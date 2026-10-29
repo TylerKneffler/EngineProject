@@ -16,6 +16,11 @@ namespace Engine::Model
         PerView = 2
     };
 
+    enum class ShadowQualityPreset : uint32_t
+    {
+        Custom = 0, Off = 1, Low = 2, Medium = 3, High = 4, Ultra = 5
+    };
+
     struct BakedLightingSettings
     {
         uint32_t lightmapResolution = 256;
@@ -29,6 +34,7 @@ namespace Engine::Model
     // uses the whole atlas; two to four cascades use its 2x2 tile layout.
     struct RealtimeShadowSettings
     {
+        ShadowQualityPreset quality = ShadowQualityPreset::Custom;
         bool enabled = true;
         uint32_t maximumShadowedLights = 1;
         uint32_t directionalResolution = 2048;
@@ -42,6 +48,58 @@ namespace Engine::Model
         uint32_t portalCascadeCount = 2;
         uint32_t portalViewBudget = 2;
     };
+
+    inline void ApplyShadowQualityPreset(RealtimeShadowSettings& settings,
+        ShadowQualityPreset quality)
+    {
+        settings.quality = quality;
+        if (quality == ShadowQualityPreset::Custom) return;
+        settings.enabled = quality != ShadowQualityPreset::Off;
+        settings.maximumShadowedLights = settings.enabled ? 1u : 0u;
+        settings.cascadeSplitLambda = 0.65f;
+        settings.cascadeTransitionFraction = 0.1f;
+        settings.portalPolicy = PortalShadowPolicy::ReuseMain;
+        settings.portalAtlasResolution = 1024;
+        settings.portalCascadeCount = 2;
+        settings.portalViewBudget = 2;
+        switch (quality)
+        {
+        case ShadowQualityPreset::Off:
+            settings.directionalResolution = 512;
+            settings.directionalCascadeCount = 1;
+            settings.directionalDistance = 64.f;
+            settings.pcfRadius = 0;
+            break;
+        case ShadowQualityPreset::Low:
+            settings.directionalResolution = 512;
+            settings.directionalCascadeCount = 1;
+            settings.directionalDistance = 64.f;
+            settings.pcfRadius = 0;
+            break;
+        case ShadowQualityPreset::Medium:
+            settings.directionalResolution = 1024;
+            settings.directionalCascadeCount = 2;
+            settings.directionalDistance = 100.f;
+            settings.pcfRadius = 1;
+            break;
+        case ShadowQualityPreset::High:
+            settings.directionalResolution = 2048;
+            settings.directionalCascadeCount = 4;
+            settings.directionalDistance = 150.f;
+            settings.pcfRadius = 1;
+            break;
+        case ShadowQualityPreset::Ultra:
+            settings.directionalResolution = 4096;
+            settings.directionalCascadeCount = 4;
+            settings.directionalDistance = 250.f;
+            settings.pcfRadius = 2;
+            settings.portalPolicy = PortalShadowPolicy::Budgeted;
+            settings.portalAtlasResolution = 2048;
+            settings.portalCascadeCount = 2;
+            break;
+        default: break;
+        }
+    }
 
     // Project-wide lighting work selected from the nearest visible point of
     // each object. Bands are evaluated in order and may be freely renamed or

@@ -49,6 +49,38 @@ int main()
     Engine::Scene::Scene scene;
     scene.Init(renderer.GetGraphicsProvider());
     Require(scene.Load("Engine/Core/Assets/Scenes/terrain/terrain_performance.scene"));
+    if (std::getenv("TERRAIN_STARTUP_WAIT_TEST"))
+    {
+        auto* viewer = scene.FindObjectByName("Terrain Performance Capsule");
+        auto* map = scene.FindObjectByName("Terrain Performance Map");
+        auto* mapDriver = map ? map->GetComponent<TerrainPerformanceDriver>() : nullptr;
+        auto* mapManager = map ? map->GetComponent<Engine::Components::TerrainManager>() : nullptr;
+        Require(viewer && mapDriver && mapManager);
+        scene.Start();
+        const double startX = viewer->transform.GetWorldPositionD().x;
+        bool dataReady = false, moved = false;
+        for (int frame = 0; frame < 1200 && !moved; ++frame)
+        {
+            scene.Update(1.f / 60.f);
+            const bool ready = mapDriver->IsInitialMapDataReady();
+            const double currentX = viewer->transform.GetWorldPositionD().x;
+            if (!ready && std::abs(currentX - startX) > 0.01)
+                throw std::runtime_error("Camera moved before map data was ready");
+            dataReady |= ready;
+            moved = std::abs(currentX - startX) > 0.01;
+            if (moved)
+                Require(ready && mapManager->GetLoadedCellCount() >= 49u);
+            if (frame % 120 == 0)
+                std::cout << "frame=" << frame << " data=" << ready
+                    << " near=" << mapManager->GetLoadedCellCount()
+                    << " far=" << mapManager->GetBuiltFarTileCount()
+                    << '/' << mapManager->GetDesiredFarTileCount()
+                    << " x=" << currentX << '\n';
+        }
+        Require(dataReady && moved);
+        std::cout << "Terrain movement waited for map data and 49 near cells\n";
+        return 0;
+    }
     auto* sunObject = scene.FindObjectByName("Terrain Performance Sun");
     Require(sunObject != nullptr);
     auto* sun = sunObject->GetComponent<Engine::Components::Light>();

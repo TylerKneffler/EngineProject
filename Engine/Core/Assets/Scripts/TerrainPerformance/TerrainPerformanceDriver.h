@@ -35,6 +35,7 @@ public:
     bool enableFarTerrain = true;
     PROPERTY(Inspector, EditAnywhere, Category = "Terrain Performance")
     float reportIntervalSeconds = 5.f;
+    void Start() override;
     void Update() override;
     void OnAfterDeserialize(IGraphicsProvider* provider) override;
     uint64_t SourceSignature() const;
@@ -43,6 +44,7 @@ public:
     uint64_t GetFarTileUploadCount() const;
     uint64_t GetFarTileUploadedBytes() const;
     double GetFarTileRebuildMilliseconds() const;
+    bool IsInitialMapDataReady() const;
 private:
     struct FarGridLoad
     {
@@ -60,4 +62,5 @@ private:
     uint64_t m_configuredSignature = 0;
     bool m_previewLoaded = false;
     bool m_farAttempted = false;
+    bool m_farDataReady = false;
 };

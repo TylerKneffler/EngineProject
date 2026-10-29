@@ -249,7 +249,9 @@ EditorState::EditorState(HINSTANCE hInstance, const Engine::Model::ProjectSettin
 {
     try
     {
-        m_window = std::make_unique<::Engine::Core::Window>(hInstance, L"Engine Editor", 1280, 720);
+        m_window = std::make_unique<::Engine::Core::Window>(hInstance,
+            L"Engine Editor", std::max(320u, projectSettings.viewportWidth),
+            std::max(240u, projectSettings.viewportHeight));
     }
     catch (const std::exception&)
     {
@@ -2368,7 +2370,8 @@ void EditorState::OpenPrefabStage(const std::string& path)
     {
         if (!ui.BeginViewportHeader("##PrefabEditMode", 230.f)) return false;
         int mode = m_prefabSkeletonEdit.enabled ? 2
-            : (m_prefabMeshEdit.enabled ? 1 : 0);
+            : m_prefabMeshEdit.enabled ? 1
+            : m_prefabSceneView->GetEditMode() == SceneEditMode::Terrain ? 3 : 0;
         const ViewportModeControl controls = DrawViewportModeControl(ui, mode);
         if (controls.changed)
         {
@@ -2379,6 +2382,8 @@ void EditorState::OpenPrefabStage(const std::string& path)
             if (mode == 2)
                 SetSkeletonEditMode(m_prefabScene.get(), m_prefabSkeletonEdit,
                     m_prefabMeshEdit, true);
+            if (mode == 3)
+                m_prefabSceneView->SetEditMode(SceneEditMode::Terrain);
         }
         if (m_prefabMeshEdit.enabled)
             SyncMeshEditSelection(m_prefabScene.get(), m_prefabMeshEdit);
@@ -2933,7 +2938,8 @@ void EditorState::ProcessPendingSceneAssetDocumentOpens()
                     return false;
                 }
                 int mode = raw->skeletonEdit.enabled ? 2
-                    : (raw->meshEdit.enabled ? 1 : 0);
+                    : raw->meshEdit.enabled ? 1
+                    : raw->view->GetEditMode() == SceneEditMode::Terrain ? 3 : 0;
                 const ViewportModeControl controls = DrawViewportModeControl(ui, mode);
                 if (controls.changed)
                 {
@@ -2944,6 +2950,8 @@ void EditorState::ProcessPendingSceneAssetDocumentOpens()
                         SetSkeletonEditMode(raw->scene.get(), raw->skeletonEdit,
                             raw->meshEdit, true);
                     SetActiveSceneAssetDocument(raw, true);
+                    if (mode == 3)
+                        raw->view->SetEditMode(SceneEditMode::Terrain);
                 }
                 if (raw->meshEdit.enabled)
                     SyncMeshEditSelection(raw->scene.get(), raw->meshEdit);
@@ -2969,7 +2977,8 @@ void EditorState::ProcessPendingSceneAssetDocumentOpens()
                     return false;
                 }
                 int mode = raw->skeletonEdit.enabled ? 2
-                    : (raw->meshEdit.enabled ? 1 : 0);
+                    : raw->meshEdit.enabled ? 1
+                    : raw->view->GetEditMode() == SceneEditMode::Terrain ? 3 : 0;
                 const ViewportModeControl controls = DrawViewportModeControl(ui, mode);
                 if (controls.changed)
                 {
@@ -2980,6 +2989,8 @@ void EditorState::ProcessPendingSceneAssetDocumentOpens()
                         SetSkeletonEditMode(raw->scene.get(), raw->skeletonEdit,
                             raw->meshEdit, true);
                     SetActiveSceneAssetDocument(raw, true);
+                    if (mode == 3)
+                        raw->view->SetEditMode(SceneEditMode::Terrain);
                 }
                 if (raw->meshEdit.enabled)
                     SyncMeshEditSelection(raw->scene.get(), raw->meshEdit);
@@ -3932,12 +3943,13 @@ void EditorState::InitializePanels()
                         : HandleMeshViewport(ui, input, m_scene.get(),
                             m_mainMeshEdit, tool);
                 };
-                mainSceneView->OnDrawDocumentTools = [this](IEditorUi& ui)
+                mainSceneView->OnDrawDocumentTools = [this, mainSceneView](IEditorUi& ui)
                 {
                     if (!ui.BeginViewportHeader("##SceneEditMode", 230.f))
                         return false;
                     int mode = m_mainSkeletonEdit.enabled ? 2
-                        : (m_mainMeshEdit.enabled ? 1 : 0);
+                        : m_mainMeshEdit.enabled ? 1
+                        : mainSceneView->GetEditMode() == SceneEditMode::Terrain ? 3 : 0;
                     const ViewportModeControl controls = DrawViewportModeControl(ui, mode);
                     if (controls.changed)
                     {
@@ -3949,6 +3961,8 @@ void EditorState::InitializePanels()
                         if (mode == 2)
                             SetSkeletonEditMode(m_scene.get(), m_mainSkeletonEdit,
                                 m_mainMeshEdit, true);
+                        if (mode == 3)
+                            mainSceneView->SetEditMode(SceneEditMode::Terrain);
                     }
                     if (m_mainMeshEdit.enabled)
                         SyncMeshEditSelection(m_scene.get(), m_mainMeshEdit);

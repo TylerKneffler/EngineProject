@@ -1,4 +1,6 @@
 #include "View.h"
+#include <algorithm>
+#include <cmath>
 
 namespace Engine::Editor
 {
@@ -33,6 +35,27 @@ void View::Resize(void* device, uint32_t width, uint32_t height)
 {
     if (m_viewBackend)
         m_viewBackend->Resize(device, width, height);
+}
+
+void View::RequestRenderSize(float width, float height)
+{
+    if (width <= 1.f || height <= 1.f) return;
+    const uint32_t requestedWidth = static_cast<uint32_t>(
+        std::max(1l, std::lround(width)));
+    const uint32_t requestedHeight = static_cast<uint32_t>(
+        std::max(1l, std::lround(height)));
+    if (requestedWidth != m_requestedWidth ||
+        requestedHeight != m_requestedHeight)
+        m_renderSizeChanged = true;
+    m_requestedWidth = requestedWidth;
+    m_requestedHeight = requestedHeight;
+}
+
+void View::ApplyRequestedRenderSize(void* device)
+{
+    if (m_requestedWidth && m_requestedHeight &&
+        (m_requestedWidth != GetWidth() || m_requestedHeight != GetHeight()))
+        Resize(device, m_requestedWidth, m_requestedHeight);
 }
 
 // ---------------------------------------------------------------------------

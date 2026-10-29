@@ -937,8 +937,15 @@ float4 PSMain(
         gridColor = lerp(gridColor, float3(1.0, 0.66, 0.15), border);
         return float4(gridColor, 1.0);
     }
+    // Distant tiles already received directional light in the vertex shader.
+    // Their unlit material has no texture or per-pixel lighting work.
+    if (flags & 16384u)
+        return float4(base.rgb + objectData.emissiveOcclusion.rgb, base.a);
+    // Terrain normals are authored from the height field. Some terrain meshes
+    // have reversed triangle winding, so the rasterizer's front-face flag is
+    // not a reliable indication of which way their lighting normal points.
     float3 terrainNormalForLighting = normalize(normal) *
-        (frontFace ? 1.0 : -1.0);
+        ((frontFace || (flags & 2048u)) ? 1.0 : -1.0);
     float terrainRoughness = 1.0;
     // Authored terrain stores six painted weights in the spare UV channels.
     // Vertex color carries the contribution of layers without a texture.

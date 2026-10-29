@@ -29,6 +29,39 @@ TerrainPerformanceDriver::TerrainPerformanceDriver()
 
 namespace
 {
+constexpr std::array<float, TerrainHeightArchive::LayerCount - 1>
+    TerrainMaterialBoundaries{-36.f, -24.f, -12.f};
+constexpr float TerrainMaterialBlendHalfWidth = 4.f;
+
+std::vector<float> MakeNearWeights(const std::vector<float>& heights,
+    const std::vector<float>& archivedWeights)
+{
+    std::vector<float> nearWeights(heights.size() * 6, 0.f);
+    if (archivedWeights.size() !=
+        heights.size() * TerrainHeightArchive::LayerCount)
+        return nearWeights;
+    for (size_t i = 0; i < heights.size(); ++i)
+    {
+        float expected[TerrainHeightArchive::LayerCount];
+        float bands[TerrainHeightArchive::LayerCount];
+        TerrainHeightArchive::BlendBaseLayers(heights[i],
+            TerrainHeightArchive::LayerForHeight(heights[i]), expected);
+        TerrainHeightArchive::BlendHeightBands(heights[i],
+            TerrainMaterialBoundaries, TerrainMaterialBlendHalfWidth, bands);
+        // Keep archive paint that differs from its original height bands.
+        bool painted = false;
+        for (int layer = 0; layer < TerrainHeightArchive::LayerCount; ++layer)
+            painted |= std::abs(archivedWeights[i * 4 + layer] -
+                expected[layer]) > .01f;
+        const float* source = painted ? archivedWeights.data() + i * 4 : bands;
+        nearWeights[i * 6 + 4] = source[0];
+        nearWeights[i * 6 + 5] = source[1];
+        nearWeights[i * 6 + 2] = source[2];
+        nearWeights[i * 6 + 3] = source[3];
+    }
+    return nearWeights;
+}
+
 struct TerrainPerformanceDriverRegistration
 {
     TerrainPerformanceDriverRegistration()
@@ -42,17 +75,19 @@ Engine::Components::TerrainManager::FarTerrainPalette MakeFarPalette()
     Engine::Components::TerrainManager::FarTerrainPalette palette;
     palette.farColors = {{
         {.04926f, .15254f, .03097f},
-        {.13833f, .22573f, .04635f},
-        {.07026f, .17219f, .03528f},
-        {.21771f, .25187f, .07453f}}};
+        {.04270f, .09440f, .02921f},
+        {.04561f, .07992f, .03262f},
+        {.07032f, .07998f, .06848f}}};
     palette.nearColors = {{
         {.05856f, .04472f, .02751f},
         {.19217f, .11348f, .05328f},
-        {.07028f, .17221f, .03527f},
-        {.21779f, .25200f, .07456f},
+        {.04561f, .07992f, .03262f},
+        {.07032f, .07998f, .06848f},
         {.04927f, .15253f, .03096f},
-        {.13832f, .22583f, .04636f}}};
+        {.04270f, .09440f, .02921f}}};
     palette.archiveToNear = {4, 5, 2, 3};
+    palette.heightBoundaries = TerrainMaterialBoundaries;
+    palette.heightBlendHalfWidth = TerrainMaterialBlendHalfWidth;
     return palette;
 }
 }
@@ -73,15 +108,8 @@ TerrainPerformanceDriver::LoadFarGridData(const std::string& path,
         if (!TerrainHeightArchive::ReadCell(archivePath, signature,
             extent, cellsX, cellsY, cell.first, cell.second, heights,
             &archivedWeights)) continue;
-        std::vector<float> nearWeights(heights.size() * 6, 0.f);
-        if (archivedWeights.size() == heights.size() * 4)
-            for (size_t i = 0; i < heights.size(); ++i)
-            {
-                nearWeights[i * 6 + 4] = archivedWeights[i * 4];
-                nearWeights[i * 6 + 5] = archivedWeights[i * 4 + 1];
-                nearWeights[i * 6 + 2] = archivedWeights[i * 4 + 2];
-                nearWeights[i * 6 + 3] = archivedWeights[i * 4 + 3];
-            }
+        std::vector<float> nearWeights = MakeNearWeights(heights,
+            archivedWeights);
         const auto editPath = std::filesystem::path(editDirectory) /
             (std::to_string(cell.first) + "_" +
                 std::to_string(cell.second) + ".terrainedit");
@@ -153,7 +181,7 @@ bool TerrainPerformanceDriver::ConfigureTerrain()
     if (!sourceAvailable && !manager->requireRuntimeBake) return false;
     // Mesh caches include reconstructed paint weights and texture tiling.
     // Refresh them when either appearance setting changes.
-    manager->SetStaticCache(cacheDirectory, signature ^ 0x4c41524745555634ull);
+    manager->SetStaticCache(cacheDirectory, signature ^ 0x4c41524745555636ull);
     manager->SetProceduralBuilder(sourceAvailable ?
         std::function<void(Engine::Components::TerrainManager::Cell,
             Engine::Components::Terrain&)>{[=](Engine::Components::TerrainManager::Cell cell,
@@ -167,37 +195,21 @@ bool TerrainPerformanceDriver::ConfigureTerrain()
                 {.26f, .22f, .17f}},
             {"Assets/Materials/Terrain/warm_dirt.material", -12.f, 0.f,
                 {.47f, .36f, .24f}},
-            {"Assets/Materials/Terrain/meadow_grass.material", 0.f, 16.f,
-                {.27f, .44f, .18f}},
-            {"Assets/Materials/Terrain/highland_grass.material", 16.f, 1000.f,
-                {.49f, .53f, .29f}},
-            {"Assets/Materials/Terrain/valley_grass.material", -1000.f, -12.f,
+            {"Assets/Materials/Terrain/shaded_moss.material", -24.f, -12.f,
+                {.23f, .31f, .19f}},
+            {"Assets/Materials/Terrain/weathered_slate.material", -12.f, 1000.f,
+                {.29f, .31f, .28f}},
+            {"Assets/Materials/Terrain/valley_grass.material", -1000.f, -36.f,
                 {.23f, .41f, .17f}},
-            {"Assets/Materials/Terrain/field_grass.material", -12.f, 0.f,
-                {.39f, .50f, .22f}}
+            {"Assets/Materials/Terrain/woodland_grass.material", -36.f, -24.f,
+                {.21f, .33f, .17f}}
         };
         std::vector<float> archivedWeights;
         if (!TerrainHeightArchive::ReadCell(archivePath, signature, extent,
             countX, countY, cell.first, cell.second, terrain.heights,
             &archivedWeights))
             throw std::runtime_error("Could not read saved terrain height cell");
-        // The four archived bands retain their original indices for existing
-        // dirt paint edits. New base terrain routes the two lowest bands to
-        // grass while leaving dirt available in paint channels zero and one.
-        constexpr size_t archivedLayers = TerrainHeightArchive::LayerCount;
-        const size_t layerCount = terrain.layers.size();
-        terrain.weights.assign(terrain.heights.size() * layerCount, 0.f);
-        for (size_t vertex = 0; vertex < terrain.heights.size(); ++vertex)
-        {
-            terrain.weights[vertex * layerCount + 4] =
-                archivedWeights[vertex * archivedLayers];
-            terrain.weights[vertex * layerCount + 5] =
-                archivedWeights[vertex * archivedLayers + 1];
-            terrain.weights[vertex * layerCount + 2] =
-                archivedWeights[vertex * archivedLayers + 2];
-            terrain.weights[vertex * layerCount + 3] =
-                archivedWeights[vertex * archivedLayers + 3];
-        }
+        terrain.weights = MakeNearWeights(terrain.heights, archivedWeights);
         terrain.Rebuild();
     }} : std::function<void(Engine::Components::TerrainManager::Cell,
         Engine::Components::Terrain&)>{});
@@ -205,7 +217,28 @@ bool TerrainPerformanceDriver::ConfigureTerrain()
     manager->ClearFarTerrain();
     m_farLoad = {};
     m_farAttempted = false;
+    m_farDataReady = false;
     return true;
+}
+
+void TerrainPerformanceDriver::Start()
+{
+    // Play mode refreshes the full-map far grid asynchronously. The camera
+    // script waits for this snapshot before leaving its start position.
+    m_farLoad = {};
+    m_farAttempted = false;
+    m_farDataReady = !enableFarTerrain || farGrid.empty();
+}
+
+bool TerrainPerformanceDriver::IsInitialMapDataReady() const
+{
+    if (!m_farDataReady || !Owner) return false;
+    const auto* manager = Owner->GetComponent<Engine::Components::TerrainManager>();
+    return manager && (!enableFarTerrain || farGrid.empty() ||
+        (manager->AreDesiredFarTilesBuilt() &&
+            manager->GetPreparingFarTileCount() == 0u &&
+            manager->GetQueuedFarTileCount() == 0u &&
+            manager->GetPreparedFarTileCount() == 0u));
 }
 
 std::vector<Engine::Components::Mesh*>
@@ -258,10 +291,13 @@ void TerrainPerformanceDriver::OnAfterDeserialize(IGraphicsProvider*)
             manager->GetEditedProceduralCells(), m_configuredSignature,
             mapHalfExtentCells, manager->cellsX, manager->cellsY);
         if (result.loaded)
+        {
             manager->ConfigureFarTerrain(mapHalfExtentCells,
                 std::move(result.heights), std::move(result.patches),
                 Engine::Components::Mesh::ResolveFilePath(heightArchive),
                 m_configuredSignature, MakeFarPalette());
+            m_farDataReady = true;
+        }
     }
     if (auto* scene = Owner->GetScene())
     {
@@ -343,6 +379,7 @@ void TerrainPerformanceDriver::Update()
                         std::move(result.heights), std::move(result.patches),
                         Engine::Components::Mesh::ResolveFilePath(heightArchive),
                         m_configuredSignature, MakeFarPalette());
+                    m_farDataReady = true;
                 }
             }
             manager->SetFarTerrainEnabled(true);

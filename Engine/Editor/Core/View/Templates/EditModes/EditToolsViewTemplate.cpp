@@ -345,7 +345,9 @@ float EditorState::GetToolbarSectionMinimumWidth(ToolbarSection section) const
             ? (skeleton.submode == 0 ? "Bone..." : "Brush...")
             : mesh.enabled ? "Mesh Tools..."
             : m_activeSceneAssetDocument && m_activeSceneAssetDocument->meshStage
-                ? "Vertex Attributes..." : "Transform...";
+                ? "Vertex Attributes..."
+                : m_activeSceneAssetDocument && m_activeSceneAssetDocument->objectStage
+                    ? "Hierarchy..." : "Animation Editor";
         const std::string label = ToolbarIconLabel(0xE713, u8"\uE713",
             "", "MinimumTools", first);
         controlWidth = ToolbarButtonWidth(label.c_str());
@@ -618,7 +620,6 @@ void EditorState::DrawToolbarTools(IEditorUi& ui, bool singleRow,
     }
     else
     {
-        open("Transform...", "Object Transform");
         if (m_activeSceneAssetDocument &&
             m_activeSceneAssetDocument->objectStage)
             open("Hierarchy...", "Hierarchy");
@@ -648,8 +649,7 @@ void EditorState::DrawToolbarTools(IEditorUi& ui, bool singleRow,
             }
             ImGui::TextUnformatted(m_toolbarPopupTool.c_str());
             ImGui::Separator();
-            if (m_toolbarPopupTool == "Object Transform" ||
-                m_toolbarPopupTool == "Bone Transform")
+            if (m_toolbarPopupTool == "Bone Transform")
                 DrawObjectEditTools(ui);
             else if (m_toolbarPopupTool == "Hierarchy" &&
                 m_activeSceneAssetDocument)
@@ -1081,14 +1081,16 @@ void EditorState::DrawGlobalToolbar(IEditorUi& ui, ToolbarSection section,
     }
     else if (showEditMode)
     {
-        int mode = skeleton.enabled ? 2 : mesh.enabled ? 1 : 0;
-        const char* modes[]{ "Object", "Mesh", "Skeleton" };
+        int mode = skeleton.enabled ? 2 : mesh.enabled ? 1 :
+            view->GetEditMode() == SceneEditMode::Terrain ? 3 : 0;
+        const char* modes[]{ "Object", "Mesh", "Skeleton", "Terrain" };
         ui.SetNextItemWidth(105.f);
-        if (ui.Combo("##GlobalEditMode", &mode, modes, 3))
+        if (ui.Combo("##GlobalEditMode", &mode, modes, 4))
         {
             SetSkeletonEditMode(scene, skeleton, mesh, false);
             SetMeshEditMode(scene, mesh, mode == 1);
             if (mode == 2) SetSkeletonEditMode(scene, skeleton, mesh, true);
+            if (mode == 3) view->SetEditMode(SceneEditMode::Terrain);
         }
         ui.Tooltip("Edit mode");
     }

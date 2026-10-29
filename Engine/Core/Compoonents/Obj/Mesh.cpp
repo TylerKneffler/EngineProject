@@ -1972,8 +1972,11 @@ void Mesh::ClearSurfaceOffsets()
 bool Mesh::SetIndexedGeometry(std::vector<Vertex> vertices,
     std::vector<uint32_t> indices)
 {
+    const auto started = std::chrono::steady_clock::now();
+    m_lastIndexedGeometryTiming = {};
     if (indices.empty() || !ValidateAuthoredGeometry(vertices, indices))
         return false;
+    const auto validated = std::chrono::steady_clock::now();
     ClearSurfaceOffsets();
     m_vertices = std::move(vertices);
     m_indices = std::move(indices);
@@ -1981,7 +1984,58 @@ bool Mesh::SetIndexedGeometry(std::vector<Vertex> vertices,
     ++m_authoredGeometryRevision;
     MarkConfigurationDirty();
     UpdateBounds();
+    const auto bounded = std::chrono::steady_clock::now();
     if (m_bufferFactory) CreateBuffer(m_bufferFactory);
+    const auto buffered = std::chrono::steady_clock::now();
+    m_lastIndexedGeometryTiming.validationMs =
+        std::chrono::duration<double, std::milli>(validated - started).count();
+    m_lastIndexedGeometryTiming.boundsMs =
+        std::chrono::duration<double, std::milli>(bounded - validated).count();
+    m_lastIndexedGeometryTiming.bufferMs =
+        std::chrono::duration<double, std::milli>(buffered - bounded).count();
+    return true;
+}
+
+std::optional<Mesh::IndexedGeometryBounds> Mesh::PrepareIndexedGeometry(
+    const std::vector<Vertex>& vertices,
+    const std::vector<uint32_t>& indices)
+{
+    if (indices.empty() || !ValidateAuthoredGeometry(vertices, indices))
+        return std::nullopt;
+    const float* first = vertices[indices.front()].pos;
+    IndexedGeometryBounds bounds{
+        {first[0], first[1], first[2]},
+        {first[0], first[1], first[2]}};
+    for (uint32_t index : indices)
+    {
+        const auto& vertex = vertices[index];
+        const glm::vec3 position(vertex.pos[0], vertex.pos[1], vertex.pos[2]);
+        bounds.minimum = glm::min(bounds.minimum, position);
+        bounds.maximum = glm::max(bounds.maximum, position);
+    }
+    return bounds;
+}
+
+bool Mesh::SetPreparedIndexedGeometry(std::vector<Vertex> vertices,
+    std::vector<uint32_t> indices, IndexedGeometryBounds bounds)
+{
+    if (vertices.empty() || indices.empty() || !m_morphTargets.empty())
+        return false;
+    const auto started = std::chrono::steady_clock::now();
+    m_lastIndexedGeometryTiming = {};
+    ClearSurfaceOffsets();
+    m_vertices = std::move(vertices);
+    m_indices = std::move(indices);
+    m_terrainVertices.clear();
+    ++m_authoredGeometryRevision;
+    MarkConfigurationDirty();
+    m_boundsMin = bounds.minimum;
+    m_boundsMax = bounds.maximum;
+    m_hasBounds = true;
+    if (m_bufferFactory) CreateBuffer(m_bufferFactory);
+    m_lastIndexedGeometryTiming.bufferMs =
+        std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - started).count();
     return true;
 }
 

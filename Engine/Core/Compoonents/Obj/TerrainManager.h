@@ -16,6 +16,7 @@
 #include <optional>
 #include <memory>
 #include <filesystem>
+#include <chrono>
 
 namespace Engine::Components
 {
@@ -68,6 +69,32 @@ public:
         uint64_t cacheBytes = 0;
     };
     MemoryUsage GetMemoryUsage() const;
+    // Main-thread duration of the most recent near-terrain streaming update.
+    // Commit subphases are included in commitMs, not added to totalMs again.
+    struct StreamingTiming
+    {
+        double totalMs = 0.0;
+        double housekeepingMs = 0.0;
+        double queueMs = 0.0;
+        double unloadMs = 0.0;
+        double candidatesMs = 0.0;
+        double loadOrScheduleMs = 0.0;
+        double lodMs = 0.0;
+        double commitMs = 0.0;
+        double commitSceneMs = 0.0;
+        double commitStitchMs = 0.0;
+        double commitLodMs = 0.0;
+        double commitGraphicsMs = 0.0;
+        double commitPhysicsMs = 0.0;
+        double colliderActivationMs = 0.0;
+        double batchRefreshMs = 0.0;
+        double memoryTrimMs = 0.0;
+        int scheduledCells = 0;
+        int committedCells = 0;
+        int changedLods = 0;
+    };
+    const StreamingTiming& GetLastStreamingTiming() const
+    { return m_lastStreamingTiming; }
     uint64_t GetTerrainTextureMemoryBytes() const;
     std::string viewerObjectName;
     // When set, procedural brush edits are stored as independent sparse files.
@@ -106,6 +133,9 @@ public:
         std::array<glm::vec3, TerrainHeightArchive::LayerCount> farColors{};
         std::array<glm::vec3, 6> nearColors{};
         std::array<int, TerrainHeightArchive::LayerCount> archiveToNear{};
+        std::array<float, TerrainHeightArchive::LayerCount - 1>
+            heightBoundaries{-12.f, 0.f, 16.f};
+        float heightBlendHalfWidth = 8.f;
     };
     // Distant visual tiles share this manager's cell grid and scene lifetime.
     void ConfigureFarTerrain(int halfExtentCells, std::vector<float> heights,
@@ -122,6 +152,7 @@ public:
     size_t GetVisibleFarTileCountForStride(int stride) const;
     size_t GetDesiredFarTileCount() const;
     size_t GetBuiltFarTileCount() const;
+    bool AreDesiredFarTilesBuilt() const;
     size_t GetPreparingFarTileCount() const;
     size_t GetQueuedFarTileCount() const;
     size_t GetPreparedFarTileCount() const;
@@ -131,6 +162,29 @@ public:
     uint64_t GetFarTileUploadedBytes() const { return m_farTileUploadedBytes; }
     double GetFarTileRebuildMilliseconds() const
     { return m_farTileRebuildMilliseconds; }
+    struct FarUpdateTiming
+    {
+        double totalMs = 0.0;
+        double selectionMs = 0.0;
+        double preparationMs = 0.0;
+        double uploadMs = 0.0;
+        double objectSetupMs = 0.0;
+        double meshInstallMs = 0.0;
+        double graphicsInitMs = 0.0;
+        double meshValidationMs = 0.0;
+        double meshBoundsMs = 0.0;
+        double meshBufferMs = 0.0;
+        double visibilityMs = 0.0;
+        double workerBuildMs = 0.0;
+        size_t queuedTiles = 0;
+        size_t uploadedTiles = 0;
+        size_t appearedTiles = 0;
+        double maxAppearanceLatencyMs = 0.0;
+    };
+    const FarUpdateTiming& GetLastFarUpdateTiming() const
+    { return m_lastFarUpdateTiming; }
+    size_t CountVisibleCoverageGaps(int centerX, int centerY,
+        int radius) const;
     size_t GetStoredTerrainCount() const { return m_cells.size(); }
     std::vector<Cell> GetEditedProceduralCells() const
     { return {m_editedProcedural.begin(), m_editedProcedural.end()}; }
@@ -192,6 +246,7 @@ private:
         std::vector<uint8_t> builtVisibility;
         bool built = false, hasGeometry = false;
         bool preparing = false;
+        std::optional<std::chrono::steady_clock::time_point> requestedAt;
     };
     int m_farHalfExtentCells = 0;
     std::vector<float> m_farHeights;
@@ -207,6 +262,7 @@ private:
     uint64_t m_farTileCacheHits = 0;
     uint64_t m_farTileUploadedBytes = 0;
     double m_farTileRebuildMilliseconds = 0.0;
+    FarUpdateTiming m_lastFarUpdateTiming;
     bool m_farEnabled = false;
     uint64_t m_uploadBudgetFrame = UINT64_MAX;
     size_t m_nearFrameUploads = 0;
@@ -239,6 +295,7 @@ private:
         bool cacheHit = false;
         bool success = false;
         double buildMilliseconds = 0.0;
+        std::optional<Mesh::IndexedGeometryBounds> bounds;
         std::vector<Mesh::Vertex> vertices;
         std::vector<uint32_t> indices;
         std::map<size_t, size_t> patchVertexOffsets;
@@ -256,6 +313,7 @@ private:
     uint64_t m_renderBatchUploadCount = 0;
     double m_renderBatchRefreshMilliseconds = 0.0;
     double m_renderBatchBuildMilliseconds = 0.0;
+    StreamingTiming m_lastStreamingTiming;
     bool m_renderBatchRefreshPending = false;
     std::string m_bakeStatus;
     bool m_runtimeBakeActive = false;
@@ -275,6 +333,8 @@ private:
         std::string bakePath;
         uint64_t bakeOffset = 0, bakeSize = 0;
         std::function<void(Cell, Terrain&)> builder;
+        std::optional<Terrain::Prepared> prepared;
+        bool preparedCacheHit = false;
     };
     struct PreparedCell
     {
@@ -306,7 +366,8 @@ private:
     bool ReadRuntimeBakeIndex(const std::string& path,
         std::map<Cell, BakeEntry>& entries) const;
     int DesiredLodStride(Cell cell, int centerX, int centerY) const;
-    void StreamCells(int centerX, int centerY);
+    int DesiredPrepareLodStride(Cell cell, int centerX, int centerY) const;
+    void StreamCells(int centerX, int centerY, int initialRadius = -1);
     void UnloadCell(Cell cell);
     void Stitch(Cell cell);
     void RefreshRenderBatches(int uploadBudget, int centerX, int centerY,

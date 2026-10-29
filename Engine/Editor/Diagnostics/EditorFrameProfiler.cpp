@@ -12,11 +12,11 @@
 namespace Engine::Editor
 {
     EditorFrameProfiler::EditorFrameProfiler(Scene::Scene* scene,
-        Renderers::IEditorRenderer* renderer, bool autoProfileMmdPlay)
+        Renderers::IEditorRenderer* renderer, bool autoProfilePlay)
     {
-        // ENGINE_EDITOR_AUTO_PROFILE_MMD also enables this trace by default.
+        // Automated editor playback also enables this trace by default.
         const char* requestedProfile = std::getenv("ENGINE_EDITOR_FRAME_PROFILE");
-        if (!requestedProfile && autoProfileMmdPlay)
+        if (!requestedProfile && autoProfilePlay)
             requestedProfile = "1";
         if (requestedProfile && std::string(requestedProfile) != "0")
         {
@@ -129,6 +129,9 @@ namespace Engine::Editor
             << ",\"views\":" << sample.renderedViews
             << ",\"scene_views\":" << sample.renderedSceneViews
             << ",\"game_views\":" << sample.renderedGameViews
+            << ",\"view_pixels\":" << sample.renderedViewPixels
+            << ",\"game_view_width\":" << sample.gameViewWidth
+            << ",\"game_view_height\":" << sample.gameViewHeight
             << ",\"shadow_draws\":" << sample.submittedShadowDraws
             << ",\"physics_substeps\":" << physicsSubsteps;
         output_ << ",\"physics_dropped_ms\":" << physicsDroppedMilliseconds

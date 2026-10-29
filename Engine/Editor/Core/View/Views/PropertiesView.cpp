@@ -32,9 +32,18 @@ bool IsObjectInScene(const Engine::Scene::Scene* scene,
     const Engine::Core::Object* object)
 {
     if (!scene || !object) return false;
+    const auto contains = [&object](const auto& self,
+        const Engine::Core::Object* root) -> bool
+    {
+        if (root == object) return true;
+        for (const Engine::Core::Object* child : root->Children)
+            if (child && self(self, child)) return true;
+        return false;
+    };
     const auto& objects = scene->GetObjects();
     return std::any_of(objects.begin(), objects.end(),
-        [object](const auto& candidate) { return candidate.get() == object; });
+        [&contains](const auto& candidate)
+        { return candidate && contains(contains, candidate.get()); });
 }
 
 void RevealFileInExplorer(const std::string& path)
@@ -56,7 +65,7 @@ void RevealFileInExplorer(const std::string& path)
 
 bool PropertiesView::HasLiveSelectedObject() const
 {
-    return m_selectedObject &&
+    return IsObjectInScene(m_scene, m_selectedObject) &&
         std::all_of(m_selectedObjects.begin(), m_selectedObjects.end(),
             [this](const Engine::Core::Object* object)
             { return IsObjectInScene(m_scene, object); });
@@ -266,7 +275,7 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
         return;
     }
     ui.BeginTextWrap();
-    if (m_selectionLocked && m_selectedObject && !HasLiveSelectedObject())
+    if (m_selectedObject && !HasLiveSelectedObject())
     {
         m_selectionLocked = false;
         ApplySelectedObjects({});

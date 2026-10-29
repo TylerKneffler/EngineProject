@@ -19,7 +19,8 @@ public:
     void Stop();
     bool IsRecording() const;
     void Event(const char* source, const char* level, const std::string& message);
-    void Frame(float reportedFrameRate, double elapsedMs);
+    void Frame(float reportedFrameRate, double elapsedMs,
+        double panelDrawMs = 0.0);
     void Sample(const std::string& jsonFields);
 
 private:

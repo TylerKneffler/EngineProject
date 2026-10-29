@@ -8,8 +8,10 @@
 #include "Core/SceneManager.h"
 #include "Core/Compoonents/Particles/ParticleEmitter.h"
 #include "Core/Compoonents/Animation/AnimationManager.h"
+#include "Core/Physics/Adapters/BulletPhysicsAdapter.h"
 #include "Core/Timing/FramePacer.h"
 #include "Core/Renderers/IEditorRenderer.h"
+#include "Core/Renderers/DX11/DX11EditorRenderer.h"
 #include "Core/Renderers/RendererFactory.h"
 #include "Core/View/View.h"
 #include "Engine/Editor/EditorState.h"
@@ -18,6 +20,7 @@
 #include "Engine/Editor/ProjectLauncher.h"
 #include "Engine/Editor/Core/View/Views/SceneView.h"
 #include "Engine/Editor/Core/View/Views/GameView.h"
+#include "Engine/Editor/Core/View/Views/PerformanceView.h"
 #include "Engine/Editor/UI/IEditorUiBackend.h"
 #ifdef ENGINE_BUILTIN_ASSET_SCRIPTS
 #include "Core/Assets/Scripts/Utilities/Rotate.h"
@@ -140,6 +143,16 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
         }
     }
 
+    if (EnvironmentVariable("ENGINE_EDITOR_AUTO_PROFILE_SCENE"))
+    {
+        if (const auto width = EnvironmentVariable("ENGINE_EDITOR_AUTO_PROFILE_WIDTH"))
+            projectSettings.viewportWidth = static_cast<uint32_t>(std::clamp(
+                std::atoi(width->c_str()), 320, 4096));
+        if (const auto height = EnvironmentVariable("ENGINE_EDITOR_AUTO_PROFILE_HEIGHT"))
+            projectSettings.viewportHeight = static_cast<uint32_t>(std::clamp(
+                std::atoi(height->c_str()), 240, 2160));
+    }
+
     const auto startupBackground =
         (std::filesystem::path(projectSettings.assetsDirectory) / "Startup" / "Editor.png").wstring();
     Engine::Core::StartupSplash splash(hInstance, L"Engine Editor", startupBackground);
@@ -179,6 +192,9 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
     Engine::Core::Window* window = editorState->GetWindow();
     Engine::Renderers::IEditorRenderer* renderer = editorState->GetRenderer();
     Engine::Scene::Scene* scene = editorState->GetScene();
+    const bool sizeDx11ViewsToPanels =
+        dynamic_cast<Engine::Renderers::DX11EditorRenderer*>(renderer) != nullptr &&
+        !EnvironmentVariable("ENGINE_EDITOR_DISABLE_PANEL_SIZING").has_value();
     if (!window || !renderer || !scene)
     {
         WriteStartupLog("Editor did not create all required core components");
@@ -199,11 +215,21 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
         [&]() { uiBackend->EndFrame(); }
     });
     editorState->InitializeUiState();
+    if (EnvironmentVariable("ENGINE_EDITOR_AUTO_PROFILE_GAME_VIEW").has_value())
+        for (const auto& panel : editorState->GetPanels())
+        {
+            if (auto* sceneView = dynamic_cast<Engine::Editor::SceneView*>(panel.get()))
+                sceneView->SetOpen(false);
+            if (auto* gameView = dynamic_cast<Engine::Editor::GameView*>(panel.get()))
+                gameView->SetOpen(true);
+        }
     splash.SetProgress(0.75f, L"Loading startup scene...");
 
-    // The opt-in playback audit loads the same bundled scene as the MMD
-    // harness, but runs it through the complete editor and UI frame loop.
-    const bool autoProfileMmdPlay =
+    // The opt-in playback audit runs a selected scene through the complete
+    // editor and UI frame loop. The MMD scene remains the default audit scene.
+    const auto requestedProfileScene =
+        EnvironmentVariable("ENGINE_EDITOR_AUTO_PROFILE_SCENE");
+    const bool autoProfilePlay = requestedProfileScene.has_value() ||
         EnvironmentVariable("ENGINE_EDITOR_AUTO_PROFILE_MMD").has_value();
     const auto requestedAutoProfileFrames =
         EnvironmentVariable("ENGINE_EDITOR_AUTO_PROFILE_FRAMES");
@@ -211,10 +237,12 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
         ? static_cast<uint32_t>(std::clamp(
             std::atoi(requestedAutoProfileFrames->c_str()), 30, 1200))
         : 180u;
-    const std::string startupScene = autoProfileMmdPlay
-        ? (std::filesystem::path(ENGINE_ASSETS_PATH) / "Scenes" /
-            "Animation" / "mmd.scene").string()
-        : projectSettings.defaultScene;
+    const std::string startupScene = requestedProfileScene
+        ? *requestedProfileScene
+        : autoProfilePlay
+            ? (std::filesystem::path(ENGINE_ASSETS_PATH) / "Scenes" /
+                "Animation" / "mmd.scene").string()
+            : projectSettings.defaultScene;
     if (!startupScene.empty())
     {
         OutputDebugStringA(("[Main] Loading default scene: " + startupScene + "\n").c_str());
@@ -306,14 +334,15 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
         
         renderer->Resize(w, h);
         uiBackend->Resize(w, h);
-        for (auto& panel : editorState->GetPanels())
-        {
-            if (panel->NeedsRender())
+        if (!sizeDx11ViewsToPanels)
+            for (auto& panel : editorState->GetPanels())
             {
-                Engine::Editor::View* view = reinterpret_cast<Engine::Editor::View*>(panel.get());
-                view->Resize(renderer->GetNativeDeviceHandle(), w, h);
+                if (panel->NeedsRender())
+                {
+                    Engine::Editor::View* view = reinterpret_cast<Engine::Editor::View*>(panel.get());
+                    view->Resize(renderer->GetNativeDeviceHandle(), w, h);
+                }
             }
-        }
         renderer->MarkDirty();
     };
     OutputDebugStringA("[Main] OnResize callback set\n");
@@ -346,12 +375,27 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
     OutputDebugStringA("[Main] Setting OnUpdate callback...\n");
     std::string displayedWindowTitle;
     Engine::Editor::EditorFrameProfiler frameProfiler(
-        scene, renderer, autoProfileMmdPlay);
+        scene, renderer, autoProfilePlay);
     uint32_t autoProfileTick = 0;
     window->OnUpdate = [&]()
     {
         using Clock = std::chrono::steady_clock;
         const auto frameBegin = Clock::now();
+        bool showTimings = false;
+        for (const auto& panel : editorState->GetPanels())
+            if (auto* performance = dynamic_cast<Engine::Editor::PerformanceView*>(panel.get());
+                performance && performance->IsOpen())
+            {
+                showTimings = true;
+                break;
+            }
+        scene->SetUpdateProfilingEnabled(showTimings || static_cast<bool>(frameProfiler));
+        if (auto* bullet = dynamic_cast<Engine::Physics::BulletPhysicsAdapter*>(
+            &scene->GetPhysics().GetAdapter()))
+            bullet->SetProfilingEnabled(showTimings || static_cast<bool>(frameProfiler));
+        if (auto* dx11 = dynamic_cast<Engine::Renderers::DX11EditorRenderer*>(renderer))
+            dx11->SetGpuTimingEnabled(showTimings || static_cast<bool>(frameProfiler));
+        if (showTimings) renderer->MarkDirty();
         editorFramePacer.Wait(editorState->GetEditorMaxFps());
         const auto afterPacing = Clock::now();
         // Update delta time
@@ -368,7 +412,7 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
         const bool wasBuilding = gameBuildManager->IsBuilding();
         const bool wasHotReloadBusy = hotReload->IsBusy();
         Engine::Editor::PostBuildAction postBuildAction;
-        if (autoProfileMmdPlay && autoProfileTick == 30u)
+        if (autoProfilePlay && autoProfileTick == 30u)
             gameBuildManager->PlayInEditor();
         gameBuildManager->Update(playState, postBuildAction);
         hotReload->Update(window->IsFocused());
@@ -449,6 +493,9 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
         uint32_t renderedViews = 0;
         uint32_t renderedSceneViews = 0;
         uint32_t renderedGameViews = 0;
+        uint64_t renderedViewPixels = 0;
+        uint32_t gameViewWidth = 0;
+        uint32_t gameViewHeight = 0;
         uint32_t submittedShadowDraws = 0;
 
         const auto needsContinuousRendering = [&]()
@@ -528,6 +575,10 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
                 if (!panel->NeedsRender() || !panel->IsOpen()) continue;
                 Engine::Editor::View* view = dynamic_cast<Engine::Editor::View*>(panel.get());
                 if (!view || !view->IsRenderVisible()) continue;
+                if (sizeDx11ViewsToPanels)
+                    view->ApplyRequestedRenderSize(renderer->GetNativeDeviceHandle());
+                renderedViewPixels += static_cast<uint64_t>(view->GetWidth()) *
+                    view->GetHeight();
                 
                 void* cmdList = renderer->GetCurrentCommandBuffer();
                 void* rtvHandle = renderer->GetCurrentRenderTargetHandle();
@@ -561,6 +612,8 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
                 else if (auto* gameView = dynamic_cast<Engine::Editor::GameView*>(view))
                 {
                     ++renderedGameViews;
+                    gameViewWidth = gameView->GetWidth();
+                    gameViewHeight = gameView->GetHeight();
                     if (auto* panelScene = gameView->GetScene())
                         submittedShadowDraws += panelScene->GetShadowDebugSnapshot()
                             .submittedCasterDrawCount;
@@ -575,7 +628,9 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
             for (auto& panel : editorState->GetPanels())
                 if (auto* view = dynamic_cast<Engine::Editor::View*>(panel.get()))
                 {
-                    if (!view->ConsumeVisibilityChanged()) continue;
+                    const bool visibilityChanged = view->ConsumeVisibilityChanged();
+                    const bool renderSizeChanged = view->ConsumeRenderSizeChanged();
+                    if (!visibilityChanged && !renderSizeChanged) continue;
                     // The tab switch happened during UI drawing, after the
                     // offscreen passes. Render the newly visible tab next frame.
                     renderer->MarkDirty();
@@ -588,7 +643,6 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
         // with the loading overlay before deserialization blocks this thread.
         editorState->ProcessPendingSceneLoad();
         const auto afterPendingLoad = Clock::now();
-        if (frameProfiler)
         {
             Engine::Editor::EditorFrameProfileSample sample{};
             sample.frameBegin = frameBegin;
@@ -608,10 +662,18 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
             sample.renderedViews = renderedViews;
             sample.renderedSceneViews = renderedSceneViews;
             sample.renderedGameViews = renderedGameViews;
+            sample.renderedViewPixels = renderedViewPixels;
+            sample.gameViewWidth = gameViewWidth;
+            sample.gameViewHeight = gameViewHeight;
             sample.submittedShadowDraws = submittedShadowDraws;
             sample.deltaSeconds = dt;
             sample.playing = playState == Engine::Editor::PlayState::Playing;
-            frameProfiler.Record(sample, scene, renderer);
+            if (frameProfiler)
+                frameProfiler.Record(sample, scene, renderer);
+            for (const auto& panel : editorState->GetPanels())
+                if (auto* performance = dynamic_cast<Engine::Editor::PerformanceView*>(panel.get());
+                    performance && performance->IsOpen())
+                    performance->SetFrameTimings(sample, renderer);
         }
 
         // Avoid spinning the editor loop while idle. Window input wakes this
@@ -620,7 +682,7 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
         if (!renderer->IsDirty() && !needsContinuousRendering())
             MsgWaitForMultipleObjectsEx(0, nullptr, 50, QS_ALLINPUT,
                 MWMO_INPUTAVAILABLE);
-        if (autoProfileMmdPlay && ++autoProfileTick == 30u + autoProfilePlayFrames)
+        if (autoProfilePlay && ++autoProfileTick == 30u + autoProfilePlayFrames)
         {
             gameBuildManager->Stop();
             PostMessageW(window->GetHWND(), WM_CLOSE, 0, 0);

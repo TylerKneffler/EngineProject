@@ -33,6 +33,12 @@ public:
         m_visibilityChanged = false;
         return changed;
     }
+    bool ConsumeRenderSizeChanged()
+    {
+        const bool changed = m_renderSizeChanged;
+        m_renderSizeChanged = false;
+        return changed;
+    }
 
     // Initialize offscreen rendering resources
     // device: opaque graphics device handle
@@ -46,6 +52,7 @@ public:
     // Resize rendering targets
     // device: opaque graphics device handle
     void Resize(void* device, uint32_t width, uint32_t height);
+    void ApplyRequestedRenderSize(void* device);
 
     // Render to offscreen target with custom drawing function
     // cmdList: opaque graphics command list handle
@@ -75,6 +82,7 @@ public:
     virtual void RenderShadow3D(void* cmd) = 0;
 
 protected:
+    void RequestRenderSize(float width, float height);
     void SetPanelVisible(bool visible)
     {
         if (m_panelVisible != visible) m_visibilityChanged = true;
@@ -84,5 +92,8 @@ private:
     bool m_panelVisible = true;
     bool m_visibilityChanged = false;
     std::unique_ptr<::Engine::Renderers::IView> m_viewBackend;  // Graphics API implementation
+    uint32_t m_requestedWidth = 0;
+    uint32_t m_requestedHeight = 0;
+    bool m_renderSizeChanged = false;
 };
 }

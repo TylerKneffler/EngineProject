@@ -4,7 +4,7 @@ namespace Engine::Editor
 {
 class IEditorUi;
 
-enum class SceneEditMode { Object, Mesh, Skeleton };
+enum class SceneEditMode { Object, Mesh, Skeleton, Terrain };
 
 struct ViewportModeControl
 {

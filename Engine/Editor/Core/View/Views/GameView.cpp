@@ -51,6 +51,7 @@ void GameView::DrawPanel(IEditorUi& ui)
              static_cast<float>(m_gameWindowWidth) / static_cast<float>(m_gameWindowHeight));
         const auto input = ui.Viewport(GetUiTextureHandle(), targetAspect,
             {m_letterboxColor.r,m_letterboxColor.g,m_letterboxColor.b,m_letterboxColor.a});
+        RequestRenderSize(input.available.x, input.available.y);
         if (m_scene)
             m_scene->SetUiPointerInput(input.mousePosInViewport.x,
                 input.mousePosInViewport.y, input.available.x, input.available.y,

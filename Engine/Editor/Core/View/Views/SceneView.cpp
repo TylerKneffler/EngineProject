@@ -147,16 +147,6 @@ void SceneView::DrawPoseToolbar(const std::function<bool(float)>& next)
 {
     if (m_scene && m_scene->IsEditorMode2D()) return;
     ImGui::PushID(this);
-    next(ImGui::CalcTextSize("Bone gizmos").x + ImGui::GetFrameHeight() +
-        ImGui::GetStyle().ItemInnerSpacing.x);
-    bool bonesVisible = EditorViewportSettings::AreBonesVisible();
-    if (ImGui::Checkbox("Bone gizmos", &bonesVisible))
-    {
-        EditorViewportSettings::SetBonesVisible(bonesVisible);
-        if (m_scene) EditorViewportSettings::Apply(*m_scene);
-    }
-    if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Show or hide skeleton bones, joint points, and rig handles.");
     next(ImGui::CalcTextSize("Pose").x + ImGui::GetFrameHeight() +
         ImGui::GetStyle().ItemInnerSpacing.x);
     ImGui::Checkbox("Pose", &m_modelManipulation);
@@ -401,6 +391,7 @@ void SceneView::DrawPanel(IEditorUi& ui)
          static_cast<float>(m_gameWindowWidth) / static_cast<float>(m_gameWindowHeight));
     const auto input = ui.Viewport(GetUiTextureHandle(), targetAspect,
         {m_letterboxColor.r,m_letterboxColor.g,m_letterboxColor.b,m_letterboxColor.a});
+    RequestRenderSize(input.available.x, input.available.y);
     m_viewportScreenMin = input.screenMin;
     m_viewportScreenMax = input.screenMax;
     if (m_scene && !m_scene->HasStarted())
@@ -427,16 +418,31 @@ void SceneView::DrawPanel(IEditorUi& ui)
     }
     bool terrainConsumedClick = false;
     static bool editTerrainCells = false;
-    auto* terrain = m_scene && m_scene->GetSelectedObject()
-        ? m_scene->GetSelectedObject()->GetComponent<Engine::Components::Terrain>()
-        : nullptr;
-    auto* manager = m_scene && m_scene->GetSelectedObject()
-        ? m_scene->GetSelectedObject()->GetComponent<Engine::Components::TerrainManager>()
-        : nullptr;
-    if (!manager && m_scene && m_scene->GetSelectedObject() &&
-        m_scene->GetSelectedObject()->Parent)
-        manager = m_scene->GetSelectedObject()->Parent->GetComponent<Engine::Components::TerrainManager>();
-    if (terrain || manager)
+    auto* selected = m_scene ? m_scene->GetSelectedObject() : nullptr;
+    auto* terrain = selected
+        ? selected->GetComponent<Engine::Components::Terrain>() : nullptr;
+    Engine::Components::TerrainManager* manager = nullptr;
+    for (auto* object = selected; object && !manager; object = object->Parent)
+        manager = object->GetComponent<Engine::Components::TerrainManager>();
+    if (selected != m_previousSelectedObject)
+    {
+        if ((terrain || manager) && m_editMode == SceneEditMode::Object)
+            m_editMode = SceneEditMode::Terrain;
+        else if (!terrain && !manager && m_editMode == SceneEditMode::Terrain)
+            m_editMode = SceneEditMode::Object;
+        m_previousSelectedObject = selected;
+    }
+    if (m_editMode == SceneEditMode::Terrain && !terrain && !manager)
+    {
+        ImGui::SetNextWindowPos({input.screenMin.x + 8.f,
+            input.screenMin.y + 48.f}, ImGuiCond_Always);
+        ImGui::Begin(("Terrain tools##" + m_title).c_str(), nullptr,
+            ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_AlwaysAutoResize |
+            ImGuiWindowFlags_NoSavedSettings);
+        ImGui::TextUnformatted("Select an object with Terrain or Terrain Manager.");
+        ImGui::End();
+    }
+    if ((terrain || manager) && m_editMode == SceneEditMode::Terrain)
     {
         static int brush = 0, layer = 0;
         static float radius = 3.f, strength = .25f;
@@ -498,7 +504,8 @@ void SceneView::DrawPanel(IEditorUi& ui)
             }
         }
     }
-    if (manager && input.available.x > 0.f && input.available.y > 0.f)
+    if (manager && m_editMode == SceneEditMode::Terrain &&
+        input.available.x > 0.f && input.available.y > 0.f)
     {
         ImGui::SetNextWindowPos({input.screenMin.x + 8.f, input.screenMin.y + 170.f}, ImGuiCond_Always);
         ImGui::Begin(("Terrain cells##" + m_title).c_str(), nullptr,

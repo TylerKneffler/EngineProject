@@ -41,10 +41,10 @@
         <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
       </transform>
       <components>
-        <components:PerlinNoiseField PerlinNoiseField.seed="7429" PerlinNoiseField.frequency="0.042" PerlinNoiseField.octaves="5" PerlinNoiseField.lacunarity="2" PerlinNoiseField.persistence="0.52">
+        <components:PerlinNoiseField PerlinNoiseField.seed="7429" PerlinNoiseField.frequency="0.012" PerlinNoiseField.octaves="3" PerlinNoiseField.lacunarity="2" PerlinNoiseField.persistence="0.3">
           <PerlinNoiseField.coordinateOffset><item>31</item><item>-17</item><item>83</item></PerlinNoiseField.coordinateOffset>
         </components:PerlinNoiseField>
-        <components:TerrainGen TerrainGen.viewerObjectName="TerrainGen Camera" TerrainGen.noiseObjectName="" TerrainGen.chunkSize="16" TerrainGen.viewRadiusInChunks="1" TerrainGen.maxChunkBuildsPerUpdate="2" TerrainGen.horizontalCellsPerChunk="12" TerrainGen.verticalCells="12" TerrainGen.patchesPerAxis="2" TerrainGen.verticalSize="18" TerrainGen.baseHeight="0" TerrainGen.heightAmplitude="6" TerrainGen.caveStrength="2.1" TerrainGen.caveFrequencyMultiplier="2.35" TerrainGen.isoLevel="0" TerrainGen.textureScale="12" TerrainGen.heightColorBlend="0.06" TerrainGen.generateColliders="false" />
+        <components:TerrainGen TerrainGen.viewerObjectName="TerrainGen Camera" TerrainGen.noiseObjectName="" TerrainGen.chunkSize="16" TerrainGen.viewRadiusInChunks="1" TerrainGen.maxChunkBuildsPerUpdate="2" TerrainGen.horizontalCellsPerChunk="12" TerrainGen.verticalCells="20" TerrainGen.patchesPerAxis="2" TerrainGen.verticalSize="30" TerrainGen.baseHeight="0" TerrainGen.heightAmplitude="10" TerrainGen.caveStrength="0.5" TerrainGen.caveFrequencyMultiplier="2.35" TerrainGen.isoLevel="0" TerrainGen.textureScale="12" TerrainGen.heightColorBlend="0.06" TerrainGen.generateColliders="false" />
       </components>
       <children>
         <item name="Chunk (0, 0)" enabled="true">

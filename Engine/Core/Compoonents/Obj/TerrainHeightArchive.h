@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
@@ -153,6 +154,22 @@ inline uint8_t LayerForHeight(float height)
         if (delta < distance) { distance = delta; nearest = layer; }
     }
     return nearest;
+}
+
+inline void BlendHeightBands(float height,
+    const std::array<float, LayerCount - 1>& boundaries,
+    float halfWidth, float* weights)
+{
+    float remaining = 1.f;
+    for (int layer = 0; layer < LayerCount - 1; ++layer)
+    {
+        const float t = std::clamp((height - boundaries[layer] + halfWidth) /
+            (2.f * halfWidth), 0.f, 1.f);
+        const float above = t * t * (3.f - 2.f * t);
+        weights[layer] = remaining * (1.f - above);
+        remaining *= above;
+    }
+    weights[LayerCount - 1] = remaining;
 }
 
 // Reconstruct soft base paint from the saved height while retaining the

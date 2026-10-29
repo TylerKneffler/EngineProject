@@ -265,6 +265,9 @@ void ProjectLoader::ParseRendering(const pugi::xml_node& projectNode, ProjectSet
         auto realtimeShadows = prop.child("RealtimeShadows");
         if (realtimeShadows)
         {
+            settings.realtimeShadows.quality = static_cast<
+                Engine::Model::ShadowQualityPreset>(std::min<uint32_t>(
+                    realtimeShadows.attribute("Quality").as_uint(0u), 5u));
             settings.realtimeShadows.enabled =
                 realtimeShadows.attribute("Enabled").as_bool(true);
             settings.realtimeShadows.maximumShadowedLights = std::clamp<uint32_t>(

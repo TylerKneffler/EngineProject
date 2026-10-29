@@ -10,6 +10,7 @@
 #include "Core/Compoonents/Obj/TerrainManager.h"
 #include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Compoonents/Lighting/Light.h"
+#include "Core/Compoonents/Obj/Mesh.h"
 #include "Core/Renderers/DX11/DX11GameRenderer.h"
 #include "Core/Window.h"
 #include "Scripts/TerrainPerformance/TerrainPerformanceDriver.h"
@@ -137,6 +138,7 @@ double PhasePercentile(const std::vector<double>& values,
 
 struct Samples
 {
+    std::map<std::string, std::vector<double>> terrainSteps;
     std::vector<double> frames, streaming, managerCpu, farTileCpu,
         renderCpu, beginFrameCpu, clearCpu, contextCpu, prepareCpu,
         shadowRenderCpu, ordinaryRenderCpu, sceneRenderCpu, frameEndCpu,
@@ -344,6 +346,27 @@ int Run()
         "TERRAIN_DISABLE_FAR_FIELD", nullptr, 0) == 0;
     const bool shadowsEnabled = GetEnvironmentVariableA(
         "TERRAIN_TEST_DISABLE_SHADOWS", nullptr, 0) == 0;
+    std::string shadowQuality = "custom";
+    std::array<char, 32> shadowQualityBuffer{};
+    const DWORD shadowQualityLength = GetEnvironmentVariableA(
+        "TERRAIN_TEST_SHADOW_QUALITY", shadowQualityBuffer.data(),
+        static_cast<DWORD>(shadowQualityBuffer.size()));
+    if (shadowQualityLength > 0 &&
+        shadowQualityLength < shadowQualityBuffer.size())
+        shadowQuality.assign(shadowQualityBuffer.data(), shadowQualityLength);
+    Engine::Model::RealtimeShadowSettings shadowSettings{};
+    const auto preset = shadowQuality == "off"
+        ? Engine::Model::ShadowQualityPreset::Off
+        : shadowQuality == "low" ? Engine::Model::ShadowQualityPreset::Low
+        : shadowQuality == "medium" ? Engine::Model::ShadowQualityPreset::Medium
+        : shadowQuality == "high" ? Engine::Model::ShadowQualityPreset::High
+        : shadowQuality == "ultra" ? Engine::Model::ShadowQualityPreset::Ultra
+        : Engine::Model::ShadowQualityPreset::Custom;
+    Require(shadowQuality == "custom" || preset !=
+        Engine::Model::ShadowQualityPreset::Custom,
+        "unknown TERRAIN_TEST_SHADOW_QUALITY");
+    Engine::Model::ApplyShadowQualityPreset(shadowSettings, preset);
+    scene.SetRealtimeShadowSettings(shadowSettings);
     const bool sunEnabled = GetEnvironmentVariableA(
         "TERRAIN_TEST_DISABLE_SUN", nullptr, 0) == 0;
     const bool unlit = GetEnvironmentVariableA(
@@ -403,6 +426,9 @@ int Run()
     manager->farRadius = farRadiusCells;
     manager->lod2Radius = lod2RadiusCells;
     manager->lod4Radius = lod4RadiusCells;
+    manager->farTileScreenErrorPixels = static_cast<float>(ReadIntSetting(
+        "TERRAIN_TEST_FAR_TILE_ERROR_PIXELS",
+        static_cast<int>(manager->farTileScreenErrorPixels), 1, 64));
     manager->maxLoadsPerUpdate = 8;
     manager->maxUnloadsPerUpdate = 32;
     manager->maxPreparedCells = 16;
@@ -453,6 +479,46 @@ int Run()
         Require(viewLength > 0 && viewLength < sizeof(requestedView),
             "TERRAIN_CAPTURE_VIEW must name human, ground, high, or crossing");
         const std::string viewName(requestedView, viewLength);
+        const bool shadowFixture = GetEnvironmentVariableA(
+            "TERRAIN_CAPTURE_SHADOW_FIXTURE", nullptr, 0) > 0;
+        if (shadowFixture)
+        {
+            const auto addCube = [&](const char* name, double x, double z,
+                double size)
+            {
+                double terrainHeight = 0.0;
+                Require(manager->TryGetHeightAtWorldPosition(
+                    {x, 0.0, z}, terrainHeight),
+                    "shadow fixture terrain height unavailable");
+                auto* fixture = scene.AddObject(name);
+                fixture->transform.position = {
+                    x, terrainHeight + size * 1.5, z};
+                fixture->transform.scale = glm::dvec3(size);
+                auto* mesh = fixture->AddComponent<Engine::Components::Mesh>();
+                mesh->LoadFromFile("Assets/Mesh/diagnostic_cube.obj");
+                mesh->OnAfterDeserialize(renderer.GetGraphicsProvider());
+                Require(mesh->IsReady(), "shadow fixture cube failed to load");
+            };
+            if (viewName == "human")
+            {
+                // Human-view camera faces +X/-Z. Spread equal primitive
+                // shapes across the view to expose distance fade and atlas
+                // coverage on terrain within the 96 m receiver range.
+                constexpr double diagonal = 0.7071067811865476;
+                constexpr std::array<double, 3> distances{ 36., 55., 82. };
+                constexpr std::array<double, 3> lateral{ -12., 0., 18. };
+                constexpr std::array<const char*, 3> names{
+                    "Near shadow cube", "Middle shadow cube", "Far shadow cube" };
+                for (size_t i = 0; i < distances.size(); ++i)
+                    addCube(names[i],
+                        initialX + diagonal * (distances[i] - lateral[i]),
+                        initialX - diagonal * (distances[i] + lateral[i]),
+                        12.0);
+            }
+            else
+                addCube("Shadow capture cube", initialX + 400.0,
+                    initialX + 400.0, 100.0);
+        }
         const auto imageDirectory =
             std::filesystem::path(".local/performance-logs/terrain-captures");
         std::filesystem::create_directories(imageDirectory);
@@ -504,6 +570,8 @@ int Run()
             }
             Require(SavePng(imageDirectory / (std::string(name) +
                 (captureWithoutBatches ? "_no_batches" : "") +
+                (shadowFixture ? "_shadow_fixture" : "") +
+                (shadowQuality == "custom" ? "" : "_shadow_" + shadowQuality) +
                 (!shadowsEnabled ? "_no_shadows" : "") +
                 (!sunEnabled ? "_no_sun" : "") +
                 (unlit ? "_unlit" : "") +
@@ -545,10 +613,13 @@ int Run()
             x, viewHeight, z};
         cameraObject->transform.rotation = {viewPitch, static_cast<float>(yaw), 0.f};
         scene.AdvanceManualFrame(1.f / 60.f);
+        const auto advanced = Clock::now();
         manager->UpdateStreamingAtPosition(
             cameraObject->transform.GetWorldPositionD());
+        const auto nearTiming = manager->GetLastStreamingTiming();
         const auto managed = Clock::now();
         driver->Update();
+        const auto farTiming = manager->GetLastFarUpdateTiming();
         const auto streamed = Clock::now();
         renderer.BeginFrame();
         const auto beganFrame = Clock::now();
@@ -561,6 +632,8 @@ int Run()
         scene.Render(context.get(), 1.f, camera, false,
             Width, Height, true);
         const auto shadowRendered = Clock::now();
+        const auto shadowTiming = scene.GetLastShadowCpuTiming();
+        const auto shadowSnapshot = scene.GetShadowDebugSnapshot();
         scene.Render(context.get(), 1.f, camera, false, Width, Height);
         const auto rendered = Clock::now();
         renderer.EndFrame();
@@ -569,6 +642,90 @@ int Run()
         const auto finished = Clock::now();
         if (!samples) return;
         samples->frames.push_back(Milliseconds(start, finished));
+        const auto step = [&](const char* name, double milliseconds) {
+            samples->terrainSteps[name].push_back(milliseconds);
+        };
+        using NearTiming = Engine::Components::TerrainManager::StreamingTiming;
+        const auto nearPhase = [&](double NearTiming::* member) {
+            return nearTiming.*member;
+        };
+        step("sceneAdvanceAndCamera", Milliseconds(start, advanced));
+        step("nearManagerCall", Milliseconds(advanced, managed));
+        step("nearManagerTotal", nearPhase(&Engine::Components::TerrainManager::
+            StreamingTiming::totalMs));
+        step("farDriverCall", Milliseconds(managed, streamed));
+        step("farSelection", farTiming.selectionMs);
+        step("farPreparation", farTiming.preparationMs);
+        step("farUpload", farTiming.uploadMs);
+        step("farObjectSetup", farTiming.objectSetupMs);
+        step("farMeshInstall", farTiming.meshInstallMs);
+        step("farMeshValidation", farTiming.meshValidationMs);
+        step("farMeshBounds", farTiming.meshBoundsMs);
+        step("farMeshBuffer", farTiming.meshBufferMs);
+        step("farGraphicsInit", farTiming.graphicsInitMs);
+        step("farVisibility", farTiming.visibilityMs);
+        step("farWorkerBuild", farTiming.workerBuildMs);
+        step("farQueuedTiles", static_cast<double>(farTiming.queuedTiles));
+        step("farUploadedTiles", static_cast<double>(farTiming.uploadedTiles));
+        step("farAppearedTiles", static_cast<double>(farTiming.appearedTiles));
+        step("farAppearanceLatency", farTiming.maxAppearanceLatencyMs);
+        step("farCoverageGaps", static_cast<double>(farFieldEnabled
+            ? manager->CountVisibleCoverageGaps(
+                static_cast<int>(std::floor(x /
+                    (manager->cellsX * manager->cellWidth))),
+                static_cast<int>(std::floor(z /
+                    (manager->cellsY * manager->cellDepth))),
+                loadedRadiusCells + 2) : 0));
+        step("nearHousekeeping", nearPhase(&Engine::Components::TerrainManager::
+            StreamingTiming::housekeepingMs));
+        step("nearQueue", nearPhase(&Engine::Components::TerrainManager::
+            StreamingTiming::queueMs));
+        step("nearUnload", nearPhase(&Engine::Components::TerrainManager::
+            StreamingTiming::unloadMs));
+        step("nearCandidates", nearPhase(&Engine::Components::TerrainManager::
+            StreamingTiming::candidatesMs));
+        step("nearLoadOrSchedule", nearPhase(&Engine::Components::TerrainManager::
+            StreamingTiming::loadOrScheduleMs));
+        step("nearLod", nearPhase(&Engine::Components::TerrainManager::
+            StreamingTiming::lodMs));
+        step("nearCommit", nearPhase(&Engine::Components::TerrainManager::
+            StreamingTiming::commitMs));
+        step("nearCommitScene", nearPhase(&Engine::Components::TerrainManager::
+            StreamingTiming::commitSceneMs));
+        step("nearCommitStitch", nearPhase(&Engine::Components::TerrainManager::
+            StreamingTiming::commitStitchMs));
+        step("nearCommitLod", nearPhase(&Engine::Components::TerrainManager::
+            StreamingTiming::commitLodMs));
+        step("nearCommitGraphics", nearPhase(&Engine::Components::TerrainManager::
+            StreamingTiming::commitGraphicsMs));
+        step("nearCommitPhysics", nearPhase(&Engine::Components::TerrainManager::
+            StreamingTiming::commitPhysicsMs));
+        step("nearColliderActivation", nearPhase(&Engine::Components::TerrainManager::
+            StreamingTiming::colliderActivationMs));
+        step("nearBatchRefresh", nearPhase(&Engine::Components::TerrainManager::
+            StreamingTiming::batchRefreshMs));
+        step("nearMemoryTrim", nearPhase(&Engine::Components::TerrainManager::
+            StreamingTiming::memoryTrimMs));
+        step("nearScheduledCells", nearTiming.scheduledCells);
+        step("nearCommittedCells", nearTiming.committedCells);
+        step("nearChangedLods", nearTiming.changedLods);
+        step("beginFrame", Milliseconds(streamed, beganFrame));
+        step("clear", Milliseconds(beganFrame, cleared));
+        step("context", Milliseconds(cleared, madeContext));
+        step("prepareRender", Milliseconds(madeContext, prepared));
+        step("shadowRender", Milliseconds(prepared, shadowRendered));
+        step("shadowScenePreparation", shadowTiming.scenePreparationMs);
+        step("shadowCascadeCulling", shadowTiming.cascadeCullingMs);
+        step("shadowRecordUpload", shadowTiming.recordUploadMs);
+        step("shadowDrawSubmission", shadowTiming.drawSubmissionMs);
+        step("shadowPortal", shadowTiming.portalMs);
+        step("shadowTotalInternal", shadowTiming.totalMs);
+        step("shadowCasterCount", shadowSnapshot.casterCount);
+        step("shadowSubmittedDraws", shadowSnapshot.submittedCasterDrawCount);
+        step("shadowCascadeCount", shadowSnapshot.cascadeCount);
+        step("ordinaryRender", Milliseconds(shadowRendered, rendered));
+        step("frameEnd", Milliseconds(rendered, finished));
+        step("frameTotal", Milliseconds(start, finished));
         const double streamingMs = Milliseconds(start, streamed);
         samples->streaming.push_back(streamingMs);
         samples->managerCpu.push_back(Milliseconds(start, managed));
@@ -631,6 +788,16 @@ int Run()
     const double startZ = startX;
     for (int i = 0; i < 30; ++i)
         runFrame(startX, startZ, heading, nullptr);
+    // A scene can begin with cells from its saved streaming radius. Finish
+    // unloading those cells before comparing configurations with smaller
+    // near radii; otherwise setup cleanup dominates the measured p95.
+    const int residentRadius = farFieldEnabled ? loadedRadiusCells :
+        std::max(loadedRadiusCells, farRadiusCells);
+    const size_t settledResidentCount = static_cast<size_t>(
+        (residentRadius * 2 + 1) * (residentRadius * 2 + 1));
+    for (int i = 0; i < 180 &&
+        manager->GetLoadedCellCount() > settledResidentCount; ++i)
+        runFrame(startX, startZ, heading, nullptr);
     Samples samples;
     // Look across the map from one high viewpoint, then move at 1.4 m/s
     // walking and 5 m/s running speeds using a fixed 60 Hz simulation step.
@@ -682,7 +849,8 @@ int Run()
                 glm::length(glm::dvec2(point.x - eye.x, point.z - eye.z)));
         }
         if (farPlaneMeters >= 10000)
-            Require(farFieldVisibleMeters > 10000.0,
+            Require(farFieldVisibleMeters > std::min(10000.0,
+                farPlaneMeters * .99),
                 "distant terrain did not reach across the map");
     }
     Require(samples.frames.size() == FramesPerPhase * 3,
@@ -740,6 +908,19 @@ int Run()
         driver->GetFarTileRebuildMilliseconds() - rebuildBeforeCrossing;
     const uint64_t crossingBatchUploads =
         manager->GetRenderBatchUploadCount() - batchUploadsBeforeCrossing;
+    const auto maxCrossingStep = [&](const char* name) {
+        const auto& values = crossingSamples.terrainSteps.at(name);
+        return *std::max_element(values.begin(), values.end());
+    };
+    const double crossingAppearanceLatency =
+        maxCrossingStep("farAppearanceLatency");
+    const double crossingCoverageGaps = maxCrossingStep("farCoverageGaps");
+    if (farFieldEnabled)
+        Require(crossingCoverageGaps == 0.0,
+            "near/far terrain coverage gap during cell crossing");
+    const double crossingAppearedTiles = std::accumulate(
+        crossingSamples.terrainSteps.at("farAppearedTiles").begin(),
+        crossingSamples.terrainSteps.at("farAppearedTiles").end(), 0.0);
     uint32_t crossingLodChanges = 0;
     for (const auto& [cell, oldStride] : lodBeforeCrossing)
         if (const auto* terrain = manager->GetLoadedCell(cell.first, cell.second))
@@ -755,10 +936,11 @@ int Run()
     const bool meetsAverage100Fps = average <= 10.0;
     const bool meets100Fps = p95 <= 10.0;
     const auto report = [&](std::ostream& out) {
-        const auto metric = [&](const char* name, const std::vector<double>& values) {
-            out << "  \"" << name << "P50Ms\": " << Percentile(values, .5)
-                << ",\n  \"" << name << "P95Ms\": " << Percentile(values, .95)
-                << ",\n  \"" << name << "P99Ms\": " << Percentile(values, .99)
+        const auto metric = [&](const char* name, const std::vector<double>& values,
+            const char* unit = "Ms") {
+            out << "  \"" << name << "P50" << unit << "\": " << Percentile(values, .5)
+                << ",\n  \"" << name << "P95" << unit << "\": " << Percentile(values, .95)
+                << ",\n  \"" << name << "P99" << unit << "\": " << Percentile(values, .99)
                 << ",\n";
         };
         out << std::fixed << std::setprecision(3)
@@ -767,6 +949,7 @@ int Run()
                 << (runtimeMode == "baked" ? "not-applicable" : cacheMode)
                 << "\",\n"
             << "  \"runtimeMode\": \"" << runtimeMode << "\",\n"
+            << "  \"shadowQuality\": \"" << shadowQuality << "\",\n"
             << "  \"headingMode\": \"" << headingMode << "\",\n"
             << "  \"viewpoint\": \"" << viewpoint << "\",\n"
             << "  \"cameraFarPlaneMeters\": " << farPlaneMeters << ",\n"
@@ -774,6 +957,8 @@ int Run()
             << "  \"terrainLoadedRadiusCells\": " << loadedRadiusCells << ",\n"
             << "  \"terrainLod2RadiusCells\": " << lod2RadiusCells << ",\n"
             << "  \"terrainLod4RadiusCells\": " << lod4RadiusCells << ",\n"
+            << "  \"farTileScreenErrorPixels\": "
+                << manager->farTileScreenErrorPixels << ",\n"
             << "  \"farFieldEnabled\": " << (farFieldEnabled ? "true" : "false")
                 << ",\n"
             << "  \"shadowsEnabled\": " << (shadowsEnabled ? "true" : "false")
@@ -814,6 +999,12 @@ int Run()
                 << crossingTileRebuildMs << ",\n"
             << "  \"crossingBatchUploads\": "
                 << crossingBatchUploads << ",\n"
+            << "  \"crossingMaxFarAppearanceLatencyMs\": "
+                << crossingAppearanceLatency << ",\n"
+            << "  \"crossingFarAppearedTiles\": "
+                << crossingAppearedTiles << ",\n"
+            << "  \"crossingMaxCoverageGaps\": "
+                << crossingCoverageGaps << ",\n"
             << "  \"crossingLodChanges\": "
                 << crossingLodChanges << ",\n"
             << "  \"crossingLoadedCellsBefore\": "
@@ -914,6 +1105,18 @@ int Run()
             Engine::Graphics::GpuTimingStage::Transparent)]);
         metric("crossingFrame", crossingSamples.frames);
         metric("crossingGpuTotal", crossingSamples.gpuTotal);
+        const auto stepUnit = [](const std::string& name) {
+            return name == "nearScheduledCells" ||
+                name == "nearCommittedCells" || name == "nearChangedLods" ||
+                name == "farQueuedTiles" || name == "farUploadedTiles" ||
+                name == "farAppearedTiles" || name == "farCoverageGaps"
+                ? "" : "Ms";
+        };
+        for (const auto& [name, values] : samples.terrainSteps)
+            metric(("terrainStep" + name).c_str(), values, stepUnit(name));
+        for (const auto& [name, values] : crossingSamples.terrainSteps)
+            metric(("crossingTerrainStep" + name).c_str(), values,
+                stepUnit(name));
         out << "  \"drawsP50\": " << Percentile(samples.draws, .5)
             << ",\n  \"drawsP95\": " << Percentile(samples.draws, .95)
             << ",\n  \"drawsP99\": " << Percentile(samples.draws, .99)
@@ -934,6 +1137,7 @@ int Run()
             (loadedRadiusCells == 2 ? "" :
                 "-near-" + std::to_string(loadedRadiusCells)) +
             "-" + runtimeMode + "-" + headingMode + "-" + cacheMode +
+            (shadowQuality == "custom" ? "" : "-shadow-" + shadowQuality) +
             (shadowsEnabled ? "" : "-no-shadows") +
             (sunEnabled ? "" : "-no-sun") +
             (unlit ? "-unlit" : "") +
@@ -946,6 +1150,26 @@ int Run()
     report(file);
     file.flush();
     report(std::cout);
+    auto csvPath = output;
+    csvPath.replace_extension(".csv");
+    std::ofstream csv(csvPath, std::ios::trunc);
+    Require(static_cast<bool>(csv), "could not write terrain frame trace");
+    csv << "phase,frame";
+    for (const auto& [name, values] : samples.terrainSteps)
+        csv << ',' << name;
+    csv << '\n' << std::fixed << std::setprecision(6);
+    const auto writeTrace = [&](const char* phase, const Samples& trace) {
+        for (size_t frame = 0; frame < trace.frames.size(); ++frame)
+        {
+            csv << phase << ',' << frame;
+            for (const auto& [name, values] : trace.terrainSteps)
+                csv << ',' << values.at(frame);
+            csv << '\n';
+        }
+    };
+    writeTrace("look_walk_run", samples);
+    writeTrace("crossing", crossingSamples);
+    Require(csv.good(), "could not finish terrain frame trace");
     if (GetEnvironmentVariableA("TERRAIN_REQUIRE_100FPS_AVERAGE", nullptr, 0) > 0)
         Require(meetsAverage100Fps,
             "terrain 1080p average frame time did not meet 100 FPS target");

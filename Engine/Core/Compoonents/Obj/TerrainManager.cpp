@@ -480,31 +480,40 @@ void TerrainManager::PrepareLoop()
         {
             Engine::Core::Object object;
             auto* terrain = object.AddComponent<Terrain>();
-            const bool baked = !task.bakePath.empty() && task.bakeSize &&
-                terrain->LoadCacheRange(task.bakePath,
-                    task.cacheSignature, nullptr, task.bakeOffset,
-                    task.bakeSize);
-            if (task.requireBake && !baked)
-                throw std::runtime_error("Missing or stale runtime terrain bake");
-            result.cacheHit = baked;
-            if (!baked && task.hasSaved) terrain->Deserialize(task.saved);
-            else if (!baked)
+            if (task.prepared)
             {
-                result.cacheHit = !task.cachePath.empty() &&
-                    terrain->LoadCache(task.cachePath,
-                        task.cacheSignature, nullptr);
-                if (!result.cacheHit && task.builder)
-                {
-                    terrain->Resize(task.cellsX, task.cellsY,
-                        task.cellWidth, task.cellDepth);
-                    task.builder(task.cell, *terrain);
-                    terrain->Rebuild();
-                    if (ReserveCacheWrite(task.cachePath, *terrain))
-                        terrain->SaveCache(task.cachePath, task.cacheSignature);
-                }
+                result.cacheHit = task.preparedCacheHit;
+                if (!terrain->InstallPrepared(std::move(*task.prepared), nullptr))
+                    throw std::runtime_error("Invalid prepared terrain cell");
             }
-            if (!baked && task.edited && !task.editPath.empty())
-                LoadEditFile(task.editPath, *terrain);
+            else
+            {
+                const bool baked = !task.bakePath.empty() && task.bakeSize &&
+                    terrain->LoadCacheRange(task.bakePath,
+                        task.cacheSignature, nullptr, task.bakeOffset,
+                        task.bakeSize);
+                if (task.requireBake && !baked)
+                    throw std::runtime_error("Missing or stale runtime terrain bake");
+                result.cacheHit = baked;
+                if (!baked && task.hasSaved) terrain->Deserialize(task.saved);
+                else if (!baked)
+                {
+                    result.cacheHit = !task.cachePath.empty() &&
+                        terrain->LoadCache(task.cachePath,
+                            task.cacheSignature, nullptr);
+                    if (!result.cacheHit && task.builder)
+                    {
+                        terrain->Resize(task.cellsX, task.cellsY,
+                            task.cellWidth, task.cellDepth);
+                        task.builder(task.cell, *terrain);
+                        terrain->Rebuild();
+                        if (ReserveCacheWrite(task.cachePath, *terrain))
+                            terrain->SaveCache(task.cachePath, task.cacheSignature);
+                    }
+                }
+                if (!baked && task.edited && !task.editPath.empty())
+                    LoadEditFile(task.editPath, *terrain);
+            }
             terrain->SetMeshLodStride(task.lodStride);
             result.terrain = terrain->TakePrepared();
         }
@@ -554,6 +563,30 @@ int TerrainManager::CommitPrepared(int centerX, int centerY, int radius,
             std::abs(cell.first - centerX) > radius ||
             std::abs(cell.second - centerY) > radius ||
             prepared.terrain.vertices.empty()) continue;
+        int desiredStride = DesiredLodStride(cell, centerX, centerY);
+        while (desiredStride > 1 &&
+            (prepared.terrain.cellsX < desiredStride ||
+                prepared.terrain.cellsY < desiredStride ||
+                prepared.terrain.cellsX % desiredStride ||
+                prepared.terrain.cellsY % desiredStride))
+            desiredStride /= 2;
+        if (prepared.terrain.lodStride != desiredStride)
+        {
+            PrepareTask task;
+            task.cell = cell;
+            task.revision = m_prepareRevision;
+            task.lodStride = desiredStride;
+            task.prepared = std::move(prepared.terrain);
+            task.preparedCacheHit = prepared.cacheHit;
+            {
+                std::lock_guard<std::mutex> lock(m_prepareMutex);
+                m_prepareQueue.push_front(std::move(task));
+            }
+            m_preparingCells[cell] = m_prepareRevision;
+            m_prepareWake.notify_one();
+            continue;
+        }
+        const auto commitStart = std::chrono::steady_clock::now();
         auto* object = Owner->GetScene()->AddObject("Terrain cell " +
             std::to_string(cell.first) + "," + std::to_string(cell.second));
         object->runtimeOnly = true;
@@ -570,10 +603,27 @@ int TerrainManager::CommitPrepared(int centerX, int centerY, int radius,
         }
         if (prepared.cacheHit) ++m_cacheHits;
         m_loaded[cell] = terrain;
+        const auto sceneInstalled = std::chrono::steady_clock::now();
         Stitch(cell);
-        terrain->SetMeshLodStride(DesiredLodStride(cell, centerX, centerY));
+        const auto stitched = std::chrono::steady_clock::now();
+        const auto lodInstalled = std::chrono::steady_clock::now();
         terrain->FinalizePreparedGraphics(m_provider);
+        const auto graphicsReady = std::chrono::steady_clock::now();
         ConfigureCellPhysics(*object);
+        const auto physicsReady = std::chrono::steady_clock::now();
+        const auto elapsed = [](auto begin, auto end) {
+            return std::chrono::duration<double, std::milli>(end - begin).count();
+        };
+        m_lastStreamingTiming.commitSceneMs +=
+            elapsed(commitStart, sceneInstalled);
+        m_lastStreamingTiming.commitStitchMs +=
+            elapsed(sceneInstalled, stitched);
+        m_lastStreamingTiming.commitLodMs +=
+            elapsed(stitched, lodInstalled);
+        m_lastStreamingTiming.commitGraphicsMs +=
+            elapsed(lodInstalled, graphicsReady);
+        m_lastStreamingTiming.commitPhysicsMs +=
+            elapsed(graphicsReady, physicsReady);
         ++uploaded;
     }
     return uploaded;
@@ -851,6 +901,17 @@ int TerrainManager::DesiredLodStride(Cell cell, int centerX, int centerY) const
     if (distance <= lod2Radius) return 2;
     if (distance <= lod4Radius) return 4;
     return 8;
+}
+
+int TerrainManager::DesiredPrepareLodStride(Cell cell, int centerX,
+    int centerY) const
+{
+    if (m_prefetchCenter &&
+        (std::abs(cell.first - centerX) > loadedRadius ||
+            std::abs(cell.second - centerY) > loadedRadius))
+        return DesiredLodStride(cell, m_prefetchCenter->first,
+            m_prefetchCenter->second);
+    return DesiredLodStride(cell, centerX, centerY);
 }
 
 void TerrainManager::UnloadCell(Cell cell)
@@ -1493,8 +1554,18 @@ bool TerrainManager::TryGetHeightAtWorldPosition(
     return std::isfinite(height);
 }
 
-void TerrainManager::StreamCells(int centerX, int centerY)
+void TerrainManager::StreamCells(int centerX, int centerY, int initialRadius)
 {
+    using ProfileClock = std::chrono::steady_clock;
+    const auto profileStart = ProfileClock::now();
+    auto phaseStart = profileStart;
+    const auto record = [&](double& destination) {
+        const auto now = ProfileClock::now();
+        destination = std::chrono::duration<double, std::milli>(
+            now - phaseStart).count();
+        phaseStart = now;
+    };
+    m_lastStreamingTiming = {};
     const auto* scene = Owner ? Owner->GetScene() : nullptr;
     const bool runtimeBudget = scene && scene->HasStarted();
     if (runtimeBudget && m_uploadBudgetFrame != scene->GetFrameIndex())
@@ -1519,7 +1590,8 @@ void TerrainManager::StreamCells(int centerX, int centerY)
         }
         ++it;
     }
-    const int radius = m_editorStreaming ? std::clamp(editorRadius, 0, 32) :
+    const int radius = initialRadius >= 0 ? std::clamp(initialRadius, 0, 32) :
+        m_editorStreaming ? std::clamp(editorRadius, 0, 32) :
         std::clamp(m_farEnabled && !m_farHeights.empty() ? loadedRadius :
             std::max(loadedRadius, farRadius), 0, 32);
     const auto farCovers = [&](Cell cell) {
@@ -1549,6 +1621,7 @@ void TerrainManager::StreamCells(int centerX, int centerY)
         m_haveLastCenter ? centerY - m_lastCenter.second : 0};
     m_lastCenter = {centerX, centerY};
     m_haveLastCenter = true;
+    record(m_lastStreamingTiming.housekeepingMs);
     if (asyncStreaming)
     {
         StartPrepareWorker();
@@ -1562,7 +1635,11 @@ void TerrainManager::StreamCells(int centerX, int centerY)
                 m_preparingCells.erase(cell);
                 it = m_prepareQueue.erase(it);
             }
-            else ++it;
+            else
+            {
+                it->lodStride = DesiredPrepareLodStride(cell, centerX, centerY);
+                ++it;
+            }
         }
         const auto score = [&](Cell cell) {
             const int dx = cell.first - centerX, dy = cell.second - centerY;
@@ -1576,6 +1653,7 @@ void TerrainManager::StreamCells(int centerX, int centerY)
                 return da == db ? a.cell < b.cell : da < db;
             });
     }
+    record(m_lastStreamingTiming.queueMs);
     int unloaded = 0;
     for (auto it = m_loaded.begin(); it != m_loaded.end() &&
         unloaded < std::clamp(maxUnloadsPerUpdate, 1, 64); )
@@ -1590,6 +1668,7 @@ void TerrainManager::StreamCells(int centerX, int centerY)
             ++unloaded;
         }
     }
+    record(m_lastStreamingTiming.unloadMs);
     std::vector<Cell> pending;
     const int minX = std::min(centerX,
         m_prefetchCenter ? m_prefetchCenter->first : centerX) - radius;
@@ -1614,6 +1693,7 @@ void TerrainManager::StreamCells(int centerX, int centerY)
         const int da = priority(a), db = priority(b);
         return da == db ? a < b : da < db;
     });
+    record(m_lastStreamingTiming.candidatesMs);
     int loaded = 0;
     const auto beforeLoads = GetMemoryUsage();
     const bool memoryFull =
@@ -1634,7 +1714,7 @@ void TerrainManager::StreamCells(int centerX, int centerY)
             task.cacheSignature = m_cacheSignature;
             task.cellsX = cellsX; task.cellsY = cellsY;
             task.cellWidth = cellWidth; task.cellDepth = cellDepth;
-            task.lodStride = DesiredLodStride(cell, centerX, centerY);
+            task.lodStride = DesiredPrepareLodStride(cell, centerX, centerY);
             const auto saved = m_cells.find(cell);
             task.hasSaved = saved != m_cells.end();
             if (task.hasSaved) task.saved = saved->second;
@@ -1671,6 +1751,8 @@ void TerrainManager::StreamCells(int centerX, int centerY)
             if (GetLoadedCell(cell.first, cell.second)) ++loaded;
         }
     }
+    m_lastStreamingTiming.scheduledCells = loaded;
+    record(m_lastStreamingTiming.loadOrScheduleMs);
     std::vector<Cell> lodPending;
     for (const auto& [cell, terrain] : m_loaded)
         if (terrain && terrain->Owner &&
@@ -1713,6 +1795,8 @@ void TerrainManager::StreamCells(int centerX, int centerY)
             ++changed;
         }
     }
+    m_lastStreamingTiming.changedLods = changed;
+    record(m_lastStreamingTiming.lodMs);
     int batchUploads = runtimeBudget
         ? std::max(0, uploadCapacity - changed) : 8;
     int preparedUploads = 0;
@@ -1728,13 +1812,21 @@ void TerrainManager::StreamCells(int centerX, int centerY)
             preparedBudget);
         batchUploads -= preparedUploads;
     }
+    m_lastStreamingTiming.committedCells = preparedUploads;
+    record(m_lastStreamingTiming.commitMs);
     RefreshColliderActivation(centerX, centerY);
+    record(m_lastStreamingTiming.colliderActivationMs);
     RefreshRenderBatches(batchUploads, centerX, centerY, radius);
+    record(m_lastStreamingTiming.batchRefreshMs);
     if (runtimeBudget)
         m_nearFrameUploads += changed + preparedUploads +
             (asyncStreaming ? 0 : loaded) +
             static_cast<size_t>(m_renderBatchUploadCount - batchesBefore);
     TrimMemoryBudget(centerX, centerY);
+    record(m_lastStreamingTiming.memoryTrimMs);
+    m_lastStreamingTiming.totalMs =
+        std::chrono::duration<double, std::milli>(
+            phaseStart - profileStart).count();
 }
 
 void TerrainManager::Update()
@@ -1968,7 +2060,9 @@ void TerrainManager::OnAfterDeserialize(IGraphicsProvider* provider)
     m_provider = provider;
     if (asyncStreaming)
     {
-        UpdateStreaming(0, 0);
+        // The far-height grid may not be configured until after this component
+        // is deserialized. Defer the larger fallback ring until normal updates.
+        StreamCells(0, 0, loadedRadius);
         return;
     }
     if (farRadius <= loadedRadius)
@@ -2297,8 +2391,9 @@ void TerrainManager::FarPrepareLoop()
                 };
                 const auto setColor = [&](Mesh::Vertex& vertex, float height) {
                     float weights[TerrainHeightArchive::LayerCount];
-                    TerrainHeightArchive::BlendBaseLayers(height,
-                        TerrainHeightArchive::LayerForHeight(height), weights);
+                    TerrainHeightArchive::BlendHeightBands(height,
+                        task.palette.heightBoundaries,
+                        task.palette.heightBlendHalfWidth, weights);
                     glm::vec3 color(0.f);
                     for (int layer = 0;
                         layer < TerrainHeightArchive::LayerCount; ++layer)
@@ -2609,6 +2704,13 @@ void TerrainManager::FarPrepareLoop()
                     WriteFarTileCache(task.cachePath, task.fingerprint,
                         result.vertices, result.indices);
             }
+            if (!result.indices.empty())
+            {
+                result.bounds = Mesh::PrepareIndexedGeometry(
+                    result.vertices, result.indices);
+                if (!result.bounds)
+                    throw std::runtime_error("Invalid prepared far tile mesh");
+            }
             result.success = true;
         }
         catch (...)
@@ -2801,6 +2903,46 @@ size_t TerrainManager::GetBuiltFarTileCount() const
         [](const FarTile& tile) { return tile.built; });
 }
 
+bool TerrainManager::AreDesiredFarTilesBuilt() const
+{
+    return std::all_of(m_farTiles.begin(), m_farTiles.end(),
+        [](const FarTile& tile) { return !tile.desired || tile.built; });
+}
+
+size_t TerrainManager::CountVisibleCoverageGaps(int centerX, int centerY,
+    int radius) const
+{
+    size_t gaps = 0;
+    radius = std::clamp(radius, 0, 32);
+    for (int y = centerY - radius; y <= centerY + radius; ++y)
+        for (int x = centerX - radius; x <= centerX + radius; ++x)
+        {
+            if (!HasCell(x, y)) continue;
+            const Terrain* nearTerrain = GetLoadedCell(x, y);
+            if (nearTerrain && nearTerrain->Owner &&
+                nearTerrain->Owner->enabled)
+                if (const Mesh* mesh = nearTerrain->Owner->GetComponent<Mesh>();
+                    mesh && mesh->IsReady()) continue;
+            bool covered = false;
+            for (const FarTile& tile : m_farTiles)
+            {
+                if (!tile.object || !tile.object->enabled || !tile.mesh ||
+                    !tile.mesh->IsReady() || !tile.hasGeometry ||
+                    x < tile.startX || x >= tile.endX ||
+                    y < tile.startY || y >= tile.endY) continue;
+                if (tile.lodStride > 1)
+                { covered = true; break; }
+                const size_t index = static_cast<size_t>(y - tile.startY) *
+                    (tile.endX - tile.startX) + x - tile.startX;
+                if (index < tile.builtVisibility.size() &&
+                    tile.builtVisibility[index])
+                { covered = true; break; }
+            }
+            if (!covered) ++gaps;
+        }
+    return gaps;
+}
+
 size_t TerrainManager::GetPreparingFarTileCount() const
 {
     return std::count_if(m_farTiles.begin(), m_farTiles.end(),
@@ -2831,6 +2973,9 @@ size_t TerrainManager::GetVisibleFarTileVertexCount() const
 void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
     const Camera* camera, int viewportHeight, float aspect)
 {
+    using FarClock = std::chrono::steady_clock;
+    const auto profileStart = FarClock::now();
+    m_lastFarUpdateTiming = {};
     if (!Owner || !m_farEnabled || m_farHeights.empty()) return;
     auto* scene = Owner->GetScene();
     if (!scene) return;
@@ -2946,8 +3091,9 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
     const auto setColor = [&](Mesh::Vertex& vertex,
         float height) {
         float weights[TerrainHeightArchive::LayerCount];
-        TerrainHeightArchive::BlendBaseLayers(height,
-            TerrainHeightArchive::LayerForHeight(height), weights);
+        TerrainHeightArchive::BlendHeightBands(height,
+            m_farPalette.heightBoundaries,
+            m_farPalette.heightBlendHalfWidth, weights);
         glm::vec3 color(0.f);
         for (int layer = 0; layer < TerrainHeightArchive::LayerCount; ++layer)
             color += m_farPalette.farColors[layer] * weights[layer];
@@ -3244,8 +3390,13 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
     for (size_t index = 0; index < m_farTiles.size(); ++index)
     {
         auto& tile = m_farTiles[index];
+        if (!tile.desired) tile.requestedAt.reset();
         if (tile.desired && (needsRebuild(tile) ||
-            !tile.dirtyPatchIndices.empty())) pending.push_back(index);
+            !tile.dirtyPatchIndices.empty()))
+        {
+            if (!tile.requestedAt) tile.requestedAt = FarClock::now();
+            pending.push_back(index);
+        }
     }
     const auto tileDistance = [&](size_t index) {
         const FarTile& tile = m_farTiles[index];
@@ -3360,6 +3511,10 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
             ? configuredUploads - used : 0;
     }
     const size_t uploadLimit = std::max(urgentCount, ordinaryUploads);
+    const auto selectedAt = FarClock::now();
+    m_lastFarUpdateTiming.selectionMs =
+        std::chrono::duration<double, std::milli>(
+            selectedAt - profileStart).count();
     size_t uploadsThisUpdate = 0;
     size_t workedTiles = 0;
     const auto updateStart = std::chrono::steady_clock::now();
@@ -3449,7 +3604,13 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
                                         (static_cast<size_t>(row) * patchWidth +
                                             col) * 3 + channel];
                         }
-                    if (!tile.mesh->UpdateIndexedVertexRange(offset, changed))
+                    const auto patchUploadStart = FarClock::now();
+                    const bool patchUploaded =
+                        tile.mesh->UpdateIndexedVertexRange(offset, changed);
+                    m_lastFarUpdateTiming.uploadMs +=
+                        std::chrono::duration<double, std::milli>(
+                            FarClock::now() - patchUploadStart).count();
+                    if (!patchUploaded)
                     { canUpdate = false; break; }
                     ++m_farTileUploadCount;
                     m_farTileUploadedBytes += changed.size() * sizeof(Mesh::Vertex);
@@ -3521,6 +3682,7 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
         std::vector<uint32_t> indices;
         std::map<size_t, size_t> patchOffsets;
         std::vector<uint8_t> preparedVisibility;
+        std::optional<Mesh::IndexedGeometryBounds> preparedBounds;
         const bool asyncEligible = m_farHeightsSnapshot &&
             !exposesGap(pending[order]);
         bool asyncPrepared = false;
@@ -3540,8 +3702,10 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
                     indices = std::move(ready->indices);
                     patchOffsets = std::move(ready->patchVertexOffsets);
                     preparedVisibility = std::move(ready->builtVisibility);
+                    preparedBounds = ready->bounds;
                     cacheHit = ready->cacheHit;
                     m_farTileRebuildMilliseconds += ready->buildMilliseconds;
+                    m_lastFarUpdateTiming.workerBuildMs += ready->buildMilliseconds;
                     asyncPrepared = ready->success;
                     m_preparedFarTiles.erase(ready);
                     tile.preparing = false;
@@ -3641,6 +3805,7 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
                             std::lock_guard<std::mutex> lock(m_farPrepareMutex);
                             m_farPrepareQueue.push_back(std::move(task));
                         }
+                        ++m_lastFarUpdateTiming.queuedTiles;
                         tile.preparing = true;
                         m_farPrepareWake.notify_one();
                 }
@@ -3969,6 +4134,7 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
                 deferred.indices = std::move(indices);
                 deferred.patchVertexOffsets = std::move(patchOffsets);
                 deferred.builtVisibility = std::move(preparedVisibility);
+                deferred.bounds = preparedBounds;
                 std::lock_guard<std::mutex> lock(m_farPrepareMutex);
                 m_preparedFarTiles.push_back(std::move(deferred));
                 tile.preparing = true;
@@ -3976,6 +4142,7 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
             continue;
         }
         if (cacheHit) ++m_farTileCacheHits;
+        const auto uploadStart = FarClock::now();
         if (!tile.object)
         {
             tile.object = scene->AddObject("Distant terrain tile " +
@@ -3996,11 +4163,34 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
             tile.object->AddComponent<
                 TerrainBatchAppearance>()->distantVisual = true;
         }
-        if (!tile.mesh->SetIndexedGeometry(
-            std::move(vertices), std::move(indices)))
+        const auto objectReady = FarClock::now();
+        const bool installed = asyncPrepared && preparedBounds
+            ? tile.mesh->SetPreparedIndexedGeometry(
+                std::move(vertices), std::move(indices), *preparedBounds)
+            : tile.mesh->SetIndexedGeometry(
+                std::move(vertices), std::move(indices));
+        if (!installed)
             throw std::runtime_error("Could not build distant terrain tile");
+        const auto& meshTiming = tile.mesh->GetLastIndexedGeometryTiming();
+        m_lastFarUpdateTiming.meshValidationMs += meshTiming.validationMs;
+        m_lastFarUpdateTiming.meshBoundsMs += meshTiming.boundsMs;
+        m_lastFarUpdateTiming.meshBufferMs += meshTiming.bufferMs;
+        const auto meshReady = FarClock::now();
         if (auto* provider = scene->GetGraphicsProvider())
             if (!tile.mesh->IsReady()) tile.mesh->OnAfterDeserialize(provider);
+        const auto graphicsReady = FarClock::now();
+        m_lastFarUpdateTiming.objectSetupMs +=
+            std::chrono::duration<double, std::milli>(
+                objectReady - uploadStart).count();
+        m_lastFarUpdateTiming.meshInstallMs +=
+            std::chrono::duration<double, std::milli>(
+                meshReady - objectReady).count();
+        m_lastFarUpdateTiming.graphicsInitMs +=
+            std::chrono::duration<double, std::milli>(
+                graphicsReady - meshReady).count();
+        m_lastFarUpdateTiming.uploadMs +=
+            std::chrono::duration<double, std::milli>(
+                graphicsReady - uploadStart).count();
         tile.object->enabled = true;
         tile.hasGeometry = true;
         tile.built = true;
@@ -4016,6 +4206,12 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
         m_farTileRebuildMilliseconds += std::chrono::duration<double,
             std::milli>(std::chrono::steady_clock::now() - rebuildStart).count();
     }
+    const auto preparedAt = FarClock::now();
+    const double loopMs = std::chrono::duration<double, std::milli>(
+        preparedAt - selectedAt).count();
+    m_lastFarUpdateTiming.preparationMs = std::max(0.0,
+        loopMs - m_lastFarUpdateTiming.uploadMs);
+    m_lastFarUpdateTiming.uploadedTiles = uploadsThisUpdate;
     // Switch every level atomically. A coarse tile stays visible until all
     // descendants covering its area have their replacement geometry ready.
     std::function<void(size_t)> hideBranch = [&](size_t index) {
@@ -4034,7 +4230,8 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
             tile.dirtyPatchIndices.empty() && !needsRebuild(tile);
         if (tile.children.empty())
         {
-            if (tile.object) tile.object->enabled = ready;
+            if (tile.object) tile.object->enabled =
+                ready || tile.hasGeometry;
             return ready;
         }
         if (tile.desired && ready)
@@ -4062,10 +4259,24 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
     for (size_t index = 0; index < m_farTiles.size(); ++index)
         if (m_farTiles[index].parentIndex == static_cast<size_t>(-1))
             showBranch(index);
-    // Keep only the active representation resident. The other level can be
-    // reloaded from its versioned cache when the camera requests it again.
+    const auto visibleAt = FarClock::now();
     for (auto& tile : m_farTiles)
-        if (tile.object && !tile.object->enabled && !tile.desired)
+        if (tile.requestedAt && tile.desired && tile.object &&
+            tile.object->enabled && tile.mesh && tile.mesh->IsReady() &&
+            tile.hasGeometry && !needsRebuild(tile))
+        {
+            m_lastFarUpdateTiming.maxAppearanceLatencyMs = std::max(
+                m_lastFarUpdateTiming.maxAppearanceLatencyMs,
+                std::chrono::duration<double, std::milli>(
+                    visibleAt - *tile.requestedAt).count());
+            ++m_lastFarUpdateTiming.appearedTiles;
+            tile.requestedAt.reset();
+        }
+    // Keep coarse parents in range as fallback coverage while detailed tiles
+    // rebuild when the near-cell window crosses their children.
+    for (auto& tile : m_farTiles)
+        if (tile.object && !tile.object->enabled && !tile.desired &&
+            (tile.lodStride == 1 || tile.outOfRange))
         {
             scene->RemoveObject(tile.object);
             tile.object = nullptr;
@@ -4076,6 +4287,13 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
             tile.builtVisibility.clear();
         }
     if (scene->HasStarted()) m_farFrameUploads += uploadsThisUpdate;
+    const auto finishedAt = FarClock::now();
+    m_lastFarUpdateTiming.visibilityMs =
+        std::chrono::duration<double, std::milli>(
+            finishedAt - preparedAt).count();
+    m_lastFarUpdateTiming.totalMs =
+        std::chrono::duration<double, std::milli>(
+            finishedAt - profileStart).count();
 }
 
 }

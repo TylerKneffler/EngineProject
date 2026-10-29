@@ -272,6 +272,19 @@ public:
     {
         return m_shadowDebugSnapshot;
     }
+    struct ShadowCpuTiming
+    {
+        double scenePreparationMs = 0;
+        double cascadeCullingMs = 0;
+        double recordUploadMs = 0;
+        double drawSubmissionMs = 0;
+        double portalMs = 0;
+        double totalMs = 0;
+    };
+    const ShadowCpuTiming& GetLastShadowCpuTiming() const
+    {
+        return m_lastShadowCpuTiming;
+    }
     void SetSelectedObject(Object* obj) { m_selectedObject = obj; }
     Object* GetSelectedObject() const { return m_selectedObject; }
     void SetEditorSelectedMesh(Engine::Components::Mesh* mesh)
@@ -678,6 +691,7 @@ private:
     uint32_t m_lastParticlePortalDrawCount = 0;
     uint32_t m_lastSkinnedObjectCount = 0;
     ShadowDebugSnapshot m_shadowDebugSnapshot;
+    ShadowCpuTiming m_lastShadowCpuTiming{};
     bool m_renderFramePrepared = false;
 
     // ---- Object list ----

@@ -2,6 +2,10 @@
 #include "PerformanceRecording.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 #include "Core/Scene/Scene.h"
+#include "Core/Renderers/IEditorRenderer.h"
+#include "Core/Renderers/DX11/DX11EditorRenderer.h"
+#include "Core/Physics/Adapters/BulletPhysicsAdapter.h"
+#include "Engine/Editor/Diagnostics/EditorFrameProfiler.h"
 #include <pdh.h>
 #include <pdhmsg.h>
 #include <psapi.h>
@@ -315,24 +319,192 @@ private:
 
 PerformanceView::PerformanceView(Engine::Scene::Scene* scene,
     std::shared_ptr<PerformanceRecording> recording)
-    : m_sampler(std::make_unique<Sampler>()), m_scene(scene),
-      m_recording(std::move(recording))
+    : m_scene(scene), m_recording(std::move(recording))
 {
     SetCursorBehaviorOnFocus(CursorBehaviorOnFocus::Visible);
-    m_hardware = m_sampler->Hardware();
+    m_samplerWorker = std::thread([this] {
+        Sampler sampler;
+        {
+            std::lock_guard lock(m_samplerMutex);
+            m_pendingHardware = sampler.Hardware();
+        }
+        for (;;)
+        {
+            std::unique_lock lock(m_samplerMutex);
+            m_samplerWake.wait(lock, [this] {
+                return m_stopSampler || m_samplerActive;
+            });
+            if (m_stopSampler) break;
+            lock.unlock();
+            const auto started = std::chrono::steady_clock::now();
+            auto snapshot = sampler.Sample();
+            const double sampleMs = std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - started).count();
+            lock.lock();
+            if (m_stopSampler) break;
+            m_pendingSnapshot = std::move(snapshot);
+            m_pendingCounterSampleMs = sampleMs;
+            ++m_samplerVersion;
+            if (m_samplerWake.wait_for(lock, std::chrono::milliseconds(500),
+                [this] { return m_stopSampler || !m_samplerActive; }) &&
+                m_stopSampler) break;
+        }
+    });
 }
 
 PerformanceView::~PerformanceView()
 {
     StopRecording();
+    {
+        std::lock_guard lock(m_samplerMutex);
+        m_stopSampler = true;
+    }
+    m_samplerWake.notify_one();
+    if (m_samplerWorker.joinable()) m_samplerWorker.join();
+}
+
+void PerformanceView::SetFrameTimings(const EditorFrameProfileSample& sample,
+    Renderers::IEditorRenderer* renderer)
+{
+    const auto ms = [](auto begin, auto end) {
+        return std::chrono::duration<double, std::milli>(end - begin).count();
+    };
+    m_hasFrameTimings = true;
+    m_frameTimings = {
+        { "Frame", ms(sample.frameBegin, sample.afterPendingLoad) },
+        { "Pacing", ms(sample.frameBegin, sample.afterPacing) },
+        { "Background", ms(sample.afterPacing, sample.afterBackground) },
+        { "Scene update", ms(sample.afterBackground, sample.afterSceneUpdate) },
+        { "Render", ms(sample.afterSceneUpdate, sample.afterRender) },
+        { "Pending load", ms(sample.afterRender, sample.afterPendingLoad) }
+    };
+    m_updateTimings.clear();
+    if (m_scene && sample.playing)
+    {
+        const auto& update = m_scene->GetLastUpdateTimings();
+        m_updateTimings = {
+            { "Objects", update.objectsMs }, { "Pose", update.poseMs },
+            { "Physics", update.physicsMs },
+            { "Post physics", update.postPhysicsMs }
+        };
+        if (auto* bullet = dynamic_cast<Physics::BulletPhysicsAdapter*>(
+            &m_scene->GetPhysics().GetAdapter()))
+        {
+            const auto physics = bullet->GetLastStepTimings();
+            m_updateTimings.push_back({ "Physics setup", physics.setupMs });
+            m_updateTimings.push_back({ "Physics simulation", physics.simulationMs });
+            m_updateTimings.push_back({ "Physics post", physics.postMs });
+        }
+    }
+    m_renderTimings = {
+        { "Prepare", sample.prepareMilliseconds },
+        { "Render entry", sample.renderEntryMilliseconds },
+        { "Clear", sample.clearMilliseconds },
+        { "Scene preparation", sample.scenePrepareMilliseconds },
+        { "Views", sample.viewMilliseconds },
+        { "Shadow draw submission", sample.shadowSubmitMilliseconds },
+        { "Main draw submission", sample.mainSubmitMilliseconds },
+        { "Editor UI", sample.editorUiMilliseconds }
+    };
+    if (auto* dx11 = dynamic_cast<Renderers::DX11EditorRenderer*>(renderer))
+    {
+        m_renderTimings.push_back({ "Render setup", dx11->GetLastRenderSetupMilliseconds() });
+        m_renderTimings.push_back({ "Begin UI", dx11->GetLastBeginUiMilliseconds() });
+        m_renderTimings.push_back({ "UI render", dx11->GetLastUiRenderMilliseconds() });
+        m_renderTimings.push_back({ "Present", dx11->GetLastPresentMilliseconds() });
+    }
+    m_gpuTimings.clear();
+    m_gpuQueryTimings.clear();
+    m_gpuTimingsValid = false;
+    if (renderer && renderer->GetGraphicsProvider())
+        if (auto* factory = renderer->GetGraphicsProvider()->GetContextFactory())
+        {
+            const auto timing = factory->GetFrameTimingTelemetry();
+            m_gpuQueryTimings = {
+                { "Query resolve (CPU)", timing.cpuGpuQueryResolveMilliseconds },
+                { "Query begin (CPU)", timing.cpuGpuQueryBeginMilliseconds },
+                { "GPU submission (CPU)", timing.cpuSubmissionMilliseconds },
+                { "GPU presentation (CPU)", timing.cpuPresentationMilliseconds }
+            };
+            m_gpuTimingsValid = timing.gpuTimingsValid;
+            if (m_gpuTimingsValid)
+            {
+                using Stage = Graphics::GpuTimingStage;
+                m_gpuTimings = {
+                    { "Shadow", timing.gpuMilliseconds[static_cast<size_t>(Stage::Shadow)] },
+                    { "Terrain", timing.gpuMilliseconds[static_cast<size_t>(Stage::Terrain)] },
+                    { "Portal", timing.gpuMilliseconds[static_cast<size_t>(Stage::Portal)] },
+                    { "Opaque", timing.gpuMilliseconds[static_cast<size_t>(Stage::Opaque)] },
+                    { "Transparent", timing.gpuMilliseconds[static_cast<size_t>(Stage::Transparent)] }
+                };
+            }
+        }
+}
+
+void PerformanceView::DrawTimings(IEditorUi& ui)
+{
+    ui.ValueLabel("Performance panel (previous draw)",
+        (std::to_string(m_lastPanelDrawMs) + " ms").c_str());
+    ui.ValueLabel("Hardware counters (background)",
+        (std::to_string(m_lastCounterSampleMs) + " ms").c_str());
+    ui.Separator();
+    if (!m_hasFrameTimings)
+    {
+        ui.DisabledLabel("Waiting for a frame sample.");
+        return;
+    }
+    const auto drawGroup = [&](const char* title,
+        const std::vector<TimingValue>& values) {
+        ui.Label(title);
+        for (const auto& value : values)
+        {
+            std::ostringstream formatted;
+            formatted << std::fixed << std::setprecision(2)
+                << value.milliseconds << " ms";
+            ui.ValueLabel(value.label, formatted.str().c_str());
+        }
+        ui.Separator();
+    };
+    drawGroup("Frame phases (CPU)", m_frameTimings);
+    if (!m_updateTimings.empty())
+        drawGroup("Scene update (CPU)", m_updateTimings);
+    drawGroup("Draw and render (CPU)", m_renderTimings);
+    if (m_scene)
+    {
+        const auto& prepare = m_scene->GetLastPrepareTimings();
+        drawGroup("Scene preparation (CPU)", {
+            { "Lookup", prepare.lookupMs }, { "Items", prepare.itemsMs },
+            { "Bone upload", prepare.boneUploadMs },
+            { "Capacity", prepare.capacityMs }
+        });
+        const auto& shadow = m_scene->GetLastShadowCpuTiming();
+        drawGroup("Shadows (CPU)", {
+            { "Total", shadow.totalMs },
+            { "Scene preparation", shadow.scenePreparationMs },
+            { "Cascade culling", shadow.cascadeCullingMs },
+            { "Record upload", shadow.recordUploadMs },
+            { "Draw submission", shadow.drawSubmissionMs },
+            { "Portals", shadow.portalMs }
+        });
+    }
+    if (m_gpuTimingsValid)
+        drawGroup("GPU stages (latest resolved sample)", m_gpuTimings);
+    else
+        ui.DisabledLabel("GPU stage timings are waiting for a resolved sample.");
+    if (!m_gpuQueryTimings.empty())
+        drawGroup("GPU work (CPU)", m_gpuQueryTimings);
 }
 
 void PerformanceView::Refresh(float frameRate)
 {
-    const auto now = std::chrono::steady_clock::now();
-    if (now < m_nextSample) return;
-    m_nextSample = now + std::chrono::milliseconds(500);
-    m_snapshot = m_sampler->Sample();
+    {
+        std::lock_guard lock(m_samplerMutex);
+        if (m_appliedSamplerVersion == m_samplerVersion) return;
+        m_snapshot = m_pendingSnapshot;
+        m_hardware = m_pendingHardware;
+        m_lastCounterSampleMs = m_pendingCounterSampleMs;
+        m_appliedSamplerVersion = m_samplerVersion;
+    }
     RecordSnapshot(frameRate);
     PushHistory(m_cpuHistory, std::min(100.f,
         m_snapshot.cpuUser + m_snapshot.cpuKernel));
@@ -387,7 +559,7 @@ void PerformanceView::StartRecording()
             << m_hardware.sharedVideoMemory
             << "; GPU engine order: 3D, compute, copy, video decode, video encode";
         m_recording->Event("recorder", "info", hardware.str());
-        m_nextSample = {};
+        m_appliedSamplerVersion = 0;
         m_lastFrame = {};
     }
     catch (const std::exception& error)
@@ -410,6 +582,7 @@ void PerformanceView::RecordSnapshot(float frameRate)
     out << std::fixed << std::setprecision(3)
         << "\"fps\":" << frameRate << ",\"frame_ms\":"
         << (frameRate > 0.f ? 1000.f / frameRate : 0.f)
+        << ",\"counter_sample_ms\":" << m_lastCounterSampleMs
         << ",\"cpu_user_pct\":" << m_snapshot.cpuUser
         << ",\"cpu_kernel_pct\":" << m_snapshot.cpuKernel
         << ",\"memory_total_bytes\":" << m_snapshot.memoryTotal
@@ -516,7 +689,7 @@ void PerformanceView::DrawOverview(IEditorUi& ui, float frameRate)
     std::ostringstream frame;
     frame << std::fixed << std::setprecision(1) << frameRate << " FPS  |  "
         << (frameRate > 0.f ? 1000.f / frameRate : 0.f) << " ms";
-    ui.ValueLabel("Frame", frame.str().c_str());
+    ui.ValueLabel("Editor frames", frame.str().c_str());
     if (m_visualMode == 2 || m_visualMode == 3)
     {
         std::vector<float> frames(m_frameHistory.begin(), m_frameHistory.end());
@@ -766,18 +939,50 @@ void PerformanceView::DrawShadows(IEditorUi& ui)
 
 void PerformanceView::DrawPanel(IEditorUi& ui)
 {
-    const float frameRate = ui.FrameRate();
+    const auto drawStart = std::chrono::steady_clock::now();
+    const float uiFrameRate = ui.FrameRate();
     const auto now = std::chrono::steady_clock::now();
     const double elapsedMs = m_lastFrame.time_since_epoch().count()
         ? std::chrono::duration<double, std::milli>(now - m_lastFrame).count()
         : 0.0;
     m_lastFrame = now;
-    Refresh(frameRate);
-    if (m_recording && elapsedMs > 0.0)
-        m_recording->Frame(frameRate, elapsedMs);
+    if (elapsedMs > 0.0)
+    {
+        m_recentFrameMs.push_back(elapsedMs);
+        m_recentFrameTotalMs += elapsedMs;
+        while (m_recentFrameMs.size() > 1 &&
+            (m_recentFrameTotalMs > 500.0 || m_recentFrameMs.size() > 30))
+        {
+            m_recentFrameTotalMs -= m_recentFrameMs.front();
+            m_recentFrameMs.pop_front();
+        }
+        m_displayFrameRate = static_cast<float>(
+            1000.0 * m_recentFrameMs.size() / m_recentFrameTotalMs);
+    }
+    const float frameRate = m_displayFrameRate;
+    const auto finishDraw = [&] {
+        m_lastPanelDrawMs = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - drawStart).count();
+        if (m_recording && elapsedMs > 0.0)
+            m_recording->Frame(uiFrameRate, elapsedMs, m_lastPanelDrawMs);
+    };
+    const bool sampleActive = m_open ||
+        (m_recording && m_recording->IsRecording());
+    bool wakeSampler = false;
+    {
+        std::lock_guard lock(m_samplerMutex);
+        if (m_samplerActive != sampleActive)
+        {
+            m_samplerActive = sampleActive;
+            wakeSampler = true;
+        }
+    }
+    if (wakeSampler) m_samplerWake.notify_one();
+    if (sampleActive) Refresh(frameRate);
     if (!ui.BeginWindow(m_title.c_str(), &m_open))
     {
         ui.EndWindow();
+        finishDraw();
         return;
     }
     DrawRecording(ui);
@@ -786,6 +991,11 @@ void PerformanceView::DrawPanel(IEditorUi& ui)
         if (ui.BeginTab("Overview"))
         {
             DrawOverview(ui, frameRate);
+            ui.EndTab();
+        }
+        if (ui.BeginTab("Timings"))
+        {
+            DrawTimings(ui);
             ui.EndTab();
         }
         if (ui.BeginTab("Logical cores"))
@@ -806,5 +1016,6 @@ void PerformanceView::DrawPanel(IEditorUi& ui)
         ui.EndTabBar();
     }
     ui.EndWindow();
+    finishDraw();
 }
 }

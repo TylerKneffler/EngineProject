@@ -151,7 +151,8 @@ void PerformanceRecording::Sample(const std::string& jsonFields)
         << "\"," << jsonFields << "}\n";
 }
 
-void PerformanceRecording::Frame(float reportedFrameRate, double elapsedMs)
+void PerformanceRecording::Frame(float reportedFrameRate, double elapsedMs,
+    double panelDrawMs)
 {
     std::lock_guard lock(m_mutex);
     if (!m_file.is_open()) return;
@@ -159,6 +160,7 @@ void PerformanceRecording::Frame(float reportedFrameRate, double elapsedMs)
         << "\",\"fps\":" << std::fixed << std::setprecision(3)
         << (elapsedMs > 0.0 ? 1000.0 / elapsedMs : 0.0)
         << ",\"frame_ms\":" << elapsedMs
-        << ",\"ui_fps\":" << reportedFrameRate << "}\n";
+        << ",\"ui_fps\":" << reportedFrameRate
+        << ",\"panel_draw_ms\":" << panelDrawMs << "}\n";
 }
 }

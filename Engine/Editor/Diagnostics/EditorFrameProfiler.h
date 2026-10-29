@@ -27,6 +27,9 @@ namespace Engine::Editor
         uint32_t renderedViews = 0;
         uint32_t renderedSceneViews = 0;
         uint32_t renderedGameViews = 0;
+        uint64_t renderedViewPixels = 0;
+        uint32_t gameViewWidth = 0;
+        uint32_t gameViewHeight = 0;
         uint32_t submittedShadowDraws = 0;
     };
 
@@ -34,7 +37,7 @@ namespace Engine::Editor
     {
     public:
         EditorFrameProfiler(Scene::Scene* scene, Renderers::IEditorRenderer* renderer,
-            bool autoProfileMmdPlay);
+            bool autoProfilePlay);
         explicit operator bool() const { return output_.is_open(); }
         void Record(const EditorFrameProfileSample& sample, Scene::Scene* scene,
             Renderers::IEditorRenderer* renderer);

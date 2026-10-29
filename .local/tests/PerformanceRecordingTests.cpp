@@ -13,7 +13,7 @@ int main()
     Engine::Editor::PerformanceRecording recording;
     if (!recording.Start(path)) throw std::runtime_error("recording did not start");
     recording.Event("console", "Error", "quoted \"message\"\nnext line");
-    recording.Frame(120.f, 8.5);
+    recording.Frame(120.f, 8.5, 1.25);
     recording.Sample("\"cpu_user_pct\":25,\"gpu_engines_pct\":[12,0,0,0,0]");
     std::cout << "engine stdout line\n";
     std::cerr << "engine stderr line\n";
@@ -25,6 +25,7 @@ int main()
     input.close();
     for (const char* expected : { "quoted \\\"message\\\"\\nnext line",
         "\"type\":\"frame\"", "\"frame_ms\":8.500",
+        "\"panel_draw_ms\":1.250",
         "\"cpu_user_pct\":25", "engine stdout line",
         "engine stderr line" })
         if (contents.find(expected) == std::string::npos)

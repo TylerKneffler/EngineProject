@@ -1,5 +1,6 @@
 #include "Scripts/TerrainGen/TerrainStreamingCameraDriver.h"
 #include "Scripts/TerrainGen/TerrainGen.h"
+#include "Scripts/TerrainPerformance/TerrainPerformanceDriver.h"
 
 #include "Core/Compoonents/Obj/TerrainManager.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
@@ -135,7 +136,37 @@ void TerrainStreamingCameraDriver::Update()
         else if (auto* manager = terrainObject->GetComponent<
             Engine::Components::TerrainManager>())
         {
-            if (manager->GetLoadedCellCount() == 0u)
+            const auto* mapDriver = terrainObject->GetComponent<
+                TerrainPerformanceDriver>();
+            const double spanX = manager->cellsX * manager->cellWidth;
+            const double spanZ = manager->cellsY * manager->cellDepth;
+            if ((mapDriver && !mapDriver->IsInitialMapDataReady()) ||
+                spanX <= 0.0 || spanZ <= 0.0)
+            {
+                holdAtStart();
+                return;
+            }
+            const glm::dvec3 local = glm::dvec3(
+                glm::inverse(terrainObject->transform.GetWorldMatrixD()) *
+                glm::dvec4(glm::dvec3(startPosition), 1.0));
+            if (!std::isfinite(local.x) || !std::isfinite(local.z))
+            {
+                holdAtStart();
+                return;
+            }
+            const int centerX = static_cast<int>(std::floor(local.x / spanX));
+            const int centerY = static_cast<int>(std::floor(local.z / spanZ));
+            const int radius = std::clamp(manager->loadedRadius, 0, 32);
+            bool initialCellsReady = manager->HasCell(centerX, centerY);
+            for (int y = centerY - radius; initialCellsReady &&
+                y <= centerY + radius; ++y)
+                for (int x = centerX - radius; x <= centerX + radius; ++x)
+                    if (manager->HasCell(x, y) && !manager->GetLoadedCell(x, y))
+                    {
+                        initialCellsReady = false;
+                        break;
+                    }
+            if (!initialCellsReady)
             {
                 holdAtStart();
                 return;

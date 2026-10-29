@@ -10,6 +10,7 @@
 #include "Engine/Editor/Core/View/Views/PropertiesView.h"
 #include "Engine/Editor/Core/View/Views/SceneView.h"
 #include "Engine/Editor/Core/View/Views/AssetsExplorerView.h"
+#include "Engine/Editor/Core/View/Views/PerformanceView.h"
 #include "Core/Component.h"
 #include "imgui.h"
 #include "imgui_internal.h"
@@ -73,6 +74,27 @@ struct ToolbarLayout
 };
 
 ToolbarLayout g_toolbarLayout;
+
+struct PanelVisibility
+{
+    bool performanceOpen = false;
+    bool performanceSaved = false;
+};
+
+PanelVisibility g_panelVisibility;
+
+void SavePanelVisibility(bool open)
+{
+    if (g_panelVisibility.performanceOpen == open &&
+        g_panelVisibility.performanceSaved)
+        return;
+    g_panelVisibility.performanceOpen = open;
+    g_panelVisibility.performanceSaved = true;
+    ImGui::MarkIniSettingsDirty();
+    // Debugger Stop can terminate the process before ImGui's periodic save.
+    if (const char* path = ImGui::GetIO().IniFilename; path && path[0])
+        ImGui::SaveIniSettingsToDisk(path);
+}
 
 void* ToolbarSettingsReadOpen(ImGuiContext*, ImGuiSettingsHandler* handler,
     const char* name)
@@ -225,6 +247,40 @@ void ImGuiPanelHost::RegisterToolbarSettings()
     handler.ReadLineFn = ToolbarSettingsReadLine;
     handler.WriteAllFn = ToolbarSettingsWriteAll;
     ImGui::AddSettingsHandler(&handler);
+
+    if (!ImGui::FindSettingsHandler("EditorPanels"))
+    {
+        g_panelVisibility = {};
+        ImGuiSettingsHandler panels;
+        panels.TypeName = "EditorPanels";
+        panels.TypeHash = ImHashStr(panels.TypeName);
+        panels.UserData = &g_panelVisibility;
+        panels.ReadInitFn = [](ImGuiContext*, ImGuiSettingsHandler* settings)
+        { *static_cast<PanelVisibility*>(settings->UserData) = {}; };
+        panels.ReadOpenFn = [](ImGuiContext*, ImGuiSettingsHandler* settings,
+            const char* name) -> void*
+        { return std::strcmp(name, "Visibility") == 0 ? settings->UserData : nullptr; };
+        panels.ReadLineFn = [](ImGuiContext*, ImGuiSettingsHandler*, void* entry,
+            const char* line)
+        {
+            int value = -1;
+            if (sscanf_s(line, "Performance=%d", &value) == 1 &&
+                (value == 0 || value == 1))
+            {
+                auto& visibility = *static_cast<PanelVisibility*>(entry);
+                visibility.performanceOpen = value != 0;
+                visibility.performanceSaved = true;
+            }
+        };
+        panels.WriteAllFn = [](ImGuiContext*, ImGuiSettingsHandler* settings,
+            ImGuiTextBuffer* output)
+        {
+            const auto& visibility = *static_cast<PanelVisibility*>(settings->UserData);
+            output->appendf("[EditorPanels][Visibility]\nPerformance=%d\n\n",
+                visibility.performanceOpen);
+        };
+        ImGui::AddSettingsHandler(&panels);
+    }
 }
 
 void ImGuiPanelHost::ReserveToolbar(EditorState& state)
@@ -796,6 +852,19 @@ void ImGuiPanelHost::DrawPanels(EditorState& state)
 {
     state.UpdateAnimationPlayback(ImGui::GetIO().DeltaTime);
     auto& panels = state.GetPanels();
+    bool hasPerformance = false;
+    for (const auto& panel : panels)
+        hasPerformance |= dynamic_cast<PerformanceView*>(panel.get()) != nullptr;
+
+    // Older layouts saved the window position but had no panel visibility entry.
+    if (!g_panelVisibility.performanceSaved &&
+        ImGui::FindWindowSettingsByID(ImHashStr("Performance")))
+        SavePanelVisibility(true);
+    if (g_panelVisibility.performanceOpen && !hasPerformance)
+        if (ViewFactory* factory = state.GetViewFactory())
+            if (auto performance = factory->Create("Performance"))
+                panels.push_back(std::move(performance));
+
     for (auto& panel : panels)
         if (panel)
         {
@@ -807,6 +876,8 @@ void ImGuiPanelHost::DrawPanels(EditorState& state)
                 m_ui.DockWindowToArea(panel->GetTitle().c_str(),
                     panel->GetDefaultDockArea());
             panel->DrawPanel(m_ui);
+            if (dynamic_cast<PerformanceView*>(panel.get()))
+                SavePanelVisibility(panel->IsOpen());
             if (compactTree)
                 PopCompactPanelStyle(true);
         }

@@ -121,6 +121,7 @@ private:
     // Computed viewport aspect ratio
     float m_aspect = 1.0f;
     Engine::Core::Object* m_prefabPreview = nullptr;
+    Engine::Core::Object* m_previousSelectedObject = nullptr;
     std::string m_prefabPreviewPath;
     bool m_prefabPreviewHasPlacement = false;
     bool m_focusOnNextDraw = false;

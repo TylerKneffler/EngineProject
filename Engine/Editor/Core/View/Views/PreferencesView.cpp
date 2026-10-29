@@ -1196,42 +1196,57 @@ void PreferencesView::DrawRenderingSection(IEditorUi& ui)
     ui.Separator();
     ui.Label("Realtime Shadows");
     auto& shadows = m_settings.realtimeShadows;
-    if (ui.Checkbox("Enable Realtime Shadows", &shadows.enabled))
+    const char* shadowQualities[] = {
+        "Custom", "Off", "Low", "Medium", "High", "Ultra" };
+    int shadowQuality = static_cast<int>(shadows.quality);
+    if (ui.Combo("Shadow Quality", &shadowQuality, shadowQualities, 6))
+    {
+        Engine::Model::ApplyShadowQualityPreset(shadows,
+            static_cast<Engine::Model::ShadowQualityPreset>(
+                std::clamp(shadowQuality, 0, 5)));
         NotifyChanged();
+    }
+    ui.Tooltip("Low uses one short-range cascade; Medium uses two; High and Ultra use four. Custom keeps the controls below.");
+    const auto shadowEdited = [&] {
+        shadows.quality = Engine::Model::ShadowQualityPreset::Custom;
+        NotifyChanged();
+    };
+    if (ui.Checkbox("Enable Realtime Shadows", &shadows.enabled))
+        shadowEdited();
     if (ui.InputUInt("Directional Shadow Light Budget", &shadows.maximumShadowedLights))
     {
         shadows.maximumShadowedLights = std::clamp<uint32_t>(
             shadows.maximumShadowedLights, 0u, 1u);
-        NotifyChanged();
+        shadowEdited();
     }
     ui.Tooltip("Zero disables the directional shadow atlas; the current renderer supports one shadow-casting directional light.");
     if (ui.InputUInt("Directional Atlas Resolution", &shadows.directionalResolution))
     {
         shadows.directionalResolution = std::clamp<uint32_t>(
             shadows.directionalResolution, 256u, 8192u);
-        NotifyChanged();
+        shadowEdited();
     }
     if (ui.InputUInt("Directional Cascades", &shadows.directionalCascadeCount))
     {
         shadows.directionalCascadeCount = std::clamp<uint32_t>(
             shadows.directionalCascadeCount, 1u, 4u);
-        NotifyChanged();
+        shadowEdited();
     }
     if (ui.DragFloat("Directional Shadow Distance",
             &shadows.directionalDistance, 1.f, 1.f, 100000.f))
-        NotifyChanged();
+        shadowEdited();
     if (ui.InputUInt("Shadow PCF Radius", &shadows.pcfRadius))
     {
         shadows.pcfRadius = std::min<uint32_t>(shadows.pcfRadius, 4u);
-        NotifyChanged();
+        shadowEdited();
     }
     if (ui.SliderFloat("Cascade Split Distribution",
             &shadows.cascadeSplitLambda, 0.f, 1.f))
-        NotifyChanged();
+        shadowEdited();
     ui.Tooltip("Zero distributes cascades uniformly; one concentrates resolution near the camera.");
     if (ui.SliderFloat("Cascade Transition Width",
             &shadows.cascadeTransitionFraction, 0.f, 0.3f))
-        NotifyChanged();
+        shadowEdited();
     ui.Tooltip("Wider transitions hide seams but sample two cascades over a larger screen region.");
     const char* portalShadowPolicies[] = {
         "Reuse Main Atlas", "Budgeted View Atlases", "Atlas Per Portal View" };
@@ -1241,7 +1256,7 @@ void PreferencesView::DrawRenderingSection(IEditorUi& ui)
     {
         shadows.portalPolicy = static_cast<Engine::Model::PortalShadowPolicy>(
             std::clamp(portalShadowPolicy, 0, 2));
-        NotifyChanged();
+        shadowEdited();
     }
     if (shadows.portalPolicy != Engine::Model::PortalShadowPolicy::ReuseMain)
     {
@@ -1250,14 +1265,14 @@ void PreferencesView::DrawRenderingSection(IEditorUi& ui)
         {
             shadows.portalAtlasResolution = std::clamp<uint32_t>(
                 shadows.portalAtlasResolution, 256u, 4096u);
-            NotifyChanged();
+            shadowEdited();
         }
         if (ui.InputUInt("Portal Shadow Cascades",
             &shadows.portalCascadeCount))
         {
             shadows.portalCascadeCount = std::clamp<uint32_t>(
                 shadows.portalCascadeCount, 1u, 4u);
-            NotifyChanged();
+            shadowEdited();
         }
     }
     if (shadows.portalPolicy == Engine::Model::PortalShadowPolicy::Budgeted &&
@@ -1265,7 +1280,7 @@ void PreferencesView::DrawRenderingSection(IEditorUi& ui)
     {
         shadows.portalViewBudget = std::clamp<uint32_t>(
             shadows.portalViewBudget, 1u, 64u);
-        NotifyChanged();
+        shadowEdited();
     }
     if (shadows.portalPolicy == Engine::Model::PortalShadowPolicy::ReuseMain)
         ui.DisabledLabel("Lowest cost. Transformed or distant portal views may sample an inaccurate main-view atlas.");
@@ -1440,6 +1455,8 @@ bool PreferencesView::SaveSettings()
                 if (!shadowNode)
                     shadowNode = prop.append_child("RealtimeShadows");
                 shadowNode.remove_attributes();
+                shadowNode.append_attribute("Quality").set_value(
+                    static_cast<uint32_t>(m_settings.realtimeShadows.quality));
                 shadowNode.append_attribute("Enabled").set_value(
                     m_settings.realtimeShadows.enabled);
                 shadowNode.append_attribute("MaximumLights").set_value(

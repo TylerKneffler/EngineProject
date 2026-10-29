@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <optional>
 
 namespace Engine::Components
 {
@@ -96,6 +97,23 @@ public:
     // Portal cuts expand only their transient CPU snapshot.
     bool SetIndexedGeometry(std::vector<Vertex> vertices,
         std::vector<uint32_t> indices);
+    struct IndexedGeometryBounds
+    {
+        glm::vec3 minimum{}, maximum{};
+    };
+    static std::optional<IndexedGeometryBounds> PrepareIndexedGeometry(
+        const std::vector<Vertex>& vertices,
+        const std::vector<uint32_t>& indices);
+    bool SetPreparedIndexedGeometry(std::vector<Vertex> vertices,
+        std::vector<uint32_t> indices, IndexedGeometryBounds bounds);
+    struct IndexedGeometryTiming
+    {
+        double validationMs = 0.0;
+        double boundsMs = 0.0;
+        double bufferMs = 0.0;
+    };
+    const IndexedGeometryTiming& GetLastIndexedGeometryTiming() const
+    { return m_lastIndexedGeometryTiming; }
     // Transfers CPU vertices out of a procedural mesh that is about to be destroyed.
     std::vector<Vertex> TakeVertices();
     // Copies the runtime rendering context needed by a procedural mesh cut.
@@ -161,6 +179,7 @@ public:
     void        OnAfterDeserialize(IGraphicsProvider* graphicsProvider) override;
 
 private:
+    IndexedGeometryTiming m_lastIndexedGeometryTiming;
     void ObserveMorphWeights() const;
     void AdvanceMorphWeightsRevision() const;
     void CreateMorphBuffers();

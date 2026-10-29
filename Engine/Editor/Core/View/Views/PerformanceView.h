@@ -5,11 +5,16 @@
 #include <array>
 #include <chrono>
 #include <deque>
+#include <condition_variable>
+#include <mutex>
+#include <thread>
 
 namespace Engine::Scene { class Scene; }
+namespace Engine::Renderers { class IEditorRenderer; }
 
 namespace Engine::Editor
 {
+struct EditorFrameProfileSample;
 class PerformanceRecording;
 struct PerformanceCoreLoad
 {
@@ -53,6 +58,8 @@ public:
         std::shared_ptr<PerformanceRecording> recording = {});
     ~PerformanceView() override;
     void DrawPanel(IEditorUi& ui) override;
+    void SetFrameTimings(const EditorFrameProfileSample& sample,
+        Renderers::IEditorRenderer* renderer);
 
 private:
     class Sampler;
@@ -61,6 +68,7 @@ private:
     void DrawCoreGrid(IEditorUi& ui);
     void DrawHardware(IEditorUi& ui);
     void DrawShadows(IEditorUi& ui);
+    void DrawTimings(IEditorUi& ui);
     void DrawRecording(IEditorUi& ui);
     void RecordSnapshot(float frameRate);
     void StartRecording();
@@ -69,11 +77,24 @@ private:
         const EditorUiPercentageSegment* segments, size_t count,
         const std::deque<float>& history, EditorUiColor historyColor);
 
-    std::unique_ptr<Sampler> m_sampler;
+    std::thread m_samplerWorker;
+    std::mutex m_samplerMutex;
+    std::condition_variable m_samplerWake;
+    bool m_stopSampler = false;
+    bool m_samplerActive = true;
+    uint64_t m_samplerVersion = 0;
+    uint64_t m_appliedSamplerVersion = 0;
+    PerformanceSnapshot m_pendingSnapshot;
+    PerformanceHardware m_pendingHardware;
     PerformanceSnapshot m_snapshot;
     PerformanceHardware m_hardware;
-    std::chrono::steady_clock::time_point m_nextSample{};
     std::chrono::steady_clock::time_point m_lastFrame{};
+    std::deque<double> m_recentFrameMs;
+    double m_recentFrameTotalMs = 0.0;
+    float m_displayFrameRate = 0.f;
+    double m_lastPanelDrawMs = 0.0;
+    double m_lastCounterSampleMs = 0.0;
+    double m_pendingCounterSampleMs = 0.0;
     std::deque<float> m_cpuHistory;
     std::deque<float> m_memoryHistory;
     std::deque<float> m_gpuHistory;
@@ -84,5 +105,13 @@ private:
     std::shared_ptr<PerformanceRecording> m_recording;
     std::string m_recordingPath;
     std::string m_recordingError;
+    struct TimingValue { const char* label; double milliseconds; };
+    std::vector<TimingValue> m_frameTimings;
+    std::vector<TimingValue> m_updateTimings;
+    std::vector<TimingValue> m_renderTimings;
+    std::vector<TimingValue> m_gpuQueryTimings;
+    std::vector<TimingValue> m_gpuTimings;
+    bool m_gpuTimingsValid = false;
+    bool m_hasFrameTimings = false;
 };
 }

@@ -47,6 +47,9 @@ struct ObjectData
     float4 pmxToonTint;
     float4 pmxEdgeColor;
     float4 pmxParams;
+    uint4 terrainMapMasks;
+    float4 terrainLayerParams[6];
+    float4 terrainMacroColors[6];
 };
 
 #ifdef VULKAN
