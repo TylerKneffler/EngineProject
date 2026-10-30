@@ -3120,6 +3120,26 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     preparedDraws.reserve(renderObjects.size());
     std::shared_ptr<Engine::Components::Texture> measurementGridTexture;
     bool measurementGridReady = false;
+    bool hasSceneLightProbeContributors = false;
+    for (const FrameComponentLookup& lookup : m_frameComponentLookupScratch)
+    {
+        if (!lookup.object || !lookup.object->IsEnabledInHierarchy())
+            continue;
+        if (const auto* group = lookup.object->GetComponent<
+                Engine::Components::LightProbeGroup>();
+            group && group->valid)
+        {
+            hasSceneLightProbeContributors = true;
+            break;
+        }
+        if (const auto* probe = lookup.object->GetComponent<
+                Engine::Components::LightProbe>();
+            probe && probe->valid)
+        {
+            hasSceneLightProbeContributors = true;
+            break;
+        }
+    }
 
     UINT slot = 0;
     for (const ViewRenderItem& sortedItem : renderObjects)
@@ -3273,8 +3293,10 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         const bool usesLegacyProbeBake = bakedLighting && bakedLighting->valid &&
             bakedLighting->version < 3 && !(mesh&&mesh->useLightProbes);
         const bool usesInterpolatedProbes=mesh&&mesh->useLightProbes;
+        const bool evaluateProbeLighting = hasSceneLightProbeContributors &&
+            (usesInterpolatedProbes||!bakedLighting||!bakedLighting->valid);
         const Engine::Components::ProbeLightingSample probeLighting =
-            (usesInterpolatedProbes||!bakedLighting||!bakedLighting->valid)
+            evaluateProbeLighting
                 ? Engine::Components::SampleLightProbes(*this,
                     glm::vec3(renderItem->world[3]))
                 : Engine::Components::ProbeLightingSample{};

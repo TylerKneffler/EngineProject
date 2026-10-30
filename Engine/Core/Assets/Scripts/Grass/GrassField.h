@@ -5,9 +5,18 @@
 #include "Core/Compoonents/Obj/Mesh.h"
 #include <map>
 #include <array>
+#include <cstdint>
 #include <string>
 #include <utility>
 #include <vector>
+
+namespace Engine::Components
+{
+class Terrain;
+class TerrainObjectLayer;
+}
+
+namespace Engine::Scene { class Scene; }
 
 // First grass rendering slice: deterministic, near-viewer tile meshes made
 // from reusable blade patches. Tiles are CPU-batched to keep draw count low.
@@ -48,6 +57,7 @@ public:
     void Start() override;
     void Update() override;
     void OnDestroy() override;
+    bool RefreshEditorPreview();
 
 private:
     using Tile = std::pair<int, int>;
@@ -59,12 +69,40 @@ private:
         Engine::Core::Object* object = nullptr;
         int lod = 0;
         bool castsShadows = false;
+        uint64_t geometrySignature = 0;
+    };
+    struct PendingTileUpdate
+    {
+        int lod = 0;
+        bool castsShadows = false;
+        uint64_t geometrySignature = 0;
+        float distanceSquared = 0.f;
+        uint64_t refreshEpoch = 0;
     };
     std::map<Tile, TileState> m_tiles;
+    std::map<Tile, PendingTileUpdate> m_pendingTileUpdates;
     bool m_loaded = false;
+    bool m_authoredPreviewHidden = false;
+    uint64_t m_lastGenerationSignature = 0;
+    bool m_hasGenerationSignature = false;
+    uint64_t m_refreshEpoch = 0;
+    std::array<std::string, 3> m_loadedShortPaths;
+    std::array<std::string, 3> m_loadedTallPaths;
+    Engine::Core::Object* m_cachedViewer = nullptr;
+    Engine::Components::Terrain* m_cachedTerrain = nullptr;
+    Engine::Components::TerrainObjectLayer* m_cachedLayer = nullptr;
+    Engine::Scene::Scene* m_cachedScene = nullptr;
+    std::string m_cachedViewerName;
+    uint64_t m_cachedStructureRevision = 0;
 
     bool LoadSources();
-    void Refresh();
-    void BuildTile(Tile tile, int lod, bool castsTileShadows);
+    bool Refresh();
+    bool ResolveCachedReferences();
+    bool EnsureAuthoredPreviewHidden();
+    void ClearTiles();
+    bool BuildTile(Tile tile, int lod, bool castsTileShadows,
+        uint64_t geometrySignature);
+    uint64_t ComputeGenerationSignature() const;
+    uint64_t ComputeTileGeometrySignature(Tile tile) const;
     float SampleHeight(float localX, float localZ) const;
 };

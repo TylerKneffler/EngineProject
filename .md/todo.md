@@ -201,6 +201,31 @@ remain in the unchecked tasks below.
   performance targets. **Done when:** a saved scene reloads identically and
   the three renderers have no visible gaps or major performance regression.
 
+### Additional grass-scene performance bottlenecks (2026-10-30)
+
+- [x] Replace editor preview-per-placement objects with batched preview tiles.
+  The current authored preview path can create hundreds of separate scene
+  objects in edit mode. Reuse the runtime tile batching approach for editor
+  visualization so Scene View does not submit one draw/object per placement.
+  **Done when:** opening `grass_flat_test.scene` keeps editor FPS stable while
+  showing equivalent grass coverage.
+- [x] Stop grass tile destroy/recreate churn in `GrassField::Refresh`.
+  Keep persistent tile objects/meshes and update only tiles whose placement
+  payload or LOD mesh actually changed. Do not rebuild unchanged tiles each
+  update tick.
+  **Done when:** camera movement across the grass radius does not trigger
+  frequent object creation/removal spikes.
+- [x] Move grass tile mesh generation and GPU upload behind a strict frame
+  budget with deferred work queues.
+  Build/update only a bounded number of dirty tiles per frame and carry over
+  the rest. Prioritize nearest visible tiles first to avoid long editor stalls.
+  **Done when:** no single frame stalls due to mass tile rebuild/upload.
+- [x] Reduce per-frame `FindObjectByName` and scene-scan costs in grass update.
+  Cache viewer and terrain references with invalidation on scene structure
+  changes instead of resolving by name every frame.
+  **Done when:** grass steady-state update work stays near-constant with static
+  camera/object state.
+
 Research behind these tasks:
 
 - [Khronos glTF 2.0 material specification](https://github.com/KhronosGroup/glTF/blob/main/specification/2.0/Specification.adoc): masked alpha, cutoff, double-sided normals, and normal-map semantics for imported plant assets.

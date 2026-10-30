@@ -8,7 +8,9 @@
 #include "Core/Serialization/SceneSerializer.h"
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <exception>
 #include <random>
 #include <set>
@@ -31,6 +33,27 @@ uint32_t TileSeed(int seed, int x, int z)
     value = (value ^ (value >> 16u)) * 0xc2b2ae35u;
     value ^= static_cast<uint32_t>(z) * 0x27d4eb2fu;
     return value ^ (value >> 16u);
+}
+
+constexpr uint64_t HashOffset = 1469598103934665603ull;
+constexpr uint64_t HashPrime = 1099511628211ull;
+
+void HashBytes(uint64_t& hash, const void* bytes, size_t byteCount)
+{
+    const auto* source = static_cast<const unsigned char*>(bytes);
+    for (size_t index = 0; index < byteCount; ++index)
+    {
+        hash ^= static_cast<uint64_t>(source[index]);
+        hash *= HashPrime;
+    }
+}
+
+void HashFloat(uint64_t& hash, float value)
+{
+    uint32_t bits = 0;
+    static_assert(sizeof(bits) == sizeof(value), "float size mismatch");
+    std::memcpy(&bits, &value, sizeof(bits));
+    HashBytes(hash, &bits, sizeof(bits));
 }
 }
 
@@ -55,15 +78,18 @@ GrassField::GrassField()
 
 bool GrassField::LoadSources()
 {
-    if (m_loaded) return !m_shortVertices[0].empty() &&
-        !m_tallVertices[0].empty();
+    const std::array<std::string, 3> shortPaths{
+        shortMesh, shortMeshLod1, shortMeshLod2};
+    const std::array<std::string, 3> tallPaths{
+        tallMesh, tallMeshLod1, tallMeshLod2};
+    if (m_loaded && m_loadedShortPaths == shortPaths &&
+        m_loadedTallPaths == tallPaths)
+        return !m_shortVertices[0].empty() && !m_tallVertices[0].empty();
     m_loaded = true;
+    m_loadedShortPaths = shortPaths;
+    m_loadedTallPaths = tallPaths;
     try
     {
-        const std::array<std::string, 3> shortPaths{
-            shortMesh, shortMeshLod1, shortMeshLod2};
-        const std::array<std::string, 3> tallPaths{
-            tallMesh, tallMeshLod1, tallMeshLod2};
         for (int lod = 0; lod < 3; ++lod)
         {
             Engine::Components::Mesh shortSource, tallSource;
@@ -85,14 +111,86 @@ bool GrassField::LoadSources()
 
 void GrassField::Start()
 {
-    m_tiles.clear();
+    ClearTiles();
     m_loaded = false;
-    // The small authored preview stays visible in the editor, while runtime
-    // tiles replace it in play mode.
-    if (Owner)
-        for (auto* child : Owner->Children)
-            if (child && child->name == "Grass Preview") child->enabled = false;
-    LoadSources();
+    m_authoredPreviewHidden = false;
+    m_hasGenerationSignature = false;
+    m_cachedScene = nullptr;
+    m_cachedStructureRevision = 0;
+    m_cachedViewerName.clear();
+    m_cachedViewer = nullptr;
+    m_cachedTerrain = nullptr;
+    m_cachedLayer = nullptr;
+    EnsureAuthoredPreviewHidden();
+}
+
+void GrassField::ClearTiles()
+{
+    if (Owner && Owner->GetScene())
+        for (auto& entry : m_tiles)
+            if (entry.second.object)
+                Owner->GetScene()->RequestRemoveObject(entry.second.object);
+    m_tiles.clear();
+    m_pendingTileUpdates.clear();
+    m_cachedViewer = nullptr;
+    m_cachedTerrain = nullptr;
+    m_cachedLayer = nullptr;
+}
+
+bool GrassField::EnsureAuthoredPreviewHidden()
+{
+    if (m_authoredPreviewHidden || !Owner) return false;
+    bool changed = false;
+    for (auto* child : Owner->Children)
+    {
+        if (!child || child->name != "Grass Preview")
+            continue;
+        if (child->enabled)
+        {
+            child->enabled = false;
+            changed = true;
+        }
+    }
+    m_authoredPreviewHidden = true;
+    return changed;
+}
+
+bool GrassField::ResolveCachedReferences()
+{
+    if (!Owner)
+    {
+        m_cachedScene = nullptr;
+        m_cachedViewer = nullptr;
+        m_cachedTerrain = nullptr;
+        m_cachedLayer = nullptr;
+        m_cachedStructureRevision = 0;
+        return false;
+    }
+    auto* scene = Owner->GetScene();
+    if (!scene)
+    {
+        m_cachedScene = nullptr;
+        m_cachedViewer = nullptr;
+        m_cachedTerrain = nullptr;
+        m_cachedLayer = nullptr;
+        m_cachedStructureRevision = 0;
+        return false;
+    }
+    const uint64_t structureRevision = scene->GetStructureRevision();
+    const bool refreshPointers = m_cachedScene != scene ||
+        m_cachedStructureRevision != structureRevision ||
+        m_cachedViewerName != viewerObjectName ||
+        !m_cachedViewer || !m_cachedTerrain;
+    m_cachedScene = scene;
+    m_cachedLayer = Owner->GetComponent<Engine::Components::TerrainObjectLayer>();
+    if (refreshPointers)
+    {
+        m_cachedViewer = Owner->FindObjectInSceneByName(viewerObjectName);
+        m_cachedTerrain = Owner->GetComponentInParent<Engine::Components::Terrain>();
+        m_cachedViewerName = viewerObjectName;
+        m_cachedStructureRevision = structureRevision;
+    }
+    return m_cachedViewer && m_cachedTerrain;
 }
 
 float GrassField::SampleHeight(float x, float z) const
@@ -119,17 +217,88 @@ float GrassField::SampleHeight(float x, float z) const
     return a + (b - a) * (sz - z0);
 }
 
-void GrassField::BuildTile(Tile tile, int lod, bool castsTileShadows)
+uint64_t GrassField::ComputeGenerationSignature() const
 {
-    if (!Owner || !Owner->GetScene()) return;
+    uint64_t hash = HashOffset;
+    HashBytes(hash, shortMesh.data(), shortMesh.size());
+    HashBytes(hash, tallMesh.data(), tallMesh.size());
+    HashBytes(hash, shortMeshLod1.data(), shortMeshLod1.size());
+    HashBytes(hash, shortMeshLod2.data(), shortMeshLod2.size());
+    HashBytes(hash, tallMeshLod1.data(), tallMeshLod1.size());
+    HashBytes(hash, tallMeshLod2.data(), tallMeshLod2.size());
+    HashFloat(hash, visibleRadius);
+    HashFloat(hash, tileSize);
+    HashFloat(hash, shortPatchesPerSquareMeter);
+    HashFloat(hash, tallPatchesPerSquareMeter);
+    HashBytes(hash, &seed, sizeof(seed));
+    HashBytes(hash, &castShadows, sizeof(castShadows));
+
+    const auto* layer = Owner
+        ? Owner->GetComponent<Engine::Components::TerrainObjectLayer>() : nullptr;
+    if (!layer) return hash;
+
+    HashFloat(hash, layer->viewDistance);
+    HashFloat(hash, layer->lod1Distance);
+    HashFloat(hash, layer->lod2Distance);
+    HashFloat(hash, layer->lodHysteresis);
+    HashFloat(hash, layer->shadowDistance);
+    HashBytes(hash, layer->layerName.data(), layer->layerName.size());
+    for (const auto& placement : layer->placements)
+    {
+        HashBytes(hash, placement.asset.data(), placement.asset.size());
+        HashFloat(hash, placement.position.x);
+        HashFloat(hash, placement.position.y);
+        HashFloat(hash, placement.position.z);
+        HashFloat(hash, placement.normal.x);
+        HashFloat(hash, placement.normal.y);
+        HashFloat(hash, placement.normal.z);
+        HashFloat(hash, placement.yawDegrees);
+        HashFloat(hash, placement.scale);
+    }
+    return hash;
+}
+
+uint64_t GrassField::ComputeTileGeometrySignature(Tile tile) const
+{
+    uint64_t hash = HashOffset;
+    HashBytes(hash, &tile.first, sizeof(tile.first));
+    HashBytes(hash, &tile.second, sizeof(tile.second));
+    const auto* layer = Owner
+        ? Owner->GetComponent<Engine::Components::TerrainObjectLayer>() : nullptr;
+    if (!layer || layer->placements.empty())
+        return hash;
+    for (const auto& placement : layer->placements)
+    {
+        if (placement.position.x < tile.first * std::max(1.f, tileSize) ||
+            placement.position.x >= (tile.first + 1) * std::max(1.f, tileSize) ||
+            placement.position.z < tile.second * std::max(1.f, tileSize) ||
+            placement.position.z >= (tile.second + 1) * std::max(1.f, tileSize))
+            continue;
+        HashFloat(hash, placement.position.x);
+        HashFloat(hash, placement.position.z);
+        HashBytes(hash, placement.asset.data(), placement.asset.size());
+        HashFloat(hash, placement.position.y);
+        HashFloat(hash, placement.normal.x);
+        HashFloat(hash, placement.normal.y);
+        HashFloat(hash, placement.normal.z);
+        HashFloat(hash, placement.yawDegrees);
+        HashFloat(hash, placement.scale);
+    }
+    return hash;
+}
+
+bool GrassField::BuildTile(Tile tile, int lod, bool castsTileShadows,
+    uint64_t geometrySignature)
+{
+    if (!Owner || !Owner->GetScene()) return false;
     const auto* terrain = Owner->GetComponentInParent<Engine::Components::Terrain>();
-    if (!terrain) return;
+    if (!terrain) return false;
     const float span = std::max(1.f, tileSize);
     const float terrainX = terrain->cellsX * terrain->cellWidth;
     const float terrainZ = terrain->cellsY * terrain->cellDepth;
     const float tileX = tile.first * span, tileZ = tile.second * span;
     if (tileX >= terrainX || tileZ >= terrainZ ||
-        tileX + span <= 0.f || tileZ + span <= 0.f) return;
+        tileX + span <= 0.f || tileZ + span <= 0.f) return false;
 
     const auto* layer = Owner->GetComponent<Engine::Components::TerrainObjectLayer>();
     lod = std::clamp(lod, 0, 2);
@@ -198,44 +367,68 @@ void GrassField::BuildTile(Tile tile, int lod, bool castsTileShadows)
         appendRandom(shortVertices, shortCount);
         appendRandom(tallVertices, tallCount);
     }
-    if (vertices.empty()) return;
+    if (vertices.empty()) return false;
 
     auto& scene = *Owner->GetScene();
-    char name[64]{};
-    std::snprintf(name, sizeof(name), "Grass Tile (%d, %d)",
-        tile.first, tile.second);
-    auto* object = scene.AddObject(name);
-    object->Parent = Owner;
-    Owner->Children.push_back(object);
+    auto existing = m_tiles.find(tile);
+    Engine::Core::Object* object = existing != m_tiles.end()
+        ? existing->second.object : nullptr;
+    const bool created = object == nullptr;
+    if (!object)
+    {
+        char name[64]{};
+        std::snprintf(name, sizeof(name), "Grass Tile (%d, %d)",
+            tile.first, tile.second);
+        object = scene.AddObject(name);
+        object->Parent = Owner;
+        Owner->Children.push_back(object);
+    }
     object->transform.position = { tileX, 0.f, tileZ };
-    auto* mesh = object->AddComponent<Engine::Components::Mesh>();
+    auto* mesh = object->GetComponent<Engine::Components::Mesh>();
+    if (!mesh)
+        mesh = object->AddComponent<Engine::Components::Mesh>();
     if (!mesh->SetAuthoredVertices(std::move(vertices)))
     {
-        scene.RequestRemoveObject(object);
-        return;
+        if (created)
+            scene.RequestRemoveObject(object);
+        return false;
     }
     if (scene.GetGraphicsProvider())
         mesh->OnAfterDeserialize(scene.GetGraphicsProvider());
-    auto* material = object->AddComponent<Engine::Components::Material>();
+    auto* material = object->GetComponent<Engine::Components::Material>();
+    if (!material)
+        material = object->AddComponent<Engine::Components::Material>();
     material->diffuseColor = {1.f, 1.f, 1.f};
     material->useVertexColors = true;
     material->roughnessFactor = 1.f;
     material->metallicFactor = 0.f;
     material->doubleSided = true;
     material->castsShadows = castsTileShadows;
-    m_tiles[tile] = {object, lod, castsTileShadows};
+    TileState& state = m_tiles[tile];
+    state.object = object;
+    state.lod = lod;
+    state.castsShadows = castsTileShadows;
+    state.geometrySignature = geometrySignature;
+    return true;
 }
 
-void GrassField::Refresh()
+bool GrassField::Refresh()
 {
-    if (!Owner || !Owner->GetScene() || !LoadSources()) return;
-    auto* viewer = Owner->FindObjectInSceneByName(viewerObjectName);
-    auto* terrain = Owner->GetComponentInParent<Engine::Components::Terrain>();
-    if (!viewer || !terrain) return;
+    if (!Owner || !Owner->GetScene() || !LoadSources()) return false;
+    bool changed = EnsureAuthoredPreviewHidden();
+    ++m_refreshEpoch;
+    const uint64_t generationSignature = ComputeGenerationSignature();
+    const bool rebuildVisibleTiles = !m_hasGenerationSignature ||
+        generationSignature != m_lastGenerationSignature;
+    m_lastGenerationSignature = generationSignature;
+    m_hasGenerationSignature = true;
+    if (!ResolveCachedReferences()) return changed;
+    auto* viewer = m_cachedViewer;
+    auto* terrain = m_cachedTerrain;
     const glm::vec3 local = glm::vec3(glm::inverse(
         terrain->Owner->transform.GetWorldMatrix()) * glm::vec4(
             viewer->transform.GetWorldPosition(), 1.f));
-    const auto* layer = Owner->GetComponent<Engine::Components::TerrainObjectLayer>();
+    const auto* layer = m_cachedLayer;
     const float span = std::max(1.f, tileSize);
     const float radius = layer ? std::max(1.f, layer->viewDistance)
         : std::max(2.f, visibleRadius);
@@ -259,7 +452,14 @@ void GrassField::Refresh()
     const int firstZ = std::max(0, centerZ - reach);
     const int endX = std::min(maxX, centerX + reach + 1);
     const int endZ = std::min(maxZ, centerZ + reach + 1);
-    std::map<Tile, std::pair<int, bool>> desired;
+    struct DesiredTile
+    {
+        int lod = 0;
+        bool castsShadows = false;
+        uint64_t geometrySignature = 0;
+        float distanceSquared = 0.f;
+    };
+    std::map<Tile, DesiredTile> desired;
     for (int z = firstZ; z < endZ; ++z)
         for (int x = firstX; x < endX; ++x)
         {
@@ -294,38 +494,87 @@ void GrassField::Refresh()
                         distance >= shadowRadius - hysteresis)
                         tileShadows = false;
                 }
-            desired.emplace(tile, std::make_pair(lod, tileShadows));
+            desired.emplace(tile, DesiredTile{
+                lod, tileShadows, ComputeTileGeometrySignature(tile),
+                dx * dx + dz * dz});
         }
     for (auto it = m_tiles.begin(); it != m_tiles.end(); )
     {
         if (desired.count(it->first)) { ++it; continue; }
         Owner->GetScene()->RequestRemoveObject(it->second.object);
+        m_pendingTileUpdates.erase(it->first);
         it = m_tiles.erase(it);
+        changed = true;
     }
-    int remaining = std::clamp(maxTileBuildsPerUpdate, 1, 16);
     for (const auto& [tile, target] : desired)
     {
         const auto existing = m_tiles.find(tile);
-        if (existing != m_tiles.end() && existing->second.lod == target.first)
+        const bool needsGeometryUpdate = existing == m_tiles.end() ||
+            existing->second.lod != target.lod ||
+            existing->second.geometrySignature != target.geometrySignature ||
+            rebuildVisibleTiles;
+        if (!needsGeometryUpdate)
         {
-            if (existing->second.castsShadows != target.second)
+            m_pendingTileUpdates.erase(tile);
+            if (existing->second.castsShadows != target.castsShadows)
             {
                 if (auto* material = existing->second.object->
                     GetComponent<Engine::Components::Material>())
-                    material->castsShadows = target.second;
-                existing->second.castsShadows = target.second;
+                    material->castsShadows = target.castsShadows;
+                existing->second.castsShadows = target.castsShadows;
+                changed = true;
             }
             continue;
         }
+        auto& pending = m_pendingTileUpdates[tile];
+        pending.lod = target.lod;
+        pending.castsShadows = target.castsShadows;
+        pending.geometrySignature = target.geometrySignature;
+        pending.distanceSquared = target.distanceSquared;
+        pending.refreshEpoch = m_refreshEpoch;
+    }
+    for (auto it = m_pendingTileUpdates.begin();
+         it != m_pendingTileUpdates.end();)
+    {
+        if (it->second.refreshEpoch != m_refreshEpoch ||
+            !desired.count(it->first))
+            it = m_pendingTileUpdates.erase(it);
+        else
+            ++it;
+    }
+
+    int remaining = std::clamp(maxTileBuildsPerUpdate, 1, 16);
+    std::vector<Tile> orderedPending;
+    orderedPending.reserve(m_pendingTileUpdates.size());
+    for (const auto& entry : m_pendingTileUpdates)
+        orderedPending.push_back(entry.first);
+    std::sort(orderedPending.begin(), orderedPending.end(),
+        [&](const Tile& first, const Tile& second)
+        {
+            const float firstDistance =
+                m_pendingTileUpdates[first].distanceSquared;
+            const float secondDistance =
+                m_pendingTileUpdates[second].distanceSquared;
+            if (firstDistance != secondDistance)
+                return firstDistance < secondDistance;
+            if (first.first != second.first)
+                return first.first < second.first;
+            return first.second < second.second;
+        });
+    for (const Tile& tile : orderedPending)
+    {
         if (remaining <= 0) break;
-        auto* oldObject = existing != m_tiles.end()
-            ? existing->second.object : nullptr;
-        BuildTile(tile, target.first, target.second);
-        if (oldObject && m_tiles.find(tile) != m_tiles.end() &&
-            m_tiles[tile].object != oldObject)
-            Owner->GetScene()->RequestRemoveObject(oldObject);
+        const auto pending = m_pendingTileUpdates.find(tile);
+        if (pending == m_pendingTileUpdates.end()) continue;
+        if (BuildTile(tile, pending->second.lod, pending->second.castsShadows,
+                pending->second.geometrySignature))
+        {
+            m_pendingTileUpdates.erase(pending);
+            changed = true;
+        }
         --remaining;
     }
+    return changed;
 }
 
 void GrassField::Update()
@@ -335,5 +584,12 @@ void GrassField::Update()
 
 void GrassField::OnDestroy()
 {
-    m_tiles.clear();
+    ClearTiles();
+}
+
+bool GrassField::RefreshEditorPreview()
+{
+    if (!Owner || !Owner->GetScene() || Owner->GetScene()->HasStarted())
+        return false;
+    return Refresh();
 }

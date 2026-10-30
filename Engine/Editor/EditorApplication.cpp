@@ -8,6 +8,7 @@
 #include "Core/SceneManager.h"
 #include "Core/Compoonents/Particles/ParticleEmitter.h"
 #include "Core/Compoonents/Animation/AnimationManager.h"
+#include "Core/Assets/Scripts/Grass/GrassField.h"
 #include "Core/Physics/Adapters/BulletPhysicsAdapter.h"
 #include "Core/Timing/FramePacer.h"
 #include "Core/Renderers/IEditorRenderer.h"
@@ -476,6 +477,9 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
                         animation->Tick(std::max(dt, 0.f));
                         previewAdvanced = true;
                     }
+                    if (auto* grass = object->GetComponent<GrassField>())
+                        previewAdvanced = grass->RefreshEditorPreview() ||
+                            previewAdvanced;
                 }
             }
             if (previewAdvanced) renderer->MarkDirty();
