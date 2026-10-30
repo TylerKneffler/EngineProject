@@ -18,6 +18,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <string>
 
 namespace Engine::Editor
 {
@@ -79,6 +80,9 @@ struct PanelVisibility
 {
     bool performanceOpen = false;
     bool performanceSaved = false;
+    std::string lastFocusedWindow;
+    bool focusSaved = false;
+    bool restoreFocusPending = false;
 };
 
 PanelVisibility g_panelVisibility;
@@ -90,6 +94,20 @@ void SavePanelVisibility(bool open)
         return;
     g_panelVisibility.performanceOpen = open;
     g_panelVisibility.performanceSaved = true;
+    ImGui::MarkIniSettingsDirty();
+    // Debugger Stop can terminate the process before ImGui's periodic save.
+    if (const char* path = ImGui::GetIO().IniFilename; path && path[0])
+        ImGui::SaveIniSettingsToDisk(path);
+}
+
+void SaveLastFocusedWindow(const char* title)
+{
+    if (!title || !title[0]) return;
+    if (g_panelVisibility.focusSaved &&
+        g_panelVisibility.lastFocusedWindow == title)
+        return;
+    g_panelVisibility.lastFocusedWindow = title;
+    g_panelVisibility.focusSaved = true;
     ImGui::MarkIniSettingsDirty();
     // Debugger Stop can terminate the process before ImGui's periodic save.
     if (const char* path = ImGui::GetIO().IniFilename; path && path[0])
@@ -271,13 +289,27 @@ void ImGuiPanelHost::RegisterToolbarSettings()
                 visibility.performanceOpen = value != 0;
                 visibility.performanceSaved = true;
             }
+            constexpr char lastFocusedPrefix[] = "LastFocused=";
+            constexpr size_t lastFocusedPrefixLength =
+                sizeof(lastFocusedPrefix) - 1;
+            if (std::strncmp(line, lastFocusedPrefix,
+                    lastFocusedPrefixLength) == 0)
+            {
+                auto& visibility = *static_cast<PanelVisibility*>(entry);
+                visibility.lastFocusedWindow = line + lastFocusedPrefixLength;
+                visibility.focusSaved = true;
+                visibility.restoreFocusPending =
+                    !visibility.lastFocusedWindow.empty();
+            }
         };
         panels.WriteAllFn = [](ImGuiContext*, ImGuiSettingsHandler* settings,
             ImGuiTextBuffer* output)
         {
             const auto& visibility = *static_cast<PanelVisibility*>(settings->UserData);
-            output->appendf("[EditorPanels][Visibility]\nPerformance=%d\n\n",
-                visibility.performanceOpen);
+            output->appendf(
+                "[EditorPanels][Visibility]\nPerformance=%d\nLastFocused=%s\n\n",
+                visibility.performanceOpen,
+                visibility.lastFocusedWindow.c_str());
         };
         ImGui::AddSettingsHandler(&panels);
     }
@@ -880,6 +912,34 @@ void ImGuiPanelHost::DrawPanels(EditorState& state)
                 SavePanelVisibility(panel->IsOpen());
             if (compactTree)
                 PopCompactPanelStyle(true);
+        }
+
+    if (g_panelVisibility.restoreFocusPending &&
+        !g_panelVisibility.lastFocusedWindow.empty())
+    {
+        for (const auto& panel : panels)
+        {
+            if (!panel || !panel->IsOpen() ||
+                panel->GetTitle() != g_panelVisibility.lastFocusedWindow)
+                continue;
+            m_ui.FocusWindow(g_panelVisibility.lastFocusedWindow.c_str());
+            g_panelVisibility.restoreFocusPending = false;
+            break;
+        }
+    }
+
+    if (ImGuiWindow* focused = ImGui::GetCurrentContext()->NavWindow)
+        for (const auto& panel : panels)
+        {
+            if (!panel || !panel->IsOpen())
+                continue;
+            ImGuiWindow* panelWindow =
+                ImGui::FindWindowByName(panel->GetTitle().c_str());
+            if (panelWindow && panelWindow->RootWindow == focused->RootWindow)
+            {
+                SaveLastFocusedWindow(panel->GetTitle().c_str());
+                break;
+            }
         }
 
     if (Engine::Core::Component::HasEditorReferencePick())
