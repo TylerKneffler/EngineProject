@@ -339,6 +339,60 @@ void SceneView::DrawPoseToolbar(const std::function<bool(float)>& next)
     ImGui::PopID();
 }
 
+void SceneView::DrawTerrainToolbar(const std::function<bool(float)>& next)
+{
+    if (m_editMode != SceneEditMode::Terrain || !m_scene) return;
+    auto* selected = m_scene->GetSelectedObject();
+    auto* terrain = selected
+        ? selected->GetComponent<Engine::Components::Terrain>() : nullptr;
+    Engine::Components::TerrainManager* manager = nullptr;
+    for (auto* object = selected; object && !manager; object = object->Parent)
+        manager = object->GetComponent<Engine::Components::TerrainManager>();
+
+    ImGui::PushID(this);
+    if (!terrain && !manager)
+    {
+        if (next(225.f))
+            ImGui::TextDisabled("Select Terrain or Terrain Manager");
+        ImGui::PopID();
+        return;
+    }
+    const char* modes[] = {"Raise", "Lower", "Average", "Blend", "Paint"};
+    if (next(112.f))
+    {
+        ImGui::SetNextItemWidth(112.f);
+        ImGui::Combo("##TerrainBrush", &m_terrainBrush, modes, 5);
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Terrain brush");
+    }
+    if (next(120.f))
+    {
+        ImGui::SetNextItemWidth(120.f);
+        ImGui::DragFloat("##TerrainRadius", &m_terrainRadius,
+            .05f, .05f, 100.f, "Radius %.1f");
+    }
+    if (next(135.f))
+    {
+        ImGui::SetNextItemWidth(135.f);
+        ImGui::DragFloat("##TerrainStrength", &m_terrainStrength,
+            .01f, .001f, 2.f, "Strength %.2f");
+    }
+    if (m_terrainBrush == 4 && terrain)
+    {
+        m_terrainLayer = std::clamp(m_terrainLayer, 0,
+            std::max(0, static_cast<int>(terrain->layers.size()) - 1));
+        if (next(100.f))
+        {
+            ImGui::SetNextItemWidth(100.f);
+            ImGui::SliderInt("##TerrainLayer", &m_terrainLayer, 0,
+                std::max(0, static_cast<int>(terrain->layers.size()) - 1),
+                "Layer %d");
+        }
+    }
+    if (manager && next(125.f))
+        ImGui::Checkbox("Edit cells", &m_editTerrainCells);
+    ImGui::PopID();
+}
+
 void SceneView::DrawPanel(IEditorUi& ui)
 {
     if (m_scene) EditorViewportSettings::Apply(*m_scene);
@@ -417,7 +471,6 @@ void SceneView::DrawPanel(IEditorUi& ui)
         }
     }
     bool terrainConsumedClick = false;
-    static bool editTerrainCells = false;
     auto* selected = m_scene ? m_scene->GetSelectedObject() : nullptr;
     auto* terrain = selected
         ? selected->GetComponent<Engine::Components::Terrain>() : nullptr;
@@ -428,43 +481,12 @@ void SceneView::DrawPanel(IEditorUi& ui)
     {
         if ((terrain || manager) && m_editMode == SceneEditMode::Object)
             m_editMode = SceneEditMode::Terrain;
-        else if (!terrain && !manager && m_editMode == SceneEditMode::Terrain)
-            m_editMode = SceneEditMode::Object;
         m_previousSelectedObject = selected;
-    }
-    if (m_editMode == SceneEditMode::Terrain && !terrain && !manager)
-    {
-        ImGui::SetNextWindowPos({input.screenMin.x + 8.f,
-            input.screenMin.y + 48.f}, ImGuiCond_Always);
-        ImGui::Begin(("Terrain tools##" + m_title).c_str(), nullptr,
-            ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_AlwaysAutoResize |
-            ImGuiWindowFlags_NoSavedSettings);
-        ImGui::TextUnformatted("Select an object with Terrain or Terrain Manager.");
-        ImGui::End();
     }
     if ((terrain || manager) && m_editMode == SceneEditMode::Terrain)
     {
-        static int brush = 0, layer = 0;
-        static float radius = 3.f, strength = .25f;
-        ImGui::SetNextWindowPos({input.screenMin.x + 8.f, input.screenMin.y + 48.f}, ImGuiCond_Always);
-        ImGui::SetNextWindowBgAlpha(.92f);
-        ImGui::Begin(("Terrain tools##" + m_title).c_str(), nullptr,
-            ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove |
-            ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings);
-        const char* modes[] = {"Raise", "Lower", "Average", "Blend", "Paint"};
-        ImGui::Combo("Brush", &brush, modes, 5);
-        ImGui::DragFloat("Radius", &radius, .05f, .05f, 100.f);
-        ImGui::DragFloat("Strength", &strength, .01f, .001f, 2.f);
-        if (brush == 4 && terrain)
-        {
-            layer = std::clamp(layer, 0, static_cast<int>(terrain->layers.size()) - 1);
-            ImGui::SliderInt("Layer", &layer, 0,
-                std::max(0, static_cast<int>(terrain->layers.size()) - 1));
-        }
-        terrainConsumedClick = ImGui::IsWindowHovered();
-        ImGui::End();
-        if (input.hovered && input.leftDown && !terrainConsumedClick &&
-            !(manager && editTerrainCells) &&
+        if (input.hovered && input.leftDown &&
+            !(manager && m_editTerrainCells) &&
             input.available.x > 0.f && input.available.y > 0.f)
         {
             auto* camera = m_scene->editorCamera.GetComponent<Engine::Components::Camera>();
@@ -492,28 +514,22 @@ void SceneView::DrawPanel(IEditorUi& ui)
                         {
                             const glm::dvec3 hit = a + (b - a) * t;
                             terrainConsumedClick = manager->ApplyBrush(hit.x, hit.z,
-                                radius, strength * ImGui::GetIO().DeltaTime * 30.f,
-                                static_cast<Engine::Components::Terrain::Brush>(brush), layer);
+                                m_terrainRadius, m_terrainStrength * ImGui::GetIO().DeltaTime * 30.f,
+                                static_cast<Engine::Components::Terrain::Brush>(m_terrainBrush), m_terrainLayer);
                         }
                     }
                 }
                 else terrainConsumedClick = terrain->ApplyBrushFromLocalRay(
                     glm::vec3(a), glm::vec3(b),
-                    radius, strength * ImGui::GetIO().DeltaTime * 30.f,
-                    static_cast<Engine::Components::Terrain::Brush>(brush), layer);
+                    m_terrainRadius, m_terrainStrength * ImGui::GetIO().DeltaTime * 30.f,
+                    static_cast<Engine::Components::Terrain::Brush>(m_terrainBrush), m_terrainLayer);
             }
         }
     }
     if (manager && m_editMode == SceneEditMode::Terrain &&
         input.available.x > 0.f && input.available.y > 0.f)
     {
-        ImGui::SetNextWindowPos({input.screenMin.x + 8.f, input.screenMin.y + 170.f}, ImGuiCond_Always);
-        ImGui::Begin(("Terrain cells##" + m_title).c_str(), nullptr,
-            ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_AlwaysAutoResize |
-            ImGuiWindowFlags_NoSavedSettings);
-        ImGui::Checkbox("Edit terrain cells", &editTerrainCells);
-        ImGui::End();
-        if (editTerrainCells)
+        if (m_editTerrainCells)
         {
             auto* camera = m_scene->editorCamera.GetComponent<Engine::Components::Camera>();
             if (camera)

@@ -77,6 +77,7 @@ public:
             translationSnap, rotationSnapDegrees, scaleSnap);
     }
     void DrawPoseToolbar(const std::function<bool(float)>& next);
+    void DrawTerrainToolbar(const std::function<bool(float)>& next);
     bool UseGlobalToolbar = false;
     void SetDocumentPath(std::string path) { m_documentPath = std::move(path); }
     void RequestFocusOnNextDraw() { m_focusOnNextDraw = true; }
@@ -126,6 +127,11 @@ private:
     bool m_prefabPreviewHasPlacement = false;
     bool m_focusOnNextDraw = false;
     SceneEditMode m_editMode = SceneEditMode::Object;
+    int m_terrainBrush = 0;
+    int m_terrainLayer = 0;
+    float m_terrainRadius = 3.f;
+    float m_terrainStrength = .25f;
+    bool m_editTerrainCells = false;
     bool m_modelManipulation = false;
     int m_modelSelectionMode = 2;
     int m_modelAction = 0;

@@ -8,6 +8,7 @@
 #include "Core/Script.h"
 #include "Core/Compoonents/Obj/Mesh.h"
 #include "Core/Compoonents/Obj/Terrain.h"
+#include "Core/Compoonents/Obj/TerrainObjectLayer.h"
 #include "Core/Compoonents/Obj/TerrainManager.h"
 #include "Core/Compoonents/Materials/Material.h"
 #include "Core/Compoonents/Camera/Camera.h"
@@ -185,6 +186,7 @@ void SceneSerializer::EnsureBuiltinsRegistered()
 
     RegisterComponentType<Engine::Components::Mesh>();
     RegisterComponentType<Engine::Components::Terrain>();
+    RegisterComponentType<Engine::Components::TerrainObjectLayer>();
     RegisterComponentType<Engine::Components::TerrainManager>();
     RegisterComponentType<Engine::Components::Material>();
     RegisterComponentType<Engine::Components::Camera>();

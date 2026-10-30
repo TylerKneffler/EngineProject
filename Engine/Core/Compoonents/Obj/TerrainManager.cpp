@@ -1,4 +1,5 @@
 #include "TerrainManager.h"
+#include "TerrainObjectLayer.h"
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Compoonents/Obj/TerrainBatchAppearance.h"
@@ -10,6 +11,7 @@
 #include "Core/Compoonents/Physics/RigidBody.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -612,6 +614,7 @@ int TerrainManager::CommitPrepared(int centerX, int centerY, int radius,
         }
         if (prepared.cacheHit) ++m_cacheHits;
         m_loaded[cell] = terrain;
+        RestoreObjectLayers(cell, *object);
         const auto sceneInstalled = std::chrono::steady_clock::now();
         Stitch(cell);
         const auto stitched = std::chrono::steady_clock::now();
@@ -896,6 +899,7 @@ void TerrainManager::LoadCell(Cell cell, int lodStride)
     }
     if (!baked && m_editedProcedural.count(cell)) LoadEdit(cell, *terrain);
     m_loaded[cell] = terrain;
+    RestoreObjectLayers(cell, *object);
     Stitch(cell);
     terrain->SetMeshLodStride(lodStride);
     ConfigureCellPhysics(*object);
@@ -938,8 +942,112 @@ void TerrainManager::UnloadCell(Cell cell)
     }
     if (!m_proceduralCells.count(cell)) m_cells[cell] = terrain->Serialize();
     auto* object = terrain->Owner;
+    if (object) CaptureObjectLayers(cell, *object);
     m_loaded.erase(found);
     if (object && object->GetScene()) object->GetScene()->RemoveObject(object);
+}
+
+void TerrainManager::CaptureObjectLayers(Cell cell,
+    const Engine::Core::Object& cellObject)
+{
+    JsonValue layers = JsonValue::MakeArray();
+    for (const auto* child : cellObject.Children)
+        if (child)
+            if (const auto* layer = child->GetComponent<TerrainObjectLayer>())
+                layers.Push(layer->Serialize());
+    if (layers.ArraySize()) m_objectLayers[cell] = std::move(layers);
+    else m_objectLayers.erase(cell);
+}
+
+void TerrainManager::RestoreObjectLayers(Cell cell,
+    Engine::Core::Object& cellObject)
+{
+    if (!cellObject.GetScene()) return;
+    const auto findLayer = [&](const std::string& name) {
+        for (auto* child : cellObject.Children)
+            if (child)
+                if (auto* layer = child->GetComponent<TerrainObjectLayer>())
+                    if (layer->layerName == name) return layer;
+        return static_cast<TerrainObjectLayer*>(nullptr);
+    };
+    const auto makeLayer = [&](const std::string& name,
+        const JsonValue* saved) {
+        if (name.empty() || findLayer(name)) return;
+        auto* child = cellObject.GetScene()->AddObject(name);
+        child->runtimeOnly = true;
+        cellObject.GetScene()->MoveObject(child, &cellObject,
+            Engine::Scene::Scene::ObjectPlacement::AsChild);
+        auto* layer = child->AddComponent<TerrainObjectLayer>();
+        if (saved) layer->Deserialize(*saved);
+        layer->layerName = name;
+    };
+    if (const auto found = m_objectLayers.find(cell);
+        found != m_objectLayers.end())
+    {
+        const JsonValue& layers = found->second;
+        for (size_t i = 0; i < layers.ArraySize(); ++i)
+        {
+            const JsonValue& saved = layers.ArrayAt(i);
+            makeLayer(saved["layerName"].AsString(), &saved);
+        }
+    }
+    for (const auto& name : m_objectLayerNames) makeLayer(name, nullptr);
+}
+
+bool TerrainManager::AddObjectLayer(const std::string& name)
+{
+    if (name.empty() || std::all_of(name.begin(), name.end(),
+            [](unsigned char c) { return std::isspace(c) != 0; }) ||
+        std::find(m_objectLayerNames.begin(), m_objectLayerNames.end(), name) !=
+            m_objectLayerNames.end() ||
+        (Owner && Owner->GetScene() && Owner->GetScene()->HasStarted()))
+        return false;
+    m_objectLayerNames.push_back(name);
+    for (const auto& [cell, terrain] : m_loaded)
+        if (terrain && terrain->Owner)
+        {
+            RestoreObjectLayers(cell, *terrain->Owner);
+            CaptureObjectLayers(cell, *terrain->Owner);
+        }
+    MarkConfigurationDirty();
+    return true;
+}
+
+bool TerrainManager::RemoveObjectLayer(const std::string& name)
+{
+    const auto found = std::find(m_objectLayerNames.begin(),
+        m_objectLayerNames.end(), name);
+    if (found == m_objectLayerNames.end() ||
+        (Owner && Owner->GetScene() && Owner->GetScene()->HasStarted()))
+        return false;
+    m_objectLayerNames.erase(found);
+    for (auto it = m_objectLayers.begin(); it != m_objectLayers.end(); )
+    {
+        JsonValue kept = JsonValue::MakeArray();
+        for (size_t i = 0; i < it->second.ArraySize(); ++i)
+        {
+            const JsonValue& entry = it->second.ArrayAt(i);
+            if (entry["layerName"].AsString() != name) kept.Push(entry);
+        }
+        if (kept.ArraySize()) { it->second = std::move(kept); ++it; }
+        else it = m_objectLayers.erase(it);
+    }
+    for (const auto& [cell, terrain] : m_loaded)
+        if (terrain && terrain->Owner && terrain->Owner->GetScene())
+        {
+            auto* object = terrain->Owner;
+            for (auto* child : object->Children)
+                if (child)
+                    if (auto* layer = child->GetComponent<TerrainObjectLayer>())
+                        if (layer->layerName == name)
+                        {
+                            object->GetScene()->RemoveObject(child);
+                            break;
+                        }
+            CaptureObjectLayers(cell, *object);
+        }
+    MarkConfigurationDirty();
+    return true;
 }
 
 void TerrainManager::Stitch(Cell cell)
@@ -1055,6 +1163,7 @@ bool TerrainManager::RemoveCell(int x, int y)
     InvalidatePrepared();
     UnloadCell({x, y});
     m_cells.erase({x, y});
+    m_objectLayers.erase({x, y});
     m_proceduralCells.erase({x, y});
     m_editedProcedural.erase({x, y});
     m_dirtyProceduralEdits.erase({x, y});
@@ -1913,6 +2022,44 @@ TerrainManager::JsonValue TerrainManager::Serialize() const
         .Set("cellDataDirectory", JsonValue(cellDataDirectory))
         .Set("runtimeBakeDirectory", JsonValue(runtimeBakeDirectory));
     out.Set("requireRuntimeBake", JsonValue(requireRuntimeBake));
+    JsonValue objectLayerNames = JsonValue::MakeArray();
+    for (const auto& name : m_objectLayerNames)
+        objectLayerNames.Push(JsonValue(name));
+    out.Set("objectLayerNames", std::move(objectLayerNames));
+    JsonValue objectLayerCells = JsonValue::MakeArray();
+    for (const auto& [cell, stored] : m_objectLayers)
+    {
+        JsonValue layers = stored;
+        if (const auto loaded = m_loaded.find(cell); loaded != m_loaded.end())
+        {
+            layers = JsonValue::MakeArray();
+            if (loaded->second && loaded->second->Owner)
+                for (const auto* child : loaded->second->Owner->Children)
+                    if (child)
+                        if (const auto* layer = child->GetComponent<TerrainObjectLayer>())
+                            layers.Push(layer->Serialize());
+        }
+        if (layers.ArraySize())
+            objectLayerCells.Push(JsonValue::MakeObject()
+                .Set("x", JsonValue(cell.first))
+                .Set("y", JsonValue(cell.second))
+                .Set("layers", std::move(layers)));
+    }
+    for (const auto& [cell, loaded] : m_loaded)
+        if (!m_objectLayers.count(cell) && loaded && loaded->Owner)
+        {
+            JsonValue layers = JsonValue::MakeArray();
+            for (const auto* child : loaded->Owner->Children)
+                if (child)
+                    if (const auto* layer = child->GetComponent<TerrainObjectLayer>())
+                        layers.Push(layer->Serialize());
+            if (layers.ArraySize())
+                objectLayerCells.Push(JsonValue::MakeObject()
+                    .Set("x", JsonValue(cell.first))
+                    .Set("y", JsonValue(cell.second))
+                    .Set("layers", std::move(layers)));
+        }
+    out.Set("objectLayerCells", std::move(objectLayerCells));
     JsonValue cells = JsonValue::MakeArray();
     for (const auto& [cell, data] : m_cells)
     {
@@ -2037,6 +2184,32 @@ void TerrainManager::Deserialize(const JsonValue& value)
     requireRuntimeBake = value.Has("requireRuntimeBake") &&
         value["requireRuntimeBake"].AsBool();
     m_cells.clear();
+    m_objectLayerNames.clear();
+    const auto& objectLayerNames = value["objectLayerNames"];
+    for (size_t i = 0; i < objectLayerNames.ArraySize(); ++i)
+    {
+        const std::string name = objectLayerNames.ArrayAt(i).AsString();
+        if (!name.empty() && std::find(m_objectLayerNames.begin(),
+            m_objectLayerNames.end(), name) == m_objectLayerNames.end())
+            m_objectLayerNames.push_back(name);
+    }
+    m_objectLayers.clear();
+    const auto& objectLayerCells = value["objectLayerCells"];
+    for (size_t i = 0; i < objectLayerCells.ArraySize(); ++i)
+    {
+        const auto& entry = objectLayerCells.ArrayAt(i);
+        if (entry["layers"].IsArray())
+            m_objectLayers[{entry["x"].AsInt(), entry["y"].AsInt()}] =
+                entry["layers"];
+        const auto& layers = entry["layers"];
+        for (size_t j = 0; j < layers.ArraySize(); ++j)
+        {
+            const std::string name = layers.ArrayAt(j)["layerName"].AsString();
+            if (!name.empty() && std::find(m_objectLayerNames.begin(),
+                m_objectLayerNames.end(), name) == m_objectLayerNames.end())
+                m_objectLayerNames.push_back(name);
+        }
+    }
     m_proceduralCells.clear();
     m_editedProcedural.clear();
     m_dirtyProceduralEdits.clear();
@@ -2194,6 +2367,31 @@ bool TerrainManager::DrawProperties(::Engine::Editor::IEditorUi& ui)
         }
     }
     if (ui.Button("Add center cell")) changed |= AddCell(0, 0);
+    ui.Separator();
+    ui.Label("Terrain object layers (one child per loaded cell)");
+    char layerName[128]{};
+    std::memcpy(layerName, m_newObjectLayerName.data(),
+        std::min(m_newObjectLayerName.size(), sizeof(layerName) - 1));
+    if (ui.InputText("New object layer", layerName, sizeof(layerName)))
+        m_newObjectLayerName = layerName;
+    if (ui.Button("Add object layer") && AddObjectLayer(m_newObjectLayerName))
+    {
+        m_newObjectLayerName = "Objects";
+        changed = true;
+    }
+    for (size_t i = 0; i < m_objectLayerNames.size(); ++i)
+    {
+        const std::string name = m_objectLayerNames[i];
+        ui.Label(name.c_str());
+        ui.SameLine();
+        const std::string button = "Remove##ObjectLayer" +
+            std::to_string(i);
+        if (ui.Button(button.c_str()))
+        {
+            changed |= RemoveObjectLayer(name);
+            break;
+        }
+    }
     if (changed) MarkConfigurationDirty();
     return changed;
 }

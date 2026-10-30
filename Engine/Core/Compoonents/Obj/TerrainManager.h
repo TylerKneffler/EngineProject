@@ -17,6 +17,7 @@
 #include <memory>
 #include <filesystem>
 #include <chrono>
+#include <vector>
 
 namespace Engine::Components
 {
@@ -123,6 +124,10 @@ public:
     size_t GetPreparingCellCount() const { return m_preparingCells.size(); }
     size_t GetCacheHitCount() const { return m_cacheHits; }
     Terrain* GetLoadedCell(int x, int y) const;
+    const std::vector<std::string>& GetObjectLayerNames() const
+    { return m_objectLayerNames; }
+    bool AddObjectLayer(const std::string& name);
+    bool RemoveObjectLayer(const std::string& name);
     bool AddCell(int x, int y);
     bool AddProceduralCell(int x, int y);
     void SetProceduralBuilder(std::function<void(Cell, Terrain&)> builder);
@@ -222,6 +227,11 @@ public:
     bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
 private:
     std::map<Cell, JsonValue> m_cells;
+    std::map<Cell, JsonValue> m_objectLayers;
+    std::vector<std::string> m_objectLayerNames;
+    std::string m_newObjectLayerName = "Objects";
+    void RestoreObjectLayers(Cell cell, Engine::Core::Object& cellObject);
+    void CaptureObjectLayers(Cell cell, const Engine::Core::Object& cellObject);
     std::set<Cell> m_proceduralCells;
     std::set<Cell> m_editedProcedural;
     mutable std::set<Cell> m_dirtyProceduralEdits;

@@ -64,8 +64,13 @@ void D3D11GraphicsBuffer::Unmap()
 
 void D3D11GraphicsBuffer::FlushMappedWrites(uint64_t offset, uint64_t size)
 {
-    if (m_access != AccessMode::Upload || !m_buffer || m_shadowData.empty() ||
-        offset >= m_size || size == 0)
+    if (m_access != AccessMode::Upload || !m_buffer || m_shadowData.empty())
+        return;
+    if (offset >= m_size)
+        return;
+    const uint64_t availableBytes = m_size - offset;
+    const uint64_t requestedBytes = size == UINT64_MAX ? availableBytes : size;
+    if (requestedBytes == 0 || requestedBytes > availableBytes)
         return;
     // D3D11_MAP_WRITE_DISCARD invalidates the complete native resource, not
     // merely the byte range requested by the caller.  The range still guards
@@ -73,7 +78,12 @@ void D3D11GraphicsBuffer::FlushMappedWrites(uint64_t offset, uint64_t size)
     // the entire CPU shadow.  Copying only [offset, offset + size) caused later
     // partial updates (morph weights, portal records, and editor debug tails)
     // to leave every untouched byte in the GPU buffer undefined.
-    const size_t byteCount = static_cast<size_t>(m_size);
+    D3D11_BUFFER_DESC bufferDesc{};
+    m_buffer->GetDesc(&bufferDesc);
+    const size_t nativeByteCount = static_cast<size_t>(
+        std::min<uint64_t>(m_shadowData.size(), static_cast<uint64_t>(bufferDesc.ByteWidth)));
+    if (nativeByteCount == 0)
+        return;
     Microsoft::WRL::ComPtr<ID3D11Device> device;
     Microsoft::WRL::ComPtr<ID3D11DeviceContext> context;
     m_buffer->GetDevice(&device);
@@ -83,7 +93,8 @@ void D3D11GraphicsBuffer::FlushMappedWrites(uint64_t offset, uint64_t size)
     D3D11_MAPPED_SUBRESOURCE mapped{};
     if (SUCCEEDED(context->Map(m_buffer.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped)))
     {
-        std::memcpy(mapped.pData, m_shadowData.data(), byteCount);
+        const size_t copyBytes = std::min<size_t>(nativeByteCount, m_shadowData.size());
+        std::memcpy(mapped.pData, m_shadowData.data(), copyBytes);
         context->Unmap(m_buffer.Get(), 0);
     }
 }

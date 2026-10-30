@@ -273,7 +273,12 @@ bool EditorState::HasToolbarSection(ToolbarSection section) const
             (m_toolbarVisibility.modeTools && (mesh.enabled || skeleton.enabled));
     case ToolbarSection::Tools:
         return m_toolbarVisibility.toolDetails &&
-            !(skeleton.enabled && skeleton.submode == 1);
+            !(skeleton.enabled && skeleton.submode == 1) &&
+            (GetGlobalToolbarSceneView()->GetEditMode() == SceneEditMode::Terrain ||
+                mesh.enabled || skeleton.enabled ||
+                (m_activeSceneAssetDocument &&
+                    (m_activeSceneAssetDocument->meshStage ||
+                        m_activeSceneAssetDocument->objectStage)));
     case ToolbarSection::Paint:
         return m_toolbarVisibility.paintTools &&
             ((skeleton.enabled && skeleton.submode == 1) || mesh.enabled);
@@ -335,6 +340,12 @@ float EditorState::GetToolbarSectionMinimumWidth(ToolbarSection section) const
     }
     case ToolbarSection::Tools:
     {
+        if (auto* view = GetGlobalToolbarSceneView();
+            view && view->GetEditMode() == SceneEditMode::Terrain)
+        {
+            controlWidth = 225.f;
+            break;
+        }
         const MeshEditSession& mesh = m_activeSceneAssetDocument
             ? m_activeSceneAssetDocument->meshEdit
             : m_prefabDocumentFocused ? m_prefabMeshEdit : m_mainMeshEdit;
@@ -346,8 +357,7 @@ float EditorState::GetToolbarSectionMinimumWidth(ToolbarSection section) const
             : mesh.enabled ? "Mesh Tools..."
             : m_activeSceneAssetDocument && m_activeSceneAssetDocument->meshStage
                 ? "Vertex Attributes..."
-                : m_activeSceneAssetDocument && m_activeSceneAssetDocument->objectStage
-                    ? "Hierarchy..." : "Animation Editor";
+                : "Hierarchy...";
         const std::string label = ToolbarIconLabel(0xE713, u8"\uE713",
             "", "MinimumTools", first);
         controlWidth = ToolbarButtonWidth(label.c_str());
@@ -377,6 +387,10 @@ float EditorState::GetToolbarSectionPreferredWidth(ToolbarSection section) const
     if (m_activeAnimationDocument)
         return section == ToolbarSection::Mode ? 280.f :
             section == ToolbarSection::Tools ? 650.f : 0.f;
+    if (section == ToolbarSection::Tools)
+        if (auto* view = GetGlobalToolbarSceneView();
+            view && view->GetEditMode() == SceneEditMode::Terrain)
+            return 525.f;
     const float spacing = ImGui::GetStyle().ItemSpacing.x;
     if (section == ToolbarSection::File)
     {
@@ -416,6 +430,12 @@ void EditorState::DrawToolbarTools(IEditorUi& ui, bool singleRow,
     if (!scene) return;
 
     ToolbarRow row{singleRow, overflow};
+    if (auto* view = GetGlobalToolbarSceneView();
+        view && view->GetEditMode() == SceneEditMode::Terrain)
+    {
+        view->DrawTerrainToolbar([&](float width) { return row.Next(width); });
+        return;
+    }
     const auto button = [&](const char* label)
     {
         const bool animation = std::string_view(label) == "Animation Editor";
@@ -624,12 +644,6 @@ void EditorState::DrawToolbarTools(IEditorUi& ui, bool singleRow,
             m_activeSceneAssetDocument->objectStage)
             open("Hierarchy...", "Hierarchy");
     }
-
-    if (auto* view = GetGlobalToolbarSceneView())
-        view->DrawPoseToolbar([&](float width) { return row.Next(width); });
-
-    if (button("Animation Editor"))
-        OpenAnimationEditor();
 
     if (ImGui::IsPopupOpen("##ToolbarToolPopup"))
     {
