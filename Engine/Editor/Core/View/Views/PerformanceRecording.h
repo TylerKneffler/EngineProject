@@ -1,5 +1,6 @@
 #pragma once
 #include <filesystem>
+#include <cstdint>
 #include <fstream>
 #include <mutex>
 #include <memory>
@@ -22,6 +23,7 @@ public:
     void Frame(float reportedFrameRate, double elapsedMs,
         double panelDrawMs = 0.0);
     void Sample(const std::string& jsonFields);
+    void FrameDetails(const std::string& jsonFields);
 
 private:
     class OutputTap;
@@ -29,6 +31,7 @@ private:
     std::string Timestamp() const;
     mutable std::mutex m_mutex;
     std::ofstream m_file;
+    uint64_t m_frameIndex = 0;
     std::unique_ptr<OutputTap> m_stdoutTap;
     std::unique_ptr<OutputTap> m_stderrTap;
     std::streambuf* m_originalStdout = nullptr;

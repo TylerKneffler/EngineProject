@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "DX11ShaderCompiler.h"
+#include "Core/Renderers/HlslFileInclude.h"
 #include <sstream>
 
 namespace Engine::Renderers
@@ -38,8 +39,9 @@ std::unique_ptr<Engine::Graphics::IShader> D3D11ShaderCompiler::CompileFromFile(
 #endif
         ;
 
+    HlslFileInclude includes(filePath);
     HRESULT hr = D3DCompileFromFile(
-        widePath.c_str(), nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE,
+        widePath.c_str(), nullptr, &includes,
         entryPoint, target, flags, 0, &bytecode, &errors);
     if (FAILED(hr))
     {

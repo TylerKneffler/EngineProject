@@ -28,7 +28,7 @@ static void RequireAt(bool condition, int line)
 }
 #define Require(condition) RequireAt((condition), __LINE__)
 
-int main()
+int main() try
 {
     Engine::Scene::Scene scene;
     auto* object = scene.AddObject("Terrain manager");
@@ -729,4 +729,10 @@ int main()
     Require(!runtimeTerrain->RemoveCell(0, 0));
     Require(runtimeTerrain->HasCell(0, 0));
     Require(!runtimeTerrain->HasCell(1, 0));
+}
+
+catch (const std::exception& error)
+{
+    std::cerr << error.what() << '\n';
+    return 1;
 }

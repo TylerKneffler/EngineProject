@@ -7,8 +7,8 @@ namespace Engine::Renderers
 Microsoft::WRL::ComPtr<ID3D12RootSignature>
 CreateD3D12MaterialRootSignature(ID3D12Device* device)
 {
-    D3D12_DESCRIPTOR_RANGE ranges[20]{};
-    D3D12_ROOT_PARAMETER parameters[28]{};
+    D3D12_DESCRIPTOR_RANGE ranges[38]{};
+    D3D12_ROOT_PARAMETER parameters[47]{};
     parameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
     parameters[0].Descriptor.ShaderRegister = 0;
     parameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
@@ -99,6 +99,26 @@ CreateD3D12MaterialRootSignature(ID3D12Device* device)
             &ranges[18 + index];
         parameters[26 + index].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
     }
+
+    // Object.hlsl's material contract includes six terrain normals, six
+    // roughness maps and six height maps, even for ordinary mesh pipelines.
+    // Their dynamic shader branches require these registers in the signature.
+    for (UINT index = 0; index < 18; ++index)
+    {
+        auto& range = ranges[20 + index];
+        range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+        range.NumDescriptors = 1;
+        range.BaseShaderRegister = 27 + index;
+        auto& parameter = parameters[28 + index];
+        parameter.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+        parameter.DescriptorTable.NumDescriptorRanges = 1;
+        parameter.DescriptorTable.pDescriptorRanges = &range;
+        parameter.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+    }
+
+    parameters[46].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
+    parameters[46].Descriptor.ShaderRegister = 45;
+    parameters[46].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
 
     D3D12_STATIC_SAMPLER_DESC sampler{};
     sampler.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;

@@ -3,6 +3,7 @@
 #include "Engine/Editor/UI/IEditorUi.h"
 #include "Core/Serialization/Json.h"
 #include "Core/Compoonents/Materials/Texture.h"
+#include "Core/Compoonents/Materials/Material.h"
 #include "Core/Compoonents/Obj/Mesh.h"
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Core/Graphics/IGraphicsTexture.h"
@@ -449,6 +450,8 @@ static bool IsCompatiblePathAsset(const std::string& property,
     std::transform(name.begin(), name.end(), name.begin(),
         [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
     const std::string extension = LowerExtension(path);
+    if (name.find("shader") != std::string::npos)
+        return extension == ".hlsl";
     if (name.find("font") != std::string::npos)
         return extension == ".ttf" || extension == ".otf";
     if (name.find("audio") != std::string::npos)
@@ -596,7 +599,16 @@ bool Component::DrawProperties(::Engine::Editor::IEditorUi& ui)
         const bool mixedValue = IsEditorValueMixed(key, value);
         
         // Create appropriate control based on value type
-        if (value.IsString())
+        if (key == "shaders" && GetTypeName() == "Material" && value.IsArray())
+        {
+            auto* material = static_cast<Engine::Components::Material*>(this);
+            if (material->DrawShaderProperties(ui))
+            {
+                editedData.Set(key, material->Serialize()["shaders"]);
+                markModified(key);
+            }
+        }
+        else if (value.IsString())
         {
             const std::string stringValue = mixedValue ? "-" : value.AsString();
             

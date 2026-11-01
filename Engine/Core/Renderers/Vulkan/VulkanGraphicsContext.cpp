@@ -1,6 +1,7 @@
 #include "pch.h"
 #if defined(ENGINE_VULKAN_ENABLED)
 #include "VulkanGraphicsContext.h"
+#include "VulkanRenderPassScope.h"
 #include "VulkanGraphicsBuffer.h"
 #include "VulkanPipelineStateBuilder.h"
 #include <algorithm>
@@ -230,6 +231,7 @@ void VulkanGraphicsContextFactory::PrepareFrame(uint32_t frameSlot)
 {
     m_preparedFrameSlot = frameSlot;
     ++m_preparedFrameSerial;
+    if(m_textureSystem) m_textureSystem->PrepareFrame(frameSlot);
     if (m_occlusionState)
         m_occlusionState->Prepare(frameSlot, m_commandBuffer);
     if (m_gpuTimings)
@@ -415,9 +417,48 @@ void VulkanGraphicsContext::SetStructuredBuffer(uint32_t slot, const Engine::Gra
         index = slot - 7;
     else if (slot >= 14 && slot <= 15)
         index = slot - 9;
+    else if (slot == 45)
+        index = 7;
     else
         return;
     m_structuredBuffers[index] = dynamic_cast<const VulkanGraphicsBuffer*>(buffer);
+}
+
+bool VulkanGraphicsContext::BeginComputePass()
+{
+    if (!m_commandBuffer || m_pausedDepthTarget || m_activeOcclusionIndex != UINT32_MAX) return false;
+    if(m_activeDepthTarget)
+    {
+        if(!m_activeDepthTarget->GetLoadRenderPass()) return false;
+        vkCmdEndRenderPass(m_commandBuffer);
+        m_pausedDepthTarget=m_activeDepthTarget; m_activeDepthTarget=nullptr;
+    }
+    else PauseVulkanScenePass(m_commandBuffer);
+    return true;
+}
+void VulkanGraphicsContext::EndComputePass()
+{
+    if(m_pausedDepthTarget)
+    {
+        VkRenderPassBeginInfo begin{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
+        begin.renderPass=m_pausedDepthTarget->GetLoadRenderPass();
+        begin.framebuffer=m_pausedDepthTarget->GetFramebuffer();
+        begin.renderArea.extent={m_pausedDepthTarget->GetWidth(),m_pausedDepthTarget->GetHeight()};
+        vkCmdBeginRenderPass(m_commandBuffer,&begin,VK_SUBPASS_CONTENTS_INLINE);
+        m_activeDepthTarget=m_pausedDepthTarget; m_pausedDepthTarget=nullptr;
+    }
+    else ResumeVulkanScenePass(m_commandBuffer);
+}
+bool VulkanGraphicsContext::DrawInstancesIndirect(const Engine::Graphics::IGraphicsBuffer* buffer,
+    uint64_t offset, bool indexed)
+{
+    const auto* native=dynamic_cast<const VulkanGraphicsBuffer*>(buffer);
+    if (!m_commandBuffer || !native || offset+(indexed?20u:16u)>buffer->GetSize()) return false;
+    if (m_textureSystem && m_pipeline)
+        m_textureSystem->Bind(m_commandBuffer,m_pipeline->GetLayout(),m_textures,m_structuredBuffers);
+    if(indexed) vkCmdDrawIndexedIndirect(m_commandBuffer,native->GetBuffer(),offset,1,20);
+    else vkCmdDrawIndirect(m_commandBuffer,native->GetBuffer(),offset,1,16);
+    return true;
 }
 
 bool VulkanGraphicsContext::SetComputePipeline(
@@ -486,14 +527,14 @@ void VulkanGraphicsContext::StorageBarrier(
     VkBufferMemoryBarrier barrier{ VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER };
     barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
     barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT |
-        VK_ACCESS_SHADER_WRITE_BIT;
+        VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
     barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.buffer = native->GetBuffer();
     barrier.size = VK_WHOLE_SIZE;
     vkCmdPipelineBarrier(m_commandBuffer,
         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
+        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
         0, 0, nullptr, 1, &barrier, 0, nullptr);
 }
 

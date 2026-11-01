@@ -204,6 +204,23 @@ uint64_t D3D12OcclusionKey(uint64_t viewId, uint64_t objectId)
 }
 }
 
+struct D3D12IndirectSignatures
+{
+    Microsoft::WRL::ComPtr<ID3D12CommandSignature> signatures[2];
+    explicit D3D12IndirectSignatures(ID3D12Device* device)
+    {
+        for(unsigned indexed=0;indexed<2;++indexed)
+        {
+            D3D12_INDIRECT_ARGUMENT_DESC argument{};
+            argument.Type=indexed ? D3D12_INDIRECT_ARGUMENT_TYPE_DRAW_INDEXED:D3D12_INDIRECT_ARGUMENT_TYPE_DRAW;
+            D3D12_COMMAND_SIGNATURE_DESC descriptor{};
+            descriptor.ByteStride=indexed?20u:16u; descriptor.NumArgumentDescs=1; descriptor.pArgumentDescs=&argument;
+            if(FAILED(device->CreateCommandSignature(&descriptor,nullptr,IID_PPV_ARGS(&signatures[indexed]))))
+                throw std::runtime_error("Failed to create indirect draw signature");
+        }
+    }
+};
+
 D3D12GraphicsContext::D3D12GraphicsContext(ID3D12GraphicsCommandList* cmdList)
     : m_cmdList(cmdList)
 {
@@ -212,9 +229,10 @@ D3D12GraphicsContext::D3D12GraphicsContext(ID3D12GraphicsCommandList* cmdList)
 D3D12GraphicsContext::D3D12GraphicsContext(ID3D12GraphicsCommandList* cmdList,
     ID3D12RootSignature* rootSig,
     std::shared_ptr<D3D12OcclusionQueryState> occlusionState,
-    std::shared_ptr<D3D12GpuTimingState> gpuTimings)
+    std::shared_ptr<D3D12GpuTimingState> gpuTimings,
+    std::shared_ptr<D3D12IndirectSignatures> indirectSignatures)
     : m_cmdList(cmdList), m_rootSignature(rootSig),
-      m_occlusionState(std::move(occlusionState)), m_gpuTimings(std::move(gpuTimings))
+      m_occlusionState(std::move(occlusionState)), m_gpuTimings(std::move(gpuTimings)), m_indirectSignatures(std::move(indirectSignatures))
 {
     // Set the root signature immediately if provided
     if (m_cmdList && m_rootSignature)
@@ -374,7 +392,7 @@ void D3D12GraphicsContext::SetStructuredBuffer(uint32_t slot, const Engine::Grap
 {
     if (!buffer || !m_cmdList ||
         !((slot >= 6 && slot <= 8) || (slot >= 10 && slot <= 11) ||
-          (slot >= 14 && slot <= 15))) return;
+          (slot >= 14 && slot <= 15) || slot == 45)) return;
     const auto* structured = dynamic_cast<const D3D12GraphicsBuffer*>(buffer);
     if (!structured) return;
     // Root parameters 7-9 and 11-12 are root SRVs matching t6-t8/t10-t11.
@@ -459,7 +477,17 @@ void D3D12GraphicsContext::StorageBarrier(
     m_cmdList->ResourceBarrier(1, &barrier);
     TransitionComputeBuffer(m_cmdList, native,
         D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE |
-        D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+        D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+}
+
+bool D3D12GraphicsContext::DrawInstancesIndirect(const Engine::Graphics::IGraphicsBuffer* buffer,
+    uint64_t offset, bool indexed)
+{
+    const auto* native = dynamic_cast<const D3D12GraphicsBuffer*>(buffer);
+    if (!m_cmdList || !native || offset + (indexed ? 20u : 16u) > buffer->GetSize()) return false;
+    if(!m_indirectSignatures) return false;
+    m_cmdList->ExecuteIndirect(m_indirectSignatures->signatures[indexed?1:0].Get(),1,native->GetResource(),offset,nullptr,0);
+    return true;
 }
 
 bool D3D12GraphicsContext::CopyBuffer(
@@ -650,7 +678,8 @@ D3D12GraphicsContextFactory::D3D12GraphicsContextFactory(
     ID3D12RootSignature* rootSignature)
     : m_device(device), m_commandQueue(commandQueue), m_rootSignature(rootSignature),
       m_occlusionState(std::make_shared<D3D12OcclusionQueryState>(device)),
-      m_gpuTimings(std::make_shared<D3D12GpuTimingState>(device, commandQueue))
+      m_gpuTimings(std::make_shared<D3D12GpuTimingState>(device, commandQueue)),
+      m_indirectSignatures(std::make_shared<D3D12IndirectSignatures>(device))
 {
     // Create command allocator
     HRESULT hr = device->CreateCommandAllocator(
@@ -678,7 +707,7 @@ std::unique_ptr<Engine::Graphics::IGraphicsContext> D3D12GraphicsContextFactory:
     // otherwise fall back to the factory's own command list.
     auto* list = m_externalCmdList ? m_externalCmdList : m_cmdList.Get();
     return std::make_unique<D3D12GraphicsContext>(
-        list, m_rootSignature, m_occlusionState, m_gpuTimings);
+        list, m_rootSignature, m_occlusionState, m_gpuTimings, m_indirectSignatures);
 }
 
 void D3D12GraphicsContextFactory::SetCommandBuffer(void* cmd)

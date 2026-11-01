@@ -43,6 +43,9 @@ void GameView::DrawPanel(IEditorUi& ui)
 {
     const bool windowVisible = ui.BeginViewportWindow(m_title.c_str(), &m_open);
     SetPanelVisible(windowVisible);
+    const bool focused = ui.IsWindowFocused();
+    if (m_scene && (!windowVisible || !m_open || !focused))
+        m_scene->SetGameplayInputEnabled(false);
     if (ui.IsWindowFocused() && OnFocused) OnFocused();
     if (windowVisible)
     {
@@ -52,6 +55,14 @@ void GameView::DrawPanel(IEditorUi& ui)
         const auto input = ui.Viewport(GetUiTextureHandle(), targetAspect,
             {m_letterboxColor.r,m_letterboxColor.g,m_letterboxColor.b,m_letterboxColor.a});
         RequestRenderSize(input.available.x, input.available.y);
+        if (m_scene && focused)
+        {
+            m_scene->SetGameplayInputAnchor({
+                (input.screenMin.x + input.screenMax.x) * 0.5f,
+                (input.screenMin.y + input.screenMax.y) * 0.5f });
+            if (input.hovered && input.leftClicked)
+                m_scene->SetGameplayInputEnabled(true);
+        }
         if (m_scene)
             m_scene->SetUiPointerInput(input.mousePosInViewport.x,
                 input.mousePosInViewport.y, input.available.x, input.available.y,

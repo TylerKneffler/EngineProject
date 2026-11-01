@@ -50,20 +50,24 @@ struct ObjectData
     uint4 terrainMapMasks;
     float4 terrainLayerParams[6];
     float4 terrainMacroColors[6];
+    float4 geometryFade; // dither interval, reserved, enabled
 };
 
+struct InstanceTransform { float4 row0; float4 row1; float4 row2; };
 #ifdef VULKAN
 [[vk::push_constant]] DrawConstants draw;
 [[vk::binding(8, 0)]] StructuredBuffer<ObjectData> objects;
 [[vk::binding(9, 0)]] StructuredBuffer<float4x4> boneMatrices;
 [[vk::binding(11, 0)]] StructuredBuffer<float4> morphDeltas;
 [[vk::binding(12, 0)]] StructuredBuffer<float4> morphWeights;
+[[vk::binding(46, 0)]] StructuredBuffer<InstanceTransform> meshInstances;
 #else
 cbuffer DrawBuffer : register(b0) { DrawConstants draw; };
 StructuredBuffer<ObjectData> objects : register(t7);
 StructuredBuffer<float4x4> boneMatrices : register(t8);
 StructuredBuffer<float4> morphDeltas : register(t10);
 StructuredBuffer<float4> morphWeights : register(t11);
+StructuredBuffer<InstanceTransform> meshInstances : register(t45);
 #endif
 
 #include "../SkinDeformation.hlsli"
@@ -88,10 +92,17 @@ void VSMain(
     float4 sdefRadius0 : TEXCOORD9,
     float4 sdefRadius1 : TEXCOORD10,
     uint vertexId : SV_VertexID,
+    uint instanceId : SV_InstanceID,
     out float4 oPos : SV_POSITION)
 {
     ObjectData objectData = objects[draw.objectIndex];
     float4 localPosition = float4(pos, 1.0);
+    if ((draw.drawFlags & 0x20000000u) != 0u)
+    {
+        InstanceTransform instance = meshInstances[instanceId];
+        localPosition = float4(dot(instance.row0, localPosition),
+            dot(instance.row1, localPosition), dot(instance.row2, localPosition), 1.0);
+    }
     uint activeMorphCount = (uint)objectData.morphParams.x;
     uint morphVertexCount = (uint)objectData.morphParams.y;
     uint morphStride = (uint)objectData.morphParams.w;

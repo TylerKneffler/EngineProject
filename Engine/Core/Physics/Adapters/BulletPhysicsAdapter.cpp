@@ -1,3 +1,6 @@
+#include "Core/Compoonents/Obj/Terrain.h"
+#include "Core/Compoonents/Obj/Mesh.h"
+#include <BulletCollision/CollisionShapes/btTriangleShape.h>
 #include "Core/Physics/Adapters/BulletPhysicsAdapter.h"
 #include "Core/Compoonents/Physics/Cloth.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
@@ -723,6 +726,30 @@ bool ContactFrictionAdded(btManifoldPoint& point,
         secondObject->getCollisionObject()->getUserPointer());
     if (!first || !second)
         return false;
+    // Flat terrain is one continuous support surface. Triangle-edge normals
+    // can otherwise kick a moving capsule upward even inside a single cell.
+    // Keep non-planar terrain and ordinary mesh collisions unchanged.
+    if (second->Owner && second->Owner->GetComponent<Engine::Components::Terrain>() &&
+        secondObject->getCollisionShape()->getShapeType() == TRIANGLE_SHAPE_PROXYTYPE)
+        if (const auto* mesh = second->Owner->GetComponent<Engine::Components::Mesh>();
+            mesh && mesh->HasBounds() &&
+            std::abs(mesh->GetBoundsMax().y - mesh->GetBoundsMin().y) < 1.e-5f)
+        {
+            const auto* triangle = static_cast<const btTriangleShape*>(secondObject->getCollisionShape());
+            btVector3 faceNormal;
+            triangle->calcNormal(faceNormal);
+            faceNormal = secondObject->getWorldTransform().getBasis() * faceNormal;
+            faceNormal.normalize();
+            btScalar alignment = faceNormal.dot(point.m_normalWorldOnB);
+            if (alignment < 0) { faceNormal = -faceNormal; alignment = -alignment; }
+            if (alignment > .5f)
+            {
+                point.m_normalWorldOnB = faceNormal;
+                point.m_positionWorldOnB = point.m_positionWorldOnA - faceNormal * point.getDistance();
+                point.m_localPointB = secondObject->getCollisionObject()->getWorldTransform().invXform(
+                    point.m_positionWorldOnB);
+            }
+        }
     point.m_combinedFriction = std::clamp(
         first->ResolveFrictionFor(second) * second->ResolveFrictionFor(first),
         0.f, 1.f);
@@ -757,6 +784,9 @@ void BulletPhysicsAdapter::Step(double deltaTime)
     Engine::Scene::Scene& scene = *m_impl->scene;
     std::vector<Engine::Components::MeshObjectCollider*> meshColliders;
     for (const auto& object : scene.GetObjects())
+    {
+        if (const auto* body = object->GetComponent<Engine::Components::RigidBody>();
+            body && body->IsCollisionSuspended()) continue;
         for (Engine::Core::Component* component : object->Components)
             if (auto* collider = dynamic_cast<
                     Engine::Components::MeshObjectCollider*>(component))
@@ -764,6 +794,7 @@ void BulletPhysicsAdapter::Step(double deltaTime)
                 collider->BeginContactFrame();
                 meshColliders.push_back(collider);
             }
+    }
     // Animation updates objects before this step. Restore the previous
     // pose-only IK result before a deforming mesh collider samples the
     // skin, so the collision hull matches the pose that is rendered.
@@ -779,6 +810,7 @@ void BulletPhysicsAdapter::Step(double deltaTime)
         for (Engine::Core::Component* component : object->Components)
             if (auto* body = dynamic_cast<Engine::Components::RigidBody*>(component))
             {
+                if (body->IsCollisionSuspended()) continue;
                 EnsureRigidBodyState(*body);
                 bodies.push_back(body);
                 body->m_isColliding = false;

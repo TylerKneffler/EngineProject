@@ -512,6 +512,12 @@ void AssetInspectorTemplate::Draw(IEditorUi& ui, Engine::Scene::Scene* scene)
         if (material.LoadFromFile(m_selectedPath))
         {
             bool changed = false;
+            if (ui.PropertyGroupHeader("Shaders"))
+            {
+                ui.Indent(12.f);
+                changed |= material.DrawShaderProperties(ui, this);
+                ui.Unindent(12.f);
+            }
             const auto editTexture = [&](const char* label,
                 const std::shared_ptr<Engine::Components::Texture>& texture,
                 const auto& setter)

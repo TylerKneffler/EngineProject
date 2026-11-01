@@ -40,6 +40,7 @@ namespace Engine::Model
         uint32_t directionalResolution = 2048;
         uint32_t directionalCascadeCount = 4;
         float directionalDistance = 150.f;
+        float grassCasterDistance = 150.f;
         uint32_t pcfRadius = 1;
         float cascadeSplitLambda = 0.65f;
         float cascadeTransitionFraction = 0.1f;
@@ -68,30 +69,35 @@ namespace Engine::Model
             settings.directionalResolution = 512;
             settings.directionalCascadeCount = 1;
             settings.directionalDistance = 64.f;
+            settings.grassCasterDistance = 6.f;
             settings.pcfRadius = 0;
             break;
         case ShadowQualityPreset::Low:
             settings.directionalResolution = 512;
             settings.directionalCascadeCount = 1;
             settings.directionalDistance = 64.f;
+            settings.grassCasterDistance = 6.f;
             settings.pcfRadius = 0;
             break;
         case ShadowQualityPreset::Medium:
             settings.directionalResolution = 1024;
             settings.directionalCascadeCount = 2;
             settings.directionalDistance = 100.f;
+            settings.grassCasterDistance = 10.f;
             settings.pcfRadius = 1;
             break;
         case ShadowQualityPreset::High:
             settings.directionalResolution = 2048;
             settings.directionalCascadeCount = 4;
             settings.directionalDistance = 150.f;
+            settings.grassCasterDistance = 16.f;
             settings.pcfRadius = 1;
             break;
         case ShadowQualityPreset::Ultra:
             settings.directionalResolution = 4096;
             settings.directionalCascadeCount = 4;
             settings.directionalDistance = 250.f;
+            settings.grassCasterDistance = 24.f;
             settings.pcfRadius = 2;
             settings.portalPolicy = PortalShadowPolicy::Budgeted;
             settings.portalAtlasResolution = 2048;

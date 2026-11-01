@@ -16,7 +16,41 @@ size_t VulkanTextureSystem::TextureKeyHash::operator()(const TextureKey& key) co
     for (VkBuffer value : key.buffers)
         hash ^= std::hash<VkBuffer>{}(value) +
             0x9e3779b9 + (hash << 6) + (hash >> 2);
+    for (auto value:key.bufferIdentities)
+        hash ^= std::hash<uint64_t>{}(value)+0x9e3779b9+(hash<<6)+(hash>>2);
     return hash;
+}
+
+VkDescriptorPool VulkanTextureSystem::CreateDescriptorPool()
+{
+    VkDescriptorPoolSize sizes[3]{
+        { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 38 * 512 },
+        { VK_DESCRIPTOR_TYPE_SAMPLER, 512 },
+        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 8 * 512 }
+    };
+    VkDescriptorPoolCreateInfo poolInfo{
+        VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
+    poolInfo.maxSets = 512;
+    poolInfo.poolSizeCount = ARRAYSIZE(sizes);
+    poolInfo.pPoolSizes = sizes;
+    VkDescriptorPool pool=VK_NULL_HANDLE;
+    VkCheck(vkCreateDescriptorPool(m_device,&poolInfo,nullptr,&pool),"vkCreateDescriptorPool");
+    return pool;
+
+}
+void VulkanTextureSystem::PrepareFrame(uint32_t frameSlot)
+{
+    if(m_descriptorFrames.size()<=frameSlot) m_descriptorFrames.resize(size_t(frameSlot)+1);
+    m_descriptorFrame=frameSlot;
+    auto& frame=m_descriptorFrames[frameSlot];
+    if(frame.pools.empty()) frame.pools.push_back(CreateDescriptorPool());
+    // The renderer has waited for this slot's fence. Reset only when stale
+    // resources have filled its cache; descriptors in other slots remain live.
+    if(frame.sets.size()>384)
+    {
+        for(auto pool:frame.pools) VkCheck(vkResetDescriptorPool(m_device,pool,0),"vkResetDescriptorPool(material)");
+        frame.sets.clear(); frame.activePool=0;
+    }
 }
 
 VulkanTextureSystem::VulkanTextureSystem(
@@ -29,7 +63,7 @@ VulkanTextureSystem::VulkanTextureSystem(
       m_queue(queue),
       m_queueFamily(queueFamily)
 {
-    VkDescriptorSetLayoutBinding bindings[46]{};
+    VkDescriptorSetLayoutBinding bindings[47]{};
     for (uint32_t binding = 0; binding < 6; ++binding)
     {
         bindings[binding].binding = binding;
@@ -101,6 +135,10 @@ VulkanTextureSystem::VulkanTextureSystem(
         bindings[28 + index].descriptorCount = 1;
         bindings[28 + index].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
     }
+    bindings[46].binding = 46;
+    bindings[46].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    bindings[46].descriptorCount = 1;
+    bindings[46].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
     VkDescriptorSetLayoutCreateInfo layoutInfo{
         VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
     layoutInfo.bindingCount = ARRAYSIZE(bindings);
@@ -108,18 +146,7 @@ VulkanTextureSystem::VulkanTextureSystem(
     VkCheck(vkCreateDescriptorSetLayout(
         m_device, &layoutInfo, nullptr, &m_layout), "vkCreateDescriptorSetLayout");
 
-    VkDescriptorPoolSize sizes[3]{
-        { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 38 * 512 },
-        { VK_DESCRIPTOR_TYPE_SAMPLER, 512 },
-        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 7 * 512 }
-    };
-    VkDescriptorPoolCreateInfo poolInfo{
-        VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
-    poolInfo.maxSets = 512;
-    poolInfo.poolSizeCount = ARRAYSIZE(sizes);
-    poolInfo.pPoolSizes = sizes;
-    VkCheck(vkCreateDescriptorPool(
-        m_device, &poolInfo, nullptr, &m_pool), "vkCreateDescriptorPool");
+    PrepareFrame(0);
 
     VkSamplerCreateInfo samplerInfo{ VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
     samplerInfo.magFilter = VK_FILTER_LINEAR;
@@ -182,12 +209,12 @@ void VulkanTextureSystem::Shutdown()
     if (m_dummyBuffer) vkDestroyBuffer(m_device, m_dummyBuffer, nullptr);
     if (m_dummyBufferMemory) vkFreeMemory(m_device, m_dummyBufferMemory, nullptr);
     if (m_sampler) vkDestroySampler(m_device, m_sampler, nullptr);
-    if (m_pool) vkDestroyDescriptorPool(m_device, m_pool, nullptr);
+    for(auto& frame:m_descriptorFrames) for(auto pool:frame.pools) vkDestroyDescriptorPool(m_device,pool,nullptr);
+    m_descriptorFrames.clear();
     if (m_layout) vkDestroyDescriptorSetLayout(m_device, m_layout, nullptr);
     m_dummyBuffer = VK_NULL_HANDLE;
     m_dummyBufferMemory = VK_NULL_HANDLE;
     m_sampler = VK_NULL_HANDLE;
-    m_pool = VK_NULL_HANDLE;
     m_layout = VK_NULL_HANDLE;
     m_device = VK_NULL_HANDLE;
 }
@@ -383,6 +410,14 @@ std::shared_ptr<VulkanGraphicsTexture> VulkanTextureSystem::CreateDepthTexture(
     VkRenderPass renderPass = VK_NULL_HANDLE;
     VkCheck(vkCreateRenderPass(m_device, &passInfo, nullptr, &renderPass),
         "vkCreateRenderPass(shadow)");
+    // Compatible resume pass preserves shadow depth across compute dispatches.
+    attachments[1].loadOp=VK_ATTACHMENT_LOAD_OP_LOAD;
+    attachments[1].initialLayout=VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    dependencies[0].srcStageMask|=VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+    dependencies[0].srcAccessMask|=VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    dependencies[0].dstAccessMask|=VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
+    VkRenderPass loadRenderPass=VK_NULL_HANDLE;
+    VkCheck(vkCreateRenderPass(m_device,&passInfo,nullptr,&loadRenderPass),"vkCreateRenderPass(shadow resume)");
     VkImageView views[] = { color.view, depth.view };
     VkFramebufferCreateInfo framebufferInfo{ VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
     framebufferInfo.renderPass = renderPass;
@@ -395,7 +430,7 @@ std::shared_ptr<VulkanGraphicsTexture> VulkanTextureSystem::CreateDepthTexture(
     VkCheck(vkCreateFramebuffer(m_device, &framebufferInfo, nullptr, &framebuffer),
         "vkCreateFramebuffer(shadow)");
     auto texture = std::make_shared<VulkanGraphicsTexture>(shared_from_this(), depth);
-    texture->SetDepthTargetResources(color, renderPass, framebuffer, width, height);
+    texture->SetDepthTargetResources(color, renderPass, loadRenderPass, framebuffer, width, height);
     return texture;
 }
 
@@ -403,31 +438,41 @@ void VulkanTextureSystem::Bind(
     VkCommandBuffer commands,
     VkPipelineLayout pipelineLayout,
     const std::array<const VulkanGraphicsTexture*, 30>& textures,
-    const std::array<const VulkanGraphicsBuffer*, 7>& buffers)
+    const std::array<const VulkanGraphicsBuffer*, 8>& buffers)
 {
+    auto& frame=m_descriptorFrames[m_descriptorFrame];
     TextureKey key{};
     for (size_t index = 0; index < textures.size(); ++index)
         key.views[index] =
             textures[index] ? textures[index]->GetView() : m_white.view;
     for (size_t index = 0; index < buffers.size(); ++index)
+    {
         key.buffers[index] =
             buffers[index] ? buffers[index]->GetBuffer() : m_dummyBuffer;
+        key.bufferIdentities[index] = buffers[index] ? buffers[index]->GetIdentity() : 0;
+    }
 
     VkDescriptorSet set = VK_NULL_HANDLE;
-    if (auto found = m_sets.find(key); found != m_sets.end())
+    if (auto found = frame.sets.find(key); found != frame.sets.end())
         set = found->second;
     else
     {
         VkDescriptorSetAllocateInfo allocate{
             VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
-        allocate.descriptorPool = m_pool;
+        allocate.descriptorPool = frame.pools[frame.activePool];
         allocate.descriptorSetCount = 1;
         allocate.pSetLayouts = &m_layout;
-        VkCheck(vkAllocateDescriptorSets(m_device, &allocate, &set),
-            "vkAllocateDescriptorSets(material)");
+        VkResult allocation=vkAllocateDescriptorSets(m_device,&allocate,&set);
+        if(allocation==VK_ERROR_OUT_OF_POOL_MEMORY || allocation==VK_ERROR_FRAGMENTED_POOL)
+        {
+            if(++frame.activePool>=frame.pools.size()) frame.pools.push_back(CreateDescriptorPool());
+            allocate.descriptorPool=frame.pools[frame.activePool];
+            allocation=vkAllocateDescriptorSets(m_device,&allocate,&set);
+        }
+        VkCheck(allocation,"vkAllocateDescriptorSets(material)");
 
         VkDescriptorImageInfo images[38]{};
-        VkWriteDescriptorSet writes[46]{};
+        VkWriteDescriptorSet writes[47]{};
         for (uint32_t index = 0; index < 6; ++index)
         {
             images[index].imageView =
@@ -523,11 +568,11 @@ void VulkanTextureSystem::Bind(
         writes[6].descriptorCount = 1;
         writes[6].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
         writes[6].pImageInfo = &samplerInfo;
-        VkDescriptorBufferInfo bufferInfos[7]{};
-        for (uint32_t index = 0; index < 7; ++index)
+        VkDescriptorBufferInfo bufferInfos[8]{};
+        for (uint32_t index = 0; index < 8; ++index)
         {
             const uint32_t binding = index < 3 ? index + 7 :
-                (index < 5 ? index + 8 : index + 10);
+                (index < 5 ? index + 8 : index < 7 ? index + 10 : 46);
             bufferInfos[index].buffer =
                 buffers[index] ? buffers[index]->GetBuffer() : m_dummyBuffer;
             bufferInfos[index].range =
@@ -540,7 +585,7 @@ void VulkanTextureSystem::Bind(
             writes[binding].pBufferInfo = &bufferInfos[index];
         }
         vkUpdateDescriptorSets(m_device, ARRAYSIZE(writes), writes, 0, nullptr);
-        m_sets.emplace(key, set);
+        frame.sets.emplace(key, set);
     }
     vkCmdBindDescriptorSets(
         commands, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout,
@@ -558,20 +603,23 @@ void VulkanGraphicsTexture::ReleaseImage(VkDevice device)
 {
     if (device && m_framebuffer) vkDestroyFramebuffer(device, m_framebuffer, nullptr);
     if (device && m_renderPass) vkDestroyRenderPass(device, m_renderPass, nullptr);
+    if (device && m_loadRenderPass) vkDestroyRenderPass(device, m_loadRenderPass, nullptr);
     if (device) VulkanDestroyImage(device, m_depthColor);
     if (device) VulkanDestroyImage(device, m_image);
     m_framebuffer = VK_NULL_HANDLE;
     m_renderPass = VK_NULL_HANDLE;
+    m_loadRenderPass = VK_NULL_HANDLE;
     m_depthColor = {};
     m_image = {};
 }
 
 void VulkanGraphicsTexture::SetDepthTargetResources(VulkanImageResource color,
-    VkRenderPass renderPass, VkFramebuffer framebuffer,
+    VkRenderPass renderPass, VkRenderPass loadRenderPass, VkFramebuffer framebuffer,
     uint32_t width, uint32_t height)
 {
     m_depthColor = color;
     m_renderPass = renderPass;
+    m_loadRenderPass = loadRenderPass;
     m_framebuffer = framebuffer;
     m_width = width;
     m_height = height;

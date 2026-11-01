@@ -48,6 +48,8 @@ public:
     // mechanism that makes a component update.
     virtual void Start() {}
     virtual void Update() {}
+    // Components with only authored/render data opt out of frame callbacks.
+    virtual bool RequiresUpdate() const { return true; }
     virtual void Enabled() {}
     virtual void Disabled() {}
     virtual void OnDestroy() {}

@@ -63,6 +63,9 @@ public:
     // Shows the window. Must be called after setting up OnUpdate, OnResize, and WndProcHook.
     void Show();
 
+    // Release the pointer when the host pauses or stops gameplay.
+    void ReleaseGameplayInput();
+
     // Enters the message loop. Blocks until WM_QUIT is received. Escape
     // releases input focus/cursor capture. Use the close button or Alt+F4 to exit.
     // Returns the wParam value from WM_QUIT, conventionally the exit code.

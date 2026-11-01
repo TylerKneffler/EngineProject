@@ -67,6 +67,15 @@ public:
     bool generateColliders = false;
     // Keep terrain collision active only near the viewer.
     bool streamCollidersByDistance = true;
+    // Collision-only management for authored Terrain descendants. Their
+    // meshes and grass remain resident; no cell loading/unloading is performed.
+    bool manageAuthoredCellColliders = false;
+    // Activate the current cell and at most one neighbor per axis near an edge.
+    float colliderActivationDistance = 1.f;
+    void UpdateColliderStreamingAtPosition(const glm::dvec3& worldPosition);
+    size_t GetActiveColliderCellCount() const { return m_activeColliderCells; }
+    size_t GetManagedColliderCellCount() const
+    { return manageAuthoredCellColliders ? m_authoredCollisionCells.size() : m_loaded.size(); }
     // Terrain mesh and cell data only; shared textures and renderer targets are excluded.
     int cpuBudgetMiB = 512;
     int gpuBudgetMiB = 256;
@@ -398,6 +407,11 @@ private:
     void RefreshRenderBatches(int uploadBudget, int centerX, int centerY,
         int radius);
     void RefreshColliderActivation(int centerX, int centerY);
+    void RefreshAuthoredCollisionCells();
+    std::map<Cell, Terrain*> m_authoredCollisionCells;
+    uint64_t m_authoredCollisionRevision = 0;
+    std::optional<glm::dvec3> m_collisionViewerLocal;
+    size_t m_activeColliderCells = 0;
     void TrimMemoryBudget(int centerX, int centerY);
     bool ReserveCacheWrite(const std::string& path, const Terrain& terrain);
     bool SaveEdit(Cell cell, const Terrain& terrain) const;

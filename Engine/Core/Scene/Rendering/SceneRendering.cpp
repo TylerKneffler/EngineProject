@@ -1,3 +1,5 @@
+#include "Core/Rendering/ShadowReceiverCulling.h"
+#include "Core/Rendering/RenderJobs.h"
 #include "Core/Scene/Scene.h"
 #include <chrono>
 #include "Core/Compoonents/Camera/Camera.h"
@@ -27,6 +29,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cctype>
 #include <cstring>
 #include <stdexcept>
 #include <filesystem>
@@ -298,6 +301,7 @@ struct ObjectGPUData
     glm::uvec4 terrainMapMasks{ 0u }; // normal, roughness, height, reserved
     glm::vec4 terrainLayerParams[6]{}; // roughness, normal scale, height blend, reserved
     glm::vec4 terrainMacroColors[6]{}; // measured linear albedo averages
+    glm::vec4 geometryFade{0.f, 1.f, 0.f, 0.f}; // dither interval, reserved, enabled
 };
 
 // Constant buffer for grid rendering
@@ -345,7 +349,7 @@ struct ParticleCBData
 };
 
 static_assert(sizeof(DrawCBData) == 16, "Draw constants must remain small");
-static_assert(sizeof(ObjectGPUData) == 1472, "Object buffer layout must match Object.hlsl");
+static_assert(sizeof(ObjectGPUData) == 1488, "Object buffer layout must match Object.hlsl");
 static_assert(sizeof(Engine::Model::LightData) == 128,
     "Light buffer layout must match Object.hlsl");
 static_assert(sizeof(GridCBData) == 128, "Grid constant-buffer layout must match Grid.hlsl");
@@ -615,6 +619,45 @@ void Scene::EnsureObjectRenderCapacity(uint32_t requiredObjects)
     m_objectCapacity = capacity;
 }
 
+void Scene::SelectRenderPassBuffers()
+{
+    auto* contexts=m_graphicsProvider->GetContextFactory();
+    const auto frameSlot=contexts->GetPreparedFrameSlot();
+    const auto serial=contexts->GetPreparedFrameSerial();
+    if(m_renderPassBufferSlots.size()<=frameSlot) m_renderPassBufferSlots.resize(size_t(frameSlot)+1);
+    auto& slot=m_renderPassBufferSlots[frameSlot];
+    if(slot.serial!=serial) { slot.serial=serial; slot.cursor=0; }
+    if(slot.passes.size()<=slot.cursor) slot.passes.push_back(std::make_unique<RenderPassBuffers>());
+    auto* selected=slot.passes[slot.cursor++].get();
+    const auto exchange=[&](RenderPassBuffers& buffers) {
+        using std::swap;
+        swap(buffers.constants,m_objectConstantBuffer); swap(buffers.objects,m_objectDataBuffer);
+        swap(buffers.shadowConstants,m_shadowConstantBuffer); swap(buffers.shadowObjects,m_shadowObjectDataBuffer);
+        swap(buffers.constantsMapped,m_objectCBMapped); swap(buffers.objectsMapped,m_objectDataMapped);
+        swap(buffers.shadowConstantsMapped,m_shadowCBMapped); swap(buffers.shadowObjectsMapped,m_shadowObjectDataMapped);
+        swap(buffers.capacity,m_objectCapacity);
+    };
+    if(!m_activeRenderPassBuffers) { m_activeRenderPassBuffers=selected; return; }
+    const uint32_t requiredCapacity=m_objectCapacity;
+    exchange(*m_activeRenderPassBuffers);
+    if(!selected->objects)
+    {
+        selected->capacity=requiredCapacity;
+        const uint64_t capacity=requiredCapacity;
+        const uint64_t constants=capacity+kMaxPortalRenderViews*(capacity+2)+kMaxSpatialDebugDraws;
+        auto* factory=m_graphicsProvider->GetBufferFactory();
+        using Buffer=Engine::Graphics::IGraphicsBuffer;
+        selected->constants=factory->CreateBuffer(Buffer::Usage::ConstantBuffer,Buffer::AccessMode::Upload,constants*kCBStride,nullptr,sizeof(DrawCBData));
+        selected->objects=factory->CreateBuffer(Buffer::Usage::ShaderResource,Buffer::AccessMode::Upload,(capacity+kMaxSpatialDebugDraws)*sizeof(ObjectGPUData),nullptr,sizeof(ObjectGPUData));
+        selected->shadowConstants=factory->CreateBuffer(Buffer::Usage::ConstantBuffer,Buffer::AccessMode::Upload,capacity*4*kCBStride,nullptr,sizeof(DrawCBData));
+        selected->shadowObjects=factory->CreateBuffer(Buffer::Usage::ShaderResource,Buffer::AccessMode::Upload,capacity*4*sizeof(ObjectGPUData),nullptr,sizeof(ObjectGPUData));
+        selected->constantsMapped=selected->constants->Map(); selected->objectsMapped=selected->objects->Map();
+        selected->shadowConstantsMapped=selected->shadowConstants->Map(); selected->shadowObjectsMapped=selected->shadowObjects->Map();
+    }
+    exchange(*selected); m_activeRenderPassBuffers=selected;
+    EnsureObjectRenderCapacity(std::max(1u,static_cast<uint32_t>(m_frameRenderItems.size())));
+}
+
 void Scene::EnsureSkinPaletteCapacity(uint32_t requiredMatrices)
 {
     if (requiredMatrices <= m_boneMatrixCapacity)
@@ -809,12 +852,12 @@ void Scene::BuildGridPipeline()
     std::string shaderPath = EngineShaderPath("Grid.hlsl");
     std::string currentDir = std::filesystem::current_path().string();
     std::string absolutePath = std::filesystem::absolute(shaderPath).string();
-    
+
     OutputDebugStringA(("[Scene::BuildGridPipeline] Current directory: " + currentDir + "\n").c_str());
     OutputDebugStringA(("[Scene::BuildGridPipeline] Shader path: " + shaderPath + "\n").c_str());
     OutputDebugStringA(("[Scene::BuildGridPipeline] Absolute path: " + absolutePath + "\n").c_str());
     OutputDebugStringA(("[Scene::BuildGridPipeline] File exists: " + std::string(std::filesystem::exists(shaderPath) ? "YES" : "NO") + "\n").c_str());
-    
+
     auto vsShader = shaderCompiler->CompileFromFile(
         shaderPath.c_str(),
         "VSMain",
@@ -834,7 +877,7 @@ void Scene::BuildGridPipeline()
     if (!builder)
         throw std::runtime_error("Failed to create pipeline state builder");
 
-    // Grid pipeline: 
+    // Grid pipeline:
     // - No vertex buffer (fullscreen triangle via SV_VertexID)
     // - Alpha blend for semi-transparency
     // - Preserve scene alpha under transparent grid cells and lines
@@ -860,7 +903,7 @@ void Scene::BuildGridPipeline()
         .SetPrimitiveTopology(Engine::Graphics::IPipelineStateBuilder::PrimitiveTopology::TriangleList)
         .SetRenderTargetFormat(10, 20)         // DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_FORMAT_D32_FLOAT_S8X24_UINT
         .Build();
-    
+
     if (!m_gridPipeline)
         throw std::runtime_error("Failed to build grid pipeline: " + builder->GetLastError());
 }
@@ -1210,6 +1253,63 @@ void Scene::RenderParticles(IGraphicsContext* context,
         context->EndGpuTiming(Engine::Graphics::GpuTimingStage::Transparent);
 }
 
+Scene::IPipelineState* Scene::ResolveMaterialShaderPipeline(
+    const std::string& requestedPath, IPipelineState* base, bool terrain,
+    bool overlay, const std::string& blendMode, std::string& error)
+{
+    if (requestedPath.empty() && !overlay && blendMode == "Auto")
+    {
+        error.clear();
+        return base;
+    }
+    const std::string path = requestedPath.empty()
+        ? EngineShaderPath("Object.hlsl") : requestedPath;
+    const std::string key = std::to_string(reinterpret_cast<uintptr_t>(base)) +
+        "|" + (overlay ? "overlay|" : "surface|") + blendMode + "|" + path;
+    std::error_code fileError;
+    const auto modified = std::filesystem::last_write_time(path, fileError);
+    const int64_t stamp = fileError ? 0 : modified.time_since_epoch().count();
+    auto found = m_materialShaderPipelines.find(key);
+    if (found != m_materialShaderPipelines.end() && found->second.sourceStamp == stamp)
+    {
+        error = found->second.error;
+        return found->second.pipeline.get();
+    }
+    auto& cached = m_materialShaderPipelines[key];
+    if (cached.pipeline)
+        m_retiredMaterialShaderPipelines.push_back(std::move(cached.pipeline));
+    cached.sourceStamp = stamp;
+    cached.error.clear();
+    try
+    {
+        std::string extension = std::filesystem::path(path).extension().string();
+        std::transform(extension.begin(), extension.end(), extension.begin(),
+            [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        if (extension != ".hlsl")
+            throw std::runtime_error("Material shader must reference an .hlsl asset: " + path);
+        if (fileError)
+            throw std::runtime_error("Material shader asset not found: " + path);
+        const auto builder = m_materialShaderBuilders.find(base);
+        if (builder == m_materialShaderBuilders.end())
+            throw std::runtime_error("Material shader is unsupported for this render pass");
+        auto* compiler = m_graphicsProvider->GetShaderCompiler();
+        const char* vertexEntry = terrain ? "VSTerrainMain" : "VSMain";
+        auto vertex = compiler->CompileFromFile(path, vertexEntry,
+            Engine::Graphics::IShaderCompiler::CompileProfile::VS_5_0);
+        if (!vertex) throw std::runtime_error(path + ": " + compiler->GetLastError());
+        auto pixel = compiler->CompileFromFile(path, "PSMain",
+            Engine::Graphics::IShaderCompiler::CompileProfile::PS_5_0);
+        if (!pixel) throw std::runtime_error(path + ": " + compiler->GetLastError());
+        cached.pipeline = builder->second(vertex.get(), pixel.get(), overlay, blendMode);
+    }
+    catch (const std::exception& exception)
+    {
+        cached.error = exception.what();
+    }
+    error = cached.error;
+    return cached.pipeline.get();
+}
+
 void Scene::BuildObjectPipeline()
 {
     if (!m_graphicsProvider)
@@ -1279,6 +1379,9 @@ void Scene::BuildObjectPipeline()
         { "COLOR",    0, 2, 0, 32, false },
     };
     m_terrainPipelineByBase.clear();
+    m_materialShaderBuilders.clear();
+    m_materialShaderPipelines.clear();
+    m_retiredMaterialShaderPipelines.clear();
 
     enum class PortalStencilMode
     {
@@ -1289,22 +1392,28 @@ void Scene::BuildObjectPipeline()
         Read
     };
 
-    auto buildMaterialPipelineVariant = [&](bool doubleSided, bool blend,
+    // The same state builder is used by built-in and asset-backed passes so
+    // terrain layouts, wireframe, culling and portal stencil tests stay aligned.
+    auto buildConfiguredMaterialPipeline = [pipelineFactory, layout, terrainLayout](
+                                     const Engine::Graphics::IShader* vertex,
+                                     const Engine::Graphics::IShader* pixel,
+                                     bool doubleSided, bool blend,
                                      bool wireframe,
                                      PortalStencilMode stencilMode,
                                      bool colorWriteEnabled,
                                      const char* description,
                                      bool terrainFormat,
-                                     bool shadowPass = false)
+                                     bool overlay, const std::string& blendMode)
     {
+        if (blendMode == "Opaque") blend = false;
+        else if (blendMode == "Alpha" || blendMode == "Additive" || overlay) blend = true;
         auto materialBuilder = pipelineFactory->CreateBuilder();
         if (!materialBuilder)
             throw std::runtime_error(
                 std::string("Failed to create ") + description +
                 " pipeline state builder");
-        auto& state = materialBuilder->SetVertexShader(
-                terrainFormat ? terrainVsShader.get() : vsShader.get())
-            .SetPixelShader(shadowPass ? shadowPsShader.get() : psShader.get())
+        auto& state = materialBuilder->SetVertexShader(vertex)
+            .SetPixelShader(pixel)
             .SetFillMode(wireframe)
             .SetCullMode(!doubleSided)
             .SetFrontCounterClockwise(false)
@@ -1314,7 +1423,7 @@ void Scene::BuildObjectPipeline()
         if (blend)
         {
             state.SetSrcBlend(4)
-                .SetDestBlend(5)
+                .SetDestBlend(blendMode == "Additive" ? 1 : 5)
                 .SetBlendOp(0)
                 .SetSrcBlendAlpha(1)
                 .SetDestBlendAlpha(0)
@@ -1365,12 +1474,12 @@ void Scene::BuildObjectPipeline()
                 stencilMode == PortalStencilMode::ResetDepth ? true :
                 stencilMode == PortalStencilMode::Write ||
                 stencilMode == PortalStencilMode::Increment
-                    ? false : !blend)
+                    ? false : (!overlay && !blend))
             .SetDepthFunc(
                 stencilMode == PortalStencilMode::ResetDepth ? 7 :
                 stencilMode == PortalStencilMode::Write ||
                 stencilMode == PortalStencilMode::Increment
-                ? 3 : (blend ? 3 : 1))
+                ? 3 : ((blend || overlay) ? 3 : 1))
             .SetInputLayout(terrainFormat ? terrainLayout : layout,
                 terrainFormat ? 4u : 18u)
             .SetPrimitiveTopology(
@@ -1381,6 +1490,33 @@ void Scene::BuildObjectPipeline()
             throw std::runtime_error(
                 std::string("Failed to build ") + description +
                 " pipeline: " + materialBuilder->GetLastError());
+        return pipeline;
+    };
+
+    auto buildMaterialPipelineVariant = [&](bool doubleSided, bool blend,
+                                     bool wireframe,
+                                     PortalStencilMode stencilMode,
+                                     bool colorWriteEnabled,
+                                     const char* description,
+                                     bool terrainFormat,
+                                     bool shadowPass = false)
+    {
+        auto pipeline = buildConfiguredMaterialPipeline(
+            terrainFormat ? terrainVsShader.get() : vsShader.get(),
+            shadowPass ? shadowPsShader.get() : psShader.get(),
+            doubleSided, blend, wireframe, stencilMode, colorWriteEnabled,
+            description, terrainFormat, false, "Auto");
+        if (colorWriteEnabled && !shadowPass)
+            m_materialShaderBuilders.emplace(pipeline.get(),
+                [buildConfiguredMaterialPipeline, doubleSided, blend, wireframe,
+                 stencilMode, terrainFormat](const Engine::Graphics::IShader* vertex,
+                    const Engine::Graphics::IShader* pixel, bool overlay,
+                    const std::string& blendMode)
+                {
+                    return buildConfiguredMaterialPipeline(vertex, pixel,
+                        doubleSided, blend, wireframe, stencilMode, true,
+                        "material shader asset", terrainFormat, overlay, blendMode);
+                });
         return pipeline;
     };
 
@@ -1655,17 +1791,19 @@ void Scene::PrepareRenderFrame()
         ? PrepareClock::now() : PrepareClock::time_point{};
     m_renderFramePrepared = false;
     m_frameRenderItems.clear();
+    ++m_materialPreparationSerial;
     m_frameLightCount = 0;
     m_lastSkinnedObjectCount = 0;
 
     if (!m_graphicsProvider || !m_lightDataMapped || !m_boneDataMapped)
         return;
 
+    if (m_frameLookupRevision != GetStructureRevision() || m_frameLookupEditPose != m_editorMeshEditPose)
+    {
     m_frameComponentLookupScratch.clear();
     m_frameComponentLookupScratch.reserve(m_objects.size());
     m_frameSpatialManipulatorScratch.clear();
     m_frameSpatialManipulatorScratch.reserve(m_objects.size());
-    size_t requiredBoneMatrices = 0;
     for (const auto& object : m_objects)
     {
         FrameComponentLookup lookup{};
@@ -1687,12 +1825,26 @@ void Scene::PrepareRenderFrame()
             if (lookup.spatialManipulator)
                 m_frameSpatialManipulatorScratch.push_back(
                     lookup.spatialManipulator);
-            if (lookup.skinnedMesh)
-                if (const auto* skeleton = lookup.skinnedMesh->ResolveSkeleton())
-                    requiredBoneMatrices += skeleton->jointNodes.size();
+
         }
         m_frameComponentLookupScratch.push_back(lookup);
     }
+        m_frameLookupRevision = GetStructureRevision();
+        m_frameLookupEditPose = m_editorMeshEditPose;
+    }
+    if(m_materialCacheStructureRevision!=GetStructureRevision())
+    {
+        std::unordered_set<const Engine::Components::Material*> live;
+        for(const auto& lookup:m_frameComponentLookupScratch) if(lookup.material) live.insert(lookup.material);
+        for(auto it=m_renderMaterialCache.begin();it!=m_renderMaterialCache.end();)
+            if(!live.count(it->first)) it=m_renderMaterialCache.erase(it); else ++it;
+        m_materialCacheStructureRevision=GetStructureRevision();
+    }
+    size_t requiredBoneMatrices = 0;
+    for (const auto& lookup : m_frameComponentLookupScratch)
+        if (lookup.skinnedMesh)
+            if (const auto* skeleton = lookup.skinnedMesh->ResolveSkeleton())
+                requiredBoneMatrices += skeleton->jointNodes.size();
     if (requiredBoneMatrices > std::numeric_limits<uint32_t>::max())
         throw std::runtime_error("Bone matrix count exceeds renderer index range");
     EnsureSkinPaletteCapacity(static_cast<uint32_t>(requiredBoneMatrices));
@@ -2027,7 +2179,55 @@ void Scene::PrepareRenderFrame()
             }
         }
 
-        m_frameRenderItems.push_back(item);
+        const auto appendGeometry = [&](FrameRenderItem draw) {
+            Engine::Components::Mesh* source = draw.mesh;
+            if (source && !draw.warpedVertexBuffer)
+                draw.geometryFade = source->GetRuntimeGeometryFade();
+            if(source && source->IsInstanced() && source->gpuLodSelection &&
+                draw.object!=m_selectedObject && source!=m_editorSelectedMesh && source!=m_editorWeightPaintMesh &&
+                !draw.warpedVertexBuffer && !draw.traversalChartPortal && source->IsRuntimeLodResident(0) && source->IsRuntimeLodResident(1) &&
+                (!draw.material || std::none_of(draw.material->shaders.begin(),draw.material->shaders.end(),[](const auto& shader){return shader.enabled;})))
+            {
+                draw.gpuMaximumLod=source->IsRuntimeLodResident(2) ? 2:1;
+                draw.gpuLodDistances={std::max(0.f,source->gpuLod1Distance),std::max(source->gpuLod1Distance,source->gpuLod2Distance)};
+                if(draw.gpuMaximumLod==1) draw.gpuLodDistances.y=1.e20f;
+                draw.geometryFade={0,draw.gpuLodDistances.x,draw.gpuLodDistances.y,2.f+source->GetRuntimeVisibility()};
+                m_frameRenderItems.push_back(draw);
+                return;
+            }
+            if (source && source->gpuLodSelection && draw.object!=m_selectedObject &&
+                source!=m_editorSelectedMesh && source!=m_editorWeightPaintMesh && !source->IsInstanced() &&
+                !source->HasMorphTargets() && !source->HasSurfaceOffsets() && !draw.skinJointCount &&
+                !draw.warpedVertexBuffer && !draw.traversalChartPortal && source->IsRuntimeLodResident(0) &&
+                source->IsRuntimeLodResident(1))
+            {
+                const int maximumLod = source->IsRuntimeLodResident(2) ? 2 : 1;
+                for (int lod=0;lod<=maximumLod;++lod)
+                {
+                    draw.mesh=source->GetRuntimeLodMesh(lod);
+                    draw.mesh->useLightProbes=source->useLightProbes;
+                    draw.mesh->grassShadowCaster=source->grassShadowCaster;
+                    draw.mesh->useBoundsForShadowCulling=source->useBoundsForShadowCulling;
+                    draw.gpuLod=lod; draw.gpuMaximumLod=maximumLod;
+                    draw.gpuLodDistances={std::max(0.f,source->gpuLod1Distance),
+                        std::max(source->gpuLod1Distance,source->gpuLod2Distance)};
+                    if(source->IsInstanced() && maximumLod==1) draw.gpuLodDistances.y=1.e20f;
+                    if(source->IsInstanced()) draw.geometryFade={float(lod),draw.gpuLodDistances.x,draw.gpuLodDistances.y,2.f+source->GetRuntimeVisibility()};
+                    m_frameRenderItems.push_back(draw);
+                }
+                return;
+            }
+            m_frameRenderItems.push_back(draw);
+            if (source && !draw.warpedVertexBuffer)
+                if (auto* previous = source->GetPreviousRuntimeLodMesh())
+                {
+                    draw.mesh = previous;
+                    previous->grassShadowCaster=source->grassShadowCaster;
+                    draw.geometryFade = source->GetRuntimeGeometryFade(true);
+                    m_frameRenderItems.push_back(draw);
+                }
+        };
+        appendGeometry(item);
         if (hasSplitRenderInstances)
         {
             for (size_t index = 1u; index < splitInstances->second.size(); ++index)
@@ -2037,7 +2237,7 @@ void Scene::PrepareRenderFrame()
                 remoteItem.traversalClipPlane = splitInstances->second[index].clipPlane;
                 remoteItem.traversalChartPortal =
                     splitInstances->second[index].chartPortal;
-                m_frameRenderItems.push_back(remoteItem);
+                appendGeometry(remoteItem);
             }
         }
     }
@@ -2061,6 +2261,19 @@ void Scene::PrepareRenderFrame()
             ms(afterLookup, afterItems), ms(afterItems, afterBoneUpload),
             ms(afterBoneUpload, PrepareClock::now()) };
     }
+    const auto spatialStart=PrepareClock::now();
+    std::vector<Engine::Rendering::RenderBounds> spatialBounds;
+    spatialBounds.reserve(m_frameRenderItems.size());
+    for (const auto& item : m_frameRenderItems)
+    {
+        auto* mesh = item.mesh;
+        if (mesh && mesh->HasBounds() && !item.skinJointCount && !mesh->HasMorphTargets() &&
+            !mesh->HasSurfaceOffsets() && !item.warpedVertexBuffer && !item.traversalChartPortal)
+            spatialBounds.push_back(Engine::Rendering::TransformBounds(mesh->GetBoundsMin(), mesh->GetBoundsMax(), item.world));
+        else spatialBounds.push_back({});
+    }
+    m_renderSpatialIndex.Update(std::move(spatialBounds));
+    m_lastPrepareTimings.spatialMs=std::chrono::duration<double,std::milli>(PrepareClock::now()-spatialStart).count();
     m_renderFramePrepared = true;
 }
 
@@ -2072,6 +2285,28 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     Engine::Components::Camera* cameraOverride, bool includeEditorVisuals,
     uint32_t viewportWidth, uint32_t viewportHeight, bool shadowOnly)
 {
+    using RenderClock = std::chrono::steady_clock;
+    m_lastRenderCpuTimings={};
+    struct RenderMeasurement
+    {
+        RenderCpuTimings& metrics;
+        const uint32_t& draws; const uint64_t& triangles;
+        Engine::Rendering::RenderJobs::Statistics jobs=Engine::Rendering::RenderJobs::Get().ReadStatistics();
+        RenderClock::time_point start=RenderClock::now();
+        ~RenderMeasurement()
+        {
+            metrics.totalMs=std::chrono::duration<double,std::milli>(RenderClock::now()-start).count();
+            const auto endJobs=Engine::Rendering::RenderJobs::Get().ReadStatistics();
+            metrics.workerActiveMs=double(endJobs.workerNs-jobs.workerNs)/1.e6;
+            metrics.mainJobMs=double(endJobs.callerNs-jobs.callerNs)/1.e6;
+            metrics.workerWaitMs=double(endJobs.waitNs-jobs.waitNs)/1.e6;
+            metrics.workerJobs=endJobs.jobs-jobs.jobs; metrics.workerTasks=endJobs.workerTasks-jobs.workerTasks;
+            metrics.otherMs=std::max(0.,metrics.totalMs-metrics.startupMs-metrics.terrainPreparationMs-
+                metrics.cullingMs-metrics.sortingMs-metrics.occlusionMs-metrics.materialMs-
+                metrics.batchingMs-metrics.uploadMs-metrics.submissionMs-metrics.retainedUiMs-metrics.portalMs);
+            metrics.physicalDraws=draws; metrics.candidateTriangles=triangles; metrics.views=1;
+        }
+    } measurement{m_lastRenderCpuTimings,m_lastOrdinaryDrawCount,m_lastOrdinaryTriangleCount};
     const auto shadowCpuStart = std::chrono::steady_clock::now();
     if (shadowOnly)
         m_lastShadowCpuTiming = {};
@@ -2083,7 +2318,12 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     m_lastOcclusionCulledCount = 0;
     m_lastTerrainOcclusionCulledCount = 0;
     m_lastParticlePortalDrawCount = 0;
-    m_shadowDebugSnapshot = {};
+    if (shadowOnly) m_shadowDebugSnapshot = {};
+    else
+    {
+        m_shadowDebugSnapshot.bakedReceiverCount = 0;
+        m_shadowDebugSnapshot.dynamicReceiverCount = 0;
+    }
     if (!context)
     {
         return;
@@ -2101,6 +2341,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
 
     if (!m_renderFramePrepared)
         PrepareRenderFrame();
+    SelectRenderPassBuffers();
     m_lastOrdinaryDrawCount = 0;
     m_lastOrdinaryTriangleCount = 0;
     const uint32_t portalRenderSlotsPerView = m_objectCapacity + 2u;
@@ -2131,26 +2372,12 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         }
         hasAuthoredCameraWorld = true;
         const glm::vec3 authoredCameraPosition(authoredCameraWorld[3]);
-        std::function<void(const Engine::Core::Object*)> findContainingVolume;
-        findContainingVolume = [&](const Engine::Core::Object* object)
-        {
-            if (!object || cameraInsideInteriorOnlyWarp ||
-                !object->IsEnabledInHierarchy())
-                return;
-            const auto* volume = object->GetComponent<
-                Engine::Components::SpatialManipulator>();
-            if (volume && volume->enabled && volume->definesWarpVolume &&
-                volume->renderWarpInteriorOnly &&
+        for(const auto* volume:m_frameSpatialManipulatorScratch)
+            if(volume && volume->Owner && volume->Owner->IsEnabledInHierarchy() &&
+                volume->enabled && volume->definesWarpVolume && volume->renderWarpInteriorOnly &&
                 volume->ContainsWorldPoint(authoredCameraPosition))
-            {
-                cameraInsideInteriorOnlyWarp = true;
-                return;
-            }
-            for (const Engine::Core::Object* child : object->Children)
-                findContainingVolume(child);
-        };
-        for (const auto& object : m_objects)
-            findContainingVolume(object.get());
+            { cameraInsideInteriorOnlyWarp=true; break; }
+
     }
 
     glm::mat4 view = cam->GetViewMatrix();
@@ -2253,26 +2480,11 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                     allOutside([](const glm::vec4& point)
                         { return point.z > point.w; }));
             };
-            std::function<void(const Engine::Core::Object*)> findIntersectedVolume;
-            findIntersectedVolume = [&](const Engine::Core::Object* object)
-            {
-                if (!object || cameraUsesSourceWarpChart ||
-                    !object->IsEnabledInHierarchy())
-                    return;
-                const auto* volume = object->GetComponent<
-                    Engine::Components::SpatialManipulator>();
-                if (volume && (sourceChartAllowed ||
-                    volume->renderWarpInteriorOnly) &&
-                    volumeIntersectsView(*volume))
-                {
-                    cameraUsesSourceWarpChart = true;
-                    return;
-                }
-                for (const Engine::Core::Object* child : object->Children)
-                    findIntersectedVolume(child);
-            };
-            for (const auto& object : m_objects)
-                findIntersectedVolume(object.get());
+            for(const auto* volume:m_frameSpatialManipulatorScratch)
+                if(volume && volume->Owner && volume->Owner->IsEnabledInHierarchy() &&
+                    (sourceChartAllowed || volume->renderWarpInteriorOnly) && volumeIntersectsView(*volume))
+                { cameraUsesSourceWarpChart=true; break; }
+
         }
     }
     // A source-chart view continues through a finite nonlinear volume instead
@@ -2541,6 +2753,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         glm::vec4 cameraData { 0.f };
         std::array<glm::vec3, 4> centers{};
         std::array<float, 4> radii{};
+        std::array<Engine::Rendering::ShadowReceiverCulling,4> receivers{};
         uint32_t count = 1u;
     };
     const auto buildShadowCascades = [&](const glm::mat4& cascadeView,
@@ -2594,13 +2807,14 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         }
 
         float previousSplit = cameraNear;
+        float previousNear = cameraNear;
         const uint32_t tileResolution = result.count > 1u
             ? std::max(1u, atlasResolution / 2u) : atlasResolution;
         for (uint32_t cascade = 0; cascade < result.count; ++cascade)
         {
             const float split = result.splits[cascade];
             const float nearFactor = std::clamp(
-                (previousSplit - cameraNear) / (cameraFar - cameraNear), 0.f, 1.f);
+                (previousSplit - (previousSplit-previousNear)*std::clamp(m_realtimeShadowSettings.cascadeTransitionFraction,0.f,0.3f) - cameraNear) / (cameraFar - cameraNear), 0.f, 1.f);
             const float farFactor = std::clamp(
                 (split - cameraNear) / (cameraFar - cameraNear), 0.f, 1.f);
             std::array<glm::vec3, 8> corners{};
@@ -2639,6 +2853,9 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 -radius, radius, -radius, radius,
                 0.1f, shadowDistance * 2.f);
             result.viewProjections[cascade] = lightProjection * lightView;
+            result.receivers[cascade].Build(corners,lightOrientation,
+                worldUnitsPerTexel*float(m_realtimeShadowSettings.pcfRadius+2)+0.01f);
+            previousNear=previousSplit;
             previousSplit = split;
         }
         result.data = {
@@ -2703,21 +2920,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
 
         const glm::vec3 minimum = item.mesh->GetBoundsMin();
         const glm::vec3 maximum = item.mesh->GetBoundsMax();
-        glm::vec3 worldMinimum(std::numeric_limits<float>::max());
-        glm::vec3 worldMaximum(std::numeric_limits<float>::lowest());
-        for (int z = 0; z < 2; ++z)
-            for (int y = 0; y < 2; ++y)
-                for (int x = 0; x < 2; ++x)
-                {
-                    const glm::vec3 corner = glm::vec3(itemWorld * glm::vec4(
-                        x ? maximum.x : minimum.x,
-                        y ? maximum.y : minimum.y,
-                        z ? maximum.z : minimum.z, 1.f));
-                    worldMinimum = glm::min(worldMinimum, corner);
-                    worldMaximum = glm::max(worldMaximum, corner);
-                }
-        const glm::vec3 nearest = glm::clamp(cameraPosition,
-            worldMinimum, worldMaximum);
+        const auto bounds=Engine::Rendering::TransformBounds(minimum,maximum,itemWorld);
+        const glm::vec3 nearest = glm::clamp(cameraPosition,bounds.minimum,bounds.maximum);
         const glm::vec3 delta = nearest - cameraPosition;
         return glm::dot(delta, delta);
     };
@@ -2906,6 +3110,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         return std::pair<float, float>{ std::max(x.first, z.first),
             std::min(x.second, z.second) };
     };
+    const auto terrainPreparationStart=RenderClock::now();
+    m_lastRenderCpuTimings.startupMs=std::chrono::duration<double,std::milli>(terrainPreparationStart-measurement.start).count();
     if (useTerrainOcclusion)
     {
         terrainBlockers.reserve(m_frameRenderItems.size());
@@ -2925,6 +3131,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 terrainBlockers.push_back(*footprint);
         }
     }
+    m_lastRenderCpuTimings.terrainPreparationMs=std::chrono::duration<double,std::milli>(RenderClock::now()-terrainPreparationStart).count();
     const auto hiddenByTerrain = [&](const FrameRenderItem& item)
     {
         if (!useTerrainOcclusion || !item.object ||
@@ -3003,38 +3210,33 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         }
         return false;
     };
+    const auto cullingStart = RenderClock::now();
+    static const std::vector<uint8_t> emptyVisibility;
+    const auto& spatialVisible = !shadowOnly && !hasPortalViews && !m_editorMode2D
+        ? m_renderSpatialIndex.Query(viewProjection) : emptyVisibility;
     std::vector<ViewRenderItem>& renderObjects = m_viewRenderItemScratch;
     renderObjects.clear();
     renderObjects.reserve(m_frameRenderItems.size());
-    for (const FrameRenderItem& item : m_frameRenderItems)
+    std::vector<ViewRenderItem> classified(m_frameRenderItems.size());
+    std::vector<uint8_t> accepted(m_frameRenderItems.size(),0), terrainRejected(m_frameRenderItems.size(),0);
+    Engine::Rendering::RenderJobs::Get().For(m_frameRenderItems.size(),cameraUsesSourceWarpChart ? SIZE_MAX:128,[&](size_t index)
     {
-        if (!item.belongsToPreview || includeEditorVisuals)
-        {
-            const glm::mat4 itemWorld = useSourceChartMesh(item)
-                ? sourceChartWorld(item) : item.world;
-            // A portal camera can see objects outside the main camera's
-            // frustum. Until portal jobs have their own per-view draw lists,
-            // retain the full scene whenever a valid portal view exists.
-            // The directional-light pass must retain off-screen casters. A
-            // caster outside the camera frustum can still project a shadow
-            // into a visible cascade, which is especially noticeable on the
-            // large, curved triangles of streamed terrain.
-            if (!shadowOnly && !hasPortalViews &&
-                outsideViewFrustum(item, itemWorld))
-                continue;
-            if (hiddenByTerrain(item))
-            {
-                ++m_lastTerrainOcclusionCulledCount;
-                continue;
-            }
-            const glm::vec3 delta = glm::vec3(itemWorld[3]) - cameraPosition;
-            renderObjects.push_back({ &item, glm::dot(delta, delta),
-                nearestLightingDistanceSquared(item, itemWorld),
-                itemWorld[3].z, item.sortingLayer,
-                item.blended && !(includeEditorVisuals &&
-                    item.mesh == m_editorWeightPaintMesh) });
-        }
-    }
+        const auto& item=m_frameRenderItems[index];
+        if(shadowOnly && (!item.mesh || (item.material && !item.material->castsShadows))) return;
+        if(!spatialVisible.empty() && !spatialVisible[index]) return;
+        if(item.belongsToPreview && !includeEditorVisuals) return;
+        const auto world=useSourceChartMesh(item) ? sourceChartWorld(item):item.world;
+        if(!shadowOnly && !hasPortalViews && spatialVisible.empty() && outsideViewFrustum(item,world)) return;
+        if(hiddenByTerrain(item)) { terrainRejected[index]=1; return; }
+        const auto delta=glm::vec3(world[3])-cameraPosition;
+        classified[index]={&item,glm::dot(delta,delta),shadowOnly ? 0.f:nearestLightingDistanceSquared(item,world),
+            world[3].z,item.sortingLayer,item.blended && !(includeEditorVisuals && item.mesh==m_editorWeightPaintMesh)};
+        accepted[index]=1;
+    });
+    for(size_t index=0;index<classified.size();++index)
+    { if(accepted[index]) renderObjects.push_back(classified[index]); m_lastTerrainOcclusionCulledCount+=terrainRejected[index]; }
+    const auto sortingStart = RenderClock::now();
+    m_lastRenderCpuTimings.cullingMs = std::chrono::duration<double,std::milli>(sortingStart-cullingStart).count();
     std::stable_sort(renderObjects.begin(), renderObjects.end(),
         [&](const ViewRenderItem& first, const ViewRenderItem& second)
         {
@@ -3051,6 +3253,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 : first.cameraDistanceSquared < second.cameraDistanceSquared;
         });
 
+    m_lastRenderCpuTimings.sortingMs = std::chrono::duration<double,std::milli>(RenderClock::now()-sortingStart).count();
+    const auto occlusionStart=RenderClock::now();
     // Occlusion results are deliberately tied to the exact camera and scene
     // transforms that produced them. Any movement restores all objects to the
     // visible state; the backend consumes only completed GPU query results and
@@ -3079,6 +3283,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             const uint64_t revision =
                 visible.source->mesh->GetConfigurationRevision();
             hashOcclusionBytes(&revision, sizeof(revision));
+            const auto fadeRevision = visible.source->mesh->GetRuntimeFadeRevision();
+            hashOcclusionBytes(&fadeRevision, sizeof(fadeRevision));
         }
     }
     const uint64_t occlusionViewId =
@@ -3087,10 +3293,12 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     const bool occlusionQueriesEnabled = context->BeginOcclusionFrame(
         occlusionViewId, occlusionSignature);
 
+    m_lastRenderCpuTimings.occlusionMs=std::chrono::duration<double,std::milli>(RenderClock::now()-occlusionStart).count();
     struct PreparedDraw
     {
         Engine::Core::Object* object = nullptr;
         Engine::Components::Mesh* mesh = nullptr;
+        Engine::Components::Material* material = nullptr;
         Engine::Graphics::IGraphicsBuffer* vertexBuffer = nullptr;
         Engine::Graphics::IGraphicsBuffer* indexBuffer = nullptr;
         Engine::Graphics::IGraphicsBuffer* morphDeltaBuffer = nullptr;
@@ -3104,6 +3312,11 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         uint32_t vertexStride = 0;
         uint32_t vertexCount = 0;
         uint32_t indexCount = 0;
+        int gpuLod = -1, gpuMaximumLod = 0;
+        glm::vec2 gpuLodDistances{0};
+        uint32_t automaticGroup = UINT32_MAX;
+        uint32_t frameItemIndex = 0;
+
         const Engine::Components::SpatialManipulator* traversalChartPortal = nullptr;
         const Engine::Components::SpatialManipulator* spatialManipulator = nullptr;
         bool preview = false;
@@ -3121,30 +3334,32 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     std::shared_ptr<Engine::Components::Texture> measurementGridTexture;
     bool measurementGridReady = false;
     bool hasSceneLightProbeContributors = false;
-    for (const FrameComponentLookup& lookup : m_frameComponentLookupScratch)
-    {
-        if (!lookup.object || !lookup.object->IsEnabledInHierarchy())
-            continue;
-        if (const auto* group = lookup.object->GetComponent<
-                Engine::Components::LightProbeGroup>();
-            group && group->valid)
-        {
-            hasSceneLightProbeContributors = true;
-            break;
-        }
-        if (const auto* probe = lookup.object->GetComponent<
-                Engine::Components::LightProbe>();
-            probe && probe->valid)
-        {
-            hasSceneLightProbeContributors = true;
-            break;
-        }
-    }
+    for (auto* group : GetComponents<Engine::Components::LightProbeGroup>())
+        hasSceneLightProbeContributors |= group->valid && group->Owner->IsEnabledInHierarchy();
+    for (auto* probe : GetComponents<Engine::Components::LightProbe>())
+        hasSceneLightProbeContributors |= probe->valid && probe->Owner->IsEnabledInHierarchy();
 
+    struct PackedRecord { uint32_t index; DrawCBData draw; ObjectGPUData object; };
+    struct DirtyRange { uint32_t first=UINT32_MAX,last=0; double elapsedMs=0; };
+    struct BufferedRecords
+    {
+        std::vector<PackedRecord> records;
+        std::vector<std::future<DirtyRange>> jobs;
+        ~BufferedRecords() { for(auto& job:jobs) if(job.valid()) job.wait(); }
+    };
+    static thread_local std::array<BufferedRecords,2> recordBuffers;
+    static thread_local unsigned recordBufferIndex=0;
+    auto& recordSnapshot=recordBuffers[recordBufferIndex++ % recordBuffers.size()];
+    struct RecordFence { BufferedRecords& snapshot; ~RecordFence() { for(auto& job:snapshot.jobs) if(job.valid()) job.wait(); } } recordFence{recordSnapshot};
+    recordSnapshot.records.clear(); recordSnapshot.jobs.clear();
+    recordSnapshot.records.reserve(renderObjects.size());
+    uint32_t firstDirtyObject=UINT32_MAX, lastDirtyObject=0;
+    const auto materialStart = RenderClock::now();
     UINT slot = 0;
     for (const ViewRenderItem& sortedItem : renderObjects)
     {
         const FrameRenderItem* renderItem = sortedItem.source;
+        slot=static_cast<UINT>(renderItem-m_frameRenderItems.data());
         Engine::Core::Object* obj = renderItem->object;
         Engine::Components::Mesh* mesh = renderItem->mesh;
         Engine::Components::Sprite* sprite = renderItem->sprite;
@@ -3192,8 +3407,14 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         preparedDraw.morphDeltaBuffer = m_emptyMorphDeltaBuffer.get();
         preparedDraw.morphWeightBuffer = m_emptyMorphWeightBuffer.get();
         preparedDraw.textures[8] = m_brdfIntegrationLut.get();
+        preparedDraw.frameItemIndex=static_cast<uint32_t>(renderItem-m_frameRenderItems.data());
+        preparedDraw.gpuLod=renderItem->gpuLod;
+        preparedDraw.gpuMaximumLod=renderItem->gpuMaximumLod;
+        preparedDraw.gpuLodDistances=renderItem->gpuLodDistances;
         preparedDraw.object = obj;
         preparedDraw.mesh = mesh;
+        preparedDraw.material = sprite ? nullptr : mat;
+        if (!shadowOnly && mat) mat->shaderError.clear();
         preparedDraw.spatialManipulator = renderItem->spatialManipulator;
         preparedDraw.preview = isPreview;
         preparedDraw.terrain = mesh && mesh->UsesTerrainVertexFormat();
@@ -3207,6 +3428,13 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         preparedDraw.castsShadow = shadowSelection.valid && mesh && !sprite &&
             !sortedItem.blended && !belongsToPreview &&
             (!mat || mat->castsShadows);
+        if(preparedDraw.castsShadow && mesh->grassShadowCaster)
+        {
+            const float distance=std::max(0.f,m_realtimeShadowSettings.grassCasterDistance);
+            const auto bounds=Engine::Rendering::TransformBounds(mesh->GetBoundsMin(),mesh->GetBoundsMax(),renderItem->world);
+            const auto delta=glm::clamp(cameraPosition,bounds.minimum,bounds.maximum)-cameraPosition;
+            preparedDraw.castsShadow=glm::dot(delta,delta)<=distance*distance;
+        }
         if (shadowOnly)
         {
             if (!preparedDraw.castsShadow)
@@ -3218,6 +3446,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 mesh->GetPosedVertexBuffer() &&
                 !mesh->IsPortalPoseSnapshot() &&
                 (useSourceChart || !renderItem->warpedVertexBuffer);
+            preparedDraw.objectData.geometryFade=hasPortalViews && renderItem->geometryFade.w>=2.f ? mesh->GetRuntimeGeometryFade():renderItem->geometryFade;
+            preparedDraw.objectData.viewPositionAlphaCutoff=glm::vec4(cameraPosition,.001f);
             preparedDraw.objectData.world = world;
             preparedDraw.objectData.viewProjection = proj * view;
             preparedDraw.objectData.traversalClipPlane =
@@ -3260,7 +3490,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             }
             preparedDraw.doubleSided = preparedDraw.terrainCell ||
                 (mat && mat->doubleSided);
-            preparedDraw.drawData = { slot, 0u, 0u, 0u };
+            preparedDraw.drawData = { slot, 0u, mesh->IsInstanced() ? (0x20000000u | (renderItem->geometryFade.w>=2.f && !hasPortalViews ? 0x00100000u:0u)):0u, 0u };
             preparedDraw.traversalChartPortal =
                 renderItem->traversalChartPortal;
             preparedDraw.vertexBuffer = !useSourceChart &&
@@ -3283,6 +3513,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         preparedDraw.occlusionCandidate = occlusionQueriesEnabled &&
             !wireframeMode &&
             !sortedItem.blended && !sprite &&
+            renderItem->geometryFade.w < .5f &&
             !renderItem->warpedVertexBuffer &&
             !renderItem->traversalChartPortal;
         preparedDraw.occlusionId = static_cast<uint64_t>(
@@ -3401,6 +3632,41 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         }
         else if (mat)
         {
+            const uint32_t materialVariant=(allowNormalMapping?1u:0u)|(allowParallaxMapping?2u:0u)|
+                (allowEnvironmentDiffuse?4u:0u)|(allowReflections?8u:0u);
+            auto& cachedMaterial=m_renderMaterialCache[mat][materialVariant];
+            if(cachedMaterial.frame==m_materialPreparationSerial && cachedMaterial.revision==mat->GetConfigurationRevision() && cachedMaterial.data.size()==sizeof(ObjectGPUData))
+            {
+                ObjectGPUData cachedData;
+                std::memcpy(&cachedData,cachedMaterial.data.data(),sizeof(cachedData));
+                objectData.ambientUnlit=cachedData.ambientUnlit;
+                objectData.baseColor=cachedData.baseColor;
+                objectData.blinnPhongSpecularShininess=cachedData.blinnPhongSpecularShininess;
+                objectData.emissiveOcclusion=cachedData.emissiveOcclusion;
+                objectData.environmentParams=cachedData.environmentParams;
+                objectData.materialParams=cachedData.materialParams;
+                objectData.parallaxParams=cachedData.parallaxParams;
+                objectData.pmxEdgeColor=cachedData.pmxEdgeColor;
+                objectData.pmxParams=cachedData.pmxParams;
+                objectData.pmxSphereTint=cachedData.pmxSphereTint;
+                objectData.pmxTextureTint=cachedData.pmxTextureTint;
+                objectData.pmxToonTint=cachedData.pmxToonTint;
+                objectData.reflectionEnvironmentParams=cachedData.reflectionEnvironmentParams;
+                std::copy(std::begin(cachedData.reflectionEnvironmentSH),std::end(cachedData.reflectionEnvironmentSH),objectData.reflectionEnvironmentSH);
+                objectData.subsurfaceColorWeight=cachedData.subsurfaceColorWeight;
+                objectData.subsurfaceRadiusThickness=cachedData.subsurfaceRadiusThickness;
+                objectData.subsurfaceTransmission=cachedData.subsurfaceTransmission;
+                objectData.textureUvSets0=cachedData.textureUvSets0;
+                objectData.textureUvSets1=cachedData.textureUvSets1;
+                objectData.viewPositionAlphaCutoff=cachedData.viewPositionAlphaCutoff;
+                preparedDraw.textures=cachedMaterial.textures;
+                doubleSided=cachedMaterial.doubleSided;
+                alphaMode=static_cast<Engine::Components::MaterialAlphaMode>(cachedMaterial.alphaMode);
+                objectData.viewPositionAlphaCutoff=glm::vec4(cameraPosition,objectData.viewPositionAlphaCutoff.w);
+            }
+            else
+            {
+
             alphaMode = mat->GetAlphaMode();
             doubleSided = mat->doubleSided;
             uint32_t textureFlags = 0;
@@ -3441,7 +3707,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 mat->edgeWidth, static_cast<float>(mat->sphereMode),
                 static_cast<float>(mat->builtinToon), mat->edgeEnabled ? 1.f : 0.f };
             objectData.ambientUnlit = glm::vec4(
-                settings.ambientColor + mat->ambientColor + bakedIrradiance,
+                settings.ambientColor + mat->ambientColor,
                 mat->unlit ? 1.f : 0.f);
             objectData.emissiveOcclusion = glm::vec4(
                 mat->emissiveColor, mat->occlusionStrength);
@@ -3495,7 +3761,16 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 static_cast<float>(mat->occlusionUvSet) };
             objectData.textureUvSets1 = { static_cast<float>(mat->emissiveUvSet),
                 static_cast<float>(mat->heightUvSet), 0.f, 0.f };
-        }
+
+                cachedMaterial.data.resize(sizeof(ObjectGPUData));
+                std::memcpy(cachedMaterial.data.data(),&objectData,sizeof(objectData));
+                cachedMaterial.textures=preparedDraw.textures;
+                cachedMaterial.doubleSided=doubleSided; cachedMaterial.alphaMode=uint32_t(alphaMode);
+                cachedMaterial.revision=mat->GetConfigurationRevision();
+                cachedMaterial.frame=m_materialPreparationSerial;
+            }
+            objectData.ambientUnlit+=glm::vec4(bakedIrradiance,0);
+}
         else
         {
             objectData.baseColor = { 0.8f, 0.8f, 0.8f, 1.f };
@@ -3702,15 +3977,13 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 : m_frameLightCount);
         const DrawCBData drawData{ slot,
             forceUnlitMode ? 0u : qualityLightCount,
-            clusteredLightingEnabled ? kClusteredLightingFlag : 0u, 0u };
+            (clusteredLightingEnabled ? kClusteredLightingFlag : 0u) |
+                (mesh && mesh->IsInstanced() ? (0x20000000u | (renderItem->geometryFade.w>=2.f && !hasPortalViews ? 0x00100000u:0u)):0u), 0u };
         preparedDraw.drawData = drawData;
+        objectData.geometryFade = hasPortalViews && renderItem->geometryFade.w>=2.f ? mesh->GetRuntimeGeometryFade():renderItem->geometryFade;
         preparedDraw.objectData = objectData;
         preparedDraw.traversalChartPortal = renderItem->traversalChartPortal;
-        memcpy(static_cast<uint8_t*>(m_objectCBMapped) + offset,
-            &preparedDraw.drawData, sizeof(preparedDraw.drawData));
-        memcpy(static_cast<uint8_t*>(m_objectDataMapped) +
-            static_cast<size_t>(slot) * sizeof(ObjectGPUData),
-            &preparedDraw.objectData, sizeof(preparedDraw.objectData));
+        recordSnapshot.records.push_back({slot,preparedDraw.drawData,preparedDraw.objectData});
 
         Engine::Graphics::IPipelineState* materialPipeline = nullptr;
         if (isPreview)
@@ -3760,28 +4033,121 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
 
         ++slot;
     }
-    m_lastOrdinaryDrawCount = static_cast<uint32_t>(preparedDraws.size());
+    if(!shadowOnly)
+    {
+        const size_t count=recordSnapshot.records.size();
+        auto* objectBytes=static_cast<uint8_t*>(m_objectDataMapped);
+        auto* constantBytes=static_cast<uint8_t*>(m_objectCBMapped);
+        const size_t tasks=std::min<size_t>(3,(count+63)/64);
+        for(size_t task=0;task<tasks;++task)
+        {
+            const size_t first=count*task/tasks,last=count*(task+1)/tasks;
+            recordSnapshot.jobs.push_back(Engine::Rendering::RenderJobs::Get().Submit([&recordSnapshot,objectBytes,constantBytes,first,last] {
+                const auto started=RenderClock::now(); DirtyRange dirty;
+                for(size_t i=first;i<last;++i)
+                {
+                    const auto& record=recordSnapshot.records[i];
+                    std::memcpy(constantBytes+size_t(record.index)*kCBStride,&record.draw,sizeof(record.draw));
+                    auto* destination=objectBytes+size_t(record.index)*sizeof(ObjectGPUData);
+                    if(std::memcmp(destination,&record.object,sizeof(record.object))!=0)
+                    { std::memcpy(destination,&record.object,sizeof(record.object)); dirty.first=std::min(dirty.first,record.index); dirty.last=std::max(dirty.last,record.index); }
+                }
+                dirty.elapsedMs=std::chrono::duration<double,std::milli>(RenderClock::now()-started).count(); return dirty;
+            }));
+        }
+    }
+    m_lastRenderCpuTimings.materialMs = std::chrono::duration<double,std::milli>(RenderClock::now()-materialStart).count();
+    m_lastRenderCpuTimings.candidateDraws=preparedDraws.size();
+    const auto batchingStart = RenderClock::now();
+    struct AutomaticGroup { std::vector<uint32_t> members; };
+    std::vector<AutomaticGroup> automaticGroups;
+    using AutomaticKey = std::tuple<const void*,const void*,const void*,
+        std::array<const Engine::Graphics::IGraphicsTexture*,30>,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,bool,int,std::vector<std::pair<uint32_t,uint32_t>>,std::array<const void*,3>,const void*>;
+    std::map<AutomaticKey,uint32_t> automaticLookup;
+    for (uint32_t index=0;index<preparedDraws.size();++index)
+    {
+        auto& draw=preparedDraws[index];
+        const bool custom = draw.material && std::any_of(draw.material->shaders.begin(),draw.material->shaders.end(),
+            [](const auto& shader) { return shader.enabled; });
+        const bool selected=includeEditorVisuals && (draw.object==m_selectedObject || draw.mesh==m_editorSelectedMesh || draw.mesh==m_editorWeightPaintMesh);
+        if ((!automaticInstancing && !(draw.drawData.flags & 0x00100000u)) || m_editorMode2D || hasPortalViews || !draw.mesh || draw.blended ||
+            draw.preview || draw.pmxOutline || draw.spatialManipulator || draw.traversalChartPortal ||
+            draw.objectData.skinParams.y>0 || draw.mesh->HasMorphTargets() || draw.mesh->HasSurfaceOffsets() ||
+            draw.vertexBuffer!=draw.mesh->GetGraphicsBuffer() || custom || selected || !draw.mesh->HasBounds()) continue;
+        AutomaticKey key{draw.vertexBuffer,draw.indexBuffer,draw.pipeline,
+            draw.textures,draw.vertexStride,draw.vertexCount,draw.indexCount,draw.drawData.lightCount,
+            draw.drawData.flags | (draw.terrain ? 0x08000000u : 0u) | (draw.doubleSided ? 0x04000000u : 0u),draw.castsShadow,draw.gpuLod,{},{},automaticInstancing ? nullptr:draw.object};
+        if(draw.mesh->IsInstanced())
+        {
+            for(const auto& range:draw.mesh->GetInstanceRanges()) std::get<11>(key).emplace_back(range.firstVertex,range.vertexCount);
+            if(draw.drawData.flags & 0x00100000u) for(int lod=0;lod<=draw.gpuMaximumLod;++lod)
+                std::get<12>(key)[lod]=draw.mesh->GetRuntimeLodMesh(lod)->GetGraphicsBuffer();
+        }
+        const auto found=automaticLookup.find(key);
+        uint32_t group;
+        if(found==automaticLookup.end())
+        { group=uint32_t(automaticGroups.size()); automaticLookup.emplace(std::move(key),group); automaticGroups.push_back({}); }
+        else group=found->second;
+        automaticGroups[group].members.push_back(index);
+    }
+    for(auto& group:automaticGroups)
+        std::sort(group.members.begin(),group.members.end(),[&](uint32_t a,uint32_t b) {
+            return preparedDraws[a].drawData.objectIndex<preparedDraws[b].drawData.objectIndex;
+        });
+    for (uint32_t group=0;group<automaticGroups.size();++group)
+        if (automaticGroups[group].members.size()>1 || preparedDraws[automaticGroups[group].members.front()].gpuLod>=0 || (preparedDraws[automaticGroups[group].members.front()].drawData.flags & 0x00100000u))
+            for(auto index:automaticGroups[group].members) preparedDraws[index].automaticGroup=group;
+    m_lastRenderCpuTimings.batchingMs=std::chrono::duration<double,std::milli>(RenderClock::now()-batchingStart).count();
+    m_lastOrdinaryDrawCount = 0;
     m_lastOrdinaryTriangleCount = 0;
     for (const PreparedDraw& draw : preparedDraws)
-        m_lastOrdinaryTriangleCount +=
-            (draw.indexBuffer ? draw.indexCount : draw.vertexCount) / 3;
-    m_shadowDebugSnapshot.casterCount = static_cast<uint32_t>(std::count_if(
-        preparedDraws.begin(), preparedDraws.end(),
-        [&](const PreparedDraw& draw)
+    {
+        if (draw.mesh && draw.mesh->IsInstanced())
         {
-            return draw.castsShadow && draw.vertexBuffer &&
-                !(draw.spatialManipulator && draw.spatialManipulator->enabled);
-        }));
-    m_shadowDebugSnapshot.submittedCasterDrawCount = 0;
+            for (const auto& range : draw.mesh->GetInstanceRanges())
+                if (range.instanceCount && range.vertexCount)
+                {
+                    ++m_lastOrdinaryDrawCount;
+                    m_lastOrdinaryTriangleCount += uint64_t(range.vertexCount / 3) * range.instanceCount;
+                }
+        }
+        else
+        {
+            ++m_lastOrdinaryDrawCount;
+            m_lastOrdinaryTriangleCount += (draw.indexBuffer ? draw.indexCount : draw.vertexCount) / 3;
+        }
+    }
+    if(shadowOnly)
+    {
+        std::unordered_set<const Engine::Core::Object*> eligibleCasters;
+        for(const auto& draw:preparedDraws)
+            if(draw.castsShadow && draw.vertexBuffer && !(draw.spatialManipulator && draw.spatialManipulator->enabled))
+                eligibleCasters.insert(draw.object);
+        m_shadowDebugSnapshot.casterCount=static_cast<uint32_t>(eligibleCasters.size());
+    }
+    if (shadowOnly) m_shadowDebugSnapshot.submittedCasterDrawCount = 0;
 
+    const auto recordWaitStart=RenderClock::now();
+    for(auto& job:recordSnapshot.jobs)
+    {
+        const auto dirty=job.get(); firstDirtyObject=std::min(firstDirtyObject,dirty.first); lastDirtyObject=std::max(lastDirtyObject,dirty.last);
+        m_lastRenderCpuTimings.recordPackingMs+=dirty.elapsedMs;
+    }
+    recordSnapshot.jobs.clear();
+    m_lastRenderCpuTimings.recordWaitMs=std::chrono::duration<double,std::milli>(RenderClock::now()-recordWaitStart).count();
     // DX11 buffers use CPU-side shadow storage. Upload the complete object
     // array once, then keep structured-buffer binding free of hidden copies.
     if (!shadowOnly && !preparedDraws.empty())
     {
-        const uint64_t ordinaryBytes = static_cast<uint64_t>(
-            preparedDraws.size()) * sizeof(ObjectGPUData);
-        m_objectDataBuffer->FlushMappedWrites(0, ordinaryBytes);
-        m_lastObjectDataUploadBytes += ordinaryBytes;
+        const auto uploadStart=RenderClock::now();
+        if(firstDirtyObject!=UINT32_MAX)
+        {
+            const uint64_t changedBytes=uint64_t(lastDirtyObject-firstDirtyObject+1)*sizeof(ObjectGPUData);
+            m_objectDataBuffer->FlushMappedWrites(uint64_t(firstDirtyObject)*sizeof(ObjectGPUData),changedBytes);
+            m_lastObjectDataUploadBytes+=changedBytes;
+            m_lastRenderCpuTimings.changedUploadBytes+=changedBytes;
+        }
+        m_lastRenderCpuTimings.uploadMs+=std::chrono::duration<double,std::milli>(RenderClock::now()-uploadStart).count();
         context->SetStructuredBuffer(6, m_lightDataBuffer.get());
         context->SetStructuredBuffer(7, m_objectDataBuffer.get());
         context->SetStructuredBuffer(8, m_boneDataBuffer.get());
@@ -3813,8 +4179,22 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     {
         context->SetStructuredBuffer(10, draw.morphDeltaBuffer);
         context->SetStructuredBuffer(11, draw.morphWeightBuffer);
+        context->SetStructuredBuffer(45, draw.mesh && draw.mesh->IsInstanced()
+            ? draw.mesh->GetInstanceBuffer() : m_emptyMorphDeltaBuffer.get());
         context->SetVertexBuffer(0, draw.vertexBuffer, draw.vertexStride, 0);
-        if (draw.indexBuffer && draw.indexCount > 0u)
+        if (draw.mesh && draw.mesh->IsInstanced())
+        {
+            for (const auto& range : draw.mesh->GetInstanceRanges())
+                if (range.instanceCount && range.vertexCount)
+                {
+                    // SV_InstanceID begins at zero on D3D. Bind the compact
+                    // species slice rather than relying on base-instance IDs.
+                    context->SetStructuredBuffer(45, draw.mesh->GetInstanceBuffer(range.firstInstance));
+                    context->DrawInstanced(range.vertexCount, range.instanceCount,
+                        range.firstVertex, 0);
+                }
+        }
+        else if (draw.indexBuffer && draw.indexCount > 0u)
         {
             context->SetIndexBuffer(draw.indexBuffer, draw.indexCount, 0);
             context->DrawIndexedInstanced(draw.indexCount, 1, 0, 0, 0);
@@ -3823,12 +4203,234 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             context->DrawInstanced(draw.vertexCount, 1, 0, 0);
     };
 
+    const auto submitMaterialGeometry = [&](const PreparedDraw& draw,
+        Engine::Graphics::IPipelineState* base,
+        const std::function<void()>& restoreState = {})
+    {
+        bool submitted = false;
+        if (draw.material)
+            for (const auto& shader : draw.material->shaders)
+            {
+                if (!shader.enabled) continue;
+                std::string error;
+                auto* pipeline = ResolveMaterialShaderPipeline(
+                    draw.material->ResolveShaderPath(shader.path), base,
+                    draw.terrain, submitted, shader.blendMode, error);
+                if (!error.empty() && draw.material->shaderError.find(error) == std::string::npos)
+                {
+                    if (!draw.material->shaderError.empty()) draw.material->shaderError += "\n";
+                    draw.material->shaderError += error;
+                }
+                // An invalid surface falls back to the built-in surface;
+                // invalid overlays are skipped without hiding the mesh.
+                if (!pipeline && submitted) continue;
+                context->SetPipeline(pipeline ? pipeline : base);
+                if (restoreState) restoreState();
+                submitGeometry(draw);
+                submitted = true;
+            }
+        if (!submitted)
+        {
+            context->SetPipeline(base);
+            if (restoreState) restoreState();
+            submitGeometry(draw);
+        }
+    };
+
+    std::vector<uint8_t> selectedLods(preparedDraws.size(),1);
+    Engine::Rendering::RenderJobs::Get().For(preparedDraws.size(),512,[&](size_t index) {
+        const auto& draw=preparedDraws[index];
+        if(draw.gpuLod<0) return;
+        const float distance=glm::length(glm::vec3(draw.objectData.world[3])-cameraPosition);
+        const int lod=distance<draw.gpuLodDistances.x ? 0 : distance<draw.gpuLodDistances.y ? 1 : 2;
+        if(draw.mesh->IsInstanced())
+        {
+            const float width=std::max(.001f,std::min(.5f,(draw.gpuLodDistances.y-draw.gpuLodDistances.x)*.25f));
+            selectedLods[index]=draw.gpuLod==0 ? distance<=draw.gpuLodDistances.x+width:
+                draw.gpuLod==1 ? distance>=draw.gpuLodDistances.x-width && distance<=draw.gpuLodDistances.y+width:
+                distance>=draw.gpuLodDistances.y-width;
+        }
+        else selectedLods[index]=std::min(lod,draw.gpuMaximumLod)==draw.gpuLod;
+    });
+    const auto lodSelected = [&](const PreparedDraw& draw) {
+        return selectedLods[size_t(&draw-preparedDraws.data())]!=0;
+    };
+    const auto submitAutomaticGroup = [&](const AutomaticGroup& group,
+        const glm::mat4& cullViewProjection, uint32_t objectBase,
+        Engine::Graphics::IPipelineState* pipeline, const std::vector<uint8_t>* visibility)->uint32_t
+    {
+        const auto& representative=preparedDraws[group.members.front()];
+        if(representative.mesh->IsInstanced())
+        {
+            uint32_t submitted=0;
+            const bool gpuLod=(representative.drawData.flags & 0x00100000u)!=0;
+            const int lodCount=gpuLod ? representative.gpuMaximumLod+1:1;
+            for(int residentLod=0;residentLod<lodCount;++residentLod)
+            {
+            auto* sourceMesh=gpuLod ? representative.mesh->GetRuntimeLodMesh(residentLod):representative.mesh;
+            for(size_t rangeIndex=0;rangeIndex<sourceMesh->GetInstanceRanges().size();++rangeIndex)
+            {
+                const auto& sourceRange=sourceMesh->GetInstanceRanges()[rangeIndex];
+                if(!sourceRange.vertexCount) continue;
+                auto& members=m_explicitInstanceCache.members; members.clear();
+                std::vector<uint32_t> memberDraws;
+                uint32_t count=0;
+                for(auto index:group.members)
+                {
+                    if(visibility && !(*visibility)[index]) continue;
+                    const auto& draw=preparedDraws[index];
+                    const auto& range=draw.mesh->GetInstanceRanges()[rangeIndex];
+                    if(!range.instanceCount) continue;
+                    const auto& data=draw.mesh->GetInstanceData();
+                    members.push_back({data,data->revision,draw.drawData.objectIndex,range.firstInstance,range.instanceCount,
+                        draw.objectData.world,draw.mesh->GetInstanceSource()->GetBoundsMin(),draw.mesh->GetInstanceSource()->GetBoundsMax(),draw.gpuLodDistances});
+                    memberDraws.push_back(index); count+=range.instanceCount;
+                }
+                if(!count) continue;
+                bool gpu=gpuInstanceCulling && context->SupportsIndirectDraws() && (count>=32 || representative.gpuLod>=0);
+                if(gpu && !m_instanceCullAttempted)
+                {
+                    m_instanceCullAttempted=true;
+                    auto shader=m_graphicsProvider->GetShaderCompiler()->CompileFromFile(
+                        EngineShaderPath("InstanceCull.hlsl"),"CSMain",Engine::Graphics::IShaderCompiler::CompileProfile::CS_5_0);
+                    if(shader) m_instanceCullPipeline=m_graphicsProvider->GetPipelineStateFactory()->CreateComputePipeline(shader.get());
+                }
+                gpu=gpu && m_instanceCullPipeline;
+                if(gpu) gpu=context->BeginComputePass();
+                DrawCBData constants=representative.drawData;
+                constants.objectIndex=objectBase; constants.flags|=uint32_t(residentLod)<<21; constants.flags|=gpu ? 0x01000000u:0x02000000u;
+                if(shadowOnly) { constants.lightCount=0; constants.flags&=~kClusteredLightingFlag; }
+                const auto uploadStart=RenderClock::now();
+                auto& buffers=m_explicitInstanceCache.Acquire(m_graphicsProvider,gpu,&constants,m_lastRenderCpuTimings.changedUploadBytes,
+                    [&](std::vector<Engine::Rendering::ExplicitInstanceRecord>& records) {
+                    records.resize(size_t(count)*2);
+                    std::vector<size_t> offsets(members.size()+1,0);
+                    for(size_t i=0;i<members.size();++i) offsets[i+1]=offsets[i]+members[i].count;
+                    Engine::Rendering::RenderJobs::Get().For(members.size(),count>=1024 ? 2:SIZE_MAX,[&](size_t member) {
+                        const auto& key=members[member];
+                        const auto& data=preparedDraws[memberDraws[member]].mesh->GetInstanceData();
+                        for(uint32_t i=0;i<key.count;++i)
+                        {
+                            const auto& source=data->transforms[key.first+i];
+                            auto& transform=records[(offsets[member]+i)*2];
+                            auto& metadata=records[(offsets[member]+i)*2+1]; metadata={};
+                            std::memcpy(transform.rows,source.rows,sizeof(transform.rows));
+                            if(!gpu) std::memcpy(&metadata.rows[0].x,&key.object,4);
+                            else
+                            {
+                                glm::mat4 affine(1);
+                                for(int row=0;row<3;++row) for(int column=0;column<4;++column) affine[column][row]=source.rows[row][column];
+                                const auto bounds=Engine::Rendering::TransformBounds(key.minimum,key.maximum,key.world*affine);
+                                metadata.rows[0]=glm::vec4((bounds.minimum+bounds.maximum)*.5f,glm::length((bounds.maximum-bounds.minimum)*.5f));
+                                const auto origin=glm::vec3(key.world[3]);
+                                const glm::uvec4 ids(key.object,key.first+i,glm::floatBitsToUint(origin.x),glm::floatBitsToUint(origin.y));
+                                std::memcpy(&metadata.rows[1],&ids,sizeof(ids));
+                                metadata.rows[2]={key.lodDistances,origin.z,0};
+                            }
+                        }
+                    });
+                });
+                m_lastRenderCpuTimings.uploadMs+=std::chrono::duration<double,std::milli>(RenderClock::now()-uploadStart).count();
+                if(gpu)
+                {
+                    context->SetStructuredBuffer(45,m_emptyMorphDeltaBuffer.get());
+                    context->SetComputePipeline(m_instanceCullPipeline.get());
+                    Engine::Rendering::InstanceCullConstants cull;
+                    cull.viewProjection=cullViewProjection; cull.cameraPosition=glm::vec4(cameraPosition,1);
+                    cull.counts={buffers.instanceCount,sourceRange.vertexCount,sourceRange.firstVertex,1};
+                    cull.selection={gpuLod ? residentLod:-1,1,representative.gpuMaximumLod,0};
+                    context->SetComputeReadBuffer(buffers.input.get()); context->SetComputeWriteBuffer(buffers.instances.get());
+                    context->SetComputeConstants(&cull,sizeof(cull)); context->DispatchCompute(1); context->StorageBarrier(buffers.instances.get());
+                    cull.counts.w=0;
+                    context->SetComputePipeline(m_instanceCullPipeline.get());
+                    context->SetComputeReadBuffer(buffers.input.get()); context->SetComputeWriteBuffer(buffers.instances.get());
+                    context->SetComputeConstants(&cull,sizeof(cull)); context->DispatchCompute((buffers.instanceCount+63)/64);
+                    context->StorageBarrier(buffers.instances.get()); context->EndComputePass();
+                    ++m_lastRenderCpuTimings.gpuBatches;
+                }
+                context->SetPipeline(pipeline); context->SetConstantBuffer(0,buffers.draw.get());
+                context->SetStructuredBuffer(45,buffers.instances.get());
+                context->SetStructuredBuffer(10,m_emptyMorphDeltaBuffer.get()); context->SetStructuredBuffer(11,m_emptyMorphWeightBuffer.get());
+                context->SetVertexBuffer(0,sourceMesh->GetGraphicsBuffer(),sourceMesh->GetVertexStride(),0);
+                if(gpu) context->DrawInstancesIndirect(buffers.instances.get(),0,false);
+                else context->DrawInstanced(sourceRange.vertexCount,buffers.instanceCount,sourceRange.firstVertex,0);
+                ++submitted; ++m_lastRenderCpuTimings.automaticBatches;
+                m_lastRenderCpuTimings.automaticInstances+=buffers.instanceCount;
+            }
+            }
+            return submitted;
+        }
+        bool gpu=gpuInstanceCulling && context->SupportsIndirectDraws() &&
+            (group.members.size()>=32 || representative.gpuLod>=0);
+        if (gpu && !m_instanceCullAttempted)
+        {
+            m_instanceCullAttempted=true;
+            auto shader=m_graphicsProvider->GetShaderCompiler()->CompileFromFile(
+                EngineShaderPath("InstanceCull.hlsl"),"CSMain",Engine::Graphics::IShaderCompiler::CompileProfile::CS_5_0);
+            if(shader) m_instanceCullPipeline=m_graphicsProvider->GetPipelineStateFactory()->CreateComputePipeline(shader.get());
+        }
+        gpu=gpu && m_instanceCullPipeline;
+        if(gpu) gpu=context->BeginComputePass();
+        auto& instances=m_automaticInstanceCache.scratch;
+        instances.clear();
+        for(auto index:group.members)
+        {
+            const auto& draw=preparedDraws[index];
+            if(visibility && !(*visibility)[index]) continue;
+            if(!gpu && !lodSelected(draw)) continue;
+            const auto bounds=Engine::Rendering::TransformBounds(draw.mesh->GetBoundsMin(),draw.mesh->GetBoundsMax(),draw.objectData.world);
+            Engine::Rendering::AutomaticInstance instance;
+            instance.sphere=glm::vec4((bounds.minimum+bounds.maximum)*.5f,glm::length((bounds.maximum-bounds.minimum)*.5f));
+            const auto origin=glm::vec3(draw.objectData.world[3]);
+            instance.meta={draw.drawData.objectIndex,uint32_t(draw.gpuMaximumLod),
+                glm::floatBitsToUint(origin.x),glm::floatBitsToUint(origin.y)};
+            instance.lod={draw.gpuLodDistances,origin.z,0}; instances.push_back(instance);
+        }
+        if(instances.empty()) { if(gpu) context->EndComputePass(); return 0; }
+        DrawCBData constants=representative.drawData;
+        constants.objectIndex=objectBase; constants.flags|=0x10000000u;
+        if(shadowOnly) { constants.lightCount=0; constants.flags&=~kClusteredLightingFlag; }
+        const auto batchUploadStart=RenderClock::now();
+        auto& buffers=m_automaticInstanceCache.Acquire(m_graphicsProvider,gpu,instances,&constants,m_lastRenderCpuTimings.changedUploadBytes);
+        m_lastRenderCpuTimings.uploadMs+=std::chrono::duration<double,std::milli>(RenderClock::now()-batchUploadStart).count();
+        if(gpu)
+        {
+            context->SetStructuredBuffer(45,m_emptyMorphDeltaBuffer.get());
+            context->SetComputePipeline(m_instanceCullPipeline.get());
+            Engine::Rendering::InstanceCullConstants cull;
+            cull.viewProjection=cullViewProjection; cull.cameraPosition=glm::vec4(cameraPosition,1);
+            cull.counts={uint32_t(instances.size()),representative.indexBuffer ? representative.indexCount : representative.vertexCount,
+                representative.indexBuffer ? 1u:0u,1u}; cull.selection.x=representative.gpuLod;
+            context->SetComputeReadBuffer(buffers.input.get()); context->SetComputeWriteBuffer(buffers.output.get());
+            context->SetComputeConstants(&cull,sizeof(cull)); context->DispatchCompute(1); context->StorageBarrier(buffers.output.get());
+            cull.counts.w=0;
+            context->SetComputePipeline(m_instanceCullPipeline.get());
+            context->SetComputeWriteBuffer(buffers.output.get()); context->SetComputeReadBuffer(buffers.input.get());
+            context->SetComputeConstants(&cull,sizeof(cull)); context->DispatchCompute((uint32_t(instances.size())+63)/64);
+            context->StorageBarrier(buffers.output.get()); context->EndComputePass(); ++m_lastRenderCpuTimings.gpuBatches;
+        }
+        context->SetPipeline(pipeline);
+        context->SetConstantBuffer(0,buffers.draw.get());
+        context->SetStructuredBuffer(45,buffers.output.get());
+        context->SetStructuredBuffer(10,m_emptyMorphDeltaBuffer.get());
+        context->SetStructuredBuffer(11,m_emptyMorphWeightBuffer.get());
+        context->SetVertexBuffer(0,representative.vertexBuffer,representative.vertexStride,0);
+        if(representative.indexBuffer) context->SetIndexBuffer(representative.indexBuffer,representative.indexCount,0);
+        if(gpu) context->DrawInstancesIndirect(buffers.output.get(),0,representative.indexBuffer!=nullptr);
+        else if(representative.indexBuffer) context->DrawIndexedInstanced(representative.indexCount,uint32_t(instances.size()));
+        else context->DrawInstanced(representative.vertexCount,uint32_t(instances.size()));
+        ++m_lastRenderCpuTimings.automaticBatches; m_lastRenderCpuTimings.automaticInstances+=instances.size();
+        return 1;
+    };
+
     const auto outsideShadowCascade = [&](const PreparedDraw& draw,
         uint32_t cascade)
     {
-        if (!draw.terrainCell || !draw.mesh->HasBounds()) return false;
+        if (!draw.mesh || !draw.mesh->HasBounds() ||
+            (!draw.terrainCell && !draw.mesh->useBoundsForShadowCulling)) return false;
         const glm::vec3 minimum = draw.mesh->GetBoundsMin();
         const glm::vec3 maximum = draw.mesh->GetBoundsMax();
+        if(mainShadowCascades.receivers[cascade].Outside(minimum,maximum,draw.objectData.world)) return true;
         const glm::vec3 center = (minimum + maximum) * 0.5f;
         const glm::vec3 extent = (maximum - minimum) * 0.5f;
         const glm::mat4 localToClip = shadowViewProjections[cascade] *
@@ -3867,20 +4469,33 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         context->BeginDepthOnlyPass(m_directionalShadowMap.get(), 1.f))
     {
         context->BeginGpuTiming(Engine::Graphics::GpuTimingStage::Shadow);
+        std::array<std::vector<uint8_t>,4> cascadeVisible;
+        for(uint32_t cascade=0;cascade<shadowCascadeCount;++cascade)
+        {
+            const auto& frameVisible=hasPortalViews ? emptyVisibility : m_renderSpatialIndex.Query(shadowViewProjections[cascade]);
+            cascadeVisible[cascade].resize(preparedDraws.size(),1);
+            if(!frameVisible.empty())
+                for(size_t index=0;index<preparedDraws.size();++index)
+                    cascadeVisible[cascade][index]=frameVisible[preparedDraws[index].frameItemIndex];
+        }
         std::vector<uint8_t> cascadeMasks(preparedDraws.size(), 0u);
-        for (size_t drawIndex = 0; drawIndex < preparedDraws.size(); ++drawIndex)
+        Engine::Rendering::RenderJobs::Get().For(preparedDraws.size(),512,[&](size_t drawIndex)
         {
             const PreparedDraw& draw = preparedDraws[drawIndex];
             if (!draw.castsShadow || !draw.vertexBuffer ||
                 isSpatialManipulatorCarrierDraw(draw))
-                continue;
+                return;
             for (uint32_t cascade = 0; cascade < shadowCascadeCount; ++cascade)
-                if (!outsideShadowCascade(draw, cascade))
+                if (cascadeVisible[cascade][drawIndex] && !outsideShadowCascade(draw, cascade))
                     cascadeMasks[drawIndex] |= static_cast<uint8_t>(1u << cascade);
-        }
+        });
+        for(uint32_t cascade=0;cascade<shadowCascadeCount;++cascade)
+            for(size_t index=0;index<preparedDraws.size();++index)
+                cascadeVisible[cascade][index]=(cascadeMasks[index] & (1u<<cascade))!=0;
         const auto shadowCullingEnd = std::chrono::steady_clock::now();
         m_lastShadowCpuTiming.cascadeCullingMs = shadowElapsedMs(
             shadowPreparationEnd, shadowCullingEnd);
+        uint32_t firstDirtyShadow=UINT32_MAX,lastDirtyShadow=0;
         for (uint32_t cascade = 0; cascade < shadowCascadeCount; ++cascade)
         {
             for (size_t drawIndex = 0; drawIndex < preparedDraws.size(); ++drawIndex)
@@ -3897,9 +4512,12 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                     (1u | 32u));
                 shadowData.ambientUnlit.w = 1.f;
                 shadowData.environmentParams = glm::vec4(0.f);
-                std::memcpy(static_cast<uint8_t*>(m_shadowObjectDataMapped) +
-                    static_cast<size_t>(recordIndex) * sizeof(ObjectGPUData),
-                    &shadowData, sizeof(ObjectGPUData));
+                auto* destination=static_cast<uint8_t*>(m_shadowObjectDataMapped)+size_t(recordIndex)*sizeof(ObjectGPUData);
+                if(std::memcmp(destination,&shadowData,sizeof(shadowData))!=0)
+                {
+                    std::memcpy(destination,&shadowData,sizeof(shadowData));
+                    firstDirtyShadow=std::min(firstDirtyShadow,recordIndex); lastDirtyShadow=recordIndex;
+                }
                 DrawCBData shadowDraw = draw.drawData;
                 shadowDraw.objectIndex = recordIndex;
                 shadowDraw.lightCount = 0;
@@ -3909,16 +4527,29 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                     &shadowDraw, sizeof(shadowDraw));
             }
         }
-        const uint64_t shadowBytes = static_cast<uint64_t>(shadowCascadeCount) *
-            m_objectCapacity * sizeof(ObjectGPUData);
-        m_shadowObjectDataBuffer->FlushMappedWrites(0, shadowBytes);
+        if(firstDirtyShadow!=UINT32_MAX)
+        {
+            const uint64_t bytes=uint64_t(lastDirtyShadow-firstDirtyShadow+1)*sizeof(ObjectGPUData);
+            m_shadowObjectDataBuffer->FlushMappedWrites(uint64_t(firstDirtyShadow)*sizeof(ObjectGPUData),bytes);
+            m_lastRenderCpuTimings.changedUploadBytes+=bytes;
+        }
         context->SetStructuredBuffer(6, m_lightDataBuffer.get());
         context->SetStructuredBuffer(7, m_shadowObjectDataBuffer.get());
         context->SetStructuredBuffer(8, m_boneDataBuffer.get());
+        context->PrepareConstantBuffer(m_shadowConstantBuffer.get(),
+            static_cast<uint64_t>(shadowCascadeCount) * m_objectCapacity * kCBStride);
         const auto shadowRecordsEnd = std::chrono::steady_clock::now();
         m_lastShadowCpuTiming.recordUploadMs = shadowElapsedMs(
             shadowCullingEnd, shadowRecordsEnd);
 
+        const auto threadCycles = []()->uint64_t {
+#if defined(_WIN32)
+            ULONG64 cycles=0; QueryThreadCycleTime(GetCurrentThread(),&cycles); return cycles;
+#else
+            return 0;
+#endif
+        };
+        const auto submissionCyclesStart=m_updateProfilingEnabled ? threadCycles():0;
         const uint32_t tileResolution = shadowCascadeCount > 1u
             ? m_directionalShadowResolution / 2u
             : m_directionalShadowResolution;
@@ -3940,20 +4571,28 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 static_cast<int32_t>(tileY * tileResolution),
                 static_cast<int32_t>((tileX + 1u) * tileResolution),
                 static_cast<int32_t>((tileY + 1u) * tileResolution) });
+            std::vector<uint8_t> automaticSubmitted(automaticGroups.size(),0);
             for (size_t drawIndex = 0; drawIndex < preparedDraws.size(); ++drawIndex)
             {
                 if (!(cascadeMasks[drawIndex] & (1u << cascade)))
                     continue;
                 const PreparedDraw& draw = preparedDraws[drawIndex];
+                if(draw.automaticGroup!=UINT32_MAX && automaticSubmitted[draw.automaticGroup]) continue;
+                if(draw.automaticGroup==UINT32_MAX && !lodSelected(draw)) continue;
+
                 Engine::Graphics::IPipelineState* shadowPipeline =
                     draw.doubleSided
                         ? m_directionalShadowDoubleSidedPipeline.get()
                         : m_directionalShadowPipeline.get();
+                const auto bindStarted = m_updateProfilingEnabled
+                    ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
                 context->SetPipeline(geometryPipeline(draw, shadowPipeline));
                 const uint32_t recordIndex = cascade * m_objectCapacity +
                     draw.drawData.objectIndex;
                 context->SetConstantBuffer(0, m_shadowConstantBuffer.get(),
                     static_cast<uint64_t>(recordIndex) * kCBStride);
+                const auto afterConstants = m_updateProfilingEnabled
+                    ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
                 for (uint32_t textureSlot = 0;
                     textureSlot < 12; ++textureSlot)
                 {
@@ -3963,12 +4602,55 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 }
                 shadowTextures = draw.textures;
                 shadowTexturesBound = true;
+                const auto beforeGeometry = m_updateProfilingEnabled
+                    ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+                if(draw.automaticGroup!=UINT32_MAX)
+                {
+                    automaticSubmitted[draw.automaticGroup]=1;
+                    const auto draws=submitAutomaticGroup(automaticGroups[draw.automaticGroup],
+                        shadowViewProjections[cascade],cascade*m_objectCapacity,geometryPipeline(draw,shadowPipeline),&cascadeVisible[cascade]);
+                    m_shadowDebugSnapshot.submittedCasterDrawCount+=draws;
+                    m_lastShadowCpuTiming.automaticDraws+=draws;
+                    if(m_updateProfilingEnabled)
+                    {
+                        m_lastShadowCpuTiming.constantBindingMs+=shadowElapsedMs(bindStarted,afterConstants);
+                        m_lastShadowCpuTiming.textureBindingMs+=shadowElapsedMs(afterConstants,beforeGeometry);
+                        const double batchMs=shadowElapsedMs(beforeGeometry,std::chrono::steady_clock::now());
+                        m_lastShadowCpuTiming.geometryDrawMs+=batchMs;
+                        m_lastShadowCpuTiming.maxBatchMs=std::max(m_lastShadowCpuTiming.maxBatchMs,batchMs);
+                    }
+                    continue;
+                }
                 submitGeometry(draw);
-                ++m_shadowDebugSnapshot.submittedCasterDrawCount;
+                if (m_updateProfilingEnabled)
+                {
+                    m_lastShadowCpuTiming.constantBindingMs += shadowElapsedMs(bindStarted, afterConstants);
+                    m_lastShadowCpuTiming.textureBindingMs += shadowElapsedMs(afterConstants, beforeGeometry);
+                    const double batchMs=shadowElapsedMs(beforeGeometry,std::chrono::steady_clock::now());
+                    m_lastShadowCpuTiming.geometryDrawMs += batchMs;
+                    m_lastShadowCpuTiming.maxBatchMs=std::max(m_lastShadowCpuTiming.maxBatchMs,batchMs);
+                }
+                if (draw.mesh && draw.mesh->IsInstanced())
+                {
+                    const auto draws=static_cast<uint32_t>(std::count_if(
+                        draw.mesh->GetInstanceRanges().begin(), draw.mesh->GetInstanceRanges().end(),
+                        [](const auto& range) { return range.instanceCount && range.vertexCount; }));
+                    m_shadowDebugSnapshot.submittedCasterDrawCount+=draws;
+                    m_lastShadowCpuTiming.explicitInstanceDraws+=draws;
+                }
+                else { ++m_shadowDebugSnapshot.submittedCasterDrawCount; ++m_lastShadowCpuTiming.ordinaryDraws; }
             }
         }
+        if(m_updateProfilingEnabled)
+        {
+            m_lastShadowCpuTiming.submissionThreadCycles=threadCycles()-submissionCyclesStart;
+            m_lastShadowCpuTiming.submissionWallMs=shadowElapsedMs(shadowRecordsEnd,std::chrono::steady_clock::now());
+        }
+        const auto restoreStarted = std::chrono::steady_clock::now();
         context->EndDepthOnlyPass();
         context->EndGpuTiming(Engine::Graphics::GpuTimingStage::Shadow);
+        m_lastShadowCpuTiming.passRestoreMs = shadowElapsedMs(
+            restoreStarted, std::chrono::steady_clock::now());
         m_lastShadowCpuTiming.drawSubmissionMs = shadowElapsedMs(
             shadowRecordsEnd, std::chrono::steady_clock::now());
 
@@ -4165,8 +4847,24 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         context->BeginGpuTiming(stage);
         activeGpuStage = stage;
     };
+    m_lastOrdinaryDrawCount=0;
+    const auto submissionStart=RenderClock::now();
+    const double uploadBeforeSubmission=m_lastRenderCpuTimings.uploadMs;
+    std::vector<uint8_t> submittedAutomaticGroups(automaticGroups.size(),0);
     for (const PreparedDraw& draw : preparedDraws)
     {
+        if(draw.automaticGroup!=UINT32_MAX)
+        {
+            if(submittedAutomaticGroups[draw.automaticGroup]) continue;
+            submittedAutomaticGroups[draw.automaticGroup]=1;
+            switchGpuStage(draw.terrain || draw.terrainCell ? Engine::Graphics::GpuTimingStage::Terrain : Engine::Graphics::GpuTimingStage::Opaque);
+            for(uint32_t textureSlot=0;textureSlot<std::max(draw.textureSlotCount,boundTextureSlotCount);++textureSlot)
+                if(!texturesBound || boundTextures[textureSlot]!=draw.textures[textureSlot]) context->SetTexture(textureSlot,draw.textures[textureSlot]);
+            boundTextures=draw.textures; boundTextureSlotCount=draw.textureSlotCount; texturesBound=true;
+            m_lastOrdinaryDrawCount+=submitAutomaticGroup(automaticGroups[draw.automaticGroup],viewProjection,0,geometryPipeline(draw,draw.pipeline),nullptr);
+            continue;
+        }
+        if(!lodSelected(draw)) continue;
         if (!draw.vertexBuffer)
             continue;
         // Spatial manipulators are logical scene components. Meshes or
@@ -4205,7 +4903,10 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         boundTextures = draw.textures;
         texturesBound = true;
         boundTextureSlotCount = draw.textureSlotCount;
-        submitGeometry(draw);
+        if(draw.mesh && draw.mesh->IsInstanced())
+            for(const auto& range:draw.mesh->GetInstanceRanges()) m_lastOrdinaryDrawCount+=range.instanceCount && range.vertexCount;
+        else ++m_lastOrdinaryDrawCount;
+        submitMaterialGeometry(draw, geometryPipeline(draw, draw.pipeline));
         if (draw.occlusionCandidate)
             context->EndOcclusionQuery();
 
@@ -4223,12 +4924,14 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             submitGeometry(draw);
         }
     }
+    m_lastRenderCpuTimings.submissionMs=std::max(0.,std::chrono::duration<double,std::milli>(RenderClock::now()-submissionStart).count()-(m_lastRenderCpuTimings.uploadMs-uploadBeforeSubmission));
     if (activeGpuStage)
     {
         context->EndGpuTiming(*activeGpuStage);
         activeGpuStage.reset();
     }
 
+    const auto portalWorkStart=RenderClock::now();
     struct PortalStencilPass
     {
         Engine::Components::SpatialManipulator* source = nullptr;
@@ -5444,9 +6147,11 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                                 context->SetTexture(textureSlot,
                                     portalTexture(portalJob, draw, textureSlot));
                             }
-                            dx11Context->OMSetDepthStencilState(
-                                stencilReadState.Get(), portalStencilRef);
-                            submitGeometry(draw);
+                            submitMaterialGeometry(draw, geometryPipeline(draw, draw.pipeline), [&]
+                            {
+                                dx11Context->OMSetDepthStencilState(
+                                    stencilReadState.Get(), portalStencilRef);
+                            });
                         }
                         }
 
@@ -5655,7 +6360,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                     context->SetTexture(textureSlot,
                         portalTexture(portalJob, draw, textureSlot));
                 }
-                submitGeometry(draw);
+                submitMaterialGeometry(draw, geometryPipeline(draw,
+                    resolveStencilReadPipeline(draw.pipeline)));
             }
 
             // The connected chart uses the same particle records with its
@@ -5773,12 +6479,15 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         context->DrawInstanced(3, 1, 0, 0);
     }
 
+    m_lastRenderCpuTimings.portalMs=std::chrono::duration<double,std::milli>(RenderClock::now()-portalWorkStart).count();
+    const auto retainedUiStart=RenderClock::now();
     // Screen-space retained UI is a game-view pass. The scene editor camera
     // should inspect UI objects in the scene without applying runtime
     // fullscreen composition that anchors to the active viewport.
     if (m_uiRenderer && (!includeEditorVisuals || settings.sceneViewUiOverlay))
         m_uiRenderer->Render(*this, context, aspect);
     updatePortalShadowDebug();
+    m_lastRenderCpuTimings.retainedUiMs=std::chrono::duration<double,std::milli>(RenderClock::now()-retainedUiStart).count();
 }
 
 }

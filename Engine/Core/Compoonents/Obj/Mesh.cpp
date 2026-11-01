@@ -1,8 +1,10 @@
 #include "Mesh.h"
+#include "Core/Rendering/SharedMeshBuffers.h"
 #include "Core/Model/MeshPackAsset.h"
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 #include <fstream>
+#include <algorithm>
 #include <sstream>
 #include <array>
 #include <filesystem>
@@ -14,6 +16,7 @@
 #include <limits>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <glm/gtc/quaternion.hpp>
 #ifdef _WIN32
 #define NOMINMAX
@@ -27,6 +30,9 @@ Mesh::Mesh()
     SetTypeName(COMPONENT_TYPE_NAME(Mesh));
     RegisterField("file", m_filePath);
     RegisterField("useLightProbes",useLightProbes,"Lighting");
+    RegisterField("gpuLodSelection",gpuLodSelection,"LOD");
+    RegisterField("gpuLod1Distance",gpuLod1Distance,"LOD");
+    RegisterField("gpuLod2Distance",gpuLod2Distance,"LOD");
 }
 
 #ifndef ENGINE_ASSETS_PATH
@@ -256,6 +262,8 @@ static size_t ResolveObjIndex(int index, size_t count,
 
 void Mesh::LoadFromFile(const std::string& path)
 {
+    ClearInstancing();
+    ClearRuntimeLods();
     ClearSurfaceOffsets();
     MarkConfigurationDirty();
     ++m_authoredGeometryRevision;
@@ -454,6 +462,8 @@ bool Mesh::SetDeformedVertices(const std::vector<Vertex>& vertices)
         (vertices.size() == m_vertices.size() &&
          std::memcmp(vertices.data(), m_vertices.data(), byteSize) == 0))
         return false;
+    MakeGeometryWritable();
+    ClearRuntimeLods();
     ClearSurfaceOffsets();
 
     // A real portal cut adds intersection vertices, so the two clipped halves
@@ -509,6 +519,8 @@ bool Mesh::SetDeformedVertices(std::vector<Vertex>&& vertices)
         (vertices.size() == m_vertices.size() &&
          std::memcmp(vertices.data(), m_vertices.data(), byteSize) == 0))
         return false;
+    MakeGeometryWritable();
+    ClearRuntimeLods();
     ClearSurfaceOffsets();
 
     m_terrainVertices.clear();
@@ -548,6 +560,8 @@ bool Mesh::SetAuthoredVertices(std::vector<Vertex> vertices)
 {
     if (!ValidateAuthoredGeometry(vertices, {}))
         return false;
+    ClearRuntimeLods();
+    ClearInstancing();
     ClearSurfaceOffsets();
     m_terrainVertices.clear();
     m_indices.clear();
@@ -561,10 +575,248 @@ bool Mesh::SetAuthoredVertices(std::vector<Vertex> vertices)
     return true;
 }
 
+bool Mesh::SetPreparedTriangleGeometry(std::vector<Vertex> vertices,
+    const glm::vec3& minimum, const glm::vec3& maximum)
+{
+    if (vertices.empty() || vertices.size() % 3 != 0 || HasMorphTargets() ||
+        !glm::all(glm::lessThanEqual(minimum, maximum))) return false;
+    ClearRuntimeLods();
+    ClearInstancing();
+    ClearSurfaceOffsets();
+    m_vertices = std::move(vertices);
+    m_terrainVertices.clear();
+    m_indices.clear();
+    m_indexBuffer.reset();
+    m_vertexBuffer.reset();
+    m_boundsMin = minimum;
+    m_boundsMax = maximum;
+    m_hasBounds = true;
+    m_ready = false;
+    ++m_authoredGeometryRevision;
+    MarkConfigurationDirty();
+    if (m_bufferFactory) CreateBuffer(m_bufferFactory);
+    return true;
+}
+
+void Mesh::SetInstancedGeometry(std::shared_ptr<Mesh> source,
+    std::shared_ptr<InstanceData> instances, std::vector<InstanceRange> ranges,
+    const glm::vec3& minimum, const glm::vec3& maximum)
+{
+    static_assert(sizeof(InstanceTransform) == 48, "Instance transform layout must match Object.hlsl");
+    if (!source || source.get() == this || source->IsInstanced() ||
+        source->HasMorphTargets() || source->HasSurfaceOffsets() ||
+        source->UsesTerrainVertexFormat() || source->GetIndexCount() || !instances)
+        throw std::invalid_argument("Instances require a static triangle-list source mesh");
+    for (const auto& range : ranges)
+        if (range.firstVertex % 3 || range.vertexCount % 3 ||
+            uint64_t(range.firstVertex) + range.vertexCount > source->GetVertexCount() ||
+            uint64_t(range.firstInstance) + range.instanceCount > instances->transforms.size())
+            throw std::invalid_argument("Instance range exceeds shared geometry or placements");
+    ClearRuntimeLods();
+    m_vertices.clear(); m_indices.clear(); m_terrainVertices.clear();
+    m_vertexBuffer.reset(); m_indexBuffer.reset();
+    m_instanceSource = std::move(source);
+    m_instances = std::move(instances);
+    m_instanceRanges = std::move(ranges);
+    m_boundsMin = minimum; m_boundsMax = maximum; m_hasBounds = true;
+    m_ready = m_instanceSource->IsReady();
+    for (const auto& range : m_instanceRanges)
+        if (range.instanceCount)
+        {
+            auto* buffer = GetInstanceBuffer(range.firstInstance);
+            if (!buffer || buffer->GetSize() < uint64_t(range.instanceCount) * sizeof(InstanceTransform))
+                m_ready = false;
+        }
+    ++m_authoredGeometryRevision;
+    MarkConfigurationDirty();
+}
+
+bool Mesh::ExchangeStaticGeometry(Mesh& other)
+{
+    if (HasMorphTargets() || other.HasMorphTargets() ||
+        HasSurfaceOffsets() || other.HasSurfaceOffsets()) return false;
+    using std::swap;
+    swap(m_instanceSource, other.m_instanceSource);
+    swap(m_instances, other.m_instances);
+    swap(m_instanceRanges, other.m_instanceRanges);
+    swap(m_vertices, other.m_vertices);
+    swap(m_terrainVertices, other.m_terrainVertices);
+    swap(m_indices, other.m_indices);
+    swap(m_vertexBuffer, other.m_vertexBuffer);
+    swap(m_sharedVertexBuffer, other.m_sharedVertexBuffer);
+    swap(m_sharedIndexBuffer, other.m_sharedIndexBuffer);
+    swap(m_indexBuffer, other.m_indexBuffer);
+    swap(m_bufferFactory, other.m_bufferFactory);
+    swap(m_ready, other.m_ready);
+    swap(m_hasBounds, other.m_hasBounds);
+    swap(m_boundsMin, other.m_boundsMin);
+    swap(m_boundsMax, other.m_boundsMax);
+    ++m_authoredGeometryRevision;
+    ++other.m_authoredGeometryRevision;
+    MarkConfigurationDirty();
+    other.MarkConfigurationDirty();
+    return true;
+}
+
+bool Mesh::StoreRuntimeLod(int lod, std::unique_ptr<Mesh> geometry)
+{
+    if (lod < 0 || lod >= MaximumRuntimeLods || !geometry || geometry.get() == this ||
+        HasMorphTargets() || HasSurfaceOffsets() || geometry->HasMorphTargets() ||
+        geometry->HasSurfaceOffsets() || !geometry->m_runtimeLods.empty()) return false;
+    if (m_runtimeLods.empty() && GetVertexCount() > 0)
+    {
+        // Preserve an ordinary object's existing geometry as its base LOD.
+        m_runtimeLods.push_back(std::make_unique<Mesh>());
+        m_activeRuntimeLod = 0;
+    }
+    if (m_runtimeLods.size() <= static_cast<size_t>(lod)) m_runtimeLods.resize(lod + 1);
+    if (lod == m_previousRuntimeLod || lod == m_activeRuntimeLod)
+    { m_previousRuntimeLod = -1; m_runtimeLodProgress = 1.f; }
+    if (m_activeRuntimeLod == lod)
+    {
+        if (!ExchangeStaticGeometry(*geometry)) return false;
+        // geometry now owns the replaced buffers; release them, retaining a holder.
+        m_runtimeLods[lod] = std::make_unique<Mesh>();
+    }
+    else m_runtimeLods[lod] = std::move(geometry);
+    return true;
+}
+
+bool Mesh::IsRuntimeLodResident(int lod) const
+{
+    return lod >= 0 && static_cast<size_t>(lod) < m_runtimeLods.size() &&
+        m_runtimeLods[lod] != nullptr;
+}
+
+bool Mesh::SelectRuntimeLod(int lod)
+{
+    if (lod == m_activeRuntimeLod || !IsRuntimeLodResident(lod) ||
+        HasMorphTargets() || HasSurfaceOffsets()) return false;
+    if (m_activeRuntimeLod >= 0 &&
+        !ExchangeStaticGeometry(*m_runtimeLods[m_activeRuntimeLod])) return false;
+    ExchangeStaticGeometry(*m_runtimeLods[lod]);
+    m_activeRuntimeLod = lod;
+    m_previousRuntimeLod = -1;
+    m_runtimeLodProgress = 1.f;
+    return true;
+}
+
+bool Mesh::BeginRuntimeLodTransition(int lod, float durationSeconds)
+{
+    // Complete the current pair before accepting another target. The caller
+    // can retry its desired level next frame without allocations or thrashing.
+    if (m_previousRuntimeLod >= 0) return false;
+    const int previous = m_activeRuntimeLod;
+    if (!SelectRuntimeLod(lod)) return false;
+    if (previous >= 0 && durationSeconds > 0.f)
+    {
+        m_previousRuntimeLod = previous;
+        m_runtimeLodProgress = 0.f;
+        m_runtimeLodDuration = durationSeconds;
+    }
+    return true;
+}
+
+bool Mesh::AdvanceRuntimeLodTransition(float deltaSeconds)
+{
+    if (m_previousRuntimeLod < 0 || deltaSeconds <= 0.f) return false;
+    m_runtimeLodProgress = std::min(1.f, m_runtimeLodProgress +
+        deltaSeconds / std::max(.001f, m_runtimeLodDuration));
+    if (m_runtimeLodProgress >= 1.f)
+    { m_previousRuntimeLod = -1; ++m_runtimeFadeRevision; }
+    return true;
+}
+
+Mesh* Mesh::GetPreviousRuntimeLodMesh() const
+{
+    return IsRuntimeLodResident(m_previousRuntimeLod)
+        ? m_runtimeLods[m_previousRuntimeLod].get() : nullptr;
+}
+
+void Mesh::SetRuntimeVisibility(float visibility)
+{
+    const float next = std::clamp(visibility, 0.f, 1.f);
+    if ((next <= 0.f) != (m_runtimeVisibility <= 0.f) ||
+        (next >= 1.f) != (m_runtimeVisibility >= 1.f)) ++m_runtimeFadeRevision;
+    m_runtimeVisibility = next;
+}
+
+glm::vec4 Mesh::GetRuntimeGeometryFade(bool previous) const
+{
+    const float split = m_previousRuntimeLod >= 0 ? m_runtimeLodProgress : 1.f;
+    const float boundary = split * m_runtimeVisibility;
+    // Complementary coverage intervals preserve opaque depth writes and avoid
+    // transparent sorting. Ordinary, fully visible meshes use the fast path.
+    if (previous) return {boundary, m_runtimeVisibility, 0.f, 1.f};
+    return {0.f, boundary, 0.f, boundary < 1.f ? 1.f : 0.f};
+}
+
+int Mesh::ChooseRuntimeLod(float distance, std::initializer_list<float> thresholds,
+    float hysteresis) const
+{
+    if (std::isnan(distance)) return std::max(0, m_activeRuntimeLod);
+    hysteresis = std::max(0.f, hysteresis);
+    int target = 0, level = 0;
+    float lower = 0.f;
+    float activeLower = 0.f, activeUpper = std::numeric_limits<float>::infinity();
+    for (float threshold : thresholds)
+    {
+        if (level == MaximumRuntimeLods - 1) break;
+        const float upper = std::max(lower, threshold);
+        if (distance >= upper) target = level + 1;
+        if (m_activeRuntimeLod == level) { activeLower = lower; activeUpper = upper; }
+        lower = upper;
+        ++level;
+    }
+    if (m_activeRuntimeLod == level) activeLower = lower;
+    if (m_activeRuntimeLod >= 0 && m_activeRuntimeLod <= level &&
+        (m_activeRuntimeLod == 0 || distance >= activeLower - hysteresis) &&
+        distance < activeUpper + hysteresis) return m_activeRuntimeLod;
+    return target;
+}
+
+size_t Mesh::GetResidentRuntimeLodCount() const
+{
+    return std::count_if(m_runtimeLods.begin(), m_runtimeLods.end(),
+        [](const auto& geometry) { return geometry != nullptr; });
+}
+
+uint64_t Mesh::GetRuntimeLodGpuMemoryBytes() const
+{
+    if (IsInstanced())
+    {
+        std::unordered_set<const void*> resources;
+        uint64_t bytes = 0;
+        const auto count = [&](const Mesh& mesh) {
+            if (auto* buffer = mesh.GetGraphicsBuffer(); buffer && resources.insert(buffer).second)
+                bytes += buffer->GetSize();
+            if (mesh.m_instances) for (const auto& slice : mesh.m_instances->slices)
+                if (auto* buffer = slice.buffer.get(); buffer && resources.insert(buffer).second)
+                    bytes += buffer->GetSize();
+        };
+        count(*this);
+        for (const auto& geometry : m_runtimeLods) if (geometry) count(*geometry);
+        return bytes;
+    }
+    uint64_t bytes = m_activeRuntimeLod >= 0 ? GetGpuBufferMemoryBytes() : 0;
+    for (const auto& geometry : m_runtimeLods)
+        if (geometry) bytes += geometry->GetGpuBufferMemoryBytes();
+    return bytes;
+}
+
+void Mesh::ClearRuntimeLods()
+{
+    m_runtimeLods.clear();
+    m_activeRuntimeLod = -1;
+    m_previousRuntimeLod = -1;
+    m_runtimeLodProgress = 1.f;
+}
+
 bool Mesh::UpdateAuthoredVertices(std::vector<Vertex> vertices)
 {
     if (vertices.size() != m_vertices.size() || !m_terrainVertices.empty() ||
         !ValidateAuthoredGeometry(vertices, m_indices)) return false;
+    MakeGeometryWritable();
     const size_t byteSize = vertices.size() * sizeof(Vertex);
     if (m_vertexBuffer)
     {
@@ -586,6 +838,7 @@ bool Mesh::UpdateAuthoredVertices(std::vector<Vertex> vertices)
             m_vertexBuffer->Unmap();
         }
     }
+    ClearRuntimeLods();
     ClearSurfaceOffsets();
     m_vertices = std::move(vertices);
     ++m_authoredGeometryRevision;
@@ -601,6 +854,7 @@ bool Mesh::UpdateIndexedVertexRange(size_t first,
     if (vertices.empty() || m_indices.empty() || !m_terrainVertices.empty() ||
         first > m_vertices.size() ||
         vertices.size() > m_vertices.size() - first) return false;
+    MakeGeometryWritable();
     if (m_vertexBuffer &&
         m_vertexBuffer->GetAccessMode() == IGraphicsBuffer::AccessMode::Upload)
     {
@@ -624,6 +878,7 @@ bool Mesh::UpdateIndexedVertexRange(size_t first,
         if (!replacement) return false;
         m_vertexBuffer = std::move(replacement);
     }
+    ClearRuntimeLods();
     ClearSurfaceOffsets();
     ++m_authoredGeometryRevision;
     MarkConfigurationDirty();
@@ -640,6 +895,7 @@ void Mesh::SetAuthoredFilePath(std::string path)
 
 std::vector<Mesh::Vertex> Mesh::TakeVertices()
 {
+    ClearRuntimeLods();
     ClearSurfaceOffsets();
     m_ready = false;
     m_hasBounds = false;
@@ -706,9 +962,11 @@ Mesh::TerrainMeshData Mesh::BuildIndexedTerrain(
 bool Mesh::SetTerrainGeometry(TerrainMeshData&& geometry,
     bool retainExpandedVertices)
 {
+    ClearRuntimeLods();
     ClearSurfaceOffsets();
     if (geometry.vertices.empty() || geometry.indices.empty())
         return false;
+    ClearInstancing();
 
     m_terrainVertices = std::move(geometry.vertices);
     m_indices = std::move(geometry.indices);
@@ -737,7 +995,8 @@ bool Mesh::SetTerrainGeometry(TerrainMeshData&& geometry,
         sizeof(uint32_t);
     if (m_bufferFactory)
     {
-        const auto upload = [&](std::unique_ptr<IGraphicsBuffer>& buffer,
+        MakeGeometryWritable();
+        const auto upload = [&](std::shared_ptr<IGraphicsBuffer>& buffer,
             IGraphicsBuffer::Usage usage, uint64_t byteCount, const void* data)
         {
             if (!buffer || buffer->GetSize() < byteCount)
@@ -763,6 +1022,7 @@ bool Mesh::SetTerrainGeometry(TerrainMeshData&& geometry,
 
 Mesh::TerrainMeshData Mesh::TakeTerrainGeometry()
 {
+    ClearRuntimeLods();
     ClearSurfaceOffsets();
     TerrainMeshData result{ std::move(m_terrainVertices), std::move(m_indices) };
     m_vertices.clear();
@@ -801,6 +1061,13 @@ uint64_t Mesh::GetUploadShadowMemoryBytes() const
 
 uint64_t Mesh::GetGpuBufferMemoryBytes() const
 {
+    if (IsInstanced())
+    {
+        uint64_t bytes = m_instanceSource->GetGpuBufferMemoryBytes();
+        for (const auto& slice : m_instances->slices)
+            if (slice.buffer) bytes += slice.buffer->GetSize();
+        return bytes;
+    }
     return (m_vertexBuffer ? m_vertexBuffer->GetSize() : 0u) +
         (m_posedVertexBuffer ? m_posedVertexBuffer->GetSize() : 0u) +
         (m_indexBuffer ? m_indexBuffer->GetSize() : 0u) +
@@ -817,6 +1084,7 @@ void Mesh::InitializeRuntimeCloneFrom(const Mesh& source)
 void Mesh::SetMorphData(unsigned nodeIndex, std::vector<MorphTarget> targets,
     std::vector<float> weights)
 {
+    ClearRuntimeLods();
     m_morphFilePath.clear();
     m_morphNodeIndex = nodeIndex;
     m_morphTargets = std::move(targets);
@@ -1942,6 +2210,7 @@ void Mesh::SetSurfaceOffsets(std::vector<glm::vec3> offsets,
         ClearSurfaceOffsets();
         return;
     }
+    ClearRuntimeLods();
     m_surfaceOffsets = std::move(offsets);
     if (!m_bufferFactory) return;
     std::vector<Vertex> posed = BuildPosedVertices(skinPalette);
@@ -1977,6 +2246,8 @@ bool Mesh::SetIndexedGeometry(std::vector<Vertex> vertices,
     if (indices.empty() || !ValidateAuthoredGeometry(vertices, indices))
         return false;
     const auto validated = std::chrono::steady_clock::now();
+    ClearRuntimeLods();
+    ClearInstancing();
     ClearSurfaceOffsets();
     m_vertices = std::move(vertices);
     m_indices = std::move(indices);
@@ -2023,6 +2294,8 @@ bool Mesh::SetPreparedIndexedGeometry(std::vector<Vertex> vertices,
         return false;
     const auto started = std::chrono::steady_clock::now();
     m_lastIndexedGeometryTiming = {};
+    ClearRuntimeLods();
+    ClearInstancing();
     ClearSurfaceOffsets();
     m_vertices = std::move(vertices);
     m_indices = std::move(indices);
@@ -2041,6 +2314,21 @@ bool Mesh::SetPreparedIndexedGeometry(std::vector<Vertex> vertices,
 
 #pragma region DX12 buffer creation and rendering
 
+void Mesh::MakeGeometryWritable()
+{
+    if (!m_bufferFactory) return;
+    if (m_sharedVertexBuffer && m_vertexBuffer)
+    {
+        const void* data = UsesTerrainVertexFormat() ? static_cast<const void*>(m_terrainVertices.data()) : m_vertices.data();
+        m_vertexBuffer = m_bufferFactory->CreateBuffer(IGraphicsBuffer::Usage::VertexBuffer,
+            IGraphicsBuffer::AccessMode::Upload, GetVertexCount() * uint64_t(GetVertexStride()), data);
+    }
+    if (m_sharedIndexBuffer && m_indexBuffer)
+        m_indexBuffer = m_bufferFactory->CreateBuffer(IGraphicsBuffer::Usage::IndexBuffer,
+            IGraphicsBuffer::AccessMode::Upload, m_indices.size() * sizeof(uint32_t), m_indices.data());
+    m_sharedVertexBuffer = m_sharedIndexBuffer = false;
+}
+
 void Mesh::CreateBuffer(IGraphicsBufferFactory* bufferFactory)
 {
     if (!bufferFactory || (m_vertices.empty() && m_terrainVertices.empty()))
@@ -2053,13 +2341,12 @@ void Mesh::CreateBuffer(IGraphicsBufferFactory* bufferFactory)
             m_terrainVertices.size()) * sizeof(TerrainVertex);
         const uint64_t indexBytes = static_cast<uint64_t>(m_indices.size()) *
             sizeof(uint32_t);
-        m_vertexBuffer = bufferFactory->CreateBuffer(
-            IGraphicsBuffer::Usage::VertexBuffer,
-            IGraphicsBuffer::AccessMode::Upload, vertexBytes,
-            m_terrainVertices.data());
-        m_indexBuffer = bufferFactory->CreateBuffer(
-            IGraphicsBuffer::Usage::IndexBuffer,
-            IGraphicsBuffer::AccessMode::Upload, indexBytes, m_indices.data());
+        m_vertexBuffer = Engine::Rendering::AcquireMeshBuffer(bufferFactory,
+            IGraphicsBuffer::Usage::VertexBuffer, m_terrainVertices.data(), vertexBytes, sizeof(TerrainVertex));
+        m_sharedVertexBuffer = true;
+        m_indexBuffer = Engine::Rendering::AcquireMeshBuffer(bufferFactory,
+            IGraphicsBuffer::Usage::IndexBuffer, m_indices.data(), indexBytes, sizeof(uint32_t));
+        m_sharedIndexBuffer = true;
         if (!m_vertexBuffer || !m_indexBuffer)
             throw std::runtime_error("Failed to create indexed terrain buffers");
         m_ready = true;
@@ -2067,8 +2354,9 @@ void Mesh::CreateBuffer(IGraphicsBufferFactory* bufferFactory)
     }
     const uint64_t byteSize = m_vertices.size() * sizeof(Vertex);
 
-    m_vertexBuffer = bufferFactory->CreateStaticVertexBuffer(
-        byteSize, m_vertices.data());
+    m_vertexBuffer = Engine::Rendering::AcquireMeshBuffer(bufferFactory,
+        IGraphicsBuffer::Usage::VertexBuffer, m_vertices.data(), byteSize, sizeof(Vertex));
+    m_sharedVertexBuffer = true;
 
     if (!m_vertexBuffer)
         throw std::runtime_error("Failed to create vertex buffer");
@@ -2078,9 +2366,9 @@ void Mesh::CreateBuffer(IGraphicsBufferFactory* bufferFactory)
     {
         const uint64_t indexBytes = static_cast<uint64_t>(m_indices.size()) *
             sizeof(uint32_t);
-        m_indexBuffer = bufferFactory->CreateBuffer(
-            IGraphicsBuffer::Usage::IndexBuffer,
-            IGraphicsBuffer::AccessMode::Upload, indexBytes, m_indices.data());
+        m_indexBuffer = Engine::Rendering::AcquireMeshBuffer(bufferFactory,
+            IGraphicsBuffer::Usage::IndexBuffer, m_indices.data(), indexBytes, sizeof(uint32_t));
+        m_sharedIndexBuffer = true;
         if (!m_indexBuffer)
             throw std::runtime_error("Failed to create mesh index buffer");
     }
@@ -2114,6 +2402,12 @@ bool Mesh::DrawProperties(::Engine::Editor::IEditorUi& ui)
     ui.ValueLabel("Morph Targets", morphCount.c_str());
     bool changed = false;
     changed=ui.Checkbox("Use Light Probes",&useLightProbes)||changed;
+    changed=ui.Checkbox("GPU LOD Selection",&gpuLodSelection)||changed;
+    if(gpuLodSelection)
+    {
+        changed=ui.DragFloat("LOD 1 Distance",&gpuLod1Distance,.1f,0.f,100000.f)||changed;
+        changed=ui.DragFloat("LOD 2 Distance",&gpuLod2Distance,.1f,gpuLod1Distance,100000.f)||changed;
+    }
     if (!m_morphWeights.empty() &&
         ui.PropertyGroupHeader("Morph Weights", false))
     {
@@ -2186,6 +2480,9 @@ void Mesh::DeserializeLegacyMorphTargets(const JsonValue& value)
 
 void Mesh::Deserialize(const JsonValue& v)
 {
+    if(v.Has("gpuLodSelection")) gpuLodSelection=v["gpuLodSelection"].AsBool();
+    if(v.Has("gpuLod1Distance")) gpuLod1Distance=std::max(0.f,v["gpuLod1Distance"].AsFloat());
+    if(v.Has("gpuLod2Distance")) gpuLod2Distance=std::max(gpuLod1Distance,v["gpuLod2Distance"].AsFloat());
     if (v.Has("file") && !v["file"].AsString().empty())
         LoadFromFile(v["file"].AsString());
     if (v.Has("morphFile") && !v["morphFile"].AsString().empty())

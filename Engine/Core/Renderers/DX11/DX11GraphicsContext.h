@@ -41,6 +41,9 @@ struct D3D11FrameResourceState
     std::array<Microsoft::WRL::ComPtr<ID3D11Buffer>, ConstantSlots>
         fallbackConstantBuffers;
     Microsoft::WRL::ComPtr<ID3D11SamplerState> materialSampler;
+    Microsoft::WRL::ComPtr<ID3D11Buffer> indirectArguments;
+    Microsoft::WRL::ComPtr<ID3D11UnorderedAccessView> indirectArgumentsUav;
+    Microsoft::WRL::ComPtr<ID3D11ComputeShader> copyIndirectShader;
     uint32_t arenaCursor = 0;
     bool firstArenaWrite = true;
     bool arenaSupported = false;
@@ -90,6 +93,7 @@ public:
 
     void SetPipeline(const Engine::Graphics::IPipelineState* pipeline) override;
     void SetStencilReference(uint32_t reference) override;
+    void PrepareConstantBuffer(const Engine::Graphics::IGraphicsBuffer* buffer, uint64_t bytes) override;
     void SetConstantBuffer(uint32_t slot, const Engine::Graphics::IGraphicsBuffer* buffer, uint64_t offset = 0) override;
     void SetStructuredBuffer(uint32_t slot, const Engine::Graphics::IGraphicsBuffer* buffer) override;
     bool SetComputePipeline(const Engine::Graphics::IPipelineState* pipeline) override;
@@ -98,6 +102,8 @@ public:
     void SetComputeWriteBuffer(const Engine::Graphics::IGraphicsBuffer* buffer) override;
     void DispatchCompute(uint32_t x, uint32_t y = 1, uint32_t z = 1) override;
     void StorageBarrier(const Engine::Graphics::IGraphicsBuffer* buffer) override;
+    bool SupportsIndirectDraws() const override { return true; }
+    bool DrawInstancesIndirect(const Engine::Graphics::IGraphicsBuffer*, uint64_t, bool) override;
     bool CopyBuffer(const Engine::Graphics::IGraphicsBuffer* source,
         Engine::Graphics::IGraphicsBuffer* destination,
         uint64_t bytes = 0) override;
@@ -136,6 +142,10 @@ private:
     std::array<bool, D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT>
         m_textureSlotInitialized{};
     bool m_materialSamplerBound = false;
+    bool m_explicitScissor=false, m_savedExplicitScissor=false;
+    const Engine::Graphics::IGraphicsBuffer* m_preparedConstants = nullptr;
+    uint32_t m_preparedConstantStart = 0;
+    uint32_t m_preparedConstantBytes = 0;
     uint32_t m_stencilReference = 0;
     Microsoft::WRL::ComPtr<ID3D11RenderTargetView> m_savedRenderTarget;
     Microsoft::WRL::ComPtr<ID3D11DepthStencilView> m_savedDepthTarget;
@@ -161,9 +171,12 @@ public:
     }
     void PrepareFrame(uint32_t) override
     {
+        ++m_preparedFrameSerial;
         if (m_frameResources) m_frameResources->PrepareFrame();
         if (m_gpuTimings) m_gpuTimings->PrepareFrame();
     }
+    uint64_t GetPreparedFrameSerial() const override { return m_preparedFrameSerial; }
+    uint32_t GetPreparedFrameSlot() const override { return 0; }
     void FinalizeFrame() override
     { if (m_gpuTimings) m_gpuTimings->FinalizeFrame(); }
     Engine::Graphics::FrameTimingTelemetry GetFrameTimingTelemetry() const override
@@ -182,6 +195,7 @@ public:
     }
 
 private:
+    uint64_t m_preparedFrameSerial=0;
     ID3D11Device* m_device = nullptr;
     ID3D11DeviceContext* m_context = nullptr;
     ID3D11DeviceContext* m_externalContext = nullptr;

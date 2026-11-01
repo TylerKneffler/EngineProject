@@ -8,6 +8,8 @@
 #include <condition_variable>
 #include <mutex>
 #include <thread>
+#include "Core/Rendering/RenderPerformance.h"
+#include "Engine/Editor/Diagnostics/PerformanceMetrics.h"
 
 namespace Engine::Scene { class Scene; }
 namespace Engine::Renderers { class IEditorRenderer; }
@@ -26,6 +28,7 @@ struct PerformanceSnapshot
 {
     float cpuUser = 0.f;
     float cpuKernel = 0.f;
+    float processCpuPercent=0.f, processCpuCores=0.f, mainThreadCpuPercent=0.f;
     std::vector<PerformanceCoreLoad> cores;
     uint64_t memoryTotal = 0;
     uint64_t memoryUsed = 0;
@@ -58,6 +61,7 @@ public:
         std::shared_ptr<PerformanceRecording> recording = {});
     ~PerformanceView() override;
     void DrawPanel(IEditorUi& ui) override;
+    bool IsRecording() const;
     void SetFrameTimings(const EditorFrameProfileSample& sample,
         Renderers::IEditorRenderer* renderer);
 
@@ -113,5 +117,12 @@ private:
     std::vector<TimingValue> m_gpuTimings;
     bool m_gpuTimingsValid = false;
     bool m_hasFrameTimings = false;
+    Engine::Rendering::RenderCpuTimings m_renderCpu;
+    std::deque<double> m_frameIntervals;
+    double m_frameIntervalTotal=0, m_statisticsElapsed=0;
+    FrameStatistics m_frameStatistics;
+    double m_gpuTotalMs=0;
+    uint64_t m_gpuSampleId=0;
+    uint32_t m_gpuRegions=0;
 };
 }

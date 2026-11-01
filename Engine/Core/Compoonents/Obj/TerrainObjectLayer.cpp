@@ -80,6 +80,7 @@ void TerrainObjectLayer::Deserialize(const JsonValue& value)
             std::isfinite(placement.position.z) &&
             std::isfinite(placement.scale)) placements.push_back(std::move(placement));
     }
+    MarkConfigurationDirty();
 }
 
 bool TerrainObjectLayer::DrawProperties(::Engine::Editor::IEditorUi& ui)

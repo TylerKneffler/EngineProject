@@ -281,6 +281,8 @@ void ProjectLoader::ParseRendering(const pugi::xml_node& projectNode, ProjectSet
             settings.realtimeShadows.directionalDistance = std::clamp(
                 realtimeShadows.attribute("DirectionalDistance").as_float(150.f),
                 1.f, 100000.f);
+            settings.realtimeShadows.grassCasterDistance = std::clamp(
+                realtimeShadows.attribute("GrassCasterDistance").as_float(150.f),0.f,100000.f);
             settings.realtimeShadows.pcfRadius = std::min<uint32_t>(
                 realtimeShadows.attribute("PcfRadius").as_uint(1u), 4u);
             settings.realtimeShadows.cascadeSplitLambda = std::clamp(

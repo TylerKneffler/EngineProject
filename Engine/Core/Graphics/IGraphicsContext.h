@@ -61,6 +61,10 @@ public:
     // Pipelines still define compare/write operations and masks.
     virtual void SetStencilReference(uint32_t) {}
 
+    // Optional batched snapshot of immutable draw constants. Explicit APIs
+    // already bind ranges directly; DX11 can upload a pass in one map.
+    virtual void PrepareConstantBuffer(const IGraphicsBuffer*, uint64_t) {}
+
     // Constant buffer binding
     virtual void SetConstantBuffer(uint32_t slot, const IGraphicsBuffer* buffer, uint64_t offset = 0) = 0;
     virtual void SetStructuredBuffer(uint32_t slot, const IGraphicsBuffer* buffer) = 0;
@@ -72,6 +76,10 @@ public:
     virtual void SetComputeWriteBuffer(const IGraphicsBuffer*) {}
     virtual void DispatchCompute(uint32_t, uint32_t = 1, uint32_t = 1) {}
     virtual void StorageBarrier(const IGraphicsBuffer*) {}
+    virtual bool BeginComputePass() { return true; }
+    virtual void EndComputePass() {}
+    virtual bool SupportsIndirectDraws() const { return false; }
+    virtual bool DrawInstancesIndirect(const IGraphicsBuffer*, uint64_t, bool) { return false; }
     // Copies GPU data into a Readback buffer. The caller must wait for the
     // submitting frame's fence before mapping on explicit APIs.
     virtual bool CopyBuffer(const IGraphicsBuffer*, IGraphicsBuffer*,

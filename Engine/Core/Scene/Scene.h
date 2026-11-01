@@ -1,4 +1,5 @@
 #pragma once
+#include "Core/Compoonents/SpatialUpdate.h"
 #include <glm/gtc/quaternion.hpp>
 #include "Core/Object.h"
 #include "Core/Graphics/IPipelineState.h"
@@ -9,6 +10,10 @@
 #include "Core/Model/MeshData.h"
 #include "Core/Model/LightingData.h"
 #include "Core/Time/SimulationClock.h"
+#include "Core/Rendering/GrassPerformance.h"
+#include "Core/Rendering/RenderPerformance.h"
+#include "Core/Rendering/RenderSpatialIndex.h"
+#include "Core/Rendering/AutomaticInstancing.h"
 #include "Core/Physics/Physics.h"
 #include <glm/glm.hpp>
 #include <array>
@@ -16,6 +21,9 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <any>
+#include <typeindex>
+#include <unordered_set>
 #include <vector>
 
 namespace Engine::Audio { class Audio; }
@@ -149,23 +157,55 @@ public:
     void Start();
     bool HasStarted() const { return m_hasStarted; }
     void Update(float deltaTime);
+    bool UpdateSpatialScripts(bool editor=false) { return m_spatialUpdates.Tick(*this,editor); }
+    const auto& GetSpatialUpdateScheduler() const { return m_spatialUpdates; }
     struct UpdateTimings
     {
         double objectsMs = 0.0;
         double poseMs = 0.0;
         double physicsMs = 0.0;
         double postPhysicsMs = 0.0;
+        double constraintsMs = 0.0, audioMs = 0.0;
     };
     void SetUpdateProfilingEnabled(bool enabled) { m_updateProfilingEnabled = enabled; }
     const UpdateTimings& GetLastUpdateTimings() const { return m_lastUpdateTimings; }
+    void ResetGrassPerformance() { m_grassPerformance = {}; m_grassGpuResources.clear(); }
+    bool AccountGrassGpuResource(const void* resource)
+    { return resource && m_grassGpuResources.insert(resource).second; }
+    const Engine::Rendering::GrassPerformance& GetGrassPerformance() const
+    { return m_grassPerformance; }
+    void AddGrassPerformance(const Engine::Rendering::GrassPerformance& value)
+    {
+        m_grassPerformance.totalMs += value.totalMs;
+        m_grassPerformance.scanMs += value.scanMs;
+        m_grassPerformance.generationMs += value.generationMs;
+        m_grassPerformance.uploadMs += value.uploadMs;
+        m_grassPerformance.placementsScanned += value.placementsScanned;
+        m_grassPerformance.tilesBuilt += value.tilesBuilt;
+        m_grassPerformance.lodSwitches += value.lodSwitches;
+        m_grassPerformance.pending += value.pending;
+        m_grassPerformance.residentLods += value.residentLods;
+        m_grassPerformance.gpuBytes += value.gpuBytes;
+        m_grassPerformance.instances += value.instances;
+        m_grassPerformance.instanceUploadBytes += value.instanceUploadBytes;
+        m_grassPerformance.activeTiles+=value.activeTiles;
+        m_grassPerformance.transitionTiles+=value.transitionTiles;
+        m_grassPerformance.fadingTiles+=value.fadingTiles;
+    }
     struct PrepareTimings
     {
         double lookupMs = 0.0;
         double itemsMs = 0.0;
         double boneUploadMs = 0.0;
         double capacityMs = 0.0;
+        double spatialMs = 0.0;
     };
     const PrepareTimings& GetLastPrepareTimings() const { return m_lastPrepareTimings; }
+    using RenderCpuTimings = Engine::Rendering::RenderCpuTimings;
+    const RenderCpuTimings& GetLastRenderCpuTimings() const { return m_lastRenderCpuTimings; }
+    void ResetRenderCpuTimings() { m_lastRenderCpuTimings={}; }
+    bool automaticInstancing = true;
+    bool gpuInstanceCulling = true;
     // Re-evaluate animation-facing solvers after a manually sampled pose.
     void ApplyPoseConstraints();
     // Advances exactly one configured fixed frame. Offline exporters use this
@@ -274,10 +314,17 @@ public:
     }
     struct ShadowCpuTiming
     {
+        uint64_t explicitInstanceDraws=0, automaticDraws=0, ordinaryDraws=0;
         double scenePreparationMs = 0;
         double cascadeCullingMs = 0;
         double recordUploadMs = 0;
         double drawSubmissionMs = 0;
+        double constantBindingMs = 0;
+        double textureBindingMs = 0;
+        double geometryDrawMs = 0;
+        double submissionWallMs = 0, maxBatchMs = 0;
+        uint64_t submissionThreadCycles = 0;
+        double passRestoreMs = 0;
         double portalMs = 0;
         double totalMs = 0;
     };
@@ -326,6 +373,18 @@ public:
     // target, used to keep embedded-view UI hit bounds aligned.
     void SetUiPointerInput(float x, float y, float viewportWidth,
         float viewportHeight, bool hovered, bool mouseDown);
+
+    // Embedded gameplay must acquire input from its viewport, rather than
+    // treating every editor panel as part of the game window.
+    void SetGameplayInputEnabled(bool enabled)
+    {
+        m_gameplayInputManaged = true;
+        m_gameplayInputEnabled = enabled;
+    }
+    bool IsGameplayInputEnabled() const { return m_gameplayInputEnabled; }
+    bool IsGameplayInputManaged() const { return m_gameplayInputManaged; }
+    void SetGameplayInputAnchor(const glm::vec2& anchor) { m_gameplayInputAnchor = anchor; }
+    const glm::vec2& GetGameplayInputAnchor() const { return m_gameplayInputAnchor; }
 
     // Returns the first active Camera component found on a scene game object.
     // The editor camera is deliberately excluded so GameView cannot silently
@@ -388,6 +447,14 @@ public:
     // until its Update() returns.
     void    RequestRemoveObject(Object* obj);
     void    RemoveObject(Object* obj);
+    // Edit previews queue removals while traversing objects, just like scripts.
+    // Call only after that traversal; runtime Update commits automatically.
+    void CommitPendingObjectChanges()
+    {
+        if (m_isUpdating) return;
+        FlushPendingObjectAdditions();
+        FlushPendingObjectRemovals();
+    }
     void    ClearObjects();                  // remove all objects and reset selection
     const std::vector<std::unique_ptr<Object>>& GetObjects() const { return m_objects; }
     bool TryGetObjectPath(const Object* object, ObjectPath& path) const;
@@ -397,6 +464,19 @@ public:
     // component creation call this automatically; hierarchy editors should
     // use MoveObject so cached animation bindings stay coherent.
     uint64_t GetStructureRevision() const { return m_structureRevision; }
+    template<typename T> const std::vector<T*>& GetComponents() const
+    {
+        auto& entry = m_componentRegistry[std::type_index(typeid(T))];
+        if (entry.first != m_structureRevision || !entry.second.has_value())
+        {
+            std::vector<T*> components;
+            for (const auto& object : m_objects) if (object)
+                for (auto* component : object->Components)
+                    if (auto* typed = dynamic_cast<T*>(component)) components.push_back(typed);
+            entry = {m_structureRevision, std::move(components)};
+        }
+        return std::any_cast<const std::vector<T*>&>(entry.second);
+    }
     void NotifyStructureChanged()
     {
         if (++m_structureRevision == 0)
@@ -426,6 +506,9 @@ public:
     const Engine::Components::Texture* GetSkyboxPreviewTexture();
 
 private:
+    bool m_gameplayInputManaged = false;
+    bool m_gameplayInputEnabled = true;
+    glm::vec2 m_gameplayInputAnchor { 0.f };
     // ---- Rendering resources (kept API-agnostic) ----
     IGraphicsProvider* m_graphicsProvider = nullptr;
     std::unique_ptr<IPipelineState> m_gridPipeline;
@@ -519,6 +602,22 @@ private:
     std::unique_ptr<IPipelineState> m_directionalShadowDoubleSidedPipeline;
     std::unordered_map<const IPipelineState*, std::unique_ptr<IPipelineState>>
         m_terrainPipelineByBase;
+    using MaterialShaderBuilder = std::function<std::unique_ptr<IPipelineState>(
+        const Engine::Graphics::IShader*, const Engine::Graphics::IShader*,
+        bool, const std::string&)>;
+    std::unordered_map<const IPipelineState*, MaterialShaderBuilder> m_materialShaderBuilders;
+    struct MaterialShaderPipeline
+    {
+        std::unique_ptr<IPipelineState> pipeline;
+        int64_t sourceStamp = 0;
+        std::string error;
+    };
+    std::unordered_map<std::string, MaterialShaderPipeline> m_materialShaderPipelines;
+    // Preserve pipelines referenced by earlier queued frames after source edits.
+    std::vector<std::unique_ptr<IPipelineState>> m_retiredMaterialShaderPipelines;
+    IPipelineState* ResolveMaterialShaderPipeline(const std::string& path,
+        IPipelineState* base, bool terrain, bool overlay,
+        const std::string& blendMode, std::string& error);
     std::shared_ptr<Engine::Graphics::IGraphicsTexture> m_directionalShadowMap;
     uint32_t m_directionalShadowResolution = 0;
     uint64_t m_directionalShadowAllocationGeneration = 0;
@@ -609,6 +708,8 @@ private:
 
     struct FrameRenderItem
     {
+        int gpuLod = -1, gpuMaximumLod = 0;
+        glm::vec2 gpuLodDistances{0};
         Object* object = nullptr;
         Engine::Components::Mesh* mesh = nullptr;
         Engine::Components::Sprite* sprite = nullptr;
@@ -626,6 +727,7 @@ private:
         // Non-zero only for a portal-split chart instance. Object.hlsl clips
         // against this world-space plane without modifying the mesh buffer.
         glm::vec4 traversalClipPlane{0.f};
+        glm::vec4 geometryFade{0.f, 1.f, 0.f, 0.f};
         // The portal endpoint whose coordinate chart owns world and the clip
         // plane. Portal views remap only instances in their near-side chart.
         const Engine::Components::SpatialManipulator* traversalChartPortal = nullptr;
@@ -651,6 +753,41 @@ private:
         const Engine::Rendering::BakedLightingData* bakedLighting = nullptr;
     };
     std::vector<FrameComponentLookup> m_frameComponentLookupScratch;
+    Engine::Rendering::RenderSpatialIndex m_renderSpatialIndex;
+    RenderCpuTimings m_lastRenderCpuTimings;
+    Engine::Rendering::AutomaticInstanceCache m_automaticInstanceCache;
+    Engine::Rendering::ExplicitInstanceBatchCache m_explicitInstanceCache;
+    struct RenderPassBuffers
+    {
+        std::unique_ptr<IGraphicsBuffer> constants, objects, shadowConstants, shadowObjects;
+        void* constantsMapped=nullptr; void* objectsMapped=nullptr;
+        void* shadowConstantsMapped=nullptr; void* shadowObjectsMapped=nullptr;
+        uint32_t capacity=0;
+    };
+    struct RenderPassBufferSlot
+    {
+        uint64_t serial=UINT64_MAX;
+        size_t cursor=0;
+        std::vector<std::unique_ptr<RenderPassBuffers>> passes;
+    };
+    std::vector<RenderPassBufferSlot> m_renderPassBufferSlots;
+    RenderPassBuffers* m_activeRenderPassBuffers=nullptr;
+    void SelectRenderPassBuffers();
+    struct CachedRenderMaterial
+    {
+        std::vector<uint8_t> data;
+        std::array<const Engine::Graphics::IGraphicsTexture*,30> textures{};
+        uint64_t revision=0;
+        uint64_t frame=0;
+        uint32_t alphaMode=0;
+        bool doubleSided=false;
+    };
+    std::unordered_map<const Engine::Components::Material*,std::unordered_map<uint32_t,CachedRenderMaterial>> m_renderMaterialCache;
+    uint64_t m_materialPreparationSerial=0, m_materialCacheStructureRevision=0;
+    std::unique_ptr<Engine::Graphics::IPipelineState> m_instanceCullPipeline;
+    bool m_instanceCullAttempted = false;
+    uint64_t m_frameLookupRevision = 0;
+    bool m_frameLookupEditPose = false;
     std::vector<Engine::Components::SpatialManipulator*>
         m_frameSpatialManipulatorScratch;
 
@@ -701,12 +838,19 @@ private:
     bool m_isUpdating = false;
     bool m_updateProfilingEnabled = false;
     UpdateTimings m_lastUpdateTimings{};
+    Engine::Rendering::GrassPerformance m_grassPerformance{};
+    std::unordered_set<const void*> m_grassGpuResources;
     PrepareTimings m_lastPrepareTimings{};
     bool m_hasStarted = false;
     size_t m_particleBudget = 100000;
     float m_deltaTime = 0.f;
     Engine::Time::SimulationClock m_clock;
     uint64_t m_structureRevision = 1;
+    mutable std::unordered_map<std::type_index, std::pair<uint64_t, std::any>> m_componentRegistry;
+    uint64_t m_updateRegistryRevision = 0;
+    std::vector<Object*> m_updateObjects, m_poseObjects;
+    Engine::Components::SpatialUpdateScheduler m_spatialUpdates;
+    void RefreshUpdateRegistry();
     void FlushPendingObjectAdditions();
     void FlushPendingObjectRemovals();
     void EnforceParticleBudget();

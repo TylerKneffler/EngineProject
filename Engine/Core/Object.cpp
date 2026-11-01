@@ -100,7 +100,7 @@ void Object::Update()
 {
     if (!IsEnabledInHierarchy()) return;
     for (Component* comp : Components)
-        if (comp) comp->Update();
+        if (comp && comp->RequiresUpdate()) comp->Update();
 }
 
 void Object::Destroy()

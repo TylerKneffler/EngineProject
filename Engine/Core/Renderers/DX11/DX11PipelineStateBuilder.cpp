@@ -122,6 +122,7 @@ std::unique_ptr<Engine::Graphics::IPipelineState> D3D11PipelineStateBuilder::Bui
     raster.CullMode = m_cullMode;
     raster.FrontCounterClockwise = m_frontCCW;
     raster.DepthClipEnable = m_depthClip;
+    raster.ScissorEnable = TRUE;
     if (SUCCEEDED(hr)) { operation = "rasterizer state"; hr = m_device->CreateRasterizerState(&raster, &pipeline->rasterizerState); }
 
     D3D11_BLEND_DESC blend{};

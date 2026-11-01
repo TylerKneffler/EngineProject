@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "DX11GraphicsContext.h"
+#include <d3dcompiler.h>
 #include "DX11GraphicsBuffer.h"
 #include "DX11PipelineStateBuilder.h"
 #include "DX11GraphicsTexture.h"
@@ -193,7 +194,12 @@ D3D11GraphicsContext::D3D11GraphicsContext(ID3D11Device* device,
       m_gpuTimings(std::move(gpuTimings))
 {
     if (m_context)
+    {
         m_context->QueryInterface(IID_PPV_ARGS(&m_context1));
+        UINT count=1; D3D11_VIEWPORT viewport{};
+        m_context->RSGetViewports(&count,&viewport);
+        if(count) SetViewport({viewport.TopLeftX,viewport.TopLeftY,viewport.Width,viewport.Height,viewport.MinDepth,viewport.MaxDepth});
+    }
 }
 
 void D3D11GraphicsContext::BeginGpuTiming(
@@ -350,6 +356,36 @@ void D3D11GraphicsContext::SetStencilReference(uint32_t reference)
         m_context->OMSetDepthStencilState(m_depthStencilState.Get(), reference);
 }
 
+void D3D11GraphicsContext::PrepareConstantBuffer(
+    const Engine::Graphics::IGraphicsBuffer* buffer, uint64_t bytes)
+{
+    m_preparedConstants = nullptr;
+    m_preparedConstantBytes = 0;
+    const auto* source = dynamic_cast<const D3D11GraphicsBuffer*>(buffer);
+    if (!m_context1 || !m_frameResources || !m_frameResources->arenaSupported ||
+        !m_frameResources->constantArena || !source || !source->GetShadowData() ||
+        !bytes || bytes > source->GetSize() ||
+        bytes > D3D11FrameResourceState::ArenaSize ||
+        bytes % D3D11FrameResourceState::ConstantSize) return;
+    auto& resources = *m_frameResources;
+    if (resources.arenaCursor + bytes > D3D11FrameResourceState::ArenaSize)
+    { resources.arenaCursor = 0; resources.firstArenaWrite = true; }
+    const auto mapType = resources.firstArenaWrite ? D3D11_MAP_WRITE_DISCARD :
+        D3D11_MAP_WRITE_NO_OVERWRITE;
+    D3D11_MAPPED_SUBRESOURCE mapped{};
+    if (FAILED(m_context->Map(resources.constantArena.Get(), 0, mapType, 0, &mapped))) return;
+    std::memcpy(static_cast<uint8_t*>(mapped.pData) + resources.arenaCursor,
+        source->GetShadowData(), static_cast<size_t>(bytes));
+    m_context->Unmap(resources.constantArena.Get(), 0);
+    m_preparedConstants = buffer;
+    m_preparedConstantStart = resources.arenaCursor;
+    m_preparedConstantBytes = static_cast<uint32_t>(bytes);
+    resources.arenaCursor += m_preparedConstantBytes;
+    resources.firstArenaWrite = false;
+    ++resources.arenaWrites;
+    if (mapType == D3D11_MAP_WRITE_DISCARD) ++resources.discardMaps;
+}
+
 void D3D11GraphicsContext::SetConstantBuffer(uint32_t slot, const Engine::Graphics::IGraphicsBuffer* buffer, uint64_t offset)
 {
     if (!m_device || !m_context || !buffer || !m_frameResources ||
@@ -357,6 +393,18 @@ void D3D11GraphicsContext::SetConstantBuffer(uint32_t slot, const Engine::Graphi
     const auto* source = dynamic_cast<const D3D11GraphicsBuffer*>(buffer);
     if (!source || !source->GetShadowData() || offset >= source->GetSize()) return;
 
+    if (buffer == m_preparedConstants && offset % D3D11FrameResourceState::ConstantSize == 0 &&
+        offset + D3D11FrameResourceState::ConstantSize <= m_preparedConstantBytes)
+    {
+        ID3D11Buffer* native = m_frameResources->constantArena.Get();
+        const UINT first = (m_preparedConstantStart + static_cast<uint32_t>(offset)) / 16u;
+        const UINT count = D3D11FrameResourceState::ConstantSize / 16u;
+        m_context1->VSSetConstantBuffers1(slot, 1, &native, &first, &count);
+        m_context1->PSSetConstantBuffers1(slot, 1, &native, &first, &count);
+        return;
+    }
+    // A later discard renames the arena. Do not reuse a previous pass snapshot.
+    m_preparedConstants = nullptr;
     const size_t available = static_cast<size_t>(source->GetSize() - offset);
     const size_t copySize = std::min<size_t>(
         D3D11FrameResourceState::ConstantSize, available);
@@ -497,6 +545,47 @@ void D3D11GraphicsContext::StorageBarrier(const Engine::Graphics::IGraphicsBuffe
     m_context->CSSetShader(nullptr, nullptr, 0);
 }
 
+bool D3D11GraphicsContext::DrawInstancesIndirect(const Engine::Graphics::IGraphicsBuffer* buffer,
+    uint64_t offset, bool indexed)
+{
+    const auto* native = dynamic_cast<const D3D11GraphicsBuffer*>(buffer);
+    if (!m_context || !native || offset + (indexed ? 20u : 16u) > buffer->GetSize()) return false;
+    if(!m_frameResources) m_frameResources=std::make_shared<D3D11FrameResourceState>(m_device,m_context);
+    auto& m_indirectArguments=m_frameResources->indirectArguments;
+    auto& m_indirectArgumentsUav=m_frameResources->indirectArgumentsUav;
+    auto& m_copyIndirectShader=m_frameResources->copyIndirectShader;
+    if(!m_indirectArguments)
+    {
+        D3D11_BUFFER_DESC descriptor{}; descriptor.ByteWidth=20;
+        descriptor.Usage=D3D11_USAGE_DEFAULT;
+        descriptor.BindFlags=D3D11_BIND_UNORDERED_ACCESS;
+        descriptor.MiscFlags=D3D11_RESOURCE_MISC_DRAWINDIRECT_ARGS | D3D11_RESOURCE_MISC_BUFFER_ALLOW_RAW_VIEWS;
+        if(FAILED(m_device->CreateBuffer(&descriptor,nullptr,&m_indirectArguments))) return false;
+        D3D11_UNORDERED_ACCESS_VIEW_DESC view{};
+        view.Format=DXGI_FORMAT_R32_TYPELESS; view.ViewDimension=D3D11_UAV_DIMENSION_BUFFER;
+        view.Buffer.NumElements=5; view.Buffer.Flags=D3D11_BUFFER_UAV_FLAG_RAW;
+        if(FAILED(m_device->CreateUnorderedAccessView(m_indirectArguments.Get(),&view,&m_indirectArgumentsUav))) return false;
+        const char source[] = "struct Record { uint4 a; uint4 b; uint4 c; }; StructuredBuffer<Record> inputArgs:register(t0); RWByteAddressBuffer outputArgs:register(u0); [numthreads(1,1,1)] void CSMain(uint3 id:SV_DispatchThreadID) { outputArgs.Store4(0,inputArgs[0].a); outputArgs.Store(16,inputArgs[0].b.x); }";
+        Microsoft::WRL::ComPtr<ID3DBlob> code,errors;
+        if(FAILED(D3DCompile(source,sizeof(source)-1,nullptr,nullptr,nullptr,"CSMain","cs_5_0",0,0,&code,&errors)) ||
+            FAILED(m_device->CreateComputeShader(code->GetBufferPointer(),code->GetBufferSize(),nullptr,&m_copyIndirectShader))) return false;
+    }
+    // D3D11 does not permit a partial copy from a structured buffer into an
+    // indirect argument buffer. Copy its header on the GPU without readback.
+    if(offset || !m_copyIndirectShader) return false;
+    ID3D11ShaderResourceView* source=native->GetShaderResourceView();
+    ID3D11UnorderedAccessView* destination=m_indirectArgumentsUav.Get();
+    m_context->CSSetShader(m_copyIndirectShader.Get(),nullptr,0);
+    m_context->CSSetShaderResources(0,1,&source); m_context->CSSetUnorderedAccessViews(0,1,&destination,nullptr);
+    m_context->Dispatch(1,1,1);
+    source=nullptr; destination=nullptr;
+    m_context->CSSetShaderResources(0,1,&source); m_context->CSSetUnorderedAccessViews(0,1,&destination,nullptr);
+    m_context->CSSetShader(nullptr,nullptr,0);
+    if (indexed) m_context->DrawIndexedInstancedIndirect(m_indirectArguments.Get(),0);
+    else m_context->DrawInstancedIndirect(m_indirectArguments.Get(),0);
+    return true;
+}
+
 bool D3D11GraphicsContext::CopyBuffer(
     const Engine::Graphics::IGraphicsBuffer* source,
     Engine::Graphics::IGraphicsBuffer* destination, uint64_t bytes)
@@ -575,6 +664,7 @@ bool D3D11GraphicsContext::BeginDepthOnlyPass(
     const auto* nativeTexture = dynamic_cast<const D3D11GraphicsTexture*>(texture);
     if (!nativeTexture || !nativeTexture->GetDepthView())
         return false;
+    m_savedExplicitScissor=m_explicitScissor;
 
     m_context->OMGetRenderTargets(1,
         m_savedRenderTarget.ReleaseAndGetAddressOf(),
@@ -618,6 +708,7 @@ void D3D11GraphicsContext::EndDepthOnlyPass()
     m_savedDepthTarget.Reset();
     m_savedViewports.clear();
     m_savedScissors.clear();
+    m_explicitScissor=m_savedExplicitScissor;
     m_depthOnlyPassActive = false;
 }
 
@@ -626,12 +717,19 @@ void D3D11GraphicsContext::SetViewport(const Viewport& value)
     if (!m_context) return;
     D3D11_VIEWPORT viewport{ value.x, value.y, value.width, value.height, value.minDepth, value.maxDepth };
     m_context->RSSetViewports(1, &viewport);
+    if(!m_explicitScissor)
+    {
+        D3D11_RECT rect{static_cast<LONG>(value.x),static_cast<LONG>(value.y),
+            static_cast<LONG>(value.x+value.width),static_cast<LONG>(value.y+value.height)};
+        m_context->RSSetScissorRects(1,&rect);
+    }
 }
 
 void D3D11GraphicsContext::SetScissorRect(const ScissorRect& value)
 {
     if (!m_context) return;
     D3D11_RECT rect{ value.left, value.top, value.right, value.bottom };
+    m_explicitScissor=true;
     m_context->RSSetScissorRects(1, &rect);
 }
 

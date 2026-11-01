@@ -90,6 +90,16 @@ void D3D11GraphicsBuffer::FlushMappedWrites(uint64_t offset, uint64_t size)
     if (!device) return;
     device->GetImmediateContext(&context);
     if (!context) return;
+    if (bufferDesc.Usage == D3D11_USAGE_DEFAULT)
+    {
+        const uint64_t end=std::min<uint64_t>(offset+requestedBytes,nativeByteCount);
+        if(end<=offset) return;
+        D3D11_BOX region{};
+        region.left=static_cast<UINT>(offset); region.right=static_cast<UINT>(end);
+        region.bottom=1; region.back=1;
+        context->UpdateSubresource(m_buffer.Get(),0,&region,m_shadowData.data()+offset,0,0);
+        return;
+    }
     D3D11_MAPPED_SUBRESOURCE mapped{};
     if (SUCCEEDED(context->Map(m_buffer.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped)))
     {
@@ -134,6 +144,9 @@ std::unique_ptr<Engine::Graphics::IGraphicsBuffer> D3D11BufferFactory::CreateBuf
         ? D3D11_USAGE_DYNAMIC : (access == Engine::Graphics::IGraphicsBuffer::AccessMode::Readback ? D3D11_USAGE_STAGING : D3D11_USAGE_DEFAULT);
     desc.CPUAccessFlags = access == Engine::Graphics::IGraphicsBuffer::AccessMode::Upload
         ? D3D11_CPU_ACCESS_WRITE : (access == Engine::Graphics::IGraphicsBuffer::AccessMode::Readback ? D3D11_CPU_ACCESS_READ : 0);
+    if(usage == Engine::Graphics::IGraphicsBuffer::Usage::ShaderResource &&
+        access == Engine::Graphics::IGraphicsBuffer::AccessMode::Upload)
+    { desc.Usage=D3D11_USAGE_DEFAULT; desc.CPUAccessFlags=0; }
 
     switch (usage)
     {

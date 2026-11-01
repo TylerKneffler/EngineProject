@@ -2,6 +2,7 @@
 #include "PerformanceRecording.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 #include "Core/Scene/Scene.h"
+#include "Core/Compoonents/Obj/TerrainManager.h"
 #include "Core/Renderers/IEditorRenderer.h"
 #include "Core/Renderers/DX11/DX11EditorRenderer.h"
 #include "Core/Physics/Adapters/BulletPhysicsAdapter.h"
@@ -83,8 +84,9 @@ void PushHistory(std::deque<T>& history, T value)
 class PerformanceView::Sampler
 {
 public:
-    Sampler()
+    explicit Sampler(DWORD mainThreadId)
     {
+        m_mainThread=OpenThread(THREAD_QUERY_LIMITED_INFORMATION,FALSE,mainThreadId);
         QueryHardware();
         QueryProcessorTimes(m_previousProcessors);
         InitializeGpuCounters();
@@ -92,6 +94,7 @@ public:
 
     ~Sampler()
     {
+        if(m_mainThread) CloseHandle(m_mainThread);
         if (m_gpuQuery) PdhCloseQuery(m_gpuQuery);
     }
 
@@ -101,6 +104,7 @@ public:
     {
         PerformanceSnapshot result;
         SampleProcessors(result);
+        SampleProcessCpu(result);
         SampleMemory(result);
         SampleGpu(result);
         return result;
@@ -163,6 +167,32 @@ private:
         }
         m_previousProcessors = std::move(current);
     }
+
+    static uint64_t Ticks(FILETIME time)
+    { return (uint64_t(time.dwHighDateTime)<<32)|time.dwLowDateTime; }
+    void SampleProcessCpu(PerformanceSnapshot& result)
+    {
+        FILETIME creation{},exit{},kernel{},user{};
+        const auto now=std::chrono::steady_clock::now();
+        if(!GetProcessTimes(GetCurrentProcess(),&creation,&exit,&kernel,&user)) return;
+        const auto process=Ticks(kernel)+Ticks(user);
+        uint64_t thread=0;
+        if(m_mainThread && GetThreadTimes(m_mainThread,&creation,&exit,&kernel,&user)) thread=Ticks(kernel)+Ticks(user);
+        if(m_previousProcessTime.time_since_epoch().count())
+        {
+            const double elapsed=std::chrono::duration<double>(now-m_previousProcessTime).count()*1.e7;
+            if(elapsed>0)
+            {
+                result.processCpuCores=float(double(process-m_previousProcess)/elapsed);
+                result.processCpuPercent=std::clamp(100.f*result.processCpuCores/std::max(1u,m_hardware.logicalCores),0.f,100.f);
+                if(thread>=m_previousThread) result.mainThreadCpuPercent=std::clamp(float(100.*double(thread-m_previousThread)/elapsed),0.f,100.f);
+            }
+        }
+        m_previousProcess=process; m_previousThread=thread; m_previousProcessTime=now;
+    }
+    HANDLE m_mainThread=nullptr;
+    uint64_t m_previousProcess=0,m_previousThread=0;
+    std::chrono::steady_clock::time_point m_previousProcessTime{};
 
     void SampleMemory(PerformanceSnapshot& result)
     {
@@ -322,8 +352,9 @@ PerformanceView::PerformanceView(Engine::Scene::Scene* scene,
     : m_scene(scene), m_recording(std::move(recording))
 {
     SetCursorBehaviorOnFocus(CursorBehaviorOnFocus::Visible);
-    m_samplerWorker = std::thread([this] {
-        Sampler sampler;
+    const DWORD mainThreadId=GetCurrentThreadId();
+    m_samplerWorker = std::thread([this,mainThreadId] {
+        Sampler sampler(mainThreadId);
         {
             std::lock_guard lock(m_samplerMutex);
             m_pendingHardware = sampler.Hardware();
@@ -363,12 +394,33 @@ PerformanceView::~PerformanceView()
     if (m_samplerWorker.joinable()) m_samplerWorker.join();
 }
 
+bool PerformanceView::IsRecording() const
+{
+    return m_recording && m_recording->IsRecording();
+}
+
 void PerformanceView::SetFrameTimings(const EditorFrameProfileSample& sample,
     Renderers::IEditorRenderer* renderer)
 {
     const auto ms = [](auto begin, auto end) {
         return std::chrono::duration<double, std::milli>(end - begin).count();
     };
+    m_renderCpu=sample.renderCpu;
+    if(sample.deltaSeconds>0 && std::isfinite(sample.deltaSeconds))
+    {
+        const double interval=sample.deltaSeconds*1000.;
+        m_frameIntervals.push_back(interval); m_frameIntervalTotal+=interval; m_statisticsElapsed+=interval;
+        while(m_frameIntervals.size()>1 && (m_frameIntervalTotal>5000. || m_frameIntervals.size()>600))
+        { m_frameIntervalTotal-=m_frameIntervals.front(); m_frameIntervals.pop_front(); }
+        if(m_statisticsElapsed>=250. || !m_frameStatistics.meanMs)
+        { m_frameStatistics=SummarizeFrames(std::vector<double>(m_frameIntervals.begin(),m_frameIntervals.end())); m_statisticsElapsed=0; }
+    }
+    if (IsRecording())
+    {
+        if (!IsOpen()) Refresh(sample.deltaSeconds > 0.f ? 1.f / sample.deltaSeconds : 0.f);
+        m_recording->FrameDetails(
+            EditorFrameProfiler::SerializeFields(sample, m_scene, renderer));
+    }
     m_hasFrameTimings = true;
     m_frameTimings = {
         { "Frame", ms(sample.frameBegin, sample.afterPendingLoad) },
@@ -383,7 +435,7 @@ void PerformanceView::SetFrameTimings(const EditorFrameProfileSample& sample,
     {
         const auto& update = m_scene->GetLastUpdateTimings();
         m_updateTimings = {
-            { "Objects", update.objectsMs }, { "Pose", update.poseMs },
+            { "Objects", update.objectsMs }, { "Pose / constraints", update.constraintsMs }, { "Audio", update.audioMs },
             { "Physics", update.physicsMs },
             { "Post physics", update.postPhysicsMs }
         };
@@ -402,8 +454,8 @@ void PerformanceView::SetFrameTimings(const EditorFrameProfileSample& sample,
         { "Clear", sample.clearMilliseconds },
         { "Scene preparation", sample.scenePrepareMilliseconds },
         { "Views", sample.viewMilliseconds },
-        { "Shadow draw submission", sample.shadowSubmitMilliseconds },
-        { "Main draw submission", sample.mainSubmitMilliseconds },
+        { "Shadow pass (CPU)", sample.shadowSubmitMilliseconds },
+        { "Main pass (CPU)", sample.mainSubmitMilliseconds },
         { "Editor UI", sample.editorUiMilliseconds }
     };
     if (auto* dx11 = dynamic_cast<Renderers::DX11EditorRenderer*>(renderer))
@@ -427,6 +479,8 @@ void PerformanceView::SetFrameTimings(const EditorFrameProfileSample& sample,
                 { "GPU presentation (CPU)", timing.cpuPresentationMilliseconds }
             };
             m_gpuTimingsValid = timing.gpuTimingsValid;
+            m_gpuSampleId=timing.gpuSampleId; m_gpuRegions=timing.gpuRegionCount; m_gpuTotalMs=0;
+            if(m_gpuTimingsValid) for(double value:timing.gpuMilliseconds) m_gpuTotalMs+=value;
             if (m_gpuTimingsValid)
             {
                 using Stage = Graphics::GpuTimingStage;
@@ -465,6 +519,12 @@ void PerformanceView::DrawTimings(IEditorUi& ui)
         }
         ui.Separator();
     };
+    drawGroup("Frame intervals (rolling five seconds)", {
+        {"Average interval",m_frameStatistics.meanMs},{"95th percentile",m_frameStatistics.p95Ms},{"99th percentile",m_frameStatistics.p99Ms}
+    });
+    ui.ValueLabel("Average FPS",std::to_string(m_frameStatistics.fps).c_str());
+    ui.ValueLabel("Frames over 60 FPS budget (%)",std::to_string(m_frameStatistics.over60BudgetPercent).c_str());
+    ui.DisabledLabel("Frame interval includes waits between updates; CPU frame work can be shorter. The 60 FPS budget is 16.67 ms.");
     drawGroup("Frame phases (CPU)", m_frameTimings);
     if (!m_updateTimings.empty())
         drawGroup("Scene update (CPU)", m_updateTimings);
@@ -475,22 +535,72 @@ void PerformanceView::DrawTimings(IEditorUi& ui)
         drawGroup("Scene preparation (CPU)", {
             { "Lookup", prepare.lookupMs }, { "Items", prepare.itemsMs },
             { "Bone upload", prepare.boneUploadMs },
-            { "Capacity", prepare.capacityMs }
+            { "Capacity", prepare.capacityMs }, { "Spatial hierarchy", prepare.spatialMs }
         });
+        const auto& grass = m_scene->GetGrassPerformance();
+        drawGroup("Grass (CPU)", {
+            { "Total", grass.totalMs }, { "Placement indexing", grass.scanMs },
+            { "Instance preparation", grass.generationMs }, { "GPU upload", grass.uploadMs }
+        });
+        ui.ValueLabel("Grass pending tiles", std::to_string(grass.pending).c_str());
+        ui.ValueLabel("Grass LOD switches", std::to_string(grass.lodSwitches).c_str());
+        ui.ValueLabel("Grass instance tiles prepared", std::to_string(grass.tilesBuilt).c_str());
+        ui.ValueLabel("Grass placements scanned", std::to_string(grass.placementsScanned).c_str());
+        ui.ValueLabel("Grass resident LODs", std::to_string(grass.residentLods).c_str());
+        ui.ValueLabel("Grass GPU memory", FormatBytes(grass.gpuBytes).c_str());
+        ui.Separator();
+        ui.ValueLabel("Grass placement instances",std::to_string(grass.instances).c_str());
+        ui.ValueLabel("Grass placement uploads",FormatBytes(grass.instanceUploadBytes).c_str());
+        ui.ValueLabel("Grass active / LOD transition / fading tiles",
+            (std::to_string(grass.activeTiles)+" / "+std::to_string(grass.transitionTiles)+" / "+std::to_string(grass.fadingTiles)).c_str());
+        ui.Separator();
         const auto& shadow = m_scene->GetLastShadowCpuTiming();
+        ui.ValueLabel("Shadow draws: explicit instances / automatic / ordinary",
+            (std::to_string(shadow.explicitInstanceDraws)+" / "+std::to_string(shadow.automaticDraws)+" / "+std::to_string(shadow.ordinaryDraws)).c_str());
+        ui.ValueLabel("Shadow submission thread cycles", std::to_string(shadow.submissionThreadCycles).c_str());
         drawGroup("Shadows (CPU)", {
             { "Total", shadow.totalMs },
             { "Scene preparation", shadow.scenePreparationMs },
             { "Cascade culling", shadow.cascadeCullingMs },
             { "Record upload", shadow.recordUploadMs },
             { "Draw submission", shadow.drawSubmissionMs },
+            { "Constant binding", shadow.constantBindingMs },
+            { "Texture binding", shadow.textureBindingMs },
+            { "Geometry draws", shadow.geometryDrawMs },
+            { "Submission wall time", shadow.submissionWallMs },
+            { "Slowest batch", shadow.maxBatchMs },
+            { "Pass restore", shadow.passRestoreMs },
             { "Portals", shadow.portalMs }
         });
     }
+    drawGroup("Main render passes (all views, CPU)", {
+        {"Measured total",m_renderCpu.totalMs},{"Camera / lighting / setup",m_renderCpu.startupMs},
+        {"Terrain occluder preparation",m_renderCpu.terrainPreparationMs},{"View culling",m_renderCpu.cullingMs},
+        {"Sorting",m_renderCpu.sortingMs},{"Occlusion queries / signature",m_renderCpu.occlusionMs},
+        {"Material preparation",m_renderCpu.materialMs},{"Batch preparation",m_renderCpu.batchingMs},
+        {"Data uploads",m_renderCpu.uploadMs},{"Draw submission",m_renderCpu.submissionMs},
+        {"Retained UI",m_renderCpu.retainedUiMs},{"Portals / overlays",m_renderCpu.portalMs},
+        {"Worker execution (summed)",m_renderCpu.workerActiveMs},{"Main-thread jobs",m_renderCpu.mainJobMs},
+        {"Worker synchronization",m_renderCpu.workerWaitMs},{"Record packing (workers)",m_renderCpu.recordPackingMs},
+        {"Record synchronization",m_renderCpu.recordWaitMs},{"Other",m_renderCpu.otherMs}
+    });
+    ui.ValueLabel("Draw candidates / physical draws",(std::to_string(m_renderCpu.candidateDraws)+" / "+std::to_string(m_renderCpu.physicalDraws)).c_str());
+    ui.ValueLabel("Automatic batches / GPU batches",(std::to_string(m_renderCpu.automaticBatches)+" / "+std::to_string(m_renderCpu.gpuBatches)).c_str());
+    ui.ValueLabel("Automatic instance candidates",std::to_string(m_renderCpu.automaticInstances).c_str());
+    ui.ValueLabel("Triangle candidates",std::to_string(m_renderCpu.candidateTriangles).c_str());
+    ui.ValueLabel("Changed rendering uploads",FormatBytes(m_renderCpu.changedUploadBytes).c_str());
+    ui.DisabledLabel("Instance and triangle candidates are counted before GPU visibility and LOD selection. Timing groups contain nested totals.");
+    ui.Separator();
     if (m_gpuTimingsValid)
         drawGroup("GPU stages (latest resolved sample)", m_gpuTimings);
     else
         ui.DisabledLabel("GPU stage timings are waiting for a resolved sample.");
+    if(m_gpuTimingsValid)
+    {
+        ui.ValueLabel("Measured GPU stage total (ms)",std::to_string(m_gpuTotalMs).c_str());
+        ui.ValueLabel("GPU sample / timed regions",(std::to_string(m_gpuSampleId)+" / "+std::to_string(m_gpuRegions)).c_str());
+        ui.DisabledLabel("GPU samples resolve asynchronously. CPU and GPU times overlap; do not add them. GPU stage totals exclude untimed work.");
+    }
     if (!m_gpuQueryTimings.empty())
         drawGroup("GPU work (CPU)", m_gpuQueryTimings);
 }
@@ -585,6 +695,10 @@ void PerformanceView::RecordSnapshot(float frameRate)
         << ",\"counter_sample_ms\":" << m_lastCounterSampleMs
         << ",\"cpu_user_pct\":" << m_snapshot.cpuUser
         << ",\"cpu_kernel_pct\":" << m_snapshot.cpuKernel
+        << ",\"cpu_scope\":\"system\",\"gpu_engines_scope\":\"system_all_adapters\""
+        << ",\"process_cpu_pct\":" << m_snapshot.processCpuPercent
+        << ",\"process_cpu_core_equivalents\":" << m_snapshot.processCpuCores
+        << ",\"main_thread_cpu_pct\":" << m_snapshot.mainThreadCpuPercent
         << ",\"memory_total_bytes\":" << m_snapshot.memoryTotal
         << ",\"memory_used_bytes\":" << m_snapshot.memoryUsed
         << ",\"editor_working_set_bytes\":" << m_snapshot.processMemory
@@ -606,11 +720,26 @@ void PerformanceView::RecordSnapshot(float frameRate)
         const auto& shadow = m_scene->GetShadowDebugSnapshot();
         out << ",\"shadow_enabled\":" << (shadow.enabled ? "true" : "false")
             << ",\"shadow_cascades\":" << shadow.cascadeCount
+            << ",\"shadow_atlas_resolution\":" << shadow.atlasResolution
+            << ",\"shadow_atlas_generation\":" << shadow.atlasAllocationGeneration
+            << ",\"shadow_cascade_splits\":[" << shadow.cascadeSplits.x << ',' << shadow.cascadeSplits.y << ','
+            << shadow.cascadeSplits.z << ',' << shadow.cascadeSplits.w << ']'
             << ",\"shadow_casters\":" << shadow.casterCount
             << ",\"shadow_draws\":" << shadow.submittedCasterDrawCount
             << ",\"shadow_portal_atlases\":" << shadow.portalAtlasCount
             << ",\"shadow_rendered_portal_atlases\":"
             << shadow.renderedPortalAtlasCount;
+        size_t managed = 0, active = 0;
+        // Hardware snapshots run at low frequency; never scan every collider
+        // for every body during physics setup.
+        for (const auto& object : m_scene->GetObjects())
+            if (const auto* manager = object->GetComponent<Engine::Components::TerrainManager>())
+            {
+                managed += manager->GetManagedColliderCellCount();
+                active += manager->GetActiveColliderCellCount();
+            }
+        out << ",\"terrain_collider_cells\":" << managed
+            << ",\"terrain_active_collider_cells\":" << active;
     }
     m_recording->Sample(out.str());
 }
@@ -636,7 +765,7 @@ void PerformanceView::DrawRecording(IEditorUi& ui)
     }
     else
         ui.DisabledLabel("Logs are saved in .local/performance-logs.");
-    ui.DisabledLabel("Captures Console, C++ stdout/stderr, per-frame timing, and sampled CPU/GPU/memory/shadow stats. Share the .jsonl file for diagnosis.");
+    ui.DisabledLabel("Captures frame phases, CPU/GPU stage timings, physics, viewport sizes, hardware stats, and Console/stdout/stderr. Share the .jsonl file for diagnosis.");
     if (!m_recordingError.empty())
         ui.Label(m_recordingError.c_str());
     ui.Separator();
@@ -703,8 +832,11 @@ void PerformanceView::DrawOverview(IEditorUi& ui, float frameRate)
         { "User", m_snapshot.cpuUser, kUserColor },
         { "Kernel", m_snapshot.cpuKernel, kKernelColor }
     };
-    DrawMetric(ui, "##cpuGrid", "CPU", cpu, std::size(cpu), m_cpuHistory, kUserColor);
+    DrawMetric(ui, "##cpuGrid", "System CPU", cpu, std::size(cpu), m_cpuHistory, kUserColor);
 
+    ui.ValueLabel("Editor CPU (% of system)",std::to_string(m_snapshot.processCpuPercent).c_str());
+    ui.ValueLabel("Editor CPU (logical-core equivalents)",std::to_string(m_snapshot.processCpuCores).c_str());
+    ui.ValueLabel("Main thread CPU (% of one logical core)",std::to_string(m_snapshot.mainThreadCpuPercent).c_str());
     const float process = Percent(m_snapshot.processMemory, m_snapshot.memoryTotal);
     const float cache = Percent(std::min(m_snapshot.systemCache,
         m_snapshot.memoryUsed > m_snapshot.processMemory
@@ -726,7 +858,7 @@ void PerformanceView::DrawOverview(IEditorUi& ui, float frameRate)
     std::array<EditorUiPercentageSegment, 5> gpu{};
     for (size_t index = 0; index < gpu.size(); ++index)
         gpu[index] = { kGpuLabels[index], m_snapshot.gpuEngines[index], kGpuColors[index] };
-    DrawMetric(ui, "##gpuGrid", "GPU engines", gpu.data(), gpu.size(),
+    DrawMetric(ui, "##gpuGrid", "System GPU engines (all adapters)", gpu.data(), gpu.size(),
         m_gpuHistory, kGpuColors[0]);
     if (m_snapshot.gpuMemoryBudget)
     {
@@ -734,13 +866,13 @@ void PerformanceView::DrawOverview(IEditorUi& ui, float frameRate)
             { "Local memory", Percent(m_snapshot.gpuMemoryUsed,
                 m_snapshot.gpuMemoryBudget), kGpuColors[4] }
         };
-        DrawMetric(ui, "##vramGrid", "GPU memory", videoMemory, 1,
+        DrawMetric(ui, "##vramGrid", "Editor GPU memory (selected adapter)", videoMemory, 1,
             m_gpuMemoryHistory, kGpuColors[4]);
         const std::string videoText = FormatBytes(m_snapshot.gpuMemoryUsed) + " / " +
             FormatBytes(m_snapshot.gpuMemoryBudget) + " current OS budget";
         ui.DisabledLabel(videoText.c_str());
     }
-    ui.DisabledLabel("GPU engine categories may execute concurrently; combined occupancy is capped at 100%.");
+    ui.DisabledLabel("Engine activity includes all applications/adapters. GPU memory is editor usage on the selected adapter. Engine categories overlap and are capped at 100%.");
 }
 
 void PerformanceView::DrawCoreGrid(IEditorUi& ui)

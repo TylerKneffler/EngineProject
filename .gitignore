@@ -27,6 +27,8 @@ build/
 !.local/tests/VSCodeBridgeTests.js
 !.local/tests/StandaloneAssetTests.cpp
 !.local/tests/InspectorTestUi.h
+!.local/tests/MaterialShaderTests.cpp
+!.local/tests/GameViewInputTests.cpp
 !.local/tests/VmdMotionDecoderTests.cpp
 !.local/tests/FbxDuplicateNameTests.cpp
 !.local/tests/ImportVisualAudit.cpp
@@ -44,3 +46,9 @@ project-build.log
 ReleaseBuilds/.staging-*/
 # Generated runtime terrain archives and legacy per-cell bake data.
 /Engine/Core/Assets/TerrainData/TerrainPerformance/BakedCells/
+
+!.local/tests/GrassPerformanceTests.cpp
+
+!.local/tests/TerrainColliderStreamingTests.cpp
+
+!.local/tests/test_performance_eval.py

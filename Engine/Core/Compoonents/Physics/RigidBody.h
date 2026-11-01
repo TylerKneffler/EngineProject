@@ -125,6 +125,11 @@ public:
     void Deserialize(const JsonValue& value) override;
     bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
 
+    // Transient residency gate used by terrain collision streaming. Suspension
+    // removes the native body without disabling rendering or changing body settings.
+    void SetCollisionSuspended(bool suspended);
+    bool IsCollisionSuspended() const { return m_collisionSuspended; }
+
     void Start() override;
     void Update() override;
     void Enabled() override;
@@ -168,6 +173,7 @@ private:
     static std::unique_ptr<Engine::Physics::PhysicsComponentState> MakeBulletState();
     void BindBulletState(Engine::Physics::PhysicsComponentState* state);
     Impl* m_impl = nullptr;
+    bool m_collisionSuspended = false;
     bool m_isColliding = false;
     bool m_isGrounded = false;
     bool m_editorTransformChanged = false;

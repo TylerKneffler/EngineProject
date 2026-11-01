@@ -66,6 +66,7 @@ bool PerformanceRecording::Start(const std::filesystem::path& path)
     std::lock_guard lock(m_mutex);
     m_file.open(path, std::ios::binary | std::ios::trunc);
     if (!m_file.is_open()) return false;
+    m_frameIndex = 0;
     m_originalStdout = std::cout.rdbuf();
     m_originalStderr = std::cerr.rdbuf();
     m_stdoutTap = std::make_unique<OutputTap>(*this, m_originalStdout, "stdout");
@@ -149,6 +150,16 @@ void PerformanceRecording::Sample(const std::string& jsonFields)
     if (!m_file.is_open()) return;
     m_file << "{\"type\":\"sample\",\"time_utc\":\"" << Timestamp()
         << "\"," << jsonFields << "}\n";
+}
+
+void PerformanceRecording::FrameDetails(const std::string& jsonFields)
+{
+    std::lock_guard lock(m_mutex);
+    if (!m_file.is_open()) return;
+    m_file << "{\"type\":\"frame_details\",\"time_utc\":\"" << Timestamp()
+        << "\",\"frame\":" << m_frameIndex++ << ',' << jsonFields << "}\n";
+    // Keep a live capture readable without flushing on every frame.
+    if (m_frameIndex % 30u == 0u) m_file.flush();
 }
 
 void PerformanceRecording::Frame(float reportedFrameRate, double elapsedMs,

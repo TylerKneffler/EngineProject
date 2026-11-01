@@ -3,6 +3,8 @@
 #include <chrono>
 #include <cstdint>
 #include <fstream>
+#include <string>
+#include "Core/Rendering/RenderPerformance.h"
 
 namespace Engine::Renderers { class IEditorRenderer; }
 namespace Engine::Scene { class Scene; }
@@ -31,6 +33,7 @@ namespace Engine::Editor
         uint32_t gameViewWidth = 0;
         uint32_t gameViewHeight = 0;
         uint32_t submittedShadowDraws = 0;
+        Engine::Rendering::RenderCpuTimings renderCpu;
     };
 
     class EditorFrameProfiler
@@ -39,6 +42,9 @@ namespace Engine::Editor
         EditorFrameProfiler(Scene::Scene* scene, Renderers::IEditorRenderer* renderer,
             bool autoProfilePlay);
         explicit operator bool() const { return output_.is_open(); }
+        // Shared by the opt-in trace and normal Performance recordings.
+        static std::string SerializeFields(const EditorFrameProfileSample& sample,
+            Scene::Scene* scene, Renderers::IEditorRenderer* renderer);
         void Record(const EditorFrameProfileSample& sample, Scene::Scene* scene,
             Renderers::IEditorRenderer* renderer);
 

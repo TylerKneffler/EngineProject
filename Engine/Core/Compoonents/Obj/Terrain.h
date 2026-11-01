@@ -16,6 +16,7 @@ class Material;
 class Terrain : public Engine::Core::Component
 {
 public:
+    bool RequiresUpdate() const override { return false; }
     struct Layer
     {
         std::string material;

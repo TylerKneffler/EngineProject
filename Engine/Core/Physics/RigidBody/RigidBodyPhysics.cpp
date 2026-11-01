@@ -140,8 +140,20 @@ Engine::Components::RigidBody::~RigidBody()
     else DestroyBody();
 }
 
+void Engine::Components::RigidBody::SetCollisionSuspended(bool suspended)
+{
+    if (m_collisionSuspended == suspended) return;
+    m_collisionSuspended = suspended;
+    if (suspended && m_impl)
+    {
+        if (Owner && Owner->GetScene()) Owner->GetScene()->GetPhysics().DestroyRigidBody(*this);
+        else DestroyBody();
+    }
+}
+
 bool Engine::Components::RigidBody::EnsureBody()
 {
+    if (m_collisionSuspended) return false;
     if (!Owner || !Owner->GetScene() || !Owner->IsEnabledInHierarchy())
     {
         DestroyBody();

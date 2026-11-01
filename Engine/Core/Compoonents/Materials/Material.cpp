@@ -2,6 +2,7 @@
 #include "Core/Compoonents/Materials/Texture.h"
 #include "Core/Compoonents/Obj/Mesh.h"
 #include "Core/Serialization/Json.h"
+#include "Engine/Editor/UI/IEditorUi.h"
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
@@ -12,6 +13,7 @@ namespace Engine::Components
 Material::Material()
 {
     SetTypeName(COMPONENT_TYPE_NAME(Material));
+    RegisterEditorFieldGroup("shaders", "Shaders");
     RegisterField("diffuse", diffuseColor, "Colors");
     RegisterField("useVertexColors", useVertexColors, "Colors");
     RegisterField("ambient", ambientColor, "Colors");
@@ -78,6 +80,40 @@ namespace
 #define ENGINE_ASSETS_PATH "Engine/Core/Assets/"
 #endif
 
+    Material::JsonValue ShaderListJson(const std::vector<MaterialShader>& shaders)
+    {
+        auto list = Material::JsonValue::MakeArray();
+        for (const auto& shader : shaders)
+        {
+            auto entry = Material::JsonValue::MakeObject();
+            entry.Set("path", Material::JsonValue(shader.path));
+            entry.Set("enabled", Material::JsonValue(shader.enabled));
+            entry.Set("blendMode", Material::JsonValue(shader.blendMode));
+            list.Push(entry);
+        }
+        return list;
+    }
+
+    void ReadShaderList(const Material::JsonValue& list,
+        std::vector<MaterialShader>& shaders)
+    {
+        shaders.clear();
+        if (!list.IsArray()) return;
+        for (size_t i = 0; i < list.ArraySize(); ++i)
+        {
+            const auto& entry = list.ArrayAt(i);
+            if (!entry.IsString() && !entry.IsObject()) continue;
+            MaterialShader shader;
+            shader.path = entry.IsString() ? entry.AsString() : entry["path"].AsString();
+            if (entry.IsObject())
+            {
+                if (entry.Has("enabled")) shader.enabled = entry["enabled"].AsBool();
+                if (entry.Has("blendMode")) shader.blendMode = entry["blendMode"].AsString();
+            }
+            shaders.push_back(std::move(shader));
+        }
+    }
+
     Engine::Serialization::JsonValue J3(const glm::vec3& v)
     {
         return Engine::Serialization::JsonValue::MakeArray()
@@ -141,6 +177,8 @@ bool Material::LoadFromFile(const std::string& path)
     try
     {
         const JsonValue root = Engine::Serialization::JsonParseFile(path);
+        ReadShaderList(root["shaders"], shaders);
+        shaderError.clear();
         baseColorTexture.reset();
         metallicRoughnessTexture.reset();
         normalTexture.reset();
@@ -260,6 +298,7 @@ bool Material::SaveToFile(const std::string& path) const
 {
     JsonValue root = JsonValue::MakeObject();
     root.Set("version", JsonValue(1));
+    root.Set("shaders", ShaderListJson(shaders));
     root.Set("baseColor", J3(diffuseColor));
     root.Set("useVertexColors", JsonValue(useVertexColors));
     root.Set("ambientColor", J3(ambientColor));
@@ -330,6 +369,80 @@ bool Material::SaveToFile(const std::string& path) const
 std::string Material::TexturePath(const std::shared_ptr<Texture>& texture)
 {
     return texture ? texture->GetFilePath() : std::string{};
+}
+
+std::string Material::ResolveShaderPath(const std::string& path) const
+{
+    return path.empty() ? std::string{} : ResolveTexturePath(m_filePath, path);
+}
+
+bool Material::DrawShaderProperties(::Engine::Editor::IEditorUi& ui, const void* context)
+{
+    ui.PushId("shaders");
+    ui.DisabledLabel("First pass: surface. Later passes: overlays in list order.");
+    ui.DisabledLabel("An empty path uses the built-in surface shader.");
+    bool changed = false;
+    for (size_t index = 0; index < shaders.size(); ++index)
+    {
+        auto& shader = shaders[index];
+        const std::string id = std::to_string(index);
+        ui.PushId(id.c_str());
+        changed |= DrawAssetPathPicker(ui, context ? context : this,
+            id.c_str(), "Shader file", "shader", shader.path);
+        char buffer[4096]{};
+        snprintf(buffer, sizeof(buffer), "%s", shader.path.c_str());
+        if (ui.InputTextSubmit("Asset path", buffer, sizeof(buffer)))
+        {
+            std::string extension = std::filesystem::path(buffer).extension().string();
+            std::transform(extension.begin(), extension.end(), extension.begin(),
+                [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            if (!buffer[0] || extension == ".hlsl")
+            {
+                shader.path = buffer;
+                changed = true;
+            }
+        }
+        changed |= ui.Checkbox("Enabled", &shader.enabled);
+        const char* modes[] = { "Auto", "Opaque", "Alpha", "Additive" };
+        int mode = 0;
+        for (int candidate = 1; candidate < 4; ++candidate)
+            if (shader.blendMode == modes[candidate]) mode = candidate;
+        if (ui.Combo("Blend", &mode, modes, 4))
+        {
+            shader.blendMode = modes[mode];
+            changed = true;
+        }
+        ui.BeginDisabled(index == 0);
+        const bool up = ui.Button("Move up");
+        ui.EndDisabled();
+        ui.SameLine();
+        ui.BeginDisabled(index + 1 == shaders.size());
+        const bool down = ui.Button("Move down");
+        ui.EndDisabled();
+        ui.SameLine();
+        const bool remove = ui.Button("Remove");
+        ui.PopId();
+        if (remove)
+        {
+            shaders.erase(shaders.begin() + index);
+            changed = true;
+            break;
+        }
+        if ((up && index > 0) || (down && index + 1 < shaders.size()))
+        {
+            std::swap(shaders[index], shaders[up ? index - 1 : index + 1]);
+            changed = true;
+            break;
+        }
+    }
+    if (ui.Button("Add shader"))
+    {
+        shaders.emplace_back();
+        changed = true;
+    }
+    if (!shaderError.empty()) ui.Label(shaderError.c_str());
+    ui.PopId();
+    return changed;
 }
 
 void Material::SetSphereTexture(const std::string& path)
@@ -428,6 +541,10 @@ MaterialAlphaMode Material::GetAlphaMode() const
 
 void Material::Validate()
 {
+    for (auto& shader : shaders)
+        if (shader.blendMode != "Opaque" && shader.blendMode != "Alpha" &&
+            shader.blendMode != "Additive")
+            shader.blendMode = "Auto";
     if (specularModel != "BlinnPhong")
         specularModel = "MetallicRoughness";
     metallicFactor = std::clamp(metallicFactor, 0.f, 1.f);
@@ -469,6 +586,7 @@ Material::JsonValue Material::Serialize() const
 {
     JsonValue value = Component::Serialize();
     value.Set("materialAsset", JsonValue(m_filePath));
+    value.Set("shaders", ShaderListJson(shaders));
     value.Set("edgeColor", J4(edgeColor));
     value.Set("sphereTint", J4(sphereTint));
     value.Set("toonTint", J4(toonTint));
@@ -491,6 +609,8 @@ void Material::Deserialize(const JsonValue& value)
     if (value.Has("materialAsset") && !value["materialAsset"].AsString().empty())
         LoadFromFile(value["materialAsset"].AsString());
     Component::Deserialize(value);
+    if (value.Has("shaders")) ReadShaderList(value["shaders"], shaders);
+    shaderError.clear();
     if (!value.Has("specularModel") && value.Has("useMmdSpecular"))
         specularModel = (value["useMmdSpecular"].AsBool() ||
             value["useMmdSpecular"].AsString() == "true")

@@ -10,6 +10,7 @@ namespace Engine::Renderers
 class D3D12GraphicsTexture;
 struct D3D12OcclusionQueryState;
 struct D3D12GpuTimingState;
+struct D3D12IndirectSignatures;
 
 // ---------------------------------------------------------------------------
 // D3D12GraphicsContext — DirectX 12 command recording wrapper
@@ -21,7 +22,8 @@ public:
     D3D12GraphicsContext(ID3D12GraphicsCommandList* cmdList,
         ID3D12RootSignature* rootSig,
         std::shared_ptr<D3D12OcclusionQueryState> occlusionState = {},
-        std::shared_ptr<D3D12GpuTimingState> gpuTimings = {});
+        std::shared_ptr<D3D12GpuTimingState> gpuTimings = {},
+        std::shared_ptr<D3D12IndirectSignatures> indirectSignatures = {});
     void SetPipeline(const Engine::Graphics::IPipelineState* pipeline) override;
     void SetStencilReference(uint32_t reference) override;
     void SetConstantBuffer(uint32_t slot, const Engine::Graphics::IGraphicsBuffer* buffer, uint64_t offset = 0) override;
@@ -32,6 +34,8 @@ public:
     void SetComputeWriteBuffer(const Engine::Graphics::IGraphicsBuffer* buffer) override;
     void DispatchCompute(uint32_t x, uint32_t y = 1, uint32_t z = 1) override;
     void StorageBarrier(const Engine::Graphics::IGraphicsBuffer* buffer) override;
+    bool SupportsIndirectDraws() const override { return true; }
+    bool DrawInstancesIndirect(const Engine::Graphics::IGraphicsBuffer*, uint64_t, bool) override;
     bool CopyBuffer(const Engine::Graphics::IGraphicsBuffer* source,
         Engine::Graphics::IGraphicsBuffer* destination,
         uint64_t bytes = 0) override;
@@ -76,6 +80,7 @@ private:
     uint32_t m_indexCount = 0;
     std::shared_ptr<D3D12OcclusionQueryState> m_occlusionState;
     std::shared_ptr<D3D12GpuTimingState> m_gpuTimings;
+    std::shared_ptr<D3D12IndirectSignatures> m_indirectSignatures;
     uint64_t m_occlusionViewId = 0;
     uint64_t m_occlusionSceneSignature = 0;
     uint64_t m_activeOcclusionKey = 0;
@@ -115,5 +120,6 @@ private:
     ID3D12GraphicsCommandList* m_externalCmdList = nullptr; // set via SetCommandBuffer
     std::shared_ptr<D3D12OcclusionQueryState> m_occlusionState;
     std::shared_ptr<D3D12GpuTimingState> m_gpuTimings;
+    std::shared_ptr<D3D12IndirectSignatures> m_indirectSignatures;
 };
 }

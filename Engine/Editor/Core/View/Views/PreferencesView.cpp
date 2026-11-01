@@ -1235,6 +1235,9 @@ void PreferencesView::DrawRenderingSection(IEditorUi& ui)
     if (ui.DragFloat("Directional Shadow Distance",
             &shadows.directionalDistance, 1.f, 1.f, 100000.f))
         shadowEdited();
+    if (ui.DragFloat("Grass Shadow Caster Distance", &shadows.grassCasterDistance, .5f, 0.f, 100000.f))
+        shadowEdited();
+    ui.Tooltip("Additional distance limit for grass shadows. Each terrain layer may impose a shorter range.");
     if (ui.InputUInt("Shadow PCF Radius", &shadows.pcfRadius))
     {
         shadows.pcfRadius = std::min<uint32_t>(shadows.pcfRadius, 4u);
@@ -1467,6 +1470,8 @@ bool PreferencesView::SaveSettings()
                     m_settings.realtimeShadows.directionalCascadeCount);
                 shadowNode.append_attribute("DirectionalDistance").set_value(
                     m_settings.realtimeShadows.directionalDistance);
+                shadowNode.append_attribute("GrassCasterDistance").set_value(
+                    m_settings.realtimeShadows.grassCasterDistance);
                 shadowNode.append_attribute("PcfRadius").set_value(
                     m_settings.realtimeShadows.pcfRadius);
                 shadowNode.append_attribute("CascadeSplitLambda").set_value(

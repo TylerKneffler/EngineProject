@@ -8,6 +8,7 @@
 #include <vector>
 #include <memory>
 #include <optional>
+#include <initializer_list>
 
 namespace Engine::Components
 {
@@ -24,12 +25,24 @@ public:
     using IGraphicsProvider = Engine::Graphics::IGraphicsProvider;
 
     Mesh();
+    bool RequiresUpdate() const override { return false; }
     ~Mesh() = default;
 
     // Use interpolated baked probes instead of a surface lightmap. Enable for
     // movable meshes and characters that travel through a probe volume.
     PROPERTY(Inspector,EditAnywhere,Category="Lighting")
     bool useLightProbes=false;
+    // Procedural rigid meshes can opt into cascade AABB culling. Skinned and
+    // shader-deformed meshes need conservative bounds before enabling this.
+    bool useBoundsForShadowCulling = false;
+    // Runtime classification; the project grass shadow budget supplements the layer budget.
+    bool grassShadowCaster = false;
+    PROPERTY(Inspector,EditAnywhere,Category="LOD")
+    bool gpuLodSelection = false;
+    PROPERTY(Inspector,EditAnywhere,Category="LOD")
+    float gpuLod1Distance = 8.f;
+    PROPERTY(Inspector,EditAnywhere,Category="LOD")
+    float gpuLod2Distance = 16.f;
 
     // Load vertex data from a triangulated OBJ file (CPU side only).
     void LoadFromFile(const std::string& path);
@@ -46,15 +59,50 @@ public:
     void CreateBuffer(IGraphicsBufferFactory* bufferFactory);
 
     // Get the underlying graphics buffer (API-agnostic)
-    IGraphicsBuffer* GetGraphicsBuffer() const { return m_vertexBuffer.get(); }
-    IGraphicsBuffer* GetIndexBuffer() const { return m_indexBuffer.get(); }
+    IGraphicsBuffer* GetGraphicsBuffer() const { return m_instanceSource ? m_instanceSource->GetGraphicsBuffer() : m_vertexBuffer.get(); }
+    IGraphicsBuffer* GetIndexBuffer() const { return m_instanceSource ? m_instanceSource->GetIndexBuffer() : m_indexBuffer.get(); }
+
+    // Transient rigid instances share immutable geometry and placement buffers
+    // across tiles/LODs. Rows describe a uniform-scale affine transform.
+    struct InstanceTransform { glm::vec4 rows[3]; };
+    struct InstanceData
+    {
+        uint64_t revision=1;
+        void MarkDirty() { ++revision; }
+        struct Slice
+        {
+            uint32_t firstInstance = 0, instanceCount = 0;
+            std::unique_ptr<IGraphicsBuffer> buffer;
+        };
+        std::vector<InstanceTransform> transforms;
+        std::vector<Slice> slices;
+    };
+    struct InstanceRange
+    {
+        uint32_t firstVertex = 0, vertexCount = 0;
+        uint32_t firstInstance = 0, instanceCount = 0;
+    };
+    void SetInstancedGeometry(std::shared_ptr<Mesh> source,
+        std::shared_ptr<InstanceData> instances, std::vector<InstanceRange> ranges,
+        const glm::vec3& minimum, const glm::vec3& maximum);
+    bool IsInstanced() const { return m_instanceSource != nullptr; }
+    const Mesh* GetInstanceSource() const { return m_instanceSource.get(); }
+    IGraphicsBuffer* GetInstanceBuffer(uint32_t firstInstance = 0) const
+    {
+        if (m_instances) for (const auto& slice : m_instances->slices)
+            if (slice.firstInstance == firstInstance) return slice.buffer.get();
+        return nullptr;
+    }
+    const std::vector<InstanceRange>& GetInstanceRanges() const { return m_instanceRanges; }
+    const std::shared_ptr<InstanceData>& GetInstanceData() const { return m_instances; }
     
     uint32_t GetVertexCount() const
     {
+        if (m_instanceSource) return m_instanceSource->GetVertexCount();
         return static_cast<uint32_t>(m_terrainVertices.empty()
             ? m_vertices.size() : m_terrainVertices.size());
     }
-    uint32_t GetIndexCount() const { return static_cast<uint32_t>(m_indices.size()); }
+    uint32_t GetIndexCount() const { return m_instanceSource ? m_instanceSource->GetIndexCount() : static_cast<uint32_t>(m_indices.size()); }
     const std::vector<Vertex>& GetVertices() const { return m_vertices; }
     const std::vector<TerrainVertex>& GetTerrainVertices() const
     {
@@ -87,6 +135,36 @@ public:
     // deformation state. This validates topology, updates bounds/revision,
     // and recreates the GPU buffer when this mesh is already resident.
     bool SetAuthoredVertices(std::vector<Vertex> vertices);
+    // Procedural triangle streams whose generator has already checked topology
+    // and accumulated bounds. Avoids a second full CPU scan at publication.
+    bool SetPreparedTriangleGeometry(std::vector<Vertex> vertices,
+        const glm::vec3& minimum, const glm::vec3& maximum);
+    // Exchanges static geometry and resident GPU buffers without copying or upload.
+    // Returns false for meshes with morphs or runtime deformation.
+    bool ExchangeStaticGeometry(Mesh& other);
+    // Runtime LODs belong to this object. Installing geometry transfers ownership;
+    // selecting a resident level exchanges buffers without copies or uploads.
+    // These caches are transient and do not change the mesh asset's file path.
+    static constexpr int MaximumRuntimeLods = 16;
+    bool StoreRuntimeLod(int lod, std::unique_ptr<Mesh> geometry);
+    bool IsRuntimeLodResident(int lod) const;
+    Mesh* GetRuntimeLodMesh(int lod) const
+    { return !IsRuntimeLodResident(lod) ? nullptr : lod == m_activeRuntimeLod ? const_cast<Mesh*>(this) : m_runtimeLods[lod].get(); }
+    bool SelectRuntimeLod(int lod);
+    int GetActiveRuntimeLod() const { return m_activeRuntimeLod; }
+    bool BeginRuntimeLodTransition(int lod, float durationSeconds);
+    bool AdvanceRuntimeLodTransition(float deltaSeconds);
+    Mesh* GetPreviousRuntimeLodMesh() const;
+    glm::vec4 GetRuntimeGeometryFade(bool previous = false) const;
+    void SetRuntimeVisibility(float visibility);
+    float GetRuntimeVisibility() const { return m_runtimeVisibility; }
+    uint64_t GetRuntimeFadeRevision() const { return m_runtimeFadeRevision; }
+    int ChooseRuntimeLod(float distance, std::initializer_list<float> thresholds,
+        float hysteresis = 0.f) const;
+    size_t GetResidentRuntimeLodCount() const;
+    uint64_t GetRuntimeLodGpuMemoryBytes() const;
+    // Releases cached alternatives, retaining the currently displayed geometry.
+    void ClearRuntimeLods();
     // Updates authored vertex data without changing topology or reallocating
     // the index buffer. Used for interactive Mesh Edit transforms.
     bool UpdateAuthoredVertices(std::vector<Vertex> vertices);
@@ -179,6 +257,20 @@ public:
     void        OnAfterDeserialize(IGraphicsProvider* graphicsProvider) override;
 
 private:
+    void ClearInstancing()
+    { m_instanceSource.reset(); m_instances.reset(); m_instanceRanges.clear(); }
+    std::shared_ptr<Mesh> m_instanceSource;
+    std::shared_ptr<InstanceData> m_instances;
+    std::vector<InstanceRange> m_instanceRanges;
+    // Lazy storage keeps ordinary meshes free of per-LOD allocations. The
+    // active level lives in this mesh; its cache entry is an empty holder.
+    std::vector<std::unique_ptr<Mesh>> m_runtimeLods;
+    int m_activeRuntimeLod = -1;
+    int m_previousRuntimeLod = -1;
+    float m_runtimeLodProgress = 1.f;
+    float m_runtimeLodDuration = 0.f;
+    float m_runtimeVisibility = 1.f;
+    uint64_t m_runtimeFadeRevision = 0;
     IndexedGeometryTiming m_lastIndexedGeometryTiming;
     void ObserveMorphWeights() const;
     void AdvanceMorphWeightsRevision() const;
@@ -190,10 +282,12 @@ private:
     std::vector<TerrainVertex> m_terrainVertices;
     std::vector<uint32_t> m_indices;
     uint64_t m_authoredGeometryRevision = 1;
-    std::unique_ptr<IGraphicsBuffer> m_vertexBuffer;
+    std::shared_ptr<IGraphicsBuffer> m_vertexBuffer;
+    bool m_sharedVertexBuffer = false, m_sharedIndexBuffer = false;
+    void MakeGeometryWritable();
     std::unique_ptr<IGraphicsBuffer> m_posedVertexBuffer;
     std::vector<glm::vec3> m_surfaceOffsets;
-    std::unique_ptr<IGraphicsBuffer> m_indexBuffer;
+    std::shared_ptr<IGraphicsBuffer> m_indexBuffer;
     std::unique_ptr<IGraphicsBuffer> m_morphDeltaBuffer;
     uint32_t m_morphDeltaStrideFloat4 = 3;
     std::unique_ptr<IGraphicsBuffer> m_morphWeightBuffer;

@@ -405,6 +405,10 @@ void UIRenderer::Render(Engine::Scene::Scene& scene,
     Engine::Graphics::IGraphicsContext* context, float viewportAspect)
 {
     if (!IsReady() || !context || !m_impl->provider) return;
+    if(scene.GetComponents<Engine::Components::Canvas>().empty() &&
+        scene.GetComponents<Engine::Components::UIText>().empty() &&
+        scene.GetComponents<Engine::Components::UIImage>().empty() &&
+        scene.GetComponents<Engine::Components::UIButton>().empty()) return;
     const std::vector<Engine::Model::UITextLayout> items = Engine::UI::UILayout::Resolve(scene, viewportAspect);
 
     glm::vec2 mouseClientPosition = m_impl->pointerPosition;
@@ -443,12 +447,10 @@ void UIRenderer::Render(Engine::Scene::Scene& scene,
     if (m_impl->whiteTexture)
     {
         std::vector<std::pair<Engine::Components::Canvas*, glm::vec2>> canvasSizes;
-        for (const auto& candidate : scene.GetObjects())
+        for (auto* canvas : scene.GetComponents<Engine::Components::Canvas>())
         {
-            Engine::Core::Object* object = candidate.get();
-            Engine::Components::Canvas* canvas = object && object->IsEnabledInHierarchy()
-                ? object->GetComponent<Engine::Components::Canvas>() : nullptr;
-            if (!canvas)
+            auto* object=canvas->Owner;
+            if (!object || !object->IsEnabledInHierarchy())
                 continue;
             bool isNestedCanvas = false;
             for (Engine::Core::Object* ancestor = object->Parent; ancestor; ancestor = ancestor->Parent)
@@ -466,12 +468,11 @@ void UIRenderer::Render(Engine::Scene::Scene& scene,
         // Images are backgrounds in the retained UI stack: they render before
         // button state overlays and text while respecting the computed rect
         // and parent clip from UIObject.
-        for (const auto& candidate : scene.GetObjects())
+        for (auto* image : scene.GetComponents<Engine::Components::UIImage>())
         {
-            Engine::Core::Object* object = candidate.get();
+            auto* object=image->Owner;
             if (!object || !object->IsEnabledInHierarchy()) continue;
             auto* layout = object->GetComponent<Engine::Components::UIObject>();
-            auto* image = object->GetComponent<Engine::Components::UIImage>();
             const bool solidColorImage = image && image->sourcePath.empty();
             if (!layout || !image || !layout->visible ||
                 image->fillAmount <= 0.f ||
@@ -591,13 +592,12 @@ void UIRenderer::Render(Engine::Scene::Scene& scene,
         }
 
         const uint32_t firstButtonVertex = static_cast<uint32_t>(vertices.size());
-        for (const auto& candidate : scene.GetObjects())
+        for (auto* button : scene.GetComponents<Engine::Components::UIButton>())
         {
-            Engine::Core::Object* object = candidate.get();
+            auto* object=button->Owner;
             if (!object || !object->IsEnabledInHierarchy())
                 continue;
             auto* layout = object->GetComponent<Engine::Components::UIObject>();
-            auto* button = object->GetComponent<Engine::Components::UIButton>();
             if (!layout || !button || !layout->visible)
                 continue;
 

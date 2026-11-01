@@ -202,6 +202,7 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
         return 1;
     }
     Engine::Core::SceneManager::SetActiveScene(scene);
+    scene->SetGameplayInputEnabled(false);
     Engine::Core::SceneManager::SetDefaultScenePath(projectSettings.defaultScene);
 
     auto uiBackend = Engine::Editor::CreateEditorUiBackend();
@@ -279,6 +280,7 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
     std::chrono::steady_clock::time_point debuggerDeadline;
     gameBuildManager->OnPlayStart = [&]()
     {
+        scene->SetGameplayInputEnabled(false);
         const bool requested = editorState->RequestCodeEditorAttach();
         editorState->CapturePlayModeScene();
         waitingForPlayDebugger = requested && !IsDebuggerPresent();
@@ -295,6 +297,8 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
     };
     gameBuildManager->OnPlayStop = [&]()
     {
+        scene->SetGameplayInputEnabled(false);
+        window->ReleaseGameplayInput();
         waitingForPlayDebugger = false;
         Engine::Core::SceneManager::CancelPendingSceneLoad();
         editorState->RestorePlayModeScene();
@@ -358,11 +362,13 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
     window->OnInputEnd = [&]() { uiBackend->EndInput(); };
     window->OnEscapePressed = [&]()
     {
+        scene->SetGameplayInputEnabled(false);
         uiBackend->ClearFocus();
         renderer->MarkDirty();
     };
     window->OnApplicationFocusLost = [&]()
     {
+        scene->SetGameplayInputEnabled(false);
         uiBackend->ClearFocus();
         renderer->MarkDirty();
     };
@@ -385,7 +391,7 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
         bool showTimings = false;
         for (const auto& panel : editorState->GetPanels())
             if (auto* performance = dynamic_cast<Engine::Editor::PerformanceView*>(panel.get());
-                performance && performance->IsOpen())
+                performance && (performance->IsOpen() || performance->IsRecording()))
             {
                 showTimings = true;
                 break;
@@ -417,6 +423,12 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
             gameBuildManager->PlayInEditor();
         gameBuildManager->Update(playState, postBuildAction);
         hotReload->Update(window->IsFocused());
+        if (playState != Engine::Editor::PlayState::Playing)
+        {
+            scene->SetGameplayInputEnabled(false);
+            if (previousPlayState == Engine::Editor::PlayState::Playing)
+                window->ReleaseGameplayInput();
+        }
         const auto afterBackground = Clock::now();
         if (previousPlayState != playState ||
             wasBuilding != gameBuildManager->IsBuilding() ||
@@ -440,6 +452,7 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
             scene->Start();
         }
 
+        scene->ResetGrassPerformance();
         // Tick game objects while playing
         if (playState == Engine::Editor::PlayState::Playing &&
             !waitingForPlayDebugger)
@@ -477,10 +490,13 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
                         animation->Tick(std::max(dt, 0.f));
                         previewAdvanced = true;
                     }
-                    if (auto* grass = object->GetComponent<GrassField>())
-                        previewAdvanced = grass->RefreshEditorPreview() ||
-                            previewAdvanced;
+
                 }
+            }
+            for (auto* previewScene : previewScenes)
+            {
+                previewAdvanced=previewScene->UpdateSpatialScripts(true) || previewAdvanced;
+                previewScene->CommitPendingObjectChanges();
             }
             if (previewAdvanced) renderer->MarkDirty();
         }
@@ -501,6 +517,7 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
         uint32_t gameViewWidth = 0;
         uint32_t gameViewHeight = 0;
         uint32_t submittedShadowDraws = 0;
+        Engine::Rendering::RenderCpuTimings renderCpu;
 
         const auto needsContinuousRendering = [&]()
         {
@@ -587,12 +604,17 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
                 void* cmdList = renderer->GetCurrentCommandBuffer();
                 void* rtvHandle = renderer->GetCurrentRenderTargetHandle();
                 
+                Engine::Scene::Scene* renderedScene=nullptr;
+                if(auto* scenePanel=dynamic_cast<Engine::Editor::SceneView*>(view)) renderedScene=scenePanel->GetScene();
+                else if(auto* gamePanel=dynamic_cast<Engine::Editor::GameView*>(view)) renderedScene=gamePanel->GetScene();
                 const auto viewBegin = Clock::now();
                 view->Render(cmdList, rtvHandle,
                     [&, view](void* cmd)
                     {
                         const auto begin = Clock::now();
+                        if(renderedScene) renderedScene->ResetRenderCpuTimings();
                         view->Render3D(cmd);
+                        if(renderedScene) renderCpu+=renderedScene->GetLastRenderCpuTimings();
                         mainSubmitMilliseconds += std::chrono::duration<double,
                             std::milli>(Clock::now() - begin).count();
                     },
@@ -662,6 +684,7 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
             sample.viewMilliseconds = viewMilliseconds;
             sample.shadowSubmitMilliseconds = shadowSubmitMilliseconds;
             sample.mainSubmitMilliseconds = mainSubmitMilliseconds;
+            sample.renderCpu=renderCpu;
             sample.editorUiMilliseconds = editorUiMilliseconds;
             sample.renderedViews = renderedViews;
             sample.renderedSceneViews = renderedSceneViews;
@@ -676,7 +699,7 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
                 frameProfiler.Record(sample, scene, renderer);
             for (const auto& panel : editorState->GetPanels())
                 if (auto* performance = dynamic_cast<Engine::Editor::PerformanceView*>(panel.get());
-                    performance && performance->IsOpen())
+                    performance && (performance->IsOpen() || performance->IsRecording()))
                     performance->SetFrameTimings(sample, renderer);
         }
 

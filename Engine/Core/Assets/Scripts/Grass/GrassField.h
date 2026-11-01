@@ -1,8 +1,13 @@
 #pragma once
 
 #include "Core/Script.h"
+#include "Core/Compoonents/SpatialUpdate.h"
 #include "Core/PropertyMacros.h"
 #include "Core/Compoonents/Obj/Mesh.h"
+#include "Core/Compoonents/Obj/TerrainObjectLayer.h"
+#include "Core/Rendering/GrassPerformance.h"
+#include <chrono>
+#include <optional>
 #include <map>
 #include <array>
 #include <cstdint>
@@ -18,9 +23,9 @@ class TerrainObjectLayer;
 
 namespace Engine::Scene { class Scene; }
 
-// First grass rendering slice: deterministic, near-viewer tile meshes made
-// from reusable blade patches. Tiles are CPU-batched to keep draw count low.
-class GrassField final : public Engine::Core::Script
+// Deterministic tiles sharing species geometry. Only compact placement records
+// are prepared on the CPU; all blade vertex transforms run on the GPU.
+class GrassField final : public Engine::Core::Script, public Engine::Components::SpatialUpdate
 {
 public:
     GrassField();
@@ -39,6 +44,8 @@ public:
     std::string tallMeshLod2 = "Assets/Mesh/Grass/field_tall_lod2.obj";
     PROPERTY(Inspector, EditAnywhere, Category = "Grass | Viewer")
     std::string viewerObjectName = "Grass Test Capsule";
+    PROPERTY(Inspector, EditAnywhere, Category = "Grass | Viewer")
+    bool useEditorCamera = false;
     PROPERTY(Inspector, EditAnywhere, Category = "Grass | Viewer", ClampMin = "2")
     float visibleRadius = 11.f;
     PROPERTY(Inspector, EditAnywhere, Category = "Grass | Tiles", ClampMin = "1")
@@ -49,43 +56,79 @@ public:
     float tallPatchesPerSquareMeter = .16f;
     PROPERTY(Inspector, EditAnywhere, Category = "Grass | Tiles")
     int seed = 18731;
+    // Retained for scene compatibility; placement publication is capped at one
+    // tile per refresh and shares the scene's preparation/upload budget.
     PROPERTY(Inspector, EditAnywhere, Category = "Grass | Tiles", ClampMin = "1", ClampMax = "16")
     int maxTileBuildsPerUpdate = 4;
+    PROPERTY(Inspector, EditAnywhere, Category = "Grass | Tiles", ClampMin = "0.1", ClampMax = "16")
+    float tileWorkBudgetMs = 2.f;
     PROPERTY(Inspector, EditAnywhere, Category = "Grass | Lighting")
     bool castShadows = false;
+    PROPERTY(Inspector, EditAnywhere, Category = "Grass | LOD", ClampMin = "0")
+    float fadeDuration = .35f;
+    PROPERTY(Inspector, EditAnywhere, Category = "Grass | LOD")
+    bool gpuLodSelection = true;
+    PROPERTY(Inspector, EditAnywhere, Category = "Grass | LOD", ClampMin = "0")
+    float distanceFadeWidth = 2.f;
 
     void Start() override;
     void Update() override;
+    bool RequiresUpdate() const override { return false; }
+    uint64_t SpatialRegionRevision() const override;
+    Engine::Components::SpatialUpdateRegion DescribeSpatialRegion() override;
+    bool TickSpatialRegion(bool editor) override { return editor ? RefreshEditorPreview():Refresh(); }
+    void LeaveSpatialRegion() override { ClearTiles(); m_performance={}; }
     void OnDestroy() override;
     bool RefreshEditorPreview();
+    const Engine::Rendering::GrassPerformance& GetLastPerformance() const
+    { return m_performance; }
 
 private:
     using Tile = std::pair<int, int>;
     using Source = std::vector<Engine::Components::Mesh::Vertex>;
-    std::array<Source, 3> m_shortVertices;
-    std::array<Source, 3> m_tallVertices;
+    std::array<std::shared_ptr<const Source>, 3> m_shortVertices;
+    std::array<std::shared_ptr<const Source>, 3> m_tallVertices;
+    std::array<std::shared_ptr<Engine::Components::Mesh>, 3> m_sourceMeshes;
+    Engine::Graphics::IGraphicsBufferFactory* m_loadedFactory = nullptr;
+    glm::vec3 m_sourceMinimum{0}, m_sourceMaximum{0};
+    using Placement = Engine::Components::TerrainObjectLayer::Placement;
+    using Clock = std::chrono::steady_clock;
     struct TileState
     {
         Engine::Core::Object* object = nullptr;
-        int lod = 0;
+        Engine::Components::Mesh* mesh = nullptr;
+        int desiredLod = 0;
         bool castsShadows = false;
-        uint64_t geometrySignature = 0;
+        float distanceSquared = 0;
+        float visibility = 0;
+        float appearance = 0;
     };
-    struct PendingTileUpdate
+    struct BuildJob
     {
+        Tile tile;
         int lod = 0;
-        bool castsShadows = false;
-        uint64_t geometrySignature = 0;
-        float distanceSquared = 0.f;
-        uint64_t refreshEpoch = 0;
+        uint64_t signature = 0;
+        std::vector<Placement> placements;
+        size_t placement = 0;
+        std::shared_ptr<Engine::Components::Mesh::InstanceData> instances;
+        uint32_t shortCount = 0;
+        glm::vec3 minimum{0}, maximum{0};
     };
     std::map<Tile, TileState> m_tiles;
-    std::map<Tile, PendingTileUpdate> m_pendingTileUpdates;
+    std::map<Tile, std::vector<Placement>> m_placementTiles;
+    std::optional<BuildJob> m_build;
+    const Engine::Components::TerrainObjectLayer* m_indexedLayer = nullptr;
+    uint64_t m_placementRevision = 0;
+    const Placement* m_placementData = nullptr;
+    size_t m_placementCount = 0;
+    float m_indexedTileSize = 0;
+    uint64_t m_placementSignature = 0;
+    Engine::Rendering::GrassPerformance m_performance;
     bool m_loaded = false;
+    Clock::time_point m_lastRefresh{};
     bool m_authoredPreviewHidden = false;
     uint64_t m_lastGenerationSignature = 0;
     bool m_hasGenerationSignature = false;
-    uint64_t m_refreshEpoch = 0;
     std::array<std::string, 3> m_loadedShortPaths;
     std::array<std::string, 3> m_loadedTallPaths;
     Engine::Core::Object* m_cachedViewer = nullptr;
@@ -100,9 +143,11 @@ private:
     bool ResolveCachedReferences();
     bool EnsureAuthoredPreviewHidden();
     void ClearTiles();
-    bool BuildTile(Tile tile, int lod, bool castsTileShadows,
-        uint64_t geometrySignature);
+    void RefreshPlacementIndex();
+    void BeginBuild(Tile tile, int lod, uint64_t signature);
+    bool AdvanceBuild(Clock::time_point deadline);
+    bool ActivateTileLod(TileState& tile, int lod);
     uint64_t ComputeGenerationSignature() const;
-    uint64_t ComputeTileGeometrySignature(Tile tile) const;
+
     float SampleHeight(float localX, float localZ) const;
 };

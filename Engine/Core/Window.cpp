@@ -129,6 +129,11 @@ Window::~Window()
         DestroyWindow(m_hwnd);
 }
 
+void Window::ReleaseGameplayInput()
+{
+    ReleaseInputFocus(false);
+}
+
 void Window::Show()
 {
     if (!m_hwnd)

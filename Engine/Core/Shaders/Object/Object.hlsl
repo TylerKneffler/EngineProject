@@ -53,6 +53,7 @@ struct ObjectData
     uint4 terrainMapMasks;
     float4 terrainLayerParams[6];
     float4 terrainMacroColors[6];
+    float4 geometryFade; // dither interval, reserved, enabled
 };
 
 struct SceneLightData
@@ -67,6 +68,8 @@ struct SceneLightData
     float4 photometry;
 };
 
+struct InstanceTransform { float4 row0; float4 row1; float4 row2; };
+
 #ifdef VULKAN
 [[vk::push_constant]] DrawConstants draw;
 [[vk::binding(7, 0)]] StructuredBuffer<SceneLightData> sceneLights;
@@ -74,6 +77,7 @@ struct SceneLightData
 [[vk::binding(9, 0)]] StructuredBuffer<float4x4> boneMatrices;
 [[vk::binding(11, 0)]] StructuredBuffer<float4> morphDeltas;
 [[vk::binding(12, 0)]] StructuredBuffer<float4> morphWeights;
+[[vk::binding(46, 0)]] StructuredBuffer<InstanceTransform> meshInstances;
 [[vk::binding(0, 0)]] Texture2D baseColorMap;
 [[vk::binding(1, 0)]] Texture2D metallicRoughnessMap;
 [[vk::binding(2, 0)]] Texture2D normalMap;
@@ -161,6 +165,7 @@ StructuredBuffer<ObjectData> objects : register(t7);
 StructuredBuffer<float4x4> boneMatrices : register(t8);
 StructuredBuffer<float4> morphDeltas : register(t10);
 StructuredBuffer<float4> morphWeights : register(t11);
+StructuredBuffer<InstanceTransform> meshInstances : register(t45);
 SamplerState materialSampler : register(s0);
 #endif
 
@@ -185,6 +190,16 @@ float SampleIes(uint index, float cosine)
     return 1.0;
 }
 
+uint ResolveObjectIndex(uint instanceId)
+{
+    if ((draw.drawFlags & 0x01000000u) != 0u)
+        return draw.objectIndex + asuint(meshInstances[instanceId * 2 + 2].row0.x);
+    if ((draw.drawFlags & 0x02000000u) != 0u)
+        return draw.objectIndex + asuint(meshInstances[instanceId * 2 + 1].row0.x);
+    return (draw.drawFlags & 0x10000000u) != 0u
+        ? draw.objectIndex + asuint(meshInstances[instanceId + 1].row0.x) : draw.objectIndex;
+}
+
 void VSMain(
     float3 pos : POSITION,
     float3 normal : NORMAL,
@@ -205,6 +220,7 @@ void VSMain(
     float4 sdefRadius0 : TEXCOORD9,
     float4 sdefRadius1 : TEXCOORD10,
     uint vertexId : SV_VertexID,
+    uint instanceId : SV_InstanceID,
     out float4 oPos : SV_POSITION,
     out float3 oWorldPos : TEXCOORD2,
     out float3 oNormal : NORMAL,
@@ -216,12 +232,25 @@ void VSMain(
     out float4 oUvChannels1 : TEXCOORD4,
     out float4 oUvChannels2 : TEXCOORD5,
     out float4 oUvChannels3 : TEXCOORD6,
-    out float4 oUvChannels4 : TEXCOORD7)
+    out float4 oUvChannels4 : TEXCOORD7,
+    out nointerpolation uint oObjectIndex : TEXCOORD11)
 {
-    ObjectData objectData = objects[draw.objectIndex];
+    oObjectIndex = ResolveObjectIndex(instanceId);
+    ObjectData objectData = objects[oObjectIndex];
     float4 localPosition = float4(pos, 1.0);
     float3 localNormal = normal;
     float3 localTangent = tangent.xyz;
+    if ((draw.drawFlags & 0x20000000u) != 0u)
+    {
+        InstanceTransform instance = meshInstances[(draw.drawFlags & 0x01000000u) != 0u ? instanceId * 2 + 1 :
+            ((draw.drawFlags & 0x02000000u) != 0u ? instanceId * 2 : instanceId)];
+        localPosition = float4(dot(instance.row0, localPosition),
+            dot(instance.row1, localPosition), dot(instance.row2, localPosition), 1.0);
+        localNormal = float3(dot(instance.row0.xyz, localNormal),
+            dot(instance.row1.xyz, localNormal), dot(instance.row2.xyz, localNormal));
+        localTangent = float3(dot(instance.row0.xyz, localTangent),
+            dot(instance.row1.xyz, localTangent), dot(instance.row2.xyz, localTangent));
+    }
     float4 localUv = float4(uv, uv1);
     float4 fullUv0 = float4(uv, uvChannels0.zw);
     float4 fullUv1 = float4(uv1, uvChannels1.zw);
@@ -331,6 +360,7 @@ void VSMain(
 // UV, or authored tangent stream. Its UVs are planar X/Z coordinates, so
 // reconstruct a tangent aligned with +X and project it onto the surface.
 void VSTerrainMain(
+    uint instanceId : SV_InstanceID,
     float3 pos : POSITION,
     float3 normal : NORMAL,
     float2 uv : TEXCOORD,
@@ -346,9 +376,11 @@ void VSTerrainMain(
     out float4 oUvChannels1 : TEXCOORD4,
     out float4 oUvChannels2 : TEXCOORD5,
     out float4 oUvChannels3 : TEXCOORD6,
-    out float4 oUvChannels4 : TEXCOORD7)
+    out float4 oUvChannels4 : TEXCOORD7,
+    out nointerpolation uint oObjectIndex : TEXCOORD11)
 {
-    ObjectData objectData = objects[draw.objectIndex];
+    oObjectIndex = ResolveObjectIndex(instanceId);
+    ObjectData objectData = objects[oObjectIndex];
     const float3 localNormal = normalize(normal);
     float3 localTangent = float3(1.0, 0.0, 0.0) -
         localNormal * localNormal.x;
@@ -854,18 +886,50 @@ float SampleTerrainLayerHeight(uint layer, float2 uv)
     return terrainHeight5.Sample(materialSampler, uv).r;
 }
 
+// World-anchored coverage is stable as the camera moves. Both LODs and their
+// shadows use the same intervals, so transitioning surfaces do not alpha-blend
+// or require transparent sorting.
+void ApplyGeometryFade(ObjectData data, float3 worldPosition)
+{
+    if (data.geometryFade.w >= 2.0)
+    {
+        const float distance=length(mul(data.world,float4(0,0,0,1)).xyz-data.viewPositionAlphaCutoff.xyz);
+        const float width=max(.001,min(.5,(data.geometryFade.z-data.geometryFade.y)*.25));
+        const float first=smoothstep(data.geometryFade.y-width,data.geometryFade.y+width,distance);
+        const float second=smoothstep(data.geometryFade.z-width,data.geometryFade.z+width,distance);
+        const uint lod=(draw.drawFlags >> 21u) & 3u;
+        const float visibility=saturate(data.geometryFade.w-2.0);
+        if(lod==0) data.geometryFade=float4(0,(1-first)*visibility,0,1);
+        else if(lod==1) data.geometryFade=distance<data.geometryFade.z-width ? float4((1-first)*visibility,visibility,0,1):float4(0,(1-second)*visibility,0,1);
+        else data.geometryFade=float4((1-second)*visibility,visibility,0,1);
+    }
+    if (data.geometryFade.w > 0.5)
+    {
+        if (data.geometryFade.y <= data.geometryFade.x) clip(-1.0);
+        float3 cell = floor(worldPosition * 96.0);
+        float threshold = frac(sin(dot(cell, float3(12.9898, 78.233, 37.719))) * 43758.5453);
+        clip(threshold - data.geometryFade.x);
+        clip(data.geometryFade.y - threshold);
+    }
+}
+
 float4 PSShadowMain(
+    float4 pos : SV_POSITION,
     float3 worldPos : TEXCOORD2,
+    float3 normal : NORMAL,
     float2 uv : TEXCOORD,
     float2 uv1 : TEXCOORD1,
     float4 vertexColor : COLOR,
+    float4 tangent : TANGENT,
     float4 uvChannels0 : TEXCOORD3,
     float4 uvChannels1 : TEXCOORD4,
     float4 uvChannels2 : TEXCOORD5,
     float4 uvChannels3 : TEXCOORD6,
-    float4 uvChannels4 : TEXCOORD7) : SV_TARGET
+    float4 uvChannels4 : TEXCOORD7,
+    nointerpolation uint objectIndex : TEXCOORD11) : SV_TARGET
 {
-    ObjectData objectData = objects[draw.objectIndex];
+    ObjectData objectData = objects[(draw.drawFlags & 0x13000000u) != 0u ? objectIndex : draw.objectIndex];
+    ApplyGeometryFade(objectData, worldPos);
     if (dot(objectData.traversalClipPlane.xyz,
         objectData.traversalClipPlane.xyz) > 0.0 &&
         dot(float4(worldPos, 1.0), objectData.traversalClipPlane) < 0.0)
@@ -905,9 +969,11 @@ float4 PSMain(
     float4 uvChannels2 : TEXCOORD5,
     float4 uvChannels3 : TEXCOORD6,
     float4 uvChannels4 : TEXCOORD7,
+    nointerpolation uint objectIndex : TEXCOORD11,
     bool frontFace : SV_IsFrontFace) : SV_TARGET
 {
-    ObjectData objectData = objects[draw.objectIndex];
+    ObjectData objectData = objects[(draw.drawFlags & 0x13000000u) != 0u ? objectIndex : draw.objectIndex];
+    ApplyGeometryFade(objectData, worldPos);
     uint flags = (uint)objectData.materialParams.w;
     // Split traversal instances retain their own chart clipping even while
     // they are drawn through another portal view. This must be separate from

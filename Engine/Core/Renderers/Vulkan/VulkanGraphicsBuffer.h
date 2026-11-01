@@ -2,6 +2,7 @@
 #if defined(ENGINE_VULKAN_ENABLED)
 #include "Core/Graphics/IGraphicsBuffer.h"
 #include "VulkanCommon.h"
+#include <atomic>
 
 namespace Engine::Renderers
 {
@@ -20,6 +21,7 @@ public:
     void Unmap() override {}
     void* GetNativeHandle() const override { return reinterpret_cast<void*>(m_buffer); }
     VkBuffer GetBuffer() const { return m_buffer; }
+    uint64_t GetIdentity() const { return m_identity; }
     const uint8_t* GetMappedData() const { return static_cast<const uint8_t*>(m_mapped); }
 private:
     VkDevice m_device = VK_NULL_HANDLE;
@@ -30,6 +32,8 @@ private:
     uint64_t m_size = 0;
     void* m_mapped = nullptr;
     uint32_t m_elementStride = 0;
+    inline static std::atomic<uint64_t> s_nextIdentity{1};
+    uint64_t m_identity = s_nextIdentity.fetch_add(1,std::memory_order_relaxed);
 };
 
 class VulkanBufferFactory : public Engine::Graphics::IGraphicsBufferFactory

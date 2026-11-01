@@ -38,19 +38,21 @@ public:
         VkCommandBuffer commands,
         VkPipelineLayout pipelineLayout,
         const std::array<const VulkanGraphicsTexture*, 30>& textures,
-        const std::array<const VulkanGraphicsBuffer*, 7>& buffers);
+        const std::array<const VulkanGraphicsBuffer*, 8>& buffers);
     VkDescriptorSetLayout GetDescriptorSetLayout() const { return m_layout; }
     VkDevice GetDevice() const { return m_device; }
     VkPhysicalDevice GetPhysicalDevice() const { return m_physicalDevice; }
+    void PrepareFrame(uint32_t frameSlot);
 
 private:
     struct TextureKey
     {
         std::array<VkImageView, 30> views{};
-        std::array<VkBuffer, 7> buffers{};
+        std::array<VkBuffer, 8> buffers{};
+        std::array<uint64_t, 8> bufferIdentities{};
         bool operator==(const TextureKey& other) const
         {
-            return views == other.views && buffers == other.buffers;
+            return views == other.views && buffers == other.buffers && bufferIdentities == other.bufferIdentities;
         }
     };
     struct TextureKeyHash
@@ -68,12 +70,19 @@ private:
     VkQueue m_queue = VK_NULL_HANDLE;
     uint32_t m_queueFamily = 0;
     VkDescriptorSetLayout m_layout = VK_NULL_HANDLE;
-    VkDescriptorPool m_pool = VK_NULL_HANDLE;
     VkSampler m_sampler = VK_NULL_HANDLE;
     VkBuffer m_dummyBuffer = VK_NULL_HANDLE;
     VkDeviceMemory m_dummyBufferMemory = VK_NULL_HANDLE;
     VulkanImageResource m_white;
-    std::unordered_map<TextureKey, VkDescriptorSet, TextureKeyHash> m_sets;
+    struct DescriptorFrame
+    {
+        std::vector<VkDescriptorPool> pools;
+        size_t activePool=0;
+        std::unordered_map<TextureKey,VkDescriptorSet,TextureKeyHash> sets;
+    };
+    std::vector<DescriptorFrame> m_descriptorFrames;
+    size_t m_descriptorFrame=0;
+    VkDescriptorPool CreateDescriptorPool();
     std::unordered_set<VulkanGraphicsTexture*> m_liveTextures;
 };
 
@@ -91,11 +100,12 @@ public:
     VkImageView GetView() const { return m_image.view; }
     bool IsDepthTarget() const { return m_framebuffer != VK_NULL_HANDLE; }
     VkRenderPass GetRenderPass() const { return m_renderPass; }
+    VkRenderPass GetLoadRenderPass() const { return m_loadRenderPass; }
     VkFramebuffer GetFramebuffer() const { return m_framebuffer; }
     uint32_t GetWidth() const { return m_width; }
     uint32_t GetHeight() const { return m_height; }
     void SetDepthTargetResources(VulkanImageResource color,
-        VkRenderPass renderPass, VkFramebuffer framebuffer,
+        VkRenderPass renderPass, VkRenderPass loadRenderPass, VkFramebuffer framebuffer,
         uint32_t width, uint32_t height);
 
 private:
@@ -105,6 +115,7 @@ private:
     VulkanImageResource m_image;
     VulkanImageResource m_depthColor;
     VkRenderPass m_renderPass = VK_NULL_HANDLE;
+    VkRenderPass m_loadRenderPass = VK_NULL_HANDLE;
     VkFramebuffer m_framebuffer = VK_NULL_HANDLE;
     uint32_t m_width = 0;
     uint32_t m_height = 0;

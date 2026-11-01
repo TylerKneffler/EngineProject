@@ -61,6 +61,17 @@ FirstPersonController::FirstPersonController()
     RegisterField("lockCursor", lockCursor);
 }
 
+FirstPersonController::~FirstPersonController()
+{
+    SetCursorLock(false);
+}
+
+void FirstPersonController::Disabled()
+{
+    m_inputSuspended = true;
+    SetCursorLock(false);
+}
+
 namespace
 {
 struct FirstPersonControllerRegistration
@@ -115,7 +126,9 @@ void FirstPersonController::Update()
         const bool clickedAfterRelease = leftMousePressed ||
             (leftMouseDown && !m_leftMouseWasDown);
         m_leftMouseWasDown = leftMouseDown;
-        if (!clickedAfterRelease)
+        const bool viewportAcquired = Owner->GetScene() &&
+            Owner->GetScene()->IsGameplayInputManaged();
+        if (!viewportAcquired && !clickedAfterRelease)
             return;
         m_inputSuspended = false;
         SetCursorLock(lockCursor);
@@ -136,19 +149,8 @@ void FirstPersonController::UpdateLook()
     if (!m_cursorLocked || !Owner)
         return;
 
-    HWND foreground = GetForegroundWindow();
-    if (!foreground)
-        return;
-
-    RECT clientRect{};
-    if (!GetClientRect(foreground, &clientRect))
-        return;
-
-    POINT lookAnchor {
-        (clientRect.left + clientRect.right) / 2,
-        (clientRect.top + clientRect.bottom) / 2
-    };
-    if (!ClientToScreen(foreground, &lookAnchor))
+    POINT lookAnchor{};
+    if (!GetLookAnchor(lookAnchor))
         return;
 
     POINT cursor{};
@@ -329,20 +331,12 @@ void FirstPersonController::SetCursorLock(bool locked)
     m_cursorLocked = locked;
     if (locked)
     {
-        HWND foreground = GetForegroundWindow();
-        RECT clientRect{};
-        if (foreground && GetClientRect(foreground, &clientRect))
+        POINT center{};
+        if (GetLookAnchor(center))
         {
-            POINT center {
-                (clientRect.left + clientRect.right) / 2,
-                (clientRect.top + clientRect.bottom) / 2
-            };
-            if (ClientToScreen(foreground, &center))
-            {
-                SetCursorPos(center.x, center.y);
-                m_lastCursorPosition = center;
-                m_hasLastCursorPosition = true;
-            }
+            SetCursorPos(center.x, center.y);
+            m_lastCursorPosition = center;
+            m_hasLastCursorPosition = true;
         }
         SetSystemCursorVisible(false);
     }
@@ -353,8 +347,27 @@ void FirstPersonController::SetCursorLock(bool locked)
     }
 }
 
-bool FirstPersonController::IsApplicationFocused()
+bool FirstPersonController::GetLookAnchor(POINT& anchor) const
 {
+    if (Owner && Owner->GetScene() && Owner->GetScene()->IsGameplayInputManaged())
+    {
+        const auto& position = Owner->GetScene()->GetGameplayInputAnchor();
+        anchor = { static_cast<LONG>(position.x), static_cast<LONG>(position.y) };
+        return true;
+    }
+    const HWND foreground = GetForegroundWindow();
+    RECT clientRect{};
+    if (!foreground || !GetClientRect(foreground, &clientRect))
+        return false;
+    anchor = { (clientRect.left + clientRect.right) / 2,
+        (clientRect.top + clientRect.bottom) / 2 };
+    return ClientToScreen(foreground, &anchor) != FALSE;
+}
+
+bool FirstPersonController::IsApplicationFocused() const
+{
+    if (Owner && Owner->GetScene() && !Owner->GetScene()->IsGameplayInputEnabled())
+        return false;
     const HWND foreground = GetForegroundWindow();
     if (!foreground || !GetFocus())
         return false;

@@ -54,6 +54,22 @@ def main() -> None:
                     count=1)
                 if count != 1:
                     raise RuntimeError(f"Missing {field} in scene")
+        if case == "full":
+            # The expanded scene shares its outer 440 cells through a prefab.
+            # Apply the same LOD override there without changing authored assets.
+            prefab_asset = "Assets/Prefabs/Terrain/GrassStressCell.prefab"
+            prefab_source = ROOT / "Engine/Core" / prefab_asset
+            if prefab_asset in scene_text and prefab_source.exists():
+                prefab_text = prefab_source.read_text(encoding="utf-8")
+                for field in ("lod1Distance", "lod2Distance"):
+                    prefab_text, count = re.subn(
+                        rf'TerrainObjectLayer\.{field}="[0-9.]+"',
+                        f'TerrainObjectLayer.{field}="18"', prefab_text, count=1)
+                    if count != 1:
+                        raise RuntimeError(f"Missing prefab {field}")
+                prefab = OUTPUT / f"{case}.prefab"
+                prefab.write_text(prefab_text, encoding="utf-8")
+                scene_text = scene_text.replace(prefab_asset, prefab.as_posix())
         scene = OUTPUT / f"{case}.scene"
         scene.write_text(scene_text, encoding="utf-8")
         seconds, output = run([str(SERVER), "--scene", str(scene),
@@ -62,12 +78,12 @@ def main() -> None:
         (OUTPUT / f"{case}.jsonl").write_text(output, encoding="utf-8")
         states = [json.loads(line) for line in output.splitlines()
                   if line.startswith('{') and '"scene_state"' in line]
-        tiles = {item["name"]: item for item in states[-1]["objects"]
-                 if item["name"].startswith("Grass Tile (")}
+        tiles = [item for item in states[-1]["objects"]
+                 if item["name"].startswith("Grass Tile (")]
         data = {"headlessTotalSeconds": round(seconds, 3),
                 "tileCount": len(tiles),
                 "tileVertices": sum(tile["mesh"]["vertexCount"]
-                                    for tile in tiles.values())}
+                                    for tile in tiles)}
         if args.render_frames:
             end = 15 + args.render_frames
             render_dir = OUTPUT / f"{case}_render"

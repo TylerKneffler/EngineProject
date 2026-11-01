@@ -1,4 +1,4 @@
-"""Regenerate the small flat-terrain grass test scene and editor preview."""
+"""Regenerate the 21 x 21 flat-terrain grass stress scene."""
 
 from pathlib import Path
 import math
@@ -127,5 +127,6 @@ def build() -> str:
 
 
 if __name__ == "__main__":
-    SCENE.write_text(build(), encoding="utf-8", newline="\n")
+    from expand_grass_test_scene import expand_scene
+    SCENE.write_text(expand_scene(build()), encoding="utf-8", newline="\n")
     print(SCENE)

@@ -35,6 +35,10 @@ public:
     void SetComputeWriteBuffer(const Engine::Graphics::IGraphicsBuffer* buffer) override;
     void DispatchCompute(uint32_t x, uint32_t y = 1, uint32_t z = 1) override;
     void StorageBarrier(const Engine::Graphics::IGraphicsBuffer* buffer) override;
+    bool BeginComputePass() override;
+    void EndComputePass() override;
+    bool SupportsIndirectDraws() const override { return true; }
+    bool DrawInstancesIndirect(const Engine::Graphics::IGraphicsBuffer*, uint64_t, bool) override;
     bool CopyBuffer(const Engine::Graphics::IGraphicsBuffer* source,
         Engine::Graphics::IGraphicsBuffer* destination,
         uint64_t bytes = 0) override;
@@ -67,7 +71,7 @@ private:
     std::shared_ptr<VulkanComputeDescriptorArena> m_computeDescriptors;
     std::shared_ptr<VulkanTextureSystem> m_textureSystem;
     std::array<const VulkanGraphicsTexture*, 30> m_textures{};
-    std::array<const VulkanGraphicsBuffer*, 7> m_structuredBuffers{};
+    std::array<const VulkanGraphicsBuffer*, 8> m_structuredBuffers{};
     std::shared_ptr<VulkanOcclusionQueryState> m_occlusionState;
     std::shared_ptr<VulkanGpuTimingState> m_gpuTimings;
     uint64_t m_occlusionViewId = 0;
@@ -75,6 +79,7 @@ private:
     uint64_t m_activeOcclusionKey = 0;
     uint32_t m_activeOcclusionIndex = UINT32_MAX;
     const VulkanGraphicsTexture* m_activeDepthTarget = nullptr;
+    const VulkanGraphicsTexture* m_pausedDepthTarget = nullptr;
 };
 
 class VulkanGraphicsContextFactory : public Engine::Graphics::IGraphicsContextFactory

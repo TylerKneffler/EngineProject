@@ -25,16 +25,11 @@ std::vector<OrderedVolume> GatherOrderedVolumes(const Scene& scene,
     // hierarchy view over the same entries. Recursing from every list entry
     // revisits descendants once per ancestor and can apply a nested volume
     // multiple times.
-    for (const auto& owned : scene.GetObjects())
+    for (const auto* manipulator : scene.GetComponents<Engine::Components::SpatialManipulator>())
     {
-        const Engine::Core::Object* object = owned.get();
-        if (!object || object == query.excludedOwner ||
-            !object->IsEnabledInHierarchy())
-            continue;
-        const auto* manipulator =
-            object->GetComponent<Engine::Components::SpatialManipulator>();
-        if (!manipulator || !manipulator->enabled ||
-            !manipulator->definesWarpVolume)
+        const auto* object=manipulator->Owner;
+        if (!object || object == query.excludedOwner || !object->IsEnabledInHierarchy() ||
+            !manipulator->enabled || !manipulator->definesWarpVolume)
             continue;
         Scene::ObjectPath path;
         scene.TryGetObjectPath(object, path);

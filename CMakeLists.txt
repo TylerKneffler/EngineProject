@@ -468,6 +468,15 @@ if(ENGINE_VULKAN_ENABLED)
             list(APPEND VULKAN_SHADER_OUTPUTS "${SHADER_OUTPUT}")
         endforeach()
     endforeach()
+    set(SHADER_SOURCE "${ENGINE_ROOT}/Engine/Core/Shaders/InstanceCull/InstanceCull.hlsl")
+    set(SHADER_OUTPUT "${VULKAN_SHADER_DIR}/InstanceCull.CS.spv")
+    add_custom_command(OUTPUT "${SHADER_OUTPUT}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${VULKAN_SHADER_DIR}"
+        COMMAND "${DXC_SPIRV_EXECUTABLE}" -spirv -fspv-target-env=vulkan1.1
+            -fvk-use-dx-layout -fspv-entrypoint-name=main -D VULKAN=1 -T cs_6_0 -E CSMain
+            -Fo "${SHADER_OUTPUT}" "${SHADER_SOURCE}"
+        DEPENDS "${SHADER_SOURCE}" VERBATIM)
+    list(APPEND VULKAN_SHADER_OUTPUTS "${SHADER_OUTPUT}")
     foreach(SHADER_ENTRY CSClear CSUpdate CSSpawn)
         set(SHADER_SOURCE
             "${ENGINE_ROOT}/Engine/Core/Shaders/ParticleGpu/ParticleGpu.hlsl")
@@ -607,6 +616,70 @@ if(ENGINE_VULKAN_ENABLED)
             COMMENT "Compiling ObjectOutline.${SHADER_ENTRY} for Vulkan"
         )
         list(APPEND VULKAN_SHADER_OUTPUTS "${SHADER_OUTPUT}")
+    endforeach()
+    # Material shader assets keep their relative paths in the binary tree.
+    # Headers remain .hlsli; .hlsl files with mesh entry points are draw passes.
+    set(MATERIAL_SHADER_ROOTS "${ENGINE_ROOT}/Engine/Core/Assets")
+    set(MATERIAL_SHADER_NAMESPACES Engine)
+    if(ENGINE_PROJECT_DIR)
+        list(APPEND MATERIAL_SHADER_ROOTS "${ENGINE_PROJECT_DIR}/Assets")
+        list(APPEND MATERIAL_SHADER_NAMESPACES Project)
+    endif()
+    list(LENGTH MATERIAL_SHADER_ROOTS MATERIAL_SHADER_ROOT_COUNT)
+    math(EXPR MATERIAL_SHADER_ROOT_LAST "${MATERIAL_SHADER_ROOT_COUNT} - 1")
+    file(GLOB_RECURSE MATERIAL_SHADER_HEADERS CONFIGURE_DEPENDS
+        "${ENGINE_ROOT}/Engine/Core/Shaders/*.hlsli"
+        "${ENGINE_ROOT}/Engine/Core/Assets/*.hlsli")
+    if(ENGINE_PROJECT_DIR)
+        file(GLOB_RECURSE PROJECT_SHADER_HEADERS CONFIGURE_DEPENDS
+            "${ENGINE_PROJECT_DIR}/Assets/*.hlsli")
+        list(APPEND MATERIAL_SHADER_HEADERS ${PROJECT_SHADER_HEADERS})
+    endif()
+    foreach(ROOT_INDEX RANGE ${MATERIAL_SHADER_ROOT_LAST})
+        list(GET MATERIAL_SHADER_ROOTS ${ROOT_INDEX} MATERIAL_SHADER_ROOT)
+        list(GET MATERIAL_SHADER_NAMESPACES ${ROOT_INDEX} MATERIAL_SHADER_NAMESPACE)
+        file(GLOB_RECURSE MATERIAL_SHADER_SOURCES CONFIGURE_DEPENDS
+            "${MATERIAL_SHADER_ROOT}/*.hlsl")
+        foreach(SHADER_SOURCE IN LISTS MATERIAL_SHADER_SOURCES)
+            file(READ "${SHADER_SOURCE}" MATERIAL_SHADER_TEXT)
+            if(NOT MATERIAL_SHADER_TEXT MATCHES "VSMain|Object.hlsl")
+                continue()
+            endif()
+            file(RELATIVE_PATH MATERIAL_SHADER_RELATIVE "${MATERIAL_SHADER_ROOT}" "${SHADER_SOURCE}")
+            set(MATERIAL_SHADER_ENTRIES VSMain PSMain)
+            if(MATERIAL_SHADER_TEXT MATCHES "VSTerrainMain|Object.hlsl")
+                list(APPEND MATERIAL_SHADER_ENTRIES VSTerrainMain)
+            endif()
+            foreach(SHADER_ENTRY IN LISTS MATERIAL_SHADER_ENTRIES)
+                if(SHADER_ENTRY STREQUAL "PSMain")
+                    set(SHADER_STAGE PS)
+                    set(SHADER_PROFILE ps_6_0)
+                    set(SHADER_SPIRV_ENTRY PSMain)
+                else()
+                    set(SHADER_STAGE VS)
+                    set(SHADER_PROFILE vs_6_0)
+                    set(SHADER_SPIRV_ENTRY VSMain)
+                endif()
+                set(SHADER_SUFFIX "")
+                if(SHADER_ENTRY STREQUAL "VSTerrainMain")
+                    set(SHADER_SUFFIX ".VSTerrainMain")
+                endif()
+                set(SHADER_OUTPUT "${VULKAN_SHADER_DIR}/Materials/${MATERIAL_SHADER_NAMESPACE}/${MATERIAL_SHADER_RELATIVE}${SHADER_SUFFIX}.${SHADER_STAGE}.spv")
+                get_filename_component(SHADER_OUTPUT_DIR "${SHADER_OUTPUT}" DIRECTORY)
+                add_custom_command(
+                    OUTPUT "${SHADER_OUTPUT}"
+                    COMMAND ${CMAKE_COMMAND} -E make_directory "${SHADER_OUTPUT_DIR}"
+                    COMMAND "${DXC_SPIRV_EXECUTABLE}" -spirv -fspv-target-env=vulkan1.1
+                        -fvk-use-dx-layout -fspv-entrypoint-name=${SHADER_SPIRV_ENTRY}
+                        -D VULKAN=1 -T ${SHADER_PROFILE} -E ${SHADER_ENTRY}
+                        -Fo "${SHADER_OUTPUT}" "${SHADER_SOURCE}"
+                    DEPENDS "${SHADER_SOURCE}" ${MATERIAL_SHADER_HEADERS}
+                        "${ENGINE_ROOT}/Engine/Core/Shaders/Object/Object.hlsl"
+                    VERBATIM
+                    COMMENT "Compiling material ${MATERIAL_SHADER_RELATIVE} (${SHADER_ENTRY})")
+                list(APPEND VULKAN_SHADER_OUTPUTS "${SHADER_OUTPUT}")
+            endforeach()
+        endforeach()
     endforeach()
     add_custom_target(VulkanShaders DEPENDS ${VULKAN_SHADER_OUTPUTS})
     add_dependencies(Engine VulkanShaders)
@@ -857,23 +930,48 @@ endif()
 
 set(ENGINE_LOCAL_TEST_ROOT "${ENGINE_ROOT}/.local/tests")
 
-if(NOT ENGINE_PROJECT_DIR)
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/GameViewInputTests.cpp")
+    enable_testing()
+    add_executable(GameViewInputTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/GameViewInputTests.cpp"
+        "${ENGINE_ROOT}/Engine/Editor/Core/View/View.cpp"
+        "${ENGINE_ROOT}/Engine/Editor/Core/View/Views/GameView.cpp")
+    target_link_libraries(GameViewInputTests PRIVATE Engine)
+    target_include_directories(GameViewInputTests PRIVATE
+        "${ENGINE_ROOT}/Engine" "${ENGINE_ROOT}/Engine/Editor"
+        "${ENGINE_ROOT}/Engine/Editor/Core")
+    add_test(NAME GameViewInputRegression COMMAND GameViewInputTests)
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/AnimationEditorSourceTests.cpp")
     enable_testing()
     add_executable(AnimationEditorSourceTests EXCLUDE_FROM_ALL
-        "${ENGINE_ROOT}/.local/tests/AnimationEditorSourceTests.cpp")
+        "${ENGINE_LOCAL_TEST_ROOT}/AnimationEditorSourceTests.cpp")
     target_link_libraries(AnimationEditorSourceTests PRIVATE Engine)
     target_include_directories(AnimationEditorSourceTests PRIVATE
         "${ENGINE_ROOT}/Engine" "${ENGINE_ROOT}/Engine/Editor")
     add_test(NAME AnimationEditorSources COMMAND AnimationEditorSourceTests)
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/HumanoidRigDetectionTests.cpp")
+    enable_testing()
     add_executable(HumanoidRigDetectionTests EXCLUDE_FROM_ALL
-        "${ENGINE_ROOT}/.local/tests/HumanoidRigDetectionTests.cpp")
+        "${ENGINE_LOCAL_TEST_ROOT}/HumanoidRigDetectionTests.cpp")
     target_link_libraries(HumanoidRigDetectionTests PRIVATE Engine)
     target_include_directories(HumanoidRigDetectionTests PRIVATE
         "${ENGINE_ROOT}/Engine" "${ENGINE_ROOT}/Engine/Editor")
     add_test(NAME HumanoidRigDetection COMMAND HumanoidRigDetectionTests)
     set_tests_properties(HumanoidRigDetection PROPERTIES WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/CharacterPerformanceTests.cpp")
+    enable_testing()
     add_executable(CharacterPerformanceTests EXCLUDE_FROM_ALL
-        "${ENGINE_ROOT}/.local/tests/CharacterPerformanceTests.cpp"
+        "${ENGINE_LOCAL_TEST_ROOT}/CharacterPerformanceTests.cpp"
         "${ENGINE_ROOT}/Engine/Editor/Core/Importers/MmdDanceAssetBinder.cpp"
         "${ENGINE_ROOT}/Engine/Editor/Core/Importers/MmdPoseRetargeter.cpp"
         "${ENGINE_ROOT}/Engine/Editor/Core/Importers/PmxModelDecoder.cpp"
@@ -914,7 +1012,7 @@ if(NOT ENGINE_PROJECT_DIR AND
         "${ENGINE_LOCAL_TEST_ROOT}/PerformanceRecordingTests.cpp"
         "${ENGINE_ROOT}/Engine/Editor/Core/View/Views/PerformanceRecording.cpp")
     target_include_directories(PerformanceRecordingTests PRIVATE
-        "${ENGINE_ROOT}/Engine/Editor")
+        "${ENGINE_ROOT}/Engine/Editor" "${ENGINE_ROOT}/Engine")
     add_test(NAME PerformanceRecording COMMAND PerformanceRecordingTests)
 endif()
 
@@ -955,6 +1053,18 @@ if(NOT ENGINE_PROJECT_DIR AND
         "${ENGINE_ROOT}/Engine")
     add_test(NAME SubsurfaceMaterialRegression COMMAND SubsurfaceMaterialTests)
     set_tests_properties(SubsurfaceMaterialRegression PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/MaterialShaderTests.cpp")
+    enable_testing()
+    add_executable(MaterialShaderTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/MaterialShaderTests.cpp")
+    target_link_libraries(MaterialShaderTests PRIVATE Engine)
+    target_include_directories(MaterialShaderTests PRIVATE "${ENGINE_ROOT}/Engine")
+    add_test(NAME MaterialShaderRegression COMMAND MaterialShaderTests)
+    set_tests_properties(MaterialShaderRegression PROPERTIES
         WORKING_DIRECTORY "${ENGINE_ROOT}")
 endif()
 
@@ -2066,4 +2176,28 @@ if(NOT ENGINE_PROJECT_DIR AND
     add_test(NAME RetainedUILayoutAndSerialization COMMAND UILayoutTests)
     set_tests_properties(RetainedUILayoutAndSerialization PROPERTIES
         WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND WIN32 AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/GrassPerformanceTests.cpp")
+    enable_testing()
+    add_executable(GrassPerformanceTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/GrassPerformanceTests.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/Grass/GrassField.cpp")
+    target_link_libraries(GrassPerformanceTests PRIVATE Engine d3d11)
+    target_include_directories(GrassPerformanceTests PRIVATE
+        "${ENGINE_ROOT}/Engine" "${ENGINE_ROOT}/Engine/Core/Assets")
+    add_test(NAME GrassPerformance COMMAND GrassPerformanceTests)
+    set_tests_properties(GrassPerformance PROPERTIES WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/TerrainColliderStreamingTests.cpp")
+    enable_testing()
+    add_executable(TerrainColliderStreamingTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/TerrainColliderStreamingTests.cpp")
+    target_link_libraries(TerrainColliderStreamingTests PRIVATE Engine)
+    target_include_directories(TerrainColliderStreamingTests PRIVATE "${ENGINE_ROOT}/Engine")
+    add_test(NAME TerrainColliderStreaming COMMAND TerrainColliderStreamingTests)
+    set_tests_properties(TerrainColliderStreaming PROPERTIES WORKING_DIRECTORY "${ENGINE_ROOT}")
 endif()

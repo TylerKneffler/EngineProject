@@ -7,6 +7,10 @@ class InspectorTestUi final : public IEditorUi {
 public:
     std::string clickButton;
     bool changeClip=false, changePlaying=false;
+    bool viewportVisible=false, windowFocused=false;
+    EditorUiViewportInput viewportInput{};
+    bool BeginViewportWindow(const char*, bool*) override { return viewportVisible; }
+    bool IsWindowFocused() const override { return windowFocused; }
     void SetNextWindowRect(float x, float y, float width, float height) override {  }
     bool BeginWindow(const char* title, bool* open, bool noPadding) override { return {}; }
     bool BeginViewportOverlay(const char* id, float width, float height) override { return {}; }
@@ -104,7 +108,7 @@ public:
     void UsageHistory(const char* id, const float* values, size_t count, float minimum, float maximum, EditorUiColor color, float width, float height) override {  }
     float FrameRate() const override { return {}; }
     void DrawImage(void* texture, float width, float height) override {  }
-    EditorUiViewportInput Viewport(void* texture, float aspectRatio, EditorUiColor letterboxColor) override { return {}; }
+    EditorUiViewportInput Viewport(void* texture, float aspectRatio, EditorUiColor letterboxColor) override { return viewportInput; }
     void DrawViewportLine(EditorUiVec2 start, EditorUiVec2 end, EditorUiColor color, float thickness) override {  }
     void DrawViewportTriangle(EditorUiVec2 first, EditorUiVec2 second, EditorUiVec2 third, EditorUiColor color) override {  }
     void DrawViewportCircle(EditorUiVec2 center, float radius, EditorUiColor color, bool filled, float thickness) override {  }

@@ -831,20 +831,91 @@ void TerrainManager::ConfigureCellPhysics(Engine::Core::Object& object) const
     body->restitution = 0.f;
 }
 
+void TerrainManager::RefreshAuthoredCollisionCells()
+{
+    if (!Owner || !Owner->GetScene()) return;
+    const auto revision = Owner->GetScene()->GetStructureRevision();
+    if (m_authoredCollisionRevision == revision) return;
+    m_authoredCollisionCells.clear();
+    const double width = static_cast<double>(cellsX) * cellWidth;
+    const double depth = static_cast<double>(cellsY) * cellDepth;
+    if (width <= 0 || depth <= 0) return;
+    const glm::dmat4 inverse = glm::inverse(Owner->transform.GetWorldMatrixD());
+    std::vector<Engine::Core::Object*> pending(Owner->Children.begin(), Owner->Children.end());
+    while (!pending.empty())
+    {
+        auto* object = pending.back();
+        pending.pop_back();
+        if (!object) continue;
+        if (auto* terrain = object->GetComponent<Terrain>())
+        {
+            const auto local = glm::dvec3(inverse * glm::dvec4(object->transform.GetWorldPositionD(), 1.0));
+            const Cell cell{static_cast<int>(std::llround(local.x / width)),
+                static_cast<int>(std::llround(local.z / depth))};
+            m_authoredCollisionCells[cell] = terrain;
+            // Grass descendants are irrelevant to terrain collision discovery.
+            continue;
+        }
+        pending.insert(pending.end(), object->Children.begin(), object->Children.end());
+    }
+    m_authoredCollisionRevision = revision;
+}
+
+void TerrainManager::UpdateColliderStreamingAtPosition(const glm::dvec3& worldPosition)
+{
+    if (!Owner) return;
+    const auto local = glm::dvec3(glm::inverse(Owner->transform.GetWorldMatrixD()) * glm::dvec4(worldPosition, 1.0));
+    const double width = static_cast<double>(cellsX) * cellWidth;
+    const double depth = static_cast<double>(cellsY) * cellDepth;
+    if (width <= 0 || depth <= 0) return;
+    m_collisionViewerLocal = local;
+    if (manageAuthoredCellColliders) RefreshAuthoredCollisionCells();
+    RefreshColliderActivation(static_cast<int>(std::floor(local.x / width)),
+        static_cast<int>(std::floor(local.z / depth)));
+}
+
 void TerrainManager::RefreshColliderActivation(int centerX, int centerY)
 {
-    if (!generateColliders || !streamCollidersByDistance) return;
-    const int colliderRadius = std::clamp(loadedRadius + 1, 0, 64);
-    for (const auto& [cell, terrain] : m_loaded)
+    m_activeColliderCells = 0;
+    if (!generateColliders) return;
+    const double width = static_cast<double>(cellsX) * cellWidth;
+    const double depth = static_cast<double>(cellsY) * cellDepth;
+    if (width <= 0 || depth <= 0) return;
+    double x = width * .5, z = depth * .5;
+    if (m_collisionViewerLocal &&
+        static_cast<int>(std::floor(m_collisionViewerLocal->x / width)) == centerX &&
+        static_cast<int>(std::floor(m_collisionViewerLocal->z / depth)) == centerY)
+    {
+        x = m_collisionViewerLocal->x - centerX * width;
+        z = m_collisionViewerLocal->z - centerY * depth;
+    }
+    const auto gridWorld = Owner ? Owner->transform.GetWorldMatrixD() : glm::dmat4(1.0);
+    const auto neighbor = [this](double coordinate, double span, double worldScale) {
+        const double margin = std::clamp(static_cast<double>(colliderActivationDistance) /
+            std::max(worldScale, 1.e-9), 0.0, span * .499);
+        return coordinate <= margin ? -1 : coordinate >= span - margin ? 1 : 0;
+    };
+    const int adjacentX = neighbor(x, width, glm::length(glm::dvec3(gridWorld[0])));
+    const int adjacentZ = neighbor(z, depth, glm::length(glm::dvec3(gridWorld[2])));
+    const auto& cells = manageAuthoredCellColliders ? m_authoredCollisionCells : m_loaded;
+    for (const auto& [cell, terrain] : cells)
     {
         if (!terrain || !terrain->Owner) continue;
         auto* collider = terrain->Owner->GetComponent<MeshObjectCollider>();
-        if (!collider) continue;
-        const bool active = std::abs(cell.first - centerX) <= colliderRadius &&
-            std::abs(cell.second - centerY) <= colliderRadius;
-        if (collider->collisionEnabled == active) continue;
-        collider->collisionEnabled = active;
-        collider->MarkConfigurationDirty();
+        auto* body = terrain->Owner->GetComponent<RigidBody>();
+        if (!collider || !body) continue;
+        const bool active = !streamCollidersByDistance ||
+            ((cell.first == centerX || (adjacentX && cell.first == centerX + adjacentX)) &&
+             (cell.second == centerY || (adjacentZ && cell.second == centerY + adjacentZ)));
+        // Retain rendering and scripts while removing distant native bodies.
+        // Suspended bodies are skipped before physics configuration checks.
+        body->SetCollisionSuspended(!active);
+        if (collider->collisionEnabled != active)
+        {
+            collider->collisionEnabled = active;
+            collider->MarkConfigurationDirty();
+        }
+        if (active) ++m_activeColliderCells;
     }
 }
 
@@ -1310,6 +1381,8 @@ bool TerrainManager::ApplyBrush(double x, double z, float radius, float strength
 
 void TerrainManager::SyncLoadedCells(int centerX, int centerY)
 {
+    if (manageAuthoredCellColliders)
+    { RefreshAuthoredCollisionCells(); RefreshColliderActivation(centerX, centerY); return; }
     const int radius = m_editorStreaming ? std::clamp(editorRadius, 0, 32) :
         std::clamp(m_farEnabled && !m_farHeights.empty() ? loadedRadius :
             std::max(loadedRadius, farRadius), 0, 32);
@@ -1570,6 +1643,9 @@ void TerrainManager::RefreshRenderBatches(int uploadBudget, int centerX,
 
 void TerrainManager::UpdateStreaming(int centerX, int centerY)
 {
+    m_collisionViewerLocal.reset();
+    if (manageAuthoredCellColliders)
+    { RefreshAuthoredCollisionCells(); RefreshColliderActivation(centerX, centerY); return; }
     if (m_editorStreaming) InvalidatePrepared();
     m_editorStreaming = false;
     m_prefetchCenter.reset();
@@ -1580,12 +1656,15 @@ void TerrainManager::UpdateStreamingAtPosition(
     const glm::dvec3& worldPosition)
 {
     if (!Owner) return;
+    if (manageAuthoredCellColliders)
+    { UpdateColliderStreamingAtPosition(worldPosition); return; }
     const glm::dvec3 local = glm::dvec3(
         glm::inverse(Owner->transform.GetWorldMatrixD()) *
         glm::dvec4(worldPosition, 1.0));
     const double spanX = static_cast<double>(cellsX) * cellWidth;
     const double spanY = static_cast<double>(cellsY) * cellDepth;
     if (spanX <= 0.0 || spanY <= 0.0) return;
+    m_collisionViewerLocal = local;
     const double cellX = local.x / spanX;
     const double cellY = local.z / spanY;
     const int centerX = static_cast<int>(std::floor(cellX));
@@ -1606,7 +1685,8 @@ void TerrainManager::UpdateStreamingAtPosition(
 void TerrainManager::UpdateEditorStreaming(const glm::dvec3& worldPosition,
     const Camera* camera, int viewportHeight, float aspect)
 {
-    if (!Owner || !Owner->GetScene() || Owner->GetScene()->HasStarted()) return;
+    if (!Owner || !Owner->GetScene() || Owner->GetScene()->HasStarted() ||
+        manageAuthoredCellColliders) return;
     const glm::dvec3 local = glm::dvec3(
         glm::inverse(Owner->transform.GetWorldMatrixD()) *
         glm::dvec4(worldPosition, 1.0));
@@ -1948,11 +2028,20 @@ void TerrainManager::Update()
     if (!Owner || viewerObjectName.empty()) return;
     auto* viewer = Owner->FindObjectInSceneByName(viewerObjectName);
     if (!viewer) return;
-    UpdateStreamingAtPosition(viewer->transform.GetWorldPositionD());
+    if (manageAuthoredCellColliders)
+        UpdateColliderStreamingAtPosition(viewer->transform.GetWorldPositionD());
+    else UpdateStreamingAtPosition(viewer->transform.GetWorldPositionD());
 }
 
 void TerrainManager::Start()
 {
+    if (manageAuthoredCellColliders)
+    {
+        m_authoredCollisionRevision = 0;
+        RefreshAuthoredCollisionCells();
+        Update();
+        return;
+    }
     m_runtimeBakeActive = false;
     m_bakeIndex.clear();
     if (runtimeBakeDirectory.empty())
@@ -2015,6 +2104,8 @@ TerrainManager::JsonValue TerrainManager::Serialize() const
         .Set("generateColliders", JsonValue(generateColliders))
         .Set("streamCollidersByDistance",
             JsonValue(streamCollidersByDistance))
+        .Set("manageAuthoredCellColliders", JsonValue(manageAuthoredCellColliders))
+        .Set("colliderActivationDistance", JsonValue(colliderActivationDistance))
         .Set("cpuBudgetMiB", JsonValue(cpuBudgetMiB))
         .Set("gpuBudgetMiB", JsonValue(gpuBudgetMiB))
         .Set("cacheBudgetMiB", JsonValue(cacheBudgetMiB))
@@ -2170,6 +2261,13 @@ void TerrainManager::Deserialize(const JsonValue& value)
         value["generateColliders"].AsBool();
     streamCollidersByDistance = !value.Has("streamCollidersByDistance") ||
         value["streamCollidersByDistance"].AsBool();
+    manageAuthoredCellColliders = value.Has("manageAuthoredCellColliders") &&
+        value["manageAuthoredCellColliders"].AsBool();
+    colliderActivationDistance = value.Has("colliderActivationDistance")
+        ? std::clamp(value["colliderActivationDistance"].AsFloat(), 0.f, 100.f) : 1.f;
+    m_authoredCollisionRevision = 0;
+    m_authoredCollisionCells.clear();
+    m_collisionViewerLocal.reset();
     cpuBudgetMiB = value.Has("cpuBudgetMiB")
         ? std::clamp(value["cpuBudgetMiB"].AsInt(), 1, 16384) : 512;
     gpuBudgetMiB = value.Has("gpuBudgetMiB")
@@ -2252,6 +2350,7 @@ void TerrainManager::Deserialize(const JsonValue& value)
 void TerrainManager::OnAfterDeserialize(IGraphicsProvider* provider)
 {
     m_provider = provider;
+    if (manageAuthoredCellColliders) return;
     if (asyncStreaming)
     {
         // The far-height grid may not be configured until after this component
@@ -2316,6 +2415,9 @@ bool TerrainManager::DrawProperties(::Engine::Editor::IEditorUi& ui)
         &generateColliders);
     changed |= ui.Checkbox("Enable only near terrain colliders",
         &streamCollidersByDistance);
+    changed |= ui.Checkbox("Manage authored cell colliders", &manageAuthoredCellColliders);
+    changed |= ui.DragFloat("Collider edge distance (m)", &colliderActivationDistance, .05f, 0.f, 100.f);
+    ui.ValueLabel("Active terrain collider cells", std::to_string(m_activeColliderCells).c_str());
     changed |= ui.SliderInt("CPU terrain budget MiB", &cpuBudgetMiB, 1, 16384);
     changed |= ui.SliderInt("GPU terrain budget MiB", &gpuBudgetMiB, 1, 16384);
     changed |= ui.SliderInt("Mesh cache budget MiB", &cacheBudgetMiB, 1, 16384);

@@ -1,6 +1,8 @@
 #include "pch.h"
 #if defined(ENGINE_VULKAN_ENABLED)
 #include "VulkanPostProcess.h"
+#include "VulkanRenderCore.h"
+#include "VulkanRenderPassScope.h"
 #include "Core/Graphics/PostProcess.h"
 #include <filesystem>
 #include <fstream>
@@ -31,6 +33,7 @@ VulkanPostProcess::~VulkanPostProcess()
 {
     if (!m_device) return;
     DestroyImages();
+    if (m_sceneLoadPass) vkDestroyRenderPass(m_device,m_sceneLoadPass,nullptr);
     if (m_pipeline) vkDestroyPipeline(m_device, m_pipeline, nullptr);
     if (m_pipelineLayout) vkDestroyPipelineLayout(m_device, m_pipelineLayout, nullptr);
     if (m_descriptorPool) vkDestroyDescriptorPool(m_device, m_descriptorPool, nullptr);
@@ -44,6 +47,8 @@ void VulkanPostProcess::Init(VkPhysicalDevice physicalDevice, VkDevice device,
 {
     m_physicalDevice = physicalDevice; m_device = device;
     m_sceneRenderPass = sceneRenderPass; m_outputRenderPass = outputRenderPass;
+    m_sceneLoadPass = VulkanRenderCore::CreateRenderPassForDevice(device,
+        VK_FORMAT_R16G16B16A16_SFLOAT,true,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,true);
     VkSamplerCreateInfo sampler{ VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
     sampler.magFilter = sampler.minFilter = VK_FILTER_LINEAR;
     sampler.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
@@ -134,10 +139,12 @@ void VulkanPostProcess::BeginScene(VkCommandBuffer command, const float clearCol
     VkRenderPassBeginInfo begin{ VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO }; begin.renderPass = m_sceneRenderPass; begin.framebuffer = m_sceneFramebuffer;
     begin.renderArea.extent = { m_width, m_height }; begin.clearValueCount = 2; begin.pClearValues = clears;
     vkCmdBeginRenderPass(command, &begin, VK_SUBPASS_CONTENTS_INLINE);
+    RegisterVulkanScenePass(command,m_sceneLoadPass,m_sceneFramebuffer,m_width,m_height);
     VkViewport viewport{ 0.f, static_cast<float>(m_height), static_cast<float>(m_width), -static_cast<float>(m_height), 0.f, 1.f };
     VkRect2D scissor{ {0,0}, {m_width,m_height} }; vkCmdSetViewport(command, 0, 1, &viewport); vkCmdSetScissor(command, 0, 1, &scissor);
 }
-void VulkanPostProcess::EndScene(VkCommandBuffer command) { vkCmdEndRenderPass(command); }
+void VulkanPostProcess::EndScene(VkCommandBuffer command)
+{ ResumeVulkanScenePass(command); vkCmdEndRenderPass(command); VulkanScenePassScopes().erase(command); }
 
 void VulkanPostProcess::BeginComposition(VkCommandBuffer command, VkFramebuffer output,
     uint32_t width, uint32_t height, const float clearColor[4])

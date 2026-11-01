@@ -97,39 +97,60 @@ void Scene::Start()
     m_hasStarted = true;
 }
 
+void Scene::RefreshUpdateRegistry()
+{
+    if (m_updateRegistryRevision == GetStructureRevision()) return;
+    m_updateObjects.clear(); m_poseObjects.clear();
+    for (const auto& object : m_objects)
+    {
+        bool updates = typeid(*object) != typeid(Object), pose = false;
+        for (auto* component : object->Components) if (component)
+        {
+            updates |= component->RequiresUpdate();
+            pose |= dynamic_cast<Engine::Components::RigController*>(component) ||
+                dynamic_cast<Engine::Components::MaterialPropertyMorph*>(component) ||
+                dynamic_cast<Engine::Components::RigConstraints*>(component) ||
+                dynamic_cast<Engine::Components::RigMorphControls*>(component) ||
+                dynamic_cast<Engine::Components::RigPhysicsBinding*>(component) ||
+                dynamic_cast<Engine::Components::TwoBoneIK*>(component) ||
+                dynamic_cast<Engine::Components::ChainIK*>(component) ||
+                dynamic_cast<Engine::Components::TransformConstraint*>(component);
+        }
+        if (updates) m_updateObjects.push_back(object.get());
+        if (pose) m_poseObjects.push_back(object.get());
+    }
+    m_updateRegistryRevision = GetStructureRevision();
+}
+
 void Scene::Update(float deltaTime)
 {
+    ResetGrassPerformance();
     using Clock = std::chrono::steady_clock;
     const auto updateBegin = m_updateProfilingEnabled ? Clock::now() : Clock::time_point{};
     m_deltaTime = m_clock.Advance(deltaTime);
     EnforceParticleBudget();
     m_isUpdating = true;
-    for (const auto& object : m_objects)
-        object->Update();
+    RefreshUpdateRegistry();
+    const auto updateObjects = m_updateObjects; // callbacks may change the registry
+    for (auto* object : updateObjects) object->Update();
+    UpdateSpatialScripts();
     const auto afterObjects = m_updateProfilingEnabled ? Clock::now() : Clock::time_point{};
     ApplyPoseConstraints();
+    const auto afterConstraints = m_updateProfilingEnabled ? Clock::now() : Clock::time_point{};
     m_audio->Update(m_deltaTime);
     const auto afterPose = m_updateProfilingEnabled ? Clock::now() : Clock::time_point{};
     const double physicsDelta = m_clock.IsFixedStep()
         ? m_clock.GetFixedStep() : static_cast<double>(m_deltaTime);
     m_physics->Step(physicsDelta);
     const auto afterPhysics = m_updateProfilingEnabled ? Clock::now() : Clock::time_point{};
-    for (const auto& object : m_objects)
-        if (object && object->IsEnabledInHierarchy())
-            if (auto* binding = object->GetComponent<Engine::Components::RigPhysicsBinding>())
-                binding->PostPhysicsUpdate();
-    for (const auto& object : m_objects)
-        if (object && object->IsEnabledInHierarchy())
-            if (auto* constraints = object->GetComponent<Engine::Components::RigConstraints>())
-            {
-                constraints->RefreshPoseOutputs();
-                constraints->PostPhysicsUpdate();
-            }
-    for (const auto& object : m_objects)
-        if (object && object->IsEnabledInHierarchy() &&
-            !object->GetComponent<Engine::Components::RigConstraints>())
-            if (auto* morphs = object->GetComponent<Engine::Components::RigMorphControls>())
-                morphs->RefreshPoseOutputs();
+    for (auto* binding : GetComponents<Engine::Components::RigPhysicsBinding>())
+        if (binding->Owner->IsEnabledInHierarchy()) binding->PostPhysicsUpdate();
+    for (auto* constraints : GetComponents<Engine::Components::RigConstraints>())
+        if (constraints->Owner->IsEnabledInHierarchy())
+        { constraints->RefreshPoseOutputs(); constraints->PostPhysicsUpdate(); }
+    for (auto* morphs : GetComponents<Engine::Components::RigMorphControls>())
+        if (morphs->Owner->IsEnabledInHierarchy() && !morphs->Owner->GetComponent<Engine::Components::RigConstraints>())
+            morphs->RefreshPoseOutputs();
     // Bullet has now published current-frame poses and overlap pairs. Portal
     // traversal deliberately runs here rather than in Component::Update so a
     // crossing is evaluated against the motion that just occurred.
@@ -139,18 +160,13 @@ void Scene::Update(float deltaTime)
         ObjectPath path;
     };
     std::vector<OrderedPortal> portals;
-    for (const auto& object : m_objects)
-    {
-        if (!object || !object->IsEnabledInHierarchy())
-            continue;
-        if (auto* manipulator = object->GetComponent<
-            Engine::Components::SpatialManipulator>())
+    for (auto* manipulator : GetComponents<Engine::Components::SpatialManipulator>())
+        if (manipulator->Owner->IsEnabledInHierarchy())
         {
             ObjectPath path;
-            TryGetObjectPath(object.get(), path);
-            portals.push_back({ manipulator, std::move(path) });
+            TryGetObjectPath(manipulator->Owner, path);
+            portals.push_back({manipulator, std::move(path)});
         }
-    }
     std::sort(portals.begin(), portals.end(),
         [](const OrderedPortal& first, const OrderedPortal& second)
         {
@@ -166,19 +182,13 @@ void Scene::Update(float deltaTime)
     for (const OrderedPortal& portal : portals)
         portal.manipulator->PostPhysicsUpdate(&claimedBodies);
     // Contacts and final bone/portal poses are available only after physics.
-    for (const auto& object : m_objects)
-        if (object && object->IsEnabledInHierarchy())
-            for (Engine::Core::Component* component : object->Components)
-                if (auto* tissue = dynamic_cast<Engine::Components::SoftTissueSurface*>(component))
-                {
-                    for (const auto* body : claimedBodies)
-                        if (body && tissue->IsBoundUnder(body->Owner))
-                        {
-                            tissue->Reset();
-                            break;
-                        }
-                    tissue->PostPhysicsUpdate(static_cast<float>(physicsDelta));
-                }
+    for (auto* tissue : GetComponents<Engine::Components::SoftTissueSurface>())
+        if (tissue->Owner->IsEnabledInHierarchy())
+        {
+            for (const auto* body : claimedBodies)
+                if (body && tissue->IsBoundUnder(body->Owner)) { tissue->Reset(); break; }
+            tissue->PostPhysicsUpdate(static_cast<float>(physicsDelta));
+        }
     m_isUpdating = false;
     FlushPendingObjectAdditions();
     FlushPendingObjectRemovals();
@@ -189,7 +199,7 @@ void Scene::Update(float deltaTime)
         { return std::chrono::duration<double, std::milli>(last - first).count(); };
         m_lastUpdateTimings = { ms(updateBegin, afterObjects),
             ms(afterObjects, afterPose), ms(afterPose, afterPhysics),
-            ms(afterPhysics, Clock::now()) };
+            ms(afterPhysics, Clock::now()), ms(afterObjects,afterConstraints), ms(afterConstraints,afterPose) };
     }
 }
 
@@ -201,60 +211,46 @@ void Scene::SetParticleBudget(size_t capacity)
 
 size_t Scene::GetParticleLiveCount() const
 {
-    size_t count = 0;
-    for (const auto& object : m_objects)
-        if (object)
-            if (const auto* emitter = object->GetComponent<
-                Engine::Components::ParticleEmitter>())
-                count += emitter->GetParticles().size();
+    size_t count=0;
+    for(auto* emitter:GetComponents<Engine::Components::ParticleEmitter>()) count+=emitter->GetParticles().size();
     return count;
 }
-
-size_t Scene::GetParticleCapacityFor(
-    const Engine::Components::ParticleEmitter* target) const
+size_t Scene::GetParticleCapacityFor(const Engine::Components::ParticleEmitter* target) const
 {
-    size_t remaining = m_particleBudget;
-    for (const auto& object : m_objects)
+    size_t remaining=m_particleBudget;
+    for(auto* emitter:GetComponents<Engine::Components::ParticleEmitter>())
     {
-        if (!object) continue;
-        const auto* emitter = object->GetComponent<
-            Engine::Components::ParticleEmitter>();
-        if (!emitter || emitter == target) continue;
-        const size_t live = std::max(emitter->GetParticles().size(),
-            static_cast<size_t>(emitter->GetGpuReservedCapacity()));
-        remaining = live >= remaining ? 0 : remaining - live;
+        if(emitter==target) continue;
+        const auto reserved=std::max(emitter->GetParticles().size(),size_t(emitter->GetGpuReservedCapacity()));
+        remaining=reserved>=remaining ? 0:remaining-reserved;
     }
     return remaining;
 }
-
 void Scene::EnforceParticleBudget()
 {
-    size_t remaining = m_particleBudget;
-    for (const auto& object : m_objects)
+    size_t remaining=m_particleBudget;
+    for(auto* emitter:GetComponents<Engine::Components::ParticleEmitter>())
     {
-        if (!object) continue;
-        auto* emitter = object->GetComponent<
-            Engine::Components::ParticleEmitter>();
-        if (!emitter) continue;
         emitter->TrimToCapacity(remaining);
-        const size_t reserved = std::max(emitter->GetParticles().size(),
-            static_cast<size_t>(emitter->GetGpuReservedCapacity()));
-        remaining = reserved >= remaining ? 0 : remaining - reserved;
+        const auto reserved=std::max(emitter->GetParticles().size(),size_t(emitter->GetGpuReservedCapacity()));
+        remaining=reserved>=remaining ? 0:remaining-reserved;
     }
 }
 
 void Scene::ApplyPoseConstraints()
 {
-    for (const auto& object : m_objects)
+    RefreshUpdateRegistry();
+    const auto poseObjects = m_poseObjects;
+    for (auto* object : poseObjects)
         if (object && object->IsEnabledInHierarchy())
             if (auto* legacy = object->GetComponent<Engine::Components::RigController>())
                 legacy->EnsureComponents();
-    for (const auto& object : m_objects)
+    for (auto* object : poseObjects)
         if (object && object->IsEnabledInHierarchy())
             for (Engine::Core::Component* component : object->Components)
                 if (auto* morph = dynamic_cast<Engine::Components::MaterialPropertyMorph*>(component))
                     morph->Apply();
-    for (const auto& object : m_objects)
+    for (auto* object : poseObjects)
         if (object && object->IsEnabledInHierarchy())
         {
             auto* constraints = object->GetComponent<Engine::Components::RigConstraints>();
@@ -266,7 +262,7 @@ void Scene::ApplyPoseConstraints()
                 binding->Apply();
             if (morphs) morphs->ApplyImpulseMorphs();
         }
-    for (const auto& object : m_objects)
+    for (auto* object : poseObjects)
         if (object && object->IsEnabledInHierarchy())
             for (Engine::Core::Component* component : object->Components)
                 if (auto* ik = dynamic_cast<Engine::Components::TwoBoneIK*>(component))
@@ -274,14 +270,14 @@ void Scene::ApplyPoseConstraints()
     std::unordered_map<Engine::Core::Object*,
         std::vector<Engine::Components::ChainIK*>> chainGroups;
     std::vector<Engine::Core::Object*> chainRoots;
-    for (const auto& object : m_objects)
+    for (auto* object : poseObjects)
         if (object && object->IsEnabledInHierarchy())
             for (auto* component : object->Components)
                 if (auto* ik = dynamic_cast<Engine::Components::ChainIK*>(component))
                 {
-                    if (chainGroups.find(object.get()) == chainGroups.end())
-                        chainRoots.push_back(object.get());
-                    chainGroups[object.get()].push_back(ik);
+                    if (chainGroups.find(object) == chainGroups.end())
+                        chainRoots.push_back(object);
+                    chainGroups[object].push_back(ik);
                 }
     for (auto* root : chainRoots)
         Engine::Components::ChainIK::ApplyGroup(chainGroups[root]);
@@ -290,14 +286,14 @@ void Scene::ApplyPoseConstraints()
     std::vector<Engine::Components::TransformConstraint*> constraints;
     std::unordered_map<Engine::Core::Object*,
         std::vector<Engine::Components::TransformConstraint*>> byOwner;
-    for (const auto& object : m_objects)
+    for (auto* object : poseObjects)
         if (object && object->IsEnabledInHierarchy())
             for (auto* component : object->Components)
                 if (auto* constraint = dynamic_cast<
                         Engine::Components::TransformConstraint*>(component))
                 {
                     constraints.push_back(constraint);
-                    byOwner[object.get()].push_back(constraint);
+                    byOwner[object].push_back(constraint);
                 }
     std::stable_sort(constraints.begin(), constraints.end(),
         [](const auto* left, const auto* right)

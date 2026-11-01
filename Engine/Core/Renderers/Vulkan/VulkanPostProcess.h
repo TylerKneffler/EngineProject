@@ -26,6 +26,7 @@ private:
     VkPhysicalDevice m_physicalDevice = VK_NULL_HANDLE;
     VkDevice m_device = VK_NULL_HANDLE;
     VkRenderPass m_sceneRenderPass = VK_NULL_HANDLE;
+    VkRenderPass m_sceneLoadPass = VK_NULL_HANDLE;
     VkRenderPass m_outputRenderPass = VK_NULL_HANDLE;
     VulkanImageResource m_sceneColor;
     VulkanImageResource m_depth;

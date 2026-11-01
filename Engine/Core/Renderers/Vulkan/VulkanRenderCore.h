@@ -9,6 +9,8 @@ namespace Engine::Renderers
 class VulkanRenderCore
 {
 public:
+    static VkRenderPass CreateRenderPassForDevice(VkDevice device, VkFormat colorFormat,
+        bool depth, VkImageLayout finalLayout, bool load = false);
     ~VulkanRenderCore();
     bool Init(HWND hwnd, uint32_t width, uint32_t height, bool mainDepth);
     void Resize(uint32_t width, uint32_t height);

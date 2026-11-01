@@ -4,6 +4,7 @@
 #include <glm/glm.hpp>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace Engine::Components
 {
@@ -15,13 +16,33 @@ enum class MaterialAlphaMode : int
     Blend
 };
 
+// A mesh draw pass using an HLSL asset with VSMain / PSMain entry points.
+// Auto inherits the material blend for the first pass and alpha blends overlays.
+struct MaterialShader
+{
+    std::string path;
+    bool enabled = true;
+    std::string blendMode = "Auto"; // Auto, Opaque, Alpha, Additive
+};
+
 class Material : public Engine::Core::Component
 {
 public:
     using JsonValue = Engine::Serialization::JsonValue;
     using IGraphicsProvider = Engine::Graphics::IGraphicsProvider;
     Material();
+    bool RequiresUpdate() const override { return false; }
     ~Material() = default;
+
+    // Empty list uses the built-in surface. An empty path explicitly selects
+    // that surface, allowing custom overlays after it. Order is significant.
+    PROPERTY(Inspector, EditAnywhere, Category = "Material | Shaders")
+    std::vector<MaterialShader> shaders;
+    std::string ResolveShaderPath(const std::string& path) const;
+    bool DrawShaderProperties(::Engine::Editor::IEditorUi& ui,
+        const void* context = nullptr);
+    // Runtime diagnostic displayed by the inspector; never serialized.
+    std::string shaderError;
 
     // Phong shading properties — must match the CBData layout expected by the HLSL.
     PROPERTY(Inspector, EditAnywhere, Category = "Material | Color")

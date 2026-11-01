@@ -76,7 +76,8 @@ namespace Engine::Rendering
         std::vector<Scratch::LightCandidate>& candidates =
             m_scratch->candidates;
         candidates.clear();
-        candidates.reserve(scene.GetObjects().size() * 2u);
+        const auto& lights=scene.GetComponents<Engine::Components::Light>();
+        candidates.reserve(lights.size() * 2u);
         const auto importanceScore = [&](const LightData& data,
             const Engine::Components::Light& light)
         {
@@ -92,13 +93,12 @@ namespace Engine::Rendering
                 1.f - distance / light.range, 0.f, 1.f);
             return radiance * normalized * normalized;
         };
-        for (const auto& candidate : scene.GetObjects())
+        for (const auto* light : lights)
         {
-            if (!candidate->IsEnabledInHierarchy())
+            const auto* candidate=light->Owner;
+            if (!candidate || !candidate->IsEnabledInHierarchy())
                 continue;
-            const Engine::Components::Light* light =
-                candidate->GetComponent<Engine::Components::Light>();
-            if (!light || light->baked || light->intensity <= 0.f)
+            if (light->baked || light->intensity <= 0.f)
                 continue;
             if (light->GetLightType() != Engine::Components::Light::Type::Directional && light->range <= 0.f)
                 continue;
@@ -110,7 +110,7 @@ namespace Engine::Rendering
             {
                 world = scene.MapSpatialMatrix(world,
                     { Engine::Scene::Scene::SpatialQueryDomain::Rendering,
-                        candidate.get() });
+                        candidate });
             }
             LightData data{};
             const auto type = light->GetLightType();
@@ -146,7 +146,7 @@ namespace Engine::Rendering
             data.cookieRight = glm::vec4(glm::normalize(glm::vec3(world[0])), 0.f);
             data.cookieUp = glm::vec4(glm::normalize(glm::vec3(world[1])), 0.f);
             data.photometry.z = std::max(light->cookieScale, 0.001f);
-            const std::string stableKey = stableObjectPath(candidate.get());
+            const std::string stableKey = stableObjectPath(candidate);
             candidates.push_back({ data, light, stableKey,
                 importanceScore(data, *light) });
 

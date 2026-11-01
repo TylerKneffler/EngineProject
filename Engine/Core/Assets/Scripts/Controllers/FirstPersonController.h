@@ -10,6 +10,7 @@ class FirstPersonController : public Engine::Core::Script
 {
 public:
     FirstPersonController();
+    ~FirstPersonController() override;
 
     PROPERTY(Inspector, EditAnywhere, Category = "Movement")
     float moveSpeed = 4.f;
@@ -28,12 +29,14 @@ public:
 
     void Start() override;
     void Update() override;
+    void Disabled() override;
 
 private:
     void UpdateLook();
     void UpdateMovement(float deltaTime);
     void SetCursorLock(bool locked);
-    static bool IsApplicationFocused();
+    bool IsApplicationFocused() const;
+    bool GetLookAnchor(POINT& anchor) const;
     static bool IsKeyDown(int virtualKey);
 
     bool m_cursorLocked = false;

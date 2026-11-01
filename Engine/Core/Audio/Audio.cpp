@@ -4,7 +4,6 @@
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
 
-#include <vector>
 
 namespace Engine::Audio
 {
@@ -16,28 +15,19 @@ void Audio::Update(float)
 
     Engine::Components::AudioSource* fallback = nullptr;
     Engine::Components::AudioSource* assigned = nullptr;
-    std::vector<Engine::Core::Object*> pending;
-    for (const auto& object : m_scene->GetObjects())
-        pending.push_back(object.get());
-    while (!pending.empty())
+    // Scene's typed registry is rebuilt only when components change. GetObjects
+    // already contains descendants; recursively walking it revisits sources.
+    const auto& sources = m_scene->GetComponents<Engine::Components::AudioSource>();
+    for (auto it = sources.rbegin(); it != sources.rend(); ++it)
     {
-        Engine::Core::Object* object = pending.back();
-        pending.pop_back();
-        pending.insert(pending.end(), object->Children.begin(),
-            object->Children.end());
-        if (!object->IsEnabledInHierarchy()) continue;
-        for (Engine::Core::Component* component : object->Components)
+        auto* source = *it;
+        if (!source->Owner || !source->Owner->IsEnabledInHierarchy()) continue;
+        if (!fallback) fallback = source;
+        if (source->listenerCameraReference.IsAssigned())
         {
-            auto* source = dynamic_cast<Engine::Components::AudioSource*>(component);
-            if (!source) continue;
-            if (!fallback) fallback = source;
-            if (source->listenerCameraReference.IsAssigned())
-            {
-                assigned = source;
-                break;
-            }
+            assigned = source;
+            break;
         }
-        if (assigned) break;
     }
 
     // miniaudio exposes one engine listener. An explicit source reference wins;
@@ -49,36 +39,14 @@ void Audio::Update(float)
 void Audio::Reset()
 {
     if (!m_scene) return;
-    std::vector<Engine::Core::Object*> pending;
-    for (const auto& object : m_scene->GetObjects())
-        pending.push_back(object.get());
-    while (!pending.empty())
-    {
-        Engine::Core::Object* object = pending.back();
-        pending.pop_back();
-        pending.insert(pending.end(), object->Children.begin(),
-            object->Children.end());
-        for (Engine::Core::Component* component : object->Components)
-            if (auto* source = dynamic_cast<Engine::Components::AudioSource*>(component))
-                source->Stop();
-    }
+    for (auto* source : m_scene->GetComponents<Engine::Components::AudioSource>())
+        source->Stop();
 }
 
 void Audio::SynchronizeToTime(double sceneTime)
 {
     if (!m_scene) return;
-    std::vector<Engine::Core::Object*> pending;
-    for (const auto& object : m_scene->GetObjects())
-        pending.push_back(object.get());
-    while (!pending.empty())
-    {
-        Engine::Core::Object* object = pending.back();
-        pending.pop_back();
-        pending.insert(pending.end(), object->Children.begin(),
-            object->Children.end());
-        for (Engine::Core::Component* component : object->Components)
-            if (auto* source = dynamic_cast<Engine::Components::AudioSource*>(component))
-                source->SynchronizeToTime(sceneTime);
-    }
+    for (auto* source : m_scene->GetComponents<Engine::Components::AudioSource>())
+        source->SynchronizeToTime(sceneTime);
 }
 }

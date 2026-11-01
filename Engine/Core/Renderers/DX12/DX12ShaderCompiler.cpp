@@ -1,4 +1,5 @@
 #include "DX12ShaderCompiler.h"
+#include "Core/Renderers/HlslFileInclude.h"
 #include <d3dcompiler.h>
 #include <sstream>
 
@@ -28,13 +29,20 @@ std::unique_ptr<Engine::Graphics::IShader> D3D12ShaderCompiler::CompileFromFile(
 
     // Convert string path to LPCWSTR
     int wlen = MultiByteToWideChar(CP_UTF8, 0, filePath.c_str(), -1, nullptr, 0);
-    std::wstring wpath(wlen - 1, 0);
-    MultiByteToWideChar(CP_UTF8, 0, filePath.c_str(), -1, &wpath[0], wlen);
+    if (wlen <= 1)
+    {
+        m_lastError = "Invalid shader path";
+        return nullptr;
+    }
+    std::wstring wpath(static_cast<size_t>(wlen), L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, filePath.c_str(), -1, wpath.data(), wlen);
+    wpath.pop_back();
 
+    HlslFileInclude includes(filePath);
     HRESULT hr = D3DCompileFromFile(
         wpath.c_str(),
         nullptr,
-        D3D_COMPILE_STANDARD_FILE_INCLUDE,
+        &includes,
         entryPoint,
         target,
         D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION,
