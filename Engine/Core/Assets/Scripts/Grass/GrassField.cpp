@@ -83,6 +83,8 @@ GrassField::GrassField()
     RegisterField("tileWorkBudgetMs", tileWorkBudgetMs, "Tiles");
     RegisterField("fadeDuration", fadeDuration, "LOD");
     RegisterField("distanceFadeWidth", distanceFadeWidth, "LOD");
+    RegisterField("gpuLodSelection", gpuLodSelection, "LOD");
+    RegisterField("allowProceduralGeneration", allowProceduralGeneration, "Tiles");
 }
 
 bool GrassField::LoadSources()
@@ -273,25 +275,9 @@ void GrassField::RefreshPlacementIndex()
         data == m_placementData && count == m_placementCount &&
         tileSize == m_indexedTileSize) return;
     const auto started = Clock::now();
-    m_placementTiles.clear();
-    m_placementSignature = HashOffset;
-    if (layer)
-        for (const auto& placement : layer->placements)
-        {
-            const float span = std::max(1.f, tileSize);
-            const Tile tile{static_cast<int>(std::floor(placement.position.x / span)),
-                static_cast<int>(std::floor(placement.position.z / span))};
-            m_placementTiles[tile].push_back(placement);
-            HashBytes(m_placementSignature, placement.asset.data(), placement.asset.size());
-            for (int axis = 0; axis < 3; ++axis)
-            {
-                HashFloat(m_placementSignature, placement.position[axis]);
-                HashFloat(m_placementSignature, placement.normal[axis]);
-            }
-            HashFloat(m_placementSignature, placement.yawDegrees);
-            HashFloat(m_placementSignature, placement.scale);
-            ++m_performance.placementsScanned;
-        }
+    m_placementTiles=layer ? &layer->GetPreparedTiles(std::max(1.f,tileSize)):nullptr;
+    m_placementSignature=layer ? layer->GetPreparedSignature(std::max(1.f,tileSize)):HashOffset;
+    if(layer && !layer->HasLoadedPreparedData()) m_performance.placementsScanned+=layer->placements.size();
     m_indexedLayer = layer;
     m_placementRevision = revision;
     m_placementData = data;
@@ -311,6 +297,7 @@ uint64_t GrassField::ComputeGenerationSignature() const
     HashFloat(hash, shortPatchesPerSquareMeter);
     HashFloat(hash, tallPatchesPerSquareMeter);
     HashBytes(hash, &seed, sizeof(seed));
+    HashBytes(hash,&allowProceduralGeneration,sizeof(allowProceduralGeneration));
     if (m_cachedTerrain)
     {
         const auto revision = m_cachedTerrain->GetConfigurationRevision();
@@ -330,10 +317,28 @@ void GrassField::BeginBuild(Tile tile, int lod, uint64_t signature)
     job.tile = tile;
     job.lod = lod;
     job.signature = signature;
-    if (m_placementCount)
+    if (m_placementCount && m_placementTiles)
     {
-        const auto found = m_placementTiles.find(tile);
-        if (found != m_placementTiles.end()) job.placements = found->second;
+        const auto found=m_placementTiles->find(tile);
+        job.instances=std::make_shared<Engine::Components::Mesh::InstanceData>();
+        if(found!=m_placementTiles->end())
+        {
+            const auto& prepared=found->second;
+            for(bool tall:{false,true}) for(const auto& [asset,records]:prepared.groups) if((asset==tallMesh)==tall)
+                for(const auto& record:records)
+                {
+                    job.instances->transforms.push_back(record.transform);
+                    job.instances->placementIds.push_back(m_cachedLayer->placements[record.index].id);
+                    if(!tall) ++job.shortCount;
+                }
+            const float radius=glm::length(glm::max(glm::abs(m_sourceMinimum),glm::abs(m_sourceMaximum)))*prepared.maximumScale;
+            job.minimum=prepared.minimum-glm::vec3(radius); job.maximum=prepared.maximum+glm::vec3(radius);
+        }
+        job.totalCount=uint32_t(job.instances->transforms.size()); job.placement=job.totalCount; job.prepared=true;
+        uint64_t identity=HashOffset;
+        for(auto* owner=Owner;owner;owner=owner->Parent) HashBytes(identity,owner->name.data(),owner->name.size());
+        HashBytes(identity,&tile.first,sizeof(tile.first)); HashBytes(identity,&tile.second,sizeof(tile.second)); job.instances->stableId=identity;
+        return;
     }
     else
     {
@@ -363,6 +368,8 @@ void GrassField::BeginBuild(Tile tile, int lod, uint64_t signature)
         append(shortMesh, shortPatchesPerSquareMeter, 64);
         append(tallMesh, tallPatchesPerSquareMeter, 32);
     }
+    job.totalCount=uint32_t(job.placements.size());
+    // Procedural opt-in data still needs preparation; saved layers use baked records.
     // Group instances by species so each source vertex range is drawn once.
     std::stable_partition(job.placements.begin(), job.placements.end(),
         [&](const Placement& p) { return p.asset != tallMesh; });
@@ -377,7 +384,7 @@ bool GrassField::AdvanceBuild(Clock::time_point deadline)
     auto& job = *m_build;
     const auto generated = Clock::now();
     const float span = std::max(1.f, tileSize);
-    while (job.placement < job.placements.size())
+    while (!job.prepared && job.placement < job.placements.size())
     {
         const auto& p = job.placements[job.placement++];
         const glm::mat3 rotation = glm::mat3_cast(
@@ -408,31 +415,12 @@ bool GrassField::AdvanceBuild(Clock::time_point deadline)
     }
     m_performance.generationMs += std::chrono::duration<double, std::milli>(
         Clock::now() - generated).count();
-    // Publication/upload is one atomic driver operation. Defer it if CPU
-    // preparation consumed the frame's budget; publish at most one instance tile
-    // per refresh. A single driver allocation can still exceed the budget.
+    // Defer publication if preparation consumed the frame's budget.
     if (Clock::now() >= deadline) return false;
     auto& tile = m_tiles.at(job.tile);
     using Mesh = Engine::Components::Mesh;
-    if (!job.instances->transforms.empty())
-    {
-        const auto upload = Clock::now();
-        if (auto* provider = Owner->GetScene()->GetGraphicsProvider())
-            for (const auto [first, count] : {std::pair<uint32_t,uint32_t>{0, job.shortCount},
-                    {job.shortCount, static_cast<uint32_t>(job.placements.size()) - job.shortCount}})
-            {
-                if (!count) continue;
-                Mesh::InstanceData::Slice slice;
-                slice.firstInstance = first; slice.instanceCount = count;
-                slice.buffer = provider->GetBufferFactory()->CreateStaticShaderResource(
-                    count * sizeof(Mesh::InstanceTransform), job.instances->transforms.data() + first,
-                    sizeof(Mesh::InstanceTransform));
-                m_performance.instanceUploadBytes += slice.buffer ? slice.buffer->GetSize() : 0;
-                job.instances->slices.push_back(std::move(slice));
-            }
-        m_performance.uploadMs += std::chrono::duration<double, std::milli>(
-            Clock::now() - upload).count();
-    }
+    // Register in the persistent GPU pool on first render. Custom shader
+    // fallbacks create native slices lazily; normal draws have no duplicate upload.
     // All LODs reuse these placement buffers. A distance change only selects
     // another shared source range; it never schedules generation or an upload.
     for (int lod = 0; lod < 3; ++lod)
@@ -442,7 +430,7 @@ bool GrassField::AdvanceBuild(Clock::time_point deadline)
         std::vector<Mesh::InstanceRange> ranges{
             {0, shortVertices, 0, job.shortCount},
             {shortVertices, static_cast<uint32_t>(m_tallVertices[lod]->size()), job.shortCount,
-                static_cast<uint32_t>(job.placements.size()) - job.shortCount}};
+                job.totalCount - job.shortCount}};
         geometry->SetInstancedGeometry(m_sourceMeshes[lod], job.instances, std::move(ranges), job.minimum, job.maximum);
         tile.mesh->StoreRuntimeLod(lod, std::move(geometry));
     }
@@ -491,6 +479,8 @@ bool GrassField::Refresh()
         scene.AddGrassPerformance(m_performance);
         return changed;
     }
+    if((!m_cachedLayer || m_cachedLayer->placements.empty()) && !allowProceduralGeneration)
+    { if(!m_tiles.empty() || m_build) { ClearTiles(); changed=true; } return changed; }
     if (!LoadSources()) return changed;
     RefreshPlacementIndex();
     const uint64_t signature = ComputeGenerationSignature();
@@ -518,7 +508,7 @@ bool GrassField::Refresh()
             const float edgeX = std::max(0.f, std::abs(dx) - span * .5f);
             const float edgeZ = std::max(0.f, std::abs(dz) - span * .5f);
             if (edgeX * edgeX + edgeZ * edgeZ > radius * radius) continue;
-            if (m_placementCount && !m_placementTiles.count({x,z})) continue;
+            if (m_placementCount && !m_placementTiles->count({x,z})) continue;
             const Tile key{x,z};
             desired.insert(key);
             auto& tile = m_tiles[key];
@@ -559,7 +549,7 @@ bool GrassField::Refresh()
             changed = previousVisibility != tile.visibility || changed;
             tile.distanceSquared = dx * dx + dz * dz;
             const float distance = std::sqrt(tile.distanceSquared);
-            const int lod = tile.mesh->ChooseRuntimeLod(distance, {lod1, lod2}, hysteresis);
+            const int lod = gpuLodSelection ? 0:tile.mesh->ChooseRuntimeLod(distance, {lod1, lod2}, hysteresis);
             tile.desiredLod = gpuLodSelection ? 0:lod;
             tile.mesh->gpuLodSelection=gpuLodSelection;
             tile.mesh->gpuLod1Distance=lod1; tile.mesh->gpuLod2Distance=lod2;

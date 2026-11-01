@@ -51,18 +51,18 @@ void TestSpatialScheduling()
     Engine::Scene::Scene scene;
     auto* viewer=scene.AddObject("Viewer");
     auto* first=scene.AddObject("Near")->AddComponent<Scheduled>(); first->viewer=viewer;
-    auto* far=scene.AddObject("Far"); far->transform.position.x=100;
-    auto* second=far->AddComponent<Scheduled>(); second->viewer=viewer;
+    auto* farObject=scene.AddObject("Far"); farObject->transform.position.x=100;
+    auto* second=farObject->AddComponent<Scheduled>(); second->viewer=viewer;
     scene.UpdateSpatialScripts();
     Require(first->ticks==1 && second->ticks==0,"scheduler updated a dormant field");
     viewer->transform.position.x=100; scene.UpdateSpatialScripts();
     Require(first->leaves==1 && second->ticks==1,"scheduler missed a viewer boundary crossing");
-    far->enabled=false; scene.UpdateSpatialScripts();
+    farObject->enabled=false; scene.UpdateSpatialScripts();
     Require(second->leaves==1,"disabled scheduled field was not retired");
-    far->enabled=true; far->transform.position.x=200; ++second->revision;
+    farObject->enabled=true; farObject->transform.position.x=200; ++second->revision;
     scene.UpdateSpatialScripts(); Require(second->ticks==1,"changed spatial bounds were not invalidated");
     viewer->transform.position.x=200; scene.UpdateSpatialScripts(); Require(second->ticks==2,"changed spatial bounds were not queried");
-    scene.RequestRemoveObject(far); scene.CommitPendingObjectChanges(); scene.UpdateSpatialScripts();
+    scene.RequestRemoveObject(farObject); scene.CommitPendingObjectChanges(); scene.UpdateSpatialScripts();
     Require(scene.GetSpatialUpdateScheduler().activeCount==0,"deleted scheduled field remained active");
 }
 
@@ -97,6 +97,11 @@ void TestLandscapePreparation()
     Require(lights.CollectLights(scene,lightData,4,false)==0,"deleted light remained cached");
     Require(scene.SampleSpatialPoint(point).point==point,"deleted volume remained cached");
     audio.Update(0); audio.Reset(); audio.SynchronizeToTime(0);
+    std::vector<std::future<unsigned>> queued;
+    for(unsigned i=0;i<3;++i) queued.push_back(Engine::Rendering::RenderJobs::Get().Submit([i] { return i+7; }));
+    unsigned returned=0;
+    for(auto& job:queued) returned+=job.get();
+    Require(returned==24,"asynchronous snapshot preparation lost work");
     std::vector<std::atomic<unsigned>> visits(2048);
     for(int repeat=0;repeat<3;++repeat)
         Engine::Rendering::RenderJobs::Get().For(visits.size(),512,[&](size_t i) { ++visits[i]; });
@@ -225,6 +230,14 @@ void TestGrass()
         "explicit editor viewer did not unload distant grass");
     std::cout << "Grass: " << builds << " placement uploads (6 shared-source LODs) in " << frames
         << " budgeted frames; 100 moving frames with zero rebuilds/uploads/scans.\n";
+    grass->useEditorCamera=false; layer->placements.clear(); layer->MarkConfigurationDirty();
+    scene.ResetGrassPerformance(); grass->Update(); scene.CommitPendingObjectChanges();
+    Require(grass->GetLastPerformance().residentLods==0 && grass->GetLastPerformance().pending==0,
+        "empty authored layer generated procedural grass");
+    grass->allowProceduralGeneration=true;
+    scene.ResetGrassPerformance(); grass->Update(); scene.CommitPendingObjectChanges();
+    Require(grass->GetLastPerformance().pending>0 || grass->GetLastPerformance().tilesBuilt>0,
+        "explicit procedural opt-in failed");
 }
 
 void TestDx11ConstantsAndGeometry()
@@ -418,9 +431,12 @@ void CheckFadeRendering()
     constexpr unsigned size = 128;
     Engine::Core::Window window(GetModuleHandleW(nullptr), L"Grass fade render check", size, size);
     Renderer renderer;
+    std::cerr << "Fade renderer initialization" << std::endl;
     Require(renderer.Init(window.GetHWND(), size, size), "fade renderer failed");
+    std::cerr << "Fade renderer initialized" << std::endl;
     Engine::Scene::Scene scene;
     scene.Init(renderer.GetGraphicsProvider());
+    std::cerr << "Fade scene initialized" << std::endl;
     scene.settings.skyboxEnabled = false;
     scene.settings.showGrid = false;
     auto* cameraOwner = scene.AddObject("Camera");
@@ -512,19 +528,32 @@ void CheckFadeRendering()
         instances->slices.push_back(std::move(slice));
     }
     mesh->SetInstancedGeometry(source, instances, {{0,3,1,1},{3,3,2,1}}, {-1.2f,-.45f,0}, {1.2f,.45f,0});
+    instances->slices.clear();
+    Require(mesh->IsReady(),"persistent instances require redundant native slice buffers");
     material->useVertexColors = true;
+    bool captureShadow=false;
     const auto capture = [&]() {
         for (int frame = 0; frame < 3; ++frame)
         {
-            renderer.BeginFrame(); renderer.Clear(0,0,0,1);
+            renderer.BeginFrame();
             scene.PrepareRenderFrame();
             auto context = renderer.CreateFrameGraphicsContext();
+            if(captureShadow)
+            {
+                context->SetViewport({0,0,float(size),float(size),0,1});
+                context->SetScissorRect({0,0,int32_t(size),int32_t(size)});
+                scene.Render(context.get(),1.f,camera,false,size,size,true);
+                context->SetViewport({0,0,float(size),float(size),0,1});
+                context->SetScissorRect({0,0,int32_t(size),int32_t(size)});
+            }
+            renderer.Clear(0,0,0,1);
             scene.Render(context.get(), 1.f, camera, false, size, size);
             requestCapture();
             renderer.EndFrame();
         }
         std::vector<uint8_t> pixels;
         Require(readCapture(pixels), "instance capture failed");
+        renderer.WaitIdle();
         return pixels;
     };
     auto gpuInstances = capture();
@@ -631,6 +660,27 @@ void CheckFadeRendering()
         Require(lodDifferences<32,"GPU grass LOD or complementary fade differs from fallback");
     }
     std::cout << "GPU grass LOD/fade intervals match fallback at five distances.\n";
+    auto* sun=scene.AddObject("Shadow sun")->AddComponent<Engine::Components::Light>();
+    sun->lightType=int(Engine::Components::Light::Type::Directional); sun->castsShadows=true;
+    material->castsShadows=secondMaterial->castsShadows=true;
+    std::vector<Mesh::Vertex> plane(6);
+    const glm::vec2 coordinates[6]={{-2,-2},{2,-2},{2,2},{-2,-2},{2,2},{-2,2}};
+    for(size_t i=0;i<6;++i)
+    {
+        plane[i].pos[0]=coordinates[i].x; plane[i].pos[1]=coordinates[i].y; plane[i].pos[2]=1;
+        plane[i].normal[2]=-1; for(int channel=0;channel<4;++channel) plane[i].color[channel]=1;
+    }
+    auto* receiver=scene.AddObject("Shadow receiver"); auto* receiverMesh=receiver->AddComponent<Mesh>();
+    receiverMesh->SetAuthoredVertices(plane); receiverMesh->CreateBuffer(factory);
+    auto* receiverMaterial=receiver->AddComponent<Engine::Components::Material>();
+    receiverMaterial->doubleSided=true; receiverMaterial->castsShadows=false;
+    captureShadow=true; scene.gpuInstanceCulling=false; const auto shadowReference=capture();
+    scene.gpuInstanceCulling=true; const auto shadowGpu=capture();
+    size_t shadowDifferences=0;
+    for(size_t i=0;i<shadowGpu.size();++i) shadowDifferences+=std::abs(int(shadowGpu[i])-int(shadowReference[i]))>2;
+    Require(shadowDifferences<32,"GPU grass shadow compaction/fades changed receiver pixels");
+    Require(scene.GetLastShadowCpuTiming().gpuGrassBatches>0,"shadow grass stayed on the CPU fallback");
+    std::cout << "GPU grass shadow receiver comparison: " << shadowDifferences << " differing channels.\n";
     renderer.WaitIdle();
     std::cout << "GPU instancing matches CPU reference pixels; distinct species ranges and placement offsets verified.\n";
 
@@ -645,6 +695,12 @@ void TestComponentRegistry()
     scene.Update(1.f/60);
     auto* counter=object->AddComponent<Counter>();
     Require(scene.GetComponents<Counter>().size()==1,"component registry did not track additions");
+    const auto revision=scene.GetComponentRevision<Counter>();
+    const auto* registryData=scene.GetComponents<Counter>().data();
+    auto* unrelated=scene.AddObject("Unrelated mesh");
+    unrelated->AddComponent<Engine::Components::Mesh>();
+    Require(scene.GetComponentRevision<Counter>()==revision && scene.GetComponents<Counter>().data()==registryData,
+        "unrelated streaming invalidated a typed registry");
     scene.Update(1.f/60);
     Require(counter->updates==1,"new component on static object did not enter update list");
     object->enabled=false; scene.Update(1.f/60);
@@ -667,6 +723,122 @@ void TestComponentRegistry()
     Require(loaded.gpuLodSelection && loaded.gpuLod1Distance==4 && loaded.gpuLod2Distance==12,
         "GPU LOD settings failed serialization");
     std::cout<<"Component registry tracks add, removal, activation, and cached update callbacks.\n";
+}
+
+void TestBakedPlacements()
+{
+    using Layer=Engine::Components::TerrainObjectLayer;
+    Layer source;
+    for(int i=0;i<20;++i)
+    {
+        Layer::Placement placement; placement.asset=i%2 ? "a":"b";
+        placement.position={float(i)-9,.5f,float(i%3)}; placement.normal={.2f,1,.1f}; placement.yawDegrees=float(i*17);
+        source.placements.push_back(placement);
+    }
+    const auto saved=source.Serialize(); Layer loaded; loaded.Deserialize(saved);
+    Require(loaded.HasLoadedPreparedData(),"saved placements did not load baked tile records");
+    const auto& first=source.GetPreparedTiles(4); const auto& second=loaded.GetPreparedTiles(4);
+    Require(first.size()==second.size(),"baked tile membership differs");
+    for(const auto& [key,tile]:first) for(const auto& [asset,records]:tile.groups)
+    {
+        const auto& copy=second.at(key).groups.at(asset);
+        Require(copy.size()==records.size(),"baked species records differ");
+        for(size_t i=0;i<records.size();++i)
+            Require(std::memcmp(&records[i].transform,&copy[i].transform,48)==0,"baked affine record changed");
+    }
+    const auto identity=loaded.placements.front().id;
+    loaded.placements.front().position.x+=1; loaded.MarkConfigurationDirty(); loaded.GetPreparedTiles(4);
+    Require(!loaded.HasLoadedPreparedData() && loaded.placements.front().id==identity,"placement edit lost identity or reused stale cache");
+    auto invalid=saved; invalid.Set("bakedInstances",Layer::JsonValue("invalid"));
+    loaded.Deserialize(invalid); Require(!loaded.HasLoadedPreparedData(),"corrupt cache was accepted");
+    Require(loaded.GetPreparedTiles(4).size()==first.size(),"corrupt cache did not regenerate safely");
+    std::cout<<"Baked tiles round-trip exact affines and IDs; edits and corrupt caches invalidate safely.\n";
+}
+
+void TestSceneLoadingIntoWarmCaches()
+{
+    using namespace Engine::Components;
+    Engine::Scene::Scene source;
+    auto* terrainOwner=source.AddObject("Loaded terrain");
+    terrainOwner->AddComponent<Mesh>();
+    auto* terrain=terrainOwner->AddComponent<Terrain>();
+    terrain->cellsX=terrain->cellsY=16;
+    terrain->cellWidth=terrain->cellDepth=1;
+    terrainOwner->AddComponent<RigidBody>();
+    auto* viewer=source.AddObject("Loaded viewer"); viewer->transform.position={2,0,2};
+    auto* fieldOwner=source.AddObject("Loaded layer");
+    fieldOwner->Parent=terrainOwner; terrainOwner->Children.push_back(fieldOwner);
+    auto* layer=fieldOwner->AddComponent<TerrainObjectLayer>();
+    TerrainObjectLayer::Placement placement;
+    placement.asset="Assets/Mesh/Grass/meadow_short.obj"; placement.position={1,0,1};
+    layer->placements.push_back(placement); layer->MarkConfigurationDirty();
+    auto* field=fieldOwner->AddComponent<GrassField>();
+    field->viewerObjectName="Loaded viewer"; field->fadeDuration=0;
+    const auto saved=source.SaveToString();
+
+    Engine::Scene::Scene loaded;
+    // Normal editor startup queries these before another scene is opened.
+    loaded.GetComponents<GrassField>(); loaded.GetComponents<SpatialUpdate>();
+    loaded.GetComponents<TerrainObjectLayer>(); loaded.GetComponents<Mesh>(); loaded.GetComponents<RigidBody>();
+    loaded.UpdateSpatialScripts(true);
+    for(bool playing:{false,true})
+    {
+        Require(Engine::Serialization::SceneSerializer::LoadFromString(loaded,saved,nullptr),"fixture scene failed to load");
+        Require(loaded.GetComponents<GrassField>().size()==1 && loaded.GetComponents<SpatialUpdate>().size()==1,
+            "scene loading omitted grass from previously initialized component caches");
+        Require(loaded.GetComponents<TerrainObjectLayer>().size()==1 && loaded.GetComponents<Mesh>().size()==1 && loaded.GetComponents<RigidBody>().size()==1,
+            "scene loading omitted ordinary components from warm typed caches");
+        field=loaded.FindObjectByName("Loaded layer")->GetComponent<GrassField>();
+        if(playing) loaded.Start();
+        for(unsigned frame=0;frame<24 && field->GetLastPerformance().residentLods==0;++frame)
+        {
+            loaded.ResetGrassPerformance();
+            if(playing) loaded.Update(1.f/60.f);
+            else { loaded.UpdateSpatialScripts(true); loaded.CommitPendingObjectChanges(); }
+        }
+        Require(field->GetLastPerformance().residentLods==3 && field->GetLastPerformance().activeTiles==1,
+            "grass did not activate after scene switching or entering Play");
+    }
+    std::cout<<"Scene switching refreshes warm component caches and schedules grass in Edit and Play.\n";
+}
+
+void TestPersistentStorage()
+{
+    using Mesh=Engine::Components::Mesh;
+    Engine::Core::Window window(GetModuleHandleW(nullptr),L"Persistent instance storage",64,64);
+    Engine::Renderers::DX11GameRenderer renderer;
+    Require(renderer.Init(window.GetHWND(),64,64),"pool renderer init failed");
+    Engine::Rendering::PersistentInstancePool pool;
+    auto source=std::make_shared<Mesh::InstanceData>(); source->transforms.resize(64);
+    for(auto& transform:source->transforms) { transform={}; transform.rows[0].x=transform.rows[1].y=transform.rows[2].z=1; }
+    for(unsigned frame=0;frame<12;++frame)
+    {
+        renderer.BeginFrame(); auto* provider=renderer.GetGraphicsProvider(); pool.BeginFrame(provider);
+        if(frame==6) { source->transforms[19].rows[0].w=4; source->MarkDirty(); }
+        if(frame==9)
+        {
+            auto replacement=std::make_shared<Mesh::InstanceData>(); replacement->transforms=source->transforms;
+            replacement->transforms[23].rows[1].w=5; source=std::move(replacement);
+        }
+        const auto first=pool.Register(source,source->revision,source->transforms.data(),64,42);
+        pool.Upload(provider);
+        Require(pool.Get(first).identity.x==42,"persistent source identity changed");
+        if(frame>=3 && frame<6) Require(pool.stats.newBytes+pool.stats.editedBytes+pool.stats.growthBytes==0,"resident pool reuploaded unchanged transforms");
+        if(frame==6) Require(pool.stats.editedBytes==64 && pool.stats.growthBytes==0,"single placement edit uploaded more than one record");
+        if(frame==9) Require(pool.stats.editedBytes==64 && pool.stats.newBytes+pool.stats.growthBytes==0,"saved tile replacement did not preserve its GPU allocation");
+        renderer.EndFrame();
+    }
+    const auto maximum=pool.ResidentBytes()*4;
+    for(unsigned frame=0;frame<90;++frame)
+    {
+        renderer.BeginFrame(); auto* provider=renderer.GetGraphicsProvider(); pool.BeginFrame(provider);
+        auto streamed=std::make_shared<Mesh::InstanceData>(); streamed->transforms=source->transforms;
+        pool.Register(streamed,1,streamed->transforms.data(),64); pool.Upload(provider);
+        Require(pool.ResidentBytes()<=maximum,"streaming pool capacity grew without reuse");
+        renderer.EndFrame();
+    }
+    renderer.WaitIdle();
+    std::cout<<"Persistent storage: zero unchanged uploads, one 64-byte edited record, bounded streaming allocations.\n";
 }
 
 template<typename Renderer=Engine::Renderers::DX11GameRenderer>
@@ -788,7 +960,7 @@ void CheckAutomaticRendering()
     std::cout<<"Shared geometry, automatic batching, GPU visibility/LOD, dirty uploads, and edit isolation passed.\n";
 }
 
-void RenderAudit(const char* reportPath=".local/performance-logs/grass-automatic-instancing-render-audit.jsonl",bool matrix=false)
+void RenderAudit(const char* reportPath=".local/performance-logs/grass-automatic-instancing-render-audit.jsonl",bool matrix=false,bool storageAudit=false)
 {
     using Clock = std::chrono::steady_clock;
     constexpr unsigned width = 1848, height = 1069;
@@ -808,12 +980,15 @@ void RenderAudit(const char* reportPath=".local/performance-logs/grass-automatic
     for (const auto& object : scene.GetObjects())
         if (auto* field = object->GetComponent<GrassField>()) fields.push_back(field);
     Require(fields.size() == 441, "render audit must exercise all terrain grass fields");
+    if(storageAudit) for(auto* layer:scene.GetComponents<Engine::Components::TerrainObjectLayer>())
+        Require(layer->HasLoadedPreparedData(),"landscape cell did not load its baked placement cache");
     scene.SetUpdateProfilingEnabled(true);
     const char* modes[]={"default","terrain-only","grass-no-shadows","full-grass"};
-    for(unsigned pass=0;pass<(matrix ? 4u:1u);++pass)
+    for(unsigned pass=0;pass<(matrix ? 4u:storageAudit ? 2u:1u);++pass)
     {
     const unsigned mode=matrix ? pass:3u;
-    const std::string path=matrix ? std::string(".local/performance-logs/landscape-matrix-")+modes[mode]+".jsonl":reportPath;
+    const char* route=storageAudit ? (pass ? "streaming":"resident"):"resident";
+    const std::string path=storageAudit ? std::string(".local/performance-logs/static-instance-")+route+".jsonl":matrix ? std::string(".local/performance-logs/landscape-matrix-")+modes[mode]+".jsonl":reportPath;
     std::cout << "Benchmark mode: " << modes[mode] << std::endl;
     std::ofstream report(path);
     unsigned measured = 0;
@@ -828,8 +1003,13 @@ void RenderAudit(const char* reportPath=".local/performance-logs/grass-automatic
         // Stay within the authored tile radius while crossing LOD thresholds.
         player->transform.position.x = warmed ? 3.f * std::sin(measured * .04f):
             (matrix && frame>=31 ? 3.f*std::sin((frame-31)*.04f):0.f);
+        if(storageAudit && pass && warmed)
+        {
+            player->transform.position.x=64.f*std::sin(measured*.02f);
+            player->transform.position.z=32.f*std::sin(measured*.04f);
+        }
         scene.ResetGrassPerformance();
-        if(!warmed || mode>=2) for (auto* field : fields) field->Update();
+        if(!warmed || mode>=2) scene.UpdateSpatialScripts();
         const auto g = scene.GetGrassPerformance();
         scene.CommitPendingObjectChanges();
         if(matrix) for(const auto& object:scene.GetObjects())
@@ -861,8 +1041,11 @@ void RenderAudit(const char* reportPath=".local/performance-logs/grass-automatic
         const auto gpu=renderer.GetGraphicsProvider()->GetContextFactory()->GetFrameTimingTelemetry();
         const auto shadowSettings=scene.GetShadowDebugSnapshot();
         report << "{\"type\":\"frame_details\",\"playing\":true,\"benchmark_mode\":\"" << modes[mode]
+            << "\",\"route\":\"" << route << "\",\"route_version\":\"static-instances-v1\",\"renderer\":\"dx11"
             << "\",\"benchmark_scope\":\"render_and_grass_no_editor_or_physics\",\"measured\":" << (warmed ? "true":"false")
             << ",\"view_pixels\":" << width*height << ",\"frame\":" << frame << ",\"frame_ms\":" << ms
+            << ",\"view_width\":" << width << ",\"view_height\":" << height
+            << ",\"viewer_x\":" << player->transform.position.x << ",\"viewer_z\":" << player->transform.position.z
             << ",\"grass_ms\":" << g.totalMs << ",\"grass_built\":" << g.tilesBuilt
             << ",\"grass_scanned\":" << g.placementsScanned << ",\"grass_pending\":" << g.pending
             << ",\"grass_lod_switches\":" << g.lodSwitches << ",\"grass_gpu_bytes\":" << g.gpuBytes
@@ -887,13 +1070,26 @@ void RenderAudit(const char* reportPath=".local/performance-logs/grass-automatic
             << ",\"gpu_batches\":" << renderCpu.gpuBatches
             << ",\"render_material_ms\":" << renderCpu.materialMs
             << ",\"render_culling_ms\":" << renderCpu.cullingMs
+            << ",\"render_sorting_ms\":" << renderCpu.sortingMs
+            << ",\"render_batching_ms\":" << renderCpu.batchingMs
+            << ",\"render_retained_ui_ms\":" << renderCpu.retainedUiMs
+            << ",\"render_portal_ms\":" << renderCpu.portalMs
+            << ",\"render_worker_active_ms\":" << renderCpu.workerActiveMs
+            << ",\"render_main_job_ms\":" << renderCpu.mainJobMs
+            << ",\"render_worker_wait_ms\":" << renderCpu.workerWaitMs
+            << ",\"render_record_pack_ms\":" << renderCpu.recordPackingMs
+            << ",\"render_record_wait_ms\":" << renderCpu.recordWaitMs
             << ",\"render_submit_ms\":" << renderCpu.submissionMs
             << ",\"render_upload_ms\":" << renderCpu.uploadMs
             << ",\"render_cpu_total_ms\":" << renderCpu.totalMs
             << ",\"render_startup_ms\":" << renderCpu.startupMs
             << ",\"render_terrain_prepare_ms\":" << renderCpu.terrainPreparationMs
             << ",\"render_occlusion_ms\":" << renderCpu.occlusionMs
-            << ",\"render_other_ms\":" << renderCpu.otherMs << "}\n";
+            << ",\"render_other_ms\":" << renderCpu.otherMs;
+        renderCpu.instances.WriteJson(report); shadow.instances.WriteJson(report,"shadow_instance_");
+        report << "}\n";
+        if(storageAudit) Require(renderCpu.instances.editedBytes==0 && shadow.instances.editedBytes==0,
+            "camera movement edited static placement records");
         if (warmed)
         {
             ++measured;
@@ -901,7 +1097,7 @@ void RenderAudit(const char* reportPath=".local/performance-logs/grass-automatic
             steadyBuilds += g.tilesBuilt; steadyScans += g.placementsScanned; switches += g.lodSwitches;
             if (measured >= 240) break;
         }
-        if (!warmed && frame > (matrix ? 300:30) && g.pending == 0 && g.tilesBuilt == 0)
+        if (!warmed && frame > (matrix || storageAudit ? 300:30) && g.pending == 0 && g.tilesBuilt == 0)
         {
             const auto snapshotStarted = Clock::now();
             const auto snapshot = scene.SaveSnapshotToString();
@@ -928,9 +1124,19 @@ void RenderAudit(const char* reportPath=".local/performance-logs/grass-automatic
 
 int main(int argc, char** argv)
 {
+    SetUnhandledExceptionFilter([](EXCEPTION_POINTERS* failure)->LONG {
+        HMODULE module=nullptr;
+        const auto address=failure->ExceptionRecord->ExceptionAddress;
+        GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+            reinterpret_cast<LPCWSTR>(address),&module);
+        wchar_t name[MAX_PATH]{}; GetModuleFileNameW(module,name,MAX_PATH);
+        std::wcerr << L"Native failure in " << name << L" offset " << std::hex << (uintptr_t(address)-uintptr_t(module)) << std::endl;
+        return EXCEPTION_EXECUTE_HANDLER;
+    });
     try
     {
         if (argc > 1 && std::string(argv[1]) == "--landscape-matrix") RenderAudit("",true);
+        else if(argc>1 && std::string(argv[1])=="--static-instance-audit") RenderAudit("",false,true);
         else if (argc > 1 && std::string(argv[1]) == "--render-audit") RenderAudit();
         else if(argc>1 && std::string(argv[1])=="--diagnostics-audit") RenderAudit(".local/performance-logs/grass-diagnostics-audit.jsonl");
         else if (argc > 1 && std::string(argv[1]) == "--fade-render-check") CheckFadeRendering();
@@ -944,7 +1150,7 @@ int main(int argc, char** argv)
 #if defined(ENGINE_VULKAN_ENABLED)
         else if(argc>1 && std::string(argv[1])=="--automatic-render-vulkan") CheckAutomaticRendering<Engine::Renderers::VulkanGameRenderer>();
 #endif
-        else { TestSpatialScheduling(); TestLandscapePreparation(); TestGrass(); TestDx11ConstantsAndGeometry(); TestComponentRegistry(); }
+        else { TestSpatialScheduling(); TestLandscapePreparation(); TestGrass(); TestDx11ConstantsAndGeometry(); TestComponentRegistry(); TestBakedPlacements(); TestSceneLoadingIntoWarmCaches(); TestPersistentStorage(); }
     }
     catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }

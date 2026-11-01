@@ -99,15 +99,13 @@ void Scene::Start()
 
 void Scene::RefreshUpdateRegistry()
 {
-    if (m_updateRegistryRevision == GetStructureRevision()) return;
-    m_updateObjects.clear(); m_poseObjects.clear();
-    for (const auto& object : m_objects)
-    {
-        bool updates = typeid(*object) != typeid(Object), pose = false;
-        for (auto* component : object->Components) if (component)
+    if(m_updateRegistryRevision==GetStructureRevision() && !m_updateRegistryFull) return;
+    const auto classify=[](Object* object) {
+        bool updates=typeid(*object)!=typeid(Object),pose=false;
+        for(auto* component:object->Components) if(component)
         {
-            updates |= component->RequiresUpdate();
-            pose |= dynamic_cast<Engine::Components::RigController*>(component) ||
+            updates|=component->RequiresUpdate();
+            pose|=dynamic_cast<Engine::Components::RigController*>(component) ||
                 dynamic_cast<Engine::Components::MaterialPropertyMorph*>(component) ||
                 dynamic_cast<Engine::Components::RigConstraints*>(component) ||
                 dynamic_cast<Engine::Components::RigMorphControls*>(component) ||
@@ -116,10 +114,25 @@ void Scene::RefreshUpdateRegistry()
                 dynamic_cast<Engine::Components::ChainIK*>(component) ||
                 dynamic_cast<Engine::Components::TransformConstraint*>(component);
         }
-        if (updates) m_updateObjects.push_back(object.get());
-        if (pose) m_poseObjects.push_back(object.get());
+        return std::pair<bool,bool>{updates,pose};
+    };
+    if(m_updateRegistryFull)
+    {
+        m_updateObjects.clear(); m_poseObjects.clear();
+        for(const auto& object:m_objects)
+        { const auto state=classify(object.get()); if(state.first) m_updateObjects.push_back(object.get()); if(state.second) m_poseObjects.push_back(object.get()); }
     }
-    m_updateRegistryRevision = GetStructureRevision();
+    else for(auto* owner:m_updateRegistryDirty)
+    {
+        const auto state=m_componentRegistry.Contains(owner) ? classify(owner):std::pair<bool,bool>{false,false};
+        const auto update=[&](auto& list,bool active) {
+            auto found=std::find(list.begin(),list.end(),owner);
+            if(active && found==list.end()) list.push_back(owner);
+            else if(!active && found!=list.end()) list.erase(found);
+        };
+        update(m_updateObjects,state.first); update(m_poseObjects,state.second);
+    }
+    m_updateRegistryDirty.clear(); m_updateRegistryFull=false; m_updateRegistryRevision=GetStructureRevision();
 }
 
 void Scene::Update(float deltaTime)
@@ -129,6 +142,7 @@ void Scene::Update(float deltaTime)
     const auto updateBegin = m_updateProfilingEnabled ? Clock::now() : Clock::time_point{};
     m_deltaTime = m_clock.Advance(deltaTime);
     EnforceParticleBudget();
+    m_componentRegistry.ReleaseSnapshots();
     m_isUpdating = true;
     RefreshUpdateRegistry();
     const auto updateObjects = m_updateObjects; // callbacks may change the registry
@@ -354,8 +368,11 @@ Engine::Core::Object* Scene::AddObject()
     if (m_isUpdating)
         m_pendingObjectAdditions.push_back(std::move(obj));
     else
+    {
         m_objects.push_back(std::move(obj));
-    NotifyStructureChanged();
+        m_componentRegistry.Adopt(raw);
+    }
+    NotifyStructureChanged(raw);
     return raw;
 }
 
@@ -617,7 +634,7 @@ void Scene::RemoveObject(Engine::Core::Object* obj)
         }
     for (Engine::Core::Object* object : objectsToRemove)
         if (object)
-            object->OwnerScene = nullptr;
+        { NotifyStructureChanged(object,true); object->OwnerScene = nullptr; }
 
     if (obj->Parent)
     {
@@ -655,7 +672,6 @@ void Scene::RemoveObject(Engine::Core::Object* obj)
                     candidate.get()) != objectsToRemove.end();
             }),
         m_objects.end());
-    NotifyStructureChanged();
 }
 
 void Scene::RequestRemoveObject(Engine::Core::Object* obj)
@@ -679,7 +695,9 @@ void Scene::FlushPendingObjectAdditions()
         // this update boundary.
         if (m_hasStarted)
             object->Start();
+        auto* added=object.get();
         m_objects.push_back(std::move(object));
+        m_componentRegistry.Adopt(added); NotifyStructureChanged(added);
     }
     m_pendingObjectAdditions.clear();
 }

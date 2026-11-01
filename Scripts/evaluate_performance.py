@@ -15,10 +15,14 @@ def summary(values):
 
 
 def evaluate(rows, path="", all_frames=False):
-    frames = [r for r in rows if r.get("type") == "frame_details"]
+    frames = [r for r in rows if r.get("type") == "frame_details" or
+              (r.get("type") is None and r.get("schema_version", 0) >= 1 and "frame_ms" in r and "playing" in r)]
+    aliases = {"grass_total_ms": "grass_ms", "grass_tiles_built": "grass_built",
+               "grass_placements_scanned": "grass_scanned", "render_submission_ms": "render_submit_ms"}
+    frames = [dict(r, **{key: r[alias] for key, alias in aliases.items() if key not in r and alias in r}) for r in frames]
     if not all_frames and any(r.get("playing") for r in frames):
         frames = [r for r in frames if r.get("playing")]
-    if not all_frames and any(r.get("measured") for r in frames):
+    if not all_frames and any("measured" in r for r in frames):
         frames = [r for r in frames if r.get("measured")]
     if not frames:
         raise ValueError("Recording contains no frame_details records")
@@ -28,7 +32,8 @@ def evaluate(rows, path="", all_frames=False):
     if not interval:
         raise ValueError("Recording contains no valid positive frame intervals")
     metrics = {k: summary([r[k] for r in frames if k in r])
-               for k in frames[0] if k.endswith("_ms") and isinstance(frames[0][k], (int, float))}
+               for k in set().union(*(r.keys() for r in frames))
+               if k.endswith("_ms") or k.startswith(("instance_", "shadow_instance_"))}
     gpu = {}
     for index, row in enumerate(frames):
         if row.get("gpu_valid"):
@@ -37,6 +42,8 @@ def evaluate(rows, path="", all_frames=False):
                   for key in ("gpu_shadow_ms", "gpu_terrain_ms", "gpu_portal_ms", "gpu_opaque_ms", "gpu_transparent_ms")}
     gpu_total = summary([sum(r.get(key, 0) for key in gpu_stages) for r in gpu.values()])
     hardware = [r for r in rows if r.get("type") == "sample"]
+    if not all_frames and any("measured" in r for r in hardware):
+        hardware = [r for r in hardware if r.get("measured")]
     hardware_metrics = {key: summary([r[key] for r in hardware if key in r]) for key in
                         ("process_cpu_pct", "process_cpu_core_equivalents", "main_thread_cpu_pct",
                          "cpu_user_pct", "cpu_kernel_pct", "editor_working_set_bytes", "gpu_memory_used_bytes")}
@@ -54,11 +61,12 @@ def evaluate(rows, path="", all_frames=False):
                          "low_cycle_density_spikes": len(low_cycle_spikes)}
     phase_keys = ("render_startup_ms", "render_terrain_prepare_ms", "render_occlusion_ms",
                   "render_culling_ms", "render_sorting_ms", "render_material_ms", "render_batching_ms",
-                  "render_upload_ms", "render_submission_ms", "render_other_ms")
+                  "render_upload_ms", "render_submission_ms", "render_retained_ui_ms", "render_portal_ms", "render_other_ms")
     measured = sum(metrics[key]["mean"] for key in phase_keys if metrics.get(key))
     main = metrics.get("render_cpu_total_ms") or metrics.get("main_submit_ms")
     warnings = ["CPU wall time and asynchronously resolved GPU stages overlap; never add them.",
-                "Automatic instance and triangle counts are candidates before GPU culling and LOD selection."]
+                "Automatic instance and triangle counts are candidates before GPU culling and LOD selection.",
+                "Worker execution and record packing overlap main-thread phases; do not add them to frame time."]
     if shadow_cycles:
         warnings.append("Low thread-cycle density during long shadow submissions can indicate scheduling or waits; CPU frequency changes also affect density.")
     if "shadow_submission_thread_cpu_ms" in metrics:
@@ -110,7 +118,9 @@ def markdown(result, comparison=None):
                 "grass_total_ms", "grass_generation_ms", "grass_upload_ms", "physics_ms", "pose_ms", "constraints_ms", "audio_ms",
                 "render_startup_ms", "render_terrain_prepare_ms", "render_occlusion_ms",
                 "shadow_draw_ms", "shadow_geometry_draw_ms", "shadow_submission_thread_cpu_ms",
-                "shadow_submission_off_cpu_ms", "shadow_submission_wall_ms", "shadow_max_batch_ms"):
+                "shadow_submission_off_cpu_ms", "shadow_submission_wall_ms", "shadow_max_batch_ms",
+                "render_retained_ui_ms", "render_portal_ms", "render_worker_active_ms", "render_main_job_ms",
+                "render_worker_wait_ms", "render_record_pack_ms", "render_record_wait_ms"):
         if value := result["metrics"].get(key):
             lines.append(f"| {key} | {value['mean']:.3f} | {value['p95']:.3f} |")
     if result["shadow_submission"]["thread_cycles"]:
@@ -125,6 +135,12 @@ def markdown(result, comparison=None):
                   f"{result['gpu_total_ms']['mean']:.2f} ms on average."]
         if result["gpu_shadow_share_percent"] is not None:
             lines.append(f"Shadows account for {result['gpu_shadow_share_percent']:.1f}% of measured GPU time.")
+    storage = {key: value for key, value in result["metrics"].items()
+               if key.startswith(("instance_", "shadow_instance_")) and value}
+    if storage:
+        lines += ["", "| Instance storage measurement | Average | P95 | Maximum |", "|---|---:|---:|---:|"]
+        for key, value in sorted(storage.items()):
+            lines.append(f"| {key} | {value['mean']:.1f} | {value['p95']:.0f} | {value['max']:.0f} |")
     if result["main_pass_unexplained_ms"] is not None:
         lines += ["", f"Main-pass time outside available sub-timers: {result['main_pass_unexplained_ms']:.2f} ms average."]
     lines += ["", f"Grass prepared {result['grass_tiles_prepared']} instance tiles and indexed "

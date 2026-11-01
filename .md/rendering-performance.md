@@ -134,3 +134,113 @@ include GPU timestamps; `Scripts/evaluate_performance.py` excludes warmup and
 removes repeated asynchronous GPU samples. This helper measures rendering and
 grass updates, without editor UI, audio, or full gameplay/physics updates; its FPS
 is not editor FPS.
+
+
+## Main-thread preparation and GPU grass
+
+Grass fields opt into a reusable spatial update scheduler. Scene updates query
+cached field bounds for each distinct viewer, refresh only candidate fields, and
+retire fields that leave the region. Region revisions cover transform, terrain
+size, viewer selection, and range changes. Component removal/reload refreshes
+cached references before reading their revisions. Editor grass publication occurs
+after the scene-object preview walk, avoiding appending objects while iterating
+that owning container. Ordinary component callbacks honor `RequiresUpdate()`.
+
+View visibility and terrain-occlusion classification use worker jobs against a
+stable frame snapshot. Two retained record packets copy object/material values
+into disjoint CPU buffer regions on workers. Graphics setup and GPU instance
+culling can proceed while packing runs; a fence publishes changed records before
+the first draw. Fence cleanup also waits on exceptional exits. Gameplay callbacks,
+scene mutation, and graphics API calls remain on their owning thread. This is
+buffered preparation overlapping submission, not arbitrary concurrent access to
+the live scene.
+
+Explicit instance batches retain shared placement lifetimes and revisioned member
+keys. Sorting a camera view no longer renumbers its prepared object records.
+Unchanged keys skip reading/merging placement transforms and skip input uploads.
+Resident LOD draws can share the same immutable input allocation; outputs and draw
+constants remain distinct per pass/frame slot. Authored placement edits must call
+`Mesh::InstanceData::MarkDirty()` after updating transforms. Camera changes update
+compute constants, rather than rebuilding unchanged placement input.
+
+GPU grass compaction reads conservative placement spheres, rejects invisible
+placements, classifies the target resident LOD, and writes indirect arguments and
+visible affine/object records without CPU readback. Each tile prepares its material
+and object record once for all resident LODs. Shader coverage intervals retain
+complementary LOD transitions and outer distance fade. Custom shaders, selected
+meshes, portal views, and unavailable compute paths keep compatible fallbacks.
+Shadow-only records now include explicit-instance and fade flags as camera records
+do. Vulkan shadow passes use compatible HDR attachment/dependency descriptions and
+can preserve depth around compute dispatches.
+
+Retained UI exits through cached component lists when a scene has no UI. Image,
+button, and canvas collection uses typed registries. CPU render timings now split
+retained UI and portal/overlay work from the remaining unclassified work. Worker
+wall times are summed across workers and overlap other phases; they must not be
+added to total frame time. Record packing and its fence wait are separate counters.
+GPU grass batch counts, cache hits, placement upload bytes, and active/dormant field
+counts are recorded.
+
+Editor audit controls now count actual rendered Play frames, accept warmup frames,
+and support `ENGINE_EDITOR_AUTO_PROFILE_KEEP_OPEN`. An optional
+`ENGINE_EDITOR_PROFILE_LAYOUT` isolates audit docking changes. Audit traces also
+include process and main-thread CPU samples over intervals of at least 500 ms;
+short-pass CPU accounting is deliberately avoided.
+
+Regression coverage includes scheduled field enter/leave, moved bounds, disabled
+ancestors, deletion, asynchronous packet results, unchanged placement uploads,
+per-species offsets, GPU LOD/fade comparisons at five distances, and receiver-image
+comparisons for GPU grass shadows on DX11/DX12/Vulkan. Vulkan validation no longer
+reports the shadow pass compatibility failures exposed by these tests. Existing
+wireframe-feature and swapchain semaphore validation findings remain separate
+backend work.
+
+## Persistent placement storage and streamed cells
+
+`PersistentInstancePool` stores generic `Mesh::InstanceData` records independently
+of camera visibility, material grouping and LOD. Each 64-byte record contains a
+48-byte affine transform plus a saved source/placement identity. Per-frame-slot
+buffers apply a journal of changed ranges. Replacement data with the same stable
+source identity compares records and retains its allocation; edits call
+`InstanceData::MarkDirty()`. Free ranges coalesce, capacity grows geometrically,
+and source lifetimes and replaced buffers remain pinned until the owning graphics
+slot's fence completes. Capacity is retained for reuse at its residency high-water
+mark rather than shrunk and reallocated while moving.
+
+Camera and cascade batches contain 144-byte tile descriptors. Compute reads the
+persistent pool and writes visible IDs and indirect draw arguments, without copying
+placement matrices. Compatibility keys use source geometry, material bindings,
+pipeline, camera/pass and LOD; tile membership is ordered by stable object slot.
+Unchanged camera movement does not upload placement transforms. Selected/custom
+shader fallbacks allocate native slices only when used. Ordinary duplicate meshes
+continue to share geometry and use automatic instancing.
+
+`TerrainObjectLayer` saves stable placement IDs and a versioned, source-signature
+checked tile/affine cache. Legacy or invalid caches are prepared once and saved on
+the next authoring save. `Scripts/bake_instance_layers.py` prepares existing scene
+and prefab XML without rewriting unrelated formatting; `--check` verifies caches.
+Changing tile size rebuilds that derived cache. Empty layers stay empty unless
+`GrassField.allowProceduralGeneration` is explicitly enabled.
+
+Typed component lists update only the changed owner, and unrelated typed-list
+revisions remain stable. Render lookup entries and update-list membership refresh
+only for changed owners. Physics caches unsuspended body/collider candidates by
+typed component and activity revision; static transform synchronization retains
+its world-revision check.
+
+Recordings expose `instance_*` and `shadow_instance_*` upload causes: new records,
+edited records, pool growth, tile metadata and fallback visible IDs. Allocations,
+retirements, resident pool bytes and cache misses (cold, membership, metadata,
+mode) are separate. Pool growth includes initializing the new capacity and is
+deliberately distinguished from ordinary incremental uploads. Resident bytes is
+a high-water gauge across views; event counters sum across views. These counters
+exclude shared source geometry and ordinary object-record buffers.
+
+`GrassPerformanceTests --static-instance-audit` runs resident movement and streaming
+routes at 1848 x 1069 on DX11, using the saved scene's quality settings, with over
+300 warmup frames and 240 measured frames per route. Repeat the same route/version,
+viewport, renderer and quality settings for before/after comparisons. JSONL includes
+CPU phases, resolved GPU timings, upload causes and actual shadow settings. The
+helper covers grass preparation and rendering; full-editor, UI, simulation and
+physics costs require an editor recording. The evaluator reports P95/P99 and peak
+upload bytes rather than deriving performance from the smoothed FPS display.

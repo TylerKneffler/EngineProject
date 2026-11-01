@@ -31,7 +31,7 @@ public:
     void SetStructuredBuffer(uint32_t slot, const Engine::Graphics::IGraphicsBuffer* buffer) override;
     bool SetComputePipeline(const Engine::Graphics::IPipelineState* pipeline) override;
     void SetComputeConstants(const void* data, uint32_t size) override;
-    void SetComputeReadBuffer(const Engine::Graphics::IGraphicsBuffer* buffer) override;
+    void SetComputeReadBuffer(const Engine::Graphics::IGraphicsBuffer* buffer, uint32_t slot = 0) override;
     void SetComputeWriteBuffer(const Engine::Graphics::IGraphicsBuffer* buffer) override;
     void DispatchCompute(uint32_t x, uint32_t y = 1, uint32_t z = 1) override;
     void StorageBarrier(const Engine::Graphics::IGraphicsBuffer* buffer) override;
@@ -67,11 +67,12 @@ private:
     const VulkanPipelineState* m_pipeline = nullptr;
     const class VulkanComputePipeline* m_computePipeline = nullptr;
     const VulkanGraphicsBuffer* m_computeRead = nullptr;
+    const VulkanGraphicsBuffer* m_computePool = nullptr;
     const VulkanGraphicsBuffer* m_computeWrite = nullptr;
     std::shared_ptr<VulkanComputeDescriptorArena> m_computeDescriptors;
     std::shared_ptr<VulkanTextureSystem> m_textureSystem;
     std::array<const VulkanGraphicsTexture*, 30> m_textures{};
-    std::array<const VulkanGraphicsBuffer*, 8> m_structuredBuffers{};
+    std::array<const VulkanGraphicsBuffer*, 9> m_structuredBuffers{};
     std::shared_ptr<VulkanOcclusionQueryState> m_occlusionState;
     std::shared_ptr<VulkanGpuTimingState> m_gpuTimings;
     uint64_t m_occlusionViewId = 0;

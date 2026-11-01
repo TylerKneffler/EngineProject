@@ -1,3 +1,4 @@
+#include <cstdlib>
 #include "pch.h"
 #include "ImGuiUiBackend.h"
 #include "Editor/Core/View/EditorViewportSettings.h"
@@ -105,6 +106,12 @@ bool ImGuiUiBackend::Initialize(void* nativeWindow, ::Engine::Renderers::IEditor
     Shutdown();
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
+    // Opt-in performance audits keep their panel layout out of the user session.
+    if(const char* path=std::getenv("ENGINE_EDITOR_PROFILE_LAYOUT"))
+    {
+        static const std::string profileLayout(path);
+        ImGui::GetIO().IniFilename=profileLayout.c_str();
+    }
     ImGuiPanelHost::RegisterToolbarSettings();
     EditorViewportSettings::RegisterSettingsHandler();
     ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;

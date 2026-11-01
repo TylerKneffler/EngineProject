@@ -92,9 +92,8 @@ private:
     PerformanceHardware m_pendingHardware;
     PerformanceSnapshot m_snapshot;
     PerformanceHardware m_hardware;
-    std::chrono::steady_clock::time_point m_lastFrame{};
-    std::deque<double> m_recentFrameMs;
-    double m_recentFrameTotalMs = 0.0;
+    FrameRateWindow m_editorFrameRate;
+    float m_lastUiFrameRate=0;
     float m_displayFrameRate = 0.f;
     double m_lastPanelDrawMs = 0.0;
     double m_lastCounterSampleMs = 0.0;

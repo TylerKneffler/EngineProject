@@ -383,7 +383,11 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
     std::string displayedWindowTitle;
     Engine::Editor::EditorFrameProfiler frameProfiler(
         scene, renderer, autoProfilePlay);
-    uint32_t autoProfileTick = 0;
+    uint32_t autoProfileTick = 0,autoProfilePlayingFrames=0;
+    const bool autoProfileKeepOpen=EnvironmentVariable("ENGINE_EDITOR_AUTO_PROFILE_KEEP_OPEN").has_value();
+    const auto warmupFrames=EnvironmentVariable("ENGINE_EDITOR_AUTO_PROFILE_WARMUP_FRAMES");
+    const uint32_t autoProfileWarmup=warmupFrames ? uint32_t(std::clamp(std::atoi(warmupFrames->c_str()),0,1200)):0;
+    bool autoProfileComplete=false;
     window->OnUpdate = [&]()
     {
         using Clock = std::chrono::steady_clock;
@@ -695,6 +699,8 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
             sample.submittedShadowDraws = submittedShadowDraws;
             sample.deltaSeconds = dt;
             sample.playing = playState == Engine::Editor::PlayState::Playing;
+            sample.measured=!autoProfilePlay || (sample.playing && renderedGameViews>0 &&
+                autoProfilePlayingFrames>=autoProfileWarmup && !autoProfileComplete);
             if (frameProfiler)
                 frameProfiler.Record(sample, scene, renderer);
             for (const auto& panel : editorState->GetPanels())
@@ -709,10 +715,15 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
         if (!renderer->IsDirty() && !needsContinuousRendering())
             MsgWaitForMultipleObjectsEx(0, nullptr, 50, QS_ALLINPUT,
                 MWMO_INPUTAVAILABLE);
-        if (autoProfilePlay && ++autoProfileTick == 30u + autoProfilePlayFrames)
+        if(autoProfilePlay)
         {
-            gameBuildManager->Stop();
-            PostMessageW(window->GetHWND(), WM_CLOSE, 0, 0);
+            ++autoProfileTick;
+            if(!autoProfileComplete && playState==Engine::Editor::PlayState::Playing && !waitingForPlayDebugger && renderedGameViews>0 &&
+                ++autoProfilePlayingFrames>=autoProfileWarmup+autoProfilePlayFrames)
+            {
+                autoProfileComplete=true; frameProfiler.Stop();
+                if(!autoProfileKeepOpen) { gameBuildManager->Stop(); PostMessageW(window->GetHWND(),WM_CLOSE,0,0); }
+            }
         }
     };
     OutputDebugStringA("[Main] OnUpdate callback set\n");

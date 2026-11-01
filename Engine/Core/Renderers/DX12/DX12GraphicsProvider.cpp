@@ -8,7 +8,7 @@ Microsoft::WRL::ComPtr<ID3D12RootSignature>
 CreateD3D12MaterialRootSignature(ID3D12Device* device)
 {
     D3D12_DESCRIPTOR_RANGE ranges[38]{};
-    D3D12_ROOT_PARAMETER parameters[47]{};
+    D3D12_ROOT_PARAMETER parameters[48]{};
     parameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
     parameters[0].Descriptor.ShaderRegister = 0;
     parameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
@@ -119,6 +119,10 @@ CreateD3D12MaterialRootSignature(ID3D12Device* device)
     parameters[46].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
     parameters[46].Descriptor.ShaderRegister = 45;
     parameters[46].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
+
+    parameters[47].ParameterType=D3D12_ROOT_PARAMETER_TYPE_SRV;
+    parameters[47].Descriptor.ShaderRegister=46;
+    parameters[47].ShaderVisibility=D3D12_SHADER_VISIBILITY_VERTEX;
 
     D3D12_STATIC_SAMPLER_DESC sampler{};
     sampler.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;

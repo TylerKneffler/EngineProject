@@ -68,6 +68,9 @@ public:
     struct InstanceData
     {
         uint64_t revision=1;
+        uint64_t slicesRevision=1;
+        uint64_t stableId=0;
+        std::vector<uint64_t> placementIds;
         void MarkDirty() { ++revision; }
         struct Slice
         {

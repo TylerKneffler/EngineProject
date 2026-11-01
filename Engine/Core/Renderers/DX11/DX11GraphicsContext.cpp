@@ -513,12 +513,12 @@ void D3D11GraphicsContext::SetComputeConstants(const void* data, uint32_t size)
 }
 
 void D3D11GraphicsContext::SetComputeReadBuffer(
-    const Engine::Graphics::IGraphicsBuffer* buffer)
+    const Engine::Graphics::IGraphicsBuffer* buffer, uint32_t slot)
 {
     if (!m_context) return;
     const auto* native = dynamic_cast<const D3D11GraphicsBuffer*>(buffer);
     ID3D11ShaderResourceView* view = native ? native->GetShaderResourceView() : nullptr;
-    m_context->CSSetShaderResources(0, 1, &view);
+    m_context->CSSetShaderResources(slot, 1, &view);
 }
 
 void D3D11GraphicsContext::SetComputeWriteBuffer(

@@ -620,13 +620,8 @@ void Mesh::SetInstancedGeometry(std::shared_ptr<Mesh> source,
     m_instanceRanges = std::move(ranges);
     m_boundsMin = minimum; m_boundsMax = maximum; m_hasBounds = true;
     m_ready = m_instanceSource->IsReady();
-    for (const auto& range : m_instanceRanges)
-        if (range.instanceCount)
-        {
-            auto* buffer = GetInstanceBuffer(range.firstInstance);
-            if (!buffer || buffer->GetSize() < uint64_t(range.instanceCount) * sizeof(InstanceTransform))
-                m_ready = false;
-        }
+    // Instance records are resident in the renderer's persistent pool on first
+    // submission. Legacy per-range buffers are optional shader fallbacks.
     ++m_authoredGeometryRevision;
     MarkConfigurationDirty();
 }

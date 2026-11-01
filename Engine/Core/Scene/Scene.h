@@ -1,4 +1,6 @@
 #pragma once
+#include "Core/Scene/ComponentRegistry.h"
+#include "Core/Rendering/PersistentInstanceBatches.h"
 #include "Core/Compoonents/SpatialUpdate.h"
 #include <glm/gtc/quaternion.hpp>
 #include "Core/Object.h"
@@ -314,7 +316,8 @@ public:
     }
     struct ShadowCpuTiming
     {
-        uint64_t explicitInstanceDraws=0, automaticDraws=0, ordinaryDraws=0;
+        Engine::Rendering::InstanceStorageTimings instances;
+        uint64_t explicitInstanceDraws=0, automaticDraws=0, ordinaryDraws=0, gpuGrassBatches=0;
         double scenePreparationMs = 0;
         double cascadeCullingMs = 0;
         double recordUploadMs = 0;
@@ -454,6 +457,7 @@ public:
         if (m_isUpdating) return;
         FlushPendingObjectAdditions();
         FlushPendingObjectRemovals();
+        m_componentRegistry.ReleaseSnapshots();
     }
     void    ClearObjects();                  // remove all objects and reset selection
     const std::vector<std::unique_ptr<Object>>& GetObjects() const { return m_objects; }
@@ -465,22 +469,27 @@ public:
     // use MoveObject so cached animation bindings stay coherent.
     uint64_t GetStructureRevision() const { return m_structureRevision; }
     template<typename T> const std::vector<T*>& GetComponents() const
+    { return m_componentRegistry.Get<T>(m_objects); }
+    template<class T> uint64_t GetComponentRevision() const { return m_componentRegistry.Revision<T>(m_objects); }
+    uint64_t GetPhysicsActivityRevision() const { return m_physicsActivityRevision; }
+    void NotifyPhysicsActivityChanged() { ++m_physicsActivityRevision; }
+    bool IsCommittedObject(Object* owner) const { return m_componentRegistry.Contains(owner); }
+    void NotifyStructureChanged(Object* owner=nullptr,bool removed=false)
     {
-        auto& entry = m_componentRegistry[std::type_index(typeid(T))];
-        if (entry.first != m_structureRevision || !entry.second.has_value())
+        if (++m_structureRevision == 0) ++m_structureRevision;
+        if(!owner) { m_componentRegistry.Reconcile(m_objects); m_frameLookupFull=true; m_updateRegistryFull=true; }
+        else
         {
-            std::vector<T*> components;
-            for (const auto& object : m_objects) if (object)
-                for (auto* component : object->Components)
-                    if (auto* typed = dynamic_cast<T*>(component)) components.push_back(typed);
-            entry = {m_structureRevision, std::move(components)};
+            if(removed) m_componentRegistry.Remove(owner); else m_componentRegistry.Changed(owner);
+            m_frameLookupDirty.insert(owner); m_updateRegistryDirty.insert(owner);
         }
-        return std::any_cast<const std::vector<T*>&>(entry.second);
     }
-    void NotifyStructureChanged()
+    void NotifyComponentRemoved(Engine::Core::Component* component)
     {
-        if (++m_structureRevision == 0)
-            ++m_structureRevision;
+        m_componentRegistry.Remove(component);
+        if(++m_structureRevision==0) ++m_structureRevision;
+        if(component && component->Owner)
+        { m_frameLookupDirty.insert(component->Owner); m_updateRegistryDirty.insert(component->Owner); }
     }
 
     // Serialization — delegates to SceneSerializer.
@@ -708,6 +717,8 @@ private:
 
     struct FrameRenderItem
     {
+        uint32_t objectSlot=0;
+        bool previousLod=false;
         int gpuLod = -1, gpuMaximumLod = 0;
         glm::vec2 gpuLodDistances{0};
         Object* object = nullptr;
@@ -741,6 +752,11 @@ private:
     };
 
     std::vector<FrameRenderItem> m_frameRenderItems;
+    using RenderObjectKey=std::tuple<uintptr_t,int,uintptr_t,bool>;
+    std::map<RenderObjectKey,uint32_t> m_renderObjectSlots;
+    std::vector<uint32_t> m_freeRenderObjectSlots;
+    uint32_t m_renderObjectSlotCount=0;
+    uint64_t m_renderObjectSlotsRevision=UINT64_MAX;
 
     struct FrameComponentLookup
     {
@@ -756,7 +772,10 @@ private:
     Engine::Rendering::RenderSpatialIndex m_renderSpatialIndex;
     RenderCpuTimings m_lastRenderCpuTimings;
     Engine::Rendering::AutomaticInstanceCache m_automaticInstanceCache;
-    Engine::Rendering::ExplicitInstanceBatchCache m_explicitInstanceCache;
+    Engine::Rendering::PersistentInstancePool m_persistentInstances;
+    Engine::Rendering::PersistentInstanceBatches m_persistentBatches;
+    uint64_t m_instanceViewSerial=UINT64_MAX;
+    std::map<std::pair<const void*,bool>,uint32_t> m_instanceViewUses;
     struct RenderPassBuffers
     {
         std::unique_ptr<IGraphicsBuffer> constants, objects, shadowConstants, shadowObjects;
@@ -786,6 +805,10 @@ private:
     uint64_t m_materialPreparationSerial=0, m_materialCacheStructureRevision=0;
     std::unique_ptr<Engine::Graphics::IPipelineState> m_instanceCullPipeline;
     bool m_instanceCullAttempted = false;
+    bool m_frameLookupFull=true,m_updateRegistryFull=true;
+    std::unordered_set<Object*> m_frameLookupDirty,m_updateRegistryDirty;
+    std::unordered_map<Object*,size_t> m_frameLookupIndices;
+    std::vector<size_t> m_frameLookupFree;
     uint64_t m_frameLookupRevision = 0;
     bool m_frameLookupEditPose = false;
     std::vector<Engine::Components::SpatialManipulator*>
@@ -846,7 +869,8 @@ private:
     float m_deltaTime = 0.f;
     Engine::Time::SimulationClock m_clock;
     uint64_t m_structureRevision = 1;
-    mutable std::unordered_map<std::type_index, std::pair<uint64_t, std::any>> m_componentRegistry;
+    mutable Engine::Scene::ComponentRegistry m_componentRegistry;
+    uint64_t m_physicsActivityRevision=0;
     uint64_t m_updateRegistryRevision = 0;
     std::vector<Object*> m_updateObjects, m_poseObjects;
     Engine::Components::SpatialUpdateScheduler m_spatialUpdates;

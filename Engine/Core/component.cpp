@@ -22,6 +22,11 @@
 #define ENGINE_ASSETS_PATH "Engine/Core/Assets/"
 #endif
 
+Engine::Core::Component::~Component()
+{
+    if(Owner && Owner->GetScene()) Owner->GetScene()->NotifyComponentRemoved(this);
+}
+
 namespace Engine::Core
 {
 

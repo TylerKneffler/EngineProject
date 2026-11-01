@@ -1,16 +1,50 @@
 # Engine TODO
 
-Last updated: 2026-10-31.
+Last updated: 2026-11-01.
+
+## Parallel scene updates and rendering
+
+- [ ] Identify and eliminate graphics-submission stalls with native-call timings for buffer mapping, dispatch, resource binding, indirect arguments, draws, and fence waits.
+- [ ] Replace the fixed three-worker render pool with a configurable engine job scheduler supporting dependencies, workload-sized batches, and measured worker utilization.
+- [ ] Publish immutable scene snapshots and defer object creation, removal, hierarchy changes, and component writes to defined commit boundaries.
+- [ ] Add component update dependencies and explicit read/write access so independent updates can run concurrently while existing scripts retain a compatible serial path.
+- [ ] Update dirty transforms and world bounds in parallel according to hierarchy dependencies; retain unchanged static results.
+- [ ] Cache static render items and spatial-index entries, updating only changed objects instead of rebuilding their preparation every frame.
+- [ ] Prepare render items, material records, visibility, sorting, and compatible draw batches on workers from stable snapshots.
+- [ ] Share camera and shadow preparation across views and cascades; schedule independent visibility and batch preparation without unnecessary per-loop barriers.
+- [ ] Move terrain-cell loading, decoding, instance preparation, and bounds construction onto workers with bounded queues, cancellation, and scene-generation checks.
+- [ ] Parallelize independent animation and rig evaluation while preserving animation, constraints, physics, and final-pose ordering.
+- [ ] Parallelize physics preparation and post-processing where independent; preserve simulation ownership and synchronized scene publication.
+- [ ] Move graphics submission to a dedicated owning render thread using buffered render packets, frame-safe resource retirement, and bounded frame latency.
+- [ ] Add worker command recording through backend-specific contexts: benchmark DX11 deferred contexts and support independent DX12/Vulkan command lists or buffers.
+- [ ] Remove confirmed buffer-reuse synchronization stalls with frame-safe constant, upload, and indirect-argument allocations.
+- [ ] Move expensive editor data preparation and asset processing onto workers while keeping window, input, and UI construction on their owning thread.
+- [ ] Record per-stage main-thread busy time, worker execution, queue delay, dependency waits, render-thread stalls, and frame latency in the Performance view and recordings.
+- [ ] Validate serial and parallel modes with matched-route captures, frame-time percentiles, worker scaling, and regression checks for scene loading, Play/Stop, streaming, transforms, shadows, and all renderers.
+
+## Static instance storage and streaming performance
+
+- [x] Add generic persistent GPU instance pools for saved terrain-layer and prefab placements.
+- [x] Keep object and instance IDs stable across visibility, sorting, LOD, and streaming changes; key batch caches by render compatibility instead of submission order.
+- [x] Compact visible instance IDs and indirect LOD draw arguments on the GPU for camera and shadow passes without rebuilding placement transforms.
+- [x] Upload only new or edited placement ranges and changed object metadata; preserve unchanged placement storage during camera movement.
+- [x] Bake tile indexes and render-ready instance records with static placement data to avoid runtime regrouping and transform conversion.
+- [x] Stream cell instance allocations with reusable capacity, bounded residency, and GPU-fence-safe retirement.
+- [x] Make procedural runtime placement generation explicit opt-in and preserve intentionally empty authored layers.
+- [x] Update component registries and render-item caches incrementally without invalidating unrelated scene data when tiles enter or leave.
+- [x] Maintain active physics work lists and synchronize static colliders only when changed; skip suspended terrain bodies during routine setup and post-step work.
+- [x] Record instance-cache miss reasons, buffer allocations, and placement upload bytes by cause and camera/shadow pass.
+- [x] Add matched-route movement and streaming benchmarks for upload spikes, frame-time percentiles, and CPU/GPU costs at fixed viewport and quality settings.
 
 ## Main-thread performance
 
-- [ ] Break down remaining main-render overhead and record worker execution, synchronization waits, and main-thread critical-path time.
-- [ ] Centralize grass updates around active nearby cells instead of updating every terrain field independently.
-- [ ] Prepare visibility, LOD, material records, and instance batches on workers using immutable scene snapshots.
-- [ ] Keep persistent grass placement buffers and stable instance IDs; update changed placements and compact visible IDs without rebuilding merged transforms.
-- [ ] Add GPU grass visibility, LOD classification, and indirect camera/shadow draws while preserving fades and off-screen shadows.
-- [ ] Separate gameplay updates and rendering with buffered snapshots so preparation and graphics submission can overlap safely.
-- [ ] Validate editor frame time, percentiles, main-thread usage, worker utilization, and GPU timings with fresh recordings of the same route and settings.
+- [x] Break down retained UI, portal/overlay work, worker execution, synchronization waits, and record packing in recordings and the Performance view.
+- [x] Centralize grass updates with viewer queries over cached terrain-field bounds and retire fields leaving the active region.
+- [x] Prepare visibility, fallback LOD classifications, and copied material/object records on workers.
+- [x] Retain grass placement buffers and stable member identities; reuse unchanged batches across camera and LOD draws.
+- [x] Add GPU grass visibility, LOD classification, complementary fades, and indirect camera/shadow draws across DX11, DX12, and Vulkan.
+- [x] Buffer immutable render records and overlap worker packing with graphics setup and GPU culling; keep scene mutation and graphics calls on their owning thread.
+- [x] Validate editor frame time, percentiles, main-thread usage, worker utilization, and GPU timings with a warmed full-editor capture.
 
 ## Landscape performance
 

@@ -8,6 +8,21 @@ spec.loader.exec_module(evaluation)
 
 
 class PerformanceEvaluationTests(unittest.TestCase):
+    def test_instance_upload_causes_and_late_metrics(self):
+        rows = [dict(type="frame_details", playing=True, frame_ms=10),
+                dict(type="frame_details", playing=True, frame_ms=20, instance_edited_bytes=64,
+                     shadow_instance_metadata_bytes=144)]
+        result = evaluation.evaluate(rows)
+        self.assertEqual(result["metrics"]["instance_edited_bytes"]["max"], 64)
+        self.assertIn("shadow_instance_metadata_bytes", evaluation.markdown(result))
+
+    def test_render_helper_metric_aliases(self):
+        result = evaluation.evaluate([dict(type="frame_details", playing=True, frame_ms=10,
+                                          grass_ms=1, grass_built=2, grass_scanned=40, render_submit_ms=3)])
+        self.assertEqual(result["grass_tiles_prepared"], 2)
+        self.assertEqual(result["grass_placements_indexed"], 40)
+        self.assertEqual(result["metrics"]["render_submission_ms"]["mean"], 3)
+
     def test_intervals_gpu_deduplication_and_missing_metrics(self):
         rows = [dict(type="frame_details", playing=True, dt_ms=10, frame_ms=8, gpu_valid=True,
                      gpu_sample_id=1, gpu_shadow_ms=4, main_submit_ms=6, render_submission_ms=2),
@@ -48,6 +63,20 @@ class PerformanceEvaluationTests(unittest.TestCase):
         result = evaluation.evaluate(rows)
         self.assertEqual(result["shadow_submission"]["low_cycle_density_spikes"], 1)
         self.assertIn("low cycle density", evaluation.markdown(result))
+
+    def test_opt_in_editor_trace_and_measured_hardware(self):
+        rows = [dict(schema_version=2, frame=0, playing=True, measured=False, frame_ms=100),
+                dict(schema_version=2, frame=1, playing=True, measured=True, frame_ms=10),
+                dict(type="sample", measured=False, process_cpu_pct=80),
+                dict(type="sample", measured=True, process_cpu_pct=5)]
+        result = evaluation.evaluate(rows)
+        self.assertEqual(result["frames"], 1)
+        self.assertEqual(result["effective_fps"], 100)
+        self.assertEqual(result["hardware"]["process_cpu_pct"]["mean"], 5)
+
+    def test_unfinished_warmup_is_not_reported_as_measured(self):
+        with self.assertRaises(ValueError):
+            evaluation.evaluate([dict(type="frame_details", measured=False, playing=True, frame_ms=20)])
 
     def test_partial_gpu_instrumentation_can_be_reported(self):
         result = evaluation.evaluate([dict(type="frame_details", playing=True, dt_ms=20,

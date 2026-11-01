@@ -1,4 +1,5 @@
 struct InstanceRecord { float4 sphere; uint4 meta; float4 lod; };
+struct PersistentInstance { float4 row0; float4 row1; float4 row2; uint4 identity; };
 struct OutputRecord { uint4 row0; uint4 row1; uint4 row2; };
 struct CullConstants
 {
@@ -11,22 +12,65 @@ struct CullConstants
 [[vk::push_constant]] CullConstants constants;
 [[vk::binding(0, 0)]] StructuredBuffer<InstanceRecord> inputInstances;
 [[vk::binding(1, 0)]] RWStructuredBuffer<OutputRecord> outputInstances;
+[[vk::binding(2, 0)]] StructuredBuffer<PersistentInstance> placementPool;
 #else
 cbuffer Constants : register(b0) { CullConstants constants; };
 StructuredBuffer<InstanceRecord> inputInstances : register(t0);
 RWStructuredBuffer<OutputRecord> outputInstances : register(u0);
+StructuredBuffer<PersistentInstance> placementPool : register(t1);
 #endif
 [numthreads(64,1,1)]
-void CSMain(uint3 id : SV_DispatchThreadID)
+void CSMain(uint3 id : SV_DispatchThreadID, uint3 group : SV_GroupID, uint3 thread : SV_GroupThreadID)
 {
     if (constants.counts.w != 0)
     {
         if (id.x == 0)
         {
             OutputRecord args;
-            args.row0 = uint4(constants.counts.y,0,constants.selection.y == 1 ? constants.counts.z : 0,0);
+            args.row0 = uint4(constants.counts.y,0,constants.selection.y >= 1 ? constants.counts.z : 0,0);
             args.row1 = 0; args.row2 = 0;
             outputInstances[0] = args;
+        }
+        return;
+    }
+    if(constants.selection.y == 2)
+    {
+        if(group.x >= constants.counts.x) return;
+        InstanceRecord world=inputInstances[group.x*3];
+        InstanceRecord bounds=inputInstances[group.x*3+1];
+        InstanceRecord lodData=inputInstances[group.x*3+2];
+        if(constants.selection.x >= 0)
+        {
+            const float distance=length(lodData.sphere.xyz-constants.cameraPosition.xyz);
+            const float width=max(.001,min(.5,(lodData.lod.y-lodData.lod.x)*.25));
+            if((constants.selection.x==0 && distance>lodData.lod.x+width) ||
+               (constants.selection.x==1 && (distance<lodData.lod.x-width || distance>lodData.lod.y+width)) ||
+               (constants.selection.x==2 && distance<lodData.lod.y-width)) return;
+        }
+        const float3 localCenter=(bounds.sphere.xyz+bounds.lod.xyz)*.5;
+        const float3 localExtent=(bounds.lod.xyz-bounds.sphere.xyz)*.5;
+        const float3 worldX=world.sphere.xyz,worldY=asfloat(world.meta.xyz),worldZ=world.lod.xyz;
+        const float4 worldRow1=asfloat(world.meta);
+        float4 rows[4];
+        [unroll] for(uint row=0;row<4;++row) rows[row]=constants.viewProjection[row];
+        float4 planes[6]={rows[3]+rows[0],rows[3]-rows[0],rows[3]+rows[1],rows[3]-rows[1],rows[2],rows[3]-rows[2]};
+        for(uint index=thread.x;index<bounds.meta.y;index+=64)
+        {
+            const uint placementIndex=bounds.meta.x+index;
+            PersistentInstance placement=placementPool[placementIndex];
+            const float4 center=float4(localCenter,1);
+            const float3 instanceCenter=float3(dot(placement.row0,center),dot(placement.row1,center),dot(placement.row2,center));
+            const float3 instanceExtent=float3(dot(abs(placement.row0.xyz),localExtent),dot(abs(placement.row1.xyz),localExtent),dot(abs(placement.row2.xyz),localExtent));
+            const float4 worldCenter=float4(dot(world.sphere,float4(instanceCenter,1)),dot(worldRow1,float4(instanceCenter,1)),dot(world.lod,float4(instanceCenter,1)),1);
+            const float3 worldExtent=float3(dot(abs(worldX),instanceExtent),dot(abs(worldY),instanceExtent),dot(abs(worldZ),instanceExtent));
+            const float radius=length(worldExtent);
+            bool visible=true;
+            [unroll] for(uint plane=0;plane<6;++plane)
+                if(dot(planes[plane],worldCenter)<-radius*length(planes[plane].xyz)) visible=false;
+            if(!visible) continue;
+            uint destination; InterlockedAdd(outputInstances[0].row0.y,1,destination);
+            OutputRecord result; result.row0=uint4(bounds.meta.z,placementIndex,0,0); result.row1=placement.identity; result.row2=0;
+            outputInstances[destination+1]=result;
         }
         return;
     }

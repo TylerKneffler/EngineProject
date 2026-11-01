@@ -409,6 +409,8 @@ void PerformanceView::SetFrameTimings(const EditorFrameProfileSample& sample,
     if(sample.deltaSeconds>0 && std::isfinite(sample.deltaSeconds))
     {
         const double interval=sample.deltaSeconds*1000.;
+        m_editorFrameRate.Add(interval);
+        m_displayFrameRate=static_cast<float>(m_editorFrameRate.Fps());
         m_frameIntervals.push_back(interval); m_frameIntervalTotal+=interval; m_statisticsElapsed+=interval;
         while(m_frameIntervals.size()>1 && (m_frameIntervalTotal>5000. || m_frameIntervals.size()>600))
         { m_frameIntervalTotal-=m_frameIntervals.front(); m_frameIntervals.pop_front(); }
@@ -417,6 +419,7 @@ void PerformanceView::SetFrameTimings(const EditorFrameProfileSample& sample,
     }
     if (IsRecording())
     {
+        m_recording->Frame(m_lastUiFrameRate,sample.deltaSeconds*1000.,m_lastPanelDrawMs);
         if (!IsOpen()) Refresh(sample.deltaSeconds > 0.f ? 1.f / sample.deltaSeconds : 0.f);
         m_recording->FrameDetails(
             EditorFrameProfiler::SerializeFields(sample, m_scene, renderer));
@@ -558,6 +561,8 @@ void PerformanceView::DrawTimings(IEditorUi& ui)
         ui.ValueLabel("Shadow draws: explicit instances / automatic / ordinary",
             (std::to_string(shadow.explicitInstanceDraws)+" / "+std::to_string(shadow.automaticDraws)+" / "+std::to_string(shadow.ordinaryDraws)).c_str());
         ui.ValueLabel("Shadow submission thread cycles", std::to_string(shadow.submissionThreadCycles).c_str());
+        ui.ValueLabel("Shadow instance new / edited / growth bytes",(FormatBytes(shadow.instances.newBytes)+" / "+FormatBytes(shadow.instances.editedBytes)+" / "+FormatBytes(shadow.instances.growthBytes)).c_str());
+        ui.ValueLabel("Shadow instance metadata / allocations",(FormatBytes(shadow.instances.metadataBytes)+" / "+std::to_string(shadow.instances.allocations)).c_str());
         drawGroup("Shadows (CPU)", {
             { "Total", shadow.totalMs },
             { "Scene preparation", shadow.scenePreparationMs },
@@ -573,6 +578,15 @@ void PerformanceView::DrawTimings(IEditorUi& ui)
             { "Portals", shadow.portalMs }
         });
     }
+    ui.ValueLabel("GPU grass batches / reused batches",(std::to_string(m_renderCpu.gpuGrassBatches)+" / "+std::to_string(m_renderCpu.grassBatchCacheHits)).c_str());
+    ui.ValueLabel("Grass batch placement uploads",FormatBytes(m_renderCpu.grassPlacementUploadBytes).c_str());
+    ui.ValueLabel("Instance pool resident",FormatBytes(m_renderCpu.instances.residentBytes).c_str());
+    ui.ValueLabel("Instance new / edited / growth bytes",(FormatBytes(m_renderCpu.instances.newBytes)+" / "+FormatBytes(m_renderCpu.instances.editedBytes)+" / "+FormatBytes(m_renderCpu.instances.growthBytes)).c_str());
+    ui.ValueLabel("Instance metadata / visible IDs",(FormatBytes(m_renderCpu.instances.metadataBytes)+" / "+FormatBytes(m_renderCpu.instances.visibleIdBytes)).c_str());
+    ui.ValueLabel("Custom shader instance fallback uploads",FormatBytes(m_renderCpu.instances.fallbackBytes).c_str());
+    ui.ValueLabel("Instance allocations / retirements",(std::to_string(m_renderCpu.instances.allocations)+" / "+std::to_string(m_renderCpu.instances.retirements)).c_str());
+    ui.ValueLabel("Instance misses: cold / membership / metadata / mode",(std::to_string(m_renderCpu.instances.cacheCold)+" / "+std::to_string(m_renderCpu.instances.cacheMembership)+" / "+std::to_string(m_renderCpu.instances.cacheMetadata)+" / "+std::to_string(m_renderCpu.instances.cacheMode)).c_str());
+    ui.ValueLabel("Worker jobs / tasks",(std::to_string(m_renderCpu.workerJobs)+" / "+std::to_string(m_renderCpu.workerTasks)).c_str());
     drawGroup("Main render passes (all views, CPU)", {
         {"Measured total",m_renderCpu.totalMs},{"Camera / lighting / setup",m_renderCpu.startupMs},
         {"Terrain occluder preparation",m_renderCpu.terrainPreparationMs},{"View culling",m_renderCpu.cullingMs},
@@ -670,7 +684,6 @@ void PerformanceView::StartRecording()
             << "; GPU engine order: 3D, compute, copy, video decode, video encode";
         m_recording->Event("recorder", "info", hardware.str());
         m_appliedSamplerVersion = 0;
-        m_lastFrame = {};
     }
     catch (const std::exception& error)
     {
@@ -818,7 +831,7 @@ void PerformanceView::DrawOverview(IEditorUi& ui, float frameRate)
     std::ostringstream frame;
     frame << std::fixed << std::setprecision(1) << frameRate << " FPS  |  "
         << (frameRate > 0.f ? 1000.f / frameRate : 0.f) << " ms";
-    ui.ValueLabel("Editor frames", frame.str().c_str());
+    ui.ValueLabel("Editor FPS (0.5 s)", frame.str().c_str());
     if (m_visualMode == 2 || m_visualMode == 3)
     {
         std::vector<float> frames(m_frameHistory.begin(), m_frameHistory.end());
@@ -1072,31 +1085,11 @@ void PerformanceView::DrawShadows(IEditorUi& ui)
 void PerformanceView::DrawPanel(IEditorUi& ui)
 {
     const auto drawStart = std::chrono::steady_clock::now();
-    const float uiFrameRate = ui.FrameRate();
-    const auto now = std::chrono::steady_clock::now();
-    const double elapsedMs = m_lastFrame.time_since_epoch().count()
-        ? std::chrono::duration<double, std::milli>(now - m_lastFrame).count()
-        : 0.0;
-    m_lastFrame = now;
-    if (elapsedMs > 0.0)
-    {
-        m_recentFrameMs.push_back(elapsedMs);
-        m_recentFrameTotalMs += elapsedMs;
-        while (m_recentFrameMs.size() > 1 &&
-            (m_recentFrameTotalMs > 500.0 || m_recentFrameMs.size() > 30))
-        {
-            m_recentFrameTotalMs -= m_recentFrameMs.front();
-            m_recentFrameMs.pop_front();
-        }
-        m_displayFrameRate = static_cast<float>(
-            1000.0 * m_recentFrameMs.size() / m_recentFrameTotalMs);
-    }
+    m_lastUiFrameRate=ui.FrameRate();
     const float frameRate = m_displayFrameRate;
     const auto finishDraw = [&] {
         m_lastPanelDrawMs = std::chrono::duration<double, std::milli>(
             std::chrono::steady_clock::now() - drawStart).count();
-        if (m_recording && elapsedMs > 0.0)
-            m_recording->Frame(uiFrameRate, elapsedMs, m_lastPanelDrawMs);
     };
     const bool sampleActive = m_open ||
         (m_recording && m_recording->IsRecording());

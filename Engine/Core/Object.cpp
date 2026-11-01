@@ -69,7 +69,7 @@ Object::~Object()
 void Object::NotifyStructureChanged()
 {
     if (OwnerScene)
-        OwnerScene->NotifyStructureChanged();
+        OwnerScene->NotifyStructureChanged(this);
 }
 
 #pragma region Lifecycle methods

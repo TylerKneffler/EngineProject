@@ -98,7 +98,7 @@ public:
     void SetStructuredBuffer(uint32_t slot, const Engine::Graphics::IGraphicsBuffer* buffer) override;
     bool SetComputePipeline(const Engine::Graphics::IPipelineState* pipeline) override;
     void SetComputeConstants(const void* data, uint32_t size) override;
-    void SetComputeReadBuffer(const Engine::Graphics::IGraphicsBuffer* buffer) override;
+    void SetComputeReadBuffer(const Engine::Graphics::IGraphicsBuffer* buffer, uint32_t slot = 0) override;
     void SetComputeWriteBuffer(const Engine::Graphics::IGraphicsBuffer* buffer) override;
     void DispatchCompute(uint32_t x, uint32_t y = 1, uint32_t z = 1) override;
     void StorageBarrier(const Engine::Graphics::IGraphicsBuffer* buffer) override;

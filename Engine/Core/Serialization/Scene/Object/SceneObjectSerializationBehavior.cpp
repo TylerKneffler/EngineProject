@@ -189,6 +189,11 @@ bool DeserializeExpandedObject(
         object.Components.push_back(component);
     }
 
+    // Deserialization attaches components directly rather than using
+    // Object::AddComponent. Publish the completed owner to existing typed,
+    // render and update caches, including caches warmed by a previous scene.
+    object.NotifyStructureChanged();
+
     // Convert old serialized rig payloads after the component loop so the
     // new components can participate in normal runtime evaluation.
     if (auto* legacy = object.GetComponent<Engine::Components::RigController>())

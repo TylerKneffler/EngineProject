@@ -172,6 +172,7 @@ void PerformanceRecording::Frame(float reportedFrameRate, double elapsedMs,
         << (elapsedMs > 0.0 ? 1000.0 / elapsedMs : 0.0)
         << ",\"frame_ms\":" << elapsedMs
         << ",\"ui_fps\":" << reportedFrameRate
+        << ",\"fps_scope\":\"editor_frame_interval\""
         << ",\"panel_draw_ms\":" << panelDrawMs << "}\n";
 }
 }

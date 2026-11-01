@@ -11,13 +11,25 @@
 
 int main()
 {
+    Engine::Editor::FrameRateWindow frameRate;
+    for(int frame=0;frame<200;++frame) frameRate.Add(10);
+    if(frameRate.Fps()!=100) throw std::runtime_error("Frame rate must count frame intervals");
+    frameRate.Add(5000);
+    if(frameRate.Fps()!=.2) throw std::runtime_error("Frame rate must include idle waits");
+    for(int frame=0;frame<100;++frame) frameRate.Add(10);
+    frameRate.Add(-1); frameRate.Add(std::numeric_limits<double>::quiet_NaN());
+    if(frameRate.Fps()!=100) throw std::runtime_error("Frame rate must recover after idle and ignore invalid intervals");
     const auto stats=Engine::Editor::SummarizeFrames({10,20,30,40,0,-1,std::numeric_limits<double>::quiet_NaN()});
     if(stats.meanMs!=25 || stats.fps!=40 || stats.p95Ms!=40 || stats.p99Ms!=40 || stats.over60BudgetPercent!=75)
         throw std::runtime_error("Frame statistics must use mean intervals and ignore invalid samples");
     Engine::Rendering::RenderCpuTimings view, all;
     view.totalMs=3; view.views=1; view.physicalDraws=4;
+    view.workerWaitMs=.25; view.workerTasks=3; view.gpuGrassBatches=2; view.grassPlacementUploadBytes=48;
+    view.instances.newBytes=64; view.instances.residentBytes=4096; view.instances.cacheMembership=1;
     all+=view; all+=view;
-    if(all.totalMs!=6 || all.views!=2 || all.physicalDraws!=8)
+    if(all.instances.newBytes!=128 || all.instances.residentBytes!=4096 || all.instances.cacheMembership!=2)
+        throw std::runtime_error("Instance storage counters or residency gauges aggregated incorrectly");
+    if(all.totalMs!=6 || all.views!=2 || all.physicalDraws!=8 || all.workerWaitMs!=.5 || all.workerTasks!=6 || all.gpuGrassBatches!=4 || all.grassPlacementUploadBytes!=96)
         throw std::runtime_error("Rendering measurements did not aggregate multiple views");
     const auto path = std::filesystem::current_path() /
         "engine-performance-recording-test.jsonl";

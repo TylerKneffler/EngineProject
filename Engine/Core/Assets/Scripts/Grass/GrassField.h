@@ -68,6 +68,8 @@ public:
     float fadeDuration = .35f;
     PROPERTY(Inspector, EditAnywhere, Category = "Grass | LOD")
     bool gpuLodSelection = true;
+    PROPERTY(Inspector, EditAnywhere, Category = "Grass | Tiles")
+    bool allowProceduralGeneration = false;
     PROPERTY(Inspector, EditAnywhere, Category = "Grass | LOD", ClampMin = "0")
     float distanceFadeWidth = 2.f;
 
@@ -111,11 +113,12 @@ private:
         std::vector<Placement> placements;
         size_t placement = 0;
         std::shared_ptr<Engine::Components::Mesh::InstanceData> instances;
-        uint32_t shortCount = 0;
+        uint32_t shortCount = 0,totalCount=0;
+        bool prepared=false;
         glm::vec3 minimum{0}, maximum{0};
     };
     std::map<Tile, TileState> m_tiles;
-    std::map<Tile, std::vector<Placement>> m_placementTiles;
+    const Engine::Components::TerrainObjectLayer::PreparedTiles* m_placementTiles=nullptr;
     std::optional<BuildJob> m_build;
     const Engine::Components::TerrainObjectLayer* m_indexedLayer = nullptr;
     uint64_t m_placementRevision = 0;

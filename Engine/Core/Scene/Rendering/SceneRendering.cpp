@@ -1798,39 +1798,46 @@ void Scene::PrepareRenderFrame()
     if (!m_graphicsProvider || !m_lightDataMapped || !m_boneDataMapped)
         return;
 
-    if (m_frameLookupRevision != GetStructureRevision() || m_frameLookupEditPose != m_editorMeshEditPose)
+    if(m_frameLookupRevision!=GetStructureRevision() || m_frameLookupEditPose!=m_editorMeshEditPose || m_frameLookupFull)
     {
-    m_frameComponentLookupScratch.clear();
-    m_frameComponentLookupScratch.reserve(m_objects.size());
-    m_frameSpatialManipulatorScratch.clear();
-    m_frameSpatialManipulatorScratch.reserve(m_objects.size());
-    for (const auto& object : m_objects)
-    {
-        FrameComponentLookup lookup{};
-        lookup.object = object.get();
-        if (lookup.object)
+        const auto describe=[&](Engine::Core::Object* object) {
+            FrameComponentLookup lookup{}; lookup.object=object;
+            lookup.mesh=object->GetComponent<Engine::Components::Mesh>();
+            lookup.sprite=object->GetComponent<Engine::Components::Sprite>();
+            lookup.material=object->GetComponent<Engine::Components::Material>();
+            lookup.spatialManipulator=object->GetComponent<Engine::Components::SpatialManipulator>();
+            lookup.skinnedMesh=m_editorMeshEditPose ? nullptr:object->GetComponent<Engine::Components::SkinnedMesh>();
+            lookup.bakedLighting=object->GetComponent<Engine::Rendering::BakedLightingData>(); return lookup;
+        };
+        if(m_frameLookupFull || m_frameLookupEditPose!=m_editorMeshEditPose)
         {
-            lookup.mesh = lookup.object->GetComponent<
-                Engine::Components::Mesh>();
-            lookup.sprite = lookup.object->GetComponent<
-                Engine::Components::Sprite>();
-            lookup.material = lookup.object->GetComponent<
-                Engine::Components::Material>();
-            lookup.spatialManipulator = lookup.object->GetComponent<
-                Engine::Components::SpatialManipulator>();
-            lookup.skinnedMesh = m_editorMeshEditPose ? nullptr :
-                lookup.object->GetComponent<Engine::Components::SkinnedMesh>();
-            lookup.bakedLighting = lookup.object->GetComponent<
-                Engine::Rendering::BakedLightingData>();
-            if (lookup.spatialManipulator)
-                m_frameSpatialManipulatorScratch.push_back(
-                    lookup.spatialManipulator);
-
+            m_frameComponentLookupScratch.clear(); m_frameLookupIndices.clear(); m_frameLookupFree.clear();
+            m_frameComponentLookupScratch.reserve(m_objects.size());
+            for(const auto& object:m_objects)
+            { m_frameLookupIndices[object.get()]=m_frameComponentLookupScratch.size(); m_frameComponentLookupScratch.push_back(describe(object.get())); }
         }
-        m_frameComponentLookupScratch.push_back(lookup);
-    }
-        m_frameLookupRevision = GetStructureRevision();
-        m_frameLookupEditPose = m_editorMeshEditPose;
+        else for(auto* owner:m_frameLookupDirty)
+        {
+            auto found=m_frameLookupIndices.find(owner);
+            if(!m_componentRegistry.Contains(owner))
+            {
+                if(found!=m_frameLookupIndices.end())
+                { m_frameComponentLookupScratch[found->second]={}; m_frameLookupFree.push_back(found->second); m_frameLookupIndices.erase(found); }
+                continue;
+            }
+            if(found!=m_frameLookupIndices.end()) m_frameComponentLookupScratch[found->second]=describe(owner);
+            else
+            {
+                size_t index=m_frameComponentLookupScratch.size();
+                if(m_frameLookupFree.empty()) m_frameComponentLookupScratch.push_back(describe(owner));
+                else { index=m_frameLookupFree.back(); m_frameLookupFree.pop_back(); m_frameComponentLookupScratch[index]=describe(owner); }
+                m_frameLookupIndices[owner]=index;
+            }
+        }
+        m_frameSpatialManipulatorScratch.clear();
+        for(const auto& lookup:m_frameComponentLookupScratch) if(lookup.spatialManipulator) m_frameSpatialManipulatorScratch.push_back(lookup.spatialManipulator);
+        m_frameLookupDirty.clear(); m_frameLookupFull=false;
+        m_frameLookupRevision=GetStructureRevision(); m_frameLookupEditPose=m_editorMeshEditPose;
     }
     if(m_materialCacheStructureRevision!=GetStructureRevision())
     {
@@ -2222,6 +2229,7 @@ void Scene::PrepareRenderFrame()
                 if (auto* previous = source->GetPreviousRuntimeLodMesh())
                 {
                     draw.mesh = previous;
+                    draw.previousLod=true;
                     previous->grassShadowCaster=source->grassShadowCaster;
                     draw.geometryFade = source->GetRuntimeGeometryFade(true);
                     m_frameRenderItems.push_back(draw);
@@ -2251,8 +2259,31 @@ void Scene::PrepareRenderFrame()
     m_lastSkinnedObjectCount = skinPaletteSlot;
     if (m_frameRenderItems.size() > std::numeric_limits<uint32_t>::max())
         throw std::runtime_error("Prepared draw count exceeds renderer index range");
-    EnsureObjectRenderCapacity(
-        static_cast<uint32_t>(m_frameRenderItems.size()));
+    if(m_renderObjectSlotsRevision!=GetStructureRevision())
+    {
+        std::unordered_set<uintptr_t> owners,charts;
+        for(const auto& object:m_objects) owners.insert(uintptr_t(object.get()));
+        for(auto* chart:m_frameSpatialManipulatorScratch) charts.insert(uintptr_t(chart));
+        for(auto it=m_renderObjectSlots.begin();it!=m_renderObjectSlots.end();)
+            if(!owners.count(std::get<0>(it->first)) || (std::get<2>(it->first) && !charts.count(std::get<2>(it->first))))
+            { m_freeRenderObjectSlots.push_back(it->second); it=m_renderObjectSlots.erase(it); }
+            else ++it;
+        m_renderObjectSlotsRevision=GetStructureRevision();
+    }
+    for(auto& item:m_frameRenderItems)
+    {
+        RenderObjectKey key{uintptr_t(item.object),item.gpuLod,uintptr_t(item.traversalChartPortal),item.previousLod};
+        auto found=m_renderObjectSlots.find(key);
+        if(found==m_renderObjectSlots.end())
+        {
+            uint32_t index=m_renderObjectSlotCount;
+            if(m_freeRenderObjectSlots.empty()) ++m_renderObjectSlotCount;
+            else { index=m_freeRenderObjectSlots.back(); m_freeRenderObjectSlots.pop_back(); }
+            found=m_renderObjectSlots.emplace(key,index).first;
+        }
+        item.objectSlot=found->second;
+    }
+    EnsureObjectRenderCapacity(m_renderObjectSlotCount);
     if (m_updateProfilingEnabled)
     {
         const auto ms = [](auto first, auto last)
@@ -2359,6 +2390,14 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         return;
     }
 
+    const auto instanceSerial=m_graphicsProvider->GetContextFactory()->GetPreparedFrameSerial();
+    const bool newInstanceFrame=m_instanceViewSerial!=instanceSerial;
+    if(m_instanceViewSerial!=instanceSerial) { m_instanceViewSerial=instanceSerial; m_instanceViewUses.clear(); }
+    const uint32_t instanceViewOrdinal=m_instanceViewUses[{cam,shadowOnly}]++;
+    m_persistentInstances.BeginFrame(m_graphicsProvider);
+    const auto poolBefore=m_persistentInstances.stats;
+    m_lastRenderCpuTimings.instances.retirements=newInstanceFrame ? poolBefore.retirements:0;
+    m_lastRenderCpuTimings.instances.residentBytes=m_persistentInstances.ResidentBytes();
     glm::mat4 authoredCameraWorld(1.f);
     bool hasAuthoredCameraWorld = false;
     bool cameraInsideInteriorOnlyWarp = false;
@@ -3359,7 +3398,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     for (const ViewRenderItem& sortedItem : renderObjects)
     {
         const FrameRenderItem* renderItem = sortedItem.source;
-        slot=static_cast<UINT>(renderItem-m_frameRenderItems.data());
+        slot=renderItem->objectSlot;
         Engine::Core::Object* obj = renderItem->object;
         Engine::Components::Mesh* mesh = renderItem->mesh;
         Engine::Components::Sprite* sprite = renderItem->sprite;
@@ -4127,37 +4166,33 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     }
     if (shadowOnly) m_shadowDebugSnapshot.submittedCasterDrawCount = 0;
 
-    const auto recordWaitStart=RenderClock::now();
-    for(auto& job:recordSnapshot.jobs)
-    {
-        const auto dirty=job.get(); firstDirtyObject=std::min(firstDirtyObject,dirty.first); lastDirtyObject=std::max(lastDirtyObject,dirty.last);
-        m_lastRenderCpuTimings.recordPackingMs+=dirty.elapsedMs;
-    }
-    recordSnapshot.jobs.clear();
-    m_lastRenderCpuTimings.recordWaitMs=std::chrono::duration<double,std::milli>(RenderClock::now()-recordWaitStart).count();
-    // DX11 buffers use CPU-side shadow storage. Upload the complete object
-    // array once, then keep structured-buffer binding free of hidden copies.
-    if (!shadowOnly && !preparedDraws.empty())
-    {
+    bool recordsUploaded=shadowOnly;
+    const auto ensureRecordsUploaded=[&]() {
+        if(recordsUploaded) return;
+        const auto recordWaitStart=RenderClock::now();
+        for(auto& job:recordSnapshot.jobs)
+        {
+            const auto dirty=job.get(); firstDirtyObject=std::min(firstDirtyObject,dirty.first); lastDirtyObject=std::max(lastDirtyObject,dirty.last);
+            m_lastRenderCpuTimings.recordPackingMs+=dirty.elapsedMs;
+        }
+        recordSnapshot.jobs.clear();
+        m_lastRenderCpuTimings.recordWaitMs+=std::chrono::duration<double,std::milli>(RenderClock::now()-recordWaitStart).count();
         const auto uploadStart=RenderClock::now();
         if(firstDirtyObject!=UINT32_MAX)
         {
-            const uint64_t changedBytes=uint64_t(lastDirtyObject-firstDirtyObject+1)*sizeof(ObjectGPUData);
-            m_objectDataBuffer->FlushMappedWrites(uint64_t(firstDirtyObject)*sizeof(ObjectGPUData),changedBytes);
-            m_lastObjectDataUploadBytes+=changedBytes;
-            m_lastRenderCpuTimings.changedUploadBytes+=changedBytes;
+            const uint64_t bytes=uint64_t(lastDirtyObject-firstDirtyObject+1)*sizeof(ObjectGPUData);
+            m_objectDataBuffer->FlushMappedWrites(uint64_t(firstDirtyObject)*sizeof(ObjectGPUData),bytes);
+            m_lastObjectDataUploadBytes+=bytes; m_lastRenderCpuTimings.changedUploadBytes+=bytes;
         }
         m_lastRenderCpuTimings.uploadMs+=std::chrono::duration<double,std::milli>(RenderClock::now()-uploadStart).count();
-        context->SetStructuredBuffer(6, m_lightDataBuffer.get());
-        context->SetStructuredBuffer(7, m_objectDataBuffer.get());
-        context->SetStructuredBuffer(8, m_boneDataBuffer.get());
-        context->SetStructuredBuffer(10, m_emptyMorphDeltaBuffer.get());
-        context->SetStructuredBuffer(11, m_emptyMorphWeightBuffer.get());
-        if (clusteredLightingEnabled)
-        {
-            context->SetStructuredBuffer(14, m_clusterHeaderBuffer.get());
-            context->SetStructuredBuffer(15, m_clusterLightIndexBuffer.get());
-        }
+        recordsUploaded=true;
+    };
+    if(!shadowOnly && !preparedDraws.empty())
+    {
+        context->SetStructuredBuffer(6,m_lightDataBuffer.get()); context->SetStructuredBuffer(7,m_objectDataBuffer.get());
+        context->SetStructuredBuffer(8,m_boneDataBuffer.get()); context->SetStructuredBuffer(10,m_emptyMorphDeltaBuffer.get());
+        context->SetStructuredBuffer(11,m_emptyMorphWeightBuffer.get());
+        if(clusteredLightingEnabled) { context->SetStructuredBuffer(14,m_clusterHeaderBuffer.get()); context->SetStructuredBuffer(15,m_clusterLightIndexBuffer.get()); }
     }
 
     const auto isSpatialManipulatorCarrierDraw = [&](const PreparedDraw& draw)
@@ -4177,10 +4212,32 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
 
     const auto submitGeometry = [&](const PreparedDraw& draw)
     {
+        if(draw.mesh && draw.mesh->IsInstanced())
+        {
+            auto& instances=*draw.mesh->GetInstanceData();
+            if(instances.slicesRevision!=instances.revision)
+            {
+                for(auto& slice:instances.slices) m_persistentInstances.Retire(std::move(slice.buffer));
+                instances.slices.clear(); instances.slicesRevision=instances.revision;
+            }
+            for(const auto& range:draw.mesh->GetInstanceRanges())
+                if(range.instanceCount && !draw.mesh->GetInstanceBuffer(range.firstInstance))
+                {
+                    Engine::Components::Mesh::InstanceData::Slice slice;
+                    slice.firstInstance=range.firstInstance; slice.instanceCount=range.instanceCount;
+                    slice.buffer=m_graphicsProvider->GetBufferFactory()->CreateStaticShaderResource(
+                        size_t(range.instanceCount)*sizeof(Engine::Components::Mesh::InstanceTransform),
+                        instances.transforms.data()+range.firstInstance,sizeof(Engine::Components::Mesh::InstanceTransform));
+                    ++m_lastRenderCpuTimings.instances.allocations;
+                    m_lastRenderCpuTimings.instances.fallbackBytes+=slice.buffer->GetSize();
+                    instances.slices.push_back(std::move(slice));
+                }
+        }
         context->SetStructuredBuffer(10, draw.morphDeltaBuffer);
         context->SetStructuredBuffer(11, draw.morphWeightBuffer);
         context->SetStructuredBuffer(45, draw.mesh && draw.mesh->IsInstanced()
             ? draw.mesh->GetInstanceBuffer() : m_emptyMorphDeltaBuffer.get());
+        context->SetStructuredBuffer(46,m_emptyMorphDeltaBuffer.get());
         context->SetVertexBuffer(0, draw.vertexBuffer, draw.vertexStride, 0);
         if (draw.mesh && draw.mesh->IsInstanced())
         {
@@ -4272,8 +4329,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             {
                 const auto& sourceRange=sourceMesh->GetInstanceRanges()[rangeIndex];
                 if(!sourceRange.vertexCount) continue;
-                auto& members=m_explicitInstanceCache.members; members.clear();
-                std::vector<uint32_t> memberDraws;
+                std::vector<Engine::Rendering::InstanceTileRecord> tiles;
                 uint32_t count=0;
                 for(auto index:group.members)
                 {
@@ -4282,12 +4338,26 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                     const auto& range=draw.mesh->GetInstanceRanges()[rangeIndex];
                     if(!range.instanceCount) continue;
                     const auto& data=draw.mesh->GetInstanceData();
-                    members.push_back({data,data->revision,draw.drawData.objectIndex,range.firstInstance,range.instanceCount,
-                        draw.objectData.world,draw.mesh->GetInstanceSource()->GetBoundsMin(),draw.mesh->GetInstanceSource()->GetBoundsMax(),draw.gpuLodDistances});
-                    memberDraws.push_back(index); count+=range.instanceCount;
+                    const auto base=m_persistentInstances.Register(data,data->revision,data->transforms.data(),uint32_t(data->transforms.size()),data->stableId,data->placementIds);
+                    Engine::Rendering::InstanceTileRecord tile{};
+                    for(int row=0;row<3;++row) for(int column=0;column<4;++column) tile.world[row][column]=draw.objectData.world[column][row];
+                    auto minimum=draw.mesh->GetInstanceSource()->GetBoundsMin(),maximum=draw.mesh->GetInstanceSource()->GetBoundsMax();
+                    if(gpuLod) for(int lod=1;lod<=draw.gpuMaximumLod;++lod)
+                    {
+                        const auto* variant=draw.mesh->GetRuntimeLodMesh(lod)->GetInstanceSource();
+                        minimum=glm::min(minimum,variant->GetBoundsMin()); maximum=glm::max(maximum,variant->GetBoundsMax());
+                    }
+                    tile.minimum=glm::vec4(minimum,0); tile.maximum=glm::vec4(maximum,0);
+                    tile.range={base+range.firstInstance,range.instanceCount,draw.drawData.objectIndex,uint32_t(draw.gpuMaximumLod)};
+                    tile.origin=draw.objectData.world[3]; tile.lod={draw.gpuLodDistances,0,0};
+                    tiles.push_back(tile); count+=range.instanceCount;
                 }
                 if(!count) continue;
-                bool gpu=gpuInstanceCulling && context->SupportsIndirectDraws() && (count>=32 || representative.gpuLod>=0);
+                // Camera sorting must not invalidate unchanged tile metadata.
+                std::sort(tiles.begin(),tiles.end(),[](const auto& first,const auto& second) {
+                    return std::tie(first.range.z,first.range.x)<std::tie(second.range.z,second.range.x);
+                });
+                bool gpu=gpuInstanceCulling && context->SupportsIndirectDraws() && (count>=32 || gpuLod);
                 if(gpu && !m_instanceCullAttempted)
                 {
                     m_instanceCullAttempted=true;
@@ -4298,66 +4368,65 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 gpu=gpu && m_instanceCullPipeline;
                 if(gpu) gpu=context->BeginComputePass();
                 DrawCBData constants=representative.drawData;
-                constants.objectIndex=objectBase; constants.flags|=uint32_t(residentLod)<<21; constants.flags|=gpu ? 0x01000000u:0x02000000u;
+                constants.objectIndex=objectBase; constants.flags|=(uint32_t(residentLod)<<21)|0x00080000u;
                 if(shadowOnly) { constants.lightCount=0; constants.flags&=~kClusteredLightingFlag; }
+                Engine::Rendering::PersistentInstanceBatches::Key key{
+                    uintptr_t(cam),uintptr_t(shadowOnly),instanceViewOrdinal,objectBase/m_objectCapacity,
+                    uintptr_t(sourceMesh->GetGraphicsBuffer()),uintptr_t(pipeline),sourceRange.firstVertex,sourceRange.vertexCount,
+                    uintptr_t(residentLod),representative.drawData.flags,representative.drawData.lightCount,uintptr_t(representative.doubleSided),uintptr_t(representative.castsShadow)};
+                for(auto* texture:representative.textures) key.push_back(uintptr_t(texture));
+                if(!automaticInstancing) key.push_back(uintptr_t(representative.object));
                 const auto uploadStart=RenderClock::now();
-                auto& buffers=m_explicitInstanceCache.Acquire(m_graphicsProvider,gpu,&constants,m_lastRenderCpuTimings.changedUploadBytes,
-                    [&](std::vector<Engine::Rendering::ExplicitInstanceRecord>& records) {
-                    records.resize(size_t(count)*2);
-                    std::vector<size_t> offsets(members.size()+1,0);
-                    for(size_t i=0;i<members.size();++i) offsets[i+1]=offsets[i]+members[i].count;
-                    Engine::Rendering::RenderJobs::Get().For(members.size(),count>=1024 ? 2:SIZE_MAX,[&](size_t member) {
-                        const auto& key=members[member];
-                        const auto& data=preparedDraws[memberDraws[member]].mesh->GetInstanceData();
-                        for(uint32_t i=0;i<key.count;++i)
-                        {
-                            const auto& source=data->transforms[key.first+i];
-                            auto& transform=records[(offsets[member]+i)*2];
-                            auto& metadata=records[(offsets[member]+i)*2+1]; metadata={};
-                            std::memcpy(transform.rows,source.rows,sizeof(transform.rows));
-                            if(!gpu) std::memcpy(&metadata.rows[0].x,&key.object,4);
-                            else
-                            {
-                                glm::mat4 affine(1);
-                                for(int row=0;row<3;++row) for(int column=0;column<4;++column) affine[column][row]=source.rows[row][column];
-                                const auto bounds=Engine::Rendering::TransformBounds(key.minimum,key.maximum,key.world*affine);
-                                metadata.rows[0]=glm::vec4((bounds.minimum+bounds.maximum)*.5f,glm::length((bounds.maximum-bounds.minimum)*.5f));
-                                const auto origin=glm::vec3(key.world[3]);
-                                const glm::uvec4 ids(key.object,key.first+i,glm::floatBitsToUint(origin.x),glm::floatBitsToUint(origin.y));
-                                std::memcpy(&metadata.rows[1],&ids,sizeof(ids));
-                                metadata.rows[2]={key.lodDistances,origin.z,0};
-                            }
-                        }
-                    });
-                });
+                const auto poolAllocations=m_persistentInstances.stats.allocations;
+                auto* pool=m_persistentInstances.Upload(m_graphicsProvider);
+                auto& buffers=m_persistentBatches.Acquire(m_graphicsProvider,std::move(key),gpu,tiles,&constants,m_persistentInstances,m_lastRenderCpuTimings.changedUploadBytes);
                 m_lastRenderCpuTimings.uploadMs+=std::chrono::duration<double,std::milli>(RenderClock::now()-uploadStart).count();
+                m_lastRenderCpuTimings.grassBatchCacheHits+=!buffers.metadataChanged;
+                auto& storage=m_lastRenderCpuTimings.instances;
+                storage.metadataBytes+=buffers.metadataUploadBytes; storage.visibleIdBytes+=buffers.idUploadBytes;
+                storage.allocations+=buffers.allocations;
+                storage.allocations+=m_persistentInstances.stats.allocations-poolAllocations;
+                if(buffers.cold) ++storage.cacheCold;
+                else if(buffers.modeChanged) ++storage.cacheMode;
+                else if(buffers.membershipChanged) ++storage.cacheMembership;
+                else if(buffers.metadataChanged) ++storage.cacheMetadata;
                 if(gpu)
                 {
+                    ++m_lastRenderCpuTimings.gpuGrassBatches;
+                    if(shadowOnly) ++m_lastShadowCpuTiming.gpuGrassBatches;
                     context->SetStructuredBuffer(45,m_emptyMorphDeltaBuffer.get());
                     context->SetComputePipeline(m_instanceCullPipeline.get());
                     Engine::Rendering::InstanceCullConstants cull;
                     cull.viewProjection=cullViewProjection; cull.cameraPosition=glm::vec4(cameraPosition,1);
-                    cull.counts={buffers.instanceCount,sourceRange.vertexCount,sourceRange.firstVertex,1};
-                    cull.selection={gpuLod ? residentLod:-1,1,representative.gpuMaximumLod,0};
-                    context->SetComputeReadBuffer(buffers.input.get()); context->SetComputeWriteBuffer(buffers.instances.get());
-                    context->SetComputeConstants(&cull,sizeof(cull)); context->DispatchCompute(1); context->StorageBarrier(buffers.instances.get());
+                    cull.counts={uint32_t(tiles.size()),sourceRange.vertexCount,sourceRange.firstVertex,1};
+                    cull.selection={gpuLod ? residentLod:-1,2,representative.gpuMaximumLod,0};
+                    context->SetComputeReadBuffer(buffers.input.get()); context->SetComputeReadBuffer(pool,1); context->SetComputeWriteBuffer(buffers.output.get());
+                    context->SetComputeConstants(&cull,sizeof(cull)); context->DispatchCompute(1); context->StorageBarrier(buffers.output.get());
                     cull.counts.w=0;
                     context->SetComputePipeline(m_instanceCullPipeline.get());
-                    context->SetComputeReadBuffer(buffers.input.get()); context->SetComputeWriteBuffer(buffers.instances.get());
-                    context->SetComputeConstants(&cull,sizeof(cull)); context->DispatchCompute((buffers.instanceCount+63)/64);
-                    context->StorageBarrier(buffers.instances.get()); context->EndComputePass();
-                    ++m_lastRenderCpuTimings.gpuBatches;
+                    context->SetComputeReadBuffer(buffers.input.get()); context->SetComputeReadBuffer(pool,1); context->SetComputeWriteBuffer(buffers.output.get());
+                    context->SetComputeConstants(&cull,sizeof(cull)); context->DispatchCompute(uint32_t(tiles.size()));
+                    context->StorageBarrier(buffers.output.get()); context->EndComputePass(); ++m_lastRenderCpuTimings.gpuBatches;
                 }
+                ensureRecordsUploaded();
                 context->SetPipeline(pipeline); context->SetConstantBuffer(0,buffers.draw.get());
-                context->SetStructuredBuffer(45,buffers.instances.get());
+                context->SetStructuredBuffer(45,buffers.output.get()); context->SetStructuredBuffer(46,pool);
                 context->SetStructuredBuffer(10,m_emptyMorphDeltaBuffer.get()); context->SetStructuredBuffer(11,m_emptyMorphWeightBuffer.get());
                 context->SetVertexBuffer(0,sourceMesh->GetGraphicsBuffer(),sourceMesh->GetVertexStride(),0);
-                if(gpu) context->DrawInstancesIndirect(buffers.instances.get(),0,false);
-                else context->DrawInstanced(sourceRange.vertexCount,buffers.instanceCount,sourceRange.firstVertex,0);
+                if(gpu) context->DrawInstancesIndirect(buffers.output.get(),0,false);
+                else context->DrawInstanced(sourceRange.vertexCount,buffers.candidates,sourceRange.firstVertex,0);
                 ++submitted; ++m_lastRenderCpuTimings.automaticBatches;
-                m_lastRenderCpuTimings.automaticInstances+=buffers.instanceCount;
+                m_lastRenderCpuTimings.automaticInstances+=buffers.candidates;
             }
             }
+            const auto& stats=m_persistentInstances.stats;
+            auto& storage=m_lastRenderCpuTimings.instances;
+            storage.newBytes=stats.newBytes-poolBefore.newBytes;
+            storage.editedBytes=stats.editedBytes-poolBefore.editedBytes;
+            storage.growthBytes=stats.growthBytes-poolBefore.growthBytes;
+            storage.residentBytes=m_persistentInstances.ResidentBytes();
+            m_lastRenderCpuTimings.grassPlacementUploadBytes=stats.newBytes+stats.editedBytes+stats.growthBytes-
+                poolBefore.newBytes-poolBefore.editedBytes-poolBefore.growthBytes;
             return submitted;
         }
         bool gpu=gpuInstanceCulling && context->SupportsIndirectDraws() &&
@@ -4409,9 +4478,11 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             context->SetComputeConstants(&cull,sizeof(cull)); context->DispatchCompute((uint32_t(instances.size())+63)/64);
             context->StorageBarrier(buffers.output.get()); context->EndComputePass(); ++m_lastRenderCpuTimings.gpuBatches;
         }
+        ensureRecordsUploaded();
         context->SetPipeline(pipeline);
         context->SetConstantBuffer(0,buffers.draw.get());
         context->SetStructuredBuffer(45,buffers.output.get());
+        context->SetStructuredBuffer(46,m_emptyMorphDeltaBuffer.get());
         context->SetStructuredBuffer(10,m_emptyMorphDeltaBuffer.get());
         context->SetStructuredBuffer(11,m_emptyMorphWeightBuffer.get());
         context->SetVertexBuffer(0,representative.vertexBuffer,representative.vertexStride,0);
@@ -4827,6 +4898,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     if (shadowOnly)
     {
         updatePortalShadowDebug();
+        m_lastShadowCpuTiming.instances=m_lastRenderCpuTimings.instances;
         const auto shadowEnd = std::chrono::steady_clock::now();
         m_lastShadowCpuTiming.portalMs = shadowElapsedMs(portalStart, shadowEnd);
         m_lastShadowCpuTiming.totalMs = shadowElapsedMs(
@@ -4878,6 +4950,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             ++m_lastOcclusionCulledCount;
             continue;
         }
+        ensureRecordsUploaded();
         switchGpuStage((draw.terrain || draw.terrainCell)
             ? Engine::Graphics::GpuTimingStage::Terrain
             : (draw.blended
@@ -4931,6 +5004,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         activeGpuStage.reset();
     }
 
+    ensureRecordsUploaded();
     const auto portalWorkStart=RenderClock::now();
     struct PortalStencilPass
     {
@@ -6402,7 +6476,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             ? static_cast<uint64_t>(m_objectCapacity) + std::min(
                 spatialDebugPasses.size(),
                 static_cast<size_t>(kMaxSpatialDebugDraws))
-            : static_cast<uint64_t>(preparedDraws.size());
+            : static_cast<uint64_t>(m_renderObjectSlotCount);
         const uint64_t restoredBytes = restoredRecords * sizeof(ObjectGPUData);
         m_objectDataBuffer->FlushMappedWrites(0, restoredBytes);
         m_lastObjectDataUploadBytes += restoredBytes;

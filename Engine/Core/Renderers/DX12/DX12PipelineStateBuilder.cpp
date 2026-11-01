@@ -16,7 +16,7 @@ D3D12PipelineStateFactory::CreateComputePipeline(
 {
     if (!m_device || !shader || !shader->GetBytecode() ||
         !shader->GetBytecodeSize()) return nullptr;
-    D3D12_ROOT_PARAMETER parameters[3]{};
+    D3D12_ROOT_PARAMETER parameters[4]{};
     parameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
     parameters[0].Constants = { 0, 0, 32 };
     parameters[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
@@ -26,7 +26,9 @@ D3D12PipelineStateFactory::CreateComputePipeline(
     for (auto& parameter : parameters)
         parameter.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
     D3D12_ROOT_SIGNATURE_DESC signatureDesc{};
-    signatureDesc.NumParameters = 3;
+    parameters[3].ParameterType=D3D12_ROOT_PARAMETER_TYPE_SRV;
+    parameters[3].Descriptor={1,0};
+    signatureDesc.NumParameters = 4;
     signatureDesc.pParameters = parameters;
     Microsoft::WRL::ComPtr<ID3DBlob> signatureBytes;
     Microsoft::WRL::ComPtr<ID3DBlob> errors;

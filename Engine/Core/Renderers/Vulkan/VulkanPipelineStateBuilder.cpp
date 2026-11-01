@@ -20,8 +20,8 @@ VulkanPipelineStateFactory::CreateComputePipeline(
 {
     if (!m_device || !shader || !shader->GetBytecode() ||
         !shader->GetBytecodeSize()) return nullptr;
-    VkDescriptorSetLayoutBinding bindings[2]{};
-    for (uint32_t index = 0; index < 2; ++index)
+    VkDescriptorSetLayoutBinding bindings[3]{};
+    for (uint32_t index = 0; index < 3; ++index)
     {
         bindings[index].binding = index;
         bindings[index].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
@@ -30,7 +30,7 @@ VulkanPipelineStateFactory::CreateComputePipeline(
     }
     VkDescriptorSetLayoutCreateInfo setInfo{
         VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
-    setInfo.bindingCount = 2;
+    setInfo.bindingCount = 3;
     setInfo.pBindings = bindings;
     VkDescriptorSetLayout setLayout = VK_NULL_HANDLE;
     if (vkCreateDescriptorSetLayout(m_device, &setInfo, nullptr,

@@ -28,7 +28,7 @@ struct VulkanComputeDescriptorArena
         {
             VkDescriptorPoolSize size{};
             size.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-            size.descriptorCount = 16384;
+            size.descriptorCount = 3 * 8192;
             VkDescriptorPoolCreateInfo info{
                 VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
             info.maxSets = 8192;
@@ -417,8 +417,8 @@ void VulkanGraphicsContext::SetStructuredBuffer(uint32_t slot, const Engine::Gra
         index = slot - 7;
     else if (slot >= 14 && slot <= 15)
         index = slot - 9;
-    else if (slot == 45)
-        index = 7;
+    else if (slot == 45 || slot == 46)
+        index = slot-38;
     else
         return;
     m_structuredBuffers[index] = dynamic_cast<const VulkanGraphicsBuffer*>(buffer);
@@ -481,9 +481,10 @@ void VulkanGraphicsContext::SetComputeConstants(const void* data, uint32_t size)
 }
 
 void VulkanGraphicsContext::SetComputeReadBuffer(
-    const Engine::Graphics::IGraphicsBuffer* buffer)
+    const Engine::Graphics::IGraphicsBuffer* buffer, uint32_t slot)
 {
-    m_computeRead = dynamic_cast<const VulkanGraphicsBuffer*>(buffer);
+    if(slot==1) m_computePool=dynamic_cast<const VulkanGraphicsBuffer*>(buffer);
+    else m_computeRead = dynamic_cast<const VulkanGraphicsBuffer*>(buffer);
 }
 
 void VulkanGraphicsContext::SetComputeWriteBuffer(
@@ -500,11 +501,12 @@ void VulkanGraphicsContext::DispatchCompute(uint32_t x, uint32_t y, uint32_t z)
     VkDescriptorSet set = m_computeDescriptors->Allocate(
         m_computePipeline->GetSetLayout());
     if (!set) return;
-    VkDescriptorBufferInfo buffers[2]{};
+    VkDescriptorBufferInfo buffers[3]{};
     buffers[0] = { read->GetBuffer(), 0, VK_WHOLE_SIZE };
     buffers[1] = { m_computeWrite->GetBuffer(), 0, VK_WHOLE_SIZE };
-    VkWriteDescriptorSet writes[2]{};
-    for (uint32_t index = 0; index < 2; ++index)
+    buffers[2] = { (m_computePool ? m_computePool:read)->GetBuffer(),0,VK_WHOLE_SIZE };
+    VkWriteDescriptorSet writes[3]{};
+    for (uint32_t index = 0; index < 3; ++index)
     {
         writes[index] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
         writes[index].dstSet = set;
@@ -513,7 +515,7 @@ void VulkanGraphicsContext::DispatchCompute(uint32_t x, uint32_t y, uint32_t z)
         writes[index].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         writes[index].pBufferInfo = &buffers[index];
     }
-    vkUpdateDescriptorSets(m_computeDescriptors->device, 2, writes, 0, nullptr);
+    vkUpdateDescriptorSets(m_computeDescriptors->device, 3, writes, 0, nullptr);
     vkCmdBindDescriptorSets(m_commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
         m_computePipeline->GetLayout(), 0, 1, &set, 0, nullptr);
     vkCmdDispatch(m_commandBuffer, x, y, z);

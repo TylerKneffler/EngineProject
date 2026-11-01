@@ -45,11 +45,15 @@ public:
             for(auto* source:sources) m_entries.push_back({source,UINT64_MAX,{}});
             m_structure=scene.GetStructureRevision();
         }
+        const bool describeAll=rebuild;
         for(auto& entry:m_entries)
         {
-            const auto revision=entry.source->SpatialRegionRevision();
-            if(rebuild || entry.revision!=revision)
-            { entry.region=entry.source->DescribeSpatialRegion(); entry.revision=revision; rebuild=true; }
+            // Refresh component references before examining their revision
+            // after removals/reloads; old cached references may have expired.
+            if(describeAll)
+            { entry.region=entry.source->DescribeSpatialRegion(); entry.revision=entry.source->SpatialRegionRevision(); }
+            else if(entry.revision!=entry.source->SpatialRegionRevision())
+            { entry.region=entry.source->DescribeSpatialRegion(); entry.revision=entry.source->SpatialRegionRevision(); rebuild=true; }
         }
         if(rebuild)
         {

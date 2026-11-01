@@ -114,6 +114,9 @@ struct BulletPhysicsAdapter::Impl
     uint32_t lastSubstepCount = 0u;
     double lastDroppedSeconds = 0.0;
     bool profilingEnabled = false;
+    uint64_t bodyRegistryRevision=UINT64_MAX,colliderRegistryRevision=UINT64_MAX,activityRevision=UINT64_MAX;
+    std::vector<Engine::Components::RigidBody*> activeBodies;
+    std::vector<Engine::Components::MeshObjectCollider*> activeColliders;
     BulletPhysicsAdapter::StepTimings lastStepTimings{};
     struct PortalMeshCollider
     {
@@ -782,65 +785,39 @@ void BulletPhysicsAdapter::Step(double deltaTime)
     const auto stepBegin = m_impl->profilingEnabled
         ? StepClock::now() : StepClock::time_point{};
     Engine::Scene::Scene& scene = *m_impl->scene;
-    std::vector<Engine::Components::MeshObjectCollider*> meshColliders;
-    for (const auto& object : scene.GetObjects())
+    const auto bodyRevision=scene.GetComponentRevision<Engine::Components::RigidBody>();
+    const auto colliderRevision=scene.GetComponentRevision<Engine::Components::MeshObjectCollider>();
+    const auto activityRevision=scene.GetPhysicsActivityRevision();
+    if(m_impl->bodyRegistryRevision!=bodyRevision || m_impl->colliderRegistryRevision!=colliderRevision || m_impl->activityRevision!=activityRevision)
     {
-        if (const auto* body = object->GetComponent<Engine::Components::RigidBody>();
-            body && body->IsCollisionSuspended()) continue;
-        for (Engine::Core::Component* component : object->Components)
-            if (auto* collider = dynamic_cast<
-                    Engine::Components::MeshObjectCollider*>(component))
-            {
-                collider->BeginContactFrame();
-                meshColliders.push_back(collider);
-            }
+        m_impl->activeBodies.clear(); m_impl->activeColliders.clear();
+        for(auto* body:scene.GetComponents<Engine::Components::RigidBody>())
+            if(!body->IsCollisionSuspended()) m_impl->activeBodies.push_back(body);
+        for(auto* collider:scene.GetComponents<Engine::Components::MeshObjectCollider>())
+        {
+            const auto* body=collider->Owner->GetComponent<Engine::Components::RigidBody>();
+            if(!body || !body->IsCollisionSuspended()) m_impl->activeColliders.push_back(collider);
+        }
+        m_impl->bodyRegistryRevision=bodyRevision; m_impl->colliderRegistryRevision=colliderRevision; m_impl->activityRevision=activityRevision;
     }
-    // Animation updates objects before this step. Restore the previous
-    // pose-only IK result before a deforming mesh collider samples the
-    // skin, so the collision hull matches the pose that is rendered.
-    for (const auto& object : scene.GetObjects())
-        for (Engine::Core::Component* component : object->Components)
-            if (auto* bone = dynamic_cast<Engine::Components::IKBone*>(component);
-                bone && bone->UsesMeshColliderPoseOnly() && bone->IsSimulating())
-                bone->SyncBoneFromBody();
-    std::vector<Engine::Components::RigidBody*> bodies;
-    std::vector<Engine::Components::Cloth*> clothBodies;
-    std::vector<Engine::Components::IKBone*> ikBones;
-    for (const auto& object : scene.GetObjects())
-        for (Engine::Core::Component* component : object->Components)
-            if (auto* body = dynamic_cast<Engine::Components::RigidBody*>(component))
-            {
-                if (body->IsCollisionSuspended()) continue;
-                EnsureRigidBodyState(*body);
-                bodies.push_back(body);
-                body->m_isColliding = false;
-                body->m_isGrounded = false;
-                body->BeginOverlapFrame();
-                if (body->EnsureBody())
-                {
-                    if (!Engine::Physics::IsDynamic(*body) ||
-                        body->m_editorTransformChanged)
-                        body->SyncBodyFromTransform();
-                }
-            }
-            else if (auto* cloth = dynamic_cast<Engine::Components::Cloth*>(component))
-            {
-                EnsureClothState(*cloth);
-                clothBodies.push_back(cloth);
-                if (cloth->collisionMorph)
-                    cloth->EnsureCollisionMorph();
-                else if (cloth->EnsureSoftBody())
-                {
-                    cloth->UpdatePinnedNodes();
-                    cloth->ApplyForces();
-                }
-            }
-            else if (auto* bone = dynamic_cast<
-                    Engine::Components::IKBone*>(component))
-            {
-                EnsureIKBoneState(*bone);
-                ikBones.push_back(bone);
-            }
+    const auto& meshColliders=m_impl->activeColliders;
+    for(auto* collider:meshColliders) collider->BeginContactFrame();
+    std::vector<Engine::Components::IKBone*> ikBones=scene.GetComponents<Engine::Components::IKBone>();
+    for(auto* bone:ikBones) if(bone->UsesMeshColliderPoseOnly() && bone->IsSimulating()) bone->SyncBoneFromBody();
+    const auto& bodies=m_impl->activeBodies;
+    for(auto* body:bodies)
+    {
+        EnsureRigidBodyState(*body); body->m_isColliding=false; body->m_isGrounded=false; body->BeginOverlapFrame();
+        if(body->EnsureBody() && (!Engine::Physics::IsDynamic(*body) || body->m_editorTransformChanged)) body->SyncBodyFromTransform();
+    }
+    std::vector<Engine::Components::Cloth*> clothBodies=scene.GetComponents<Engine::Components::Cloth>();
+    for(auto* cloth:clothBodies)
+    {
+        EnsureClothState(*cloth);
+        if(cloth->collisionMorph) cloth->EnsureCollisionMorph();
+        else if(cloth->EnsureSoftBody()) { cloth->UpdatePinnedNodes(); cloth->ApplyForces(); }
+    }
+    for(auto* bone:ikBones) EnsureIKBoneState(*bone);
     for (Engine::Components::IKBone* bone : ikBones)
         bone->RemoveInvalidConstraint();
     for (Engine::Components::IKBone* bone : ikBones)
@@ -856,11 +833,10 @@ void BulletPhysicsAdapter::Step(double deltaTime)
         if (!cloth->collisionMorph && cloth->IsSimulating())
             cloth->BindAnchors();
     std::vector<Impl::PmxBindingState> currentPmxBindings;
-    for (const auto& object : scene.GetObjects())
+    for (auto* binding : scene.GetComponents<Engine::Components::RigPhysicsBinding>())
     {
-        if (!object || !object->IsEnabledInHierarchy()) continue;
-        auto* binding = object->GetComponent<Engine::Components::RigPhysicsBinding>();
-        if (!binding || binding->physicsJoints.empty()) continue;
+        auto* object=binding->Owner;
+        if (!object || !object->IsEnabledInHierarchy() || binding->physicsJoints.empty()) continue;
         const float scale = glm::length(glm::vec3(
             object->transform.GetWorldMatrix()[0]));
         if (!std::isfinite(scale) || scale <= 0.f) continue;
@@ -1211,13 +1187,9 @@ void BulletPhysicsAdapter::Step(double deltaTime)
 
     for (Engine::Components::MeshObjectCollider* collider : meshColliders)
         collider->ResolveContactSurfaces();
-    if (m_impl->lastSubstepCount > 0)
-        for (const auto& object : scene.GetObjects())
-            for (Engine::Core::Component* component : object->Components)
-                if (auto* skeleton = dynamic_cast<
-                        Engine::Components::Skeleton*>(component))
-                    skeleton->ApplyMeshContactResponse(static_cast<float>(
-                        m_impl->lastSubstepCount * m_impl->fixedStepSeconds));
+    if(m_impl->lastSubstepCount>0)
+        for(auto* skeleton:scene.GetComponents<Engine::Components::Skeleton>())
+            skeleton->ApplyMeshContactResponse(static_cast<float>(m_impl->lastSubstepCount*m_impl->fixedStepSeconds));
     for (Engine::Components::Cloth* cloth : clothBodies)
         if (cloth->collisionMorph)
             cloth->UpdateCollisionMorph(static_cast<float>(boundedDelta));
@@ -1252,6 +1224,8 @@ void BulletPhysicsAdapter::Step(double deltaTime)
 
 void BulletPhysicsAdapter::Reset()
 {
+    m_impl->bodyRegistryRevision=UINT64_MAX; m_impl->activityRevision=UINT64_MAX;
+    m_impl->activeBodies.clear(); m_impl->activeColliders.clear();
     ClearPmxJoints();
     Engine::Scene::Scene& scene = *m_impl->scene;
     for (const auto& object : scene.GetObjects())

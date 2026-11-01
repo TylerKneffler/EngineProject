@@ -18,6 +18,7 @@ namespace Engine::Editor
         TimePoint afterRender, afterPendingLoad;
         float deltaSeconds = 0.f;
         bool playing = false;
+        bool measured = true;
         double prepareMilliseconds = 0.0;
         double renderEntryMilliseconds = 0.0;
         double clearMilliseconds = 0.0;
@@ -45,11 +46,14 @@ namespace Engine::Editor
         // Shared by the opt-in trace and normal Performance recordings.
         static std::string SerializeFields(const EditorFrameProfileSample& sample,
             Scene::Scene* scene, Renderers::IEditorRenderer* renderer);
+        void Stop();
         void Record(const EditorFrameProfileSample& sample, Scene::Scene* scene,
             Renderers::IEditorRenderer* renderer);
 
     private:
         std::ofstream output_;
         uint64_t frameIndex_ = 0;
+        std::chrono::steady_clock::time_point cpuSampleStart_{};
+        uint64_t processTicks_=0,threadTicks_=0;
     };
 }

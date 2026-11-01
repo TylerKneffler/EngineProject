@@ -85,6 +85,8 @@ namespace Engine::Editor
         output << "\"schema_version\":2,\"playing\":"
             << (sample.playing ? "true" : "false")
             << ",\"dt_ms\":" << sample.deltaSeconds * 1000.f
+            << ",\"fps\":" << (sample.deltaSeconds>0 ? 1./sample.deltaSeconds:0.)
+            << ",\"fps_scope\":\"editor_frame_interval\""
             << ",\"frame_ms\":" << ms(sample.frameBegin, sample.afterPendingLoad)
             << ",\"pacing_ms\":" << ms(sample.frameBegin, sample.afterPacing)
             << ",\"background_ms\":" << ms(sample.afterPacing, sample.afterBackground)
@@ -161,9 +163,11 @@ namespace Engine::Editor
         writeStepArray("physics_bullet_world_ms", bulletTimings.bulletWorldMs);
         writeStepArray("physics_contacts_ms", bulletTimings.contactsMs);
         const auto& shadow = scene->GetLastShadowCpuTiming();
+        shadow.instances.WriteJson(output,"shadow_instance_");
         output << ",\"shadow_total_ms\":" << shadow.totalMs
             << ",\"shadow_explicit_instance_draws\":" << shadow.explicitInstanceDraws
             << ",\"shadow_automatic_draws\":" << shadow.automaticDraws
+            << ",\"shadow_gpu_grass_batches\":" << shadow.gpuGrassBatches
             << ",\"shadow_ordinary_draws\":" << shadow.ordinaryDraws
             << ",\"shadow_prepare_ms\":" << shadow.scenePreparationMs
             << ",\"shadow_culling_ms\":" << shadow.cascadeCullingMs
@@ -184,6 +188,7 @@ namespace Engine::Editor
             << ",\"spatial_dormant_fields\":" << scene->GetSpatialUpdateScheduler().dormantCount;
         const auto& grass = scene->GetGrassPerformance();
         const auto& renderCpu=sample.renderCpu;
+        renderCpu.instances.WriteJson(output);
         output << ",\"render_metrics_scope\":\"all_main_views\""
             << ",\"render_cpu_total_ms\":" << renderCpu.totalMs
             << ",\"render_startup_ms\":" << renderCpu.startupMs
@@ -199,6 +204,9 @@ namespace Engine::Editor
             << ",\"render_record_wait_ms\":" << renderCpu.recordWaitMs
             << ",\"render_worker_jobs\":" << renderCpu.workerJobs
             << ",\"render_worker_tasks\":" << renderCpu.workerTasks
+            << ",\"gpu_grass_batches\":" << renderCpu.gpuGrassBatches
+            << ",\"grass_batch_cache_hits\":" << renderCpu.grassBatchCacheHits
+            << ",\"grass_batch_placement_upload_bytes\":" << renderCpu.grassPlacementUploadBytes
             << ",\"render_candidate_draws\":" << renderCpu.candidateDraws
             << ",\"render_physical_draws\":" << renderCpu.physicalDraws
             << ",\"render_candidate_triangles\":" << renderCpu.candidateTriangles
@@ -227,12 +235,47 @@ namespace Engine::Editor
         output << ",\"grass_active_tiles\":" << grass.activeTiles
             << ",\"grass_lod_transition_tiles\":" << grass.transitionTiles
             << ",\"grass_fading_tiles\":" << grass.fadingTiles;
+        output << ",\"measured\":" << (sample.measured ? "true":"false");
         return output.str();
+    }
+
+    void EditorFrameProfiler::Stop()
+    {
+        if(output_.is_open()) { output_ << "{\"type\":\"capture_complete\"}\n"; output_.flush(); output_.close(); }
     }
 
     void EditorFrameProfiler::Record(const EditorFrameProfileSample& sample,
         Scene::Scene* scene, Renderers::IEditorRenderer* renderer)
     {
+#if defined(_WIN32)
+        const auto now=std::chrono::steady_clock::now();
+        const double seconds=std::chrono::duration<double>(now-cpuSampleStart_).count();
+        if(cpuSampleStart_.time_since_epoch().count()==0 || seconds>=.5)
+        {
+            FILETIME created{},exited{},kernel{},user{};
+            const auto ticks=[](FILETIME value) { return (uint64_t(value.dwHighDateTime)<<32)|value.dwLowDateTime; };
+            if(GetProcessTimes(GetCurrentProcess(),&created,&exited,&kernel,&user))
+            {
+                const auto process=ticks(kernel)+ticks(user);
+                if(GetThreadTimes(GetCurrentThread(),&created,&exited,&kernel,&user))
+                {
+                    const auto thread=ticks(kernel)+ticks(user);
+                    if(cpuSampleStart_.time_since_epoch().count()!=0)
+                    {
+                        const double cores=double(process-processTicks_)/(seconds*1.e7);
+                        const double mainPercent=100.*double(thread-threadTicks_)/(seconds*1.e7);
+                        const auto processors=std::max<DWORD>(1,GetActiveProcessorCount(ALL_PROCESSOR_GROUPS));
+                        output_ << "{\"type\":\"sample\",\"playing\":" << (sample.playing ? "true":"false")
+                            << ",\"measured\":" << (sample.measured ? "true":"false")
+                            << ",\"process_cpu_core_equivalents\":" << cores
+                            << ",\"process_cpu_pct\":" << cores*100./processors
+                            << ",\"main_thread_cpu_pct\":" << mainPercent << "}\n";
+                    }
+                    processTicks_=process; threadTicks_=thread; cpuSampleStart_=now;
+                }
+            }
+        }
+#endif
         output_ << "{\"frame\":" << frameIndex_ << ","
             << SerializeFields(sample, scene, renderer) << "}\n";
         if (++frameIndex_ % 30u == 0u)

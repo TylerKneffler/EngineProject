@@ -392,7 +392,7 @@ void D3D12GraphicsContext::SetStructuredBuffer(uint32_t slot, const Engine::Grap
 {
     if (!buffer || !m_cmdList ||
         !((slot >= 6 && slot <= 8) || (slot >= 10 && slot <= 11) ||
-          (slot >= 14 && slot <= 15) || slot == 45)) return;
+          (slot >= 14 && slot <= 15) || (slot == 45 || slot == 46))) return;
     const auto* structured = dynamic_cast<const D3D12GraphicsBuffer*>(buffer);
     if (!structured) return;
     // Root parameters 7-9 and 11-12 are root SRVs matching t6-t8/t10-t11.
@@ -436,14 +436,14 @@ void D3D12GraphicsContext::SetComputeConstants(const void* data, uint32_t size)
 }
 
 void D3D12GraphicsContext::SetComputeReadBuffer(
-    const Engine::Graphics::IGraphicsBuffer* buffer)
+    const Engine::Graphics::IGraphicsBuffer* buffer, uint32_t slot)
 {
     auto* native = dynamic_cast<D3D12GraphicsBuffer*>(
         const_cast<Engine::Graphics::IGraphicsBuffer*>(buffer));
     if (!m_cmdList || !native) return;
     TransitionComputeBuffer(m_cmdList, native,
         D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-    m_cmdList->SetComputeRootShaderResourceView(1,
+    m_cmdList->SetComputeRootShaderResourceView(slot == 1 ? 3 : 1,
         native->GetGPUVirtualAddress());
 }
 

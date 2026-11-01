@@ -69,6 +69,7 @@ struct SceneLightData
 };
 
 struct InstanceTransform { float4 row0; float4 row1; float4 row2; };
+struct PersistentInstance { float4 row0; float4 row1; float4 row2; uint4 identity; };
 
 #ifdef VULKAN
 [[vk::push_constant]] DrawConstants draw;
@@ -78,6 +79,7 @@ struct InstanceTransform { float4 row0; float4 row1; float4 row2; };
 [[vk::binding(11, 0)]] StructuredBuffer<float4> morphDeltas;
 [[vk::binding(12, 0)]] StructuredBuffer<float4> morphWeights;
 [[vk::binding(46, 0)]] StructuredBuffer<InstanceTransform> meshInstances;
+[[vk::binding(47, 0)]] StructuredBuffer<PersistentInstance> persistentInstances;
 [[vk::binding(0, 0)]] Texture2D baseColorMap;
 [[vk::binding(1, 0)]] Texture2D metallicRoughnessMap;
 [[vk::binding(2, 0)]] Texture2D normalMap;
@@ -166,6 +168,7 @@ StructuredBuffer<float4x4> boneMatrices : register(t8);
 StructuredBuffer<float4> morphDeltas : register(t10);
 StructuredBuffer<float4> morphWeights : register(t11);
 StructuredBuffer<InstanceTransform> meshInstances : register(t45);
+StructuredBuffer<PersistentInstance> persistentInstances : register(t46);
 SamplerState materialSampler : register(s0);
 #endif
 
@@ -192,6 +195,8 @@ float SampleIes(uint index, float cosine)
 
 uint ResolveObjectIndex(uint instanceId)
 {
+    if ((draw.drawFlags & 0x00080000u) != 0u)
+        return draw.objectIndex+asuint(meshInstances[instanceId+1].row0.x);
     if ((draw.drawFlags & 0x01000000u) != 0u)
         return draw.objectIndex + asuint(meshInstances[instanceId * 2 + 2].row0.x);
     if ((draw.drawFlags & 0x02000000u) != 0u)
@@ -244,6 +249,11 @@ void VSMain(
     {
         InstanceTransform instance = meshInstances[(draw.drawFlags & 0x01000000u) != 0u ? instanceId * 2 + 1 :
             ((draw.drawFlags & 0x02000000u) != 0u ? instanceId * 2 : instanceId)];
+        if((draw.drawFlags & 0x00080000u) != 0u)
+        {
+            PersistentInstance placement=persistentInstances[asuint(meshInstances[instanceId+1].row0.y)];
+            instance.row0=placement.row0; instance.row1=placement.row1; instance.row2=placement.row2;
+        }
         localPosition = float4(dot(instance.row0, localPosition),
             dot(instance.row1, localPosition), dot(instance.row2, localPosition), 1.0);
         localNormal = float3(dot(instance.row0.xyz, localNormal),
@@ -928,7 +938,7 @@ float4 PSShadowMain(
     float4 uvChannels4 : TEXCOORD7,
     nointerpolation uint objectIndex : TEXCOORD11) : SV_TARGET
 {
-    ObjectData objectData = objects[(draw.drawFlags & 0x13000000u) != 0u ? objectIndex : draw.objectIndex];
+    ObjectData objectData = objects[(draw.drawFlags & 0x13080000u) != 0u ? objectIndex : draw.objectIndex];
     ApplyGeometryFade(objectData, worldPos);
     if (dot(objectData.traversalClipPlane.xyz,
         objectData.traversalClipPlane.xyz) > 0.0 &&
@@ -972,7 +982,7 @@ float4 PSMain(
     nointerpolation uint objectIndex : TEXCOORD11,
     bool frontFace : SV_IsFrontFace) : SV_TARGET
 {
-    ObjectData objectData = objects[(draw.drawFlags & 0x13000000u) != 0u ? objectIndex : draw.objectIndex];
+    ObjectData objectData = objects[(draw.drawFlags & 0x13080000u) != 0u ? objectIndex : draw.objectIndex];
     ApplyGeometryFade(objectData, worldPos);
     uint flags = (uint)objectData.materialParams.w;
     // Split traversal instances retain their own chart clipping even while

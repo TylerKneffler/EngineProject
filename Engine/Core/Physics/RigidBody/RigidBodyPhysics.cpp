@@ -144,6 +144,7 @@ void Engine::Components::RigidBody::SetCollisionSuspended(bool suspended)
 {
     if (m_collisionSuspended == suspended) return;
     m_collisionSuspended = suspended;
+    if(Owner && Owner->GetScene()) Owner->GetScene()->NotifyPhysicsActivityChanged();
     if (suspended && m_impl)
     {
         if (Owner && Owner->GetScene()) Owner->GetScene()->GetPhysics().DestroyRigidBody(*this);
@@ -184,9 +185,8 @@ bool Engine::Components::RigidBody::EnsureBody()
         }
     // Component references may point outside the skeleton's object subtree.
     if (!colliderSkeleton && Owner->GetComponent<MeshObjectCollider>())
-        for (const auto& object : Owner->GetScene()->GetObjects())
-            if (auto* skeleton = object->GetComponent<Skeleton>();
-                skeleton && skeleton->meshColliderReference.IsAssigned())
+        for (auto* skeleton : Owner->GetScene()->GetComponents<Skeleton>())
+            if (skeleton->meshColliderReference.IsAssigned())
             {
                 auto* selected = skeleton->ResolveMeshCollider();
                 if (!selected || selected->Owner != Owner) continue;
