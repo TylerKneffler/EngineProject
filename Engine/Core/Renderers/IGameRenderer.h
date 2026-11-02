@@ -33,5 +33,10 @@ public:
     // Create a graphics context bound to the renderer's current frame command
     // stream. Call after BeginFrame() and before EndFrame().
     virtual std::unique_ptr<Engine::Graphics::IGraphicsContext> CreateFrameGraphicsContext() = 0;
+
+    // Monotonic GPU completion watermark for resources retired after EndFrame.
+    // Poll only on the renderer's owning thread. Token zero means no submission.
+    virtual uint64_t GetSubmittedFrameToken() const = 0;
+    virtual bool IsFrameComplete(uint64_t token) = 0;
 };
 }

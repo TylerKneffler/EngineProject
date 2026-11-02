@@ -14,6 +14,7 @@ enum class GpuTimingStage : uint32_t
 {
     Shadow,
     Terrain,
+    Grass,
     Portal,
     Opaque,
     Transparent,

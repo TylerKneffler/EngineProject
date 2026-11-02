@@ -1,4 +1,5 @@
 #include "Scripts/Demos/Snake/SnakeGameManager.h"
+#include "Core/Input/NativeInputSnapshot.h"
 
 #include "Scripts/Demos/Snake/SnakeFood.h"
 #include "Scripts/Demos/Snake/SnakePlayer.h"
@@ -246,7 +247,7 @@ void SnakeGameManager::RefreshMenu()
 
 bool SnakeGameManager::IsKeyDown(int virtualKey)
 {
-    return (GetAsyncKeyState(virtualKey) & 0x8000) != 0;
+    return (Engine::Core::ReadNativeKeyState(virtualKey) & 0x8000) != 0;
 }
 
 bool SnakeGameManager::KeyPressed(int virtualKey)

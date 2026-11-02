@@ -33,8 +33,7 @@ using Scene = Engine::Scene::Scene;
 Object* AddChild(Scene& scene, Object& parent, const std::string& name)
 {
     Object* child = scene.AddObject(name);
-    child->Parent = &parent;
-    parent.Children.push_back(child);
+    scene.SetParentLocal(child, &parent);
     return child;
 }
 
@@ -219,6 +218,12 @@ void TerrainGen::OnDestroy()
     m_readyChunks.clear();
 }
 
+void TerrainGen::FenceBackgroundWork()
+{
+    StopWorkerPool();
+    CancelPendingGeneration();
+}
+
 void TerrainGen::EnsureWorkerPool(std::size_t workerCount)
 {
     workerCount = std::max<std::size_t>(1u, workerCount);
@@ -371,13 +376,7 @@ void TerrainGen::RefreshChunks()
         if (candidate.object)
         {
             CacheChunkMesh(candidate.key, *candidate.object);
-            if (candidate.object->Parent)
-            {
-                auto& siblings = candidate.object->Parent->Children;
-                siblings.erase(std::remove(siblings.begin(), siblings.end(),
-                    candidate.object), siblings.end());
-            }
-            candidate.object->Parent = nullptr;
+            Owner->GetScene()->SetParentLocal(candidate.object, nullptr);
             candidate.object->enabled = false;
             m_chunkObjectPool.push_back(candidate.object);
         }
@@ -1755,8 +1754,7 @@ void TerrainGen::BuildChunk(int chunkX, int chunkZ,
             m_chunkObjectPool.pop_back();
             chunkObject->name = name;
             chunkObject->enabled = true;
-            chunkObject->Parent = Owner;
-            Owner->Children.push_back(chunkObject);
+            scene.SetParentLocal(chunkObject, Owner);
         }
         else
         {

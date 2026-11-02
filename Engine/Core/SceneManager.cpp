@@ -1,17 +1,153 @@
 #include "pch.h"
 #include "Core/SceneManager.h"
 #include "Core/Scene/Scene.h"
-#include <future>
+#include <condition_variable>
+#include <fstream>
+#include <iterator>
+#include <mutex>
+#include <optional>
 #include <thread>
 
 namespace Engine::Core
 {
+namespace
+{
+class AsyncSceneReader
+{
+public:
+    using Callback = std::function<void(Engine::Scene::Scene*)>;
+    struct Request
+    {
+        std::string path;
+        Callback callback;
+        uint64_t generation = 0;
+        uint64_t sceneGeneration = 0;
+        uint64_t id = 0;
+    };
+    struct Result
+    {
+        std::string source;
+        Callback callback;
+        uint64_t generation = 0;
+        uint64_t sceneGeneration = 0;
+        bool readSucceeded = false;
+    };
+
+    AsyncSceneReader() = default;
+    ~AsyncSceneReader()
+    {
+        {
+            std::lock_guard lock(m_mutex);
+            m_stopping = true;
+        }
+        m_wake.notify_one();
+        if (m_worker.joinable()) m_worker.join();
+    }
+
+    void Submit(std::string path, Callback callback, uint64_t generation,
+        uint64_t sceneGeneration)
+    {
+        {
+            std::lock_guard lock(m_mutex);
+            if (!m_worker.joinable())
+                m_worker = std::thread([this] { Run(); });
+            const uint64_t id = ++m_latestId;
+            m_pending = Request{std::move(path), std::move(callback),
+                generation, sceneGeneration, id};
+            m_completed.reset();
+        }
+        m_wake.notify_one();
+    }
+
+    void Cancel()
+    {
+        std::unique_lock lock(m_mutex);
+        ++m_latestId;
+        m_pending.reset();
+        m_completed.reset();
+        m_idle.wait(lock, [this] { return !m_active; });
+    }
+
+    std::optional<Result> TakeCompleted()
+    {
+        std::lock_guard lock(m_mutex);
+        auto result = std::move(m_completed);
+        m_completed.reset();
+        return result;
+    }
+
+private:
+    void Run()
+    {
+        std::unique_lock lock(m_mutex);
+        while (true)
+        {
+            m_wake.wait(lock, [this] { return m_stopping || m_pending.has_value(); });
+            if (m_stopping) return;
+            Request request = std::move(*m_pending);
+            m_pending.reset();
+            m_active = true;
+            lock.unlock();
+            {
+                Result result;
+                result.generation = request.generation;
+                result.sceneGeneration = request.sceneGeneration;
+                result.callback = std::move(request.callback);
+                try
+                {
+                    std::ifstream file(request.path, std::ios::binary);
+                    if (file)
+                    {
+                        result.source.assign(std::istreambuf_iterator<char>(file), {});
+                        result.readSucceeded = !file.bad();
+                    }
+                }
+                catch (...) { result.source.clear(); result.readSucceeded = false; }
+                lock.lock();
+                if (request.id == m_latestId && !m_stopping)
+                    m_completed = std::move(result);
+            }
+            m_active = false;
+            m_idle.notify_all();
+        }
+    }
+
+    std::mutex m_mutex;
+    std::condition_variable m_wake;
+    std::condition_variable m_idle;
+    std::optional<Request> m_pending;
+    std::optional<Result> m_completed;
+    uint64_t m_latestId = 0;
+    bool m_stopping = false;
+    bool m_active = false;
+    std::thread m_worker;
+};
+
+AsyncSceneReader& SceneReader()
+{
+    static AsyncSceneReader reader;
+    return reader;
+}
+}
 
 // Static member initialization
 Engine::Scene::Scene* SceneManager::s_activeScene = nullptr;
 SceneManager::SceneLoadedCallback SceneManager::s_onSceneLoaded = nullptr;
 std::string SceneManager::s_defaultScenePath;
 std::string SceneManager::s_pendingScenePath;
+uint64_t SceneManager::s_sceneGeneration = 0;
+
+void SceneManager::SetActiveScene(Engine::Scene::Scene* scene)
+{
+    if (s_activeScene)
+        s_activeScene->AssertOwnerThread();
+    if (scene)
+        scene->AssertOwnerThread();
+    SceneReader().Cancel();
+    s_pendingScenePath.clear();
+    s_activeScene = scene;
+    ++s_sceneGeneration;
+}
 
 // ---------------------------------------------------------------------------
 // SceneManager::LoadScene
@@ -20,6 +156,8 @@ bool SceneManager::LoadScene(const std::string& path)
 {
     if (!s_activeScene)
         return false;
+    s_activeScene->AssertOwnerThread();
+    SceneReader().Cancel();
 
     // Clear and load the new scene
     if (!s_activeScene->Load(path))
@@ -35,7 +173,20 @@ bool SceneManager::LoadScene(const std::string& path)
 void SceneManager::RequestSceneLoad(const std::string& path)
 {
     if (!path.empty())
+    {
+        if (s_activeScene)
+            s_activeScene->AssertOwnerThread();
+        SceneReader().Cancel();
         s_pendingScenePath = path;
+    }
+}
+
+void SceneManager::CancelPendingSceneLoad()
+{
+    if (s_activeScene)
+        s_activeScene->AssertOwnerThread();
+    s_pendingScenePath.clear();
+    SceneReader().Cancel();
 }
 
 bool SceneManager::RequestDefaultSceneLoad()
@@ -48,18 +199,31 @@ bool SceneManager::RequestDefaultSceneLoad()
 
 bool SceneManager::ProcessPendingSceneLoad()
 {
-    if (s_pendingScenePath.empty())
+    if (s_activeScene)
+        s_activeScene->AssertOwnerThread();
+    if (!s_pendingScenePath.empty())
+    {
+        std::string path = std::move(s_pendingScenePath);
+        s_pendingScenePath.clear();
+        if (!LoadScene(path)) return false;
+        s_activeScene->Start();
+        return true;
+    }
+    auto result = SceneReader().TakeCompleted();
+    if (!result || result->generation != s_sceneGeneration || !s_activeScene ||
+        result->sceneGeneration != s_activeScene->CaptureSceneGeneration())
         return false;
-
-    std::string path = std::move(s_pendingScenePath);
-    s_pendingScenePath.clear();
-    if (!LoadScene(path))
-        return false;
-
-    // A transition creates a fresh component graph whose lifecycle must begin
-    // before the next update/render frame.
-    s_activeScene->Start();
-    return true;
+    Engine::Scene::Scene* loaded = nullptr;
+    if (result->readSucceeded && s_activeScene->LoadFromString(result->source))
+    {
+        s_activeScene->Start();
+        loaded = s_activeScene;
+        if (s_onSceneLoaded)
+            s_onSceneLoaded(loaded);
+    }
+    if (result->callback)
+        result->callback(loaded);
+    return loaded != nullptr;
 }
 
 // ---------------------------------------------------------------------------
@@ -68,36 +232,17 @@ bool SceneManager::ProcessPendingSceneLoad()
 void SceneManager::LoadSceneAsync(const std::string& path,
                                    std::function<void(Engine::Scene::Scene*)> onComplete)
 {
-    if (!s_activeScene)
+    if (!s_activeScene || path.empty())
     {
         if (onComplete)
             onComplete(nullptr);
         return;
     }
 
-    // Launch async loading task using std::async
-    // Note: Engine::Scene::Scene loading typically involves file I/O which is safe to do on background thread,
-    // but graphics resource creation must happen on main thread
-    std::thread([path, onComplete, activeScene = s_activeScene]()
-    {
-        // Perform scene loading on background thread
-        bool success = activeScene->Load(path);
-        
-        // Schedule callbacks to run on main thread (or invoke directly if safe)
-        // For now, invoke callbacks directly - proper implementation would queue for main thread
-        if (success)
-        {
-            if (s_onSceneLoaded)
-                s_onSceneLoaded(activeScene);
-            if (onComplete)
-                onComplete(activeScene);
-        }
-        else
-        {
-            if (onComplete)
-                onComplete(nullptr);
-        }
-    }).detach(); // Detach thread to run independently
+    s_activeScene->AssertOwnerThread();
+    s_pendingScenePath.clear();
+    SceneReader().Submit(path, std::move(onComplete), s_sceneGeneration,
+        s_activeScene->CaptureSceneGeneration());
 }
 
 }

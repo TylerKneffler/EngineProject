@@ -134,6 +134,47 @@ class PerformanceEvaluationTests(unittest.TestCase):
         self.assertIsNone(result["gpu_shadow_share_percent"])
         self.assertIn("2.00 ms", evaluation.markdown(result))
 
+    def test_render_work_balance_uses_unique_gpu_samples(self):
+        rows = [dict(type="frame_details", frame_ms=20, render_cpu_total_ms=10,
+                     gpu_valid=True, gpu_sample_id=1, gpu_opaque_ms=60, gpu_shadow_ms=10),
+                dict(type="frame_details", frame_ms=20, render_cpu_total_ms=10,
+                     gpu_valid=True, gpu_sample_id=1, gpu_opaque_ms=60, gpu_shadow_ms=10),
+                dict(type="frame_details", frame_ms=20, render_cpu_total_ms=10,
+                     gpu_valid=True, gpu_sample_id=2, gpu_opaque_ms=40, gpu_shadow_ms=10)]
+        balance = evaluation.evaluate(rows)["render_work_balance"]
+        self.assertEqual(balance["classification"], "GPU-heavy")
+        self.assertEqual(balance["gpu_to_cpu_ratio"], 6)
+        self.assertEqual(balance["largest_gpu_stage"], "gpu_opaque_ms")
+        self.assertIn("GPU-heavy", evaluation.markdown(evaluation.evaluate(rows)))
+        self.assertIsNone(evaluation.evaluate([dict(type="frame_details", frame_ms=20,
+                                                    render_cpu_total_ms=10)])["render_work_balance"])
+
+    def test_grass_gpu_stage_is_separate_from_opaque(self):
+        result = evaluation.evaluate([dict(type="frame_details", frame_ms=20,
+                                           render_cpu_total_ms=5, gpu_valid=True,
+                                           gpu_grass_ms=8, gpu_opaque_ms=3,
+                                           gpu_terrain_ms=2)])
+        self.assertEqual(result["gpu_total_ms"]["mean"], 13)
+        self.assertEqual(result["render_work_balance"]["largest_gpu_stage"], "gpu_grass_ms")
+        self.assertIn("gpu_grass_ms", evaluation.markdown(result))
+
+    def test_gpu_comparison_requires_matching_capture_conditions(self):
+        identity = dict(renderer="dx11", benchmark_scope="render", route="resident",
+                        route_version="v1", view_width=1848, view_height=1069,
+                        shadow_cascades=4, shadow_atlas_resolution=2048)
+        frame = dict(type="frame_details", playing=True, measured=True,
+                     frame_ms=20, gpu_valid=True, gpu_sample_id=1,
+                     gpu_grass_ms=8, **identity)
+        baseline = evaluation.evaluate([frame])
+        current = evaluation.evaluate([dict(frame, gpu_grass_ms=6)])
+        report = evaluation.markdown(current, baseline)
+        self.assertIn("Matched renderer, route", report)
+        self.assertIn("| gpu_grass_ms | 8.000 | 6.000 | -2.000 ms |", report)
+        changed = evaluation.evaluate([dict(frame, gpu_grass_ms=6, view_width=924)])
+        report = evaluation.markdown(changed, baseline)
+        self.assertIn("not verified as matched: view_width", report)
+        self.assertNotIn("-2.000 ms", report)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -519,8 +519,7 @@ bool GrassField::Refresh()
                 tile.object = scene.AddObject(name);
                 tile.object->runtimeOnly = true;
                 tile.object->enabled = false;
-                tile.object->Parent = Owner;
-                Owner->Children.push_back(tile.object);
+                scene.SetParentLocal(tile.object, Owner);
                 tile.object->transform.position = {x * span, 0, z * span};
                 tile.mesh = tile.object->AddComponent<Engine::Components::Mesh>();
                 tile.mesh->useBoundsForShadowCulling = true;

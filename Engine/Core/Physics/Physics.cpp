@@ -16,6 +16,10 @@ Physics::Physics(Engine::Scene::Scene&, std::unique_ptr<IPhysicsAdapter> adapter
 
 Physics::~Physics() = default;
 void Physics::Step(double deltaTime) { m_adapter->Step(deltaTime); }
+void Physics::PrepareStep(double deltaTime) { m_adapter->PrepareStep(deltaTime); }
+void Physics::SimulatePreparedStep() { m_adapter->SimulatePreparedStep(); }
+void Physics::FinishPreparedStep() { m_adapter->FinishPreparedStep(); }
+void Physics::AbortPreparedStep() { m_adapter->AbortPreparedStep(); }
 void Physics::Reset() { m_adapter->Reset(); }
 void Physics::ConfigureFixedStep(double seconds, uint32_t maximumSubsteps,
     uint32_t solverIterations)

@@ -27,6 +27,11 @@ TerrainPerformanceDriver::TerrainPerformanceDriver()
     RegisterField("reportIntervalSeconds", reportIntervalSeconds);
 }
 
+void TerrainPerformanceDriver::FenceBackgroundWork()
+{
+    if (m_farLoad.valid()) m_farLoad.wait();
+}
+
 namespace
 {
 constexpr std::array<float, TerrainHeightArchive::LayerCount - 1>

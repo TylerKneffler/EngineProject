@@ -1,4 +1,5 @@
 #include "Scripts/Demos/Pong/PongPlayer.h"
+#include "Core/Input/NativeInputSnapshot.h"
 
 #include "Scripts/Demos/Pong/PongGameManager.h"
 #include "Core/Compoonents/Physics/PrimitiveObjectCollider.h"
@@ -80,5 +81,5 @@ float PongPlayer::PaddleHalfHeight() const
 
 bool PongPlayer::IsKeyDown(int virtualKey)
 {
-    return (GetAsyncKeyState(virtualKey) & 0x8000) != 0;
+    return (Engine::Core::ReadNativeKeyState(virtualKey) & 0x8000) != 0;
 }

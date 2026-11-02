@@ -17,7 +17,7 @@ inline uint32_t GraphicsTextureBytesPerPixel(GraphicsTextureFormat format)
     return format == GraphicsTextureFormat::Rgba32Float ? 16u : 4u;
 }
 
-class IGraphicsTexture
+class IGraphicsTexture : public std::enable_shared_from_this<IGraphicsTexture>
 {
 public:
     virtual ~IGraphicsTexture() = default;

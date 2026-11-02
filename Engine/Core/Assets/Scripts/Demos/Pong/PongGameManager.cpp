@@ -1,4 +1,5 @@
 #include "Scripts/Demos/Pong/PongGameManager.h"
+#include "Core/Input/NativeInputSnapshot.h"
 
 #include "Scripts/Demos/Pong/PongBall.h"
 #include "Scripts/Demos/Pong/PongUI.h"
@@ -175,7 +176,7 @@ void PongGameManager::SetStatus(const std::string& text)
 
 bool PongGameManager::IsKeyDown(int virtualKey)
 {
-    return (GetAsyncKeyState(virtualKey) & 0x8000) != 0;
+    return (Engine::Core::ReadNativeKeyState(virtualKey) & 0x8000) != 0;
 }
 
 bool PongGameManager::KeyPressed(int virtualKey)

@@ -1,5 +1,6 @@
 #pragma once
 #include "pch.h"
+#include <cstdint>
 #include <functional>
 
 namespace Engine::Scene { class Scene; }
@@ -35,7 +36,7 @@ public:
     static void RequestSceneLoad(const std::string& path);
     static bool RequestDefaultSceneLoad();
     static bool ProcessPendingSceneLoad();
-    static void CancelPendingSceneLoad() { s_pendingScenePath.clear(); }
+    static void CancelPendingSceneLoad();
 
     static void SetDefaultScenePath(const std::string& path)
     {
@@ -43,10 +44,9 @@ public:
     }
     static const std::string& GetDefaultScenePath() { return s_defaultScenePath; }
     
-    // Load a scene in the background without blocking the main thread
-    // When load completes, the callback is invoked with the loaded scene
-    // Note: Callbacks are invoked on the background thread - ensure thread safety
-    //       or queue operations for the main thread as needed
+    // Read scene bytes on a bounded worker. ProcessPendingSceneLoad applies the
+    // latest request and invokes its callback on the scene owner thread.
+    // Replaced or canceled requests do not invoke their callbacks.
     static void LoadSceneAsync(const std::string& path, 
                                std::function<void(Engine::Scene::Scene*)> onComplete);
     
@@ -62,12 +62,13 @@ public:
     // ---- Internal API (called from Main.cpp) ----
     
     // Set the active scene (called during startup or when loading a new scene)
-    static void SetActiveScene(Engine::Scene::Scene* scene) { s_activeScene = scene; }
+    static void SetActiveScene(Engine::Scene::Scene* scene);
 
 private:
     static Engine::Scene::Scene* s_activeScene;
     static SceneLoadedCallback s_onSceneLoaded;
     static std::string s_defaultScenePath;
     static std::string s_pendingScenePath;
+    static uint64_t s_sceneGeneration;
 };
 }

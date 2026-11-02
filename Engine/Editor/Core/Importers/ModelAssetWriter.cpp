@@ -151,8 +151,7 @@ glm::vec3 QuaternionEuler(const glm::quat& q)
 Engine::Core::Object* AddChild(Engine::Scene::Scene& scene, Engine::Core::Object* parent, const std::string& name)
 {
     Engine::Core::Object* child = scene.AddObject(name);
-    child->Parent = parent;
-    parent->Children.push_back(child);
+    scene.SetParentLocal(child, parent);
     return child;
 }
 

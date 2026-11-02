@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "DX12GraphicsTexture.h"
+#include "DX12QueueMutex.h"
 
 #include <cstring>
 
@@ -141,12 +142,15 @@ std::shared_ptr<Engine::Graphics::IGraphicsTexture> D3D12TextureFactory::CreateT
     if (FAILED(commands->Close()))
         return nullptr;
     ID3D12CommandList* lists[] = { commands.Get() };
-    m_queue->ExecuteCommandLists(1, lists);
-
     Microsoft::WRL::ComPtr<ID3D12Fence> fence;
-    if (FAILED(m_device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence))) ||
-        FAILED(m_queue->Signal(fence.Get(), 1)))
+    if (FAILED(m_device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence))))
         return nullptr;
+    {
+        std::lock_guard queueLock(DX12QueueMutex());
+        m_queue->ExecuteCommandLists(1, lists);
+        if (FAILED(m_queue->Signal(fence.Get(), 1)))
+            return nullptr;
+    }
     HANDLE eventHandle = CreateEventW(nullptr, FALSE, FALSE, nullptr);
     if (!eventHandle)
         return nullptr;

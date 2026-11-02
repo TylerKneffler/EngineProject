@@ -4,6 +4,7 @@
 #include "Core/Compoonents/Physics/RigidBody.h"
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
+#include "Core/Input/NativeInputSnapshot.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include <algorithm>
 #include <glm/gtc/constants.hpp>
@@ -30,24 +31,7 @@ glm::vec3 PerpendicularForward(const glm::vec3& up)
 
 void SetSystemCursorVisible(bool visible)
 {
-    CURSORINFO cursorInfo { sizeof(CURSORINFO) };
-    if (GetCursorInfo(&cursorInfo) &&
-        ((cursorInfo.flags & CURSOR_SHOWING) != 0) == visible)
-    {
-        return;
-    }
-    if (visible)
-    {
-        while (ShowCursor(TRUE) < 0)
-        {
-        }
-    }
-    else
-    {
-        while (ShowCursor(FALSE) >= 0)
-        {
-        }
-    }
+    Engine::Core::RequestNativeCursorVisible(visible);
 }
 }
 
@@ -107,7 +91,7 @@ void FirstPersonController::Update()
     // Read both bits in one call. The transition bit preserves a quick
     // down/up click even when the window message queue is fully drained before
     // this update, while the high bit still tracks a held button.
-    const SHORT leftMouseState = GetAsyncKeyState(VK_LBUTTON);
+    const SHORT leftMouseState = Engine::Core::ReadNativeKeyState(VK_LBUTTON);
     const bool leftMouseDown = (leftMouseState & 0x8000) != 0;
     const bool leftMousePressed = (leftMouseState & 0x0001) != 0;
     if (!focused || IsKeyDown(VK_ESCAPE))
@@ -154,12 +138,12 @@ void FirstPersonController::UpdateLook()
         return;
 
     POINT cursor{};
-    if (!GetCursorPos(&cursor))
+    if (!Engine::Core::ReadNativeCursorPosition(cursor))
         return;
 
     if (!m_hasLastCursorPosition)
     {
-        SetCursorPos(lookAnchor.x, lookAnchor.y);
+        Engine::Core::RequestNativeCursorPosition(lookAnchor);
         m_lastCursorPosition = lookAnchor;
         m_hasLastCursorPosition = true;
         return;
@@ -171,7 +155,7 @@ void FirstPersonController::UpdateLook()
     // is active. Focus loss still releases capture in Update().
     const float deltaX = static_cast<float>(cursor.x - lookAnchor.x);
     const float deltaY = static_cast<float>(cursor.y - lookAnchor.y);
-    SetCursorPos(lookAnchor.x, lookAnchor.y);
+    Engine::Core::RequestNativeCursorPosition(lookAnchor);
     m_lastCursorPosition = lookAnchor;
     SetSystemCursorVisible(false);
 
@@ -334,7 +318,7 @@ void FirstPersonController::SetCursorLock(bool locked)
         POINT center{};
         if (GetLookAnchor(center))
         {
-            SetCursorPos(center.x, center.y);
+            Engine::Core::RequestNativeCursorPosition(center);
             m_lastCursorPosition = center;
             m_hasLastCursorPosition = true;
         }
@@ -349,6 +333,11 @@ void FirstPersonController::SetCursorLock(bool locked)
 
 bool FirstPersonController::GetLookAnchor(POINT& anchor) const
 {
+    if (auto* input = Engine::Core::CurrentNativeInputSnapshot())
+    {
+        anchor = input->center;
+        return input->hasCenter;
+    }
     if (Owner && Owner->GetScene() && Owner->GetScene()->IsGameplayInputManaged())
     {
         const auto& position = Owner->GetScene()->GetGameplayInputAnchor();
@@ -368,6 +357,8 @@ bool FirstPersonController::IsApplicationFocused() const
 {
     if (Owner && Owner->GetScene() && !Owner->GetScene()->IsGameplayInputEnabled())
         return false;
+    if (Engine::Core::CurrentNativeInputSnapshot())
+        return Engine::Core::IsNativeInputFocused();
     const HWND foreground = GetForegroundWindow();
     if (!foreground || !GetFocus())
         return false;
@@ -379,5 +370,5 @@ bool FirstPersonController::IsApplicationFocused() const
 
 bool FirstPersonController::IsKeyDown(int virtualKey)
 {
-    return (GetAsyncKeyState(virtualKey) & 0x8000) != 0;
+    return (Engine::Core::ReadNativeKeyState(virtualKey) & 0x8000) != 0;
 }

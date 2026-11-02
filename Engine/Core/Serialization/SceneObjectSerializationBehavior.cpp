@@ -147,6 +147,7 @@ bool DeserializeExpandedObject(
         component->Owner = &object;
         component->Deserialize(componentNode);
         component->OnAfterDeserialize(graphicsProvider);
+        object.AssertSceneOwner();
         object.Components.push_back(component);
     }
 
@@ -157,8 +158,7 @@ bool DeserializeExpandedObject(
             scene, children.ArrayAt(i), graphicsProvider, registry, options);
         if (!child)
             throw std::runtime_error("Could not instantiate child object");
-        child->Parent = &object;
-        object.Children.push_back(child);
+        scene.SetParentLocal(child, &object);
     }
 
     return true;

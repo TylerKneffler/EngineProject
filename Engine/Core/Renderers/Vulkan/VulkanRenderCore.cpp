@@ -1,6 +1,7 @@
 #include "pch.h"
 #if defined(ENGINE_VULKAN_ENABLED)
 #include "VulkanRenderCore.h"
+#include "VulkanQueueMutex.h"
 #include <algorithm>
 #include <cstring>
 
@@ -9,7 +10,11 @@ namespace Engine::Renderers
 VulkanRenderCore::~VulkanRenderCore()
 {
     if (!m_instance) return;
-    if (m_device) vkDeviceWaitIdle(m_device);
+    if (m_device)
+    {
+        std::lock_guard queueLock(VulkanQueueMutex());
+        vkDeviceWaitIdle(m_device);
+    }
     DestroySwapchain();
     if (m_mainRenderPass) vkDestroyRenderPass(m_device, m_mainRenderPass, nullptr);
     if (m_offscreenRenderPass) vkDestroyRenderPass(m_device, m_offscreenRenderPass, nullptr);
@@ -326,9 +331,14 @@ VkCommandBuffer VulkanRenderCore::BeginFrame()
 {
     if (m_resizePending)
     {
-        vkDeviceWaitIdle(m_device); DestroySwapchain(); CreateSwapchain(); m_resizePending = false;
+        {
+            std::lock_guard queueLock(VulkanQueueMutex());
+            vkDeviceWaitIdle(m_device);
+        }
+        DestroySwapchain(); CreateSwapchain(); m_resizePending = false;
     }
     VkCheck(vkWaitForFences(m_device, 1, &m_inFlight[m_frameIndex], VK_TRUE, UINT64_MAX), "vkWaitForFences");
+    m_completedSerial = std::max(m_completedSerial, m_frameSerial[m_frameIndex]);
     VkResult acquired = vkAcquireNextImageKHR(m_device, m_swapchain, UINT64_MAX,
         m_imageAvailable[m_frameIndex], VK_NULL_HANDLE, &m_imageIndex);
     if (acquired == VK_ERROR_OUT_OF_DATE_KHR) { m_resizePending = true; return VK_NULL_HANDLE; }
@@ -352,7 +362,9 @@ void VulkanRenderCore::EndFrame()
     submit.pWaitDstStageMask = &waitStage;
     submit.commandBufferCount = 1; submit.pCommandBuffers = &m_currentCommandBuffer;
     submit.signalSemaphoreCount = 1; submit.pSignalSemaphores = &m_renderFinished[m_frameIndex];
+    std::lock_guard queueLock(VulkanQueueMutex());
     VkCheck(vkQueueSubmit(m_queue, 1, &submit, m_inFlight[m_frameIndex]), "vkQueueSubmit");
+    m_frameSerial[m_frameIndex] = ++m_submittedSerial;
     VkPresentInfoKHR present{ VK_STRUCTURE_TYPE_PRESENT_INFO_KHR };
     present.waitSemaphoreCount = 1; present.pWaitSemaphores = &m_renderFinished[m_frameIndex];
     present.swapchainCount = 1; present.pSwapchains = &m_swapchain; present.pImageIndices = &m_imageIndex;
@@ -363,6 +375,30 @@ void VulkanRenderCore::EndFrame()
     m_frameIndex = (m_frameIndex + 1) % FRAME_COUNT;
 }
 
-void VulkanRenderCore::WaitIdle() const { if (m_device) vkDeviceWaitIdle(m_device); }
+bool VulkanRenderCore::IsFrameComplete(uint64_t token)
+{
+    if (token <= m_completedSerial) return true;
+    if (!m_device) return false;
+    for (uint32_t slot = 0; slot < FRAME_COUNT; ++slot)
+    {
+        if (m_frameSerial[slot] <= m_completedSerial) continue;
+        const VkResult status = vkGetFenceStatus(m_device, m_inFlight[slot]);
+        if (status == VK_SUCCESS)
+            m_completedSerial = std::max(m_completedSerial, m_frameSerial[slot]);
+        else if (status != VK_NOT_READY)
+            VkCheck(status, "vkGetFenceStatus");
+    }
+    return token <= m_completedSerial;
+}
+
+void VulkanRenderCore::WaitIdle() const
+{
+    if (m_device)
+    {
+        std::lock_guard queueLock(VulkanQueueMutex());
+        VkCheck(vkDeviceWaitIdle(m_device), "vkDeviceWaitIdle");
+        m_completedSerial = m_submittedSerial;
+    }
+}
 }
 #endif

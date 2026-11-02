@@ -168,6 +168,7 @@ void ResolveObject(Engine::Core::Object* object, Engine::Components::Canvas* can
 std::vector<Engine::Model::UITextLayout> UILayout::Resolve(
     Engine::Scene::Scene& scene, float viewportAspect)
 {
+    scene.AssertOwnerThread();
     std::vector<Engine::Model::UITextLayout> output;
     for (const auto& candidate : scene.GetObjects())
     {

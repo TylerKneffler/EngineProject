@@ -139,6 +139,7 @@ public:
     void Start() override;
     void Update() override;
     void OnDestroy() override;
+    void FenceBackgroundWork() override;
     bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
 
     // Rebuilds the configured terrain ring immediately. This is also exposed

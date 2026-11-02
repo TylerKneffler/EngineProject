@@ -7,6 +7,8 @@
 #include <cstdint>
 #include <vector>
 #include <string>
+#include <optional>
+#include <typeindex>
 
 #define COMPONENT_TYPE_NAME(ClassName) #ClassName
 
@@ -20,6 +22,24 @@ class Object;
 class Component
 {
 public:
+    enum class UpdateThreadAffinity { SimulationOwner, Worker };
+    enum class UpdateParallelSafety { Serial, DeclaredAccess };
+    struct CallbackPolicy
+    {
+        // Start, Enabled, Disabled and OnDestroy always run on the scene owner.
+        UpdateThreadAffinity updateThread = UpdateThreadAffinity::SimulationOwner;
+        UpdateParallelSafety updateSafety = UpdateParallelSafety::Serial;
+    };
+    struct UpdateAccess
+    {
+        // Names identify shared data, including scene services and object fields.
+        // A read may overlap another read; writes exclude readers and writers.
+        std::vector<std::string> reads;
+        std::vector<std::string> writes;
+        // Every matching component in the current parallel segment completes
+        // before this component. Use the concrete component type.
+        std::vector<std::type_index> after;
+    };
     using JsonValue = Engine::Serialization::JsonValue;
     using ComponentReference = Engine::Core::ComponentReference;
     using Object = Engine::Core::Object;
@@ -48,11 +68,22 @@ public:
     // mechanism that makes a component update.
     virtual void Start() {}
     virtual void Update() {}
+    virtual CallbackPolicy GetCallbackPolicy() const { return {}; }
+    // Worker policy also requires this declaration. Update may touch only its
+    // own state and named resources; live scene, window, and graphics work
+    // stays on its owner. The default remains the serial owner path.
+    virtual std::optional<UpdateAccess> GetUpdateAccess() const { return std::nullopt; }
+    // Runs on the simulation owner after a successful Update. Worker updates
+    // finish as a group before this hook publishes shared or resource state.
+    virtual void PublishUpdateOnOwner() {}
     // Components with only authored/render data opt out of frame callbacks.
     virtual bool RequiresUpdate() const { return true; }
     virtual void Enabled() {}
     virtual void Disabled() {}
     virtual void OnDestroy() {}
+    // Called on the scene owner before lifecycle transitions or module unload.
+    // Implementations must cancel queued work and join work executing component code.
+    virtual void FenceBackgroundWork() {}
     // Called by the Properties panel to draw editable properties in the editor.
     // Returns true when an editor control changed serialized component data.
     virtual bool DrawProperties(::Engine::Editor::IEditorUi& ui);
@@ -81,11 +112,7 @@ public:
     // derived state only after configuration changes. Scripts that mutate
     // public component fields directly should call MarkConfigurationDirty().
     uint64_t GetConfigurationRevision() const { return m_configurationRevision; }
-    void MarkConfigurationDirty()
-    {
-        if (++m_configurationRevision == 0)
-            ++m_configurationRevision;
-    }
+    void MarkConfigurationDirty();
 
     // Hierarchy lookup helpers available to any component.
     Object* FindObjectInChildrenByName(const std::string& objectName,

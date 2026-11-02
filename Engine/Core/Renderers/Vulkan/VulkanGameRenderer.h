@@ -23,6 +23,10 @@ public:
     bool ReadSceneCaptureRGBA(std::vector<uint8_t>& pixels);
     void BeginFrame() override;
     void EndFrame() override;
+    uint64_t GetSubmittedFrameToken() const override
+    { return m_core.GetSubmittedFrameToken(); }
+    bool IsFrameComplete(uint64_t token) override
+    { return m_core.IsFrameComplete(token); }
     std::unique_ptr<Engine::Graphics::IGraphicsContext> CreateFrameGraphicsContext() override;
     Engine::Graphics::FrameTimingTelemetry GetFrameTimingTelemetry() const override
     { return m_frameTelemetry; }

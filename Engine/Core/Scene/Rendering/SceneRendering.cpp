@@ -1,6 +1,7 @@
 #include "Core/Rendering/ShadowReceiverCulling.h"
 #include "Core/Rendering/RenderJobs.h"
 #include "Core/Scene/Scene.h"
+#include "Core/Graphics/GraphicsCommandPacket.h"
 #include <chrono>
 #include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Compoonents/Obj/Mesh.h"
@@ -367,6 +368,11 @@ void Scene::Init(Engine::Graphics::IGraphicsProvider* graphicsProvider)
     if (!graphicsProvider)
         throw std::runtime_error("Scene::Init requires a non-null graphics provider");
 
+    if (m_activeNativeFrameBuffers)
+        WaitForGpuResourceDestruction();
+    m_nativeFrameBuffers.clear();
+    m_activeNativeFrameBuffers = nullptr;
+
     m_graphicsProvider = graphicsProvider;
     m_particleDrawSlots.clear();
 
@@ -619,7 +625,7 @@ void Scene::EnsureObjectRenderCapacity(uint32_t requiredObjects)
     m_objectCapacity = capacity;
 }
 
-void Scene::SelectRenderPassBuffers()
+void Scene::SelectRenderPassBuffers(uint32_t frameItemCount)
 {
     auto* contexts=m_graphicsProvider->GetContextFactory();
     const auto frameSlot=contexts->GetPreparedFrameSlot();
@@ -655,7 +661,7 @@ void Scene::SelectRenderPassBuffers()
         selected->shadowConstantsMapped=selected->shadowConstants->Map(); selected->shadowObjectsMapped=selected->shadowObjects->Map();
     }
     exchange(*selected); m_activeRenderPassBuffers=selected;
-    EnsureObjectRenderCapacity(std::max(1u,static_cast<uint32_t>(m_frameRenderItems.size())));
+    EnsureObjectRenderCapacity(std::max(1u,frameItemCount));
 }
 
 void Scene::EnsureSkinPaletteCapacity(uint32_t requiredMatrices)
@@ -1381,7 +1387,8 @@ void Scene::BuildObjectPipeline()
     m_terrainPipelineByBase.clear();
     m_materialShaderBuilders.clear();
     m_materialShaderPipelines.clear();
-    m_retiredMaterialShaderPipelines.clear();
+    if (!m_deferGraphicsRetirement)
+        m_retiredMaterialShaderPipelines.clear();
 
     enum class PortalStencilMode
     {
@@ -1784,12 +1791,138 @@ void Scene::BuildObjectPipeline()
 // Scene::PrepareRenderFrame
 // ---------------------------------------------------------------------------
 
+Scene::RetiredGraphicsResources Scene::TakeRetiredGraphicsResources()
+{
+    RetiredGraphicsResources retired;
+    retired.buffers.swap(m_retiredRenderBuffers);
+    retired.sharedBuffers.swap(m_retiredSharedRenderBuffers);
+    retired.pipelines.swap(m_retiredMaterialShaderPipelines);
+    retired.textures.swap(m_retiredShadowTextures);
+    return retired;
+}
+
+void Scene::RetireGraphicsBuffer(std::unique_ptr<IGraphicsBuffer> buffer)
+{
+    if (buffer && m_deferGraphicsRetirement)
+        m_retiredRenderBuffers.push_back(std::move(buffer));
+}
+
+void Scene::RetireGraphicsBuffer(std::shared_ptr<IGraphicsBuffer> buffer)
+{
+    if (buffer && m_deferGraphicsRetirement)
+        m_retiredSharedRenderBuffers.push_back(std::move(buffer));
+}
+
+struct Scene::NativeRenderPacket
+{
+    std::vector<FrameRenderItem> items;
+    std::vector<std::shared_ptr<IGraphicsBuffer>> meshBuffers;
+};
+
+std::shared_ptr<const Scene::NativeRenderPacket> Scene::TakeNativeRenderPacket()
+{
+    AssertOwnerThread();
+    if (!m_renderFramePrepared || m_nativeRenderPacketTaken)
+        throw std::logic_error("Native render packet requires a prepared scene frame");
+    m_nativeRenderPacketTaken = true;
+    auto packet = std::make_shared<NativeRenderPacket>();
+    packet->items = std::move(m_frameRenderItems);
+    packet->meshBuffers.reserve(packet->items.size() * 2);
+    for (const FrameRenderItem& item : packet->items)
+    {
+        if (!item.mesh) continue;
+        if (auto vertex = item.mesh->GetVertexBufferOwner())
+            packet->meshBuffers.push_back(std::move(vertex));
+        if (auto index = item.mesh->GetIndexBufferOwner())
+            packet->meshBuffers.push_back(std::move(index));
+    }
+    return packet;
+}
+
+void Scene::RetainNativePacketMeshBuffers(const NativeRenderPacket& packet,
+    Engine::Graphics::GraphicsCommandPacket& commands) const
+{
+    AssertOwnerThread();
+    for (const auto& buffer : packet.meshBuffers)
+        commands.RetainBuffer(buffer);
+}
+
+void Scene::SelectNativeFrameBuffers()
+{
+    if (!m_deferGraphicsRetirement || !m_graphicsProvider ||
+        !m_graphicsProvider->GetContextFactory()) return;
+    const uint32_t slotIndex = m_graphicsProvider->GetContextFactory()
+        ->GetPreparedFrameSlot();
+    if (m_nativeFrameBuffers.size() <= slotIndex)
+        m_nativeFrameBuffers.resize(static_cast<size_t>(slotIndex) + 1u);
+    if (!m_nativeFrameBuffers[slotIndex])
+        m_nativeFrameBuffers[slotIndex] = std::make_unique<NativeFrameBuffers>();
+    auto* selected = m_nativeFrameBuffers[slotIndex].get();
+    if (selected == m_activeNativeFrameBuffers) return;
+    if (!m_activeNativeFrameBuffers)
+    {
+        m_activeNativeFrameBuffers = selected;
+        return;
+    }
+    const auto exchange = [&](NativeFrameBuffers& slot)
+    {
+        using std::swap;
+        swap(m_gridConstantBuffer, slot.grid);
+        swap(m_gridCBMapped, slot.gridMapped);
+        swap(m_skyboxConstantBuffer, slot.skybox);
+        swap(m_skyboxCBMapped, slot.skyboxMapped);
+        swap(m_lightDataBuffer, slot.lights);
+        swap(m_lightDataMapped, slot.lightsMapped);
+        swap(m_boneDataBuffer, slot.bones);
+        swap(m_boneDataMapped, slot.bonesMapped);
+        swap(m_boneMatrixCapacity, slot.boneCapacity);
+        swap(m_clusterHeaderBuffer, slot.clusterHeaders);
+        swap(m_clusterHeaderMapped, slot.clusterHeadersMapped);
+        swap(m_clusterHeaderCapacity, slot.clusterHeaderCapacity);
+        swap(m_clusterLightIndexBuffer, slot.clusterIndices);
+        swap(m_clusterLightIndexMapped, slot.clusterIndicesMapped);
+        swap(m_clusterLightIndexCapacity, slot.clusterIndexCapacity);
+        swap(m_portalApertureBuffer, slot.portalAperture);
+        swap(m_portalApertureMapped, slot.portalApertureMapped);
+    };
+    auto* previous = m_activeNativeFrameBuffers;
+    exchange(*previous);
+    exchange(*selected);
+    auto* factory = m_graphicsProvider->GetBufferFactory();
+    const auto createLike = [&](const std::unique_ptr<IGraphicsBuffer>& source,
+        std::unique_ptr<IGraphicsBuffer>& destination, void*& mapped)
+    {
+        if (!source || destination) return;
+        destination = factory->CreateBuffer(source->GetUsage(),
+            source->GetAccessMode(), source->GetSize(), nullptr,
+            source->GetElementStride());
+        mapped = destination ? destination->Map() : nullptr;
+        if (!mapped)
+            throw std::runtime_error("Failed to allocate native frame upload buffer");
+    };
+    createLike(previous->grid, m_gridConstantBuffer, m_gridCBMapped);
+    createLike(previous->skybox, m_skyboxConstantBuffer, m_skyboxCBMapped);
+    createLike(previous->lights, m_lightDataBuffer, m_lightDataMapped);
+    createLike(previous->bones, m_boneDataBuffer, m_boneDataMapped);
+    if (m_boneDataBuffer && !m_boneMatrixCapacity)
+        m_boneMatrixCapacity = previous->boneCapacity;
+    createLike(previous->portalAperture, m_portalApertureBuffer,
+        m_portalApertureMapped);
+    m_activeNativeFrameBuffers = selected;
+}
+
 void Scene::PrepareRenderFrame()
 {
+    AssertOwnerThread();
+    // Editor edits also publish through this boundary before render workers
+    // inspect the scene. Unchanged snapshots are reused without allocation.
+    CommitPendingObjectChanges();
+    SelectNativeFrameBuffers();
     const auto preparationJobs=Engine::Rendering::RenderJobs::Get().ReadStatistics();
     using PrepareClock = std::chrono::steady_clock;
     m_lastPrepareTimings={};
     m_renderFramePrepared = false;
+    m_nativeRenderPacketTaken = false;
     m_frameRenderItems.clear();
     ++m_materialPreparationSerial;
     m_frameLightCount = 0;
@@ -1901,7 +2034,12 @@ void Scene::PrepareRenderFrame()
 
     m_frameRenderItems.reserve(m_objects.size());
     if (!hasActiveWarpVolume)
+    {
+        if (m_deferGraphicsRetirement)
+            for (auto& [object, cached] : m_warpedRenderMeshes)
+                RetireGraphicsBuffer(std::move(cached.vertexBuffer));
         m_warpedRenderMeshes.clear();
+    }
     // The authored Mesh buffer cannot be changed for rendering a nonlinear
     // volume: it may also back a collider, an editor asset, or another draw.
     // Keep a private upload buffer for each affected object instead.
@@ -1914,7 +2052,10 @@ void Scene::PrepareRenderFrame()
                 return object.get() == cache->first;
             });
         if (!stillInScene)
+        {
+            RetireGraphicsBuffer(std::move(cache->second.vertexBuffer));
             cache = m_warpedRenderMeshes.erase(cache);
+        }
         else
             ++cache;
     }
@@ -2106,8 +2247,10 @@ void Scene::PrepareRenderFrame()
                         byteSize) != 0;
                 if (contentsChanged)
                 {
-                    if (topologyChanged || !cached.vertexBuffer)
+                    if (topologyChanged || !cached.vertexBuffer ||
+                        m_deferGraphicsRetirement)
                     {
+                        RetireGraphicsBuffer(std::move(cached.vertexBuffer));
                         cached.vertexBuffer = m_graphicsProvider->GetBufferFactory()
                             ->CreateBuffer(Engine::Graphics::IGraphicsBuffer::Usage::VertexBuffer,
                                 Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
@@ -2336,7 +2479,30 @@ void Scene::PrepareRenderFrame()
     }
     const auto bounds=m_worldBoundsCache.Prepare(boundsInput,spatialBounds);
     m_lastPrepareTimings.boundsReused=bounds.reused; m_lastPrepareTimings.boundsUpdated=bounds.updated;
-    const auto spatial=m_renderSpatialIndex.Update(std::move(spatialBounds));
+    m_spatialSlotBounds.resize(m_renderObjectSlotCount);
+    m_spatialSlotSeen.assign(m_renderObjectSlotCount,0);
+    for(size_t index=0;index<m_frameRenderItems.size();++index)
+    {
+        const auto slot=m_frameRenderItems[index].objectSlot;
+        const auto& current=spatialBounds[index];
+        if(!m_spatialSlotSeen[slot])
+        { m_spatialSlotBounds[slot]=current; m_spatialSlotSeen[slot]=1; }
+        else
+        {
+            auto& aggregate=m_spatialSlotBounds[slot];
+            // Several chart instances can share a draw slot. A single
+            // unbounded instance must keep all of them conservatively visible.
+            if(!aggregate.bounded || !current.bounded) aggregate.bounded=false;
+            else
+            {
+                aggregate.minimum=glm::min(aggregate.minimum,current.minimum);
+                aggregate.maximum=glm::max(aggregate.maximum,current.maximum);
+            }
+        }
+    }
+    // Retain the last bound for absent slots. A temporary LOD or visibility
+    // change then leaves the tree topology intact; no draw consumes that slot.
+    const auto spatial=m_renderSpatialIndex.Update(m_spatialSlotBounds);
     m_lastPrepareTimings.spatialIndexMs=spatial.totalMs; m_lastPrepareTimings.spatialCompareMs=spatial.compareMs;
     m_lastPrepareTimings.spatialRefitMs=spatial.refitMs; m_lastPrepareTimings.spatialBuildMs=spatial.buildMs;
     m_lastPrepareTimings.spatialChangedBounds=spatial.changedBounds; m_lastPrepareTimings.spatialReusedBounds=spatial.reusedBounds;
@@ -2357,8 +2523,17 @@ void Scene::PrepareRenderFrame()
 
 void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     Engine::Components::Camera* cameraOverride, bool includeEditorVisuals,
-    uint32_t viewportWidth, uint32_t viewportHeight, bool shadowOnly)
+    uint32_t viewportWidth, uint32_t viewportHeight, bool shadowOnly,
+    const NativeRenderPacket* nativePacket)
 {
+    const bool previousNativeRecording = m_recordingNativeCommands;
+    m_recordingNativeCommands = nativePacket && IsOwnerThread();
+    struct NativeRecordingGuard
+    {
+        bool& current;
+        bool previous;
+        ~NativeRecordingGuard() { current = previous; }
+    } nativeRecordingGuard{m_recordingNativeCommands, previousNativeRecording};
     struct NativePass
     {
         Engine::Graphics::IGraphicsContext* context;
@@ -2423,9 +2598,12 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             std::exp2(std::clamp(settings.outputExposure, -16.f, 16.f)),
             static_cast<uint32_t>(settings.toneMapping) });
 
+    if (m_nativeRenderPacketTaken && !nativePacket)
+        throw std::logic_error("Native frame draw list was transferred to a render packet");
     if (!m_renderFramePrepared)
         PrepareRenderFrame();
-    SelectRenderPassBuffers();
+    const auto& frameRenderItems = nativePacket ? nativePacket->items : m_frameRenderItems;
+    SelectRenderPassBuffers(static_cast<uint32_t>(frameRenderItems.size()));
     m_lastOrdinaryDrawCount = 0;
     m_lastOrdinaryTriangleCount = 0;
     const uint32_t portalRenderSlotsPerView = m_objectCapacity + 2u;
@@ -3206,8 +3384,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     m_lastRenderCpuTimings.startupMs=std::chrono::duration<double,std::milli>(terrainPreparationStart-measurement.start).count();
     if (useTerrainOcclusion)
     {
-        terrainBlockers.reserve(m_frameRenderItems.size());
-        for (const FrameRenderItem& item : m_frameRenderItems)
+        terrainBlockers.reserve(frameRenderItems.size());
+        for (const FrameRenderItem& item : frameRenderItems)
         {
             if (!item.object || item.belongsToPreview ||
                 (m_previewObject && IsObjectOrDescendant(
@@ -3308,14 +3486,14 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         ? m_renderSpatialIndex.Query(viewProjection) : emptyVisibility;
     std::vector<ViewRenderItem>& renderObjects = m_viewRenderItemScratch;
     renderObjects.clear();
-    renderObjects.reserve(m_frameRenderItems.size());
-    std::vector<ViewRenderItem> classified(m_frameRenderItems.size());
-    std::vector<uint8_t> accepted(m_frameRenderItems.size(),0), terrainRejected(m_frameRenderItems.size(),0);
-    Engine::Rendering::RenderJobs::Get().For(m_frameRenderItems.size(),cameraUsesSourceWarpChart ? SIZE_MAX:128,[&](size_t index)
+    renderObjects.reserve(frameRenderItems.size());
+    std::vector<ViewRenderItem> classified(frameRenderItems.size());
+    std::vector<uint8_t> accepted(frameRenderItems.size(),0), terrainRejected(frameRenderItems.size(),0);
+    Engine::Rendering::RenderJobs::Get().For(frameRenderItems.size(),cameraUsesSourceWarpChart ? SIZE_MAX:128,[&](size_t index)
     {
-        const auto& item=m_frameRenderItems[index];
+        const auto& item=frameRenderItems[index];
         if(shadowOnly && (!item.mesh || (item.material && !item.material->castsShadows))) return;
-        if(!spatialVisible.empty() && !spatialVisible[index]) return;
+        if(!spatialVisible.empty() && !spatialVisible[item.objectSlot]) return;
         if(item.belongsToPreview && !includeEditorVisuals) return;
         const auto world=useSourceChartMesh(item) ? sourceChartWorld(item):item.world;
         if(!shadowOnly && !hasPortalViews && spatialVisible.empty() && outsideViewFrustum(item,world)) return;
@@ -3499,7 +3677,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         preparedDraw.morphDeltaBuffer = m_emptyMorphDeltaBuffer.get();
         preparedDraw.morphWeightBuffer = m_emptyMorphWeightBuffer.get();
         preparedDraw.textures[8] = m_brdfIntegrationLut.get();
-        preparedDraw.frameItemIndex=static_cast<uint32_t>(renderItem-m_frameRenderItems.data());
+        preparedDraw.frameItemIndex=static_cast<uint32_t>(renderItem-frameRenderItems.data());
         preparedDraw.gpuLod=renderItem->gpuLod;
         preparedDraw.gpuMaximumLod=renderItem->gpuMaximumLod;
         preparedDraw.gpuLodDistances=renderItem->gpuLodDistances;
@@ -4600,7 +4778,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             cascadeVisible[cascade].resize(preparedDraws.size(),1);
             if(!frameVisible.empty())
                 for(size_t index=0;index<preparedDraws.size();++index)
-                    cascadeVisible[cascade][index]=frameVisible[preparedDraws[index].frameItemIndex];
+                    cascadeVisible[cascade][index]=frameVisible[frameRenderItems[preparedDraws[index].frameItemIndex].objectSlot];
         }
         std::vector<uint8_t> cascadeMasks(preparedDraws.size(), 0u);
         Engine::Rendering::RenderJobs::Get().For(preparedDraws.size(),512,[&](size_t drawIndex)
@@ -4808,7 +4986,10 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 entry.atlasResolution = entry.atlas ? portalResolution : 0u;
                 entry.rendered = false;
             }
-            if (entry.bufferCapacity != m_objectCapacity)
+            // A recorded native frame may still be reading these upload
+            // buffers when the next frame prepares its portal shadows.
+            if (entry.bufferCapacity != m_objectCapacity ||
+                m_recordingNativeCommands)
             {
                 if (entry.constantBuffer && entry.constantMapped)
                     entry.constantBuffer->Unmap();
@@ -4982,7 +5163,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         {
             if(submittedAutomaticGroups[draw.automaticGroup]) continue;
             submittedAutomaticGroups[draw.automaticGroup]=1;
-            switchGpuStage(draw.terrain || draw.terrainCell ? Engine::Graphics::GpuTimingStage::Terrain : Engine::Graphics::GpuTimingStage::Opaque);
+            switchGpuStage(draw.terrain || draw.terrainCell ? Engine::Graphics::GpuTimingStage::Terrain :
+                draw.mesh && draw.mesh->grassShadowCaster ? Engine::Graphics::GpuTimingStage::Grass : Engine::Graphics::GpuTimingStage::Opaque);
             for(uint32_t textureSlot=0;textureSlot<std::max(draw.textureSlotCount,boundTextureSlotCount);++textureSlot)
                 if(!texturesBound || boundTextures[textureSlot]!=draw.textures[textureSlot]) context->SetTexture(textureSlot,draw.textures[textureSlot]);
             boundTextures=draw.textures; boundTextureSlotCount=draw.textureSlotCount; texturesBound=true;
@@ -5006,6 +5188,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         ensureRecordsUploaded();
         switchGpuStage((draw.terrain || draw.terrainCell)
             ? Engine::Graphics::GpuTimingStage::Terrain
+            : (draw.mesh && draw.mesh->grassShadowCaster)
+                ? Engine::Graphics::GpuTimingStage::Grass
             : (draw.blended
                 ? Engine::Graphics::GpuTimingStage::Transparent
                 : Engine::Graphics::GpuTimingStage::Opaque));

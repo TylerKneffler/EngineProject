@@ -59,6 +59,7 @@ inline std::string FindComponentSubclass(const std::string& path)
 template<typename T>
 void ReplaceOrAddComponent(Engine::Core::Object& object, T* component)
 {
+    object.AssertSceneOwner();
     component->Owner = &object;
     for (auto it = object.Components.begin(); it != object.Components.end(); ++it)
     {
@@ -66,9 +67,11 @@ void ReplaceOrAddComponent(Engine::Core::Object& object, T* component)
         {
             delete *it;
             *it = component;
+            object.NotifyStructureChanged();
             return;
         }
     }
     object.Components.push_back(component);
+    object.NotifyStructureChanged();
 }
 }

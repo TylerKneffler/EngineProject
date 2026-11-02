@@ -1,56 +1,85 @@
 # Engine TODO
 
-Last updated: 2026-11-01.
+Last updated: 2026-11-02.
+
+## Highest-impact path to CPU/GPU overlap
+
+1. Publish immutable scene/render snapshots at commit boundaries. Add component read/write and thread-affinity policies, then schedule safe update, pose, and render-preparation jobs against those snapshots. Keep existing arbitrary callbacks on the simulation owner until their access is declared.
+2. Move the simulation loop to its own owner thread with bounded input and render handoffs. Move graphics submission to a dedicated render owner once frame-safe resources and Play/Stop/reload barriers are in place. This lets CPU preparation for frame N+1 overlap GPU submission for frame N.
+3. Move terrain decoding, animation/rig evaluation, and independent physics preparation onto bounded jobs. Use the stage timings and worker queue delay to choose batches that keep cores busy without adding a frame barrier.
+4. Benchmark backend command recording after the owner split. DX12/Vulkan command buffers can be built independently; DX11 deferred contexts need a measured benefit before adoption. Compare matched-route frame percentiles and latency, not peak CPU utilization alone.
+5. Measure native graphics-call stalls on matched moving/streaming routes and fix only confirmed buffer or fence bottlenecks. The resident DX11 capture found no long map or indirect-argument call; its worst instrumented call was a 0.734 ms draw.
+6. Reduce grass GPU work on the 441-cell stress route. The Grass stage averages 63.4 ms of 86.8 ms measured GPU stages at 1848 x 1069; CPU render work averages about 13.6 ms. At one-quarter the pixels, grass time drops to 30.0 ms, indicating substantial pixel-dependent work. Benchmark shader, coverage, and LOD changes against image references before changing quality.
 
 ## Parallel scene updates and rendering
 
-- [ ] Identify and eliminate graphics-submission stalls with native-call timings for buffer mapping, dispatch, resource binding, indirect arguments, draws, and fence waits.
-- [x] Replace the fixed three-worker render pool with a configurable engine job scheduler supporting dependencies, workload-sized batches, and execution/queue/wait measurements.
-- [ ] Move the native scene/game loop onto a dedicated simulation thread, separate from window/input/UI handling and graphics submission, with synchronized input snapshots and bounded render handoff.
-- [ ] Schedule native update phases as dependent jobs: component updates, spatial scripts, transforms, animation/constraints, physics preparation, simulation, post-physics processing, and render snapshot publication.
-- [ ] Publish immutable scene snapshots and defer object creation, removal, hierarchy changes, and component writes to defined commit boundaries.
-- [ ] Add component update dependencies and explicit read/write access so independent updates can run concurrently while existing scripts retain a compatible serial path.
-- [ ] Add explicit thread-affinity and parallel-safety policies for native component and script callbacks; move eligible Update work onto workers and marshal window, graphics, and shared-state operations to their owners.
+Open work is ordered by engine-wide impact and prerequisites; completed foundations follow.
+
+- [x] Publish immutable scene snapshots at defined commit boundaries; execute worker object, hierarchy, and component mutations through queued commands and publish serial owner edits at the next boundary.
+  - [x] Publish value-owned scene snapshots and add stable-ID mutation commands committed on the scene owner.
+  - [x] Migrate direct editor and script object/component writes to commit commands or a declared serial owner path; enforce commit boundaries for every mutation.
+- [x] Move the native scene/game loop onto a dedicated simulation thread, separate from window/input/UI handling and graphics submission, with synchronized input snapshots and bounded render handoff.
+- [x] Move graphics submission to a dedicated owning render thread using buffered render packets, frame-safe resource retirement, and bounded frame latency.
+  - [x] Route standalone graphics submission, resize, and idle waits through one render thread with a bounded one-frame handoff.
+  - [x] Resolve native UI layout on the simulation owner after the object commit and hand its prepared text ordering to the render thread.
+  - [x] Add DX11, DX12, and Vulkan frame-completion tokens; fence-retire replaced scene buffers, shader pipelines, and shadow atlases; bound submitted GPU frames and drain before native object removal.
+  - [x] Fence-retire mesh vertex, index, morph, and posed buffers when a live component replaces them.
+  - [x] Move the prepared native draw list and mesh buffer references into a simulation-published frame packet; consume and fence-retain that packet on the render owner.
+  - [x] Replace the borrowed live-scene draw data with owned render packets and retire GPU resources only after their frame fences complete.
+  - [x] Overlap simulation preparation for frame N+1 with render-thread submission of frame N while retaining bounded frame slots and scene commit barriers.
+  - [x] Restore GPU occlusion-query feedback on the recorded native path without reading backend query state from the simulation owner.
+- [x] Coordinate fixed-step updates, Play/Stop, pause, scene loading, hot reload, and shutdown across simulation, workers, and rendering without stale jobs or partially published scenes.
+  - [x] Read asynchronous scene files on one bounded worker and commit the latest result with callbacks on the scene owner; cancel stale results on scene changes and shutdown.
+  - [x] Restore failed scene loads and publish only the finished replacement or restored scene snapshot at the owner commit boundary; defer editor Play/Stop scene mutations until after frame submission, drain GPU work before object destruction, and cancel pending reads on hot reload.
+  - [x] Fence scene-generation jobs and script-module callbacks before Play/Stop, hot reload, and shutdown; verify fixed-step and pause transitions across both hosts.
+- [x] Schedule native update phases as dependent jobs: component updates, spatial scripts, transforms, animation/constraints, physics preparation, simulation, post-physics processing, and render snapshot publication.
+- [x] Add component update dependencies and explicit read/write access so independent updates can run concurrently while existing scripts retain a compatible serial path.
+- [x] Add explicit thread-affinity and parallel-safety policies for native component and script callbacks; move eligible Update work onto workers and marshal window, graphics, and shared-state operations to their owners.
 - [ ] Run Start, Enabled, Disabled, and OnDestroy on the owning simulation thread with deterministic ordering, once-only lifecycle delivery, and completion of jobs referencing affected objects before destruction.
 - [ ] Separate CPU preparation in deserialization and lifecycle callbacks from graphics resource creation, submitting resource work to the render thread.
-- [ ] Coordinate fixed-step updates, Play/Stop, pause, scene loading, hot reload, and shutdown across simulation, workers, and rendering without stale jobs or partially published scenes.
 - [ ] Route reloadable script-module jobs through the host-owned scheduler and complete or cancel module jobs before unloading their code.
-- [x] Parallelize dirty transform preparation for stable hierarchies, retain static matrices, and preserve owner validation during streaming commits.
-- [x] Cache unchanged world bounds and prepare changed bounds from copied matrices on workers.
-- [x] Retain spatial hierarchy topology and refit changed bounds, using worker jobs for large updates and rebuilding on membership or quality changes.
-- [ ] Keep spatial entries keyed to persistent draw slots across LOD fades and temporary visibility changes.
-- [ ] Cache static render items, updating only changed objects instead of rebuilding preparation every frame.
 - [ ] Prepare render items, material records, visibility, sorting, and compatible draw batches on workers from stable snapshots.
+- [ ] Cache static render items, updating only changed objects instead of rebuilding preparation every frame.
 - [ ] Share camera and shadow preparation across views and cascades; schedule independent visibility and batch preparation without unnecessary per-loop barriers.
 - [ ] Move terrain-cell loading, decoding, instance preparation, and bounds construction onto workers with bounded queues, cancellation, and scene-generation checks.
 - [ ] Parallelize independent animation and rig evaluation while preserving animation, constraints, physics, and final-pose ordering.
 - [ ] Parallelize physics preparation and post-processing where independent; preserve simulation ownership and synchronized scene publication.
-- [ ] Move graphics submission to a dedicated owning render thread using buffered render packets, frame-safe resource retirement, and bounded frame latency.
 - [ ] Add worker command recording through backend-specific contexts: benchmark DX11 deferred contexts and support independent DX12/Vulkan command lists or buffers.
-- [x] Advance DX11 frame resources and persistent-cache retirement independently of GPU timing controls.
-- [x] Append DX11 compute constants to the shared constant arena; retain fallback uploads and invalidate cached ranges after cross-context arena discards.
-- [x] Add opt-in DX11 native-call timing by camera/shadow pass, including call counts, wall-time maxima, thread cycles, recording fields, and capture evaluation.
+- [ ] Identify and eliminate graphics-submission stalls with native-call timings for buffer mapping, dispatch, resource binding, indirect arguments, draws, and fence waits.
 - [ ] Remove confirmed buffer-reuse synchronization stalls with frame-safe constant, upload, and indirect-argument allocations.
 - [ ] Move expensive editor data preparation and asset processing onto workers while keeping window, input, and UI construction on their owning thread.
 - [ ] Record per-stage main-thread busy time, worker execution, queue delay, dependency waits, render-thread stalls, and frame latency in the Performance view and recordings.
 - [ ] Validate serial and parallel modes with matched-route captures, frame-time percentiles, worker scaling, and regression checks for scene loading, Play/Stop, streaming, transforms, shadows, and all renderers.
+- [ ] Reduce measured grass GPU shading/coverage cost without visible regressions in editor, gameplay, export, shadows, or DX11/DX12/Vulkan.
+- [x] Replace the fixed three-worker render pool with a configurable engine job scheduler supporting dependencies, workload-sized batches, and execution/queue/wait measurements.
+- [x] Parallelize dirty transform preparation for stable hierarchies, retain static matrices, and preserve owner validation during streaming commits.
+- [x] Cache unchanged world bounds and prepare changed bounds from copied matrices on workers.
+- [x] Retain spatial hierarchy topology and refit changed bounds, using worker jobs for large updates and rebuilding on membership or quality changes.
+- [x] Keep spatial entries keyed to persistent draw slots across LOD fades and temporary visibility changes.
+- [x] Advance DX11 frame resources and persistent-cache retirement independently of GPU timing controls.
+- [x] Append DX11 compute constants to the shared constant arena; retain fallback uploads and invalidate cached ranges after cross-context arena discards.
+- [x] Add opt-in DX11 native-call timing by camera/shadow pass, including call counts, wall-time maxima, thread cycles, recording fields, and capture evaluation.
+- [x] Compare GPU stage changes only for captures with matching renderer, benchmark route, view size, and shadow settings; label unverified comparisons.
+- [x] Split grass GPU timing from ordinary opaque draws across all renderers, recordings, the Performance view, and the capture evaluator.
 
 ## Additional main-thread work from the code audit
 
-- [x] Move performance-record formatting and file writes to a bounded ordered writer queue; capture immutable timing data on its owner, report queue overflow, and drain recordings cleanly on stop.
-- [x] Cache asset-browser directory listings, file metadata, and filtered/sorted search results on workers, refreshed through filesystem notifications with a polling fallback.
-- [x] Prepare visible asset thumbnails asynchronously with bounded jobs, private decoding, stale-result cancellation, and graphics-owner publication.
+Open work is ordered by engine-wide impact and prerequisites; completed items follow.
+
+- [ ] Extend thread accounting to UI, simulation, rendering, workers, and writer queues; separate recurring frame work from import/save/bake/startup hitches in recordings and benchmarks.
 - [ ] Move scene/prefab file reads, parsing, snapshot encoding, save writes, and undo-history comparisons onto workers from versioned snapshots; commit live scene changes on the simulation owner and retain edit revision ordering.
-- [ ] Run model/motion import, asset copying/remapping, lighting bakes, and generated-asset writes as cancellable background jobs with progress and bounded result publication.
 - [ ] Compile and cache shader bytecode and decode textures on workers; prewarm required variants and queue graphics resource/pipeline publication without blocking render preparation on first use.
 - [ ] Move CPU particle simulation, surface preparation, skin/morph fallbacks, mesh deformation, and warp sampling onto jobs or existing GPU paths; batch collision requests against a safe physics snapshot.
-- [ ] Accelerate editor picking with cached spatial/triangle indexes and worker-prepared skinned geometry; validate asynchronous hover results against camera, pose, and scene revisions.
-- [ ] Decode and preload audio files asynchronously, including the current synchronous OGG path; publish playback commands through the audio owner's queue while preserving real-time mixing.
+- [ ] Run model/motion import, asset copying/remapping, lighting bakes, and generated-asset writes as cancellable background jobs with progress and bounded result publication.
 - [ ] Move hot-reload module/symbol copying and fallback filesystem scans off the frame loop; budget build-output processing and publish module replacement only after affected callbacks and jobs finish.
-- [ ] Pipeline export readback, image encoding, and output writes with bounded buffers; keep GPU readback operations on the graphics owner and preserve deterministic frame ordering.
-- [x] Replace edit-preview whole-scene scans with typed particle-emitter and animation registries.
 - [ ] Schedule preview CPU preparation through the same dependency system as gameplay.
-- [ ] Extend thread accounting to UI, simulation, rendering, workers, and writer queues; separate recurring frame work from import/save/bake/startup hitches in recordings and benchmarks.
+- [ ] Decode and preload audio files asynchronously, including the current synchronous OGG path; publish playback commands through the audio owner's queue while preserving real-time mixing.
+- [ ] Pipeline export readback, image encoding, and output writes with bounded buffers; keep GPU readback operations on the graphics owner and preserve deterministic frame ordering.
+- [ ] Accelerate editor picking with cached spatial/triangle indexes and worker-prepared skinned geometry; validate asynchronous hover results against camera, pose, and scene revisions.
+- [x] Move performance-record formatting and file writes to a bounded ordered writer queue; capture immutable timing data on its owner, report queue overflow, and drain recordings cleanly on stop.
+- [x] Replace edit-preview whole-scene scans with typed particle-emitter and animation registries.
+- [x] Cache asset-browser directory listings, file metadata, and filtered/sorted search results on workers, refreshed through filesystem notifications with a polling fallback.
+- [x] Prepare visible asset thumbnails asynchronously with bounded jobs, private decoding, stale-result cancellation, and graphics-owner publication.
 
 ## Static instance storage and streaming performance
 

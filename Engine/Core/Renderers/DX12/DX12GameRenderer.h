@@ -93,6 +93,9 @@ public:
     // IGameRenderer interface
     void BeginFrame() override;   // reset allocator + list, transition backbuffer to RENDER_TARGET
     void EndFrame() override;     // execute list, present, signal fence
+    uint64_t GetSubmittedFrameToken() const override { return m_fenceValue; }
+    bool IsFrameComplete(uint64_t token) override
+    { return token == 0 || (m_fence && m_fence->GetCompletedValue() >= token); }
     std::unique_ptr<Engine::Graphics::IGraphicsContext> CreateFrameGraphicsContext() override;
     Engine::Graphics::FrameTimingTelemetry GetFrameTimingTelemetry() const override
     { return m_frameTelemetry; }

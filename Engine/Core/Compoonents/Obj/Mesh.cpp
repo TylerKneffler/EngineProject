@@ -1,5 +1,7 @@
 #include "Mesh.h"
 #include "Core/Rendering/SharedMeshBuffers.h"
+#include "Core/Object.h"
+#include "Core/Scene/Scene.h"
 #include "Core/Model/MeshPackAsset.h"
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Engine/Editor/UI/IEditorUi.h"
@@ -260,6 +262,47 @@ static size_t ResolveObjIndex(int index, size_t count,
 #pragma endregion
 #pragma region Mesh implementation
 
+bool Mesh::UsesDeferredGraphicsRetirement() const
+{
+    return Owner && Owner->GetScene() &&
+        Owner->GetScene()->IsDeferredGraphicsRetirementEnabled();
+}
+
+void Mesh::ReplaceVertexBuffer(std::shared_ptr<IGraphicsBuffer> buffer)
+{
+    if (m_vertexBuffer != buffer && Owner && Owner->GetScene())
+        Owner->GetScene()->RetireGraphicsBuffer(std::move(m_vertexBuffer));
+    m_vertexBuffer = std::move(buffer);
+}
+
+void Mesh::ReplaceIndexBuffer(std::shared_ptr<IGraphicsBuffer> buffer)
+{
+    if (m_indexBuffer != buffer && Owner && Owner->GetScene())
+        Owner->GetScene()->RetireGraphicsBuffer(std::move(m_indexBuffer));
+    m_indexBuffer = std::move(buffer);
+}
+
+void Mesh::ReplacePosedVertexBuffer(std::unique_ptr<IGraphicsBuffer> buffer)
+{
+    if (Owner && Owner->GetScene())
+        Owner->GetScene()->RetireGraphicsBuffer(std::move(m_posedVertexBuffer));
+    m_posedVertexBuffer = std::move(buffer);
+}
+
+void Mesh::ReplaceMorphDeltaBuffer(std::unique_ptr<IGraphicsBuffer> buffer)
+{
+    if (Owner && Owner->GetScene())
+        Owner->GetScene()->RetireGraphicsBuffer(std::move(m_morphDeltaBuffer));
+    m_morphDeltaBuffer = std::move(buffer);
+}
+
+void Mesh::ReplaceMorphWeightBuffer(std::unique_ptr<IGraphicsBuffer> buffer)
+{
+    if (Owner && Owner->GetScene())
+        Owner->GetScene()->RetireGraphicsBuffer(std::move(m_morphWeightBuffer));
+    m_morphWeightBuffer = std::move(buffer);
+}
+
 void Mesh::LoadFromFile(const std::string& path)
 {
     ClearInstancing();
@@ -269,7 +312,7 @@ void Mesh::LoadFromFile(const std::string& path)
     ++m_authoredGeometryRevision;
     m_terrainVertices.clear();
     m_indices.clear();
-    m_indexBuffer.reset();
+    ReplaceIndexBuffer({});
     m_filePath = path;  // store for serialization
     const std::filesystem::path resolvedPath = ResolveFilePath(path);
     if (resolvedPath.filename() == "sphere.obj")
@@ -471,10 +514,11 @@ bool Mesh::SetDeformedVertices(const std::vector<Vertex>& vertices)
     // upload buffer when its size changes instead of rejecting the cut.
     m_terrainVertices.clear();
     m_indices.clear();
-    m_indexBuffer.reset();
+    ReplaceIndexBuffer({});
     const bool canReuseBuffer = m_vertexBuffer &&
         m_vertexBuffer->GetAccessMode() == IGraphicsBuffer::AccessMode::Upload &&
-        byteSize <= m_vertexBuffer->GetSize();
+        byteSize <= m_vertexBuffer->GetSize() &&
+        !UsesDeferredGraphicsRetirement();
     if (!canReuseBuffer)
     {
         if (m_vertexBuffer || m_bufferFactory)
@@ -486,7 +530,7 @@ bool Mesh::SetDeformedVertices(const std::vector<Vertex>& vertices)
                 IGraphicsBuffer::AccessMode::Upload, byteSize, vertices.data());
             if (!replacement)
                 return false;
-            m_vertexBuffer = std::move(replacement);
+            ReplaceVertexBuffer(std::move(replacement));
         }
         m_vertices = vertices;
         UpdateBounds();
@@ -525,10 +569,11 @@ bool Mesh::SetDeformedVertices(std::vector<Vertex>&& vertices)
 
     m_terrainVertices.clear();
     m_indices.clear();
-    m_indexBuffer.reset();
+    ReplaceIndexBuffer({});
     const bool canReuseBuffer = m_vertexBuffer &&
         m_vertexBuffer->GetAccessMode() == IGraphicsBuffer::AccessMode::Upload &&
-        byteSize <= m_vertexBuffer->GetSize();
+        byteSize <= m_vertexBuffer->GetSize() &&
+        !UsesDeferredGraphicsRetirement();
     if (!canReuseBuffer && (m_vertexBuffer || m_bufferFactory))
     {
         if (!m_bufferFactory)
@@ -538,7 +583,7 @@ bool Mesh::SetDeformedVertices(std::vector<Vertex>&& vertices)
             IGraphicsBuffer::AccessMode::Upload, byteSize, vertices.data());
         if (!replacement)
             return false;
-        m_vertexBuffer = std::move(replacement);
+        ReplaceVertexBuffer(std::move(replacement));
     }
 
     m_vertices = std::move(vertices);
@@ -565,7 +610,7 @@ bool Mesh::SetAuthoredVertices(std::vector<Vertex> vertices)
     ClearSurfaceOffsets();
     m_terrainVertices.clear();
     m_indices.clear();
-    m_indexBuffer.reset();
+    ReplaceIndexBuffer({});
     m_vertices = std::move(vertices);
     ++m_authoredGeometryRevision;
     MarkConfigurationDirty();
@@ -586,8 +631,8 @@ bool Mesh::SetPreparedTriangleGeometry(std::vector<Vertex> vertices,
     m_vertices = std::move(vertices);
     m_terrainVertices.clear();
     m_indices.clear();
-    m_indexBuffer.reset();
-    m_vertexBuffer.reset();
+    ReplaceIndexBuffer({});
+    ReplaceVertexBuffer({});
     m_boundsMin = minimum;
     m_boundsMax = maximum;
     m_hasBounds = true;
@@ -614,7 +659,7 @@ void Mesh::SetInstancedGeometry(std::shared_ptr<Mesh> source,
             throw std::invalid_argument("Instance range exceeds shared geometry or placements");
     ClearRuntimeLods();
     m_vertices.clear(); m_indices.clear(); m_terrainVertices.clear();
-    m_vertexBuffer.reset(); m_indexBuffer.reset();
+    ReplaceVertexBuffer({}); ReplaceIndexBuffer({});
     m_instanceSource = std::move(source);
     m_instances = std::move(instances);
     m_instanceRanges = std::move(ranges);
@@ -816,14 +861,15 @@ bool Mesh::UpdateAuthoredVertices(std::vector<Vertex> vertices)
     if (m_vertexBuffer)
     {
         if (byteSize > m_vertexBuffer->GetSize()) return false;
-        if (m_vertexBuffer->GetAccessMode() != IGraphicsBuffer::AccessMode::Upload)
+        if (m_vertexBuffer->GetAccessMode() != IGraphicsBuffer::AccessMode::Upload ||
+            UsesDeferredGraphicsRetirement())
         {
             if (!m_bufferFactory) return false;
             auto replacement = m_bufferFactory->CreateBuffer(
                 IGraphicsBuffer::Usage::VertexBuffer,
                 IGraphicsBuffer::AccessMode::Upload, byteSize, vertices.data());
             if (!replacement) return false;
-            m_vertexBuffer = std::move(replacement);
+            ReplaceVertexBuffer(std::move(replacement));
         }
         else
         {
@@ -851,7 +897,8 @@ bool Mesh::UpdateIndexedVertexRange(size_t first,
         vertices.size() > m_vertices.size() - first) return false;
     MakeGeometryWritable();
     if (m_vertexBuffer &&
-        m_vertexBuffer->GetAccessMode() == IGraphicsBuffer::AccessMode::Upload)
+        m_vertexBuffer->GetAccessMode() == IGraphicsBuffer::AccessMode::Upload &&
+        !UsesDeferredGraphicsRetirement())
     {
         void* mapped = m_vertexBuffer->Map();
         if (!mapped) return false;
@@ -863,7 +910,8 @@ bool Mesh::UpdateIndexedVertexRange(size_t first,
     }
     std::copy(vertices.begin(), vertices.end(), m_vertices.begin() + first);
     if (m_vertexBuffer &&
-        m_vertexBuffer->GetAccessMode() != IGraphicsBuffer::AccessMode::Upload)
+        (m_vertexBuffer->GetAccessMode() != IGraphicsBuffer::AccessMode::Upload ||
+            UsesDeferredGraphicsRetirement()))
     {
         if (!m_bufferFactory) return false;
         auto replacement = m_bufferFactory->CreateBuffer(
@@ -871,7 +919,7 @@ bool Mesh::UpdateIndexedVertexRange(size_t first,
             IGraphicsBuffer::AccessMode::Upload,
             m_vertices.size() * sizeof(Vertex), m_vertices.data());
         if (!replacement) return false;
-        m_vertexBuffer = std::move(replacement);
+        ReplaceVertexBuffer(std::move(replacement));
     }
     ClearRuntimeLods();
     ClearSurfaceOffsets();
@@ -994,9 +1042,16 @@ bool Mesh::SetTerrainGeometry(TerrainMeshData&& geometry,
         const auto upload = [&](std::shared_ptr<IGraphicsBuffer>& buffer,
             IGraphicsBuffer::Usage usage, uint64_t byteCount, const void* data)
         {
-            if (!buffer || buffer->GetSize() < byteCount)
-                buffer = m_bufferFactory->CreateBuffer(usage,
+            if (!buffer || buffer->GetSize() < byteCount ||
+                UsesDeferredGraphicsRetirement())
+            {
+                auto replacement = m_bufferFactory->CreateBuffer(usage,
                     IGraphicsBuffer::AccessMode::Upload, byteCount, data);
+                if (&buffer == &m_vertexBuffer)
+                    ReplaceVertexBuffer(std::move(replacement));
+                else
+                    ReplaceIndexBuffer(std::move(replacement));
+            }
             else if (void* mapped = buffer->Map())
             {
                 std::memcpy(mapped, data, static_cast<size_t>(byteCount));
@@ -1263,8 +1318,8 @@ uint64_t Mesh::GetMorphWeightsRevision() const
 
 void Mesh::CreateMorphBuffers()
 {
-    m_morphDeltaBuffer.reset();
-    m_morphWeightBuffer.reset();
+    ReplaceMorphDeltaBuffer({});
+    ReplaceMorphWeightBuffer({});
     m_packedMorphWeights.clear();
     m_activeMorphTargetCount = 0;
     if (!m_bufferFactory || m_vertices.empty() || m_morphTargets.empty())
@@ -1319,18 +1374,18 @@ void Mesh::CreateMorphBuffers()
                         deltas[base + 4 + channel] = target.uvChannels[channel][vertexIndex];
         }
     }
-    m_morphDeltaBuffer = m_bufferFactory->CreateStaticShaderResource(
+    ReplaceMorphDeltaBuffer(m_bufferFactory->CreateStaticShaderResource(
         static_cast<uint64_t>(deltas.size()) * sizeof(glm::vec4),
-        deltas.data(), sizeof(glm::vec4));
+        deltas.data(), sizeof(glm::vec4)));
 
     // Each float4 stores the authored target index and its current weight.
     // The vertex shaders can then skip inactive targets entirely.
     m_packedMorphWeights.assign(m_morphTargets.size(), glm::vec4(0.f));
-    m_morphWeightBuffer = m_bufferFactory->CreateBuffer(
+    ReplaceMorphWeightBuffer(m_bufferFactory->CreateBuffer(
         IGraphicsBuffer::Usage::ShaderResource,
         IGraphicsBuffer::AccessMode::Upload,
         static_cast<uint64_t>(m_packedMorphWeights.size()) * sizeof(glm::vec4),
-        m_packedMorphWeights.data(), sizeof(glm::vec4));
+        m_packedMorphWeights.data(), sizeof(glm::vec4)));
     UploadMorphWeights();
 }
 
@@ -1344,6 +1399,15 @@ void Mesh::UploadMorphWeights()
         if (m_morphWeights[index] != 0.f)
             m_packedMorphWeights[m_activeMorphTargetCount++] = glm::vec4(
                 static_cast<float>(index), m_morphWeights[index], 0.f, 0.f);
+    if (UsesDeferredGraphicsRetirement() && m_bufferFactory)
+    {
+        ReplaceMorphWeightBuffer(m_bufferFactory->CreateBuffer(
+            IGraphicsBuffer::Usage::ShaderResource,
+            IGraphicsBuffer::AccessMode::Upload,
+            static_cast<uint64_t>(m_packedMorphWeights.size()) * sizeof(glm::vec4),
+            m_packedMorphWeights.data(), sizeof(glm::vec4)));
+        return;
+    }
     if (void* mapped = m_morphWeightBuffer->Map())
     {
         const uint64_t byteCount = static_cast<uint64_t>(m_activeMorphTargetCount) *
@@ -2210,10 +2274,11 @@ void Mesh::SetSurfaceOffsets(std::vector<glm::vec3> offsets,
     if (!m_bufferFactory) return;
     std::vector<Vertex> posed = BuildPosedVertices(skinPalette);
     const uint64_t bytes = posed.size() * sizeof(Vertex);
-    if (!m_posedVertexBuffer || m_posedVertexBuffer->GetSize() != bytes)
-        m_posedVertexBuffer = m_bufferFactory->CreateBuffer(
+    if (!m_posedVertexBuffer || m_posedVertexBuffer->GetSize() != bytes ||
+        UsesDeferredGraphicsRetirement())
+        ReplacePosedVertexBuffer(m_bufferFactory->CreateBuffer(
             IGraphicsBuffer::Usage::VertexBuffer,
-            IGraphicsBuffer::AccessMode::Upload, bytes, posed.data());
+            IGraphicsBuffer::AccessMode::Upload, bytes, posed.data()));
     else if (void* mapped = m_posedVertexBuffer->Map())
     {
         std::memcpy(mapped, posed.data(), static_cast<size_t>(bytes));
@@ -2221,16 +2286,16 @@ void Mesh::SetSurfaceOffsets(std::vector<glm::vec3> offsets,
         m_posedVertexBuffer->FlushMappedWrites();
     }
     else
-        m_posedVertexBuffer = m_bufferFactory->CreateBuffer(
+        ReplacePosedVertexBuffer(m_bufferFactory->CreateBuffer(
             IGraphicsBuffer::Usage::VertexBuffer,
-            IGraphicsBuffer::AccessMode::Upload, bytes, posed.data());
+            IGraphicsBuffer::AccessMode::Upload, bytes, posed.data()));
     if (!m_posedVertexBuffer) m_surfaceOffsets.clear();
 }
 
 void Mesh::ClearSurfaceOffsets()
 {
     m_surfaceOffsets.clear();
-    m_posedVertexBuffer.reset();
+    ReplacePosedVertexBuffer({});
 }
 
 bool Mesh::SetIndexedGeometry(std::vector<Vertex> vertices,
@@ -2315,12 +2380,12 @@ void Mesh::MakeGeometryWritable()
     if (m_sharedVertexBuffer && m_vertexBuffer)
     {
         const void* data = UsesTerrainVertexFormat() ? static_cast<const void*>(m_terrainVertices.data()) : m_vertices.data();
-        m_vertexBuffer = m_bufferFactory->CreateBuffer(IGraphicsBuffer::Usage::VertexBuffer,
-            IGraphicsBuffer::AccessMode::Upload, GetVertexCount() * uint64_t(GetVertexStride()), data);
+        ReplaceVertexBuffer(m_bufferFactory->CreateBuffer(IGraphicsBuffer::Usage::VertexBuffer,
+            IGraphicsBuffer::AccessMode::Upload, GetVertexCount() * uint64_t(GetVertexStride()), data));
     }
     if (m_sharedIndexBuffer && m_indexBuffer)
-        m_indexBuffer = m_bufferFactory->CreateBuffer(IGraphicsBuffer::Usage::IndexBuffer,
-            IGraphicsBuffer::AccessMode::Upload, m_indices.size() * sizeof(uint32_t), m_indices.data());
+        ReplaceIndexBuffer(m_bufferFactory->CreateBuffer(IGraphicsBuffer::Usage::IndexBuffer,
+            IGraphicsBuffer::AccessMode::Upload, m_indices.size() * sizeof(uint32_t), m_indices.data()));
     m_sharedVertexBuffer = m_sharedIndexBuffer = false;
 }
 
@@ -2336,11 +2401,11 @@ void Mesh::CreateBuffer(IGraphicsBufferFactory* bufferFactory)
             m_terrainVertices.size()) * sizeof(TerrainVertex);
         const uint64_t indexBytes = static_cast<uint64_t>(m_indices.size()) *
             sizeof(uint32_t);
-        m_vertexBuffer = Engine::Rendering::AcquireMeshBuffer(bufferFactory,
-            IGraphicsBuffer::Usage::VertexBuffer, m_terrainVertices.data(), vertexBytes, sizeof(TerrainVertex));
+        ReplaceVertexBuffer(Engine::Rendering::AcquireMeshBuffer(bufferFactory,
+            IGraphicsBuffer::Usage::VertexBuffer, m_terrainVertices.data(), vertexBytes, sizeof(TerrainVertex)));
         m_sharedVertexBuffer = true;
-        m_indexBuffer = Engine::Rendering::AcquireMeshBuffer(bufferFactory,
-            IGraphicsBuffer::Usage::IndexBuffer, m_indices.data(), indexBytes, sizeof(uint32_t));
+        ReplaceIndexBuffer(Engine::Rendering::AcquireMeshBuffer(bufferFactory,
+            IGraphicsBuffer::Usage::IndexBuffer, m_indices.data(), indexBytes, sizeof(uint32_t)));
         m_sharedIndexBuffer = true;
         if (!m_vertexBuffer || !m_indexBuffer)
             throw std::runtime_error("Failed to create indexed terrain buffers");
@@ -2349,8 +2414,8 @@ void Mesh::CreateBuffer(IGraphicsBufferFactory* bufferFactory)
     }
     const uint64_t byteSize = m_vertices.size() * sizeof(Vertex);
 
-    m_vertexBuffer = Engine::Rendering::AcquireMeshBuffer(bufferFactory,
-        IGraphicsBuffer::Usage::VertexBuffer, m_vertices.data(), byteSize, sizeof(Vertex));
+    ReplaceVertexBuffer(Engine::Rendering::AcquireMeshBuffer(bufferFactory,
+        IGraphicsBuffer::Usage::VertexBuffer, m_vertices.data(), byteSize, sizeof(Vertex)));
     m_sharedVertexBuffer = true;
 
     if (!m_vertexBuffer)
@@ -2361,13 +2426,13 @@ void Mesh::CreateBuffer(IGraphicsBufferFactory* bufferFactory)
     {
         const uint64_t indexBytes = static_cast<uint64_t>(m_indices.size()) *
             sizeof(uint32_t);
-        m_indexBuffer = Engine::Rendering::AcquireMeshBuffer(bufferFactory,
-            IGraphicsBuffer::Usage::IndexBuffer, m_indices.data(), indexBytes, sizeof(uint32_t));
+        ReplaceIndexBuffer(Engine::Rendering::AcquireMeshBuffer(bufferFactory,
+            IGraphicsBuffer::Usage::IndexBuffer, m_indices.data(), indexBytes, sizeof(uint32_t)));
         m_sharedIndexBuffer = true;
         if (!m_indexBuffer)
             throw std::runtime_error("Failed to create mesh index buffer");
     }
-    else m_indexBuffer.reset();
+    else ReplaceIndexBuffer({});
     m_ready = true;
 }
 #pragma endregion

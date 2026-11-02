@@ -330,6 +330,7 @@ bool SceneSerializer::RefreshPrefabInstances(
 
         for (Engine::Core::Object* instance : instances)
         {
+            instance->AssertSceneOwner();
             const JsonValue localOverrides = Detail::SceneObjectBehavior::BuildPrefabPatches(*instance, false);
             const Engine::Components::Transform placement = instance->transform;
             const auto prefab = instance->Prefab;
@@ -337,6 +338,7 @@ bool SceneSerializer::RefreshPrefabInstances(
             for (Engine::Core::Object* child : oldChildren)
                 scene.RemoveObject(child);
             instance->Children.clear();
+            scene.WaitForGpuResourceDestruction();
             for (Engine::Core::Component* component : instance->Components)
                 delete component;
             instance->Components.clear();

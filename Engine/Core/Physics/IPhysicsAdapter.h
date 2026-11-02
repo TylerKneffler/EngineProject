@@ -17,6 +17,10 @@ public:
     virtual ~IPhysicsAdapter() = default;
     virtual const char* Name() const = 0;
     virtual void Step(double deltaTime) = 0;
+    virtual void PrepareStep(double deltaTime) = 0;
+    virtual void SimulatePreparedStep() = 0;
+    virtual void FinishPreparedStep() = 0;
+    virtual void AbortPreparedStep() = 0;
     virtual void Reset() = 0;
     virtual void ConfigureFixedStep(double seconds, uint32_t maximumSubsteps,
         uint32_t solverIterations) = 0;

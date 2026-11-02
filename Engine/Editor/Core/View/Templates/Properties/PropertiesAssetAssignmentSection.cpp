@@ -160,7 +160,11 @@ bool PropertiesView::AddComponentFromAsset(const std::string& path, std::string&
             if (!MmdDanceAssetBinder::AddClipForPrefab(prefabPath, path, *manager, error))
             { message = "[Properties] " + error; return false; }
             if (newManager)
+            {
+                model->Owner->AssertSceneOwner();
                 model->Owner->Components.push_back(newManager.release());
+                model->Owner->NotifyStructureChanged();
+            }
             manager->EndEditorPreview();
             message = "[Properties] Added animation to AnimationManager from: " + path;
             return true;
@@ -184,7 +188,11 @@ bool PropertiesView::AddComponentFromAsset(const std::string& path, std::string&
             if (!MmdDanceAssetBinder::ApplyForPrefab(prefabPath, path, *manager, error))
             { message = "[Properties] Could not apply animation pack: " + error; return false; }
             if (newManager)
+            {
+                model->Owner->AssertSceneOwner();
                 model->Owner->Components.push_back(newManager.release());
+                model->Owner->NotifyStructureChanged();
+            }
             manager->EndEditorPreview();
             message = "[Properties] Applied animation pack from: " + path;
             return true;

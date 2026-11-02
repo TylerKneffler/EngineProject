@@ -161,6 +161,8 @@ namespace Engine::Editor
                 static_cast<size_t>(Engine::Graphics::GpuTimingStage::Shadow)]
             << ",\"gpu_terrain_ms\":" << gpuTiming.gpuMilliseconds[
                 static_cast<size_t>(Engine::Graphics::GpuTimingStage::Terrain)]
+            << ",\"gpu_grass_ms\":" << gpuTiming.gpuMilliseconds[
+                static_cast<size_t>(Engine::Graphics::GpuTimingStage::Grass)]
             << ",\"gpu_portal_ms\":" << gpuTiming.gpuMilliseconds[
                 static_cast<size_t>(Engine::Graphics::GpuTimingStage::Portal)]
             << ",\"gpu_opaque_ms\":" << gpuTiming.gpuMilliseconds[

@@ -486,8 +486,7 @@ bool RigAsset::ApplySkeleton(Engine::Core::Object& owner,
         if (!object)
         {
             object = owner.GetScene()->AddObject(name);
-            object->Parent = parent;
-            parent->Children.push_back(object);
+            owner.GetScene()->SetParentLocal(object, parent);
             object->transform.position = node.position;
             object->transform.rotation = node.rotation;
             object->transform.scale = node.scale;

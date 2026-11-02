@@ -1,4 +1,5 @@
 #include "Core/Renderers/UIRenderer.h"
+#include "Core/Graphics/GraphicsCommandPacket.h"
 
 #include "Core/UI/UILayout.h"
 #include "Core/Compoonents/UI/Canvas.h"
@@ -14,6 +15,7 @@
 #include "Core/Graphics/IPipelineState.h"
 #include "Core/Graphics/IShader.h"
 #include "Core/Scene/Scene.h"
+#include "Core/Input/NativeInputSnapshot.h"
 #define STBTT_STATIC
 #define STB_TRUETYPE_IMPLEMENTATION
 #include <imstb_truetype.h>
@@ -401,6 +403,44 @@ void UIRenderer::SetPointerInput(float x, float y, float viewportWidth,
     m_impl->externalPointerDown = mouseDown;
 }
 
+void UIRenderer::UpdateNativeInteraction(Engine::Scene::Scene& scene,
+    const Engine::Core::NativeInputSnapshot& input)
+{
+    scene.AssertOwnerThread();
+    if (!input.clientWidth || !input.clientHeight) return;
+    const auto buttons = scene.GetComponents<Engine::Components::UIButton>();
+    if (buttons.empty()) return;
+    const float aspect = static_cast<float>(input.clientWidth) /
+        static_cast<float>(input.clientHeight);
+    Engine::UI::UILayout::Resolve(scene, aspect);
+    const bool mouseDown = (input.keys[VK_LBUTTON] & 0x8000) != 0;
+    for (auto* button : buttons)
+    {
+        auto* object = button ? button->Owner : nullptr;
+        if (!object || !object->IsEnabledInHierarchy()) continue;
+        auto* layout = object->GetComponent<Engine::Components::UIObject>();
+        if (!layout || !layout->visible) continue;
+        Engine::Components::Canvas* canvas = nullptr;
+        for (auto* current = object; current; current = current->Parent)
+            if ((canvas = current->GetComponent<Engine::Components::Canvas>()))
+                break;
+        if (!canvas) continue;
+        const glm::vec2 size = canvas->GetLogicalSize(aspect);
+        const auto& rect = layout->GetComputedRect();
+        const auto& clip = layout->GetComputedClipRect();
+        const float x = input.clientCursor.x *
+            size.x / static_cast<float>(input.clientWidth);
+        const float y = input.clientCursor.y *
+            size.y / static_cast<float>(input.clientHeight);
+        const bool hovered = input.cursorInWindow &&
+            x >= rect.x && x <= rect.x + rect.width &&
+            y >= rect.y && y <= rect.y + rect.height &&
+            x >= clip.x && x <= clip.x + clip.width &&
+            y >= clip.y && y <= clip.y + clip.height;
+        button->UpdateInteraction(hovered, mouseDown);
+    }
+}
+
 void UIRenderer::Render(Engine::Scene::Scene& scene,
     Engine::Graphics::IGraphicsContext* context, float viewportAspect)
 {
@@ -409,7 +449,10 @@ void UIRenderer::Render(Engine::Scene::Scene& scene,
         scene.GetComponents<Engine::Components::UIText>().empty() &&
         scene.GetComponents<Engine::Components::UIImage>().empty() &&
         scene.GetComponents<Engine::Components::UIButton>().empty()) return;
-    const std::vector<Engine::Model::UITextLayout> items = Engine::UI::UILayout::Resolve(scene, viewportAspect);
+    const std::vector<Engine::Model::UITextLayout> items =
+        scene.IsOwnerThread() && !scene.IsRecordingNativeCommands()
+        ? Engine::UI::UILayout::Resolve(scene, viewportAspect)
+        : scene.GetPreparedNativeUiLayout();
 
     glm::vec2 mouseClientPosition = m_impl->pointerPosition;
     glm::vec2 mouseClientSize = m_impl->pointerViewportSize;
@@ -634,7 +677,8 @@ void UIRenderer::Render(Engine::Scene::Scene& scene,
                     mousePosition.x >= clip.x && mousePosition.x <= clip.x + clip.width &&
                     mousePosition.y >= clip.y && mousePosition.y <= clip.y + clip.height;
             }
-            button->UpdateInteraction(hovered, mouseDown);
+            if (scene.IsOwnerThread() && !scene.IsRecordingNativeCommands())
+                button->UpdateInteraction(hovered, mouseDown);
 
             const glm::vec3 rgb = !button->interactable
                 ? button->disabledColor
@@ -732,7 +776,16 @@ void UIRenderer::Render(Engine::Scene::Scene& scene,
     }
     if (vertices.empty()) return;
 
-    if (!m_impl->vertexBuffer || m_impl->vertexCapacity < vertices.size())
+    auto* commandPacket = dynamic_cast<Engine::Graphics::GraphicsCommandPacket*>(context);
+    std::unique_ptr<Engine::Graphics::IGraphicsBuffer> packetVertexBuffer;
+    if (commandPacket)
+    {
+        packetVertexBuffer = m_impl->provider->GetBufferFactory()->CreateBuffer(
+            Engine::Graphics::IGraphicsBuffer::Usage::VertexBuffer,
+            Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
+            vertices.size() * sizeof(UIVertex));
+    }
+    else if (!m_impl->vertexBuffer || m_impl->vertexCapacity < vertices.size())
     {
         m_impl->vertexCapacity = std::max<std::size_t>(vertices.size(),
             std::max<std::size_t>(1024, m_impl->vertexCapacity * 2));
@@ -740,15 +793,18 @@ void UIRenderer::Render(Engine::Scene::Scene& scene,
             Engine::Graphics::IGraphicsBuffer::Usage::VertexBuffer, Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
             m_impl->vertexCapacity * sizeof(UIVertex));
     }
-    if (!m_impl->vertexBuffer) return;
-    if (void* mapped = m_impl->vertexBuffer->Map())
+    auto* vertexBuffer = commandPacket ? packetVertexBuffer.get() : m_impl->vertexBuffer.get();
+    if (!vertexBuffer) return;
+    if (void* mapped = vertexBuffer->Map())
     {
         std::memcpy(mapped, vertices.data(), vertices.size() * sizeof(UIVertex));
-        m_impl->vertexBuffer->Unmap();
+        vertexBuffer->Unmap();
     }
     else return;
 
-    context->SetVertexBuffer(0, m_impl->vertexBuffer.get(), sizeof(UIVertex));
+    context->SetVertexBuffer(0, vertexBuffer, sizeof(UIVertex));
+    if (commandPacket)
+        commandPacket->RetainBuffer(std::move(packetVertexBuffer));
     bool activeFontPipeline = false;
     bool hasActivePipeline = false;
     for (const DrawSegment& segment : segments)

@@ -17,6 +17,8 @@ public:
     VkCommandBuffer BeginFrame();
     void EndFrame();
     void WaitIdle() const;
+    uint64_t GetSubmittedFrameToken() const { return m_submittedSerial; }
+    bool IsFrameComplete(uint64_t token);
 
     VkInstance GetInstance() const { return m_instance; }
     VkPhysicalDevice GetPhysicalDevice() const { return m_physicalDevice; }
@@ -72,6 +74,9 @@ private:
     VkSemaphore m_imageAvailable[FRAME_COUNT]{};
     VkSemaphore m_renderFinished[FRAME_COUNT]{};
     VkFence m_inFlight[FRAME_COUNT]{};
+    uint64_t m_frameSerial[FRAME_COUNT]{};
+    uint64_t m_submittedSerial = 0;
+    mutable uint64_t m_completedSerial = 0;
     uint32_t m_frameIndex = 0;
     uint32_t m_imageIndex = 0;
     VkCommandBuffer m_currentCommandBuffer = VK_NULL_HANDLE;

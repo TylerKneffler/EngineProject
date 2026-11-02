@@ -243,6 +243,8 @@ void PropertiesView::DrawMultiSelection(IEditorUi& ui)
             ui.Unindent(12.f);
             if (changed)
             {
+                for (Engine::Core::Component* edited : common)
+                    if (edited) edited->MarkConfigurationDirty();
                 for (Engine::Core::Object* object : m_selectedObjects)
                 {
                     if (auto* body = object->GetComponent<Engine::Components::RigidBody>())
@@ -259,6 +261,7 @@ void PropertiesView::DrawMultiSelection(IEditorUi& ui)
 
 void PropertiesView::DrawPanel(IEditorUi& ui)
 {
+    if (m_scene) m_scene->AssertOwnerThread();
     if (m_skyboxRevealPending &&
         std::chrono::steady_clock::now() - m_skyboxRevealRequestedAt >=
             std::chrono::milliseconds(GetDoubleClickTime()))
@@ -689,8 +692,11 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
         if (componentOpen)
         {
             ui.Indent(12.f);
-            componentPropertiesChanged =
-                component->DrawProperties(ui) || componentPropertiesChanged;
+            if (component->DrawProperties(ui))
+            {
+                component->MarkConfigurationDirty();
+                componentPropertiesChanged = true;
+            }
             if (auto* manager = dynamic_cast<Engine::Components::AnimationManager*>(component);
                 manager && !manager->editAnimationRequest.empty())
             {
@@ -751,9 +757,12 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
 
     if (componentToDelete)
     {
+        m_selectedObject->AssertSceneOwner();
         const std::string deletedType = componentToDelete->GetTypeName();
         m_selectedObject->Components.remove(componentToDelete);
         m_selectedObject->NotifyStructureChanged();
+        if (m_selectedObject->GetScene())
+            m_selectedObject->GetScene()->WaitForGpuResourceDestruction();
         delete componentToDelete;
         LogAssetDrop("[Properties] Deleted component '" + deletedType + "'");
         if (OnComponentsChanged)

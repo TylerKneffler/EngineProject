@@ -61,6 +61,10 @@ public:
     // Get the underlying graphics buffer (API-agnostic)
     IGraphicsBuffer* GetGraphicsBuffer() const { return m_instanceSource ? m_instanceSource->GetGraphicsBuffer() : m_vertexBuffer.get(); }
     IGraphicsBuffer* GetIndexBuffer() const { return m_instanceSource ? m_instanceSource->GetIndexBuffer() : m_indexBuffer.get(); }
+    std::shared_ptr<IGraphicsBuffer> GetVertexBufferOwner() const
+    { return m_instanceSource ? m_instanceSource->GetVertexBufferOwner() : m_vertexBuffer; }
+    std::shared_ptr<IGraphicsBuffer> GetIndexBufferOwner() const
+    { return m_instanceSource ? m_instanceSource->GetIndexBufferOwner() : m_indexBuffer; }
 
     // Transient rigid instances share immutable geometry and placement buffers
     // across tiles/LODs. Rows describe a uniform-scale affine transform.
@@ -260,6 +264,12 @@ public:
     void        OnAfterDeserialize(IGraphicsProvider* graphicsProvider) override;
 
 private:
+    bool UsesDeferredGraphicsRetirement() const;
+    void ReplaceVertexBuffer(std::shared_ptr<IGraphicsBuffer> buffer);
+    void ReplaceIndexBuffer(std::shared_ptr<IGraphicsBuffer> buffer);
+    void ReplacePosedVertexBuffer(std::unique_ptr<IGraphicsBuffer> buffer);
+    void ReplaceMorphDeltaBuffer(std::unique_ptr<IGraphicsBuffer> buffer);
+    void ReplaceMorphWeightBuffer(std::unique_ptr<IGraphicsBuffer> buffer);
     void ClearInstancing()
     { m_instanceSource.reset(); m_instances.reset(); m_instanceRanges.clear(); }
     std::shared_ptr<Mesh> m_instanceSource;

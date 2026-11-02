@@ -7,6 +7,8 @@
 #include <dxgi.h>
 #include <dxgi1_5.h>
 #include <vector>
+#include <deque>
+#include <utility>
 #include <cstddef>
 
 namespace Engine::Renderers
@@ -24,6 +26,8 @@ public:
     void WaitIdle() override;
     void BeginFrame() override;
     void EndFrame() override;
+    uint64_t GetSubmittedFrameToken() const override { return m_submittedFrameToken; }
+    bool IsFrameComplete(uint64_t token) override;
     std::unique_ptr<Engine::Graphics::IGraphicsContext> CreateFrameGraphicsContext() override;
     Engine::Graphics::FrameTimingTelemetry GetFrameTimingTelemetry() const override
     { return m_frameTelemetry; }
@@ -43,6 +47,7 @@ public:
 
 private:
     void CreateTargets();
+    void SignalFrameCompletion();
     Microsoft::WRL::ComPtr<ID3D11Device> m_device;
     Microsoft::WRL::ComPtr<ID3D11DeviceContext> m_context;
     Microsoft::WRL::ComPtr<IDXGISwapChain> m_swapChain;
@@ -79,5 +84,9 @@ private:
     bool m_allowTearing = false;
     UINT m_swapChainFlags = 0;
     Engine::Graphics::FrameTimingTelemetry m_frameTelemetry{};
+    std::deque<std::pair<uint64_t, Microsoft::WRL::ComPtr<ID3D11Query>>>
+        m_frameCompletionQueries;
+    uint64_t m_submittedFrameToken = 0;
+    uint64_t m_completedFrameToken = 0;
 };
 }

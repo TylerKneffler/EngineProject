@@ -53,6 +53,10 @@ public:
     Physics& operator=(const Physics&) = delete;
 
     void Step(double deltaTime);
+    void PrepareStep(double deltaTime);
+    void SimulatePreparedStep();
+    void FinishPreparedStep();
+    void AbortPreparedStep();
     void Reset();
 
     // Advances the selected adapter in fixed quanta, independently of output

@@ -493,6 +493,7 @@ void PerformanceView::SetFrameTimings(const EditorFrameProfileSample& sample,
                 m_gpuTimings = {
                     { "Shadow", timing.gpuMilliseconds[static_cast<size_t>(Stage::Shadow)] },
                     { "Terrain", timing.gpuMilliseconds[static_cast<size_t>(Stage::Terrain)] },
+                    { "Grass", timing.gpuMilliseconds[static_cast<size_t>(Stage::Grass)] },
                     { "Portal", timing.gpuMilliseconds[static_cast<size_t>(Stage::Portal)] },
                     { "Opaque", timing.gpuMilliseconds[static_cast<size_t>(Stage::Opaque)] },
                     { "Transparent", timing.gpuMilliseconds[static_cast<size_t>(Stage::Transparent)] }

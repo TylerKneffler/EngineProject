@@ -29,6 +29,7 @@ class JobScheduler
         size_t pending=0;
         bool complete=false;
         bool allowCaller=true;
+        std::thread::id ownerThread{};
         std::exception_ptr error,dependencyError;
         Clock::time_point submitted=Clock::now(),ready=submitted;
         JobScheduler* owner=nullptr;
@@ -94,14 +95,20 @@ private:
     bool CanHelp() const
     {
         return std::any_of(m_queue.begin(),m_queue.end(),[&](const auto& task) {
-            return task->allowCaller || s_worker==this || m_workers.empty();
+            return (task->ownerThread==std::thread::id{} ||
+                task->ownerThread==std::this_thread::get_id()) &&
+                (task->allowCaller || s_worker==this || m_workers.empty());
         });
     }
     bool Help()
     {
         std::shared_ptr<State> task;
         { std::lock_guard lock(m_mutex);
-          auto eligible=std::find_if(m_queue.begin(),m_queue.end(),[&](const auto& entry) { return entry->allowCaller || s_worker==this || m_workers.empty(); });
+          auto eligible=std::find_if(m_queue.begin(),m_queue.end(),[&](const auto& entry) {
+              return (entry->ownerThread==std::thread::id{} ||
+                  entry->ownerThread==std::this_thread::get_id()) &&
+                  (entry->allowCaller || s_worker==this || m_workers.empty());
+          });
           if(eligible==m_queue.end()) return false;
           task=std::move(*eligible); m_queue.erase(eligible); }
         Run(task,s_worker==this); return true;
@@ -126,9 +133,14 @@ public:
                 std::shared_ptr<State> task;
                 {
                     std::unique_lock lock(m_mutex);
-                    m_ready.wait(lock,[&] { return m_stop || !m_queue.empty(); });
-                    if(m_stop && m_queue.empty()) return;
-                    task=std::move(m_queue.front()); m_queue.pop_front();
+                    m_ready.wait(lock,[&] { return m_stop || std::any_of(
+                        m_queue.begin(),m_queue.end(),[](const auto& queued) {
+                            return queued->ownerThread==std::thread::id{};
+                        }); });
+                    auto eligible=std::find_if(m_queue.begin(),m_queue.end(),
+                        [](const auto& queued) { return queued->ownerThread==std::thread::id{}; });
+                    if(eligible==m_queue.end()) { if(m_stop) return; continue; }
+                    task=std::move(*eligible); m_queue.erase(eligible);
                 }
                 Run(task,true);
             }
@@ -153,6 +165,14 @@ public:
         m_ready.notify_all(); for(auto& worker:m_workers) worker.join();
     }
     unsigned WorkerCount() const { return unsigned(m_workers.size()); }
+    bool IsComplete(const Handle& handle)
+    {
+        if(!handle.state) return true;
+        if(handle.state->owner!=this)
+            throw std::invalid_argument("Job handle belongs to another scheduler");
+        std::lock_guard lock(m_mutex);
+        return handle.state->complete;
+    }
     // Change at frame boundaries for profiling. Async Submit jobs retain worker
     // affinity; disabling parallel loops never moves background IO onto the UI.
     void SetParallelForEnabled(bool enabled) { m_parallelFor=enabled; }
@@ -162,9 +182,11 @@ public:
         return {m_workerNs.load(),m_callerNs.load(),m_waitNs.load(),m_jobs.load(),m_workerTasks.load(),
             m_queueNs.load(),m_dependencyNs.load(),m_pending,m_peakPending.load(),WorkerCount()};
     }
-    template<class F> Handle Schedule(F&& function,const std::vector<Handle>& dependencies={},bool allowCaller=true)
+    template<class F> Handle ScheduleImpl(F&& function,const std::vector<Handle>& dependencies,
+        bool allowCaller,std::thread::id ownerThread)
     {
-        auto task=std::make_shared<State>(); task->function=std::forward<F>(function); task->owner=this; task->allowCaller=allowCaller;
+        auto task=std::make_shared<State>(); task->function=std::forward<F>(function); task->owner=this;
+        task->allowCaller=allowCaller; task->ownerThread=ownerThread;
         {
             std::lock_guard lock(m_mutex);
             if(m_stop) throw std::runtime_error("Job scheduler is stopping");
@@ -184,6 +206,12 @@ public:
         if(m_workers.empty()) { try { Wait(result); } catch(...) {} }
         return result;
     }
+    template<class F> Handle Schedule(F&& function,const std::vector<Handle>& dependencies={},bool allowCaller=true)
+    { return ScheduleImpl(std::forward<F>(function),dependencies,allowCaller,{}); }
+    // Jobs touching live scene or native physics are queued with their owner.
+    // Workers may run their dependencies but never execute these callbacks.
+    template<class F> Handle ScheduleOnOwner(F&& function,const std::vector<Handle>& dependencies={})
+    { return ScheduleImpl(std::forward<F>(function),dependencies,true,std::this_thread::get_id()); }
     void Wait(const Handle& handle)
     {
         if(!handle.state) return;

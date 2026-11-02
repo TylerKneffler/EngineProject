@@ -240,8 +240,7 @@ bool SplinePath::DrawProperties(Engine::Editor::IEditorUi& ui)
     {
         Engine::Core::Object* point = Owner->GetScene()->AddObject(
             "Point " + std::to_string(Owner->Children.size() + 1u));
-        point->Parent = Owner;
-        Owner->Children.push_back(point);
+        Owner->GetScene()->SetParentLocal(point, Owner);
         point->transform.position = Owner->Children.size() > 1u
             ? Owner->Children[Owner->Children.size() - 2u]->transform.position +
                 glm::dvec3(0.0, 0.0, 2.0)

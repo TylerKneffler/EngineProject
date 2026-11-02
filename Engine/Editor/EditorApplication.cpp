@@ -202,6 +202,7 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
         return 1;
     }
     Engine::Core::SceneManager::SetActiveScene(scene);
+    scene->SetBeforeGpuResourceDestruction([renderer] { renderer->WaitIdle(); });
     scene->SetGameplayInputEnabled(false);
     Engine::Core::SceneManager::SetDefaultScenePath(projectSettings.defaultScene);
 
@@ -260,9 +261,25 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
     auto hotReload = std::make_unique<Engine::Editor::EditorHotReload>(*editorState,
         editorState->GetConsole(), projectSettings.scriptsDirectory,
         ENGINE_BUILD_DIR, PROJECT_SCRIPTS_PATH);
+    bool pendingPlayStopRestore = false;
+    bool pendingPlayStart = false;
+    bool editorFrameDrawing = false;
+    const auto finishPlayStop = [&]()
+    {
+        if (!pendingPlayStopRestore) return;
+        pendingPlayStopRestore = false;
+        Engine::Core::SceneManager::CancelPendingSceneLoad();
+        scene->FenceBackgroundWork();
+        Engine::Core::SceneManager::SetOnSceneLoaded({});
+        editorState->RestorePlayModeScene();
+    };
     hotReload->BeforeApply = [&]()
     {
         gameBuildManager->Stop();
+        finishPlayStop();
+        Engine::Core::SceneManager::CancelPendingSceneLoad();
+        scene->FenceBackgroundWork();
+        Engine::Core::SceneManager::SetOnSceneLoaded({});
     };
     OutputDebugStringA("[Main] GameBuildManager created\n");
     OutputDebugStringA("[Main] Getting window, renderer, scene...\n");
@@ -280,6 +297,8 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
     std::chrono::steady_clock::time_point debuggerDeadline;
     gameBuildManager->OnPlayStart = [&]()
     {
+        Engine::Core::SceneManager::CancelPendingSceneLoad();
+        scene->FenceBackgroundWork();
         scene->SetGameplayInputEnabled(false);
         const bool requested = editorState->RequestCodeEditorAttach();
         editorState->CapturePlayModeScene();
@@ -293,15 +312,21 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
                     "[Debug] Waiting up to 4 seconds for VS Code to attach.");
         }
         else
-            scene->Start();
+        {
+            if (editorFrameDrawing) pendingPlayStart = true;
+            else scene->Start();
+        }
     };
     gameBuildManager->OnPlayStop = [&]()
     {
         scene->SetGameplayInputEnabled(false);
         window->ReleaseGameplayInput();
         waitingForPlayDebugger = false;
+        pendingPlayStart = false;
         Engine::Core::SceneManager::CancelPendingSceneLoad();
-        editorState->RestorePlayModeScene();
+        // A toolbar Stop can arrive while RenderIfNeeded still owns a command
+        // list. Restore once that frame has been submitted.
+        pendingPlayStopRestore = true;
     };
     gameBuildManager->OnBuildComplete = [&](bool)
     {
@@ -311,6 +336,7 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
     editorState->OnSceneLoadRequested = [&](const std::string&)
     {
         gameBuildManager->Stop();
+        finishPlayStop();
     };
 
     // Frame timing
@@ -420,6 +446,7 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
         // frame so the final status/overlay is drawn even when continuous work
         // ended during this update.
         const Engine::Editor::PlayState previousPlayState = playState;
+        bool pausedFenced = false;
         const bool wasBuilding = gameBuildManager->IsBuilding();
         const bool wasHotReloadBusy = hotReload->IsBusy();
         Engine::Editor::PostBuildAction postBuildAction;
@@ -427,6 +454,13 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
             gameBuildManager->PlayInEditor();
         gameBuildManager->Update(playState, postBuildAction);
         hotReload->Update(window->IsFocused());
+        finishPlayStop();
+        if (previousPlayState == Engine::Editor::PlayState::Playing &&
+            playState == Engine::Editor::PlayState::Paused)
+        {
+            scene->FenceBackgroundWork();
+            pausedFenced = true;
+        }
         if(editorState->PollBackgroundWork()) renderer->MarkDirty();
         if (playState != Engine::Editor::PlayState::Playing)
         {
@@ -454,6 +488,7 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
                     ? "[Debug] VS Code debugger attached."
                     : "[Debug] VS Code did not attach; continuing Play.");
             waitingForPlayDebugger = false;
+            pendingPlayStart = false;
             scene->Start();
         }
 
@@ -538,6 +573,12 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
         // Render frame
         renderer->RenderIfNeeded([&]()
         {
+            editorFrameDrawing = true;
+            struct DrawingGuard
+            {
+                bool& active;
+                ~DrawingGuard() { active = false; }
+            } drawingGuard{editorFrameDrawing};
             const auto drawBegin = Clock::now();
             renderEntryMilliseconds = std::chrono::duration<double, std::milli>(
                 drawBegin - afterSceneUpdate).count();
@@ -660,6 +701,17 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
                 }
         });
         const auto afterRender = Clock::now();
+        if (!pausedFenced &&
+            previousPlayState == Engine::Editor::PlayState::Playing &&
+            playState == Engine::Editor::PlayState::Paused)
+            scene->FenceBackgroundWork();
+        finishPlayStop();
+        if (pendingPlayStart && playState == Engine::Editor::PlayState::Playing &&
+            !waitingForPlayDebugger)
+        {
+            pendingPlayStart = false;
+            scene->Start();
+        }
 
         // Scene requests made while drawing the UI now have a presented frame
         // with the loading overlay before deserialization blocks this thread.
@@ -744,6 +796,11 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
     // still alive. The renderer itself is owned by EditorState.
     gameBuildManager.reset();
     hotReload.reset();
+    Engine::Core::SceneManager::CancelPendingSceneLoad();
+    Engine::Core::SceneManager::SetOnSceneLoaded({});
+    scene->FenceBackgroundWork();
+    Engine::Core::SceneManager::SetActiveScene(nullptr);
+    scene->SetBeforeGpuResourceDestruction({});
     editorState.reset();
     uiBackend.reset();
 

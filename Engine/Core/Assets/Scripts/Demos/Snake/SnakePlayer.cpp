@@ -1,4 +1,5 @@
 #include "Scripts/Demos/Snake/SnakePlayer.h"
+#include "Core/Input/NativeInputSnapshot.h"
 
 #include "Core/Serialization/SceneSerializer.h"
 
@@ -51,5 +52,5 @@ glm::ivec2 SnakePlayer::ConsumeDirection(
 
 bool SnakePlayer::IsKeyDown(int virtualKey)
 {
-    return (GetAsyncKeyState(virtualKey) & 0x8000) != 0;
+    return (Engine::Core::ReadNativeKeyState(virtualKey) & 0x8000) != 0;
 }

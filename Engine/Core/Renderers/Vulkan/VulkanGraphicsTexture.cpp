@@ -2,6 +2,7 @@
 #if defined(ENGINE_VULKAN_ENABLED)
 #include "VulkanGraphicsTexture.h"
 #include "VulkanGraphicsBuffer.h"
+#include "VulkanQueueMutex.h"
 
 #include <cstring>
 
@@ -330,8 +331,11 @@ VulkanImageResource VulkanTextureSystem::Upload(
     VkSubmitInfo submit{ VK_STRUCTURE_TYPE_SUBMIT_INFO };
     submit.commandBufferCount = 1;
     submit.pCommandBuffers = &commands;
-    VkCheck(vkQueueSubmit(m_queue, 1, &submit, VK_NULL_HANDLE), "vkQueueSubmit(texture)");
-    VkCheck(vkQueueWaitIdle(m_queue), "vkQueueWaitIdle(texture)");
+    {
+        std::lock_guard queueLock(VulkanQueueMutex());
+        VkCheck(vkQueueSubmit(m_queue, 1, &submit, VK_NULL_HANDLE), "vkQueueSubmit(texture)");
+        VkCheck(vkQueueWaitIdle(m_queue), "vkQueueWaitIdle(texture)");
+    }
 
     vkDestroyCommandPool(m_device, pool, nullptr);
     vkDestroyBuffer(m_device, staging, nullptr);

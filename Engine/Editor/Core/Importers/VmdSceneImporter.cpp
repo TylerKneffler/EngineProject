@@ -147,7 +147,7 @@ Engine::Model::ModelImportResult VmdSceneImporter::Import(
         if (!motion.cameras.empty())
         {
             auto* object = scene.AddObject("VMD Camera");
-            if (root) { object->Parent = root; root->Children.push_back(object); }
+            if (root) scene.SetParentLocal(object, root);
             object->AddComponent<Engine::Components::Camera>();
             auto* track = object->AddComponent<Engine::Components::SceneCameraLightTrack>();
             track->kind = static_cast<int>(Engine::Components::SceneCameraLightTrack::Kind::Camera);
@@ -173,7 +173,7 @@ Engine::Model::ModelImportResult VmdSceneImporter::Import(
         if (!motion.lights.empty())
         {
             auto* object = scene.AddObject("VMD Light");
-            if (root) { object->Parent = root; root->Children.push_back(object); }
+            if (root) scene.SetParentLocal(object, root);
             auto* light = object->AddComponent<Engine::Components::Light>();
             light->lightType = static_cast<int>(Engine::Components::Light::Type::Directional);
             light->intensity = 1.f;

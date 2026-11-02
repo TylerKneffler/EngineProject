@@ -72,9 +72,16 @@ void Object::NotifyStructureChanged()
         OwnerScene->NotifyStructureChanged(this);
 }
 
+void Object::AssertSceneOwner() const
+{
+    if (OwnerScene)
+        OwnerScene->AssertOwnerThread();
+}
+
 #pragma region Lifecycle methods
 void Object::Enabled()
 {
+    AssertSceneOwner();
     if (enabled) return;
     enabled = true;
     for (Component* comp : Components)
@@ -83,6 +90,7 @@ void Object::Enabled()
 
 void Object::Disabled()
 {
+    AssertSceneOwner();
     if (!enabled) return;
     enabled = false;
     for (Component* comp : Components)
@@ -91,6 +99,7 @@ void Object::Disabled()
 
 void Object::Start()
 {
+    AssertSceneOwner();
     if (!IsEnabledInHierarchy()) return;
     for (Component* comp : Components)
         if (comp) comp->Start();
@@ -98,13 +107,19 @@ void Object::Start()
 
 void Object::Update()
 {
+    AssertSceneOwner();
     if (!IsEnabledInHierarchy()) return;
     for (Component* comp : Components)
-        if (comp && comp->RequiresUpdate()) comp->Update();
+        if (comp && comp->RequiresUpdate())
+        {
+            comp->Update();
+            comp->PublishUpdateOnOwner();
+        }
 }
 
 void Object::Destroy()
 {
+    AssertSceneOwner();
     // Scene objects are owned by Scene::m_objects. Deleting one directly is
     // invalid (and especially unsafe from a component callback), because the
     // scene may still be iterating the object/component containers. Queue the

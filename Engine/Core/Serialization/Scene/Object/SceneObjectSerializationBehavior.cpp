@@ -186,6 +186,7 @@ bool DeserializeExpandedObject(
         }
         else component->Deserialize(componentNode);
         component->OnAfterDeserialize(graphicsProvider);
+        object.AssertSceneOwner();
         object.Components.push_back(component);
     }
 
@@ -206,8 +207,7 @@ bool DeserializeExpandedObject(
             scene, children.ArrayAt(i), graphicsProvider, registry, options);
         if (!child)
             throw std::runtime_error("Could not instantiate child object");
-        child->Parent = &object;
-        object.Children.push_back(child);
+        scene.SetParentLocal(child, &object);
     }
 
     return true;
@@ -598,11 +598,14 @@ bool SceneObjectBehavior::ApplyObjectState(Engine::Core::Object& object, const J
             replacement->Owner = &object;
             replacements.push_back(std::move(replacement));
         }
+        if (object.GetScene())
+            object.GetScene()->WaitForGpuResourceDestruction();
         for (Engine::Core::Component* component : object.Components)
         {
             if (component) component->OnDestroy();
             delete component;
         }
+        object.AssertSceneOwner();
         object.Components.clear();
         for (auto& replacement : replacements)
             object.Components.push_back(replacement.release());

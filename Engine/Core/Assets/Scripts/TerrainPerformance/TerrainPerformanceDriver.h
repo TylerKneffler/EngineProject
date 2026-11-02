@@ -37,6 +37,7 @@ public:
     float reportIntervalSeconds = 5.f;
     void Start() override;
     void Update() override;
+    void FenceBackgroundWork() override;
     void OnAfterDeserialize(IGraphicsProvider* provider) override;
     uint64_t SourceSignature() const;
     bool ConfigureTerrain();

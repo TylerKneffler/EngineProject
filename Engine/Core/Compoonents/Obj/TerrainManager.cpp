@@ -61,6 +61,11 @@ TerrainManager::TerrainManager()
 
 TerrainManager::~TerrainManager()
 {
+    FenceBackgroundWork();
+}
+
+void TerrainManager::FenceBackgroundWork()
+{
     {
         std::lock_guard<std::mutex> lock(m_farPrepareMutex);
         m_stopFarWorker = true;
@@ -69,12 +74,25 @@ TerrainManager::~TerrainManager()
     m_farPrepareWake.notify_one();
     if (m_farWorker.joinable()) m_farWorker.join();
     {
+        std::lock_guard<std::mutex> lock(m_farPrepareMutex);
+        m_preparedFarTiles.clear();
+        m_stopFarWorker = false;
+        ++m_farPrepareRevision;
+    }
+    {
         std::lock_guard<std::mutex> lock(m_prepareMutex);
         m_stopPrepareWorker = true;
         m_prepareQueue.clear();
     }
     m_prepareWake.notify_one();
     if (m_prepareWorker.joinable()) m_prepareWorker.join();
+    {
+        std::lock_guard<std::mutex> lock(m_prepareMutex);
+        m_preparedCells.clear();
+        m_preparingCells.clear();
+        m_stopPrepareWorker = false;
+        ++m_prepareRevision;
+    }
 }
 
 bool TerrainManager::HasCell(int x, int y) const

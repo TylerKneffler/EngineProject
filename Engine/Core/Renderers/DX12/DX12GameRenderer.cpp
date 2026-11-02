@@ -1,4 +1,5 @@
 #include "DX12GameRenderer.h"
+#include "DX12QueueMutex.h"
 #include <chrono>
 #include <algorithm>
 #include <cmath>
@@ -280,6 +281,7 @@ void DX12GameRenderer::EndFrame()
     ThrowIfFailed(m_commandList->Close());
 
     ID3D12CommandList* lists[] = { m_commandList.Get() };
+    std::lock_guard queueLock(DX12QueueMutex());
     m_commandQueue->ExecuteCommandLists(1, lists);
 
     // Present — pass ALLOW_TEARING when supported so DWM does not throttle

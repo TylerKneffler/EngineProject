@@ -25,6 +25,13 @@ struct PerformanceCoreLoad
     float kernel = 0.f;
 };
 
+struct PerformanceGpuEngineLoad
+{
+    std::string id;
+    uint32_t category = 0;
+    float usage = 0.f;
+};
+
 struct PerformanceSnapshot
 {
     float cpuUser = 0.f;
@@ -38,6 +45,7 @@ struct PerformanceSnapshot
     uint64_t commitUsed = 0;
     uint64_t commitLimit = 0;
     std::array<float, 5> gpuEngines{};
+    std::vector<PerformanceGpuEngineLoad> gpuEngineInstances;
     uint64_t gpuMemoryUsed = 0;
     uint64_t gpuMemoryBudget = 0;
 };
@@ -71,6 +79,7 @@ private:
     void Refresh(float frameRate);
     void DrawOverview(IEditorUi& ui, float frameRate);
     void DrawCoreGrid(IEditorUi& ui);
+    void DrawGpuEngineGrid(IEditorUi& ui);
     void DrawHardware(IEditorUi& ui);
     void DrawShadows(IEditorUi& ui);
     void DrawTimings(IEditorUi& ui);

@@ -18,6 +18,10 @@ public:
     ~BulletPhysicsAdapter() override;
     const char* Name() const override { return "Bullet"; }
     void Step(double deltaTime) override;
+    void PrepareStep(double deltaTime) override;
+    void SimulatePreparedStep() override;
+    void FinishPreparedStep() override;
+    void AbortPreparedStep() override;
     void Reset() override;
     void ConfigureFixedStep(double seconds, uint32_t maximumSubsteps,
         uint32_t solverIterations) override;

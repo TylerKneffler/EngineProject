@@ -28,6 +28,7 @@ public:
     using Cell = std::pair<int, int>;
     TerrainManager();
     ~TerrainManager() override;
+    void FenceBackgroundWork() override;
     int cellsX = 32, cellsY = 32;
     float cellWidth = 1.f, cellDepth = 1.f;
     int loadedRadius = 1;

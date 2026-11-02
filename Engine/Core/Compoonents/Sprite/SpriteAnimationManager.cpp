@@ -70,6 +70,19 @@ void SpriteAnimationManager::Update()
             }
         }
     }
+    // Direct and serial calls retain their original texture-selection timing.
+    // Worker calls publish the cache change after their segment has joined.
+    if (!Owner || !Owner->GetScene() || Owner->GetScene()->IsOwnerThread())
+        SelectTexture();
+    else
+        m_pendingSelection = true;
+}
+
+void SpriteAnimationManager::PublishUpdateOnOwner()
+{
+    if (!m_pendingSelection) return;
+    if (Owner) Owner->AssertSceneOwner();
+    m_pendingSelection = false;
     SelectTexture();
 }
 
@@ -183,6 +196,7 @@ const SpriteAnimationManager::SpriteSheetFrame* SpriteAnimationManager::GetCurre
 
 void SpriteAnimationManager::SelectTexture()
 {
+    if (Owner) Owner->AssertSceneOwner();
     const SpriteSheetFrame* selected = GetCurrentFrame();
     const std::string image = selected ? selected->image : std::string{};
     if (image == m_loadedImagePath)

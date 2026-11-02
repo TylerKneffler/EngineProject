@@ -3,6 +3,7 @@
 #include "Core/Graphics/IGraphicsProvider.h"
 
 namespace Engine::Scene { class Scene; }
+namespace Engine::Core { struct NativeInputSnapshot; }
 
 namespace Engine::Renderers
 {
@@ -14,6 +15,9 @@ public:
 
     void Initialize(Engine::Graphics::IGraphicsProvider* graphicsProvider);
     void Render(Engine::Scene::Scene& scene, Engine::Graphics::IGraphicsContext* context, float viewportAspect);
+    // Native game button callbacks execute during the simulation tick.
+    static void UpdateNativeInteraction(Engine::Scene::Scene& scene,
+        const Engine::Core::NativeInputSnapshot& input);
     // Supplies pointer coordinates relative to an embedded render surface (for
     // example the editor Game panel). This overrides native-window polling.
     void SetPointerInput(float x, float y, float viewportWidth,

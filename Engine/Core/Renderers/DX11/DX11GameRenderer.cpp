@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "DX11GameRenderer.h"
 #include "Core/Graphics/PostProcess.h"
+#include <d3d11_4.h>
 #include <chrono>
 
 namespace Engine::Renderers
@@ -70,6 +71,11 @@ bool DX11GameRenderer::Init(void* hwndHandle, uint32_t width, uint32_t height)
             m_allowTearing = false;
         }
         ThrowIfFailed(hr);
+        // Native simulation can update upload resources while the render
+        // owner submits the preceding packet through the immediate context.
+        Microsoft::WRL::ComPtr<ID3D11Multithread> multithread;
+        ThrowIfFailed(m_context.As(&multithread));
+        multithread->SetMultithreadProtected(TRUE);
         m_swapChainFlags = swap.Flags;
         m_width = width;
         m_height = height;
@@ -158,6 +164,8 @@ void DX11GameRenderer::EndFrame()
             }
             m_frameTelemetry.cpuPresentationMilliseconds = 0.0;
             m_frameTelemetry.flipModelSwapChain = m_flipModelSwapChain;
+            SignalFrameCompletion();
+            m_context->Flush();
             return;
         }
     }
@@ -177,6 +185,7 @@ void DX11GameRenderer::EndFrame()
         Engine::Graphics::SetPostProcessSettings(postProcess);
     }
     m_postProcess.Compose(m_context.Get(), output, temporalFrame);
+    SignalFrameCompletion();
     m_temporalSampleTarget = 1u;
     m_temporalSamplesAccumulated = 0u;
     if (m_graphicsProvider && m_graphicsProvider->GetContextFactory())
@@ -527,10 +536,41 @@ void DX11GameRenderer::WaitIdle()
     D3D11_QUERY_DESC descriptor{};
     descriptor.Query = D3D11_QUERY_EVENT;
     Microsoft::WRL::ComPtr<ID3D11Query> completion;
-    if (FAILED(m_device->CreateQuery(&descriptor, &completion))) return;
+    ThrowIfFailed(m_device->CreateQuery(&descriptor, &completion));
     m_context->End(completion.Get());
     m_context->Flush();
-    while (m_context->GetData(completion.Get(), nullptr, 0, 0) == S_FALSE)
+    HRESULT status = S_FALSE;
+    while ((status = m_context->GetData(completion.Get(), nullptr, 0, 0)) == S_FALSE)
         SwitchToThread();
+    ThrowIfFailed(status);
+    m_completedFrameToken = m_submittedFrameToken;
+    m_frameCompletionQueries.clear();
+}
+
+void DX11GameRenderer::SignalFrameCompletion()
+{
+    D3D11_QUERY_DESC descriptor{};
+    descriptor.Query = D3D11_QUERY_EVENT;
+    Microsoft::WRL::ComPtr<ID3D11Query> completion;
+    ThrowIfFailed(m_device->CreateQuery(&descriptor, &completion));
+    m_context->End(completion.Get());
+    m_frameCompletionQueries.emplace_back(++m_submittedFrameToken,
+        std::move(completion));
+}
+
+bool DX11GameRenderer::IsFrameComplete(uint64_t token)
+{
+    if (token <= m_completedFrameToken) return true;
+    while (!m_frameCompletionQueries.empty())
+    {
+        const auto& front = m_frameCompletionQueries.front();
+        const HRESULT status = m_context->GetData(front.second.Get(), nullptr, 0,
+            D3D11_ASYNC_GETDATA_DONOTFLUSH);
+        if (status == S_FALSE) break;
+        ThrowIfFailed(status);
+        m_completedFrameToken = front.first;
+        m_frameCompletionQueries.pop_front();
+    }
+    return token <= m_completedFrameToken;
 }
 }

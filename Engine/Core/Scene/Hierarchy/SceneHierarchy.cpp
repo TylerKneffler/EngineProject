@@ -1,4 +1,5 @@
 #include "Core/Scene/Scene.h"
+#include "Core/SceneManager.h"
 #include "Core/Compoonents/Animation/TwoBoneIK.h"
 #include "Core/Compoonents/Animation/ChainIK.h"
 #include "Core/Compoonents/Animation/RigController.h"
@@ -17,6 +18,11 @@
 #include "Core/Physics/Physics.h"
 #include "Core/Physics/IPhysicsAdapter.h"
 #include "Core/Renderers/UIRenderer.h"
+#include "Core/UI/UILayout.h"
+#include "Core/Compoonents/UI/Canvas.h"
+#include "Core/Input/NativeInputSnapshot.h"
+#include "Core/Threading/ComponentUpdateScheduler.h"
+#include "Core/Threading/JobScheduler.h"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -63,10 +69,13 @@ Scene::Scene(PhysicsAdapterFactory physicsAdapterFactory)
     m_physics = std::make_unique<Engine::Physics::Physics>(
         *this, physicsAdapterFactory ? physicsAdapterFactory(*this) : nullptr);
     m_audio = std::make_unique<Engine::Audio::Audio>(*this);
+    CommitPendingObjectChanges();
 }
 
 Scene::~Scene()
 {
+    try { FenceBackgroundWork(); }
+    catch (...) { /* Component destructors still join their own workers. */ }
     m_audio->Reset();
     m_physics->Reset();
     for (const auto& object : m_objects)
@@ -76,8 +85,24 @@ Scene::~Scene()
             object->OwnerScene = nullptr;
 }
 
+void Scene::FenceBackgroundWork()
+{
+    AssertOwnerThread();
+    if (m_isUpdating)
+        throw std::logic_error("Background work cannot be fenced during Update");
+    if (Engine::Core::SceneManager::GetActiveScene() == this)
+        Engine::Core::SceneManager::CancelPendingSceneLoad();
+    FenceSceneGeneration();
+    // A worker can execute code from a reloadable script module. Join it
+    // before replacing scene objects or unloading that module.
+    for (auto* component : GetComponents<Engine::Core::Component>())
+        component->FenceBackgroundWork();
+}
+
 void Scene::Start()
 {
+    AssertOwnerThread();
+    FenceBackgroundWork();
     m_clock.Reset();
     m_deltaTime = 0.f;
     for (const auto& object : m_objects)
@@ -95,6 +120,7 @@ void Scene::Start()
             [object](const auto& current) { return current.get() == object; }))
             object->Start();
     m_hasStarted = true;
+    CommitPendingObjectChanges();
 }
 
 void Scene::RefreshUpdateRegistry()
@@ -137,6 +163,7 @@ void Scene::RefreshUpdateRegistry()
 
 void Scene::Update(float deltaTime)
 {
+    AssertOwnerThread();
     ResetGrassPerformance();
     using Clock = std::chrono::steady_clock;
     const auto updateBegin = m_updateProfilingEnabled ? Clock::now() : Clock::time_point{};
@@ -144,19 +171,92 @@ void Scene::Update(float deltaTime)
     EnforceParticleBudget();
     m_componentRegistry.ReleaseSnapshots();
     m_isUpdating = true;
-    RefreshUpdateRegistry();
-    const auto updateObjects = m_updateObjects; // callbacks may change the registry
-    for (auto* object : updateObjects) object->Update();
-    UpdateSpatialScripts();
-    const auto afterObjects = m_updateProfilingEnabled ? Clock::now() : Clock::time_point{};
-    ApplyPoseConstraints();
-    const auto afterConstraints = m_updateProfilingEnabled ? Clock::now() : Clock::time_point{};
-    m_audio->Update(m_deltaTime);
-    const auto afterPose = m_updateProfilingEnabled ? Clock::now() : Clock::time_point{};
+    struct UpdatingGuard
+    {
+        bool& flag;
+        ~UpdatingGuard() { flag = false; }
+    } updatingGuard{m_isUpdating};
     const double physicsDelta = m_clock.IsFixedStep()
         ? m_clock.GetFixedStep() : static_cast<double>(m_deltaTime);
-    m_physics->Step(physicsDelta);
-    const auto afterPhysics = m_updateProfilingEnabled ? Clock::now() : Clock::time_point{};
+    Clock::time_point afterObjects{}, afterConstraints{}, afterPose{}, afterPhysics{};
+    const auto componentUpdates = [&]
+    {
+    RefreshUpdateRegistry();
+    const auto updateObjects = m_updateObjects; // callbacks may change the registry
+    std::vector<Engine::Threading::ComponentUpdateScheduler::Node> parallelUpdates;
+    const auto finishParallelUpdates = [&]
+    {
+        Engine::Threading::ComponentUpdateScheduler::Run(parallelUpdates);
+        parallelUpdates.clear();
+    };
+    for (auto* object : updateObjects)
+    {
+        // Object subclasses may override Update and must retain their exact
+        // owner-thread dispatch. A legacy component makes its whole object
+        // serial so callbacks can still edit the live component list.
+        if (typeid(*object) != typeid(Engine::Core::Object))
+        {
+            finishParallelUpdates();
+            object->Update();
+            continue;
+        }
+        if (!object->IsEnabledInHierarchy()) continue;
+        std::vector<Engine::Threading::ComponentUpdateScheduler::Node> objectUpdates;
+        bool serial = false;
+        for (auto* component : object->Components)
+        {
+            if (!component || !component->RequiresUpdate()) continue;
+            const auto policy = component->GetCallbackPolicy();
+            if (policy.updateThread != Engine::Core::Component::UpdateThreadAffinity::Worker)
+            {
+                serial = true;
+                break;
+            }
+            if (policy.updateSafety != Engine::Core::Component::UpdateParallelSafety::DeclaredAccess)
+                throw std::logic_error("Worker component update requires declared parallel safety");
+            auto access = component->GetUpdateAccess();
+            if (!access)
+                throw std::logic_error("Worker component update requires an access declaration");
+            objectUpdates.push_back({component, std::move(*access)});
+        }
+        if (serial)
+        {
+            finishParallelUpdates();
+            object->Update();
+        }
+        else
+            parallelUpdates.insert(parallelUpdates.end(),
+                std::make_move_iterator(objectUpdates.begin()),
+                std::make_move_iterator(objectUpdates.end()));
+    }
+    finishParallelUpdates();
+    };
+    const auto spatialScripts = [&]
+    {
+        UpdateSpatialScripts();
+        afterObjects = m_updateProfilingEnabled ? Clock::now() : Clock::time_point{};
+    };
+    const auto transforms = [&]
+    {
+        std::vector<Engine::Components::Transform*> values;
+        values.reserve(m_objects.size());
+        for (const auto& object : m_objects)
+            values.push_back(&object->transform);
+        m_transformHierarchy.Prepare(values);
+    };
+    const auto animationConstraints = [&]
+    {
+        ApplyPoseConstraints();
+        afterConstraints = m_updateProfilingEnabled ? Clock::now() : Clock::time_point{};
+        m_audio->Update(m_deltaTime);
+        afterPose = m_updateProfilingEnabled ? Clock::now() : Clock::time_point{};
+    };
+    const auto physicsPreparation = [&] { m_physics->PrepareStep(physicsDelta); };
+    const auto physicsSimulation = [&] { m_physics->SimulatePreparedStep(); };
+    const auto postPhysics = [&]
+    {
+    m_physics->FinishPreparedStep();
+    afterPhysics = m_updateProfilingEnabled ? Clock::now() : Clock::time_point{};
     for (auto* binding : GetComponents<Engine::Components::RigPhysicsBinding>())
         if (binding->Owner->IsEnabledInHierarchy()) binding->PostPhysicsUpdate();
     for (auto* constraints : GetComponents<Engine::Components::RigConstraints>())
@@ -203,9 +303,24 @@ void Scene::Update(float deltaTime)
                 if (body && tissue->IsBoundUnder(body->Owner)) { tissue->Reset(); break; }
             tissue->PostPhysicsUpdate(static_cast<float>(physicsDelta));
         }
+    if (const auto* input = Engine::Core::CurrentNativeInputSnapshot())
+    {
+        if (input->clientWidth && input->clientHeight)
+            Engine::Renderers::UIRenderer::UpdateNativeInteraction(*this, *input);
+    }
+    };
+    const auto publishRenderSnapshot = [&]
+    {
     m_isUpdating = false;
-    FlushPendingObjectAdditions();
-    FlushPendingObjectRemovals();
+    CommitPendingObjectChanges();
+    if (const auto* input = Engine::Core::CurrentNativeInputSnapshot())
+    {
+        if (input->clientWidth && input->clientHeight)
+            PrepareNativeUiLayout(static_cast<float>(input->clientWidth) /
+                static_cast<float>(input->clientHeight));
+        else
+            m_preparedNativeUiLayout.clear();
+    }
     EnforceParticleBudget();
     if (m_updateProfilingEnabled)
     {
@@ -214,6 +329,29 @@ void Scene::Update(float deltaTime)
         m_lastUpdateTimings = { ms(updateBegin, afterObjects),
             ms(afterObjects, afterPose), ms(afterPose, afterPhysics),
             ms(afterPhysics, Clock::now()), ms(afterObjects,afterConstraints), ms(afterConstraints,afterPose) };
+    }
+    };
+    auto& jobs = Engine::Threading::JobScheduler::Get();
+    std::vector<Engine::Threading::JobScheduler::Handle> phases;
+    phases.reserve(8);
+    try
+    {
+        phases.push_back(jobs.ScheduleOnOwner(componentUpdates));
+        phases.push_back(jobs.ScheduleOnOwner(spatialScripts, {phases.back()}));
+        phases.push_back(jobs.ScheduleOnOwner(transforms, {phases.back()}));
+        phases.push_back(jobs.ScheduleOnOwner(animationConstraints, {phases.back()}));
+        phases.push_back(jobs.ScheduleOnOwner(physicsPreparation, {phases.back()}));
+        phases.push_back(jobs.ScheduleOnOwner(physicsSimulation, {phases.back()}));
+        phases.push_back(jobs.ScheduleOnOwner(postPhysics, {phases.back()}));
+        phases.push_back(jobs.ScheduleOnOwner(publishRenderSnapshot, {phases.back()}));
+        jobs.Wait(phases.back());
+    }
+    catch (...)
+    {
+        for (const auto& phase : phases)
+            try { jobs.Wait(phase); } catch (...) {}
+        m_physics->AbortPreparedStep();
+        throw;
     }
 }
 
@@ -355,6 +493,7 @@ void Scene::ApplyPoseConstraints()
 
 void Scene::UpdateFixedFrame()
 {
+    AssertOwnerThread();
     if (!m_clock.IsFixedStep())
         throw std::logic_error("UpdateFixedFrame requires a configured fixed time step");
     Update(0.f);
@@ -362,10 +501,18 @@ void Scene::UpdateFixedFrame()
 
 Engine::Core::Object* Scene::AddObject()
 {
+    return AddObjectWithId(m_nextObjectId.fetch_add(1, std::memory_order_relaxed));
+}
+
+Engine::Core::Object* Scene::AddObjectWithId(ObjectId id)
+{
+    AssertOwnerThread();
     auto obj = std::make_unique<Engine::Core::Object>();
     Engine::Core::Object* raw = obj.get();
     raw->OwnerScene = this;
-    if (m_isUpdating)
+    m_objectIds.emplace(raw, id);
+    m_objectsById.emplace(id, raw);
+    if (m_isUpdating || m_isCommitting)
         m_pendingObjectAdditions.push_back(std::move(obj));
     else
     {
@@ -490,6 +637,7 @@ bool Scene::MoveObject(
     Engine::Core::Object* target,
     ObjectPlacement placement)
 {
+    AssertOwnerThread();
     if (!object || object == target)
         return false;
 
@@ -589,16 +737,40 @@ bool Scene::MoveObject(
     return true;
 }
 
+bool Scene::SetParentLocal(Object* object, Object* parent)
+{
+    AssertOwnerThread();
+    if (!object || object->OwnerScene != this ||
+        (parent && parent->OwnerScene != this)) return false;
+    for (Object* ancestor = parent; ancestor; ancestor = ancestor->Parent)
+        if (ancestor == object) return false;
+    if (object->Parent == parent) return true;
+    if (object->Parent)
+    {
+        auto& siblings = object->Parent->Children;
+        siblings.erase(std::remove(siblings.begin(), siblings.end(), object),
+            siblings.end());
+    }
+    object->Parent = parent;
+    if (parent) parent->Children.push_back(object);
+    NotifyStructureChanged(object);
+    return true;
+}
+
 void Scene::RemoveObject(Engine::Core::Object* obj)
 {
+    AssertOwnerThread();
     if (!obj)
         return;
 
-    if (m_isUpdating)
+    if (m_isUpdating || (m_isCommitting && !m_isFlushingRemovals))
     {
         RequestRemoveObject(obj);
         return;
     }
+
+    if (m_beforeGpuResourceDestruction)
+        m_beforeGpuResourceDestruction();
 
     std::vector<Engine::Core::Object*> objectsToRemove;
     std::function<void(Engine::Core::Object*)> collect = [&](Engine::Core::Object* current)
@@ -625,6 +797,7 @@ void Scene::RemoveObject(Engine::Core::Object* obj)
     for (Engine::Core::Object* object : objectsToRemove)
         for (Engine::Core::Component* component : object->Components)
         {
+            m_componentSnapshotCache.erase(component);
             if (auto* body = dynamic_cast<Engine::Components::RigidBody*>(component))
                 m_physics->DestroyRigidBody(*body);
             else if (auto* cloth = dynamic_cast<Engine::Components::Cloth*>(component))
@@ -634,7 +807,12 @@ void Scene::RemoveObject(Engine::Core::Object* obj)
         }
     for (Engine::Core::Object* object : objectsToRemove)
         if (object)
-        { NotifyStructureChanged(object,true); object->OwnerScene = nullptr; }
+        {
+            NotifyStructureChanged(object,true);
+            m_objectsById.erase(GetObjectId(object));
+            m_objectIds.erase(object);
+            object->OwnerScene = nullptr;
+        }
 
     if (obj->Parent)
     {
@@ -676,6 +854,7 @@ void Scene::RemoveObject(Engine::Core::Object* obj)
 
 void Scene::RequestRemoveObject(Engine::Core::Object* obj)
 {
+    AssertOwnerThread();
     if (!obj || std::find(m_pendingObjectRemovals.begin(),
             m_pendingObjectRemovals.end(), obj) != m_pendingObjectRemovals.end())
     {
@@ -686,7 +865,9 @@ void Scene::RequestRemoveObject(Engine::Core::Object* obj)
 
 void Scene::FlushPendingObjectAdditions()
 {
-    for (auto& object : m_pendingObjectAdditions)
+    std::vector<std::unique_ptr<Object>> pending;
+    pending.swap(m_pendingObjectAdditions);
+    for (auto& object : pending)
     {
         if (!object)
             continue;
@@ -699,13 +880,15 @@ void Scene::FlushPendingObjectAdditions()
         m_objects.push_back(std::move(object));
         m_componentRegistry.Adopt(added); NotifyStructureChanged(added);
     }
-    m_pendingObjectAdditions.clear();
 }
 
 void Scene::FlushPendingObjectRemovals()
 {
     std::vector<Engine::Core::Object*> pending;
     pending.swap(m_pendingObjectRemovals);
+    m_isFlushingRemovals = true;
+    struct RemovalGuard { bool& flag; ~RemovalGuard() { flag = false; } }
+        guard{m_isFlushingRemovals};
     for (Engine::Core::Object* object : pending)
     {
         // An earlier request can remove a parent. Do not dereference the
@@ -722,9 +905,20 @@ void Scene::FlushPendingObjectRemovals()
 
 void Scene::ClearObjects()
 {
+    AssertOwnerThread();
+    if (m_isUpdating)
+        throw std::logic_error("Clearing a scene during Update requires a commit boundary");
+    FenceBackgroundWork();
+    if (m_beforeGpuResourceDestruction && !m_objects.empty())
+        m_beforeGpuResourceDestruction();
     m_hasStarted = false;
+    {
+        std::lock_guard<std::mutex> lock(m_queuedSceneMutationsMutex);
+        m_queuedSceneMutations.clear();
+    }
     m_pendingObjectAdditions.clear();
     m_pendingObjectRemovals.clear();
+    m_preparedNativeUiLayout.clear();
     m_audio->Reset();
     m_physics->Reset();
     for (const auto& object : m_objects)
@@ -733,10 +927,222 @@ void Scene::ClearObjects()
         if (object)
             object->OwnerScene = nullptr;
     m_objects.clear();
+    m_objectIds.clear();
+    m_objectsById.clear();
+    m_componentSnapshotCache.clear();
     m_selectedObject = nullptr;
     m_editorSelectedMesh = nullptr;
     m_previewObject = nullptr;
     NotifyStructureChanged();
+    CommitPendingObjectChanges();
+}
+
+void Scene::PrepareNativeUiLayout(float viewportAspect)
+{
+    AssertOwnerThread();
+    if (GetComponents<Engine::Components::Canvas>().empty())
+    {
+        m_preparedNativeUiLayout.clear();
+        return;
+    }
+    m_preparedNativeUiLayout = Engine::UI::UILayout::Resolve(*this, viewportAspect);
+}
+
+Engine::Threading::JobScheduler::Handle Scene::ScheduleSceneJob(
+    std::function<void(SceneGeneration)> work)
+{
+    AssertOwnerThread();
+    auto& scheduler = Engine::Threading::JobScheduler::Get();
+    m_sceneJobs.erase(std::remove_if(m_sceneJobs.begin(), m_sceneJobs.end(),
+        [&scheduler](const auto& handle) { return scheduler.IsComplete(handle); }),
+        m_sceneJobs.end());
+    const SceneGeneration generation = CaptureSceneGeneration();
+    auto handle = scheduler.Schedule([this, generation, work = std::move(work)]
+    {
+        if (CaptureSceneGeneration() == generation)
+            work(generation);
+    }, {}, false);
+    m_sceneJobs.push_back(handle);
+    return handle;
+}
+
+void Scene::FenceSceneGeneration()
+{
+    AssertOwnerThread();
+    {
+        std::lock_guard lock(m_queuedSceneMutationsMutex);
+        SceneGeneration next = m_sceneGeneration.load(std::memory_order_relaxed) + 1;
+        if (!next) ++next;
+        m_sceneGeneration.store(next, std::memory_order_release);
+        m_queuedSceneMutations.clear();
+    }
+    auto jobs = std::move(m_sceneJobs);
+    m_sceneJobs.clear();
+    auto& scheduler = Engine::Threading::JobScheduler::Get();
+    // Drain every callback even when one job failed. Callers receive job
+    // errors through their handles; lifecycle cleanup must still finish.
+    for (const auto& job : jobs)
+        try { scheduler.Wait(job); } catch (...) {}
+}
+
+bool Scene::QueueSceneMutation(SceneGeneration generation,
+    std::function<void(Scene&)> mutation)
+{
+    std::lock_guard<std::mutex> lock(m_queuedSceneMutationsMutex);
+    if (generation != m_sceneGeneration.load(std::memory_order_acquire))
+        return false;
+    m_queuedSceneMutations.push_back({generation, std::move(mutation)});
+    return true;
+}
+
+Scene::ObjectId Scene::GetObjectId(const Object* object) const
+{
+    AssertOwnerThread();
+    const auto found = m_objectIds.find(object);
+    return found == m_objectIds.end() ? 0 : found->second;
+}
+
+Scene::Object* Scene::FindObjectById(ObjectId id) const
+{
+    AssertOwnerThread();
+    const auto found = m_objectsById.find(id);
+    return found == m_objectsById.end() ? nullptr : found->second;
+}
+
+Scene::ObjectId Scene::QueueAddObject(SceneGeneration generation, std::string name)
+{
+    const ObjectId id = m_nextObjectId.fetch_add(1, std::memory_order_relaxed);
+    return QueueSceneMutation(generation, [id, name = std::move(name)](Scene& scene)
+    {
+        scene.AddObjectWithId(id)->name = name;
+    }) ? id : 0;
+}
+
+void Scene::QueueRemoveObject(SceneGeneration generation, ObjectId id)
+{
+    QueueSceneMutation(generation, [id](Scene& scene)
+    {
+        if (Object* object = scene.FindObjectById(id))
+            scene.RemoveObject(object);
+    });
+}
+
+void Scene::QueueMoveObject(SceneGeneration generation, ObjectId id, ObjectId target,
+    ObjectPlacement placement)
+{
+    QueueSceneMutation(generation, [id, target, placement](Scene& scene)
+    {
+        Object* object = scene.FindObjectById(id);
+        Object* destination = target ? scene.FindObjectById(target) : nullptr;
+        if (object && (!target || destination))
+            scene.MoveObject(object, destination, placement);
+    });
+}
+
+void Scene::QueueObjectFieldWrite(SceneGeneration generation, ObjectId id,
+    std::function<void(Object&)> write)
+{
+    QueueSceneMutation(generation, [id, write = std::move(write)](Scene& scene)
+    {
+        if (Object* object = scene.FindObjectById(id))
+            write(*object);
+    });
+}
+
+void Scene::CommitPendingObjectChanges()
+{
+    AssertOwnerThread();
+    if (m_isUpdating || m_isCommitting) return;
+    m_isCommitting = true;
+    struct CommitGuard { bool& flag; ~CommitGuard() { flag = false; } } guard{m_isCommitting};
+    std::vector<QueuedSceneMutation> commands;
+    {
+        std::lock_guard<std::mutex> lock(m_queuedSceneMutationsMutex);
+        commands.swap(m_queuedSceneMutations);
+    }
+    const SceneGeneration generation = CaptureSceneGeneration();
+    for (auto& command : commands)
+        if (command.generation == generation) command.apply(*this);
+    FlushPendingObjectAdditions();
+    FlushPendingObjectRemovals();
+    m_componentRegistry.ReleaseSnapshots();
+    if (!m_suppressSceneSnapshotPublication)
+        PublishSceneSnapshot();
+}
+
+void Scene::PublishSceneSnapshot()
+{
+    AssertOwnerThread();
+    if (!m_isCommitting)
+        throw std::logic_error("Scene snapshots may only publish at a commit boundary");
+    const auto publishBegin = std::chrono::steady_clock::now();
+    const auto current = GetPublishedSceneSnapshot();
+    bool unchanged = current && current->structureRevision == m_structureRevision &&
+        current->objects.size() == m_objects.size();
+    if (unchanged)
+        for (size_t index = 0; index < m_objects.size(); ++index)
+        {
+            const Object* object = m_objects[index].get();
+            const auto& prior = current->objects[index];
+            if (prior.id != GetObjectId(object) ||
+                prior.parentId != GetObjectId(object->Parent) ||
+                prior.name != object->name || prior.enabled != object->enabled ||
+                glm::any(glm::notEqual(prior.position, object->transform.position)) ||
+                glm::any(glm::notEqual(prior.rotation, object->transform.rotation)) ||
+                glm::any(glm::notEqual(prior.scale, object->transform.scale)) ||
+                prior.components.size() != object->Components.size())
+            { unchanged = false; break; }
+            size_t componentIndex = 0;
+            for (const auto* component : object->Components)
+                if (!component ||
+                    prior.components[componentIndex++].configurationRevision !=
+                        component->GetConfigurationRevision())
+                { unchanged = false; break; }
+            if (!unchanged) break;
+        }
+    if (unchanged)
+    {
+        m_lastSnapshotPublishMs = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - publishBegin).count();
+        return;
+    }
+    auto snapshot = std::make_shared<SceneSnapshot>();
+    snapshot->generation = ++m_snapshotGeneration;
+    snapshot->structureRevision = m_structureRevision;
+    snapshot->objects.reserve(m_objects.size());
+    for (const auto& owned : m_objects)
+    {
+        const Object* object = owned.get();
+        SceneSnapshot::ObjectInfo state;
+        state.id = GetObjectId(object);
+        state.parentId = GetObjectId(object->Parent);
+        state.name = object->name;
+        state.enabled = object->enabled;
+        state.position = object->transform.position;
+        state.rotation = object->transform.rotation;
+        state.scale = object->transform.scale;
+        state.components.reserve(object->Components.size());
+        for (const auto* component : object->Components)
+            if (component)
+            {
+                const auto revision = component->GetConfigurationRevision();
+                auto& cached = m_componentSnapshotCache[component];
+                if (!cached.state || cached.revision != revision)
+                {
+                    cached.state = std::make_shared<const
+                        Engine::Serialization::JsonValue>(component->Serialize());
+                    cached.revision = revision;
+                }
+                state.components.push_back({component->GetTypeName(), revision,
+                    cached.state});
+            }
+        snapshot->objects.push_back(std::move(state));
+    }
+    std::shared_ptr<const SceneSnapshot> immutable = std::move(snapshot);
+    std::atomic_store_explicit(&m_publishedSceneSnapshot,
+        std::move(immutable), std::memory_order_release);
+    m_lastSnapshotPublishMs = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - publishBegin).count();
 }
 
 }

@@ -95,6 +95,7 @@ public:
 
     // Get the scene this object belongs to
     Engine::Scene::Scene* GetScene() const { return OwnerScene; }
+    void AssertSceneOwner() const;
     void NotifyStructureChanged();
 
     // Hierarchy lookup helpers
@@ -110,6 +111,7 @@ public:
     template<typename T, typename... Args>
     T* AddComponent(Args&&... args)
     {
+        AssertSceneOwner();
         T* component = new T(std::forward<Args>(args)...);
         component->Owner = this;
         Components.push_back(component);

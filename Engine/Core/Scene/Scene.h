@@ -13,7 +13,9 @@
 #include "Core/Model/SceneSettings.h"
 #include "Core/Model/MeshData.h"
 #include "Core/Model/LightingData.h"
+#include "Core/Model/UIData.h"
 #include "Core/Time/SimulationClock.h"
+#include "Core/Threading/JobScheduler.h"
 #include "Core/Rendering/GrassPerformance.h"
 #include "Core/Rendering/RenderPerformance.h"
 #include "Core/Rendering/RenderSpatialIndex.h"
@@ -21,9 +23,13 @@
 #include "Core/Physics/Physics.h"
 #include <glm/glm.hpp>
 #include <array>
+#include <atomic>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <thread>
+#include <stdexcept>
 #include <unordered_map>
 #include <any>
 #include <typeindex>
@@ -52,6 +58,7 @@ namespace Engine::Graphics
 {
     class IGraphicsProvider;
     class IGraphicsContext;
+    class GraphicsCommandPacket;
     class IGraphicsTexture;
 }
 
@@ -86,7 +93,32 @@ public:
     using IGraphicsBuffer = Engine::Graphics::IGraphicsBuffer;
 
     using ObjectPath = std::vector<std::size_t>;
+    using ObjectId = uint64_t;
     enum class ObjectPlacement { Before, AsChild, After };
+
+    // Value-only view of the committed scene. A reader may retain a snapshot
+    // after objects are removed; it must never dereference live scene state.
+    struct SceneSnapshot
+    {
+        struct ComponentInfo
+        {
+            std::string type;
+            uint64_t configurationRevision = 0;
+            std::shared_ptr<const Engine::Serialization::JsonValue> authoredState;
+        };
+        struct ObjectInfo
+        {
+            ObjectId id = 0, parentId = 0;
+            std::string name;
+            bool enabled = true;
+            glm::dvec3 position { 0.0 };
+            glm::vec3 rotation { 0.f }, scale { 1.f };
+            std::vector<ComponentInfo> components;
+        };
+        uint64_t generation = 0, structureRevision = 0;
+        std::vector<ObjectInfo> objects;
+    };
+    struct NativeRenderPacket;
 
     // Every subsystem asks for spatial coordinates through this contract.
     // Physics bodies still store their stable Euclidean simulation chart;
@@ -223,8 +255,8 @@ public:
     // Advances exactly one configured fixed frame. Offline exporters use this
     // instead of supplying or sampling wall-clock deltas.
     void UpdateFixedFrame();
-    void SetFixedTimeStep(double seconds) { m_clock.SetFixedStep(seconds); }
-    void UseVariableTimeStep() { m_clock.UseVariableStep(); }
+    void SetFixedTimeStep(double seconds) { AssertOwnerThread(); m_clock.SetFixedStep(seconds); }
+    void UseVariableTimeStep() { AssertOwnerThread(); m_clock.UseVariableStep(); }
     float GetDeltaTime() const { return m_deltaTime; }
     // CPU particle storage is capped across all emitters. Existing particles
     // keep their slots in scene object order; new spawns are dropped at budget.
@@ -239,7 +271,7 @@ public:
     // Manual render loops can advance the shared streaming/upload frame
     // budget without running the scene's component and physics updates.
     void AdvanceManualFrame(float deltaTime)
-    { m_deltaTime = m_clock.Advance(deltaTime); }
+    { AssertOwnerThread(); m_deltaTime = m_clock.Advance(deltaTime); }
     const Engine::Time::SimulationClock& GetClock() const { return m_clock; }
     Engine::Physics::Physics& GetPhysics() { return *m_physics; }
     const Engine::Physics::Physics& GetPhysics() const { return *m_physics; }
@@ -263,12 +295,46 @@ public:
     // multiple views can then reuse the resulting object, light, material,
     // and skin data.
     void PrepareRenderFrame();
+    std::shared_ptr<const NativeRenderPacket> TakeNativeRenderPacket();
+    void RetainNativePacketMeshBuffers(const NativeRenderPacket& packet,
+        Engine::Graphics::GraphicsCommandPacket& commands) const;
+    // Native UI layout writes computed component rectangles on the scene owner.
+    // The render worker reads this prepared layout until the frame completes.
+    void PrepareNativeUiLayout(float viewportAspect);
+    const std::vector<Engine::Model::UITextLayout>& GetPreparedNativeUiLayout() const
+    { return m_preparedNativeUiLayout; }
+    bool IsRecordingNativeCommands() const { return m_recordingNativeCommands; }
     // Record queued GPU particle steps before a Vulkan render pass begins.
     void RecordGpuParticleSimulation(IGraphicsContext* context);
+    struct RetiredGraphicsResources
+    {
+        std::vector<std::unique_ptr<IGraphicsBuffer>> buffers;
+        std::vector<std::shared_ptr<IGraphicsBuffer>> sharedBuffers;
+        std::vector<std::unique_ptr<IPipelineState>> pipelines;
+        std::vector<std::shared_ptr<Engine::Graphics::IGraphicsTexture>> textures;
+        bool Empty() const
+        { return buffers.empty() && sharedBuffers.empty() && pipelines.empty() && textures.empty(); }
+    };
+    // Called by the render owner after EndFrame while the simulation handoff
+    // is blocked. The caller keeps these resources until the GPU frame fence.
+    RetiredGraphicsResources TakeRetiredGraphicsResources();
+    // Mesh components can replace buffers while their object remains live.
+    // Native frame handoff serializes these calls with TakeRetiredGraphicsResources.
+    void RetireGraphicsBuffer(std::unique_ptr<IGraphicsBuffer> buffer);
+    void RetireGraphicsBuffer(std::shared_ptr<IGraphicsBuffer> buffer);
+    void SetDeferredGraphicsRetirement(bool enabled)
+    { AssertOwnerThread(); m_deferGraphicsRetirement = enabled; }
+    bool IsDeferredGraphicsRetirementEnabled() const
+    { AssertOwnerThread(); return m_deferGraphicsRetirement; }
+    void SetBeforeGpuResourceDestruction(std::function<void()> waitForGpu)
+    { AssertOwnerThread(); m_beforeGpuResourceDestruction = std::move(waitForGpu); }
+    void WaitForGpuResourceDestruction()
+    { AssertOwnerThread(); if (m_beforeGpuResourceDestruction) m_beforeGpuResourceDestruction(); }
     void Render(IGraphicsContext* context, float aspect,
         Camera* cameraOverride = nullptr, bool includeEditorVisuals = true,
           uint32_t viewportWidth = 0u, uint32_t viewportHeight = 0u,
-          bool shadowOnly = false);
+          bool shadowOnly = false,
+          const NativeRenderPacket* nativePacket = nullptr);
     // Bytes of object records made visible to the GPU by the most recent
     // Render call. This excludes vertex, light, and bone buffers.
     uint64_t GetLastObjectDataUploadBytes() const
@@ -279,6 +345,8 @@ public:
     {
         return m_lastOcclusionCulledCount;
     }
+    void SetLastNativeOcclusionCulledCount(uint32_t count)
+    { AssertOwnerThread(); m_lastOcclusionCulledCount = count; }
     uint32_t GetLastTerrainOcclusionCulledCount() const
     {
         return m_lastTerrainOcclusionCulledCount;
@@ -450,6 +518,26 @@ public:
     void StopEditorCameraFollow();
 
     // Object management
+    // Legacy editor and script callbacks run on the scene owner. Their direct
+    // public-field edits form a serial compatibility path and are published
+    // at the next update or render-preparation commit. Workers use the queue.
+    void AssertOwnerThread() const
+    {
+        if (std::this_thread::get_id() != m_ownerThread)
+            throw std::logic_error("Live scene mutation requires the scene owner thread");
+    }
+    bool IsOwnerThread() const
+    { return std::this_thread::get_id() == m_ownerThread; }
+    void FenceBackgroundWork();
+    // Call only while the current owner is idle and no scene readers are active.
+    // The standalone game uses this once at worker startup and once at shutdown.
+    void TransferOwnerTo(std::thread::id nextOwner)
+    {
+        AssertOwnerThread();
+        if (nextOwner == std::thread::id{})
+            throw std::logic_error("Scene owner thread cannot be empty");
+        m_ownerThread = nextOwner;
+    }
     Object* AddObject();                     // create an empty Object owned by this scene
     Object* AddObject(const std::string& name);
     // Includes objects queued for an end-of-frame runtime spawn.
@@ -462,18 +550,74 @@ public:
     void    RemoveObject(Object* obj);
     // Edit previews queue removals while traversing objects, just like scripts.
     // Call only after that traversal; runtime Update commits automatically.
-    void CommitPendingObjectChanges()
+    void CommitPendingObjectChanges();
+    // A worker must carry the generation captured when its scene work was
+    // scheduled. The owner fences tracked jobs before replacing or destroying
+    // objects, so no callback from a reloadable module survives that boundary.
+    using SceneGeneration = uint64_t;
+    SceneGeneration CaptureSceneGeneration() const
+    { return m_sceneGeneration.load(std::memory_order_acquire); }
+    Engine::Threading::JobScheduler::Handle ScheduleSceneJob(
+        std::function<void(SceneGeneration)> work);
+    void FenceSceneGeneration();
+    std::shared_ptr<const SceneSnapshot> GetPublishedSceneSnapshot() const
+    { return std::atomic_load_explicit(&m_publishedSceneSnapshot, std::memory_order_acquire); }
+    double GetLastSceneSnapshotPublishMs() const { return m_lastSnapshotPublishMs; }
+    // Workers pass the generation captured when their job was scheduled.
+    // Commands execute in FIFO order on the owner at the next commit boundary;
+    // commands from an earlier Play, scene, or module generation are dropped.
+    ObjectId QueueAddObject(SceneGeneration generation, std::string name);
+    ObjectId QueueAddObject(std::string name)
+    { AssertOwnerThread(); return QueueAddObject(CaptureSceneGeneration(), std::move(name)); }
+    void QueueRemoveObject(SceneGeneration generation, ObjectId id);
+    void QueueRemoveObject(ObjectId id)
+    { AssertOwnerThread(); QueueRemoveObject(CaptureSceneGeneration(), id); }
+    void QueueMoveObject(SceneGeneration generation, ObjectId id,
+        ObjectId target, ObjectPlacement placement);
+    void QueueMoveObject(ObjectId id, ObjectId target, ObjectPlacement placement)
+    { AssertOwnerThread(); QueueMoveObject(CaptureSceneGeneration(), id, target, placement); }
+    // Field writes may change name, enabled state, or local transform. Use
+    // QueueMoveObject for hierarchy edits and QueueAddComponent for structure.
+    void QueueObjectFieldWrite(SceneGeneration generation, ObjectId id,
+        std::function<void(Object&)> write);
+    void QueueObjectFieldWrite(ObjectId id, std::function<void(Object&)> write)
+    { AssertOwnerThread(); QueueObjectFieldWrite(CaptureSceneGeneration(), id, std::move(write)); }
+    template<typename T> void QueueAddComponent(SceneGeneration generation, ObjectId id)
     {
-        if (m_isUpdating) return;
-        FlushPendingObjectAdditions();
-        FlushPendingObjectRemovals();
-        m_componentRegistry.ReleaseSnapshots();
+        QueueSceneMutation(generation, [id](Scene& scene)
+        {
+            if (auto* object = scene.FindObjectById(id))
+                object->AddComponent<T>();
+        });
     }
+    template<typename T> void QueueAddComponent(ObjectId id)
+    { AssertOwnerThread(); QueueAddComponent<T>(CaptureSceneGeneration(), id); }
+    template<typename T> void QueueComponentWrite(SceneGeneration generation,
+        ObjectId id, std::function<void(T&)> write)
+    {
+        QueueSceneMutation(generation, [id, write = std::move(write)](Scene& scene)
+        {
+            if (auto* object = scene.FindObjectById(id))
+                if (auto* component = object->GetComponent<T>())
+                {
+                    write(*component);
+                    component->MarkConfigurationDirty();
+                }
+        });
+    }
+    template<typename T> void QueueComponentWrite(ObjectId id, std::function<void(T&)> write)
+    { AssertOwnerThread(); QueueComponentWrite<T>(CaptureSceneGeneration(), id, std::move(write)); }
+    // Live object lookup is scene-owner only. Workers use IDs in the snapshot.
+    ObjectId GetObjectId(const Object* object) const;
+    Object* FindObjectById(ObjectId id) const;
     void    ClearObjects();                  // remove all objects and reset selection
     const std::vector<std::unique_ptr<Object>>& GetObjects() const { return m_objects; }
     bool TryGetObjectPath(const Object* object, ObjectPath& path) const;
     Object* FindObjectByPath(const ObjectPath& path) const;
     bool MoveObject(Object* object, Object* target, ObjectPlacement placement);
+    // Serial owner path for runtime hierarchy edits that preserve local TRS.
+    // The result is published at the next update/render-preparation boundary.
+    bool SetParentLocal(Object* object, Object* parent);
     // Invalidates caches that retain object or component pointers. Object and
     // component creation call this automatically; hierarchy editors should
     // use MoveObject so cached animation bindings stay coherent.
@@ -486,6 +630,7 @@ public:
     bool IsCommittedObject(Object* owner) const { return m_componentRegistry.Contains(owner); }
     void NotifyStructureChanged(Object* owner=nullptr,bool removed=false)
     {
+        AssertOwnerThread();
         if (++m_structureRevision == 0) ++m_structureRevision;
         if(!owner) { m_componentRegistry.Reconcile(m_objects); m_frameLookupFull=true; m_updateRegistryFull=true; }
         else
@@ -496,6 +641,8 @@ public:
     }
     void NotifyComponentRemoved(Engine::Core::Component* component)
     {
+        AssertOwnerThread();
+        m_componentSnapshotCache.erase(component);
         m_componentRegistry.Remove(component);
         if(++m_structureRevision==0) ++m_structureRevision;
         if(component && component->Owner)
@@ -684,10 +831,12 @@ private:
     void* m_lightDataMapped = nullptr;
     std::unique_ptr<IGraphicsBuffer> m_boneDataBuffer;
     void* m_boneDataMapped = nullptr;
-    // Capacity growth can occur while prior DX12/Vulkan command buffers are
-    // still in flight. Retain replaced resources for the scene lifetime so a
-    // resize never destroys storage referenced by queued GPU work.
+    // Capacity growth can occur while prior command buffers are still in
+    // flight. Game rendering moves these into fence-tagged retirement batches.
     std::vector<std::unique_ptr<IGraphicsBuffer>> m_retiredRenderBuffers;
+    std::vector<std::shared_ptr<IGraphicsBuffer>> m_retiredSharedRenderBuffers;
+    bool m_deferGraphicsRetirement = false;
+    std::function<void()> m_beforeGpuResourceDestruction;
     std::unique_ptr<IGraphicsBuffer> m_emptyMorphDeltaBuffer;
     std::unique_ptr<IGraphicsBuffer> m_emptyMorphWeightBuffer;
     std::shared_ptr<Engine::Graphics::IGraphicsTexture> m_brdfIntegrationLut;
@@ -701,7 +850,27 @@ private:
     std::vector<uint32_t> m_clusterLightIndexScratch;
     std::unique_ptr<IGraphicsBuffer> m_portalApertureBuffer;
     void* m_portalApertureMapped = nullptr;
+    struct NativeFrameBuffers
+    {
+        std::unique_ptr<IGraphicsBuffer> grid, skybox, lights, bones;
+        std::unique_ptr<IGraphicsBuffer> clusterHeaders, clusterIndices;
+        std::unique_ptr<IGraphicsBuffer> portalAperture;
+        void* gridMapped = nullptr;
+        void* skyboxMapped = nullptr;
+        void* lightsMapped = nullptr;
+        void* bonesMapped = nullptr;
+        void* clusterHeadersMapped = nullptr;
+        void* clusterIndicesMapped = nullptr;
+        void* portalApertureMapped = nullptr;
+        uint32_t boneCapacity = 0;
+        uint32_t clusterHeaderCapacity = 0;
+        uint32_t clusterIndexCapacity = 0;
+    };
+    std::vector<std::unique_ptr<NativeFrameBuffers>> m_nativeFrameBuffers;
+    NativeFrameBuffers* m_activeNativeFrameBuffers = nullptr;
+    void SelectNativeFrameBuffers();
     std::unique_ptr<Engine::Renderers::UIRenderer> m_uiRenderer;
+    std::vector<Engine::Model::UITextLayout> m_preparedNativeUiLayout;
     std::unique_ptr<Engine::Physics::Physics> m_physics;
     std::unique_ptr<Engine::Audio::Audio> m_audio;
 
@@ -781,6 +950,10 @@ private:
     std::vector<FrameComponentLookup> m_frameComponentLookupScratch;
     Engine::Rendering::RenderSpatialIndex m_renderSpatialIndex;
     Engine::Rendering::RenderBoundsCache m_worldBoundsCache;
+    // Spatial index positions follow persistent draw slots, not the compact
+    // frame draw order, which changes during LOD fades and visibility changes.
+    std::vector<Engine::Rendering::RenderBounds> m_spatialSlotBounds;
+    std::vector<uint8_t> m_spatialSlotSeen;
     Engine::Components::TransformHierarchy m_transformHierarchy;
     uint64_t m_transformPreparationRevision=UINT64_MAX;
     std::vector<Engine::Components::Transform*> m_transformPreparationScratch;
@@ -805,7 +978,7 @@ private:
     };
     std::vector<RenderPassBufferSlot> m_renderPassBufferSlots;
     RenderPassBuffers* m_activeRenderPassBuffers=nullptr;
-    void SelectRenderPassBuffers();
+    void SelectRenderPassBuffers(uint32_t frameItemCount);
     struct CachedRenderMaterial
     {
         std::vector<uint8_t> data;
@@ -867,11 +1040,42 @@ private:
     ShadowDebugSnapshot m_shadowDebugSnapshot;
     ShadowCpuTiming m_lastShadowCpuTiming{};
     bool m_renderFramePrepared = false;
+    bool m_nativeRenderPacketTaken = false;
+    bool m_recordingNativeCommands = false;
 
     // ---- Object list ----
     std::vector<std::unique_ptr<Object>> m_objects;
+    std::thread::id m_ownerThread = std::this_thread::get_id();
     std::vector<std::unique_ptr<Object>> m_pendingObjectAdditions;
     std::vector<Object*> m_pendingObjectRemovals;
+    std::atomic<ObjectId> m_nextObjectId { 1 };
+    std::unordered_map<const Object*, ObjectId> m_objectIds;
+    std::unordered_map<ObjectId, Object*> m_objectsById;
+    struct CachedComponentSnapshot
+    {
+        uint64_t revision = 0;
+        std::shared_ptr<const Engine::Serialization::JsonValue> state;
+    };
+    std::unordered_map<const Engine::Core::Component*, CachedComponentSnapshot>
+        m_componentSnapshotCache;
+    mutable std::mutex m_queuedSceneMutationsMutex;
+    struct QueuedSceneMutation
+    {
+        SceneGeneration generation;
+        std::function<void(Scene&)> apply;
+    };
+    std::vector<QueuedSceneMutation> m_queuedSceneMutations;
+    std::atomic<SceneGeneration> m_sceneGeneration{1};
+    std::vector<Engine::Threading::JobScheduler::Handle> m_sceneJobs;
+    std::shared_ptr<const SceneSnapshot> m_publishedSceneSnapshot;
+    bool m_suppressSceneSnapshotPublication = false;
+    uint64_t m_snapshotGeneration = 0;
+    double m_lastSnapshotPublishMs = 0;
+    bool m_isCommitting = false;
+    bool m_isFlushingRemovals = false;
+    bool QueueSceneMutation(SceneGeneration generation,
+        std::function<void(Scene&)> mutation);
+    void PublishSceneSnapshot();
     bool m_isUpdating = false;
     bool m_updateProfilingEnabled = false;
     UpdateTimings m_lastUpdateTimings{};
@@ -889,6 +1093,7 @@ private:
     std::vector<Object*> m_updateObjects, m_poseObjects;
     Engine::Components::SpatialUpdateScheduler m_spatialUpdates;
     void RefreshUpdateRegistry();
+    Object* AddObjectWithId(ObjectId id);
     void FlushPendingObjectAdditions();
     void FlushPendingObjectRemovals();
     void EnforceParticleBudget();

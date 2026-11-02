@@ -117,6 +117,14 @@ struct BulletPhysicsAdapter::Impl
     uint64_t bodyRegistryRevision=UINT64_MAX,colliderRegistryRevision=UINT64_MAX,activityRevision=UINT64_MAX;
     std::vector<Engine::Components::RigidBody*> activeBodies;
     std::vector<Engine::Components::MeshObjectCollider*> activeColliders;
+    std::vector<Engine::Components::Cloth*> preparedClothBodies;
+    std::vector<Engine::Components::IKBone*> preparedIkBones;
+    double preparedDeltaTime = 0.0;
+    double preparedBoundedDelta = 0.0;
+    std::chrono::steady_clock::time_point preparedBegin{};
+    std::chrono::steady_clock::time_point preparedAfterSetup{};
+    std::chrono::steady_clock::time_point preparedAfterSimulation{};
+    bool stepPrepared = false;
     BulletPhysicsAdapter::StepTimings lastStepTimings{};
     struct PortalMeshCollider
     {
@@ -779,7 +787,25 @@ PhysicsWorldState::PhysicsWorldState()
 
 void BulletPhysicsAdapter::Step(double deltaTime)
 {
+    try
+    {
+        PrepareStep(deltaTime);
+        SimulatePreparedStep();
+        FinishPreparedStep();
+    }
+    catch (...)
+    {
+        AbortPreparedStep();
+        throw;
+    }
+}
+
+void BulletPhysicsAdapter::PrepareStep(double deltaTime)
+{
     using StepClock = std::chrono::steady_clock;
+    if (m_impl->stepPrepared)
+        throw std::logic_error("A physics step is already prepared");
+    m_impl->preparedDeltaTime = deltaTime;
     if (m_impl->profilingEnabled)
         m_impl->lastStepTimings = {};
     const auto stepBegin = m_impl->profilingEnabled
@@ -802,7 +828,8 @@ void BulletPhysicsAdapter::Step(double deltaTime)
     }
     const auto& meshColliders=m_impl->activeColliders;
     for(auto* collider:meshColliders) collider->BeginContactFrame();
-    std::vector<Engine::Components::IKBone*> ikBones=scene.GetComponents<Engine::Components::IKBone>();
+    auto& ikBones=m_impl->preparedIkBones;
+    ikBones=scene.GetComponents<Engine::Components::IKBone>();
     for(auto* bone:ikBones) if(bone->UsesMeshColliderPoseOnly() && bone->IsSimulating()) bone->SyncBoneFromBody();
     const auto& bodies=m_impl->activeBodies;
     for(auto* body:bodies)
@@ -810,7 +837,8 @@ void BulletPhysicsAdapter::Step(double deltaTime)
         EnsureRigidBodyState(*body); body->m_isColliding=false; body->m_isGrounded=false; body->BeginOverlapFrame();
         if(body->EnsureBody() && (!Engine::Physics::IsDynamic(*body) || body->m_editorTransformChanged)) body->SyncBodyFromTransform();
     }
-    std::vector<Engine::Components::Cloth*> clothBodies=scene.GetComponents<Engine::Components::Cloth>();
+    auto& clothBodies=m_impl->preparedClothBodies;
+    clothBodies=scene.GetComponents<Engine::Components::Cloth>();
     for(auto* cloth:clothBodies)
     {
         EnsureClothState(*cloth);
@@ -1008,6 +1036,9 @@ void BulletPhysicsAdapter::Step(double deltaTime)
     m_impl->lastSubstepCount = 0u;
     const auto afterSetup = m_impl->profilingEnabled
         ? StepClock::now() : StepClock::time_point{};
+    m_impl->preparedBegin = stepBegin;
+    m_impl->preparedAfterSetup = afterSetup;
+    m_impl->stepPrepared = true;
     if (bodies.empty() && clothBodies.empty() && ikBones.empty())
     {
         m_impl->accumulatorSeconds = 0.0;
@@ -1015,6 +1046,18 @@ void BulletPhysicsAdapter::Step(double deltaTime)
         m_impl->lastStepTimings = {};
         return;
     }
+}
+
+void BulletPhysicsAdapter::SimulatePreparedStep()
+{
+    if (!m_impl->stepPrepared)
+        throw std::logic_error("A physics step was not prepared");
+    if (m_impl->activeBodies.empty() && m_impl->preparedClothBodies.empty() &&
+        m_impl->preparedIkBones.empty()) return;
+    using StepClock = std::chrono::steady_clock;
+    const double deltaTime = m_impl->preparedDeltaTime;
+    const auto& bodies = m_impl->activeBodies;
+    const auto& ikBones = m_impl->preparedIkBones;
 
     Engine::Physics::PhysicsWorldState& physics = *m_impl->state;
     physics.world->getSolverInfo().m_numIterations =
@@ -1024,6 +1067,7 @@ void BulletPhysicsAdapter::Step(double deltaTime)
     const double maximumFrameDelta =
         m_impl->fixedStepSeconds * m_impl->maximumSubsteps;
     const double boundedDelta = std::min(inputDelta, maximumFrameDelta);
+    m_impl->preparedBoundedDelta = boundedDelta;
     const double maximumPending = 2.0 * maximumFrameDelta;
     const double pending = m_impl->accumulatorSeconds + boundedDelta;
     m_impl->lastDroppedSeconds = inputDelta - boundedDelta +
@@ -1172,6 +1216,26 @@ void BulletPhysicsAdapter::Step(double deltaTime)
     }
     const auto afterSimulation = m_impl->profilingEnabled
         ? StepClock::now() : StepClock::time_point{};
+    m_impl->preparedAfterSimulation = afterSimulation;
+}
+
+void BulletPhysicsAdapter::FinishPreparedStep()
+{
+    if (!m_impl->stepPrepared)
+        throw std::logic_error("A physics step was not prepared");
+    m_impl->stepPrepared = false;
+    if (m_impl->activeBodies.empty() && m_impl->preparedClothBodies.empty() &&
+        m_impl->preparedIkBones.empty()) return;
+    using StepClock = std::chrono::steady_clock;
+    const auto& bodies = m_impl->activeBodies;
+    auto& ikBones = m_impl->preparedIkBones;
+    const auto& clothBodies = m_impl->preparedClothBodies;
+    const auto& meshColliders = m_impl->activeColliders;
+    Engine::Scene::Scene& scene = *m_impl->scene;
+    const double boundedDelta = m_impl->preparedBoundedDelta;
+    const auto stepBegin = m_impl->preparedBegin;
+    const auto afterSetup = m_impl->preparedAfterSetup;
+    const auto afterSimulation = m_impl->preparedAfterSimulation;
 
     for (Engine::Components::RigidBody* body : bodies)
     {
@@ -1222,8 +1286,16 @@ void BulletPhysicsAdapter::Step(double deltaTime)
     }
 }
 
+void BulletPhysicsAdapter::AbortPreparedStep()
+{
+    m_impl->stepPrepared = false;
+    m_impl->preparedClothBodies.clear();
+    m_impl->preparedIkBones.clear();
+}
+
 void BulletPhysicsAdapter::Reset()
 {
+    AbortPreparedStep();
     m_impl->bodyRegistryRevision=UINT64_MAX; m_impl->activityRevision=UINT64_MAX;
     m_impl->activeBodies.clear(); m_impl->activeColliders.clear();
     ClearPmxJoints();

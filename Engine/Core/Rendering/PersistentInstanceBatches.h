@@ -31,6 +31,7 @@ public:
     };
 private:
     struct Slot { uint64_t serial=UINT64_MAX; std::map<Key,Batch> batches;
+        std::vector<std::unique_ptr<Graphics::IGraphicsBuffer>> retired;
         Slot()=default; Slot(const Slot&)=delete; Slot& operator=(const Slot&)=delete;
         Slot(Slot&&) noexcept=default; Slot& operator=(Slot&&) noexcept=default; };
     std::vector<Slot> m_slots;
@@ -45,6 +46,8 @@ public:
         if(slot.serial!=serial)
         {
             slot.serial=serial;
+            // The context factory has waited this slot's GPU fence.
+            slot.retired.clear();
             for(auto it=slot.batches.begin();it!=slot.batches.end();)
                 if(serial>it->second.serial && serial-it->second.serial>240) it=slot.batches.erase(it); else ++it;
         }
@@ -65,7 +68,10 @@ public:
         {
             const size_t capacity=std::max<size_t>(sizeof(InstanceTileRecord),bytes);
             if(!batch.input || batch.input->GetSize()<capacity)
-            { batch.input=factory->CreateBuffer(Graphics::IGraphicsBuffer::Usage::ShaderResource,Graphics::IGraphicsBuffer::AccessMode::Upload,capacity,tiles.data(),48); ++batch.allocations; }
+            {
+                if (batch.input) slot.retired.push_back(std::move(batch.input));
+                batch.input=factory->CreateBuffer(Graphics::IGraphicsBuffer::Usage::ShaderResource,Graphics::IGraphicsBuffer::AccessMode::Upload,capacity,tiles.data(),48); ++batch.allocations;
+            }
             else if(auto* mapped=batch.input->Map())
             { std::memcpy(mapped,tiles.data(),bytes); batch.input->FlushMappedWrites(0,bytes); }
             batch.metadataUploadBytes=bytes; uploadBytes+=bytes;
@@ -74,6 +80,7 @@ public:
         if(!batch.output || batch.gpu!=gpu || batch.output->GetSize()<outputBytes)
         {
             size_t capacity=48*64; while(capacity<outputBytes) capacity*=2;
+            if (batch.output) slot.retired.push_back(std::move(batch.output));
             batch.output=factory->CreateBuffer(gpu ? Graphics::IGraphicsBuffer::Usage::StorageBuffer:Graphics::IGraphicsBuffer::Usage::ShaderResource,
                 gpu ? Graphics::IGraphicsBuffer::AccessMode::Default:Graphics::IGraphicsBuffer::AccessMode::Upload,capacity,nullptr,48);
             ++batch.allocations; batch.metadataChanged=true;

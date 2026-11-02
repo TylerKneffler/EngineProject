@@ -14,6 +14,19 @@ def summary(values):
             "p99": values[math.ceil(.99 * len(values)) - 1], "max": values[-1]}
 
 
+MATCHED_ROUTE_FIELDS = ("renderer", "benchmark_scope", "route", "route_version",
+                        "view_width", "view_height", "shadow_cascades",
+                        "shadow_atlas_resolution")
+
+
+def capture_identity(frames):
+    identity = {}
+    for key in MATCHED_ROUTE_FIELDS:
+        values = {frame.get(key) for frame in frames}
+        identity[key] = next(iter(values)) if len(values) == 1 else None
+    return identity
+
+
 def evaluate(rows, path="", all_frames=False):
     frames = [r for r in rows if r.get("type") == "frame_details" or
               (r.get("type") is None and r.get("schema_version", 0) >= 1 and "frame_ms" in r and "playing" in r)]
@@ -40,7 +53,7 @@ def evaluate(rows, path="", all_frames=False):
         if row.get("gpu_valid"):
             gpu[row.get("gpu_sample_id", f"row:{index}")] = row
     gpu_stages = {key: summary([r[key] for r in gpu.values() if key in r])
-                  for key in ("gpu_shadow_ms", "gpu_terrain_ms", "gpu_portal_ms", "gpu_opaque_ms", "gpu_transparent_ms")}
+                  for key in ("gpu_shadow_ms", "gpu_terrain_ms", "gpu_grass_ms", "gpu_portal_ms", "gpu_opaque_ms", "gpu_transparent_ms")}
     gpu_total = summary([sum(r.get(key, 0) for key in gpu_stages) for r in gpu.values()])
     hardware = [r for r in rows if r.get("type") == "sample"]
     if not all_frames and any("measured" in r for r in hardware):
@@ -65,6 +78,18 @@ def evaluate(rows, path="", all_frames=False):
                   "render_upload_ms", "render_submission_ms", "render_retained_ui_ms", "render_portal_ms", "render_other_ms")
     measured = sum(metrics[key]["mean"] for key in phase_keys if metrics.get(key))
     main = metrics.get("render_cpu_total_ms") or metrics.get("main_submit_ms")
+    render_balance = None
+    render_cpu = metrics.get("render_cpu_total_ms")
+    if gpu_total and render_cpu and render_cpu["mean"] > 0:
+        ratio = gpu_total["mean"] / render_cpu["mean"]
+        dominant = max(((key, value["mean"]) for key, value in gpu_stages.items() if value),
+                       key=lambda item: item[1], default=None)
+        render_balance = {"gpu_to_cpu_ratio": ratio,
+                          "classification": "GPU-heavy" if ratio >= 2 else
+                                            "CPU-render-heavy" if ratio <= .5 else "mixed",
+                          "largest_gpu_stage": dominant[0] if dominant else None,
+                          "largest_gpu_stage_share_percent":
+                              100 * dominant[1] / gpu_total["mean"] if dominant and gpu_total["mean"] else None}
     warnings = ["CPU wall time and asynchronously resolved GPU stages overlap; never add them.",
                 "Automatic instance and triangle counts are candidates before GPU culling and LOD selection.",
                 "Worker execution and record packing overlap main-thread phases; do not add them to frame time."]
@@ -112,11 +137,14 @@ def evaluate(rows, path="", all_frames=False):
                                              for r in hardware), default=0))
     if recording_loss:
         warnings.append(f"Recording writer dropped or failed {recording_loss} records; frame statistics may omit stalls.")
-    return {"capture": str(path), "frames": len(frames), "start_utc": frames[0].get("time_utc"),
+    return {"capture": str(path), "frames": len(frames),
+            "capture_identity": capture_identity(frames),
+            "start_utc": frames[0].get("time_utc"),
             "end_utc": frames[-1].get("time_utc"), "effective_fps": 1000 / interval["mean"],
             "interval_ms": interval, "over_60fps_budget_percent": 100 * sum(v > 1000 / 60 for v in intervals) / len(intervals),
             "metrics": metrics, "unique_gpu_samples": len(gpu), "gpu_stages_ms": gpu_stages,
             "gpu_total_ms": gpu_total, "gpu_shadow_share_percent": shadow_share,
+            "render_work_balance": render_balance,
             "main_pass_unexplained_ms": max(0, main["mean"] - measured) if main else None,
             "grass_tiles_prepared": sum(r.get("grass_tiles_built", 0) for r in frames),
             "grass_placements_indexed": sum(r.get("grass_placements_scanned", 0) for r in frames),
@@ -184,6 +212,13 @@ def markdown(result, comparison=None):
                   f"{result['gpu_total_ms']['mean']:.2f} ms on average."]
         if result["gpu_shadow_share_percent"] is not None:
             lines.append(f"Shadows account for {result['gpu_shadow_share_percent']:.1f}% of measured GPU time.")
+    if balance := result.get("render_work_balance"):
+        lines += ["", f"Render work balance: **{balance['classification']}**; measured GPU stages total "
+                  f"{balance['gpu_to_cpu_ratio']:.1f} times the CPU render wall time on average."]
+        if balance["largest_gpu_stage"]:
+            lines.append(f"Largest GPU stage: {balance['largest_gpu_stage']} "
+                         f"({balance['largest_gpu_stage_share_percent']:.1f}% of measured GPU stage time).")
+        lines.append("GPU stages resolve asynchronously; this comparison describes measured work, not device utilization or an exact frame critical path.")
     storage = {key: value for key, value in result["metrics"].items()
                if key.startswith(("instance_", "shadow_instance_")) and value}
     if storage:
@@ -197,10 +232,24 @@ def markdown(result, comparison=None):
     if comparison:
         change = (1 - result["interval_ms"]["mean"] / comparison["interval_ms"]["mean"]) * 100
         lines += ["", f"Comparison: {comparison['effective_fps']:.2f} to {result['effective_fps']:.2f} FPS; "
-                  f"average frame interval decreased {change:.1f}%. View size, scene, and motion may differ."]
-        if result.get("view_pixels") and comparison.get("view_pixels"):
-            pixel_change=(result["view_pixels"]["mean"]/comparison["view_pixels"]["mean"]-1)*100
-            lines += [f"Rendered pixel count changed {pixel_change:+.1f}%; this is not a controlled benchmark comparison."]
+                  f"average frame interval decreased {change:.1f}%."]
+        current_identity = result.get("capture_identity", {})
+        previous_identity = comparison.get("capture_identity", {})
+        missing = [key for key in MATCHED_ROUTE_FIELDS
+                   if current_identity.get(key) is None or previous_identity.get(key) is None]
+        mismatched = [key for key in MATCHED_ROUTE_FIELDS
+                      if key not in missing and current_identity[key] != previous_identity[key]]
+        if missing or mismatched:
+            lines.append("Capture conditions are not verified as matched: " +
+                         ", ".join(mismatched + missing) + ". GPU stage deltas are omitted.")
+        else:
+            lines += ["Matched renderer, route, view size, and shadow settings. Motion and hardware load still require review.",
+                      "", "| GPU stage | Baseline ms | Current ms | Change |", "|---|---:|---:|---:|"]
+            for key, current in result["gpu_stages_ms"].items():
+                previous = comparison["gpu_stages_ms"].get(key)
+                if current and previous:
+                    lines.append(f"| {key} | {previous['mean']:.3f} | {current['mean']:.3f} | "
+                                 f"{current['mean'] - previous['mean']:+.3f} ms |")
     lines += ["", "## Interpretation", ""]
     if result["gpu_shadow_share_percent"] and result["gpu_shadow_share_percent"] > 50:
         lines.append("- GPU shadows dominate measured GPU work; evaluate cascade resolution/count, shadow distance, and grass caster distance.")

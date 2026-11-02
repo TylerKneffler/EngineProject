@@ -47,6 +47,9 @@ public:
 
     void Start() override {}
     void Update() override {}
+    // Existing and reloadable scripts stay on the simulation owner unless a
+    // derived script explicitly declares worker safety and access.
+    CallbackPolicy GetCallbackPolicy() const override { return {}; }
     void Enabled() override {}
     void Disabled() override {}
     void OnDestroy() override {}

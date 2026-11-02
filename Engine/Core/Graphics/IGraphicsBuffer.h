@@ -10,7 +10,7 @@ namespace Engine::Graphics
 // 
 // Abstracts ID3D12Resource and Vulkan VkBuffer
 // ---------------------------------------------------------------------------
-class IGraphicsBuffer
+class IGraphicsBuffer : public std::enable_shared_from_this<IGraphicsBuffer>
 {
 public:
     virtual ~IGraphicsBuffer() = default;

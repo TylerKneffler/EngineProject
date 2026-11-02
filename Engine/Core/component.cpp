@@ -18,6 +18,13 @@
 #include <Windows.h>
 #include <commdlg.h>
 
+void Engine::Core::Component::MarkConfigurationDirty()
+{
+    if (Owner) Owner->AssertSceneOwner();
+    if (++m_configurationRevision == 0)
+        ++m_configurationRevision;
+}
+
 #ifndef ENGINE_ASSETS_PATH
 #define ENGINE_ASSETS_PATH "Engine/Core/Assets/"
 #endif

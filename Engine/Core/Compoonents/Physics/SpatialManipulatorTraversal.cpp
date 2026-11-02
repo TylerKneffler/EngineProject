@@ -505,9 +505,7 @@ void SpatialManipulator::MaterializeTraversalMeshSplits(
         // the authored original (and all of its behavioral ownership) rather
         // than duplicating scripts or persisting half of an animation rig.
         remoteObject->runtimeOnly = true;
-        remoteObject->Parent = localBody->Owner->Parent;
-        if (remoteObject->Parent)
-            remoteObject->Parent->Children.push_back(remoteObject);
+        scene.SetParentLocal(remoteObject, localBody->Owner->Parent);
         remoteObject->transform.position = localBody->Owner->transform.position;
         remoteObject->transform.rotation = localBody->Owner->transform.rotation;
         remoteObject->transform.scale = localBody->Owner->transform.scale;

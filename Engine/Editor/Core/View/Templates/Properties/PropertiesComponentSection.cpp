@@ -77,6 +77,7 @@ bool PropertiesView::AddRegisteredComponent(const std::string& typeName, std::st
                 return false;
             }
         }
+        m_selectedObject->AssertSceneOwner();
         component->Owner = m_selectedObject;
         component->OnAfterDeserialize(m_scene ? m_scene->GetGraphicsProvider() : nullptr);
         m_selectedObject->Components.push_back(component.release());

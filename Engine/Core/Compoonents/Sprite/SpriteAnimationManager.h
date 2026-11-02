@@ -29,6 +29,11 @@ public:
     bool LoadFromFile(const std::string& path);
     void Start() override;
     void Update() override;
+    CallbackPolicy GetCallbackPolicy() const override
+    { return { UpdateThreadAffinity::Worker, UpdateParallelSafety::DeclaredAccess }; }
+    std::optional<UpdateAccess> GetUpdateAccess() const override
+    { return UpdateAccess{{"scene.deltaTime"}, {}, {}}; }
+    void PublishUpdateOnOwner() override;
     void Deserialize(const JsonValue& value) override;
     void OnAfterDeserialize(IGraphicsProvider* graphicsProvider) override;
     bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
@@ -48,5 +53,6 @@ private:
     std::string m_loadedAnimationPath;
     std::string m_loadedImagePath;
     float m_frameElapsed = 0.f;
+    bool m_pendingSelection = false;
 };
 }

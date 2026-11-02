@@ -1,5 +1,15 @@
 #include "Core/Scene/Scene.h"
+#include "Core/SceneManager.h"
+#include "Core/Input/NativeInputSnapshot.h"
+#include "Core/Graphics/GraphicsCommandPacket.h"
+#include "Core/Compoonents/UI/Canvas.h"
+#include "Core/Compoonents/UI/UIButton.h"
+#include "Core/Compoonents/UI/UIObject.h"
+#include "Core/Compoonents/UI/UIText.h"
 #include "Core/Rendering/RenderJobs.h"
+#include "Core/Threading/ComponentUpdateScheduler.h"
+#include "Core/Script.h"
+#include "Core/Compoonents/Sprite/SpriteAnimationManager.h"
 #include "Core/IO/DirectorySnapshotCache.h"
 #include "Core/Compoonents/Physics/SpatialManipulator.h"
 #include "Core/Compoonents/Lighting/Light.h"
@@ -12,6 +22,9 @@
 #include "Core/Compoonents/Obj/TerrainManager.h"
 #include "Core/Compoonents/Materials/Material.h"
 #include "Core/Physics/Adapters/BulletPhysicsAdapter.h"
+#include "Core/Physics/Physics.h"
+#include "Core/Compoonents/Physics/PrimitiveObjectCollider.h"
+#include "Core/Compoonents/Physics/RigidBody.h"
 #include "Core/Compoonents/Obj/TerrainObjectLayer.h"
 #include "Core/Assets/Scripts/Grass/GrassField.h"
 #include "Core/Renderers/DX11/DX11GraphicsContext.h"
@@ -23,6 +36,8 @@
 #include <stdexcept>
 #include <vector>
 #include <fstream>
+#include <future>
+#include <filesystem>
 #include <chrono>
 #include <cmath>
 #include "Core/Window.h"
@@ -36,6 +51,13 @@
 void Require(bool condition, const char* message)
 { if (!condition) throw std::runtime_error(message); }
 
+struct SnapshotStartProbe : Engine::Core::Component
+{
+    static inline std::atomic<int> starts{0};
+    bool RequiresUpdate() const override { return false; }
+    void Start() override { ++starts; }
+};
+
 void TestEngineScheduling()
 {
     Engine::Threading::JobScheduler jobs(2);
@@ -44,6 +66,22 @@ void TestEngineScheduling()
     auto b=jobs.Schedule([&] { Require(first==7,"job ran before dependency"); second=11; },{a});
     auto c=jobs.Schedule([&] { Require(first+second==18,"dependency results were not visible"); },{a,b});
     jobs.Wait(c);
+    const auto sceneOwner = std::this_thread::get_id();
+    int ownerPhase = 0;
+    auto ownerFirst = jobs.ScheduleOnOwner([&]
+    {
+        Require(std::this_thread::get_id() == sceneOwner,
+            "owner phase ran on a worker");
+        ownerPhase = 1;
+    });
+    auto ownerSecond = jobs.ScheduleOnOwner([&]
+    {
+        Require(std::this_thread::get_id() == sceneOwner && ownerPhase == 1,
+            "owner phase ignored its dependency");
+        ownerPhase = 2;
+    }, {ownerFirst});
+    jobs.Wait(ownerSecond);
+    Require(ownerPhase == 2, "owner phase graph did not finish");
     {
         Engine::Threading::JobScheduler isolated(1);
         std::promise<void> entered,release; auto gate=release.get_future().share();
@@ -77,6 +115,664 @@ void TestEngineScheduling()
     { Engine::Threading::JobScheduler shutdown(2); for(int i=0;i<32;++i) shutdown.Schedule([&] { ++drained; }); }
     Require(drained==32,"scheduler shutdown abandoned jobs");
     std::cout<<"Engine jobs: dependency ordering, failure propagation, nested progress, serial mode and shutdown passed.\n";
+}
+
+struct UpdateAccessProbe : Engine::Core::Component
+{
+    std::function<void()> callback;
+    UpdateAccess access;
+    void Update() override { callback(); }
+    CallbackPolicy GetCallbackPolicy() const override
+    { return { UpdateThreadAffinity::Worker, UpdateParallelSafety::DeclaredAccess }; }
+    std::optional<UpdateAccess> GetUpdateAccess() const override { return access; }
+};
+
+struct UpdatePrerequisiteProbe : UpdateAccessProbe {};
+struct UpdateDependentProbe : UpdateAccessProbe {};
+
+struct LegacyUpdateProbe : Engine::Core::Script
+{
+    std::function<void()> callback;
+    void Update() override { callback(); }
+};
+
+struct NativeSpriteWorkerProbe : Engine::Components::SpriteAnimationManager
+{
+    std::thread::id updateThread, publishThread;
+    void Update() override
+    {
+        SpriteAnimationManager::Update();
+        updateThread = std::this_thread::get_id();
+    }
+    void PublishUpdateOnOwner() override
+    {
+        SpriteAnimationManager::PublishUpdateOnOwner();
+        publishThread = std::this_thread::get_id();
+    }
+};
+
+struct UnsafeWorkerProbe : Engine::Core::Component
+{
+    CallbackPolicy GetCallbackPolicy() const override
+    { return { UpdateThreadAffinity::Worker, UpdateParallelSafety::Serial }; }
+};
+
+void TestComponentUpdateScheduling()
+{
+    using Scheduler = Engine::Threading::ComponentUpdateScheduler;
+    Engine::Scene::Scene scene;
+    std::atomic<int> value{0};
+    auto* before = scene.AddObject("parallel first")->AddComponent<UpdatePrerequisiteProbe>();
+    before->callback = [&] { Require(value.fetch_add(1) == 0, "prerequisite ran late"); };
+    before->access.writes = {"shared"};
+    auto* after = scene.AddObject("parallel second")->AddComponent<UpdateDependentProbe>();
+    after->callback = [&] { Require(value.fetch_add(1) == 1, "dependent ran early"); };
+    after->access.reads = {"shared"};
+    after->access.after = {typeid(UpdatePrerequisiteProbe)};
+    auto* legacy = scene.AddObject("legacy")->AddComponent<LegacyUpdateProbe>();
+    legacy->callback = [&]
+    {
+        Require(scene.IsOwnerThread() && value.fetch_add(1) == 2,
+            "legacy update escaped its serial barrier");
+    };
+    auto* last = scene.AddObject("parallel last")->AddComponent<UpdateAccessProbe>();
+    last->access.writes = {"shared"};
+    last->callback = [&] { Require(value.fetch_add(1) == 3, "update crossed legacy barrier"); };
+    scene.Update(0.f);
+    Require(value == 4, "component update dispatch skipped a callback");
+
+    Engine::Scene::Scene nativeScene;
+    auto* sprite = nativeScene.AddObject("native sprite")
+        ->AddComponent<NativeSpriteWorkerProbe>();
+    Require(sprite->LoadFromFile(
+        "Engine/Core/Assets/Textures/Sprites/Slime/slime_idle.spriteanim"),
+        "native sprite fixture did not load");
+    nativeScene.Update(0.2f);
+    Require(sprite->frame > 0, "native sprite frame did not advance");
+    Require(sprite->publishThread == std::this_thread::get_id(),
+        "native sprite shared state was not published on the owner");
+    if (Engine::Threading::JobScheduler::Get().WorkerCount() > 0)
+        Require(sprite->updateThread != sprite->publishThread,
+            "eligible native update did not run on a worker");
+    Engine::Scene::Scene invalidScene;
+    auto* invalidObject = invalidScene.AddObject("invalid worker policy");
+    invalidObject->AddComponent<UnsafeWorkerProbe>();
+    bool invalidPolicyRejected = false;
+    try { invalidScene.Update(0.f); }
+    catch (const std::logic_error&) { invalidPolicyRejected = true; }
+    Require(invalidPolicyRejected, "unsafe worker policy was accepted");
+    invalidScene.RemoveObject(invalidObject);
+    Require(invalidScene.GetObjects().empty(),
+        "failed policy check left the scene in an update");
+
+    UpdatePrerequisiteProbe late;
+    UpdateDependentProbe early;
+    value = 0;
+    late.callback = [&] { value = 1; };
+    early.callback = [&] { Require(value == 1, "later prerequisite was ignored"); };
+    early.access.after = {typeid(UpdatePrerequisiteProbe)};
+    Scheduler::Run({{&early, early.access}, {&late, late.access}});
+    late.access.after = {typeid(UpdateDependentProbe)};
+    bool cycleRejected = false;
+    try { Scheduler::Run({{&early, early.access}, {&late, late.access}}); }
+    catch (const std::logic_error&) { cycleRejected = true; }
+    Require(cycleRejected, "component update dependency cycle was accepted");
+    UpdateAccessProbe writer, reader;
+    value = 0;
+    writer.access.writes = {"shared"};
+    reader.access.reads = {"shared"};
+    writer.callback = [&] { value = 7; };
+    reader.callback = [&] { Require(value == 7, "read overtook a declared write"); };
+    Scheduler::Run({{&writer, writer.access}, {&reader, reader.access}});
+    if (Engine::Threading::JobScheduler::Get().WorkerCount() >= 2)
+    {
+        UpdateAccessProbe left, right;
+        left.access.reads = {"shared"};
+        right.access.reads = {"shared"};
+        std::promise<void> leftStarted, rightStarted;
+        const auto leftReady = leftStarted.get_future().share();
+        const auto rightReady = rightStarted.get_future().share();
+        left.callback = [&]
+        {
+            leftStarted.set_value();
+            Require(rightReady.wait_for(std::chrono::seconds(2)) == std::future_status::ready,
+                "independent component updates did not overlap");
+        };
+        right.callback = [&]
+        {
+            rightStarted.set_value();
+            Require(leftReady.wait_for(std::chrono::seconds(2)) == std::future_status::ready,
+                "independent component updates did not overlap");
+        };
+        Scheduler::Run({{&left, left.access}, {&right, right.access}});
+    }
+    std::cout << "Component update access, dependencies and legacy barriers passed.\n";
+}
+
+void TestSceneSnapshotCommit()
+{
+    SnapshotStartProbe::starts = 0;
+    Engine::Scene::Scene scene;
+    auto* root = scene.AddObject("Snapshot root");
+    auto* material = root->AddComponent<Engine::Components::Material>();
+    const auto rootId = scene.GetObjectId(root);
+    scene.CommitPendingObjectChanges();
+    scene.Start();
+    const auto before = scene.GetPublishedSceneSnapshot();
+    Require(before && before->objects.size() == 1 && before->objects[0].id == rootId,
+        "initial scene snapshot was not published");
+    scene.CommitPendingObjectChanges();
+    Require(scene.GetPublishedSceneSnapshot() == before,
+        "unchanged commit rebuilt the published snapshot");
+    bool rejectedWorkerMutation = false;
+    bool rejectedWorkerComponentWrite = false;
+    bool rejectedImplicitGeneration = false;
+    std::thread invalidProducer([&]
+    {
+        try { scene.AddObject("Invalid worker object"); }
+        catch (const std::logic_error&) { rejectedWorkerMutation = true; }
+        try { material->MarkConfigurationDirty(); }
+        catch (const std::logic_error&) { rejectedWorkerComponentWrite = true; }
+        try { scene.QueueAddObject("Worker without generation"); }
+        catch (const std::logic_error&) { rejectedImplicitGeneration = true; }
+    });
+    invalidProducer.join();
+    Require(rejectedWorkerMutation && rejectedWorkerComponentWrite &&
+        rejectedImplicitGeneration &&
+        scene.GetPublishedSceneSnapshot() == before,
+        "live scene mutation from a worker bypassed the owner boundary");
+    const float originalRoughness = material->roughnessFactor;
+    Engine::Scene::Scene::ObjectId childId = 0;
+    const auto sceneGeneration = scene.CaptureSceneGeneration();
+    std::thread producer([&]
+    {
+        childId = scene.QueueAddObject(sceneGeneration, "Queued child");
+        scene.QueueMoveObject(sceneGeneration, childId, rootId,
+            Engine::Scene::Scene::ObjectPlacement::AsChild);
+        scene.QueueAddComponent<Engine::Components::Material>(sceneGeneration, childId);
+        scene.QueueAddComponent<SnapshotStartProbe>(sceneGeneration, childId);
+        scene.QueueObjectFieldWrite(sceneGeneration, childId,
+            [](auto& value) { value.transform.position.x = 3.f; });
+        scene.QueueComponentWrite<Engine::Components::Material>(sceneGeneration, rootId,
+            [](auto& value) { value.roughnessFactor = 0.25f; });
+    });
+    producer.join();
+    Require(scene.FindObjectById(childId) == nullptr &&
+        material->roughnessFactor == originalRoughness,
+        "queued scene mutation escaped its commit boundary");
+    scene.CommitPendingObjectChanges();
+    const auto after = scene.GetPublishedSceneSnapshot();
+    Require(after && after->generation > before->generation &&
+        after->objects.size() == 2 && before->objects.size() == 1,
+        "published snapshot changed in place or omitted queued creation");
+    Require(after->objects[1].id == childId &&
+        after->objects[1].parentId == rootId &&
+        after->objects[1].position.x == 3.f &&
+        after->objects[1].components.size() == 2 &&
+        after->objects[0].components.size() == 1 &&
+        after->objects[0].components[0].configurationRevision >
+            before->objects[0].components[0].configurationRevision,
+        "snapshot omitted committed hierarchy or component revision");
+    Require((*before->objects[0].components[0].authoredState)[
+            "roughnessFactor"].AsFloat() == originalRoughness &&
+        (*after->objects[0].components[0].authoredState)[
+            "roughnessFactor"].AsFloat() == 0.25f,
+        "component snapshot did not retain copied configuration values");
+    Require(scene.FindObjectById(childId)->Parent == root &&
+        material->roughnessFactor == 0.25f &&
+        SnapshotStartProbe::starts == 1,
+        "queued hierarchy or component write was not committed");
+    auto* child = scene.FindObjectById(childId);
+    const auto localPosition = child->transform.position;
+    Require(!scene.SetParentLocal(root, child),
+        "serial hierarchy edit accepted a parent cycle");
+    Require(scene.SetParentLocal(child, nullptr) &&
+        child->Parent == nullptr && child->transform.position == localPosition &&
+        scene.GetPublishedSceneSnapshot() == after,
+        "serial hierarchy edit changed local transform or published early");
+    scene.CommitPendingObjectChanges();
+    Require(scene.GetPublishedSceneSnapshot()->objects[1].parentId == 0 &&
+        after->objects[1].parentId == rootId,
+        "serial hierarchy edit did not publish at the commit boundary");
+    Require(scene.SetParentLocal(child, root),
+        "serial hierarchy edit could not restore the parent");
+    scene.CommitPendingObjectChanges();
+    material->roughnessFactor = 0.5f;
+    material->MarkConfigurationDirty();
+    const auto beforeOwnerCommit = scene.GetPublishedSceneSnapshot();
+    Require((*beforeOwnerCommit->objects[0].components[0].authoredState)[
+            "roughnessFactor"].AsFloat() == 0.25f,
+        "serial component edit changed the published snapshot early");
+    scene.CommitPendingObjectChanges();
+    Require((*scene.GetPublishedSceneSnapshot()->objects[0].components[0].authoredState)[
+            "roughnessFactor"].AsFloat() == 0.5f,
+        "serial component edit was absent after the commit boundary");
+    const auto transientId = scene.QueueAddObject("Transient");
+    scene.QueueRemoveObject(transientId);
+    scene.CommitPendingObjectChanges();
+    Require(scene.FindObjectById(transientId) == nullptr &&
+        scene.GetPublishedSceneSnapshot()->objects.size() == 2,
+        "create and remove in one commit left a live object");
+    scene.QueueRemoveObject(rootId);
+    scene.CommitPendingObjectChanges();
+    Require(scene.GetPublishedSceneSnapshot()->objects.empty() &&
+        scene.FindObjectById(rootId) == nullptr &&
+        scene.FindObjectById(childId) == nullptr && after->objects.size() == 2,
+        "removal did not publish an immutable empty scene");
+    scene.AddObject("Clear boundary probe");
+    Require(scene.GetPublishedSceneSnapshot()->objects.empty(),
+        "serial creation published outside a commit boundary");
+    scene.CommitPendingObjectChanges();
+    const auto beforeClear = scene.GetPublishedSceneSnapshot();
+    scene.ClearObjects();
+    Require(beforeClear->objects.size() == 1 &&
+        scene.GetPublishedSceneSnapshot()->objects.empty() &&
+        scene.GetPublishedSceneSnapshot()->generation > beforeClear->generation,
+        "scene clear did not publish through its commit boundary");
+}
+
+void TestSimulationOwnerHandoff()
+{
+    Engine::Scene::Scene scene;
+    const auto windowThread = std::this_thread::get_id();
+    std::promise<void> begin;
+    auto ready = begin.get_future().share();
+    std::exception_ptr failure;
+    std::thread simulation([&]
+    {
+        ready.wait();
+        try
+        {
+            auto* object = scene.AddObject("Simulation owner");
+            object->AddComponent<Engine::Components::Material>();
+            scene.CommitPendingObjectChanges();
+            Engine::Core::NativeInputSnapshot input;
+            input.keys['W'] = static_cast<SHORT>(0x8000);
+            input.cursor = { 10, 20 };
+            Engine::Core::SetCurrentNativeInputSnapshot(&input);
+            Require((Engine::Core::ReadNativeKeyState('W') & 0x8000) != 0,
+                "simulation did not read the captured key state");
+            Engine::Core::RequestNativeCursorPosition({ 30, 40 });
+            POINT cursor{};
+            Require(Engine::Core::ReadNativeCursorPosition(cursor) &&
+                cursor.x == 30 && cursor.y == 40 &&
+                input.cursorPositionRequested,
+                "simulation cursor request was not retained for window handoff");
+            Engine::Core::SetCurrentNativeInputSnapshot(nullptr);
+        }
+        catch (...) { failure = std::current_exception(); }
+        scene.TransferOwnerTo(windowThread);
+    });
+    scene.TransferOwnerTo(simulation.get_id());
+    bool rejectedWindowMutation = false;
+    try { scene.AddObject("Window thread mutation"); }
+    catch (const std::logic_error&) { rejectedWindowMutation = true; }
+    begin.set_value();
+    simulation.join();
+    if (failure) std::rethrow_exception(failure);
+    Require(rejectedWindowMutation &&
+        scene.GetPublishedSceneSnapshot()->objects.size() == 1,
+        "simulation handoff failed to isolate the scene owner");
+    scene.AddObject("Window owner restored");
+    scene.CommitPendingObjectChanges();
+}
+
+void TestNativeUiInteractionOwner()
+{
+    Engine::Scene::Scene scene;
+    auto* canvas = scene.AddObject("UI canvas");
+    canvas->AddComponent<Engine::Components::Canvas>();
+    auto* buttonObject = scene.AddObject("UI button");
+    Require(scene.SetParentLocal(buttonObject, canvas),
+        "native UI button did not join its canvas");
+    auto* layout = buttonObject->AddComponent<Engine::Components::UIObject>();
+    auto* text = buttonObject->AddComponent<Engine::Components::UIText>();
+    layout->anchorMin = { 0.5f, 0.5f, 0.f };
+    layout->anchorMax = layout->anchorMin;
+    auto* button = buttonObject->AddComponent<Engine::Components::UIButton>();
+    int clicks = 0;
+    button->AddOnClickListener([&](auto&)
+    {
+        scene.AssertOwnerThread();
+        ++clicks;
+    });
+    scene.Start();
+    Engine::Core::NativeInputSnapshot input;
+    input.focused = true;
+    input.cursorInWindow = true;
+    input.clientWidth = 800;
+    input.clientHeight = 600;
+    input.clientCursor = { 400, 300 };
+    Engine::Core::SetCurrentNativeInputSnapshot(&input);
+    input.keys[VK_LBUTTON] = static_cast<SHORT>(0x8000);
+    scene.Update(1.f / 60.f);
+    input.keys[VK_LBUTTON] = 0;
+    scene.Update(1.f / 60.f);
+    Engine::Core::SetCurrentNativeInputSnapshot(nullptr);
+    Require(clicks == 1 && button->ConsumeClick(),
+        "native UI click did not run on the scene owner during simulation");
+    Require(scene.GetPreparedNativeUiLayout().size() == 1 &&
+        scene.GetPreparedNativeUiLayout().front().text == text,
+        "native UI layout was not prepared before render handoff");
+    scene.ClearObjects();
+    Require(scene.GetPreparedNativeUiLayout().empty(),
+        "removed UI components survived in the prepared render layout");
+}
+
+void TestAsyncSceneOwnerCommit()
+{
+    Engine::Scene::Scene source;
+    source.AddObject("Async replacement");
+    const auto path = std::filesystem::temp_directory_path() /
+        "engine-async-scene-owner-test.scene";
+    {
+        std::ofstream file(path, std::ios::binary);
+        file << source.SaveToString();
+        Require(file.good(), "async scene fixture could not be written");
+    }
+
+    Engine::Core::Window window(GetModuleHandleW(nullptr), L"Async scene owner", 64, 64);
+    Engine::Renderers::DX11GameRenderer renderer;
+    Require(renderer.Init(window.GetHWND(), 64, 64), "async scene renderer init failed");
+    Engine::Scene::Scene scene;
+    scene.Init(renderer.GetGraphicsProvider());
+    scene.AddObject("Old scene");
+    Engine::Core::SceneManager::SetActiveScene(&scene);
+    int loadedCallbacks = 0;
+    Engine::Core::SceneManager::SetOnSceneLoaded([&](auto* loaded)
+    {
+        scene.AssertOwnerThread();
+        Require(loaded == &scene, "scene-loaded callback received another scene");
+        ++loadedCallbacks;
+    });
+    bool completed = false;
+    Engine::Core::SceneManager::LoadSceneAsync(path.string(), [&](auto* loaded)
+    {
+        scene.AssertOwnerThread();
+        Require(loaded == &scene && scene.FindObjectByName("Async replacement"),
+            "async scene callback ran before the owner committed the scene");
+        completed = true;
+    });
+    for (int attempt = 0; attempt < 200 && !completed; ++attempt)
+    {
+        Engine::Core::SceneManager::ProcessPendingSceneLoad();
+        if (!completed) std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    Require(completed && loadedCallbacks == 1 &&
+        !scene.FindObjectByName("Old scene"),
+        "async scene was not applied once at the owner boundary");
+    bool missingCompleted = false;
+    Engine::Core::SceneManager::LoadSceneAsync(path.string() + ".missing",
+        [&](auto* loaded)
+        {
+            scene.AssertOwnerThread();
+            Require(!loaded, "missing async scene reported a successful load");
+            missingCompleted = true;
+        });
+    for (int attempt = 0; attempt < 200 && !missingCompleted; ++attempt)
+    {
+        Engine::Core::SceneManager::ProcessPendingSceneLoad();
+        if (!missingCompleted)
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    Require(missingCompleted && loadedCallbacks == 1 &&
+        scene.FindObjectByName("Async replacement"),
+        "failed async file read changed the active scene");
+    const auto brokenPath = std::filesystem::temp_directory_path() /
+        "engine-async-scene-partial-test.scene";
+    {
+        std::ofstream file(brokenPath, std::ios::binary);
+        file << R"({"version":1,"objects":[{"name":"Partial replacement"},{"prefab":"missing-partial-test.prefab"}]})";
+        Require(file.good(), "partial scene fixture could not be written");
+    }
+    bool brokenCompleted = false;
+    const auto beforeBrokenLoad = scene.GetPublishedSceneSnapshot();
+    Engine::Core::SceneManager::LoadSceneAsync(brokenPath.string(),
+        [&](auto* loaded)
+        {
+            scene.AssertOwnerThread();
+            Require(!loaded && scene.FindObjectByName("Async replacement") &&
+                !scene.FindObjectByName("Partial replacement"),
+                "failed async deserialization published a partial scene");
+            brokenCompleted = true;
+        });
+    for (int attempt = 0; attempt < 200 && !brokenCompleted; ++attempt)
+    {
+        Engine::Core::SceneManager::ProcessPendingSceneLoad();
+        if (!brokenCompleted)
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    Require(brokenCompleted && loadedCallbacks == 1,
+        "failed async deserialization did not complete on the scene owner");
+    const auto afterBrokenLoad = scene.GetPublishedSceneSnapshot();
+    Require(afterBrokenLoad && beforeBrokenLoad &&
+        afterBrokenLoad->objects.size() == beforeBrokenLoad->objects.size() &&
+        afterBrokenLoad->objects.front().name == "Async replacement",
+        "failed async deserialization left an incomplete published snapshot");
+    int staleCallbacks = 0;
+    Engine::Core::SceneManager::LoadSceneAsync(path.string(),
+        [&](auto*) { ++staleCallbacks; });
+    Engine::Core::SceneManager::SetActiveScene(nullptr);
+    Engine::Core::SceneManager::SetActiveScene(&scene);
+    for (int attempt = 0; attempt < 10; ++attempt)
+    {
+        Engine::Core::SceneManager::ProcessPendingSceneLoad();
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    Require(staleCallbacks == 0 && loadedCallbacks == 1,
+        "canceled scene load survived an active-scene generation change");
+    Engine::Core::SceneManager::LoadSceneAsync(path.string(),
+        [&](auto*) { ++staleCallbacks; });
+    scene.FenceBackgroundWork();
+    for (int attempt = 0; attempt < 10; ++attempt)
+    {
+        Engine::Core::SceneManager::ProcessPendingSceneLoad();
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    Require(staleCallbacks == 0 && loadedCallbacks == 1,
+        "scene lifecycle fence accepted an old asynchronous file result");
+    auto callbackToken = std::make_shared<int>(1);
+    std::weak_ptr<int> callbackLifetime = callbackToken;
+    Engine::Core::SceneManager::LoadSceneAsync(path.string(),
+        [callbackToken](auto*) {});
+    callbackToken.reset();
+    Engine::Core::SceneManager::CancelPendingSceneLoad();
+    Require(callbackLifetime.expired(),
+        "canceled scene reader retained a script callback");
+    Engine::Core::SceneManager::SetOnSceneLoaded({});
+    Engine::Core::SceneManager::SetActiveScene(nullptr);
+    renderer.WaitIdle();
+    std::filesystem::remove(path);
+    std::filesystem::remove(brokenPath);
+}
+
+void TestLifecycleWorkerFenceAndClock()
+{
+    struct WorkerComponent final : Engine::Core::Component
+    {
+        std::atomic<int>& completed;
+        std::thread worker;
+        explicit WorkerComponent(std::atomic<int>& value) : completed(value) {}
+        void Start() override
+        {
+            worker = std::thread([this]
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(20));
+                completed.fetch_add(1);
+            });
+        }
+        void FenceBackgroundWork() override
+        {
+            if (worker.joinable()) worker.join();
+        }
+        ~WorkerComponent() override
+        {
+            if (worker.joinable()) std::terminate();
+        }
+    };
+    Engine::Scene::Scene scene;
+    std::atomic<int> completed{0};
+    scene.AddObject("Worker")->AddComponent<WorkerComponent>(completed);
+    scene.SetFixedTimeStep(1.0 / 60.0);
+    scene.Start();
+    scene.Update(2.f);
+    Require(scene.GetFrameIndex() == 1 &&
+        std::abs(scene.GetElapsedTime() - 1.0 / 60.0) < 1e-8,
+        "fixed step followed wall-clock delta");
+    scene.FenceBackgroundWork(); // Pause: no Update while the host is paused.
+    Require(completed == 1 && scene.GetFrameIndex() == 1,
+        "pause transition left scene work active or advanced the clock");
+    scene.Update(10.f); // Resume: wall time spent paused is ignored.
+    Require(scene.GetFrameIndex() == 2 &&
+        std::abs(scene.GetElapsedTime() - 2.0 / 60.0) < 1e-8,
+        "fixed step accumulated paused wall time");
+    std::promise<void> entered;
+    std::promise<void> release;
+    auto released = release.get_future().share();
+    const auto oldGeneration = scene.CaptureSceneGeneration();
+    const bool hasSceneWorkers =
+        Engine::Threading::JobScheduler::Get().WorkerCount() > 0;
+    if (!hasSceneWorkers) release.set_value();
+    const auto oldJob = scene.ScheduleSceneJob([&](auto generation)
+    {
+        entered.set_value();
+        released.wait();
+        scene.QueueAddObject(generation, "Stale worker object");
+    });
+    entered.get_future().wait();
+    std::thread releaseWorker;
+    if (hasSceneWorkers)
+        releaseWorker = std::thread([&]
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+            release.set_value();
+        });
+    scene.FenceBackgroundWork();
+    if (releaseWorker.joinable()) releaseWorker.join();
+    Engine::Threading::JobScheduler::Get().Wait(oldJob);
+    Require(scene.CaptureSceneGeneration() != oldGeneration &&
+        scene.QueueAddObject(oldGeneration, "Late old object") == 0,
+        "lifecycle fence did not invalidate old worker commands");
+    scene.CommitPendingObjectChanges();
+    Require(!scene.FindObjectByName("Stale worker object") &&
+        !scene.FindObjectByName("Late old object"),
+        "stale scene-generation command survived the lifecycle fence");
+    scene.ClearObjects(); // Stop must join before destroying components.
+    scene.Start();
+    Require(scene.GetFrameIndex() == 0 && scene.GetElapsedTime() == 0.0,
+        "Play did not reset the simulation clock");
+    scene.UseVariableTimeStep();
+    scene.Update(0.25f);
+    Require(scene.GetFrameIndex() == 1 &&
+        std::abs(scene.GetElapsedTime() - 0.25) < 1e-8,
+        "variable step did not resume from a reset clock");
+}
+
+void TestPhasedPhysicsStep()
+{
+    const auto addDrop = [](Engine::Scene::Scene& scene)
+    {
+        auto* floor = scene.AddObject("Floor");
+        floor->transform.position = {0.f, -0.5f, 0.f};
+        floor->AddComponent<Engine::Components::PrimitiveObjectCollider>()
+            ->size = {10.f, 1.f, 10.f};
+        floor->AddComponent<Engine::Components::RigidBody>()->bodyType = "Static";
+        auto* drop = scene.AddObject("Drop");
+        drop->transform.position = {0.f, 2.f, 0.f};
+        drop->AddComponent<Engine::Components::PrimitiveObjectCollider>();
+        drop->AddComponent<Engine::Components::RigidBody>();
+        scene.Start();
+        return drop;
+    };
+    Engine::Scene::Scene direct, scheduled;
+    auto* directDrop = addDrop(direct);
+    auto* scheduledDrop = addDrop(scheduled);
+    for (int frame = 0; frame < 30; ++frame)
+    {
+        direct.GetPhysics().Step(1.0 / 60.0);
+        scheduled.Update(1.f / 60.f);
+        Require(direct.GetPhysics().GetLastSubstepCount() ==
+            scheduled.GetPhysics().GetLastSubstepCount(),
+            "scheduled physics changed fixed-step substep count");
+    }
+    const double directY = directDrop->transform.position.y;
+    const double scheduledY = scheduledDrop->transform.position.y;
+    Require(std::abs(directY - scheduledY) < 0.001 && directY < 2.0,
+        "scheduled physics changed the rigid-body trajectory");
+}
+
+void TestSceneGpuDestructionBarrier()
+{
+    Engine::Scene::Scene scene;
+    int waits = 0;
+    scene.SetBeforeGpuResourceDestruction([&]
+    {
+        scene.AssertOwnerThread();
+        ++waits;
+    });
+    auto* removed = scene.AddObject("Removed after GPU idle");
+    scene.RemoveObject(removed);
+    Require(waits == 1, "object removal bypassed the GPU destruction barrier");
+    scene.AddObject("Cleared after GPU idle");
+    scene.ClearObjects();
+    Require(waits == 2, "scene clear bypassed the GPU destruction barrier");
+    scene.SetBeforeGpuResourceDestruction({});
+}
+
+void TestMeshBufferRetirement()
+{
+    Engine::Core::Window window(GetModuleHandleW(nullptr),
+        L"Mesh buffer retirement regression", 64, 64);
+    Engine::Renderers::DX11GameRenderer renderer;
+    Require(renderer.Init(window.GetHWND(), 64, 64),
+        "mesh retirement renderer failed");
+    Engine::Scene::Scene scene;
+    scene.SetDeferredGraphicsRetirement(true);
+    auto* mesh = scene.AddObject("Replace live mesh buffers")
+        ->AddComponent<Engine::Components::Mesh>();
+    std::vector<Engine::Components::Mesh::Vertex> vertices(3);
+    vertices[0].pos[0] = -1.f;
+    vertices[1].pos[0] = 1.f;
+    vertices[2].pos[1] = 1.f;
+    Require(mesh->SetAuthoredVertices(vertices), "initial mesh geometry failed");
+    mesh->CreateBuffer(renderer.GetGraphicsProvider()->GetBufferFactory());
+    auto* original = mesh->GetGraphicsBuffer();
+    vertices[0].pos[0] = -2.f;
+    Require(mesh->SetAuthoredVertices(vertices), "replacement mesh geometry failed");
+    auto retired = scene.TakeRetiredGraphicsResources();
+    Require(original != mesh->GetGraphicsBuffer() &&
+        std::any_of(retired.sharedBuffers.begin(), retired.sharedBuffers.end(),
+            [original](const auto& buffer) { return buffer.get() == original; }),
+        "live mesh vertex buffer was destroyed before fence retirement");
+
+    mesh->SetSurfaceOffsets(std::vector<glm::vec3>(3, glm::vec3(0.f)), nullptr);
+    auto* posed = mesh->GetPosedVertexBuffer();
+    Require(posed != nullptr, "posed mesh buffer creation failed");
+    mesh->ClearSurfaceOffsets();
+    auto retiredPosed = scene.TakeRetiredGraphicsResources();
+    Require(std::any_of(retiredPosed.buffers.begin(), retiredPosed.buffers.end(),
+        [posed](const auto& buffer) { return buffer.get() == posed; }),
+        "live mesh posed buffer was destroyed before fence retirement");
+    renderer.WaitIdle();
+}
+
+void BenchmarkSceneSnapshot()
+{
+    Engine::Scene::Scene scene;
+    for (int i = 0; i < 441; ++i)
+        scene.AddObject("Snapshot cell " + std::to_string(i))
+            ->AddComponent<Engine::Components::Material>();
+    scene.CommitPendingObjectChanges();
+    const double firstMs = scene.GetLastSceneSnapshotPublishMs();
+    double totalMs = 0;
+    for (int frame = 0; frame < 240; ++frame)
+    {
+        scene.CommitPendingObjectChanges();
+        totalMs += scene.GetLastSceneSnapshotPublishMs();
+    }
+    std::cout << "Scene snapshot: 441 objects, first publication " << firstMs
+              << " ms, 240 unchanged publications average " << totalMs / 240
+              << " ms.\n";
 }
 
 void TestRenderBoundsCaching()
@@ -208,6 +904,11 @@ void TestSceneTransformScheduling()
     Engine::Scene::Scene scene; scene.Init(renderer.GetGraphicsProvider()); scene.SetUpdateProfilingEnabled(true);
     auto* root=scene.AddObject("Transform root"); auto* child=scene.AddObject("Transform child");
     child->Parent=root; child->transform.position={1,2,3};
+    auto* childMesh=child->AddComponent<Engine::Components::Mesh>();
+    std::vector<Engine::Components::Mesh::Vertex> triangle(3);
+    triangle[0].pos[0]=-1; triangle[1].pos[0]=1; triangle[2].pos[1]=1;
+    Require(childMesh->SetAuthoredVertices(triangle),"spatial slot triangle creation failed");
+    childMesh->CreateBuffer(renderer.GetGraphicsProvider()->GetBufferFactory());
     scene.PrepareRenderFrame();
     Require(scene.GetLastPrepareTimings().transformStructureFallback==1,"structural frame rebuilt the transform hierarchy");
     scene.PrepareRenderFrame();
@@ -226,6 +927,12 @@ void TestSceneTransformScheduling()
     scene.PrepareRenderFrame();
     Require(scene.GetLastPrepareTimings().transformStructureFallback==0 && scene.GetLastPrepareTimings().transformWorldReused>=2,
         "scene did not restore static transform reuse after streaming stopped");
+    child->enabled=false; scene.PrepareRenderFrame();
+    Require(scene.GetLastPrepareTimings().spatialRebuilds==0,
+        "temporarily hidden draw rebuilt the spatial hierarchy");
+    child->enabled=true; scene.PrepareRenderFrame();
+    Require(scene.GetLastPrepareTimings().spatialRebuilds==0,
+        "restored draw rebuilt the spatial hierarchy");
     std::cout<<"Scene transforms: owner fallback during streaming, parallel-ready stable frames, descendant updates and cache recovery passed.\n";
 }
 
@@ -825,8 +1532,12 @@ void CheckFadeRendering()
         {
             renderer.BeginFrame(); renderer.Clear(0,0,0,1);
             scene.PrepareRenderFrame();
+            auto drawPacket = scene.TakeNativeRenderPacket();
+            Engine::Graphics::GraphicsCommandPacket commands;
+            scene.Render(&commands, 1.f, camera, false, size, size,
+                false, drawPacket.get());
             auto context = renderer.CreateFrameGraphicsContext();
-            scene.Render(context.get(), 1.f, camera, false, size, size);
+            commands.Replay(*context);
             requestCapture();
             renderer.EndFrame();
         }
@@ -838,6 +1549,9 @@ void CheckFadeRendering()
         coverage.push_back(visible);
     }
     renderer.WaitIdle();
+    Require(renderer.GetSubmittedFrameToken() > 0 &&
+        renderer.IsFrameComplete(renderer.GetSubmittedFrameToken()),
+        "renderer completion token did not finish after idle");
     std::cout << "Shader fade pixel coverage (0/25/50/75/100%): ";
     for (auto count : coverage) std::cout << count << ' ';
     std::cout << '\n';
@@ -1183,6 +1897,9 @@ void TestPersistentStorage()
         renderer.EndFrame();
     }
     renderer.WaitIdle();
+    Require(renderer.GetSubmittedFrameToken() >= 102 &&
+        renderer.IsFrameComplete(renderer.GetSubmittedFrameToken()),
+        "DX11 completion queries did not retire submitted frames after idle");
     std::cout<<"Persistent storage: zero unchanged uploads, one 64-byte edited record, bounded streaming allocations.\n";
 }
 
@@ -1305,10 +2022,9 @@ void CheckAutomaticRendering()
     std::cout<<"Shared geometry, automatic batching, GPU visibility/LOD, dirty uploads, and edit isolation passed.\n";
 }
 
-void RenderAudit(const char* reportPath=".local/performance-logs/grass-automatic-instancing-render-audit.jsonl",bool matrix=false,bool storageAudit=false,bool compare=false,bool nativeAudit=false)
+void RenderAudit(const char* reportPath=".local/performance-logs/grass-automatic-instancing-render-audit.jsonl",bool matrix=false,bool storageAudit=false,bool compare=false,bool nativeAudit=false,unsigned width=1848,unsigned height=1069)
 {
     using Clock = std::chrono::steady_clock;
-    constexpr unsigned width = 1848, height = 1069;
     Engine::Core::Window window(GetModuleHandleW(nullptr), L"Grass render audit", width, height);
     Engine::Renderers::DX11GameRenderer renderer;
     Require(renderer.Init(window.GetHWND(), width, height), "hardware renderer failed");
@@ -1419,6 +2135,7 @@ void RenderAudit(const char* reportPath=".local/performance-logs/grass-automatic
             << ",\"gpu_sample_id\":" << gpu.gpuSampleId
             << ",\"gpu_shadow_ms\":" << gpu.gpuMilliseconds[size_t(Engine::Graphics::GpuTimingStage::Shadow)]
             << ",\"gpu_terrain_ms\":" << gpu.gpuMilliseconds[size_t(Engine::Graphics::GpuTimingStage::Terrain)]
+            << ",\"gpu_grass_ms\":" << gpu.gpuMilliseconds[size_t(Engine::Graphics::GpuTimingStage::Grass)]
             << ",\"gpu_opaque_ms\":" << gpu.gpuMilliseconds[size_t(Engine::Graphics::GpuTimingStage::Opaque)]
             << ",\"shadow_ms\":" << shadow.totalMs << ",\"shadow_draw_ms\":" << shadow.drawSubmissionMs
             << ",\"shadow_cb_ms\":" << shadow.constantBindingMs
@@ -1510,6 +2227,45 @@ void RenderAudit(const char* reportPath=".local/performance-logs/grass-automatic
     Engine::Threading::JobScheduler::Get().SetParallelForEnabled(true);
 }
 
+void TestRecordedOcclusionFeedback()
+{
+    struct Probe final : Engine::Graphics::IGraphicsContext
+    {
+        uint32_t frames = 0, decisions = 0, queries = 0, draws = 0, bindings = 0;
+        void SetPipeline(const Engine::Graphics::IPipelineState*) override { ++bindings; }
+        void SetConstantBuffer(uint32_t, const Engine::Graphics::IGraphicsBuffer*, uint64_t) override {}
+        void SetStructuredBuffer(uint32_t, const Engine::Graphics::IGraphicsBuffer*) override {}
+        void SetVertexBuffer(uint32_t, const Engine::Graphics::IGraphicsBuffer*, uint32_t, uint64_t) override {}
+        void SetIndexBuffer(const Engine::Graphics::IGraphicsBuffer*, uint32_t, uint64_t) override {}
+        void SetViewport(const Viewport&) override {}
+        void SetScissorRect(const ScissorRect&) override {}
+        void Clear(float, float, float, float, float) override {}
+        void DrawInstanced(uint32_t, uint32_t, uint32_t, uint32_t) override { ++draws; }
+        void DrawIndexedInstanced(uint32_t, uint32_t, uint32_t, int32_t, uint32_t) override { ++draws; }
+        void TransitionResource(void*, ResourceState, ResourceState) override {}
+        void* GetNativeHandle() const override { return nullptr; }
+        bool BeginOcclusionFrame(uint64_t, uint64_t) override { ++frames; return true; }
+        bool IsOccluded(uint64_t id) override { ++decisions; return id == 7u; }
+        void BeginOcclusionQuery(uint64_t) override { ++queries; }
+    } probe;
+    Engine::Graphics::GraphicsCommandPacket commands;
+    Require(commands.BeginOcclusionFrame(3u, 5u), "recorder disabled occlusion queries");
+    for (uint64_t id : {7u, 8u})
+    {
+        Require(!commands.IsOccluded(id), "recorder read backend occlusion state");
+        commands.BeginOcclusionQuery(id);
+        commands.SetPipeline(nullptr);
+        commands.DrawInstanced(3, 1);
+        commands.EndOcclusionQuery();
+    }
+    commands.Replay(probe);
+    Require(probe.frames == 1 && probe.decisions == 2 &&
+        probe.queries == 1 && probe.draws == 1 && probe.bindings == 2,
+        "recorded occlusion did not skip only the hidden draw");
+    Require(commands.GetReplayOcclusionCulledCount() == 1,
+        "recorded occlusion count did not reflect replay");
+}
+
 int main(int argc, char** argv)
 {
     SetUnhandledExceptionFilter([](EXCEPTION_POINTERS* failure)->LONG {
@@ -1529,10 +2285,19 @@ int main(int argc, char** argv)
         else if(argc>1 && std::string(argv[1])=="--parallel-stage-comparison") RenderAudit(".local/performance-logs/parallel-comparison-",false,true,true);
         else if(argc>1 && std::string(argv[1])=="--native-submission-audit") RenderAudit(".local/performance-logs/native-submission-stage2.jsonl",false,false,false,true);
         else if(argc>1 && std::string(argv[1])=="--parallel-spatial-audit") RenderAudit(".local/performance-logs/parallel-stage5-",false,true);
+        else if(argc>1 && std::string(argv[1])=="--parallel-slot-audit") RenderAudit(".local/performance-logs/parallel-slot-",false,true);
+        else if(argc>1 && std::string(argv[1])=="--parallel-native-audit") RenderAudit(".local/performance-logs/parallel-native-stage7.jsonl",false,false,false,true);
+        else if(argc>1 && std::string(argv[1])=="--parallel-gpu-stage-audit") RenderAudit(".local/performance-logs/parallel-gpu-stage7.jsonl");
+        else if(argc>1 && std::string(argv[1])=="--parallel-gpu-halfres-audit") RenderAudit(".local/performance-logs/parallel-gpu-halfres-stage7.jsonl",false,false,false,false,924,535);
+        else if(argc>1 && std::string(argv[1])=="--parallel-snapshot-audit") RenderAudit(".local/performance-logs/parallel-snapshot-stage9.jsonl");
+        else if(argc>1 && std::string(argv[1])=="--snapshot-benchmark") BenchmarkSceneSnapshot();
         else if(argc>1 && std::string(argv[1])=="--parallel-transform-audit") RenderAudit(".local/performance-logs/parallel-stage4-",false,true);
         else if(argc>1 && std::string(argv[1])=="--transform-benchmark") BenchmarkTransformHierarchy();
         else if(argc>1 && std::string(argv[1])=="--transform-regression") { TestTransformHierarchy(); TestSceneTransformScheduling(); }
-        else if(argc>1 && std::string(argv[1])=="--native-regression") { TestDx11ConstantsAndGeometry(); TestEditorFrameLifecycle(); }
+        else if(argc>1 && std::string(argv[1])=="--component-update-regression") TestComponentUpdateScheduling();
+        else if(argc>1 && std::string(argv[1])=="--physics-phase-regression") TestPhasedPhysicsStep();
+        else if(argc>1 && std::string(argv[1])=="--native-regression") { TestRecordedOcclusionFeedback(); TestDx11ConstantsAndGeometry(); TestEditorFrameLifecycle(); }
+        else if(argc>1 && std::string(argv[1])=="--lifecycle-regression") { TestSceneSnapshotCommit(); TestSimulationOwnerHandoff(); TestAsyncSceneOwnerCommit(); TestLifecycleWorkerFenceAndClock(); TestSceneGpuDestructionBarrier(); }
         else if (argc > 1 && std::string(argv[1]) == "--render-audit") RenderAudit();
         else if(argc>1 && std::string(argv[1])=="--diagnostics-audit") RenderAudit(".local/performance-logs/grass-diagnostics-audit.jsonl");
         else if (argc > 1 && std::string(argv[1]) == "--fade-render-check") CheckFadeRendering();
@@ -1546,7 +2311,7 @@ int main(int argc, char** argv)
 #if defined(ENGINE_VULKAN_ENABLED)
         else if(argc>1 && std::string(argv[1])=="--automatic-render-vulkan") CheckAutomaticRendering<Engine::Renderers::VulkanGameRenderer>();
 #endif
-        else { TestEngineScheduling(); TestRenderBoundsCaching(); TestTransformHierarchy(); TestSceneTransformScheduling(); TestDirectorySnapshots(); TestSpatialScheduling(); TestLandscapePreparation(); TestGrass(); TestDx11ConstantsAndGeometry(); TestEditorFrameLifecycle(); TestComponentRegistry(); TestBakedPlacements(); TestSceneLoadingIntoWarmCaches(); TestPersistentStorage(); }
+        else { TestEngineScheduling(); TestComponentUpdateScheduling(); TestPhasedPhysicsStep(); TestSceneSnapshotCommit(); TestSimulationOwnerHandoff(); TestNativeUiInteractionOwner(); TestAsyncSceneOwnerCommit(); TestLifecycleWorkerFenceAndClock(); TestSceneGpuDestructionBarrier(); TestMeshBufferRetirement(); TestRecordedOcclusionFeedback(); TestRenderBoundsCaching(); TestTransformHierarchy(); TestSceneTransformScheduling(); TestDirectorySnapshots(); TestSpatialScheduling(); TestLandscapePreparation(); TestGrass(); TestDx11ConstantsAndGeometry(); TestEditorFrameLifecycle(); TestComponentRegistry(); TestBakedPlacements(); TestSceneLoadingIntoWarmCaches(); TestPersistentStorage(); }
     }
     catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }

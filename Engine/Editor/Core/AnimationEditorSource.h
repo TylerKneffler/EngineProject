@@ -100,7 +100,7 @@ inline std::string ClipPreview(const Engine::Model::AnimationClipAsset& asset)
             // Corrupt metadata must not create a cycle in the preview scene.
             for (auto* ancestor = parent; ancestor; ancestor = ancestor->Parent)
                 if (ancestor == object) throw std::runtime_error("Animation skeleton contains a cycle.");
-            object->Parent = parent; parent->Children.push_back(object);
+            scene.SetParentLocal(object, parent);
         }
     }
     for (size_t i = 0; i < nodes.size(); ++i)
