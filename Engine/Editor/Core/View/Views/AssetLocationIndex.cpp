@@ -1,8 +1,10 @@
 #include "AssetLocationIndex.h"
 #include "Core/Serialization/Json.h"
 #include "Core/AssetRecord.h"
+#include "Core/Threading/JobScheduler.h"
 #include <Windows.h>
 #include <algorithm>
+#include <chrono>
 #include <fstream>
 #include <iomanip>
 #include <sstream>
@@ -40,8 +42,10 @@ bool Under(const std::string& path, const std::string& prefix)
 }
 }
 
-void AssetLocationIndex::Open(const fs::path& assetsRoot)
+void AssetLocationIndex::Open(const fs::path& assetsRoot, bool deferInitialScan)
 {
+    ++m_revision;
+    m_scanRequested = false;
     std::error_code error;
     m_root = fs::weakly_canonical(assetsRoot, error);
     m_entries.clear();
@@ -66,15 +70,15 @@ void AssetLocationIndex::Open(const fs::path& assetsRoot)
         }
     }
     catch (...) { m_entries.clear(); }
-    if (m_entries.empty() && Scan(m_entries)) Save();
+    if (m_entries.empty() && !deferInitialScan && Scan(m_root, m_entries)) Save();
 }
 
-bool AssetLocationIndex::Scan(std::unordered_map<std::string, Entry>& entries) const
+bool AssetLocationIndex::Scan(const fs::path& root, Entries& entries)
 {
     entries.clear();
-    if (m_root.empty()) return false;
+    if (root.empty()) return false;
     std::error_code error;
-    fs::recursive_directory_iterator it(m_root,
+    fs::recursive_directory_iterator it(root,
         fs::directory_options::skip_permission_denied, error), end;
     std::unordered_set<std::string> ambiguousIds;
     if (error) return false;
@@ -97,7 +101,7 @@ bool AssetLocationIndex::Scan(std::unordered_map<std::string, Entry>& entries) c
         if (!directory && item.path().extension() == ".meta") continue;
         const std::string id = FileIdentity(item.path(), directory);
         if (id.empty()) return false;
-        const auto relative = item.path().lexically_relative(m_root).generic_string();
+        const auto relative = item.path().lexically_relative(root).generic_string();
         const auto addIdentity = [&](const std::string& identity)
         {
             // Duplicate sidecars and hard links cannot identify a unique move.
@@ -124,8 +128,52 @@ bool AssetLocationIndex::Scan(std::unordered_map<std::string, Entry>& entries) c
 
 std::vector<AssetLocationIndex::Move> AssetLocationIndex::Detect()
 {
-    std::unordered_map<std::string, Entry> current;
-    if (!Scan(current)) return {};
+    Entries current;
+    if (!Scan(m_root, current)) return {};
+    return Analyze(std::move(current));
+}
+
+void AssetLocationIndex::RequestDetect()
+{
+    if (m_root.empty()) return;
+    if (m_pending.valid()) { m_scanRequested = true; return; }
+    const fs::path root = m_root;
+    m_pendingRevision = m_revision;
+    m_scanRequested = false;
+    m_pending = Engine::Threading::JobScheduler::Get().Submit([root]
+    {
+        ScanResult result;
+        try { result.success = Scan(root, result.entries); }
+        catch (...) { result.entries.clear(); }
+        return result;
+    });
+}
+
+bool AssetLocationIndex::PollDetect(std::vector<Move>& moves)
+{
+    if (!m_pending.valid() ||
+        m_pending.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+        return false;
+    ScanResult result = m_pending.get();
+    if (m_pendingRevision != m_revision || m_scanRequested)
+    {
+        RequestDetect();
+        return false;
+    }
+    if (!result.success) return false;
+    if (m_entries.empty())
+    {
+        m_scanned = std::move(result.entries);
+        Accept();
+        moves.clear();
+        return true;
+    }
+    moves = Analyze(std::move(result.entries));
+    return true;
+}
+
+std::vector<AssetLocationIndex::Move> AssetLocationIndex::Analyze(Entries current)
+{
     std::vector<Move> moves;
     for (const auto& [id, now] : current)
     {
@@ -180,6 +228,7 @@ void AssetLocationIndex::Accept()
         }
     if (!changed) { m_scanned.clear(); return; }
     m_entries = std::move(m_scanned);
+    ++m_revision;
     Save();
 }
 
@@ -204,7 +253,7 @@ void AssetLocationIndex::RecordKnownMove(const fs::path& oldPath,
             entry.path = newRelative + entry.path.substr(oldRelative.size());
             changed = true;
         }
-    if (changed) Save();
+    if (changed) { ++m_revision; Save(); }
 }
 
 bool AssetLocationIndex::Save() const

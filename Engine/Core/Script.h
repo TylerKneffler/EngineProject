@@ -1,6 +1,10 @@
 #pragma once
 #include "Core/component.h"
 #include "Core/Object.h"
+#include "Core/Threading/ScriptModuleJobs.h"
+#include <future>
+#include <type_traits>
+#include <utility>
 
 // ---------------------------------------------------------------------------
 // Script — base class for all user scripts.
@@ -53,6 +57,33 @@ public:
     void Enabled() override {}
     void Disabled() override {}
     void OnDestroy() override {}
+
+    // Work that may execute script-module code must use the host's queue so
+    // hot reload can cancel pending callbacks and join running callbacks.
+    template<class Function>
+    static auto SubmitJob(Function&& function)
+    {
+        using Result = std::invoke_result_t<Function>;
+        auto task = std::make_shared<std::packaged_task<Result()>>(
+            std::forward<Function>(function));
+        auto result = task->get_future();
+        auto callback = [task] { (*task)(); };
+        if (auto* host = Engine::Threading::ScriptModuleJobsSlot())
+        {
+            if (!host->Submit(std::move(callback)))
+                throw std::runtime_error("Script module jobs are closing");
+        }
+        else
+        {
+#if defined(ENGINE_RELOADABLE_SCRIPT_MODULE)
+            throw std::runtime_error("Reloadable script module has no host job scheduler");
+#else
+            Engine::Threading::JobScheduler::Get().Schedule(
+                std::move(callback), {}, false);
+#endif
+        }
+        return result;
+    }
 
     // Derived scripts set their serialized type name in their constructor.
     // Returning Component's stored name preserves that identity in scene and

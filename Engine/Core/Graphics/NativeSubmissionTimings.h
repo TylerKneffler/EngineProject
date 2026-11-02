@@ -10,10 +10,10 @@
 namespace Engine::Graphics
 {
 enum class NativePhase : uint32_t { Other,Camera,Shadow,Count };
-enum class NativeOperation : uint32_t { Map,Upload,Bind,Dispatch,IndirectArguments,Draw,ResourceCreate,Readback,Count };
+enum class NativeOperation : uint32_t { Map,Unmap,Upload,Bind,Dispatch,IndirectArguments,Draw,ResourceCreate,Readback,FenceWait,Count };
 struct NativeCallTiming
 {
-    uint64_t calls=0,threadCycles=0,cycleSamples=0;
+    uint64_t calls=0,threadCycles=0,cycleSamples=0,maximumCallCycles=0;
     double milliseconds=0,maximumMs=0;
 };
 struct NativeSubmissionTimings
@@ -29,7 +29,7 @@ struct NativeSubmissionTimings
             <<",\"native_compute_arena_writes\":"<<computeArenaWrites<<",\"native_compute_discard_maps\":"<<computeDiscardMaps;
         if(!enabled) return;
         static const char* phaseNames[]={"other","camera","shadow"};
-        static const char* operationNames[]={"map","upload","bind","dispatch","indirect_args","draw","resource_create","readback"};
+        static const char* operationNames[]={"map","unmap","upload","bind","dispatch","indirect_args","draw","resource_create","readback","fence_wait"};
         for(size_t phase=0;phase<phases.size();++phase) for(size_t op=0;op<phases[phase].size();++op)
         {
             const auto& value=phases[phase][op];
@@ -39,6 +39,7 @@ struct NativeSubmissionTimings
             key(); output<<"_max_ms\":"<<value.maximumMs;
             key(); output<<"_thread_cycles\":"<<value.threadCycles;
             key(); output<<"_cycle_samples\":"<<value.cycleSamples;
+            key(); output<<"_max_call_cycles\":"<<value.maximumCallCycles;
         }
     }
 };
@@ -72,13 +73,20 @@ public:
     {
         if(!m_target) return;
         const auto elapsed=std::chrono::duration<double,std::milli>(Clock::now()-m_started).count();
+        const bool newMaximum=elapsed>m_target->maximumMs;
+        if(newMaximum) m_target->maximumCallCycles=0;
 #if defined(_WIN32)
         ULONG64 cycles=0;
         if(m_haveCycles && QueryThreadCycleTime(GetCurrentThread(),&cycles) && cycles>=m_cycles)
-        { m_target->threadCycles+=cycles-m_cycles; ++m_target->cycleSamples; }
+        {
+            m_target->threadCycles+=cycles-m_cycles;
+            ++m_target->cycleSamples;
+            if(newMaximum)
+                m_target->maximumCallCycles=cycles-m_cycles;
+        }
 #endif
         ++m_target->calls; m_target->milliseconds+=elapsed;
-        if(elapsed>m_target->maximumMs) m_target->maximumMs=elapsed;
+        if(newMaximum) m_target->maximumMs=elapsed;
     }
 };
 template<class F> decltype(auto) MeasureNative(NativeSubmissionProbe* probe,NativeOperation operation,F&& function)

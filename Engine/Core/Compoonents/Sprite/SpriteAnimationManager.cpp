@@ -95,6 +95,19 @@ void SpriteAnimationManager::Deserialize(const JsonValue& value)
 
 void SpriteAnimationManager::OnAfterDeserialize(IGraphicsProvider* graphicsProvider)
 {
+    (void)graphicsProvider;
+    if (!animationFile.empty())
+    {
+        const bool serializedPlaying = playing;
+        LoadFromFile(animationFile);
+        playing = serializedPlaying;
+    }
+    if (graphicsProvider && !DeferGraphicsPreparation(graphicsProvider))
+        PrepareGraphicsResources(graphicsProvider);
+}
+
+void SpriteAnimationManager::PrepareGraphicsResources(IGraphicsProvider* graphicsProvider)
+{
     Prepare(graphicsProvider);
 }
 

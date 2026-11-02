@@ -1,5 +1,6 @@
 #include "Core/Serialization/SceneSerializer.h"
 #include "Core/Component.h"
+#include "Core/Threading/ScriptModuleJobs.h"
 #include <string>
 #include <vector>
 
@@ -29,4 +30,10 @@ extern "C" __declspec(dllexport) Engine::Core::Component* EngineCreateScript(
     const char* typeName)
 {
     return typeName ? Engine::Serialization::SceneSerializer::CreateRegisteredComponent(typeName) : nullptr;
+}
+
+extern "C" __declspec(dllexport) void EngineSetScriptJobHost(
+    Engine::Threading::IScriptModuleJobs* host)
+{
+    Engine::Threading::ScriptModuleJobsSlot() = host;
 }

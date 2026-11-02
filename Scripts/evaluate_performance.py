@@ -17,6 +17,7 @@ def summary(values):
 MATCHED_ROUTE_FIELDS = ("renderer", "benchmark_scope", "route", "route_version",
                         "view_width", "view_height", "shadow_cascades",
                         "shadow_atlas_resolution")
+GPU_ENGINE_CATEGORIES = ("3D", "Compute", "Copy", "Video decode", "Video encode", "Other")
 
 
 def capture_identity(frames):
@@ -61,6 +62,21 @@ def evaluate(rows, path="", all_frames=False):
     hardware_metrics = {key: summary([r[key] for r in hardware if key in r]) for key in
                         ("process_cpu_pct", "process_cpu_core_equivalents", "main_thread_cpu_pct",
                          "cpu_user_pct", "cpu_kernel_pct", "editor_working_set_bytes", "gpu_memory_used_bytes")}
+    cpu_cores = {}
+    gpu_engines = {}
+    for row in hardware:
+        for index, load in enumerate(row.get("cpu_cores_pct", [])):
+            if (isinstance(load, list) and len(load) == 2 and
+                    all(isinstance(v, (int, float)) and math.isfinite(v) for v in load)):
+                cpu_cores.setdefault(index, []).append(sum(load))
+        for engine in row.get("gpu_engine_instances", []):
+            if (isinstance(engine, list) and len(engine) == 3 and
+                    isinstance(engine[0], str) and isinstance(engine[1], int) and
+                    isinstance(engine[2], (int, float)) and math.isfinite(engine[2])):
+                gpu_engines.setdefault((engine[0], engine[1]), []).append(engine[2])
+    cpu_cores = {str(index): summary(values) for index, values in sorted(cpu_cores.items())}
+    gpu_engines = {f"{identity} / {GPU_ENGINE_CATEGORIES[category] if 0 <= category < len(GPU_ENGINE_CATEGORIES) else 'Other'}": summary(values)
+                   for (identity, category), values in sorted(gpu_engines.items())}
     shadow_share = (gpu_stages["gpu_shadow_ms"]["mean"] / gpu_total["mean"] * 100
                     if gpu_total and gpu_total["mean"] and gpu_stages["gpu_shadow_ms"] else None)
     shadow_cycles = [(r.get("shadow_submission_wall_ms", r.get("shadow_draw_ms", 0)),
@@ -99,8 +115,9 @@ def evaluate(rows, path="", all_frames=False):
         warnings.append("Shadow thread CPU uses OS accounting; off-CPU residual includes scheduling and waits, and does not prove a GPU stall.")
     native_frames = [r for r in frames if r.get("native_timing_enabled")]
     native_calls = {}
+    native_stall_frames = {}
     for phase in ("other", "camera", "shadow"):
-        for operation in ("map", "upload", "bind", "dispatch", "indirect_args", "draw", "resource_create", "readback"):
+        for operation in ("map", "unmap", "upload", "bind", "dispatch", "indirect_args", "draw", "resource_create", "readback", "fence_wait"):
             prefix = f"native_{phase}_{operation}"
             samples = [r for r in native_frames if prefix + "_calls" in r]
             if not samples:
@@ -110,8 +127,12 @@ def evaluate(rows, path="", all_frames=False):
                 "calls": summary([r[prefix + "_calls"] for r in samples]),
                 "wall_ms": summary([r.get(prefix + "_ms", 0) for r in samples]),
                 "maximum_call_ms": summary([r.get(prefix + "_max_ms", 0) for r in samples]),
+                "cycles_at_max_call": max(samples, key=lambda r: r.get(prefix + "_max_ms", 0)).get(prefix + "_max_call_cycles", 0),
                 "thread_cycles": summary([r.get(prefix + "_thread_cycles", 0) for r in samples]),
                 "cycle_samples": sum(r.get(prefix + "_cycle_samples", 0) for r in samples)}
+            stalls = [r for r in samples if r.get(prefix + "_max_ms", 0) >= 5.0]
+            if stalls:
+                native_stall_frames[prefix] = len(stalls)
     if native_frames:
         warnings.append("Native graphics-call timing is opt-in and adds per-call clock/cycle-query overhead. Compare performance with it disabled; long calls with low cycles are wait candidates, not proof of GPU synchronization.")
     if "prepare_transforms_ms" in metrics:
@@ -149,9 +170,12 @@ def evaluate(rows, path="", all_frames=False):
             "grass_tiles_prepared": sum(r.get("grass_tiles_built", 0) for r in frames),
             "grass_placements_indexed": sum(r.get("grass_placements_scanned", 0) for r in frames),
             "shadow_submission": shadow_submission,
-            "hardware": hardware_metrics, "view_pixels": viewport_pixels,
+            "hardware": hardware_metrics, "cpu_cores": cpu_cores,
+            "gpu_engines": gpu_engines, "view_pixels": viewport_pixels,
             "recording_lost_records": recording_loss, "native_timed_frames": len(native_frames),
-            "native_calls": native_calls, "warnings": warnings}
+            "native_calls": native_calls,
+            "native_stall_frames_5ms": native_stall_frames,
+            "warnings": warnings}
 
 
 def load(path, all_frames=False):
@@ -196,10 +220,14 @@ def markdown(result, comparison=None):
             lines += ["", f"{key}: {value['mean']:.1f} per frame; maximum {value['max']:.0f}."]
     if result.get("native_calls"):
         lines += ["", f"Native call diagnostics: {result['native_timed_frames']} instrumented frames.",
-                  "", "| Native call group | Calls/frame | Wall ms/frame | Worst call ms |", "|---|---:|---:|---:|"]
+                  "", "| Native call group | Calls/frame | Wall ms/frame | Worst call ms | Cycles in worst call |", "|---|---:|---:|---:|---:|"]
         for key, value in sorted(result["native_calls"].items()):
             if value["calls"]["max"]:
-                lines.append(f"| {key} | {value['calls']['mean']:.1f} | {value['wall_ms']['mean']:.3f} | {value['maximum_call_ms']['max']:.3f} |")
+                lines.append(f"| {key} | {value['calls']['mean']:.1f} | {value['wall_ms']['mean']:.3f} | {value['maximum_call_ms']['max']:.3f} | {value['cycles_at_max_call']:.0f} |")
+        if result.get("native_stall_frames_5ms"):
+            groups = ", ".join(f"{key}: {count}" for key, count in
+                               sorted(result["native_stall_frames_5ms"].items()))
+            lines.append(f"Frames with a native call of at least 5 ms: {groups}.")
     if result["shadow_submission"]["thread_cycles"]:
         lines += ["", f"Shadow submission: {result['shadow_submission']['thread_cycles']['mean']:.0f} thread cycles on average; "
                   f"{result['shadow_submission']['low_cycle_density_spikes']} long submissions had unusually low cycle density."]
@@ -212,6 +240,16 @@ def markdown(result, comparison=None):
                   f"{result['gpu_total_ms']['mean']:.2f} ms on average."]
         if result["gpu_shadow_share_percent"] is not None:
             lines.append(f"Shadows account for {result['gpu_shadow_share_percent']:.1f}% of measured GPU time.")
+    if result.get("cpu_cores"):
+        lines += ["", "| Logical CPU | Mean usage % | P95 usage % |",
+                  "|---|---:|---:|"]
+        for core, usage in result["cpu_cores"].items():
+            lines.append(f"| {core} | {usage['mean']:.1f} | {usage['p95']:.1f} |")
+    if result.get("gpu_engines"):
+        lines += ["", "| GPU engine (adapter LUID / category) | Mean usage % | P95 usage % |",
+                  "|---|---:|---:|"]
+        for engine, usage in result["gpu_engines"].items():
+            lines.append(f"| {engine} | {usage['mean']:.1f} | {usage['p95']:.1f} |")
     if balance := result.get("render_work_balance"):
         lines += ["", f"Render work balance: **{balance['classification']}**; measured GPU stages total "
                   f"{balance['gpu_to_cpu_ratio']:.1f} times the CPU render wall time on average."]

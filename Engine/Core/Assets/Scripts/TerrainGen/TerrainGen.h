@@ -5,11 +5,10 @@
 #include "Core/Model/MeshData.h"
 #include <glm/glm.hpp>
 #include <cstdint>
-#include <condition_variable>
 #include <deque>
+#include <future>
 #include <mutex>
 #include <string>
-#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -248,10 +247,8 @@ private:
         const PerlinNoiseField& noise) const;
     static GeneratedChunkMesh GenerateChunkMesh(
         const GenerationSnapshot& snapshot, int chunkX, int chunkZ);
-    void EnsureWorkerPool(std::size_t workerCount);
     void StopWorkerPool();
     void CancelPendingGeneration();
-    void WorkerLoop();
     void HarvestCompletedChunks();
     int CommitCompletedChunks(int budget);
     bool IsChunkDesired(int x, int z) const;
@@ -295,11 +292,9 @@ private:
     std::vector<QueuedChunk> m_chunkQueue;
     std::unordered_map<int64_t, InFlightChunk> m_inFlightChunks;
     std::unordered_map<int64_t, GeneratedChunkMesh> m_readyChunks;
-    std::vector<std::thread> m_workerThreads;
-    std::deque<GenerationJob> m_generationJobs;
+    std::vector<std::future<void>> m_generationHandles;
     std::deque<GeneratedChunkMesh> m_completedChunks;
     std::mutex m_generationMutex;
-    std::condition_variable m_generationCondition;
     bool m_stopWorkers = false;
     uint64_t m_generationEpoch = 1;
     std::size_t m_pendingChunkUnloadCount = 0;

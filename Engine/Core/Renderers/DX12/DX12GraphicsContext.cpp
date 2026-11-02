@@ -710,6 +710,14 @@ std::unique_ptr<Engine::Graphics::IGraphicsContext> D3D12GraphicsContextFactory:
         list, m_rootSignature, m_occlusionState, m_gpuTimings, m_indirectSignatures);
 }
 
+std::unique_ptr<Engine::Graphics::IGraphicsContext> D3D12GraphicsContextFactory::CreateContextForCommandBuffer(void* commandBuffer)
+{
+    if (!commandBuffer) return nullptr;
+    return std::make_unique<D3D12GraphicsContext>(
+        static_cast<ID3D12GraphicsCommandList*>(commandBuffer), m_rootSignature,
+        m_occlusionState, m_gpuTimings, m_indirectSignatures);
+}
+
 void D3D12GraphicsContextFactory::SetCommandBuffer(void* cmd)
 {
     m_externalCmdList = static_cast<ID3D12GraphicsCommandList*>(cmd);

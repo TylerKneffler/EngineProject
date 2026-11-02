@@ -59,8 +59,11 @@ Object::Object(Transform initialTransform)
 
 Object::~Object()
 {
+    if (OwnerScene) AssertSceneOwner();
     for (Component* component : Components)
-        if (component) component->OnDestroy();
+        if (component) component->FenceBackgroundWork();
+    for (Component* component : Components)
+        if (component) component->DispatchDestroy();
     for (Component* component : Components)
         delete component;
     Components.clear();
@@ -84,17 +87,47 @@ void Object::Enabled()
     AssertSceneOwner();
     if (enabled) return;
     enabled = true;
-    for (Component* comp : Components)
-        if (comp) comp->Enabled();
+    if (OwnerScene && OwnerScene->HasStarted())
+    {
+        // Scene storage order defines callback order for the whole subtree.
+        std::vector<Object*> descendants;
+        for (const auto& candidate : OwnerScene->GetObjects())
+            for (Object* parent = candidate.get(); parent; parent = parent->Parent)
+                if (parent == this)
+                {
+                    descendants.push_back(candidate.get());
+                    break;
+                }
+        for (Object* descendant : descendants)
+            if (std::any_of(OwnerScene->GetObjects().begin(),
+                    OwnerScene->GetObjects().end(),
+                    [descendant](const auto& current)
+                    { return current.get() == descendant; }))
+                descendant->Start();
+    }
 }
 
 void Object::Disabled()
 {
     AssertSceneOwner();
     if (!enabled) return;
+    const bool wasActive = IsEnabledInHierarchy();
     enabled = false;
+    if (wasActive)
+    {
+        for (Component* comp : Components)
+            if (comp) comp->DispatchDisabled();
+        for (Object* child : Children)
+            if (child) child->DisableLifecycleInHierarchy();
+    }
+}
+
+void Object::DisableLifecycleInHierarchy()
+{
     for (Component* comp : Components)
-        if (comp) comp->Disabled();
+        if (comp) comp->DispatchDisabled();
+    for (Object* child : Children)
+        if (child) child->DisableLifecycleInHierarchy();
 }
 
 void Object::Start()
@@ -102,7 +135,11 @@ void Object::Start()
     AssertSceneOwner();
     if (!IsEnabledInHierarchy()) return;
     for (Component* comp : Components)
-        if (comp) comp->Start();
+        if (comp)
+        {
+            comp->DispatchStart();
+            comp->DispatchEnabled();
+        }
 }
 
 void Object::Update()
@@ -140,7 +177,7 @@ void Object::Destroy()
 
     // Destroy components
     for (Component* comp : Components)
-        if (comp) comp->OnDestroy();
+        if (comp) { comp->FenceBackgroundWork(); comp->DispatchDestroy(); }
     for (Component* comp : Components)
     {
         if (comp)

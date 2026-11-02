@@ -36,6 +36,7 @@ public:
     void PublishUpdateOnOwner() override;
     void Deserialize(const JsonValue& value) override;
     void OnAfterDeserialize(IGraphicsProvider* graphicsProvider) override;
+    void PrepareGraphicsResources(IGraphicsProvider* graphicsProvider) override;
     bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
     bool Prepare(IGraphicsProvider* graphicsProvider);
     bool IsReady() const;

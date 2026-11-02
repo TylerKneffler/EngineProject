@@ -2,6 +2,7 @@
 #include "Core/SceneManager.h"
 #include "Core/Input/NativeInputSnapshot.h"
 #include "Core/Graphics/GraphicsCommandPacket.h"
+#include "Core/Graphics/IGraphicsProvider.h"
 #include "Core/Compoonents/UI/Canvas.h"
 #include "Core/Compoonents/UI/UIButton.h"
 #include "Core/Compoonents/UI/UIObject.h"
@@ -668,6 +669,142 @@ void TestLifecycleWorkerFenceAndClock()
         "variable step did not resume from a reset clock");
 }
 
+void TestComponentLifecycleDelivery()
+{
+    struct Probe final : Engine::Core::Component
+    {
+        std::vector<std::string>& events;
+        std::atomic<bool>& jobFinished;
+        std::thread::id owner;
+        Probe(std::vector<std::string>& value, std::atomic<bool>& finished)
+            : events(value), jobFinished(finished), owner(std::this_thread::get_id()) {}
+        bool RequiresUpdate() const override { return false; }
+        void Record(const char* event)
+        {
+            Require(std::this_thread::get_id() == owner,
+                "lifecycle callback left the simulation owner");
+            events.emplace_back(event);
+        }
+        void Start() override { Record("Start"); }
+        void Enabled() override { Record("Enabled"); }
+        void Disabled() override { Record("Disabled"); }
+        void OnDestroy() override
+        {
+            Require(jobFinished, "OnDestroy ran before a referencing scene job completed");
+            Record("OnDestroy");
+        }
+    };
+    Engine::Scene::Scene scene;
+    std::vector<std::string> events;
+    std::atomic<bool> jobFinished{false};
+    auto* object = scene.AddObject("Lifecycle probe");
+    object->AddComponent<Probe>(events, jobFinished);
+    scene.Start();
+    scene.Start();
+    object->Disabled();
+    object->Disabled();
+    object->Enabled();
+    object->Enabled();
+    std::promise<void> entered, release;
+    auto released = release.get_future().share();
+    const bool hasWorkers = Engine::Threading::JobScheduler::Get().WorkerCount() > 0;
+    if (!hasWorkers) release.set_value();
+    auto job = scene.ScheduleSceneJob([&](auto)
+    {
+        entered.set_value();
+        released.wait();
+        jobFinished = true;
+    });
+    entered.get_future().wait();
+    std::thread unblock;
+    if (hasWorkers) unblock = std::thread([&]
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        release.set_value();
+    });
+    scene.RemoveObject(object);
+    if (unblock.joinable()) unblock.join();
+    Engine::Threading::JobScheduler::Get().Wait(job);
+    Require(events == std::vector<std::string>{"Start", "Enabled", "Disabled",
+        "Enabled", "Disabled", "OnDestroy"},
+        "lifecycle callbacks were duplicated or out of order");
+}
+
+void TestDeferredGraphicsPreparation()
+{
+    struct Provider final : Engine::Graphics::IGraphicsProvider
+    {
+        Engine::Graphics::IShaderCompiler* GetShaderCompiler() override { return nullptr; }
+        Engine::Graphics::IGraphicsBufferFactory* GetBufferFactory() override { return nullptr; }
+        Engine::Graphics::IPipelineStateFactory* GetPipelineStateFactory() override { return nullptr; }
+        Engine::Graphics::IGraphicsContextFactory* GetContextFactory() override { return nullptr; }
+        Engine::Graphics::IGraphicsTextureFactory* GetTextureFactory() override { return nullptr; }
+    } provider;
+    struct Probe final : Engine::Core::Component
+    {
+        int& cpu;
+        int& graphics;
+        Probe(int& cpuCount, int& graphicsCount) : cpu(cpuCount), graphics(graphicsCount) {}
+        bool RequiresUpdate() const override { return false; }
+        void OnAfterDeserialize(IGraphicsProvider* provider) override
+        {
+            Require(!provider, "CPU deserialization received a graphics provider");
+            ++cpu;
+        }
+        void PrepareGraphicsResources(IGraphicsProvider* provider) override
+        {
+            Require(provider != nullptr, "graphics stage lacked a provider");
+            ++graphics;
+        }
+    };
+    Engine::Scene::Scene scene;
+    int cpu = 0, graphics = 0;
+    auto* component = scene.AddObject("Deferred resource")->AddComponent<Probe>(cpu, graphics);
+    component->OnAfterDeserialize(nullptr);
+    scene.QueueGraphicsPreparation();
+    Require(cpu == 1 && graphics == 0, "deserialization created resources early");
+    scene.ProcessGraphicsPreparation(&provider);
+    scene.ProcessGraphicsPreparation(&provider);
+    Require(graphics == 1, "graphics preparation was lost or duplicated");
+    scene.ClearObjects();
+    scene.QueueGraphicsPreparation();
+    scene.ProcessGraphicsPreparation(&provider);
+    Require(graphics == 1, "destroyed component received graphics preparation");
+}
+
+void TestScriptModuleJobFence()
+{
+    Engine::Threading::JobScheduler scheduler(1);
+    Engine::Threading::ScriptModuleJobs host(scheduler);
+    Engine::Threading::ScriptModuleJobsSlot() = &host;
+    std::promise<void> entered, release;
+    auto released = release.get_future().share();
+    std::atomic<bool> ranQueued{false};
+    auto running = Engine::Core::Script::SubmitJob([&]
+    {
+        entered.set_value();
+        released.wait();
+    });
+    entered.get_future().wait();
+    auto queued = Engine::Core::Script::SubmitJob([&]
+    {
+        ranQueued = true;
+    });
+    std::thread unblock([&]
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        release.set_value();
+    });
+    host.CloseAndWait();
+    unblock.join();
+    Engine::Threading::ScriptModuleJobsSlot() = nullptr;
+    running.get();
+    Require(!ranQueued && queued.wait_for(std::chrono::seconds(0)) ==
+        std::future_status::ready,
+        "module fence did not cancel and complete queued code");
+    Require(!host.Submit([] {}), "closed module accepted another callback");
+}
+
 void TestPhasedPhysicsStep()
 {
     const auto addDrop = [](Engine::Scene::Scene& scene)
@@ -681,6 +818,14 @@ void TestPhasedPhysicsStep()
         drop->transform.position = {0.f, 2.f, 0.f};
         drop->AddComponent<Engine::Components::PrimitiveObjectCollider>();
         drop->AddComponent<Engine::Components::RigidBody>();
+        // Cross the physics registry's worker-batch threshold while keeping
+        // the suspended bodies out of Bullet's world.
+        for (int index = 0; index < 260; ++index)
+        {
+            auto* inactive = scene.AddObject("Suspended body");
+            inactive->AddComponent<Engine::Components::RigidBody>()
+                ->SetCollisionSuspended(true);
+        }
         scene.Start();
         return drop;
     };
@@ -913,14 +1058,39 @@ void TestSceneTransformScheduling()
     Require(scene.GetLastPrepareTimings().transformStructureFallback==1,"structural frame rebuilt the transform hierarchy");
     scene.PrepareRenderFrame();
     Require(scene.GetLastPrepareTimings().transformStructureFallback==0,"stable scene did not resume prepared transforms");
+    Require(scene.GetLastPrepareTimings().staticRenderItemsReused==1,
+        "unchanged static mesh render item was rebuilt");
     root->transform.position.x=10; scene.PrepareRenderFrame();
     Require(scene.GetLastPrepareTimings().transformWorldUpdated==2,"scene transform phase missed a parent's descendants"); CheckTransform(*child);
+    Require(scene.GetLastPrepareTimings().staticRenderItemsUpdated==1 &&
+        scene.GetLastPrepareTimings().staticRenderItemsReused==0,
+        "parent transform edit did not refresh the child render item");
+    scene.PrepareRenderFrame();
+    Require(scene.GetLastPrepareTimings().staticRenderItemsReused==1,
+        "static render item was not reused after its transform update");
+    triangle[0].pos[0]=-2;
+    Require(childMesh->SetAuthoredVertices(triangle),"static mesh geometry edit failed");
+    scene.PrepareRenderFrame();
+    Require(scene.GetLastPrepareTimings().staticRenderItemsUpdated==1 &&
+        scene.GetLastPrepareTimings().staticRenderItemsReused==0,
+        "geometry edit did not refresh the static render item");
+    scene.PrepareRenderFrame();
+    Require(scene.GetLastPrepareTimings().staticRenderItemsReused==1,
+        "static render item was not reused after its geometry update");
+    child->transform.matrixLayer.SetLocalToLayer(
+        glm::translate(glm::mat4(1.f),glm::vec3(0.f,3.f,0.f)));
+    scene.PrepareRenderFrame();
+    Require(scene.GetLastPrepareTimings().staticRenderItemsUpdated==1 &&
+        scene.GetLastPrepareTimings().staticRenderItemsReused==0,
+        "matrix layer edit did not refresh the static render item");
     for(int frame=0;frame<16;++frame)
     {
         auto* streamed=scene.AddObject("Streamed transform"); streamed->Parent=root; streamed->transform.position.z=frame;
         scene.PrepareRenderFrame();
         Require(scene.GetLastPrepareTimings().transformStructureFallback==1 && scene.GetLastPrepareTimings().transformLocalUpdated==0,
             "streaming forced a whole-scene transform rebuild"); CheckTransform(*streamed);
+        Require(scene.GetLastPrepareTimings().staticRenderItemsReused==1,
+            "unrelated object insertion invalidated a static render item");
         scene.RemoveObject(streamed); scene.PrepareRenderFrame();
         Require(scene.GetLastPrepareTimings().transformStructureFallback==1,"streaming removal was not handled on its owner");
     }
@@ -928,9 +1098,13 @@ void TestSceneTransformScheduling()
     Require(scene.GetLastPrepareTimings().transformStructureFallback==0 && scene.GetLastPrepareTimings().transformWorldReused>=2,
         "scene did not restore static transform reuse after streaming stopped");
     child->enabled=false; scene.PrepareRenderFrame();
+    Require(scene.GetLastPrepareTimings().staticRenderItemsReused==0,
+        "hidden mesh retained a static render item");
     Require(scene.GetLastPrepareTimings().spatialRebuilds==0,
         "temporarily hidden draw rebuilt the spatial hierarchy");
     child->enabled=true; scene.PrepareRenderFrame();
+    Require(scene.GetLastPrepareTimings().staticRenderItemsUpdated==1,
+        "restored mesh did not rebuild its render item");
     Require(scene.GetLastPrepareTimings().spatialRebuilds==0,
         "restored draw rebuilt the spatial hierarchy");
     std::cout<<"Scene transforms: owner fallback during streaming, parallel-ready stable frames, descendant updates and cache recovery passed.\n";
@@ -2022,7 +2196,7 @@ void CheckAutomaticRendering()
     std::cout<<"Shared geometry, automatic batching, GPU visibility/LOD, dirty uploads, and edit isolation passed.\n";
 }
 
-void RenderAudit(const char* reportPath=".local/performance-logs/grass-automatic-instancing-render-audit.jsonl",bool matrix=false,bool storageAudit=false,bool compare=false,bool nativeAudit=false,unsigned width=1848,unsigned height=1069)
+void RenderAudit(const char* reportPath=".local/performance-logs/grass-automatic-instancing-render-audit.jsonl",bool matrix=false,bool storageAudit=false,bool compare=false,bool nativeAudit=false,unsigned width=1848,unsigned height=1069,bool reverseOrder=false)
 {
     using Clock = std::chrono::steady_clock;
     Engine::Core::Window window(GetModuleHandleW(nullptr), L"Grass render audit", width, height);
@@ -2051,7 +2225,7 @@ void RenderAudit(const char* reportPath=".local/performance-logs/grass-automatic
     {
     const unsigned mode=matrix ? pass:3u;
     const bool streaming=storageAudit && (compare ? pass>=2:pass>0);
-    const bool parallel=!compare || pass%2==1;
+    const bool parallel=!compare || ((pass%2==1) != reverseOrder);
     Engine::Threading::JobScheduler::Get().SetParallelForEnabled(parallel);
     if(compare)
     {
@@ -2283,7 +2457,9 @@ int main(int argc, char** argv)
         else if(argc>1 && std::string(argv[1])=="--static-instance-audit") RenderAudit("",false,true);
         else if(argc>1 && std::string(argv[1])=="--parallel-stage-audit") RenderAudit(".local/performance-logs/parallel-stage-",false,true);
         else if(argc>1 && std::string(argv[1])=="--parallel-stage-comparison") RenderAudit(".local/performance-logs/parallel-comparison-",false,true,true);
-        else if(argc>1 && std::string(argv[1])=="--native-submission-audit") RenderAudit(".local/performance-logs/native-submission-stage2.jsonl",false,false,false,true);
+        else if(argc>2 && std::string(argv[1])=="--current-scene-comparison") RenderAudit(argv[2],false,true,true);
+        else if(argc>2 && std::string(argv[1])=="--current-scene-comparison-reverse") RenderAudit(argv[2],false,true,true,false,1848,1069,true);
+        else if(argc>1 && std::string(argv[1])=="--native-submission-audit") RenderAudit(argc>2 ? argv[2] : ".local/performance-logs/native-submission-stage2.jsonl",false,false,false,true);
         else if(argc>1 && std::string(argv[1])=="--parallel-spatial-audit") RenderAudit(".local/performance-logs/parallel-stage5-",false,true);
         else if(argc>1 && std::string(argv[1])=="--parallel-slot-audit") RenderAudit(".local/performance-logs/parallel-slot-",false,true);
         else if(argc>1 && std::string(argv[1])=="--parallel-native-audit") RenderAudit(".local/performance-logs/parallel-native-stage7.jsonl",false,false,false,true);
@@ -2291,13 +2467,14 @@ int main(int argc, char** argv)
         else if(argc>1 && std::string(argv[1])=="--parallel-gpu-halfres-audit") RenderAudit(".local/performance-logs/parallel-gpu-halfres-stage7.jsonl",false,false,false,false,924,535);
         else if(argc>1 && std::string(argv[1])=="--parallel-snapshot-audit") RenderAudit(".local/performance-logs/parallel-snapshot-stage9.jsonl");
         else if(argc>1 && std::string(argv[1])=="--snapshot-benchmark") BenchmarkSceneSnapshot();
+        else if(argc>1 && std::string(argv[1])=="--static-render-cache-test") TestSceneTransformScheduling();
         else if(argc>1 && std::string(argv[1])=="--parallel-transform-audit") RenderAudit(".local/performance-logs/parallel-stage4-",false,true);
         else if(argc>1 && std::string(argv[1])=="--transform-benchmark") BenchmarkTransformHierarchy();
         else if(argc>1 && std::string(argv[1])=="--transform-regression") { TestTransformHierarchy(); TestSceneTransformScheduling(); }
         else if(argc>1 && std::string(argv[1])=="--component-update-regression") TestComponentUpdateScheduling();
         else if(argc>1 && std::string(argv[1])=="--physics-phase-regression") TestPhasedPhysicsStep();
         else if(argc>1 && std::string(argv[1])=="--native-regression") { TestRecordedOcclusionFeedback(); TestDx11ConstantsAndGeometry(); TestEditorFrameLifecycle(); }
-        else if(argc>1 && std::string(argv[1])=="--lifecycle-regression") { TestSceneSnapshotCommit(); TestSimulationOwnerHandoff(); TestAsyncSceneOwnerCommit(); TestLifecycleWorkerFenceAndClock(); TestSceneGpuDestructionBarrier(); }
+        else if(argc>1 && std::string(argv[1])=="--lifecycle-regression") { TestSceneSnapshotCommit(); TestSimulationOwnerHandoff(); TestAsyncSceneOwnerCommit(); TestLifecycleWorkerFenceAndClock(); TestComponentLifecycleDelivery(); TestDeferredGraphicsPreparation(); TestScriptModuleJobFence(); TestSceneGpuDestructionBarrier(); }
         else if (argc > 1 && std::string(argv[1]) == "--render-audit") RenderAudit();
         else if(argc>1 && std::string(argv[1])=="--diagnostics-audit") RenderAudit(".local/performance-logs/grass-diagnostics-audit.jsonl");
         else if (argc > 1 && std::string(argv[1]) == "--fade-render-check") CheckFadeRendering();

@@ -1,6 +1,7 @@
 #include "Core/Scene/Scene.h"
 #include "Core/Compoonents/Obj/TerrainManager.h"
 #include "Core/Compoonents/Obj/Mesh.h"
+#include "Core/Compoonents/Obj/TerrainObjectLayer.h"
 #include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Compoonents/Physics/PrimitiveObjectCollider.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
@@ -17,6 +18,7 @@
 #include <algorithm>
 #include <glm/gtc/constants.hpp>
 #include <iostream>
+#include <string_view>
 
 static void RequireAt(bool condition, int line)
 {
@@ -28,7 +30,7 @@ static void RequireAt(bool condition, int line)
 }
 #define Require(condition) RequireAt((condition), __LINE__)
 
-int main() try
+int main(int argc, char** argv) try
 {
     Engine::Scene::Scene scene;
     auto* object = scene.AddObject("Terrain manager");
@@ -49,6 +51,7 @@ int main() try
     Require(left->heights[5] == 2.f);
     const auto saved = manager->Serialize();
     manager->loadedRadius = 0;
+    manager->farRadius = 0;
     manager->SyncLoadedCells(0, 0);
     Require(manager->GetLoadedCell(1, 0) == nullptr);
     manager->SyncLoadedCells(1, 0);
@@ -112,6 +115,7 @@ int main() try
     async->maxPreparedCells = 2;
     async->maxLoadsPerUpdate = 2;
     async->maxUploadsPerUpdate = 1;
+    Require(async->AddObjectLayer("Props"));
     const auto asyncCachePath = std::filesystem::temp_directory_path() /
         ("terrain_async_cache_" + std::to_string(
             std::chrono::steady_clock::now().time_since_epoch().count()));
@@ -152,6 +156,19 @@ int main() try
         Require((*buildOrder)[0] == 0 && (*buildOrder)[1] == 1);
     }
     Require(async->GetLoadedCell(1, 0)->heights[4] == 5.f);
+    auto* asyncMesh = async->GetLoadedCell(1, 0)->Owner->GetComponent<
+        Engine::Components::Mesh>();
+    Require(asyncMesh && asyncMesh->HasBounds() &&
+        asyncMesh->GetBoundsMax().y >= 5.f);
+    Engine::Components::TerrainObjectLayer* props = nullptr;
+    for (auto* child : async->GetLoadedCell(1, 0)->Owner->Children)
+        if (child) props = child->GetComponent<
+            Engine::Components::TerrainObjectLayer>();
+    Require(props && props->layerName == "Props");
+    Engine::Components::TerrainObjectLayer::Placement placement;
+    placement.asset = "test/rock";
+    placement.position = {1.f, 2.f, 1.f};
+    props->placements.push_back(placement);
     async->UpdateStreaming(100, 100);
     Require(async->GetLoadedCellCount() == 0);
     async->UpdateStreaming(-10, 0);
@@ -161,6 +178,13 @@ int main() try
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     Require(async->GetLoadedCellCount() == 3);
+    props = nullptr;
+    for (auto* child : async->GetLoadedCell(1, 0)->Owner->Children)
+        if (child) props = child->GetComponent<
+            Engine::Components::TerrainObjectLayer>();
+    Require(props && props->placements.size() == 1 &&
+        props->HasLoadedPreparedData() &&
+        !props->GetPreparedTiles(4.f).empty());
     Require(buildCount->load() == 3);
     Require(async->GetCacheHitCount() == 3);
     const auto asyncEditPath = std::filesystem::temp_directory_path() /
@@ -215,10 +239,40 @@ int main() try
     std::filesystem::remove_all(asyncCachePath);
     std::filesystem::remove_all(asyncEditPath);
 
+    Engine::Scene::Scene cancelledScene;
+    auto* cancelledObject = cancelledScene.AddObject("Cancelled streaming");
+    auto* cancelled = cancelledObject->AddComponent<
+        Engine::Components::TerrainManager>();
+    cancelled->cellsX = cancelled->cellsY = 2;
+    cancelled->loadedRadius = cancelled->farRadius = 0;
+    cancelled->asyncStreaming = true;
+    std::atomic<int> cancelledBuilds{0};
+    cancelled->SetProceduralBuilder([&cancelledBuilds](
+        Engine::Components::TerrainManager::Cell,
+        Engine::Components::Terrain& terrain) {
+        ++cancelledBuilds;
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        terrain.Rebuild();
+    });
+    Require(cancelled->AddProceduralCell(0, 0));
+    cancelled->UpdateStreaming(0, 0);
+    cancelledScene.FenceBackgroundWork();
+    Require(cancelled->GetLoadedCellCount() == 0 &&
+        cancelled->GetPreparingCellCount() == 0);
+    for (int attempt = 0; attempt < 500 && !cancelled->GetLoadedCell(0, 0);
+        ++attempt)
+    {
+        cancelled->UpdateStreaming(0, 0);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    Require(cancelled->GetLoadedCell(0, 0) != nullptr);
+    if (argc > 1 && std::string_view(argv[1]) == "--worker-only") return 0;
+
     auto* prefetchObject = scene.AddObject("Approach prefetch");
     auto* prefetch = prefetchObject->AddComponent<Engine::Components::TerrainManager>();
     prefetch->cellsX = prefetch->cellsY = 2;
     prefetch->loadedRadius = 0;
+    prefetch->farRadius = 0;
     prefetch->asyncStreaming = true;
     prefetch->maxPreparedCells = 1;
     prefetch->maxUploadsPerUpdate = 1;
@@ -254,6 +308,7 @@ int main() try
     auto* baked = bakedObject->AddComponent<Engine::Components::TerrainManager>();
     baked->cellsX = baked->cellsY = 2;
     baked->loadedRadius = 0;
+    baked->farRadius = 0;
     baked->SetStaticCache({}, 123);
     const auto runtimeBakePath = std::filesystem::temp_directory_path() /
         ("terrain_runtime_bake_" + std::to_string(

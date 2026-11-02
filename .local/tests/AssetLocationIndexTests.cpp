@@ -5,6 +5,8 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <chrono>
+#include <thread>
 #include <crtdbg.h>
 
 namespace fs = std::filesystem;
@@ -75,5 +77,33 @@ int main()
     fs::copy_file(unpairedSource, unpairedTarget);
     fs::remove(unpairedSource);
     assert(reopened.Detect().empty());
+
+    // The editor's nonblocking scan must publish the same move on its owner.
+    const fs::path asyncRoot = root / "Async";
+    fs::create_directories(asyncRoot);
+    const fs::path asyncSource = asyncRoot / "before.asset";
+    std::ofstream(asyncSource).put('a');
+    AssetLocationIndex asynchronous;
+    asynchronous.Open(asyncRoot, true);
+    auto poll = [&](std::vector<AssetLocationIndex::Move>& result)
+    {
+        const auto deadline = std::chrono::steady_clock::now() +
+            std::chrono::seconds(10);
+        while (std::chrono::steady_clock::now() < deadline)
+        {
+            if (asynchronous.PollDetect(result)) return true;
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        return false;
+    };
+    asynchronous.RequestDetect();
+    moves.clear();
+    assert(poll(moves) && moves.empty());
+    fs::rename(asyncSource, asyncRoot / "after.asset");
+    asynchronous.RequestDetect();
+    assert(poll(moves) && moves.size() == 1);
+    assert(moves[0].oldPath == "before.asset" &&
+        moves[0].newPath == "after.asset");
+    asynchronous.Accept();
     fs::remove_all(root);
 }

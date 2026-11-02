@@ -42,6 +42,7 @@ public:
 
     void Deserialize(const JsonValue& value) override;
     void OnAfterDeserialize(IGraphicsProvider* graphicsProvider) override;
+    void PrepareGraphicsResources(IGraphicsProvider* graphicsProvider) override;
     bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
     void SetAnimationManager(SpriteAnimationManager* manager);
     // Resolves the animation-manager component once and captures everything

@@ -28,6 +28,11 @@ public:
     bool IsFrameComplete(uint64_t token) override
     { return m_core.IsFrameComplete(token); }
     std::unique_ptr<Engine::Graphics::IGraphicsContext> CreateFrameGraphicsContext() override;
+    bool RecordWorkerCommands(const Engine::Graphics::GraphicsCommandPacket&) override;
+    bool SupportsWorkerCommands() const override { return true; }
+    void SetWorkerRecordingEnabled(bool enabled) override
+    { m_workerRecordingEnabled = enabled; }
+    void SubmitWorkerCommands() override;
     Engine::Graphics::FrameTimingTelemetry GetFrameTimingTelemetry() const override
     { return m_frameTelemetry; }
 private:
@@ -37,6 +42,10 @@ private:
     VulkanRenderCore m_core;
     std::unique_ptr<VulkanGraphicsProvider> m_provider;
     VkCommandBuffer m_commandBuffer = VK_NULL_HANDLE;
+    VkCommandPool m_workerCommandPools[2]{};
+    VkCommandBuffer m_workerCommandBuffers[2]{};
+    bool m_workerCommandsReady = false;
+    bool m_workerRecordingEnabled = false;
     uint32_t m_width = 0, m_height = 0;
     bool m_renderPassActive = false;
     VulkanPostProcess m_postProcess;

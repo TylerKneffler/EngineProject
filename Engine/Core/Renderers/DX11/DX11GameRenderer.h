@@ -29,6 +29,11 @@ public:
     uint64_t GetSubmittedFrameToken() const override { return m_submittedFrameToken; }
     bool IsFrameComplete(uint64_t token) override;
     std::unique_ptr<Engine::Graphics::IGraphicsContext> CreateFrameGraphicsContext() override;
+    bool RecordWorkerCommands(const Engine::Graphics::GraphicsCommandPacket&) override;
+    bool SupportsWorkerCommands() const override
+    { return m_deferredCommandsEnabled &&
+        (!m_alternatingDeferredBenchmark || (m_frameNumber & 1u)); }
+    void SubmitWorkerCommands() override;
     Engine::Graphics::FrameTimingTelemetry GetFrameTimingTelemetry() const override
     { return m_frameTelemetry; }
 
@@ -50,6 +55,11 @@ private:
     void SignalFrameCompletion();
     Microsoft::WRL::ComPtr<ID3D11Device> m_device;
     Microsoft::WRL::ComPtr<ID3D11DeviceContext> m_context;
+    Microsoft::WRL::ComPtr<ID3D11DeviceContext> m_workerContext;
+    Microsoft::WRL::ComPtr<ID3D11CommandList> m_workerCommandList;
+    bool m_deferredCommandsEnabled = false;
+    bool m_alternatingDeferredBenchmark = false;
+    uint64_t m_frameNumber = 0;
     Microsoft::WRL::ComPtr<IDXGISwapChain> m_swapChain;
     Microsoft::WRL::ComPtr<ID3D11RenderTargetView> m_rtv;
     Microsoft::WRL::ComPtr<ID3D11Texture2D> m_depthTexture;

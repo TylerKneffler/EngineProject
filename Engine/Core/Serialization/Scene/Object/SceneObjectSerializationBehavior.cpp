@@ -185,7 +185,8 @@ bool DeserializeExpandedObject(
             component->Deserialize(migrated);
         }
         else component->Deserialize(componentNode);
-        component->OnAfterDeserialize(graphicsProvider);
+        component->OnAfterDeserialize(nullptr);
+        if (graphicsProvider) scene.QueueGraphicsPreparation();
         object.AssertSceneOwner();
         object.Components.push_back(component);
     }
@@ -337,7 +338,9 @@ void SceneObjectBehavior::ApplyBakedMaterialOverrides(Engine::Core::Object& root
         if (!material)
             material = object->AddComponent<Engine::Components::Material>();
         material->Deserialize(entry["material"]);
-        material->OnAfterDeserialize(graphicsProvider);
+        material->OnAfterDeserialize(nullptr);
+        if (graphicsProvider && object->GetScene())
+            object->GetScene()->QueueGraphicsPreparation();
 
         Engine::Rendering::BakedLightingData* baked = object->GetComponent<Engine::Rendering::BakedLightingData>();
         if (!baked)
@@ -599,10 +602,12 @@ bool SceneObjectBehavior::ApplyObjectState(Engine::Core::Object& object, const J
             replacements.push_back(std::move(replacement));
         }
         if (object.GetScene())
+            object.GetScene()->WaitForSceneJobs();
+        if (object.GetScene())
             object.GetScene()->WaitForGpuResourceDestruction();
         for (Engine::Core::Component* component : object.Components)
         {
-            if (component) component->OnDestroy();
+            if (component) { component->FenceBackgroundWork(); component->DispatchDestroy(); }
             delete component;
         }
         object.AssertSceneOwner();
@@ -630,7 +635,9 @@ bool SceneObjectBehavior::ApplyObjectState(Engine::Core::Object& object, const J
             (*component)->Deserialize(migrated);
         }
         else (*component)->Deserialize(source);
-        (*component)->OnAfterDeserialize(graphicsProvider);
+        (*component)->OnAfterDeserialize(nullptr);
+        if (graphicsProvider && object.GetScene())
+            object.GetScene()->QueueGraphicsPreparation();
     }
     const JsonValue& children = node["children"];
     if (children.ArraySize() != object.Children.size()) return false;

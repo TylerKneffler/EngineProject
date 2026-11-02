@@ -6,6 +6,7 @@
 #include "Core/Startup/StartupSplash.h"
 #include "Core/Graphics/IGraphicsContext.h"
 #include "Core/Graphics/GraphicsCommandPacket.h"
+#include "Core/Rendering/RenderJobs.h"
 #include "Core/Renderers/RendererFactory.h"
 #include "Core/Renderers/IGameRenderer.h"
 #include "Core/Object.h"
@@ -16,9 +17,11 @@
 #include "Core/Input/NativeInputSnapshot.h"
 #include <atomic>
 #include <condition_variable>
+#include <chrono>
 #include <deque>
 #include <exception>
 #include <filesystem>
+#include <fstream>
 #include <mutex>
 #include <thread>
 #include <utility>
@@ -81,6 +84,7 @@ class SimulationLoop
 public:
     struct TickResult
     {
+        std::chrono::steady_clock::time_point startedAt;
         ::Engine::Core::NativeInputSnapshot input;
         std::shared_ptr<const ::Engine::Scene::Scene::SceneSnapshot> snapshot;
         ::Engine::Scene::Scene::RetiredGraphicsResources retired;
@@ -110,6 +114,7 @@ public:
         if (m_stopping || m_busy)
             throw std::logic_error("Simulation handoff already has a frame");
         m_deltaTime = deltaTime;
+        m_frameStartedAt = std::chrono::steady_clock::now();
         m_input = std::move(input);
         m_busy = true;
         m_work = Work::Update;
@@ -132,7 +137,7 @@ public:
         if (!renderFrame)
         {
             m_busy = false;
-            return {std::move(m_input), {}, {}, {}, {}};
+            return {m_frameStartedAt, std::move(m_input), {}, {}, {}, {}};
         }
         m_previousOcclusionCulled = previousOcclusionCulled;
         m_work = Work::Prepare;
@@ -145,7 +150,7 @@ public:
             auto failure = std::exchange(m_failure, nullptr);
             std::rethrow_exception(failure);
         }
-        return {std::move(m_input), std::move(m_snapshot),
+        return {m_frameStartedAt, std::move(m_input), std::move(m_snapshot),
             std::move(m_retired),
             std::move(m_shadowCommands), std::move(m_sceneCommands)};
     }
@@ -242,6 +247,7 @@ private:
     std::shared_ptr<const ::Engine::Graphics::GraphicsCommandPacket> m_sceneCommands;
     std::exception_ptr m_failure;
     float m_deltaTime = 0.f;
+    std::chrono::steady_clock::time_point m_frameStartedAt;
     uint32_t m_previousOcclusionCulled = 0;
     bool m_ready = false;
     bool m_busy = false;
@@ -260,6 +266,21 @@ public:
     explicit RenderLoop(::Engine::Renderers::IGameRenderer& renderer)
         : m_renderer(renderer)
     {
+        char workerFlag[2]{};
+        m_workerRecordingEnabled = GetEnvironmentVariableA(
+            "ENGINE_WORKER_COMMAND_RECORDING", workerFlag, sizeof(workerFlag)) == 1 &&
+            workerFlag[0] == '1';
+        m_renderer.SetWorkerRecordingEnabled(
+            m_workerRecordingEnabled && m_renderer.SupportsWorkerCommands());
+        wchar_t path[32768]{};
+        const DWORD length = GetEnvironmentVariableW(
+            L"ENGINE_COMMAND_RECORD_BENCHMARK", path, 32768);
+        if (length && length < 32768)
+        {
+            m_benchmark.open(std::filesystem::path(path), std::ios::trunc);
+            if (m_benchmark)
+                m_benchmark << "frame,worker,shadow_ms,frame_ms,latency_ms\n";
+        }
         m_worker = std::thread([this] { Run(); });
     }
 
@@ -283,6 +304,7 @@ public:
     {
         std::lock_guard submitLock(m_submitMutex);
         Packet packet;
+        packet.startedAt = tick.startedAt;
         packet.snapshot = std::move(tick.snapshot);
         packet.retired = std::move(tick.retired);
         packet.shadowCommands = std::move(tick.shadowCommands);
@@ -330,6 +352,7 @@ private:
     enum class Work { None, BeginFrame, Frame, Resize, Idle };
     struct Packet
     {
+        std::chrono::steady_clock::time_point startedAt;
         std::shared_ptr<const ::Engine::Scene::Scene::SceneSnapshot> snapshot;
         ::Engine::Scene::Scene::RetiredGraphicsResources retired;
         std::shared_ptr<const ::Engine::Graphics::GraphicsCommandPacket> shadowCommands;
@@ -385,12 +408,28 @@ private:
 
     void Draw(Packet packet)
     {
+        const auto frameStart = std::chrono::steady_clock::now();
         if (!packet.snapshot ||
             !packet.shadowCommands || !packet.sceneCommands)
             throw std::logic_error("Render handoff has no recorded frame");
         auto graphicsContext = m_renderer.CreateFrameGraphicsContext();
-        if (graphicsContext)
+        const auto shadowStart = std::chrono::steady_clock::now();
+        // The shadow stream has its own native allocator/pool. Keep the render
+        // owner's frame context untouched while its recording worker runs.
+        bool workerRecorded = false;
+        if (m_workerRecordingEnabled && m_renderer.SupportsWorkerCommands())
+        {
+            auto shadowRecording = ::Engine::Rendering::RenderJobs::Get().Submit(
+                [this, shadow = packet.shadowCommands]
+                { return m_renderer.RecordWorkerCommands(*shadow); });
+            workerRecorded = shadowRecording.get();
+        }
+        if (workerRecorded)
+            m_renderer.SubmitWorkerCommands();
+        else if (graphicsContext)
             packet.shadowCommands->Replay(*graphicsContext);
+        const double shadowMs = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - shadowStart).count();
         m_renderer.Clear(0.1f, 0.1f, 0.1f);
         if (graphicsContext)
             packet.sceneCommands->Replay(*graphicsContext);
@@ -398,6 +437,14 @@ private:
             packet.sceneCommands->GetReplayOcclusionCulledCount(),
             std::memory_order_release);
         m_renderer.EndFrame();
+        if (m_benchmark)
+            m_benchmark << ++m_benchmarkFrame << ',' << (workerRecorded ? 1 : 0)
+                << ',' << shadowMs << ',' <<
+                std::chrono::duration<double, std::milli>(
+                    std::chrono::steady_clock::now() - frameStart).count()
+                << ',' << std::chrono::duration<double, std::milli>(
+                    std::chrono::steady_clock::now() - packet.startedAt).count()
+                << '\n';
         const uint64_t token = m_renderer.GetSubmittedFrameToken();
         if (token)
             m_inFlightFrames.push_back(token);
@@ -474,6 +521,9 @@ private:
     }
 
     ::Engine::Renderers::IGameRenderer& m_renderer;
+    bool m_workerRecordingEnabled = false;
+    std::ofstream m_benchmark;
+    uint64_t m_benchmarkFrame = 0;
     std::atomic<uint32_t> m_lastOcclusionCulled{0};
     std::mutex m_submitMutex;
     std::mutex m_mutex;

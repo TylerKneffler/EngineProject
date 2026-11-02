@@ -79,12 +79,11 @@ public:
         if(!m_nodes.empty()) query(query,0);
         return result;
     }
-    const std::vector<uint8_t>& Query(const glm::mat4& clip) const
+    // Query without touching the view cache so independent views can prepare
+    // visibility concurrently against the same published tree.
+    std::vector<uint8_t> QueryUncached(const glm::mat4& clip) const
     {
-        for(const auto& view:m_views) if(view.valid && view.clip==clip) return view.visible;
-        auto& cache=m_views[m_nextView++ % m_views.size()];
-        cache.clip=clip; cache.valid=true;
-        auto& visible=cache.visible; visible.assign(m_bounds.size(),m_ready ? 0:1);
+        std::vector<uint8_t> visible(m_bounds.size(),m_ready ? 0:1);
         if(!m_ready) return visible;
         for (auto i:m_unbounded) visible[i]=1;
         glm::vec4 row[4];
@@ -104,6 +103,15 @@ public:
         };
         if (!m_nodes.empty()) query(query,0);
         return visible;
+    }
+    const std::vector<uint8_t>& Query(const glm::mat4& clip) const
+    {
+        for(const auto& view:m_views) if(view.valid && view.clip==clip) return view.visible;
+        auto& cache=m_views[m_nextView++ % m_views.size()];
+        cache.clip=clip;
+        cache.visible=QueryUncached(clip);
+        cache.valid=true;
+        return cache.visible;
     }
 };
 }

@@ -6,6 +6,7 @@
 #include "Engine/Editor/Core/View/Templates/Assets/AssetPreviewCache.h"
 #include "AssetLocationIndex.h"
 #include "Core/IO/DirectorySnapshotCache.h"
+#include "Core/Model/ImportedModel.h"
 
 namespace Engine::Core { class Object; }
 namespace Engine::Scene { class Scene; }
@@ -54,7 +55,7 @@ public:
         const std::string& destinationDirectory = {},
         std::string* copiedPath = nullptr);
     void CheckForExternalMoves();
-    bool PollDirectoryCache() { const bool directory=m_directoryCache.Poll(); const bool previews=m_previewCache.Poll(); return directory || previews; }
+    bool PollDirectoryCache();
     void RecordKnownMove(const std::string& oldPath, const std::string& newPath)
     { m_locationIndex.RecordKnownMove(oldPath, newPath); }
     const std::string& GetSelectedPath() const { return m_selectedPath; }
@@ -131,6 +132,8 @@ private:
     float m_screenRight = 0.f;
     float m_screenBottom = 0.f;
     AssetLocationIndex m_locationIndex;
+    std::future<Engine::Model::ModelImportResult> m_extractionPending;
+    std::string m_extractionAssetsPath;
     std::vector<AssetLocationIndex::Move> m_externalMoves;
     bool m_locationCheckPending = false;
 };

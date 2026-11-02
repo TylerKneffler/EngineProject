@@ -108,6 +108,7 @@ public:
     void FinalizeFrame() override;
     Engine::Graphics::FrameTimingTelemetry GetFrameTimingTelemetry() const override;
     std::unique_ptr<Engine::Graphics::IGraphicsContext> CreateContext() override;
+    std::unique_ptr<Engine::Graphics::IGraphicsContext> CreateContextForCommandBuffer(void*) override;
 
 private:
     uint32_t m_preparedFrameSlot = 0;

@@ -228,14 +228,18 @@ void VulkanGraphicsContextFactory::SetDevice(VkDevice device, float timestampPer
 }
 
 void VulkanGraphicsContextFactory::PrepareFrame(uint32_t frameSlot)
+{ PrepareFrameForCommandBuffer(frameSlot, m_commandBuffer); }
+
+void VulkanGraphicsContextFactory::PrepareFrameForCommandBuffer(
+    uint32_t frameSlot, VkCommandBuffer commandBuffer)
 {
     m_preparedFrameSlot = frameSlot;
     ++m_preparedFrameSerial;
     if(m_textureSystem) m_textureSystem->PrepareFrame(frameSlot);
     if (m_occlusionState)
-        m_occlusionState->Prepare(frameSlot, m_commandBuffer);
+        m_occlusionState->Prepare(frameSlot, commandBuffer);
     if (m_gpuTimings)
-        m_gpuTimings->Prepare(frameSlot, m_commandBuffer);
+        m_gpuTimings->Prepare(frameSlot, commandBuffer);
     if (m_computeDescriptors)
         m_computeDescriptors->Prepare(frameSlot);
 }

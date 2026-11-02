@@ -30,6 +30,12 @@ void Sprite::Deserialize(const JsonValue& value)
 
 void Sprite::OnAfterDeserialize(IGraphicsProvider* graphicsProvider)
 {
+    if (graphicsProvider && !DeferGraphicsPreparation(graphicsProvider))
+        PrepareGraphicsResources(graphicsProvider);
+}
+
+void Sprite::PrepareGraphicsResources(IGraphicsProvider* graphicsProvider)
+{
     Prepare(graphicsProvider);
 }
 

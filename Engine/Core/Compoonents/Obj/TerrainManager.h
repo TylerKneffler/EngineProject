@@ -19,9 +19,12 @@
 #include <chrono>
 #include <vector>
 
+namespace Engine::Scene { class Scene; }
+
 namespace Engine::Components
 {
 class Camera;
+class TerrainObjectLayer;
 class TerrainManager final : public Engine::Core::Component
 {
 public:
@@ -234,6 +237,7 @@ public:
     JsonValue Serialize() const override;
     void Deserialize(const JsonValue& value) override;
     void OnAfterDeserialize(IGraphicsProvider* provider) override;
+    void PrepareGraphicsResources(IGraphicsProvider* provider) override;
     bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
 private:
     std::map<Cell, JsonValue> m_cells;
@@ -359,6 +363,8 @@ private:
     {
         Cell cell;
         uint64_t revision = 0, cacheSignature = 0;
+        Engine::Scene::Scene* scene = nullptr;
+        uint64_t sceneGeneration = 0;
         int cellsX = 0, cellsY = 0, lodStride = 1;
         float cellWidth = 1.f, cellDepth = 1.f;
         bool hasSaved = false, edited = false;
@@ -370,6 +376,8 @@ private:
         std::function<void(Cell, Terrain&)> builder;
         std::optional<Terrain::Prepared> prepared;
         bool preparedCacheHit = false;
+        std::vector<std::pair<std::string, JsonValue>> objectLayers;
+        std::vector<std::unique_ptr<TerrainObjectLayer>> preparedLayers;
     };
     struct PreparedCell
     {
@@ -377,6 +385,8 @@ private:
         uint64_t revision = 0;
         bool cacheHit = false;
         Terrain::Prepared terrain;
+        uint64_t sceneGeneration = 0;
+        std::vector<std::unique_ptr<TerrainObjectLayer>> objectLayers;
     };
     std::thread m_prepareWorker;
     mutable std::mutex m_prepareMutex;
@@ -384,8 +394,8 @@ private:
     std::deque<PrepareTask> m_prepareQueue;
     std::deque<PreparedCell> m_preparedCells;
     std::map<Cell, uint64_t> m_preparingCells;
-    uint64_t m_prepareRevision = 1;
-    bool m_stopPrepareWorker = false;
+    std::atomic<uint64_t> m_prepareRevision{1};
+    std::atomic<bool> m_stopPrepareWorker{false};
     bool m_haveLastCenter = false;
     bool m_editorStreaming = false;
     Cell m_lastCenter{0, 0};

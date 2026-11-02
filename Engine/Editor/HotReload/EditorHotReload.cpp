@@ -18,6 +18,8 @@ EditorHotReload::EditorHotReload(EditorState& editorState, ConsoleView* console,
 
 EditorHotReload::~EditorHotReload()
 {
+    if (m_moduleJobs) m_moduleJobs->CloseAndWait();
+    if (m_setJobHost) m_setJobHost(nullptr);
     if (m_process)
     {
         if (m_processJob) TerminateJobObject(m_processJob, 1);
@@ -199,7 +201,8 @@ void EditorHotReload::PollCompile()
 
 bool EditorHotReload::LoadModule(const std::filesystem::path& path,
     HMODULE& module, std::vector<std::string>& types,
-    CreateScript& createFunction)
+    CreateScript& createFunction, SetJobHost& setJobHost,
+    Engine::Threading::IScriptModuleJobs* jobs)
 {
     module = LoadLibraryW(path.wstring().c_str());
     if (!module) return false;
@@ -209,12 +212,15 @@ bool EditorHotReload::LoadModule(const std::filesystem::path& path,
         GetProcAddress(module, "EngineScriptTypeName"));
     createFunction = reinterpret_cast<CreateScript>(
         GetProcAddress(module, "EngineCreateScript"));
-    if (!count || !name || !createFunction)
+    setJobHost = reinterpret_cast<SetJobHost>(
+        GetProcAddress(module, "EngineSetScriptJobHost"));
+    if (!count || !name || !createFunction || !setJobHost)
     {
         FreeLibrary(module);
         module = nullptr;
         return false;
     }
+    setJobHost(jobs);
     for (int index = 0; index < count(); ++index)
         if (const char* type = name(index); type && *type)
             types.emplace_back(type);
@@ -254,16 +260,22 @@ bool EditorHotReload::ApplyModule()
     HMODULE candidate = nullptr;
     std::vector<std::string> candidateTypes;
     CreateScript candidateCreate = nullptr;
-    if (!LoadModule(candidatePath, candidate, candidateTypes, candidateCreate))
+    SetJobHost candidateSetJobHost = nullptr;
+    auto candidateJobs = std::make_unique<Engine::Threading::ScriptModuleJobs>();
+    if (!LoadModule(candidatePath, candidate, candidateTypes, candidateCreate,
+        candidateSetJobHost, candidateJobs.get()))
         return false;
 
     if (BeforeApply) BeforeApply();
     Engine::Scene::Scene* scene = m_editorState.GetScene();
     if (!scene)
     {
+        candidateJobs->CloseAndWait();
+        candidateSetJobHost(nullptr);
         FreeLibrary(candidate);
         return false;
     }
+    if (m_moduleJobs) m_moduleJobs->CloseAndWait();
     const std::string snapshot = scene->SaveToString();
     ::Engine::Scene::Scene::ObjectPath selectedPath;
     scene->TryGetObjectPath(scene->GetSelectedObject(), selectedPath);
@@ -291,9 +303,13 @@ bool EditorHotReload::ApplyModule()
     if (!scene->LoadFromString(snapshot))
     {
         scene->ClearObjects();
+        candidateJobs->CloseAndWait();
+        candidateSetJobHost(nullptr);
         for (const auto& type : candidateTypes) Engine::Serialization::SceneSerializer::Unregister(type);
         for (auto& [type, factory] : previousFactories)
             if (factory) Engine::Serialization::SceneSerializer::Register(type, std::move(factory));
+        m_moduleJobs = std::make_unique<Engine::Threading::ScriptModuleJobs>();
+        if (m_setJobHost) m_setJobHost(m_moduleJobs.get());
         scene->LoadFromString(snapshot);
         m_editorState.RefreshSelectionAfterReload(selectedPath);
         FreeLibrary(candidate);
@@ -301,10 +317,14 @@ bool EditorHotReload::ApplyModule()
     }
 
     m_editorState.RefreshSelectionAfterReload(selectedPath);
+    if (m_setJobHost) m_setJobHost(nullptr);
     m_module = candidate;
     m_loadedModulePath = candidatePath;
     m_registeredTypes = std::move(candidateTypes);
     m_createScript = candidateCreate;
+    m_setJobHost = candidateSetJobHost;
+    m_moduleJobs = std::move(candidateJobs);
+    previousFactories.clear();
     if (previousModule)
     {
         FreeLibrary(previousModule);

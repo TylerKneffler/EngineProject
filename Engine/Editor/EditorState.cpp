@@ -431,7 +431,7 @@ void EditorState::CheckAssetLocations()
 
 bool EditorState::PollBackgroundWork()
 {
-    return m_primaryAssets && m_primaryAssets->IsOpen() && m_primaryAssets->PollDirectoryCache();
+    return m_primaryAssets && m_primaryAssets->PollDirectoryCache();
 }
 
 // ---------------------------------------------------------------------------

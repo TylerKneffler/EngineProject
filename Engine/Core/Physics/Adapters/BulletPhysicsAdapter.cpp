@@ -11,6 +11,7 @@
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Physics/Internal/PhysicsInternal.h"
+#include "Core/Threading/JobScheduler.h"
 #include <algorithm>
 #include <chrono>
 #include <array>
@@ -817,13 +818,32 @@ void BulletPhysicsAdapter::PrepareStep(double deltaTime)
     if(m_impl->bodyRegistryRevision!=bodyRevision || m_impl->colliderRegistryRevision!=colliderRevision || m_impl->activityRevision!=activityRevision)
     {
         m_impl->activeBodies.clear(); m_impl->activeColliders.clear();
-        for(auto* body:scene.GetComponents<Engine::Components::RigidBody>())
-            if(!body->IsCollisionSuspended()) m_impl->activeBodies.push_back(body);
-        for(auto* collider:scene.GetComponents<Engine::Components::MeshObjectCollider>())
+        // The owner keeps the component registry stable until this join. Workers
+        // only inspect independent component metadata; native Bullet setup and
+        // the ordered active lists remain on the simulation owner.
+        const auto& registeredBodies = scene.GetComponents<Engine::Components::RigidBody>();
+        const auto& registeredColliders = scene.GetComponents<Engine::Components::MeshObjectCollider>();
+        std::vector<uint8_t> bodyActive(registeredBodies.size());
+        std::vector<uint8_t> colliderActive(registeredColliders.size());
+        auto& jobs = Engine::Threading::JobScheduler::Get();
+        jobs.For(registeredBodies.size() + registeredColliders.size(), 256,
+            [&](size_t index)
         {
+            if (index < registeredBodies.size())
+            {
+                bodyActive[index] =
+                    !registeredBodies[index]->IsCollisionSuspended();
+                return;
+            }
+            index -= registeredBodies.size();
+            auto* collider = registeredColliders[index];
             const auto* body=collider->Owner->GetComponent<Engine::Components::RigidBody>();
-            if(!body || !body->IsCollisionSuspended()) m_impl->activeColliders.push_back(collider);
-        }
+            colliderActive[index] = !body || !body->IsCollisionSuspended();
+        });
+        for (size_t index = 0; index < registeredBodies.size(); ++index)
+            if (bodyActive[index]) m_impl->activeBodies.push_back(registeredBodies[index]);
+        for (size_t index = 0; index < registeredColliders.size(); ++index)
+            if (colliderActive[index]) m_impl->activeColliders.push_back(registeredColliders[index]);
         m_impl->bodyRegistryRevision=bodyRevision; m_impl->colliderRegistryRevision=colliderRevision; m_impl->activityRevision=activityRevision;
     }
     const auto& meshColliders=m_impl->activeColliders;

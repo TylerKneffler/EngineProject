@@ -211,8 +211,11 @@ public:
     void Deserialize(const JsonValue& value) override;
     void OnAfterDeserialize(IGraphicsProvider* graphicsProvider) override
     {
-        PrepareTextures(graphicsProvider);
+        if (graphicsProvider && !DeferGraphicsPreparation(graphicsProvider))
+            PrepareGraphicsResources(graphicsProvider);
     }
+    void PrepareGraphicsResources(IGraphicsProvider* graphicsProvider) override
+    { PrepareTextures(graphicsProvider); }
 
 private:
     static std::string TexturePath(const std::shared_ptr<Texture>& texture);

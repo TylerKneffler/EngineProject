@@ -262,6 +262,8 @@ public:
     void        Deserialize(const JsonValue& v) override;
     void        DeserializeLegacyMorphTargets(const JsonValue& value);
     void        OnAfterDeserialize(IGraphicsProvider* graphicsProvider) override;
+    void PrepareGraphicsResources(IGraphicsProvider* graphicsProvider) override;
+    void DeferGraphicsBuffers() { m_bufferFactory = nullptr; m_ready = false; }
 
 private:
     bool UsesDeferredGraphicsRetirement() const;

@@ -10,6 +10,7 @@
 #include <thread>
 #include "Core/Rendering/RenderPerformance.h"
 #include "Engine/Editor/Diagnostics/PerformanceMetrics.h"
+#include "Engine/Editor/Diagnostics/EditorFrameProfiler.h"
 #include "Core/Graphics/IGraphicsContext.h"
 
 namespace Engine::Scene { class Scene; }
@@ -17,7 +18,6 @@ namespace Engine::Renderers { class IEditorRenderer; }
 
 namespace Engine::Editor
 {
-struct EditorFrameProfileSample;
 class PerformanceRecording;
 struct PerformanceCoreLoad
 {
@@ -44,7 +44,7 @@ struct PerformanceSnapshot
     uint64_t systemCache = 0;
     uint64_t commitUsed = 0;
     uint64_t commitLimit = 0;
-    std::array<float, 5> gpuEngines{};
+    std::array<float, 6> gpuEngines{};
     std::vector<PerformanceGpuEngineLoad> gpuEngineInstances;
     uint64_t gpuMemoryUsed = 0;
     uint64_t gpuMemoryBudget = 0;
@@ -120,6 +120,8 @@ private:
     std::string m_recordingError;
     struct TimingValue { const char* label; double milliseconds; };
     std::vector<TimingValue> m_frameTimings;
+    std::array<EditorFrameProfileSample::StageWork,5> m_stageWork{};
+    double m_frameLatencyMs=0;
     std::vector<TimingValue> m_updateTimings;
     std::vector<TimingValue> m_renderTimings;
     std::vector<TimingValue> m_gpuQueryTimings;

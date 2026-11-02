@@ -236,6 +236,7 @@ public:
         double capacityMs = 0.0;
         double spatialMs = 0.0;
         uint64_t boundsReused=0,boundsUpdated=0;
+        uint64_t staticRenderItemsReused=0,staticRenderItemsUpdated=0;
         double workerMs=0,mainJobMs=0,workerWaitMs=0,workerQueueMs=0;
         double transformsMs=0,transformSnapshotMs=0,transformComputeMs=0,transformCommitMs=0;
         uint64_t transformLocalUpdated=0,transformWorldUpdated=0,transformWorldReused=0,transformLevels=0;
@@ -295,6 +296,9 @@ public:
     // multiple views can then reuse the resulting object, light, material,
     // and skin data.
     void PrepareRenderFrame();
+    void QueueGraphicsPreparation()
+    { AssertOwnerThread(); m_graphicsPreparationPending = true; }
+    void ProcessGraphicsPreparation(IGraphicsProvider* graphicsProvider);
     std::shared_ptr<const NativeRenderPacket> TakeNativeRenderPacket();
     void RetainNativePacketMeshBuffers(const NativeRenderPacket& packet,
         Engine::Graphics::GraphicsCommandPacket& commands) const;
@@ -529,6 +533,7 @@ public:
     bool IsOwnerThread() const
     { return std::this_thread::get_id() == m_ownerThread; }
     void FenceBackgroundWork();
+    void WaitForSceneJobs();
     // Call only while the current owner is idle and no scene readers are active.
     // The standalone game uses this once at worker startup and once at shutdown.
     void TransferOwnerTo(std::thread::id nextOwner)
@@ -914,6 +919,15 @@ private:
         // renderer-owned view of the authored mesh, never the mesh itself.
         IGraphicsBuffer* warpedVertexBuffer = nullptr;
         glm::mat4 world{1.f};
+        glm::mat4 authoredWorld{1.f};
+        glm::vec3 boundsMinimum{0.f}, boundsMaximum{0.f};
+        bool hasBounds = false;
+        bool hasMorphTargets = false;
+        bool hasSurfaceOffsets = false;
+        bool castsShadows = true;
+        bool terrainSurface = false;
+        bool terrainCell = false;
+        bool completeTerrainFootprint = false;
         // Non-zero only for a portal-split chart instance. Object.hlsl clips
         // against this world-space plane without modifying the mesh buffer.
         glm::vec4 traversalClipPlane{0.f};
@@ -931,6 +945,16 @@ private:
     };
 
     std::vector<FrameRenderItem> m_frameRenderItems;
+    struct StaticRenderItemCache
+    {
+        FrameRenderItem item;
+        uint64_t worldRevision = 0;
+        uint64_t meshRevision = 0;
+        uint64_t geometryRevision = 0;
+        bool matrixLayerEnabled = false;
+        glm::mat4 matrixLayer{1.f};
+    };
+    std::unordered_map<Object*, StaticRenderItemCache> m_staticRenderItemCache;
     using RenderObjectKey=std::tuple<uintptr_t,int,uintptr_t,bool>;
     std::map<RenderObjectKey,uint32_t> m_renderObjectSlots;
     std::vector<uint32_t> m_freeRenderObjectSlots;
@@ -1083,6 +1107,8 @@ private:
     std::unordered_set<const void*> m_grassGpuResources;
     PrepareTimings m_lastPrepareTimings{};
     bool m_hasStarted = false;
+    bool m_graphicsPreparationPending = false;
+    uint64_t m_lifecycleRevision = 0;
     size_t m_particleBudget = 100000;
     float m_deltaTime = 0.f;
     Engine::Time::SimulationClock m_clock;

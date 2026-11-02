@@ -14,7 +14,9 @@
 #include <cmath>
 #include <iomanip>
 #include <filesystem>
+#include <map>
 #include <numeric>
+#include <set>
 #include <sstream>
 
 #pragma comment(lib, "pdh.lib")
@@ -29,13 +31,13 @@ constexpr EditorUiColor kKernelColor{ .65f, .38f, 1.f, 1.f };
 constexpr EditorUiColor kProcessColor{ .18f, .82f, .57f, 1.f };
 constexpr EditorUiColor kCacheColor{ .95f, .68f, .20f, 1.f };
 constexpr EditorUiColor kOtherMemoryColor{ .25f, .53f, .75f, 1.f };
-constexpr std::array<EditorUiColor, 5> kGpuColors{{
+constexpr std::array<EditorUiColor, 6> kGpuColors{{
     { .30f, .82f, .42f, 1.f }, { .10f, .67f, .75f, 1.f },
     { .95f, .58f, .18f, 1.f }, { .90f, .34f, .50f, 1.f },
-    { .62f, .45f, .92f, 1.f }
+    { .62f, .45f, .92f, 1.f }, { .65f, .65f, .65f, 1.f }
 }};
 constexpr const char* kGpuLabels[] = {
-    "3D", "Compute", "Copy", "Video decode", "Video encode"
+    "3D", "Compute", "Copy", "Video decode", "Video encode", "Other"
 };
 
 std::string FormatBytes(uint64_t bytes)
@@ -121,7 +123,13 @@ private:
         ULONG interruptCount = 0;
     };
     using NtQuerySystemInformationFn = LONG (WINAPI*)(ULONG, PVOID, ULONG, PULONG);
-    struct GpuCounter { PDH_HCOUNTER handle = nullptr; int category = 0; };
+    struct GpuCounter
+    {
+        PDH_HCOUNTER handle = nullptr;
+        int category = 0;
+        std::string engineId;
+        std::wstring path;
+    };
 
     bool QueryProcessorTimes(std::vector<ProcessorTimes>& values)
     {
@@ -223,6 +231,13 @@ private:
     void InitializeGpuCounters()
     {
         if (PdhOpenQueryW(nullptr, 0, &m_gpuQuery) != ERROR_SUCCESS) return;
+        RefreshGpuCounters();
+        if (!m_gpuCounters.empty()) PdhCollectQueryData(m_gpuQuery);
+    }
+
+    void RefreshGpuCounters()
+    {
+        if (!m_gpuQuery) return;
         DWORD length = 0;
         PdhExpandWildCardPathW(nullptr,
             L"\\GPU Engine(*)\\Utilization Percentage", nullptr, &length,
@@ -232,25 +247,53 @@ private:
         if (PdhExpandWildCardPathW(nullptr,
             L"\\GPU Engine(*)\\Utilization Percentage", paths.data(), &length,
             PDH_NOEXPANDCOUNTERS) != ERROR_SUCCESS) return;
+        std::set<std::wstring> live;
         for (const wchar_t* path = paths.data(); *path; path += wcslen(path) + 1)
         {
+            live.emplace(path);
+            if (std::any_of(m_gpuCounters.begin(), m_gpuCounters.end(),
+                [path](const GpuCounter& counter) { return counter.path == path; }))
+                continue;
             PDH_HCOUNTER counter = nullptr;
             if (PdhAddEnglishCounterW(m_gpuQuery, path, 0, &counter) != ERROR_SUCCESS)
                 continue;
             std::wstring lower(path);
             std::transform(lower.begin(), lower.end(), lower.begin(), towlower);
-            int category = 0;
-            if (lower.find(L"engtype_compute") != std::wstring::npos) category = 1;
+            int category = 5;
+            if (lower.find(L"engtype_3d") != std::wstring::npos) category = 0;
+            else if (lower.find(L"engtype_compute") != std::wstring::npos) category = 1;
             else if (lower.find(L"engtype_copy") != std::wstring::npos) category = 2;
             else if (lower.find(L"engtype_video decode") != std::wstring::npos) category = 3;
             else if (lower.find(L"engtype_video encode") != std::wstring::npos) category = 4;
-            m_gpuCounters.push_back({ counter, category });
+            // GPU Engine exposes one counter per process and engine. Aggregate
+            // processes by adapter LUID, physical adapter and engine index.
+            const auto luid = lower.find(L"luid_");
+            const auto type = lower.find(L"_engtype_", luid);
+            if (luid == std::wstring::npos || type == std::wstring::npos)
+            {
+                PdhRemoveCounter(counter);
+                continue;
+            }
+            const std::wstring identity = lower.substr(luid, type - luid);
+            m_gpuCounters.push_back({ counter, category, Narrow(identity.c_str()), path });
         }
-        if (!m_gpuCounters.empty()) PdhCollectQueryData(m_gpuQuery);
+        m_gpuCounters.erase(std::remove_if(m_gpuCounters.begin(), m_gpuCounters.end(),
+            [&live](const GpuCounter& counter)
+            {
+                if (live.find(counter.path) != live.end()) return false;
+                PdhRemoveCounter(counter.handle);
+                return true;
+            }), m_gpuCounters.end());
     }
 
     void SampleGpu(PerformanceSnapshot& result)
     {
+        if (++m_gpuRefreshSamples >= 10)
+        {
+            m_gpuRefreshSamples = 0;
+            RefreshGpuCounters();
+        }
+        std::map<std::pair<std::string, int>, float> engines;
         if (m_gpuQuery && PdhCollectQueryData(m_gpuQuery) == ERROR_SUCCESS)
         {
             for (const GpuCounter& counter : m_gpuCounters)
@@ -259,11 +302,16 @@ private:
                 if (PdhGetFormattedCounterValue(counter.handle, PDH_FMT_DOUBLE,
                     nullptr, &value) == ERROR_SUCCESS &&
                     value.CStatus == PDH_CSTATUS_VALID_DATA && std::isfinite(value.doubleValue))
-                    result.gpuEngines[counter.category] +=
+                    engines[{counter.engineId, counter.category}] +=
                         static_cast<float>(std::max(0.0, value.doubleValue));
             }
-            for (float& usage : result.gpuEngines)
-                usage = std::clamp(usage, 0.f, 100.f);
+            for (const auto& [key, value] : engines)
+            {
+                const float usage = std::clamp(value, 0.f, 100.f);
+                result.gpuEngineInstances.push_back({key.first,
+                    static_cast<uint32_t>(key.second), usage});
+                result.gpuEngines[key.second] = std::max(result.gpuEngines[key.second], usage);
+            }
         }
         if (m_adapter)
         {
@@ -344,6 +392,7 @@ private:
     std::vector<ProcessorTimes> m_previousProcessors;
     PDH_HQUERY m_gpuQuery = nullptr;
     std::vector<GpuCounter> m_gpuCounters;
+    unsigned m_gpuRefreshSamples = 0;
     ComPtr<IDXGIAdapter3> m_adapter;
 };
 
@@ -406,6 +455,8 @@ void PerformanceView::SetFrameTimings(const EditorFrameProfileSample& sample,
         return std::chrono::duration<double, std::milli>(end - begin).count();
     };
     m_renderCpu=sample.renderCpu;
+    m_stageWork=sample.stages;
+    m_frameLatencyMs=sample.deltaSeconds*1000.;
     if(sample.deltaSeconds>0 && std::isfinite(sample.deltaSeconds))
     {
         const double interval=sample.deltaSeconds*1000.;
@@ -533,6 +584,23 @@ void PerformanceView::DrawTimings(IEditorUi& ui)
     ui.ValueLabel("Frames over 60 FPS budget (%)",std::to_string(m_frameStatistics.over60BudgetPercent).c_str());
     ui.DisabledLabel("Frame interval includes waits between updates; CPU frame work can be shorter. The 60 FPS budget is 16.67 ms.");
     drawGroup("Frame phases (CPU)", m_frameTimings);
+    ui.Label("Stage work (ms)");
+    ui.DisabledLabel("Columns: wall / main busy / worker execution / queue delay / dependency wait / scheduler wait / render stall. Worker and queue values sum across engine jobs; stages can overlap.");
+    static constexpr const char* stageNames[]={"Pacing","Background","Scene update","Render","Pending load"};
+    for(size_t i=0;i<m_stageWork.size();++i)
+    {
+        const auto& stage=m_stageWork[i];
+        std::ostringstream values;
+        values << std::fixed << std::setprecision(2) << stage.wallMs << " / "
+            << stage.mainBusyMs << " / " << stage.workerMs << " / "
+            << stage.queueMs << " / " << stage.dependencyMs << " / "
+            << stage.waitMs << " / " << stage.renderStallMs;
+        ui.ValueLabel(stageNames[i],values.str().c_str());
+    }
+    ui.ValueLabel("Frame latency (update interval)",
+        (std::to_string(m_frameLatencyMs)+" ms").c_str());
+    ui.DisabledLabel("Render stall estimates time the main thread was not executing CPU instructions during render; it includes waits and preemption.");
+    ui.Separator();
     if (!m_updateTimings.empty())
         drawGroup("Scene update (CPU)", m_updateTimings);
     drawGroup("Draw and render (CPU)", m_renderTimings);
@@ -546,7 +614,8 @@ void PerformanceView::DrawTimings(IEditorUi& ui)
     }
     if(m_nativeTimings.enabled)
     {
-        static const char* names[]={"Map","Upload / unmap","Bindings","Dispatch","Indirect argument copy","Draw","Resource creation","Readback"};
+        static const char* names[]={"Map","Unmap","Upload","Bindings","Dispatch","Indirect argument copy","Draw","Resource creation","Readback","Fence wait"};
+        static_assert(std::size(names)==size_t(Graphics::NativeOperation::Count));
         for(size_t phase=0;phase<m_nativeTimings.phases.size();++phase)
         {
             std::vector<TimingValue> values;
@@ -773,6 +842,13 @@ void PerformanceView::RecordSnapshot(float frameRate)
     for (size_t index = 0; index < m_snapshot.cores.size(); ++index)
         out << (index ? "," : "") << '[' << m_snapshot.cores[index].user
             << ',' << m_snapshot.cores[index].kernel << ']';
+    out << "],\"gpu_engine_instances\":[";
+    for (size_t index = 0; index < m_snapshot.gpuEngineInstances.size(); ++index)
+    {
+        const auto& engine = m_snapshot.gpuEngineInstances[index];
+        out << (index ? "," : "") << "[\"" << engine.id << "\","
+            << engine.category << ',' << engine.usage << ']';
+    }
     out << ']';
     if (m_scene)
     {
@@ -925,10 +1001,10 @@ void PerformanceView::DrawOverview(IEditorUi& ui, float frameRate)
         FormatBytes(m_snapshot.systemCache);
     ui.DisabledLabel(memoryText.c_str());
 
-    std::array<EditorUiPercentageSegment, 5> gpu{};
+    std::array<EditorUiPercentageSegment, 6> gpu{};
     for (size_t index = 0; index < gpu.size(); ++index)
         gpu[index] = { kGpuLabels[index], m_snapshot.gpuEngines[index], kGpuColors[index] };
-    DrawMetric(ui, "##gpuGrid", "System GPU engines (all adapters)", gpu.data(), gpu.size(),
+    DrawMetric(ui, "##gpuGrid", "Busiest GPU engines by category (all adapters)", gpu.data(), gpu.size(),
         m_gpuHistory, kGpuColors[0]);
     if (m_snapshot.gpuMemoryBudget)
     {
@@ -942,7 +1018,7 @@ void PerformanceView::DrawOverview(IEditorUi& ui, float frameRate)
             FormatBytes(m_snapshot.gpuMemoryBudget) + " current OS budget";
         ui.DisabledLabel(videoText.c_str());
     }
-    ui.DisabledLabel("Engine activity includes all applications/adapters. GPU memory is editor usage on the selected adapter. Engine categories overlap and are capped at 100%.");
+    ui.DisabledLabel("GPU engine activity includes all applications and adapters. Category bars show the busiest engine. GPU memory is editor usage on the selected adapter.");
 }
 
 void PerformanceView::DrawCoreGrid(IEditorUi& ui)
@@ -969,6 +1045,32 @@ void PerformanceView::DrawCoreGrid(IEditorUi& ui)
         };
         const std::string id = "##core" + std::to_string(index);
         ui.PercentageGrid(id.c_str(), core, std::size(core), 66.f);
+    }
+    ui.EndTable();
+}
+
+void PerformanceView::DrawGpuEngineGrid(IEditorUi& ui)
+{
+    if (m_snapshot.gpuEngineInstances.empty())
+    {
+        ui.DisabledLabel("Per-engine GPU counters are unavailable.");
+        return;
+    }
+    ui.DisabledLabel("System usage by physical GPU engine, including all processes. Adapter LUID and engine index identify each engine.");
+    const int columns = std::max(1, static_cast<int>(ui.AvailableContentWidth() / 220.f));
+    if (!ui.BeginTable("##gpuEngineTiles", columns)) return;
+    for (size_t index = 0; index < m_snapshot.gpuEngineInstances.size(); ++index)
+    {
+        const auto& engine = m_snapshot.gpuEngineInstances[index];
+        ui.TableNextColumn();
+        const std::string label = std::string(kGpuLabels[engine.category]) + "  " +
+            engine.id + "  " + std::to_string(static_cast<int>(std::round(engine.usage))) + '%';
+        ui.Label(label.c_str());
+        const EditorUiPercentageSegment segment[] = {
+            { kGpuLabels[engine.category], engine.usage, kGpuColors[engine.category] }
+        };
+        const std::string id = "##gpuEngine" + std::to_string(index);
+        ui.PercentageGrid(id.c_str(), segment, 1, 66.f);
     }
     ui.EndTable();
 }
@@ -1183,6 +1285,11 @@ void PerformanceView::DrawPanel(IEditorUi& ui)
         if (ui.BeginTab("Logical cores"))
         {
             DrawCoreGrid(ui);
+            ui.EndTab();
+        }
+        if (ui.BeginTab("GPU engines"))
+        {
+            DrawGpuEngineGrid(ui);
             ui.EndTab();
         }
         if (ui.BeginTab("Hardware"))

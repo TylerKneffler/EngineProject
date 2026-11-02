@@ -18,6 +18,14 @@
 #include <Windows.h>
 #include <commdlg.h>
 
+bool Engine::Core::Component::DeferGraphicsPreparation(
+    Engine::Graphics::IGraphicsProvider* provider)
+{
+    if (!provider || !Owner || !Owner->GetScene()) return false;
+    Owner->GetScene()->QueueGraphicsPreparation();
+    return true;
+}
+
 void Engine::Core::Component::MarkConfigurationDirty()
 {
     if (Owner) Owner->AssertSceneOwner();

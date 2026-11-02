@@ -14,6 +14,7 @@
 #include "Core/AssetRecord.h"
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
+#include "Core/Threading/JobScheduler.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 #include <algorithm>
 #include <cstdint>
@@ -175,17 +176,15 @@ void SampleAnimation(const Engine::Model::AnimationClip* animation, float time,
 {
     pose.Reset();
     if (!animation) return;
-    for (const Engine::Model::AnimationChannel& channel : animation->channels)
+    const auto appliesToNode = [nodeCount](const auto& channel)
     {
-        if (channel.path == Engine::Model::AnimationChannel::Path::Weights &&
-            !channel.targetMesh.empty()) continue;
-        if (channel.nodeIndex >= nodeCount)
-            continue;
+        return channel.nodeIndex < nodeCount &&
+            (channel.path != Engine::Model::AnimationChannel::Path::Weights ||
+                channel.targetMesh.empty());
+    };
+    const auto applySample = [&](const auto& channel, const std::vector<float>& sampled)
+    {
         NodePose& node = pose.Get(channel.nodeIndex);
-        std::vector<float>& sampled =
-            channel.path == Engine::Model::AnimationChannel::Path::Weights
-                ? node.weights : channelValues;
-        Sample(channel, time, sampled);
         switch (channel.path)
         {
         case Engine::Model::AnimationChannel::Path::Translation:
@@ -198,8 +197,30 @@ void SampleAnimation(const Engine::Model::AnimationClip* animation, float time,
             if (sampled.size() >= 3) { node.hasScale = true; node.scale = { sampled[0], sampled[1], sampled[2] }; }
             break;
         case Engine::Model::AnimationChannel::Path::Weights:
-            node.hasWeights = true; break;
+            node.weights = sampled; node.hasWeights = true; break;
         }
+    };
+    // Sampling channels is independent, but duplicate channels must still be
+    // applied in clip order so the final pose retains last-channel precedence.
+    if (animation->channels.size() >= 64)
+    {
+        std::vector<std::vector<float>> sampled(animation->channels.size());
+        Engine::Threading::JobScheduler::Get().For(sampled.size(), 32,
+            [&](size_t index)
+            {
+                const auto& channel = animation->channels[index];
+                if (appliesToNode(channel)) Sample(channel, time, sampled[index]);
+            });
+        for (size_t index = 0; index < sampled.size(); ++index)
+            if (appliesToNode(animation->channels[index]))
+                applySample(animation->channels[index], sampled[index]);
+        return;
+    }
+    for (const auto& channel : animation->channels)
+    {
+        if (!appliesToNode(channel)) continue;
+        Sample(channel, time, channelValues);
+        applySample(channel, channelValues);
     }
 }
 

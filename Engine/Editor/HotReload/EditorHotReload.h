@@ -4,6 +4,7 @@
 #include "Engine/Editor/HotReload/ScriptFileWatcher.h"
 #include "Engine/Editor/Core/View/Views/ConsoleView.h"
 #include "Core/Scene/Scene.h"
+#include "Core/Threading/ScriptModuleJobs.h"
 
 namespace Engine::Editor
 {
@@ -29,13 +30,15 @@ private:
     using ScriptTypeCount = int (*)();
     using ScriptTypeName = const char* (*)(int);
     using CreateScript = Engine::Core::Component* (*)(const char*);
+    using SetJobHost = void (*)(Engine::Threading::IScriptModuleJobs*);
 
     void StartCompile();
     void DrainOutput();
     void PollCompile();
     bool ApplyModule();
     bool LoadModule(const std::filesystem::path& path, HMODULE& module,
-        std::vector<std::string>& types, CreateScript& createFunction);
+        std::vector<std::string>& types, CreateScript& createFunction,
+        SetJobHost& setJobHost, Engine::Threading::IScriptModuleJobs* jobs);
     void Log(ConsoleView::Level level, const std::string& line);
 
     EditorState& m_editorState;
@@ -52,6 +55,8 @@ private:
     std::filesystem::path m_loadedModulePath;
     std::vector<std::string> m_registeredTypes;
     CreateScript m_createScript = nullptr;
+    SetJobHost m_setJobHost = nullptr;
+    std::unique_ptr<Engine::Threading::ScriptModuleJobs> m_moduleJobs;
     uint64_t m_generation = 0;
     bool m_dirty = false;
     bool m_applying = false;

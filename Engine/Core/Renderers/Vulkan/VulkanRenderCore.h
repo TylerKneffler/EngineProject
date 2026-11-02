@@ -16,6 +16,7 @@ public:
     void Resize(uint32_t width, uint32_t height);
     VkCommandBuffer BeginFrame();
     void EndFrame();
+    void SetPreFrameCommandBuffer(VkCommandBuffer command) { m_preFrameCommandBuffer = command; }
     void WaitIdle() const;
     uint64_t GetSubmittedFrameToken() const { return m_submittedSerial; }
     bool IsFrameComplete(uint64_t token);
@@ -80,6 +81,7 @@ private:
     uint32_t m_frameIndex = 0;
     uint32_t m_imageIndex = 0;
     VkCommandBuffer m_currentCommandBuffer = VK_NULL_HANDLE;
+    VkCommandBuffer m_preFrameCommandBuffer = VK_NULL_HANDLE;
 };
 }
 #endif

@@ -63,6 +63,18 @@ void UIImage::Deserialize(const JsonValue& value)
 
 void UIImage::OnAfterDeserialize(IGraphicsProvider* graphicsProvider)
 {
+    (void)graphicsProvider;
+    if (!sourcePath.empty())
+    {
+        m_loadedPath = ResolveImagePath(sourcePath);
+        m_texture = Texture::Acquire(m_loadedPath, true);
+    }
+    if (graphicsProvider && !DeferGraphicsPreparation(graphicsProvider))
+        PrepareGraphicsResources(graphicsProvider);
+}
+
+void UIImage::PrepareGraphicsResources(IGraphicsProvider* graphicsProvider)
+{
     Prepare(graphicsProvider);
 }
 

@@ -5,6 +5,7 @@
 #include "Core/Compoonents/Obj/Mesh.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
 #include "Core/Object.h"
+#include "Core/Threading/JobScheduler.h"
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -176,11 +177,14 @@ void MeshObjectCollider::ResolveContactSurfaces()
         mesh->BuildPortalCutTriangleStream(palette);
     if (triangles.size() < 3) return;
     const glm::mat4 world = mesh->Owner->transform.GetWorldMatrix();
-    std::vector<glm::vec3> positions;
-    positions.reserve(triangles.size());
-    for (const Mesh::Vertex& vertex : triangles)
-        positions.emplace_back(world * glm::vec4(vertex.pos[0],
+    std::vector<glm::vec3> positions(triangles.size());
+    Engine::Threading::JobScheduler::Get().For(triangles.size(), 1024,
+        [&](size_t index)
+    {
+        const Mesh::Vertex& vertex = triangles[index];
+        positions[index] = glm::vec3(world * glm::vec4(vertex.pos[0],
             vertex.pos[1], vertex.pos[2], 1.f));
+    });
 
     const uint32_t triangleCount =
         static_cast<uint32_t>(positions.size() / 3);

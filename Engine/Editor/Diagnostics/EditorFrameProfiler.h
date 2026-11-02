@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <array>
 #include <fstream>
 #include <string>
 #include "Core/Rendering/RenderPerformance.h"
@@ -15,6 +16,13 @@ namespace Engine::Editor
 {
     struct EditorFrameProfileSample
     {
+        struct StageWork
+        {
+            double wallMs=0, mainBusyMs=0, workerMs=0, queueMs=0;
+            double dependencyMs=0, waitMs=0, renderStallMs=0;
+        };
+        // Pacing, background, update, render, pending load, in that order.
+        std::array<StageWork,5> stages{};
         using TimePoint = std::chrono::steady_clock::time_point;
         TimePoint frameBegin, afterPacing, afterBackground, afterSceneUpdate;
         TimePoint afterRender, afterPendingLoad;

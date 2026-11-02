@@ -206,6 +206,8 @@ public:
         if(m_frameResources) { value.computeArenaWrites=m_frameResources->computeArenaWrites; value.computeDiscardMaps=m_frameResources->computeDiscardMaps; }
         return value;
     }
+    Engine::Graphics::NativeSubmissionProbe* GetNativeProbe() const
+    { return m_frameResources ? m_frameResources->native.get() : nullptr; }
     void SetComputeConstantArenaEnabled(bool enabled) { if(m_frameResources) m_frameResources->computeArenaEnabled=enabled; }
     Engine::Graphics::FrameTimingTelemetry GetFrameTimingTelemetry() const override
     { return m_gpuTimings ? m_gpuTimings->telemetry : Engine::Graphics::FrameTimingTelemetry{}; }
@@ -220,6 +222,12 @@ public:
         return std::make_unique<D3D11GraphicsContext>(
             m_device, m_externalContext ? m_externalContext : m_context,
             m_occlusionState, m_frameResources, m_gpuTimings);
+    }
+    std::unique_ptr<Engine::Graphics::IGraphicsContext> CreateContextForCommandBuffer(void* commandBuffer) override
+    {
+        return std::make_unique<D3D11GraphicsContext>(m_device,
+            static_cast<ID3D11DeviceContext*>(commandBuffer),
+            nullptr, m_frameResources, nullptr);
     }
 
 private:

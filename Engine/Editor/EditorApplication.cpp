@@ -14,6 +14,7 @@
 #include "Core/Renderers/IEditorRenderer.h"
 #include "Core/Renderers/DX11/DX11EditorRenderer.h"
 #include "Core/Renderers/RendererFactory.h"
+#include "Core/Rendering/RenderJobs.h"
 #include "Core/View/View.h"
 #include "Engine/Editor/EditorState.h"
 #include "Engine/Editor/GameBuildManager.h"
@@ -426,6 +427,27 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
                 showTimings = true;
                 break;
             }
+        const bool captureStageWork=showTimings || static_cast<bool>(frameProfiler);
+        const auto stageCounters = [captureStageWork]()
+        {
+            struct Counters
+            {
+                uint64_t threadTicks=0;
+                Engine::Rendering::RenderJobs::Statistics jobs;
+            } result;
+            if(!captureStageWork) return result;
+            FILETIME created{}, exited{}, kernel{}, user{};
+            if (GetThreadTimes(GetCurrentThread(), &created, &exited, &kernel, &user))
+            {
+                const auto ticks=[](FILETIME value) {
+                    return (uint64_t(value.dwHighDateTime)<<32) | value.dwLowDateTime;
+                };
+                result.threadTicks=ticks(kernel)+ticks(user);
+            }
+            result.jobs=Engine::Rendering::RenderJobs::Get().ReadStatistics();
+            return result;
+        };
+        const auto frameCounters=stageCounters();
         scene->SetUpdateProfilingEnabled(showTimings || static_cast<bool>(frameProfiler));
         if (auto* bullet = dynamic_cast<Engine::Physics::BulletPhysicsAdapter*>(
             &scene->GetPhysics().GetAdapter()))
@@ -435,6 +457,7 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
         if (showTimings) renderer->MarkDirty();
         editorFramePacer.Wait(editorState->GetEditorMaxFps());
         const auto afterPacing = Clock::now();
+        const auto pacingCounters=stageCounters();
         // Update delta time
         LARGE_INTEGER now;
         QueryPerformanceCounter(&now);
@@ -469,6 +492,7 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
                 window->ReleaseGameplayInput();
         }
         const auto afterBackground = Clock::now();
+        const auto backgroundCounters=stageCounters();
         if (previousPlayState != playState ||
             wasBuilding != gameBuildManager->IsBuilding() ||
             wasHotReloadBusy != hotReload->IsBusy())
@@ -532,6 +556,7 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
             if (previewAdvanced) renderer->MarkDirty();
         }
         const auto afterSceneUpdate = Clock::now();
+        const auto updateCounters=stageCounters();
 
         double prepareMilliseconds = 0.0;
         double renderEntryMilliseconds = 0.0;
@@ -701,6 +726,7 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
                 }
         });
         const auto afterRender = Clock::now();
+        const auto renderCounters=stageCounters();
         if (!pausedFenced &&
             previousPlayState == Engine::Editor::PlayState::Playing &&
             playState == Engine::Editor::PlayState::Paused)
@@ -717,8 +743,28 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
         // with the loading overlay before deserialization blocks this thread.
         editorState->ProcessPendingSceneLoad();
         const auto afterPendingLoad = Clock::now();
+        const auto loadCounters=stageCounters();
         {
             Engine::Editor::EditorFrameProfileSample sample{};
+            const auto fillStage=[&](size_t index, auto begin, auto end,
+                const auto& first, const auto& last)
+            {
+                auto& stage=sample.stages[index];
+                stage.wallMs=std::chrono::duration<double,std::milli>(end-begin).count();
+                stage.mainBusyMs=last.threadTicks>=first.threadTicks
+                    ? double(last.threadTicks-first.threadTicks)/10000. : 0.;
+                stage.workerMs=double(last.jobs.workerNs-first.jobs.workerNs)/1.e6;
+                stage.queueMs=double(last.jobs.queueNs-first.jobs.queueNs)/1.e6;
+                stage.dependencyMs=double(last.jobs.dependencyNs-first.jobs.dependencyNs)/1.e6;
+                stage.waitMs=double(last.jobs.waitNs-first.jobs.waitNs)/1.e6;
+                if(index==3)
+                    stage.renderStallMs=std::max(0.,stage.wallMs-stage.mainBusyMs);
+            };
+            fillStage(0,frameBegin,afterPacing,frameCounters,pacingCounters);
+            fillStage(1,afterPacing,afterBackground,pacingCounters,backgroundCounters);
+            fillStage(2,afterBackground,afterSceneUpdate,backgroundCounters,updateCounters);
+            fillStage(3,afterSceneUpdate,afterRender,updateCounters,renderCounters);
+            fillStage(4,afterRender,afterPendingLoad,renderCounters,loadCounters);
             sample.frameBegin = frameBegin;
             sample.afterPacing = afterPacing;
             sample.afterBackground = afterBackground;

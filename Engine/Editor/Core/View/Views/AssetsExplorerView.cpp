@@ -12,6 +12,7 @@
 #include "Core/Object.h"
 #include "Core/Prefab/PrefabAsset.h"
 #include "Core/Serialization/SceneSerializer.h"
+#include "Core/Threading/JobScheduler.h"
 #include "Core/Scene/Scene.h"
 #include "../Focus/WindowFocusHandler.h"
 #include <filesystem>
@@ -139,7 +140,7 @@ void AssetsExplorerView::Init(const std::string& assetsPath,
     m_pendingAssetDropDirectory.clear();
     m_scene = scene;
     m_previewCache.Clear();
-    m_locationIndex.Open(m_assetsPath);
+    m_locationIndex.Open(m_assetsPath, true);
     m_externalMoves.clear();
     m_locationCheckPending = false;
     CheckForExternalMoves();
@@ -147,21 +148,21 @@ void AssetsExplorerView::Init(const std::string& assetsPath,
 
 void AssetsExplorerView::ExtractModelAssets(const std::string& sourcePath)
 {
+    if (m_extractionPending.valid())
+    {
+        m_error = "An asset extraction is already running.";
+        return;
+    }
     const fs::path source(sourcePath);
     if (!fs::is_regular_file(source) || !IsCompoundModelSource(source))
     {
         m_error = "Choose a model, rig, animation pack, or mesh pack.";
         return;
     }
-    const auto imported = AssetDataExtractor::Extract(source, source.parent_path());
-    if (!imported.success)
-    {
-        m_error = imported.message;
-        return;
-    }
     m_error.clear();
-    if (OnAssetContentsChanged)
-        OnAssetContentsChanged(imported.outputDirectory);
+    m_extractionAssetsPath = m_assetsPath;
+    m_extractionPending = Engine::Threading::JobScheduler::Get().Submit(
+        [source] { return AssetDataExtractor::Extract(source, source.parent_path()); });
 }
 
 void AssetsExplorerView::CheckForExternalMoves()
@@ -173,7 +174,43 @@ void AssetsExplorerView::CheckForExternalMoves()
         return;
     }
     m_locationCheckPending = false;
-    m_externalMoves = m_locationIndex.Detect();
+    m_locationIndex.RequestDetect();
+}
+
+bool AssetsExplorerView::PollDirectoryCache()
+{
+    const bool directory = m_directoryCache.Poll();
+    const bool previews = m_previewCache.Poll();
+    bool locations = false;
+    if (m_externalMoves.empty())
+        locations = m_locationIndex.PollDetect(m_externalMoves);
+    bool extraction = false;
+    if (m_extractionPending.valid() &&
+        m_extractionPending.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
+    {
+        extraction = true;
+        try
+        {
+            const auto result = m_extractionPending.get();
+            if (m_extractionAssetsPath != m_assetsPath)
+            {
+                m_extractionAssetsPath.clear();
+            }
+            else if (result.success)
+            {
+                m_error.clear();
+                if (OnAssetContentsChanged)
+                    OnAssetContentsChanged(result.outputDirectory);
+            }
+            else m_error = result.message;
+        }
+        catch (const std::exception& error)
+        {
+            if (m_extractionAssetsPath == m_assetsPath)
+                m_error = error.what();
+        }
+    }
+    return directory || previews || locations || extraction;
 }
 
 // ---------------------------------------------------------------------------
@@ -368,6 +405,8 @@ void AssetsExplorerView::DrawPanel(IEditorUi& ui)
 
     if (!m_error.empty())
         ui.ColoredLabel(m_error.c_str(), { 1.f, 0.3f, 0.3f, 1.f });
+    if (m_extractionPending.valid())
+        ui.DisabledLabel("Extracting assets...");
     if (m_renamingScript)
     {
         const EditorUiTextEditResult rename = ui.RenameText(

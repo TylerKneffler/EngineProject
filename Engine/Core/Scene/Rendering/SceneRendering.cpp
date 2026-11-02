@@ -374,6 +374,8 @@ void Scene::Init(Engine::Graphics::IGraphicsProvider* graphicsProvider)
     m_activeNativeFrameBuffers = nullptr;
 
     m_graphicsProvider = graphicsProvider;
+    m_staticRenderItemCache.clear();
+    QueueGraphicsPreparation();
     m_particleDrawSlots.clear();
 
     // Create constant buffers via the graphics buffer factory
@@ -1911,12 +1913,23 @@ void Scene::SelectNativeFrameBuffers()
     m_activeNativeFrameBuffers = selected;
 }
 
+void Scene::ProcessGraphicsPreparation(IGraphicsProvider* graphicsProvider)
+{
+    AssertOwnerThread();
+    if (!m_graphicsPreparationPending || !graphicsProvider) return;
+    m_graphicsPreparationPending = false;
+    for (const auto& object : m_objects)
+        for (auto* component : object->Components)
+            if (component) component->PrepareGraphicsResources(graphicsProvider);
+}
+
 void Scene::PrepareRenderFrame()
 {
     AssertOwnerThread();
     // Editor edits also publish through this boundary before render workers
     // inspect the scene. Unchanged snapshots are reused without allocation.
     CommitPendingObjectChanges();
+    ProcessGraphicsPreparation(m_graphicsProvider);
     SelectNativeFrameBuffers();
     const auto preparationJobs=Engine::Rendering::RenderJobs::Get().ReadStatistics();
     using PrepareClock = std::chrono::steady_clock;
@@ -1963,6 +1976,7 @@ void Scene::PrepareRenderFrame()
         };
         if(m_frameLookupFull || m_frameLookupEditPose!=m_editorMeshEditPose)
         {
+            m_staticRenderItemCache.clear();
             m_frameComponentLookupScratch.clear(); m_frameLookupIndices.clear(); m_frameLookupFree.clear();
             m_frameComponentLookupScratch.reserve(m_objects.size());
             for(const auto& object:m_objects)
@@ -1970,6 +1984,7 @@ void Scene::PrepareRenderFrame()
         }
         else for(auto* owner:m_frameLookupDirty)
         {
+            m_staticRenderItemCache.erase(owner);
             auto found=m_frameLookupIndices.find(owner);
             if(!m_componentRegistry.Contains(owner))
             {
@@ -2092,6 +2107,58 @@ void Scene::PrepareRenderFrame()
             continue;
         Engine::Components::Mesh* mesh = lookup.mesh;
         Engine::Components::Sprite* sprite = lookup.sprite;
+        // Ordinary static meshes keep their prepared draw until their owner,
+        // geometry, or transform changes. Dynamic paths continue below.
+        const bool staticCandidate = mesh && !sprite && !lookup.skinnedMesh &&
+            !hasActiveWarpVolume && !m_previewObject &&
+            !mesh->IsInstanced() && !mesh->gpuLodSelection &&
+            !mesh->GetPreviousRuntimeLodMesh() &&
+            traversalRenderInstances.find(candidate) ==
+                traversalRenderInstances.end();
+        if (staticCandidate && candidate->IsEnabledInHierarchy() &&
+            mesh->IsReady() && mesh->IsEditorVisible() &&
+            mesh->IsAnimationVisible())
+        {
+            auto cached = m_staticRenderItemCache.find(candidate);
+            if (cached != m_staticRenderItemCache.end())
+            {
+                auto& entry = cached->second;
+                const auto& layer = candidate->transform.matrixLayer;
+                const bool terrainCell =
+                    candidate->GetComponent<Engine::Components::Terrain>() != nullptr;
+                const auto* terrainBatch = candidate->GetComponent<
+                    Engine::Components::TerrainBatchAppearance>();
+                if (entry.item.mesh == mesh && entry.item.material == lookup.material &&
+                    entry.item.spatialManipulator == lookup.spatialManipulator &&
+                    entry.item.bakedLighting == lookup.bakedLighting &&
+                    entry.worldRevision == candidate->transform.GetWorldRevision() &&
+                    entry.meshRevision == mesh->GetConfigurationRevision() &&
+                    entry.geometryRevision == mesh->GetAuthoredGeometryRevision() &&
+                    entry.item.terrainCell == terrainCell &&
+                    entry.item.terrainSurface == (terrainCell || terrainBatch) &&
+                    (!terrainBatch || entry.item.completeTerrainFootprint ==
+                        (terrainBatch->completeFootprint && !terrainBatch->distantVisual)) &&
+                    entry.matrixLayerEnabled == layer.enabled &&
+                    (!layer.enabled || std::memcmp(&entry.matrixLayer,
+                        &layer.localToLayer, sizeof(layer.localToLayer)) == 0))
+                {
+                    FrameRenderItem item = entry.item;
+                    if (item.material)
+                    {
+                        item.material->Validate();
+                        item.material->PrepareTextures(m_graphicsProvider);
+                        item.castsShadows = item.material->castsShadows;
+                        item.blended = item.material->GetAlphaMode() ==
+                            Engine::Components::MaterialAlphaMode::Blend;
+                    }
+                    item.geometryFade = mesh->GetRuntimeGeometryFade();
+                    m_frameRenderItems.push_back(item);
+                    ++m_lastPrepareTimings.staticRenderItemsReused;
+                    continue;
+                }
+            }
+        }
+        m_staticRenderItemCache.erase(candidate);
         Engine::Components::Sprite::RenderData spriteData;
         const bool spriteReady = sprite && sprite->IsEditorVisible() &&
             sprite->PrepareRenderData(m_graphicsProvider, spriteData);
@@ -2109,6 +2176,14 @@ void Scene::PrepareRenderFrame()
         item.spatialManipulator = lookup.spatialManipulator;
         item.skinnedMesh = lookup.skinnedMesh;
         item.bakedLighting = lookup.bakedLighting;
+        item.castsShadows = !lookup.material || lookup.material->castsShadows;
+        item.terrainCell = candidate->GetComponent<Engine::Components::Terrain>() != nullptr;
+        item.terrainSurface = item.terrainCell;
+        if (const auto* batch = candidate->GetComponent<Engine::Components::TerrainBatchAppearance>())
+        {
+            item.terrainSurface = true;
+            item.completeTerrainFootprint = batch->completeFootprint && !batch->distantVisual;
+        }
         item.belongsToPreview = m_previewObject &&
             IsObjectOrDescendant(candidate, m_previewObject);
         glm::mat4 authoredWorld = preparedTransforms ? m_transformHierarchy.ReadPreparedWorldMatrix(candidate->transform):candidate->transform.GetWorldMatrix();
@@ -2117,6 +2192,7 @@ void Scene::PrepareRenderFrame()
             authoredWorld = candidate->transform.matrixLayer.localToLayer *
                 authoredWorld;
         }
+        item.authoredWorld = authoredWorld;
         // The scene walk above already established that no nonlinear mapping
         // is active. Avoid making every terrain patch independently scan the
         // complete scene for warp volumes on every rendered frame.
@@ -2350,6 +2426,17 @@ void Scene::PrepareRenderFrame()
 
         const auto appendGeometry = [&](FrameRenderItem draw) {
             Engine::Components::Mesh* source = draw.mesh;
+            const auto publish = [&](FrameRenderItem& current) {
+                current.hasBounds = current.mesh && current.mesh->HasBounds();
+                current.hasMorphTargets = current.mesh && current.mesh->HasMorphTargets();
+                current.hasSurfaceOffsets = current.mesh && current.mesh->HasSurfaceOffsets();
+                if (current.hasBounds)
+                {
+                    current.boundsMinimum = current.mesh->GetBoundsMin();
+                    current.boundsMaximum = current.mesh->GetBoundsMax();
+                }
+                m_frameRenderItems.push_back(current);
+            };
             if (source && !draw.warpedVertexBuffer)
                 draw.geometryFade = source->GetRuntimeGeometryFade();
             if(source && source->IsInstanced() && source->gpuLodSelection &&
@@ -2361,7 +2448,7 @@ void Scene::PrepareRenderFrame()
                 draw.gpuLodDistances={std::max(0.f,source->gpuLod1Distance),std::max(source->gpuLod1Distance,source->gpuLod2Distance)};
                 if(draw.gpuMaximumLod==1) draw.gpuLodDistances.y=1.e20f;
                 draw.geometryFade={0,draw.gpuLodDistances.x,draw.gpuLodDistances.y,2.f+source->GetRuntimeVisibility()};
-                m_frameRenderItems.push_back(draw);
+                publish(draw);
                 return;
             }
             if (source && source->gpuLodSelection && draw.object!=m_selectedObject &&
@@ -2382,11 +2469,11 @@ void Scene::PrepareRenderFrame()
                         std::max(source->gpuLod1Distance,source->gpuLod2Distance)};
                     if(source->IsInstanced() && maximumLod==1) draw.gpuLodDistances.y=1.e20f;
                     if(source->IsInstanced()) draw.geometryFade={float(lod),draw.gpuLodDistances.x,draw.gpuLodDistances.y,2.f+source->GetRuntimeVisibility()};
-                    m_frameRenderItems.push_back(draw);
+                    publish(draw);
                 }
                 return;
             }
-            m_frameRenderItems.push_back(draw);
+            publish(draw);
             if (source && !draw.warpedVertexBuffer)
                 if (auto* previous = source->GetPreviousRuntimeLodMesh())
                 {
@@ -2394,9 +2481,10 @@ void Scene::PrepareRenderFrame()
                     draw.previousLod=true;
                     previous->grassShadowCaster=source->grassShadowCaster;
                     draw.geometryFade = source->GetRuntimeGeometryFade(true);
-                    m_frameRenderItems.push_back(draw);
+                    publish(draw);
                 }
         };
+        const size_t firstDraw = m_frameRenderItems.size();
         appendGeometry(item);
         if (hasSplitRenderInstances)
         {
@@ -2409,6 +2497,18 @@ void Scene::PrepareRenderFrame()
                     splitInstances->second[index].chartPortal;
                 appendGeometry(remoteItem);
             }
+        }
+        if (staticCandidate && m_frameRenderItems.size() == firstDraw + 1 &&
+            !item.warpedVertexBuffer && !hasSplitRenderInstances &&
+            !mesh->HasMorphTargets() &&
+            !mesh->HasSurfaceOffsets())
+        {
+            const auto& layer = candidate->transform.matrixLayer;
+            m_staticRenderItemCache[candidate] = {
+                m_frameRenderItems.back(), candidate->transform.GetWorldRevision(),
+                mesh->GetConfigurationRevision(), mesh->GetAuthoredGeometryRevision(),
+                layer.enabled, layer.localToLayer };
+            ++m_lastPrepareTimings.staticRenderItemsUpdated;
         }
     }
 
@@ -2450,9 +2550,10 @@ void Scene::PrepareRenderFrame()
     {
         const auto ms = [](auto first, auto last)
         { return std::chrono::duration<double, std::milli>(last - first).count(); };
-        m_lastPrepareTimings = { ms(afterTransforms, afterLookup),
-            ms(afterLookup, afterItems), ms(afterItems, afterBoneUpload),
-            ms(afterBoneUpload, PrepareClock::now()) };
+        m_lastPrepareTimings.lookupMs=ms(afterTransforms, afterLookup);
+        m_lastPrepareTimings.itemsMs=ms(afterLookup, afterItems);
+        m_lastPrepareTimings.boneUploadMs=ms(afterItems, afterBoneUpload);
+        m_lastPrepareTimings.capacityMs=ms(afterBoneUpload, PrepareClock::now());
     }
     m_lastPrepareTimings.transformsMs=transforms.totalMs+transformGatherMs;
     m_lastPrepareTimings.transformSnapshotMs=transforms.snapshotMs+transformGatherMs;
@@ -2466,17 +2567,18 @@ void Scene::PrepareRenderFrame()
     const auto spatialStart=PrepareClock::now();
     std::vector<Engine::Rendering::RenderBounds> spatialBounds;
     std::vector<Engine::Rendering::RenderBoundsCache::Input> boundsInput;
-    boundsInput.reserve(m_frameRenderItems.size());
-    for (const auto& item : m_frameRenderItems)
+    boundsInput.resize(m_frameRenderItems.size());
+    Engine::Rendering::RenderJobs::Get().For(m_frameRenderItems.size(),128,[&](size_t index)
     {
-        auto* mesh = item.mesh;
+        const auto& item = m_frameRenderItems[index];
         Engine::Rendering::RenderBoundsCache::Input input;
         input.slot=item.objectSlot; input.world=item.world;
-        if (mesh && mesh->HasBounds() && !item.skinJointCount && !mesh->HasMorphTargets() &&
-            !mesh->HasSurfaceOffsets() && !item.warpedVertexBuffer && !item.traversalChartPortal)
-        { input.bounded=true; input.minimum=mesh->GetBoundsMin(); input.maximum=mesh->GetBoundsMax(); }
-        boundsInput.push_back(input);
-    }
+        if (item.hasBounds && !item.skinJointCount &&
+            !item.hasMorphTargets && !item.hasSurfaceOffsets &&
+            !item.warpedVertexBuffer && !item.traversalChartPortal)
+        { input.bounded=true; input.minimum=item.boundsMinimum; input.maximum=item.boundsMaximum; }
+        boundsInput[index]=input;
+    });
     const auto bounds=m_worldBoundsCache.Prepare(boundsInput,spatialBounds);
     m_lastPrepareTimings.boundsReused=bounds.reused; m_lastPrepareTimings.boundsUpdated=bounds.updated;
     m_spatialSlotBounds.resize(m_renderObjectSlotCount);
@@ -2763,10 +2865,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     // Scene Camera Warp Look-Through option.
     const auto sourceChartWorld = [](const FrameRenderItem& item)
     {
-        glm::mat4 world = item.object->transform.GetWorldMatrix();
-        if (item.object->transform.matrixLayer.enabled)
-            world = item.object->transform.matrixLayer.localToLayer * world;
-        return world;
+        return item.authoredWorld;
     };
     const auto useSourceChartMesh = [&](const FrameRenderItem& item)
     {
@@ -3185,11 +3284,11 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         const glm::mat4& itemWorld)
     {
         const glm::vec3 centerDelta = glm::vec3(itemWorld[3]) - cameraPosition;
-        if (!item.mesh || item.sprite || !item.mesh->HasBounds())
+        if (!item.mesh || item.sprite || !item.hasBounds)
             return glm::dot(centerDelta, centerDelta);
 
-        const glm::vec3 minimum = item.mesh->GetBoundsMin();
-        const glm::vec3 maximum = item.mesh->GetBoundsMax();
+        const glm::vec3 minimum = item.boundsMinimum;
+        const glm::vec3 maximum = item.boundsMaximum;
         const auto bounds=Engine::Rendering::TransformBounds(minimum,maximum,itemWorld);
         const glm::vec3 nearest = glm::clamp(cameraPosition,bounds.minimum,bounds.maximum);
         const glm::vec3 delta = nearest - cameraPosition;
@@ -3200,10 +3299,10 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         const glm::mat4& itemWorld)
     {
         if (!item.mesh || item.sprite || item.warpedVertexBuffer ||
-            !item.mesh->HasBounds() || item.traversalChartPortal)
+            !item.hasBounds || item.traversalChartPortal)
             return false;
-        const glm::vec3 minimum = item.mesh->GetBoundsMin();
-        const glm::vec3 maximum = item.mesh->GetBoundsMax();
+        const glm::vec3 minimum = item.boundsMinimum;
+        const glm::vec3 maximum = item.boundsMaximum;
         const glm::mat4 localToClip = viewProjection * itemWorld;
         std::array<glm::vec4, 8> corners{};
         size_t cornerIndex = 0;
@@ -3298,10 +3397,21 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         });
     const bool useTerrainOcclusion = !shadowOnly && !includeEditorVisuals &&
         !hasPortalViews && !m_editorMode2D && !terrainWarpActive;
+    std::future<std::vector<uint8_t>> cameraVisibilityJob;
+    struct CameraVisibilityFence
+    {
+        std::future<std::vector<uint8_t>>& job;
+        ~CameraVisibilityFence() { if (job.valid()) job.wait(); }
+    } cameraVisibilityFence{cameraVisibilityJob};
+    if (useTerrainOcclusion)
+        cameraVisibilityJob = Engine::Rendering::RenderJobs::Get().Submit(
+            [this, viewProjection] {
+                return m_renderSpatialIndex.QueryUncached(viewProjection);
+            });
     const auto terrainFootprint = [&](const FrameRenderItem& item)
         -> std::optional<TerrainFootprint>
     {
-        if (!item.mesh || !item.mesh->HasBounds() || item.sprite ||
+        if (!item.mesh || !item.hasBounds || item.sprite ||
             item.warpedVertexBuffer || item.traversalChartPortal ||
             item.blended)
             return std::nullopt;
@@ -3312,9 +3422,9 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 if (std::abs(world[column][row] -
                     (column == row ? 1.f : 0.f)) > 0.0001f)
                     return std::nullopt;
-        const glm::vec3 minimum = item.mesh->GetBoundsMin() +
+        const glm::vec3 minimum = item.boundsMinimum +
             glm::vec3(world[3]);
-        const glm::vec3 maximum = item.mesh->GetBoundsMax() +
+        const glm::vec3 maximum = item.boundsMaximum +
             glm::vec3(world[3]);
         if (minimum.x >= maximum.x || minimum.z >= maximum.z ||
             (cameraPosition.x >= minimum.x &&
@@ -3391,10 +3501,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 (m_previewObject && IsObjectOrDescendant(
                     item.object, m_previewObject)))
                 continue;
-            const auto* batch = item.object->GetComponent<
-                Engine::Components::TerrainBatchAppearance>();
-            if (!item.object->GetComponent<Engine::Components::Terrain>() &&
-                !(batch && batch->completeFootprint && !batch->distantVisual))
+            if (!item.terrainSurface ||
+                (!item.completeTerrainFootprint && !item.terrainCell))
                 continue;
             const auto footprint = terrainFootprint(item);
             if (footprint)
@@ -3404,10 +3512,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     m_lastRenderCpuTimings.terrainPreparationMs=std::chrono::duration<double,std::milli>(RenderClock::now()-terrainPreparationStart).count();
     const auto hiddenByTerrain = [&](const FrameRenderItem& item)
     {
-        if (!useTerrainOcclusion || !item.object ||
-            (!item.object->GetComponent<Engine::Components::Terrain>() &&
-                !item.object->GetComponent<
-                    Engine::Components::TerrainBatchAppearance>()))
+        if (!useTerrainOcclusion || !item.terrainSurface)
             return false;
         const auto footprint = terrainFootprint(item);
         if (!footprint)
@@ -3482,8 +3587,14 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     };
     const auto cullingStart = RenderClock::now();
     static const std::vector<uint8_t> emptyVisibility;
-    const auto& spatialVisible = !shadowOnly && !hasPortalViews && !m_editorMode2D
-        ? m_renderSpatialIndex.Query(viewProjection) : emptyVisibility;
+    std::vector<uint8_t> preparedCameraVisibility;
+    const bool hasPreparedCameraVisibility = cameraVisibilityJob.valid();
+    if (hasPreparedCameraVisibility)
+        preparedCameraVisibility = cameraVisibilityJob.get();
+    const auto& spatialVisible = hasPreparedCameraVisibility
+        ? preparedCameraVisibility
+        : (!shadowOnly && !hasPortalViews && !m_editorMode2D
+            ? m_renderSpatialIndex.Query(viewProjection) : emptyVisibility);
     std::vector<ViewRenderItem>& renderObjects = m_viewRenderItemScratch;
     renderObjects.clear();
     renderObjects.reserve(frameRenderItems.size());
@@ -3492,7 +3603,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     Engine::Rendering::RenderJobs::Get().For(frameRenderItems.size(),cameraUsesSourceWarpChart ? SIZE_MAX:128,[&](size_t index)
     {
         const auto& item=frameRenderItems[index];
-        if(shadowOnly && (!item.mesh || (item.material && !item.material->castsShadows))) return;
+        if(shadowOnly && (!item.mesh || !item.castsShadows)) return;
         if(!spatialVisible.empty() && !spatialVisible[item.objectSlot]) return;
         if(item.belongsToPreview && !includeEditorVisuals) return;
         const auto world=useSourceChartMesh(item) ? sourceChartWorld(item):item.world;
@@ -3507,21 +3618,37 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     { if(accepted[index]) renderObjects.push_back(classified[index]); m_lastTerrainOcclusionCulledCount+=terrainRejected[index]; }
     const auto sortingStart = RenderClock::now();
     m_lastRenderCpuTimings.cullingMs = std::chrono::duration<double,std::milli>(sortingStart-cullingStart).count();
-    std::stable_sort(renderObjects.begin(), renderObjects.end(),
-        [&](const ViewRenderItem& first, const ViewRenderItem& second)
-        {
-            if (m_editorMode2D)
+    // The accepted view list owns its sort keys for the whole job. Scene
+    // components are not consulted by the comparator.
+    const auto sortViewItems = [&renderObjects, editorMode2D = m_editorMode2D]()
+    {
+        std::stable_sort(renderObjects.begin(), renderObjects.end(),
+            [editorMode2D](const ViewRenderItem& first, const ViewRenderItem& second)
             {
-                if (first.sortingLayer != second.sortingLayer)
-                    return first.sortingLayer < second.sortingLayer;
-                return first.worldDepth < second.worldDepth;
-            }
-            if (first.blended != second.blended)
-                return !first.blended;
-            return first.blended
-                ? first.cameraDistanceSquared > second.cameraDistanceSquared
-                : first.cameraDistanceSquared < second.cameraDistanceSquared;
-        });
+                if (editorMode2D)
+                {
+                    if (first.sortingLayer != second.sortingLayer)
+                        return first.sortingLayer < second.sortingLayer;
+                    return first.worldDepth < second.worldDepth;
+                }
+                if (first.blended != second.blended)
+                    return !first.blended;
+                return first.blended
+                    ? first.cameraDistanceSquared > second.cameraDistanceSquared
+                    : first.cameraDistanceSquared < second.cameraDistanceSquared;
+            });
+    };
+    std::future<void> sortJob;
+    if (renderObjects.size() >= 128)
+        sortJob = Engine::Rendering::RenderJobs::Get().Submit(sortViewItems);
+    else
+        sortViewItems();
+    bool hasSceneLightProbeContributors = false;
+    for (auto* group : GetComponents<Engine::Components::LightProbeGroup>())
+        hasSceneLightProbeContributors |= group->valid && group->Owner->IsEnabledInHierarchy();
+    for (auto* probe : GetComponents<Engine::Components::LightProbe>())
+        hasSceneLightProbeContributors |= probe->valid && probe->Owner->IsEnabledInHierarchy();
+    if (sortJob.valid()) sortJob.get();
 
     m_lastRenderCpuTimings.sortingMs = std::chrono::duration<double,std::milli>(RenderClock::now()-sortingStart).count();
     const auto occlusionStart=RenderClock::now();
@@ -3603,17 +3730,10 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     preparedDraws.reserve(renderObjects.size());
     std::shared_ptr<Engine::Components::Texture> measurementGridTexture;
     bool measurementGridReady = false;
-    bool hasSceneLightProbeContributors = false;
-    for (auto* group : GetComponents<Engine::Components::LightProbeGroup>())
-        hasSceneLightProbeContributors |= group->valid && group->Owner->IsEnabledInHierarchy();
-    for (auto* probe : GetComponents<Engine::Components::LightProbe>())
-        hasSceneLightProbeContributors |= probe->valid && probe->Owner->IsEnabledInHierarchy();
 
-    struct PackedRecord { uint32_t index; DrawCBData draw; ObjectGPUData object; };
     struct DirtyRange { uint32_t first=UINT32_MAX,last=0; double elapsedMs=0; };
     struct BufferedRecords
     {
-        std::vector<PackedRecord> records;
         std::vector<std::future<DirtyRange>> jobs;
         ~BufferedRecords() { for(auto& job:jobs) if(job.valid()) job.wait(); }
     };
@@ -3621,8 +3741,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     static thread_local unsigned recordBufferIndex=0;
     auto& recordSnapshot=recordBuffers[recordBufferIndex++ % recordBuffers.size()];
     struct RecordFence { BufferedRecords& snapshot; ~RecordFence() { for(auto& job:snapshot.jobs) if(job.valid()) job.wait(); } } recordFence{recordSnapshot};
-    recordSnapshot.records.clear(); recordSnapshot.jobs.clear();
-    recordSnapshot.records.reserve(renderObjects.size());
+    recordSnapshot.jobs.clear();
     uint32_t firstDirtyObject=UINT32_MAX, lastDirtyObject=0;
     const auto materialStart = RenderClock::now();
     UINT slot = 0;
@@ -4253,7 +4372,6 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         objectData.geometryFade = hasPortalViews && renderItem->geometryFade.w>=2.f ? mesh->GetRuntimeGeometryFade():renderItem->geometryFade;
         preparedDraw.objectData = objectData;
         preparedDraw.traversalChartPortal = renderItem->traversalChartPortal;
-        recordSnapshot.records.push_back({slot,preparedDraw.drawData,preparedDraw.objectData});
 
         Engine::Graphics::IPipelineState* materialPipeline = nullptr;
         if (isPreview)
@@ -4305,22 +4423,23 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     }
     if(!shadowOnly)
     {
-        const size_t count=recordSnapshot.records.size();
+        const size_t count=preparedDraws.size();
         auto* objectBytes=static_cast<uint8_t*>(m_objectDataMapped);
         auto* constantBytes=static_cast<uint8_t*>(m_objectCBMapped);
         const size_t tasks=std::min<size_t>(3,(count+63)/64);
         for(size_t task=0;task<tasks;++task)
         {
             const size_t first=count*task/tasks,last=count*(task+1)/tasks;
-            recordSnapshot.jobs.push_back(Engine::Rendering::RenderJobs::Get().Submit([&recordSnapshot,objectBytes,constantBytes,first,last] {
+            recordSnapshot.jobs.push_back(Engine::Rendering::RenderJobs::Get().Submit([&preparedDraws,objectBytes,constantBytes,first,last] {
                 const auto started=RenderClock::now(); DirtyRange dirty;
                 for(size_t i=first;i<last;++i)
                 {
-                    const auto& record=recordSnapshot.records[i];
-                    std::memcpy(constantBytes+size_t(record.index)*kCBStride,&record.draw,sizeof(record.draw));
-                    auto* destination=objectBytes+size_t(record.index)*sizeof(ObjectGPUData);
-                    if(std::memcmp(destination,&record.object,sizeof(record.object))!=0)
-                    { std::memcpy(destination,&record.object,sizeof(record.object)); dirty.first=std::min(dirty.first,record.index); dirty.last=std::max(dirty.last,record.index); }
+                    const auto& draw=preparedDraws[i];
+                    const uint32_t slot=draw.drawData.objectIndex;
+                    std::memcpy(constantBytes+size_t(slot)*kCBStride,&draw.drawData,sizeof(draw.drawData));
+                    auto* destination=objectBytes+size_t(slot)*sizeof(ObjectGPUData);
+                    if(std::memcmp(destination,&draw.objectData,sizeof(draw.objectData))!=0)
+                    { std::memcpy(destination,&draw.objectData,sizeof(draw.objectData)); dirty.first=std::min(dirty.first,slot); dirty.last=std::max(dirty.last,slot); }
                 }
                 dirty.elapsedMs=std::chrono::duration<double,std::milli>(RenderClock::now()-started).count(); return dirty;
             }));
@@ -4330,10 +4449,11 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     m_lastRenderCpuTimings.candidateDraws=preparedDraws.size();
     const auto batchingStart = RenderClock::now();
     struct AutomaticGroup { std::vector<uint32_t> members; };
-    std::vector<AutomaticGroup> automaticGroups;
     using AutomaticKey = std::tuple<const void*,const void*,const void*,
         std::array<const Engine::Graphics::IGraphicsTexture*,30>,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,bool,int,std::vector<std::pair<uint32_t,uint32_t>>,std::array<const void*,3>,const void*>;
-    std::map<AutomaticKey,uint32_t> automaticLookup;
+    struct AutomaticCandidate { AutomaticKey key; uint32_t drawIndex; uint32_t objectIndex; };
+    std::vector<AutomaticCandidate> automaticCandidates;
+    automaticCandidates.reserve(preparedDraws.size());
     for (uint32_t index=0;index<preparedDraws.size();++index)
     {
         auto& draw=preparedDraws[index];
@@ -4353,21 +4473,28 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             if(draw.drawData.flags & 0x00100000u) for(int lod=0;lod<=draw.gpuMaximumLod;++lod)
                 std::get<12>(key)[lod]=draw.mesh->GetRuntimeLodMesh(lod)->GetGraphicsBuffer();
         }
-        const auto found=automaticLookup.find(key);
-        uint32_t group;
-        if(found==automaticLookup.end())
-        { group=uint32_t(automaticGroups.size()); automaticLookup.emplace(std::move(key),group); automaticGroups.push_back({}); }
-        else group=found->second;
-        automaticGroups[group].members.push_back(index);
+        automaticCandidates.push_back({std::move(key),index,draw.drawData.objectIndex});
     }
-    for(auto& group:automaticGroups)
-        std::sort(group.members.begin(),group.members.end(),[&](uint32_t a,uint32_t b) {
-            return preparedDraws[a].drawData.objectIndex<preparedDraws[b].drawData.objectIndex;
+    auto batchJob = Engine::Rendering::RenderJobs::Get().Submit(
+        [candidates = std::move(automaticCandidates)]() {
+            std::map<AutomaticKey,uint32_t> lookup;
+            std::vector<AutomaticGroup> groups;
+            std::vector<uint32_t> objectIndices;
+            objectIndices.resize(candidates.empty() ? 0 :
+                1u + std::max_element(candidates.begin(),candidates.end(),
+                    [](const auto& a,const auto& b) { return a.drawIndex<b.drawIndex; })->drawIndex);
+            for (auto& candidate : candidates)
+            {
+                objectIndices[candidate.drawIndex]=candidate.objectIndex;
+                auto [found, inserted]=lookup.emplace(std::move(candidate.key),static_cast<uint32_t>(groups.size()));
+                if (inserted) groups.push_back({});
+                groups[found->second].members.push_back(candidate.drawIndex);
+            }
+            for (auto& group : groups)
+                std::sort(group.members.begin(),group.members.end(),
+                    [&](uint32_t a,uint32_t b) { return objectIndices[a]<objectIndices[b]; });
+            return groups;
         });
-    for (uint32_t group=0;group<automaticGroups.size();++group)
-        if (automaticGroups[group].members.size()>1 || preparedDraws[automaticGroups[group].members.front()].gpuLod>=0 || (preparedDraws[automaticGroups[group].members.front()].drawData.flags & 0x00100000u))
-            for(auto index:automaticGroups[group].members) preparedDraws[index].automaticGroup=group;
-    m_lastRenderCpuTimings.batchingMs=std::chrono::duration<double,std::milli>(RenderClock::now()-batchingStart).count();
     m_lastOrdinaryDrawCount = 0;
     m_lastOrdinaryTriangleCount = 0;
     for (const PreparedDraw& draw : preparedDraws)
@@ -4387,6 +4514,11 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             m_lastOrdinaryTriangleCount += (draw.indexBuffer ? draw.indexCount : draw.vertexCount) / 3;
         }
     }
+    std::vector<AutomaticGroup> automaticGroups = batchJob.get();
+    for (uint32_t group=0;group<automaticGroups.size();++group)
+        if (automaticGroups[group].members.size()>1 || preparedDraws[automaticGroups[group].members.front()].gpuLod>=0 || (preparedDraws[automaticGroups[group].members.front()].drawData.flags & 0x00100000u))
+            for(auto index:automaticGroups[group].members) preparedDraws[index].automaticGroup=group;
+    m_lastRenderCpuTimings.batchingMs=std::chrono::duration<double,std::milli>(RenderClock::now()-batchingStart).count();
     if(shadowOnly)
     {
         std::unordered_set<const Engine::Core::Object*> eligibleCasters;
@@ -4772,40 +4904,45 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     {
         context->BeginGpuTiming(Engine::Graphics::GpuTimingStage::Shadow);
         std::array<std::vector<uint8_t>,4> cascadeVisible;
-        for(uint32_t cascade=0;cascade<shadowCascadeCount;++cascade)
+        // Each cascade owns its visibility and receiver results. The spatial
+        // tree is immutable for this render, and uncached queries leave the
+        // single-owner view cache untouched.
+        Engine::Rendering::RenderJobs::Get().For(shadowCascadeCount,1,[&](size_t cascade)
         {
-            const auto& frameVisible=hasPortalViews ? emptyVisibility : m_renderSpatialIndex.Query(shadowViewProjections[cascade]);
-            cascadeVisible[cascade].resize(preparedDraws.size(),1);
-            if(!frameVisible.empty())
-                for(size_t index=0;index<preparedDraws.size();++index)
-                    cascadeVisible[cascade][index]=frameVisible[frameRenderItems[preparedDraws[index].frameItemIndex].objectSlot];
-        }
-        std::vector<uint8_t> cascadeMasks(preparedDraws.size(), 0u);
-        Engine::Rendering::RenderJobs::Get().For(preparedDraws.size(),512,[&](size_t drawIndex)
-        {
-            const PreparedDraw& draw = preparedDraws[drawIndex];
-            if (!draw.castsShadow || !draw.vertexBuffer ||
-                isSpatialManipulatorCarrierDraw(draw))
-                return;
-            for (uint32_t cascade = 0; cascade < shadowCascadeCount; ++cascade)
-                if (cascadeVisible[cascade][drawIndex] && !outsideShadowCascade(draw, cascade))
-                    cascadeMasks[drawIndex] |= static_cast<uint8_t>(1u << cascade);
+            const auto frameVisible=hasPortalViews ? std::vector<uint8_t>{} :
+                m_renderSpatialIndex.QueryUncached(shadowViewProjections[cascade]);
+            auto& visible=cascadeVisible[cascade];
+            visible.resize(preparedDraws.size(),0);
+            for(size_t drawIndex=0;drawIndex<preparedDraws.size();++drawIndex)
+            {
+                const PreparedDraw& draw=preparedDraws[drawIndex];
+                if (!draw.castsShadow || !draw.vertexBuffer ||
+                    isSpatialManipulatorCarrierDraw(draw)) continue;
+                if(!frameVisible.empty() &&
+                    !frameVisible[frameRenderItems[draw.frameItemIndex].objectSlot]) continue;
+                visible[drawIndex]=!outsideShadowCascade(draw,static_cast<uint32_t>(cascade));
+            }
         });
-        for(uint32_t cascade=0;cascade<shadowCascadeCount;++cascade)
-            for(size_t index=0;index<preparedDraws.size();++index)
-                cascadeVisible[cascade][index]=(cascadeMasks[index] & (1u<<cascade))!=0;
+        std::vector<uint8_t> cascadeMasks(preparedDraws.size(), 0u);
+        for(size_t drawIndex=0;drawIndex<preparedDraws.size();++drawIndex)
+        {
+            for (uint32_t cascade = 0; cascade < shadowCascadeCount; ++cascade)
+                if (cascadeVisible[cascade][drawIndex])
+                    cascadeMasks[drawIndex] |= static_cast<uint8_t>(1u << cascade);
+        }
         const auto shadowCullingEnd = std::chrono::steady_clock::now();
         m_lastShadowCpuTiming.cascadeCullingMs = shadowElapsedMs(
             shadowPreparationEnd, shadowCullingEnd);
-        uint32_t firstDirtyShadow=UINT32_MAX,lastDirtyShadow=0;
-        for (uint32_t cascade = 0; cascade < shadowCascadeCount; ++cascade)
+        std::array<uint32_t,4> firstDirtyByCascade, lastDirtyByCascade{};
+        firstDirtyByCascade.fill(UINT32_MAX);
+        Engine::Rendering::RenderJobs::Get().For(shadowCascadeCount,1,[&](size_t cascade)
         {
             for (size_t drawIndex = 0; drawIndex < preparedDraws.size(); ++drawIndex)
             {
                 if (!(cascadeMasks[drawIndex] & (1u << cascade)))
                     continue;
                 const PreparedDraw& draw = preparedDraws[drawIndex];
-                const uint32_t recordIndex = cascade * m_objectCapacity +
+                const uint32_t recordIndex = static_cast<uint32_t>(cascade) * m_objectCapacity +
                     draw.drawData.objectIndex;
                 ObjectGPUData shadowData = draw.objectData;
                 shadowData.viewProjection = shadowViewProjections[cascade];
@@ -4818,7 +4955,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 if(std::memcmp(destination,&shadowData,sizeof(shadowData))!=0)
                 {
                     std::memcpy(destination,&shadowData,sizeof(shadowData));
-                    firstDirtyShadow=std::min(firstDirtyShadow,recordIndex); lastDirtyShadow=recordIndex;
+                    firstDirtyByCascade[cascade]=std::min(firstDirtyByCascade[cascade],recordIndex);
+                    lastDirtyByCascade[cascade]=recordIndex;
                 }
                 DrawCBData shadowDraw = draw.drawData;
                 shadowDraw.objectIndex = recordIndex;
@@ -4828,6 +4966,12 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                     static_cast<uint64_t>(recordIndex) * kCBStride,
                     &shadowDraw, sizeof(shadowDraw));
             }
+        });
+        uint32_t firstDirtyShadow=UINT32_MAX,lastDirtyShadow=0;
+        for (uint32_t cascade = 0; cascade < shadowCascadeCount; ++cascade)
+        {
+            firstDirtyShadow=std::min(firstDirtyShadow,firstDirtyByCascade[cascade]);
+            lastDirtyShadow=std::max(lastDirtyShadow,lastDirtyByCascade[cascade]);
         }
         if(firstDirtyShadow!=UINT32_MAX)
         {

@@ -345,6 +345,7 @@ VkCommandBuffer VulkanRenderCore::BeginFrame()
     if (acquired != VK_SUCCESS && acquired != VK_SUBOPTIMAL_KHR) VkCheck(acquired, "vkAcquireNextImageKHR");
     VkCheck(vkResetFences(m_device, 1, &m_inFlight[m_frameIndex]), "vkResetFences");
     m_currentCommandBuffer = m_commandBuffers[m_frameIndex];
+    m_preFrameCommandBuffer = VK_NULL_HANDLE;
     VkCheck(vkResetCommandBuffer(m_currentCommandBuffer, 0), "vkResetCommandBuffer");
     VkCommandBufferBeginInfo begin{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
     begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
@@ -360,7 +361,9 @@ void VulkanRenderCore::EndFrame()
     VkSubmitInfo submit{ VK_STRUCTURE_TYPE_SUBMIT_INFO };
     submit.waitSemaphoreCount = 1; submit.pWaitSemaphores = &m_imageAvailable[m_frameIndex];
     submit.pWaitDstStageMask = &waitStage;
-    submit.commandBufferCount = 1; submit.pCommandBuffers = &m_currentCommandBuffer;
+    VkCommandBuffer commands[2] = { m_preFrameCommandBuffer, m_currentCommandBuffer };
+    submit.commandBufferCount = m_preFrameCommandBuffer ? 2u : 1u;
+    submit.pCommandBuffers = m_preFrameCommandBuffer ? commands : &m_currentCommandBuffer;
     submit.signalSemaphoreCount = 1; submit.pSignalSemaphores = &m_renderFinished[m_frameIndex];
     std::lock_guard queueLock(VulkanQueueMutex());
     VkCheck(vkQueueSubmit(m_queue, 1, &submit, m_inFlight[m_frameIndex]), "vkQueueSubmit");
@@ -372,6 +375,7 @@ void VulkanRenderCore::EndFrame()
     if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) m_resizePending = true;
     else VkCheck(result, "vkQueuePresentKHR");
     m_currentCommandBuffer = VK_NULL_HANDLE;
+    m_preFrameCommandBuffer = VK_NULL_HANDLE;
     m_frameIndex = (m_frameIndex + 1) % FRAME_COUNT;
 }
 

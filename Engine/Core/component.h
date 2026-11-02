@@ -63,6 +63,11 @@ public:
     virtual void Deserialize(const Engine::Serialization::JsonValue& v);
     // Lets components rebuild runtime resources without serializer type checks.
     virtual void        OnAfterDeserialize(Engine::Graphics::IGraphicsProvider*) {}
+    // Called from the render preparation boundary after CPU deserialization.
+    // Resource creation belongs here, while OnAfterDeserialize is CPU only.
+    virtual void PrepareGraphicsResources(Engine::Graphics::IGraphicsProvider*) {}
+    // Returns true when a scene will run the graphics stage at its next render.
+    bool DeferGraphicsPreparation(Engine::Graphics::IGraphicsProvider*);
     // Engine components and game scripts share lifecycle dispatch. Script is
     // a semantic marker for user-authored/hot-reloadable behavior, not the
     // mechanism that makes a component update.
@@ -81,9 +86,41 @@ public:
     virtual void Enabled() {}
     virtual void Disabled() {}
     virtual void OnDestroy() {}
+    // Lifecycle state belongs to the component so repeated scene starts and
+    // object removal cannot deliver the same callback twice.
+    void DispatchStart()
+    {
+        if (m_lifecycleDestroyed || m_lifecycleStarted) return;
+        m_lifecycleStarted = true;
+        Start();
+    }
+    void DispatchEnabled()
+    {
+        if (m_lifecycleDestroyed || m_lifecycleEnabled) return;
+        m_lifecycleEnabled = true;
+        Enabled();
+    }
+    void DispatchDisabled()
+    {
+        if (m_lifecycleDestroyed || !m_lifecycleEnabled) return;
+        m_lifecycleEnabled = false;
+        Disabled();
+    }
+    void DispatchDestroy()
+    {
+        if (m_lifecycleDestroyed) return;
+        DispatchDisabled();
+        m_lifecycleDestroyed = true;
+        OnDestroy();
+    }
     // Called on the scene owner before lifecycle transitions or module unload.
     // Implementations must cancel queued work and join work executing component code.
     virtual void FenceBackgroundWork() {}
+private:
+    bool m_lifecycleStarted = false;
+    bool m_lifecycleEnabled = false;
+    bool m_lifecycleDestroyed = false;
+public:
     // Called by the Properties panel to draw editable properties in the editor.
     // Returns true when an editor control changed serialized component data.
     virtual bool DrawProperties(::Engine::Editor::IEditorUi& ui);

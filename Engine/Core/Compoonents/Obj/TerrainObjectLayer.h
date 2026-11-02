@@ -55,6 +55,7 @@ public:
         float yawDegrees);
     JsonValue Serialize() const override;
     void Deserialize(const JsonValue& value) override;
+    void InstallPrepared(TerrainObjectLayer&& source);
     bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
 private:
     mutable PreparedTiles m_prepared;

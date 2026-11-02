@@ -89,6 +89,7 @@ public:
     void SetCommandBuffer(void* commandBuffer) override
     { m_commandBuffer = reinterpret_cast<VkCommandBuffer>(commandBuffer); }
     void PrepareFrame(uint32_t frameSlot) override;
+    void PrepareFrameForCommandBuffer(uint32_t frameSlot, VkCommandBuffer commandBuffer);
     uint32_t GetPreparedFrameSlot() const override { return m_preparedFrameSlot; }
     uint64_t GetPreparedFrameSerial() const override { return m_preparedFrameSerial; }
     void FinalizeFrame() override;
@@ -100,6 +101,13 @@ public:
                 m_commandBuffer, m_textureSystem, m_occlusionState, m_gpuTimings,
                 m_computeDescriptors)
             : nullptr;
+    }
+    std::unique_ptr<Engine::Graphics::IGraphicsContext> CreateContextForCommandBuffer(void* commandBuffer) override
+    {
+        if (!commandBuffer) return nullptr;
+        return std::make_unique<VulkanGraphicsContext>(
+            reinterpret_cast<VkCommandBuffer>(commandBuffer), m_textureSystem,
+            m_occlusionState, m_gpuTimings, m_computeDescriptors);
     }
     void SetDevice(VkDevice device, float timestampPeriod);
     void SetTextureSystem(std::shared_ptr<VulkanTextureSystem> textureSystem)

@@ -35,20 +35,19 @@ Open work is ordered by engine-wide impact and prerequisites; completed foundati
 - [x] Schedule native update phases as dependent jobs: component updates, spatial scripts, transforms, animation/constraints, physics preparation, simulation, post-physics processing, and render snapshot publication.
 - [x] Add component update dependencies and explicit read/write access so independent updates can run concurrently while existing scripts retain a compatible serial path.
 - [x] Add explicit thread-affinity and parallel-safety policies for native component and script callbacks; move eligible Update work onto workers and marshal window, graphics, and shared-state operations to their owners.
-- [ ] Run Start, Enabled, Disabled, and OnDestroy on the owning simulation thread with deterministic ordering, once-only lifecycle delivery, and completion of jobs referencing affected objects before destruction.
-- [ ] Separate CPU preparation in deserialization and lifecycle callbacks from graphics resource creation, submitting resource work to the render thread.
-- [ ] Route reloadable script-module jobs through the host-owned scheduler and complete or cancel module jobs before unloading their code.
-- [ ] Prepare render items, material records, visibility, sorting, and compatible draw batches on workers from stable snapshots.
-- [ ] Cache static render items, updating only changed objects instead of rebuilding preparation every frame.
-- [ ] Share camera and shadow preparation across views and cascades; schedule independent visibility and batch preparation without unnecessary per-loop barriers.
-- [ ] Move terrain-cell loading, decoding, instance preparation, and bounds construction onto workers with bounded queues, cancellation, and scene-generation checks.
-- [ ] Parallelize independent animation and rig evaluation while preserving animation, constraints, physics, and final-pose ordering.
-- [ ] Parallelize physics preparation and post-processing where independent; preserve simulation ownership and synchronized scene publication.
-- [ ] Add worker command recording through backend-specific contexts: benchmark DX11 deferred contexts and support independent DX12/Vulkan command lists or buffers.
-- [ ] Identify and eliminate graphics-submission stalls with native-call timings for buffer mapping, dispatch, resource binding, indirect arguments, draws, and fence waits.
-- [ ] Remove confirmed buffer-reuse synchronization stalls with frame-safe constant, upload, and indirect-argument allocations.
-- [ ] Move expensive editor data preparation and asset processing onto workers while keeping window, input, and UI construction on their owning thread.
-- [ ] Record per-stage main-thread busy time, worker execution, queue delay, dependency waits, render-thread stalls, and frame latency in the Performance view and recordings.
+- [x] Run Start, Enabled, Disabled, and OnDestroy on the owning simulation thread with deterministic ordering, once-only lifecycle delivery, and completion of jobs referencing affected objects before destruction.
+- [x] Separate CPU preparation in deserialization and lifecycle callbacks from graphics resource creation, submitting resource work to the render thread.
+- [x] Route reloadable script-module jobs through the host-owned scheduler and complete or cancel module jobs before unloading their code.
+- [x] Prepare render items, material records, visibility, sorting, and compatible draw batches on workers from stable snapshots.
+- [x] Cache static render items, updating only changed objects instead of rebuilding preparation every frame.
+- [x] Share camera and shadow preparation across views and cascades; schedule independent visibility and batch preparation without unnecessary per-loop barriers.
+- [x] Move terrain-cell loading, decoding, instance preparation, and bounds construction onto workers with bounded queues, cancellation, and scene-generation checks.
+- [x] Parallelize independent animation channel sampling and isolated rig evaluation; join pose jobs before IK, transform constraints, physics, and final-pose publication.
+- [x] Parallelize physics preparation and post-processing where independent; preserve simulation ownership and synchronized scene publication.
+- [x] Add worker command recording through backend-specific contexts: benchmark DX11 deferred contexts and support independent DX12/Vulkan command lists or buffers.
+- [ ] Identify and eliminate graphics-submission stalls with native-call timings for buffer mapping, dispatch, resource binding, indirect arguments, draws, and fence waits. DX11 moving and streaming audit: maps and indirect copies stayed short; isolated `UpdateSubresource` and dispatch hitches remained. Dynamic upload renaming moved stalls to dispatch and did not improve P95. See [native submission stall audit](native-submission-stalls-20261102.md).
+- [x] Move expensive editor data preparation and asset processing onto workers while keeping window, input, and UI construction on their owning thread.
+- [x] Record per-stage main-thread busy time, worker execution, queue delay, dependency waits, render-thread stalls, and frame latency in the Performance view and recordings.
 - [ ] Validate serial and parallel modes with matched-route captures, frame-time percentiles, worker scaling, and regression checks for scene loading, Play/Stop, streaming, transforms, shadows, and all renderers.
 - [ ] Reduce measured grass GPU shading/coverage cost without visible regressions in editor, gameplay, export, shadows, or DX11/DX12/Vulkan.
 - [x] Replace the fixed three-worker render pool with a configurable engine job scheduler supporting dependencies, workload-sized batches, and execution/queue/wait measurements.

@@ -4,6 +4,7 @@
 #include <memory>
 
 
+namespace Engine::Graphics { class GraphicsCommandPacket; }
 namespace Engine::Renderers
 {
 // ---------------------------------------------------------------------------
@@ -33,6 +34,12 @@ public:
     // Create a graphics context bound to the renderer's current frame command
     // stream. Call after BeginFrame() and before EndFrame().
     virtual std::unique_ptr<Engine::Graphics::IGraphicsContext> CreateFrameGraphicsContext() = 0;
+    // Called on a recording worker after BeginFrame. The render owner joins
+    // that worker and calls SubmitWorkerCommands before Clear/scene replay.
+    virtual bool RecordWorkerCommands(const Engine::Graphics::GraphicsCommandPacket&) { return false; }
+    virtual bool SupportsWorkerCommands() const { return false; }
+    virtual void SetWorkerRecordingEnabled(bool) {}
+    virtual void SubmitWorkerCommands() {}
 
     // Monotonic GPU completion watermark for resources retired after EndFrame.
     // Poll only on the renderer's owning thread. Token zero means no submission.

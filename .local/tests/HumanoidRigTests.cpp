@@ -4,6 +4,8 @@
 #include "Core/Compoonents/Animation/Model.h"
 #include "Core/Compoonents/Animation/Skeleton.h"
 #include "Core/Compoonents/Animation/AnimationManager.h"
+#include "Core/Compoonents/Animation/RigConstraints.h"
+#include "Core/Threading/JobScheduler.h"
 #include "Core/Model/AnimationPackAsset.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Object.h"
@@ -55,10 +57,79 @@ std::vector<Model::AnimationClipAsset::BaseNode> Bind(const std::vector<H::Node>
     return result;
 }
 
+void CheckParallelPose()
+{
+    auto& jobs = Threading::JobScheduler::Get();
+    struct RestoreParallelMode
+    {
+        Threading::JobScheduler& jobs;
+        ~RestoreParallelMode() { jobs.SetParallelForEnabled(true); }
+    } restore{jobs};
+    const auto evaluate = [&](bool parallel)
+    {
+        jobs.SetParallelForEnabled(parallel);
+        Scene::Scene scene;
+        std::vector<Core::Object*> bones;
+        for (int rig = 0; rig < 3; ++rig)
+        {
+            auto* root = scene.AddObject();
+            root->transform.position = glm::vec3(float(rig + 1), 0.f, 0.f);
+            auto* bone = scene.AddObject();
+            bone->Parent = root;
+            root->Children.push_back(bone);
+            bones.push_back(bone);
+            auto* model = root->AddComponent<Components::Model>();
+            model->BindNode(0, root);
+            model->BindNode(1, bone);
+            auto* animation = root->AddComponent<Components::AnimationManager>();
+            Model::AnimationClip clip;
+            clip.clipName = "pose";
+            clip.duration = 1.f;
+            for (int index = 0; index < 64; ++index)
+            {
+                Model::AnimationChannel channel;
+                channel.nodeIndex = 1;
+                channel.path = Model::AnimationChannel::Path::Translation;
+                channel.valueWidth = 3;
+                channel.times = {0.f, 1.f};
+                const float x = float(rig + index);
+                channel.values = {x, 0.f, 0.f, x + 1.f, 0.f, 0.f};
+                clip.channels.push_back(std::move(channel));
+            }
+            animation->InstallEmbeddedClips({clip});
+            animation->clip = "pose";
+            auto* constraints = root->AddComponent<Components::RigConstraints>();
+            Model::ImportedAppendRule append;
+            append.nodeIndex = 1;
+            append.sourceNodeIndex = 0;
+            append.translation = true;
+            append.influence = .25f;
+            constraints->appendRules.push_back(append);
+        }
+        scene.Start();
+        for (int frame = 0; frame < 3; ++frame) scene.Update(1.f / 60.f);
+        std::vector<glm::vec3> positions;
+        for (auto* bone : bones)
+            positions.push_back(glm::vec3(bone->transform.position));
+        return positions;
+    };
+    const auto serial = evaluate(false);
+    const auto parallel = evaluate(true);
+    CHECK(serial.size() == parallel.size());
+    for (size_t index = 0; index < serial.size(); ++index)
+    {
+        CHECK(std::abs(serial[index].x -
+            (63.f + float(index) + .05f + .25f * float(index + 1))) < 1e-4f);
+        CHECK(glm::distance(serial[index], parallel[index]) < 1e-6f);
+    }
+}
+
 int main(int argc, char** argv)
 {
     try
     {
+        CheckParallelPose();
+        if (argc > 1 && std::string(argv[1]) == "--pose-only") return 0;
         if (argc>1 && std::string(argv[1])=="--inspect")
         {
             for (const auto* path : {"Engine/Core/Assets/Roku_V1_packed/Roku_V1_packed.rig",

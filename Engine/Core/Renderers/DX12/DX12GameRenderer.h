@@ -97,6 +97,9 @@ public:
     bool IsFrameComplete(uint64_t token) override
     { return token == 0 || (m_fence && m_fence->GetCompletedValue() >= token); }
     std::unique_ptr<Engine::Graphics::IGraphicsContext> CreateFrameGraphicsContext() override;
+    bool RecordWorkerCommands(const Engine::Graphics::GraphicsCommandPacket&) override;
+    bool SupportsWorkerCommands() const override { return true; }
+    void SubmitWorkerCommands() override;
     Engine::Graphics::FrameTimingTelemetry GetFrameTimingTelemetry() const override
     { return m_frameTelemetry; }
 
@@ -150,6 +153,9 @@ private:
     ComPtr<ID3D12CommandQueue>        m_commandQueue;
     ComPtr<ID3D12CommandAllocator>    m_commandAllocators[FRAME_COUNT];
     ComPtr<ID3D12GraphicsCommandList> m_commandList;
+    ComPtr<ID3D12CommandAllocator> m_workerAllocators[FRAME_COUNT];
+    ComPtr<ID3D12GraphicsCommandList> m_workerCommandList;
+    bool m_workerCommandsReady = false;
     ComPtr<ID3D12RootSignature>       m_rootSignature;
 
     // -- Render targets --

@@ -37,6 +37,7 @@ public:
 
     void Deserialize(const JsonValue& value) override;
     void OnAfterDeserialize(IGraphicsProvider* graphicsProvider) override;
+    void PrepareGraphicsResources(IGraphicsProvider* graphicsProvider) override;
     bool Prepare(IGraphicsProvider* graphicsProvider);
     const Texture* GetTexture() const { return m_texture.get(); }
 

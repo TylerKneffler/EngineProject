@@ -91,6 +91,7 @@ namespace Engine::Editor
             << ",\"dt_ms\":" << sample.deltaSeconds * 1000.f
             << ",\"fps\":" << (sample.deltaSeconds>0 ? 1./sample.deltaSeconds:0.)
             << ",\"fps_scope\":\"editor_frame_interval\""
+            << ",\"frame_latency_ms\":" << sample.deltaSeconds * 1000.f
             << ",\"frame_ms\":" << ms(sample.frameBegin, sample.afterPendingLoad)
             << ",\"pacing_ms\":" << ms(sample.frameBegin, sample.afterPacing)
             << ",\"background_ms\":" << ms(sample.afterPacing, sample.afterBackground)
@@ -178,6 +179,21 @@ namespace Engine::Editor
             << ",\"game_view_height\":" << sample.gameViewHeight
             << ",\"shadow_draws\":" << sample.submittedShadowDraws
             << ",\"physics_substeps\":" << physicsSubsteps;
+        static constexpr const char* stageNames[]={"pacing","background","update","render","pending_load"};
+        output << ",\"stage_work\":[";
+        for(size_t i=0;i<sample.stages.size();++i)
+        {
+            const auto& stage=sample.stages[i];
+            if(i) output << ',';
+            output << "{\"stage\":\"" << stageNames[i] << "\",\"wall_ms\":" << stage.wallMs
+                << ",\"main_busy_ms\":" << stage.mainBusyMs
+                << ",\"worker_execution_ms\":" << stage.workerMs
+                << ",\"queue_delay_ms\":" << stage.queueMs
+                << ",\"dependency_wait_ms\":" << stage.dependencyMs
+                << ",\"scheduler_wait_ms\":" << stage.waitMs
+                << ",\"render_thread_stall_ms\":" << stage.renderStallMs << '}';
+        }
+        output << ']';
         output << ",\"physics_dropped_ms\":" << physicsDroppedMilliseconds
             << ",\"physics_pending_ms\":" << physicsPendingMilliseconds;
         const auto writeStepArray = [&](const char* key, const auto& values)

@@ -80,6 +80,24 @@ class PerformanceEvaluationTests(unittest.TestCase):
         self.assertEqual(result["effective_fps"], 100)
         self.assertEqual(result["hardware"]["process_cpu_pct"]["mean"], 5)
 
+    def test_per_core_and_gpu_engine_readings_use_measured_samples(self):
+        rows = [dict(type="frame_details", measured=True, frame_ms=10),
+                dict(type="sample", measured=False, cpu_cores_pct=[[99, 0]],
+                     gpu_engine_instances=[["luid_1_phys_0_eng_0", 0, 99]]),
+                dict(type="sample", measured=True, cpu_cores_pct=[[20, 5], [10, 10]],
+                     gpu_engine_instances=[["luid_1_phys_0_eng_0", 0, 30]]),
+                dict(type="sample", measured=True, cpu_cores_pct=[[40, 10], [0, 20]],
+                     gpu_engine_instances=[["luid_1_phys_0_eng_0", 0, 50],
+                                           ["luid_1_phys_0_eng_1", 1, 75]])]
+        result = evaluation.evaluate(rows)
+        self.assertEqual(result["cpu_cores"]["0"]["mean"], 37.5)
+        self.assertEqual(result["cpu_cores"]["1"]["mean"], 20)
+        self.assertEqual(result["gpu_engines"]["luid_1_phys_0_eng_0 / 3D"]["mean"], 40)
+        self.assertEqual(result["gpu_engines"]["luid_1_phys_0_eng_1 / Compute"]["mean"], 75)
+        report = evaluation.markdown(result)
+        self.assertIn("Logical CPU", report)
+        self.assertIn("luid_1_phys_0_eng_0", report)
+
     def test_unfinished_warmup_is_not_reported_as_measured(self):
         with self.assertRaises(ValueError):
             evaluation.evaluate([dict(type="frame_details", measured=False, playing=True, frame_ms=20)])

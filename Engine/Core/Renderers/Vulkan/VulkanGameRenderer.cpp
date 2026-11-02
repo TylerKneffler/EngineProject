@@ -1,6 +1,7 @@
 #include "pch.h"
 #if defined(ENGINE_VULKAN_ENABLED)
 #include "VulkanGameRenderer.h"
+#include "Core/Graphics/GraphicsCommandPacket.h"
 #include <chrono>
 #include <algorithm>
 #include <cmath>
@@ -13,6 +14,8 @@ VulkanGameRenderer::~VulkanGameRenderer()
     // VulkanRenderCore because of member order. Finish their GPU use first.
     m_core.WaitIdle();
     DestroySceneCapture();
+    for (auto pool : m_workerCommandPools)
+        if (pool) vkDestroyCommandPool(m_core.GetDevice(), pool, nullptr);
 }
 
 bool VulkanGameRenderer::Init(void* hwnd, uint32_t width, uint32_t height)
@@ -24,6 +27,20 @@ bool VulkanGameRenderer::Init(void* hwnd, uint32_t width, uint32_t height)
         m_core.GetQueue(), m_core.GetQueueFamily());
     m_postProcess.Init(m_core.GetPhysicalDevice(), m_core.GetDevice(),
         m_core.GetOffscreenRenderPass(), m_core.GetMainRenderPass(), width, height);
+    for (uint32_t slot = 0; slot < 2; ++slot)
+    {
+        VkCommandPoolCreateInfo pool{ VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
+        pool.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+        pool.queueFamilyIndex = m_core.GetQueueFamily();
+        VkCheck(vkCreateCommandPool(m_core.GetDevice(), &pool, nullptr,
+            &m_workerCommandPools[slot]), "vkCreateCommandPool(worker)");
+        VkCommandBufferAllocateInfo allocate{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
+        allocate.commandPool = m_workerCommandPools[slot];
+        allocate.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        allocate.commandBufferCount = 1;
+        VkCheck(vkAllocateCommandBuffers(m_core.GetDevice(), &allocate,
+            &m_workerCommandBuffers[slot]), "vkAllocateCommandBuffers(worker)");
+    }
     return true;
 }
 
@@ -42,12 +59,14 @@ void VulkanGameRenderer::Resize(uint32_t width, uint32_t height)
 void VulkanGameRenderer::BeginFrame()
 {
     m_commandBuffer = m_core.BeginFrame();
+    m_workerCommandsReady = false;
     m_renderPassActive = false;
     if (m_commandBuffer && m_provider)
     {
         auto* factory = m_provider->GetContextFactory();
         factory->SetCommandBuffer(reinterpret_cast<void*>(m_commandBuffer));
-        factory->PrepareFrame(m_core.GetFrameIndex());
+        if (!m_workerRecordingEnabled)
+            factory->PrepareFrame(m_core.GetFrameIndex());
     }
 }
 
@@ -194,6 +213,35 @@ std::unique_ptr<Engine::Graphics::IGraphicsContext> VulkanGameRenderer::CreateFr
     auto* factory = m_provider->GetContextFactory();
     factory->SetCommandBuffer(reinterpret_cast<void*>(m_commandBuffer));
     return factory->CreateContext();
+}
+
+bool VulkanGameRenderer::RecordWorkerCommands(const Engine::Graphics::GraphicsCommandPacket& packet)
+{
+    if (!m_commandBuffer) return false;
+    const auto slot = m_core.GetFrameIndex();
+    VkCheck(vkResetCommandPool(m_core.GetDevice(), m_workerCommandPools[slot], 0),
+        "vkResetCommandPool(worker)");
+    VkCommandBuffer command = m_workerCommandBuffers[slot];
+    VkCommandBufferBeginInfo begin{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+    begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    VkCheck(vkBeginCommandBuffer(command, &begin), "vkBeginCommandBuffer(worker)");
+    auto* factory = static_cast<VulkanGraphicsContextFactory*>(
+        m_provider->GetContextFactory());
+    factory->PrepareFrameForCommandBuffer(slot, command);
+    auto context = factory->CreateContextForCommandBuffer(
+        reinterpret_cast<void*>(command));
+    if (!context) return false;
+    packet.Replay(*context);
+    VkCheck(vkEndCommandBuffer(command), "vkEndCommandBuffer(worker)");
+    m_workerCommandsReady = true;
+    return true;
+}
+
+void VulkanGameRenderer::SubmitWorkerCommands()
+{
+    if (!m_workerCommandsReady) return;
+    m_core.SetPreFrameCommandBuffer(m_workerCommandBuffers[m_core.GetFrameIndex()]);
+    m_workerCommandsReady = false;
 }
 }
 #endif

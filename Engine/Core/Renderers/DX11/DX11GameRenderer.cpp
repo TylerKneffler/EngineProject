@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "DX11GameRenderer.h"
 #include "Core/Graphics/PostProcess.h"
+#include "Core/Graphics/GraphicsCommandPacket.h"
 #include <d3d11_4.h>
 #include <chrono>
 
@@ -81,6 +82,13 @@ bool DX11GameRenderer::Init(void* hwndHandle, uint32_t width, uint32_t height)
         m_height = height;
         CreateTargets();
         m_graphicsProvider = std::make_unique<D3D11GraphicsProvider>(m_device.Get(), m_context.Get());
+        char deferredFlag[2]{};
+        m_deferredCommandsEnabled = GetEnvironmentVariableA(
+            "ENGINE_DX11_DEFERRED_COMMANDS", deferredFlag, sizeof(deferredFlag)) == 1 &&
+            (deferredFlag[0] == '1' || deferredFlag[0] == '2');
+        m_alternatingDeferredBenchmark = deferredFlag[0] == '2';
+        if (m_deferredCommandsEnabled)
+            ThrowIfFailed(m_device->CreateDeferredContext(0, &m_workerContext));
         return true;
     }
     catch (const std::exception& error)
@@ -128,6 +136,7 @@ void DX11GameRenderer::Resize(uint32_t width, uint32_t height)
 
 void DX11GameRenderer::BeginFrame()
 {
+    ++m_frameNumber;
     if (m_graphicsProvider)
         m_graphicsProvider->GetContextFactory()->PrepareFrame(0);
     m_postProcess.BindScene(m_context.Get(), m_dsv.Get(), m_clearColor);
@@ -530,6 +539,24 @@ std::unique_ptr<Engine::Graphics::IGraphicsContext> DX11GameRenderer::CreateFram
         : nullptr;
 }
 
+bool DX11GameRenderer::RecordWorkerCommands(const Engine::Graphics::GraphicsCommandPacket& packet)
+{
+    if (!m_workerContext || !m_graphicsProvider) return false;
+    auto context = m_graphicsProvider->GetContextFactory()->CreateContextForCommandBuffer(
+        m_workerContext.Get());
+    if (!context) return false;
+    packet.Replay(*context);
+    ThrowIfFailed(m_workerContext->FinishCommandList(FALSE, &m_workerCommandList));
+    return true;
+}
+
+void DX11GameRenderer::SubmitWorkerCommands()
+{
+    if (!m_workerCommandList) return;
+    m_context->ExecuteCommandList(m_workerCommandList.Get(), FALSE);
+    m_workerCommandList.Reset();
+}
+
 void DX11GameRenderer::WaitIdle()
 {
     if (!m_device || !m_context) return;
@@ -540,8 +567,13 @@ void DX11GameRenderer::WaitIdle()
     m_context->End(completion.Get());
     m_context->Flush();
     HRESULT status = S_FALSE;
-    while ((status = m_context->GetData(completion.Get(), nullptr, 0, 0)) == S_FALSE)
-        SwitchToThread();
+    auto* factory = m_graphicsProvider
+        ? static_cast<D3D11GraphicsContextFactory*>(m_graphicsProvider->GetContextFactory()) : nullptr;
+    auto* probe = factory ? factory->GetNativeProbe() : nullptr;
+    Engine::Graphics::MeasureNative(probe, Engine::Graphics::NativeOperation::FenceWait, [&] {
+        while ((status = m_context->GetData(completion.Get(), nullptr, 0, 0)) == S_FALSE)
+            SwitchToThread();
+    });
     ThrowIfFailed(status);
     m_completedFrameToken = m_submittedFrameToken;
     m_frameCompletionQueries.clear();

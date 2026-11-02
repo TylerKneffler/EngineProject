@@ -203,5 +203,9 @@ public:
     virtual uint32_t GetConstantBufferArenaWrites() const { return 0; }
     virtual uint32_t GetConstantBufferDiscardMaps() const { return 0; }
     virtual std::unique_ptr<IGraphicsContext> CreateContext() = 0;
+    // Build a context around a worker-owned native command stream without
+    // changing the factory's current frame stream.
+    virtual std::unique_ptr<IGraphicsContext> CreateContextForCommandBuffer(void*)
+    { return nullptr; }
 };
 }

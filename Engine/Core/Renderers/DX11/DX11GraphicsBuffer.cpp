@@ -106,7 +106,7 @@ void D3D11GraphicsBuffer::FlushMappedWrites(uint64_t offset, uint64_t size)
     {
         const size_t copyBytes = std::min<size_t>(nativeByteCount, m_shadowData.size());
         std::memcpy(mapped.pData, m_shadowData.data(), copyBytes);
-        Engine::Graphics::MeasureNative(m_native.get(),Engine::Graphics::NativeOperation::Upload,[&] { return context->Unmap(m_buffer.Get(), 0); });
+        Engine::Graphics::MeasureNative(m_native.get(),Engine::Graphics::NativeOperation::Unmap,[&] { return context->Unmap(m_buffer.Get(), 0); });
     }
 }
 

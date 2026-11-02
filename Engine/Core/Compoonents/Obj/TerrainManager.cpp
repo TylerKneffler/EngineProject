@@ -82,6 +82,7 @@ void TerrainManager::FenceBackgroundWork()
     {
         std::lock_guard<std::mutex> lock(m_prepareMutex);
         m_stopPrepareWorker = true;
+        ++m_prepareRevision;
         m_prepareQueue.clear();
     }
     m_prepareWake.notify_one();
@@ -102,6 +103,7 @@ bool TerrainManager::HasCell(int x, int y) const
 
 void TerrainManager::SetProceduralBuilder(std::function<void(Cell, Terrain&)> builder)
 {
+    InvalidatePrepared();
     m_proceduralBuilder = std::move(builder);
 }
 
@@ -505,6 +507,14 @@ void TerrainManager::PrepareLoop()
         PreparedCell result;
         result.cell = task.cell;
         result.revision = task.revision;
+        result.sceneGeneration = task.sceneGeneration;
+        const auto cancelled = [&] {
+            return m_stopPrepareWorker.load(std::memory_order_acquire) ||
+                task.revision != m_prepareRevision.load(std::memory_order_acquire) ||
+                (task.scene && task.scene->CaptureSceneGeneration() !=
+                    task.sceneGeneration);
+        };
+        if (cancelled()) continue;
         try
         {
             Engine::Core::Object object;
@@ -523,6 +533,7 @@ void TerrainManager::PrepareLoop()
                         task.bakeSize);
                 if (task.requireBake && !baked)
                     throw std::runtime_error("Missing or stale runtime terrain bake");
+                if (cancelled()) continue;
                 result.cacheHit = baked;
                 if (!baked && task.hasSaved) terrain->Deserialize(task.saved);
                 else if (!baked)
@@ -543,13 +554,28 @@ void TerrainManager::PrepareLoop()
                 if (!baked && task.edited && !task.editPath.empty())
                     LoadEditFile(task.editPath, *terrain);
             }
+            if (cancelled()) continue;
             terrain->SetMeshLodStride(task.lodStride);
             result.terrain = terrain->TakePrepared();
+            result.terrain.bounds = Mesh::PrepareIndexedGeometry(
+                result.terrain.vertices, result.terrain.indices);
+            if (!result.terrain.bounds)
+                throw std::runtime_error("Invalid prepared terrain bounds");
+            result.objectLayers = std::move(task.preparedLayers);
+            for (auto& [name, saved] : task.objectLayers)
+            {
+                if (cancelled()) break;
+                auto layer = std::make_unique<TerrainObjectLayer>();
+                if (!saved.IsNull()) layer->Deserialize(saved);
+                layer->layerName = name;
+                if (!layer->HasLoadedPreparedData()) layer->GetPreparedTiles(4.f);
+                result.objectLayers.push_back(std::move(layer));
+            }
         }
         catch (...) { result.terrain.vertices.clear(); }
         {
             std::lock_guard<std::mutex> lock(m_prepareMutex);
-            if (task.revision == m_prepareRevision)
+            if (!cancelled() && task.revision == m_prepareRevision)
                 m_preparedCells.push_back(std::move(result));
         }
     }
@@ -587,7 +613,10 @@ int TerrainManager::CommitPrepared(int centerX, int centerY, int radius,
                 found->second == prepared.revision) m_preparingCells.erase(found);
         }
         const Cell cell = prepared.cell;
-        if (!Owner || !Owner->GetScene() || !HasCell(cell.first, cell.second) ||
+        if (!Owner || !Owner->GetScene() ||
+            Owner->GetScene()->CaptureSceneGeneration() !=
+                prepared.sceneGeneration ||
+            !HasCell(cell.first, cell.second) ||
             m_loaded.count(cell) ||
             std::abs(cell.first - centerX) > radius ||
             std::abs(cell.second - centerY) > radius ||
@@ -604,9 +633,12 @@ int TerrainManager::CommitPrepared(int centerX, int centerY, int radius,
             PrepareTask task;
             task.cell = cell;
             task.revision = m_prepareRevision;
+            task.scene = Owner->GetScene();
+            task.sceneGeneration = prepared.sceneGeneration;
             task.lodStride = desiredStride;
             task.prepared = std::move(prepared.terrain);
             task.preparedCacheHit = prepared.cacheHit;
+            task.preparedLayers = std::move(prepared.objectLayers);
             {
                 std::lock_guard<std::mutex> lock(m_prepareMutex);
                 m_prepareQueue.push_front(std::move(task));
@@ -632,7 +664,15 @@ int TerrainManager::CommitPrepared(int centerX, int centerY, int radius,
         }
         if (prepared.cacheHit) ++m_cacheHits;
         m_loaded[cell] = terrain;
-        RestoreObjectLayers(cell, *object);
+        for (auto& preparedLayer : prepared.objectLayers)
+        {
+            auto* child = Owner->GetScene()->AddObject(preparedLayer->layerName);
+            child->runtimeOnly = true;
+            Owner->GetScene()->MoveObject(child, object,
+                Engine::Scene::Scene::ObjectPlacement::AsChild);
+            child->AddComponent<TerrainObjectLayer>()->InstallPrepared(
+                std::move(*preparedLayer));
+        }
         const auto sceneInstalled = std::chrono::steady_clock::now();
         Stitch(cell);
         const auto stitched = std::chrono::steady_clock::now();
@@ -1092,6 +1132,7 @@ bool TerrainManager::AddObjectLayer(const std::string& name)
         (Owner && Owner->GetScene() && Owner->GetScene()->HasStarted()))
         return false;
     m_objectLayerNames.push_back(name);
+    InvalidatePrepared();
     for (const auto& [cell, terrain] : m_loaded)
         if (terrain && terrain->Owner)
         {
@@ -1110,6 +1151,7 @@ bool TerrainManager::RemoveObjectLayer(const std::string& name)
         (Owner && Owner->GetScene() && Owner->GetScene()->HasStarted()))
         return false;
     m_objectLayerNames.erase(found);
+    InvalidatePrepared();
     for (auto it = m_objectLayers.begin(); it != m_objectLayers.end(); )
     {
         JsonValue kept = JsonValue::MakeArray();
@@ -1923,6 +1965,8 @@ void TerrainManager::StreamCells(int centerX, int centerY, int initialRadius)
             PrepareTask task;
             task.cell = cell;
             task.revision = m_prepareRevision;
+            task.scene = Owner->GetScene();
+            task.sceneGeneration = task.scene->CaptureSceneGeneration();
             task.cacheSignature = m_cacheSignature;
             task.cellsX = cellsX; task.cellsY = cellsY;
             task.cellWidth = cellWidth; task.cellDepth = cellDepth;
@@ -1949,6 +1993,19 @@ void TerrainManager::StreamCells(int centerX, int centerY, int initialRadius)
                 (m_runtimeBakeActive || requireRuntimeBake);
             task.edited = m_editedProcedural.count(cell) != 0;
             task.editPath = GetEditFilePath(cell);
+            std::set<std::string> layerNames;
+            if (const auto found = m_objectLayers.find(cell);
+                found != m_objectLayers.end())
+                for (size_t i = 0; i < found->second.ArraySize(); ++i)
+                {
+                    const auto& savedLayer = found->second.ArrayAt(i);
+                    const auto name = savedLayer["layerName"].AsString();
+                    if (!name.empty() && layerNames.insert(name).second)
+                        task.objectLayers.emplace_back(name, savedLayer);
+                }
+            for (const auto& name : m_objectLayerNames)
+                if (!name.empty() && layerNames.insert(name).second)
+                    task.objectLayers.emplace_back(name, JsonValue{});
             {
                 std::lock_guard<std::mutex> lock(m_prepareMutex);
                 m_prepareQueue.push_back(std::move(task));
@@ -2367,7 +2424,9 @@ void TerrainManager::Deserialize(const JsonValue& value)
 
 void TerrainManager::OnAfterDeserialize(IGraphicsProvider* provider)
 {
-    m_provider = provider;
+    m_provider = nullptr;
+    if (provider && !DeferGraphicsPreparation(provider))
+        PrepareGraphicsResources(provider);
     if (manageAuthoredCellColliders) return;
     if (asyncStreaming)
     {
@@ -2385,6 +2444,11 @@ void TerrainManager::OnAfterDeserialize(IGraphicsProvider* provider)
             for (int x = -radius; x <= radius; ++x)
                 if (HasCell(x, y)) LoadCell({x, y});
     }
+}
+
+void TerrainManager::PrepareGraphicsResources(IGraphicsProvider* provider)
+{
+    m_provider = provider;
 }
 
 bool TerrainManager::DrawProperties(::Engine::Editor::IEditorUi& ui)

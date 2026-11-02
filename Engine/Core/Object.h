@@ -92,6 +92,7 @@ public:
     virtual void Start();
     virtual void Update();
     virtual void Destroy();
+    void DisableLifecycleInHierarchy();
 
     // Get the scene this object belongs to
     Engine::Scene::Scene* GetScene() const { return OwnerScene; }

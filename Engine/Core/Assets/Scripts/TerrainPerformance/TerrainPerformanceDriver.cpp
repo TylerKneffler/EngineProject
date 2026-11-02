@@ -365,7 +365,7 @@ void TerrainPerformanceDriver::Update()
                         manager->cellDataDirectory);
                 const auto editedCells = manager->GetEditedProceduralCells();
                 const int cellsX = manager->cellsX, cellsY = manager->cellsY;
-                m_farLoad = std::async(std::launch::async,
+                m_farLoad = SubmitJob(
                     [path, archivePath, editDirectory, editedCells,
                         signature, extent, cellsX, cellsY] {
                         return LoadFarGridData(path, archivePath,

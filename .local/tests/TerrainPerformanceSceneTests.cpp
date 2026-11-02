@@ -6,9 +6,11 @@
 #include "Core/Compoonents/Materials/Material.h"
 #include "Core/Compoonents/Materials/Texture.h"
 #include "Scripts/TerrainPerformance/TerrainPerformanceDriver.h"
+#include "Scripts/TerrainGen/TerrainStreamingCameraDriver.h"
 #include "Scripts/TerrainPerformance/TerrainHeightArchive.h"
 #include "Core/Window.h"
 #include "Core/Renderers/DX11/DX11GameRenderer.h"
+#include "Core/Threading/JobScheduler.h"
 #include <Windows.h>
 #include <Psapi.h>
 #pragma comment(lib, "Psapi.lib")
@@ -49,6 +51,80 @@ int main()
     Engine::Scene::Scene scene;
     scene.Init(renderer.GetGraphicsProvider());
     Require(scene.Load("Engine/Core/Assets/Scenes/terrain/terrain_performance.scene"));
+    if (const char* output = std::getenv("TERRAIN_CURRENT_BENCHMARK"))
+    {
+        const bool parallel = std::getenv("TERRAIN_PARALLEL_PREPARATION") != nullptr;
+        Engine::Threading::JobScheduler::Get().SetParallelForEnabled(parallel);
+        auto* viewer = scene.FindObjectByName("Terrain Performance Capsule");
+        auto* map = scene.FindObjectByName("Terrain Performance Map");
+        auto* camera = viewer ? viewer->GetComponent<Engine::Components::Camera>() : nullptr;
+        auto* manager = map ? map->GetComponent<Engine::Components::TerrainManager>() : nullptr;
+        auto* driver = map ? map->GetComponent<TerrainPerformanceDriver>() : nullptr;
+        Require(viewer && camera && manager && driver);
+        Require(!manager->requireRuntimeBake && manager->runtimeBakeDirectory.empty());
+        if (auto* movement = viewer->GetComponent<TerrainStreamingCameraDriver>())
+            movement->moveOnStart = false;
+        scene.Start();
+        std::ofstream report(output, std::ios::trunc);
+        Require(report.good());
+        bool ready = false;
+        int measuredFrames = 0;
+        for (int frame = 0; frame < 1800 && measuredFrames < 240; ++frame)
+        {
+            if (!ready && frame >= 180 && driver->IsInitialMapDataReady())
+            {
+                renderer.WaitIdle();
+                ready = true;
+            }
+            const bool measured = ready;
+            const int routeFrame = measuredFrames;
+            viewer->transform.position.x = measured ? 64.0 * std::sin(routeFrame * .04) : 0.0;
+            viewer->transform.position.z = measured ? -300.0 + 64.0 * std::sin(routeFrame * .03) : -300.0;
+            const auto frameStart = std::chrono::steady_clock::now();
+            scene.Update(1.f / 60.f);
+            const auto afterUpdate = std::chrono::steady_clock::now();
+            renderer.BeginFrame();
+            renderer.Clear(.2f, .25f, .3f);
+            scene.PrepareRenderFrame();
+            auto context = renderer.CreateFrameGraphicsContext();
+            scene.Render(context.get(), static_cast<float>(width) / height,
+                camera, false, width, height, true);
+            scene.Render(context.get(), static_cast<float>(width) / height,
+                camera, false, width, height);
+            renderer.EndFrame();
+            const auto frameEnd = std::chrono::steady_clock::now();
+            const auto gpu = renderer.GetFrameTimingTelemetry();
+            const auto cpu = scene.GetLastRenderCpuTimings();
+            const auto milliseconds = [](auto first, auto last)
+            { return std::chrono::duration<double, std::milli>(last - first).count(); };
+            report << "{\"type\":\"frame_details\",\"playing\":true,\"measured\":"
+                << (measured ? "true" : "false") << ",\"parallel_preparation\":"
+                << (parallel ? "true" : "false")
+                << ",\"route\":\"terrain-current-moving\",\"renderer\":\"dx11\""
+                << ",\"benchmark_scope\":\"update_and_render_no_editor\",\"view_width\":"
+                << width << ",\"view_height\":" << height
+                << ",\"frame_ms\":" << milliseconds(frameStart, frameEnd)
+                << ",\"update_ms\":" << milliseconds(frameStart, afterUpdate)
+                << ",\"render_cpu_total_ms\":" << cpu.totalMs
+                << ",\"render_worker_active_ms\":" << cpu.workerActiveMs
+                << ",\"render_worker_wait_ms\":" << cpu.workerWaitMs
+                << ",\"gpu_valid\":" << (gpu.gpuTimingsValid ? "true" : "false")
+                << ",\"gpu_sample_id\":" << gpu.gpuSampleId
+                << ",\"gpu_terrain_ms\":" << gpu.gpuMilliseconds[
+                    size_t(Engine::Graphics::GpuTimingStage::Terrain)]
+                << ",\"gpu_shadow_ms\":" << gpu.gpuMilliseconds[
+                    size_t(Engine::Graphics::GpuTimingStage::Shadow)]
+                << ",\"terrain_loaded_cells\":" << manager->GetLoadedCellCount()
+                << ",\"terrain_far_tiles\":" << manager->GetBuiltFarTileCount();
+            renderer.GetGraphicsProvider()->GetContextFactory()->
+                GetNativeSubmissionTimings().WriteJson(report);
+            report << "}\n";
+            if (measured) ++measuredFrames;
+        }
+        Require(measuredFrames == 240);
+        renderer.WaitIdle();
+        return 0;
+    }
     if (std::getenv("TERRAIN_STARTUP_WAIT_TEST"))
     {
         auto* viewer = scene.FindObjectByName("Terrain Performance Capsule");

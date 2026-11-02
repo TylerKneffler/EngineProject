@@ -177,6 +177,25 @@ void TerrainObjectLayer::Deserialize(const JsonValue& value)
     if(value["bakedInstances"].IsString()) LoadPrepared(value["bakedInstances"].AsString());
 }
 
+void TerrainObjectLayer::InstallPrepared(TerrainObjectLayer&& source)
+{
+    layerName = std::move(source.layerName);
+    viewDistance = source.viewDistance;
+    lod1Distance = source.lod1Distance;
+    lod2Distance = source.lod2Distance;
+    lodHysteresis = source.lodHysteresis;
+    shadowDistance = source.shadowDistance;
+    placements = std::move(source.placements);
+    m_prepared = std::move(source.m_prepared);
+    m_preparedSignature = source.m_preparedSignature;
+    m_preparedSpan = source.m_preparedSpan;
+    m_preparedCount = placements.size();
+    m_loadedPrepared = source.m_loadedPrepared;
+    MarkConfigurationDirty();
+    m_preparedData = placements.data();
+    m_preparedRevision = GetConfigurationRevision();
+}
+
 bool TerrainObjectLayer::DrawProperties(::Engine::Editor::IEditorUi& ui)
 {
     bool changed = false;

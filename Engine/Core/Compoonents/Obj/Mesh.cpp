@@ -2540,6 +2540,7 @@ void Mesh::DeserializeLegacyMorphTargets(const JsonValue& value)
 
 void Mesh::Deserialize(const JsonValue& v)
 {
+    DeferGraphicsBuffers();
     if(v.Has("gpuLodSelection")) gpuLodSelection=v["gpuLodSelection"].AsBool();
     if(v.Has("gpuLod1Distance")) gpuLod1Distance=std::max(0.f,v["gpuLod1Distance"].AsFloat());
     if(v.Has("gpuLod2Distance")) gpuLod2Distance=std::max(gpuLod1Distance,v["gpuLod2Distance"].AsFloat());
@@ -2568,7 +2569,13 @@ void Mesh::Deserialize(const JsonValue& v)
 
 void Mesh::OnAfterDeserialize(IGraphicsProvider* graphicsProvider)
 {
-    if (graphicsProvider)
+    if (graphicsProvider && !DeferGraphicsPreparation(graphicsProvider))
+        PrepareGraphicsResources(graphicsProvider);
+}
+
+void Mesh::PrepareGraphicsResources(IGraphicsProvider* graphicsProvider)
+{
+    if (graphicsProvider && !m_ready)
         CreateBuffer(graphicsProvider->GetBufferFactory());
 }
 }

@@ -224,25 +224,15 @@ void TerrainGen::FenceBackgroundWork()
     CancelPendingGeneration();
 }
 
-void TerrainGen::EnsureWorkerPool(std::size_t workerCount)
-{
-    workerCount = std::max<std::size_t>(1u, workerCount);
-    while (m_workerThreads.size() < workerCount)
-        m_workerThreads.emplace_back([this]() { WorkerLoop(); });
-}
-
 void TerrainGen::StopWorkerPool()
 {
     {
         std::lock_guard<std::mutex> lock(m_generationMutex);
         m_stopWorkers = true;
-        m_generationJobs.clear();
     }
-    m_generationCondition.notify_all();
-    for (std::thread& worker : m_workerThreads)
-        if (worker.joinable())
-            worker.join();
-    m_workerThreads.clear();
+    for (auto& job : m_generationHandles)
+        if (job.valid()) job.wait();
+    m_generationHandles.clear();
     {
         std::lock_guard<std::mutex> lock(m_generationMutex);
         m_completedChunks.clear();
@@ -256,43 +246,9 @@ void TerrainGen::CancelPendingGeneration()
     ++m_generationEpoch;
     if (m_generationEpoch == 0)
         ++m_generationEpoch;
-    m_generationJobs.clear();
     m_completedChunks.clear();
     m_inFlightChunks.clear();
     m_readyChunks.clear();
-}
-
-void TerrainGen::WorkerLoop()
-{
-#if defined(_WIN32)
-    // Contour generation is throughput work. Keep it below the render/update
-    // thread even when several chunks are queued, otherwise camera movement
-    // and frame preparation lose time slices while approaching a new ring.
-    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_LOWEST);
-#endif
-    for (;;)
-    {
-        GenerationJob job;
-        {
-            std::unique_lock<std::mutex> lock(m_generationMutex);
-            m_generationCondition.wait(lock, [this]()
-            {
-                return m_stopWorkers || !m_generationJobs.empty();
-            });
-            if (m_stopWorkers)
-                return;
-            job = std::move(m_generationJobs.front());
-            m_generationJobs.pop_front();
-        }
-        GeneratedChunkMesh result = GenerateChunkMesh(
-            job.snapshot, job.x, job.z);
-        result.generationEpoch = job.generationEpoch;
-        {
-            std::lock_guard<std::mutex> lock(m_generationMutex);
-            if (!m_stopWorkers)
-                m_completedChunks.push_back(std::move(result));
-        }
-    }
 }
 
 void TerrainGen::HarvestCompletedChunks()
@@ -447,6 +403,12 @@ void TerrainGen::RefreshChunks()
     const PerlinNoiseField* noise = ResolveNoise();
     if (noise)
     {
+        m_generationHandles.erase(std::remove_if(m_generationHandles.begin(),
+            m_generationHandles.end(), [](std::future<void>& job)
+            {
+                return job.wait_for(std::chrono::seconds(0)) ==
+                    std::future_status::ready;
+            }), m_generationHandles.end());
         const GenerationSnapshot snapshot = CaptureGenerationSnapshot(*noise);
         int launchBudget = std::clamp(maxChunkBuildsPerUpdate, 1, 16);
         const unsigned hardwareThreads = std::thread::hardware_concurrency();
@@ -469,15 +431,24 @@ void TerrainGen::RefreshChunks()
             m_chunkQueue.erase(candidateIterator);
             --launchBudget;
             const int64_t key = ChunkKey(candidate.x, candidate.z);
-            EnsureWorkerPool(concurrency);
             m_inFlightChunks.emplace(key, InFlightChunk{
                 candidate.x, candidate.z });
+            const GenerationJob job{snapshot, candidate.x,
+                candidate.z, m_generationEpoch};
+            m_generationHandles.push_back(SubmitJob([this, job]
             {
+                {
+                    std::lock_guard<std::mutex> lock(m_generationMutex);
+                    if (m_stopWorkers || job.generationEpoch != m_generationEpoch)
+                        return;
+                }
+                GeneratedChunkMesh result = GenerateChunkMesh(
+                    job.snapshot, job.x, job.z);
+                result.generationEpoch = job.generationEpoch;
                 std::lock_guard<std::mutex> lock(m_generationMutex);
-                m_generationJobs.push_back({ snapshot, candidate.x,
-                    candidate.z, m_generationEpoch });
-            }
-            m_generationCondition.notify_one();
+                if (!m_stopWorkers && job.generationEpoch == m_generationEpoch)
+                    m_completedChunks.push_back(std::move(result));
+            }));
             ++m_meshCacheMisses;
         }
     }

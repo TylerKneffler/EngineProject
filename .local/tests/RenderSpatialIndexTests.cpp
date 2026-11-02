@@ -76,6 +76,13 @@ void Regression()
     stats=index.Update(bounds); Require(!stats.changedBounds && !stats.refitNodes && !stats.rebuilds && stats.reusedBounds==bounds.size(),"static tree performed work");
     auto& jobs=Engine::Threading::JobScheduler::Get(); const auto before=jobs.ReadStatistics();
     stats=index.Update(bounds); Require(before.jobs==jobs.ReadStatistics().jobs,"unchanged spatial tree scheduled jobs");
+    std::array<std::vector<uint8_t>,12> concurrentVisibility;
+    jobs.For(concurrentVisibility.size(),1,[&](size_t view) {
+        concurrentVisibility[view]=index.QueryUncached(Clip(static_cast<unsigned>(view)));
+    });
+    for(unsigned view=0;view<concurrentVisibility.size();++view)
+        Require(concurrentVisibility[view]==Brute(bounds,Clip(view)),
+            "concurrent uncached view query differs from brute-force visibility");
     // The same clip must be invalidated after an isolated move.
     const auto old=index.Query(glm::mat4(1)); bounds[0].minimum={-.25f,-.25f,.25f}; bounds[0].maximum={.25f,.25f,.75f};
     stats=index.Update(bounds);

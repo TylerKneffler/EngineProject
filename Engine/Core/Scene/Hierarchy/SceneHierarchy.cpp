@@ -402,18 +402,48 @@ void Scene::ApplyPoseConstraints()
             for (Engine::Core::Component* component : object->Components)
                 if (auto* morph = dynamic_cast<Engine::Components::MaterialPropertyMorph*>(component))
                     morph->Apply();
+    const auto applyRig = [](Engine::Core::Object* object)
+    {
+        auto* constraints = object->GetComponent<Engine::Components::RigConstraints>();
+        auto* morphs = object->GetComponent<Engine::Components::RigMorphControls>();
+        if (constraints) constraints->RestorePose();
+        if (morphs) morphs->ApplyBoneMorphs();
+        if (constraints) constraints->Apply();
+        if (auto* binding = object->GetComponent<Engine::Components::RigPhysicsBinding>())
+            binding->Apply();
+        if (morphs) morphs->ApplyImpulseMorphs();
+    };
+    auto& jobs = Engine::Threading::JobScheduler::Get();
+    std::vector<Engine::Core::Object*> independentRigs;
+    const auto finishIndependentRigs = [&]
+    {
+        jobs.For(independentRigs.size(), 1, [&](size_t index)
+        { applyRig(independentRigs[index]); });
+        independentRigs.clear();
+    };
     for (auto* object : poseObjects)
-        if (object && object->IsEnabledInHierarchy())
+    {
+        if (!object || !object->IsEnabledInHierarchy()) continue;
+        const auto* constraints = object->GetComponent<Engine::Components::RigConstraints>();
+        const auto* morphs = object->GetComponent<Engine::Components::RigMorphControls>();
+        const auto* binding = object->GetComponent<Engine::Components::RigPhysicsBinding>();
+        if (!constraints && !morphs && !binding) continue;
+        // Top-level rigs own disjoint transform trees. External parents and
+        // impulse/physics bindings can read or change another tree or Bullet,
+        // so they retain their original owner-thread position in the order.
+        const bool independent = !object->Parent &&
+            !binding &&
+            (!constraints || constraints->externalParents.empty()) &&
+            (!morphs || morphs->impulseMorphs.empty());
+        if (independent)
+            independentRigs.push_back(object);
+        else
         {
-            auto* constraints = object->GetComponent<Engine::Components::RigConstraints>();
-            auto* morphs = object->GetComponent<Engine::Components::RigMorphControls>();
-            if (constraints) constraints->RestorePose();
-            if (morphs) morphs->ApplyBoneMorphs();
-            if (constraints) constraints->Apply();
-            if (auto* binding = object->GetComponent<Engine::Components::RigPhysicsBinding>())
-                binding->Apply();
-            if (morphs) morphs->ApplyImpulseMorphs();
+            finishIndependentRigs();
+            applyRig(object);
         }
+    }
+    finishIndependentRigs();
     for (auto* object : poseObjects)
         if (object && object->IsEnabledInHierarchy())
             for (Engine::Core::Component* component : object->Components)
@@ -769,6 +799,10 @@ void Scene::RemoveObject(Engine::Core::Object* obj)
         return;
     }
 
+    // Scene jobs can retain references to any object. Finish them before
+    // callbacks or destructors invalidate those references.
+    WaitForSceneJobs();
+
     if (m_beforeGpuResourceDestruction)
         m_beforeGpuResourceDestruction();
 
@@ -782,6 +816,10 @@ void Scene::RemoveObject(Engine::Core::Object* obj)
             collect(child);
     };
     collect(obj);
+
+    for (Engine::Core::Object* object : objectsToRemove)
+        for (Engine::Core::Component* component : object->Components)
+            if (component) component->FenceBackgroundWork();
 
     if (std::find(objectsToRemove.begin(), objectsToRemove.end(),
             m_editorCameraFollowTarget) != objectsToRemove.end())
@@ -912,6 +950,7 @@ void Scene::ClearObjects()
     if (m_beforeGpuResourceDestruction && !m_objects.empty())
         m_beforeGpuResourceDestruction();
     m_hasStarted = false;
+    m_graphicsPreparationPending = false;
     {
         std::lock_guard<std::mutex> lock(m_queuedSceneMutationsMutex);
         m_queuedSceneMutations.clear();
@@ -976,6 +1015,12 @@ void Scene::FenceSceneGeneration()
         m_sceneGeneration.store(next, std::memory_order_release);
         m_queuedSceneMutations.clear();
     }
+    WaitForSceneJobs();
+}
+
+void Scene::WaitForSceneJobs()
+{
+    AssertOwnerThread();
     auto jobs = std::move(m_sceneJobs);
     m_sceneJobs.clear();
     auto& scheduler = Engine::Threading::JobScheduler::Get();
@@ -1064,6 +1109,21 @@ void Scene::CommitPendingObjectChanges()
     for (auto& command : commands)
         if (command.generation == generation) command.apply(*this);
     FlushPendingObjectAdditions();
+    if (m_hasStarted && m_lifecycleRevision != m_structureRevision)
+    {
+        m_lifecycleRevision = m_structureRevision;
+        // Newly attached components begin at the next owner commit. The
+        // per-component state makes this stable across repeated commits.
+        const auto objects = [&]
+        {
+            std::vector<Object*> result;
+            result.reserve(m_objects.size());
+            for (const auto& object : m_objects) result.push_back(object.get());
+            return result;
+        }();
+        for (Object* object : objects)
+            if (m_componentRegistry.Contains(object)) object->Start();
+    }
     FlushPendingObjectRemovals();
     m_componentRegistry.ReleaseSnapshots();
     if (!m_suppressSceneSnapshotPublication)

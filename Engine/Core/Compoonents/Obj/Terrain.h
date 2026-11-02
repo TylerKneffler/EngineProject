@@ -9,6 +9,7 @@
 #include <array>
 #include <iosfwd>
 #include <map>
+#include <optional>
 
 namespace Engine::Components
 {
@@ -43,6 +44,7 @@ public:
         std::vector<Layer> layers;
         std::vector<Mesh::Vertex> vertices;
         std::vector<uint32_t> indices;
+        std::optional<Mesh::IndexedGeometryBounds> bounds;
         std::vector<std::shared_ptr<Material>> materials;
         std::vector<std::string> materialPaths;
         std::vector<BakedAppearance> bakedAppearance;
@@ -94,6 +96,7 @@ public:
     JsonValue Serialize() const override;
     void Deserialize(const JsonValue& value) override;
     void OnAfterDeserialize(IGraphicsProvider* provider) override;
+    void PrepareGraphicsResources(IGraphicsProvider* provider) override;
     void Start() override;
     bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
 private:

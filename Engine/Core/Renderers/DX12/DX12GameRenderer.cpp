@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include "DX12GraphicsContext.h"
+#include "Core/Graphics/GraphicsCommandPacket.h"
 
 
 namespace Engine::Renderers
@@ -197,6 +198,7 @@ void DX12GameRenderer::BeginFrame()
     ThrowIfFailed(m_commandAllocators[m_frameIndex]->Reset());
     ThrowIfFailed(m_commandList->Reset(
         m_commandAllocators[m_frameIndex].Get(), nullptr));
+    m_workerCommandsReady = false;
 
     // ---- Resource barrier: PRESENT → RENDER_TARGET ----
     // D3D12 tracks a "state" for each resource that describes how the hardware
@@ -548,6 +550,36 @@ void DX12GameRenderer::CreateCommandObjects()
         m_commandAllocators[0].Get(), nullptr,
         IID_PPV_ARGS(&m_commandList)));
     ThrowIfFailed(m_commandList->Close()); // closed until BeginFrame
+    for (uint32_t i = 0; i < FRAME_COUNT; ++i)
+        ThrowIfFailed(m_device->CreateCommandAllocator(
+            D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_workerAllocators[i])));
+    ThrowIfFailed(m_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT,
+        m_workerAllocators[0].Get(), nullptr, IID_PPV_ARGS(&m_workerCommandList)));
+    ThrowIfFailed(m_workerCommandList->Close());
+}
+
+bool DX12GameRenderer::RecordWorkerCommands(const Engine::Graphics::GraphicsCommandPacket& packet)
+{
+    auto* factory = m_graphicsProvider->GetContextFactory();
+    ThrowIfFailed(m_workerAllocators[m_frameIndex]->Reset());
+    ThrowIfFailed(m_workerCommandList->Reset(m_workerAllocators[m_frameIndex].Get(), nullptr));
+    auto context = factory->CreateContextForCommandBuffer(m_workerCommandList.Get());
+    if (!context) return false;
+    packet.Replay(*context);
+    ThrowIfFailed(m_workerCommandList->Close());
+    m_workerCommandsReady = true;
+    return true;
+}
+
+void DX12GameRenderer::SubmitWorkerCommands()
+{
+    // The queue preserves submission order. The shadow list finishes before
+    // commands in the main frame list even though both were recorded apart.
+    if (!m_workerCommandsReady) return;
+    ID3D12CommandList* list = m_workerCommandList.Get();
+    std::lock_guard queueLock(DX12QueueMutex());
+    m_commandQueue->ExecuteCommandLists(1, &list);
+    m_workerCommandsReady = false;
 }
 
 // ---------------------------------------------------------------------------

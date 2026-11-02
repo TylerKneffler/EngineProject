@@ -8,6 +8,7 @@
 #include "Core/Scene/Scene.h"
 #include "Core/Physics/Internal/PhysicsInternal.h"
 #include "Core/Physics/Cloth/ClothSimulationMeshCache.h"
+#include "Core/Threading/JobScheduler.h"
 #include <BulletSoftBody/btSoftBodyHelpers.h>
 #include <algorithm>
 #include <cmath>
@@ -634,7 +635,10 @@ void Engine::Components::Cloth::SyncMeshFromSoftBody()
     const glm::mat4 inverseWorld = glm::inverse(clothWorld);
     const glm::mat4 clothToRender = glm::inverse(m_impl->mesh->Owner
         ? m_impl->mesh->Owner->transform.GetWorldMatrix() : clothWorld) * clothWorld;
-    for (std::size_t index = 0; index < deformed.size(); ++index)
+    // Bullet has finished stepping. Each worker writes only its own vertex;
+    // the owner publishes the completed mesh after both joined passes.
+    Engine::Threading::JobScheduler::Get().For(deformed.size(), 1024,
+        [&](std::size_t index)
     {
         const btVector3& world = m_impl->softBody->m_nodes[
             static_cast<int>(m_impl->renderToNode[index])].m_x;
@@ -644,9 +648,11 @@ void Engine::Components::Cloth::SyncMeshFromSoftBody()
         deformed[index].pos[0] = renderPosition.x;
         deformed[index].pos[1] = renderPosition.y;
         deformed[index].pos[2] = renderPosition.z;
-    }
-    for (std::size_t index = 0; index + 2 < deformed.size(); index += 3)
+    });
+    Engine::Threading::JobScheduler::Get().For(deformed.size() / 3, 512,
+        [&](std::size_t triangle)
     {
+        const std::size_t index = triangle * 3;
         const glm::vec3 first(deformed[index].pos[0], deformed[index].pos[1], deformed[index].pos[2]);
         const glm::vec3 second(deformed[index + 1].pos[0], deformed[index + 1].pos[1], deformed[index + 1].pos[2]);
         const glm::vec3 third(deformed[index + 2].pos[0], deformed[index + 2].pos[1], deformed[index + 2].pos[2]);
@@ -659,7 +665,7 @@ void Engine::Components::Cloth::SyncMeshFromSoftBody()
             deformed[vertex].normal[1] = normal.y;
             deformed[vertex].normal[2] = normal.z;
         }
-    }
+    });
     m_impl->mesh->SetDeformedVertices(deformed);
     // Uploading a simulated frame advances Mesh's revision. It must not make
     // the next physics step treat this transient deformation as new authoring.
@@ -725,8 +731,10 @@ void Engine::Components::Cloth::UpdateCollisionMorph(float deltaTime)
     const float expand = 1.f + squeeze *
         std::clamp(collisionMorphExpansion, 0.f, 1.f);
     std::vector<Engine::Model::AnimationVertex> deformed = m_impl->originalVertices;
-    for (Engine::Model::AnimationVertex& vertex : deformed)
+    Engine::Threading::JobScheduler::Get().For(deformed.size(), 1024,
+        [&](std::size_t index)
     {
+        auto& vertex = deformed[index];
         const glm::vec3 original(vertex.pos[0], vertex.pos[1], vertex.pos[2]);
         const glm::vec3 relative = original - m_impl->morphLocalCenter;
         const glm::vec3 parallel = localNormal * glm::dot(relative, localNormal);
@@ -735,9 +743,11 @@ void Engine::Components::Cloth::UpdateCollisionMorph(float deltaTime)
         vertex.pos[0] = position.x;
         vertex.pos[1] = position.y;
         vertex.pos[2] = position.z;
-    }
-    for (std::size_t index = 0; index + 2 < deformed.size(); index += 3)
+    });
+    Engine::Threading::JobScheduler::Get().For(deformed.size() / 3, 512,
+        [&](std::size_t triangle)
     {
+        const std::size_t index = triangle * 3;
         const glm::vec3 first(deformed[index].pos[0], deformed[index].pos[1], deformed[index].pos[2]);
         const glm::vec3 second(deformed[index + 1].pos[0], deformed[index + 1].pos[1], deformed[index + 1].pos[2]);
         const glm::vec3 third(deformed[index + 2].pos[0], deformed[index + 2].pos[1], deformed[index + 2].pos[2]);
@@ -750,7 +760,7 @@ void Engine::Components::Cloth::UpdateCollisionMorph(float deltaTime)
             deformed[vertex].normal[1] = normal.y;
             deformed[vertex].normal[2] = normal.z;
         }
-    }
+    });
     m_impl->mesh->SetDeformedVertices(deformed);
 }
 

@@ -762,7 +762,11 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
         m_selectedObject->Components.remove(componentToDelete);
         m_selectedObject->NotifyStructureChanged();
         if (m_selectedObject->GetScene())
+            m_selectedObject->GetScene()->WaitForSceneJobs();
+        if (m_selectedObject->GetScene())
             m_selectedObject->GetScene()->WaitForGpuResourceDestruction();
+        componentToDelete->FenceBackgroundWork();
+        componentToDelete->DispatchDestroy();
         delete componentToDelete;
         LogAssetDrop("[Properties] Deleted component '" + deletedType + "'");
         if (OnComponentsChanged)

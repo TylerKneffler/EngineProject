@@ -439,24 +439,25 @@ bool Terrain::InstallPrepared(Prepared prepared, IGraphicsProvider* provider)
     m_bakedAppearance = std::move(prepared.bakedAppearance);
     m_bakedLods = std::move(prepared.bakedLods);
     m_bakedTextureMask = prepared.bakedTextureMask;
-    m_provider = provider;
-    for (auto& material : m_materials)
-        if (material && provider) material->PrepareTextures(provider);
+    m_provider = nullptr;
     Mesh* mesh = Owner->GetComponent<Mesh>();
     if (!mesh) mesh = Owner->AddComponent<Mesh>();
-    if (!mesh->SetIndexedGeometry(std::move(prepared.vertices),
-        std::move(prepared.indices))) return false;
-    if (provider && !mesh->IsReady()) mesh->OnAfterDeserialize(provider);
+    mesh->DeferGraphicsBuffers();
+    const bool installed = prepared.bounds
+        ? mesh->SetPreparedIndexedGeometry(std::move(prepared.vertices),
+            std::move(prepared.indices), *prepared.bounds)
+        : mesh->SetIndexedGeometry(std::move(prepared.vertices),
+            std::move(prepared.indices));
+    if (!installed) return false;
+    if (provider && !DeferGraphicsPreparation(provider))
+        PrepareGraphicsResources(provider);
     return true;
 }
 
 void Terrain::FinalizePreparedGraphics(IGraphicsProvider* provider)
 {
-    m_provider = provider;
-    for (auto& material : m_materials)
-        if (material && provider) material->PrepareTextures(provider);
-    if (auto* mesh = Owner ? Owner->GetComponent<Mesh>() : nullptr)
-        if (provider && !mesh->IsReady()) mesh->OnAfterDeserialize(provider);
+    if (provider && !DeferGraphicsPreparation(provider))
+        PrepareGraphicsResources(provider);
 }
 
 bool Terrain::SaveCache(const std::string& path, uint64_t signature,
@@ -864,10 +865,22 @@ void Terrain::Deserialize(const JsonValue& value)
 
 void Terrain::OnAfterDeserialize(IGraphicsProvider* provider)
 {
+    m_provider = nullptr;
+    if (Owner)
+        if (auto* mesh = Owner->GetComponent<Mesh>()) mesh->DeferGraphicsBuffers();
+    Rebuild();
+    if (provider && !DeferGraphicsPreparation(provider))
+        PrepareGraphicsResources(provider);
+}
+
+void Terrain::PrepareGraphicsResources(IGraphicsProvider* provider)
+{
     m_provider = provider;
     for (auto& material : m_materials)
         if (material) material->PrepareTextures(provider);
-    Rebuild();
+    if (Owner)
+        if (auto* mesh = Owner->GetComponent<Mesh>())
+            mesh->PrepareGraphicsResources(provider);
 }
 
 void Terrain::Start()
