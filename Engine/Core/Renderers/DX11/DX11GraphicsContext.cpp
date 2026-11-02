@@ -6,12 +6,15 @@
 #include "DX11GraphicsTexture.h"
 #include <algorithm>
 #include <cstring>
+#include <cstdlib>
 
 namespace Engine::Renderers
 {
 D3D11FrameResourceState::D3D11FrameResourceState(ID3D11Device* device,
-    ID3D11DeviceContext* context)
+    ID3D11DeviceContext* context,std::shared_ptr<Engine::Graphics::NativeSubmissionProbe> probe)
+    :native(probe ? std::move(probe):std::make_shared<Engine::Graphics::NativeSubmissionProbe>())
 {
+    native->timings.supported=true;
     Microsoft::WRL::ComPtr<ID3D11DeviceContext1> context1;
     D3D11_FEATURE_DATA_D3D11_OPTIONS options{};
     arenaSupported = device && context &&
@@ -46,9 +49,11 @@ D3D11FrameResourceState::D3D11FrameResourceState(ID3D11Device* device,
 void D3D11FrameResourceState::PrepareFrame()
 {
     arenaCursor = 0;
+    ++arenaGeneration;
     firstArenaWrite = true;
     arenaWrites = 0;
     discardMaps = 0;
+    computeArenaWrites=computeDiscardMaps=0;
 }
 
 D3D11GpuTimingState::D3D11GpuTimingState(ID3D11Device* timingDevice,
@@ -175,12 +180,16 @@ void D3D11GpuTimingState::End(Engine::Graphics::GpuTimingStage stage)
 }
 
 D3D11GraphicsContextFactory::D3D11GraphicsContextFactory(
-    ID3D11Device* device, ID3D11DeviceContext* context)
+    ID3D11Device* device, ID3D11DeviceContext* context,std::shared_ptr<Engine::Graphics::NativeSubmissionProbe> probe)
     : m_device(device), m_context(context),
       m_occlusionState(std::make_shared<D3D11OcclusionQueryState>()),
-      m_frameResources(std::make_shared<D3D11FrameResourceState>(device, context)),
+      m_frameResources(std::make_shared<D3D11FrameResourceState>(device, context,std::move(probe))),
       m_gpuTimings(std::make_shared<D3D11GpuTimingState>(device, context))
 {
+    if(const char* value=std::getenv("ENGINE_NATIVE_CALL_TIMINGS"))
+        m_frameResources->native->timings.enabled=std::string(value)!="0";
+    if(const char* value=std::getenv("ENGINE_DX11_COMPUTE_ARENA"))
+        m_frameResources->computeArenaEnabled=std::string(value)!="0";
 }
 
 D3D11GraphicsContext::D3D11GraphicsContext(ID3D11Device* device,
@@ -337,15 +346,15 @@ void D3D11GraphicsContext::SetPipeline(const Engine::Graphics::IPipelineState* s
     const auto* pipeline = dynamic_cast<const D3D11PipelineState*>(state);
     if (!pipeline) return;
 
-    m_context->VSSetShader(pipeline->vertexShader.Get(), nullptr, 0);
-    m_context->PSSetShader(pipeline->pixelShader.Get(), nullptr, 0);
-    m_context->IASetInputLayout(pipeline->inputLayout.Get());
-    m_context->IASetPrimitiveTopology(pipeline->topology);
-    m_context->RSSetState(pipeline->rasterizerState.Get());
+    Engine::Graphics::MeasureNative(NativeProbe(),Engine::Graphics::NativeOperation::Bind,[&] { return m_context->VSSetShader(pipeline->vertexShader.Get(), nullptr, 0); });
+    Engine::Graphics::MeasureNative(NativeProbe(),Engine::Graphics::NativeOperation::Bind,[&] { return m_context->PSSetShader(pipeline->pixelShader.Get(), nullptr, 0); });
+    Engine::Graphics::MeasureNative(NativeProbe(),Engine::Graphics::NativeOperation::Bind,[&] { return m_context->IASetInputLayout(pipeline->inputLayout.Get()); });
+    Engine::Graphics::MeasureNative(NativeProbe(),Engine::Graphics::NativeOperation::Bind,[&] { return m_context->IASetPrimitiveTopology(pipeline->topology); });
+    Engine::Graphics::MeasureNative(NativeProbe(),Engine::Graphics::NativeOperation::Bind,[&] { return m_context->RSSetState(pipeline->rasterizerState.Get()); });
     const float blendFactor[4]{};
-    m_context->OMSetBlendState(pipeline->blendState.Get(), blendFactor, UINT_MAX);
+    Engine::Graphics::MeasureNative(NativeProbe(),Engine::Graphics::NativeOperation::Bind,[&] { return m_context->OMSetBlendState(pipeline->blendState.Get(), blendFactor, UINT_MAX); });
     m_depthStencilState = pipeline->depthStencilState;
-    m_context->OMSetDepthStencilState(m_depthStencilState.Get(), m_stencilReference);
+    Engine::Graphics::MeasureNative(NativeProbe(),Engine::Graphics::NativeOperation::Bind,[&] { return m_context->OMSetDepthStencilState(m_depthStencilState.Get(), m_stencilReference); });
     m_boundPipeline = state;
 }
 
@@ -353,7 +362,7 @@ void D3D11GraphicsContext::SetStencilReference(uint32_t reference)
 {
     m_stencilReference = reference;
     if (m_context)
-        m_context->OMSetDepthStencilState(m_depthStencilState.Get(), reference);
+        Engine::Graphics::MeasureNative(NativeProbe(),Engine::Graphics::NativeOperation::Bind,[&] { return m_context->OMSetDepthStencilState(m_depthStencilState.Get(), reference); });
 }
 
 void D3D11GraphicsContext::PrepareConstantBuffer(
@@ -373,10 +382,12 @@ void D3D11GraphicsContext::PrepareConstantBuffer(
     const auto mapType = resources.firstArenaWrite ? D3D11_MAP_WRITE_DISCARD :
         D3D11_MAP_WRITE_NO_OVERWRITE;
     D3D11_MAPPED_SUBRESOURCE mapped{};
-    if (FAILED(m_context->Map(resources.constantArena.Get(), 0, mapType, 0, &mapped))) return;
+    if (FAILED(Engine::Graphics::MeasureNative(NativeProbe(),Engine::Graphics::NativeOperation::Map,[&] { return m_context->Map(resources.constantArena.Get(), 0, mapType, 0, &mapped); }))) return;
     std::memcpy(static_cast<uint8_t*>(mapped.pData) + resources.arenaCursor,
         source->GetShadowData(), static_cast<size_t>(bytes));
-    m_context->Unmap(resources.constantArena.Get(), 0);
+    Engine::Graphics::MeasureNative(NativeProbe(),Engine::Graphics::NativeOperation::Upload,[&] { return m_context->Unmap(resources.constantArena.Get(), 0); });
+    if(mapType == D3D11_MAP_WRITE_DISCARD) ++resources.arenaGeneration;
+    m_preparedConstantGeneration = resources.arenaGeneration;
     m_preparedConstants = buffer;
     m_preparedConstantStart = resources.arenaCursor;
     m_preparedConstantBytes = static_cast<uint32_t>(bytes);
@@ -393,14 +404,14 @@ void D3D11GraphicsContext::SetConstantBuffer(uint32_t slot, const Engine::Graphi
     const auto* source = dynamic_cast<const D3D11GraphicsBuffer*>(buffer);
     if (!source || !source->GetShadowData() || offset >= source->GetSize()) return;
 
-    if (buffer == m_preparedConstants && offset % D3D11FrameResourceState::ConstantSize == 0 &&
+    if (buffer == m_preparedConstants && m_preparedConstantGeneration == m_frameResources->arenaGeneration && offset % D3D11FrameResourceState::ConstantSize == 0 &&
         offset + D3D11FrameResourceState::ConstantSize <= m_preparedConstantBytes)
     {
         ID3D11Buffer* native = m_frameResources->constantArena.Get();
         const UINT first = (m_preparedConstantStart + static_cast<uint32_t>(offset)) / 16u;
         const UINT count = D3D11FrameResourceState::ConstantSize / 16u;
-        m_context1->VSSetConstantBuffers1(slot, 1, &native, &first, &count);
-        m_context1->PSSetConstantBuffers1(slot, 1, &native, &first, &count);
+        Engine::Graphics::MeasureNative(NativeProbe(),Engine::Graphics::NativeOperation::Bind,[&] { m_context1->VSSetConstantBuffers1(slot, 1, &native, &first, &count); });
+        Engine::Graphics::MeasureNative(NativeProbe(),Engine::Graphics::NativeOperation::Bind,[&] { m_context1->PSSetConstantBuffers1(slot, 1, &native, &first, &count); });
         return;
     }
     // A later discard renames the arena. Do not reuse a previous pass snapshot.
@@ -421,27 +432,27 @@ void D3D11GraphicsContext::SetConstantBuffer(uint32_t slot, const Engine::Graphi
         D3D11_MAPPED_SUBRESOURCE mapped{};
         const D3D11_MAP mapType = m_frameResources->firstArenaWrite
             ? D3D11_MAP_WRITE_DISCARD : D3D11_MAP_WRITE_NO_OVERWRITE;
-        if (SUCCEEDED(m_context->Map(m_frameResources->constantArena.Get(), 0,
-            mapType, 0, &mapped)))
+        if (SUCCEEDED(Engine::Graphics::MeasureNative(NativeProbe(),Engine::Graphics::NativeOperation::Map,[&] { return m_context->Map(m_frameResources->constantArena.Get(), 0,
+            mapType, 0, &mapped); })))
         {
             auto* destination = static_cast<uint8_t*>(mapped.pData) +
                 m_frameResources->arenaCursor;
             std::memset(destination, 0, D3D11FrameResourceState::ConstantSize);
             std::memcpy(destination, source->GetShadowData() + offset, copySize);
-            m_context->Unmap(m_frameResources->constantArena.Get(), 0);
+            Engine::Graphics::MeasureNative(NativeProbe(),Engine::Graphics::NativeOperation::Upload,[&] { return m_context->Unmap(m_frameResources->constantArena.Get(), 0); });
 
             ID3D11Buffer* native = m_frameResources->constantArena.Get();
             const UINT firstConstant = m_frameResources->arenaCursor / 16u;
             const UINT constantCount = D3D11FrameResourceState::ConstantSize / 16u;
-            m_context1->VSSetConstantBuffers1(slot, 1, &native,
-                &firstConstant, &constantCount);
-            m_context1->PSSetConstantBuffers1(slot, 1, &native,
-                &firstConstant, &constantCount);
+            Engine::Graphics::MeasureNative(NativeProbe(),Engine::Graphics::NativeOperation::Bind,[&] { m_context1->VSSetConstantBuffers1(slot, 1, &native,
+                &firstConstant, &constantCount); });
+            Engine::Graphics::MeasureNative(NativeProbe(),Engine::Graphics::NativeOperation::Bind,[&] { m_context1->PSSetConstantBuffers1(slot, 1, &native,
+                &firstConstant, &constantCount); });
             m_frameResources->arenaCursor +=
                 D3D11FrameResourceState::ConstantSize;
             ++m_frameResources->arenaWrites;
             if (mapType == D3D11_MAP_WRITE_DISCARD)
-                ++m_frameResources->discardMaps;
+            { ++m_frameResources->discardMaps; ++m_frameResources->arenaGeneration; }
             m_frameResources->firstArenaWrite = false;
             return;
         }
@@ -455,21 +466,21 @@ void D3D11GraphicsContext::SetConstantBuffer(uint32_t slot, const Engine::Graphi
         desc.Usage = D3D11_USAGE_DYNAMIC;
         desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
         desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
-        ThrowIfFailed(m_device->CreateBuffer(&desc, nullptr, &fallback));
+        ThrowIfFailed(Engine::Graphics::MeasureNative(NativeProbe(),Engine::Graphics::NativeOperation::ResourceCreate,[&] { return m_device->CreateBuffer(&desc, nullptr, &fallback); }));
     }
 
     D3D11_MAPPED_SUBRESOURCE mapped{};
-    ThrowIfFailed(m_context->Map(fallback.Get(), 0,
-        D3D11_MAP_WRITE_DISCARD, 0, &mapped));
+    ThrowIfFailed(Engine::Graphics::MeasureNative(NativeProbe(),Engine::Graphics::NativeOperation::Map,[&] { return m_context->Map(fallback.Get(), 0,
+        D3D11_MAP_WRITE_DISCARD, 0, &mapped); }));
     ++m_frameResources->discardMaps;
     std::memset(mapped.pData, 0, D3D11FrameResourceState::ConstantSize);
     std::memcpy(mapped.pData, source->GetShadowData() + offset,
         copySize);
-    m_context->Unmap(fallback.Get(), 0);
+    Engine::Graphics::MeasureNative(NativeProbe(),Engine::Graphics::NativeOperation::Upload,[&] { return m_context->Unmap(fallback.Get(), 0); });
 
     ID3D11Buffer* native = fallback.Get();
-    m_context->VSSetConstantBuffers(slot, 1, &native);
-    m_context->PSSetConstantBuffers(slot, 1, &native);
+    Engine::Graphics::MeasureNative(NativeProbe(),Engine::Graphics::NativeOperation::Bind,[&] { return m_context->VSSetConstantBuffers(slot, 1, &native); });
+    Engine::Graphics::MeasureNative(NativeProbe(),Engine::Graphics::NativeOperation::Bind,[&] { return m_context->PSSetConstantBuffers(slot, 1, &native); });
 }
 
 void D3D11GraphicsContext::SetStructuredBuffer(uint32_t slot, const Engine::Graphics::IGraphicsBuffer* buffer)
@@ -477,8 +488,8 @@ void D3D11GraphicsContext::SetStructuredBuffer(uint32_t slot, const Engine::Grap
     if (!m_context || slot >= D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT) return;
     const auto* structured = dynamic_cast<const D3D11GraphicsBuffer*>(buffer);
     ID3D11ShaderResourceView* view = structured ? structured->GetShaderResourceView() : nullptr;
-    m_context->VSSetShaderResources(slot, 1, &view);
-    m_context->PSSetShaderResources(slot, 1, &view);
+    Engine::Graphics::MeasureNative(NativeProbe(),Engine::Graphics::NativeOperation::Bind,[&] { return m_context->VSSetShaderResources(slot, 1, &view); });
+    Engine::Graphics::MeasureNative(NativeProbe(),Engine::Graphics::NativeOperation::Bind,[&] { return m_context->PSSetShaderResources(slot, 1, &view); });
 }
 
 bool D3D11GraphicsContext::SetComputePipeline(
@@ -486,13 +497,40 @@ bool D3D11GraphicsContext::SetComputePipeline(
 {
     const auto* compute = dynamic_cast<const D3D11ComputePipeline*>(pipeline);
     if (!m_context || !compute) return false;
-    m_context->CSSetShader(compute->GetShader(), nullptr, 0);
+    Engine::Graphics::MeasureNative(NativeProbe(),Engine::Graphics::NativeOperation::Bind,[&] { return m_context->CSSetShader(compute->GetShader(), nullptr, 0); });
     return true;
 }
 
 void D3D11GraphicsContext::SetComputeConstants(const void* data, uint32_t size)
 {
     if (!m_device || !m_context || !data || !size || size > 256) return;
+    if(m_frameResources && m_frameResources->computeArenaEnabled && m_frameResources->arenaSupported &&
+        m_frameResources->constantArena && m_context1)
+    {
+        auto& resources=*m_frameResources;
+        if(resources.arenaCursor+256>resources.ArenaSize) { resources.arenaCursor=0; resources.firstArenaWrite=true; }
+        const auto mapType=resources.firstArenaWrite ? D3D11_MAP_WRITE_DISCARD:D3D11_MAP_WRITE_NO_OVERWRITE;
+        D3D11_MAPPED_SUBRESOURCE mapped{};
+        if(SUCCEEDED(Engine::Graphics::MeasureNative(NativeProbe(),Engine::Graphics::NativeOperation::Map,[&] {
+            return m_context->Map(resources.constantArena.Get(),0,mapType,0,&mapped);
+        })))
+        {
+            auto* destination=static_cast<uint8_t*>(mapped.pData)+resources.arenaCursor;
+            std::memset(destination,0,256); std::memcpy(destination,data,size);
+            Engine::Graphics::MeasureNative(NativeProbe(),Engine::Graphics::NativeOperation::Upload,[&] { m_context->Unmap(resources.constantArena.Get(),0); });
+            ID3D11Buffer* native=resources.constantArena.Get();
+            const UINT first=resources.arenaCursor/16,count=16;
+            Engine::Graphics::MeasureNative(NativeProbe(),Engine::Graphics::NativeOperation::Bind,[&] { m_context1->CSSetConstantBuffers1(0,1,&native,&first,&count); });
+            if(mapType==D3D11_MAP_WRITE_DISCARD)
+            {
+                ++resources.discardMaps; ++resources.arenaGeneration;
+                // Discard renames the whole arena, including prior graphics snapshots.
+                m_preparedConstants=nullptr; m_preparedConstantBytes=0;
+            }
+            resources.firstArenaWrite=false; resources.arenaCursor+=256;
+            ++resources.arenaWrites; ++resources.computeArenaWrites; return;
+        }
+    }
     if (!m_computeConstants)
     {
         D3D11_BUFFER_DESC desc{};
@@ -500,16 +538,17 @@ void D3D11GraphicsContext::SetComputeConstants(const void* data, uint32_t size)
         desc.Usage = D3D11_USAGE_DYNAMIC;
         desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
         desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
-        ThrowIfFailed(m_device->CreateBuffer(&desc, nullptr, &m_computeConstants));
+        ThrowIfFailed(Engine::Graphics::MeasureNative(NativeProbe(),Engine::Graphics::NativeOperation::ResourceCreate,[&] { return m_device->CreateBuffer(&desc, nullptr, &m_computeConstants); }));
     }
     D3D11_MAPPED_SUBRESOURCE mapped{};
-    ThrowIfFailed(m_context->Map(m_computeConstants.Get(), 0,
-        D3D11_MAP_WRITE_DISCARD, 0, &mapped));
+    ThrowIfFailed(Engine::Graphics::MeasureNative(NativeProbe(),Engine::Graphics::NativeOperation::Map,[&] { return m_context->Map(m_computeConstants.Get(), 0,
+        D3D11_MAP_WRITE_DISCARD, 0, &mapped); }));
+    if(m_frameResources) ++m_frameResources->computeDiscardMaps;
     std::memset(mapped.pData, 0, 256);
     std::memcpy(mapped.pData, data, size);
-    m_context->Unmap(m_computeConstants.Get(), 0);
+    Engine::Graphics::MeasureNative(NativeProbe(),Engine::Graphics::NativeOperation::Upload,[&] { return m_context->Unmap(m_computeConstants.Get(), 0); });
     ID3D11Buffer* native = m_computeConstants.Get();
-    m_context->CSSetConstantBuffers(0, 1, &native);
+    Engine::Graphics::MeasureNative(NativeProbe(),Engine::Graphics::NativeOperation::Bind,[&] { return m_context->CSSetConstantBuffers(0, 1, &native); });
 }
 
 void D3D11GraphicsContext::SetComputeReadBuffer(
@@ -518,7 +557,7 @@ void D3D11GraphicsContext::SetComputeReadBuffer(
     if (!m_context) return;
     const auto* native = dynamic_cast<const D3D11GraphicsBuffer*>(buffer);
     ID3D11ShaderResourceView* view = native ? native->GetShaderResourceView() : nullptr;
-    m_context->CSSetShaderResources(slot, 1, &view);
+    Engine::Graphics::MeasureNative(NativeProbe(),Engine::Graphics::NativeOperation::Bind,[&] { return m_context->CSSetShaderResources(slot, 1, &view); });
 }
 
 void D3D11GraphicsContext::SetComputeWriteBuffer(
@@ -527,12 +566,12 @@ void D3D11GraphicsContext::SetComputeWriteBuffer(
     if (!m_context) return;
     const auto* native = dynamic_cast<const D3D11GraphicsBuffer*>(buffer);
     ID3D11UnorderedAccessView* view = native ? native->GetUnorderedAccessView() : nullptr;
-    m_context->CSSetUnorderedAccessViews(0, 1, &view, nullptr);
+    Engine::Graphics::MeasureNative(NativeProbe(),Engine::Graphics::NativeOperation::Bind,[&] { return m_context->CSSetUnorderedAccessViews(0, 1, &view, nullptr); });
 }
 
 void D3D11GraphicsContext::DispatchCompute(uint32_t x, uint32_t y, uint32_t z)
 {
-    if (m_context && x && y && z) m_context->Dispatch(x, y, z);
+    if (m_context && x && y && z) Engine::Graphics::MeasureNative(NativeProbe(),Engine::Graphics::NativeOperation::Dispatch,[&] { return m_context->Dispatch(x, y, z); });
 }
 
 void D3D11GraphicsContext::StorageBarrier(const Engine::Graphics::IGraphicsBuffer*)
@@ -540,9 +579,9 @@ void D3D11GraphicsContext::StorageBarrier(const Engine::Graphics::IGraphicsBuffe
     if (!m_context) return;
     ID3D11UnorderedAccessView* emptyUav = nullptr;
     ID3D11ShaderResourceView* emptySrv = nullptr;
-    m_context->CSSetUnorderedAccessViews(0, 1, &emptyUav, nullptr);
-    m_context->CSSetShaderResources(0, 1, &emptySrv);
-    m_context->CSSetShader(nullptr, nullptr, 0);
+    Engine::Graphics::MeasureNative(NativeProbe(),Engine::Graphics::NativeOperation::Bind,[&] { return m_context->CSSetUnorderedAccessViews(0, 1, &emptyUav, nullptr); });
+    Engine::Graphics::MeasureNative(NativeProbe(),Engine::Graphics::NativeOperation::Bind,[&] { return m_context->CSSetShaderResources(0, 1, &emptySrv); });
+    Engine::Graphics::MeasureNative(NativeProbe(),Engine::Graphics::NativeOperation::Bind,[&] { return m_context->CSSetShader(nullptr, nullptr, 0); });
 }
 
 bool D3D11GraphicsContext::DrawInstancesIndirect(const Engine::Graphics::IGraphicsBuffer* buffer,
@@ -560,29 +599,29 @@ bool D3D11GraphicsContext::DrawInstancesIndirect(const Engine::Graphics::IGraphi
         descriptor.Usage=D3D11_USAGE_DEFAULT;
         descriptor.BindFlags=D3D11_BIND_UNORDERED_ACCESS;
         descriptor.MiscFlags=D3D11_RESOURCE_MISC_DRAWINDIRECT_ARGS | D3D11_RESOURCE_MISC_BUFFER_ALLOW_RAW_VIEWS;
-        if(FAILED(m_device->CreateBuffer(&descriptor,nullptr,&m_indirectArguments))) return false;
+        if(FAILED(Engine::Graphics::MeasureNative(NativeProbe(),Engine::Graphics::NativeOperation::ResourceCreate,[&] { return m_device->CreateBuffer(&descriptor,nullptr,&m_indirectArguments); }))) return false;
         D3D11_UNORDERED_ACCESS_VIEW_DESC view{};
         view.Format=DXGI_FORMAT_R32_TYPELESS; view.ViewDimension=D3D11_UAV_DIMENSION_BUFFER;
         view.Buffer.NumElements=5; view.Buffer.Flags=D3D11_BUFFER_UAV_FLAG_RAW;
-        if(FAILED(m_device->CreateUnorderedAccessView(m_indirectArguments.Get(),&view,&m_indirectArgumentsUav))) return false;
+        if(FAILED(Engine::Graphics::MeasureNative(NativeProbe(),Engine::Graphics::NativeOperation::ResourceCreate,[&] { return m_device->CreateUnorderedAccessView(m_indirectArguments.Get(),&view,&m_indirectArgumentsUav); }))) return false;
         const char source[] = "struct Record { uint4 a; uint4 b; uint4 c; }; StructuredBuffer<Record> inputArgs:register(t0); RWByteAddressBuffer outputArgs:register(u0); [numthreads(1,1,1)] void CSMain(uint3 id:SV_DispatchThreadID) { outputArgs.Store4(0,inputArgs[0].a); outputArgs.Store(16,inputArgs[0].b.x); }";
         Microsoft::WRL::ComPtr<ID3DBlob> code,errors;
         if(FAILED(D3DCompile(source,sizeof(source)-1,nullptr,nullptr,nullptr,"CSMain","cs_5_0",0,0,&code,&errors)) ||
-            FAILED(m_device->CreateComputeShader(code->GetBufferPointer(),code->GetBufferSize(),nullptr,&m_copyIndirectShader))) return false;
+            FAILED(Engine::Graphics::MeasureNative(NativeProbe(),Engine::Graphics::NativeOperation::ResourceCreate,[&] { return m_device->CreateComputeShader(code->GetBufferPointer(),code->GetBufferSize(),nullptr,&m_copyIndirectShader); }))) return false;
     }
     // D3D11 does not permit a partial copy from a structured buffer into an
     // indirect argument buffer. Copy its header on the GPU without readback.
     if(offset || !m_copyIndirectShader) return false;
     ID3D11ShaderResourceView* source=native->GetShaderResourceView();
     ID3D11UnorderedAccessView* destination=m_indirectArgumentsUav.Get();
-    m_context->CSSetShader(m_copyIndirectShader.Get(),nullptr,0);
-    m_context->CSSetShaderResources(0,1,&source); m_context->CSSetUnorderedAccessViews(0,1,&destination,nullptr);
-    m_context->Dispatch(1,1,1);
+    Engine::Graphics::MeasureNative(NativeProbe(),Engine::Graphics::NativeOperation::Bind,[&] { return m_context->CSSetShader(m_copyIndirectShader.Get(),nullptr,0); });
+    Engine::Graphics::MeasureNative(NativeProbe(),Engine::Graphics::NativeOperation::Bind,[&] { return m_context->CSSetShaderResources(0,1,&source); }); Engine::Graphics::MeasureNative(NativeProbe(),Engine::Graphics::NativeOperation::Bind,[&] { return m_context->CSSetUnorderedAccessViews(0,1,&destination,nullptr); });
+    Engine::Graphics::MeasureNative(NativeProbe(),Engine::Graphics::NativeOperation::IndirectArguments,[&] { return m_context->Dispatch(1,1,1); });
     source=nullptr; destination=nullptr;
-    m_context->CSSetShaderResources(0,1,&source); m_context->CSSetUnorderedAccessViews(0,1,&destination,nullptr);
-    m_context->CSSetShader(nullptr,nullptr,0);
-    if (indexed) m_context->DrawIndexedInstancedIndirect(m_indirectArguments.Get(),0);
-    else m_context->DrawInstancedIndirect(m_indirectArguments.Get(),0);
+    Engine::Graphics::MeasureNative(NativeProbe(),Engine::Graphics::NativeOperation::Bind,[&] { return m_context->CSSetShaderResources(0,1,&source); }); Engine::Graphics::MeasureNative(NativeProbe(),Engine::Graphics::NativeOperation::Bind,[&] { return m_context->CSSetUnorderedAccessViews(0,1,&destination,nullptr); });
+    Engine::Graphics::MeasureNative(NativeProbe(),Engine::Graphics::NativeOperation::Bind,[&] { return m_context->CSSetShader(nullptr,nullptr,0); });
+    if (indexed) Engine::Graphics::MeasureNative(NativeProbe(),Engine::Graphics::NativeOperation::Draw,[&] { return m_context->DrawIndexedInstancedIndirect(m_indirectArguments.Get(),0); });
+    else Engine::Graphics::MeasureNative(NativeProbe(),Engine::Graphics::NativeOperation::Draw,[&] { return m_context->DrawInstancedIndirect(m_indirectArguments.Get(),0); });
     return true;
 }
 
@@ -642,7 +681,7 @@ void D3D11GraphicsContext::SetTexture(uint32_t slot, const Engine::Graphics::IGr
     if (!m_textureSlotInitialized[shaderSlot] ||
         m_boundTextureViews[shaderSlot] != view)
     {
-        m_context->PSSetShaderResources(shaderSlot, 1, &view);
+        Engine::Graphics::MeasureNative(NativeProbe(),Engine::Graphics::NativeOperation::Bind,[&] { return m_context->PSSetShaderResources(shaderSlot, 1, &view); });
         m_boundTextureViews[shaderSlot] = view;
         m_textureSlotInitialized[shaderSlot] = true;
     }
@@ -681,7 +720,7 @@ bool D3D11GraphicsContext::BeginDepthOnlyPass(
         m_context->RSGetScissorRects(&scissorCount, m_savedScissors.data());
 
     ID3D11ShaderResourceView* nullView = nullptr;
-    m_context->PSSetShaderResources(12, 1, &nullView);
+    Engine::Graphics::MeasureNative(NativeProbe(),Engine::Graphics::NativeOperation::Bind,[&] { return m_context->PSSetShaderResources(12, 1, &nullView); });
     m_boundTextureViews[12] = nullptr;
     m_textureSlotInitialized[12] = true;
     ID3D11DepthStencilView* depthView = nativeTexture->GetDepthView();
@@ -738,14 +777,14 @@ void D3D11GraphicsContext::Clear(float, float, float, float, float) {}
 void D3D11GraphicsContext::DrawInstanced(uint32_t vertices, uint32_t instances,
                                          uint32_t startVertex, uint32_t startInstance)
 {
-    if (m_context) m_context->DrawInstanced(vertices, instances, startVertex, startInstance);
+    if (m_context) Engine::Graphics::MeasureNative(NativeProbe(),Engine::Graphics::NativeOperation::Draw,[&] { return m_context->DrawInstanced(vertices, instances, startVertex, startInstance); });
 }
 
 void D3D11GraphicsContext::DrawIndexedInstanced(uint32_t indices, uint32_t instances,
                                                 uint32_t startIndex, int32_t baseVertex,
                                                 uint32_t startInstance)
 {
-    if (m_context) m_context->DrawIndexedInstanced(indices, instances, startIndex, baseVertex, startInstance);
+    if (m_context) Engine::Graphics::MeasureNative(NativeProbe(),Engine::Graphics::NativeOperation::Draw,[&] { return m_context->DrawIndexedInstanced(indices, instances, startIndex, baseVertex, startInstance); });
 }
 
 void D3D11GraphicsContext::TransitionResource(void*, ResourceState, ResourceState) {}

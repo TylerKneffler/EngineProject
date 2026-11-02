@@ -5,6 +5,8 @@
 #include <fstream>
 #include <string>
 #include "Core/Rendering/RenderPerformance.h"
+#include "Core/Threading/CapturedText.h"
+#include "Core/Threading/AsyncTextWriter.h"
 
 namespace Engine::Renderers { class IEditorRenderer; }
 namespace Engine::Scene { class Scene; }
@@ -42,16 +44,18 @@ namespace Engine::Editor
     public:
         EditorFrameProfiler(Scene::Scene* scene, Renderers::IEditorRenderer* renderer,
             bool autoProfilePlay);
-        explicit operator bool() const { return output_.is_open(); }
+        explicit operator bool() const { return output_.IsOpen(); }
         // Shared by the opt-in trace and normal Performance recordings.
         static std::string SerializeFields(const EditorFrameProfileSample& sample,
+            Scene::Scene* scene, Renderers::IEditorRenderer* renderer);
+        static Engine::Threading::CapturedText CaptureFields(const EditorFrameProfileSample& sample,
             Scene::Scene* scene, Renderers::IEditorRenderer* renderer);
         void Stop();
         void Record(const EditorFrameProfileSample& sample, Scene::Scene* scene,
             Renderers::IEditorRenderer* renderer);
 
     private:
-        std::ofstream output_;
+        Engine::Threading::AsyncTextWriter output_;
         uint64_t frameIndex_ = 0;
         std::chrono::steady_clock::time_point cpuSampleStart_{};
         uint64_t processTicks_=0,threadTicks_=0;

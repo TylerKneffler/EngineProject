@@ -8,9 +8,74 @@
 #include "Diagnostics/PerformanceMetrics.h"
 #include "Core/Rendering/RenderPerformance.h"
 #include <limits>
+#include "Core/Graphics/NativeSubmissionTimings.h"
+#include <future>
+#include <thread>
+
+void TestAsyncWriter()
+{
+    const auto path=std::filesystem::current_path()/"engine-async-writer-test.jsonl";
+    Engine::Threading::AsyncTextWriter writer(4096,2);
+    if(!writer.Start(path)) throw std::runtime_error("async writer did not open");
+    std::promise<void> entered,release; auto gate=release.get_future().share();
+    const auto owner=std::this_thread::get_id();
+    writer.Enqueue([&entered,gate,owner] {
+        if(std::this_thread::get_id()==owner) throw std::runtime_error("formatter ran on producer");
+        entered.set_value(); gate.wait(); return "{\"sequence\":0}";
+    },128);
+    if(entered.get_future().wait_for(std::chrono::seconds(5))!=std::future_status::ready)
+    { release.set_value(); writer.Stop(); throw std::runtime_error("writer worker did not start"); }
+    writer.Enqueue([] { return "{\"sequence\":1}"; },128);
+    writer.Enqueue([] { return "{\"sequence\":2}"; },128);
+    if(writer.Enqueue([] { return "overflow"; },128))
+    { release.set_value(); writer.Stop(); throw std::runtime_error("writer queue is not bounded"); }
+    release.set_value(); writer.Stop();
+    auto statistics=writer.ReadStatistics();
+    if(statistics.written!=3 || statistics.dropped!=1 || statistics.queuedBytes!=0 || statistics.failed)
+        throw std::runtime_error("writer did not drain or account for overflow");
+    std::ifstream input(path); const std::string contents((std::istreambuf_iterator<char>(input)),{}); input.close();
+    if(contents.find("\"sequence\":0")>contents.find("\"sequence\":1") ||
+        contents.find("\"sequence\":1")>contents.find("\"sequence\":2") ||
+        contents.find("\"dropped_records\":1")==std::string::npos)
+        throw std::runtime_error("writer reordered records or omitted loss summary");
+    if(!writer.Start(path)) throw std::runtime_error("writer did not restart");
+    Engine::Threading::CapturedText captured;
+    std::string source="immutable"; captured<<"{\"text\":\""<<source<<"\",\"value\":"<<uint64_t(9007199254740993ull)<<"}";
+    source="edited";
+    const auto bytes=captured.OwnedBytes();
+    writer.Enqueue([captured=std::move(captured)] { return captured.Format(); },bytes);
+    // A malformed record must not terminate the writer or prevent draining.
+    writer.Enqueue([]()->std::string { throw std::runtime_error("format failure"); },64);
+    writer.Stop();
+    statistics=writer.ReadStatistics();
+    // Use a larger capacity for captured packets: the first packet above can
+    // intentionally exceed this tiny queue and must count as an overflow.
+    if(statistics.failed!=1 || statistics.dropped!=1) throw std::runtime_error("writer failure/oversize accounting failed");
+    Engine::Threading::AsyncTextWriter copied;
+    if(!copied.Start(path)) throw std::runtime_error("snapshot writer did not start");
+    Engine::Threading::CapturedText snapshot;
+    snapshot<<"{\"text\":\""<<std::string("immutable")<<"\",\"value\":"<<uint64_t(9007199254740993ull)<<"}";
+    const auto snapshotBytes=snapshot.OwnedBytes();
+    copied.Enqueue([snapshot=std::move(snapshot)] { return snapshot.Format(); },snapshotBytes); copied.Stop();
+    input.open(path); const std::string copy((std::istreambuf_iterator<char>(input)),{}); input.close();
+    if(copy.find("immutable")==std::string::npos || copy.find("9007199254740993")==std::string::npos)
+        throw std::runtime_error("captured values lost ownership or integer precision");
+    std::filesystem::remove(path);
+}
 
 int main()
 {
+    Engine::Graphics::NativeSubmissionTimings native;
+    native.supported=true; native.enabled=true; native.frameSerial=42;
+    native.computeArenaWrites=8;
+    native.phases[size_t(Engine::Graphics::NativePhase::Shadow)][size_t(Engine::Graphics::NativeOperation::Map)]={3,9007199254740993ull,3,2.5,2};
+    Engine::Threading::CapturedText nativeCapture; native.WriteJson(nativeCapture);
+    const auto nativeText=nativeCapture.Format();
+    for(const char* field : {"\"native_timing_enabled\":true", "\"native_compute_arena_writes\":8",
+        "\"native_shadow_map_calls\":3", "\"native_shadow_map_thread_cycles\":9007199254740993"})
+        if(nativeText.find(field)==std::string::npos) throw std::runtime_error("native submission fields lost during background formatting");
+
+    TestAsyncWriter();
     Engine::Editor::FrameRateWindow frameRate;
     for(int frame=0;frame<200;++frame) frameRate.Add(10);
     if(frameRate.Fps()!=100) throw std::runtime_error("Frame rate must count frame intervals");

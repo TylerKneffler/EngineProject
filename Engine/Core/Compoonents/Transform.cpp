@@ -128,6 +128,20 @@ void Transform::NotifyEditorTransformChanged(uint8_t channels)
     m_editorOverrideChannels |= channels;
 }
 
+glm::dmat4 Transform::ComposeLocalMatrix(const glm::dvec3& position,
+    const glm::vec3& rotation,const glm::vec3& scale)
+{
+    glm::dmat4 t  = glm::translate(glm::dmat4(1.0), position);
+    glm::dmat4 rxD = glm::rotate(glm::dmat4(1.0),
+        static_cast<double>(rotation.x), glm::dvec3(1.0, 0.0, 0.0));
+    glm::dmat4 ryD = glm::rotate(glm::dmat4(1.0),
+        static_cast<double>(rotation.y), glm::dvec3(0.0, 1.0, 0.0));
+    glm::dmat4 rzD = glm::rotate(glm::dmat4(1.0),
+        static_cast<double>(rotation.z), glm::dvec3(0.0, 0.0, 1.0));
+    glm::dmat4 sD = glm::scale(glm::dmat4(1.0), glm::dvec3(scale));
+    return t * rzD * ryD * rxD * sD;
+}
+
 void Transform::UpdateLocalCache() const
 {
     const bool valuesChanged = m_localCacheInitialized &&
@@ -139,15 +153,7 @@ void Transform::UpdateLocalCache() const
     if (m_localCacheInitialized && !valuesChanged)
         return;
 
-    glm::dmat4 t  = glm::translate(glm::dmat4(1.0), position);
-    glm::dmat4 rxD = glm::rotate(glm::dmat4(1.0),
-        static_cast<double>(rotation.x), glm::dvec3(1.0, 0.0, 0.0));
-    glm::dmat4 ryD = glm::rotate(glm::dmat4(1.0),
-        static_cast<double>(rotation.y), glm::dvec3(0.0, 1.0, 0.0));
-    glm::dmat4 rzD = glm::rotate(glm::dmat4(1.0),
-        static_cast<double>(rotation.z), glm::dvec3(0.0, 0.0, 1.0));
-    glm::dmat4 sD = glm::scale(glm::dmat4(1.0), glm::dvec3(scale));
-    m_cachedLocalMatrixD = t * rzD * ryD * rxD * sD;
+    m_cachedLocalMatrixD = ComposeLocalMatrix(position,rotation,scale);
     m_cachedLocalMatrix = glm::mat4(m_cachedLocalMatrixD);
     m_cachedPosition = position;
     m_cachedRotation = rotation;

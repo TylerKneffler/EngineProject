@@ -2201,3 +2201,29 @@ if(NOT ENGINE_PROJECT_DIR AND
     add_test(NAME TerrainColliderStreaming COMMAND TerrainColliderStreamingTests)
     set_tests_properties(TerrainColliderStreaming PROPERTIES WORKING_DIRECTORY "${ENGINE_ROOT}")
 endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/AssetPreviewAsyncTests.cpp")
+    enable_testing()
+    add_executable(AssetPreviewAsyncTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/AssetPreviewAsyncTests.cpp"
+        "${ENGINE_ROOT}/Engine/Editor/Core/View/Templates/Assets/AssetPreviewCache.cpp"
+        "${ENGINE_ROOT}/Engine/Editor/Core/Paint/BrushPreset.cpp")
+    target_link_libraries(AssetPreviewAsyncTests PRIVATE Engine assimp::assimp)
+    target_compile_definitions(AssetPreviewAsyncTests PRIVATE NOMINMAX)
+    target_include_directories(AssetPreviewAsyncTests PRIVATE "${ENGINE_ROOT}" "${ENGINE_ROOT}/Engine")
+    add_test(NAME AssetPreviewAsync COMMAND AssetPreviewAsyncTests)
+    set_tests_properties(AssetPreviewAsync PROPERTIES WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/RenderSpatialIndexTests.cpp")
+    enable_testing()
+    add_executable(RenderSpatialIndexTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/RenderSpatialIndexTests.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Rendering/RenderSpatialIndex.cpp")
+    target_include_directories(RenderSpatialIndexTests PRIVATE "${ENGINE_ROOT}/Engine")
+    target_link_libraries(RenderSpatialIndexTests PRIVATE glm::glm)
+    add_test(NAME RenderSpatialIndex COMMAND RenderSpatialIndexTests)
+    set_tests_properties(RenderSpatialIndex PROPERTIES WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()

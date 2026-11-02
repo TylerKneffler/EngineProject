@@ -60,6 +60,7 @@ public:
     bool Selectable(const char*, bool, bool) override;
     EditorUiAssetTileResult AssetTile(const char*, const char*, void*, bool, float) override;
     float AvailableContentWidth() const override;
+    bool IsRectVisible(float width,float height) const override;
     EditorUiContextMenuResult ContextMenu(const void*,const char*,const char*,bool,const char*,bool,bool,bool,bool) override;
     EditorUiAssetCreateMenuResult AssetWindowContextMenu(bool) override;
     EditorUiAssetItemMenuResult AssetItemContextMenu(const char*, bool, bool, bool, bool, bool) override;

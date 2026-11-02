@@ -10,6 +10,7 @@
 #include <thread>
 #include "Core/Rendering/RenderPerformance.h"
 #include "Engine/Editor/Diagnostics/PerformanceMetrics.h"
+#include "Core/Graphics/IGraphicsContext.h"
 
 namespace Engine::Scene { class Scene; }
 namespace Engine::Renderers { class IEditorRenderer; }
@@ -123,5 +124,7 @@ private:
     double m_gpuTotalMs=0;
     uint64_t m_gpuSampleId=0;
     uint32_t m_gpuRegions=0;
+    Engine::Graphics::NativeSubmissionTimings m_nativeTimings;
+    bool m_nativeTimingRequested=false,m_nativeTimingChange=false;
 };
 }

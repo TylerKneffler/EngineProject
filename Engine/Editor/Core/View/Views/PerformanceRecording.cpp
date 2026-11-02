@@ -17,6 +17,7 @@ public:
 protected:
     std::streamsize xsputn(const char* text, std::streamsize count) override
     {
+        std::lock_guard lock(m_mutex);
         const auto written = m_original->sputn(text, count);
         for (std::streamsize index = 0; index < written; ++index)
         {
@@ -39,6 +40,7 @@ protected:
 
     int sync() override
     {
+        std::lock_guard lock(m_mutex);
         if (!m_line.empty())
         {
             m_recording.Event(m_source, "output", m_line);
@@ -52,6 +54,7 @@ private:
     std::streambuf* m_original;
     const char* m_source;
     std::string m_line;
+    std::mutex m_mutex;
 };
 
 PerformanceRecording::PerformanceRecording() = default;
@@ -63,9 +66,10 @@ PerformanceRecording::~PerformanceRecording()
 
 bool PerformanceRecording::Start(const std::filesystem::path& path)
 {
+    if(IsRecording()) return false;
+    Stop(); // Join a completed/error writer and restore any previous output taps.
     std::lock_guard lock(m_mutex);
-    m_file.open(path, std::ios::binary | std::ios::trunc);
-    if (!m_file.is_open()) return false;
+    if (!m_writer.Start(path)) return false;
     m_frameIndex = 0;
     m_originalStdout = std::cout.rdbuf();
     m_originalStderr = std::cerr.rdbuf();
@@ -87,14 +91,12 @@ void PerformanceRecording::Stop()
         m_stdoutTap.reset();
         m_stderrTap.reset();
     }
-    std::lock_guard lock(m_mutex);
-    if (m_file.is_open()) m_file.close();
+    m_writer.Stop();
 }
 
 bool PerformanceRecording::IsRecording() const
 {
-    std::lock_guard lock(m_mutex);
-    return m_file.is_open();
+    return m_writer.IsOpen();
 }
 
 std::string PerformanceRecording::Escape(const std::string& value)
@@ -119,9 +121,8 @@ std::string PerformanceRecording::Escape(const std::string& value)
     return out.str();
 }
 
-std::string PerformanceRecording::Timestamp() const
+std::string PerformanceRecording::Timestamp(std::chrono::system_clock::time_point now)
 {
-    const auto now = std::chrono::system_clock::now();
     const auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(
         now.time_since_epoch()).count() % 1000;
     std::time_t seconds = std::chrono::system_clock::to_time_t(now);
@@ -137,42 +138,60 @@ void PerformanceRecording::Event(const char* source, const char* level,
     const std::string& message)
 {
     std::lock_guard lock(m_mutex);
-    if (!m_file.is_open()) return;
-    m_file << "{\"type\":\"output\",\"time_utc\":\"" << Timestamp()
-        << "\",\"source\":\"" << Escape(source) << "\",\"level\":\""
-        << Escape(level) << "\",\"message\":\"" << Escape(message)
-        << "\"}\n";
+    const auto time=std::chrono::system_clock::now();
+    const size_t bytes=message.size()+std::char_traits<char>::length(source)+std::char_traits<char>::length(level)+256;
+    m_writer.Enqueue([source=std::string(source),level=std::string(level),message,time] {
+        return "{\"type\":\"output\",\"time_utc\":\""+Timestamp(time)+"\",\"source\":\""+
+            Escape(source)+"\",\"level\":\""+Escape(level)+"\",\"message\":\""+Escape(message)+"\"}";
+    },bytes);
 }
 
 void PerformanceRecording::Sample(const std::string& jsonFields)
 {
+    Engine::Threading::CapturedText fields; fields<<jsonFields; Sample(std::move(fields));
+}
+
+void PerformanceRecording::Sample(Engine::Threading::CapturedText fields)
+{
     std::lock_guard lock(m_mutex);
-    if (!m_file.is_open()) return;
-    m_file << "{\"type\":\"sample\",\"time_utc\":\"" << Timestamp()
-        << "\"," << jsonFields << "}\n";
+    const auto time=std::chrono::system_clock::now();
+    const auto bytes=fields.OwnedBytes()+256;
+    m_writer.Enqueue([fields=std::move(fields),time] {
+        return "{\"type\":\"sample\",\"time_utc\":\""+Timestamp(time)+"\","+fields.Format()+"}";
+    },bytes);
 }
 
 void PerformanceRecording::FrameDetails(const std::string& jsonFields)
 {
+    Engine::Threading::CapturedText fields; fields<<jsonFields; FrameDetails(std::move(fields));
+}
+
+void PerformanceRecording::FrameDetails(Engine::Threading::CapturedText fields)
+{
     std::lock_guard lock(m_mutex);
-    if (!m_file.is_open()) return;
-    m_file << "{\"type\":\"frame_details\",\"time_utc\":\"" << Timestamp()
-        << "\",\"frame\":" << m_frameIndex++ << ',' << jsonFields << "}\n";
-    // Keep a live capture readable without flushing on every frame.
-    if (m_frameIndex % 30u == 0u) m_file.flush();
+    if(!m_writer.IsOpen()) return;
+    const auto index=m_frameIndex++;
+    const auto time=std::chrono::system_clock::now();
+    const auto bytes=fields.OwnedBytes()+256;
+    m_writer.Enqueue([fields=std::move(fields),index,time] {
+        return "{\"type\":\"frame_details\",\"time_utc\":\""+Timestamp(time)+"\",\"frame\":"+
+            std::to_string(index)+","+fields.Format()+"}";
+    },bytes);
 }
 
 void PerformanceRecording::Frame(float reportedFrameRate, double elapsedMs,
     double panelDrawMs)
 {
     std::lock_guard lock(m_mutex);
-    if (!m_file.is_open()) return;
-    m_file << "{\"type\":\"frame\",\"time_utc\":\"" << Timestamp()
-        << "\",\"fps\":" << std::fixed << std::setprecision(3)
-        << (elapsedMs > 0.0 ? 1000.0 / elapsedMs : 0.0)
-        << ",\"frame_ms\":" << elapsedMs
-        << ",\"ui_fps\":" << reportedFrameRate
-        << ",\"fps_scope\":\"editor_frame_interval\""
-        << ",\"panel_draw_ms\":" << panelDrawMs << "}\n";
+    const auto time=std::chrono::system_clock::now();
+    m_writer.Enqueue([reportedFrameRate,elapsedMs,panelDrawMs,time] {
+        std::ostringstream output; output.imbue(std::locale::classic());
+        output << "{\"type\":\"frame\",\"time_utc\":\"" << Timestamp(time)
+            << "\",\"fps\":" << std::fixed << std::setprecision(3)
+            << (elapsedMs>0 ? 1000./elapsedMs:0.) << ",\"frame_ms\":" << elapsedMs
+            << ",\"ui_fps\":" << reportedFrameRate << ",\"fps_scope\":\"editor_frame_interval\""
+            << ",\"panel_draw_ms\":" << panelDrawMs << "}";
+        return output.str();
+    },256);
 }
 }

@@ -129,8 +129,12 @@ void DX11EditorRenderer::RenderIfNeeded(std::function<void()> drawFn)
     if (!m_dirty || !m_rtv) return;
     m_dirty = false;
     const auto setupBegin = std::chrono::steady_clock::now();
-    if (m_gpuTimingEnabled && m_graphicsProvider)
-        m_graphicsProvider->GetContextFactory()->PrepareFrame(0);
+    if (m_graphicsProvider)
+    {
+        auto* factory=m_graphicsProvider->GetContextFactory();
+        factory->SetGpuTimingEnabled(m_gpuTimingEnabled);
+        factory->PrepareFrame(0);
+    }
     const auto afterPrepareFrame = std::chrono::steady_clock::now();
     ID3D11RenderTargetView* target = m_rtv.Get();
     m_context->OMSetRenderTargets(1, &target, nullptr);
@@ -153,7 +157,7 @@ void DX11EditorRenderer::RenderIfNeeded(std::function<void()> drawFn)
     const auto uiBegin = std::chrono::steady_clock::now();
     if (m_uiHooks.render) m_uiHooks.render(m_context.Get());
     if (m_uiHooks.endFrame) m_uiHooks.endFrame();
-    if (m_gpuTimingEnabled && m_graphicsProvider)
+    if (m_graphicsProvider)
         m_graphicsProvider->GetContextFactory()->FinalizeFrame();
     const auto presentBegin = std::chrono::steady_clock::now();
     m_lastUiRenderMilliseconds = std::chrono::duration<double, std::milli>(

@@ -20,6 +20,10 @@ public:
 
     static std::shared_ptr<Texture> Acquire(
         const std::string& path, bool srgb = true);
+    // Worker-owned CPU decoding, independent of cached/live render textures.
+    // Thumbnails sample only the base level and do not need a mip chain.
+    static std::shared_ptr<Texture> DecodeDetached(
+        const std::string& path, bool srgb = true);
     // Discard decoded/GPU data for a generated asset that was overwritten.
     // Existing shared references will lazily reload it on the next Prepare.
     static void Invalidate(const std::string& path);
@@ -57,6 +61,7 @@ private:
     std::vector<uint8_t> m_pixels;
     GraphicsTextureFormat m_format = GraphicsTextureFormat::Rgba8;
     bool m_srgb = true;
+    bool m_generateMips = true;
     IGraphicsProvider* m_preparedProvider = nullptr;
     std::shared_ptr<IGraphicsTexture> m_graphicsTexture;
 };

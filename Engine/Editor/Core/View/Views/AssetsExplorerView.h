@@ -5,6 +5,7 @@
 #include "View/IEditorPanel.h"
 #include "Engine/Editor/Core/View/Templates/Assets/AssetPreviewCache.h"
 #include "AssetLocationIndex.h"
+#include "Core/IO/DirectorySnapshotCache.h"
 
 namespace Engine::Core { class Object; }
 namespace Engine::Scene { class Scene; }
@@ -53,6 +54,7 @@ public:
         const std::string& destinationDirectory = {},
         std::string* copiedPath = nullptr);
     void CheckForExternalMoves();
+    bool PollDirectoryCache() { const bool directory=m_directoryCache.Poll(); const bool previews=m_previewCache.Poll(); return directory || previews; }
     void RecordKnownMove(const std::string& oldPath, const std::string& newPath)
     { m_locationIndex.RecordKnownMove(oldPath, newPath); }
     const std::string& GetSelectedPath() const { return m_selectedPath; }
@@ -94,6 +96,7 @@ private:
     std::string m_codeEditor = "None";
     Engine::Scene::Scene* m_scene = nullptr;
     AssetPreviewCache m_previewCache;
+    Engine::IO::DirectorySnapshotCache m_directoryCache;
     std::string m_currentDirectory;
     std::vector<std::string> m_backHistory;
     std::string m_selectedPath;

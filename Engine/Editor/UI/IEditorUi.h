@@ -254,6 +254,8 @@ public:
     virtual EditorUiAssetTileResult AssetTile(const char* label,
         const char* fallbackIcon, void* texture, bool selected, float size) = 0;
     virtual float AvailableContentWidth() const = 0;
+    // Test a region at the current cursor before preparing expensive UI content.
+    virtual bool IsRectVisible(float, float) const { return true; }
     virtual EditorUiContextMenuResult ContextMenu(const void* id,
         const char* addLabel, const char* deleteLabel,
         bool objectCreationMenu = false,

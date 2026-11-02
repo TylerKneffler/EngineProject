@@ -249,6 +249,14 @@ std::shared_ptr<Texture> Texture::Acquire(const std::string& path, bool srgb)
         });
 }
 
+std::shared_ptr<Texture> Texture::DecodeDetached(const std::string& path, bool srgb)
+{
+    auto decoded=std::shared_ptr<Texture>(new Texture(
+        std::filesystem::path(path).lexically_normal().generic_string(),srgb));
+    decoded->m_generateMips=false;
+    return decoded->Load() ? decoded:nullptr;
+}
+
 void Texture::Invalidate(const std::string& path)
 {
     Engine::Rendering::EnvironmentMap::Invalidate(path);
@@ -407,8 +415,8 @@ bool Texture::Load()
     }
     if (success)
     {
-        m_mipLevels = FullMipCount(m_width, m_height);
-        GenerateMipChain(m_pixels, m_width, m_height, m_format, m_srgb);
+        m_mipLevels = m_generateMips ? FullMipCount(m_width, m_height):1;
+        if(m_generateMips) GenerateMipChain(m_pixels, m_width, m_height, m_format, m_srgb);
     }
     else
     {
@@ -445,8 +453,8 @@ bool Texture::SetPreviewPixels(const std::vector<uint8_t>& rgba)
         rgba.size() != static_cast<size_t>(m_width) * m_height * 4)
         return false;
     m_pixels = rgba;
-    m_mipLevels = FullMipCount(m_width, m_height);
-    GenerateMipChain(m_pixels, m_width, m_height, m_format, m_srgb);
+    m_mipLevels = m_generateMips ? FullMipCount(m_width, m_height):1;
+    if(m_generateMips) GenerateMipChain(m_pixels, m_width, m_height, m_format, m_srgb);
     m_graphicsTexture.reset();
     m_preparedProvider = nullptr;
     return true;

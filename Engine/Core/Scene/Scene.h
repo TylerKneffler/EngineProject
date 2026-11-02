@@ -1,4 +1,6 @@
 #pragma once
+#include "Core/Rendering/RenderBoundsCache.h"
+#include "Core/Compoonents/TransformHierarchy.h"
 #include "Core/Scene/ComponentRegistry.h"
 #include "Core/Rendering/PersistentInstanceBatches.h"
 #include "Core/Compoonents/SpatialUpdate.h"
@@ -201,6 +203,14 @@ public:
         double boneUploadMs = 0.0;
         double capacityMs = 0.0;
         double spatialMs = 0.0;
+        uint64_t boundsReused=0,boundsUpdated=0;
+        double workerMs=0,mainJobMs=0,workerWaitMs=0,workerQueueMs=0;
+        double transformsMs=0,transformSnapshotMs=0,transformComputeMs=0,transformCommitMs=0;
+        uint64_t transformLocalUpdated=0,transformWorldUpdated=0,transformWorldReused=0,transformLevels=0;
+        uint64_t transformStructureFallback=0;
+        double spatialIndexMs=0,spatialCompareMs=0,spatialRefitMs=0,spatialBuildMs=0;
+        uint64_t spatialChangedBounds=0,spatialReusedBounds=0,spatialDirtyLeaves=0,spatialRefitNodes=0;
+        uint64_t spatialRebuilds=0,spatialQualityRebuilds=0;
     };
     const PrepareTimings& GetLastPrepareTimings() const { return m_lastPrepareTimings; }
     using RenderCpuTimings = Engine::Rendering::RenderCpuTimings;
@@ -770,6 +780,10 @@ private:
     };
     std::vector<FrameComponentLookup> m_frameComponentLookupScratch;
     Engine::Rendering::RenderSpatialIndex m_renderSpatialIndex;
+    Engine::Rendering::RenderBoundsCache m_worldBoundsCache;
+    Engine::Components::TransformHierarchy m_transformHierarchy;
+    uint64_t m_transformPreparationRevision=UINT64_MAX;
+    std::vector<Engine::Components::Transform*> m_transformPreparationScratch;
     RenderCpuTimings m_lastRenderCpuTimings;
     Engine::Rendering::AutomaticInstanceCache m_automaticInstanceCache;
     Engine::Rendering::PersistentInstancePool m_persistentInstances;

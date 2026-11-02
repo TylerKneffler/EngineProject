@@ -1,5 +1,6 @@
 #include "Core/Scene/Scene.h"
 #include "Core/Rendering/RenderJobs.h"
+#include "Core/IO/DirectorySnapshotCache.h"
 #include "Core/Compoonents/Physics/SpatialManipulator.h"
 #include "Core/Compoonents/Lighting/Light.h"
 #include "Core/Compoonents/Audio/AudioSource.h"
@@ -26,6 +27,7 @@
 #include <cmath>
 #include "Core/Window.h"
 #include "Core/Renderers/DX11/DX11GameRenderer.h"
+#include "Core/Renderers/DX11/DX11EditorRenderer.h"
 #include "Core/Renderers/DX12/DX12GameRenderer.h"
 #include "Core/Renderers/Vulkan/VulkanGameRenderer.h"
 #include <type_traits>
@@ -33,6 +35,275 @@
 
 void Require(bool condition, const char* message)
 { if (!condition) throw std::runtime_error(message); }
+
+void TestEngineScheduling()
+{
+    Engine::Threading::JobScheduler jobs(2);
+    int first=0,second=0;
+    auto a=jobs.Schedule([&] { first=7; });
+    auto b=jobs.Schedule([&] { Require(first==7,"job ran before dependency"); second=11; },{a});
+    auto c=jobs.Schedule([&] { Require(first+second==18,"dependency results were not visible"); },{a,b});
+    jobs.Wait(c);
+    {
+        Engine::Threading::JobScheduler isolated(1);
+        std::promise<void> entered,release; auto gate=release.get_future().share();
+        auto occupied=isolated.Submit([&entered,gate] { entered.set_value(); gate.wait(); });
+        entered.get_future().wait();
+        const auto producer=std::this_thread::get_id();
+        auto io=isolated.Submit([producer] { return std::this_thread::get_id()!=producer; });
+        auto work=isolated.Schedule([] {});
+        isolated.Wait(work); // Must skip the queued worker-only operation.
+        release.set_value(); occupied.get();
+        Require(io.get(),"cooperative wait stole asynchronous IO onto the producer");
+    }
+    auto identity=jobs.Submit([] { return std::this_thread::get_id(); });
+    Require(identity.get()!=std::this_thread::get_id(),"queued CPU work stayed on caller");
+    std::atomic<unsigned> visits{0};
+    jobs.For(256,512,[&](size_t i) { ++visits; if(i==0) jobs.For(256,512,[&](size_t) { ++visits; }); });
+    Require(visits==512,"nested jobs deadlocked, skipped or duplicated work");
+    const auto owner=std::this_thread::get_id();
+    jobs.For(512,SIZE_MAX,[&](size_t) { Require(std::this_thread::get_id()==owner,"thread-affine loop moved to workers"); });
+    bool ran=false,failed=false;
+    auto broken=jobs.Schedule([] { throw std::runtime_error("dependency failure"); });
+    auto skipped=jobs.Schedule([&] { ran=true; },{broken});
+    try { jobs.Wait(skipped); } catch(const std::runtime_error&) { failed=true; }
+    Require(failed && !ran,"failed dependency did not propagate");
+    Engine::Threading::JobScheduler serial(0);
+    Require(serial.Submit([] { return 9; }).get()==9,"serial scheduler lost returned value");
+    auto serialFailure=serial.Schedule([] { throw std::runtime_error("serial failure"); }); failed=false;
+    try { serial.Wait(serialFailure); } catch(const std::runtime_error&) { failed=true; }
+    Require(failed,"serial job failure was lost");
+    std::atomic<unsigned> drained{0};
+    { Engine::Threading::JobScheduler shutdown(2); for(int i=0;i<32;++i) shutdown.Schedule([&] { ++drained; }); }
+    Require(drained==32,"scheduler shutdown abandoned jobs");
+    std::cout<<"Engine jobs: dependency ordering, failure propagation, nested progress, serial mode and shutdown passed.\n";
+}
+
+void TestRenderBoundsCaching()
+{
+    using Cache=Engine::Rendering::RenderBoundsCache;
+    Cache cache; std::vector<Cache::Input> input(256); std::vector<Engine::Rendering::RenderBounds> bounds;
+    for(size_t i=0;i<input.size();++i) { input[i].slot=uint32_t(i); input[i].bounded=true; input[i].minimum={-1,-1,-1}; input[i].maximum={1,1,1}; }
+    auto statistics=cache.Prepare(input,bounds);
+    Require(statistics.updated==256 && bounds.front().minimum==glm::vec3(-1),"initial bounds preparation failed");
+    statistics=cache.Prepare(input,bounds);
+    Require(statistics.reused==256 && statistics.updated==0,"static bounds were rebuilt");
+    input[7].world[3].x=4;
+    statistics=cache.Prepare(input,bounds);
+    Require(statistics.updated==1 && statistics.reused==255 && bounds[7].minimum.x==3,"moved object did not invalidate only its bounds");
+    input[9].maximum.x=3; input[3].bounded=false;
+    statistics=cache.Prepare(input,bounds);
+    Require(statistics.updated==1 && bounds[9].maximum.x==3 && !bounds[3].bounded,"geometry or unbounded fallback was not refreshed");
+    std::cout<<"World bounds: unchanged reuse, isolated transform/geometry edits and conservative fallbacks passed.\n";
+}
+
+glm::dmat4 ReferenceTransform(const Engine::Core::Object* object)
+{
+    if(!object) return glm::dmat4(1);
+    const auto& t=object->transform;
+    auto matrix=glm::translate(glm::dmat4(1),t.position);
+    matrix*=glm::rotate(glm::dmat4(1),double(t.rotation.z),glm::dvec3(0,0,1));
+    matrix*=glm::rotate(glm::dmat4(1),double(t.rotation.y),glm::dvec3(0,1,0));
+    matrix*=glm::rotate(glm::dmat4(1),double(t.rotation.x),glm::dvec3(1,0,0));
+    matrix*=glm::scale(glm::dmat4(1),glm::dvec3(t.scale));
+    return ReferenceTransform(object->Parent)*matrix;
+}
+void CheckTransform(const Engine::Core::Object& object)
+{
+    const auto expected=ReferenceTransform(&object),actual=object.transform.GetWorldMatrixD();
+    const auto expectedFloat=glm::mat4(expected),actualFloat=object.transform.GetWorldMatrix();
+    for(int column=0;column<4;++column) for(int row=0;row<4;++row)
+    {
+        Require(std::abs(expected[column][row]-actual[column][row])<1.e-6,"parallel double world matrix differs from hierarchical TRS reference");
+        Require(expectedFloat[column][row]==actualFloat[column][row],"parallel float matrix lost double-precision world conversion");
+    }
+}
+void TestTransformHierarchy()
+{
+    using Engine::Core::Object;
+    using Engine::Components::Transform;
+    Engine::Components::TransformHierarchy hierarchy;
+    std::vector<std::unique_ptr<Object>> objects;
+    std::vector<Transform*> input;
+    constexpr size_t count=2047;
+    for(size_t i=0;i<count;++i)
+    {
+        auto object=std::make_unique<Object>();
+        object->transform.position={double(i%5)*.125,double(i%3)*.25,double(i%7)*.125};
+        object->transform.rotation={float(i%3)*.01f,float(i%5)*.02f,float(i%7)*.01f};
+        object->transform.scale={1.01f,.99f,i%31==0 ? -1.f:1.f};
+        if(i) object->Parent=objects[(i-1)/2].get();
+        input.push_back(&object->transform); objects.push_back(std::move(object));
+    }
+    objects[0]->transform.position.x=1.e9+.125;
+    std::reverse(input.begin(),input.end()); // Input order must not impose hierarchy order.
+    auto result=hierarchy.Prepare(input);
+    Require(result.valid && result.localUpdated==count && result.worldUpdated==count && result.topologyRebuilt,"initial hierarchy preparation failed");
+    for(const auto& object:objects)
+    {
+        CheckTransform(*object);
+        Require(hierarchy.ReadPreparedWorldMatrix(object->transform)==object->transform.GetWorldMatrix(),"prepared render matrix differs from lazy validation");
+    }
+    Object outside; outside.transform.position={1,2,3};
+    Require(hierarchy.ReadPreparedWorldMatrix(outside.transform)==outside.transform.GetWorldMatrix(),"non-batched read did not retain lazy validation");
+    const auto revision=objects.back()->transform.GetWorldRevision();
+    const auto before=Engine::Threading::JobScheduler::Get().ReadStatistics();
+    result=hierarchy.Prepare(input);
+    const auto after=Engine::Threading::JobScheduler::Get().ReadStatistics();
+    Require(result.valid && result.worldReused==count && !result.localUpdated && !result.worldUpdated && !result.topologyRebuilt,
+        "unchanged hierarchy did not retain its caches");
+    Require(before.jobs==after.jobs && objects.back()->transform.GetWorldRevision()==revision,"static hierarchy scheduled jobs or advanced revisions");
+    objects.back()->transform.position.y+=.25;
+    result=hierarchy.Prepare(input);
+    Require(result.localUpdated==1 && result.worldUpdated==1,"leaf edit rebuilt unrelated branches"); CheckTransform(*objects.back());
+    objects[0]->transform.position.z+=.5;
+    result=hierarchy.Prepare(input);
+    Require(result.localUpdated==1 && result.worldUpdated==count,"parent edit failed to propagate world caches");
+    for(const auto& object:objects) CheckTransform(*object);
+    objects.back()->transform.MarkDirty(); result=hierarchy.Prepare(input);
+    Require(result.localUpdated==1 && result.worldUpdated==1,"explicit dirty notification was lost");
+    objects.back()->Parent=objects[2].get(); result=hierarchy.Prepare(input);
+    Require(result.topologyRebuilt && result.worldUpdated==1,"direct reparenting was not detected"); CheckTransform(*objects.back());
+    Object external; external.transform.position={32.125,-7,3}; objects[0]->Parent=&external;
+    result=hierarchy.Prepare(input); Require(result.worldUpdated==count,"external parent was not captured"); CheckTransform(*objects.back());
+    external.transform.position.x+=.125; result=hierarchy.Prepare(input);
+    Require(!result.topologyRebuilt && result.worldUpdated==count,"external parent edit did not invalidate descendants"); CheckTransform(*objects.back());
+    // Invalid topology must be rejected before publishing any copied local edits.
+    auto* oldParent=objects.back()->Parent; objects.back()->Parent=objects.back().get();
+    objects.back()->transform.position.z+=.125; result=hierarchy.Prepare(input);
+    Require(!result.valid,"cyclic hierarchy was accepted");
+    objects.back()->Parent=oldParent; result=hierarchy.Prepare(input);
+    Require(result.valid && result.localUpdated==1,"cycle recovery lost pending edits"); CheckTransform(*objects.back());
+    input.push_back(input.front()); Require(!hierarchy.Prepare(input).valid,"duplicate transform was accepted"); input.pop_back();
+    input.erase(input.begin()); objects.pop_back(); Require(hierarchy.Prepare(input).valid,"deleted/reordered hierarchy retained stale topology");
+    auto& scheduler=Engine::Threading::JobScheduler::Get(); scheduler.SetParallelForEnabled(false);
+    objects[0]->transform.rotation.y+=.1f; Require(hierarchy.Prepare(input).valid,"serial hierarchy preparation failed");
+    for(const auto& object:objects) CheckTransform(*object);
+    scheduler.SetParallelForEnabled(true); objects[0]->transform.rotation.y+=.1f;
+    Require(hierarchy.Prepare(input).valid,"parallel hierarchy preparation failed");
+    for(const auto& object:objects) CheckTransform(*object);
+    // Layer/portal mapping remains a separate operation on the authored world matrix.
+    objects[0]->transform.matrixLayer.SetLocalToLayer(glm::translate(glm::mat4(1),glm::vec3(3,4,5)));
+    Require(objects[0]->transform.GetWorldMatrixWithLayer()==objects[0]->transform.matrixLayer.localToLayer*objects[0]->transform.GetWorldMatrix(),
+        "hierarchy preparation changed matrix-layer mapping");
+    for(size_t frame=0;frame<32;++frame)
+    {
+        auto streamed=std::make_unique<Object>(); streamed->Parent=objects[3+frame%8].get();
+        streamed->transform.position={double(frame)*.25,2,3}; input.push_back(&streamed->transform);
+        result=hierarchy.Prepare(input);
+        Require(result.valid && result.localUpdated==1 && result.worldUpdated==1,"streaming a leaf rebuilt unrelated transform matrices");
+        CheckTransform(*streamed);
+        Require(hierarchy.ReadPreparedWorldMatrix(streamed->transform)==streamed->transform.GetWorldMatrix(),"streamed transform did not publish its prepared matrix");
+        input.pop_back(); streamed.reset(); result=hierarchy.Prepare(input);
+        Require(result.valid && result.worldUpdated==0,"removing a streamed leaf invalidated surviving matrices");
+    }
+    std::cout<<"Transforms: hierarchical float/double TRS, static reuse, direct edits, reparent/delete, external parents, cycle rejection, serial/parallel and layers passed.\n";
+}
+
+void TestSceneTransformScheduling()
+{
+    Engine::Core::Window window(GetModuleHandleW(nullptr),L"Scene transform preparation regression",64,64);
+    Engine::Renderers::DX11GameRenderer renderer;
+    Require(renderer.Init(window.GetHWND(),64,64),"scene transform renderer failed");
+    Engine::Scene::Scene scene; scene.Init(renderer.GetGraphicsProvider()); scene.SetUpdateProfilingEnabled(true);
+    auto* root=scene.AddObject("Transform root"); auto* child=scene.AddObject("Transform child");
+    child->Parent=root; child->transform.position={1,2,3};
+    scene.PrepareRenderFrame();
+    Require(scene.GetLastPrepareTimings().transformStructureFallback==1,"structural frame rebuilt the transform hierarchy");
+    scene.PrepareRenderFrame();
+    Require(scene.GetLastPrepareTimings().transformStructureFallback==0,"stable scene did not resume prepared transforms");
+    root->transform.position.x=10; scene.PrepareRenderFrame();
+    Require(scene.GetLastPrepareTimings().transformWorldUpdated==2,"scene transform phase missed a parent's descendants"); CheckTransform(*child);
+    for(int frame=0;frame<16;++frame)
+    {
+        auto* streamed=scene.AddObject("Streamed transform"); streamed->Parent=root; streamed->transform.position.z=frame;
+        scene.PrepareRenderFrame();
+        Require(scene.GetLastPrepareTimings().transformStructureFallback==1 && scene.GetLastPrepareTimings().transformLocalUpdated==0,
+            "streaming forced a whole-scene transform rebuild"); CheckTransform(*streamed);
+        scene.RemoveObject(streamed); scene.PrepareRenderFrame();
+        Require(scene.GetLastPrepareTimings().transformStructureFallback==1,"streaming removal was not handled on its owner");
+    }
+    scene.PrepareRenderFrame();
+    Require(scene.GetLastPrepareTimings().transformStructureFallback==0 && scene.GetLastPrepareTimings().transformWorldReused>=2,
+        "scene did not restore static transform reuse after streaming stopped");
+    std::cout<<"Scene transforms: owner fallback during streaming, parallel-ready stable frames, descendant updates and cache recovery passed.\n";
+}
+
+void BenchmarkTransformHierarchy()
+{
+    using Clock=std::chrono::steady_clock;
+    using Engine::Core::Object;
+    std::ofstream report(".local/performance-logs/parallel-stage4-transforms.jsonl");
+    for(bool tree:{false,true}) for(bool moving:{false,true})
+    {
+        std::vector<std::unique_ptr<Object>> objects;
+        std::vector<Engine::Components::Transform*> input;
+        for(size_t i=0;i<4095;++i)
+        {
+            auto object=std::make_unique<Object>();
+            if(tree && i) object->Parent=objects[(i-1)/2].get();
+            input.push_back(&object->transform); objects.push_back(std::move(object));
+        }
+        Engine::Components::TransformHierarchy hierarchy;
+        for(unsigned mode=0;mode<3;++mode)
+        {
+            auto& jobs=Engine::Threading::JobScheduler::Get(); jobs.SetParallelForEnabled(mode==2);
+            double total=0,capture=0,compute=0,commit=0; unsigned measured=0;
+            for(unsigned frame=0;frame<68;++frame)
+            {
+                for(size_t i=0;i<objects.size();++i)
+                {
+                    auto& transform=objects[i]->transform;
+                    transform.position={double(i%7)*.125,moving ? double(frame)*.002:0.,double(i%5)*.25};
+                    transform.rotation={.01f,float(i%5)*.01f,moving ? float(frame)*.001f:0.f};
+                }
+                const auto start=Clock::now();
+                Engine::Components::TransformHierarchy::Statistics stats;
+                if(mode==0) for(const auto& object:objects) (void)object->transform.GetWorldMatrix();
+                else
+                {
+                    stats=hierarchy.Prepare(input);
+                    for(const auto& object:objects) (void)hierarchy.ReadPreparedWorldMatrix(object->transform);
+                }
+                const auto elapsed=std::chrono::duration<double,std::milli>(Clock::now()-start).count();
+                if(frame>=8) { total+=elapsed; capture+=stats.snapshotMs; compute+=stats.computeMs; commit+=stats.commitMs; ++measured; }
+            }
+            CheckTransform(*objects.back());
+            const char* name=mode==0 ? "lazy-owner":mode==1 ? "batch-serial":"batch-parallel";
+            report<<"{\"topology\":\""<<(tree ? "tree":"roots")<<"\",\"moving\":"<<(moving ? "true":"false")
+                <<",\"mode\":\""<<name<<"\",\"objects\":4095,\"frames\":"<<measured
+                <<",\"total_ms\":"<<total/measured<<",\"capture_ms\":"<<capture/measured<<",\"compute_ms\":"<<compute/measured
+                <<",\"commit_ms\":"<<commit/measured<<"}\n";
+            std::cout<<(tree ? "tree":"roots")<<" "<<(moving ? "moving":"static")<<" "<<name<<": "<<total/measured<<" ms\n";
+        }
+    }
+    Engine::Threading::JobScheduler::Get().SetParallelForEnabled(true);
+}
+
+void TestDirectorySnapshots()
+{
+    namespace fs=std::filesystem;
+    const auto root=fs::current_path()/".local"/("directory-cache-test-"+std::to_string(GetCurrentProcessId()));
+    fs::create_directories(root/"Folder");
+    std::ofstream(root/"z.mesh")<<"test"; std::ofstream(root/"a.rig")<<"test";
+    std::ofstream(root/"a.meshpack")<<"test"; std::ofstream(root/"hidden.meta")<<"test";
+    Engine::IO::DirectorySnapshotCache cache; cache.Watch(root);
+    const auto read=[&](const std::string& query,size_t expected) {
+        const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
+        std::shared_ptr<const Engine::IO::DirectorySnapshot> snapshot;
+        do { cache.Poll(); snapshot=cache.Get(root,query); if(snapshot && snapshot->entries.size()==expected) return snapshot;
+             std::this_thread::sleep_for(std::chrono::milliseconds(1)); } while(std::chrono::steady_clock::now()<deadline);
+        throw std::runtime_error("directory snapshot did not refresh");
+    };
+    auto snapshot=read("",4);
+    Require(snapshot->entries.front().is_directory(),"directory sorting changed");
+    auto rig=read("a.rig",1); Require(rig->entries.front().meshPacked,"directory metadata was not cached");
+    std::ofstream(root/"new.mesh")<<"new"; snapshot=read("",5);
+    fs::remove(root/"new.mesh"); snapshot=read("",4);
+    fs::remove(root/"z.mesh"); fs::remove(root/"a.rig"); fs::remove(root/"a.meshpack"); fs::remove(root/"hidden.meta");
+    fs::remove(root/"Folder"); fs::remove(root);
+    std::cout<<"Directory snapshots: filtering, metadata, sorting and external create/delete refresh passed.\n";
+}
 
 void TestSpatialScheduling()
 {
@@ -240,6 +511,35 @@ void TestGrass()
         "explicit procedural opt-in failed");
 }
 
+void TestEditorFrameLifecycle()
+{
+    Engine::Core::Window window(GetModuleHandleW(nullptr),L"Editor frame lifecycle regression",64,64);
+    Engine::Renderers::DX11EditorRenderer renderer;
+    Require(renderer.Init(window.GetHWND(),64,64),"editor renderer init failed");
+    auto* factory=renderer.GetGraphicsProvider()->GetContextFactory();
+    factory->SetNativeCallTimingEnabled(true);
+    for(uint64_t frame=1;frame<=6;++frame)
+    {
+        renderer.SetGpuTimingEnabled(frame==3 || frame==4);
+        renderer.MarkDirty();
+        renderer.RenderIfNeeded([&] {
+            auto context=factory->CreateContext(); uint32_t value=uint32_t(frame);
+            context->SetNativeTimingPhase(Engine::Graphics::NativePhase::Camera);
+            context->SetComputeConstants(&value,sizeof(value));
+        });
+        const auto timings=factory->GetNativeSubmissionTimings();
+        Require(factory->GetPreparedFrameSerial()==frame && timings.frameSerial==frame,
+            "editor frame recycling depends on GPU diagnostics");
+        Require(timings.computeArenaWrites+timings.computeDiscardMaps==1,"frame upload counters were not reset");
+        Require(timings.phases[size_t(Engine::Graphics::NativePhase::Camera)][size_t(Engine::Graphics::NativeOperation::Map)].calls==1,
+            "native counters accumulated across editor frames");
+        if(frame!=3 && frame!=4) Require(!factory->GetFrameTimingTelemetry().gpuTimingsValid,"disabled GPU timing remained valid");
+    }
+    factory->SetNativeCallTimingEnabled(false); renderer.MarkDirty(); renderer.RenderIfNeeded();
+    Require(factory->GetPreparedFrameSerial()==7 && !factory->GetNativeSubmissionTimings().enabled,"diagnostic disable stopped recycling");
+    std::cout<<"Editor: frame serial and resources advance with GPU diagnostics off and across toggles.\n";
+}
+
 void TestDx11ConstantsAndGeometry()
 {
     using namespace Engine::Renderers;
@@ -284,6 +584,51 @@ void TestDx11ConstantsAndGeometry()
             "batched constant upload corrupted data");
         immediate->Unmap(readback.Get(), 0);
     }
+    resources->native->timings.enabled=true;
+    context.SetNativeTimingPhase(Engine::Graphics::NativePhase::Camera);
+    if(resources->arenaSupported)
+    {
+        resources->PrepareFrame();
+        const uint32_t a=0x12345678,b=0x87654321;
+        context.SetComputeConstants(&a,sizeof(a));
+        context.SetComputeConstants(&b,sizeof(b));
+        Require(resources->computeArenaWrites==2 && resources->discardMaps==1 && resources->computeDiscardMaps==0,
+            "compute constants did not append without discard");
+        Microsoft::WRL::ComPtr<ID3D11DeviceContext1> context1; immediate.As(&context1);
+        Microsoft::WRL::ComPtr<ID3D11Buffer> bound; UINT offset=0,count=0;
+        context1->CSGetConstantBuffers1(0,1,&bound,&offset,&count);
+        Require(bound.Get()==resources->constantArena.Get() && offset==16 && count==16,"compute constant range is wrong");
+        D3D11_BUFFER_DESC desc{}; bound->GetDesc(&desc); desc.Usage=D3D11_USAGE_STAGING;
+        desc.BindFlags=0; desc.CPUAccessFlags=D3D11_CPU_ACCESS_READ;
+        Microsoft::WRL::ComPtr<ID3D11Buffer> readback;
+        Require(SUCCEEDED(device->CreateBuffer(&desc,nullptr,&readback)),"compute staging failed");
+        immediate->CopyResource(readback.Get(),bound.Get()); D3D11_MAPPED_SUBRESOURCE mapped{};
+        Require(SUCCEEDED(immediate->Map(readback.Get(),0,D3D11_MAP_READ,0,&mapped)),"compute readback failed");
+        Require(*static_cast<uint32_t*>(mapped.pData)==a &&
+            *reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(mapped.pData)+256)==b,
+            "compute constants overwrote previous dispatch data");
+        immediate->Unmap(readback.Get(),0);
+        // A different graphics context can wrap the shared arena. Cached graphics
+        // snapshots must observe that rename before reusing a range.
+        context.PrepareConstantBuffer(constants.get(),constants->GetSize());
+        D3D11GraphicsContext other(device.Get(),immediate.Get(),{},resources);
+        resources->arenaCursor=resources->ArenaSize;
+        other.SetComputeConstants(&b,sizeof(b));
+        const auto writes=resources->arenaWrites;
+        context.SetConstantBuffer(0,constants.get(),256);
+        Require(resources->arenaWrites==writes+1,"stale graphics snapshot survived another context's discard");
+        resources->computeArenaEnabled=false;
+    }
+    uint32_t fallbackValue=7; context.SetComputeConstants(&fallbackValue,sizeof(fallbackValue));
+    Require(resources->computeDiscardMaps==1,"compute fallback did not record its discard map");
+    const auto& camera=resources->native->timings.phases[size_t(Engine::Graphics::NativePhase::Camera)];
+    Require(camera[size_t(Engine::Graphics::NativeOperation::Map)].calls>0 &&
+        camera[size_t(Engine::Graphics::NativeOperation::Bind)].calls>0,"native timings missed compute upload or binding");
+    resources->native->Reset(42);
+    Require(resources->native->timings.frameSerial==42 && resources->native->timings.enabled &&
+        resources->native->timings.phases[size_t(Engine::Graphics::NativePhase::Camera)][0].calls==0,
+        "native frame timing reset retained old samples");
+    resources->native->timings.enabled=false;
     resources->arenaSupported = false;
     context.PrepareConstantBuffer(constants.get(), constants->GetSize());
     context.SetConstantBuffer(0, constants.get(), 256);
@@ -960,13 +1305,14 @@ void CheckAutomaticRendering()
     std::cout<<"Shared geometry, automatic batching, GPU visibility/LOD, dirty uploads, and edit isolation passed.\n";
 }
 
-void RenderAudit(const char* reportPath=".local/performance-logs/grass-automatic-instancing-render-audit.jsonl",bool matrix=false,bool storageAudit=false)
+void RenderAudit(const char* reportPath=".local/performance-logs/grass-automatic-instancing-render-audit.jsonl",bool matrix=false,bool storageAudit=false,bool compare=false,bool nativeAudit=false)
 {
     using Clock = std::chrono::steady_clock;
     constexpr unsigned width = 1848, height = 1069;
     Engine::Core::Window window(GetModuleHandleW(nullptr), L"Grass render audit", width, height);
     Engine::Renderers::DX11GameRenderer renderer;
     Require(renderer.Init(window.GetHWND(), width, height), "hardware renderer failed");
+    if(nativeAudit) renderer.GetGraphicsProvider()->GetContextFactory()->SetNativeCallTimingEnabled(true);
     Engine::Scene::Scene scene;
     scene.Init(renderer.GetGraphicsProvider());
     std::cout << "Loading 441-cell landscape; Debug loading can take about a minute." << std::endl;
@@ -984,11 +1330,23 @@ void RenderAudit(const char* reportPath=".local/performance-logs/grass-automatic
         Require(layer->HasLoadedPreparedData(),"landscape cell did not load its baked placement cache");
     scene.SetUpdateProfilingEnabled(true);
     const char* modes[]={"default","terrain-only","grass-no-shadows","full-grass"};
-    for(unsigned pass=0;pass<(matrix ? 4u:storageAudit ? 2u:1u);++pass)
+    if(compare) for(auto* field:fields) field->fadeDuration=0; // Identical coverage at each route frame.
+    for(unsigned pass=0;pass<(matrix || compare ? 4u:storageAudit ? 2u:1u);++pass)
     {
     const unsigned mode=matrix ? pass:3u;
-    const char* route=storageAudit ? (pass ? "streaming":"resident"):"resident";
-    const std::string path=storageAudit ? std::string(".local/performance-logs/static-instance-")+route+".jsonl":matrix ? std::string(".local/performance-logs/landscape-matrix-")+modes[mode]+".jsonl":reportPath;
+    const bool streaming=storageAudit && (compare ? pass>=2:pass>0);
+    const bool parallel=!compare || pass%2==1;
+    Engine::Threading::JobScheduler::Get().SetParallelForEnabled(parallel);
+    if(compare)
+    {
+        // Each mode starts with the same generated-tile residency. Shared source
+        // assets stay warm; the stationary warmup rebuilds identical active tiles.
+        for(auto* field:fields) field->OnDestroy();
+        scene.CommitPendingObjectChanges();
+    }
+    player->transform.position.z=0;
+    const char* route=streaming ? "streaming":"resident";
+    const std::string path=storageAudit ? std::string(*reportPath ? reportPath:".local/performance-logs/static-instance-")+route+(compare ? (parallel ? "-parallel":"-serial"):"")+".jsonl":matrix ? std::string(".local/performance-logs/landscape-matrix-")+modes[mode]+".jsonl":reportPath;
     std::cout << "Benchmark mode: " << modes[mode] << std::endl;
     std::ofstream report(path);
     unsigned measured = 0;
@@ -1003,7 +1361,7 @@ void RenderAudit(const char* reportPath=".local/performance-logs/grass-automatic
         // Stay within the authored tile radius while crossing LOD thresholds.
         player->transform.position.x = warmed ? 3.f * std::sin(measured * .04f):
             (matrix && frame>=31 ? 3.f*std::sin((frame-31)*.04f):0.f);
-        if(storageAudit && pass && warmed)
+        if(streaming && warmed)
         {
             player->transform.position.x=64.f*std::sin(measured*.02f);
             player->transform.position.z=32.f*std::sin(measured*.04f);
@@ -1041,8 +1399,10 @@ void RenderAudit(const char* reportPath=".local/performance-logs/grass-automatic
         const auto gpu=renderer.GetGraphicsProvider()->GetContextFactory()->GetFrameTimingTelemetry();
         const auto shadowSettings=scene.GetShadowDebugSnapshot();
         report << "{\"type\":\"frame_details\",\"playing\":true,\"benchmark_mode\":\"" << modes[mode]
-            << "\",\"route\":\"" << route << "\",\"route_version\":\"static-instances-v1\",\"renderer\":\"dx11"
-            << "\",\"benchmark_scope\":\"render_and_grass_no_editor_or_physics\",\"measured\":" << (warmed ? "true":"false")
+            << "\",\"route\":\"" << route << "\",\"route_version\":\"static-instances-v1\",\"renderer\":\"dx11\""
+            << ",\"parallel_preparation\":" << (parallel ? "true":"false") << ",\"fixed_fade_coverage\":" << (compare ? "true":"false")
+            << ",\"warm_state_reset\":" << (compare ? "true":"false")
+            << ",\"benchmark_scope\":\"render_and_grass_no_editor_or_physics\",\"measured\":" << (warmed ? "true":"false")
             << ",\"view_pixels\":" << width*height << ",\"frame\":" << frame << ",\"frame_ms\":" << ms
             << ",\"view_width\":" << width << ",\"view_height\":" << height
             << ",\"viewer_x\":" << player->transform.position.x << ",\"viewer_z\":" << player->transform.position.z
@@ -1079,6 +1439,11 @@ void RenderAudit(const char* reportPath=".local/performance-logs/grass-automatic
             << ",\"render_worker_wait_ms\":" << renderCpu.workerWaitMs
             << ",\"render_record_pack_ms\":" << renderCpu.recordPackingMs
             << ",\"render_record_wait_ms\":" << renderCpu.recordWaitMs
+            << ",\"render_worker_queue_ms\":" << renderCpu.workerQueueMs
+            << ",\"configured_workers\":" << renderCpu.configuredWorkers
+            << ",\"prepare_bounds_reused\":" << scene.GetLastPrepareTimings().boundsReused
+            << ",\"prepare_bounds_updated\":" << scene.GetLastPrepareTimings().boundsUpdated
+            << ",\"prepare_worker_active_ms\":" << scene.GetLastPrepareTimings().workerMs
             << ",\"render_submit_ms\":" << renderCpu.submissionMs
             << ",\"render_upload_ms\":" << renderCpu.uploadMs
             << ",\"render_cpu_total_ms\":" << renderCpu.totalMs
@@ -1086,7 +1451,29 @@ void RenderAudit(const char* reportPath=".local/performance-logs/grass-automatic
             << ",\"render_terrain_prepare_ms\":" << renderCpu.terrainPreparationMs
             << ",\"render_occlusion_ms\":" << renderCpu.occlusionMs
             << ",\"render_other_ms\":" << renderCpu.otherMs;
+        const auto& prep=scene.GetLastPrepareTimings();
+        report<<",\"prepare_spatial_ms\":"<<prep.spatialMs
+            <<",\"prepare_spatial_index_ms\":"<<prep.spatialIndexMs
+            <<",\"prepare_spatial_compare_ms\":"<<prep.spatialCompareMs
+            <<",\"prepare_spatial_refit_ms\":"<<prep.spatialRefitMs
+            <<",\"prepare_spatial_build_ms\":"<<prep.spatialBuildMs
+            <<",\"prepare_spatial_changed_bounds\":"<<prep.spatialChangedBounds
+            <<",\"prepare_spatial_reused_bounds\":"<<prep.spatialReusedBounds
+            <<",\"prepare_spatial_dirty_leaves\":"<<prep.spatialDirtyLeaves
+            <<",\"prepare_spatial_refit_nodes\":"<<prep.spatialRefitNodes
+            <<",\"prepare_spatial_rebuilds\":"<<prep.spatialRebuilds
+            <<",\"prepare_spatial_quality_rebuilds\":"<<prep.spatialQualityRebuilds;
+        report<<",\"prepare_transforms_ms\":"<<prep.transformsMs
+            <<",\"prepare_transform_snapshot_ms\":"<<prep.transformSnapshotMs
+            <<",\"prepare_transform_compute_ms\":"<<prep.transformComputeMs
+            <<",\"prepare_transform_commit_ms\":"<<prep.transformCommitMs
+            <<",\"prepare_transform_local_updated\":"<<prep.transformLocalUpdated
+            <<",\"prepare_transform_world_updated\":"<<prep.transformWorldUpdated
+            <<",\"prepare_transform_world_reused\":"<<prep.transformWorldReused
+            <<",\"prepare_transform_levels\":"<<prep.transformLevels
+            <<",\"prepare_transform_structure_fallback\":"<<prep.transformStructureFallback;
         renderCpu.instances.WriteJson(report); shadow.instances.WriteJson(report,"shadow_instance_");
+        renderer.GetGraphicsProvider()->GetContextFactory()->GetNativeSubmissionTimings().WriteJson(report);
         report << "}\n";
         if(storageAudit) Require(renderCpu.instances.editedBytes==0 && shadow.instances.editedBytes==0,
             "camera movement edited static placement records");
@@ -1120,6 +1507,7 @@ void RenderAudit(const char* reportPath=".local/performance-logs/grass-automatic
         << " new instance tiles, " << switches << " cached LOD switches.\n";
     std::cout << "Authored snapshot: " << snapshotBytes << " bytes in " << snapshotMs << " ms." << std::endl;
     }
+    Engine::Threading::JobScheduler::Get().SetParallelForEnabled(true);
 }
 
 int main(int argc, char** argv)
@@ -1137,6 +1525,14 @@ int main(int argc, char** argv)
     {
         if (argc > 1 && std::string(argv[1]) == "--landscape-matrix") RenderAudit("",true);
         else if(argc>1 && std::string(argv[1])=="--static-instance-audit") RenderAudit("",false,true);
+        else if(argc>1 && std::string(argv[1])=="--parallel-stage-audit") RenderAudit(".local/performance-logs/parallel-stage-",false,true);
+        else if(argc>1 && std::string(argv[1])=="--parallel-stage-comparison") RenderAudit(".local/performance-logs/parallel-comparison-",false,true,true);
+        else if(argc>1 && std::string(argv[1])=="--native-submission-audit") RenderAudit(".local/performance-logs/native-submission-stage2.jsonl",false,false,false,true);
+        else if(argc>1 && std::string(argv[1])=="--parallel-spatial-audit") RenderAudit(".local/performance-logs/parallel-stage5-",false,true);
+        else if(argc>1 && std::string(argv[1])=="--parallel-transform-audit") RenderAudit(".local/performance-logs/parallel-stage4-",false,true);
+        else if(argc>1 && std::string(argv[1])=="--transform-benchmark") BenchmarkTransformHierarchy();
+        else if(argc>1 && std::string(argv[1])=="--transform-regression") { TestTransformHierarchy(); TestSceneTransformScheduling(); }
+        else if(argc>1 && std::string(argv[1])=="--native-regression") { TestDx11ConstantsAndGeometry(); TestEditorFrameLifecycle(); }
         else if (argc > 1 && std::string(argv[1]) == "--render-audit") RenderAudit();
         else if(argc>1 && std::string(argv[1])=="--diagnostics-audit") RenderAudit(".local/performance-logs/grass-diagnostics-audit.jsonl");
         else if (argc > 1 && std::string(argv[1]) == "--fade-render-check") CheckFadeRendering();
@@ -1150,7 +1546,7 @@ int main(int argc, char** argv)
 #if defined(ENGINE_VULKAN_ENABLED)
         else if(argc>1 && std::string(argv[1])=="--automatic-render-vulkan") CheckAutomaticRendering<Engine::Renderers::VulkanGameRenderer>();
 #endif
-        else { TestSpatialScheduling(); TestLandscapePreparation(); TestGrass(); TestDx11ConstantsAndGeometry(); TestComponentRegistry(); TestBakedPlacements(); TestSceneLoadingIntoWarmCaches(); TestPersistentStorage(); }
+        else { TestEngineScheduling(); TestRenderBoundsCaching(); TestTransformHierarchy(); TestSceneTransformScheduling(); TestDirectorySnapshots(); TestSpatialScheduling(); TestLandscapePreparation(); TestGrass(); TestDx11ConstantsAndGeometry(); TestEditorFrameLifecycle(); TestComponentRegistry(); TestBakedPlacements(); TestSceneLoadingIntoWarmCaches(); TestPersistentStorage(); }
     }
     catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }

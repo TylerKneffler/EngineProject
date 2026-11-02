@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <algorithm>
 #include <ostream>
 namespace Engine::Rendering
 {
@@ -8,7 +9,7 @@ struct InstanceStorageTimings
     uint64_t newBytes=0,editedBytes=0,growthBytes=0,metadataBytes=0,visibleIdBytes=0,fallbackBytes=0;
     uint64_t allocations=0,retirements=0,cacheCold=0,cacheMembership=0,cacheMetadata=0,cacheMode=0;
     uint64_t residentBytes=0;
-    void WriteJson(std::ostream& output,const char* prefix="instance_") const
+    template<class Stream> void WriteJson(Stream& output,const char* prefix="instance_") const
     {
         const auto field=[&](const char* name,uint64_t value) { output<<",\""<<prefix<<name<<"\":"<<value; };
         field("new_bytes",newBytes); field("edited_bytes",editedBytes); field("growth_bytes",growthBytes);
@@ -34,6 +35,8 @@ struct RenderCpuTimings
     double totalMs=0, startupMs=0, terrainPreparationMs=0, occlusionMs=0, otherMs=0;
     double recordPackingMs=0, recordWaitMs=0;
     double workerActiveMs=0, mainJobMs=0, workerWaitMs=0, retainedUiMs=0, portalMs=0;
+    double workerQueueMs=0,workerDependencyMs=0;
+    uint64_t configuredWorkers=0;
     uint64_t workerJobs=0, workerTasks=0;
     uint64_t gpuGrassBatches=0, grassBatchCacheHits=0, grassPlacementUploadBytes=0;
     uint64_t automaticBatches=0, automaticInstances=0, gpuBatches=0, changedUploadBytes=0;
@@ -45,6 +48,8 @@ struct RenderCpuTimings
         ADD(cullingMs); ADD(sortingMs); ADD(materialMs); ADD(uploadMs); ADD(submissionMs); ADD(batchingMs);
         ADD(recordPackingMs); ADD(recordWaitMs);
         ADD(workerActiveMs); ADD(mainJobMs); ADD(workerWaitMs); ADD(retainedUiMs); ADD(portalMs);
+        ADD(workerQueueMs); ADD(workerDependencyMs);
+        configuredWorkers=std::max(configuredWorkers,value.configuredWorkers);
         ADD(workerJobs); ADD(workerTasks);
         ADD(gpuGrassBatches); ADD(grassBatchCacheHits); ADD(grassPlacementUploadBytes);
         ADD(totalMs); ADD(startupMs); ADD(terrainPreparationMs); ADD(occlusionMs); ADD(otherMs);

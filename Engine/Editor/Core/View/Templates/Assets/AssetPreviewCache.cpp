@@ -8,7 +8,10 @@
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Core/Graphics/IGraphicsTexture.h"
 #include "Core/Memory/CacheStore.h"
+#include "Core/Threading/JobScheduler.h"
+#include <atomic>
 #include "Core/Model/RigAsset.h"
+#include "Core/Serialization/Json.h"
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
 
@@ -29,15 +32,16 @@ namespace Engine::Editor
 namespace
 {
 constexpr uint32_t PreviewSize = 128;
+// Shared across preview clients; jobs capture paths and owned CPU data only.
+const auto PreviewJobs=std::make_shared<std::atomic<unsigned>>(0);
 constexpr float Pi = 3.14159265358979323846f;
-constexpr const char* PreviewCacheDomain = "Editor.AssetPreview";
 constexpr uint32_t ScenePreviewMagic = 0x56525053; // "SPRV"
 
 std::vector<uint8_t> MakeBrushPreview(const Paint::BrushPreset& brush)
 {
     std::vector<uint8_t> pixels(PreviewSize * PreviewSize * 4, 255);
     auto tip = brush.tipPath.empty() ? nullptr :
-        Engine::Components::Texture::Acquire(brush.tipPath, false);
+        Engine::Components::Texture::DecodeDetached(brush.tipPath, false);
     const bool hasTip = tip && tip->Load() && tip->GetWidth() &&
         tip->GetHeight() && tip->GetPixels().size() >=
             static_cast<size_t>(tip->GetWidth()) * tip->GetHeight() * 4;
@@ -700,118 +704,173 @@ bool AssetPreviewCache::IsCircularPreview(const std::string& path)
         extension == ".hdr" || extension == ".exr";
 }
 
+namespace
+{
+std::vector<uint8_t> PreparePreview(const std::string& path)
+{
+    const std::string extension = Extension(path);
+    if (extension == ".material" || extension == ".mat")
+    {
+        // This preview samples scalar colors only. Avoid live Texture::Acquire
+        // and generic cache pruning from a worker when reading material assets.
+        Engine::Components::Material material;
+        const auto root=Engine::Serialization::JsonParseFile(path);
+        const auto color=[&](const char* key,glm::vec3 fallback) {
+            const auto& value=root[key];
+            return value.IsArray() && value.ArraySize()>=3 ? glm::vec3(
+                value.ArrayAt(0).AsFloat(),value.ArrayAt(1).AsFloat(),value.ArrayAt(2).AsFloat()):fallback;
+        };
+        material.diffuseColor=color("baseColor",material.diffuseColor);
+        material.emissiveColor=color("emissive",material.emissiveColor);
+        if(root.Has("metallic")) material.metallicFactor=root["metallic"].AsFloat();
+        if(root.Has("roughness")) material.roughnessFactor=root["roughness"].AsFloat();
+        if(root.Has("reflectionStrength")) material.reflectionStrength=root["reflectionStrength"].AsFloat();
+        material.Validate();
+        return MakeMaterialPreview(material);
+    }
+    else if (extension == ".rig")
+    {
+        const auto rig = Engine::Model::RigAsset::Load(path);
+        if (rig) return MakeRigPreview(*rig);
+    }
+    else if (extension == ".brush")
+    {
+        Paint::BrushPreset brush;
+        std::string brushError;
+        if (Paint::LoadBrushPreset(path, brush, brushError))
+            return MakeBrushPreview(brush);
+    }
+    else if (extension == ".scene")
+    {
+        const std::vector<uint8_t> pixels = ReadScenePreview(path);
+        if (!pixels.empty())
+            return pixels;
+    }
+    else
+    {
+        const bool highDynamicRange =
+            extension == ".hdr" || extension == ".exr";
+        const bool model = extension == ".obj" || extension == ".fbx" ||
+            extension == ".mesh" || extension == ".gltf" ||
+            extension == ".glb" || extension == ".ply" ||
+            extension == ".stl" || extension == ".prefab";
+        if (model)
+        {
+            std::string meshPath = extension == ".prefab"
+                ? FirstPrefabMesh(path) : path;
+            std::vector<Engine::Model::AnimationVertex> vertices;
+            const std::string meshExtension = Extension(meshPath);
+            if (meshExtension == ".mesh" || meshExtension == ".obj")
+            {
+                try
+                {
+                    Engine::Components::Mesh mesh;
+                    mesh.LoadFromFile(meshPath);
+                    vertices = mesh.GetVertices();
+                }
+                catch (...) {}
+            }
+            else if (!meshPath.empty())
+                vertices = LoadModelVertices(meshPath);
+            const std::vector<uint8_t> pixels = MakeMeshPreview(vertices);
+            if (!pixels.empty())
+                return pixels;
+        }
+        else
+        {
+            auto image=Engine::Components::Texture::DecodeDetached(path,!highDynamicRange);
+            if(image) return highDynamicRange ? MakeEnvironmentPreview(*image):MakeImagePreview(*image);
+        }
+    }
+    return {};
+}
+std::filesystem::file_time_type PreviewStamp(const std::string& path)
+{
+    std::error_code error;
+    // A scene thumbnail is a derived sidecar and may change without a scene save.
+    const auto source=Extension(path)==".scene" ? ScenePreviewPath(path):std::filesystem::path(path);
+    const auto stamp=std::filesystem::last_write_time(source,error);
+    return error ? std::filesystem::file_time_type::min():stamp;
+}
+}
+
+bool AssetPreviewCache::Poll()
+{
+    bool changed=false;
+    const auto now=Clock::now();
+    for(auto it=m_requests.begin();it!=m_requests.end();)
+    {
+        auto entry=it->second;
+        if(now-entry->lastUse>std::chrono::seconds(30) && !entry->pending.valid()) { it=m_requests.erase(it); continue; }
+        if(!entry->notified && (entry->invalidated || (entry->pending.valid() &&
+            entry->pending.wait_for(std::chrono::seconds(0))==std::future_status::ready) ||
+            (!entry->pending.valid() && now-entry->lastUse<=std::chrono::seconds(2) && now>=entry->checkAfter)))
+        { entry->notified=true; changed=true; }
+        ++it;
+    }
+    if(m_waitingForSlot && PreviewJobs->load()<2) { m_waitingForSlot=false; changed=true; }
+    return changed;
+}
+
 void* AssetPreviewCache::Get(const std::string& path,
     Engine::Graphics::IGraphicsProvider* graphicsProvider)
 {
-    if (!graphicsProvider || !Supports(path))
-        return nullptr;
-    std::error_code error;
-    const auto writeTime = std::filesystem::last_write_time(path, error);
-    if (error)
-        return nullptr;
-    Engine::Memory::CacheStore& cache = Engine::Memory::CacheStore::Get();
-    const std::string key = Engine::Memory::CacheStore::PathKey(path);
-    std::shared_ptr<Entry> entry = cache.Find<Entry>(PreviewCacheDomain, key);
-    if (entry && entry->provider == graphicsProvider &&
-        entry->writeTime == writeTime)
+    if(!graphicsProvider || !Supports(path)) return nullptr;
+    const auto key=Engine::Memory::CacheStore::PathKey(path);
+    auto entry=s_entries[key].lock();
+    if(!entry || entry->provider!=graphicsProvider)
     {
-        const auto* texture = entry->generated
-            ? entry->generated.get()
-            : (entry->source ? entry->source->GetGraphicsTexture() : nullptr);
-        return texture ? texture->GetNativeHandle() : nullptr;
-    }
-
-    if (entry && entry->writeTime != writeTime)
-        Engine::Components::Texture::Invalidate(path);
-    cache.Erase(PreviewCacheDomain, key);
-    entry = cache.GetOrCreate<Entry>(Engine::Memory::CacheLifetime::ShortTerm,
-        PreviewCacheDomain, key, [&]()
+        entry=std::make_shared<Entry>(); entry->provider=graphicsProvider; s_entries[key]=entry;
+        if(--s_creationsUntilPrune==0)
         {
-            auto created = std::make_shared<Entry>();
-            created->writeTime = writeTime;
-            created->provider = graphicsProvider;
-            const std::string extension = Extension(path);
-            if (extension == ".material" || extension == ".mat")
+            s_creationsUntilPrune=128;
+            for(auto it=s_entries.begin();it!=s_entries.end();)
+                if(it->second.expired()) it=s_entries.erase(it); else ++it;
+        }
+    }
+    if(entry->invalidated)
+    {
+        entry->cancelled->store(true);
+        entry->pending={}; entry->initialized=false; entry->invalidated=false;
+        entry->checkAfter={}; entry->notified=false;
+    }
+    const auto now=Clock::now(); entry->lastUse=now; m_requests[key]=entry;
+    if(entry->pending.valid() && entry->pending.wait_for(std::chrono::seconds(0))==std::future_status::ready)
+    {
+        try
+        {
+            auto prepared=entry->pending.get();
+            if(prepared.stable)
             {
-                Engine::Components::Material material;
-                if (material.LoadFromFile(path))
-                    created->generated = Upload(graphicsProvider,
-                        MakeMaterialPreview(material));
+                if(prepared.changed)
+                    entry->generated=prepared.pixels.empty() ? nullptr:Upload(graphicsProvider,prepared.pixels);
+                entry->writeTime=prepared.writeTime; entry->initialized=true;
             }
-            else if (extension == ".rig")
-            {
-                const auto rig = Engine::Model::RigAsset::Load(path);
-                if (rig) created->generated = Upload(graphicsProvider,
-                    MakeRigPreview(*rig));
-            }
-            else if (extension == ".brush")
-            {
-                Paint::BrushPreset brush;
-                std::string brushError;
-                if (Paint::LoadBrushPreset(path, brush, brushError))
-                    created->generated = Upload(graphicsProvider,
-                        MakeBrushPreview(brush));
-            }
-            else if (extension == ".scene")
-            {
-                const std::vector<uint8_t> pixels = ReadScenePreview(path);
-                if (!pixels.empty())
-                    created->generated = Upload(graphicsProvider, pixels);
-            }
-            else
-            {
-                const bool highDynamicRange =
-                    extension == ".hdr" || extension == ".exr";
-                const bool model = extension == ".obj" || extension == ".fbx" ||
-                    extension == ".mesh" || extension == ".gltf" ||
-                    extension == ".glb" || extension == ".ply" ||
-                    extension == ".stl" || extension == ".prefab";
-                if (model)
-                {
-                    std::string meshPath = extension == ".prefab"
-                        ? FirstPrefabMesh(path) : path;
-                    std::vector<Engine::Model::AnimationVertex> vertices;
-                    const std::string meshExtension = Extension(meshPath);
-                    if (meshExtension == ".mesh" || meshExtension == ".obj")
-                    {
-                        try
-                        {
-                            Engine::Components::Mesh mesh;
-                            mesh.LoadFromFile(meshPath);
-                            vertices = mesh.GetVertices();
-                        }
-                        catch (...) {}
-                    }
-                    else if (!meshPath.empty())
-                        vertices = LoadModelVertices(meshPath);
-                    const std::vector<uint8_t> pixels = MakeMeshPreview(vertices);
-                    if (!pixels.empty())
-                        created->generated = Upload(graphicsProvider, pixels);
-                }
-                else
-                {
-                    created->source = Engine::Components::Texture::Acquire(
-                        path, !highDynamicRange);
-                    if (highDynamicRange)
-                    {
-                        if (created->source->Load())
-                            created->generated = Upload(graphicsProvider,
-                                MakeEnvironmentPreview(*created->source));
-                    }
-                    else
-                    {
-                        if (created->source->Load())
-                            created->generated = Upload(graphicsProvider,
-                                MakeImagePreview(*created->source));
-                    }
-                }
-            }
-            return created;
-        }, std::chrono::seconds(30));
-    const auto* texture = entry && entry->generated
-        ? entry->generated.get()
-        : (entry && entry->source ? entry->source->GetGraphicsTexture() : nullptr);
-    return texture ? texture->GetNativeHandle() : nullptr;
+        }
+        catch(...) { /* Keep the last good thumbnail after an IO/decoder failure. */ }
+        entry->checkAfter=now+std::chrono::seconds(1); entry->notified=false;
+    }
+    if(!entry->pending.valid() && now>=entry->checkAfter)
+    {
+        if(PreviewJobs->load()<2)
+        {
+            const auto stamp=entry->writeTime; const bool initialized=entry->initialized;
+            auto jobs=PreviewJobs; ++*jobs; entry->notified=false;
+            auto cancelled=std::make_shared<std::atomic<bool>>(false); entry->cancelled=cancelled;
+            try { entry->pending=Engine::Threading::JobScheduler::Get().Submit([path,stamp,initialized,jobs,cancelled] {
+                struct Finish { std::shared_ptr<std::atomic<unsigned>> jobs; ~Finish() { --*jobs; } } finish{jobs};
+                Prepared prepared;
+                if(cancelled->load()) { prepared.stable=false; return prepared; }
+                prepared.writeTime=PreviewStamp(path);
+                prepared.changed=!initialized || prepared.writeTime!=stamp;
+                if(prepared.changed && prepared.writeTime!=std::filesystem::file_time_type::min() && !cancelled->load()) prepared.pixels=PreparePreview(path);
+                prepared.stable=!cancelled->load() && PreviewStamp(path)==prepared.writeTime;
+                return prepared;
+            }); } catch(...) { --*jobs; entry->checkAfter=now+std::chrono::seconds(1); }
+        }
+        else m_waitingForSlot=true;
+    }
+    return entry->generated ? entry->generated->GetNativeHandle():nullptr;
 }
 
 bool AssetPreviewCache::CaptureScene(const std::string& path,
@@ -826,13 +885,8 @@ bool AssetPreviewCache::CaptureScene(const std::string& path,
     }
     if (!WriteScenePreview(path, pixels))
         return false;
-    Engine::Memory::CacheStore::Get().Erase(PreviewCacheDomain,
-        Engine::Memory::CacheStore::PathKey(path));
-    if (graphicsProvider)
-    {
-        AssetPreviewCache previews;
-        previews.Get(path, graphicsProvider);
-    }
+    InvalidateEntries(path);
+    (void)graphicsProvider; // Publication is deferred until the next browser draw.
     return true;
 }
 
@@ -856,10 +910,8 @@ void AssetPreviewCache::MovePersistentPreview(const std::string& oldPath,
                 std::filesystem::remove(oldPreview, error);
         }
     }
-    Engine::Memory::CacheStore::Get().Erase(PreviewCacheDomain,
-        Engine::Memory::CacheStore::PathKey(oldPath));
-    Engine::Memory::CacheStore::Get().Erase(PreviewCacheDomain,
-        Engine::Memory::CacheStore::PathKey(newPath));
+    InvalidateEntries(oldPath);
+    InvalidateEntries(newPath);
 }
 
 void AssetPreviewCache::RemovePersistentPreview(const std::string& path)
@@ -868,18 +920,24 @@ void AssetPreviewCache::RemovePersistentPreview(const std::string& path)
         return;
     std::error_code error;
     std::filesystem::remove(ScenePreviewPath(path), error);
-    Engine::Memory::CacheStore::Get().Erase(PreviewCacheDomain,
-        Engine::Memory::CacheStore::PathKey(path));
+    InvalidateEntries(path);
+}
+
+void AssetPreviewCache::InvalidateEntries(const std::string& path)
+{
+    const auto found=s_entries.find(Engine::Memory::CacheStore::PathKey(path));
+    if(found!=s_entries.end()) if(auto entry=found->second.lock())
+    { entry->cancelled->store(true); entry->invalidated=true; entry->notified=false; }
 }
 
 void AssetPreviewCache::Invalidate(const std::string& path)
 {
-    Engine::Memory::CacheStore::Get().Erase(PreviewCacheDomain,
-        Engine::Memory::CacheStore::PathKey(path));
+    InvalidateEntries(path);
 }
 
 void AssetPreviewCache::Clear()
 {
-    Engine::Memory::CacheStore::Get().ClearDomain(PreviewCacheDomain);
+    m_requests.clear(); m_waitingForSlot=false;
+    for(auto& pair:s_entries) if(auto entry=pair.second.lock()) { entry->cancelled->store(true); entry->invalidated=true; entry->notified=false; }
 }
 }

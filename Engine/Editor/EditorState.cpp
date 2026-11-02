@@ -429,6 +429,11 @@ void EditorState::CheckAssetLocations()
         m_primaryAssets->CheckForExternalMoves();
 }
 
+bool EditorState::PollBackgroundWork()
+{
+    return m_primaryAssets && m_primaryAssets->IsOpen() && m_primaryAssets->PollDirectoryCache();
+}
+
 // ---------------------------------------------------------------------------
 // EditorState::SaveScene
 // ---------------------------------------------------------------------------

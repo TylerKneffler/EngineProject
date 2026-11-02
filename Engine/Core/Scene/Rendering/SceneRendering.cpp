@@ -1786,9 +1786,9 @@ void Scene::BuildObjectPipeline()
 
 void Scene::PrepareRenderFrame()
 {
+    const auto preparationJobs=Engine::Rendering::RenderJobs::Get().ReadStatistics();
     using PrepareClock = std::chrono::steady_clock;
-    const auto prepareBegin = m_updateProfilingEnabled
-        ? PrepareClock::now() : PrepareClock::time_point{};
+    m_lastPrepareTimings={};
     m_renderFramePrepared = false;
     m_frameRenderItems.clear();
     ++m_materialPreparationSerial;
@@ -1797,6 +1797,25 @@ void Scene::PrepareRenderFrame()
 
     if (!m_graphicsProvider || !m_lightDataMapped || !m_boneDataMapped)
         return;
+
+    const auto transformBegin=PrepareClock::now();
+    const auto structureRevision=GetStructureRevision();
+    const bool preparedTransforms=structureRevision==m_transformPreparationRevision;
+    m_transformPreparationRevision=structureRevision;
+    Engine::Components::TransformHierarchy::Statistics transforms;
+    double transformGatherMs=0;
+    if(preparedTransforms)
+    {
+        m_transformPreparationScratch.clear(); m_transformPreparationScratch.reserve(m_objects.size());
+        for(const auto& object:m_objects) m_transformPreparationScratch.push_back(&object->transform);
+        const auto transformCaptured=PrepareClock::now();
+        transformGatherMs=std::chrono::duration<double,std::milli>(transformCaptured-transformBegin).count();
+        transforms=m_transformHierarchy.Prepare(m_transformPreparationScratch);
+        if(!transforms.valid) throw std::runtime_error("Cannot prepare a cyclic or duplicate transform hierarchy");
+    }
+    // Streaming/object commit frames retain lazy owner validation. This avoids
+    // rebuilding a whole hierarchy index to evaluate a handful of new leaves.
+    const auto afterTransforms=PrepareClock::now();
 
     if(m_frameLookupRevision!=GetStructureRevision() || m_frameLookupEditPose!=m_editorMeshEditPose || m_frameLookupFull)
     {
@@ -1951,7 +1970,7 @@ void Scene::PrepareRenderFrame()
         item.bakedLighting = lookup.bakedLighting;
         item.belongsToPreview = m_previewObject &&
             IsObjectOrDescendant(candidate, m_previewObject);
-        glm::mat4 authoredWorld = candidate->transform.GetWorldMatrix();
+        glm::mat4 authoredWorld = preparedTransforms ? m_transformHierarchy.ReadPreparedWorldMatrix(candidate->transform):candidate->transform.GetWorldMatrix();
         if (candidate->transform.matrixLayer.enabled)
         {
             authoredWorld = candidate->transform.matrixLayer.localToLayer *
@@ -2158,7 +2177,7 @@ void Scene::PrepareRenderFrame()
                         for (size_t i = 0; i < std::min(joints.size(),
                                 matrices.size()); ++i)
                             if (auto* joint = joints[i])
-                                matrices[i] = joint->transform.GetWorldMatrix() *
+                                matrices[i] = (preparedTransforms ? m_transformHierarchy.ReadPreparedWorldMatrix(joint->transform):joint->transform.GetWorldMatrix()) *
                                     (i < skeleton->inverseBindMatrices.size()
                                         ? skeleton->inverseBindMatrices[i]
                                         : glm::mat4(1.f));
@@ -2288,23 +2307,47 @@ void Scene::PrepareRenderFrame()
     {
         const auto ms = [](auto first, auto last)
         { return std::chrono::duration<double, std::milli>(last - first).count(); };
-        m_lastPrepareTimings = { ms(prepareBegin, afterLookup),
+        m_lastPrepareTimings = { ms(afterTransforms, afterLookup),
             ms(afterLookup, afterItems), ms(afterItems, afterBoneUpload),
             ms(afterBoneUpload, PrepareClock::now()) };
     }
+    m_lastPrepareTimings.transformsMs=transforms.totalMs+transformGatherMs;
+    m_lastPrepareTimings.transformSnapshotMs=transforms.snapshotMs+transformGatherMs;
+    m_lastPrepareTimings.transformComputeMs=transforms.computeMs;
+    m_lastPrepareTimings.transformCommitMs=transforms.commitMs;
+    m_lastPrepareTimings.transformLocalUpdated=transforms.localUpdated;
+    m_lastPrepareTimings.transformWorldUpdated=transforms.worldUpdated;
+    m_lastPrepareTimings.transformWorldReused=transforms.worldReused;
+    m_lastPrepareTimings.transformLevels=transforms.levels;
+    m_lastPrepareTimings.transformStructureFallback=preparedTransforms ? 0:1;
     const auto spatialStart=PrepareClock::now();
     std::vector<Engine::Rendering::RenderBounds> spatialBounds;
-    spatialBounds.reserve(m_frameRenderItems.size());
+    std::vector<Engine::Rendering::RenderBoundsCache::Input> boundsInput;
+    boundsInput.reserve(m_frameRenderItems.size());
     for (const auto& item : m_frameRenderItems)
     {
         auto* mesh = item.mesh;
+        Engine::Rendering::RenderBoundsCache::Input input;
+        input.slot=item.objectSlot; input.world=item.world;
         if (mesh && mesh->HasBounds() && !item.skinJointCount && !mesh->HasMorphTargets() &&
             !mesh->HasSurfaceOffsets() && !item.warpedVertexBuffer && !item.traversalChartPortal)
-            spatialBounds.push_back(Engine::Rendering::TransformBounds(mesh->GetBoundsMin(), mesh->GetBoundsMax(), item.world));
-        else spatialBounds.push_back({});
+        { input.bounded=true; input.minimum=mesh->GetBoundsMin(); input.maximum=mesh->GetBoundsMax(); }
+        boundsInput.push_back(input);
     }
-    m_renderSpatialIndex.Update(std::move(spatialBounds));
+    const auto bounds=m_worldBoundsCache.Prepare(boundsInput,spatialBounds);
+    m_lastPrepareTimings.boundsReused=bounds.reused; m_lastPrepareTimings.boundsUpdated=bounds.updated;
+    const auto spatial=m_renderSpatialIndex.Update(std::move(spatialBounds));
+    m_lastPrepareTimings.spatialIndexMs=spatial.totalMs; m_lastPrepareTimings.spatialCompareMs=spatial.compareMs;
+    m_lastPrepareTimings.spatialRefitMs=spatial.refitMs; m_lastPrepareTimings.spatialBuildMs=spatial.buildMs;
+    m_lastPrepareTimings.spatialChangedBounds=spatial.changedBounds; m_lastPrepareTimings.spatialReusedBounds=spatial.reusedBounds;
+    m_lastPrepareTimings.spatialDirtyLeaves=spatial.dirtyLeaves; m_lastPrepareTimings.spatialRefitNodes=spatial.refitNodes;
+    m_lastPrepareTimings.spatialRebuilds=spatial.rebuilds; m_lastPrepareTimings.spatialQualityRebuilds=spatial.qualityRebuilds;
     m_lastPrepareTimings.spatialMs=std::chrono::duration<double,std::milli>(PrepareClock::now()-spatialStart).count();
+    const auto completedJobs=Engine::Rendering::RenderJobs::Get().ReadStatistics();
+    m_lastPrepareTimings.workerMs=double(completedJobs.workerNs-preparationJobs.workerNs)/1.e6;
+    m_lastPrepareTimings.mainJobMs=double(completedJobs.callerNs-preparationJobs.callerNs)/1.e6;
+    m_lastPrepareTimings.workerWaitMs=double(completedJobs.waitNs-preparationJobs.waitNs)/1.e6;
+    m_lastPrepareTimings.workerQueueMs=double(completedJobs.queueNs-preparationJobs.queueNs)/1.e6;
     m_renderFramePrepared = true;
 }
 
@@ -2316,6 +2359,13 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     Engine::Components::Camera* cameraOverride, bool includeEditorVisuals,
     uint32_t viewportWidth, uint32_t viewportHeight, bool shadowOnly)
 {
+    struct NativePass
+    {
+        Engine::Graphics::IGraphicsContext* context;
+        Engine::Graphics::NativePhase previous;
+        ~NativePass() { if(context) context->SetNativeTimingPhase(previous); }
+    } nativePass{context,context ? context->GetNativeTimingPhase():Engine::Graphics::NativePhase::Other};
+    if(context) context->SetNativeTimingPhase(shadowOnly ? Engine::Graphics::NativePhase::Shadow:Engine::Graphics::NativePhase::Camera);
     using RenderClock = std::chrono::steady_clock;
     m_lastRenderCpuTimings={};
     struct RenderMeasurement
@@ -2331,6 +2381,9 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             metrics.workerActiveMs=double(endJobs.workerNs-jobs.workerNs)/1.e6;
             metrics.mainJobMs=double(endJobs.callerNs-jobs.callerNs)/1.e6;
             metrics.workerWaitMs=double(endJobs.waitNs-jobs.waitNs)/1.e6;
+            metrics.workerQueueMs=double(endJobs.queueNs-jobs.queueNs)/1.e6;
+            metrics.workerDependencyMs=double(endJobs.dependencyNs-jobs.dependencyNs)/1.e6;
+            metrics.configuredWorkers=endJobs.workers;
             metrics.workerJobs=endJobs.jobs-jobs.jobs; metrics.workerTasks=endJobs.workerTasks-jobs.workerTasks;
             metrics.otherMs=std::max(0.,metrics.totalMs-metrics.startupMs-metrics.terrainPreparationMs-
                 metrics.cullingMs-metrics.sortingMs-metrics.occlusionMs-metrics.materialMs-

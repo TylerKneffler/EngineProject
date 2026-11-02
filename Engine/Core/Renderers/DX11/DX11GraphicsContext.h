@@ -34,10 +34,12 @@ struct D3D11FrameResourceState
     static constexpr uint32_t ConstantSlots = 16;
     static constexpr uint32_t ArenaSize = 4u * 1024u * 1024u;
 
-    D3D11FrameResourceState(ID3D11Device* device, ID3D11DeviceContext* context);
+    D3D11FrameResourceState(ID3D11Device* device, ID3D11DeviceContext* context,
+        std::shared_ptr<Engine::Graphics::NativeSubmissionProbe> probe={});
     void PrepareFrame();
 
     Microsoft::WRL::ComPtr<ID3D11Buffer> constantArena;
+    std::shared_ptr<Engine::Graphics::NativeSubmissionProbe> native;
     std::array<Microsoft::WRL::ComPtr<ID3D11Buffer>, ConstantSlots>
         fallbackConstantBuffers;
     Microsoft::WRL::ComPtr<ID3D11SamplerState> materialSampler;
@@ -45,10 +47,13 @@ struct D3D11FrameResourceState
     Microsoft::WRL::ComPtr<ID3D11UnorderedAccessView> indirectArgumentsUav;
     Microsoft::WRL::ComPtr<ID3D11ComputeShader> copyIndirectShader;
     uint32_t arenaCursor = 0;
+    uint64_t arenaGeneration = 0;
     bool firstArenaWrite = true;
     bool arenaSupported = false;
     uint32_t arenaWrites = 0;
     uint32_t discardMaps = 0;
+    uint32_t computeArenaWrites=0,computeDiscardMaps=0;
+    bool computeArenaEnabled=true;
 };
 
 struct D3D11GpuTimingState
@@ -85,7 +90,13 @@ struct D3D11GpuTimingState
 
 class D3D11GraphicsContext : public Engine::Graphics::IGraphicsContext
 {
+    Engine::Graphics::NativeSubmissionProbe* NativeProbe() const
+    { return m_frameResources ? m_frameResources->native.get():nullptr; }
 public:
+    Engine::Graphics::NativePhase GetNativeTimingPhase() const override
+    { return m_frameResources && m_frameResources->native ? m_frameResources->native->phase:Engine::Graphics::NativePhase::Other; }
+    void SetNativeTimingPhase(Engine::Graphics::NativePhase phase) override
+    { if(m_frameResources && m_frameResources->native) m_frameResources->native->phase=phase; }
     D3D11GraphicsContext(ID3D11Device* device, ID3D11DeviceContext* context,
         std::shared_ptr<D3D11OcclusionQueryState> occlusionState = {},
         std::shared_ptr<D3D11FrameResourceState> frameResources = {},
@@ -145,6 +156,7 @@ private:
     bool m_explicitScissor=false, m_savedExplicitScissor=false;
     const Engine::Graphics::IGraphicsBuffer* m_preparedConstants = nullptr;
     uint32_t m_preparedConstantStart = 0;
+    uint64_t m_preparedConstantGeneration = 0;
     uint32_t m_preparedConstantBytes = 0;
     uint32_t m_stencilReference = 0;
     Microsoft::WRL::ComPtr<ID3D11RenderTargetView> m_savedRenderTarget;
@@ -163,7 +175,8 @@ private:
 class D3D11GraphicsContextFactory : public Engine::Graphics::IGraphicsContextFactory
 {
 public:
-    D3D11GraphicsContextFactory(ID3D11Device* device, ID3D11DeviceContext* context);
+    D3D11GraphicsContextFactory(ID3D11Device* device, ID3D11DeviceContext* context,
+        std::shared_ptr<Engine::Graphics::NativeSubmissionProbe> probe={});
 
     void SetCommandBuffer(void* context) override
     {
@@ -172,13 +185,28 @@ public:
     void PrepareFrame(uint32_t) override
     {
         ++m_preparedFrameSerial;
+        if(m_frameResources && m_frameResources->native) m_frameResources->native->Reset(m_preparedFrameSerial);
         if (m_frameResources) m_frameResources->PrepareFrame();
-        if (m_gpuTimings) m_gpuTimings->PrepareFrame();
+        if (m_gpuTimings && m_gpuTimingEnabled) m_gpuTimings->PrepareFrame();
     }
     uint64_t GetPreparedFrameSerial() const override { return m_preparedFrameSerial; }
     uint32_t GetPreparedFrameSlot() const override { return 0; }
     void FinalizeFrame() override
-    { if (m_gpuTimings) m_gpuTimings->FinalizeFrame(); }
+    { if (m_gpuTimings && m_gpuTimingEnabled) m_gpuTimings->FinalizeFrame(); }
+    void SetGpuTimingEnabled(bool enabled) override
+    {
+        m_gpuTimingEnabled=enabled;
+        if(!enabled && m_gpuTimings) { m_gpuTimings->recording=false; m_gpuTimings->telemetry.gpuTimingsValid=false; }
+    }
+    void SetNativeCallTimingEnabled(bool enabled) override
+    { if(m_frameResources && m_frameResources->native) m_frameResources->native->timings.enabled=enabled; }
+    Engine::Graphics::NativeSubmissionTimings GetNativeSubmissionTimings() const override
+    {
+        auto value=m_frameResources && m_frameResources->native ? m_frameResources->native->timings:Engine::Graphics::NativeSubmissionTimings{};
+        if(m_frameResources) { value.computeArenaWrites=m_frameResources->computeArenaWrites; value.computeDiscardMaps=m_frameResources->computeDiscardMaps; }
+        return value;
+    }
+    void SetComputeConstantArenaEnabled(bool enabled) { if(m_frameResources) m_frameResources->computeArenaEnabled=enabled; }
     Engine::Graphics::FrameTimingTelemetry GetFrameTimingTelemetry() const override
     { return m_gpuTimings ? m_gpuTimings->telemetry : Engine::Graphics::FrameTimingTelemetry{}; }
     bool UsesPersistentConstantBufferArena() const override
@@ -196,6 +224,7 @@ public:
 
 private:
     uint64_t m_preparedFrameSerial=0;
+    bool m_gpuTimingEnabled=true;
     ID3D11Device* m_device = nullptr;
     ID3D11DeviceContext* m_context = nullptr;
     ID3D11DeviceContext* m_externalContext = nullptr;

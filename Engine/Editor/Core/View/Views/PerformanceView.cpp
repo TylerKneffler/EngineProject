@@ -422,7 +422,7 @@ void PerformanceView::SetFrameTimings(const EditorFrameProfileSample& sample,
         m_recording->Frame(m_lastUiFrameRate,sample.deltaSeconds*1000.,m_lastPanelDrawMs);
         if (!IsOpen()) Refresh(sample.deltaSeconds > 0.f ? 1.f / sample.deltaSeconds : 0.f);
         m_recording->FrameDetails(
-            EditorFrameProfiler::SerializeFields(sample, m_scene, renderer));
+            EditorFrameProfiler::CaptureFields(sample, m_scene, renderer));
     }
     m_hasFrameTimings = true;
     m_frameTimings = {
@@ -474,6 +474,9 @@ void PerformanceView::SetFrameTimings(const EditorFrameProfileSample& sample,
     if (renderer && renderer->GetGraphicsProvider())
         if (auto* factory = renderer->GetGraphicsProvider()->GetContextFactory())
         {
+            m_nativeTimings=factory->GetNativeSubmissionTimings();
+            if(m_nativeTimingChange) { factory->SetNativeCallTimingEnabled(m_nativeTimingRequested); m_nativeTimingChange=false; }
+            else m_nativeTimingRequested=m_nativeTimings.enabled;
             const auto timing = factory->GetFrameTimingTelemetry();
             m_gpuQueryTimings = {
                 { "Query resolve (CPU)", timing.cpuGpuQueryResolveMilliseconds },
@@ -532,13 +535,41 @@ void PerformanceView::DrawTimings(IEditorUi& ui)
     if (!m_updateTimings.empty())
         drawGroup("Scene update (CPU)", m_updateTimings);
     drawGroup("Draw and render (CPU)", m_renderTimings);
+    ui.BeginDisabled(!m_nativeTimings.supported);
+    if(ui.Checkbox("Native graphics call timing",&m_nativeTimingRequested)) m_nativeTimingChange=true;
+    ui.EndDisabled();
+    if(m_nativeTimings.supported)
+    {
+        ui.ValueLabel("Compute constant arena writes",std::to_string(m_nativeTimings.computeArenaWrites).c_str());
+        ui.ValueLabel("Compute constant fallback discards",std::to_string(m_nativeTimings.computeDiscardMaps).c_str());
+    }
+    if(m_nativeTimings.enabled)
+    {
+        static const char* names[]={"Map","Upload / unmap","Bindings","Dispatch","Indirect argument copy","Draw","Resource creation","Readback"};
+        for(size_t phase=0;phase<m_nativeTimings.phases.size();++phase)
+        {
+            std::vector<TimingValue> values;
+            for(size_t operation=0;operation<m_nativeTimings.phases[phase].size();++operation)
+                values.push_back({names[operation],m_nativeTimings.phases[phase][operation].milliseconds});
+            drawGroup(phase==0 ? "Native calls outside passes (CPU)":phase==1 ? "Native camera calls (CPU)":"Native shadow calls (CPU)",values);
+        }
+        ui.DisabledLabel("Diagnostic timing adds overhead. Recordings include call maxima and thread cycles; low cycles alone do not prove a GPU wait.");
+    }
     if (m_scene)
     {
         const auto& prepare = m_scene->GetLastPrepareTimings();
         drawGroup("Scene preparation (CPU)", {
-            { "Lookup", prepare.lookupMs }, { "Items", prepare.itemsMs },
+            { "Transforms", prepare.transformsMs }, { "Lookup", prepare.lookupMs }, { "Items", prepare.itemsMs },
             { "Bone upload", prepare.boneUploadMs },
             { "Capacity", prepare.capacityMs }, { "Spatial hierarchy", prepare.spatialMs }
+        });
+        drawGroup("Transform preparation detail (CPU wall time)", {
+            { "Capture",prepare.transformSnapshotMs }, { "Compute and joins",prepare.transformComputeMs },
+            { "Commit",prepare.transformCommitMs }
+        });
+        drawGroup("Spatial index detail (CPU wall time)", {
+            { "Compare",prepare.spatialCompareMs }, { "Refit and joins",prepare.spatialRefitMs },
+            { "Rebuild",prepare.spatialBuildMs }
         });
         const auto& grass = m_scene->GetGrassPerformance();
         drawGroup("Grass (CPU)", {
@@ -587,6 +618,20 @@ void PerformanceView::DrawTimings(IEditorUi& ui)
     ui.ValueLabel("Instance allocations / retirements",(std::to_string(m_renderCpu.instances.allocations)+" / "+std::to_string(m_renderCpu.instances.retirements)).c_str());
     ui.ValueLabel("Instance misses: cold / membership / metadata / mode",(std::to_string(m_renderCpu.instances.cacheCold)+" / "+std::to_string(m_renderCpu.instances.cacheMembership)+" / "+std::to_string(m_renderCpu.instances.cacheMetadata)+" / "+std::to_string(m_renderCpu.instances.cacheMode)).c_str());
     ui.ValueLabel("Worker jobs / tasks",(std::to_string(m_renderCpu.workerJobs)+" / "+std::to_string(m_renderCpu.workerTasks)).c_str());
+    ui.ValueLabel("Configured workers",std::to_string(m_renderCpu.configuredWorkers).c_str());
+    if(m_scene)
+    {
+        const auto& prepare=m_scene->GetLastPrepareTimings();
+        ui.ValueLabel("Transform world reused / updated",(std::to_string(prepare.transformWorldReused)+" / "+std::to_string(prepare.transformWorldUpdated)).c_str());
+        ui.ValueLabel("Transform locals updated",std::to_string(prepare.transformLocalUpdated).c_str());
+        ui.ValueLabel("Transform hierarchy levels",std::to_string(prepare.transformLevels).c_str());
+        ui.ValueLabel("Transform structure-change fallback",std::to_string(prepare.transformStructureFallback).c_str());
+        ui.ValueLabel("Spatial index changed / reused bounds",(std::to_string(prepare.spatialChangedBounds)+" / "+std::to_string(prepare.spatialReusedBounds)).c_str());
+        ui.ValueLabel("Spatial dirty leaves / refit nodes",(std::to_string(prepare.spatialDirtyLeaves)+" / "+std::to_string(prepare.spatialRefitNodes)).c_str());
+        ui.ValueLabel("Spatial rebuilds / quality rebuilds",(std::to_string(prepare.spatialRebuilds)+" / "+std::to_string(prepare.spatialQualityRebuilds)).c_str());
+        ui.ValueLabel("Bounds reused / updated",(std::to_string(prepare.boundsReused)+" / "+std::to_string(prepare.boundsUpdated)).c_str());
+        ui.ValueLabel("Preparation worker / wait ms",(std::to_string(prepare.workerMs)+" / "+std::to_string(prepare.workerWaitMs)).c_str());
+    }
     drawGroup("Main render passes (all views, CPU)", {
         {"Measured total",m_renderCpu.totalMs},{"Camera / lighting / setup",m_renderCpu.startupMs},
         {"Terrain occluder preparation",m_renderCpu.terrainPreparationMs},{"View culling",m_renderCpu.cullingMs},
@@ -596,6 +641,7 @@ void PerformanceView::DrawTimings(IEditorUi& ui)
         {"Retained UI",m_renderCpu.retainedUiMs},{"Portals / overlays",m_renderCpu.portalMs},
         {"Worker execution (summed)",m_renderCpu.workerActiveMs},{"Main-thread jobs",m_renderCpu.mainJobMs},
         {"Worker synchronization",m_renderCpu.workerWaitMs},{"Record packing (workers)",m_renderCpu.recordPackingMs},
+        {"Worker queue delay (summed)",m_renderCpu.workerQueueMs},{"Dependency readiness (summed)",m_renderCpu.workerDependencyMs},
         {"Record synchronization",m_renderCpu.recordWaitMs},{"Other",m_renderCpu.otherMs}
     });
     ui.ValueLabel("Draw candidates / physical draws",(std::to_string(m_renderCpu.candidateDraws)+" / "+std::to_string(m_renderCpu.physicalDraws)).c_str());
@@ -701,9 +747,8 @@ void PerformanceView::StopRecording()
 void PerformanceView::RecordSnapshot(float frameRate)
 {
     if (!m_recording || !m_recording->IsRecording()) return;
-    std::ostringstream out;
-    out << std::fixed << std::setprecision(3)
-        << "\"fps\":" << frameRate << ",\"frame_ms\":"
+    Engine::Threading::CapturedText out;
+    out << "\"fps\":" << frameRate << ",\"frame_ms\":"
         << (frameRate > 0.f ? 1000.f / frameRate : 0.f)
         << ",\"counter_sample_ms\":" << m_lastCounterSampleMs
         << ",\"cpu_user_pct\":" << m_snapshot.cpuUser
@@ -754,7 +799,11 @@ void PerformanceView::RecordSnapshot(float frameRate)
         out << ",\"terrain_collider_cells\":" << managed
             << ",\"terrain_active_collider_cells\":" << active;
     }
-    m_recording->Sample(out.str());
+    const auto writer=m_recording->GetWriterStatistics();
+    out<<",\"recording_queue_bytes\":"<<writer.queuedBytes<<",\"recording_dropped_records\":"<<writer.dropped
+        <<",\"recording_failed_records\":"<<writer.failed<<",\"recording_format_ms\":"<<writer.formatNs/1.e6
+        <<",\"recording_write_ms\":"<<writer.writeNs/1.e6;
+    m_recording->Sample(std::move(out));
 }
 
 void PerformanceView::DrawRecording(IEditorUi& ui)
@@ -769,6 +818,13 @@ void PerformanceView::DrawRecording(IEditorUi& ui)
     ui.SameLine();
     ui.DisabledLabel(active ? "Recording CPU/GPU stats and editor output"
         : "Saved when recording stops");
+    if(m_recording)
+    {
+        const auto writer=m_recording->GetWriterStatistics();
+        if(active || writer.dropped || writer.failed)
+            ui.ValueLabel("Writer queued / dropped / failed",(FormatBytes(writer.queuedBytes)+" / "+
+                std::to_string(writer.dropped)+" / "+std::to_string(writer.failed)).c_str());
+    }
     if (!m_recordingPath.empty())
     {
         ui.ValueLabel(active ? "Recording to" : "Saved performance log",

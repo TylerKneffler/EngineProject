@@ -1,5 +1,6 @@
 #pragma once
 #include "Core/Graphics/IGraphicsBuffer.h"
+#include "Core/Graphics/NativeSubmissionTimings.h"
 #include <wrl/client.h>
 #include <d3d11.h>
 #include <vector>
@@ -15,7 +16,8 @@ public:
     D3D11GraphicsBuffer(Microsoft::WRL::ComPtr<ID3D11Buffer> buffer,
                         Usage usage, AccessMode access, uint64_t size,
                         const void* initialData, uint32_t elementStride,
-                        Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> srv);
+                        Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> srv,
+                        std::shared_ptr<Engine::Graphics::NativeSubmissionProbe> probe={});
     void SetUnorderedAccessView(Microsoft::WRL::ComPtr<ID3D11UnorderedAccessView> view)
     { m_uav = std::move(view); }
 
@@ -48,12 +50,14 @@ private:
     Microsoft::WRL::ComPtr<ID3D11UnorderedAccessView> m_uav;
     Microsoft::WRL::ComPtr<ID3D11DeviceContext> m_readbackContext;
     std::vector<uint8_t> m_shadowData;
+    std::shared_ptr<Engine::Graphics::NativeSubmissionProbe> m_native;
 };
 
 class D3D11BufferFactory : public Engine::Graphics::IGraphicsBufferFactory
 {
 public:
-    explicit D3D11BufferFactory(ID3D11Device* device) : m_device(device) {}
+    explicit D3D11BufferFactory(ID3D11Device* device,std::shared_ptr<Engine::Graphics::NativeSubmissionProbe> probe={})
+        :m_device(device),m_native(std::move(probe)) {}
 
     std::unique_ptr<Engine::Graphics::IGraphicsBuffer> CreateBuffer(
         Engine::Graphics::IGraphicsBuffer::Usage usage,
@@ -70,5 +74,6 @@ public:
 
 private:
     ID3D11Device* m_device = nullptr;
+    std::shared_ptr<Engine::Graphics::NativeSubmissionProbe> m_native;
 };
 }

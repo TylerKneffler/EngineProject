@@ -150,6 +150,9 @@ public:
     glm::vec3 InverseApplyWorldMatrixLayer(const glm::vec3& point) const;
 
 private:
+    friend class TransformHierarchy;
+    static glm::dmat4 ComposeLocalMatrix(const glm::dvec3& position,
+        const glm::vec3& rotation,const glm::vec3& scale);
     void UpdateLocalCache() const;
     void UpdateWorldCache() const;
     static void AdvanceRevision(uint64_t& revision);

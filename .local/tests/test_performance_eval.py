@@ -8,6 +8,12 @@ spec.loader.exec_module(evaluation)
 
 
 class PerformanceEvaluationTests(unittest.TestCase):
+    def test_async_writer_loss_is_reported(self):
+        result = evaluation.evaluate([dict(type="frame_details", playing=True, frame_ms=10),
+                                      dict(type="writer_summary", dropped_records=3, failed_records=1)])
+        self.assertEqual(result["recording_lost_records"], 4)
+        self.assertTrue(any("may omit stalls" in warning for warning in result["warnings"]))
+
     def test_instance_upload_causes_and_late_metrics(self):
         rows = [dict(type="frame_details", playing=True, frame_ms=10),
                 dict(type="frame_details", playing=True, frame_ms=20, instance_edited_bytes=64,
@@ -77,6 +83,50 @@ class PerformanceEvaluationTests(unittest.TestCase):
     def test_unfinished_warmup_is_not_reported_as_measured(self):
         with self.assertRaises(ValueError):
             evaluation.evaluate([dict(type="frame_details", measured=False, playing=True, frame_ms=20)])
+
+    def test_native_diagnostics_exclude_disabled_frames(self):
+        rows = [dict(type="frame_details", frame_ms=10, native_timing_enabled=False,
+                     native_camera_map_calls=0, native_camera_map_ms=0),
+                dict(type="frame_details", frame_ms=20, native_timing_enabled=True,
+                     native_camera_map_calls=4, native_camera_map_ms=3,
+                     native_camera_map_max_ms=2, native_camera_map_thread_cycles=1234,
+                     native_camera_map_cycle_samples=4, native_compute_arena_writes=8)]
+        result = evaluation.evaluate(rows)
+        native = result["native_calls"]["native_camera_map"]
+        self.assertEqual(result["native_timed_frames"], 1)
+        self.assertEqual(result["metrics"]["native_compute_arena_writes"]["mean"], 8)
+        self.assertEqual(native["calls"]["mean"], 4)
+        self.assertEqual(native["wall_ms"]["mean"], 3)
+        self.assertEqual(native["maximum_call_ms"]["max"], 2)
+        self.assertIn("native_camera_map", evaluation.markdown(result))
+        self.assertTrue(any("per-call" in warning for warning in result["warnings"]))
+
+    def test_transform_preparation_fields(self):
+        result = evaluation.evaluate([dict(type="frame_details", frame_ms=20,
+            prepare_transforms_ms=2, prepare_transform_snapshot_ms=.5,
+            prepare_transform_compute_ms=1, prepare_transform_commit_ms=.5,
+            prepare_transform_local_updated=4, prepare_transform_world_updated=12,
+            prepare_transform_world_reused=100, prepare_transform_levels=3, prepare_transform_structure_fallback=1)])
+        self.assertEqual(result["metrics"]["prepare_transform_world_reused"]["mean"], 100)
+        report = evaluation.markdown(result)
+        self.assertIn("prepare_transform_compute_ms", report)
+        self.assertIn("prepare_transform_world_updated", report)
+        self.assertIn("prepare_transform_structure_fallback", report)
+        self.assertTrue(any("lazy owner transform" in warning for warning in result["warnings"]))
+        self.assertTrue(any("nested wall timings" in warning for warning in result["warnings"]))
+
+    def test_spatial_index_preparation_fields(self):
+        result = evaluation.evaluate([dict(type="frame_details", frame_ms=20,
+            prepare_spatial_index_ms=2, prepare_spatial_compare_ms=.25,
+            prepare_spatial_refit_ms=1.75, prepare_spatial_build_ms=0,
+            prepare_spatial_changed_bounds=1, prepare_spatial_reused_bounds=999,
+            prepare_spatial_dirty_leaves=1, prepare_spatial_refit_nodes=8,
+            prepare_spatial_rebuilds=0, prepare_spatial_quality_rebuilds=0)])
+        self.assertEqual(result["metrics"]["prepare_spatial_refit_nodes"]["mean"], 8)
+        report = evaluation.markdown(result)
+        self.assertIn("prepare_spatial_index_ms", report)
+        self.assertIn("prepare_spatial_rebuilds", report)
+        self.assertTrue(any("Spatial compare/refit/build" in warning for warning in result["warnings"]))
 
     def test_partial_gpu_instrumentation_can_be_reported(self):
         result = evaluation.evaluate([dict(type="frame_details", playing=True, dt_ms=20,

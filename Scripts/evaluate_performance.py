@@ -33,7 +33,8 @@ def evaluate(rows, path="", all_frames=False):
         raise ValueError("Recording contains no valid positive frame intervals")
     metrics = {k: summary([r[k] for r in frames if k in r])
                for k in set().union(*(r.keys() for r in frames))
-               if k.endswith("_ms") or k.startswith(("instance_", "shadow_instance_"))}
+               if k.endswith("_ms") or k.startswith(("instance_", "shadow_instance_", "prepare_transform_", "prepare_spatial_"))
+               or k in ("native_compute_arena_writes", "native_compute_discard_maps")}
     gpu = {}
     for index, row in enumerate(frames):
         if row.get("gpu_valid"):
@@ -71,6 +72,30 @@ def evaluate(rows, path="", all_frames=False):
         warnings.append("Low thread-cycle density during long shadow submissions can indicate scheduling or waits; CPU frequency changes also affect density.")
     if "shadow_submission_thread_cpu_ms" in metrics:
         warnings.append("Shadow thread CPU uses OS accounting; off-CPU residual includes scheduling and waits, and does not prove a GPU stall.")
+    native_frames = [r for r in frames if r.get("native_timing_enabled")]
+    native_calls = {}
+    for phase in ("other", "camera", "shadow"):
+        for operation in ("map", "upload", "bind", "dispatch", "indirect_args", "draw", "resource_create", "readback"):
+            prefix = f"native_{phase}_{operation}"
+            samples = [r for r in native_frames if prefix + "_calls" in r]
+            if not samples:
+                continue
+            native_calls[prefix] = {
+                "frames": len(samples),
+                "calls": summary([r[prefix + "_calls"] for r in samples]),
+                "wall_ms": summary([r.get(prefix + "_ms", 0) for r in samples]),
+                "maximum_call_ms": summary([r.get(prefix + "_max_ms", 0) for r in samples]),
+                "thread_cycles": summary([r.get(prefix + "_thread_cycles", 0) for r in samples]),
+                "cycle_samples": sum(r.get(prefix + "_cycle_samples", 0) for r in samples)}
+    if native_frames:
+        warnings.append("Native graphics-call timing is opt-in and adds per-call clock/cycle-query overhead. Compare performance with it disabled; long calls with low cycles are wait candidates, not proof of GPU synchronization.")
+    if "prepare_transforms_ms" in metrics:
+        warnings.append("Transform capture, compute and commit partition prepare_transforms_ms, which is already inside scene_prepare_ms; these nested wall timings must not be added to the frame total.")
+    fallback = metrics.get("prepare_transform_structure_fallback")
+    if fallback and fallback["max"]:
+        warnings.append("Structure-change frames use lazy owner transform validation inside item/bone preparation; dedicated transform counters cover the batch path only.")
+    if "prepare_spatial_index_ms" in metrics:
+        warnings.append("Spatial compare/refit/build timings partition prepare_spatial_index_ms, already contained in prepare_spatial_ms and scene preparation. Refit jobs can overlap worker execution counters.")
     missing = [key for key in phase_keys[:3] if key not in metrics]
     if missing:
         warnings.append("Capture predates full main-pass breakdown: " + ", ".join(missing))
@@ -81,6 +106,12 @@ def evaluate(rows, path="", all_frames=False):
     viewport_pixels = summary([r["view_pixels"] for r in frames if "view_pixels" in r])
     if any("shadow_casters" in r for r in hardware) and not any(r.get("schema_version", 0) >= 2 for r in frames):
         warnings.append("Legacy eligible-shadow-caster counts may be overwritten by main-view preparation.")
+    writers = [r for r in rows if r.get("type") == "writer_summary"]
+    recording_loss = sum(r.get("dropped_records", 0) + r.get("failed_records", 0) for r in writers)
+    recording_loss = max(recording_loss, max((r.get("recording_dropped_records", 0) + r.get("recording_failed_records", 0)
+                                             for r in hardware), default=0))
+    if recording_loss:
+        warnings.append(f"Recording writer dropped or failed {recording_loss} records; frame statistics may omit stalls.")
     return {"capture": str(path), "frames": len(frames), "start_utc": frames[0].get("time_utc"),
             "end_utc": frames[-1].get("time_utc"), "effective_fps": 1000 / interval["mean"],
             "interval_ms": interval, "over_60fps_budget_percent": 100 * sum(v > 1000 / 60 for v in intervals) / len(intervals),
@@ -90,7 +121,9 @@ def evaluate(rows, path="", all_frames=False):
             "grass_tiles_prepared": sum(r.get("grass_tiles_built", 0) for r in frames),
             "grass_placements_indexed": sum(r.get("grass_placements_scanned", 0) for r in frames),
             "shadow_submission": shadow_submission,
-            "hardware": hardware_metrics, "view_pixels": viewport_pixels, "warnings": warnings}
+            "hardware": hardware_metrics, "view_pixels": viewport_pixels,
+            "recording_lost_records": recording_loss, "native_timed_frames": len(native_frames),
+            "native_calls": native_calls, "warnings": warnings}
 
 
 def load(path, all_frames=False):
@@ -120,9 +153,25 @@ def markdown(result, comparison=None):
                 "shadow_draw_ms", "shadow_geometry_draw_ms", "shadow_submission_thread_cpu_ms",
                 "shadow_submission_off_cpu_ms", "shadow_submission_wall_ms", "shadow_max_batch_ms",
                 "render_retained_ui_ms", "render_portal_ms", "render_worker_active_ms", "render_main_job_ms",
-                "render_worker_wait_ms", "render_record_pack_ms", "render_record_wait_ms"):
+                "render_worker_wait_ms", "render_record_pack_ms", "render_record_wait_ms", "prepare_transforms_ms",
+                "prepare_transform_snapshot_ms", "prepare_transform_compute_ms", "prepare_transform_commit_ms",
+                "prepare_spatial_index_ms", "prepare_spatial_compare_ms", "prepare_spatial_refit_ms", "prepare_spatial_build_ms"):
         if value := result["metrics"].get(key):
             lines.append(f"| {key} | {value['mean']:.3f} | {value['p95']:.3f} |")
+    for key in ("prepare_transform_local_updated", "prepare_transform_world_updated", "prepare_transform_world_reused", "prepare_transform_levels", "prepare_transform_structure_fallback",
+                "prepare_spatial_changed_bounds", "prepare_spatial_reused_bounds", "prepare_spatial_dirty_leaves",
+                "prepare_spatial_refit_nodes", "prepare_spatial_rebuilds", "prepare_spatial_quality_rebuilds"):
+        if value := result["metrics"].get(key):
+            lines += ["", f"{key}: {value['mean']:.1f} per frame; maximum {value['max']:.0f}."]
+    for key in ("native_compute_arena_writes", "native_compute_discard_maps"):
+        if value := result["metrics"].get(key):
+            lines += ["", f"{key}: {value['mean']:.1f} per frame; maximum {value['max']:.0f}."]
+    if result.get("native_calls"):
+        lines += ["", f"Native call diagnostics: {result['native_timed_frames']} instrumented frames.",
+                  "", "| Native call group | Calls/frame | Wall ms/frame | Worst call ms |", "|---|---:|---:|---:|"]
+        for key, value in sorted(result["native_calls"].items()):
+            if value["calls"]["max"]:
+                lines.append(f"| {key} | {value['calls']['mean']:.1f} | {value['wall_ms']['mean']:.3f} | {value['maximum_call_ms']['max']:.3f} |")
     if result["shadow_submission"]["thread_cycles"]:
         lines += ["", f"Shadow submission: {result['shadow_submission']['thread_cycles']['mean']:.0f} thread cycles on average; "
                   f"{result['shadow_submission']['low_cycle_density_spikes']} long submissions had unusually low cycle density."]

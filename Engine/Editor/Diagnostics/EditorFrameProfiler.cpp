@@ -28,21 +28,25 @@ namespace Engine::Editor
                 : std::filesystem::path(requestedProfile);
             if (!path.parent_path().empty())
                 std::filesystem::create_directories(path.parent_path());
-            output_.open(path, std::ios::trunc);
+            output_.Start(path);
         }
-        scene->SetUpdateProfilingEnabled(output_.is_open());
+        scene->SetUpdateProfilingEnabled(output_.IsOpen());
         if (auto* bullet = dynamic_cast<Engine::Physics::BulletPhysicsAdapter*>(
             &scene->GetPhysics().GetAdapter()))
-            bullet->SetProfilingEnabled(output_.is_open());
+            bullet->SetProfilingEnabled(output_.IsOpen());
         if (auto* dx11 = dynamic_cast<Engine::Renderers::DX11EditorRenderer*>(renderer))
-            dx11->SetGpuTimingEnabled(output_.is_open());
+            dx11->SetGpuTimingEnabled(output_.IsOpen());
     }
 
     std::string EditorFrameProfiler::SerializeFields(const EditorFrameProfileSample& sample,
         Scene::Scene* scene, Renderers::IEditorRenderer* renderer)
     {
-        std::ostringstream output;
-        output.imbue(std::locale::classic());
+        return CaptureFields(sample,scene,renderer).Format();
+    }
+    Engine::Threading::CapturedText EditorFrameProfiler::CaptureFields(const EditorFrameProfileSample& sample,
+        Scene::Scene* scene, Renderers::IEditorRenderer* renderer)
+    {
+        Engine::Threading::CapturedText output;
         const auto ms = [](auto first, auto last)
         {
             return std::chrono::duration<double, std::milli>(
@@ -108,11 +112,36 @@ namespace Engine::Editor
             << ",\"begin_ui_ms\":" << beginUiMilliseconds
             << ",\"clear_ms\":" << sample.clearMilliseconds
             << ",\"scene_prepare_ms\":" << sample.scenePrepareMilliseconds
+            << ",\"prepare_transforms_ms\":" << prepareTimings.transformsMs
+            << ",\"prepare_transform_snapshot_ms\":" << prepareTimings.transformSnapshotMs
+            << ",\"prepare_transform_compute_ms\":" << prepareTimings.transformComputeMs
+            << ",\"prepare_transform_commit_ms\":" << prepareTimings.transformCommitMs
+            << ",\"prepare_transform_local_updated\":" << prepareTimings.transformLocalUpdated
+            << ",\"prepare_transform_world_updated\":" << prepareTimings.transformWorldUpdated
+            << ",\"prepare_transform_world_reused\":" << prepareTimings.transformWorldReused
+            << ",\"prepare_transform_levels\":" << prepareTimings.transformLevels
+            << ",\"prepare_transform_structure_fallback\":" << prepareTimings.transformStructureFallback
             << ",\"prepare_lookup_ms\":" << prepareTimings.lookupMs
             << ",\"prepare_items_ms\":" << prepareTimings.itemsMs
             << ",\"prepare_bone_upload_ms\":" << prepareTimings.boneUploadMs
             << ",\"prepare_capacity_ms\":" << prepareTimings.capacityMs
             << ",\"prepare_spatial_ms\":" << prepareTimings.spatialMs
+            << ",\"prepare_spatial_index_ms\":" << prepareTimings.spatialIndexMs
+            << ",\"prepare_spatial_compare_ms\":" << prepareTimings.spatialCompareMs
+            << ",\"prepare_spatial_refit_ms\":" << prepareTimings.spatialRefitMs
+            << ",\"prepare_spatial_build_ms\":" << prepareTimings.spatialBuildMs
+            << ",\"prepare_spatial_changed_bounds\":" << prepareTimings.spatialChangedBounds
+            << ",\"prepare_spatial_reused_bounds\":" << prepareTimings.spatialReusedBounds
+            << ",\"prepare_spatial_dirty_leaves\":" << prepareTimings.spatialDirtyLeaves
+            << ",\"prepare_spatial_refit_nodes\":" << prepareTimings.spatialRefitNodes
+            << ",\"prepare_spatial_rebuilds\":" << prepareTimings.spatialRebuilds
+            << ",\"prepare_spatial_quality_rebuilds\":" << prepareTimings.spatialQualityRebuilds
+            << ",\"prepare_bounds_reused\":" << prepareTimings.boundsReused
+            << ",\"prepare_bounds_updated\":" << prepareTimings.boundsUpdated
+            << ",\"prepare_worker_active_ms\":" << prepareTimings.workerMs
+            << ",\"prepare_main_job_ms\":" << prepareTimings.mainJobMs
+            << ",\"prepare_worker_wait_ms\":" << prepareTimings.workerWaitMs
+            << ",\"prepare_worker_queue_ms\":" << prepareTimings.workerQueueMs
             << ",\"view_ms\":" << sample.viewMilliseconds
             << ",\"shadow_submit_ms\":" << sample.shadowSubmitMilliseconds
             << ",\"main_submit_ms\":" << sample.mainSubmitMilliseconds
@@ -182,6 +211,7 @@ namespace Engine::Editor
             << ",\"shadow_max_batch_ms\":" << shadow.maxBatchMs
             << ",\"shadow_restore_ms\":" << shadow.passRestoreMs;
         const auto* factory = renderer->GetGraphicsProvider()->GetContextFactory();
+        factory->GetNativeSubmissionTimings().WriteJson(output);
         output << ",\"constant_arena_writes\":" << factory->GetConstantBufferArenaWrites()
             << ",\"constant_discard_maps\":" << factory->GetConstantBufferDiscardMaps();
         output << ",\"spatial_active_fields\":" << scene->GetSpatialUpdateScheduler().activeCount
@@ -200,6 +230,10 @@ namespace Engine::Editor
             << ",\"render_worker_active_ms\":" << renderCpu.workerActiveMs
             << ",\"render_main_job_ms\":" << renderCpu.mainJobMs
             << ",\"render_worker_wait_ms\":" << renderCpu.workerWaitMs
+            << ",\"worker_metrics_scope\":\"engine_jobs_during_render\""
+            << ",\"render_worker_queue_ms\":" << renderCpu.workerQueueMs
+            << ",\"render_worker_dependency_ms\":" << renderCpu.workerDependencyMs
+            << ",\"configured_workers\":" << renderCpu.configuredWorkers
             << ",\"render_record_pack_ms\":" << renderCpu.recordPackingMs
             << ",\"render_record_wait_ms\":" << renderCpu.recordWaitMs
             << ",\"render_worker_jobs\":" << renderCpu.workerJobs
@@ -236,12 +270,13 @@ namespace Engine::Editor
             << ",\"grass_lod_transition_tiles\":" << grass.transitionTiles
             << ",\"grass_fading_tiles\":" << grass.fadingTiles;
         output << ",\"measured\":" << (sample.measured ? "true":"false");
-        return output.str();
+        return output;
     }
 
     void EditorFrameProfiler::Stop()
     {
-        if(output_.is_open()) { output_ << "{\"type\":\"capture_complete\"}\n"; output_.flush(); output_.close(); }
+        if(output_.IsOpen()) output_.Enqueue([] { return "{\"type\":\"capture_complete\"}"; },64);
+        output_.Stop();
     }
 
     void EditorFrameProfiler::Record(const EditorFrameProfileSample& sample,
@@ -265,20 +300,24 @@ namespace Engine::Editor
                         const double cores=double(process-processTicks_)/(seconds*1.e7);
                         const double mainPercent=100.*double(thread-threadTicks_)/(seconds*1.e7);
                         const auto processors=std::max<DWORD>(1,GetActiveProcessorCount(ALL_PROCESSOR_GROUPS));
-                        output_ << "{\"type\":\"sample\",\"playing\":" << (sample.playing ? "true":"false")
+                        Engine::Threading::CapturedText fields;
+                        fields << "{\"type\":\"sample\",\"playing\":" << (sample.playing ? "true":"false")
                             << ",\"measured\":" << (sample.measured ? "true":"false")
                             << ",\"process_cpu_core_equivalents\":" << cores
                             << ",\"process_cpu_pct\":" << cores*100./processors
-                            << ",\"main_thread_cpu_pct\":" << mainPercent << "}\n";
+                            << ",\"main_thread_cpu_pct\":" << mainPercent << "}";
+                        const auto bytes=fields.OwnedBytes();
+                        output_.Enqueue([fields=std::move(fields)] { return fields.Format(); },bytes);
                     }
                     processTicks_=process; threadTicks_=thread; cpuSampleStart_=now;
                 }
             }
         }
 #endif
-        output_ << "{\"frame\":" << frameIndex_ << ","
-            << SerializeFields(sample, scene, renderer) << "}\n";
-        if (++frameIndex_ % 30u == 0u)
-            output_.flush();
+        auto fields=CaptureFields(sample,scene,renderer);
+        const auto bytes=fields.OwnedBytes(),index=frameIndex_++;
+        output_.Enqueue([fields=std::move(fields),index] {
+            return "{\"frame\":"+std::to_string(index)+","+fields.Format()+"}";
+        },bytes);
     }
 }

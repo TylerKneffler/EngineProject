@@ -1016,6 +1016,10 @@ EditorUiAssetTileResult ImGuiEditorUi::AssetTile(const char* label,
         ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
     return result;
 }
+bool ImGuiEditorUi::IsRectVisible(float width,float height) const
+{
+    return ImGui::IsRectVisible(ImVec2(width,height));
+}
 float ImGuiEditorUi::AvailableContentWidth() const
 {
     return ImGui::GetContentRegionAvail().x;

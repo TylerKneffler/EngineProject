@@ -4,6 +4,7 @@
 #include <numeric>
 #include <array>
 #include <vector>
+#include <cstdint>
 
 namespace Engine::Rendering
 {
@@ -24,47 +25,47 @@ inline RenderBounds TransformBounds(glm::vec3 minimum, glm::vec3 maximum, const 
 }
 class RenderSpatialIndex
 {
-    struct Node { RenderBounds bounds; uint32_t first=0, count=0, left=0, right=0; };
+    static constexpr uint32_t NoNode=UINT32_MAX;
+    struct Node
+    {
+        RenderBounds bounds;
+        uint32_t first=0,count=0,left=0,right=0,parent=NoNode,depth=0;
+        double area=0;
+    };
     std::vector<RenderBounds> m_bounds;
     std::vector<uint32_t> m_order, m_unbounded;
     std::vector<Node> m_nodes;
+    std::vector<uint32_t> m_leafForItem,m_changed;
+    std::vector<uint64_t> m_marks;
+    std::vector<double> m_costDeltas;
+    std::vector<std::vector<uint32_t>> m_dirtyLevels;
+    uint64_t m_generation=0,m_refitPasses=0;
+    double m_treeCost=0,m_baselineCost=0;
+    bool m_incremental=true,m_ready=true;
+    static RenderBounds Merge(const RenderBounds& a,const RenderBounds& b);
+    static double Area(const RenderBounds& bounds);
     struct ViewCache { glm::mat4 clip{1}; std::vector<uint8_t> visible; bool valid=false; };
     mutable std::array<ViewCache,8> m_views;
     mutable size_t m_nextView=0;
-    uint32_t BuildNode(uint32_t first, uint32_t count)
-    {
-        const uint32_t index = uint32_t(m_nodes.size());
-        m_nodes.push_back({});
-        RenderBounds bounds = m_bounds[m_order[first]];
-        for (uint32_t i=1;i<count;++i)
-        { bounds.minimum=glm::min(bounds.minimum,m_bounds[m_order[first+i]].minimum);
-          bounds.maximum=glm::max(bounds.maximum,m_bounds[m_order[first+i]].maximum); }
-        m_nodes[index] = {bounds, first, count, 0, 0};
-        if (count > 8)
-        {
-            const auto extent = bounds.maximum-bounds.minimum;
-            const int axis = extent.x > extent.y ? (extent.x > extent.z ? 0:2) : (extent.y > extent.z ? 1:2);
-            const uint32_t half=count/2;
-            std::nth_element(m_order.begin()+first,m_order.begin()+first+half,m_order.begin()+first+count,
-                [&](uint32_t a,uint32_t b) { return (m_bounds[a].minimum[axis]+m_bounds[a].maximum[axis]) <
-                    (m_bounds[b].minimum[axis]+m_bounds[b].maximum[axis]); });
-            const auto left=BuildNode(first,half), right=BuildNode(first+half,count-half);
-            m_nodes[index].left=left; m_nodes[index].right=right; m_nodes[index].count=0;
-        }
-        return index;
-    }
+    uint32_t BuildNode(uint32_t first,uint32_t count,uint32_t parent=NoNode,uint32_t depth=0);
+    void Rebuild();
 public:
-    void Update(std::vector<RenderBounds> bounds)
+    void SetIncrementalUpdatesEnabled(bool enabled) { m_incremental=enabled; }
+    struct UpdateStatistics
     {
-        if (bounds==m_bounds) return;
-        for(auto& view:m_views) view.valid=false;
-        m_bounds=std::move(bounds); m_order.clear(); m_unbounded.clear(); m_nodes.clear();
-        for (uint32_t i=0;i<m_bounds.size();++i)
-            (m_bounds[i].bounded ? m_order:m_unbounded).push_back(i);
-        if (!m_order.empty()) BuildNode(0,uint32_t(m_order.size()));
-    }
+        uint64_t changedBounds=0,reusedBounds=0,dirtyLeaves=0,refitNodes=0,rebuilds=0,qualityRebuilds=0;
+        double totalMs=0,compareMs=0,refitMs=0,buildMs=0;
+    };
+    // Single-owner update/publication. Worker jobs operate only on owned bounds
+    // and disjoint tree nodes; queries resume after every job has joined.
+    UpdateStatistics Update(std::vector<RenderBounds> bounds);
     std::vector<uint32_t> QueryPointXZ(glm::vec3 point) const
     {
+        if(!m_ready)
+        {
+            std::vector<uint32_t> conservative(m_bounds.size());
+            std::iota(conservative.begin(),conservative.end(),0); return conservative;
+        }
         std::vector<uint32_t> result=m_unbounded;
         const auto contains=[&](const RenderBounds& b) {
             return point.x>=b.minimum.x && point.x<=b.maximum.x && point.z>=b.minimum.z && point.z<=b.maximum.z;
@@ -83,7 +84,8 @@ public:
         for(const auto& view:m_views) if(view.valid && view.clip==clip) return view.visible;
         auto& cache=m_views[m_nextView++ % m_views.size()];
         cache.clip=clip; cache.valid=true;
-        auto& visible=cache.visible; visible.assign(m_bounds.size(),0);
+        auto& visible=cache.visible; visible.assign(m_bounds.size(),m_ready ? 0:1);
+        if(!m_ready) return visible;
         for (auto i:m_unbounded) visible[i]=1;
         glm::vec4 row[4];
         for (int i=0;i<4;++i) row[i]={clip[0][i],clip[1][i],clip[2][i],clip[3][i]};

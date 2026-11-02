@@ -52,3 +52,7 @@ ReleaseBuilds/.staging-*/
 !.local/tests/TerrainColliderStreamingTests.cpp
 
 !.local/tests/test_performance_eval.py
+
+!.local/tests/AssetPreviewAsyncTests.cpp
+
+!.local/tests/RenderSpatialIndexTests.cpp

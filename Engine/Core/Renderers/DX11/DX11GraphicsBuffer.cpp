@@ -8,9 +8,10 @@ namespace Engine::Renderers
 D3D11GraphicsBuffer::D3D11GraphicsBuffer(
     Microsoft::WRL::ComPtr<ID3D11Buffer> buffer,
     Usage usage, AccessMode access, uint64_t size, const void* initialData,
-    uint32_t elementStride, Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> srv)
+    uint32_t elementStride, Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> srv,
+    std::shared_ptr<Engine::Graphics::NativeSubmissionProbe> probe)
     : m_buffer(std::move(buffer)), m_usage(usage), m_access(access), m_size(size),
-      m_elementStride(elementStride), m_srv(std::move(srv))
+      m_elementStride(elementStride), m_srv(std::move(srv)),m_native(std::move(probe))
 {
     if (access == AccessMode::Upload)
     {
@@ -30,8 +31,8 @@ void* D3D11GraphicsBuffer::Map()
         if (!device) return nullptr;
         device->GetImmediateContext(&m_readbackContext);
         D3D11_MAPPED_SUBRESOURCE mapped{};
-        if (!m_readbackContext || FAILED(m_readbackContext->Map(m_buffer.Get(),
-            0, D3D11_MAP_READ, 0, &mapped)))
+        if (!m_readbackContext || FAILED(Engine::Graphics::MeasureNative(m_native.get(),Engine::Graphics::NativeOperation::Readback,[&] { return m_readbackContext->Map(m_buffer.Get(),
+            0, D3D11_MAP_READ, 0, &mapped); })))
         {
             m_readbackContext.Reset();
             return nullptr;
@@ -48,7 +49,7 @@ void D3D11GraphicsBuffer::Unmap()
     if (m_access == AccessMode::Readback)
     {
         if (m_readbackContext)
-            m_readbackContext->Unmap(m_buffer.Get(), 0);
+            Engine::Graphics::MeasureNative(m_native.get(),Engine::Graphics::NativeOperation::Readback,[&] { return m_readbackContext->Unmap(m_buffer.Get(), 0); });
         m_readbackContext.Reset();
         return;
     }
@@ -97,15 +98,15 @@ void D3D11GraphicsBuffer::FlushMappedWrites(uint64_t offset, uint64_t size)
         D3D11_BOX region{};
         region.left=static_cast<UINT>(offset); region.right=static_cast<UINT>(end);
         region.bottom=1; region.back=1;
-        context->UpdateSubresource(m_buffer.Get(),0,&region,m_shadowData.data()+offset,0,0);
+        Engine::Graphics::MeasureNative(m_native.get(),Engine::Graphics::NativeOperation::Upload,[&] { return context->UpdateSubresource(m_buffer.Get(),0,&region,m_shadowData.data()+offset,0,0); });
         return;
     }
     D3D11_MAPPED_SUBRESOURCE mapped{};
-    if (SUCCEEDED(context->Map(m_buffer.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped)))
+    if (SUCCEEDED(Engine::Graphics::MeasureNative(m_native.get(),Engine::Graphics::NativeOperation::Map,[&] { return context->Map(m_buffer.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped); })))
     {
         const size_t copyBytes = std::min<size_t>(nativeByteCount, m_shadowData.size());
         std::memcpy(mapped.pData, m_shadowData.data(), copyBytes);
-        context->Unmap(m_buffer.Get(), 0);
+        Engine::Graphics::MeasureNative(m_native.get(),Engine::Graphics::NativeOperation::Upload,[&] { return context->Unmap(m_buffer.Get(), 0); });
     }
 }
 
@@ -187,7 +188,7 @@ std::unique_ptr<Engine::Graphics::IGraphicsBuffer> D3D11BufferFactory::CreateBuf
     D3D11_SUBRESOURCE_DATA data{};
     data.pSysMem = initialData;
     Microsoft::WRL::ComPtr<ID3D11Buffer> buffer;
-    ThrowIfFailed(m_device->CreateBuffer(&desc, initialData ? &data : nullptr, &buffer));
+    ThrowIfFailed(Engine::Graphics::MeasureNative(m_native.get(),Engine::Graphics::NativeOperation::ResourceCreate,[&] { return m_device->CreateBuffer(&desc, initialData ? &data : nullptr, &buffer); }));
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> srv;
     if (access != Engine::Graphics::IGraphicsBuffer::AccessMode::Readback &&
         (usage == Engine::Graphics::IGraphicsBuffer::Usage::ShaderResource ||
@@ -197,10 +198,10 @@ std::unique_ptr<Engine::Graphics::IGraphicsBuffer> D3D11BufferFactory::CreateBuf
         srvDesc.Format = DXGI_FORMAT_UNKNOWN;
         srvDesc.ViewDimension = D3D11_SRV_DIMENSION_BUFFER;
         srvDesc.Buffer.NumElements = static_cast<UINT>(sizeBytes / elementStride);
-        ThrowIfFailed(m_device->CreateShaderResourceView(buffer.Get(), &srvDesc, &srv));
+        ThrowIfFailed(Engine::Graphics::MeasureNative(m_native.get(),Engine::Graphics::NativeOperation::ResourceCreate,[&] { return m_device->CreateShaderResourceView(buffer.Get(), &srvDesc, &srv); }));
     }
     auto result = std::make_unique<D3D11GraphicsBuffer>(
-        std::move(buffer), usage, access, sizeBytes, initialData, elementStride, std::move(srv));
+        std::move(buffer), usage, access, sizeBytes, initialData, elementStride, std::move(srv),m_native);
     if (usage == Engine::Graphics::IGraphicsBuffer::Usage::StorageBuffer &&
         access == Engine::Graphics::IGraphicsBuffer::AccessMode::Default)
     {
@@ -209,8 +210,8 @@ std::unique_ptr<Engine::Graphics::IGraphicsBuffer> D3D11BufferFactory::CreateBuf
         viewDesc.ViewDimension = D3D11_UAV_DIMENSION_BUFFER;
         viewDesc.Buffer.NumElements = static_cast<UINT>(sizeBytes / elementStride);
         Microsoft::WRL::ComPtr<ID3D11UnorderedAccessView> view;
-        ThrowIfFailed(m_device->CreateUnorderedAccessView(result->GetBuffer(),
-            &viewDesc, &view));
+        ThrowIfFailed(Engine::Graphics::MeasureNative(m_native.get(),Engine::Graphics::NativeOperation::ResourceCreate,[&] { return m_device->CreateUnorderedAccessView(result->GetBuffer(),
+            &viewDesc, &view); }));
         result->SetUnorderedAccessView(std::move(view));
     }
     return result;

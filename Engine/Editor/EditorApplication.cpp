@@ -427,6 +427,7 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
             gameBuildManager->PlayInEditor();
         gameBuildManager->Update(playState, postBuildAction);
         hotReload->Update(window->IsFocused());
+        if(editorState->PollBackgroundWork()) renderer->MarkDirty();
         if (playState != Engine::Editor::PlayState::Playing)
         {
             scene->SetGameplayInputEnabled(false);
@@ -478,24 +479,15 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
                     previewScenes.insert(view->GetScene());
             for (Engine::Scene::Scene* previewScene : previewScenes)
             {
-                for (const auto& object : previewScene->GetObjects())
-                {
-                    if (!object || !object->IsEnabledInHierarchy()) continue;
-                    if (auto* emitter = object->GetComponent<Engine::Components::ParticleEmitter>();
-                        emitter && emitter->IsEditorPreviewRunning())
+                for(auto* emitter:previewScene->GetComponents<Engine::Components::ParticleEmitter>())
+                    if(emitter->Owner && emitter->Owner->IsEnabledInHierarchy() && emitter->IsEditorPreviewRunning())
                     {
-                        emitter->Advance(std::max(dt, 0.f),
-                            object->transform.GetWorldMatrix());
-                        previewAdvanced = true;
+                        emitter->Advance(std::max(dt,0.f),emitter->Owner->transform.GetWorldMatrix());
+                        previewAdvanced=true;
                     }
-                    if (auto* animation = object->GetComponent<Engine::Components::AnimationManager>();
-                        animation && animation->IsEditorPreviewRunning())
-                    {
-                        animation->Tick(std::max(dt, 0.f));
-                        previewAdvanced = true;
-                    }
-
-                }
+                for(auto* animation:previewScene->GetComponents<Engine::Components::AnimationManager>())
+                    if(animation->Owner && animation->Owner->IsEnabledInHierarchy() && animation->IsEditorPreviewRunning())
+                    { animation->Tick(std::max(dt,0.f)); previewAdvanced=true; }
             }
             for (auto* previewScene : previewScenes)
             {

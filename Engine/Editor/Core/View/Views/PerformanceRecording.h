@@ -6,6 +6,8 @@
 #include <memory>
 #include <streambuf>
 #include <string>
+#include "Core/Threading/AsyncTextWriter.h"
+#include "Core/Threading/CapturedText.h"
 
 namespace Engine::Editor
 {
@@ -23,14 +25,17 @@ public:
     void Frame(float reportedFrameRate, double elapsedMs,
         double panelDrawMs = 0.0);
     void Sample(const std::string& jsonFields);
+    void Sample(Engine::Threading::CapturedText fields);
     void FrameDetails(const std::string& jsonFields);
+    void FrameDetails(Engine::Threading::CapturedText fields);
+    Engine::Threading::AsyncTextWriter::Statistics GetWriterStatistics() const { return m_writer.ReadStatistics(); }
 
 private:
     class OutputTap;
     static std::string Escape(const std::string& value);
-    std::string Timestamp() const;
+    static std::string Timestamp(std::chrono::system_clock::time_point time);
     mutable std::mutex m_mutex;
-    std::ofstream m_file;
+    Engine::Threading::AsyncTextWriter m_writer;
     uint64_t m_frameIndex = 0;
     std::unique_ptr<OutputTap> m_stdoutTap;
     std::unique_ptr<OutputTap> m_stderrTap;

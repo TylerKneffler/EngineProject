@@ -124,6 +124,7 @@ void AssetsExplorerView::Init(const std::string& assetsPath,
 {
     m_assetsPath = fs::path(assetsPath).lexically_normal().string();
     m_currentDirectory = m_assetsPath;
+    m_directoryCache.Watch(m_assetsPath);
     m_backHistory.clear();
     m_selectedPath.clear();
     m_selectedPaths.clear();
@@ -435,34 +436,10 @@ void AssetsExplorerView::DrawCurrentDirectory(IEditorUi& ui)
         std::function<void(const fs::path&)> drawDirectory;
         drawDirectory = [&](const fs::path& directoryPath)
         {
-            std::vector<fs::directory_entry> entries;
-            for (const auto& entry : fs::directory_iterator(directoryPath))
-            {
-                // Repository metadata such as .gitkeep is not project content.
-                const std::string entryName = entry.path().filename().string();
-                if ((!entryName.empty() && entryName.front() == '.') ||
-                    entry.path().extension() == ".meta")
-                    continue;
-                std::string searchable = entryName;
-                std::transform(searchable.begin(), searchable.end(),
-                    searchable.begin(), [](unsigned char c)
-                    {
-                        return static_cast<char>(std::tolower(c));
-                    });
-                if (!query.empty() && searchable.find(query) == std::string::npos)
-                    continue;
-                entries.push_back(entry);
-            }
-
-            // Directories first, then alphabetical within each kind.
-            std::sort(entries.begin(), entries.end(),
-                [](const fs::directory_entry& a, const fs::directory_entry& b)
-                {
-                    if (a.is_directory() != b.is_directory())
-                        return a.is_directory();
-                    return a.path().filename().string() <
-                        b.path().filename().string();
-                });
+            const auto snapshot=m_directoryCache.Get(directoryPath,query);
+            if(!snapshot) return;
+            if(!snapshot->error.empty()) { m_error="Error reading directory: "+snapshot->error; return; }
+            const auto& entries=snapshot->entries;
 
             for (const auto& entry : entries)
             {
@@ -509,11 +486,9 @@ void AssetsExplorerView::DrawCurrentDirectory(IEditorUi& ui)
                 const EditorUiAssetItemMenuResult menu =
                     ui.AssetItemContextMenu(entryPath.c_str(),
                         entry.path().extension() == ".rig" &&
-                            !fs::exists(entry.path().parent_path() /
-                                (entry.path().stem().string() + ".meshpack")),
+                            !entry.meshPacked,
                         entry.path().extension() == ".rig" &&
-                            fs::exists(entry.path().parent_path() /
-                                (entry.path().stem().string() + ".meshpack")),
+                            entry.meshPacked,
                         directory, !m_clipboardPaths.empty(),
                         !directory && IsCompoundModelSource(entry.path()));
                 if (menu.copyRequested)
@@ -593,31 +568,10 @@ void AssetsExplorerView::DrawGridDirectory(IEditorUi& ui)
         std::transform(query.begin(), query.end(), query.begin(),
             [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
 
-        std::vector<fs::directory_entry> entries;
-        for (const auto& entry : fs::directory_iterator(m_currentDirectory))
-        {
-            const std::string name = entry.path().filename().string();
-            if ((!name.empty() && name.front() == '.') ||
-                entry.path().extension() == ".meta")
-                continue;
-            std::string searchable = name;
-            std::transform(searchable.begin(), searchable.end(),
-                searchable.begin(), [](unsigned char c)
-                {
-                    return static_cast<char>(std::tolower(c));
-                });
-            if (query.empty() || searchable.find(query) != std::string::npos)
-                entries.push_back(entry);
-        }
-        std::sort(entries.begin(), entries.end(),
-            [](const fs::directory_entry& first,
-                const fs::directory_entry& second)
-            {
-                if (first.is_directory() != second.is_directory())
-                    return first.is_directory();
-                return first.path().filename().string() <
-                    second.path().filename().string();
-            });
+        const auto snapshot=m_directoryCache.Get(m_currentDirectory,query);
+        if(!snapshot) { ui.DisabledLabel("Loading assets..."); return; }
+        if(!snapshot->error.empty()) { m_error="Error reading directory: "+snapshot->error; return; }
+        const auto& entries=snapshot->entries;
 
         const float tileSize = AssetThumbnailSize;
         const int columns = std::max(1, static_cast<int>(
@@ -629,7 +583,7 @@ void AssetsExplorerView::DrawGridDirectory(IEditorUi& ui)
             m_visiblePaths.push_back(entryPath);
             const bool directory = entry.is_directory();
             void* preview = nullptr;
-            if (!directory && m_scene && AssetPreviewCache::Supports(entryPath))
+            if (!directory && m_scene && ui.IsRectVisible(tileSize,tileSize) && AssetPreviewCache::Supports(entryPath))
                 preview = m_previewCache.Get(entryPath,
                     m_scene->GetGraphicsProvider());
             const std::string fallback = directory
@@ -655,11 +609,9 @@ void AssetsExplorerView::DrawGridDirectory(IEditorUi& ui)
             const EditorUiAssetItemMenuResult menu =
                 ui.AssetItemContextMenu(entryPath.c_str(),
                     entry.path().extension() == ".rig" &&
-                        !fs::exists(entry.path().parent_path() /
-                            (entry.path().stem().string() + ".meshpack")),
+                        !entry.meshPacked,
                     entry.path().extension() == ".rig" &&
-                        fs::exists(entry.path().parent_path() /
-                            (entry.path().stem().string() + ".meshpack")),
+                        entry.meshPacked,
                     directory, !m_clipboardPaths.empty(),
                     !directory && IsCompoundModelSource(entry.path()));
             if (menu.copyRequested)

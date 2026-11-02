@@ -6,6 +6,7 @@
 #include "IPipelineState.h"
 #include "IGraphicsBuffer.h"
 #include "IGraphicsTexture.h"
+#include "NativeSubmissionTimings.h"
 
 namespace Engine::Graphics
 {
@@ -54,6 +55,8 @@ class IGraphicsContext
 {
 public:
     virtual ~IGraphicsContext() = default;
+    virtual NativePhase GetNativeTimingPhase() const { return NativePhase::Other; }
+    virtual void SetNativeTimingPhase(NativePhase) {}
 
     // Pipeline state
     virtual void SetPipeline(const IPipelineState* pipeline) = 0;
@@ -192,6 +195,9 @@ public:
     virtual uint64_t GetPreparedFrameSerial() const { return 0; }
     virtual void FinalizeFrame() {}
     virtual FrameTimingTelemetry GetFrameTimingTelemetry() const { return {}; }
+    virtual void SetNativeCallTimingEnabled(bool) {}
+    virtual void SetGpuTimingEnabled(bool) {}
+    virtual NativeSubmissionTimings GetNativeSubmissionTimings() const { return {}; }
     virtual bool UsesPersistentConstantBufferArena() const { return false; }
     virtual uint32_t GetConstantBufferArenaWrites() const { return 0; }
     virtual uint32_t GetConstantBufferDiscardMaps() const { return 0; }

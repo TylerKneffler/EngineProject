@@ -75,6 +75,7 @@ public:
     bool Init();
     void InitializeUiState();
     void CheckAssetLocations();
+    bool PollBackgroundWork();
 
     // ---- Access ----
     ::Engine::Core::Window* GetWindow() const { return m_window.get(); }
