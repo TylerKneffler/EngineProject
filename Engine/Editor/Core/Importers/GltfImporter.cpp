@@ -1,4 +1,5 @@
 #include "GltfImporter.h"
+#include "AssetJobControl.h"
 #include "Core/AnimationClipMapping.h"
 
 #include "Core/AssetRecord.h"
@@ -248,6 +249,7 @@ Engine::Model::ModelImportResult GltfImporter::Import(
 
     try
     {
+        AssetJobCheckpoint(0.04f);
         const std::string sourceModelName = SafeName(source.stem().string(), "Model");
         normalizedAssets = fs::path(assetsDirectory).lexically_normal();
         output = UniqueModelDirectory(normalizedAssets, sourceModelName);
@@ -284,6 +286,7 @@ Engine::Model::ModelImportResult GltfImporter::Import(
         std::vector<std::string> imagePaths(asset.images.size());
         for (size_t imageIndex = 0; imageIndex < asset.images.size(); ++imageIndex)
         {
+            AssetJobCheckpoint(0.25f);
             const auto& image = asset.images[imageIndex];
             const std::string name = SafeName(
                 image.name, "Texture " + std::to_string(imageIndex + 1));
@@ -311,6 +314,7 @@ Engine::Model::ModelImportResult GltfImporter::Import(
         std::vector<std::string> materialPaths(asset.materials.size());
         for (size_t materialIndex = 0; materialIndex < asset.materials.size(); ++materialIndex)
         {
+            AssetJobCheckpoint(0.35f);
             const auto& imported = asset.materials[materialIndex];
             Engine::Components::Material material;
             material.diffuseColor = {
@@ -382,6 +386,8 @@ Engine::Model::ModelImportResult GltfImporter::Import(
         std::vector<std::vector<ImportedPrimitiveRuntime>> meshRuntime(asset.meshes.size());
         for (size_t meshIndex = 0; meshIndex < asset.meshes.size(); ++meshIndex)
         {
+            AssetJobCheckpoint(0.45f + 0.35f * static_cast<float>(meshIndex) /
+                std::max<size_t>(1, asset.meshes.size()));
             const auto& importedMesh = asset.meshes[meshIndex];
             meshPaths[meshIndex].resize(importedMesh.primitives.size());
             meshRuntime[meshIndex].resize(importedMesh.primitives.size());
@@ -674,6 +680,7 @@ Engine::Model::ModelImportResult GltfImporter::Import(
         if (manager) manager->clips.reserve(asset.animations.size());
         for (size_t animationIndex = 0; animationIndex < asset.animations.size(); ++animationIndex)
         {
+            AssetJobCheckpoint(0.82f);
             const auto& importedAnimation = asset.animations[animationIndex];
             Engine::Model::AnimationClip animation;
             animation.clipName = importedAnimation.name.empty()
@@ -926,6 +933,7 @@ Engine::Model::ModelImportResult GltfImporter::Import(
                       { "skinIndex", static_cast<double>(skeleton->skinIndex) } });
             }
 
+        AssetJobCheckpoint(0.97f);
         if (manager) manager->RefreshRigClips();
         if (!Engine::Serialization::SceneSerializer::SavePrefab(*prefabRoot, prefabPath.string()))
             throw std::runtime_error("Could not save prefab: " + prefabPath.string());

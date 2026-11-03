@@ -30,6 +30,12 @@ namespace Engine::Editor
         bool playing = false;
         bool measured = true;
         bool playPipeline = false;
+        bool startup = false;
+        uint32_t activity = 0;
+        double uiCpuMilliseconds = 0;
+        uint64_t workerPending = 0;
+        unsigned workerCount = 0;
+        Engine::Threading::AsyncTextWriter::Statistics writer;
         double simulationMilliseconds = 0, simulationCpuMilliseconds = 0;
         double simulationWaitMilliseconds = 0, simulationOverlapMilliseconds = 0;
         double simulationGpuWaitMilliseconds = 0, pipelineRecordMilliseconds = 0;
@@ -65,6 +71,8 @@ namespace Engine::Editor
         void Stop();
         void Record(const EditorFrameProfileSample& sample, Scene::Scene* scene,
             Renderers::IEditorRenderer* renderer);
+        Engine::Threading::AsyncTextWriter::Statistics GetWriterStatistics() const
+        { return output_.ReadStatistics(); }
 
     private:
         Engine::Threading::AsyncTextWriter output_;

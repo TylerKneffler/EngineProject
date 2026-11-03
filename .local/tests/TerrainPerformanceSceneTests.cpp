@@ -95,14 +95,17 @@ int main()
             const auto frameEnd = std::chrono::steady_clock::now();
             const auto gpu = renderer.GetFrameTimingTelemetry();
             const auto cpu = scene.GetLastRenderCpuTimings();
+            const auto shadow = scene.GetShadowDebugSnapshot();
             const auto milliseconds = [](auto first, auto last)
             { return std::chrono::duration<double, std::milli>(last - first).count(); };
             report << "{\"type\":\"frame_details\",\"playing\":true,\"measured\":"
                 << (measured ? "true" : "false") << ",\"parallel_preparation\":"
                 << (parallel ? "true" : "false")
-                << ",\"route\":\"terrain-current-moving\",\"renderer\":\"dx11\""
+                << ",\"route\":\"terrain-current-moving\",\"route_version\":\"v1\",\"renderer\":\"dx11\""
                 << ",\"benchmark_scope\":\"update_and_render_no_editor\",\"view_width\":"
                 << width << ",\"view_height\":" << height
+                << ",\"shadow_cascades\":" << shadow.cascadeCount
+                << ",\"shadow_atlas_resolution\":" << shadow.atlasResolution
                 << ",\"frame_ms\":" << milliseconds(frameStart, frameEnd)
                 << ",\"update_ms\":" << milliseconds(frameStart, afterUpdate)
                 << ",\"render_cpu_total_ms\":" << cpu.totalMs

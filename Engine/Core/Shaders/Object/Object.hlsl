@@ -966,6 +966,62 @@ float4 PSShadowMain(
     return 0.0;
 }
 
+// Opaque foliage keeps the shared instancing and LOD vertex path, but skips
+// clustered lighting, specular BRDFs, reflections and the wide shadow kernel.
+float4 PSFoliageMain(
+    float4 pos : SV_POSITION,
+    float3 worldPos : TEXCOORD2,
+    float3 normal : NORMAL,
+    float2 uv : TEXCOORD,
+    float4 vertexColor : COLOR,
+    nointerpolation uint objectIndex : TEXCOORD11,
+    bool frontFace : SV_IsFrontFace) : SV_TARGET
+{
+    ObjectData objectData = objects[(draw.drawFlags & 0x13080000u) != 0u
+        ? objectIndex : draw.objectIndex];
+    ApplyGeometryFade(objectData, worldPos);
+    if (dot(objectData.traversalClipPlane.xyz,
+        objectData.traversalClipPlane.xyz) > 0.0 &&
+        dot(float4(worldPos, 1.0), objectData.traversalClipPlane) < 0.0)
+        clip(-1.0);
+    if (dot(objectData.portalClipPlane.xyz,
+        objectData.portalClipPlane.xyz) > 0.0 &&
+        dot(float4(worldPos, 1.0), objectData.portalClipPlane) < 0.0)
+        clip(-1.0);
+
+    uint flags = (uint)objectData.materialParams.w;
+    float4 base = objectData.baseColor *
+        ((flags & 4096u) ? float4(1.0, 1.0, 1.0, 1.0) : vertexColor);
+    if (flags & 1u)
+        base *= baseColorMap.Sample(materialSampler, uv) *
+            objectData.pmxTextureTint;
+    if (flags & 32u)
+        clip(base.a - objectData.viewPositionAlphaCutoff.w);
+    if (objectData.ambientUnlit.w > 0.5)
+        return float4(base.rgb + objectData.emissiveOcclusion.rgb, base.a);
+
+    float3 n = normalize(frontFace ? normal : -normal);
+    float3 lit = objectData.ambientUnlit.rgb;
+    [loop] for (uint i = 0u; i < draw.lightCount; ++i)
+    {
+        SceneLightData light = sceneLights[i];
+        if (abs(light.params.y - 1.0) >= 0.25 ||
+            (objectData.lightingChannels.x & asuint(light.attenuation.z)) == 0u)
+            continue;
+        float3 direction = normalize(light.positionRange.xyz);
+        float diffuse = saturate(dot(n, direction));
+        if (diffuse <= 0.0) continue;
+        float shadow = objectData.shadowParams.z > 0.0
+            ? EvaluateDirectionalShadow(objectData, light,
+                worldPos, n, direction, 0)
+            : 1.0;
+        lit += light.colorIntensity.rgb *
+            (light.colorIntensity.w * diffuse * shadow * 0.31830988618);
+    }
+    return float4(base.rgb * lit + objectData.emissiveOcclusion.rgb,
+        base.a);
+}
+
 float4 PSMain(
     float4 pos : SV_POSITION,
     float3 worldPos : TEXCOORD2,

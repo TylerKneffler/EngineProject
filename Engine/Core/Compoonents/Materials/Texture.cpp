@@ -4,6 +4,7 @@
 #include "Core/Graphics/IGraphicsTexture.h"
 #include "Core/Memory/CacheStore.h"
 #include "Core/Rendering/Lighting/EnvironmentMap.h"
+#include "Core/Rendering/RenderJobs.h"
 
 #include <Windows.h>
 #include <wincodec.h>
@@ -20,6 +21,8 @@
 #include <cmath>
 #include <cstring>
 #include <memory>
+#include <deque>
+#include <mutex>
 #include <glm/glm.hpp>
 #include <glm/geometric.hpp>
 
@@ -27,6 +30,8 @@ namespace Engine::Components
 {
 namespace
 {
+std::mutex s_publicationMutex;
+std::deque<std::pair<std::weak_ptr<Texture>, uint64_t>> s_publications;
 std::string TextureIdentity(const std::string& path, bool srgb)
 {
     return Engine::Memory::CacheStore::PathKey(path,
@@ -272,6 +277,11 @@ void Texture::Invalidate(const std::string& path)
 
 void Texture::InvalidateCache()
 {
+    ++m_generation;
+    m_decode = {};
+    m_queued = false;
+    m_queuedProvider = nullptr;
+    m_decodeFailed = false;
     m_pixels.clear();
     m_width = m_height = 0;
     m_mipLevels = 0;
@@ -439,12 +449,7 @@ void Texture::Reload()
     Engine::Rendering::EnvironmentMap::Invalidate(m_filePath);
     Engine::Memory::CacheStore::Get().Erase("Lighting.EnvironmentSH",
         Engine::Memory::CacheStore::PathKey(m_filePath));
-    m_pixels.clear();
-    m_width = m_height = 0;
-    m_mipLevels = 0;
-    m_format = GraphicsTextureFormat::Rgba8;
-    m_graphicsTexture.reset();
-    m_preparedProvider = nullptr;
+    InvalidateCache();
 }
 
 bool Texture::SetPreviewPixels(const std::vector<uint8_t>& rgba)
@@ -453,6 +458,11 @@ bool Texture::SetPreviewPixels(const std::vector<uint8_t>& rgba)
         rgba.size() != static_cast<size_t>(m_width) * m_height * 4)
         return false;
     m_pixels = rgba;
+    ++m_generation;
+    m_decode = {};
+    m_queued = false;
+    m_queuedProvider = nullptr;
+    m_decodeFailed = false;
     m_mipLevels = m_generateMips ? FullMipCount(m_width, m_height):1;
     if(m_generateMips) GenerateMipChain(m_pixels, m_width, m_height, m_format, m_srgb);
     m_graphicsTexture.reset();
@@ -460,7 +470,104 @@ bool Texture::SetPreviewPixels(const std::vector<uint8_t>& rgba)
     return true;
 }
 
+void Texture::QueuePrepare(IGraphicsProvider* graphicsProvider)
+{
+    if (!graphicsProvider || m_decodeFailed ||
+        (m_graphicsTexture && m_graphicsTexture->GetNativeHandle() &&
+            m_preparedProvider == graphicsProvider))
+        return;
+    if (m_queued)
+    {
+        if (m_queuedProvider == graphicsProvider) return;
+        ++m_generation; // Retire the publication requested for the old provider.
+    }
+    if (m_pixels.empty() && !m_decode.valid())
+    {
+        const auto path = m_filePath;
+        const bool srgb = m_srgb;
+        m_decode = Engine::Rendering::RenderJobs::Get().Submit([path, srgb] {
+            auto decoded = std::shared_ptr<Texture>(new Texture(path, srgb));
+            return decoded->Load() ? decoded : std::shared_ptr<Texture>{};
+        });
+    }
+    m_queued = true;
+    m_queuedProvider = graphicsProvider;
+    std::lock_guard lock(s_publicationMutex);
+    s_publications.emplace_back(weak_from_this(), m_generation);
+}
+
+void Texture::PublishQueued(IGraphicsProvider* graphicsProvider, size_t maxUploads)
+{
+    if (!graphicsProvider || !maxUploads)
+        return;
+    size_t pending = 0;
+    {
+        std::lock_guard lock(s_publicationMutex);
+        pending = s_publications.size();
+    }
+    for (size_t checked = 0, attempted = 0;
+        checked < pending && attempted < maxUploads; ++checked)
+    {
+        std::pair<std::weak_ptr<Texture>, uint64_t> entry;
+        {
+            std::lock_guard lock(s_publicationMutex);
+            if (s_publications.empty()) break;
+            entry = s_publications.front();
+            s_publications.pop_front();
+        }
+        auto texture = entry.first.lock();
+        if (!texture || entry.second != texture->m_generation || !texture->m_queued)
+            continue;
+        if (texture->m_queuedProvider != graphicsProvider)
+        {
+            std::lock_guard lock(s_publicationMutex);
+            s_publications.push_back(std::move(entry));
+            continue;
+        }
+        if (texture->m_decode.valid())
+        {
+            if (texture->m_decode.wait_for(std::chrono::seconds(0)) !=
+                std::future_status::ready)
+            {
+                std::lock_guard lock(s_publicationMutex);
+                s_publications.push_back(std::move(entry));
+                continue;
+            }
+            try
+            {
+                auto decoded = texture->m_decode.get();
+                if (decoded)
+                {
+                    texture->m_width = decoded->m_width;
+                    texture->m_height = decoded->m_height;
+                    texture->m_mipLevels = decoded->m_mipLevels;
+                    texture->m_format = decoded->m_format;
+                    texture->m_pixels = std::move(decoded->m_pixels);
+                }
+                else texture->m_decodeFailed = true;
+            }
+            catch (...) { texture->m_decodeFailed = true; }
+        }
+        texture->m_queued = false;
+        texture->m_queuedProvider = nullptr;
+        if (!texture->m_decodeFailed)
+        {
+            ++attempted;
+            texture->PrepareImmediate(graphicsProvider);
+        }
+    }
+}
+
 bool Texture::Prepare(IGraphicsProvider* graphicsProvider)
+{
+    if (!graphicsProvider) return false;
+    if (m_graphicsTexture && m_graphicsTexture->GetNativeHandle() &&
+        m_preparedProvider == graphicsProvider) return true;
+    QueuePrepare(graphicsProvider);
+    return false;
+}
+
+bool Texture::PrepareImmediate(IGraphicsProvider* graphicsProvider)
 {
     if (!graphicsProvider)
         return false;
@@ -510,7 +617,8 @@ bool Texture::Prepare(IGraphicsProvider* graphicsProvider)
     m_preparedProvider = m_graphicsTexture ? graphicsProvider : nullptr;
     // Ordinary material textures remain on the GPU. Editors can decode the
     // source again through GetPixels() when they actually need CPU pixels.
-    if (m_graphicsTexture && m_format == GraphicsTextureFormat::Rgba8)
+    if (m_graphicsTexture && m_format == GraphicsTextureFormat::Rgba8 &&
+        !m_retainPixelsForCpu)
         std::vector<uint8_t>().swap(m_pixels);
     return static_cast<bool>(m_graphicsTexture);
 }

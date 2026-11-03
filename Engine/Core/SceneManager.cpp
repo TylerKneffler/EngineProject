@@ -1,6 +1,8 @@
 #include "pch.h"
 #include "Core/SceneManager.h"
 #include "Core/Scene/Scene.h"
+#include "Core/Serialization/SceneSerializer.h"
+#include "Core/Serialization/Json.h"
 #include <condition_variable>
 #include <fstream>
 #include <iterator>
@@ -26,7 +28,7 @@ public:
     };
     struct Result
     {
-        std::string source;
+        Engine::Serialization::JsonValue document;
         Callback callback;
         uint64_t generation = 0;
         uint64_t sceneGeneration = 0;
@@ -95,14 +97,10 @@ private:
                 result.callback = std::move(request.callback);
                 try
                 {
-                    std::ifstream file(request.path, std::ios::binary);
-                    if (file)
-                    {
-                        result.source.assign(std::istreambuf_iterator<char>(file), {});
-                        result.readSucceeded = !file.bad();
-                    }
+                    result.document = Engine::Serialization::SceneSerializer::ReadSceneFile(request.path);
+                    result.readSucceeded = result.document.IsObject();
                 }
-                catch (...) { result.source.clear(); result.readSucceeded = false; }
+                catch (...) { result.document = {}; result.readSucceeded = false; }
                 lock.lock();
                 if (request.id == m_latestId && !m_stopping)
                     m_completed = std::move(result);
@@ -176,8 +174,7 @@ void SceneManager::RequestSceneLoad(const std::string& path)
     {
         if (s_activeScene)
             s_activeScene->AssertOwnerThread();
-        SceneReader().Cancel();
-        s_pendingScenePath = path;
+        LoadSceneAsync(path, {});
     }
 }
 
@@ -201,20 +198,12 @@ bool SceneManager::ProcessPendingSceneLoad()
 {
     if (s_activeScene)
         s_activeScene->AssertOwnerThread();
-    if (!s_pendingScenePath.empty())
-    {
-        std::string path = std::move(s_pendingScenePath);
-        s_pendingScenePath.clear();
-        if (!LoadScene(path)) return false;
-        s_activeScene->Start();
-        return true;
-    }
     auto result = SceneReader().TakeCompleted();
     if (!result || result->generation != s_sceneGeneration || !s_activeScene ||
         result->sceneGeneration != s_activeScene->CaptureSceneGeneration())
         return false;
     Engine::Scene::Scene* loaded = nullptr;
-    if (result->readSucceeded && s_activeScene->LoadFromString(result->source))
+    if (result->readSucceeded && s_activeScene->LoadFromValue(result->document))
     {
         s_activeScene->Start();
         loaded = s_activeScene;

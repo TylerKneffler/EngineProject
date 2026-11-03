@@ -5,6 +5,8 @@
 #include "Core/Serialization/SceneSerializer.h"
 #include <chrono>
 #include <filesystem>
+#include <fstream>
+#include <future>
 #include <iostream>
 #include <stdexcept>
 
@@ -22,15 +24,37 @@ int main()
         fs::path path;
         ~Cleanup() { std::error_code error; fs::remove(path, error); }
     } cleanup{prefabPath};
+    Cleanup sceneCleanup{prefabPath.string() + ".scene"};
 
     try
     {
         Engine::Scene::Scene source;
         auto* original = source.AddObject("Prefab object");
-        CHECK(SceneSerializer::SavePrefab(*original, prefabPath.string()));
+        const auto capturedScene = SceneSerializer::CaptureSceneDocument(source);
+        auto sceneXml = std::async(std::launch::async, [capturedScene] {
+            return SceneSerializer::EncodeSceneFile(capturedScene);
+        }).get();
+        {
+            std::ofstream sceneFile(sceneCleanup.path, std::ios::binary);
+            sceneFile << sceneXml;
+        }
+        auto parsedScene = std::async(std::launch::async, [&] {
+            return SceneSerializer::ReadSceneFile(sceneCleanup.path.string());
+        }).get();
+        Engine::Scene::Scene parsedSceneInstance;
+        CHECK(SceneSerializer::LoadFromValue(parsedSceneInstance, parsedScene));
+        CHECK(parsedSceneInstance.GetObjects().size() == 1);
+        CHECK(parsedSceneInstance.GetObjects().front()->name == "Prefab object");
+        auto savePrefab = SceneSerializer::PreparePrefabSave(*original, prefabPath.string());
+        CHECK(std::async(std::launch::async, std::move(savePrefab)).get());
+
+        auto parsedPrefab = std::async(std::launch::async, [&] {
+            return SceneSerializer::ReadPrefabFile(prefabPath.string());
+        }).get();
 
         Engine::Scene::Scene scene;
-        auto* first = SceneSerializer::InstantiatePrefab(scene, prefabPath.string());
+        auto* first = SceneSerializer::InstantiatePrefabFromValue(
+            scene, prefabPath.string(), parsedPrefab);
         auto* second = SceneSerializer::InstantiatePrefab(scene, prefabPath.string());
         CHECK(first && second);
 

@@ -21,6 +21,8 @@ public:
     std::unique_ptr<Engine::Graphics::IShader> CompileFromFile(const std::string& filePath,
         const char* entryPoint, CompileProfile profile) override;
     std::string GetLastError() const override { return m_lastError; }
+    std::unique_ptr<Engine::Graphics::IShaderCompiler> CreateWorkerCompiler() const override
+    { return std::make_unique<VulkanShaderCompiler>(); }
 private:
     std::string m_lastError;
 };

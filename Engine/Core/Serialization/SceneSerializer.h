@@ -7,6 +7,7 @@
 namespace Engine::Core { class Component; class Object; }
 namespace Engine::Scene { class Scene; }
 namespace Engine::Graphics { class IGraphicsProvider; }
+namespace Engine::Serialization { class JsonValue; }
 
 namespace Engine::Serialization
 {
@@ -85,7 +86,18 @@ public:
     // Compact, lossless editor history/play snapshot. LoadFromString accepts
     // these bytes as well as the public XML/JSON scene formats.
     static std::string SaveSnapshotToString(const Scene& scene);
+    // Capture the live graph on its owner; these value-only operations may run
+    // on an IO worker after the owner releases the snapshot.
+    static JsonValue CaptureSceneDocument(const Scene& scene);
+    static std::string EncodeSceneSnapshot(const JsonValue& document);
+    static std::string EncodeSceneFile(const JsonValue& document);
+    static JsonValue ParseSceneText(const std::string& source);
+    static JsonValue ReadSceneFile(const std::string& path);
     static bool LoadFromString(Scene& scene, const std::string& source,
+        IGraphicsProvider* graphicsProvider = nullptr);
+    // Restore a previously parsed snapshot without decoding its binary form.
+    // The caller owns rollback if a component or prefab fails during restore.
+    static bool LoadFromValue(Scene& scene, const JsonValue& snapshot,
         IGraphicsProvider* graphicsProvider = nullptr);
 
     // Capture and recreate one object plus its complete child hierarchy.
@@ -101,10 +113,17 @@ public:
 
     static bool SavePrefab(const Object& object, const std::string& path,
         bool preserveRootTransform = false);
+    // Capture on the scene owner, then invoke the returned value-only job on
+    // an IO worker. It owns the prefab and rig data needed by the save.
+    static std::function<bool()> PreparePrefabSave(const Object& object,
+        const std::string& path, bool preserveRootTransform = false);
     static std::string SavePrefabToString(const Object& object,
         bool includeRootTransform = true);
     static Object* InstantiatePrefab(Scene& scene, const std::string& path,
         IGraphicsProvider* graphicsProvider = nullptr);
+    static JsonValue ReadPrefabFile(const std::string& path);
+    static Object* InstantiatePrefabFromValue(Scene& scene, const std::string& path,
+        const JsonValue& document, IGraphicsProvider* graphicsProvider = nullptr);
     // Reload every scene instance that references path while preserving each
     // root placement transform. preservedInstance can identify the instance
     // already edited in-place; it will not be rebuilt. Returns false if the

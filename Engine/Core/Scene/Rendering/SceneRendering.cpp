@@ -106,6 +106,22 @@ namespace
         return (std::filesystem::path(ENGINE_SHADERS_PATH) / relativePath).string();
     }
 
+    bool IsFastFoliageSurface(const Engine::Components::Material* material)
+    {
+        if (!material || material->baseColorUvSet != 0 ||
+            material->GetAlphaMode() == Engine::Components::MaterialAlphaMode::Blend)
+            return false;
+        const Engine::Components::MaterialShader* surface = nullptr;
+        for (const auto& shader : material->shaders)
+        {
+            if (!shader.enabled) continue;
+            if (surface) return false;
+            surface = &shader;
+        }
+        return surface && surface->path == "Assets/Shaders/Foliage.hlsl" &&
+            (surface->blendMode == "Auto" || surface->blendMode == "Opaque");
+    }
+
     bool IsObjectOrDescendant(const Engine::Core::Object* object, const Engine::Core::Object* root)
     {
         for (const Engine::Core::Object* current = object; current; current = current->Parent)
@@ -123,31 +139,6 @@ namespace
             hash *= prime;
         }
     }
-
-    struct MeshPositionKey
-    {
-        float x;
-        float y;
-        float z;
-
-        bool operator==(const MeshPositionKey& other) const
-        {
-            return x == other.x && y == other.y && z == other.z;
-        }
-    };
-
-    struct MeshPositionKeyHash
-    {
-        size_t operator()(const MeshPositionKey& value) const
-        {
-            size_t result = std::hash<float>{}(value.x);
-            result ^= std::hash<float>{}(value.y) + 0x9e3779b9u +
-                (result << 6u) + (result >> 2u);
-            result ^= std::hash<float>{}(value.z) + 0x9e3779b9u +
-                (result << 6u) + (result >> 2u);
-            return result;
-        }
-    };
 
     float RadicalInverseVdc(uint32_t bits)
     {
@@ -788,7 +779,7 @@ void Scene::BuildSkyboxPipeline()
         (std::filesystem::path(ENGINE_ASSETS_PATH) / "Textures" / "Skyboxes" /
             "editor-default-sky.png").string();
     m_defaultSkyboxTexture = Engine::Components::Texture::Acquire(defaultPath);
-    if (!m_defaultSkyboxTexture->Prepare(m_graphicsProvider))
+    if (!m_defaultSkyboxTexture->PrepareImmediate(m_graphicsProvider))
         m_defaultSkyboxTexture.reset();
 }
 
@@ -808,10 +799,10 @@ const Engine::Components::Texture* Scene::ResolveSkyboxTexture()
     {
         m_loadedSkyboxPath = settings.skyboxTexture;
         m_sceneSkyboxTexture = Engine::Components::Texture::Acquire(settings.skyboxTexture);
-        if (!m_sceneSkyboxTexture->Prepare(m_graphicsProvider))
-            m_sceneSkyboxTexture.reset();
     }
-    return m_sceneSkyboxTexture ? m_sceneSkyboxTexture.get() : m_defaultSkyboxTexture.get();
+    if (m_sceneSkyboxTexture && m_sceneSkyboxTexture->Prepare(m_graphicsProvider))
+        return m_sceneSkyboxTexture.get();
+    return m_defaultSkyboxTexture.get();
 }
 
 const Engine::Components::Texture* Scene::GetSkyboxPreviewTexture()
@@ -841,8 +832,7 @@ Scene::ResolveReflectionEnvironment(
 {
     if (!material.useCustomReflectionEnvironment ||
         !material.reflectionEnvironmentMap ||
-        (!material.reflectionEnvironmentMap->HasPixels() &&
-            !material.reflectionEnvironmentMap->Load()))
+        !material.reflectionEnvironmentMap->HasPixels())
         return nullptr;
     auto environment = Engine::Rendering::EnvironmentMap::Acquire(
         *material.reflectionEnvironmentMap);
@@ -1092,7 +1082,7 @@ void Scene::RenderParticles(IGraphicsContext* context,
                 const size_t sampleCount = std::min(particles.size(), FluidSurfaceLimit);
                 std::vector<FluidSurfaceParticleData> surface(sampleCount + 1u);
                 surface[0].meta.x = static_cast<uint32_t>(sampleCount);
-                for (size_t i = 0; i < sampleCount; ++i)
+                Engine::Rendering::RenderJobs::Get().For(sampleCount, 128, [&](size_t i)
                 {
                     const auto& particle = particles[i * particles.size() / sampleCount];
                     const glm::vec3 position = emitter->worldSpace
@@ -1105,7 +1095,7 @@ void Scene::RenderParticles(IGraphicsContext* context,
                     surface[i + 1u].colorSize = glm::vec4(particle.color,
                         particle.size * std::clamp(emitter->fluidVisualRadiusScale,
                             0.5f, 3.f));
-                }
+                });
                 auto buffer = bufferFactory->CreateBuffer(
                     IGraphicsBuffer::Usage::ShaderResource,
                     IGraphicsBuffer::AccessMode::Upload,
@@ -1118,19 +1108,23 @@ void Scene::RenderParticles(IGraphicsContext* context,
                     static_cast<uint32_t>(particles.size()) });
                 continue;
             }
-            for (const auto& particle : emitter->GetParticles())
+            const auto& particles = emitter->GetParticles();
+            const size_t count = std::min(particles.size(),
+                RenderLimit - records.size());
+            records.resize(records.size() + count);
+            Engine::Rendering::RenderJobs::Get().For(count, 512, [&](size_t index)
             {
-                if (records.size() >= RenderLimit) break;
+                const auto& particle = particles[index];
                 const glm::vec3 position = emitter->worldSpace
                     ? particle.position
                     : glm::vec3(world * glm::vec4(particle.position, 1.f));
                 const float fade = std::clamp(1.f - particle.age /
                     std::max(particle.lifetime, 0.001f), 0.f, 1.f);
-                records.push_back({ glm::vec4(position, particle.size),
+                records[batchFirst + index] = { glm::vec4(position, particle.size),
                     glm::vec4(particle.color, fade *
                         std::clamp(emitter->opacity, 0.f, 1.f)),
-                    glm::vec4(particle.rotation, 0.f, 0.f, 0.f) });
-            }
+                    glm::vec4(particle.rotation, 0.f, 0.f, 0.f) };
+            });
             const uint32_t batchCount = static_cast<uint32_t>(records.size()) - batchFirst;
             if (batchCount)
                 slot.batches.push_back({ batchFirst, batchCount,
@@ -1272,6 +1266,71 @@ void Scene::RenderParticles(IGraphicsContext* context,
         context->EndGpuTiming(Engine::Graphics::GpuTimingStage::Transparent);
 }
 
+Scene::MaterialShaderFuture Scene::QueueMaterialShaderBytecode(
+    const std::string& path, bool terrain, int64_t stamp)
+{
+    const std::string key = path + "|" + (terrain ? "terrain|" : "mesh|") +
+        std::to_string(stamp);
+    if (auto found = m_materialShaderBytecode.find(key);
+        found != m_materialShaderBytecode.end()) return found->second;
+    auto compiler = m_graphicsProvider->GetShaderCompiler()->CreateWorkerCompiler();
+    auto future = Engine::Rendering::RenderJobs::Get().Submit(
+        [path, terrain, compiler = std::move(compiler)]() mutable {
+            MaterialShaderBytecode result;
+            const char* vertexEntry = terrain ? "VSTerrainMain" : "VSMain";
+            auto vertex = compiler->CompileFromFile(path, vertexEntry,
+                Engine::Graphics::IShaderCompiler::CompileProfile::VS_5_0);
+            if (!vertex) { result.error = path + ": " + compiler->GetLastError(); return result; }
+            auto pixel = compiler->CompileFromFile(path, "PSMain",
+                Engine::Graphics::IShaderCompiler::CompileProfile::PS_5_0);
+            if (!pixel) { result.error = path + ": " + compiler->GetLastError(); return result; }
+            result.vertex = std::move(vertex);
+            result.pixel = std::move(pixel);
+            return result;
+        }).share();
+    return m_materialShaderBytecode.emplace(key, std::move(future)).first->second;
+}
+
+void Scene::PrewarmMaterialShaders(const Engine::Components::Material& material,
+    bool terrain)
+{
+    if (!m_graphicsProvider || !m_graphicsProvider->GetShaderCompiler()) return;
+    for (const auto& shader : material.shaders)
+    {
+        if (!shader.enabled || shader.path.empty()) continue;
+        const std::string path = material.ResolveShaderPath(shader.path);
+        if (std::filesystem::path(path).extension() != ".hlsl") continue;
+        std::error_code error;
+        const auto modified = std::filesystem::last_write_time(path, error);
+        if (!error) QueueMaterialShaderBytecode(path, terrain,
+            modified.time_since_epoch().count());
+    }
+}
+
+void Scene::PublishMaterialShaderPipelines(size_t maxPipelines)
+{
+    size_t published = 0;
+    for (auto& [key, cached] : m_materialShaderPipelines)
+    {
+        if (published >= maxPipelines) break;
+        if (!cached.bytecode.valid() || cached.pipeline || !cached.error.empty() ||
+            cached.bytecode.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+            continue;
+        try
+        {
+            const auto& bytecode = cached.bytecode.get();
+            if (!bytecode.error.empty()) cached.error = bytecode.error;
+            else if (auto builder = m_materialShaderBuilders.find(cached.base);
+                builder != m_materialShaderBuilders.end())
+                cached.pipeline = builder->second(bytecode.vertex.get(),
+                    bytecode.pixel.get(), cached.overlay, cached.blendMode);
+            else cached.error = "Material shader is unsupported for this render pass";
+        }
+        catch (const std::exception& exception) { cached.error = exception.what(); }
+        ++published;
+    }
+}
+
 Scene::IPipelineState* Scene::ResolveMaterialShaderPipeline(
     const std::string& requestedPath, IPipelineState* base, bool terrain,
     bool overlay, const std::string& blendMode, std::string& error)
@@ -1299,6 +1358,10 @@ Scene::IPipelineState* Scene::ResolveMaterialShaderPipeline(
         m_retiredMaterialShaderPipelines.push_back(std::move(cached.pipeline));
     cached.sourceStamp = stamp;
     cached.error.clear();
+    cached.base = base;
+    cached.overlay = overlay;
+    cached.blendMode = blendMode;
+    cached.bytecode = {};
     try
     {
         std::string extension = std::filesystem::path(path).extension().string();
@@ -1311,15 +1374,7 @@ Scene::IPipelineState* Scene::ResolveMaterialShaderPipeline(
         const auto builder = m_materialShaderBuilders.find(base);
         if (builder == m_materialShaderBuilders.end())
             throw std::runtime_error("Material shader is unsupported for this render pass");
-        auto* compiler = m_graphicsProvider->GetShaderCompiler();
-        const char* vertexEntry = terrain ? "VSTerrainMain" : "VSMain";
-        auto vertex = compiler->CompileFromFile(path, vertexEntry,
-            Engine::Graphics::IShaderCompiler::CompileProfile::VS_5_0);
-        if (!vertex) throw std::runtime_error(path + ": " + compiler->GetLastError());
-        auto pixel = compiler->CompileFromFile(path, "PSMain",
-            Engine::Graphics::IShaderCompiler::CompileProfile::PS_5_0);
-        if (!pixel) throw std::runtime_error(path + ": " + compiler->GetLastError());
-        cached.pipeline = builder->second(vertex.get(), pixel.get(), overlay, blendMode);
+        cached.bytecode = QueueMaterialShaderBytecode(path, terrain, stamp);
     }
     catch (const std::exception& exception)
     {
@@ -1400,6 +1455,7 @@ void Scene::BuildObjectPipeline()
     m_terrainPipelineByBase.clear();
     m_materialShaderBuilders.clear();
     m_materialShaderPipelines.clear();
+    m_materialShaderBytecode.clear();
     if (!m_deferGraphicsRetirement)
         m_retiredMaterialShaderPipelines.clear();
 
@@ -1937,6 +1993,8 @@ void Scene::ProcessGraphicsPreparation(IGraphicsProvider* graphicsProvider)
 void Scene::PrepareRenderFrame(bool publishSnapshot)
 {
     AssertOwnerThread();
+    Engine::Components::Texture::PublishQueued(m_graphicsProvider);
+    PublishMaterialShaderPipelines();
     const bool priorPublicationSuppressed = m_suppressSceneSnapshotPublication;
     struct RestorePublication
     {
@@ -2066,6 +2124,7 @@ void Scene::PrepareRenderFrame(bool publishSnapshot)
             lookup.object->IsEnabledInHierarchy() ? 1u : 0u);
     }
 
+    std::optional<SpatialWarpSnapshot> warpSnapshot;
     m_frameRenderItems.reserve(m_objects.size());
     if (!hasActiveWarpVolume)
     {
@@ -2166,6 +2225,7 @@ void Scene::PrepareRenderFrame(bool publishSnapshot)
                     {
                         item.material->Validate();
                         item.material->PrepareTextures(m_graphicsProvider);
+                        PrewarmMaterialShaders(*item.material, item.terrainSurface);
                         item.castsShadows = item.material->castsShadows;
                         item.blended = item.material->GetAlphaMode() ==
                             Engine::Components::MaterialAlphaMode::Blend;
@@ -2261,6 +2321,8 @@ void Scene::PrepareRenderFrame(bool publishSnapshot)
             }
             else
             {
+            if (!warpSnapshot)
+                warpSnapshot.emplace(CaptureSpatialWarpSnapshot());
             const glm::mat3 authoredLinear(authoredWorld);
             const float authoredDeterminant = glm::determinant(authoredLinear);
             const glm::mat3 authoredNormal =
@@ -2268,32 +2330,24 @@ void Scene::PrepareRenderFrame(bool publishSnapshot)
                 std::abs(authoredDeterminant) > 1e-7f
                     ? glm::transpose(glm::inverse(authoredLinear))
                     : glm::mat3(1.f);
-            const SpatialQuery renderQuery {
-                SpatialQueryDomain::Rendering, candidate };
-            const SpatialQuerySample originSample = SampleSpatialPoint(
-                glm::vec3(authoredWorld[3]), renderQuery);
-            std::vector<Engine::Model::AnimationVertex> warpedVertices;
-            warpedVertices.reserve(mesh->GetVertices().size());
-            std::unordered_map<MeshPositionKey, SpatialQuerySample,
-                MeshPositionKeyHash> spatialSamples;
-            spatialSamples.reserve(mesh->GetVertices().size());
-            bool affectedByWarp = originSample.affectedByWarpVolume;
-            for (const Engine::Model::AnimationVertex& sourceVertex : mesh->GetVertices())
+            const SpatialQuerySample originSample = warpSnapshot->Sample(
+                glm::vec3(authoredWorld[3]), candidate);
+            const auto& sourceVertices = mesh->GetVertices();
+            std::vector<Engine::Model::AnimationVertex> warpedVertices(
+                sourceVertices.size());
+            std::vector<uint8_t> affectedVertices(sourceVertices.size());
+            Engine::Rendering::RenderJobs::Get().For(sourceVertices.size(), 256,
+                [&](size_t index)
             {
+                const auto& sourceVertex = sourceVertices[index];
                 Engine::Model::AnimationVertex warpedVertex = sourceVertex;
                 const glm::vec3 localPosition(sourceVertex.pos[0],
                     sourceVertex.pos[1], sourceVertex.pos[2]);
                 const glm::vec3 worldPosition = glm::vec3(authoredWorld *
                     glm::vec4(localPosition, 1.f));
-                const MeshPositionKey positionKey {
-                    localPosition.x, localPosition.y, localPosition.z };
-                auto [sampleIt, inserted] = spatialSamples.try_emplace(
-                    positionKey);
-                if (inserted)
-                    sampleIt->second = SampleSpatialPoint(worldPosition,
-                        renderQuery);
-                const SpatialQuerySample& sample = sampleIt->second;
-                affectedByWarp = affectedByWarp || sample.affectedByWarpVolume;
+                const SpatialQuerySample sample = warpSnapshot->Sample(
+                    worldPosition, candidate);
+                affectedVertices[index] = sample.affectedByWarpVolume ? 1 : 0;
 
                 const glm::vec3 localNormal(sourceVertex.normal[0],
                     sourceVertex.normal[1], sourceVertex.normal[2]);
@@ -2329,8 +2383,11 @@ void Scene::PrepareRenderFrame(bool publishSnapshot)
                 warpedVertex.tangent[0] = warpedTangent.x;
                 warpedVertex.tangent[1] = warpedTangent.y;
                 warpedVertex.tangent[2] = warpedTangent.z;
-                warpedVertices.push_back(warpedVertex);
-            }
+                warpedVertices[index] = warpedVertex;
+            });
+            const bool affectedByWarp = originSample.affectedByWarpVolume ||
+                std::any_of(affectedVertices.begin(), affectedVertices.end(),
+                    [](uint8_t affected) { return affected != 0; });
             if (affectedByWarp)
             {
                 const size_t byteSize = warpedVertices.size() *
@@ -2392,6 +2449,7 @@ void Scene::PrepareRenderFrame(bool publishSnapshot)
         {
             item.material->Validate();
             item.material->PrepareTextures(m_graphicsProvider);
+            PrewarmMaterialShaders(*item.material, item.terrainSurface);
             item.blended = item.material->GetAlphaMode() ==
                 Engine::Components::MaterialAlphaMode::Blend;
         }
@@ -2461,7 +2519,8 @@ void Scene::PrepareRenderFrame(bool publishSnapshot)
             if(source && source->IsInstanced() && source->gpuLodSelection &&
                 draw.object!=m_selectedObject && source!=m_editorSelectedMesh && source!=m_editorWeightPaintMesh &&
                 !draw.warpedVertexBuffer && !draw.traversalChartPortal && source->IsRuntimeLodResident(0) && source->IsRuntimeLodResident(1) &&
-                (!draw.material || std::none_of(draw.material->shaders.begin(),draw.material->shaders.end(),[](const auto& shader){return shader.enabled;})))
+                (!draw.material || IsFastFoliageSurface(draw.material) ||
+                    std::none_of(draw.material->shaders.begin(),draw.material->shaders.end(),[](const auto& shader){return shader.enabled;})))
             {
                 draw.gpuMaximumLod=source->IsRuntimeLodResident(2) ? 2:1;
                 draw.gpuLodDistances={std::max(0.f,source->gpuLod1Distance),std::max(source->gpuLod1Distance,source->gpuLod2Distance)};
@@ -3767,6 +3826,10 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     };
     std::vector<PreparedDraw> preparedDraws;
     preparedDraws.reserve(renderObjects.size());
+    // All streamed grass tiles share the same foliage asset and a small set
+    // of base pipeline variants. Resolve each variant once per view.
+    std::unordered_map<IPipelineState*,
+        std::pair<IPipelineState*, std::string>> foliagePipelines;
     std::shared_ptr<Engine::Components::Texture> measurementGridTexture;
     bool measurementGridReady = false;
 
@@ -4437,6 +4500,20 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                     : (doubleSided
                         ? m_objectDoubleSidedPipeline.get()
                         : m_objectPipeline.get());
+        if (!shadowOnly && !isPreview && !wireframeMode && !sprite && mesh &&
+            !preparedDraw.terrain && !preparedDraw.terrainCell &&
+            !mesh->HasMorphTargets() && !mesh->HasSurfaceOffsets() &&
+            !renderItem->skinJointCount && IsFastFoliageSurface(mat))
+        {
+            auto [entry, inserted] = foliagePipelines.try_emplace(materialPipeline);
+            if (inserted)
+                entry->second.first = ResolveMaterialShaderPipeline(
+                    mat->ResolveShaderPath("Assets/Shaders/Foliage.hlsl"),
+                    materialPipeline, false, false, "Auto",
+                    entry->second.second);
+            if (entry->second.first) materialPipeline = entry->second.first;
+            else mat->shaderError = entry->second.second;
+        }
         preparedDraw.pipeline = materialPipeline;
         preparedDraw.constantBufferOffset = offset;
         preparedDraw.vertexBuffer = sprite
@@ -4495,8 +4572,10 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     for (uint32_t index=0;index<preparedDraws.size();++index)
     {
         auto& draw=preparedDraws[index];
-        const bool custom = draw.material && std::any_of(draw.material->shaders.begin(),draw.material->shaders.end(),
-            [](const auto& shader) { return shader.enabled; });
+        const bool custom = draw.material &&
+            !IsFastFoliageSurface(draw.material) &&
+            std::any_of(draw.material->shaders.begin(),draw.material->shaders.end(),
+                [](const auto& shader) { return shader.enabled; });
         const bool selected=includeEditorVisuals && (draw.object==m_selectedObject || draw.mesh==m_editorSelectedMesh || draw.mesh==m_editorWeightPaintMesh);
         if ((!automaticInstancing && !(draw.drawData.flags & 0x00100000u)) || m_editorMode2D || hasPortalViews || !draw.mesh || draw.blended ||
             draw.preview || draw.pmxOutline || draw.spatialManipulator || draw.traversalChartPortal ||

@@ -11,6 +11,13 @@ namespace Engine::Editor
 class ScenePlacementAndPicking
 {
 public:
+    static void PrepareSkinnedGeometry(const Engine::Scene::Scene& scene);
+    static void ClearCaches();
+    // Returns the last completed hover only while its camera, pose, and scene
+    // snapshot still match. A new query is queued when any input changes.
+    static Engine::Core::Object* PickObjectHoverAsync(
+        const Engine::Scene::Scene& scene, const EditorUiVec2& mousePos,
+        const EditorUiVec2& viewportSize);
     static bool FindPrefabPlacement(const Engine::Scene::Scene& scene,
         const Engine::Core::Object* prefabPreview,
         const EditorUiVec2& mousePos,

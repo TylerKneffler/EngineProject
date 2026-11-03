@@ -51,8 +51,38 @@ def expand_scene(source: str, radius: int = 10) -> str:
         "TerrainManager.streamCollidersByDistance": "true",
         "TerrainManager.manageAuthoredCellColliders": "true",
         "TerrainManager.colliderActivationDistance": "1",
+        "TerrainManager.streamedPrefabPath": PREFAB_ASSET,
+        "TerrainManager.reuseStreamedPrefabCells": "true",
+        "TerrainManager.streamedPrefabCellName": "Grass Terrain Cell",
+        "TerrainManager.streamedPrefabHalfExtent": str(radius),
+        "TerrainManager.streamedPrefabRadius": "1",
+        "TerrainManager.maxLoadsPerUpdate": "2",
     })
     grid = ET.SubElement(landscape, "children")
+    # One coarse surface preserves the full view while detailed grass cells
+    # load only around the camera. Keep it below the cell surfaces to avoid
+    # overlapping depth values and omit all physics and grass components.
+    distant = ET.SubElement(grid, "item", {"name": "Grass Distant Terrain", "enabled": "true"})
+    distant.append(deepcopy(center.find("transform")))
+    for value, coordinate in zip(position(distant),
+                                 (-radius * width, -0.03, -radius * depth)):
+        value.text = f"{coordinate:g}"
+    distant_components = ET.SubElement(distant, "components")
+    for component_name in ("Mesh", "Terrain", "Material"):
+        component = center.find(f"components/{{{NS}}}{component_name}")
+        if component is not None:
+            distant_components.append(deepcopy(component))
+    distant_terrain = distant.find(f"components/{{{NS}}}Terrain")
+    distant_terrain.set("Terrain.cellsX", "1")
+    distant_terrain.set("Terrain.cellsY", "1")
+    distant_terrain.set("Terrain.cellWidth", f"{(radius * 2 + 1) * width:g}")
+    distant_terrain.set("Terrain.cellDepth", f"{(radius * 2 + 1) * depth:g}")
+    distant_terrain.set("Terrain.textureTiling",
+                        f"{float(terrain.get('Terrain.textureTiling', '4')) * (radius * 2 + 1):g}")
+    for property_name in ("Terrain.heights", "Terrain.weights"):
+        property_node = distant_terrain.find(property_name)
+        if property_node is not None:
+            distant_terrain.remove(property_node)
     for value in position(center):
         value.text = "0"
     # The manager activates the initial player cells before the first physics step.
@@ -67,6 +97,7 @@ def expand_scene(source: str, radius: int = 10) -> str:
         if field is not None:
             field.attrib.setdefault("GrassField.fadeDuration", ".35")
             field.attrib.setdefault("GrassField.distanceFadeWidth", "2")
+            field.set("GrassField.retainDormantTiles", "true")
             children = layer.find("children")
             if children is not None:
                 children.clear()
@@ -83,19 +114,6 @@ def expand_scene(source: str, radius: int = 10) -> str:
     ET.indent(prefab, space="  ")
     PREFAB.parent.mkdir(parents=True, exist_ok=True)
     PREFAB.write_text(ET.tostring(prefab, encoding="unicode", xml_declaration=True) + "\n", encoding="utf-8")
-    for z in range(-radius, radius + 1):
-        for x in range(-radius, radius + 1):
-            if x == 0 and z == 0:
-                continue
-            cell = ET.SubElement(grid, "item", {"prefab": PREFAB_ASSET})
-            transform = deepcopy(center.find("transform"))
-            cell.append(transform)
-            for v, value in zip(position(cell), (x * width, 0, z * depth)):
-                v.text = f"{value:g}"
-            patches = ET.SubElement(cell, "prefabOverrides")
-            patch = ET.SubElement(patches, "item", {"value": f"Grass Terrain Cell ({x}, {z})"})
-            path = ET.SubElement(patch, "path")
-            ET.SubElement(path, "item", {"key": "name"})
     # Make more of the enlarged terrain visible from the player camera.
     for camera in root.iter(f"{{{NS}}}Camera"):
         camera.set("Camera.far", f"{max(80, (radius + 1) * max(width, depth) * 2):g}")

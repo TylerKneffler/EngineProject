@@ -117,6 +117,18 @@ public:
     }
     const std::vector<uint32_t>& GetIndices() const { return m_indices; }
     uint64_t GetAuthoredGeometryRevision() const { return m_authoredGeometryRevision; }
+    struct PoseSnapshot
+    {
+        std::vector<Vertex> vertices;
+        std::vector<uint32_t> indices;
+        std::vector<MorphTarget> morphTargets;
+        std::vector<float> morphWeights;
+        std::vector<glm::vec3> surfaceOffsets;
+    };
+    PoseSnapshot CapturePoseSnapshot() const;
+    static std::vector<Vertex> BuildPosedVertices(
+        const PoseSnapshot& snapshot, const std::vector<glm::mat4>* skinPalette,
+        bool includeSurfaceOffsets = true);
     std::vector<Vertex> BuildPosedVertices(
         const std::vector<glm::mat4>* skinPalette = nullptr,
         bool includeSurfaceOffsets = true) const;
@@ -128,6 +140,7 @@ public:
     void ClearSurfaceOffsets();
     IGraphicsBuffer* GetPosedVertexBuffer() const { return m_posedVertexBuffer.get(); }
     bool HasSurfaceOffsets() const { return !m_surfaceOffsets.empty(); }
+    uint64_t GetSurfaceOffsetsRevision() const { return m_surfaceOffsetsRevision; }
     const std::vector<glm::vec3>& GetSurfaceOffsets() const { return m_surfaceOffsets; }
     bool UsesTerrainVertexFormat() const { return !m_terrainVertices.empty(); }
     static TerrainMeshData BuildIndexedTerrain(const std::vector<Vertex>& vertices);
@@ -266,6 +279,12 @@ public:
     void DeferGraphicsBuffers() { m_bufferFactory = nullptr; m_ready = false; }
 
 private:
+    static std::vector<Vertex> BuildPosedVerticesFromData(
+        const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices,
+        const std::vector<MorphTarget>& morphTargets,
+        const std::vector<float>& morphWeights,
+        const std::vector<glm::vec3>& surfaceOffsets,
+        const std::vector<glm::mat4>* skinPalette, bool includeSurfaceOffsets);
     bool UsesDeferredGraphicsRetirement() const;
     void ReplaceVertexBuffer(std::shared_ptr<IGraphicsBuffer> buffer);
     void ReplaceIndexBuffer(std::shared_ptr<IGraphicsBuffer> buffer);
@@ -302,6 +321,7 @@ private:
     void MakeGeometryWritable();
     std::unique_ptr<IGraphicsBuffer> m_posedVertexBuffer;
     std::vector<glm::vec3> m_surfaceOffsets;
+    uint64_t m_surfaceOffsetsRevision = 1;
     std::shared_ptr<IGraphicsBuffer> m_indexBuffer;
     std::unique_ptr<IGraphicsBuffer> m_morphDeltaBuffer;
     uint32_t m_morphDeltaStrideFloat4 = 3;

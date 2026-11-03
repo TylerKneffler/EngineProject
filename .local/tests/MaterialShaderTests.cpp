@@ -16,6 +16,7 @@
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
+#include <thread>
 #include <type_traits>
 
 using Engine::Components::Material;
@@ -153,18 +154,33 @@ static void RenderStack(const char* name, bool terrain)
         const size_t center = ((Size / 2) * Size + Size / 2) * 4;
         return glm::ivec3(pixels[center], pixels[center + 1], pixels[center + 2]);
     };
+    const auto captureUntil = [&](auto ready)
+    {
+        glm::ivec3 pixels{};
+        for (int attempt = 0; attempt < 100; ++attempt)
+        {
+            pixels = capture();
+            if (ready(pixels)) return pixels;
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        return pixels;
+    };
     const auto base = capture();
     Require(base.g > base.r + 40, "Built-in surface is not green");
     const MaterialShader warm{"Assets/Shaders/WarmOverlay.hlsl", true, "Alpha"};
     material->shaders = {{"", true, "Auto"}, warm};
-    const auto tinted = capture();
+    const auto tinted = captureUntil([&](const glm::ivec3& pixels) {
+        return pixels.r > base.r + 30 && pixels.g < base.g - 5;
+    });
     std::cout << name << (terrain ? " terrain" : " mesh") << " center: base "
         << base.r << ',' << base.g << ',' << base.b << " overlay "
         << tinted.r << ',' << tinted.g << ',' << tinted.b << '\n';
     Require(material->shaderError.empty(), material->shaderError.c_str());
     Require(tinted.r > base.r + 30 && tinted.g < base.g - 5, "Overlay did not alpha blend");
     std::swap(material->shaders[0], material->shaders[1]);
-    const auto reordered = capture();
+    const auto reordered = captureUntil([&](const glm::ivec3& pixels) {
+        return glm::all(glm::lessThanEqual(glm::abs(pixels - base), glm::ivec3(3)));
+    });
     Require(glm::all(glm::lessThanEqual(glm::abs(reordered - base), glm::ivec3(3))),
         "Shader pass order did not affect compositing");
     material->shaders = {{"", true, "Auto"}, warm};
@@ -181,11 +197,15 @@ static void RenderStack(const char* name, bool terrain)
     Require(material->shaderError.find(".hlsl") != std::string::npos, "Wrong file type has no diagnostic");
     material->shaders = {{"", true, "Auto"}, warm};
     material->shaders[1].blendMode = "Additive";
-    const auto additive = capture();
+    const auto additive = captureUntil([&](const glm::ivec3& pixels) {
+        return pixels.r > base.r + 30 && pixels.g >= base.g - 3;
+    });
     Require(additive.r > base.r + 30 && additive.g >= base.g - 3, "Additive pass did not add light");
     material->shaders = {warm};
     material->shaders[0].blendMode = "Opaque";
-    const auto opaque = capture();
+    const auto opaque = captureUntil([&](const glm::ivec3& pixels) {
+        return pixels.r > tinted.r + 20 && pixels.g < tinted.g - 20;
+    });
     Require(opaque.r > tinted.r + 20 && opaque.g < tinted.g - 20,
         "Custom surface did not replace the built-in shader");
     if constexpr (std::is_same_v<Renderer, Engine::Renderers::DX11GameRenderer> ||
@@ -197,10 +217,13 @@ static void RenderStack(const char* name, bool terrain)
         material->shaders = {{"", true, "Auto"}, {fs::absolute(broken).generic_string(), true, "Alpha"}};
         Require(glm::all(glm::lessThanEqual(glm::abs(capture() - base), glm::ivec3(3))),
             "Compile failure did not skip the overlay");
+        captureUntil([&](const glm::ivec3&) { return !material->shaderError.empty(); });
         Require(!material->shaderError.empty(), "Compile failure has no diagnostic");
         std::ofstream(broken) << "#include \"" << fs::absolute(material->ResolveShaderPath(warm.path)).generic_string() << "\"\n";
         fs::last_write_time(broken, fs::file_time_type::clock::now() + std::chrono::seconds(1));
-        const auto repaired = capture();
+        const auto repaired = captureUntil([&](const glm::ivec3& pixels) {
+            return material->shaderError.empty() && pixels.r > base.r + 30;
+        });
         Require(material->shaderError.empty(), material->shaderError.c_str());
         Require(repaired.r > base.r + 30, "Source edit did not rebuild failed cached shader");
     }

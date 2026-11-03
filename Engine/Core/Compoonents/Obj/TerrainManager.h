@@ -71,9 +71,20 @@ public:
     bool generateColliders = false;
     // Keep terrain collision active only near the viewer.
     bool streamCollidersByDistance = true;
-    // Collision-only management for authored Terrain descendants. Their
-    // meshes and grass remain resident; no cell loading/unloading is performed.
+    // Manage collision for authored Terrain descendants and any nearby
+    // prefab cells supplied by the optional streamed grid below.
     bool manageAuthoredCellColliders = false;
+    // A square of prefab cells around the authored center, created only near the viewer.
+    std::string streamedPrefabPath;
+    bool reuseStreamedPrefabCells = false;
+    std::string streamedPrefabCellName = "Terrain Cell";
+    int streamedPrefabHalfExtent = 0;
+    int streamedPrefabRadius = 1;
+    size_t GetStreamedPrefabCellCount() const
+    { const size_t side = static_cast<size_t>(streamedPrefabHalfExtent) * 2 + 1;
+      return streamedPrefabPath.empty() ? 0 : side * side - 1; }
+    size_t GetLoadedPrefabCellCount() const { return m_streamedPrefabCells.size(); }
+    size_t GetPooledPrefabCellCount() const { return m_streamedPrefabPool.size(); }
     // Activate the current cell and at most one neighbor per axis near an edge.
     float colliderActivationDistance = 1.f;
     void UpdateColliderStreamingAtPosition(const glm::dvec3& worldPosition);
@@ -420,6 +431,10 @@ private:
     void RefreshColliderActivation(int centerX, int centerY);
     void RefreshAuthoredCollisionCells();
     std::map<Cell, Terrain*> m_authoredCollisionCells;
+    std::map<Cell, Engine::Core::Object*> m_streamedPrefabCells;
+    std::vector<Engine::Core::Object*> m_streamedPrefabPool;
+    bool m_startingPrefabCells = false;
+    void StreamPrefabCells(int centerX, int centerY, bool unlimited = false);
     uint64_t m_authoredCollisionRevision = 0;
     std::optional<glm::dvec3> m_collisionViewerLocal;
     size_t m_activeColliderCells = 0;

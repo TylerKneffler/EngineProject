@@ -776,6 +776,8 @@ int main(int argc, char** argv) try
     runtimeTerrain->cellsX = runtimeTerrain->cellsY = 2;
     Require(runtimeTerrain->AddCell(0, 0));
     runtimeTerrainScene.Start();
+    runtimeTerrain->SyncLoadedCells(0, 0);
+    Require(runtimeTerrain->GetLoadedCell(0, 0) != nullptr);
     Require(!runtimeTerrain->ApplyBrush(1.0, 1.0, 1.f, 1.f,
         Engine::Components::Terrain::Brush::Raise));
     Require(!runtimeTerrain->GetLoadedCell(0, 0)->ApplyBrush(

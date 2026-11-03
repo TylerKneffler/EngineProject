@@ -5,10 +5,12 @@ namespace Engine::Scene
 
 Engine::Model::BakeResult Scene::BakeLighting(
     const std::string& assetsDirectory, const std::string& sceneName,
-    const Engine::Model::BakedLightingSettings& bakeSettings)
+    const Engine::Model::BakedLightingSettings& bakeSettings,
+    const std::function<void(float)>& progress,
+    const std::function<bool()>& cancelled)
 {
     auto result = m_bakedLightingPipeline.Bake(
-        *this, assetsDirectory, sceneName, bakeSettings);
+        *this, assetsDirectory, sceneName, bakeSettings, progress, cancelled);
     m_lightingBakeStatus = result.message;
     return result;
 }

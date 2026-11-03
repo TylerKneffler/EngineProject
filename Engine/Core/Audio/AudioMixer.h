@@ -2,6 +2,7 @@
 
 #include <glm/glm.hpp>
 #include <cstdint>
+#include <functional>
 #include <string>
 
 namespace Engine::Audio
@@ -28,6 +29,11 @@ public:
     // public component headers.
     void* GetEngineHandle();
     void* GetBusHandle(const std::string& bus);
+    // File IO and decoding run on the worker. Graph commands are consumed by
+    // the scene's audio owner before it advances or reads the mixer.
+    void SubmitDecode(std::function<void()> job);
+    void EnqueueCommand(std::function<void()> command);
+    void DrainCommands();
 
 private:
     AudioMixer();

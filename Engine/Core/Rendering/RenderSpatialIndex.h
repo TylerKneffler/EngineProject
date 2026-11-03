@@ -1,6 +1,7 @@
 #pragma once
 #include <glm/glm.hpp>
 #include <algorithm>
+#include <cmath>
 #include <numeric>
 #include <array>
 #include <vector>
@@ -77,6 +78,50 @@ public:
             else { self(self,node.left); self(self,node.right); }
         };
         if(!m_nodes.empty()) query(query,0);
+        return result;
+    }
+    std::vector<uint32_t> QueryRay(glm::vec3 origin, glm::vec3 direction,
+        float limit) const
+    {
+        if (!m_ready)
+        {
+            std::vector<uint32_t> conservative(m_bounds.size());
+            std::iota(conservative.begin(), conservative.end(), 0);
+            return conservative;
+        }
+        std::vector<uint32_t> result = m_unbounded;
+        const auto intersects = [&](const RenderBounds& bounds) {
+            float nearDistance = 0.f, farDistance = limit;
+            for (int axis = 0; axis < 3; ++axis)
+            {
+                if (std::abs(direction[axis]) < 1e-8f)
+                {
+                    if (origin[axis] < bounds.minimum[axis] ||
+                        origin[axis] > bounds.maximum[axis]) return false;
+                    continue;
+                }
+                float a = (bounds.minimum[axis] - origin[axis]) / direction[axis];
+                float b = (bounds.maximum[axis] - origin[axis]) / direction[axis];
+                if (a > b) std::swap(a, b);
+                nearDistance = std::max(nearDistance, a);
+                farDistance = std::min(farDistance, b);
+                if (nearDistance > farDistance) return false;
+            }
+            return farDistance > 0.f;
+        };
+        const auto query = [&](auto&& self, uint32_t nodeIndex) -> void {
+            const auto& node = m_nodes[nodeIndex];
+            if (!intersects(node.bounds)) return;
+            if (node.count)
+                for (uint32_t i = 0; i < node.count; ++i)
+                {
+                    const uint32_t item = m_order[node.first + i];
+                    if (intersects(m_bounds[item])) result.push_back(item);
+                }
+            else { self(self, node.left); self(self, node.right); }
+        };
+        if (!m_nodes.empty()) query(query, 0);
+        std::sort(result.begin(), result.end());
         return result;
     }
     // Query without touching the view cache so independent views can prepare

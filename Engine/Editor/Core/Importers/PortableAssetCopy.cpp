@@ -1,4 +1,5 @@
 #include "PortableAssetCopy.h"
+#include "AssetJobControl.h"
 #include "Core/Serialization/Json.h"
 #include <pugixml.hpp>
 #include <algorithm>
@@ -57,6 +58,7 @@ public:
 
     std::string Copy(const fs::path& owner, const std::string& reference)
     {
+        AssetJobCheckpoint();
         const fs::path original = Resolve(owner, reference);
         auto found = copied.find(original);
         if (found != copied.end()) return found->second;
@@ -65,7 +67,7 @@ public:
         for (unsigned index = 2; fs::exists(target); ++index)
             target = root / (original.stem().string() + " " +
                 std::to_string(index) + original.extension().string());
-        fs::copy_file(original, target);
+        AssetJobCopyFile(original, target);
         return copied.emplace(original, target.filename().generic_string())
             .first->second;
     }
@@ -191,6 +193,7 @@ void CopyObj(const fs::path& source, const fs::path& destination, Package& packa
 
 void CopyPortableAsset(const fs::path& source, const fs::path& destination)
 {
+    AssetJobCheckpoint(0.05f);
     std::string extension = source.extension().string();
     std::transform(extension.begin(), extension.end(), extension.begin(),
         [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
@@ -203,6 +206,7 @@ void CopyPortableAsset(const fs::path& source, const fs::path& destination)
         throw std::runtime_error("Import dependency directory exists: " + package.root.string());
     try
     {
+        AssetJobCheckpoint(0.1f);
         if (extension == ".obj") CopyObj(source, destination, package);
         else
         {
@@ -213,12 +217,14 @@ void CopyPortableAsset(const fs::path& source, const fs::path& destination)
             if (sheetName.empty()) throw std::runtime_error("Sprite animation has no sheet");
             const fs::path sheet = Resolve(source, sheetName);
             const std::string copiedName = package.Copy(source, sheetName);
+            AssetJobCheckpoint(0.6f);
             RewriteSheet(sheet, package.root / copiedName, package);
             animation.Set("spriteSheet", JsonValue(
                 package.root.filename().generic_string() + "/" + copiedName));
             animation.Erase("spriteSheetFile");
             Write(destination, Engine::Serialization::JsonWrite(animation) + "\n");
         }
+        AssetJobCheckpoint(0.9f);
     }
     catch (...)
     {

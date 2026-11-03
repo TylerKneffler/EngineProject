@@ -1,4 +1,5 @@
 #include "FbxModelDecoder.h"
+#include "AssetJobControl.h"
 #include "LegacyFbxModelDecoder.h"
 #include "Core/Serialization/Json.h"
 
@@ -568,6 +569,7 @@ static bool AppendDuplicateNodeAnimations(const ufbx_scene& scene,
 bool FbxModelDecoder::Decode(const std::string& sourcePath, Engine::Model::ImportedModel& model,
     std::string& error)
 {
+    AssetJobCheckpoint(0.03f);
     // Assimp's FBX reader starts at binary FBX 7.1. Report legacy files
     // before the parser produces an opaque FBX-DOM failure.
     std::ifstream sourceFile(sourcePath, std::ios::binary);
@@ -595,6 +597,7 @@ bool FbxModelDecoder::Decode(const std::string& sourcePath, Engine::Model::Impor
         aiProcess_GenSmoothNormals | aiProcess_CalcTangentSpace |
         aiProcess_SortByPType | aiProcess_ValidateDataStructure |
         aiProcess_LimitBoneWeights);
+    AssetJobCheckpoint(0.2f);
     if (!scene || !scene->mRootNode)
     {
         error = importer.GetErrorString();
@@ -653,6 +656,7 @@ bool FbxModelDecoder::Decode(const std::string& sourcePath, Engine::Model::Impor
     std::vector<unsigned> meshOwnerNode(scene->mNumMeshes, 0);
     std::function<void(const aiNode*, int)> readNode = [&](const aiNode* source, int parent)
     {
+        if ((model.nodes.size() & 127u) == 0) AssetJobCheckpoint();
         const unsigned index = static_cast<unsigned>(model.nodes.size());
         Engine::Model::ImportedNode node;
         node.name = Name(source->mName, "Node " + std::to_string(index + 1));
@@ -736,6 +740,7 @@ bool FbxModelDecoder::Decode(const std::string& sourcePath, Engine::Model::Impor
     model.materials.resize(scene->mNumMaterials);
     for (unsigned index = 0; index < scene->mNumMaterials; ++index)
     {
+        AssetJobCheckpoint(0.3f);
         const aiMaterial* source = scene->mMaterials[index];
         Engine::Model::ImportedMaterial& material = model.materials[index];
         // FBX color layers are independent of the surface material. Keep the
@@ -854,6 +859,8 @@ bool FbxModelDecoder::Decode(const std::string& sourcePath, Engine::Model::Impor
     std::vector<std::vector<unsigned>> morphIndexRemaps(scene->mNumMeshes);
     for (unsigned meshIndex = 0; meshIndex < scene->mNumMeshes; ++meshIndex)
     {
+        AssetJobCheckpoint(0.35f + 0.12f * static_cast<float>(meshIndex) /
+            (std::max)(1u, scene->mNumMeshes));
         const aiMesh* source = scene->mMeshes[meshIndex];
         Engine::Model::ImportedPrimitive& primitive = model.primitives[meshIndex];
         primitive.name = Name(source->mName, "Mesh " + std::to_string(meshIndex + 1));
@@ -1071,6 +1078,7 @@ bool FbxModelDecoder::Decode(const std::string& sourcePath, Engine::Model::Impor
     model.animations.reserve(scene->mNumAnimations);
     for (unsigned animationIndex = 0; animationIndex < scene->mNumAnimations; ++animationIndex)
     {
+        AssetJobCheckpoint(0.48f);
         const aiAnimation* source = scene->mAnimations[animationIndex];
         Engine::Model::ImportedAnimation animation;
         animation.name = Name(source->mName, "Animation " + std::to_string(animationIndex + 1));

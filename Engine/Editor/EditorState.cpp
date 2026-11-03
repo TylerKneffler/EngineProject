@@ -1,6 +1,8 @@
 #include "pch.h"
 #include "EditorState.h"
+#include "Engine/Editor/Diagnostics/FrameActivity.h"
 #include "Core/SceneManager.h"
+#include "Core/Rendering/RenderJobs.h"
 #include "Engine/Editor/CodeEditorLink.h"
 #include "Core/View/ViewFactory.h"
 #include "Core/View/IEditorPanel.h"
@@ -24,6 +26,8 @@
 #include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Compoonents/Materials/Material.h"
 #include "Core/Compoonents/Materials/Texture.h"
+#include "Core/Compoonents/Lighting/LightProbe.h"
+#include "Core/Rendering/Lighting/BakedLightingData.h"
 #include "Core/Compoonents/Animation/Skeleton.h"
 #include "Core/Compoonents/Animation/AnimationBone.h"
 #include "Core/Compoonents/Animation/SkinnedMesh.h"
@@ -39,6 +43,7 @@
 #include "Core/Importers/VmdSceneImporter.h"
 #include "Core/Importers/MmdDanceAssetBinder.h"
 #include "Core/Importers/PortableAssetCopy.h"
+#include "Core/Threading/JobScheduler.h"
 #include "Core/MeshEditGeometry.h"
 #include "Core/MeshEditSnapshot.h"
 #include "Core/SnapshotHistory.h"
@@ -116,6 +121,14 @@ bool EditorState::RequestCodeEditorAttach(bool openWorkspace)
 
 namespace
 {
+    bool HistoryDiffers(const std::string& left, const std::string& right)
+    {
+        if (left.size() != right.size()) return true;
+        if (left.size() < 64 * 1024) return left != right;
+        return Engine::Rendering::RenderJobs::Get().Submit(
+            [&left, &right] { return left != right; }).get();
+    }
+
     std::shared_ptr<Engine::Components::Texture> PaintTextureForSlot(
         const Engine::Components::Material& material, int slot,
         int& uvSet)
@@ -265,6 +278,21 @@ EditorState::EditorState(HINSTANCE hInstance, const Engine::Model::ProjectSettin
 // ---------------------------------------------------------------------------
 EditorState::~EditorState()
 {
+    if (m_importJobControl)
+        m_importJobControl->cancelled.store(true, std::memory_order_release);
+    if (m_stageImportControl)
+        m_stageImportControl->cancelled.store(true, std::memory_order_release);
+    if (m_bakeJobControl)
+        m_bakeJobControl->cancelled.store(true, std::memory_order_release);
+    if (m_bakePublication)
+    {
+        const auto root = m_bakePublication->outputRoot;
+        Engine::Threading::JobScheduler::Get().Submit([root] {
+            std::error_code ignored;
+            std::filesystem::remove_all(root, ignored);
+        });
+        m_bakePublication.reset();
+    }
 }
 
 bool EditorState::HasUnsavedChanges() const
@@ -443,7 +471,102 @@ void EditorState::CheckAssetLocations()
 
 bool EditorState::PollBackgroundWork()
 {
-    return m_primaryAssets && m_primaryAssets->PollDirectoryCache();
+    const bool saved = PollSceneSave();
+    const bool imported = PollImportJob();
+    const bool baked = PollBakeJob();
+    bool openedPrefab = false;
+    if (m_prefabRead.valid() &&
+        m_prefabRead.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
+    {
+        const std::string path = std::exchange(m_prefabReadPath, std::string{});
+        try
+        {
+            auto document = m_prefabRead.get();
+            OpenPrefabStageWithDocument(path, document);
+        }
+        catch (const std::exception& error)
+        {
+            if (m_primaryConsole)
+                m_primaryConsole->AddLog(ConsoleView::Level::Error,
+                    std::string("Failed to read prefab: ") + error.what());
+        }
+        openedPrefab = true;
+    }
+    const bool assets = m_primaryAssets && m_primaryAssets->PollDirectoryCache();
+    return saved || imported || baked || m_stageImport.valid() ||
+        openedPrefab || assets;
+}
+
+void EditorState::StartSceneSave(SceneSaveRequest request)
+{
+    m_sceneSave = Engine::Rendering::RenderJobs::Get().Submit(
+        [request = std::move(request)]() mutable {
+            SceneSaveResult result;
+            result.path = std::move(request.path);
+            result.revision = request.revision;
+            result.generation = request.generation;
+            try
+            {
+                result.snapshot = Engine::Serialization::SceneSerializer::EncodeSceneSnapshot(request.document);
+                const std::string xml = Engine::Serialization::SceneSerializer::EncodeSceneFile(request.document);
+                std::ofstream file(result.path, std::ios::binary | std::ios::trunc);
+                if (file)
+                {
+                    file.write(xml.data(), static_cast<std::streamsize>(xml.size()));
+                    file.flush();
+                    result.succeeded = file.good();
+                }
+            }
+            catch (...) { result.succeeded = false; }
+            return result;
+        });
+}
+
+bool EditorState::PollSceneSave()
+{
+    if (!m_sceneSave.valid() || m_sceneSave.wait_for(std::chrono::seconds(0)) !=
+        std::future_status::ready) return false;
+    SceneSaveResult result = m_sceneSave.get();
+    FrameActivity::Mark(FrameActivity::Save);
+    if (result.generation != m_sceneDocumentGeneration)
+    {
+        m_nextSceneSave.reset();
+        return true;
+    }
+    if (result.succeeded)
+    {
+        m_currentScenePath = NormalizeAssetPath(result.path);
+        m_savedSceneSnapshot = std::move(result.snapshot);
+        m_savedSceneRevision = result.revision;
+        m_hasUnsavedChanges = result.revision != m_sceneEditRevision;
+        RefreshSceneDocumentTitle();
+        if (m_primaryConsole)
+            m_primaryConsole->AddLog(ConsoleView::Level::Info,
+                "Scene saved: " + m_currentScenePath);
+        if (!m_hasUnsavedChanges && m_scene)
+            AssetPreviewCache::CaptureScene(m_currentScenePath, *m_scene,
+                m_scene->GetGraphicsProvider());
+    }
+    else if (m_primaryConsole)
+        m_primaryConsole->AddLog(ConsoleView::Level::Error,
+            "Failed to save scene: " + result.path);
+    if (m_nextSceneSave)
+    {
+        auto next = std::move(*m_nextSceneSave);
+        m_nextSceneSave.reset();
+        StartSceneSave(std::move(next));
+    }
+    else if (!m_loadAfterSceneSave.empty())
+    {
+        if (result.succeeded)
+            QueueSceneLoad(std::exchange(m_loadAfterSceneSave, {}));
+        else
+        {
+            m_sceneToLoad = std::exchange(m_loadAfterSceneSave, {});
+            m_showUnsavedWarning = true;
+        }
+    }
+    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -619,7 +742,7 @@ void EditorState::FinishVertexPaintStroke(MeshEditSession& session)
         session.undo.push_back(std::move(session.vertexStrokeBefore));
     session.redo.clear();
     session.baseline = CaptureMeshSnapshot(*session.activeMesh);
-    session.dirty = session.baseline != session.savedSnapshot;
+    session.dirty = HistoryDiffers(session.baseline, session.savedSnapshot);
     if (!session.savePath.empty())
     {
         MeshEditSession cached = session;
@@ -1517,7 +1640,7 @@ bool EditorState::HandleMeshViewport(IEditorUi& ui,
                         session.gizmoChanged = false;
                         session.redo.clear();
                         session.baseline = after;
-                        session.dirty = session.baseline != session.savedSnapshot;
+                        session.dirty = HistoryDiffers(session.baseline, session.savedSnapshot);
                         if (!session.savePath.empty())
                         {
                             MeshEditSession cached = session;
@@ -1718,7 +1841,7 @@ bool EditorState::ApplyMeshHistory(bool redo)
     if (!session->activeMesh ||
         !StepMeshSnapshotHistory(*session->activeMesh, redo,
             session->undo, session->redo, session->baseline)) return false;
-    session->dirty = session->baseline != session->savedSnapshot;
+    session->dirty = HistoryDiffers(session->baseline, session->savedSnapshot);
     if (m_activeSceneAssetDocument)
         RefreshSceneAssetDocumentTitle(*m_activeSceneAssetDocument);
     if (!session->savePath.empty())
@@ -1845,6 +1968,7 @@ bool EditorState::SavePendingMeshEdits()
 
 void EditorState::SaveScene()
 {
+    FrameActivity::Mark(FrameActivity::Save);
     if (!m_playModeSceneSnapshot.empty())
     {
         if (m_primaryConsole)
@@ -1910,7 +2034,10 @@ void EditorState::SaveScene()
                 }
                 root = object.get();
             }
-        if (!root || !Engine::Serialization::SceneSerializer::SavePrefab(*root, m_activePrefabPath))
+        const bool prefabSaved = root && Engine::Rendering::RenderJobs::Get().Submit(
+            Engine::Serialization::SceneSerializer::PreparePrefabSave(
+                *root, m_activePrefabPath)).get();
+        if (!prefabSaved)
         {
             if (m_primaryConsole)
                 m_primaryConsole->AddLog(ConsoleView::Level::Error,
@@ -1941,6 +2068,7 @@ void EditorState::SaveScene()
 
 bool EditorState::SaveMainScene()
 {
+    FrameActivity::Mark(FrameActivity::Save);
     if (!m_scene || !m_playModeSceneSnapshot.empty())
         return false;
 
@@ -1972,23 +2100,19 @@ bool EditorState::SaveMainScene()
     if (std::filesystem::path(destination).extension().empty())
         destination += ".scene";
 
-    if (m_scene->Save(destination))
+    try
     {
-        m_currentScenePath = NormalizeAssetPath(destination);
-        m_hasUnsavedChanges = false;
-        RefreshSceneDocumentTitle();
-        m_savedSceneSnapshot = m_scene->SaveSnapshotToString();
-        AssetPreviewCache::CaptureScene(m_currentScenePath, *m_scene,
-            m_scene->GetGraphicsProvider());
-        if (m_primaryConsole)
-            m_primaryConsole->AddLog(
-                ConsoleView::Level::Info, "Scene saved: " + m_currentScenePath);
+        SceneSaveRequest request{Engine::Serialization::SceneSerializer::CaptureSceneDocument(*m_scene),
+            destination, m_sceneEditRevision, m_sceneDocumentGeneration};
+        if (m_sceneSave.valid()) m_nextSceneSave = std::move(request);
+        else StartSceneSave(std::move(request));
         return true;
     }
-    else if (m_primaryConsole)
+    catch (const std::exception& error)
     {
-        m_primaryConsole->AddLog(
-            ConsoleView::Level::Error, "Failed to save scene: " + destination);
+        if (m_primaryConsole)
+            m_primaryConsole->AddLog(ConsoleView::Level::Error,
+                "Failed to capture scene for save: " + std::string(error.what()));
     }
 
     return false;
@@ -1996,6 +2120,7 @@ bool EditorState::SaveMainScene()
 
 void EditorState::SaveAll()
 {
+    FrameActivity::Mark(FrameActivity::Save);
     if (!m_playModeSceneSnapshot.empty())
     {
         if (m_primaryConsole)
@@ -2095,8 +2220,16 @@ std::string EditorState::GetActiveDocumentName() const
 
 void EditorState::BakeLighting()
 {
+    FrameActivity::Mark(FrameActivity::Bake);
+    if (IsBakeJobRunning())
+    {
+        CancelBakeJob();
+        return;
+    }
     if (!m_scene)
         return;
+    auto document = Engine::Serialization::SceneSerializer::CaptureSceneDocument(
+        *m_scene);
     const std::string assets = m_projectSettings.assetsDirectory.empty()
         ? "Assets" : m_projectSettings.assetsDirectory;
     std::string sceneName = m_currentScenePath.empty()
@@ -2104,21 +2237,254 @@ void EditorState::BakeLighting()
         : std::filesystem::path(m_currentScenePath).stem().string();
     if (sceneName.empty())
         sceneName = "Scene";
-    const auto result = m_scene->BakeLighting(
-        assets, sceneName, m_projectSettings.bakedLighting);
-    if (m_primaryConsole)
-        m_primaryConsole->AddLog(result.succeeded
-            ? ConsoleView::Level::Info : ConsoleView::Level::Error,
-            result.message);
-    if (result.succeeded)
+    for (char& character : sceneName)
+        if (!std::isalnum(static_cast<unsigned char>(character)) &&
+            character != '_' && character != '-') character = '_';
+    static std::atomic<uint64_t> nextBakeId{1};
+    const std::string outputName = sceneName + "_job_" +
+        std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) +
+        "_" + std::to_string(nextBakeId.fetch_add(1));
+    const auto settings = m_projectSettings.bakedLighting;
+    m_bakeSceneGeneration = m_sceneDocumentGeneration;
+    m_bakeSceneRevision = m_sceneEditRevision;
+    m_bakePublicationIndex = 0;
+    m_bakePublicationFailed = false;
+    m_bakeJobControl = std::make_shared<AssetJobControl>();
+    const auto control = m_bakeJobControl;
+    m_bakeJob = Engine::Threading::JobScheduler::Get().Submit(
+        [document = std::move(document), assets, outputName, settings,
+            control]() mutable -> BakeJobResult
+        {
+            BakeJobResult output;
+            output.outputRoot = std::filesystem::path(assets) / ".temp" /
+                "Baked" / outputName;
+            try
+            {
+                control->Checkpoint();
+                control->SetProgress(0.02f);
+                Engine::Scene::Scene snapshot;
+                if (!Engine::Serialization::SceneSerializer::LoadFromValue(
+                        snapshot, document, nullptr))
+                    throw std::runtime_error("Could not prepare lighting bake scene");
+                control->Checkpoint();
+                control->SetProgress(0.1f);
+                output.status = snapshot.BakeLighting(assets, outputName,
+                    settings,
+                    [control](float progress) {
+                        control->SetProgress(0.1f + 0.85f * progress);
+                    },
+                    [control] { return control->cancelled.load(
+                        std::memory_order_acquire); });
+                if (!output.status.succeeded)
+                    throw std::runtime_error(output.status.message);
+                control->Checkpoint();
+                for (const auto& object : snapshot.GetObjects())
+                {
+                    BakeObjectResult item;
+                    if (const auto* data = object->GetComponent<
+                            Engine::Rendering::BakedLightingData>())
+                    {
+                        item.hasMaterial = data->valid;
+                        item.irradiance = data->irradiance;
+                        item.directionalIrradiance = data->directionalIrradiance;
+                        item.lightDirection = data->lightDirection;
+                        item.originalMaterialAsset = data->originalMaterialAsset;
+                        item.originalMaterialSnapshot = data->originalMaterialSnapshot;
+                        item.bakedMaterialAsset = data->bakedMaterialAsset;
+                        item.bakedLightmapAsset = data->bakedLightmapAsset;
+                    }
+                    if (const auto* probe = object->GetComponent<
+                            Engine::Components::LightProbe>())
+                    {
+                        item.hasProbe = probe->valid;
+                        item.probeIrradiance = probe->irradiance;
+                        item.probeDirectional = probe->directionalIrradiance;
+                        item.probeDirection = probe->lightDirection;
+                    }
+                    if (const auto* group = object->GetComponent<
+                            Engine::Components::LightProbeGroup>())
+                    {
+                        item.hasProbeGroup = group->valid;
+                        item.groupIrradiance = group->irradiance;
+                        item.groupDirectional = group->directionalIrradiance;
+                        item.groupDirections = group->lightDirections;
+                    }
+                    if (item.hasMaterial || item.hasProbe || item.hasProbeGroup)
+                    {
+                        snapshot.TryGetObjectPath(object.get(), item.path);
+                        output.objects.push_back(std::move(item));
+                    }
+                }
+                control->Checkpoint();
+                control->SetProgress(1.f);
+            }
+            catch (const std::exception& error)
+            {
+                output.status.succeeded = false;
+                output.status.message = error.what();
+                std::error_code ignored;
+                std::filesystem::remove_all(output.outputRoot, ignored);
+                output.objects.clear();
+            }
+            return output;
+        });
+}
+
+void EditorState::CancelBakeJob()
+{
+    if (m_bakeJobControl)
+        m_bakeJobControl->cancelled.store(true, std::memory_order_release);
+    if (m_bakePublication)
     {
+        const auto root = m_bakePublication->outputRoot;
+        m_bakePublication.reset();
+        if (m_scene)
+        {
+            m_scene->ClearBakedLighting();
+            m_hasUnsavedChanges = true;
+            MarkSceneEdited();
+        }
+        Engine::Threading::JobScheduler::Get().Submit([root] {
+            std::error_code ignored;
+            std::filesystem::remove_all(root, ignored);
+        });
+    }
+}
+
+bool EditorState::PollBakeJob()
+{
+    if (m_bakeJob.valid())
+    {
+        if (m_bakeJob.wait_for(std::chrono::seconds(0)) !=
+            std::future_status::ready) return true;
+        BakeJobResult result = m_bakeJob.get();
+        const bool cancelled = m_bakeJobControl &&
+            m_bakeJobControl->cancelled.load(std::memory_order_acquire);
+        const bool stale = !m_scene ||
+            m_bakeSceneGeneration != m_sceneDocumentGeneration ||
+            m_bakeSceneRevision != m_sceneEditRevision;
+        if (cancelled || stale || !result.status.succeeded)
+        {
+            const auto root = result.outputRoot;
+            Engine::Threading::JobScheduler::Get().Submit([root] {
+                std::error_code ignored;
+                std::filesystem::remove_all(root, ignored);
+            });
+            if (!cancelled && !stale && m_primaryConsole)
+                m_primaryConsole->AddLog(ConsoleView::Level::Error,
+                    result.status.message);
+            if (!cancelled && !stale && m_scene)
+                m_scene->SetLightingBakeStatus(result.status.message);
+            m_bakeJobControl.reset();
+            return true;
+        }
+        m_bakePublication = std::move(result);
+        m_bakePublicationIndex = 0;
+        m_bakePublicationFailed = false;
+    }
+    if (!m_bakePublication) return false;
+    if (!m_scene || m_bakeSceneGeneration != m_sceneDocumentGeneration ||
+        m_bakeSceneRevision != m_sceneEditRevision)
+    {
+        CancelBakeJob();
+        m_bakeJobControl.reset();
+        return true;
+    }
+    if (m_bakePublicationIndex == 0)
+        m_scene->ClearBakedLighting();
+    constexpr size_t publicationBudget = 2;
+    const size_t end = std::min(m_bakePublicationIndex + publicationBudget,
+        m_bakePublication->objects.size());
+    for (; m_bakePublicationIndex < end; ++m_bakePublicationIndex)
+    {
+        const BakeObjectResult& item =
+            m_bakePublication->objects[m_bakePublicationIndex];
+        Engine::Core::Object* object = m_scene->FindObjectByPath(item.path);
+        if (!object) { m_bakePublicationFailed = true; continue; }
+        if (item.hasMaterial)
+        {
+            auto* material = object->GetComponent<Engine::Components::Material>();
+            if (!material)
+                material = object->AddComponent<Engine::Components::Material>();
+            if (material->LoadFromFile(item.bakedMaterialAsset))
+            {
+                material->PrepareTextures(m_scene->GetGraphicsProvider());
+                auto* data = object->GetComponent<
+                    Engine::Rendering::BakedLightingData>();
+                if (!data)
+                    data = object->AddComponent<
+                        Engine::Rendering::BakedLightingData>();
+                data->irradiance = item.irradiance;
+                data->directionalIrradiance = item.directionalIrradiance;
+                data->lightDirection = item.lightDirection;
+                data->originalMaterialAsset = item.originalMaterialAsset;
+                data->originalMaterialSnapshot = item.originalMaterialSnapshot;
+                data->bakedMaterialAsset = item.bakedMaterialAsset;
+                data->bakedLightmapAsset = item.bakedLightmapAsset;
+                data->valid = true;
+                data->version = 3;
+            }
+            else
+            {
+                m_bakePublicationFailed = true;
+                if (m_primaryConsole)
+                    m_primaryConsole->AddLog(ConsoleView::Level::Error,
+                        "Could not publish baked material: " +
+                        item.bakedMaterialAsset);
+            }
+        }
+        if (item.hasProbe)
+            if (auto* probe = object->GetComponent<
+                    Engine::Components::LightProbe>())
+            {
+                probe->irradiance = item.probeIrradiance;
+                probe->directionalIrradiance = item.probeDirectional;
+                probe->lightDirection = item.probeDirection;
+                probe->valid = true;
+            }
+        if (item.hasProbeGroup)
+            if (auto* group = object->GetComponent<
+                    Engine::Components::LightProbeGroup>())
+            {
+                group->irradiance = item.groupIrradiance;
+                group->directionalIrradiance = item.groupDirectional;
+                group->lightDirections = item.groupDirections;
+                group->valid = true;
+            }
+    }
+    if (m_bakePublicationIndex == m_bakePublication->objects.size())
+    {
+        if (m_bakePublicationFailed)
+        {
+            const auto root = m_bakePublication->outputRoot;
+            m_scene->ClearBakedLighting();
+            m_scene->SetLightingBakeStatus("Lighting bake publication failed.");
+            Engine::Threading::JobScheduler::Get().Submit([root] {
+                std::error_code ignored;
+                std::filesystem::remove_all(root, ignored);
+            });
+            if (m_primaryConsole)
+                m_primaryConsole->AddLog(ConsoleView::Level::Error,
+                    "Lighting bake publication failed.");
+        }
+        else
+        {
+            m_scene->SetLightingBakeStatus(m_bakePublication->status.message);
+            if (m_primaryConsole)
+                m_primaryConsole->AddLog(ConsoleView::Level::Info,
+                    m_bakePublication->status.message);
+        }
+        m_bakePublication.reset();
+        m_bakeJobControl.reset();
         m_hasUnsavedChanges = true;
         MarkSceneEdited();
     }
+    return true;
 }
 
 void EditorState::ClearBakedLighting()
 {
+    CancelBakeJob();
     if (!m_scene)
         return;
     m_scene->ClearBakedLighting();
@@ -2139,7 +2505,19 @@ void EditorState::LoadScene(const std::string& path)
 
 void EditorState::LoadStartupScene(const std::string& path)
 {
-    LoadSceneNow(path);
+    try
+    {
+        auto parsed = Engine::Rendering::RenderJobs::Get().Submit([path] {
+            return Engine::Serialization::SceneSerializer::ReadSceneFile(path);
+        }).get();
+        LoadSceneNow(path, &parsed);
+    }
+    catch (const std::exception& error)
+    {
+        LogStartupFailure(std::string("Failed to read startup scene: ") + error.what());
+        if (m_primaryConsole)
+            m_primaryConsole->AddLog(ConsoleView::Level::Error, error.what());
+    }
 }
 
 void EditorState::RequestSceneLoad(const std::string& path)
@@ -2172,7 +2550,8 @@ bool EditorState::ConfirmSceneLoad(bool saveCurrentScene)
     m_showUnsavedWarning = false;
     if (m_renderer)
         m_renderer->MarkDirty();
-    QueueSceneLoad(path);
+    if (saveCurrentScene) m_loadAfterSceneSave = path;
+    else QueueSceneLoad(path);
     return true;
 }
 
@@ -2181,15 +2560,30 @@ void EditorState::QueueSceneLoad(const std::string& path)
     if (path.empty()) return;
     m_queuedScenePath = path;
     m_sceneLoadingMessage = "Loading scene: " + std::filesystem::path(path).filename().string();
+    m_queuedSceneDocument = Engine::Rendering::RenderJobs::Get().Submit([path] {
+        return Engine::Serialization::SceneSerializer::ReadSceneFile(path);
+    });
     if (m_renderer) m_renderer->MarkDirty();
 }
 
 void EditorState::ProcessPendingSceneLoad()
 {
-    if (m_queuedScenePath.empty()) return;
+    if (m_queuedScenePath.empty() || !m_queuedSceneDocument.valid() ||
+        m_queuedSceneDocument.wait_for(std::chrono::seconds(0)) !=
+            std::future_status::ready) return;
     const std::string path = std::move(m_queuedScenePath);
     m_queuedScenePath.clear();
-    LoadSceneNow(path);
+    try
+    {
+        auto parsed = m_queuedSceneDocument.get();
+        LoadSceneNow(path, &parsed);
+    }
+    catch (const std::exception& error)
+    {
+        if (m_primaryConsole)
+            m_primaryConsole->AddLog(ConsoleView::Level::Error,
+                std::string("Failed to read scene: ") + error.what());
+    }
     m_sceneLoadingMessage.clear();
     if (m_renderer) m_renderer->MarkDirty();
 }
@@ -2202,8 +2596,10 @@ void EditorState::CancelSceneLoad()
         m_renderer->MarkDirty();
 }
 
-void EditorState::LoadSceneNow(const std::string& path)
+void EditorState::LoadSceneNow(const std::string& path,
+    const Engine::Serialization::JsonValue* parsed)
 {
+    FrameActivity::Mark(FrameActivity::Load);
 
     OutputDebugStringA(("[EditorState::LoadScene] Loading scene: " + path + "\n").c_str());
     
@@ -2232,8 +2628,11 @@ void EditorState::LoadSceneNow(const std::string& path)
     // Load the scene
     try
     {
-        if (m_scene->Load(resolvedPath))
+        if (parsed ? m_scene->LoadFromValue(*parsed) : m_scene->Load(resolvedPath))
         {
+            ++m_sceneDocumentGeneration;
+            m_nextSceneSave.reset();
+            m_loadAfterSceneSave.clear();
             m_mainMeshEdit = {};
             m_mainSkeletonEdit = {};
             m_scene->SetEditorSelectedMesh(nullptr);
@@ -2284,6 +2683,18 @@ void EditorState::LoadSceneNow(const std::string& path)
 
 void EditorState::OpenPrefabStage(const std::string& path)
 {
+    if (path.empty()) return;
+    m_prefabReadPath = NormalizeAssetPath(path);
+    m_prefabRead = Engine::Rendering::RenderJobs::Get().Submit(
+        [path = m_prefabReadPath] {
+            return Engine::Serialization::SceneSerializer::ReadPrefabFile(path);
+        });
+}
+
+void EditorState::OpenPrefabStageWithDocument(const std::string& path,
+    const Engine::Serialization::JsonValue& document)
+{
+    FrameActivity::Mark(FrameActivity::Load);
     if (!m_scene || !m_viewFactory || path.empty()) return;
     const std::string normalized = NormalizeAssetPath(path);
     if (normalized == m_activePrefabPath) return;
@@ -2308,8 +2719,8 @@ void EditorState::OpenPrefabStage(const std::string& path)
             m_projectSettings.realtimeShadows);
         prefabScene->SetDistanceLightingSettings(
             m_projectSettings.distanceLighting);
-        root = Engine::Serialization::SceneSerializer::InstantiatePrefab(
-            *prefabScene, normalized, prefabScene->GetGraphicsProvider());
+        root = Engine::Serialization::SceneSerializer::InstantiatePrefabFromValue(
+            *prefabScene, normalized, document, prefabScene->GetGraphicsProvider());
     }
     catch (const std::exception& error)
     {
@@ -2566,6 +2977,75 @@ void EditorState::ProcessPendingSceneAssetDocumentOpens()
             continue;
         }
 
+        std::optional<Engine::Model::ModelImportResult> stageImport;
+        if (ModelImporter::SupportsExtension(extension))
+        {
+            if (!m_stageImport.valid())
+            {
+                const std::string assetsDirectory =
+                    m_projectSettings.assetsDirectory.empty()
+                    ? std::string("Assets") : m_projectSettings.assetsDirectory;
+                m_stageImportPath = normalized;
+                m_stageImportControl = std::make_shared<AssetJobControl>();
+                const auto control = m_stageImportControl;
+                m_stageImport = Engine::Threading::JobScheduler::Get().Submit(
+                    [normalized, assetsDirectory, control] {
+                        AssetJobScope scope(control.get());
+                        AssetJobCheckpoint(0.01f);
+                        auto imported = ModelImporter::Import(
+                            normalized, assetsDirectory);
+                        if (control->cancelled.load(std::memory_order_acquire) &&
+                            !imported.outputDirectory.empty())
+                        {
+                            std::error_code ignored;
+                            std::filesystem::remove_all(
+                                imported.outputDirectory, ignored);
+                        }
+                        AssetJobCheckpoint(1.f);
+                        return imported;
+                    });
+                m_pendingSceneAssetDocuments.push_front(std::move(path));
+                return;
+            }
+            if (m_stageImportPath != normalized ||
+                m_stageImport.wait_for(std::chrono::seconds(0)) !=
+                    std::future_status::ready)
+            {
+                m_pendingSceneAssetDocuments.push_front(std::move(path));
+                return;
+            }
+            try { stageImport = m_stageImport.get(); }
+            catch (const std::exception& error)
+            {
+                if (m_primaryConsole &&
+                    !(m_stageImportControl && m_stageImportControl->cancelled.load()))
+                    m_primaryConsole->AddLog(ConsoleView::Level::Error,
+                        "Could not import model for Asset Stage: " +
+                        std::string(error.what()));
+            }
+            const bool cancelled = m_stageImportControl &&
+                m_stageImportControl->cancelled.load();
+            if (cancelled && stageImport &&
+                !stageImport->outputDirectory.empty())
+            {
+                const auto output = std::filesystem::path(
+                    stageImport->outputDirectory);
+                const auto assets = std::filesystem::path(
+                    m_projectSettings.assetsDirectory.empty()
+                        ? "Assets" : m_projectSettings.assetsDirectory);
+                Engine::Threading::JobScheduler::Get().Submit(
+                    [output, assets] {
+                        const auto relative = output.lexically_relative(assets);
+                        if (relative.empty() || *relative.begin() == "..") return;
+                        std::error_code ignored;
+                        std::filesystem::remove_all(output, ignored);
+                    });
+            }
+            m_stageImportControl.reset();
+            m_stageImportPath.clear();
+            if (cancelled || !stageImport) continue;
+        }
+
         auto document = std::make_unique<SceneAssetDocument>();
         document->path = normalized;
         document->identity = identity;
@@ -2604,10 +3084,7 @@ void EditorState::ProcessPendingSceneAssetDocumentOpens()
         }
         else if (document->modelStage)
         {
-            const std::string assetsDirectory = m_projectSettings.assetsDirectory.empty()
-                ? std::string("Assets") : m_projectSettings.assetsDirectory;
-            const Engine::Model::ModelImportResult imported =
-                ModelImporter::Import(normalized, assetsDirectory);
+            const Engine::Model::ModelImportResult& imported = *stageImport;
             if (imported.success)
             {
                 document->prefab = true;
@@ -2750,7 +3227,7 @@ void EditorState::ProcessPendingSceneAssetDocumentOpens()
         {
             raw->scene->SetSelectedObject(object);
             const std::string current = CaptureSceneAssetDocumentSnapshot(*raw);
-            if (raw->baseline != current)
+            if (HistoryDiffers(raw->baseline, current))
             {
                 if (m_historyLimit > 0)
                 {
@@ -2759,7 +3236,7 @@ void EditorState::ProcessPendingSceneAssetDocumentOpens()
                 }
                 raw->redo.clear();
                 raw->baseline = current;
-                raw->dirty = raw->baseline != raw->savedSnapshot;
+                raw->dirty = HistoryDiffers(raw->baseline, raw->savedSnapshot);
                 RefreshSceneAssetDocumentTitle(*raw);
             }
             if (m_primaryHierarchy) m_primaryHierarchy->SetSelectedObject(object);
@@ -3148,6 +3625,7 @@ void EditorState::RefreshSceneAssetDocumentTitle(SceneAssetDocument& document)
 
 bool EditorState::SaveSceneAssetDocument(SceneAssetDocument& document)
 {
+    FrameActivity::Mark(FrameActivity::Save);
     FinishSkeletonPaintStroke(document.skeletonEdit);
     if (document.meshEdit.dirty &&
         !SaveMeshEditSession(document.meshEdit)) return false;
@@ -3172,11 +3650,23 @@ bool EditorState::SaveSceneAssetDocument(SceneAssetDocument& document)
                 if (root) { root = nullptr; break; }
                 root = object.get();
             }
-        saved = root && Engine::Serialization::SceneSerializer::SavePrefab(
-            *root, stageSavePath);
+        saved = root && Engine::Rendering::RenderJobs::Get().Submit(
+            Engine::Serialization::SceneSerializer::PreparePrefabSave(
+                *root, stageSavePath)).get();
     }
     else if (document.scene)
-        saved = document.scene->Save(document.path);
+    {
+        auto value = Engine::Serialization::SceneSerializer::CaptureSceneDocument(*document.scene);
+        saved = Engine::Rendering::RenderJobs::Get().Submit(
+            [value = std::move(value), path = document.path] {
+                const auto xml = Engine::Serialization::SceneSerializer::EncodeSceneFile(value);
+                std::ofstream file(path, std::ios::binary | std::ios::trunc);
+                if (!file) return false;
+                file.write(xml.data(), static_cast<std::streamsize>(xml.size()));
+                file.flush();
+                return file.good();
+            }).get();
+    }
     if (document.skeletonStage)
         ApplySkeletonStageVisibility(document);
     else if (document.objectStage)
@@ -3237,16 +3727,28 @@ std::string EditorState::CaptureSceneAssetDocumentSnapshot(
     if (document.skeletonStage || document.objectStage)
     {
         RestoreSkeletonStageVisibility(document);
-        const std::string snapshot = document.scene
-            ? document.scene->SaveToString() : std::string{};
+        auto value = document.scene
+            ? Engine::Serialization::SceneSerializer::CaptureSceneDocument(*document.scene)
+            : Engine::Serialization::JsonValue{};
         if (document.skeletonStage)
             ApplySkeletonStageVisibility(document);
         else
             ApplyObjectStageVisibility(document);
-        return snapshot;
+        if (!document.scene) return {};
+        return Engine::Rendering::RenderJobs::Get().Submit(
+            [value = std::move(value)] {
+                return Engine::Serialization::SceneSerializer::EncodeSceneFile(value);
+            }).get();
     }
     if (!document.meshStage || !document.mesh)
-        return document.scene ? document.scene->SaveToString() : std::string{};
+    {
+        if (!document.scene) return {};
+        auto value = Engine::Serialization::SceneSerializer::CaptureSceneDocument(*document.scene);
+        return Engine::Rendering::RenderJobs::Get().Submit(
+            [value = std::move(value)] {
+                return Engine::Serialization::SceneSerializer::EncodeSceneFile(value);
+            }).get();
+    }
     const auto& vertices = document.mesh->GetVertices();
     const auto& indices = document.mesh->GetIndices();
     const uint32_t counts[] = { static_cast<uint32_t>(vertices.size()),
@@ -3803,152 +4305,126 @@ void EditorState::RemovePrefabPanels()
     m_prefabSceneView = nullptr;
 }
 
-void EditorState::RebindMainScene(Engine::Scene::Scene* previous,
-    Engine::Scene::Scene* next)
-{
-    Engine::Core::Component::ClearEditorReferenceSearches();
-    // Only replace bindings to the project scene. Asset/prefab documents own
-    // independent scenes and must remain attached to them.
-    for (auto& panel : m_panels)
-    {
-        if (auto* view = dynamic_cast<SceneView*>(panel.get());
-            view && view->GetScene() == previous) view->SetScene(next);
-        if (auto* view = dynamic_cast<GameView*>(panel.get());
-            view && view->GetScene() == previous) view->SetScene(next);
-        if (auto* view = dynamic_cast<HierarchyView*>(panel.get());
-            view && view->GetScene() == previous) view->Init(next);
-        if (auto* view = dynamic_cast<PropertiesView*>(panel.get());
-            view && view->GetScene() == previous) view->SetScene(next);
-        if (auto* view = dynamic_cast<AssetsExplorerView*>(panel.get());
-            view && view->GetScene() == previous) view->SetScene(next);
-        if (auto* view = dynamic_cast<PerformanceView*>(panel.get());
-            view && view->GetScene() == previous) view->SetScene(next);
-    }
-    if (m_viewFactory) m_viewFactory->SetScene(next);
-    if (m_pendingImportScene == previous) CancelPendingImportAsset();
-    m_toolbarPopupScene = nullptr;
-    m_toolbarPopupTool.clear();
-    m_meshToolbarScene = nullptr;
-    m_mainSceneGizmoWasActive = false;
-    if (Engine::Core::SceneManager::GetActiveScene() == previous)
-        Engine::Core::SceneManager::SetActiveScene(next);
-}
-
 bool EditorState::CapturePlayModeScene()
 {
-    if (m_retainedEditScene) return true;
-    if (!m_scene) return false;
+    if (!m_scene || !m_playModeSceneSnapshot.empty()) return false;
 
     FinishSkeletonPaintStroke(m_mainSkeletonEdit);
     TrackSceneChanges(true, false);
+    FlushHistoryCapture();
     CommitPendingHistoryEdit();
     m_playModeSceneSnapshot = !m_activeSceneAssetDocument &&
         !m_activeAnimationDocument && !m_historyBaseline.scene.empty() &&
         m_historyCapturedRevision == m_sceneEditRevision
-        ? m_historyBaseline.scene : m_scene->SaveSnapshotToString();
+        ? m_historyBaseline.scene : CaptureHistoryEntry().scene;
+    // Parse the captured binary tree while Play runs. The scene itself stays
+    // on its owner thread; only immutable snapshot bytes cross this boundary.
+    try
+    {
+        m_playModeParsedSnapshot = std::async(std::launch::async,
+            [snapshot = m_playModeSceneSnapshot] {
+                return Engine::Serialization::AssetParse(snapshot);
+            });
+    }
+    catch (const std::system_error&)
+    {
+        // Stop can still use the ordinary snapshot loader if no worker starts.
+    }
     m_prePlayHasUnsavedChanges = m_hasUnsavedChanges;
     m_prePlayHadObjectSelection = false;
     m_prePlaySelectionPath.clear();
     for (const auto& panel : m_panels)
     {
         const auto* hierarchy = dynamic_cast<const HierarchyView*>(panel.get());
-        if (!hierarchy || hierarchy->GetScene() != m_scene.get()) continue;
+        if (!hierarchy) continue;
         auto* selected = hierarchy->GetSelectedObject();
         m_prePlayHadObjectSelection = selected &&
             m_scene->TryGetObjectPath(selected, m_prePlaySelectionPath);
         break;
     }
 
-    // Construct transactionally: a failed clone leaves the edit graph and
-    // every panel attached to their original objects.
-    const auto begin = std::chrono::steady_clock::now();
-    std::unique_ptr<Engine::Scene::Scene> runtime;
-    try
-    {
-        m_scene->FenceBackgroundWork();
-        runtime = std::make_unique<Engine::Scene::Scene>();
-        runtime->Init(m_renderer->GetGraphicsProvider());
-        runtime->SetBeforeGpuResourceDestruction([renderer = m_renderer.get()] {
-            renderer->WaitIdle();
-        });
-        if (!runtime->LoadFromString(m_playModeSceneSnapshot))
-            throw std::runtime_error("Could not deserialize the runtime scene");
-        runtime->GetPhysics().ConfigureStepBudget(
-            m_projectSettings.physicsTargetMilliseconds,
-            m_projectSettings.physicsMaximumSubsteps);
-        runtime->SetRealtimeShadowSettings(m_projectSettings.realtimeShadows);
-        runtime->SetDistanceLightingSettings(m_projectSettings.distanceLighting);
-        runtime->editorCamera.transform.position = m_scene->editorCamera.transform.position;
-        runtime->editorCamera.transform.rotation = m_scene->editorCamera.transform.rotation;
-        runtime->editorCamera.transform.scale = m_scene->editorCamera.transform.scale;
-        runtime->SetGameplayInputEnabled(false);
-    }
-    catch (const std::exception& error)
-    {
-        if (m_renderer) m_renderer->WaitIdle();
-        runtime.reset();
-        m_playModeSceneSnapshot.clear();
-        m_prePlaySelectionPath.clear();
-        if (m_primaryConsole)
-            m_primaryConsole->AddLog(ConsoleView::Level::Error,
-                std::string("[Play] Could not create runtime scene: ") + error.what());
-        return false;
-    }
-
-    m_renderer->WaitIdle();
-    RebindMainScene(m_scene.get(), runtime.get());
-    m_retainedEditScene = std::move(m_scene);
-    m_scene = std::move(runtime);
-    m_prePlayMeshEdit = std::move(m_mainMeshEdit);
-    m_prePlaySkeletonEdit = std::move(m_mainSkeletonEdit);
-    m_mainMeshEdit = MeshEditSession{};
-    m_mainSkeletonEdit = SkeletonEditSession{};
-    const double milliseconds = std::chrono::duration<double, std::milli>(
-        std::chrono::steady_clock::now() - begin).count();
-    if (m_primaryConsole)
-        m_primaryConsole->AddLog(ConsoleView::Level::Info,
-            "[Play] Runtime copy ready in " + std::to_string(milliseconds) +
-            " ms; original edit scene retained in memory.");
+    OutputDebugStringA("[Play] Captured editor scene state.\n");
     return true;
 }
 
 void EditorState::RestorePlayModeScene()
 {
-    if (!m_retainedEditScene) return;
-    const auto begin = std::chrono::steady_clock::now();
-    m_scene->FenceBackgroundWork();
-    m_renderer->WaitIdle();
-    RebindMainScene(m_scene.get(), m_retainedEditScene.get());
-    auto runtime = std::move(m_scene);
-    m_scene = std::move(m_retainedEditScene);
-    m_mainMeshEdit = std::move(m_prePlayMeshEdit);
-    m_mainSkeletonEdit = std::move(m_prePlaySkeletonEdit);
-    m_prePlayMeshEdit = MeshEditSession{};
-    m_prePlaySkeletonEdit = SkeletonEditSession{};
-    m_hasUnsavedChanges = m_prePlayHasUnsavedChanges;
-    RefreshSceneDocumentTitle();
-    // Keep document selection separate from project-scene selection.
-    if (!m_activeSceneAssetDocument && !m_activeAnimationDocument)
+    if (!m_scene || m_playModeSceneSnapshot.empty()) return;
+    const auto restoreBegin = std::chrono::steady_clock::now();
+
+    for (auto& panel : m_panels)
+        if (auto* hierarchy = dynamic_cast<HierarchyView*>(panel.get()))
+            hierarchy->SetSelectedObject(nullptr);
+    if (m_primaryProperties) m_primaryProperties->SetSelectedObject(nullptr);
+
+    bool restored = false;
+    bool usedCachedSnapshot = false;
+    if (m_playModeParsedSnapshot.valid())
+    {
+        try
+        {
+            const auto snapshot = m_playModeParsedSnapshot.get();
+            restored = m_scene->RestoreTrustedSnapshot(snapshot);
+            usedCachedSnapshot = restored;
+        }
+        catch (const std::exception& error)
+        {
+            OutputDebugStringA((std::string("[Play] Cached snapshot unavailable: ") +
+                error.what() + "\n").c_str());
+        }
+    }
+    if (!restored)
+        restored = m_scene->LoadFromString(m_playModeSceneSnapshot);
+
+    if (restored)
+    {
+        m_mainSkeletonEdit.skeleton = nullptr;
+        m_mainSkeletonEdit.bindingMesh = nullptr;
+        m_mainSkeletonEdit.mesh = nullptr;
+        m_mainSkeletonEdit.adjacency.reset();
+        m_mainSkeletonEdit.observedBindTransforms.clear();
+        m_mainSkeletonEdit.observedSubmode = -1;
+        m_mainMeshEdit.activeMesh = nullptr;
+        m_scene->SetEditorWeightPaint(nullptr, -1);
+        m_scene->SetEditorMeshEditPose(m_mainMeshEdit.enabled ||
+            m_mainSkeletonEdit.enabled);
+        m_hasUnsavedChanges = m_prePlayHasUnsavedChanges;
+        RefreshSceneDocumentTitle();
         SelectObject(m_prePlayHadObjectSelection
             ? m_scene->FindObjectByPath(m_prePlaySelectionPath) : nullptr);
-    m_historySelectionDirty = false;
-    m_sceneEditInProgress = false;
+        if (m_mainSkeletonEdit.enabled)
+        {
+            SyncSkeletonEditSelection(m_scene.get(), m_mainSkeletonEdit);
+            if (m_mainMeshEdit.dirty && m_mainSkeletonEdit.mesh &&
+                RestoreMeshSnapshot(*m_mainSkeletonEdit.mesh,
+                    m_mainMeshEdit.baseline))
+                m_mainMeshEdit.activeMesh = m_mainSkeletonEdit.mesh;
+        }
+        m_historyBaseline.scene = m_playModeSceneSnapshot;
+        CaptureHistorySelection(m_historyBaseline);
+        m_historyCapturedRevision = m_sceneEditRevision;
+        m_historySelectionDirty = false;
+        m_sceneEditInProgress = false;
+        if (m_renderer) m_renderer->MarkDirty();
+        OutputDebugStringA("[Play] Restored editor scene state.\n");
+        if (m_primaryConsole)
+            m_primaryConsole->AddLog(ConsoleView::Level::Info,
+                "[Play] Restored pre-play scene state in " +
+                std::to_string(std::chrono::duration<double, std::milli>(
+                    std::chrono::steady_clock::now() - restoreBegin).count()) +
+                " ms" + (usedCachedSnapshot ? " from cached snapshot." : "."));
+    }
+    else
+    {
+        OutputDebugStringA("[Play] ERROR: Failed to restore editor scene state.\n");
+        if (m_primaryConsole)
+            m_primaryConsole->AddLog(ConsoleView::Level::Error,
+                "[Play] Failed to restore pre-play scene state.");
+    }
+
     m_playModeSceneSnapshot.clear();
-    m_historyCapturedRevision = m_sceneEditRevision;
     m_prePlaySelectionPath.clear();
     m_prePlayHadObjectSelection = false;
-    const auto restored = std::chrono::steady_clock::now();
-    // Destruction stays on the scene/GPU owner thread. No prefab loading,
-    // deserialization, or first configuration publication is needed on Stop.
-    runtime.reset();
-    const auto finished = std::chrono::steady_clock::now();
-    const double restoreMs = std::chrono::duration<double, std::milli>(restored - begin).count();
-    const double cleanupMs = std::chrono::duration<double, std::milli>(finished - restored).count();
-    m_renderer->MarkDirty();
-    if (m_primaryConsole)
-        m_primaryConsole->AddLog(ConsoleView::Level::Info,
-            "[Play] Restored retained edit scene in " + std::to_string(restoreMs) +
-            " ms; runtime cleanup " + std::to_string(cleanupMs) + " ms.");
 }
 
 void EditorState::RefreshSelectionAfterReload(const ::Engine::Scene::Scene::ObjectPath& selectedPath)
@@ -4384,11 +4860,11 @@ void EditorState::WireupCallbacks()
         auto refresh = [this](Engine::Scene::Scene* scene)
         {
             if (!scene) return;
-            const std::string snapshot = scene->SaveToString();
+            const auto snapshot = Engine::Serialization::SceneSerializer::CaptureSceneDocument(*scene);
             ::Engine::Scene::Scene::ObjectPath selectedPath;
             const bool hadSelection = scene->GetSelectedObject() &&
                 scene->TryGetObjectPath(scene->GetSelectedObject(), selectedPath);
-            if (!scene->LoadFromString(snapshot) && m_primaryConsole)
+            if (!scene->LoadFromValue(snapshot) && m_primaryConsole)
                 m_primaryConsole->AddLog(ConsoleView::Level::Error,
                     "Could not refresh a scene after asset contents changed.");
             if (hadSelection)
@@ -4690,13 +5166,14 @@ void EditorState::WireupCallbacks()
                     StartObjectImport(path, overScene);
                     continue;
                 }
-                ImportAssetFile(path);
+                StartObjectImport(path, overScene);
             }
         };
 }
 
 void EditorState::ImportAsset()
 {
+    FrameActivity::Mark(FrameActivity::Import);
     wchar_t source[MAX_PATH] = {};
     OPENFILENAMEW dialog{};
     dialog.lStructSize = sizeof(dialog);
@@ -4724,13 +5201,20 @@ void EditorState::ImportAsset()
             extension == ".obj" || extension == ".spriteanim" ||
             extension == ".prefab")
             StartObjectImport(path, false);
-        else ImportAssetFile(path);
+        else StartObjectImport(path, false);
     }
 }
 
 void EditorState::StartObjectImport(const std::string& path, bool intoScene,
     const std::string& destinationDirectory)
 {
+    if (m_importJob.valid())
+    {
+        if (m_primaryConsole)
+            m_primaryConsole->AddLog(ConsoleView::Level::Warning,
+                "Finish or cancel the current asset import first.");
+        return;
+    }
     const std::filesystem::path assetsRoot = m_projectSettings.assetsDirectory.empty()
         ? std::filesystem::path("Assets")
         : std::filesystem::path(m_projectSettings.assetsDirectory);
@@ -4833,6 +5317,8 @@ void EditorState::ClearImportReference()
 
 void EditorState::CancelPendingImportAsset()
 {
+    if (m_importJob.valid() && m_importJobControl)
+        m_importJobControl->cancelled.store(true, std::memory_order_release);
     m_pendingImportAssetPath.clear();
     m_pendingImportDirectory.clear();
     m_pendingImportScene = nullptr;
@@ -4859,7 +5345,9 @@ std::string EditorState::ConsumeImportHierarchyFocusRequest()
 
 void EditorState::ConfirmPendingImportAsset()
 {
+    FrameActivity::Mark(FrameActivity::Import);
     if (m_pendingImportAssetPath.empty()) return;
+    if (m_importJob.valid()) return;
     if (IsPendingPmxImport() && (!std::isfinite(m_pendingPmxUnitScaleToMeters) ||
         m_pendingPmxUnitScaleToMeters <= 0.f ||
         m_pendingPmxUnitScaleToMeters > 1000.f))
@@ -4895,80 +5383,280 @@ void EditorState::ConfirmPendingImportAsset()
         }
     }
     const std::string source = m_pendingImportAssetPath;
-    const bool intoScene = m_pendingImportIntoScene;
     const bool asPrefab = m_pendingImportAsPrefab;
-    Engine::Scene::Scene* scene = m_pendingImportScene;
     m_pendingImportError.clear();
-    std::string primary = ImportAssetFile(source, reference, true,
-        destination.string(), asPrefab, m_pendingPmxUnitScaleToMeters,
+    std::string extension = fs::path(source).extension().string();
+    std::transform(extension.begin(), extension.end(), extension.begin(),
+        [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
+    std::string bindPrefab;
+    if (extension == ".vmd" && reference)
+        if (auto* root = reference->GetPrefabInstanceRoot(); root && root->Prefab)
+            bindPrefab = root->Prefab->GetPath();
+    const PmxImportOptions options{
         m_pendingPmxImportMorphs, m_pendingPmxImportRigConstraints,
-        m_pendingPmxImportFollowBoneColliders,
-        m_pendingPmxImportDynamicPhysics,
+        m_pendingPmxImportFollowBoneColliders, m_pendingPmxImportDynamicPhysics,
         m_pendingPmxWeightFittedColliders,
-        m_pendingPmxPhysicsQuality,
-        m_pendingPmxColliderMode);
-    if (primary.empty())
+        m_pendingPmxPhysicsQuality <= 0 ? PmxPhysicsQuality::High :
+            m_pendingPmxPhysicsQuality == 1 ? PmxPhysicsQuality::Medium :
+            PmxPhysicsQuality::Low,
+        m_pendingPmxColliderMode <= 0 ? PmxColliderMode::Hull :
+            m_pendingPmxColliderMode == 1 ? PmxColliderMode::Primitive :
+            PmxColliderMode::None };
+    m_importSceneGeneration = m_sceneDocumentGeneration;
+    m_importDestinationRoot = destination;
+    m_importReferencePath = m_pendingImportReferencePath;
+    m_importReferenceObject = reference;
+    m_importJobControl = std::make_shared<AssetJobControl>();
+    const auto control = m_importJobControl;
+    const float unitScale = m_pendingPmxUnitScaleToMeters;
+    const fs::path projectAssetsRoot = m_projectSettings.assetsDirectory.empty()
+        ? fs::path("Assets") : fs::path(m_projectSettings.assetsDirectory);
+    m_importJob = Engine::Threading::JobScheduler::Get().Submit(
+        [source, destination, projectAssetsRoot, extension, asPrefab, bindPrefab, options,
+            unitScale, control]() -> ImportJobResult
+        {
+            AssetJobScope scope(control.get());
+            ImportJobResult result;
+            fs::path createdCopy;
+            fs::path createdPrefab;
+            try
+            {
+                AssetJobCheckpoint(0.01f);
+                const fs::path input(source);
+                if (ModelImporter::SupportsExtension(extension))
+                {
+                    auto imported = extension == ".vmd" && asPrefab
+                        ? VmdSceneImporter::Import(source,
+                            destination.string(), true)
+                        : ModelImporter::Import(source, destination.string(),
+                            unitScale, options);
+                    if (!imported.success)
+                        throw std::runtime_error(imported.message);
+                    result.primary = asPrefab && !imported.prefabPath.empty()
+                        ? imported.prefabPath : imported.primaryAssetPath.empty()
+                        ? imported.prefabPath : imported.primaryAssetPath;
+                    result.outputDirectory = imported.outputDirectory;
+                    result.message = imported.message;
+                    AssetJobCheckpoint(0.9f);
+                    if (!bindPrefab.empty())
+                    {
+                        AssetJobCheckpoint();
+                        control->committing.store(true, std::memory_order_release);
+                        result.boundPrefab = bindPrefab;
+                        result.boundCharacter = MmdDanceAssetBinder::BindFromPrefab(
+                            bindPrefab, source, result.bindingError,
+                            (fs::path(imported.outputDirectory) /
+                                (input.stem().string() + ".animpack")).string());
+                    }
+                }
+                else
+                {
+                    const bool portable = extension == ".obj" ||
+                        extension == ".spriteanim";
+                    std::error_code pathError;
+                    const fs::path absoluteSource = fs::weakly_canonical(input, pathError);
+                    const fs::path absoluteAssets = fs::weakly_canonical(destination, pathError);
+                    if (!pathError)
+                    {
+                        const fs::path relative = absoluteSource.lexically_relative(absoluteAssets);
+                        if (!relative.empty() && *relative.begin() != "..")
+                        {
+                            Engine::Core::AssetRecord::Ensure(input, input,
+                                { { "importer", std::string("native") } });
+                            result.primary = source;
+                        }
+                    }
+                    if (result.primary.empty())
+                    {
+                        fs::path output = destination / input.filename();
+                        const std::string stem = output.stem().string();
+                        const std::string suffix = output.extension().string();
+                        for (unsigned index = 2; fs::exists(output) ||
+                            (portable && fs::exists(output.parent_path() /
+                                (output.stem().string() + "_dependencies"))); ++index)
+                            output = destination /
+                                (stem + " " + std::to_string(index) + suffix);
+                        AssetJobCheckpoint(0.1f);
+                        if (portable) CopyPortableAsset(input, output);
+                        else AssetJobCopyFile(input, output);
+                        createdCopy = output;
+                        result.createdPaths.push_back(output);
+                        AssetJobCheckpoint(0.9f);
+                        Engine::Core::AssetRecord::Ensure(output, input,
+                            { { "importer", std::string("copy") } });
+                        result.primary = output.string();
+                    }
+                    if (asPrefab && portable)
+                    {
+                        AssetJobCheckpoint(0.93f);
+                        const fs::path assetsRoot = fs::weakly_canonical(
+                            projectAssetsRoot);
+                        const fs::path importedPath = fs::weakly_canonical(
+                            result.primary);
+                        const fs::path withinAssets = importedPath.lexically_relative(
+                            assetsRoot);
+                        if (withinAssets.empty() || *withinAssets.begin() == "..")
+                            throw std::runtime_error("Imported asset is outside Assets");
+                        const std::string portablePath =
+                            (assetsRoot.filename() / withinAssets).generic_string();
+                        Engine::Scene::Scene prefabScene;
+                        Engine::Core::Object* object = prefabScene.AddObject(
+                            importedPath.stem().string());
+                        if (extension == ".obj")
+                        {
+                            auto* mesh = object->AddComponent<
+                                Engine::Components::Mesh>();
+                            mesh->LoadFromFile(result.primary);
+                            mesh->SetAuthoredFilePath(portablePath);
+                            object->AddComponent<Engine::Components::Material>();
+                        }
+                        else
+                        {
+                            auto* manager = object->AddComponent<
+                                Engine::Components::SpriteAnimationManager>();
+                            auto* sprite = object->AddComponent<
+                                Engine::Components::Sprite>();
+                            sprite->SetAnimationManager(manager);
+                            if (!manager->LoadFromFile(result.primary))
+                                throw std::runtime_error(
+                                    "Could not load sprite animation");
+                            manager->animationFile = portablePath;
+                        }
+                        fs::path prefab = importedPath;
+                        prefab.replace_extension(".prefab");
+                        const std::string stem = prefab.stem().string();
+                        for (unsigned index = 2; fs::exists(prefab); ++index)
+                            prefab = prefab.parent_path() /
+                                (stem + " " + std::to_string(index) + ".prefab");
+                        createdPrefab = prefab;
+                        result.createdPaths.push_back(prefab);
+                        AssetJobCheckpoint(0.97f);
+                        if (!Engine::Serialization::SceneSerializer::SavePrefab(
+                                *object, prefab.string()))
+                            throw std::runtime_error(
+                                "Could not save imported object prefab");
+                        Engine::Core::AssetRecord::Ensure(prefab, result.primary,
+                            { { "importer", std::string("object-prefab") } });
+                        result.primary = prefab.string();
+                    }
+                }
+                if (control->committing.load(std::memory_order_acquire))
+                    control->SetProgress(1.f);
+                else AssetJobCheckpoint(1.f);
+            }
+            catch (const std::exception& error)
+            {
+                if (!control->committing.load(std::memory_order_acquire))
+                {
+                    std::error_code ignored;
+                    if (!createdPrefab.empty())
+                    {
+                        fs::remove(createdPrefab, ignored);
+                        fs::remove(Engine::Core::AssetRecord::SidecarPath(
+                            createdPrefab), ignored);
+                    }
+                    if (!createdCopy.empty())
+                    {
+                        fs::remove(createdCopy, ignored);
+                        fs::remove(Engine::Core::AssetRecord::SidecarPath(
+                            createdCopy), ignored);
+                        fs::remove_all(createdCopy.parent_path() /
+                            (createdCopy.stem().string() + "_dependencies"), ignored);
+                    }
+                    if (!result.outputDirectory.empty())
+                        fs::remove_all(result.outputDirectory, ignored);
+                }
+                result.primary.clear();
+                result.message = error.what();
+            }
+            return result;
+        });
+}
+
+bool EditorState::PollImportJob()
+{
+    if (!m_importJob.valid()) return false;
+    if (m_importJob.wait_for(std::chrono::seconds(0)) !=
+        std::future_status::ready) return true;
+    ImportJobResult result = m_importJob.get();
+    const bool cancelled = m_importJobControl &&
+        m_importJobControl->cancelled.load(std::memory_order_acquire) &&
+        !m_importJobControl->committing.load(std::memory_order_acquire);
+    m_importJobControl.reset();
+    if (cancelled)
     {
-        if (m_pendingImportError.empty())
-            m_pendingImportError = "Import failed. See the Console for details, then retry.";
-        return;
+        const auto root = m_importDestinationRoot;
+        Engine::Threading::JobScheduler::Get().Submit(
+            [result = std::move(result), root] {
+                const auto cleanup = [&root](const std::filesystem::path& path) {
+                    const auto relative = path.lexically_relative(root);
+                    if (relative.empty() || *relative.begin() == "..") return;
+                    std::error_code ignored;
+                    std::filesystem::remove_all(path, ignored);
+                    std::filesystem::remove(
+                        Engine::Core::AssetRecord::SidecarPath(path), ignored);
+                };
+                for (const auto& path : result.createdPaths) cleanup(path);
+                if (!result.outputDirectory.empty()) cleanup(result.outputDirectory);
+            });
+        m_importDestinationRoot.clear();
+        return true;
     }
+    m_importDestinationRoot.clear();
+    if (result.primary.empty())
+    {
+        m_pendingImportError = result.message.empty()
+            ? "Import failed. See the Console for details, then retry."
+            : result.message;
+        if (m_primaryConsole)
+            m_primaryConsole->AddLog(ConsoleView::Level::Error,
+                "Asset import failed: " + m_pendingImportError);
+        return true;
+    }
+    if (m_primaryConsole)
+    {
+        m_primaryConsole->AddLog(ConsoleView::Level::Info,
+            "Asset imported: " + result.primary);
+        if (!result.message.empty() &&
+            (std::filesystem::path(m_pendingImportAssetPath).extension() == ".pmx" ||
+                result.message.find("missing source texture files:") != std::string::npos))
+            m_primaryConsole->AddLog(ConsoleView::Level::Warning, result.message);
+    }
+    Engine::Scene::Scene* scene = m_pendingImportScene;
+    Engine::Core::Object* reference = nullptr;
+    if (scene && scene == GetActiveDocumentScene() &&
+        m_importSceneGeneration == m_sceneDocumentGeneration &&
+        m_importReferenceObject)
+    {
+        reference = scene->FindObjectByPath(m_importReferencePath);
+        if (reference != m_importReferenceObject) reference = nullptr;
+    }
+    if (result.boundCharacter && reference && !result.boundPrefab.empty())
+    {
+        Engine::Serialization::SceneSerializer::RefreshPrefabInstances(
+            *scene, result.boundPrefab, scene->GetGraphicsProvider());
+    }
+    else if (!result.bindingError.empty() && m_primaryConsole)
+        m_primaryConsole->AddLog(ConsoleView::Level::Warning,
+            "MMD character binding skipped: " + result.bindingError);
+    const std::string source = m_pendingImportAssetPath;
+    const bool intoScene = m_pendingImportIntoScene && scene &&
+        scene == GetActiveDocumentScene() &&
+        m_importSceneGeneration == m_sceneDocumentGeneration;
+    PublishImportJob(result.primary, source, intoScene, scene, reference);
+    return true;
+}
+
+void EditorState::PublishImportJob(const std::string& primaryPath,
+    const std::string& source, bool intoScene,
+    Engine::Scene::Scene* scene, Engine::Core::Object* reference)
+{
+    namespace fs = std::filesystem;
+    std::string primary = primaryPath;
     CancelPendingImportAsset();
     std::string extension = fs::path(source).extension().string();
     std::transform(extension.begin(), extension.end(), extension.begin(),
         [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
-    if (asPrefab && (extension == ".obj" || extension == ".spriteanim"))
-    {
-        try
-        {
-            const fs::path configuredAssets = m_projectSettings.assetsDirectory.empty()
-                ? fs::path("Assets") : fs::path(m_projectSettings.assetsDirectory);
-            const fs::path assetsRoot = fs::weakly_canonical(configuredAssets);
-            const fs::path importedPath = fs::weakly_canonical(primary);
-            const fs::path withinAssets = importedPath.lexically_relative(assetsRoot);
-            if (withinAssets.empty() || *withinAssets.begin() == "..")
-                throw std::runtime_error("Imported asset is outside Assets");
-            const std::string portablePath =
-                (assetsRoot.filename() / withinAssets).generic_string();
-            Engine::Scene::Scene prefabScene;
-            Engine::Core::Object* object = prefabScene.AddObject(fs::path(primary).stem().string());
-            if (extension == ".obj")
-            {
-                auto* mesh = object->AddComponent<Engine::Components::Mesh>();
-                mesh->LoadFromFile(primary);
-                mesh->SetAuthoredFilePath(portablePath);
-                object->AddComponent<Engine::Components::Material>();
-            }
-            else
-            {
-                auto* manager = object->AddComponent<Engine::Components::SpriteAnimationManager>();
-                auto* sprite = object->AddComponent<Engine::Components::Sprite>();
-                sprite->SetAnimationManager(manager);
-                if (!manager->LoadFromFile(primary))
-                    throw std::runtime_error("Could not load sprite animation");
-                manager->animationFile = portablePath;
-            }
-            fs::path prefab = fs::path(primary).replace_extension(".prefab");
-            const std::string stem = prefab.stem().string();
-            for (unsigned index = 2; fs::exists(prefab); ++index)
-                prefab = prefab.parent_path() /
-                    (stem + " " + std::to_string(index) + ".prefab");
-            if (!Engine::Serialization::SceneSerializer::SavePrefab(*object, prefab.string()))
-                throw std::runtime_error("Could not save imported object prefab");
-            Engine::Core::AssetRecord::Ensure(prefab, primary,
-                { { "importer", std::string("object-prefab") } });
-            primary = prefab.string();
-            if (m_primaryConsole)
-                m_primaryConsole->AddLog(ConsoleView::Level::Info,
-                    "Prefab created: " + primary);
-        }
-        catch (const std::exception& error)
-        {
-            if (m_primaryConsole)
-                m_primaryConsole->AddLog(ConsoleView::Level::Error,
-                    "Could not create imported prefab: " + std::string(error.what()));
-        }
-    }
     if (!intoScene || !scene) return;
     if (extension != ".vmd")
     {
@@ -4998,184 +5686,6 @@ void EditorState::ConfirmPendingImportAsset()
     }
 }
 
-std::string EditorState::ImportAssetFile(const std::string& path,
-    Engine::Core::Object* reference, bool explicitReference,
-    const std::string& destinationDirectory, bool asPrefab,
-    float pmxUnitScaleToMeters, bool pmxImportMorphs,
-    bool pmxImportRigConstraints, bool pmxImportFollowBoneColliders,
-    bool pmxImportDynamicPhysics, bool pmxWeightFittedColliders,
-    int pmxPhysicsQuality, int pmxColliderMode)
-{
-    namespace fs = std::filesystem;
-    const fs::path source(path);
-    std::string extension = source.extension().string();
-    std::transform(extension.begin(), extension.end(), extension.begin(),
-        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    const fs::path assetsDirectory = destinationDirectory.empty()
-        ? (m_projectSettings.assetsDirectory.empty()
-            ? fs::path("Assets") : fs::path(m_projectSettings.assetsDirectory))
-        : fs::path(destinationDirectory);
-
-    try
-    {
-        fs::create_directories(assetsDirectory);
-        if (ModelImporter::SupportsExtension(extension))
-        {
-            const Engine::Model::ModelImportResult imported =
-                extension == ".vmd" && asPrefab
-                ? VmdSceneImporter::Import(source.string(),
-                    assetsDirectory.string(), true)
-                : ModelImporter::Import(source.string(), assetsDirectory.string(),
-                    pmxUnitScaleToMeters, { pmxImportMorphs,
-                        pmxImportRigConstraints, pmxImportFollowBoneColliders,
-                        pmxImportDynamicPhysics, pmxWeightFittedColliders,
-                        pmxPhysicsQuality <= 0 ? PmxPhysicsQuality::High :
-                        pmxPhysicsQuality == 1 ? PmxPhysicsQuality::Medium :
-                        PmxPhysicsQuality::Low,
-                        pmxColliderMode <= 0 ? PmxColliderMode::Hull :
-                        pmxColliderMode == 1 ? PmxColliderMode::Primitive :
-                        PmxColliderMode::None });
-            if (!imported.success)
-                throw std::runtime_error(imported.message);
-            bool boundCharacter = false;
-            bool attemptedCharacterBinding = false;
-            if (extension == ".vmd")
-            {
-                Engine::Scene::Scene* activeScene = GetActiveDocumentScene();
-                Engine::Core::Object* selected = explicitReference
-                    ? reference : (activeScene ? activeScene->GetSelectedObject() : nullptr);
-                Engine::Core::Object* root = selected
-                    ? selected->GetPrefabInstanceRoot() : nullptr;
-                if (root && root->Prefab)
-                {
-                    attemptedCharacterBinding = true;
-                    const std::string prefabPath = root->Prefab->GetPath();
-                    std::string bindError;
-                    boundCharacter = MmdDanceAssetBinder::BindFromPrefab(
-                        prefabPath, source.string(), bindError,
-                        (fs::path(imported.outputDirectory) /
-                            (source.stem().string() + ".animpack")).string());
-                    if (boundCharacter)
-                    {
-                        Engine::Scene::Scene::ObjectPath selectionPath;
-                        const bool hadSelection = activeScene->TryGetObjectPath(
-                            selected, selectionPath);
-                        if (Engine::Serialization::SceneSerializer::RefreshPrefabInstances(
-                                *activeScene, prefabPath, activeScene->GetGraphicsProvider()))
-                        {
-                            if (hadSelection)
-                                SelectObject(activeScene->FindObjectByPath(selectionPath));
-                        }
-                        else if (m_primaryConsole)
-                            m_primaryConsole->AddLog(ConsoleView::Level::Warning,
-                                "MMD animations saved, but scene instances could not be refreshed");
-                        if (m_primaryConsole)
-                        {
-                            const fs::path output = fs::path(prefabPath).parent_path();
-                            const auto report = Engine::Serialization::JsonParseFile(
-                                (output / (source.stem().string() + "_mmd.json")).string());
-                            const std::string bodyClip = report["bodyClip"].AsString();
-                            const std::string faceClip = report["facialClip"].AsString();
-                            const std::string animationPack =
-                                report["animationPack"].AsString();
-                            if (!bodyClip.empty())
-                                m_primaryConsole->AddLog(ConsoleView::Level::Info,
-                                    "MMD body animation: " + bodyClip);
-                            if (!faceClip.empty())
-                                m_primaryConsole->AddLog(ConsoleView::Level::Info,
-                                    "MMD facial animation: " + faceClip);
-                            if (!animationPack.empty())
-                                m_primaryConsole->AddLog(ConsoleView::Level::Info,
-                                    "MMD animation pack: " + animationPack);
-                            for (size_t index = 0;
-                                index < report["limitations"].ArraySize(); ++index)
-                                m_primaryConsole->AddLog(ConsoleView::Level::Warning,
-                                    report["limitations"].ArrayAt(index).AsString());
-                        }
-                    }
-                    else if (m_primaryConsole)
-                        m_primaryConsole->AddLog(ConsoleView::Level::Warning,
-                            "MMD character binding skipped: " + bindError);
-                }
-                else if (m_primaryConsole)
-                    m_primaryConsole->AddLog(ConsoleView::Level::Info,
-                        "VMD source tracks packed; select an imported FBX or PMX character to also create playable body and facial .anim files");
-            }
-            if (m_primaryConsole)
-            {
-                if (!imported.message.empty() && (extension == ".pmx" ||
-                    imported.message.find("; missing source texture files:") != std::string::npos))
-                    m_primaryConsole->AddLog(ConsoleView::Level::Warning,
-                        imported.message);
-                const std::string& primaryAsset = asPrefab &&
-                    !imported.prefabPath.empty() ? imported.prefabPath
-                    : imported.primaryAssetPath.empty()
-                    ? imported.prefabPath : imported.primaryAssetPath;
-                m_primaryConsole->AddLog(ConsoleView::Level::Info,
-                    "Asset imported: " + primaryAsset);
-                if (extension == ".vmd")
-                    m_primaryConsole->AddLog(ConsoleView::Level::Info,
-                        "VMD animation pack: " +
-                        (fs::path(imported.outputDirectory) /
-                            (source.stem().string() + ".animpack")).string());
-                if (extension == ".vmd" && attemptedCharacterBinding &&
-                    !boundCharacter &&
-                    imported.message.find("need target binding") != std::string::npos)
-                    m_primaryConsole->AddLog(ConsoleView::Level::Warning,
-                        imported.message);
-            }
-            return asPrefab && !imported.prefabPath.empty()
-                ? imported.prefabPath : imported.primaryAssetPath.empty()
-                ? imported.prefabPath : imported.primaryAssetPath;
-        }
-
-        std::error_code relativeError;
-        const fs::path absoluteSource = fs::weakly_canonical(source, relativeError);
-        const fs::path absoluteAssets = fs::weakly_canonical(assetsDirectory, relativeError);
-        if (!relativeError)
-        {
-            const fs::path relative = absoluteSource.lexically_relative(absoluteAssets);
-            if (!relative.empty() && *relative.begin() != "..")
-            {
-                Engine::Core::AssetRecord::Ensure(source, source,
-                    { { "importer", std::string("native") } });
-                return source.string();
-            }
-        }
-
-        fs::path destination = assetsDirectory / source.filename();
-        const std::string stem = destination.stem().string();
-        const std::string suffix = destination.extension().string();
-        const bool portableCopy = extension == ".obj" || extension == ".spriteanim";
-        const auto dependencyDirectory = [](const fs::path& asset)
-        {
-            return asset.parent_path() / (asset.stem().string() + "_dependencies");
-        };
-        for (unsigned index = 2; fs::exists(destination) ||
-                (portableCopy && fs::exists(dependencyDirectory(destination))); ++index)
-            destination = assetsDirectory /
-                (stem + " " + std::to_string(index) + suffix);
-        if (portableCopy)
-            CopyPortableAsset(source, destination);
-        else
-            fs::copy_file(source, destination);
-        Engine::Core::AssetRecord::Ensure(destination, source,
-            { { "importer", std::string("copy") } });
-        if (m_primaryConsole)
-            m_primaryConsole->AddLog(ConsoleView::Level::Info,
-                "Asset imported: " + destination.string());
-        return destination.string();
-    }
-    catch (const std::exception& error)
-    {
-        m_pendingImportError = error.what();
-        if (m_primaryConsole)
-            m_primaryConsole->AddLog(ConsoleView::Level::Error,
-                "Asset import failed: " + std::string(error.what()));
-        return {};
-    }
-}
-
 Engine::Core::Object* EditorState::InstantiateAsset(const std::string& path,
     bool recordChange, bool showImportDialog)
 {
@@ -5200,14 +5710,8 @@ Engine::Core::Object* EditorState::InstantiateAsset(const std::string& path,
         }
         if (ModelImporter::SupportsExtension(extension))
         {
-            const std::string assetsDirectory = m_projectSettings.assetsDirectory.empty()
-                ? std::string("Assets")
-                : m_projectSettings.assetsDirectory;
-            const Engine::Model::ModelImportResult imported = ModelImporter::Import(path, assetsDirectory);
-            if (!imported.success)
-                throw std::runtime_error(imported.message);
-            object = Engine::Serialization::SceneSerializer::InstantiatePrefab(
-                *targetScene, imported.prefabPath, targetScene->GetGraphicsProvider());
+            if (recordChange) StartObjectImport(path, true);
+            return nullptr;
         }
         else if (extension == ".prefab")
         {
@@ -5358,7 +5862,11 @@ EditorState::HistoryEntry EditorState::CaptureHistoryEntry() const
     HistoryEntry entry;
     if (!m_scene)
         return entry;
-    entry.scene = m_scene->SaveSnapshotToString();
+    auto document = Engine::Serialization::SceneSerializer::CaptureSceneDocument(*m_scene);
+    entry.scene = Engine::Rendering::RenderJobs::Get().Submit(
+        [document = std::move(document)] {
+            return Engine::Serialization::SceneSerializer::EncodeSceneSnapshot(document);
+        }).get();
     CaptureHistorySelection(entry);
     return entry;
 }
@@ -5392,7 +5900,7 @@ void EditorState::TrackSceneChanges(bool allowHistory, bool editInProgress)
             return;
         SceneAssetDocument& document = *m_activeSceneAssetDocument;
         std::string current = CaptureSceneAssetDocumentSnapshot(document);
-        if (current != document.baseline)
+        if (HistoryDiffers(current, document.baseline))
         {
             if (m_historyLimit > 0 && document.undo.size() >= m_historyLimit)
                 document.undo.pop_front();
@@ -5409,7 +5917,7 @@ void EditorState::TrackSceneChanges(bool allowHistory, bool editInProgress)
             }
             document.redo.clear();
             document.baseline = std::move(current);
-            document.dirty = document.baseline != document.savedSnapshot;
+            document.dirty = HistoryDiffers(document.baseline, document.savedSnapshot);
             RefreshSceneAssetDocumentTitle(document);
             if (m_renderer) m_renderer->MarkDirty();
         }
@@ -5432,45 +5940,78 @@ void EditorState::TrackSceneChanges(bool allowHistory, bool editInProgress)
     if (editInProgress)
         return;
 
-    // Editor mutation callbacks advance the revision. If it has not changed,
-    // the serialized scene must still match the existing history baseline, so
-    // avoid rebuilding and comparing the complete scene on this idle frame.
-    if (!m_historyBaseline.scene.empty() &&
-        m_historyCapturedRevision == m_sceneEditRevision)
-        return;
-
-    HistoryEntry current = CaptureHistoryEntry();
-    m_historyCapturedRevision = m_sceneEditRevision;
-    m_historySelectionDirty = false;
-    if (m_historyBaseline.scene.empty())
+    if (m_historyCapture.valid())
     {
-        m_historyBaseline = std::move(current);
-        if (m_savedSceneSnapshot.empty())
-            m_savedSceneSnapshot = m_historyBaseline.scene;
-        return;
-    }
-
-    if (current.scene != m_historyBaseline.scene)
-    {
-        if (m_historyLimit > 0 && !m_hasPendingHistoryEdit)
+        if (m_historyCapture.wait_for(std::chrono::seconds(0)) !=
+            std::future_status::ready) return;
+        HistoryCapture result = m_historyCapture.get();
+        // A newer owner mutation supersedes this captured document. Its
+        // worker may finish later, but it must never publish out of order.
+        // The first capture is the undo baseline even if an edit arrived
+        // before encoding finished; publish it before capturing the edit.
+        if (m_historyBaseline.scene.empty() &&
+            result.savedRevision == m_savedSceneRevision)
         {
-            m_pendingHistoryBefore = m_historyBaseline;
-            m_hasPendingHistoryEdit = true;
-            m_redoHistory.clear();
+            m_historyBaseline = std::move(result.entry);
+            m_historyCapturedRevision = result.revision;
+            if (m_savedSceneSnapshot.empty())
+                m_savedSceneSnapshot = m_historyBaseline.scene;
         }
-        m_historyBaseline = std::move(current);
-        m_hasUnsavedChanges = m_historyBaseline.scene != m_savedSceneSnapshot;
-        RefreshSceneDocumentTitle();
-        if (m_hasPendingHistoryEdit && !editInProgress)
-            CommitPendingHistoryEdit();
+        else if (result.revision == m_sceneEditRevision &&
+            result.savedRevision == m_savedSceneRevision)
+        {
+            m_historyCapturedRevision = result.revision;
+            m_historySelectionDirty = false;
+            if (result.changed)
+            {
+                if (m_historyLimit > 0 && !m_hasPendingHistoryEdit)
+                {
+                    m_pendingHistoryBefore = m_historyBaseline;
+                    m_hasPendingHistoryEdit = true;
+                    m_redoHistory.clear();
+                }
+                m_historyBaseline = std::move(result.entry);
+                m_hasUnsavedChanges = result.dirty;
+                RefreshSceneDocumentTitle();
+                if (m_hasPendingHistoryEdit) CommitPendingHistoryEdit();
+            }
+            else
+            {
+                m_historyBaseline.hasSelection = result.entry.hasSelection;
+                m_historyBaseline.selectionPath = std::move(result.entry.selectionPath);
+                if (m_hasPendingHistoryEdit) CommitPendingHistoryEdit();
+            }
+        }
     }
-    else
+    if (!m_historyBaseline.scene.empty() &&
+        m_historyCapturedRevision == m_sceneEditRevision) return;
+    HistoryEntry entry;
+    CaptureHistorySelection(entry);
+    auto document = Engine::Serialization::SceneSerializer::CaptureSceneDocument(*m_scene);
+    const uint64_t revision = m_sceneEditRevision;
+    const uint64_t savedRevision = m_savedSceneRevision;
+    const std::string baseline = m_historyBaseline.scene;
+    const std::string saved = m_savedSceneSnapshot;
+    m_historyCapture = Engine::Rendering::RenderJobs::Get().Submit(
+        [document = std::move(document), entry = std::move(entry),
+         revision, savedRevision, baseline, saved]() mutable {
+            entry.scene = Engine::Serialization::SceneSerializer::EncodeSceneSnapshot(document);
+            const bool changed = entry.scene != baseline;
+            const bool dirty = entry.scene != saved;
+            return HistoryCapture{std::move(entry), revision, savedRevision,
+                changed, dirty};
+        });
+}
+
+void EditorState::FlushHistoryCapture()
+{
+    // Commands such as Undo are ordering barriers. Ordinary frames only poll.
+    while (m_historyCapture.valid())
     {
-        // Selection is editor state too, but changing it alone is not an undo action.
-        m_historyBaseline.hasSelection = current.hasSelection;
-        m_historyBaseline.selectionPath = std::move(current.selectionPath);
-        if (m_hasPendingHistoryEdit && !editInProgress)
-            CommitPendingHistoryEdit();
+        m_historyCapture.wait();
+        if (m_activeSceneAssetDocument || m_activeAnimationDocument)
+        { m_historyCapture.get(); break; }
+        TrackSceneChanges(true, false);
     }
 }
 
@@ -5479,7 +6020,7 @@ void EditorState::CommitPendingHistoryEdit()
     if (!m_hasPendingHistoryEdit)
         return;
     if (m_historyLimit > 0 &&
-        m_pendingHistoryBefore.scene != m_historyBaseline.scene)
+        HistoryDiffers(m_pendingHistoryBefore.scene, m_historyBaseline.scene))
     {
         m_undoHistory.push_back(std::move(m_pendingHistoryBefore));
         if (m_mainSkeletonEdit.enabled)
@@ -5516,7 +6057,7 @@ void EditorState::Undo()
             document.baseline, [&](const std::string& snapshot)
             { return RestoreSceneAssetDocumentSnapshot(document, snapshot); }))
             return;
-        document.dirty = document.baseline != document.savedSnapshot;
+        document.dirty = HistoryDiffers(document.baseline, document.savedSnapshot);
         RefreshSceneAssetDocumentTitle(document);
         if (m_primaryHierarchy) m_primaryHierarchy->SetSelectedObject(nullptr);
         if (m_primaryProperties) m_primaryProperties->SetSelectedObject(nullptr);
@@ -5531,6 +6072,7 @@ void EditorState::Undo()
         return;
     }
     TrackSceneChanges(true, false);
+    FlushHistoryCapture();
     CommitPendingHistoryEdit();
     if (!m_scene || m_undoHistory.empty())
         return;
@@ -5564,7 +6106,7 @@ void EditorState::Redo()
             document.baseline, [&](const std::string& snapshot)
             { return RestoreSceneAssetDocumentSnapshot(document, snapshot); }))
             return;
-        document.dirty = document.baseline != document.savedSnapshot;
+        document.dirty = HistoryDiffers(document.baseline, document.savedSnapshot);
         RefreshSceneAssetDocumentTitle(document);
         if (m_primaryHierarchy) m_primaryHierarchy->SetSelectedObject(nullptr);
         if (m_primaryProperties) m_primaryProperties->SetSelectedObject(nullptr);
@@ -5579,6 +6121,7 @@ void EditorState::Redo()
         return;
     }
     TrackSceneChanges(true, false);
+    FlushHistoryCapture();
     CommitPendingHistoryEdit();
     if (!m_scene || m_redoHistory.empty())
         return;
@@ -5608,7 +6151,8 @@ bool EditorState::CanUndo() const
         !edit->undo.empty()) return true;
     return m_activeSceneAssetDocument ? !m_activeSceneAssetDocument->undo.empty()
         : m_activeAssetDocument ? m_activeAssetDocument->CanUndo()
-        : (m_hasPendingHistoryEdit || !m_undoHistory.empty());
+        : (m_hasPendingHistoryEdit || !m_undoHistory.empty() ||
+            m_historyCapture.valid());
 }
 
 bool EditorState::CanRedo() const
@@ -5660,7 +6204,7 @@ void EditorState::ApplyHistoryEntry(
     m_historyBaseline = std::move(entry);
     m_historyCapturedRevision = m_sceneEditRevision;
     m_historySelectionDirty = false;
-    m_hasUnsavedChanges = m_historyBaseline.scene != m_savedSceneSnapshot;
+    m_hasUnsavedChanges = HistoryDiffers(m_historyBaseline.scene, m_savedSceneSnapshot);
     RefreshSceneDocumentTitle();
     if (m_primaryConsole)
         m_primaryConsole->AddLog(ConsoleView::Level::Info,
@@ -5669,6 +6213,7 @@ void EditorState::ApplyHistoryEntry(
 
 void EditorState::ResetHistory(bool sceneIsSaved)
 {
+    if (m_historyCapture.valid()) m_historyCapture = {};
     m_undoHistory.clear();
     m_redoHistory.clear();
     m_pendingHistoryBefore = {};
@@ -5677,7 +6222,10 @@ void EditorState::ResetHistory(bool sceneIsSaved)
     m_historyCapturedRevision = m_sceneEditRevision;
     m_historySelectionDirty = false;
     if (sceneIsSaved)
+    {
         m_savedSceneSnapshot = m_historyBaseline.scene;
+        m_savedSceneRevision = m_sceneEditRevision;
+    }
 }
 
 void EditorState::SetHistoryLimit(uint32_t limit)

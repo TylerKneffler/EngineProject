@@ -40,6 +40,5 @@ private:
     std::vector<float> m_density;
     std::vector<float> m_pressure;
     std::vector<glm::vec3> m_acceleration;
-    std::vector<uint32_t> m_neighbors;
 };
 }

@@ -3,6 +3,7 @@
 #include "Engine/Editor/Startup/EditorCommandLine.h"
 #include "Engine/Editor/Startup/EditorStartupSettings.h"
 #include "Engine/Editor/Diagnostics/EditorFrameProfiler.h"
+#include "Engine/Editor/Diagnostics/FrameActivity.h"
 #include "Core/Window.h"
 #include "Core/Startup/StartupSplash.h"
 #include "Core/ProjectLoader.h"
@@ -306,16 +307,8 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
     const auto beginPlayScene = [&]()
     {
         pendingPlayStart = false;
-        if (!editorState->CapturePlayModeScene())
-        {
-            editorState->SetLoadingOverlay(false);
-            gameBuildManager->Stop();
-            return;
-        }
-        scene = editorState->GetScene();
         scene->Start();
         resetPlayDelta = true;
-        editorState->SetLoadingOverlay(false);
     };
     gameBuildManager->OnPlayStart = [&]()
     {
@@ -323,8 +316,12 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
         scene->FenceBackgroundWork();
         scene->SetGameplayInputEnabled(false);
         const bool requested = editorState->RequestCodeEditorAttach();
+        if (!editorState->CapturePlayModeScene())
+        {
+            gameBuildManager->Stop();
+            return;
+        }
         pendingPlayStart = true;
-        editorState->SetLoadingOverlay(true, "Preparing runtime scene...");
         waitingForPlayDebugger = requested && !IsDebuggerPresent();
         if (waitingForPlayDebugger)
         {
@@ -341,7 +338,6 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
         window->ReleaseGameplayInput();
         waitingForPlayDebugger = false;
         pendingPlayStart = false;
-        editorState->SetLoadingOverlay(false);
         Engine::Core::SceneManager::CancelPendingSceneLoad();
         // A toolbar Stop can arrive while RenderIfNeeded still owns a command
         // list. Restore once that frame has been submitted.
@@ -442,6 +438,7 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
     Engine::Editor::EditorFrameProfiler frameProfiler(
         scene, renderer, autoProfilePlay);
     uint32_t autoProfileTick = 0,autoProfilePlayingFrames=0;
+    uint64_t recordedFrameCount = 0;
     const bool autoProfileKeepOpen=EnvironmentVariable("ENGINE_EDITOR_AUTO_PROFILE_KEEP_OPEN").has_value();
     const auto warmupFrames=EnvironmentVariable("ENGINE_EDITOR_AUTO_PROFILE_WARMUP_FRAMES");
     const uint32_t autoProfileWarmup=warmupFrames ? uint32_t(std::clamp(std::atoi(warmupFrames->c_str()),0,1200)):0;
@@ -569,7 +566,7 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
         {
             if (resetPlayDelta)
             {
-                // Runtime cloning is loading time, not simulation time.
+                // Keep the transition frame out of simulation time.
                 dt = 0.f;
                 QueryPerformanceCounter(&lastCounter);
                 resetPlayDelta = false;
@@ -592,23 +589,8 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
                 if (auto* view = dynamic_cast<Engine::Editor::SceneView*>(panel.get());
                     view && view->IsOpen() && view->GetScene())
                     previewScenes.insert(view->GetScene());
-            for (Engine::Scene::Scene* previewScene : previewScenes)
-            {
-                for(auto* emitter:previewScene->GetComponents<Engine::Components::ParticleEmitter>())
-                    if(emitter->Owner && emitter->Owner->IsEnabledInHierarchy() && emitter->IsEditorPreviewRunning())
-                    {
-                        emitter->Advance(std::max(dt,0.f),emitter->Owner->transform.GetWorldMatrix());
-                        previewAdvanced=true;
-                    }
-                for(auto* animation:previewScene->GetComponents<Engine::Components::AnimationManager>())
-                    if(animation->Owner && animation->Owner->IsEnabledInHierarchy() && animation->IsEditorPreviewRunning())
-                    { animation->Tick(std::max(dt,0.f)); previewAdvanced=true; }
-            }
             for (auto* previewScene : previewScenes)
-            {
-                previewAdvanced=previewScene->UpdateSpatialScripts(true) || previewAdvanced;
-                previewScene->CommitPendingObjectChanges();
-            }
+                previewAdvanced = previewScene->AdvanceEditorPreviews(dt) || previewAdvanced;
             if (previewAdvanced) renderer->MarkDirty();
         }
         const auto afterSceneUpdate = Clock::now();
@@ -664,12 +646,17 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
         Engine::Editor::EditorPlayPipeline::Timings pipelineTimings;
         Engine::Rendering::GrassPerformance recordedGrass;
         bool uiDrawn = false;
+        double uiCpuMilliseconds = 0;
         const auto drawEditorUi = [&]()
         {
             if (uiDrawn) return;
             const auto beforeUi = Clock::now();
+            const auto beforeUiCounters = stageCounters();
             uiBackend->DrawEditor(*editorState, playState, gameBuildManager.get());
             editorUiMilliseconds = std::chrono::duration<double, std::milli>(Clock::now() - beforeUi).count();
+            const auto afterUiCounters = stageCounters();
+            if (afterUiCounters.threadTicks >= beforeUiCounters.threadTicks)
+                uiCpuMilliseconds = double(afterUiCounters.threadTicks - beforeUiCounters.threadTicks) / 10000.;
             uiDrawn = true;
             for (auto& panel : editorState->GetPanels())
                 if (auto* view = dynamic_cast<Engine::Editor::View*>(panel.get()))
@@ -914,6 +901,9 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
             playState == Engine::Editor::PlayState::Paused)
             scene->FenceBackgroundWork();
         finishPlayStop();
+        // UI callbacks and the simulation tick have returned before a script
+        // module can replace their component code.
+        if (hotReload->PublishPending()) renderer->MarkDirty();
         if (pendingPlayStart && playState == Engine::Editor::PlayState::Playing &&
             !waitingForPlayDebugger)
         {
@@ -953,6 +943,12 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
             sample.afterRender = afterRender;
             sample.afterPendingLoad = afterPendingLoad;
             sample.playPipeline = usePlayPipeline;
+            sample.uiCpuMilliseconds = uiCpuMilliseconds;
+            sample.workerPending = loadCounters.jobs.pending;
+            sample.workerCount = loadCounters.jobs.workers;
+            sample.startup = recordedFrameCount++ < 2;
+            sample.activity = Engine::Editor::FrameActivity::Consume();
+            sample.writer = frameProfiler.GetWriterStatistics();
             sample.simulationMilliseconds = pipelineTimings.updateMs;
             sample.simulationCpuMilliseconds = pipelineTimings.updateCpuMs;
             sample.simulationWaitMilliseconds = pipelineTimings.waitMs;

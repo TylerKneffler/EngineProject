@@ -118,6 +118,7 @@ SceneView::SceneView()
 SceneView::~SceneView()
 {
     CancelPrefabPreview();
+    ScenePlacementAndPicking::ClearCaches();
 }
 
 // ---------------------------------------------------------------------------
@@ -127,6 +128,7 @@ void SceneView::SetScene(Engine::Scene::Scene* scene)
 {
     if (m_scene == scene) return;
     CancelPrefabPreview();
+    ScenePlacementAndPicking::ClearCaches();
     m_previousSelectedObject = nullptr;
     // Gestures and model pins contain pointers into the previous graph.
     m_gizmos.ResetInteraction();
@@ -459,6 +461,8 @@ void SceneView::DrawPanel(IEditorUi& ui)
          static_cast<float>(m_gameWindowWidth) / static_cast<float>(m_gameWindowHeight));
     const auto input = ui.Viewport(GetUiTextureHandle(), targetAspect,
         {m_letterboxColor.r,m_letterboxColor.g,m_letterboxColor.b,m_letterboxColor.a});
+    if (m_scene && (input.hovered || input.viewportDragActive))
+        ScenePlacementAndPicking::PrepareSkinnedGeometry(*m_scene);
     RequestRenderSize(input.available.x, input.available.y);
     m_viewportScreenMin = input.screenMin;
     m_viewportScreenMax = input.screenMax;
@@ -761,8 +765,11 @@ void SceneView::DrawPanel(IEditorUi& ui)
                     extension == ".anim" || extension == ".animation" ||
                     extension == ".animpack"))
                 {
-                    auto* hovered = ScenePlacementAndPicking::PickObjectInViewport(
-                        *m_scene, input.mousePosInViewport, input.available, true);
+                    auto* hovered = payload.delivered
+                        ? ScenePlacementAndPicking::PickObjectInViewport(
+                            *m_scene, input.mousePosInViewport, input.available, true)
+                        : ScenePlacementAndPicking::PickObjectHoverAsync(
+                            *m_scene, input.mousePosInViewport, input.available);
                     target = AssetDropTarget(hovered, extension);
                     if (target)
                     {

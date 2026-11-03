@@ -80,11 +80,13 @@ GrassField::GrassField()
     RegisterField("seed", seed, "Tiles");
     RegisterField("maxTileBuildsPerUpdate", maxTileBuildsPerUpdate, "Tiles");
     RegisterField("castShadows", castShadows, "Lighting");
+    RegisterField("shaderPath", shaderPath, "Lighting");
     RegisterField("tileWorkBudgetMs", tileWorkBudgetMs, "Tiles");
     RegisterField("fadeDuration", fadeDuration, "LOD");
     RegisterField("distanceFadeWidth", distanceFadeWidth, "LOD");
     RegisterField("gpuLodSelection", gpuLodSelection, "LOD");
     RegisterField("allowProceduralGeneration", allowProceduralGeneration, "Tiles");
+    RegisterField("retainDormantTiles", retainDormantTiles, "Tiles");
 }
 
 bool GrassField::LoadSources()
@@ -180,6 +182,24 @@ void GrassField::ClearTiles()
     m_tiles.clear();
     m_build.reset();
     m_hasGenerationSignature = false;
+}
+
+void GrassField::SuspendTiles()
+{
+    m_build.reset();
+    for (auto& [key, tile] : m_tiles)
+    {
+        tile.object->enabled = false;
+        tile.visibility = tile.appearance = 0.f;
+        tile.mesh->SetRuntimeVisibility(0.f);
+    }
+}
+
+void GrassField::LeaveSpatialRegion()
+{
+    if (retainDormantTiles) SuspendTiles();
+    else ClearTiles();
+    m_performance = {};
 }
 
 bool GrassField::EnsureAuthoredPreviewHidden()
@@ -474,7 +494,8 @@ bool GrassField::Refresh()
     {
         // Distant cells must not load species meshes, index placements, or
         // generate tile geometry just because they exist in the stress scene.
-        if (!m_tiles.empty() || m_build) { ClearTiles(); changed = true; }
+        if (!m_tiles.empty() || m_build)
+        { if (retainDormantTiles) SuspendTiles(); else ClearTiles(); changed = true; }
         m_performance.totalMs = std::chrono::duration<double, std::milli>(Clock::now() - started).count();
         scene.AddGrassPerformance(m_performance);
         return changed;
@@ -528,6 +549,8 @@ bool GrassField::Refresh()
                 auto* material = tile.object->AddComponent<Engine::Components::Material>();
                 material->diffuseColor = {1,1,1};
                 material->useVertexColors = true;
+                if (!shaderPath.empty())
+                    material->shaders.push_back({shaderPath, true, "Auto"});
                 material->roughnessFactor = 1;
                 material->metallicFactor = 0;
                 material->doubleSided = true;
@@ -559,7 +582,16 @@ bool GrassField::Refresh()
                 else if (!tile.castsShadows && distance >= shadowRadius - hysteresis) shadows = false;
             }
             tile.castsShadows = shadows;
-            tile.object->GetComponent<Engine::Components::Material>()->castsShadows = shadows;
+            auto* tileMaterial = tile.object->GetComponent<Engine::Components::Material>();
+            tileMaterial->castsShadows = shadows;
+            if ((shaderPath.empty() && !tileMaterial->shaders.empty()) ||
+                (!shaderPath.empty() && (tileMaterial->shaders.size() != 1 ||
+                    tileMaterial->shaders.front().path != shaderPath)))
+            {
+                tileMaterial->shaders.clear();
+                if (!shaderPath.empty())
+                    tileMaterial->shaders.push_back({shaderPath, true, "Auto"});
+            }
             changed = ActivateTileLod(tile, tile.desiredLod) || changed;
             tile.object->enabled = tile.mesh->GetActiveRuntimeLod() >= 0 && tile.visibility > 0.f;
         }
@@ -578,8 +610,17 @@ bool GrassField::Refresh()
         }
         if (m_build && m_build->tile == it->first) m_build.reset();
         it->second.object->enabled = false;
-        scene.RequestRemoveObject(it->second.object);
-        it = m_tiles.erase(it);
+        if (retainDormantTiles)
+        {
+            it->second.visibility = it->second.appearance = 0.f;
+            it->second.mesh->SetRuntimeVisibility(0.f);
+            ++it;
+        }
+        else
+        {
+            scene.RequestRemoveObject(it->second.object);
+            it = m_tiles.erase(it);
+        }
         changed = true;
     }
     // Prioritize nearby missing tiles. Preparing placements installs all three
@@ -657,6 +698,7 @@ uint64_t GrassField::SpatialRegionRevision() const
     uint64_t revision=HashOffset;
     if(Owner) { const auto world=Owner->transform.GetWorldRevision(); HashBytes(revision,&world,sizeof(world)); }
     HashBytes(revision,viewerObjectName.data(),viewerObjectName.size());
+    HashBytes(revision,shaderPath.data(),shaderPath.size());
     HashBytes(revision,&useEditorCamera,sizeof(useEditorCamera)); HashFloat(revision,tileSize); HashFloat(revision,visibleRadius);
     if(Owner && Owner->GetScene()) { const bool started=Owner->GetScene()->HasStarted(); HashBytes(revision,&started,sizeof(started)); }
     if(m_cachedLayer) HashFloat(revision,m_cachedLayer->viewDistance);

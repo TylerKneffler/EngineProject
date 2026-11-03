@@ -6,6 +6,10 @@
 #include <mutex>
 #include <unordered_map>
 #include <cstdint>
+#include <condition_variable>
+#include <deque>
+#include <functional>
+#include <thread>
 
 namespace Engine::Audio
 {
@@ -18,6 +22,12 @@ struct AudioMixer::Impl
     std::unordered_map<std::string, float> busVolumes;
     std::unordered_map<std::string, std::unique_ptr<ma_sound_group>> buses;
     std::mutex mutex;
+    std::mutex queueMutex;
+    std::condition_variable decodeReady;
+    std::deque<std::function<void()>> decodeJobs;
+    std::deque<std::function<void()>> commands;
+    std::thread decodeWorker;
+    bool stopping = false;
 };
 
 AudioMixer& AudioMixer::Get()
@@ -38,12 +48,35 @@ AudioMixer::AudioMixer() : m_impl(new Impl())
         result = ma_engine_init(&config, &m_impl->engine);
     }
     m_impl->initialized = result == MA_SUCCESS;
+    m_impl->decodeWorker = std::thread([this] {
+        for (;;)
+        {
+            std::function<void()> job;
+            {
+                std::unique_lock<std::mutex> lock(m_impl->queueMutex);
+                m_impl->decodeReady.wait(lock, [this] {
+                    return m_impl->stopping || !m_impl->decodeJobs.empty();
+                });
+                if (m_impl->stopping && m_impl->decodeJobs.empty()) return;
+                job = std::move(m_impl->decodeJobs.front());
+                m_impl->decodeJobs.pop_front();
+            }
+            job();
+        }
+    });
 }
 
 AudioMixer::~AudioMixer()
 {
     if (m_impl)
     {
+        {
+            std::lock_guard<std::mutex> lock(m_impl->queueMutex);
+            m_impl->stopping = true;
+        }
+        m_impl->decodeReady.notify_one();
+        if (m_impl->decodeWorker.joinable()) m_impl->decodeWorker.join();
+        DrainCommands();
         if (m_impl->initialized)
         {
             for (auto& [name, group] : m_impl->buses)
@@ -63,6 +96,7 @@ bool AudioMixer::IsAvailable() const
 bool AudioMixer::ConfigureOffline(uint32_t sampleRate, uint32_t channels)
 {
     if (!m_impl || sampleRate == 0u || channels == 0u) return false;
+    DrainCommands();
     std::lock_guard<std::mutex> lock(m_impl->mutex);
     m_impl->offline = false;
     if (m_impl->initialized)
@@ -86,6 +120,7 @@ bool AudioMixer::ConfigureOffline(uint32_t sampleRate, uint32_t channels)
 
 bool AudioMixer::ReadOfflineFrames(float* samples, uint64_t frameCount)
 {
+    DrainCommands();
     if (!m_impl || !m_impl->offline || (!samples && frameCount != 0u))
         return false;
     return ma_engine_read_pcm_frames(&m_impl->engine, samples, frameCount,
@@ -155,5 +190,34 @@ void* AudioMixer::GetBusHandle(const std::string& requestedBus)
     ma_sound_group* result = group.get();
     m_impl->buses.emplace(bus, std::move(group));
     return result;
+}
+
+void AudioMixer::SubmitDecode(std::function<void()> job)
+{
+    if (!m_impl) return;
+    {
+        std::lock_guard<std::mutex> lock(m_impl->queueMutex);
+        if (m_impl->stopping) return;
+        m_impl->decodeJobs.push_back(std::move(job));
+    }
+    m_impl->decodeReady.notify_one();
+}
+
+void AudioMixer::EnqueueCommand(std::function<void()> command)
+{
+    if (!m_impl) return;
+    std::lock_guard<std::mutex> lock(m_impl->queueMutex);
+    if (!m_impl->stopping) m_impl->commands.push_back(std::move(command));
+}
+
+void AudioMixer::DrainCommands()
+{
+    if (!m_impl) return;
+    std::deque<std::function<void()>> commands;
+    {
+        std::lock_guard<std::mutex> lock(m_impl->queueMutex);
+        commands.swap(m_impl->commands);
+    }
+    for (auto& command : commands) command();
 }
 }

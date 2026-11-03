@@ -220,6 +220,7 @@ public:
     Engine::Core::ComponentReference targetManipulator { "SpatialManipulator" };
 
     glm::mat4 GetOverlayMatrix() const;
+    Engine::Scene::Spatial::WarpVolumeDefinition GetWarpVolumeDefinition() const;
     bool ContainsWorldPoint(const glm::vec3& worldPoint) const;
     glm::vec3 MapWorldPointThroughVolume(const glm::vec3& worldPoint) const;
     glm::mat4 GetPortalWorldTransformTo(const SpatialManipulator& target) const;

@@ -81,7 +81,9 @@ ScriptFileWatcher::~ScriptFileWatcher() = default;
 void ScriptFileWatcher::Initialize(std::string directory)
 {
     m_directory = std::filesystem::path(std::move(directory));
-    m_files = Scan();
+    if (m_scan.valid()) m_scan.get();
+    m_scanDetectChanges = m_scanRequested = m_requestedDetectChanges = false;
+    m_files = Scan(m_directory);
     m_notifications = std::make_unique<NotificationState>();
     if (!m_notifications->Start(m_directory))
         m_notifications.reset();
@@ -91,13 +93,13 @@ void ScriptFileWatcher::Initialize(std::string directory)
 }
 
 std::unordered_map<std::string, ScriptFileWatcher::Stamp>
-ScriptFileWatcher::Scan() const
+ScriptFileWatcher::Scan(const std::filesystem::path& directory)
 {
     std::unordered_map<std::string, Stamp> files;
     std::error_code error;
-    if (m_directory.empty() || !std::filesystem::exists(m_directory, error))
+    if (directory.empty() || !std::filesystem::exists(directory, error))
         return files;
-    for (std::filesystem::recursive_directory_iterator iterator(m_directory, error), end;
+    for (std::filesystem::recursive_directory_iterator iterator(directory, error), end;
          iterator != end && !error; iterator.increment(error))
     {
         if (!iterator->is_regular_file(error)) continue;
@@ -114,11 +116,46 @@ ScriptFileWatcher::Scan() const
     return files;
 }
 
+void ScriptFileWatcher::RequestScan(bool detectChanges)
+{
+    if (m_scan.valid())
+    {
+        // A source notification already requested a build. Its baseline
+        // refresh must not report the same edit a second time.
+        m_scanDetectChanges = detectChanges;
+        m_scanRequested = true;
+        m_requestedDetectChanges = detectChanges;
+        return;
+    }
+    m_scanDetectChanges = detectChanges;
+    const auto directory = m_directory;
+    m_scan = std::async(std::launch::async, [directory] { return Scan(directory); });
+}
+
+bool ScriptFileWatcher::CompleteScan()
+{
+    if (!m_scan.valid() ||
+        m_scan.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+        return false;
+    auto current = m_scan.get();
+    const bool changed = m_scanDetectChanges && current != m_files;
+    m_files = std::move(current);
+    m_scanDetectChanges = false;
+    if (m_scanRequested)
+    {
+        const bool detectChanges = m_requestedDetectChanges;
+        m_scanRequested = m_requestedDetectChanges = false;
+        RequestScan(detectChanges);
+    }
+    return changed;
+}
+
 bool ScriptFileWatcher::Poll()
 {
     const auto now = std::chrono::steady_clock::now();
+    const bool scanChanged = CompleteScan();
     if (!m_notifications)
-        return PollFallback(now);
+        return PollFallback(now) || scanChanged;
 
     bool relevantChange = false;
     if (WaitForSingleObject(m_notifications->event, 0) == WAIT_OBJECT_0)
@@ -173,10 +210,10 @@ bool ScriptFileWatcher::Poll()
         m_debouncedChangePending = false;
         // Keep the fallback baseline current without scanning during idle
         // frames. This scan runs only after a real source notification.
-        m_files = Scan();
+        RequestScan(false);
         return true;
     }
-    return false;
+    return scanChanged;
 }
 
 bool ScriptFileWatcher::PollFallback(
@@ -185,10 +222,7 @@ bool ScriptFileWatcher::PollFallback(
     if (now < m_nextFallbackScan)
         return false;
     m_nextFallbackScan = now + kFallbackPollInterval;
-    auto current = Scan();
-    if (current == m_files)
-        return false;
-    m_files = std::move(current);
-    return true;
+    RequestScan(true);
+    return false;
 }
 }

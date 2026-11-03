@@ -8,6 +8,7 @@ build/
 .local/*
 !.local/tests/
 .local/tests/*
+!.local/tests/AudioPipelineTests.cpp
 !.local/tests/PmxModelDecoderTests.cpp
 !.local/tests/MmdRenderTests.cpp
 !.local/tests/LegacyFbxImportTests.cpp

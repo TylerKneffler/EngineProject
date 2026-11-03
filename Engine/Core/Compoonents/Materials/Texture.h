@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <future>
 #include <string>
 #include <vector>
 
@@ -11,7 +12,7 @@ namespace Engine::Graphics { class IGraphicsProvider; }
 
 namespace Engine::Components
 {
-class Texture
+class Texture : public std::enable_shared_from_this<Texture>
 {
 public:
     using IGraphicsProvider = Engine::Graphics::IGraphicsProvider;
@@ -36,6 +37,12 @@ public:
     // caller persists the pixels separately when the stroke is committed.
     bool SetPreviewPixels(const std::vector<uint8_t>& rgba);
     bool Prepare(IGraphicsProvider* graphicsProvider);
+    // Startup-only path for resources required before the first frame.
+    bool PrepareImmediate(IGraphicsProvider* graphicsProvider);
+    // Schedule CPU decoding; publication is pumped on the graphics owner.
+    void QueuePrepare(IGraphicsProvider* graphicsProvider);
+    static void PublishQueued(IGraphicsProvider* graphicsProvider, size_t maxUploads = 2);
+    void RetainPixelsForCpu() { m_retainPixelsForCpu = true; }
 
     const std::string& GetFilePath() const { return m_filePath; }
     uint32_t GetWidth() const { return m_width; }
@@ -62,7 +69,13 @@ private:
     GraphicsTextureFormat m_format = GraphicsTextureFormat::Rgba8;
     bool m_srgb = true;
     bool m_generateMips = true;
+    bool m_retainPixelsForCpu = false;
     IGraphicsProvider* m_preparedProvider = nullptr;
     std::shared_ptr<IGraphicsTexture> m_graphicsTexture;
+    std::future<std::shared_ptr<Texture>> m_decode;
+    bool m_queued = false;
+    IGraphicsProvider* m_queuedProvider = nullptr;
+    bool m_decodeFailed = false;
+    uint64_t m_generation = 0;
 };
 }

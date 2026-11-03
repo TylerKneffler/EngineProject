@@ -1,19 +1,23 @@
 #pragma once
 #include "Core/Model/ProjectSettings.h"
 #include "Core/Model/AnimationClip.h"
+#include "Core/Model/ImportedModel.h"
 #include "Core/AnimationTimelineEditing.h"
 #include "Core/Model/RigAsset.h"
 #include "pch.h"
 #include "Core/ProjectLoader.h"
 #include "Core/Scene/Scene.h"
+#include "Core/Serialization/Json.h"
 #include "Core/Renderers/IEditorRenderer.h"
 #include "UI/IEditorUi.h"
 #include "Core/Gizmos/EditorGizmoSystem.h"
 #include "Core/View/Templates/EditModes/Skeleton/WeightPaintSurface.h"
 #include "Core/Paint/BrushPreset.h"
+#include "Core/Importers/AssetJobControl.h"
 #include <memory>
 #include <vector>
 #include <functional>
+#include <future>
 #include <deque>
 #include <cstdint>
 #include <chrono>
@@ -23,6 +27,8 @@
 #include <tuple>
 #include <utility>
 #include <optional>
+#include <filesystem>
+#include <algorithm>
 
 namespace Engine::Core { class Window; }
 namespace Engine::Components { class Mesh; }
@@ -149,6 +155,19 @@ public:
     bool IsEditingPrefab() const;
     std::string GetActiveDocumentName() const;
     void BakeLighting();
+    bool IsBakeJobRunning() const
+    { return m_bakeJob.valid() || m_bakePublication.has_value(); }
+    float GetBakeJobProgress() const
+    { return m_bakePublication
+        ? 0.95f + 0.05f * static_cast<float>(m_bakePublicationIndex) /
+            static_cast<float>(std::max<size_t>(1, m_bakePublication->objects.size()))
+        : m_bakeJobControl ? 0.95f * m_bakeJobControl->progress.load() : 1.f; }
+    void CancelBakeJob();
+    bool IsStageImportRunning() const { return m_stageImport.valid(); }
+    float GetStageImportProgress() const
+    { return m_stageImportControl ? m_stageImportControl->progress.load() : 0.f; }
+    void CancelStageImport()
+    { if (m_stageImportControl) m_stageImportControl->cancelled.store(true); }
     void ClearBakedLighting();
     void ImportAsset();
     void OpenCodeEditor();
@@ -204,6 +223,11 @@ public:
     void ClearImportReference();
     void ConfirmPendingImportAsset();
     void CancelPendingImportAsset();
+    bool IsImportJobRunning() const { return m_importJob.valid(); }
+    float GetImportJobProgress() const
+    { return m_importJobControl ? m_importJobControl->progress.load() : 0.f; }
+    bool IsImportJobCommitting() const
+    { return m_importJobControl && m_importJobControl->committing.load(); }
     std::string ConsumeImportHierarchyFocusRequest();
     bool CapturePlayModeScene();
     void RestorePlayModeScene();
@@ -450,17 +474,11 @@ private:
     void WireupCallbacks();
     Engine::Core::Object* InstantiateAsset(const std::string& path, bool recordChange = true,
         bool showImportDialog = true);
-    std::string ImportAssetFile(const std::string& path,
-        Engine::Core::Object* reference = nullptr,
-        bool explicitReference = false,
-        const std::string& destinationDirectory = {},
-        bool asPrefab = false, float pmxUnitScaleToMeters = 1.f,
-        bool pmxImportMorphs = true, bool pmxImportRigConstraints = true,
-        bool pmxImportFollowBoneColliders = true,
-        bool pmxImportDynamicPhysics = false,
-        bool pmxWeightFittedColliders = false,
-        int pmxPhysicsQuality = 1,
-        int pmxColliderMode = 1);
+    bool PollImportJob();
+    bool PollBakeJob();
+    void PublishImportJob(const std::string& primary,
+        const std::string& source, bool intoScene,
+        Engine::Scene::Scene* scene, Engine::Core::Object* reference);
     void CaptureImportReference(Engine::Core::Object* object);
     void SelectObject(Engine::Core::Object* object);
     struct HistoryEntry
@@ -469,7 +487,16 @@ private:
         bool hasSelection = false;
         ::Engine::Scene::Scene::ObjectPath selectionPath;
     };
+    struct HistoryCapture
+    {
+        HistoryEntry entry;
+        uint64_t revision = 0;
+        uint64_t savedRevision = 0;
+        bool changed = false;
+        bool dirty = false;
+    };
     HistoryEntry CaptureHistoryEntry() const;
+    void FlushHistoryCapture();
     void CaptureHistorySelection(HistoryEntry& entry) const;
     void MarkSceneEdited();
     void MarkHistorySelectionChanged()
@@ -483,10 +510,28 @@ private:
     void CommitPendingHistoryEdit();
     void TrimHistory();
     bool SaveMainScene();
+    struct SceneSaveResult
+    {
+        std::string path, snapshot;
+        uint64_t revision = 0;
+        uint64_t generation = 0;
+        bool succeeded = false;
+    };
+    struct SceneSaveRequest
+    {
+        Engine::Serialization::JsonValue document;
+        std::string path;
+        uint64_t revision = 0;
+        uint64_t generation = 0;
+    };
+    void StartSceneSave(SceneSaveRequest request);
+    bool PollSceneSave();
     void QueueSceneLoad(const std::string& path);
-    void LoadSceneNow(const std::string& path);
+    void OpenPrefabStageWithDocument(const std::string& path,
+        const Engine::Serialization::JsonValue& document);
+    void LoadSceneNow(const std::string& path,
+        const Engine::Serialization::JsonValue* parsed = nullptr);
     void RemovePrefabPanels();
-    void RebindMainScene(Engine::Scene::Scene* previous, Engine::Scene::Scene* next);
     void SetPrefabDocumentFocused(bool focused);
     void SetPrefabDirty(bool dirty);
     void RefreshPrefabDocumentTitle();
@@ -806,8 +851,6 @@ private:
     std::unique_ptr<::Engine::Core::Window> m_window;
     std::unique_ptr<::Engine::Renderers::IEditorRenderer> m_renderer;
     std::unique_ptr<Engine::Scene::Scene> m_scene;
-    // The authored graph stays alive while m_scene owns the runtime copy.
-    std::unique_ptr<Engine::Scene::Scene> m_retainedEditScene;
     std::unique_ptr<Engine::Scene::Scene> m_prefabScene;
     std::unique_ptr<ViewFactory> m_viewFactory;
     std::unique_ptr<PreferencesView> m_preferences;
@@ -843,8 +886,6 @@ private:
     MeshEditSession m_mainMeshEdit;
     MeshEditSession m_prefabMeshEdit;
     SkeletonEditSession m_mainSkeletonEdit;
-    MeshEditSession m_prePlayMeshEdit;
-    SkeletonEditSession m_prePlaySkeletonEdit;
     SkeletonEditSession m_prefabSkeletonEdit;
     std::unordered_map<std::string, MeshEditSession> m_meshEditCache;
 
@@ -854,6 +895,8 @@ private:
     std::string m_currentScenePath;
     std::string m_activePrefabPath;
     std::string m_pendingPrefabPath;
+    std::string m_prefabReadPath;
+    std::future<Engine::Serialization::JsonValue> m_prefabRead;
     std::deque<std::pair<std::string, std::string>> m_pendingAssetDocuments;
     bool m_prefabHasUnsavedChanges = false;
     bool m_prefabDocumentFocused = false;
@@ -862,8 +905,10 @@ private:
     bool m_loadingOverlayVisible = false;
     std::string m_loadingOverlayMessage;
     std::string m_queuedScenePath;
+    std::future<Engine::Serialization::JsonValue> m_queuedSceneDocument;
     std::string m_sceneLoadingMessage;
     std::string m_playModeSceneSnapshot;
+    std::future<Engine::Serialization::JsonValue> m_playModeParsedSnapshot;
     bool m_prePlayHasUnsavedChanges = false;
     bool m_prePlayHadObjectSelection = false;
     ::Engine::Scene::Scene::ObjectPath m_prePlaySelectionPath;
@@ -873,6 +918,9 @@ private:
     HistoryEntry m_historyBaseline;
     HistoryEntry m_pendingHistoryBefore;
     std::string m_savedSceneSnapshot;
+    std::future<SceneSaveResult> m_sceneSave;
+    std::optional<SceneSaveRequest> m_nextSceneSave;
+    std::string m_loadAfterSceneSave;
     uint32_t m_historyLimit = 100;
     bool m_hasPendingHistoryEdit = false;
     bool m_assetPreviewActive = false;
@@ -889,6 +937,9 @@ private:
     int m_meshToolbarSelectionMode = 0;
     uint64_t m_sceneEditRevision = 0;
     uint64_t m_historyCapturedRevision = 0;
+    uint64_t m_savedSceneRevision = 0;
+    uint64_t m_sceneDocumentGeneration = 0;
+    std::future<HistoryCapture> m_historyCapture;
     bool m_historySelectionDirty = false;
 
     std::string m_sceneToLoad;
@@ -906,6 +957,58 @@ private:
     int m_pendingPmxColliderMode = 1;
     std::string m_pendingImportReferenceLabel;
     std::string m_pendingImportError;
+    struct ImportJobResult
+    {
+        std::string primary;
+        std::string outputDirectory;
+        std::vector<std::filesystem::path> createdPaths;
+        std::string message;
+        std::string bindingError;
+        std::string boundPrefab;
+        bool boundCharacter = false;
+    };
+    std::future<ImportJobResult> m_importJob;
+    std::filesystem::path m_importDestinationRoot;
+    std::shared_ptr<AssetJobControl> m_importJobControl;
+    uint64_t m_importSceneGeneration = 0;
+    Engine::Scene::Scene::ObjectPath m_importReferencePath;
+    Engine::Core::Object* m_importReferenceObject = nullptr;
+    std::future<Engine::Model::ModelImportResult> m_stageImport;
+    std::shared_ptr<AssetJobControl> m_stageImportControl;
+    std::string m_stageImportPath;
+    struct BakeObjectResult
+    {
+        Engine::Scene::Scene::ObjectPath path;
+        bool hasMaterial = false;
+        glm::vec3 irradiance{0.f};
+        glm::vec3 directionalIrradiance{0.f};
+        glm::vec3 lightDirection{0.f, 1.f, 0.f};
+        std::string originalMaterialAsset;
+        std::string originalMaterialSnapshot;
+        std::string bakedMaterialAsset;
+        std::string bakedLightmapAsset;
+        bool hasProbe = false;
+        glm::vec3 probeIrradiance{0.f};
+        glm::vec3 probeDirectional{0.f};
+        glm::vec3 probeDirection{0.f, 1.f, 0.f};
+        bool hasProbeGroup = false;
+        std::vector<glm::vec3> groupIrradiance;
+        std::vector<glm::vec3> groupDirectional;
+        std::vector<glm::vec3> groupDirections;
+    };
+    struct BakeJobResult
+    {
+        Engine::Model::BakeResult status;
+        std::vector<BakeObjectResult> objects;
+        std::filesystem::path outputRoot;
+    };
+    std::future<BakeJobResult> m_bakeJob;
+    std::shared_ptr<AssetJobControl> m_bakeJobControl;
+    std::optional<BakeJobResult> m_bakePublication;
+    size_t m_bakePublicationIndex = 0;
+    bool m_bakePublicationFailed = false;
+    uint64_t m_bakeSceneGeneration = 0;
+    uint64_t m_bakeSceneRevision = 0;
     Engine::Scene::Scene* m_pendingImportScene = nullptr;
     Engine::Core::Object* m_pendingImportReferenceObject = nullptr;
     Engine::Scene::Scene::ObjectPath m_pendingImportReferencePath;

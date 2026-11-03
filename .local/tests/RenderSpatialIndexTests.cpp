@@ -171,6 +171,18 @@ void Regression()
     unbounded[2].minimum.x=1; stats=index.Update(unbounded); Require(!stats.refitNodes && !stats.rebuilds,"unbounded bounds performed a tree refit");
     Index boundary; std::vector<Bounds> edge={{{1,0,0},{2,1,1},true},{{-2,0,0},{-1,1,1},true}}; boundary.Update(edge);
     Require(boundary.Query(glm::mat4(1))==std::vector<uint8_t>(2,1),"touching clip boundary was culled");
+    Index rays;
+    std::vector<Bounds> rayBounds={{{2,-1,-1},{3,1,1},true},
+        {{6,-1,-1},{7,1,1},true},{{0,0,0},{0,0,0},false}};
+    rays.Update(rayBounds);
+    Require(rays.QueryRay({0,0,0},{1,0,0},5.f)==std::vector<uint32_t>({0,2}),
+        "ray query missed the near box or included the far box");
+    Require(rays.QueryRay({0,2,0},{1,0,0},10.f)==std::vector<uint32_t>({2}),
+        "parallel ray crossed a box outside its slab");
+    rayBounds[0].minimum.x=8; rayBounds[0].maximum.x=9;
+    rays.Update(rayBounds);
+    Require(rays.QueryRay({0,0,0},{1,0,0},5.f)==std::vector<uint32_t>({2}),
+        "ray query kept a stale box after refit");
     std::cout<<"Spatial index: sparse/dense serial and parallel refits, independent visibility/point queries, cache invalidation, membership, quality rebuilds, empty/unbounded/boundary cases passed.\n";
 }
 void Benchmark()

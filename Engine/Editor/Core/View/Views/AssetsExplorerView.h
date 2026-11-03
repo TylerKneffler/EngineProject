@@ -7,6 +7,9 @@
 #include "AssetLocationIndex.h"
 #include "Core/IO/DirectorySnapshotCache.h"
 #include "Core/Model/ImportedModel.h"
+#include "Engine/Editor/Core/Importers/AssetJobControl.h"
+#include <deque>
+#include <future>
 
 namespace Engine::Core { class Object; }
 namespace Engine::Scene { class Scene; }
@@ -28,7 +31,7 @@ class AssetsExplorerView : public IEditorPanel
 {
 public:
     AssetsExplorerView();
-    ~AssetsExplorerView() = default;
+    ~AssetsExplorerView() { CancelCopyJobs(); }
 
     // Initializes the view with the path to the Assets directory
     void Init(const std::string& assetsPath, Engine::Scene::Scene* scene = nullptr);
@@ -58,6 +61,7 @@ public:
         std::string* copiedPath = nullptr);
     void CheckForExternalMoves();
     bool PollDirectoryCache();
+    void CancelCopyJobs();
     void RecordKnownMove(const std::string& oldPath, const std::string& newPath)
     { m_locationIndex.RecordKnownMove(oldPath, newPath); }
     const std::string& GetSelectedPath() const { return m_selectedPath; }
@@ -135,7 +139,26 @@ private:
     float m_screenBottom = 0.f;
     AssetLocationIndex m_locationIndex;
     std::future<Engine::Model::ModelImportResult> m_extractionPending;
+    std::shared_ptr<AssetJobControl> m_extractionControl;
     std::string m_extractionAssetsPath;
+    struct CopyRequest
+    {
+        std::filesystem::path source;
+        std::filesystem::path destinationRoot;
+        std::filesystem::path assetsRoot;
+    };
+    struct CopyResult
+    {
+        std::string path;
+        std::string assetsRoot;
+        std::string error;
+        bool cancelled = false;
+    };
+    std::deque<CopyRequest> m_copyQueue;
+    std::future<CopyResult> m_copyPending;
+    std::shared_ptr<AssetJobControl> m_copyControl;
+    bool PollCopyJobs();
+    void StartNextCopyJob();
     std::vector<AssetLocationIndex::Move> m_externalMoves;
     bool m_locationCheckPending = false;
 };

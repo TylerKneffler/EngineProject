@@ -27,6 +27,8 @@
 #include "Core/Rendering/Lighting/BakedLightingData.h"
 #include <pugixml.hpp>
 #include <fstream>
+#include <future>
+#include <iterator>
 #include <algorithm>
 #include <cerrno>
 #include <cctype>
@@ -44,20 +46,65 @@ namespace Engine::Serialization
 // ---- Save -------------------------------------------------------------------
 std::string SceneSerializer::SaveToString(const Engine::Scene::Scene& scene)
 {
-    return Detail::SceneXmlBehavior::WriteDocument(Detail::SceneObjectBehavior::SerializeScene(scene));
+    auto document = CaptureSceneDocument(scene);
+    return std::async(std::launch::async, [document = std::move(document)] {
+        return EncodeSceneFile(document);
+    }).get();
 }
 
 std::string SceneSerializer::SaveSnapshotToString(const Engine::Scene::Scene& scene)
 {
-    return AssetWriteBinary(Detail::SceneObjectBehavior::SerializeScene(scene));
+    auto document = CaptureSceneDocument(scene);
+    return std::async(std::launch::async, [document = std::move(document)] {
+        return EncodeSceneSnapshot(document);
+    }).get();
+}
+
+JsonValue SceneSerializer::CaptureSceneDocument(const Engine::Scene::Scene& scene)
+{
+    scene.AssertOwnerThread();
+    return Detail::SceneObjectBehavior::SerializeScene(scene);
+}
+
+std::string SceneSerializer::EncodeSceneSnapshot(const JsonValue& document)
+{
+    return AssetWriteBinary(document);
+}
+
+std::string SceneSerializer::EncodeSceneFile(const JsonValue& document)
+{
+    return Detail::SceneXmlBehavior::WriteDocument(document);
+}
+
+JsonValue SceneSerializer::ReadSceneFile(const std::string& path)
+{
+    std::ifstream file(path, std::ios::binary);
+    if (!file) throw std::runtime_error("Could not read scene: " + path);
+    const std::string source(std::istreambuf_iterator<char>(file), {});
+    if (file.bad()) throw std::runtime_error("Could not read scene: " + path);
+    return ParseSceneText(source);
+}
+
+JsonValue SceneSerializer::ParseSceneText(const std::string& source)
+{
+    pugi::xml_document xml;
+    if (xml.load_buffer(source.data(), source.size()))
+        return Detail::SceneXmlBehavior::ReadNode(xml.document_element());
+    return AssetParse(source);
 }
 
 bool SceneSerializer::Save(const Engine::Scene::Scene& scene, const std::string& path)
 {
-    std::ofstream file(path);
-    if (!file) return false;
-    file << SaveToString(scene);
-    return file.good();
+    auto document = CaptureSceneDocument(scene);
+    return std::async(std::launch::async,
+        [document = std::move(document), path] {
+            const std::string xml = EncodeSceneFile(document);
+            std::ofstream file(path, std::ios::binary | std::ios::trunc);
+            if (!file) return false;
+            file.write(xml.data(), static_cast<std::streamsize>(xml.size()));
+            file.flush();
+            return file.good();
+        }).get();
 }
 
 bool Detail::SceneDocumentBehavior::DeserializeScene(Engine::Scene::Scene& scene, const JsonValue& root,
@@ -102,16 +149,10 @@ bool SceneSerializer::LoadFromString(Engine::Scene::Scene& scene, const std::str
     EnsureBuiltinsRegistered();
     try
     {
-        if (Detail::SceneDocumentBehavior::DeserializeScene(
-            scene, AssetParse(source), graphicsProvider, GetRegistry()))
-            return true;
-    }
-    catch (const std::exception&) {}
-
-    try
-    {
-        if (Detail::SceneXmlBehavior::LoadDocument(scene, source, graphicsProvider, GetRegistry(), false))
-            return true;
+        const auto document = std::async(std::launch::async, [source] {
+            return ParseSceneText(source);
+        }).get();
+        return LoadFromValue(scene, document, graphicsProvider);
     }
     catch (const std::exception& error)
     {
@@ -119,21 +160,34 @@ bool SceneSerializer::LoadFromString(Engine::Scene::Scene& scene, const std::str
             error.what() + "\n").c_str());
         return false;
     }
+}
 
-    OutputDebugStringA("[SceneSerializer] Failed to load scene data: unsupported format\n");
-    return false;
+bool SceneSerializer::LoadFromValue(Engine::Scene::Scene& scene, const JsonValue& snapshot,
+    Engine::Graphics::IGraphicsProvider* graphicsProvider)
+{
+    EnsureBuiltinsRegistered();
+    try
+    {
+        return Detail::SceneDocumentBehavior::DeserializeScene(
+            scene, snapshot, graphicsProvider, GetRegistry());
+    }
+    catch (const std::exception& error)
+    {
+        OutputDebugStringA((std::string("[SceneSerializer] Failed to restore snapshot: ") +
+            error.what() + "\n").c_str());
+        return false;
+    }
 }
 
 bool SceneSerializer::Load(Engine::Scene::Scene& scene, const std::string& path, Engine::Graphics::IGraphicsProvider* graphicsProvider)
 {
     EnsureBuiltinsRegistered();
-    try { return Detail::SceneXmlBehavior::LoadDocument(scene, path, graphicsProvider, GetRegistry(), true); }
-    catch (const std::exception&) {}
-
     try
     {
-        return Detail::SceneDocumentBehavior::DeserializeScene(
-            scene, JsonParseFile(path), graphicsProvider, GetRegistry());
+        const auto document = std::async(std::launch::async, [path] {
+            return ReadSceneFile(path);
+        }).get();
+        return LoadFromValue(scene, document, graphicsProvider);
     }
     catch (const std::exception& error)
     {

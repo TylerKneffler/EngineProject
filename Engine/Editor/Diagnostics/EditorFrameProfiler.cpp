@@ -1,4 +1,5 @@
 #include "Engine/Editor/Diagnostics/EditorFrameProfiler.h"
+#include "Engine/Editor/Diagnostics/FrameActivity.h"
 
 #include "Core/Physics/Adapters/BulletPhysicsAdapter.h"
 #include "Core/Renderers/DX11/DX11EditorRenderer.h"
@@ -304,6 +305,33 @@ namespace Engine::Editor
             << ",\"grass_lod_transition_tiles\":" << grass.transitionTiles
             << ",\"grass_fading_tiles\":" << grass.fadingTiles;
         output << ",\"measured\":" << (sample.measured ? "true":"false");
+        output << ",\"recurring_frame\":" << ((!sample.startup && !sample.activity) ? "true":"false")
+            << ",\"frame_activity\":[";
+        bool activityWritten = false;
+        const auto activity = [&](uint32_t bit, const char* name)
+        {
+            if (sample.activity & bit)
+            {
+                if (activityWritten) output << ',';
+                output << '"' << name << '"';
+                activityWritten = true;
+            }
+        };
+        if (sample.startup) { output << "\"startup\""; activityWritten = true; }
+        activity(FrameActivity::Import, "import");
+        activity(FrameActivity::Save, "save");
+        activity(FrameActivity::Bake, "bake");
+        activity(FrameActivity::Load, "load");
+        output << "]"
+            << ",\"ui_thread_cpu_ms\":" << sample.uiCpuMilliseconds
+            << ",\"render_thread_cpu_ms\":" << sample.stages[3].mainBusyMs
+            << ",\"worker_queue_pending\":" << sample.workerPending
+            << ",\"worker_count\":" << sample.workerCount
+            << ",\"writer_queue_records\":" << sample.writer.queuedRecords
+            << ",\"writer_queue_bytes\":" << sample.writer.queuedBytes
+            << ",\"writer_written_records\":" << sample.writer.written
+            << ",\"writer_dropped_records\":" << sample.writer.dropped
+            << ",\"writer_failed_records\":" << sample.writer.failed;
         return output;
     }
 

@@ -504,6 +504,7 @@ void Material::SetReflectionEnvironmentTexture(const std::string& path)
     reflectionEnvironmentTexture = ResolveTexturePath(path);
     reflectionEnvironmentMap = reflectionEnvironmentTexture.empty() ? nullptr :
         Texture::Acquire(reflectionEnvironmentTexture, false);
+    if (reflectionEnvironmentMap) reflectionEnvironmentMap->RetainPixelsForCpu();
 }
 
 void Material::PrepareTextures(IGraphicsProvider* graphicsProvider)
@@ -517,11 +518,11 @@ void Material::PrepareTextures(IGraphicsProvider* graphicsProvider)
         heightTexture, occlusionTexture, emissiveTexture,
         subsurfaceThicknessTexture, sphereTexture, toonTexture })
         if (texture)
-            texture->Prepare(graphicsProvider);
+            texture->QueuePrepare(graphicsProvider);
     // Diffuse environment lighting uses the CPU-side SH projection, while
     // glossy reflections sample the original mipmapped panorama on the GPU.
     if (reflectionEnvironmentMap)
-        reflectionEnvironmentMap->Prepare(graphicsProvider);
+        reflectionEnvironmentMap->QueuePrepare(graphicsProvider);
 }
 
 MaterialAlphaMode Material::GetAlphaMode() const

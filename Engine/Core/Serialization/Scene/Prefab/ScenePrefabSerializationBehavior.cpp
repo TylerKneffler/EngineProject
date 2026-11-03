@@ -26,8 +26,11 @@
 #include "Core/Compoonents/Animation/SkinnedMesh.h"
 #include "Core/Model/RigAsset.h"
 #include "Core/Rendering/Lighting/BakedLightingData.h"
+#include "Core/Rendering/RenderJobs.h"
 #include <pugixml.hpp>
+#include <array>
 #include <fstream>
+#include <future>
 #include <algorithm>
 #include <cerrno>
 #include <cctype>
@@ -44,8 +47,10 @@ namespace Engine::Serialization
 {
 namespace
 {
-bool SaveRigAssets(const Engine::Core::Object& object,
-    const std::string& prefabPath)
+using RigSave = std::pair<std::string, Engine::Model::RigAsset>;
+
+bool CaptureRigAssets(const Engine::Core::Object& object,
+    std::vector<RigSave>& rigs)
 {
     for (const auto* component : object.Components)
         if (const auto* skeleton = dynamic_cast<const
@@ -56,38 +61,46 @@ bool SaveRigAssets(const Engine::Core::Object& object,
             const auto* scene = object.GetScene();
             if (!scene) return false;
             auto rig = Engine::Model::RigAsset::Capture(*scene, *skeleton);
-            if (auto existing = Engine::Model::RigAsset::Load(
-                    skeleton->rigPath, skeleton->skinIndex))
-            {
-                rig.animationPaths = std::move(existing->animationPaths);
-                if (!existing->bindNodes.empty())
-                    rig.bindNodes = std::move(existing->bindNodes);
-                rig.controls = existing->controls;
-                rig.poses = existing->poses;
-                rig.symmetryPairs = existing->symmetryPairs;
-            }
-            std::filesystem::path referencedPrefab(prefabPath);
-            const std::filesystem::path storedRig(skeleton->rigPath);
-            if (storedRig.is_relative() && !storedRig.parent_path().empty())
-            {
-                const auto rigDirectory = std::filesystem::path(
-                    Engine::Components::Mesh::ResolveFilePath(
-                        storedRig.parent_path().string()));
-                const auto prefabDirectory = std::filesystem::path(
-                    Engine::Components::Mesh::ResolveFilePath(
-                        referencedPrefab.parent_path().string()));
-                std::error_code directoryError;
-                if (std::filesystem::equivalent(rigDirectory,
-                        prefabDirectory, directoryError) && !directoryError)
-                    referencedPrefab = storedRig.parent_path() /
-                        referencedPrefab.filename();
-            }
-            rig.prefabPath = referencedPrefab.generic_string();
-            if (!rig.Save(skeleton->rigPath)) return false;
+            rigs.emplace_back(skeleton->rigPath, std::move(rig));
         }
     for (const auto* child : object.Children)
-        if (child && !child->Prefab && !SaveRigAssets(*child, prefabPath))
+        if (child && !child->Prefab && !CaptureRigAssets(*child, rigs))
             return false;
+    return true;
+}
+
+bool SaveRigAssets(std::vector<RigSave>& rigs, const std::string& prefabPath)
+{
+    for (auto& [path, rig] : rigs)
+    {
+        if (auto existing = Engine::Model::RigAsset::Load(path, rig.skinIndex))
+        {
+            rig.animationPaths = std::move(existing->animationPaths);
+            if (!existing->bindNodes.empty())
+                rig.bindNodes = std::move(existing->bindNodes);
+            rig.controls = existing->controls;
+            rig.poses = existing->poses;
+            rig.symmetryPairs = existing->symmetryPairs;
+        }
+        std::filesystem::path referencedPrefab(prefabPath);
+        const std::filesystem::path storedRig(path);
+        if (storedRig.is_relative() && !storedRig.parent_path().empty())
+        {
+            const auto rigDirectory = std::filesystem::path(
+                Engine::Components::Mesh::ResolveFilePath(
+                    storedRig.parent_path().string()));
+            const auto prefabDirectory = std::filesystem::path(
+                Engine::Components::Mesh::ResolveFilePath(
+                    referencedPrefab.parent_path().string()));
+            std::error_code directoryError;
+            if (std::filesystem::equivalent(rigDirectory,
+                    prefabDirectory, directoryError) && !directoryError)
+                referencedPrefab = storedRig.parent_path() /
+                    referencedPrefab.filename();
+        }
+        rig.prefabPath = referencedPrefab.generic_string();
+        if (!rig.Save(path)) return false;
+    }
     return true;
 }
 
@@ -115,12 +128,24 @@ void RemoveRigBackedInlineData(JsonValue& object)
 bool SceneSerializer::SavePrefab(const Engine::Core::Object& object, const std::string& path,
     bool preserveRootTransform)
 {
-    if (!SaveRigAssets(object, path)) return false;
+    auto save = PreparePrefabSave(object, path, preserveRootTransform);
+    return std::async(std::launch::async, std::move(save)).get();
+}
+
+std::function<bool()> SceneSerializer::PreparePrefabSave(
+    const Engine::Core::Object& object, const std::string& path,
+    bool preserveRootTransform)
+{
+    std::vector<RigSave> rigs;
+    if (!CaptureRigAssets(object, rigs)) return [] { return false; };
     JsonValue root = JsonValue::MakeObject();
     root.Set("version", JsonValue(1));
     root.Set("type", JsonValue(std::string("prefab")));
     JsonValue objectNode = Detail::SceneObjectBehavior::SerializeObject(object, false);
     RemoveRigBackedInlineData(objectNode);
+    return [root = std::move(root), objectNode = std::move(objectNode),
+            rigs = std::move(rigs), path, preserveRootTransform]() mutable {
+    if (!SaveRigAssets(rigs, path)) return false;
     if (preserveRootTransform && std::filesystem::is_regular_file(path))
     {
         try
@@ -151,6 +176,7 @@ bool SceneSerializer::SavePrefab(const Engine::Core::Object& object, const std::
         return false;
     file << Detail::SceneXmlBehavior::WriteDocument(root, "Prefab");
     return file.good();
+    };
 }
 
 std::string SceneSerializer::SavePrefabToString(const Engine::Core::Object& object,
@@ -165,7 +191,9 @@ std::string SceneSerializer::SavePrefabToString(const Engine::Core::Object& obje
     if (!includeRootTransform)
         objectNode.Set("transform", JsonValue::MakeObject());
     root.Set("object", std::move(objectNode));
-    return Detail::SceneXmlBehavior::WriteDocument(root, "Prefab");
+    return std::async(std::launch::async, [root = std::move(root)] {
+        return Detail::SceneXmlBehavior::WriteDocument(root, "Prefab");
+    }).get();
 }
 
 namespace
@@ -207,11 +235,106 @@ JsonValue LoadPrefabDocument(const std::filesystem::path& path)
         return Detail::SceneXmlBehavior::ReadNode(root);
     }
 }
+
+struct CachedPrefabDocument
+{
+    std::string key;
+    std::filesystem::file_time_type modified{};
+    std::uintmax_t size = 0;
+    JsonValue document;
+    std::string sourceSnapshot;
+    Engine::Graphics::IGraphicsProvider* sourceProvider = nullptr;
+    glm::vec3 sourcePosition { 0.f };
+    glm::vec3 sourceRotation { 0.f };
+    glm::vec3 sourceScale { 1.f };
+};
+
+thread_local std::array<std::shared_ptr<CachedPrefabDocument>, 8> prefabCache;
+thread_local std::size_t nextPrefabCache = 0;
+
+std::shared_ptr<CachedPrefabDocument> FindCachedPrefabDocument(
+    const std::filesystem::path& path, const std::string& key)
+{
+    std::error_code modifiedError, sizeError;
+    const auto modified = std::filesystem::last_write_time(path, modifiedError);
+    const auto size = std::filesystem::file_size(path, sizeError);
+    if (modifiedError || sizeError) return {};
+    for (const auto& entry : prefabCache)
+        if (entry && entry->key == key &&
+            entry->modified == modified && entry->size == size)
+            return entry;
+    return {};
+}
+
+std::shared_ptr<CachedPrefabDocument> LoadPrefabDocumentCached(
+    const std::filesystem::path& path, const std::string& key,
+    const JsonValue* parsed = nullptr)
+{
+    // Large scenes can place the same prefab hundreds of times. Keep a small
+    // owner-thread cache of parsed documents, keyed by the file's current
+    // version. Each instantiation still gets independent component objects.
+    std::error_code modifiedError, sizeError;
+    const auto modified = std::filesystem::last_write_time(path, modifiedError);
+    const auto size = std::filesystem::file_size(path, sizeError);
+    auto create = [&] {
+        auto entry = std::make_shared<CachedPrefabDocument>();
+        entry->key = key;
+        entry->modified = modified;
+        entry->size = size;
+        entry->document = parsed ? *parsed : LoadPrefabDocument(path);
+        return entry;
+    };
+    if (modifiedError || sizeError)
+        return create();
+    for (const auto& entry : prefabCache)
+        if (entry && entry->key == key &&
+            entry->modified == modified && entry->size == size)
+            return entry;
+    auto document = create();
+    prefabCache[nextPrefabCache] = document;
+    nextPrefabCache = (nextPrefabCache + 1) % prefabCache.size();
+    return document;
+}
 }
 
 Engine::Core::Object* SceneSerializer::InstantiatePrefab(
     Engine::Scene::Scene& scene,
     const std::string& path,
+    Engine::Graphics::IGraphicsProvider* graphicsProvider)
+{
+    try
+    {
+        const auto resolved = ResolvePrefabPath(path);
+        std::string key = resolved.lexically_normal().generic_string();
+#ifdef _WIN32
+        std::transform(key.begin(), key.end(), key.begin(),
+            [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
+#endif
+        if (const auto cached = FindCachedPrefabDocument(resolved, key))
+            return InstantiatePrefabFromValue(scene, path, cached->document,
+                graphicsProvider);
+        auto document = Engine::Rendering::RenderJobs::Get().Submit([path] {
+            return ReadPrefabFile(path);
+        }).get();
+        return InstantiatePrefabFromValue(scene, path, document, graphicsProvider);
+    }
+    catch (const std::exception&) { return nullptr; }
+}
+
+JsonValue SceneSerializer::ReadPrefabFile(const std::string& path)
+{
+    const auto resolved = ResolvePrefabPath(path);
+    std::string key = resolved.lexically_normal().generic_string();
+#ifdef _WIN32
+    std::transform(key.begin(), key.end(), key.begin(),
+        [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
+#endif
+    return LoadPrefabDocumentCached(resolved, key)->document;
+}
+
+Engine::Core::Object* SceneSerializer::InstantiatePrefabFromValue(
+    Engine::Scene::Scene& scene,
+    const std::string& path, const JsonValue& parsed,
     Engine::Graphics::IGraphicsProvider* graphicsProvider)
 {
     EnsureBuiltinsRegistered();
@@ -242,7 +365,9 @@ Engine::Core::Object* SceneSerializer::InstantiatePrefab(
 
     try
     {
-        const JsonValue root = LoadPrefabDocument(resolvedPath);
+        const auto document = LoadPrefabDocumentCached(resolvedPath, prefabKey,
+            parsed.IsObject() ? &parsed : nullptr);
+        const JsonValue& root = document->document;
         if (!root.IsObject() || root["version"].AsInt() != 1 ||
             root["type"].AsString() != "prefab" || !root["object"].IsObject())
             return nullptr;
@@ -267,7 +392,25 @@ Engine::Core::Object* SceneSerializer::InstantiatePrefab(
             for (const auto& [object, index] : legacyNodeBindings)
                 model->BindNode(index, object);
         }
-        Detail::SceneObjectBehavior::SetPrefabSourceSnapshot(*rootObject, Detail::SceneObjectBehavior::SerializeObject(*rootObject, false));
+        if (document->sourceSnapshot.empty() ||
+            document->sourceProvider != graphicsProvider)
+        {
+            Detail::SceneObjectBehavior::SetPrefabSourceSnapshot(*rootObject,
+                Detail::SceneObjectBehavior::SerializeObject(*rootObject, false));
+            document->sourceSnapshot = rootObject->PrefabSourceSnapshot;
+            document->sourceProvider = graphicsProvider;
+            document->sourcePosition = rootObject->PrefabSourcePosition;
+            document->sourceRotation = rootObject->PrefabSourceRotation;
+            document->sourceScale = rootObject->PrefabSourceScale;
+        }
+        else
+        {
+            rootObject->PrefabSourceSnapshot = document->sourceSnapshot;
+            rootObject->PrefabSourcePosition = document->sourcePosition;
+            rootObject->PrefabSourceRotation = document->sourceRotation;
+            rootObject->PrefabSourceScale = document->sourceScale;
+            rootObject->PrefabSourceTransformValid = true;
+        }
         // The baseline was captured from this exact instance. Its first
         // inspector/undo query does not need to parse and diff it again.
         rootObject->PrefabOverridePatchSnapshot.clear();
@@ -297,7 +440,8 @@ bool SceneSerializer::RefreshPrefabInstances(
     try
     {
         const std::filesystem::path resolvedPath = ResolvePrefabPath(path);
-        const JsonValue root = LoadPrefabDocument(resolvedPath);
+        const JsonValue root = Engine::Rendering::RenderJobs::Get().Submit(
+            [resolvedPath] { return LoadPrefabDocument(resolvedPath); }).get();
         if (!root.IsObject() || root["version"].AsInt() != 1 ||
             root["type"].AsString() != "prefab" || !root["object"].IsObject())
             return false;

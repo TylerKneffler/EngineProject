@@ -22,10 +22,12 @@
 #include "Core/Rendering/RenderSpatialIndex.h"
 #include "Core/Rendering/AutomaticInstancing.h"
 #include "Core/Physics/Physics.h"
+#include "Core/Scene/Spatial/WarpVolume.h"
 #include <glm/glm.hpp>
 #include <array>
 #include <atomic>
 #include <functional>
+#include <future>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -62,6 +64,7 @@ namespace Engine::Graphics
     class IGraphicsContext;
     class GraphicsCommandPacket;
     class IGraphicsTexture;
+    class IShader;
 }
 
 // Forward declarations
@@ -147,6 +150,20 @@ public:
         glm::mat3 jacobian { 1.f };
         bool affectedByWarpVolume = false;
     };
+    struct SpatialWarpSnapshot
+    {
+        struct Volume
+        {
+            const Object* owner = nullptr; // Identity only; never dereferenced by jobs.
+            Spatial::WarpVolumeDefinition definition;
+            glm::mat4 world { 1.f };
+            int priority = 0;
+            ObjectPath path;
+        };
+        std::vector<Volume> volumes;
+        SpatialQuerySample Sample(const glm::vec3& worldPoint,
+            const Object* excludedOwner = nullptr) const;
+    };
     struct SpatialRay
     {
         glm::vec3 origin { 0.f };
@@ -195,6 +212,9 @@ public:
     void Start();
     bool HasStarted() const { return m_hasStarted; }
     void Update(float deltaTime);
+    // Advance explicit edit-mode previews without running gameplay callbacks.
+    // Live scene phases use the same owner-thread dependency scheduler as Update().
+    bool AdvanceEditorPreviews(float deltaTime);
     bool UpdateSpatialScripts(bool editor=false) { return m_spatialUpdates.Tick(*this,editor); }
     const auto& GetSpatialUpdateScheduler() const { return m_spatialUpdates; }
     struct UpdateTimings
@@ -486,6 +506,7 @@ public:
     // The sample Jacobian carries nonlinear orientation/scale to consumers.
     SpatialQuerySample SampleSpatialPoint(const glm::vec3& worldPoint,
         const SpatialQuery& query = {}) const;
+    SpatialWarpSnapshot CaptureSpatialWarpSnapshot() const;
     glm::vec3 MapSpatialPoint(const glm::vec3& worldPoint,
         const SpatialQuery& query = {}) const;
     // Numerically inverts the fully composed spatial mapping. This is local:
@@ -669,13 +690,20 @@ public:
     bool Load(const std::string& path);
     std::string SaveToString() const;
     std::string SaveSnapshotToString() const;
+    // Editor Play restore: skips serializing the runtime graph for rollback.
+    bool RestoreTrustedSnapshot(const Engine::Serialization::JsonValue& snapshot);
     bool LoadFromString(const std::string& source);
+    bool LoadFromValue(const Engine::Serialization::JsonValue& document);
 
     Engine::Model::BakeResult BakeLighting(
         const std::string& assetsDirectory = "Assets",
         const std::string& sceneName = "Scene",
-        const Engine::Model::BakedLightingSettings& bakeSettings = {});
+        const Engine::Model::BakedLightingSettings& bakeSettings = {},
+        const std::function<void(float)>& progress = {},
+        const std::function<bool()>& cancelled = {});
     void ClearBakedLighting();
+    void SetLightingBakeStatus(std::string status)
+    { AssertOwnerThread(); m_lightingBakeStatus = std::move(status); }
     const std::string& GetLightingBakeStatus() const { return m_lightingBakeStatus; }
 
     SceneSettings settings;
@@ -784,11 +812,26 @@ private:
         const Engine::Graphics::IShader*, const Engine::Graphics::IShader*,
         bool, const std::string&)>;
     std::unordered_map<const IPipelineState*, MaterialShaderBuilder> m_materialShaderBuilders;
+    struct MaterialShaderBytecode
+    {
+        std::shared_ptr<Engine::Graphics::IShader> vertex, pixel;
+        std::string error;
+    };
+    using MaterialShaderFuture = std::shared_future<MaterialShaderBytecode>;
+    std::unordered_map<std::string, MaterialShaderFuture> m_materialShaderBytecode;
+    MaterialShaderFuture QueueMaterialShaderBytecode(const std::string& path,
+        bool terrain, int64_t stamp);
+    void PrewarmMaterialShaders(const Engine::Components::Material& material,
+        bool terrain);
     struct MaterialShaderPipeline
     {
         std::unique_ptr<IPipelineState> pipeline;
         int64_t sourceStamp = 0;
         std::string error;
+        MaterialShaderFuture bytecode;
+        const IPipelineState* base = nullptr;
+        bool overlay = false;
+        std::string blendMode;
     };
     std::unordered_map<std::string, MaterialShaderPipeline> m_materialShaderPipelines;
     // Preserve pipelines referenced by earlier queued frames after source edits.
@@ -796,6 +839,7 @@ private:
     IPipelineState* ResolveMaterialShaderPipeline(const std::string& path,
         IPipelineState* base, bool terrain, bool overlay,
         const std::string& blendMode, std::string& error);
+    void PublishMaterialShaderPipelines(size_t maxPipelines = 2);
     std::shared_ptr<Engine::Graphics::IGraphicsTexture> m_directionalShadowMap;
     uint32_t m_directionalShadowResolution = 0;
     uint64_t m_directionalShadowAllocationGeneration = 0;

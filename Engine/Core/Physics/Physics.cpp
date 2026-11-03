@@ -72,6 +72,17 @@ std::vector<Physics::RaycastHit> Physics::SweepSphereAll(
 {
     return m_adapter->SweepSphereAll(origin, direction, distance, radius, mask);
 }
+
+std::vector<std::vector<Physics::RaycastHit>> Physics::SweepSphereBatch(
+    const std::vector<SphereSweepRequest>& requests) const
+{
+    std::vector<std::vector<RaycastHit>> results;
+    results.reserve(requests.size());
+    for (const auto& request : requests)
+        results.push_back(SweepSphereAll(request.origin, request.direction,
+            request.distance, request.radius, request.collisionMask));
+    return results;
+}
 void Physics::ApplyRigidBodyAction(Engine::Components::RigidBody& body,
     RigidBodyAction action, const glm::vec3& value,
     const glm::quat& rotation)

@@ -7,10 +7,18 @@
 #include "Core/Compoonents/Obj/Mesh.h"
 #include "Core/Compoonents/Obj/Sprite.h"
 #include "Core/Scene/Scene.h"
+#include "Core/Rendering/RenderSpatialIndex.h"
+#include "Core/Threading/JobScheduler.h"
 #include <algorithm>
+#include <chrono>
 #include <cfloat>
 #include <cmath>
+#include <cstring>
+#include <future>
 #include <limits>
+#include <memory>
+#include <numeric>
+#include <unordered_map>
 #include <glm/ext/matrix_transform.hpp>
 #include <glm/geometric.hpp>
 #include <glm/gtc/matrix_inverse.hpp>
@@ -19,6 +27,366 @@ namespace Engine::Editor
 {
 namespace
 {
+struct TriangleIndex
+{
+    struct Triangle { uint32_t ids[3]; glm::vec3 minimum, maximum, center; };
+    struct Node { glm::vec3 minimum, maximum; size_t begin = 0, end = 0; int left = -1, right = -1; };
+    std::vector<glm::vec3> vertices;
+    std::vector<Triangle> triangles;
+    std::vector<uint32_t> order;
+    std::vector<Node> nodes;
+
+    static bool RayBox(const glm::vec3& origin, const glm::vec3& direction,
+        const glm::vec3& minimum, const glm::vec3& maximum, float limit)
+    {
+        float nearDistance = 0.f, farDistance = limit;
+        for (int axis = 0; axis < 3; ++axis)
+        {
+            if (std::abs(direction[axis]) < 1e-8f)
+            {
+                if (origin[axis] < minimum[axis] || origin[axis] > maximum[axis])
+                    return false;
+                continue;
+            }
+            float a = (minimum[axis] - origin[axis]) / direction[axis];
+            float b = (maximum[axis] - origin[axis]) / direction[axis];
+            if (a > b) std::swap(a, b);
+            nearDistance = std::max(nearDistance, a);
+            farDistance = std::min(farDistance, b);
+            if (nearDistance > farDistance) return false;
+        }
+        return farDistance > 0.f;
+    }
+
+    int BuildNode(size_t begin, size_t end)
+    {
+        const int id = static_cast<int>(nodes.size());
+        nodes.emplace_back();
+        glm::vec3 minimum(FLT_MAX), maximum(-FLT_MAX);
+        for (size_t i = begin; i < end; ++i)
+        {
+            const Triangle& triangle = triangles[order[i]];
+            minimum = glm::min(minimum, triangle.minimum);
+            maximum = glm::max(maximum, triangle.maximum);
+        }
+        nodes[id].minimum = minimum;
+        nodes[id].maximum = maximum;
+        nodes[id].begin = begin;
+        nodes[id].end = end;
+        if (end - begin <= 8) return id;
+        const glm::vec3 extent = maximum - minimum;
+        const int axis = extent.x > extent.y && extent.x > extent.z ? 0 :
+            extent.y > extent.z ? 1 : 2;
+        const size_t middle = begin + (end - begin) / 2;
+        std::nth_element(order.begin() + begin, order.begin() + middle,
+            order.begin() + end, [&](uint32_t a, uint32_t b) {
+                return triangles[a].center[axis] < triangles[b].center[axis];
+            });
+        const int left = BuildNode(begin, middle);
+        const int right = BuildNode(middle, end);
+        nodes[id].left = left;
+        nodes[id].right = right;
+        return id;
+    }
+
+    static TriangleIndex Prepare(Engine::Components::Mesh::PoseSnapshot snapshot,
+        std::vector<glm::mat4> palette)
+    {
+        TriangleIndex result;
+        const auto posed = Engine::Components::Mesh::BuildPosedVertices(
+            snapshot, &palette);
+        result.vertices.reserve(posed.size());
+        for (const auto& vertex : posed)
+            result.vertices.emplace_back(vertex.pos[0], vertex.pos[1], vertex.pos[2]);
+        const size_t count = snapshot.indices.empty() ? posed.size() :
+            snapshot.indices.size();
+        result.triangles.reserve(count / 3);
+        for (size_t i = 0; i + 2 < count; i += 3)
+        {
+            const uint32_t a = snapshot.indices.empty() ? static_cast<uint32_t>(i) : snapshot.indices[i];
+            const uint32_t b = snapshot.indices.empty() ? static_cast<uint32_t>(i + 1) : snapshot.indices[i + 1];
+            const uint32_t c = snapshot.indices.empty() ? static_cast<uint32_t>(i + 2) : snapshot.indices[i + 2];
+            if (a >= result.vertices.size() || b >= result.vertices.size() ||
+                c >= result.vertices.size()) continue;
+            const glm::vec3 minimum = glm::min(result.vertices[a],
+                glm::min(result.vertices[b], result.vertices[c]));
+            const glm::vec3 maximum = glm::max(result.vertices[a],
+                glm::max(result.vertices[b], result.vertices[c]));
+            result.triangles.push_back({ { a, b, c }, minimum, maximum,
+                (minimum + maximum) * .5f });
+        }
+        result.order.resize(result.triangles.size());
+        std::iota(result.order.begin(), result.order.end(), 0u);
+        if (!result.order.empty()) result.BuildNode(0, result.order.size());
+        return result;
+    }
+
+    bool Intersect(const glm::vec3& origin, const glm::vec3& direction,
+        float& distance, size_t* triangleIndex = nullptr,
+        float* baryU = nullptr, float* baryV = nullptr) const
+    {
+        if (nodes.empty()) return false;
+        float nearest = FLT_MAX, nearestU = 0.f, nearestV = 0.f;
+        size_t nearestTriangle = 0;
+        std::vector<int> stack{ 0 };
+        while (!stack.empty())
+        {
+            const int id = stack.back(); stack.pop_back();
+            const Node& node = nodes[id];
+            if (!RayBox(origin, direction, node.minimum, node.maximum, nearest))
+                continue;
+            if (node.left >= 0)
+            { stack.push_back(node.left); stack.push_back(node.right); continue; }
+            for (size_t i = node.begin; i < node.end; ++i)
+            {
+                const size_t triangle = order[i];
+                const auto& ids = triangles[triangle].ids;
+                const glm::vec3& a = vertices[ids[0]];
+                const glm::vec3 e1 = vertices[ids[1]] - a;
+                const glm::vec3 e2 = vertices[ids[2]] - a;
+                const glm::vec3 p = glm::cross(direction, e2);
+                const float det = glm::dot(e1, p);
+                if (std::abs(det) < 1e-7f) continue;
+                const float inverse = 1.f / det;
+                const glm::vec3 offset = origin - a;
+                const float u = glm::dot(offset, p) * inverse;
+                if (u < 0.f || u > 1.f) continue;
+                const glm::vec3 q = glm::cross(offset, e1);
+                const float v = glm::dot(direction, q) * inverse;
+                if (v < 0.f || u + v > 1.f) continue;
+                const float hit = glm::dot(e2, q) * inverse;
+                if (hit <= 0.f || hit >= nearest) continue;
+                nearest = hit; nearestTriangle = triangle;
+                nearestU = u; nearestV = v;
+            }
+        }
+        if (nearest == FLT_MAX) return false;
+        distance = nearest;
+        if (triangleIndex) *triangleIndex = nearestTriangle;
+        if (baryU) *baryU = nearestU;
+        if (baryV) *baryV = nearestV;
+        return true;
+    }
+};
+
+struct SkinnedEntry
+{
+    uint64_t geometryRevision = 0, morphRevision = 0;
+    uint64_t configurationRevision = 0, surfaceRevision = 0;
+    std::vector<glm::mat4> palette;
+    std::future<TriangleIndex> pending;
+    std::shared_ptr<const TriangleIndex> ready;
+};
+std::unordered_map<const Engine::Components::Mesh*, SkinnedEntry> skinnedEntries;
+const Engine::Scene::Scene* cachedScene = nullptr;
+uint64_t cachedStructureRevision = 0;
+struct SpatialCache
+{
+    const Engine::Scene::Scene* scene = nullptr;
+    uint64_t structureRevision = 0;
+    std::vector<Engine::Core::Object*> objects;
+    Engine::Rendering::RenderSpatialIndex index;
+};
+SpatialCache spatialCache;
+struct HoverCandidate
+{
+    Engine::Core::Object* object = nullptr;
+    std::vector<Engine::Core::Object*> ancestors;
+    glm::vec3 origin{}, direction{}, minimum{}, maximum{};
+    std::shared_ptr<const TriangleIndex> triangles;
+    float travelled = 0.f, maximumDistance = FLT_MAX;
+    bool sphere = false;
+
+    float Intersect() const
+    {
+        float distance = FLT_MAX;
+        if (triangles)
+        {
+            if (!triangles->Intersect(origin, direction, distance)) return FLT_MAX;
+        }
+        else if (sphere)
+        {
+            const glm::vec3 offset = origin - minimum;
+            const float a = glm::dot(direction, direction);
+            const float b = 2.f * glm::dot(offset, direction);
+            const float c = glm::dot(offset, offset) - maximum.x * maximum.x;
+            const float discriminant = b * b - 4.f * a * c;
+            if (discriminant < 0.f || a <= 0.f) return FLT_MAX;
+            const float root = std::sqrt(discriminant);
+            const float first = (-b - root) / (2.f * a);
+            const float second = (-b + root) / (2.f * a);
+            distance = first > 0.f ? first : second;
+        }
+        else
+        {
+            float nearDistance = 0.f, farDistance = maximumDistance;
+            for (int axis = 0; axis < 3; ++axis)
+            {
+                if (std::abs(direction[axis]) < 1e-8f)
+                {
+                    if (origin[axis] < minimum[axis] ||
+                        origin[axis] > maximum[axis]) return FLT_MAX;
+                    continue;
+                }
+                float first = (minimum[axis] - origin[axis]) / direction[axis];
+                float second = (maximum[axis] - origin[axis]) / direction[axis];
+                if (first > second) std::swap(first, second);
+                nearDistance = std::max(nearDistance, first);
+                farDistance = std::min(farDistance, second);
+                if (nearDistance > farDistance) return FLT_MAX;
+            }
+            distance = nearDistance > 0.f ? nearDistance : farDistance;
+        }
+        return distance > 0.f && distance < maximumDistance
+            ? travelled + distance : FLT_MAX;
+    }
+};
+struct HoverState
+{
+    uint64_t signature = 0;
+    std::future<Engine::Core::Object*> pending;
+    Engine::Core::Object* result = nullptr;
+    bool completed = false;
+};
+HoverState hoverState;
+
+uint64_t HashBytes(uint64_t hash, const void* data, size_t size)
+{
+    const auto* bytes = static_cast<const unsigned char*>(data);
+    for (size_t i = 0; i < size; ++i)
+    { hash ^= bytes[i]; hash *= 1099511628211ull; }
+    return hash;
+}
+
+uint64_t HoverSignature(const Engine::Scene::Scene& scene,
+    const EditorUiVec2& mouse, const EditorUiVec2& viewport)
+{
+    uint64_t hash = 14695981039346656037ull;
+    const auto* sceneAddress = &scene;
+    hash = HashBytes(hash, &sceneAddress, sizeof(sceneAddress));
+    const uint64_t structure = scene.GetStructureRevision();
+    hash = HashBytes(hash, &structure, sizeof(structure));
+    const uint64_t physics = scene.GetPhysicsActivityRevision();
+    hash = HashBytes(hash, &physics, sizeof(physics));
+    hash = HashBytes(hash, &mouse, sizeof(mouse));
+    hash = HashBytes(hash, &viewport, sizeof(viewport));
+    const auto* camera = scene.editorCamera.GetComponent<Engine::Components::Camera>();
+    if (camera && viewport.y > 0.f)
+    {
+        const glm::mat4 view = camera->GetViewMatrix();
+        const glm::mat4 projection = camera->GetProjectionMatrix(viewport.x / viewport.y);
+        hash = HashBytes(hash, &view, sizeof(view));
+        hash = HashBytes(hash, &projection, sizeof(projection));
+    }
+    for (const auto& entry : scene.GetObjects())
+    {
+        auto* object = entry.get();
+        hash = HashBytes(hash, &object, sizeof(object));
+        if (!object) continue;
+        const uint64_t world = object->transform.GetWorldRevision();
+        hash = HashBytes(hash, &world, sizeof(world));
+        const bool enabled = object->IsEnabledInHierarchy();
+        hash = HashBytes(hash, &enabled, sizeof(enabled));
+        for (auto* component : object->Components)
+        {
+            hash = HashBytes(hash, &component, sizeof(component));
+            if (component)
+            {
+                const uint64_t configuration = component->GetConfigurationRevision();
+                hash = HashBytes(hash, &configuration, sizeof(configuration));
+            }
+        }
+        auto* mesh = object->GetComponent<Engine::Components::Mesh>();
+        if (!mesh) continue;
+        const uint64_t revisions[] = { mesh->GetAuthoredGeometryRevision(),
+            mesh->GetConfigurationRevision(), mesh->GetMorphWeightsRevision(),
+            mesh->GetSurfaceOffsetsRevision() };
+        hash = HashBytes(hash, revisions, sizeof(revisions));
+        if (auto* skin = object->GetComponent<Engine::Components::SkinnedMesh>())
+            for (const auto& matrix : skin->BuildPalette())
+                hash = HashBytes(hash, &matrix, sizeof(matrix));
+    }
+    return hash;
+}
+
+void UpdateSpatialCache(const Engine::Scene::Scene& scene)
+{
+    const auto& sceneObjects = scene.GetObjects();
+    if (spatialCache.scene != &scene ||
+        spatialCache.structureRevision != scene.GetStructureRevision() ||
+        spatialCache.objects.size() != sceneObjects.size())
+    {
+        spatialCache.scene = &scene;
+        spatialCache.structureRevision = scene.GetStructureRevision();
+        spatialCache.objects.clear();
+        spatialCache.objects.reserve(sceneObjects.size());
+        for (const auto& object : sceneObjects)
+            spatialCache.objects.push_back(object.get());
+    }
+    std::vector<Engine::Rendering::RenderBounds> bounds;
+    bounds.reserve(spatialCache.objects.size());
+    for (auto* object : spatialCache.objects)
+    {
+        Engine::Rendering::RenderBounds box;
+        if (!object || !object->IsEnabledInHierarchy())
+        { bounds.push_back({ glm::vec3(0.f), glm::vec3(0.f), true }); continue; }
+        auto* mesh = object->GetComponent<Engine::Components::Mesh>();
+        if (mesh && mesh->HasBounds() &&
+            !object->GetComponent<Engine::Components::SkinnedMesh>())
+            box = Engine::Rendering::TransformBounds(mesh->GetBoundsMin(),
+                mesh->GetBoundsMax(), object->transform.GetWorldMatrix());
+        else if (mesh && mesh->HasBounds())
+            box.bounded = false; // Animated vertices can leave bind bounds.
+        else if (object->GetComponent<Engine::Components::Sprite>() || mesh)
+        {
+            const glm::vec3 center = object->transform.GetWorldPosition();
+            const float radius = glm::max(glm::max(object->transform.scale.x,
+                object->transform.scale.y), object->transform.scale.z) * .75f;
+            box = { center - glm::vec3(radius), center + glm::vec3(radius), true };
+        }
+        else
+            box = { glm::vec3(0.f), glm::vec3(0.f), true };
+        bounds.push_back(box);
+    }
+    spatialCache.index.Update(std::move(bounds));
+}
+
+const TriangleIndex* SkinnedIndex(const Engine::Components::Mesh& mesh,
+    const Engine::Components::SkinnedMesh& skin, bool wait)
+{
+    const std::vector<glm::mat4> palette = skin.BuildPalette();
+    const uint64_t geometryRevision = mesh.GetAuthoredGeometryRevision();
+    const uint64_t morphRevision = mesh.GetMorphWeightsRevision();
+    const uint64_t configurationRevision = mesh.GetConfigurationRevision();
+    const uint64_t surfaceRevision = mesh.GetSurfaceOffsetsRevision();
+    auto& entry = skinnedEntries[&mesh];
+    const bool samePose = entry.palette.size() == palette.size() &&
+        std::equal(entry.palette.begin(), entry.palette.end(), palette.begin(),
+            [](const glm::mat4& a, const glm::mat4& b) {
+                return std::memcmp(&a, &b, sizeof(glm::mat4)) == 0;
+            });
+    if (entry.geometryRevision != geometryRevision ||
+        entry.morphRevision != morphRevision ||
+        entry.configurationRevision != configurationRevision ||
+        entry.surfaceRevision != surfaceRevision || !samePose ||
+        (!entry.ready && !entry.pending.valid()))
+    {
+        entry.geometryRevision = geometryRevision;
+        entry.morphRevision = morphRevision;
+        entry.configurationRevision = configurationRevision;
+        entry.surfaceRevision = surfaceRevision;
+        entry.palette = palette;
+        entry.ready.reset();
+        entry.pending = Engine::Threading::JobScheduler::Get().Submit(
+            [snapshot = mesh.CapturePoseSnapshot(), palette]() mutable {
+                return TriangleIndex::Prepare(std::move(snapshot), std::move(palette));
+            });
+    }
+    if (!entry.ready && entry.pending.valid() && (wait ||
+        entry.pending.wait_for(std::chrono::seconds(0)) == std::future_status::ready))
+        entry.ready = std::make_shared<TriangleIndex>(entry.pending.get());
+    return entry.ready.get();
+}
 bool BuildViewportRay(const Engine::Scene::Scene& scene,
     const EditorUiVec2& mousePos, const EditorUiVec2& viewportSize,
     glm::vec3& origin, glm::vec3& direction)
@@ -102,48 +470,144 @@ bool IntersectSkinnedMesh(const Engine::Core::Object& object,
     const glm::vec3& rayOrigin, const glm::vec3& rayDirection,
     float& distance)
 {
-    const std::vector<glm::mat4>& palette = skinned.BuildPalette();
-    if (palette.empty())
-        return IntersectMeshBounds(object, mesh, rayOrigin, rayDirection,
-            distance);
-
-    const glm::mat4 inverseWorld = glm::inverse(object.transform.GetWorldMatrix());
-    const glm::vec3 origin = glm::vec3(inverseWorld * glm::vec4(rayOrigin, 1.f));
-    const glm::vec3 direction = glm::vec3(inverseWorld * glm::vec4(rayDirection, 0.f));
-    const std::vector<Engine::Components::Mesh::Vertex> triangles =
-        mesh.BuildPortalCutTriangleStream(&palette);
-    float nearest = FLT_MAX;
-    for (size_t i = 0; i + 2 < triangles.size(); i += 3)
-    {
-        const auto position = [](const Engine::Components::Mesh::Vertex& vertex)
-        {
-            return glm::vec3(vertex.pos[0], vertex.pos[1], vertex.pos[2]);
-        };
-        const glm::vec3 a = position(triangles[i]);
-        const glm::vec3 edge1 = position(triangles[i + 1]) - a;
-        const glm::vec3 edge2 = position(triangles[i + 2]) - a;
-        const glm::vec3 p = glm::cross(direction, edge2);
-        const float determinant = glm::dot(edge1, p);
-        if (std::abs(determinant) < 0.000001f)
-            continue;
-        const float inverseDeterminant = 1.f / determinant;
-        const glm::vec3 offset = origin - a;
-        const float u = glm::dot(offset, p) * inverseDeterminant;
-        if (u < 0.f || u > 1.f)
-            continue;
-        const glm::vec3 q = glm::cross(offset, edge1);
-        const float v = glm::dot(direction, q) * inverseDeterminant;
-        if (v < 0.f || u + v > 1.f)
-            continue;
-        const float hit = glm::dot(edge2, q) * inverseDeterminant;
-        if (hit > 0.f && hit < nearest)
-            nearest = hit;
-    }
-    if (nearest == FLT_MAX)
-        return false;
-    distance = nearest;
-    return true;
+    const auto* index = SkinnedIndex(mesh, skinned, true);
+    const glm::mat4 inverse = glm::inverse(object.transform.GetWorldMatrix());
+    return index && index->Intersect(glm::vec3(inverse * glm::vec4(rayOrigin, 1.f)),
+        glm::vec3(inverse * glm::vec4(rayDirection, 0.f)), distance);
 }
+}
+
+void ScenePlacementAndPicking::ClearCaches()
+{
+    skinnedEntries.clear();
+    spatialCache = {};
+    hoverState = {};
+    cachedScene = nullptr;
+    cachedStructureRevision = 0;
+}
+
+void ScenePlacementAndPicking::PrepareSkinnedGeometry(
+    const Engine::Scene::Scene& scene)
+{
+    if (cachedScene != &scene ||
+        cachedStructureRevision != scene.GetStructureRevision())
+    {
+        ClearCaches();
+        cachedScene = &scene;
+        cachedStructureRevision = scene.GetStructureRevision();
+    }
+    for (const auto& entry : scene.GetObjects())
+    {
+        auto* object = entry.get();
+        if (!object || !object->IsEnabledInHierarchy()) continue;
+        auto* mesh = object->GetComponent<Engine::Components::Mesh>();
+        auto* skin = object->GetComponent<Engine::Components::SkinnedMesh>();
+        if (mesh && skin && mesh->IsEditorVisible())
+            SkinnedIndex(*mesh, *skin, false);
+    }
+}
+
+Engine::Core::Object* ScenePlacementAndPicking::PickObjectHoverAsync(
+    const Engine::Scene::Scene& scene, const EditorUiVec2& mousePos,
+    const EditorUiVec2& viewportSize)
+{
+    if (scene.IsEditorMode2D())
+        return PickObjectInViewport(scene, mousePos, viewportSize, true);
+    glm::vec3 rayOrigin{}, rayDirection{};
+    if (!BuildViewportRay(scene, mousePos, viewportSize,
+        rayOrigin, rayDirection)) return nullptr;
+    const uint64_t signature = HoverSignature(scene, mousePos, viewportSize);
+    if (hoverState.signature == signature)
+    {
+        if (!hoverState.completed && hoverState.pending.valid() &&
+            hoverState.pending.wait_for(std::chrono::seconds(0)) ==
+                std::future_status::ready)
+        {
+            hoverState.result = hoverState.pending.get();
+            hoverState.completed = true;
+        }
+        return hoverState.completed ? hoverState.result : nullptr;
+    }
+
+    UpdateSpatialCache(scene);
+    std::vector<HoverCandidate> candidates;
+    float travelled = 0.f;
+    bool geometryPending = false;
+    const auto segments = scene.TracePortalRay({ rayOrigin, rayDirection }, 10000.f);
+    for (const auto& segment : segments)
+    {
+        for (uint32_t item : spatialCache.index.QueryRay(segment.ray.origin,
+            segment.ray.direction, segment.maxDistance))
+        {
+            auto* object = spatialCache.objects[item];
+            if (!object || !object->IsEnabledInHierarchy() ||
+                !Engine::Scene::Scene::IsObjectInSpatialRegion(
+                    object, segment.contentScopeRoot)) continue;
+            auto* mesh = object->GetComponent<Engine::Components::Mesh>();
+            auto* sprite = object->GetComponent<Engine::Components::Sprite>();
+            if (!mesh && !sprite) continue;
+            HoverCandidate candidate;
+            candidate.object = object;
+            for (auto* parent = object->Parent; parent; parent = parent->Parent)
+                candidate.ancestors.push_back(parent);
+            candidate.travelled = travelled;
+            candidate.maximumDistance = segment.maxDistance;
+            if (mesh && mesh->HasBounds())
+            {
+                const glm::mat4 inverse = glm::inverse(
+                    object->transform.GetWorldMatrix());
+                candidate.origin = glm::vec3(inverse *
+                    glm::vec4(segment.ray.origin, 1.f));
+                candidate.direction = glm::vec3(inverse *
+                    glm::vec4(segment.ray.direction, 0.f));
+                candidate.minimum = mesh->GetBoundsMin();
+                candidate.maximum = mesh->GetBoundsMax();
+                if (auto* skin = object->GetComponent<Engine::Components::SkinnedMesh>())
+                {
+                    SkinnedIndex(*mesh, *skin, false);
+                    const auto found = skinnedEntries.find(mesh);
+                    candidate.triangles = found->second.ready;
+                    if (!candidate.triangles) geometryPending = true;
+                }
+            }
+            else
+            {
+                candidate.sphere = true;
+                candidate.origin = segment.ray.origin;
+                candidate.direction = segment.ray.direction;
+                candidate.minimum = object->transform.GetWorldPosition();
+                const float radius = glm::max(glm::max(object->transform.scale.x,
+                    object->transform.scale.y), object->transform.scale.z) * .75f;
+                candidate.maximum.x = radius;
+            }
+            candidates.push_back(std::move(candidate));
+        }
+        travelled += segment.maxDistance;
+    }
+    hoverState = {};
+    if (geometryPending) return nullptr;
+    hoverState.signature = signature;
+    hoverState.pending = Engine::Threading::JobScheduler::Get().Submit(
+        [candidates = std::move(candidates)]() {
+            Engine::Core::Object* best = nullptr;
+            float nearest = FLT_MAX;
+            const HoverCandidate* bestCandidate = nullptr;
+            for (const auto& candidate : candidates)
+            {
+                const float distance = candidate.Intersect();
+                const bool deeperChild = best && std::find(
+                    candidate.ancestors.begin(), candidate.ancestors.end(), best)
+                    != candidate.ancestors.end();
+                const bool shallowerParent = bestCandidate && std::find(
+                    bestCandidate->ancestors.begin(), bestCandidate->ancestors.end(),
+                    candidate.object) != bestCandidate->ancestors.end();
+                if (distance < FLT_MAX && (deeperChild ||
+                    (!shallowerParent && distance < nearest)))
+                { nearest = distance; best = candidate.object; bestCandidate = &candidate; }
+            }
+            return best;
+        });
+    return nullptr;
 }
 
 bool ScenePlacementAndPicking::FindPrefabPlacement(
@@ -156,11 +620,13 @@ bool ScenePlacementAndPicking::FindPrefabPlacement(
     if (!BuildViewportRay(scene, mousePos, viewportSize, rayOrigin, rayDirection))
         return false;
 
+    UpdateSpatialCache(scene);
     float bestDistance = FLT_MAX;
     bool found = false;
-    for (const auto& objectPointer : scene.GetObjects())
+    for (uint32_t candidate : spatialCache.index.QueryRay(
+        rayOrigin, rayDirection, FLT_MAX))
     {
-        Engine::Core::Object* object = objectPointer.get();
+        Engine::Core::Object* object = spatialCache.objects[candidate];
         if (!object || !object->IsEnabledInHierarchy() ||
             !object->GetComponent<Engine::Components::Mesh>() ||
             IsInObjectHierarchy(object, prefabPreview))
@@ -264,10 +730,9 @@ Engine::Core::Object* ScenePlacementAndPicking::PickSkinnedBoneInViewport(
         if (!skeleton) continue;
         const auto& joints = skeleton->ResolveJoints();
         const auto& source = mesh->GetVertices();
-        const auto& indices = mesh->GetIndices();
         if (source.empty()) continue;
-        const auto posed = mesh->BuildPosedVertices(&skin->BuildPalette());
-        if (posed.size() != source.size()) continue;
+        const auto* index = SkinnedIndex(*mesh, *skin, true);
+        if (!index) continue;
         const glm::mat4 world = object->transform.GetWorldMatrix();
         if (std::abs(glm::determinant(world)) < 1e-8f) continue;
         const glm::mat4 inverseWorld = glm::inverse(world);
@@ -275,33 +740,11 @@ Engine::Core::Object* ScenePlacementAndPicking::PickSkinnedBoneInViewport(
             glm::vec4(rayOrigin, 1.f));
         const glm::vec3 direction = glm::vec3(inverseWorld *
             glm::vec4(rayDirection, 0.f));
-        const size_t count = indices.empty() ? posed.size() : indices.size();
-        for (size_t i = 0; i + 2 < count; i += 3)
+        size_t triangle = 0;
+        float t = 0.f, u = 0.f, v = 0.f;
+        if (index->Intersect(origin, direction, t, &triangle, &u, &v))
         {
-            const size_t ids[3] = { indices.empty() ? i : indices[i],
-                indices.empty() ? i + 1 : indices[i + 1],
-                indices.empty() ? i + 2 : indices[i + 2] };
-            if (ids[0] >= posed.size() || ids[1] >= posed.size() ||
-                ids[2] >= posed.size()) continue;
-            const auto position = [&](size_t id) {
-                return glm::vec3(posed[id].pos[0], posed[id].pos[1],
-                    posed[id].pos[2]);
-            };
-            const glm::vec3 a = position(ids[0]);
-            const glm::vec3 edge1 = position(ids[1]) - a;
-            const glm::vec3 edge2 = position(ids[2]) - a;
-            const glm::vec3 p = glm::cross(direction, edge2);
-            const float det = glm::dot(edge1, p);
-            if (std::abs(det) < 1e-7f) continue;
-            const float invDet = 1.f / det;
-            const glm::vec3 offset = origin - a;
-            const float u = glm::dot(offset, p) * invDet;
-            if (u < 0.f || u > 1.f) continue;
-            const glm::vec3 q = glm::cross(offset, edge1);
-            const float v = glm::dot(direction, q) * invDet;
-            if (v < 0.f || u + v > 1.f) continue;
-            const float t = glm::dot(edge2, q) * invDet;
-            if (t <= 0.f) continue;
+            const auto& ids = index->triangles[triangle].ids;
             const float worldDistance = glm::length(glm::vec3(world *
                 glm::vec4(origin + direction * t, 1.f)) - rayOrigin);
             if (worldDistance >= closest) continue;
@@ -367,6 +810,7 @@ Engine::Core::Object* ScenePlacementAndPicking::PickObjectInViewport(
     const glm::vec3 rayOrigin = glm::vec3(nearH) / nearH.w;
     const glm::vec3 rayTarget = glm::vec3(farH) / farH.w;
     const glm::vec3 rayDir = glm::normalize(rayTarget - rayOrigin);
+    UpdateSpatialCache(scene);
 
     if (scene.IsEditorMode2D())
     {
@@ -416,9 +860,10 @@ Engine::Core::Object* ScenePlacementAndPicking::PickObjectInViewport(
 
         Engine::Core::Object* closestMesh = nullptr;
         float closestDistance = FLT_MAX;
-        for (const auto& objPtr : scene.GetObjects())
+        for (uint32_t candidate : spatialCache.index.QueryRay(
+            rayOrigin, rayDir, FLT_MAX))
         {
-            Engine::Core::Object* obj = objPtr.get();
+            Engine::Core::Object* obj = spatialCache.objects[candidate];
             Engine::Components::Mesh* mesh = obj && obj->IsEnabledInHierarchy()
                 ? obj->GetComponent<Engine::Components::Mesh>() : nullptr;
             float distance = 0.f;
@@ -439,9 +884,11 @@ Engine::Core::Object* ScenePlacementAndPicking::PickObjectInViewport(
         scene.TracePortalRay({ rayOrigin, rayDir }, 10000.f);
     for (const Engine::Scene::Scene::PortalRaySegment& segment : segments)
     {
-        for (const auto& objPtr : scene.GetObjects())
+        const auto candidates = spatialCache.index.QueryRay(segment.ray.origin,
+            segment.ray.direction, segment.maxDistance);
+        for (uint32_t candidate : candidates)
         {
-            Engine::Core::Object* obj = objPtr.get();
+            Engine::Core::Object* obj = spatialCache.objects[candidate];
             Engine::Components::Mesh* mesh = obj && obj->IsEnabledInHierarchy()
                 ? obj->GetComponent<Engine::Components::Mesh>() : nullptr;
             Engine::Components::Sprite* sprite = obj && obj->IsEnabledInHierarchy()

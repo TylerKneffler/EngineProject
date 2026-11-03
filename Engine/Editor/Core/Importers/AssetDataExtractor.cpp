@@ -1,4 +1,5 @@
 #include "AssetDataExtractor.h"
+#include "AssetJobControl.h"
 #include "ModelImporter.h"
 #include "Core/AssetRecord.h"
 #include "Core/Model/AnimationClipAsset.h"
@@ -47,6 +48,7 @@ Engine::Model::ModelImportResult AssetDataExtractor::Extract(
     fs::path output;
     try
     {
+        AssetJobCheckpoint(0.02f);
         if (!Supports(source) || !fs::is_regular_file(source))
             throw std::runtime_error("Select a supported model, rig, animation pack, or mesh pack.");
         const auto extension = Extension(source);
@@ -57,6 +59,7 @@ Engine::Model::ModelImportResult AssetDataExtractor::Extract(
         for (unsigned suffix = 2; fs::exists(output); ++suffix)
             output = destination / (base + " " + std::to_string(suffix));
         fs::create_directories(output);
+        AssetJobCheckpoint(0.2f);
         const auto record = [&](const fs::path& path)
         {
             Engine::Core::AssetRecord::Ensure(path, source,
@@ -64,6 +67,7 @@ Engine::Model::ModelImportResult AssetDataExtractor::Extract(
         };
         const auto writeClip = [&](const Engine::Model::AnimationClipAsset& asset, size_t index)
         {
+            AssetJobCheckpoint();
             const auto path = output / (Name(asset.clip.clipName) + "_" +
                 std::to_string(index + 1) + ".anim");
             auto standalone = asset;
@@ -79,7 +83,10 @@ Engine::Model::ModelImportResult AssetDataExtractor::Extract(
                 throw std::runtime_error(error);
             std::vector<fs::path> extractedFiles;
             for (const auto& entry : fs::recursive_directory_iterator(output))
+            {
+                AssetJobCheckpoint();
                 if (entry.is_regular_file()) extractedFiles.push_back(entry.path());
+            }
             for (const auto& path : extractedFiles) record(path);
         }
         else if (extension == ".animpack")
@@ -88,6 +95,8 @@ Engine::Model::ModelImportResult AssetDataExtractor::Extract(
             if (!pack) throw std::runtime_error(error);
             for (size_t i = 0; i < pack->clips.size(); ++i)
             {
+                AssetJobCheckpoint(0.3f + 0.6f * static_cast<float>(i) /
+                    std::max<size_t>(1, pack->clips.size()));
                 Engine::Model::AnimationClipAsset asset;
                 asset.clip = pack->clips[i];
                 asset.bindSkeleton = pack->bindSkeleton;
@@ -97,6 +106,7 @@ Engine::Model::ModelImportResult AssetDataExtractor::Extract(
             }
             for (size_t i = 0; i < pack->sourceTracks.size(); ++i)
             {
+                AssetJobCheckpoint();
                 const auto& track = pack->sourceTracks[i];
                 const auto path = output / (Name(track.kind) + "_" + std::to_string(i + 1) + ".vmdtrack");
                 if (!pack->ExtractSourceTrack(track.kind, path.string(), error))
@@ -111,6 +121,8 @@ Engine::Model::ModelImportResult AssetDataExtractor::Extract(
             std::set<std::string> animations;
             for (size_t i = 0; i < rigs.size(); ++i)
             {
+                AssetJobCheckpoint(0.3f + 0.6f * static_cast<float>(i) /
+                    std::max<size_t>(1, rigs.size()));
                 auto skeleton = rigs[i];
                 if (skeleton.bindNodes.empty())
                     throw std::runtime_error("Rig has no standalone hierarchy. Split its source model again.");
@@ -123,6 +135,7 @@ Engine::Model::ModelImportResult AssetDataExtractor::Extract(
                 record(path);
                 for (size_t p = 0; p < rigs[i].poses.size(); ++p)
                 {
+                    AssetJobCheckpoint();
                     Engine::Model::PoseAsset pose;
                     pose.name = rigs[i].poses[p].name;
                     for (const auto& joint : rigs[i].poses[p].joints)
@@ -150,6 +163,7 @@ Engine::Model::ModelImportResult AssetDataExtractor::Extract(
             if (fs::exists(meshPack) && !Engine::Model::MeshPackAsset::Extract(meshPack, output, error))
                 throw std::runtime_error(error);
         }
+        AssetJobCheckpoint(0.98f);
         result.success = true;
         result.outputDirectory = output.generic_string();
         result.message = "Split " + source.filename().string();

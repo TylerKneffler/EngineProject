@@ -68,6 +68,68 @@ glm::vec3 MapPoint(const glm::vec3& worldPoint,
 }
 }
 
+Scene::SpatialWarpSnapshot Scene::CaptureSpatialWarpSnapshot() const
+{
+    SpatialWarpSnapshot snapshot;
+    for (const auto* manipulator : GetComponents<Engine::Components::SpatialManipulator>())
+    {
+        const auto* owner = manipulator->Owner;
+        if (!owner || !owner->IsEnabledInHierarchy() ||
+            !manipulator->enabled || !manipulator->definesWarpVolume)
+            continue;
+        SpatialWarpSnapshot::Volume volume;
+        volume.owner = owner;
+        volume.definition = manipulator->GetWarpVolumeDefinition();
+        volume.world = owner->transform.GetWorldMatrix();
+        volume.priority = manipulator->warpPriority;
+        TryGetObjectPath(owner, volume.path);
+        snapshot.volumes.push_back(std::move(volume));
+    }
+    std::sort(snapshot.volumes.begin(), snapshot.volumes.end(),
+        [](const auto& a, const auto& b) {
+            return a.priority != b.priority ? a.priority < b.priority :
+                a.path < b.path;
+        });
+    return snapshot;
+}
+
+Scene::SpatialQuerySample Scene::SpatialWarpSnapshot::Sample(
+    const glm::vec3& worldPoint, const Object* excludedOwner) const
+{
+    const auto map = [&](const glm::vec3& point, bool& affected) {
+        glm::vec3 mapped = point;
+        for (const Volume& volume : volumes)
+        {
+            if (volume.owner == excludedOwner) continue;
+            const glm::vec3 before = mapped;
+            mapped = Spatial::WarpVolume::MapPoint(volume.definition,
+                volume.world, mapped);
+            const glm::vec3 delta = mapped - before;
+            affected = affected || glm::dot(delta, delta) > 1e-12f;
+        }
+        return mapped;
+    };
+    SpatialQuerySample sample{};
+    sample.point = map(worldPoint, sample.affectedByWarpVolume);
+    if (volumes.empty() || (volumes.size() == 1 &&
+        volumes.front().owner == excludedOwner)) return sample;
+    constexpr float step = 0.001f;
+    for (int column = 0; column < 3; ++column)
+    {
+        bool affected = false;
+        const glm::vec3 endpoint = map(worldPoint +
+            glm::vec3(column == 0, column == 1, column == 2) * step,
+            affected);
+        glm::vec3 derivative = (endpoint - sample.point) / step;
+        if (!std::isfinite(derivative.x) || !std::isfinite(derivative.y) ||
+            !std::isfinite(derivative.z))
+            derivative = glm::vec3(column == 0, column == 1, column == 2);
+        sample.jacobian[column] = derivative;
+        sample.affectedByWarpVolume = sample.affectedByWarpVolume || affected;
+    }
+    return sample;
+}
+
 Scene::SpatialQuerySample Scene::SampleSpatialPoint(
     const glm::vec3& worldPoint, const SpatialQuery& query) const
 {

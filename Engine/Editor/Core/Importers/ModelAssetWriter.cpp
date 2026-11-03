@@ -1,4 +1,5 @@
 #include "ModelAssetWriter.h"
+#include "AssetJobControl.h"
 #include "Core/AnimationClipMapping.h"
 
 #include "Core/AssetRecord.h"
@@ -366,6 +367,7 @@ Engine::Model::ModelImportResult ModelAssetWriter::Write(const Engine::Model::Im
     fs::path output;
     try
     {
+        AssetJobCheckpoint(0.55f);
         const std::string sourceName = SafeName(model.name, SafeName(source.stem().string(), "Model"));
         output = UniqueDirectory(assets, sourceName);
         const fs::path meshesDirectory = output / "Meshes";
@@ -379,6 +381,7 @@ Engine::Model::ModelImportResult ModelAssetWriter::Write(const Engine::Model::Im
         std::set<std::string> missingTextures;
         auto importTexture = [&](const std::string& value) -> std::string
         {
+            AssetJobCheckpoint();
             if (value.empty()) return {};
             if (const auto found = importedTextures.find(value); found != importedTextures.end())
                 return found->second;
@@ -418,7 +421,7 @@ Engine::Model::ModelImportResult ModelAssetWriter::Write(const Engine::Model::Im
             for (unsigned suffix = 2; fs::exists(destination); ++suffix)
                 destination = texturesDirectory /
                     (original.stem().string() + " " + std::to_string(suffix) + original.extension().string());
-            fs::copy_file(original, destination);
+            AssetJobCopyFile(original, destination);
             Engine::Core::AssetRecord::Ensure(destination, source,
                 { { "importer", std::string("model-texture") },
                   { "sourceFormat", model.sourceFormat } });
@@ -429,6 +432,8 @@ Engine::Model::ModelImportResult ModelAssetWriter::Write(const Engine::Model::Im
         materialPaths.reserve(model.materials.size() + 1);
         for (size_t index = 0; index < model.materials.size(); ++index)
         {
+            AssetJobCheckpoint(0.60f + 0.08f * static_cast<float>(index) /
+                std::max<size_t>(1, model.materials.size()));
             const Engine::Model::ImportedMaterial& imported = model.materials[index];
             Engine::Components::Material material;
             material.diffuseColor = glm::vec3(imported.baseColor);
@@ -483,6 +488,8 @@ Engine::Model::ModelImportResult ModelAssetWriter::Write(const Engine::Model::Im
         const std::vector<uint32_t> noIndices;
         for (size_t index = 0; index < model.primitives.size(); ++index)
         {
+            AssetJobCheckpoint(0.68f + 0.16f * static_cast<float>(index) /
+                std::max<size_t>(1, model.primitives.size()));
             const Engine::Model::ImportedPrimitive& primitive = model.primitives[index];
             if (primitive.vertices.empty()) continue;
             const auto indexed = model.sourceFormat == "pmx"
@@ -528,6 +535,7 @@ Engine::Model::ModelImportResult ModelAssetWriter::Write(const Engine::Model::Im
         root->transform.scale = glm::vec3(model.unitScaleToMeters);
         for (size_t index = 0; index < model.skins.size(); ++index)
         {
+            AssetJobCheckpoint();
             Engine::Components::Skeleton* skeleton =
                 root->AddComponent<Engine::Components::Skeleton>();
             skeleton->skinIndex = static_cast<unsigned>(index);
@@ -595,6 +603,8 @@ Engine::Model::ModelImportResult ModelAssetWriter::Write(const Engine::Model::Im
             softBodyMaterials.insert(soft.materialIndex);
         for (size_t index = 0; index < model.nodes.size(); ++index)
         {
+            AssetJobCheckpoint(0.84f + 0.12f * static_cast<float>(index) /
+                std::max<size_t>(1, model.nodes.size()));
             const Engine::Model::ImportedNode& imported = model.nodes[index];
             Engine::Core::Object* parent = imported.parent >= 0 && static_cast<size_t>(imported.parent) < objects.size()
                 ? objects[static_cast<size_t>(imported.parent)] : root;
@@ -968,6 +978,7 @@ Engine::Model::ModelImportResult ModelAssetWriter::Write(const Engine::Model::Im
                   { "skinCount", static_cast<double>(rigSkins.size()) } });
         }
 
+        AssetJobCheckpoint(0.97f);
         if (manager) manager->RefreshRigClips();
         if (!Engine::Serialization::SceneSerializer::SavePrefab(*root, prefabPath.string()))
             throw std::runtime_error("Could not save prefab");

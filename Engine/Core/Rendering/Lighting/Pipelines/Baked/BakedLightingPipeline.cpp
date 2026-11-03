@@ -23,6 +23,12 @@ namespace Engine::Rendering
 {
 namespace
 {
+void CheckBakeCancellation(const std::function<bool()>& cancelled)
+{
+    if (cancelled && cancelled())
+        throw std::runtime_error("Lighting bake cancelled");
+}
+
 struct BakeLight
 {
     glm::vec3 position{};
@@ -247,10 +253,12 @@ float Edge(const glm::vec2& a, const glm::vec2& b, const glm::vec2& p)
         (p.y - a.y) * (b.x - a.x);
 }
 
-void Dilate(Image& image, uint32_t passes)
+void Dilate(Image& image, uint32_t passes,
+    const std::function<bool()>& cancelled)
 {
     for (uint32_t pass = 0; pass < passes; ++pass)
     {
+        CheckBakeCancellation(cancelled);
         const auto previousPixels = image.pixels;
         const auto previousWeights = image.weights;
         for (uint32_t y = 0; y < image.height; ++y)
@@ -288,12 +296,14 @@ void Dilate(Image& image, uint32_t passes)
 Image BakeImage(const Engine::Core::Object& object, const Engine::Components::Material& material,
     const std::vector<BakeLight>& lights,
     const std::vector<SurfaceTriangle>& geometry,
-    const Engine::Model::BakedLightingSettings& settings)
+    const Engine::Model::BakedLightingSettings& settings,
+    const std::function<bool()>& cancelled)
 {
     Image image(settings.lightmapResolution);
     bool wroteTexel = false;
     for (size_t triangleIndex = 0; triangleIndex < geometry.size(); ++triangleIndex)
     {
+        if ((triangleIndex & 63u) == 0) CheckBakeCancellation(cancelled);
         const SurfaceTriangle& triangle = geometry[triangleIndex];
         if (triangle.owner != &object)
             continue;
@@ -316,6 +326,8 @@ Image BakeImage(const Engine::Core::Object& object, const Engine::Components::Ma
             static_cast<int>(std::ceil(std::max({
                 points[0].y, points[1].y, points[2].y }))));
         for (int y = minY; y <= maxY; ++y)
+        {
+        if ((y & 15) == 0) CheckBakeCancellation(cancelled);
         for (int x = minX; x <= maxX; ++x)
         {
             const glm::vec2 sample(x + 0.5f, y + 0.5f);
@@ -349,6 +361,7 @@ Image BakeImage(const Engine::Core::Object& object, const Engine::Components::Ma
             image.weightedDirection += weightedDirection;
             ++image.lightingSamples;
             wroteTexel = true;
+        }
         }
     }
     for (size_t index = 0; index < image.pixels.size(); ++index)
@@ -384,7 +397,7 @@ Image BakeImage(const Engine::Core::Object& object, const Engine::Components::Ma
         std::fill(image.pixels.begin(), image.pixels.end(), fallback);
         std::fill(image.weights.begin(), image.weights.end(), 1.f);
     }
-    Dilate(image, settings.dilationPasses);
+    Dilate(image, settings.dilationPasses, cancelled);
     return image;
 }
 
@@ -400,7 +413,8 @@ void WriteU32(std::ofstream& file, uint32_t value)
         file.put(static_cast<char>((value >> shift) & 0xff));
 }
 
-bool SaveBmp(const std::filesystem::path& path, const Image& image)
+bool SaveBmp(const std::filesystem::path& path, const Image& image,
+    const std::function<bool()>& cancelled)
 {
     std::ofstream file(path, std::ios::binary);
     if (!file)
@@ -414,8 +428,10 @@ bool SaveBmp(const std::filesystem::path& path, const Image& image)
     WriteU16(file, 1); WriteU16(file, 32); WriteU32(file, 0);
     WriteU32(file, pixelBytes); WriteU32(file, 2835); WriteU32(file, 2835);
     WriteU32(file, 0); WriteU32(file, 0);
-    for (const glm::vec3& pixel : image.pixels)
+    for (size_t index = 0; index < image.pixels.size(); ++index)
     {
+        if ((index & 16383u) == 0) CheckBakeCancellation(cancelled);
+        const glm::vec3& pixel = image.pixels[index];
         file.put(static_cast<char>(SrgbByte(pixel.b)));
         file.put(static_cast<char>(SrgbByte(pixel.g)));
         file.put(static_cast<char>(SrgbByte(pixel.r)));
@@ -475,11 +491,15 @@ bool RestoreMaterial(Engine::Core::Object& object, const BakedLightingData& data
 
 Engine::Model::BakeResult BakedLightingPipeline::Bake(Engine::Scene::Scene& scene,
     const std::string& assetsDirectory, const std::string& sceneName,
-    const Engine::Model::BakedLightingSettings& requestedBakeSettings) const
+    const Engine::Model::BakedLightingSettings& requestedBakeSettings,
+    const std::function<void(float)>& progress,
+    const std::function<bool()>& cancelled) const
 {
     Engine::Model::BakeResult result{};
     try
     {
+        CheckBakeCancellation(cancelled);
+        if (progress) progress(0.02f);
         Engine::Model::BakedLightingSettings settings = requestedBakeSettings;
         settings.lightmapResolution = std::clamp(
             settings.lightmapResolution, 32u, 2048u);
@@ -538,9 +558,12 @@ Engine::Model::BakeResult BakedLightingPipeline::Bake(Engine::Scene::Scene& scen
                 RestoreMaterial(*object, *data, scene.GetGraphicsProvider());
 
         const std::vector<SurfaceTriangle> geometry = GatherGeometry(scene);
+        CheckBakeCancellation(cancelled);
+        if (progress) progress(0.12f);
         uint32_t probeCount=0;
         for(const auto& object:scene.GetObjects())
         {
+            CheckBakeCancellation(cancelled);
             if(!object->IsEnabledInHierarchy()) continue;
             if(auto* probe=object->GetComponent<Engine::Components::LightProbe>())
             {
@@ -562,6 +585,7 @@ Engine::Model::BakeResult BakedLightingPipeline::Bake(Engine::Scene::Scene& scen
                 for(int y=0;y<group->countY;++y)
                 for(int x=0;x<group->countX;++x)
                 {
+                    if ((x & 7) == 0) CheckBakeCancellation(cancelled);
                     const size_t index=static_cast<size_t>(x)+
                         static_cast<size_t>(group->countX)*(
                         static_cast<size_t>(y)+
@@ -580,8 +604,15 @@ Engine::Model::BakeResult BakedLightingPipeline::Bake(Engine::Scene::Scene& scen
                 probeCount+=static_cast<uint32_t>(group->SampleCount());
             }
         }
+        if (progress) progress(0.25f);
+        size_t receiverIndex = 0;
+        const size_t objectCount = std::max<size_t>(1, scene.GetObjects().size());
         for (const auto& object : scene.GetObjects())
         {
+            CheckBakeCancellation(cancelled);
+            if (progress) progress(0.25f + 0.70f *
+                static_cast<float>(receiverIndex++) /
+                static_cast<float>(objectCount));
             const Engine::Components::Mesh* mesh = object->GetComponent<Engine::Components::Mesh>();
             if (!mesh || !object->IsEnabledInHierarchy())
                 continue;
@@ -590,6 +621,18 @@ Engine::Model::BakeResult BakedLightingPipeline::Bake(Engine::Scene::Scene& scen
             Engine::Components::Material* source = object->GetComponent<Engine::Components::Material>();
             if (!source)
                 source = object->AddComponent<Engine::Components::Material>();
+            // Headless editor bakes operate on a snapshot. Decode source
+            // textures into private CPU objects so the worker never changes
+            // a texture shared with the live renderer.
+            if (!scene.GetGraphicsProvider())
+            {
+                if (source->baseColorTexture)
+                    source->baseColorTexture = Engine::Components::Texture::
+                        DecodeDetached(source->baseColorTexture->GetFilePath(), true);
+                if (source->emissiveTexture)
+                    source->emissiveTexture = Engine::Components::Texture::
+                        DecodeDetached(source->emissiveTexture->GetFilePath(), true);
+            }
             BakedLightingData* data = object->GetComponent<BakedLightingData>();
             const std::string previousOriginal = data
                 ? data->originalMaterialAsset : source->GetFilePath();
@@ -606,10 +649,12 @@ Engine::Model::BakeResult BakedLightingPipeline::Bake(Engine::Scene::Scene& scen
             if (!source->SaveToFile(snapshotPath.string()))
                 throw std::runtime_error("Could not save source material snapshot");
 
-            const Image image = BakeImage(*object, *source, lights, geometry, settings);
-            if (!SaveBmp(lightmapPath, image))
+            const Image image = BakeImage(*object, *source, lights, geometry,
+                settings, cancelled);
+            if (!SaveBmp(lightmapPath, image, cancelled))
                 throw std::runtime_error("Could not save baked lightmap");
-            Engine::Components::Texture::Invalidate(PortablePath(lightmapPath));
+            if (scene.GetGraphicsProvider())
+                Engine::Components::Texture::Invalidate(PortablePath(lightmapPath));
 
             Engine::Components::Material baked;
             if (!baked.LoadFromFile(snapshotPath.string()))
@@ -647,6 +692,7 @@ Engine::Model::BakeResult BakedLightingPipeline::Bake(Engine::Scene::Scene& scen
         }
 
         result.succeeded = true;
+        if (progress) progress(1.f);
         result.bakedLightCount = static_cast<uint32_t>(lights.size());
         result.message = "Baked " + std::to_string(result.bakedLightCount) +
             " light(s) into " + std::to_string(result.receiverCount) +

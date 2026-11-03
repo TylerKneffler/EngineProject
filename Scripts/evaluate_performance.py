@@ -50,7 +50,11 @@ def evaluate(rows, path="", all_frames=False):
                         and session_frames[index + 1].get("playing") is False)
         stalls.append(dict(frame=row.get("frame"), time_utc=row.get("time_utc"),
                            frame_ms=row["frame_ms"], stage=stage,
-                           stage_ms=stages.get(stage, 0), play_stop_transition=stopping))
+                           stage_ms=stages.get(stage, 0), play_stop_transition=stopping,
+                           activity=row.get("frame_activity", [])))
+    activity_frames = [dict(frame=row.get("frame"), frame_ms=row.get("frame_ms", 0),
+                            activity=row.get("frame_activity", [])) for row in session_frames
+                       if row.get("frame_activity")]
     selection = "all recorded frames"
     if not all_frames and any(r.get("playing") for r in frames):
         frames = [r for r in frames if r.get("playing")]
@@ -58,6 +62,14 @@ def evaluate(rows, path="", all_frames=False):
     if not all_frames and any("measured" in r for r in frames):
         frames = [r for r in frames if r.get("measured")]
         selection = "measured Play frames" if selection == "Play frames" else "measured frames"
+    if not all_frames and any("recurring_frame" in r for r in session_frames):
+        # dt_ms measures the preceding interval. Exclude the sample after a
+        # tagged hitch as well as the hitch frame itself.
+        recurring = {id(row) for index, row in enumerate(session_frames)
+                     if row.get("recurring_frame") and
+                     (index == 0 or session_frames[index - 1].get("recurring_frame"))}
+        frames = [row for row in frames if id(row) in recurring]
+        selection = "recurring " + selection
     if not frames:
         raise ValueError("Recording contains no frame_details records")
     intervals = [r.get("dt_ms", r.get("frame_ms", 0)) for r in frames]
@@ -67,8 +79,17 @@ def evaluate(rows, path="", all_frames=False):
         raise ValueError("Recording contains no valid positive frame intervals")
     metrics = {k: summary([r[k] for r in frames if k in r])
                for k in set().union(*(r.keys() for r in frames))
-               if k.endswith("_ms") or k.startswith(("instance_", "shadow_instance_", "prepare_transform_", "prepare_spatial_", "render_batch_"))
+               if k.endswith("_ms") or k.startswith(("instance_", "shadow_instance_", "prepare_transform_", "prepare_spatial_", "render_batch_", "writer_queue_", "worker_queue_"))
                or k in ("native_compute_arena_writes", "native_compute_discard_maps")}
+    stage_work = {}
+    for stage in ("pacing", "background", "update", "render", "pending_load"):
+        values = [item for row in frames for item in row.get("stage_work", [])
+                  if isinstance(item, dict) and item.get("stage") == stage]
+        if values:
+            stage_work[stage] = {key: summary([item[key] for item in values if key in item])
+                                 for key in ("wall_ms", "main_busy_ms", "worker_execution_ms",
+                                             "queue_delay_ms", "dependency_wait_ms",
+                                             "scheduler_wait_ms", "render_thread_stall_ms")}
     gpu = {}
     for index, row in enumerate(frames):
         if row.get("gpu_valid"):
@@ -186,15 +207,19 @@ def evaluate(rows, path="", all_frames=False):
         warnings.append(f"Recording writer dropped or failed {recording_loss} records; frame statistics may omit stalls.")
     if stalls:
         warnings.append("Full-recording stalls are reported before Play/measured filtering. A Stop freeze can fall outside Play-only interval FPS because dt_ms describes the preceding frame and arrives on the next stopped frame. pending_load_ms includes post-frame scene restoration, not only file loads.")
+    if activity_frames:
+        warnings.append("Recurring-frame statistics exclude tagged editor activities and the following interval. Activity tags identify frames containing import, save, bake, load, or initial draw work; overlapping activity is listed together. Startup work before the first recorded frame is outside this capture.")
     return {"capture": str(path), "frames": len(frames), "frame_selection": selection,
             "session": {"frames": len(session_frames), "interval_ms": session_intervals,
                         "effective_fps": 1000 / session_intervals["mean"] if session_intervals else None,
-                        "stalls": sorted(stalls, key=lambda row: row["frame_ms"], reverse=True)},
+                        "stalls": sorted(stalls, key=lambda row: row["frame_ms"], reverse=True),
+                        "activity_frames": activity_frames},
             "capture_identity": capture_identity(frames),
             "start_utc": frames[0].get("time_utc"),
             "end_utc": frames[-1].get("time_utc"), "effective_fps": 1000 / interval["mean"],
             "interval_ms": interval, "over_60fps_budget_percent": 100 * sum(v > 1000 / 60 for v in intervals) / len(intervals),
-            "metrics": metrics, "unique_gpu_samples": len(gpu), "gpu_stages_ms": gpu_stages,
+            "metrics": metrics, "stage_work": stage_work,
+            "unique_gpu_samples": len(gpu), "gpu_stages_ms": gpu_stages,
             "gpu_total_ms": gpu_total, "gpu_shadow_share_percent": shadow_share,
             "render_work_balance": render_balance,
             "main_pass_unexplained_ms": max(0, main["mean"] - measured) if main else None,
@@ -234,11 +259,16 @@ def markdown(result, comparison=None):
     if session.get("stalls"):
         if session.get("effective_fps"):
             lines += ["", f"Full recording, including transitions: {session['frames']} frames, {session['effective_fps']:.2f} FPS from recorded intervals."]
-        lines += ["", "| Blocking frame | Total ms | Dominant recorded stage | Stage ms | Play/Stop transition |", "|---|---:|---|---:|---|"]
+        lines += ["", "| Blocking frame | Total ms | Dominant recorded stage | Stage ms | Activity | Play/Stop transition |", "|---|---:|---|---:|---|---|"]
         for stall in session["stalls"][:10]:
-            lines.append(f"| {stall['frame']} | {stall['frame_ms']:.1f} | {stall['stage'] or 'unattributed'} | {stall['stage_ms']:.1f} | {'yes' if stall['play_stop_transition'] else 'no'} |")
+            lines.append(f"| {stall['frame']} | {stall['frame_ms']:.1f} | {stall['stage'] or 'unattributed'} | {stall['stage_ms']:.1f} | {', '.join(stall['activity']) or 'recurring'} | {'yes' if stall['play_stop_transition'] else 'no'} |")
+    if session.get("activity_frames"):
+        lines += ["", "| Activity frame | Total ms | Activity |", "|---|---:|---|"]
+        for hitch in sorted(session["activity_frames"], key=lambda row: row["frame_ms"], reverse=True)[:10]:
+            lines.append(f"| {hitch['frame']} | {hitch['frame_ms']:.1f} | {', '.join(hitch['activity'])} |")
     lines += ["", "| CPU wall-time measurement | Average ms | P95 ms |", "|---|---:|---:|"]
     for key in ("frame_ms", "update_ms", "render_ms", "main_submit_ms", "shadow_submit_ms", "editor_ui_ms",
+                "ui_thread_cpu_ms", "render_thread_cpu_ms", "writer_queue_records", "writer_queue_bytes", "worker_queue_pending",
                 "simulation_ms", "simulation_cpu_ms", "simulation_wait_ms", "simulation_overlap_ms",
                 "simulation_gpu_wait_ms", "pipeline_record_ms",
                 "grass_total_ms", "grass_generation_ms", "grass_upload_ms", "physics_ms", "pose_ms", "constraints_ms", "audio_ms",
@@ -251,6 +281,11 @@ def markdown(result, comparison=None):
                 "prepare_spatial_index_ms", "prepare_spatial_compare_ms", "prepare_spatial_refit_ms", "prepare_spatial_build_ms"):
         if value := result["metrics"].get(key):
             lines.append(f"| {key} | {value['mean']:.3f} | {value['p95']:.3f} |")
+    if result.get("stage_work"):
+        lines += ["", "| Frame stage | Wall ms | Main CPU ms | Worker execution ms | Queue delay ms |", "|---|---:|---:|---:|---:|"]
+        for name, work in result["stage_work"].items():
+            value = lambda key: work[key]["mean"] if work.get(key) else 0
+            lines.append(f"| {name} | {value('wall_ms'):.3f} | {value('main_busy_ms'):.3f} | {value('worker_execution_ms'):.3f} | {value('queue_delay_ms'):.3f} |")
     for key in ("prepare_transform_local_updated", "prepare_transform_world_updated", "prepare_transform_world_reused", "prepare_transform_levels", "prepare_transform_structure_fallback",
                 "prepare_spatial_active_slots", "prepare_spatial_retained_slots",
                 "prepare_spatial_changed_bounds", "prepare_spatial_reused_bounds", "prepare_spatial_dirty_leaves",

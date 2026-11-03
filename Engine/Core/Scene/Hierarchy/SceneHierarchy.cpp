@@ -2,6 +2,7 @@
 #include "Core/SceneManager.h"
 #include "Core/Compoonents/Animation/TwoBoneIK.h"
 #include "Core/Compoonents/Animation/ChainIK.h"
+#include "Core/Compoonents/Animation/AnimationManager.h"
 #include "Core/Compoonents/Animation/RigController.h"
 #include "Core/Compoonents/Animation/RigConstraints.h"
 #include "Core/Compoonents/Animation/RigMorphControls.h"
@@ -159,6 +160,57 @@ void Scene::RefreshUpdateRegistry()
         update(m_updateObjects,state.first); update(m_poseObjects,state.second);
     }
     m_updateRegistryDirty.clear(); m_updateRegistryFull=false; m_updateRegistryRevision=GetStructureRevision();
+}
+
+bool Scene::AdvanceEditorPreviews(float deltaTime)
+{
+    AssertOwnerThread();
+    const float seconds = std::max(deltaTime, 0.f);
+    bool advanced = false;
+    auto& jobs = Engine::Threading::JobScheduler::Get();
+    std::vector<Engine::Threading::JobScheduler::Handle> phases;
+    phases.reserve(4);
+    try
+    {
+        phases.push_back(jobs.ScheduleOnOwner([&]
+        {
+            for (auto* emitter : GetComponents<Engine::Components::ParticleEmitter>())
+                if (emitter->Owner && emitter->Owner->IsEnabledInHierarchy() &&
+                    emitter->IsEditorPreviewRunning())
+                {
+                    emitter->Advance(seconds, emitter->Owner->transform.GetWorldMatrix());
+                    advanced = true;
+                }
+        }));
+        phases.push_back(jobs.ScheduleOnOwner([&]
+        {
+            for (auto* animation : GetComponents<Engine::Components::AnimationManager>())
+                if (animation->Owner && animation->Owner->IsEnabledInHierarchy() &&
+                    animation->IsEditorPreviewRunning())
+                {
+                    animation->Tick(seconds);
+                    advanced = true;
+                }
+        }, {phases.back()}));
+        phases.push_back(jobs.ScheduleOnOwner([&]
+        {
+            advanced = UpdateSpatialScripts(true) || advanced;
+        }, {phases.back()}));
+        phases.push_back(jobs.ScheduleOnOwner([&]
+        {
+            CommitPendingObjectChanges();
+        }, {phases.back()}));
+        jobs.Wait(phases.back());
+    }
+    catch (...)
+    {
+        // Every queued closure captures this scene and local state. Fence all
+        // phases before either can be destroyed during exception unwinding.
+        for (const auto& phase : phases)
+            try { jobs.Wait(phase); } catch (...) {}
+        throw;
+    }
+    return advanced;
 }
 
 void Scene::Update(float deltaTime)

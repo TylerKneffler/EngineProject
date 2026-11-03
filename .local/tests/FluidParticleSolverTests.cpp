@@ -5,6 +5,7 @@
 #include "Core/Scene/Scene.h"
 #include "Core/Physics/Physics.h"
 #include "Core/Object.h"
+#include "Core/Threading/JobScheduler.h"
 #include <glm/glm.hpp>
 #include <cmath>
 #include <iostream>
@@ -256,6 +257,35 @@ int main()
                 "moving boundary did not push stationary fluid");
         }
 
+        {
+            std::vector<ParticleState> serial(512), parallel(512);
+            for (size_t i = 0; i < serial.size(); ++i)
+            {
+                serial[i].position = glm::vec3(float(i % 8) * 0.05f,
+                    float((i / 8) % 8) * 0.05f,
+                    float(i / 64) * 0.05f);
+                serial[i].active = true;
+            }
+            parallel = serial;
+            FluidParticleSolver::Settings settings;
+            settings.substeps = 2;
+            FluidParticleSolver serialSolver(settings), parallelSolver(settings);
+            auto& jobs = Engine::Threading::JobScheduler::Get();
+            const bool previous = jobs.ParallelForEnabled();
+            jobs.SetParallelForEnabled(false);
+            serialSolver.Step(serial.data(), serial.size(), 1.f / 60.f,
+                {{0.f, -9.81f, 0.f}, 0.1f});
+            jobs.SetParallelForEnabled(true);
+            parallelSolver.Step(parallel.data(), parallel.size(), 1.f / 60.f,
+                {{0.f, -9.81f, 0.f}, 0.1f});
+            jobs.SetParallelForEnabled(previous);
+            for (size_t i = 0; i < serial.size(); ++i)
+                Require(Near(serial[i].position, parallel[i].position, 1e-5f) &&
+                    Near(serial[i].velocity, parallel[i].velocity, 1e-5f) &&
+                    std::abs(serialSolver.GetDensities()[i] -
+                        parallelSolver.GetDensities()[i]) < 1e-5f,
+                    "parallel fluid step differs from serial reference");
+        }
         std::cout << "Fluid SPH, bounds, coupling, and reset pass\n";
         return 0;
     }

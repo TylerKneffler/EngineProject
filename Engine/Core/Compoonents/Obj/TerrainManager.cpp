@@ -10,6 +10,7 @@
 #include "Core/Compoonents/Physics/MeshObjectCollider.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
 #include "Engine/Editor/UI/IEditorUi.h"
+#include "Core/Serialization/SceneSerializer.h"
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -904,9 +905,13 @@ void TerrainManager::RefreshAuthoredCollisionCells()
     {
         auto* object = pending.back();
         pending.pop_back();
-        if (!object) continue;
+        if (!object || !object->IsEnabledInHierarchy()) continue;
         if (auto* terrain = object->GetComponent<Terrain>())
         {
+            // Visual fallback terrain has no physics body and is not a cell
+            // whose collider should be managed by this grid.
+            if (!object->GetComponent<MeshObjectCollider>() ||
+                !object->GetComponent<RigidBody>()) continue;
             const auto local = glm::dvec3(inverse * glm::dvec4(object->transform.GetWorldPositionD(), 1.0));
             const Cell cell{static_cast<int>(std::llround(local.x / width)),
                 static_cast<int>(std::llround(local.z / depth))};
@@ -927,9 +932,92 @@ void TerrainManager::UpdateColliderStreamingAtPosition(const glm::dvec3& worldPo
     const double depth = static_cast<double>(cellsY) * cellDepth;
     if (width <= 0 || depth <= 0) return;
     m_collisionViewerLocal = local;
-    if (manageAuthoredCellColliders) RefreshAuthoredCollisionCells();
-    RefreshColliderActivation(static_cast<int>(std::floor(local.x / width)),
-        static_cast<int>(std::floor(local.z / depth)));
+    const int centerX = static_cast<int>(std::floor(local.x / width));
+    const int centerY = static_cast<int>(std::floor(local.z / depth));
+    if (manageAuthoredCellColliders)
+    {
+        StreamPrefabCells(centerX, centerY);
+        RefreshAuthoredCollisionCells();
+    }
+    RefreshColliderActivation(centerX, centerY);
+}
+
+void TerrainManager::StreamPrefabCells(int centerX, int centerY, bool unlimited)
+{
+    if (!Owner || !Owner->GetScene() || streamedPrefabPath.empty() ||
+        streamedPrefabHalfExtent <= 0) return;
+    auto& scene = *Owner->GetScene();
+    const int radius = std::clamp(streamedPrefabRadius, 0, 8);
+    std::vector<Engine::Core::Object*> reusable;
+    for (auto it = m_streamedPrefabCells.begin(); it != m_streamedPrefabCells.end(); )
+    {
+        const Cell cell = it->first;
+        auto* object = it->second;
+        if (std::abs(cell.first - centerX) <= radius &&
+            std::abs(cell.second - centerY) <= radius) { ++it; continue; }
+        it = m_streamedPrefabCells.erase(it);
+        if (reuseStreamedPrefabCells) reusable.push_back(object);
+        else scene.RemoveObject(object);
+    }
+    bool changed = !reusable.empty();
+    std::vector<Cell> candidates;
+    for (int y = std::max(-streamedPrefabHalfExtent, centerY - radius);
+        y <= std::min(streamedPrefabHalfExtent, centerY + radius); ++y)
+        for (int x = std::max(-streamedPrefabHalfExtent, centerX - radius);
+            x <= std::min(streamedPrefabHalfExtent, centerX + radius); ++x)
+            if ((x || y) && !m_streamedPrefabCells.count({x, y}))
+                candidates.emplace_back(x, y);
+    std::sort(candidates.begin(), candidates.end(), [centerX, centerY](Cell a, Cell b) {
+        const int da = (a.first - centerX) * (a.first - centerX) +
+            (a.second - centerY) * (a.second - centerY);
+        const int db = (b.first - centerX) * (b.first - centerX) +
+            (b.second - centerY) * (b.second - centerY);
+        return da == db ? a < b : da < db;
+    });
+    int budget = unlimited ? static_cast<int>(candidates.size()) : maxLoadsPerUpdate;
+    for (const Cell cell : candidates)
+    {
+        Engine::Core::Object* object = nullptr;
+        bool created = false;
+        if (reuseStreamedPrefabCells && !reusable.empty())
+        {
+            object = reusable.back();
+            reusable.pop_back();
+        }
+        else if (reuseStreamedPrefabCells && !m_streamedPrefabPool.empty())
+        {
+            object = m_streamedPrefabPool.back();
+            m_streamedPrefabPool.pop_back();
+        }
+        else
+        {
+            if (budget-- <= 0) break;
+            object = Engine::Serialization::SceneSerializer::InstantiatePrefab(
+                scene, streamedPrefabPath, m_provider);
+            if (!object) break;
+            scene.SetParentLocal(object, Owner);
+            object->runtimeOnly = true;
+            created = true;
+        }
+        object->enabled = true;
+        object->transform.position = {
+            cell.first * cellsX * cellWidth, 0.f,
+            cell.second * cellsY * cellDepth};
+        object->name = streamedPrefabCellName + " (" + std::to_string(cell.first) +
+            ", " + std::to_string(cell.second) + ")";
+        m_streamedPrefabCells[cell] = object;
+        changed = true;
+        if (created && (scene.HasStarted() || m_startingPrefabCells)) object->Start();
+    }
+    for (auto* object : reusable)
+    {
+        object->enabled = false;
+        object->name = "Pooled " + streamedPrefabCellName;
+        if (auto* body = object->GetComponent<RigidBody>())
+            body->SetCollisionSuspended(true);
+        m_streamedPrefabPool.push_back(object);
+    }
+    if (changed) m_authoredCollisionRevision = 0;
 }
 
 void TerrainManager::RefreshColliderActivation(int centerX, int centerY)
@@ -1442,7 +1530,7 @@ bool TerrainManager::ApplyBrush(double x, double z, float radius, float strength
 void TerrainManager::SyncLoadedCells(int centerX, int centerY)
 {
     if (manageAuthoredCellColliders)
-    { RefreshAuthoredCollisionCells(); RefreshColliderActivation(centerX, centerY); return; }
+    { StreamPrefabCells(centerX, centerY); RefreshAuthoredCollisionCells(); RefreshColliderActivation(centerX, centerY); return; }
     const int radius = m_editorStreaming ? std::clamp(editorRadius, 0, 32) :
         std::clamp(m_farEnabled && !m_farHeights.empty() ? loadedRadius :
             std::max(loadedRadius, farRadius), 0, 32);
@@ -1705,7 +1793,7 @@ void TerrainManager::UpdateStreaming(int centerX, int centerY)
 {
     m_collisionViewerLocal.reset();
     if (manageAuthoredCellColliders)
-    { RefreshAuthoredCollisionCells(); RefreshColliderActivation(centerX, centerY); return; }
+    { StreamPrefabCells(centerX, centerY); RefreshAuthoredCollisionCells(); RefreshColliderActivation(centerX, centerY); return; }
     if (m_editorStreaming) InvalidatePrepared();
     m_editorStreaming = false;
     m_prefetchCenter.reset();
@@ -1745,8 +1833,7 @@ void TerrainManager::UpdateStreamingAtPosition(
 void TerrainManager::UpdateEditorStreaming(const glm::dvec3& worldPosition,
     const Camera* camera, int viewportHeight, float aspect)
 {
-    if (!Owner || !Owner->GetScene() || Owner->GetScene()->HasStarted() ||
-        manageAuthoredCellColliders) return;
+    if (!Owner || !Owner->GetScene() || Owner->GetScene()->HasStarted()) return;
     const glm::dvec3 local = glm::dvec3(
         glm::inverse(Owner->transform.GetWorldMatrixD()) *
         glm::dvec4(worldPosition, 1.0));
@@ -1758,6 +1845,14 @@ void TerrainManager::UpdateEditorStreaming(const glm::dvec3& worldPosition,
     m_prefetchCenter.reset();
     const int centerX = static_cast<int>(std::floor(local.x / spanX));
     const int centerY = static_cast<int>(std::floor(local.z / spanZ));
+    if (manageAuthoredCellColliders)
+    {
+        m_collisionViewerLocal = local;
+        StreamPrefabCells(centerX, centerY);
+        RefreshAuthoredCollisionCells();
+        RefreshColliderActivation(centerX, centerY);
+        return;
+    }
     StreamCells(centerX, centerY);
     if (m_farEnabled) UpdateFarTerrain(centerX, centerY, camera,
         viewportHeight, aspect);
@@ -2114,7 +2209,9 @@ void TerrainManager::Start()
     {
         m_authoredCollisionRevision = 0;
         RefreshAuthoredCollisionCells();
+        m_startingPrefabCells = true;
         Update();
+        m_startingPrefabCells = false;
         return;
     }
     m_runtimeBakeActive = false;
@@ -2180,6 +2277,11 @@ TerrainManager::JsonValue TerrainManager::Serialize() const
         .Set("streamCollidersByDistance",
             JsonValue(streamCollidersByDistance))
         .Set("manageAuthoredCellColliders", JsonValue(manageAuthoredCellColliders))
+        .Set("streamedPrefabPath", JsonValue(streamedPrefabPath))
+        .Set("reuseStreamedPrefabCells", JsonValue(reuseStreamedPrefabCells))
+        .Set("streamedPrefabCellName", JsonValue(streamedPrefabCellName))
+        .Set("streamedPrefabHalfExtent", JsonValue(streamedPrefabHalfExtent))
+        .Set("streamedPrefabRadius", JsonValue(streamedPrefabRadius))
         .Set("colliderActivationDistance", JsonValue(colliderActivationDistance))
         .Set("cpuBudgetMiB", JsonValue(cpuBudgetMiB))
         .Set("gpuBudgetMiB", JsonValue(gpuBudgetMiB))
@@ -2273,6 +2375,12 @@ TerrainManager::JsonValue TerrainManager::Serialize() const
 
 void TerrainManager::Deserialize(const JsonValue& value)
 {
+    for (auto& [cell, object] : m_streamedPrefabCells)
+        if (Owner && Owner->GetScene()) Owner->GetScene()->RemoveObject(object);
+    m_streamedPrefabCells.clear();
+    for (auto* object : m_streamedPrefabPool)
+        if (Owner && Owner->GetScene()) Owner->GetScene()->RemoveObject(object);
+    m_streamedPrefabPool.clear();
     InvalidatePrepared();
     m_runtimeBakeActive = false;
     m_bakeIndex.clear();
@@ -2338,6 +2446,16 @@ void TerrainManager::Deserialize(const JsonValue& value)
         value["streamCollidersByDistance"].AsBool();
     manageAuthoredCellColliders = value.Has("manageAuthoredCellColliders") &&
         value["manageAuthoredCellColliders"].AsBool();
+    streamedPrefabPath = value.Has("streamedPrefabPath")
+        ? value["streamedPrefabPath"].AsString() : std::string{};
+    reuseStreamedPrefabCells = value.Has("reuseStreamedPrefabCells") &&
+        value["reuseStreamedPrefabCells"].AsBool();
+    streamedPrefabCellName = value.Has("streamedPrefabCellName")
+        ? value["streamedPrefabCellName"].AsString() : "Terrain Cell";
+    streamedPrefabHalfExtent = value.Has("streamedPrefabHalfExtent")
+        ? std::clamp(value["streamedPrefabHalfExtent"].AsInt(), 0, 128) : 0;
+    streamedPrefabRadius = value.Has("streamedPrefabRadius")
+        ? std::clamp(value["streamedPrefabRadius"].AsInt(), 0, 8) : 1;
     colliderActivationDistance = value.Has("colliderActivationDistance")
         ? std::clamp(value["colliderActivationDistance"].AsFloat(), 0.f, 100.f) : 1.f;
     m_authoredCollisionRevision = 0;
@@ -2498,6 +2616,14 @@ bool TerrainManager::DrawProperties(::Engine::Editor::IEditorUi& ui)
     changed |= ui.Checkbox("Enable only near terrain colliders",
         &streamCollidersByDistance);
     changed |= ui.Checkbox("Manage authored cell colliders", &manageAuthoredCellColliders);
+    if (!streamedPrefabPath.empty())
+    {
+        ui.ValueLabel("Streamed cell prefab", streamedPrefabPath.c_str());
+        changed |= ui.Checkbox("Reuse streamed prefab cells", &reuseStreamedPrefabCells);
+        changed |= ui.SliderInt("Streamed grid half extent", &streamedPrefabHalfExtent, 0, 128);
+        changed |= ui.SliderInt("Streamed prefab radius", &streamedPrefabRadius, 0, 8);
+        ui.ValueLabel("Loaded prefab cells", std::to_string(m_streamedPrefabCells.size()).c_str());
+    }
     changed |= ui.DragFloat("Collider edge distance (m)", &colliderActivationDistance, .05f, 0.f, 100.f);
     ui.ValueLabel("Active terrain collider cells", std::to_string(m_activeColliderCells).c_str());
     changed |= ui.SliderInt("CPU terrain budget MiB", &cpuBudgetMiB, 1, 16384);

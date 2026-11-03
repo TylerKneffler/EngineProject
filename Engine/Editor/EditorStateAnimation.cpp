@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "EditorState.h"
+#include "Engine/Editor/Diagnostics/FrameActivity.h"
 #include "Core/AnimationClipEditing.h"
 #include "Core/AnimationClipMapping.h"
 #include "Core/AnimationRigSelection.h"
@@ -2253,6 +2254,7 @@ bool EditorState::AddAnimationLimbKey(AnimationDocument& document,
 
 bool EditorState::BakeAnimationLimbs(AnimationDocument& document)
 {
+    FrameActivity::Mark(FrameActivity::Bake);
     if (!document.sourceManager || !document.poseSkeleton ||
         document.clipIndex < 0 || document.clipIndex >=
             static_cast<int>(document.sourceManager->clips.size())) return false;

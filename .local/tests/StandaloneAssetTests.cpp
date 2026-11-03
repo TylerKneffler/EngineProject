@@ -6,10 +6,18 @@
 #include "Core/Compoonents/Animation/Skeleton.h"
 #include "Core/Compoonents/Animation/AnimationManager.h"
 #include "Core/Scene/Scene.h"
+#include "Core/Compoonents/Lighting/Light.h"
+#include "Core/Compoonents/Lighting/LightProbe.h"
+#include "Core/Compoonents/Obj/Mesh.h"
+#include "Core/Compoonents/Materials/Material.h"
+#include "Core/Rendering/Lighting/BakedLightingData.h"
+#include "Core/Threading/JobScheduler.h"
 #include "Core/Object.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include "Engine/Editor/Core/Importers/AssetDataExtractor.h"
 #include "Engine/Editor/Core/Importers/ModelImporter.h"
+#include "Engine/Editor/Core/Importers/AssetJobControl.h"
+#include "Engine/Editor/Core/Importers/PortableAssetCopy.h"
 #include "Engine/Editor/Core/Importers/MmdDanceAssetBinder.h"
 #include "InspectorTestUi.h"
 #include <chrono>
@@ -31,7 +39,7 @@ public:
     }
 };
 
-int main()
+int main(int argc, char** argv)
 {
     namespace fs = std::filesystem;
     using namespace Engine;
@@ -40,6 +48,155 @@ int main()
     fs::create_directories(output);
     try
     {
+        Scene::Scene authoredBake;
+        auto* bakedLight = authoredBake.AddObject("Bake test light")
+            ->AddComponent<Components::Light>();
+        bakedLight->baked = true;
+        authoredBake.AddObject("Bake test probe")
+            ->AddComponent<Components::LightProbe>();
+        std::vector<Components::Mesh::Vertex> bakeVertices(3);
+        const float positions[3][3] = {
+            { -1.f, 0.f, -1.f }, { 1.f, 0.f, -1.f }, { 0.f, 0.f, 1.f } };
+        const float uvs[3][2] = {
+            { 0.f, 0.f }, { 1.f, 0.f }, { 0.5f, 1.f } };
+        for (size_t index = 0; index < 3; ++index)
+        {
+            for (size_t axis = 0; axis < 3; ++axis)
+            {
+                bakeVertices[index].pos[axis] = positions[index][axis];
+                bakeVertices[index].normal[axis] = axis == 1 ? 1.f : 0.f;
+            }
+            for (size_t axis = 0; axis < 2; ++axis)
+                bakeVertices[index].uv[axis] = uvs[index][axis];
+        }
+        const fs::path bakeMeshPath = output / "bake_test_triangle.mesh";
+        CHECK(Components::Mesh::SaveNativeFile(bakeMeshPath.string(),
+            bakeVertices));
+        auto* receiver = authoredBake.AddObject("Bake test receiver");
+        receiver->AddComponent<Components::Mesh>()->LoadFromFile(
+            bakeMeshPath.string());
+        receiver->AddComponent<Components::Material>();
+        auto bakeDocument = Serialization::SceneSerializer::
+            CaptureSceneDocument(authoredBake);
+        auto bakeFuture = Threading::JobScheduler::Get().Submit(
+            [bakeDocument = std::move(bakeDocument), output]() {
+                Scene::Scene prepared;
+                CHECK(Serialization::SceneSerializer::LoadFromValue(
+                    prepared, bakeDocument, nullptr));
+                float progress = 0.f;
+                Model::BakedLightingSettings settings;
+                settings.lightmapResolution = 32;
+                const auto result = prepared.BakeLighting(output.string(),
+                    "BackgroundBakeTest", settings,
+                    [&](float value) { progress = value; });
+                CHECK(result.succeeded && result.receiverCount == 1 &&
+                    progress == 1.f);
+                bool probeValid = false;
+                bool materialValid = false;
+                for (const auto& object : prepared.GetObjects())
+                {
+                    if (const auto* probe = object->GetComponent<
+                            Components::LightProbe>())
+                        probeValid = probe->valid;
+                    if (const auto* data = object->GetComponent<
+                            Rendering::BakedLightingData>())
+                        materialValid = data->valid &&
+                            fs::is_regular_file(data->bakedLightmapAsset) &&
+                            fs::is_regular_file(data->bakedMaterialAsset);
+                }
+                CHECK(probeValid && materialValid);
+                const auto cancelled = prepared.BakeLighting(output.string(),
+                    "CancelledBakeTest", settings, {}, [] { return true; });
+                CHECK(!cancelled.succeeded);
+            });
+        bakeFuture.get();
+        if (argc > 1 && std::string(argv[1]) == "--copy-job-only")
+        {
+            const fs::path source = output / "source";
+            const fs::path destination = output / "destination";
+            fs::create_directories(source);
+            fs::create_directories(destination);
+            { std::ofstream(source / "model.obj") <<
+                "mtllib surface.mtl\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n"; }
+            { std::ofstream(source / "surface.mtl") <<
+                "newmtl Surface\nmap_Kd color.png\n"; }
+            { std::ofstream(source / "color.png", std::ios::binary) <<
+                "test image bytes"; }
+            auto control = std::make_shared<Editor::AssetJobControl>();
+            auto copyFuture = Threading::JobScheduler::Get().Submit(
+                [source, destination, control] {
+                    Editor::AssetJobScope scope(control.get());
+                    Editor::CopyPortableAsset(source / "model.obj",
+                        destination / "model.obj");
+                });
+            copyFuture.get();
+            const fs::path dependency = destination / "model_dependencies";
+            CHECK(fs::is_regular_file(destination / "model.obj") &&
+                fs::is_regular_file(dependency / "surface.mtl") &&
+                fs::is_regular_file(dependency / "color.png"));
+            std::ifstream remapped(destination / "model.obj");
+            const std::string text((std::istreambuf_iterator<char>(remapped)), {});
+            CHECK(text.find("model_dependencies/surface.mtl") !=
+                std::string::npos);
+            control->cancelled.store(true);
+            auto cancelledFuture = Threading::JobScheduler::Get().Submit(
+                [source, destination, control] {
+                    Editor::AssetJobScope scope(control.get());
+                    Editor::CopyPortableAsset(source / "model.obj",
+                        destination / "cancelled.obj");
+                });
+            bool cancelled = false;
+            try { cancelledFuture.get(); }
+            catch (const std::runtime_error&) { cancelled = true; }
+            CHECK(cancelled && !fs::exists(destination / "cancelled.obj"));
+            std::cout << "Background portable copy, remapping, and cancellation passed\n";
+            return 0;
+        }
+        if (argc > 1 && std::string(argv[1]) == "--import-jobs-only")
+        {
+            auto control = std::make_shared<Editor::AssetJobControl>();
+            auto modelFuture = Threading::JobScheduler::Get().Submit(
+                [output, control] {
+                    Editor::AssetJobScope scope(control.get());
+                    return Editor::ModelImporter::Import(
+                        "Engine/Core/Assets/Models/Gltf/Fox.glb",
+                        output.string());
+                });
+            const auto model = modelFuture.get();
+            CHECK(model.success && fs::is_regular_file(model.prefabPath) &&
+                control->progress.load() >= 0.97f);
+            auto motionFuture = Threading::JobScheduler::Get().Submit(
+                [output] {
+                    Editor::AssetJobControl motionControl;
+                    Editor::AssetJobScope scope(&motionControl);
+                    return Editor::ModelImporter::Import(
+                        "Engine/Core/Assets/Models/mmd/dance1.vmd",
+                        output.string());
+                });
+            const auto motion = motionFuture.get();
+            CHECK(motion.success && fs::is_regular_file(
+                motion.primaryAssetPath));
+            control->cancelled.store(true);
+            auto cancelledFuture = Threading::JobScheduler::Get().Submit(
+                [output, control] {
+                    Editor::AssetJobScope scope(control.get());
+                    return Editor::ModelImporter::Import(
+                        "Engine/Core/Assets/Models/Gltf/Fox.glb",
+                        output.string());
+                });
+            bool cancelled = false;
+            try { cancelledFuture.get(); }
+            catch (const std::runtime_error&) { cancelled = true; }
+            CHECK(cancelled);
+            std::cout << "Background model/motion import and cancellation passed\n";
+            return 0;
+        }
+        if (argc > 1 && std::string(argv[1]) == "--bake-only")
+        {
+            std::cout << "Background scene snapshot and cancellable lighting bake passed\n";
+            return 0;
+        }
+
         Model::RigAsset rig;
         rig.joints.push_back({ 0, "Hip", -1, glm::mat4(1.f) });
         rig.bindNodes.push_back({ "Hip", "", { 0.f, 1.f, 0.f }, {}, { 1.f, 1.f, 1.f } });

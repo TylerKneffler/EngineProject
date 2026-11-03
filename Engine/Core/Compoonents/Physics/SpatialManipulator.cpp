@@ -138,6 +138,12 @@ glm::mat4 SpatialManipulator::GetOverlayMatrix() const
         BuildWarpVolumeDefinition(*this));
 }
 
+Engine::Scene::Spatial::WarpVolumeDefinition
+SpatialManipulator::GetWarpVolumeDefinition() const
+{
+    return BuildWarpVolumeDefinition(*this);
+}
+
 bool SpatialManipulator::ContainsWorldPoint(const glm::vec3& worldPoint) const
 {
     return Owner && Engine::Scene::Spatial::WarpVolume::Contains(

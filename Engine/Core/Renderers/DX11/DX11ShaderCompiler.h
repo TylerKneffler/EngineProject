@@ -36,6 +36,8 @@ public:
         CompileProfile profile) override;
 
     std::string GetLastError() const override { return m_lastError; }
+    std::unique_ptr<Engine::Graphics::IShaderCompiler> CreateWorkerCompiler() const override
+    { return std::make_unique<D3D11ShaderCompiler>(); }
 
 private:
     std::string m_lastError;

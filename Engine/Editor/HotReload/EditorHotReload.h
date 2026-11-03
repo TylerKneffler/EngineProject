@@ -5,6 +5,7 @@
 #include "Engine/Editor/Core/View/Views/ConsoleView.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Threading/ScriptModuleJobs.h"
+#include <future>
 
 namespace Engine::Editor
 {
@@ -19,9 +20,11 @@ public:
     ~EditorHotReload();
 
     void Update(bool editorFocused);
+    bool PublishPending();
     bool IsBusy() const
     {
-        return m_process != nullptr || m_applying ||
+        return m_process != nullptr || m_staging.valid() ||
+            !m_stagedModule.empty() || m_applying ||
             (m_dirty && m_waitingForBuildTree);
     }
     std::function<void()> BeforeApply;
@@ -35,7 +38,8 @@ private:
     void StartCompile();
     void DrainOutput();
     void PollCompile();
-    bool ApplyModule();
+    void PollStaging();
+    bool ApplyModule(const std::filesystem::path& candidatePath);
     bool LoadModule(const std::filesystem::path& path, HMODULE& module,
         std::vector<std::string>& types, CreateScript& createFunction,
         SetJobHost& setJobHost, Engine::Threading::IScriptModuleJobs* jobs);
@@ -57,6 +61,13 @@ private:
     CreateScript m_createScript = nullptr;
     SetJobHost m_setJobHost = nullptr;
     std::unique_ptr<Engine::Threading::ScriptModuleJobs> m_moduleJobs;
+    struct StagedModule
+    {
+        std::filesystem::path path;
+        std::string symbolsError;
+    };
+    std::future<StagedModule> m_staging;
+    std::filesystem::path m_stagedModule;
     uint64_t m_generation = 0;
     bool m_dirty = false;
     bool m_applying = false;

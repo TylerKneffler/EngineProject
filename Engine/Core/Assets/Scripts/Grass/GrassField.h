@@ -64,12 +64,16 @@ public:
     float tileWorkBudgetMs = 2.f;
     PROPERTY(Inspector, EditAnywhere, Category = "Grass | Lighting")
     bool castShadows = false;
+    PROPERTY(Inspector, EditAnywhere, Category = "Grass | Lighting")
+    std::string shaderPath = "Assets/Shaders/Foliage.hlsl";
     PROPERTY(Inspector, EditAnywhere, Category = "Grass | LOD", ClampMin = "0")
     float fadeDuration = .35f;
     PROPERTY(Inspector, EditAnywhere, Category = "Grass | LOD")
     bool gpuLodSelection = true;
     PROPERTY(Inspector, EditAnywhere, Category = "Grass | Tiles")
     bool allowProceduralGeneration = false;
+    PROPERTY(Inspector, EditAnywhere, Category = "Grass | Tiles")
+    bool retainDormantTiles = false;
     PROPERTY(Inspector, EditAnywhere, Category = "Grass | LOD", ClampMin = "0")
     float distanceFadeWidth = 2.f;
 
@@ -79,7 +83,7 @@ public:
     uint64_t SpatialRegionRevision() const override;
     Engine::Components::SpatialUpdateRegion DescribeSpatialRegion() override;
     bool TickSpatialRegion(bool editor) override { return editor ? RefreshEditorPreview():Refresh(); }
-    void LeaveSpatialRegion() override { ClearTiles(); m_performance={}; }
+    void LeaveSpatialRegion() override;
     void OnDestroy() override;
     bool RefreshEditorPreview();
     const Engine::Rendering::GrassPerformance& GetLastPerformance() const
@@ -146,6 +150,7 @@ private:
     bool ResolveCachedReferences();
     bool EnsureAuthoredPreviewHidden();
     void ClearTiles();
+    void SuspendTiles();
     void RefreshPlacementIndex();
     void BeginBuild(Tile tile, int lod, uint64_t signature);
     bool AdvanceBuild(Clock::time_point deadline);

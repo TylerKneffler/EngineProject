@@ -1,4 +1,5 @@
 #include "ModelImporter.h"
+#include "AssetJobControl.h"
 
 #include "FbxModelDecoder.h"
 #include "GltfImporter.h"
@@ -183,6 +184,7 @@ Engine::Model::ModelImportResult ModelImporter::Import(const std::string& source
     const std::string& assetsDirectory, float pmxUnitScaleToMeters,
     PmxImportOptions pmxOptions)
 {
+    AssetJobCheckpoint(0.02f);
     const std::string extension = LowerExtension(sourcePath);
     if (extension == ".vmd")
         return VmdSceneImporter::Import(sourcePath, assetsDirectory);
@@ -196,6 +198,7 @@ Engine::Model::ModelImportResult ModelImporter::Import(const std::string& source
         std::string error;
         if (!FbxModelDecoder::Decode(sourcePath, model, error))
             return { false, {}, {}, {}, error.empty() ? "Could not decode FBX" : error };
+        AssetJobCheckpoint(0.5f);
         return ModelAssetWriter::Write(model, sourcePath, assetsDirectory);
     }
     if (extension == ".pmx")
@@ -213,6 +216,7 @@ Engine::Model::ModelImportResult ModelImporter::Import(const std::string& source
         PmxImportReport report;
         if (!PmxModelDecoder::Decode(sourcePath, model, error, &report, pmxOptions))
             return { false, {}, {}, {}, error.empty() ? "Could not decode PMX" : error };
+        AssetJobCheckpoint(0.5f);
         ApplyPmxPhysicsQuality(model, pmxOptions, report);
         model.unitScaleToMeters = pmxUnitScaleToMeters;
         auto result = ModelAssetWriter::Write(model, sourcePath, assetsDirectory,

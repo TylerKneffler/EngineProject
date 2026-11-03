@@ -1,5 +1,7 @@
 #include "Core/Scene/Scene.h"
 #include "Core/Serialization/SceneSerializer.h"
+#include "Core/Serialization/Json.h"
+#include "Core/Rendering/RenderJobs.h"
 #include <stdexcept>
 
 namespace Engine::Scene
@@ -13,34 +15,15 @@ bool Scene::Save(const std::string& path) const
 bool Scene::Load(const std::string& path)
 {
     AssertOwnerThread();
-    if (!m_graphicsProvider)
-        return false;
-    // Deserializers clear the graph before constructing objects. Keep a
-    // restorable owner-side document until the replacement has fully loaded.
-    const std::string previous = SaveSnapshotToString();
-    const bool wasStarted = HasStarted();
-    const uint64_t previousRevision = GetStructureRevision();
-    m_suppressSceneSnapshotPublication = true;
-    struct PublicationGuard
+    Engine::Serialization::JsonValue document;
+    try
     {
-        bool& suppressed;
-        ~PublicationGuard() { suppressed = false; }
-    } publication{m_suppressSceneSnapshotPublication};
-    if (Engine::Serialization::SceneSerializer::Load(*this, path, m_graphicsProvider))
-    {
-        m_suppressSceneSnapshotPublication = false;
-        CommitPendingObjectChanges();
-        return true;
+        document = Engine::Rendering::RenderJobs::Get().Submit([path] {
+            return Engine::Serialization::SceneSerializer::ReadSceneFile(path);
+        }).get();
     }
-    if (GetStructureRevision() == previousRevision)
-        return false;
-    if (!Engine::Serialization::SceneSerializer::LoadFromString(
-            *this, previous, m_graphicsProvider))
-        throw std::runtime_error("Failed to restore the scene after a failed load");
-    if (wasStarted) Start();
-    m_suppressSceneSnapshotPublication = false;
-    CommitPendingObjectChanges();
-    return false;
+    catch (const std::exception&) { return false; }
+    return LoadFromValue(document);
 }
 
 std::string Scene::SaveToString() const
@@ -56,32 +39,51 @@ std::string Scene::SaveSnapshotToString() const
 bool Scene::LoadFromString(const std::string& source)
 {
     AssertOwnerThread();
-    if (!m_graphicsProvider)
+    Engine::Serialization::JsonValue document;
+    try
+    {
+        document = Engine::Rendering::RenderJobs::Get().Submit([source] {
+            return Engine::Serialization::SceneSerializer::ParseSceneText(source);
+        }).get();
+    }
+    catch (const std::exception&) { return false; }
+    return LoadFromValue(document);
+}
+
+bool Scene::RestoreTrustedSnapshot(const Engine::Serialization::JsonValue& snapshot)
+{
+    AssertOwnerThread();
+    if (!m_graphicsProvider || !snapshot.IsObject() ||
+        snapshot["version"].AsInt() != 1)
         return false;
-    const std::string previous = SaveSnapshotToString();
-    const bool wasStarted = HasStarted();
-    const uint64_t previousRevision = GetStructureRevision();
     m_suppressSceneSnapshotPublication = true;
     struct PublicationGuard
     {
         bool& suppressed;
         ~PublicationGuard() { suppressed = false; }
     } publication{m_suppressSceneSnapshotPublication};
-    if (Engine::Serialization::SceneSerializer::LoadFromString(
-            *this, source, m_graphicsProvider))
-    {
-        m_suppressSceneSnapshotPublication = false;
-        CommitPendingObjectChanges();
-        return true;
-    }
-    if (GetStructureRevision() == previousRevision)
+    if (!Engine::Serialization::SceneSerializer::LoadFromValue(
+            *this, snapshot, m_graphicsProvider))
         return false;
-    if (!Engine::Serialization::SceneSerializer::LoadFromString(
-            *this, previous, m_graphicsProvider))
-        throw std::runtime_error("Failed to restore the scene after a failed load");
-    if (wasStarted) Start();
     m_suppressSceneSnapshotPublication = false;
     CommitPendingObjectChanges();
+    return true;
+}
+
+bool Scene::LoadFromValue(const Engine::Serialization::JsonValue& document)
+{
+    AssertOwnerThread();
+    if (!m_graphicsProvider || !document.IsObject() ||
+        document["version"].AsInt() != 1)
+        return false;
+    const auto previous = Engine::Serialization::SceneSerializer::CaptureSceneDocument(*this);
+    const bool wasStarted = HasStarted();
+    const uint64_t previousRevision = GetStructureRevision();
+    if (RestoreTrustedSnapshot(document)) return true;
+    if (GetStructureRevision() == previousRevision) return false;
+    if (!RestoreTrustedSnapshot(previous))
+        throw std::runtime_error("Failed to restore the scene after a failed load");
+    if (wasStarted) Start();
     return false;
 }
 

@@ -764,9 +764,30 @@ void ParticleEmitter::ResolveCollisions(const glm::mat4& emitterWorld,
     const auto& physics = Owner->GetScene()->GetPhysics();
     const bool fluidCoupling = fluidEnabled &&
         fluidCouplingMode != static_cast<int>(FluidCouplingMode::Off);
-    for (size_t index = 0; index < m_particles.size(); ++index)
+    struct MovingBody { RigidBody* body; glm::vec3 travel; };
+    std::vector<MovingBody> movingBodies;
+    if (fluidCoupling)
+        for (const auto& object : Owner->GetScene()->GetObjects())
+        {
+            if (!object || object.get() == Owner ||
+                !object->IsEnabledInHierarchy()) continue;
+            auto* body = object->GetComponent<RigidBody>();
+            if (body && !body->isTrigger && body->bodyType != "Static")
+                movingBodies.push_back({ body,
+                    body->GetLinearVelocity() * seconds });
+        }
+    constexpr size_t CollisionBatchParticles = 256;
+    for (size_t first = 0; first < m_particles.size();
+        first += CollisionBatchParticles)
     {
-        Particle& particle = m_particles[index];
+    const size_t last = std::min(first + CollisionBatchParticles, m_particles.size());
+    std::vector<Engine::Physics::Physics::SphereSweepRequest> requests;
+    std::vector<RigidBody*> requestBodyFilter;
+    std::vector<size_t> requestOffsets(last - first + 1u);
+    for (size_t index = first; index < last; ++index)
+    {
+        requestOffsets[index - first] = requests.size();
+        const Particle& particle = m_particles[index];
         if (!particle.active || particle.age >= particle.lifetime) continue;
         const glm::vec3 start = worldSpace ? m_previousPositions[index] :
             glm::vec3(emitterWorld * glm::vec4(m_previousPositions[index], 1.f));
@@ -775,36 +796,47 @@ void ParticleEmitter::ResolveCollisions(const glm::mat4& emitterWorld,
         const glm::vec3 travel = end - start;
         const float distance = glm::length(travel);
         if (!std::isfinite(distance)) continue;
+        const float radius = std::max(0.01f, particle.size);
+        if (distance > 1e-6f)
+        {
+            requests.push_back({ start, travel / distance, distance, radius,
+                static_cast<uint32_t>(fluidCoupling ? fluidCollisionMask : collisionMask) });
+            requestBodyFilter.push_back(nullptr);
+        }
+        if (fluidCoupling)
+            for (const MovingBody& moving : movingBodies)
+            {
+                const glm::vec3 relativeTravel = travel - moving.travel;
+                const float relativeDistance = glm::length(relativeTravel);
+                if (!std::isfinite(relativeDistance) ||
+                    relativeDistance <= 1e-6f) continue;
+                requests.push_back({ start, relativeTravel / relativeDistance,
+                    relativeDistance, radius,
+                    static_cast<uint32_t>(fluidCollisionMask) });
+                requestBodyFilter.push_back(moving.body);
+            }
+    }
+    requestOffsets.back() = requests.size();
+    const auto results = physics.SweepSphereBatch(requests);
+    for (size_t index = first; index < last; ++index)
+    {
+        Particle& particle = m_particles[index];
+        if (!particle.active || particle.age >= particle.lifetime) continue;
         // A point ray can miss a grazing wall and then begin the next step
         // inside it. Sweep the visible particle radius instead.
         const float collisionRadius = std::max(0.01f, particle.size);
         std::vector<Engine::Physics::Physics::RaycastHit> hits;
-        if (distance > 1e-6f)
-            hits = physics.SweepSphereAll(start, travel / distance,
-                distance, collisionRadius, static_cast<uint32_t>(
-                    fluidCoupling ? fluidCollisionMask : collisionMask));
-        if (fluidCoupling)
+        for (size_t request = requestOffsets[index - first];
+            request < requestOffsets[index - first + 1u]; ++request)
         {
-            // A stationary particle can still be hit by a moving boundary.
-            // Sweep its relative path against the body's current collider.
-            for (const auto& object : Owner->GetScene()->GetObjects())
+            if (!requestBodyFilter[request])
+                hits.insert(hits.end(), results[request].begin(),
+                    results[request].end());
+            else
             {
-                if (!object || object.get() == Owner ||
-                    !object->IsEnabledInHierarchy()) continue;
-                auto* body = object->GetComponent<RigidBody>();
-                if (!body || body->isTrigger || body->bodyType == "Static")
-                    continue;
-                const glm::vec3 bodyTravel = body->GetLinearVelocity() * seconds;
-                const glm::vec3 relativeTravel = travel - bodyTravel;
-                const float relativeDistance = glm::length(relativeTravel);
-                if (!std::isfinite(relativeDistance) ||
-                    relativeDistance <= 1e-6f) continue;
-                const auto movingHits = physics.SweepSphereAll(start,
-                    relativeTravel / relativeDistance, relativeDistance,
-                    collisionRadius,
-                    static_cast<uint32_t>(fluidCollisionMask));
-                for (const auto& hit : movingHits)
-                    if (hit.rigidBody == body)
+                // A stationary particle can be hit by a moving boundary.
+                for (const auto& hit : results[request])
+                    if (hit.rigidBody == requestBodyFilter[request])
                     {
                         hits.push_back(hit);
                         break;
@@ -858,6 +890,7 @@ void ParticleEmitter::ResolveCollisions(const glm::mat4& emitterWorld,
                 ++m_droppedCollisionHits;
             break;
         }
+    }
     }
 }
 

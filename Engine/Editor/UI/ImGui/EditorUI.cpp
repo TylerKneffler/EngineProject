@@ -28,10 +28,13 @@ void EditorUI::Render(PlayState playState)
     {
         ImGui::SetNextWindowSize(ImVec2(500.f, 0.f), ImGuiCond_FirstUseEver);
         bool open = true;
-        if (ImGui::Begin("Import Asset", &open, ImGuiWindowFlags_NoCollapse))
+        if (ImGui::Begin("Import Asset",
+                m_state->IsImportJobRunning() ? nullptr : &open,
+                ImGuiWindowFlags_NoCollapse))
         {
             ImGui::TextWrapped("Source: %s", m_state->GetPendingImportAssetPath().c_str());
             ImGui::Separator();
+            ImGui::BeginDisabled(m_state->IsImportJobRunning());
             bool intoScene = m_state->IsPendingImportIntoScene();
             bool asPrefab = m_state->IsPendingImportAsPrefab();
             if (ImGui::RadioButton("Import to Assets directory", !intoScene && !asPrefab))
@@ -130,17 +133,52 @@ void EditorUI::Render(PlayState playState)
             }
             if (!m_state->GetPendingImportError().empty())
                 ImGui::TextWrapped("%s", m_state->GetPendingImportError().c_str());
+            ImGui::EndDisabled();
+            if (m_state->IsImportJobRunning())
+            {
+                ImGui::TextUnformatted("Importing assets...");
+                ImGui::ProgressBar(m_state->GetImportJobProgress(),
+                    ImVec2(-1.f, 0.f));
+            }
             ImGui::Separator();
-            ImGui::BeginDisabled(m_state->IsPickingImportReference());
+            ImGui::BeginDisabled(m_state->IsPickingImportReference() ||
+                m_state->IsImportJobRunning());
             if (ImGui::Button("Confirm Import"))
                 m_state->ConfirmPendingImportAsset();
             ImGui::EndDisabled();
             ImGui::SameLine();
+            ImGui::BeginDisabled(m_state->IsImportJobCommitting());
             if (ImGui::Button("Cancel"))
                 m_state->CancelPendingImportAsset();
+            ImGui::EndDisabled();
         }
         ImGui::End();
         if (!open) m_state->CancelPendingImportAsset();
+    }
+    if (m_state->IsStageImportRunning())
+    {
+        ImGui::SetNextWindowSize(ImVec2(350.f, 0.f), ImGuiCond_FirstUseEver);
+        if (ImGui::Begin("Model Stage Import", nullptr,
+                ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_AlwaysAutoResize))
+        {
+            ImGui::ProgressBar(m_state->GetStageImportProgress(),
+                ImVec2(300.f, 0.f));
+            if (ImGui::Button("Cancel stage import"))
+                m_state->CancelStageImport();
+        }
+        ImGui::End();
+    }
+    if (m_state->IsBakeJobRunning())
+    {
+        ImGui::SetNextWindowSize(ImVec2(350.f, 0.f), ImGuiCond_FirstUseEver);
+        if (ImGui::Begin("Lighting Bake", nullptr,
+                ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_AlwaysAutoResize))
+        {
+            ImGui::ProgressBar(m_state->GetBakeJobProgress(),
+                ImVec2(300.f, 0.f));
+            if (ImGui::Button("Cancel bake")) m_state->CancelBakeJob();
+        }
+        ImGui::End();
     }
     if (m_state->IsLoadingOverlayVisible())
     {

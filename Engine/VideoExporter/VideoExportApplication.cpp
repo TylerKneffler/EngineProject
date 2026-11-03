@@ -19,14 +19,20 @@
 #include "Core/Renderers/DX11/DX11GameRenderer.h"
 #include <algorithm>
 #include <cmath>
+#include <condition_variable>
+#include <deque>
+#include <exception>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <cstdint>
 #include <iostream>
 #include <iomanip>
+#include <mutex>
 #include <set>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 #include <shellapi.h>
 #include <wincodec.h>
@@ -479,6 +485,85 @@ private:
     HANDLE m_writePipe = nullptr;
     HANDLE m_process = nullptr;
     fs::path m_videoOnlyPath;
+};
+
+// The graphics thread owns every D3D readback. This queue only receives CPU
+// copies and processes them on one worker, so files and pipe writes stay ordered.
+class OrderedFrameWriter
+{
+public:
+    struct Frame
+    {
+        uint64_t number = 0;
+        std::vector<uint8_t> bytes;
+        std::vector<float> floats;
+    };
+
+    explicit OrderedFrameWriter(std::function<bool(Frame&)> write)
+        : m_write(std::move(write)), m_worker([this] { Run(); }) {}
+    ~OrderedFrameWriter() { Finish(); }
+
+    bool Submit(Frame&& frame)
+    {
+        std::unique_lock lock(m_mutex);
+        m_space.wait(lock, [this] { return m_failed || m_queue.size() < 2u; });
+        if (m_failed) return false;
+        m_queue.push_back(std::move(frame));
+        m_ready.notify_one();
+        return true;
+    }
+
+    bool Finish()
+    {
+        {
+            std::lock_guard lock(m_mutex);
+            m_closed = true;
+        }
+        m_ready.notify_one();
+        if (m_worker.joinable()) m_worker.join();
+        return !m_failed;
+    }
+
+private:
+    void Run()
+    {
+        for (;;)
+        {
+            Frame frame;
+            {
+                std::unique_lock lock(m_mutex);
+                m_ready.wait(lock, [this] { return m_closed || !m_queue.empty(); });
+                if (m_queue.empty()) return;
+                frame = std::move(m_queue.front());
+                m_queue.pop_front();
+                m_space.notify_one();
+            }
+            bool saved = false;
+            try { saved = m_write(frame); }
+            catch (const std::exception& error)
+            {
+                std::cerr << "Frame " << frame.number << " output failed: "
+                    << error.what() << '\n';
+            }
+            if (!saved)
+            {
+                std::lock_guard lock(m_mutex);
+                m_failed = true;
+                m_queue.clear();
+                m_space.notify_all();
+                return;
+            }
+        }
+    }
+
+    std::function<bool(Frame&)> m_write;
+    std::mutex m_mutex;
+    std::condition_variable m_ready;
+    std::condition_variable m_space;
+    std::deque<Frame> m_queue;
+    std::thread m_worker;
+    bool m_closed = false;
+    bool m_failed = false;
 };
 
 bool MuxOfflineAudio(const ExportOptions& options, const fs::path& videoPath,
@@ -1177,14 +1262,48 @@ int VideoExportApplication::Run(HINSTANCE instance)
     bool sawCameraTrack = false;
     bool success = true;
     uint64_t framesWritten = 0;
-    std::vector<uint8_t> pixels;
+    std::set<uint64_t> writerCompletedFrames = completedFrames;
+    OrderedFrameWriter outputWriter([&](OrderedFrameWriter::Frame& output)
+    {
+        bool saved = false;
+        if (!imageSequence)
+            saved = encoder.Write(output.bytes);
+        else
+        {
+            const fs::path framePath = options.output / FrameName(output.number,
+                options.format == "png" ? L"png" : L"exr");
+            saved = options.format == "png"
+                ? SavePng(framePath, options.width, options.height, output.bytes)
+                : SaveExr(framePath, options.width, options.height,
+                    options.hdrBits, output.floats);
+            if (saved)
+            {
+                writerCompletedFrames.insert(output.number);
+                saved = WriteManifest(manifestPath, compatibility, options.format,
+                    options.width, options.height, options.frameRate.ToString(),
+                    selectedFrameStart, selectedFrameEnd, compatibilitySettings,
+                    writerCompletedFrames, "rendering");
+            }
+        }
+        if (!saved)
+            std::cerr << "Could not save or encode output for frame "
+                << output.number << ".\n";
+        else
+            ++framesWritten;
+        return saved;
+    });
+    std::deque<uint64_t> pendingReadbacks;
     const auto consumeReadback = [&](bool wait)
     {
-        if (!renderer.ReadExportFrameRGBA(pixels, wait))
-            return !wait;
-        if (!encoder.Write(pixels))
-            return false;
-        ++framesWritten;
+        if (pendingReadbacks.empty()) return true;
+        OrderedFrameWriter::Frame output;
+        const bool ready = imageSequence && options.format == "exr"
+            ? renderer.ReadExportFrameFloatRGBA(output.floats, wait)
+            : renderer.ReadExportFrameRGBA(output.bytes, wait);
+        if (!ready) return !wait;
+        output.number = pendingReadbacks.front();
+        pendingReadbacks.pop_front();
+        if (!outputWriter.Submit(std::move(output))) return false;
         return true;
     };
     const uint64_t simulationFrameLimit = imageSequence && !cacheEnabled
@@ -1268,42 +1387,16 @@ int VideoExportApplication::Run(HINSTANCE instance)
         camera = scene.FindGameCamera();
         if (selected && !alreadyComplete)
         {
-            bool saved = false;
-            const fs::path framePath = options.output / FrameName(frame,
-                options.format == "png" ? L"png" : L"exr");
-            if (imageSequence && options.format == "png")
+            pendingReadbacks.push_back(frame);
+            if (!consumeReadback(false) ||
+                (renderer.GetPendingExportFrameCount() >=
+                    renderer.GetExportReadbackCapacity() &&
+                    !consumeReadback(true)))
             {
-                if (renderer.ReadExportFrameRGBA(pixels, true))
-                    saved = SavePng(framePath, options.width, options.height, pixels);
-            }
-            else if (imageSequence)
-            {
-                std::vector<float> linearPixels;
-                if (renderer.ReadExportFrameFloatRGBA(linearPixels, true))
-                    saved = SaveExr(framePath, options.width, options.height,
-                        options.hdrBits, linearPixels);
-            }
-            else
-            {
-                saved = consumeReadback(false) &&
-                    (renderer.GetPendingExportFrameCount() <
-                        renderer.GetExportReadbackCapacity() || consumeReadback(true));
-            }
-            if (!saved)
-            {
-                std::cerr << "Could not save or encode output for frame " << frame << ".\n";
+                std::cerr << "Could not read or queue output for frame "
+                    << frame << ".\n";
                 success = false;
                 break;
-            }
-            if (imageSequence)
-            {
-                completedFrames.insert(frame);
-                ++framesWritten;
-                success = WriteManifest(manifestPath, compatibility, options.format,
-                    options.width, options.height, options.frameRate.ToString(), selectedFrameStart,
-                    selectedFrameEnd, compatibilitySettings, completedFrames,
-                    "rendering");
-                if (!success) break;
             }
         }
 
@@ -1319,7 +1412,7 @@ int VideoExportApplication::Run(HINSTANCE instance)
         std::cerr << "Simulation bake did not complete all expected samples.\n";
         success = false;
     }
-    while (success && renderer.GetPendingExportFrameCount() > 0u)
+    while (success && !pendingReadbacks.empty())
     {
         if (!consumeReadback(true))
         {
@@ -1328,6 +1421,8 @@ int VideoExportApplication::Run(HINSTANCE instance)
         }
     }
     renderer.WaitIdle();
+    success = outputWriter.Finish() && success;
+    completedFrames = std::move(writerCompletedFrames);
     success = encoder.Finish(true) && success;
     if (success && !imageSequence && simulationCache.IsReplaying())
     {

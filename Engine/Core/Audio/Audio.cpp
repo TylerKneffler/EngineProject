@@ -1,4 +1,5 @@
 #include "Core/Audio/Audio.h"
+#include "Core/Audio/AudioMixer.h"
 
 #include "Core/Compoonents/Audio/AudioSource.h"
 #include "Core/Object.h"
@@ -34,6 +35,7 @@ void Audio::Update(float)
     // otherwise every source follows the same active scene camera.
     if (Engine::Components::AudioSource* source = assigned ? assigned : fallback)
         source->UpdateListener();
+    AudioMixer::Get().DrainCommands();
 }
 
 void Audio::Reset()

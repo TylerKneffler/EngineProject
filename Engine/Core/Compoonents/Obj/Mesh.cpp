@@ -1,5 +1,6 @@
 #include "Mesh.h"
 #include "Core/Rendering/SharedMeshBuffers.h"
+#include "Core/Threading/JobScheduler.h"
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Model/MeshPackAsset.h"
@@ -2030,14 +2031,40 @@ std::vector<Mesh::Vertex> Mesh::BuildPosedVertices(
     const std::vector<glm::mat4>* skinPalette,
     bool includeSurfaceOffsets) const
 {
-    std::vector<Vertex> deformed = m_vertices;
-    for (size_t targetIndex = 0; targetIndex < m_morphTargets.size() &&
-        targetIndex < m_morphWeights.size(); ++targetIndex)
+    return BuildPosedVerticesFromData(m_vertices, m_indices, m_morphTargets,
+        m_morphWeights, m_surfaceOffsets, skinPalette, includeSurfaceOffsets);
+}
+
+Mesh::PoseSnapshot Mesh::CapturePoseSnapshot() const
+{
+    return { m_vertices, m_indices, m_morphTargets, m_morphWeights,
+        m_surfaceOffsets };
+}
+
+std::vector<Mesh::Vertex> Mesh::BuildPosedVertices(
+    const PoseSnapshot& snapshot, const std::vector<glm::mat4>* skinPalette,
+    bool includeSurfaceOffsets)
+{
+    return BuildPosedVerticesFromData(snapshot.vertices, snapshot.indices,
+        snapshot.morphTargets, snapshot.morphWeights, snapshot.surfaceOffsets,
+        skinPalette, includeSurfaceOffsets);
+}
+
+std::vector<Mesh::Vertex> Mesh::BuildPosedVerticesFromData(
+    const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices,
+    const std::vector<MorphTarget>& morphTargets,
+    const std::vector<float>& morphWeights,
+    const std::vector<glm::vec3>& surfaceOffsets,
+    const std::vector<glm::mat4>* skinPalette, bool includeSurfaceOffsets)
+{
+    std::vector<Vertex> deformed = vertices;
+    for (size_t targetIndex = 0; targetIndex < morphTargets.size() &&
+        targetIndex < morphWeights.size(); ++targetIndex)
     {
-        const float weight = m_morphWeights[targetIndex];
-        const MorphTarget& target = m_morphTargets[targetIndex];
+        const float weight = morphWeights[targetIndex];
+        const MorphTarget& target = morphTargets[targetIndex];
         if (std::abs(weight) <= 1e-7f) continue;
-        for (size_t index = 0; index < deformed.size(); ++index)
+        Engine::Threading::JobScheduler::Get().For(deformed.size(), 1024, [&](size_t index)
         {
             Vertex& vertex = deformed[index];
             if (index < target.positions.size())
@@ -2076,12 +2103,13 @@ std::vector<Mesh::Vertex> Mesh::BuildPosedVertices(
             vertex.uvChannels[0][1] = vertex.uv[1];
             vertex.uvChannels[1][0] = vertex.uv1[0];
             vertex.uvChannels[1][1] = vertex.uv1[1];
-        }
+        });
     }
     if (skinPalette && !skinPalette->empty())
     {
-        for (Vertex& vertex : deformed)
+        Engine::Threading::JobScheduler::Get().For(deformed.size(), 1024, [&](size_t index)
         {
+            Vertex& vertex = deformed[index];
             const glm::vec3 sourcePosition(vertex.pos[0], vertex.pos[1], vertex.pos[2]);
             const glm::vec3 sourceNormal(vertex.normal[0], vertex.normal[1], vertex.normal[2]);
             const glm::vec3 sourceTangent(vertex.tangent[0], vertex.tangent[1], vertex.tangent[2]);
@@ -2164,7 +2192,7 @@ std::vector<Mesh::Vertex> Mesh::BuildPosedVertices(
                 vertex.normal[2] = normal.z;
                 vertex.tangent[0] = tangent.x; vertex.tangent[1] = tangent.y;
                 vertex.tangent[2] = tangent.z;
-                continue;
+                return;
             }
             glm::mat4 skin(0.f);
             float totalWeight = 0.f;
@@ -2183,7 +2211,7 @@ std::vector<Mesh::Vertex> Mesh::BuildPosedVertices(
                     totalWeight += vertex.weights1[influence];
                 }
             }
-            if (totalWeight <= 1e-7f) continue;
+            if (totalWeight <= 1e-7f) return;
             const glm::vec4 position = skin * glm::vec4(
                 vertex.pos[0], vertex.pos[1], vertex.pos[2], 1.f);
             glm::vec3 normal = glm::mat3(skin) * glm::vec3(
@@ -2198,27 +2226,27 @@ std::vector<Mesh::Vertex> Mesh::BuildPosedVertices(
             vertex.normal[2] = normal.z;
             vertex.tangent[0] = tangent.x; vertex.tangent[1] = tangent.y;
             vertex.tangent[2] = tangent.z;
-        }
+        });
     }
-    if (includeSurfaceOffsets && m_surfaceOffsets.size() == deformed.size())
+    if (includeSurfaceOffsets && surfaceOffsets.size() == deformed.size())
     {
         for (size_t index = 0; index < deformed.size(); ++index)
         {
             const glm::vec3 position(deformed[index].pos[0],
                 deformed[index].pos[1], deformed[index].pos[2]);
-            const glm::vec3 moved = position + m_surfaceOffsets[index];
+            const glm::vec3 moved = position + surfaceOffsets[index];
             deformed[index].pos[0] = moved.x;
             deformed[index].pos[1] = moved.y;
             deformed[index].pos[2] = moved.z;
         }
         std::vector<glm::vec3> accumulated(deformed.size(), glm::vec3(0.f));
-        const size_t triangleCount = m_indices.empty() ? deformed.size() / 3
-            : m_indices.size() / 3;
+        const size_t triangleCount = indices.empty() ? deformed.size() / 3
+            : indices.size() / 3;
         for (size_t triangle = 0; triangle < triangleCount; ++triangle)
         {
-            const size_t a = m_indices.empty() ? triangle * 3 : m_indices[triangle * 3];
-            const size_t b = m_indices.empty() ? triangle * 3 + 1 : m_indices[triangle * 3 + 1];
-            const size_t c = m_indices.empty() ? triangle * 3 + 2 : m_indices[triangle * 3 + 2];
+            const size_t a = indices.empty() ? triangle * 3 : indices[triangle * 3];
+            const size_t b = indices.empty() ? triangle * 3 + 1 : indices[triangle * 3 + 1];
+            const size_t c = indices.empty() ? triangle * 3 + 2 : indices[triangle * 3 + 2];
             if (a >= deformed.size() || b >= deformed.size() || c >= deformed.size()) continue;
             const auto point = [&](size_t i) { return glm::vec3(
                 deformed[i].pos[0], deformed[i].pos[1], deformed[i].pos[2]); };
@@ -2271,6 +2299,7 @@ void Mesh::SetSurfaceOffsets(std::vector<glm::vec3> offsets,
     }
     ClearRuntimeLods();
     m_surfaceOffsets = std::move(offsets);
+    ++m_surfaceOffsetsRevision;
     if (!m_bufferFactory) return;
     std::vector<Vertex> posed = BuildPosedVertices(skinPalette);
     const uint64_t bytes = posed.size() * sizeof(Vertex);
@@ -2294,6 +2323,7 @@ void Mesh::SetSurfaceOffsets(std::vector<glm::vec3> offsets,
 
 void Mesh::ClearSurfaceOffsets()
 {
+    if (!m_surfaceOffsets.empty()) ++m_surfaceOffsetsRevision;
     m_surfaceOffsets.clear();
     ReplacePosedVertexBuffer({});
 }

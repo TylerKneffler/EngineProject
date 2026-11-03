@@ -12,6 +12,9 @@
 #include <cstdlib>
 #include <cmath>
 #include <filesystem>
+#include <atomic>
+#include <memory>
+#include <vector>
 
 extern "C" {
 #define STB_VORBIS_HEADER_ONLY
@@ -45,7 +48,20 @@ struct AudioSource::Impl
 {
     ma_sound sound{};
     ma_audio_buffer oggBuffer{};
-    short* oggSamples = nullptr;
+    struct Decoded
+    {
+        std::vector<short> samples;
+        ma_uint64 frames = 0;
+        int channels = 0;
+        int sampleRate = 0;
+        std::atomic<bool> ready{ false };
+        bool succeeded = false;
+    };
+    std::shared_ptr<Decoded> pending;
+    std::shared_ptr<std::atomic<bool>> commandAlive =
+        std::make_shared<std::atomic<bool>>(true);
+    std::vector<short> samples;
+    bool playRequested = false;
     bool soundInitialized = false;
     bool bufferInitialized = false;
     std::string loadedPath;
@@ -120,35 +136,84 @@ bool AudioSource::EnsureLoaded()
     if (!m_impl || audioPath.empty()) return false;
     if (m_impl->soundInitialized && m_impl->loadedPath == audioPath && m_impl->loadedBus == bus)
         return true;
-    Unload();
+    if (m_impl->loadedPath != audioPath || m_impl->loadedBus != bus)
+    {
+        const bool resume = m_impl->playRequested;
+        Unload();
+        m_impl->loadedPath = audioPath;
+        m_impl->loadedBus = bus;
+        m_impl->playRequested = resume;
+        m_impl->transportPlaying = resume;
+        if (resume && UsesDeterministicClock())
+            m_impl->deterministicStartTime = Owner->GetScene()->GetElapsedTime();
+    }
+
+    if (!m_impl->pending)
+    {
+        auto decoded = std::make_shared<Impl::Decoded>();
+        m_impl->pending = decoded;
+        const auto path = audioPath;
+        Engine::Audio::AudioMixer::Get().SubmitDecode([decoded, path] {
+            try
+            {
+            const std::filesystem::path resolved = ResolveAudioPath(path);
+            if (Lower(resolved.extension().string()) == ".ogg")
+            {
+                short* samples = nullptr;
+                int channels = 0, sampleRate = 0;
+                const int frames = stb_vorbis_decode_filename(resolved.string().c_str(),
+                    &channels, &sampleRate, &samples);
+                if (frames > 0 && channels > 0 && sampleRate > 0 && samples)
+                {
+                    decoded->samples.assign(samples,
+                        samples + static_cast<size_t>(frames) * channels);
+                    decoded->frames = static_cast<ma_uint64>(frames);
+                    decoded->channels = channels;
+                    decoded->sampleRate = sampleRate;
+                    decoded->succeeded = true;
+                }
+                std::free(samples);
+            }
+            else
+            {
+                ma_decoder_config config = ma_decoder_config_init(ma_format_s16, 0, 0);
+                ma_uint64 frames = 0;
+                void* pcm = nullptr;
+                if (ma_decode_file(resolved.string().c_str(), &config, &frames, &pcm) == MA_SUCCESS &&
+                    pcm && frames > 0 && config.channels > 0 && config.sampleRate > 0)
+                {
+                    const auto* samples = static_cast<const short*>(pcm);
+                    decoded->samples.assign(samples,
+                        samples + static_cast<size_t>(frames) * config.channels);
+                    decoded->frames = frames;
+                    decoded->channels = static_cast<int>(config.channels);
+                    decoded->sampleRate = static_cast<int>(config.sampleRate);
+                    decoded->succeeded = true;
+                }
+                if (pcm) ma_free(pcm, nullptr);
+            }
+            }
+            catch (...) { decoded->succeeded = false; }
+            decoded->ready.store(true, std::memory_order_release);
+        });
+        return false;
+    }
+    if (!m_impl->pending->ready.load(std::memory_order_acquire)) return false;
+    if (!m_impl->pending->succeeded) return false;
 
     auto* engine = static_cast<ma_engine*>(Engine::Audio::AudioMixer::Get().GetEngineHandle());
     auto* group = static_cast<ma_sound_group*>(Engine::Audio::AudioMixer::Get().GetBusHandle(bus));
     if (!engine || !group) return false;
 
-    const std::filesystem::path resolved = ResolveAudioPath(audioPath);
-    ma_result result = MA_ERROR;
-    if (Lower(resolved.extension().string()) == ".ogg")
-    {
-        int channels = 0;
-        int sampleRate = 0;
-        const int frames = stb_vorbis_decode_filename(resolved.string().c_str(), &channels,
-            &sampleRate, &m_impl->oggSamples);
-        if (frames <= 0 || channels <= 0 || sampleRate <= 0) return false;
-        m_impl->oggSampleRate = sampleRate;
-        const ma_audio_buffer_config config = ma_audio_buffer_config_init(ma_format_s16,
-            static_cast<ma_uint32>(channels), static_cast<ma_uint64>(frames),
-            m_impl->oggSamples, nullptr);
-        result = ma_audio_buffer_init(&config, &m_impl->oggBuffer);
-        m_impl->bufferInitialized = result == MA_SUCCESS;
-        if (result == MA_SUCCESS)
-            result = ma_sound_init_from_data_source(engine, &m_impl->oggBuffer, 0, group, &m_impl->sound);
-    }
-    else
-    {
-        result = ma_sound_init_from_file(engine, resolved.string().c_str(), 0, group, nullptr,
-            &m_impl->sound);
-    }
+    m_impl->samples = std::move(m_impl->pending->samples);
+    m_impl->oggSampleRate = m_impl->pending->sampleRate;
+    const ma_audio_buffer_config config = ma_audio_buffer_config_init(ma_format_s16,
+        static_cast<ma_uint32>(m_impl->pending->channels), m_impl->pending->frames,
+        m_impl->samples.data(), nullptr);
+    ma_result result = ma_audio_buffer_init(&config, &m_impl->oggBuffer);
+    m_impl->bufferInitialized = result == MA_SUCCESS;
+    if (result == MA_SUCCESS)
+        result = ma_sound_init_from_data_source(engine, &m_impl->oggBuffer, 0, group, &m_impl->sound);
 
     m_impl->soundInitialized = result == MA_SUCCESS;
     if (!m_impl->soundInitialized)
@@ -156,21 +221,34 @@ bool AudioSource::EnsureLoaded()
         Unload();
         return false;
     }
-    m_impl->loadedPath = audioPath;
-    m_impl->loadedBus = bus;
+    m_impl->pending.reset();
     ApplySettings();
+    if (m_impl->playRequested)
+    {
+        auto alive = m_impl->commandAlive;
+        auto* impl = m_impl;
+        Engine::Audio::AudioMixer::Get().EnqueueCommand([alive, impl] {
+            if (alive->load(std::memory_order_acquire) && impl->soundInitialized)
+            {
+                if (ma_sound_at_end(&impl->sound)) ma_sound_seek_to_pcm_frame(&impl->sound, 0);
+                ma_sound_start(&impl->sound);
+            }
+        });
+    }
     return true;
 }
 
 void AudioSource::Unload()
 {
     if (!m_impl) return;
+    m_impl->commandAlive->store(false, std::memory_order_release);
+    m_impl->commandAlive = std::make_shared<std::atomic<bool>>(true);
     if (m_impl->soundInitialized)
         ma_sound_uninit(&m_impl->sound);
     if (m_impl->bufferInitialized)
         ma_audio_buffer_uninit(&m_impl->oggBuffer);
-    std::free(m_impl->oggSamples);
-    m_impl->oggSamples = nullptr;
+    m_impl->samples.clear();
+    m_impl->pending.reset();
     m_impl->soundInitialized = false;
     m_impl->bufferInitialized = false;
     m_impl->loadedPath.clear();
@@ -178,28 +256,45 @@ void AudioSource::Unload()
     m_impl->oggSampleRate = 0;
     m_impl->appliedTransformRevision = 0;
     m_impl->transportPlaying = false;
+    m_impl->playRequested = false;
     m_impl->deterministicStartTime = 0.0;
     m_impl->deterministicOffset = 0.0;
 }
 
 bool AudioSource::Play()
 {
-    if (!EnsureLoaded()) return false;
-    ApplySettings();
+    if (!m_impl || audioPath.empty()) return false;
+    const bool loaded = EnsureLoaded();
+    m_impl->playRequested = true;
     m_impl->transportPlaying = true;
     if (UsesDeterministicClock())
-    {
         m_impl->deterministicStartTime = Owner->GetScene()->GetElapsedTime();
+    if (!loaded) return true;
+    ApplySettings();
+    if (UsesDeterministicClock())
+    {
         SynchronizeToSceneClock();
         return true;
     }
-    if (ma_sound_at_end(&m_impl->sound))
-        ma_sound_seek_to_pcm_frame(&m_impl->sound, 0);
-    return ma_sound_start(&m_impl->sound) == MA_SUCCESS;
+    auto alive = m_impl->commandAlive;
+    auto* impl = m_impl;
+    Engine::Audio::AudioMixer::Get().EnqueueCommand([alive, impl] {
+        if (alive->load(std::memory_order_acquire) && impl->soundInitialized)
+        {
+            if (ma_sound_at_end(&impl->sound)) ma_sound_seek_to_pcm_frame(&impl->sound, 0);
+            ma_sound_start(&impl->sound);
+        }
+    });
+    return true;
 }
 
 void AudioSource::Pause()
 {
+    if (m_impl)
+    {
+        m_impl->playRequested = false;
+        if (!m_impl->soundInitialized) m_impl->transportPlaying = false;
+    }
     if (m_impl && m_impl->soundInitialized)
     {
         if (UsesDeterministicClock())
@@ -213,17 +308,27 @@ void AudioSource::Pause()
                 m_impl->deterministicOffset = static_cast<double>(cursor) / sampleRate;
         }
         m_impl->transportPlaying = false;
-        ma_sound_stop(&m_impl->sound);
+        auto alive = m_impl->commandAlive;
+        auto* impl = m_impl;
+        Engine::Audio::AudioMixer::Get().EnqueueCommand([alive, impl] {
+            if (alive->load(std::memory_order_acquire) && impl->soundInitialized)
+                ma_sound_stop(&impl->sound);
+        });
     }
 }
 
 void AudioSource::Stop()
 {
     Pause();
+    if (m_impl) m_impl->deterministicOffset = 0.0;
     if (m_impl && m_impl->soundInitialized)
     {
-        m_impl->deterministicOffset = 0.0;
-        ma_sound_seek_to_pcm_frame(&m_impl->sound, 0);
+        auto alive = m_impl->commandAlive;
+        auto* impl = m_impl;
+        Engine::Audio::AudioMixer::Get().EnqueueCommand([alive, impl] {
+            if (alive->load(std::memory_order_acquire) && impl->soundInitialized)
+                ma_sound_seek_to_pcm_frame(&impl->sound, 0);
+        });
     }
 }
 
@@ -268,7 +373,14 @@ void AudioSource::Update()
         return;
     }
     if (wasPlaying && !IsPlaying() && !ma_sound_at_end(&m_impl->sound))
-        ma_sound_start(&m_impl->sound);
+    {
+        auto alive = m_impl->commandAlive;
+        auto* impl = m_impl;
+        Engine::Audio::AudioMixer::Get().EnqueueCommand([alive, impl] {
+            if (alive->load(std::memory_order_acquire) && impl->soundInitialized)
+                ma_sound_start(&impl->sound);
+        });
+    }
 }
 
 bool AudioSource::UsesDeterministicClock() const

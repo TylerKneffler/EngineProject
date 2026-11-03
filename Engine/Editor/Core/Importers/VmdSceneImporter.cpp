@@ -1,4 +1,5 @@
 #include "VmdSceneImporter.h"
+#include "AssetJobControl.h"
 #include "VmdMotionDecoder.h"
 #include "Core/AssetRecord.h"
 #include "Core/Model/AnimationPackAsset.h"
@@ -70,6 +71,7 @@ Engine::Model::ModelImportResult VmdSceneImporter::Import(
     std::string error;
     if (!VmdMotionDecoder::DecodeFile(sourcePath, motion, error))
     { result.message = error; return result; }
+    AssetJobCheckpoint(0.45f);
 
     const fs::path source = fs::path(sourcePath).lexically_normal();
     const fs::path assets = fs::path(assetsDirectory).lexically_normal();
@@ -79,8 +81,9 @@ Engine::Model::ModelImportResult VmdSceneImporter::Import(
         output = assets / (base + " " + std::to_string(suffix));
     try
     {
+        AssetJobCheckpoint(0.5f);
         fs::create_directories(output);
-        fs::copy_file(source, output / source.filename());
+        AssetJobCopyFile(source, output / source.filename());
         Engine::Core::AssetRecord::Ensure(output / source.filename(), source,
             { { "importer", std::string("vmd-source") } });
 
@@ -88,6 +91,7 @@ Engine::Model::ModelImportResult VmdSceneImporter::Import(
         const auto appendTrack = [&](const char* kind, const auto& frames,
             auto serialize)
         {
+            AssetJobCheckpoint();
             std::string json = WriteTrack(output, source, motion, kind,
                 frames, serialize);
             if (!json.empty()) pack.sourceTracks.push_back({ kind, std::move(json) });
@@ -136,6 +140,7 @@ Engine::Model::ModelImportResult VmdSceneImporter::Import(
                 .Set("color", Numbers(key.color))
                 .Set("position", Numbers(key.position)); });
         const fs::path packPath = output / (source.stem().string() + ".animpack");
+        AssetJobCheckpoint(0.75f);
         if (!pack.Save(packPath.string(), error))
             throw std::runtime_error("Could not save VMD animation pack: " + error);
         Engine::Core::AssetRecord::Ensure(packPath, source,
@@ -209,6 +214,7 @@ Engine::Model::ModelImportResult VmdSceneImporter::Import(
                   { "animationPack", packPath.generic_string() } });
             result.prefabPath = prefab.generic_string();
         }
+        AssetJobCheckpoint(0.97f);
         result.success = true;
         result.primaryAssetPath = packPath.generic_string();
         result.outputDirectory = output.generic_string();

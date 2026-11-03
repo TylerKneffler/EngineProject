@@ -1273,6 +1273,41 @@ void TestLandscapePreparation()
     Require(quality.directionalCascadeCount==4 && quality.grassCasterDistance==16.f,"high landscape shadow budget");
 }
 
+void TestWarpSnapshot()
+{
+    Engine::Scene::Scene scene;
+    auto* first = scene.AddObject("Snapshot volume A");
+    auto* second = scene.AddObject("Snapshot volume B");
+    auto* a = first->AddComponent<Engine::Components::SpatialManipulator>();
+    auto* b = second->AddComponent<Engine::Components::SpatialManipulator>();
+    a->definesWarpVolume = b->definesWarpVolume = true;
+    a->position = { 2.f, 0.f, 0.f };
+    b->position = { 0.f, 1.f, 0.f };
+    b->warpPriority = 1;
+    const auto snapshot = scene.CaptureSpatialWarpSnapshot();
+    std::vector<glm::vec3> points(2048);
+    for (size_t i = 0; i < points.size(); ++i)
+        points[i] = glm::vec3(float(i % 31), float(i % 19), float(i % 13));
+    std::vector<Engine::Scene::Scene::SpatialQuerySample> samples(points.size());
+    Engine::Rendering::RenderJobs::Get().For(points.size(), 256,
+        [&](size_t i) { samples[i] = snapshot.Sample(points[i]); });
+    for (size_t i = 0; i < points.size(); ++i)
+    {
+        const auto reference = scene.SampleSpatialPoint(points[i]);
+        Require(glm::length(samples[i].point - reference.point) < 1e-4f,
+            "worker warp snapshot changed mapped position");
+        for (int column = 0; column < 3; ++column)
+            Require(glm::length(samples[i].jacobian[column] -
+                reference.jacobian[column]) < 1e-3f,
+                "worker warp snapshot changed Jacobian");
+    }
+    const glm::vec3 point(1.f, 2.f, 3.f);
+    Require(glm::length(snapshot.Sample(point, first).point -
+        scene.SampleSpatialPoint(point,
+            { Engine::Scene::Scene::SpatialQueryDomain::Rendering, first }).point) < 1e-4f,
+        "worker warp snapshot ignored excluded owner");
+}
+
 void TestGrass()
 {
     Engine::Scene::Scene scene;
@@ -1602,34 +1637,35 @@ void CheckStressScene()
     Require(Engine::Serialization::SceneSerializer::Load(scene,
         "Engine/Core/Assets/Scenes/terrain/grass_flat_test.scene", nullptr), "stress scene load failed");
     size_t cells = 0, fields = 0, placements = 0;
-    float minimumX = 1.e9f, maximumX = -1.e9f, minimumZ = 1.e9f, maximumZ = -1.e9f;
-    GrassField* distant = nullptr;
     for (const auto& object : scene.GetObjects())
     {
         if (auto* terrain = object->GetComponent<Engine::Components::Terrain>())
-        {
             ++cells;
-            const auto origin = object->transform.GetWorldPosition();
-            minimumX = std::min(minimumX, origin.x);
-            minimumZ = std::min(minimumZ, origin.z);
-            maximumX = std::max(maximumX, origin.x + terrain->cellsX * terrain->cellWidth);
-            maximumZ = std::max(maximumZ, origin.z + terrain->cellsY * terrain->cellDepth);
-            if (origin.x < -150 && origin.z < -150)
-                for (auto* child : object->Children)
-                    if (auto* field = child->GetComponent<GrassField>()) distant = field;
-        }
         if (object->GetComponent<GrassField>()) ++fields;
         if (auto* layer = object->GetComponent<Engine::Components::TerrainObjectLayer>()) placements += layer->placements.size();
     }
-    Require(cells == 441 && fields == 441 && placements == 648 * 441,
-        "stress scene cell, grass field, or placement count is wrong");
-    Require(minimumX == -168 && minimumZ == -168 && maximumX == 168 && maximumZ == 168,
-        "stress scene is not centered or contains cell spacing gaps");
+    Require(cells == 2 && fields == 1 && placements == 648,
+        "stress scene must load its center cell and distant visual terrain");
+    auto* distantTerrain = scene.FindObjectByName("Grass Distant Terrain");
+    auto* fallback = distantTerrain ?
+        distantTerrain->GetComponent<Engine::Components::Terrain>() : nullptr;
+    Require(fallback && fallback->cellsX == 1 && fallback->cellsY == 1 &&
+        fallback->cellWidth == 336.f && fallback->cellDepth == 336.f &&
+        distantTerrain->transform.GetWorldPosition().x == -168.f &&
+        distantTerrain->transform.GetWorldPosition().z == -168.f &&
+        !distantTerrain->GetComponent<Engine::Components::MeshObjectCollider>() &&
+        !distantTerrain->GetComponent<Engine::Components::RigidBody>(),
+        "distant visual terrain must cover the grid without collision");
     auto* landscape = scene.FindObjectByName("Grass Terrain Landscape");
     auto* manager = landscape ? landscape->GetComponent<Engine::Components::TerrainManager>() : nullptr;
-    Require(manager && manager->manageAuthoredCellColliders, "stress terrain collision manager missing");
+    Require(manager && manager->manageAuthoredCellColliders &&
+        manager->reuseStreamedPrefabCells &&
+        manager->GetStreamedPrefabCellCount() == 440,
+        "stress terrain streaming grid missing");
     manager->Start();
-    Require(manager->GetManagedColliderCellCount() == 441 && manager->GetActiveColliderCellCount() == 1,
+    Require(manager->GetManagedColliderCellCount() ==
+        manager->GetLoadedPrefabCellCount() + 1 &&
+        manager->GetActiveColliderCellCount() == 1,
         "stress scene must begin with one active terrain collider");
     auto& bullet = dynamic_cast<Engine::Physics::BulletPhysicsAdapter&>(scene.GetPhysics().GetAdapter());
     bullet.SetProfilingEnabled(true);
@@ -1642,13 +1678,71 @@ void CheckStressScene()
     }
     std::cout << "Stress terrain physics setup after initialization: " << setup/9 << " ms average; "
         << manager->GetActiveColliderCellCount() << " active terrain collider.\n";
-    Require(distant != nullptr, "far corner cell missing");
-    distant->Update();
-    const auto& performance = distant->GetLastPerformance();
-    Require(performance.placementsScanned == 0 && performance.tilesBuilt == 0 && performance.residentLods == 0,
-        "distant grass performed generation work");
-    std::cout << "Stress scene: " << cells << " terrain cells, " << placements
-        << " grass placements, 336 x 336 metres; distant generation skipped.\n";
+    const size_t residentObjects = scene.GetObjects().size();
+    std::set<Engine::Core::Object*> oldEdge;
+    for (int y = -1; y <= 1; ++y)
+    {
+        auto* object = scene.FindObjectByName("Grass Terrain Cell (-1, " +
+            std::to_string(y) + ")");
+        Require(object, "initial grass cell ring did not finish loading");
+        oldEdge.insert(object);
+    }
+    int graphicsDestructionFences = 0;
+    scene.SetBeforeGpuResourceDestruction([&] { ++graphicsDestructionFences; });
+    manager->UpdateStreaming(1, 0);
+    for (int y = -1; y <= 1; ++y)
+    {
+        auto* object = scene.FindObjectByName("Grass Terrain Cell (2, " +
+            std::to_string(y) + ")");
+        Require(object && oldEdge.count(object),
+            "moving the viewer allocated a new cell instead of reusing one");
+    }
+    Require(scene.GetObjects().size() == residentObjects &&
+        manager->GetLoadedPrefabCellCount() == 8 &&
+        manager->GetPooledPrefabCellCount() == 0 &&
+        graphicsDestructionFences == 0,
+        "cell movement changed residency or waited for graphics destruction");
+    scene.SetBeforeGpuResourceDestruction({});
+    manager->UpdateStreaming(0, 0);
+    for (int frame = 0; frame < 5; ++frame) manager->UpdateStreaming(10, 10);
+    auto* corner = scene.FindObjectByName("Grass Terrain Cell (10, 10)");
+    Require(corner && corner->GetComponent<Engine::Components::Terrain>(),
+        "far corner cell did not stream in");
+    bool cornerHasGrass = false;
+    for (auto* child : corner->Children)
+        if (child && child->GetComponent<GrassField>()) cornerHasGrass = true;
+    Require(cornerHasGrass, "streamed corner cell lost its grass field");
+    Require(manager->GetLoadedPrefabCellCount() <= 8,
+        "streaming kept distant prefab cells resident");
+    manager->UpdateStreaming(0, 0);
+    scene.CommitPendingObjectChanges();
+    Require(!scene.FindObjectByName("Grass Terrain Cell (10, 10)"),
+        "far corner cell did not unload");
+    auto* centerLayer = scene.FindObjectByName("Grass Layer");
+    auto* centerField = centerLayer ? centerLayer->GetComponent<GrassField>() : nullptr;
+    Require(centerField && centerField->retainDormantTiles,
+        "stress scene must retain dormant grass tiles");
+    centerField->RefreshEditorPreview();
+    scene.CommitPendingObjectChanges();
+    size_t centerTiles = 0;
+    for (auto* child : centerLayer->Children)
+        if (child && child->name.rfind("Grass Tile (", 0) == 0) ++centerTiles;
+    Require(centerTiles > 0, "grass preview did not create tiles for dormancy check");
+    const size_t objectsBeforeGrassLeave = scene.GetObjects().size();
+    int grassDestructionFences = 0;
+    scene.SetBeforeGpuResourceDestruction([&] { ++grassDestructionFences; });
+    centerField->LeaveSpatialRegion();
+    scene.CommitPendingObjectChanges();
+    Require(scene.GetObjects().size() == objectsBeforeGrassLeave &&
+        grassDestructionFences == 0,
+        "dormant grass tile eviction destroyed GPU resources");
+    centerField->RefreshEditorPreview();
+    scene.CommitPendingObjectChanges();
+    Require(scene.GetObjects().size() == objectsBeforeGrassLeave &&
+        grassDestructionFences == 0,
+        "returning to retained grass allocated replacement tiles");
+    scene.SetBeforeGpuResourceDestruction({});
+    std::cout << "Stress scene: 441 logical cells, one initially resident, far cells stream on demand.\n";
 }
 
 template<typename Renderer = Engine::Renderers::DX11GameRenderer>
@@ -1912,6 +2006,23 @@ void CheckFadeRendering()
         Require(lodDifferences<32,"GPU grass LOD or complementary fade differs from fallback");
     }
     std::cout << "GPU grass LOD/fade intervals match fallback at five distances.\n";
+    cameraOwner->transform.position.z=-3.f;
+    material->shaders={{"Assets/Shaders/Foliage.hlsl",true,"Auto"}};
+    secondMaterial->shaders=material->shaders;
+    const auto foliagePixels=capture();
+    if (!material->shaderError.empty() || !secondMaterial->shaderError.empty())
+        std::cerr << "Foliage shader errors: " << material->shaderError << " | "
+            << secondMaterial->shaderError << '\n';
+    Require(material->shaderError.empty() && secondMaterial->shaderError.empty(),
+        "foliage material shader failed to compile");
+    Require(scene.GetLastRenderCpuTimings().gpuBatches>0 &&
+        scene.GetLastRenderCpuTimings().automaticBatches>0,
+        "foliage material shader disabled grass GPU LOD or batching");
+    Require(std::any_of(foliagePixels.begin(),foliagePixels.end(),
+        [](uint8_t channel){return channel>100;}),
+        "foliage material shader produced no visible pixels");
+    material->shaders.clear();
+    secondMaterial->shaders.clear();
     auto* sun=scene.AddObject("Shadow sun")->AddComponent<Engine::Components::Light>();
     sun->lightType=int(Engine::Components::Light::Type::Directional); sun->castsShadows=true;
     material->castsShadows=secondMaterial->castsShadows=true;
@@ -2274,7 +2385,7 @@ void RenderAudit(const char* reportPath=".local/performance-logs/grass-automatic
     if(nativeAudit) renderer.GetGraphicsProvider()->GetContextFactory()->SetNativeCallTimingEnabled(true);
     Engine::Scene::Scene scene;
     scene.Init(renderer.GetGraphicsProvider());
-    std::cout << "Loading 441-cell landscape; Debug loading can take about a minute." << std::endl;
+    std::cout << "Loading streamed grass landscape." << std::endl;
     Require(scene.Load("Engine/Core/Assets/Scenes/terrain/grass_flat_test.scene"), "grass scene failed");
     auto* player = scene.FindObjectByName("Grass Test Capsule");
     auto* owner = scene.FindObjectByName("Grass Layer");
@@ -2284,7 +2395,8 @@ void RenderAudit(const char* reportPath=".local/performance-logs/grass-automatic
     std::vector<GrassField*> fields;
     for (const auto& object : scene.GetObjects())
         if (auto* field = object->GetComponent<GrassField>()) fields.push_back(field);
-    Require(fields.size() == 441, "render audit must exercise all terrain grass fields");
+    Require(!fields.empty() && fields.size() < 441,
+        "render audit must begin with streamed terrain grass fields");
     if(storageAudit) for(auto* layer:scene.GetComponents<Engine::Components::TerrainObjectLayer>())
         Require(layer->HasLoadedPreparedData(),"landscape cell did not load its baked placement cache");
     scene.SetUpdateProfilingEnabled(true);
@@ -2600,6 +2712,7 @@ int main(int argc, char** argv)
         else if(argc>1 && std::string(argv[1])=="--transform-regression") { TestTransformHierarchy(); TestSceneTransformScheduling(); }
         else if(argc>1 && std::string(argv[1])=="--component-update-regression") TestComponentUpdateScheduling();
         else if(argc>1 && std::string(argv[1])=="--physics-phase-regression") TestPhasedPhysicsStep();
+        else if(argc>1 && std::string(argv[1])=="--warp-snapshot-regression") TestWarpSnapshot();
         else if(argc>1 && std::string(argv[1])=="--native-regression") { TestRecordedOcclusionFeedback(); TestDx11ConstantsAndGeometry(); TestEditorFrameLifecycle(); }
         else if(argc>1 && std::string(argv[1])=="--lifecycle-regression") { TestSceneSnapshotCommit(); TestSimulationOwnerHandoff(); TestAsyncSceneOwnerCommit(); TestLifecycleWorkerFenceAndClock(); TestComponentLifecycleDelivery(); TestDeferredGraphicsPreparation(); TestScriptModuleJobFence(); TestSceneGpuDestructionBarrier(); }
         else if (argc > 1 && std::string(argv[1]) == "--render-audit") RenderAudit();

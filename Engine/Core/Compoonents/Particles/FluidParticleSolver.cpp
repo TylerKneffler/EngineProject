@@ -1,4 +1,5 @@
 #include "FluidParticleSolver.h"
+#include "Core/Threading/JobScheduler.h"
 #include <algorithm>
 #include <cmath>
 
@@ -33,7 +34,6 @@ void FluidParticleSolver::Reset()
     m_density.clear();
     m_pressure.clear();
     m_acceleration.clear();
-    m_neighbors.clear();
 }
 
 void FluidParticleSolver::Step(ParticleState* particles, size_t count,
@@ -78,13 +78,14 @@ void FluidParticleSolver::Step(ParticleState* particles, size_t count,
     {
         if (!m_grid.Build(particles, count, h)) return;
         // Include the self kernel. QueryRadius also includes coincident peers.
-        for (size_t i = 0; i < count; ++i)
+        Engine::Threading::JobScheduler::Get().For(count, 256, [&](size_t i)
         {
             m_density[i] = 0.f;
             m_pressure[i] = 0.f;
-            if (!particles[i].active) continue;
-            m_grid.QueryRadius(particles[i].position, h, m_neighbors);
-            for (const uint32_t j : m_neighbors)
+            if (!particles[i].active) return;
+            thread_local std::vector<uint32_t> neighbors;
+            m_grid.QueryRadius(particles[i].position, h, neighbors);
+            for (const uint32_t j : neighbors)
             {
                 const glm::vec3 delta = particles[i].position -
                     particles[j].position;
@@ -93,17 +94,18 @@ void FluidParticleSolver::Step(ParticleState* particles, size_t count,
             }
             m_density[i] = std::max(m_density[i], 0.001f);
             m_pressure[i] = stiffness * std::max(0.f, m_density[i] - rest);
-        }
+        });
 
-        for (size_t i = 0; i < count; ++i)
+        Engine::Threading::JobScheduler::Get().For(count, 256, [&](size_t i)
         {
             m_acceleration[i] = glm::vec3(0.f);
-            if (!particles[i].active) continue;
+            if (!particles[i].active) return;
             glm::vec3 acceleration = (Finite(forces.acceleration) ?
                 forces.acceleration : glm::vec3(0.f)) + particles[i].force;
-            m_grid.QueryRadius(particles[i].position, h, m_neighbors,
+            thread_local std::vector<uint32_t> neighbors;
+            m_grid.QueryRadius(particles[i].position, h, neighbors,
                 static_cast<uint32_t>(i));
-            for (const uint32_t j : m_neighbors)
+            for (const uint32_t j : neighbors)
             {
                 const glm::vec3 displacement = particles[i].position -
                     particles[j].position;
@@ -120,12 +122,12 @@ void FluidParticleSolver::Step(ParticleState* particles, size_t count,
                     m_density[j] * viscosityLaplacian * remainder;
             }
             m_acceleration[i] = Limited(acceleration, 1000.f);
-        }
+        });
 
-        for (size_t i = 0; i < count; ++i)
+        Engine::Threading::JobScheduler::Get().For(count, 256, [&](size_t i)
         {
             auto& particle = particles[i];
-            if (!particle.active) continue;
+            if (!particle.active) return;
             particle.velocity = Limited((particle.velocity +
                 m_acceleration[i] * dt) * damping, maxSpeed);
             particle.position += particle.velocity * dt;
@@ -144,7 +146,7 @@ void FluidParticleSolver::Step(ParticleState* particles, size_t count,
                         particle.velocity[axis] *= -bounce;
                 }
             }
-        }
+        });
     }
     for (size_t i = 0; i < count; ++i)
     {

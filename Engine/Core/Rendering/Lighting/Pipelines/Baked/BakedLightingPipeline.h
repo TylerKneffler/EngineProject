@@ -3,6 +3,7 @@
 #include "Core/Rendering/Lighting/Pipelines/ILightingPipeline.h"
 #include "Core/Model/LightingData.h"
 #include <string>
+#include <functional>
 
 namespace Engine::Scene { class Scene; }
 
@@ -21,7 +22,9 @@ namespace Engine::Rendering
 
         BakeResult Bake(Engine::Scene::Scene& scene, const std::string& assetsDirectory,
             const std::string& sceneName,
-            const BakedLightingSettings& bakeSettings) const;
+            const BakedLightingSettings& bakeSettings,
+            const std::function<void(float)>& progress = {},
+            const std::function<bool()>& cancelled = {}) const;
         uint32_t Clear(Engine::Scene::Scene& scene) const;
     };
 }

@@ -100,6 +100,18 @@ public:
     std::vector<RaycastHit> SweepSphereAll(const glm::vec3& origin,
         const glm::vec3& direction, float maxDistance, float radius,
         uint32_t collisionMask = ~0u) const;
+    struct SphereSweepRequest
+    {
+        glm::vec3 origin { 0.f };
+        glm::vec3 direction { 0.f };
+        float distance = 0.f;
+        float radius = 0.f;
+        uint32_t collisionMask = ~0u;
+    };
+    // Call on the simulation owner between physics steps. The native world is
+    // stable for the complete ordered batch; no worker touches Bullet state.
+    std::vector<std::vector<RaycastHit>> SweepSphereBatch(
+        const std::vector<SphereSweepRequest>& requests) const;
 
     void ApplyRigidBodyAction(Engine::Components::RigidBody& body,
         RigidBodyAction action, const glm::vec3& value,

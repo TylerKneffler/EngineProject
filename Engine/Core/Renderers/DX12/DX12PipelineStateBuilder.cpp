@@ -3,6 +3,7 @@
 #include "DX12ShaderCompiler.h"
 #include <stdexcept>
 #include <sstream>
+#include <d3d12sdklayers.h>
 
 // ---------------------------------------------------------------------------
 // D3D12PipelineStateBuilder Implementation
@@ -355,6 +356,23 @@ std::unique_ptr<Engine::Graphics::IPipelineState> D3D12PipelineStateBuilder::Bui
     {
         std::ostringstream oss;
         oss << "CreateGraphicsPipelineState failed with HRESULT 0x" << std::hex << hr;
+        Microsoft::WRL::ComPtr<ID3D12InfoQueue> infoQueue;
+        if (SUCCEEDED(m_device->QueryInterface(IID_PPV_ARGS(&infoQueue))))
+        {
+            const UINT64 count = infoQueue->GetNumStoredMessages();
+            if (count)
+            {
+                SIZE_T bytes = 0;
+                if (SUCCEEDED(infoQueue->GetMessage(count - 1, nullptr, &bytes)) && bytes)
+                {
+                    std::vector<unsigned char> message(bytes);
+                    if (SUCCEEDED(infoQueue->GetMessage(count - 1,
+                        reinterpret_cast<D3D12_MESSAGE*>(message.data()), &bytes)))
+                        oss << ": " << reinterpret_cast<D3D12_MESSAGE*>(
+                            message.data())->pDescription;
+                }
+            }
+        }
         m_lastError = oss.str();
         return nullptr;
     }

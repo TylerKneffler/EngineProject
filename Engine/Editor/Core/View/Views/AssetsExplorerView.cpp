@@ -16,6 +16,8 @@
 #include "Core/Scene/Scene.h"
 #include "../Focus/WindowFocusHandler.h"
 #include <filesystem>
+#include <array>
+#include <chrono>
 #include <fstream>
 #include <shellapi.h>
 #include <unordered_map>
@@ -123,6 +125,9 @@ private:
 void AssetsExplorerView::Init(const std::string& assetsPath,
     Engine::Scene::Scene* scene)
 {
+    CancelCopyJobs();
+    if (m_extractionControl)
+        m_extractionControl->cancelled.store(true, std::memory_order_release);
     m_assetsPath = fs::path(assetsPath).lexically_normal().string();
     m_currentDirectory = m_assetsPath;
     m_directoryCache.Watch(m_assetsPath);
@@ -161,8 +166,28 @@ void AssetsExplorerView::ExtractModelAssets(const std::string& sourcePath)
     }
     m_error.clear();
     m_extractionAssetsPath = m_assetsPath;
+    m_extractionControl = std::make_shared<AssetJobControl>();
+    const auto control = m_extractionControl;
     m_extractionPending = Engine::Threading::JobScheduler::Get().Submit(
-        [source] { return AssetDataExtractor::Extract(source, source.parent_path()); });
+        [source, control] {
+            AssetJobScope scope(control.get());
+            AssetJobCheckpoint(0.01f);
+            auto result = AssetDataExtractor::Extract(source, source.parent_path());
+            if (control->cancelled.load(std::memory_order_acquire) &&
+                !result.outputDirectory.empty())
+            {
+                const fs::path output = result.outputDirectory;
+                const fs::path relative = output.lexically_relative(
+                    source.parent_path());
+                if (!relative.empty() && *relative.begin() != "..")
+                {
+                    std::error_code ignored;
+                    fs::remove_all(output, ignored);
+                }
+            }
+            AssetJobCheckpoint(1.f);
+            return result;
+        });
 }
 
 void AssetsExplorerView::CheckForExternalMoves()
@@ -179,6 +204,7 @@ void AssetsExplorerView::CheckForExternalMoves()
 
 bool AssetsExplorerView::PollDirectoryCache()
 {
+    const bool copies = PollCopyJobs();
     const bool directory = m_directoryCache.Poll();
     const bool previews = m_previewCache.Poll();
     bool locations = false;
@@ -192,8 +218,22 @@ bool AssetsExplorerView::PollDirectoryCache()
         try
         {
             const auto result = m_extractionPending.get();
-            if (m_extractionAssetsPath != m_assetsPath)
+            if ((m_extractionControl && m_extractionControl->cancelled.load()) ||
+                m_extractionAssetsPath != m_assetsPath)
             {
+                if (m_extractionControl &&
+                    m_extractionControl->cancelled.load() &&
+                    !result.outputDirectory.empty())
+                {
+                    const fs::path output = result.outputDirectory;
+                    const fs::path root = m_extractionAssetsPath;
+                    Engine::Threading::JobScheduler::Get().Submit([output, root] {
+                        const fs::path relative = output.lexically_relative(root);
+                        if (relative.empty() || *relative.begin() == "..") return;
+                        std::error_code ignored;
+                        fs::remove_all(output, ignored);
+                    });
+                }
                 m_extractionAssetsPath.clear();
             }
             else if (result.success)
@@ -206,11 +246,13 @@ bool AssetsExplorerView::PollDirectoryCache()
         }
         catch (const std::exception& error)
         {
-            if (m_extractionAssetsPath == m_assetsPath)
+            if (m_extractionAssetsPath == m_assetsPath &&
+                !(m_extractionControl && m_extractionControl->cancelled.load()))
                 m_error = error.what();
         }
     }
-    return directory || previews || locations || extraction;
+    if (extraction) m_extractionControl.reset();
+    return directory || previews || locations || extraction || copies;
 }
 
 // ---------------------------------------------------------------------------
@@ -406,7 +448,19 @@ void AssetsExplorerView::DrawPanel(IEditorUi& ui)
     if (!m_error.empty())
         ui.ColoredLabel(m_error.c_str(), { 1.f, 0.3f, 0.3f, 1.f });
     if (m_extractionPending.valid())
-        ui.DisabledLabel("Extracting assets...");
+    {
+        ui.Label("Extracting assets...");
+        ui.Progress(m_extractionControl ? m_extractionControl->progress.load() : 0.f);
+        if (ui.Button("Cancel extraction") && m_extractionControl)
+            m_extractionControl->cancelled.store(true,
+                std::memory_order_release);
+    }
+    if (m_copyPending.valid() || !m_copyQueue.empty())
+    {
+        ui.Label("Copying assets...");
+        ui.Progress(m_copyControl ? m_copyControl->progress.load() : 0.f);
+        if (ui.Button("Cancel copies")) CancelCopyJobs();
+    }
     if (m_renamingScript)
     {
         const EditorUiTextEditResult rename = ui.RenameText(
@@ -1199,6 +1253,7 @@ bool AssetsExplorerView::MoveAssetPath(const std::string& sourcePath,
 bool AssetsExplorerView::CopyExternalPath(const std::string& sourcePath,
     const std::string& destinationDirectory, std::string* copiedPath)
 {
+    if (copiedPath) copiedPath->clear();
     if (m_assetsPath.empty())
     {
         m_error = "Assets path is not initialized.";
@@ -1234,89 +1289,195 @@ bool AssetsExplorerView::CopyExternalPath(const std::string& sourcePath,
         m_error = "Cannot copy a folder into itself.";
         return false;
     }
-
-    fs::path destination = destinationRoot / source.filename();
-    const std::string stem = destination.stem().string();
-    const std::string extension = destination.extension().string();
-    for (unsigned suffix = 2; fs::exists(destination); ++suffix)
-        destination = destinationRoot /
-            (stem + " " + std::to_string(suffix) + extension);
-
-    bool createdDestination = false;
-    try
+    constexpr size_t maxQueuedCopies = 64;
+    if (m_copyQueue.size() >= maxQueuedCopies)
     {
-        const auto copyFile = [&](const fs::path& from, const fs::path& to)
-        {
-            if (!fs::copy_file(from, to))
-                throw std::runtime_error("Destination already exists");
-            if (to == destination) createdDestination = true;
-            if (from.extension() == ".meta" ||
-                (!from.filename().string().empty() &&
-                    from.filename().string().front() == '.'))
-                return;
-            std::optional<Engine::Core::AssetRecord> record;
-            try { record = Engine::Core::AssetRecord::Load(from); }
-            catch (...) { /* Copy the file even if its sidecar is invalid. */ }
-            Engine::Core::AssetRecord::Ensure(to,
-                record ? fs::path(record->sourcePath) : from,
-                record ? record->importSettings :
-                    Engine::Model::AssetImportSettings{});
-        };
-
-        if (directory)
-        {
-            if (!fs::create_directory(destination))
-                throw std::runtime_error("Destination already exists");
-            createdDestination = true;
-            for (fs::recursive_directory_iterator it(source,
-                    fs::directory_options::none), end;
-                it != end; ++it)
-            {
-                const fs::directory_entry& entry = *it;
-                if (entry.is_symlink())
-                {
-                    it.disable_recursion_pending();
-                    continue;
-                }
-                const fs::path relative = entry.path().lexically_relative(source);
-                const fs::path target = destination / relative;
-                if (entry.is_directory())
-                    fs::create_directories(target);
-                else if (entry.is_regular_file())
-                {
-                    if (entry.path().filename() == ".assetlocations.json")
-                        continue;
-                    if (entry.path().extension() == ".meta")
-                    {
-                        const std::string path = entry.path().string();
-                        if (fs::exists(fs::path(path.substr(0, path.size() - 5))))
-                            continue;
-                    }
-                    copyFile(entry.path(), target);
-                }
-            }
-        }
-        else
-            copyFile(source, destination);
-    }
-    catch (const std::exception& exception)
-    {
-        if (createdDestination && IsPathWithin(assetsRoot, destination))
-        {
-            std::error_code cleanupError;
-            fs::remove_all(destination, cleanupError);
-        }
-        m_error = "Could not copy dropped asset: " +
-            std::string(exception.what());
+        m_error = "The asset copy queue is full.";
         return false;
     }
-
+    m_copyQueue.push_back({ source, destinationRoot, assetsRoot });
     m_error.clear();
-    SelectPath(destination.string());
-    if (copiedPath) *copiedPath = destination.string();
-    if (OnAssetContentsChanged)
-        OnAssetContentsChanged(destination.string());
-    CheckForExternalMoves();
+    StartNextCopyJob();
+    return true;
+}
+
+void AssetsExplorerView::CancelCopyJobs()
+{
+    m_copyQueue.clear();
+    if (m_copyControl)
+        m_copyControl->cancelled.store(true, std::memory_order_release);
+}
+
+void AssetsExplorerView::StartNextCopyJob()
+{
+    if (m_copyPending.valid() || m_copyQueue.empty()) return;
+    CopyRequest request = std::move(m_copyQueue.front());
+    m_copyQueue.pop_front();
+    m_copyControl = std::make_shared<AssetJobControl>();
+    const auto control = m_copyControl;
+    m_copyPending = Engine::Threading::JobScheduler::Get().Submit(
+        [request = std::move(request), control]() -> CopyResult
+        {
+            AssetJobScope scope(control.get());
+            CopyResult result;
+            result.assetsRoot = request.assetsRoot.string();
+            fs::path destination;
+            bool created = false;
+            try
+            {
+                AssetJobCheckpoint(0.01f);
+                if (!fs::exists(request.source) ||
+                    !fs::is_directory(request.destinationRoot))
+                    throw std::runtime_error("Source or destination no longer exists");
+                destination = request.destinationRoot / request.source.filename();
+                const std::string stem = destination.stem().string();
+                const std::string extension = destination.extension().string();
+                for (unsigned suffix = 2; fs::exists(destination); ++suffix)
+                    destination = request.destinationRoot /
+                        (stem + " " + std::to_string(suffix) + extension);
+                const bool directory = fs::is_directory(request.source);
+                size_t fileCount = 0;
+                if (directory)
+                {
+                    for (fs::recursive_directory_iterator it(request.source), end;
+                        it != end; ++it)
+                    {
+                        AssetJobCheckpoint();
+                        if (it->is_symlink()) { it.disable_recursion_pending(); continue; }
+                        if (it->is_regular_file()) ++fileCount;
+                    }
+                }
+                else fileCount = 1;
+                AssetJobCheckpoint(0.1f);
+                size_t copied = 0;
+                const auto copyFile = [&](const fs::path& from, const fs::path& to)
+                {
+                    AssetJobCheckpoint();
+                    std::ifstream input(from, std::ios::binary);
+                    std::ofstream output(to, std::ios::binary | std::ios::trunc);
+                    if (!input || !output)
+                        throw std::runtime_error("Could not open copied asset");
+                    std::array<char, 1024 * 1024> buffer;
+                    while (input)
+                    {
+                        AssetJobCheckpoint();
+                        input.read(buffer.data(), buffer.size());
+                        const auto bytes = input.gcount();
+                        if (bytes > 0) output.write(buffer.data(), bytes);
+                    }
+                    output.flush();
+                    if (!output || input.bad())
+                        throw std::runtime_error("Could not write copied asset");
+                    if (from.extension() != ".meta" &&
+                        (from.filename().string().empty() ||
+                            from.filename().string().front() != '.'))
+                    {
+                        std::optional<Engine::Core::AssetRecord> record;
+                        try { record = Engine::Core::AssetRecord::Load(from); }
+                        catch (...) {}
+                        Engine::Core::AssetRecord::Ensure(to,
+                            record ? fs::path(record->sourcePath) : from,
+                            record ? record->importSettings :
+                                Engine::Model::AssetImportSettings{});
+                    }
+                    ++copied;
+                    control->SetProgress(0.1f + 0.85f *
+                        static_cast<float>(copied) /
+                        static_cast<float>(std::max<size_t>(1, fileCount)));
+                };
+                if (directory)
+                {
+                    if (!fs::create_directory(destination))
+                        throw std::runtime_error("Destination already exists");
+                    created = true;
+                    for (fs::recursive_directory_iterator it(request.source), end;
+                        it != end; ++it)
+                    {
+                        AssetJobCheckpoint();
+                        if (it->is_symlink()) { it.disable_recursion_pending(); continue; }
+                        const fs::path target = destination /
+                            it->path().lexically_relative(request.source);
+                        if (it->is_directory()) fs::create_directories(target);
+                        else if (it->is_regular_file())
+                        {
+                            if (it->path().filename() == ".assetlocations.json")
+                                continue;
+                            if (it->path().extension() == ".meta")
+                            {
+                                const std::string path = it->path().string();
+                                if (fs::exists(fs::path(path.substr(0, path.size() - 5))))
+                                    continue;
+                            }
+                            copyFile(it->path(), target);
+                        }
+                    }
+                }
+                else
+                {
+                    created = true;
+                    copyFile(request.source, destination);
+                }
+                AssetJobCheckpoint(1.f);
+                result.path = destination.string();
+            }
+            catch (const std::exception& exception)
+            {
+                result.cancelled = control->cancelled.load(std::memory_order_acquire);
+                if (created && !destination.empty() &&
+                    IsPathWithin(request.assetsRoot, destination))
+                {
+                    std::error_code ignored;
+                    fs::remove_all(destination, ignored);
+                    fs::remove(Engine::Core::AssetRecord::SidecarPath(destination),
+                        ignored);
+                }
+                result.error = exception.what();
+            }
+            return result;
+        });
+}
+
+bool AssetsExplorerView::PollCopyJobs()
+{
+    if (!m_copyPending.valid())
+    {
+        StartNextCopyJob();
+        return !m_copyQueue.empty();
+    }
+    if (m_copyPending.wait_for(std::chrono::seconds(0)) !=
+        std::future_status::ready) return true;
+    const CopyResult result = m_copyPending.get();
+    const bool cancelled = result.cancelled ||
+        (m_copyControl && m_copyControl->cancelled.load(
+            std::memory_order_acquire));
+    m_copyControl.reset();
+    if (cancelled && !result.path.empty())
+    {
+        const fs::path path = result.path;
+        const fs::path root = result.assetsRoot;
+        Engine::Threading::JobScheduler::Get().Submit([path, root] {
+            if (!IsPathWithin(root, path)) return;
+            std::error_code ignored;
+            fs::remove_all(path, ignored);
+            fs::remove(Engine::Core::AssetRecord::SidecarPath(path), ignored);
+        });
+    }
+    std::error_code rootError;
+    const fs::path currentRoot = fs::weakly_canonical(m_assetsPath, rootError);
+    if (!cancelled && !rootError &&
+        fs::path(result.assetsRoot) == currentRoot)
+    {
+        if (!result.error.empty())
+            m_error = "Could not copy asset: " + result.error;
+        else
+        {
+            m_error.clear();
+            SelectPath(result.path);
+            if (OnAssetContentsChanged) OnAssetContentsChanged(result.path);
+            CheckForExternalMoves();
+        }
+    }
+    StartNextCopyJob();
     return true;
 }
 
@@ -1369,7 +1530,7 @@ void AssetsExplorerView::PasteClipboard(const std::string& directory)
             success = MoveAssetPath(source, directory, &destination);
         else
             success = CopyExternalPath(source, directory, &destination);
-        if (success)
+        if (success && !destination.empty())
             pasted.push_back(destination);
         else
         {

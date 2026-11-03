@@ -1,4 +1,5 @@
 #include "SoftTissueSurface.h"
+#include "Core/Threading/JobScheduler.h"
 #include "SkinnedMesh.h"
 #include "Skeleton.h"
 #include "Core/Compoonents/Physics/MeshObjectCollider.h"
@@ -266,7 +267,7 @@ void SoftTissueSurface::PostPhysicsUpdate(float fixedDelta)
     };
 
     std::vector<glm::vec3> target(posed.size(), glm::vec3(0.f));
-    for (size_t index = 0; index < posed.size(); ++index)
+    Engine::Threading::JobScheduler::Get().For(posed.size(), 1024, [&](size_t index)
     {
         float strain = 0.f;
         unsigned edges = 0;
@@ -285,7 +286,7 @@ void SoftTissueSurface::PostPhysicsUpdate(float fixedDelta)
             target[index] = Normal(posed[index]) *
                 std::clamp(poseStrength, 0.f, limit) *
                 (strain / static_cast<float>(edges)) * mask(index);
-    }
+    });
 
     std::unordered_set<uint64_t> currentContacts;
     std::vector<glm::vec3> currentContactPoints;
@@ -365,7 +366,7 @@ void SoftTissueSurface::PostPhysicsUpdate(float fixedDelta)
     m_previousContacts = std::move(currentContacts);
     m_previousContactPoints = std::move(currentContactPoints);
 
-    for (size_t index = 0; index < m_offset.size(); ++index)
+    Engine::Threading::JobScheduler::Get().For(m_offset.size(), 1024, [&](size_t index)
     {
         const float denominator = 1.f + 2.f * dampingRatio * frequency * dt +
             frequency * frequency * dt * dt;
@@ -381,7 +382,7 @@ void SoftTissueSurface::PostPhysicsUpdate(float fixedDelta)
             m_offset[index] *= limit / length;
             m_velocity[index] = glm::vec3(0.f);
         }
-    }
+    });
     const float strainLimit = std::clamp(maxEdgeStrain, 0.f, 1.f);
     for (size_t index = 0; index < m_offset.size(); ++index)
         for (uint32_t neighbor : m_neighbors[index])

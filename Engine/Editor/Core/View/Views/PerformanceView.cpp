@@ -472,8 +472,10 @@ void PerformanceView::SetFrameTimings(const EditorFrameProfileSample& sample,
     {
         m_recording->Frame(m_lastUiFrameRate,sample.deltaSeconds*1000.,m_lastPanelDrawMs);
         if (!IsOpen()) Refresh(sample.deltaSeconds > 0.f ? 1.f / sample.deltaSeconds : 0.f);
+        auto recordedSample = sample;
+        recordedSample.writer = m_recording->GetWriterStatistics();
         m_recording->FrameDetails(
-            EditorFrameProfiler::CaptureFields(sample, m_scene, renderer));
+            EditorFrameProfiler::CaptureFields(recordedSample, m_scene, renderer));
     }
     m_hasFrameTimings = true;
     m_frameTimings = {

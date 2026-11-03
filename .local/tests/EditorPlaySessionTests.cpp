@@ -2,6 +2,7 @@
 #include "Engine/Editor/Startup/EditorStartupSettings.h"
 #include "Engine/Editor/Core/View/ViewFactory.h"
 #include "Core/SceneManager.h"
+#include "Core/Compoonents/Obj/TerrainManager.h"
 #include <imgui.h>
 #include <chrono>
 #include <iostream>
@@ -36,7 +37,11 @@ int main(int argc, char** argv)
         {
             std::cout << "Loading full grass scene; waiting for completion.\n";
             editor.LoadStartupScene("Engine/Core/Assets/Scenes/terrain/grass_flat_test.scene");
-            Require(original->GetObjects().size() >= 885, "full grass scene did not load");
+            auto* landscape = original->FindObjectByName("Grass Terrain Landscape");
+            auto* manager = landscape ? landscape->GetComponent<Engine::Components::TerrainManager>() : nullptr;
+            Require(manager && manager->GetStreamedPrefabCellCount() == 440 &&
+                original->GetObjects().size() < 100,
+                "grass scene did not load as a streamed grid");
         }
         auto* authored = original->AddObject("Retained authored object");
         authored->transform.position = {1.f, 2.f, 3.f};
@@ -57,27 +62,27 @@ int main(int argc, char** argv)
         hierarchy->OnHierarchyChanged();
         editor.TrackSceneChanges(true, false);
         Require(editor.CanUndo(), "fixture did not create undo history");
+        Engine::Scene::Scene::ObjectPath authoredPath;
+        Require(original->TryGetObjectPath(authored, authoredPath),
+            "authored object has no scene path");
         const auto baseline = original->SaveSnapshotToString();
         editor.SetHasUnsavedChanges(true);
         const bool dirty = editor.HasUnsavedChanges();
         const int cycles = grass ? 1 : 3;
         for (int cycle = 0; cycle < cycles; ++cycle)
         {
-            std::cout << "Creating runtime copy for cycle " << cycle + 1 << ".\n";
+            std::cout << "Starting play for cycle " << cycle + 1 << ".\n";
             const auto start = std::chrono::steady_clock::now();
-            Require(editor.CapturePlayModeScene(), "runtime copy failed");
+            Require(editor.CapturePlayModeScene(), "play snapshot failed");
             auto* runtime = editor.GetScene();
-            Require(runtime != original, "Play used authored scene");
+            Require(runtime == original, "Play replaced the editor scene");
             Require(Engine::Core::SceneManager::GetActiveScene() == runtime,
-                "scene manager kept edit scene active");
+                "scene manager changed scenes for Play");
             Require(hierarchy->GetScene() == runtime && properties->GetScene() == runtime,
-                "editor panels did not follow runtime scene");
-            Require(editor.CapturePlayModeScene() && editor.GetScene() == runtime,
-                "duplicate capture replaced active session");
+                "editor panels lost the scene");
             auto newView = editor.GetViewFactory()->Create("Game");
             Require(dynamic_cast<Engine::Editor::GameView*>(newView.get())->GetScene() == runtime,
-                "new panels use dormant edit scene");
-            // New panels must participate in Stop rebinding too.
+                "new panels use the wrong scene");
             editor.GetPanels().push_back(std::move(newView));
             runtime->Start();
             runtime->Update(1.f / 60.f);
@@ -85,18 +90,18 @@ int main(int argc, char** argv)
             if (!grass) runtime->ClearObjects();
             runtime->AddObject("Runtime replacement");
             runtime->CommitPendingObjectChanges();
-            Require(authored->OwnerScene == original &&
-                authored->transform.position == glm::dvec3(1.0, 2.0, 3.0),
-                "runtime mutated retained objects");
             const auto stop = std::chrono::steady_clock::now();
             editor.RestorePlayModeScene();
             const double stopMs = std::chrono::duration<double, std::milli>(
                 std::chrono::steady_clock::now() - stop).count();
-            Require(editor.GetScene() == original, "Stop recreated edit scene");
+            Require(editor.GetScene() == original, "Stop replaced the editor scene");
             Require(Engine::Core::SceneManager::GetActiveScene() == original,
-                "scene manager kept runtime scene active");
+                "scene manager changed scenes after Stop");
             Require(original->SaveSnapshotToString() == baseline,
                 "Stop changed authored state");
+            authored = original->FindObjectByPath(authoredPath);
+            Require(authored && authored->transform.position == glm::dvec3(1.0, 2.0, 3.0),
+                "Stop did not restore the authored object");
             Require(hierarchy->GetSelectedObject() == authored &&
                 properties->GetSelectedObject() == authored,
                 "Stop did not restore original selection pointers");
@@ -132,7 +137,7 @@ int main(int argc, char** argv)
         editor.ReleaseUiPanels();
         Require(editor.GetPanels().empty() && !editor.GetConsole() && !editor.GetViewFactory(),
             "UI release left live panel/factory bindings");
-        std::cout << "Retained edit scene Play/Stop checks passed.\n";
+        std::cout << "Original scene Play/Stop checks passed.\n";
     }
     catch (const std::exception& error)
     {

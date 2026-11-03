@@ -1,4 +1,5 @@
 #include "PmxModelDecoder.h"
+#include "AssetJobControl.h"
 
 #include <Windows.h>
 #include <algorithm>
@@ -242,6 +243,9 @@ bool PmxModelDecoder::Decode(const std::string& sourcePath,
         std::vector<std::array<int, 4>> vertexBones(vertexCount);
         for (int i = 0; i < vertexCount; ++i)
         {
+            if ((i & 1023) == 0)
+                AssetJobCheckpoint(0.05f + 0.2f * static_cast<float>(i) /
+                    (std::max)(1, vertexCount));
             auto& vertex = vertices[i];
             const auto position = reader.Vec3();
             const auto normal = reader.Vec3();
@@ -339,6 +343,7 @@ bool PmxModelDecoder::Decode(const std::string& sourcePath,
         int toonMaterials = 0, outlineMaterials = 0;
         for (int i = 0; i < materialCount; ++i)
         {
+            AssetJobCheckpoint(0.3f);
             auto& material = model.materials.emplace_back();
             const std::string local = reader.Text(utf8);
             const std::string english = reader.Text(utf8);
@@ -411,6 +416,7 @@ bool PmxModelDecoder::Decode(const std::string& sourcePath,
         int afterPhysicsBones = 0, externalParentBones = 0;
         for (int i = 0; i < boneCount; ++i)
         {
+            AssetJobCheckpoint(0.38f);
             const std::string local = reader.Text(utf8);
             const std::string english = reader.Text(utf8);
             // VMD bone keys use the local MMD names.
@@ -500,6 +506,7 @@ bool PmxModelDecoder::Decode(const std::string& sourcePath,
         std::vector<int> impulseRigidReferences;
         for (int i = 0; i < morphCount; ++i)
         {
+            AssetJobCheckpoint(0.45f);
             PmxMorph& morph = morphs[i];
             const std::string local = reader.Text(utf8);
             const std::string english = reader.Text(utf8);

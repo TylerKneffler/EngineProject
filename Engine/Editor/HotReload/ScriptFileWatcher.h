@@ -1,5 +1,6 @@
 #pragma once
 #include <filesystem>
+#include <future>
 #include <chrono>
 #include <memory>
 #include <string>
@@ -23,11 +24,17 @@ private:
     using Stamp = std::filesystem::file_time_type;
     struct NotificationState;
 
-    std::unordered_map<std::string, Stamp> Scan() const;
+    static std::unordered_map<std::string, Stamp> Scan(const std::filesystem::path& directory);
+    void RequestScan(bool detectChanges);
+    bool CompleteScan();
     bool PollFallback(std::chrono::steady_clock::time_point now);
     std::filesystem::path m_directory;
     std::unordered_map<std::string, Stamp> m_files;
     std::unique_ptr<NotificationState> m_notifications;
+    std::future<std::unordered_map<std::string, Stamp>> m_scan;
+    bool m_scanDetectChanges = false;
+    bool m_scanRequested = false;
+    bool m_requestedDetectChanges = false;
     std::chrono::steady_clock::time_point m_nextFallbackScan{};
     std::chrono::steady_clock::time_point m_lastRelevantChange{};
     bool m_debouncedChangePending = false;

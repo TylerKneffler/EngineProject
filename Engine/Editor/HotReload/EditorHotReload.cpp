@@ -18,6 +18,7 @@ EditorHotReload::EditorHotReload(EditorState& editorState, ConsoleView* console,
 
 EditorHotReload::~EditorHotReload()
 {
+    if (m_staging.valid()) m_staging.wait();
     if (m_moduleJobs) m_moduleJobs->CloseAndWait();
     if (m_setJobHost) m_setJobHost(nullptr);
     if (m_process)
@@ -48,7 +49,9 @@ void EditorHotReload::Update(bool editorFocused)
         DrainOutput();
         PollCompile();
     }
-    else if (editorFocused && m_dirty)
+    PollStaging();
+    if (!m_process && !m_staging.valid() && m_stagedModule.empty() &&
+        editorFocused && m_dirty)
     {
         StartCompile();
     }
@@ -135,23 +138,32 @@ void EditorHotReload::StartCompile()
 void EditorHotReload::DrainOutput()
 {
     DWORD available = 0;
-    while (m_pipe && PeekNamedPipe(m_pipe, nullptr, 0, nullptr, &available, nullptr) && available)
+    // Reading and formatting an unbounded build log can stall a frame.
+    constexpr DWORD budget = 16 * 1024;
+    constexpr DWORD lineBudget = 128;
+    DWORD consumed = 0;
+    DWORD lines = 0;
+    while (consumed < budget && lines < lineBudget && m_pipe &&
+        PeekNamedPipe(m_pipe, nullptr, 0, nullptr, &available, nullptr) && available)
     {
-        char bytes[1024];
+        char bytes[256];
         DWORD read = 0;
-        if (!ReadFile(m_pipe, bytes, std::min<DWORD>(available, sizeof(bytes)),
+        if (!ReadFile(m_pipe, bytes, std::min<DWORD>({available,
+            static_cast<DWORD>(sizeof(bytes)), budget - consumed}),
             &read, nullptr) || !read)
             break;
+        consumed += read;
         for (DWORD index = 0; index < read; ++index)
         {
             if (bytes[index] == '\n')
             {
+                ++lines;
                 if (!m_lineBuffer.empty() && m_lineBuffer.back() == '\r')
                     m_lineBuffer.pop_back();
                 if (!m_lineBuffer.empty()) Log(ConsoleView::Level::Build, m_lineBuffer);
                 m_lineBuffer.clear();
             }
-            else m_lineBuffer.push_back(bytes[index]);
+            else if (m_lineBuffer.size() < 4096) m_lineBuffer.push_back(bytes[index]);
         }
     }
 }
@@ -160,7 +172,9 @@ void EditorHotReload::PollCompile()
 {
     if (!m_process || WaitForSingleObject(m_process, 0) == WAIT_TIMEOUT)
         return;
-    DrainOutput();
+    DWORD available = 0;
+    if (m_pipe && PeekNamedPipe(m_pipe, nullptr, 0, nullptr, &available, nullptr) && available)
+        return;
     DWORD exitCode = 1;
     GetExitCodeProcess(m_process, &exitCode);
     CloseHandle(m_process);
@@ -187,16 +201,76 @@ void EditorHotReload::PollCompile()
         return;
     }
 
-    m_editorState.SetLoadingOverlay(true, "Loading scripts...");
-    m_applying = true;
-    const bool applied = ApplyModule();
-    m_applying = false;
+    m_editorState.SetLoadingOverlay(true, "Preparing scripts...");
+    const auto source = m_modulePath;
+    const auto runtimeDirectory = m_buildDirectory / ".hotreload";
+    const auto generation = ++m_generation;
+    m_staging = std::async(std::launch::async,
+        [source, runtimeDirectory, generation]
+        {
+            StagedModule result;
+            std::error_code error;
+            if (!std::filesystem::exists(source, error)) return result;
+            std::filesystem::create_directories(runtimeDirectory, error);
+            if (error) return result;
+            const auto directory = runtimeDirectory /
+                ("ProjectScripts_" + std::to_string(generation));
+            std::filesystem::create_directories(directory, error);
+            if (error) return result;
+            const auto candidate = directory / source.filename();
+            if (!std::filesystem::copy_file(source, candidate,
+                std::filesystem::copy_options::overwrite_existing, error))
+                return result;
+            auto symbols = source;
+            symbols.replace_extension(".pdb");
+            error.clear();
+            if (std::filesystem::exists(symbols, error))
+            {
+                error.clear();
+                std::filesystem::copy_file(symbols, directory / symbols.filename(),
+                    std::filesystem::copy_options::overwrite_existing, error);
+                if (error) result.symbolsError = error.message();
+            }
+            result.path = candidate;
+            return result;
+        });
+}
+
+void EditorHotReload::PollStaging()
+{
+    if (!m_staging.valid() ||
+        m_staging.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+        return;
+    const auto staged = m_staging.get();
     m_buildTreeLock.Release();
+    if (!staged.symbolsError.empty())
+        Log(ConsoleView::Level::Error,
+            "Could not copy script debug symbols: " + staged.symbolsError);
+    if (staged.path.empty())
+    {
+        m_editorState.SetLoadingOverlay(false);
+        Log(ConsoleView::Level::Error,
+            "Could not prepare compiled scripts; the last working scripts are still active.");
+        m_editorState.CheckAssetLocations();
+        return;
+    }
+    m_stagedModule = staged.path;
+    m_editorState.SetLoadingOverlay(true, "Loading scripts...");
+}
+
+bool EditorHotReload::PublishPending()
+{
+    if (m_stagedModule.empty()) return false;
+    m_applying = true;
+    const bool applied = ApplyModule(m_stagedModule);
+    m_applying = false;
+    m_stagedModule.clear();
     m_editorState.SetLoadingOverlay(false);
     Log(applied ? ConsoleView::Level::Info : ConsoleView::Level::Error,
         applied ? "Scripts compiled and loaded." :
         "Could not load compiled scripts; the last working scripts are still active.");
     m_editorState.CheckAssetLocations();
+    return true;
 }
 
 bool EditorHotReload::LoadModule(const std::filesystem::path& path,
@@ -227,35 +301,11 @@ bool EditorHotReload::LoadModule(const std::filesystem::path& path,
     return true;
 }
 
-bool EditorHotReload::ApplyModule()
+bool EditorHotReload::ApplyModule(const std::filesystem::path& candidatePath)
 {
     std::error_code error;
-    if (!std::filesystem::exists(m_modulePath, error)) return false;
-    const std::filesystem::path runtimeDirectory =
-        m_buildDirectory / ".hotreload";
-    std::filesystem::create_directories(runtimeDirectory, error);
-    if (error) return false;
-    const std::filesystem::path candidateDirectory = runtimeDirectory /
-        ("ProjectScripts_" + std::to_string(++m_generation));
-    std::filesystem::create_directories(candidateDirectory, error);
-    if (error) return false;
-    const std::filesystem::path candidatePath =
-        candidateDirectory / m_modulePath.filename();
-    if (!std::filesystem::copy_file(m_modulePath, candidatePath,
-        std::filesystem::copy_options::overwrite_existing, error))
-        return false;
     std::filesystem::path symbolsPath = m_modulePath;
     symbolsPath.replace_extension(".pdb");
-    if (std::filesystem::exists(symbolsPath, error))
-    {
-        error.clear();
-        std::filesystem::copy_file(symbolsPath,
-            candidateDirectory / symbolsPath.filename(),
-            std::filesystem::copy_options::overwrite_existing, error);
-        if (error)
-            Log(ConsoleView::Level::Error,
-                "Could not copy script debug symbols: " + error.message());
-    }
 
     HMODULE candidate = nullptr;
     std::vector<std::string> candidateTypes;

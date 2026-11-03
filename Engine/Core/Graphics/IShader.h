@@ -58,6 +58,9 @@ public:
         const char* entryPoint,
         CompileProfile profile) = 0;
 
+    // A separate instance keeps diagnostic state private to worker jobs.
+    virtual std::unique_ptr<IShaderCompiler> CreateWorkerCompiler() const = 0;
+
     // Get the last compilation error message
     virtual std::string GetLastError() const = 0;
 };

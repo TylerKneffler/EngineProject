@@ -1,4 +1,5 @@
 #include "VmdMotionDecoder.h"
+#include "AssetJobControl.h"
 
 #include <algorithm>
 #include <cmath>
@@ -150,6 +151,7 @@ bool VmdMotionDecoder::DecodeFile(const std::string& path, VmdMotion& motion,
     std::vector<uint8_t> bytes(static_cast<size_t>(size));
     if (!file.read(reinterpret_cast<char*>(bytes.data()), size))
     { error = "Could not read VMD file"; return false; }
+    AssetJobCheckpoint(0.1f);
     return DecodeBytes(bytes, motion, error);
 }
 
@@ -173,6 +175,7 @@ bool VmdMotionDecoder::DecodeBytes(const std::vector<uint8_t>& bytes,
         std::map<std::pair<std::string, uint32_t>, VmdBoneFrame> bones;
         for (uint32_t index = 0, count = reader.Count("bone", 111); index < count; ++index)
         {
+            if ((index & 1023u) == 0) AssetJobCheckpoint(0.15f);
             VmdBoneFrame value;
             value.name = Name(reader, 15);
             value.frame = reader.U32();
@@ -188,6 +191,7 @@ bool VmdMotionDecoder::DecodeBytes(const std::vector<uint8_t>& bytes,
         std::map<std::pair<std::string, uint32_t>, VmdMorphFrame> morphs;
         for (uint32_t index = 0, count = reader.Count("morph", 23); index < count; ++index)
         {
+            if ((index & 1023u) == 0) AssetJobCheckpoint(0.25f);
             VmdMorphFrame value;
             value.name = Name(reader, 15);
             value.frame = reader.U32();
@@ -204,6 +208,7 @@ bool VmdMotionDecoder::DecodeBytes(const std::vector<uint8_t>& bytes,
             std::map<uint32_t, VmdCameraFrame> cameras;
             for (uint32_t index = 0; index < motion.cameraFrames; ++index)
             {
+                if ((index & 1023u) == 0) AssetJobCheckpoint(0.32f);
                 VmdCameraFrame value;
                 value.frame = reader.U32();
                 value.timeSeconds = static_cast<float>(value.frame / 30.0);

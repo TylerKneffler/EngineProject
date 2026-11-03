@@ -8,6 +8,8 @@
 #include "Core/Compoonents/Physics/MeshObjectCollider.h"
 #include "Core/Physics/Physics.h"
 #include "Core/Scene/Scene.h"
+#include "Core/Scene/Spatial/PortalMapping.h"
+#include "Core/Threading/JobScheduler.h"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -376,15 +378,19 @@ void SpatialManipulator::ApplyTraversalMeshDeformation(SpatialManipulator* targe
     localVertices.reserve(localHalf.size());
     for (const Mesh::Vertex& vertex : localHalf)
         localVertices.emplace_back(vertex.pos[0], vertex.pos[1], vertex.pos[2]);
-    std::vector<glm::vec3> remoteWorldVertices;
-    remoteWorldVertices.reserve(remoteHalf.size());
-    for (Mesh::Vertex& vertex : remoteHalf)
+    const Engine::Scene::Spatial::PortalMapping portalMapping(
+        GetWorldPortalShapePoints(), target->GetWorldPortalShapePoints(),
+        GetPortalWorldFrame(), target->GetPortalWorldFrame());
+    std::vector<glm::vec3> remoteWorldVertices(remoteHalf.size());
+    Engine::Threading::JobScheduler::Get().For(remoteHalf.size(), 256,
+        [&](size_t index)
     {
+        Mesh::Vertex& vertex = remoteHalf[index];
         const glm::vec3 localPosition(vertex.pos[0], vertex.pos[1], vertex.pos[2]);
         const glm::vec3 sourceWorldPosition = glm::vec3(bodyWorld *
             glm::vec4(localPosition, 1.f));
         const glm::vec3 mappedWorldPosition = piecewiseWarp
-            ? MapWorldPointThroughPortalShape(sourceWorldPosition, *target)
+            ? portalMapping.MapPoint(sourceWorldPosition)
             : glm::vec3(portalWorldTransform *
                 glm::vec4(sourceWorldPosition, 1.f));
         const glm::vec3 mappedLocal = glm::vec3(bodyWorldInverse *
@@ -392,7 +398,7 @@ void SpatialManipulator::ApplyTraversalMeshDeformation(SpatialManipulator* targe
         vertex.pos[0] = mappedLocal.x;
         vertex.pos[1] = mappedLocal.y;
         vertex.pos[2] = mappedLocal.z;
-        remoteWorldVertices.push_back(mappedWorldPosition);
+        remoteWorldVertices[index] = mappedWorldPosition;
 
         const glm::vec3 localNormal(vertex.normal[0], vertex.normal[1],
             vertex.normal[2]);
@@ -402,9 +408,8 @@ void SpatialManipulator::ApplyTraversalMeshDeformation(SpatialManipulator* targe
             const glm::vec3 sourceWorldNormal = SafeNormalize(
                 glm::transpose(glm::inverse(glm::mat3(bodyWorld))) * localNormal,
                 glm::vec3(0.f, 0.f, 1.f));
-            const glm::vec3 mappedWorldNormal =
-                MapWorldNormalThroughPortalShape(sourceWorldPosition,
-                    sourceWorldNormal, *target);
+            const glm::vec3 mappedWorldNormal = portalMapping.MapNormal(
+                sourceWorldPosition, sourceWorldNormal);
             mappedLocalNormal = SafeNormalize(glm::transpose(glm::mat3(bodyWorld)) *
                 mappedWorldNormal, glm::vec3(0.f, 0.f, 1.f));
         }
@@ -424,9 +429,8 @@ void SpatialManipulator::ApplyTraversalMeshDeformation(SpatialManipulator* targe
             {
                 const glm::vec3 sourceWorldTangent = glm::mat3(bodyWorld) *
                     localTangent;
-                const glm::vec3 mappedWorldTangent =
-                    MapWorldDirectionThroughPortalShape(sourceWorldPosition,
-                        sourceWorldTangent, *target);
+                const glm::vec3 mappedWorldTangent = portalMapping.MapDirection(
+                    sourceWorldPosition, sourceWorldTangent);
                 const glm::vec3 mappedLocalTangent = SafeNormalize(
                     glm::mat3(bodyWorldInverse) * mappedWorldTangent,
                     localTangent);
@@ -435,7 +439,7 @@ void SpatialManipulator::ApplyTraversalMeshDeformation(SpatialManipulator* targe
                 vertex.tangent[2] = mappedLocalTangent.z;
             }
         }
-    }
+    });
 
     state.localMeshVertices = localHalf;
     state.remoteMeshVertices = remoteHalf;
@@ -889,14 +893,19 @@ void SpatialManipulator::UpdateTriggerTraversal(SpatialManipulator* target,
                     const glm::mat4 mappedBodyWorld =
                         body->Owner->transform.GetWorldMatrix();
                     const glm::mat4 mappedBodyInverse = glm::inverse(mappedBodyWorld);
-                    for (Mesh::Vertex& vertex : warpedVertices)
+                    const Engine::Scene::Spatial::PortalMapping portalMapping(
+                        GetWorldPortalShapePoints(), target->GetWorldPortalShapePoints(),
+                        GetPortalWorldFrame(), target->GetPortalWorldFrame());
+                    Engine::Threading::JobScheduler::Get().For(warpedVertices.size(), 256,
+                        [&](size_t index)
                     {
+                        Mesh::Vertex& vertex = warpedVertices[index];
                         const glm::vec3 localPosition(vertex.pos[0], vertex.pos[1],
                             vertex.pos[2]);
                         const glm::vec3 oldWorldPosition(bodyWorld *
                             glm::vec4(localPosition, 1.f));
                         const glm::vec3 newWorldPosition =
-                            MapWorldPointThroughPortalShape(oldWorldPosition, *target);
+                            portalMapping.MapPoint(oldWorldPosition);
                         const glm::vec3 newLocalPosition(mappedBodyInverse *
                             glm::vec4(newWorldPosition, 1.f));
                         vertex.pos[0] = newLocalPosition.x;
@@ -908,9 +917,8 @@ void SpatialManipulator::UpdateTriggerTraversal(SpatialManipulator* target,
                         const glm::vec3 oldWorldNormal = SafeNormalize(
                             glm::transpose(glm::inverse(glm::mat3(bodyWorld))) *
                                 localNormal, glm::vec3(0.f, 0.f, 1.f));
-                        const glm::vec3 newWorldNormal =
-                            MapWorldNormalThroughPortalShape(oldWorldPosition,
-                                oldWorldNormal, *target);
+                        const glm::vec3 newWorldNormal = portalMapping.MapNormal(
+                            oldWorldPosition, oldWorldNormal);
                         const glm::vec3 newLocalNormal = SafeNormalize(
                             glm::transpose(glm::mat3(mappedBodyWorld)) *
                                 newWorldNormal, localNormal);
@@ -924,8 +932,8 @@ void SpatialManipulator::UpdateTriggerTraversal(SpatialManipulator* target,
                             const glm::vec3 oldWorldTangent =
                                 glm::mat3(bodyWorld) * localTangent;
                             const glm::vec3 newWorldTangent =
-                                MapWorldDirectionThroughPortalShape(
-                                    oldWorldPosition, oldWorldTangent, *target);
+                                portalMapping.MapDirection(oldWorldPosition,
+                                    oldWorldTangent);
                             const glm::vec3 newLocalTangent = SafeNormalize(
                                 glm::mat3(mappedBodyInverse) * newWorldTangent,
                                 localTangent);
@@ -933,7 +941,7 @@ void SpatialManipulator::UpdateTriggerTraversal(SpatialManipulator* target,
                             vertex.tangent[1] = newLocalTangent.y;
                             vertex.tangent[2] = newLocalTangent.z;
                         }
-                    }
+                    });
                     warpedMesh->SetDeformedVertices(warpedVertices);
                     for (Engine::Core::Component* component :
                         body->Owner->Components)
