@@ -45,6 +45,10 @@ public:
     // (resize, input, property edits, scene changes, etc.).
     virtual void MarkDirty() = 0;
     virtual bool IsDirty() const = 0;
+    // Poll on the graphics owner after RenderIfNeeded has submitted its frame.
+    virtual bool SupportsFrameCompletion() const { return false; }
+    virtual uint64_t GetSubmittedFrameToken() const { return 0; }
+    virtual bool IsFrameComplete(uint64_t token) { return token == 0; }
 
     virtual void SetUiRenderHooks(EditorUiRenderHooks hooks) = 0;
     virtual void SetUiTextureHooks(EditorUiTextureHooks) {}

@@ -931,6 +931,41 @@ endif()
 
 set(ENGINE_LOCAL_TEST_ROOT "${ENGINE_ROOT}/.local/tests")
 
+if(NOT ENGINE_PROJECT_DIR AND WIN32 AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/EditorPlayPipelineTests.cpp")
+    enable_testing()
+    add_executable(EditorPlayPipelineTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/EditorPlayPipelineTests.cpp"
+        "${ENGINE_ROOT}/Engine/Editor/Runtime/EditorPlayPipeline.cpp")
+    target_link_libraries(EditorPlayPipelineTests PRIVATE Engine)
+    target_include_directories(EditorPlayPipelineTests PRIVATE "${ENGINE_ROOT}/Engine")
+    add_test(NAME EditorPlayPipeline COMMAND EditorPlayPipelineTests)
+    set_tests_properties(EditorPlayPipeline PROPERTIES TIMEOUT 30)
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND WIN32 AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/EditorPlaySessionTests.cpp")
+    enable_testing()
+    set(EDITOR_PLAY_TEST_SOURCES ${EDITOR_SOURCES})
+    list(FILTER EDITOR_PLAY_TEST_SOURCES EXCLUDE REGEX "/Main\\.cpp$")
+    add_executable(EditorPlaySessionTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/EditorPlaySessionTests.cpp"
+        ${EDITOR_PLAY_TEST_SOURCES} ${ASSET_SOURCES})
+    foreach(property INCLUDE_DIRECTORIES COMPILE_DEFINITIONS LINK_LIBRARIES)
+        get_target_property(editor_play_${property} Editor ${property})
+        set_property(TARGET EditorPlaySessionTests PROPERTY ${property}
+            "${editor_play_${property}}")
+    endforeach()
+    target_precompile_headers(EditorPlaySessionTests REUSE_FROM Engine)
+    if(MSVC)
+        target_compile_options(EditorPlaySessionTests PRIVATE /MP)
+    endif()
+    add_dependencies(EditorPlaySessionTests ProjectScripts)
+    add_test(NAME EditorPlaySession COMMAND EditorPlaySessionTests)
+    set_tests_properties(EditorPlaySession PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}" TIMEOUT 120)
+endif()
+
 if(NOT ENGINE_PROJECT_DIR AND
    EXISTS "${ENGINE_LOCAL_TEST_ROOT}/GameViewInputTests.cpp")
     enable_testing()
@@ -2192,6 +2227,14 @@ if(NOT ENGINE_PROJECT_DIR AND WIN32 AND
         "${ENGINE_ROOT}/Engine" "${ENGINE_ROOT}/Engine/Core/Assets")
     add_test(NAME GrassPerformance COMMAND GrassPerformanceTests)
     set_tests_properties(GrassPerformance PROPERTIES WORKING_DIRECTORY "${ENGINE_ROOT}")
+    add_test(NAME ShadowSparseSlotsDX11 COMMAND GrassPerformanceTests --fade-render-check)
+    add_test(NAME ShadowSparseSlotsDX12 COMMAND GrassPerformanceTests --instance-render-dx12)
+    set_tests_properties(ShadowSparseSlotsDX11 ShadowSparseSlotsDX12
+        PROPERTIES WORKING_DIRECTORY "${ENGINE_ROOT}")
+    if(ENGINE_VULKAN_ENABLED)
+        add_test(NAME ShadowSparseSlotsVulkan COMMAND GrassPerformanceTests --instance-render-vulkan)
+        set_tests_properties(ShadowSparseSlotsVulkan PROPERTIES WORKING_DIRECTORY "${ENGINE_ROOT}")
+    endif()
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND
@@ -2229,4 +2272,15 @@ if(NOT ENGINE_PROJECT_DIR AND
     target_link_libraries(RenderSpatialIndexTests PRIVATE glm::glm)
     add_test(NAME RenderSpatialIndex COMMAND RenderSpatialIndexTests)
     set_tests_properties(RenderSpatialIndex PROPERTIES WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/DrawBatchPreparationTests.cpp")
+    enable_testing()
+    add_executable(DrawBatchPreparationTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/DrawBatchPreparationTests.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Rendering/DrawBatchPreparation.cpp")
+    target_include_directories(DrawBatchPreparationTests PRIVATE "${ENGINE_ROOT}/Engine")
+    add_test(NAME DrawBatchPreparation COMMAND DrawBatchPreparationTests)
+    set_tests_properties(DrawBatchPreparation PROPERTIES WORKING_DIRECTORY "${ENGINE_ROOT}")
 endif()

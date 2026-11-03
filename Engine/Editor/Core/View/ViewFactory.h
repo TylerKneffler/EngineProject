@@ -54,6 +54,7 @@ public:
     // Supported names include the document views and all utility panels.
     // Returns nullptr if the type name is unknown or if no SRV slot is available for a 3-D view.
     std::unique_ptr<IEditorPanel> Create(const std::string& typeName);
+    void SetScene(Engine::Scene::Scene* scene) { m_scene = scene; }
 
     // Creates an additional scene viewport bound to an independent scene.
     // Used by prefab editing so the project Scene/Game views keep rendering

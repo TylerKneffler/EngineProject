@@ -23,6 +23,7 @@ public:
     void SetPointerInput(float x, float y, float viewportWidth,
         float viewportHeight, bool hovered, bool mouseDown);
     bool IsReady() const;
+    bool CaptureEmbeddedPointer(Engine::Core::NativeInputSnapshot& input) const;
 
 private:
     struct Impl;

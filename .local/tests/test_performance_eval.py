@@ -8,6 +8,34 @@ spec.loader.exec_module(evaluation)
 
 
 class PerformanceEvaluationTests(unittest.TestCase):
+    def test_editor_pipeline_reports_overlapping_work(self):
+        result = evaluation.evaluate([dict(type="frame_details", playing=True,
+            frame_ms=16, dt_ms=16, update_ms=0, render_ms=16,
+            editor_play_pipeline=True, simulation_ms=8,
+            simulation_cpu_ms=6, simulation_wait_ms=1,
+            simulation_overlap_ms=7, pipeline_record_ms=2)])
+        self.assertEqual(result["metrics"]["simulation_ms"]["mean"], 8)
+        self.assertEqual(result["effective_fps"], 62.5)
+        self.assertIn("simulation_overlap_ms", evaluation.markdown(result))
+        self.assertTrue(any("must not be added" in text for text in result["warnings"]))
+
+    def test_stop_freeze_survives_play_filtering(self):
+        rows = [dict(type="frame_details", frame=7, playing=True, dt_ms=16,
+                     frame_ms=55016, pending_load_ms=55000, render_ms=10),
+                dict(type="frame_details", frame=8, playing=False, dt_ms=55016, frame_ms=16)]
+        result = evaluation.evaluate(rows)
+        self.assertEqual(result["frames"], 1)
+        self.assertEqual(result["effective_fps"], 62.5)
+        self.assertEqual(result["session"]["frames"], 2)
+        self.assertAlmostEqual(result["session"]["effective_fps"], 1000 / 27516)
+        stall = result["session"]["stalls"][0]
+        self.assertEqual(stall["stage"], "pending_load_ms")
+        self.assertEqual(stall["stage_ms"], 55000)
+        self.assertTrue(stall["play_stop_transition"])
+        self.assertIn("55000.0", evaluation.markdown(result))
+        self.assertTrue(any("Stop freeze" in warning for warning in result["warnings"]))
+        self.assertEqual(evaluation.evaluate(rows, all_frames=True)["session"]["stalls"], result["session"]["stalls"])
+
     def test_async_writer_loss_is_reported(self):
         result = evaluation.evaluate([dict(type="frame_details", playing=True, frame_ms=10),
                                       dict(type="writer_summary", dropped_records=3, failed_records=1)])
@@ -137,6 +165,7 @@ class PerformanceEvaluationTests(unittest.TestCase):
         result = evaluation.evaluate([dict(type="frame_details", frame_ms=20,
             prepare_spatial_index_ms=2, prepare_spatial_compare_ms=.25,
             prepare_spatial_refit_ms=1.75, prepare_spatial_build_ms=0,
+            prepare_spatial_active_slots=100, prepare_spatial_retained_slots=1000,
             prepare_spatial_changed_bounds=1, prepare_spatial_reused_bounds=999,
             prepare_spatial_dirty_leaves=1, prepare_spatial_refit_nodes=8,
             prepare_spatial_rebuilds=0, prepare_spatial_quality_rebuilds=0)])
@@ -144,7 +173,18 @@ class PerformanceEvaluationTests(unittest.TestCase):
         report = evaluation.markdown(result)
         self.assertIn("prepare_spatial_index_ms", report)
         self.assertIn("prepare_spatial_rebuilds", report)
+        self.assertIn("prepare_spatial_active_slots", report)
+        self.assertTrue(any("inactive historical bounds" in warning for warning in result["warnings"]))
+        self.assertEqual(result["metrics"]["prepare_spatial_retained_slots"]["mean"], 1000)
         self.assertTrue(any("Spatial compare/refit/build" in warning for warning in result["warnings"]))
+
+    def test_worker_batch_preparation_fields(self):
+        result = evaluation.evaluate([dict(type="frame_details", frame_ms=20,
+            render_batch_snapshot_ms=.1, render_batch_build_ms=.2, render_batch_wait_ms=.05,
+            render_batch_eligible_draws=512, render_batch_cache_hits=1, render_batch_worker_jobs=1, render_batch_reused_keys=512)])
+        self.assertEqual(result["metrics"]["render_batch_eligible_draws"]["mean"], 512)
+        self.assertIn("render_batch_cache_hits", evaluation.markdown(result))
+        self.assertTrue(any("Worker grouping overlaps" in warning for warning in result["warnings"]))
 
     def test_partial_gpu_instrumentation_can_be_reported(self):
         result = evaluation.evaluate([dict(type="frame_details", playing=True, dt_ms=20,

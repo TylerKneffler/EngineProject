@@ -5,6 +5,7 @@
 #include <d3d11.h>
 #include <dxgi.h>
 #include <vector>
+#include <deque>
 
 namespace Engine::Renderers
 {
@@ -22,6 +23,10 @@ public:
     bool IsDirty() const override { return m_dirty; }
     void SetUiRenderHooks(EditorUiRenderHooks hooks) override { m_uiHooks = std::move(hooks); }
     void RenderIfNeeded(std::function<void()> drawFn = nullptr) override;
+    void WaitIdle() override;
+    bool SupportsFrameCompletion() const override { return true; }
+    uint64_t GetSubmittedFrameToken() const override { return m_submittedFrameToken; }
+    bool IsFrameComplete(uint64_t token) override;
     std::pair<std::pair<void*, void*>, uint32_t> AllocateSrvSlot() override;
     void FreeSrvSlot(uint32_t slotIndex) override;
     bool CanAllocateSrvSlot() const override { return !m_freeSrvSlots.empty(); }
@@ -60,5 +65,7 @@ private:
     double m_lastBeginUiMilliseconds = 0.0;
     double m_lastRenderSetupMilliseconds = 0.0;
     bool m_gpuTimingEnabled = false;
+    uint64_t m_submittedFrameToken = 0, m_completedFrameToken = 0;
+    std::deque<std::pair<uint64_t, Microsoft::WRL::ComPtr<ID3D11Query>>> m_frameCompletionQueries;
 };
 }

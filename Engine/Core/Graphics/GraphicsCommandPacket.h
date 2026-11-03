@@ -13,6 +13,19 @@ namespace Engine::Graphics
 class GraphicsCommandPacket final : public IGraphicsContext
 {
 public:
+    // Reuse only after GPU completion and after the last external reader has
+    // released the packet. Preserve command capacity, release resource owners.
+    void Reset()
+    {
+        m_commandCount = 0;
+        m_ownedBuffers.clear();
+        m_sharedBuffers.clear();
+        m_seenBuffers.clear();
+        m_ownedTextures.clear();
+        m_seenTextures.clear();
+        m_phase = NativePhase::Other;
+        m_replayOcclusionCulled.store(0, std::memory_order_relaxed);
+    }
     void RetainBuffer(std::unique_ptr<IGraphicsBuffer> buffer)
     { if (buffer) m_ownedBuffers.push_back(std::move(buffer)); }
     void RetainBuffer(std::shared_ptr<IGraphicsBuffer> buffer)
@@ -24,8 +37,9 @@ public:
         unsigned skippedDepthPasses = 0;
         bool skipOccludedDraw = false;
         uint32_t occlusionCulled = 0;
-        for (const Command& command : m_commands)
+        for (size_t index = 0; index < m_commandCount; ++index)
         {
+            const Command& command = m_commands[index];
             if (skippedDepthPasses)
             {
                 if (command.op == Op::BeginDepthOnlyPass) ++skippedDepthPasses;
@@ -116,6 +130,7 @@ public:
             c.bytes.resize(size);
             std::memcpy(c.bytes.data(), data, size);
         }
+        else c.bytes.clear();
     }
     void SetComputeReadBuffer(const IGraphicsBuffer* buffer, uint32_t slot = 0) override
     { TrackBuffer(buffer); auto& c = Add(Op::ComputeRead); c.pointer = buffer; c.n[0] = slot; }
@@ -197,7 +212,15 @@ private:
         ScissorRect scissor{};
         std::vector<uint8_t> bytes;
     };
-    Command& Add(Op op) { auto& command = m_commands.emplace_back(); command.op = op; return command; }
+    Command& Add(Op op)
+    {
+        if (m_commandCount == m_commands.size()) m_commands.emplace_back();
+        auto& command = m_commands[m_commandCount++];
+        // Every operation setter supplies all fields consumed by its replay
+        // case. Reuse the record and its byte-vector allocation after Reset.
+        command.op = op;
+        return command;
+    }
     void TrackBuffer(const IGraphicsBuffer* buffer)
     {
         if (buffer && m_seenBuffers.insert(buffer).second)
@@ -205,6 +228,7 @@ private:
                 m_sharedBuffers.push_back(std::move(owner));
     }
     std::vector<Command> m_commands;
+    size_t m_commandCount = 0;
     std::vector<std::unique_ptr<IGraphicsBuffer>> m_ownedBuffers;
     std::vector<std::shared_ptr<const IGraphicsBuffer>> m_sharedBuffers;
     std::unordered_set<const IGraphicsBuffer*> m_seenBuffers;

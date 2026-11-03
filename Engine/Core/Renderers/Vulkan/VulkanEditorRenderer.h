@@ -19,6 +19,9 @@ public:
     void Clear(float r, float g, float b, float a = 1.0f) override;
     Engine::Graphics::IGraphicsProvider* GetGraphicsProvider() override { return m_provider.get(); }
     void WaitIdle() override { m_core.WaitIdle(); }
+    bool SupportsFrameCompletion() const override { return true; }
+    uint64_t GetSubmittedFrameToken() const override { return m_core.GetSubmittedFrameToken(); }
+    bool IsFrameComplete(uint64_t token) override { return m_core.IsFrameComplete(token); }
     void MarkDirty() override { m_dirty = true; }
     bool IsDirty() const override { return m_dirty; }
     void SetUiRenderHooks(EditorUiRenderHooks hooks) override { m_uiHooks = std::move(hooks); }

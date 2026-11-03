@@ -56,3 +56,7 @@ ReleaseBuilds/.staging-*/
 !.local/tests/AssetPreviewAsyncTests.cpp
 
 !.local/tests/RenderSpatialIndexTests.cpp
+
+!.local/tests/DrawBatchPreparationTests.cpp
+!.local/tests/EditorPlaySessionTests.cpp
+!.local/tests/EditorPlayPipelineTests.cpp

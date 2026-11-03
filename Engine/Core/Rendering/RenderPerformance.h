@@ -34,6 +34,8 @@ struct RenderCpuTimings
     double cullingMs=0, sortingMs=0, materialMs=0, uploadMs=0, submissionMs=0, batchingMs=0;
     double totalMs=0, startupMs=0, terrainPreparationMs=0, occlusionMs=0, otherMs=0;
     double recordPackingMs=0, recordWaitMs=0;
+    double batchSnapshotMs=0,batchBuildMs=0,batchWaitMs=0;
+    uint64_t batchEligibleDraws=0,batchCacheHits=0,batchWorkerJobs=0,batchReusedKeys=0;
     double workerActiveMs=0, mainJobMs=0, workerWaitMs=0, retainedUiMs=0, portalMs=0;
     double workerQueueMs=0,workerDependencyMs=0;
     uint64_t configuredWorkers=0;
@@ -47,6 +49,8 @@ struct RenderCpuTimings
 #define ADD(field) field+=value.field
         ADD(cullingMs); ADD(sortingMs); ADD(materialMs); ADD(uploadMs); ADD(submissionMs); ADD(batchingMs);
         ADD(recordPackingMs); ADD(recordWaitMs);
+        ADD(batchSnapshotMs); ADD(batchBuildMs); ADD(batchWaitMs);
+        ADD(batchEligibleDraws); ADD(batchCacheHits); ADD(batchWorkerJobs); ADD(batchReusedKeys);
         ADD(workerActiveMs); ADD(mainJobMs); ADD(workerWaitMs); ADD(retainedUiMs); ADD(portalMs);
         ADD(workerQueueMs); ADD(workerDependencyMs);
         configuredWorkers=std::max(configuredWorkers,value.configuredWorkers);

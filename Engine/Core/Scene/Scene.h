@@ -1,5 +1,6 @@
 #pragma once
 #include "Core/Rendering/RenderBoundsCache.h"
+#include "Core/Rendering/DrawBatchPreparation.h"
 #include "Core/Compoonents/TransformHierarchy.h"
 #include "Core/Scene/ComponentRegistry.h"
 #include "Core/Rendering/PersistentInstanceBatches.h"
@@ -37,6 +38,7 @@
 #include <vector>
 
 namespace Engine::Audio { class Audio; }
+namespace Engine::Core { struct NativeInputSnapshot; }
 namespace Engine::Components
 {
     class Camera;
@@ -242,6 +244,7 @@ public:
         uint64_t transformLocalUpdated=0,transformWorldUpdated=0,transformWorldReused=0,transformLevels=0;
         uint64_t transformStructureFallback=0;
         double spatialIndexMs=0,spatialCompareMs=0,spatialRefitMs=0,spatialBuildMs=0;
+        uint64_t spatialActiveSlots=0,spatialRetainedSlots=0;
         uint64_t spatialChangedBounds=0,spatialReusedBounds=0,spatialDirtyLeaves=0,spatialRefitNodes=0;
         uint64_t spatialRebuilds=0,spatialQualityRebuilds=0;
     };
@@ -295,7 +298,9 @@ public:
     // PrepareRenderFrame() performs the camera-independent scene walk once;
     // multiple views can then reuse the resulting object, light, material,
     // and skin data.
-    void PrepareRenderFrame();
+    // Editor replay packets can defer publication to the following simulation
+    // commit. Object mutations still commit before rendering in either mode.
+    void PrepareRenderFrame(bool publishSnapshot = true);
     void QueueGraphicsPreparation()
     { AssertOwnerThread(); m_graphicsPreparationPending = true; }
     void ProcessGraphicsPreparation(IGraphicsProvider* graphicsProvider);
@@ -458,6 +463,7 @@ public:
     // target, used to keep embedded-view UI hit bounds aligned.
     void SetUiPointerInput(float x, float y, float viewportWidth,
         float viewportHeight, bool hovered, bool mouseDown);
+    void CaptureEmbeddedUiInput(Engine::Core::NativeInputSnapshot& input) const;
 
     // Embedded gameplay must acquire input from its viewport, rather than
     // treating every editor panel as part of the game window.
@@ -535,7 +541,8 @@ public:
     void FenceBackgroundWork();
     void WaitForSceneJobs();
     // Call only while the current owner is idle and no scene readers are active.
-    // The standalone game uses this once at worker startup and once at shutdown.
+    // The native game transfers at startup/shutdown; editor Play transfers at
+    // recorded-frame boundaries, with live UI excluded until the tick joins.
     void TransferOwnerTo(std::thread::id nextOwner)
     {
         AssertOwnerThread();
@@ -983,6 +990,7 @@ private:
     std::vector<Engine::Components::Transform*> m_transformPreparationScratch;
     RenderCpuTimings m_lastRenderCpuTimings;
     Engine::Rendering::AutomaticInstanceCache m_automaticInstanceCache;
+    std::array<Engine::Rendering::DrawBatchPreparation,2> m_drawBatchPreparation;
     Engine::Rendering::PersistentInstancePool m_persistentInstances;
     Engine::Rendering::PersistentInstanceBatches m_persistentBatches;
     uint64_t m_instanceViewSerial=UINT64_MAX;
@@ -1002,7 +1010,7 @@ private:
     };
     std::vector<RenderPassBufferSlot> m_renderPassBufferSlots;
     RenderPassBuffers* m_activeRenderPassBuffers=nullptr;
-    void SelectRenderPassBuffers(uint32_t frameItemCount);
+    void SelectRenderPassBuffers(uint32_t requiredObjectSlots);
     struct CachedRenderMaterial
     {
         std::vector<uint8_t> data;

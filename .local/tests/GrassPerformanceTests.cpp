@@ -1670,6 +1670,13 @@ void CheckFadeRendering()
     auto* camera = cameraOwner->AddComponent<Engine::Components::Camera>();
     camera->useTransformRotation = false;
     camera->target = {0,0,0};
+    // Reserve an earlier, off-camera draw slot, then hide it. Camera and
+    // shadow masks must continue addressing the later persistent slots.
+    auto* hiddenSlot=scene.AddObject("Retained off-camera slot");
+    hiddenSlot->transform.position.x=1000;
+    auto* hiddenMesh=hiddenSlot->AddComponent<Engine::Components::Mesh>();
+    auto* hiddenMaterial=hiddenSlot->AddComponent<Engine::Components::Material>();
+    hiddenMaterial->castsShadows=false;
     auto* owner = scene.AddObject("Fade triangle");
     auto* mesh = owner->AddComponent<Engine::Components::Mesh>();
     std::vector<Engine::Components::Mesh::Vertex> vertices(3);
@@ -1681,6 +1688,8 @@ void CheckFadeRendering()
         vertex.normal[2] = -1;
         for (int channel = 0; channel < 4; ++channel) vertex.color[channel] = 1;
     }
+    hiddenMesh->SetAuthoredVertices(vertices);
+    hiddenMesh->CreateBuffer(renderer.GetGraphicsProvider()->GetBufferFactory());
     Require(mesh->SetAuthoredVertices(vertices), "fade triangle creation failed");
     mesh->CreateBuffer(renderer.GetGraphicsProvider()->GetBufferFactory());
     auto* material = owner->AddComponent<Engine::Components::Material>();
@@ -1733,6 +1742,7 @@ void CheckFadeRendering()
     for (size_t index = 1; index < coverage.size(); ++index)
         Require(coverage[index] > coverage[index-1], "shader fade coverage is not progressive");
 
+    hiddenSlot->enabled=false;
     using Mesh = Engine::Components::Mesh;
     auto* factory = renderer.GetGraphicsProvider()->GetBufferFactory();
     auto source = std::make_shared<Mesh>();
@@ -1764,23 +1774,32 @@ void CheckFadeRendering()
     instances->slices.clear();
     Require(mesh->IsReady(),"persistent instances require redundant native slice buffers");
     material->useVertexColors = true;
-    bool captureShadow=false;
+    bool captureShadow=false, captureNativePacket=false, separateShadowFrames=false;
     const auto capture = [&]() {
         for (int frame = 0; frame < 3; ++frame)
         {
             renderer.BeginFrame();
             scene.PrepareRenderFrame();
+            auto drawPacket=captureNativePacket ? scene.TakeNativeRenderPacket():nullptr;
             auto context = renderer.CreateFrameGraphicsContext();
             if(captureShadow)
             {
                 context->SetViewport({0,0,float(size),float(size),0,1});
                 context->SetScissorRect({0,0,int32_t(size),int32_t(size)});
-                scene.Render(context.get(),1.f,camera,false,size,size,true);
+                scene.Render(context.get(),1.f,camera,false,size,size,true,drawPacket.get());
+                if(separateShadowFrames)
+                {
+                    // Exercise both allocations with fresh frame attachment
+                    // bindings; capacity testing must not depend on whether a
+                    // backend restores its color target after a depth-only pass.
+                    renderer.EndFrame(); renderer.BeginFrame();
+                    context=renderer.CreateFrameGraphicsContext();
+                }
                 context->SetViewport({0,0,float(size),float(size),0,1});
                 context->SetScissorRect({0,0,int32_t(size),int32_t(size)});
             }
             renderer.Clear(0,0,0,1);
-            scene.Render(context.get(), 1.f, camera, false, size, size);
+            scene.Render(context.get(), 1.f, camera, false, size, size,false,drawPacket.get());
             requestCapture();
             renderer.EndFrame();
         }
@@ -1908,6 +1927,7 @@ void CheckFadeRendering()
     auto* receiverMaterial=receiver->AddComponent<Engine::Components::Material>();
     receiverMaterial->doubleSided=true; receiverMaterial->castsShadows=false;
     captureShadow=true; scene.gpuInstanceCulling=false; const auto shadowReference=capture();
+    hiddenSlot->enabled=true;
     scene.gpuInstanceCulling=true; const auto shadowGpu=capture();
     size_t shadowDifferences=0;
     for(size_t i=0;i<shadowGpu.size();++i) shadowDifferences+=std::abs(int(shadowGpu[i])-int(shadowReference[i]))>2;
@@ -1916,6 +1936,55 @@ void CheckFadeRendering()
     std::cout << "GPU grass shadow receiver comparison: " << shadowDifferences << " differing channels.\n";
     renderer.WaitIdle();
     std::cout << "GPU instancing matches CPU reference pixels; distinct species ranges and placement offsets verified.\n";
+
+    // Existing frame/view buffers have only 512 slots. Grow persistent IDs
+    // past 1024, then render one high-ID caster while old buffers are reused.
+    // Count-based allocation would pass a handful of active draws and write
+    // the later cascades beyond those old 512-slot shadow allocations.
+    std::vector<Engine::Core::Object*> fillers;
+    for(unsigned i=0;i<1025;++i)
+    {
+        auto* object=scene.AddObject("Sparse slot filler");
+        object->transform.position.x=10000;
+        auto* sparseMesh=object->AddComponent<Mesh>();
+        sparseMesh->SetAuthoredVertices(vertices); sparseMesh->CreateBuffer(factory);
+        auto* sparseMaterial=object->AddComponent<Engine::Components::Material>();
+        sparseMaterial->unlit=true; sparseMaterial->doubleSided=true;
+        sparseMaterial->diffuseColor={1,1,1}; sparseMaterial->castsShadows=true;
+        fillers.push_back(object);
+    }
+    scene.PrepareRenderFrame();
+    Require(scene.GetLastPrepareTimings().spatialActiveSlots>1024,"sparse slot fixture did not allocate high persistent IDs");
+    for(auto* object:fillers) object->enabled=false;
+    fillers.back()->enabled=true; fillers.back()->transform.position.x=0;
+    owner->enabled=second->enabled=receiver->enabled=hiddenSlot->enabled=false;
+    cameraOwner->transform.position={0,0,-3};
+    Engine::Model::RealtimeShadowSettings sparseShadows;
+    sparseShadows.directionalCascadeCount=4; sparseShadows.directionalResolution=512;
+    scene.SetRealtimeShadowSettings(sparseShadows);
+    // DX12 depth-only contexts leave attachment rebinding to their host.
+    // DX11 capture reads flip-model buffers, so fill both with color frames.
+    separateShadowFrames=std::is_same_v<Renderer,Engine::Renderers::DX12GameRenderer>;
+    for(bool native:{false,true}) for(bool parallel:{false,true})
+    {
+        captureNativePacket=native;
+        Engine::Threading::JobScheduler::Get().SetParallelForEnabled(parallel);
+        for(unsigned reuse=0;reuse<3;++reuse)
+        {
+            const auto pixels=capture(); size_t visible=0;
+            for(size_t i=0;i<pixels.size();i+=4) visible+=pixels[i]>100;
+            std::cout<<"Sparse slots: native="<<native<<" parallel="<<parallel<<" reuse="<<reuse
+                <<" visible="<<visible<<" active="<<scene.GetLastPrepareTimings().spatialActiveSlots
+                <<" retained="<<scene.GetLastPrepareTimings().spatialRetainedSlots<<std::endl;
+            Require(visible>500,"high persistent slot was not drawn after pass-buffer reuse");
+            Require(scene.GetLastPrepareTimings().spatialActiveSlots<8,"sparse fixture still has a packed draw list");
+            Require(scene.GetShadowDebugSnapshot().cascadeCount==4 && scene.GetShadowDebugSnapshot().submittedCasterDrawCount>0,
+                "sparse high-ID caster did not exercise shadow cascades");
+        }
+    }
+    Engine::Threading::JobScheduler::Get().SetParallelForEnabled(true);
+    renderer.WaitIdle();
+    std::cout<<"Sparse high-slot camera/shadow uploads passed across reused views, native packets and serial/parallel cascades.\n";
 
 }
 
@@ -2323,6 +2392,13 @@ void RenderAudit(const char* reportPath=".local/performance-logs/grass-automatic
             << ",\"render_culling_ms\":" << renderCpu.cullingMs
             << ",\"render_sorting_ms\":" << renderCpu.sortingMs
             << ",\"render_batching_ms\":" << renderCpu.batchingMs
+            << ",\"render_batch_snapshot_ms\":" << renderCpu.batchSnapshotMs
+            << ",\"render_batch_build_ms\":" << renderCpu.batchBuildMs
+            << ",\"render_batch_wait_ms\":" << renderCpu.batchWaitMs
+            << ",\"render_batch_eligible_draws\":" << renderCpu.batchEligibleDraws
+            << ",\"render_batch_cache_hits\":" << renderCpu.batchCacheHits
+            << ",\"render_batch_worker_jobs\":" << renderCpu.batchWorkerJobs
+            << ",\"render_batch_reused_keys\":" << renderCpu.batchReusedKeys
             << ",\"render_retained_ui_ms\":" << renderCpu.retainedUiMs
             << ",\"render_portal_ms\":" << renderCpu.portalMs
             << ",\"render_worker_active_ms\":" << renderCpu.workerActiveMs
@@ -2349,6 +2425,8 @@ void RenderAudit(const char* reportPath=".local/performance-logs/grass-automatic
             <<",\"prepare_spatial_refit_ms\":"<<prep.spatialRefitMs
             <<",\"prepare_spatial_build_ms\":"<<prep.spatialBuildMs
             <<",\"prepare_spatial_changed_bounds\":"<<prep.spatialChangedBounds
+            <<",\"prepare_spatial_active_slots\":"<<prep.spatialActiveSlots
+            <<",\"prepare_spatial_retained_slots\":"<<prep.spatialRetainedSlots
             <<",\"prepare_spatial_reused_bounds\":"<<prep.spatialReusedBounds
             <<",\"prepare_spatial_dirty_leaves\":"<<prep.spatialDirtyLeaves
             <<",\"prepare_spatial_refit_nodes\":"<<prep.spatialRefitNodes
@@ -2405,7 +2483,8 @@ void TestRecordedOcclusionFeedback()
 {
     struct Probe final : Engine::Graphics::IGraphicsContext
     {
-        uint32_t frames = 0, decisions = 0, queries = 0, draws = 0, bindings = 0;
+        uint32_t frames = 0, decisions = 0, queries = 0, draws = 0, bindings = 0, computeBytes = 0;
+        void SetComputeConstants(const void*, uint32_t size) override { computeBytes = size; }
         void SetPipeline(const Engine::Graphics::IPipelineState*) override { ++bindings; }
         void SetConstantBuffer(uint32_t, const Engine::Graphics::IGraphicsBuffer*, uint64_t) override {}
         void SetStructuredBuffer(uint32_t, const Engine::Graphics::IGraphicsBuffer*) override {}
@@ -2438,6 +2517,51 @@ void TestRecordedOcclusionFeedback()
         "recorded occlusion did not skip only the hidden draw");
     Require(commands.GetReplayOcclusionCulledCount() == 1,
         "recorded occlusion count did not reflect replay");
+    commands.Reset();
+    commands.Replay(probe);
+    Require(probe.frames == 1 && probe.draws == 1,
+        "recycled packet replayed stale commands");
+    Engine::Graphics::GraphicsCommandPacket constants;
+    const uint32_t value = 42;
+    constants.SetComputeConstants(&value, sizeof(value));
+    constants.Replay(probe);
+    Require(probe.computeBytes == sizeof(value), "compute constant capture failed");
+    constants.Reset();
+    constants.SetComputeConstants(nullptr, 0);
+    constants.Replay(probe);
+    Require(probe.computeBytes == 0, "recycled compute constants retained stale bytes");
+}
+
+void AuditStopRestore()
+{
+    using Clock=std::chrono::steady_clock;
+    const auto ms=[](auto start) { return std::chrono::duration<double,std::milli>(Clock::now()-start).count(); };
+    Engine::Core::Window window(GetModuleHandleW(nullptr),L"Stop restore audit",64,64);
+    ShowWindow(window.GetHWND(),SW_HIDE);
+    Engine::Renderers::DX11GameRenderer renderer;
+    Require(renderer.Init(window.GetHWND(),64,64),"restore audit renderer failed");
+    Engine::Scene::Scene scene; scene.Init(renderer.GetGraphicsProvider());
+    scene.SetBeforeGpuResourceDestruction([&] { renderer.WaitIdle(); });
+    std::cout<<"Loading full grass scene for stop/restore audit; waiting for load completion."<<std::endl;
+    auto started=Clock::now();
+    Require(scene.Load("Engine/Core/Assets/Scenes/terrain/grass_flat_test.scene"),"restore audit scene load failed");
+    std::cout<<"Initial load: "<<ms(started)<<" ms, "<<scene.GetObjects().size()<<" objects."<<std::endl;
+    started=Clock::now(); const auto baseline=scene.SaveSnapshotToString();
+    std::cout<<"Pre-play snapshot: "<<ms(started)<<" ms, "<<baseline.size()<<" bytes."<<std::endl;
+    started=Clock::now(); scene.Start(); scene.Update(1.f/60.f);
+    std::cout<<"Start/update: "<<ms(started)<<" ms, "<<scene.GetObjects().size()<<" objects."<<std::endl;
+    started=Clock::now(); const auto rollback=scene.SaveSnapshotToString();
+    std::cout<<"Stop rollback snapshot: "<<ms(started)<<" ms, "<<rollback.size()<<" bytes."<<std::endl;
+    started=Clock::now(); scene.FenceBackgroundWork();
+    std::cout<<"Stop job fence: "<<ms(started)<<" ms."<<std::endl;
+    started=Clock::now(); scene.ClearObjects();
+    std::cout<<"Stop clear: "<<ms(started)<<" ms."<<std::endl;
+    started=Clock::now();
+    Require(Engine::Serialization::SceneSerializer::LoadFromString(scene,baseline,renderer.GetGraphicsProvider()),"restore audit deserialize failed");
+    std::cout<<"Stop deserialize: "<<ms(started)<<" ms, "<<scene.GetObjects().size()<<" objects."<<std::endl;
+    started=Clock::now(); scene.CommitPendingObjectChanges();
+    std::cout<<"Stop publish: "<<ms(started)<<" ms."<<std::endl;
+    renderer.WaitIdle();
 }
 
 int main(int argc, char** argv)
@@ -2453,13 +2577,16 @@ int main(int argc, char** argv)
     });
     try
     {
-        if (argc > 1 && std::string(argv[1]) == "--landscape-matrix") RenderAudit("",true);
+        if(argc>1 && std::string(argv[1])=="--stop-restore-audit") AuditStopRestore();
+        else if (argc > 1 && std::string(argv[1]) == "--landscape-matrix") RenderAudit("",true);
         else if(argc>1 && std::string(argv[1])=="--static-instance-audit") RenderAudit("",false,true);
         else if(argc>1 && std::string(argv[1])=="--parallel-stage-audit") RenderAudit(".local/performance-logs/parallel-stage-",false,true);
         else if(argc>1 && std::string(argv[1])=="--parallel-stage-comparison") RenderAudit(".local/performance-logs/parallel-comparison-",false,true,true);
         else if(argc>2 && std::string(argv[1])=="--current-scene-comparison") RenderAudit(argv[2],false,true,true);
         else if(argc>2 && std::string(argv[1])=="--current-scene-comparison-reverse") RenderAudit(argv[2],false,true,true,false,1848,1069,true);
         else if(argc>1 && std::string(argv[1])=="--native-submission-audit") RenderAudit(argc>2 ? argv[2] : ".local/performance-logs/native-submission-stage2.jsonl",false,false,false,true);
+        else if(argc>1 && std::string(argv[1])=="--worker-batch-audit") RenderAudit(".local/performance-logs/parallel-stage7-",false,true);
+        else if(argc>1 && std::string(argv[1])=="--persistent-spatial-audit") RenderAudit(".local/performance-logs/parallel-stage6-",false,true);
         else if(argc>1 && std::string(argv[1])=="--parallel-spatial-audit") RenderAudit(".local/performance-logs/parallel-stage5-",false,true);
         else if(argc>1 && std::string(argv[1])=="--parallel-slot-audit") RenderAudit(".local/performance-logs/parallel-slot-",false,true);
         else if(argc>1 && std::string(argv[1])=="--parallel-native-audit") RenderAudit(".local/performance-logs/parallel-native-stage7.jsonl",false,false,false,true);

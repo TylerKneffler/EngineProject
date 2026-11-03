@@ -74,6 +74,8 @@ public:
     // ---- Initialization ----
     bool Init();
     void InitializeUiState();
+    // Release viewport/preview texture registrations before UI backend shutdown.
+    void ReleaseUiPanels();
     void CheckAssetLocations();
     bool PollBackgroundWork();
 
@@ -203,7 +205,7 @@ public:
     void ConfirmPendingImportAsset();
     void CancelPendingImportAsset();
     std::string ConsumeImportHierarchyFocusRequest();
-    void CapturePlayModeScene();
+    bool CapturePlayModeScene();
     void RestorePlayModeScene();
     void SetLoadingOverlay(bool visible, std::string message = {})
     {
@@ -484,6 +486,7 @@ private:
     void QueueSceneLoad(const std::string& path);
     void LoadSceneNow(const std::string& path);
     void RemovePrefabPanels();
+    void RebindMainScene(Engine::Scene::Scene* previous, Engine::Scene::Scene* next);
     void SetPrefabDocumentFocused(bool focused);
     void SetPrefabDirty(bool dirty);
     void RefreshPrefabDocumentTitle();
@@ -803,6 +806,8 @@ private:
     std::unique_ptr<::Engine::Core::Window> m_window;
     std::unique_ptr<::Engine::Renderers::IEditorRenderer> m_renderer;
     std::unique_ptr<Engine::Scene::Scene> m_scene;
+    // The authored graph stays alive while m_scene owns the runtime copy.
+    std::unique_ptr<Engine::Scene::Scene> m_retainedEditScene;
     std::unique_ptr<Engine::Scene::Scene> m_prefabScene;
     std::unique_ptr<ViewFactory> m_viewFactory;
     std::unique_ptr<PreferencesView> m_preferences;
@@ -838,6 +843,8 @@ private:
     MeshEditSession m_mainMeshEdit;
     MeshEditSession m_prefabMeshEdit;
     SkeletonEditSession m_mainSkeletonEdit;
+    MeshEditSession m_prePlayMeshEdit;
+    SkeletonEditSession m_prePlaySkeletonEdit;
     SkeletonEditSession m_prefabSkeletonEdit;
     std::unordered_map<std::string, MeshEditSession> m_meshEditCache;
 

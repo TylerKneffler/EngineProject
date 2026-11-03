@@ -1,4 +1,5 @@
 #include "GameView.h"
+#include "Core/Graphics/GraphicsCommandPacket.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 #include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Scene/Scene.h"
@@ -118,6 +119,19 @@ void GameView::Render3D(void* cmd)
     if (ctx)
         m_scene->Render(ctx.get(), m_aspect, gameCamera, false,
             GetWidth(), GetHeight());
+}
+
+void GameView::RecordRenderCommands(Engine::Graphics::GraphicsCommandPacket& shadow,
+    Engine::Graphics::GraphicsCommandPacket& color,
+    const Engine::Scene::Scene::NativeRenderPacket* packet)
+{
+    if (!m_scene) return;
+    auto* camera = m_scene->FindGameCamera();
+    if (!camera) camera = m_scene->editorCamera.GetComponent<Engine::Components::Camera>();
+    if (!camera) return;
+    m_scene->PrepareNativeUiLayout(m_aspect);
+    m_scene->Render(&shadow, m_aspect, camera, false, GetWidth(), GetHeight(), true, packet);
+    m_scene->Render(&color, m_aspect, camera, false, GetWidth(), GetHeight(), false, packet);
 }
 
 void GameView::RenderShadow3D(void* cmd)

@@ -35,6 +35,20 @@ struct EditorGizmoResult
 class EditorGizmoSystem
 {
 public:
+    void ResetInteraction()
+    {
+        // Drop all graph pointers while retaining editor configuration.
+        EditorGizmoSystem fresh;
+        fresh.m_modelPickFilter = m_modelPickFilter;
+        fresh.m_poseTranslationHandler = m_poseTranslationHandler;
+        fresh.m_poseEditing = m_poseEditing;
+        fresh.m_bonePivotMode = m_bonePivotMode;
+        fresh.m_boneCustomPivot = m_boneCustomPivot;
+        fresh.m_boneTranslationSnap = m_boneTranslationSnap;
+        fresh.m_boneRotationSnap = m_boneRotationSnap;
+        fresh.m_boneScaleSnap = m_boneScaleSnap;
+        *this = std::move(fresh);
+    }
     void SetModelManipulation(bool enabled, int selectionMode, bool rotate)
     { m_modelManipulation = enabled; m_modelSelectionMode = selectionMode;
         m_modelRotate = rotate; }

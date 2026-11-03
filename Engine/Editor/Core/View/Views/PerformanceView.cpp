@@ -508,10 +508,19 @@ void PerformanceView::SetFrameTimings(const EditorFrameProfileSample& sample,
         { "Clear", sample.clearMilliseconds },
         { "Scene preparation", sample.scenePrepareMilliseconds },
         { "Views", sample.viewMilliseconds },
-        { "Shadow pass (CPU)", sample.shadowSubmitMilliseconds },
-        { "Main pass (CPU)", sample.mainSubmitMilliseconds },
+        { sample.playPipeline ? "Shadow replay (CPU)" : "Shadow pass (CPU)", sample.shadowSubmitMilliseconds },
+        { sample.playPipeline ? "Main replay (CPU)" : "Main pass (CPU)", sample.mainSubmitMilliseconds },
         { "Editor UI", sample.editorUiMilliseconds }
     };
+    if (sample.playPipeline)
+    {
+        m_renderTimings.push_back({"Simulation on owner worker", sample.simulationMilliseconds});
+        m_renderTimings.push_back({"Simulation CPU", sample.simulationCpuMilliseconds});
+        m_renderTimings.push_back({"Simulation completion wait", sample.simulationWaitMilliseconds});
+        m_renderTimings.push_back({"Simulation/submission overlap", sample.simulationOverlapMilliseconds});
+        m_renderTimings.push_back({"Lifecycle GPU wait", sample.simulationGpuWaitMilliseconds});
+        m_renderTimings.push_back({"Render packet recording", sample.pipelineRecordMilliseconds});
+    }
     if (auto* dx11 = dynamic_cast<Renderers::DX11EditorRenderer*>(renderer))
     {
         m_renderTimings.push_back({ "Render setup", dx11->GetLastRenderSetupMilliseconds() });
@@ -696,6 +705,7 @@ void PerformanceView::DrawTimings(IEditorUi& ui)
         ui.ValueLabel("Transform locals updated",std::to_string(prepare.transformLocalUpdated).c_str());
         ui.ValueLabel("Transform hierarchy levels",std::to_string(prepare.transformLevels).c_str());
         ui.ValueLabel("Transform structure-change fallback",std::to_string(prepare.transformStructureFallback).c_str());
+        ui.ValueLabel("Spatial active / retained slots",(std::to_string(prepare.spatialActiveSlots)+" / "+std::to_string(prepare.spatialRetainedSlots)).c_str());
         ui.ValueLabel("Spatial index changed / reused bounds",(std::to_string(prepare.spatialChangedBounds)+" / "+std::to_string(prepare.spatialReusedBounds)).c_str());
         ui.ValueLabel("Spatial dirty leaves / refit nodes",(std::to_string(prepare.spatialDirtyLeaves)+" / "+std::to_string(prepare.spatialRefitNodes)).c_str());
         ui.ValueLabel("Spatial rebuilds / quality rebuilds",(std::to_string(prepare.spatialRebuilds)+" / "+std::to_string(prepare.spatialQualityRebuilds)).c_str());
@@ -712,10 +722,14 @@ void PerformanceView::DrawTimings(IEditorUi& ui)
         {"Worker execution (summed)",m_renderCpu.workerActiveMs},{"Main-thread jobs",m_renderCpu.mainJobMs},
         {"Worker synchronization",m_renderCpu.workerWaitMs},{"Record packing (workers)",m_renderCpu.recordPackingMs},
         {"Worker queue delay (summed)",m_renderCpu.workerQueueMs},{"Dependency readiness (summed)",m_renderCpu.workerDependencyMs},
+        {"Batch snapshot (owner)",m_renderCpu.batchSnapshotMs},{"Batch grouping",m_renderCpu.batchBuildMs},
+        {"Batch synchronization",m_renderCpu.batchWaitMs},
         {"Record synchronization",m_renderCpu.recordWaitMs},{"Other",m_renderCpu.otherMs}
     });
     ui.ValueLabel("Draw candidates / physical draws",(std::to_string(m_renderCpu.candidateDraws)+" / "+std::to_string(m_renderCpu.physicalDraws)).c_str());
     ui.ValueLabel("Automatic batches / GPU batches",(std::to_string(m_renderCpu.automaticBatches)+" / "+std::to_string(m_renderCpu.gpuBatches)).c_str());
+    ui.ValueLabel("Batch eligible draws / cache hits / worker jobs",(std::to_string(m_renderCpu.batchEligibleDraws)+" / "+std::to_string(m_renderCpu.batchCacheHits)+" / "+std::to_string(m_renderCpu.batchWorkerJobs)).c_str());
+    ui.ValueLabel("Reused batch compatibility keys",std::to_string(m_renderCpu.batchReusedKeys).c_str());
     ui.ValueLabel("Automatic instance candidates",std::to_string(m_renderCpu.automaticInstances).c_str());
     ui.ValueLabel("Triangle candidates",std::to_string(m_renderCpu.candidateTriangles).c_str());
     ui.ValueLabel("Changed rendering uploads",FormatBytes(m_renderCpu.changedUploadBytes).c_str());

@@ -44,12 +44,16 @@ public:
     // cmd: opaque graphics command list handle (cast internally to ID3D12GraphicsCommandList*)
     void Render3D(void* cmd) override;
     void RenderShadow3D(void* cmd) override;
+    void RecordRenderCommands(Engine::Graphics::GraphicsCommandPacket& shadow,
+        Engine::Graphics::GraphicsCommandPacket& color,
+        const Engine::Scene::Scene::NativeRenderPacket* packet);
 
     // Shows the offscreen texture with letterboxing/pillarboxing based on
     // aspect ratio settings, captures mouse input, and drives the
     // scene's editorCamera with FPS-style look / pan / zoom.
     void DrawPanel(IEditorUi& ui) override;
     Engine::Scene::Scene* GetScene() const { return m_scene; }
+    void SetScene(Engine::Scene::Scene* scene);
     bool ContainsScreenPoint(float x, float y) const
     { return m_viewportScreenMax.x > m_viewportScreenMin.x &&
         x >= m_viewportScreenMin.x && x < m_viewportScreenMax.x &&

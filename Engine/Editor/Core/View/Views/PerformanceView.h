@@ -71,6 +71,8 @@ public:
     ~PerformanceView() override;
     void DrawPanel(IEditorUi& ui) override;
     bool IsRecording() const;
+    Engine::Scene::Scene* GetScene() const { return m_scene; }
+    void SetScene(Engine::Scene::Scene* scene) { m_scene = scene; }
     void SetFrameTimings(const EditorFrameProfileSample& sample,
         Renderers::IEditorRenderer* renderer);
 

@@ -132,6 +132,8 @@ namespace Engine::Editor
             << ",\"prepare_spatial_refit_ms\":" << prepareTimings.spatialRefitMs
             << ",\"prepare_spatial_build_ms\":" << prepareTimings.spatialBuildMs
             << ",\"prepare_spatial_changed_bounds\":" << prepareTimings.spatialChangedBounds
+            << ",\"prepare_spatial_active_slots\":" << prepareTimings.spatialActiveSlots
+            << ",\"prepare_spatial_retained_slots\":" << prepareTimings.spatialRetainedSlots
             << ",\"prepare_spatial_reused_bounds\":" << prepareTimings.spatialReusedBounds
             << ",\"prepare_spatial_dirty_leaves\":" << prepareTimings.spatialDirtyLeaves
             << ",\"prepare_spatial_refit_nodes\":" << prepareTimings.spatialRefitNodes
@@ -147,6 +149,13 @@ namespace Engine::Editor
             << ",\"shadow_submit_ms\":" << sample.shadowSubmitMilliseconds
             << ",\"main_submit_ms\":" << sample.mainSubmitMilliseconds
             << ",\"editor_ui_ms\":" << sample.editorUiMilliseconds
+            << ",\"editor_play_pipeline\":" << (sample.playPipeline ? "true" : "false")
+            << ",\"simulation_ms\":" << sample.simulationMilliseconds
+            << ",\"simulation_cpu_ms\":" << sample.simulationCpuMilliseconds
+            << ",\"simulation_wait_ms\":" << sample.simulationWaitMilliseconds
+            << ",\"simulation_overlap_ms\":" << sample.simulationOverlapMilliseconds
+            << ",\"simulation_gpu_wait_ms\":" << sample.simulationGpuWaitMilliseconds
+            << ",\"pipeline_record_ms\":" << sample.pipelineRecordMilliseconds
             << ",\"ui_render_ms\":" << uiRenderMilliseconds
             << ",\"present_ms\":" << presentMilliseconds
             << ",\"gpu_valid\":"
@@ -268,6 +277,13 @@ namespace Engine::Editor
             << ",\"render_upload_ms\":" << renderCpu.uploadMs
             << ",\"render_submission_ms\":" << renderCpu.submissionMs
             << ",\"render_batching_ms\":" << renderCpu.batchingMs
+            << ",\"render_batch_snapshot_ms\":" << renderCpu.batchSnapshotMs
+            << ",\"render_batch_build_ms\":" << renderCpu.batchBuildMs
+            << ",\"render_batch_wait_ms\":" << renderCpu.batchWaitMs
+            << ",\"render_batch_eligible_draws\":" << renderCpu.batchEligibleDraws
+            << ",\"render_batch_cache_hits\":" << renderCpu.batchCacheHits
+            << ",\"render_batch_worker_jobs\":" << renderCpu.batchWorkerJobs
+            << ",\"render_batch_reused_keys\":" << renderCpu.batchReusedKeys
             << ",\"automatic_batches\":" << renderCpu.automaticBatches
             << ",\"automatic_instances\":" << renderCpu.automaticInstances
             << ",\"gpu_instance_batches\":" << renderCpu.gpuBatches

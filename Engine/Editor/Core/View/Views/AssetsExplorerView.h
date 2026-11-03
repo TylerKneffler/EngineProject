@@ -32,6 +32,8 @@ public:
 
     // Initializes the view with the path to the Assets directory
     void Init(const std::string& assetsPath, Engine::Scene::Scene* scene = nullptr);
+    Engine::Scene::Scene* GetScene() const { return m_scene; }
+    void SetScene(Engine::Scene::Scene* scene) { m_scene = scene; }
 
     // Defines the package-neutral asset file tree.
     void DrawPanel(IEditorUi& ui) override;

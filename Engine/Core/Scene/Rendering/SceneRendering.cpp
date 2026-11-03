@@ -61,6 +61,12 @@
 
 namespace Engine::Scene
 {
+void Scene::CaptureEmbeddedUiInput(Engine::Core::NativeInputSnapshot& input) const
+{
+    AssertOwnerThread();
+    if (m_uiRenderer) m_uiRenderer->CaptureEmbeddedPointer(input);
+}
+
 void Scene::SetUiPointerInput(float x, float y, float viewportWidth,
     float viewportHeight, bool hovered, bool mouseDown)
 {
@@ -627,7 +633,7 @@ void Scene::EnsureObjectRenderCapacity(uint32_t requiredObjects)
     m_objectCapacity = capacity;
 }
 
-void Scene::SelectRenderPassBuffers(uint32_t frameItemCount)
+void Scene::SelectRenderPassBuffers(uint32_t requiredObjectSlots)
 {
     auto* contexts=m_graphicsProvider->GetContextFactory();
     const auto frameSlot=contexts->GetPreparedFrameSlot();
@@ -645,7 +651,12 @@ void Scene::SelectRenderPassBuffers(uint32_t frameItemCount)
         swap(buffers.shadowConstantsMapped,m_shadowCBMapped); swap(buffers.shadowObjectsMapped,m_shadowObjectDataMapped);
         swap(buffers.capacity,m_objectCapacity);
     };
-    if(!m_activeRenderPassBuffers) { m_activeRenderPassBuffers=selected; return; }
+    if(!m_activeRenderPassBuffers)
+    {
+        EnsureObjectRenderCapacity(requiredObjectSlots);
+        m_activeRenderPassBuffers=selected;
+        return;
+    }
     const uint32_t requiredCapacity=m_objectCapacity;
     exchange(*m_activeRenderPassBuffers);
     if(!selected->objects)
@@ -663,7 +674,7 @@ void Scene::SelectRenderPassBuffers(uint32_t frameItemCount)
         selected->shadowConstantsMapped=selected->shadowConstants->Map(); selected->shadowObjectsMapped=selected->shadowObjects->Map();
     }
     exchange(*selected); m_activeRenderPassBuffers=selected;
-    EnsureObjectRenderCapacity(std::max(1u,frameItemCount));
+    EnsureObjectRenderCapacity(requiredObjectSlots);
 }
 
 void Scene::EnsureSkinPaletteCapacity(uint32_t requiredMatrices)
@@ -1923,11 +1934,19 @@ void Scene::ProcessGraphicsPreparation(IGraphicsProvider* graphicsProvider)
             if (component) component->PrepareGraphicsResources(graphicsProvider);
 }
 
-void Scene::PrepareRenderFrame()
+void Scene::PrepareRenderFrame(bool publishSnapshot)
 {
     AssertOwnerThread();
-    // Editor edits also publish through this boundary before render workers
-    // inspect the scene. Unchanged snapshots are reused without allocation.
+    const bool priorPublicationSuppressed = m_suppressSceneSnapshotPublication;
+    struct RestorePublication
+    {
+        bool& flag;
+        bool previous;
+        ~RestorePublication() { flag = previous; }
+    } restorePublication{m_suppressSceneSnapshotPublication, priorPublicationSuppressed};
+    m_suppressSceneSnapshotPublication = priorPublicationSuppressed || !publishSnapshot;
+    // Commit editor edits before preparing owned draw data. Replay-only editor
+    // frames publish on their simulation commit instead of scanning twice.
     CommitPendingObjectChanges();
     ProcessGraphicsPreparation(m_graphicsProvider);
     SelectNativeFrameBuffers();
@@ -2604,6 +2623,8 @@ void Scene::PrepareRenderFrame()
     }
     // Retain the last bound for absent slots. A temporary LOD or visibility
     // change then leaves the tree topology intact; no draw consumes that slot.
+    m_lastPrepareTimings.spatialActiveSlots=m_frameRenderItems.size();
+    m_lastPrepareTimings.spatialRetainedSlots=m_spatialSlotBounds.size();
     const auto spatial=m_renderSpatialIndex.Update(m_spatialSlotBounds);
     m_lastPrepareTimings.spatialIndexMs=spatial.totalMs; m_lastPrepareTimings.spatialCompareMs=spatial.compareMs;
     m_lastPrepareTimings.spatialRefitMs=spatial.refitMs; m_lastPrepareTimings.spatialBuildMs=spatial.buildMs;
@@ -2705,7 +2726,25 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     if (!m_renderFramePrepared)
         PrepareRenderFrame();
     const auto& frameRenderItems = nativePacket ? nativePacket->items : m_frameRenderItems;
-    SelectRenderPassBuffers(static_cast<uint32_t>(frameRenderItems.size()));
+    uint32_t requiredObjectSlots=1;
+    for(const auto& item:frameRenderItems)
+    {
+        if(item.objectSlot==UINT32_MAX)
+            throw std::runtime_error("Render object slot exceeds buffer index range");
+        requiredObjectSlots=std::max(requiredObjectSlots,item.objectSlot+1u);
+    }
+    // Persistent slots can be sparse after LOD/visibility changes. Size the
+    // selected frame/view buffers by their highest addressed slot, not draw count.
+    SelectRenderPassBuffers(requiredObjectSlots);
+    // Validate on the owner before record-packing/cascade jobs can touch maps.
+    const uint64_t shadowRecords=uint64_t(m_objectCapacity)*4u;
+    if(requiredObjectSlots>m_objectCapacity || !m_objectDataMapped || !m_objectCBMapped ||
+        !m_shadowObjectDataMapped || !m_shadowCBMapped ||
+        m_objectDataBuffer->GetSize()<uint64_t(requiredObjectSlots)*sizeof(ObjectGPUData) ||
+        m_objectConstantBuffer->GetSize()<uint64_t(requiredObjectSlots)*kCBStride ||
+        m_shadowObjectDataBuffer->GetSize()<shadowRecords*sizeof(ObjectGPUData) ||
+        m_shadowConstantBuffer->GetSize()<shadowRecords*kCBStride)
+        throw std::runtime_error("Render pass upload buffers do not cover persistent object slots");
     m_lastOrdinaryDrawCount = 0;
     m_lastOrdinaryTriangleCount = 0;
     const uint32_t portalRenderSlotsPerView = m_objectCapacity + 2u;
@@ -4448,12 +4487,11 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     m_lastRenderCpuTimings.materialMs = std::chrono::duration<double,std::milli>(RenderClock::now()-materialStart).count();
     m_lastRenderCpuTimings.candidateDraws=preparedDraws.size();
     const auto batchingStart = RenderClock::now();
-    struct AutomaticGroup { std::vector<uint32_t> members; };
-    using AutomaticKey = std::tuple<const void*,const void*,const void*,
-        std::array<const Engine::Graphics::IGraphicsTexture*,30>,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,bool,int,std::vector<std::pair<uint32_t,uint32_t>>,std::array<const void*,3>,const void*>;
-    struct AutomaticCandidate { AutomaticKey key; uint32_t drawIndex; uint32_t objectIndex; };
-    std::vector<AutomaticCandidate> automaticCandidates;
-    automaticCandidates.reserve(preparedDraws.size());
+    using BatchPreparation=Engine::Rendering::DrawBatchPreparation;
+    using AutomaticGroup=BatchPreparation::Group;
+    using AutomaticKey=Engine::Rendering::DrawBatchKey;
+    std::vector<BatchPreparation::Input> batchInput;
+    batchInput.reserve(preparedDraws.size());
     for (uint32_t index=0;index<preparedDraws.size();++index)
     {
         auto& draw=preparedDraws[index];
@@ -4473,28 +4511,25 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             if(draw.drawData.flags & 0x00100000u) for(int lod=0;lod<=draw.gpuMaximumLod;++lod)
                 std::get<12>(key)[lod]=draw.mesh->GetRuntimeLodMesh(lod)->GetGraphicsBuffer();
         }
-        automaticCandidates.push_back({std::move(key),index,draw.drawData.objectIndex});
+        batchInput.push_back({std::move(key),draw.drawData.objectIndex,index});
     }
-    auto batchJob = Engine::Rendering::RenderJobs::Get().Submit(
-        [candidates = std::move(automaticCandidates)]() {
-            std::map<AutomaticKey,uint32_t> lookup;
-            std::vector<AutomaticGroup> groups;
-            std::vector<uint32_t> objectIndices;
-            objectIndices.resize(candidates.empty() ? 0 :
-                1u + std::max_element(candidates.begin(),candidates.end(),
-                    [](const auto& a,const auto& b) { return a.drawIndex<b.drawIndex; })->drawIndex);
-            for (auto& candidate : candidates)
-            {
-                objectIndices[candidate.drawIndex]=candidate.objectIndex;
-                auto [found, inserted]=lookup.emplace(std::move(candidate.key),static_cast<uint32_t>(groups.size()));
-                if (inserted) groups.push_back({});
-                groups[found->second].members.push_back(candidate.drawIndex);
-            }
-            for (auto& group : groups)
-                std::sort(group.members.begin(),group.members.end(),
-                    [&](uint32_t a,uint32_t b) { return objectIndices[a]<objectIndices[b]; });
-            return groups;
+    m_lastRenderCpuTimings.batchEligibleDraws=batchInput.size();
+    m_lastRenderCpuTimings.batchSnapshotMs=std::chrono::duration<double,std::milli>(RenderClock::now()-batchingStart).count();
+    auto& batchCache=m_drawBatchPreparation[shadowOnly ? 1:0];
+    BatchPreparation::Result batchResult;
+    std::future<BatchPreparation::Result> batchJob;
+    struct BatchFence { std::future<BatchPreparation::Result>& job; ~BatchFence() { if(job.valid()) job.wait(); } } batchFence{batchJob};
+    auto& batchScheduler=Engine::Rendering::RenderJobs::Get();
+    // Small sets stay on the owner. Large copied snapshots can overlap the
+    // draw statistics below; workers never inspect live meshes or materials.
+    if(batchInput.size()>=256 && batchScheduler.WorkerCount() && batchScheduler.ParallelForEnabled())
+    {
+        m_lastRenderCpuTimings.batchWorkerJobs=1;
+        batchJob=batchScheduler.Submit([&batchCache,input=std::move(batchInput)]() mutable {
+            return batchCache.Prepare(std::move(input));
         });
+    }
+    else batchResult=batchCache.Prepare(std::move(batchInput));
     m_lastOrdinaryDrawCount = 0;
     m_lastOrdinaryTriangleCount = 0;
     for (const PreparedDraw& draw : preparedDraws)
@@ -4514,11 +4549,6 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             m_lastOrdinaryTriangleCount += (draw.indexBuffer ? draw.indexCount : draw.vertexCount) / 3;
         }
     }
-    std::vector<AutomaticGroup> automaticGroups = batchJob.get();
-    for (uint32_t group=0;group<automaticGroups.size();++group)
-        if (automaticGroups[group].members.size()>1 || preparedDraws[automaticGroups[group].members.front()].gpuLod>=0 || (preparedDraws[automaticGroups[group].members.front()].drawData.flags & 0x00100000u))
-            for(auto index:automaticGroups[group].members) preparedDraws[index].automaticGroup=group;
-    m_lastRenderCpuTimings.batchingMs=std::chrono::duration<double,std::milli>(RenderClock::now()-batchingStart).count();
     if(shadowOnly)
     {
         std::unordered_set<const Engine::Core::Object*> eligibleCasters;
@@ -4528,6 +4558,18 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         m_shadowDebugSnapshot.casterCount=static_cast<uint32_t>(eligibleCasters.size());
     }
     if (shadowOnly) m_shadowDebugSnapshot.submittedCasterDrawCount = 0;
+
+    const auto batchWaitStart=RenderClock::now();
+    if(batchJob.valid()) batchResult=batchJob.get();
+    m_lastRenderCpuTimings.batchWaitMs=std::chrono::duration<double,std::milli>(RenderClock::now()-batchWaitStart).count();
+    m_lastRenderCpuTimings.batchBuildMs=batchResult.buildMs;
+    m_lastRenderCpuTimings.batchCacheHits=batchResult.reused ? 1:0;
+    m_lastRenderCpuTimings.batchReusedKeys=batchResult.reusedKeys;
+    auto automaticGroups=std::move(batchResult.groups);
+    for (uint32_t group=0;group<automaticGroups.size();++group)
+        if (automaticGroups[group].members.size()>1 || preparedDraws[automaticGroups[group].members.front()].gpuLod>=0 || (preparedDraws[automaticGroups[group].members.front()].drawData.flags & 0x00100000u))
+            for(auto index:automaticGroups[group].members) preparedDraws[index].automaticGroup=group;
+    m_lastRenderCpuTimings.batchingMs=std::chrono::duration<double,std::milli>(RenderClock::now()-batchingStart).count();
 
     bool recordsUploaded=shadowOnly;
     const auto ensureRecordsUploaded=[&]() {

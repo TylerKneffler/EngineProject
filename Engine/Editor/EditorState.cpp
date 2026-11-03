@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "EditorState.h"
+#include "Core/SceneManager.h"
 #include "Engine/Editor/CodeEditorLink.h"
 #include "Core/View/ViewFactory.h"
 #include "Core/View/IEditorPanel.h"
@@ -421,6 +422,17 @@ void EditorState::InitializeUiState()
         return;
     WireupCallbacks();
     InitializePanels();
+}
+
+void EditorState::ReleaseUiPanels()
+{
+    m_primaryConsole = nullptr;
+    m_primaryHierarchy = nullptr;
+    m_primaryProperties = nullptr;
+    m_primaryAssets = nullptr;
+    m_prefabSceneView = nullptr;
+    m_panels.clear();
+    m_viewFactory.reset();
 }
 
 void EditorState::CheckAssetLocations()
@@ -3791,18 +3803,45 @@ void EditorState::RemovePrefabPanels()
     m_prefabSceneView = nullptr;
 }
 
-void EditorState::CapturePlayModeScene()
+void EditorState::RebindMainScene(Engine::Scene::Scene* previous,
+    Engine::Scene::Scene* next)
 {
-    if (!m_scene || !m_playModeSceneSnapshot.empty())
-        return;
+    Engine::Core::Component::ClearEditorReferenceSearches();
+    // Only replace bindings to the project scene. Asset/prefab documents own
+    // independent scenes and must remain attached to them.
+    for (auto& panel : m_panels)
+    {
+        if (auto* view = dynamic_cast<SceneView*>(panel.get());
+            view && view->GetScene() == previous) view->SetScene(next);
+        if (auto* view = dynamic_cast<GameView*>(panel.get());
+            view && view->GetScene() == previous) view->SetScene(next);
+        if (auto* view = dynamic_cast<HierarchyView*>(panel.get());
+            view && view->GetScene() == previous) view->Init(next);
+        if (auto* view = dynamic_cast<PropertiesView*>(panel.get());
+            view && view->GetScene() == previous) view->SetScene(next);
+        if (auto* view = dynamic_cast<AssetsExplorerView*>(panel.get());
+            view && view->GetScene() == previous) view->SetScene(next);
+        if (auto* view = dynamic_cast<PerformanceView*>(panel.get());
+            view && view->GetScene() == previous) view->SetScene(next);
+    }
+    if (m_viewFactory) m_viewFactory->SetScene(next);
+    if (m_pendingImportScene == previous) CancelPendingImportAsset();
+    m_toolbarPopupScene = nullptr;
+    m_toolbarPopupTool.clear();
+    m_meshToolbarScene = nullptr;
+    m_mainSceneGizmoWasActive = false;
+    if (Engine::Core::SceneManager::GetActiveScene() == previous)
+        Engine::Core::SceneManager::SetActiveScene(next);
+}
+
+bool EditorState::CapturePlayModeScene()
+{
+    if (m_retainedEditScene) return true;
+    if (!m_scene) return false;
 
     FinishSkeletonPaintStroke(m_mainSkeletonEdit);
-
-    // Finish any editor interaction before establishing the immutable play
-    // baseline. Runtime changes must never enter the undo history.
     TrackSceneChanges(true, false);
     CommitPendingHistoryEdit();
-    // TrackSceneChanges just brought this baseline up to date.
     m_playModeSceneSnapshot = !m_activeSceneAssetDocument &&
         !m_activeAnimationDocument && !m_historyBaseline.scene.empty() &&
         m_historyCapturedRevision == m_sceneEditRevision
@@ -3813,74 +3852,103 @@ void EditorState::CapturePlayModeScene()
     for (const auto& panel : m_panels)
     {
         const auto* hierarchy = dynamic_cast<const HierarchyView*>(panel.get());
-        if (!hierarchy)
-            continue;
-        Engine::Core::Object* selected = hierarchy->GetSelectedObject();
+        if (!hierarchy || hierarchy->GetScene() != m_scene.get()) continue;
+        auto* selected = hierarchy->GetSelectedObject();
         m_prePlayHadObjectSelection = selected &&
             m_scene->TryGetObjectPath(selected, m_prePlaySelectionPath);
         break;
     }
-    OutputDebugStringA("[Play] Captured editor scene state.\n");
+
+    // Construct transactionally: a failed clone leaves the edit graph and
+    // every panel attached to their original objects.
+    const auto begin = std::chrono::steady_clock::now();
+    std::unique_ptr<Engine::Scene::Scene> runtime;
+    try
+    {
+        m_scene->FenceBackgroundWork();
+        runtime = std::make_unique<Engine::Scene::Scene>();
+        runtime->Init(m_renderer->GetGraphicsProvider());
+        runtime->SetBeforeGpuResourceDestruction([renderer = m_renderer.get()] {
+            renderer->WaitIdle();
+        });
+        if (!runtime->LoadFromString(m_playModeSceneSnapshot))
+            throw std::runtime_error("Could not deserialize the runtime scene");
+        runtime->GetPhysics().ConfigureStepBudget(
+            m_projectSettings.physicsTargetMilliseconds,
+            m_projectSettings.physicsMaximumSubsteps);
+        runtime->SetRealtimeShadowSettings(m_projectSettings.realtimeShadows);
+        runtime->SetDistanceLightingSettings(m_projectSettings.distanceLighting);
+        runtime->editorCamera.transform.position = m_scene->editorCamera.transform.position;
+        runtime->editorCamera.transform.rotation = m_scene->editorCamera.transform.rotation;
+        runtime->editorCamera.transform.scale = m_scene->editorCamera.transform.scale;
+        runtime->SetGameplayInputEnabled(false);
+    }
+    catch (const std::exception& error)
+    {
+        if (m_renderer) m_renderer->WaitIdle();
+        runtime.reset();
+        m_playModeSceneSnapshot.clear();
+        m_prePlaySelectionPath.clear();
+        if (m_primaryConsole)
+            m_primaryConsole->AddLog(ConsoleView::Level::Error,
+                std::string("[Play] Could not create runtime scene: ") + error.what());
+        return false;
+    }
+
+    m_renderer->WaitIdle();
+    RebindMainScene(m_scene.get(), runtime.get());
+    m_retainedEditScene = std::move(m_scene);
+    m_scene = std::move(runtime);
+    m_prePlayMeshEdit = std::move(m_mainMeshEdit);
+    m_prePlaySkeletonEdit = std::move(m_mainSkeletonEdit);
+    m_mainMeshEdit = MeshEditSession{};
+    m_mainSkeletonEdit = SkeletonEditSession{};
+    const double milliseconds = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - begin).count();
+    if (m_primaryConsole)
+        m_primaryConsole->AddLog(ConsoleView::Level::Info,
+            "[Play] Runtime copy ready in " + std::to_string(milliseconds) +
+            " ms; original edit scene retained in memory.");
+    return true;
 }
 
 void EditorState::RestorePlayModeScene()
 {
-    if (!m_scene || m_playModeSceneSnapshot.empty())
-        return;
-
-    // Scene replacement invalidates object pointers held by editor panels.
-    for (auto& panel : m_panels)
-        if (auto* hierarchy = dynamic_cast<HierarchyView*>(panel.get()))
-            hierarchy->SetSelectedObject(nullptr);
-    if (m_primaryProperties)
-        m_primaryProperties->SetSelectedObject(nullptr);
-
-    if (m_scene->LoadFromString(m_playModeSceneSnapshot))
-    {
-        m_mainSkeletonEdit.skeleton = nullptr;
-        m_mainSkeletonEdit.bindingMesh = nullptr;
-        m_mainSkeletonEdit.mesh = nullptr;
-        m_mainSkeletonEdit.adjacency.reset();
-        m_mainSkeletonEdit.observedBindTransforms.clear();
-        m_mainSkeletonEdit.observedSubmode = -1;
-        m_mainMeshEdit.activeMesh = nullptr;
-        m_scene->SetEditorWeightPaint(nullptr, -1);
-        m_scene->SetEditorMeshEditPose(m_mainMeshEdit.enabled ||
-            m_mainSkeletonEdit.enabled);
-        m_hasUnsavedChanges = m_prePlayHasUnsavedChanges;
-        RefreshSceneDocumentTitle();
+    if (!m_retainedEditScene) return;
+    const auto begin = std::chrono::steady_clock::now();
+    m_scene->FenceBackgroundWork();
+    m_renderer->WaitIdle();
+    RebindMainScene(m_scene.get(), m_retainedEditScene.get());
+    auto runtime = std::move(m_scene);
+    m_scene = std::move(m_retainedEditScene);
+    m_mainMeshEdit = std::move(m_prePlayMeshEdit);
+    m_mainSkeletonEdit = std::move(m_prePlaySkeletonEdit);
+    m_prePlayMeshEdit = MeshEditSession{};
+    m_prePlaySkeletonEdit = SkeletonEditSession{};
+    m_hasUnsavedChanges = m_prePlayHasUnsavedChanges;
+    RefreshSceneDocumentTitle();
+    // Keep document selection separate from project-scene selection.
+    if (!m_activeSceneAssetDocument && !m_activeAnimationDocument)
         SelectObject(m_prePlayHadObjectSelection
-            ? m_scene->FindObjectByPath(m_prePlaySelectionPath)
-            : nullptr);
-        if (m_mainSkeletonEdit.enabled)
-        {
-            SyncSkeletonEditSelection(m_scene.get(), m_mainSkeletonEdit);
-            if (m_mainMeshEdit.dirty && m_mainSkeletonEdit.mesh &&
-                RestoreMeshSnapshot(*m_mainSkeletonEdit.mesh,
-                    m_mainMeshEdit.baseline))
-                m_mainMeshEdit.activeMesh = m_mainSkeletonEdit.mesh;
-        }
-        m_historyBaseline.scene = m_playModeSceneSnapshot;
-        CaptureHistorySelection(m_historyBaseline);
-        m_historyCapturedRevision = m_sceneEditRevision;
-        m_historySelectionDirty = false;
-        m_sceneEditInProgress = false;
-        if (m_renderer)
-            m_renderer->MarkDirty();
-        OutputDebugStringA("[Play] Restored editor scene state.\n");
-        if (m_primaryConsole)
-            m_primaryConsole->AddLog(ConsoleView::Level::Info, "[Play] Restored pre-play scene state.");
-    }
-    else
-    {
-        OutputDebugStringA("[Play] ERROR: Failed to restore editor scene state.\n");
-        if (m_primaryConsole)
-            m_primaryConsole->AddLog(ConsoleView::Level::Error, "[Play] Failed to restore pre-play scene state.");
-    }
-
+            ? m_scene->FindObjectByPath(m_prePlaySelectionPath) : nullptr);
+    m_historySelectionDirty = false;
+    m_sceneEditInProgress = false;
     m_playModeSceneSnapshot.clear();
+    m_historyCapturedRevision = m_sceneEditRevision;
     m_prePlaySelectionPath.clear();
     m_prePlayHadObjectSelection = false;
+    const auto restored = std::chrono::steady_clock::now();
+    // Destruction stays on the scene/GPU owner thread. No prefab loading,
+    // deserialization, or first configuration publication is needed on Stop.
+    runtime.reset();
+    const auto finished = std::chrono::steady_clock::now();
+    const double restoreMs = std::chrono::duration<double, std::milli>(restored - begin).count();
+    const double cleanupMs = std::chrono::duration<double, std::milli>(finished - restored).count();
+    m_renderer->MarkDirty();
+    if (m_primaryConsole)
+        m_primaryConsole->AddLog(ConsoleView::Level::Info,
+            "[Play] Restored retained edit scene in " + std::to_string(restoreMs) +
+            " ms; runtime cleanup " + std::to_string(cleanupMs) + " ms.");
 }
 
 void EditorState::RefreshSelectionAfterReload(const ::Engine::Scene::Scene::ObjectPath& selectedPath)

@@ -164,6 +164,13 @@ void DX11EditorRenderer::RenderIfNeeded(std::function<void()> drawFn)
         presentBegin - uiBegin).count();
     ThrowIfFailed(m_swapChain->Present(0,
         m_allowTearing ? DXGI_PRESENT_ALLOW_TEARING : 0));
+    D3D11_QUERY_DESC descriptor{};
+    descriptor.Query = D3D11_QUERY_EVENT;
+    Microsoft::WRL::ComPtr<ID3D11Query> completion;
+    ThrowIfFailed(m_device->CreateQuery(&descriptor, &completion));
+    m_context->End(completion.Get());
+    m_frameCompletionQueries.emplace_back(++m_submittedFrameToken, std::move(completion));
+    IsFrameComplete(m_submittedFrameToken);
     m_lastPresentMilliseconds = std::chrono::duration<double, std::milli>(
         std::chrono::steady_clock::now() - presentBegin).count();
 }
@@ -187,5 +194,37 @@ void DX11EditorRenderer::FreeSrvSlot(uint32_t slot)
 std::unique_ptr<IView> DX11EditorRenderer::CreateViewBackend()
 {
     return std::make_unique<D3D11View>();
+}
+
+void DX11EditorRenderer::WaitIdle()
+{
+    if (!m_device || !m_context) return;
+    D3D11_QUERY_DESC descriptor{};
+    descriptor.Query = D3D11_QUERY_EVENT;
+    Microsoft::WRL::ComPtr<ID3D11Query> completion;
+    ThrowIfFailed(m_device->CreateQuery(&descriptor, &completion));
+    m_context->End(completion.Get());
+    m_context->Flush();
+    HRESULT status;
+    while ((status = m_context->GetData(completion.Get(), nullptr, 0, 0)) == S_FALSE)
+        SwitchToThread();
+    ThrowIfFailed(status);
+    m_completedFrameToken = m_submittedFrameToken;
+    m_frameCompletionQueries.clear();
+}
+
+bool DX11EditorRenderer::IsFrameComplete(uint64_t token)
+{
+    while (!m_frameCompletionQueries.empty())
+    {
+        const auto& front = m_frameCompletionQueries.front();
+        const HRESULT status = m_context->GetData(front.second.Get(), nullptr, 0,
+            D3D11_ASYNC_GETDATA_DONOTFLUSH);
+        if (status == S_FALSE) break;
+        ThrowIfFailed(status);
+        m_completedFrameToken = front.first;
+        m_frameCompletionQueries.pop_front();
+    }
+    return token <= m_completedFrameToken;
 }
 }

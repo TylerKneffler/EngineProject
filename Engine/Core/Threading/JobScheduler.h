@@ -175,6 +175,7 @@ public:
     }
     // Change at frame boundaries for profiling. Async Submit jobs retain worker
     // affinity; disabling parallel loops never moves background IO onto the UI.
+    bool ParallelForEnabled() const { return m_parallelFor.load(); }
     void SetParallelForEnabled(bool enabled) { m_parallelFor=enabled; }
     Statistics ReadStatistics()
     {

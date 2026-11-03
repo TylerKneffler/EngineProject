@@ -34,10 +34,30 @@ def evaluate(rows, path="", all_frames=False):
     aliases = {"grass_total_ms": "grass_ms", "grass_tiles_built": "grass_built",
                "grass_placements_scanned": "grass_scanned", "render_submission_ms": "render_submit_ms"}
     frames = [dict(r, **{key: r[alias] for key, alias in aliases.items() if key not in r and alias in r}) for r in frames]
+    session_frames = frames
+    session_intervals = summary([r.get("dt_ms", r.get("frame_ms", 0)) for r in session_frames
+                                 if isinstance(r.get("dt_ms", r.get("frame_ms", 0)), (int, float))
+                                 and r.get("dt_ms", r.get("frame_ms", 0)) > 0])
+    stalls = []
+    for index, row in enumerate(session_frames):
+        if not isinstance(row.get("frame_ms"), (int, float)) or not math.isfinite(row["frame_ms"]) or row["frame_ms"] < 1000:
+            continue
+        stages = {key: row.get(key, 0) for key in
+                  ("pending_load_ms", "update_ms", "render_ms", "pacing_ms", "background_ms")}
+        stages = {key: value for key, value in stages.items() if isinstance(value, (int, float)) and math.isfinite(value)}
+        stage = max(stages, key=stages.get) if stages and max(stages.values()) > 0 else None
+        stopping = bool(row.get("playing") and index + 1 < len(session_frames)
+                        and session_frames[index + 1].get("playing") is False)
+        stalls.append(dict(frame=row.get("frame"), time_utc=row.get("time_utc"),
+                           frame_ms=row["frame_ms"], stage=stage,
+                           stage_ms=stages.get(stage, 0), play_stop_transition=stopping))
+    selection = "all recorded frames"
     if not all_frames and any(r.get("playing") for r in frames):
         frames = [r for r in frames if r.get("playing")]
+        selection = "Play frames"
     if not all_frames and any("measured" in r for r in frames):
         frames = [r for r in frames if r.get("measured")]
+        selection = "measured Play frames" if selection == "Play frames" else "measured frames"
     if not frames:
         raise ValueError("Recording contains no frame_details records")
     intervals = [r.get("dt_ms", r.get("frame_ms", 0)) for r in frames]
@@ -47,7 +67,7 @@ def evaluate(rows, path="", all_frames=False):
         raise ValueError("Recording contains no valid positive frame intervals")
     metrics = {k: summary([r[k] for r in frames if k in r])
                for k in set().union(*(r.keys() for r in frames))
-               if k.endswith("_ms") or k.startswith(("instance_", "shadow_instance_", "prepare_transform_", "prepare_spatial_"))
+               if k.endswith("_ms") or k.startswith(("instance_", "shadow_instance_", "prepare_transform_", "prepare_spatial_", "render_batch_"))
                or k in ("native_compute_arena_writes", "native_compute_discard_maps")}
     gpu = {}
     for index, row in enumerate(frames):
@@ -135,11 +155,17 @@ def evaluate(rows, path="", all_frames=False):
                 native_stall_frames[prefix] = len(stalls)
     if native_frames:
         warnings.append("Native graphics-call timing is opt-in and adds per-call clock/cycle-query overhead. Compare performance with it disabled; long calls with low cycles are wait candidates, not proof of GPU synchronization.")
+    if any(r.get("editor_play_pipeline") for r in frames):
+        warnings.append("Editor Play simulation runs on its owner worker and overlaps graphics submission. update_ms measures only the serial update scope; simulation_ms and simulation_overlap_ms overlap render_ms and must not be added to it. Overlap is wall time, not a measurement of simultaneous CPU busy time. Main/shadow submission scopes measure packet replay in this mode; compare pipeline_record_ms too, rather than interpreting shorter replay scopes as saved total work.")
     if "prepare_transforms_ms" in metrics:
         warnings.append("Transform capture, compute and commit partition prepare_transforms_ms, which is already inside scene_prepare_ms; these nested wall timings must not be added to the frame total.")
     fallback = metrics.get("prepare_transform_structure_fallback")
     if fallback and fallback["max"]:
         warnings.append("Structure-change frames use lazy owner transform validation inside item/bone preparation; dedicated transform counters cover the batch path only.")
+    if "prepare_spatial_retained_slots" in metrics:
+        warnings.append("Retained spatial slots include inactive historical bounds and free slots; only active frame items can submit draws. Capacity is a scene-lifetime high-water mark, not an object or draw count.")
+    if "render_batch_build_ms" in metrics:
+        warnings.append("Batch snapshot, grouping and synchronization are nested in render_batching_ms. Worker grouping overlaps owner draw statistics and synchronization waits, so its duration must not be added to batching wall time. Cache hits count views where every active key reused its assignment, not individual groups. Reused-key counts include partial hits during membership changes.")
     if "prepare_spatial_index_ms" in metrics:
         warnings.append("Spatial compare/refit/build timings partition prepare_spatial_index_ms, already contained in prepare_spatial_ms and scene preparation. Refit jobs can overlap worker execution counters.")
     missing = [key for key in phase_keys[:3] if key not in metrics]
@@ -158,7 +184,12 @@ def evaluate(rows, path="", all_frames=False):
                                              for r in hardware), default=0))
     if recording_loss:
         warnings.append(f"Recording writer dropped or failed {recording_loss} records; frame statistics may omit stalls.")
-    return {"capture": str(path), "frames": len(frames),
+    if stalls:
+        warnings.append("Full-recording stalls are reported before Play/measured filtering. A Stop freeze can fall outside Play-only interval FPS because dt_ms describes the preceding frame and arrives on the next stopped frame. pending_load_ms includes post-frame scene restoration, not only file loads.")
+    return {"capture": str(path), "frames": len(frames), "frame_selection": selection,
+            "session": {"frames": len(session_frames), "interval_ms": session_intervals,
+                        "effective_fps": 1000 / session_intervals["mean"] if session_intervals else None,
+                        "stalls": sorted(stalls, key=lambda row: row["frame_ms"], reverse=True)},
             "capture_identity": capture_identity(frames),
             "start_utc": frames[0].get("time_utc"),
             "end_utc": frames[-1].get("time_utc"), "effective_fps": 1000 / interval["mean"],
@@ -196,10 +227,20 @@ def load(path, all_frames=False):
 
 def markdown(result, comparison=None):
     lines = ["# Performance evaluation", "", f"Capture: `{result['capture']}`", "",
-             f"{result['frames']} frames; **{result['effective_fps']:.2f} FPS** from frame intervals.",
+             f"{result['frames']} {result.get('frame_selection', 'frames')}; **{result['effective_fps']:.2f} FPS** from frame intervals.",
              f"Frame interval: {result['interval_ms']['mean']:.2f} ms average, {result['interval_ms']['p95']:.2f} ms P95, "
-             f"{result['interval_ms']['p99']:.2f} ms P99.", "", "| CPU wall-time measurement | Average ms | P95 ms |", "|---|---:|---:|"]
+             f"{result['interval_ms']['p99']:.2f} ms P99."]
+    session = result.get("session", {})
+    if session.get("stalls"):
+        if session.get("effective_fps"):
+            lines += ["", f"Full recording, including transitions: {session['frames']} frames, {session['effective_fps']:.2f} FPS from recorded intervals."]
+        lines += ["", "| Blocking frame | Total ms | Dominant recorded stage | Stage ms | Play/Stop transition |", "|---|---:|---|---:|---|"]
+        for stall in session["stalls"][:10]:
+            lines.append(f"| {stall['frame']} | {stall['frame_ms']:.1f} | {stall['stage'] or 'unattributed'} | {stall['stage_ms']:.1f} | {'yes' if stall['play_stop_transition'] else 'no'} |")
+    lines += ["", "| CPU wall-time measurement | Average ms | P95 ms |", "|---|---:|---:|"]
     for key in ("frame_ms", "update_ms", "render_ms", "main_submit_ms", "shadow_submit_ms", "editor_ui_ms",
+                "simulation_ms", "simulation_cpu_ms", "simulation_wait_ms", "simulation_overlap_ms",
+                "simulation_gpu_wait_ms", "pipeline_record_ms",
                 "grass_total_ms", "grass_generation_ms", "grass_upload_ms", "physics_ms", "pose_ms", "constraints_ms", "audio_ms",
                 "render_startup_ms", "render_terrain_prepare_ms", "render_occlusion_ms",
                 "shadow_draw_ms", "shadow_geometry_draw_ms", "shadow_submission_thread_cpu_ms",
@@ -211,6 +252,7 @@ def markdown(result, comparison=None):
         if value := result["metrics"].get(key):
             lines.append(f"| {key} | {value['mean']:.3f} | {value['p95']:.3f} |")
     for key in ("prepare_transform_local_updated", "prepare_transform_world_updated", "prepare_transform_world_reused", "prepare_transform_levels", "prepare_transform_structure_fallback",
+                "prepare_spatial_active_slots", "prepare_spatial_retained_slots",
                 "prepare_spatial_changed_bounds", "prepare_spatial_reused_bounds", "prepare_spatial_dirty_leaves",
                 "prepare_spatial_refit_nodes", "prepare_spatial_rebuilds", "prepare_spatial_quality_rebuilds"):
         if value := result["metrics"].get(key):
@@ -263,6 +305,12 @@ def markdown(result, comparison=None):
         lines += ["", "| Instance storage measurement | Average | P95 | Maximum |", "|---|---:|---:|---:|"]
         for key, value in sorted(storage.items()):
             lines.append(f"| {key} | {value['mean']:.1f} | {value['p95']:.0f} | {value['max']:.0f} |")
+    batches = {key: value for key, value in result["metrics"].items()
+               if key.startswith("render_batch_") and value}
+    if batches:
+        lines += ["", "| Batch preparation measurement | Average | P95 | Maximum |", "|---|---:|---:|---:|"]
+        for key, value in sorted(batches.items()):
+            lines.append(f"| {key} | {value['mean']:.3f} | {value['p95']:.3f} | {value['max']:.3f} |")
     if result["main_pass_unexplained_ms"] is not None:
         lines += ["", f"Main-pass time outside available sub-timers: {result['main_pass_unexplained_ms']:.2f} ms average."]
     lines += ["", f"Grass prepared {result['grass_tiles_prepared']} instance tiles and indexed "

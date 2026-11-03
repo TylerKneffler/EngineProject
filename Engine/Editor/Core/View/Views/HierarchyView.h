@@ -29,7 +29,24 @@ public:
     HierarchyView();
     ~HierarchyView() = default;
 
-    void Init(Engine::Scene::Scene* scene) { m_scene = scene; }
+    Engine::Scene::Scene* GetScene() const { return m_scene; }
+    void Init(Engine::Scene::Scene* scene)
+    {
+        if (m_scene == scene) return;
+        m_selectedObject = m_selectionAnchor = nullptr;
+        m_selectedObjects.clear();
+        m_pendingDragged = m_pendingTarget = m_pendingPasteTarget = nullptr;
+        m_pendingAddParent = m_pendingPrefabRoot = nullptr;
+        m_pendingDeletes.clear();
+        m_hasPendingPaste = m_hasPendingAdd = m_hasPendingMove = false;
+        m_pendingPrefabAction = PendingPrefabAction::None;
+        m_debugDragSource = m_debugHoverTarget = nullptr;
+        m_objectClipboard.clear();
+        m_clipboardScene = nullptr;
+        m_clipboardCut = false;
+        m_searchMatches.clear();
+        m_scene = scene;
+    }
 
     void DrawPanel(IEditorUi& ui) override;
 

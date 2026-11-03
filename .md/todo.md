@@ -11,6 +11,19 @@ Last updated: 2026-11-02.
 5. Measure native graphics-call stalls on matched moving/streaming routes and fix only confirmed buffer or fence bottlenecks. The resident DX11 capture found no long map or indirect-argument call; its worst instrumented call was a 0.734 ms draw.
 6. Reduce grass GPU work on the 441-cell stress route. The Grass stage averages 63.4 ms of 86.8 ms measured GPU stages at 1848 x 1069; CPU render work averages about 13.6 ms. At one-quarter the pixels, grass time drops to 30.0 ms, indicating substantial pixel-dependent work. Benchmark shader, coverage, and LOD changes against image references before changing quality.
 
+## Editor Play performance and Stop freezes
+
+- [x] Overlap editor Play simulation with graphics submission through owned Scene/Game view command packets, bounded owner handoffs and GPU resource retirement.
+- [x] Reuse completed render packets and command storage; expose simulation work, completion wait, submission overlap and packet recording in Performance recordings and evaluation.
+- [ ] Extend worker preparation beyond current culling/packing jobs to the remaining render-item, material and command-recording work from immutable inputs.
+- [ ] Validate editor scaling on matched moving/streaming routes across DX11, DX12 and Vulkan; keep stationary measurements separate from gameplay gains.
+- [x] Retain the authored scene in memory during Play and restore its original objects, selection, history and edit sessions on Stop.
+- [ ] Prepare the separate runtime scene incrementally so Play startup does not block while cloning large terrain/prefab graphs.
+- [ ] Retire the stopped runtime scene with bounded owner-thread cleanup after GPU completion; remove the remaining destruction hitch.
+- [ ] Cache versioned immutable prefab documents across repeated instances, with file-change invalidation and independent per-instance state.
+- [ ] Prepare runtime-copy configuration snapshots from owned data and publish at the owner commit boundary without blocking UI for first serialization.
+- [ ] Record separate Play/Stop fence, GPU-wait, snapshot, deserialization and publication timings alongside full-recording transition stalls.
+
 ## Parallel scene updates and rendering
 
 Open work is ordered by engine-wide impact and prerequisites; completed foundations follow.
@@ -55,6 +68,8 @@ Open work is ordered by engine-wide impact and prerequisites; completed foundati
 - [x] Cache unchanged world bounds and prepare changed bounds from copied matrices on workers.
 - [x] Retain spatial hierarchy topology and refit changed bounds, using worker jobs for large updates and rebuilding on membership or quality changes.
 - [x] Keep spatial entries keyed to persistent draw slots across LOD fades and temporary visibility changes.
+- [x] Prepare compatible draw batches from copied keys on workers and reuse compatibility assignments across draw-order and visibility changes.
+- [ ] Cache unchanged mesh/material eligibility and compatibility snapshots to reduce owner-side batch key gathering.
 - [x] Advance DX11 frame resources and persistent-cache retirement independently of GPU timing controls.
 - [x] Append DX11 compute constants to the shared constant arena; retain fallback uploads and invalidate cached ranges after cross-context arena discards.
 - [x] Add opt-in DX11 native-call timing by camera/shadow pass, including call counts, wall-time maxima, thread cycles, recording fields, and capture evaluation.

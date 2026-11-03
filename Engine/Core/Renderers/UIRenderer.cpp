@@ -441,6 +441,18 @@ void UIRenderer::UpdateNativeInteraction(Engine::Scene::Scene& scene,
     }
 }
 
+bool UIRenderer::CaptureEmbeddedPointer(Engine::Core::NativeInputSnapshot& input) const
+{
+    if (!m_impl || !m_impl->hasExternalPointerInput) return false;
+    input.clientWidth = static_cast<uint32_t>(m_impl->pointerViewportSize.x);
+    input.clientHeight = static_cast<uint32_t>(m_impl->pointerViewportSize.y);
+    input.clientCursor = {static_cast<LONG>(m_impl->pointerPosition.x),
+        static_cast<LONG>(m_impl->pointerPosition.y)};
+    input.cursorInWindow = input.focused && m_impl->externalPointerHovered;
+    input.keys[VK_LBUTTON] = input.focused && m_impl->externalPointerDown ? SHORT(0x8000) : 0;
+    return true;
+}
+
 void UIRenderer::Render(Engine::Scene::Scene& scene,
     Engine::Graphics::IGraphicsContext* context, float viewportAspect)
 {

@@ -1,4 +1,5 @@
 #include "Core/Rendering/RenderSpatialIndex.h"
+#include "Core/Rendering/RenderBoundsCache.h"
 #include "Core/Threading/JobScheduler.h"
 #include <glm/gtc/matrix_transform.hpp>
 #include <algorithm>
@@ -68,6 +69,55 @@ void Check(Index& index,const std::vector<Bounds>& bounds,bool brute)
         auto actual=index.QueryPointXZ(position); std::sort(actual.begin(),actual.end());
         Require(actual==expected,"refit point query lost or added candidates");
     }
+}
+void PersistentSlotsRegression()
+{
+    using Cache=Engine::Rendering::RenderBoundsCache;
+    Cache cache; Index index; std::vector<Bounds> retained;
+    std::vector<Cache::Input> active;
+    const auto grid=Grid(2048);
+    for(uint32_t slot=0;slot<grid.size();++slot)
+    { Cache::Input item; item.slot=slot; item.bounded=true; item.minimum=grid[slot].minimum; item.maximum=grid[slot].maximum; active.push_back(item); }
+    const auto update=[&](uint32_t count) {
+        cache.PreparePersistent(active,count,retained);
+        const auto stats=index.Update(retained);
+        // Packed reference has only active items in their current order. This
+        // checks the mapping used by camera and each shadow cascade separately.
+        std::vector<Bounds> packed;
+        for(const auto& item:active) packed.push_back(item.bounded ?
+            Engine::Rendering::TransformBounds(item.minimum,item.maximum,item.world):Bounds{});
+        for(unsigned view=0;view<12;++view)
+        {
+            const auto clip=Clip(view); const auto expected=Brute(packed,clip);
+            const auto& visibility=index.Query(clip);
+            for(size_t item=0;item<active.size();++item)
+                Require(visibility[active[item].slot]==expected[item],"persistent slot visibility differs from active packed reference");
+        }
+        return stats;
+    };
+    Require(update(2048).rebuilds==1,"initial persistent tree missing");
+    std::reverse(active.begin(),active.end());
+    Require(!update(2048).changedBounds,"draw order changed persistent bounds");
+    const auto saved=active;
+    active.erase(active.begin(),active.begin()+1000);
+    Require(!update(2048).rebuilds,"temporary draw removal rebuilt persistent tree");
+    active.clear(); Require(!update(2048).changedBounds,"empty active frame discarded retained bounds");
+    active=saved; Require(!update(2048).changedBounds,"LOD/visibility reactivation changed static slots");
+    // Slot reuse after deletion must overwrite stale geometry, including the
+    // bounded -> unbounded -> bounded transition and a move while inactive.
+    active[0].world[3].x-=20;
+    Require(update(2048).changedBounds==1,"recycled slot kept its previous transform");
+    active[1].bounded=false; Require(update(2048).rebuilds==1,"unbounded recycled slot kept bounded classification");
+    active[1].bounded=true; Require(update(2048).rebuilds==1,"bounded recycled slot remained unbounded");
+    auto added=active[0]; added.slot=2055; active.push_back(added);
+    Require(update(2056).rebuilds==1,"persistent capacity growth did not rebuild");
+    active.clear(); Require(!update(2056).changedBounds,"inactive holes changed retained tree");
+    Require(update(0).rebuilds==1 && retained.empty(),"explicit storage reset retained stale slots");
+    active.push_back(added); active.back().slot=0; update(1);
+    bool rejected=false;
+    try { cache.PreparePersistent(active,0,retained); } catch(const std::out_of_range&) { rejected=true; }
+    Require(rejected && retained.size()==1,"invalid slot mutated persistent storage");
+    std::cout<<"Persistent draw-slot order, fades, inactivity, recycling, growth and reset passed.\n";
 }
 void Regression()
 {
@@ -150,8 +200,39 @@ void Benchmark()
     }
     Engine::Threading::JobScheduler::Get().SetParallelForEnabled(true);
 }
+void SlotBenchmark()
+{
+    using Cache=Engine::Rendering::RenderBoundsCache;
+    const auto grid=Grid(4096);
+    std::vector<Cache::Input> all;
+    for(uint32_t slot=0;slot<grid.size();++slot)
+    { Cache::Input item; item.slot=slot; item.bounded=true; item.minimum=grid[slot].minimum; item.maximum=grid[slot].maximum; all.push_back(item); }
+    std::filesystem::create_directories(".local/performance-logs");
+    std::ofstream report(".local/performance-logs/parallel-stage6-slot-benchmark.jsonl");
+    for(bool persistent:{false,true})
+    {
+        Cache cache; Index index; std::vector<Bounds> bounds;
+        if(persistent) cache.PreparePersistent(all,4096,bounds); else cache.Prepare(all,bounds);
+        index.Update(bounds);
+        double total=0,indexMs=0; uint64_t rebuilds=0,refits=0;
+        for(unsigned frame=0;frame<128;++frame)
+        {
+            std::vector<Cache::Input> active;
+            const size_t count=3072+(frame%5)*64;
+            for(size_t i=0;i<count;++i) active.push_back(all[(i+frame*17)%all.size()]);
+            const auto started=std::chrono::steady_clock::now();
+            if(persistent) cache.PreparePersistent(active,4096,bounds); else cache.Prepare(active,bounds);
+            const auto stats=index.Update(bounds);
+            const auto elapsed=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count();
+            if(frame>=8) { total+=elapsed; indexMs+=stats.totalMs; rebuilds+=stats.rebuilds; refits+=stats.refitNodes; }
+        }
+        report<<"{\"mode\":\""<<(persistent ? "persistent":"packed")<<"\",\"frames\":120,\"prepare_and_index_ms\":"<<total/120
+            <<",\"index_ms\":"<<indexMs/120<<",\"rebuilds\":"<<rebuilds<<",\"refit_nodes\":"<<refits<<"}\n";
+        std::cout<<(persistent ? "Persistent":"Packed")<<" rotating active set: "<<total/120<<" ms, "<<rebuilds<<" rebuilds.\n";
+    }
+}
 int main(int argc,char** argv)
 {
-    try { if(argc>1 && std::string(argv[1])=="--benchmark") Benchmark(); else Regression(); }
+    try { if(argc>1 && std::string(argv[1])=="--slot-benchmark") SlotBenchmark(); else if(argc>1 && std::string(argv[1])=="--benchmark") Benchmark(); else { Regression(); PersistentSlotsRegression(); } }
     catch(const std::exception& error) { std::cerr<<error.what()<<'\n'; return 1; }
 }

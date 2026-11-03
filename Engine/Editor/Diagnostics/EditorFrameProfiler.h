@@ -29,6 +29,10 @@ namespace Engine::Editor
         float deltaSeconds = 0.f;
         bool playing = false;
         bool measured = true;
+        bool playPipeline = false;
+        double simulationMilliseconds = 0, simulationCpuMilliseconds = 0;
+        double simulationWaitMilliseconds = 0, simulationOverlapMilliseconds = 0;
+        double simulationGpuWaitMilliseconds = 0, pipelineRecordMilliseconds = 0;
         double prepareMilliseconds = 0.0;
         double renderEntryMilliseconds = 0.0;
         double clearMilliseconds = 0.0;

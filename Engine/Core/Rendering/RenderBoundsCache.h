@@ -1,6 +1,7 @@
 #pragma once
 #include "RenderSpatialIndex.h"
 #include "Core/Threading/JobScheduler.h"
+#include <stdexcept>
 
 namespace Engine::Rendering
 {
@@ -23,15 +24,32 @@ private:
 public:
     Statistics Prepare(const std::vector<Input>& input,std::vector<RenderBounds>& output)
     {
-        Statistics statistics; output.assign(input.size(),{}); m_pending.clear();
+        output.assign(input.size(),{});
+        return PrepareInto(input,output,false);
+    }
+    // Caller-owned slot storage retains inactive bounds. Visibility must be
+    // consumed only through active draw slots, never by iterating this storage.
+    Statistics PreparePersistent(const std::vector<Input>& input,uint32_t slotCount,std::vector<RenderBounds>& output)
+    {
+        for(const auto& value:input) if(value.slot>=slotCount)
+            throw std::out_of_range("Render bounds slot exceeds persistent storage");
+        output.resize(slotCount);
+        return PrepareInto(input,output,true);
+    }
+private:
+    Statistics PrepareInto(const std::vector<Input>& input,std::vector<RenderBounds>& output,bool persistent)
+    {
+        Statistics statistics; m_pending.clear();
         for(size_t index=0;index<input.size();++index)
         {
-            const auto& value=input[index]; if(!value.bounded) continue;
+            const auto& value=input[index];
+            const size_t destination=persistent ? value.slot:index;
+            if(!value.bounded) { output[destination]={}; continue; }
             if(m_entries.size()<=value.slot) m_entries.resize(size_t(value.slot)+1);
             const auto& entry=m_entries[value.slot];
             if(entry.valid && entry.input.minimum==value.minimum && entry.input.maximum==value.maximum && entry.input.world==value.world)
-            { output[index]=entry.bounds; ++statistics.reused; }
-            else { m_pending.push_back({value,index,{}}); ++statistics.updated; }
+            { output[destination]=entry.bounds; ++statistics.reused; }
+            else { m_pending.push_back({value,destination,{}}); ++statistics.updated; }
         }
         // Workers touch only copied matrices/bounds and their distinct result.
         Threading::JobScheduler::Get().For(m_pending.size(),64,[&](size_t index) {

@@ -61,6 +61,10 @@ public:
     void Clear(float r, float g, float b, float a = 1.0f) override;
     Engine::Graphics::IGraphicsProvider* GetGraphicsProvider() override;
     void WaitIdle() override { FlushGPU(); }
+    bool SupportsFrameCompletion() const override { return true; }
+    uint64_t GetSubmittedFrameToken() const override { return m_fenceValue; }
+    bool IsFrameComplete(uint64_t token) override
+    { return !token || (m_fence && m_fence->GetCompletedValue() >= token); }
 
     // IEditorRenderer interface
     void MarkDirty() override { m_dirty = true; }

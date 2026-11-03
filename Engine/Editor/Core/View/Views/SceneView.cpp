@@ -1,5 +1,6 @@
 
 #include "SceneView.h"
+#include "Core/Graphics/GraphicsCommandPacket.h"
 #include "Core/Component.h"
 #include "Editor/Core/View/EditorViewportSettings.h"
 #include "Scene/SceneCameraController.h"
@@ -122,6 +123,19 @@ SceneView::~SceneView()
 // ---------------------------------------------------------------------------
 // Init — store the scene pointer, then delegate resource creation to View.
 // ---------------------------------------------------------------------------
+void SceneView::SetScene(Engine::Scene::Scene* scene)
+{
+    if (m_scene == scene) return;
+    CancelPrefabPreview();
+    m_previousSelectedObject = nullptr;
+    // Gestures and model pins contain pointers into the previous graph.
+    m_gizmos.ResetInteraction();
+    const auto tool = m_toolbar.GetTransformTool();
+    m_toolbar = SceneViewportToolbar{};
+    m_toolbar.SetTransformTool(tool);
+    m_scene = scene;
+}
+
 void SceneView::Init(void* device,
                          uint32_t width, uint32_t height,
                          void* srvCpu,
@@ -912,6 +926,17 @@ void SceneView::Render3D(void* cmd)
         m_scene->Render(ctx.get(), m_aspect, nullptr, true,
             GetWidth(), GetHeight());
     }
+}
+
+void SceneView::RecordRenderCommands(Engine::Graphics::GraphicsCommandPacket& shadow,
+    Engine::Graphics::GraphicsCommandPacket& color,
+    const Engine::Scene::Scene::NativeRenderPacket* packet)
+{
+    if (!m_scene) return;
+    m_scene->UpdateEditorCameraFollow();
+    m_scene->PrepareNativeUiLayout(m_aspect);
+    m_scene->Render(&shadow, m_aspect, nullptr, false, GetWidth(), GetHeight(), true, packet);
+    m_scene->Render(&color, m_aspect, nullptr, true, GetWidth(), GetHeight(), false, packet);
 }
 
 void SceneView::RenderShadow3D(void* cmd)

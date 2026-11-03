@@ -34,6 +34,17 @@ public:
     }
     void SetAllowComponentStructureEdits(bool allow)
     { m_allowComponentStructureEdits = allow; }
+    Engine::Scene::Scene* GetScene() const { return m_scene; }
+    void SetScene(Engine::Scene::Scene* scene)
+    {
+        if (m_scene == scene) return;
+        m_selectionLocked = false;
+        SetSelectedObject(nullptr);
+        m_deferredTransformPrefabRoot = nullptr;
+        m_componentJumpTarget = nullptr;
+        m_componentPickerOpen = false;
+        m_scene = scene;
+    }
 
     void SetSelectedObject(Engine::Core::Object* obj)
     {
