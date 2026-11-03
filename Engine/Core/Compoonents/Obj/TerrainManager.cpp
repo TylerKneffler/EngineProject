@@ -1127,10 +1127,13 @@ int TerrainManager::DesiredLodStride(Cell cell, int centerX, int centerY) const
     if (m_editorStreaming) return 1;
     const int distance = std::max(std::abs(cell.first - centerX),
         std::abs(cell.second - centerY));
-    if (distance <= loadedRadius) return 1;
-    if (distance <= lod2Radius) return 2;
-    if (distance <= lod4Radius) return 4;
-    return 8;
+    int stride = distance <= loadedRadius ? 1 :
+        distance <= lod2Radius ? 2 : distance <= lod4Radius ? 4 : 8;
+    // Match Terrain::SetMeshLodStride: unsupported strides otherwise consume
+    // the LOD/upload budget every frame without ever changing the mesh.
+    while (stride > 1 && (cellsX < stride || cellsY < stride ||
+        cellsX % stride || cellsY % stride)) stride /= 2;
+    return stride;
 }
 
 int TerrainManager::DesiredPrepareLodStride(Cell cell, int centerX,
@@ -2044,7 +2047,9 @@ void TerrainManager::StreamCells(int centerX, int centerY, int initialRadius)
     });
     record(m_lastStreamingTiming.candidatesMs);
     int loaded = 0;
-    const auto beforeLoads = GetMemoryUsage();
+    // Settled windows have no load requests; avoid walking all resident
+    // meshes and locking both worker queues for a budget we will not use.
+    const auto beforeLoads = pending.empty() ? MemoryUsage{} : GetMemoryUsage();
     const bool memoryFull =
         beforeLoads.cpuBytes >= (static_cast<uint64_t>(std::max(1, cpuBudgetMiB)) << 20) ||
         beforeLoads.gpuBytes >= (static_cast<uint64_t>(std::max(1, gpuBudgetMiB)) << 20);
@@ -3350,6 +3355,7 @@ void TerrainManager::RefreshFarTerrainEditedCells(
             if (cell.first >= tile.startX && cell.first < tile.endX &&
                 cell.second >= tile.startY && cell.second < tile.endY)
             {
+                tile.containsEditedPatch = true;
                 if (!newPatch && tile.lodStride == 1 && tile.built &&
                     tile.patchVertexOffsets.count(patchIndex))
                     tile.dirtyPatchIndices.insert(patchIndex);
@@ -3900,6 +3906,15 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
                     break;
                 }
         }
+        // Parent indices are stable now. Mark the ancestor chain once instead
+        // of searching every edited cell for every parent on every frame.
+        for (size_t index = 0; index < m_farTiles.size(); ++index)
+        {
+            if (m_farTiles[index].patchIndices.empty()) continue;
+            for (size_t ancestor = index; ancestor != static_cast<size_t>(-1);
+                ancestor = m_farTiles[ancestor].parentIndex)
+                m_farTiles[ancestor].containsEditedPatch = true;
+        }
     }
     for (auto& tile : m_farTiles) tile.desired = false;
     const glm::dmat4 terrainWorld = Owner->transform.GetWorldMatrixD();
@@ -3953,11 +3968,7 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
             centerX - (parent.endX - 1)});
         const int dy = std::max({parent.startY - centerY, 0,
             centerY - (parent.endY - 1)});
-        const bool hasPatch = std::any_of(m_farPatchCells.begin(),
-            m_farPatchCells.end(), [&](Cell cell) {
-                return cell.first >= parent.startX && cell.first < parent.endX &&
-                    cell.second >= parent.startY && cell.second < parent.endY;
-            });
+        const bool hasPatch = parent.containsEditedPatch;
         const bool outsideNear = std::max(dx, dy) > nearRadius + 1;
         if (!outsideNear || hasPatch)
             parent.coarseSelected = false;
@@ -4092,14 +4103,28 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
             std::abs(viewCenter.x) <= halfY * viewAspect + radius &&
             std::abs(viewCenter.y) <= halfY + radius;
     };
-    std::sort(pending.begin(), pending.end(), [&](size_t a, size_t b) {
-        if (exposesGap(a) != exposesGap(b)) return exposesGap(a);
-        if (readyIndices.count(a) != readyIndices.count(b))
-            return readyIndices.count(a) != 0;
-        if (cameraVisible(a) != cameraVisible(b)) return cameraVisible(a);
-        const int distanceA = tileDistance(a), distanceB = tileDistance(b);
-        return distanceA == distanceB ? a < b : distanceA < distanceB;
-    });
+    struct TilePriority
+    {
+        size_t index;
+        bool gap, ready, inView;
+        int distance;
+    };
+    std::vector<TilePriority> priorities;
+    priorities.reserve(pending.size());
+    for (size_t index : pending)
+        priorities.push_back({index, exposesGap(index),
+            readyIndices.count(index) != 0, cameraVisible(index),
+            tileDistance(index)});
+    std::sort(priorities.begin(), priorities.end(),
+        [](const TilePriority& a, const TilePriority& b) {
+            if (a.gap != b.gap) return a.gap;
+            if (a.ready != b.ready) return a.ready;
+            if (a.inView != b.inView) return a.inView;
+            return a.distance == b.distance ? a.index < b.index :
+                a.distance < b.distance;
+        });
+    for (size_t order = 0; order < priorities.size(); ++order)
+        pending[order] = priorities[order].index;
     {
         std::map<size_t, size_t> priority;
         for (size_t order = 0; order < pending.size(); ++order)

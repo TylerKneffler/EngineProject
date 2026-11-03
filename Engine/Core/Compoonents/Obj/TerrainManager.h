@@ -288,6 +288,7 @@ private:
         bool desired = false;
         bool outOfRange = false;
         bool coarseSelected = false;
+        bool containsEditedPatch = false;
         float maxHeightError = 0.f;
         float minHeight = 0.f, maxHeight = 0.f;
         Engine::Core::Object* object = nullptr;

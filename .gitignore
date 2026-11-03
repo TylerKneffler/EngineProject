@@ -6,6 +6,11 @@ build/
 .local/
 !.local/
 .local/*
+!.local/scripts/
+.local/scripts/*
+!.local/scripts/benchmark_foliage_baseline.py
+!.local/scripts/benchmark_terrain_scene.py
+!.local/scripts/evaluate_performance.py
 !.local/tests/
 .local/tests/*
 !.local/tests/AudioPipelineTests.cpp
