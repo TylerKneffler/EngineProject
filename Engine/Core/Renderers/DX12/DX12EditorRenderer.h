@@ -65,6 +65,7 @@ public:
     uint64_t GetSubmittedFrameToken() const override { return m_fenceValue; }
     bool IsFrameComplete(uint64_t token) override
     { return !token || (m_fence && m_fence->GetCompletedValue() >= token); }
+    void WaitForFrame(uint64_t token) override;
 
     // IEditorRenderer interface
     void MarkDirty() override { m_dirty = true; }

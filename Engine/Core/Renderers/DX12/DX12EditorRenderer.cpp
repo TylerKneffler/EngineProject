@@ -457,4 +457,11 @@ void DX12EditorRenderer::FlushGPU()
     }
     m_frameIndex = m_swapChain->GetCurrentBackBufferIndex();
 }
+
+void DX12EditorRenderer::WaitForFrame(uint64_t token)
+{
+    if (IsFrameComplete(token)) return;
+    ThrowIfFailed(m_fence->SetEventOnCompletion(token, m_fenceEvent));
+    WaitForSingleObject(m_fenceEvent, INFINITE);
+}
 }

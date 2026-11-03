@@ -20,6 +20,8 @@ public:
     struct Timings
     {
         double updateMs = 0, updateCpuMs = 0, waitMs = 0, overlapMs = 0, gpuWaitMs = 0;
+        double queueWaitMs = 0;
+        uint32_t queueWaits = 0, retainedFrames = 0;
     };
     explicit EditorPlayPipeline(Renderers::IEditorRenderer& renderer);
     ~EditorPlayPipeline();
@@ -37,7 +39,12 @@ private:
     using Clock = std::chrono::steady_clock;
     void Run();
     void WaitForGraphics();
-    void CollectCompletedFrames(bool boundQueue = true);
+    struct QueueCollection
+    {
+        double waitMs = 0;
+        uint32_t waits = 0, retainedFrames = 0;
+    };
+    QueueCollection CollectCompletedFrames(bool boundQueue = true);
     Renderers::IEditorRenderer& m_renderer;
     const std::thread::id m_editorOwner;
     std::thread::id m_simulationOwner;

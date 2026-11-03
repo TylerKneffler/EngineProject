@@ -227,4 +227,13 @@ bool DX11EditorRenderer::IsFrameComplete(uint64_t token)
     }
     return token <= m_completedFrameToken;
 }
+
+void DX11EditorRenderer::WaitForFrame(uint64_t token)
+{
+    if (IsFrameComplete(token)) return;
+    // GetData with DONOTFLUSH is only a poll. Submit pending commands once,
+    // then wait for the event query already attached to the requested frame.
+    m_context->Flush();
+    while (!IsFrameComplete(token)) SwitchToThread();
+}
 }

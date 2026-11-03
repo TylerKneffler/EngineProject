@@ -955,6 +955,9 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
             sample.simulationOverlapMilliseconds = pipelineTimings.overlapMs;
             sample.simulationGpuWaitMilliseconds = pipelineTimings.gpuWaitMs;
             sample.pipelineRecordMilliseconds = pipelineRecordMs;
+            sample.pipelineQueueWaitMilliseconds = pipelineTimings.queueWaitMs;
+            sample.pipelineQueueWaits = pipelineTimings.queueWaits;
+            sample.pipelineRetainedFrames = pipelineTimings.retainedFrames;
             sample.prepareMilliseconds = prepareMilliseconds;
             sample.renderEntryMilliseconds = renderEntryMilliseconds;
             sample.clearMilliseconds = clearMilliseconds;

@@ -2452,6 +2452,21 @@
             "directory": false
         },
         {
+            "id": "file:5e2ba5e5:510000:bad0f",
+            "path": "Scripts/Demos/Pong/PongAI.h",
+            "directory": false
+        },
+        {
+            "id": "file:5e2ba5e5:6d0000:7a744",
+            "path": "Scenes/terrain/grass_single_cell_distant_test.scene",
+            "directory": false
+        },
+        {
+            "id": "file:5e2ba5e5:6d0000:2ca57",
+            "path": "Scenes/terrain/grass_single_cell_test.scene",
+            "directory": false
+        },
+        {
             "id": "file:5e2ba5e5:600000:e0e7",
             "path": "Scenes/terrain/terrain_performance.scene",
             "directory": false
@@ -2499,11 +2514,6 @@
         {
             "id": "file:5e2ba5e5:4b0000:bad10",
             "path": "Scripts/Demos/Pong/PongAI.cpp",
-            "directory": false
-        },
-        {
-            "id": "file:5e2ba5e5:510000:bad0f",
-            "path": "Scripts/Demos/Pong/PongAI.h",
             "directory": false
         },
         {

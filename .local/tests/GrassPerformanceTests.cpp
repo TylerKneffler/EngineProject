@@ -2376,7 +2376,7 @@ void CheckAutomaticRendering()
     std::cout<<"Shared geometry, automatic batching, GPU visibility/LOD, dirty uploads, and edit isolation passed.\n";
 }
 
-void RenderAudit(const char* reportPath=".local/performance-logs/grass-automatic-instancing-render-audit.jsonl",bool matrix=false,bool storageAudit=false,bool compare=false,bool nativeAudit=false,unsigned width=1848,unsigned height=1069,bool reverseOrder=false)
+void RenderAudit(const char* reportPath=".local/performance-logs/grass-automatic-instancing-render-audit.jsonl",bool matrix=false,bool storageAudit=false,bool compare=false,bool nativeAudit=false,unsigned width=1848,unsigned height=1069,bool reverseOrder=false,int selectedMode=-1,bool fixedRoute=false,const char* scenePath="Engine/Core/Assets/Scenes/terrain/grass_flat_test.scene")
 {
     using Clock = std::chrono::steady_clock;
     Engine::Core::Window window(GetModuleHandleW(nullptr), L"Grass render audit", width, height);
@@ -2386,7 +2386,16 @@ void RenderAudit(const char* reportPath=".local/performance-logs/grass-automatic
     Engine::Scene::Scene scene;
     scene.Init(renderer.GetGraphicsProvider());
     std::cout << "Loading streamed grass landscape." << std::endl;
-    Require(scene.Load("Engine/Core/Assets/Scenes/terrain/grass_flat_test.scene"), "grass scene failed");
+    Require(scene.Load(scenePath), "grass scene failed");
+    auto* landscape=scene.FindObjectByName("Grass Terrain Landscape");
+    auto* streamManager=landscape ? landscape->GetComponent<Engine::Components::TerrainManager>():nullptr;
+    const size_t residentTerrainTarget=streamManager ?
+        1u+static_cast<size_t>((2*streamManager->streamedPrefabRadius+1)*(2*streamManager->streamedPrefabRadius+1)):0u;
+    if(selectedMode>=0 && streamManager)
+    {
+        streamManager->Start();
+        scene.CommitPendingObjectChanges();
+    }
     auto* player = scene.FindObjectByName("Grass Test Capsule");
     auto* owner = scene.FindObjectByName("Grass Layer");
     auto* grass = owner ? owner->GetComponent<GrassField>() : nullptr;
@@ -2397,14 +2406,19 @@ void RenderAudit(const char* reportPath=".local/performance-logs/grass-automatic
         if (auto* field = object->GetComponent<GrassField>()) fields.push_back(field);
     Require(!fields.empty() && fields.size() < 441,
         "render audit must begin with streamed terrain grass fields");
+    std::vector<bool> authoredGrassShadows;
+    authoredGrassShadows.reserve(fields.size());
+    for(const auto* field:fields) authoredGrassShadows.push_back(field->castShadows);
     if(storageAudit) for(auto* layer:scene.GetComponents<Engine::Components::TerrainObjectLayer>())
         Require(layer->HasLoadedPreparedData(),"landscape cell did not load its baked placement cache");
     scene.SetUpdateProfilingEnabled(true);
     const char* modes[]={"default","terrain-only","grass-no-shadows","full-grass"};
     if(compare) for(auto* field:fields) field->fadeDuration=0; // Identical coverage at each route frame.
-    for(unsigned pass=0;pass<(matrix || compare ? 4u:storageAudit ? 2u:1u);++pass)
+    for(unsigned pass=0;pass<(selectedMode>=0 ? 1u:matrix || compare ? 4u:storageAudit ? 2u:1u);++pass)
     {
-    const unsigned mode=matrix ? pass:3u;
+    const unsigned mode=selectedMode>=0 ? static_cast<unsigned>(selectedMode):matrix ? pass:3u;
+    if(matrix) for(size_t i=0;i<fields.size();++i)
+        fields[i]->castShadows=mode==3 && authoredGrassShadows[i];
     const bool streaming=storageAudit && (compare ? pass>=2:pass>0);
     const bool parallel=!compare || ((pass%2==1) != reverseOrder);
     Engine::Threading::JobScheduler::Get().SetParallelForEnabled(parallel);
@@ -2417,7 +2431,7 @@ void RenderAudit(const char* reportPath=".local/performance-logs/grass-automatic
     }
     player->transform.position.z=0;
     const char* route=streaming ? "streaming":"resident";
-    const std::string path=storageAudit ? std::string(*reportPath ? reportPath:".local/performance-logs/static-instance-")+route+(compare ? (parallel ? "-parallel":"-serial"):"")+".jsonl":matrix ? std::string(".local/performance-logs/landscape-matrix-")+modes[mode]+".jsonl":reportPath;
+    const std::string path=selectedMode>=0 ? reportPath:storageAudit ? std::string(*reportPath ? reportPath:".local/performance-logs/static-instance-")+route+(compare ? (parallel ? "-parallel":"-serial"):"")+".jsonl":matrix ? std::string(".local/performance-logs/landscape-matrix-")+modes[mode]+".jsonl":reportPath;
     std::cout << "Benchmark mode: " << modes[mode] << std::endl;
     std::ofstream report(path);
     unsigned measured = 0;
@@ -2430,13 +2444,18 @@ void RenderAudit(const char* reportPath=".local/performance-logs/grass-automatic
     {
         const auto started = Clock::now();
         // Stay within the authored tile radius while crossing LOD thresholds.
-        player->transform.position.x = warmed ? 3.f * std::sin(measured * .04f):
+        player->transform.position.x = fixedRoute ? 0.f:warmed ? 3.f * std::sin(measured * .04f):
             (matrix && frame>=31 ? 3.f*std::sin((frame-31)*.04f):0.f);
         if(streaming && warmed)
         {
             player->transform.position.x=64.f*std::sin(measured*.02f);
             player->transform.position.z=32.f*std::sin(measured*.04f);
         }
+        if(selectedMode>=0 && streamManager &&
+            scene.GetComponents<Engine::Components::Terrain>().size()<residentTerrainTarget)
+            streamManager->Update();
+        if(selectedMode==2) for(auto* field:scene.GetComponents<GrassField>())
+            field->castShadows=false;
         scene.ResetGrassPerformance();
         if(!warmed || mode>=2) scene.UpdateSpatialScripts();
         const auto g = scene.GetGrassPerformance();
@@ -2446,8 +2465,6 @@ void RenderAudit(const char* reportPath=".local/performance-logs/grass-automatic
             {
                 const bool grassTile=object->name.find("Grass Tile (")==0;
                 mesh->SetEditorVisible(mode!=0 && (!grassTile || mode>=2));
-                if(grassTile) if(auto* material=object->GetComponent<Engine::Components::Material>())
-                    material->castsShadows=mode==3 && material->castsShadows;
             }
         renderer.BeginFrame();
         renderer.Clear(.1f,.1f,.1f);
@@ -2470,10 +2487,11 @@ void RenderAudit(const char* reportPath=".local/performance-logs/grass-automatic
         const auto gpu=renderer.GetGraphicsProvider()->GetContextFactory()->GetFrameTimingTelemetry();
         const auto shadowSettings=scene.GetShadowDebugSnapshot();
         report << "{\"type\":\"frame_details\",\"playing\":true,\"benchmark_mode\":\"" << modes[mode]
-            << "\",\"route\":\"" << route << "\",\"route_version\":\"static-instances-v1\",\"renderer\":\"dx11\""
+            << "\",\"scene_asset\":\"" << scenePath
+            << "\",\"route\":\"" << (fixedRoute ? "fixed":route) << "\",\"route_version\":\"" << (selectedMode>=0 && streamManager ? "streamed-cells-v2":selectedMode>=0 ? "isolated-cell-v1":"static-instances-v1") << "\",\"renderer\":\"dx11\""
             << ",\"parallel_preparation\":" << (parallel ? "true":"false") << ",\"fixed_fade_coverage\":" << (compare ? "true":"false")
             << ",\"warm_state_reset\":" << (compare ? "true":"false")
-            << ",\"benchmark_scope\":\"render_and_grass_no_editor_or_physics\",\"measured\":" << (warmed ? "true":"false")
+            << ",\"benchmark_scope\":\"" << (selectedMode>=0 && streamManager ? "render_grass_and_cell_streaming_no_editor_or_physics":"render_and_grass_no_editor_or_physics") << "\",\"measured\":" << (warmed ? "true":"false")
             << ",\"view_pixels\":" << width*height << ",\"frame\":" << frame << ",\"frame_ms\":" << ms
             << ",\"view_width\":" << width << ",\"view_height\":" << height
             << ",\"viewer_x\":" << player->transform.position.x << ",\"viewer_z\":" << player->transform.position.z
@@ -2481,6 +2499,7 @@ void RenderAudit(const char* reportPath=".local/performance-logs/grass-automatic
             << ",\"grass_scanned\":" << g.placementsScanned << ",\"grass_pending\":" << g.pending
             << ",\"grass_lod_switches\":" << g.lodSwitches << ",\"grass_gpu_bytes\":" << g.gpuBytes
             << ",\"grass_instances\":" << g.instances << ",\"grass_instance_upload_bytes\":" << g.instanceUploadBytes
+            << ",\"terrain_component_count\":" << scene.GetComponents<Engine::Components::Terrain>().size()
             << ",\"shadow_cascades\":" << shadowSettings.cascadeCount
             << ",\"shadow_atlas_resolution\":" << shadowSettings.atlasResolution
             << ",\"shadow_submission_wall_ms\":" << shadow.submissionWallMs
@@ -2567,12 +2586,18 @@ void RenderAudit(const char* reportPath=".local/performance-logs/grass-automatic
         }
         if (!warmed && frame > (matrix || storageAudit ? 300:30) && g.pending == 0 && g.tilesBuilt == 0)
         {
-            const auto snapshotStarted = Clock::now();
-            const auto snapshot = scene.SaveSnapshotToString();
-            snapshotBytes = snapshot.size();
-            snapshotMs = std::chrono::duration<double,std::milli>(Clock::now()-snapshotStarted).count();
-            Require(scene.SaveToString().find("Grass Tile (") == std::string::npos,
-                "runtime grass leaked into render-audit save");
+            if(selectedMode>=0 && streamManager)
+                Require(scene.GetComponents<Engine::Components::Terrain>().size()>=residentTerrainTarget,
+                    "grass landscape did not stream its detailed cells");
+            if(selectedMode<0)
+            {
+                const auto snapshotStarted = Clock::now();
+                const auto snapshot = scene.SaveSnapshotToString();
+                snapshotBytes = snapshot.size();
+                snapshotMs = std::chrono::duration<double,std::milli>(Clock::now()-snapshotStarted).count();
+                Require(scene.SaveToString().find("Grass Tile (") == std::string::npos,
+                    "runtime grass leaked into render-audit save");
+            }
             warmed = true;
         }
     }
@@ -2589,6 +2614,55 @@ void RenderAudit(const char* reportPath=".local/performance-logs/grass-automatic
     std::cout << "Authored snapshot: " << snapshotBytes << " bytes in " << snapshotMs << " ms." << std::endl;
     }
     Engine::Threading::JobScheduler::Get().SetParallelForEnabled(true);
+}
+
+void RenderEmptyBaseline(const char* reportPath,unsigned width,unsigned height)
+{
+    using Clock=std::chrono::steady_clock;
+    Engine::Core::Window window(GetModuleHandleW(nullptr),L"Empty scene render baseline",width,height);
+    Engine::Renderers::DX11GameRenderer renderer;
+    Require(renderer.Init(window.GetHWND(),width,height),"hardware renderer failed");
+    Engine::Scene::Scene scene;
+    scene.Init(renderer.GetGraphicsProvider());
+    constexpr const char* scenePath="Engine/Core/Assets/Scenes/Basics/default.scene";
+    Require(scene.Load(scenePath),"default scene failed");
+    auto* cameraOwner=scene.FindObjectByName("Camera");
+    auto* camera=cameraOwner ? cameraOwner->GetComponent<Engine::Components::Camera>():nullptr;
+    Require(camera && scene.GetComponents<Engine::Components::Mesh>().empty(),
+        "default baseline must have a camera and no meshes");
+    std::ofstream report(reportPath);
+    Require(report.good(),"empty baseline output failed");
+    for(unsigned frame=0;frame<541;++frame)
+    {
+        const auto started=Clock::now();
+        renderer.BeginFrame();
+        renderer.Clear(.1f,.1f,.1f);
+        scene.PrepareRenderFrame();
+        auto context=renderer.CreateFrameGraphicsContext();
+        scene.Render(context.get(),static_cast<float>(width)/height,camera,false,width,height,true);
+        scene.Render(context.get(),static_cast<float>(width)/height,camera,false,width,height);
+        renderer.EndFrame();
+        const double ms=std::chrono::duration<double,std::milli>(Clock::now()-started).count();
+        const auto gpu=renderer.GetGraphicsProvider()->GetContextFactory()->GetFrameTimingTelemetry();
+        const auto cpu=scene.GetLastRenderCpuTimings();
+        const auto shadow=scene.GetShadowDebugSnapshot();
+        report<<"{\"type\":\"frame_details\",\"playing\":true,\"benchmark_mode\":\"empty-default\""
+            <<",\"scene_asset\":\""<<scenePath<<"\",\"route\":\"empty-static\""
+            <<",\"route_version\":\"v1\",\"renderer\":\"dx11\""
+            <<",\"benchmark_scope\":\"render_and_grass_no_editor_or_physics\""
+            <<",\"measured\":"<<(frame>=301?"true":"false")
+            <<",\"view_width\":"<<width<<",\"view_height\":"<<height
+            <<",\"frame\":"<<frame<<",\"frame_ms\":"<<ms
+            <<",\"shadow_cascades\":"<<shadow.cascadeCount
+            <<",\"shadow_atlas_resolution\":"<<shadow.atlasResolution
+            <<",\"gpu_valid\":"<<(gpu.gpuTimingsValid?"true":"false")
+            <<",\"gpu_sample_id\":"<<gpu.gpuSampleId
+            <<",\"gpu_shadow_ms\":"<<gpu.gpuMilliseconds[size_t(Engine::Graphics::GpuTimingStage::Shadow)]
+            <<",\"gpu_terrain_ms\":"<<gpu.gpuMilliseconds[size_t(Engine::Graphics::GpuTimingStage::Terrain)]
+            <<",\"gpu_grass_ms\":"<<gpu.gpuMilliseconds[size_t(Engine::Graphics::GpuTimingStage::Grass)]
+            <<",\"render_cpu_total_ms\":"<<cpu.totalMs<<"}\n";
+    }
+    renderer.WaitIdle();
 }
 
 void TestRecordedOcclusionFeedback()
@@ -2691,6 +2765,29 @@ int main(int argc, char** argv)
     {
         if(argc>1 && std::string(argv[1])=="--stop-restore-audit") AuditStopRestore();
         else if (argc > 1 && std::string(argv[1]) == "--landscape-matrix") RenderAudit("",true);
+        else if(argc>1 && std::string(argv[1])=="--empty-default-baseline")
+        {
+            Require(argc==5,"usage: --empty-default-baseline output.jsonl width height");
+            const unsigned width=static_cast<unsigned>(std::stoul(argv[3]));
+            const unsigned height=static_cast<unsigned>(std::stoul(argv[4]));
+            Require(width>0 && height>0,"benchmark dimensions must be positive");
+            RenderEmptyBaseline(argv[2],width,height);
+        }
+        else if(argc>1 && (std::string(argv[1])=="--foliage-baseline" ||
+                            std::string(argv[1])=="--foliage-baseline-fixed"))
+        {
+            Require(argc==6 || argc==7,"usage: --foliage-baseline off|shadows-off|on output.jsonl width height [scene]");
+            const std::string mode=argv[2];
+            Require(mode=="off" || mode=="shadows-off" || mode=="on",
+                "foliage mode must be off, shadows-off, or on");
+            const unsigned width=static_cast<unsigned>(std::stoul(argv[4]));
+            const unsigned height=static_cast<unsigned>(std::stoul(argv[5]));
+            Require(width>0 && height>0,"benchmark dimensions must be positive");
+            RenderAudit(argv[3],true,false,false,false,width,height,false,
+                mode=="on" ? 3:mode=="shadows-off" ? 2:1,
+                std::string(argv[1])=="--foliage-baseline-fixed",
+                argc==7 ? argv[6]:"Engine/Core/Assets/Scenes/terrain/grass_flat_test.scene");
+        }
         else if(argc>1 && std::string(argv[1])=="--static-instance-audit") RenderAudit("",false,true);
         else if(argc>1 && std::string(argv[1])=="--parallel-stage-audit") RenderAudit(".local/performance-logs/parallel-stage-",false,true);
         else if(argc>1 && std::string(argv[1])=="--parallel-stage-comparison") RenderAudit(".local/performance-logs/parallel-comparison-",false,true,true);

@@ -49,6 +49,9 @@ public:
     virtual bool SupportsFrameCompletion() const { return false; }
     virtual uint64_t GetSubmittedFrameToken() const { return 0; }
     virtual bool IsFrameComplete(uint64_t token) { return token == 0; }
+    // Wait only for the submitted frame whose retained resources are needed.
+    // Backends without per-frame waits can conservatively drain the device.
+    virtual void WaitForFrame(uint64_t token) { if (!IsFrameComplete(token)) WaitIdle(); }
 
     virtual void SetUiRenderHooks(EditorUiRenderHooks hooks) = 0;
     virtual void SetUiTextureHooks(EditorUiTextureHooks) {}

@@ -13,6 +13,8 @@ struct Renderer final : Engine::Renderers::IEditorRenderer
     const std::thread::id owner = std::this_thread::get_id();
     uint64_t submitted = 1, completed = 0;
     unsigned idleWaits = 0;
+    unsigned frameWaits = 0;
+    uint64_t lastWaitedToken = 0;
     bool submittedFrame = true;
     bool Init(void*, uint32_t, uint32_t) override { return true; }
     void Resize(uint32_t, uint32_t) override {}
@@ -29,6 +31,12 @@ struct Renderer final : Engine::Renderers::IEditorRenderer
     bool SupportsFrameCompletion() const override { return true; }
     uint64_t GetSubmittedFrameToken() const override { return submitted; }
     bool IsFrameComplete(uint64_t token) override { return token <= completed; }
+    void WaitForFrame(uint64_t token) override
+    {
+        Require(std::this_thread::get_id() == owner, "frame wait escaped graphics owner");
+        Require(token <= submitted, "frame wait requested an unsubmitted token");
+        ++frameWaits; lastWaitedToken = token; completed = token;
+    }
     void MarkDirty() override {}
     bool IsDirty() const override { return true; }
     void SetUiRenderHooks(Engine::Renderers::EditorUiRenderHooks) override {}
@@ -113,14 +121,22 @@ int main()
         pipeline.Finish();
         pipeline.Drain();
 
-        const unsigned beforeBound = renderer.idleWaits;
+        const unsigned beforeBoundIdle = renderer.idleWaits;
+        const unsigned beforeBoundFrame = renderer.frameWaits;
+        uint64_t firstToken = renderer.submitted + 1;
+        Engine::Editor::EditorPlayPipeline::Timings bounded;
         for (int frame = 0; frame < 3; ++frame)
         {
             ++renderer.submitted;
             pipeline.Begin(scene, .016f, {});
-            pipeline.Finish();
+            bounded = pipeline.Finish();
         }
-        Require(renderer.idleWaits == beforeBound + 1, "GPU frames were not bounded to three");
+        Require(renderer.idleWaits == beforeBoundIdle && renderer.frameWaits == beforeBoundFrame + 1,
+            "queue bound drained the device instead of waiting for one frame");
+        Require(renderer.lastWaitedToken == firstToken && renderer.completed < renderer.submitted,
+            "queue bound waited for the newest frame");
+        Require(bounded.queueWaits == 1 && bounded.retainedFrames == 2,
+            "queue wait was not measured or older resources were not retired");
 
         const auto published = scene.GetPublishedSceneSnapshot();
         probe->Owner->name = "Owner edit before replay";

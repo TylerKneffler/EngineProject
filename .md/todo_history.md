@@ -424,6 +424,7 @@ Earlier baseline (Release DX11, 960×540, this machine, dirt/grass textures, bef
 
 ## Landscape performance
 
+- [x] Add a fresh-process foliage landscape baseline runner with fixed and moving DX11 routes and separate foliage-off, grass-shadows-off, and full-foliage cases. At 790 x 589 Release, the moving route measured 9.08, 9.99, and 19.37 ms mean intervals respectively over 240 frames per case; a second shadow pair confirmed the shadow cost with run-to-run variation. The 1920 x 1080 foliage-off case measured 33.21 ms and repeated at 33.69 ms. These render-helper captures exclude editor UI and physics; see `.md/foliage-landscape-baseline-20261103.md` for percentiles, GPU stages, and limits.
 - [x] Batch compatible grass tiles by species, LOD, material, and render state in camera and shadow passes.
 - [x] Cull shadow casters against cascade receiver silhouettes while preserving off-screen shadows and cascade fades.
 - [x] Add grass caster distance to shadow quality presets and project preferences.

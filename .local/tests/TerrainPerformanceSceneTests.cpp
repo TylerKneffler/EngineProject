@@ -42,8 +42,20 @@ int main()
     const bool benchmarkShadows = std::getenv("TERRAIN_SHADOW_BENCHMARK") != nullptr;
     const bool captureDummy = std::getenv("TERRAIN_DUMMY_CAPTURE") != nullptr;
     const bool captureGrid = std::getenv("TERRAIN_GRID_CAPTURE") != nullptr;
-    const unsigned width = captureDummy || captureGrid ? 1280u : (benchmark ? 960u : 64u);
-    const unsigned height = captureDummy || captureGrid ? 720u : (benchmark ? 540u : 64u);
+    const auto benchmarkDimension = [](const char* name, unsigned fallback)
+    {
+        if (const char* value = std::getenv(name))
+        {
+            const unsigned parsed = static_cast<unsigned>(std::stoul(value));
+            Require(parsed > 0 && parsed <= 8192);
+            return parsed;
+        }
+        return fallback;
+    };
+    const unsigned width = captureDummy || captureGrid ? 1280u :
+        benchmark ? benchmarkDimension("TERRAIN_BENCHMARK_WIDTH", 960u) : 64u;
+    const unsigned height = captureDummy || captureGrid ? 720u :
+        benchmark ? benchmarkDimension("TERRAIN_BENCHMARK_HEIGHT", 540u) : 64u;
     Engine::Core::Window window(GetModuleHandleW(nullptr),
         L"Terrain performance scene test", width, height);
     Engine::Renderers::DX11GameRenderer renderer;
@@ -53,6 +65,13 @@ int main()
     Require(scene.Load("Engine/Core/Assets/Scenes/terrain/terrain_performance.scene"));
     if (const char* output = std::getenv("TERRAIN_CURRENT_BENCHMARK"))
     {
+        if (std::getenv("TERRAIN_BENCHMARK_NO_SHADOWS"))
+        {
+            auto* sunObject = scene.FindObjectByName("Terrain Performance Sun");
+            auto* sun = sunObject ? sunObject->GetComponent<Engine::Components::Light>() : nullptr;
+            Require(sun);
+            sun->castsShadows = false;
+        }
         const bool parallel = std::getenv("TERRAIN_PARALLEL_PREPARATION") != nullptr;
         Engine::Threading::JobScheduler::Get().SetParallelForEnabled(parallel);
         auto* viewer = scene.FindObjectByName("Terrain Performance Capsule");

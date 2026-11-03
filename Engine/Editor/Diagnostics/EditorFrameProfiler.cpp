@@ -157,6 +157,9 @@ namespace Engine::Editor
             << ",\"simulation_overlap_ms\":" << sample.simulationOverlapMilliseconds
             << ",\"simulation_gpu_wait_ms\":" << sample.simulationGpuWaitMilliseconds
             << ",\"pipeline_record_ms\":" << sample.pipelineRecordMilliseconds
+            << ",\"pipeline_queue_wait_ms\":" << sample.pipelineQueueWaitMilliseconds
+            << ",\"pipeline_queue_waits\":" << sample.pipelineQueueWaits
+            << ",\"pipeline_retained_frames\":" << sample.pipelineRetainedFrames
             << ",\"ui_render_ms\":" << uiRenderMilliseconds
             << ",\"present_ms\":" << presentMilliseconds
             << ",\"gpu_valid\":"

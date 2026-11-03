@@ -115,7 +115,10 @@ EditorPlayPipeline::Timings EditorPlayPipeline::Finish(std::vector<Commands> com
     Core::ApplyNativeCursorRequests(m_input);
     m_frames.push_back({m_renderer.GetSubmittedFrameToken(), std::move(commands),
         scene->TakeRetiredGraphicsResources()});
-    CollectCompletedFrames();
+    const auto collection = CollectCompletedFrames();
+    result.queueWaitMs = collection.waitMs;
+    result.queueWaits = collection.waits;
+    result.retainedFrames = collection.retainedFrames;
     if (failure) std::rethrow_exception(failure);
     return result;
 }
@@ -131,30 +134,38 @@ std::shared_ptr<Graphics::GraphicsCommandPacket> EditorPlayPipeline::AcquireComm
     return result;
 }
 
-void EditorPlayPipeline::CollectCompletedFrames(bool boundQueue)
+EditorPlayPipeline::QueueCollection EditorPlayPipeline::CollectCompletedFrames(bool boundQueue)
 {
-    while (!m_frames.empty() && m_renderer.IsFrameComplete(m_frames.front().token))
+    const auto retireCompleted = [this]
     {
-        // Current-frame instrumentation may still read the replay results.
-        // Recycle at next acquisition, after those external owners disappear.
-        if (std::any_of(m_frames.front().commands.begin(), m_frames.front().commands.end(),
-            [](const Commands& packet) { return packet.use_count() != 1; })) break;
-        for (auto& packet : m_frames.front().commands)
-            if (m_recycledCommands.size() < 64)
-            {
-                auto reusable = std::const_pointer_cast<Graphics::GraphicsCommandPacket>(std::move(packet));
-                reusable->Reset();
-                m_recycledCommands.push_back(std::move(reusable));
-            }
-        m_frames.pop_front();
-    }
-    // Bound packet/resource lifetimes and GPU latency even when no resources
-    // were replaced. This wait is outside command recording.
+        while (!m_frames.empty() && m_renderer.IsFrameComplete(m_frames.front().token))
+        {
+            // A current-frame reader may still hold a packet. It keeps that
+            // packet alive; the completed frame need not block retirement.
+            for (auto& packet : m_frames.front().commands)
+                if (packet.use_count() == 1 && m_recycledCommands.size() < 64)
+                {
+                    auto reusable = std::const_pointer_cast<Graphics::GraphicsCommandPacket>(std::move(packet));
+                    reusable->Reset();
+                    m_recycledCommands.push_back(std::move(reusable));
+                }
+            m_frames.pop_front();
+        }
+    };
+    retireCompleted();
+    QueueCollection result;
+    // Bound retained resources while waiting for only the oldest frame. A
+    // full device drain would also wait for newer frames still in flight.
     if (boundQueue && m_frames.size() >= 3)
     {
-        m_renderer.WaitIdle();
-        m_frames.clear();
+        const auto start = Clock::now();
+        m_renderer.WaitForFrame(m_frames.front().token);
+        result.waitMs = std::chrono::duration<double, std::milli>(Clock::now() - start).count();
+        result.waits = 1;
+        retireCompleted();
     }
+    result.retainedFrames = static_cast<uint32_t>(m_frames.size());
+    return result;
 }
 
 void EditorPlayPipeline::Drain()

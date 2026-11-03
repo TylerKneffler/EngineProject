@@ -44,6 +44,8 @@
                 "--target", "Editor",
                 "--parallel"
             ],
+            "dependsOn": "CMake: Configure (Debug)",
+            "dependsOrder": "sequence",
             "group": {
                 "kind": "build",
                 "isDefault": true

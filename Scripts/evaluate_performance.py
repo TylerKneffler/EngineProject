@@ -80,7 +80,8 @@ def evaluate(rows, path="", all_frames=False):
     metrics = {k: summary([r[k] for r in frames if k in r])
                for k in set().union(*(r.keys() for r in frames))
                if k.endswith("_ms") or k.startswith(("instance_", "shadow_instance_", "prepare_transform_", "prepare_spatial_", "render_batch_", "writer_queue_", "worker_queue_"))
-               or k in ("native_compute_arena_writes", "native_compute_discard_maps")}
+               or k in ("native_compute_arena_writes", "native_compute_discard_maps",
+                        "pipeline_queue_waits", "pipeline_retained_frames")}
     stage_work = {}
     for stage in ("pacing", "background", "update", "render", "pending_load"):
         values = [item for row in frames for item in row.get("stage_work", [])
@@ -270,7 +271,7 @@ def markdown(result, comparison=None):
     for key in ("frame_ms", "update_ms", "render_ms", "main_submit_ms", "shadow_submit_ms", "editor_ui_ms",
                 "ui_thread_cpu_ms", "render_thread_cpu_ms", "writer_queue_records", "writer_queue_bytes", "worker_queue_pending",
                 "simulation_ms", "simulation_cpu_ms", "simulation_wait_ms", "simulation_overlap_ms",
-                "simulation_gpu_wait_ms", "pipeline_record_ms",
+                "simulation_gpu_wait_ms", "pipeline_record_ms", "pipeline_queue_wait_ms",
                 "grass_total_ms", "grass_generation_ms", "grass_upload_ms", "physics_ms", "pose_ms", "constraints_ms", "audio_ms",
                 "render_startup_ms", "render_terrain_prepare_ms", "render_occlusion_ms",
                 "shadow_draw_ms", "shadow_geometry_draw_ms", "shadow_submission_thread_cpu_ms",
@@ -281,6 +282,12 @@ def markdown(result, comparison=None):
                 "prepare_spatial_index_ms", "prepare_spatial_compare_ms", "prepare_spatial_refit_ms", "prepare_spatial_build_ms"):
         if value := result["metrics"].get(key):
             lines.append(f"| {key} | {value['mean']:.3f} | {value['p95']:.3f} |")
+    if waits := result["metrics"].get("pipeline_queue_waits"):
+        retained = result["metrics"].get("pipeline_retained_frames")
+        lines.append(f"\nPlay queue waits: {waits['mean']:.3f} per frame; "
+                     f"retained frames: {retained['mean']:.2f} average, "
+                     f"{retained['max']:.0f} maximum." if retained else
+                     f"\nPlay queue waits: {waits['mean']:.3f} per frame.")
     if result.get("stage_work"):
         lines += ["", "| Frame stage | Wall ms | Main CPU ms | Worker execution ms | Queue delay ms |", "|---|---:|---:|---:|---:|"]
         for name, work in result["stage_work"].items():
