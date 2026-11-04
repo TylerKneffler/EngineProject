@@ -45,6 +45,8 @@ public:
     bool ColorEdit3(const char*, float*) override; bool ColorEdit4(const char*, float*) override;
     bool SliderInt(const char*, int*, int, int) override;
     bool SliderFloat(const char*, float*, float, float) override;
+    bool LodRangeSlider(const char*, float*, int, float,
+        const char* const*) override;
     bool InputUInt(const char*, uint32_t*) override;
     void ValueLabel(const char*, const char*) override; bool CollapsingHeader(const char*, bool) override;
     bool PropertyGroupHeader(const char*, bool) override;

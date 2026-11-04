@@ -325,7 +325,7 @@ void VSMain(
     float3 worldUp = mul((float3x3)objectData.world, grassUp);
     float upLength = max(length(worldUp), 0.0001);
     if (objectData.grassAnimation.y > 0.5)
-        ApplyGrassWind(objectData.grassAnimation.x,
+        ApplyGrassWind(objectData.grassAnimation.x, objectData.grassAnimation.z,
             mul(objectData.world, float4(grassRoot, 1)).xyz, worldUp / upLength,
             max(0.0, pos.y) * upLength, worldPosition.xyz, worldNormal, worldTangent);
     oPos = mul(objectData.viewProjection, worldPosition);

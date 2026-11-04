@@ -32,6 +32,7 @@ Mesh::Mesh()
 {
     SetTypeName(COMPONENT_TYPE_NAME(Mesh));
     RegisterField("file", m_filePath);
+    RegisterField("foliageWindStrength",foliageWindStrength,"Foliage");
     RegisterField("useLightProbes",useLightProbes,"Lighting");
     RegisterField("gpuLodSelection",gpuLodSelection,"LOD");
     RegisterField("gpuLod1Distance",gpuLod1Distance,"LOD");
@@ -793,6 +794,12 @@ glm::vec4 Mesh::GetRuntimeGeometryFade(bool previous) const
 }
 
 int Mesh::ChooseRuntimeLod(float distance, std::initializer_list<float> thresholds,
+    float hysteresis) const
+{
+    return ChooseRuntimeLod(distance, std::vector<float>(thresholds), hysteresis);
+}
+
+int Mesh::ChooseRuntimeLod(float distance, const std::vector<float>& thresholds,
     float hysteresis) const
 {
     if (std::isnan(distance)) return std::max(0, m_activeRuntimeLod);
@@ -2571,6 +2578,7 @@ void Mesh::DeserializeLegacyMorphTargets(const JsonValue& value)
 void Mesh::Deserialize(const JsonValue& v)
 {
     DeferGraphicsBuffers();
+    if(v.Has("foliageWindStrength")) foliageWindStrength=std::clamp(v["foliageWindStrength"].AsFloat(),0.f,1.f);
     if(v.Has("gpuLodSelection")) gpuLodSelection=v["gpuLodSelection"].AsBool();
     if(v.Has("gpuLod1Distance")) gpuLod1Distance=std::max(0.f,v["gpuLod1Distance"].AsFloat());
     if(v.Has("gpuLod2Distance")) gpuLod2Distance=std::max(gpuLod1Distance,v["gpuLod2Distance"].AsFloat());

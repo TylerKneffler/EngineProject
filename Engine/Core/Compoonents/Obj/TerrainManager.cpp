@@ -2579,84 +2579,116 @@ bool TerrainManager::DrawProperties(::Engine::Editor::IEditorUi& ui)
     bool changed = false;
     const int previousX = cellsX, previousY = cellsY;
     const float previousWidth = cellWidth, previousDepth = cellDepth;
-    changed |= ui.SliderInt("Cells X", &cellsX, 1, 512);
-    changed |= ui.SliderInt("Cells Y", &cellsY, 1, 512);
-    changed |= ui.DragFloat("Cell width", &cellWidth, .1f, .001f, 1000.f);
-    changed |= ui.DragFloat("Cell depth", &cellDepth, .1f, .001f, 1000.f);
-    changed |= ui.SliderInt("Interactive radius", &loadedRadius, 0, 32);
-    changed |= ui.SliderInt("Editor radius", &editorRadius, 0, 32);
-    changed |= ui.SliderInt("LOD changes per update", &maxLodChangesPerUpdate, 1, 64);
-    changed |= ui.SliderInt("Loads per update", &maxLoadsPerUpdate, 1, 64);
-    changed |= ui.SliderInt("Unloads per update", &maxUnloadsPerUpdate, 1, 64);
     const bool priorAsync = asyncStreaming;
-    changed |= ui.Checkbox("Async streaming", &asyncStreaming);
-    changed |= ui.SliderInt("Prepared cell limit", &maxPreparedCells, 1, 64);
-    changed |= ui.SliderInt("Uploads per update", &maxUploadsPerUpdate, 1, 64);
-    changed |= ui.SliderFloat("Far rebuild budget (ms)",
-        &maxFarRebuildMilliseconds, .001f, 100.f);
-    changed |= ui.SliderFloat("Far tile error (pixels)",
-        &farTileScreenErrorPixels, .1f, 64.f);
-    changed |= ui.SliderFloat("LOD 2 error (pixels, -1 inherits)",
-        &farTileErrorPixelsLod2, -1.f, 64.f);
-    changed |= ui.SliderFloat("LOD 4 error (pixels, -1 inherits)",
-        &farTileErrorPixelsLod4, -1.f, 64.f);
-    changed |= ui.SliderFloat("LOD 8 error (pixels, -1 inherits)",
-        &farTileErrorPixelsLod8, -1.f, 64.f);
-    changed |= ui.SliderFloat("LOD 16+ error (pixels, -1 inherits)",
-        &farTileErrorPixelsLod16, -1.f, 64.f);
-    changed |= ui.DragFloat("Maximum far view distance (m, 0 follows camera)",
-        &maxFarViewDistanceMeters, 10.f, 0.f, 1000000.f);
-    changed |= ui.SliderFloat("Far tile LOD hysteresis",
-        &farTileLodHysteresis, 0.f, .9f);
-    changed |= ui.Checkbox("Batch far terrain cells", &batchFarCells);
-    changed |= ui.Checkbox("Fast runtime terrain lighting", &fastRuntimeLighting);
-    changed |= ui.Checkbox("Stochastic terrain tile variation",
-        &stochasticTerrainVariation);
-    changed |= ui.Checkbox("Terrain macro color blend",
-        &terrainMacroColorEnabled);
-    changed |= ui.Checkbox("Measurement grid (metres and cell borders)",
-        &measurementGrid);
-    changed |= ui.Checkbox("Generate terrain cell colliders",
-        &generateColliders);
-    changed |= ui.Checkbox("Enable only near terrain colliders",
-        &streamCollidersByDistance);
-    changed |= ui.Checkbox("Manage authored cell colliders", &manageAuthoredCellColliders);
-    if (!streamedPrefabPath.empty())
+    if (ui.CollapsingHeader("View distance and quality"))
     {
-        ui.ValueLabel("Streamed cell prefab", streamedPrefabPath.c_str());
-        changed |= ui.Checkbox("Reuse streamed prefab cells", &reuseStreamedPrefabCells);
-        changed |= ui.SliderInt("Streamed grid half extent", &streamedPrefabHalfExtent, 0, 128);
-        changed |= ui.SliderInt("Streamed prefab radius", &streamedPrefabRadius, 0, 8);
-        ui.ValueLabel("Loaded prefab cells", std::to_string(m_streamedPrefabCells.size()).c_str());
+        changed |= ui.DragFloat("View distance (m)",
+            &maxFarViewDistanceMeters, 10.f, 0.f, 1000000.f);
+        ui.Tooltip("Maximum distant terrain draw distance, capped by the camera far clip. Zero uses the camera far clip. Applies to distant terrain tiles; cell loading is controlled below.");
+        changed |= ui.SliderFloat("Terrain quality (pixel error)",
+            &farTileScreenErrorPixels, .1f, 64.f);
+        ui.Tooltip("Lower values preserve more distant terrain detail and cost more to render. Higher values switch to simpler terrain sooner. Per-LOD overrides are under Advanced terrain LOD.");
+        changed |= ui.SliderInt("Full detail distance (cells)", &loadedRadius, 0, 32);
+        ui.Tooltip("Full-resolution terrain and interactive cells around the viewer. Distances are square grid radii: one cell spans Cells X * Cell width by Cells Y * Cell depth.");
+        changed |= ui.SliderInt("Terrain loading distance (cells)", &farRadius, -1, 32);
+        ui.Tooltip("Loaded terrain radius when distant terrain tiles are unavailable. -1 follows full detail distance. When distant tiles are active, only full-detail cells are loaded.");
+        changed |= ui.SliderInt("Medium detail ends (cells)", &lod2Radius, 0, 32);
+        ui.Tooltip("Loaded cells beyond full detail use half-resolution terrain (LOD 2) through this radius. Applies when distant terrain tiles are unavailable.");
+        changed |= ui.SliderInt("Low detail ends (cells)", &lod4Radius, 0, 32);
+        ui.Tooltip("Loaded cells beyond medium detail use quarter-resolution terrain (LOD 4) through this radius, then eighth-resolution terrain. Keep this at least as large as the medium detail radius.");
+        changed |= ui.SliderInt("Editor detail distance (cells)", &editorRadius, 0, 32);
+        ui.Tooltip("Editable full-resolution cell radius around the Scene view camera, separate from play mode.");
+        ui.Label("Object view distance, LOD distances and shadow distance: Terrain Object Layer.");
+        ui.Label("Shadow quality and global shadow range: Preferences > Rendering > Realtime Shadows.");
     }
-    changed |= ui.DragFloat("Collider edge distance (m)", &colliderActivationDistance, .05f, 0.f, 100.f);
-    ui.ValueLabel("Active terrain collider cells", std::to_string(m_activeColliderCells).c_str());
-    changed |= ui.SliderInt("CPU terrain budget MiB", &cpuBudgetMiB, 1, 16384);
-    changed |= ui.SliderInt("GPU terrain budget MiB", &gpuBudgetMiB, 1, 16384);
-    changed |= ui.SliderInt("Mesh cache budget MiB", &cacheBudgetMiB, 1, 16384);
-    char bakeDirectory[512]{};
-    std::memcpy(bakeDirectory, runtimeBakeDirectory.data(),
-        std::min(runtimeBakeDirectory.size(), sizeof(bakeDirectory) - 1));
-    if (ui.InputText("Runtime bake directory", bakeDirectory,
-        sizeof(bakeDirectory)))
+    if (ui.CollapsingHeader("Advanced streaming and memory", false))
     {
-        runtimeBakeDirectory = bakeDirectory;
-        changed = true;
+        changed |= ui.SliderInt("LOD changes per update", &maxLodChangesPerUpdate, 1, 64);
+        changed |= ui.SliderInt("Loads per update", &maxLoadsPerUpdate, 1, 64);
+        changed |= ui.SliderInt("Unloads per update", &maxUnloadsPerUpdate, 1, 64);
+        changed |= ui.Checkbox("Async streaming", &asyncStreaming);
+        changed |= ui.SliderInt("Prepared cell limit", &maxPreparedCells, 1, 64);
+        changed |= ui.SliderInt("Uploads per update", &maxUploadsPerUpdate, 1, 64);
+        changed |= ui.SliderFloat("Far rebuild budget (ms)",
+            &maxFarRebuildMilliseconds, .001f, 100.f);
+        changed |= ui.SliderInt("CPU terrain budget MiB", &cpuBudgetMiB, 1, 16384);
+        changed |= ui.SliderInt("GPU terrain budget MiB", &gpuBudgetMiB, 1, 16384);
+        changed |= ui.SliderInt("Mesh cache budget MiB", &cacheBudgetMiB, 1, 16384);
+        changed |= ui.Checkbox("Batch far terrain cells", &batchFarCells);
     }
-    changed |= ui.Checkbox("Require runtime terrain bake", &requireRuntimeBake);
-    if (ui.Button("Bake all terrain cells for runtime") &&
-        Owner && Owner->GetScene() && !Owner->GetScene()->HasStarted())
+    if (ui.CollapsingHeader("Advanced terrain LOD", false))
     {
-        if (runtimeBakeDirectory.empty())
+        ui.Label("Pixel error overrides: -1 uses Terrain quality; lower values retain more detail.");
+        changed |= ui.SliderFloat("LOD 2 error (pixels, -1 inherits)",
+            &farTileErrorPixelsLod2, -1.f, 64.f);
+        changed |= ui.SliderFloat("LOD 4 error (pixels, -1 inherits)",
+            &farTileErrorPixelsLod4, -1.f, 64.f);
+        changed |= ui.SliderFloat("LOD 8 error (pixels, -1 inherits)",
+            &farTileErrorPixelsLod8, -1.f, 64.f);
+        changed |= ui.SliderFloat("LOD 16+ error (pixels, -1 inherits)",
+            &farTileErrorPixelsLod16, -1.f, 64.f);
+        changed |= ui.SliderFloat("Far tile LOD hysteresis",
+            &farTileLodHysteresis, 0.f, .9f);
+        ui.Tooltip("Stabilizes detail changes as the camera moves. Larger values reduce switching near LOD boundaries.");
+    }
+    if (ui.CollapsingHeader("Terrain appearance", false))
+    {
+        changed |= ui.Checkbox("Fast runtime terrain lighting", &fastRuntimeLighting);
+        changed |= ui.Checkbox("Stochastic terrain tile variation",
+            &stochasticTerrainVariation);
+        changed |= ui.Checkbox("Terrain macro color blend",
+            &terrainMacroColorEnabled);
+        changed |= ui.Checkbox("Measurement grid (metres and cell borders)",
+            &measurementGrid);
+    }
+    if (ui.CollapsingHeader("Terrain collision", false))
+    {
+        changed |= ui.Checkbox("Generate terrain cell colliders",
+            &generateColliders);
+        changed |= ui.Checkbox("Enable only near terrain colliders",
+            &streamCollidersByDistance);
+        changed |= ui.Checkbox("Manage authored cell colliders", &manageAuthoredCellColliders);
+        if (!streamedPrefabPath.empty())
         {
-            runtimeBakeDirectory = !cellDataDirectory.empty()
-                ? cellDataDirectory + "/BakedCells"
-                : "Assets/TerrainBakes";
+            ui.ValueLabel("Streamed cell prefab", streamedPrefabPath.c_str());
+            changed |= ui.Checkbox("Reuse streamed prefab cells", &reuseStreamedPrefabCells);
+            changed |= ui.SliderInt("Streamed grid half extent", &streamedPrefabHalfExtent, 0, 128);
+            changed |= ui.SliderInt("Streamed prefab radius", &streamedPrefabRadius, 0, 8);
+            ui.ValueLabel("Loaded prefab cells", std::to_string(m_streamedPrefabCells.size()).c_str());
+        }
+        changed |= ui.DragFloat("Collider edge distance (m)", &colliderActivationDistance, .05f, 0.f, 100.f);
+        ui.ValueLabel("Active terrain collider cells", std::to_string(m_activeColliderCells).c_str());
+    }
+    if (ui.CollapsingHeader("Terrain layout and baking", false))
+    {
+        changed |= ui.SliderInt("Cells X", &cellsX, 1, 512);
+        changed |= ui.SliderInt("Cells Y", &cellsY, 1, 512);
+        changed |= ui.DragFloat("Cell width (m)", &cellWidth, .1f, .001f, 1000.f);
+        changed |= ui.DragFloat("Cell depth (m)", &cellDepth, .1f, .001f, 1000.f);
+        char bakeDirectory[512]{};
+        std::memcpy(bakeDirectory, runtimeBakeDirectory.data(),
+            std::min(runtimeBakeDirectory.size(), sizeof(bakeDirectory) - 1));
+        if (ui.InputText("Runtime bake directory", bakeDirectory,
+            sizeof(bakeDirectory)))
+        {
+            runtimeBakeDirectory = bakeDirectory;
             changed = true;
         }
-        changed |= BakeRuntimeTerrain();
+        changed |= ui.Checkbox("Require runtime terrain bake", &requireRuntimeBake);
+        if (ui.Button("Bake all terrain cells for runtime") &&
+            Owner && Owner->GetScene() && !Owner->GetScene()->HasStarted())
+        {
+            if (runtimeBakeDirectory.empty())
+            {
+                runtimeBakeDirectory = !cellDataDirectory.empty()
+                    ? cellDataDirectory + "/BakedCells"
+                    : "Assets/TerrainBakes";
+                changed = true;
+            }
+            changed |= BakeRuntimeTerrain();
+        }
+        if (!m_bakeStatus.empty()) ui.Label(m_bakeStatus.c_str());
     }
-    if (!m_bakeStatus.empty()) ui.Label(m_bakeStatus.c_str());
     if (priorAsync != asyncStreaming) InvalidatePrepared();
     if (cellsX != previousX || cellsY != previousY ||
         cellWidth != previousWidth || cellDepth != previousDepth)
@@ -2668,48 +2700,52 @@ bool TerrainManager::DrawProperties(::Engine::Editor::IEditorUi& ui)
             {
                 loaded->Resize(cellsX, cellsY, cellWidth, cellDepth);
                 loaded->Owner->transform.position = {
-                    static_cast<double>(cell.first) * cellsX * cellWidth,
+                        static_cast<double>(cell.first) * cellsX * cellWidth,
                     0.0, static_cast<double>(cell.second) * cellsY * cellDepth};
-                data = loaded->Serialize();
-            }
-            else
-            {
-                Terrain temporary;
-                temporary.Deserialize(data);
-                temporary.Resize(cellsX, cellsY, cellWidth, cellDepth);
-                data = temporary.Serialize();
+                    data = loaded->Serialize();
+                }
+                else
+                {
+                    Terrain temporary;
+                    temporary.Deserialize(data);
+                    temporary.Resize(cellsX, cellsY, cellWidth, cellDepth);
+                    data = temporary.Serialize();
+                }
             }
         }
-    }
-    if (ui.Button("Add center cell")) changed |= AddCell(0, 0);
-    ui.Separator();
-    ui.Label("Terrain object layers (one child per loaded cell)");
-    char layerName[128]{};
-    std::memcpy(layerName, m_newObjectLayerName.data(),
-        std::min(m_newObjectLayerName.size(), sizeof(layerName) - 1));
-    if (ui.InputText("New object layer", layerName, sizeof(layerName)))
-        m_newObjectLayerName = layerName;
-    if (ui.Button("Add object layer") && AddObjectLayer(m_newObjectLayerName))
-    {
-        m_newObjectLayerName = "Objects";
-        changed = true;
-    }
-    for (size_t i = 0; i < m_objectLayerNames.size(); ++i)
-    {
-        const std::string name = m_objectLayerNames[i];
-        ui.Label(name.c_str());
-        ui.SameLine();
-        const std::string button = "Remove##ObjectLayer" +
-            std::to_string(i);
-        if (ui.Button(button.c_str()))
+        if (ui.CollapsingHeader("Terrain cells and object layers", false))
         {
-            changed |= RemoveObjectLayer(name);
-            break;
+            if (ui.Button("Add center cell")) changed |= AddCell(0, 0);
+            ui.Separator();
+            ui.Label("Terrain object layers (one child per loaded cell)");
+            char layerName[128]{};
+            std::memcpy(layerName, m_newObjectLayerName.data(),
+                std::min(m_newObjectLayerName.size(), sizeof(layerName) - 1));
+            if (ui.InputText("New object layer", layerName, sizeof(layerName)))
+            m_newObjectLayerName = layerName;
+            if (ui.Button("Add object layer") && AddObjectLayer(m_newObjectLayerName))
+            {
+                m_newObjectLayerName = "Objects";
+                changed = true;
+            }
+            for (size_t i = 0; i < m_objectLayerNames.size(); ++i)
+            {
+                const std::string name = m_objectLayerNames[i];
+                ui.Label(name.c_str());
+                ui.SameLine();
+                const std::string button = "Remove##ObjectLayer" +
+                std::to_string(i);
+                if (ui.Button(button.c_str()))
+                {
+                    changed |= RemoveObjectLayer(name);
+                    break;
+                }
+            }
         }
+        if (changed) MarkConfigurationDirty();
+        return changed;
     }
-    if (changed) MarkConfigurationDirty();
-    return changed;
-}
+
 namespace
 {
 constexpr uint64_t FarTileCacheMagic = 0x31454c4954524146ull;

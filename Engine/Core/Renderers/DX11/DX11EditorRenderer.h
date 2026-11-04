@@ -26,6 +26,7 @@ public:
     void WaitIdle() override;
     bool SupportsFrameCompletion() const override { return true; }
     uint64_t GetSubmittedFrameToken() const override { return m_submittedFrameToken; }
+    std::optional<uint64_t> GetSubmittedFrameCount() const override { return m_submittedFrameToken; }
     bool IsFrameComplete(uint64_t token) override;
     void WaitForFrame(uint64_t token) override;
     std::pair<std::pair<void*, void*>, uint32_t> AllocateSrvSlot() override;

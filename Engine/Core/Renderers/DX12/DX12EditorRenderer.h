@@ -63,6 +63,7 @@ public:
     void WaitIdle() override { FlushGPU(); }
     bool SupportsFrameCompletion() const override { return true; }
     uint64_t GetSubmittedFrameToken() const override { return m_fenceValue; }
+    std::optional<uint64_t> GetSubmittedFrameCount() const override { return m_submittedFrameCount; }
     bool IsFrameComplete(uint64_t token) override
     { return !token || (m_fence && m_fence->GetCompletedValue() >= token); }
     void WaitForFrame(uint64_t token) override;
@@ -156,6 +157,7 @@ private:
     uint32_t m_height     = 0;
 
     // Initialized true so the very first call to RenderIfNeeded always draws.
+    uint64_t m_submittedFrameCount = 0;
     bool m_dirty = true;
     bool m_tearingSupported = false;
 

@@ -88,12 +88,25 @@ namespace Engine::Editor
             }
         double gpuTotal=0;
         for(double value:gpuTiming.gpuMilliseconds) gpuTotal+=value;
-        output << "\"schema_version\":2,\"playing\":"
+        double mainCpuMs=0, workerCpuMs=0;
+        for(const auto& stage:sample.stages)
+        { mainCpuMs+=stage.mainBusyMs; workerCpuMs+=stage.workerMs; }
+        output << "\"schema_version\":3,\"playing\":"
             << (sample.playing ? "true" : "false")
-            << ",\"dt_ms\":" << sample.deltaSeconds * 1000.f
-            << ",\"fps\":" << (sample.deltaSeconds>0 ? 1./sample.deltaSeconds:0.)
-            << ",\"fps_scope\":\"editor_frame_interval\""
-            << ",\"frame_latency_ms\":" << sample.deltaSeconds * 1000.f
+            << ",\"dt_ms\":" << sample.updateIntervalMs
+            << ",\"simulation_delta_ms\":" << sample.deltaSeconds * 1000.f
+            << ",\"fps\":" << (sample.updateIntervalMs>0 ? 1000./sample.updateIntervalMs:0.)
+            << ",\"fps_scope\":\"editor_update_interval\""
+            << ",\"editor_update_interval_ms\":" << sample.updateIntervalMs
+            << ",\"editor_updates_per_second\":" << (sample.updateIntervalMs>0 ? 1000./sample.updateIntervalMs:0.)
+            << ",\"submission_count_valid\":" << (sample.submissionCountValid ? "true":"false")
+            << ",\"submitted_frames\":" << sample.submittedFrames
+            << ",\"submission_interval_ms\":" << sample.submissionIntervalMs
+            << ",\"main_cpu_work_ms\":" << mainCpuMs
+            << ",\"worker_execution_sum_ms\":" << workerCpuMs
+            << ",\"main_nonrunning_ms\":" << std::max(0.,ms(sample.frameBegin,sample.afterPendingLoad)-mainCpuMs)
+            << ",\"previous_idle_wait_ms\":" << sample.idleWaitMs
+            << ",\"frame_latency_ms\":" << sample.updateIntervalMs
             << ",\"frame_ms\":" << ms(sample.frameBegin, sample.afterPendingLoad)
             << ",\"pacing_ms\":" << ms(sample.frameBegin, sample.afterPacing)
             << ",\"background_ms\":" << ms(sample.afterPacing, sample.afterBackground)

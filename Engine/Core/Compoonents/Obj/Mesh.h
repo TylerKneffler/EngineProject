@@ -4,6 +4,7 @@
 #include "Core/Graphics/IGraphicsBuffer.h"
 #include "Core/Model/MeshData.h"
 #include <cstdint>
+#include <algorithm>
 #include <string>
 #include <vector>
 #include <memory>
@@ -37,6 +38,9 @@ public:
     bool useBoundsForShadowCulling = false;
     // Runtime classification; the project grass shadow budget supplements the layer budget.
     bool grassShadowCaster = false;
+    // Authored foliage shares the grass wind field, with restrained tree motion.
+    PROPERTY(Inspector,EditAnywhere,Category="Foliage",ClampMin="0",ClampMax="1")
+    float foliageWindStrength = 0.f;
     // Transient per-object caster range; zero means unrestricted. Evaluated on
     // the GPU so distance changes do not toggle whole instance tiles.
     float runtimeShadowDistance = 0.f;
@@ -169,7 +173,7 @@ public:
     // Runtime LODs belong to this object. Installing geometry transfers ownership;
     // selecting a resident level exchanges buffers without copies or uploads.
     // These caches are transient and do not change the mesh asset's file path.
-    static constexpr int MaximumRuntimeLods = 16;
+    static constexpr int MaximumRuntimeLods = 32;
     bool StoreRuntimeLod(int lod, std::unique_ptr<Mesh> geometry);
     bool IsRuntimeLodResident(int lod) const;
     Mesh* GetRuntimeLodMesh(int lod) const
@@ -184,6 +188,8 @@ public:
     float GetRuntimeVisibility() const { return m_runtimeVisibility; }
     uint64_t GetRuntimeFadeRevision() const { return m_runtimeFadeRevision; }
     int ChooseRuntimeLod(float distance, std::initializer_list<float> thresholds,
+        float hysteresis = 0.f) const;
+    int ChooseRuntimeLod(float distance, const std::vector<float>& thresholds,
         float hysteresis = 0.f) const;
     size_t GetResidentRuntimeLodCount() const;
     uint64_t GetRuntimeLodGpuMemoryBytes() const;
@@ -237,8 +243,10 @@ public:
     const std::string& GetFilePath() const { return m_filePath; }
     void SetAuthoredFilePath(std::string path);
     bool HasBounds() const { return m_hasBounds; }
-    const glm::vec3& GetBoundsMin() const { return m_boundsMin; }
-    const glm::vec3& GetBoundsMax() const { return m_boundsMax; }
+    float GetFoliageWindPadding() const
+    { return 1.5f * std::max(0.f,m_boundsMax.y) * std::clamp(foliageWindStrength,0.f,1.f); }
+    glm::vec3 GetBoundsMin() const { return m_boundsMin-glm::vec3(GetFoliageWindPadding()); }
+    glm::vec3 GetBoundsMax() const { return m_boundsMax+glm::vec3(GetFoliageWindPadding()); }
     unsigned GetMorphNodeIndex() const { return m_morphNodeIndex; }
     void SetMorphData(unsigned nodeIndex, std::vector<MorphTarget> targets,
         std::vector<float> weights);

@@ -41,13 +41,13 @@ float GrassWindPerlin(float2 position, uint seed)
     return clamp(1.41421356 * lerp(bottom, top, fade.y), -1.0, 1.0);
 }
 
-void ApplyGrassWind(float sceneTime,
+void ApplyGrassWind(float sceneTime, float strength,
     float3 root, float3 up, float height,
     inout float3 position, inout float3 normal, inout float3 tangent)
 {
     float direction = radians(GrassWindDirectionDegrees);
     float4 wind = float4(cos(direction), sin(direction),
-        saturate(GrassWindStrength), sceneTime * max(0.0, GrassWindSpeed));
+        saturate(GrassWindStrength * strength), sceneTime * max(0.0, GrassWindSpeed));
     float noiseScale = 1.0 / max(1.0, GrassWindWaveSize);
     uint seed = GrassWindSeed;
     if (wind.z <= 0.0 || height <= 0.0) return;

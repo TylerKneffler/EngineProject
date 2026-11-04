@@ -21,6 +21,7 @@ public:
     void WaitIdle() override { m_core.WaitIdle(); }
     bool SupportsFrameCompletion() const override { return true; }
     uint64_t GetSubmittedFrameToken() const override { return m_core.GetSubmittedFrameToken(); }
+    std::optional<uint64_t> GetSubmittedFrameCount() const override { return m_core.GetSubmittedFrameToken(); }
     bool IsFrameComplete(uint64_t token) override { return m_core.IsFrameComplete(token); }
     void MarkDirty() override { m_dirty = true; }
     bool IsDirty() const override { return m_dirty; }

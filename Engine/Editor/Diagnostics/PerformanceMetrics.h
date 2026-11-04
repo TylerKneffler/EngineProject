@@ -1,5 +1,6 @@
 #pragma once
 #include <algorithm>
+#include <cstdint>
 #include <cmath>
 #include <vector>
 #include <deque>
@@ -9,20 +10,26 @@ struct FrameStatistics
 {
     double meanMs=0, p95Ms=0, p99Ms=0, fps=0, over60BudgetPercent=0;
 };
-// Count editor frame intervals, independently of panel draws or input events.
+// Include zero-event intervals so an idle renderer reports zero throughput.
 class FrameRateWindow
 {
-    std::deque<double> m_intervals;
+    struct Sample { double milliseconds; uint64_t count; };
+    std::deque<Sample> m_samples;
     double m_total=0;
+    uint64_t m_count=0;
 public:
-    void Add(double intervalMs)
+    void Add(double intervalMs, uint64_t count=1)
     {
         if(!std::isfinite(intervalMs) || intervalMs<=0) return;
-        m_intervals.push_back(intervalMs); m_total+=intervalMs;
-        while(m_intervals.size()>1 && (m_total-m_intervals.front()>=500. || m_intervals.size()>600))
-        { m_total-=m_intervals.front(); m_intervals.pop_front(); }
+        m_samples.push_back({intervalMs,count}); m_total+=intervalMs; m_count+=count;
+        while(m_samples.size()>1 && (m_total-m_samples.front().milliseconds>=500. || m_samples.size()>600))
+        {
+            m_total-=m_samples.front().milliseconds;
+            m_count-=m_samples.front().count;
+            m_samples.pop_front();
+        }
     }
-    double Fps() const { return m_total>0 ? 1000.*m_intervals.size()/m_total:0; }
+    double Fps() const { return m_total>0 ? 1000.*m_count/m_total:0; }
 };
 inline FrameStatistics SummarizeFrames(std::vector<double> values)
 {

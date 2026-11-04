@@ -1,0 +1,13 @@
+{
+    "version": 1,
+    "id": "5f975587-ed68-4d37-a814-e7867ad22a21",
+    "sourcePath": "C:/Users/tyler/source/repos/EngineProject/.local/woodland-import/Grass/Grass.gltf",
+    "importSettings": {
+        "decomposeNodeMatrices": true,
+        "generateMeshIndices": true,
+        "importer": "gltf",
+        "loadExternalBuffers": true,
+        "loadExternalImages": true
+    }
+}
+

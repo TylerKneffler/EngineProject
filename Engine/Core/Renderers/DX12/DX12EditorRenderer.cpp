@@ -216,6 +216,7 @@ void DX12EditorRenderer::EndFrame()
 
     ID3D12CommandList* lists[] = { m_commandList.Get() };
     m_commandQueue->ExecuteCommandLists(1, lists);
+    ++m_submittedFrameCount;
 
     // Present without a vblank wait; allow tearing when the swap chain supports it.
     ThrowIfFailed(m_swapChain->Present(0,

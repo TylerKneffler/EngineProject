@@ -1,0 +1,13 @@
+{
+    "version": 1,
+    "id": "dd3f1347-e1e2-40e1-92d4-2a53eefcb3b9",
+    "sourcePath": "C:/Users/tyler/source/repos/EngineProject/.local/woodland-import/Oaks/Oaks.gltf",
+    "importSettings": {
+        "decomposeNodeMatrices": true,
+        "generateMeshIndices": true,
+        "importer": "gltf",
+        "loadExternalBuffers": true,
+        "loadExternalImages": true
+    }
+}
+

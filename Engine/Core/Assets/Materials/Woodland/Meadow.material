@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "baseColor": [
+    0.48,
+    0.53,
+    0.36
+  ],
+  "metallic": 0,
+  "roughness": 1,
+  "useVertexColors": true,
+  "baseColorTexture": "Assets/Textures/Terrain/meadow_grass.png",
+  "castsShadows": true
+}

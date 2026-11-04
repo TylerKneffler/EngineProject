@@ -1042,6 +1042,7 @@ if(NOT ENGINE_PROJECT_DIR AND WIN32 AND
     add_test(NAME AssetLocationIndexRegression COMMAND AssetLocationIndexTests)
 endif()
 
+# Verify recorded update and submission rates independently of UI-reported FPS.
 if(NOT ENGINE_PROJECT_DIR AND
    EXISTS "${ENGINE_LOCAL_TEST_ROOT}/PerformanceRecordingTests.cpp")
     enable_testing()
@@ -2236,9 +2237,14 @@ if(NOT ENGINE_PROJECT_DIR AND WIN32 AND
         "${ENGINE_LOCAL_TEST_ROOT}/GrassPerformanceTests.cpp"
         "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/Grass/GrassField.cpp")
     target_link_libraries(GrassPerformanceTests PRIVATE Engine d3d11)
+    target_compile_options(GrassPerformanceTests PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/bigobj>)
     target_include_directories(GrassPerformanceTests PRIVATE
         "${ENGINE_ROOT}/Engine" "${ENGINE_ROOT}/Engine/Core/Assets")
     add_test(NAME GrassPerformance COMMAND GrassPerformanceTests)
+    add_test(NAME OakMeadowSceneDX11 COMMAND GrassPerformanceTests --oak-meadow-scene)
+    set_tests_properties(OakMeadowSceneDX11 PROPERTIES WORKING_DIRECTORY "${ENGINE_ROOT}" TIMEOUT 180)
+    add_test(NAME ShaderPreparationCacheDX11 COMMAND GrassPerformanceTests --shader-preparation-cache)
+    set_tests_properties(ShaderPreparationCacheDX11 PROPERTIES WORKING_DIRECTORY "${ENGINE_ROOT}" TIMEOUT 60)
     add_test(NAME GrassPlayerFloors COMMAND GrassPerformanceTests --grass-player-floors)
     set_tests_properties(GrassPlayerFloors PROPERTIES WORKING_DIRECTORY "${ENGINE_ROOT}" TIMEOUT 60)
     set_tests_properties(GrassPerformance PROPERTIES WORKING_DIRECTORY "${ENGINE_ROOT}")
@@ -2300,4 +2306,24 @@ if(NOT ENGINE_PROJECT_DIR AND
     target_include_directories(DrawBatchPreparationTests PRIVATE "${ENGINE_ROOT}/Engine")
     add_test(NAME DrawBatchPreparation COMMAND DrawBatchPreparationTests)
     set_tests_properties(DrawBatchPreparation PROPERTIES WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/PerformanceMetricsTests.cpp")
+    enable_testing()
+    add_executable(PerformanceMetricsTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/PerformanceMetricsTests.cpp")
+    target_include_directories(PerformanceMetricsTests PRIVATE "${ENGINE_ROOT}")
+    add_test(NAME PerformanceMetrics COMMAND PerformanceMetricsTests)
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/ShaderSourceCacheTests.cpp")
+    enable_testing()
+    add_executable(ShaderSourceCacheTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/ShaderSourceCacheTests.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Rendering/ShaderSourceCache.cpp")
+    target_include_directories(ShaderSourceCacheTests PRIVATE "${ENGINE_ROOT}/Engine")
+    add_test(NAME ShaderSourceCache COMMAND ShaderSourceCacheTests)
+    set_tests_properties(ShaderSourceCache PROPERTIES TIMEOUT 30)
 endif()

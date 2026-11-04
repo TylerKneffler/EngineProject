@@ -228,6 +228,18 @@ public:
     virtual bool ColorEdit4(const char* label, float* color) = 0;
     virtual bool SliderInt(const char* label, int* value, int minimum, int maximum) = 0;
     virtual bool SliderFloat(const char* label, float* value, float minimum, float maximum) = 0;
+    // Ordered distance boundaries; segmentCount is boundaryCount + 1.
+    virtual bool LodRangeSlider(const char* label, float* boundaries,
+        int boundaryCount, float maximum, const char* const* segmentLabels)
+    {
+        Label(label);
+        bool changed = false;
+        for (int i = 0; i < boundaryCount; ++i)
+            changed |= SliderFloat(segmentLabels[i + 1], &boundaries[i],
+                i ? boundaries[i - 1] : 0.f,
+                i + 1 < boundaryCount ? boundaries[i + 1] : maximum);
+        return changed;
+    }
     virtual bool InputUInt(const char* label, uint32_t* value) = 0;
     virtual void ValueLabel(const char* label, const char* value) = 0;
     virtual bool CollapsingHeader(const char* label, bool defaultOpen = true) = 0;

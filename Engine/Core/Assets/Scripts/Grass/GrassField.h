@@ -25,7 +25,7 @@ namespace Engine::Scene { class Scene; }
 
 // Deterministic tiles sharing species geometry. Only compact placement records
 // are prepared on the CPU; all blade vertex transforms run on the GPU.
-class GrassField final : public Engine::Core::Script, public Engine::Components::SpatialUpdate
+class GrassField final : public Engine::Core::Script, public Engine::Components::SpatialUpdate, public Engine::Components::TerrainObjectLodProvider
 {
 public:
     GrassField();
@@ -66,6 +66,10 @@ public:
     bool castShadows = false;
     PROPERTY(Inspector, EditAnywhere, Category = "Grass | Lighting")
     std::string shaderPath = "Assets/Shaders/Foliage.hlsl";
+    PROPERTY(Inspector, EditAnywhere, Category = "Grass | Assets")
+    std::string materialPath;
+    PROPERTY(Inspector, EditAnywhere, Category = "Grass | Lighting", ClampMin = "0", ClampMax = "1")
+    float windStrength = 1.f;
     PROPERTY(Inspector, EditAnywhere, Category = "Grass | LOD", ClampMin = "0")
     float fadeDuration = .35f;
     PROPERTY(Inspector, EditAnywhere, Category = "Grass | LOD")
@@ -77,6 +81,7 @@ public:
     PROPERTY(Inspector, EditAnywhere, Category = "Grass | LOD", ClampMin = "0")
     float distanceFadeWidth = 2.f;
 
+    std::map<std::string, std::vector<std::string>> GetTerrainObjectLodMeshes() const override;
     void Start() override;
     void Update() override;
     bool RequiresUpdate() const override { return false; }
@@ -92,9 +97,9 @@ public:
 private:
     using Tile = std::pair<int, int>;
     using Source = std::vector<Engine::Components::Mesh::Vertex>;
-    std::array<std::shared_ptr<const Source>, 3> m_shortVertices;
-    std::array<std::shared_ptr<const Source>, 3> m_tallVertices;
-    std::array<std::shared_ptr<Engine::Components::Mesh>, 3> m_sourceMeshes;
+    std::vector<std::shared_ptr<const Source>> m_shortVertices;
+    std::vector<std::shared_ptr<const Source>> m_tallVertices;
+    std::vector<std::shared_ptr<Engine::Components::Mesh>> m_sourceMeshes;
     Engine::Graphics::IGraphicsBufferFactory* m_loadedFactory = nullptr;
     glm::vec3 m_sourceMinimum{0}, m_sourceMaximum{0};
     using Placement = Engine::Components::TerrainObjectLayer::Placement;
@@ -132,12 +137,13 @@ private:
     uint64_t m_placementSignature = 0;
     Engine::Rendering::GrassPerformance m_performance;
     bool m_loaded = false;
+    std::string m_loadedMaterialPath, m_resolvedMaterialPath;
     Clock::time_point m_lastRefresh{};
     bool m_authoredPreviewHidden = false;
     uint64_t m_lastGenerationSignature = 0;
     bool m_hasGenerationSignature = false;
-    std::array<std::string, 3> m_loadedShortPaths;
-    std::array<std::string, 3> m_loadedTallPaths;
+    std::vector<std::string> m_loadedShortPaths;
+    std::vector<std::string> m_loadedTallPaths;
     Engine::Core::Object* m_cachedViewer = nullptr;
     Engine::Components::Terrain* m_cachedTerrain = nullptr;
     Engine::Components::TerrainObjectLayer* m_cachedLayer = nullptr;
@@ -145,6 +151,8 @@ private:
     std::string m_cachedViewerName;
     uint64_t m_cachedStructureRevision = 0;
 
+    std::vector<float> m_lodDistances;
+    bool m_useGpuLodSelection = false;
     bool LoadSources();
     bool Refresh();
     bool ResolveCachedReferences();

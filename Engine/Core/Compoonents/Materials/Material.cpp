@@ -371,9 +371,32 @@ std::string Material::TexturePath(const std::shared_ptr<Texture>& texture)
     return texture ? texture->GetFilePath() : std::string{};
 }
 
+std::vector<std::filesystem::path> Material::ShaderSearchPaths(const std::string& path) const
+{
+    if(path.empty()) return {};
+    const std::filesystem::path requested(path);
+    std::vector<std::filesystem::path> result{requested};
+    const auto generic=requested.generic_string();
+    constexpr std::string_view marker="Engine/Core/Assets/";
+    if(const auto root=generic.find(marker);root!=std::string::npos)
+        result.push_back(std::filesystem::path(ENGINE_ASSETS_PATH)/generic.substr(root+marker.size()));
+    const auto relative=requested.lexically_relative(std::filesystem::path("Assets"));
+    if(!relative.empty() && *relative.begin()!="..")
+        result.push_back(std::filesystem::path(ENGINE_ASSETS_PATH)/relative);
+    if(!requested.is_absolute())
+        result.push_back(std::filesystem::path(m_filePath).parent_path()/requested);
+    return result;
+}
+
 std::string Material::ResolveShaderPath(const std::string& path) const
 {
-    return path.empty() ? std::string{} : ResolveTexturePath(m_filePath, path);
+    if(path.empty()) return {};
+    for(const auto& candidate:ShaderSearchPaths(path))
+    {
+        std::error_code error;
+        if(std::filesystem::exists(candidate,error)) return candidate.lexically_normal().generic_string();
+    }
+    return std::filesystem::path(path).lexically_normal().generic_string();
 }
 
 bool Material::DrawShaderProperties(::Engine::Editor::IEditorUi& ui, const void* context)

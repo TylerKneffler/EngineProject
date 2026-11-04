@@ -304,6 +304,67 @@ struct ObjectGPUData
     glm::vec4 grassAnimation{0.f}; // scene time, grass enabled, reserved
 };
 
+// Value-only boundary: resources are resolved by the scene owner before assembly.
+// Texture pointers are binding identities; this function never dereferences them.
+struct ResolvedMaterialRecord
+{
+    ObjectGPUData data{};
+    std::array<const Engine::Graphics::IGraphicsTexture*, 30> textures{};
+    bool doubleSided = false;
+    Engine::Components::MaterialAlphaMode alphaMode{};
+};
+
+void ApplyResolvedMaterialRecord(const ResolvedMaterialRecord& material,
+    const glm::vec3& cameraPosition, const glm::vec3& irradiance,
+    ObjectGPUData& objectData)
+{
+    const auto& cachedData = material.data;
+    objectData.ambientUnlit=cachedData.ambientUnlit;
+    objectData.baseColor=cachedData.baseColor;
+    objectData.blinnPhongSpecularShininess=cachedData.blinnPhongSpecularShininess;
+    objectData.emissiveOcclusion=cachedData.emissiveOcclusion;
+    objectData.environmentParams=cachedData.environmentParams;
+    objectData.materialParams=cachedData.materialParams;
+    objectData.parallaxParams=cachedData.parallaxParams;
+    objectData.pmxEdgeColor=cachedData.pmxEdgeColor;
+    objectData.pmxParams=cachedData.pmxParams;
+    objectData.pmxSphereTint=cachedData.pmxSphereTint;
+    objectData.pmxTextureTint=cachedData.pmxTextureTint;
+    objectData.pmxToonTint=cachedData.pmxToonTint;
+    objectData.reflectionEnvironmentParams=cachedData.reflectionEnvironmentParams;
+    std::copy(std::begin(cachedData.reflectionEnvironmentSH),std::end(cachedData.reflectionEnvironmentSH),objectData.reflectionEnvironmentSH);
+    objectData.subsurfaceColorWeight=cachedData.subsurfaceColorWeight;
+    objectData.subsurfaceRadiusThickness=cachedData.subsurfaceRadiusThickness;
+    objectData.subsurfaceTransmission=cachedData.subsurfaceTransmission;
+    objectData.textureUvSets0=cachedData.textureUvSets0;
+    objectData.textureUvSets1=cachedData.textureUvSets1;
+    objectData.viewPositionAlphaCutoff=cachedData.viewPositionAlphaCutoff;
+    objectData.ambientUnlit += glm::vec4(irradiance, 0.f);
+    objectData.viewPositionAlphaCutoff = glm::vec4(cameraPosition,
+        cachedData.viewPositionAlphaCutoff.w);
+}
+
+// Per-object values are copied after probe sampling and component/resource reads.
+// Assembly can consume this snapshot without reaching back into the scene.
+struct ResolvedObjectRecord
+{
+    ObjectGPUData data{};
+    glm::vec4 directional{0.f};
+    glm::vec4 direction{0.f};
+    bool preview = false;
+    bool forceUnlit = false;
+};
+
+ObjectGPUData AssembleObjectRecord(const ResolvedObjectRecord& input)
+{
+    ObjectGPUData result = input.data;
+    result.bakedDirectional = input.directional;
+    result.bakedLightDirection = input.direction;
+    if (input.preview) result.baseColor.a *= 0.45f;
+    if (input.forceUnlit) result.ambientUnlit.w = 1.f;
+    return result;
+}
+
 // Constant buffer for grid rendering
 struct GridCBData
 {
@@ -1293,6 +1354,19 @@ Scene::MaterialShaderFuture Scene::QueueMaterialShaderBytecode(
     return m_materialShaderBytecode.emplace(key, std::move(future)).first->second;
 }
 
+const Engine::Rendering::ShaderSourceCache::Source& Scene::ResolveMaterialShaderSource(
+    const Engine::Components::Material& material, const std::string& path)
+{
+    AssertOwnerThread();
+    static const Engine::Rendering::ShaderSourceCache::Source builtin{};
+    if(path.empty()) return builtin;
+    const auto before=m_materialShaderSources.GetStatistics().resolutions;
+    const auto& source=m_materialShaderSources.Resolve(material.GetFilePath(),path,
+        [&]{return material.ShaderSearchPaths(path);});
+    m_lastPrepareTimings.itemShaderResolutions+=m_materialShaderSources.GetStatistics().resolutions-before;
+    return source;
+}
+
 void Scene::PrewarmMaterialShaders(const Engine::Components::Material& material,
     bool terrain)
 {
@@ -1303,13 +1377,9 @@ void Scene::PrewarmMaterialShaders(const Engine::Components::Material& material,
         ++m_lastPrepareTimings.itemShaderRequests;
         if (!m_preparedMaterialShaderSources.emplace(material.GetFilePath(), shader.path, terrain).second)
             continue;
-        ++m_lastPrepareTimings.itemShaderResolutions;
-        const std::string path = material.ResolveShaderPath(shader.path);
-        if (std::filesystem::path(path).extension() != ".hlsl") continue;
-        std::error_code error;
-        const auto modified = std::filesystem::last_write_time(path, error);
-        if (!error) QueueMaterialShaderBytecode(path, terrain,
-            modified.time_since_epoch().count());
+        const auto& source=ResolveMaterialShaderSource(material,shader.path);
+        if(source.hlsl && source.exists)
+            QueueMaterialShaderBytecode(source.path,terrain,source.revision);
     }
 }
 
@@ -1338,21 +1408,20 @@ void Scene::PublishMaterialShaderPipelines(size_t maxPipelines)
 }
 
 Scene::IPipelineState* Scene::ResolveMaterialShaderPipeline(
-    const std::string& requestedPath, IPipelineState* base, bool terrain,
+    const Engine::Rendering::ShaderSourceCache::Source& requestedSource, IPipelineState* base, bool terrain,
     bool overlay, const std::string& blendMode, std::string& error)
 {
-    if (requestedPath.empty() && !overlay && blendMode == "Auto")
+    if (requestedSource.path.empty() && !overlay && blendMode == "Auto")
     {
         error.clear();
         return base;
     }
-    const std::string path = requestedPath.empty()
-        ? EngineShaderPath("Object.hlsl") : requestedPath;
+    const auto& source=requestedSource.path.empty()
+        ? m_materialShaderSources.Resolve(EngineShaderPath("Object.hlsl")) : requestedSource;
+    const std::string& path=source.path;
     const std::string key = std::to_string(reinterpret_cast<uintptr_t>(base)) +
         "|" + (overlay ? "overlay|" : "surface|") + blendMode + "|" + path;
-    std::error_code fileError;
-    const auto modified = std::filesystem::last_write_time(path, fileError);
-    const int64_t stamp = fileError ? 0 : modified.time_since_epoch().count();
+    const int64_t stamp=source.revision;
     auto found = m_materialShaderPipelines.find(key);
     if (found != m_materialShaderPipelines.end() && found->second.sourceStamp == stamp)
     {
@@ -1370,12 +1439,9 @@ Scene::IPipelineState* Scene::ResolveMaterialShaderPipeline(
     cached.bytecode = {};
     try
     {
-        std::string extension = std::filesystem::path(path).extension().string();
-        std::transform(extension.begin(), extension.end(), extension.begin(),
-            [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-        if (extension != ".hlsl")
+        if (!source.hlsl)
             throw std::runtime_error("Material shader must reference an .hlsl asset: " + path);
-        if (fileError)
+        if (!source.exists)
             throw std::runtime_error("Material shader asset not found: " + path);
         const auto builder = m_materialShaderBuilders.find(base);
         if (builder == m_materialShaderBuilders.end())
@@ -2000,6 +2066,7 @@ void Scene::PrepareRenderFrame(bool publishSnapshot)
 {
     AssertOwnerThread();
     Engine::Components::Texture::PublishQueued(m_graphicsProvider);
+    m_materialShaderSources.Poll();
     PublishMaterialShaderPipelines();
     const bool priorPublicationSuppressed = m_suppressSceneSnapshotPublication;
     struct RestorePublication
@@ -4035,8 +4102,9 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 (useSourceChart || !renderItem->warpedVertexBuffer);
             preparedDraw.objectData.geometryFade=hasPortalViews && renderItem->geometryFade.w>=2.f ? mesh->GetRuntimeGeometryFade():renderItem->geometryFade;
             preparedDraw.objectData.shadowCasterFade={casterFade.x,std::min(casterFade.x,casterFade.y),0.f,0.f};
-            preparedDraw.objectData.grassAnimation={mesh->grassShadowCaster ? static_cast<float>(GetElapsedTime()) : 0.f,
-                mesh->grassShadowCaster ? 1.f : 0.f, 0.f, 0.f};
+            preparedDraw.objectData.grassAnimation={mesh->grassShadowCaster || mesh->foliageWindStrength>0.f ? static_cast<float>(GetElapsedTime()):0.f,
+                mesh->grassShadowCaster || mesh->foliageWindStrength>0.f ? 1.f : 0.f,
+                mesh->foliageWindStrength>0.f ? std::clamp(mesh->foliageWindStrength,0.f,1.f):1.f, 0.f};
             preparedDraw.objectData.viewPositionAlphaCutoff=glm::vec4(cameraPosition,.001f);
             preparedDraw.objectData.world = world;
             preparedDraw.objectData.viewProjection = proj * view;
@@ -4116,11 +4184,15 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         const bool usesInterpolatedProbes=mesh&&mesh->useLightProbes;
         const bool evaluateProbeLighting = hasSceneLightProbeContributors &&
             (usesInterpolatedProbes||!bakedLighting||!bakedLighting->valid);
-        const Engine::Components::ProbeLightingSample probeLighting =
-            evaluateProbeLighting
+        const auto resolveProbeLighting = [&]()
+        {
+            AssertOwnerThread();
+            return evaluateProbeLighting
                 ? Engine::Components::SampleLightProbes(*this,
                     glm::vec3(renderItem->world[3]))
                 : Engine::Components::ProbeLightingSample{};
+        };
+        const Engine::Components::ProbeLightingSample probeLighting = resolveProbeLighting();
         const glm::vec3 bakedIrradiance =
             usesLegacyProbeBake
                 ? bakedLighting->irradiance
@@ -4222,145 +4294,143 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         }
         else if (mat)
         {
-            const uint32_t materialVariant=(allowNormalMapping?1u:0u)|(allowParallaxMapping?2u:0u)|
-                (allowEnvironmentDiffuse?4u:0u)|(allowReflections?8u:0u);
-            auto& cachedMaterial=m_renderMaterialCache[mat][materialVariant];
-            if(cachedMaterial.frame==m_materialPreparationSerial && cachedMaterial.revision==mat->GetConfigurationRevision() && cachedMaterial.data.size()==sizeof(ObjectGPUData))
+            const ObjectGPUData environmentSeed = objectData;
+            const auto resolveMaterialRecord = [&]() -> ResolvedMaterialRecord
             {
-                ObjectGPUData cachedData;
-                std::memcpy(&cachedData,cachedMaterial.data.data(),sizeof(cachedData));
-                objectData.ambientUnlit=cachedData.ambientUnlit;
-                objectData.baseColor=cachedData.baseColor;
-                objectData.blinnPhongSpecularShininess=cachedData.blinnPhongSpecularShininess;
-                objectData.emissiveOcclusion=cachedData.emissiveOcclusion;
-                objectData.environmentParams=cachedData.environmentParams;
-                objectData.materialParams=cachedData.materialParams;
-                objectData.parallaxParams=cachedData.parallaxParams;
-                objectData.pmxEdgeColor=cachedData.pmxEdgeColor;
-                objectData.pmxParams=cachedData.pmxParams;
-                objectData.pmxSphereTint=cachedData.pmxSphereTint;
-                objectData.pmxTextureTint=cachedData.pmxTextureTint;
-                objectData.pmxToonTint=cachedData.pmxToonTint;
-                objectData.reflectionEnvironmentParams=cachedData.reflectionEnvironmentParams;
-                std::copy(std::begin(cachedData.reflectionEnvironmentSH),std::end(cachedData.reflectionEnvironmentSH),objectData.reflectionEnvironmentSH);
-                objectData.subsurfaceColorWeight=cachedData.subsurfaceColorWeight;
-                objectData.subsurfaceRadiusThickness=cachedData.subsurfaceRadiusThickness;
-                objectData.subsurfaceTransmission=cachedData.subsurfaceTransmission;
-                objectData.textureUvSets0=cachedData.textureUvSets0;
-                objectData.textureUvSets1=cachedData.textureUvSets1;
-                objectData.viewPositionAlphaCutoff=cachedData.viewPositionAlphaCutoff;
-                preparedDraw.textures=cachedMaterial.textures;
-                doubleSided=cachedMaterial.doubleSided;
-                alphaMode=static_cast<Engine::Components::MaterialAlphaMode>(cachedMaterial.alphaMode);
-                objectData.viewPositionAlphaCutoff=glm::vec4(cameraPosition,objectData.viewPositionAlphaCutoff.w);
-            }
-            else
-            {
-
-            alphaMode = mat->GetAlphaMode();
-            doubleSided = mat->doubleSided;
-            uint32_t textureFlags = 0;
-            if (!mat->useVertexColors) textureFlags |= 4096u;
-            auto prepareTexture = [&](uint32_t textureSlot,
-                                      const std::shared_ptr<Engine::Components::Texture>& texture,
-                                      uint32_t flag)
-            {
-                const Engine::Graphics::IGraphicsTexture* graphicsTexture =
-                    texture ? texture->GetGraphicsTexture() : nullptr;
-                preparedDraw.textures[textureSlot] = graphicsTexture;
-                if (graphicsTexture)
-                    textureFlags |= flag;
-            };
-            prepareTexture(0, mat->baseColorTexture, 1u);
-            prepareTexture(10, mat->sphereTexture, 256u);
-            prepareTexture(11, mat->toonTexture, 512u);
-            prepareTexture(1, mat->metallicRoughnessTexture, 2u);
-            if (allowNormalMapping)
-                prepareTexture(2, mat->normalTexture, 4u);
-            prepareTexture(3, mat->occlusionTexture, 8u);
-            prepareTexture(4, mat->emissiveTexture, 16u);
-            if (mat->subsurfaceEnabled && mat->subsurfaceWeight > 0.f &&
-                !mat->unlit && alphaMode != Engine::Components::MaterialAlphaMode::Blend)
-                prepareTexture(9, mat->subsurfaceThicknessTexture, 128u);
-            if (allowParallaxMapping)
-                prepareTexture(5, mat->heightTexture, 64u);
-            if (alphaMode == Engine::Components::MaterialAlphaMode::Mask)
-                textureFlags |= 32u;
-
-            objectData.baseColor = glm::vec4(mat->diffuseColor, mat->baseColorAlpha);
-            objectData.pmxTextureTint = glm::vec4(
-                mat->baseColorTextureTint, mat->baseColorTextureTintAlpha);
-            objectData.pmxSphereTint = mat->sphereTint;
-            objectData.pmxToonTint = mat->toonTint;
-            objectData.pmxEdgeColor = mat->edgeColor;
-            objectData.pmxParams = {
-                mat->edgeWidth, static_cast<float>(mat->sphereMode),
-                static_cast<float>(mat->builtinToon), mat->edgeEnabled ? 1.f : 0.f };
-            objectData.ambientUnlit = glm::vec4(
-                settings.ambientColor + mat->ambientColor,
-                mat->unlit ? 1.f : 0.f);
-            objectData.emissiveOcclusion = glm::vec4(
-                mat->emissiveColor, mat->occlusionStrength);
-            objectData.materialParams = {
-                mat->metallicFactor, mat->roughnessFactor, mat->normalScale,
-                static_cast<float>(textureFlags)
-            };
-            if (mat->specularModel == "BlinnPhong")
-                objectData.blinnPhongSpecularShininess = glm::vec4(
-                    mat->specularColor, std::max(mat->shininess, 0.f) + 1.f);
-            // Blended and unlit materials opt out. A metallic-roughness map can
-            // still suppress scattering per pixel in the shader.
-            if (mat->subsurfaceEnabled && !mat->unlit &&
-                alphaMode != Engine::Components::MaterialAlphaMode::Blend)
-            {
-                objectData.subsurfaceColorWeight = glm::vec4(
-                    mat->subsurfaceColor, mat->subsurfaceWeight);
-                objectData.subsurfaceRadiusThickness = glm::vec4(
-                    mat->subsurfaceRadius, mat->subsurfaceThickness);
-                objectData.subsurfaceTransmission.x = mat->subsurfaceTransmission;
-            }
-            objectData.viewPositionAlphaCutoff = glm::vec4(
-                cameraPosition, mat->alphaCutoff);
-            objectData.parallaxParams = {
-                mat->heightScale, mat->heightMinSteps,
-                mat->heightMaxSteps, 0.f
-            };
-            objectData.environmentParams.z = allowEnvironmentDiffuse
-                ? mat->environmentDiffuseStrength : 0.f;
-            objectData.environmentParams.w = allowReflections
-                ? mat->reflectionStrength : 0.f;
-            if (allowReflections)
-            if (const auto reflectionEnvironment = ResolveReflectionEnvironment(*mat))
-            {
-                objectData.reflectionEnvironmentParams = {
-                    std::exp2(std::clamp(mat->reflectionEnvironmentExposure,
-                        -16.f, 16.f)),
-                    glm::radians(mat->reflectionEnvironmentRotation), 1.f, 0.f };
-                const auto& reflectionSH = reflectionEnvironment->GetRadianceSH();
-                std::copy(reflectionSH.begin(), reflectionSH.end(),
-                    objectData.reflectionEnvironmentSH);
-                if (reflectionEnvironment->GetSpecularTexture())
+                AssertOwnerThread();
+                // Seed view environment values before applying material overrides.
+                ObjectGPUData objectData{};
+                auto textures = preparedDraw.textures;
+                bool doubleSided = false;
+                auto alphaMode = Engine::Components::MaterialAlphaMode::Opaque;
+                objectData.environmentParams = environmentSeed.environmentParams;
+                objectData.reflectionEnvironmentParams = environmentSeed.reflectionEnvironmentParams;
+                const uint32_t materialVariant=(allowNormalMapping?1u:0u)|(allowParallaxMapping?2u:0u)|
+                    (allowEnvironmentDiffuse?4u:0u)|(allowReflections?8u:0u);
+                auto& cachedMaterial=m_renderMaterialCache[mat][materialVariant];
+                if(cachedMaterial.frame==m_materialPreparationSerial && cachedMaterial.revision==mat->GetConfigurationRevision() && cachedMaterial.data.size()==sizeof(ObjectGPUData))
                 {
-                    preparedDraw.textures[6] =
-                        reflectionEnvironment->GetSpecularTexture();
-                    objectData.reflectionEnvironmentParams.w = 1.f;
+                    ObjectGPUData cachedData;
+                    std::memcpy(&cachedData,cachedMaterial.data.data(),sizeof(cachedData));
+                    objectData = cachedData;
+                    textures=cachedMaterial.textures;
+                    doubleSided=cachedMaterial.doubleSided;
+                    alphaMode=static_cast<Engine::Components::MaterialAlphaMode>(cachedMaterial.alphaMode);
+                    objectData.viewPositionAlphaCutoff=glm::vec4(cameraPosition,objectData.viewPositionAlphaCutoff.w);
                 }
-            }
-            objectData.textureUvSets0 = { static_cast<float>(mat->baseColorUvSet),
-                static_cast<float>(mat->metallicRoughnessUvSet), static_cast<float>(mat->normalUvSet),
-                static_cast<float>(mat->occlusionUvSet) };
-            objectData.textureUvSets1 = { static_cast<float>(mat->emissiveUvSet),
-                static_cast<float>(mat->heightUvSet), 0.f, 0.f };
+                else
+                {
 
-                cachedMaterial.data.resize(sizeof(ObjectGPUData));
-                std::memcpy(cachedMaterial.data.data(),&objectData,sizeof(objectData));
-                cachedMaterial.textures=preparedDraw.textures;
-                cachedMaterial.doubleSided=doubleSided; cachedMaterial.alphaMode=uint32_t(alphaMode);
-                cachedMaterial.revision=mat->GetConfigurationRevision();
-                cachedMaterial.frame=m_materialPreparationSerial;
-            }
-            objectData.ambientUnlit+=glm::vec4(bakedIrradiance,0);
-}
+                alphaMode = mat->GetAlphaMode();
+                doubleSided = mat->doubleSided;
+                uint32_t textureFlags = 0;
+                if (!mat->useVertexColors) textureFlags |= 4096u;
+                auto prepareTexture = [&](uint32_t textureSlot,
+                                          const std::shared_ptr<Engine::Components::Texture>& texture,
+                                          uint32_t flag)
+                {
+                    const Engine::Graphics::IGraphicsTexture* graphicsTexture =
+                        texture ? texture->GetGraphicsTexture() : nullptr;
+                    textures[textureSlot] = graphicsTexture;
+                    if (graphicsTexture)
+                        textureFlags |= flag;
+                };
+                prepareTexture(0, mat->baseColorTexture, 1u);
+                prepareTexture(10, mat->sphereTexture, 256u);
+                prepareTexture(11, mat->toonTexture, 512u);
+                prepareTexture(1, mat->metallicRoughnessTexture, 2u);
+                if (allowNormalMapping)
+                    prepareTexture(2, mat->normalTexture, 4u);
+                prepareTexture(3, mat->occlusionTexture, 8u);
+                prepareTexture(4, mat->emissiveTexture, 16u);
+                if (mat->subsurfaceEnabled && mat->subsurfaceWeight > 0.f &&
+                    !mat->unlit && alphaMode != Engine::Components::MaterialAlphaMode::Blend)
+                    prepareTexture(9, mat->subsurfaceThicknessTexture, 128u);
+                if (allowParallaxMapping)
+                    prepareTexture(5, mat->heightTexture, 64u);
+                if (alphaMode == Engine::Components::MaterialAlphaMode::Mask)
+                    textureFlags |= 32u;
+
+                objectData.baseColor = glm::vec4(mat->diffuseColor, mat->baseColorAlpha);
+                objectData.pmxTextureTint = glm::vec4(
+                    mat->baseColorTextureTint, mat->baseColorTextureTintAlpha);
+                objectData.pmxSphereTint = mat->sphereTint;
+                objectData.pmxToonTint = mat->toonTint;
+                objectData.pmxEdgeColor = mat->edgeColor;
+                objectData.pmxParams = {
+                    mat->edgeWidth, static_cast<float>(mat->sphereMode),
+                    static_cast<float>(mat->builtinToon), mat->edgeEnabled ? 1.f : 0.f };
+                objectData.ambientUnlit = glm::vec4(
+                    settings.ambientColor + mat->ambientColor,
+                    mat->unlit ? 1.f : 0.f);
+                objectData.emissiveOcclusion = glm::vec4(
+                    mat->emissiveColor, mat->occlusionStrength);
+                objectData.materialParams = {
+                    mat->metallicFactor, mat->roughnessFactor, mat->normalScale,
+                    static_cast<float>(textureFlags)
+                };
+                if (mat->specularModel == "BlinnPhong")
+                    objectData.blinnPhongSpecularShininess = glm::vec4(
+                        mat->specularColor, std::max(mat->shininess, 0.f) + 1.f);
+                // Blended and unlit materials opt out. A metallic-roughness map can
+                // still suppress scattering per pixel in the shader.
+                if (mat->subsurfaceEnabled && !mat->unlit &&
+                    alphaMode != Engine::Components::MaterialAlphaMode::Blend)
+                {
+                    objectData.subsurfaceColorWeight = glm::vec4(
+                        mat->subsurfaceColor, mat->subsurfaceWeight);
+                    objectData.subsurfaceRadiusThickness = glm::vec4(
+                        mat->subsurfaceRadius, mat->subsurfaceThickness);
+                    objectData.subsurfaceTransmission.x = mat->subsurfaceTransmission;
+                }
+                objectData.viewPositionAlphaCutoff = glm::vec4(
+                    cameraPosition, mat->alphaCutoff);
+                objectData.parallaxParams = {
+                    mat->heightScale, mat->heightMinSteps,
+                    mat->heightMaxSteps, 0.f
+                };
+                objectData.environmentParams.z = allowEnvironmentDiffuse
+                    ? mat->environmentDiffuseStrength : 0.f;
+                objectData.environmentParams.w = allowReflections
+                    ? mat->reflectionStrength : 0.f;
+                if (allowReflections)
+                if (const auto reflectionEnvironment = ResolveReflectionEnvironment(*mat))
+                {
+                    objectData.reflectionEnvironmentParams = {
+                        std::exp2(std::clamp(mat->reflectionEnvironmentExposure,
+                            -16.f, 16.f)),
+                        glm::radians(mat->reflectionEnvironmentRotation), 1.f, 0.f };
+                    const auto& reflectionSH = reflectionEnvironment->GetRadianceSH();
+                    std::copy(reflectionSH.begin(), reflectionSH.end(),
+                        objectData.reflectionEnvironmentSH);
+                    if (reflectionEnvironment->GetSpecularTexture())
+                    {
+                        textures[6] =
+                            reflectionEnvironment->GetSpecularTexture();
+                        objectData.reflectionEnvironmentParams.w = 1.f;
+                    }
+                }
+                objectData.textureUvSets0 = { static_cast<float>(mat->baseColorUvSet),
+                    static_cast<float>(mat->metallicRoughnessUvSet), static_cast<float>(mat->normalUvSet),
+                    static_cast<float>(mat->occlusionUvSet) };
+                objectData.textureUvSets1 = { static_cast<float>(mat->emissiveUvSet),
+                    static_cast<float>(mat->heightUvSet), 0.f, 0.f };
+
+                    cachedMaterial.data.resize(sizeof(ObjectGPUData));
+                    std::memcpy(cachedMaterial.data.data(),&objectData,sizeof(objectData));
+                    cachedMaterial.textures=textures;
+                    cachedMaterial.doubleSided=doubleSided; cachedMaterial.alphaMode=uint32_t(alphaMode);
+                    cachedMaterial.revision=mat->GetConfigurationRevision();
+                    cachedMaterial.frame=m_materialPreparationSerial;
+                }
+                return { objectData, textures, doubleSided, alphaMode };
+            };
+            const ResolvedMaterialRecord resolvedMaterial = resolveMaterialRecord();
+            ApplyResolvedMaterialRecord(resolvedMaterial, cameraPosition, bakedIrradiance, objectData);
+            preparedDraw.textures = resolvedMaterial.textures;
+            doubleSided = resolvedMaterial.doubleSided;
+            alphaMode = resolvedMaterial.alphaMode;
+        }
         else
         {
             objectData.baseColor = { 0.8f, 0.8f, 0.8f, 1.f };
@@ -4524,24 +4594,22 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             objectData.shadowCameraData = mainShadowCascades.cameraData;
             preparedDraw.textures[7] = m_directionalShadowMap.get();
         }
-        if (isPreview)
-            objectData.baseColor.a *= 0.45f;
-            if (forceUnlitMode)
-                objectData.ambientUnlit.w = 1.f;
+        ResolvedObjectRecord resolvedObject;
+        resolvedObject.preview = isPreview;
+        resolvedObject.forceUnlit = forceUnlitMode;
         if (usesLegacyProbeBake)
         {
-            objectData.bakedDirectional = glm::vec4(
+            resolvedObject.directional = glm::vec4(
                 bakedLighting->directionalIrradiance, 0.f);
-            objectData.bakedLightDirection = glm::vec4(
-                bakedLighting->lightDirection, 1.f);
+            resolvedObject.direction = glm::vec4(bakedLighting->lightDirection, 1.f);
         }
-        else if(probeLighting.valid)
+        else if (probeLighting.valid)
         {
-            objectData.bakedDirectional=glm::vec4(
-                probeLighting.directionalIrradiance,0.f);
-            objectData.bakedLightDirection=glm::vec4(
-                probeLighting.direction,1.f);
+            resolvedObject.directional = glm::vec4(probeLighting.directionalIrradiance, 0.f);
+            resolvedObject.direction = glm::vec4(probeLighting.direction, 1.f);
         }
+        resolvedObject.data = objectData;
+        objectData = AssembleObjectRecord(resolvedObject);
 
         // Static terrain's inexpensive directional pass must keep the sun
         // through the detailed-to-far-field join. The generic lighting
@@ -4572,8 +4640,9 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         preparedDraw.drawData = drawData;
         objectData.geometryFade = hasPortalViews && renderItem->geometryFade.w>=2.f ? mesh->GetRuntimeGeometryFade():renderItem->geometryFade;
         objectData.shadowCasterFade={casterFade.x,std::min(casterFade.x,casterFade.y),0.f,0.f};
-        objectData.grassAnimation={mesh && mesh->grassShadowCaster ? static_cast<float>(GetElapsedTime()) : 0.f,
-            mesh && mesh->grassShadowCaster ? 1.f : 0.f, 0.f, 0.f};
+        objectData.grassAnimation={mesh && (mesh->grassShadowCaster || mesh->foliageWindStrength>0.f) ? static_cast<float>(GetElapsedTime()):0.f,
+            mesh && (mesh->grassShadowCaster || mesh->foliageWindStrength>0.f) ? 1.f : 0.f,
+            mesh && mesh->foliageWindStrength>0.f ? std::clamp(mesh->foliageWindStrength,0.f,1.f):1.f, 0.f};
         preparedDraw.objectData = objectData;
         preparedDraw.traversalChartPortal = renderItem->traversalChartPortal;
 
@@ -4610,7 +4679,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             auto [entry, inserted] = foliagePipelines.try_emplace(materialPipeline);
             if (inserted)
                 entry->second.first = ResolveMaterialShaderPipeline(
-                    mat->ResolveShaderPath("Assets/Shaders/Foliage.hlsl"),
+                    ResolveMaterialShaderSource(*mat,"Assets/Shaders/Foliage.hlsl"),
                     materialPipeline, false, false, "Auto",
                     entry->second.second);
             if (entry->second.first) materialPipeline = entry->second.first;
@@ -4919,7 +4988,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 if (!shader.enabled) continue;
                 std::string error;
                 auto* pipeline = ResolveMaterialShaderPipeline(
-                    draw.material->ResolveShaderPath(shader.path), base,
+                    ResolveMaterialShaderSource(*draw.material,shader.path), base,
                     draw.terrain, submitted, shader.blendMode, error);
                 if (!error.empty() && draw.material->shaderError.find(error) == std::string::npos)
                 {

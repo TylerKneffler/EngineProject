@@ -4,6 +4,7 @@
 #include <memory>
 #include <utility>
 #include <cstdint>
+#include <optional>
 
 
 namespace Engine::Renderers
@@ -48,6 +49,8 @@ public:
     // Poll on the graphics owner after RenderIfNeeded has submitted its frame.
     virtual bool SupportsFrameCompletion() const { return false; }
     virtual uint64_t GetSubmittedFrameToken() const { return 0; }
+    // Frame submissions only. Fence tokens can also advance for resource drains.
+    virtual std::optional<uint64_t> GetSubmittedFrameCount() const { return std::nullopt; }
     virtual bool IsFrameComplete(uint64_t token) { return token == 0; }
     // Wait only for the submitted frame whose retained resources are needed.
     // Backends without per-frame waits can conservatively drain the device.

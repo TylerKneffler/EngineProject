@@ -1,0 +1,13 @@
+{
+    "version": 1,
+    "id": "fcb7e9fc-d6cf-449a-a8a3-5db6af7ca9c2",
+    "sourcePath": "C:/Users/tyler/source/repos/EngineProject/.local/woodland-import/Bushes/Bushes.gltf",
+    "importSettings": {
+        "decomposeNodeMatrices": true,
+        "generateMeshIndices": true,
+        "importer": "gltf",
+        "loadExternalBuffers": true,
+        "loadExternalImages": true
+    }
+}
+

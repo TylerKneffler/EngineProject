@@ -81,6 +81,8 @@ GrassField::GrassField()
     RegisterField("maxTileBuildsPerUpdate", maxTileBuildsPerUpdate, "Tiles");
     RegisterField("castShadows", castShadows, "Lighting");
     RegisterField("shaderPath", shaderPath, "Lighting");
+    RegisterField("materialPath", materialPath, "Assets");
+    RegisterField("windStrength", windStrength, "Lighting");
     RegisterField("tileWorkBudgetMs", tileWorkBudgetMs, "Tiles");
     RegisterField("fadeDuration", fadeDuration, "LOD");
     RegisterField("distanceFadeWidth", distanceFadeWidth, "LOD");
@@ -89,20 +91,74 @@ GrassField::GrassField()
     RegisterField("retainDormantTiles", retainDormantTiles, "Tiles");
 }
 
+std::map<std::string, std::vector<std::string>> GrassField::GetTerrainObjectLodMeshes() const
+{
+    std::map<std::string, std::vector<std::string>> definitions;
+    for (const auto& paths : {std::vector<std::string>{shortMesh, shortMeshLod1, shortMeshLod2},
+            std::vector<std::string>{tallMesh, tallMeshLod1, tallMeshLod2}})
+    {
+        if (paths.front().empty()) continue;
+        auto& levels = definitions[paths.front()];
+        if (!levels.empty()) continue;
+        for (const auto& path : paths) if (!path.empty()) levels.push_back(path);
+    }
+    return definitions;
+}
+
 bool GrassField::LoadSources()
 {
     auto* provider = Owner->GetScene()->GetGraphicsProvider();
     auto* factory = provider ? provider->GetBufferFactory() : nullptr;
-    const std::array<std::string, 3> shortPaths{
-        shortMesh, shortMeshLod1, shortMeshLod2};
-    const std::array<std::string, 3> tallPaths{
-        tallMesh, tallMeshLod1, tallMeshLod2};
+    auto definitions = GetTerrainObjectLodMeshes();
+    // Resolve only the rendered species here; enumerating every placement belongs
+    // in the inspector, not in the per-frame streaming path.
+    if (m_cachedLayer)
+        for (const auto& asset : {shortMesh, tallMesh})
+            if (const auto found = m_cachedLayer->objectLods.find(asset);
+                found != m_cachedLayer->objectLods.end() && !found->second.meshes.empty())
+            {
+                auto meshes = found->second.meshes;
+                meshes.erase(std::remove(meshes.begin(), meshes.end(), std::string{}), meshes.end());
+                if (meshes.size() > Engine::Components::TerrainObjectLayer::MaximumObjectLods)
+                    meshes.resize(Engine::Components::TerrainObjectLayer::MaximumObjectLods);
+                if (!meshes.empty()) definitions[asset] = std::move(meshes);
+            }
+    auto shortLevels = definitions[shortMesh], tallLevels = definitions[tallMesh];
+    if (shortLevels.empty() || tallLevels.empty()) return false;
+    const auto distances = [&](const std::string& asset, size_t count) {
+        if (m_cachedLayer) return m_cachedLayer->GetObjectLodDistances(asset, count);
+        std::vector<float> result;
+        for (size_t i = 1; i < count; ++i) result.push_back(std::max(2.f, visibleRadius));
+        return result;
+    };
+    const auto shortDistances = distances(shortMesh, shortLevels.size());
+    const auto tallDistances = distances(tallMesh, tallLevels.size());
+    // A shared tile changes only the species whose boundary was crossed.
+    // The sorted union supports different LOD counts and distances per asset.
+    m_lodDistances = shortDistances;
+    m_lodDistances.insert(m_lodDistances.end(), tallDistances.begin(), tallDistances.end());
+    std::sort(m_lodDistances.begin(), m_lodDistances.end());
+    m_lodDistances.erase(std::unique(m_lodDistances.begin(), m_lodDistances.end()), m_lodDistances.end());
+    m_useGpuLodSelection = gpuLodSelection && shortLevels.size() == 3 &&
+        tallLevels.size() == 3 && shortDistances == tallDistances && m_lodDistances.size() == 2;
+    std::vector<std::string> shortPaths, tallPaths;
+    for (size_t i = 0; i <= m_lodDistances.size(); ++i)
+    {
+        const auto level = [&](const std::vector<float>& thresholds) {
+            return i == 0 ? size_t(0) : size_t(std::upper_bound(thresholds.begin(), thresholds.end(), m_lodDistances[i - 1]) - thresholds.begin());
+        };
+        shortPaths.push_back(shortLevels[level(shortDistances)]);
+        tallPaths.push_back(tallLevels[level(tallDistances)]);
+    }
     if (m_loaded && m_loadedFactory == factory && m_loadedShortPaths == shortPaths &&
         m_loadedTallPaths == tallPaths)
         return m_shortVertices[0] && m_tallVertices[0] && !m_shortVertices[0]->empty() && !m_tallVertices[0]->empty();
     m_loaded = true;
-    if (m_loadedFactory != factory) m_hasGenerationSignature = false;
     m_loadedFactory = factory;
+    m_hasGenerationSignature = false;
+    m_shortVertices.resize(shortPaths.size());
+    m_tallVertices.resize(tallPaths.size());
+    m_sourceMeshes.resize(shortPaths.size());
     m_loadedShortPaths = shortPaths;
     m_loadedTallPaths = tallPaths;
     try
@@ -117,10 +173,17 @@ bool GrassField::LoadSources()
                 Engine::Memory::CacheLifetime::LongTerm, "GrassSpecies", key, [&]() {
                     Engine::Components::Mesh mesh;
                     mesh.LoadFromFile(path);
+                    if (!mesh.GetIndices().empty())
+                    {
+                        auto triangles=std::make_shared<Source>();
+                        triangles->reserve(mesh.GetIndices().size());
+                        for (const auto index:mesh.GetIndices()) triangles->push_back(mesh.GetVertices().at(index));
+                        return triangles;
+                    }
                     return std::make_shared<Source>(mesh.TakeVertices());
                 });
         };
-        for (int lod = 0; lod < 3; ++lod)
+        for (int lod = 0; lod < static_cast<int>(m_sourceMeshes.size()); ++lod)
         {
             m_shortVertices[lod] = load(shortPaths[lod]);
             m_tallVertices[lod] = load(tallPaths[lod]);
@@ -132,7 +195,7 @@ bool GrassField::LoadSources()
         for (auto it = sharedMeshes.begin(); it != sharedMeshes.end();)
             if (it->second.expired()) it = sharedMeshes.erase(it); else ++it;
         bool first = true;
-        for (int lod = 0; lod < 3; ++lod)
+        for (int lod = 0; lod < static_cast<int>(m_sourceMeshes.size()); ++lod)
         {
             const auto key = std::make_tuple(factory, m_shortVertices[lod].get(), m_tallVertices[lod].get());
             auto mesh = sharedMeshes[key].lock();
@@ -448,7 +511,7 @@ bool GrassField::AdvanceBuild(Clock::time_point deadline)
     // fallbacks create native slices lazily; normal draws have no duplicate upload.
     // All LODs reuse these placement buffers. A distance change only selects
     // another shared source range; it never schedules generation or an upload.
-    for (int lod = 0; lod < 3; ++lod)
+    for (int lod = 0; lod < static_cast<int>(m_sourceMeshes.size()); ++lod)
     {
         auto geometry = std::make_unique<Mesh>();
         const auto shortVertices = static_cast<uint32_t>(m_shortVertices[lod]->size());
@@ -516,8 +579,8 @@ bool GrassField::Refresh()
         m_lastGenerationSignature = signature;
         m_hasGenerationSignature = true;
     }
-    const float lod1 = layer ? std::clamp(layer->lod1Distance, 0.f, radius) : radius;
-    const float lod2 = layer ? std::clamp(layer->lod2Distance, lod1, radius) : radius;
+    const float lod1 = m_lodDistances.empty() ? radius : m_lodDistances.front();
+    const float lod2 = m_lodDistances.size() < 2 ? radius : m_lodDistances[1];
     const float hysteresis = layer ? std::max(0.f, layer->lodHysteresis) : 0;
     const float shadowRadius = layer ? std::clamp(layer->shadowDistance, 0.f, radius) : radius;
     const int reach = static_cast<int>(std::ceil(radius / span)) + 1;
@@ -576,9 +639,9 @@ bool GrassField::Refresh()
             changed = previousVisibility != tile.visibility || changed;
             tile.distanceSquared = dx * dx + dz * dz;
             const float distance = std::sqrt(tile.distanceSquared);
-            const int lod = gpuLodSelection ? 0:tile.mesh->ChooseRuntimeLod(distance, {lod1, lod2}, hysteresis);
-            tile.desiredLod = gpuLodSelection ? 0:lod;
-            tile.mesh->gpuLodSelection=gpuLodSelection;
+            const int lod = m_useGpuLodSelection ? 0 : tile.mesh->ChooseRuntimeLod(distance, m_lodDistances, hysteresis);
+            tile.desiredLod = m_useGpuLodSelection ? 0 : lod;
+            tile.mesh->gpuLodSelection=m_useGpuLodSelection;
             tile.mesh->gpuLod1Distance=lod1; tile.mesh->gpuLod2Distance=lod2;
             // Keep caster eligibility stable. The shadow shader fades each
             // surface at the range edge; compute culls distant placements.
@@ -587,6 +650,18 @@ bool GrassField::Refresh()
             tile.mesh->runtimeShadowFadeWidth=std::min(shadowRadius,std::max(.25f,distanceFadeWidth));
             tile.castsShadows = shadows;
             auto* tileMaterial = tile.object->GetComponent<Engine::Components::Material>();
+            if (!materialPath.empty())
+            {
+                if (m_loadedMaterialPath!=materialPath)
+                {
+                    m_loadedMaterialPath=materialPath;
+                    m_resolvedMaterialPath=Engine::Components::Mesh::ResolveFilePath(materialPath);
+                }
+                if (tileMaterial->GetFilePath()!=m_resolvedMaterialPath && tileMaterial->LoadFromFile(m_resolvedMaterialPath))
+                    tileMaterial->PrepareTextures(scene.GetGraphicsProvider());
+            }
+            tile.mesh->foliageWindStrength=std::clamp(windStrength,0.f,1.f);
+            tile.mesh->grassShadowCaster=windStrength>0.f;
             tileMaterial->castsShadows = shadows;
             if ((shaderPath.empty() && !tileMaterial->shaders.empty()) ||
                 (!shaderPath.empty() && (tileMaterial->shaders.size() != 1 ||
@@ -639,7 +714,7 @@ bool GrassField::Refresh()
         int missing = !tile.mesh->IsRuntimeLodResident(tile.desiredLod) ? tile.desiredLod : -1;
         const bool required = missing >= 0;
         if (missing < 0)
-            for (int lod = 0; lod < 3; ++lod)
+            for (int lod = 0; lod < static_cast<int>(m_sourceMeshes.size()); ++lod)
                 if (!tile.mesh->IsRuntimeLodResident(lod)) { missing = lod; break; }
         if (missing < 0) continue;
         ++m_performance.pending;
@@ -668,7 +743,7 @@ bool GrassField::Refresh()
             // Keep current geometry until the desired replacement is resident.
             changed = ActivateTileLod(tile, tile.desiredLod) || changed;
             if (tile.mesh->GetActiveRuntimeLod() < 0)
-                for (int lod = 0; lod < 3; ++lod)
+                for (int lod = 0; lod < static_cast<int>(m_sourceMeshes.size()); ++lod)
                     if (tile.mesh->IsRuntimeLodResident(lod)) { changed = ActivateTileLod(tile, lod) || changed; break; }
         }
     }
@@ -703,6 +778,7 @@ uint64_t GrassField::SpatialRegionRevision() const
     if(Owner) { const auto world=Owner->transform.GetWorldRevision(); HashBytes(revision,&world,sizeof(world)); }
     HashBytes(revision,viewerObjectName.data(),viewerObjectName.size());
     HashBytes(revision,shaderPath.data(),shaderPath.size());
+    HashBytes(revision,materialPath.data(),materialPath.size()); HashFloat(revision,windStrength);
     HashBytes(revision,&useEditorCamera,sizeof(useEditorCamera)); HashFloat(revision,tileSize); HashFloat(revision,visibleRadius);
     if(Owner && Owner->GetScene()) { const bool started=Owner->GetScene()->HasStarted(); HashBytes(revision,&started,sizeof(started)); }
     if(m_cachedLayer) HashFloat(revision,m_cachedLayer->viewDistance);

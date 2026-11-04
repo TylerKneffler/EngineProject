@@ -1,4 +1,5 @@
 #include "TerrainObjectLayer.h"
+#include "Core/Object.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/quaternion.hpp>
@@ -19,6 +20,44 @@ TerrainObjectLayer::TerrainObjectLayer()
     RegisterField("lod2Distance", lod2Distance, "Object LOD");
     RegisterField("lodHysteresis", lodHysteresis, "Object LOD");
     RegisterField("shadowDistance", shadowDistance, "Object LOD");
+}
+
+std::map<std::string, std::vector<std::string>> TerrainObjectLayer::GetDefinedObjectLods() const
+{
+    std::map<std::string, std::vector<std::string>> definitions;
+    if (Owner)
+        for (const auto* component : Owner->Components)
+            if (const auto* provider = dynamic_cast<const TerrainObjectLodProvider*>(component))
+                for (const auto& [asset, meshes] : provider->GetTerrainObjectLodMeshes())
+                    definitions[asset] = meshes;
+    for (const auto& placement : placements)
+        if (!definitions.count(placement.asset)) definitions[placement.asset] = {placement.asset};
+    for (const auto& [asset, settings] : objectLods)
+        if (!settings.meshes.empty()) definitions[asset] = settings.meshes;
+    for (auto& [asset, meshes] : definitions)
+    {
+        meshes.erase(std::remove(meshes.begin(), meshes.end(), std::string{}), meshes.end());
+        if (meshes.empty()) meshes.push_back(asset);
+        if (meshes.size() > MaximumObjectLods) meshes.resize(MaximumObjectLods);
+    }
+    return definitions;
+}
+
+std::vector<float> TerrainObjectLayer::GetObjectLodDistances(const std::string& asset, size_t lodCount) const
+{
+    const size_t count = std::min(lodCount, MaximumObjectLods);
+    std::vector<float> result;
+    const auto found = objectLods.find(asset);
+    const float maximum = std::isfinite(viewDistance) ? std::clamp(viewDistance, 1.f, 100000.f) : 18.f;
+    for (size_t i = 1; i < count; ++i)
+    {
+        float distance = count == 3 ? (i == 1 ? lod1Distance : lod2Distance) : maximum * float(i) / float(count);
+        if (found != objectLods.end() && i <= found->second.distances.size())
+            distance = found->second.distances[i - 1];
+        if (!std::isfinite(distance)) distance = maximum * float(i) / float(count);
+        result.push_back(std::clamp(distance, result.empty() ? 0.f : result.back(), maximum));
+    }
+    return result;
 }
 
 glm::quat TerrainObjectLayer::SurfaceRotation(const glm::vec3& normal,
@@ -119,6 +158,17 @@ TerrainObjectLayer::JsonValue TerrainObjectLayer::Serialize() const
     JsonValue out = Component::Serialize();
     out.Set("bakedInstances",JsonValue(SerializePrepared()));
     out.Set("layerName", JsonValue(layerName));
+    JsonValue lodEntries = JsonValue::MakeArray();
+    for (const auto& [asset, settings] : objectLods)
+    {
+        JsonValue meshes = JsonValue::MakeArray(), distances = JsonValue::MakeArray();
+        for (const auto& mesh : settings.meshes) meshes.Push(JsonValue(mesh));
+        const size_t count = settings.meshes.empty() ? settings.distances.size() + 1 : settings.meshes.size();
+        for (float distance : GetObjectLodDistances(asset, count)) distances.Push(JsonValue(distance));
+        lodEntries.Push(JsonValue::MakeObject().Set("asset", JsonValue(asset))
+            .Set("meshes", std::move(meshes)).Set("distances", std::move(distances)));
+    }
+    out.Set("objectLods", std::move(lodEntries));
     JsonValue entries = JsonValue::MakeArray();
     for (const Placement& placement : placements)
         entries.Push(JsonValue::MakeObject()
@@ -146,6 +196,27 @@ void TerrainObjectLayer::Deserialize(const JsonValue& value)
     lodHysteresis = std::clamp(lodHysteresis, 0.f, 10.f);
     shadowDistance = std::clamp(shadowDistance, 0.f, viewDistance);
     layerName = value.Has("layerName") ? value["layerName"].AsString() : "Objects";
+    objectLods.clear();
+    const auto& lodEntries = value["objectLods"];
+    for (size_t i = 0; i < lodEntries.ArraySize(); ++i)
+    {
+        const auto& entry = lodEntries.ArrayAt(i);
+        const std::string asset = entry["asset"].AsString();
+        if (asset.empty()) continue;
+        ObjectLods settings;
+        const auto& meshes = entry["meshes"];
+        for (size_t j = 0; j < std::min(meshes.ArraySize(), MaximumObjectLods); ++j)
+            if (meshes.ArrayAt(j).IsString() && !meshes.ArrayAt(j).AsString().empty())
+                settings.meshes.push_back(meshes.ArrayAt(j).AsString());
+        const auto& distances = entry["distances"];
+        const size_t count = settings.meshes.empty() ? MaximumObjectLods : settings.meshes.size();
+        for (size_t j = 0; j < distances.ArraySize() && j + 1 < count; ++j)
+            settings.distances.push_back(distances.ArrayAt(j).AsFloat());
+        objectLods[asset] = std::move(settings);
+        const size_t normalizedCount = objectLods[asset].meshes.empty()
+            ? objectLods[asset].distances.size() + 1 : objectLods[asset].meshes.size();
+        objectLods[asset].distances = GetObjectLodDistances(asset, normalizedCount);
+    }
     placements.clear();
     const auto& entries = value["placements"];
     placements.reserve(entries.ArraySize());
@@ -185,6 +256,7 @@ void TerrainObjectLayer::InstallPrepared(TerrainObjectLayer&& source)
     lod2Distance = source.lod2Distance;
     lodHysteresis = source.lodHysteresis;
     shadowDistance = source.shadowDistance;
+    objectLods = std::move(source.objectLods);
     placements = std::move(source.placements);
     m_prepared = std::move(source.m_prepared);
     m_preparedSignature = source.m_preparedSignature;
@@ -200,16 +272,60 @@ bool TerrainObjectLayer::DrawProperties(::Engine::Editor::IEditorUi& ui)
 {
     bool changed = false;
     ui.ValueLabel("Layer", layerName.c_str());
-    changed |= ui.DragFloat("View distance (m)", &viewDistance,
+    changed |= ui.DragFloat("Object view distance (m)", &viewDistance,
         .25f, 1.f, 100000.f);
-    changed |= ui.DragFloat("LOD 1 starts (m)", &lod1Distance,
-        .25f, 0.f, viewDistance);
-    changed |= ui.DragFloat("LOD 2 starts (m)", &lod2Distance,
-        .25f, lod1Distance, viewDistance);
-    changed |= ui.DragFloat("LOD hysteresis (m)", &lodHysteresis,
+    ui.Tooltip("Objects beyond this distance are hidden. Distances are measured to each object tile center.");
+    viewDistance = std::clamp(viewDistance, 1.f, 100000.f);
+    const auto definitions = GetDefinedObjectLods();
+    if (definitions.empty()) ui.Label("No terrain object assets defined.");
+    for (const auto& [asset, meshes] : definitions)
+    {
+        ui.ValueLabel("Object asset", asset.c_str());
+        auto distances = GetObjectLodDistances(asset, meshes.size());
+        std::vector<std::string> labels;
+        std::vector<const char*> labelPointers;
+        for (size_t i = 0; i < meshes.size(); ++i) labels.push_back("LOD " + std::to_string(i));
+        for (const auto& label : labels) labelPointers.push_back(label.c_str());
+        const std::string sliderLabel = "Object LOD distances##" + asset;
+        if (ui.LodRangeSlider(sliderLabel.c_str(), distances.data(), static_cast<int>(distances.size()), viewDistance, labelPointers.data()))
+        {
+            objectLods[asset].distances = std::move(distances);
+            changed = true;
+        }
+        const std::string header = "LOD mesh definitions##" + asset;
+        if (ui.CollapsingHeader(header.c_str(), false))
+        {
+            ui.Label("One mesh per LOD, highest detail first (up to 16). Drag segment boundaries to set distances.");
+            auto editedMeshes = meshes;
+            bool edited = false;
+            for (size_t i = 0; i < meshes.size(); ++i)
+            {
+                char path[1024]{};
+                std::memcpy(path, meshes[i].data(), std::min(meshes[i].size(), sizeof(path) - 1));
+                const std::string field = labels[i] + " mesh##" + asset;
+                if (ui.InputText(field.c_str(), path, sizeof(path)) && path[0])
+                { editedMeshes[i] = path; edited = true; }
+            }
+            const std::string add = "Add LOD##" + asset, remove = "Remove last LOD##" + asset;
+            if (meshes.size() < MaximumObjectLods && ui.Button(add.c_str()))
+            { editedMeshes.push_back(meshes.back()); edited = true; }
+            if (meshes.size() > 1 && ui.Button(remove.c_str()))
+            { editedMeshes.pop_back(); edited = true; }
+            if (edited)
+            {
+                auto& settings = objectLods[asset];
+                settings.meshes = std::move(editedMeshes);
+                settings.distances = std::move(distances);
+                settings.distances = GetObjectLodDistances(asset, settings.meshes.size());
+                changed = true;
+            }
+        }
+    }
+    changed |= ui.DragFloat("LOD transition buffer (m)", &lodHysteresis,
         .1f, 0.f, 10.f);
     changed |= ui.DragFloat("Shadow distance (m)", &shadowDistance,
         .25f, 0.f, viewDistance);
+    ui.Tooltip("Objects stop casting shadows beyond this distance. Zero disables object shadows. Shadow quality is set in Preferences > Rendering > Realtime Shadows.");
     viewDistance = std::clamp(viewDistance, 1.f, 100000.f);
     lod1Distance = std::clamp(lod1Distance, 0.f, viewDistance);
     lod2Distance = std::clamp(lod2Distance, lod1Distance, viewDistance);

@@ -66,3 +66,8 @@ ReleaseBuilds/.staging-*/
 !.local/tests/DrawBatchPreparationTests.cpp
 !.local/tests/EditorPlaySessionTests.cpp
 !.local/tests/EditorPlayPipelineTests.cpp
+
+!.local/tests/PerformanceMetricsTests.cpp
+!.local/tests/PerformanceRecordingTests.cpp
+
+!.local/tests/ShaderSourceCacheTests.cpp

@@ -1118,25 +1118,25 @@ void TestSharedMaterialShaderPreparation()
         scene.PrepareRenderFrame();
         const auto& timing=scene.GetLastPrepareTimings();
         Require(timing.itemShaderRequests==requests && timing.itemShaderResolutions==resolutions,
-            "shader preparation did not share source checks or refresh the next frame");
+            "shader preparation did not reuse sources or resolve a changed path");
         const double parts=timing.itemValidationMs+timing.itemTexturesMs+timing.itemShadersMs+
             timing.itemMeshStateMs+timing.itemBoundsMs+timing.itemLodMs+timing.itemBuildMs;
         Require(std::abs(parts-timing.itemsMs)<0.01, "item timers overlap or omit preparation work");
     };
     check(2,1);
-    check(2,1); // Still poll sources in each new frame, including cached static items.
+    check(2,0); // Unchanged frames reuse source resolution and metadata.
     materials[1]->shaders.front().path="Assets/Shaders/WarmOverlay.hlsl";
-    check(2,2); // Direct script edits need no configuration notification.
+    check(2,1); // Only the new path resolves; direct edits need no notification.
     materials[1]->shaders.front().enabled=false;
-    check(1,1);
+    check(1,0);
     materials[1]->shaders.front().enabled=true;
     materials[1]->shaders.front().path=materials[0]->shaders.front().path;
     objects[1]->AddComponent<Engine::Components::TerrainBatchAppearance>();
-    check(2,2); // Terrain and ordinary mesh bytecode are separate variants.
+    check(2,0); // Bytecode variants share the same source resolution.
     objects[1]->enabled=false;
-    check(1,1);
+    check(1,0);
     renderer.WaitIdle();
-    std::cout << "Shared shader sources, frame refresh, direct edits, disabled shaders and terrain variants passed.\n";
+    std::cout << "Shared shader sources, unchanged-frame reuse, direct edits, disabled shaders and terrain variants passed.\n";
 }
 
 void TestMaterialPreparationCache()
@@ -3274,6 +3274,216 @@ void AuditStopRestore()
     renderer.WaitIdle();
 }
 
+void TestVariableTerrainObjectLods()
+{
+    using Layer = Engine::Components::TerrainObjectLayer;
+    using Mesh = Engine::Components::Mesh;
+    Engine::Scene::Scene scene;
+    auto* terrainOwner = scene.AddObject("Variable LOD terrain");
+    auto* terrain = terrainOwner->AddComponent<Engine::Components::Terrain>();
+    terrain->cellsX = terrain->cellsY = 16;
+    auto* viewer = scene.AddObject("Variable LOD viewer");
+    viewer->transform.position = {2, 0, 2};
+    auto* owner = scene.AddObject("Variable LOD layer");
+    owner->Parent = terrainOwner;
+    terrainOwner->Children.push_back(owner);
+    auto* layer = owner->AddComponent<Layer>();
+    auto* grass = owner->AddComponent<GrassField>();
+    grass->viewerObjectName = viewer->name;
+    layer->objectLods[grass->shortMesh].distances = {4, 8};
+    Require(layer->GetDefinedObjectLods().at(grass->shortMesh).size() == 3,
+        "renderer object LOD definitions were not discovered");
+    Layer inherited;
+    inherited.Deserialize(layer->Serialize());
+    Require(inherited.objectLods.at(grass->shortMesh).meshes.empty() &&
+        inherited.GetObjectLodDistances(grass->shortMesh, 3) == std::vector<float>({4, 8}),
+        "distance-only overrides lost inherited object definitions");
+    const auto thirdLod = grass->shortMeshLod2;
+    grass->shortMeshLod2.clear();
+    Require(layer->GetDefinedObjectLods().at(grass->shortMesh).size() == 2 &&
+        layer->GetObjectLodDistances(grass->shortMesh, 2).size() == 1,
+        "editing an object's LOD chain did not update its boundary count");
+    grass->shortMeshLod2 = thirdLod;
+    grass->fadeDuration = 0;
+    grass->tileWorkBudgetMs = 16;
+    // GPU's old three-level selector must yield to the variable CPU selector.
+    grass->gpuLodSelection = true;
+    layer->viewDistance = 100;
+    layer->lodHysteresis = 0;
+    layer->objectLods[grass->shortMesh] = {{grass->shortMesh, grass->shortMeshLod1,
+        grass->shortMeshLod2, grass->shortMeshLod1, grass->shortMeshLod2}, {5, 10, 15, 20}};
+    layer->objectLods[grass->tallMesh] = {{grass->tallMesh, grass->tallMeshLod1}, {12}};
+    for (const auto& asset : {grass->shortMesh, grass->tallMesh})
+    {
+        Layer::Placement placement;
+        placement.asset = asset;
+        placement.position = {1, 0, 1};
+        layer->placements.push_back(placement);
+    }
+    layer->MarkConfigurationDirty();
+    const auto saved = layer->Serialize();
+    Layer loaded;
+    loaded.Deserialize(saved);
+    Require(loaded.GetDefinedObjectLods().at(grass->shortMesh).size() == 5,
+        "five object LODs did not survive serialization");
+    Require(loaded.GetObjectLodDistances(grass->shortMesh, 5) == std::vector<float>({5, 10, 15, 20}),
+        "object boundaries did not survive serialization");
+    Layer installed;
+    installed.InstallPrepared(std::move(loaded));
+    Require(installed.objectLods.at(grass->tallMesh).meshes.size() == 2,
+        "prepared streaming dropped object LOD definitions");
+    Layer legacy;
+    legacy.lod1Distance = 7; legacy.lod2Distance = 11;
+    Require(legacy.GetObjectLodDistances("legacy", 3) == std::vector<float>({7, 11}),
+        "legacy terrain object distances changed");
+    Require(legacy.GetObjectLodDistances("single", 1).empty(), "one LOD created a boundary");
+    grass->Start();
+    for (int i = 0; i < 100; ++i)
+    {
+        scene.ResetGrassPerformance(); grass->Update(); scene.CommitPendingObjectChanges();
+        if (grass->GetLastPerformance().residentLods == 6) break;
+    }
+    auto* tile = scene.FindObjectByName("Grass Tile (0, 0)");
+    Require(tile, "variable LOD tile was not built");
+    auto* mesh = tile->GetComponent<Mesh>();
+    Require(mesh->GetResidentRuntimeLodCount() == 6 && !mesh->gpuLodSelection,
+        "different object LOD counts did not build their combined levels");
+    const auto instances = mesh->GetInstanceData();
+    for (const auto& sample : {std::pair<float,int>{0.f,0}, {6.f,1}, {11.f,2}, {13.f,3}, {16.f,4}, {21.f,5}})
+    {
+        viewer->transform.position = {2 + sample.first, 0, 2};
+        scene.ResetGrassPerformance(); grass->Update(); scene.CommitPendingObjectChanges();
+        Require(mesh->GetActiveRuntimeLod() == sample.second, "object distance selected the wrong LOD");
+        Require(grass->GetLastPerformance().tilesBuilt == 0 && mesh->GetInstanceData() == instances,
+            "object LOD transition rebuilt placement data");
+    }
+    // Each species changes only at its own boundaries.
+    const auto* beforeTall = mesh->GetRuntimeLodMesh(2);
+    const auto* afterTall = mesh->GetRuntimeLodMesh(3);
+    Require(beforeTall->GetInstanceRanges()[0].vertexCount == afterTall->GetInstanceRanges()[0].vertexCount,
+        "crossing the tall object boundary also changed the short object LOD");
+    Require(beforeTall->GetInstanceRanges()[1].vertexCount != afterTall->GetInstanceRanges()[1].vertexCount,
+        "crossing the tall object boundary did not change its mesh");
+    // Maximum independently defined chains must not be truncated to three levels.
+    for (const auto& asset : {grass->shortMesh, grass->tallMesh})
+    {
+        auto& settings = layer->objectLods[asset];
+        settings.meshes.resize(16, asset);
+        settings.distances.clear();
+        for (int i = 1; i < 16; ++i) settings.distances.push_back(float(i * 2 + (asset == grass->tallMesh)));
+    }
+    layer->MarkConfigurationDirty();
+    viewer->transform.position = {2, 0, 2};
+    for (int i = 0; i < 100; ++i)
+    {
+        scene.ResetGrassPerformance(); grass->Update(); scene.CommitPendingObjectChanges();
+        if (grass->GetLastPerformance().residentLods == 31) break;
+    }
+    tile = scene.FindObjectByName("Grass Tile (0, 0)");
+    Require(tile && tile->GetComponent<Mesh>()->GetResidentRuntimeLodCount() == 31,
+        "independent 16-level object chains were truncated");
+    // A single-level object needs no divider and remains renderable.
+    layer->objectLods[grass->shortMesh] = {{grass->shortMesh}, {}};
+    layer->objectLods[grass->tallMesh] = {{grass->tallMesh}, {}};
+    layer->MarkConfigurationDirty();
+    for (int i = 0; i < 100; ++i)
+    {
+        scene.ResetGrassPerformance(); grass->Update(); scene.CommitPendingObjectChanges();
+        if (grass->GetLastPerformance().residentLods == 1) break;
+    }
+    Require(grass->GetLastPerformance().residentLods == 1, "single-level objects failed to render");
+    std::cout << "Variable terrain object LOD counts, independent distances, streaming and legacy settings passed.\n";
+}
+
+
+void CheckOakMeadowScene()
+{
+    constexpr unsigned width=1280,height=720;
+    Engine::Core::Window window(GetModuleHandleW(nullptr),L"Oak Meadow validation",width,height);
+    ShowWindow(window.GetHWND(),SW_HIDE);
+    Engine::Renderers::DX11GameRenderer renderer;
+    Require(renderer.Init(window.GetHWND(),width,height),"meadow renderer init failed");
+    Engine::Scene::Scene scene; scene.Init(renderer.GetGraphicsProvider());
+    Require(scene.Load("Engine/Core/Assets/Scenes/terrain/oak_meadow.scene"),"meadow scene load failed");
+    auto* player=scene.FindObjectByName("Meadow Explorer");
+    Require(player,"meadow camera object missing");
+    auto* camera=player->GetComponent<Engine::Components::Camera>();
+    Require(camera,"meadow camera missing");
+    const auto fields=scene.GetComponents<GrassField>();
+    Require(fields.size()==2,"meadow grass streaming layers missing");
+    for(auto* field:fields) field->Start();
+    scene.PrepareRenderFrame();
+    unsigned foliage=0,textured=0;
+    for(const auto& object:scene.GetObjects())
+        if(auto* mesh=object->GetComponent<Engine::Components::Mesh>();mesh && mesh->foliageWindStrength>0)
+        {
+            ++foliage;
+            Require(mesh->GetVertexCount()>0 && mesh->GetGraphicsBuffer(),"meadow foliage mesh not resident");
+            if(auto* mat=object->GetComponent<Engine::Components::Material>();mat && mat->baseColorTexture) ++textured;
+        }
+    Require(foliage>250 && textured==foliage,"meadow lost foliage textures or native prefab geometry");
+    bool refreshGrass=true;
+    const auto render=[&](float delta) {
+        scene.AdvanceManualFrame(delta);
+        scene.ResetGrassPerformance();
+        if(refreshGrass) for(auto* field:fields) field->RefreshEditorPreview();
+        renderer.BeginFrame(); renderer.Clear(.1f,.1f,.1f,1);
+        scene.PrepareRenderFrame();
+        auto context=renderer.CreateFrameGraphicsContext(); context->SetScissorRect({0,0,int(width),int(height)});
+        scene.Render(context.get(),float(width)/height,camera,false,width,height,true);
+        scene.Render(context.get(),float(width)/height,camera,false,width,height);
+        renderer.EndFrame();
+    };
+    const auto capture=[&] {
+        std::vector<uint8_t> result;Require(renderer.CaptureFrameRGBA(result),"meadow capture failed");return result;
+    };
+    const auto save=[&](const char* path,const std::vector<uint8_t>& rgba) {
+        BITMAPFILEHEADER file{};BITMAPINFOHEADER info{};
+        file.bfType=0x4d42;file.bfOffBits=sizeof(file)+sizeof(info);file.bfSize=file.bfOffBits+width*height*4;
+        info.biSize=sizeof(info);info.biWidth=width;info.biHeight=-int(height);info.biPlanes=1;info.biBitCount=32;info.biCompression=BI_RGB;
+        auto bgra=rgba;for(size_t i=0;i<bgra.size();i+=4) std::swap(bgra[i],bgra[i+2]);
+        std::ofstream out(path,std::ios::binary);out.write(reinterpret_cast<const char*>(&file),sizeof(file));
+        out.write(reinterpret_cast<const char*>(&info),sizeof(info));out.write(reinterpret_cast<const char*>(bgra.data()),bgra.size());
+    };
+    for(int frame=0;frame<90;++frame) render(1.f/60);
+    unsigned tiles=0;
+    for(const auto& object:scene.GetObjects())
+        if(auto* mesh=object->GetComponent<Engine::Components::Mesh>();mesh && mesh->IsInstanced() && object->enabled)
+        {
+            ++tiles;auto* material=object->GetComponent<Engine::Components::Material>();
+            Require(material && material->baseColorTexture && material->baseColorTexture->GetGraphicsTexture(),"streamed grass lost its texture atlas");
+        }
+    Require(tiles>20,"meadow grass tiles failed to populate");
+    const auto first=capture();save(".local/oak-meadow-entrance.bmp",first);
+
+    refreshGrass=false;std::vector<Engine::Core::Object*> activeTiles;
+    for(const auto& object:scene.GetObjects())
+        if(auto* mesh=object->GetComponent<Engine::Components::Mesh>();mesh && mesh->IsInstanced() && object->enabled)
+        { activeTiles.push_back(object.get());object->enabled=false; }
+    render(0);const auto groundOnly=capture();size_t visibleGrassPixels=0;
+    for(size_t i=width*height*2;i<first.size();i+=4)
+        visibleGrassPixels+=first[i+1]>first[i]*1.1f && first[i+1]>first[i+2]*1.1f &&
+            std::abs(int(first[i])-int(groundOnly[i]))+std::abs(int(first[i+1])-int(groundOnly[i+1]))+
+            std::abs(int(first[i+2])-int(groundOnly[i+2]))>16;
+    Require(visibleGrassPixels>10000,"grass ground coverage is not visibly distinct from the terrain");
+    for(auto* tile:activeTiles) tile->enabled=true;
+    refreshGrass=true;
+    render(2.f);const auto second=capture();size_t changed=0;
+    for(size_t i=0;i<first.size();i+=4)
+        changed+=std::abs(int(first[i])-int(second[i]))+std::abs(int(first[i+1])-int(second[i+1]))+std::abs(int(first[i+2])-int(second[i+2]))>12;
+    Require(changed>500,"authored meadow wind did not animate");
+    for(const auto& object:scene.GetObjects())
+        if(auto* mat=object->GetComponent<Engine::Components::Material>()) Require(mat->shaderError.empty(),"meadow material shader compilation failed");
+    player->transform.position={-5,27,-39};camera->target={2,1,5};
+    for(int frame=0;frame<3;++frame) render(0);
+    save(".local/oak-meadow-overlook.bmp",capture());
+    std::cout<<"Oak Meadow: "<<foliage<<" textured wind meshes, "<<changed<<" changed wind pixels, "
+        <<scene.GetShadowDebugSnapshot().submittedCasterDrawCount<<" shadow caster submissions.\n";
+    std::cout<<"Grass: "<<tiles<<" active streamed tiles, "<<visibleGrassPixels<<" distinct grass pixels in the lower half.\n";
+    Require(scene.GetShadowDebugSnapshot().submittedCasterDrawCount>0,"meadow did not submit shadows");
+    renderer.WaitIdle();
+}
+
 int main(int argc, char** argv)
 {
     SetUnhandledExceptionFilter([](EXCEPTION_POINTERS* failure)->LONG {
@@ -3287,7 +3497,9 @@ int main(int argc, char** argv)
     });
     try
     {
-        if(argc>1 && std::string(argv[1])=="--shadow-record-upload-order") TestShadowRecordUploadOrder();
+        if(argc>1 && std::string(argv[1])=="--oak-meadow-scene") CheckOakMeadowScene();
+        else if(argc>1 && std::string(argv[1])=="--terrain-object-lods") { TestVariableTerrainObjectLods(); TestGrass(); TestBakedPlacements(); }
+        else if(argc>1 && std::string(argv[1])=="--shadow-record-upload-order") TestShadowRecordUploadOrder();
         else if(argc>1 && std::string(argv[1])=="--instance-tile-preparation") { TestInstanceTilePreparation(); TestPersistentStorage(); }
         else if(argc>1 && std::string(argv[1])=="--material-preparation-cache") TestMaterialPreparationCache();
         else if(argc>1 && std::string(argv[1])=="--instanced-record-cache") TestInstancedRenderRecordCache();

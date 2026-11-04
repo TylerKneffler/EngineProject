@@ -456,10 +456,18 @@ void PerformanceView::SetFrameTimings(const EditorFrameProfileSample& sample,
     };
     m_renderCpu=sample.renderCpu;
     m_stageWork=sample.stages;
-    m_frameLatencyMs=sample.deltaSeconds*1000.;
-    if(sample.deltaSeconds>0 && std::isfinite(sample.deltaSeconds))
+    m_frameLatencyMs=sample.updateIntervalMs;
+    m_submissionRateValid = sample.submissionCountValid;
+    if (sample.submissionCountValid) m_submissionRate.Add(sample.submissionIntervalMs, sample.submittedFrames);
+    m_mainCpuMs=0; m_workerCpuMs=0;
+    for (const auto& stage : sample.stages)
+    { m_mainCpuMs+=stage.mainBusyMs; m_workerCpuMs+=stage.workerMs; }
+    m_mainNonRunningMs=std::max(0.,ms(sample.frameBegin,sample.afterPendingLoad)-m_mainCpuMs);
+    m_idleWaitMs=sample.idleWaitMs;
+    m_pacingMs=ms(sample.frameBegin,sample.afterPacing);
+    if(sample.updateIntervalMs>0 && std::isfinite(sample.updateIntervalMs))
     {
-        const double interval=sample.deltaSeconds*1000.;
+        const double interval=sample.updateIntervalMs;
         m_editorFrameRate.Add(interval);
         m_displayFrameRate=static_cast<float>(m_editorFrameRate.Fps());
         m_frameIntervals.push_back(interval); m_frameIntervalTotal+=interval; m_statisticsElapsed+=interval;
@@ -470,8 +478,9 @@ void PerformanceView::SetFrameTimings(const EditorFrameProfileSample& sample,
     }
     if (IsRecording())
     {
-        m_recording->Frame(m_lastUiFrameRate,sample.deltaSeconds*1000.,m_lastPanelDrawMs);
-        if (!IsOpen()) Refresh(sample.deltaSeconds > 0.f ? 1.f / sample.deltaSeconds : 0.f);
+        m_recording->Frame(m_lastUiFrameRate,sample.updateIntervalMs,m_lastPanelDrawMs,
+            m_submissionRateValid ? m_submissionRate.Fps() : -1.);
+        if (!IsOpen()) Refresh(m_displayFrameRate);
         auto recordedSample = sample;
         recordedSample.writer = m_recording->GetWriterStatistics();
         m_recording->FrameDetails(
@@ -480,7 +489,7 @@ void PerformanceView::SetFrameTimings(const EditorFrameProfileSample& sample,
     m_hasFrameTimings = true;
     m_uiPanels = sample.uiPanels;
     m_frameTimings = {
-        { "Frame", ms(sample.frameBegin, sample.afterPendingLoad) },
+        { "Update callback wall", ms(sample.frameBegin, sample.afterPendingLoad) },
         { "Pacing", ms(sample.frameBegin, sample.afterPacing) },
         { "Background", ms(sample.afterPacing, sample.afterBackground) },
         { "Scene update", ms(sample.afterBackground, sample.afterSceneUpdate) },
@@ -593,11 +602,11 @@ void PerformanceView::DrawTimings(IEditorUi& ui)
         }
         ui.Separator();
     };
-    drawGroup("Frame intervals (rolling five seconds)", {
+    drawGroup("Editor update intervals (rolling five seconds)", {
         {"Average interval",m_frameStatistics.meanMs},{"95th percentile",m_frameStatistics.p95Ms},{"99th percentile",m_frameStatistics.p99Ms}
     });
-    ui.ValueLabel("Average FPS",std::to_string(m_frameStatistics.fps).c_str());
-    ui.ValueLabel("Frames over 60 FPS budget (%)",std::to_string(m_frameStatistics.over60BudgetPercent).c_str());
+    ui.ValueLabel("Average editor updates/sec",std::to_string(m_frameStatistics.fps).c_str());
+    ui.ValueLabel("Updates over 16.67 ms (%)",std::to_string(m_frameStatistics.over60BudgetPercent).c_str());
     ui.DisabledLabel("Frame interval includes waits between updates; CPU frame work can be shorter. The 60 FPS budget is 16.67 ms.");
     drawGroup("Frame phases (CPU)", m_frameTimings);
     ui.Label("UI construction by panel (previous frame)");
@@ -622,7 +631,7 @@ void PerformanceView::DrawTimings(IEditorUi& ui)
             << stage.waitMs << " / " << stage.renderStallMs;
         ui.ValueLabel(stageNames[i],values.str().c_str());
     }
-    ui.ValueLabel("Frame latency (update interval)",
+    ui.ValueLabel("Editor update interval",
         (std::to_string(m_frameLatencyMs)+" ms").c_str());
     ui.DisabledLabel("Render stall estimates time the main thread was not executing CPU instructions during render; it includes waits and preemption.");
     ui.Separator();
@@ -860,7 +869,7 @@ void PerformanceView::RecordSnapshot(float frameRate)
 {
     if (!m_recording || !m_recording->IsRecording()) return;
     Engine::Threading::CapturedText out;
-    out << "\"fps\":" << frameRate << ",\"frame_ms\":"
+    out << "\"fps_scope\":\"editor_update_interval\",\"fps\":" << frameRate << ",\"frame_ms\":"
         << (frameRate > 0.f ? 1000.f / frameRate : 0.f)
         << ",\"counter_sample_ms\":" << m_lastCounterSampleMs
         << ",\"cpu_user_pct\":" << m_snapshot.cpuUser
@@ -1004,9 +1013,19 @@ void PerformanceView::DrawOverview(IEditorUi& ui, float frameRate)
         "Scrolling timelines", "All visuals" };
     ui.Combo("Visual", &m_visualMode, modes, static_cast<int>(std::size(modes)));
     std::ostringstream frame;
-    frame << std::fixed << std::setprecision(1) << frameRate << " FPS  |  "
+    frame << std::fixed << std::setprecision(1) << frameRate << " updates/s  |  "
         << (frameRate > 0.f ? 1000.f / frameRate : 0.f) << " ms";
-    ui.ValueLabel("Editor FPS (0.5 s)", frame.str().c_str());
+    ui.ValueLabel("Editor updates/sec (0.5 s)", frame.str().c_str());
+    ui.ValueLabel("Submitted frames/sec (0.5 s)", m_submissionRateValid ?
+        std::to_string(m_submissionRate.Fps()).c_str() : "Unavailable / warming up");
+    ui.ValueLabel("Main thread CPU work (ms)",std::to_string(m_mainCpuMs).c_str());
+    ui.ValueLabel("Worker execution sum (ms)",std::to_string(m_workerCpuMs).c_str());
+    ui.ValueLabel("Main thread non-running / waits (ms)",std::to_string(m_mainNonRunningMs).c_str());
+    ui.ValueLabel("Frame pacing (ms)",std::to_string(m_pacingMs).c_str());
+    ui.ValueLabel("Previous idle wait (ms)",std::to_string(m_idleWaitMs).c_str());
+    ui.ValueLabel("GPU measured regions, last resolved (ms)",m_gpuTimingsValid ? std::to_string(m_gpuTotalMs).c_str() : "Unavailable");
+    ui.DisabledLabel("Submitted frames are renderer submissions, not display scanouts or unique images. Unchanged redraws count. GPU regions may exclude work; CPU and worker times can overlap.");
+    ui.DisabledLabel("The Performance panel requests continuous redraws; these measurements include its overhead.");
     if (m_visualMode == 2 || m_visualMode == 3)
     {
         std::vector<float> frames(m_frameHistory.begin(), m_frameHistory.end());

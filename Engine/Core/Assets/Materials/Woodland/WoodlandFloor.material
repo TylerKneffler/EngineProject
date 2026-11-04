@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "baseColor": [
+    0.48,
+    0.55,
+    0.4
+  ],
+  "metallic": 0,
+  "roughness": 1,
+  "useVertexColors": true,
+  "baseColorTexture": "Assets/Textures/Terrain/shaded_moss.png",
+  "castsShadows": true
+}

@@ -444,6 +444,8 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
         scene, renderer, autoProfilePlay);
     uint32_t autoProfileTick = 0,autoProfilePlayingFrames=0;
     uint64_t recordedFrameCount = 0;
+    std::chrono::steady_clock::time_point previousUpdateBegin{}, previousSubmissionSample{};
+    double previousIdleWaitMs = 0;
     const bool autoProfileKeepOpen=EnvironmentVariable("ENGINE_EDITOR_AUTO_PROFILE_KEEP_OPEN").has_value();
     const auto warmupFrames=EnvironmentVariable("ENGINE_EDITOR_AUTO_PROFILE_WARMUP_FRAMES");
     const uint32_t autoProfileWarmup=warmupFrames ? uint32_t(std::clamp(std::atoi(warmupFrames->c_str()),0,1200)):0;
@@ -452,6 +454,9 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
     {
         using Clock = std::chrono::steady_clock;
         const auto frameBegin = Clock::now();
+        const double updateIntervalMs = previousUpdateBegin == Clock::time_point{} ? 0. :
+            std::chrono::duration<double,std::milli>(frameBegin-previousUpdateBegin).count();
+        previousUpdateBegin = frameBegin;
         bool showTimings = false;
         for (const auto& panel : editorState->GetPanels())
             if (auto* performance = dynamic_cast<Engine::Editor::PerformanceView*>(panel.get());
@@ -680,6 +685,7 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
                 if (auto* view = dynamic_cast<Engine::Editor::View*>(panel.get());
                     view && view->IsOpen() && view->IsRenderVisible())
                     view->ApplyRequestedRenderSize(renderer->GetNativeDeviceHandle());
+        const auto submissionBefore = renderer->GetSubmittedFrameCount();
         submittingEditorFrame = true;
         renderer->RenderIfNeeded([&]()
         {
@@ -906,6 +912,7 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
             resizeEditor(width, height);
         }
         const auto afterRender = Clock::now();
+        const auto submissionAfter = renderer->GetSubmittedFrameCount();
         const auto renderCounters=stageCounters();
         if (!pausedFenced &&
             previousPlayState == Engine::Editor::PlayState::Playing &&
@@ -947,6 +954,14 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
             fillStage(2,afterBackground,afterSceneUpdate,backgroundCounters,updateCounters);
             fillStage(3,afterSceneUpdate,afterRender,updateCounters,renderCounters);
             fillStage(4,afterRender,afterPendingLoad,renderCounters,loadCounters);
+            sample.updateIntervalMs = updateIntervalMs;
+            sample.idleWaitMs = previousIdleWaitMs;
+            sample.submissionCountValid = submissionBefore && submissionAfter &&
+                previousSubmissionSample != Clock::time_point{} && *submissionAfter >= *submissionBefore;
+            sample.submittedFrames = sample.submissionCountValid ? *submissionAfter-*submissionBefore : 0;
+            sample.submissionIntervalMs = previousSubmissionSample == Clock::time_point{} ? 0. :
+                std::chrono::duration<double,std::milli>(afterRender-previousSubmissionSample).count();
+            previousSubmissionSample = afterRender;
             sample.frameBegin = frameBegin;
             sample.afterPacing = afterPacing;
             sample.afterBackground = afterBackground;
@@ -1006,9 +1021,13 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
         // Avoid spinning the editor loop while idle. Window input wakes this
         // wait immediately; the short timeout also services asynchronous
         // directory notifications and other background state promptly.
+        previousIdleWaitMs = 0;
         if (!renderer->IsDirty() && !needsContinuousRendering())
-            MsgWaitForMultipleObjectsEx(0, nullptr, 50, QS_ALLINPUT,
-                MWMO_INPUTAVAILABLE);
+        {
+            const auto idleBegin = Clock::now();
+            MsgWaitForMultipleObjectsEx(0, nullptr, 50, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+            previousIdleWaitMs = std::chrono::duration<double,std::milli>(Clock::now()-idleBegin).count();
+        }
         if(autoProfilePlay)
         {
             ++autoProfileTick;

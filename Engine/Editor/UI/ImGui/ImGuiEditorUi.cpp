@@ -498,6 +498,103 @@ bool ImGuiEditorUi::ColorEdit3(const char*l,float*v){const bool mixed=ConsumeMix
 bool ImGuiEditorUi::ColorEdit4(const char*l,float*v){const bool mixed=ConsumeMixedValue();return InspectorField(l,[&](const char* id){return mixed?ImGui::DragFloat4(id,v,.01f,0.f,1.f,"-"):ImGui::ColorEdit4(id,v);});}
 bool ImGuiEditorUi::SliderInt(const char*l,int*v,int a,int b){return InspectorField(l,[&](const char* id){return ImGui::SliderInt(id,v,a,b);});}
 bool ImGuiEditorUi::SliderFloat(const char*l,float*v,float a,float b){return InspectorField(l,[&](const char* id){return ImGui::SliderFloat(id,v,a,b,"%.0f units");});}
+
+bool ImGuiEditorUi::LodRangeSlider(const char* label, float* boundaries,
+    int boundaryCount, float maximum, const char* const* segmentLabels)
+{
+    if (boundaryCount < 0 || maximum <= 0.f) return false;
+    ImGui::PushID(label);
+    const char* visibleEnd = std::strstr(label, "##");
+    ImGui::TextUnformatted(label, visibleEnd);
+    const float textHeight = ImGui::GetTextLineHeight();
+    const float width = std::max(1.f, ImGui::GetContentRegionAvail().x);
+    const float inset = std::min(8.f, width * .1f);
+    const float trackWidth = std::max(1.f, width - inset * 2.f);
+    const ImVec2 origin = ImGui::GetCursorScreenPos();
+    const float top = origin.y + textHeight + 5.f;
+    const float bottom = top + textHeight + 12.f;
+    ImGui::InvisibleButton("##range", ImVec2(width, textHeight * 3.f + 24.f));
+    const bool hovered = ImGui::IsItemHovered();
+    const bool active = ImGui::IsItemActive();
+    const auto position = [&](float distance) {
+        return origin.x + inset + trackWidth * std::clamp(distance / maximum, 0.f, 1.f);
+    };
+    const ImGuiID selectionId = ImGui::GetID("selected boundary");
+    auto* storage = ImGui::GetStateStorage();
+    if (boundaryCount > 0 && ImGui::IsItemActivated())
+    {
+        int nearest = 0;
+        for (int i = 1; i < boundaryCount; ++i)
+            if (std::abs(ImGui::GetIO().MousePos.x - position(boundaries[i])) <
+                std::abs(ImGui::GetIO().MousePos.x - position(boundaries[nearest]))) nearest = i;
+        storage->SetInt(selectionId, nearest);
+    }
+    bool changed = false;
+    if (boundaryCount > 0 && active && ImGui::IsMouseDown(ImGuiMouseButton_Left))
+    {
+        const int selected = std::clamp(storage->GetInt(selectionId), 0, boundaryCount - 1);
+        const float distance = (ImGui::GetIO().MousePos.x - origin.x - inset) / trackWidth * maximum;
+        const float value = std::clamp(distance,
+            selected ? boundaries[selected - 1] : 0.f,
+            selected + 1 < boundaryCount ? boundaries[selected + 1] : maximum);
+        changed = boundaries[selected] != value;
+        boundaries[selected] = value;
+    }
+    auto* draw = ImGui::GetWindowDrawList();
+    const ImU32 colors[] = {IM_COL32(65, 143, 100, 255),
+        IM_COL32(65, 119, 174, 255), IM_COL32(143, 105, 165, 255), IM_COL32(168, 128, 64, 255)};
+    for (int i = 0; i <= boundaryCount; ++i)
+    {
+        const float left = position(i ? boundaries[i - 1] : 0.f);
+        const float right = position(i < boundaryCount ? boundaries[i] : maximum);
+        draw->AddRectFilled(ImVec2(left, top), ImVec2(right, bottom), colors[i % 4]);
+        const ImVec2 size = ImGui::CalcTextSize(segmentLabels[i]);
+        draw->PushClipRect(ImVec2(left, top), ImVec2(right, bottom), true);
+        draw->AddText(ImVec2((left + right - size.x) * .5f, top + 6.f),
+            IM_COL32_WHITE, segmentLabels[i]);
+        draw->PopClipRect();
+    }
+    for (int i = 0; i < boundaryCount; ++i)
+    {
+        const float x = position(boundaries[i]);
+        draw->AddLine(ImVec2(x, top - 3.f), ImVec2(x, bottom + 3.f), IM_COL32_WHITE, 2.f);
+        draw->AddCircleFilled(ImVec2(x, bottom + 3.f), 4.f, IM_COL32_WHITE);
+    }
+    draw->AddText(ImVec2(origin.x + inset, origin.y), ImGui::GetColorU32(ImGuiCol_Text), "0 m");
+    char endLabel[48];
+    std::snprintf(endLabel, sizeof(endLabel), "%.1f m", maximum);
+    draw->AddText(ImVec2(origin.x + width - inset - ImGui::CalcTextSize(endLabel).x, origin.y),
+        ImGui::GetColorU32(ImGuiCol_Text), endLabel);
+    if (hovered || active)
+    {
+        ImGui::BeginTooltip();
+        ImGui::TextUnformatted("Drag a boundary to change where the next LOD starts.");
+        for (int i = 0; i < boundaryCount; ++i)
+            ImGui::Text("%s starts: %.2f m", segmentLabels[i + 1], boundaries[i]);
+        ImGui::EndTooltip();
+    }
+    // Numeric fields also support precise values and keyboard editing.
+    if (boundaryCount > 0 && ImGui::TreeNode("Exact LOD distances"))
+    {
+        for (int i = 0; i < boundaryCount; ++i)
+        {
+            ImGui::PushID(i);
+            const std::string field = std::string(segmentLabels[i + 1]) + " starts (m)";
+            changed |= InspectorField(field.c_str(), [&](const char* id) {
+                return ImGui::DragFloat(id, &boundaries[i], .1f,
+                    i ? boundaries[i - 1] : 0.f,
+                    i + 1 < boundaryCount ? boundaries[i + 1] : maximum, "%.2f");
+            });
+            boundaries[i] = std::clamp(boundaries[i], i ? boundaries[i - 1] : 0.f,
+                i + 1 < boundaryCount ? boundaries[i + 1] : maximum);
+            ImGui::PopID();
+        }
+        ImGui::TreePop();
+    }
+    ImGui::PopID();
+    return changed;
+}
+
 bool ImGuiEditorUi::InputUInt(const char*l,uint32_t*v){return InspectorField(l,[&](const char* id){return ImGui::InputScalar(id,ImGuiDataType_U32,v);});}
 void ImGuiEditorUi::ValueLabel(const char*l,const char*v){const char* value=ConsumeMixedValue()?"-":v;InspectorField(l,[&](const char* id){ImGui::LabelText(id,"%s",value);return false;});}
 bool ImGuiEditorUi::CollapsingHeader(const char*l,bool d){return ImGui::CollapsingHeader(l,d?ImGuiTreeNodeFlags_DefaultOpen:0);}

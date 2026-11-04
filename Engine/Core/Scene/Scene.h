@@ -1,6 +1,7 @@
 #pragma once
 #include "Core/Rendering/RenderBoundsCache.h"
 #include "Core/Rendering/DrawBatchPreparation.h"
+#include "Core/Rendering/ShaderSourceCache.h"
 #include "Core/Compoonents/TransformHierarchy.h"
 #include "Core/Scene/ComponentRegistry.h"
 #include "Core/Rendering/PersistentInstanceBatches.h"
@@ -827,8 +828,10 @@ private:
     std::unordered_map<std::string, MaterialShaderFuture> m_materialShaderBytecode;
     MaterialShaderFuture QueueMaterialShaderBytecode(const std::string& path,
         bool terrain, int64_t stamp);
-    // One source lookup per authored material location/path/variant each frame.
-    // Reset every preparation to retain hot reload and direct script edits.
+    Engine::Rendering::ShaderSourceCache m_materialShaderSources;
+    const Engine::Rendering::ShaderSourceCache::Source& ResolveMaterialShaderSource(
+        const Engine::Components::Material& material, const std::string& path);
+    // Deduplicate prewarm requests per frame; source resolution survives frames.
     std::set<std::tuple<std::string, std::string, bool>> m_preparedMaterialShaderSources;
     void PrewarmMaterialShaders(const Engine::Components::Material& material,
         bool terrain);
@@ -845,7 +848,7 @@ private:
     std::unordered_map<std::string, MaterialShaderPipeline> m_materialShaderPipelines;
     // Preserve pipelines referenced by earlier queued frames after source edits.
     std::vector<std::unique_ptr<IPipelineState>> m_retiredMaterialShaderPipelines;
-    IPipelineState* ResolveMaterialShaderPipeline(const std::string& path,
+    IPipelineState* ResolveMaterialShaderPipeline(const Engine::Rendering::ShaderSourceCache::Source& source,
         IPipelineState* base, bool terrain, bool overlay,
         const std::string& blendMode, std::string& error);
     void PublishMaterialShaderPipelines(size_t maxPipelines = 2);

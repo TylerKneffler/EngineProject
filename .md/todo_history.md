@@ -397,9 +397,6 @@ Earlier baseline (Release DX11, 960×540, this machine, dirt/grass textures, bef
 - [x] Add opt-in DX11 native-call timing by camera/shadow pass, including call counts, wall-time maxima, thread cycles, recording fields, and capture evaluation.
 - [x] Compare GPU stage changes only for captures with matching renderer, benchmark route, view size, and shadow settings; label unverified comparisons.
 - [x] Split grass GPU timing from ordinary opaque draws across all renderers, recordings, the Performance view, and the capture evaluator.
-
-## Static instance storage and streaming performance
-
 - [x] Add generic persistent GPU instance pools for saved terrain-layer and prefab placements.
 - [x] Keep object and instance IDs stable across visibility, sorting, LOD, and streaming changes; key batch caches by render compatibility instead of submission order.
 - [x] Compact visible instance IDs and indirect LOD draw arguments on the GPU for camera and shadow passes without rebuilding placement transforms.
@@ -411,9 +408,6 @@ Earlier baseline (Release DX11, 960×540, this machine, dirt/grass textures, bef
 - [x] Maintain active physics work lists and synchronize static colliders only when changed; skip suspended terrain bodies during routine setup and post-step work.
 - [x] Record instance-cache miss reasons, buffer allocations, and placement upload bytes by cause and camera/shadow pass.
 - [x] Add matched-route movement and streaming benchmarks for upload spikes, frame-time percentiles, and CPU/GPU costs at fixed viewport and quality settings.
-
-## Main-thread performance
-
 - [x] Break down retained UI, portal/overlay work, worker execution, synchronization waits, and record packing in recordings and the Performance view.
 - [x] Centralize grass updates with viewer queries over cached terrain-field bounds and retire fields leaving the active region.
 - [x] Prepare visibility, fallback LOD classifications, and copied material/object records on workers.
@@ -421,9 +415,6 @@ Earlier baseline (Release DX11, 960×540, this machine, dirt/grass textures, bef
 - [x] Add GPU grass visibility, LOD classification, complementary fades, and indirect camera/shadow draws across DX11, DX12, and Vulkan.
 - [x] Buffer immutable render records and overlap worker packing with graphics setup and GPU culling; keep scene mutation and graphics calls on their owning thread.
 - [x] Validate editor frame time, percentiles, main-thread usage, worker utilization, and GPU timings with a warmed full-editor capture.
-
-## Landscape performance
-
 - [x] Add a fresh-process foliage landscape baseline runner with fixed and moving DX11 routes and separate foliage-off, grass-shadows-off, and full-foliage cases. At 790 x 589 Release, the moving route measured 9.08, 9.99, and 19.37 ms mean intervals respectively over 240 frames per case; a second shadow pair confirmed the shadow cost with run-to-run variation. The 1920 x 1080 foliage-off case measured 33.21 ms and repeated at 33.69 ms. These render-helper captures exclude editor UI and physics; see `.md/foliage-landscape-baseline-20261103.md` for percentiles, GPU stages, and limits.
 - [x] Batch compatible grass tiles by species, LOD, material, and render state in camera and shadow passes.
 - [x] Cull shadow casters against cascade receiver silhouettes while preserving off-screen shadows and cascade fades.
@@ -434,9 +425,6 @@ Earlier baseline (Release DX11, 960×540, this machine, dirt/grass textures, bef
 - [x] Prepare large instance batches, cascade visibility, and fallback LOD classifications with worker jobs.
 - [x] Record shadow submission wall time, active thread cycles, and slowest batches.
 - [x] Compare empty, terrain-only, grass without shadows, and full grass with a fixed route, viewport, build, and quality.
-
-## Engine rendering and update performance
-
 - [x] Automatically instance compatible repeated meshes and prefab mesh components in camera and shadow passes.
 - [x] Share immutable GPU mesh buffers across duplicate asset, generated terrain, and prefab usage.
 - [x] Cache material and render preparation shared across draws, views, and shadow cascades.
@@ -449,20 +437,14 @@ Earlier baseline (Release DX11, 960×540, this machine, dirt/grass textures, bef
 - [x] Preserve frame-safe render records and clipping for multiple batched camera views.
 - [x] Expose current batching, upload, grass fade, shadow workload, frame-percentile, and process/thread CPU measurements in the Performance view and recordings.
 - [x] Add a repeatable capture evaluator with GPU sample deduplication and measurement-scope checks.
-
-## Grass performance
-
 - [x] Replace CPU-expanded grass tiles with GPU instances of shared species/LOD meshes.
 - [x] Share compact species placement buffers across each tile's LODs; avoid uploads when changing LOD.
 - [x] Apply a scene-wide grass preparation/upload budget and retain nearby tiles beyond the visibility radius.
 - [x] Record visible grass instance counts, placement upload bytes, and shared GPU memory without double counting.
 - [x] Share grass species geometry across terrain cells to avoid repeated source loading.
 - [x] Prevent flat terrain triangle edges from kicking the player capsule upward.
-
 - [x] Keep terrain collision active only under the player and nearby edges/corners, with at most four active cells per landscape.
-
 - [x] Move runtime LOD caching, hysteresis, buffer switching, and memory accounting into each object's Mesh component.
-
 - [x] Reduce CPU overhead in DX11 shadow draw submission.
 - [x] Cache grass placement data by tile and remove repeated full-placement scans and hashing.
 - [x] Switch resident grass LODs without rebuilding or uploading geometry.
@@ -470,12 +452,6 @@ Earlier baseline (Release DX11, 960×540, this machine, dirt/grass textures, bef
 - [x] Record grass scanning, tile generation, upload time, pending work, and rebuild counts in Performance recordings.
 - [x] Preserve accurate shadow draw counts after the main render pass.
 - [x] Reduce Play/Stop scene transition stalls by excluding generated grass geometry and retiring legacy preview objects.
-
-
-## Additional main-thread work from the code audit
-
-Open work is ordered by engine-wide impact and prerequisites; completed items follow.
-
 - [x] Extend thread accounting to UI, simulation, rendering, workers, and writer queues; separate recurring frame work from import/save/bake/startup hitches in recordings and benchmarks.
 - [x] Move scene/prefab file reads, parsing, snapshot encoding, save writes, and undo-history comparisons onto workers from versioned snapshots; commit live scene changes on the simulation owner and retain edit revision ordering.
 - [x] Compile and cache shader bytecode and decode textures on workers; prewarm required variants and queue graphics resource/pipeline publication without blocking render preparation on first use.
@@ -490,3 +466,25 @@ Open work is ordered by engine-wide impact and prerequisites; completed items fo
 - [x] Replace edit-preview whole-scene scans with typed particle-emitter and animation registries.
 - [x] Cache asset-browser directory listings, file metadata, and filtered/sorted search results on workers, refreshed through filesystem notifications with a polling fallback.
 - [x] Prepare visible asset thumbnails asynchronously with bounded jobs, private decoding, stale-result cancellation, and graphics-owner publication.
+- [x] Fit directional shadow cascades in camera-local space with double-precision projection rays and exact slice depths. Keep radius and world texel-grid phase stable under fixed-position yaw/pitch and translation; record cascade radii.
+- [x] Fix camera-sorted shadow record uploads to cover the highest changed persistent slot. Add DX11 GPU readback checks for moving/rotating cameras, one/four cascades and ordinary/native packets; record shadow enable, cascade and atlas state for future captures.
+- [x] Add real shadow-receiver fade coverage and repeated-frame pixel checks for ordinary/native-recorded rendering on DX11/DX12/Vulkan. Fix the small fixture's receiver normals and depth bias so it measures visible shadows.
+- [x] Restore DX12 standalone game color/depth targets, viewport and scissor after depth-only shadow passes.
+- [x] Replace grass tile shadow-distance toggles with GPU distance fading and per-instance shadow-range culling while retaining resident placement buffers. Reusable meshes expose transient caster range/fade settings; color-pass visibility stays independent.
+- [x] Add timings within render-item preparation for material/shader preparation, mesh state, bounds, LOD metadata, and draw-item construction. Baseline: 9.87 ms foliage-only versus 0.14 ms terrain-only at 1920 x 1080 in Debug DX11.
+- [x] Cache prepared rigid instanced render records, including foliage. Invalidate on geometry, placement, or transform edits; refresh material state, fades, and GPU LOD parameters on reuse. Preserve full preparation for CPU LOD transitions, deformation, previews, and portal/warp paths.
+- [x] Read prepared transform revisions during the stable render phase so cached records avoid repeated parent-chain validation.
+- [x] Share shader source resolution and file checks across materials using the same authored path and terrain/mesh variant each frame; retain per-frame hot reload and direct script edits.
+- [x] Cache normalized material validation inputs and resident texture preparation by texture/provider state. Detect direct script edits, pending uploads, invalidation, replacement, and provider changes without relying solely on revision notifications.
+- [x] Reuse resident foliage placement buffers with GPU instance visibility, LOD selection and indirect counts. Register each source once per view, cache camera-independent tile records, and reuse them across LODs and shadow cascades; keep coarse CPU tile rejection and explicit CPU fallback paths.
+- [x] Build changed instance placement and tile render records from immutable snapshots, with worker-local output for large batches and owner-side publication/upload. Preserve retained-reader lifetimes and skip worker scheduling for unchanged data and small edits.
+- [x] Isolate remaining ordinary material/object record assembly from mutable material, probe and graphics-resource caches before expanding worker preparation beyond the instance record paths.
+- [x] Reduce average foliage render-item preparation below 2 ms and validate 100+ FPS in the stationary full editor/gameplay loop at 1920 x 1080 with unchanged visual quality. Debug DX11 result: 0.68 ms item preparation, 162.0 FPS, frame P95 7.12 ms.
+- [x] Record UI construction by panel in the Performance view, recordings and evaluation reports, including panel totals and remaining editor UI work.
+- [x] Skip clipped percentage-grid, history-graph and asset-thumbnail drawing while preserving layout and interaction geometry.
+- [x] Partition command recording into compute, scene snapshot/resource retention, view recording and remaining bookkeeping; expose the breakdown in Performance view, recordings and evaluation reports.
+- [x] Cache directional-only clustered-light grids per GPU frame-slot buffer and layout. Skip recurring grid construction/uploads; invalidate on local lights, layout changes and buffer replacement.
+- [x] Replace recurring shader-source resolution/checks with change-driven invalidation while retaining hot reload, direct path edits and missing-file recovery (latest preparation cost: 0.33 ms).
+- [x] Partition command recording into compute, scene snapshot/resource retention, view recording and remaining bookkeeping; expose the breakdown in Performance view, recordings and evaluation reports.
+- [x] Cache directional-only clustered-light grids per GPU frame-slot buffer and layout. Skip recurring grid construction/uploads; invalidate on local lights, layout changes and buffer replacement.
+- [x] Replace recurring shader-source resolution/checks with change-driven invalidation while retaining hot reload, direct path edits and missing-file recovery (latest preparation cost: 0.33 ms).

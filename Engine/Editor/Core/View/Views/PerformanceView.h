@@ -104,7 +104,9 @@ private:
     PerformanceHardware m_pendingHardware;
     PerformanceSnapshot m_snapshot;
     PerformanceHardware m_hardware;
-    FrameRateWindow m_editorFrameRate;
+    FrameRateWindow m_editorFrameRate, m_submissionRate;
+    bool m_submissionRateValid = false;
+    double m_mainCpuMs=0, m_workerCpuMs=0, m_mainNonRunningMs=0, m_idleWaitMs=0, m_pacingMs=0;
     float m_lastUiFrameRate=0;
     float m_displayFrameRate = 0.f;
     double m_lastPanelDrawMs = 0.0;

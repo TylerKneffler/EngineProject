@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "baseColor": [
+    0.83,
+    0.75,
+    0.62
+  ],
+  "metallic": 0,
+  "roughness": 1,
+  "useVertexColors": true,
+  "baseColorTexture": "Assets/Textures/Terrain/warm_dirt.png",
+  "castsShadows": true
+}

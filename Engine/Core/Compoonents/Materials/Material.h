@@ -4,6 +4,7 @@
 #include <glm/glm.hpp>
 #include <memory>
 #include <array>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -40,6 +41,8 @@ public:
     PROPERTY(Inspector, EditAnywhere, Category = "Material | Shaders")
     std::vector<MaterialShader> shaders;
     std::string ResolveShaderPath(const std::string& path) const;
+    // Ordered candidates, including absent higher-priority locations for watching.
+    std::vector<std::filesystem::path> ShaderSearchPaths(const std::string& path) const;
     bool DrawShaderProperties(::Engine::Editor::IEditorUi& ui,
         const void* context = nullptr);
     // Runtime diagnostic displayed by the inspector; never serialized.

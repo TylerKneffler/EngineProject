@@ -10,6 +10,13 @@
 
 namespace Engine::Components
 {
+// Implemented by terrain object renderers so the inspector uses their authored LODs.
+class TerrainObjectLodProvider
+{
+public:
+    virtual ~TerrainObjectLodProvider() = default;
+    virtual std::map<std::string, std::vector<std::string>> GetTerrainObjectLodMeshes() const = 0;
+};
 // Place on a direct child of a Terrain cell. Positions are cell-local; the
 // owning TerrainManager saves this data when it streams the cell out.
 class TerrainObjectLayer final : public Engine::Core::Component
@@ -36,6 +43,17 @@ public:
     float lodHysteresis = .75f;
     float shadowDistance = 8.f;
     std::vector<Placement> placements;
+    static constexpr size_t MaximumObjectLods = 16;
+    struct ObjectLods
+    {
+        // Empty inherits the renderer's object definition; editing distances does not copy it.
+        std::vector<std::string> meshes;
+        std::vector<float> distances;
+    };
+    // Keyed by the placement's base asset. Resolved N-level chains use N-1 distances.
+    std::map<std::string, ObjectLods> objectLods;
+    std::map<std::string, std::vector<std::string>> GetDefinedObjectLods() const;
+    std::vector<float> GetObjectLodDistances(const std::string& asset, size_t lodCount) const;
 
     struct PreparedPlacement { uint32_t index=0; Mesh::InstanceTransform transform{}; };
     struct PreparedTile

@@ -27,7 +27,10 @@ namespace Engine::Editor
         using TimePoint = std::chrono::steady_clock::time_point;
         TimePoint frameBegin, afterPacing, afterBackground, afterSceneUpdate;
         TimePoint afterRender, afterPendingLoad;
-        float deltaSeconds = 0.f;
+        float deltaSeconds = 0.f; // Simulation delta; may reset on play transitions.
+        double updateIntervalMs = 0, submissionIntervalMs = 0, idleWaitMs = 0;
+        uint64_t submittedFrames = 0;
+        bool submissionCountValid = false;
         bool playing = false;
         bool measured = true;
         bool playPipeline = false;

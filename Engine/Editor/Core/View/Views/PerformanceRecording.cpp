@@ -180,17 +180,21 @@ void PerformanceRecording::FrameDetails(Engine::Threading::CapturedText fields)
 }
 
 void PerformanceRecording::Frame(float reportedFrameRate, double elapsedMs,
-    double panelDrawMs)
+    double panelDrawMs, double submittedFramesPerSecond)
 {
     std::lock_guard lock(m_mutex);
     const auto time=std::chrono::system_clock::now();
-    m_writer.Enqueue([reportedFrameRate,elapsedMs,panelDrawMs,time] {
+    m_writer.Enqueue([reportedFrameRate,elapsedMs,panelDrawMs,submittedFramesPerSecond,time] {
         std::ostringstream output; output.imbue(std::locale::classic());
         output << "{\"type\":\"frame\",\"time_utc\":\"" << Timestamp(time)
             << "\",\"fps\":" << std::fixed << std::setprecision(3)
             << (elapsedMs>0 ? 1000./elapsedMs:0.) << ",\"frame_ms\":" << elapsedMs
-            << ",\"ui_fps\":" << reportedFrameRate << ",\"fps_scope\":\"editor_frame_interval\""
-            << ",\"panel_draw_ms\":" << panelDrawMs << "}";
+            << ",\"ui_fps\":" << reportedFrameRate << ",\"fps_scope\":\"editor_update_interval\""
+            << ",\"editor_updates_per_second\":" << (elapsedMs>0 ? 1000./elapsedMs:0.)
+            << ",\"submitted_frames_per_second\":";
+        if(submittedFramesPerSecond>=0) output << submittedFramesPerSecond;
+        else output << "null";
+        output << ",\"panel_draw_ms\":" << panelDrawMs << "}";
         return output.str();
     },256);
 }
