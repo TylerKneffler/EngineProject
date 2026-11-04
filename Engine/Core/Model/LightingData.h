@@ -39,8 +39,10 @@ namespace Engine::Model
         uint32_t maximumShadowedLights = 1;
         uint32_t directionalResolution = 2048;
         uint32_t directionalCascadeCount = 4;
+        uint32_t directionalCascadeCasterBudget = 0;
         float directionalDistance = 150.f;
         float grassCasterDistance = 150.f;
+        float foliageCasterDistance = 150.f;
         uint32_t pcfRadius = 1;
         float cascadeSplitLambda = 0.65f;
         float cascadeTransitionFraction = 0.1f;
@@ -66,38 +68,54 @@ namespace Engine::Model
         switch (quality)
         {
         case ShadowQualityPreset::Off:
-            settings.directionalResolution = 512;
+            settings.directionalResolution = 256;
             settings.directionalCascadeCount = 1;
-            settings.directionalDistance = 64.f;
-            settings.grassCasterDistance = 6.f;
+            settings.directionalCascadeCasterBudget = 64;
+            settings.directionalDistance = 32.f;
+            settings.grassCasterDistance = 4.f;
+            settings.foliageCasterDistance = 12.f;
             settings.pcfRadius = 0;
+            settings.portalAtlasResolution = 512;
+            settings.portalCascadeCount = 1;
+            settings.portalViewBudget = 1;
             break;
         case ShadowQualityPreset::Low:
-            settings.directionalResolution = 512;
+            settings.directionalResolution = 256;
             settings.directionalCascadeCount = 1;
-            settings.directionalDistance = 64.f;
-            settings.grassCasterDistance = 6.f;
+            settings.directionalCascadeCasterBudget = 96;
+            settings.directionalDistance = 40.f;
+            settings.grassCasterDistance = 4.f;
+            settings.foliageCasterDistance = 16.f;
             settings.pcfRadius = 0;
+            settings.portalAtlasResolution = 512;
+            settings.portalCascadeCount = 1;
+            settings.portalViewBudget = 1;
             break;
         case ShadowQualityPreset::Medium:
-            settings.directionalResolution = 1024;
+            settings.directionalResolution = 768;
             settings.directionalCascadeCount = 2;
-            settings.directionalDistance = 100.f;
-            settings.grassCasterDistance = 10.f;
+            settings.directionalCascadeCasterBudget = 160;
+            settings.directionalDistance = 72.f;
+            settings.grassCasterDistance = 8.f;
+            settings.foliageCasterDistance = 28.f;
             settings.pcfRadius = 1;
             break;
         case ShadowQualityPreset::High:
             settings.directionalResolution = 2048;
             settings.directionalCascadeCount = 4;
+            settings.directionalCascadeCasterBudget = 0;
             settings.directionalDistance = 150.f;
             settings.grassCasterDistance = 16.f;
+            settings.foliageCasterDistance = 56.f;
             settings.pcfRadius = 1;
             break;
         case ShadowQualityPreset::Ultra:
             settings.directionalResolution = 4096;
             settings.directionalCascadeCount = 4;
+            settings.directionalCascadeCasterBudget = 0;
             settings.directionalDistance = 250.f;
             settings.grassCasterDistance = 24.f;
+            settings.foliageCasterDistance = 96.f;
             settings.pcfRadius = 2;
             settings.portalPolicy = PortalShadowPolicy::Budgeted;
             settings.portalAtlasResolution = 2048;
@@ -117,11 +135,13 @@ namespace Engine::Model
         uint32_t maxRealtimeLights = MaxRealtimeLights;
         bool normalMapping = true;
         bool parallaxMapping = true;
+        bool subsurfaceScattering = true;
         bool environmentDiffuse = true;
         bool reflections = true;
         bool realtimeShadows = true;
         float shadowDistanceScale = 1.f;
         uint32_t maximumShadowPcfRadius = 4;
+        float minimumProjectedPixels = 0.f;
     };
 
     struct DistanceLightingSettings
@@ -135,11 +155,11 @@ namespace Engine::Model
         uint32_t maximumLightsPerCluster = 32;
         std::vector<DistanceLightingBand> bands = {
             { "High", 250.f, MaxRealtimeLights, true, true, true, true,
-                true, 1.f, 4u },
-            { "Medium", 600.f, 8u, true, false, true, false,
-                true, 0.65f, 1u },
-            { "Low", 1000.f, 2u, false, false, false, false,
-                false, 0.f, 0u }
+                true, true, 1.f, 4u, 0.f },
+            { "Medium", 600.f, 8u, true, false, false, true, false,
+                true, 0.65f, 1u, 1.f },
+            { "Low", 1000.f, 2u, false, false, false, false, false,
+                false, 0.f, 0u, 2.f }
         };
     };
 

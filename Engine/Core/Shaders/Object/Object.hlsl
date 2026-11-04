@@ -702,22 +702,56 @@ float SampleDirectionalShadowCascade(ObjectData objectData,
         return lerp(lerp(s00, s10, texelFraction.x),
             lerp(s01, s11, texelFraction.x), texelFraction.y);
     }
+    float receiverDepth = projected.z - objectData.shadowParams.x;
     float litSamples = 0.0;
-    [loop] for (int y = -4; y <= 5; ++y)
-    [loop] for (int x = -4; x <= 5; ++x)
+    [branch] if (radius == 1)
     {
-        if (x < -radius || x > radius + 1 ||
-            y < -radius || y > radius + 1)
-            continue;
-        float weightX = x == -radius ? 1.0 - texelFraction.x :
-            (x == radius + 1 ? texelFraction.x : 1.0);
-        float weightY = y == -radius ? 1.0 - texelFraction.y :
-            (y == radius + 1 ? texelFraction.y : 1.0);
+        [unroll] for (int y = -1; y <= 2; ++y)
+        [unroll] for (int x = -1; x <= 2; ++x)
+        {
+            float weightX = x == -1 ? 1.0 - texelFraction.x :
+                (x == 2 ? texelFraction.x : 1.0);
+            float weightY = y == -1 ? 1.0 - texelFraction.y :
+                (y == 2 ? texelFraction.y : 1.0);
+            int2 coordinate = clamp(center + int2(x, y),
+                tileOrigin, tileMaximum);
+            float storedDepth = shadowMap.Load(int3(coordinate, 0));
+            litSamples += (receiverDepth <= storedDepth ? 1.0 : 0.0) *
+                weightX * weightY;
+        }
+        return litSamples / 9.0;
+    }
+    [branch] if (radius == 2)
+    {
+        [unroll] for (int y = -2; y <= 3; ++y)
+        [unroll] for (int x = -2; x <= 3; ++x)
+        {
+            float weightX = x == -2 ? 1.0 - texelFraction.x :
+                (x == 3 ? texelFraction.x : 1.0);
+            float weightY = y == -2 ? 1.0 - texelFraction.y :
+                (y == 3 ? texelFraction.y : 1.0);
+            int2 coordinate = clamp(center + int2(x, y),
+                tileOrigin, tileMaximum);
+            float storedDepth = shadowMap.Load(int3(coordinate, 0));
+            litSamples += (receiverDepth <= storedDepth ? 1.0 : 0.0) *
+                weightX * weightY;
+        }
+        return litSamples / 25.0;
+    }
+    const int minimumOffset = -radius;
+    const int maximumOffset = radius + 1;
+    [loop] for (int y = minimumOffset; y <= maximumOffset; ++y)
+    [loop] for (int x = minimumOffset; x <= maximumOffset; ++x)
+    {
+        float weightX = x == minimumOffset ? 1.0 - texelFraction.x :
+            (x == maximumOffset ? texelFraction.x : 1.0);
+        float weightY = y == minimumOffset ? 1.0 - texelFraction.y :
+            (y == maximumOffset ? texelFraction.y : 1.0);
         int2 coordinate = clamp(center + int2(x, y),
             tileOrigin, tileMaximum);
         float storedDepth = shadowMap.Load(int3(coordinate, 0));
-        litSamples += (projected.z - objectData.shadowParams.x <= storedDepth
-            ? 1.0 : 0.0) * weightX * weightY;
+        litSamples += (receiverDepth <= storedDepth ? 1.0 : 0.0) *
+            weightX * weightY;
     }
     float diameter = 2.0 * radius + 1.0;
     return litSamples / (diameter * diameter);

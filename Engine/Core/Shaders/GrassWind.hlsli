@@ -4,9 +4,9 @@
 static const float GrassWindStrength = 1.0;
 static const float GrassWindMaximumBendDegrees = 85.0;
 static const float GrassWindRootStiffnessHeight = 0.18; // metres
-static const float GrassWindSpeed = 2;
+static const float GrassWindSpeed = 1.35;
 static const float GrassWindDirectionDegrees = 35.0;
-static const float GrassWindWaveSize = 32.0; // metres; broad, slowly passing fronts
+static const float GrassWindWaveSize = 18.0; // metres; smaller cells increase local variation
 static const uint GrassWindSeed = 18731u;
 uint GrassWindHash(int2 cell, uint seed)
 {
@@ -58,12 +58,15 @@ void ApplyGrassWind(float sceneTime, float strength,
     float2 coordinate = float2(dot(traveling, wind.xy), dot(traveling, side) * .25)
         * max(noiseScale, .0001);
     float broad = GrassWindPerlin(coordinate, seed);
-    float detail = GrassWindPerlin(coordinate * 1.35 + float2(17.2, 3.7 + wind.w * .025),
+    int2 variationCell = int2(floor(root.xz * .45));
+    float variation = (float)(GrassWindHash(variationCell, seed ^ 0x3c6ef372u) & 1023u) / 1023.0;
+    float2 phaseOffset = float2(cos(variation * 6.2831853), sin(variation * 6.2831853)) * .9;
+    float detail = GrassWindPerlin(coordinate * 1.9 + phaseOffset + float2(17.2, 3.7 + wind.w * .018),
         seed ^ 0x9e3779b9u);
     // Signed, zero-centered gusts let each passing wave lean the grass both
     // ways and return through upright, instead of imposing a permanent lean.
-    float gust = clamp(2.4 * (broad * .90 + detail * .10), -1.0, 1.0);
-    float crossSway = .35 * detail;
+    float gust = clamp(2.1 * (broad * .68 + detail * .32), -1.0, 1.0);
+    float crossSway = .5 * detail;
     float2 heading = wind.xy + side * crossSway;
     float3 bendDirection = float3(heading.x, 0.0, heading.y);
     bendDirection -= up * dot(bendDirection, up);

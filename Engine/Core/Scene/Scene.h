@@ -855,6 +855,26 @@ private:
     std::shared_ptr<Engine::Graphics::IGraphicsTexture> m_directionalShadowMap;
     uint32_t m_directionalShadowResolution = 0;
     uint64_t m_directionalShadowAllocationGeneration = 0;
+    bool m_directionalShadowCacheValid = false;
+    uint64_t m_directionalShadowFrameCounter = 0;
+    uint64_t m_directionalShadowLastRenderedFrame = 0;
+    uint32_t m_directionalShadowCachedResolution = 0;
+    uint32_t m_directionalShadowCachedCascadeCount = 1;
+    std::string m_directionalShadowCachedLightKey;
+    glm::vec3 m_directionalShadowCachedCameraPosition { 0.f };
+    glm::vec3 m_directionalShadowCachedDirection { 0.f, 1.f, 0.f };
+    std::array<glm::mat4, 4> m_directionalShadowCachedViewProjections{
+        glm::mat4(1.f), glm::mat4(1.f), glm::mat4(1.f), glm::mat4(1.f) };
+    std::array<glm::vec3, 4> m_directionalShadowCachedCascadeCenters{
+        glm::vec3(0.f), glm::vec3(0.f), glm::vec3(0.f), glm::vec3(0.f) };
+    std::array<float, 4> m_directionalShadowCachedCascadeRadii{
+        0.f, 0.f, 0.f, 0.f };
+    glm::vec4 m_directionalShadowCachedCascadeSplits { 0.f };
+    glm::vec4 m_directionalShadowCachedCascadeData { 0.f };
+    glm::vec4 m_directionalShadowCachedCameraData { 0.f };
+    std::array<uint64_t, 4> m_directionalShadowCascadeLastRenderedFrame{
+        0u, 0u, 0u, 0u };
+    uint32_t m_directionalShadowRefreshCursor = 0;
     struct PortalShadowCacheEntry
     {
         uint64_t key = 0;

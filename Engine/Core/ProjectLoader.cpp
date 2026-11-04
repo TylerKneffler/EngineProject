@@ -278,11 +278,16 @@ void ProjectLoader::ParseRendering(const pugi::xml_node& projectNode, ProjectSet
             settings.realtimeShadows.directionalCascadeCount = std::clamp<uint32_t>(
                 realtimeShadows.attribute("DirectionalCascades").as_uint(4u),
                 1u, 4u);
+            settings.realtimeShadows.directionalCascadeCasterBudget =
+                realtimeShadows.attribute("DirectionalCascadeCasterBudget")
+                    .as_uint(0u);
             settings.realtimeShadows.directionalDistance = std::clamp(
                 realtimeShadows.attribute("DirectionalDistance").as_float(150.f),
                 1.f, 100000.f);
             settings.realtimeShadows.grassCasterDistance = std::clamp(
                 realtimeShadows.attribute("GrassCasterDistance").as_float(150.f),0.f,100000.f);
+            settings.realtimeShadows.foliageCasterDistance = std::clamp(
+                realtimeShadows.attribute("FoliageCasterDistance").as_float(150.f),0.f,100000.f);
             settings.realtimeShadows.pcfRadius = std::min<uint32_t>(
                 realtimeShadows.attribute("PcfRadius").as_uint(1u), 4u);
             settings.realtimeShadows.cascadeSplitLambda = std::clamp(
@@ -346,6 +351,8 @@ void ProjectLoader::ParseRendering(const pugi::xml_node& projectNode, ProjectSet
                     bandNode.attribute("NormalMapping").as_bool(true);
                 band.parallaxMapping =
                     bandNode.attribute("ParallaxMapping").as_bool(true);
+                band.subsurfaceScattering =
+                    bandNode.attribute("SubsurfaceScattering").as_bool(true);
                 band.environmentDiffuse =
                     bandNode.attribute("EnvironmentDiffuse").as_bool(true);
                 band.reflections =
@@ -358,6 +365,9 @@ void ProjectLoader::ParseRendering(const pugi::xml_node& projectNode, ProjectSet
                 band.maximumShadowPcfRadius = std::min<uint32_t>(
                     bandNode.attribute("MaximumShadowPcfRadius").as_uint(4u),
                     4u);
+                band.minimumProjectedPixels = std::clamp(
+                    bandNode.attribute("MinimumProjectedPixels").as_float(0.f),
+                    0.f, 64.f);
                 previousEnd = band.endDistance;
                 bands.push_back(std::move(band));
             }

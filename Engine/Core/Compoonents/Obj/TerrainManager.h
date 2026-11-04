@@ -57,6 +57,9 @@ public:
     // Zero follows the camera clip distance.
     float maxFarViewDistanceMeters = 0.f;
     float farTileLodHysteresis = .2f;
+    bool farVegetationImpostors = true;
+    float farVegetationClusterSpanMeters = 24.f;
+    int farVegetationImpostorBudgetPerTile = 96;
     bool batchFarCells = true;
     // Optional fast directional diffuse shading for static play-mode terrain.
     bool fastRuntimeLighting = false;

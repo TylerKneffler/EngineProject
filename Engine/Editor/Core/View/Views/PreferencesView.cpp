@@ -1122,8 +1122,12 @@ void PreferencesView::DrawRenderingSection(IEditorUi& ui)
         }
         if (ui.Checkbox("Normal Mapping", &band.normalMapping)) NotifyChanged();
         if (ui.Checkbox("Parallax Mapping", &band.parallaxMapping)) NotifyChanged();
+        if (ui.Checkbox("Subsurface Scattering",
+                &band.subsurfaceScattering)) NotifyChanged();
         if (ui.Checkbox("Environment Diffuse", &band.environmentDiffuse)) NotifyChanged();
         if (ui.Checkbox("Reflections", &band.reflections)) NotifyChanged();
+        if (ui.SliderFloat("Minimum Projected Size (pixels)",
+                &band.minimumProjectedPixels, 0.f, 8.f)) NotifyChanged();
         if (ui.Checkbox("Realtime Shadows", &band.realtimeShadows)) NotifyChanged();
         if (band.realtimeShadows)
         {
@@ -1232,12 +1236,19 @@ void PreferencesView::DrawRenderingSection(IEditorUi& ui)
             shadows.directionalCascadeCount, 1u, 4u);
         shadowEdited();
     }
+    if (ui.InputUInt("Directional Cascade Caster Budget",
+        &shadows.directionalCascadeCasterBudget))
+        shadowEdited();
+    ui.Tooltip("Maximum shadow casters per cascade. Zero is unlimited.");
     if (ui.DragFloat("Directional Shadow Distance",
             &shadows.directionalDistance, 1.f, 1.f, 100000.f))
         shadowEdited();
     if (ui.DragFloat("Grass Shadow Caster Distance", &shadows.grassCasterDistance, .5f, 0.f, 100000.f))
         shadowEdited();
     ui.Tooltip("Additional distance limit for grass shadows. Each terrain layer may impose a shorter range.");
+    if (ui.DragFloat("Foliage Shadow Caster Distance", &shadows.foliageCasterDistance, .5f, 0.f, 100000.f))
+        shadowEdited();
+    ui.Tooltip("Additional distance limit for foliage/tree shadows. Zero disables foliage shadow casting.");
     if (ui.InputUInt("Shadow PCF Radius", &shadows.pcfRadius))
     {
         shadows.pcfRadius = std::min<uint32_t>(shadows.pcfRadius, 4u);
@@ -1468,10 +1479,16 @@ bool PreferencesView::SaveSettings()
                     m_settings.realtimeShadows.directionalResolution);
                 shadowNode.append_attribute("DirectionalCascades").set_value(
                     m_settings.realtimeShadows.directionalCascadeCount);
+                shadowNode.append_attribute(
+                    "DirectionalCascadeCasterBudget").set_value(
+                        m_settings.realtimeShadows
+                            .directionalCascadeCasterBudget);
                 shadowNode.append_attribute("DirectionalDistance").set_value(
                     m_settings.realtimeShadows.directionalDistance);
                 shadowNode.append_attribute("GrassCasterDistance").set_value(
                     m_settings.realtimeShadows.grassCasterDistance);
+                shadowNode.append_attribute("FoliageCasterDistance").set_value(
+                    m_settings.realtimeShadows.foliageCasterDistance);
                 shadowNode.append_attribute("PcfRadius").set_value(
                     m_settings.realtimeShadows.pcfRadius);
                 shadowNode.append_attribute("CascadeSplitLambda").set_value(
@@ -1519,6 +1536,8 @@ bool PreferencesView::SaveSettings()
                         band.normalMapping);
                     bandNode.append_attribute("ParallaxMapping").set_value(
                         band.parallaxMapping);
+                    bandNode.append_attribute("SubsurfaceScattering").set_value(
+                        band.subsurfaceScattering);
                     bandNode.append_attribute("EnvironmentDiffuse").set_value(
                         band.environmentDiffuse);
                     bandNode.append_attribute("Reflections").set_value(
@@ -1529,6 +1548,8 @@ bool PreferencesView::SaveSettings()
                         band.shadowDistanceScale);
                     bandNode.append_attribute("MaximumShadowPcfRadius").set_value(
                         band.maximumShadowPcfRadius);
+                    bandNode.append_attribute("MinimumProjectedPixels").set_value(
+                        band.minimumProjectedPixels);
                 }
             }
 

@@ -2273,6 +2273,11 @@ TerrainManager::JsonValue TerrainManager::Serialize() const
         .Set("farTileErrorPixelsLod16", JsonValue(farTileErrorPixelsLod16))
         .Set("maxFarViewDistanceMeters", JsonValue(maxFarViewDistanceMeters))
         .Set("farTileLodHysteresis", JsonValue(farTileLodHysteresis))
+        .Set("farVegetationImpostors", JsonValue(farVegetationImpostors))
+        .Set("farVegetationClusterSpanMeters",
+            JsonValue(farVegetationClusterSpanMeters))
+        .Set("farVegetationImpostorBudgetPerTile",
+            JsonValue(farVegetationImpostorBudgetPerTile))
         .Set("batchFarCells", JsonValue(batchFarCells))
         .Set("fastRuntimeLighting", JsonValue(fastRuntimeLighting))
         .Set("stochasticTerrainVariation", JsonValue(stochasticTerrainVariation))
@@ -2436,6 +2441,16 @@ void TerrainManager::Deserialize(const JsonValue& value)
             1000000.f) : 0.f;
     farTileLodHysteresis = value.Has("farTileLodHysteresis")
         ? std::clamp(value["farTileLodHysteresis"].AsFloat(), 0.f, .9f) : .2f;
+    farVegetationImpostors = !value.Has("farVegetationImpostors") ||
+        value["farVegetationImpostors"].AsBool();
+    farVegetationClusterSpanMeters = value.Has("farVegetationClusterSpanMeters")
+        ? std::clamp(value["farVegetationClusterSpanMeters"].AsFloat(), 2.f, 256.f)
+        : 24.f;
+    farVegetationImpostorBudgetPerTile =
+        value.Has("farVegetationImpostorBudgetPerTile")
+            ? std::clamp(value["farVegetationImpostorBudgetPerTile"].AsInt(),
+                0, 2048)
+            : 96;
     batchFarCells = !value.Has("batchFarCells") || value["batchFarCells"].AsBool();
     fastRuntimeLighting = value.Has("fastRuntimeLighting") &&
         value["fastRuntimeLighting"].AsBool();
@@ -2630,6 +2645,13 @@ bool TerrainManager::DrawProperties(::Engine::Editor::IEditorUi& ui)
         changed |= ui.SliderFloat("Far tile LOD hysteresis",
             &farTileLodHysteresis, 0.f, .9f);
         ui.Tooltip("Stabilizes detail changes as the camera moves. Larger values reduce switching near LOD boundaries.");
+        changed |= ui.Checkbox("Far vegetation impostors",
+            &farVegetationImpostors);
+        changed |= ui.SliderFloat("Far vegetation cluster span (m)",
+            &farVegetationClusterSpanMeters, 2.f, 256.f);
+        changed |= ui.SliderInt("Far vegetation impostor budget per tile",
+            &farVegetationImpostorBudgetPerTile, 0, 2048);
+        ui.Tooltip("Clusters distant terrain-object vegetation into low-cost impostor billboards per far tile.");
     }
     if (ui.CollapsingHeader("Terrain appearance", false))
     {
@@ -2749,7 +2771,7 @@ bool TerrainManager::DrawProperties(::Engine::Editor::IEditorUi& ui)
 namespace
 {
 constexpr uint64_t FarTileCacheMagic = 0x31454c4954524146ull;
-constexpr uint32_t FarTileCacheVersion = 2;
+constexpr uint32_t FarTileCacheVersion = 3;
 void HashBytes(uint64_t& hash, const void* data, size_t bytes)
 {
     const auto* begin = static_cast<const unsigned char*>(data);
@@ -3735,6 +3757,134 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
         vertex.color[1] = color.g;
         vertex.color[2] = color.b;
     };
+    struct VegetationCluster
+    {
+        glm::vec3 localPosition{0.f};
+        float scale = 1.f;
+        uint32_t count = 0;
+    };
+    std::map<Cell, std::vector<VegetationCluster>>
+        farVegetationClustersByCell;
+    if (farVegetationImpostors && farVegetationImpostorBudgetPerTile > 0)
+    {
+        struct ClusterAccumulator
+        {
+            glm::vec3 weightedPosition{0.f};
+            float weight = 0.f;
+            float maxScale = 0.f;
+            uint32_t count = 0;
+        };
+        const float clusterSpan = std::max(2.f,
+            farVegetationClusterSpanMeters);
+        const auto isVegetationAsset = [](std::string asset)
+        {
+            std::transform(asset.begin(), asset.end(), asset.begin(),
+                [](unsigned char ch) {
+                    return static_cast<char>(std::tolower(ch));
+                });
+            return asset.find("tree") != std::string::npos ||
+                asset.find("oak") != std::string::npos ||
+                asset.find("pine") != std::string::npos ||
+                asset.find("bush") != std::string::npos ||
+                asset.find("shrub") != std::string::npos ||
+                asset.find("foliage") != std::string::npos ||
+                asset.find("grass") != std::string::npos ||
+                asset.find("plant") != std::string::npos;
+        };
+        const auto collectLayerClusters = [&](Cell cell,
+            const JsonValue& layers)
+        {
+            std::map<Cell, ClusterAccumulator> accumulators;
+            for (size_t layerIndex = 0; layerIndex < layers.ArraySize();
+                ++layerIndex)
+            {
+                const auto& layer = layers.ArrayAt(layerIndex);
+                const auto& placements = layer["placements"];
+                const std::string layerName = layer["layerName"].AsString();
+                std::string loweredLayerName = layerName;
+                std::transform(loweredLayerName.begin(),
+                    loweredLayerName.end(), loweredLayerName.begin(),
+                    [](unsigned char ch) {
+                        return static_cast<char>(std::tolower(ch));
+                    });
+                const bool vegetationLayer =
+                    loweredLayerName.find("tree") != std::string::npos ||
+                    loweredLayerName.find("foliage") != std::string::npos ||
+                    loweredLayerName.find("grass") != std::string::npos ||
+                    loweredLayerName.find("plant") != std::string::npos;
+                for (size_t placementIndex = 0;
+                    placementIndex < placements.ArraySize(); ++placementIndex)
+                {
+                    const auto& placement = placements.ArrayAt(
+                        placementIndex);
+                    const auto& position = placement["position"];
+                    if (position.ArraySize() != 3)
+                        continue;
+                    const std::string asset = placement["asset"].AsString();
+                    if (!vegetationLayer && !isVegetationAsset(asset))
+                        continue;
+                    const float scale = placement.Has("scale")
+                        ? std::max(0.f, placement["scale"].AsFloat()) : 1.f;
+                    if (!std::isfinite(scale) || scale <= 0.f)
+                        continue;
+                    const glm::vec3 localPosition(
+                        position.ArrayAt(0).AsFloat(),
+                        position.ArrayAt(1).AsFloat(),
+                        position.ArrayAt(2).AsFloat());
+                    if (!std::isfinite(localPosition.x) ||
+                        !std::isfinite(localPosition.y) ||
+                        !std::isfinite(localPosition.z))
+                        continue;
+                    const Cell clusterCell{
+                        static_cast<int>(std::floor(localPosition.x /
+                            clusterSpan)),
+                        static_cast<int>(std::floor(localPosition.z /
+                            clusterSpan))
+                    };
+                    auto& cluster = accumulators[clusterCell];
+                    cluster.weightedPosition += localPosition * scale;
+                    cluster.weight += scale;
+                    cluster.maxScale = std::max(cluster.maxScale, scale);
+                    ++cluster.count;
+                }
+            }
+            if (accumulators.empty())
+                return;
+            auto& output = farVegetationClustersByCell[cell];
+            output.reserve(output.size() + accumulators.size());
+            for (const auto& [clusterCell, accumulator] : accumulators)
+            {
+                if (accumulator.count == 0 || accumulator.weight <= 0.f)
+                    continue;
+                VegetationCluster cluster;
+                cluster.localPosition = accumulator.weightedPosition /
+                    accumulator.weight;
+                cluster.scale = std::max(0.5f, accumulator.maxScale);
+                cluster.count = accumulator.count;
+                output.push_back(cluster);
+            }
+        };
+        for (const auto& [cell, layers] : m_objectLayers)
+            if (std::max(std::abs(cell.first - centerX),
+                std::abs(cell.second - centerY)) > nearRadius + 1)
+                collectLayerClusters(cell, layers);
+        for (const auto& [cell, terrain] : m_loaded)
+        {
+            if (!terrain || !terrain->Owner)
+                continue;
+            if (std::max(std::abs(cell.first - centerX),
+                std::abs(cell.second - centerY)) <= nearRadius + 1)
+                continue;
+            JsonValue layers = JsonValue::MakeArray();
+            for (const auto* child : terrain->Owner->Children)
+                if (child)
+                    if (const auto* layer = child->GetComponent<
+                        TerrainObjectLayer>())
+                        layers.Push(layer->Serialize());
+            if (layers.ArraySize())
+                collectLayerClusters(cell, layers);
+        }
+    }
     if (m_farTiles.empty())
     {
         // Align one parent around the origin so the outer regions can use
@@ -4816,7 +4966,103 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
             ++uploadsThisUpdate;
             continue;
         }
-        const uint64_t uploadBytes =
+        if (!farVegetationClustersByCell.empty() &&
+            farVegetationImpostorBudgetPerTile > 0 && tile.lodStride > 1)
+        {
+            struct TileCluster
+            {
+                glm::vec3 position{0.f};
+                float scale = 1.f;
+                uint32_t count = 0;
+                float priority = 0.f;
+            };
+            std::vector<TileCluster> tileClusters;
+            for (int cellY = tile.startY; cellY < tile.endY; ++cellY)
+                for (int cellX = tile.startX; cellX < tile.endX; ++cellX)
+                {
+                    if (!visible(cellX, cellY, centerX, centerY))
+                        continue;
+                    const auto found = farVegetationClustersByCell.find(
+                        {cellX, cellY});
+                    if (found == farVegetationClustersByCell.end())
+                        continue;
+                    for (const auto& cluster : found->second)
+                    {
+                        TileCluster candidate;
+                        candidate.position = glm::vec3(
+                            (cellX - tile.startX) * spanX +
+                                cluster.localPosition.x,
+                            cluster.localPosition.y,
+                            (cellY - tile.startY) * spanZ +
+                                cluster.localPosition.z);
+                        candidate.scale = cluster.scale;
+                        candidate.count = cluster.count;
+                        candidate.priority = cluster.scale *
+                            std::sqrt(static_cast<float>(
+                                std::max(1u, cluster.count)));
+                        tileClusters.push_back(candidate);
+                    }
+                }
+            if (!tileClusters.empty())
+            {
+                std::sort(tileClusters.begin(), tileClusters.end(),
+                    [](const TileCluster& first, const TileCluster& second) {
+                        return first.priority == second.priority
+                            ? first.position.x < second.position.x
+                            : first.priority > second.priority;
+                    });
+                if (tileClusters.size() > static_cast<size_t>(
+                    farVegetationImpostorBudgetPerTile))
+                    tileClusters.resize(static_cast<size_t>(
+                        farVegetationImpostorBudgetPerTile));
+                const auto addImpostorCross = [&](const TileCluster& cluster) {
+                    const float width = std::clamp(cluster.scale * 1.6f,
+                        1.f, 24.f);
+                    const float height = std::clamp(cluster.scale * 4.f +
+                        std::sqrt(static_cast<float>(cluster.count)),
+                        2.f, 48.f);
+                    const float x = cluster.position.x;
+                    const float y = cluster.position.y;
+                    const float z = cluster.position.z;
+                    const glm::vec3 tint = cluster.count >= 4
+                        ? glm::vec3(0.11f, 0.30f, 0.12f)
+                        : glm::vec3(0.16f, 0.36f, 0.14f);
+                    const auto appendVertex = [&](float vx, float vy,
+                        float vz) -> uint32_t {
+                        Mesh::Vertex vertex{};
+                        vertex.pos[0] = vx;
+                        vertex.pos[1] = vy;
+                        vertex.pos[2] = vz;
+                        vertex.normal[0] = 0.f;
+                        vertex.normal[1] = 1.f;
+                        vertex.normal[2] = 0.f;
+                        vertex.color[0] = tint.r;
+                        vertex.color[1] = tint.g;
+                        vertex.color[2] = tint.b;
+                        vertex.color[3] = 1.f;
+                        vertices.push_back(vertex);
+                        return static_cast<uint32_t>(vertices.size() - 1);
+                    };
+                    const float half = width * .5f;
+                    const uint32_t a0 = appendVertex(x - half, y, z);
+                    const uint32_t a1 = appendVertex(x + half, y, z);
+                    const uint32_t a2 = appendVertex(x - half, y + height, z);
+                    const uint32_t a3 = appendVertex(x + half, y + height, z);
+                    const uint32_t b0 = appendVertex(x, y, z - half);
+                    const uint32_t b1 = appendVertex(x, y, z + half);
+                    const uint32_t b2 = appendVertex(x, y + height, z - half);
+                    const uint32_t b3 = appendVertex(x, y + height, z + half);
+                    indices.insert(indices.end(), {
+                        a0, a2, a1, a1, a2, a3,
+                        a1, a2, a0, a3, a2, a1,
+                        b0, b2, b1, b1, b2, b3,
+                        b1, b2, b0, b3, b2, b1});
+                };
+                for (const auto& cluster : tileClusters)
+                    addImpostorCross(cluster);
+            }
+        }
+        const uint64_t uploadBytes=
             vertices.size() * sizeof(Mesh::Vertex) +
             indices.size() * sizeof(uint32_t);
         const auto memory = GetMemoryUsage();

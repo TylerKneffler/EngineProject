@@ -543,8 +543,9 @@ bool D3D12GraphicsContext::BeginDepthOnlyPass(
     m_cmdList->ResourceBarrier(1, &barrier);
     const auto dsv = depth->GetDsvHandle();
     m_cmdList->OMSetRenderTargets(0, nullptr, FALSE, &dsv);
-    m_cmdList->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH,
-        clearDepth, 0, 0, nullptr);
+    if (clearDepth >= 0.f)
+        m_cmdList->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH,
+            clearDepth, 0, 0, nullptr);
     m_activeDepthTarget = depth;
     return true;
 }

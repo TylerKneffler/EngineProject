@@ -53,9 +53,9 @@ namespace Engine::Editor
         settings.leftPanelTabs = { "HierarchyView" };
         settings.centerPanelTabs = { "Scene", "Game" };
         settings.rightPanelTabs = { "Properties" };
-        settings.renderingAPI = "DirectX11";
-        settings.editorRenderingAPI = "DirectX11";
-        settings.gameRenderingAPI = "DirectX11";
+        settings.renderingAPI = "DirectX12";
+        settings.editorRenderingAPI = "DirectX12";
+        settings.gameRenderingAPI = "DirectX12";
         settings.clearColor = { 0.18f, 0.18f, 0.18f, 1.f };
         settings.targetFramerate = 60;
         settings.aspectRatioMode = Model::ProjectSettings::AspectRatioMode::Free;

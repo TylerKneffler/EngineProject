@@ -9,5 +9,5 @@
   "roughness": 1,
   "useVertexColors": true,
   "baseColorTexture": "Assets/Textures/Terrain/warm_dirt.png",
-  "castsShadows": true
+  "castsShadows": false
 }

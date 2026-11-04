@@ -234,26 +234,32 @@ def compose(library):
     height=lambda x,z:.4*math.sin(x*.065)*math.cos(z*.08)+.23*math.sin(z*.11)+.08*math.sin((x+z)*.2)
     player=copy.deepcopy(lookup['Grass Test Capsule']);player.set('name','Meadow Explorer')
     transform(player,(path_x(-26),height(path_x(-26),-26)+1.08,-26))
-    camera=component(player,'Camera');camera.set('Camera.fov','67');camera.set('Camera.far','200')
+    camera=component(player,'Camera');camera.set('Camera.fov','67');camera.set('Camera.far','220')
     vector(camera,'Camera.target',[path_x(5),1.35,5]);objects.append(player)
     sun=copy.deepcopy(lookup['Grass Sun']);sun.set('name','Late afternoon sun')
     transform(sun,(0,20,-10),(.70,2.40,0));light=component(sun,'Light');light.set('Light.intensity','3.2')
+    light.set('Light.shadowResolutionScale','.0625');light.set('Light.shadowFilterScale','.05')
     vector(light,'Light.color',[1,.91,.77]);objects.append(sun)
     materials=ASSETS/'Materials/Woodland';materials.mkdir(parents=True,exist_ok=True)
     for name,texture,color in [('Meadow','meadow_grass.png',[.48,.53,.36]),('Path','warm_dirt.png',[.83,.75,.62]),('WoodlandFloor','shaded_moss.png',[.48,.55,.40])]:
         (materials/(name+'.material')).write_text(json.dumps({'version':1,'baseColor':color,'metallic':0,'roughness':1,
-            'useVertexColors':True,'baseColorTexture':'Assets/Textures/Terrain/'+texture,'castsShadows':True},indent=2)+'\n')
+            'useVertexColors':True,'baseColorTexture':'Assets/Textures/Terrain/'+texture,'castsShadows':False},indent=2)+'\n')
     terrain=copy.deepcopy(lookup['Flat Grass Terrain']);terrain.set('name','Oak meadow ground')
     terrain.find('children').clear();transform(terrain,(-48,0,-48))
-    t=component(terrain,'Terrain');t.clear();t.attrib.update({'Terrain.cellsX':'64','Terrain.cellsY':'64','Terrain.cellWidth':'1.5','Terrain.cellDepth':'1.5','Terrain.textureTiling':'48'})
+    terrain_half_extent=48.0
+    terrain_cells=32
+    terrain_cell_size=(terrain_half_extent*2.0)/terrain_cells
+    t=component(terrain,'Terrain');t.clear();t.attrib.update({
+        'Terrain.cellsX':str(terrain_cells),'Terrain.cellsY':str(terrain_cells),
+        'Terrain.cellWidth':f'{terrain_cell_size:g}','Terrain.cellDepth':f'{terrain_cell_size:g}','Terrain.textureTiling':'48'})
     heights=ET.SubElement(t,'Terrain.heights');weights=ET.SubElement(t,'Terrain.weights');layers=ET.SubElement(t,'Terrain.layers')
     for name,col in [('Meadow',[.37,.47,.22]),('Path',[.40,.32,.20]),('WoodlandFloor',[.22,.30,.16])]:
         l=ET.SubElement(layers,'item',{'material':f'Assets/Materials/Woodland/{name}.material','minHeight':'-100','maxHeight':'100'})
         vector(l,'color',col)
-    for row in range(65):
-        z=-48+row*1.5
-        for column in range(65):
-            x=-48+column*1.5;ET.SubElement(heights,'item').text=f'{height(x,z):.5f}'
+    for row in range(terrain_cells+1):
+        z=-terrain_half_extent+row*terrain_cell_size
+        for column in range(terrain_cells+1):
+            x=-terrain_half_extent+column*terrain_cell_size;ET.SubElement(heights,'item').text=f'{height(x,z):.5f}'
             distance=abs(x-path_x(z));dirt=max(0,min(1,(2.15-distance)/1.1))
             moss=max(0,min(.75,(abs(x)-16)/25))*(1-dirt)
             for w in [1-dirt-moss,dirt,moss]:ET.SubElement(weights,'item').text=f'{w:.5f}'
@@ -278,7 +284,7 @@ def compose(library):
         positions.append((x,z))
         if len(positions)>=48:break
     for i,(x,z) in enumerate(positions):
-        species=oak_names[i%len(oak_names)];distance=math.hypot(x,z+26);lod=0 if distance<26 else 1 if distance<55 else 2
+        species=oak_names[i%len(oak_names)];distance=math.hypot(x,z+26);lod=0 if distance<10 else 1 if distance<24 else 2
         place(trees,species+f'_LOD{lod}',x,z,rng.uniform(.70,1.08))
     bush_names=[n for n in library if n.startswith(('Medium_bush','Small_bush','tall_bush'))]
     for i in range(165):
@@ -292,10 +298,10 @@ def compose(library):
     for zcell in range(-30,44):
         for xcell in range(-36,37):
             x=xcell+rng.uniform(-.4,.4);z=zcell+rng.uniform(-.4,.4)
-            if abs(x-path_x(z))<1.65 or any((x-a)**2+(z-b)**2<1.7**2 for a,b in positions):continue
-            density=.43+.18*math.sin(x*.23+z*.11)
+            if abs(x-path_x(z))<1.35 or any((x-a)**2+(z-b)**2<1.5**2 for a,b in positions):continue
+            density=.58+.22*math.sin(x*.23+z*.11)
             if rng.random()>density:continue
-            distance=math.hypot(x,z+26);lod=0 if distance<12 else 1 if distance<34 else 2
+            distance=math.hypot(x,z+26);lod=0 if distance<4 else 1 if distance<12 else 2
             place(grass,f'MeadowPatch_{rng.randrange(1,5):02}_LOD{lod}',x,z,rng.uniform(.70,1.15));placements+=1
 
     # Use the existing streaming/instancing path, with the imported grass atlas.
@@ -308,15 +314,15 @@ def compose(library):
     for field in range(2):
         obj=ET.SubElement(terrain_children,'item',{'name':f'Imported meadow grass {field+1}','enabled':'true'});transform(obj)
         cs=ET.SubElement(obj,'components');layer=ET.SubElement(cs,'{'+NS+'}TerrainObjectLayer',{
-            'TerrainObjectLayer.viewDistance':'50','TerrainObjectLayer.lod1Distance':'12',
-            'TerrainObjectLayer.lod2Distance':'30','TerrainObjectLayer.lodHysteresis':'.8',
-            'TerrainObjectLayer.shadowDistance':'20','TerrainObjectLayer.layerName':f'Imported Grass {field+1}'})
+            'TerrainObjectLayer.viewDistance':'72','TerrainObjectLayer.lod1Distance':'3',
+            'TerrainObjectLayer.lod2Distance':'7','TerrainObjectLayer.lodHysteresis':'1.8',
+            'TerrainObjectLayer.shadowDistance':'8','TerrainObjectLayer.layerName':f'Imported Grass {field+1}'})
         entries=ET.SubElement(layer,'TerrainObjectLayer.placements');field_nodes.append(entries)
-        properties={'viewerObjectName':'Meadow Explorer','useEditorCamera':'false','visibleRadius':'50','tileSize':'8',
-            'castShadows':'false','maxTileBuildsPerUpdate':'8','tileWorkBudgetMs':'4','fadeDuration':'.25',
-            'distanceFadeWidth':'4','retainDormantTiles':'true','gpuLodSelection':'true',
+        properties={'viewerObjectName':'Meadow Explorer','useEditorCamera':'false','visibleRadius':'72','tileSize':'8',
+            'castShadows':'false','maxTileBuildsPerUpdate':'8','tileWorkBudgetMs':'4','fadeDuration':'.8',
+            'distanceFadeWidth':'6','retainDormantTiles':'true','gpuLodSelection':'true',
             'allowProceduralGeneration':'false','materialPath':'Assets/Models/Woodland/Grass/Materials/BR_MainGrass 1.material',
-            'shaderPath':'Assets/Shaders/Foliage.hlsl','windStrength':'.48'}
+            'shaderPath':'Assets/Shaders/Foliage.hlsl','windStrength':'.42'}
         for species,index in [('short',field*2+1),('tall',field*2+2)]:
             for lod,suffix in [(0,''),(1,'Lod1'),(2,'Lod2')]:properties[species+'Mesh'+suffix]=source_files[f'MeadowPatch_{index:02}_LOD{lod}']
         ET.SubElement(cs,'{'+NS+'}GrassField',{'GrassField.'+k:v for k,v in properties.items()})

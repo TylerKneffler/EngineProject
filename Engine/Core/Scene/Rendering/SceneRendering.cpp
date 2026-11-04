@@ -3492,10 +3492,144 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     };
 
     ShadowCascadeSet mainShadowCascades{};
+    bool renderMainDirectionalShadow = shadowSelection.valid;
+    std::array<uint8_t, 4> directionalShadowDirtyMask{};
+    bool preserveDirectionalShadowAtlas = false;
     if (shadowSelection.valid)
-        mainShadowCascades = buildShadowCascades(view,
-            m_directionalShadowResolution,
+    {
+        ++m_directionalShadowFrameCounter;
+        const ShadowCascadeSet requestedShadowCascades = buildShadowCascades(
+            view, m_directionalShadowResolution,
             m_realtimeShadowSettings.directionalCascadeCount);
+        mainShadowCascades = requestedShadowCascades;
+        const bool cacheReusable = m_directionalShadowCacheValid &&
+            m_directionalShadowCachedResolution ==
+                m_directionalShadowResolution &&
+            m_directionalShadowCachedLightKey ==
+                shadowSelection.stableLightKey &&
+            m_directionalShadowCachedCascadeCount ==
+                requestedShadowCascades.count &&
+            glm::dot(glm::normalize(shadowSelection.directionToLight),
+                glm::normalize(m_directionalShadowCachedDirection)) > 0.9995f;
+        if (shadowOnly)
+        {
+            auto copyCachedCascades = [&]()
+            {
+                mainShadowCascades.viewProjections =
+                    m_directionalShadowCachedViewProjections;
+                mainShadowCascades.splits =
+                    m_directionalShadowCachedCascadeSplits;
+                mainShadowCascades.data =
+                    m_directionalShadowCachedCascadeData;
+                mainShadowCascades.cameraData =
+                    m_directionalShadowCachedCameraData;
+                mainShadowCascades.centers =
+                    m_directionalShadowCachedCascadeCenters;
+                mainShadowCascades.radii =
+                    m_directionalShadowCachedCascadeRadii;
+                mainShadowCascades.count =
+                    m_directionalShadowCachedCascadeCount;
+            };
+            if (!cacheReusable)
+            {
+                for (uint32_t cascade = 0; cascade < requestedShadowCascades.count; ++cascade)
+                    directionalShadowDirtyMask[cascade] = 1u;
+            }
+            else
+            {
+                const bool globalCascadeDataChanged =
+                    glm::length(requestedShadowCascades.splits -
+                        m_directionalShadowCachedCascadeSplits) > 1e-4f ||
+                    glm::length(requestedShadowCascades.data -
+                        m_directionalShadowCachedCascadeData) > 1e-4f ||
+                    glm::length(requestedShadowCascades.cameraData -
+                        m_directionalShadowCachedCameraData) > 1e-4f;
+                if (globalCascadeDataChanged)
+                {
+                    for (uint32_t cascade = 0; cascade < requestedShadowCascades.count; ++cascade)
+                        directionalShadowDirtyMask[cascade] = 1u;
+                }
+                else
+                {
+                    const auto matrixDelta = [](const glm::mat4& first,
+                        const glm::mat4& second)
+                    {
+                        float maxDelta = 0.f;
+                        for (uint32_t row = 0; row < 4u; ++row)
+                            for (uint32_t col = 0; col < 4u; ++col)
+                                maxDelta = std::max(maxDelta,
+                                    std::abs(first[row][col] - second[row][col]));
+                        return maxDelta;
+                    };
+                    for (uint32_t cascade = 0; cascade < requestedShadowCascades.count; ++cascade)
+                    {
+                        const float centerDelta = glm::length(
+                            requestedShadowCascades.centers[cascade] -
+                            m_directionalShadowCachedCascadeCenters[cascade]);
+                        const float radiusDelta = std::abs(
+                            requestedShadowCascades.radii[cascade] -
+                            m_directionalShadowCachedCascadeRadii[cascade]);
+                        const float projectionDelta = matrixDelta(
+                            requestedShadowCascades.viewProjections[cascade],
+                            m_directionalShadowCachedViewProjections[cascade]);
+                        directionalShadowDirtyMask[cascade] =
+                            (centerDelta > 0.05f || radiusDelta > 0.05f ||
+                                projectionDelta > 1e-4f) ? 1u : 0u;
+                    }
+                    const uint32_t refreshCascade =
+                        m_directionalShadowRefreshCursor %
+                        requestedShadowCascades.count;
+                    const bool temporalRefreshDue =
+                        (m_directionalShadowFrameCounter -
+                            m_directionalShadowCascadeLastRenderedFrame[refreshCascade]) >= 2u;
+                    if (temporalRefreshDue)
+                    {
+                        directionalShadowDirtyMask[refreshCascade] = 1u;
+                        m_directionalShadowRefreshCursor =
+                            (refreshCascade + 1u) %
+                            requestedShadowCascades.count;
+                    }
+                }
+            }
+            uint32_t dirtyCascadeCount = 0;
+            for (uint32_t cascade = 0; cascade < requestedShadowCascades.count; ++cascade)
+                dirtyCascadeCount += directionalShadowDirtyMask[cascade] ? 1u : 0u;
+            renderMainDirectionalShadow = dirtyCascadeCount > 0u;
+            if (!renderMainDirectionalShadow && cacheReusable)
+                copyCachedCascades();
+            preserveDirectionalShadowAtlas = cacheReusable &&
+                renderMainDirectionalShadow &&
+                dirtyCascadeCount < requestedShadowCascades.count;
+            if (preserveDirectionalShadowAtlas)
+                for (uint32_t cascade = 0; cascade < requestedShadowCascades.count; ++cascade)
+                    if (!directionalShadowDirtyMask[cascade])
+                    {
+                        mainShadowCascades.viewProjections[cascade] =
+                            m_directionalShadowCachedViewProjections[cascade];
+                        mainShadowCascades.centers[cascade] =
+                            m_directionalShadowCachedCascadeCenters[cascade];
+                        mainShadowCascades.radii[cascade] =
+                            m_directionalShadowCachedCascadeRadii[cascade];
+                    }
+        }
+        else if (m_directionalShadowCacheValid)
+        {
+            mainShadowCascades.viewProjections =
+                m_directionalShadowCachedViewProjections;
+            mainShadowCascades.splits =
+                m_directionalShadowCachedCascadeSplits;
+            mainShadowCascades.data =
+                m_directionalShadowCachedCascadeData;
+            mainShadowCascades.cameraData =
+                m_directionalShadowCachedCameraData;
+            mainShadowCascades.centers =
+                m_directionalShadowCachedCascadeCenters;
+            mainShadowCascades.radii =
+                m_directionalShadowCachedCascadeRadii;
+            mainShadowCascades.count =
+                m_directionalShadowCachedCascadeCount;
+        }
+    }
     const auto& shadowViewProjections = mainShadowCascades.viewProjections;
     const glm::vec4 shadowCascadeSplits = mainShadowCascades.splits;
     const uint32_t shadowCascadeCount = mainShadowCascades.count;
@@ -3950,9 +4084,12 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     {
         Engine::Core::Object* object = nullptr;
         Engine::Components::Mesh* mesh = nullptr;
+        Engine::Components::Mesh* shadowMesh = nullptr;
         Engine::Components::Material* material = nullptr;
         Engine::Graphics::IGraphicsBuffer* vertexBuffer = nullptr;
         Engine::Graphics::IGraphicsBuffer* indexBuffer = nullptr;
+        Engine::Graphics::IGraphicsBuffer* shadowVertexBuffer = nullptr;
+        Engine::Graphics::IGraphicsBuffer* shadowIndexBuffer = nullptr;
         Engine::Graphics::IGraphicsBuffer* morphDeltaBuffer = nullptr;
         Engine::Graphics::IGraphicsBuffer* morphWeightBuffer = nullptr;
         Engine::Graphics::IPipelineState* pipeline = nullptr;
@@ -3964,6 +4101,9 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         uint32_t vertexStride = 0;
         uint32_t vertexCount = 0;
         uint32_t indexCount = 0;
+        uint32_t shadowVertexStride = 0;
+        uint32_t shadowVertexCount = 0;
+        uint32_t shadowIndexCount = 0;
         int gpuLod = -1, gpuMaximumLod = 0;
         glm::vec2 gpuLodDistances{0};
         uint32_t automaticGroup = UINT32_MAX;
@@ -3978,6 +4118,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         bool pmxOutline = false;
         bool castsShadow = false;
         bool doubleSided = false;
+        bool shadowDoubleSided = false;
         bool occlusionCandidate = false;
         uint64_t occlusionId = 0;
     };
@@ -4036,10 +4177,52 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             (!lightingBand || lightingBand->normalMapping);
         const bool allowParallaxMapping = !beyondLightingDistance &&
             (!lightingBand || lightingBand->parallaxMapping);
+        const bool allowSubsurfaceScattering = !beyondLightingDistance &&
+            (!lightingBand || lightingBand->subsurfaceScattering);
         const bool allowEnvironmentDiffuse = !beyondLightingDistance &&
             (!lightingBand || lightingBand->environmentDiffuse);
         const bool allowReflections = !beyondLightingDistance &&
             (!lightingBand || lightingBand->reflections);
+        const float minimumProjectedPixels = !beyondLightingDistance &&
+            lightingBand ? std::max(0.f,
+                lightingBand->minimumProjectedPixels) : 0.f;
+        if (!shadowOnly && minimumProjectedPixels > 0.f && mesh &&
+            mesh->HasBounds() && !sprite && !belongsToPreview)
+        {
+            const auto bounds = Engine::Rendering::TransformBounds(
+                mesh->GetBoundsMin(), mesh->GetBoundsMax(), renderItem->world);
+            const glm::vec3 extent = (bounds.maximum - bounds.minimum) * 0.5f;
+            const float radius = glm::length(extent);
+            if (radius > 0.f)
+            {
+                const float centerDistance = std::sqrt(
+                    std::max(0.f, sortedItem.cameraDistanceSquared));
+                const float distance = std::max(0.001f,
+                    centerDistance - radius);
+                float projectedDiameter = 0.f;
+                if (cam->orthographic)
+                {
+                    const float halfHeight = std::max(0.01f,
+                        cam->orthographicSize);
+                    projectedDiameter = 2.f * radius *
+                        static_cast<float>(viewportHeight) /
+                        (2.f * halfHeight);
+                }
+                else
+                {
+                    const float halfFov = glm::radians(
+                        std::clamp(cam->fov, 1.f, 179.f)) * 0.5f;
+                    const float tanHalfFov = std::tan(halfFov);
+                    if (tanHalfFov > 0.f)
+                        projectedDiameter = 2.f * radius *
+                            static_cast<float>(viewportHeight) /
+                            (2.f * tanHalfFov * distance);
+                }
+                if (projectedDiameter > 0.f &&
+                    projectedDiameter < minimumProjectedPixels)
+                    continue;
+            }
+        }
         // Mixed-lighting contract: a valid bake owns shadowing on a static
         // receiver. It still participates in the caster pass below, allowing
         // dynamic receivers to retain realtime shadows from static geometry.
@@ -4080,6 +4263,12 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         if(mesh && mesh->grassShadowCaster)
         {
             const float budget=std::max(0.f,m_realtimeShadowSettings.grassCasterDistance);
+            if(budget<=0.f) preparedDraw.castsShadow=false;
+            else if(casterFade.x<=0.f || budget<casterFade.x) casterFade.x=budget;
+        }
+        else if(mesh && mesh->foliageWindStrength>0.f)
+        {
+            const float budget=std::max(0.f,m_realtimeShadowSettings.foliageCasterDistance);
             if(budget<=0.f) preparedDraw.castsShadow=false;
             else if(casterFade.x<=0.f || budget<casterFade.x) casterFade.x=budget;
         }
@@ -4158,11 +4347,28 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                     : mesh->GetGraphicsBuffer());
             preparedDraw.vertexStride = mesh->GetVertexStride();
             preparedDraw.vertexCount = mesh->GetVertexCount();
+            preparedDraw.shadowMesh = mesh;
+            if (!mesh->IsInstanced() && preparedDraw.gpuLod > 0 &&
+                mesh->gpuLodSelection)
+            {
+                if (auto* runtimeShadowMesh =
+                    mesh->GetRuntimeLodMesh(preparedDraw.gpuLod))
+                    preparedDraw.shadowMesh = runtimeShadowMesh;
+            }
+            preparedDraw.shadowVertexBuffer = preparedDraw.shadowMesh->GetGraphicsBuffer();
+            preparedDraw.shadowVertexStride = preparedDraw.shadowMesh->GetVertexStride();
+            preparedDraw.shadowVertexCount = preparedDraw.shadowMesh->GetVertexCount();
             if (!useSourceChart && !renderItem->warpedVertexBuffer &&
                 mesh->GetIndexBuffer())
             {
                 preparedDraw.indexBuffer = mesh->GetIndexBuffer();
                 preparedDraw.indexCount = mesh->GetIndexCount();
+            }
+            if (!useSourceChart && !renderItem->warpedVertexBuffer &&
+                preparedDraw.shadowMesh->GetIndexBuffer())
+            {
+                preparedDraw.shadowIndexBuffer = preparedDraw.shadowMesh->GetIndexBuffer();
+                preparedDraw.shadowIndexCount = preparedDraw.shadowMesh->GetIndexCount();
             }
             preparedDraws.push_back(std::move(preparedDraw));
             ++slot;
@@ -4306,7 +4512,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 objectData.environmentParams = environmentSeed.environmentParams;
                 objectData.reflectionEnvironmentParams = environmentSeed.reflectionEnvironmentParams;
                 const uint32_t materialVariant=(allowNormalMapping?1u:0u)|(allowParallaxMapping?2u:0u)|
-                    (allowEnvironmentDiffuse?4u:0u)|(allowReflections?8u:0u);
+                    (allowEnvironmentDiffuse?4u:0u)|(allowReflections?8u:0u)|
+                    (allowSubsurfaceScattering?16u:0u);
                 auto& cachedMaterial=m_renderMaterialCache[mat][materialVariant];
                 if(cachedMaterial.frame==m_materialPreparationSerial && cachedMaterial.revision==mat->GetConfigurationRevision() && cachedMaterial.data.size()==sizeof(ObjectGPUData))
                 {
@@ -4343,7 +4550,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                     prepareTexture(2, mat->normalTexture, 4u);
                 prepareTexture(3, mat->occlusionTexture, 8u);
                 prepareTexture(4, mat->emissiveTexture, 16u);
-                if (mat->subsurfaceEnabled && mat->subsurfaceWeight > 0.f &&
+                if (allowSubsurfaceScattering &&
+                    mat->subsurfaceEnabled && mat->subsurfaceWeight > 0.f &&
                     !mat->unlit && alphaMode != Engine::Components::MaterialAlphaMode::Blend)
                     prepareTexture(9, mat->subsurfaceThicknessTexture, 128u);
                 if (allowParallaxMapping)
@@ -4374,7 +4582,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                         mat->specularColor, std::max(mat->shininess, 0.f) + 1.f);
                 // Blended and unlit materials opt out. A metallic-roughness map can
                 // still suppress scattering per pixel in the shader.
-                if (mat->subsurfaceEnabled && !mat->unlit &&
+                if (allowSubsurfaceScattering &&
+                    mat->subsurfaceEnabled && !mat->unlit &&
                     alphaMode != Engine::Components::MaterialAlphaMode::Blend)
                 {
                     objectData.subsurfaceColorWeight = glm::vec4(
@@ -4559,13 +4768,31 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             objectData.environmentParams.w = 0.f;
             alphaMode = Engine::Components::MaterialAlphaMode::Opaque;
         }
+        bool terrainShadowDoubleSided = doubleSided;
         // Terrain patches may be viewed from either side near steep slopes or
         // below overhangs. Their authored winding is not consistent across
-        // the terrain generators, so use the two-sided pipeline for both the
-        // color and shadow passes.
+        // terrain generators, so keep color two-sided. Shadows use two-sided
+        // near the camera and single-sided farther away to trim shadow cost.
         if (preparedDraw.terrainCell)
+        {
             doubleSided = true;
+            terrainShadowDoubleSided = true;
+            if (mesh && mesh->HasBounds())
+            {
+                constexpr float kTerrainTwoSidedShadowDistance = 22.f;
+                const auto bounds = Engine::Rendering::TransformBounds(
+                    mesh->GetBoundsMin(), mesh->GetBoundsMax(), objectData.world);
+                const auto nearestPoint = glm::clamp(cameraPosition,
+                    bounds.minimum, bounds.maximum);
+                const auto delta = nearestPoint - cameraPosition;
+                terrainShadowDoubleSided =
+                    glm::dot(delta, delta) <=
+                    kTerrainTwoSidedShadowDistance *
+                        kTerrainTwoSidedShadowDistance;
+            }
+        }
         preparedDraw.doubleSided = doubleSided;
+        preparedDraw.shadowDoubleSided = terrainShadowDoubleSided;
         if (shadowSelection.valid)
         {
             std::copy(shadowViewProjections.begin(),
@@ -4697,12 +4924,43 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             ? sprite->GetVertexStride() : mesh->GetVertexStride();
         preparedDraw.vertexCount = sprite
             ? sprite->GetVertexCount() : mesh->GetVertexCount();
+        preparedDraw.shadowMesh = mesh;
+        if (!sprite && mesh && !mesh->IsInstanced() &&
+            preparedDraw.gpuLod > 0 && mesh->gpuLodSelection)
+        {
+            if (auto* runtimeShadowMesh =
+                mesh->GetRuntimeLodMesh(preparedDraw.gpuLod))
+                preparedDraw.shadowMesh = runtimeShadowMesh;
+        }
+        preparedDraw.shadowVertexBuffer = sprite
+            ? preparedDraw.vertexBuffer
+            : (preparedDraw.shadowMesh
+                ? preparedDraw.shadowMesh->GetGraphicsBuffer()
+                : preparedDraw.vertexBuffer);
+        preparedDraw.shadowVertexStride = sprite
+            ? preparedDraw.vertexStride
+            : (preparedDraw.shadowMesh
+                ? preparedDraw.shadowMesh->GetVertexStride()
+                : preparedDraw.vertexStride);
+        preparedDraw.shadowVertexCount = sprite
+            ? preparedDraw.vertexCount
+            : (preparedDraw.shadowMesh
+                ? preparedDraw.shadowMesh->GetVertexCount()
+                : preparedDraw.vertexCount);
         const bool usesDirectMeshBuffer = !sprite && !useSourceChart &&
             !renderItem->warpedVertexBuffer;
         if (usesDirectMeshBuffer && mesh && mesh->GetIndexBuffer())
         {
             preparedDraw.indexBuffer = mesh->GetIndexBuffer();
             preparedDraw.indexCount = mesh->GetIndexCount();
+        }
+        if (usesDirectMeshBuffer && preparedDraw.shadowMesh &&
+            preparedDraw.shadowMesh->GetIndexBuffer())
+        {
+            preparedDraw.shadowIndexBuffer =
+                preparedDraw.shadowMesh->GetIndexBuffer();
+            preparedDraw.shadowIndexCount =
+                preparedDraw.shadowMesh->GetIndexCount();
         }
         preparedDraws.push_back(preparedDraw);
 
@@ -4828,6 +5086,14 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     std::vector<TilePreparation::Input> tileInputs;
     std::vector<size_t> tileDrawIndexes;
     std::unordered_map<const void*,uint32_t> placementBases;
+    const auto scaledShadowLodDistances = [&](const glm::vec2 distances)
+    {
+        if(!shadowOnly) return distances;
+        constexpr float shadowLodDistanceScale = .6f;
+        const float lod1 = std::max(0.f, distances.x * shadowLodDistanceScale);
+        const float lod2 = std::max(lod1, distances.y * shadowLodDistanceScale);
+        return glm::vec2(lod1, lod2);
+    };
     for(size_t index=0;index<preparedDraws.size();++index)
     {
         const auto& draw=preparedDraws[index];
@@ -4858,7 +5124,14 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             input.minimum -= glm::vec3(padding);
             input.maximum += glm::vec3(padding);
         }
-        input.lod={draw.gpuLodDistances,draw.objectData.shadowCasterFade.x,draw.objectData.shadowCasterFade.y};
+        float shadowRange = draw.objectData.shadowCasterFade.x;
+        if (shadowOnly && draw.gpuLod >= 0)
+        {
+            if (draw.gpuLod == 1) shadowRange *= .7f;
+            else if (draw.gpuLod >= 2) shadowRange *= .4f;
+        }
+        input.lod={scaledShadowLodDistances(draw.gpuLodDistances),shadowRange,
+            std::min(shadowRange, draw.objectData.shadowCasterFade.y)};
         for(const auto& range:draw.mesh->GetInstanceRanges())
             input.ranges.emplace_back(range.firstInstance,range.instanceCount);
         tileInputs.push_back(std::move(input));
@@ -4927,18 +5200,34 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             ? terrain->second.get() : base;
     };
 
-    const auto submitGeometry = [&](const PreparedDraw& draw)
+    const auto submitGeometry = [&](const PreparedDraw& draw,
+        bool shadowGeometry = false)
     {
-        if(draw.mesh && draw.mesh->IsInstanced())
+        auto* geometryMesh = shadowGeometry && draw.shadowMesh
+            ? draw.shadowMesh : draw.mesh;
+        auto* geometryVertexBuffer = shadowGeometry && draw.shadowVertexBuffer
+            ? draw.shadowVertexBuffer : draw.vertexBuffer;
+        auto* geometryIndexBuffer = shadowGeometry && draw.shadowIndexBuffer
+            ? draw.shadowIndexBuffer : draw.indexBuffer;
+        const uint32_t geometryVertexStride = shadowGeometry &&
+            draw.shadowVertexStride > 0
+            ? draw.shadowVertexStride : draw.vertexStride;
+        const uint32_t geometryVertexCount = shadowGeometry &&
+            draw.shadowVertexCount > 0
+            ? draw.shadowVertexCount : draw.vertexCount;
+        const uint32_t geometryIndexCount = shadowGeometry &&
+            draw.shadowIndexCount > 0
+            ? draw.shadowIndexCount : draw.indexCount;
+        if(geometryMesh && geometryMesh->IsInstanced())
         {
-            auto& instances=*draw.mesh->GetInstanceData();
+            auto& instances=*geometryMesh->GetInstanceData();
             if(instances.slicesRevision!=instances.revision)
             {
                 for(auto& slice:instances.slices) m_persistentInstances.Retire(std::move(slice.buffer));
                 instances.slices.clear(); instances.slicesRevision=instances.revision;
             }
-            for(const auto& range:draw.mesh->GetInstanceRanges())
-                if(range.instanceCount && !draw.mesh->GetInstanceBuffer(range.firstInstance))
+            for(const auto& range:geometryMesh->GetInstanceRanges())
+                if(range.instanceCount && !geometryMesh->GetInstanceBuffer(range.firstInstance))
                 {
                     Engine::Components::Mesh::InstanceData::Slice slice;
                     slice.firstInstance=range.firstInstance; slice.instanceCount=range.instanceCount;
@@ -4952,29 +5241,29 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         }
         context->SetStructuredBuffer(10, draw.morphDeltaBuffer);
         context->SetStructuredBuffer(11, draw.morphWeightBuffer);
-        context->SetStructuredBuffer(45, draw.mesh && draw.mesh->IsInstanced()
-            ? draw.mesh->GetInstanceBuffer() : m_emptyMorphDeltaBuffer.get());
+        context->SetStructuredBuffer(45, geometryMesh && geometryMesh->IsInstanced()
+            ? geometryMesh->GetInstanceBuffer() : m_emptyMorphDeltaBuffer.get());
         context->SetStructuredBuffer(46,m_emptyMorphDeltaBuffer.get());
-        context->SetVertexBuffer(0, draw.vertexBuffer, draw.vertexStride, 0);
-        if (draw.mesh && draw.mesh->IsInstanced())
+        context->SetVertexBuffer(0, geometryVertexBuffer, geometryVertexStride, 0);
+        if (geometryMesh && geometryMesh->IsInstanced())
         {
-            for (const auto& range : draw.mesh->GetInstanceRanges())
+            for (const auto& range : geometryMesh->GetInstanceRanges())
                 if (range.instanceCount && range.vertexCount)
                 {
                     // SV_InstanceID begins at zero on D3D. Bind the compact
                     // species slice rather than relying on base-instance IDs.
-                    context->SetStructuredBuffer(45, draw.mesh->GetInstanceBuffer(range.firstInstance));
+                    context->SetStructuredBuffer(45, geometryMesh->GetInstanceBuffer(range.firstInstance));
                     context->DrawInstanced(range.vertexCount, range.instanceCount,
                         range.firstVertex, 0);
                 }
         }
-        else if (draw.indexBuffer && draw.indexCount > 0u)
+        else if (geometryIndexBuffer && geometryIndexCount > 0u)
         {
-            context->SetIndexBuffer(draw.indexBuffer, draw.indexCount, 0);
-            context->DrawIndexedInstanced(draw.indexCount, 1, 0, 0, 0);
+            context->SetIndexBuffer(geometryIndexBuffer, geometryIndexCount, 0);
+            context->DrawIndexedInstanced(geometryIndexCount, 1, 0, 0, 0);
         }
         else
-            context->DrawInstanced(draw.vertexCount, 1, 0, 0);
+            context->DrawInstanced(geometryVertexCount, 1, 0, 0);
     };
 
     const auto submitMaterialGeometry = [&](const PreparedDraw& draw,
@@ -5015,14 +5304,15 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     Engine::Rendering::RenderJobs::Get().For(preparedDraws.size(),512,[&](size_t index) {
         const auto& draw=preparedDraws[index];
         if(draw.gpuLod<0) return;
+        const glm::vec2 lodDistances=scaledShadowLodDistances(draw.gpuLodDistances);
         const float distance=glm::length(glm::vec3(draw.objectData.world[3])-cameraPosition);
-        const int lod=distance<draw.gpuLodDistances.x ? 0 : distance<draw.gpuLodDistances.y ? 1 : 2;
+        const int lod=distance<lodDistances.x ? 0 : distance<lodDistances.y ? 1 : 2;
         if(draw.mesh->IsInstanced())
         {
-            const float width=std::max(.001f,std::min(.5f,(draw.gpuLodDistances.y-draw.gpuLodDistances.x)*.25f));
-            selectedLods[index]=draw.gpuLod==0 ? distance<=draw.gpuLodDistances.x+width:
-                draw.gpuLod==1 ? distance>=draw.gpuLodDistances.x-width && distance<=draw.gpuLodDistances.y+width:
-                distance>=draw.gpuLodDistances.y-width;
+            const float width=std::max(.001f,std::min(.5f,(lodDistances.y-lodDistances.x)*.25f));
+            selectedLods[index]=draw.gpuLod==0 ? distance<=lodDistances.x+width:
+                draw.gpuLod==1 ? distance>=lodDistances.x-width && distance<=lodDistances.y+width:
+                distance>=lodDistances.y-width;
         }
         else selectedLods[index]=std::min(lod,draw.gpuMaximumLod)==draw.gpuLod;
     });
@@ -5239,8 +5529,10 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     if (shadowOnly)
         m_lastShadowCpuTiming.scenePreparationMs = shadowElapsedMs(
             shadowCpuStart, shadowPreparationEnd);
-    if (shadowOnly && shadowSelection.valid && m_directionalShadowPipeline &&
-        context->BeginDepthOnlyPass(m_directionalShadowMap.get(), 1.f))
+    if (shadowOnly && shadowSelection.valid && renderMainDirectionalShadow &&
+        m_directionalShadowPipeline &&
+        context->BeginDepthOnlyPass(m_directionalShadowMap.get(),
+            preserveDirectionalShadowAtlas ? -1.f : 1.f))
     {
         context->BeginGpuTiming(Engine::Graphics::GpuTimingStage::Shadow);
         std::array<std::vector<uint8_t>,4> cascadeVisible;
@@ -5256,11 +5548,53 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             for(size_t drawIndex=0;drawIndex<preparedDraws.size();++drawIndex)
             {
                 const PreparedDraw& draw=preparedDraws[drawIndex];
-                if (!draw.castsShadow || !draw.vertexBuffer ||
+                if (!draw.castsShadow || !draw.shadowVertexBuffer ||
                     isSpatialManipulatorCarrierDraw(draw)) continue;
                 if(!frameVisible.empty() &&
                     !frameVisible[frameRenderItems[draw.frameItemIndex].objectSlot]) continue;
                 visible[drawIndex]=!outsideShadowCascade(draw,static_cast<uint32_t>(cascade));
+            }
+            const uint32_t cascadeCasterBudget =
+                m_realtimeShadowSettings.directionalCascadeCasterBudget;
+            if (cascadeCasterBudget > 0u)
+            {
+                std::vector<std::pair<float, size_t>> candidates;
+                candidates.reserve(preparedDraws.size());
+                const glm::vec3 cascadeCenter =
+                    mainShadowCascades.centers[cascade];
+                for (size_t drawIndex = 0; drawIndex < preparedDraws.size();
+                    ++drawIndex)
+                {
+                    if (!visible[drawIndex])
+                        continue;
+                    const PreparedDraw& draw = preparedDraws[drawIndex];
+                    const glm::vec3 origin =
+                        glm::vec3(draw.objectData.world[3]);
+                    const float distance =
+                        glm::length(origin - cascadeCenter);
+                    const float lodPenalty = draw.gpuLod >= 0
+                        ? static_cast<float>(draw.gpuLod) * 8.f : 0.f;
+                    const float grassPenalty =
+                        draw.mesh && draw.mesh->grassShadowCaster ? 10.f : 0.f;
+                    const float terrainPenalty = draw.terrainCell ? 4.f : 0.f;
+                    candidates.emplace_back(distance + lodPenalty +
+                        grassPenalty + terrainPenalty, drawIndex);
+                }
+                if (candidates.size() > cascadeCasterBudget)
+                {
+                    std::nth_element(candidates.begin(),
+                        candidates.begin() + cascadeCasterBudget,
+                        candidates.end(),
+                        [](const auto& left, const auto& right)
+                        {
+                            return left.first == right.first
+                                ? left.second < right.second
+                                : left.first < right.first;
+                        });
+                    for (size_t index = cascadeCasterBudget;
+                        index < candidates.size(); ++index)
+                        visible[candidates[index].second] = 0;
+                }
             }
         });
         std::vector<uint8_t> cascadeMasks(preparedDraws.size(), 0u);
@@ -5347,6 +5681,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         bool shadowTexturesBound = false;
         for (uint32_t cascade = 0; cascade < shadowCascadeCount; ++cascade)
         {
+            if (!directionalShadowDirtyMask[cascade])
+                continue;
             const uint32_t tileX = shadowCascadeCount > 1u
                 ? cascade & 1u : 0u;
             const uint32_t tileY = shadowCascadeCount > 1u
@@ -5371,7 +5707,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 if(draw.automaticGroup==UINT32_MAX && !lodSelected(draw)) continue;
 
                 Engine::Graphics::IPipelineState* shadowPipeline =
-                    draw.doubleSided
+                    draw.shadowDoubleSided
                         ? m_directionalShadowDoubleSidedPipeline.get()
                         : m_directionalShadowPipeline.get();
                 const auto bindStarted = m_updateProfilingEnabled
@@ -5411,7 +5747,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                     }
                     continue;
                 }
-                submitGeometry(draw);
+                submitGeometry(draw, true);
                 if (m_updateProfilingEnabled)
                 {
                     m_lastShadowCpuTiming.constantBindingMs += shadowElapsedMs(bindStarted, afterConstants);
@@ -5443,7 +5779,45 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             restoreStarted, std::chrono::steady_clock::now());
         m_lastShadowCpuTiming.drawSubmissionMs = shadowElapsedMs(
             shadowRecordsEnd, std::chrono::steady_clock::now());
+        m_directionalShadowCacheValid = true;
+        m_directionalShadowLastRenderedFrame =
+            m_directionalShadowFrameCounter;
+        m_directionalShadowCachedResolution =
+            m_directionalShadowResolution;
+        m_directionalShadowCachedCascadeCount =
+            mainShadowCascades.count;
+        m_directionalShadowCachedLightKey =
+            shadowSelection.stableLightKey;
+        m_directionalShadowCachedCameraPosition = cameraPosition;
+        m_directionalShadowCachedDirection =
+            glm::normalize(shadowSelection.directionToLight);
+        for (uint32_t cascade = 0; cascade < shadowCascadeCount; ++cascade)
+            if (directionalShadowDirtyMask[cascade])
+            {
+                m_directionalShadowCachedViewProjections[cascade] =
+                    mainShadowCascades.viewProjections[cascade];
+                m_directionalShadowCachedCascadeCenters[cascade] =
+                    mainShadowCascades.centers[cascade];
+                m_directionalShadowCachedCascadeRadii[cascade] =
+                    mainShadowCascades.radii[cascade];
+                m_directionalShadowCascadeLastRenderedFrame[cascade] =
+                    m_directionalShadowFrameCounter;
+            }
+        m_directionalShadowCachedCascadeSplits =
+            mainShadowCascades.splits;
+        m_directionalShadowCachedCascadeData =
+            mainShadowCascades.data;
+        m_directionalShadowCachedCameraData =
+            mainShadowCascades.cameraData;
 
+    }
+    else if (shadowOnly && shadowSelection.valid &&
+        !renderMainDirectionalShadow)
+    {
+        m_lastShadowCpuTiming.cascadeCullingMs = 0.0;
+        m_lastShadowCpuTiming.recordUploadMs = 0.0;
+        m_lastShadowCpuTiming.drawSubmissionMs = 0.0;
+        m_lastShadowCpuTiming.passRestoreMs = 0.0;
     }
 
     const auto portalStart = std::chrono::steady_clock::now();
@@ -5580,7 +5954,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                                 draw.traversalChartPortal, entry.targetChart))
                         continue;
                     Engine::Graphics::IPipelineState* shadowPipeline =
-                        draw.doubleSided
+                        draw.shadowDoubleSided
                             ? m_directionalShadowDoubleSidedPipeline.get()
                             : m_directionalShadowPipeline.get();
                     context->SetPipeline(geometryPipeline(draw, shadowPipeline));

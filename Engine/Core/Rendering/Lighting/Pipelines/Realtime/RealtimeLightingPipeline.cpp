@@ -233,7 +233,7 @@ namespace Engine::Rendering
             shadowCandidate.depthBias = std::clamp(light.shadowDepthBias, 0.f, 0.05f);
             shadowCandidate.normalBias = std::clamp(light.shadowNormalBias, 0.f, 0.1f);
             shadowCandidate.resolutionScale = std::clamp(
-                light.shadowResolutionScale, 0.25f, 1.f);
+                light.shadowResolutionScale, 0.0625f, 1.f);
             shadowCandidate.filterScale = std::clamp(light.shadowFilterScale, 0.f, 1.f);
             if (!selectedShadow || shadowCandidate.score > selectedShadow->score ||
                 (shadowCandidate.score == selectedShadow->score &&

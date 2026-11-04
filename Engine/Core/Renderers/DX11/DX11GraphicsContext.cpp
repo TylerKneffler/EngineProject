@@ -728,8 +728,9 @@ bool D3D11GraphicsContext::BeginDepthOnlyPass(
     m_textureSlotInitialized[12] = true;
     ID3D11DepthStencilView* depthView = nativeTexture->GetDepthView();
     m_context->OMSetRenderTargets(0, nullptr, depthView);
-    m_context->ClearDepthStencilView(depthView, D3D11_CLEAR_DEPTH,
-        std::clamp(clearDepth, 0.f, 1.f), 0);
+    if (clearDepth >= 0.f)
+        m_context->ClearDepthStencilView(depthView, D3D11_CLEAR_DEPTH,
+            std::clamp(clearDepth, 0.f, 1.f), 0);
     m_depthOnlyPassActive = true;
     return true;
 }

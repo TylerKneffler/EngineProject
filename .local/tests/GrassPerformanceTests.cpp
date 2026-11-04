@@ -2779,10 +2779,18 @@ void RenderAudit(const char* reportPath=".local/performance-logs/grass-automatic
         scene.CommitPendingObjectChanges();
     }
     auto* player = scene.FindObjectByName("Grass Test Capsule");
-    auto* owner = scene.FindObjectByName("Grass Layer");
-    auto* grass = owner ? owner->GetComponent<GrassField>() : nullptr;
-    auto* camera = player ? player->GetComponent<Engine::Components::Camera>() : nullptr;
-    Require(grass && camera, "grass/camera missing from scene");
+    if (!player)
+        player = scene.FindObjectByName("Meadow Explorer");
+    Engine::Components::Camera* camera = player ? player->GetComponent<Engine::Components::Camera>() : nullptr;
+    if (!camera)
+        for (const auto& object : scene.GetObjects())
+            if (auto* candidate = object->GetComponent<Engine::Components::Camera>())
+            {
+                camera = candidate;
+                if (!player) player = object.get();
+                break;
+            }
+    Require(player && camera, "render-audit viewer camera missing from scene");
     std::vector<GrassField*> fields;
     for (const auto& object : scene.GetObjects())
         if (auto* field = object->GetComponent<GrassField>()) fields.push_back(field);
@@ -3497,7 +3505,10 @@ int main(int argc, char** argv)
     });
     try
     {
-        if(argc>1 && std::string(argv[1])=="--oak-meadow-scene") CheckOakMeadowScene();
+        if(argc>1 && std::string(argv[1])=="--oak-meadow-scene")
+            RenderAudit(".local/performance-logs/oak-meadow-benchmark.jsonl",false,false,false,false,1280,720,false,3,true,
+                "Engine/Core/Assets/Scenes/terrain/oak_meadow.scene");
+        else if(argc>1 && std::string(argv[1])=="--oak-meadow-validation") CheckOakMeadowScene();
         else if(argc>1 && std::string(argv[1])=="--terrain-object-lods") { TestVariableTerrainObjectLods(); TestGrass(); TestBakedPlacements(); }
         else if(argc>1 && std::string(argv[1])=="--shadow-record-upload-order") TestShadowRecordUploadOrder();
         else if(argc>1 && std::string(argv[1])=="--instance-tile-preparation") { TestInstanceTilePreparation(); TestPersistentStorage(); }
