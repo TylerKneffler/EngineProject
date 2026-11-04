@@ -1,21 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Scene xmlns:components="urn:engine-components" version="1">
   <settings dimension="0" showGrid="false" gridHalfSize="80" gridCellSize="1" gridOpacity="0.12" gridFadeDistance="180" skyboxTexture="" hdriLightingEnabled="false" hdriIntensity="1" hdriExposure="0" hdriRotation="0" renderMode="0" sceneViewUiOverlay="false">
-    <gridColor><item>0.18</item><item>0.22</item><item>0.17</item></gridColor>
-    <gridOriginColor><item>0.4</item><item>0.72</item><item>0.3</item></gridOriginColor>
-    <ambientColor><item>0.055</item><item>0.07</item><item>0.05</item></ambientColor>
+    <gridColor _arrayEncoding="spaceSeparatedNumbers">0.18 0.22 0.17</gridColor>
+    <gridOriginColor _arrayEncoding="spaceSeparatedNumbers">0.4 0.72 0.3</gridOriginColor>
+    <ambientColor _arrayEncoding="spaceSeparatedNumbers">0.055 0.07 0.05</ambientColor>
   </settings>
   <objects>
     <item name="TerrainGen Camera" enabled="true">
       <transform>
-        <Transform.position><item>8</item><item>11</item><item>4</item></Transform.position>
-        <Transform.rotation><item>0.42</item><item>0</item><item>0</item></Transform.rotation>
-        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">8 11 4</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0.42 0 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
       </transform>
       <components>
         <components:Camera Camera.active="true" Camera.useTransformRotation="true" Camera.fov="68" Camera.near="0.05" Camera.far="260" Camera.orthographic="false" Camera.orthographicSize="5">
-          <Camera.target><item>8</item><item>0</item><item>20</item></Camera.target>
-          <Camera.up><item>0</item><item>1</item><item>0</item></Camera.up>
+          <Camera.target _arrayEncoding="spaceSeparatedNumbers">8 0 20</Camera.target>
+          <Camera.up _arrayEncoding="spaceSeparatedNumbers">0 1 0</Camera.up>
         </components:Camera>
         <components:FirstPersonController FirstPersonController.moveSpeed="10" FirstPersonController.sprintMultiplier="2.2" FirstPersonController.lookSensitivity="0.0025" FirstPersonController.invertY="false" FirstPersonController.lockCursor="true" />
       </components>
@@ -23,38 +23,38 @@
     </item>
     <item name="Terrain Sun" enabled="true">
       <transform>
-        <Transform.position><item>12</item><item>24</item><item>-8</item></Transform.position>
-        <Transform.rotation><item>0.72</item><item>-0.58</item><item>0</item></Transform.rotation>
-        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">12 24 -8</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0.72 -0.58 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
       </transform>
       <components>
         <components:Light Light.lightType="1" Light.intensity="3.2" Light.range="160" Light.falloff="1.5" Light.baked="false" Light.castsShadows="true" Light.shadowStrength="1" Light.shadowDepthBias="0.0015" Light.shadowNormalBias="0.01" Light.shadowResolutionScale="1" Light.shadowFilterScale="1">
-          <Light.color><item>1</item><item>0.93</item><item>0.76</item></Light.color>
+          <Light.color _arrayEncoding="spaceSeparatedNumbers">1 0.93 0.76</Light.color>
         </components:Light>
       </components>
       <children />
     </item>
     <item name="Base TerrainGen" enabled="true">
       <transform>
-        <Transform.position><item>0</item><item>0</item><item>0</item></Transform.position>
-        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
-        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
       </transform>
       <components>
         <components:PerlinNoiseField PerlinNoiseField.seed="7429" PerlinNoiseField.frequency="0.012" PerlinNoiseField.octaves="3" PerlinNoiseField.lacunarity="2" PerlinNoiseField.persistence="0.3">
-          <PerlinNoiseField.coordinateOffset><item>31</item><item>-17</item><item>83</item></PerlinNoiseField.coordinateOffset>
+          <PerlinNoiseField.coordinateOffset _arrayEncoding="spaceSeparatedNumbers">31 -17 83</PerlinNoiseField.coordinateOffset>
         </components:PerlinNoiseField>
         <components:TerrainGen TerrainGen.viewerObjectName="TerrainGen Camera" TerrainGen.noiseObjectName="" TerrainGen.chunkSize="16" TerrainGen.viewRadiusInChunks="1" TerrainGen.maxChunkBuildsPerUpdate="2" TerrainGen.horizontalCellsPerChunk="12" TerrainGen.verticalCells="20" TerrainGen.patchesPerAxis="2" TerrainGen.verticalSize="30" TerrainGen.baseHeight="0" TerrainGen.heightAmplitude="10" TerrainGen.caveStrength="0.5" TerrainGen.caveFrequencyMultiplier="2.35" TerrainGen.isoLevel="0" TerrainGen.textureScale="12" TerrainGen.heightColorBlend="0.06" TerrainGen.generateColliders="false" />
       </components>
       <children>
         <item name="Chunk (0, 0)" enabled="true">
-          <transform><Transform.position><item>0</item><item>0</item><item>0</item></Transform.position><Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation><Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale></transform>
+          <transform><Transform.position _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.position><Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation><Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale></transform>
           <components><components:TerrainChunk TerrainChunk.chunkX="0" TerrainChunk.chunkZ="0" TerrainChunk.patchCount="4" /></components>
           <children>
-            <item name="Patch (0, 0)" enabled="true"><transform><Transform.position><item>0</item><item>0</item><item>0</item></Transform.position><Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation><Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale></transform><components><components:TerrainPatch TerrainPatch.patchX="0" TerrainPatch.patchZ="0" TerrainPatch.triangleCount="0" /></components><children /></item>
-            <item name="Patch (1, 0)" enabled="true"><transform><Transform.position><item>8</item><item>0</item><item>0</item></Transform.position><Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation><Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale></transform><components><components:TerrainPatch TerrainPatch.patchX="1" TerrainPatch.patchZ="0" TerrainPatch.triangleCount="0" /></components><children /></item>
-            <item name="Patch (0, 1)" enabled="true"><transform><Transform.position><item>0</item><item>0</item><item>8</item></Transform.position><Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation><Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale></transform><components><components:TerrainPatch TerrainPatch.patchX="0" TerrainPatch.patchZ="1" TerrainPatch.triangleCount="0" /></components><children /></item>
-            <item name="Patch (1, 1)" enabled="true"><transform><Transform.position><item>8</item><item>0</item><item>8</item></Transform.position><Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation><Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale></transform><components><components:TerrainPatch TerrainPatch.patchX="1" TerrainPatch.patchZ="1" TerrainPatch.triangleCount="0" /></components><children /></item>
+            <item name="Patch (0, 0)" enabled="true"><transform><Transform.position _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.position><Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation><Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale></transform><components><components:TerrainPatch TerrainPatch.patchX="0" TerrainPatch.patchZ="0" TerrainPatch.triangleCount="0" /></components><children /></item>
+            <item name="Patch (1, 0)" enabled="true"><transform><Transform.position _arrayEncoding="spaceSeparatedNumbers">8 0 0</Transform.position><Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation><Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale></transform><components><components:TerrainPatch TerrainPatch.patchX="1" TerrainPatch.patchZ="0" TerrainPatch.triangleCount="0" /></components><children /></item>
+            <item name="Patch (0, 1)" enabled="true"><transform><Transform.position _arrayEncoding="spaceSeparatedNumbers">0 0 8</Transform.position><Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation><Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale></transform><components><components:TerrainPatch TerrainPatch.patchX="0" TerrainPatch.patchZ="1" TerrainPatch.triangleCount="0" /></components><children /></item>
+            <item name="Patch (1, 1)" enabled="true"><transform><Transform.position _arrayEncoding="spaceSeparatedNumbers">8 0 8</Transform.position><Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation><Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale></transform><components><components:TerrainPatch TerrainPatch.patchX="1" TerrainPatch.patchZ="1" TerrainPatch.triangleCount="0" /></components><children /></item>
           </children>
         </item>
       </children>

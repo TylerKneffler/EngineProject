@@ -15,9 +15,10 @@ namespace Engine::Serialization
 // ---------------------------------------------------------------------------
 // SceneSerializer — saves and loads Scene objects to/from scene XML files.
 //
-// Scene XML files use a generic element tree. Arrays use <item>; objects use
-// their serialized field names; objects with a serialized "type" use that type
-// as a namespace-qualified element without serializer-side type lists:
+// Scene XML files use a generic element tree. Object arrays use <item>;
+// numeric arrays use a single text node with encoded values; objects use their
+// serialized field names; objects with a serialized "type" use that type as a
+// namespace-qualified element without serializer-side type lists:
 //   <Scene xmlns:components="urn:engine-components">
 //     <version>1</version>
 //     <settings>...</settings>

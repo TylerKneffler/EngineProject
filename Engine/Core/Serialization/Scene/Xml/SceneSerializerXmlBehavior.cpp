@@ -20,6 +20,8 @@ constexpr const char* ComponentPrefix = "components";
 constexpr const char* ComponentNamespace = "urn:engine-components";
 constexpr const char* TypeField = "type";
 constexpr const char* ArrayItem = "item";
+constexpr const char* ArrayEncodingAttribute = "_arrayEncoding";
+constexpr const char* NumberArrayEncoding = "spaceSeparatedNumbers";
 
 // Files written before arrays became self-describing used semantic collection
 // element names. Keep those names here only as an input compatibility rule;
@@ -100,6 +102,52 @@ bool IsScalarValue(const JsonValue& value)
         type == JsonValue::Type::String;
 }
 
+bool IsNumberArray(const JsonValue& value)
+{
+    if (!value.IsArray())
+        return false;
+    for (std::size_t index = 0; index < value.ArraySize(); ++index)
+        if (!value.ArrayAt(index).IsNumber())
+            return false;
+    return true;
+}
+
+std::string NumberArrayToText(const JsonValue& value)
+{
+    std::ostringstream stream;
+    stream << std::setprecision(std::numeric_limits<double>::max_digits10);
+    for (std::size_t index = 0; index < value.ArraySize(); ++index)
+    {
+        if (index > 0)
+            stream << ' ';
+        stream << value.ArrayAt(index).AsDouble();
+    }
+    return stream.str();
+}
+
+bool ParseNumberArrayText(const std::string& text, JsonValue& array)
+{
+    array = JsonValue::MakeArray();
+    const char* cursor = text.c_str();
+    while (*cursor)
+    {
+        while (*cursor && (std::isspace(static_cast<unsigned char>(*cursor)) || *cursor == ','))
+            ++cursor;
+        if (!*cursor)
+            break;
+
+        char* end = nullptr;
+        errno = 0;
+        const double number = std::strtod(cursor, &end);
+        if (end == cursor || errno == ERANGE)
+            return false;
+
+        array.Push(JsonValue(number));
+        cursor = end;
+    }
+    return true;
+}
+
 std::string ScalarToText(const JsonValue& value)
 {
     switch (value.GetType())
@@ -152,8 +200,8 @@ JsonValue SceneXmlBehavior::ReadNode(const pugi::xml_node& node)
         return component;
     }
 
-    bool hasElementChildren = false;
     const bool hasAttributes = node.first_attribute() != nullptr;
+    bool hasElementChildren = false;
     bool allItems = true;
     bool allComponents = true;
     for (const pugi::xml_node& child : node.children())
@@ -167,6 +215,15 @@ JsonValue SceneXmlBehavior::ReadNode(const pugi::xml_node& node)
         allComponents = allComponents &&
             SplitQualifiedName(child.name(), childPrefix, childLocalName) &&
             childPrefix == SceneXml::ComponentPrefix;
+    }
+
+    const auto arrayEncoding = node.attribute(SceneXml::ArrayEncodingAttribute);
+    if (!hasElementChildren && arrayEncoding &&
+        std::string(arrayEncoding.value()) == SceneXml::NumberArrayEncoding)
+    {
+        JsonValue numberArray;
+        if (ParseNumberArrayText(node.child_value(), numberArray))
+            return numberArray;
     }
 
     if (SceneXml::IsLegacyCollection(fieldName) ||
@@ -260,6 +317,13 @@ void SceneXmlBehavior::WriteField(pugi::xml_node parent, const char* name, const
     }
     if (value.IsArray())
     {
+        if (IsNumberArray(value))
+        {
+            child.append_attribute(SceneXml::ArrayEncodingAttribute)
+                .set_value(SceneXml::NumberArrayEncoding);
+            child.text().set(NumberArrayToText(value).c_str());
+            return;
+        }
         WriteArrayItems(child, value, SceneXml::ArrayItem);
         return;
     }

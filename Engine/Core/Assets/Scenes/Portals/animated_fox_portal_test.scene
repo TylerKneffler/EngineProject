@@ -1,241 +1,85 @@
 <?xml version="1.0"?>
 <Scene xmlns:components="urn:engine-components" version="1">
   <settings dimension="0" showGrid="true" gridHalfSize="20" gridCellSize="1" gridOpacity="0.35" gridFadeDistance="80" skyboxEnabled="true" skyboxTexture="Assets/Textures/Skyboxes/editor-default-sky.png" hdriLightingEnabled="false" hdriIntensity="1" hdriExposure="0" hdriRotation="0" toneMapping="1" outputExposure="0" renderMode="0" sceneViewUiOverlay="false" portalDebugVisuals="true" sceneCameraWarpLookThrough="false" portalDebugWireframe="true" portalDebugTintRemoteView="false" portalDebugOverlayAlpha="0.65" portalRecursionDepth="4" portalConnectionRepeatLimit="4" portalMaxViewsPerFrame="32">
-    <gridColor>
-      <item>0.24</item>
-      <item>0.26</item>
-      <item>0.3</item>
-    </gridColor>
-    <gridOriginColor>
-      <item>0.25</item>
-      <item>0.6</item>
-      <item>0.95</item>
-    </gridOriginColor>
-    <ambientColor>
-      <item>0.09</item>
-      <item>0.1</item>
-      <item>0.14</item>
-    </ambientColor>
+    <gridColor _arrayEncoding="spaceSeparatedNumbers">0.24 0.26 0.3</gridColor>
+    <gridOriginColor _arrayEncoding="spaceSeparatedNumbers">0.25 0.6 0.95</gridOriginColor>
+    <ambientColor _arrayEncoding="spaceSeparatedNumbers">0.09 0.1 0.14</ambientColor>
   </settings>
   <objects>
     <item name="Animated Fox Portal Camera" enabled="true">
       <transform>
-        <Transform.position>
-          <item>3</item>
-          <item>2.4</item>
-          <item>-8</item>
-        </Transform.position>
-        <Transform.rotation>
-          <item>0</item>
-          <item>0</item>
-          <item>0</item>
-        </Transform.rotation>
-        <Transform.scale>
-          <item>1</item>
-          <item>1</item>
-          <item>1</item>
-        </Transform.scale>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">3 2.4 -8</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
       </transform>
       <components>
         <components:Camera Camera.active="true" Camera.useTransformRotation="false" Camera.fov="55" Camera.near="0.01" Camera.far="200" Camera.orthographic="false" Camera.orthographicSize="5">
-          <Camera.target>
-            <item>2.5</item>
-            <item>1.25</item>
-            <item>0</item>
-          </Camera.target>
-          <Camera.up>
-            <item>0</item>
-            <item>1</item>
-            <item>0</item>
-          </Camera.up>
+          <Camera.target _arrayEncoding="spaceSeparatedNumbers">2.5 1.25 0</Camera.target>
+          <Camera.up _arrayEncoding="spaceSeparatedNumbers">0 1 0</Camera.up>
         </components:Camera>
       </components>
       <children />
     </item>
     <item name="Animated Fox Portal Light" enabled="true">
       <transform>
-        <Transform.position>
-          <item>-2.5</item>
-          <item>4</item>
-          <item>-2</item>
-        </Transform.position>
-        <Transform.rotation>
-          <item>0</item>
-          <item>0</item>
-          <item>0</item>
-        </Transform.rotation>
-        <Transform.scale>
-          <item>1</item>
-          <item>1</item>
-          <item>1</item>
-        </Transform.scale>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">-2.5 4 -2</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
       </transform>
       <components>
         <components:Light Light.lightType="0" Light.intensity="7" Light.range="12" Light.falloff="1.8" Light.intensityMode="0" Light.innerConeAngle="25" Light.outerConeAngle="35" Light.lightingChannels="-1" Light.cookieTexture="" Light.iesProfileTexture="" Light.cookieScale="1" Light.baked="false" Light.castsShadows="false" Light.shadowStrength="1" Light.shadowDepthBias="0.0015" Light.shadowNormalBias="0.01" Light.shadowResolutionScale="1" Light.shadowFilterScale="1">
-          <Light.color>
-            <item>1</item>
-            <item>0.78</item>
-            <item>0.55</item>
-          </Light.color>
+          <Light.color _arrayEncoding="spaceSeparatedNumbers">1 0.78 0.55</Light.color>
         </components:Light>
       </components>
       <children />
     </item>
     <item name="Animated Fox Portal Fill Light" enabled="true">
       <transform>
-        <Transform.position>
-          <item>3</item>
-          <item>2</item>
-          <item>-1</item>
-        </Transform.position>
-        <Transform.rotation>
-          <item>0</item>
-          <item>0</item>
-          <item>0</item>
-        </Transform.rotation>
-        <Transform.scale>
-          <item>1</item>
-          <item>1</item>
-          <item>1</item>
-        </Transform.scale>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">3 2 -1</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
       </transform>
       <components>
         <components:Light Light.lightType="0" Light.intensity="4" Light.range="10" Light.falloff="2" Light.intensityMode="0" Light.innerConeAngle="25" Light.outerConeAngle="35" Light.lightingChannels="-1" Light.cookieTexture="" Light.iesProfileTexture="" Light.cookieScale="1" Light.baked="false" Light.castsShadows="false" Light.shadowStrength="1" Light.shadowDepthBias="0.0015" Light.shadowNormalBias="0.01" Light.shadowResolutionScale="1" Light.shadowFilterScale="1">
-          <Light.color>
-            <item>0.3</item>
-            <item>0.55</item>
-            <item>1</item>
-          </Light.color>
+          <Light.color _arrayEncoding="spaceSeparatedNumbers">0.3 0.55 1</Light.color>
         </components:Light>
       </components>
       <children />
     </item>
     <item name="Fox Source Portal" enabled="true">
       <transform>
-        <Transform.position>
-          <item>0</item>
-          <item>1.7</item>
-          <item>0</item>
-        </Transform.position>
-        <Transform.rotation>
-          <item>0</item>
-          <item>0</item>
-          <item>0</item>
-        </Transform.rotation>
-        <Transform.scale>
-          <item>1</item>
-          <item>1</item>
-          <item>1</item>
-        </Transform.scale>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">0 1.7 0</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
       </transform>
       <components>
         <components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Box" PrimitiveObjectCollider.radius="0.5" PrimitiveObjectCollider.height="1">
-          <PrimitiveObjectCollider.center>
-            <item>0</item>
-            <item>0</item>
-            <item>0</item>
-          </PrimitiveObjectCollider.center>
-          <PrimitiveObjectCollider.size>
-            <item>8</item>
-            <item>6.8</item>
-            <item>1</item>
-          </PrimitiveObjectCollider.size>
+          <PrimitiveObjectCollider.center _arrayEncoding="spaceSeparatedNumbers">0 0 0</PrimitiveObjectCollider.center>
+          <PrimitiveObjectCollider.size _arrayEncoding="spaceSeparatedNumbers">8 6.8 1</PrimitiveObjectCollider.size>
         </components:PrimitiveObjectCollider>
         <components:RigidBody RigidBody.bodyType="Static" RigidBody.mass="1" RigidBody.useGravity="false" RigidBody.gravityScale="1" RigidBody.linearDamping="0.05" RigidBody.angularDamping="0.05" RigidBody.friction="0.5" RigidBody.restitution="0" RigidBody.isTrigger="true" RigidBody.continuousCollision="false" RigidBody.freezePositionX="false" RigidBody.freezePositionY="false" RigidBody.freezePositionZ="false" RigidBody.freezeRotationX="false" RigidBody.freezeRotationY="false" RigidBody.freezeRotationZ="false" RigidBody.collisionLayer="2" RigidBody.collisionMask="-1" RigidBody.collisionIdentifier="">
-          <RigidBody.gravityDirection>
-            <item>0</item>
-            <item>-1</item>
-            <item>0</item>
-          </RigidBody.gravityDirection>
-          <RigidBody.initialLinearVelocity>
-            <item>0</item>
-            <item>0</item>
-            <item>0</item>
-          </RigidBody.initialLinearVelocity>
-          <RigidBody.initialAngularVelocity>
-            <item>0</item>
-            <item>0</item>
-            <item>0</item>
-          </RigidBody.initialAngularVelocity>
+          <RigidBody.gravityDirection _arrayEncoding="spaceSeparatedNumbers">0 -1 0</RigidBody.gravityDirection>
+          <RigidBody.initialLinearVelocity _arrayEncoding="spaceSeparatedNumbers">0 0 0</RigidBody.initialLinearVelocity>
+          <RigidBody.initialAngularVelocity _arrayEncoding="spaceSeparatedNumbers">0 0 0</RigidBody.initialAngularVelocity>
           <RigidBody.frictionBehaviors />
         </components:RigidBody>
         <components:SpatialManipulator SpatialManipulator.enabled="true" SpatialManipulator.connectionMode="2" SpatialManipulator.matrixOverlayIncludeChildren="true" SpatialManipulator.matrixOverlayPriority="0" SpatialManipulator.definesWarpVolume="false" SpatialManipulator.warpPriority="0" SpatialManipulator.warpVolumeShape="0" SpatialManipulator.warpVolumeRadius="5" SpatialManipulator.warpBoundaryFalloff="0" SpatialManipulator.renderWarpInteriorOnly="false" SpatialManipulator.applyTraversalScale="false" SpatialManipulator.persistTraversalScaleOnExit="true" SpatialManipulator.spaceWarpType="0" SpatialManipulator.spiralRadiansPerUnit="0.5" SpatialManipulator.formulaX="x" SpatialManipulator.formulaY="y" SpatialManipulator.formulaZ="z" SpatialManipulator.formulaA="1" SpatialManipulator.formulaB="1" SpatialManipulator.formulaC="1" SpatialManipulator.formulaD="0" SpatialManipulator.portalPointCount="4" SpatialManipulator.autoMatchPortalPointCount="true" SpatialManipulator.deformMeshOnTraversal="true" SpatialManipulator.traversalBlendDistance="1.25" SpatialManipulator.deformationStrength="1" SpatialManipulator.portalEdgeHalfWidth="0.055" SpatialManipulator.portalEdgeHalfDepth="0.08" SpatialManipulator.portalCollisionCutUpdateDistance="0.04" SpatialManipulator.materializeSplitOnDisconnect="true" SpatialManipulator.portalTraversalPriority="0">
-          <SpatialManipulator.position>
-            <item>0</item>
-            <item>0</item>
-            <item>0</item>
-          </SpatialManipulator.position>
-          <SpatialManipulator.rotation>
-            <item>0</item>
-            <item>0</item>
-            <item>0</item>
-          </SpatialManipulator.rotation>
-          <SpatialManipulator.scale>
-            <item>1</item>
-            <item>1</item>
-            <item>1</item>
-          </SpatialManipulator.scale>
+          <SpatialManipulator.position _arrayEncoding="spaceSeparatedNumbers">0 0 0</SpatialManipulator.position>
+          <SpatialManipulator.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</SpatialManipulator.rotation>
+          <SpatialManipulator.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</SpatialManipulator.scale>
           <SpatialManipulator.matrixOverlayScopeRoot expectedType="Transform" objectPath="" objectName="" componentType="" componentIndex="0" />
-          <SpatialManipulator.warpVolumeSize>
-            <item>10</item>
-            <item>10</item>
-            <item>10</item>
-          </SpatialManipulator.warpVolumeSize>
-          <SpatialManipulator.spiralAxis>
-            <item>0</item>
-            <item>1</item>
-            <item>0</item>
-          </SpatialManipulator.spiralAxis>
-          <SpatialManipulator.portalPoint>
-            <item>0</item>
-            <item>0</item>
-            <item>0</item>
-          </SpatialManipulator.portalPoint>
-          <SpatialManipulator.portalNormal>
-            <item>0</item>
-            <item>0</item>
-            <item>1</item>
-          </SpatialManipulator.portalNormal>
-          <SpatialManipulator.portalShapePoint0>
-            <item>-4</item>
-            <item>-3.4</item>
-            <item>0</item>
-          </SpatialManipulator.portalShapePoint0>
-          <SpatialManipulator.portalShapePoint1>
-            <item>4</item>
-            <item>-3.4</item>
-            <item>0</item>
-          </SpatialManipulator.portalShapePoint1>
-          <SpatialManipulator.portalShapePoint2>
-            <item>4</item>
-            <item>3.4</item>
-            <item>0</item>
-          </SpatialManipulator.portalShapePoint2>
-          <SpatialManipulator.portalShapePoint3>
-            <item>-4</item>
-            <item>3.4</item>
-            <item>0</item>
-          </SpatialManipulator.portalShapePoint3>
-          <SpatialManipulator.portalShapePoint4>
-            <item>0</item>
-            <item>0</item>
-            <item>0</item>
-          </SpatialManipulator.portalShapePoint4>
-          <SpatialManipulator.portalShapePoint5>
-            <item>0</item>
-            <item>0</item>
-            <item>0</item>
-          </SpatialManipulator.portalShapePoint5>
-          <SpatialManipulator.portalShapePoint6>
-            <item>0</item>
-            <item>0</item>
-            <item>0</item>
-          </SpatialManipulator.portalShapePoint6>
-          <SpatialManipulator.portalShapePoint7>
-            <item>0</item>
-            <item>0</item>
-            <item>0</item>
-          </SpatialManipulator.portalShapePoint7>
+          <SpatialManipulator.warpVolumeSize _arrayEncoding="spaceSeparatedNumbers">10 10 10</SpatialManipulator.warpVolumeSize>
+          <SpatialManipulator.spiralAxis _arrayEncoding="spaceSeparatedNumbers">0 1 0</SpatialManipulator.spiralAxis>
+          <SpatialManipulator.portalPoint _arrayEncoding="spaceSeparatedNumbers">0 0 0</SpatialManipulator.portalPoint>
+          <SpatialManipulator.portalNormal _arrayEncoding="spaceSeparatedNumbers">0 0 1</SpatialManipulator.portalNormal>
+          <SpatialManipulator.portalShapePoint0 _arrayEncoding="spaceSeparatedNumbers">-4 -3.4 0</SpatialManipulator.portalShapePoint0>
+          <SpatialManipulator.portalShapePoint1 _arrayEncoding="spaceSeparatedNumbers">4 -3.4 0</SpatialManipulator.portalShapePoint1>
+          <SpatialManipulator.portalShapePoint2 _arrayEncoding="spaceSeparatedNumbers">4 3.4 0</SpatialManipulator.portalShapePoint2>
+          <SpatialManipulator.portalShapePoint3 _arrayEncoding="spaceSeparatedNumbers">-4 3.4 0</SpatialManipulator.portalShapePoint3>
+          <SpatialManipulator.portalShapePoint4 _arrayEncoding="spaceSeparatedNumbers">0 0 0</SpatialManipulator.portalShapePoint4>
+          <SpatialManipulator.portalShapePoint5 _arrayEncoding="spaceSeparatedNumbers">0 0 0</SpatialManipulator.portalShapePoint5>
+          <SpatialManipulator.portalShapePoint6 _arrayEncoding="spaceSeparatedNumbers">0 0 0</SpatialManipulator.portalShapePoint6>
+          <SpatialManipulator.portalShapePoint7 _arrayEncoding="spaceSeparatedNumbers">0 0 0</SpatialManipulator.portalShapePoint7>
           <SpatialManipulator.portalContentScopeRoot expectedType="Transform" objectPath="" objectName="" componentType="" componentIndex="0" />
           <SpatialManipulator.meshReference expectedType="Mesh" objectPath="" objectName="" componentType="" componentIndex="0" />
           <SpatialManipulator.traversalTriggerBodyReference expectedType="RigidBody" objectPath="" objectName="Fox Source Portal" componentType="RigidBody" componentIndex="0" />
@@ -246,130 +90,38 @@
     </item>
     <item name="Fox Target Portal" enabled="true">
       <transform>
-        <Transform.position>
-          <item>10</item>
-          <item>1.7</item>
-          <item>0</item>
-        </Transform.position>
-        <Transform.rotation>
-          <item>0</item>
-          <item>3.14159</item>
-          <item>0</item>
-        </Transform.rotation>
-        <Transform.scale>
-          <item>1</item>
-          <item>1</item>
-          <item>1</item>
-        </Transform.scale>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">10 1.7 0</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 3.14159 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
       </transform>
       <components>
         <components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Box" PrimitiveObjectCollider.radius="0.5" PrimitiveObjectCollider.height="1">
-          <PrimitiveObjectCollider.center>
-            <item>0</item>
-            <item>0</item>
-            <item>0</item>
-          </PrimitiveObjectCollider.center>
-          <PrimitiveObjectCollider.size>
-            <item>8</item>
-            <item>6.8</item>
-            <item>1</item>
-          </PrimitiveObjectCollider.size>
+          <PrimitiveObjectCollider.center _arrayEncoding="spaceSeparatedNumbers">0 0 0</PrimitiveObjectCollider.center>
+          <PrimitiveObjectCollider.size _arrayEncoding="spaceSeparatedNumbers">8 6.8 1</PrimitiveObjectCollider.size>
         </components:PrimitiveObjectCollider>
         <components:RigidBody RigidBody.bodyType="Static" RigidBody.mass="1" RigidBody.useGravity="false" RigidBody.gravityScale="1" RigidBody.linearDamping="0.05" RigidBody.angularDamping="0.05" RigidBody.friction="0.5" RigidBody.restitution="0" RigidBody.isTrigger="true" RigidBody.continuousCollision="false" RigidBody.freezePositionX="false" RigidBody.freezePositionY="false" RigidBody.freezePositionZ="false" RigidBody.freezeRotationX="false" RigidBody.freezeRotationY="false" RigidBody.freezeRotationZ="false" RigidBody.collisionLayer="2" RigidBody.collisionMask="-1" RigidBody.collisionIdentifier="">
-          <RigidBody.gravityDirection>
-            <item>0</item>
-            <item>-1</item>
-            <item>0</item>
-          </RigidBody.gravityDirection>
-          <RigidBody.initialLinearVelocity>
-            <item>0</item>
-            <item>0</item>
-            <item>0</item>
-          </RigidBody.initialLinearVelocity>
-          <RigidBody.initialAngularVelocity>
-            <item>0</item>
-            <item>0</item>
-            <item>0</item>
-          </RigidBody.initialAngularVelocity>
+          <RigidBody.gravityDirection _arrayEncoding="spaceSeparatedNumbers">0 -1 0</RigidBody.gravityDirection>
+          <RigidBody.initialLinearVelocity _arrayEncoding="spaceSeparatedNumbers">0 0 0</RigidBody.initialLinearVelocity>
+          <RigidBody.initialAngularVelocity _arrayEncoding="spaceSeparatedNumbers">0 0 0</RigidBody.initialAngularVelocity>
           <RigidBody.frictionBehaviors />
         </components:RigidBody>
         <components:SpatialManipulator SpatialManipulator.enabled="true" SpatialManipulator.connectionMode="2" SpatialManipulator.matrixOverlayIncludeChildren="true" SpatialManipulator.matrixOverlayPriority="0" SpatialManipulator.definesWarpVolume="false" SpatialManipulator.warpPriority="0" SpatialManipulator.warpVolumeShape="0" SpatialManipulator.warpVolumeRadius="5" SpatialManipulator.warpBoundaryFalloff="0" SpatialManipulator.renderWarpInteriorOnly="false" SpatialManipulator.applyTraversalScale="false" SpatialManipulator.persistTraversalScaleOnExit="true" SpatialManipulator.spaceWarpType="0" SpatialManipulator.spiralRadiansPerUnit="0.5" SpatialManipulator.formulaX="x" SpatialManipulator.formulaY="y" SpatialManipulator.formulaZ="z" SpatialManipulator.formulaA="1" SpatialManipulator.formulaB="1" SpatialManipulator.formulaC="1" SpatialManipulator.formulaD="0" SpatialManipulator.portalPointCount="4" SpatialManipulator.autoMatchPortalPointCount="true" SpatialManipulator.deformMeshOnTraversal="true" SpatialManipulator.traversalBlendDistance="1.25" SpatialManipulator.deformationStrength="1" SpatialManipulator.portalEdgeHalfWidth="0.055" SpatialManipulator.portalEdgeHalfDepth="0.08" SpatialManipulator.portalCollisionCutUpdateDistance="0.04" SpatialManipulator.materializeSplitOnDisconnect="true" SpatialManipulator.portalTraversalPriority="0">
-          <SpatialManipulator.position>
-            <item>0</item>
-            <item>0</item>
-            <item>0</item>
-          </SpatialManipulator.position>
-          <SpatialManipulator.rotation>
-            <item>0</item>
-            <item>0</item>
-            <item>0</item>
-          </SpatialManipulator.rotation>
-          <SpatialManipulator.scale>
-            <item>1</item>
-            <item>1</item>
-            <item>1</item>
-          </SpatialManipulator.scale>
+          <SpatialManipulator.position _arrayEncoding="spaceSeparatedNumbers">0 0 0</SpatialManipulator.position>
+          <SpatialManipulator.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</SpatialManipulator.rotation>
+          <SpatialManipulator.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</SpatialManipulator.scale>
           <SpatialManipulator.matrixOverlayScopeRoot expectedType="Transform" objectPath="" objectName="" componentType="" componentIndex="0" />
-          <SpatialManipulator.warpVolumeSize>
-            <item>10</item>
-            <item>10</item>
-            <item>10</item>
-          </SpatialManipulator.warpVolumeSize>
-          <SpatialManipulator.spiralAxis>
-            <item>0</item>
-            <item>1</item>
-            <item>0</item>
-          </SpatialManipulator.spiralAxis>
-          <SpatialManipulator.portalPoint>
-            <item>0</item>
-            <item>0</item>
-            <item>0</item>
-          </SpatialManipulator.portalPoint>
-          <SpatialManipulator.portalNormal>
-            <item>0</item>
-            <item>0</item>
-            <item>1</item>
-          </SpatialManipulator.portalNormal>
-          <SpatialManipulator.portalShapePoint0>
-            <item>-4</item>
-            <item>-3.4</item>
-            <item>0</item>
-          </SpatialManipulator.portalShapePoint0>
-          <SpatialManipulator.portalShapePoint1>
-            <item>4</item>
-            <item>-3.4</item>
-            <item>0</item>
-          </SpatialManipulator.portalShapePoint1>
-          <SpatialManipulator.portalShapePoint2>
-            <item>4</item>
-            <item>3.4</item>
-            <item>0</item>
-          </SpatialManipulator.portalShapePoint2>
-          <SpatialManipulator.portalShapePoint3>
-            <item>-4</item>
-            <item>3.4</item>
-            <item>0</item>
-          </SpatialManipulator.portalShapePoint3>
-          <SpatialManipulator.portalShapePoint4>
-            <item>0</item>
-            <item>0</item>
-            <item>0</item>
-          </SpatialManipulator.portalShapePoint4>
-          <SpatialManipulator.portalShapePoint5>
-            <item>0</item>
-            <item>0</item>
-            <item>0</item>
-          </SpatialManipulator.portalShapePoint5>
-          <SpatialManipulator.portalShapePoint6>
-            <item>0</item>
-            <item>0</item>
-            <item>0</item>
-          </SpatialManipulator.portalShapePoint6>
-          <SpatialManipulator.portalShapePoint7>
-            <item>0</item>
-            <item>0</item>
-            <item>0</item>
-          </SpatialManipulator.portalShapePoint7>
+          <SpatialManipulator.warpVolumeSize _arrayEncoding="spaceSeparatedNumbers">10 10 10</SpatialManipulator.warpVolumeSize>
+          <SpatialManipulator.spiralAxis _arrayEncoding="spaceSeparatedNumbers">0 1 0</SpatialManipulator.spiralAxis>
+          <SpatialManipulator.portalPoint _arrayEncoding="spaceSeparatedNumbers">0 0 0</SpatialManipulator.portalPoint>
+          <SpatialManipulator.portalNormal _arrayEncoding="spaceSeparatedNumbers">0 0 1</SpatialManipulator.portalNormal>
+          <SpatialManipulator.portalShapePoint0 _arrayEncoding="spaceSeparatedNumbers">-4 -3.4 0</SpatialManipulator.portalShapePoint0>
+          <SpatialManipulator.portalShapePoint1 _arrayEncoding="spaceSeparatedNumbers">4 -3.4 0</SpatialManipulator.portalShapePoint1>
+          <SpatialManipulator.portalShapePoint2 _arrayEncoding="spaceSeparatedNumbers">4 3.4 0</SpatialManipulator.portalShapePoint2>
+          <SpatialManipulator.portalShapePoint3 _arrayEncoding="spaceSeparatedNumbers">-4 3.4 0</SpatialManipulator.portalShapePoint3>
+          <SpatialManipulator.portalShapePoint4 _arrayEncoding="spaceSeparatedNumbers">0 0 0</SpatialManipulator.portalShapePoint4>
+          <SpatialManipulator.portalShapePoint5 _arrayEncoding="spaceSeparatedNumbers">0 0 0</SpatialManipulator.portalShapePoint5>
+          <SpatialManipulator.portalShapePoint6 _arrayEncoding="spaceSeparatedNumbers">0 0 0</SpatialManipulator.portalShapePoint6>
+          <SpatialManipulator.portalShapePoint7 _arrayEncoding="spaceSeparatedNumbers">0 0 0</SpatialManipulator.portalShapePoint7>
           <SpatialManipulator.portalContentScopeRoot expectedType="Transform" objectPath="" objectName="" componentType="" componentIndex="0" />
           <SpatialManipulator.meshReference expectedType="Mesh" objectPath="" objectName="" componentType="" componentIndex="0" />
           <SpatialManipulator.traversalTriggerBodyReference expectedType="RigidBody" objectPath="" objectName="Fox Target Portal" componentType="RigidBody" componentIndex="0" />
@@ -380,51 +132,19 @@
     </item>
     <item name="Animated Fox Traversal Rig" enabled="true">
       <transform>
-        <Transform.position>
-          <item>0</item>
-          <item>1.2</item>
-          <item>-5</item>
-        </Transform.position>
-        <Transform.rotation>
-          <item>0</item>
-          <item>0</item>
-          <item>0</item>
-        </Transform.rotation>
-        <Transform.scale>
-          <item>1</item>
-          <item>1</item>
-          <item>1</item>
-        </Transform.scale>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">0 1.2 -5</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
       </transform>
       <components>
         <components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Box" PrimitiveObjectCollider.radius="0.5" PrimitiveObjectCollider.height="1">
-          <PrimitiveObjectCollider.center>
-            <item>0</item>
-            <item>0.65</item>
-            <item>0</item>
-          </PrimitiveObjectCollider.center>
-          <PrimitiveObjectCollider.size>
-            <item>1.15</item>
-            <item>1.35</item>
-            <item>2.2</item>
-          </PrimitiveObjectCollider.size>
+          <PrimitiveObjectCollider.center _arrayEncoding="spaceSeparatedNumbers">0 0.65 0</PrimitiveObjectCollider.center>
+          <PrimitiveObjectCollider.size _arrayEncoding="spaceSeparatedNumbers">1.15 1.35 2.2</PrimitiveObjectCollider.size>
         </components:PrimitiveObjectCollider>
         <components:RigidBody RigidBody.bodyType="Dynamic" RigidBody.mass="1" RigidBody.useGravity="false" RigidBody.gravityScale="1" RigidBody.linearDamping="0" RigidBody.angularDamping="0" RigidBody.friction="0" RigidBody.restitution="0" RigidBody.isTrigger="false" RigidBody.continuousCollision="true" RigidBody.freezePositionX="false" RigidBody.freezePositionY="false" RigidBody.freezePositionZ="false" RigidBody.freezeRotationX="true" RigidBody.freezeRotationY="true" RigidBody.freezeRotationZ="true" RigidBody.collisionLayer="1" RigidBody.collisionMask="-3" RigidBody.collisionIdentifier="">
-          <RigidBody.gravityDirection>
-            <item>0</item>
-            <item>-1</item>
-            <item>0</item>
-          </RigidBody.gravityDirection>
-          <RigidBody.initialLinearVelocity>
-            <item>0</item>
-            <item>0</item>
-            <item>3.2</item>
-          </RigidBody.initialLinearVelocity>
-          <RigidBody.initialAngularVelocity>
-            <item>0</item>
-            <item>0</item>
-            <item>0</item>
-          </RigidBody.initialAngularVelocity>
+          <RigidBody.gravityDirection _arrayEncoding="spaceSeparatedNumbers">0 -1 0</RigidBody.gravityDirection>
+          <RigidBody.initialLinearVelocity _arrayEncoding="spaceSeparatedNumbers">0 0 3.2</RigidBody.initialLinearVelocity>
+          <RigidBody.initialAngularVelocity _arrayEncoding="spaceSeparatedNumbers">0 0 0</RigidBody.initialAngularVelocity>
           <RigidBody.frictionBehaviors />
         </components:RigidBody>
         <components:PortalTraversalRepeater PortalTraversalRepeater.sourcePortalObjectName="Fox Source Portal" PortalTraversalRepeater.targetPortalObjectName="Fox Target Portal" PortalTraversalRepeater.reverseClearance="4" PortalTraversalRepeater.teleportDetectionDistance="5" PortalTraversalRepeater.reverseAngularVelocity="false" />
@@ -432,21 +152,9 @@
       <children>
         <item prefab="Assets/Prefabs/Fox/Fox.prefab">
           <transform>
-            <Transform.position>
-              <item>0</item>
-              <item>0</item>
-              <item>0</item>
-            </Transform.position>
-            <Transform.rotation>
-              <item>0</item>
-              <item>3.14159</item>
-              <item>0</item>
-            </Transform.rotation>
-            <Transform.scale>
-              <item>0.045</item>
-              <item>0.045</item>
-              <item>0.045</item>
-            </Transform.scale>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 3.14159 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">0.045 0.045 0.045</Transform.scale>
           </transform>
         </item>
       </children>

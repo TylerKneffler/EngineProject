@@ -1,34 +1,34 @@
 <?xml version="1.0"?>
 <Scene xmlns:components="urn:engine-components" version="1">
   <settings dimension="0" showGrid="true" gridHalfSize="34" gridCellSize="1" gridOpacity="0.18" gridFadeDistance="100" skyboxTexture="" hdriLightingEnabled="false" hdriIntensity="1" hdriExposure="0" hdriRotation="0" renderMode="0" sceneViewUiOverlay="false" portalDebugVisuals="true" portalDebugWireframe="false" portalDebugTintRemoteView="true" portalDebugOverlayAlpha="0.28" portalRecursionDepth="5" portalConnectionRepeatLimit="4" portalMaxViewsPerFrame="48">
-    <gridColor><item>0.12</item><item>0.14</item><item>0.18</item></gridColor>
-    <gridOriginColor><item>0.2</item><item>0.65</item><item>0.95</item></gridOriginColor>
-    <ambientColor><item>0.09</item><item>0.09</item><item>0.12</item></ambientColor>
+    <gridColor _arrayEncoding="spaceSeparatedNumbers">0.12 0.14 0.18</gridColor>
+    <gridOriginColor _arrayEncoding="spaceSeparatedNumbers">0.2 0.65 0.95</gridOriginColor>
+    <ambientColor _arrayEncoding="spaceSeparatedNumbers">0.09 0.09 0.12</ambientColor>
   </settings>
   <objects>
     <item prefab="Assets/Prefabs/CharacterCapsule.prefab" enabled="true">
       <transform>
-        <Transform.position><item>0</item><item>1</item><item>0</item></Transform.position>
-        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
-        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">0 1 0</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
       </transform>
     </item>
     <item name="Room 1 Red Shell" enabled="true">
       <transform>
-        <Transform.position><item>0</item><item>0</item><item>0</item></Transform.position>
-        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
-        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
       </transform>
       <components>
         <components:Mesh Mesh.file="Assets/Mesh/adjacent_door_room.obj" />
         <components:Material Material.shininess="36" Material.metallicFactor="0.08" Material.roughnessFactor="0.72" Material.baseColorAlpha="1" Material.doubleSided="true" Material.unlit="false" Material.alphaMode="Opaque">
-          <Material.diffuse><item>0.82</item><item>0.12</item><item>0.12</item></Material.diffuse>
-          <Material.ambient><item>0.131</item><item>0.019</item><item>0.019</item></Material.ambient>
-          <Material.specular><item>0.35</item><item>0.35</item><item>0.4</item></Material.specular>
-          <Material.emissiveColor><item>0.021</item><item>0.003</item><item>0.003</item></Material.emissiveColor>
+          <Material.diffuse _arrayEncoding="spaceSeparatedNumbers">0.82 0.12 0.12</Material.diffuse>
+          <Material.ambient _arrayEncoding="spaceSeparatedNumbers">0.131 0.019 0.019</Material.ambient>
+          <Material.specular _arrayEncoding="spaceSeparatedNumbers">0.35 0.35 0.4</Material.specular>
+          <Material.emissiveColor _arrayEncoding="spaceSeparatedNumbers">0.021 0.003 0.003</Material.emissiveColor>
         </components:Material>
         <components:MeshObjectCollider MeshObjectCollider.collisionEnabled="true" MeshObjectCollider.convex="false" MeshObjectCollider.meshPath="Assets/Mesh/adjacent_door_room.obj">
-          <MeshObjectCollider.center><item>0</item><item>0</item><item>0</item></MeshObjectCollider.center>
+          <MeshObjectCollider.center _arrayEncoding="spaceSeparatedNumbers">0 0 0</MeshObjectCollider.center>
           <MeshObjectCollider.meshReference expectedType="Mesh" objectPath="" objectName="Room 1 Red Shell" componentType="Mesh" componentIndex="0" />
         </components:MeshObjectCollider>
         <components:RigidBody RigidBody.bodyType="Static" RigidBody.mass="1" RigidBody.useGravity="false" RigidBody.friction="0.82" RigidBody.restitution="0" RigidBody.isTrigger="false" RigidBody.continuousCollision="false" RigidBody.collisionLayer="1" RigidBody.collisionMask="-1" />
@@ -37,29 +37,29 @@
     </item>
     <item name="Room 1 Light" enabled="true">
       <transform>
-        <Transform.position><item>0</item><item>3</item><item>0</item></Transform.position>
-        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
-        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">0 3 0</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
       </transform>
-      <components><components:Light Light.lightType="0" Light.intensity="9" Light.range="9" Light.falloff="1.65" Light.baked="false"><Light.color><item>1</item><item>0.3</item><item>0.3</item></Light.color></components:Light></components>
+      <components><components:Light Light.lightType="0" Light.intensity="9" Light.range="9" Light.falloff="1.65" Light.baked="false"><Light.color _arrayEncoding="spaceSeparatedNumbers">1 0.3 0.3</Light.color></components:Light></components>
       <children />
     </item>
     <item name="Room 2 Green Shell" enabled="true">
       <transform>
-        <Transform.position><item>0</item><item>7</item><item>0</item></Transform.position>
-        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
-        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">0 7 0</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
       </transform>
       <components>
         <components:Mesh Mesh.file="Assets/Mesh/adjacent_door_room.obj" />
         <components:Material Material.shininess="36" Material.metallicFactor="0.08" Material.roughnessFactor="0.72" Material.baseColorAlpha="1" Material.doubleSided="true" Material.unlit="false" Material.alphaMode="Opaque">
-          <Material.diffuse><item>0.12</item><item>0.68</item><item>0.22</item></Material.diffuse>
-          <Material.ambient><item>0.019</item><item>0.109</item><item>0.035</item></Material.ambient>
-          <Material.specular><item>0.35</item><item>0.35</item><item>0.4</item></Material.specular>
-          <Material.emissiveColor><item>0.003</item><item>0.017</item><item>0.006</item></Material.emissiveColor>
+          <Material.diffuse _arrayEncoding="spaceSeparatedNumbers">0.12 0.68 0.22</Material.diffuse>
+          <Material.ambient _arrayEncoding="spaceSeparatedNumbers">0.019 0.109 0.035</Material.ambient>
+          <Material.specular _arrayEncoding="spaceSeparatedNumbers">0.35 0.35 0.4</Material.specular>
+          <Material.emissiveColor _arrayEncoding="spaceSeparatedNumbers">0.003 0.017 0.006</Material.emissiveColor>
         </components:Material>
         <components:MeshObjectCollider MeshObjectCollider.collisionEnabled="true" MeshObjectCollider.convex="false" MeshObjectCollider.meshPath="Assets/Mesh/adjacent_door_room.obj">
-          <MeshObjectCollider.center><item>0</item><item>0</item><item>0</item></MeshObjectCollider.center>
+          <MeshObjectCollider.center _arrayEncoding="spaceSeparatedNumbers">0 0 0</MeshObjectCollider.center>
           <MeshObjectCollider.meshReference expectedType="Mesh" objectPath="" objectName="Room 2 Green Shell" componentType="Mesh" componentIndex="0" />
         </components:MeshObjectCollider>
         <components:RigidBody RigidBody.bodyType="Static" RigidBody.mass="1" RigidBody.useGravity="false" RigidBody.friction="0.82" RigidBody.restitution="0" RigidBody.isTrigger="false" RigidBody.continuousCollision="false" RigidBody.collisionLayer="1" RigidBody.collisionMask="-1" />
@@ -68,29 +68,29 @@
     </item>
     <item name="Room 2 Light" enabled="true">
       <transform>
-        <Transform.position><item>0</item><item>10</item><item>0</item></Transform.position>
-        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
-        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">0 10 0</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
       </transform>
-      <components><components:Light Light.lightType="0" Light.intensity="9" Light.range="9" Light.falloff="1.65" Light.baked="false"><Light.color><item>0.3</item><item>0.8600000000000001</item><item>0.4</item></Light.color></components:Light></components>
+      <components><components:Light Light.lightType="0" Light.intensity="9" Light.range="9" Light.falloff="1.65" Light.baked="false"><Light.color _arrayEncoding="spaceSeparatedNumbers">0.3 0.8600000000000001 0.4</Light.color></components:Light></components>
       <children />
     </item>
     <item name="Room 3 Blue Shell" enabled="true">
       <transform>
-        <Transform.position><item>0</item><item>14</item><item>0</item></Transform.position>
-        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
-        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">0 14 0</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
       </transform>
       <components>
         <components:Mesh Mesh.file="Assets/Mesh/adjacent_door_room.obj" />
         <components:Material Material.shininess="36" Material.metallicFactor="0.08" Material.roughnessFactor="0.72" Material.baseColorAlpha="1" Material.doubleSided="true" Material.unlit="false" Material.alphaMode="Opaque">
-          <Material.diffuse><item>0.12</item><item>0.28</item><item>0.88</item></Material.diffuse>
-          <Material.ambient><item>0.019</item><item>0.045</item><item>0.141</item></Material.ambient>
-          <Material.specular><item>0.35</item><item>0.35</item><item>0.4</item></Material.specular>
-          <Material.emissiveColor><item>0.003</item><item>0.007</item><item>0.022</item></Material.emissiveColor>
+          <Material.diffuse _arrayEncoding="spaceSeparatedNumbers">0.12 0.28 0.88</Material.diffuse>
+          <Material.ambient _arrayEncoding="spaceSeparatedNumbers">0.019 0.045 0.141</Material.ambient>
+          <Material.specular _arrayEncoding="spaceSeparatedNumbers">0.35 0.35 0.4</Material.specular>
+          <Material.emissiveColor _arrayEncoding="spaceSeparatedNumbers">0.003 0.007 0.022</Material.emissiveColor>
         </components:Material>
         <components:MeshObjectCollider MeshObjectCollider.collisionEnabled="true" MeshObjectCollider.convex="false" MeshObjectCollider.meshPath="Assets/Mesh/adjacent_door_room.obj">
-          <MeshObjectCollider.center><item>0</item><item>0</item><item>0</item></MeshObjectCollider.center>
+          <MeshObjectCollider.center _arrayEncoding="spaceSeparatedNumbers">0 0 0</MeshObjectCollider.center>
           <MeshObjectCollider.meshReference expectedType="Mesh" objectPath="" objectName="Room 3 Blue Shell" componentType="Mesh" componentIndex="0" />
         </components:MeshObjectCollider>
         <components:RigidBody RigidBody.bodyType="Static" RigidBody.mass="1" RigidBody.useGravity="false" RigidBody.friction="0.82" RigidBody.restitution="0" RigidBody.isTrigger="false" RigidBody.continuousCollision="false" RigidBody.collisionLayer="1" RigidBody.collisionMask="-1" />
@@ -99,32 +99,32 @@
     </item>
     <item name="Room 3 Light" enabled="true">
       <transform>
-        <Transform.position><item>0</item><item>17</item><item>0</item></Transform.position>
-        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
-        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">0 17 0</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
       </transform>
-      <components><components:Light Light.lightType="0" Light.intensity="9" Light.range="9" Light.falloff="1.65" Light.baked="false"><Light.color><item>0.3</item><item>0.46</item><item>1</item></Light.color></components:Light></components>
+      <components><components:Light Light.lightType="0" Light.intensity="9" Light.range="9" Light.falloff="1.65" Light.baked="false"><Light.color _arrayEncoding="spaceSeparatedNumbers">0.3 0.46 1</Light.color></components:Light></components>
       <children />
     </item>
     <item name="Room 1 West Entrance" enabled="true">
       <transform>
-        <Transform.position><item>-4</item><item>1.7</item><item>0</item></Transform.position>
-        <Transform.rotation><item>0</item><item>1.570796</item><item>0</item></Transform.rotation>
-        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">-4 1.7 0</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 1.570796 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
       </transform>
       <components>
         <components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Box" PrimitiveObjectCollider.radius="0.5" PrimitiveObjectCollider.height="1">
-          <PrimitiveObjectCollider.center><item>0</item><item>0</item><item>0</item></PrimitiveObjectCollider.center>
-          <PrimitiveObjectCollider.size><item>2.4</item><item>3.4</item><item>0.7</item></PrimitiveObjectCollider.size>
+          <PrimitiveObjectCollider.center _arrayEncoding="spaceSeparatedNumbers">0 0 0</PrimitiveObjectCollider.center>
+          <PrimitiveObjectCollider.size _arrayEncoding="spaceSeparatedNumbers">2.4 3.4 0.7</PrimitiveObjectCollider.size>
         </components:PrimitiveObjectCollider>
         <components:RigidBody RigidBody.bodyType="Static" RigidBody.mass="1" RigidBody.useGravity="false" RigidBody.friction="0" RigidBody.restitution="0" RigidBody.isTrigger="true" RigidBody.continuousCollision="false" RigidBody.collisionLayer="2" RigidBody.collisionMask="-1" />
         <components:SpatialManipulator SpatialManipulator.enabled="true" SpatialManipulator.connectionMode="2" SpatialManipulator.portalPointCount="4" SpatialManipulator.autoMatchPortalPointCount="true" SpatialManipulator.deformMeshOnTraversal="true" SpatialManipulator.traversalBlendDistance="0.8" SpatialManipulator.deformationStrength="1" SpatialManipulator.portalEdgeHalfWidth="0.055" SpatialManipulator.portalEdgeHalfDepth="0.1" SpatialManipulator.portalCollisionCutUpdateDistance="0.04" SpatialManipulator.materializeSplitOnDisconnect="true" SpatialManipulator.portalTraversalPriority="0">
-          <SpatialManipulator.portalPoint><item>0</item><item>0</item><item>0</item></SpatialManipulator.portalPoint>
-          <SpatialManipulator.portalNormal><item>0</item><item>0</item><item>1</item></SpatialManipulator.portalNormal>
-          <SpatialManipulator.portalShapePoint0><item>-1.2</item><item>-1.7</item><item>0</item></SpatialManipulator.portalShapePoint0>
-          <SpatialManipulator.portalShapePoint1><item>1.2</item><item>-1.7</item><item>0</item></SpatialManipulator.portalShapePoint1>
-          <SpatialManipulator.portalShapePoint2><item>1.2</item><item>1.7</item><item>0</item></SpatialManipulator.portalShapePoint2>
-          <SpatialManipulator.portalShapePoint3><item>-1.2</item><item>1.7</item><item>0</item></SpatialManipulator.portalShapePoint3>
+          <SpatialManipulator.portalPoint _arrayEncoding="spaceSeparatedNumbers">0 0 0</SpatialManipulator.portalPoint>
+          <SpatialManipulator.portalNormal _arrayEncoding="spaceSeparatedNumbers">0 0 1</SpatialManipulator.portalNormal>
+          <SpatialManipulator.portalShapePoint0 _arrayEncoding="spaceSeparatedNumbers">-1.2 -1.7 0</SpatialManipulator.portalShapePoint0>
+          <SpatialManipulator.portalShapePoint1 _arrayEncoding="spaceSeparatedNumbers">1.2 -1.7 0</SpatialManipulator.portalShapePoint1>
+          <SpatialManipulator.portalShapePoint2 _arrayEncoding="spaceSeparatedNumbers">1.2 1.7 0</SpatialManipulator.portalShapePoint2>
+          <SpatialManipulator.portalShapePoint3 _arrayEncoding="spaceSeparatedNumbers">-1.2 1.7 0</SpatialManipulator.portalShapePoint3>
           <SpatialManipulator.traversalTriggerBodyReference expectedType="RigidBody" objectPath="" objectName="Room 1 West Entrance" componentType="RigidBody" componentIndex="0" />
           <SpatialManipulator.targetManipulator expectedType="SpatialManipulator" objectPath="" objectName="Room 3 North Exit" componentType="SpatialManipulator" componentIndex="0" />
         </components:SpatialManipulator>
@@ -133,23 +133,23 @@
     </item>
     <item name="Room 1 North Exit" enabled="true">
       <transform>
-        <Transform.position><item>0</item><item>1.7</item><item>4</item></Transform.position>
-        <Transform.rotation><item>0</item><item>3.141593</item><item>0</item></Transform.rotation>
-        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">0 1.7 4</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 3.141593 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
       </transform>
       <components>
         <components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Box" PrimitiveObjectCollider.radius="0.5" PrimitiveObjectCollider.height="1">
-          <PrimitiveObjectCollider.center><item>0</item><item>0</item><item>0</item></PrimitiveObjectCollider.center>
-          <PrimitiveObjectCollider.size><item>2.4</item><item>3.4</item><item>0.7</item></PrimitiveObjectCollider.size>
+          <PrimitiveObjectCollider.center _arrayEncoding="spaceSeparatedNumbers">0 0 0</PrimitiveObjectCollider.center>
+          <PrimitiveObjectCollider.size _arrayEncoding="spaceSeparatedNumbers">2.4 3.4 0.7</PrimitiveObjectCollider.size>
         </components:PrimitiveObjectCollider>
         <components:RigidBody RigidBody.bodyType="Static" RigidBody.mass="1" RigidBody.useGravity="false" RigidBody.friction="0" RigidBody.restitution="0" RigidBody.isTrigger="true" RigidBody.continuousCollision="false" RigidBody.collisionLayer="2" RigidBody.collisionMask="-1" />
         <components:SpatialManipulator SpatialManipulator.enabled="true" SpatialManipulator.connectionMode="2" SpatialManipulator.portalPointCount="4" SpatialManipulator.autoMatchPortalPointCount="true" SpatialManipulator.deformMeshOnTraversal="true" SpatialManipulator.traversalBlendDistance="0.8" SpatialManipulator.deformationStrength="1" SpatialManipulator.portalEdgeHalfWidth="0.055" SpatialManipulator.portalEdgeHalfDepth="0.1" SpatialManipulator.portalCollisionCutUpdateDistance="0.04" SpatialManipulator.materializeSplitOnDisconnect="true" SpatialManipulator.portalTraversalPriority="0">
-          <SpatialManipulator.portalPoint><item>0</item><item>0</item><item>0</item></SpatialManipulator.portalPoint>
-          <SpatialManipulator.portalNormal><item>0</item><item>0</item><item>1</item></SpatialManipulator.portalNormal>
-          <SpatialManipulator.portalShapePoint0><item>-1.2</item><item>-1.7</item><item>0</item></SpatialManipulator.portalShapePoint0>
-          <SpatialManipulator.portalShapePoint1><item>1.2</item><item>-1.7</item><item>0</item></SpatialManipulator.portalShapePoint1>
-          <SpatialManipulator.portalShapePoint2><item>1.2</item><item>1.7</item><item>0</item></SpatialManipulator.portalShapePoint2>
-          <SpatialManipulator.portalShapePoint3><item>-1.2</item><item>1.7</item><item>0</item></SpatialManipulator.portalShapePoint3>
+          <SpatialManipulator.portalPoint _arrayEncoding="spaceSeparatedNumbers">0 0 0</SpatialManipulator.portalPoint>
+          <SpatialManipulator.portalNormal _arrayEncoding="spaceSeparatedNumbers">0 0 1</SpatialManipulator.portalNormal>
+          <SpatialManipulator.portalShapePoint0 _arrayEncoding="spaceSeparatedNumbers">-1.2 -1.7 0</SpatialManipulator.portalShapePoint0>
+          <SpatialManipulator.portalShapePoint1 _arrayEncoding="spaceSeparatedNumbers">1.2 -1.7 0</SpatialManipulator.portalShapePoint1>
+          <SpatialManipulator.portalShapePoint2 _arrayEncoding="spaceSeparatedNumbers">1.2 1.7 0</SpatialManipulator.portalShapePoint2>
+          <SpatialManipulator.portalShapePoint3 _arrayEncoding="spaceSeparatedNumbers">-1.2 1.7 0</SpatialManipulator.portalShapePoint3>
           <SpatialManipulator.traversalTriggerBodyReference expectedType="RigidBody" objectPath="" objectName="Room 1 North Exit" componentType="RigidBody" componentIndex="0" />
           <SpatialManipulator.targetManipulator expectedType="SpatialManipulator" objectPath="" objectName="Room 2 West Entrance" componentType="SpatialManipulator" componentIndex="0" />
         </components:SpatialManipulator>
@@ -158,23 +158,23 @@
     </item>
     <item name="Room 2 West Entrance" enabled="true">
       <transform>
-        <Transform.position><item>-4</item><item>8.7</item><item>0</item></Transform.position>
-        <Transform.rotation><item>0</item><item>1.570796</item><item>0</item></Transform.rotation>
-        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">-4 8.7 0</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 1.570796 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
       </transform>
       <components>
         <components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Box" PrimitiveObjectCollider.radius="0.5" PrimitiveObjectCollider.height="1">
-          <PrimitiveObjectCollider.center><item>0</item><item>0</item><item>0</item></PrimitiveObjectCollider.center>
-          <PrimitiveObjectCollider.size><item>2.4</item><item>3.4</item><item>0.7</item></PrimitiveObjectCollider.size>
+          <PrimitiveObjectCollider.center _arrayEncoding="spaceSeparatedNumbers">0 0 0</PrimitiveObjectCollider.center>
+          <PrimitiveObjectCollider.size _arrayEncoding="spaceSeparatedNumbers">2.4 3.4 0.7</PrimitiveObjectCollider.size>
         </components:PrimitiveObjectCollider>
         <components:RigidBody RigidBody.bodyType="Static" RigidBody.mass="1" RigidBody.useGravity="false" RigidBody.friction="0" RigidBody.restitution="0" RigidBody.isTrigger="true" RigidBody.continuousCollision="false" RigidBody.collisionLayer="2" RigidBody.collisionMask="-1" />
         <components:SpatialManipulator SpatialManipulator.enabled="true" SpatialManipulator.connectionMode="2" SpatialManipulator.portalPointCount="4" SpatialManipulator.autoMatchPortalPointCount="true" SpatialManipulator.deformMeshOnTraversal="true" SpatialManipulator.traversalBlendDistance="0.8" SpatialManipulator.deformationStrength="1" SpatialManipulator.portalEdgeHalfWidth="0.055" SpatialManipulator.portalEdgeHalfDepth="0.1" SpatialManipulator.portalCollisionCutUpdateDistance="0.04" SpatialManipulator.materializeSplitOnDisconnect="true" SpatialManipulator.portalTraversalPriority="0">
-          <SpatialManipulator.portalPoint><item>0</item><item>0</item><item>0</item></SpatialManipulator.portalPoint>
-          <SpatialManipulator.portalNormal><item>0</item><item>0</item><item>1</item></SpatialManipulator.portalNormal>
-          <SpatialManipulator.portalShapePoint0><item>-1.2</item><item>-1.7</item><item>0</item></SpatialManipulator.portalShapePoint0>
-          <SpatialManipulator.portalShapePoint1><item>1.2</item><item>-1.7</item><item>0</item></SpatialManipulator.portalShapePoint1>
-          <SpatialManipulator.portalShapePoint2><item>1.2</item><item>1.7</item><item>0</item></SpatialManipulator.portalShapePoint2>
-          <SpatialManipulator.portalShapePoint3><item>-1.2</item><item>1.7</item><item>0</item></SpatialManipulator.portalShapePoint3>
+          <SpatialManipulator.portalPoint _arrayEncoding="spaceSeparatedNumbers">0 0 0</SpatialManipulator.portalPoint>
+          <SpatialManipulator.portalNormal _arrayEncoding="spaceSeparatedNumbers">0 0 1</SpatialManipulator.portalNormal>
+          <SpatialManipulator.portalShapePoint0 _arrayEncoding="spaceSeparatedNumbers">-1.2 -1.7 0</SpatialManipulator.portalShapePoint0>
+          <SpatialManipulator.portalShapePoint1 _arrayEncoding="spaceSeparatedNumbers">1.2 -1.7 0</SpatialManipulator.portalShapePoint1>
+          <SpatialManipulator.portalShapePoint2 _arrayEncoding="spaceSeparatedNumbers">1.2 1.7 0</SpatialManipulator.portalShapePoint2>
+          <SpatialManipulator.portalShapePoint3 _arrayEncoding="spaceSeparatedNumbers">-1.2 1.7 0</SpatialManipulator.portalShapePoint3>
           <SpatialManipulator.traversalTriggerBodyReference expectedType="RigidBody" objectPath="" objectName="Room 2 West Entrance" componentType="RigidBody" componentIndex="0" />
           <SpatialManipulator.targetManipulator expectedType="SpatialManipulator" objectPath="" objectName="Room 1 North Exit" componentType="SpatialManipulator" componentIndex="0" />
         </components:SpatialManipulator>
@@ -183,23 +183,23 @@
     </item>
     <item name="Room 2 North Exit" enabled="true">
       <transform>
-        <Transform.position><item>0</item><item>8.7</item><item>4</item></Transform.position>
-        <Transform.rotation><item>0</item><item>3.141593</item><item>0</item></Transform.rotation>
-        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">0 8.7 4</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 3.141593 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
       </transform>
       <components>
         <components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Box" PrimitiveObjectCollider.radius="0.5" PrimitiveObjectCollider.height="1">
-          <PrimitiveObjectCollider.center><item>0</item><item>0</item><item>0</item></PrimitiveObjectCollider.center>
-          <PrimitiveObjectCollider.size><item>2.4</item><item>3.4</item><item>0.7</item></PrimitiveObjectCollider.size>
+          <PrimitiveObjectCollider.center _arrayEncoding="spaceSeparatedNumbers">0 0 0</PrimitiveObjectCollider.center>
+          <PrimitiveObjectCollider.size _arrayEncoding="spaceSeparatedNumbers">2.4 3.4 0.7</PrimitiveObjectCollider.size>
         </components:PrimitiveObjectCollider>
         <components:RigidBody RigidBody.bodyType="Static" RigidBody.mass="1" RigidBody.useGravity="false" RigidBody.friction="0" RigidBody.restitution="0" RigidBody.isTrigger="true" RigidBody.continuousCollision="false" RigidBody.collisionLayer="2" RigidBody.collisionMask="-1" />
         <components:SpatialManipulator SpatialManipulator.enabled="true" SpatialManipulator.connectionMode="2" SpatialManipulator.portalPointCount="4" SpatialManipulator.autoMatchPortalPointCount="true" SpatialManipulator.deformMeshOnTraversal="true" SpatialManipulator.traversalBlendDistance="0.8" SpatialManipulator.deformationStrength="1" SpatialManipulator.portalEdgeHalfWidth="0.055" SpatialManipulator.portalEdgeHalfDepth="0.1" SpatialManipulator.portalCollisionCutUpdateDistance="0.04" SpatialManipulator.materializeSplitOnDisconnect="true" SpatialManipulator.portalTraversalPriority="0">
-          <SpatialManipulator.portalPoint><item>0</item><item>0</item><item>0</item></SpatialManipulator.portalPoint>
-          <SpatialManipulator.portalNormal><item>0</item><item>0</item><item>1</item></SpatialManipulator.portalNormal>
-          <SpatialManipulator.portalShapePoint0><item>-1.2</item><item>-1.7</item><item>0</item></SpatialManipulator.portalShapePoint0>
-          <SpatialManipulator.portalShapePoint1><item>1.2</item><item>-1.7</item><item>0</item></SpatialManipulator.portalShapePoint1>
-          <SpatialManipulator.portalShapePoint2><item>1.2</item><item>1.7</item><item>0</item></SpatialManipulator.portalShapePoint2>
-          <SpatialManipulator.portalShapePoint3><item>-1.2</item><item>1.7</item><item>0</item></SpatialManipulator.portalShapePoint3>
+          <SpatialManipulator.portalPoint _arrayEncoding="spaceSeparatedNumbers">0 0 0</SpatialManipulator.portalPoint>
+          <SpatialManipulator.portalNormal _arrayEncoding="spaceSeparatedNumbers">0 0 1</SpatialManipulator.portalNormal>
+          <SpatialManipulator.portalShapePoint0 _arrayEncoding="spaceSeparatedNumbers">-1.2 -1.7 0</SpatialManipulator.portalShapePoint0>
+          <SpatialManipulator.portalShapePoint1 _arrayEncoding="spaceSeparatedNumbers">1.2 -1.7 0</SpatialManipulator.portalShapePoint1>
+          <SpatialManipulator.portalShapePoint2 _arrayEncoding="spaceSeparatedNumbers">1.2 1.7 0</SpatialManipulator.portalShapePoint2>
+          <SpatialManipulator.portalShapePoint3 _arrayEncoding="spaceSeparatedNumbers">-1.2 1.7 0</SpatialManipulator.portalShapePoint3>
           <SpatialManipulator.traversalTriggerBodyReference expectedType="RigidBody" objectPath="" objectName="Room 2 North Exit" componentType="RigidBody" componentIndex="0" />
           <SpatialManipulator.targetManipulator expectedType="SpatialManipulator" objectPath="" objectName="Room 3 West Entrance" componentType="SpatialManipulator" componentIndex="0" />
         </components:SpatialManipulator>
@@ -208,23 +208,23 @@
     </item>
     <item name="Room 3 West Entrance" enabled="true">
       <transform>
-        <Transform.position><item>-4</item><item>15.7</item><item>0</item></Transform.position>
-        <Transform.rotation><item>0</item><item>1.570796</item><item>0</item></Transform.rotation>
-        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">-4 15.7 0</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 1.570796 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
       </transform>
       <components>
         <components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Box" PrimitiveObjectCollider.radius="0.5" PrimitiveObjectCollider.height="1">
-          <PrimitiveObjectCollider.center><item>0</item><item>0</item><item>0</item></PrimitiveObjectCollider.center>
-          <PrimitiveObjectCollider.size><item>2.4</item><item>3.4</item><item>0.7</item></PrimitiveObjectCollider.size>
+          <PrimitiveObjectCollider.center _arrayEncoding="spaceSeparatedNumbers">0 0 0</PrimitiveObjectCollider.center>
+          <PrimitiveObjectCollider.size _arrayEncoding="spaceSeparatedNumbers">2.4 3.4 0.7</PrimitiveObjectCollider.size>
         </components:PrimitiveObjectCollider>
         <components:RigidBody RigidBody.bodyType="Static" RigidBody.mass="1" RigidBody.useGravity="false" RigidBody.friction="0" RigidBody.restitution="0" RigidBody.isTrigger="true" RigidBody.continuousCollision="false" RigidBody.collisionLayer="2" RigidBody.collisionMask="-1" />
         <components:SpatialManipulator SpatialManipulator.enabled="true" SpatialManipulator.connectionMode="2" SpatialManipulator.portalPointCount="4" SpatialManipulator.autoMatchPortalPointCount="true" SpatialManipulator.deformMeshOnTraversal="true" SpatialManipulator.traversalBlendDistance="0.8" SpatialManipulator.deformationStrength="1" SpatialManipulator.portalEdgeHalfWidth="0.055" SpatialManipulator.portalEdgeHalfDepth="0.1" SpatialManipulator.portalCollisionCutUpdateDistance="0.04" SpatialManipulator.materializeSplitOnDisconnect="true" SpatialManipulator.portalTraversalPriority="0">
-          <SpatialManipulator.portalPoint><item>0</item><item>0</item><item>0</item></SpatialManipulator.portalPoint>
-          <SpatialManipulator.portalNormal><item>0</item><item>0</item><item>1</item></SpatialManipulator.portalNormal>
-          <SpatialManipulator.portalShapePoint0><item>-1.2</item><item>-1.7</item><item>0</item></SpatialManipulator.portalShapePoint0>
-          <SpatialManipulator.portalShapePoint1><item>1.2</item><item>-1.7</item><item>0</item></SpatialManipulator.portalShapePoint1>
-          <SpatialManipulator.portalShapePoint2><item>1.2</item><item>1.7</item><item>0</item></SpatialManipulator.portalShapePoint2>
-          <SpatialManipulator.portalShapePoint3><item>-1.2</item><item>1.7</item><item>0</item></SpatialManipulator.portalShapePoint3>
+          <SpatialManipulator.portalPoint _arrayEncoding="spaceSeparatedNumbers">0 0 0</SpatialManipulator.portalPoint>
+          <SpatialManipulator.portalNormal _arrayEncoding="spaceSeparatedNumbers">0 0 1</SpatialManipulator.portalNormal>
+          <SpatialManipulator.portalShapePoint0 _arrayEncoding="spaceSeparatedNumbers">-1.2 -1.7 0</SpatialManipulator.portalShapePoint0>
+          <SpatialManipulator.portalShapePoint1 _arrayEncoding="spaceSeparatedNumbers">1.2 -1.7 0</SpatialManipulator.portalShapePoint1>
+          <SpatialManipulator.portalShapePoint2 _arrayEncoding="spaceSeparatedNumbers">1.2 1.7 0</SpatialManipulator.portalShapePoint2>
+          <SpatialManipulator.portalShapePoint3 _arrayEncoding="spaceSeparatedNumbers">-1.2 1.7 0</SpatialManipulator.portalShapePoint3>
           <SpatialManipulator.traversalTriggerBodyReference expectedType="RigidBody" objectPath="" objectName="Room 3 West Entrance" componentType="RigidBody" componentIndex="0" />
           <SpatialManipulator.targetManipulator expectedType="SpatialManipulator" objectPath="" objectName="Room 2 North Exit" componentType="SpatialManipulator" componentIndex="0" />
         </components:SpatialManipulator>
@@ -233,23 +233,23 @@
     </item>
     <item name="Room 3 North Exit" enabled="true">
       <transform>
-        <Transform.position><item>0</item><item>15.7</item><item>4</item></Transform.position>
-        <Transform.rotation><item>0</item><item>3.141593</item><item>0</item></Transform.rotation>
-        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">0 15.7 4</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 3.141593 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
       </transform>
       <components>
         <components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Box" PrimitiveObjectCollider.radius="0.5" PrimitiveObjectCollider.height="1">
-          <PrimitiveObjectCollider.center><item>0</item><item>0</item><item>0</item></PrimitiveObjectCollider.center>
-          <PrimitiveObjectCollider.size><item>2.4</item><item>3.4</item><item>0.7</item></PrimitiveObjectCollider.size>
+          <PrimitiveObjectCollider.center _arrayEncoding="spaceSeparatedNumbers">0 0 0</PrimitiveObjectCollider.center>
+          <PrimitiveObjectCollider.size _arrayEncoding="spaceSeparatedNumbers">2.4 3.4 0.7</PrimitiveObjectCollider.size>
         </components:PrimitiveObjectCollider>
         <components:RigidBody RigidBody.bodyType="Static" RigidBody.mass="1" RigidBody.useGravity="false" RigidBody.friction="0" RigidBody.restitution="0" RigidBody.isTrigger="true" RigidBody.continuousCollision="false" RigidBody.collisionLayer="2" RigidBody.collisionMask="-1" />
         <components:SpatialManipulator SpatialManipulator.enabled="true" SpatialManipulator.connectionMode="2" SpatialManipulator.portalPointCount="4" SpatialManipulator.autoMatchPortalPointCount="true" SpatialManipulator.deformMeshOnTraversal="true" SpatialManipulator.traversalBlendDistance="0.8" SpatialManipulator.deformationStrength="1" SpatialManipulator.portalEdgeHalfWidth="0.055" SpatialManipulator.portalEdgeHalfDepth="0.1" SpatialManipulator.portalCollisionCutUpdateDistance="0.04" SpatialManipulator.materializeSplitOnDisconnect="true" SpatialManipulator.portalTraversalPriority="0">
-          <SpatialManipulator.portalPoint><item>0</item><item>0</item><item>0</item></SpatialManipulator.portalPoint>
-          <SpatialManipulator.portalNormal><item>0</item><item>0</item><item>1</item></SpatialManipulator.portalNormal>
-          <SpatialManipulator.portalShapePoint0><item>-1.2</item><item>-1.7</item><item>0</item></SpatialManipulator.portalShapePoint0>
-          <SpatialManipulator.portalShapePoint1><item>1.2</item><item>-1.7</item><item>0</item></SpatialManipulator.portalShapePoint1>
-          <SpatialManipulator.portalShapePoint2><item>1.2</item><item>1.7</item><item>0</item></SpatialManipulator.portalShapePoint2>
-          <SpatialManipulator.portalShapePoint3><item>-1.2</item><item>1.7</item><item>0</item></SpatialManipulator.portalShapePoint3>
+          <SpatialManipulator.portalPoint _arrayEncoding="spaceSeparatedNumbers">0 0 0</SpatialManipulator.portalPoint>
+          <SpatialManipulator.portalNormal _arrayEncoding="spaceSeparatedNumbers">0 0 1</SpatialManipulator.portalNormal>
+          <SpatialManipulator.portalShapePoint0 _arrayEncoding="spaceSeparatedNumbers">-1.2 -1.7 0</SpatialManipulator.portalShapePoint0>
+          <SpatialManipulator.portalShapePoint1 _arrayEncoding="spaceSeparatedNumbers">1.2 -1.7 0</SpatialManipulator.portalShapePoint1>
+          <SpatialManipulator.portalShapePoint2 _arrayEncoding="spaceSeparatedNumbers">1.2 1.7 0</SpatialManipulator.portalShapePoint2>
+          <SpatialManipulator.portalShapePoint3 _arrayEncoding="spaceSeparatedNumbers">-1.2 1.7 0</SpatialManipulator.portalShapePoint3>
           <SpatialManipulator.traversalTriggerBodyReference expectedType="RigidBody" objectPath="" objectName="Room 3 North Exit" componentType="RigidBody" componentIndex="0" />
           <SpatialManipulator.targetManipulator expectedType="SpatialManipulator" objectPath="" objectName="Room 1 West Entrance" componentType="SpatialManipulator" componentIndex="0" />
         </components:SpatialManipulator>
@@ -258,11 +258,11 @@
     </item>
     <item name="Stack Overview Camera" enabled="true">
       <transform>
-        <Transform.position><item>16</item><item>15</item><item>-20</item></Transform.position>
-        <Transform.rotation><item>0</item><item>0</item><item>0</item></Transform.rotation>
-        <Transform.scale><item>1</item><item>1</item><item>1</item></Transform.scale>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">16 15 -20</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
       </transform>
-      <components><components:Camera Camera.active="false" Camera.useTransformRotation="false" Camera.fov="58" Camera.near="0.02" Camera.far="120" Camera.orthographic="false" Camera.orthographicSize="5"><Camera.target><item>0</item><item>10</item><item>0</item></Camera.target><Camera.up><item>0</item><item>1</item><item>0</item></Camera.up></components:Camera></components>
+      <components><components:Camera Camera.active="false" Camera.useTransformRotation="false" Camera.fov="58" Camera.near="0.02" Camera.far="120" Camera.orthographic="false" Camera.orthographicSize="5"><Camera.target _arrayEncoding="spaceSeparatedNumbers">0 10 0</Camera.target><Camera.up _arrayEncoding="spaceSeparatedNumbers">0 1 0</Camera.up></components:Camera></components>
       <children />
     </item>
   </objects>
