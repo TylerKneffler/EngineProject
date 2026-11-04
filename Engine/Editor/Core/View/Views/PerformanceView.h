@@ -122,6 +122,7 @@ private:
     std::string m_recordingError;
     struct TimingValue { const char* label; double milliseconds; };
     std::vector<TimingValue> m_frameTimings;
+    std::vector<EditorFrameProfileSample::UiPanel> m_uiPanels;
     std::array<EditorFrameProfileSample::StageWork,5> m_stageWork{};
     double m_frameLatencyMs=0;
     std::vector<TimingValue> m_updateTimings;

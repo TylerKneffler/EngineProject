@@ -55,6 +55,11 @@ public:
     const std::vector<uint8_t>& GetPixels() const;
     bool IsSrgb() const { return m_srgb; }
     const IGraphicsTexture* GetGraphicsTexture() const { return m_graphicsTexture.get(); }
+    bool IsPreparedFor(const IGraphicsProvider* provider) const
+    {
+        return provider && m_preparedProvider==provider && m_graphicsTexture &&
+            m_graphicsTexture->GetNativeHandle();
+    }
 
 private:
     explicit Texture(std::string path, bool srgb)

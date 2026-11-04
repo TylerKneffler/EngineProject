@@ -561,6 +561,7 @@ void D3D12GraphicsContext::EndDepthOnlyPass()
     barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
     m_cmdList->ResourceBarrier(1, &barrier);
     m_activeDepthTarget = nullptr;
+    if(m_restoreDepthOnlyPass) m_restoreDepthOnlyPass();
 }
 
 void D3D12GraphicsContext::SetStencilReference(uint32_t reference)

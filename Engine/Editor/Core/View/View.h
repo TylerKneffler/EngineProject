@@ -53,6 +53,9 @@ public:
     // device: opaque graphics device handle
     void Resize(void* device, uint32_t width, uint32_t height);
     void ApplyRequestedRenderSize(void* device);
+    // Keep benchmark targets independent of dock layout and window resizing.
+    // Pass zero dimensions to resume normal viewport sizing.
+    void SetFixedRenderSize(void* device, uint32_t width, uint32_t height);
 
     // Render to offscreen target with custom drawing function
     // cmdList: opaque graphics command list handle
@@ -95,5 +98,7 @@ private:
     uint32_t m_requestedWidth = 0;
     uint32_t m_requestedHeight = 0;
     bool m_renderSizeChanged = false;
+    uint32_t m_fixedWidth = 0;
+    uint32_t m_fixedHeight = 0;
 };
 }

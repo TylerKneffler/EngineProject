@@ -4,6 +4,7 @@
 #include "Core/Compoonents/TransformHierarchy.h"
 #include "Core/Scene/ComponentRegistry.h"
 #include "Core/Rendering/PersistentInstanceBatches.h"
+#include "Core/Rendering/InstanceTilePreparation.h"
 #include "Core/Compoonents/SpatialUpdate.h"
 #include <glm/gtc/quaternion.hpp>
 #include "Core/Object.h"
@@ -37,6 +38,7 @@
 #include <any>
 #include <typeindex>
 #include <unordered_set>
+#include <set>
 #include <vector>
 
 namespace Engine::Audio { class Audio; }
@@ -254,11 +256,15 @@ public:
     {
         double lookupMs = 0.0;
         double itemsMs = 0.0;
+        double itemValidationMs=0, itemTexturesMs=0, itemShadersMs=0;
+        double itemMeshStateMs=0, itemBoundsMs=0, itemLodMs=0, itemBuildMs=0;
+        uint64_t itemShaderRequests=0, itemShaderResolutions=0;
         double boneUploadMs = 0.0;
         double capacityMs = 0.0;
         double spatialMs = 0.0;
         uint64_t boundsReused=0,boundsUpdated=0;
         uint64_t staticRenderItemsReused=0,staticRenderItemsUpdated=0;
+        uint64_t instancedRenderItemsReused=0,instancedRenderItemsUpdated=0;
         double workerMs=0,mainJobMs=0,workerWaitMs=0,workerQueueMs=0;
         double transformsMs=0,transformSnapshotMs=0,transformComputeMs=0,transformCommitMs=0;
         uint64_t transformLocalUpdated=0,transformWorldUpdated=0,transformWorldReused=0,transformLevels=0;
@@ -821,6 +827,9 @@ private:
     std::unordered_map<std::string, MaterialShaderFuture> m_materialShaderBytecode;
     MaterialShaderFuture QueueMaterialShaderBytecode(const std::string& path,
         bool terrain, int64_t stamp);
+    // One source lookup per authored material location/path/variant each frame.
+    // Reset every preparation to retain hot reload and direct script edits.
+    std::set<std::tuple<std::string, std::string, bool>> m_preparedMaterialShaderSources;
     void PrewarmMaterialShaders(const Engine::Components::Material& material,
         bool terrain);
     struct MaterialShaderPipeline
@@ -983,6 +992,7 @@ private:
         // against this world-space plane without modifying the mesh buffer.
         glm::vec4 traversalClipPlane{0.f};
         glm::vec4 geometryFade{0.f, 1.f, 0.f, 0.f};
+        glm::vec2 shadowCasterFade{0.f,1.f};
         // The portal endpoint whose coordinate chart owns world and the clip
         // plane. Portal views remap only instances in their near-side chart.
         const Engine::Components::SpatialManipulator* traversalChartPortal = nullptr;
@@ -1004,6 +1014,10 @@ private:
         uint64_t geometryRevision = 0;
         bool matrixLayerEnabled = false;
         glm::mat4 matrixLayer{1.f};
+        const void* instanceData = nullptr;
+        uint64_t instanceRevision = 0;
+        const Engine::Components::Mesh* instanceSource = nullptr;
+        uint64_t sourceGeometryRevision = 0;
     };
     std::unordered_map<Object*, StaticRenderItemCache> m_staticRenderItemCache;
     using RenderObjectKey=std::tuple<uintptr_t,int,uintptr_t,bool>;
@@ -1037,6 +1051,10 @@ private:
     std::array<Engine::Rendering::DrawBatchPreparation,2> m_drawBatchPreparation;
     Engine::Rendering::PersistentInstancePool m_persistentInstances;
     Engine::Rendering::PersistentInstanceBatches m_persistentBatches;
+    Engine::Rendering::InstanceTilePreparation m_instanceTilePreparation;
+    // Directional light indices cover every cluster and do not depend on
+    // camera pose or light color. Buffer identities separate GPU frame slots.
+    std::map<std::pair<const void*,const void*>,std::array<uint32_t,5>> m_directionalClusterLayouts;
     uint64_t m_instanceViewSerial=UINT64_MAX;
     std::map<std::pair<const void*,bool>,uint32_t> m_instanceViewUses;
     struct RenderPassBuffers

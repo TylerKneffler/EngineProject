@@ -1,5 +1,6 @@
 #pragma once
 #include "Core/Graphics/IGraphicsProvider.h"
+#include "RenderJobs.h"
 #include <glm/glm.hpp>
 #include <algorithm>
 #include <cstring>
@@ -71,6 +72,7 @@ public:
     struct Statistics
     {
         uint64_t newBytes=0,editedBytes=0,growthBytes=0,allocations=0,retirements=0,hits=0;
+        uint64_t preparedRecords=0,workerPasses=0;
     } stats;
     void BeginFrame(Graphics::IGraphicsProvider* provider)
     {
@@ -128,15 +130,32 @@ public:
         }
         if(created) source.identity=identity ? identity:m_nextIdentity++;
         if(identity) m_stableSources.emplace(identity,lifetime.get());
-        source.lifetime=lifetime; source.count=count; source.revision=revision;
+        source.lifetime=lifetime; source.count=count; source.revision=UINT64_MAX;
         uint32_t dirtyFirst=UINT32_MAX,dirtyLast=0;
-        const auto* bytes=static_cast<const uint8_t*>(transforms);
+        // Changed sources are copied while the scene owner is stable. Workers
+        // only convert immutable affine/identity snapshots, never live meshes
+        // or mapped GPU memory. Publication and dirty-range merging stay here.
+        struct AffineSnapshot { glm::vec4 rows[3]; };
+        static_assert(sizeof(AffineSnapshot)==48);
+        std::vector<AffineSnapshot> affine(count);
+        if(count) std::memcpy(affine.data(),transforms,size_t(count)*sizeof(AffineSnapshot));
+        const std::vector<uint64_t> identities(ids);
+        const auto sourceIdentity=source.identity;
+        std::vector<PersistentInstance> records(count);
+        // Small edits cost less than a scheduler handoff. Large changed sources
+        // amortize snapshot and worker setup; unchanged sources returned above.
+        RenderJobs::Get().For(count,count>=1024 ? 256:SIZE_MAX,[&](size_t index)
+        {
+            auto& record=records[index];
+            std::memcpy(record.rows,affine[index].rows,sizeof(record.rows));
+            const uint64_t placement=index<identities.size() ? identities[index]:uint64_t(index)+1;
+            record.identity={uint32_t(sourceIdentity),uint32_t(sourceIdentity>>32),uint32_t(placement),uint32_t(placement>>32)};
+        });
+        stats.preparedRecords+=count;
+        if(count>=1024 && RenderJobs::Get().WorkerCount() && RenderJobs::Get().ParallelForEnabled()) ++stats.workerPasses;
         for(uint32_t index=0;index<count;++index)
         {
-            PersistentInstance record{};
-            std::memcpy(record.rows,bytes+size_t(index)*48,48);
-            const uint64_t placement=index<ids.size() ? ids[index]:uint64_t(index)+1;
-            record.identity={uint32_t(source.identity),uint32_t(source.identity>>32),uint32_t(placement),uint32_t(placement>>32)};
+            const auto& record=records[index];
             auto& destination=m_records[source.first+index];
             if(moved || std::memcmp(&destination,&record,sizeof(record))!=0)
             {
@@ -149,6 +168,7 @@ public:
             }
         }
         if(dirtyFirst!=UINT32_MAX) m_changes.push_back({++m_revision,source.first+dirtyFirst,dirtyLast-dirtyFirst+1,created});
+        source.revision=revision;
         return source.first;
     }
     const PersistentInstance& Get(uint32_t index) const { return m_records.at(index); }

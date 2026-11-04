@@ -1,5 +1,5 @@
 // Material shader asset: the normal object vertex path preserves instancing,
-// GPU LOD and dithered fades. Only the foliage color pass is simplified.
+// GPU LOD, root-pinned grass wind and dithered fades. The foliage color pass is simplified.
 #define PSMain PSObjectMain
 #include "../../Shaders/Object/Object.hlsl"
 #undef PSMain

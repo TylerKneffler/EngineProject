@@ -513,16 +513,21 @@ void Material::PrepareTextures(IGraphicsProvider* graphicsProvider)
         (!reflectionEnvironmentMap ||
             reflectionEnvironmentMap->GetFilePath() != reflectionEnvironmentTexture))
         SetReflectionEnvironmentTexture(reflectionEnvironmentTexture);
-    for (const auto& texture : {
-        baseColorTexture, metallicRoughnessTexture, normalTexture,
-        heightTexture, occlusionTexture, emissiveTexture,
-        subsurfaceThicknessTexture, sphereTexture, toonTexture })
-        if (texture)
-            texture->QueuePrepare(graphicsProvider);
-    // Diffuse environment lighting uses the CPU-side SH projection, while
-    // glossy reflections sample the original mipmapped panorama on the GPU.
-    if (reflectionEnvironmentMap)
-        reflectionEnvironmentMap->QueuePrepare(graphicsProvider);
+    const std::array<Texture*,10> textures={baseColorTexture.get(), metallicRoughnessTexture.get(),
+        normalTexture.get(), heightTexture.get(), occlusionTexture.get(), emissiveTexture.get(),
+        subsurfaceThicknessTexture.get(), sphereTexture.get(), toonTexture.get(), reflectionEnvironmentMap.get()};
+    const bool resident=std::all_of(textures.begin(),textures.end(),[&](const Texture* texture) {
+        return !texture || texture->IsPreparedFor(graphicsProvider);
+    });
+    if(m_texturesCached && m_preparedTextureProvider==graphicsProvider &&
+        std::equal(textures.begin(),textures.end(),m_preparedTextures.begin()) && resident) return;
+    // Raw pointers avoid copying ten shared owners every render preparation.
+    // Pending, failed, replaced or invalidated resources still visit QueuePrepare.
+    for(auto* texture:textures)
+        if(texture) texture->QueuePrepare(graphicsProvider);
+    std::copy(textures.begin(),textures.end(),m_preparedTextures.begin());
+    m_preparedTextureProvider=graphicsProvider;
+    m_texturesCached=resident;
 }
 
 MaterialAlphaMode Material::GetAlphaMode() const
@@ -546,6 +551,22 @@ void Material::Validate()
         if (shader.blendMode != "Opaque" && shader.blendMode != "Alpha" &&
             shader.blendMode != "Additive")
             shader.blendMode = "Auto";
+    // Public fields can change without configuration notifications. Keep this
+    // normalized-input snapshot in sync with every clamp below.
+    const auto captureFloats=[&] { return std::array<float,25>{
+        metallicFactor, roughnessFactor, subsurfaceWeight,
+        subsurfaceRadius[0], subsurfaceRadius[1], subsurfaceRadius[2],
+        subsurfaceColor[0], subsurfaceColor[1], subsurfaceColor[2],
+        subsurfaceThickness, subsurfaceTransmission, environmentDiffuseStrength,
+        reflectionStrength, reflectionEnvironmentExposure, baseColorAlpha, alphaCutoff,
+        normalScale, heightScale, terrainHeightBlendStrength,
+        terrainMacroColor[0], terrainMacroColor[1], terrainMacroColor[2],
+        heightMinSteps, heightMaxSteps, occlusionStrength}; };
+    const auto captureUvSets=[&] { return std::array<int,6>{baseColorUvSet,
+        metallicRoughnessUvSet, normalUvSet, occlusionUvSet, emissiveUvSet, heightUvSet}; };
+    if(m_validationCached && (specularModel=="BlinnPhong" || specularModel=="MetallicRoughness") &&
+        (alphaMode=="Opaque" || alphaMode=="Mask" || alphaMode=="Blend") &&
+        captureFloats()==m_validatedFloats && captureUvSets()==m_validatedUvSets) return;
     if (specularModel != "BlinnPhong")
         specularModel = "MetallicRoughness";
     metallicFactor = std::clamp(metallicFactor, 0.f, 1.f);
@@ -581,6 +602,9 @@ void Material::Validate()
     case MaterialAlphaMode::Blend: alphaMode = "Blend"; break;
     default: alphaMode = "Opaque"; break;
     }
+    m_validatedFloats=captureFloats();
+    m_validatedUvSets=captureUvSets();
+    m_validationCached=true;
 }
 
 Material::JsonValue Material::Serialize() const

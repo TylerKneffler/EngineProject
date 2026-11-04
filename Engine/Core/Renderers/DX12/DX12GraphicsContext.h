@@ -1,4 +1,5 @@
 #pragma once
+#include <functional>
 #include "Core/Graphics/IGraphicsContext.h"
 #include <wrl/client.h>
 #include <d3d12.h>
@@ -45,6 +46,9 @@ public:
     bool BeginDepthOnlyPass(const Engine::Graphics::IGraphicsTexture* texture,
         float clearDepth = 1.f) override;
     void EndDepthOnlyPass() override;
+    // D3D12 command lists cannot query their previously bound framebuffer.
+    // Hosts that run a depth pass inside a color frame supply its restoration.
+    void SetDepthOnlyPassRestore(std::function<void()> restore) { m_restoreDepthOnlyPass=std::move(restore); }
 
     void SetViewport(const Viewport& vp) override;
     void SetScissorRect(const ScissorRect& rect) override;
@@ -86,6 +90,7 @@ private:
     uint64_t m_activeOcclusionKey = 0;
     uint32_t m_activeOcclusionIndex = UINT32_MAX;
     D3D12GraphicsTexture* m_activeDepthTarget = nullptr;
+    std::function<void()> m_restoreDepthOnlyPass;
 
     D3D12_RESOURCE_STATES ConvertResourceState(ResourceState state) const;
 };

@@ -150,6 +150,11 @@ bool GrassField::LoadSources()
             else { m_sourceMinimum = glm::min(m_sourceMinimum, mesh->GetBoundsMin());
                 m_sourceMaximum = glm::max(m_sourceMaximum, mesh->GetBoundsMax()); }
         }
+        // Reserve the largest permitted bend once, for every LOD. Wind edits
+        // never regenerate placements or change their GPU buffers.
+        const float windPadding = 1.5f * std::max(0.f, m_sourceMaximum.y);
+        m_sourceMinimum -= glm::vec3(windPadding);
+        m_sourceMaximum += glm::vec3(windPadding);
     }
     catch (const std::exception& error)
     {
@@ -575,12 +580,11 @@ bool GrassField::Refresh()
             tile.desiredLod = gpuLodSelection ? 0:lod;
             tile.mesh->gpuLodSelection=gpuLodSelection;
             tile.mesh->gpuLod1Distance=lod1; tile.mesh->gpuLod2Distance=lod2;
-            bool shadows = castShadows && shadowRadius > 0 && distance < shadowRadius;
-            if (castShadows && shadowRadius > 0)
-            {
-                if (tile.castsShadows && distance < shadowRadius + hysteresis) shadows = true;
-                else if (!tile.castsShadows && distance >= shadowRadius - hysteresis) shadows = false;
-            }
+            // Keep caster eligibility stable. The shadow shader fades each
+            // surface at the range edge; compute culls distant placements.
+            const bool shadows = castShadows && shadowRadius > 0;
+            tile.mesh->runtimeShadowDistance=shadowRadius;
+            tile.mesh->runtimeShadowFadeWidth=std::min(shadowRadius,std::max(.25f,distanceFadeWidth));
             tile.castsShadows = shadows;
             auto* tileMaterial = tile.object->GetComponent<Engine::Components::Material>();
             tileMaterial->castsShadows = shadows;

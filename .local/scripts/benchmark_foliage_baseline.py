@@ -1,4 +1,4 @@
-"""Capture matched DX11 landscape render baselines with foliage off and on.
+"""Capture matched DX11 terrain-only, foliage-only, and combined render baselines.
 
 The helper includes grass updates and rendering, but no editor UI or physics.
 Each case runs in a fresh process and writes its full per-frame JSONL trace.
@@ -21,12 +21,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("output_dir", type=Path)
     parser.add_argument("--config", choices=("Debug", "Release"), default="Release")
-    parser.add_argument("--width", type=int, default=1920)
-    parser.add_argument("--height", type=int, default=1080)
+    parser.add_argument("--width", type=int, choices=(1920,), default=1920)
+    parser.add_argument("--height", type=int, choices=(1080,), default=1080)
     parser.add_argument("--route", choices=("moving", "fixed"), default="moving")
     parser.add_argument("--scene", choices=("stress", "single", "single-distant", "default"),
                         default="stress")
-    parser.add_argument("--modes", nargs="+", choices=("off", "shadows-off", "on"),
+    parser.add_argument("--modes", nargs="+", choices=("off", "shadows-off", "on", "foliage-only"),
                         default=("off", "shadows-off", "on"))
     parser.add_argument("--reuse", action="store_true",
                         help="Summarize existing traces without running the renderer")
@@ -68,6 +68,9 @@ def main():
                   if line.startswith("{")]
         frames = [row for row in frames if row.get("type") == "frame_details"
                   and row.get("measured")]
+        if not frames or any((row.get("view_width"), row.get("view_height")) != (1920, 1080)
+                             for row in frames):
+            raise RuntimeError(f"benchmark did not render at 1920x1080: {trace}")
         if len(frames) != 240:
             raise RuntimeError(f"{mode} has {len(frames)} measured frames, expected 240: {trace}")
         summary["cases"][mode] = {
@@ -77,6 +80,12 @@ def main():
             "gpu_samples": evaluated["unique_gpu_samples"],
             "grass_update_ms": evaluated["metrics"].get("grass_ms"),
             "render_cpu_ms": evaluated["metrics"].get("render_cpu_total_ms"),
+            "scene_prepare_ms": evaluated["metrics"].get("scene_prepare_ms"),
+            "prepare_items_ms": evaluated["metrics"].get("prepare_items_ms"),
+            "visible_terrain_meshes": sorted({row["visible_terrain_meshes"] for row in frames
+                                               if "visible_terrain_meshes" in row}),
+            "visible_foliage_meshes": sorted({row["visible_foliage_meshes"] for row in frames
+                                               if "visible_foliage_meshes" in row}),
             "peak_grass_instances": max((row.get("grass_instances", 0) for row in frames), default=0),
             "tiles_built": sum(row.get("grass_built", 0) for row in frames),
             "peak_placement_upload_bytes": max((row.get("grass_instance_upload_bytes", 0)

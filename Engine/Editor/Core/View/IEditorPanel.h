@@ -41,6 +41,8 @@ public:
 
     // Draws through the selected package-neutral UI implementation.
     virtual void DrawPanel(IEditorUi& ui) = 0;
+    void SetLastUiDrawMilliseconds(double value) { m_lastUiDrawMilliseconds = value; }
+    double GetLastUiDrawMilliseconds() const { return m_lastUiDrawMilliseconds; }
 
     // Returns true if this panel owns an offscreen DX12 render target.
     virtual bool NeedsRender() const { return false; }
@@ -98,6 +100,7 @@ public:
     }
 
 protected:
+    double m_lastUiDrawMilliseconds = 0;
     std::string m_title;
     bool        m_open = true;
     CursorBehaviorOnFocus m_cursorBehaviorOnFocus = CursorBehaviorOnFocus::Visible;

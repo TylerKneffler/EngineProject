@@ -11,6 +11,7 @@
 #include <string>
 #include <sstream>
 #include <locale>
+#include <algorithm>
 
 namespace Engine::Editor
 {
@@ -125,6 +126,17 @@ namespace Engine::Editor
             << ",\"prepare_transform_structure_fallback\":" << prepareTimings.transformStructureFallback
             << ",\"prepare_lookup_ms\":" << prepareTimings.lookupMs
             << ",\"prepare_items_ms\":" << prepareTimings.itemsMs
+            << ",\"prepare_instanced_items_reused\":" << prepareTimings.instancedRenderItemsReused
+            << ",\"prepare_instanced_items_updated\":" << prepareTimings.instancedRenderItemsUpdated
+            << ",\"prepare_item_validation_ms\":" << prepareTimings.itemValidationMs
+            << ",\"prepare_item_textures_ms\":" << prepareTimings.itemTexturesMs
+            << ",\"prepare_item_shaders_ms\":" << prepareTimings.itemShadersMs
+            << ",\"prepare_item_mesh_state_ms\":" << prepareTimings.itemMeshStateMs
+            << ",\"prepare_item_bounds_ms\":" << prepareTimings.itemBoundsMs
+            << ",\"prepare_item_lod_ms\":" << prepareTimings.itemLodMs
+            << ",\"prepare_item_build_ms\":" << prepareTimings.itemBuildMs
+            << ",\"prepare_item_shader_requests\":" << prepareTimings.itemShaderRequests
+            << ",\"prepare_item_shader_resolutions\":" << prepareTimings.itemShaderResolutions
             << ",\"prepare_bone_upload_ms\":" << prepareTimings.boneUploadMs
             << ",\"prepare_capacity_ms\":" << prepareTimings.capacityMs
             << ",\"prepare_spatial_ms\":" << prepareTimings.spatialMs
@@ -157,6 +169,11 @@ namespace Engine::Editor
             << ",\"simulation_overlap_ms\":" << sample.simulationOverlapMilliseconds
             << ",\"simulation_gpu_wait_ms\":" << sample.simulationGpuWaitMilliseconds
             << ",\"pipeline_record_ms\":" << sample.pipelineRecordMilliseconds
+            << ",\"pipeline_compute_record_ms\":" << sample.pipelineComputeRecordMilliseconds
+            << ",\"pipeline_snapshot_ms\":" << sample.pipelineSnapshotMilliseconds
+            << ",\"pipeline_view_record_ms\":" << sample.pipelineViewRecordMilliseconds
+            << ",\"pipeline_record_other_ms\":" << std::max(0.0,sample.pipelineRecordMilliseconds-
+                sample.pipelineComputeRecordMilliseconds-sample.pipelineSnapshotMilliseconds-sample.pipelineViewRecordMilliseconds)
             << ",\"pipeline_queue_wait_ms\":" << sample.pipelineQueueWaitMilliseconds
             << ",\"pipeline_queue_waits\":" << sample.pipelineQueueWaits
             << ",\"pipeline_retained_frames\":" << sample.pipelineRetainedFrames
@@ -223,6 +240,19 @@ namespace Engine::Editor
         writeStepArray("physics_bullet_world_ms", bulletTimings.bulletWorldMs);
         writeStepArray("physics_contacts_ms", bulletTimings.contactsMs);
         const auto& shadow = scene->GetLastShadowCpuTiming();
+        const auto& shadowState = scene->GetShadowDebugSnapshot();
+        output << ",\"shadow_state_enabled\":" << (shadowState.enabled ? 1:0)
+            << ",\"shadow_state_selected_light\":" << (shadowState.hasSelectedLight ? 1:0)
+            << ",\"shadow_state_cascade_count\":" << shadowState.cascadeCount
+            << ",\"shadow_state_atlas_resolution\":" << shadowState.atlasResolution
+            << ",\"shadow_state_atlas_generation\":" << shadowState.atlasAllocationGeneration
+            << ",\"shadow_state_caster_count\":" << shadowState.casterCount;
+        output << ",\"shadow_state_cascade_splits\":[";
+        for(size_t i=0;i<4;++i) { if(i) output << ','; output << shadowState.cascadeSplits[i]; }
+        output << "]";
+        output << ",\"shadow_state_cascade_radii\":[";
+        for(size_t i=0;i<4;++i) { if(i) output << ','; output << shadowState.cascadeRadii[i]; }
+        output << "]";
         shadow.instances.WriteJson(output,"shadow_instance_");
         output << ",\"shadow_total_ms\":" << shadow.totalMs
             << ",\"shadow_explicit_instance_draws\":" << shadow.explicitInstanceDraws
@@ -253,6 +283,9 @@ namespace Engine::Editor
         output << ",\"render_metrics_scope\":\"all_main_views\""
             << ",\"render_cpu_total_ms\":" << renderCpu.totalMs
             << ",\"render_startup_ms\":" << renderCpu.startupMs
+            << ",\"render_cluster_prepare_ms\":" << renderCpu.clusterPreparationMs
+            << ",\"render_cluster_cache_hits\":" << renderCpu.clusterCacheHits
+            << ",\"render_cluster_upload_bytes\":" << renderCpu.clusterUploadBytes
             << ",\"render_terrain_prepare_ms\":" << renderCpu.terrainPreparationMs
             << ",\"render_occlusion_ms\":" << renderCpu.occlusionMs
             << ",\"render_other_ms\":" << renderCpu.otherMs
@@ -282,6 +315,10 @@ namespace Engine::Editor
             << ",\"render_submission_ms\":" << renderCpu.submissionMs
             << ",\"render_batching_ms\":" << renderCpu.batchingMs
             << ",\"render_batch_snapshot_ms\":" << renderCpu.batchSnapshotMs
+            << ",\"render_instance_tile_prepare_ms\":" << renderCpu.instanceTilePrepareMs
+            << ",\"render_instance_tile_reused\":" << renderCpu.instanceTileReused
+            << ",\"render_instance_tile_built\":" << renderCpu.instanceTileBuilt
+            << ",\"render_instance_tile_worker_passes\":" << renderCpu.instanceTileWorkerPasses
             << ",\"render_batch_build_ms\":" << renderCpu.batchBuildMs
             << ",\"render_batch_wait_ms\":" << renderCpu.batchWaitMs
             << ",\"render_batch_eligible_draws\":" << renderCpu.batchEligibleDraws
@@ -335,6 +372,28 @@ namespace Engine::Editor
             << ",\"writer_written_records\":" << sample.writer.written
             << ",\"writer_dropped_records\":" << sample.writer.dropped
             << ",\"writer_failed_records\":" << sample.writer.failed;
+        output << ",\"ui_panels\":[";
+        double panelTotal = 0;
+        bool firstPanel = true;
+        for (const auto& panel : sample.uiPanels)
+        {
+            if (!firstPanel) output << ',';
+            firstPanel = false;
+            output << "{\"title\":\"";
+            // Titles can contain asset paths or user-authored names. Own and
+            // escape them before the asynchronous writer sees the sample.
+            constexpr char hex[] = "0123456789abcdef";
+            for (unsigned char c : panel.title)
+            {
+                if (c == '"' || c == '\\') output << '\\' << char(c);
+                else if (c < 0x20) output << "\\u00" << hex[c >> 4] << hex[c & 15];
+                else output << char(c);
+            }
+            output << "\",\"draw_ms\":" << panel.milliseconds << '}';
+            panelTotal += panel.milliseconds;
+        }
+        output << "],\"ui_panels_ms\":" << panelTotal
+            << ",\"ui_other_ms\":" << std::max(0.0, sample.editorUiMilliseconds - panelTotal);
         return output;
     }
 

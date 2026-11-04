@@ -147,14 +147,15 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
         }
     }
 
-    if (EnvironmentVariable("ENGINE_EDITOR_AUTO_PROFILE_SCENE"))
+    const bool standardBenchmark =
+        EnvironmentVariable("ENGINE_EDITOR_AUTO_PROFILE_SCENE").has_value() ||
+        EnvironmentVariable("ENGINE_EDITOR_AUTO_PROFILE_MMD").has_value();
+    if (standardBenchmark)
     {
-        if (const auto width = EnvironmentVariable("ENGINE_EDITOR_AUTO_PROFILE_WIDTH"))
-            projectSettings.viewportWidth = static_cast<uint32_t>(std::clamp(
-                std::atoi(width->c_str()), 320, 4096));
-        if (const auto height = EnvironmentVariable("ENGINE_EDITOR_AUTO_PROFILE_HEIGHT"))
-            projectSettings.viewportHeight = static_cast<uint32_t>(std::clamp(
-                std::atoi(height->c_str()), 240, 2160));
+        projectSettings.viewportWidth = 1920;
+        projectSettings.viewportHeight = 1080;
+        projectSettings.aspectRatioMode = Engine::Model::ProjectSettings::AspectRatioMode::Locked;
+        projectSettings.gameAspectRatio = 1920.f / 1080.f;
     }
 
     const auto startupBackground =
@@ -221,6 +222,10 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
         [&]() { uiBackend->EndFrame(); }
     });
     editorState->InitializeUiState();
+    if (standardBenchmark)
+        for (const auto& panel : editorState->GetPanels())
+            if (auto* view = dynamic_cast<Engine::Editor::View*>(panel.get()))
+                view->SetFixedRenderSize(renderer->GetNativeDeviceHandle(), 1920, 1080);
     if (EnvironmentVariable("ENGINE_EDITOR_AUTO_PROFILE_GAME_VIEW").has_value())
         for (const auto& panel : editorState->GetPanels())
         {
@@ -643,6 +648,7 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
         std::vector<Engine::Editor::EditorPlayPipeline::Commands> frameCommands;
         std::shared_ptr<Engine::Graphics::GraphicsCommandPacket> computeCommands;
         double pipelineRecordMs = 0;
+        double pipelineComputeRecordMs=0,pipelineSnapshotMs=0,pipelineViewRecordMs=0;
         Engine::Editor::EditorPlayPipeline::Timings pipelineTimings;
         Engine::Rendering::GrassPerformance recordedGrass;
         bool uiDrawn = false;
@@ -726,10 +732,13 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
                 computeCommands = playPipeline->AcquireCommands();
                 scene->RecordGpuParticleSimulation(computeCommands.get());
                 frameCommands.push_back(computeCommands);
+                const auto computeRecordEnd=Clock::now();
+                pipelineComputeRecordMs=std::chrono::duration<double,std::milli>(computeRecordEnd-recordStart).count();
                 if (preparedScenes.count(scene))
                 {
                     auto drawPacket = scene->TakeNativeRenderPacket();
                     scene->RetainNativePacketMeshBuffers(*drawPacket, *computeCommands);
+                    pipelineSnapshotMs=std::chrono::duration<double,std::milli>(Clock::now()-computeRecordEnd).count();
                     for (const auto& panel : editorState->GetPanels())
                     {
                         auto* view = dynamic_cast<Engine::Editor::View*>(panel.get());
@@ -737,11 +746,13 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
                         RecordedView recorded{view,
                             playPipeline->AcquireCommands(),
                             playPipeline->AcquireCommands(), 0};
+                        const auto viewRecordStart=Clock::now();
                         if (auto* sceneView = dynamic_cast<Engine::Editor::SceneView*>(view))
                             sceneView->RecordRenderCommands(*recorded.shadow, *recorded.color, drawPacket.get());
                         else if (auto* gameView = dynamic_cast<Engine::Editor::GameView*>(view))
                             gameView->RecordRenderCommands(*recorded.shadow, *recorded.color, drawPacket.get());
                         else continue;
+                        pipelineViewRecordMs+=std::chrono::duration<double,std::milli>(Clock::now()-viewRecordStart).count();
                         recorded.shadowDraws = scene->GetShadowDebugSnapshot().submittedCasterDrawCount;
                         renderCpu += scene->GetLastRenderCpuTimings();
                         frameCommands.push_back(recorded.shadow);
@@ -944,6 +955,9 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
             sample.afterPendingLoad = afterPendingLoad;
             sample.playPipeline = usePlayPipeline;
             sample.uiCpuMilliseconds = uiCpuMilliseconds;
+            for (const auto& panel : editorState->GetPanels())
+                if (panel)
+                    sample.uiPanels.push_back({panel->GetTitle(), panel->GetLastUiDrawMilliseconds()});
             sample.workerPending = loadCounters.jobs.pending;
             sample.workerCount = loadCounters.jobs.workers;
             sample.startup = recordedFrameCount++ < 2;
@@ -955,6 +969,9 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
             sample.simulationOverlapMilliseconds = pipelineTimings.overlapMs;
             sample.simulationGpuWaitMilliseconds = pipelineTimings.gpuWaitMs;
             sample.pipelineRecordMilliseconds = pipelineRecordMs;
+            sample.pipelineComputeRecordMilliseconds=pipelineComputeRecordMs;
+            sample.pipelineSnapshotMilliseconds=pipelineSnapshotMs;
+            sample.pipelineViewRecordMilliseconds=pipelineViewRecordMs;
             sample.pipelineQueueWaitMilliseconds = pipelineTimings.queueWaitMs;
             sample.pipelineQueueWaits = pipelineTimings.queueWaits;
             sample.pipelineRetainedFrames = pipelineTimings.retainedFrames;

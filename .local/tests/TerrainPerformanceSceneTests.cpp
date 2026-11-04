@@ -42,20 +42,8 @@ int main()
     const bool benchmarkShadows = std::getenv("TERRAIN_SHADOW_BENCHMARK") != nullptr;
     const bool captureDummy = std::getenv("TERRAIN_DUMMY_CAPTURE") != nullptr;
     const bool captureGrid = std::getenv("TERRAIN_GRID_CAPTURE") != nullptr;
-    const auto benchmarkDimension = [](const char* name, unsigned fallback)
-    {
-        if (const char* value = std::getenv(name))
-        {
-            const unsigned parsed = static_cast<unsigned>(std::stoul(value));
-            Require(parsed > 0 && parsed <= 8192);
-            return parsed;
-        }
-        return fallback;
-    };
-    const unsigned width = captureDummy || captureGrid ? 1280u :
-        benchmark ? benchmarkDimension("TERRAIN_BENCHMARK_WIDTH", 960u) : 64u;
-    const unsigned height = captureDummy || captureGrid ? 720u :
-        benchmark ? benchmarkDimension("TERRAIN_BENCHMARK_HEIGHT", 540u) : 64u;
+    const unsigned width = captureDummy || captureGrid ? 1280u : benchmark ? 1920u : 64u;
+    const unsigned height = captureDummy || captureGrid ? 720u : benchmark ? 1080u : 64u;
     Engine::Core::Window window(GetModuleHandleW(nullptr),
         L"Terrain performance scene test", width, height);
     Engine::Renderers::DX11GameRenderer renderer;

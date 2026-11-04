@@ -478,6 +478,7 @@ void PerformanceView::SetFrameTimings(const EditorFrameProfileSample& sample,
             EditorFrameProfiler::CaptureFields(recordedSample, m_scene, renderer));
     }
     m_hasFrameTimings = true;
+    m_uiPanels = sample.uiPanels;
     m_frameTimings = {
         { "Frame", ms(sample.frameBegin, sample.afterPendingLoad) },
         { "Pacing", ms(sample.frameBegin, sample.afterPacing) },
@@ -522,6 +523,10 @@ void PerformanceView::SetFrameTimings(const EditorFrameProfileSample& sample,
         m_renderTimings.push_back({"Simulation/submission overlap", sample.simulationOverlapMilliseconds});
         m_renderTimings.push_back({"Lifecycle GPU wait", sample.simulationGpuWaitMilliseconds});
         m_renderTimings.push_back({"Render packet recording", sample.pipelineRecordMilliseconds});
+        m_renderTimings.push_back({"Compute recording", sample.pipelineComputeRecordMilliseconds});
+        m_renderTimings.push_back({"Scene snapshot / resource retention", sample.pipelineSnapshotMilliseconds});
+        m_renderTimings.push_back({"View command recording", sample.pipelineViewRecordMilliseconds});
+        m_renderTimings.push_back({"Clustered light lists (inside render startup)", sample.renderCpu.clusterPreparationMs});
     }
     if (auto* dx11 = dynamic_cast<Renderers::DX11EditorRenderer*>(renderer))
     {
@@ -595,6 +600,15 @@ void PerformanceView::DrawTimings(IEditorUi& ui)
     ui.ValueLabel("Frames over 60 FPS budget (%)",std::to_string(m_frameStatistics.over60BudgetPercent).c_str());
     ui.DisabledLabel("Frame interval includes waits between updates; CPU frame work can be shorter. The 60 FPS budget is 16.67 ms.");
     drawGroup("Frame phases (CPU)", m_frameTimings);
+    ui.Label("UI construction by panel (previous frame)");
+    ui.DisabledLabel("Panel times are contained in Editor UI; toolbar, menus and editor bookkeeping are outside these panel scopes.");
+    for (const auto& panel : m_uiPanels)
+    {
+        char value[48];
+        snprintf(value, sizeof(value), "%.3f ms", panel.milliseconds);
+        ui.ValueLabel(panel.title.c_str(), value);
+    }
+    ui.Separator();
     ui.Label("Stage work (ms)");
     ui.DisabledLabel("Columns: wall / main busy / worker execution / queue delay / dependency wait / scheduler wait / render stall. Worker and queue values sum across engine jobs; stages can overlap.");
     static constexpr const char* stageNames[]={"Pacing","Background","Scene update","Render","Pending load"};
@@ -644,6 +658,16 @@ void PerformanceView::DrawTimings(IEditorUi& ui)
             { "Bone upload", prepare.boneUploadMs },
             { "Capacity", prepare.capacityMs }, { "Spatial hierarchy", prepare.spatialMs }
         });
+        drawGroup("Render item preparation detail (CPU wall time)", {
+            { "Material validation",prepare.itemValidationMs }, { "Texture preparation",prepare.itemTexturesMs },
+            { "Shader preparation",prepare.itemShadersMs }, { "Mesh state",prepare.itemMeshStateMs },
+            { "Bounds/publication",prepare.itemBoundsMs }, { "LOD metadata",prepare.itemLodMs },
+            { "Item construction/other",prepare.itemBuildMs }
+        });
+        ui.ValueLabel("Cached instanced render items",std::to_string(prepare.instancedRenderItemsReused).c_str());
+        ui.ValueLabel("Rebuilt instanced render items",std::to_string(prepare.instancedRenderItemsUpdated).c_str());
+        ui.ValueLabel("Shader preparation requests",std::to_string(prepare.itemShaderRequests).c_str());
+        ui.ValueLabel("Unique shader source lookups",std::to_string(prepare.itemShaderResolutions).c_str());
         drawGroup("Transform preparation detail (CPU wall time)", {
             { "Capture",prepare.transformSnapshotMs }, { "Compute and joins",prepare.transformComputeMs },
             { "Commit",prepare.transformCommitMs }
@@ -725,12 +749,14 @@ void PerformanceView::DrawTimings(IEditorUi& ui)
         {"Worker synchronization",m_renderCpu.workerWaitMs},{"Record packing (workers)",m_renderCpu.recordPackingMs},
         {"Worker queue delay (summed)",m_renderCpu.workerQueueMs},{"Dependency readiness (summed)",m_renderCpu.workerDependencyMs},
         {"Batch snapshot (owner)",m_renderCpu.batchSnapshotMs},{"Batch grouping",m_renderCpu.batchBuildMs},
+        {"Instance tile snapshots / merge",m_renderCpu.instanceTilePrepareMs},
         {"Batch synchronization",m_renderCpu.batchWaitMs},
         {"Record synchronization",m_renderCpu.recordWaitMs},{"Other",m_renderCpu.otherMs}
     });
     ui.ValueLabel("Draw candidates / physical draws",(std::to_string(m_renderCpu.candidateDraws)+" / "+std::to_string(m_renderCpu.physicalDraws)).c_str());
     ui.ValueLabel("Automatic batches / GPU batches",(std::to_string(m_renderCpu.automaticBatches)+" / "+std::to_string(m_renderCpu.gpuBatches)).c_str());
     ui.ValueLabel("Batch eligible draws / cache hits / worker jobs",(std::to_string(m_renderCpu.batchEligibleDraws)+" / "+std::to_string(m_renderCpu.batchCacheHits)+" / "+std::to_string(m_renderCpu.batchWorkerJobs)).c_str());
+    ui.ValueLabel("Instance tile reused / built / parallel passes",(std::to_string(m_renderCpu.instanceTileReused)+" / "+std::to_string(m_renderCpu.instanceTileBuilt)+" / "+std::to_string(m_renderCpu.instanceTileWorkerPasses)).c_str());
     ui.ValueLabel("Reused batch compatibility keys",std::to_string(m_renderCpu.batchReusedKeys).c_str());
     ui.ValueLabel("Automatic instance candidates",std::to_string(m_renderCpu.automaticInstances).c_str());
     ui.ValueLabel("Triangle candidates",std::to_string(m_renderCpu.candidateTriangles).c_str());

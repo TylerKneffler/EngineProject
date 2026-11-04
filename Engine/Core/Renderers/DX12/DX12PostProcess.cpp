@@ -98,6 +98,13 @@ void DX12PostProcess::BindScene(ID3D12GraphicsCommandList* list,
     list->ClearRenderTargetView(target, clearColor, 0, nullptr);
 }
 
+void DX12PostProcess::RebindScene(ID3D12GraphicsCommandList* list,
+    D3D12_CPU_DESCRIPTOR_HANDLE depth)
+{
+    auto target=m_rtvHeap->GetCPUDescriptorHandleForHeapStart();
+    list->OMSetRenderTargets(1,&target,FALSE,depth.ptr ? &depth:nullptr);
+}
+
 void DX12PostProcess::ClearScene(ID3D12GraphicsCommandList* list,
     const float clearColor[4])
 {

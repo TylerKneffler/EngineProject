@@ -5,6 +5,7 @@
 #include <array>
 #include <fstream>
 #include <string>
+#include <vector>
 #include "Core/Rendering/RenderPerformance.h"
 #include "Core/Threading/CapturedText.h"
 #include "Core/Threading/AsyncTextWriter.h"
@@ -33,12 +34,15 @@ namespace Engine::Editor
         bool startup = false;
         uint32_t activity = 0;
         double uiCpuMilliseconds = 0;
+        struct UiPanel { std::string title; double milliseconds = 0; };
+        std::vector<UiPanel> uiPanels;
         uint64_t workerPending = 0;
         unsigned workerCount = 0;
         Engine::Threading::AsyncTextWriter::Statistics writer;
         double simulationMilliseconds = 0, simulationCpuMilliseconds = 0;
         double simulationWaitMilliseconds = 0, simulationOverlapMilliseconds = 0;
         double simulationGpuWaitMilliseconds = 0, pipelineRecordMilliseconds = 0;
+        double pipelineComputeRecordMilliseconds=0,pipelineSnapshotMilliseconds=0,pipelineViewRecordMilliseconds=0;
         double pipelineQueueWaitMilliseconds = 0;
         uint32_t pipelineQueueWaits = 0, pipelineRetainedFrames = 0;
         double prepareMilliseconds = 0.0;

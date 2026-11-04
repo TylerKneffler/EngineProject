@@ -37,6 +37,10 @@ public:
     bool useBoundsForShadowCulling = false;
     // Runtime classification; the project grass shadow budget supplements the layer budget.
     bool grassShadowCaster = false;
+    // Transient per-object caster range; zero means unrestricted. Evaluated on
+    // the GPU so distance changes do not toggle whole instance tiles.
+    float runtimeShadowDistance = 0.f;
+    float runtimeShadowFadeWidth = 1.f;
     PROPERTY(Inspector,EditAnywhere,Category="LOD")
     bool gpuLodSelection = false;
     PROPERTY(Inspector,EditAnywhere,Category="LOD")

@@ -968,39 +968,42 @@ EditorUiAssetTileResult ImGuiEditorUi::AssetTile(const char* label,
         ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 2.f);
     }
     ImGui::Button("##assetTile", { size, size });
-    const float hover = AnimateInteraction(ImGui::GetItemID(),
-        ImGui::IsItemHovered(), 12.f);
-    const ImVec2 minimum = ImGui::GetItemRectMin();
-    const ImVec2 maximum = ImGui::GetItemRectMax();
-    ImDrawList* drawList = ImGui::GetWindowDrawList();
-    const float padding = 6.f;
-    if (texture)
+    if (ImGui::IsItemVisible())
     {
-        drawList->AddImage(
-            static_cast<ImTextureID>(reinterpret_cast<uintptr_t>(texture)),
-            { minimum.x + padding, minimum.y + padding },
-            { maximum.x - padding, maximum.y - padding });
-    }
-    else if (fallbackIcon && *fallbackIcon)
-    {
-        const ImVec2 nativeSize = ImGui::CalcTextSize(fallbackIcon);
-        const float fitWidth = nativeSize.x > 0.f
-            ? ImGui::GetFontSize() * (size - padding * 2.f) / nativeSize.x
-            : ImGui::GetFontSize();
-        const float fontSize = std::min({ size * 0.42f, 48.f, fitWidth });
-        const ImVec2 iconSize = ImGui::GetFont()->CalcTextSizeA(
-            fontSize, FLT_MAX, 0.f, fallbackIcon);
-        drawList->AddText(ImGui::GetFont(), fontSize,
-            { minimum.x + (size - iconSize.x) * 0.5f,
-              minimum.y + (size - iconSize.y) * 0.5f },
-            ImGui::GetColorU32(ImGuiCol_TextDisabled), fallbackIcon);
-    }
-    if (hover > .01f)
-    {
-        ImVec4 accent = ImGui::GetStyleColorVec4(ImGuiCol_CheckMark);
-        accent.w *= hover * .85f;
-        drawList->AddRect(minimum, maximum, ImGui::GetColorU32(accent),
-            ImGui::GetStyle().FrameRounding, 0, 1.f + hover);
+        const float hover = AnimateInteraction(ImGui::GetItemID(),
+            ImGui::IsItemHovered(), 12.f);
+        const ImVec2 minimum = ImGui::GetItemRectMin();
+        const ImVec2 maximum = ImGui::GetItemRectMax();
+        ImDrawList* drawList = ImGui::GetWindowDrawList();
+        const float padding = 6.f;
+        if (texture)
+        {
+            drawList->AddImage(
+                static_cast<ImTextureID>(reinterpret_cast<uintptr_t>(texture)),
+                { minimum.x + padding, minimum.y + padding },
+                { maximum.x - padding, maximum.y - padding });
+        }
+        else if (fallbackIcon && *fallbackIcon)
+        {
+            const ImVec2 nativeSize = ImGui::CalcTextSize(fallbackIcon);
+            const float fitWidth = nativeSize.x > 0.f
+                ? ImGui::GetFontSize() * (size - padding * 2.f) / nativeSize.x
+                : ImGui::GetFontSize();
+            const float fontSize = std::min({ size * 0.42f, 48.f, fitWidth });
+            const ImVec2 iconSize = ImGui::GetFont()->CalcTextSizeA(
+                fontSize, FLT_MAX, 0.f, fallbackIcon);
+            drawList->AddText(ImGui::GetFont(), fontSize,
+                { minimum.x + (size - iconSize.x) * 0.5f,
+                  minimum.y + (size - iconSize.y) * 0.5f },
+                ImGui::GetColorU32(ImGuiCol_TextDisabled), fallbackIcon);
+        }
+        if (hover > .01f)
+        {
+            ImVec4 accent = ImGui::GetStyleColorVec4(ImGuiCol_CheckMark);
+            accent.w *= hover * .85f;
+            drawList->AddRect(minimum, maximum, ImGui::GetColorU32(accent),
+                ImGui::GetStyle().FrameRounding, 0, 1.f + hover);
+        }
     }
     if (selected)
     {
@@ -1342,6 +1345,9 @@ void ImGuiEditorUi::PercentageGrid(const char* id,
     const float height=actualWidth;
     const ImVec2 origin=ImGui::GetCursorScreenPos();
     ImGui::InvisibleButton(id,{actualWidth,height});
+    // Reserve layout and the item ID even when clipped, but do not tessellate
+    // hundreds of rounded cells outside the visible panel area.
+    if (!ImGui::IsItemVisible()) return;
     ImDrawList* draw=ImGui::GetWindowDrawList();
     const ImU32 empty=ImGui::GetColorU32(ImGuiCol_FrameBg);
     const ImU32 border=ImGui::GetColorU32(ImGuiCol_Border);
@@ -1470,6 +1476,7 @@ void ImGuiEditorUi::UsageHistory(const char* id,const float* values,size_t count
     const float width=requestedWidth>0.f?requestedWidth:ImGui::GetContentRegionAvail().x;
     const ImVec2 origin=ImGui::GetCursorScreenPos();
     ImGui::InvisibleButton(id,{width,height});
+    if (!ImGui::IsItemVisible()) return;
     ImDrawList* draw=ImGui::GetWindowDrawList();
     draw->AddRectFilled(origin,{origin.x+width,origin.y+height},ImGui::GetColorU32(ImGuiCol_FrameBg),3.f);
     const ImU32 grid=ImGui::GetColorU32(ImGuiCol_Border);

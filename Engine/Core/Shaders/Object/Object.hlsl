@@ -54,6 +54,8 @@ struct ObjectData
     float4 terrainLayerParams[6];
     float4 terrainMacroColors[6];
     float4 geometryFade; // dither interval, reserved, enabled
+    float4 shadowCasterFade; // range, fade width, shadow pass enabled, reserved
+    float4 grassAnimation; // scene time, grass enabled, reserved
 };
 
 struct SceneLightData
@@ -205,6 +207,8 @@ uint ResolveObjectIndex(uint instanceId)
         ? draw.objectIndex + asuint(meshInstances[instanceId + 1].row0.x) : draw.objectIndex;
 }
 
+#include "../GrassWind.hlsli"
+
 void VSMain(
     float3 pos : POSITION,
     float3 normal : NORMAL,
@@ -245,6 +249,8 @@ void VSMain(
     float4 localPosition = float4(pos, 1.0);
     float3 localNormal = normal;
     float3 localTangent = tangent.xyz;
+    float3 grassRoot = float3(0, 0, 0);
+    float3 grassUp = float3(0, 1, 0);
     if ((draw.drawFlags & 0x20000000u) != 0u)
     {
         InstanceTransform instance = meshInstances[(draw.drawFlags & 0x01000000u) != 0u ? instanceId * 2 + 1 :
@@ -254,6 +260,8 @@ void VSMain(
             PersistentInstance placement=persistentInstances[asuint(meshInstances[instanceId+1].row0.y)];
             instance.row0=placement.row0; instance.row1=placement.row1; instance.row2=placement.row2;
         }
+        grassRoot = float3(instance.row0.w, instance.row1.w, instance.row2.w);
+        grassUp = float3(instance.row0.y, instance.row1.y, instance.row2.y);
         localPosition = float4(dot(instance.row0, localPosition),
             dot(instance.row1, localPosition), dot(instance.row2, localPosition), 1.0);
         localNormal = float3(dot(instance.row0.xyz, localNormal),
@@ -312,6 +320,14 @@ void VSMain(
     // Adjacent terrain patches can own different transforms while still
     // producing bit-identical clip positions along their common border.
     float4 worldPosition = mul(objectData.world, localPosition);
+    float3 worldNormal = normalize(mul((float3x3)objectData.world, localNormal));
+    float3 worldTangent = mul((float3x3)objectData.world, localTangent);
+    float3 worldUp = mul((float3x3)objectData.world, grassUp);
+    float upLength = max(length(worldUp), 0.0001);
+    if (objectData.grassAnimation.y > 0.5)
+        ApplyGrassWind(objectData.grassAnimation.x,
+            mul(objectData.world, float4(grassRoot, 1)).xyz, worldUp / upLength,
+            max(0.0, pos.y) * upLength, worldPosition.xyz, worldNormal, worldTangent);
     oPos = mul(objectData.viewProjection, worldPosition);
     // Portal apertures are stencil masks rather than visible surfaces. Keep a
     // mask in front of the near plane rasterizable while the camera approaches
@@ -324,7 +340,7 @@ void VSMain(
     if ((draw.drawFlags & 0x80000000u) != 0u)
         oPos.z = oPos.w;
     oWorldPos = worldPosition.xyz;
-    oNormal = normalize(mul((float3x3)objectData.world, localNormal));
+    oNormal = worldNormal;
     oUv = objectData.spriteUvRect.xy + localUv.xy * objectData.spriteUvRect.zw;
     oUv1 = localUv.zw;
     oUvChannels0 = float4(localUv.xy, fullUv0.zw);
@@ -362,8 +378,7 @@ void VSMain(
                     (weight - 0.6667) * 3.0));
         oColor = float4(heat, 1.0);
     }
-    oTangent = float4(
-        normalize(mul((float3x3)objectData.world, localTangent)), tangent.w);
+    oTangent = float4(normalize(worldTangent), tangent.w);
 }
 
 // Compact indexed terrain input. Terrain has no skin, morph target, secondary
@@ -912,6 +927,16 @@ void ApplyGeometryFade(ObjectData data, float3 worldPosition)
         if(lod==0) data.geometryFade=float4(0,(1-first)*visibility,0,1);
         else if(lod==1) data.geometryFade=distance<data.geometryFade.z-width ? float4((1-first)*visibility,visibility,0,1):float4(0,(1-second)*visibility,0,1);
         else data.geometryFade=float4((1-second)*visibility,visibility,0,1);
+    }
+    if (data.shadowCasterFade.z > 0.5 && data.shadowCasterFade.x > 0.0)
+    {
+        const float range=data.shadowCasterFade.x;
+        const float width=max(0.001,data.shadowCasterFade.y);
+        const float distance=length(worldPosition-data.viewPositionAlphaCutoff.xyz);
+        const float opacity=1.0-smoothstep(max(0.0,range-width),range,distance);
+        // Scale complementary LOD intervals together, preserving their union.
+        if(data.geometryFade.w>0.5) data.geometryFade.xy*=opacity;
+        else data.geometryFade=float4(0,opacity,0,1);
     }
     if (data.geometryFade.w > 0.5)
     {

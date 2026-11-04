@@ -417,7 +417,14 @@ std::unique_ptr<Engine::Graphics::IGraphicsContext> DX12GameRenderer::CreateFram
     if (!m_graphicsProvider) return nullptr;
     auto* factory = m_graphicsProvider->GetContextFactory();
     factory->SetCommandBuffer(m_commandList.Get());
-    return factory->CreateContext();
+    auto context = factory->CreateContext();
+    if (auto* native = dynamic_cast<D3D12GraphicsContext*>(context.get()))
+        native->SetDepthOnlyPassRestore([this] {
+            m_postProcess.RebindScene(m_commandList.Get(), m_dsvHeap->GetCPUDescriptorHandleForHeapStart());
+            m_commandList->RSSetViewports(1, &m_viewport);
+            m_commandList->RSSetScissorRects(1, &m_scissorRect);
+        });
+    return context;
 }
 
 // ---------------------------------------------------------------------------

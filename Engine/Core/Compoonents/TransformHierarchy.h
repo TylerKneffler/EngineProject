@@ -23,6 +23,7 @@ public:
     // Read during a stable owner phase after Prepare, with no intervening TRS
     // or hierarchy writes. External/non-batched transforms keep lazy validation.
     glm::mat4 ReadPreparedWorldMatrix(const Transform& transform) const;
+    uint64_t ReadPreparedWorldRevision(const Transform& transform) const;
 private:
     static constexpr size_t NoParent=size_t(-1);
     struct Node

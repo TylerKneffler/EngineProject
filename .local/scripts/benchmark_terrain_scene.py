@@ -19,7 +19,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("output_dir", type=Path)
     parser.add_argument("--config", choices=("Debug", "Release"), default="Release")
-    parser.add_argument("--sizes", nargs="+", default=("960x540", "1920x1080"))
+    parser.add_argument("--sizes", nargs="+", choices=("1920x1080",), default=("1920x1080",))
     parser.add_argument("--shadows", choices=("on", "off"), default="on")
     args = parser.parse_args()
     executable = ROOT / "build" / args.config / args.config / "TerrainPerformanceSceneTests.exe"
@@ -65,6 +65,9 @@ def main():
                   if line.startswith("{")]
         frames = [row for row in frames if row.get("type") == "frame_details"
                   and row.get("measured")]
+        if not frames or any((row.get("view_width"), row.get("view_height")) != (1920, 1080)
+                             for row in frames):
+            raise RuntimeError(f"benchmark did not render at 1920x1080: {trace}")
         case = {"frames": evaluated["frames"],
                 "frame_p50_ms": statistics.median(row["frame_ms"] for row in frames),
                 "frame_interval_ms": evaluated["interval_ms"],

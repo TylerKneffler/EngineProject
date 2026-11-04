@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "Engine/Editor/UI/ImGui/Panels/ImGuiPanelHost.h"
+#include <chrono>
 #include "Engine/Editor/EditorState.h"
 #include "Engine/Editor/GameBuildManager.h"
 #include "Engine/Editor/Core/View/IEditorPanel.h"
@@ -907,7 +908,10 @@ void ImGuiPanelHost::DrawPanels(EditorState& state)
             if (panel->ConsumeDefaultDockPending())
                 m_ui.DockWindowToArea(panel->GetTitle().c_str(),
                     panel->GetDefaultDockArea());
+            const auto panelStart = std::chrono::steady_clock::now();
             panel->DrawPanel(m_ui);
+            panel->SetLastUiDrawMilliseconds(std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - panelStart).count());
             if (dynamic_cast<PerformanceView*>(panel.get()))
                 SavePanelVisibility(panel->IsOpen());
             if (compactTree)

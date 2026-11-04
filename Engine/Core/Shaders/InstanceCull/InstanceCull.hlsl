@@ -64,6 +64,10 @@ void CSMain(uint3 id : SV_DispatchThreadID, uint3 group : SV_GroupID, uint3 thre
             const float4 worldCenter=float4(dot(world.sphere,float4(instanceCenter,1)),dot(worldRow1,float4(instanceCenter,1)),dot(world.lod,float4(instanceCenter,1)),1);
             const float3 worldExtent=float3(dot(abs(worldX),instanceExtent),dot(abs(worldY),instanceExtent),dot(abs(worldZ),instanceExtent));
             const float radius=length(worldExtent);
+            // Range culling is shadow-only. Keep boundary-crossing placements
+            // for the per-fragment fade instead of dropping the whole tile.
+            if(constants.selection.w!=0 && lodData.lod.z>0.0 &&
+                length(worldCenter.xyz-constants.cameraPosition.xyz)-radius>=lodData.lod.z) continue;
             bool visible=true;
             [unroll] for(uint plane=0;plane<6;++plane)
                 if(dot(planes[plane],worldCenter)<-radius*length(planes[plane].xyz)) visible=false;

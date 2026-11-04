@@ -33,12 +33,27 @@ void View::Init(void* device,
 // ---------------------------------------------------------------------------
 void View::Resize(void* device, uint32_t width, uint32_t height)
 {
-    if (m_viewBackend)
+    if (m_fixedWidth && m_fixedHeight)
+    {
+        width = m_fixedWidth;
+        height = m_fixedHeight;
+    }
+    if (m_viewBackend && (width != GetWidth() || height != GetHeight()))
         m_viewBackend->Resize(device, width, height);
+}
+
+void View::SetFixedRenderSize(void* device, uint32_t width, uint32_t height)
+{
+    m_fixedWidth = width && height ? width : 0;
+    m_fixedHeight = width && height ? height : 0;
+    m_requestedWidth = m_requestedHeight = 0;
+    m_renderSizeChanged = true;
+    if (m_fixedWidth) Resize(device, m_fixedWidth, m_fixedHeight);
 }
 
 void View::RequestRenderSize(float width, float height)
 {
+    if (m_fixedWidth && m_fixedHeight) return;
     if (width <= 1.f || height <= 1.f) return;
     const uint32_t requestedWidth = static_cast<uint32_t>(
         std::max(1l, std::lround(width)));

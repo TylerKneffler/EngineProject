@@ -16,6 +16,13 @@ glm::mat4 TransformHierarchy::ReadPreparedWorldMatrix(const Transform& transform
         ? transform.m_cachedWorldMatrix:transform.GetWorldMatrix();
 }
 
+uint64_t TransformHierarchy::ReadPreparedWorldRevision(const Transform& transform) const
+{
+    if(!transform.Owner || !transform.Owner->Parent) return transform.GetWorldRevision();
+    return m_topologyValid && m_indices.find(&transform)!=m_indices.end()
+        ? transform.m_worldRevision:transform.GetWorldRevision();
+}
+
 TransformHierarchy::Statistics TransformHierarchy::Prepare(const std::vector<Transform*>& transforms)
 {
     using Clock=std::chrono::steady_clock;

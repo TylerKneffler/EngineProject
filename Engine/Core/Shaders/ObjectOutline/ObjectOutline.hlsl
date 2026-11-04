@@ -51,6 +51,8 @@ struct ObjectData
     float4 terrainLayerParams[6];
     float4 terrainMacroColors[6];
     float4 geometryFade; // dither interval, reserved, enabled
+    float4 shadowCasterFade;
+    float4 grassAnimation;
 };
 
 struct InstanceTransform { float4 row0; float4 row1; float4 row2; };

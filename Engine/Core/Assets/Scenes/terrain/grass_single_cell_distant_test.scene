@@ -901,7 +901,7 @@
                 <item>1</item>
               </Material.toonTint>
             </components:Material>
-            <components:MeshObjectCollider MeshObjectCollider.collisionEnabled="false" MeshObjectCollider.meshPath="" MeshObjectCollider.convex="false" MeshObjectCollider.maxSurfaceMappingDistance="0.30000001192092896">
+            <components:MeshObjectCollider MeshObjectCollider.collisionEnabled="true" MeshObjectCollider.meshPath="" MeshObjectCollider.convex="false" MeshObjectCollider.maxSurfaceMappingDistance="0.30000001192092896">
               <MeshObjectCollider.center>
                 <item>0</item>
                 <item>0</item>

@@ -79,9 +79,20 @@ def evaluate(rows, path="", all_frames=False):
         raise ValueError("Recording contains no valid positive frame intervals")
     metrics = {k: summary([r[k] for r in frames if k in r])
                for k in set().union(*(r.keys() for r in frames))
-               if k.endswith("_ms") or k.startswith(("instance_", "shadow_instance_", "prepare_transform_", "prepare_spatial_", "render_batch_", "writer_queue_", "worker_queue_"))
+               if k.endswith("_ms") or k.startswith(("instance_", "shadow_instance_", "shadow_state_", "prepare_transform_", "prepare_spatial_", "prepare_item_", "prepare_instanced_", "render_batch_", "render_cluster_", "render_instance_tile_", "writer_queue_", "worker_queue_"))
                or k in ("native_compute_arena_writes", "native_compute_discard_maps",
                         "pipeline_queue_waits", "pipeline_retained_frames")}
+    ui_panels = {}
+    for row in frames:
+        # Multiple documents can share a title; combine their cost per frame.
+        panel_frame = {}
+        for panel in row.get("ui_panels", []):
+            title, value = panel.get("title"), panel.get("draw_ms")
+            if isinstance(title, str) and isinstance(value, (int, float)) and math.isfinite(value):
+                panel_frame[title] = panel_frame.get(title, 0) + value
+        for title, value in panel_frame.items():
+            ui_panels.setdefault(title, []).append(value)
+    ui_panels = {title: dict(summary(values), frames=len(values)) for title, values in ui_panels.items()}
     stage_work = {}
     for stage in ("pacing", "background", "update", "render", "pending_load"):
         values = [item for row in frames for item in row.get("stage_work", [])
@@ -219,7 +230,7 @@ def evaluate(rows, path="", all_frames=False):
             "start_utc": frames[0].get("time_utc"),
             "end_utc": frames[-1].get("time_utc"), "effective_fps": 1000 / interval["mean"],
             "interval_ms": interval, "over_60fps_budget_percent": 100 * sum(v > 1000 / 60 for v in intervals) / len(intervals),
-            "metrics": metrics, "stage_work": stage_work,
+            "metrics": metrics, "stage_work": stage_work, "ui_panels_ms": ui_panels,
             "unique_gpu_samples": len(gpu), "gpu_stages_ms": gpu_stages,
             "gpu_total_ms": gpu_total, "gpu_shadow_share_percent": shadow_share,
             "render_work_balance": render_balance,
@@ -271,17 +282,38 @@ def markdown(result, comparison=None):
     for key in ("frame_ms", "update_ms", "render_ms", "main_submit_ms", "shadow_submit_ms", "editor_ui_ms",
                 "ui_thread_cpu_ms", "render_thread_cpu_ms", "writer_queue_records", "writer_queue_bytes", "worker_queue_pending",
                 "simulation_ms", "simulation_cpu_ms", "simulation_wait_ms", "simulation_overlap_ms",
-                "simulation_gpu_wait_ms", "pipeline_record_ms", "pipeline_queue_wait_ms",
+                "simulation_gpu_wait_ms", "pipeline_record_ms", "pipeline_compute_record_ms", "pipeline_snapshot_ms", "pipeline_view_record_ms", "pipeline_record_other_ms", "pipeline_queue_wait_ms",
                 "grass_total_ms", "grass_generation_ms", "grass_upload_ms", "physics_ms", "pose_ms", "constraints_ms", "audio_ms",
-                "render_startup_ms", "render_terrain_prepare_ms", "render_occlusion_ms",
+                "render_startup_ms", "render_cluster_prepare_ms", "render_terrain_prepare_ms", "render_occlusion_ms",
                 "shadow_draw_ms", "shadow_geometry_draw_ms", "shadow_submission_thread_cpu_ms",
                 "shadow_submission_off_cpu_ms", "shadow_submission_wall_ms", "shadow_max_batch_ms",
                 "render_retained_ui_ms", "render_portal_ms", "render_worker_active_ms", "render_main_job_ms",
                 "render_worker_wait_ms", "render_record_pack_ms", "render_record_wait_ms", "prepare_transforms_ms",
                 "prepare_transform_snapshot_ms", "prepare_transform_compute_ms", "prepare_transform_commit_ms",
+                "scene_prepare_ms", "prepare_items_ms", "prepare_item_validation_ms", "prepare_item_textures_ms",
+                "prepare_item_shaders_ms", "prepare_item_mesh_state_ms", "prepare_item_bounds_ms",
+                "prepare_item_lod_ms", "prepare_item_build_ms",
                 "prepare_spatial_index_ms", "prepare_spatial_compare_ms", "prepare_spatial_refit_ms", "prepare_spatial_build_ms"):
         if value := result["metrics"].get(key):
             lines.append(f"| {key} | {value['mean']:.3f} | {value['p95']:.3f} |")
+    if result.get("ui_panels_ms"):
+        lines += ["", "UI panel times are nested in editor_ui_ms; statistics use frames where that panel was present.",
+                  "", "| UI panel | Frames | Mean ms | P95 ms | P99 ms |", "|---|---:|---:|---:|---:|"]
+        for title, value in sorted(result["ui_panels_ms"].items(), key=lambda item: item[1]["mean"], reverse=True):
+            title = title.replace("|", "\\|").replace("\n", " ").replace("\r", " ")
+            lines.append(f"| {title} | {value['frames']} | {value['mean']:.3f} | {value['p95']:.3f} | {value['p99']:.3f} |")
+        for key in ("ui_panels_ms", "ui_other_ms"):
+            if value := result["metrics"].get(key):
+                lines.append(f"\n{key}: mean {value['mean']:.3f} ms, P95 {value['p95']:.3f} ms.")
+    if sources := result["metrics"].get("prepare_item_shader_resolutions"):
+        requests = result["metrics"].get("prepare_item_shader_requests")
+        lines.append(f"\nShader preparation: {sources['mean']:.2f} unique source checks per frame" +
+                     (f" for {requests['mean']:.2f} requests." if requests else "."))
+    if result["metrics"].get("render_instance_tile_prepare_ms"):
+        lines += ["", "| Instance tile preparation | Mean | P95 |", "|---|---:|---:|"]
+        for key in ("render_instance_tile_prepare_ms", "render_instance_tile_reused", "render_instance_tile_built", "render_instance_tile_worker_passes"):
+            if value := result["metrics"].get(key):
+                lines.append(f"| {key} | {value['mean']:.3f} | {value['p95']:.3f} |")
     if waits := result["metrics"].get("pipeline_queue_waits"):
         retained = result["metrics"].get("pipeline_retained_frames")
         lines.append(f"\nPlay queue waits: {waits['mean']:.3f} per frame; "

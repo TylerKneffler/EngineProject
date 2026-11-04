@@ -462,6 +462,7 @@ if(ENGINE_VULKAN_ENABLED)
                         -fvk-use-dx-layout -D VULKAN=1 -T ${SHADER_PROFILE}
                         -E ${SHADER_ENTRY} -Fo "${SHADER_OUTPUT}" "${SHADER_SOURCE}"
                 DEPENDS "${SHADER_SOURCE}" "${ENGINE_ROOT}/Engine/Core/Shaders/SkinDeformation.hlsli"
+                    "${ENGINE_ROOT}/Engine/Core/Shaders/GrassWind.hlsli"
                 VERBATIM
                 COMMENT "Compiling ${SHADER_NAME}.${STAGE} for Vulkan"
             )
@@ -1135,6 +1136,18 @@ if(NOT ENGINE_PROJECT_DIR AND
     target_link_libraries(WeightInfluenceTests PRIVATE Engine)
     target_include_directories(WeightInfluenceTests PRIVATE "${ENGINE_ROOT}/Engine")
     add_test(NAME WeightInfluenceRegression COMMAND WeightInfluenceTests)
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/test_performance_eval.py")
+    find_package(Python3 COMPONENTS Interpreter QUIET)
+    if(Python3_Interpreter_FOUND)
+        enable_testing()
+        add_test(NAME PerformanceEvaluation
+            COMMAND "${Python3_EXECUTABLE}" "${ENGINE_LOCAL_TEST_ROOT}/test_performance_eval.py")
+        set_tests_properties(PerformanceEvaluation PROPERTIES
+            WORKING_DIRECTORY "${ENGINE_ROOT}" ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+    endif()
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND
@@ -2226,8 +2239,12 @@ if(NOT ENGINE_PROJECT_DIR AND WIN32 AND
     target_include_directories(GrassPerformanceTests PRIVATE
         "${ENGINE_ROOT}/Engine" "${ENGINE_ROOT}/Engine/Core/Assets")
     add_test(NAME GrassPerformance COMMAND GrassPerformanceTests)
+    add_test(NAME GrassPlayerFloors COMMAND GrassPerformanceTests --grass-player-floors)
+    set_tests_properties(GrassPlayerFloors PROPERTIES WORKING_DIRECTORY "${ENGINE_ROOT}" TIMEOUT 60)
     set_tests_properties(GrassPerformance PROPERTIES WORKING_DIRECTORY "${ENGINE_ROOT}")
     add_test(NAME ShadowSparseSlotsDX11 COMMAND GrassPerformanceTests --fade-render-check)
+    add_test(NAME ShadowRecordUploadOrderDX11 COMMAND GrassPerformanceTests --shadow-record-upload-order)
+    set_tests_properties(ShadowRecordUploadOrderDX11 PROPERTIES WORKING_DIRECTORY "${ENGINE_ROOT}")
     add_test(NAME ShadowSparseSlotsDX12 COMMAND GrassPerformanceTests --instance-render-dx12)
     set_tests_properties(ShadowSparseSlotsDX11 ShadowSparseSlotsDX12
         PROPERTIES WORKING_DIRECTORY "${ENGINE_ROOT}")
