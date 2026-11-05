@@ -23,6 +23,13 @@ public:
         ID3D12Device* device,
         ID3D12CommandQueue* commandQueue,
         ID3D12RootSignature* rootSig);
+    D3D12GraphicsProvider(
+        ID3D12Device* device,
+        ID3D12CommandQueue* commandQueue,
+        ID3D12RootSignature* rootSig,
+        Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> sharedTextureHeap,
+        uint32_t sharedTextureFirstDescriptor,
+        uint32_t sharedTextureDescriptorCount);
 
     Engine::Graphics::IShaderCompiler* GetShaderCompiler() override { return m_shaderCompiler.get(); }
     Engine::Graphics::IGraphicsBufferFactory* GetBufferFactory() override { return m_bufferFactory.get(); }

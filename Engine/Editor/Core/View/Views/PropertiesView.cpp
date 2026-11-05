@@ -359,7 +359,7 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
                 const Engine::Components::Texture* skybox =
                     m_scene->GetSkyboxPreviewTexture();
                 void* textureHandle = skybox && skybox->GetGraphicsTexture()
-                    ? skybox->GetGraphicsTexture()->GetNativeHandle()
+                    ? skybox->GetGraphicsTexture()->GetUiHandle()
                     : nullptr;
                 if (textureHandle)
                 {

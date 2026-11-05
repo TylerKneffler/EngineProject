@@ -34,7 +34,25 @@ D3D12TextureFactory::D3D12TextureFactory(
     desc.NumDescriptors = kMaxTextures;
     desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
     if (SUCCEEDED(m_device->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&m_heap))))
+    {
         m_descriptorSize = m_device->GetDescriptorHandleIncrementSize(desc.Type);
+        m_descriptorCount = kMaxTextures;
+    }
+}
+
+D3D12TextureFactory::D3D12TextureFactory(
+    ID3D12Device* device,
+    ID3D12CommandQueue* queue,
+    Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> sharedHeap,
+    uint32_t firstDescriptor,
+    uint32_t descriptorCount)
+    : m_device(device), m_queue(queue), m_heap(std::move(sharedHeap)),
+      m_firstDescriptor(firstDescriptor), m_descriptorCount(descriptorCount)
+{
+    if (!m_device || !m_heap || m_descriptorCount == 0)
+        return;
+    m_descriptorSize = m_device->GetDescriptorHandleIncrementSize(
+        D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 }
 
 std::shared_ptr<Engine::Graphics::IGraphicsTexture> D3D12TextureFactory::CreateTexture2D(
@@ -46,7 +64,7 @@ std::shared_ptr<Engine::Graphics::IGraphicsTexture> D3D12TextureFactory::CreateT
     bool srgb)
 {
     if (!m_device || !m_queue || !m_heap || !width || !height || !rgbaPixels ||
-        !mipLevels || m_nextDescriptor >= kMaxTextures)
+        !mipLevels || m_nextDescriptor >= m_descriptorCount)
         return nullptr;
 
     D3D12_RESOURCE_DESC textureDesc{};
@@ -167,8 +185,9 @@ std::shared_ptr<Engine::Graphics::IGraphicsTexture> D3D12TextureFactory::CreateT
 
     D3D12_CPU_DESCRIPTOR_HANDLE cpu = m_heap->GetCPUDescriptorHandleForHeapStart();
     D3D12_GPU_DESCRIPTOR_HANDLE gpu = m_heap->GetGPUDescriptorHandleForHeapStart();
-    cpu.ptr += static_cast<SIZE_T>(m_nextDescriptor) * m_descriptorSize;
-    gpu.ptr += static_cast<UINT64>(m_nextDescriptor) * m_descriptorSize;
+    const uint32_t descriptorIndex = m_firstDescriptor + m_nextDescriptor;
+    cpu.ptr += static_cast<SIZE_T>(descriptorIndex) * m_descriptorSize;
+    gpu.ptr += static_cast<UINT64>(descriptorIndex) * m_descriptorSize;
     ++m_nextDescriptor;
 
     D3D12_SHADER_RESOURCE_VIEW_DESC srv{};
@@ -187,7 +206,7 @@ std::shared_ptr<Engine::Graphics::IGraphicsTexture>
 D3D12TextureFactory::CreateDepthTexture2D(uint32_t width, uint32_t height)
 {
     if (!m_device || !m_heap || !width || !height ||
-        m_nextDescriptor >= kMaxTextures)
+        m_nextDescriptor >= m_descriptorCount)
         return nullptr;
 
     D3D12_RESOURCE_DESC desc{};
@@ -213,8 +232,9 @@ D3D12TextureFactory::CreateDepthTexture2D(uint32_t width, uint32_t height)
 
     D3D12_CPU_DESCRIPTOR_HANDLE cpu = m_heap->GetCPUDescriptorHandleForHeapStart();
     D3D12_GPU_DESCRIPTOR_HANDLE gpu = m_heap->GetGPUDescriptorHandleForHeapStart();
-    cpu.ptr += static_cast<SIZE_T>(m_nextDescriptor) * m_descriptorSize;
-    gpu.ptr += static_cast<UINT64>(m_nextDescriptor) * m_descriptorSize;
+    const uint32_t descriptorIndex = m_firstDescriptor + m_nextDescriptor;
+    cpu.ptr += static_cast<SIZE_T>(descriptorIndex) * m_descriptorSize;
+    gpu.ptr += static_cast<UINT64>(descriptorIndex) * m_descriptorSize;
     ++m_nextDescriptor;
     D3D12_SHADER_RESOURCE_VIEW_DESC srv{};
     srv.Format = DXGI_FORMAT_R32_FLOAT_X8X24_TYPELESS;

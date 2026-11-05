@@ -3,6 +3,7 @@
 #include "Core/Graphics/IGraphicsTexture.h"
 
 #include <d3d12.h>
+#include <cstdint>
 #include <wrl/client.h>
 
 namespace Engine::Renderers
@@ -19,6 +20,10 @@ public:
           m_handle(handle), m_dsvHeap(std::move(dsvHeap)) {}
 
     void* GetNativeHandle() const override { return m_resource.Get(); }
+    void* GetUiHandle() const override
+    {
+        return reinterpret_cast<void*>(static_cast<uintptr_t>(m_handle.ptr));
+    }
     ID3D12DescriptorHeap* GetHeap() const { return m_heap.Get(); }
     D3D12_GPU_DESCRIPTOR_HANDLE GetGpuHandle() const { return m_handle; }
     D3D12_CPU_DESCRIPTOR_HANDLE GetDsvHandle() const
@@ -36,6 +41,12 @@ class D3D12TextureFactory final : public Engine::Graphics::IGraphicsTextureFacto
 {
 public:
     D3D12TextureFactory(ID3D12Device* device, ID3D12CommandQueue* queue);
+    D3D12TextureFactory(
+        ID3D12Device* device,
+        ID3D12CommandQueue* queue,
+        Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> sharedHeap,
+        uint32_t firstDescriptor,
+        uint32_t descriptorCount);
     std::shared_ptr<Engine::Graphics::IGraphicsTexture> CreateTexture2D(
         uint32_t width, uint32_t height, const uint8_t* rgbaPixels,
         uint32_t mipLevels, Engine::Graphics::GraphicsTextureFormat format,
@@ -49,6 +60,8 @@ private:
     ID3D12CommandQueue* m_queue = nullptr;
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_heap;
     uint32_t m_descriptorSize = 0;
+    uint32_t m_firstDescriptor = 0;
+    uint32_t m_descriptorCount = 0;
     uint32_t m_nextDescriptor = 0;
 };
 }

@@ -33,33 +33,38 @@ bool DX12EditorRenderer::Init(void* hwnd, uint32_t width, uint32_t height)
         // Object materials use b0 plus five glTF texture slots (t0-t4).
         m_rootSignature = CreateD3D12MaterialRootSignature(m_device.Get());
 
+        ThrowIfFailed(m_device->CreateFence(0, D3D12_FENCE_FLAG_NONE,
+            IID_PPV_ARGS(&m_fence)));
+
+        m_fenceEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        if (!m_fenceEvent)
+            throw std::runtime_error("Failed to create fence event.");
+
+        // SRV heap layout:
+        //   slot 0   : ImGui font/default UI descriptor
+        //   slots 1+ : editor view slots (Scene/Game/etc.)
+        //   tail     : shared editor texture previews (ImGui image widgets)
+        D3D12_DESCRIPTOR_HEAP_DESC srvDesc{};
+        srvDesc.NumDescriptors = IEditorRenderer::MAX_SRV_SLOTS + UI_TEXTURE_SRV_SLOTS;
+        srvDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+        srvDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+        ThrowIfFailed(m_device->CreateDescriptorHeap(&srvDesc, IID_PPV_ARGS(&m_srvHeap)));
+
         // ---- Graphics provider ----
-        // Initialize the graphics provider for shader compilation, buffer creation, etc.
+        // Use the shared editor SRV heap tail for texture previews so ImGui can
+        // safely sample them through the same bound descriptor heap.
         m_graphicsProvider = std::make_unique<D3D12GraphicsProvider>(
-            m_device.Get(), m_commandQueue.Get(), m_rootSignature.Get());
+            m_device.Get(), m_commandQueue.Get(), m_rootSignature.Get(), m_srvHeap,
+            IEditorRenderer::MAX_SRV_SLOTS, UI_TEXTURE_SRV_SLOTS);
 
-    ThrowIfFailed(m_device->CreateFence(0, D3D12_FENCE_FLAG_NONE,
-        IID_PPV_ARGS(&m_fence)));
+        // Initialize free view slots; slot 0 remains reserved for the UI package.
+        for (uint32_t i = IEditorRenderer::MAX_SRV_SLOTS - 1; i > 0; --i)
+            m_freeSrvSlots.push_back(i);
 
-    m_fenceEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
-    if (!m_fenceEvent)
-        throw std::runtime_error("Failed to create fence event.");
-    
-    // SRV heap: slot 0 = UI package; slots 1-31 = view textures.
-    D3D12_DESCRIPTOR_HEAP_DESC srvDesc{};
-    srvDesc.NumDescriptors = IEditorRenderer::MAX_SRV_SLOTS;
-    srvDesc.Type  = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-    srvDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-    ThrowIfFailed(m_device->CreateDescriptorHeap(&srvDesc, IID_PPV_ARGS(&m_srvHeap)));
+        m_viewport = { 0.f, 0.f, static_cast<float>(width), static_cast<float>(height), 0.f, 1.f };
+        m_scissorRect = { 0, 0, static_cast<LONG>(width), static_cast<LONG>(height) };
 
-    // Initialize free view slots; slot 0 remains reserved for the UI package.
-    for (uint32_t i = IEditorRenderer::MAX_SRV_SLOTS - 1; i > 0; --i)
-        m_freeSrvSlots.push_back(i);
-
-    m_viewport    = { 0.f, 0.f, static_cast<float>(width), static_cast<float>(height), 0.f, 1.f };
-    m_scissorRect = { 0, 0, static_cast<LONG>(width), static_cast<LONG>(height) };
-
-    return true;
+        return true;
     }
     catch (const std::exception& e)
     {

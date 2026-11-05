@@ -697,7 +697,7 @@ bool Component::DrawProperties(::Engine::Editor::IEditorUi& ui)
                             
                             if (previewTexture->GetGraphicsTexture())
                             {
-                                textureHandle = previewTexture->GetGraphicsTexture()->GetNativeHandle();
+                                textureHandle = previewTexture->GetGraphicsTexture()->GetUiHandle();
                             }
                         }
                     }

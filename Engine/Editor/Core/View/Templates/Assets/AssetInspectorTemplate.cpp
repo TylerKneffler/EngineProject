@@ -719,7 +719,7 @@ void AssetInspectorTemplate::Draw(IEditorUi& ui, Engine::Scene::Scene* scene)
         void* handle = environment
             ? m_previewCache.Get(m_selectedPath, graphics)
             : (m_texturePreview && m_texturePreview->GetGraphicsTexture()
-                ? m_texturePreview->GetGraphicsTexture()->GetNativeHandle() : nullptr);
+                ? m_texturePreview->GetGraphicsTexture()->GetUiHandle() : nullptr);
         if (handle)
         {
             if (environment)

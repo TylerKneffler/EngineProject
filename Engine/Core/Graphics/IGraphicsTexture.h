@@ -22,6 +22,10 @@ class IGraphicsTexture : public std::enable_shared_from_this<IGraphicsTexture>
 public:
     virtual ~IGraphicsTexture() = default;
     virtual void* GetNativeHandle() const = 0;
+    // Handle suitable for editor UI image rendering (e.g. ImGui texture ID).
+    // Defaults to the backend native handle; renderers can override when UI
+    // requires a different object (such as DX12 GPU descriptor handles).
+    virtual void* GetUiHandle() const { return GetNativeHandle(); }
 };
 
 class IGraphicsTextureFactory
@@ -43,4 +47,3 @@ public:
         uint32_t, uint32_t) { return nullptr; }
 };
 }
-

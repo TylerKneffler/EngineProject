@@ -870,7 +870,7 @@ void* AssetPreviewCache::Get(const std::string& path,
         }
         else m_waitingForSlot=true;
     }
-    return entry->generated ? entry->generated->GetNativeHandle():nullptr;
+    return entry->generated ? entry->generated->GetUiHandle():nullptr;
 }
 
 bool AssetPreviewCache::CaptureScene(const std::string& path,

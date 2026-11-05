@@ -281,7 +281,7 @@ void AssetDocumentView::DrawImageCanvas(IEditorUi& ui)
         availableHeight / m_imageHeight, 4.f });
     const ImVec2 size(m_imageWidth * scale, m_imageHeight * scale);
     ImGui::Image(static_cast<ImTextureID>(reinterpret_cast<uintptr_t>(
-        m_imageTexture->GetNativeHandle())), size);
+        m_imageTexture->GetUiHandle())), size);
     const ImVec2 minimum = ImGui::GetItemRectMin();
     const bool hovered = ImGui::IsItemHovered();
     const ImVec2 cursor = ImGui::GetIO().MousePos;
@@ -608,7 +608,7 @@ void AssetDocumentView::DrawPaintToolbar(IEditorUi& ui,
             m_imageBrush.tipPath, false);
         if (tip && graphics && tip->Prepare(graphics) &&
             tip->GetGraphicsTexture())
-            ui.DrawImage(tip->GetGraphicsTexture()->GetNativeHandle(),
+            ui.DrawImage(tip->GetGraphicsTexture()->GetUiHandle(),
                 72.f, 72.f);
         else ui.DisabledLabel("Image tip preview unavailable.");
     }

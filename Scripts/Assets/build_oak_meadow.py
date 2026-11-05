@@ -238,6 +238,7 @@ def compose(library):
     vector(camera,'Camera.target',[path_x(5),1.35,5]);objects.append(player)
     sun=copy.deepcopy(lookup['Grass Sun']);sun.set('name','Late afternoon sun')
     transform(sun,(0,20,-10),(.70,2.40,0));light=component(sun,'Light');light.set('Light.intensity','3.2')
+    light.set('Light.castsShadows','false')
     light.set('Light.shadowResolutionScale','.0625');light.set('Light.shadowFilterScale','.05')
     vector(light,'Light.color',[1,.91,.77]);objects.append(sun)
     materials=ASSETS/'Materials/Woodland';materials.mkdir(parents=True,exist_ok=True)
@@ -247,7 +248,7 @@ def compose(library):
     terrain=copy.deepcopy(lookup['Flat Grass Terrain']);terrain.set('name','Oak meadow ground')
     terrain.find('children').clear();transform(terrain,(-48,0,-48))
     terrain_half_extent=48.0
-    terrain_cells=32
+    terrain_cells=16
     terrain_cell_size=(terrain_half_extent*2.0)/terrain_cells
     t=component(terrain,'Terrain');t.clear();t.attrib.update({
         'Terrain.cellsX':str(terrain_cells),'Terrain.cellsY':str(terrain_cells),
@@ -269,9 +270,9 @@ def compose(library):
     distant=copy.deepcopy(lookup['Grass Distant Terrain']);distant.set('name','Distant meadow horizon');transform(distant,(-180,-.18,-180))
     dt=component(distant,'Terrain');dt.set('Terrain.cellWidth','360');dt.set('Terrain.cellDepth','360')
     objects.append(distant)
-    def group(name):
-        g=ET.SubElement(objects,'item',{'name':name,'enabled':'true'});transform(g);ET.SubElement(g,'components');return ET.SubElement(g,'children')
-    trees=group('Oak groves - seventeen source varieties');shrubs=group('Hedgerow and woodland understory');grass=group('Wind-swept meadow patches')
+    def group(name,enabled=True):
+        g=ET.SubElement(objects,'item',{'name':name,'enabled':'true' if enabled else 'false'});transform(g);ET.SubElement(g,'components');return ET.SubElement(g,'children')
+    trees=group('Oak groves - seventeen source varieties')
     def place(parent,name,x,z,scale=1.,yaw=None):
         obj=ET.SubElement(parent,'item',{'prefab':portable(str(library[name].relative_to(ROOT)).replace('\\','/')),'enabled':'true'})
         transform(obj,(x,height(x,z)-.025,z),(0,yaw if yaw is not None else rng.uniform(-math.pi,math.pi),0),(scale,scale,scale))
@@ -286,61 +287,13 @@ def compose(library):
     for i,(x,z) in enumerate(positions):
         species=oak_names[i%len(oak_names)];distance=math.hypot(x,z+26);lod=0 if distance<10 else 1 if distance<24 else 2
         place(trees,species+f'_LOD{lod}',x,z,rng.uniform(.70,1.08))
-    bush_names=[n for n in library if n.startswith(('Medium_bush','Small_bush','tall_bush'))]
-    for i in range(165):
-        if i<110:
-            tx,tz=positions[i%len(positions)];angle=rng.uniform(0,math.tau);radius=rng.uniform(2.2,5.4);x,z=tx+math.cos(angle)*radius,tz+math.sin(angle)*radius
-        else:
-            z=rng.uniform(-31,39);x=path_x(z)+rng.choice([-1,1])*rng.uniform(4.5,10)
-        if abs(x-path_x(z))<3 or max(abs(x),abs(z))>46:continue
-        place(shrubs,bush_names[i%len(bush_names)],x,z,rng.uniform(.6,1.15))
-    placements=0
-    for zcell in range(-30,44):
-        for xcell in range(-36,37):
-            x=xcell+rng.uniform(-.4,.4);z=zcell+rng.uniform(-.4,.4)
-            if abs(x-path_x(z))<1.35 or any((x-a)**2+(z-b)**2<1.5**2 for a,b in positions):continue
-            density=.58+.22*math.sin(x*.23+z*.11)
-            if rng.random()>density:continue
-            distance=math.hypot(x,z+26);lod=0 if distance<4 else 1 if distance<12 else 2
-            place(grass,f'MeadowPatch_{rng.randrange(1,5):02}_LOD{lod}',x,z,rng.uniform(.70,1.15));placements+=1
-
-    # Use the existing streaming/instancing path, with the imported grass atlas.
-    for parent in list(objects):
-        if parent.get('name')=='Wind-swept meadow patches':objects.remove(parent)
-    terrain_children=terrain.find('children')
-    source_files={name:component(ET.parse(path).getroot().find('object'),'Mesh').get('Mesh.file')
-        for name,path in library.items() if name.startswith('MeadowPatch')}
-    field_nodes=[]
-    for field in range(2):
-        obj=ET.SubElement(terrain_children,'item',{'name':f'Imported meadow grass {field+1}','enabled':'true'});transform(obj)
-        cs=ET.SubElement(obj,'components');layer=ET.SubElement(cs,'{'+NS+'}TerrainObjectLayer',{
-            'TerrainObjectLayer.viewDistance':'72','TerrainObjectLayer.lod1Distance':'3',
-            'TerrainObjectLayer.lod2Distance':'7','TerrainObjectLayer.lodHysteresis':'1.8',
-            'TerrainObjectLayer.shadowDistance':'8','TerrainObjectLayer.layerName':f'Imported Grass {field+1}'})
-        entries=ET.SubElement(layer,'TerrainObjectLayer.placements');field_nodes.append(entries)
-        properties={'viewerObjectName':'Meadow Explorer','useEditorCamera':'false','visibleRadius':'72','tileSize':'8',
-            'castShadows':'false','maxTileBuildsPerUpdate':'8','tileWorkBudgetMs':'4','fadeDuration':'.8',
-            'distanceFadeWidth':'6','retainDormantTiles':'true','gpuLodSelection':'true',
-            'allowProceduralGeneration':'false','materialPath':'Assets/Models/Woodland/Grass/Materials/BR_MainGrass 1.material',
-            'shaderPath':'Assets/Shaders/Foliage.hlsl','windStrength':'.42'}
-        for species,index in [('short',field*2+1),('tall',field*2+2)]:
-            for lod,suffix in [(0,''),(1,'Lod1'),(2,'Lod2')]:properties[species+'Mesh'+suffix]=source_files[f'MeadowPatch_{index:02}_LOD{lod}']
-        ET.SubElement(cs,'{'+NS+'}GrassField',{'GrassField.'+k:v for k,v in properties.items()})
-        ET.SubElement(obj,'children')
-    for index,obj in enumerate(grass):
-        match=re.search(r'MeadowPatch_(\d+)_LOD',obj.get('prefab'));variant=int(match[1]);field=(variant-1)//2
-        t=obj.find('transform');position=[float(x.text) for x in t.find('Transform.position')]
-        yaw=float(t.find('Transform.rotation')[1].text);scale=float(t.find('Transform.scale')[0].text)
-        entry=ET.SubElement(field_nodes[field],'item',{'asset':source_files[f'MeadowPatch_{variant:02}_LOD0'],
-            'yawDegrees':str(math.degrees(yaw)),'scale':str(scale),'id':str(187310000+index)})
-        vector(entry,'position',[position[0]+48,position[1],position[2]+48]);vector(entry,'normal',[0,1,0])
     path=ASSETS/'Scenes/terrain/oak_meadow.scene';write_xml(path,scene)
-    print(f'Created {path}: {len(positions)} oaks, {len(shrubs)} shrubs, {placements} grass patches',flush=True)
+    print(f'Created {path}: {len(positions)} oaks',flush=True)
     credits=[]
     for pack in (ASSETS/'Other').glob('*/scene.gltf'):
         info=json.loads(pack.read_text())['asset']['extras'];credits.append(f"- {info['title']} by {info['author']}\n  Source: {info['source']}\n  License: {info['license']}")
     (OUTPUT/'ATTRIBUTION.md').write_text('# Oak Meadow source assets\n\n'+'\n\n'.join(credits)+'\n\nModified for this scene: Y-up metre-scale geometry, root pivots, reusable native prefabs, alpha-tested materials, grounded whole-blade ribbon retopology and density LODs. Original packs remain in Assets/Other.\n')
-    (OUTPUT/'README.md').write_text('# Oak Meadow\n\nOpen `Assets/Scenes/terrain/oak_meadow.scene` and press Play. WASD moves, mouse looks, Shift sprints.\n\nThe scene uses a painted three-layer ground, a winding footpath, seventeen oak varieties, nine shrub varieties and four grass patch variants. Source oak LODs are selected by authored distance from the entrance; these are static scene choices, not a runtime LOD switch. Grass uses nested whole-blade subsets for its three levels. All plants are separate editable prefabs under `Assets/Prefabs/Woodland`.\n\nGrass is streamed in two textured instanced layers using the existing GrassField system.\n\n`Mesh.foliageWindStrength` enables the shared root-pinned wind field for authored meshes. Grass bends strongly, shrubs moderately, and oak trunks/canopies share restrained motion. The same vertex path drives color and shadows, with bounds padding for wind. Bark and canopies keep source PBR shading; grass and shrubs use the existing fast foliage shading with their imported textures.\n\nRegenerate with `python Scripts/Assets/build_oak_meadow.py --prepare-only`, then `python Scripts/Assets/build_oak_meadow.py` (numpy/scipy and a built Debug Editor required). Existing imported packs are reused. Imports use the native glTF importer; generated intermediates live under `.local/woodland-import`. See ATTRIBUTION.md for CC-BY-4.0 credits.\n')
+    (OUTPUT/'README.md').write_text('# Oak Meadow\n\nOpen `Assets/Scenes/terrain/oak_meadow.scene` and press Play. WASD moves, mouse looks, Shift sprints.\n\nThe scene uses a painted three-layer ground, a winding footpath and seventeen oak varieties. Source oak LODs are selected by authored distance from the entrance; these are static scene choices, not a runtime LOD switch. Trees are separate editable prefabs under `Assets/Prefabs/Woodland/Oaks`.\n\nFor performance, the authored terrain grid uses 16x16 cells, there is no grass streaming system, and no shrub-prefab layer in this scene.\n\n`Mesh.foliageWindStrength` enables the shared root-pinned wind field for authored meshes. The oak meadow scene intentionally keeps tree trunks and canopies at zero wind so they remain static and do not trigger shadow-map churn from shader-driven vertex motion. The same vertex path drives color and shadows, with bounds padding for wind. Bark and canopies keep source PBR shading.\n\nRegenerate with `python Scripts/Assets/build_oak_meadow.py --prepare-only`, then `python Scripts/Assets/build_oak_meadow.py` (numpy/scipy and a built Debug Editor required). Existing imported packs are reused. Imports use the native glTF importer; generated intermediates live under `.local/woodland-import`. See ATTRIBUTION.md for CC-BY-4.0 credits.\n')
 
 if __name__=='__main__':
     os.chdir(ROOT)

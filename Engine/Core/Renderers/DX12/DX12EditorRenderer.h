@@ -98,6 +98,7 @@ public:
     // Number of back-buffer slots (double-buffering). Declared before member
     // arrays that use it as a size.
     static constexpr uint32_t FRAME_COUNT = 2;
+    static constexpr uint32_t UI_TEXTURE_SRV_SLOTS = 1024;
 
 private:
     // These are kept private so all rendering is gated through RenderIfNeeded.

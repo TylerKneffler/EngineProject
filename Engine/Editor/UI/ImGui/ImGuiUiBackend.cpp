@@ -372,9 +372,49 @@ void ImGuiUiBackend::RenderDrawData(::ImDrawData* drawData, void* commandBuffer)
     else if (m_graphicsApi == GraphicsApi::DirectX12)
     {
         auto* dx12 = static_cast<::Engine::Renderers::DX12EditorRenderer*>(m_renderer);
-        ID3D12DescriptorHeap* heaps[] = { dx12->GetUiDescriptorHeap() };
+        ID3D12DescriptorHeap* const uiHeap = dx12->GetUiDescriptorHeap();
+        if (!uiHeap) return;
+        ID3D12DescriptorHeap* heaps[] = { uiHeap };
         auto* commands = static_cast<ID3D12GraphicsCommandList*>(commandBuffer);
+        if (!commands) return;
         commands->SetDescriptorHeaps(1, heaps);
+
+        // DX12 ImGui rendering requires every ImTextureID to reference a
+        // descriptor in the currently-bound heap. Some editor panels pass
+        // backend-native texture handles from non-ImGui paths, which can be
+        // non-descriptor pointers in DX12 and trigger SDK-layer exceptions.
+        // Clamp unsupported IDs to the UI heap start so the frame stays valid.
+        const auto heapStart = uiHeap->GetGPUDescriptorHandleForHeapStart();
+        const auto heapDesc = uiHeap->GetDesc();
+        const UINT descriptorSize = dx12->GetDevice()
+            ->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+        const uint64_t first = static_cast<uint64_t>(heapStart.ptr);
+        const uint64_t span = static_cast<uint64_t>(descriptorSize) *
+            static_cast<uint64_t>(heapDesc.NumDescriptors);
+        const uint64_t end = first + span;
+        const ImTextureID fallback = static_cast<ImTextureID>(first);
+
+        for (int listIndex = 0; listIndex < drawData->CmdListsCount; ++listIndex)
+        {
+            ImDrawList* drawList = const_cast<ImDrawList*>(drawData->CmdLists[listIndex]);
+            for (int cmdIndex = 0; cmdIndex < drawList->CmdBuffer.Size; ++cmdIndex)
+            {
+                ImDrawCmd& cmd = drawList->CmdBuffer[cmdIndex];
+                const ImTextureID texId = cmd.TexRef._TexData
+                    ? cmd.TexRef._TexData->TexID
+                    : cmd.TexRef._TexID;
+                const uint64_t texture = static_cast<uint64_t>(texId);
+                const bool inRange = texture >= first && texture < end;
+                const bool aligned = descriptorSize != 0 &&
+                    ((texture - first) % descriptorSize) == 0;
+                if (!inRange || !aligned)
+                {
+                    cmd.TexRef._TexData = nullptr;
+                    cmd.TexRef._TexID = fallback;
+                }
+            }
+        }
+
         ImGui_ImplDX12_RenderDrawData(drawData, commands);
     }
 #if defined(ENGINE_VULKAN_ENABLED)
