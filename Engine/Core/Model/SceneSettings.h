@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Core/Model/RendererData.h"
+#include "Core/Model/TextureLodSettings.h"
 #include <glm/glm.hpp>
 #include <string>
 
@@ -51,6 +52,7 @@ struct SceneSettings
     ToneMappingOperator toneMapping = ToneMappingOperator::Aces;
     float outputExposure = 0.f;
     SceneRenderMode renderMode = SceneRenderMode::Lit;
+    TextureLodSettings textureLod;
     // Heavy scenes can optionally render at a reduced internal resolution and
     // optionally combine it with temporal reconstruction for stable output.
     RenderScaleMode renderScaleMode = RenderScaleMode::Native;

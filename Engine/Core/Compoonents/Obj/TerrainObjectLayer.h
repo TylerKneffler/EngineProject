@@ -74,8 +74,17 @@ public:
     JsonValue Serialize() const override;
     void Deserialize(const JsonValue& value) override;
     void InstallPrepared(TerrainObjectLayer&& source);
+    // Static prefab placements share source geometry/material definitions.
+    // Derived render/physics objects are never saved into the authored layer.
+    void PreparePrefabInstances(IGraphicsProvider* provider);
     bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
 private:
+    struct PrefabInstances;
+    std::shared_ptr<PrefabInstances> m_prefabInstances;
+    uint64_t m_prefabCheckedRevision=UINT64_MAX;
+    const Placement* m_prefabCheckedData=nullptr;
+    size_t m_prefabCheckedCount=0;
+    bool m_hasPrefabPlacements=false;
     mutable PreparedTiles m_prepared;
     mutable uint64_t m_preparedRevision=UINT64_MAX,m_preparedSignature=0;
     mutable const Placement* m_preparedData=nullptr;

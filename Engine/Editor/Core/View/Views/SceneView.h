@@ -136,6 +136,11 @@ private:
     float m_terrainRadius = 3.f;
     float m_terrainStrength = .25f;
     bool m_editTerrainCells = false;
+    std::string m_terrainObjectPrefab;
+    bool m_terrainAlignObjects = true;
+    float m_terrainObjectSpacing = 2.f;
+    glm::vec3 m_lastTerrainObjectPosition{0.f};
+    bool m_terrainObjectStroke = false;
     bool m_modelManipulation = false;
     int m_modelSelectionMode = 2;
     int m_modelAction = 0;

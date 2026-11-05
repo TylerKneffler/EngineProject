@@ -1,4 +1,6 @@
 #include "ScenePlacementAndPicking.h"
+#include "SurfacePlacement.h"
+#include "Core/Compoonents/Obj/Terrain.h"
 
 #include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Compoonents/Animation/SkinnedMesh.h"
@@ -475,6 +477,58 @@ bool IntersectSkinnedMesh(const Engine::Core::Object& object,
     return index && index->Intersect(glm::vec3(inverse * glm::vec4(rayOrigin, 1.f)),
         glm::vec3(inverse * glm::vec4(rayDirection, 0.f)), distance);
 }
+}
+
+bool ScenePlacementAndPicking::FindTerrainPlacement(
+    const Engine::Scene::Scene& scene, const Engine::Core::Object* terrainRoot,
+    const EditorUiVec2& mousePos, const EditorUiVec2& viewportSize,
+    glm::vec3& placement, glm::vec3& normal)
+{
+    glm::vec3 origin{}, direction{};
+    if (!terrainRoot || !BuildViewportRay(scene, mousePos, viewportSize,
+            origin, direction)) return false;
+    double nearest = std::numeric_limits<double>::max();
+    bool found = false;
+    for (const auto& entry : scene.GetObjects())
+    {
+        auto* object = entry.get();
+        if (!object || !object->IsEnabledInHierarchy() ||
+            !IsInObjectHierarchy(object, terrainRoot) ||
+            !object->GetComponent<Engine::Components::Terrain>()) continue;
+        auto* mesh = object->GetComponent<Engine::Components::Mesh>();
+        float boundsDistance = 0.f;
+        if (!mesh || !IntersectMeshBounds(*object, *mesh, origin,
+                direction, boundsDistance)) continue;
+        const auto& vertices = mesh->GetVertices();
+        const auto& indices = mesh->GetIndices();
+        const auto world = object->transform.GetWorldMatrixD();
+        const auto up = glm::transpose(glm::inverse(glm::dmat3(world))) *
+            glm::dvec3(0.0, 1.0, 0.0);
+        for (size_t i = 0; i + 2 < indices.size(); i += 3)
+        {
+            glm::dvec3 points[3];
+            bool valid = true;
+            for (int j = 0; j < 3; ++j)
+            {
+                if (indices[i + j] >= vertices.size()) { valid = false; break; }
+                const auto& v = vertices[indices[i + j]];
+                points[j] = glm::dvec3(world *
+                    glm::dvec4(v.pos[0], v.pos[1], v.pos[2], 1.0));
+            }
+            glm::dvec3 hitNormal;
+            if (valid && IntersectPlacementTriangle(glm::dvec3(origin),
+                    glm::dvec3(direction), points[0], points[1], points[2],
+                    nearest, hitNormal))
+            {
+                if (glm::dot(hitNormal, up) < 0.0) hitNormal = -hitNormal;
+                normal = glm::vec3(hitNormal);
+                found = true;
+            }
+        }
+    }
+    if (found) placement = glm::vec3(glm::dvec3(origin) +
+        glm::dvec3(direction) * nearest);
+    return found;
 }
 
 void ScenePlacementAndPicking::ClearCaches()

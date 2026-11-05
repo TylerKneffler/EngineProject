@@ -449,6 +449,9 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
     const bool autoProfileKeepOpen=EnvironmentVariable("ENGINE_EDITOR_AUTO_PROFILE_KEEP_OPEN").has_value();
     const auto warmupFrames=EnvironmentVariable("ENGINE_EDITOR_AUTO_PROFILE_WARMUP_FRAMES");
     const uint32_t autoProfileWarmup=warmupFrames ? uint32_t(std::clamp(std::atoi(warmupFrames->c_str()),0,1200)):0;
+    const auto stopFrames=EnvironmentVariable("ENGINE_EDITOR_AUTO_PROFILE_STOP_FRAMES");
+    const uint32_t autoProfileStopFrames=stopFrames ? uint32_t(std::clamp(std::atoi(stopFrames->c_str()),0,1200)):0;
+    uint32_t autoProfileStoppedFrames=0;
     bool autoProfileComplete=false;
     window->OnUpdate = [&]()
     {
@@ -1007,6 +1010,8 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
             sample.gameViewHeight = gameViewHeight;
             sample.submittedShadowDraws = submittedShadowDraws;
             sample.deltaSeconds = dt;
+            sample.playSnapshotBytes=editorState->GetPlaySnapshotMemoryBytes();
+            sample.sceneHistoryBytes=editorState->GetSceneHistoryMemoryBytes();
             sample.playing = playState == Engine::Editor::PlayState::Playing;
             sample.measured=!autoProfilePlay || (sample.playing && renderedGameViews>0 &&
                 autoProfilePlayingFrames>=autoProfileWarmup && !autoProfileComplete);
@@ -1030,12 +1035,29 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
         }
         if(autoProfilePlay)
         {
+            if (autoProfileComplete && autoProfileStopFrames>0 &&
+                autoProfileStoppedFrames<autoProfileStopFrames)
+            {
+                renderer->MarkDirty();
+                // Count restored Edit frames only, after Stop's deferred restore.
+                if (playState==Engine::Editor::PlayState::Stopped && !pendingPlayStopRestore &&
+                    ++autoProfileStoppedFrames>=autoProfileStopFrames)
+                {
+                    frameProfiler.Stop();
+                    if(!autoProfileKeepOpen) PostMessageW(window->GetHWND(),WM_CLOSE,0,0);
+                }
+            }
             ++autoProfileTick;
             if(!autoProfileComplete && playState==Engine::Editor::PlayState::Playing && !waitingForPlayDebugger && renderedGameViews>0 &&
                 ++autoProfilePlayingFrames>=autoProfileWarmup+autoProfilePlayFrames)
             {
-                autoProfileComplete=true; frameProfiler.Stop();
-                if(!autoProfileKeepOpen) { gameBuildManager->Stop(); PostMessageW(window->GetHWND(),WM_CLOSE,0,0); }
+                autoProfileComplete=true;
+                if (autoProfileStopFrames>0) gameBuildManager->Stop();
+                else
+                {
+                    frameProfiler.Stop();
+                    if(!autoProfileKeepOpen) { gameBuildManager->Stop(); PostMessageW(window->GetHWND(),WM_CLOSE,0,0); }
+                }
             }
         }
     };

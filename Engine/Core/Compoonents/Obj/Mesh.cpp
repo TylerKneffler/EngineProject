@@ -1,4 +1,5 @@
 #include "Mesh.h"
+#include "TerrainSurfaceWinding.h"
 #include "Core/Rendering/SharedMeshBuffers.h"
 #include "Core/Threading/JobScheduler.h"
 #include "Core/Object.h"
@@ -1019,6 +1020,7 @@ bool Mesh::SetTerrainGeometry(TerrainMeshData&& geometry,
         return false;
     ClearInstancing();
 
+    OrientTerrainSurfaceUp(geometry.vertices, geometry.indices);
     m_terrainVertices = std::move(geometry.vertices);
     m_indices = std::move(geometry.indices);
     m_vertices.clear();

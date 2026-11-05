@@ -393,9 +393,12 @@ bool VulkanGraphicsContext::BeginDepthOnlyPass(
     auto* depth = dynamic_cast<const VulkanGraphicsTexture*>(texture);
     if (!depth || !depth->IsDepthTarget()) return false;
     VkClearValue clears[2]{};
-    clears[1].depthStencil = { clearDepth, 0 };
+    clears[1].depthStencil = { clearDepth < 0.f ? 1.f : clearDepth, 0 };
     VkRenderPassBeginInfo begin{ VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
-    begin.renderPass = depth->GetRenderPass();
+    // A negative clear depth requests preservation of an existing atlas.
+    // Partial directional-cascade refreshes use the same contract as DX11/12.
+    begin.renderPass = clearDepth < 0.f
+        ? depth->GetLoadRenderPass() : depth->GetRenderPass();
     begin.framebuffer = depth->GetFramebuffer();
     begin.renderArea.extent = { depth->GetWidth(), depth->GetHeight() };
     begin.clearValueCount = 2;

@@ -7,6 +7,10 @@
 #include "Core/Scene/Scene.h"
 
 #include <cstdlib>
+#if defined(_WIN32)
+#include <windows.h>
+#include <psapi.h>
+#endif
 #include <filesystem>
 #include <string>
 #include <sstream>
@@ -91,6 +95,17 @@ namespace Engine::Editor
         double mainCpuMs=0, workerCpuMs=0;
         for(const auto& stage:sample.stages)
         { mainCpuMs+=stage.mainBusyMs; workerCpuMs+=stage.workerMs; }
+#if defined(_WIN32)
+        PROCESS_MEMORY_COUNTERS_EX memory{};
+        memory.cb=sizeof(memory);
+        if (GetProcessMemoryInfo(GetCurrentProcess(),
+            reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&memory),sizeof(memory)))
+            output << "\"editor_working_set_bytes\":" << memory.WorkingSetSize
+                << ",\"editor_peak_working_set_bytes\":" << memory.PeakWorkingSetSize
+                << ",\"editor_private_bytes\":" << memory.PrivateUsage << ',';
+#endif
+        output << "\"play_snapshot_capacity_bytes\":" << sample.playSnapshotBytes
+            << ",\"scene_history_capacity_bytes\":" << sample.sceneHistoryBytes << ',';
         output << "\"schema_version\":3,\"playing\":"
             << (sample.playing ? "true" : "false")
             << ",\"dt_ms\":" << sample.updateIntervalMs

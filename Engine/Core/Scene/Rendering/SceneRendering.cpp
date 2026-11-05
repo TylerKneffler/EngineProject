@@ -7,6 +7,7 @@
 #include "Core/Compoonents/Obj/Mesh.h"
 #include "Core/Compoonents/Materials/Material.h"
 #include "Core/Compoonents/Obj/Terrain.h"
+#include "Core/Compoonents/Obj/TerrainObjectLayer.h"
 #include "Core/Compoonents/Obj/TerrainManager.h"
 #include "Core/Compoonents/Obj/TerrainBatchAppearance.h"
 #include "Core/Compoonents/Physics/SpatialManipulator.h"
@@ -302,6 +303,8 @@ struct ObjectGPUData
     glm::vec4 geometryFade{0.f, 1.f, 0.f, 0.f}; // dither interval, reserved, enabled
     glm::vec4 shadowCasterFade{0.f}; // range, fade width, shadow pass enabled, reserved
     glm::vec4 grassAnimation{0.f}; // scene time, grass enabled, reserved
+    glm::vec4 textureLodParams{0.f}; // near, far, maximum mip bias, enabled/shading tier
+    glm::vec4 alphaLodParams{0.f};
 };
 
 // Value-only boundary: resources are resolved by the scene owner before assembly.
@@ -410,7 +413,7 @@ struct ParticleCBData
 };
 
 static_assert(sizeof(DrawCBData) == 16, "Draw constants must remain small");
-static_assert(sizeof(ObjectGPUData) == 1520, "Object buffer layout must match Object.hlsl");
+static_assert(sizeof(ObjectGPUData) == 1552, "Object buffer layout must match Object.hlsl");
 static_assert(sizeof(Engine::Model::LightData) == 128,
     "Light buffer layout must match Object.hlsl");
 static_assert(sizeof(GridCBData) == 128, "Grid constant-buffer layout must match Grid.hlsl");
@@ -2078,6 +2081,10 @@ void Scene::PrepareRenderFrame(bool publishSnapshot)
     m_suppressSceneSnapshotPublication = priorPublicationSuppressed || !publishSnapshot;
     // Commit editor edits before preparing owned draw data. Replay-only editor
     // frames publish on their simulation commit instead of scanning twice.
+    CommitPendingObjectChanges();
+    // Copy the registry view: deriving prefab batches adds scene components.
+    const auto objectLayers=GetComponents<Engine::Components::TerrainObjectLayer>();
+    for (auto* layer:objectLayers) layer->PreparePrefabInstances(m_graphicsProvider);
     CommitPendingObjectChanges();
     ProcessGraphicsPreparation(m_graphicsProvider);
     SelectNativeFrameBuffers();
@@ -4242,6 +4249,12 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         preparedDraw.gpuLod=renderItem->gpuLod;
         preparedDraw.gpuMaximumLod=renderItem->gpuMaximumLod;
         preparedDraw.gpuLodDistances=renderItem->gpuLodDistances;
+        if (mesh && mesh->prefabLodBand>=0)
+        {
+            preparedDraw.gpuLod=mesh->prefabLodBand;
+            preparedDraw.gpuMaximumLod=2;
+            preparedDraw.gpuLodDistances=mesh->prefabLodDistances;
+        }
         preparedDraw.object = obj;
         preparedDraw.mesh = mesh;
         preparedDraw.material = sprite ? nullptr : mat;
@@ -4289,10 +4302,14 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 mesh->GetPosedVertexBuffer() &&
                 !mesh->IsPortalPoseSnapshot() &&
                 (useSourceChart || !renderItem->warpedVertexBuffer);
-            preparedDraw.objectData.geometryFade=hasPortalViews && renderItem->geometryFade.w>=2.f ? mesh->GetRuntimeGeometryFade():renderItem->geometryFade;
+            preparedDraw.objectData.geometryFade=mesh->prefabLodBand>=0 ? glm::vec4(float(mesh->prefabLodBand),mesh->prefabLodDistances.x,mesh->prefabLodDistances.y,4.f) : (hasPortalViews && renderItem->geometryFade.w>=2.f ? mesh->GetRuntimeGeometryFade():renderItem->geometryFade);
             preparedDraw.objectData.shadowCasterFade={casterFade.x,std::min(casterFade.x,casterFade.y),1.f,0.f};
             preparedDraw.objectData.grassAnimation={0.f,0.f,0.f,0.f};
             preparedDraw.objectData.viewPositionAlphaCutoff=glm::vec4(cameraPosition,.001f);
+            preparedDraw.objectData.alphaLodParams = mat && mat->overrideTextureLod
+                ? mat->textureLod.AlphaGpuParameters() : settings.textureLod.AlphaGpuParameters();
+            preparedDraw.objectData.textureLodParams = mat && mat->overrideTextureLod
+                ? mat->textureLod.GpuParameters() : settings.textureLod.GpuParameters();
             preparedDraw.objectData.world = world;
             preparedDraw.objectData.viewProjection = proj * view;
             preparedDraw.objectData.traversalClipPlane =
@@ -4333,8 +4350,11 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 preparedDraw.objectData.viewPositionAlphaCutoff.w =
                     mat->alphaCutoff;
             }
-            preparedDraw.doubleSided = preparedDraw.terrainCell ||
+            preparedDraw.doubleSided = !preparedDraw.terrainCell &&
                 (mat && mat->doubleSided);
+            // Independent prefab cards carry their authored caster sidedness.
+            if (mesh->prefabLodBand>=0)
+                preparedDraw.shadowDoubleSided=preparedDraw.doubleSided;
             preparedDraw.drawData = { slot, 0u, mesh->IsInstanced() ? (0x20000000u | (renderItem->geometryFade.w>=2.f && !hasPortalViews ? 0x00100000u:0u)):0u, 0u };
             preparedDraw.traversalChartPortal =
                 renderItem->traversalChartPortal;
@@ -4766,29 +4786,17 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             objectData.environmentParams.w = 0.f;
             alphaMode = Engine::Components::MaterialAlphaMode::Opaque;
         }
+        // Resolve after cached material assembly: scene settings must also affect
+        // static objects and material-less meshes without rebuilding their assets.
+        objectData.alphaLodParams = mat && mat->overrideTextureLod
+            ? mat->textureLod.AlphaGpuParameters() : settings.textureLod.AlphaGpuParameters();
+        objectData.textureLodParams = mat && mat->overrideTextureLod
+            ? mat->textureLod.GpuParameters() : settings.textureLod.GpuParameters();
         bool terrainShadowDoubleSided = doubleSided;
-        // Terrain patches may be viewed from either side near steep slopes or
-        // below overhangs. Their authored winding is not consistent across
-        // terrain generators, so keep color two-sided. Shadows use two-sided
-        // near the camera and single-sided farther away to trim shadow cost.
+        // Height fields have a single upward-facing surface, including cached
+        // terrain and streamed batches. Backfaces do not contribute color or shadows.
         if (preparedDraw.terrainCell)
-        {
-            doubleSided = true;
-            terrainShadowDoubleSided = true;
-            if (mesh && mesh->HasBounds())
-            {
-                constexpr float kTerrainTwoSidedShadowDistance = 22.f;
-                const auto bounds = Engine::Rendering::TransformBounds(
-                    mesh->GetBoundsMin(), mesh->GetBoundsMax(), objectData.world);
-                const auto nearestPoint = glm::clamp(cameraPosition,
-                    bounds.minimum, bounds.maximum);
-                const auto delta = nearestPoint - cameraPosition;
-                terrainShadowDoubleSided =
-                    glm::dot(delta, delta) <=
-                    kTerrainTwoSidedShadowDistance *
-                        kTerrainTwoSidedShadowDistance;
-            }
-        }
+            doubleSided = terrainShadowDoubleSided = false;
         preparedDraw.doubleSided = doubleSided;
         preparedDraw.shadowDoubleSided = terrainShadowDoubleSided;
         if (shadowSelection.valid)
@@ -4863,7 +4871,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             (clusteredLightingEnabled ? kClusteredLightingFlag : 0u) |
                 (mesh && mesh->IsInstanced() ? (0x20000000u | (renderItem->geometryFade.w>=2.f && !hasPortalViews ? 0x00100000u:0u)):0u), 0u };
         preparedDraw.drawData = drawData;
-        objectData.geometryFade = hasPortalViews && renderItem->geometryFade.w>=2.f ? mesh->GetRuntimeGeometryFade():renderItem->geometryFade;
+        objectData.geometryFade = mesh && mesh->prefabLodBand>=0 ? glm::vec4(float(mesh->prefabLodBand),mesh->prefabLodDistances.x,mesh->prefabLodDistances.y,4.f) : (hasPortalViews && renderItem->geometryFade.w>=2.f ? mesh->GetRuntimeGeometryFade():renderItem->geometryFade);
         objectData.shadowCasterFade={casterFade.x,std::min(casterFade.x,casterFade.y),0.f,0.f};
         objectData.grassAnimation={mesh && (mesh->grassShadowCaster || mesh->foliageWindStrength>0.f) ? static_cast<float>(GetElapsedTime()):0.f,
             mesh && (mesh->grassShadowCaster || mesh->foliageWindStrength>0.f) ? 1.f : 0.f,
@@ -5123,12 +5131,12 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             input.maximum += glm::vec3(padding);
         }
         float shadowRange = draw.objectData.shadowCasterFade.x;
-        if (shadowOnly && draw.gpuLod >= 0)
+        if (shadowOnly && draw.gpuLod >= 0 && draw.mesh->prefabLodBand<0)
         {
             if (draw.gpuLod == 1) shadowRange *= .7f;
             else if (draw.gpuLod >= 2) shadowRange *= .4f;
         }
-        input.lod={scaledShadowLodDistances(draw.gpuLodDistances),shadowRange,
+        input.lod={draw.mesh->prefabLodBand>=0 ? draw.gpuLodDistances : scaledShadowLodDistances(draw.gpuLodDistances),shadowRange,
             std::min(shadowRange, draw.objectData.shadowCasterFade.y)};
         for(const auto& range:draw.mesh->GetInstanceRanges())
             input.ranges.emplace_back(range.firstInstance,range.instanceCount);
@@ -5301,7 +5309,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     std::vector<uint8_t> selectedLods(preparedDraws.size(),1);
     Engine::Rendering::RenderJobs::Get().For(preparedDraws.size(),512,[&](size_t index) {
         const auto& draw=preparedDraws[index];
-        if(draw.gpuLod<0) return;
+        if(draw.gpuLod<0 || draw.mesh->prefabLodBand>=0) return;
         const glm::vec2 lodDistances=scaledShadowLodDistances(draw.gpuLodDistances);
         const float distance=glm::length(glm::vec3(draw.objectData.world[3])-cameraPosition);
         const int lod=distance<lodDistances.x ? 0 : distance<lodDistances.y ? 1 : 2;
@@ -5348,7 +5356,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 std::sort(tiles.begin(),tiles.end(),[](const auto& first,const auto& second) {
                     return std::tie(first.range.z,first.range.x)<std::tie(second.range.z,second.range.x);
                 });
-                bool gpu=gpuInstanceCulling && context->SupportsIndirectDraws() && (count>=32 || gpuLod);
+                bool gpu=gpuInstanceCulling && context->SupportsIndirectDraws() && (count>=32 || gpuLod || representative.mesh->prefabLodBand>=0);
                 if(gpu && !m_instanceCullAttempted)
                 {
                     m_instanceCullAttempted=true;
@@ -5364,7 +5372,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 Engine::Rendering::PersistentInstanceBatches::Key key{
                     uintptr_t(cam),uintptr_t(shadowOnly),instanceViewOrdinal,objectBase/m_objectCapacity,
                     uintptr_t(sourceMesh->GetGraphicsBuffer()),uintptr_t(pipeline),sourceRange.firstVertex,sourceRange.vertexCount,
-                    uintptr_t(residentLod),representative.drawData.flags,representative.drawData.lightCount,uintptr_t(representative.doubleSided),uintptr_t(representative.castsShadow)};
+                    uintptr_t(residentLod) | (uintptr_t(representative.mesh->prefabLodBand+1)<<8),representative.drawData.flags,representative.drawData.lightCount,uintptr_t(representative.doubleSided),uintptr_t(representative.castsShadow)};
                 for(auto* texture:representative.textures) key.push_back(uintptr_t(texture));
                 if(!automaticInstancing) key.push_back(uintptr_t(representative.object));
                 const auto uploadStart=RenderClock::now();
@@ -5388,7 +5396,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                     Engine::Rendering::InstanceCullConstants cull;
                     cull.viewProjection=cullViewProjection; cull.cameraPosition=glm::vec4(cameraPosition,1);
                     cull.counts={uint32_t(tiles.size()),sourceRange.vertexCount,sourceRange.firstVertex,1};
-                    cull.selection={gpuLod ? residentLod:-1,2,representative.gpuMaximumLod,shadowOnly ? 1:0};
+                    cull.selection={gpuLod ? residentLod:representative.gpuLod,2,representative.gpuMaximumLod,
+                        (shadowOnly ? 1:0) | (representative.mesh->prefabLodBand>=0 ? 2:0)};
                     context->SetComputeReadBuffer(buffers.input.get()); context->SetComputeReadBuffer(pool,1); context->SetComputeWriteBuffer(buffers.output.get());
                     context->SetComputeConstants(&cull,sizeof(cull)); context->DispatchCompute(1); context->StorageBarrier(buffers.output.get());
                     cull.counts.w=0;

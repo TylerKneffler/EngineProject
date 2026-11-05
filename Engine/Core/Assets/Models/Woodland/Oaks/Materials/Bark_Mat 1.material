@@ -90,7 +90,7 @@
   "heightMinSteps": 8,
   "heightMaxSteps": 32,
   "occlusionStrength": 1,
-  "doubleSided": true,
+  "doubleSided": false,
   "castsShadows": true,
   "unlit": false,
   "lightingChannels": -1,

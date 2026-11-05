@@ -71,3 +71,9 @@ ReleaseBuilds/.staging-*/
 !.local/tests/PerformanceRecordingTests.cpp
 
 !.local/tests/ShaderSourceCacheTests.cpp
+!.local/tests/TextureResidencyTests.cpp
+!.local/tests/TextureResidencyBackendTests.cpp
+
+!.local/tests/TerrainCullingBackendTests.cpp
+
+!.local/tests/OakBackendCapture.cpp

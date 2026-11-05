@@ -6,7 +6,7 @@ struct CullConstants
     float4x4 viewProjection;
     float4 cameraPosition;
     uint4 counts; // instance count, vertex/index count, indexed, reset phase
-    int4 selection; // target LOD (-1 means no LOD filter), reserved
+    int4 selection; // target LOD, mode, maximum LOD, flags (1 shadow, 2 per-placement bands)
 };
 #ifdef VULKAN
 [[vk::push_constant]] CullConstants constants;
@@ -39,7 +39,9 @@ void CSMain(uint3 id : SV_DispatchThreadID, uint3 group : SV_GroupID, uint3 thre
         InstanceRecord world=inputInstances[group.x*3];
         InstanceRecord bounds=inputInstances[group.x*3+1];
         InstanceRecord lodData=inputInstances[group.x*3+2];
-        if(constants.selection.x >= 0)
+        // Existing grass LOD uses a shared tile-origin fade. Independent prefab
+        // bands use per-fragment fades and conservative per-placement selection.
+        if(constants.selection.x>=0 && (constants.selection.w & 2)==0)
         {
             const float distance=length(lodData.sphere.xyz-constants.cameraPosition.xyz);
             const float width=max(.001,min(.5,(lodData.lod.y-lodData.lod.x)*.25));
@@ -64,9 +66,19 @@ void CSMain(uint3 id : SV_DispatchThreadID, uint3 group : SV_GroupID, uint3 thre
             const float4 worldCenter=float4(dot(world.sphere,float4(instanceCenter,1)),dot(worldRow1,float4(instanceCenter,1)),dot(world.lod,float4(instanceCenter,1)),1);
             const float3 worldExtent=float3(dot(abs(worldX),instanceExtent),dot(abs(worldY),instanceExtent),dot(abs(worldZ),instanceExtent));
             const float radius=length(worldExtent);
+            if(constants.selection.x>=0 && (constants.selection.w & 2)!=0)
+            {
+                // Conservative per-placement bands. Shader dithering resolves the
+                // overlap; testing the tile center would lose trees at boundaries.
+                const float distance=length(worldCenter.xyz-constants.cameraPosition.xyz);
+                const float width=max(.001,min(.5,(lodData.lod.y-lodData.lod.x)*.25));
+                if ((constants.selection.x==0 && distance-radius>lodData.lod.x+width) ||
+                    (constants.selection.x==1 && (distance+radius<lodData.lod.x-width || distance-radius>lodData.lod.y+width)) ||
+                    (constants.selection.x==2 && distance+radius<lodData.lod.y-width)) continue;
+            }
             // Range culling is shadow-only. Keep boundary-crossing placements
             // for the per-fragment fade instead of dropping the whole tile.
-            if(constants.selection.w!=0 && lodData.lod.z>0.0 &&
+            if((constants.selection.w & 1)!=0 && lodData.lod.z>0.0 &&
                 length(worldCenter.xyz-constants.cameraPosition.xyz)-radius>=lodData.lod.z) continue;
             bool visible=true;
             [unroll] for(uint plane=0;plane<6;++plane)

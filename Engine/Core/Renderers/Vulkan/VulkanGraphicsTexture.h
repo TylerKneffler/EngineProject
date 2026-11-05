@@ -98,6 +98,13 @@ public:
         return reinterpret_cast<void*>(m_image.image);
     }
     VkImageView GetView() const { return m_image.view; }
+    // Dedicated image allocation size (excludes staging and descriptors).
+    uint64_t GetAllocationSizeBytes() const
+    {
+        VkMemoryRequirements requirements{};
+        vkGetImageMemoryRequirements(m_system->GetDevice(), m_image.image, &requirements);
+        return requirements.size;
+    }
     bool IsDepthTarget() const { return m_framebuffer != VK_NULL_HANDLE; }
     VkRenderPass GetRenderPass() const { return m_renderPass; }
     VkRenderPass GetLoadRenderPass() const { return m_loadRenderPass; }

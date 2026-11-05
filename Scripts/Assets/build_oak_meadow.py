@@ -195,6 +195,7 @@ def make_prefabs():
                 if isinstance(value,str):d[key]=portable(value)
             leaf=d.get('alphaMode')=='Mask' or pack in ['Bushes','Grass']
             d.update(useVertexColors=False,ambientColor=[.025,.03,.02],metallic=0,roughness=.86)
+            if pack=='Oaks' and not leaf:d['doubleSided']=False
             if leaf:d.update(alphaMode='Mask',alphaCutoff=.32,doubleSided=True,castsShadows=True,ambientColor=[.20,.23,.13],normalScale=.55,reflectionStrength=.18)
             if pack in ['Grass','Bushes']:d['shaders']=[{'path':'Assets/Shaders/Foliage.hlsl','enabled':True,'blendMode':'Auto'}]
             path.write_text(json.dumps(d,indent=2)+'\n')
@@ -210,24 +211,164 @@ def make_prefabs():
                     node.clear();node.set('Material.materialAsset',asset.replace('Assets/','Engine/Core/Assets/',1))
             transform(obj)
             # Native object names and separate bark/leaf slots stay editable.
-            if pack=='Oaks':
-                cs=obj.find('components');col=ET.SubElement(cs,'{'+NS+'}PrimitiveObjectCollider',{
-                    'PrimitiveObjectCollider.collisionEnabled':'true','PrimitiveObjectCollider.shape':'Capsule',
-                    'PrimitiveObjectCollider.radius':'.32','PrimitiveObjectCollider.height':'3'})
-                vector(col,'PrimitiveObjectCollider.center',[0,1.5,0])
-                ET.SubElement(cs,'{'+NS+'}RigidBody',{'RigidBody.bodyType':'Static','RigidBody.useGravity':'false'})
             prefab=ET.Element('Prefab',{'version':'1','type':'prefab'});prefab.append(obj)
             path=ASSETS/'Prefabs/Woodland'/pack/(model+'.prefab');write_xml(path,prefab)
             library[model]=path
     return library
 
-def compose(library):
-    import math,random
+def add_grass_layer(terrain, template, grove_half_extent=48.0):
+    """Transfer the flat scene's authored grass pattern onto this terrain."""
+    import math
+    source=next(n for n in template.iter('item') if n.find('components/{'+NS+'}GrassField') is not None)
+    grass=copy.deepcopy(source);grass.set('name','Oak meadow grass')
+    children=grass.find('children')
+    if children is not None:children.clear()
+    transform(grass)
+    field=component(grass,'GrassField')
+    field.set('GrassField.viewerObjectName','Meadow Explorer')
+    field.set('GrassField.useEditorCamera','true')
+    field.set('GrassField.allowProceduralGeneration','false')
+    field.set('GrassField.retainDormantTiles','false')
+    layer=component(grass,'TerrainObjectLayer')
+    layer.attrib.pop('TerrainObjectLayer.bakedInstances',None)  # Flat transforms are invalid here.
+    layer.set('TerrainObjectLayer.layerName','Meadow grass')
+    layer.set('TerrainObjectLayer.viewDistance','36')
+    placements=layer.find('TerrainObjectLayer.placements')
+    originals=list(placements);placements.clear()
+    def numbers(node):
+        return [float(n.text) for n in node] if len(node) else [float(n) for n in node.text.split()]
+    t=component(terrain,'Terrain')
+    cells_x=int(t.get('Terrain.cellsX'));cells_z=int(t.get('Terrain.cellsY'))
+    width=float(t.get('Terrain.cellWidth'));depth=float(t.get('Terrain.cellDepth'))
+    heights=[float(n.text) for n in t.find('Terrain.heights')]
+    weights=[float(n.text) for n in t.find('Terrain.weights')]
+    layer_count=len(t.find('Terrain.layers'))
+    origin=numbers(terrain.find('transform/Transform.position'))
+    def sample(x,z):
+        gx=x/width;gz=z/depth;col=min(int(gx),cells_x-1);row=min(int(gz),cells_z-1)
+        u=gx-col;v=gz-row;a=row*(cells_x+1)+col;b=a+cells_x+1
+        # Match Terrain's a,b,a+1 / a+1,b,b+1 triangle diagonal exactly.
+        ids,blend=([a,a+1,b],[1-u-v,u,v]) if u+v<=1 else ([a+1,b,b+1],[1-v,1-u,u+v-1])
+        y=sum(heights[i]*w for i,w in zip(ids,blend))
+        dirt=sum(weights[i*layer_count+1]*w for i,w in zip(ids,blend))
+        dx=((heights[a+1]-heights[a]) if u+v<=1 else (heights[b+1]-heights[b]))/width
+        dz=((heights[b]-heights[a]) if u+v<=1 else (heights[b+1]-heights[a+1]))/depth
+        length=math.sqrt(dx*dx+1+dz*dz)
+        return y,[-dx/length,1/length,-dz/length],dirt
+    # The authored grove covers 96 m; the remaining ground supplies the horizon.
+    first=int(math.floor(-grove_half_extent/16));last=int(math.ceil(grove_half_extent/16))
+    for tile_z in range(first,last):
+        for tile_x in range(first,last):
+            tile=(tile_z-first)*(last-first)+(tile_x-first)
+            for index,original in enumerate(originals):
+                position=numbers(original.find('position'))
+                x=position[0]+tile_x*16;z=position[2]+tile_z*16
+                if abs(x)>grove_half_extent or abs(z)>grove_half_extent:continue
+                local_x=x-origin[0];local_z=z-origin[2]
+                y,normal,dirt=sample(local_x,local_z)
+                if dirt>=.35:continue
+                placement=ET.SubElement(placements,'item',dict(original.attrib))
+                placement.set('id',str(tile*len(originals)+index+1))
+                for name,values in [('position',[local_x,y,local_z]),('normal',normal)]:
+                    node=ET.SubElement(placement,name,{'_arrayEncoding':'spaceSeparatedNumbers'})
+                    node.text=' '.join(f'{value:.7g}' for value in values)
+    terrain_children=terrain.find('children')
+    if terrain_children is None:terrain_children=ET.SubElement(terrain,'children')
+    for child in list(terrain_children):
+        if child.get('name')=='Oak meadow grass' or child.get('prefab')=='Assets/Prefabs/Woodland/OakMeadowGrass.prefab':terrain_children.remove(child)
+    prefab=ET.Element('Prefab',{'version':'1','type':'prefab'})
+    grass.tag='object';prefab.append(grass)
+    write_xml(ASSETS/'Prefabs/Woodland/OakMeadowGrass.prefab',prefab)
+    instance=ET.SubElement(terrain_children,'item',{'prefab':'Assets/Prefabs/Woodland/OakMeadowGrass.prefab','enabled':'true'})
+    transform(instance)
+    return len(placements)
+
+
+def populate_forest(scene, library, count=2048):
+    """Replace only oak placements; preserve authored terrain, grass and settings."""
+    import math, random
     rng=random.Random(18731)
+    objects=scene.find('objects')
+    for node in list(objects):
+        if node.get('name','').startswith(('Oak groves','Oak forest')):
+            objects.remove(node)
+    terrain=next(n for n in objects if component(n,'Terrain') is not None)
+    children=terrain.find('children')
+    if children is None:children=ET.SubElement(terrain,'children')
+    for node in list(children):
+        if node.get('name')=='Oak forest':children.remove(node)
+    group=ET.SubElement(children,'item',{'name':'Oak forest','enabled':'true'})
+    transform(group);ET.SubElement(group,'children');cs=ET.SubElement(group,'components')
+    layer=ET.SubElement(cs,'{'+NS+'}TerrainObjectLayer',{
+        'TerrainObjectLayer.layerName':'Oak forest','TerrainObjectLayer.viewDistance':'220',
+        'TerrainObjectLayer.lod1Distance':'28','TerrainObjectLayer.lod2Distance':'90',
+        'TerrainObjectLayer.shadowDistance':'90'})
+    trees=ET.SubElement(layer,'TerrainObjectLayer.placements')
+    surface=component(terrain,'Terrain')
+    cells_x=int(surface.get('Terrain.cellsX'));cells_z=int(surface.get('Terrain.cellsY'))
+    step_x=float(surface.get('Terrain.cellWidth'));step_z=float(surface.get('Terrain.cellDepth'))
+    origin=[float(n.text) for n in terrain.find('transform/Transform.position')]
+    heights=[float(n.text) for n in surface.find('Terrain.heights')]
+    def ground(x,z):
+        gx=(x-origin[0])/step_x;gz=(z-origin[2])/step_z
+        col=min(cells_x-1,max(0,int(math.floor(gx))))
+        row=min(cells_z-1,max(0,int(math.floor(gz))))
+        u=gx-col;v=gz-row;i=row*(cells_x+1)+col
+        a,b,c,d=heights[i],heights[i+1],heights[i+cells_x+1],heights[i+cells_x+2]
+        return origin[1]+((1-u-v)*a+u*b+v*c if u+v<=1 else
+            (1-v)*b+(1-u)*c+(u+v-1)*d)-.025
+    path_x=lambda z:2.4*math.sin(z*.095)+1.3*math.sin(z*.19)
+    species=sorted({re.sub(r'_LOD[012]$','',n) for n in library if '_oak_tree_' in n})
+    if len(species)!=17:raise RuntimeError('Expected all seventeen native oak varieties')
+    lods=ET.SubElement(layer,'TerrainObjectLayer.objectLods')
+    for name in species:
+        paths=[portable(str(library[name+f'_LOD{lod}'].relative_to(ROOT)).replace('\\','/')) for lod in range(3)]
+        impostor=ASSETS/'Prefabs/Woodland/Oaks'/(name+'_Impostor.prefab')
+        if impostor.exists(): paths[2]='Assets/'+impostor.relative_to(ASSETS).as_posix()
+        entry=ET.SubElement(lods,'item',{'asset':paths[0]})
+        meshes=ET.SubElement(entry,'meshes')
+        for path in paths:ET.SubElement(meshes,'item').text=path
+        distances=ET.SubElement(entry,'distances')
+        for distance in [28,90]:ET.SubElement(distances,'item').text=str(distance)
+    centers=[(rng.uniform(-156,156),rng.uniform(-156,156)) for _ in range(96)]
+    positions=[];buckets={};pairs=0
+    def accept(x,z,spacing):
+        if len(positions)>=count or max(abs(x),abs(z))>164 or abs(x-path_x(z))<3.4:return False
+        key=(math.floor(x/4.2),math.floor(z/4.2))
+        for dz in range(-1,2):
+            for dx in range(-1,2):
+                for a,b in buckets.get((key[0]+dx,key[1]+dz),[]):
+                    if (x-a)**2+(z-b)**2<spacing**2:return False
+        positions.append((x,z));buckets.setdefault(key,[]).append((x,z));return True
+    for attempt in range(count*200):
+        if len(positions)>=count:break
+        if rng.random()<.75:
+            cx,cz=rng.choice(centers);x,z=rng.gauss(cx,13),rng.gauss(cz,13)
+        else:x,z=rng.uniform(-164,164),rng.uniform(-164,164)
+        if not accept(x,z,4.2):continue
+        if rng.random()<.38:
+            angle=rng.uniform(-math.pi,math.pi);distance=rng.uniform(1.9,2.8)
+            pairs+=accept(x+math.cos(angle)*distance,z+math.sin(angle)*distance,1.85)
+    if len(positions)!=count:raise RuntimeError(f'Could only place {len(positions)} of {count} oaks')
+    for i,(x,z) in enumerate(positions):
+        name=species[i%len(species)]+'_LOD0'
+        scale=rng.uniform(.70,1.08)
+        yaw=rng.uniform(-math.pi,math.pi)
+        obj=ET.SubElement(trees,'item',{'asset':portable(str(library[name].relative_to(ROOT)).replace('\\','/')),
+            'id':str(i+1),'yawDegrees':f'{math.degrees(yaw):.7g}','scale':f'{scale:.7g}'})
+        for key,values in [('position',[x-origin[0],ground(x,z)-origin[1],z-origin[2]]),('normal',[0,1,0])]:
+            ET.SubElement(obj,key,{'_arrayEncoding':'spaceSeparatedNumbers'}).text=' '.join(f'{value:.7g}' for value in values)
+    print(f'Forest: {count} oaks, {pairs} close companions, 17 runtime LOD varieties, 328 x 328 m coverage',flush=True)
+    return count
+
+
+def compose(library):
+    import math
     template=ET.parse(ASSETS/'Scenes/terrain/grass_flat_test.scene').getroot()
     lookup={n.get('name'):n for n in template.iter('item') if n.get('name')}
     scene=ET.Element('Scene',{'version':'1'});settings=copy.deepcopy(template.find('settings'))
     settings.set('skyboxTexture','Assets/Textures/Skyboxes/editor-default-sky.png')
+    for key,value in [('textureLodEnabled','true'),('textureLodNearDistance','12'),('textureLodFarDistance','48'),('textureLodMipBias','4'),('textureLodSimplifyShading','true')]:settings.set(key,value)
     settings.set('hdriLightingEnabled','true');settings.set('hdriIntensity','.55');settings.set('outputExposure','-.2')
     vector(settings,'ambientColor',[.10,.13,.15]);scene.append(settings);objects=ET.SubElement(scene,'objects')
     path_x=lambda z:2.4*math.sin(z*.095)+1.3*math.sin(z*.19)
@@ -246,13 +387,14 @@ def compose(library):
         (materials/(name+'.material')).write_text(json.dumps({'version':1,'baseColor':color,'metallic':0,'roughness':1,
             'useVertexColors':True,'baseColorTexture':'Assets/Textures/Terrain/'+texture,'castsShadows':False},indent=2)+'\n')
     terrain=copy.deepcopy(lookup['Flat Grass Terrain']);terrain.set('name','Oak meadow ground')
-    terrain.find('children').clear();transform(terrain,(-48,0,-48))
-    terrain_half_extent=48.0
-    terrain_cells=16
+    # One continuous surface covers both the grove and the distant horizon.
+    terrain_half_extent=180.0
+    terrain_cells=60
+    terrain.find('children').clear();transform(terrain,(-terrain_half_extent,0,-terrain_half_extent))
     terrain_cell_size=(terrain_half_extent*2.0)/terrain_cells
     t=component(terrain,'Terrain');t.clear();t.attrib.update({
         'Terrain.cellsX':str(terrain_cells),'Terrain.cellsY':str(terrain_cells),
-        'Terrain.cellWidth':f'{terrain_cell_size:g}','Terrain.cellDepth':f'{terrain_cell_size:g}','Terrain.textureTiling':'48'})
+        'Terrain.cellWidth':f'{terrain_cell_size:g}','Terrain.cellDepth':f'{terrain_cell_size:g}','Terrain.textureTiling':'180'})
     heights=ET.SubElement(t,'Terrain.heights');weights=ET.SubElement(t,'Terrain.weights');layers=ET.SubElement(t,'Terrain.layers')
     for name,col in [('Meadow',[.37,.47,.22]),('Path',[.40,.32,.20]),('WoodlandFloor',[.22,.30,.16])]:
         l=ET.SubElement(layers,'item',{'material':f'Assets/Materials/Woodland/{name}.material','minHeight':'-100','maxHeight':'100'})
@@ -265,39 +407,24 @@ def compose(library):
             moss=max(0,min(.75,(abs(x)-16)/25))*(1-dirt)
             for w in [1-dirt-moss,dirt,moss]:ET.SubElement(weights,'item').text=f'{w:.5f}'
     collider=component(terrain,'MeshObjectCollider');collider.set('MeshObjectCollider.collisionEnabled','true')
+    grass_count=add_grass_layer(terrain,template)
     objects.append(terrain)
-    # A broad matching floor hides the horizon edge without more vegetation draws.
-    distant=copy.deepcopy(lookup['Grass Distant Terrain']);distant.set('name','Distant meadow horizon');transform(distant,(-180,-.18,-180))
-    dt=component(distant,'Terrain');dt.set('Terrain.cellWidth','360');dt.set('Terrain.cellDepth','360')
-    objects.append(distant)
-    def group(name,enabled=True):
-        g=ET.SubElement(objects,'item',{'name':name,'enabled':'true' if enabled else 'false'});transform(g);ET.SubElement(g,'components');return ET.SubElement(g,'children')
-    trees=group('Oak groves - seventeen source varieties')
-    def place(parent,name,x,z,scale=1.,yaw=None):
-        obj=ET.SubElement(parent,'item',{'prefab':portable(str(library[name].relative_to(ROOT)).replace('\\','/')),'enabled':'true'})
-        transform(obj,(x,height(x,z)-.025,z),(0,yaw if yaw is not None else rng.uniform(-math.pi,math.pi),0),(scale,scale,scale))
-    oak_names=sorted({re.sub(r'_LOD[012]$','',n) for n in library if '_oak_tree_' in n})
-    positions=[]
-    # Irregular groves frame an open view along the footpath; never place in its corridor.
-    for attempt in range(1500):
-        x,z=rng.uniform(-43,43),rng.uniform(-37,44)
-        if abs(x-path_x(z))<8.5 or (abs(x)<17 and z<8) or any((x-a)**2+(z-b)**2<8.8**2 for a,b in positions):continue
-        positions.append((x,z))
-        if len(positions)>=48:break
-    for i,(x,z) in enumerate(positions):
-        species=oak_names[i%len(oak_names)];distance=math.hypot(x,z+26);lod=0 if distance<10 else 1 if distance<24 else 2
-        place(trees,species+f'_LOD{lod}',x,z,rng.uniform(.70,1.08))
+    tree_count=populate_forest(scene,library)
     path=ASSETS/'Scenes/terrain/oak_meadow.scene';write_xml(path,scene)
-    print(f'Created {path}: {len(positions)} oaks',flush=True)
+    print(f'Created {path}: {tree_count} oaks, {grass_count} grounded grass patches',flush=True)
     credits=[]
     for pack in (ASSETS/'Other').glob('*/scene.gltf'):
         info=json.loads(pack.read_text())['asset']['extras'];credits.append(f"- {info['title']} by {info['author']}\n  Source: {info['source']}\n  License: {info['license']}")
     (OUTPUT/'ATTRIBUTION.md').write_text('# Oak Meadow source assets\n\n'+'\n\n'.join(credits)+'\n\nModified for this scene: Y-up metre-scale geometry, root pivots, reusable native prefabs, alpha-tested materials, grounded whole-blade ribbon retopology and density LODs. Original packs remain in Assets/Other.\n')
-    (OUTPUT/'README.md').write_text('# Oak Meadow\n\nOpen `Assets/Scenes/terrain/oak_meadow.scene` and press Play. WASD moves, mouse looks, Shift sprints.\n\nThe scene uses a painted three-layer ground, a winding footpath and seventeen oak varieties. Source oak LODs are selected by authored distance from the entrance; these are static scene choices, not a runtime LOD switch. Trees are separate editable prefabs under `Assets/Prefabs/Woodland/Oaks`.\n\nFor performance, the authored terrain grid uses 16x16 cells, there is no grass streaming system, and no shrub-prefab layer in this scene.\n\n`Mesh.foliageWindStrength` enables the shared root-pinned wind field for authored meshes. The oak meadow scene intentionally keeps tree trunks and canopies at zero wind so they remain static and do not trigger shadow-map churn from shader-driven vertex motion. The same vertex path drives color and shadows, with bounds padding for wind. Bark and canopies keep source PBR shading.\n\nRegenerate with `python Scripts/Assets/build_oak_meadow.py --prepare-only`, then `python Scripts/Assets/build_oak_meadow.py` (numpy/scipy and a built Debug Editor required). Existing imported packs are reused. Imports use the native glTF importer; generated intermediates live under `.local/woodland-import`. See ATTRIBUTION.md for CC-BY-4.0 credits.\n')
+    (OUTPUT/'README.md').write_text('# Oak Meadow\n\nOpen `Assets/Scenes/terrain/oak_meadow.scene` and press Play. WASD moves, mouse looks, Shift sprints.\n\nThe forest stress scene uses 2,048 oaks across a 328 x 328 m area, a painted three-layer ground, a winding footpath and seventeen oak varieties. Irregular canopy clusters include 569 close companions at roughly 2-3 m spacing; the narrow footpath remains clear. Trees select shared resident geometry as the camera moves: LOD0 within 28 m, LOD1 to 90 m, and an authored 28-triangle impostor beyond. Complementary spatial dithering blends each boundary over a one-metre interval. Placements reference the base variety, rather than a starting-camera LOD. Trees are compact shared-prefab placements in the terrain child `Oak forest` (`TerrainObjectLayer`), referencing editable assets under `Assets/Prefabs/Woodland/Oaks`. Prefab parts share source geometry and materials instead of expanding a full object hierarchy for every tree. Oak prefabs currently contain no collider or rigid body. Add a primitive collider to the LOD0/base prefab to apply it to every placement of that oak variety, including its configured visual LOD and impostor variants; saved prefab edits are polled once per second. The terrain Objects brush stores prefab references in these layers.\n\nOne continuous 60x60 terrain grid covers the grove and horizon without overlapping surfaces. Grass from `grass_flat_test.scene` is authored across the 96 m grove and streamed to a 36 m view distance using its existing LODs and wind settings. Grass roots and normals follow the actual terrain triangles, leaving the painted footpath clear. Grass placement data lives in `Assets/Prefabs/Woodland/OakMeadowGrass.prefab`, attached directly beneath the terrain. There is no shrub-prefab layer in this scene.\n\n`Mesh.foliageWindStrength` enables the shared root-pinned wind field for authored meshes. The oak meadow scene intentionally keeps tree trunks and canopies at zero wind so they remain static and do not trigger shadow-map churn from shader-driven vertex motion. The same vertex path drives color and shadows, with bounds padding for wind. Bark and canopies keep source PBR shading. The scene enables generic distance texture LOD: full quality within 12 m, smoothly reaching +4 mip bias at 48 m, with normal/material detail and reflections fading over that interval. Adjust Texture LOD in Scene Properties or enable a material override. Bark is one-sided; leaf cards remain two-sided to preserve canopy coverage. Terrain renders only its upward-facing surface.\n\nRebuild only tree placements with `python Scripts/Assets/build_oak_meadow.py --forest-only`, preserving the current terrain, grass and scene settings. Regenerate all assets with `python Scripts/Assets/build_oak_meadow.py --prepare-only`, then `python Scripts/Assets/build_oak_meadow.py` (numpy/scipy and a built Debug Editor required). Existing imported packs are reused. Imports use the native glTF importer; generated intermediates live under `.local/woodland-import`. See ATTRIBUTION.md for CC-BY-4.0 credits.\n')
 
 if __name__=='__main__':
     os.chdir(ROOT)
-    if '--prepare-only' in sys.argv:prepare()
+    if '--forest-only' in sys.argv:
+        library={p.stem:p for p in (ASSETS/'Prefabs/Woodland/Oaks').glob('*.prefab')}
+        path=ASSETS/'Scenes/terrain/oak_meadow.scene'
+        scene=ET.parse(path).getroot();populate_forest(scene,library);write_xml(path,scene)
+    elif '--prepare-only' in sys.argv:prepare()
     else:
         manifest=json.loads((STAGE/'manifest.json').read_text()) if (STAGE/'manifest.json').exists() else prepare()
         import_packs(manifest)

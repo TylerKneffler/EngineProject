@@ -17,6 +17,9 @@
 
 #include <algorithm>
 #include <cctype>
+#include <charconv>
+#include <cstdlib>
+#include <string_view>
 #include <filesystem>
 #include <cmath>
 #include <cstring>
@@ -32,6 +35,21 @@ namespace
 {
 std::mutex s_publicationMutex;
 std::deque<std::pair<std::weak_ptr<Texture>, uint64_t>> s_publications;
+
+uint32_t ResidentTextureDimensionCap()
+{
+    // One process-wide startup policy keeps shared cache entries consistent.
+    static const uint32_t cap = [] {
+        const char* text = std::getenv("ENGINE_TEXTURE_MAX_DIMENSION");
+        if (!text) return 0u;
+        const std::string_view value(text);
+        uint32_t parsed = 0;
+        const auto result = std::from_chars(value.data(), value.data() + value.size(), parsed);
+        return result.ec == std::errc{} && result.ptr == value.data() + value.size()
+            ? parsed : 0u;
+    }();
+    return cap;
+}
 std::string TextureIdentity(const std::string& path, bool srgb)
 {
     return Engine::Memory::CacheStore::PathKey(path,
@@ -585,23 +603,19 @@ bool Texture::PrepareImmediate(IGraphicsProvider* graphicsProvider)
         uint32_t uploadHeight = m_height;
         uint32_t uploadMipLevels = m_mipLevels;
         size_t uploadOffset = 0;
-        // Full-resolution float panoramas are unnecessarily expensive for
-        // real-time specular sampling and make Vulkan's synchronous staging
-        // upload stall the editor. Start at an existing 2K mip; the original
-        // pixels remain available for CPU lighting projection.
+        uint32_t dimensionCap = ResidentTextureDimensionCap();
+        // Preserve the existing panorama ceiling, including when the global
+        // limit is disabled or larger. Source metadata/pixels stay unchanged.
         if (m_format == GraphicsTextureFormat::Rgba32Float)
+            dimensionCap = dimensionCap ? std::min(dimensionCap, 2048u) : 2048u;
+        const uint32_t bytesPerPixel = GraphicsTextureBytesPerPixel(m_format);
+        while (dimensionCap && std::max(uploadWidth, uploadHeight) > dimensionCap &&
+               uploadMipLevels > 1)
         {
-            const uint32_t bytesPerPixel =
-                GraphicsTextureBytesPerPixel(m_format);
-            while (std::max(uploadWidth, uploadHeight) > 2048 &&
-                   uploadMipLevels > 1)
-            {
-                uploadOffset += static_cast<size_t>(uploadWidth) *
-                    uploadHeight * bytesPerPixel;
-                uploadWidth = std::max(1u, uploadWidth / 2);
-                uploadHeight = std::max(1u, uploadHeight / 2);
-                --uploadMipLevels;
-            }
+            uploadOffset += static_cast<size_t>(uploadWidth) * uploadHeight * bytesPerPixel;
+            uploadWidth = std::max(1u, uploadWidth / 2);
+            uploadHeight = std::max(1u, uploadHeight / 2);
+            --uploadMipLevels;
         }
         m_graphicsTexture =
             factory->CreateTexture2D(

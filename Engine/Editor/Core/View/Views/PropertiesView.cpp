@@ -441,6 +441,23 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
             }
 
             ui.Separator();
+            ui.Label("Texture LOD");
+            auto& textureLod = m_scene->settings.textureLod;
+            bool textureLodChanged = ui.Checkbox("Distance Texture LOD", &textureLod.enabled);
+            textureLodChanged |= ui.DragFloat("Full Quality Distance", &textureLod.nearDistance, .5f, 0.f, 10000.f);
+            textureLodChanged |= ui.DragFloat("Lowest Quality Distance", &textureLod.farDistance, .5f, .01f, 10000.f);
+            textureLodChanged |= ui.DragFloat("Maximum Mip Bias", &textureLod.mipBias, .1f, 0.f, 8.f);
+            ui.Tooltip("Adds progressively coarser texture sampling at distance. Does not unload texture mip levels.");
+            textureLodChanged |= ui.Checkbox("Simplify Distant Shading", &textureLod.simplifyShading);
+            textureLodChanged |= ui.DragFloat("Maximum Alpha Mip Bias", &textureLod.alphaMipBias, .1f, 0.f, 8.f);
+            textureLodChanged |= ui.Checkbox("Disable Alpha Testing At Far Distance", &textureLod.disableAlphaAtFar);
+            ui.Tooltip("Fade normal and material detail maps and reflections over the same distance interval. Materials can override these settings.");
+            if (textureLodChanged)
+            {
+                textureLod.Normalize();
+                if (OnComponentsChanged) OnComponentsChanged();
+            }
+            ui.Separator();
             ui.Label("Output Tone Mapping");
             const char* toneMappingOperators[] = { "None", "ACES", "Reinhard" };
             int toneMapping = static_cast<int>(m_scene->settings.toneMapping);

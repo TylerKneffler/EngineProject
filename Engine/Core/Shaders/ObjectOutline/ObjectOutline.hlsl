@@ -53,6 +53,8 @@ struct ObjectData
     float4 geometryFade; // dither interval, reserved, enabled
     float4 shadowCasterFade;
     float4 grassAnimation;
+    float4 textureLodParams; // near, far, maximum mip bias, enabled/shading tier
+    float4 alphaLodParams; // maximum alpha mip bias, disable mask at far distance
 };
 
 struct InstanceTransform { float4 row0; float4 row1; float4 row2; };

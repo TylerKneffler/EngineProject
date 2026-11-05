@@ -2758,17 +2758,38 @@ void CheckAutomaticRendering()
     std::cout<<"Shared geometry, automatic batching, GPU visibility/LOD, dirty uploads, and edit isolation passed.\n";
 }
 
-void RenderAudit(const char* reportPath=".local/performance-logs/grass-automatic-instancing-render-audit.jsonl",bool matrix=false,bool storageAudit=false,bool compare=false,bool nativeAudit=false,unsigned width=1920,unsigned height=1080,bool reverseOrder=false,int selectedMode=-1,bool fixedRoute=false,const char* scenePath="Engine/Core/Assets/Scenes/terrain/grass_flat_test.scene")
+void RenderAudit(const char* reportPath=".local/performance-logs/grass-automatic-instancing-render-audit.jsonl",bool matrix=false,bool storageAudit=false,bool compare=false,bool nativeAudit=false,unsigned width=1920,unsigned height=1080,bool reverseOrder=false,int selectedMode=-1,bool fixedRoute=false,const char* scenePath="Engine/Core/Assets/Scenes/terrain/grass_flat_test.scene", bool oakOverlook=false, int textureLodOverride=-1)
 {
+    const bool oak = std::string(scenePath).find("oak_meadow.scene") != std::string::npos;
     using Clock = std::chrono::steady_clock;
     Engine::Core::Window window(GetModuleHandleW(nullptr), L"Grass render audit", width, height);
     Engine::Renderers::DX11GameRenderer renderer;
     Require(renderer.Init(window.GetHWND(), width, height), "hardware renderer failed");
+    if (oak)
+    {
+        auto context = renderer.CreateFrameGraphicsContext();
+        auto* native = static_cast<ID3D11DeviceContext*>(context->GetNativeHandle());
+        Microsoft::WRL::ComPtr<ID3D11Device> device;
+        native->GetDevice(&device);
+        Microsoft::WRL::ComPtr<IDXGIDevice> dxgiDevice;
+        Microsoft::WRL::ComPtr<IDXGIAdapter> adapter;
+        DXGI_ADAPTER_DESC description{};
+        if (SUCCEEDED(device.As(&dxgiDevice)) &&
+            SUCCEEDED(dxgiDevice->GetAdapter(&adapter)) &&
+            SUCCEEDED(adapter->GetDesc(&description)))
+        {
+            char name[512]{};
+            WideCharToMultiByte(CP_UTF8, 0, description.Description, -1,
+                name, sizeof(name), nullptr, nullptr);
+            std::cout << "Render adapter: " << name << std::endl;
+        }
+    }
     if(nativeAudit) renderer.GetGraphicsProvider()->GetContextFactory()->SetNativeCallTimingEnabled(true);
     Engine::Scene::Scene scene;
     scene.Init(renderer.GetGraphicsProvider());
     std::cout << "Loading streamed grass landscape." << std::endl;
     Require(scene.Load(scenePath), "grass scene failed");
+    if (textureLodOverride >= 0) scene.settings.textureLod.enabled = textureLodOverride != 0;
     auto* landscape=scene.FindObjectByName("Grass Terrain Landscape");
     auto* streamManager=landscape ? landscape->GetComponent<Engine::Components::TerrainManager>():nullptr;
     const size_t residentTerrainTarget=streamManager ?
@@ -2794,15 +2815,18 @@ void RenderAudit(const char* reportPath=".local/performance-logs/grass-automatic
     std::vector<GrassField*> fields;
     for (const auto& object : scene.GetObjects())
         if (auto* field = object->GetComponent<GrassField>()) fields.push_back(field);
-    Require(!fields.empty() && fields.size() < 441,
+    Require((oak || !fields.empty()) && fields.size() < 441,
         "render audit must begin with streamed terrain grass fields");
+    if (oak) for (auto* field : fields) field->useEditorCamera = false;
     std::vector<bool> authoredGrassShadows;
     authoredGrassShadows.reserve(fields.size());
     for(const auto* field:fields) authoredGrassShadows.push_back(field->castShadows);
     if(storageAudit) for(auto* layer:scene.GetComponents<Engine::Components::TerrainObjectLayer>())
         Require(layer->HasLoadedPreparedData(),"landscape cell did not load its baked placement cache");
     scene.SetUpdateProfilingEnabled(true);
-    const char* modes[]={"default","terrain-only","grass-no-shadows","full-grass","foliage-only"};
+    const char* grassModes[]={"default","terrain-only","grass-no-shadows","full-grass","foliage-only"};
+    const char* oakModes[]={"sky-only","terrain-only","full-scene","full-scene","trees-only"};
+    const char** modes = oak ? oakModes : grassModes;
     if(compare) for(auto* field:fields) field->fadeDuration=0; // Identical coverage at each route frame.
     for(unsigned pass=0;pass<(selectedMode>=0 ? 1u:matrix || compare ? 4u:storageAudit ? 2u:1u);++pass)
     {
@@ -2819,7 +2843,8 @@ void RenderAudit(const char* reportPath=".local/performance-logs/grass-automatic
         for(auto* field:fields) field->OnDestroy();
         scene.CommitPendingObjectChanges();
     }
-    player->transform.position.z=0;
+    if (!oak) player->transform.position.z=0;
+    if (oakOverlook) { player->transform.position={-5,27,-39}; camera->target={2,1,5}; }
     const char* route=streaming ? "streaming":"resident";
     const std::string path=selectedMode>=0 ? reportPath:storageAudit ? std::string(*reportPath ? reportPath:".local/performance-logs/static-instance-")+route+(compare ? (parallel ? "-parallel":"-serial"):"")+".jsonl":matrix ? std::string(".local/performance-logs/landscape-matrix-")+modes[mode]+".jsonl":reportPath;
     std::cout << "Benchmark mode: " << modes[mode] << std::endl;
@@ -2834,7 +2859,7 @@ void RenderAudit(const char* reportPath=".local/performance-logs/grass-automatic
     {
         const auto started = Clock::now();
         // Stay within the authored tile radius while crossing LOD thresholds.
-        player->transform.position.x = fixedRoute ? 0.f:warmed ? 3.f * std::sin(measured * .04f):
+        if (!oak) player->transform.position.x = fixedRoute ? 0.f:warmed ? 3.f * std::sin(measured * .04f):
             (matrix && frame>=31 ? 3.f*std::sin((frame-31)*.04f):0.f);
         if(streaming && warmed)
         {
@@ -2850,18 +2875,24 @@ void RenderAudit(const char* reportPath=".local/performance-logs/grass-automatic
         if(!warmed || mode>=2) scene.UpdateSpatialScripts();
         const auto g = scene.GetGrassPerformance();
         scene.CommitPendingObjectChanges();
-        if(matrix) for(const auto& object:scene.GetObjects())
+        if(matrix && !oak) for(const auto& object:scene.GetObjects())
             if(auto* mesh=object->GetComponent<Engine::Components::Mesh>())
             {
                 const bool grassTile=object->name.find("Grass Tile (")==0;
                 mesh->SetEditorVisible(mode==4 ? grassTile : mode!=0 && (!grassTile || mode>=2));
+            }
+        if (oak) for (const auto& object : scene.GetObjects())
+            if (auto* mesh=object->GetComponent<Engine::Components::Mesh>())
+            {
+                const bool terrain = object->GetComponent<Engine::Components::Terrain>() != nullptr;
+                mesh->SetEditorVisible(mode == 0 ? false : mode == 1 ? terrain : mode == 4 ? !terrain : true);
             }
         uint64_t visibleTerrainMeshes=0, visibleFoliageMeshes=0;
         for (const auto& object : scene.GetObjects())
             if (auto* mesh=object->GetComponent<Engine::Components::Mesh>();
                 mesh && mesh->IsEditorVisible() && object->IsEnabledInHierarchy())
             {
-                if (object->name.find("Grass Tile (")==0) ++visibleFoliageMeshes;
+                if (oak ? !object->GetComponent<Engine::Components::Terrain>() : object->name.find("Grass Tile (")==0) ++visibleFoliageMeshes;
                 else ++visibleTerrainMeshes;
             }
         if (mode==1) Require(visibleFoliageMeshes==0, "terrain-only benchmark retained visible foliage");
@@ -2880,21 +2911,28 @@ void RenderAudit(const char* reportPath=".local/performance-logs/grass-automatic
             "main pass reset the shadow draw count");
         Require(eligibleCasters==scene.GetShadowDebugSnapshot().casterCount,"main pass reset eligible shadow casters");
         sawShadows |= submitted > 0;
+        const auto endStarted = Clock::now();
         renderer.EndFrame();
+        const double endMs = std::chrono::duration<double,std::milli>(Clock::now()-endStarted).count();
         const double ms = std::chrono::duration<double,std::milli>(Clock::now()-started).count();
         const auto& shadow = scene.GetLastShadowCpuTiming();
         Require(shadow.explicitInstanceDraws+shadow.automaticDraws+shadow.ordinaryDraws==submitted,
             "shadow draw type counters do not match submitted draws");
         const auto& renderCpu=scene.GetLastRenderCpuTimings();
-        const auto gpu=renderer.GetGraphicsProvider()->GetContextFactory()->GetFrameTimingTelemetry();
+        const auto gpu=renderer.GetFrameTimingTelemetry();
         const auto shadowSettings=scene.GetShadowDebugSnapshot();
         report << "{\"type\":\"frame_details\",\"playing\":true,\"benchmark_mode\":\"" << modes[mode]
             << "\",\"scene_asset\":\"" << scenePath
-            << "\",\"route\":\"" << (fixedRoute ? "fixed":route) << "\",\"route_version\":\"" << (selectedMode>=0 && streamManager ? "streamed-cells-v2":selectedMode>=0 ? "isolated-cell-v1":"static-instances-v1") << "\",\"renderer\":\"dx11\""
+            << "\",\"route\":\"" << (fixedRoute ? "fixed":route) << "\",\"route_version\":\"" << (oak ? "oak-authored-camera-v1":selectedMode>=0 && streamManager ? "streamed-cells-v2":selectedMode>=0 ? "isolated-cell-v1":"static-instances-v1") << "\",\"renderer\":\"dx11\""
             << ",\"parallel_preparation\":" << (parallel ? "true":"false") << ",\"fixed_fade_coverage\":" << (compare ? "true":"false")
             << ",\"warm_state_reset\":" << (compare ? "true":"false")
-            << ",\"benchmark_scope\":\"" << (selectedMode>=0 && streamManager ? "render_grass_and_cell_streaming_no_editor_or_physics":"render_and_grass_no_editor_or_physics") << "\",\"measured\":" << (warmed ? "true":"false")
+            << ",\"benchmark_scope\":\"" << (oak ? "render_no_editor_or_physics":selectedMode>=0 && streamManager ? "render_grass_and_cell_streaming_no_editor_or_physics":"render_and_grass_no_editor_or_physics") << "\",\"measured\":" << (warmed ? "true":"false")
             << ",\"view_pixels\":" << width*height << ",\"frame\":" << frame << ",\"frame_ms\":" << ms
+            << ",\"texture_lod_enabled\":" << (scene.settings.textureLod.enabled ? "true":"false")
+            << ",\"end_frame_ms\":" << endMs
+            << ",\"present_ms\":" << gpu.cpuPresentationMilliseconds
+            << ",\"gpu_query_resolve_ms\":" << gpu.cpuGpuQueryResolveMilliseconds
+            << ",\"viewpoint\":\"" << (oakOverlook ? "overlook":"entrance") << "\""
             << ",\"view_width\":" << width << ",\"view_height\":" << height
             << ",\"viewer_x\":" << player->transform.position.x << ",\"viewer_z\":" << player->transform.position.z
             << ",\"grass_ms\":" << g.totalMs << ",\"grass_built\":" << g.tilesBuilt
@@ -3008,6 +3046,22 @@ void RenderAudit(const char* reportPath=".local/performance-logs/grass-automatic
             steadyBuilds += g.tilesBuilt; steadyScans += g.placementsScanned; switches += g.lodSwitches;
             if (measured >= 240) break;
         }
+        if (oak && frame == 59)
+        {
+            std::vector<uint8_t> pixels;
+            Require(renderer.CaptureFrameRGBA(pixels), "oak benchmark capture failed");
+            BITMAPFILEHEADER file{}; BITMAPINFOHEADER info{};
+            file.bfType=0x4d42; file.bfOffBits=sizeof(file)+sizeof(info);
+            file.bfSize=file.bfOffBits+width*height*4;
+            info.biSize=sizeof(info); info.biWidth=width; info.biHeight=-int(height);
+            info.biPlanes=1; info.biBitCount=32; info.biCompression=BI_RGB;
+            for(size_t i=0;i<pixels.size();i+=4) std::swap(pixels[i],pixels[i+2]);
+            auto imagePath=std::filesystem::path(path); imagePath.replace_extension(".bmp");
+            std::ofstream image(imagePath,std::ios::binary);
+            image.write(reinterpret_cast<const char*>(&file),sizeof(file));
+            image.write(reinterpret_cast<const char*>(&info),sizeof(info));
+            image.write(reinterpret_cast<const char*>(pixels.data()),pixels.size());
+        }
         if (!warmed && frame >= (selectedMode>=0 ? 59:matrix || storageAudit ? 301:31) && g.pending == 0 && g.tilesBuilt == 0)
         {
             if(selectedMode>=0 && streamManager)
@@ -3026,7 +3080,7 @@ void RenderAudit(const char* reportPath=".local/performance-logs/grass-automatic
         }
     }
     renderer.WaitIdle();
-    if(mode==3) Require(sawShadows, "render audit never submitted shadow draws");
+    if(mode==3 && !oak) Require(sawShadows, "render audit never submitted shadow draws");
     Require(measured == 240, "grass did not finish warming");
     // Movement can enter previously unvisited cells. Those index their authored
     // placements once; the small fixture above verifies zero repeated scanning.
@@ -3404,6 +3458,170 @@ void TestVariableTerrainObjectLods()
 }
 
 
+void CheckTerrainSurfaceCulling()
+{
+    constexpr unsigned width=256, height=256;
+    Engine::Core::Window window(GetModuleHandleW(nullptr), L"Terrain surface culling", width, height);
+    ShowWindow(window.GetHWND(), SW_HIDE);
+    Engine::Renderers::DX11GameRenderer renderer;
+    Require(renderer.Init(window.GetHWND(), width, height), "terrain test renderer failed");
+    Engine::Scene::Scene scene;
+    scene.Init(renderer.GetGraphicsProvider());
+    scene.settings.skyboxEnabled=false;
+    scene.settings.showGrid=false;
+    scene.settings.ambientColor={1,1,1};
+    auto* object=scene.AddObject("One-sided terrain");
+    auto* terrain=object->AddComponent<Engine::Components::Terrain>();
+    terrain->Resize(2,2,2,2);
+    terrain->PrepareGraphicsResources(renderer.GetGraphicsProvider());
+    auto* material=object->AddComponent<Engine::Components::Material>();
+    material->unlit=true;
+    material->diffuseColor={0,1,0};
+    material->doubleSided=true; // Terrain must override this material choice.
+    auto* viewer=scene.AddObject("Viewer");
+    auto* camera=viewer->AddComponent<Engine::Components::Camera>();
+    camera->target={2,0,2};
+    camera->useTransformRotation=false;
+    const auto countGreen=[&](float y) {
+        viewer->transform.position={2,y,2.2f};
+        std::vector<uint8_t> pixels;
+        for(int frame=0;frame<4;++frame)
+        {
+            scene.AdvanceManualFrame(1.f/60);
+            renderer.BeginFrame(); renderer.Clear(.01f,.01f,.01f,1);
+            scene.PrepareRenderFrame();
+            auto context=renderer.CreateFrameGraphicsContext();
+            scene.Render(context.get(),1.f,camera,false,width,height,true);
+            scene.Render(context.get(),1.f,camera,false,width,height);
+            renderer.EndFrame();
+            Require(renderer.CaptureFrameRGBA(pixels), "terrain test capture failed");
+        }
+        size_t green=0;
+        for(size_t i=0;i<pixels.size();i+=4)
+            green+=pixels[i+1]>pixels[i]+20 && pixels[i+1]>pixels[i+2]+20;
+        return green;
+    };
+    const auto above=countGreen(4);
+    const auto below=countGreen(-4);
+    Require(above>1000,"terrain top surface was culled");
+    Require(below==0,"terrain underside still rendered");
+    // Exercise the mip-biased and detail-faded shader on the visible surface.
+    scene.settings.textureLod={true,0.f,1.f,4.f,true};
+    Require(countGreen(4)>1000,"texture LOD hid the terrain surface");
+    // A real leaf atlas must keep identical coverage even at aggressive color bias.
+    object->enabled=false;
+    auto* card=scene.AddObject("Masked leaf coverage");
+    using Mesh=Engine::Components::Mesh;
+    std::vector<Mesh::Vertex> vertices(4);
+    const float positions[4][2]={{-1,-1},{1,-1},{1,1},{-1,1}};
+    for(int i=0;i<4;++i)
+    {
+        vertices[i].pos[0]=positions[i][0]; vertices[i].pos[1]=positions[i][1];
+        vertices[i].normal[2]=-1;
+        vertices[i].uv[0]=(positions[i][0]+1)*.5f;
+        vertices[i].uv[1]=(positions[i][1]+1)*.5f;
+        for(auto& color:vertices[i].color) color=1;
+    }
+    auto* mesh=card->AddComponent<Mesh>();
+    Require(mesh->SetIndexedGeometry(vertices,{0,1,2,0,2,3}),"leaf test geometry failed");
+    mesh->CreateBuffer(renderer.GetGraphicsProvider()->GetBufferFactory());
+    auto* mask=card->AddComponent<Engine::Components::Material>();
+    mask->doubleSided=true; mask->unlit=true; mask->castsShadows=false;
+    mask->diffuseColor={0,1,0}; mask->alphaMode="Mask"; mask->alphaCutoff=.32f;
+    mask->SetBaseColorTexture("Assets/Models/Woodland/Oaks/Textures/Texture 6 6.png");
+    mask->PrepareGraphicsResources(renderer.GetGraphicsProvider());
+    viewer->transform.position={0,0,-3}; camera->target={0,0,0};
+    const auto coverage=[&](bool enabled) {
+        scene.settings.textureLod={enabled,0.f,1.f,8.f,true};
+        std::vector<uint8_t> pixels;
+        for(int frame=0;frame<4;++frame)
+        {
+            scene.AdvanceManualFrame(1.f/60);
+            renderer.BeginFrame(); renderer.Clear(.01f,.01f,.01f,1);
+            scene.PrepareRenderFrame(); auto context=renderer.CreateFrameGraphicsContext();
+            scene.Render(context.get(),1.f,camera,false,width,height,true);
+            scene.Render(context.get(),1.f,camera,false,width,height);
+            renderer.EndFrame(); Require(renderer.CaptureFrameRGBA(pixels),"leaf test capture failed");
+        }
+        size_t green=0;
+        for(size_t i=0;i<pixels.size();i+=4)
+            green+=pixels[i+1]>pixels[i]+20 && pixels[i+1]>pixels[i+2]+20;
+        return green;
+    };
+    const auto fullCoverage=coverage(false), biasedCoverage=coverage(true);
+    Require(fullCoverage>100,"leaf atlas did not render");
+    Require(fullCoverage==biasedCoverage,"texture LOD changed masked surface coverage");
+    std::cout << "Masked coverage preserved: " << fullCoverage << " pixels with LOD off and on.\n";
+    std::cout << "Terrain top-only rendering and texture LOD shader passed: " << above << " top pixels, " << below << " underside pixels.\n";
+}
+
+void CheckOakGrassTransfer()
+{
+    constexpr unsigned width=1280, height=720;
+    Engine::Core::Window window(GetModuleHandleW(nullptr),L"Oak grass transfer",width,height);
+    ShowWindow(window.GetHWND(),SW_HIDE);
+    Engine::Renderers::DX11GameRenderer renderer;
+    Require(renderer.Init(window.GetHWND(),width,height),"oak grass renderer failed");
+    Engine::Scene::Scene scene; scene.Init(renderer.GetGraphicsProvider());
+    Require(scene.Load("Engine/Core/Assets/Scenes/terrain/oak_meadow.scene"),"oak grass scene load failed");
+    Require(scene.GetComponents<Engine::Components::Terrain>().size()==1,"oak terrain duplicated");
+    const auto fields=scene.GetComponents<GrassField>();
+    Require(fields.size()==1,"oak grass layer missing or duplicated");
+    auto* field=fields.front();
+    auto* layer=field->Owner->GetComponent<Engine::Components::TerrainObjectLayer>();
+    auto* terrain=field->Owner->GetComponentInParent<Engine::Components::Terrain>();
+    Require(layer && terrain && layer->placements.size()>20000,"oak authored grass placements missing");
+    Require(field->viewerObjectName=="Meadow Explorer" && field->useEditorCamera,"grass viewer configuration wrong");
+    auto* ground=terrain->Owner->GetComponent<Engine::Components::Mesh>();
+    const auto& vertices=ground->GetVertices(); const auto& indices=ground->GetIndices();
+    std::set<uint64_t> ids;
+    for(const auto& placement:layer->placements)
+    {
+        Require(ids.insert(placement.id).second,"grass placement IDs duplicated");
+        const float gx=placement.position.x/terrain->cellWidth, gz=placement.position.z/terrain->cellDepth;
+        const int col=int(gx),row=int(gz);
+        Require(col>=0 && col<terrain->cellsX && row>=0 && row<terrain->cellsY,"grass outside terrain");
+        const size_t triangle=(size_t(row)*terrain->cellsX+col)*6 + ((gx-col)+(gz-row)>1 ? 3:0);
+        const auto point=[&](size_t i) {
+            const auto& v=vertices[indices[triangle+i]]; return glm::vec3(v.pos[0],v.pos[1],v.pos[2]);
+        };
+        const auto a=point(0),b=point(1),c=point(2);
+        const auto normal=glm::normalize(glm::cross(b-a,c-a));
+        Require(std::abs(glm::dot(normal,placement.position-a))<.0001f,"grass floats above terrain triangle");
+        Require(glm::dot(normal,placement.normal)>.99999f,"grass slope alignment wrong");
+    }
+    auto* player=scene.FindObjectByName("Meadow Explorer");
+    auto* camera=player->GetComponent<Engine::Components::Camera>();
+    field->useEditorCamera=false; field->Start();
+    uint64_t active=0,instances=0;
+    for(int frame=0;frame<160;++frame)
+    {
+        scene.AdvanceManualFrame(1.f/60); scene.ResetGrassPerformance();
+        field->TickSpatialRegion(false); scene.CommitPendingObjectChanges();
+        renderer.BeginFrame(); renderer.Clear(.1f,.1f,.1f);
+        scene.PrepareRenderFrame(); auto context=renderer.CreateFrameGraphicsContext();
+        scene.Render(context.get(),float(width)/height,camera,false,width,height,true);
+        scene.Render(context.get(),float(width)/height,camera,false,width,height);
+        renderer.EndFrame();
+        const auto performance=scene.GetGrassPerformance();
+        active=performance.activeTiles; instances=performance.instances;
+        if(frame>=90 && performance.pending==0 && active>0)break;
+    }
+    Require(active>0 && instances>100,"transferred grass did not stream or render");
+    std::vector<uint8_t> pixels; Require(renderer.CaptureFrameRGBA(pixels),"oak grass capture failed");
+    BITMAPFILEHEADER file{};BITMAPINFOHEADER info{};
+    file.bfType=0x4d42;file.bfOffBits=sizeof(file)+sizeof(info);file.bfSize=file.bfOffBits+width*height*4;
+    info.biSize=sizeof(info);info.biWidth=width;info.biHeight=-int(height);info.biPlanes=1;info.biBitCount=32;
+    for(size_t i=0;i<pixels.size();i+=4)std::swap(pixels[i],pixels[i+2]);
+    std::ofstream image(".local/oak-grass-transfer.bmp",std::ios::binary);
+    image.write(reinterpret_cast<const char*>(&file),sizeof(file));image.write(reinterpret_cast<const char*>(&info),sizeof(info));
+    image.write(reinterpret_cast<const char*>(pixels.data()),pixels.size());
+    for(const auto& object:scene.GetObjects())
+        if(auto* material=object->GetComponent<Engine::Components::Material>())
+            Require(material->shaderError.empty(),"oak grass shader failed");
+    std::cout<<"Oak grass transfer: "<<layer->placements.size()<<" grounded/aligned placements, "<<active<<" active tiles, "<<instances<<" resident instances.\n";
+}
+
 void CheckOakMeadowScene()
 {
     constexpr unsigned width=1280,height=720;
@@ -3496,7 +3714,12 @@ int main(int argc, char** argv)
     });
     try
     {
-        if(argc>1 && std::string(argv[1])=="--oak-meadow-scene")
+        if(argc>1 && std::string(argv[1])=="--oak-grass-transfer") CheckOakGrassTransfer();
+        else if(argc>1 && std::string(argv[1])=="--terrain-surface-culling") CheckTerrainSurfaceCulling();
+        else if(argc>=7 && std::string(argv[1])=="--oak-benchmark")
+            RenderAudit(argv[2],false,false,false,false,unsigned(std::stoi(argv[3])),unsigned(std::stoi(argv[4])),false,std::stoi(argv[5]),true,
+                "Engine/Core/Assets/Scenes/terrain/oak_meadow.scene",std::string(argv[6])=="overlook",argc>7 ? std::stoi(argv[7]):-1);
+        else if(argc>1 && std::string(argv[1])=="--oak-meadow-scene")
             RenderAudit(".local/performance-logs/oak-meadow-benchmark.jsonl",false,false,false,false,1280,720,false,3,true,
                 "Engine/Core/Assets/Scenes/terrain/oak_meadow.scene");
         else if(argc>1 && std::string(argv[1])=="--oak-meadow-validation") CheckOakMeadowScene();

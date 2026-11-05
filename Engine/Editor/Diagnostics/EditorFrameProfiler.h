@@ -31,6 +31,7 @@ namespace Engine::Editor
         double updateIntervalMs = 0, submissionIntervalMs = 0, idleWaitMs = 0;
         uint64_t submittedFrames = 0;
         bool submissionCountValid = false;
+        uint64_t playSnapshotBytes=0, sceneHistoryBytes=0;
         bool playing = false;
         bool measured = true;
         bool playPipeline = false;

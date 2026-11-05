@@ -1,4 +1,5 @@
 #include "Terrain.h"
+#include "TerrainSurfaceWinding.h"
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Compoonents/Obj/Mesh.h"
@@ -333,9 +334,10 @@ void Terrain::Rebuild()
         for (int col = 0; col < cellsX; ++col)
         {
             const uint32_t a = row * (cellsX + 1) + col, b = a + cellsX + 1;
-            indices.insert(indices.end(), {a, a + 1, b, a + 1, b + 1, b});
+            indices.insert(indices.end(), {a, b, a + 1, a + 1, b, b + 1});
         }
     ReduceMeshForLod(vertices, indices, cellsX, cellsY, m_meshLodStride);
+    OrientTerrainSurfaceUp(vertices, indices);
     mesh->SetIndexedGeometry(std::move(vertices), std::move(indices));
     if (m_provider && !mesh->IsReady()) mesh->OnAfterDeserialize(m_provider);
 }
@@ -390,7 +392,9 @@ bool Terrain::InstallBakedLod(int stride)
     }
     Mesh* mesh = Owner->GetComponent<Mesh>();
     if (!mesh) mesh = Owner->AddComponent<Mesh>();
-    return mesh->SetIndexedGeometry(std::move(vertices), lod.indices);
+    auto indices = lod.indices;
+    OrientTerrainSurfaceUp(vertices, indices);
+    return mesh->SetIndexedGeometry(std::move(vertices), std::move(indices));
 }
 
 uint64_t Terrain::GetBakedCpuMemoryBytes() const
@@ -443,6 +447,7 @@ bool Terrain::InstallPrepared(Prepared prepared, IGraphicsProvider* provider)
     Mesh* mesh = Owner->GetComponent<Mesh>();
     if (!mesh) mesh = Owner->AddComponent<Mesh>();
     mesh->DeferGraphicsBuffers();
+    OrientTerrainSurfaceUp(prepared.vertices, prepared.indices);
     const bool installed = prepared.bounds
         ? mesh->SetPreparedIndexedGeometry(std::move(prepared.vertices),
             std::move(prepared.indices), *prepared.bounds)
@@ -767,11 +772,12 @@ bool Terrain::LoadCacheRange(const std::string& path, uint64_t signature,
         for (int col = 0; col < x; ++col)
         {
             const uint32_t a = row * (x + 1) + col, b = a + x + 1;
-            indices.insert(indices.end(), {a, a + 1, b, a + 1, b + 1, b});
+            indices.insert(indices.end(), {a, b, a + 1, a + 1, b, b + 1});
         }
     ReduceMeshForLod(vertices, indices, x, y, m_meshLodStride);
     Mesh* mesh = Owner->GetComponent<Mesh>();
     if (!mesh) mesh = Owner->AddComponent<Mesh>();
+    OrientTerrainSurfaceUp(vertices, indices);
     if (!mesh->SetIndexedGeometry(std::move(vertices), std::move(indices)))
         return false;
     cellsX = x; cellsY = y; cellWidth = width; cellDepth = depth;

@@ -1,0 +1,10 @@
+<?xml version='1.0' encoding='utf-8'?>
+<Prefab xmlns:components="urn:engine-components" version="1" type="prefab">
+  <object name="Sapling_oak_tree_003 impostor" enabled="true">
+    <components>
+      <components:Mesh Mesh.file="Assets/Models/Woodland/Oaks/Meshes/Sapling_oak_tree_003_Impostor.mesh" />
+      <components:Material Material.materialAsset="Engine/Core/Assets/Models/Woodland/Oaks/Materials/Sapling_oak_tree_003_Impostor.material" />
+    </components>
+    <children />
+  </object>
+</Prefab>

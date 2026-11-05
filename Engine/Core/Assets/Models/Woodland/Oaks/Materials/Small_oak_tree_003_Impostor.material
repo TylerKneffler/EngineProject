@@ -1,0 +1,107 @@
+{
+  "version": 1,
+  "shaders": [],
+  "baseColor": [
+    1,
+    1,
+    1
+  ],
+  "useVertexColors": false,
+  "ambientColor": [
+    0.2,
+    0.23,
+    0.13
+  ],
+  "specularColor": [
+    1,
+    1,
+    1
+  ],
+  "emissive": [
+    0,
+    0,
+    0
+  ],
+  "shininess": 32,
+  "specularModel": "BlinnPhong",
+  "metallic": 0,
+  "roughness": 0.86,
+  "subsurfaceEnabled": false,
+  "subsurfaceWeight": 0,
+  "subsurfaceRadius": [
+    0.004000000189989805,
+    0.0020000000949949026,
+    0.0010000000474974513
+  ],
+  "subsurfaceColor": [
+    1,
+    0.44999998807907104,
+    0.3499999940395355
+  ],
+  "subsurfaceThickness": 0,
+  "subsurfaceTransmission": 0,
+  "environmentDiffuseStrength": 1,
+  "reflectionStrength": 0,
+  "useCustomReflectionEnvironment": false,
+  "reflectionEnvironmentTexture": "",
+  "reflectionEnvironmentExposure": 0,
+  "reflectionEnvironmentRotation": 0,
+  "baseColorAlpha": 1,
+  "baseColorTextureTint": [
+    1,
+    1,
+    1
+  ],
+  "baseColorTextureTintAlpha": 1,
+  "edgeColor": [
+    0,
+    0,
+    0,
+    0
+  ],
+  "edgeWidth": 0,
+  "edgeEnabled": false,
+  "sphereTint": [
+    1,
+    1,
+    1,
+    1
+  ],
+  "toonTint": [
+    1,
+    1,
+    1,
+    1
+  ],
+  "sphereMode": 0,
+  "builtinToon": -1,
+  "sphereTexture": "",
+  "toonTexture": "",
+  "alphaMode": "Mask",
+  "alphaCutoff": 0.32,
+  "normalScale": 0.55,
+  "heightScale": 0.05000000074505806,
+  "terrainHeightBlendStrength": 0,
+  "terrainMacroColor": [
+    0,
+    0,
+    0
+  ],
+  "heightMinSteps": 8,
+  "heightMaxSteps": 32,
+  "occlusionStrength": 1,
+  "doubleSided": true,
+  "castsShadows": true,
+  "unlit": false,
+  "lightingChannels": -1,
+  "baseColorUvSet": 0,
+  "metallicRoughnessUvSet": 0,
+  "normalUvSet": 0,
+  "occlusionUvSet": 0,
+  "emissiveUvSet": 0,
+  "heightUvSet": 0,
+  "baseColorTexture": "Assets/Other/oak_trees_pack_17var_lods_seasons_gameready/textures/Small_oak_tree__003_Billboard_Mat_baseColor.png",
+  "metallicRoughnessTexture": "",
+  "normalTexture": "",
+  "occlusionTexture": ""
+}

@@ -2,15 +2,7 @@
 <Prefab xmlns:components="urn:engine-components" version="1" type="prefab">
   <object name="Sapling_oak_tree_002_LOD2" enabled="true">
     <components>
-      <components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Capsule" PrimitiveObjectCollider.radius=".32" PrimitiveObjectCollider.height="3">
-        <PrimitiveObjectCollider.center>
-          <item>0</item>
-          <item>1.5</item>
-          <item>0</item>
-        </PrimitiveObjectCollider.center>
-      </components:PrimitiveObjectCollider>
-      <components:RigidBody RigidBody.bodyType="Static" RigidBody.useGravity="false" />
-    </components>
+      </components>
     <children>
       <item name="Primitive 1" enabled="true">
         <transform>

@@ -1,4 +1,5 @@
 #pragma once
+#include "Core/Model/TextureLodSettings.h"
 #include "Core/component.h"
 #include "Core/PropertyMacros.h"
 #include <glm/glm.hpp>
@@ -162,6 +163,9 @@ public:
     PROPERTY(Inspector, EditAnywhere, Category = "Material | Properties")
     bool      doubleSided { false };
 
+    bool overrideTextureLod = false;
+    Engine::Model::TextureLodSettings textureLod;
+
     // Opaque and masked mesh materials cast realtime shadows by default.
     // Blended materials remain excluded by the shadow pipeline.
     PROPERTY(Inspector, EditAnywhere, Category = "Material | Shadows")
@@ -223,7 +227,7 @@ public:
 
 private:
     bool m_validationCached=false;
-    std::array<float,25> m_validatedFloats{};
+    std::array<float,29> m_validatedFloats{};
     std::array<int,6> m_validatedUvSets{};
     std::array<const Texture*,10> m_preparedTextures{};
     IGraphicsProvider* m_preparedTextureProvider=nullptr;

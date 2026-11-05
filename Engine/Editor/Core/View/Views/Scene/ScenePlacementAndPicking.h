@@ -13,6 +13,12 @@ class ScenePlacementAndPicking
 public:
     static void PrepareSkinnedGeometry(const Engine::Scene::Scene& scene);
     static void ClearCaches();
+    // Hits only terrain meshes belonging to the selected terrain or manager.
+    // No editor grid fallback: object paint must land on a real surface.
+    static bool FindTerrainPlacement(const Engine::Scene::Scene& scene,
+        const Engine::Core::Object* terrainRoot,
+        const EditorUiVec2& mousePos, const EditorUiVec2& viewportSize,
+        glm::vec3& placement, glm::vec3& normal);
     // Returns the last completed hover only while its camera, pose, and scene
     // snapshot still match. A new query is queued when any input changes.
     static Engine::Core::Object* PickObjectHoverAsync(

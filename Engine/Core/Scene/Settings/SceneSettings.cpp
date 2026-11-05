@@ -77,6 +77,13 @@ Engine::Serialization::JsonValue SerializeSceneSettings(const Engine::Model::Sce
     value.Set("hdriRotation", Engine::Serialization::JsonValue(settings.hdriRotation));
     value.Set("toneMapping",
         Engine::Serialization::JsonValue(static_cast<int>(settings.toneMapping)));
+    value.Set("textureLodEnabled", Engine::Serialization::JsonValue(settings.textureLod.enabled));
+    value.Set("textureLodNearDistance", Engine::Serialization::JsonValue(settings.textureLod.nearDistance));
+    value.Set("textureLodFarDistance", Engine::Serialization::JsonValue(settings.textureLod.farDistance));
+    value.Set("textureLodMipBias", Engine::Serialization::JsonValue(settings.textureLod.mipBias));
+    value.Set("textureLodSimplifyShading", Engine::Serialization::JsonValue(settings.textureLod.simplifyShading));
+    value.Set("textureLodDisableAlphaAtFar", Engine::Serialization::JsonValue(settings.textureLod.disableAlphaAtFar));
+    value.Set("textureLodAlphaMipBias", Engine::Serialization::JsonValue(settings.textureLod.alphaMipBias));
     value.Set("outputExposure", Engine::Serialization::JsonValue(settings.outputExposure));
     value.Set("renderMode",
         Engine::Serialization::JsonValue(static_cast<int>(settings.renderMode)));
@@ -117,8 +124,18 @@ Engine::Serialization::JsonValue SerializeSceneSettings(const Engine::Model::Sce
 
 void DeserializeSceneSettings(Engine::Model::SceneSettings& settings, const Engine::Serialization::JsonValue& value)
 {
+    // Legacy documents must not inherit quality settings from the previous scene.
+    settings.textureLod = {};
     if (!value.IsObject())
         return;
+    if (const auto* field = FindField(value, "textureLodEnabled")) settings.textureLod.enabled = field->AsBool();
+    if (const auto* field = FindField(value, "textureLodNearDistance")) settings.textureLod.nearDistance = field->AsFloat();
+    if (const auto* field = FindField(value, "textureLodFarDistance")) settings.textureLod.farDistance = field->AsFloat();
+    if (const auto* field = FindField(value, "textureLodMipBias")) settings.textureLod.mipBias = field->AsFloat();
+    if (const auto* field = FindField(value, "textureLodSimplifyShading")) settings.textureLod.simplifyShading = field->AsBool();
+    if (const auto* field = FindField(value, "textureLodAlphaMipBias")) settings.textureLod.alphaMipBias = field->AsFloat();
+    if (const auto* field = FindField(value, "textureLodDisableAlphaAtFar")) settings.textureLod.disableAlphaAtFar = field->AsBool();
+    settings.textureLod.Normalize();
     if (const auto* dimension = FindField(value, "dimension"))
     {
         settings.dimension = dimension->AsInt() == 1

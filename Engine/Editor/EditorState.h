@@ -229,6 +229,15 @@ public:
     bool IsImportJobCommitting() const
     { return m_importJobControl && m_importJobControl->committing.load(); }
     std::string ConsumeImportHierarchyFocusRequest();
+    // Serialized byte capacities only; excludes parsed snapshots and allocator overhead.
+    uint64_t GetPlaySnapshotMemoryBytes() const { return m_playModeSceneSnapshot.capacity(); }
+    uint64_t GetSceneHistoryMemoryBytes() const
+    {
+        uint64_t bytes=m_historyBaseline.scene.capacity()+m_pendingHistoryBefore.scene.capacity();
+        for (const auto& entry:m_undoHistory) bytes+=entry.scene.capacity();
+        for (const auto& entry:m_redoHistory) bytes+=entry.scene.capacity();
+        return bytes;
+    }
     bool CapturePlayModeScene();
     void RestorePlayModeScene();
     void SetLoadingOverlay(bool visible, std::string message = {})

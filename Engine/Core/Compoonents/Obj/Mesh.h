@@ -47,6 +47,10 @@ public:
     float runtimeShadowFadeWidth = 1.f;
     PROPERTY(Inspector,EditAnywhere,Category="LOD")
     bool gpuLodSelection = false;
+    // Independent resident prefab bands may use different materials (e.g. impostors).
+    // Transient; all bands share placement records and are selected on the GPU.
+    int prefabLodBand = -1;
+    glm::vec2 prefabLodDistances{0.f};
     PROPERTY(Inspector,EditAnywhere,Category="LOD")
     float gpuLod1Distance = 8.f;
     PROPERTY(Inspector,EditAnywhere,Category="LOD")

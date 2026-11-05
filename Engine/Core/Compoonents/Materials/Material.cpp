@@ -31,6 +31,14 @@ Material::Material()
     RegisterField("alphaMode", alphaMode, "Surface");
     RegisterField("alphaCutoff", alphaCutoff, "Surface");
     RegisterField("doubleSided", doubleSided, "Surface");
+    RegisterField("overrideTextureLod", overrideTextureLod, "Texture LOD");
+    RegisterField("textureLodEnabled", textureLod.enabled, "Texture LOD");
+    RegisterField("textureLodNearDistance", textureLod.nearDistance, "Texture LOD");
+    RegisterField("textureLodFarDistance", textureLod.farDistance, "Texture LOD");
+    RegisterField("textureLodMipBias", textureLod.mipBias, "Texture LOD");
+    RegisterField("textureLodSimplifyShading", textureLod.simplifyShading, "Texture LOD");
+    RegisterField("textureLodDisableAlphaAtFar", textureLod.disableAlphaAtFar, "Texture LOD");
+    RegisterField("textureLodAlphaMipBias", textureLod.alphaMipBias, "Texture LOD");
     RegisterField("castsShadows", castsShadows, "Shadows");
     RegisterField("unlit", unlit, "Surface");
     RegisterField("lightingChannels", lightingChannels, "Lighting");
@@ -177,6 +185,8 @@ bool Material::LoadFromFile(const std::string& path)
     try
     {
         const JsonValue root = Engine::Serialization::JsonParseFile(path);
+        overrideTextureLod = false;
+        textureLod = {};
         ReadShaderList(root["shaders"], shaders);
         shaderError.clear();
         baseColorTexture.reset();
@@ -246,6 +256,14 @@ bool Material::LoadFromFile(const std::string& path)
         if (root.Has("builtinToon")) builtinToon = root["builtinToon"].AsInt();
         if (root.Has("alphaMode")) alphaMode = root["alphaMode"].AsString();
         if (root.Has("alphaCutoff")) alphaCutoff = root["alphaCutoff"].AsFloat();
+        if (root.Has("overrideTextureLod")) overrideTextureLod = root["overrideTextureLod"].AsBool();
+        if (root.Has("textureLodEnabled")) textureLod.enabled = root["textureLodEnabled"].AsBool();
+        if (root.Has("textureLodNearDistance")) textureLod.nearDistance = root["textureLodNearDistance"].AsFloat();
+        if (root.Has("textureLodFarDistance")) textureLod.farDistance = root["textureLodFarDistance"].AsFloat();
+        if (root.Has("textureLodMipBias")) textureLod.mipBias = root["textureLodMipBias"].AsFloat();
+        if (root.Has("textureLodSimplifyShading")) textureLod.simplifyShading = root["textureLodSimplifyShading"].AsBool();
+        if (root.Has("textureLodDisableAlphaAtFar")) textureLod.disableAlphaAtFar = root["textureLodDisableAlphaAtFar"].AsBool();
+        if (root.Has("textureLodAlphaMipBias")) textureLod.alphaMipBias = root["textureLodAlphaMipBias"].AsFloat();
         if (root.Has("normalScale")) normalScale = root["normalScale"].AsFloat();
         if (root.Has("heightScale")) heightScale = root["heightScale"].AsFloat();
         if (root.Has("terrainHeightBlendStrength"))
@@ -334,6 +352,14 @@ bool Material::SaveToFile(const std::string& path) const
     root.Set("toonTexture", JsonValue(TexturePath(toonTexture)));
     root.Set("alphaMode", JsonValue(alphaMode));
     root.Set("alphaCutoff", JsonValue(alphaCutoff));
+    root.Set("overrideTextureLod", JsonValue(overrideTextureLod));
+    root.Set("textureLodEnabled", JsonValue(textureLod.enabled));
+    root.Set("textureLodNearDistance", JsonValue(textureLod.nearDistance));
+    root.Set("textureLodFarDistance", JsonValue(textureLod.farDistance));
+    root.Set("textureLodMipBias", JsonValue(textureLod.mipBias));
+    root.Set("textureLodSimplifyShading", JsonValue(textureLod.simplifyShading));
+    root.Set("textureLodDisableAlphaAtFar", JsonValue(textureLod.disableAlphaAtFar));
+    root.Set("textureLodAlphaMipBias", JsonValue(textureLod.alphaMipBias));
     root.Set("normalScale", JsonValue(normalScale));
     root.Set("heightScale", JsonValue(heightScale));
     root.Set("terrainHeightBlendStrength", JsonValue(terrainHeightBlendStrength));
@@ -576,7 +602,7 @@ void Material::Validate()
             shader.blendMode = "Auto";
     // Public fields can change without configuration notifications. Keep this
     // normalized-input snapshot in sync with every clamp below.
-    const auto captureFloats=[&] { return std::array<float,25>{
+    const auto captureFloats=[&] { return std::array<float,29>{
         metallicFactor, roughnessFactor, subsurfaceWeight,
         subsurfaceRadius[0], subsurfaceRadius[1], subsurfaceRadius[2],
         subsurfaceColor[0], subsurfaceColor[1], subsurfaceColor[2],
@@ -584,7 +610,8 @@ void Material::Validate()
         reflectionStrength, reflectionEnvironmentExposure, baseColorAlpha, alphaCutoff,
         normalScale, heightScale, terrainHeightBlendStrength,
         terrainMacroColor[0], terrainMacroColor[1], terrainMacroColor[2],
-        heightMinSteps, heightMaxSteps, occlusionStrength}; };
+        heightMinSteps, heightMaxSteps, occlusionStrength,
+        textureLod.nearDistance, textureLod.farDistance, textureLod.mipBias, textureLod.alphaMipBias}; };
     const auto captureUvSets=[&] { return std::array<int,6>{baseColorUvSet,
         metallicRoughnessUvSet, normalUvSet, occlusionUvSet, emissiveUvSet, heightUvSet}; };
     if(m_validationCached && (specularModel=="BlinnPhong" || specularModel=="MetallicRoughness") &&
@@ -605,6 +632,7 @@ void Material::Validate()
         reflectionEnvironmentExposure, -16.f, 16.f);
     baseColorAlpha = std::clamp(baseColorAlpha, 0.f, 1.f);
     alphaCutoff = std::clamp(alphaCutoff, 0.f, 1.f);
+    textureLod.Normalize();
     normalScale = std::max(normalScale, 0.f);
     heightScale = std::clamp(heightScale, 0.f, 0.2f);
     terrainHeightBlendStrength = std::clamp(terrainHeightBlendStrength, 0.f, 1.f);

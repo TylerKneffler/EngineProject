@@ -202,6 +202,15 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(glm)
 
+if(NOT ENGINE_PROJECT_DIR)
+    enable_testing()
+    add_executable(SurfacePlacementTests EXCLUDE_FROM_ALL
+        "${ENGINE_ROOT}/Tests/SurfacePlacementTests.cpp")
+    target_include_directories(SurfacePlacementTests PRIVATE "${ENGINE_ROOT}")
+    target_link_libraries(SurfacePlacementTests PRIVATE glm::glm)
+    add_test(NAME SurfacePlacement COMMAND SurfacePlacementTests)
+endif()
+
 # ---------------------------------------------------------------------------
 # IMGUI — Git library
 # ---------------------------------------------------------------------------
@@ -2241,6 +2250,10 @@ if(NOT ENGINE_PROJECT_DIR AND WIN32 AND
     target_include_directories(GrassPerformanceTests PRIVATE
         "${ENGINE_ROOT}/Engine" "${ENGINE_ROOT}/Engine/Core/Assets")
     add_test(NAME GrassPerformance COMMAND GrassPerformanceTests)
+    add_test(NAME TerrainSurfaceCullingDX11 COMMAND GrassPerformanceTests --terrain-surface-culling)
+    set_tests_properties(TerrainSurfaceCullingDX11 PROPERTIES WORKING_DIRECTORY "${ENGINE_ROOT}" TIMEOUT 120)
+    add_test(NAME OakGrassTransferDX11 COMMAND GrassPerformanceTests --oak-grass-transfer)
+    set_tests_properties(OakGrassTransferDX11 PROPERTIES WORKING_DIRECTORY "${ENGINE_ROOT}" TIMEOUT 180)
     add_test(NAME OakMeadowSceneDX11 COMMAND GrassPerformanceTests --oak-meadow-scene)
     set_tests_properties(OakMeadowSceneDX11 PROPERTIES WORKING_DIRECTORY "${ENGINE_ROOT}" TIMEOUT 180)
     add_test(NAME ShaderPreparationCacheDX11 COMMAND GrassPerformanceTests --shader-preparation-cache)
@@ -2326,4 +2339,113 @@ if(NOT ENGINE_PROJECT_DIR AND
     target_include_directories(ShaderSourceCacheTests PRIVATE "${ENGINE_ROOT}/Engine")
     add_test(NAME ShaderSourceCache COMMAND ShaderSourceCacheTests)
     set_tests_properties(ShaderSourceCache PROPERTIES TIMEOUT 30)
+endif()
+
+if(NOT ENGINE_PROJECT_DIR)
+    enable_testing()
+    add_executable(TextureLodTests EXCLUDE_FROM_ALL "${ENGINE_ROOT}/Tests/TextureLodTests.cpp")
+    target_link_libraries(TextureLodTests PRIVATE Engine)
+    target_include_directories(TextureLodTests PRIVATE "${ENGINE_ROOT}/Engine")
+    add_test(NAME TextureLod COMMAND TextureLodTests)
+    set_tests_properties(TextureLod PROPERTIES WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/TextureResidencyTests.cpp")
+    enable_testing()
+    add_executable(TextureResidencyTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/TextureResidencyTests.cpp")
+    target_compile_definitions(TextureResidencyTests PRIVATE NOMINMAX)
+    target_link_libraries(TextureResidencyTests PRIVATE Engine)
+    target_include_directories(TextureResidencyTests PRIVATE "${ENGINE_ROOT}/Engine")
+    foreach(cap IN ITEMS 0 1024 1 3000 invalid -1 4294967296)
+        set(expected_cap "${cap}")
+        if(cap STREQUAL "invalid" OR cap STREQUAL "-1" OR cap STREQUAL "4294967296")
+            set(expected_cap 0)
+        endif()
+        add_test(NAME TextureResidency_${cap} COMMAND TextureResidencyTests
+            "${ENGINE_ROOT}/Engine/Core/Assets/Models/Woodland/Oaks/Textures/Texture 1 1.png"
+            "${expected_cap}")
+        set_tests_properties(TextureResidency_${cap} PROPERTIES
+            ENVIRONMENT "ENGINE_TEXTURE_MAX_DIMENSION=${cap}" TIMEOUT 60)
+    endforeach()
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND WIN32 AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/TextureResidencyBackendTests.cpp")
+    add_executable(TextureResidencyBackendTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/TextureResidencyBackendTests.cpp")
+    target_link_libraries(TextureResidencyBackendTests PRIVATE Engine d3d11 dxgi)
+    target_compile_definitions(TextureResidencyBackendTests PRIVATE NOMINMAX)
+    target_include_directories(TextureResidencyBackendTests PRIVATE "${ENGINE_ROOT}/Engine")
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND WIN32 AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/TerrainCullingBackendTests.cpp")
+    enable_testing()
+    add_executable(TerrainCullingBackendTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/TerrainCullingBackendTests.cpp")
+    target_link_libraries(TerrainCullingBackendTests PRIVATE Engine d3d11 dxgi)
+    target_compile_definitions(TerrainCullingBackendTests PRIVATE NOMINMAX)
+    target_include_directories(TerrainCullingBackendTests PRIVATE "${ENGINE_ROOT}/Engine")
+    set(terrain_culling_backends dx11 dx12)
+    if(ENGINE_VULKAN_ENABLED)
+        list(APPEND terrain_culling_backends vulkan)
+    endif()
+    foreach(backend IN LISTS terrain_culling_backends)
+        add_test(NAME TerrainCulling_${backend} COMMAND TerrainCullingBackendTests ${backend})
+        set_tests_properties(TerrainCulling_${backend} PROPERTIES
+            WORKING_DIRECTORY "${ENGINE_ROOT}" TIMEOUT 180 RUN_SERIAL TRUE)
+    endforeach()
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND WIN32 AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/OakBackendCapture.cpp")
+    add_executable(OakBackendCapture EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/OakBackendCapture.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/Grass/GrassField.cpp")
+    set_target_properties(OakBackendCapture PROPERTIES OUTPUT_NAME "TerrainPrefabAndOakTests")
+    target_link_libraries(OakBackendCapture PRIVATE Engine d3d11 dxgi)
+    target_compile_definitions(OakBackendCapture PRIVATE NOMINMAX)
+    target_compile_options(OakBackendCapture PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/bigobj>)
+    target_include_directories(OakBackendCapture PRIVATE
+        "${ENGINE_ROOT}/Engine" "${ENGINE_ROOT}/Engine/Core/Assets")
+    add_test(NAME TerrainSharedPrefabs COMMAND OakBackendCapture shared-prefabs)
+    set_tests_properties(TerrainSharedPrefabs PROPERTIES WORKING_DIRECTORY "${ENGINE_ROOT}" TIMEOUT 60 RUN_SERIAL TRUE)
+    set(oak_capture_backends dx11 dx12)
+    if(ENGINE_VULKAN_ENABLED)
+        list(APPEND oak_capture_backends vulkan)
+    endif()
+    foreach(backend IN LISTS oak_capture_backends)
+        add_test(NAME OakBackend_${backend} COMMAND OakBackendCapture ${backend})
+        set_tests_properties(OakBackend_${backend} PROPERTIES
+            WORKING_DIRECTORY "${ENGINE_ROOT}" TIMEOUT 240 RUN_SERIAL TRUE)
+    endforeach()
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND WIN32)
+    add_executable(TreeAllocationAudit EXCLUDE_FROM_ALL Tests/TreeAllocationAudit.cpp)
+    target_link_libraries(TreeAllocationAudit PRIVATE Engine)
+    target_compile_definitions(TreeAllocationAudit PRIVATE NOMINMAX)
+    target_include_directories(TreeAllocationAudit PRIVATE "${ENGINE_ROOT}/Engine")
+    set(tree_audit_backends dx11 dx12)
+    if(ENGINE_VULKAN_ENABLED)
+        list(APPEND tree_audit_backends vulkan)
+    endif()
+    foreach(backend IN LISTS tree_audit_backends)
+        add_test(NAME TreeAllocation_${backend} COMMAND TreeAllocationAudit ${backend})
+        set_tests_properties(TreeAllocation_${backend} PROPERTIES
+            WORKING_DIRECTORY "${ENGINE_ROOT}" TIMEOUT 90 RUN_SERIAL TRUE)
+    endforeach()
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND WIN32)
+    add_executable(TreeLodBackendTests EXCLUDE_FROM_ALL Tests/TreeLodBackendTests.cpp)
+    target_link_libraries(TreeLodBackendTests PRIVATE Engine d3d11 dxgi)
+    target_compile_definitions(TreeLodBackendTests PRIVATE NOMINMAX)
+    target_include_directories(TreeLodBackendTests PRIVATE "${ENGINE_ROOT}/Engine")
+    foreach(backend IN LISTS tree_audit_backends)
+        add_test(NAME TreeLod_${backend} COMMAND TreeLodBackendTests ${backend})
+        set_tests_properties(TreeLod_${backend} PROPERTIES WORKING_DIRECTORY "${ENGINE_ROOT}" TIMEOUT 180 RUN_SERIAL TRUE)
+    endforeach()
 endif()

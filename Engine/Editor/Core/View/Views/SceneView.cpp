@@ -5,6 +5,7 @@
 #include "Editor/Core/View/EditorViewportSettings.h"
 #include "Scene/SceneCameraController.h"
 #include "Scene/ScenePlacementAndPicking.h"
+#include "Scene/SurfacePlacement.h"
 #include "Engine/Editor/Core/View/Templates/EditModes/Object/ObjectViewportTemplate.h"
 #include "Engine/Editor/Core/View/Templates/EditModes/Mesh/MeshViewportTemplate.h"
 #include "Engine/Editor/Core/View/Templates/EditModes/Skeleton/SkeletonViewportTemplate.h"
@@ -18,8 +19,10 @@
 #include "Core/Compoonents/Animation/AnimationManager.h"
 #include "Core/Compoonents/Obj/Mesh.h"
 #include "Core/Compoonents/Obj/Terrain.h"
+#include "Core/Compoonents/Obj/TerrainObjectLayer.h"
 #include "Core/Compoonents/Obj/TerrainManager.h"
 #include <set>
+#include <filesystem>
 #include <vector>
 #include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Compoonents/Transform.h"
@@ -34,6 +37,7 @@
 #include <algorithm>
 #include <cmath>
 #include <glm/gtc/matrix_inverse.hpp>
+#include <glm/gtc/quaternion.hpp>
 
 namespace Engine::Editor
 {
@@ -373,20 +377,20 @@ void SceneView::DrawTerrainToolbar(const std::function<bool(float)>& next)
         ImGui::PopID();
         return;
     }
-    const char* modes[] = {"Raise", "Lower", "Average", "Blend", "Paint"};
+    const char* modes[] = {"Raise", "Lower", "Average", "Blend", "Paint", "Objects"};
     if (next(112.f))
     {
         ImGui::SetNextItemWidth(112.f);
-        ImGui::Combo("##TerrainBrush", &m_terrainBrush, modes, 5);
+        ImGui::Combo("##TerrainBrush", &m_terrainBrush, modes, 6);
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("Terrain brush");
     }
-    if (next(120.f))
+    if (m_terrainBrush != 5 && next(120.f))
     {
         ImGui::SetNextItemWidth(120.f);
         ImGui::DragFloat("##TerrainRadius", &m_terrainRadius,
             .05f, .05f, 100.f, "Radius %.1f");
     }
-    if (next(135.f))
+    if (m_terrainBrush != 5 && next(135.f))
     {
         ImGui::SetNextItemWidth(135.f);
         ImGui::DragFloat("##TerrainStrength", &m_terrainStrength,
@@ -404,7 +408,38 @@ void SceneView::DrawTerrainToolbar(const std::function<bool(float)>& next)
                 "Layer %d");
         }
     }
-    if (manager && next(125.f))
+    if (m_terrainBrush == 5)
+    {
+        if (next(210.f))
+        {
+            const std::string label = m_terrainObjectPrefab.empty()
+                ? "Drop prefab here##ObjectBrush" :
+                std::filesystem::path(m_terrainObjectPrefab).filename().string() + "##ObjectBrush";
+            ImGui::Button(label.c_str(), {210.f, 0.f});
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Drag a prefab from Assets here, then drag on terrain to paint objects.");
+            if (ImGui::BeginDragDropTarget())
+            {
+                if (const auto* payload = ImGui::AcceptDragDropPayload("ENGINE_ASSET_PATH"))
+                {
+                    const auto* data = static_cast<const char*>(payload->Data);
+                    size_t length = 0;
+                    while (length < static_cast<size_t>(payload->DataSize) && data[length]) ++length;
+                    const std::string path(data, length);
+                    if (LowerAssetExtension(path) == ".prefab") m_terrainObjectPrefab = path;
+                }
+                ImGui::EndDragDropTarget();
+            }
+        }
+        if (next(145.f)) ImGui::Checkbox("Align to surface", &m_terrainAlignObjects);
+        if (next(135.f))
+        {
+            ImGui::SetNextItemWidth(135.f);
+            ImGui::DragFloat("##ObjectSpacing", &m_terrainObjectSpacing,
+                .05f, .1f, 100.f, "Spacing %.1f");
+        }
+    }
+    if (m_terrainBrush != 5 && manager && next(125.f))
         ImGui::Checkbox("Edit cells", &m_editTerrainCells);
     ImGui::PopID();
 }
@@ -501,7 +536,69 @@ void SceneView::DrawPanel(IEditorUi& ui)
             m_editMode = SceneEditMode::Terrain;
         m_previousSelectedObject = selected;
     }
-    if ((terrain || manager) && m_editMode == SceneEditMode::Terrain)
+    const bool objectBrush = (terrain || manager) &&
+        m_editMode == SceneEditMode::Terrain && m_terrainBrush == 5;
+    if (!objectBrush || !input.leftDown || !input.hovered ||
+        input.rightDown || input.middleDown)
+        m_terrainObjectStroke = false;
+    if (objectBrush)
+    {
+        // Reserve the stroke even on a miss, so painting cannot select its own objects.
+        terrainConsumedClick = input.hovered && (input.leftDown || input.leftClicked);
+        glm::vec3 position{}, normal{};
+        if (input.hovered && !input.rightDown && !input.middleDown &&
+            ScenePlacementAndPicking::FindTerrainPlacement(*m_scene,
+                manager ? manager->Owner : selected,
+                input.mousePosInViewport, input.available, position, normal))
+        {
+            ui.DrawViewportCircle(input.mousePosInViewport, 6.f, {1.f, .8f, .15f, 1.f}, false, 2.f);
+            const bool spaced = !m_terrainObjectStroke ||
+                glm::distance(position, m_lastTerrainObjectPosition) >=
+                    std::max(.1f, m_terrainObjectSpacing);
+            if (AllowObjectCreation && input.leftDown && !m_terrainObjectPrefab.empty() && spaced)
+            {
+                auto* cell=manager ? nullptr:terrain;
+                if (manager)
+                    for (auto* candidate:m_scene->GetComponents<Engine::Components::Terrain>())
+                    {
+                        if (candidate->Owner->GetComponentInParent<Engine::Components::TerrainManager>()!=manager) continue;
+                        const auto local=glm::vec3(glm::inverse(candidate->Owner->transform.GetWorldMatrix())*glm::vec4(position,1));
+                        if (local.x>=0 && local.z>=0 && local.x<=candidate->cellsX*candidate->cellWidth &&
+                            local.z<=candidate->cellsY*candidate->cellDepth) { cell=candidate; break; }
+                    }
+                if (cell)
+                {
+                    Engine::Components::TerrainObjectLayer* layer=nullptr;
+                    for (auto* child:cell->Owner->Children)
+                        if (auto* candidate=child->GetComponent<Engine::Components::TerrainObjectLayer>();
+                            candidate && (candidate->layerName=="Objects" ||
+                            (!candidate->placements.empty() && LowerAssetExtension(candidate->placements.front().asset)==".prefab")))
+                        { layer=candidate; break; }
+                    if (!layer)
+                    {
+                        auto* child=m_scene->AddObject("Objects");
+                        m_scene->MoveObject(child,cell->Owner,Engine::Scene::Scene::ObjectPlacement::AsChild);
+                        child->transform.position={0,0,0}; child->transform.rotation={0,0,0};
+                        child->transform.scale={1,1,1};
+                        layer=child->AddComponent<Engine::Components::TerrainObjectLayer>();
+                    }
+                    Engine::Components::TerrainObjectLayer::Placement placement;
+                    placement.asset=m_terrainObjectPrefab;
+                    const auto inverse=glm::inverse(layer->Owner->transform.GetWorldMatrix());
+                    placement.position=glm::vec3(inverse*glm::vec4(position,1));
+                    placement.normal=m_terrainAlignObjects ? glm::normalize(glm::vec3(inverse*glm::vec4(normal,0))):glm::vec3(0,1,0);
+                    layer->placements.push_back(placement); layer->MarkConfigurationDirty();
+                    if (OnObjectCreated) OnObjectCreated(selected);
+                    // Keep terrain selected for the rest of the brush stroke.
+                    m_scene->SetSelectedObject(selected);
+                    if (OnObjectSelected) OnObjectSelected(selected);
+                    m_lastTerrainObjectPosition = position;
+                    m_terrainObjectStroke = true;
+                }
+            }
+        }
+    }
+    if ((terrain || manager) && m_editMode == SceneEditMode::Terrain && !objectBrush)
     {
         if (input.hovered && input.leftDown &&
             !(manager && m_editTerrainCells) &&
@@ -544,7 +641,7 @@ void SceneView::DrawPanel(IEditorUi& ui)
             }
         }
     }
-    if (manager && m_editMode == SceneEditMode::Terrain &&
+    if (manager && m_editMode == SceneEditMode::Terrain && !objectBrush &&
         input.available.x > 0.f && input.available.y > 0.f)
     {
         if (m_editTerrainCells)
@@ -815,7 +912,7 @@ void SceneView::DrawPanel(IEditorUi& ui)
             input.rightDown || input.middleDown ||
             input.zoomDragDown)
         {
-            if (input.leftClicked && !overlayConsumedClick &&
+            if (input.leftClicked && !overlayConsumedClick && !terrainConsumedClick &&
                 transformTool != EditorTransformTool::Hand &&
                 !m_modelManipulation &&
                 !gizmoResult.consumedClick &&
