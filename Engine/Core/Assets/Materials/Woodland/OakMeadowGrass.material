@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "shaders": [
+    {
+      "path": "Assets/Shaders/Foliage.hlsl",
+      "enabled": true,
+      "blendMode": "Auto"
+    }
+  ],
+  "baseColor": [
+    1,
+    1,
+    1
+  ],
+  "useVertexColors": false,
+  "ambientColor": [
+    0.2,
+    0.23,
+    0.13
+  ],
+  "metallic": 0,
+  "roughness": 0.86,
+  "reflectionStrength": 0.18,
+  "alphaMode": "Mask",
+  "alphaCutoff": 0.32,
+  "normalScale": 0.55,
+  "doubleSided": true,
+  "castsShadows": true,
+  "baseColorTexture": "Assets/Models/Woodland/Grass/Textures/Texture 2 2.png",
+  "normalTexture": "Assets/Models/Woodland/Grass/Textures/Texture 1 1.png"
+}
