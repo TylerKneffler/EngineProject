@@ -80,6 +80,20 @@ Engine::Serialization::JsonValue SerializeSceneSettings(const Engine::Model::Sce
     value.Set("outputExposure", Engine::Serialization::JsonValue(settings.outputExposure));
     value.Set("renderMode",
         Engine::Serialization::JsonValue(static_cast<int>(settings.renderMode)));
+    value.Set("renderScaleMode",
+        Engine::Serialization::JsonValue(static_cast<int>(settings.renderScaleMode)));
+    value.Set("renderScale",
+        Engine::Serialization::JsonValue(settings.renderScale));
+    value.Set("dynamicInternalRenderScale",
+        Engine::Serialization::JsonValue(settings.dynamicInternalRenderScale));
+    value.Set("temporalUpscaling",
+        Engine::Serialization::JsonValue(settings.temporalUpscaling));
+    value.Set("renderScaleTargetMs",
+        Engine::Serialization::JsonValue(settings.renderScaleTargetMs));
+    value.Set("renderScaleMinimum",
+        Engine::Serialization::JsonValue(settings.renderScaleMinimum));
+    value.Set("renderScaleMaximum",
+        Engine::Serialization::JsonValue(settings.renderScaleMaximum));
     value.Set("sceneViewUiOverlay",
         Engine::Serialization::JsonValue(settings.sceneViewUiOverlay));
     value.Set("portalDebugVisuals",
@@ -167,6 +181,25 @@ void DeserializeSceneSettings(Engine::Model::SceneSettings& settings, const Engi
             break;
         }
     }
+    if (const auto* renderScaleMode = FindField(value, "renderScaleMode"))
+    {
+        settings.renderScaleMode = static_cast<Engine::Model::RenderScaleMode>(
+            std::clamp(renderScaleMode->AsInt(), 0, 3));
+        settings.renderScale = Engine::Model::RenderQualitySettings::ScaleForMode(
+            settings.renderScaleMode);
+    }
+    if (const auto* renderScale = FindField(value, "renderScale"))
+        settings.renderScale = std::clamp(renderScale->AsFloat(), 0.5f, 1.0f);
+    if (const auto* dynamicInternalRenderScale = FindField(value, "dynamicInternalRenderScale"))
+        settings.dynamicInternalRenderScale = dynamicInternalRenderScale->AsBool();
+    if (const auto* temporalUpscaling = FindField(value, "temporalUpscaling"))
+        settings.temporalUpscaling = temporalUpscaling->AsBool();
+    if (const auto* renderScaleTargetMs = FindField(value, "renderScaleTargetMs"))
+        settings.renderScaleTargetMs = std::max(8.0f, renderScaleTargetMs->AsFloat());
+    if (const auto* renderScaleMinimum = FindField(value, "renderScaleMinimum"))
+        settings.renderScaleMinimum = std::clamp(renderScaleMinimum->AsFloat(), 0.5f, 1.0f);
+    if (const auto* renderScaleMaximum = FindField(value, "renderScaleMaximum"))
+        settings.renderScaleMaximum = std::clamp(renderScaleMaximum->AsFloat(), 0.5f, 1.0f);
     if (const auto* sceneViewUiOverlay = FindField(value, "sceneViewUiOverlay"))
         settings.sceneViewUiOverlay = sceneViewUiOverlay->AsBool();
     if (const auto* portalDebugVisuals = FindField(value, "portalDebugVisuals"))

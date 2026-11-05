@@ -746,7 +746,7 @@ void DX12GameRenderer::CreateDepthStencilTarget()
     resourceDesc.Height = m_height;
     resourceDesc.DepthOrArraySize = 1;
     resourceDesc.MipLevels = 1;
-    resourceDesc.Format = DXGI_FORMAT_D32_FLOAT_S8X24_UINT;
+    resourceDesc.Format = DXGI_FORMAT_R32G8X24_TYPELESS;
     resourceDesc.SampleDesc = { 1, 0 };
     resourceDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
     resourceDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;

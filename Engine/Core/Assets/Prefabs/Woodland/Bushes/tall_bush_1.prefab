@@ -2,7 +2,7 @@
 <Prefab xmlns:components="urn:engine-components" version="1" type="prefab">
   <object name="tall_bush_1" enabled="true">
     <components>
-      <components:Mesh Mesh.file="Assets/Models/Woodland/Bushes/Meshes/tall_bush_1 5_1.mesh" Mesh.foliageWindStrength="0.16" Mesh.useLightProbes="false" Mesh.gpuLodSelection="false" Mesh.gpuLod1Distance="8" Mesh.gpuLod2Distance="16" />
+      <components:Mesh Mesh.file="Assets/Models/Woodland/Bushes/Meshes/tall_bush_1 5_1.mesh" Mesh.foliageWindStrength="0" Mesh.useLightProbes="false" Mesh.gpuLodSelection="false" Mesh.gpuLod1Distance="8" Mesh.gpuLod2Distance="16" />
       <components:Material Material.materialAsset="Engine/Core/Assets/Models/Woodland/Bushes/Materials/phong3 1.material" />
     </components>
     <children />

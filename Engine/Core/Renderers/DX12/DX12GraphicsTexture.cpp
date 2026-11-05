@@ -196,17 +196,18 @@ D3D12TextureFactory::CreateDepthTexture2D(uint32_t width, uint32_t height)
     desc.Height = height;
     desc.DepthOrArraySize = 1;
     desc.MipLevels = 1;
-    desc.Format = DXGI_FORMAT_R32_TYPELESS;
+    desc.Format = DXGI_FORMAT_R32G8X24_TYPELESS;
     desc.SampleDesc.Count = 1;
     desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
     desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
     D3D12_CLEAR_VALUE clear{};
-    clear.Format = DXGI_FORMAT_D32_FLOAT;
+    clear.Format = DXGI_FORMAT_D32_FLOAT_S8X24_UINT;
     clear.DepthStencil.Depth = 1.f;
+    clear.DepthStencil.Stencil = 0;
     const auto heapProperties = HeapProperties(D3D12_HEAP_TYPE_DEFAULT);
     Microsoft::WRL::ComPtr<ID3D12Resource> texture;
     if (FAILED(m_device->CreateCommittedResource(&heapProperties,
-        D3D12_HEAP_FLAG_NONE, &desc, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+        D3D12_HEAP_FLAG_NONE, &desc, D3D12_RESOURCE_STATE_DEPTH_WRITE,
         &clear, IID_PPV_ARGS(&texture))))
         return nullptr;
 
@@ -216,7 +217,7 @@ D3D12TextureFactory::CreateDepthTexture2D(uint32_t width, uint32_t height)
     gpu.ptr += static_cast<UINT64>(m_nextDescriptor) * m_descriptorSize;
     ++m_nextDescriptor;
     D3D12_SHADER_RESOURCE_VIEW_DESC srv{};
-    srv.Format = DXGI_FORMAT_R32_FLOAT;
+    srv.Format = DXGI_FORMAT_R32_FLOAT_X8X24_TYPELESS;
     srv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
     srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
     srv.Texture2D.MipLevels = 1;
@@ -229,7 +230,7 @@ D3D12TextureFactory::CreateDepthTexture2D(uint32_t width, uint32_t height)
     if (FAILED(m_device->CreateDescriptorHeap(&dsvDesc, IID_PPV_ARGS(&dsvHeap))))
         return nullptr;
     D3D12_DEPTH_STENCIL_VIEW_DESC dsv{};
-    dsv.Format = DXGI_FORMAT_D32_FLOAT;
+    dsv.Format = DXGI_FORMAT_D32_FLOAT_S8X24_UINT;
     dsv.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
     m_device->CreateDepthStencilView(texture.Get(), &dsv,
         dsvHeap->GetCPUDescriptorHandleForHeapStart());

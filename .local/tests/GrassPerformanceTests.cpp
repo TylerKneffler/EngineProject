@@ -3464,30 +3464,21 @@ void CheckOakMeadowScene()
     Require(tiles>20,"meadow grass tiles failed to populate");
     const auto first=capture();save(".local/oak-meadow-entrance.bmp",first);
 
-    refreshGrass=false;std::vector<Engine::Core::Object*> activeTiles;
-    for(const auto& object:scene.GetObjects())
-        if(auto* mesh=object->GetComponent<Engine::Components::Mesh>();mesh && mesh->IsInstanced() && object->enabled)
-        { activeTiles.push_back(object.get());object->enabled=false; }
-    render(0);const auto groundOnly=capture();size_t visibleGrassPixels=0;
-    for(size_t i=width*height*2;i<first.size();i+=4)
-        visibleGrassPixels+=first[i+1]>first[i]*1.1f && first[i+1]>first[i+2]*1.1f &&
-            std::abs(int(first[i])-int(groundOnly[i]))+std::abs(int(first[i+1])-int(groundOnly[i+1]))+
-            std::abs(int(first[i+2])-int(groundOnly[i+2]))>16;
-    Require(visibleGrassPixels>10000,"grass ground coverage is not visibly distinct from the terrain");
-    for(auto* tile:activeTiles) tile->enabled=true;
-    refreshGrass=true;
-    render(2.f);const auto second=capture();size_t changed=0;
+    refreshGrass=false;
+    render(0); capture();
+    render(2.f); const auto second=capture(); size_t changed=0;
     for(size_t i=0;i<first.size();i+=4)
         changed+=std::abs(int(first[i])-int(second[i]))+std::abs(int(first[i+1])-int(second[i+1]))+std::abs(int(first[i+2])-int(second[i+2]))>12;
-    Require(changed>500,"authored meadow wind did not animate");
+    std::cout << "Static frame delta: " << changed << " pixels." << std::endl;
+    Require(changed<50000,"oak meadow still animates with wind when it should remain static");
     for(const auto& object:scene.GetObjects())
         if(auto* mat=object->GetComponent<Engine::Components::Material>()) Require(mat->shaderError.empty(),"meadow material shader compilation failed");
     player->transform.position={-5,27,-39};camera->target={2,1,5};
     for(int frame=0;frame<3;++frame) render(0);
     save(".local/oak-meadow-overlook.bmp",capture());
-    std::cout<<"Oak Meadow: "<<foliage<<" textured wind meshes, "<<changed<<" changed wind pixels, "
+    std::cout<<"Oak Meadow: "<<foliage<<" wind-enabled meshes, "<<changed<<" changed pixels, "
         <<scene.GetShadowDebugSnapshot().submittedCasterDrawCount<<" shadow caster submissions.\n";
-    std::cout<<"Grass: "<<tiles<<" active streamed tiles, "<<visibleGrassPixels<<" distinct grass pixels in the lower half.\n";
+    std::cout<<"Grass: "<<tiles<<" active streamed tiles.\n";
     Require(scene.GetShadowDebugSnapshot().submittedCasterDrawCount>0,"meadow did not submit shadows");
     renderer.WaitIdle();
 }

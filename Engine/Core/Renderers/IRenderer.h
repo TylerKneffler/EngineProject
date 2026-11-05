@@ -1,5 +1,7 @@
 #pragma once
 #include "Core/Graphics/IGraphicsProvider.h"
+#include "Core/Model/RendererData.h"
+#include <algorithm>
 
 namespace Engine::Renderers
 {
@@ -31,6 +33,29 @@ public:
     // the renderer implementation (see DX12EditorRenderer vs DX12GameRenderer).
     virtual void Clear(float r, float g, float b, float a = 1.0f) = 0;
 
+    // Dynamic internal render scale lets heavy scenes trade a little image
+    // sharpness for lower GPU cost while maintaining the same logical viewport.
+    virtual void SetRenderScale(float scale)
+    {
+        m_renderScale = std::clamp(scale, 0.5f, 1.0f);
+        m_renderScaleMode = m_renderScale > 0.90f ? Engine::Model::RenderScaleMode::Native :
+            m_renderScale >= 0.70f ? Engine::Model::RenderScaleMode::Quality75 :
+            m_renderScale >= 0.58f ? Engine::Model::RenderScaleMode::Quality67 :
+            Engine::Model::RenderScaleMode::Quality50;
+    }
+    virtual float GetRenderScale() const { return m_renderScale; }
+    virtual void SetRenderScaleMode(Engine::Model::RenderScaleMode mode)
+    {
+        m_renderScaleMode = mode;
+        m_renderScale = Engine::Model::RenderQualitySettings::ScaleForMode(mode);
+    }
+    virtual Engine::Model::RenderScaleMode GetRenderScaleMode() const
+    { return m_renderScaleMode; }
+    virtual void SetTemporalUpscaling(bool enabled) { m_temporalUpscaling = enabled; }
+    virtual bool IsTemporalUpscalingEnabled() const { return m_temporalUpscaling; }
+    virtual void SetDynamicRenderScale(bool enabled) { m_dynamicRenderScale = enabled; }
+    virtual bool IsDynamicRenderScaleEnabled() const { return m_dynamicRenderScale; }
+
     // Get access to graphics services (shader compilation, buffer creation, pipeline building)
     virtual Engine::Graphics::IGraphicsProvider* GetGraphicsProvider() = 0;
 
@@ -39,5 +64,11 @@ public:
     virtual void WaitIdle() {}
     virtual Engine::Graphics::FrameTimingTelemetry GetFrameTimingTelemetry() const
     { return {}; }
+
+protected:
+    float m_renderScale = 1.0f;
+    bool m_temporalUpscaling = false;
+    bool m_dynamicRenderScale = false;
+    Engine::Model::RenderScaleMode m_renderScaleMode = Engine::Model::RenderScaleMode::Native;
 };
 }

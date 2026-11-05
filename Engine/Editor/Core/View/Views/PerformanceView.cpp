@@ -608,6 +608,26 @@ void PerformanceView::DrawTimings(IEditorUi& ui)
     ui.ValueLabel("Average editor updates/sec",std::to_string(m_frameStatistics.fps).c_str());
     ui.ValueLabel("Updates over 16.67 ms (%)",std::to_string(m_frameStatistics.over60BudgetPercent).c_str());
     ui.DisabledLabel("Frame interval includes waits between updates; CPU frame work can be shorter. The 60 FPS budget is 16.67 ms.");
+
+    constexpr uint64_t kBudgetTriangles = 4'000'000ull;
+    constexpr uint64_t kBudgetShadowCasters = 256ull;
+    constexpr uint64_t kBudgetMaterialComplexity = 2'000ull;
+    const auto visibleTriangles = std::max<uint64_t>(m_renderCpu.candidateTriangles, 0ull);
+    const auto shadowCasters = m_scene ? std::max<uint64_t>(m_scene->GetShadowDebugSnapshot().casterCount, 0ull) : 0ull;
+    const auto materialComplexity = std::max<uint64_t>(m_renderCpu.gpuBatches * 24ull + m_renderCpu.candidateDraws, 0ull);
+    const bool sceneBudgetWarning = visibleTriangles > kBudgetTriangles ||
+        shadowCasters > kBudgetShadowCasters ||
+        materialComplexity > kBudgetMaterialComplexity;
+    ui.Separator();
+    ui.Label("Scene budgets");
+    ui.ValueLabel("Visible triangles", std::to_string(visibleTriangles).c_str());
+    ui.ValueLabel("Shadow casters", std::to_string(shadowCasters).c_str());
+    ui.ValueLabel("Material complexity", std::to_string(materialComplexity).c_str());
+    if (sceneBudgetWarning)
+        ui.ColoredLabel("Scene budget alert: heavy scene costs are breaching the current targets.", { .95f, .68f, .20f, 1.f });
+    else
+        ui.DisabledLabel("All current scene budget counters are within the current targets.");
+
     drawGroup("Frame phases (CPU)", m_frameTimings);
     ui.Label("UI construction by panel (previous frame)");
     ui.DisabledLabel("Panel times are contained in Editor UI; toolbar, menus and editor bookkeeping are outside these panel scopes.");

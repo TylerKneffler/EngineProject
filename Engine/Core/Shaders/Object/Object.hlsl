@@ -324,7 +324,12 @@ void VSMain(
     float3 worldTangent = mul((float3x3)objectData.world, localTangent);
     float3 worldUp = mul((float3x3)objectData.world, grassUp);
     float upLength = max(length(worldUp), 0.0001);
-    if (objectData.grassAnimation.y > 0.5)
+    // Wind must not deform shadow casters; otherwise shadow maps redraw for
+    // every shader-driven vertex change while the mesh is still static in the
+    // light pass.
+    const bool useGrassWind = objectData.grassAnimation.y > 0.5 &&
+        objectData.shadowCasterFade.z <= 0.5;
+    if (useGrassWind)
         ApplyGrassWind(objectData.grassAnimation.x, objectData.grassAnimation.z,
             mul(objectData.world, float4(grassRoot, 1)).xyz, worldUp / upLength,
             max(0.0, pos.y) * upLength, worldPosition.xyz, worldNormal, worldTangent);

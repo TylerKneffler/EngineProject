@@ -109,7 +109,7 @@ void D3D12View::CreateResources(void* device, uint32_t width, uint32_t height)
     d3dDevice->CreateShaderResourceView(m_texture.Get(), &srvDesc, m_srvCpu);
 
     D3D12_RESOURCE_DESC depthDesc = texDesc;
-    depthDesc.Format = DXGI_FORMAT_D32_FLOAT_S8X24_UINT;
+    depthDesc.Format = DXGI_FORMAT_R32G8X24_TYPELESS;
     depthDesc.Flags  = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
 
     D3D12_CLEAR_VALUE depthClear{};

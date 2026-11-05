@@ -2,7 +2,7 @@
 <Prefab xmlns:components="urn:engine-components" version="1" type="prefab">
   <object name="MeadowPatch_04_LOD2" enabled="true">
     <components>
-      <components:Mesh Mesh.file="Assets/Models/Woodland/Grass/Meshes/MeadowPatch_04_LOD2 12_1.mesh" Mesh.foliageWindStrength="0.48" Mesh.useLightProbes="false" Mesh.gpuLodSelection="false" Mesh.gpuLod1Distance="8" Mesh.gpuLod2Distance="16" />
+      <components:Mesh Mesh.file="Assets/Models/Woodland/Grass/Meshes/MeadowPatch_04_LOD2 12_1.mesh" Mesh.foliageWindStrength="0" Mesh.useLightProbes="false" Mesh.gpuLodSelection="false" Mesh.gpuLod1Distance="8" Mesh.gpuLod2Distance="16" />
       <components:Material Material.materialAsset="Engine/Core/Assets/Models/Woodland/Grass/Materials/BR_MainGrass 1.material" />
     </components>
     <children />

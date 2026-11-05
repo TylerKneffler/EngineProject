@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Core/Model/RendererData.h"
 #include <glm/glm.hpp>
 #include <string>
 
@@ -50,6 +51,15 @@ struct SceneSettings
     ToneMappingOperator toneMapping = ToneMappingOperator::Aces;
     float outputExposure = 0.f;
     SceneRenderMode renderMode = SceneRenderMode::Lit;
+    // Heavy scenes can optionally render at a reduced internal resolution and
+    // optionally combine it with temporal reconstruction for stable output.
+    RenderScaleMode renderScaleMode = RenderScaleMode::Native;
+    float renderScale = 1.0f;
+    bool dynamicInternalRenderScale = false;
+    bool temporalUpscaling = false;
+    float renderScaleTargetMs = 16.67f;
+    float renderScaleMinimum = 0.5f;
+    float renderScaleMaximum = 1.0f;
     // When true, SceneView also shows game-style screen-space UI composition.
     // Default stays false so scene camera reflects in-scene editing context.
     bool sceneViewUiOverlay = false;

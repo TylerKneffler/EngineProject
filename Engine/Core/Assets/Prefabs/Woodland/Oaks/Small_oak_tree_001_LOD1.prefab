@@ -31,7 +31,7 @@
           </Transform.scale>
         </transform>
         <components>
-          <components:Mesh Mesh.file="Assets/Models/Woodland/Oaks/Meshes/Small_oak_tree_001_LOD1 44_1.mesh" Mesh.foliageWindStrength="0.018" Mesh.useLightProbes="false" Mesh.gpuLodSelection="false" Mesh.gpuLod1Distance="8" Mesh.gpuLod2Distance="16" />
+          <components:Mesh Mesh.file="Assets/Models/Woodland/Oaks/Meshes/Small_oak_tree_001_LOD1 44_1.mesh" Mesh.foliageWindStrength="0" Mesh.useLightProbes="false" Mesh.gpuLodSelection="false" Mesh.gpuLod1Distance="8" Mesh.gpuLod2Distance="16" />
           <components:Material Material.materialAsset="Engine/Core/Assets/Models/Woodland/Oaks/Materials/Bark_Mat 1.material" />
         </components>
         <children />
@@ -55,7 +55,7 @@
           </Transform.scale>
         </transform>
         <components>
-          <components:Mesh Mesh.file="Assets/Models/Woodland/Oaks/Meshes/Small_oak_tree_001_LOD1 44_2.mesh" Mesh.foliageWindStrength="0.018" Mesh.useLightProbes="false" Mesh.gpuLodSelection="false" Mesh.gpuLod1Distance="8" Mesh.gpuLod2Distance="16" />
+          <components:Mesh Mesh.file="Assets/Models/Woodland/Oaks/Meshes/Small_oak_tree_001_LOD1 44_2.mesh" Mesh.foliageWindStrength="0" Mesh.useLightProbes="false" Mesh.gpuLodSelection="false" Mesh.gpuLod1Distance="8" Mesh.gpuLod2Distance="16" />
           <components:Material Material.materialAsset="Engine/Core/Assets/Models/Woodland/Oaks/Materials/Cluster_Mat 2.material" />
         </components>
         <children />

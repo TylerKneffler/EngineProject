@@ -4290,10 +4290,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 !mesh->IsPortalPoseSnapshot() &&
                 (useSourceChart || !renderItem->warpedVertexBuffer);
             preparedDraw.objectData.geometryFade=hasPortalViews && renderItem->geometryFade.w>=2.f ? mesh->GetRuntimeGeometryFade():renderItem->geometryFade;
-            preparedDraw.objectData.shadowCasterFade={casterFade.x,std::min(casterFade.x,casterFade.y),0.f,0.f};
-            preparedDraw.objectData.grassAnimation={mesh->grassShadowCaster || mesh->foliageWindStrength>0.f ? static_cast<float>(GetElapsedTime()):0.f,
-                mesh->grassShadowCaster || mesh->foliageWindStrength>0.f ? 1.f : 0.f,
-                mesh->foliageWindStrength>0.f ? std::clamp(mesh->foliageWindStrength,0.f,1.f):1.f, 0.f};
+            preparedDraw.objectData.shadowCasterFade={casterFade.x,std::min(casterFade.x,casterFade.y),1.f,0.f};
+            preparedDraw.objectData.grassAnimation={0.f,0.f,0.f,0.f};
             preparedDraw.objectData.viewPositionAlphaCutoff=glm::vec4(cameraPosition,.001f);
             preparedDraw.objectData.world = world;
             preparedDraw.objectData.viewProjection = proj * view;

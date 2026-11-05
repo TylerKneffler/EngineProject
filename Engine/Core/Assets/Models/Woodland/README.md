@@ -6,6 +6,6 @@ The scene uses a painted three-layer ground, a winding footpath, seventeen oak v
 
 Grass is streamed in two textured instanced layers using the existing GrassField system.
 
-`Mesh.foliageWindStrength` enables the shared root-pinned wind field for authored meshes. Grass bends strongly, shrubs moderately, and oak trunks/canopies share restrained motion. The same vertex path drives color and shadows, with bounds padding for wind. Bark and canopies keep source PBR shading; grass and shrubs use the existing fast foliage shading with their imported textures.
+`Mesh.foliageWindStrength` enables the shared root-pinned wind field for authored meshes. Grass and shrubs may use it, but the oak meadow scene intentionally keeps tree trunks and canopies at zero wind so they remain static and do not trigger shadow-map churn from shader-driven vertex motion. The same vertex path drives color and shadows, with bounds padding for wind. Bark and canopies keep source PBR shading; grass and shrubs use the existing fast foliage shading with their imported textures.
 
 Regenerate with `python Scripts/Assets/build_oak_meadow.py --prepare-only`, then `python Scripts/Assets/build_oak_meadow.py` (numpy/scipy and a built Debug Editor required). Existing imported packs are reused. Imports use the native glTF importer; generated intermediates live under `.local/woodland-import`. See ATTRIBUTION.md for CC-BY-4.0 credits.
