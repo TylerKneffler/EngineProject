@@ -1,5 +1,8 @@
 #include "Core/Scene/Scene.h"
 #include "Core/SceneManager.h"
+#include "Core/Compoonents/Obj/Mesh.h"
+#include "Core/Compoonents/Materials/Material.h"
+#include <typeinfo>
 #include "Core/Compoonents/Animation/TwoBoneIK.h"
 #include "Core/Compoonents/Animation/ChainIK.h"
 #include "Core/Compoonents/Animation/AnimationManager.h"
@@ -75,7 +78,14 @@ Scene::Scene(PhysicsAdapterFactory physicsAdapterFactory)
 
 Scene::~Scene()
 {
-    try { FenceBackgroundWork(); }
+    try
+    {
+        FenceBackgroundWork();
+        // Normal frame handoff empties this list. Protect a scene destroyed
+        // before that handoff as well, including removal of its final object.
+        if(!m_retiredRenderObjects.empty() && m_beforeGpuResourceDestruction)
+            m_beforeGpuResourceDestruction();
+    }
     catch (...) { /* Component destructors still join their own workers. */ }
     m_audio->Reset();
     m_physics->Reset();
@@ -855,7 +865,17 @@ void Scene::RemoveObject(Engine::Core::Object* obj)
     // callbacks or destructors invalidate those references.
     WaitForSceneJobs();
 
-    if (m_beforeGpuResourceDestruction)
+    // Generated grass/prefab leaves own only built-in rendering components.
+    // Keep their complete resource graph alive behind the submitted frame's
+    // fence; arbitrary scripts, physics, subclasses and subtrees still drain
+    // before their original lifecycle/destruction path.
+    const bool retireRenderLeaf=m_deferGraphicsRetirement && obj->runtimeOnly &&
+        obj->Children.empty() && std::all_of(obj->Components.begin(),obj->Components.end(),
+            [](const Engine::Core::Component* component) {
+                return !component || typeid(*component)==typeid(Engine::Components::Mesh) ||
+                    typeid(*component)==typeid(Engine::Components::Material);
+            });
+    if (!retireRenderLeaf && m_beforeGpuResourceDestruction)
         m_beforeGpuResourceDestruction();
 
     std::vector<Engine::Core::Object*> objectsToRemove;
@@ -928,6 +948,20 @@ void Scene::RemoveObject(Engine::Core::Object* obj)
     }
 
     m_editorSelectedMesh = nullptr;
+    if(retireRenderLeaf)
+    {
+        // Deliver logical destruction now, on the scene owner. The fence
+        // releases storage later; DispatchDestroy is idempotent at that point.
+        for(auto* component:obj->Components) if(component) component->DispatchDestroy();
+        auto found=std::find_if(m_objects.begin(),m_objects.end(),
+            [obj](const auto& candidate) { return candidate.get()==obj; });
+        if(found!=m_objects.end())
+        {
+            m_retiredRenderObjects.push_back(std::move(*found));
+            m_objects.erase(found);
+        }
+        return;
+    }
     m_objects.erase(
         std::remove_if(
             m_objects.begin(),
@@ -999,8 +1033,10 @@ void Scene::ClearObjects()
     if (m_isUpdating)
         throw std::logic_error("Clearing a scene during Update requires a commit boundary");
     FenceBackgroundWork();
-    if (m_beforeGpuResourceDestruction && !m_objects.empty())
+    if (m_beforeGpuResourceDestruction &&
+        (!m_objects.empty() || !m_retiredRenderObjects.empty()))
         m_beforeGpuResourceDestruction();
+    m_retiredRenderObjects.clear();
     m_hasStarted = false;
     m_graphicsPreparationPending = false;
     {

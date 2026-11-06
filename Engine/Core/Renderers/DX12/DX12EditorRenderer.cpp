@@ -158,6 +158,8 @@ void DX12EditorRenderer::BeginFrame()
     ThrowIfFailed(m_commandAllocators[m_frameIndex]->Reset());
     ThrowIfFailed(m_commandList->Reset(
         m_commandAllocators[m_frameIndex].Get(), nullptr));
+    if (m_graphicsProvider)
+        m_graphicsProvider->GetContextFactory()->SetCommandBuffer(m_commandList.Get());
 
     // Set the root signature immediately after reset (required for D3D12)
     m_commandList->SetGraphicsRootSignature(m_rootSignature.Get());
@@ -217,6 +219,10 @@ void DX12EditorRenderer::EndFrame()
     barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
     m_commandList->ResourceBarrier(1, &barrier);
 
+    // Resolve this slot's timestamps on the same command list that recorded
+    // them. PrepareFrame reads the results after the slot fence completes.
+    if (m_graphicsProvider)
+        m_graphicsProvider->GetContextFactory()->FinalizeFrame();
     ThrowIfFailed(m_commandList->Close());
 
     ID3D12CommandList* lists[] = { m_commandList.Get() };

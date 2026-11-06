@@ -265,9 +265,15 @@ void DX12GameRenderer::EndFrame()
 {
     m_postProcess.Compose(m_commandList.Get(), GetCurrentRTV());
     if (m_captureRequested) RecordSceneCapture();
-    // NOTE: The RENDER_TARGET → PRESENT barrier is NOT recorded here.
-    // RenderOverlay() calls ReleaseWrappedResources which issues that barrier
-    // via the D3D11On12 device's command list, submitted with Flush().
+    // This renderer submits directly through DX12. No interop overlay remains
+    // to transition the swap-chain buffer on our behalf.
+    D3D12_RESOURCE_BARRIER presentBarrier{};
+    presentBarrier.Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    presentBarrier.Transition.pResource=m_renderTargets[m_frameIndex].Get();
+    presentBarrier.Transition.StateBefore=D3D12_RESOURCE_STATE_RENDER_TARGET;
+    presentBarrier.Transition.StateAfter=D3D12_RESOURCE_STATE_PRESENT;
+    presentBarrier.Transition.Subresource=D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    m_commandList->ResourceBarrier(1,&presentBarrier);
 
     // ---- Submit the DX12 command list ----
     // Close() finalises the command list; no more commands can be appended

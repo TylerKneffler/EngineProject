@@ -302,7 +302,7 @@ def populate_forest(scene, library, count=2048):
     layer=ET.SubElement(cs,'{'+NS+'}TerrainObjectLayer',{
         'TerrainObjectLayer.layerName':'Oak forest','TerrainObjectLayer.viewDistance':'220',
         'TerrainObjectLayer.lod1Distance':'28','TerrainObjectLayer.lod2Distance':'90',
-        'TerrainObjectLayer.shadowDistance':'90'})
+        'TerrainObjectLayer.shadowDistance':'90','TerrainObjectLayer.shadowLod':'1'})
     trees=ET.SubElement(layer,'TerrainObjectLayer.placements')
     surface=component(terrain,'Terrain')
     cells_x=int(surface.get('Terrain.cellsX'));cells_z=int(surface.get('Terrain.cellsY'))
@@ -379,8 +379,8 @@ def compose(library):
     vector(camera,'Camera.target',[path_x(5),1.35,5]);objects.append(player)
     sun=copy.deepcopy(lookup['Grass Sun']);sun.set('name','Late afternoon sun')
     transform(sun,(0,20,-10),(.70,2.40,0));light=component(sun,'Light');light.set('Light.intensity','3.2')
-    light.set('Light.castsShadows','false')
-    light.set('Light.shadowResolutionScale','.0625');light.set('Light.shadowFilterScale','.05')
+    light.set('Light.castsShadows','true')
+    light.set('Light.shadowResolutionScale','1');light.set('Light.shadowFilterScale','1')
     vector(light,'Light.color',[1,.91,.77]);objects.append(sun)
     materials=ASSETS/'Materials/Woodland';materials.mkdir(parents=True,exist_ok=True)
     for name,texture,color in [('Meadow','meadow_grass.png',[.48,.53,.36]),('Path','warm_dirt.png',[.83,.75,.62]),('WoodlandFloor','shaded_moss.png',[.48,.55,.40])]:

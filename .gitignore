@@ -77,3 +77,10 @@ ReleaseBuilds/.staging-*/
 !.local/tests/TerrainCullingBackendTests.cpp
 
 !.local/tests/OakBackendCapture.cpp
+
+!.local/tests/ForestPerformanceAudit.cpp
+
+!.local/tests/UploadRecordCacheTests.cpp
+
+!.local/tests/StreamedRenderRetirementTests.cpp
+!.local/tests/StableShadowCascadeTests.cpp

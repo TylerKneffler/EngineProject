@@ -7,6 +7,11 @@
             "directory": false
         },
         {
+            "id": "file:a8e05ef1:210000:227fef",
+            "path": "Prefabs/Woodland/Oaks/Big_oak_tree_001_LOD1.prefab",
+            "directory": false
+        },
+        {
             "id": "file:a8e05ef1:130000:31bbc6",
             "path": "Models/mmd/Mococo/Mococo Prefab/Meshes/Collar Chain 8.mesh",
             "directory": false
@@ -62,13 +67,13 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:3b0000:708fd",
-            "path": "Audio/TestTone.mp3",
+            "id": "file:a8e05ef1:170000:29fa9a",
+            "path": "Models/Woodland/Oaks/Meshes/Large_oak_tree_001_LOD0 13_2.mesh",
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:170000:29fa9a",
-            "path": "Models/Woodland/Oaks/Meshes/Large_oak_tree_001_LOD0 13_2.mesh",
+            "id": "file:a8e05ef1:3b0000:708fd",
+            "path": "Audio/TestTone.mp3",
             "directory": false
         },
         {
@@ -127,6 +132,16 @@
             "directory": true
         },
         {
+            "id": "file:a8e05ef1:3e0000:cf853",
+            "path": "Mesh/cone.obj",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:180000:227f76",
+            "path": "Models/Woodland/Oaks/Materials/Big_oak_tree_001_Impostor.material",
+            "directory": false
+        },
+        {
             "id": "file:a8e05ef1:730000:6961c",
             "path": "HDRI/river_alcove_4k.exr",
             "directory": false
@@ -134,11 +149,6 @@
         {
             "id": "asset:fbf53acf-d3e5-4500-b5e9-af7f52093bce",
             "path": "Models/mmd/Mococo/Mococo Prefab/Meshes/Jacket triangles 18.mesh",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:3e0000:cf853",
-            "path": "Mesh/cone.obj",
             "directory": false
         },
         {
@@ -207,11 +217,6 @@
             "directory": true
         },
         {
-            "id": "file:a8e05ef1:670000:115414",
-            "path": "Textures/sss_thickness_ear.png",
-            "directory": false
-        },
-        {
             "id": "asset:cffb5aa2-97ed-4f91-8703-7866b1adf7b7",
             "path": "Models/mmd/Mococo/Mococo Prefab/Meshes/Belt metal 3.mesh",
             "directory": false
@@ -259,6 +264,11 @@
         {
             "id": "file:a8e05ef1:2b0000:f0fab",
             "path": "Mesh/torus.obj",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:200000:227fd8",
+            "path": "Models/Woodland/Oaks/Meshes/Big_oak_tree_002_Impostor.mesh",
             "directory": false
         },
         {
@@ -317,11 +327,6 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:1a0000:29fefa",
-            "path": "Prefabs/Woodland/Oaks/Large_oak_tree_001_LOD2.prefab",
-            "directory": false
-        },
-        {
             "id": "file:a8e05ef1:1e0000:30d200",
             "path": "Models/mmd/Mococo/Mococo Prefab/Materials/Teeth 24.material",
             "directory": false
@@ -337,13 +342,13 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:150000:3247cb",
-            "path": "Materials/Grass/meadow_short.material",
+            "id": "file:a8e05ef1:60000:12e59c",
+            "path": "Textures/PBRDemo/CopperSlate_BaseColor.png",
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:60000:12e59c",
-            "path": "Textures/PBRDemo/CopperSlate_BaseColor.png",
+            "id": "file:a8e05ef1:150000:3247cb",
+            "path": "Materials/Grass/meadow_short.material",
             "directory": false
         },
         {
@@ -387,11 +392,6 @@
             "directory": true
         },
         {
-            "id": "file:a8e05ef1:4b0000:29ff9b",
-            "path": "Prefabs/Woodland/Oaks/Sapling_oak_tree_001_LOD0.prefab",
-            "directory": false
-        },
-        {
             "id": "file:a8e05ef1:150000:29fd3f",
             "path": "Models/Woodland/Oaks/Meshes/Small_oak_tree_002_LOD2 48_1.mesh",
             "directory": false
@@ -419,6 +419,11 @@
         {
             "id": "file:a8e05ef1:2220000:553cd",
             "path": "Materials/Terrain/field_grass.material",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:490000:227fe7",
+            "path": "Models/Woodland/Oaks/Meshes/Sapling_oak_tree_003_Impostor.mesh",
             "directory": false
         },
         {
@@ -472,11 +477,6 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:1c0000:29fef4",
-            "path": "Prefabs/Woodland/Oaks/Large_oak_tree_001_LOD1.prefab",
-            "directory": false
-        },
-        {
             "id": "file:a8e05ef1:110000:31e627",
             "path": "Models/mmd/dance1.vmd",
             "directory": false
@@ -484,6 +484,36 @@
         {
             "id": "file:a8e05ef1:280000:6baa2",
             "path": "Mesh",
+            "directory": true
+        },
+        {
+            "id": "file:a8e05ef1:1a0000:e8d67",
+            "path": "Models/Woodland/Grass",
+            "directory": true
+        },
+        {
+            "id": "file:a8e05ef1:120000:257115",
+            "path": "Prefabs/Woodland/Oaks/Large_oak_tree_003_Impostor.prefab",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:2c0000:31e594",
+            "path": "Models/mmd/Mococo/Textures/OutlineBody.png",
+            "directory": false
+        },
+        {
+            "id": "asset:45804885-c2ad-40c0-bf49-0eeef241215c",
+            "path": "Models/Woodland/Oaks/Meshes/Large_oak_tree_002_LOD2 18_1.mesh",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:150000:257161",
+            "path": "Prefabs/Woodland/Oaks/Sapling_oak_tree_003_LOD0.prefab",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:480000:109c67",
+            "path": "Textures/Calibration",
             "directory": true
         },
         {
@@ -495,26 +525,6 @@
             "id": "file:a8e05ef1:12b0000:497ba",
             "path": "Materials/Woodland/Meadow.material",
             "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:480000:109c67",
-            "path": "Textures/Calibration",
-            "directory": true
-        },
-        {
-            "id": "asset:45804885-c2ad-40c0-bf49-0eeef241215c",
-            "path": "Models/Woodland/Oaks/Meshes/Large_oak_tree_002_LOD2 18_1.mesh",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:2c0000:31e594",
-            "path": "Models/mmd/Mococo/Textures/OutlineBody.png",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:1a0000:e8d67",
-            "path": "Models/Woodland/Grass",
-            "directory": true
         },
         {
             "id": "file:a8e05ef1:180000:6bb30",
@@ -580,11 +590,6 @@
             "id": "file:a8e05ef1:370000:e6d26",
             "path": "Scenes/Physics",
             "directory": true
-        },
-        {
-            "id": "file:a8e05ef1:160000:29fecf",
-            "path": "Prefabs/Woodland/Oaks/Big_oak_tree_001_LOD0.prefab",
-            "directory": false
         },
         {
             "id": "asset:8ebccde5-eb62-45dd-8566-fbaa93889acb",
@@ -677,6 +682,11 @@
             "directory": false
         },
         {
+            "id": "file:a8e05ef1:120000:257168",
+            "path": "Prefabs/Woodland/Oaks/Small_oak_tree_001_LOD0.prefab",
+            "directory": false
+        },
+        {
             "id": "file:a8e05ef1:130000:7099f",
             "path": "Mesh/smooth_shrinking_tunnel.obj",
             "directory": false
@@ -752,6 +762,11 @@
             "directory": false
         },
         {
+            "id": "file:a8e05ef1:150000:25711e",
+            "path": "Prefabs/Woodland/Oaks/Large_oak_tree_004_LOD0.prefab",
+            "directory": false
+        },
+        {
             "id": "file:a8e05ef1:630000:e87ed",
             "path": "Models/crash-dummy/source",
             "directory": true
@@ -817,6 +832,11 @@
             "directory": false
         },
         {
+            "id": "file:a8e05ef1:120000:25716d",
+            "path": "Prefabs/Woodland/Oaks/Small_oak_tree_001_LOD2.prefab",
+            "directory": false
+        },
+        {
             "id": "file:a8e05ef1:d30000:4aa69",
             "path": "Scripts/Grass/GrassField.h",
             "directory": false
@@ -844,11 +864,6 @@
         {
             "id": "file:a8e05ef1:140000:29fd33",
             "path": "Models/Woodland/Oaks/Meshes/Small_oak_tree_002_LOD0 46_1.mesh",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:60000:29ff14",
-            "path": "Prefabs/Woodland/Oaks/Large_oak_tree_004_LOD1.prefab",
             "directory": false
         },
         {
@@ -997,14 +1012,14 @@
             "directory": false
         },
         {
-            "id": "asset:ff5f5b32-a0ef-46e7-b5a1-a05218f18e36",
-            "path": "Models/Woodland/Oaks/Meshes/Large_oak_tree_002_LOD2 18_2.mesh",
-            "directory": false
-        },
-        {
             "id": "file:a8e05ef1:2f0000:f8fcd",
             "path": "Models/Gltf",
             "directory": true
+        },
+        {
+            "id": "file:a8e05ef1:140000:257162",
+            "path": "Prefabs/Woodland/Oaks/Sapling_oak_tree_003_LOD1.prefab",
+            "directory": false
         },
         {
             "id": "asset:cb52ec1e-0e37-4a32-8ebd-adefc523f7d7",
@@ -1112,6 +1127,11 @@
             "directory": false
         },
         {
+            "id": "file:a8e05ef1:1a0000:227fb1",
+            "path": "Models/Woodland/Oaks/Materials/Large_oak_tree_002_Impostor.material",
+            "directory": false
+        },
+        {
             "id": "asset:70bcc5ca-d5b1-4a4b-93eb-11e3c82dbd82",
             "path": "Models/mmd/Mococo/Mococo Prefab/Materials/Eye white 32.material",
             "directory": false
@@ -1140,11 +1160,6 @@
             "id": "file:a8e05ef1:1370000:68df1",
             "path": "Models/mmd/Mococo/Mococo Prefab/Materials",
             "directory": true
-        },
-        {
-            "id": "file:a8e05ef1:110000:29fee3",
-            "path": "Prefabs/Woodland/Oaks/Big_oak_tree_004_LOD0.prefab",
-            "directory": false
         },
         {
             "id": "file:a8e05ef1:370000:31e568",
@@ -1217,11 +1232,6 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:1a0000:29fef1",
-            "path": "Prefabs/Woodland/Oaks/Large_oak_tree_001_LOD0.prefab",
-            "directory": false
-        },
-        {
             "id": "asset:a85eca79-12c3-4a41-8559-0e2519eb4101",
             "path": "Models/mmd/Mococo/Mococo Prefab/Meshes/Iris 16.morph",
             "directory": false
@@ -1259,6 +1269,11 @@
         {
             "id": "file:a8e05ef1:140000:31d2ef",
             "path": "Models/mmd/Mococo/Mococo Prefab/dancing_mmd.json",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:150000:257176",
+            "path": "Prefabs/Woodland/Oaks/Small_oak_tree_003_LOD0.prefab",
             "directory": false
         },
         {
@@ -1317,11 +1332,6 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:60000:29ff15",
-            "path": "Prefabs/Woodland/Oaks/Large_oak_tree_004_LOD2.prefab",
-            "directory": false
-        },
-        {
             "id": "asset:24a17c4f-8e24-4b3d-950b-c0e8414cf099",
             "path": "Models/mmd/Mococo/Mococo Prefab/Materials/Choker 4.material",
             "directory": false
@@ -1337,8 +1347,13 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:c00000:6cb78",
-            "path": "Models/mmd/Mococo/Mococo Prefab/Materials/Choker spikes 6.material",
+            "id": "file:a8e05ef1:110000:31bd27",
+            "path": "Models/mmd/Mococo/Mococo Prefab/Meshes/Head 29.morph",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:120000:25715b",
+            "path": "Prefabs/Woodland/Oaks/Sapling_oak_tree_002_LOD2.prefab",
             "directory": false
         },
         {
@@ -1347,8 +1362,8 @@
             "directory": true
         },
         {
-            "id": "file:a8e05ef1:110000:31bd27",
-            "path": "Models/mmd/Mococo/Mococo Prefab/Meshes/Head 29.morph",
+            "id": "file:a8e05ef1:c00000:6cb78",
+            "path": "Models/mmd/Mococo/Mococo Prefab/Materials/Choker spikes 6.material",
             "directory": false
         },
         {
@@ -1359,11 +1374,6 @@
         {
             "id": "asset:de32d0cd-a5df-4827-ad40-7b01351af7f9",
             "path": "Models/mmd/Mococo/Mococo Prefab/Materials/Choker spikes 6.material",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:70000:12e5af",
-            "path": "Textures/Sprites/Slime/slime_idle.spritesheet",
             "directory": false
         },
         {
@@ -1432,23 +1442,28 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:190000:29facb",
-            "path": "Models/Woodland/Oaks/Meshes/Large_oak_tree_002_LOD0 16_2.mesh",
-            "directory": false
-        },
-        {
             "id": "asset:cbf8cf62-864b-4d57-b4cd-e302b9e7ed45",
             "path": "Models/mmd/Mococo/Mococo Prefab/Materials/Eye highlight 10.material",
             "directory": false
         },
         {
-            "id": "asset:f9d058a3-d243-4daf-9b10-07d8318e3f6b",
-            "path": "Models/Woodland/Oaks/Meshes/Big_oak_tree_004_LOD2 12_1.mesh",
+            "id": "file:a8e05ef1:190000:29facb",
+            "path": "Models/Woodland/Oaks/Meshes/Large_oak_tree_002_LOD0 16_2.mesh",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:130000:227fdc",
+            "path": "Models/Woodland/Oaks/Meshes/Large_oak_tree_001_Impostor.mesh",
             "directory": false
         },
         {
             "id": "file:a8e05ef1:190000:29faa9",
             "path": "Models/Woodland/Oaks/Meshes/Large_oak_tree_001_LOD1 14_2.mesh",
+            "directory": false
+        },
+        {
+            "id": "asset:f9d058a3-d243-4daf-9b10-07d8318e3f6b",
+            "path": "Models/Woodland/Oaks/Meshes/Big_oak_tree_004_LOD2 12_1.mesh",
             "directory": false
         },
         {
@@ -1462,13 +1477,13 @@
             "directory": false
         },
         {
-            "id": "asset:8dbdf0c0-5f95-4b2c-b988-308f044badb4",
-            "path": "Models/mmd/Mococo/Mococo Prefab/Materials/Eye line 28.material",
+            "id": "file:a8e05ef1:e0000:30b4ba",
+            "path": "Scripts/TerrainGen/TerrainStreamingCameraDriver.cpp",
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:e0000:30b4ba",
-            "path": "Scripts/TerrainGen/TerrainStreamingCameraDriver.cpp",
+            "id": "asset:8dbdf0c0-5f95-4b2c-b988-308f044badb4",
+            "path": "Models/mmd/Mococo/Mococo Prefab/Materials/Eye line 28.material",
             "directory": false
         },
         {
@@ -1522,6 +1537,11 @@
             "directory": false
         },
         {
+            "id": "file:a8e05ef1:70000:12e59b",
+            "path": "Textures/PBRDemo",
+            "directory": true
+        },
+        {
             "id": "file:a8e05ef1:580000:f856a",
             "path": "Models/mmd/Mococo/Mococo Prefab/Materials/Facials extra 40.material",
             "directory": false
@@ -1530,11 +1550,6 @@
             "id": "file:a8e05ef1:150000:29fd39",
             "path": "Models/Woodland/Oaks/Meshes/Small_oak_tree_002_LOD0 46_2.mesh",
             "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:70000:12e59b",
-            "path": "Textures/PBRDemo",
-            "directory": true
         },
         {
             "id": "asset:5007cd34-d460-4bcd-aca1-756ed30ebf62",
@@ -1552,13 +1567,8 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:180000:29fa24",
-            "path": "Models/Woodland/Grass/Textures",
-            "directory": true
-        },
-        {
-            "id": "file:a8e05ef1:c0000:30b4bc",
-            "path": "Scripts/TerrainGen/TerrainStreamingCameraDriver.h",
+            "id": "file:a8e05ef1:200000:10622d",
+            "path": "Models/mmd/Mococo/Mococo Prefab/Materials/Hair Accessory 12.material",
             "directory": false
         },
         {
@@ -1567,8 +1577,18 @@
             "directory": true
         },
         {
-            "id": "file:a8e05ef1:200000:10622d",
-            "path": "Models/mmd/Mococo/Mococo Prefab/Materials/Hair Accessory 12.material",
+            "id": "file:a8e05ef1:c0000:30b4bc",
+            "path": "Scripts/TerrainGen/TerrainStreamingCameraDriver.h",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:180000:29fa24",
+            "path": "Models/Woodland/Grass/Textures",
+            "directory": true
+        },
+        {
+            "id": "file:a8e05ef1:190000:227f9d",
+            "path": "Models/Woodland/Oaks/Materials/Big_oak_tree_004_Impostor.material",
             "directory": false
         },
         {
@@ -1592,16 +1612,6 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:50000:29fa7c",
-            "path": "Models/Woodland/Oaks/Meshes/Big_oak_tree_004_LOD2 12_2.mesh",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:280000:29ff22",
-            "path": "Prefabs/Woodland/Oaks/Medium_oak_tree_002_LOD1.prefab",
-            "directory": false
-        },
-        {
             "id": "file:a8e05ef1:b00000:10c768",
             "path": "Models/mmd/Mococo/Mococo Prefab/Materials/HairTailEar 14.material",
             "directory": false
@@ -1612,13 +1622,13 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:150000:29fdf5",
-            "path": "Other/oak_trees_pack_17var_lods_seasons_gameready/textures/Large_oak_tree_001_Billboard_Mat_baseColor.png",
+            "id": "file:a8e05ef1:50000:29fa7c",
+            "path": "Models/Woodland/Oaks/Meshes/Big_oak_tree_004_LOD2 12_2.mesh",
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:240000:2a000a",
-            "path": "Prefabs/Woodland/Oaks/Small_oak_tree_001_LOD0.prefab",
+            "id": "file:a8e05ef1:150000:29fdf5",
+            "path": "Other/oak_trees_pack_17var_lods_seasons_gameready/textures/Large_oak_tree_001_Billboard_Mat_baseColor.png",
             "directory": false
         },
         {
@@ -1644,11 +1654,6 @@
         {
             "id": "file:a8e05ef1:c0000:30b4b2",
             "path": "Scripts/TerrainGen/PerlinNoiseField.h",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:f0000:12e5f1",
-            "path": "Textures/Calibration/direction.png",
             "directory": false
         },
         {
@@ -1717,6 +1722,11 @@
             "directory": false
         },
         {
+            "id": "file:a8e05ef1:130000:257178",
+            "path": "Prefabs/Woodland/Oaks/Small_oak_tree_003_LOD2.prefab",
+            "directory": false
+        },
+        {
             "id": "file:a8e05ef1:290000:12e6bc",
             "path": "Models/mmd/Mococo/Mococo Prefab/Materials/Jacket 19.material",
             "directory": false
@@ -1732,8 +1742,18 @@
             "directory": false
         },
         {
+            "id": "file:a8e05ef1:1d0000:227fcb",
+            "path": "Models/Woodland/Oaks/Materials/Medium_oak_tree_003_Impostor.material",
+            "directory": false
+        },
+        {
             "id": "asset:cd41ebba-9839-4320-93e4-e1051d884186",
             "path": "Models/mmd/Mococo/Mococo Prefab/Meshes/Claws 7.mesh",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:110000:257179",
+            "path": "Scenes/terrain/oak_meadow.scene",
             "directory": false
         },
         {
@@ -1757,13 +1777,13 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:b0000:30b4c0",
-            "path": "Scripts/Utilities/Rotate.cpp",
+            "id": "file:a8e05ef1:2f0000:29f8af",
+            "path": "Models/mmd/Mococo/Mococo Prefab/Materials/Jacket Fur 17.material",
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:2f0000:29f8af",
-            "path": "Models/mmd/Mococo/Mococo Prefab/Materials/Jacket Fur 17.material",
+            "id": "file:a8e05ef1:120000:257144",
+            "path": "Prefabs/Woodland/Oaks/Medium_oak_tree_002_LOD2.prefab",
             "directory": false
         },
         {
@@ -1892,13 +1912,8 @@
             "directory": false
         },
         {
-            "id": "asset:70aed8ef-1d14-4dc4-b4a3-f647324e973e",
-            "path": "Models/Woodland/Oaks/Meshes/Medium_oak_tree_003_LOD2 33_1.mesh",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:2c0000:29fff3",
-            "path": "Prefabs/Woodland/Oaks/Sapling_oak_tree_003_LOD0.prefab",
+            "id": "file:a8e05ef1:170000:227fee",
+            "path": "Prefabs/Woodland/Oaks/Big_oak_tree_001_LOD0.prefab",
             "directory": false
         },
         {
@@ -1912,13 +1927,13 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:120000:30d1cd",
-            "path": "Models/mmd/Mococo/Mococo Prefab/Materials/Shoes 22.material",
+            "id": "asset:70aed8ef-1d14-4dc4-b4a3-f647324e973e",
+            "path": "Models/Woodland/Oaks/Meshes/Medium_oak_tree_003_LOD2 33_1.mesh",
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:70000:29ffe3",
-            "path": "Prefabs/Woodland/Oaks/Sapling_oak_tree_002_LOD0.prefab",
+            "id": "file:a8e05ef1:190000:29fa35",
+            "path": "Models/Woodland/Oaks/Meshes/Big_oak_tree_001_LOD0 1_2.mesh",
             "directory": false
         },
         {
@@ -1927,8 +1942,8 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:190000:29fa35",
-            "path": "Models/Woodland/Oaks/Meshes/Big_oak_tree_001_LOD0 1_2.mesh",
+            "id": "file:a8e05ef1:120000:30d1cd",
+            "path": "Models/mmd/Mococo/Mococo Prefab/Materials/Shoes 22.material",
             "directory": false
         },
         {
@@ -2037,11 +2052,6 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:150000:29fed2",
-            "path": "Prefabs/Woodland/Oaks/Big_oak_tree_001_LOD2.prefab",
-            "directory": false
-        },
-        {
             "id": "asset:ed42a025-15da-47fa-b295-2cd7e20e53eb",
             "path": "Models/mmd/Mococo/Mococo Prefab/Meshes/Headphones 15.mesh",
             "directory": false
@@ -2054,6 +2064,11 @@
         {
             "id": "file:a8e05ef1:3b0000:3108b7",
             "path": "Models/mmd/Mococo/Mococo Prefab/Meshes/Belt metal 3.mesh",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:130000:227ff7",
+            "path": "Prefabs/Woodland/Oaks/Big_oak_tree_003_LOD0.prefab",
             "directory": false
         },
         {
@@ -2072,8 +2087,18 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:200000:31c886",
-            "path": "Models/mmd/Mococo/Mococo Prefab/Meshes/Outline Pink 2.mesh",
+            "id": "asset:4103e801-969e-4eb0-8c5e-a2fde67fbbe3",
+            "path": "Models/mmd/Mococo/Mococo Prefab/Meshes/Body 25.morph",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:120000:257123",
+            "path": "Prefabs/Woodland/Oaks/Large_oak_tree_004_LOD2.prefab",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:1d0000:227f72",
+            "path": "Models/Woodland/Oaks/Materials/Bark_Mat 1.material",
             "directory": false
         },
         {
@@ -2082,13 +2107,18 @@
             "directory": false
         },
         {
-            "id": "asset:4103e801-969e-4eb0-8c5e-a2fde67fbbe3",
-            "path": "Models/mmd/Mococo/Mococo Prefab/Meshes/Body 25.morph",
+            "id": "file:a8e05ef1:200000:31c886",
+            "path": "Models/mmd/Mococo/Mococo Prefab/Meshes/Outline Pink 2.mesh",
             "directory": false
         },
         {
             "id": "file:a8e05ef1:180000:29fa7e",
             "path": "Models/Woodland/Oaks/Meshes/Large_oak_tree_001_LOD0 13_1.mesh",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:120000:257163",
+            "path": "Prefabs/Woodland/Oaks/Sapling_oak_tree_003_LOD2.prefab",
             "directory": false
         },
         {
@@ -2134,6 +2164,11 @@
         {
             "id": "asset:64ff79d8-dc66-4abd-90cc-62432f1ce202",
             "path": "Models/mmd/Mococo/Mococo Prefab/Meshes/Choker metal 5.mesh",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:1a0000:227fe9",
+            "path": "Models/Woodland/Oaks/Meshes/Small_oak_tree_002_Impostor.mesh",
             "directory": false
         },
         {
@@ -2252,6 +2287,11 @@
             "directory": false
         },
         {
+            "id": "file:a8e05ef1:170000:25711b",
+            "path": "Prefabs/Woodland/Oaks/Large_oak_tree_003_LOD2.prefab",
+            "directory": false
+        },
+        {
             "id": "file:a8e05ef1:110000:31bca2",
             "path": "Models/mmd/Mococo/Mococo Prefab/Meshes/Eyebrows 11.morph",
             "directory": false
@@ -2307,6 +2347,11 @@
             "directory": false
         },
         {
+            "id": "file:a8e05ef1:170000:257107",
+            "path": "Prefabs/Woodland/Oaks/Large_oak_tree_002_Impostor.prefab",
+            "directory": false
+        },
+        {
             "id": "asset:278a08f1-d9bf-407d-b073-5f787b653052",
             "path": "Models/Woodland/Oaks/Meshes/Large_oak_tree_003_LOD0 19_2.mesh",
             "directory": false
@@ -2314,6 +2359,11 @@
         {
             "id": "file:a8e05ef1:160000:31bcba",
             "path": "Models/mmd/Mococo/Mococo Prefab/Meshes/Facials extra 40.mesh",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:440000:227fd6",
+            "path": "Models/Woodland/Oaks/Materials/Small_oak_tree_003_Impostor.material",
             "directory": false
         },
         {
@@ -2354,11 +2404,6 @@
         {
             "id": "asset:ce12afbf-7c0d-40b2-8a91-1be0b438ef54",
             "path": "Models/mmd/Mococo/Mococo Prefab/Meshes/Hair band 13.mesh",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:c0000:30b4b8",
-            "path": "Scripts/TerrainGen/TerrainPatch.cpp",
             "directory": false
         },
         {
@@ -2417,11 +2462,6 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:1b0000:29fed7",
-            "path": "Prefabs/Woodland/Oaks/Big_oak_tree_002_LOD2.prefab",
-            "directory": false
-        },
-        {
             "id": "file:a8e05ef1:d0000:31ad47",
             "path": "Models/mmd/sad cat dance/praying.vmd",
             "directory": false
@@ -2472,24 +2512,29 @@
             "directory": false
         },
         {
+            "id": "file:a8e05ef1:60000:12e5c0",
+            "path": "Textures/Sprites/Slime/slime_swallow.png",
+            "directory": false
+        },
+        {
             "id": "file:a8e05ef1:570000:31c409",
             "path": "Models/mmd/Mococo/Mococo Prefab/Meshes/Jacket triangles 18.mesh",
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:60000:12e5c0",
-            "path": "Textures/Sprites/Slime/slime_swallow.png",
+            "id": "file:a8e05ef1:1d0000:227fa3",
+            "path": "Models/Woodland/Oaks/Materials/Large_oak_tree_001_Impostor.material",
+            "directory": false
+        },
+        {
+            "id": "asset:9ceff3f1-9c8c-477c-84c6-3a7c6878b1fe",
+            "path": "Models/Woodland/Oaks/Meshes/Large_oak_tree_002_LOD1 17_2.mesh",
             "directory": false
         },
         {
             "id": "file:a8e05ef1:e40000:a343",
             "path": "Models/mmd/sad cat dance",
             "directory": true
-        },
-        {
-            "id": "asset:9ceff3f1-9c8c-477c-84c6-3a7c6878b1fe",
-            "path": "Models/Woodland/Oaks/Meshes/Large_oak_tree_002_LOD1 17_2.mesh",
-            "directory": false
         },
         {
             "id": "file:a8e05ef1:650000:e844d",
@@ -2504,11 +2549,6 @@
         {
             "id": "file:a8e05ef1:140000:29feaa",
             "path": "Prefabs/Woodland/Bushes/tall_bush_3.prefab",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:60000:2a001a",
-            "path": "Prefabs/Woodland/Oaks/Small_oak_tree_001_LOD2.prefab",
             "directory": false
         },
         {
@@ -2567,13 +2607,13 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:60000:29ff78",
-            "path": "Prefabs/Woodland/Oaks/Medium_oak_tree_003_LOD0.prefab",
+            "id": "file:a8e05ef1:160000:31cfd0",
+            "path": "Models/mmd/Mococo/Mococo Prefab/Meshes/Outline outfit 37.mesh",
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:160000:31cfd0",
-            "path": "Models/mmd/Mococo/Mococo Prefab/Meshes/Outline outfit 37.mesh",
+            "id": "file:a8e05ef1:1c0000:227fe8",
+            "path": "Models/Woodland/Oaks/Meshes/Small_oak_tree_001_Impostor.mesh",
             "directory": false
         },
         {
@@ -2642,6 +2682,11 @@
             "directory": false
         },
         {
+            "id": "file:a8e05ef1:190000:227fb2",
+            "path": "Models/Woodland/Oaks/Materials/Large_oak_tree_003_Impostor.material",
+            "directory": false
+        },
+        {
             "id": "file:a8e05ef1:130000:31d2e0",
             "path": "Models/mmd/Mococo/Mococo Prefab/Mococo Abyssgard_mixamo_com_1.anim",
             "directory": false
@@ -2677,18 +2722,8 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:160000:29ffe4",
-            "path": "Prefabs/Woodland/Oaks/Sapling_oak_tree_002_LOD1.prefab",
-            "directory": false
-        },
-        {
             "id": "asset:322e8ab1-a1bb-4f76-97ca-d8e9abaca652",
             "path": "Models/mmd/Mococo/Mococo Prefab/Meshes/Teeth 24.morph",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:200000:29ff06",
-            "path": "Prefabs/Woodland/Oaks/Large_oak_tree_003_LOD0.prefab",
             "directory": false
         },
         {
@@ -2704,11 +2739,6 @@
         {
             "id": "file:a8e05ef1:170000:31d06f",
             "path": "Models/mmd/Mococo/Mococo Prefab/Meshes/Tongue 31.morph",
-            "directory": false
-        },
-        {
-            "id": "asset:d77b535c-c677-4bec-abe2-113be74b70fc",
-            "path": "Models/Woodland/Oaks/Meshes/Large_oak_tree_001_LOD2 15_1.mesh",
             "directory": false
         },
         {
@@ -2742,8 +2772,8 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:120000:31d288",
-            "path": "Models/mmd/Mococo/Mococo Prefab/Mococo Abyssgard.low.prefab",
+            "id": "file:a8e05ef1:130000:29fe6c",
+            "path": "Other/oak_trees_pack_17var_lods_seasons_gameready/textures/Small_oak_tree__002_Billboard_Mat_metallicRoughness.png",
             "directory": false
         },
         {
@@ -2752,8 +2782,8 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:130000:29fe6c",
-            "path": "Other/oak_trees_pack_17var_lods_seasons_gameready/textures/Small_oak_tree__002_Billboard_Mat_metallicRoughness.png",
+            "id": "file:a8e05ef1:120000:31d288",
+            "path": "Models/mmd/Mococo/Mococo Prefab/Mococo Abyssgard.low.prefab",
             "directory": false
         },
         {
@@ -2769,6 +2799,11 @@
         {
             "id": "asset:84f88ecf-5bae-40df-8ed6-bc6d5a8ebaf5",
             "path": "Models/mmd/Mococo/Mococo Prefab/Mococo Abyssgard.low.prefab",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:130000:257101",
+            "path": "Prefabs/Woodland/Oaks/Large_oak_tree_001_LOD1.prefab",
             "directory": false
         },
         {
@@ -2807,8 +2842,18 @@
             "directory": false
         },
         {
+            "id": "file:a8e05ef1:140000:257173",
+            "path": "Prefabs/Woodland/Oaks/Small_oak_tree_003_Impostor.prefab",
+            "directory": false
+        },
+        {
             "id": "file:a8e05ef1:280000:31e593",
             "path": "Models/mmd/Mococo/Textures/Outfit1_Acc.png",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:120000:25713c",
+            "path": "Prefabs/Woodland/Oaks/Medium_oak_tree_002_LOD1.prefab",
             "directory": false
         },
         {
@@ -2887,23 +2932,13 @@
             "directory": false
         },
         {
+            "id": "file:a8e05ef1:150000:24fde7",
+            "path": "Prefabs/Woodland/Oaks/Large_oak_tree_001_LOD0.prefab",
+            "directory": false
+        },
+        {
             "id": "asset:02f94481-5c2b-49e4-8512-f7a4f47e8592",
             "path": "Models/mmd/sad cat dance/dancing VMD/Facial.vmdtrack",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:180000:29fa2b",
-            "path": "Models/Woodland/Oaks/Materials/Bark_Mat 1.material",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:120000:324812",
-            "path": "Models/mmd/sad cat dance/dancing VMD/Properties.vmdtrack",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:c0000:30b4b5",
-            "path": "Scripts/TerrainGen/TerrainChunk.h",
             "directory": false
         },
         {
@@ -2919,6 +2954,16 @@
         {
             "id": "asset:e7f97a0c-530f-4414-afd5-9fcbb1c6bb4c",
             "path": "Models/Woodland/Oaks/Meshes/Medium_oak_tree_002_LOD0 28_1.mesh",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:c0000:30b4b5",
+            "path": "Scripts/TerrainGen/TerrainChunk.h",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:120000:324812",
+            "path": "Models/mmd/sad cat dance/dancing VMD/Properties.vmdtrack",
             "directory": false
         },
         {
@@ -2954,11 +2999,6 @@
         {
             "id": "file:a8e05ef1:c0000:3078b3",
             "path": "Models/mmd/sad cat dance/headband with cat ears BY »½α¬ία/headband with cat ears.png",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:140000:31d2fd",
-            "path": "TerrainData/TerrainPerformance/world.heights",
             "directory": false
         },
         {
@@ -3017,23 +3057,18 @@
             "directory": true
         },
         {
-            "id": "file:a8e05ef1:110000:258550",
-            "path": "Scripts/TerrainGen/TerrainGen.cpp",
-            "directory": false
-        },
-        {
             "id": "file:a8e05ef1:220000:e8d68",
             "path": "Models/Woodland/Grass/Grass.prefab",
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:1270000:e1db3",
-            "path": "Models/Woodland/ATTRIBUTION.md",
+            "id": "file:a8e05ef1:60000:12e59e",
+            "path": "Textures/PBRDemo/CopperSlate_Height.png",
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:60000:12e59e",
-            "path": "Textures/PBRDemo/CopperSlate_Height.png",
+            "id": "file:a8e05ef1:1270000:e1db3",
+            "path": "Models/Woodland/ATTRIBUTION.md",
             "directory": false
         },
         {
@@ -3054,6 +3089,11 @@
         {
             "id": "asset:a71c1130-8905-4bcb-b323-ee48f3632072",
             "path": "Models/Woodland/Bushes/Materials/phong3 1.material",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:1e0000:227f81",
+            "path": "Models/Woodland/Oaks/Materials/Big_oak_tree_002_Impostor.material",
             "directory": false
         },
         {
@@ -3097,18 +3137,23 @@
             "directory": false
         },
         {
+            "id": "file:a8e05ef1:120000:257134",
+            "path": "Prefabs/Woodland/Oaks/Medium_oak_tree_001_LOD2.prefab",
+            "directory": false
+        },
+        {
             "id": "asset:d097906a-5d7b-4f26-9cba-074debaff9b5",
             "path": "Models/Woodland/Bushes/Meshes/Medium_bush_3 6_1.mesh",
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:1590000:113c3e",
-            "path": "Scenes/Rendering/subsurface_scattering_demo.scene",
+            "id": "file:a8e05ef1:60000:12e5a7",
+            "path": "Textures/Skyboxes/editor-default-sky.png",
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:60000:12e5a7",
-            "path": "Textures/Skyboxes/editor-default-sky.png",
+            "id": "file:a8e05ef1:1590000:113c3e",
+            "path": "Scenes/Rendering/subsurface_scattering_demo.scene",
             "directory": false
         },
         {
@@ -3137,8 +3182,8 @@
             "directory": false
         },
         {
-            "id": "asset:ee16fd15-2ac7-4999-9448-c5f7547ae8c9",
-            "path": "Models/Woodland/Oaks/Meshes/Large_oak_tree_002_LOD0 16_1.mesh",
+            "id": "file:a8e05ef1:470000:e6c81",
+            "path": "Models/Woodland/Bushes/Meshes/tall_bush_4 9_1.mesh",
             "directory": false
         },
         {
@@ -3147,14 +3192,19 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:470000:e6c81",
-            "path": "Models/Woodland/Bushes/Meshes/tall_bush_4 9_1.mesh",
+            "id": "asset:ee16fd15-2ac7-4999-9448-c5f7547ae8c9",
+            "path": "Models/Woodland/Oaks/Meshes/Large_oak_tree_002_LOD0 16_1.mesh",
             "directory": false
         },
         {
             "id": "file:a8e05ef1:290000:e6ddb",
             "path": "Models/Woodland/Bushes/Textures",
             "directory": true
+        },
+        {
+            "id": "file:a8e05ef1:23b0000:4c4f8",
+            "path": "Shaders/Foliage.hlsl",
+            "directory": false
         },
         {
             "id": "file:a8e05ef1:830000:e6e07",
@@ -3164,16 +3214,6 @@
         {
             "id": "file:a8e05ef1:a60000:60593",
             "path": "Prefabs/Fox/Fox.prefab",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:23b0000:4c4f8",
-            "path": "Shaders/Foliage.hlsl",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:150000:29fed4",
-            "path": "Prefabs/Woodland/Oaks/Big_oak_tree_002_LOD1.prefab",
             "directory": false
         },
         {
@@ -3222,11 +3262,6 @@
             "directory": true
         },
         {
-            "id": "file:a8e05ef1:60000:29ffc2",
-            "path": "Prefabs/Woodland/Oaks/Sapling_oak_tree_001_LOD2.prefab",
-            "directory": false
-        },
-        {
             "id": "file:a8e05ef1:180000:29fa50",
             "path": "Models/Woodland/Oaks/Meshes/Big_oak_tree_002_LOD1 5_2.mesh",
             "directory": false
@@ -3252,13 +3287,13 @@
             "directory": false
         },
         {
-            "id": "asset:16b7513e-ebdb-4f8f-979c-139101e8bbdd",
-            "path": "Models/Woodland/Grass/Meshes/MeadowPatch_02_LOD2 6_1.mesh",
+            "id": "file:a8e05ef1:140000:29fcd5",
+            "path": "Models/Woodland/Oaks/Meshes/Sapling_oak_tree_003_LOD0 40_1.mesh",
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:210000:3f8b2",
-            "path": "Models/Woodland/Oaks/Meshes/Large_oak_tree_002_LOD1 17_2.mesh",
+            "id": "file:a8e05ef1:260000:29fe68",
+            "path": "Other/oak_trees_pack_17var_lods_seasons_gameready/textures/Small_oak_tree__002_Billboard_Mat_baseColor.png",
             "directory": false
         },
         {
@@ -3267,18 +3302,13 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:60000:29fed8",
-            "path": "Prefabs/Woodland/Oaks/Big_oak_tree_003_LOD0.prefab",
+            "id": "file:a8e05ef1:210000:3f8b2",
+            "path": "Models/Woodland/Oaks/Meshes/Large_oak_tree_002_LOD1 17_2.mesh",
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:140000:29fcd5",
-            "path": "Models/Woodland/Oaks/Meshes/Sapling_oak_tree_003_LOD0 40_1.mesh",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:260000:29fe68",
-            "path": "Other/oak_trees_pack_17var_lods_seasons_gameready/textures/Small_oak_tree__002_Billboard_Mat_baseColor.png",
+            "id": "asset:16b7513e-ebdb-4f8f-979c-139101e8bbdd",
+            "path": "Models/Woodland/Grass/Meshes/MeadowPatch_02_LOD2 6_1.mesh",
             "directory": false
         },
         {
@@ -3294,6 +3324,16 @@
         {
             "id": "file:a8e05ef1:190000:29fa5e",
             "path": "Models/Woodland/Oaks/Meshes/Big_oak_tree_003_LOD0 7_1.mesh",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:130000:22fd02",
+            "path": "Prefabs/Woodland/Oaks/Big_oak_tree_004_Impostor.prefab",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:120000:257104",
+            "path": "Prefabs/Woodland/Oaks/Large_oak_tree_001_LOD2.prefab",
             "directory": false
         },
         {
@@ -3327,13 +3367,13 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:150000:29fde6",
-            "path": "Other/oak_trees_pack_17var_lods_seasons_gameready/textures/Cluster_Mat_baseColor.png",
+            "id": "file:a8e05ef1:2c0000:257146",
+            "path": "Prefabs/Woodland/Oaks/Medium_oak_tree_003_Impostor.prefab",
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:140000:29fed3",
-            "path": "Prefabs/Woodland/Oaks/Big_oak_tree_002_LOD0.prefab",
+            "id": "file:a8e05ef1:150000:29fde6",
+            "path": "Other/oak_trees_pack_17var_lods_seasons_gameready/textures/Cluster_Mat_baseColor.png",
             "directory": false
         },
         {
@@ -3357,11 +3397,6 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:170000:2a0052",
-            "path": "Prefabs/Woodland/Oaks/Small_oak_tree_003_LOD1.prefab",
-            "directory": false
-        },
-        {
             "id": "file:a8e05ef1:180000:29fa29",
             "path": "Models/Woodland/Oaks",
             "directory": true
@@ -3369,6 +3404,11 @@
         {
             "id": "asset:387a646a-f02a-4950-81cc-961f76c7ff11",
             "path": "Models/Woodland/Oaks/Materials/Bark_Mat 1.material",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:1e0000:227f82",
+            "path": "Models/Woodland/Oaks/Materials/Big_oak_tree_003_Impostor.material",
             "directory": false
         },
         {
@@ -3392,14 +3432,69 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:190000:29fa33",
-            "path": "Models/Woodland/Oaks/Meshes/Big_oak_tree_001_LOD0 1_1.mesh",
+            "id": "file:a8e05ef1:200000:227fbc",
+            "path": "Models/Woodland/Oaks/Materials/Large_oak_tree_004_Impostor.material",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:170000:227fbe",
+            "path": "Models/Woodland/Oaks/Materials/Medium_oak_tree_001_Impostor.material",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:1f0000:227fbf",
+            "path": "Models/Woodland/Oaks/Materials/Medium_oak_tree_002_Impostor.material",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:170000:227fcc",
+            "path": "Models/Woodland/Oaks/Materials/Sapling_oak_tree_001_Impostor.material",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:170000:227fcf",
+            "path": "Models/Woodland/Oaks/Materials/Sapling_oak_tree_002_Impostor.material",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:1f00000:719cc",
+            "path": "Textures/Terrain/generate_terrain_textures.py",
+            "directory": false
+        },
+        {
+            "id": "asset:537bc2f3-67dc-492c-b381-61ea189bea29",
+            "path": "Models/Woodland/Oaks/Meshes/Small_oak_tree_001_LOD0 43_1.mesh",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:1a0000:227fd1",
+            "path": "Models/Woodland/Oaks/Materials/Sapling_oak_tree_003_Impostor.material",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:120000:227fd4",
+            "path": "Models/Woodland/Oaks/Materials/Small_oak_tree_001_Impostor.material",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:140000:227fd5",
+            "path": "Models/Woodland/Oaks/Materials/Small_oak_tree_002_Impostor.material",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:150000:227fd7",
+            "path": "Models/Woodland/Oaks/Meshes/Big_oak_tree_001_Impostor.mesh",
             "directory": false
         },
         {
             "id": "file:a8e05ef1:1b70000:6fc6e",
             "path": "Scripts/TerrainPerformance",
             "directory": true
+        },
+        {
+            "id": "file:a8e05ef1:190000:29fa33",
+            "path": "Models/Woodland/Oaks/Meshes/Big_oak_tree_001_LOD0 1_1.mesh",
+            "directory": false
         },
         {
             "id": "asset:5cd41964-4e8e-4f69-a636-97b22a1895ab",
@@ -3477,6 +3572,11 @@
             "directory": false
         },
         {
+            "id": "file:a8e05ef1:1d0000:227fd9",
+            "path": "Models/Woodland/Oaks/Meshes/Big_oak_tree_003_Impostor.mesh",
+            "directory": false
+        },
+        {
             "id": "asset:6a63a553-a1e2-41f6-ab0c-7efc4dfda889",
             "path": "Models/Woodland/Oaks/Meshes/Big_oak_tree_003_LOD0 7_2.mesh",
             "directory": false
@@ -3489,6 +3589,16 @@
         {
             "id": "asset:9afc9d96-8c46-4c76-bfd1-d2326449d2cc",
             "path": "Models/Woodland/Oaks/Meshes/Big_oak_tree_003_LOD2 9_1.mesh",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:150000:227fe5",
+            "path": "Models/Woodland/Oaks/Meshes/Sapling_oak_tree_001_Impostor.mesh",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:1d0000:227fda",
+            "path": "Models/Woodland/Oaks/Meshes/Big_oak_tree_004_Impostor.mesh",
             "directory": false
         },
         {
@@ -3512,13 +3622,13 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:50000:2a0186",
-            "path": "Scenes/Spatial/three_room_portal_stack_loop.scene",
+            "id": "file:a8e05ef1:120000:257148",
+            "path": "Prefabs/Woodland/Oaks/Medium_oak_tree_003_LOD0.prefab",
             "directory": false
         },
         {
-            "id": "asset:d29faa38-9f29-4e0f-913f-e55a6152b7d7",
-            "path": "Models/Woodland/Oaks/Meshes/Large_oak_tree_001_LOD2 15_2.mesh",
+            "id": "file:a8e05ef1:140000:257177",
+            "path": "Prefabs/Woodland/Oaks/Small_oak_tree_003_LOD1.prefab",
             "directory": false
         },
         {
@@ -3537,11 +3647,6 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:280000:2a003e",
-            "path": "Prefabs/Woodland/Oaks/Small_oak_tree_002_LOD2.prefab",
-            "directory": false
-        },
-        {
             "id": "asset:925c0faf-67ed-4cfc-841b-f5e64cf7e95f",
             "path": "Models/Woodland/Oaks/Meshes/Big_oak_tree_004_LOD0 10_1.mesh",
             "directory": false
@@ -3554,11 +3659,6 @@
         {
             "id": "asset:57596c8f-44fc-4dcd-a785-819f0664e46b",
             "path": "Models/Woodland/Oaks/Meshes/Big_oak_tree_004_LOD0 10_2.mesh",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:3f0000:10f388",
-            "path": "Textures/Calibration/checker.png",
             "directory": false
         },
         {
@@ -3582,8 +3682,8 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:50000:29fa7a",
-            "path": "Models/Woodland/Oaks/Meshes/Big_oak_tree_004_LOD2 12_1.mesh",
+            "id": "file:a8e05ef1:150000:29fdc9",
+            "path": "Other/oak_trees_pack_17var_lods_seasons_gameready/textures/Big_oak_tree__003_Billboard_Mat_baseColor.png",
             "directory": false
         },
         {
@@ -3592,8 +3692,8 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:150000:29fdc9",
-            "path": "Other/oak_trees_pack_17var_lods_seasons_gameready/textures/Big_oak_tree__003_Billboard_Mat_baseColor.png",
+            "id": "file:a8e05ef1:50000:29fa7a",
+            "path": "Models/Woodland/Oaks/Meshes/Big_oak_tree_004_LOD2 12_1.mesh",
             "directory": false
         },
         {
@@ -3605,11 +3705,6 @@
             "id": "file:a8e05ef1:190000:29faa7",
             "path": "Models/Woodland/Oaks/Meshes/Large_oak_tree_001_LOD1 14_1.mesh",
             "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:70000:12e5aa",
-            "path": "Textures/Sprites/Slime",
-            "directory": true
         },
         {
             "id": "asset:5e9ac447-4102-46cb-a283-15755efcd5de",
@@ -3624,6 +3719,26 @@
         {
             "id": "file:a8e05ef1:170000:29faab",
             "path": "Models/Woodland/Oaks/Meshes/Large_oak_tree_001_LOD2 15_1.mesh",
+            "directory": false
+        },
+        {
+            "id": "asset:d77b535c-c677-4bec-abe2-113be74b70fc",
+            "path": "Models/Woodland/Oaks/Meshes/Large_oak_tree_001_LOD2 15_1.mesh",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:50000:2a0186",
+            "path": "Scenes/Spatial/three_room_portal_stack_loop.scene",
+            "directory": false
+        },
+        {
+            "id": "asset:d29faa38-9f29-4e0f-913f-e55a6152b7d7",
+            "path": "Models/Woodland/Oaks/Meshes/Large_oak_tree_001_LOD2 15_2.mesh",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:150000:227fdd",
+            "path": "Models/Woodland/Oaks/Meshes/Large_oak_tree_002_Impostor.mesh",
             "directory": false
         },
         {
@@ -3669,6 +3784,16 @@
         {
             "id": "file:a8e05ef1:170000:29fb02",
             "path": "Models/Woodland/Oaks/Meshes/Large_oak_tree_002_LOD2 18_2.mesh",
+            "directory": false
+        },
+        {
+            "id": "asset:ff5f5b32-a0ef-46e7-b5a1-a05218f18e36",
+            "path": "Models/Woodland/Oaks/Meshes/Large_oak_tree_002_LOD2 18_2.mesh",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:150000:227fdf",
+            "path": "Models/Woodland/Oaks/Meshes/Large_oak_tree_003_Impostor.mesh",
             "directory": false
         },
         {
@@ -3722,6 +3847,11 @@
             "directory": false
         },
         {
+            "id": "file:a8e05ef1:c0000:30b4c1",
+            "path": "Scripts/Utilities/Rotate.h",
+            "directory": false
+        },
+        {
             "id": "asset:4c077d71-919e-4b72-8ac0-02fa2adf8924",
             "path": "Models/Woodland/Oaks/Meshes/Large_oak_tree_003_LOD2 21_2.mesh",
             "directory": false
@@ -3732,8 +3862,8 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:c0000:30b4c1",
-            "path": "Scripts/Utilities/Rotate.h",
+            "id": "file:a8e05ef1:190000:227fe0",
+            "path": "Models/Woodland/Oaks/Meshes/Large_oak_tree_004_Impostor.mesh",
             "directory": false
         },
         {
@@ -3772,24 +3902,9 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:200000:2a0037",
-            "path": "Prefabs/Woodland/Oaks/Small_oak_tree_002_LOD1.prefab",
-            "directory": false
-        },
-        {
             "id": "asset:32108579-8ff4-432d-84ee-12292e37032b",
             "path": "Models/Woodland/Oaks/Meshes/Large_oak_tree_004_LOD1 23_2.mesh",
             "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:180000:29fb19",
-            "path": "Models/Woodland/Oaks/Meshes/Large_oak_tree_004_LOD2 24_1.mesh",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:140000:31d2f9",
-            "path": "TerrainData/TerrainPerformance",
-            "directory": true
         },
         {
             "id": "file:a8e05ef1:140000:29fd0d",
@@ -3802,13 +3917,23 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:330000:4b935",
-            "path": "Shaders",
+            "id": "file:a8e05ef1:140000:31d2f9",
+            "path": "TerrainData/TerrainPerformance",
             "directory": true
+        },
+        {
+            "id": "file:a8e05ef1:180000:29fb19",
+            "path": "Models/Woodland/Oaks/Meshes/Large_oak_tree_004_LOD2 24_1.mesh",
+            "directory": false
         },
         {
             "id": "asset:2d3b379d-8fe8-4eeb-bdd6-a57939fbb9a1",
             "path": "Models/Woodland/Oaks/Meshes/Large_oak_tree_004_LOD2 24_1.mesh",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:1e0000:227fe2",
+            "path": "Models/Woodland/Oaks/Meshes/Medium_oak_tree_001_Impostor.mesh",
             "directory": false
         },
         {
@@ -3872,6 +3997,16 @@
             "directory": false
         },
         {
+            "id": "file:a8e05ef1:190000:29feac",
+            "path": "Prefabs/Woodland/Grass",
+            "directory": true
+        },
+        {
+            "id": "file:a8e05ef1:180000:227fe3",
+            "path": "Models/Woodland/Oaks/Meshes/Medium_oak_tree_002_Impostor.mesh",
+            "directory": false
+        },
+        {
             "id": "file:a8e05ef1:60000:29fb3d",
             "path": "Models/Woodland/Oaks/Meshes/Medium_oak_tree_002_LOD0 28_1.mesh",
             "directory": false
@@ -3882,13 +4017,13 @@
             "directory": false
         },
         {
-            "id": "asset:439d350a-8266-4c3a-8261-5f4f935e184e",
-            "path": "Models/Woodland/Oaks/Meshes/Medium_oak_tree_002_LOD0 28_2.mesh",
+            "id": "file:a8e05ef1:60000:12e5a3",
+            "path": "Textures/PBRDemo/CopperSlate_Normal.png",
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:60000:12e5a3",
-            "path": "Textures/PBRDemo/CopperSlate_Normal.png",
+            "id": "asset:439d350a-8266-4c3a-8261-5f4f935e184e",
+            "path": "Models/Woodland/Oaks/Meshes/Medium_oak_tree_002_LOD0 28_2.mesh",
             "directory": false
         },
         {
@@ -3922,6 +4057,11 @@
             "directory": false
         },
         {
+            "id": "file:a8e05ef1:150000:227fe4",
+            "path": "Models/Woodland/Oaks/Meshes/Medium_oak_tree_003_Impostor.mesh",
+            "directory": false
+        },
+        {
             "id": "file:a8e05ef1:290000:29fb80",
             "path": "Models/Woodland/Oaks/Meshes/Medium_oak_tree_003_LOD0 31_1.mesh",
             "directory": false
@@ -3929,11 +4069,6 @@
         {
             "id": "file:a8e05ef1:220000:29fb89",
             "path": "Models/Woodland/Oaks/Meshes/Medium_oak_tree_003_LOD0 31_2.mesh",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:410000:12f34f",
-            "path": "Shaders/WarmOverlay.hlsl",
             "directory": false
         },
         {
@@ -3982,13 +4117,13 @@
             "directory": false
         },
         {
-            "id": "asset:5e96c1f0-8284-452b-b756-13eb13f55ed6",
-            "path": "Models/Woodland/Oaks/Meshes/Sapling_oak_tree_001_LOD1 35_1.mesh",
+            "id": "file:a8e05ef1:e40000:4c9e1",
+            "path": "Textures/Terrain/dark_soil.png",
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:e40000:4c9e1",
-            "path": "Textures/Terrain/dark_soil.png",
+            "id": "asset:5e96c1f0-8284-452b-b756-13eb13f55ed6",
+            "path": "Models/Woodland/Oaks/Meshes/Sapling_oak_tree_001_LOD1 35_1.mesh",
             "directory": false
         },
         {
@@ -4002,8 +4137,18 @@
             "directory": false
         },
         {
+            "id": "file:a8e05ef1:160000:227fe6",
+            "path": "Models/Woodland/Oaks/Meshes/Sapling_oak_tree_002_Impostor.mesh",
+            "directory": false
+        },
+        {
             "id": "file:a8e05ef1:1a0000:29fbe4",
             "path": "Models/Woodland/Oaks/Meshes/Sapling_oak_tree_002_LOD0 37_1.mesh",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:300000:24fdde",
+            "path": "Prefabs/Woodland/Oaks/Large_oak_tree_001_Impostor.prefab",
             "directory": false
         },
         {
@@ -4017,11 +4162,6 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:60000:29ff7c",
-            "path": "Prefabs/Woodland/Oaks/Medium_oak_tree_003_LOD1.prefab",
-            "directory": false
-        },
-        {
             "id": "file:a8e05ef1:160000:29fc28",
             "path": "Models/Woodland/Oaks/Meshes/Sapling_oak_tree_002_LOD1 38_1.mesh",
             "directory": false
@@ -4029,6 +4169,11 @@
         {
             "id": "file:a8e05ef1:140000:29fc9d",
             "path": "Models/Woodland/Oaks/Meshes/Sapling_oak_tree_002_LOD2 39_2.mesh",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:3c0000:25714d",
+            "path": "Prefabs/Woodland/Oaks/Sapling_oak_tree_001_Impostor.prefab",
             "directory": false
         },
         {
@@ -4068,16 +4213,6 @@
         },
         {
             "id": "file:a8e05ef1:140000:29fd0f",
-            "path": "Models/Woodland/Oaks/Meshes/Small_oak_tree_001_LOD0 43_1.mesh",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:1f00000:719cc",
-            "path": "Textures/Terrain/generate_terrain_textures.py",
-            "directory": false
-        },
-        {
-            "id": "asset:537bc2f3-67dc-492c-b381-61ea189bea29",
             "path": "Models/Woodland/Oaks/Meshes/Small_oak_tree_001_LOD0 43_1.mesh",
             "directory": false
         },
@@ -4147,11 +4282,6 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:270000:29ff18",
-            "path": "Prefabs/Woodland/Oaks/Medium_oak_tree_001_LOD2.prefab",
-            "directory": false
-        },
-        {
             "id": "asset:762310e8-5292-4b82-8ec9-e372e92956ee",
             "path": "Models/Woodland/Oaks/Meshes/Small_oak_tree_002_LOD2 48_1.mesh",
             "directory": false
@@ -4172,6 +4302,11 @@
             "directory": false
         },
         {
+            "id": "file:a8e05ef1:200000:227fea",
+            "path": "Models/Woodland/Oaks/Meshes/Small_oak_tree_003_Impostor.mesh",
+            "directory": false
+        },
+        {
             "id": "file:a8e05ef1:140000:29fd54",
             "path": "Models/Woodland/Oaks/Meshes/Small_oak_tree_003_LOD0 49_1.mesh",
             "directory": false
@@ -4179,11 +4314,6 @@
         {
             "id": "file:a8e05ef1:50000:2a0094",
             "path": "Scenes/Showcases/animation_showcase.scene",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:130000:2a0050",
-            "path": "Prefabs/Woodland/Oaks/Small_oak_tree_003_LOD0.prefab",
             "directory": false
         },
         {
@@ -4214,11 +4344,6 @@
         {
             "id": "file:a8e05ef1:140000:29fd5c",
             "path": "Models/Woodland/Oaks/Meshes/Small_oak_tree_003_LOD1 50_2.mesh",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:180000:29fefe",
-            "path": "Prefabs/Woodland/Oaks/Large_oak_tree_002_LOD0.prefab",
             "directory": false
         },
         {
@@ -4272,6 +4397,11 @@
             "directory": false
         },
         {
+            "id": "file:a8e05ef1:170000:257171",
+            "path": "Prefabs/Woodland/Oaks/Small_oak_tree_002_LOD2.prefab",
+            "directory": false
+        },
+        {
             "id": "asset:739fa64b-b529-4a11-854c-b6b494835a5a",
             "path": "Models/Woodland/Oaks/Textures/Texture 6 6.png",
             "directory": false
@@ -4282,7 +4412,7 @@
             "directory": true
         },
         {
-            "id": "file:a8e05ef1:150000:29fd97",
+            "id": "file:a8e05ef1:200000:227feb",
             "path": "Models/Woodland/README.md",
             "directory": false
         },
@@ -4302,6 +4432,11 @@
             "directory": true
         },
         {
+            "id": "file:a8e05ef1:120000:257170",
+            "path": "Prefabs/Woodland/Oaks/Small_oak_tree_002_LOD1.prefab",
+            "directory": false
+        },
+        {
             "id": "file:a8e05ef1:150000:29fdbd",
             "path": "Other/oak_trees_pack_17var_lods_seasons_gameready/textures/Bark_Mat_baseColor.png",
             "directory": false
@@ -4314,6 +4449,11 @@
         {
             "id": "file:a8e05ef1:150000:29fdc1",
             "path": "Other/oak_trees_pack_17var_lods_seasons_gameready/textures/Big_oak_tree__001_Billboard_Mat_baseColor.png",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:120000:25714c",
+            "path": "Prefabs/Woodland/Oaks/Medium_oak_tree_003_LOD2.prefab",
             "directory": false
         },
         {
@@ -4357,6 +4497,11 @@
             "directory": false
         },
         {
+            "id": "file:a8e05ef1:120000:257109",
+            "path": "Prefabs/Woodland/Oaks/Large_oak_tree_002_LOD0.prefab",
+            "directory": false
+        },
+        {
             "id": "file:a8e05ef1:140000:29fdda",
             "path": "Other/oak_trees_pack_17var_lods_seasons_gameready/textures/Cluster_Mat_Late_Autumn_EX_metallicRoughness.png",
             "directory": false
@@ -4372,11 +4517,6 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:1a0000:29ff95",
-            "path": "Prefabs/Woodland/Oaks/Medium_oak_tree_003_LOD2.prefab",
-            "directory": false
-        },
-        {
             "id": "file:a8e05ef1:140000:29fdf4",
             "path": "Other/oak_trees_pack_17var_lods_seasons_gameready/textures/Cluster_Mat_normal.png",
             "directory": false
@@ -4385,6 +4525,11 @@
             "id": "file:a8e05ef1:810000:70aaf",
             "path": "Prefabs/Fox/Meshes",
             "directory": true
+        },
+        {
+            "id": "file:a8e05ef1:120000:257120",
+            "path": "Prefabs/Woodland/Oaks/Large_oak_tree_004_LOD1.prefab",
+            "directory": false
         },
         {
             "id": "file:a8e05ef1:150000:29fde0",
@@ -4407,6 +4552,11 @@
             "directory": false
         },
         {
+            "id": "file:a8e05ef1:120000:257118",
+            "path": "Prefabs/Woodland/Oaks/Large_oak_tree_003_LOD1.prefab",
+            "directory": false
+        },
+        {
             "id": "file:a8e05ef1:140000:29fdf8",
             "path": "Other/oak_trees_pack_17var_lods_seasons_gameready/textures/Large_oak_tree_001_Billboard_Mat_normal.png",
             "directory": false
@@ -4414,6 +4564,11 @@
         {
             "id": "file:a8e05ef1:140000:29fdfa",
             "path": "Other/oak_trees_pack_17var_lods_seasons_gameready/textures/Large_oak_tree_002_Billboard_Mat_metallicRoughness.png",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:230000:24fd84",
+            "path": "Prefabs/Woodland/Oaks/Big_oak_tree_004_LOD1.prefab",
             "directory": false
         },
         {
@@ -4449,11 +4604,6 @@
         {
             "id": "file:a8e05ef1:310000:29fe45",
             "path": "Other/oak_trees_pack_17var_lods_seasons_gameready/textures/Medium_oak_tree__002_Billboard_Mat_metallicRoughness.png",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:110000:2a0196",
-            "path": "Scenes/terrain/oak_meadow.scene",
             "directory": false
         },
         {
@@ -4527,16 +4677,6 @@
             "directory": true
         },
         {
-            "id": "file:a8e05ef1:150000:29ffec",
-            "path": "Prefabs/Woodland/Oaks/Sapling_oak_tree_002_LOD2.prefab",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:150000:2a0000",
-            "path": "Prefabs/Woodland/Oaks/Sapling_oak_tree_003_LOD2.prefab",
-            "directory": false
-        },
-        {
             "id": "file:a8e05ef1:510000:e6b55",
             "path": "Scenes/Demo/snake.scene",
             "directory": false
@@ -4547,6 +4687,11 @@
             "directory": false
         },
         {
+            "id": "file:a8e05ef1:270000:227ff1",
+            "path": "Prefabs/Woodland/Oaks/Big_oak_tree_002_Impostor.prefab",
+            "directory": false
+        },
+        {
             "id": "file:a8e05ef1:150000:29fe89",
             "path": "Other/real_bush/textures/phong3_baseColor.png",
             "directory": false
@@ -4554,11 +4699,6 @@
         {
             "id": "file:a8e05ef1:1b90000:608f7",
             "path": "Prefabs/Fox/FoxRagdoll.prefab",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:140000:29fed0",
-            "path": "Prefabs/Woodland/Oaks/Big_oak_tree_001_LOD1.prefab",
             "directory": false
         },
         {
@@ -4637,13 +4777,13 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:190000:29feac",
-            "path": "Prefabs/Woodland/Grass",
-            "directory": true
-        },
-        {
             "id": "file:a8e05ef1:140000:29feb0",
             "path": "Prefabs/Woodland/Grass/MeadowPatch_01_LOD0.prefab",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:1c0000:257126",
+            "path": "Prefabs/Woodland/Oaks/Medium_oak_tree_001_LOD0.prefab",
             "directory": false
         },
         {
@@ -4682,133 +4822,183 @@
             "directory": false
         },
         {
+            "id": "file:a8e05ef1:180000:227fec",
+            "path": "Prefabs/Woodland/OakMeadowGrass.prefab",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:b0000:30b47f",
+            "path": "Scripts/Controllers",
+            "directory": true
+        },
+        {
             "id": "file:a8e05ef1:140000:29fece",
             "path": "Prefabs/Woodland/Oaks",
             "directory": true
         },
         {
-            "id": "file:a8e05ef1:60000:29fedc",
+            "id": "file:a8e05ef1:200000:227fed",
+            "path": "Prefabs/Woodland/Oaks/Big_oak_tree_001_Impostor.prefab",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:270000:227ff0",
+            "path": "Prefabs/Woodland/Oaks/Big_oak_tree_001_LOD2.prefab",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:2e0000:e6392",
+            "path": "Scenes/Basics",
+            "directory": true
+        },
+        {
+            "id": "file:a8e05ef1:160000:227ff2",
+            "path": "Prefabs/Woodland/Oaks/Big_oak_tree_002_LOD0.prefab",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:150000:227ff3",
+            "path": "Prefabs/Woodland/Oaks/Big_oak_tree_002_LOD1.prefab",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:140000:227ff4",
+            "path": "Prefabs/Woodland/Oaks/Big_oak_tree_002_LOD2.prefab",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:430000:227ff5",
+            "path": "Prefabs/Woodland/Oaks/Big_oak_tree_003_Impostor.prefab",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:130000:2289d6",
             "path": "Prefabs/Woodland/Oaks/Big_oak_tree_003_LOD1.prefab",
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:180000:29fee2",
+            "id": "file:a8e05ef1:290000:22d1d7",
             "path": "Prefabs/Woodland/Oaks/Big_oak_tree_003_LOD2.prefab",
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:1a0000:29fee4",
-            "path": "Prefabs/Woodland/Oaks/Big_oak_tree_004_LOD1.prefab",
+            "id": "file:a8e05ef1:100000:240b81",
+            "path": "Prefabs/Woodland/Oaks/Big_oak_tree_004_LOD0.prefab",
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:120000:12e5a6",
-            "path": "Textures/Skyboxes",
-            "directory": true
-        },
-        {
-            "id": "file:a8e05ef1:60000:29feea",
+            "id": "file:a8e05ef1:230000:24fdd7",
             "path": "Prefabs/Woodland/Oaks/Big_oak_tree_004_LOD2.prefab",
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:1b0000:29ff00",
+            "id": "file:a8e05ef1:140000:25710c",
             "path": "Prefabs/Woodland/Oaks/Large_oak_tree_002_LOD1.prefab",
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:3e0000:29ff02",
+            "id": "file:a8e05ef1:120000:257110",
             "path": "Prefabs/Woodland/Oaks/Large_oak_tree_002_LOD2.prefab",
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:b0000:30b48d",
-            "path": "Scripts/Demos/Pong/PongUI.cpp",
+            "id": "file:a8e05ef1:310000:257116",
+            "path": "Prefabs/Woodland/Oaks/Large_oak_tree_003_LOD0.prefab",
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:c00000:1a3c15",
-            "path": "Scripts/Controllers/FirstPersonController.cpp",
+            "id": "file:a8e05ef1:120000:25711d",
+            "path": "Prefabs/Woodland/Oaks/Large_oak_tree_004_Impostor.prefab",
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:2e0000:29ff08",
-            "path": "Prefabs/Woodland/Oaks/Large_oak_tree_003_LOD1.prefab",
+            "id": "file:a8e05ef1:120000:257124",
+            "path": "Prefabs/Woodland/Oaks/Medium_oak_tree_001_Impostor.prefab",
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:320000:29ff09",
-            "path": "Prefabs/Woodland/Oaks/Large_oak_tree_003_LOD2.prefab",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:540000:29ff0a",
-            "path": "Prefabs/Woodland/Oaks/Large_oak_tree_004_LOD0.prefab",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:60000:2a0060",
-            "path": "Scenes/Procedural/terrain_gen.scene",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:1c0000:29ff16",
-            "path": "Prefabs/Woodland/Oaks/Medium_oak_tree_001_LOD0.prefab",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:160000:29ff17",
+            "id": "file:a8e05ef1:160000:25712c",
             "path": "Prefabs/Woodland/Oaks/Medium_oak_tree_001_LOD1.prefab",
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:240000:29ff19",
+            "id": "file:a8e05ef1:120000:257137",
+            "path": "Prefabs/Woodland/Oaks/Medium_oak_tree_002_Impostor.prefab",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:120000:25713b",
             "path": "Prefabs/Woodland/Oaks/Medium_oak_tree_002_LOD0.prefab",
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:a20000:6f9cf",
-            "path": "Scenes/terrain/terrain_performance.scene",
+            "id": "file:a8e05ef1:160000:257149",
+            "path": "Prefabs/Woodland/Oaks/Medium_oak_tree_003_LOD1.prefab",
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:60000:29ff31",
-            "path": "Prefabs/Woodland/Oaks/Medium_oak_tree_002_LOD2.prefab",
+            "id": "file:a8e05ef1:c0000:30b4b3",
+            "path": "Scripts/TerrainGen/TerrainChunk.cpp",
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:f0000:29ffb5",
+            "id": "file:a8e05ef1:120000:257150",
+            "path": "Prefabs/Woodland/Oaks/Sapling_oak_tree_001_LOD0.prefab",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:120000:257154",
             "path": "Prefabs/Woodland/Oaks/Sapling_oak_tree_001_LOD1.prefab",
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:60000:29ffff",
-            "path": "Prefabs/Woodland/Oaks/Sapling_oak_tree_003_LOD1.prefab",
+            "id": "file:a8e05ef1:120000:257155",
+            "path": "Prefabs/Woodland/Oaks/Sapling_oak_tree_001_LOD2.prefab",
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:c0000:30b4a4",
-            "path": "Scripts/Portals/MovingPortalPairDriver.h",
+            "id": "file:a8e05ef1:160000:e6b39",
+            "path": "Scenes/Demo",
+            "directory": true
+        },
+        {
+            "id": "file:a8e05ef1:120000:257157",
+            "path": "Prefabs/Woodland/Oaks/Sapling_oak_tree_002_Impostor.prefab",
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:b0000:30b488",
-            "path": "Scripts/Demos/Pong/PongBall.h",
+            "id": "file:a8e05ef1:150000:257159",
+            "path": "Prefabs/Woodland/Oaks/Sapling_oak_tree_002_LOD0.prefab",
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:2a0000:2a0014",
+            "id": "file:a8e05ef1:140000:25715a",
+            "path": "Prefabs/Woodland/Oaks/Sapling_oak_tree_002_LOD1.prefab",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:120000:257160",
+            "path": "Prefabs/Woodland/Oaks/Sapling_oak_tree_003_Impostor.prefab",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:140000:257167",
+            "path": "Prefabs/Woodland/Oaks/Small_oak_tree_001_Impostor.prefab",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:150000:257169",
             "path": "Prefabs/Woodland/Oaks/Small_oak_tree_001_LOD1.prefab",
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:180000:2a002a",
-            "path": "Prefabs/Woodland/Oaks/Small_oak_tree_002_LOD0.prefab",
+            "id": "file:a8e05ef1:140000:25716e",
+            "path": "Prefabs/Woodland/Oaks/Small_oak_tree_002_Impostor.prefab",
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:50000:2a0056",
-            "path": "Prefabs/Woodland/Oaks/Small_oak_tree_003_LOD2.prefab",
+            "id": "file:a8e05ef1:140000:25716f",
+            "path": "Prefabs/Woodland/Oaks/Small_oak_tree_002_LOD0.prefab",
             "directory": false
         },
         {
@@ -4822,19 +5012,9 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:2e0000:e6392",
-            "path": "Scenes/Basics",
-            "directory": true
-        },
-        {
             "id": "file:a8e05ef1:8a0000:e63a5",
             "path": "Scenes/Basics/default_2d.scene",
             "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:160000:e6b39",
-            "path": "Scenes/Demo",
-            "directory": true
         },
         {
             "id": "file:a8e05ef1:200000:f9b81",
@@ -4867,13 +5047,13 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:9b0000:107f9d",
-            "path": "Scenes/Portals/portal_traversal_demo.scene",
+            "id": "file:a8e05ef1:c70000:713b7",
+            "path": "Scripts/TerrainPerformance/TerrainPerformanceDriver.h",
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:c70000:713b7",
-            "path": "Scripts/TerrainPerformance/TerrainPerformanceDriver.h",
+            "id": "file:a8e05ef1:9b0000:107f9d",
+            "path": "Scenes/Portals/portal_traversal_demo.scene",
             "directory": false
         },
         {
@@ -4885,6 +5065,11 @@
             "id": "file:a8e05ef1:b0000:30b468",
             "path": "Scenes/Procedural",
             "directory": true
+        },
+        {
+            "id": "file:a8e05ef1:60000:2a0060",
+            "path": "Scenes/Procedural/terrain_gen.scene",
+            "directory": false
         },
         {
             "id": "file:a8e05ef1:220000:2a0062",
@@ -4932,6 +5117,11 @@
             "directory": false
         },
         {
+            "id": "file:a8e05ef1:a20000:6f9cf",
+            "path": "Scenes/terrain/terrain_performance.scene",
+            "directory": false
+        },
+        {
             "id": "file:a8e05ef1:b0000:30b47c",
             "path": "Scenes/UI",
             "directory": true
@@ -4947,9 +5137,14 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:b0000:30b47f",
-            "path": "Scripts/Controllers",
-            "directory": true
+            "id": "file:a8e05ef1:b0000:30b48d",
+            "path": "Scripts/Demos/Pong/PongUI.cpp",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:c00000:1a3c15",
+            "path": "Scripts/Controllers/FirstPersonController.cpp",
+            "directory": false
         },
         {
             "id": "file:a8e05ef1:b0000:30b483",
@@ -4959,6 +5154,16 @@
         {
             "id": "file:a8e05ef1:c0000:30b486",
             "path": "Scripts/Demos/Pong/PongBall.cpp",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:c0000:30b4a4",
+            "path": "Scripts/Portals/MovingPortalPairDriver.h",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:b0000:30b488",
+            "path": "Scripts/Demos/Pong/PongBall.h",
             "directory": false
         },
         {
@@ -5037,8 +5242,8 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:c0000:30b4b3",
-            "path": "Scripts/TerrainGen/TerrainChunk.cpp",
+            "id": "file:a8e05ef1:110000:258550",
+            "path": "Scripts/TerrainGen/TerrainGen.cpp",
             "directory": false
         },
         {
@@ -5047,13 +5252,18 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:c0000:30b4b9",
-            "path": "Scripts/TerrainGen/TerrainPatch.h",
+            "id": "file:a8e05ef1:c0000:30b4b8",
+            "path": "Scripts/TerrainGen/TerrainPatch.cpp",
             "directory": false
         },
         {
             "id": "file:a8e05ef1:60000:12e5ac",
             "path": "Textures/Sprites/Slime/slime_die.png",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:c0000:30b4b9",
+            "path": "Scripts/TerrainGen/TerrainPatch.h",
             "directory": false
         },
         {
@@ -5067,6 +5277,21 @@
             "directory": false
         },
         {
+            "id": "file:a8e05ef1:b0000:30b4c0",
+            "path": "Scripts/Utilities/Rotate.cpp",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:330000:4b935",
+            "path": "Shaders",
+            "directory": true
+        },
+        {
+            "id": "file:a8e05ef1:410000:12f34f",
+            "path": "Shaders/WarmOverlay.hlsl",
+            "directory": false
+        },
+        {
             "id": "file:a8e05ef1:150000:31d2f7",
             "path": "TerrainData",
             "directory": true
@@ -5077,9 +5302,24 @@
             "directory": false
         },
         {
+            "id": "file:a8e05ef1:140000:31d2fd",
+            "path": "TerrainData/TerrainPerformance/world.heights",
+            "directory": false
+        },
+        {
             "id": "file:a8e05ef1:70000:12e599",
             "path": "Textures",
             "directory": true
+        },
+        {
+            "id": "file:a8e05ef1:3f0000:10f388",
+            "path": "Textures/Calibration/checker.png",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:f0000:12e5f1",
+            "path": "Textures/Calibration/direction.png",
+            "directory": false
         },
         {
             "id": "file:a8e05ef1:1d0000:12e5f6",
@@ -5102,6 +5342,16 @@
             "directory": false
         },
         {
+            "id": "file:a8e05ef1:120000:12e5a6",
+            "path": "Textures/Skyboxes",
+            "directory": true
+        },
+        {
+            "id": "file:a8e05ef1:70000:12e5aa",
+            "path": "Textures/Sprites/Slime",
+            "directory": true
+        },
+        {
             "id": "file:a8e05ef1:110000:12e5ad",
             "path": "Textures/Sprites/Slime/slime_hit.png",
             "directory": false
@@ -5109,6 +5359,11 @@
         {
             "id": "file:a8e05ef1:60000:12e5ae",
             "path": "Textures/Sprites/Slime/slime_idle.spriteanim",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:70000:12e5af",
+            "path": "Textures/Sprites/Slime/slime_idle.spritesheet",
             "directory": false
         },
         {
@@ -5129,6 +5384,11 @@
         {
             "id": "file:a8e05ef1:70000:12e5bf",
             "path": "Textures/Sprites/Slime/slime_move.png",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:670000:115414",
+            "path": "Textures/sss_thickness_ear.png",
             "directory": false
         },
         {

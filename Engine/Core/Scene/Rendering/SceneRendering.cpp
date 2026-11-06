@@ -1,4 +1,5 @@
 #include "Core/Rendering/ShadowReceiverCulling.h"
+#include "Core/Rendering/StableShadowCascade.h"
 #include "Core/Rendering/RenderJobs.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Graphics/GraphicsCommandPacket.h"
@@ -493,6 +494,7 @@ void Scene::Init(Engine::Graphics::IGraphicsProvider* graphicsProvider)
             sizeof(ObjectGPUData),
         nullptr, sizeof(ObjectGPUData));
     m_objectDataMapped = m_objectDataBuffer ? m_objectDataBuffer->Map() : nullptr;
+    m_objectUploadCache.Clear(); m_shadowUploadCache.Clear();
     if (!m_objectDataMapped)
         throw std::runtime_error("Failed to create object structured buffer");
 
@@ -684,6 +686,7 @@ void Scene::EnsureObjectRenderCapacity(uint32_t requiredObjects)
     m_shadowObjectDataBuffer = std::move(shadowObjectBuffer);
     m_objectCBMapped = constantMapped;
     m_objectDataMapped = objectMapped;
+    m_objectUploadCache.Clear(); m_shadowUploadCache.Clear();
     m_portalObjectDataMapped = portalMapped;
     m_shadowCBMapped = shadowConstantMapped;
     m_shadowObjectDataMapped = shadowObjectMapped;
@@ -707,6 +710,7 @@ void Scene::SelectRenderPassBuffers(uint32_t requiredObjectSlots)
         swap(buffers.constantsMapped,m_objectCBMapped); swap(buffers.objectsMapped,m_objectDataMapped);
         swap(buffers.shadowConstantsMapped,m_shadowCBMapped); swap(buffers.shadowObjectsMapped,m_shadowObjectDataMapped);
         swap(buffers.capacity,m_objectCapacity);
+        swap(buffers.objectCache,m_objectUploadCache); swap(buffers.shadowCache,m_shadowUploadCache);
     };
     if(!m_activeRenderPassBuffers)
     {
@@ -1938,6 +1942,7 @@ void Scene::BuildObjectPipeline()
 Scene::RetiredGraphicsResources Scene::TakeRetiredGraphicsResources()
 {
     RetiredGraphicsResources retired;
+    retired.objects.swap(m_retiredRenderObjects);
     retired.buffers.swap(m_retiredRenderBuffers);
     retired.sharedBuffers.swap(m_retiredSharedRenderBuffers);
     retired.pipelines.swap(m_retiredMaterialShaderPipelines);
@@ -2068,9 +2073,13 @@ void Scene::ProcessGraphicsPreparation(IGraphicsProvider* graphicsProvider)
 void Scene::PrepareRenderFrame(bool publishSnapshot)
 {
     AssertOwnerThread();
+    using PrepareClock = std::chrono::steady_clock;
+    const auto prepareBegin=PrepareClock::now();
+    m_lastPrepareTimings={};
     Engine::Components::Texture::PublishQueued(m_graphicsProvider);
     m_materialShaderSources.Poll();
     PublishMaterialShaderPipelines();
+    const auto afterAssetPublication=PrepareClock::now();
     const bool priorPublicationSuppressed = m_suppressSceneSnapshotPublication;
     struct RestorePublication
     {
@@ -2082,15 +2091,24 @@ void Scene::PrepareRenderFrame(bool publishSnapshot)
     // Commit editor edits before preparing owned draw data. Replay-only editor
     // frames publish on their simulation commit instead of scanning twice.
     CommitPendingObjectChanges();
+    const auto afterInitialCommit=PrepareClock::now();
     // Copy the registry view: deriving prefab batches adds scene components.
     const auto objectLayers=GetComponents<Engine::Components::TerrainObjectLayer>();
     for (auto* layer:objectLayers) layer->PreparePrefabInstances(m_graphicsProvider);
+    const auto afterPrefabInstances=PrepareClock::now();
     CommitPendingObjectChanges();
+    const auto afterPrefabCommit=PrepareClock::now();
     ProcessGraphicsPreparation(m_graphicsProvider);
+    const auto afterGraphicsPreparation=PrepareClock::now();
     SelectNativeFrameBuffers();
+    const auto afterNativeBuffers=PrepareClock::now();
+    const auto elapsed=[](auto begin,auto end) { return std::chrono::duration<double,std::milli>(end-begin).count(); };
+    m_lastPrepareTimings.assetPublicationMs=elapsed(prepareBegin,afterAssetPublication);
+    m_lastPrepareTimings.objectCommitMs=elapsed(afterAssetPublication,afterInitialCommit)+elapsed(afterPrefabInstances,afterPrefabCommit);
+    m_lastPrepareTimings.prefabInstancesMs=elapsed(afterInitialCommit,afterPrefabInstances);
+    m_lastPrepareTimings.graphicsPreparationMs=elapsed(afterPrefabCommit,afterGraphicsPreparation);
+    m_lastPrepareTimings.nativeBuffersMs=elapsed(afterGraphicsPreparation,afterNativeBuffers);
     const auto preparationJobs=Engine::Rendering::RenderJobs::Get().ReadStatistics();
-    using PrepareClock = std::chrono::steady_clock;
-    m_lastPrepareTimings={};
     m_renderFramePrepared = false;
     m_nativeRenderPacketTaken = false;
     m_frameRenderItems.clear();
@@ -3412,82 +3430,20 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         for (uint32_t cascade = result.count; cascade < 4u; ++cascade)
             result.splits[cascade] = cascadeFar;
 
-        const glm::vec3 directionToLight = glm::normalize(
-            shadowSelection.directionToLight);
-        const glm::vec3 up = std::abs(directionToLight.y) > 0.98f
-            ? glm::vec3(0.f, 0.f, 1.f) : glm::vec3(0.f, 1.f, 0.f);
-        const glm::mat4 lightOrientation = glm::lookAtLH(
-            glm::vec3(0.f), -directionToLight, up);
-        // Fit in camera-local space. Inverting float projection*view and then
-        // measuring world-space corners makes the radius depend on camera
-        // rotation/translation roundoff, defeating texel-grid stabilization.
-        const auto inverseProjection=glm::inverse(glm::dmat4(proj));
-        const auto inverseCascadeView=glm::inverse(glm::dmat4(cascadeView));
-        std::array<glm::dvec3,4> rayOrigins{},rayDirections{};
-        for (uint32_t corner = 0; corner < 4u; ++corner)
+        const auto cascadePosition=glm::vec3(glm::inverse(cascadeView)[3]);
+        const uint32_t tileResolution=result.count>1u
+            ? std::max(1u,atlasResolution/2u):atlasResolution;
+        for(uint32_t cascade=0;cascade<result.count;++cascade)
         {
-            const double x=(corner & 1u) ? 1.0:-1.0;
-            const double y=(corner & 2u) ? 1.0:-1.0;
-            const auto nearPoint=inverseProjection*glm::dvec4(x,y,0,1);
-            // An interior depth avoids the ill-conditioned far-plane divide
-            // for large far/near ratios. Extend this ray to exact view depths.
-            const auto middlePoint=inverseProjection*glm::dvec4(x,y,.5,1);
-            rayOrigins[corner]=glm::dvec3(nearPoint)/nearPoint.w;
-            rayDirections[corner]=glm::dvec3(middlePoint)/middlePoint.w-rayOrigins[corner];
-        }
-
-        float previousSplit = cameraNear;
-        float previousNear = cameraNear;
-        const uint32_t tileResolution = result.count > 1u
-            ? std::max(1u, atlasResolution / 2u) : atlasResolution;
-        for (uint32_t cascade = 0; cascade < result.count; ++cascade)
-        {
-            const float split = result.splits[cascade];
-            const double nearDepth=std::max(cameraNear,
-                previousSplit-(previousSplit-previousNear)*std::clamp(m_realtimeShadowSettings.cascadeTransitionFraction,0.f,0.3f));
-            std::array<glm::dvec3,8> localCorners{};
-            std::array<glm::vec3, 8> corners{};
-            glm::dvec3 localCenter(0);
-            for (uint32_t corner = 0; corner < 4u; ++corner)
-            {
-                const auto& origin=rayOrigins[corner];
-                const auto& ray=rayDirections[corner];
-                localCorners[corner]=origin+ray*((nearDepth-origin.z)/ray.z);
-                localCorners[corner+4]=origin+ray*((double(split)-origin.z)/ray.z);
-                localCenter+=localCorners[corner]+localCorners[corner+4];
-                corners[corner]=glm::vec3(inverseCascadeView*glm::dvec4(localCorners[corner],1));
-                corners[corner+4]=glm::vec3(inverseCascadeView*glm::dvec4(localCorners[corner+4],1));
-            }
-            localCenter/=8.0;
-            const auto center=glm::vec3(inverseCascadeView*glm::dvec4(localCenter,1));
-            double localRadius=.001;
-            for(const auto& corner:localCorners)
-                localRadius=std::max(localRadius,glm::length(corner-localCenter));
-            const float radius=float(std::ceil(localRadius*16.0)/16.0);
-            glm::vec3 snappedCenter = glm::vec3(
-                lightOrientation * glm::vec4(center, 1.f));
-            const float worldUnitsPerTexel = (radius * 2.f) /
-                static_cast<float>(tileResolution);
-            snappedCenter.x = std::round(snappedCenter.x / worldUnitsPerTexel) *
-                worldUnitsPerTexel;
-            snappedCenter.y = std::round(snappedCenter.y / worldUnitsPerTexel) *
-                worldUnitsPerTexel;
-            const glm::vec3 stabilizedCenter = glm::vec3(
-                glm::inverse(lightOrientation) * glm::vec4(snappedCenter, 1.f));
-            result.centers[cascade] = stabilizedCenter;
-            result.radii[cascade] = radius;
-            const glm::vec3 lightEye = stabilizedCenter +
-                directionToLight * shadowDistance;
-            const glm::mat4 lightView = glm::lookAtLH(
-                lightEye, stabilizedCenter, up);
-            const glm::mat4 lightProjection = glm::orthoLH_ZO(
-                -radius, radius, -radius, radius,
-                0.1f, shadowDistance * 2.f);
-            result.viewProjections[cascade] = lightProjection * lightView;
-            result.receivers[cascade].Build(corners,lightOrientation,
-                worldUnitsPerTexel*float(m_realtimeShadowSettings.pcfRadius+2)+0.01f);
-            previousNear=previousSplit;
-            previousSplit = split;
+            const auto stable=Engine::Rendering::BuildStableShadowCascade(
+                cascadePosition,shadowSelection.directionToLight,
+                result.splits[cascade],shadowDistance,tileResolution);
+            result.centers[cascade]=stable.center;
+            result.radii[cascade]=stable.radius;
+            result.viewProjections[cascade]=stable.viewProjection;
+            // The full radial receiver region must retain off-screen casters.
+            // The light-space orthographic bounds below perform culling;
+            // a camera-frustum receiver silhouette would discard valid trees.
         }
         result.data = {
             static_cast<float>(result.count), result.count > 1u ? 0.5f : 1.f,
@@ -3520,6 +3476,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 glm::normalize(m_directionalShadowCachedDirection)) > 0.9995f;
         if (shadowOnly)
         {
+            bool staggerMovingCascades = false;
             auto copyCachedCascades = [&]()
             {
                 mainShadowCascades.viewProjections =
@@ -3549,8 +3506,18 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                         m_directionalShadowCachedCascadeSplits) > 1e-4f ||
                     glm::length(requestedShadowCascades.data -
                         m_directionalShadowCachedCascadeData) > 1e-4f ||
-                    glm::length(requestedShadowCascades.cameraData -
-                        m_directionalShadowCachedCameraData) > 1e-4f;
+                    std::abs(requestedShadowCascades.cameraData.w -
+                        m_directionalShadowCachedCameraData.w) > 1e-4f;
+                // Rotation and lens changes do not alter radial coverage.
+                // Stagger walking updates only while every retained tile can
+                // still cover its entire current receiver sphere.
+                staggerMovingCascades = !globalCascadeDataChanged &&
+                    glm::length(cameraPosition-m_directionalShadowCachedCameraPosition)<=1.f;
+                for(uint32_t cascade=0;cascade<requestedShadowCascades.count;++cascade)
+                    if(glm::length(cameraPosition-m_directionalShadowCachedCascadeCenters[cascade])+
+                        requestedShadowCascades.splits[cascade]>
+                        m_directionalShadowCachedCascadeRadii[cascade]-.01f)
+                        staggerMovingCascades=false;
                 if (globalCascadeDataChanged)
                 {
                     for (uint32_t cascade = 0; cascade < requestedShadowCascades.count; ++cascade)
@@ -3576,6 +3543,9 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                         const float radiusDelta = std::abs(
                             requestedShadowCascades.radii[cascade] -
                             m_directionalShadowCachedCascadeRadii[cascade]);
+                        // Range/split changes alter radial coverage; refresh
+                        // the layout together rather than staggering it.
+                        if(radiusDelta>0.05f) staggerMovingCascades=false;
                         const float projectionDelta = matrixDelta(
                             requestedShadowCascades.viewProjections[cascade],
                             m_directionalShadowCachedViewProjections[cascade]);
@@ -3596,6 +3566,21 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                             (refreshCascade + 1u) %
                             requestedShadowCascades.count;
                     }
+                }
+            }
+            if (staggerMovingCascades && requestedShadowCascades.count>2u)
+            {
+                // At most two tiles per frame: prioritize a dirty near tile,
+                // then visit far tiles in a rotating order without starvation.
+                uint32_t remaining=2u-(directionalShadowDirtyMask[0] ? 1u:0u);
+                const uint32_t farCount=requestedShadowCascades.count-1u;
+                const uint32_t first=uint32_t(m_directionalShadowFrameCounter%farCount);
+                for(uint32_t offset=0;offset<farCount;++offset)
+                {
+                    const uint32_t cascade=1u+(first+offset)%farCount;
+                    if(!directionalShadowDirtyMask[cascade]) continue;
+                    if(remaining) --remaining;
+                    else directionalShadowDirtyMask[cascade]=0u;
                 }
             }
             uint32_t dirtyCascadeCount = 0;
@@ -4087,6 +4072,18 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         occlusionViewId, occlusionSignature);
 
     m_lastRenderCpuTimings.occlusionMs=std::chrono::duration<double,std::milli>(RenderClock::now()-occlusionStart).count();
+    // Shadow maps need less geometry than the camera color pass. Keep the
+    // per-placement culling bands and pixel dither bands on the same policy,
+    // including independently authored prefab LOD meshes.
+    const auto scaledShadowLodDistances = [&](const glm::vec2 distances)
+    {
+        if(!shadowOnly) return distances;
+        // Keep detailed near shadows, then use the authored reduced mesh.
+        // Hold the card transition farther out to preserve canopy coverage.
+        const float lod1 = std::max(0.f, distances.x * .3f);
+        const float lod2 = std::max(lod1, distances.y * .6f);
+        return glm::vec2(lod1, lod2);
+    };
     struct PreparedDraw
     {
         Engine::Core::Object* object = nullptr;
@@ -4158,6 +4155,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         slot=renderItem->objectSlot;
         Engine::Core::Object* obj = renderItem->object;
         Engine::Components::Mesh* mesh = renderItem->mesh;
+        const bool fixedPrefabShadow = shadowOnly && mesh && mesh->prefabShadowLod>=0;
+        if(fixedPrefabShadow && mesh->prefabLodBand>=0 && mesh->prefabLodBand!=mesh->prefabShadowLod) continue;
         Engine::Components::Sprite* sprite = renderItem->sprite;
         Engine::Components::Material* mat = renderItem->material;
         const Engine::Rendering::BakedLightingData* bakedLighting =
@@ -4254,6 +4253,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             preparedDraw.gpuLod=mesh->prefabLodBand;
             preparedDraw.gpuMaximumLod=2;
             preparedDraw.gpuLodDistances=mesh->prefabLodDistances;
+            if(fixedPrefabShadow) preparedDraw.gpuLod=-1;
         }
         preparedDraw.object = obj;
         preparedDraw.mesh = mesh;
@@ -4302,7 +4302,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 mesh->GetPosedVertexBuffer() &&
                 !mesh->IsPortalPoseSnapshot() &&
                 (useSourceChart || !renderItem->warpedVertexBuffer);
-            preparedDraw.objectData.geometryFade=mesh->prefabLodBand>=0 ? glm::vec4(float(mesh->prefabLodBand),mesh->prefabLodDistances.x,mesh->prefabLodDistances.y,4.f) : (hasPortalViews && renderItem->geometryFade.w>=2.f ? mesh->GetRuntimeGeometryFade():renderItem->geometryFade);
+            preparedDraw.objectData.geometryFade=mesh->prefabLodBand>=0 ? glm::vec4(float(mesh->prefabLodBand),scaledShadowLodDistances(mesh->prefabLodDistances),4.f) : (hasPortalViews && renderItem->geometryFade.w>=2.f ? mesh->GetRuntimeGeometryFade():renderItem->geometryFade);
             preparedDraw.objectData.shadowCasterFade={casterFade.x,std::min(casterFade.x,casterFade.y),1.f,0.f};
             preparedDraw.objectData.grassAnimation={0.f,0.f,0.f,0.f};
             preparedDraw.objectData.viewPositionAlphaCutoff=glm::vec4(cameraPosition,.001f);
@@ -4310,6 +4310,14 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 ? mat->textureLod.AlphaGpuParameters() : settings.textureLod.AlphaGpuParameters();
             preparedDraw.objectData.textureLodParams = mat && mat->overrideTextureLod
                 ? mat->textureLod.GpuParameters() : settings.textureLod.GpuParameters();
+            if(fixedPrefabShadow)
+            {
+                // Camera distance must not reshape a fixed shadow proxy, via
+                // either geometry dithering or distance-biased leaf cutouts.
+                preparedDraw.objectData.geometryFade=glm::vec4(0.f);
+                preparedDraw.objectData.textureLodParams=glm::vec4(0.f);
+                preparedDraw.objectData.alphaLodParams=glm::vec4(0.f);
+            }
             preparedDraw.objectData.world = world;
             preparedDraw.objectData.viewProjection = proj * view;
             preparedDraw.objectData.traversalClipPlane =
@@ -4975,22 +4983,23 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     if(!shadowOnly)
     {
         const size_t count=preparedDraws.size();
+        m_objectUploadCache.Prepare(size_t(m_objectDataBuffer->GetSize()/sizeof(ObjectGPUData)),sizeof(ObjectGPUData));
+        auto* objectCache=&m_objectUploadCache;
         auto* objectBytes=static_cast<uint8_t*>(m_objectDataMapped);
         auto* constantBytes=static_cast<uint8_t*>(m_objectCBMapped);
         const size_t tasks=std::min<size_t>(3,(count+63)/64);
         for(size_t task=0;task<tasks;++task)
         {
             const size_t first=count*task/tasks,last=count*(task+1)/tasks;
-            recordSnapshot.jobs.push_back(Engine::Rendering::RenderJobs::Get().Submit([&preparedDraws,objectBytes,constantBytes,first,last] {
+            recordSnapshot.jobs.push_back(Engine::Rendering::RenderJobs::Get().Submit([&preparedDraws,objectBytes,objectCache,constantBytes,first,last] {
                 const auto started=RenderClock::now(); DirtyRange dirty;
                 for(size_t i=first;i<last;++i)
                 {
                     const auto& draw=preparedDraws[i];
                     const uint32_t slot=draw.drawData.objectIndex;
                     std::memcpy(constantBytes+size_t(slot)*kCBStride,&draw.drawData,sizeof(draw.drawData));
-                    auto* destination=objectBytes+size_t(slot)*sizeof(ObjectGPUData);
-                    if(std::memcmp(destination,&draw.objectData,sizeof(draw.objectData))!=0)
-                    { std::memcpy(destination,&draw.objectData,sizeof(draw.objectData)); dirty.first=std::min(dirty.first,slot); dirty.last=std::max(dirty.last,slot); }
+                    if(objectCache->Write(slot,&draw.objectData,objectBytes))
+                    { dirty.first=std::min(dirty.first,slot); dirty.last=std::max(dirty.last,slot); }
                 }
                 dirty.elapsedMs=std::chrono::duration<double,std::milli>(RenderClock::now()-started).count(); return dirty;
             }));
@@ -5092,14 +5101,6 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     std::vector<TilePreparation::Input> tileInputs;
     std::vector<size_t> tileDrawIndexes;
     std::unordered_map<const void*,uint32_t> placementBases;
-    const auto scaledShadowLodDistances = [&](const glm::vec2 distances)
-    {
-        if(!shadowOnly) return distances;
-        constexpr float shadowLodDistanceScale = .6f;
-        const float lod1 = std::max(0.f, distances.x * shadowLodDistanceScale);
-        const float lod2 = std::max(lod1, distances.y * shadowLodDistanceScale);
-        return glm::vec2(lod1, lod2);
-    };
     for(size_t index=0;index<preparedDraws.size();++index)
     {
         const auto& draw=preparedDraws[index];
@@ -5136,7 +5137,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             if (draw.gpuLod == 1) shadowRange *= .7f;
             else if (draw.gpuLod >= 2) shadowRange *= .4f;
         }
-        input.lod={draw.mesh->prefabLodBand>=0 ? draw.gpuLodDistances : scaledShadowLodDistances(draw.gpuLodDistances),shadowRange,
+        input.lod={scaledShadowLodDistances(draw.gpuLodDistances),shadowRange,
             std::min(shadowRange, draw.objectData.shadowCasterFade.y)};
         for(const auto& range:draw.mesh->GetInstanceRanges())
             input.ranges.emplace_back(range.firstInstance,range.instanceCount);
@@ -5144,7 +5145,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         tileDrawIndexes.push_back(index);
     }
     const auto tileResult=m_instanceTilePreparation.Prepare(tileInputs,
-        m_graphicsProvider->GetContextFactory()->GetPreparedFrameSerial());
+        m_graphicsProvider->GetContextFactory()->GetPreparedFrameSerial(),shadowOnly ? 1u:0u);
     std::vector<TilePreparation::RecordsOwner> instanceTiles(preparedDraws.size());
     for(size_t i=0;i<tileDrawIndexes.size();++i)
         instanceTiles[tileDrawIndexes[i]]=tileResult.records[i];
@@ -5541,6 +5542,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         context->BeginDepthOnlyPass(m_directionalShadowMap.get(),
             preserveDirectionalShadowAtlas ? -1.f : 1.f))
     {
+        m_shadowUploadCache.Prepare(size_t(m_shadowObjectDataBuffer->GetSize()/sizeof(ObjectGPUData)),sizeof(ObjectGPUData));
         context->BeginGpuTiming(Engine::Graphics::GpuTimingStage::Shadow);
         std::array<std::vector<uint8_t>,4> cascadeVisible;
         // Each cascade owns its visibility and receiver results. The spatial
@@ -5633,10 +5635,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                     (1u | 32u));
                 shadowData.ambientUnlit.w = 1.f;
                 shadowData.environmentParams = glm::vec4(0.f);
-                auto* destination=static_cast<uint8_t*>(m_shadowObjectDataMapped)+size_t(recordIndex)*sizeof(ObjectGPUData);
-                if(std::memcmp(destination,&shadowData,sizeof(shadowData))!=0)
+                if(m_shadowUploadCache.Write(recordIndex,&shadowData,m_shadowObjectDataMapped))
                 {
-                    std::memcpy(destination,&shadowData,sizeof(shadowData));
                     firstDirtyByCascade[cascade]=std::min(firstDirtyByCascade[cascade],recordIndex);
                     // Camera-distance sorting is independent of persistent
                     // slot order. A later draw may have a lower slot; every
@@ -7118,6 +7118,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         memcpy(static_cast<uint8_t*>(m_objectDataMapped) +
             static_cast<size_t>(pass.dataSlot) * sizeof(ObjectGPUData),
             &debugData, sizeof(debugData));
+        m_objectUploadCache.Invalidate(pass.dataSlot);
     }
     if (!portalViewJobs.empty())
     {
@@ -7578,6 +7579,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 static_cast<size_t>(draw.drawData.objectIndex) *
                 sizeof(ObjectGPUData),
                 &draw.objectData, sizeof(draw.objectData));
+            m_objectUploadCache.Invalidate(draw.drawData.objectIndex);
         }
         const uint64_t restoredRecords = !spatialDebugPasses.empty()
             ? static_cast<uint64_t>(m_objectCapacity) + std::min(

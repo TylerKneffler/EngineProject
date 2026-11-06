@@ -20,6 +20,18 @@
             }
         },
         {
+            "name": "Release x64 (performance)",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/Debug/Release/Editor.exe",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "console": "internalConsole",
+            "preLaunchTask": "CMake: Build Editor Release (performance)"
+        },
+        {
             "name": "Attach to Editor (Debug)",
             "type": "cppvsdbg",
             "request": "attach",

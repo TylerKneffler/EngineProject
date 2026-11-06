@@ -49,6 +49,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("output", type=Path)
     parser.add_argument("--editor", type=Path, default=ROOT / "build/Release/Release/Editor.exe")
+    parser.add_argument("--scene", type=Path, default=ROOT / "Engine/Core/Assets/Scenes/terrain/oak_meadow.scene")
     parser.add_argument("--frames", type=int, default=90)
     parser.add_argument("--warmup", type=int, default=30)
     parser.add_argument("--stop-frames", type=int, default=30)
@@ -63,7 +64,7 @@ def main():
         env = os.environ.copy()
         env.pop("ENGINE_EDITOR_AUTO_PROFILE_KEEP_OPEN", None)
         env.update({
-            "ENGINE_EDITOR_AUTO_PROFILE_SCENE": str(ROOT / "Engine/Core/Assets/Scenes/terrain/oak_meadow.scene"),
+            "ENGINE_EDITOR_AUTO_PROFILE_SCENE": str(args.scene.resolve()),
             "ENGINE_EDITOR_AUTO_PROFILE_GAME_VIEW": "1",
             "ENGINE_EDITOR_AUTO_PROFILE_FRAMES": str(args.frames),
             "ENGINE_EDITOR_AUTO_PROFILE_WARMUP_FRAMES": str(args.warmup),

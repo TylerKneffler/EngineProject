@@ -1,4 +1,6 @@
 #include "DX12GraphicsBuffer.h"
+#include "DX12QueueMutex.h"
+#include <cstring>
 #include <stdexcept>
 
 namespace Engine::Renderers
@@ -143,4 +145,62 @@ std::unique_ptr<Engine::Graphics::IGraphicsBuffer> D3D12BufferFactory::CreateBuf
 
     return buffer;
 }
+
+std::unique_ptr<Engine::Graphics::IGraphicsBuffer> D3D12BufferFactory::CreateStaticVertexBuffer(
+    uint64_t sizeBytes, const void* initialData)
+{
+    using Buffer = Engine::Graphics::IGraphicsBuffer;
+    if (!m_queue || !initialData || !sizeBytes)
+        return IGraphicsBufferFactory::CreateStaticVertexBuffer(sizeBytes, initialData);
+
+    // Static geometry is read many times per frame by forest instances. Keep
+    // it in a default heap rather than repeatedly fetching upload-heap data.
+    auto destination = CreateBuffer(Buffer::Usage::VertexBuffer,
+        Buffer::AccessMode::Default, sizeBytes);
+    auto staging = CreateBuffer(Buffer::Usage::VertexBuffer,
+        Buffer::AccessMode::Upload, sizeBytes, initialData);
+    auto* native = static_cast<D3D12GraphicsBuffer*>(destination.get());
+    auto* upload = static_cast<D3D12GraphicsBuffer*>(staging.get());
+    Microsoft::WRL::ComPtr<ID3D12CommandAllocator> allocator;
+    Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> commands;
+    Microsoft::WRL::ComPtr<ID3D12Fence> fence;
+    if (FAILED(m_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,
+            IID_PPV_ARGS(&allocator))) ||
+        FAILED(m_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT,
+            allocator.Get(), nullptr, IID_PPV_ARGS(&commands))) ||
+        FAILED(m_device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence))))
+        throw std::runtime_error("Failed to create static geometry upload commands");
+
+    D3D12_RESOURCE_BARRIER barrier{};
+    barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    barrier.Transition.pResource = native->GetResource();
+    barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER;
+    barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST;
+    commands->ResourceBarrier(1, &barrier);
+    commands->CopyBufferRegion(native->GetResource(), 0, upload->GetResource(), 0, sizeBytes);
+    std::swap(barrier.Transition.StateBefore, barrier.Transition.StateAfter);
+    commands->ResourceBarrier(1, &barrier);
+    if (FAILED(commands->Close()))
+        throw std::runtime_error("Failed to close static geometry upload commands");
+    HANDLE eventHandle = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    if (!eventHandle)
+        throw std::runtime_error("Failed to create static geometry upload event");
+    struct CloseEvent { HANDLE handle; ~CloseEvent() { CloseHandle(handle); } } closeEvent{eventHandle};
+    if (FAILED(fence->SetEventOnCompletion(1, eventHandle)))
+        throw std::runtime_error("Failed to arm static geometry upload fence");
+    {
+        // Use the same submission lock as rendering and texture uploads. Wait
+        // outside the lock, and retain staging/commands until the copy finishes.
+        std::lock_guard queueLock(DX12QueueMutex());
+        ID3D12CommandList* lists[] = {commands.Get()};
+        m_queue->ExecuteCommandLists(1, lists);
+        if (FAILED(m_queue->Signal(fence.Get(), 1)))
+            throw std::runtime_error("Failed to signal static geometry upload fence");
+    }
+    if (WaitForSingleObject(eventHandle, INFINITE) != WAIT_OBJECT_0)
+        throw std::runtime_error("Failed to wait for static geometry upload");
+    return destination;
+}
+
 }

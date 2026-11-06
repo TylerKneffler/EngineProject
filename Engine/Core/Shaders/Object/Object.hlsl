@@ -199,14 +199,17 @@ float SampleIes(uint index, float cosine)
 
 uint ResolveObjectIndex(uint instanceId)
 {
-    if ((draw.drawFlags & 0x00080000u) != 0u)
+    // Root SRVs for inactive paths can be a one-record placeholder. Do not
+    // flatten these branches into speculative reads of instanceId+1/+2.
+    [branch] if ((draw.drawFlags & 0x13080000u) == 0u)
+        return draw.objectIndex;
+    [branch] if ((draw.drawFlags & 0x00080000u) != 0u)
         return draw.objectIndex+asuint(meshInstances[instanceId+1].row0.x);
-    if ((draw.drawFlags & 0x01000000u) != 0u)
+    [branch] if ((draw.drawFlags & 0x01000000u) != 0u)
         return draw.objectIndex + asuint(meshInstances[instanceId * 2 + 2].row0.x);
-    if ((draw.drawFlags & 0x02000000u) != 0u)
+    [branch] if ((draw.drawFlags & 0x02000000u) != 0u)
         return draw.objectIndex + asuint(meshInstances[instanceId * 2 + 1].row0.x);
-    return (draw.drawFlags & 0x10000000u) != 0u
-        ? draw.objectIndex + asuint(meshInstances[instanceId + 1].row0.x) : draw.objectIndex;
+    return draw.objectIndex + asuint(meshInstances[instanceId + 1].row0.x);
 }
 
 #include "../GrassWind.hlsli"
@@ -253,11 +256,11 @@ void VSMain(
     float3 localTangent = tangent.xyz;
     float3 grassRoot = float3(0, 0, 0);
     float3 grassUp = float3(0, 1, 0);
-    if ((draw.drawFlags & 0x20000000u) != 0u)
+    [branch] if ((draw.drawFlags & 0x20000000u) != 0u)
     {
         InstanceTransform instance = meshInstances[(draw.drawFlags & 0x01000000u) != 0u ? instanceId * 2 + 1 :
             ((draw.drawFlags & 0x02000000u) != 0u ? instanceId * 2 : instanceId)];
-        if((draw.drawFlags & 0x00080000u) != 0u)
+        [branch] if((draw.drawFlags & 0x00080000u) != 0u)
         {
             PersistentInstance placement=persistentInstances[asuint(meshInstances[instanceId+1].row0.y)];
             instance.row0=placement.row0; instance.row1=placement.row1; instance.row2=placement.row2;
@@ -701,6 +704,22 @@ float2 ParallaxOcclusionUv(
     return lerp(currentUv, previousUv, interpolation);
 }
 
+// Gather returns the same four depths as a bilinear comparison footprint.
+// Clamp its origin inside the cascade tile; swizzles replicate edge texels
+// without allowing adjacent atlas tiles (or a wrapping material sampler) in.
+float4 GatherShadowDepths(int2 origin, int2 tileMinimum, int2 tileMaximum,
+    float2 atlasSize)
+{
+    int2 safeOrigin = clamp(origin, tileMinimum, tileMaximum - 1);
+    float4 depths = shadowMap.GatherRed(materialSampler,
+        (float2(safeOrigin) + 1.0) / atlasSize).wzxy;
+    if (origin.x < tileMinimum.x) depths = depths.xxzz;
+    else if (origin.x >= tileMaximum.x) depths = depths.yyww;
+    if (origin.y < tileMinimum.y) depths = depths.xyxy;
+    else if (origin.y >= tileMaximum.y) depths = depths.zwzw;
+    return depths;
+}
+
 float SampleDirectionalShadowCascade(ObjectData objectData,
     uint cascade, float3 biasedPosition, int pcfRadius)
 {
@@ -735,15 +754,11 @@ float SampleDirectionalShadowCascade(ObjectData objectData,
     // depth reads instead of entering the general PCF loop for every pixel.
     [branch] if (radius == 0)
     {
-        int2 p00 = clamp(center, tileOrigin, tileMaximum);
-        int2 p10 = clamp(center + int2(1, 0), tileOrigin, tileMaximum);
-        int2 p01 = clamp(center + int2(0, 1), tileOrigin, tileMaximum);
-        int2 p11 = clamp(center + int2(1, 1), tileOrigin, tileMaximum);
         float receiverDepth = projected.z - objectData.shadowParams.x;
-        float s00 = receiverDepth <= shadowMap.Load(int3(p00, 0));
-        float s10 = receiverDepth <= shadowMap.Load(int3(p10, 0));
-        float s01 = receiverDepth <= shadowMap.Load(int3(p01, 0));
-        float s11 = receiverDepth <= shadowMap.Load(int3(p11, 0));
+        float4 comparisons = float4(receiverDepth.xxxx <= GatherShadowDepths(
+            center, tileOrigin, tileMaximum, float2(width, height)));
+        float s00 = comparisons.x, s10 = comparisons.y;
+        float s01 = comparisons.z, s11 = comparisons.w;
         return lerp(lerp(s00, s10, texelFraction.x),
             lerp(s01, s11, texelFraction.x), texelFraction.y);
     }
@@ -751,18 +766,17 @@ float SampleDirectionalShadowCascade(ObjectData objectData,
     float litSamples = 0.0;
     [branch] if (radius == 1)
     {
-        [unroll] for (int y = -1; y <= 2; ++y)
-        [unroll] for (int x = -1; x <= 2; ++x)
+        // Four gathers cover the existing weighted 4x4 footprint exactly.
+        [unroll] for (int y = -1; y <= 1; y += 2)
+        [unroll] for (int x = -1; x <= 1; x += 2)
         {
-            float weightX = x == -1 ? 1.0 - texelFraction.x :
-                (x == 2 ? texelFraction.x : 1.0);
-            float weightY = y == -1 ? 1.0 - texelFraction.y :
-                (y == 2 ? texelFraction.y : 1.0);
-            int2 coordinate = clamp(center + int2(x, y),
-                tileOrigin, tileMaximum);
-            float storedDepth = shadowMap.Load(int3(coordinate, 0));
-            litSamples += (receiverDepth <= storedDepth ? 1.0 : 0.0) *
-                weightX * weightY;
+            float2 weightsX = x == -1 ? float2(1.0 - texelFraction.x, 1.0)
+                : float2(1.0, texelFraction.x);
+            float2 weightsY = y == -1 ? float2(1.0 - texelFraction.y, 1.0)
+                : float2(1.0, texelFraction.y);
+            float4 comparisons = float4(receiverDepth.xxxx <= GatherShadowDepths(
+                center + int2(x, y), tileOrigin, tileMaximum, float2(width, height)));
+            litSamples += dot(comparisons, weightsX.xyxy * weightsY.xxyy);
         }
         return litSamples / 9.0;
     }
@@ -806,16 +820,19 @@ float EvaluateDirectionalShadow(ObjectData objectData, SceneLightData light,
     float3 worldPosition, float3 surfaceNormal, float3 lightDirection,
     int pcfRadius)
 {
-    if (light.params.z < 0.0 || light.params.w <= 0.0)
+    // Skip filtering for disabled shadows. Backends still bind a valid null
+    // descriptor for empty texture slots, including this shader's atlas.
+    [branch] if (light.params.z < 0.0 || light.params.w <= 0.0)
         return 1.0;
 
     float normalFacing = saturate(dot(surfaceNormal, lightDirection));
     float3 biasedPosition = worldPosition + surfaceNormal *
         objectData.shadowParams.y * (1.0 - normalFacing);
     uint cascadeCount = clamp((uint)objectData.shadowCascadeData.x, 1u, 4u);
-    float viewDistance = max(0.0, dot(
-        worldPosition - objectData.viewPositionAlphaCutoff.xyz,
-        objectData.shadowCameraData.xyz));
+    // Radial bands keep a fixed receiver in the same cascade when the player
+    // turns in place. Camera-forward depth makes shadows change with look.
+    float viewDistance = distance(worldPosition,
+        objectData.viewPositionAlphaCutoff.xyz);
     if (viewDistance >= objectData.shadowCascadeData.w)
         return 1.0;
     uint cascade = 0u;
@@ -1015,11 +1032,16 @@ void ApplyGeometryFade(ObjectData data, float3 worldPosition)
         const float opacity=1.0-smoothstep(max(0.0,range-width),range,distance);
         // Scale complementary LOD intervals together, preserving their union.
         if(data.geometryFade.w>0.5) data.geometryFade.xy*=opacity;
-        else data.geometryFade=float4(0,opacity,0,1);
+        // A fully covered fixed proxy needs neither a dither hash nor clips.
+        else if(opacity<1.0) data.geometryFade=float4(0,opacity,0,1);
     }
     if (data.geometryFade.w > 0.5)
     {
         if (data.geometryFade.y <= data.geometryFade.x) clip(-1.0);
+        // The hash is in [0,1), so a fully covered interval cannot reject a
+        // pixel. Most forest fragments are outside the narrow LOD crossfade.
+        [branch] if (data.geometryFade.x <= 0.0 && data.geometryFade.y >= 1.0)
+            return;
         float3 cell = floor(worldPosition * 96.0);
         float threshold = frac(sin(dot(cell, float3(12.9898, 78.233, 37.719))) * 43758.5453);
         clip(threshold - data.geometryFade.x);
@@ -1612,14 +1634,18 @@ float4 PSMain(
         toonLight = max(toonLight, nDotL);
         float3 radiance = light.colorIntensity.rgb *
             light.colorIntensity.w * attenuation;
-        float centerShadow = EvaluateDirectionalShadow(
-            objectData, light, worldPos, n, lightDirection,
-            (int)objectData.shadowParams.w);
+        float scatteringWeight = objectData.subsurfaceColorWeight.w * materialDetail;
+        float centerShadow = 1.0;
+        // Unlit-facing surfaces have no direct contribution to shadow unless
+        // subsurface scattering is active. Avoid filtering an unused shadow.
+        [branch] if (nDotL > 0.0 || scatteringWeight > 0.0)
+            centerShadow = EvaluateDirectionalShadow(
+                objectData, light, worldPos, n, lightDirection,
+                (int)objectData.shadowParams.w);
         [branch] if (nDotL > 0.0)
         directLight += EvaluatePbrBrdf(
             base.rgb, metallic, roughness, f0, n, v, lightDirection, materialDetail) *
             radiance * centerShadow * nDotL;
-        float scatteringWeight = objectData.subsurfaceColorWeight.w * materialDetail;
         if (scatteringWeight > 0.0)
         {
             float3 radius = max(objectData.subsurfaceRadiusThickness.rgb, 0.0);

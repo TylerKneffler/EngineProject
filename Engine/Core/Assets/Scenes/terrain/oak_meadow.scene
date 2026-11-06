@@ -53,7 +53,7 @@
     </item>
     <item name="Late afternoon sun" enabled="true">
       <components>
-        <components:Light Light.lightType="1" Light.intensity="3.2" Light.range="8" Light.falloff="2" Light.intensityMode="0" Light.innerConeAngle="25" Light.outerConeAngle="35" Light.lightingChannels="-1" Light.cookieTexture="" Light.iesProfileTexture="" Light.cookieScale="1" Light.baked="false" Light.castsShadows="false" Light.shadowStrength="1" Light.shadowDepthBias="0.00050000002374872565" Light.shadowNormalBias="0.0020000000949949026" Light.shadowResolutionScale=".0625" Light.shadowFilterScale=".05">
+        <components:Light Light.lightType="1" Light.intensity="3.2" Light.range="8" Light.falloff="2" Light.intensityMode="0" Light.innerConeAngle="25" Light.outerConeAngle="35" Light.lightingChannels="-1" Light.cookieTexture="" Light.iesProfileTexture="" Light.cookieScale="1" Light.baked="false" Light.castsShadows="true" Light.shadowStrength="1" Light.shadowDepthBias="0.00050000002374872565" Light.shadowNormalBias="0.0020000000949949026" Light.shadowResolutionScale="1" Light.shadowFilterScale="1">
           <Light.color>
             <item>1</item>
             <item>0.91</item>
@@ -15043,7 +15043,7 @@
         </item>
         <item name="Oak forest" enabled="true">
           <components>
-            <components:TerrainObjectLayer TerrainObjectLayer.layerName="Oak forest" TerrainObjectLayer.viewDistance="220" TerrainObjectLayer.lod1Distance="28" TerrainObjectLayer.lod2Distance="90" TerrainObjectLayer.shadowDistance="90">
+            <components:TerrainObjectLayer TerrainObjectLayer.layerName="Oak forest" TerrainObjectLayer.viewDistance="220" TerrainObjectLayer.lod1Distance="28" TerrainObjectLayer.lod2Distance="90" TerrainObjectLayer.shadowDistance="90" TerrainObjectLayer.shadowLod="1">
               <TerrainObjectLayer.placements>
                 <item asset="Assets/Prefabs/Woodland/Oaks/Big_oak_tree_001_LOD0.prefab" id="1" yawDegrees="-65.23021365161298" scale="0.9689106">
                   <position _arrayEncoding="spaceSeparatedNumbers">27.8706 0.1602067 313.6045</position>

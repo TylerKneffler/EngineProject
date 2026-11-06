@@ -44,8 +44,15 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider)
     const auto signature=GetPlacementSignature();
     if (m_prefabInstances && m_prefabInstances->provider==provider &&
         m_prefabInstances->signature==signature && now<m_prefabInstances->nextCheck && !changed) return;
-    const auto key=[](const std::string& path) {
-        return std::filesystem::absolute(Mesh::ResolveFilePath(path)).lexically_normal().generic_string();
+    // Thousands of placements reference a small set of prefab paths. Resolve
+    // each distinct spelling once per refresh, retaining relocation checks on
+    // subsequent refreshes so newly created project overrides are still found.
+    std::map<std::string,std::string> resolvedKeys;
+    const auto key=[&](const std::string& path) -> const std::string& {
+        auto [entry,inserted]=resolvedKeys.try_emplace(path);
+        if (inserted)
+            entry->second=std::filesystem::absolute(Mesh::ResolveFilePath(path)).lexically_normal().generic_string();
+        return entry->second;
     };
     std::map<std::string,std::string> bases;
     for (const auto& [base,lods]:objectLods)
@@ -110,10 +117,14 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider)
                 glm::toMat4(SurfaceRotation(placement.normal,placement.yawDegrees))*
                 glm::scale(glm::mat4(1),glm::vec3(placement.scale));
         };
+        // CPU objects provide coarse spatial bounds; the compute path still
+        // selects visibility and LOD for each placement. Small 64 m groups
+        // multiplied every prefab part/band into thousands of CPU components.
+        constexpr float prefabGroupSpan=256.f;
         std::map<std::pair<int,int>,std::vector<const Placement*>> tiles;
         for (const auto* placement:records)
-            tiles[{int(std::floor(placement->position.x/64.f)),
-                int(std::floor(placement->position.z/64.f))}].push_back(placement);
+            tiles[{int(std::floor(placement->position.x/prefabGroupSpan)),
+                int(std::floor(placement->position.z/prefabGroupSpan))}].push_back(placement);
         std::map<std::pair<int,int>,std::shared_ptr<Mesh::InstanceData>> tileInstances;
         std::vector<std::string> chain{asset};
         if (const auto lods=objectLods.find(asset); lods!=objectLods.end() && !lods->second.meshes.empty())
@@ -181,6 +192,7 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider)
             mesh->useBoundsForShadowCulling=true;
             mesh->foliageWindStrength=original->foliageWindStrength;
             mesh->runtimeShadowDistance=std::max(0.f,shadowDistance);
+            mesh->prefabShadowLod=shadowLod<0 ? -1:std::min(shadowLod,int(chain.size())-1);
             if (chain.size()>1)
             {
                 mesh->prefabLodBand=int(lod);

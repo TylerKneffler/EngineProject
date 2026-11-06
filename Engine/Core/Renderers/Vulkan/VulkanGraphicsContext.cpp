@@ -560,14 +560,14 @@ bool VulkanGraphicsContext::CopyBuffer(
     if (!size || size > source->GetSize() || size > destination->GetSize())
         return false;
     VkBufferMemoryBarrier before{ VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER };
-    before.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    before.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
     before.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
     before.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     before.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     before.buffer = src->GetBuffer();
     before.size = size;
     vkCmdPipelineBarrier(m_commandBuffer,
-        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+        VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
         VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 1, &before, 0, nullptr);
     VkBufferCopy region{};
     region.size = size;

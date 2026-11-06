@@ -230,9 +230,10 @@ D3D12GraphicsContext::D3D12GraphicsContext(ID3D12GraphicsCommandList* cmdList,
     ID3D12RootSignature* rootSig,
     std::shared_ptr<D3D12OcclusionQueryState> occlusionState,
     std::shared_ptr<D3D12GpuTimingState> gpuTimings,
-    std::shared_ptr<D3D12IndirectSignatures> indirectSignatures)
+    std::shared_ptr<D3D12IndirectSignatures> indirectSignatures,
+    std::shared_ptr<Engine::Graphics::IGraphicsTexture> nullTexture)
     : m_cmdList(cmdList), m_rootSignature(rootSig),
-      m_occlusionState(std::move(occlusionState)), m_gpuTimings(std::move(gpuTimings)), m_indirectSignatures(std::move(indirectSignatures))
+      m_occlusionState(std::move(occlusionState)), m_gpuTimings(std::move(gpuTimings)), m_indirectSignatures(std::move(indirectSignatures)), m_nullTexture(std::move(nullTexture))
 {
     // Set the root signature immediately if provided
     if (m_cmdList && m_rootSignature)
@@ -486,6 +487,7 @@ bool D3D12GraphicsContext::DrawInstancesIndirect(const Engine::Graphics::IGraphi
     const auto* native = dynamic_cast<const D3D12GraphicsBuffer*>(buffer);
     if (!m_cmdList || !native || offset + (indexed ? 20u : 16u) > buffer->GetSize()) return false;
     if(!m_indirectSignatures) return false;
+    m_cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     m_cmdList->ExecuteIndirect(m_indirectSignatures->signatures[indexed?1:0].Get(),1,native->GetResource(),offset,nullptr,0);
     return true;
 }
@@ -515,7 +517,7 @@ void D3D12GraphicsContext::SetTexture(uint32_t slot, const Engine::Graphics::IGr
 {
     if (!m_cmdList || (slot >= 12 && (slot < 16 || slot >= 24)))
         return;
-    const auto* nativeTexture = dynamic_cast<const D3D12GraphicsTexture*>(texture);
+    const auto* nativeTexture = dynamic_cast<const D3D12GraphicsTexture*>(texture ? texture:m_nullTexture.get());
     if (!nativeTexture)
         return;
     ID3D12DescriptorHeap* heaps[] = { nativeTexture->GetHeap() };
@@ -631,6 +633,7 @@ void D3D12GraphicsContext::DrawIndexedInstanced(
     uint32_t startInstanceLocation)
 {
     if (!m_cmdList) return;
+    m_cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     m_cmdList->DrawIndexedInstanced(indexCountPerInstance, instanceCount, startIndexLocation, baseVertexLocation, startInstanceLocation);
 }
 
@@ -677,11 +680,13 @@ D3D12_RESOURCE_STATES D3D12GraphicsContext::ConvertResourceState(ResourceState s
 D3D12GraphicsContextFactory::D3D12GraphicsContextFactory(
     ID3D12Device* device,
     ID3D12CommandQueue* commandQueue,
-    ID3D12RootSignature* rootSignature)
+    ID3D12RootSignature* rootSignature,
+    std::shared_ptr<Engine::Graphics::IGraphicsTexture> nullTexture)
     : m_device(device), m_commandQueue(commandQueue), m_rootSignature(rootSignature),
       m_occlusionState(std::make_shared<D3D12OcclusionQueryState>(device)),
       m_gpuTimings(std::make_shared<D3D12GpuTimingState>(device, commandQueue)),
-      m_indirectSignatures(std::make_shared<D3D12IndirectSignatures>(device))
+      m_indirectSignatures(std::make_shared<D3D12IndirectSignatures>(device)),
+      m_nullTexture(std::move(nullTexture))
 {
     // Create command allocator
     HRESULT hr = device->CreateCommandAllocator(
@@ -709,7 +714,7 @@ std::unique_ptr<Engine::Graphics::IGraphicsContext> D3D12GraphicsContextFactory:
     // otherwise fall back to the factory's own command list.
     auto* list = m_externalCmdList ? m_externalCmdList : m_cmdList.Get();
     return std::make_unique<D3D12GraphicsContext>(
-        list, m_rootSignature, m_occlusionState, m_gpuTimings, m_indirectSignatures);
+        list, m_rootSignature, m_occlusionState, m_gpuTimings, m_indirectSignatures, m_nullTexture);
 }
 
 std::unique_ptr<Engine::Graphics::IGraphicsContext> D3D12GraphicsContextFactory::CreateContextForCommandBuffer(void* commandBuffer)
@@ -717,7 +722,7 @@ std::unique_ptr<Engine::Graphics::IGraphicsContext> D3D12GraphicsContextFactory:
     if (!commandBuffer) return nullptr;
     return std::make_unique<D3D12GraphicsContext>(
         static_cast<ID3D12GraphicsCommandList*>(commandBuffer), m_rootSignature,
-        m_occlusionState, m_gpuTimings, m_indirectSignatures);
+        m_occlusionState, m_gpuTimings, m_indirectSignatures, m_nullTexture);
 }
 
 void D3D12GraphicsContextFactory::SetCommandBuffer(void* cmd)

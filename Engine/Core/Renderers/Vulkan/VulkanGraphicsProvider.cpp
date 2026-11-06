@@ -19,7 +19,7 @@ VulkanGraphicsProvider::VulkanGraphicsProvider(
 {
     m_textureSystem = std::make_shared<VulkanTextureSystem>(
         physicalDevice, device, queue, queueFamily);
-    m_bufferFactory = std::make_unique<VulkanBufferFactory>(physicalDevice, device);
+    m_bufferFactory = std::make_unique<VulkanBufferFactory>(physicalDevice, device, queue, queueFamily);
     m_pipelineFactory = std::make_unique<VulkanPipelineStateFactory>(
         device, renderPass, m_textureSystem->GetDescriptorSetLayout());
     VkPhysicalDeviceProperties properties{};

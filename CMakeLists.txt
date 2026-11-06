@@ -2421,6 +2421,22 @@ if(NOT ENGINE_PROJECT_DIR AND WIN32 AND
         set_tests_properties(OakBackend_${backend} PROPERTIES
             WORKING_DIRECTORY "${ENGINE_ROOT}" TIMEOUT 240 RUN_SERIAL TRUE)
     endforeach()
+    add_test(NAME OakBackend_dx12_gpu_validation COMMAND OakBackendCapture dx12)
+    set_tests_properties(OakBackend_dx12_gpu_validation PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}" TIMEOUT 360 RUN_SERIAL TRUE
+        ENVIRONMENT "ENGINE_OAK_DX12_VALIDATION=gpu" SKIP_RETURN_CODE 77)
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/StableShadowCascadeTests.cpp")
+    enable_testing()
+    add_executable(StableShadowCascadeTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/StableShadowCascadeTests.cpp")
+    target_link_libraries(StableShadowCascadeTests PRIVATE Engine)
+    target_compile_definitions(StableShadowCascadeTests PRIVATE NOMINMAX)
+    target_include_directories(StableShadowCascadeTests PRIVATE "${ENGINE_ROOT}/Engine")
+    add_test(NAME StableShadowCascade COMMAND StableShadowCascadeTests)
+    set_tests_properties(StableShadowCascade PROPERTIES TIMEOUT 30)
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND WIN32)
@@ -2448,4 +2464,42 @@ if(NOT ENGINE_PROJECT_DIR AND WIN32)
         add_test(NAME TreeLod_${backend} COMMAND TreeLodBackendTests ${backend})
         set_tests_properties(TreeLod_${backend} PROPERTIES WORKING_DIRECTORY "${ENGINE_ROOT}" TIMEOUT 180 RUN_SERIAL TRUE)
     endforeach()
+endif()
+
+# Optional device-backed forest diagnostic; kept out of ordinary builds/tests.
+if(NOT ENGINE_PROJECT_DIR AND WIN32 AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/ForestPerformanceAudit.cpp")
+    add_executable(ForestPerformanceAudit EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/ForestPerformanceAudit.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/Grass/GrassField.cpp")
+    target_link_libraries(ForestPerformanceAudit PRIVATE Engine d3d11 dxgi)
+    target_compile_definitions(ForestPerformanceAudit PRIVATE NOMINMAX)
+    target_compile_options(ForestPerformanceAudit PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/bigobj>)
+    target_include_directories(ForestPerformanceAudit PRIVATE
+        "${ENGINE_ROOT}/Engine" "${ENGINE_ROOT}/Engine/Core/Assets")
+    add_test(NAME DX12StaticGeometry COMMAND ForestPerformanceAudit static-buffer)
+    set_tests_properties(DX12StaticGeometry PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}" TIMEOUT 60 RUN_SERIAL TRUE)
+    if(ENGINE_VULKAN_ENABLED)
+        add_test(NAME VulkanStaticGeometry COMMAND ForestPerformanceAudit static-buffer-vulkan)
+        set_tests_properties(VulkanStaticGeometry PROPERTIES
+            WORKING_DIRECTORY "${ENGINE_ROOT}" TIMEOUT 60 RUN_SERIAL TRUE)
+    endif()
+endif()
+
+if(EXISTS "${ENGINE_LOCAL_TEST_ROOT}/UploadRecordCacheTests.cpp")
+    add_executable(UploadRecordCacheTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/UploadRecordCacheTests.cpp")
+    target_include_directories(UploadRecordCacheTests PRIVATE "${ENGINE_ROOT}/Engine")
+    add_test(NAME UploadRecordCache COMMAND UploadRecordCacheTests)
+endif()
+
+if(EXISTS "${ENGINE_LOCAL_TEST_ROOT}/StreamedRenderRetirementTests.cpp")
+    add_executable(StreamedRenderRetirementTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/StreamedRenderRetirementTests.cpp")
+    target_link_libraries(StreamedRenderRetirementTests PRIVATE Engine)
+    target_include_directories(StreamedRenderRetirementTests PRIVATE "${ENGINE_ROOT}/Engine")
+    target_compile_definitions(StreamedRenderRetirementTests PRIVATE NOMINMAX)
+    add_test(NAME StreamedRenderRetirement COMMAND StreamedRenderRetirementTests)
+    set_tests_properties(StreamedRenderRetirement PROPERTIES TIMEOUT 30)
 endif()

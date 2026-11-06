@@ -26,6 +26,8 @@
 #include <iostream>
 #include <stdexcept>
 #include <type_traits>
+#include <cstdlib>
+#include <d3d12sdklayers.h>
 
 using namespace Engine::Renderers;
 using namespace Engine::Components;
@@ -82,6 +84,7 @@ void CheckSharedPrefabLayer()
     Engine::Scene::Scene scene;
     auto* owner=scene.AddObject("Painted objects"); owner->transform.position={-180,0,-180};
     auto* layer=owner->AddComponent<TerrainObjectLayer>();
+    layer->shadowLod=2;
     for (int i=0;i<2;++i)
     {
         TerrainObjectLayer::Placement p; p.asset=prefabPath; p.position={180.f+2*i,0,180};
@@ -91,6 +94,7 @@ void CheckSharedPrefabLayer()
     std::cerr << "Shared prefab first preparation complete\n";
     const auto meshes=scene.GetComponents<Mesh>();
     Check(meshes.size()==1 && meshes.front()->IsInstanced(),"prefab geometry was not shared");
+    Check(meshes.front()->prefabShadowLod==0,"single-level prefab lost its fixed shadow fallback");
     Check(meshes.front()->GetInstanceData()->transforms.size()==2,"placement instances missing");
     Check(provider.allocations==1,"source vertex buffer duplicated per placement");
     Check(glm::length(meshes.front()->Owner->transform.GetWorldPosition()-glm::vec3(-180,0,-180))<.001f,
@@ -105,6 +109,9 @@ void CheckSharedPrefabLayer()
     lodPlacement.asset=std::filesystem::absolute(lodPrefabPath).generic_string();
     lodPlacement.position={184,0,180}; layer->placements.push_back(lodPlacement);
     layer->objectLods[prefabPath]={{prefabPath,lodPrefabPath},{28}};
+    layer->shadowLod=2; // A two-band chain falls back to its last available proxy.
+    TerrainObjectLayer roundTrip; roundTrip.Deserialize(layer->Serialize());
+    Check(roundTrip.shadowLod==2,"fixed shadow LOD was not serialized");
     layer->MarkConfigurationDirty();
     for (float radius : {.8f,1.25f,0.f})
     {
@@ -113,6 +120,8 @@ void CheckSharedPrefabLayer()
         std::this_thread::sleep_for(std::chrono::milliseconds(1100));
         layer->PreparePrefabInstances(&provider); scene.CommitPendingObjectChanges();
         std::cerr << "Prefab edit prepared\n";
+        for(auto* mesh:scene.GetComponents<Mesh>())
+            Check(mesh->prefabShadowLod==1,"fixed shadow LOD did not clamp to the available chain");
         const auto colliders=scene.GetComponents<PrimitiveObjectCollider>();
         Check(colliders.size()==(radius>0 ? 3u:0u),"prefab collider edit did not affect all placements and LODs");
         Check(scene.GetComponents<RigidBody>().size()==colliders.size(),"static prefab bodies missing");
@@ -147,6 +156,7 @@ void CheckSharedPrefabLayer()
     }
     Check(instanceParts==2048 && sources.size()==85 && batches>sources.size(),
         "forest did not share bark/leaf sources across spatial tiles");
+    Check(batches<400,"forest expanded shared geometry into too many CPU mesh components");
     for (auto* collider:forest.GetComponents<PrimitiveObjectCollider>())
         Check(collider->Owner->name=="Meadow Explorer","unexpected tree collider in forest");
     for (auto* body:forest.GetComponents<RigidBody>())
@@ -166,6 +176,26 @@ template<class Renderer> void CaptureOak(const std::string& backend)
     ShowWindow(window.GetHWND(),SW_HIDE);
     Renderer renderer;
     Check(renderer.Init(window.GetHWND(),width,height),"oak renderer init failed");
+    Microsoft::WRL::ComPtr<ID3D12InfoQueue> validation;
+    if constexpr (std::is_same_v<Renderer,DX12GameRenderer>)
+        if(std::getenv("ENGINE_OAK_DX12_VALIDATION"))
+            Check(SUCCEEDED(renderer.GetDevice()->QueryInterface(IID_PPV_ARGS(&validation))),
+                "DX12 validation queue unavailable");
+    auto checkValidation=[&] {
+        if(!validation) return;
+        bool failed=false;
+        for(UINT64 i=0;i<validation->GetNumStoredMessages();++i)
+        {
+            SIZE_T bytes=0; validation->GetMessage(i,nullptr,&bytes);
+            std::vector<uint8_t> storage(bytes);
+            auto* message=reinterpret_cast<D3D12_MESSAGE*>(storage.data());
+            if(SUCCEEDED(validation->GetMessage(i,message,&bytes)) &&
+                message->Severity<=D3D12_MESSAGE_SEVERITY_ERROR)
+            { std::cerr << "DX12 validation " << message->ID << ": " << message->pDescription << '\n'; failed=true; }
+        }
+        validation->ClearStoredMessages();
+        Check(!failed,"DX12 validation reported an invalid submission");
+    };
     Engine::Scene::Scene scene; scene.Init(renderer.GetGraphicsProvider());
     scene.SetBeforeGpuResourceDestruction([&] { renderer.WaitIdle(); });
     Check(scene.Load("Engine/Core/Assets/Scenes/terrain/oak_meadow.scene"),"oak scene load failed");
@@ -185,18 +215,31 @@ template<class Renderer> void CaptureOak(const std::string& backend)
         << "Actual scene; authored entrance camera and established overlook camera; "
         << width << 'x' << height << "\n";
     bool refreshGrass=true;
+    glm::vec3 shadowLookOffset(0);
+    std::vector<std::pair<std::string,std::vector<uint8_t>>> capturedImages;
     auto render=[&] {
+        try {
+        // This direct-context screenshot harness does not retain recorded
+        // packets or rotate Scene's native buffers like the Editor pipeline.
+        // Complete the previous submission before mutating shared resources.
+        renderer.WaitIdle();
+        checkValidation();
         scene.AdvanceManualFrame(0);
         scene.ResetGrassPerformance();
         if (refreshGrass) for (auto* field:fields) field->RefreshEditorPreview();
+        const auto receiverTarget=camera->target;
+        if(glm::length(shadowLookOffset)>0.f)
+            camera->target=viewer->transform.position+glm::dvec3(shadowLookOffset);
         renderer.BeginFrame(); scene.PrepareRenderFrame();
         auto context=renderer.CreateFrameGraphicsContext();
         context->SetViewport({0,0,float(width),float(height),0,1});
         context->SetScissorRect({0,0,int(width),int(height)});
         scene.Render(context.get(),float(width)/height,camera,false,width,height,true);
+        camera->target=receiverTarget;
         if constexpr (std::is_same_v<Renderer,DX12GameRenderer>)
         {
-            renderer.EndFrame(); renderer.BeginFrame(); context=renderer.CreateFrameGraphicsContext();
+            renderer.EndFrame(); checkValidation(); renderer.WaitIdle();
+            renderer.BeginFrame(); context=renderer.CreateFrameGraphicsContext();
         }
         context->SetViewport({0,0,float(width),float(height),0,1});
         context->SetScissorRect({0,0,int(width),int(height)});
@@ -204,6 +247,16 @@ template<class Renderer> void CaptureOak(const std::string& backend)
         scene.Render(context.get(),float(width)/height,camera,false,width,height);
         if constexpr (!std::is_same_v<Renderer,DX11GameRenderer>) renderer.RequestSceneCapture();
         renderer.EndFrame();
+        checkValidation();
+        } catch(...) {
+            if constexpr (std::is_same_v<Renderer,DX12GameRenderer>)
+            {
+                std::cerr << "DX12 removal reason: " << std::hex <<
+                    unsigned(renderer.GetDevice()->GetDeviceRemovedReason()) << std::dec << '\n';
+                checkValidation();
+            }
+            throw;
+        }
     };
     auto capture=[&](const std::string& name,int frames) {
         for (int i=0;i<frames;++i) render();
@@ -230,12 +283,22 @@ template<class Renderer> void CaptureOak(const std::string& backend)
             Check(renderer.CaptureFrameRGBA(pixels),"oak capture failed");
         else Check(renderer.ReadSceneCaptureRGBA(pixels),"oak capture failed");
         Check(pixels.size()==width*height*4,"oak capture size wrong");
-        std::ofstream image(".local/tree-lod-oak-validation/"+backend+"-"+name+".ppm",std::ios::binary);
-        image << "P6\n" << width << ' ' << height << "\n255\n";
-        for (size_t i=0;i<pixels.size();i+=4) image.write(reinterpret_cast<const char*>(pixels.data()+i),3);
+        // Artifact writes can trigger the project's shader watcher. Publish
+        // screenshots only after all GPU validation has completed.
+        capturedImages.emplace_back(name,pixels);
         for (auto* material:scene.GetComponents<Material>())
             Check(material->shaderError.empty(),"oak material shader error");
+        Check(scene.GetLastRenderCpuTimings().instanceTileBuilt<32,
+            "shadow/color LOD metadata cache rebuilt static forest tiles");
         const auto& shadow=scene.GetShadowDebugSnapshot();
+        size_t fixedProxies=0;
+        for(auto* mesh:scene.GetComponents<Mesh>()) if(mesh->prefabLodBand>=0)
+        {
+            Check(mesh->prefabShadowLod==1,"authored forest does not pin its shadow proxy");
+            Check(mesh->prefabLodDistances==glm::vec2(28,90),"fixed shadows changed visible tree LODs");
+            fixedProxies+=mesh->prefabLodBand==1;
+        }
+        Check(shadow.casterCount<=fixedProxies,"non-proxy forest bands entered shadow preparation");
         report << name << ": selectedShadow=" << shadow.hasSelectedLight << " casters="
             << shadow.submittedCasterDrawCount << " grassFields=" << fields.size() << std::endl;
         return pixels;
@@ -244,9 +307,8 @@ template<class Renderer> void CaptureOak(const std::string& backend)
     {
         if (view=="overlook") { viewer->transform.position={-5,27,-39}; camera->target={2,1,5}; }
         capture(view,view=="entrance" ? 45:12);
-        std::vector<std::pair<Material*,bool>> savedMaterials;
-        for (auto* material:scene.GetComponents<Material>())
-        { savedMaterials.emplace_back(material,material->castsShadows); material->castsShadows=true; }
+        Check(scene.GetShadowDebugSnapshot().hasSelectedLight,"authored oak sun shadows are disabled");
+        Check(scene.GetShadowDebugSnapshot().submittedCasterDrawCount>0,"authored oak shadow casters missing");
         struct SavedLight { Light* light; bool casts; float resolution; };
         std::vector<SavedLight> savedLights;
         for (auto* light:scene.GetComponents<Light>())
@@ -254,7 +316,7 @@ template<class Renderer> void CaptureOak(const std::string& backend)
         const auto noShadows=capture(view+"-diagnostic-shadows-off",4);
         for (const auto& saved:savedLights)
             if (saved.light->GetLightType()==Light::Type::Directional)
-            { saved.light->castsShadows=true; saved.light->shadowResolutionScale=1; }
+            { saved.light->castsShadows=saved.casts; saved.light->shadowResolutionScale=saved.resolution; }
         const auto normal=capture(view+"-diagnostic-shadows-on",8);
         Check(scene.GetShadowDebugSnapshot().hasSelectedLight,"oak diagnostic directional light was not shadowed");
         Check(scene.GetShadowDebugSnapshot().submittedCasterDrawCount>0,"oak diagnostic shadow casters missing");
@@ -266,7 +328,6 @@ template<class Renderer> void CaptureOak(const std::string& backend)
         Check(darker>100,"oak directional shadows had no visible effect");
         for (const auto& saved:savedLights)
         { saved.light->castsShadows=saved.casts; saved.light->shadowResolutionScale=saved.resolution; }
-        for (const auto& saved:savedMaterials) saved.first->castsShadows=saved.second;
         // Override the authored material sidedness to prove terrain still culls
         // its underside, using the actual scene with other objects hidden.
         std::vector<Engine::Core::Object*> hidden;
@@ -294,8 +355,71 @@ template<class Renderer> void CaptureOak(const std::string& backend)
         viewer->transform.position=savedPosition; camera->target=savedTarget;
         refreshGrass=true;
     }
+    const auto reference=capture("stable-look-reference",8);
+    const auto referenceShadow=scene.GetShadowDebugSnapshot();
+    for(const auto look: {glm::vec3(1,0,0),glm::vec3(0,0,-1)})
+    {
+        shadowLookOffset=look;
+        const auto rotated=capture(look.x>0 ? "stable-look-side":"stable-look-back",8);
+        const auto rotatedShadow=scene.GetShadowDebugSnapshot();
+        for(uint32_t cascade=0;cascade<referenceShadow.cascadeCount;++cascade)
+        {
+            Check(glm::length(rotatedShadow.cascadeCenters[cascade]-
+                referenceShadow.cascadeCenters[cascade])<.0001f,
+                "looking around moved a world-space shadow cascade");
+            Check(std::abs(rotatedShadow.cascadeRadii[cascade]-
+                referenceShadow.cascadeRadii[cascade])<.0001f,
+                "looking around resized a world-space shadow cascade");
+        }
+        size_t changedPixels=0;
+        for(size_t i=0;i<reference.size();i+=4)
+            changedPixels+=std::abs(int(reference[i])-int(rotated[i]))>5 ||
+                std::abs(int(reference[i+1])-int(rotated[i+1]))>5 ||
+                std::abs(int(reference[i+2])-int(rotated[i+2]))>5;
+        report << "fixed receiver after shadow-camera rotation: changed pixels="
+            << changedPixels << std::endl;
+        Check(changedPixels<width*height/500,
+            "turning the shadow camera visibly changed a fixed receiver view");
+    }
+    shadowLookOffset=glm::vec3(0);
+    for(int warm=0;warm<4;++warm) render();
+    auto previous=scene.GetShadowDebugSnapshot();
+    uint32_t refreshed=0;
+    for(int frame=0;frame<6;++frame)
+    {
+        const glm::vec3 step(.2f,0,0);
+        viewer->transform.position+=step; camera->target+=step+glm::vec3(.1f,0,0);
+        render();
+        const auto current=scene.GetShadowDebugSnapshot();
+        uint32_t changed=0;
+        for(uint32_t cascade=0;cascade<current.cascadeCount;++cascade)
+            if(glm::length(current.cascadeCenters[cascade]-previous.cascadeCenters[cascade])>.01f)
+            { ++changed; refreshed|=1u<<cascade; }
+        Check(changed>0 && changed<=2,"small camera movement did not budget shadow cascade updates");
+        previous=current;
+    }
+    Check(refreshed==((1u<<previous.cascadeCount)-1u),"far shadow cascade refresh starved");
+    viewer->transform.position+=glm::vec3(5,0,0); camera->target+=glm::vec3(5,0,0);
+    render();
+    const auto cut=scene.GetShadowDebugSnapshot();
+    uint32_t changed=0;
+    for(uint32_t cascade=0;cascade<cut.cascadeCount;++cascade)
+        changed+=glm::length(cut.cascadeCenters[cascade]-previous.cascadeCenters[cascade])>.01f;
+    Check(changed==cut.cascadeCount,"camera cut did not refresh the entire shadow atlas");
+    camera->fov*=.75f; render();
+    const auto zoom=scene.GetShadowDebugSnapshot();
+    for(uint32_t cascade=0;cascade<zoom.cascadeCount;++cascade)
+        Check(std::abs(zoom.cascadeRadii[cascade]-cut.cascadeRadii[cascade])<.0001f,
+            "zoom changed world-space radial shadow coverage");
     renderer.WaitIdle();
-    std::cout << backend << ": actual oak meadow entrance/overlook captures and shadow comparisons passed.\n";
+    checkValidation();
+    for (const auto& [name,pixels]:capturedImages)
+    {
+        std::ofstream image(".local/tree-lod-oak-validation/"+backend+"-"+name+".ppm",std::ios::binary);
+        image << "P6\n" << width << ' ' << height << "\n255\n";
+        for (size_t i=0;i<pixels.size();i+=4) image.write(reinterpret_cast<const char*>(pixels.data()+i),3);
+    }
+    std::cout << backend << ": actual oak captures, shadow comparisons, staggered refresh and camera cuts passed.\n";
 }
 
 int main(int argc,char** argv)
@@ -304,6 +428,20 @@ int main(int argc,char** argv)
     {
         Check(argc==2,"expected renderer backend");
         const std::string backend=argv[1];
+        if(backend=="dx12" && std::getenv("ENGINE_OAK_DX12_VALIDATION"))
+        {
+            Microsoft::WRL::ComPtr<ID3D12Debug> debug;
+            if(FAILED(D3D12GetDebugInterface(IID_PPV_ARGS(&debug))))
+            { std::cerr << "Skipping DX12 validation: debug layer unavailable\n"; return 77; }
+            debug->EnableDebugLayer();
+            if(std::string(std::getenv("ENGINE_OAK_DX12_VALIDATION"))=="gpu")
+            {
+                Microsoft::WRL::ComPtr<ID3D12Debug1> gpuDebug;
+                if(FAILED(debug.As(&gpuDebug)))
+                { std::cerr << "Skipping DX12 validation: GPU validation unavailable\n"; return 77; }
+                gpuDebug->SetEnableGPUBasedValidation(TRUE);
+            }
+        }
         if (backend=="shared-prefabs") CheckSharedPrefabLayer();
         else if (backend=="dx11") CaptureOak<DX11GameRenderer>(backend);
         else if (backend=="dx12") CaptureOak<DX12GameRenderer>(backend);

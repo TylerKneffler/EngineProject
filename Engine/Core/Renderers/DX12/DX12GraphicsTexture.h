@@ -53,6 +53,7 @@ public:
         bool srgb = true) override;
     std::shared_ptr<Engine::Graphics::IGraphicsTexture> CreateDepthTexture2D(
         uint32_t width, uint32_t height) override;
+    std::shared_ptr<Engine::Graphics::IGraphicsTexture> GetNullTexture();
 
 private:
     static constexpr uint32_t kMaxTextures = 1024;
@@ -63,5 +64,6 @@ private:
     uint32_t m_firstDescriptor = 0;
     uint32_t m_descriptorCount = 0;
     uint32_t m_nextDescriptor = 0;
+    std::shared_ptr<Engine::Graphics::IGraphicsTexture> m_nullTexture;
 };
 }

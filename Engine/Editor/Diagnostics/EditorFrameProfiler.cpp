@@ -143,6 +143,11 @@ namespace Engine::Editor
             << ",\"begin_ui_ms\":" << beginUiMilliseconds
             << ",\"clear_ms\":" << sample.clearMilliseconds
             << ",\"scene_prepare_ms\":" << sample.scenePrepareMilliseconds
+            << ",\"prepare_asset_publication_ms\":" << prepareTimings.assetPublicationMs
+            << ",\"prepare_object_commit_ms\":" << prepareTimings.objectCommitMs
+            << ",\"prepare_prefab_instances_ms\":" << prepareTimings.prefabInstancesMs
+            << ",\"prepare_graphics_preparation_ms\":" << prepareTimings.graphicsPreparationMs
+            << ",\"prepare_native_buffers_ms\":" << prepareTimings.nativeBuffersMs
             << ",\"prepare_transforms_ms\":" << prepareTimings.transformsMs
             << ",\"prepare_transform_snapshot_ms\":" << prepareTimings.transformSnapshotMs
             << ",\"prepare_transform_compute_ms\":" << prepareTimings.transformComputeMs

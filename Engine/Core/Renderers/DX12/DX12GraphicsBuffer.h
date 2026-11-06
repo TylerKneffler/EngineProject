@@ -53,8 +53,8 @@ private:
 class D3D12BufferFactory : public Engine::Graphics::IGraphicsBufferFactory
 {
 public:
-    explicit D3D12BufferFactory(ID3D12Device* device)
-        : m_device(device) {}
+    explicit D3D12BufferFactory(ID3D12Device* device, ID3D12CommandQueue* queue = nullptr)
+        : m_device(device), m_queue(queue) {}
 
     std::unique_ptr<Engine::Graphics::IGraphicsBuffer> CreateBuffer(
         Engine::Graphics::IGraphicsBuffer::Usage usage,
@@ -63,7 +63,11 @@ public:
         const void* initialData = nullptr,
         uint32_t elementStride = 0) override;
 
+    std::unique_ptr<Engine::Graphics::IGraphicsBuffer> CreateStaticVertexBuffer(
+        uint64_t sizeBytes, const void* initialData) override;
+
 private:
     ID3D12Device* m_device;
+    ID3D12CommandQueue* m_queue;
 };
 }

@@ -39,13 +39,18 @@ private:
 class VulkanBufferFactory : public Engine::Graphics::IGraphicsBufferFactory
 {
 public:
-    VulkanBufferFactory(VkPhysicalDevice physicalDevice, VkDevice device)
-        : m_physicalDevice(physicalDevice), m_device(device) {}
+    VulkanBufferFactory(VkPhysicalDevice physicalDevice, VkDevice device,
+        VkQueue queue = VK_NULL_HANDLE, uint32_t queueFamily = 0)
+        : m_queue(queue), m_queueFamily(queueFamily), m_physicalDevice(physicalDevice), m_device(device) {}
     std::unique_ptr<Engine::Graphics::IGraphicsBuffer> CreateBuffer(Engine::Graphics::IGraphicsBuffer::Usage usage,
         Engine::Graphics::IGraphicsBuffer::AccessMode access, uint64_t sizeBytes,
         const void* initialData = nullptr,
         uint32_t elementStride = 0) override;
+    std::unique_ptr<Engine::Graphics::IGraphicsBuffer> CreateStaticVertexBuffer(
+        uint64_t sizeBytes, const void* initialData) override;
 private:
+    VkQueue m_queue;
+    uint32_t m_queueFamily;
     VkPhysicalDevice m_physicalDevice;
     VkDevice m_device;
 };

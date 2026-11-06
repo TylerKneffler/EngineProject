@@ -290,7 +290,8 @@ def markdown(result, comparison=None):
                 "render_retained_ui_ms", "render_portal_ms", "render_worker_active_ms", "render_main_job_ms",
                 "render_worker_wait_ms", "render_record_pack_ms", "render_record_wait_ms", "prepare_transforms_ms",
                 "prepare_transform_snapshot_ms", "prepare_transform_compute_ms", "prepare_transform_commit_ms",
-                "scene_prepare_ms", "prepare_items_ms", "prepare_item_validation_ms", "prepare_item_textures_ms",
+                "scene_prepare_ms", "prepare_asset_publication_ms", "prepare_object_commit_ms",
+                "prepare_prefab_instances_ms", "prepare_graphics_preparation_ms", "prepare_native_buffers_ms", "prepare_items_ms", "prepare_item_validation_ms", "prepare_item_textures_ms",
                 "prepare_item_shaders_ms", "prepare_item_mesh_state_ms", "prepare_item_bounds_ms",
                 "prepare_item_lod_ms", "prepare_item_build_ms",
                 "prepare_spatial_index_ms", "prepare_spatial_compare_ms", "prepare_spatial_refit_ms", "prepare_spatial_build_ms"):

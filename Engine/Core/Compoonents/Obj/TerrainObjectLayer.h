@@ -42,6 +42,8 @@ public:
     float lod2Distance = 13.f;
     float lodHysteresis = .75f;
     float shadowDistance = 8.f;
+    // -1 follows distance bands; 0..2 pins the prefab shadow proxy only.
+    int shadowLod = -1;
     std::vector<Placement> placements;
     static constexpr size_t MaximumObjectLods = 16;
     struct ObjectLods

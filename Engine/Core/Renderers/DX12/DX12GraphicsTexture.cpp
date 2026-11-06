@@ -55,6 +55,26 @@ D3D12TextureFactory::D3D12TextureFactory(
         D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 }
 
+std::shared_ptr<Engine::Graphics::IGraphicsTexture> D3D12TextureFactory::GetNullTexture()
+{
+    if(m_nullTexture || !m_device || !m_heap || m_nextDescriptor>=m_descriptorCount)
+        return m_nullTexture;
+    auto cpu=m_heap->GetCPUDescriptorHandleForHeapStart();
+    auto gpu=m_heap->GetGPUDescriptorHandleForHeapStart();
+    const auto index=m_firstDescriptor+m_nextDescriptor++;
+    cpu.ptr+=SIZE_T(index)*m_descriptorSize;
+    gpu.ptr+=UINT64(index)*m_descriptorSize;
+    D3D12_SHADER_RESOURCE_VIEW_DESC view{};
+    view.Format=DXGI_FORMAT_R8G8B8A8_UNORM;
+    view.ViewDimension=D3D12_SRV_DIMENSION_TEXTURE2D;
+    view.Shader4ComponentMapping=D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    view.Texture2D.MipLevels=1;
+    m_device->CreateShaderResourceView(nullptr,&view,cpu);
+    m_nullTexture=std::make_shared<D3D12GraphicsTexture>(
+        Microsoft::WRL::ComPtr<ID3D12Resource>{},m_heap,gpu);
+    return m_nullTexture;
+}
+
 std::shared_ptr<Engine::Graphics::IGraphicsTexture> D3D12TextureFactory::CreateTexture2D(
     uint32_t width,
     uint32_t height,
@@ -226,7 +246,7 @@ D3D12TextureFactory::CreateDepthTexture2D(uint32_t width, uint32_t height)
     const auto heapProperties = HeapProperties(D3D12_HEAP_TYPE_DEFAULT);
     Microsoft::WRL::ComPtr<ID3D12Resource> texture;
     if (FAILED(m_device->CreateCommittedResource(&heapProperties,
-        D3D12_HEAP_FLAG_NONE, &desc, D3D12_RESOURCE_STATE_DEPTH_WRITE,
+        D3D12_HEAP_FLAG_NONE, &desc, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
         &clear, IID_PPV_ARGS(&texture))))
         return nullptr;
 

@@ -2,6 +2,7 @@
 #include "Core/Rendering/RenderBoundsCache.h"
 #include "Core/Rendering/DrawBatchPreparation.h"
 #include "Core/Rendering/ShaderSourceCache.h"
+#include "Core/Rendering/UploadRecordCache.h"
 #include "Core/Compoonents/TransformHierarchy.h"
 #include "Core/Scene/ComponentRegistry.h"
 #include "Core/Rendering/PersistentInstanceBatches.h"
@@ -255,6 +256,7 @@ public:
     }
     struct PrepareTimings
     {
+        double assetPublicationMs=0,objectCommitMs=0,prefabInstancesMs=0,graphicsPreparationMs=0,nativeBuffersMs=0;
         double lookupMs = 0.0;
         double itemsMs = 0.0;
         double itemValidationMs=0, itemTexturesMs=0, itemShadersMs=0;
@@ -344,12 +346,15 @@ public:
     void RecordGpuParticleSimulation(IGraphicsContext* context);
     struct RetiredGraphicsResources
     {
+        // Detached built-in render-only leaves retain their full mesh/texture
+        // ownership graph until the submission fence completes.
+        std::vector<std::unique_ptr<Object>> objects;
         std::vector<std::unique_ptr<IGraphicsBuffer>> buffers;
         std::vector<std::shared_ptr<IGraphicsBuffer>> sharedBuffers;
         std::vector<std::unique_ptr<IPipelineState>> pipelines;
         std::vector<std::shared_ptr<Engine::Graphics::IGraphicsTexture>> textures;
         bool Empty() const
-        { return buffers.empty() && sharedBuffers.empty() && pipelines.empty() && textures.empty(); }
+        { return objects.empty() && buffers.empty() && sharedBuffers.empty() && pipelines.empty() && textures.empty(); }
     };
     // Called by the render owner after EndFrame while the simulation handoff
     // is blocked. The caller keeps these resources until the GPU frame fence.
@@ -909,6 +914,7 @@ private:
     void* m_objectCBMapped = nullptr;
     std::unique_ptr<IGraphicsBuffer> m_objectDataBuffer;
     void* m_objectDataMapped = nullptr;
+    Engine::Rendering::UploadRecordCache m_objectUploadCache,m_shadowUploadCache;
     std::unique_ptr<IGraphicsBuffer> m_shadowConstantBuffer;
     void* m_shadowCBMapped = nullptr;
     std::unique_ptr<IGraphicsBuffer> m_shadowObjectDataBuffer;
@@ -921,6 +927,7 @@ private:
     void* m_boneDataMapped = nullptr;
     // Capacity growth can occur while prior command buffers are still in
     // flight. Game rendering moves these into fence-tagged retirement batches.
+    std::vector<std::unique_ptr<Object>> m_retiredRenderObjects;
     std::vector<std::unique_ptr<IGraphicsBuffer>> m_retiredRenderBuffers;
     std::vector<std::shared_ptr<IGraphicsBuffer>> m_retiredSharedRenderBuffers;
     bool m_deferGraphicsRetirement = false;
@@ -1083,6 +1090,7 @@ private:
     struct RenderPassBuffers
     {
         std::unique_ptr<IGraphicsBuffer> constants, objects, shadowConstants, shadowObjects;
+        Engine::Rendering::UploadRecordCache objectCache,shadowCache;
         void* constantsMapped=nullptr; void* objectsMapped=nullptr;
         void* shadowConstantsMapped=nullptr; void* shadowObjectsMapped=nullptr;
         uint32_t capacity=0;

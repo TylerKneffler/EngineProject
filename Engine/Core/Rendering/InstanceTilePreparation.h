@@ -32,14 +32,16 @@ public:
         std::vector<RecordsOwner> records;
         uint64_t reused=0,built=0,workerBatches=0;
     };
-    Result Prepare(const std::vector<Input>& inputs,uint64_t serial)
+    // A pass may use different LOD bands for the same object slot. Retain
+    // both versions so alternating shadow/color passes do not evict each other.
+    Result Prepare(const std::vector<Input>& inputs,uint64_t serial,uint32_t domain=0)
     {
         Result result;
         result.records.resize(inputs.size());
         std::vector<size_t> changed;
         for(size_t i=0;i<inputs.size();++i)
         {
-            auto found=m_entries.find(inputs[i].slot);
+            auto found=m_entries.find((uint64_t(domain)<<32)|inputs[i].slot);
             if(found!=m_entries.end() && found->second.input==inputs[i])
             {
                 found->second.serial=serial;
@@ -74,7 +76,7 @@ public:
         // Join precedes owner-side publication. Prior readers own their record
         // vectors even when a source is edited, removed or its slot is reused.
         for(const auto i:changed)
-            m_entries[inputs[i].slot]={inputs[i],result.records[i],serial};
+            m_entries[(uint64_t(domain)<<32)|inputs[i].slot]={inputs[i],result.records[i],serial};
         result.built=changed.size();
         for(auto it=m_entries.begin();it!=m_entries.end();)
             if(serial>it->second.serial && serial-it->second.serial>240) it=m_entries.erase(it);
@@ -83,6 +85,6 @@ public:
     }
 private:
     struct Entry { Input input; RecordsOwner records; uint64_t serial; };
-    std::unordered_map<uint32_t,Entry> m_entries;
+    std::unordered_map<uint64_t,Entry> m_entries;
 };
 }

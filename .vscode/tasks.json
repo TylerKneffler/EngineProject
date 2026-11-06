@@ -153,6 +153,28 @@
                 "focus": false
             },
             "problemMatcher": []
+        },
+        {
+            "label": "CMake: Build Editor Release (performance)",
+            "type": "process",
+            "command": "cmake",
+            "args": [
+                "--build",
+                "${workspaceFolder}/build/Debug",
+                "--config",
+                "Release",
+                "--target",
+                "Editor",
+                "--parallel"
+            ],
+            "dependsOn": "CMake: Configure (Debug)",
+            "dependsOrder": "sequence",
+            "group": "build",
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            },
+            "problemMatcher": "$msCompile"
         }
     ],
     "inputs": [

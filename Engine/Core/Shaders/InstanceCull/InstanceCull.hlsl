@@ -66,23 +66,32 @@ void CSMain(uint3 id : SV_DispatchThreadID, uint3 group : SV_GroupID, uint3 thre
             const float4 worldCenter=float4(dot(world.sphere,float4(instanceCenter,1)),dot(worldRow1,float4(instanceCenter,1)),dot(world.lod,float4(instanceCenter,1)),1);
             const float3 worldExtent=float3(dot(abs(worldX),instanceExtent),dot(abs(worldY),instanceExtent),dot(abs(worldZ),instanceExtent));
             const float radius=length(worldExtent);
+            const bool shadowPass=(constants.selection.w & 1)!=0;
             if(constants.selection.x>=0 && (constants.selection.w & 2)!=0)
             {
                 // Conservative per-placement bands. Shader dithering resolves the
                 // overlap; testing the tile center would lose trees at boundaries.
-                const float distance=length(worldCenter.xyz-constants.cameraPosition.xyz);
+                const float3 delta=abs(worldCenter.xyz-constants.cameraPosition.xyz);
+                // Shadow vertices are static. Color vertices can bend in wind,
+                // so retain their original conservative spherical envelope.
+                const float nearest=shadowPass ? length(max(delta-worldExtent,0.0))
+                    : length(delta)-radius;
+                const float farthest=shadowPass ? length(delta+worldExtent)
+                    : length(delta)+radius;
                 const float width=max(.001,min(.5,(lodData.lod.y-lodData.lod.x)*.25));
-                if ((constants.selection.x==0 && distance-radius>lodData.lod.x+width) ||
-                    (constants.selection.x==1 && (distance+radius<lodData.lod.x-width || distance-radius>lodData.lod.y+width)) ||
-                    (constants.selection.x==2 && distance+radius<lodData.lod.y-width)) continue;
+                if ((constants.selection.x==0 && nearest>lodData.lod.x+width) ||
+                    (constants.selection.x==1 && (farthest<lodData.lod.x-width || nearest>lodData.lod.y+width)) ||
+                    (constants.selection.x==2 && farthest<lodData.lod.y-width)) continue;
             }
             // Range culling is shadow-only. Keep boundary-crossing placements
             // for the per-fragment fade instead of dropping the whole tile.
             if((constants.selection.w & 1)!=0 && lodData.lod.z>0.0 &&
-                length(worldCenter.xyz-constants.cameraPosition.xyz)-radius>=lodData.lod.z) continue;
+                length(max(abs(worldCenter.xyz-constants.cameraPosition.xyz)-worldExtent,0.0))>=lodData.lod.z) continue;
             bool visible=true;
             [unroll] for(uint plane=0;plane<6;++plane)
-                if(dot(planes[plane],worldCenter)<-radius*length(planes[plane].xyz)) visible=false;
+                if(dot(planes[plane],worldCenter)<-(shadowPass
+                    ? dot(abs(planes[plane].xyz),worldExtent)
+                    : radius*length(planes[plane].xyz))) visible=false;
             if(!visible) continue;
             uint destination; InterlockedAdd(outputInstances[0].row0.y,1,destination);
             OutputRecord result; result.row0=uint4(bounds.meta.z,placementIndex,0,0); result.row1=placement.identity; result.row2=0;

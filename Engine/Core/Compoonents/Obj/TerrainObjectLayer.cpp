@@ -20,6 +20,7 @@ TerrainObjectLayer::TerrainObjectLayer()
     RegisterField("lod2Distance", lod2Distance, "Object LOD");
     RegisterField("lodHysteresis", lodHysteresis, "Object LOD");
     RegisterField("shadowDistance", shadowDistance, "Object LOD");
+    RegisterField("shadowLod", shadowLod, "Object LOD");
 }
 
 std::map<std::string, std::vector<std::string>> TerrainObjectLayer::GetDefinedObjectLods() const
@@ -195,6 +196,7 @@ void TerrainObjectLayer::Deserialize(const JsonValue& value)
     lod2Distance = std::clamp(lod2Distance, lod1Distance, viewDistance);
     lodHysteresis = std::clamp(lodHysteresis, 0.f, 10.f);
     shadowDistance = std::clamp(shadowDistance, 0.f, viewDistance);
+    shadowLod = std::clamp(shadowLod, -1, 2);
     layerName = value.Has("layerName") ? value["layerName"].AsString() : "Objects";
     objectLods.clear();
     const auto& lodEntries = value["objectLods"];
@@ -256,6 +258,7 @@ void TerrainObjectLayer::InstallPrepared(TerrainObjectLayer&& source)
     lod2Distance = source.lod2Distance;
     lodHysteresis = source.lodHysteresis;
     shadowDistance = source.shadowDistance;
+    shadowLod = source.shadowLod;
     objectLods = std::move(source.objectLods);
     placements = std::move(source.placements);
     m_prepared = std::move(source.m_prepared);
@@ -326,10 +329,16 @@ bool TerrainObjectLayer::DrawProperties(::Engine::Editor::IEditorUi& ui)
     changed |= ui.DragFloat("Shadow distance (m)", &shadowDistance,
         .25f, 0.f, viewDistance);
     ui.Tooltip("Objects stop casting shadows beyond this distance. Zero disables object shadows. Shadow quality is set in Preferences > Rendering > Realtime Shadows.");
+    const char* shadowLods[]={"Distance LODs", "Fixed LOD 0", "Fixed LOD 1", "Fixed LOD 2"};
+    int shadowChoice=std::clamp(shadowLod+1,0,3);
+    if(ui.Combo("Shadow geometry", &shadowChoice, shadowLods, 4))
+    { shadowLod=shadowChoice-1; changed=true; }
+    ui.Tooltip("Fixed shadow geometry keeps the canopy silhouette stable as the camera moves. Visible object LODs remain independent. Missing levels use the last available level.");
     viewDistance = std::clamp(viewDistance, 1.f, 100000.f);
     lod1Distance = std::clamp(lod1Distance, 0.f, viewDistance);
     lod2Distance = std::clamp(lod2Distance, lod1Distance, viewDistance);
     shadowDistance = std::clamp(shadowDistance, 0.f, viewDistance);
+    shadowLod = std::clamp(shadowLod, -1, 2);
     const std::string count = "Stored placements: " +
         std::to_string(placements.size());
     ui.Label(count.c_str());
