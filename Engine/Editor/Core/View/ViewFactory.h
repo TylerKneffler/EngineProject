@@ -101,6 +101,7 @@ public:
     std::function<void(const std::string&)> OnAssetDropped;     // SceneView
     std::function<void(const std::string&, Engine::Core::Object*)> OnAssetAssigned;
     std::function<Engine::Core::Object*(const std::string&)> OnAssetPreviewRequested;
+    std::function<Engine::Core::Object*(Engine::Scene::Scene*, Engine::Serialization::PreparedPrefab&)> OnPreparedAssetPreviewRequested;
     std::function<void(Engine::Core::Object*)> OnAssetPreviewCancelled;
     std::function<void(Engine::Core::Object*, const std::string&)> OnAssetPreviewCommitted;
     std::function<void()>                  OnPropertiesChanged;

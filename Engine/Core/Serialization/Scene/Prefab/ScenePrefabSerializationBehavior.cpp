@@ -1,5 +1,7 @@
 #include "Core/Serialization/SceneSerializerInternal.h"
 #include "Core/Serialization/Json.h"
+#include "Core/Serialization/PrefabLoadProfile.h"
+#include "Core/Serialization/PreparedPrefab.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Scene/Settings/SceneSettingsSerialization.h"
 #include "Core/Graphics/IGraphicsProvider.h"
@@ -218,6 +220,18 @@ std::filesystem::path ResolvePrefabPath(const std::string& path)
     return requested;
 }
 
+std::string PrefabDocumentKey(const std::filesystem::path& path)
+{
+    std::error_code error;
+    auto absolute = std::filesystem::absolute(path, error);
+    std::string key = (error ? path : absolute).lexically_normal().generic_string();
+#ifdef _WIN32
+    std::transform(key.begin(), key.end(), key.begin(),
+        [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
+#endif
+    return key;
+}
+
 JsonValue LoadPrefabDocument(const std::filesystem::path& path)
 {
     try
@@ -281,7 +295,7 @@ std::shared_ptr<CachedPrefabDocument> LoadPrefabDocumentCached(
         entry->key = key;
         entry->modified = modified;
         entry->size = size;
-        entry->document = parsed ? *parsed : LoadPrefabDocument(path);
+        entry->document = parsed ? PreparedPrefab::CopyOrConsumeDocument(*parsed) : LoadPrefabDocument(path);
         return entry;
     };
     if (modifiedError || sizeError)
@@ -302,20 +316,22 @@ Engine::Core::Object* SceneSerializer::InstantiatePrefab(
     const std::string& path,
     Engine::Graphics::IGraphicsProvider* graphicsProvider)
 {
+    PrefabLoadProfile profile(path);
     try
     {
+        if (const auto* prepared = PreparedPrefab::FindDocument(path))
+            return InstantiatePrefabFromValue(scene, path, *prepared, graphicsProvider);
         const auto resolved = ResolvePrefabPath(path);
-        std::string key = resolved.lexically_normal().generic_string();
-#ifdef _WIN32
-        std::transform(key.begin(), key.end(), key.begin(),
-            [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
-#endif
+        const std::string key = PrefabDocumentKey(resolved);
         if (const auto cached = FindCachedPrefabDocument(resolved, key))
             return InstantiatePrefabFromValue(scene, path, cached->document,
                 graphicsProvider);
-        auto document = Engine::Rendering::RenderJobs::Get().Submit([path] {
-            return ReadPrefabFile(path);
-        }).get();
+        auto document = [&] {
+            PrefabLoadProfile::Stage stage("read_parse");
+            return Engine::Rendering::RenderJobs::Get().Submit([path] {
+                return ReadPrefabFile(path);
+            }).get();
+        }();
         return InstantiatePrefabFromValue(scene, path, document, graphicsProvider);
     }
     catch (const std::exception&) { return nullptr; }
@@ -324,11 +340,7 @@ Engine::Core::Object* SceneSerializer::InstantiatePrefab(
 JsonValue SceneSerializer::ReadPrefabFile(const std::string& path)
 {
     const auto resolved = ResolvePrefabPath(path);
-    std::string key = resolved.lexically_normal().generic_string();
-#ifdef _WIN32
-    std::transform(key.begin(), key.end(), key.begin(),
-        [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
-#endif
+    const std::string key = PrefabDocumentKey(resolved);
     return LoadPrefabDocumentCached(resolved, key)->document;
 }
 
@@ -337,19 +349,12 @@ Engine::Core::Object* SceneSerializer::InstantiatePrefabFromValue(
     const std::string& path, const JsonValue& parsed,
     Engine::Graphics::IGraphicsProvider* graphicsProvider)
 {
+    PrefabLoadProfile profile(path);
     EnsureBuiltinsRegistered();
     Engine::Core::Object* rootObject = nullptr;
     static thread_local std::vector<std::string> prefabStack;
-    std::error_code absoluteError;
     const std::filesystem::path resolvedPath = ResolvePrefabPath(path);
-    std::filesystem::path identity = std::filesystem::absolute(resolvedPath, absoluteError);
-    if (absoluteError)
-        identity = resolvedPath;
-    std::string prefabKey = identity.lexically_normal().generic_string();
-#ifdef _WIN32
-    std::transform(prefabKey.begin(), prefabKey.end(), prefabKey.begin(),
-        [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
-#endif
+    const std::string prefabKey = PrefabDocumentKey(resolvedPath);
     if (std::find(prefabStack.begin(), prefabStack.end(), prefabKey) != prefabStack.end())
     {
         OutputDebugStringA(("[SceneSerializer] Cyclic prefab reference: " +
@@ -377,12 +382,15 @@ Engine::Core::Object* SceneSerializer::InstantiatePrefabFromValue(
         options.assignDefaultNameIfMissing = true;
         options.allowLegacyModelBindings = true;
         options.legacyModelBindings = &legacyNodeBindings;
-        rootObject = Detail::SceneObjectBehavior::DeserializeObjectTree(
-            scene,
-            root["object"],
-            graphicsProvider,
-            GetRegistry(),
-            options);
+        {
+            PrefabLoadProfile::Stage stage("deserialize_tree");
+            rootObject = Detail::SceneObjectBehavior::DeserializeObjectTree(
+                scene,
+                root["object"],
+                graphicsProvider,
+                GetRegistry(),
+                options);
+        }
         if (!rootObject)
             return nullptr;
         if (!legacyNodeBindings.empty())
@@ -395,6 +403,7 @@ Engine::Core::Object* SceneSerializer::InstantiatePrefabFromValue(
         if (document->sourceSnapshot.empty() ||
             document->sourceProvider != graphicsProvider)
         {
+            PrefabLoadProfile::Stage stage("source_snapshot");
             Detail::SceneObjectBehavior::SetPrefabSourceSnapshot(*rootObject,
                 Detail::SceneObjectBehavior::SerializeObject(*rootObject, false));
             document->sourceSnapshot = rootObject->PrefabSourceSnapshot;

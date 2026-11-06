@@ -308,6 +308,7 @@ void Mesh::ReplaceMorphWeightBuffer(std::unique_ptr<IGraphicsBuffer> buffer)
 
 void Mesh::LoadFromFile(const std::string& path)
 {
+    m_preparedMorphDeltas.clear();
     ClearInstancing();
     ClearRuntimeLods();
     ClearSurfaceOffsets();
@@ -1147,6 +1148,7 @@ void Mesh::SetMorphData(unsigned nodeIndex, std::vector<MorphTarget> targets,
     ClearRuntimeLods();
     m_morphFilePath.clear();
     m_morphNodeIndex = nodeIndex;
+    m_preparedMorphDeltas.clear();
     m_morphTargets = std::move(targets);
     m_morphWeights = std::move(weights);
     m_morphWeights.resize(m_morphTargets.size(), 0.f);
@@ -1326,15 +1328,16 @@ uint64_t Mesh::GetMorphWeightsRevision() const
     return m_morphWeightsRevision;
 }
 
-void Mesh::CreateMorphBuffers()
+void Mesh::PrepareDeferredGraphicsData()
 {
-    ReplaceMorphDeltaBuffer({});
-    ReplaceMorphWeightBuffer({});
-    m_packedMorphWeights.clear();
-    m_activeMorphTargetCount = 0;
-    if (!m_bufferFactory || m_vertices.empty() || m_morphTargets.empty())
-        return;
+    if (Owner || m_bufferFactory)
+        throw std::logic_error("Deferred mesh preparation requires a detached CPU mesh");
+    if (!m_vertices.empty() && !m_morphTargets.empty())
+        m_preparedMorphDeltas = BuildMorphDeltas();
+}
 
+std::vector<glm::vec4> Mesh::BuildMorphDeltas()
+{
     const size_t vertexCount = m_vertices.size();
     const bool hasFullUv = std::any_of(m_morphTargets.begin(),
         m_morphTargets.end(), [](const MorphTarget& target)
@@ -1384,6 +1387,21 @@ void Mesh::CreateMorphBuffers()
                         deltas[base + 4 + channel] = target.uvChannels[channel][vertexIndex];
         }
     }
+    return deltas;
+}
+
+void Mesh::CreateMorphBuffers()
+{
+    ReplaceMorphDeltaBuffer({});
+    ReplaceMorphWeightBuffer({});
+    m_packedMorphWeights.clear();
+    m_activeMorphTargetCount = 0;
+    if (!m_bufferFactory || m_vertices.empty() || m_morphTargets.empty())
+        return;
+
+    auto deltas = m_preparedMorphDeltas.empty()
+        ? BuildMorphDeltas() : std::move(m_preparedMorphDeltas);
+    m_preparedMorphDeltas.clear();
     ReplaceMorphDeltaBuffer(m_bufferFactory->CreateStaticShaderResource(
         static_cast<uint64_t>(deltas.size()) * sizeof(glm::vec4),
         deltas.data(), sizeof(glm::vec4)));

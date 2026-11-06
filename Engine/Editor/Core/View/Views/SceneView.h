@@ -6,6 +6,7 @@
 #include "Core/ProjectLoader.h"
 #include "Engine/Editor/Core/Gizmos/EditorGizmoSystem.h"
 #include "Scene/SceneViewportToolbar.h"
+#include "Core/Serialization/PreparedPrefab.h"
 #include "Engine/Editor/Core/View/Templates/EditModes/ViewportModeTemplate.h"
 
 namespace Engine::Editor
@@ -80,14 +81,18 @@ public:
         m_gizmos.SetBoneTransformSettings(pivotMode, customPivot,
             translationSnap, rotationSnapDegrees, scaleSnap);
     }
-    void DrawPoseToolbar(const std::function<bool(float)>& next);
+    void DrawPoseToolbar(const std::function<bool(float)>& next,
+        bool animationEditor = false, bool inlineOptions = false);
     void DrawTerrainToolbar(const std::function<bool(float)>& next);
     bool UseGlobalToolbar = false;
+    bool UseGlobalBoneVisibility = true;
     void SetDocumentPath(std::string path) { m_documentPath = std::move(path); }
     void RequestFocusOnNextDraw() { m_focusOnNextDraw = true; }
     std::function<void(const std::string&)> OnAssetDropped;
     std::function<void(const std::string&, Engine::Core::Object*)> OnAssetAssigned;
     std::function<Engine::Core::Object*(const std::string&)> OnAssetPreviewRequested;
+    std::function<Engine::Core::Object*(Engine::Scene::Scene*, Engine::Serialization::PreparedPrefab&)> OnPreparedAssetPreviewRequested;
+    bool HasPendingPrefabPreparation() const { return m_prefabPreparation.valid() || m_prefabDropPending; }
     std::function<void(Engine::Core::Object*)> OnAssetPreviewCancelled;
     std::function<void(Engine::Core::Object*, const std::string&)> OnAssetPreviewCommitted;
     std::function<void(Engine::Core::Object*)> OnObjectSelected;
@@ -129,6 +134,14 @@ private:
     Engine::Core::Object* m_previousSelectedObject = nullptr;
     std::string m_prefabPreviewPath;
     bool m_prefabPreviewHasPlacement = false;
+    std::future<std::unique_ptr<Engine::Serialization::PreparedPrefab>> m_prefabPreparation;
+    std::shared_ptr<std::atomic_bool> m_prefabPreparationCanceled;
+    glm::vec3 m_prefabPlacement{};
+    bool m_prefabDropPending = false;
+    Engine::Scene::Scene::SceneGeneration m_prefabPreparationGeneration = 0;
+    std::string m_prefabPreparationError;
+    void PollPrefabPreparation();
+    void CommitPrefabPreview();
     bool m_focusOnNextDraw = false;
     SceneEditMode m_editMode = SceneEditMode::Object;
     int m_terrainBrush = 0;

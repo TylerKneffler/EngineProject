@@ -619,12 +619,12 @@ bool Component::DrawProperties(::Engine::Editor::IEditorUi& ui)
         const bool mixedValue = IsEditorValueMixed(key, value);
         
         // Create appropriate control based on value type
-        if (key == "shaders" && GetTypeName() == "Material" && value.IsArray())
+        if (key == "shader" && GetTypeName() == "Material" && value.IsString())
         {
             auto* material = static_cast<Engine::Components::Material*>(this);
             if (material->DrawShaderProperties(ui))
             {
-                editedData.Set(key, material->Serialize()["shaders"]);
+                editedData.Set(key, material->Serialize()["shader"]);
                 markModified(key);
             }
         }

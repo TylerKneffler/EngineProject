@@ -49,6 +49,7 @@
 #include "Core/Compoonents/Constraints/Subconstraints/RotationConstraint.h"
 #include "Core/Compoonents/Physics/SpatialManipulator.h"
 #include "Core/Compoonents/Path/SplinePath.h"
+#include "Core/Compoonents/Path/SplineGeometry.h"
 #include "Core/Compoonents/Path/SplineFollower.h"
 #include "Core/Compoonents/Cinematics/CameraTrack.h"
 #include "Core/Rendering/Lighting/BakedLightingData.h"
@@ -228,6 +229,7 @@ void SceneSerializer::EnsureBuiltinsRegistered()
     RegisterComponentType<Engine::Components::RotationConstraint>();
     RegisterComponentType<Engine::Components::SpatialManipulator>();
     RegisterComponentType<SplinePath>();
+    RegisterComponentType<SplineGeometry>();
     RegisterComponentType<SplineFollower>();
     RegisterComponentType<CameraTrack>();
     RegisterComponentType<Engine::Rendering::BakedLightingData>();

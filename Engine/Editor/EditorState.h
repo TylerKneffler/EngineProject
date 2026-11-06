@@ -145,6 +145,7 @@ public:
     void SaveAnimationEditorSession() const;
     void UpdateAnimationPlayback(float deltaTime);
     void HandleAnimationDocumentClosures();
+    void ReleaseRetiredAnimationDocuments();
     void DrawAnimationCloseConfirmation(IEditorUi& ui);
     bool IsAnimationEditorFocused() const;
     bool IsAnimationPlaying() const;
@@ -599,6 +600,11 @@ private:
     };
     struct AnimationDocument
     {
+        char propertiesSearch[128]{};
+        bool propertiesOutlineOpen = false;
+        bool drawingProperties = false;
+        int propertiesHeaderOverride = -1;
+        std::string propertiesJumpTarget;
         struct TimelineKey
         {
             size_t rigIndex = 0;
@@ -877,6 +883,13 @@ private:
     std::deque<std::string> m_pendingSceneAssetDocuments;
     SceneAssetDocument* m_activeSceneAssetDocument = nullptr;
     std::vector<std::unique_ptr<AnimationDocument>> m_animationDocuments;
+    struct RetiredAnimationDocument
+    {
+        std::unique_ptr<AnimationDocument> document;
+        std::unique_ptr<IEditorPanel> panel;
+        uint32_t srvSlot = UINT32_MAX;
+    };
+    std::vector<RetiredAnimationDocument> m_retiredAnimationDocuments;
     std::string m_animationDocumentOpenError;
       std::deque<std::pair<std::string, size_t>> m_pendingAnimationDocuments;
     std::unordered_map<std::string, std::string> m_pendingAnimationClipSelections;

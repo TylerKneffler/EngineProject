@@ -2,6 +2,8 @@
 #include "DX12QueueMutex.h"
 #include <cstring>
 #include <stdexcept>
+#include <sstream>
+#include <fstream>
 
 namespace Engine::Renderers
 {
@@ -129,7 +131,25 @@ std::unique_ptr<Engine::Graphics::IGraphicsBuffer> D3D12BufferFactory::CreateBuf
         IID_PPV_ARGS(&resource));
 
     if (FAILED(hr))
-        throw std::runtime_error("Failed to create D3D12 buffer");
+    {
+        std::ostringstream message;
+        message << "Failed to create D3D12 buffer: HRESULT=0x"
+            << std::hex << static_cast<unsigned long>(hr) << std::dec
+            << ", bytes=" << sizeBytes
+            << ", usage=" << static_cast<int>(usage)
+            << ", access=" << static_cast<int>(access)
+            << ", stride=" << elementStride;
+        const HRESULT removedReason = m_device->GetDeviceRemovedReason();
+        if (FAILED(removedReason))
+            message << ", deviceRemovedReason=0x" << std::hex
+                << static_cast<unsigned long>(removedReason);
+        OutputDebugStringA((message.str() + "\n").c_str());
+        // Preserve allocation diagnostics even when the editor exits without
+        // an attached debugger or a visible console.
+        std::ofstream log("dx12-buffer-error.log", std::ios::app);
+        if (log) log << message.str() << std::endl;
+        throw std::runtime_error(message.str());
+    }
 
     auto buffer = std::make_unique<D3D12GraphicsBuffer>(resource, usage, access, sizeBytes);
     buffer->SetResourceState(initialState);

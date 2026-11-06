@@ -1,5 +1,7 @@
 #include "Core/Serialization/SceneSerializerInternal.h"
 #include "Core/Serialization/Json.h"
+#include "Core/Serialization/PrefabLoadProfile.h"
+#include "Core/Serialization/PreparedPrefab.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Scene/Settings/SceneSettingsSerialization.h"
 #include "Core/Graphics/IGraphicsProvider.h"
@@ -177,15 +179,24 @@ bool DeserializeExpandedObject(
             continue;
         }
 
-        Engine::Core::Component* component = (*factory)();
+        Engine::Core::Component* component = PreparedPrefab::TakeComponent(componentNode);
+        const bool prepared = component != nullptr;
+        if (!component) component = (*factory)();
         component->Owner = &object;
-        if (componentNode["type"].AsString() == "VmdSceneTrack")
         {
-            const JsonValue migrated = CurrentComponentData(componentNode);
-            component->Deserialize(migrated);
+            PrefabLoadProfile::Stage stage(PrefabLoadProfile::Enabled()
+                ? "component_" + type : "");
+            if (!prepared)
+            {
+                if (componentNode["type"].AsString() == "VmdSceneTrack")
+                {
+                    const JsonValue migrated = CurrentComponentData(componentNode);
+                    component->Deserialize(migrated);
+                }
+                else component->Deserialize(componentNode);
+            }
+            component->OnAfterDeserialize(nullptr);
         }
-        else component->Deserialize(componentNode);
-        component->OnAfterDeserialize(nullptr);
         if (graphicsProvider) scene.QueueGraphicsPreparation();
         object.AssertSceneOwner();
         object.Components.push_back(component);

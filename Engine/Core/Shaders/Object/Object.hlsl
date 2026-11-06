@@ -58,6 +58,7 @@ struct ObjectData
     float4 grassAnimation; // scene time, grass enabled, reserved
     float4 textureLodParams; // near, far, maximum mip bias, enabled/shading tier
     float4 alphaLodParams; // maximum alpha mip bias, disable mask at far distance
+    float4 grassCapsules[8];
 };
 
 struct SceneLightData
@@ -213,6 +214,9 @@ uint ResolveObjectIndex(uint instanceId)
 }
 
 #include "../GrassWind.hlsli"
+#ifdef GRASS_CAPSULE_INTERACTION
+#include "../GrassFootBend.hlsli"
+#endif
 
 void VSMain(
     float3 pos : POSITION,
@@ -329,6 +333,11 @@ void VSMain(
     float3 worldTangent = mul((float3x3)objectData.world, localTangent);
     float3 worldUp = mul((float3x3)objectData.world, grassUp);
     float upLength = max(length(worldUp), 0.0001);
+#ifdef GRASS_CAPSULE_INTERACTION
+    float3 restWorldPosition = worldPosition.xyz;
+    float3 restWorldNormal = worldNormal;
+    float3 restWorldTangent = worldTangent;
+#endif
     // Wind must not deform shadow casters; otherwise shadow maps redraw for
     // every shader-driven vertex change while the mesh is still static in the
     // light pass.
@@ -338,6 +347,13 @@ void VSMain(
         ApplyGrassWind(objectData.grassAnimation.x, objectData.grassAnimation.z,
             mul(objectData.world, float4(grassRoot, 1)).xyz, worldUp / upLength,
             max(0.0, pos.y) * upLength, worldPosition.xyz, worldNormal, worldTangent);
+#ifdef GRASS_CAPSULE_INTERACTION
+    if (objectData.shadowCasterFade.z <= 0.5)
+        ApplyGrassFootBend(objectData.grassCapsules, (uint)objectData.grassAnimation.w,
+            mul(objectData.world, float4(grassRoot, 1)).xyz, worldUp / upLength,
+            max(0.0, pos.y) * upLength, restWorldPosition, restWorldNormal, restWorldTangent,
+            worldPosition.xyz, worldNormal, worldTangent);
+#endif
     oPos = mul(objectData.viewProjection, worldPosition);
     // Portal apertures are stencil masks rather than visible surfaces. Keep a
     // mask in front of the near plane rasterizable while the camera approaches

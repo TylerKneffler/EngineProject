@@ -65,7 +65,7 @@ public:
     PROPERTY(Inspector, EditAnywhere, Category = "Grass | Lighting")
     bool castShadows = false;
     PROPERTY(Inspector, EditAnywhere, Category = "Grass | Lighting")
-    std::string shaderPath = "Assets/Shaders/Foliage.hlsl";
+    std::string shaderPath = "Assets/Shaders/GrassFootBend.hlsl";
     PROPERTY(Inspector, EditAnywhere, Category = "Grass | Assets")
     std::string materialPath;
     PROPERTY(Inspector, EditAnywhere, Category = "Grass | Lighting", ClampMin = "0", ClampMax = "1")

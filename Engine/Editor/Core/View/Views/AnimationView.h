@@ -7,5 +7,7 @@ namespace Engine::Editor
 // but is bound to an isolated animation preview scene by EditorState.
 class AnimationView final : public SceneView
 {
+public:
+    AnimationView() { UseGlobalBoneVisibility = false; }
 };
 }

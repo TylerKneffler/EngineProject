@@ -1,12 +1,5 @@
 {
   "version": 1,
-  "shaders": [
-    {
-      "path": "Assets/Shaders/Foliage.hlsl",
-      "enabled": true,
-      "blendMode": "Auto"
-    }
-  ],
   "baseColor": [
     1,
     0.5,
@@ -105,5 +98,6 @@
   "normalUvSet": 0,
   "occlusionUvSet": 0,
   "emissiveUvSet": 0,
-  "heightUvSet": 0
+  "heightUvSet": 0,
+  "shader": "Assets/Shaders/Foliage.hlsl"
 }

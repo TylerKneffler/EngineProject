@@ -1,0 +1,158 @@
+Prefab: Engine/Core/Assets/Models/mmd/Mococo/Mococo Prefab/Mococo Abyssgard.low.prefab
+total_ms=2152.67
+component_AnimationBone ms=4.3228 calls=239
+component_AnimationManager ms=86.9173 calls=1
+component_BoneGroup ms=0.0068 calls=2
+component_IKBone ms=2.8502 calls=133
+component_Material ms=245.773 calls=40
+component_MaterialPropertyMorph ms=0.5486 calls=13
+component_Mesh ms=891.164 calls=40
+component_Model ms=0.4487 calls=1
+component_PrimitiveObjectCollider ms=0.2034 calls=24
+component_RigConstraints ms=0.4339 calls=1
+component_RigidBody ms=0.6132 calls=24
+component_Skeleton ms=57.5111 calls=1
+component_SkinnedMesh ms=22.4865 calls=40
+deserialize_tree ms=1437.22 calls=1
+read_parse ms=312.199 calls=1
+source_snapshot ms=323.337 calls=1
+
+Prefab: Engine/Core/Assets/Models/mmd/Mococo/Mococo Prefab/Mococo Abyssgard.low.prefab
+total_ms=960.826
+component_AnimationBone ms=3.2941 calls=239
+component_AnimationManager ms=69.3652 calls=1
+component_BoneGroup ms=0.0046 calls=2
+component_IKBone ms=2.4716 calls=133
+component_Material ms=74.1917 calls=40
+component_MaterialPropertyMorph ms=0.4397 calls=13
+component_Mesh ms=401.354 calls=40
+component_Model ms=0.3818 calls=1
+component_PrimitiveObjectCollider ms=0.1295 calls=24
+component_RigConstraints ms=0.3782 calls=1
+component_RigidBody ms=0.3909 calls=24
+component_Skeleton ms=39.5824 calls=1
+component_SkinnedMesh ms=19.2535 calls=40
+deserialize_tree ms=710.377 calls=1
+read_parse ms=235.294 calls=1
+
+Prefab: Engine/Core/Assets/Models/mmd/Mococo/Mococo Prefab/Mococo Abyssgard.low.prefab
+total_ms=1462.06
+component_AnimationBone ms=3.6638 calls=239
+component_AnimationManager ms=73.2578 calls=1
+component_BoneGroup ms=0.0051 calls=2
+component_IKBone ms=2.4405 calls=133
+component_Material ms=86.787 calls=40
+component_MaterialPropertyMorph ms=0.4285 calls=13
+component_Mesh ms=452.925 calls=40
+component_Model ms=0.3897 calls=1
+component_PrimitiveObjectCollider ms=0.1409 calls=24
+component_RigConstraints ms=0.3624 calls=1
+component_RigidBody ms=0.4306 calls=24
+component_Skeleton ms=42.2289 calls=1
+component_SkinnedMesh ms=21.1534 calls=40
+deserialize_tree ms=792.518 calls=1
+read_parse ms=339.259 calls=1
+source_snapshot ms=252.475 calls=1
+
+Prefab: Engine/Core/Assets/Models/mmd/Mococo/Mococo Prefab/Mococo Abyssgard.low.prefab
+total_ms=1689.2
+component_AnimationBone ms=6.9766 calls=239
+component_AnimationManager ms=140.557 calls=1
+component_BoneGroup ms=0.0108 calls=2
+component_IKBone ms=5.1651 calls=133
+component_Material ms=109.572 calls=40
+component_MaterialPropertyMorph ms=0.6527 calls=13
+component_Mesh ms=585.872 calls=40
+component_Model ms=0.5317 calls=1
+component_PrimitiveObjectCollider ms=0.2985 calls=24
+component_RigConstraints ms=0.4604 calls=1
+component_RigidBody ms=0.8027 calls=24
+component_Skeleton ms=82.0952 calls=1
+component_SkinnedMesh ms=34.2435 calls=40
+deserialize_tree ms=1192.17 calls=1
+read_parse ms=466.8 calls=1
+
+Prefab: Engine/Core/Assets/Models/mmd/Mococo/Mococo Prefab/Mococo Abyssgard.low.prefab
+total_ms=1503.04
+component_AnimationBone ms=3.2922 calls=239
+component_AnimationManager ms=127.808 calls=1
+component_BoneGroup ms=0.0056 calls=2
+component_IKBone ms=2.3244 calls=133
+component_Material ms=76.9235 calls=40
+component_MaterialPropertyMorph ms=0.5588 calls=13
+component_Mesh ms=412.087 calls=40
+component_Model ms=0.835 calls=1
+component_PrimitiveObjectCollider ms=0.1359 calls=24
+component_RigConstraints ms=0.7254 calls=1
+component_RigidBody ms=0.4172 calls=24
+component_Skeleton ms=56.3301 calls=1
+component_SkinnedMesh ms=19.8186 calls=40
+deserialize_tree ms=803.426 calls=1
+read_parse ms=251.045 calls=1
+source_snapshot ms=351.768 calls=1
+
+Prefab: scene graphics preparation
+total_ms=514.567
+graphics_AnimationBone ms=0.2417 calls=239
+graphics_AnimationManager ms=0.0024 calls=1
+graphics_BoneGroup ms=0.0032 calls=2
+graphics_IKBone ms=0.103 calls=133
+graphics_Material ms=1.0094 calls=40
+graphics_MaterialPropertyMorph ms=0.041 calls=13
+graphics_Mesh ms=481.249 calls=40
+graphics_Model ms=0.0039 calls=1
+graphics_PrimitiveObjectCollider ms=0.025 calls=24
+graphics_RigConstraints ms=0.0032 calls=1
+graphics_RigidBody ms=0.0317 calls=24
+graphics_Skeleton ms=0.0119 calls=1
+graphics_SkinnedMesh ms=0.0919 calls=40
+
+Prefab: Engine/Core/Assets/Models/mmd/Mococo/Mococo Prefab/Mococo Abyssgard.low.prefab
+total_ms=1175.89
+component_AnimationBone ms=5.816 calls=239
+component_AnimationManager ms=118.757 calls=1
+component_BoneGroup ms=0.0071 calls=2
+component_IKBone ms=4.281 calls=133
+component_Material ms=110.612 calls=40
+component_MaterialPropertyMorph ms=0.6979 calls=13
+component_Mesh ms=618.409 calls=40
+component_Model ms=0.5425 calls=1
+component_PrimitiveObjectCollider ms=0.237 calls=24
+component_RigConstraints ms=0.4749 calls=1
+component_RigidBody ms=0.6869 calls=24
+component_Skeleton ms=81.1037 calls=1
+component_SkinnedMesh ms=36.3948 calls=40
+deserialize_tree ms=1172.88 calls=1
+
+Prefab: scene graphics preparation
+total_ms=310.474
+graphics_AnimationBone ms=0.833 calls=478
+graphics_AnimationManager ms=0.0066 calls=2
+graphics_BoneGroup ms=0.0097 calls=4
+graphics_IKBone ms=0.4214 calls=266
+graphics_Material ms=0.4617 calls=80
+graphics_MaterialPropertyMorph ms=0.0568 calls=26
+graphics_Mesh ms=300.541 calls=80
+graphics_Model ms=0.0072 calls=2
+graphics_PrimitiveObjectCollider ms=0.0954 calls=48
+graphics_RigConstraints ms=0.0073 calls=2
+graphics_RigidBody ms=0.0937 calls=48
+graphics_Skeleton ms=0.0154 calls=2
+graphics_SkinnedMesh ms=0.1756 calls=80
+
+Prefab: .local/tests-generated\prefab-cache-88568011271600\cache.prefab
+total_ms=25.0602
+deserialize_tree ms=0.1842 calls=1
+read_parse ms=12.9026 calls=1
+source_snapshot ms=0.2219 calls=1
+
+Prefab: C:\Users\tyler\source\repos\EngineProject\.local\tests-generated\prefab-cache-88568011271600\cache.prefab
+total_ms=1.163
+deserialize_tree ms=0.1184 calls=1
+
+Prefab: .local/tests-generated\prefab-cache-88568011271600\cache.prefab
+total_ms=17.9562
+deserialize_tree ms=0.0831 calls=1
+read_parse ms=16.1672 calls=1
+source_snapshot ms=0.1687 calls=1
+

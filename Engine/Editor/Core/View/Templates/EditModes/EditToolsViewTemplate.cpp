@@ -83,7 +83,7 @@ bool ToolbarIconButton(ImWchar codepoint, const char* glyph,
 
 float ToolbarButtonWidth(const char* label)
 {
-    return std::max(28.f, ImGui::CalcTextSize(label).x +
+    return std::max(28.f, ImGui::CalcTextSize(label, nullptr, true).x +
         ImGui::GetStyle().FramePadding.x * 2.f);
 }
 
@@ -232,7 +232,7 @@ SceneView* EditorState::GetGlobalToolbarSceneView() const
 {
     Engine::Scene::Scene* scene = GetActiveDocumentScene();
     if (!scene) return nullptr;
-    EditorViewportSettings::Apply(*scene);
+    if (!m_activeAnimationDocument) EditorViewportSettings::Apply(*scene);
     SceneView* view = nullptr;
     if (m_activeSceneAssetDocument)
         view = m_activeSceneAssetDocument->view;
@@ -250,7 +250,8 @@ bool EditorState::HasToolbarSection(ToolbarSection section) const
 {
     if (m_gameViewFocused) return false;
     if (m_activeAnimationDocument)
-        return section == ToolbarSection::Mode || section == ToolbarSection::Tools;
+        return section == ToolbarSection::Mode || section == ToolbarSection::Tools ||
+            (section == ToolbarSection::View && m_toolbarVisibility.sceneDisplay);
     if (m_activeAssetDocument)
         return section == ToolbarSection::File ? m_toolbarVisibility.save :
             section == ToolbarSection::Edit ? m_toolbarVisibility.undoRedo :
@@ -298,8 +299,9 @@ bool EditorState::HasToolbarSection(ToolbarSection section) const
 float EditorState::GetToolbarSectionMinimumWidth(ToolbarSection section) const
 {
     if (m_activeAnimationDocument)
-        return section == ToolbarSection::Mode ? 150.f :
-            section == ToolbarSection::Tools ? 175.f : 0.f;
+        return section == ToolbarSection::Mode ? 190.f :
+            section == ToolbarSection::Tools ? 285.f :
+            section == ToolbarSection::View ? 62.f : 0.f;
     if (m_activeAssetDocument && section == ToolbarSection::Paint)
         return 190.f;
     float controlWidth = 0.f;
@@ -319,9 +321,12 @@ float EditorState::GetToolbarSectionMinimumWidth(ToolbarSection section) const
     }
     case ToolbarSection::Edit:
     {
-        const std::string label = ToolbarIconLabel(0xE7A7, u8"\uE7A7", "",
+        const std::string undo = ToolbarIconLabel(0xE7A7, u8"\uE7A7", "",
             "MinimumUndo", "Undo");
-        controlWidth = ToolbarButtonWidth(label.c_str());
+        const std::string redo = ToolbarIconLabel(0xE7A6, u8"\uE7A6", "",
+            "MinimumRedo", "Redo");
+        controlWidth = ToolbarButtonWidth(undo.c_str()) +
+            ImGui::GetStyle().ItemSpacing.x + ToolbarButtonWidth(redo.c_str());
         break;
     }
     case ToolbarSection::Mode: controlWidth = 105.f; break;
@@ -385,8 +390,9 @@ float EditorState::GetToolbarSectionPreferredWidth(ToolbarSection section) const
 {
     float width = GetToolbarSectionMinimumWidth(section);
     if (m_activeAnimationDocument)
-        return section == ToolbarSection::Mode ? 280.f :
-            section == ToolbarSection::Tools ? 650.f : 0.f;
+        return section == ToolbarSection::Mode ? 230.f :
+            section == ToolbarSection::Tools ? 600.f :
+            section == ToolbarSection::View ? 62.f : 0.f;
     if (section == ToolbarSection::Tools)
         if (auto* view = GetGlobalToolbarSceneView();
             view && view->GetEditMode() == SceneEditMode::Terrain)
@@ -397,12 +403,6 @@ float EditorState::GetToolbarSectionPreferredWidth(ToolbarSection section) const
         const std::string saveAll = ToolbarIconLabel(0xE74E, u8"\uE74E",
             " All", "PreferredSaveAll", "Save All");
         width += spacing + ToolbarButtonWidth(saveAll.c_str());
-    }
-    else if (section == ToolbarSection::Edit)
-    {
-        const std::string redo = ToolbarIconLabel(0xE7A6, u8"\uE7A6",
-            "", "PreferredRedo", "Redo");
-        width += spacing + ToolbarButtonWidth(redo.c_str());
     }
     else if (section == ToolbarSection::View)
         width += 3.f * (28.f + spacing);
@@ -688,42 +688,41 @@ void EditorState::DrawGlobalToolbar(IEditorUi& ui, ToolbarSection section,
     if (overflow) *overflow = false;
     if (m_activeAnimationDocument)
     {
-        if (section == ToolbarSection::Mode)
-            DrawAnimationRigToolbar(ui, *m_activeAnimationDocument);
-        if (section == ToolbarSection::Tools)
+        if (section == ToolbarSection::View)
         {
-            auto& document = *m_activeAnimationDocument;
+            auto* preview = m_activeAnimationDocument->poseScene.get();
             ToolbarRow row{singleRow, overflow};
-            if (document.view)
-                document.view->DrawPoseToolbar(
-                    [&](float width) { return row.Next(width); });
+            if (preview && row.Next(28.f) &&
+                ViewIconButton("##AnimationViewBones", ViewIcon::Bones,
+                    preview->AreEditorBonesVisible(), "Show or hide animation bones"))
+            {
+                preview->SetEditorBonesVisible(!preview->AreEditorBonesVisible());
+                if (m_renderer) m_renderer->MarkDirty();
+            }
+        }
+        auto& document = *m_activeAnimationDocument;
+        if (section == ToolbarSection::Tools && document.view)
+        {
+            ToolbarRow row{singleRow, overflow};
+            document.view->DrawPoseToolbar(
+                [&](float width) { return row.Next(width); }, true, !singleRow);
+        }
+        if (section == ToolbarSection::Mode)
+        {
+            ToolbarRow row{singleRow, overflow};
             ImGui::PushID(&document);
             ImGui::BeginDisabled(!document.sourceManager);
-            const char* keyLabel = document.selectedRows.empty()
-                ? "Key Selected Bone" : "Key Selected Rows";
-            if (row.Next(ToolbarButtonWidth(keyLabel)) && ui.Button(keyLabel))
+            if (row.Next(ToolbarButtonWidth("Key pose")) && ui.Button("Key pose"))
             {
                 document.playing = false;
                 AddAnimationRowKeys(document);
             }
-            if (row.Next(ToolbarButtonWidth("Keys...")) && ui.Button("Keys..."))
-                ImGui::OpenPopup("##AnimationKeyTools");
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+                ImGui::SetTooltip("Add keys for the selected bone or timeline rows at the playhead.");
             if (row.Next(ImGui::CalcTextSize("Auto Key").x + ImGui::GetFrameHeight() +
                     ImGui::GetStyle().ItemInnerSpacing.x))
                 ui.Checkbox("Auto Key", &document.autoKey);
-            if (row.Next(180.f))
-            {
-                ImGui::SetNextItemWidth(140.f);
-                ImGui::SliderFloat("Zoom", &document.timelinePixelsPerSecond,
-                    35.f, 3200.f, "%.0f px/s", ImGuiSliderFlags_Logarithmic);
-            }
             ImGui::EndDisabled();
-            ImGui::SetNextWindowSizeConstraints({340.f, 0.f}, {520.f, 650.f});
-            if (ImGui::BeginPopup("##AnimationKeyTools", ImGuiWindowFlags_NoSavedSettings))
-            {
-                DrawAnimationKeyTools(ui, document);
-                ImGui::EndPopup();
-            }
             ImGui::PopID();
         }
         return;

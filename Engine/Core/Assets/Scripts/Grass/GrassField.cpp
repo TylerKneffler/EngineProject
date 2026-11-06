@@ -618,7 +618,7 @@ bool GrassField::Refresh()
                 material->diffuseColor = {1,1,1};
                 material->useVertexColors = true;
                 if (!shaderPath.empty())
-                    material->shaders.push_back({shaderPath, true, "Auto"});
+                    material->shader = shaderPath;
                 material->roughnessFactor = 1;
                 material->metallicFactor = 0;
                 material->doubleSided = true;
@@ -663,14 +663,7 @@ bool GrassField::Refresh()
             tile.mesh->foliageWindStrength=std::clamp(windStrength,0.f,1.f);
             tile.mesh->grassShadowCaster=windStrength>0.f;
             tileMaterial->castsShadows = shadows;
-            if ((shaderPath.empty() && !tileMaterial->shaders.empty()) ||
-                (!shaderPath.empty() && (tileMaterial->shaders.size() != 1 ||
-                    tileMaterial->shaders.front().path != shaderPath)))
-            {
-                tileMaterial->shaders.clear();
-                if (!shaderPath.empty())
-                    tileMaterial->shaders.push_back({shaderPath, true, "Auto"});
-            }
+            tileMaterial->shader = shaderPath;
             changed = ActivateTileLod(tile, tile.desiredLod) || changed;
             tile.object->enabled = tile.mesh->GetActiveRuntimeLod() >= 0 && tile.visibility > 0.f;
         }

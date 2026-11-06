@@ -259,8 +259,9 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
         OutputDebugStringA(("[Main] Loading default scene: " + startupScene + "\n").c_str());
         editorState->LoadStartupScene(startupScene);
     }
-    // Character animation documents open explicitly. A saved session must not
-    // reopen a character tab after the user closes the Animation Editor.
+    // Restore the tabs left open at shutdown. Explicitly closed animation
+    // documents are removed from the saved session by their close handler.
+    editorState->RestoreAnimationEditorSession();
     splash.SetProgress(0.90f, L"Finishing startup...");
 
     OutputDebugStringA("[Main] Creating GameBuildManager...\n");
@@ -874,6 +875,7 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
             if (!uiDrawn) drawEditorUi();
         });
         submittingEditorFrame = false;
+        editorState->ReleaseRetiredAnimationDocuments();
         // A minimized/out-of-date surface can skip the draw callback entirely.
         // Keep the simulation ticking without requiring a submitted view.
         if (usePlayPipeline && !uiDrawn && !playPipeline->Busy() &&

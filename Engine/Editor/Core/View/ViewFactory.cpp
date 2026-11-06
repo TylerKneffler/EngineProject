@@ -133,6 +133,7 @@ std::unique_ptr<IEditorPanel> ViewFactory::Create(const std::string& typeName)
         view->OnAssetDropped = OnAssetDropped;
         view->OnAssetAssigned = OnAssetAssigned;
         view->OnAssetPreviewRequested = OnAssetPreviewRequested;
+        view->OnPreparedAssetPreviewRequested = OnPreparedAssetPreviewRequested;
         view->OnAssetPreviewCancelled = OnAssetPreviewCancelled;
         view->OnAssetPreviewCommitted = OnAssetPreviewCommitted;
         if (OnObjectSelected)

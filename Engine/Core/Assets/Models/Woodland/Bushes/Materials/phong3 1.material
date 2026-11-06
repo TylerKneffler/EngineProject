@@ -1,12 +1,5 @@
 {
   "version": 1,
-  "shaders": [
-    {
-      "path": "Assets/Shaders/Foliage.hlsl",
-      "enabled": true,
-      "blendMode": "Auto"
-    }
-  ],
   "baseColor": [
     1,
     1,
@@ -109,5 +102,6 @@
   "baseColorTexture": "Assets/Models/Woodland/Bushes/Textures/Texture 3 3.png",
   "metallicRoughnessTexture": "Assets/Models/Woodland/Bushes/Textures/Texture 2 2.png",
   "normalTexture": "Assets/Models/Woodland/Bushes/Textures/Texture 1 1.png",
-  "occlusionTexture": "Assets/Models/Woodland/Bushes/Textures/Texture 2 2.png"
+  "occlusionTexture": "Assets/Models/Woodland/Bushes/Textures/Texture 2 2.png",
+  "shader": "Assets/Shaders/Foliage.hlsl"
 }

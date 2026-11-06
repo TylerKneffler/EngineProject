@@ -46,7 +46,7 @@ std::vector<glm::vec3> SplinePath::CollectPoints() const
     points.reserve(Owner->Children.size());
     for (const Engine::Core::Object* child : Owner->Children)
     {
-        if (child && (includeDisabledPoints || child->IsEnabledInHierarchy()))
+        if (child && !child->runtimeOnly && (includeDisabledPoints || child->IsEnabledInHierarchy()))
             points.push_back(child->transform.GetWorldPosition());
     }
     return points;
@@ -65,7 +65,7 @@ uint64_t SplinePath::BuildPointSignature(bool useClosed) const
         return hash;
     for (const Engine::Core::Object* child : Owner->Children)
     {
-        if (!child || (!includeDisabledPoints && !child->IsEnabledInHierarchy()))
+        if (!child || child->runtimeOnly || (!includeDisabledPoints && !child->IsEnabledInHierarchy()))
             continue;
         const uint64_t revision = child->transform.GetWorldRevision();
         HashBytes(hash, &revision, sizeof(revision));
@@ -238,13 +238,14 @@ bool SplinePath::DrawProperties(Engine::Editor::IEditorUi& ui)
         &includeDisabledPoints) || changed;
     if (Owner && Owner->GetScene() && ui.Button("Add Control Point"))
     {
+        glm::dvec3 next(0.0);
+        for (const auto* child : Owner->Children)
+            if (child && !child->runtimeOnly)
+                next=child->transform.position+glm::dvec3(0.0,0.0,2.0);
         Engine::Core::Object* point = Owner->GetScene()->AddObject(
-            "Point " + std::to_string(Owner->Children.size() + 1u));
+            "Point " + std::to_string(GetControlPointCount() + 1u));
         Owner->GetScene()->SetParentLocal(point, Owner);
-        point->transform.position = Owner->Children.size() > 1u
-            ? Owner->Children[Owner->Children.size() - 2u]->transform.position +
-                glm::dvec3(0.0, 0.0, 2.0)
-            : glm::vec3(0.f);
+        point->transform.position=next;
         changed = true;
     }
     char summary[96]{};

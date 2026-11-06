@@ -33,6 +33,7 @@ public:
         bool constantSpeed = true, bool forceClosed = false) const;
     float GetLength(bool forceClosed = false) const;
     size_t GetControlPointCount() const;
+    uint64_t GetPointSignature() const { return BuildPointSignature(closed); }
     bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
 
 private:

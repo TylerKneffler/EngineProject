@@ -8,7 +8,6 @@
 #include "Core/Importers/MmdDanceAssetBinder.h"
 #include "Core/View/ViewFactory.h"
 #include "Core/View/Views/AnimationView.h"
-#include "Core/View/EditorViewportSettings.h"
 #include "Core/View/Views/GameView.h"
 #include "Core/View/Views/HierarchyView.h"
 #include "Core/View/Views/PropertiesView.h"
@@ -237,6 +236,31 @@ std::string LowerText(std::string value)
     std::transform(value.begin(), value.end(), value.begin(),
         [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
     return value;
+}
+
+template<class Document>
+bool AnimationPropertiesHeader(Document& document, const char* label,
+    ImGuiTreeNodeFlags flags = 0)
+{
+    if (!document.drawingProperties) return ImGui::CollapsingHeader(label, flags);
+    const std::string filter = LowerText(document.propertiesSearch);
+    const bool childMatch = std::strcmp(label, "Selected bone") == 0 &&
+        (!filter.empty() && LowerText("Two-bone IK").find(filter) != std::string::npos);
+    if (!filter.empty() && LowerText(label).find(filter) == std::string::npos && !childMatch)
+        return false;
+    const bool jump = document.propertiesJumpTarget == label;
+    const bool childJump = std::strcmp(label, "Selected bone") == 0 &&
+        document.propertiesJumpTarget == "Two-bone IK";
+    if (document.propertiesHeaderOverride >= 0 || !filter.empty() || jump || childJump)
+        ImGui::SetNextItemOpen(document.propertiesHeaderOverride >= 0
+            ? document.propertiesHeaderOverride != 0 : true, ImGuiCond_Always);
+    const bool open = ImGui::CollapsingHeader(label, flags);
+    if (jump)
+    {
+        ImGui::SetScrollHereY(.15f);
+        document.propertiesJumpTarget.clear();
+    }
+    return open;
 }
 
 Engine::Model::RigAsset::ControlMap HumanoidControls(
@@ -937,6 +961,13 @@ void EditorState::ProcessPendingAnimationDocumentOpens()
                 "Could not create an Animation Editor viewport.");
             continue;
         }
+        // Animation authoring starts with its rig visible, independently of
+        // the Scene View's saved overlay preferences.
+        document->poseScene->SetEditorBonesVisible(true);
+        for (const auto& object : document->poseScene->GetObjects())
+            for (auto* component : object->Components)
+                if (auto* skeleton = dynamic_cast<Engine::Components::Skeleton*>(component))
+                    skeleton->showBones = true;
         AnimationDocument* raw = document.get();
         raw->view = view.get();
         view->SetDocumentPath(path);
@@ -1302,7 +1333,7 @@ void EditorState::SetActiveAnimationDocument(AnimationDocument* document)
     m_gameViewFocused = false;
     for (auto& panel : m_panels)
         if (auto* game = dynamic_cast<GameView*>(panel.get()))
-            game->SetScene(document->poseScene.get());
+            game->SetScene(m_scene.get());
     if (m_primaryHierarchy)
     {
         m_primaryHierarchy->Init(document->poseScene.get());
@@ -2885,7 +2916,7 @@ void EditorState::DrawAnimationMappingRepair(IEditorUi& ui,
     ImGui::TextColored({ 1.f, .55f, .3f, 1.f },
         "%zu unresolved bone channel%s", mapping.issues.size(),
         mapping.issues.size() == 1 ? "" : "s");
-    if (!ImGui::CollapsingHeader("Repair bone mappings",
+    if (!AnimationPropertiesHeader(document, "Repair bone mappings",
             ImGuiTreeNodeFlags_DefaultOpen)) return;
     if (ui.Button("Confirm existing indices for this rig"))
     {
@@ -2961,8 +2992,7 @@ void EditorState::DrawAnimationMappingRepair(IEditorUi& ui,
         document.view->SetPoseEditing(true);
         document.view->SetModelManipulation(true);
         document.view->SetModelSelectionMode(1);
-        EditorViewportSettings::SetBonesVisible(true);
-        EditorViewportSettings::Apply(*document.poseScene);
+        document.poseScene->SetEditorBonesVisible(true);
     }
     if (document.repairAwaitingViewportBone)
         ui.DisabledLabel("Click a bone in the 3D view to assign it.");
@@ -2985,7 +3015,7 @@ void EditorState::DrawAnimationRigControls(IEditorUi& ui,
     auto& controls = track->controls;
     const auto& joints = document.poseSkeleton->ResolveJoints();
     const auto& palette = document.poseSkeleton->jointNodes;
-    if (ImGui::CollapsingHeader("Humanoid animation mapping"))
+    if (AnimationPropertiesHeader(document, "Humanoid animation mapping"))
     {
         namespace H = Engine::Model::HumanoidRig;
         auto& mapping = track->humanoid;
@@ -3081,7 +3111,7 @@ void EditorState::DrawAnimationRigControls(IEditorUi& ui,
         if (ui.Button("Save humanoid mapping")) SaveAnimationDocument(document);
         ui.DisabledLabel("Save on both source and target rigs. Their exported .anim files retain the source body assignments. Hair, tails, props, and unusual chains can stay unassigned.");
     }
-    if (!ImGui::CollapsingHeader("Viewport rig controls")) return;
+    if (!AnimationPropertiesHeader(document, "Viewport rig controls")) return;
     const auto labelFor = [&](int node) -> std::string
     {
         for (size_t i = 0; i < palette.size() && i < joints.size(); ++i)
@@ -3164,7 +3194,7 @@ void EditorState::DrawAnimationPoseLibrary(IEditorUi& ui,
     AnimationDocument& document)
 {
     if (!document.poseSkeleton ||
-        !ImGui::CollapsingHeader("Pose library and symmetry")) return;
+        !AnimationPropertiesHeader(document, "Pose library and symmetry")) return;
     auto track = std::find_if(document.tracks.begin(), document.tracks.end(),
         [&](const auto& item) { return item.index == document.rigIndex; });
     if (track == document.tracks.end()) return;
@@ -3534,7 +3564,7 @@ void EditorState::DrawAnimationChainIK(IEditorUi& ui,
     AnimationDocument& document)
 {
     if (!document.poseSkeleton ||
-        !ImGui::CollapsingHeader("Chain and full-body IK")) return;
+        !AnimationPropertiesHeader(document, "Chain and full-body IK")) return;
     const auto& palette = document.poseSkeleton->jointNodes;
     const auto& joints = document.poseSkeleton->ResolveJoints();
     const auto jointFor = [&](unsigned node) -> Engine::Core::Object*
@@ -3999,7 +4029,7 @@ void EditorState::DrawAnimationRigConstraints(IEditorUi& ui,
     auto* model = document.poseSkeleton->ResolveModel();
     auto* constraints = model && model->Owner
         ? model->Owner->GetComponent<Engine::Components::RigConstraints>() : nullptr;
-    if (!constraints || !ImGui::CollapsingHeader("Model rig constraints",
+    if (!constraints || !AnimationPropertiesHeader(document, "Model rig constraints",
             ImGuiTreeNodeFlags_DefaultOpen)) return;
     auto track = std::find_if(document.tracks.begin(), document.tracks.end(),
         [&](const auto& item) { return item.index == document.rigIndex; });
@@ -4033,7 +4063,63 @@ void EditorState::DrawAnimationProperties(IEditorUi& ui,
             document.error.c_str(), { 1.f, .5f, .35f, 1.f });
         return;
     }
-    if (ImGui::CollapsingHeader("Rig details"))
+    ImGui::PushID(&document);
+    document.drawingProperties = true;
+    struct FinishProperties
+    {
+        AnimationDocument& document;
+        ~FinishProperties()
+        {
+            document.drawingProperties = false;
+            document.propertiesHeaderOverride = -1;
+            ImGui::PopID();
+        }
+    } finishProperties{document};
+    const char* sections[]{"Rig details", "Key editing", "Model rig constraints",
+        "Humanoid animation mapping", "Viewport rig controls", "Pose controller keys",
+        "Pose library and symmetry", "Chain and full-body IK", "Model animations",
+        "Repair bone mappings", "Selected bone", "Two-bone IK"};
+    const auto setExpanded = [&](bool open)
+    {
+        document.propertiesHeaderOverride = open ? 1 : 0;
+        document.propertiesSearch[0] = '\0';
+        document.propertiesJumpTarget.clear();
+        // Set hidden descendants too, so reopening Selected bone after
+        // Collapse all does not reveal an IK section left expanded earlier.
+        for (const char* section : sections)
+            ImGui::GetStateStorage()->SetInt(ImGui::GetID(section), open ? 1 : 0);
+        if (m_primaryProperties) m_primaryProperties->SetComponentHeadersOpen(open);
+    };
+    if (ui.Button(document.propertiesOutlineOpen
+            ? "List <##animationOutline" : "List >##animationOutline", 48.f))
+        document.propertiesOutlineOpen = !document.propertiesOutlineOpen;
+    ui.Tooltip("Show or hide the animation section outline");
+    ui.SameLine();
+    if (ui.Button("-##collapseAnimationProperties", 24.f))
+        setExpanded(false);
+    ui.Tooltip("Collapse all animation sections and selected bone components");
+    ui.SameLine();
+    if (ui.Button("+##expandAnimationProperties", 24.f))
+        setExpanded(true);
+    ui.Tooltip("Expand all animation sections and selected bone components");
+    ui.SameLine();
+    ui.SearchInput("##animationPropertiesSearch", document.propertiesSearch,
+        sizeof(document.propertiesSearch), "Find animation section...");
+    if (document.propertiesOutlineOpen)
+    {
+        if (ui.BeginChildRegion("animationSectionOutline", 112.f))
+        {
+            for (const char* section : sections)
+                if (ui.Selectable(section))
+                {
+                    document.propertiesJumpTarget = section;
+                    document.propertiesSearch[0] = '\0';
+                }
+        }
+        ui.EndChild();
+    }
+    ui.Separator();
+    if (AnimationPropertiesHeader(document, "Rig details"))
     {
         const std::string rigLabel = document.rigName + " / " +
             std::filesystem::path(document.path).filename().string();
@@ -4047,9 +4133,16 @@ void EditorState::DrawAnimationProperties(IEditorUi& ui,
                 ui.ValueLabel(index == 0 ? "Bound meshes" : "",
                     document.boundMeshNames[index].c_str());
     }
+    if (AnimationPropertiesHeader(document, "Key editing"))
+    {
+        DrawAnimationKeyTools(ui, document);
+        ImGui::SetNextItemWidth(160.f);
+        ImGui::SliderFloat("Timeline zoom", &document.timelinePixelsPerSecond,
+            35.f, 3200.f, "%.0f px/s", ImGuiSliderFlags_Logarithmic);
+    }
     DrawAnimationRigConstraints(ui, document);
     DrawAnimationRigControls(ui, document);
-    if (ImGui::CollapsingHeader("Pose controller keys"))
+    if (AnimationPropertiesHeader(document, "Pose controller keys"))
     {
         using Space = Engine::Model::AnimationClip::ControllerKey::Space;
         ui.ValueLabel("New key target space",
@@ -4066,7 +4159,8 @@ void EditorState::DrawAnimationProperties(IEditorUi& ui,
     DrawAnimationPoseLibrary(ui, document);
     DrawAnimationChainIK(ui, document);
     ui.Separator();
-    DrawAnimationLayerTools(ui, document);
+    if (AnimationPropertiesHeader(document, "Model animations", ImGuiTreeNodeFlags_DefaultOpen))
+        DrawAnimationLayerTools(ui, document);
     DrawAnimationMappingRepair(ui, document);
     const std::string saveLabel = std::string(Icons::Save) +
         (document.sourceObject ? " Apply Animation to Object" :
@@ -4094,6 +4188,7 @@ void EditorState::DrawAnimationProperties(IEditorUi& ui,
     if (!document.error.empty()) ui.ColoredLabel(document.error.c_str(),
         { 1.f, .5f, .35f, 1.f });
 
+    if (!AnimationPropertiesHeader(document, "Selected bone", ImGuiTreeNodeFlags_DefaultOpen)) return;
     const auto& joints = document.poseSkeleton->ResolveJoints();
     if (document.selectedBone < 0 ||
         document.selectedBone >= static_cast<int>(joints.size()) ||
@@ -4150,7 +4245,7 @@ void EditorState::DrawAnimationProperties(IEditorUi& ui,
     const bool validChain = upper && lower &&
         std::find(joints.begin(), joints.end(), upper) != joints.end() &&
         std::find(joints.begin(), joints.end(), lower) != joints.end();
-    if (validChain && ImGui::CollapsingHeader("Two-bone IK"))
+    if (validChain && AnimationPropertiesHeader(document, "Two-bone IK"))
     {
         if (document.ikControlTip != document.selectedBone ||
             document.ikControlTime != document.playheadSeconds)
@@ -4584,7 +4679,7 @@ void EditorState::DrawAnimationLayerTools(IEditorUi& ui,
     AnimationDocument& document)
 {
     if (!document.sourceManager) return;
-    ImGui::TextUnformatted("Model animations");
+    if (!document.drawingProperties) ImGui::TextUnformatted("Model animations");
     ImGui::TextWrapped("Primary and additional tracks come from this model's Animation Manager. "
         "Remove from timeline keeps the clip available; Remove from model detaches it when you save.");
     Engine::Core::Component::DrawAssetPathPicker(ui, &document,
@@ -5293,8 +5388,7 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
                 document.view->SetPoseEditing(true);
                 document.view->SetModelManipulation(true);
                 document.view->SetModelSelectionMode(1);
-                EditorViewportSettings::SetBonesVisible(true);
-                EditorViewportSettings::Apply(*document.poseScene);
+                document.poseScene->SetEditorBonesVisible(true);
             }
             ImGui::EndPopup();
         }
@@ -5975,21 +6069,43 @@ void EditorState::HandleAnimationDocumentClosures()
         if (m_timelineAnimationDocument == document)
             m_timelineAnimationDocument = nullptr;
         if (m_animationCloseDocument == document) m_animationCloseDocument = nullptr;
+        RetiredAnimationDocument retired;
         for (IEditorPanel* closing : { static_cast<IEditorPanel*>(document->view) })
             for (auto panel = m_panels.begin(); panel != m_panels.end(); ++panel)
                 if (panel->get() == closing)
                 {
                     if (auto* view = dynamic_cast<View*>(closing))
-                        m_viewFactory->FreeSrvSlot(view->GetSrvSlotIndex());
+                        retired.srvSlot = view->GetSrvSlotIndex();
                     m_viewFactory->NotifyPanelRemoved(closing);
+                    retired.panel = std::move(*panel);
                     m_panels.erase(panel);
                     break;
                 }
+        // UI drawing can close this viewport after its rendering commands and
+        // ImGui texture references have already been recorded for this frame.
+        retired.document = std::move(*it);
+        m_retiredAnimationDocuments.push_back(std::move(retired));
         it = m_animationDocuments.erase(it);
         closed = true;
     }
     if (!m_timelineAnimationDocument && !m_animationDocuments.empty())
         m_timelineAnimationDocument = m_animationDocuments.back().get();
     if (closed) SaveAnimationEditorSession();
+}
+
+void EditorState::ReleaseRetiredAnimationDocuments()
+{
+    if (m_retiredAnimationDocuments.empty()) return;
+    // Called after RenderIfNeeded submits the command list. Waiting here also
+    // protects references from earlier in-flight frames before reusing slots.
+    m_renderer->WaitIdle();
+    for (auto& retired : m_retiredAnimationDocuments)
+    {
+        retired.panel.reset();
+        retired.document.reset();
+        if (retired.srvSlot != UINT32_MAX)
+            m_viewFactory->FreeSrvSlot(retired.srvSlot);
+    }
+    m_retiredAnimationDocuments.clear();
 }
 }

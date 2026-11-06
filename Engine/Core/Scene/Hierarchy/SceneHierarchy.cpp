@@ -1039,6 +1039,10 @@ void Scene::ClearObjects()
     m_retiredRenderObjects.clear();
     m_hasStarted = false;
     m_graphicsPreparationPending = false;
+    m_graphicsPreparationRestart = false;
+    m_graphicsPreparationBudgetMs = 0;
+    m_graphicsPreparationItems.clear();
+    m_graphicsPreparationCursor = 0;
     {
         std::lock_guard<std::mutex> lock(m_queuedSceneMutationsMutex);
         m_queuedSceneMutations.clear();

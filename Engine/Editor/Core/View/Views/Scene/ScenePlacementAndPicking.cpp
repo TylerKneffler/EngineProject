@@ -125,7 +125,8 @@ struct TriangleIndex
 
     bool Intersect(const glm::vec3& origin, const glm::vec3& direction,
         float& distance, size_t* triangleIndex = nullptr,
-        float* baryU = nullptr, float* baryV = nullptr) const
+        float* baryU = nullptr, float* baryV = nullptr,
+        size_t firstVertex = 0, size_t vertexCount = SIZE_MAX) const
     {
         if (nodes.empty()) return false;
         float nearest = FLT_MAX, nearestU = 0.f, nearestV = 0.f;
@@ -143,6 +144,9 @@ struct TriangleIndex
             {
                 const size_t triangle = order[i];
                 const auto& ids = triangles[triangle].ids;
+                if (ids[0] < firstVertex || ids[0] - firstVertex >= vertexCount ||
+                    ids[1] < firstVertex || ids[1] - firstVertex >= vertexCount ||
+                    ids[2] < firstVertex || ids[2] - firstVertex >= vertexCount) continue;
                 const glm::vec3& a = vertices[ids[0]];
                 const glm::vec3 e1 = vertices[ids[1]] - a;
                 const glm::vec3 e2 = vertices[ids[2]] - a;
@@ -180,6 +184,35 @@ struct SkinnedEntry
     std::shared_ptr<const TriangleIndex> ready;
 };
 std::unordered_map<const Engine::Components::Mesh*, SkinnedEntry> skinnedEntries;
+struct StaticEntry
+{
+    uint64_t geometry = 0, morph = 0, surface = 0;
+    std::shared_ptr<const TriangleIndex> triangles;
+};
+std::unordered_map<const Engine::Components::Mesh*, StaticEntry> staticEntries;
+
+std::shared_ptr<const TriangleIndex> StaticIndex(const Engine::Components::Mesh& mesh)
+{
+    auto& entry = staticEntries[&mesh];
+    if (!entry.triangles || entry.geometry != mesh.GetAuthoredGeometryRevision() ||
+        entry.morph != mesh.GetMorphWeightsRevision() ||
+        entry.surface != mesh.GetSurfaceOffsetsRevision())
+    {
+        auto snapshot = mesh.CapturePoseSnapshot();
+        for (const auto& terrainVertex : mesh.GetTerrainVertices())
+        {
+            Engine::Components::Mesh::Vertex vertex{};
+            for (int axis = 0; axis < 3; ++axis) vertex.pos[axis] = terrainVertex.pos[axis];
+            snapshot.vertices.push_back(vertex);
+        }
+        entry.triangles = std::make_shared<TriangleIndex>(
+            TriangleIndex::Prepare(std::move(snapshot), {}));
+        entry.geometry = mesh.GetAuthoredGeometryRevision();
+        entry.morph = mesh.GetMorphWeightsRevision();
+        entry.surface = mesh.GetSurfaceOffsetsRevision();
+    }
+    return entry.triangles;
+}
 const Engine::Scene::Scene* cachedScene = nullptr;
 uint64_t cachedStructureRevision = 0;
 struct SpatialCache
@@ -193,10 +226,10 @@ SpatialCache spatialCache;
 struct HoverCandidate
 {
     Engine::Core::Object* object = nullptr;
-    std::vector<Engine::Core::Object*> ancestors;
     glm::vec3 origin{}, direction{}, minimum{}, maximum{};
     std::shared_ptr<const TriangleIndex> triangles;
     float travelled = 0.f, maximumDistance = FLT_MAX;
+    size_t firstVertex = 0, vertexCount = SIZE_MAX;
     bool sphere = false;
 
     float Intersect() const
@@ -204,7 +237,8 @@ struct HoverCandidate
         float distance = FLT_MAX;
         if (triangles)
         {
-            if (!triangles->Intersect(origin, direction, distance)) return FLT_MAX;
+            if (!triangles->Intersect(origin, direction, distance, nullptr, nullptr, nullptr,
+                    firstVertex, vertexCount)) return FLT_MAX;
         }
         else if (sphere)
         {
@@ -243,6 +277,53 @@ struct HoverCandidate
             ? travelled + distance : FLT_MAX;
     }
 };
+// Preserve the world ray parameter when transforming into mesh/instance space.
+std::vector<HoverCandidate> StaticCandidates(const Engine::Core::Object& object,
+    const Engine::Components::Mesh& mesh, const glm::vec3& origin,
+    const glm::vec3& direction)
+{
+    std::vector<HoverCandidate> result;
+    const auto append = [&](const glm::mat4& world, size_t first, size_t count,
+                            const Engine::Components::Mesh& source) {
+        if (std::abs(glm::determinant(world)) < 1e-8f) return;
+        const auto inverse = glm::inverse(world);
+        HoverCandidate candidate;
+        candidate.origin = glm::vec3(inverse * glm::vec4(origin, 1.f));
+        candidate.direction = glm::vec3(inverse * glm::vec4(direction, 0.f));
+        if (source.HasBounds() && !TriangleIndex::RayBox(candidate.origin,
+                candidate.direction, source.GetBoundsMin(), source.GetBoundsMax(), FLT_MAX)) return;
+        candidate.triangles = StaticIndex(source);
+        candidate.firstVertex = first;
+        candidate.vertexCount = count;
+        result.push_back(std::move(candidate));
+    };
+    const auto world = object.transform.GetWorldMatrix();
+    if (!mesh.IsInstanced()) append(world, 0, SIZE_MAX, mesh);
+    else if (const auto& data = mesh.GetInstanceData())
+        for (const auto& range : mesh.GetInstanceRanges())
+            for (size_t i = range.firstInstance;
+                 i < size_t(range.firstInstance) + range.instanceCount && i < data->transforms.size(); ++i)
+            {
+                glm::mat4 instance(1.f);
+                for (int row = 0; row < 3; ++row)
+                    for (int column = 0; column < 4; ++column)
+                        instance[column][row] = data->transforms[i].rows[row][column];
+                append(world * instance, range.firstVertex, range.vertexCount,
+                    *mesh.GetInstanceSource());
+            }
+    return result;
+}
+
+bool IntersectStaticMesh(const Engine::Core::Object& object,
+    const Engine::Components::Mesh& mesh, const glm::vec3& origin,
+    const glm::vec3& direction, float& distance)
+{
+    distance = FLT_MAX;
+    for (const auto& candidate : StaticCandidates(object, mesh, origin, direction))
+        distance = std::min(distance, candidate.Intersect());
+    return distance < FLT_MAX;
+}
+
 struct HoverState
 {
     uint64_t signature = 0;
@@ -300,6 +381,10 @@ uint64_t HoverSignature(const Engine::Scene::Scene& scene,
         }
         auto* mesh = object->GetComponent<Engine::Components::Mesh>();
         if (!mesh) continue;
+        const bool visible = mesh->IsEditorVisible();
+        hash = HashBytes(hash, &visible, sizeof(visible));
+        if (const auto& instances = mesh->GetInstanceData())
+            hash = HashBytes(hash, &instances->revision, sizeof(instances->revision));
         const uint64_t revisions[] = { mesh->GetAuthoredGeometryRevision(),
             mesh->GetConfigurationRevision(), mesh->GetMorphWeightsRevision(),
             mesh->GetSurfaceOffsetsRevision() };
@@ -534,6 +619,7 @@ bool ScenePlacementAndPicking::FindTerrainPlacement(
 void ScenePlacementAndPicking::ClearCaches()
 {
     skinnedEntries.clear();
+    staticEntries.clear();
     spatialCache = {};
     hoverState = {};
     cachedScene = nullptr;
@@ -599,11 +685,9 @@ Engine::Core::Object* ScenePlacementAndPicking::PickObjectHoverAsync(
                     object, segment.contentScopeRoot)) continue;
             auto* mesh = object->GetComponent<Engine::Components::Mesh>();
             auto* sprite = object->GetComponent<Engine::Components::Sprite>();
-            if (!mesh && !sprite) continue;
+            if ((!mesh && !sprite) || (mesh && !mesh->IsEditorVisible())) continue;
             HoverCandidate candidate;
             candidate.object = object;
-            for (auto* parent = object->Parent; parent; parent = parent->Parent)
-                candidate.ancestors.push_back(parent);
             candidate.travelled = travelled;
             candidate.maximumDistance = segment.maxDistance;
             if (mesh && mesh->HasBounds())
@@ -616,6 +700,18 @@ Engine::Core::Object* ScenePlacementAndPicking::PickObjectHoverAsync(
                     glm::vec4(segment.ray.direction, 0.f));
                 candidate.minimum = mesh->GetBoundsMin();
                 candidate.maximum = mesh->GetBoundsMax();
+                if (!object->GetComponent<Engine::Components::SkinnedMesh>())
+                {
+                    for (auto geometry : StaticCandidates(*object, *mesh,
+                            segment.ray.origin, segment.ray.direction))
+                    {
+                        geometry.object = candidate.object;
+                        geometry.travelled = candidate.travelled;
+                        geometry.maximumDistance = candidate.maximumDistance;
+                        candidates.push_back(std::move(geometry));
+                    }
+                    continue;
+                }
                 if (auto* skin = object->GetComponent<Engine::Components::SkinnedMesh>())
                 {
                     SkinnedIndex(*mesh, *skin, false);
@@ -645,19 +741,11 @@ Engine::Core::Object* ScenePlacementAndPicking::PickObjectHoverAsync(
         [candidates = std::move(candidates)]() {
             Engine::Core::Object* best = nullptr;
             float nearest = FLT_MAX;
-            const HoverCandidate* bestCandidate = nullptr;
             for (const auto& candidate : candidates)
             {
                 const float distance = candidate.Intersect();
-                const bool deeperChild = best && std::find(
-                    candidate.ancestors.begin(), candidate.ancestors.end(), best)
-                    != candidate.ancestors.end();
-                const bool shallowerParent = bestCandidate && std::find(
-                    bestCandidate->ancestors.begin(), bestCandidate->ancestors.end(),
-                    candidate.object) != bestCandidate->ancestors.end();
-                if (distance < FLT_MAX && (deeperChild ||
-                    (!shallowerParent && distance < nearest)))
-                { nearest = distance; best = candidate.object; bestCandidate = &candidate; }
+                if (distance < nearest)
+                { nearest = distance; best = candidate.object; }
             }
             return best;
         });
@@ -948,7 +1036,7 @@ Engine::Core::Object* ScenePlacementAndPicking::PickObjectInViewport(
             Engine::Components::Sprite* sprite = obj && obj->IsEnabledInHierarchy()
                 ? obj->GetComponent<Engine::Components::Sprite>() : nullptr;
             if (!obj || !obj->IsEnabledInHierarchy() ||
-                (!mesh && !sprite))
+                (!mesh && !sprite) || (mesh && !mesh->IsEditorVisible()))
             {
                 continue;
             }
@@ -966,21 +1054,10 @@ Engine::Core::Object* ScenePlacementAndPicking::PickObjectInViewport(
                 const bool hit = skinned
                     ? IntersectSkinnedMesh(*obj, *mesh, *skinned,
                         segment.ray.origin, segment.ray.direction, distance)
-                    : IntersectMeshBounds(*obj, *mesh, segment.ray.origin,
+                    : IntersectStaticMesh(*obj, *mesh, segment.ray.origin,
                         segment.ray.direction, distance);
-                const bool deeperChild = preserveMeshChild && best && [&] {
-                    for (auto* parent = obj->Parent; parent; parent = parent->Parent)
-                        if (parent == best) return true;
-                    return false;
-                }();
-                const bool shallowerParent = preserveMeshChild && best && [&] {
-                    for (auto* parent = best->Parent; parent; parent = parent->Parent)
-                        if (parent == obj) return true;
-                    return false;
-                }();
                 if (hit && distance < segment.maxDistance &&
-                    (deeperChild || (!shallowerParent &&
-                        travelledDistance + distance < bestDistance)))
+                    travelledDistance + distance < bestDistance)
                 {
                     bestDistance = travelledDistance + distance;
                     best = !preserveMeshChild && skinned && obj->GetPrefabInstanceRoot()
