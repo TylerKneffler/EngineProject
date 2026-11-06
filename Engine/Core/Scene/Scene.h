@@ -328,8 +328,14 @@ public:
     // Editor replay packets can defer publication to the following simulation
     // commit. Object mutations still commit before rendering in either mode.
     void PrepareRenderFrame(bool publishSnapshot = true);
-    void QueueGraphicsPreparation()
-    { AssertOwnerThread(); m_graphicsPreparationPending = true; }
+    void QueueGraphicsPreparation(double budgetMilliseconds = 0)
+    {
+        AssertOwnerThread();
+        m_graphicsPreparationPending = true;
+        m_graphicsPreparationRestart = true;
+        if (budgetMilliseconds > 0) m_graphicsPreparationBudgetMs = budgetMilliseconds;
+    }
+    bool HasPendingGraphicsPreparation() const { return m_graphicsPreparationPending; }
     void ProcessGraphicsPreparation(IGraphicsProvider* graphicsProvider);
     std::shared_ptr<const NativeRenderPacket> TakeNativeRenderPacket();
     void RetainNativePacketMeshBuffers(const NativeRenderPacket& packet,
@@ -1201,6 +1207,10 @@ private:
     PrepareTimings m_lastPrepareTimings{};
     bool m_hasStarted = false;
     bool m_graphicsPreparationPending = false;
+    bool m_graphicsPreparationRestart = false;
+    double m_graphicsPreparationBudgetMs = 0;
+    std::vector<std::pair<ObjectId, Engine::Core::Component*>> m_graphicsPreparationItems;
+    size_t m_graphicsPreparationCursor = 0;
     uint64_t m_lifecycleRevision = 0;
     size_t m_particleBudget = 100000;
     float m_deltaTime = 0.f;

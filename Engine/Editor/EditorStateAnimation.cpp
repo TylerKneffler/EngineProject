@@ -8,7 +8,6 @@
 #include "Core/Importers/MmdDanceAssetBinder.h"
 #include "Core/View/ViewFactory.h"
 #include "Core/View/Views/AnimationView.h"
-#include "Core/View/EditorViewportSettings.h"
 #include "Core/View/Views/GameView.h"
 #include "Core/View/Views/HierarchyView.h"
 #include "Core/View/Views/PropertiesView.h"
@@ -937,6 +936,13 @@ void EditorState::ProcessPendingAnimationDocumentOpens()
                 "Could not create an Animation Editor viewport.");
             continue;
         }
+        // Animation authoring starts with its rig visible, independently of
+        // the Scene View's saved overlay preferences.
+        document->poseScene->SetEditorBonesVisible(true);
+        for (const auto& object : document->poseScene->GetObjects())
+            for (auto* component : object->Components)
+                if (auto* skeleton = dynamic_cast<Engine::Components::Skeleton*>(component))
+                    skeleton->showBones = true;
         AnimationDocument* raw = document.get();
         raw->view = view.get();
         view->SetDocumentPath(path);
@@ -1302,7 +1308,7 @@ void EditorState::SetActiveAnimationDocument(AnimationDocument* document)
     m_gameViewFocused = false;
     for (auto& panel : m_panels)
         if (auto* game = dynamic_cast<GameView*>(panel.get()))
-            game->SetScene(document->poseScene.get());
+            game->SetScene(m_scene.get());
     if (m_primaryHierarchy)
     {
         m_primaryHierarchy->Init(document->poseScene.get());
@@ -2961,8 +2967,7 @@ void EditorState::DrawAnimationMappingRepair(IEditorUi& ui,
         document.view->SetPoseEditing(true);
         document.view->SetModelManipulation(true);
         document.view->SetModelSelectionMode(1);
-        EditorViewportSettings::SetBonesVisible(true);
-        EditorViewportSettings::Apply(*document.poseScene);
+        document.poseScene->SetEditorBonesVisible(true);
     }
     if (document.repairAwaitingViewportBone)
         ui.DisabledLabel("Click a bone in the 3D view to assign it.");
@@ -4046,6 +4051,13 @@ void EditorState::DrawAnimationProperties(IEditorUi& ui,
             for (size_t index = 0; index < document.boundMeshNames.size(); ++index)
                 ui.ValueLabel(index == 0 ? "Bound meshes" : "",
                     document.boundMeshNames[index].c_str());
+    }
+    if (ImGui::CollapsingHeader("Key editing"))
+    {
+        DrawAnimationKeyTools(ui, document);
+        ImGui::SetNextItemWidth(160.f);
+        ImGui::SliderFloat("Timeline zoom", &document.timelinePixelsPerSecond,
+            35.f, 3200.f, "%.0f px/s", ImGuiSliderFlags_Logarithmic);
     }
     DrawAnimationRigConstraints(ui, document);
     DrawAnimationRigControls(ui, document);
@@ -5293,8 +5305,7 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
                 document.view->SetPoseEditing(true);
                 document.view->SetModelManipulation(true);
                 document.view->SetModelSelectionMode(1);
-                EditorViewportSettings::SetBonesVisible(true);
-                EditorViewportSettings::Apply(*document.poseScene);
+                document.poseScene->SetEditorBonesVisible(true);
             }
             ImGui::EndPopup();
         }
@@ -5975,21 +5986,43 @@ void EditorState::HandleAnimationDocumentClosures()
         if (m_timelineAnimationDocument == document)
             m_timelineAnimationDocument = nullptr;
         if (m_animationCloseDocument == document) m_animationCloseDocument = nullptr;
+        RetiredAnimationDocument retired;
         for (IEditorPanel* closing : { static_cast<IEditorPanel*>(document->view) })
             for (auto panel = m_panels.begin(); panel != m_panels.end(); ++panel)
                 if (panel->get() == closing)
                 {
                     if (auto* view = dynamic_cast<View*>(closing))
-                        m_viewFactory->FreeSrvSlot(view->GetSrvSlotIndex());
+                        retired.srvSlot = view->GetSrvSlotIndex();
                     m_viewFactory->NotifyPanelRemoved(closing);
+                    retired.panel = std::move(*panel);
                     m_panels.erase(panel);
                     break;
                 }
+        // UI drawing can close this viewport after its rendering commands and
+        // ImGui texture references have already been recorded for this frame.
+        retired.document = std::move(*it);
+        m_retiredAnimationDocuments.push_back(std::move(retired));
         it = m_animationDocuments.erase(it);
         closed = true;
     }
     if (!m_timelineAnimationDocument && !m_animationDocuments.empty())
         m_timelineAnimationDocument = m_animationDocuments.back().get();
     if (closed) SaveAnimationEditorSession();
+}
+
+void EditorState::ReleaseRetiredAnimationDocuments()
+{
+    if (m_retiredAnimationDocuments.empty()) return;
+    // Called after RenderIfNeeded submits the command list. Waiting here also
+    // protects references from earlier in-flight frames before reusing slots.
+    m_renderer->WaitIdle();
+    for (auto& retired : m_retiredAnimationDocuments)
+    {
+        retired.panel.reset();
+        retired.document.reset();
+        if (retired.srvSlot != UINT32_MAX)
+            m_viewFactory->FreeSrvSlot(retired.srvSlot);
+    }
+    m_retiredAnimationDocuments.clear();
 }
 }

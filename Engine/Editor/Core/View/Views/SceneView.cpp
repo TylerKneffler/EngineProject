@@ -2,6 +2,7 @@
 #include "SceneView.h"
 #include "Core/Graphics/GraphicsCommandPacket.h"
 #include "Core/Component.h"
+#include "Core/Rendering/RenderJobs.h"
 #include "Editor/Core/View/EditorViewportSettings.h"
 #include "Scene/SceneCameraController.h"
 #include "Scene/ScenePlacementAndPicking.h"
@@ -163,47 +164,78 @@ void SceneView::Init(void* device,
 // ---------------------------------------------------------------------------
 // Pose controls shared by the main scene and animation toolbars.
 // ---------------------------------------------------------------------------
-void SceneView::DrawPoseToolbar(const std::function<bool(float)>& next)
+void SceneView::DrawPoseToolbar(const std::function<bool(float)>& next,
+    bool animationEditor, bool inlineOptions)
 {
     if (m_scene && m_scene->IsEditorMode2D()) return;
     ImGui::PushID(this);
-    next(ImGui::CalcTextSize("Pose").x + ImGui::GetFrameHeight() +
-        ImGui::GetStyle().ItemInnerSpacing.x);
-    ImGui::Checkbox("Pose", &m_modelManipulation);
-    if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Drag a limb in the active camera view. Hold Shift to move in depth.");
-    next(90.f);
-    ImGui::SetNextItemWidth(90.f);
-    const char* selections[] = { "Mesh", "Bones", "Hybrid", "Points" };
-    ImGui::Combo("##PoseSelection", &m_modelSelectionMode,
-        selections, 4);
-    if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Blue: move joint. Green: aim segment. Pink: twist segment. Ctrl-click blue points for direct grouped movement.");
-    next(75.f);
-    ImGui::SetNextItemWidth(75.f);
-    const char* actions[] = { "Move", "Rotate" };
-    ImGui::Combo("##PoseAction", &m_modelAction, actions, 2);
-    next(ImGui::CalcTextSize("Scroll depth").x + ImGui::GetFrameHeight() +
-        ImGui::GetStyle().ItemInnerSpacing.x);
-    ImGui::Checkbox("Scroll depth", &m_modelScrollDepth);
-    if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("While dragging, scroll up to pull toward the camera or down to push away.");
-    next(ImGui::CalcTextSize("Pose settings...").x +
-        ImGui::GetStyle().FramePadding.x * 2.f);
-    if (ImGui::Button("Pose settings..."))
-        ImGui::OpenPopup("##PoseSettings");
-    if (ImGui::BeginPopup("##PoseSettings"))
+    auto* selected = m_scene ? m_scene->GetSelectedObject() : nullptr;
+    auto* controller = selected
+        ? selected->GetComponent<Engine::Components::AnimationBone>() : nullptr;
+    if (!animationEditor && next(ImGui::CalcTextSize("Pose").x +
+            ImGui::GetFrameHeight() + ImGui::GetStyle().ItemInnerSpacing.x))
+        ImGui::Checkbox("Pose", &m_modelManipulation);
+    if (next(130.f))
     {
-        const char* scopes[] = { "Selected", "Body Part", "Full Body" };
-        ImGui::SetNextItemWidth(110.f);
-        ImGui::Combo("Scope", &m_modelScope, scopes, 3);
+        ImGui::SetNextItemWidth(130.f);
+        const char* scopes[]{"Scope: Selected", "Scope: Body Part", "Scope: Full Body"};
+        int scope = controller && controller->poseControllerScope >= 0
+            ? controller->poseControllerScope : m_modelScope;
+        if (ImGui::Combo("##PoseScope", &scope, scopes, 3))
+        {
+            m_modelScope = scope;
+            if (controller && controller->poseControllerScope >= 0)
+            {
+                controller->poseControllerScope = scope;
+                controller->MarkConfigurationDirty();
+                if (OnModelControllerEdited) OnModelControllerEdited();
+            }
+        }
         if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("Selected moves one joint; Body Part solves a limb; Full Body solves the hierarchy with pinned effectors.");
-        auto* selected = m_scene ? m_scene->GetSelectedObject() : nullptr;
+            ImGui::SetTooltip("Selected moves one joint; Body Part solves a limb; Full Body respects active controllers and pins.");
+    }
+    if (next(105.f))
+    {
+        ImGui::BeginDisabled(!controller);
+        ImGui::SetNextItemWidth(105.f);
+        const char* modes[]{"Solve: Auto", "Solve: IK", "Solve: FK"};
+        int mode = controller ? controller->poseControllerMode : 0;
+        if (ImGui::Combo("##PoseSolve", &mode, modes, 3) && controller)
+        {
+            controller->poseControllerMode = mode;
+            controller->MarkConfigurationDirty();
+            if (OnModelControllerEdited) OnModelControllerEdited();
+        }
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            ImGui::SetTooltip(controller ? "Solve mode for the selected bone. Auto follows the viewport scope."
+                : "Select a bone to choose IK or FK.");
+    }
+    if (next(100.f))
+    {
+        ImGui::SetNextItemWidth(100.f);
+        const char* selections[]{"Select: Mesh", "Select: Bones", "Select: Hybrid", "Select: Points"};
+        ImGui::Combo("##PoseSelection", &m_modelSelectionMode, selections, 4);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Choose what can be picked in the viewport.");
+    }
+    if (next(80.f))
+    {
+        ImGui::SetNextItemWidth(80.f);
+        const char* actions[]{"Move", "Rotate"};
+        ImGui::Combo("##PoseAction", &m_modelAction, actions, 2);
+    }
+    if (!inlineOptions && next(100.f) && ImGui::Button("Pose options"))
+        ImGui::OpenPopup("##PoseSettings");
+    const bool optionsPopup = !inlineOptions && ImGui::BeginPopup("##PoseSettings");
+    if (inlineOptions || optionsPopup)
+    {
+        if (animationEditor) ImGui::Checkbox("Enable posing", &m_modelManipulation);
+        ImGui::Checkbox("Scroll adjusts depth", &m_modelScrollDepth);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("While dragging, scroll to pull toward the camera or push away.");
         if (selected && selected->GetComponent<Engine::Components::AnimationBone>())
         {
-            auto* controller = selected->GetComponent<
-                Engine::Components::AnimationBone>();
             bool controllerActive = m_gizmos.IsModelControllerActive(selected);
             if (ImGui::Checkbox("Active", &controllerActive))
             {
@@ -229,14 +261,9 @@ void SceneView::DrawPoseToolbar(const std::function<bool(float)>& next)
                 m_gizmos.SetModelPin(selected, true, pinRotation);
                 if (OnModelControllerEdited) OnModelControllerEdited();
             }
-            if (ImGui::Button("Controller settings"))
-                ImGui::OpenPopup("##ControllerSettings");
-            if (ImGui::BeginPopup("##ControllerSettings"))
+            if (ImGui::CollapsingHeader("Controller details"))
             {
                 bool changed = false;
-                const char* modes[] = {"Follow scope", "IK", "FK"};
-                changed |= ImGui::Combo("Solve mode",
-                    &controller->poseControllerMode, modes, 3);
                 int scopeChoice = controller->poseControllerScope + 1;
                 const char* controllerScopes[] = {"Follow viewport", "Selected",
                     "Body Part", "Full Body"};
@@ -297,7 +324,6 @@ void SceneView::DrawPoseToolbar(const std::function<bool(float)>& next)
                     if (OnModelControllerEdited)
                         OnModelControllerEdited();
                 }
-                ImGui::EndPopup();
             }
         }
         if (selected && m_scene && AllowObjectCreation)
@@ -321,14 +347,14 @@ void SceneView::DrawPoseToolbar(const std::function<bool(float)>& next)
                         : static_cast<unsigned>(-1);
                     if (model)
                         model->BindNode(node, point);
-                    auto* controller = point->AddComponent<
+                    auto* newController = point->AddComponent<
                         Engine::Components::AnimationBone>();
                     if (const auto* parentBone = selected->GetComponent<
                             Engine::Components::AnimationBone>())
-                        controller->skinIndex = parentBone->skinIndex;
-                    controller->nodeIndex = node;
-                    controller->poseControlOnly = true;
-                    controller->poseControllerTarget =
+                        newController->skinIndex = parentBone->skinIndex;
+                    newController->nodeIndex = node;
+                    newController->poseControlOnly = true;
+                    newController->poseControllerTarget =
                         point->transform.GetWorldPosition();
                     m_scene->SetSelectedObject(point);
                     if (OnObjectCreated) OnObjectCreated(point);
@@ -354,7 +380,7 @@ void SceneView::DrawPoseToolbar(const std::function<bool(float)>& next)
             if (ImGui::IsItemHovered())
                 ImGui::SetTooltip("Key active controllers and fixed pins at the animation playhead.");
         }
-        ImGui::EndPopup();
+        if (optionsPopup) ImGui::EndPopup();
     }
     ImGui::PopID();
 }
@@ -446,7 +472,7 @@ void SceneView::DrawTerrainToolbar(const std::function<bool(float)>& next)
 
 void SceneView::DrawPanel(IEditorUi& ui)
 {
-    if (m_scene) EditorViewportSettings::Apply(*m_scene);
+    if (m_scene && UseGlobalBoneVisibility) EditorViewportSettings::Apply(*m_scene);
     if (m_focusOnNextDraw)
     {
         ui.FocusWindow(m_title.c_str());
@@ -805,6 +831,12 @@ void SceneView::DrawPanel(IEditorUi& ui)
     if (OnGizmoInteraction)
         OnGizmoInteraction(gizmoResult.transformDragging ||
             m_toolbar.IsTransformDragging());
+    if (m_prefabDropPending && ImGui::IsKeyPressed(ImGuiKey_Escape)) CancelPrefabPreview();
+    if (m_prefabDropPending) PollPrefabPreparation();
+    if (m_prefabDropPending)
+        ui.DrawViewportText({14.f, 18.f}, "Loading placed prefab...", {1.f, .85f, .3f, 1.f});
+    if (!m_prefabPreparationError.empty())
+        ui.DrawViewportText({14.f, 40.f}, m_prefabPreparationError.c_str(), {1.f, .4f, .3f, 1.f});
     bool prefabDragObserved = false;
     if (AllowAssetDrops && ui.BeginDragDropTarget())
     {
@@ -822,38 +854,40 @@ void SceneView::DrawPanel(IEditorUi& ui)
             if (extension == ".prefab")
             {
                 prefabDragObserved = true;
-                if ((!m_prefabPreview || m_prefabPreviewPath != path) &&
-                    OnAssetPreviewRequested)
+                if (m_prefabPreviewPath != path &&
+                    (OnPreparedAssetPreviewRequested || OnAssetPreviewRequested))
                 {
                     CancelPrefabPreview();
-                    m_prefabPreview = OnAssetPreviewRequested(path);
-                    m_prefabPreviewPath = m_prefabPreview ? path : std::string{};
-                    m_prefabPreviewHasPlacement = false;
-                    if (m_scene)
-                        m_scene->SetPreviewObject(m_prefabPreview);
+                    m_prefabPreviewPath = path;
+                    m_prefabPreparationError.clear();
+                    m_prefabPreparationGeneration = m_scene ? m_scene->CaptureSceneGeneration() : 0;
+                    m_prefabPreparationCanceled = std::make_shared<std::atomic_bool>(false);
+                    m_prefabPreparation = Engine::Rendering::RenderJobs::Get().Submit(
+                        [path, canceled = m_prefabPreparationCanceled] {
+                            return Engine::Serialization::PreparedPrefab::Load(path, canceled);
+                        });
                 }
+                PollPrefabPreparation();
                 glm::vec3 placement{};
-                if (m_prefabPreview && m_scene &&
+                if (!m_prefabDropPending && m_scene &&
                     ScenePlacementAndPicking::FindPrefabPlacement(
                         *m_scene, m_prefabPreview,
                         input.mousePosInViewport, input.available, placement))
                 {
-                    m_prefabPreview->transform.position = placement;
+                    m_prefabPlacement = placement;
+                    if (m_prefabPreview) m_prefabPreview->transform.position = placement;
                     m_prefabPreviewHasPlacement = true;
                 }
-                if (payload.delivered && m_prefabPreview &&
-                    m_prefabPreviewHasPlacement)
+                if (payload.delivered && m_prefabPreviewHasPlacement &&
+                    (m_prefabPreview || m_prefabPreparation.valid()))
                 {
-                    Engine::Core::Object* placed = m_prefabPreview;
-                    const std::string placedPath = m_prefabPreviewPath;
-                    m_prefabPreview = nullptr;
-                    m_prefabPreviewPath.clear();
-                    m_prefabPreviewHasPlacement = false;
-                    if (m_scene)
-                        m_scene->SetPreviewObject(nullptr);
-                    if (OnAssetPreviewCommitted)
-                        OnAssetPreviewCommitted(placed, placedPath);
+                    m_prefabDropPending = true;
+                    if (m_prefabPreview) CommitPrefabPreview();
                 }
+                if (m_prefabPreparation.valid())
+                    ui.DrawViewportText({input.mousePosInViewport.x + 14.f,
+                        input.mousePosInViewport.y + 18.f}, "Loading prefab...", {1.f, .85f, .3f, 1.f});
+
             }
             else
             {
@@ -887,7 +921,7 @@ void SceneView::DrawPanel(IEditorUi& ui)
         }
         ui.EndDragDropTarget();
     }
-    if (!prefabDragObserved)
+    if (!prefabDragObserved && !m_prefabDropPending)
         CancelPrefabPreview();
     bool selectSceneObject = false;
     EditorUiVec2 size = input.available;
@@ -1005,11 +1039,62 @@ void SceneView::DrawPanel(IEditorUi& ui)
     }
 }
 
+void SceneView::PollPrefabPreparation()
+{
+    if (m_scene && (m_prefabPreparation.valid() || m_prefabPreview) &&
+        m_scene->CaptureSceneGeneration() != m_prefabPreparationGeneration)
+    {
+        // A reload already destroyed the previous scene's preview object.
+        m_prefabPreview = nullptr;
+        CancelPrefabPreview();
+        return;
+    }
+    if (!m_prefabPreparation.valid() ||
+        m_prefabPreparation.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+        return;
+    try
+    {
+        auto prepared = m_prefabPreparation.get();
+        if (!prepared || !m_scene) return;
+        m_prefabPreview = OnPreparedAssetPreviewRequested
+            ? OnPreparedAssetPreviewRequested(m_scene, *prepared)
+            : OnAssetPreviewRequested ? OnAssetPreviewRequested(prepared->path) : nullptr;
+        if (!m_prefabPreview) throw std::runtime_error("Could not create prefab: " + prepared->path);
+        if (m_prefabPreviewHasPlacement)
+            m_prefabPreview->transform.position = m_prefabPlacement;
+        m_scene->SetPreviewObject(m_prefabPreview);
+        if (m_prefabDropPending) CommitPrefabPreview();
+    }
+    catch (const std::exception& error)
+    {
+        m_prefabPreparationError = error.what();
+        m_prefabDropPending = false;
+    }
+}
+
+void SceneView::CommitPrefabPreview()
+{
+    auto* placed = m_prefabPreview;
+    const auto path = m_prefabPreviewPath;
+    m_prefabPreview = nullptr;
+    m_prefabPreviewPath.clear();
+    m_prefabPreviewHasPlacement = false;
+    m_prefabDropPending = false;
+    m_prefabPreparationCanceled.reset();
+    if (m_scene) m_scene->SetPreviewObject(nullptr);
+    if (placed && OnAssetPreviewCommitted) OnAssetPreviewCommitted(placed, path);
+}
+
 void SceneView::CancelPrefabPreview()
 {
+    if (m_prefabPreparationCanceled) m_prefabPreparationCanceled->store(true);
+    m_prefabPreparation = {};
+    m_prefabPreparationCanceled.reset();
+    m_prefabDropPending = false;
     if (m_scene)
         m_scene->SetPreviewObject(nullptr);
-    if (m_prefabPreview && OnAssetPreviewCancelled)
+    if (m_prefabPreview && OnAssetPreviewCancelled && m_scene &&
+        m_scene->CaptureSceneGeneration() == m_prefabPreparationGeneration)
         OnAssetPreviewCancelled(m_prefabPreview);
     m_prefabPreview = nullptr;
     m_prefabPreviewPath.clear();

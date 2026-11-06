@@ -292,6 +292,8 @@ public:
     void        DeserializeLegacyMorphTargets(const JsonValue& value);
     void        OnAfterDeserialize(IGraphicsProvider* graphicsProvider) override;
     void PrepareGraphicsResources(IGraphicsProvider* graphicsProvider) override;
+    // CPU-only preprocessing for detached meshes on a loading worker.
+    void PrepareDeferredGraphicsData();
     void DeferGraphicsBuffers() { m_bufferFactory = nullptr; m_ready = false; }
 
 private:
@@ -325,6 +327,8 @@ private:
     void ObserveMorphWeights() const;
     void AdvanceMorphWeightsRevision() const;
     void CreateMorphBuffers();
+    std::vector<glm::vec4> BuildMorphDeltas();
+    std::vector<glm::vec4> m_preparedMorphDeltas;
     void UploadMorphWeights();
     void UpdateBounds();
     std::string m_filePath;

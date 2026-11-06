@@ -40,7 +40,7 @@ size_t ComponentCategory(const std::string& type,
         type == "UIObject" || type == "UIText") return 3;
     if (type == "AudioSource") return 4;
     if (type == "SpatialManipulator" || type == "SplinePath" ||
-        type == "SplineFollower") return 5;
+        type == "SplineFollower" || type == "SplineGeometry") return 5;
     return 7;
 }
 }

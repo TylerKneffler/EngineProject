@@ -1,5 +1,8 @@
 #include "DX12EditorRenderer.h"
 #include "D3D12View.h"
+#include <d3d12sdklayers.h>
+#include <fstream>
+#include <sstream>
 
 
 namespace Engine::Renderers
@@ -217,15 +220,42 @@ void DX12EditorRenderer::EndFrame()
     barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
     m_commandList->ResourceBarrier(1, &barrier);
 
-    ThrowIfFailed(m_commandList->Close());
+    const auto checkSubmission = [this](HRESULT hr, const char* operation)
+    {
+        if (SUCCEEDED(hr)) return;
+        std::ostringstream message;
+        message << operation << " failed: HRESULT=0x" << std::hex
+            << static_cast<unsigned long>(hr) << ", deviceRemovedReason=0x"
+            << static_cast<unsigned long>(m_device->GetDeviceRemovedReason());
+        ComPtr<ID3D12InfoQueue> queue;
+        if (SUCCEEDED(m_device.As(&queue)))
+        {
+            const UINT64 count = queue->GetNumStoredMessages();
+            const UINT64 first = count > 64 ? count - 64 : 0;
+            for (UINT64 index = first; index < count; ++index)
+            {
+                SIZE_T bytes = 0;
+                if (FAILED(queue->GetMessage(index, nullptr, &bytes)) || !bytes) continue;
+                std::vector<unsigned char> storage(bytes);
+                auto* entry = reinterpret_cast<D3D12_MESSAGE*>(storage.data());
+                if (SUCCEEDED(queue->GetMessage(index, entry, &bytes)))
+                    message << '\n' << entry->pDescription;
+            }
+        }
+        std::ofstream log("dx12-frame-error.log", std::ios::app);
+        if (log) log << message.str() << std::endl;
+        OutputDebugStringA((message.str() + "\n").c_str());
+        throw std::runtime_error(message.str());
+    };
+    checkSubmission(m_commandList->Close(), "Command list Close");
 
     ID3D12CommandList* lists[] = { m_commandList.Get() };
     m_commandQueue->ExecuteCommandLists(1, lists);
     ++m_submittedFrameCount;
 
     // Present without a vblank wait; allow tearing when the swap chain supports it.
-    ThrowIfFailed(m_swapChain->Present(0,
-        m_tearingSupported ? DXGI_PRESENT_ALLOW_TEARING : 0u));
+    checkSubmission(m_swapChain->Present(0,
+        m_tearingSupported ? DXGI_PRESENT_ALLOW_TEARING : 0u), "Present");
 
     m_fenceValues[m_frameIndex] = ++m_fenceValue;
     ThrowIfFailed(m_commandQueue->Signal(m_fence.Get(), m_fenceValues[m_frameIndex]));

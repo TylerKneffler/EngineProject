@@ -1,4 +1,5 @@
 #include "Core/Rendering/ShadowReceiverCulling.h"
+#include "Core/Serialization/PrefabLoadProfile.h"
 #include "Core/Rendering/RenderJobs.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Graphics/GraphicsCommandPacket.h"
@@ -8,6 +9,7 @@
 #include "Core/Compoonents/Materials/Material.h"
 #include "Core/Compoonents/Obj/Terrain.h"
 #include "Core/Compoonents/Obj/TerrainObjectLayer.h"
+#include "Core/Compoonents/Path/SplineGeometry.h"
 #include "Core/Compoonents/Obj/TerrainManager.h"
 #include "Core/Compoonents/Obj/TerrainBatchAppearance.h"
 #include "Core/Compoonents/Physics/SpatialManipulator.h"
@@ -2059,10 +2061,43 @@ void Scene::ProcessGraphicsPreparation(IGraphicsProvider* graphicsProvider)
 {
     AssertOwnerThread();
     if (!m_graphicsPreparationPending || !graphicsProvider) return;
+    Engine::Serialization::PrefabLoadProfile profile("scene graphics preparation");
+    if (m_graphicsPreparationRestart && m_graphicsPreparationItems.empty())
+    {
+        m_graphicsPreparationItems.clear();
+        m_graphicsPreparationCursor = 0;
+        for (const auto& object : m_objects)
+            for (auto* component : object->Components)
+                if (component)
+                    m_graphicsPreparationItems.emplace_back(GetObjectId(object.get()), component);
+        m_graphicsPreparationRestart = false;
+    }
+    const auto started = std::chrono::steady_clock::now();
+    while (m_graphicsPreparationCursor < m_graphicsPreparationItems.size())
+    {
+        const auto [id, component] = m_graphicsPreparationItems[m_graphicsPreparationCursor++];
+        auto* object = FindObjectById(id);
+        if (object && std::find(object->Components.begin(), object->Components.end(), component) != object->Components.end())
+        {
+            Engine::Serialization::PrefabLoadProfile::Stage stage(
+                Engine::Serialization::PrefabLoadProfile::Enabled()
+                    ? "graphics_" + component->GetTypeName() : "");
+            component->PrepareGraphicsResources(graphicsProvider);
+        }
+        // Individual driver calls cannot be interrupted. Yield between
+        // components, including when one upload exceeds the soft budget.
+        if (m_graphicsPreparationBudgetMs > 0 &&
+            std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - started).count() >= m_graphicsPreparationBudgetMs)
+            return;
+    }
+    m_graphicsPreparationItems.clear();
+    m_graphicsPreparationCursor = 0;
+    // Finish this queue before rescanning requests added during preparation;
+    // otherwise continuous streaming can keep restarting at the first object.
+    if (m_graphicsPreparationRestart) return;
     m_graphicsPreparationPending = false;
-    for (const auto& object : m_objects)
-        for (auto* component : object->Components)
-            if (component) component->PrepareGraphicsResources(graphicsProvider);
+    m_graphicsPreparationBudgetMs = 0;
 }
 
 void Scene::PrepareRenderFrame(bool publishSnapshot)
@@ -2085,6 +2120,8 @@ void Scene::PrepareRenderFrame(bool publishSnapshot)
     // Copy the registry view: deriving prefab batches adds scene components.
     const auto objectLayers=GetComponents<Engine::Components::TerrainObjectLayer>();
     for (auto* layer:objectLayers) layer->PreparePrefabInstances(m_graphicsProvider);
+    const auto splineGeometry=GetComponents<SplineGeometry>();
+    for (auto* geometry:splineGeometry) geometry->PrepareGeometry(m_graphicsProvider);
     CommitPendingObjectChanges();
     ProcessGraphicsPreparation(m_graphicsProvider);
     SelectNativeFrameBuffers();

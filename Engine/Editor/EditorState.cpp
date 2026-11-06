@@ -22,6 +22,7 @@
 #include "Core/Physics/Physics.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include "Core/Serialization/Json.h"
+#include "Core/Serialization/PreparedPrefab.h"
 #include "Core/Compoonents/Obj/Mesh.h"
 #include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Compoonents/Materials/Material.h"
@@ -493,8 +494,14 @@ bool EditorState::PollBackgroundWork()
         openedPrefab = true;
     }
     const bool assets = m_primaryAssets && m_primaryAssets->PollDirectoryCache();
+    bool preparingPrefab = false;
+    for (const auto& panel : m_panels)
+        if (const auto* view = dynamic_cast<const SceneView*>(panel.get()))
+            preparingPrefab |= view->HasPendingPrefabPreparation() ||
+                (view->IsRenderVisible() && view->GetScene() &&
+                    view->GetScene()->HasPendingGraphicsPreparation());
     return saved || imported || baked || m_stageImport.valid() ||
-        openedPrefab || assets;
+        openedPrefab || assets || preparingPrefab;
 }
 
 void EditorState::StartSceneSave(SceneSaveRequest request)
@@ -3555,7 +3562,7 @@ void EditorState::SetActiveSceneAssetDocument(SceneAssetDocument* document,
     const auto scene = document ? document->scene.get() : m_scene.get();
     for (auto& panel : m_panels)
         if (auto* gameView = dynamic_cast<GameView*>(panel.get()))
-            gameView->SetScene(scene);
+            gameView->SetScene(m_scene.get());
     if (m_primaryHierarchy)
     {
         m_primaryHierarchy->Init(scene);
@@ -5102,9 +5109,24 @@ void EditorState::WireupCallbacks()
         return preview;
     };
     m_viewFactory->OnAssetPreviewCancelled = [this](Engine::Core::Object* object) {
-        if (m_scene && object)
-            m_scene->RemoveObject(object);
+        if (object && object->GetScene())
+        {
+            // The current command list can still reference the preview. Remove
+            // it at the next scene commit, after this frame is submitted.
+            object->runtimeOnly = true;
+            object->GetScene()->RequestRemoveObject(object);
+        }
         m_assetPreviewActive = false;
+    };
+    m_viewFactory->OnPreparedAssetPreviewRequested = [this](Engine::Scene::Scene* scene,
+        Engine::Serialization::PreparedPrefab& prepared) -> Engine::Core::Object* {
+        if (!scene) return nullptr;
+        Engine::Serialization::PreparedPrefab::Publication publication(prepared);
+        auto* preview = Engine::Serialization::SceneSerializer::InstantiatePrefabFromValue(
+            *scene, prepared.path, prepared.document, scene->GetGraphicsProvider());
+        if (preview) scene->QueueGraphicsPreparation(2.0);
+        m_assetPreviewActive = preview != nullptr;
+        return preview;
     };
     m_viewFactory->OnAssetPreviewCommitted = [this](Engine::Core::Object* object,
         const std::string& path) {

@@ -1,0 +1,145 @@
+<?xml version='1.0' encoding='utf-8'?>
+<Scene xmlns:components="urn:engine-components" version="1">
+  <settings dimension="0" showGrid="true" gridHalfSize="40" gridCellSize="1" gridOpacity=".16" gridFadeDistance="100">
+    <ambientColor _arrayEncoding="spaceSeparatedNumbers">.2 .22 .25</ambientColor>
+  </settings>
+  <objects>
+    <item name="Road Path" enabled="true">
+      <transform>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+      </transform>
+      <components>
+        <components:SplinePath SplinePath.interpolation="1" SplinePath.closed="false" SplinePath.arcLengthSamplesPerSegment="64" />
+        <components:SplineGeometry SplineGeometry.mode="0" SplineGeometry.width="4" SplineGeometry.segmentLength="0.25" SplineGeometry.uvMetersPerRepeat="2" />
+        <components:Material>
+          <Material.diffuse _arrayEncoding="spaceSeparatedNumbers">0.18 0.2 0.22</Material.diffuse>
+        </components:Material>
+      </components>
+      <children>
+        <item name="Point 1" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-8 0 0</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 2" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-6 0 8</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 3" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">4 1 16</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 4" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">5 2 26</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 5" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-3 2 34</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+      </children>
+    </item>
+    <item name="Fence Posts" enabled="true">
+      <transform>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+      </transform>
+      <components>
+        <components:SplineGeometry SplineGeometry.pathObjectName="Road Path" SplineGeometry.mode="2" SplineGeometry.segmentLength="0.25" SplineGeometry.meshAsset="Assets/Mesh/cube.obj" SplineGeometry.spacing="2">
+          <SplineGeometry.offset _arrayEncoding="spaceSeparatedNumbers">2.3 0.6 0</SplineGeometry.offset>
+          <SplineGeometry.meshScale _arrayEncoding="spaceSeparatedNumbers">0.12 1.2 0.12</SplineGeometry.meshScale>
+        </components:SplineGeometry>
+        <components:Material>
+          <Material.diffuse _arrayEncoding="spaceSeparatedNumbers">0.5 0.3 0.12</Material.diffuse>
+        </components:Material>
+      </components>
+      <children />
+    </item>
+    <item name="Curved Fence Rail" enabled="true">
+      <transform>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+      </transform>
+      <components>
+        <components:SplineGeometry SplineGeometry.pathObjectName="Road Path" SplineGeometry.mode="3" SplineGeometry.segmentLength="0.25" SplineGeometry.meshAsset="Assets/Mesh/Spline/rail_segment.obj" SplineGeometry.spacing="2">
+          <SplineGeometry.offset _arrayEncoding="spaceSeparatedNumbers">2.3 1 0</SplineGeometry.offset>
+        </components:SplineGeometry>
+        <components:Material>
+          <Material.diffuse _arrayEncoding="spaceSeparatedNumbers">0.5 0.3 0.12</Material.diffuse>
+        </components:Material>
+      </components>
+      <children />
+    </item>
+    <item name="Curved Pipe" enabled="true">
+      <transform>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+      </transform>
+      <components>
+        <components:SplineGeometry SplineGeometry.pathObjectName="Road Path" SplineGeometry.mode="1" SplineGeometry.segmentLength="0.25" SplineGeometry.radius="0.18" SplineGeometry.radialSegments="16">
+          <SplineGeometry.offset _arrayEncoding="spaceSeparatedNumbers">-2.7 0.4 0</SplineGeometry.offset>
+        </components:SplineGeometry>
+        <components:Material>
+          <Material.diffuse _arrayEncoding="spaceSeparatedNumbers">0.25 0.45 0.6</Material.diffuse>
+        </components:Material>
+      </components>
+      <children />
+    </item>
+    <item name="Overview Camera" enabled="true">
+      <transform>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">18 18 -14</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+      </transform>
+      <components>
+        <components:Camera Camera.active="true" Camera.useTransformRotation="false" Camera.far="300" Camera.fov="42">
+          <Camera.target _arrayEncoding="spaceSeparatedNumbers">0 1 14</Camera.target>
+          <Camera.up _arrayEncoding="spaceSeparatedNumbers">0 1 0</Camera.up>
+        </components:Camera>
+      </components>
+      <children />
+    </item>
+    <item name="Sun" enabled="true">
+      <transform>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">0 12 -4</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">45 -30 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+      </transform>
+      <components>
+        <components:Light Light.lightType="1" Light.intensity="2" Light.castsShadows="true">
+          <Light.color _arrayEncoding="spaceSeparatedNumbers">1 0.94 0.85</Light.color>
+        </components:Light>
+      </components>
+      <children />
+    </item>
+  </objects>
+</Scene>
