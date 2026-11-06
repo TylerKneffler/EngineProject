@@ -1111,7 +1111,7 @@ void TestSharedMaterialShaderPreparation()
         Require(mesh->SetAuthoredVertices(triangle), "shared shader geometry failed");
         mesh->CreateBuffer(renderer.GetGraphicsProvider()->GetBufferFactory());
         materials[index]=objects[index]->AddComponent<Engine::Components::Material>();
-        materials[index]->shaders.push_back({"Assets/Shaders/Foliage.hlsl",true,"Auto"});
+        materials[index]->shader="Assets/Shaders/Foliage.hlsl";
     }
     const auto check=[&](uint64_t requests,uint64_t resolutions)
     {
@@ -1125,12 +1125,12 @@ void TestSharedMaterialShaderPreparation()
     };
     check(2,1);
     check(2,0); // Unchanged frames reuse source resolution and metadata.
-    materials[1]->shaders.front().path="Assets/Shaders/WarmOverlay.hlsl";
+    materials[1]->shader="Assets/Shaders/WarmOverlay.hlsl";
     check(2,1); // Only the new path resolves; direct edits need no notification.
-    materials[1]->shaders.front().enabled=false;
+    materials[1]->shader.clear();
     check(1,0);
-    materials[1]->shaders.front().enabled=true;
-    materials[1]->shaders.front().path=materials[0]->shaders.front().path;
+    
+    materials[1]->shader=materials[0]->shader;
     objects[1]->AddComponent<Engine::Components::TerrainBatchAppearance>();
     check(2,0); // Bytecode variants share the same source resolution.
     objects[1]->enabled=false;
@@ -1146,14 +1146,11 @@ void TestMaterialPreparationCache()
     material.roughnessFactor=-1; material.subsurfaceRadius={-1,2,0.5f};
     material.heightMinSteps=40; material.heightMaxSteps=8;
     material.normalUvSet=30; material.alphaMode="bLeNd"; material.specularModel="invalid";
-    material.shaders.push_back({"",true,"invalid"});
     material.Validate();
     Require(material.roughnessFactor==.045f && material.subsurfaceRadius==glm::vec3(0,1,.5f) &&
         material.heightMaxSteps==40 && material.normalUvSet==9 && material.alphaMode=="Blend" &&
-        material.specularModel=="MetallicRoughness" && material.shaders[0].blendMode=="Auto",
+        material.specularModel=="MetallicRoughness",
         "cached material validation missed direct script edits");
-    material.shaders[0].blendMode="invalid-again"; material.Validate();
-    Require(material.shaders[0].blendMode=="Auto", "validation cache missed a shader-only edit");
     material.heightMinSteps=4; material.heightMaxSteps=12; material.Validate();
     Require(material.heightMaxSteps==12, "material cache retained stale dependent limits");
     const auto texturePath=std::filesystem::absolute(".local/material-cache-regression.bmp").string();
@@ -1203,7 +1200,7 @@ void TestInstancedRenderRecordCache()
     auto* owner=scene.AddObject("Reusable rigid instances");
     auto* mesh=owner->AddComponent<Mesh>();
     auto* material=owner->AddComponent<Engine::Components::Material>();
-    material->shaders.push_back({"Assets/Shaders/Foliage.hlsl",true,"Auto"});
+    material->shader="Assets/Shaders/Foliage.hlsl";
     auto source=std::make_shared<Mesh>();
     std::vector<Mesh::Vertex> triangle(3);
     triangle[0].pos[0]=-1; triangle[1].pos[0]=1; triangle[2].pos[1]=1;
@@ -2220,8 +2217,8 @@ void CheckFadeRendering()
     }
     std::cout << "GPU grass LOD/fade intervals match fallback at five distances.\n";
     cameraOwner->transform.position.z=-3.f;
-    material->shaders={{"Assets/Shaders/Foliage.hlsl",true,"Auto"}};
-    secondMaterial->shaders=material->shaders;
+    material->shader="Assets/Shaders/Foliage.hlsl";
+    secondMaterial->shader=material->shader;
     const auto foliagePixels=capture();
     if (!material->shaderError.empty() || !secondMaterial->shaderError.empty())
         std::cerr << "Foliage shader errors: " << material->shaderError << " | "
@@ -2260,8 +2257,8 @@ void CheckFadeRendering()
     Require(foliagePixels==capture(),"non-grass geometry was affected by shared wind");
     std::cout << "Grass wind: " << animatedChannels << " animated channels, "
         << windDifferences << " GPU/fallback differences; shared seeded noise, paused time and non-grass checks passed.\n";
-    material->shaders.clear();
-    secondMaterial->shaders.clear();
+    material->shader.clear();
+    secondMaterial->shader.clear();
     auto* sun=scene.AddObject("Shadow sun")->AddComponent<Engine::Components::Light>();
     sun->lightType=int(Engine::Components::Light::Type::Directional); sun->castsShadows=true;
     material->castsShadows=secondMaterial->castsShadows=true;

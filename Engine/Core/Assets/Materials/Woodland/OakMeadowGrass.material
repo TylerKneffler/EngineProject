@@ -1,12 +1,5 @@
 {
   "version": 1,
-  "shaders": [
-    {
-      "path": "Assets/Shaders/Foliage.hlsl",
-      "enabled": true,
-      "blendMode": "Auto"
-    }
-  ],
   "baseColor": [
     1,
     1,
@@ -27,5 +20,6 @@
   "doubleSided": true,
   "castsShadows": true,
   "baseColorTexture": "Assets/Models/Woodland/Grass/Textures/Texture 2 2.png",
-  "normalTexture": "Assets/Models/Woodland/Grass/Textures/Texture 1 1.png"
+  "normalTexture": "Assets/Models/Woodland/Grass/Textures/Texture 1 1.png",
+  "shader": "Assets/Shaders/GrassFootBend.hlsl"
 }

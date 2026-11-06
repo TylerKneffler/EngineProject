@@ -9,6 +9,7 @@ PrimitiveObjectCollider::PrimitiveObjectCollider()
     RegisterField("size", size, "Shape");
     RegisterField("radius", radius, "Shape");
     RegisterField("height", height, "Shape");
+    RegisterField("bendGrass", bendGrass, "Grass interaction");
     RegisterField("alignToBoneChild", alignToBoneChild, "Shape");
     RegisterField("fitToSkinnedMesh", fitToSkinnedMesh, "Shape");
     RegisterField("childBone", childBone, "Shape");

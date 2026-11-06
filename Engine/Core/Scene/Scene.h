@@ -1,4 +1,5 @@
 #pragma once
+#include "Core/Rendering/GrassInteraction.h"
 #include "Core/Rendering/RenderBoundsCache.h"
 #include "Core/Rendering/DrawBatchPreparation.h"
 #include "Core/Rendering/ShaderSourceCache.h"
@@ -1163,6 +1164,7 @@ private:
     ShadowDebugSnapshot m_shadowDebugSnapshot;
     ShadowCpuTiming m_lastShadowCpuTiming{};
     bool m_renderFramePrepared = false;
+    std::vector<Engine::Rendering::GrassInteractionCapsule> m_frameGrassCapsules;
     bool m_nativeRenderPacketTaken = false;
     bool m_recordingNativeCommands = false;
 

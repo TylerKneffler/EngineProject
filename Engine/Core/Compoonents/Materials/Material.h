@@ -19,15 +19,6 @@ enum class MaterialAlphaMode : int
     Blend
 };
 
-// A mesh draw pass using an HLSL asset with VSMain / PSMain entry points.
-// Auto inherits the material blend for the first pass and alpha blends overlays.
-struct MaterialShader
-{
-    std::string path;
-    bool enabled = true;
-    std::string blendMode = "Auto"; // Auto, Opaque, Alpha, Additive
-};
-
 class Material : public Engine::Core::Component
 {
 public:
@@ -37,10 +28,9 @@ public:
     bool RequiresUpdate() const override { return false; }
     ~Material() = default;
 
-    // Empty list uses the built-in surface. An empty path explicitly selects
-    // that surface, allowing custom overlays after it. Order is significant.
-    PROPERTY(Inspector, EditAnywhere, Category = "Material | Shaders")
-    std::vector<MaterialShader> shaders;
+    // One surface shader per material. Empty selects the built-in surface.
+    PROPERTY(Inspector, EditAnywhere, Category = "Material | Shader")
+    std::string shader;
     std::string ResolveShaderPath(const std::string& path) const;
     // Ordered candidates, including absent higher-priority locations for watching.
     std::vector<std::filesystem::path> ShaderSearchPaths(const std::string& path) const;

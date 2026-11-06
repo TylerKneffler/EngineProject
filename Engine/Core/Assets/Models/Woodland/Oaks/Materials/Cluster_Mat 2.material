@@ -1,6 +1,5 @@
 {
   "version": 1,
-  "shaders": [],
   "baseColor": [
     1,
     1,
@@ -103,5 +102,6 @@
   "baseColorTexture": "Assets/Models/Woodland/Oaks/Textures/Texture 6 6.png",
   "metallicRoughnessTexture": "Assets/Models/Woodland/Oaks/Textures/Texture 5 5.png",
   "normalTexture": "Assets/Models/Woodland/Oaks/Textures/Texture 4 4.png",
-  "occlusionTexture": "Assets/Models/Woodland/Oaks/Textures/Texture 5 5.png"
+  "occlusionTexture": "Assets/Models/Woodland/Oaks/Textures/Texture 5 5.png",
+  "shader": ""
 }

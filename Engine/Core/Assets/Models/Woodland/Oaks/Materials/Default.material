@@ -1,6 +1,5 @@
 {
   "version": 1,
-  "shaders": [],
   "baseColor": [
     1,
     0.5,
@@ -99,5 +98,6 @@
   "normalUvSet": 0,
   "occlusionUvSet": 0,
   "emissiveUvSet": 0,
-  "heightUvSet": 0
+  "heightUvSet": 0,
+  "shader": ""
 }

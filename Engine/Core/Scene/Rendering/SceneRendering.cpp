@@ -114,15 +114,8 @@ namespace
         if (!material || material->baseColorUvSet != 0 ||
             material->GetAlphaMode() == Engine::Components::MaterialAlphaMode::Blend)
             return false;
-        const Engine::Components::MaterialShader* surface = nullptr;
-        for (const auto& shader : material->shaders)
-        {
-            if (!shader.enabled) continue;
-            if (surface) return false;
-            surface = &shader;
-        }
-        return surface && surface->path == "Assets/Shaders/Foliage.hlsl" &&
-            (surface->blendMode == "Auto" || surface->blendMode == "Opaque");
+        return material->shader == "Assets/Shaders/Foliage.hlsl" ||
+            material->shader == "Assets/Shaders/GrassFootBend.hlsl";
     }
 
     bool IsObjectOrDescendant(const Engine::Core::Object* object, const Engine::Core::Object* root)
@@ -307,6 +300,7 @@ struct ObjectGPUData
     glm::vec4 grassAnimation{0.f}; // scene time, grass enabled, reserved
     glm::vec4 textureLodParams{0.f}; // near, far, maximum mip bias, enabled/shading tier
     glm::vec4 alphaLodParams{0.f};
+    glm::vec4 grassCapsules[8]{}; // four start/radius + end/reach pairs
 };
 
 // Value-only boundary: resources are resolved by the scene owner before assembly.
@@ -415,7 +409,8 @@ struct ParticleCBData
 };
 
 static_assert(sizeof(DrawCBData) == 16, "Draw constants must remain small");
-static_assert(sizeof(ObjectGPUData) == 1552, "Object buffer layout must match Object.hlsl");
+static_assert(offsetof(ObjectGPUData, grassCapsules) == 1552, "Grass capsule data must follow the existing object fields");
+static_assert(sizeof(ObjectGPUData) == 1680, "Object buffer layout must match Object.hlsl");
 static_assert(sizeof(Engine::Model::LightData) == 128,
     "Light buffer layout must match Object.hlsl");
 static_assert(sizeof(GridCBData) == 128, "Grid constant-buffer layout must match Grid.hlsl");
@@ -1376,16 +1371,12 @@ void Scene::PrewarmMaterialShaders(const Engine::Components::Material& material,
     bool terrain)
 {
     if (!m_graphicsProvider || !m_graphicsProvider->GetShaderCompiler()) return;
-    for (const auto& shader : material.shaders)
-    {
-        if (!shader.enabled || shader.path.empty()) continue;
-        ++m_lastPrepareTimings.itemShaderRequests;
-        if (!m_preparedMaterialShaderSources.emplace(material.GetFilePath(), shader.path, terrain).second)
-            continue;
-        const auto& source=ResolveMaterialShaderSource(material,shader.path);
-        if(source.hlsl && source.exists)
-            QueueMaterialShaderBytecode(source.path,terrain,source.revision);
-    }
+    if (material.shader.empty()) return;
+    ++m_lastPrepareTimings.itemShaderRequests;
+    if (!m_preparedMaterialShaderSources.emplace(material.GetFilePath(), material.shader, terrain).second) return;
+    const auto& source = ResolveMaterialShaderSource(material, material.shader);
+    if (source.hlsl && source.exists)
+        QueueMaterialShaderBytecode(source.path, terrain, source.revision);
 }
 
 void Scene::PublishMaterialShaderPipelines(size_t maxPipelines)
@@ -1961,6 +1952,7 @@ void Scene::RetireGraphicsBuffer(std::shared_ptr<IGraphicsBuffer> buffer)
 
 struct Scene::NativeRenderPacket
 {
+    std::vector<Engine::Rendering::GrassInteractionCapsule> grassCapsules;
     std::vector<FrameRenderItem> items;
     std::vector<std::shared_ptr<IGraphicsBuffer>> meshBuffers;
 };
@@ -1972,6 +1964,7 @@ std::shared_ptr<const Scene::NativeRenderPacket> Scene::TakeNativeRenderPacket()
         throw std::logic_error("Native render packet requires a prepared scene frame");
     m_nativeRenderPacketTaken = true;
     auto packet = std::make_shared<NativeRenderPacket>();
+    packet->grassCapsules = m_frameGrassCapsules;
     packet->items = std::move(m_frameRenderItems);
     packet->meshBuffers.reserve(packet->items.size() * 2);
     for (const FrameRenderItem& item : packet->items)
@@ -2385,8 +2378,7 @@ void Scene::PrepareRenderFrame(bool publishSnapshot)
                             mesh!=m_editorSelectedMesh && mesh!=m_editorWeightPaintMesh &&
                             mesh->IsRuntimeLodResident(0) && mesh->IsRuntimeLodResident(1) &&
                             (!item.material || IsFastFoliageSurface(item.material) ||
-                                std::none_of(item.material->shaders.begin(),item.material->shaders.end(),
-                                    [](const auto& shader){return shader.enabled;})))
+                                item.material->shader.empty()))
                         {
                             item.gpuMaximumLod=mesh->IsRuntimeLodResident(2) ? 2:1;
                             item.gpuLodDistances={std::max(0.f,mesh->gpuLod1Distance),
@@ -2689,7 +2681,7 @@ void Scene::PrepareRenderFrame(bool publishSnapshot)
                 draw.object!=m_selectedObject && source!=m_editorSelectedMesh && source!=m_editorWeightPaintMesh &&
                 !draw.warpedVertexBuffer && !draw.traversalChartPortal && source->IsRuntimeLodResident(0) && source->IsRuntimeLodResident(1) &&
                 (!draw.material || IsFastFoliageSurface(draw.material) ||
-                    std::none_of(draw.material->shaders.begin(),draw.material->shaders.end(),[](const auto& shader){return shader.enabled;})))
+                    draw.material->shader.empty()))
             {
                 draw.gpuMaximumLod=source->IsRuntimeLodResident(2) ? 2:1;
                 draw.gpuLodDistances={std::max(0.f,source->gpuLod1Distance),std::max(source->gpuLod1Distance,source->gpuLod2Distance)};
@@ -2873,6 +2865,7 @@ void Scene::PrepareRenderFrame(bool publishSnapshot)
     m_lastPrepareTimings.mainJobMs=double(completedJobs.callerNs-preparationJobs.callerNs)/1.e6;
     m_lastPrepareTimings.workerWaitMs=double(completedJobs.waitNs-preparationJobs.waitNs)/1.e6;
     m_lastPrepareTimings.workerQueueMs=double(completedJobs.queueNs-preparationJobs.queueNs)/1.e6;
+    m_frameGrassCapsules = Engine::Rendering::CaptureGrassInteractionCapsules(*this);
     m_renderFramePrepared = true;
 }
 
@@ -3060,6 +3053,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     }
     const glm::mat4 proj = cam->GetProjectionMatrix(aspect, m_editorMode2D);
     const glm::vec3 cameraPosition = glm::vec3(glm::inverse(view)[3]);
+    const auto grassInteraction = Engine::Rendering::SelectGrassInteractionCapsules(
+        nativePacket ? nativePacket->grassCapsules : m_frameGrassCapsules, cameraPosition);
     bool cameraUsesSourceWarpChart = false;
     if (hasAuthoredCameraWorld)
     {
@@ -4137,6 +4132,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         Engine::Graphics::IGraphicsBuffer* morphDeltaBuffer = nullptr;
         Engine::Graphics::IGraphicsBuffer* morphWeightBuffer = nullptr;
         Engine::Graphics::IPipelineState* pipeline = nullptr;
+        bool surfaceShaderResolved = false;
         std::array<const Engine::Graphics::IGraphicsTexture*, 30> textures{};
         uint32_t textureSlotCount = 12;
         UINT64 constantBufferOffset = 0;
@@ -4170,7 +4166,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     preparedDraws.reserve(renderObjects.size());
     // All streamed grass tiles share the same foliage asset and a small set
     // of base pipeline variants. Resolve each variant once per view.
-    std::unordered_map<IPipelineState*,
+    std::map<std::pair<IPipelineState*, std::string>,
         std::pair<IPipelineState*, std::string>> foliagePipelines;
     std::shared_ptr<Engine::Components::Texture> measurementGridTexture;
     bool measurementGridReady = false;
@@ -4913,6 +4909,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         objectData.grassAnimation={mesh && (mesh->grassShadowCaster || mesh->foliageWindStrength>0.f) ? static_cast<float>(GetElapsedTime()):0.f,
             mesh && (mesh->grassShadowCaster || mesh->foliageWindStrength>0.f) ? 1.f : 0.f,
             mesh && mesh->foliageWindStrength>0.f ? std::clamp(mesh->foliageWindStrength,0.f,1.f):1.f, 0.f};
+        objectData.grassAnimation.w = static_cast<float>(grassInteraction.count);
+        std::copy(grassInteraction.data.begin(), grassInteraction.data.end(), objectData.grassCapsules);
         preparedDraw.objectData = objectData;
         preparedDraw.traversalChartPortal = renderItem->traversalChartPortal;
 
@@ -4946,13 +4944,17 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             !mesh->HasMorphTargets() && !mesh->HasSurfaceOffsets() &&
             !renderItem->skinJointCount && IsFastFoliageSurface(mat))
         {
-            auto [entry, inserted] = foliagePipelines.try_emplace(materialPipeline);
+            auto [entry, inserted] = foliagePipelines.try_emplace(std::make_pair(materialPipeline, mat->shader));
             if (inserted)
                 entry->second.first = ResolveMaterialShaderPipeline(
-                    ResolveMaterialShaderSource(*mat,"Assets/Shaders/Foliage.hlsl"),
+                    ResolveMaterialShaderSource(*mat,mat->shader),
                     materialPipeline, false, false, "Auto",
                     entry->second.second);
-            if (entry->second.first) materialPipeline = entry->second.first;
+            if (entry->second.first)
+            {
+                materialPipeline = entry->second.first;
+                preparedDraw.surfaceShaderResolved = true;
+            }
             else mat->shaderError = entry->second.second;
         }
         preparedDraw.pipeline = materialPipeline;
@@ -5046,8 +5048,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         auto& draw=preparedDraws[index];
         const bool custom = draw.material &&
             !IsFastFoliageSurface(draw.material) &&
-            std::any_of(draw.material->shaders.begin(),draw.material->shaders.end(),
-                [](const auto& shader) { return shader.enabled; });
+            !draw.material->shader.empty();
         const bool selected=includeEditorVisuals && (draw.object==m_selectedObject || draw.mesh==m_editorSelectedMesh || draw.mesh==m_editorWeightPaintMesh);
         if ((!automaticInstancing && !(draw.drawData.flags & 0x00100000u)) || m_editorMode2D || hasPortalViews || !draw.mesh || draw.blended ||
             draw.preview || draw.pmxOutline || draw.spatialManipulator || draw.traversalChartPortal ||
@@ -5313,34 +5314,19 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         Engine::Graphics::IPipelineState* base,
         const std::function<void()>& restoreState = {})
     {
-        bool submitted = false;
-        if (draw.material)
-            for (const auto& shader : draw.material->shaders)
-            {
-                if (!shader.enabled) continue;
-                std::string error;
-                auto* pipeline = ResolveMaterialShaderPipeline(
-                    ResolveMaterialShaderSource(*draw.material,shader.path), base,
-                    draw.terrain, submitted, shader.blendMode, error);
-                if (!error.empty() && draw.material->shaderError.find(error) == std::string::npos)
-                {
-                    if (!draw.material->shaderError.empty()) draw.material->shaderError += "\n";
-                    draw.material->shaderError += error;
-                }
-                // An invalid surface falls back to the built-in surface;
-                // invalid overlays are skipped without hiding the mesh.
-                if (!pipeline && submitted) continue;
-                context->SetPipeline(pipeline ? pipeline : base);
-                if (restoreState) restoreState();
-                submitGeometry(draw);
-                submitted = true;
-            }
-        if (!submitted)
+        auto* pipeline = base;
+        if (draw.material && !draw.material->shader.empty() && !draw.surfaceShaderResolved)
         {
-            context->SetPipeline(base);
-            if (restoreState) restoreState();
-            submitGeometry(draw);
+            std::string error;
+            if (auto* custom = ResolveMaterialShaderPipeline(
+                    ResolveMaterialShaderSource(*draw.material, draw.material->shader),
+                    base, draw.terrain, false, "Auto", error))
+                pipeline = custom;
+            if (!error.empty()) draw.material->shaderError = error;
         }
+        context->SetPipeline(pipeline);
+        if (restoreState) restoreState();
+        submitGeometry(draw);
     };
 
     std::vector<uint8_t> selectedLods(preparedDraws.size(),1);

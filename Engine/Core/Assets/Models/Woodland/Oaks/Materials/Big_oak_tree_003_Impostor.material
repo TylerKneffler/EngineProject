@@ -1,6 +1,5 @@
 {
   "version": 1,
-  "shaders": [],
   "baseColor": [
     1,
     1,
@@ -103,5 +102,6 @@
   "baseColorTexture": "Assets/Other/oak_trees_pack_17var_lods_seasons_gameready/textures/Big_oak_tree__003_Billboard_Mat_baseColor.png",
   "metallicRoughnessTexture": "",
   "normalTexture": "",
-  "occlusionTexture": ""
+  "occlusionTexture": "",
+  "shader": ""
 }

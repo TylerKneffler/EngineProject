@@ -34,6 +34,8 @@ public:
     }
     void SetAllowComponentStructureEdits(bool allow)
     { m_allowComponentStructureEdits = allow; }
+    void SetComponentHeadersOpen(bool open)
+    { m_componentHeaderOverride = open ? 1 : 0; m_propertiesSearch[0] = '\0'; }
     Engine::Scene::Scene* GetScene() const { return m_scene; }
     void SetScene(Engine::Scene::Scene* scene)
     {

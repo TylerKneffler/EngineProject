@@ -600,6 +600,11 @@ private:
     };
     struct AnimationDocument
     {
+        char propertiesSearch[128]{};
+        bool propertiesOutlineOpen = false;
+        bool drawingProperties = false;
+        int propertiesHeaderOverride = -1;
+        std::string propertiesJumpTarget;
         struct TimelineKey
         {
             size_t rigIndex = 0;

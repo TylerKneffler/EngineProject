@@ -19,6 +19,8 @@ public:
     float radius = 0.5f;
     PROPERTY(Inspector, EditAnywhere, Category = "Collider", ClampMin = "0")
     float height = 1.f;
+    PROPERTY(Inspector, EditAnywhere, Category = "Collider | Grass")
+    bool bendGrass = true;
     // For an AnimationBone, align a capsule or cylinder from this bone to a
     // direct child. Zero height uses the current bone-to-child distance.
     PROPERTY(Inspector, EditAnywhere, Category = "Collider")
