@@ -609,6 +609,37 @@ Material::JsonValue Material::Serialize() const
     return value;
 }
 
+void Material::CopyResolvedStateFrom(const Material& source)
+{
+    if (&source == this) return;
+    // Registered fields write through this component's bindings, never copy the
+    // source's callbacks, Owner or lifecycle state. Serialized textures are not
+    // registered fields; retain the exact resolved resources below instead of
+    // reloading the material file and resolving ten texture paths per batch.
+    Component::Deserialize(source.Serialize());
+    m_filePath = source.m_filePath;
+    shader = source.shader;
+    shaderError.clear();
+    edgeColor = source.edgeColor;
+    sphereTint = source.sphereTint;
+    toonTint = source.toonTint;
+    baseColorTexture = source.baseColorTexture;
+    metallicRoughnessTexture = source.metallicRoughnessTexture;
+    normalTexture = source.normalTexture;
+    heightTexture = source.heightTexture;
+    occlusionTexture = source.occlusionTexture;
+    emissiveTexture = source.emissiveTexture;
+    subsurfaceThicknessTexture = source.subsurfaceThicknessTexture;
+    sphereTexture = source.sphereTexture;
+    toonTexture = source.toonTexture;
+    reflectionEnvironmentMap = source.reflectionEnvironmentMap;
+    m_validationCached = false;
+    m_texturesCached = false;
+    m_preparedTextures = {};
+    m_preparedTextureProvider = nullptr;
+    Validate();
+}
+
 void Material::Deserialize(const JsonValue& value)
 {
     if (value.Has("materialAsset") && !value["materialAsset"].AsString().empty())

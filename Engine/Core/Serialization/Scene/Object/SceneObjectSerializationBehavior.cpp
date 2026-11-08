@@ -264,7 +264,7 @@ bool SceneObjectBehavior::DeserializeObjectTreeInto(
 
 void SceneObjectBehavior::SetPrefabSourceSnapshot(Engine::Core::Object& object, const JsonValue& source)
 {
-    object.PrefabSourceSnapshot = JsonWrite(source);
+    object.PrefabSourceSnapshot = JsonWriteCompact(source);
     Engine::Components::Transform sourceTransform;
     DeserializeTransform(sourceTransform, source["transform"]);
     object.PrefabSourcePosition = sourceTransform.position;
@@ -518,6 +518,7 @@ void SceneObjectBehavior::DiffJson(const JsonValue& baseline, const JsonValue& c
 JsonValue SceneObjectBehavior::BuildPrefabPatches(const Engine::Core::Object& instance,
     bool includeRootTransform)
 {
+    PrefabLoadProfile::Stage stage("prefab_patch_build");
     JsonValue patches = JsonValue::MakeArray();
     if (instance.PrefabSourceSnapshot.empty()) return patches;
     try

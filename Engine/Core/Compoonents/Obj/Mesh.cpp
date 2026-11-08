@@ -29,6 +29,46 @@
 
 namespace Engine::Components
 {
+float Mesh::GetTextureUvWorldScale(uint32_t uvSet) const
+{
+    if (m_instanceSource) return m_instanceSource->GetTextureUvWorldScale(uvSet);
+    if (m_textureUvRevision != m_authoredGeometryRevision)
+    {
+        m_textureUvScale={0.f,0.f};
+        const auto measure=[&](const auto& vertices) {
+            const size_t count=m_indices.empty() ? vertices.size():m_indices.size();
+            for(size_t triangle=0;triangle+2<count;triangle+=3)
+            {
+                const size_t ia=m_indices.empty()?triangle:m_indices[triangle];
+                const size_t ib=m_indices.empty()?triangle+1:m_indices[triangle+1];
+                const size_t ic=m_indices.empty()?triangle+2:m_indices[triangle+2];
+                if(std::max({ia,ib,ic})>=vertices.size()) continue;
+                const auto& a=vertices[ia];const auto& b=vertices[ib];const auto& c=vertices[ic];
+                const glm::vec3 e1(b.pos[0]-a.pos[0],b.pos[1]-a.pos[1],b.pos[2]-a.pos[2]);
+                const glm::vec3 e2(c.pos[0]-a.pos[0],c.pos[1]-a.pos[1],c.pos[2]-a.pos[2]);
+                for(uint32_t set=0;set<2;++set)
+                {
+                    const auto uv=[&](const auto& v) {
+                        if constexpr(std::is_same_v<std::decay_t<decltype(v)>,Vertex>)
+                            if(set) return glm::vec2(v.uv1[0],v.uv1[1]);
+                        return glm::vec2(v.uv[0],v.uv[1]);
+                    };
+                    const glm::vec2 u=uv(b)-uv(a),v=uv(c)-uv(a);
+                    const float determinant=u.x*v.y-u.y*v.x;
+                    if(std::abs(determinant)<1e-12f) continue;
+                    const glm::vec3 du=(e1*v.y-e2*u.y)/determinant;
+                    const glm::vec3 dv=(e2*u.x-e1*v.x)/determinant;
+                    m_textureUvScale[set]=std::max(m_textureUvScale[set],std::sqrt(glm::dot(du,du)+glm::dot(dv,dv)));
+                }
+            }
+        };
+        if(!m_terrainVertices.empty()) measure(m_terrainVertices); else measure(m_vertices);
+        for(auto& scale:m_textureUvScale) if(!(scale>0.f) || !std::isfinite(scale)) scale=std::numeric_limits<float>::infinity();
+        m_textureUvRevision=m_authoredGeometryRevision;
+    }
+    return m_textureUvScale[std::min(1u,uvSet)];
+}
+
 Mesh::Mesh()
 {
     SetTypeName(COMPONENT_TYPE_NAME(Mesh));
@@ -37,6 +77,11 @@ Mesh::Mesh()
     RegisterField("useLightProbes",useLightProbes,"Lighting");
     RegisterField("gpuLodSelection",gpuLodSelection,"LOD");
     RegisterField("gpuLod1Distance",gpuLod1Distance,"LOD");
+    RegisterField("screenLodSelection",screenLodSelection,"LOD");
+    RegisterField("distanceLodOverride",distanceLodOverride,"LOD");
+    RegisterField("screenLod1Pixels",screenLod1Pixels,"LOD");
+    RegisterField("screenLod2Pixels",screenLod2Pixels,"LOD");
+    RegisterField("screenLodHysteresis",screenLodHysteresis,"LOD");
     RegisterField("gpuLod2Distance",gpuLod2Distance,"LOD");
 }
 
@@ -823,6 +868,31 @@ int Mesh::ChooseRuntimeLod(float distance, const std::vector<float>& thresholds,
         (m_activeRuntimeLod == 0 || distance >= activeLower - hysteresis) &&
         distance < activeUpper + hysteresis) return m_activeRuntimeLod;
     return target;
+}
+
+int Mesh::ChooseScreenRuntimeLod(const glm::mat4& world,
+    const Engine::Rendering::MeshLodView& view,
+    const std::vector<float>& pixelThresholds, float hysteresis,
+    std::optional<int> distanceOverride) const
+{
+    if (distanceOverride) return std::clamp(*distanceOverride, 0, MaximumRuntimeLods - 1);
+    if (!HasBounds()) return 0;
+    glm::vec3 minimum = m_boundsMin, maximum = m_boundsMax;
+    float windStrength = foliageWindStrength;
+    // Use the same wind-expanded union regardless of the selected geometry.
+    // Streaming callers must retain an authored envelope for nonresident LODs.
+    for (const auto& lod : m_runtimeLods)
+        if (lod && lod->HasBounds())
+        {
+            minimum = glm::min(minimum, lod->m_boundsMin);
+            maximum = glm::max(maximum, lod->m_boundsMax);
+            windStrength = std::max(windStrength, lod->foliageWindStrength);
+        }
+    const glm::vec3 windPadding(1.5f * std::max(0.f, maximum.y) * std::clamp(windStrength, 0.f, 1.f));
+    minimum -= windPadding; maximum += windPadding;
+    return std::min(MaximumRuntimeLods - 1, Engine::Rendering::SelectScreenMeshLod(
+        Engine::Rendering::ProjectedLodPixels(minimum, maximum, world, view),
+        pixelThresholds, m_activeRuntimeLod, hysteresis));
 }
 
 size_t Mesh::GetResidentRuntimeLodCount() const
@@ -2520,7 +2590,15 @@ bool Mesh::DrawProperties(::Engine::Editor::IEditorUi& ui)
     bool changed = false;
     changed=ui.Checkbox("Use Light Probes",&useLightProbes)||changed;
     changed=ui.Checkbox("GPU LOD Selection",&gpuLodSelection)||changed;
-    if(gpuLodSelection)
+    changed=ui.Checkbox("Screen size LOD",&screenLodSelection)||changed;
+    if(screenLodSelection)
+    {
+        changed=ui.Checkbox("Override with authored distances",&distanceLodOverride)||changed;
+        changed=ui.DragFloat("LOD 1 pixels",&screenLod1Pixels,1.f,1.f,100000.f)||changed;
+        changed=ui.DragFloat("LOD 2 pixels",&screenLod2Pixels,1.f,1.f,screenLod1Pixels)||changed;
+        changed=ui.DragFloat("Screen LOD hysteresis",&screenLodHysteresis,.01f,0.f,.49f)||changed;
+    }
+    if(gpuLodSelection || screenLodSelection)
     {
         changed=ui.DragFloat("LOD 1 Distance",&gpuLod1Distance,.1f,0.f,100000.f)||changed;
         changed=ui.DragFloat("LOD 2 Distance",&gpuLod2Distance,.1f,gpuLod1Distance,100000.f)||changed;
@@ -2551,7 +2629,10 @@ Mesh::JsonValue Mesh::Serialize() const
     result.Set("morphNodeIndex", JsonValue(static_cast<int>(m_morphNodeIndex)));
     result.Set("morphWeights", FloatArray(m_morphWeights));
     if (!m_morphFilePath.empty())
-        return result.Set("morphFile", JsonValue(m_morphFilePath));
+    {
+        result.Set("morphFile", JsonValue(m_morphFilePath));
+        return result;
+    }
     JsonValue targets = JsonValue::MakeArray();
     for (const MorphTarget& target : m_morphTargets)
     {
@@ -2566,7 +2647,8 @@ Mesh::JsonValue Mesh::Serialize() const
             .Set("uv", Vec4Array(target.uv))
             .Set("uvChannels", std::move(channels)));
     }
-    return result.Set("morphTargets", std::move(targets));
+    result.Set("morphTargets", std::move(targets));
+    return result;
 }
 
 void Mesh::DeserializeLegacyMorphTargets(const JsonValue& value)
@@ -2600,6 +2682,11 @@ void Mesh::Deserialize(const JsonValue& v)
     DeferGraphicsBuffers();
     if(v.Has("foliageWindStrength")) foliageWindStrength=std::clamp(v["foliageWindStrength"].AsFloat(),0.f,1.f);
     if(v.Has("gpuLodSelection")) gpuLodSelection=v["gpuLodSelection"].AsBool();
+    if(v.Has("screenLodSelection")) screenLodSelection=v["screenLodSelection"].AsBool();
+    if(v.Has("distanceLodOverride")) distanceLodOverride=v["distanceLodOverride"].AsBool();
+    if(v.Has("screenLod1Pixels")) screenLod1Pixels=v["screenLod1Pixels"].AsFloat();
+    if(v.Has("screenLod2Pixels")) screenLod2Pixels=v["screenLod2Pixels"].AsFloat();
+    if(v.Has("screenLodHysteresis")) screenLodHysteresis=v["screenLodHysteresis"].AsFloat();
     if(v.Has("gpuLod1Distance")) gpuLod1Distance=std::max(0.f,v["gpuLod1Distance"].AsFloat());
     if(v.Has("gpuLod2Distance")) gpuLod2Distance=std::max(gpuLod1Distance,v["gpuLod2Distance"].AsFloat());
     if (v.Has("file") && !v["file"].AsString().empty())

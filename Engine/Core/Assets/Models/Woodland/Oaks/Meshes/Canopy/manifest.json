@@ -1,0 +1,75 @@
+{
+  "generator": "Scripts/Assets/build_canopy_lod.py",
+  "training_size": 192,
+  "retention": 0.55,
+  "distance_boundaries": [
+    28,
+    90
+  ],
+  "parts": [
+    {
+      "original": "Engine\\Core\\Assets\\Models\\Woodland\\Oaks\\Meshes\\Large_oak_tree_001_LOD1 14_1.mesh",
+      "original_sha256": "a7a78c3bd30e25a671228af6a2b6c9845195095cecf593a4c9573b0a886143ff",
+      "installed": "Engine/Core/Assets/Models/Woodland/Oaks/Meshes/Canopy/Large_oak_tree_001_Canopy 14_1.mesh",
+      "sha256": "1ba5b83a2da2a05d6e1413b4fac3db26b7dfc63da7f98a9f4fc4f32c701ec5b5",
+      "original_triangles": 1897,
+      "triangles": 565
+    },
+    {
+      "original": "Engine\\Core\\Assets\\Models\\Woodland\\Oaks\\Meshes\\Large_oak_tree_001_LOD1 14_2.mesh",
+      "original_sha256": "80d5d2042d9a07e8b1a78bd22f66b0052627a8d54677c450ec256b79a27c890f",
+      "installed": "Engine/Core/Assets/Models/Woodland/Oaks/Meshes/Canopy/Large_oak_tree_001_Canopy 14_2.mesh",
+      "sha256": "623f95010782064569392d51181a1ce44e4002a605dd3df5045640392a0717a9",
+      "original_triangles": 7956,
+      "triangles": 7830
+    },
+    {
+      "original": "Engine\\Core\\Assets\\Models\\Woodland\\Oaks\\Meshes\\Large_oak_tree_002_LOD1 17_1.mesh",
+      "original_sha256": "3ab3c5c470822ae50b254d0b11a06177c097723c142b9cc1bdc27c2e928b24b9",
+      "installed": "Engine/Core/Assets/Models/Woodland/Oaks/Meshes/Canopy/Large_oak_tree_002_Canopy 17_1.mesh",
+      "sha256": "912b1ca44c149089f670548b4c0d2eb043a763c6da8f8ea6deeafd58ecc5b759",
+      "original_triangles": 1832,
+      "triangles": 634
+    },
+    {
+      "original": "Engine\\Core\\Assets\\Models\\Woodland\\Oaks\\Meshes\\Large_oak_tree_002_LOD1 17_2.mesh",
+      "original_sha256": "ced825ec5499c9609607f472429cff327d7d11ba9fbecc0ac77dab869d7bdfc9",
+      "installed": "Engine/Core/Assets/Models/Woodland/Oaks/Meshes/Canopy/Large_oak_tree_002_Canopy 17_2.mesh",
+      "sha256": "5783839c1f31dca1e41aaa570d2c4137b07b962d732c6ec34ab74b264a735baf",
+      "original_triangles": 7884,
+      "triangles": 7836
+    },
+    {
+      "original": "Engine\\Core\\Assets\\Models\\Woodland\\Oaks\\Meshes\\Large_oak_tree_003_LOD1 20_1.mesh",
+      "original_sha256": "89d176220c328a8aeae72aa1a63663782853c171ed0bc0a5cdb88c686f5ea5e1",
+      "installed": "Engine/Core/Assets/Models/Woodland/Oaks/Meshes/Canopy/Large_oak_tree_003_Canopy 20_1.mesh",
+      "sha256": "8f0d93efd7690a8b447cd79ae2dd67b6bfcc43023572dbb45a7362cf4995b06b",
+      "original_triangles": 3103,
+      "triangles": 1026
+    },
+    {
+      "original": "Engine\\Core\\Assets\\Models\\Woodland\\Oaks\\Meshes\\Large_oak_tree_003_LOD1 20_2.mesh",
+      "original_sha256": "d02b5219f3daab059a76117c012bf11e05237bbc5772dc7936218092905996ed",
+      "installed": "Engine/Core/Assets/Models/Woodland/Oaks/Meshes/Canopy/Large_oak_tree_003_Canopy 20_2.mesh",
+      "sha256": "c8f6c58119708f56fd0132c0f3157ccccb63d847867a72f4caa5f8afe2e94bcf",
+      "original_triangles": 12036,
+      "triangles": 11730
+    },
+    {
+      "original": "Engine\\Core\\Assets\\Models\\Woodland\\Oaks\\Meshes\\Large_oak_tree_004_LOD1 23_1.mesh",
+      "original_sha256": "7850b5a976d43e54cc175cd9557b944fbc038758ee7872222913d6b20d2d0baf",
+      "installed": "Engine/Core/Assets/Models/Woodland/Oaks/Meshes/Canopy/Large_oak_tree_004_Canopy 23_1.mesh",
+      "sha256": "e339f5cb8a9bbc0837018797bcebef2a4f1e50b20f68a7e54efd5456400fe4d8",
+      "original_triangles": 1766,
+      "triangles": 664
+    },
+    {
+      "original": "Engine\\Core\\Assets\\Models\\Woodland\\Oaks\\Meshes\\Large_oak_tree_004_LOD1 23_2.mesh",
+      "original_sha256": "693180b3ca80042242ab84a5f806fcb27adce77a95bc731055928d7d4a1796de",
+      "installed": "Engine/Core/Assets/Models/Woodland/Oaks/Meshes/Canopy/Large_oak_tree_004_Canopy 23_2.mesh",
+      "sha256": "78aec36721dd625c14a7a81125dc5d3805d907dcf2cdd9710f33fe58737bf77c",
+      "original_triangles": 6024,
+      "triangles": 6012
+    }
+  ]
+}

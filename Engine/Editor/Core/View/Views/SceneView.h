@@ -113,6 +113,8 @@ public:
     bool AllowObjectTransform = true;
     float BottomPanelHeight = 420.f;
 
+protected:
+    float EffectiveRenderScale() const override;
 private:
     void CancelPrefabPreview();
 

@@ -89,9 +89,10 @@ Skeleton::JsonValue Skeleton::Serialize() const
         for (size_t i = 0; i < 16; ++i) serialized.Push(JsonValue(data[i]));
         matrices.Push(std::move(serialized));
     }
-    return result.Set("joints", std::move(nodes))
+    result.Set("joints", std::move(nodes))
         .Set("rootBoneNodes", std::move(rootNodes))
         .Set("inverseBindMatrices", std::move(matrices));
+    return result;
 }
 
 void Skeleton::Deserialize(const JsonValue& value)

@@ -7,6 +7,7 @@
 #include <sstream>
 #include <iomanip>
 #include <limits>
+#include <string_view>
 
 namespace Engine::Serialization
 {
@@ -74,7 +75,9 @@ std::string StripOwnedPrefix(const std::string& childName)
     return childName.substr(dot + 1);
 }
 
-JsonValue ParseScalarText(const std::string& text)
+// All callers supply null-terminated XML storage or a std::string. Borrow it
+// during classification; only values retained as strings need an owned copy.
+JsonValue ParseScalarText(std::string_view text)
 {
     if (text == "true")
         return JsonValue(true);
@@ -85,12 +88,12 @@ JsonValue ParseScalarText(const std::string& text)
     {
         char* end = nullptr;
         errno = 0;
-        const double number = std::strtod(text.c_str(), &end);
-        if (end && *end == '\0' && end != text.c_str() && errno != ERANGE)
+        const double number = std::strtod(text.data(), &end);
+        if (end && *end == '\0' && end != text.data() && errno != ERANGE)
             return JsonValue(number);
     }
 
-    return JsonValue(text);
+    return JsonValue(std::string(text));
 }
 
 bool IsScalarValue(const JsonValue& value)
@@ -125,10 +128,10 @@ std::string NumberArrayToText(const JsonValue& value)
     return stream.str();
 }
 
-bool ParseNumberArrayText(const std::string& text, JsonValue& array)
+bool ParseNumberArrayText(const char* text, JsonValue& array)
 {
     array = JsonValue::MakeArray();
-    const char* cursor = text.c_str();
+    const char* cursor = text;
     while (*cursor)
     {
         while (*cursor && (std::isspace(static_cast<unsigned char>(*cursor)) || *cursor == ','))
@@ -204,11 +207,13 @@ JsonValue SceneXmlBehavior::ReadNode(const pugi::xml_node& node)
     bool hasElementChildren = false;
     bool allItems = true;
     bool allComponents = true;
+    size_t elementCount = 0;
     for (const pugi::xml_node& child : node.children())
     {
         if (child.type() != pugi::node_element)
             continue;
         hasElementChildren = true;
+        ++elementCount;
         allItems = allItems && std::string(child.name()) == SceneXml::ArrayItem;
         std::string childPrefix;
         std::string childLocalName;
@@ -239,7 +244,9 @@ JsonValue SceneXmlBehavior::ReadNode(const pugi::xml_node& node)
     if (!hasElementChildren && !hasAttributes)
         return ParseScalarText(node.child_value());
 
-    JsonValue object = JsonValue::MakeObject();
+    size_t memberCount = elementCount;
+    for (const auto& attribute : node.attributes()) { (void)attribute; ++memberCount; }
+    JsonValue object = JsonValue::MakeObject(memberCount);
     for (const pugi::xml_attribute& attribute : node.attributes())
         object.Set(StripOwnedPrefix(attribute.name()),
             ParseScalarText(attribute.value()));

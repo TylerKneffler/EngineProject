@@ -830,8 +830,9 @@ Terrain::JsonValue Terrain::Serialize() const
             .Set("maxHeight", JsonValue(layer.maxHeight))
             .Set("color", JsonValue::MakeArray().Push(JsonValue(layer.previewColor.x))
                 .Push(JsonValue(layer.previewColor.y)).Push(JsonValue(layer.previewColor.z))));
-    return out.Set("heights", std::move(h)).Set("weights", std::move(w))
+    out.Set("heights", std::move(h)).Set("weights", std::move(w))
         .Set("layers", std::move(ls));
+    return out;
 }
 
 void Terrain::Deserialize(const JsonValue& value)

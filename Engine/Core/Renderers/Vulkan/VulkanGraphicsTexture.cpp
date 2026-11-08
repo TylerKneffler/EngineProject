@@ -5,12 +5,15 @@
 #include "VulkanQueueMutex.h"
 
 #include <cstring>
+#include <functional>
 
 namespace Engine::Renderers
 {
 size_t VulkanTextureSystem::TextureKeyHash::operator()(const TextureKey& key) const
 {
     size_t hash = 0;
+    for (auto value : key.identities)
+        hash ^= std::hash<uint64_t>{}(value) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
     for (VkImageView value : key.views)
         hash ^= std::hash<VkImageView>{}(value) +
             0x9e3779b9 + (hash << 6) + (hash >> 2);
@@ -41,6 +44,7 @@ VkDescriptorPool VulkanTextureSystem::CreateDescriptorPool()
 }
 void VulkanTextureSystem::PrepareFrame(uint32_t frameSlot)
 {
+    PollUploads();
     if(m_descriptorFrames.size()<=frameSlot) m_descriptorFrames.resize(size_t(frameSlot)+1);
     m_descriptorFrame=frameSlot;
     auto& frame=m_descriptorFrames[frameSlot];
@@ -204,6 +208,7 @@ void VulkanTextureSystem::Shutdown()
 {
     if (!m_device) return;
     vkDeviceWaitIdle(m_device);
+    PollUploads();
     for (VulkanGraphicsTexture* texture : m_liveTextures)
         if (texture) texture->ReleaseImage(m_device);
     m_liveTextures.clear();
@@ -229,6 +234,7 @@ VulkanImageResource VulkanTextureSystem::Upload(
     Engine::Graphics::GraphicsTextureFormat textureFormat,
     bool srgb)
 {
+    PollUploads();
     const uint32_t bytesPerPixel = GraphicsTextureBytesPerPixel(textureFormat);
     VkDeviceSize size = 0;
     uint32_t mipWidth = width, mipHeight = height;
@@ -238,8 +244,25 @@ VulkanImageResource VulkanTextureSystem::Upload(
         mipWidth = std::max(1u, mipWidth / 2);
         mipHeight = std::max(1u, mipHeight / 2);
     }
+    if (PendingUploadBytes() + size > 256ull * 1024 * 1024)
+        throw std::runtime_error("Texture staging budget exhausted; retry later");
     VkBuffer staging = VK_NULL_HANDLE;
     VkDeviceMemory stagingMemory = VK_NULL_HANDLE;
+    VulkanImageResource image{};
+    VkCommandPool pool = VK_NULL_HANDLE;
+    VkFence fence = VK_NULL_HANDLE;
+    struct Cleanup
+    {
+        std::function<void()> action;
+        ~Cleanup(){if(action)action();}
+    } cleanup{[&] {
+        if(fence) vkDestroyFence(m_device,fence,nullptr);
+        if(pool) vkDestroyCommandPool(m_device,pool,nullptr);
+        VulkanDestroyImage(m_device,image);
+        if(staging) vkDestroyBuffer(m_device,staging,nullptr);
+        if(stagingMemory) vkFreeMemory(m_device,stagingMemory,nullptr);
+    }};
+    m_uploads.reserve(m_uploads.size()+1);
     VkBufferCreateInfo bufferInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
     bufferInfo.size = size;
     bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
@@ -263,7 +286,7 @@ VulkanImageResource VulkanTextureSystem::Upload(
     std::memcpy(mapped, pixels, static_cast<size_t>(size));
     vkUnmapMemory(m_device, stagingMemory);
 
-    VulkanImageResource image = VulkanCreateImage(
+    image = VulkanCreateImage(
         m_physicalDevice, m_device, width, height,
         textureFormat == Engine::Graphics::GraphicsTextureFormat::Rgba32Float
             ? VK_FORMAT_R32G32B32A32_SFLOAT
@@ -271,7 +294,6 @@ VulkanImageResource VulkanTextureSystem::Upload(
         VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
         VK_IMAGE_ASPECT_COLOR_BIT, mipLevels);
 
-    VkCommandPool pool = VK_NULL_HANDLE;
     VkCommandPoolCreateInfo poolInfo{ VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
     poolInfo.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
     poolInfo.queueFamilyIndex = m_queueFamily;
@@ -331,16 +353,69 @@ VulkanImageResource VulkanTextureSystem::Upload(
     VkSubmitInfo submit{ VK_STRUCTURE_TYPE_SUBMIT_INFO };
     submit.commandBufferCount = 1;
     submit.pCommandBuffers = &commands;
+    VkFenceCreateInfo fenceInfo{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+    VkCheck(vkCreateFence(m_device, &fenceInfo, nullptr, &fence), "vkCreateFence(texture)");
     {
         std::lock_guard queueLock(VulkanQueueMutex());
-        VkCheck(vkQueueSubmit(m_queue, 1, &submit, VK_NULL_HANDLE), "vkQueueSubmit(texture)");
-        VkCheck(vkQueueWaitIdle(m_queue), "vkQueueWaitIdle(texture)");
+        VkCheck(vkQueueSubmit(m_queue, 1, &submit, fence), "vkQueueSubmit(texture)");
     }
 
-    vkDestroyCommandPool(m_device, pool, nullptr);
-    vkDestroyBuffer(m_device, staging, nullptr);
-    vkFreeMemory(m_device, stagingMemory, nullptr);
+    m_uploads.push_back({fence, pool, staging, stagingMemory, image.image, {}, size});
+    cleanup.action={};
     return image;
+}
+
+bool VulkanTextureSystem::UploadComplete(VkImage image) const
+{
+    for (const auto& upload : m_uploads) if (upload.image == image)
+        return vkGetFenceStatus(m_device, upload.fence) == VK_SUCCESS;
+    return true;
+}
+uint64_t VulkanTextureSystem::PendingUploadBytes() const
+{
+    uint64_t bytes = 0; for (const auto& upload : m_uploads) bytes += upload.bytes; return bytes;
+}
+void VulkanTextureSystem::PollUploads()
+{
+    for (auto it = m_uploads.begin(); it != m_uploads.end();)
+    {
+        if (vkGetFenceStatus(m_device, it->fence) != VK_SUCCESS) { ++it; continue; }
+        VulkanDestroyImage(m_device, it->retiredImage);
+        vkDestroyCommandPool(m_device, it->pool, nullptr);
+        vkDestroyBuffer(m_device, it->staging, nullptr);
+        vkFreeMemory(m_device, it->memory, nullptr);
+        vkDestroyFence(m_device, it->fence, nullptr);
+        auto owner=std::move(it->owner);
+        it = m_uploads.erase(it);
+        owner.reset();
+    }
+}
+void VulkanTextureSystem::ReleaseUploadedImage(VulkanImageResource& image)
+{
+    for (auto& upload : m_uploads) if (upload.image == image.image)
+    {
+        upload.retiredImage = image; image = {}; return;
+    }
+    if (m_device) VulkanDestroyImage(m_device, image);
+    image = {};
+}
+uint64_t VulkanTextureSystem::EstimateAllocationBytes(uint32_t width, uint32_t height,
+    uint32_t levels, Engine::Graphics::GraphicsTextureFormat format, bool srgb) const
+{
+    VkImageCreateInfo info{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+    info.imageType = VK_IMAGE_TYPE_2D;
+    info.extent = {width,height,1}; info.mipLevels = levels; info.arrayLayers = 1;
+    info.format = format == Engine::Graphics::GraphicsTextureFormat::Rgba32Float
+        ? VK_FORMAT_R32G32B32A32_SFLOAT : (srgb ? VK_FORMAT_R8G8B8A8_SRGB:VK_FORMAT_R8G8B8A8_UNORM);
+    info.tiling = VK_IMAGE_TILING_OPTIMAL; info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    info.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    info.samples = VK_SAMPLE_COUNT_1_BIT; info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    VkImage image = VK_NULL_HANDLE;
+    VkCheck(vkCreateImage(m_device,&info,nullptr,&image),"vkCreateImage(texture estimate)");
+    VkMemoryRequirements requirements{};
+    vkGetImageMemoryRequirements(m_device,image,&requirements);
+    vkDestroyImage(m_device,image,nullptr);
+    return requirements.size;
 }
 
 std::shared_ptr<VulkanGraphicsTexture> VulkanTextureSystem::CreateTexture(
@@ -353,8 +428,10 @@ std::shared_ptr<VulkanGraphicsTexture> VulkanTextureSystem::CreateTexture(
 {
     if (!width || !height || !rgbaPixels || !mipLevels)
         return nullptr;
-    return std::make_shared<VulkanGraphicsTexture>(
+    auto result = std::make_shared<VulkanGraphicsTexture>(
         shared_from_this(), Upload(width, height, rgbaPixels, mipLevels, format, srgb));
+    m_uploads.back().owner=result;
+    return result;
 }
 
 std::shared_ptr<VulkanGraphicsTexture> VulkanTextureSystem::CreateDepthTexture(
@@ -444,6 +521,8 @@ void VulkanTextureSystem::Bind(
 {
     auto& frame=m_descriptorFrames[m_descriptorFrame];
     TextureKey key{};
+    for(size_t index=0;index<textures.size();++index)
+        key.identities[index]=textures[index] ? textures[index]->GetIdentity():0;
     for (size_t index = 0; index < textures.size(); ++index)
         key.views[index] =
             textures[index] ? textures[index]->GetView() : m_white.view;
@@ -607,7 +686,7 @@ void VulkanGraphicsTexture::ReleaseImage(VkDevice device)
     if (device && m_renderPass) vkDestroyRenderPass(device, m_renderPass, nullptr);
     if (device && m_loadRenderPass) vkDestroyRenderPass(device, m_loadRenderPass, nullptr);
     if (device) VulkanDestroyImage(device, m_depthColor);
-    if (device) VulkanDestroyImage(device, m_image);
+    if (device && m_system) m_system->ReleaseUploadedImage(m_image);
     m_framebuffer = VK_NULL_HANDLE;
     m_renderPass = VK_NULL_HANDLE;
     m_loadRenderPass = VK_NULL_HANDLE;

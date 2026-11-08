@@ -116,7 +116,8 @@ Engine::Components::Cloth::JsonValue Engine::Components::Cloth::Serialize() cons
             .Set("vertexPosition", vectorValue(anchor.vertexPosition))
             .Set("bodyName", JsonValue(anchor.bodyName))
             .Set("nearMode", JsonValue(anchor.nearMode)));
-    return value.Set("anchors", std::move(bindings));
+    value.Set("anchors", std::move(bindings));
+    return value;
 }
 
 void Engine::Components::Cloth::Deserialize(const JsonValue& value)

@@ -6,6 +6,7 @@
 #include "VulkanPipelineStateBuilder.h"
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>
 #include <unordered_map>
 #include <vector>
 
@@ -144,12 +145,20 @@ struct VulkanOcclusionQueryState
 
 struct VulkanGpuTimingState
 {
-    static constexpr uint32_t QueryCapacity = 128;
+    static constexpr uint32_t QueryCapacity = 2048;
     struct Record { Engine::Graphics::GpuTimingStage stage{}; uint32_t begin = 0; uint32_t end = 0; };
-    struct FrameSlot { VkQueryPool pool = VK_NULL_HANDLE; std::vector<Record> records; std::vector<uint64_t> results; uint32_t used = 0; bool pending = false; };
-    VulkanGpuTimingState(VkDevice value, float period) : device(value), timestampPeriod(period) {}
+    static constexpr uint32_t StatisticsCapacity = 16384;
+    struct StatisticRecord { Engine::Graphics::GpuTimingStage stage; };
+    struct FrameSlot { VkQueryPool statisticsPool = VK_NULL_HANDLE; std::vector<StatisticRecord> statisticsRecords;
+        std::vector<uint64_t> statisticsResults; bool statisticsOverflow = false;
+        VkQueryPool pool = VK_NULL_HANDLE; std::vector<Record> records; std::vector<uint64_t> results; uint32_t used = 0; bool pending = false; bool overflow = false; };
+    VulkanGpuTimingState(VkDevice value, float period, bool supported) : device(value), timestampPeriod(period),
+        collectWorkload(supported && std::getenv("ENGINE_GPU_WORKLOAD_COUNTERS") != nullptr) {}
     ~VulkanGpuTimingState()
-    { if (device) for (auto& slot : slots) if (slot.pool) vkDestroyQueryPool(device, slot.pool, nullptr); }
+    { if (device) for (auto& slot : slots) {
+        if (slot.pool) vkDestroyQueryPool(device, slot.pool, nullptr);
+        if (slot.statisticsPool) vkDestroyQueryPool(device, slot.statisticsPool, nullptr);
+    } }
     bool EnsureSlot(uint32_t index)
     {
         if (!device) return false; if (slots.size() <= index) slots.resize(index + 1u);
@@ -157,7 +166,20 @@ struct VulkanGpuTimingState
         VkQueryPoolCreateInfo info{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
         info.queryType = VK_QUERY_TYPE_TIMESTAMP; info.queryCount = QueryCapacity;
         if (vkCreateQueryPool(device, &info, nullptr, &slot.pool) != VK_SUCCESS) return false;
-        slot.results.resize(QueryCapacity); return true;
+        slot.results.resize(QueryCapacity);
+        if (collectWorkload) {
+            info.queryType = VK_QUERY_TYPE_PIPELINE_STATISTICS;
+            info.queryCount = StatisticsCapacity;
+            info.pipelineStatistics = VK_QUERY_PIPELINE_STATISTIC_INPUT_ASSEMBLY_PRIMITIVES_BIT |
+                VK_QUERY_PIPELINE_STATISTIC_VERTEX_SHADER_INVOCATIONS_BIT |
+                VK_QUERY_PIPELINE_STATISTIC_FRAGMENT_SHADER_INVOCATIONS_BIT;
+            if (vkCreateQueryPool(device, &info, nullptr, &slot.statisticsPool) != VK_SUCCESS) {
+                vkDestroyQueryPool(device, slot.pool, nullptr); slot.pool = VK_NULL_HANDLE;
+                return false;
+            }
+            slot.statisticsResults.resize(size_t(StatisticsCapacity) * 3);
+        }
+        return true;
     }
     void Prepare(uint32_t index, VkCommandBuffer command)
     {
@@ -169,24 +191,43 @@ struct VulkanGpuTimingState
                 VkDeviceSize(slot.used) * sizeof(uint64_t), slot.results.data(), sizeof(uint64_t), VK_QUERY_RESULT_64_BIT);
             if (result == VK_SUCCESS)
             {
+                telemetry.gpuWorkload = {};
+                telemetry.gpuWorkloadValid = false;
+                if (collectWorkload && !slot.statisticsOverflow && !slot.statisticsRecords.empty()) {
+                    const auto count = static_cast<uint32_t>(slot.statisticsRecords.size());
+                    const auto status = vkGetQueryPoolResults(device, slot.statisticsPool, 0, count,
+                        size_t(count) * 3 * sizeof(uint64_t), slot.statisticsResults.data(),
+                        3 * sizeof(uint64_t), VK_QUERY_RESULT_64_BIT);
+                    telemetry.gpuWorkloadValid = status == VK_SUCCESS;
+                    if (telemetry.gpuWorkloadValid) for (size_t i=0; i<count; ++i) {
+                        auto& workload = telemetry.gpuWorkload[static_cast<size_t>(slot.statisticsRecords[i].stage)];
+                        // Vulkan returns counters in ascending statistic-bit order.
+                        workload.primitives += slot.statisticsResults[i*3];
+                        workload.vertices += slot.statisticsResults[i*3+1];
+                        workload.fragments += slot.statisticsResults[i*3+2];
+                    }
+                }
                 telemetry.gpuMilliseconds.fill(0.0);
                 for (const auto& record : slot.records)
                     if (slot.results[record.end] >= slot.results[record.begin])
                         telemetry.gpuMilliseconds[static_cast<size_t>(record.stage)] +=
                             double(slot.results[record.end] - slot.results[record.begin]) *
                             double(timestampPeriod) / 1000000.0;
-                telemetry.gpuTimingsValid = true; telemetry.gpuRegionCount = static_cast<uint32_t>(slot.records.size());
+                telemetry.gpuTimingsValid = !slot.overflow;
+                if (slot.overflow) telemetry.gpuWorkloadValid = false; telemetry.gpuRegionCount = static_cast<uint32_t>(slot.records.size());
                 ++telemetry.gpuSampleId;
             }
         }
-        slot.used = 0; slot.records.clear(); slot.pending = false;
+        slot.used = 0; slot.records.clear(); slot.pending = false; slot.overflow = false;
+        slot.statisticsRecords.clear(); slot.statisticsOverflow = false;
         vkCmdResetQueryPool(command, slot.pool, 0, QueryCapacity);
+        if (collectWorkload) vkCmdResetQueryPool(command, slot.statisticsPool, 0, StatisticsCapacity);
         currentSlot = index; active = UINT32_MAX; cpuStart = std::chrono::steady_clock::now();
     }
     void Begin(VkCommandBuffer command, Engine::Graphics::GpuTimingStage stage)
     {
         if (!command || currentSlot >= slots.size() || active != UINT32_MAX) return;
-        auto& slot = slots[currentSlot]; if (slot.used + 2 > QueryCapacity) return;
+        auto& slot = slots[currentSlot]; if (slot.used + 2 > QueryCapacity) { slot.overflow = true; return; }
         Record record{stage, slot.used++, slot.used++}; slot.records.push_back(record);
         active = static_cast<uint32_t>(slot.records.size() - 1u);
         vkCmdWriteTimestamp(command, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, slot.pool, record.begin);
@@ -197,6 +238,24 @@ struct VulkanGpuTimingState
         auto& slot = slots[currentSlot]; auto& record = slot.records[active]; if (record.stage != stage) return;
         vkCmdWriteTimestamp(command, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, slot.pool, record.end); active = UINT32_MAX;
     }
+    // Scope statistics to individual physical draws: instancing compute can pause
+    // and resume render passes inside one timestamp region. Queries must not span
+    // those render-pass boundaries.
+    bool BeginDraw(VkCommandBuffer command)
+    {
+        if (!collectWorkload || currentSlot >= slots.size() || active == UINT32_MAX) return false;
+        auto& slot = slots[currentSlot];
+        if (slot.statisticsRecords.size() >= StatisticsCapacity) { slot.statisticsOverflow=true; return false; }
+        const auto index=static_cast<uint32_t>(slot.statisticsRecords.size());
+        slot.statisticsRecords.push_back({slot.records[active].stage});
+        vkCmdBeginQuery(command, slot.statisticsPool, index, 0);
+        return true;
+    }
+    void EndDraw(VkCommandBuffer command)
+    {
+        auto& slot=slots[currentSlot];
+        vkCmdEndQuery(command, slot.statisticsPool, static_cast<uint32_t>(slot.statisticsRecords.size()-1));
+    }
     void Finalize(VkCommandBuffer command)
     {
         if (!command || currentSlot >= slots.size()) return; auto& slot = slots[currentSlot];
@@ -205,6 +264,7 @@ struct VulkanGpuTimingState
         telemetry.cpuSubmissionMilliseconds = std::chrono::duration<double, std::milli>(
             std::chrono::steady_clock::now() - cpuStart).count();
     }
+    const bool collectWorkload;
     VkDevice device = VK_NULL_HANDLE; float timestampPeriod = 0.f; std::vector<FrameSlot> slots;
     uint32_t currentSlot = UINT32_MAX, active = UINT32_MAX;
     Engine::Graphics::FrameTimingTelemetry telemetry{}; std::chrono::steady_clock::time_point cpuStart{};
@@ -220,10 +280,10 @@ uint64_t VulkanOcclusionKey(uint64_t viewId, uint64_t objectId)
 }
 }
 
-void VulkanGraphicsContextFactory::SetDevice(VkDevice device, float timestampPeriod)
+void VulkanGraphicsContextFactory::SetDevice(VkDevice device, float timestampPeriod, bool pipelineStatisticsEnabled)
 {
     m_occlusionState = std::make_shared<VulkanOcclusionQueryState>(device);
-    m_gpuTimings = std::make_shared<VulkanGpuTimingState>(device, timestampPeriod);
+    m_gpuTimings = std::make_shared<VulkanGpuTimingState>(device, timestampPeriod, pipelineStatisticsEnabled);
     m_computeDescriptors = std::make_shared<VulkanComputeDescriptorArena>(device);
 }
 
@@ -234,6 +294,7 @@ void VulkanGraphicsContextFactory::PrepareFrameForCommandBuffer(
     uint32_t frameSlot, VkCommandBuffer commandBuffer)
 {
     m_preparedFrameSlot = frameSlot;
+    m_textureOwners->Prepare(frameSlot);
     ++m_preparedFrameSerial;
     if(m_textureSystem) m_textureSystem->PrepareFrame(frameSlot);
     if (m_occlusionState)
@@ -382,6 +443,7 @@ void VulkanGraphicsContext::SetIndexBuffer(const Engine::Graphics::IGraphicsBuff
 
 void VulkanGraphicsContext::SetTexture(uint32_t slot, const Engine::Graphics::IGraphicsTexture* texture)
 {
+    RetainTexture(texture);
     if (slot < m_textures.size())
         m_textures[slot] = dynamic_cast<const VulkanGraphicsTexture*>(texture);
 }
@@ -392,6 +454,7 @@ bool VulkanGraphicsContext::BeginDepthOnlyPass(
     if (!m_commandBuffer || m_activeDepthTarget) return false;
     auto* depth = dynamic_cast<const VulkanGraphicsTexture*>(texture);
     if (!depth || !depth->IsDepthTarget()) return false;
+    RetainTexture(depth);
     VkClearValue clears[2]{};
     clears[1].depthStencil = { clearDepth < 0.f ? 1.f : clearDepth, 0 };
     VkRenderPassBeginInfo begin{ VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
@@ -406,6 +469,19 @@ bool VulkanGraphicsContext::BeginDepthOnlyPass(
     vkCmdBeginRenderPass(m_commandBuffer, &begin, VK_SUBPASS_CONTENTS_INLINE);
     m_activeDepthTarget = depth;
     return true;
+}
+
+void VulkanGraphicsContext::ClearDepthRectangle(const ScissorRect& rect,float depth)
+{
+    if(!m_commandBuffer || !m_activeDepthTarget || rect.left>=rect.right || rect.top>=rect.bottom) return;
+    VkClearAttachment attachment{};
+    attachment.aspectMask=VK_IMAGE_ASPECT_DEPTH_BIT;
+    attachment.clearValue.depthStencil={depth,0};
+    VkClearRect area{};
+    area.rect.offset={rect.left,rect.top};
+    area.rect.extent={uint32_t(rect.right-rect.left),uint32_t(rect.bottom-rect.top)};
+    area.layerCount=1;
+    vkCmdClearAttachments(m_commandBuffer,1,&attachment,1,&area);
 }
 
 void VulkanGraphicsContext::EndDepthOnlyPass()
@@ -463,8 +539,10 @@ bool VulkanGraphicsContext::DrawInstancesIndirect(const Engine::Graphics::IGraph
     if (!m_commandBuffer || !native || offset+(indexed?20u:16u)>buffer->GetSize()) return false;
     if (m_textureSystem && m_pipeline)
         m_textureSystem->Bind(m_commandBuffer,m_pipeline->GetLayout(),m_textures,m_structuredBuffers);
+    const bool statistics=m_gpuTimings && m_gpuTimings->BeginDraw(m_commandBuffer);
     if(indexed) vkCmdDrawIndexedIndirect(m_commandBuffer,native->GetBuffer(),offset,1,20);
     else vkCmdDrawIndirect(m_commandBuffer,native->GetBuffer(),offset,1,16);
+    if(statistics) m_gpuTimings->EndDraw(m_commandBuffer);
     return true;
 }
 
@@ -609,7 +687,9 @@ void VulkanGraphicsContext::DrawInstanced(uint32_t vertices, uint32_t instances,
             error.what() + "\n").c_str());
         return;
     }
+    const bool statistics=m_gpuTimings && m_gpuTimings->BeginDraw(m_commandBuffer);
     vkCmdDraw(m_commandBuffer, vertices, instances, firstVertex, firstInstance);
+    if(statistics) m_gpuTimings->EndDraw(m_commandBuffer);
 }
 void VulkanGraphicsContext::DrawIndexedInstanced(uint32_t indices, uint32_t instances, uint32_t firstIndex, int32_t vertexOffset, uint32_t firstInstance)
 {
@@ -625,7 +705,9 @@ void VulkanGraphicsContext::DrawIndexedInstanced(uint32_t indices, uint32_t inst
             error.what() + "\n").c_str());
         return;
     }
+    const bool statistics=m_gpuTimings && m_gpuTimings->BeginDraw(m_commandBuffer);
     vkCmdDrawIndexed(m_commandBuffer, indices, instances, firstIndex, vertexOffset, firstInstance);
+    if(statistics) m_gpuTimings->EndDraw(m_commandBuffer);
 }
 void VulkanGraphicsContext::TransitionResource(void*, ResourceState, ResourceState) {}
 }

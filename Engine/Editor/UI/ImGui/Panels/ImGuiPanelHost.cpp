@@ -458,6 +458,9 @@ void ImGuiPanelHost::DrawToolbar(EditorState& state, PlayState playState,
             float sideSpan, int side)
         {
             if (!count) return 0.f;
+            // A group's span follows its requested widths. Resizing must be
+            // allowed to grow beyond that span into the containing region.
+            const float resizeLimit = regionWidths[side];
             float minimums[ToolbarSectionCount]{};
             float minimumTotal = 0.f;
             for (int i = 0; i < count; ++i)
@@ -581,7 +584,7 @@ void ImGuiPanelHost::DrawToolbar(EditorState& state, PlayState playState,
                     {
                         const float nextWidth = std::clamp(
                             allocated[i] + ImGui::GetIO().MouseDelta.x,
-                            minimums[i], std::max(minimums[i], sideSpan));
+                            minimums[i], std::max(minimums[i], resizeLimit));
                         if (nextWidth != sectionWidths[index] ||
                             !sectionSized[index])
                         {
@@ -621,7 +624,7 @@ void ImGuiPanelHost::DrawToolbar(EditorState& state, PlayState playState,
                 {
                     sectionWidths[index] = std::clamp(
                         allocated[i] + ImGui::GetIO().MouseDelta.x,
-                        minimums[i], std::max(minimums[i], sideSpan));
+                        minimums[i], std::max(minimums[i], resizeLimit));
                     sectionSized[index] = true;
                     ImGui::MarkIniSettingsDirty();
                 }

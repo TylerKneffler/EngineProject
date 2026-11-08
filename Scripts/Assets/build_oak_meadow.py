@@ -216,7 +216,7 @@ def make_prefabs():
             library[model]=path
     return library
 
-def add_grass_layer(terrain, template, grove_half_extent=48.0):
+def add_grass_layer(terrain, template, grove_half_extent=None):
     """Transfer the flat scene's authored grass pattern onto this terrain."""
     import math
     source=next(n for n in template.iter('item') if n.find('components/{'+NS+'}GrassField') is not None)
@@ -255,7 +255,9 @@ def add_grass_layer(terrain, template, grove_half_extent=48.0):
         dz=((heights[b]-heights[a]) if u+v<=1 else (heights[b+1]-heights[a+1]))/depth
         length=math.sqrt(dx*dx+1+dz*dz)
         return y,[-dx/length,1/length,-dz/length],dirt
-    # The authored grove covers 96 m; the remaining ground supplies the horizon.
+    # Repeat the authored pattern over every terrain cell, including the horizon.
+    if grove_half_extent is None:
+        grove_half_extent=max(cells_x*width,cells_z*depth)/2
     first=int(math.floor(-grove_half_extent/16));last=int(math.ceil(grove_half_extent/16))
     for tile_z in range(first,last):
         for tile_x in range(first,last):
@@ -265,6 +267,7 @@ def add_grass_layer(terrain, template, grove_half_extent=48.0):
                 x=position[0]+tile_x*16;z=position[2]+tile_z*16
                 if abs(x)>grove_half_extent or abs(z)>grove_half_extent:continue
                 local_x=x-origin[0];local_z=z-origin[2]
+                if not (0<=local_x<=cells_x*width and 0<=local_z<=cells_z*depth):continue
                 y,normal,dirt=sample(local_x,local_z)
                 if dirt>=.35:continue
                 placement=ET.SubElement(placements,'item',dict(original.attrib))
@@ -318,11 +321,15 @@ def populate_forest(scene, library, count=2048):
         return origin[1]+((1-u-v)*a+u*b+v*c if u+v<=1 else
             (1-v)*b+(1-u)*c+(u+v-1)*d)-.025
     path_x=lambda z:2.4*math.sin(z*.095)+1.3*math.sin(z*.19)
-    species=sorted({re.sub(r'_LOD[012]$','',n) for n in library if '_oak_tree_' in n})
+    species=sorted({re.sub(r'_LOD[012]$','',n) for n in library
+        if '_oak_tree_' in n and re.search(r'_LOD[012]$',n)})
     if len(species)!=17:raise RuntimeError('Expected all seventeen native oak varieties')
     lods=ET.SubElement(layer,'TerrainObjectLayer.objectLods')
     for name in species:
         paths=[portable(str(library[name+f'_LOD{lod}'].relative_to(ROOT)).replace('\\','/')) for lod in range(3)]
+        canopy=ASSETS/'Prefabs/Woodland/Oaks'/(name+'_Canopy.prefab')
+        if name.startswith('Large_oak_tree_') and canopy.exists():
+            paths[1]='Assets/'+canopy.relative_to(ASSETS).as_posix()
         impostor=ASSETS/'Prefabs/Woodland/Oaks'/(name+'_Impostor.prefab')
         if impostor.exists(): paths[2]='Assets/'+impostor.relative_to(ASSETS).as_posix()
         entry=ET.SubElement(lods,'item',{'asset':paths[0]})
@@ -416,7 +423,7 @@ def compose(library):
     for pack in (ASSETS/'Other').glob('*/scene.gltf'):
         info=json.loads(pack.read_text())['asset']['extras'];credits.append(f"- {info['title']} by {info['author']}\n  Source: {info['source']}\n  License: {info['license']}")
     (OUTPUT/'ATTRIBUTION.md').write_text('# Oak Meadow source assets\n\n'+'\n\n'.join(credits)+'\n\nModified for this scene: Y-up metre-scale geometry, root pivots, reusable native prefabs, alpha-tested materials, grounded whole-blade ribbon retopology and density LODs. Original packs remain in Assets/Other.\n')
-    (OUTPUT/'README.md').write_text('# Oak Meadow\n\nOpen `Assets/Scenes/terrain/oak_meadow.scene` and press Play. WASD moves, mouse looks, Shift sprints.\n\nThe forest stress scene uses 2,048 oaks across a 328 x 328 m area, a painted three-layer ground, a winding footpath and seventeen oak varieties. Irregular canopy clusters include 569 close companions at roughly 2-3 m spacing; the narrow footpath remains clear. Trees select shared resident geometry as the camera moves: LOD0 within 28 m, LOD1 to 90 m, and an authored 28-triangle impostor beyond. Complementary spatial dithering blends each boundary over a one-metre interval. Placements reference the base variety, rather than a starting-camera LOD. Trees are compact shared-prefab placements in the terrain child `Oak forest` (`TerrainObjectLayer`), referencing editable assets under `Assets/Prefabs/Woodland/Oaks`. Prefab parts share source geometry and materials instead of expanding a full object hierarchy for every tree. Oak prefabs currently contain no collider or rigid body. Add a primitive collider to the LOD0/base prefab to apply it to every placement of that oak variety, including its configured visual LOD and impostor variants; saved prefab edits are polled once per second. The terrain Objects brush stores prefab references in these layers.\n\nOne continuous 60x60 terrain grid covers the grove and horizon without overlapping surfaces. Grass from `grass_flat_test.scene` is authored across the 96 m grove and streamed to a 36 m view distance using its existing LODs and wind settings. Grass roots and normals follow the actual terrain triangles, leaving the painted footpath clear. Grass placement data lives in `Assets/Prefabs/Woodland/OakMeadowGrass.prefab`, attached directly beneath the terrain. There is no shrub-prefab layer in this scene.\n\n`Mesh.foliageWindStrength` enables the shared root-pinned wind field for authored meshes. The oak meadow scene intentionally keeps tree trunks and canopies at zero wind so they remain static and do not trigger shadow-map churn from shader-driven vertex motion. The same vertex path drives color and shadows, with bounds padding for wind. Bark and canopies keep source PBR shading. The scene enables generic distance texture LOD: full quality within 12 m, smoothly reaching +4 mip bias at 48 m, with normal/material detail and reflections fading over that interval. Adjust Texture LOD in Scene Properties or enable a material override. Bark is one-sided; leaf cards remain two-sided to preserve canopy coverage. Terrain renders only its upward-facing surface.\n\nRebuild only tree placements with `python Scripts/Assets/build_oak_meadow.py --forest-only`, preserving the current terrain, grass and scene settings. Regenerate all assets with `python Scripts/Assets/build_oak_meadow.py --prepare-only`, then `python Scripts/Assets/build_oak_meadow.py` (numpy/scipy and a built Debug Editor required). Existing imported packs are reused. Imports use the native glTF importer; generated intermediates live under `.local/woodland-import`. See ATTRIBUTION.md for CC-BY-4.0 credits.\n')
+    (OUTPUT/'README.md').write_text('# Oak Meadow\n\nOpen `Assets/Scenes/terrain/oak_meadow.scene` and press Play. WASD moves, mouse looks, Shift sprints.\n\nThe forest stress scene uses 2,048 oaks across a 328 x 328 m area, a painted three-layer ground, a winding footpath and seventeen oak varieties. Irregular canopy clusters include 569 close companions at roughly 2-3 m spacing; the narrow footpath remains clear. Trees select shared resident geometry as the camera moves: LOD0 within 28 m, LOD1 to 90 m, and an authored 28-triangle impostor beyond. The four large-oak middle bands use coverage-pruned 3D Canopy prefabs; source LOD1 meshes remain available. Complementary spatial dithering blends each boundary over a one-metre interval. Placements reference the base variety, rather than a starting-camera LOD. Trees are compact shared-prefab placements in the terrain child `Oak forest` (`TerrainObjectLayer`), referencing editable assets under `Assets/Prefabs/Woodland/Oaks`. Prefab parts share source geometry and materials instead of expanding a full object hierarchy for every tree. Oak prefabs currently contain no collider or rigid body. Add a primitive collider to the LOD0/base prefab to apply it to every placement of that oak variety, including its configured visual LOD and impostor variants; saved prefab edits are polled once per second. The terrain Objects brush stores prefab references in these layers.\n\nOne continuous 60x60 terrain grid covers the grove and horizon without overlapping surfaces. Grass from `grass_flat_test.scene` is authored across the full 360 m terrain and streamed to a 36 m view distance using its existing LODs and wind settings. Grass roots and normals follow the actual terrain triangles, leaving the painted footpath clear. Grass placement data lives in `Assets/Prefabs/Woodland/OakMeadowGrass.prefab`, attached directly beneath the terrain. There is no shrub-prefab layer in this scene.\n\n`Mesh.foliageWindStrength` enables the shared root-pinned wind field for authored meshes. The oak meadow scene intentionally keeps tree trunks and canopies at zero wind so they remain static and do not trigger shadow-map churn from shader-driven vertex motion. The same vertex path drives color and shadows, with bounds padding for wind. Bark and canopies keep source PBR shading. The scene enables generic distance texture LOD: full quality within 12 m, smoothly reaching +4 mip bias at 48 m, with normal/material detail and reflections fading over that interval. Adjust Texture LOD in Scene Properties or enable a material override. Bark is one-sided; leaf cards remain two-sided to preserve canopy coverage. Terrain renders only its upward-facing surface.\n\nRebuild only tree placements with `python Scripts/Assets/build_oak_meadow.py --forest-only`, preserving the current terrain, grass and scene settings. Regenerate all assets with `python Scripts/Assets/build_oak_meadow.py --prepare-only`, then `python Scripts/Assets/build_oak_meadow.py` (numpy/scipy and a built Debug Editor required). Existing imported packs are reused. Imports use the native glTF importer; generated intermediates live under `.local/woodland-import`. See ATTRIBUTION.md for CC-BY-4.0 credits.\n')
 
 if __name__=='__main__':
     os.chdir(ROOT)
@@ -424,6 +431,11 @@ if __name__=='__main__':
         library={p.stem:p for p in (ASSETS/'Prefabs/Woodland/Oaks').glob('*.prefab')}
         path=ASSETS/'Scenes/terrain/oak_meadow.scene'
         scene=ET.parse(path).getroot();populate_forest(scene,library);write_xml(path,scene)
+    elif '--grass-only' in sys.argv:
+        scene=ET.parse(ASSETS/'Scenes/terrain/oak_meadow.scene').getroot()
+        terrain=next(n for n in scene.iter('item') if n.find('components/{'+NS+'}Terrain') is not None)
+        template=ET.parse(ASSETS/'Scenes/terrain/grass_flat_test.scene').getroot()
+        print(f'Created {add_grass_layer(terrain,template)} grounded grass patches')
     elif '--prepare-only' in sys.argv:prepare()
     else:
         manifest=json.loads((STAGE/'manifest.json').read_text()) if (STAGE/'manifest.json').exists() else prepare()

@@ -7,6 +7,56 @@
 
 namespace Engine::Renderers
 {
+
+uint32_t D3D12TextureFactory::AllocateDescriptor()
+{
+    std::lock_guard lock(m_slots->mutex);
+    if (!m_slots->free.empty())
+    {
+        auto index = m_slots->free.back(); m_slots->free.pop_back(); return index;
+    }
+    return m_nextDescriptor < m_descriptorCount ? m_nextDescriptor++ : UINT32_MAX;
+}
+void D3D12TextureFactory::OwnDescriptor(const std::shared_ptr<D3D12GraphicsTexture>& texture, uint32_t index)
+{
+    texture->SetDescriptorRelease([slots=m_slots,index] {
+        std::lock_guard lock(slots->mutex); slots->free.push_back(index);
+    });
+}
+void D3D12TextureFactory::PollUploads()
+{
+    m_uploads.erase(std::remove_if(m_uploads.begin(), m_uploads.end(),
+        [](const auto& upload) { return upload.fence->GetCompletedValue() >= 1; }), m_uploads.end());
+}
+uint64_t D3D12TextureFactory::GetPendingUploadBytes() const
+{
+    uint64_t bytes = 0; for (const auto& upload : m_uploads) bytes += upload.bytes; return bytes;
+}
+D3D12TextureFactory::~D3D12TextureFactory()
+{
+    // Shutdown only. Runtime polling and texture replacement never wait.
+    for (const auto& upload : m_uploads) if (upload.fence->GetCompletedValue() < 1)
+    {
+        HANDLE event = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        if (event)
+        {
+            if (SUCCEEDED(upload.fence->SetEventOnCompletion(1, event))) WaitForSingleObject(event, INFINITE);
+            CloseHandle(event);
+        }
+    }
+}
+uint64_t D3D12TextureFactory::EstimateAllocationBytes(uint32_t width, uint32_t height,
+    uint32_t levels, Engine::Graphics::GraphicsTextureFormat format, bool) const
+{
+    if (!m_device) return 0;
+    D3D12_RESOURCE_DESC desc{};
+    desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    desc.Width = width; desc.Height = height; desc.DepthOrArraySize = 1;
+    desc.MipLevels = static_cast<UINT16>(levels); desc.SampleDesc.Count = 1;
+    desc.Format = format == Engine::Graphics::GraphicsTextureFormat::Rgba32Float
+        ? DXGI_FORMAT_R32G32B32A32_FLOAT : DXGI_FORMAT_R8G8B8A8_TYPELESS;
+    return m_device->GetResourceAllocationInfo(0, 1, &desc).SizeInBytes;
+}
 D3D12_HEAP_PROPERTIES HeapProperties(D3D12_HEAP_TYPE type)
 {
     D3D12_HEAP_PROPERTIES properties{};
@@ -84,8 +134,16 @@ std::shared_ptr<Engine::Graphics::IGraphicsTexture> D3D12TextureFactory::CreateT
     bool srgb)
 {
     if (!m_device || !m_queue || !m_heap || !width || !height || !rgbaPixels ||
-        !mipLevels || m_nextDescriptor >= m_descriptorCount)
+        !mipLevels)
         return nullptr;
+    PollUploads();
+    const uint32_t slot = AllocateDescriptor();
+    if(slot==UINT32_MAX) return nullptr;
+    struct DescriptorLease
+    {
+        std::shared_ptr<DescriptorSlots> slots;uint32_t slot;bool owned=false;
+        ~DescriptorLease(){if(!owned){std::lock_guard lock(slots->mutex);slots->free.push_back(slot);}}
+    } lease{m_slots,slot};
 
     D3D12_RESOURCE_DESC textureDesc{};
     textureDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
@@ -112,6 +170,7 @@ std::shared_ptr<Engine::Graphics::IGraphicsTexture> D3D12TextureFactory::CreateT
     m_device->GetCopyableFootprints(
         &textureDesc, 0, mipLevels, 0, footprints.data(), rowCounts.data(),
         rowBytes.data(), &uploadSize);
+    if (GetPendingUploadBytes() + uploadSize > 256ull * 1024 * 1024) return nullptr;
 
     D3D12_RESOURCE_DESC uploadDesc{};
     uploadDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
@@ -183,32 +242,22 @@ std::shared_ptr<Engine::Graphics::IGraphicsTexture> D3D12TextureFactory::CreateT
     Microsoft::WRL::ComPtr<ID3D12Fence> fence;
     if (FAILED(m_device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence))))
         return nullptr;
+    m_uploads.reserve(m_uploads.size()+1);
     {
         std::lock_guard queueLock(DX12QueueMutex());
         m_queue->ExecuteCommandLists(1, lists);
         if (FAILED(m_queue->Signal(fence.Get(), 1)))
             return nullptr;
     }
-    HANDLE eventHandle = CreateEventW(nullptr, FALSE, FALSE, nullptr);
-    if (!eventHandle)
-        return nullptr;
-    if (fence->GetCompletedValue() < 1)
-    {
-        if (FAILED(fence->SetEventOnCompletion(1, eventHandle)))
-        {
-            CloseHandle(eventHandle);
-            return nullptr;
-        }
-        WaitForSingleObject(eventHandle, INFINITE);
-    }
-    CloseHandle(eventHandle);
+    // Same graphics queue: subsequent draws are ordered after this copy.
+    // Keep command/staging/texture storage alive until the upload fence passes.
+    m_uploads.push_back({upload, texture, allocator, commands, fence, uploadSize});
 
     D3D12_CPU_DESCRIPTOR_HANDLE cpu = m_heap->GetCPUDescriptorHandleForHeapStart();
     D3D12_GPU_DESCRIPTOR_HANDLE gpu = m_heap->GetGPUDescriptorHandleForHeapStart();
-    const uint32_t descriptorIndex = m_firstDescriptor + m_nextDescriptor;
+    const uint32_t descriptorIndex = m_firstDescriptor + slot;
     cpu.ptr += static_cast<SIZE_T>(descriptorIndex) * m_descriptorSize;
     gpu.ptr += static_cast<UINT64>(descriptorIndex) * m_descriptorSize;
-    ++m_nextDescriptor;
 
     D3D12_SHADER_RESOURCE_VIEW_DESC srv{};
     srv.Format = format == Engine::Graphics::GraphicsTextureFormat::Rgba32Float
@@ -218,15 +267,18 @@ std::shared_ptr<Engine::Graphics::IGraphicsTexture> D3D12TextureFactory::CreateT
     srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
     srv.Texture2D.MipLevels = mipLevels;
     m_device->CreateShaderResourceView(texture.Get(), &srv, cpu);
-    return std::make_shared<D3D12GraphicsTexture>(
-        std::move(texture), m_heap, gpu);
+    auto result = std::make_shared<D3D12GraphicsTexture>(texture, m_heap, gpu);
+    result->SetUpload(fence, m_device->GetResourceAllocationInfo(0, 1, &textureDesc).SizeInBytes);
+    OwnDescriptor(result, slot);
+    lease.owned=true;
+    m_uploads.back().owner = result;
+    return result;
 }
 
 std::shared_ptr<Engine::Graphics::IGraphicsTexture>
 D3D12TextureFactory::CreateDepthTexture2D(uint32_t width, uint32_t height)
 {
-    if (!m_device || !m_heap || !width || !height ||
-        m_nextDescriptor >= m_descriptorCount)
+    if (!m_device || !m_heap || !width || !height)
         return nullptr;
 
     D3D12_RESOURCE_DESC desc{};
@@ -252,10 +304,11 @@ D3D12TextureFactory::CreateDepthTexture2D(uint32_t width, uint32_t height)
 
     D3D12_CPU_DESCRIPTOR_HANDLE cpu = m_heap->GetCPUDescriptorHandleForHeapStart();
     D3D12_GPU_DESCRIPTOR_HANDLE gpu = m_heap->GetGPUDescriptorHandleForHeapStart();
-    const uint32_t descriptorIndex = m_firstDescriptor + m_nextDescriptor;
+    const uint32_t slot = AllocateDescriptor();
+    if(slot==UINT32_MAX) return nullptr;
+    const uint32_t descriptorIndex = m_firstDescriptor + slot;
     cpu.ptr += static_cast<SIZE_T>(descriptorIndex) * m_descriptorSize;
     gpu.ptr += static_cast<UINT64>(descriptorIndex) * m_descriptorSize;
-    ++m_nextDescriptor;
     D3D12_SHADER_RESOURCE_VIEW_DESC srv{};
     srv.Format = DXGI_FORMAT_R32_FLOAT_X8X24_TYPELESS;
     srv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
@@ -268,13 +321,18 @@ D3D12TextureFactory::CreateDepthTexture2D(uint32_t width, uint32_t height)
     dsvDesc.NumDescriptors = 1;
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> dsvHeap;
     if (FAILED(m_device->CreateDescriptorHeap(&dsvDesc, IID_PPV_ARGS(&dsvHeap))))
+    {
+        std::lock_guard lock(m_slots->mutex); m_slots->free.push_back(slot);
         return nullptr;
+    }
     D3D12_DEPTH_STENCIL_VIEW_DESC dsv{};
     dsv.Format = DXGI_FORMAT_D32_FLOAT_S8X24_UINT;
     dsv.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
     m_device->CreateDepthStencilView(texture.Get(), &dsv,
         dsvHeap->GetCPUDescriptorHandleForHeapStart());
-    return std::make_shared<D3D12GraphicsTexture>(
+    auto result = std::make_shared<D3D12GraphicsTexture>(
         std::move(texture), m_heap, gpu, std::move(dsvHeap));
+    OwnDescriptor(result,slot);
+    return result;
 }
 }

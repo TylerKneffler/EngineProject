@@ -19,6 +19,7 @@
 #include "Core/Compoonents/Animation/SkinnedMesh.h"
 #include "Core/Compoonents/Animation/Skeleton.h"
 #include "Core/Compoonents/Materials/Texture.h"
+#include "Core/Rendering/TextureFootprint.h"
 #include "Core/Rendering/Lighting/BakedLightingData.h"
 #include "Core/Rendering/Lighting/EnvironmentMap.h"
 #include "Core/Compoonents/Lighting/LightProbe.h"
@@ -1275,6 +1276,8 @@ void Scene::RenderParticles(IGraphicsContext* context,
             : (batch.alphaBlend ? m_particleAlphaPipeline.get()
                 : m_particlePipeline.get()));
         context->SetConstantBuffer(0, slot.constants.get(), offset);
+        if(batch.texture) Engine::Components::Texture::RequestGraphicsFootprint(batch.texture->GetGraphicsTexture(),
+            std::numeric_limits<float>::infinity()); // CPU/GPU particle size varies after preparation.
         context->SetTexture(0, batch.texture
             ? batch.texture->GetGraphicsTexture() : nullptr);
         context->SetVertexBuffer(0, slot.vertices.get(), sizeof(ParticleGPUData),
@@ -1323,6 +1326,7 @@ void Scene::RenderParticles(IGraphicsContext* context,
             : (alpha ? m_particleGpuAlphaPipeline.get()
                 : m_particleGpuPipeline.get()));
         context->SetConstantBuffer(0, slot.constants.get(), offset);
+        if(texture) Engine::Components::Texture::RequestGraphicsFootprint(texture->GetGraphicsTexture(),std::numeric_limits<float>::infinity());
         context->SetTexture(0, texture ? texture->GetGraphicsTexture() : nullptr);
         context->SetStructuredBuffer(6, emitter->GetGpuDrawBuffer());
         context->DrawInstanced(6, emitter->GetGpuDrawCapacity());
@@ -2347,7 +2351,7 @@ void Scene::PrepareRenderFrame(bool publishSnapshot)
         // are refreshed below without rebuilding transforms or bounds.
         const bool staticCandidate = mesh && !sprite && !lookup.skinnedMesh &&
             !hasActiveWarpVolume && !m_previewObject &&
-            (!mesh->gpuLodSelection || mesh->IsInstanced()) &&
+            (!(mesh->gpuLodSelection || mesh->screenLodSelection) || mesh->IsInstanced()) &&
             !mesh->HasMorphTargets() && !mesh->HasSurfaceOffsets() &&
             !mesh->GetPreviousRuntimeLodMesh() &&
             traversalRenderInstances.find(candidate) ==
@@ -2392,7 +2396,7 @@ void Scene::PrepareRenderFrame(bool publishSnapshot)
                     {
                         item.gpuMaximumLod=0;
                         item.gpuLodDistances={0,0};
-                        if (mesh->gpuLodSelection && candidate!=m_selectedObject &&
+                        if ((mesh->gpuLodSelection || mesh->screenLodSelection) && candidate!=m_selectedObject &&
                             mesh!=m_editorSelectedMesh && mesh!=m_editorWeightPaintMesh &&
                             mesh->IsRuntimeLodResident(0) && mesh->IsRuntimeLodResident(1) &&
                             (!item.material || IsFastFoliageSurface(item.material) ||
@@ -2695,7 +2699,7 @@ void Scene::PrepareRenderFrame(bool publishSnapshot)
             };
             if (source && !draw.warpedVertexBuffer)
                 draw.geometryFade = source->GetRuntimeGeometryFade();
-            if(source && source->IsInstanced() && source->gpuLodSelection &&
+            if(source && source->IsInstanced() && (source->gpuLodSelection || source->screenLodSelection) &&
                 draw.object!=m_selectedObject && source!=m_editorSelectedMesh && source!=m_editorWeightPaintMesh &&
                 !draw.warpedVertexBuffer && !draw.traversalChartPortal && source->IsRuntimeLodResident(0) && source->IsRuntimeLodResident(1) &&
                 (!draw.material || IsFastFoliageSurface(draw.material) ||
@@ -2708,7 +2712,7 @@ void Scene::PrepareRenderFrame(bool publishSnapshot)
                 publish(draw);
                 return;
             }
-            if (source && source->gpuLodSelection && draw.object!=m_selectedObject &&
+            if (source && (source->gpuLodSelection || source->screenLodSelection) && draw.object!=m_selectedObject &&
                 source!=m_editorSelectedMesh && source!=m_editorWeightPaintMesh && !source->IsInstanced() &&
                 !source->HasMorphTargets() && !source->HasSurfaceOffsets() && !draw.skinJointCount &&
                 !draw.warpedVertexBuffer && !draw.traversalChartPortal && source->IsRuntimeLodResident(0) &&
@@ -2896,6 +2900,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     uint32_t viewportWidth, uint32_t viewportHeight, bool shadowOnly,
     const NativeRenderPacket* nativePacket)
 {
+    m_screenLodCounts={};
+    const auto quality = settings.graphicsQuality.Resolve();
     const bool previousNativeRecording = m_recordingNativeCommands;
     m_recordingNativeCommands = nativePacket && IsOwnerThread();
     struct NativeRecordingGuard
@@ -2961,6 +2967,11 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     if (!m_graphicsProvider || !m_objectPipeline)
     {
         return;
+    }
+    if(auto* packet=dynamic_cast<Engine::Graphics::GraphicsCommandPacket*>(context))
+    {
+        const auto* factory=m_graphicsProvider->GetContextFactory();
+        packet->SetDepthRectangleClearSupported(factory && factory->SupportsDepthRectangleClear());
     }
 
     if (!shadowOnly)
@@ -3218,8 +3229,11 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     }
     for (uint32_t index = 0;
         !shadowOnly && index < photometryTextures.size(); ++index)
+    {
+        if(photometryTextures[index]) photometryTextures[index]->RequestMipFootprint(std::numeric_limits<float>::infinity());
         context->SetTexture(16u + index, photometryTextures[index]
             ? photometryTextures[index]->GetGraphicsTexture() : nullptr);
+    }
     m_shadowDebugSnapshot.enabled = m_realtimeShadowSettings.enabled;
 
     const uint32_t clusterTileSize = std::clamp(
@@ -3440,7 +3454,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     {
         ShadowCascadeSet result{};
         const float shadowDistance = std::clamp(
-            m_realtimeShadowSettings.directionalDistance, 1.f, 100000.f);
+            m_realtimeShadowSettings.directionalDistance * quality.shadows, 1.f, 100000.f);
         result.count = std::clamp(requestedCascadeCount, 1u, 4u);
         const float cameraNear = std::max(0.001f, cam->nearPlane);
         const float cameraFar = std::max(cameraNear + 0.001f, cam->farPlane);
@@ -3498,14 +3512,21 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             m_realtimeShadowSettings.directionalCascadeCount);
         mainShadowCascades = requestedShadowCascades;
         const bool cacheReusable = m_directionalShadowCacheValid &&
+            m_directionalShadowCachedQuality.geometry == quality.geometry &&
+            m_directionalShadowCachedQuality.shadows == quality.shadows &&
+            m_directionalShadowCachedQuality.texture == quality.texture &&
+            m_directionalShadowCachedQuality.material == quality.material &&
             m_directionalShadowCachedResolution ==
                 m_directionalShadowResolution &&
             m_directionalShadowCachedLightKey ==
                 shadowSelection.stableLightKey &&
             m_directionalShadowCachedCascadeCount ==
                 requestedShadowCascades.count &&
-            glm::dot(glm::normalize(shadowSelection.directionToLight),
-                glm::normalize(m_directionalShadowCachedDirection)) > 0.9995f;
+            // A shared light direction cannot describe tiles rendered with
+            // different orientations. Only tolerate normalization roundoff;
+            // sun motion must invalidate every cascade together.
+            glm::length(glm::normalize(shadowSelection.directionToLight) -
+                m_directionalShadowCachedDirection) <= 1.e-6f;
         if (shadowOnly)
         {
             bool staggerMovingCascades = false;
@@ -3618,6 +3639,13 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             uint32_t dirtyCascadeCount = 0;
             for (uint32_t cascade = 0; cascade < requestedShadowCascades.count; ++cascade)
                 dirtyCascadeCount += directionalShadowDirtyMask[cascade] ? 1u : 0u;
+            if(dirtyCascadeCount && !context->SupportsDepthRectangleClear())
+            {
+                // Older DX11 drivers cannot clear depth rectangles. Preserve
+                // correctness by refreshing the whole atlas on those devices.
+                directionalShadowDirtyMask.fill(1u);
+                dirtyCascadeCount=requestedShadowCascades.count;
+            }
             renderMainDirectionalShadow = dirtyCascadeCount > 0u;
             if (!renderMainDirectionalShadow && cacheReusable)
                 copyCachedCascades();
@@ -3673,6 +3701,9 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         UpdateEnvironmentLighting(skybox);
     if (!shadowOnly && skybox && skybox->GetGraphicsTexture() && m_skyboxPipeline)
     {
+        // A panorama repeat spans the full environment, beyond the camera FOV.
+        Engine::Components::Texture::RequestGraphicsFootprint(skybox->GetGraphicsTexture(),
+            4.f*float(std::max(viewportWidth,viewportHeight)));
         SkyboxCBData skyboxData{};
         // A skybox represents direction only. Excluding camera translation
         // prevents cancellation in the shader's farPoint - nearPoint math
@@ -4130,6 +4161,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         Engine::Graphics::IGraphicsBuffer* morphWeightBuffer = nullptr;
         Engine::Graphics::IPipelineState* pipeline = nullptr;
         bool surfaceShaderResolved = false;
+        bool treeGeometry = false;
         std::array<const Engine::Graphics::IGraphicsTexture*, 30> textures{};
         uint32_t textureSlotCount = 12;
         UINT64 constantBufferOffset = 0;
@@ -4190,6 +4222,13 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         Engine::Components::Mesh* mesh = renderItem->mesh;
         const bool fixedPrefabShadow = shadowOnly && mesh && mesh->prefabShadowLod>=0;
         if(fixedPrefabShadow && mesh->prefabLodBand>=0 && mesh->prefabLodBand!=mesh->prefabShadowLod) continue;
+        if (!shadowOnly && mesh && mesh->HasBounds() && (quality.viewDistance < 1.f || quality.vegetation < 1.f)) {
+            const auto bounds = Engine::Rendering::TransformBounds(mesh->GetBoundsMin(), mesh->GetBoundsMax(), renderItem->world);
+            const auto delta = glm::clamp(cameraPosition, bounds.minimum, bounds.maximum) - cameraPosition;
+            const bool vegetation = mesh->grassShadowCaster || mesh->foliageWindStrength > 0.f;
+            const float range = cam->farPlane * quality.viewDistance * (vegetation ? quality.vegetation : 1.f);
+            if (glm::dot(delta, delta) > range * range) continue;
+        }
         Engine::Components::Sprite* sprite = renderItem->sprite;
         Engine::Components::Material* mat = renderItem->material;
         const Engine::Rendering::BakedLightingData* bakedLighting =
@@ -4288,9 +4327,18 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             preparedDraw.gpuLodDistances=mesh->prefabLodDistances;
             if(fixedPrefabShadow) preparedDraw.gpuLod=-1;
         }
+        preparedDraw.gpuLodDistances *= quality.geometry;
         preparedDraw.object = obj;
         preparedDraw.mesh = mesh;
         preparedDraw.material = sprite ? nullptr : mat;
+        if (mesh)
+        {
+            const auto* source = mesh->GetInstanceSource() ? mesh->GetInstanceSource() : mesh;
+            const auto& path = source->GetFilePath();
+            // Explicit scope of the bundled forest audit; wind may be disabled.
+            preparedDraw.treeGeometry = mesh->treeTimingGeometry || path.find("/Woodland/Oaks/") != std::string::npos ||
+                path.find("\\Woodland\\Oaks\\") != std::string::npos;
+        }
         if (!shadowOnly && mat) mat->shaderError.clear();
         preparedDraw.spatialManipulator = renderItem->spatialManipulator;
         preparedDraw.preview = isPreview;
@@ -4305,7 +4353,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         preparedDraw.castsShadow = shadowSelection.valid && mesh && !sprite &&
             !sortedItem.blended && !belongsToPreview &&
             (!mat || mat->castsShadows);
-        glm::vec2 casterFade=renderItem->shadowCasterFade;
+        glm::vec2 casterFade=renderItem->shadowCasterFade * quality.shadows;
         if(mesh && mesh->grassShadowCaster)
         {
             const float budget=std::max(0.f,m_realtimeShadowSettings.grassCasterDistance);
@@ -4340,9 +4388,9 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             preparedDraw.objectData.grassAnimation={0.f,0.f,0.f,0.f};
             preparedDraw.objectData.viewPositionAlphaCutoff=glm::vec4(cameraPosition,.001f);
             preparedDraw.objectData.alphaLodParams = mat && mat->overrideTextureLod
-                ? mat->textureLod.AlphaGpuParameters() : settings.textureLod.AlphaGpuParameters();
+                ? settings.graphicsQuality.ResolveTexture(mat->textureLod).AlphaGpuParameters() : settings.graphicsQuality.ResolveTexture(settings.textureLod).AlphaGpuParameters();
             preparedDraw.objectData.textureLodParams = mat && mat->overrideTextureLod
-                ? mat->textureLod.GpuParameters() : settings.textureLod.GpuParameters();
+                ? settings.graphicsQuality.ResolveTexture(mat->textureLod).GpuParameters() : settings.graphicsQuality.ResolveTexture(settings.textureLod).GpuParameters();
             if(fixedPrefabShadow)
             {
                 // Camera distance must not reshape a fixed shadow proxy, via
@@ -4830,9 +4878,9 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         // Resolve after cached material assembly: scene settings must also affect
         // static objects and material-less meshes without rebuilding their assets.
         objectData.alphaLodParams = mat && mat->overrideTextureLod
-            ? mat->textureLod.AlphaGpuParameters() : settings.textureLod.AlphaGpuParameters();
+            ? settings.graphicsQuality.ResolveTexture(mat->textureLod).AlphaGpuParameters() : settings.graphicsQuality.ResolveTexture(settings.textureLod).AlphaGpuParameters();
         objectData.textureLodParams = mat && mat->overrideTextureLod
-            ? mat->textureLod.GpuParameters() : settings.textureLod.GpuParameters();
+            ? settings.graphicsQuality.ResolveTexture(mat->textureLod).GpuParameters() : settings.graphicsQuality.ResolveTexture(settings.textureLod).GpuParameters();
         bool terrainShadowDoubleSided = doubleSided;
         // Height fields have a single upward-facing surface, including cached
         // terrain and streamed batches. Backfaces do not contribute color or shadows.
@@ -4852,7 +4900,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                     std::min(m_realtimeShadowSettings.pcfRadius,
                         lightingBand
                             ? lightingBand->maximumShadowPcfRadius : 4u),
-                    static_cast<uint32_t>(std::round(4.f *
+                    static_cast<uint32_t>(std::round(4.f * quality.shadows *
                         shadowSelection.filterScale)))) };
             objectData.shadowCascadeSplits = shadowCascadeSplits;
             objectData.shadowCascadeData = mainShadowCascades.data;
@@ -4913,6 +4961,10 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 (mesh && mesh->IsInstanced() ? (0x20000000u | (renderItem->geometryFade.w>=2.f && !hasPortalViews ? 0x00100000u:0u)):0u), 0u };
         preparedDraw.drawData = drawData;
         objectData.geometryFade = mesh && mesh->prefabLodBand>=0 ? glm::vec4(float(mesh->prefabLodBand),mesh->prefabLodDistances.x,mesh->prefabLodDistances.y,4.f) : (hasPortalViews && renderItem->geometryFade.w>=2.f ? mesh->GetRuntimeGeometryFade():renderItem->geometryFade);
+        if (objectData.geometryFade.w >= 2.f) {
+            objectData.geometryFade.y *= quality.geometry;
+            objectData.geometryFade.z *= quality.geometry;
+        }
         objectData.shadowCasterFade={casterFade.x,std::min(casterFade.x,casterFade.y),0.f,0.f};
         objectData.grassAnimation={mesh && (mesh->grassShadowCaster || mesh->foliageWindStrength>0.f) ? static_cast<float>(GetElapsedTime()):0.f,
             mesh && (mesh->grassShadowCaster || mesh->foliageWindStrength>0.f) ? 1.f : 0.f,
@@ -5019,6 +5071,69 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
 
         ++slot;
     }
+    if(Engine::Components::Texture::GetStreamingSnapshot().budgetBytes)
+    {
+        // Gather once per view after resolving cached material records. Include
+        // every placement and directional cascade, including offscreen casters.
+        for(const auto& draw:preparedDraws)
+        {
+            float pixels=std::numeric_limits<float>::infinity();
+            const auto* mesh=draw.mesh && draw.mesh->IsInstanced() ? draw.mesh->GetInstanceSource():draw.mesh;
+            if(mesh && mesh->HasBounds() && draw.objectData.skinParams.y<=0.f &&
+                !mesh->HasMorphTargets() && !mesh->HasSurfaceOffsets() &&
+                (!draw.material || draw.material->shader.empty()))
+            {
+                float uvScale=mesh->GetTextureUvWorldScale();
+                if(draw.material && (draw.material->baseColorUvSet || draw.material->normalUvSet ||
+                    draw.material->metallicRoughnessUvSet || draw.material->occlusionUvSet ||
+                    draw.material->emissiveUvSet || draw.material->heightUvSet))
+                    uvScale=std::max(uvScale,mesh->GetTextureUvWorldScale(1));
+                if(draw.terrain || draw.terrainCell) uvScale=uvScale*1.5f/std::max(1.f,draw.objectData.textureUvSets1.z);
+                const auto footprint=[&](const glm::mat4& world) {
+                    auto low=mesh->GetBoundsMin(),high=mesh->GetBoundsMax();
+                    auto projectionWorld=world;
+                    float units=uvScale;
+                    if((draw.terrain || draw.terrainCell) && draw.objectData.textureUvSets1.x>0.f)
+                    {
+                        const auto bounds=Engine::Rendering::TransformBounds(low,high,world);
+                        low=bounds.minimum;high=bounds.maximum;projectionWorld=glm::mat4(1.f);
+                        units=1.5f*draw.objectData.textureUvSets1.x/std::max(1.f,draw.objectData.textureUvSets1.z);
+                    }
+                    float demand=Engine::Rendering::ProjectedTextureFootprint(low,high,
+                        viewProjection*projectionWorld,{float(viewportWidth),float(viewportHeight)},units);
+                    if(draw.castsShadow) for(uint32_t cascade=0;cascade<shadowCascadeCount;++cascade)
+                        demand=std::max(demand,Engine::Rendering::ProjectedTextureFootprint(low,high,
+                            shadowViewProjections[cascade]*projectionWorld,glm::vec2(float(m_directionalShadowResolution)/2.f),units));
+                    return demand;
+                };
+                pixels=0.f;
+                if(draw.mesh->IsInstanced() && draw.mesh->GetInstanceData())
+                    for(const auto& affine:draw.mesh->GetInstanceData()->transforms)
+                    {
+                        glm::mat4 matrix(1.f);
+                        for(int row=0;row<3;++row) for(int column=0;column<4;++column) matrix[column][row]=affine.rows[row][column];
+                        pixels=std::max(pixels,footprint(draw.objectData.world*matrix));
+                    }
+                else pixels=footprint(draw.objectData.world);
+            }
+            for(size_t slot=0;slot<draw.textures.size();++slot)
+                Engine::Components::Texture::RequestGraphicsFootprint(draw.textures[slot],
+                    slot==10 || slot==11 ? std::numeric_limits<float>::infinity():pixels);
+        }
+    }
+    const auto screenPolicy = [&](const PreparedDraw& draw) -> Engine::Components::Mesh* {
+        auto* source=draw.object ? draw.object->GetComponent<Engine::Components::Mesh>():nullptr;
+        return source && source->screenLodSelection && !source->distanceLodOverride &&
+            !hasPortalViews && !m_editorMode2D && !draw.blended && !draw.preview && !draw.pmxOutline &&
+            draw.mesh && draw.mesh->HasBounds() && !draw.mesh->HasMorphTargets() && !draw.mesh->HasSurfaceOffsets() &&
+            draw.objectData.skinParams.y<=0 && draw.vertexBuffer==draw.mesh->GetGraphicsBuffer() &&
+            !draw.spatialManipulator && !draw.traversalChartPortal &&
+            !(includeEditorVisuals && (draw.object==m_selectedObject || source==m_editorSelectedMesh || source==m_editorWeightPaintMesh)) &&
+            (!draw.material || IsFastFoliageSurface(draw.material) || draw.material->shader.empty()) &&
+            (draw.gpuLod>=0 || (draw.drawData.flags & 0x00100000u)) ? source:nullptr;
+    };
+    if(!shadowOnly) for(auto& draw:preparedDraws)
+        if(screenPolicy(draw)) draw.drawData.flags|=0x00800000u;
     if(!shadowOnly)
     {
         const size_t count=preparedDraws.size();
@@ -5059,7 +5174,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             !IsFastFoliageSurface(draw.material) &&
             !draw.material->shader.empty();
         const bool selected=includeEditorVisuals && (draw.object==m_selectedObject || draw.mesh==m_editorSelectedMesh || draw.mesh==m_editorWeightPaintMesh);
-        if ((!automaticInstancing && !(draw.drawData.flags & 0x00100000u)) || m_editorMode2D || hasPortalViews || !draw.mesh || draw.blended ||
+        if ((!automaticInstancing && !(draw.drawData.flags & (0x00100000u|0x00800000u))) || m_editorMode2D || hasPortalViews || !draw.mesh || draw.blended ||
             draw.preview || draw.pmxOutline || draw.spatialManipulator || draw.traversalChartPortal ||
             draw.objectData.skinParams.y>0 || draw.mesh->HasMorphTargets() || draw.mesh->HasSurfaceOffsets() ||
             draw.vertexBuffer!=draw.mesh->GetGraphicsBuffer() || custom || selected || !draw.mesh->HasBounds()) continue;
@@ -5346,14 +5461,55 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         }
         else selectedLods[index]=std::min(lod,draw.gpuMaximumLod)==draw.gpuLod;
     });
-    const auto lodSelected = [&](const PreparedDraw& draw) {
-        return selectedLods[size_t(&draw-preparedDraws.data())]!=0;
+    const auto distanceSelectedLods=selectedLods;
+    const uint64_t screenSerial=m_graphicsProvider->GetContextFactory()->GetPreparedFrameSerial();
+    for(auto it=m_screenLodHistory.begin();it!=m_screenLodHistory.end();)
+        if(screenSerial>it->second.second && screenSerial-it->second.second>240) it=m_screenLodHistory.erase(it);
+        else ++it;
+    const Engine::Rendering::MeshLodView screenView{viewProjection,
+        {float(viewportWidth),float(viewportHeight)},true};
+    const auto chooseScreen = [&](const Engine::Components::Mesh& policy, glm::vec3 low, glm::vec3 high,
+        const glm::mat4& world, uint64_t identity, uint64_t placement, uint64_t domain, int maximum) {
+        const std::array<uint64_t,4> key{uint64_t(uintptr_t(cam)),identity,placement,
+            (uint64_t(instanceViewOrdinal)<<32)|domain};
+        auto [entry,inserted]=m_screenLodHistory.try_emplace(key,std::make_pair(-1,screenSerial));
+        std::vector<float> thresholds{policy.screenLod1Pixels};
+        if(maximum>1) thresholds.push_back(policy.screenLod2Pixels);
+        const float pixels=Engine::Rendering::ProjectedLodPixels(low,high,world,screenView)*quality.geometry;
+        const int selected=Engine::Rendering::SelectScreenMeshLod(pixels,thresholds,entry->second.first,policy.screenLodHysteresis);
+        entry->second={std::min(selected,maximum),screenSerial};
+        return entry->second.first;
+    };
+    if(!shadowOnly) for(size_t i=0;i<preparedDraws.size();++i)
+    {
+        const auto& draw=preparedDraws[i];
+        auto* policy=screenPolicy(draw);
+        if(!policy || draw.mesh->IsInstanced()) continue;
+        glm::vec3 low=policy->GetBoundsMin(),high=policy->GetBoundsMax();
+        float wind=std::clamp(policy->foliageWindStrength,0.f,1.f);
+        for(int level=0;level<=draw.gpuMaximumLod;++level)
+            if(auto* geometry=policy->GetRuntimeLodMesh(level); geometry && geometry->HasBounds())
+            {
+                const glm::vec3 padding(1.5f*std::max(0.f,geometry->GetBoundsMax().y)*wind);
+                low=glm::min(low,geometry->GetBoundsMin()-padding);
+                high=glm::max(high,geometry->GetBoundsMax()+padding);
+            }
+        const int selected=chooseScreen(*policy,low,high,draw.objectData.world,
+            GetObjectId(draw.object),0,0,draw.gpuMaximumLod);
+        selectedLods[i]=draw.gpuLod==selected;
+        if(draw.gpuLod==0) ++m_screenLodCounts[selected];
+    }
+    // One decision array per placement set and view, shared by all prefab parts/bands.
+    std::map<uint64_t,std::vector<int>> screenPlacementLevels;
+    const auto lodSelected = [&](const PreparedDraw& draw, bool shadow=false) {
+        return (shadow ? distanceSelectedLods:selectedLods)[size_t(&draw-preparedDraws.data())]!=0;
     };
     const auto submitAutomaticGroup = [&](const AutomaticGroup& group,
         const glm::mat4& cullViewProjection, uint32_t objectBase,
         Engine::Graphics::IPipelineState* pipeline, const std::vector<uint8_t>* visibility)->uint32_t
     {
         const auto& representative=preparedDraws[group.members.front()];
+        const bool screenColor=!shadowOnly && !visibility && screenPolicy(representative);
         if(representative.mesh->IsInstanced())
         {
             uint32_t submitted=0;
@@ -5373,7 +5529,51 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                     if(visibility && !(*visibility)[index]) continue;
                     const auto& tile=(*instanceTiles[index])[rangeIndex];
                     if(!tile.range.y) continue;
-                    tiles.push_back(tile); count+=tile.range.y;
+                    if(screenColor)
+                    {
+                        const auto& draw=preparedDraws[index];
+                        const auto& data=*draw.mesh->GetInstanceData();
+                        auto [decisions,created]=screenPlacementLevels.try_emplace(data.lodIdentity);
+                        if(created)
+                        {
+                            glm::vec3 low=glm::vec3(tile.minimum),high=glm::vec3(tile.maximum);
+                            const int maximum=draw.mesh->prefabLodBand>=0 ? data.maximumLod:draw.gpuMaximumLod;
+                            if(data.hasLodBounds) {
+                                const glm::vec3 windPadding(1.5f*std::max(0.f,data.lodMaximum.y)*
+                                    std::clamp(draw.mesh->foliageWindStrength,0.f,1.f));
+                                low=data.lodMinimum-windPadding; high=data.lodMaximum+windPadding;
+                            }
+                            decisions->second.reserve(data.transforms.size());
+                            for(size_t placement=0;placement<data.transforms.size();++placement)
+                            {
+                                const auto& affine=data.transforms[placement];
+                                glm::mat4 matrix(1.f);
+                                for(int row=0;row<3;++row) for(int column=0;column<4;++column)
+                                    matrix[column][row]=affine.rows[row][column];
+                                decisions->second.push_back(chooseScreen(*screenPolicy(draw),low,high,
+                                    draw.objectData.world*matrix,data.lodIdentity,placement,1,maximum));
+                            }
+                            for(int selected:decisions->second) ++m_screenLodCounts[selected];
+                        }
+                        const int band=gpuLod ? residentLod:draw.gpuLod;
+                        // Emit contiguous runs into the existing persistent placement pool.
+                        // Both compute and CPU fallback consume exactly the same decisions.
+                        uint32_t run=0;
+                        for(uint32_t offset=0;offset<=tile.range.y;++offset)
+                        {
+                            const bool selected=offset<tile.range.y &&
+                                decisions->second[draw.mesh->GetInstanceRanges()[rangeIndex].firstInstance+offset]==band;
+                            if(selected) ++run;
+                            else if(run)
+                            {
+                                auto selectedTile=tile;
+                                selectedTile.range.x+=offset-run;
+                                selectedTile.range.y=run;
+                                tiles.push_back(selectedTile); count+=run; run=0;
+                            }
+                        }
+                    }
+                    else { tiles.push_back(tile); count+=tile.range.y; }
                 }
                 if(!count) continue;
                 // Camera sorting must not invalidate unchanged tile metadata.
@@ -5420,7 +5620,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                     Engine::Rendering::InstanceCullConstants cull;
                     cull.viewProjection=cullViewProjection; cull.cameraPosition=glm::vec4(cameraPosition,1);
                     cull.counts={uint32_t(tiles.size()),sourceRange.vertexCount,sourceRange.firstVertex,1};
-                    cull.selection={gpuLod ? residentLod:representative.gpuLod,2,representative.gpuMaximumLod,
+                    cull.selection={screenColor ? -1:gpuLod ? residentLod:representative.gpuLod,2,representative.gpuMaximumLod,
                         (shadowOnly ? 1:0) | (representative.mesh->prefabLodBand>=0 ? 2:0)};
                     context->SetComputeReadBuffer(buffers.input.get()); context->SetComputeReadBuffer(pool,1); context->SetComputeWriteBuffer(buffers.output.get());
                     context->SetComputeConstants(&cull,sizeof(cull)); context->DispatchCompute(1); context->StorageBarrier(buffers.output.get());
@@ -5470,7 +5670,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         {
             const auto& draw=preparedDraws[index];
             if(visibility && !(*visibility)[index]) continue;
-            if(!gpu && !lodSelected(draw)) continue;
+            if((!gpu || screenColor) && !lodSelected(draw,visibility || shadowOnly)) continue;
             const auto bounds=Engine::Rendering::TransformBounds(draw.mesh->GetBoundsMin(),draw.mesh->GetBoundsMax(),draw.objectData.world);
             Engine::Rendering::AutomaticInstance instance;
             instance.sphere=glm::vec4((bounds.minimum+bounds.maximum)*.5f,glm::length((bounds.maximum-bounds.minimum)*.5f));
@@ -5493,7 +5693,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             Engine::Rendering::InstanceCullConstants cull;
             cull.viewProjection=cullViewProjection; cull.cameraPosition=glm::vec4(cameraPosition,1);
             cull.counts={uint32_t(instances.size()),representative.indexBuffer ? representative.indexCount : representative.vertexCount,
-                representative.indexBuffer ? 1u:0u,1u}; cull.selection.x=representative.gpuLod;
+                representative.indexBuffer ? 1u:0u,1u}; cull.selection.x=screenColor ? -1:representative.gpuLod;
             context->SetComputeReadBuffer(buffers.input.get()); context->SetComputeWriteBuffer(buffers.output.get());
             context->SetComputeConstants(&cull,sizeof(cull)); context->DispatchCompute(1); context->StorageBarrier(buffers.output.get());
             cull.counts.w=0;
@@ -5713,6 +5913,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         {
             if (!directionalShadowDirtyMask[cascade])
                 continue;
+            m_shadowDebugSnapshot.refreshedCascadeMask |= 1u << cascade;
             const uint32_t tileX = shadowCascadeCount > 1u
                 ? cascade & 1u : 0u;
             const uint32_t tileY = shadowCascadeCount > 1u
@@ -5727,6 +5928,9 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 static_cast<int32_t>(tileY * tileResolution),
                 static_cast<int32_t>((tileX + 1u) * tileResolution),
                 static_cast<int32_t>((tileY + 1u) * tileResolution) });
+            if(preserveDirectionalShadowAtlas)
+                context->ClearDepthRectangle({int32_t(tileX*tileResolution),int32_t(tileY*tileResolution),
+                    int32_t((tileX+1u)*tileResolution),int32_t((tileY+1u)*tileResolution)},1.f);
             std::vector<uint8_t> automaticSubmitted(automaticGroups.size(),0);
             for (size_t drawIndex = 0; drawIndex < preparedDraws.size(); ++drawIndex)
             {
@@ -5734,7 +5938,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                     continue;
                 const PreparedDraw& draw = preparedDraws[drawIndex];
                 if(draw.automaticGroup!=UINT32_MAX && automaticSubmitted[draw.automaticGroup]) continue;
-                if(draw.automaticGroup==UINT32_MAX && !lodSelected(draw)) continue;
+                if(draw.automaticGroup==UINT32_MAX && !lodSelected(draw,true)) continue;
 
                 Engine::Graphics::IPipelineState* shadowPipeline =
                     draw.shadowDoubleSided
@@ -5810,6 +6014,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         m_lastShadowCpuTiming.drawSubmissionMs = shadowElapsedMs(
             shadowRecordsEnd, std::chrono::steady_clock::now());
         m_directionalShadowCacheValid = true;
+        m_directionalShadowCachedQuality = quality;
         m_directionalShadowLastRenderedFrame =
             m_directionalShadowFrameCounter;
         m_directionalShadowCachedResolution =
@@ -6046,6 +6251,17 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         context->BeginGpuTiming(stage);
         activeGpuStage = stage;
     };
+    const auto colorGpuStage = [](const PreparedDraw& draw)
+    {
+        using Stage = Engine::Graphics::GpuTimingStage;
+        if (draw.terrain || draw.terrainCell) return Stage::Terrain;
+        if (draw.mesh && draw.mesh->grassShadowCaster) return Stage::Grass;
+        if (draw.blended) return Stage::Transparent;
+        // Bundled oak source geometry, including shared prefab instances.
+        if (draw.treeGeometry)
+            return draw.material && draw.material->doubleSided ? Stage::TreeLeaves : Stage::TreeBark;
+        return Stage::Opaque;
+    };
     m_lastOrdinaryDrawCount=0;
     const auto submissionStart=RenderClock::now();
     const double uploadBeforeSubmission=m_lastRenderCpuTimings.uploadMs;
@@ -6056,8 +6272,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         {
             if(submittedAutomaticGroups[draw.automaticGroup]) continue;
             submittedAutomaticGroups[draw.automaticGroup]=1;
-            switchGpuStage(draw.terrain || draw.terrainCell ? Engine::Graphics::GpuTimingStage::Terrain :
-                draw.mesh && draw.mesh->grassShadowCaster ? Engine::Graphics::GpuTimingStage::Grass : Engine::Graphics::GpuTimingStage::Opaque);
+            switchGpuStage(colorGpuStage(draw));
             for(uint32_t textureSlot=0;textureSlot<std::max(draw.textureSlotCount,boundTextureSlotCount);++textureSlot)
                 if(!texturesBound || boundTextures[textureSlot]!=draw.textures[textureSlot]) context->SetTexture(textureSlot,draw.textures[textureSlot]);
             boundTextures=draw.textures; boundTextureSlotCount=draw.textureSlotCount; texturesBound=true;
@@ -6079,13 +6294,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             continue;
         }
         ensureRecordsUploaded();
-        switchGpuStage((draw.terrain || draw.terrainCell)
-            ? Engine::Graphics::GpuTimingStage::Terrain
-            : (draw.mesh && draw.mesh->grassShadowCaster)
-                ? Engine::Graphics::GpuTimingStage::Grass
-            : (draw.blended
-                ? Engine::Graphics::GpuTimingStage::Transparent
-                : Engine::Graphics::GpuTimingStage::Opaque));
+        switchGpuStage(colorGpuStage(draw));
         if (draw.occlusionCandidate)
             context->BeginOcclusionQuery(draw.occlusionId);
         if (draw.pmxOutline && m_pmxOutlinePipeline)

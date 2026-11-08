@@ -1028,6 +1028,12 @@ float SampleTerrainLayerHeight(uint layer, float2 uv, float textureBias)
 // or require transparent sorting.
 void ApplyGeometryFade(ObjectData data, float3 worldPosition)
 {
+    // Screen LOD candidates were selected with per-view hysteresis. Preserve
+    // appearance/range fade, but do not apply the authored distance LOD again.
+    // Shadow records retain their independent distance/fixed-proxy policy.
+    if ((draw.drawFlags & 0x00800000u) != 0u && data.shadowCasterFade.z < 0.5)
+        data.geometryFade = float4(0, data.geometryFade.w >= 4.0 ? 1.0 :
+            data.geometryFade.w >= 2.0 ? saturate(data.geometryFade.w-2.0) : data.geometryFade.y, 0, 1);
     if (data.geometryFade.w >= 2.0)
     {
         const float distance=length((data.geometryFade.w>=4.0 ? worldPosition:mul(data.world,float4(0,0,0,1)).xyz)-data.viewPositionAlphaCutoff.xyz);

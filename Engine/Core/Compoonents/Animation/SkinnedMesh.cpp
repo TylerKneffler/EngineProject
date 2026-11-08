@@ -218,8 +218,9 @@ SkinnedMesh::JsonValue SkinnedMesh::Serialize() const
             .Push(JsonValue(weights[i].x)).Push(JsonValue(weights[i].y))
             .Push(JsonValue(weights[i].z)).Push(JsonValue(weights[i].w)));
     }
-    return result.Set("joints", std::move(serializedJoints))
+    result.Set("joints", std::move(serializedJoints))
         .Set("weights", std::move(serializedWeights));
+    return result;
 }
 
 void SkinnedMesh::Deserialize(const JsonValue& value)

@@ -41,7 +41,15 @@ public:
     float lod1Distance = 8.f;
     float lod2Distance = 13.f;
     float lodHysteresis = .75f;
+    bool screenLodSelection = false;
+    bool distanceLodOverride = false;
+    float screenLod1Pixels = 300.f, screenLod2Pixels = 80.f;
+    float screenLodHysteresis = .1f;
     float shadowDistance = 8.f;
+    // Prefab shadows fade within the final metres of shadowDistance.
+    // GrassField tiles retain their own distanceFadeWidth control.
+    float shadowFadeWidth = 1.f;
+    float GetShadowFadeWidth() const;
     // -1 follows distance bands; 0..2 pins the prefab shadow proxy only.
     int shadowLod = -1;
     std::vector<Placement> placements;
@@ -95,7 +103,7 @@ private:
     mutable bool m_loadedPrepared=false;
     void AddPrepared(int x,int z,const PreparedPlacement& record) const;
     std::string SerializePrepared() const;
-    void LoadPrepared(const std::string& bytes);
+    void LoadPrepared(const std::string& bytes, uint64_t placementSignature);
 
 };
 }

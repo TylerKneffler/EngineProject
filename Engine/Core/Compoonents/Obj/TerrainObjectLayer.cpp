@@ -8,6 +8,7 @@
 #include <cstring>
 #include <unordered_set>
 #include "Core/Serialization/HexBytes.h"
+#include "Core/Serialization/PrefabLoadProfile.h"
 #include <glm/gtc/matrix_transform.hpp>
 
 namespace Engine::Components
@@ -19,8 +20,20 @@ TerrainObjectLayer::TerrainObjectLayer()
     RegisterField("lod1Distance", lod1Distance, "Object LOD");
     RegisterField("lod2Distance", lod2Distance, "Object LOD");
     RegisterField("lodHysteresis", lodHysteresis, "Object LOD");
+    RegisterField("screenLodSelection", screenLodSelection, "Object LOD");
+    RegisterField("distanceLodOverride", distanceLodOverride, "Object LOD");
+    RegisterField("screenLod1Pixels", screenLod1Pixels, "Object LOD");
+    RegisterField("screenLod2Pixels", screenLod2Pixels, "Object LOD");
+    RegisterField("screenLodHysteresis", screenLodHysteresis, "Object LOD");
     RegisterField("shadowDistance", shadowDistance, "Object LOD");
+    RegisterField("shadowFadeWidth", shadowFadeWidth, "Object LOD");
     RegisterField("shadowLod", shadowLod, "Object LOD");
+}
+
+float TerrainObjectLayer::GetShadowFadeWidth() const
+{
+    return std::clamp(std::isfinite(shadowFadeWidth) ? shadowFadeWidth : 1.f,
+        0.f, std::max(0.f, shadowDistance));
 }
 
 std::map<std::string, std::vector<std::string>> TerrainObjectLayer::GetDefinedObjectLods() const
@@ -131,15 +144,16 @@ std::string TerrainObjectLayer::SerializePrepared() const
     { AppendBytes(bytes,record.index); AppendBytes(bytes,int32_t(tile.first)); AppendBytes(bytes,int32_t(tile.second)); AppendBytes(bytes,record.transform); }
     return Engine::Serialization::EncodeHex(bytes);
 }
-void TerrainObjectLayer::LoadPrepared(const std::string& text)
+void TerrainObjectLayer::LoadPrepared(const std::string& text, uint64_t placementSignature)
 {
+    Engine::Serialization::PrefabLoadProfile::Stage stage("placement_restore_baked");
     if(text.size()!=2*(20+placements.size()*60)) return;
     std::vector<uint8_t> bytes; if(!Engine::Serialization::DecodeHex(text,bytes)) return;
     size_t cursor=0;
     const auto read=[&](auto& value) { std::memcpy(&value,bytes.data()+cursor,sizeof(value)); cursor+=sizeof(value); };
     uint32_t magic=0,count=0; float span=0; uint64_t signature=0;
     read(magic); read(span); read(count); read(signature);
-    if(magic!=0x31494c54 || !std::isfinite(span) || span<1 || count!=placements.size() || signature!=GetPlacementSignature()) return;
+    if(magic!=0x31494c54 || !std::isfinite(span) || span<1 || count!=placements.size() || signature!=placementSignature) return;
     PreparedTiles old=std::move(m_prepared); std::unordered_set<uint32_t> indices;
     for(uint32_t i=0;i<count;++i)
     {
@@ -155,9 +169,17 @@ void TerrainObjectLayer::LoadPrepared(const std::string& text)
 
 TerrainObjectLayer::JsonValue TerrainObjectLayer::Serialize() const
 {
-    GetPreparedTiles(m_preparedSpan);
+    using Engine::Serialization::PrefabLoadProfile;
+    PrefabLoadProfile::Stage caller(PrefabLoadProfile::Enabled()
+        ? "placement_caller_" + PrefabLoadProfile::ActiveStage() + "_" + layerName +
+            "_count_" + std::to_string(placements.size()) : "");
+    PrefabLoadProfile::Stage total("placement_snapshot_total");
+    auto baked = [&] {
+        PrefabLoadProfile::Stage stage("placement_snapshot_prepared");
+        return SerializePrepared();
+    }();
     JsonValue out = Component::Serialize();
-    out.Set("bakedInstances",JsonValue(SerializePrepared()));
+    out.Set("bakedInstances",JsonValue(std::move(baked)));
     out.Set("layerName", JsonValue(layerName));
     JsonValue lodEntries = JsonValue::MakeArray();
     for (const auto& [asset, settings] : objectLods)
@@ -170,22 +192,30 @@ TerrainObjectLayer::JsonValue TerrainObjectLayer::Serialize() const
             .Set("meshes", std::move(meshes)).Set("distances", std::move(distances)));
     }
     out.Set("objectLods", std::move(lodEntries));
-    JsonValue entries = JsonValue::MakeArray();
-    for (const Placement& placement : placements)
-        entries.Push(JsonValue::MakeObject()
-            .Set("id", JsonValue(std::to_string(placement.id)))
-            .Set("asset", JsonValue(placement.asset))
-            .Set("position", JsonValue::MakeArray()
-                .Push(JsonValue(placement.position.x))
-                .Push(JsonValue(placement.position.y))
-                .Push(JsonValue(placement.position.z)))
-            .Set("normal", JsonValue::MakeArray()
-                .Push(JsonValue(placement.normal.x))
-                .Push(JsonValue(placement.normal.y))
-                .Push(JsonValue(placement.normal.z)))
-            .Set("yawDegrees", JsonValue(placement.yawDegrees))
-            .Set("scale", JsonValue(placement.scale)));
-    return out.Set("placements", std::move(entries));
+    {
+        PrefabLoadProfile::Stage stage("placement_snapshot_records");
+        JsonValue entries = JsonValue::MakeArray();
+        for (const Placement& placement : placements)
+        {
+            JsonValue entry = JsonValue::MakeObject(6);
+            JsonValue position = JsonValue::MakeArray();
+            position.Push(JsonValue(placement.position.x))
+                .Push(JsonValue(placement.position.y)).Push(JsonValue(placement.position.z));
+            JsonValue normal = JsonValue::MakeArray();
+            normal.Push(JsonValue(placement.normal.x))
+                .Push(JsonValue(placement.normal.y)).Push(JsonValue(placement.normal.z));
+            entry
+                .Set("id", JsonValue(std::to_string(placement.id)))
+                .Set("asset", JsonValue(placement.asset))
+                .Set("position", std::move(position))
+                .Set("normal", std::move(normal))
+                .Set("yawDegrees", JsonValue(placement.yawDegrees))
+                .Set("scale", JsonValue(placement.scale));
+            entries.Push(std::move(entry));
+        }
+        out.Set("placements", std::move(entries));
+    }
+    return out;
 }
 
 void TerrainObjectLayer::Deserialize(const JsonValue& value)
@@ -196,6 +226,7 @@ void TerrainObjectLayer::Deserialize(const JsonValue& value)
     lod2Distance = std::clamp(lod2Distance, lod1Distance, viewDistance);
     lodHysteresis = std::clamp(lodHysteresis, 0.f, 10.f);
     shadowDistance = std::clamp(shadowDistance, 0.f, viewDistance);
+    shadowFadeWidth = GetShadowFadeWidth();
     shadowLod = std::clamp(shadowLod, -1, 2);
     layerName = value.Has("layerName") ? value["layerName"].AsString() : "Objects";
     objectLods.clear();
@@ -246,8 +277,13 @@ void TerrainObjectLayer::Deserialize(const JsonValue& value)
     }
     MarkConfigurationDirty();
     m_preparedRevision=UINT64_MAX; m_prepared.clear(); m_loadedPrepared=false;
-    GetPlacementSignature();
-    if(value["bakedInstances"].IsString()) LoadPrepared(value["bakedInstances"].AsString());
+    const auto signature = [&] {
+        Engine::Serialization::PrefabLoadProfile::Stage stage("placement_restore_signature");
+        return GetPlacementSignature();
+    }();
+    // No placement changes occur between normalization and baked validation.
+    // Reuse this signature rather than rebuilding the ID set and hashing again.
+    if(value["bakedInstances"].IsString()) LoadPrepared(value["bakedInstances"].AsString(), signature);
 }
 
 void TerrainObjectLayer::InstallPrepared(TerrainObjectLayer&& source)
@@ -257,7 +293,13 @@ void TerrainObjectLayer::InstallPrepared(TerrainObjectLayer&& source)
     lod1Distance = source.lod1Distance;
     lod2Distance = source.lod2Distance;
     lodHysteresis = source.lodHysteresis;
+    screenLodSelection = source.screenLodSelection;
+    distanceLodOverride = source.distanceLodOverride;
+    screenLod1Pixels = source.screenLod1Pixels;
+    screenLod2Pixels = source.screenLod2Pixels;
+    screenLodHysteresis = source.screenLodHysteresis;
     shadowDistance = source.shadowDistance;
+    shadowFadeWidth = source.GetShadowFadeWidth();
     shadowLod = source.shadowLod;
     objectLods = std::move(source.objectLods);
     placements = std::move(source.placements);
@@ -329,6 +371,17 @@ bool TerrainObjectLayer::DrawProperties(::Engine::Editor::IEditorUi& ui)
     changed |= ui.DragFloat("Shadow distance (m)", &shadowDistance,
         .25f, 0.f, viewDistance);
     ui.Tooltip("Objects stop casting shadows beyond this distance. Zero disables object shadows. Shadow quality is set in Preferences > Rendering > Realtime Shadows.");
+    changed |= ui.DragFloat("Prefab shadow fade width (m)", &shadowFadeWidth,
+        .25f, 0.f, shadowDistance);
+    ui.Tooltip("Fades prefab shadows within the last metres of their range. A wider fade smooths transitions but makes shadows diminish earlier. Zero gives a hard cutoff. Grass tiles use GrassField's distance fade width.");
+    changed |= ui.Checkbox("Screen size LOD", &screenLodSelection);
+    if(screenLodSelection)
+    {
+        changed |= ui.Checkbox("Override with authored distances", &distanceLodOverride);
+        changed |= ui.DragFloat("LOD 1 pixels", &screenLod1Pixels, 1.f, 1.f, 100000.f);
+        changed |= ui.DragFloat("LOD 2 pixels", &screenLod2Pixels, 1.f, 1.f, screenLod1Pixels);
+        changed |= ui.DragFloat("Screen LOD hysteresis", &screenLodHysteresis, .01f, 0.f, .49f);
+    }
     const char* shadowLods[]={"Distance LODs", "Fixed LOD 0", "Fixed LOD 1", "Fixed LOD 2"};
     int shadowChoice=std::clamp(shadowLod+1,0,3);
     if(ui.Combo("Shadow geometry", &shadowChoice, shadowLods, 4))
@@ -338,6 +391,7 @@ bool TerrainObjectLayer::DrawProperties(::Engine::Editor::IEditorUi& ui)
     lod1Distance = std::clamp(lod1Distance, 0.f, viewDistance);
     lod2Distance = std::clamp(lod2Distance, lod1Distance, viewDistance);
     shadowDistance = std::clamp(shadowDistance, 0.f, viewDistance);
+    shadowFadeWidth = GetShadowFadeWidth();
     shadowLod = std::clamp(shadowLod, -1, 2);
     const std::string count = "Stored placements: " +
         std::to_string(placements.size());

@@ -22,7 +22,7 @@ bool VulkanEditorRenderer::Init(void* hwnd, uint32_t width, uint32_t height)
             m_core.GetOffscreenRenderPass(), m_core.GetCompositionRenderPass() };
         m_provider = std::make_unique<VulkanGraphicsProvider>(
             m_core.GetPhysicalDevice(), m_core.GetDevice(), m_core.GetOffscreenRenderPass(),
-            m_core.GetQueue(), m_core.GetQueueFamily());
+            m_core.GetQueue(), m_core.GetQueueFamily(), m_core.PipelineStatisticsEnabled());
         for (uint32_t i = MAX_SRV_SLOTS - 1; i > 0; --i) m_freeSlots.push_back(i);
         return true;
     }

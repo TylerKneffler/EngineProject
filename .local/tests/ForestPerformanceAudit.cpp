@@ -1,3 +1,5 @@
+#include "Editor/Diagnostics/PerformanceProvenance.h"
+#include "CanopyExperiment.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Window.h"
 #include "Core/Compoonents/Obj/Mesh.h"
@@ -19,6 +21,8 @@
 #include "Core/Assets/Scripts/Grass/GrassField.h"
 #include "Core/Compoonents/Lighting/Light.h"
 #include <thread>
+#include <future>
+#include <d3d12sdklayers.h>
 #include <chrono>
 #include <algorithm>
 #include <cmath>
@@ -39,6 +43,14 @@ template<class Renderer> void CheckStaticGeometry(const std::string& backend)
     Engine::Core::Window window(GetModuleHandleW(nullptr),L"DX12 static geometry",64,64);
     ShowWindow(window.GetHWND(),SW_HIDE);
     Renderer renderer; Check(renderer.Init(window.GetHWND(),64,64),"renderer init failed");
+    Microsoft::WRL::ComPtr<ID3D12InfoQueue> validation;
+    if constexpr (std::is_same_v<Renderer,DX12GameRenderer>)
+        if (std::getenv("ENGINE_OAK_DX12_VALIDATION"))
+        {
+            Check(SUCCEEDED(renderer.GetDevice()->QueryInterface(IID_PPV_ARGS(&validation))),
+                "DX12 validation info queue unavailable");
+            validation->ClearStoredMessages();
+        }
     auto* factory=renderer.GetGraphicsProvider()->GetBufferFactory();
     for(size_t count:{size_t(3),size_t(262144)}) {
         std::vector<uint32_t> expected(count);
@@ -64,6 +76,41 @@ template<class Renderer> void CheckStaticGeometry(const std::string& backend)
             Check(static_cast<D3D12GraphicsBuffer*>(buffer.get())->GetResourceState()==D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER,
                 "readback did not restore vertex state");
     }
+    if constexpr (std::is_same_v<Renderer,DX12GameRenderer>)
+    {
+        struct Upload { std::vector<uint32_t> bytes; std::unique_ptr<Buffer> buffer; };
+        std::vector<std::future<std::vector<Upload>>> workers;
+        for (uint32_t worker=0; worker<4; ++worker)
+            workers.push_back(std::async(std::launch::async, [factory,worker] {
+                std::vector<Upload> uploads;
+                for (uint32_t iteration=0; iteration<8; ++iteration)
+                {
+                    Upload upload;
+                    upload.bytes.resize(3+worker*997+iteration*8191);
+                    for (size_t i=0; i<upload.bytes.size(); ++i)
+                        upload.bytes[i]=uint32_t(i*2654435761u)^worker^(iteration<<24);
+                    upload.buffer=factory->CreateStaticVertexBuffer(upload.bytes.size()*4,upload.bytes.data());
+                    uploads.push_back(std::move(upload));
+                }
+                return uploads;
+            }));
+        // Read every destination after all concurrent upload calls return. A
+        // premature allocator reset or scratch reuse can corrupt earlier copies.
+        std::vector<Upload> uploads;
+        for (auto& worker:workers)
+            for (auto& upload:worker.get()) uploads.push_back(std::move(upload));
+        for (auto& upload:uploads)
+        {
+            auto readback=factory->CreateBuffer(Buffer::Usage::VertexBuffer,
+                Buffer::AccessMode::Readback,upload.bytes.size()*4);
+            renderer.BeginFrame(); auto context=renderer.CreateFrameGraphicsContext();
+            Check(context->CopyBuffer(upload.buffer.get(),readback.get()),"concurrent static readback failed");
+            renderer.EndFrame(); renderer.WaitIdle();
+            Check(std::memcmp(readback->Map(),upload.bytes.data(),upload.bytes.size()*4)==0,
+                "concurrent static uploads reused resources before completion");
+            readback->Unmap();
+        }
+    }
     Mesh editable; std::vector<Mesh::Vertex> vertices(3);
     vertices[1].pos[0]=1; vertices[2].pos[1]=1;
     for(auto& vertex:vertices) { vertex.normal[2]=1; vertex.tangent[0]=1;vertex.tangent[3]=1;for(auto& color:vertex.color)color=1; }
@@ -73,6 +120,17 @@ template<class Renderer> void CheckStaticGeometry(const std::string& backend)
     Check(editable.SetDeformedVertices(vertices),"static mesh could not become writable");
     Check(editable.GetGraphicsBuffer()->GetAccessMode()==Buffer::AccessMode::Upload,"deformed mesh did not use writable storage");
     renderer.WaitIdle();
+    if (validation)
+        for (UINT64 i=0; i<validation->GetNumStoredMessages(); ++i)
+        {
+            SIZE_T bytes=0; validation->GetMessage(i,nullptr,&bytes);
+            std::vector<unsigned char> storage(bytes);
+            auto* message=reinterpret_cast<D3D12_MESSAGE*>(storage.data());
+            if (SUCCEEDED(validation->GetMessage(i,message,&bytes)) &&
+                (message->Severity==D3D12_MESSAGE_SEVERITY_ERROR ||
+                 message->Severity==D3D12_MESSAGE_SEVERITY_CORRUPTION))
+                throw std::runtime_error(std::string("DX12 static upload validation: ")+message->pDescription);
+        }
     std::cout<<backend<<" static heap, full byte readback, resource state and editable-mesh fallback passed."<<std::endl;
 }
 
@@ -85,6 +143,8 @@ template<class Renderer> void Benchmark(const std::string& backend,bool foliageO
     Check(renderer.Init(window.GetHWND(),960,540),"renderer init failed");
     Engine::Scene::Scene scene; scene.Init(renderer.GetGraphicsProvider());
     const bool cpuProfile=std::getenv("ENGINE_FOREST_AUDIT_CPU_PROFILE")!=nullptr;
+    const bool materialOnly=std::getenv("ENGINE_FOREST_AUDIT_MATERIAL_ONLY")!=nullptr;
+    const char* canopyDirectory=std::getenv("ENGINE_FOREST_AUDIT_CANOPY");
     scene.SetUpdateProfilingEnabled(cpuProfile);
     scene.SetBeforeGpuResourceDestruction([&] { renderer.WaitIdle(); });
     Check(scene.Load("Engine/Core/Assets/Scenes/terrain/oak_meadow.scene"),"forest load failed");
@@ -114,7 +174,8 @@ template<class Renderer> void Benchmark(const std::string& backend,bool foliageO
     unsigned width=960,height=540;
     double advanceMs=0,beginMs=0,prepareMs=0,sceneRenderMs=0,endMs=0;
     const auto elapsed=[](auto first,auto last) {return std::chrono::duration<double,std::milli>(last-first).count();};
-    bool requestCapture=false;
+    bool requestCapture=false, vertexOnly=false;
+    Engine::Graphics::FrameTimingTelemetry shadowTelemetry;
     auto render=[&] {
         const auto advanceBegin=std::chrono::steady_clock::now();
         scene.AdvanceManualFrame(0);
@@ -122,25 +183,36 @@ template<class Renderer> void Benchmark(const std::string& backend,bool foliageO
         renderer.BeginFrame();
         const auto afterBegin=std::chrono::steady_clock::now();
         scene.PrepareRenderFrame();
+        if(canopyDirectory)
+            for(auto* mesh:scene.GetComponents<Mesh>())
+                if(mesh->Owner->GetComponentInParent<TerrainObjectLayer>()==forest)
+                    mesh->treeTimingGeometry=true;
         const auto afterPrepare=std::chrono::steady_clock::now();
         auto context=renderer.CreateFrameGraphicsContext();
         context->SetViewport({0,0,float(width),float(height),0,1});
         context->SetScissorRect({0,0,int(width),int(height)});
         if(shadows) {
+            // Force the same complete cascade workload for material ablations;
+            // rotating cached-cascade refresh would otherwise mix pass costs.
+            if(materialOnly || canopyDirectory) scene.InvalidateDirectionalShadowCache();
             scene.Render(context.get(),float(width)/height,camera,false,width,height,true);
             if constexpr (std::is_same_v<Renderer,DX12GameRenderer>) {
-                renderer.EndFrame(); renderer.BeginFrame(); context=renderer.CreateFrameGraphicsContext();
+                renderer.EndFrame();
+                shadowTelemetry=renderer.GetFrameTimingTelemetry();
+                renderer.BeginFrame(); context=renderer.CreateFrameGraphicsContext();
                 context->SetViewport({0,0,float(width),float(height),0,1});
                 context->SetScissorRect({0,0,int(width),int(height)});
             }
         }
         renderer.Clear(.1f,.1f,.1f,1);
+        if(vertexOnly) context->SetScissorRect({0,0,0,0});
         scene.Render(context.get(),float(width)/height,camera,false,width,height);
         if(requestCapture) {
             if constexpr (!std::is_same_v<Renderer,DX11GameRenderer>) renderer.RequestSceneCapture();
         }
         const auto afterSceneRender=std::chrono::steady_clock::now();
         renderer.EndFrame();
+        if constexpr (!std::is_same_v<Renderer,DX12GameRenderer>) shadowTelemetry=renderer.GetFrameTimingTelemetry();
         const auto afterEnd=std::chrono::steady_clock::now();
         advanceMs=elapsed(advanceBegin,afterAdvance); beginMs=elapsed(afterAdvance,afterBegin);
         prepareMs=elapsed(afterBegin,afterPrepare); sceneRenderMs=elapsed(afterPrepare,afterSceneRender);
@@ -158,16 +230,87 @@ template<class Renderer> void Benchmark(const std::string& backend,bool foliageO
         if(ready && warm>=30) break;
         Check(std::chrono::steady_clock::now()<deadline,"texture warmup timed out");
     }
+    if(canopyDirectory)
+    {
+        Check(shadows,"canopy measurements require shadows");
+        width=primaryWidth; height=width*9/16;
+        renderer.WaitIdle(); renderer.Resize(width,height);
+        std::vector<bool> variants={false,true};
+        if(std::getenv("ENGINE_FOREST_AUDIT_REVERSE")) std::reverse(variants.begin(),variants.end());
+        for(bool candidate:variants)
+        {
+            renderer.WaitIdle();
+            Check(ConfigureCanopy(*forest,canopyDirectory,candidate)==4,"canopy study requires all four varieties");
+            for(const std::string view:{"entrance","overlook","zoom","motion"})
+            {
+                const auto origin=view=="entrance" ? glm::dvec3(entrance):glm::dvec3(-5,27,-39);
+                const auto aim=view=="entrance" ? glm::dvec3(target):glm::dvec3(2,1,5);
+                camera->fov=view=="zoom" ? 30.f:60.f;
+                constexpr int samples=180;
+                const auto positionFrame=[&](int frame) {
+                    const auto shift=view=="motion" ? glm::dvec3(3.5*std::sin(frame*6.283185307179586/samples),0,0):glm::dvec3(0);
+                    viewer->transform.position=origin+shift; camera->target=aim+shift;
+                };
+                // A complete periodic warmup makes delayed asynchronous GPU
+                // queries sample identical route coverage across variants.
+                for(int i=0;i<samples;++i) { positionFrame(i); render(); }
+                uint64_t lastGpu=renderer.GetFrameTimingTelemetry().gpuSampleId;
+                uint64_t lastShadow=shadowTelemetry.gpuSampleId;
+                for(int i=0;i<samples;++i)
+                {
+                    positionFrame(i); render();
+                    const auto gpu=renderer.GetFrameTimingTelemetry();
+                    const auto shadowIndex=static_cast<size_t>(Engine::Graphics::GpuTimingStage::Shadow);
+                    const bool valid=gpu.gpuTimingsValid && gpu.gpuWorkloadValid && gpu.gpuSampleId!=lastGpu;
+                    const bool shadowValid=shadowTelemetry.gpuTimingsValid && shadowTelemetry.gpuWorkloadValid &&
+                        shadowTelemetry.gpuSampleId!=lastShadow;
+                    if(valid) lastGpu=gpu.gpuSampleId;
+                    if(shadowValid) lastShadow=shadowTelemetry.gpuSampleId;
+                    output<<"{"<<Engine::Editor::PerformanceProvenanceFields()<<",\"backend\":\""<<backend
+                        <<"\",\"view\":\""<<view<<"\",\"variant\":\""<<(candidate?"candidate":"baseline")
+                        <<"\",\"frame\":"<<i<<",\"width\":"<<width<<",\"height\":"<<height
+                        <<",\"distance0\":28,\"distance1\":90,\"fov\":"<<camera->fov
+                        <<",\"x\":"<<viewer->transform.position.x<<",\"y\":"<<viewer->transform.position.y<<",\"z\":"<<viewer->transform.position.z
+                        <<",\"gpu_sample_id\":"<<gpu.gpuSampleId<<",\"gpu_valid\":"<<(valid?"true":"false")
+                        <<",\"shadow_valid\":"<<(shadowValid?"true":"false")
+                        <<",\"shadow_sample_id\":"<<shadowTelemetry.gpuSampleId
+                        <<",\"gpu_shadow_ms\":"<<shadowTelemetry.gpuMilliseconds[shadowIndex]
+                        <<",\"shadow_vs\":"<<shadowTelemetry.gpuWorkload[shadowIndex].vertices
+                        <<",\"shadow_primitives\":"<<shadowTelemetry.gpuWorkload[shadowIndex].primitives;
+                    gpu.WriteOpaqueJson(output); output<<"}\n";
+                }
+                output.flush();
+                std::cout<<backend<<' '<<(candidate?"candidate":"baseline")<<' '<<view<<" measured\n";
+            }
+        }
+        renderer.WaitIdle(); scene.ClearObjects(); renderer.WaitIdle(); return;
+    }
     std::vector<std::pair<Engine::Core::Object*,bool>> visibility;
     for(const auto& object:scene.GetObjects()) visibility.emplace_back(object.get(),object->enabled);
     struct Capture { std::filesystem::path path; unsigned width,height; std::vector<uint8_t> pixels; };
     std::vector<Capture> captures;
-    std::map<Material*,std::vector<MaterialShader>> originalShaders;
-    for(auto* material:scene.GetComponents<Material>()) originalShaders[material]=material->shaders;
+    std::map<Material*,std::string> originalShaders;
+    struct Surface { bool unlit; float cutoff; };
+    std::map<Material*, Surface> originalSurfaces;
+    std::map<Material*, Engine::Model::TextureLodSettings> originalTextureLods;
+    std::map<Material*, bool> originalTextureOverrides;
+    for(auto* material:scene.GetComponents<Material>()) {
+        originalShaders[material]=material->shader;
+        originalSurfaces[material]={material->unlit, material->alphaCutoff};
+        originalTextureLods[material]=material->textureLod;
+        originalTextureOverrides[material]=material->overrideTextureLod;
+    }
     auto measure=[&](const std::string& view,const std::string& mode,float lodDistance,unsigned pixelsWide) {
+        vertexOnly=mode.find("-vertex-only")!=std::string::npos;
         const bool simplified=mode=="foliage" || mode=="trees-foliage";
         const bool fullScene=mode=="full" || mode=="foliage";
-        for(auto& [material,shaders]:originalShaders) material->shaders=shaders;
+        for(auto& [material,shaders]:originalShaders) {
+            material->shader=shaders;
+            material->unlit=originalSurfaces[material].unlit;
+            material->alphaCutoff=originalSurfaces[material].cutoff;
+            material->textureLod=originalTextureLods[material];
+            material->overrideTextureLod=originalTextureOverrides[material];
+        }
         width=pixelsWide; height=width*9/16;
         renderer.WaitIdle(); renderer.Resize(width,height);
         // Override the resident draw bands without rebuilding imported source
@@ -178,16 +321,28 @@ template<class Renderer> void Benchmark(const std::string& backend,bool foliageO
             mesh->Owner->enabled=true;
             auto* ownerLayer=mesh->Owner->GetComponentInParent<TerrainObjectLayer>();
             if(ownerLayer==forest) {
-                mesh->prefabLodDistances={28.f,lodDistance};
+                mesh->prefabLodDistances={mode=="leaves-lod1" ? 0.f : 28.f,lodDistance};
                 mesh->MarkConfigurationDirty();
                 if(simplified) if(auto* material=mesh->Owner->GetComponent<Material>())
-                    if(material->doubleSided) material->shaders={{"Assets/Shaders/Foliage.hlsl",true,"Auto"}};
+                    if(material->doubleSided) material->shader="Assets/Shaders/Foliage.hlsl";
                 bool enabled=mode!="terrain";
                 // Source canopy parts use two-sided alpha-tested materials;
                 // impostors are included with leaves for pixel-cost isolation.
                 if(auto* material=mesh->Owner->GetComponent<Material>()) {
-                    if(mode=="bark") enabled=!material->doubleSided;
-                    if(mode=="leaves") enabled=material->doubleSided;
+                    if(mode.rfind("material-",0)==0) {
+                        material->overrideTextureLod=true;
+                        // Independent controls: no mesh, alpha, wind or lighting replacement.
+                        auto& lod=material->textureLod;
+                        lod.enabled=true;
+                        lod.nearDistance=20.f; lod.farDistance=80.f;
+                        lod.mipBias=mode=="material-mips" ? 4.f : 0.f;
+                        lod.simplifyShading=mode=="material-cheap";
+                        lod.alphaMipBias=0.f; lod.disableAlphaAtFar=false;
+                    }
+                    if(mode.rfind("bark",0)==0) enabled=!material->doubleSided;
+                    if(mode.rfind("leaves",0)==0) enabled=material->doubleSided;
+                    if(material->doubleSided && mode=="leaves-unlit") material->unlit=true;
+                    if(material->doubleSided && mode=="leaves-solid") material->alphaCutoff=0.f;
                 }
                 mesh->Owner->enabled=enabled;
             }
@@ -201,10 +356,28 @@ template<class Renderer> void Benchmark(const std::string& backend,bool foliageO
                 if(layer!=forest) mesh->Owner->enabled=false;
             }
         }
-        for(int i=0;i<12;++i) render();
+        size_t materialSlots=0;
+        std::set<Material*> activeMaterials;
+        std::set<std::string> shaderPaths;
+        std::set<std::string> shaderStates;
+        for(auto* mesh:scene.GetComponents<Mesh>())
+            if(mesh->IsInstanced() && mesh->Owner->enabled)
+                if(auto* material=mesh->Owner->GetComponent<Material>()) {
+                    ++materialSlots; activeMaterials.insert(material);
+                    shaderPaths.insert(material->shader.empty() ? "Object.hlsl" : material->shader);
+                    shaderStates.insert(material->shader+"|"+material->alphaMode+"|"+
+                        material->specularModel+"|"+std::to_string(material->doubleSided)+"|"+
+                        std::to_string(material->unlit)+"|"+
+                        std::to_string(bool(material->normalTexture))+"|"+
+                        std::to_string(bool(material->metallicRoughnessTexture))+"|"+
+                        std::to_string(bool(material->occlusionTexture)));
+                }
+        for(int i=0;i<32;++i) render();
         if(mode=="trees" || mode=="bark" || mode=="leaves")
             Check(scene.GetLastRenderCpuTimings().physicalDraws>0,"isolated tree pass is empty");
+        uint64_t workloadSamples=0, isolatedVertices=0, isolatedFragments=0;
         uint64_t lastGpu=renderer.GetFrameTimingTelemetry().gpuSampleId;
+        uint64_t lastShadow=shadowTelemetry.gpuSampleId;
         for(int i=0;i<(cpuProfile?120:36);++i) {
             const auto begin=std::chrono::steady_clock::now(); render();
             const double wall=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-begin).count();
@@ -212,9 +385,24 @@ template<class Renderer> void Benchmark(const std::string& backend,bool foliageO
             const auto gpu=renderer.GetFrameTimingTelemetry();
             const bool valid=gpu.gpuTimingsValid && gpu.gpuSampleId!=lastGpu;
             if(valid) lastGpu=gpu.gpuSampleId;
-            output<<"{\"backend\":\""<<backend<<"\",\"view\":\""<<view<<"\",\"mode\":\""<<mode
+            const auto shadowIndex=static_cast<size_t>(Engine::Graphics::GpuTimingStage::Shadow);
+            const bool shadowValid=shadows && shadowTelemetry.gpuTimingsValid && shadowTelemetry.gpuWorkloadValid &&
+                shadowTelemetry.gpuSampleId!=lastShadow && shadowTelemetry.gpuMilliseconds[shadowIndex]>0;
+            if(shadowValid) lastShadow=shadowTelemetry.gpuSampleId;
+            if(valid && gpu.gpuWorkloadValid) {
+                ++workloadSamples;
+                const auto stage=mode.rfind("bark",0)==0 ? Engine::Graphics::GpuTimingStage::TreeBark : Engine::Graphics::GpuTimingStage::TreeLeaves;
+                isolatedVertices+=gpu.gpuWorkload[static_cast<size_t>(stage)].vertices;
+                isolatedFragments+=gpu.gpuWorkload[static_cast<size_t>(stage)].fragments;
+            }
+            output<<"{"<<Engine::Editor::PerformanceProvenanceFields()<<",\"backend\":\""<<backend<<"\",\"view\":\""<<view<<"\",\"mode\":\""<<mode
                 <<"\",\"width\":"<<width<<",\"height\":"<<height<<",\"impostor_distance\":"<<lodDistance
                 <<",\"shadows\":"<<(shadows?"true":"false")
+                <<",\"scissor_mode\":\""<<(vertexOnly?"empty":"full")<<"\",\"route\":\"static-v2\",\"camera_position\":["<<viewer->transform.position.x<<','<<viewer->transform.position.y<<','<<viewer->transform.position.z<<']'
+                <<",\"camera_target\":["<<camera->target.x<<','<<camera->target.y<<','<<camera->target.z<<']'
+                <<",\"warmup_frames\":32,\"measurement_frames\":"<<(cpuProfile?120:36)
+                <<",\"cpu_profile\":"<<(cpuProfile?"true":"false")
+                <<",\"workload_counters_requested\":"<<(std::getenv("ENGINE_GPU_WORKLOAD_COUNTERS")?"true":"false")
                 <<",\"frame_ms\":"<<wall
                 <<",\"advance_ms\":"<<advanceMs<<",\"begin_frame_ms\":"<<beginMs
                 <<",\"prepare_total_ms\":"<<prepareMs<<",\"scene_render_wall_ms\":"<<sceneRenderMs
@@ -245,11 +433,32 @@ template<class Renderer> void Benchmark(const std::string& backend,bool foliageO
                 <<",\"render_other_ms\":"<<r.otherMs
                 <<",\"render_portal_ms\":"<<r.portalMs
                 <<",\"candidate_triangles\":"<<r.candidateTriangles<<",\"draws\":"<<r.physicalDraws
-                <<",\"gpu_valid\":"<<(valid?"true":"false")<<",\"gpu_ms\":";
+                <<",\"instanced_material_slots\":"<<materialSlots
+                <<",\"instanced_materials\":"<<activeMaterials.size()
+                <<",\"shader_paths\":"<<shaderPaths.size()
+                <<",\"material_shader_states\":"<<shaderStates.size()
+                <<",\"shadow_valid\":"<<(shadowValid ? "true":"false")
+                <<",\"shadow_sample_id\":"<<shadowTelemetry.gpuSampleId
+                <<",\"gpu_shadow_ms\":"<<shadowTelemetry.gpuMilliseconds[shadowIndex]
+                <<",\"gpu_shadow_vs_invocations\":"<<shadowTelemetry.gpuWorkload[shadowIndex].vertices
+                <<",\"gpu_shadow_primitives\":"<<shadowTelemetry.gpuWorkload[shadowIndex].primitives
+                <<",\"gpu_shadow_ps_invocations\":"<<shadowTelemetry.gpuWorkload[shadowIndex].fragments
+                <<",\"gpu_sample_id\":"<<gpu.gpuSampleId<<",\"gpu_valid\":"<<(valid?"true":"false")<<",\"gpu_ms\":";
             double total=0; for(auto value:gpu.gpuMilliseconds) total+=value;
-            output<<total<<"}\n";
+            output<<total; gpu.WriteOpaqueJson(output); output<<"}\n";
+        }
+        if (std::getenv("ENGINE_GPU_WORKLOAD_COUNTERS"))
+        {
+            Check(workloadSamples>0,"no completed pipeline workload samples");
+            if(mode.rfind("bark",0)==0 || mode.rfind("leaves",0)==0)
+                Check(isolatedVertices>0,"tree category failed to capture isolated geometry");
+        }
+        if(vertexOnly && std::getenv("ENGINE_GPU_WORKLOAD_COUNTERS")) {
+            Check(isolatedVertices>0,"vertex-only control skipped vertex work");
+            Check(isolatedFragments==0,"vertex-only control executed fragments");
         }
         output.flush();
+        if(vertexOnly) { std::cout<<backend<<'-'<<mode<<" done"<<std::endl; return; }
         // Capture only after measurement. Readback intentionally stalls here.
         requestCapture=true;
         for(int i=0;i<3;++i) render();
@@ -273,7 +482,7 @@ template<class Renderer> void Benchmark(const std::string& backend,bool foliageO
     };
     // Restore authored objects separately; derived prefab pointers are transient.
     visibility.erase(std::remove_if(visibility.begin(),visibility.end(),[](auto item){return item.first->runtimeOnly;}),visibility.end());
-    if(!foliageOnly) {
+    if(!foliageOnly && !materialOnly) {
     for(const std::string view:{"entrance","mid","overlook"}) {
         viewer->transform.position=view=="entrance"?entrance:view=="mid"?glm::vec3(-5,3,-65):glm::vec3(-5,27,-39);
         camera->target=view=="entrance"?target:glm::vec3(2,1,5);
@@ -281,9 +490,16 @@ template<class Renderer> void Benchmark(const std::string& backend,bool foliageO
     }
     viewer->transform.position=entrance; camera->target=target;
     if(!cpuProfile) for(unsigned resolution:{primaryWidth,primaryWidth/2})
-        for(const std::string mode:{"full","trees","terrain","bark","leaves"}) measure("entrance",mode,90,resolution);
+        for(const std::string mode:{"full","trees","terrain","bark","bark-vertex-only","leaves","leaves-vertex-only","leaves-unlit","leaves-solid","leaves-lod1"}) measure("entrance",mode,90,resolution);
     }
-    if(!cpuProfile) for(const std::string view:{"entrance","overlook"}) {
+    if(!foliageOnly && !cpuProfile) {
+        viewer->transform.position=entrance; camera->target=target;
+        std::vector<std::string> modes={"material-reference","material-mips","material-cheap"};
+        if(std::getenv("ENGINE_FOREST_AUDIT_REVERSE")) std::reverse(modes.begin(),modes.end());
+        for(const auto& mode:modes)
+            measure("entrance",mode,90,primaryWidth);
+    }
+    if(!cpuProfile && !materialOnly) for(const std::string view:{"entrance","overlook"}) {
         viewer->transform.position=view=="entrance"?entrance:glm::vec3(-5,27,-39);
         camera->target=view=="entrance"?target:glm::vec3(2,1,5);
         for(const std::string mode:{"foliage","trees-foliage"}) measure(view,mode,55,primaryWidth);
@@ -301,6 +517,14 @@ int main(int argc,char** argv) {
     try {
         Check(argc==2 || (argc==3 && std::string(argv[2])=="foliage-only"),"expected backend [foliage-only]");
         const bool foliageOnly=argc==3; std::string backend=argv[1];
+        if (backend=="static-buffer" && std::getenv("ENGINE_OAK_DX12_VALIDATION"))
+        {
+            Microsoft::WRL::ComPtr<ID3D12Debug1> debug;
+            if (FAILED(D3D12GetDebugInterface(IID_PPV_ARGS(&debug))))
+            { std::cerr<<"DX12 validation unavailable\n"; return 77; }
+            debug->EnableDebugLayer();
+            debug->SetEnableGPUBasedValidation(TRUE);
+        }
         if(backend=="static-buffer") CheckStaticGeometry<DX12GameRenderer>("dx12");
 #if defined(ENGINE_VULKAN_ENABLED)
         else if(backend=="static-buffer-vulkan") CheckStaticGeometry<VulkanGameRenderer>("vulkan");

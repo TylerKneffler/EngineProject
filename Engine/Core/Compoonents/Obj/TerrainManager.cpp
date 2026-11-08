@@ -2378,9 +2378,10 @@ TerrainManager::JsonValue TerrainManager::Serialize() const
         if (!inlineFallback.count(cell))
             edits.Push(JsonValue::MakeObject().Set("x", JsonValue(cell.first))
                 .Set("y", JsonValue(cell.second)));
-    return out.Set("cells", std::move(cells))
+    out.Set("cells", std::move(cells))
         .Set("proceduralRuns", std::move(runs))
         .Set("editedCells", std::move(edits));
+    return out;
 }
 
 void TerrainManager::Deserialize(const JsonValue& value)

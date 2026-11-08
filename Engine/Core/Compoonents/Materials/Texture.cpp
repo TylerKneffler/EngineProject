@@ -2,9 +2,11 @@
 
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Core/Graphics/IGraphicsTexture.h"
+#include "Core/Graphics/IGraphicsContext.h"
 #include "Core/Memory/CacheStore.h"
 #include "Core/Rendering/Lighting/EnvironmentMap.h"
 #include "Core/Rendering/RenderJobs.h"
+#include "Core/Rendering/TextureResidency.h"
 
 #include <Windows.h>
 #include <wincodec.h>
@@ -26,6 +28,8 @@
 #include <memory>
 #include <deque>
 #include <mutex>
+#include <limits>
+#include <unordered_map>
 #include <glm/glm.hpp>
 #include <glm/geometric.hpp>
 
@@ -35,6 +39,32 @@ namespace
 {
 std::mutex s_publicationMutex;
 std::deque<std::pair<std::weak_ptr<Texture>, uint64_t>> s_publications;
+std::mutex s_textureRegistryMutex;
+std::vector<std::weak_ptr<Texture>> s_textureRegistry;
+struct GraphicsTextureOwner { std::weak_ptr<Engine::Graphics::IGraphicsTexture> resource; std::weak_ptr<Texture> texture; };
+std::unordered_map<const Engine::Graphics::IGraphicsTexture*,GraphicsTextureOwner> s_graphicsTextureOwners;
+std::mutex s_graphicsTextureOwnersMutex;
+Texture::StreamingSnapshot s_streamSnapshot;
+std::mutex s_streamStatsMutex;
+uint64_t s_streamUploads = 0, s_streamEvictions = 0;
+struct ProviderStreamingFrame { uint64_t serial=0, frame=0, uploaded=0; };
+std::unordered_map<const Engine::Graphics::IGraphicsProvider*,ProviderStreamingFrame> s_providerStreamingFrames;
+Engine::Rendering::TextureStreamingSettings& StreamingSettings()
+{
+    static auto settings = [] {
+        Engine::Rendering::TextureStreamingSettings result;
+        if (const char* text = std::getenv("ENGINE_TEXTURE_STREAMING_BUDGET_MB"))
+        {
+            uint32_t mb = 0;
+            const std::string_view value(text);
+            const auto parsed = std::from_chars(value.data(),value.data()+value.size(),mb);
+            if (parsed.ec == std::errc{} && parsed.ptr == value.data()+value.size())
+                result.budgetBytes = uint64_t(mb) * 1024 * 1024;
+        }
+        return result;
+    }();
+    return settings;
+}
 
 uint32_t ResidentTextureDimensionCap()
 {
@@ -267,8 +297,11 @@ std::shared_ptr<Texture> Texture::Acquire(const std::string& path, bool srgb)
         Engine::Memory::CacheLifetime::LongTerm, "Texture", key,
         [&]()
         {
-            return std::shared_ptr<Texture>(new Texture(
+            auto texture = std::shared_ptr<Texture>(new Texture(
                 std::filesystem::path(path).lexically_normal().generic_string(), srgb));
+            std::lock_guard lock(s_textureRegistryMutex);
+            s_textureRegistry.push_back(texture);
+            return texture;
         });
 }
 
@@ -295,6 +328,11 @@ void Texture::Invalidate(const std::string& path)
 
 void Texture::InvalidateCache()
 {
+    m_pendingTexture.reset(); m_fallbackTexture.reset();
+    m_streamDecode = {}; m_streamDecoded.reset(); m_mipHistory.Reset();
+    m_managed = false; m_projectedPixels = 0.f;
+    m_forceFull=false;m_budgetDenied=false;
+    m_mipAllocations.clear();
     ++m_generation;
     m_decode = {};
     m_queued = false;
@@ -476,6 +514,9 @@ bool Texture::SetPreviewPixels(const std::vector<uint8_t>& rgba)
         rgba.size() != static_cast<size_t>(m_width) * m_height * 4)
         return false;
     m_pixels = rgba;
+    m_pendingTexture.reset(); m_fallbackTexture.reset();
+    m_streamDecode={}; m_streamDecoded.reset(); m_mipHistory.Reset();
+    m_managed=false; m_mipAllocations.clear();
     ++m_generation;
     m_decode = {};
     m_queued = false;
@@ -491,7 +532,7 @@ bool Texture::SetPreviewPixels(const std::vector<uint8_t>& rgba)
 void Texture::QueuePrepare(IGraphicsProvider* graphicsProvider)
 {
     if (!graphicsProvider || m_decodeFailed ||
-        (m_graphicsTexture && m_graphicsTexture->GetNativeHandle() &&
+        (!m_forceFull && m_graphicsTexture && m_graphicsTexture->GetNativeHandle() &&
             m_preparedProvider == graphicsProvider))
         return;
     if (m_queued)
@@ -516,6 +557,7 @@ void Texture::QueuePrepare(IGraphicsProvider* graphicsProvider)
 
 void Texture::PublishQueued(IGraphicsProvider* graphicsProvider, size_t maxUploads)
 {
+    StreamFrame(graphicsProvider);
     if (!graphicsProvider || !maxUploads)
         return;
     size_t pending = 0;
@@ -579,17 +621,297 @@ void Texture::PublishQueued(IGraphicsProvider* graphicsProvider, size_t maxUploa
 bool Texture::Prepare(IGraphicsProvider* graphicsProvider)
 {
     if (!graphicsProvider) return false;
-    if (m_graphicsTexture && m_graphicsTexture->GetNativeHandle() &&
+    if (!m_forceFull && m_graphicsTexture && m_graphicsTexture->GetNativeHandle() &&
         m_preparedProvider == graphicsProvider) return true;
     QueuePrepare(graphicsProvider);
     return false;
+}
+
+void Texture::ConfigureStreaming(const Engine::Rendering::TextureStreamingSettings& settings)
+{
+    // Graphics-owner API. A shrinking budget stops admission immediately;
+    // frame-owned old images retire naturally without waiting on the GPU.
+    const bool enabling=!StreamingSettings().budgetBytes && settings.budgetBytes;
+    StreamingSettings() = settings;
+    StreamingSettings().maxDecodes = std::clamp(settings.maxDecodes,1u,8u);
+    if(!settings.budgetBytes)
+    {
+        std::lock_guard lock(s_textureRegistryMutex);
+        for(const auto& weak:s_textureRegistry) if(auto t=weak.lock();t && t->m_managed)
+        {
+            t->m_managed=false;t->m_forceFull=true;
+            t->m_pendingTexture.reset();t->m_fallbackTexture.reset();
+            t->m_streamDecode={};t->m_streamDecoded.reset();t->m_decodeFailed=false;
+        }
+    }
+    else if(enabling)
+    {
+        std::vector<std::pair<std::shared_ptr<Texture>,IGraphicsProvider*>> reload;
+        {
+            std::lock_guard lock(s_textureRegistryMutex);
+            for(const auto& weak:s_textureRegistry) if(auto t=weak.lock();t && t->IsStreamable() && t->m_preparedProvider)
+                reload.emplace_back(t,t->m_preparedProvider);
+        }
+        for(auto& entry:reload) {entry.first->InvalidateCache();entry.first->QueuePrepare(entry.second);}
+    }
+}
+Texture::StreamingSnapshot Texture::GetStreamingSnapshot()
+{ std::lock_guard lock(s_streamStatsMutex); return s_streamSnapshot; }
+std::vector<Texture::StreamingTextureInfo> Texture::GetStreamingInventory()
+{
+    std::vector<StreamingTextureInfo> result;
+    std::lock_guard lock(s_textureRegistryMutex);
+    for(const auto& weak:s_textureRegistry) if(auto t=weak.lock())
+        result.push_back({t->m_filePath+(t->m_srgb?":srgb":":linear"),t->m_width,t->m_height,
+            t->m_mipLevels,t->m_residentFirstMip,t->m_demandFirstMip,t->m_managed,t->m_queued,t->m_decodeFailed});
+    return result;
+}
+bool Texture::IsStreamable() const
+{
+    return m_generateMips && m_mipLevels > 1 && m_format == GraphicsTextureFormat::Rgba8 && !m_retainPixelsForCpu;
+}
+void Texture::RequestMipFootprint(float pixelsPerUvRepeat)
+{
+    if (!std::isfinite(pixelsPerUvRepeat)) pixelsPerUvRepeat = std::numeric_limits<float>::max();
+    float previous=m_projectedPixels.load(std::memory_order_relaxed);
+    while(previous<pixelsPerUvRepeat && !m_projectedPixels.compare_exchange_weak(previous,pixelsPerUvRepeat,std::memory_order_relaxed)) {}
+}
+void Texture::RequestGraphicsFootprint(const IGraphicsTexture* resource, float pixels)
+{
+    if (!resource) return;
+    std::shared_ptr<Texture> texture;
+    {
+        std::lock_guard lock(s_graphicsTextureOwnersMutex);
+        const auto found=s_graphicsTextureOwners.find(resource);
+        if(found!=s_graphicsTextureOwners.end()) texture=found->second.texture.lock();
+    }
+    if(texture) texture->RequestMipFootprint(pixels);
+}
+bool Texture::UploadMipTail(IGraphicsProvider* provider, uint32_t firstMip, bool replacement)
+{
+    using Engine::Rendering::TextureResidency;
+    auto* factory = provider->GetTextureFactory();
+    if (!factory || firstMip >= m_mipLevels) return false;
+    uint32_t w=m_width,h=m_height;
+    size_t offset=0;
+    for (uint32_t mip=0;mip<firstMip;++mip)
+    {
+        offset += size_t(w)*h*4;
+        w=std::max(1u,w/2); h=std::max(1u,h/2);
+    }
+    const auto bytes=TextureResidency::Payload(w,h,m_mipLevels-firstMip,4);
+    const auto allocation=factory->EstimateAllocationBytes(w,h,m_mipLevels-firstMip,m_format,m_srgb);
+    const auto& settings=StreamingSettings();
+    auto& uploadThisFrame=s_providerStreamingFrames[provider].uploaded;
+    const uint64_t allocated=TextureResidency::Snapshot(provider).allocatedBytes;
+    if (!allocation || allocated > settings.budgetBytes || allocation > settings.budgetBytes-allocated ||
+        uploadThisFrame > settings.uploadBytesPerFrame || bytes > settings.uploadBytesPerFrame-uploadThisFrame)
+    {
+        m_budgetDenied=true;
+        return false;
+    }
+    const auto& pixels=m_streamDecoded ? m_streamDecoded->m_pixels:m_pixels;
+    if (offset>pixels.size() || bytes>pixels.size()-offset) return false;
+    std::shared_ptr<IGraphicsTexture> resource;
+    try { resource=factory->CreateTexture2D(w,h,pixels.data()+offset,m_mipLevels-firstMip,m_format,m_srgb); }
+    catch (const std::exception& error)
+    {
+        OutputDebugStringA(("[Texture streaming] "+m_filePath+": "+error.what()+"\n").c_str());
+        return false;
+    }
+    if (!resource || !resource->GetNativeHandle()) return false;
+    m_budgetDenied=false;
+    {std::lock_guard lock(s_graphicsTextureOwnersMutex);s_graphicsTextureOwners[resource.get()]={resource,weak_from_this()};}
+    TextureResidency::Record(resource,bytes,TextureResidency::Payload(m_width,m_height,m_mipLevels,4),
+        firstMip,provider,allocation);
+    uploadThisFrame+=bytes; s_streamUploads+=bytes;
+    if (replacement) { m_pendingTexture=std::move(resource); m_pendingFirstMip=firstMip; }
+    else
+    {
+        m_pendingTexture.reset(); m_mipAllocations.clear(); m_mipHistory.Reset();
+        m_graphicsTexture=resource; m_fallbackTexture=std::move(resource);
+        m_fallbackFirstMip=firstMip;
+        m_residentFirstMip=firstMip; m_demandFirstMip=firstMip;
+        m_preparedProvider=provider; m_managed=true;
+    }
+    m_streamDecoded.reset();
+    if (!m_retainPixelsForCpu) std::vector<uint8_t>().swap(m_pixels);
+    return true;
+}
+
+void Texture::StreamFrame(IGraphicsProvider* provider)
+{
+    if (!provider || !provider->GetTextureFactory()) return;
+    std::lock_guard statsLock(s_streamStatsMutex);
+    auto* factory=provider->GetTextureFactory();
+    factory->PollUploads();
+    auto& providerFrame=s_providerStreamingFrames[provider];
+    const auto* contextFactory=provider->GetContextFactory();
+    const uint64_t serial=contextFactory ? contextFactory->GetPreparedFrameSerial():0;
+    if(serial && providerFrame.serial==serial) return;
+    providerFrame.serial=serial;providerFrame.uploaded=0;++providerFrame.frame;
+    auto& uploadThisFrame=providerFrame.uploaded;
+    const auto settings=StreamingSettings();
+    s_streamSnapshot={}; s_streamSnapshot.budgetBytes=settings.budgetBytes;
+    s_streamSnapshot.frame=providerFrame.frame;
+    if (!settings.budgetBytes) return;
+    {
+        std::lock_guard lock(s_graphicsTextureOwnersMutex);
+        for(auto it=s_graphicsTextureOwners.begin();it!=s_graphicsTextureOwners.end();)
+            if(it->second.resource.expired()) it=s_graphicsTextureOwners.erase(it); else ++it;
+    }
+    std::vector<std::shared_ptr<Texture>> textures;
+    {
+        std::lock_guard lock(s_textureRegistryMutex);
+        for (auto it=s_textureRegistry.begin();it!=s_textureRegistry.end();)
+            if (auto texture=it->lock()) { textures.push_back(std::move(texture)); ++it; }
+            else it=s_textureRegistry.erase(it);
+    }
+    struct Candidate { std::shared_ptr<Texture> texture; float pixels; uint32_t target; };
+    std::vector<Candidate> candidates;
+    uint32_t decodes=0;
+    for (auto& texture:textures)
+    {
+        auto& t=*texture;
+        if(t.m_budgetDenied) ++s_streamSnapshot.blocked;
+        if (t.m_streamDecode.valid() || t.m_streamDecoded) ++decodes;
+        if(!t.m_managed && t.m_preparedProvider==provider && t.m_graphicsTexture)
+        {
+            uint32_t w=t.m_width,h=t.m_height;
+            for(uint32_t mip=0;mip<t.m_residentFirstMip;++mip) {w=std::max(1u,w/2);h=std::max(1u,h/2);}
+            const auto allocation=t.m_graphicsTexture->GetAllocationSizeBytes();
+            s_streamSnapshot.pinnedBytes+=allocation ? allocation:factory->EstimateAllocationBytes(w,h,t.m_mipLevels-t.m_residentFirstMip,t.m_format,t.m_srgb);
+        }
+        if (!t.m_managed || t.m_preparedProvider!=provider) continue;
+        if (t.m_pendingTexture && t.m_pendingTexture->IsUploadComplete())
+        {
+            t.m_graphicsTexture=std::move(t.m_pendingTexture);
+            t.m_residentFirstMip=t.m_pendingFirstMip;
+        }
+        if (t.m_streamDecode.valid() && t.m_streamDecode.wait_for(std::chrono::seconds(0))==std::future_status::ready)
+        {
+            try { t.m_streamDecoded=t.m_streamDecode.get(); }
+            catch (...) { t.m_streamDecoded.reset(); }
+            if (!t.m_streamDecoded) t.m_decodeFailed=true;
+        }
+        if (t.m_mipAllocations.size()!=t.m_mipLevels)
+        {
+            t.m_mipAllocations.clear(); uint32_t w=t.m_width,h=t.m_height;
+            for (uint32_t mip=0;mip<t.m_mipLevels;++mip)
+            {
+                t.m_mipAllocations.push_back(factory->EstimateAllocationBytes(w,h,t.m_mipLevels-mip,t.m_format,t.m_srgb));
+                w=std::max(1u,w/2); h=std::max(1u,h/2);
+            }
+        }
+        const float pixels=t.m_projectedPixels.exchange(0.f,std::memory_order_relaxed);
+        t.m_demandFirstMip=Engine::Rendering::TextureDemandMip(t.m_width,t.m_height,t.m_mipLevels,pixels,settings.prefetchMips);
+        uint32_t capMip=0,w=t.m_width,h=t.m_height;
+        const uint32_t cap=ResidentTextureDimensionCap();
+        while (cap && std::max(w,h)>cap && capMip+1<t.m_mipLevels)
+        { ++capMip; w=std::max(1u,w/2); h=std::max(1u,h/2); }
+        t.m_demandFirstMip=std::max(t.m_demandFirstMip,capMip);
+        t.m_demandFirstMip=std::min(t.m_demandFirstMip,t.m_fallbackFirstMip);
+        t.m_targetFirstMip=t.m_mipHistory.Update(providerFrame.frame,t.m_demandFirstMip,settings.holdFrames);
+        w=t.m_width; h=t.m_height;
+        for(uint32_t mip=0;mip<t.m_demandFirstMip;++mip) {w=std::max(1u,w/2);h=std::max(1u,h/2);}
+        s_streamSnapshot.requestedBytes+=Engine::Rendering::TextureResidency::Payload(w,h,t.m_mipLevels-t.m_demandFirstMip,4);
+        candidates.push_back({texture,pixels,t.m_targetFirstMip});
+    }
+    // Stable visual priority. Every texture has an already-admitted fallback;
+    // pressure may override temporal holds but never removes that fallback.
+    std::stable_sort(candidates.begin(),candidates.end(),[](const auto& a,const auto& b) {return a.pixels>b.pixels;});
+    uint64_t planned=0;
+    for (const auto& candidate:candidates)
+    {
+        const auto& t=*candidate.texture;
+        planned+=t.m_mipAllocations[t.m_fallbackFirstMip];
+        if(candidate.target<t.m_fallbackFirstMip) planned+=t.m_mipAllocations[candidate.target];
+    }
+    const uint64_t planningBudget=settings.budgetBytes>s_streamSnapshot.pinnedBytes ? settings.budgetBytes-s_streamSnapshot.pinnedBytes:0;
+    for(auto it=candidates.rbegin();it!=candidates.rend() && planned>planningBudget;++it)
+    {
+        auto& t=*it->texture;
+        while(it->target<t.m_fallbackFirstMip && planned>planningBudget)
+        {
+            planned-=t.m_mipAllocations[it->target++];
+            if(it->target<t.m_fallbackFirstMip) planned+=t.m_mipAllocations[it->target];
+        }
+    }
+    for(auto& candidate:candidates)
+    {
+        auto& t=*candidate.texture;
+        if(candidate.target>t.m_residentFirstMip && !t.m_pendingTexture)
+        {
+            t.m_graphicsTexture=t.m_fallbackTexture;
+            t.m_residentFirstMip=t.m_fallbackFirstMip; ++s_streamEvictions;
+        }
+        if(candidate.target<t.m_residentFirstMip && !t.m_pendingTexture)
+        {
+            const uint64_t allocated=Engine::Rendering::TextureResidency::Snapshot(provider).allocatedBytes;
+            uint32_t admitted=candidate.target;
+            while(admitted<t.m_residentFirstMip)
+            {
+                uint32_t w=t.m_width,h=t.m_height;
+                for(uint32_t mip=0;mip<admitted;++mip) {w=std::max(1u,w/2);h=std::max(1u,h/2);}
+                const auto bytes=Engine::Rendering::TextureResidency::Payload(w,h,t.m_mipLevels-admitted,4);
+                if(allocated<=settings.budgetBytes && t.m_mipAllocations[admitted]<=settings.budgetBytes-allocated &&
+                    uploadThisFrame<=settings.uploadBytesPerFrame && bytes<=settings.uploadBytesPerFrame-uploadThisFrame) break;
+                ++admitted;
+            }
+            const bool fits=admitted<t.m_residentFirstMip;
+            if (!fits)
+            {
+                ++s_streamSnapshot.blocked;
+                uint32_t w=t.m_width,h=t.m_height;
+                const uint32_t next=t.m_residentFirstMip ? t.m_residentFirstMip-1:0;
+                for(uint32_t mip=0;mip<next;++mip) {w=std::max(1u,w/2);h=std::max(1u,h/2);}
+                const uint64_t nextBytes=Engine::Rendering::TextureResidency::Payload(w,h,t.m_mipLevels-next,4);
+                // An upload cap is not memory pressure. Keep the best attainable
+                // resident tail instead of repeatedly evicting/reloading it.
+                if(t.m_graphicsTexture!=t.m_fallbackTexture && !uploadThisFrame && nextBytes<=settings.uploadBytesPerFrame)
+                { t.m_graphicsTexture=t.m_fallbackTexture; t.m_residentFirstMip=t.m_fallbackFirstMip; ++s_streamEvictions; }
+            }
+            else if(t.m_streamDecoded) t.UploadMipTail(provider,admitted,true);
+            else if(!t.m_streamDecode.valid() && !t.m_decodeFailed && decodes<settings.maxDecodes)
+            {
+                const auto path=t.m_filePath; const bool srgb=t.m_srgb;
+                t.m_streamDecode=Engine::Rendering::RenderJobs::Get().Submit([path,srgb] {
+                    auto decoded=std::shared_ptr<Texture>(new Texture(path,srgb));
+                    return decoded->Load() ? decoded:std::shared_ptr<Texture>{};
+                });
+                ++decodes;
+            }
+        }
+        else if (!t.m_streamDecode.valid() && t.m_streamDecoded)
+        { t.m_streamDecoded.reset(); if(decodes) --decodes; }
+        s_streamSnapshot.unmet+=t.m_residentFirstMip>t.m_demandFirstMip;
+        if(t.m_residentFirstMip>t.m_demandFirstMip && candidate.target>=t.m_residentFirstMip)
+            ++s_streamSnapshot.blocked;
+        ++s_streamSnapshot.demandMips[std::min(31u,t.m_demandFirstMip)];
+        ++s_streamSnapshot.residentMips[std::min(31u,t.m_residentFirstMip)];
+    }
+    const auto residency=Engine::Rendering::TextureResidency::Snapshot(provider);
+    s_streamSnapshot.allocatedBytes=residency.allocatedBytes;
+    s_streamSnapshot.stagingBytes=factory->GetPendingUploadBytes();
+    s_streamSnapshot.uploadBytes=s_streamUploads;
+    s_streamSnapshot.evictions=s_streamEvictions;
+    uint64_t owned=0;
+    for(const auto& candidate:candidates)
+    {
+        const auto& t=*candidate.texture;
+        owned+=t.m_mipAllocations[t.m_fallbackFirstMip];
+        if(t.m_graphicsTexture!=t.m_fallbackTexture) owned+=t.m_mipAllocations[t.m_residentFirstMip];
+        if(t.m_pendingTexture) owned+=t.m_mipAllocations[t.m_pendingFirstMip];
+    }
+    owned+=s_streamSnapshot.pinnedBytes;
+    s_streamSnapshot.retiredBytes=residency.allocatedBytes>owned ? residency.allocatedBytes-owned:0;
 }
 
 bool Texture::PrepareImmediate(IGraphicsProvider* graphicsProvider)
 {
     if (!graphicsProvider)
         return false;
-    if (m_graphicsTexture && m_graphicsTexture->GetNativeHandle() &&
+    if (!m_forceFull && m_graphicsTexture && m_graphicsTexture->GetNativeHandle() &&
         m_preparedProvider == graphicsProvider)
         return true;
     if (!Load())
@@ -597,6 +919,15 @@ bool Texture::PrepareImmediate(IGraphicsProvider* graphicsProvider)
     Engine::Graphics::IGraphicsTextureFactory* factory = graphicsProvider->GetTextureFactory();
     if (!factory)
         return false;
+    if (StreamingSettings().budgetBytes && IsStreamable())
+    {
+        uint32_t firstMip=0,w=m_width,h=m_height;
+        const auto cap=ResidentTextureDimensionCap();
+        const uint32_t fallbackDimension=cap ? std::min(64u,cap):64u;
+        while(std::max(w,h)>fallbackDimension && firstMip+1<m_mipLevels)
+        {++firstMip;w=std::max(1u,w/2);h=std::max(1u,h/2);}
+        return UploadMipTail(graphicsProvider, firstMip, false);
+    }
     try
     {
         uint32_t uploadWidth = m_width;
@@ -617,16 +948,26 @@ bool Texture::PrepareImmediate(IGraphicsProvider* graphicsProvider)
             uploadHeight = std::max(1u, uploadHeight / 2);
             --uploadMipLevels;
         }
-        m_graphicsTexture =
+        auto resource =
             factory->CreateTexture2D(
                 uploadWidth, uploadHeight, m_pixels.data() + uploadOffset,
                 uploadMipLevels, m_format, m_srgb);
+        if(!resource || !resource->GetNativeHandle()) return false;
+        m_graphicsTexture=std::move(resource);
+        m_forceFull=false;
+        Engine::Rendering::TextureResidency::Record(m_graphicsTexture,
+            Engine::Rendering::TextureResidency::Payload(uploadWidth, uploadHeight,
+                uploadMipLevels, bytesPerPixel),
+            Engine::Rendering::TextureResidency::Payload(m_width, m_height,
+                m_mipLevels, bytesPerPixel), m_mipLevels - uploadMipLevels,
+            graphicsProvider, factory->EstimateAllocationBytes(uploadWidth,uploadHeight,uploadMipLevels,m_format,m_srgb));
+        if(m_graphicsTexture) m_residentFirstMip=m_mipLevels-uploadMipLevels;
     }
     catch (const std::exception& error)
     {
         OutputDebugStringA(("[Texture] GPU upload failed for " + m_filePath +
             ": " + error.what() + "\n").c_str());
-        m_graphicsTexture.reset();
+        return false;
     }
     m_preparedProvider = m_graphicsTexture ? graphicsProvider : nullptr;
     // Ordinary material textures remain on the GPU. Editors can decode the

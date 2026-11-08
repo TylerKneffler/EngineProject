@@ -38,6 +38,9 @@ void View::Resize(void* device, uint32_t width, uint32_t height)
         width = m_fixedWidth;
         height = m_fixedHeight;
     }
+    const float scale = EffectiveRenderScale();
+    width = std::max(1u, static_cast<uint32_t>(std::lround(width * scale)));
+    height = std::max(1u, static_cast<uint32_t>(std::lround(height * scale)));
     if (m_viewBackend && (width != GetWidth() || height != GetHeight()))
         m_viewBackend->Resize(device, width, height);
 }
@@ -68,8 +71,8 @@ void View::RequestRenderSize(float width, float height)
 
 void View::ApplyRequestedRenderSize(void* device)
 {
-    if (m_requestedWidth && m_requestedHeight &&
-        (m_requestedWidth != GetWidth() || m_requestedHeight != GetHeight()))
+    if (m_fixedWidth && m_fixedHeight) Resize(device, m_fixedWidth, m_fixedHeight);
+    else if (m_requestedWidth && m_requestedHeight)
         Resize(device, m_requestedWidth, m_requestedHeight);
 }
 

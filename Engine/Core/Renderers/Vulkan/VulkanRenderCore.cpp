@@ -135,7 +135,12 @@ void VulkanRenderCore::CreateDevice()
     createInfo.pQueueCreateInfos = &queueInfo;
     createInfo.enabledExtensionCount = ARRAYSIZE(extensions);
     createInfo.ppEnabledExtensionNames = extensions;
+    VkPhysicalDeviceFeatures supported{}, enabled{};
+    vkGetPhysicalDeviceFeatures(m_physicalDevice, &supported);
+    enabled.pipelineStatisticsQuery = supported.pipelineStatisticsQuery;
+    createInfo.pEnabledFeatures = &enabled;
     VkCheck(vkCreateDevice(m_physicalDevice, &createInfo, nullptr, &m_device), "vkCreateDevice");
+    m_pipelineStatisticsEnabled = enabled.pipelineStatisticsQuery != VK_FALSE;
     vkGetDeviceQueue(m_device, m_queueFamily, 0, &m_queue);
 }
 

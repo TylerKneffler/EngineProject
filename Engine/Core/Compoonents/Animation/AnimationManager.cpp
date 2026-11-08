@@ -1056,7 +1056,8 @@ AnimationManager::JsonValue AnimationManager::Serialize() const
             .Set("startSeconds", JsonValue(layer.startSeconds))
             .Set("repeatCount", JsonValue(layer.repeatCount)));
     }
-    return result.Set("layers", std::move(serializedLayers));
+    result.Set("layers", std::move(serializedLayers));
+    return result;
 }
 
 void AnimationManager::Deserialize(const JsonValue& value)

@@ -34,11 +34,26 @@ def inventory():
             data = json.loads(resolve(material_path).read_text()) if material_path else {}
             parts.append(dict(mesh=mesh.attrib["Mesh.file"], triangles=(indices or vertices) // 3,
                               material=material_path, double_sided=data.get("doubleSided"),
-                              alpha_cutoff=data.get("alphaCutoff"), shaders=data.get("shaders"),
+                              alpha_cutoff=data.get("alphaCutoff"), shaders=data.get("shader") or data.get("shaders"),
                               specular_model=data.get("specularModel"),
+                              # Source-level map fetch sites, not measured GPU reads.
+                              # MR and AO remain separate reads even if they share an image.
+                              object_map_reads_full=sum(bool(data.get(k)) for k in (
+                                  "baseColorTexture", "metallicRoughnessTexture", "normalTexture",
+                                  "occlusionTexture", "emissiveTexture")),
+                              object_map_reads_far=sum(bool(data.get(k)) for k in (
+                                  "baseColorTexture", "emissiveTexture")),
+                              shadow_alpha_map_reads=int(bool(data.get("baseColorTexture")) and
+                                  data.get("alphaMode")=="Mask" and data.get("alphaCutoff",0)>0),
+                              extra_color_read_with_independent_alpha_mip=int(bool(data.get("baseColorTexture")) and
+                                  data.get("alphaMode")=="Mask" and data.get("alphaCutoff",0)>0),
                               texture_maps={k:v for k,v in data.items() if k.endswith("Texture") and isinstance(v,str) and v}))
         result.append(dict(prefab=prefab.name, triangles=sum(p["triangles"] for p in parts),
-                           material_count=len({p["material"] for p in parts}), parts=parts))
+                           material_count=len({p["material"] for p in parts}),
+                           material_slots=len(parts),
+                           source_color_draws_unbatched=len(parts),
+                           shader_paths=sorted({p["shaders"] or "Engine/Core/Shaders/Object/Object.hlsl" for p in parts}),
+                           parts=parts))
     return result
 
 

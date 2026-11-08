@@ -59,6 +59,13 @@ namespace
 Engine::Serialization::JsonValue SerializeSceneSettings(const Engine::Model::SceneSettings& settings)
 {
     Engine::Serialization::JsonValue value = Engine::Serialization::JsonValue::MakeObject();
+    auto quality = Engine::Serialization::JsonValue::MakeObject();
+    quality.Set("preset", Engine::Serialization::JsonValue(settings.graphicsQuality.preset));
+    auto overrides = settings.graphicsQuality.overrides;
+    auto channels = Engine::Model::GraphicsQualitySettings::Channels(overrides);
+    for (size_t i=0;i<channels.size();++i)
+        quality.Set(Engine::Model::GraphicsQualitySettings::Keys[i], Engine::Serialization::JsonValue(*channels[i]));
+    value.Set("graphicsQuality", quality);
     value.Set("dimension",
         Engine::Serialization::JsonValue(static_cast<int>(settings.dimension)));
     value.Set("showGrid", Engine::Serialization::JsonValue(settings.showGrid));
@@ -126,8 +133,17 @@ void DeserializeSceneSettings(Engine::Model::SceneSettings& settings, const Engi
 {
     // Legacy documents must not inherit quality settings from the previous scene.
     settings.textureLod = {};
+    settings.graphicsQuality = {};
     if (!value.IsObject())
         return;
+    if (const auto* quality = FindField(value, "graphicsQuality")) {
+        if (const auto* preset = FindField(*quality, "preset"))
+            settings.graphicsQuality.preset = std::clamp(preset->AsInt(), 0, 3);
+        auto channels = Engine::Model::GraphicsQualitySettings::Channels(settings.graphicsQuality.overrides);
+        for (size_t i=0;i<channels.size();++i)
+            if (const auto* field = FindField(*quality, Engine::Model::GraphicsQualitySettings::Keys[i]))
+                *channels[i] = field->AsFloat();
+    }
     if (const auto* field = FindField(value, "textureLodEnabled")) settings.textureLod.enabled = field->AsBool();
     if (const auto* field = FindField(value, "textureLodNearDistance")) settings.textureLod.nearDistance = field->AsFloat();
     if (const auto* field = FindField(value, "textureLodFarDistance")) settings.textureLod.farDistance = field->AsFloat();

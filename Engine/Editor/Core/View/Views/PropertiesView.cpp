@@ -441,6 +441,23 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
             }
 
             ui.Separator();
+            ui.Label("Graphics Quality");
+            auto& quality = m_scene->settings.graphicsQuality;
+            const char* presets[] = {"Reference (authored)", "High", "Medium", "Low"};
+            bool qualityChanged = ui.Combo("Preset", &quality.preset, presets, 4);
+            auto channels = Engine::Model::GraphicsQualitySettings::Channels(quality.overrides);
+            for (size_t i=0;i<channels.size();++i) {
+                qualityChanged |= ui.DragFloat(Engine::Model::GraphicsQualitySettings::Keys[i], channels[i], .05f, -1.f, 1.f);
+                ui.Tooltip("-1 inherits the preset. Positive values reduce authored quality budgets.");
+            }
+            auto effective = quality.Resolve();
+            auto resolved = Engine::Model::GraphicsQualitySettings::Channels(effective);
+            for (size_t i=0;i<resolved.size();++i) {
+                const auto label = std::string("Effective ") + Engine::Model::GraphicsQualitySettings::Keys[i] + ": " + std::to_string(*resolved[i]);
+                ui.Label(label.c_str());
+            }
+            if (qualityChanged && OnComponentsChanged) OnComponentsChanged();
+            ui.Separator();
             ui.Label("Texture LOD");
             auto& textureLod = m_scene->settings.textureLod;
             bool textureLodChanged = ui.Checkbox("Distance Texture LOD", &textureLod.enabled);

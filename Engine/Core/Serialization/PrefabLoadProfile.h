@@ -44,16 +44,23 @@ public:
             log << name << " ms=" << entry.milliseconds << " calls=" << entry.calls << '\n';
         log << '\n';
     }
+    inline static thread_local std::string activeStage;
+    static const std::string& ActiveStage() { return activeStage; }
     class Stage
     {
         PrefabLoadProfile* profile = current;
         std::string name;
+        std::string previous;
         Clock::time_point started = Clock::now();
     public:
-        explicit Stage(const std::string& label) : name(profile ? label : "") {}
+        explicit Stage(const std::string& label) : name(profile ? label : "")
+        {
+            if (profile) { previous = std::move(activeStage); activeStage = name; }
+        }
         ~Stage()
         {
             if (!profile) return;
+            activeStage = std::move(previous);
             auto& entry = profile->entries[name];
             entry.milliseconds += std::chrono::duration<double, std::milli>(Clock::now() - started).count();
             ++entry.calls;

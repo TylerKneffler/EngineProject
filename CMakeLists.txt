@@ -202,6 +202,26 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(glm)
 
+if(NOT ENGINE_PROJECT_DIR)
+    enable_testing()
+    add_executable(MeshLodSelectionTests EXCLUDE_FROM_ALL Tests/MeshLodSelectionTests.cpp)
+    target_include_directories(MeshLodSelectionTests PRIVATE "${ENGINE_ROOT}/Engine")
+    target_link_libraries(MeshLodSelectionTests PRIVATE glm::glm)
+    add_test(NAME MeshLodSelection COMMAND MeshLodSelectionTests)
+    if(WIN32)
+        add_executable(ScreenLodBackendTests EXCLUDE_FROM_ALL Tests/ScreenLodBackendTests.cpp)
+        target_link_libraries(ScreenLodBackendTests PRIVATE Engine d3d11 dxgi)
+        target_include_directories(ScreenLodBackendTests PRIVATE "${ENGINE_ROOT}/Engine")
+        target_compile_definitions(ScreenLodBackendTests PRIVATE NOMINMAX)
+        foreach(backend dx11 dx12 vulkan)
+            if(NOT backend STREQUAL "vulkan" OR ENGINE_VULKAN_ENABLED)
+                add_test(NAME ScreenMeshLod_${backend} COMMAND ScreenLodBackendTests ${backend})
+                set_tests_properties(ScreenMeshLod_${backend} PROPERTIES WORKING_DIRECTORY "${ENGINE_ROOT}" TIMEOUT 120 RUN_SERIAL TRUE)
+            endif()
+        endforeach()
+    endif()
+endif()
+
 if(NOT ENGINE_PROJECT_DIR AND EXISTS "${ENGINE_ROOT}/Tests/SurfacePlacementTests.cpp")
     enable_testing()
     add_executable(SurfacePlacementTests EXCLUDE_FROM_ALL
@@ -645,13 +665,42 @@ if(ENGINE_VULKAN_ENABLED)
             "${ENGINE_PROJECT_DIR}/Assets/*.hlsli")
         list(APPEND MATERIAL_SHADER_HEADERS ${PROJECT_SHADER_HEADERS})
     endif()
+    # Material wrappers may inherit their entry points through another shader.
+    # Follow local quoted includes, with cycle protection, both for discovery
+    # and so edits to an included .hlsl rebuild the wrapper's binaries.
+    function(engine_read_material_shader SOURCE OUT_TEXT OUT_DEPENDENCIES)
+        set(PENDING "${SOURCE}")
+        set(VISITED "")
+        set(COMBINED_TEXT "")
+        while(PENDING)
+            list(POP_FRONT PENDING CURRENT)
+            cmake_path(NORMAL_PATH CURRENT)
+            if(CURRENT IN_LIST VISITED OR NOT EXISTS "${CURRENT}")
+                continue()
+            endif()
+            list(APPEND VISITED "${CURRENT}")
+            file(READ "${CURRENT}" CURRENT_TEXT)
+            string(APPEND COMBINED_TEXT "\n${CURRENT_TEXT}")
+            string(REGEX MATCHALL "#[ \t]*include[ \t]*\"[^\"]+\"" INCLUDES "${CURRENT_TEXT}")
+            get_filename_component(CURRENT_DIRECTORY "${CURRENT}" DIRECTORY)
+            foreach(INCLUDE_DIRECTIVE IN LISTS INCLUDES)
+                string(REGEX REPLACE "^[^\"]*\"([^\"]+)\"$" "\\1" INCLUDE_PATH "${INCLUDE_DIRECTIVE}")
+                get_filename_component(INCLUDED_SOURCE "${INCLUDE_PATH}" ABSOLUTE
+                    BASE_DIR "${CURRENT_DIRECTORY}")
+                list(APPEND PENDING "${INCLUDED_SOURCE}")
+            endforeach()
+        endwhile()
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${VISITED})
+        set(${OUT_TEXT} "${COMBINED_TEXT}" PARENT_SCOPE)
+        set(${OUT_DEPENDENCIES} "${VISITED}" PARENT_SCOPE)
+    endfunction()
     foreach(ROOT_INDEX RANGE ${MATERIAL_SHADER_ROOT_LAST})
         list(GET MATERIAL_SHADER_ROOTS ${ROOT_INDEX} MATERIAL_SHADER_ROOT)
         list(GET MATERIAL_SHADER_NAMESPACES ${ROOT_INDEX} MATERIAL_SHADER_NAMESPACE)
         file(GLOB_RECURSE MATERIAL_SHADER_SOURCES CONFIGURE_DEPENDS
             "${MATERIAL_SHADER_ROOT}/*.hlsl")
         foreach(SHADER_SOURCE IN LISTS MATERIAL_SHADER_SOURCES)
-            file(READ "${SHADER_SOURCE}" MATERIAL_SHADER_TEXT)
+            engine_read_material_shader("${SHADER_SOURCE}" MATERIAL_SHADER_TEXT MATERIAL_SHADER_DEPENDENCIES)
             if(NOT MATERIAL_SHADER_TEXT MATCHES "VSMain|Object.hlsl")
                 continue()
             endif()
@@ -683,7 +732,7 @@ if(ENGINE_VULKAN_ENABLED)
                         -fvk-use-dx-layout -fspv-entrypoint-name=${SHADER_SPIRV_ENTRY}
                         -D VULKAN=1 -T ${SHADER_PROFILE} -E ${SHADER_ENTRY}
                         -Fo "${SHADER_OUTPUT}" "${SHADER_SOURCE}"
-                    DEPENDS "${SHADER_SOURCE}" ${MATERIAL_SHADER_HEADERS}
+                    DEPENDS ${MATERIAL_SHADER_DEPENDENCIES} ${MATERIAL_SHADER_HEADERS}
                         "${ENGINE_ROOT}/Engine/Core/Shaders/Object/Object.hlsl"
                     VERBATIM
                     COMMENT "Compiling material ${MATERIAL_SHADER_RELATIVE} (${SHADER_ENTRY})")
@@ -940,6 +989,11 @@ if(MSVC)
 endif()
 
 set(ENGINE_LOCAL_TEST_ROOT "${ENGINE_ROOT}/.local/tests")
+if(NOT ENGINE_PROJECT_DIR AND EXISTS "${ENGINE_LOCAL_TEST_ROOT}/CanopyLodStudy.cpp")
+    add_executable(CanopyLodStudy EXCLUDE_FROM_ALL "${ENGINE_LOCAL_TEST_ROOT}/CanopyLodStudy.cpp")
+    target_include_directories(CanopyLodStudy PRIVATE "${ENGINE_ROOT}/Engine")
+    target_link_libraries(CanopyLodStudy PRIVATE glm::glm)
+endif()
 
 if(NOT ENGINE_PROJECT_DIR AND WIN32 AND
    EXISTS "${ENGINE_LOCAL_TEST_ROOT}/EditorPlayPipelineTests.cpp")
@@ -1051,7 +1105,20 @@ if(NOT ENGINE_PROJECT_DIR AND WIN32 AND
     add_test(NAME AssetLocationIndexRegression COMMAND AssetLocationIndexTests)
 endif()
 
+# Verify depth rectangle commands survive recording and packet reuse.
+if(NOT ENGINE_PROJECT_DIR AND EXISTS "${ENGINE_LOCAL_TEST_ROOT}/ShadowCommandPacketTests.cpp")
+    enable_testing()
+    add_executable(ShadowCommandPacketTests EXCLUDE_FROM_ALL "${ENGINE_LOCAL_TEST_ROOT}/ShadowCommandPacketTests.cpp")
+    target_link_libraries(ShadowCommandPacketTests PRIVATE Engine)
+    target_include_directories(ShadowCommandPacketTests PRIVATE "${ENGINE_ROOT}/Engine")
+    add_test(NAME ShadowCommandPacket COMMAND ShadowCommandPacketTests)
+endif()
+
 # Verify recorded update and submission rates independently of UI-reported FPS.
+set_property(SOURCE
+    "${ENGINE_ROOT}/Engine/Editor/Core/View/Views/PerformanceRecording.cpp"
+    "${ENGINE_ROOT}/Engine/Editor/Diagnostics/EditorFrameProfiler.cpp"
+    APPEND PROPERTY COMPILE_DEFINITIONS ENGINE_BUILD_CONFIGURATION="$<CONFIG>")
 if(NOT ENGINE_PROJECT_DIR AND
    EXISTS "${ENGINE_LOCAL_TEST_ROOT}/PerformanceRecordingTests.cpp")
     enable_testing()
@@ -1074,6 +1141,26 @@ if(NOT ENGINE_PROJECT_DIR AND
     add_test(NAME PortableObjAndSpriteImport COMMAND PortableAssetCopyTests)
     set_tests_properties(PortableObjAndSpriteImport PROPERTIES
         WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/JsonConstructionTests.cpp")
+    enable_testing()
+    add_executable(JsonConstructionTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/JsonConstructionTests.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Serialization/Json.cpp")
+    target_include_directories(JsonConstructionTests PRIVATE "${ENGINE_ROOT}/Engine")
+    add_test(NAME JsonObjectConstruction COMMAND JsonConstructionTests)
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/JsonWriterTests.cpp")
+    enable_testing()
+    add_executable(JsonWriterTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/JsonWriterTests.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Serialization/Json.cpp")
+    target_include_directories(JsonWriterTests PRIVATE "${ENGINE_ROOT}/Engine")
+    add_test(NAME JsonWriterCompatibility COMMAND JsonWriterTests)
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND
@@ -2351,6 +2438,48 @@ if(NOT ENGINE_PROJECT_DIR AND EXISTS "${ENGINE_ROOT}/Tests/TextureLodTests.cpp")
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/test_texture_streaming_plan.py")
+    find_package(Python3 QUIET COMPONENTS Interpreter)
+    if(Python3_Interpreter_FOUND)
+        enable_testing()
+        add_test(NAME TextureStreamingPolicy
+            COMMAND "${Python3_EXECUTABLE}" "${ENGINE_LOCAL_TEST_ROOT}/test_texture_streaming_plan.py")
+    endif()
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND WIN32 AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/TextureStreamingTests.cpp" AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/TextureStreamingFixtures.h")
+    enable_testing()
+    add_executable(TextureStreamingTests EXCLUDE_FROM_ALL "${ENGINE_LOCAL_TEST_ROOT}/TextureStreamingTests.cpp")
+    target_link_libraries(TextureStreamingTests PRIVATE Engine)
+    target_include_directories(TextureStreamingTests PRIVATE "${ENGINE_ROOT}/Engine")
+    target_compile_definitions(TextureStreamingTests PRIVATE NOMINMAX)
+    add_test(NAME TextureStreamingLifetime COMMAND TextureStreamingTests)
+    set_tests_properties(TextureStreamingLifetime PROPERTIES WORKING_DIRECTORY "${ENGINE_ROOT}" TIMEOUT 60
+        ENVIRONMENT "ENGINE_TEXTURE_STREAMING_BUDGET_MB=0;ENGINE_TEXTURE_MAX_DIMENSION=0")
+endif()
+if(NOT ENGINE_PROJECT_DIR AND WIN32 AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/TextureStreamingBackendTests.cpp" AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/TextureStreamingFixtures.h")
+    enable_testing()
+    add_executable(TextureStreamingBackendTests EXCLUDE_FROM_ALL "${ENGINE_LOCAL_TEST_ROOT}/TextureStreamingBackendTests.cpp")
+    target_link_libraries(TextureStreamingBackendTests PRIVATE Engine)
+    target_include_directories(TextureStreamingBackendTests PRIVATE "${ENGINE_ROOT}/Engine")
+    target_compile_definitions(TextureStreamingBackendTests PRIVATE NOMINMAX)
+    set(texture_streaming_backends dx11 dx12)
+    if(ENGINE_VULKAN_ENABLED)
+        list(APPEND texture_streaming_backends vulkan)
+    endif()
+    foreach(backend IN LISTS texture_streaming_backends)
+        add_test(NAME TextureStreaming_${backend} COMMAND TextureStreamingBackendTests "${backend}"
+            "${ENGINE_ROOT}/.local/texture-streaming-validation/${backend}")
+        set_tests_properties(TextureStreaming_${backend} PROPERTIES WORKING_DIRECTORY "${ENGINE_ROOT}" TIMEOUT 180 RUN_SERIAL TRUE
+            ENVIRONMENT "ENGINE_TEXTURE_STREAMING_BUDGET_MB=0;ENGINE_TEXTURE_MAX_DIMENSION=0")
+    endforeach()
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
    EXISTS "${ENGINE_LOCAL_TEST_ROOT}/TextureResidencyTests.cpp")
     enable_testing()
     add_executable(TextureResidencyTests EXCLUDE_FROM_ALL
@@ -2367,7 +2496,7 @@ if(NOT ENGINE_PROJECT_DIR AND
             "${ENGINE_ROOT}/Engine/Core/Assets/Models/Woodland/Oaks/Textures/Texture 1 1.png"
             "${expected_cap}")
         set_tests_properties(TextureResidency_${cap} PROPERTIES
-            ENVIRONMENT "ENGINE_TEXTURE_MAX_DIMENSION=${cap}" TIMEOUT 60)
+            ENVIRONMENT "ENGINE_TEXTURE_MAX_DIMENSION=${cap};ENGINE_TEXTURE_STREAMING_BUDGET_MB=0" TIMEOUT 60)
     endforeach()
 endif()
 
@@ -2413,13 +2542,72 @@ if(NOT ENGINE_PROJECT_DIR AND WIN32 AND
     add_test(NAME TerrainSharedPrefabs COMMAND OakBackendCapture shared-prefabs)
     set_tests_properties(TerrainSharedPrefabs PROPERTIES WORKING_DIRECTORY "${ENGINE_ROOT}" TIMEOUT 60 RUN_SERIAL TRUE)
     set(oak_capture_backends dx11 dx12)
+    find_package(Python3 QUIET COMPONENTS Interpreter NumPy)
+    if(Python3_Interpreter_FOUND AND
+       EXISTS "${ENGINE_LOCAL_TEST_ROOT}/test_performance_inputs.py")
+        add_test(NAME PerformanceInputIdentity
+            COMMAND "${Python3_EXECUTABLE}" "${ENGINE_LOCAL_TEST_ROOT}/test_performance_inputs.py")
+    endif()
+    if(Python3_Interpreter_FOUND AND Python3_NumPy_FOUND AND
+       EXISTS "${ENGINE_LOCAL_TEST_ROOT}/test_shadow_ground.py")
+        add_test(NAME ShadowGroundAnalysisMath
+            COMMAND "${Python3_EXECUTABLE}" "${ENGINE_LOCAL_TEST_ROOT}/test_shadow_ground.py")
+    endif()
     if(ENGINE_VULKAN_ENABLED)
         list(APPEND oak_capture_backends vulkan)
     endif()
     foreach(backend IN LISTS oak_capture_backends)
+        add_test(NAME ScreenForest_${backend} COMMAND OakBackendCapture ${backend})
+        set_tests_properties(ScreenForest_${backend} PROPERTIES
+            WORKING_DIRECTORY "${ENGINE_ROOT}" TIMEOUT 300 RUN_SERIAL TRUE
+            ENVIRONMENT "ENGINE_OAK_SCREEN_LOD=1")
         add_test(NAME OakBackend_${backend} COMMAND OakBackendCapture ${backend})
         set_tests_properties(OakBackend_${backend} PROPERTIES
             WORKING_DIRECTORY "${ENGINE_ROOT}" TIMEOUT 240 RUN_SERIAL TRUE)
+        add_test(NAME OakGroundCapture_${backend} COMMAND OakBackendCapture ${backend})
+        add_test(NAME OakEntranceCapture_${backend} COMMAND OakBackendCapture ${backend})
+        add_test(NAME OakEntrance1080Capture_${backend} COMMAND OakBackendCapture ${backend})
+        set_tests_properties(OakEntrance1080Capture_${backend} PROPERTIES
+            WORKING_DIRECTORY "${ENGINE_ROOT}" TIMEOUT 600 RUN_SERIAL TRUE
+            ENVIRONMENT "ENGINE_OAK_GROUND_CAPTURE=1;ENGINE_OAK_WALK_VIEW=entrance;ENGINE_OAK_CAPTURE_SCALE=2")
+        set_tests_properties(OakEntranceCapture_${backend} PROPERTIES
+            WORKING_DIRECTORY "${ENGINE_ROOT}" TIMEOUT 300 RUN_SERIAL TRUE
+            ENVIRONMENT "ENGINE_OAK_GROUND_CAPTURE=1;ENGINE_OAK_WALK_VIEW=entrance")
+        set_tests_properties(OakGroundCapture_${backend} PROPERTIES
+            WORKING_DIRECTORY "${ENGINE_ROOT}" TIMEOUT 300 RUN_SERIAL TRUE
+            ENVIRONMENT "ENGINE_OAK_GROUND_CAPTURE=1")
+        if(Python3_Interpreter_FOUND AND Python3_NumPy_FOUND)
+            add_test(NAME OakEntrance1080Analysis_${backend}
+                COMMAND "${Python3_EXECUTABLE}" "${ENGINE_ROOT}/Scripts/analyze_shadow_ground.py"
+                    "${ENGINE_ROOT}/.local/tree-lod-oak-validation/entrance/1920x1080" --backend ${backend}
+                    --world-radius 0.25 --reference-directory "${ENGINE_ROOT}/.local/tree-lod-oak-validation/entrance"
+                    --check-retained-reference)
+            set_tests_properties(OakEntrance1080Analysis_${backend} PROPERTIES
+                DEPENDS "OakEntranceCapture_${backend};OakEntrance1080Capture_${backend}"
+                RUN_SERIAL TRUE TIMEOUT 90 SKIP_RETURN_CODE 77)
+            add_test(NAME OakEntranceAnalysis_${backend}
+                COMMAND "${Python3_EXECUTABLE}" "${ENGINE_ROOT}/Scripts/analyze_shadow_ground.py"
+                    "${ENGINE_ROOT}/.local/tree-lod-oak-validation/entrance" --backend ${backend} --check-retained-reference)
+            set_tests_properties(OakEntranceAnalysis_${backend} PROPERTIES
+                DEPENDS OakEntranceCapture_${backend} RUN_SERIAL TRUE TIMEOUT 60 SKIP_RETURN_CODE 77)
+            add_test(NAME OakEntranceWorldAnalysis_${backend}
+                COMMAND "${Python3_EXECUTABLE}" "${ENGINE_ROOT}/Scripts/analyze_shadow_ground.py"
+                    "${ENGINE_ROOT}/.local/tree-lod-oak-validation/entrance" --backend ${backend}
+                    --world-radius 0.25 --check-retained-reference)
+            set_tests_properties(OakEntranceWorldAnalysis_${backend} PROPERTIES
+                DEPENDS OakEntranceCapture_${backend} RUN_SERIAL TRUE TIMEOUT 60 SKIP_RETURN_CODE 77)
+            add_test(NAME OakWorldAnalysis_${backend}
+                COMMAND "${Python3_EXECUTABLE}" "${ENGINE_ROOT}/Scripts/analyze_shadow_ground.py"
+                    "${ENGINE_ROOT}/.local/tree-lod-oak-validation" --backend ${backend}
+                    --world-radius 0.25 --check-retained-reference)
+            set_tests_properties(OakWorldAnalysis_${backend} PROPERTIES
+                DEPENDS OakGroundCapture_${backend} RUN_SERIAL TRUE TIMEOUT 60 SKIP_RETURN_CODE 77)
+            add_test(NAME OakGroundAnalysis_${backend}
+                COMMAND "${Python3_EXECUTABLE}" "${ENGINE_ROOT}/Scripts/analyze_shadow_ground.py"
+                    "${ENGINE_ROOT}/.local/tree-lod-oak-validation" --backend ${backend} --check-retained-reference)
+            set_tests_properties(OakGroundAnalysis_${backend} PROPERTIES
+                DEPENDS OakGroundCapture_${backend} RUN_SERIAL TRUE TIMEOUT 60 SKIP_RETURN_CODE 77)
+        endif()
     endforeach()
     add_test(NAME OakBackend_dx12_gpu_validation COMMAND OakBackendCapture dx12)
     set_tests_properties(OakBackend_dx12_gpu_validation PROPERTIES
@@ -2473,7 +2661,7 @@ if(NOT ENGINE_PROJECT_DIR AND WIN32 AND
         "${ENGINE_LOCAL_TEST_ROOT}/ForestPerformanceAudit.cpp"
         "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/Grass/GrassField.cpp")
     target_link_libraries(ForestPerformanceAudit PRIVATE Engine d3d11 dxgi)
-    target_compile_definitions(ForestPerformanceAudit PRIVATE NOMINMAX)
+    target_compile_definitions(ForestPerformanceAudit PRIVATE NOMINMAX ENGINE_BUILD_CONFIGURATION="$<CONFIG>")
     target_compile_options(ForestPerformanceAudit PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/bigobj>)
     target_include_directories(ForestPerformanceAudit PRIVATE
         "${ENGINE_ROOT}/Engine" "${ENGINE_ROOT}/Engine/Core/Assets")
@@ -2540,4 +2728,28 @@ if(NOT ENGINE_PROJECT_DIR)
     target_include_directories(SplineGeometryTests PRIVATE "${ENGINE_ROOT}/Engine")
     add_test(NAME SplineGeometry COMMAND SplineGeometryTests)
     set_tests_properties(SplineGeometry PROPERTIES WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()
+
+if(BUILD_TESTING)
+    add_executable(GraphicsQualityTests EXCLUDE_FROM_ALL "${ENGINE_ROOT}/Tests/GraphicsQualityTests.cpp")
+    target_link_libraries(GraphicsQualityTests PRIVATE Engine)
+    target_include_directories(GraphicsQualityTests PRIVATE "${ENGINE_ROOT}/Engine")
+    target_compile_definitions(GraphicsQualityTests PRIVATE NOMINMAX)
+    add_test(NAME GraphicsQualityPolicy COMMAND GraphicsQualityTests)
+endif()
+
+if(BUILD_TESTING AND WIN32)
+    add_executable(GraphicsQualityBackendTests EXCLUDE_FROM_ALL "${ENGINE_ROOT}/Tests/GraphicsQualityBackendTests.cpp")
+    target_link_libraries(GraphicsQualityBackendTests PRIVATE Engine)
+    target_include_directories(GraphicsQualityBackendTests PRIVATE "${ENGINE_ROOT}/Engine")
+    target_compile_definitions(GraphicsQualityBackendTests PRIVATE NOMINMAX)
+endif()
+
+if(BUILD_TESTING AND WIN32 AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/TextureSamplingBackendTests.cpp")
+    add_executable(TextureSamplingBackendTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/TextureSamplingBackendTests.cpp")
+    target_link_libraries(TextureSamplingBackendTests PRIVATE Engine)
+    target_include_directories(TextureSamplingBackendTests PRIVATE "${ENGINE_ROOT}/Engine")
+    target_compile_definitions(TextureSamplingBackendTests PRIVATE NOMINMAX)
 endif()

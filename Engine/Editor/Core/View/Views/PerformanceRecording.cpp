@@ -1,4 +1,5 @@
 #include "PerformanceRecording.h"
+#include "Diagnostics/PerformanceProvenance.h"
 #include <chrono>
 #include <ctime>
 #include <iomanip>
@@ -71,6 +72,12 @@ bool PerformanceRecording::Start(const std::filesystem::path& path)
     std::lock_guard lock(m_mutex);
     if (!m_writer.Start(path)) return false;
     m_frameIndex = 0;
+    const auto time = std::chrono::system_clock::now();
+    const auto provenance = PerformanceProvenanceFields();
+    m_writer.Enqueue([time, provenance] {
+        return "{\"type\":\"session\",\"time_utc\":\"" + Timestamp(time) + "\"," +
+            provenance + "}";
+    }, provenance.size() + 256);
     m_originalStdout = std::cout.rdbuf();
     m_originalStderr = std::cerr.rdbuf();
     m_stdoutTap = std::make_unique<OutputTap>(*this, m_originalStdout, "stdout");

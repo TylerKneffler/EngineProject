@@ -1,5 +1,6 @@
 #include "Core/Compoonents/Materials/Texture.h"
 #include "Core/Graphics/IGraphicsProvider.h"
+#include "Core/Rendering/TextureResidency.h"
 #include <algorithm>
 #include <iostream>
 #include <stdexcept>
@@ -63,6 +64,7 @@ int main(int argc, char** argv)
         }
         const std::vector<uint8_t> expected(original.begin() + offset, original.end());
         Provider first, second;
+        const auto initial = Engine::Rendering::TextureResidency::Snapshot();
         auto verify = [&](Provider& provider) {
             Check(texture->PrepareImmediate(&provider), "upload failed");
             Check(provider.width == w && provider.height == h && provider.levels == levels,
@@ -79,6 +81,13 @@ int main(int argc, char** argv)
         texture->Reload();
         verify(second);
         Check(second.calls == 2, "reload did not recreate resource");
+        const auto residency = Engine::Rendering::TextureResidency::Snapshot();
+        Check(residency.uploads == initial.uploads + 3, "upload accounting includes cache hits");
+        Check(residency.residentResources == initial.residentResources + 1, "expired handles counted resident");
+        Check(residency.releasedResources == initial.releasedResources + 2, "release accounting");
+        Check(residency.residentPayloadBytes == initial.residentPayloadBytes + expected.size(), "resident payload accounting");
+        Check(residency.sourcePayloadBytes == initial.sourcePayloadBytes + original.size(), "source payload accounting");
+        Check(residency.uploadedPayloadBytes == initial.uploadedPayloadBytes + 3 * expected.size(), "upload volume accounting");
         std::cout << "Resident cap verified: " << w << 'x' << h << ", " << levels << " mips\n";
         return 0;
     }

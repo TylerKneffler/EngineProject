@@ -111,7 +111,8 @@ Model::JsonValue Model::Serialize() const
     JsonValue result = Component::Serialize();
     JsonValue paths = JsonValue::MakeArray();
     for (const std::string& path : m_nodePaths) paths.Push(JsonValue(path));
-    return result.Set("nodePaths", std::move(paths));
+    result.Set("nodePaths", std::move(paths));
+    return result;
 }
 
 void Model::Deserialize(const JsonValue& value)

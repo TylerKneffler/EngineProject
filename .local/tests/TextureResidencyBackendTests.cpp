@@ -3,6 +3,7 @@
 #include "Core/Compoonents/Obj/Mesh.h"
 #include "Core/Compoonents/Materials/Material.h"
 #include "Core/Compoonents/Materials/Texture.h"
+#include "Core/Rendering/TextureResidency.h"
 #include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Renderers/DX11/DX11GameRenderer.h"
 #include "Core/Renderers/DX12/DX12GameRenderer.h"
@@ -86,9 +87,20 @@ template<class Renderer> void Audit(const std::string& backend, const std::strin
     }
     renderer.WaitIdle();
     const auto after = usage();
+    const auto payload = Engine::Rendering::TextureResidency::Snapshot();
+    DXGI_QUERY_VIDEO_MEMORY_INFO localMemory{};
+    const bool budgetAvailable = adapter && SUCCEEDED(adapter->QueryVideoMemoryInfo(
+        0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &localMemory));
     std::ofstream report(prefix + ".json");
     report << "{\"backend\":\"" << backend << "\",\"allocation_bytes\":" << allocation
-        << ",\"dxgi_usage_before\":" << before << ",\"dxgi_usage_after\":" << after;
+        << ",\"dxgi_usage_before\":" << before << ",\"dxgi_usage_after\":" << after
+        << ",\"resident_payload_bytes\":" << payload.residentPayloadBytes
+        << ",\"source_payload_bytes\":" << payload.sourcePayloadBytes
+        << ",\"uploaded_payload_bytes_total\":" << payload.uploadedPayloadBytes
+        << ",\"uploads_total\":" << payload.uploads
+        << ",\"requested_bytes\":null,\"mip_demand\":null,\"evictions\":null"
+        << ",\"local_budget_bytes\":" << (budgetAvailable ? std::to_string(localMemory.Budget) : "null")
+        << ",\"local_usage_bytes\":" << (budgetAvailable ? std::to_string(localMemory.CurrentUsage) : "null");
     std::cout << "Dedicated allocation bytes: " << allocation << "; DXGI usage before/after: " << before << '/' << after << '\n';
     Engine::Scene::Scene scene;
     scene.Init(provider);
@@ -132,6 +144,9 @@ template<class Renderer> void Audit(const std::string& backend, const std::strin
             if constexpr (!std::is_same_v<Renderer, DX11GameRenderer>) renderer.RequestSceneCapture();
             renderer.EndFrame();
         }
+        // ReadSceneCaptureRGBA maps readback memory; EndFrame is asynchronous.
+        // Keep this diagnostic wait outside texture upload/retirement paths.
+        renderer.WaitIdle();
         if constexpr (std::is_same_v<Renderer, DX11GameRenderer>)
             Check(renderer.CaptureFrameRGBA(pixels), "capture failed");
         else Check(renderer.ReadSceneCaptureRGBA(pixels), "capture failed");

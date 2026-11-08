@@ -86,6 +86,8 @@ public:
 
     // ---- Factory helpers ----------------------------------------------------
     static JsonValue MakeObject();
+    // Allocation hint only; creates an empty object with normal Set semantics.
+    static JsonValue MakeObject(std::size_t memberCapacity);
     static JsonValue MakeArray();
 
 private:
@@ -105,6 +107,8 @@ private:
 
 // Pretty-print a JsonValue tree to a JSON string.
 std::string JsonWrite(const JsonValue& v, int startIndent = 0);
+// Same values and numeric precision, without formatting whitespace.
+std::string JsonWriteCompact(const JsonValue& v);
 
 // Parse a JSON string; throws std::runtime_error on parse error.
 JsonValue JsonParse(const std::string& src);

@@ -1,159 +1,79 @@
 <?xml version="1.0"?>
 <Scene xmlns:components="urn:engine-components" version="1">
-  <settings dimension="0" showGrid="true" gridHalfSize="10" gridCellSize="1" gridOpacity="0.4" gridFadeDistance="80" skyboxEnabled="true" skyboxTexture="" hdriLightingEnabled="false" hdriIntensity="1" hdriExposure="0" hdriRotation="0" toneMapping="1" outputExposure="0" renderMode="0" sceneViewUiOverlay="false" portalDebugVisuals="false" sceneCameraWarpLookThrough="false" portalDebugWireframe="false" portalDebugTintRemoteView="true" portalDebugOverlayAlpha="0.45" portalRecursionDepth="2" portalConnectionRepeatLimit="2" portalMaxViewsPerFrame="24">
-    <gridColor _arrayEncoding="spaceSeparatedNumbers">0.45 0.45 0.45</gridColor>
-    <gridOriginColor _arrayEncoding="spaceSeparatedNumbers">0.3 0.5 0.8</gridOriginColor>
-    <ambientColor _arrayEncoding="spaceSeparatedNumbers">0.12 0.12 0.12</ambientColor>
+  <settings dimension="0" showGrid="true" gridHalfSize="10" gridCellSize="1" gridOpacity="0.40000000596046448" gridFadeDistance="80" skyboxEnabled="true" skyboxTexture="" hdriLightingEnabled="false" hdriIntensity="1" hdriExposure="0" hdriRotation="0" toneMapping="1" textureLodEnabled="false" textureLodNearDistance="20" textureLodFarDistance="80" textureLodMipBias="4" textureLodSimplifyShading="true" textureLodDisableAlphaAtFar="false" textureLodAlphaMipBias="0" outputExposure="0" renderMode="0" renderScaleMode="0" renderScale="1" dynamicInternalRenderScale="false" temporalUpscaling="false" renderScaleTargetMs="16.670000076293945" renderScaleMinimum="0.5" renderScaleMaximum="1" sceneViewUiOverlay="false" portalDebugVisuals="false" sceneCameraWarpLookThrough="false" portalDebugWireframe="false" portalDebugTintRemoteView="true" portalDebugOverlayAlpha="0.44999998807907104" portalRecursionDepth="2" portalConnectionRepeatLimit="2" portalMaxViewsPerFrame="24">
+    <gridColor _arrayEncoding="spaceSeparatedNumbers">0.44999998807907104 0.44999998807907104 0.44999998807907104</gridColor>
+    <gridOriginColor _arrayEncoding="spaceSeparatedNumbers">0.30000001192092896 0.5 0.80000001192092896</gridOriginColor>
+    <ambientColor _arrayEncoding="spaceSeparatedNumbers">0.11999999731779099 0.11999999731779099 0.11999999731779099</ambientColor>
   </settings>
   <objects>
     <item prefab="Engine/Core/Assets/Models/mmd/Mococo/Mococo Prefab/Mococo Abyssgard.low.prefab">
       <transform>
         <Transform.position _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.position>
         <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
-        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">0.08 0.08 0.08</Transform.scale>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">0.079999998211860657 0.079999998211860657 0.079999998211860657</Transform.scale>
       </transform>
-      <prefabOverrides>
-        <item value="0.8">
-          <path>
-            <item key="components" />
-            <item index="3" />
-            <item key="speed" />
-          </path>
-        </item>
-        <item value="0.8">
-          <path>
-            <item key="components" />
-            <item index="3" />
-            <item key="layers" />
-            <item index="0" />
-            <item key="speed" />
-          </path>
-        </item>
-        <item value="false">
-          <path>
-            <item key="children" />
-            <item index="2" />
-            <item key="children" />
-            <item index="1" />
-            <item key="enabled" />
-          </path>
-        </item>
-        <item value="false">
-          <path>
-            <item key="children" />
-            <item index="2" />
-            <item key="children" />
-            <item index="32" />
-            <item key="enabled" />
-          </path>
-        </item>
-        <item value="false">
-          <path>
-            <item key="children" />
-            <item index="2" />
-            <item key="children" />
-            <item index="33" />
-            <item key="enabled" />
-          </path>
-        </item>
-        <item value="false">
-          <path>
-            <item key="children" />
-            <item index="2" />
-            <item key="children" />
-            <item index="34" />
-            <item key="enabled" />
-          </path>
-        </item>
-        <item value="false">
-          <path>
-            <item key="children" />
-            <item index="2" />
-            <item key="children" />
-            <item index="35" />
-            <item key="enabled" />
-          </path>
-        </item>
-        <item value="false">
-          <path>
-            <item key="children" />
-            <item index="2" />
-            <item key="children" />
-            <item index="36" />
-            <item key="enabled" />
-          </path>
-        </item>
-        <item value="false">
-          <path>
-            <item key="children" />
-            <item index="2" />
-            <item key="children" />
-            <item index="37" />
-            <item key="enabled" />
-          </path>
-        </item>
-        <item value="false">
-          <path>
-            <item key="children" />
-            <item index="2" />
-            <item key="children" />
-            <item index="38" />
-            <item key="enabled" />
-          </path>
-        </item>
-      </prefabOverrides>
     </item>
     <item name="Dance Floor" enabled="true">
       <transform>
-        <Transform.position _arrayEncoding="spaceSeparatedNumbers">0 -0.025 0</Transform.position>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">0 -0.025000000000000001 0</Transform.position>
         <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
-        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">6 0.04 6</Transform.scale>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">6 0.039999999105930328 6</Transform.scale>
       </transform>
       <components>
-        <components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj" Mesh.useLightProbes="false" />
-        <components:Material Material.shininess="32" Material.baseColorAlpha="1" Material.alphaMode="Opaque" Material.alphaCutoff="0.5" Material.doubleSided="false" Material.castsShadows="true" Material.unlit="false" Material.lightingChannels="-1" Material.metallicFactor="0.05" Material.roughnessFactor="0.85" Material.subsurfaceEnabled="false" Material.subsurfaceWeight="0" Material.subsurfaceThickness="0" Material.subsurfaceTransmission="0" Material.environmentDiffuseStrength="1" Material.occlusionStrength="1" Material.reflectionStrength="1" Material.useCustomReflectionEnvironment="false" Material.reflectionEnvironmentTexture="" Material.reflectionEnvironmentExposure="0" Material.reflectionEnvironmentRotation="0" Material.normalScale="1" Material.heightScale="0.05" Material.heightMinSteps="8" Material.heightMaxSteps="32" Material.baseColorUvSet="0" Material.metallicRoughnessUvSet="0" Material.normalUvSet="0" Material.occlusionUvSet="0" Material.emissiveUvSet="0" Material.heightUvSet="0" Material.metallicRoughnessTexture="" Material.normalTexture="" Material.heightTexture="" Material.occlusionTexture="" Material.emissiveTexture="" Material.subsurfaceThicknessTexture="" Material.materialAsset="Assets/Materials/calibration_checker.material" Material.baseColorTexture="Assets/Textures/Calibration/checker.png">
+        <components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj" Mesh.foliageWindStrength="0" Mesh.useLightProbes="false" Mesh.gpuLodSelection="false" Mesh.gpuLod1Distance="8" Mesh.gpuLod2Distance="16" />
+        <components:Material Material.useVertexColors="true" Material.shininess="32" Material.specularModel="MetallicRoughness" Material.baseColorAlpha="1" Material.baseColorTextureTintAlpha="1" Material.edgeWidth="0" Material.edgeEnabled="false" Material.sphereMode="0" Material.builtinToon="-1" Material.alphaMode="Opaque" Material.alphaCutoff="0.5" Material.doubleSided="false" Material.overrideTextureLod="false" Material.textureLodEnabled="false" Material.textureLodNearDistance="20" Material.textureLodFarDistance="80" Material.textureLodMipBias="4" Material.textureLodSimplifyShading="true" Material.textureLodDisableAlphaAtFar="false" Material.textureLodAlphaMipBias="0" Material.castsShadows="true" Material.unlit="false" Material.lightingChannels="-1" Material.metallicFactor="0.05000000074505806" Material.roughnessFactor="0.85000002384185791" Material.subsurfaceEnabled="false" Material.subsurfaceWeight="0" Material.subsurfaceThickness="0" Material.subsurfaceTransmission="0" Material.environmentDiffuseStrength="1" Material.occlusionStrength="1" Material.reflectionStrength="1" Material.useCustomReflectionEnvironment="false" Material.reflectionEnvironmentTexture="" Material.reflectionEnvironmentExposure="0" Material.reflectionEnvironmentRotation="0" Material.normalScale="1" Material.heightScale="0.05000000074505806" Material.terrainHeightBlendStrength="0" Material.heightMinSteps="8" Material.heightMaxSteps="32" Material.baseColorUvSet="0" Material.metallicRoughnessUvSet="0" Material.normalUvSet="0" Material.occlusionUvSet="0" Material.emissiveUvSet="0" Material.heightUvSet="0" Material.materialAsset="" Material.shader="" Material.sphereTexture="" Material.toonTexture="" Material.baseColorTexture="C:/repos/EngineProject/Engine/Core/Assets/Textures/Calibration/checker.png" Material.metallicRoughnessTexture="" Material.normalTexture="" Material.heightTexture="" Material.occlusionTexture="" Material.emissiveTexture="" Material.subsurfaceThicknessTexture="">
           <Material.diffuse _arrayEncoding="spaceSeparatedNumbers">1 1 1</Material.diffuse>
-          <Material.ambient _arrayEncoding="spaceSeparatedNumbers">0.1 0.1 0.1</Material.ambient>
+          <Material.ambient _arrayEncoding="spaceSeparatedNumbers">0.10000000149011612 0.10000000149011612 0.10000000149011612</Material.ambient>
           <Material.specular _arrayEncoding="spaceSeparatedNumbers">1 1 1</Material.specular>
           <Material.emissiveColor _arrayEncoding="spaceSeparatedNumbers">0 0 0</Material.emissiveColor>
-          <Material.subsurfaceRadius _arrayEncoding="spaceSeparatedNumbers">0.004 0.002 0.001</Material.subsurfaceRadius>
-          <Material.subsurfaceColor _arrayEncoding="spaceSeparatedNumbers">1 0.45 0.35</Material.subsurfaceColor>
+          <Material.baseColorTextureTint _arrayEncoding="spaceSeparatedNumbers">1 1 1</Material.baseColorTextureTint>
+          <Material.subsurfaceRadius _arrayEncoding="spaceSeparatedNumbers">0.0040000001899898052 0.0020000000949949026 0.0010000000474974513</Material.subsurfaceRadius>
+          <Material.subsurfaceColor _arrayEncoding="spaceSeparatedNumbers">1 0.44999998807907104 0.34999999403953552</Material.subsurfaceColor>
+          <Material.terrainMacroColor _arrayEncoding="spaceSeparatedNumbers">0 0 0</Material.terrainMacroColor>
+          <Material.edgeColor _arrayEncoding="spaceSeparatedNumbers">0 0 0 0</Material.edgeColor>
+          <Material.sphereTint _arrayEncoding="spaceSeparatedNumbers">1 1 1 1</Material.sphereTint>
+          <Material.toonTint _arrayEncoding="spaceSeparatedNumbers">1 1 1 1</Material.toonTint>
         </components:Material>
       </components>
-      <children />
+      <children _arrayEncoding="spaceSeparatedNumbers"></children>
     </item>
     <item name="Dance Camera" enabled="true">
       <transform>
-        <Transform.position _arrayEncoding="spaceSeparatedNumbers">0 0.95 2.7</Transform.position>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">0 0.94999999999999996 2.7000000000000002</Transform.position>
         <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
         <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
       </transform>
       <components>
-        <components:Camera Camera.active="true" Camera.useTransformRotation="false" Camera.fov="50" Camera.near="0.01" Camera.far="100" Camera.orthographic="false" Camera.orthographicSize="5">
+        <components:Camera Camera.active="true" Camera.useTransformRotation="false" Camera.fov="50" Camera.near="0.0099999997764825821" Camera.far="100" Camera.orthographic="false" Camera.orthographicSize="5">
           <Camera.target _arrayEncoding="spaceSeparatedNumbers">0 0.75 0</Camera.target>
           <Camera.up _arrayEncoding="spaceSeparatedNumbers">0 1 0</Camera.up>
         </components:Camera>
       </components>
-      <children />
+      <children _arrayEncoding="spaceSeparatedNumbers"></children>
     </item>
     <item name="Dance Key Light" enabled="true">
       <transform>
         <Transform.position _arrayEncoding="spaceSeparatedNumbers">-2 3 2</Transform.position>
-        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0.65 2.6 0</Transform.rotation>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0.64999997615814209 2.5999999046325684 0</Transform.rotation>
         <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
       </transform>
       <components>
-        <components:Light Light.lightType="1" Light.intensity="2" Light.range="8" Light.falloff="2" Light.intensityMode="0" Light.innerConeAngle="25" Light.outerConeAngle="35" Light.lightingChannels="-1" Light.cookieTexture="" Light.iesProfileTexture="" Light.cookieScale="1" Light.baked="false" Light.castsShadows="true" Light.shadowStrength="1" Light.shadowDepthBias="0.0015" Light.shadowNormalBias="0.01" Light.shadowResolutionScale="1" Light.shadowFilterScale="1">
-          <Light.color _arrayEncoding="spaceSeparatedNumbers">1 0.95 0.85</Light.color>
+        <components:Light Light.lightType="1" Light.intensity="2" Light.range="8" Light.falloff="2" Light.intensityMode="0" Light.innerConeAngle="25" Light.outerConeAngle="35" Light.lightingChannels="-1" Light.cookieTexture="" Light.iesProfileTexture="" Light.cookieScale="1" Light.baked="false" Light.castsShadows="true" Light.shadowStrength="1" Light.shadowDepthBias="0.001500000013038516" Light.shadowNormalBias="0.0099999997764825821" Light.shadowResolutionScale="1" Light.shadowFilterScale="1">
+          <Light.color _arrayEncoding="spaceSeparatedNumbers">1 0.94999998807907104 0.85000002384185791</Light.color>
         </components:Light>
       </components>
-      <children />
+      <children _arrayEncoding="spaceSeparatedNumbers"></children>
     </item>
     <item name="MMD Animation Replay" enabled="true">
+      <transform>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+      </transform>
       <components>
         <components:MmdDanceReplay MmdDanceReplay.characterObjectName="Mococo Abyssgard" />
       </components>
-      <children />
+      <children _arrayEncoding="spaceSeparatedNumbers"></children>
     </item>
   </objects>
 </Scene>

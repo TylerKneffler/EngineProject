@@ -3,6 +3,7 @@
 #include "Core/PropertyMacros.h"
 #include "Core/Graphics/IGraphicsBuffer.h"
 #include "Core/Model/MeshData.h"
+#include "Core/Rendering/MeshLodSelection.h"
 #include <cstdint>
 #include <algorithm>
 #include <string>
@@ -10,6 +11,7 @@
 #include <memory>
 #include <optional>
 #include <initializer_list>
+#include <atomic>
 
 namespace Engine::Components
 {
@@ -38,6 +40,9 @@ public:
     bool useBoundsForShadowCulling = false;
     // Runtime classification; the project grass shadow budget supplements the layer budget.
     bool grassShadowCaster = false;
+    // Transient provenance for transformed shared prefab geometry, whose source
+    // buffer intentionally has no file path. Does not affect rendering policy.
+    bool treeTimingGeometry = false;
     // Authored foliage shares the grass wind field, with restrained tree motion.
     PROPERTY(Inspector,EditAnywhere,Category="Foliage",ClampMin="0",ClampMax="1")
     float foliageWindStrength = 0.f;
@@ -47,6 +52,12 @@ public:
     float runtimeShadowFadeWidth = 1.f;
     PROPERTY(Inspector,EditAnywhere,Category="LOD")
     bool gpuLodSelection = false;
+    // Opt in to pixel thresholds; distance override restores authored policy.
+    bool screenLodSelection = false;
+    bool distanceLodOverride = false;
+    float screenLod1Pixels = 300.f;
+    float screenLod2Pixels = 80.f;
+    float screenLodHysteresis = .1f;
     // Independent resident prefab bands may use different materials (e.g. impostors).
     // Transient; all bands share placement records and are selected on the GPU.
     int prefabLodBand = -1;
@@ -84,9 +95,14 @@ public:
     struct InstanceTransform { glm::vec4 rows[3]; };
     struct InstanceData
     {
+        inline static std::atomic<uint64_t> nextLodIdentity{1};
+        const uint64_t lodIdentity=nextLodIdentity.fetch_add(1,std::memory_order_relaxed);
         uint64_t revision=1;
         uint64_t slicesRevision=1;
         uint64_t stableId=0;
+        bool hasLodBounds=false;
+        glm::vec3 lodMinimum{0},lodMaximum{0};
+        int maximumLod=0;
         std::vector<uint64_t> placementIds;
         void MarkDirty() { ++revision; }
         struct Slice
@@ -130,6 +146,7 @@ public:
     }
     const std::vector<uint32_t>& GetIndices() const { return m_indices; }
     uint64_t GetAuthoredGeometryRevision() const { return m_authoredGeometryRevision; }
+    float GetTextureUvWorldScale(uint32_t uvSet = 0) const;
     struct PoseSnapshot
     {
         std::vector<Vertex> vertices;
@@ -196,6 +213,12 @@ public:
         float hysteresis = 0.f) const;
     int ChooseRuntimeLod(float distance, const std::vector<float>& thresholds,
         float hysteresis = 0.f) const;
+    // Opt-in visible selection. An explicit distance override always wins.
+    // View must describe the actual render target; keep separate state per view.
+    int ChooseScreenRuntimeLod(const glm::mat4& world,
+        const Engine::Rendering::MeshLodView& view,
+        const std::vector<float>& pixelThresholds, float hysteresis = .1f,
+        std::optional<int> distanceOverride = std::nullopt) const;
     size_t GetResidentRuntimeLodCount() const;
     uint64_t GetRuntimeLodGpuMemoryBytes() const;
     // Releases cached alternatives, retaining the currently displayed geometry.
@@ -337,6 +360,8 @@ private:
     std::vector<TerrainVertex> m_terrainVertices;
     std::vector<uint32_t> m_indices;
     uint64_t m_authoredGeometryRevision = 1;
+    mutable uint64_t m_textureUvRevision = 0;
+    mutable std::array<float,2> m_textureUvScale{};
     std::shared_ptr<IGraphicsBuffer> m_vertexBuffer;
     bool m_sharedVertexBuffer = false, m_sharedIndexBuffer = false;
     void MakeGeometryWritable();

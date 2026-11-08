@@ -451,7 +451,8 @@ RigController::JsonValue RigController::Serialize() const
             .Set("weight", Value(morph.weight))
             .Set("offsets", std::move(offsets)));
     }
-    return result.Set("impulseMorphs", std::move(impulses));
+    result.Set("impulseMorphs", std::move(impulses));
+    return result;
 }
 
 void RigController::Deserialize(const JsonValue& value)

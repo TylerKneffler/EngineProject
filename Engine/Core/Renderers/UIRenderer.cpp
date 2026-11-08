@@ -8,6 +8,7 @@
 #include "Core/Compoonents/UI/UIObject.h"
 #include "Core/Compoonents/UI/UIText.h"
 #include "Core/Compoonents/Materials/Texture.h"
+#include <limits>
 #include "Core/Graphics/IGraphicsBuffer.h"
 #include "Core/Graphics/IGraphicsContext.h"
 #include "Core/Graphics/IGraphicsProvider.h"
@@ -632,6 +633,10 @@ void UIRenderer::Render(Engine::Scene::Scene& scene,
                 continue;
 
             const uint32_t first = static_cast<uint32_t>(vertices.size());
+            // Retained canvases may have nested transforms and external target
+            // scaling. Preserve UI detail until that mapping supplies derivatives.
+            if(texture) Engine::Components::Texture::RequestGraphicsFootprint(texture->GetGraphicsTexture(),
+                std::numeric_limits<float>::infinity());
             AddQuad(vertices, x0, y0, x1, y1, u0, v0, u1, v1,
                 glm::vec4(image->color, std::clamp(image->alpha, 0.f, 1.f)), canvasSize);
             auto* graphicsTexture = solidColorImage

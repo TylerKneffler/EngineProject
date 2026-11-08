@@ -17,7 +17,7 @@ public:
         VkDevice device,
         VkRenderPass renderPass,
         VkQueue queue,
-        uint32_t queueFamily);
+        uint32_t queueFamily, bool pipelineStatisticsEnabled);
     ~VulkanGraphicsProvider() override;
     Engine::Graphics::IShaderCompiler* GetShaderCompiler() override { return &m_shaderCompiler; }
     Engine::Graphics::IGraphicsBufferFactory* GetBufferFactory() override { return m_bufferFactory.get(); }

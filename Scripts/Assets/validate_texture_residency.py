@@ -26,7 +26,7 @@ def main():
     for backend in args.backends:
         for cap in (0, 2048, 1024):
             prefix = args.output / f"{backend}-{cap}"
-            env = dict(os.environ, ENGINE_TEXTURE_MAX_DIMENSION=str(cap))
+            env = dict(os.environ, ENGINE_TEXTURE_MAX_DIMENSION=str(cap), ENGINE_TEXTURE_STREAMING_BUDGET_MB="0")
             returncode = 0
             if not args.reuse:
                 with prefix.with_suffix(".log").open("w") as log:

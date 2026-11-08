@@ -1,4 +1,5 @@
 #include "Core/Scene/Scene.h"
+#include "CanopyExperiment.h"
 #include "Core/Window.h"
 #include "Core/Compoonents/Obj/Mesh.h"
 #include "Core/Compoonents/Obj/Terrain.h"
@@ -6,7 +7,10 @@
 #include "Core/Compoonents/Physics/PrimitiveObjectCollider.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
 #include "Core/Serialization/SceneSerializer.h"
+#include "Core/Serialization/Json.h"
+#include "Core/Serialization/HexBytes.h"
 #include "Core/Graphics/IGraphicsProvider.h"
+#include "Core/Rendering/SharedMeshBuffers.h"
 #include <cstring>
 #include <set>
 #include "Core/Compoonents/Materials/Material.h"
@@ -23,6 +27,8 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
+#include <iomanip>
 #include <iostream>
 #include <stdexcept>
 #include <type_traits>
@@ -33,9 +39,166 @@ using namespace Engine::Renderers;
 using namespace Engine::Components;
 void Check(bool ok, const char* text) { if (!ok) throw std::runtime_error(text); }
 
+void CheckGrassPhaseTiming()
+{
+    {
+        Engine::Scene::Scene grassScene;
+        auto* field=grassScene.AddObject("Grass without terrain")->AddComponent<GrassField>();
+        const auto phases=[](const Engine::Rendering::GrassPerformance& p) {
+            return p.referencesMs+p.sourcesMs+p.placementMs+p.visibilityMs+
+                p.retirementMs+p.schedulingMs+p.buildMs+p.accountingMs+p.otherMs;
+        };
+        field->TickSpatialRegion(false);
+        const auto first=field->GetLastPerformance();
+        Check(first.totalMs>0 && std::abs(phases(first)-first.totalMs)<1.e-6,
+            "early grass refresh failed to publish complete phase timing");
+        field->TickSpatialRegion(false);
+        const auto& accumulated=grassScene.GetGrassPerformance();
+        const bool accumulatedCorrectly=
+            std::abs(accumulated.totalMs-first.totalMs-field->GetLastPerformance().totalMs)<1.e-6 &&
+            std::abs(phases(accumulated)-accumulated.totalMs)<1.e-6;
+        if(!accumulatedCorrectly)
+            std::cerr << std::setprecision(17) << "Grass accumulation: first=" << first.totalMs
+                << " second=" << field->GetLastPerformance().totalMs << " scene=" << accumulated.totalMs
+                << " scene_phases=" << phases(accumulated) << '\n';
+        Check(accumulatedCorrectly,
+            "grass phase accumulation lost or double-counted time");
+    }
+}
+
+void CheckResolvedMaterialCopy()
+{
+    using namespace Engine::Serialization;
+    std::filesystem::create_directories(".local/tests-generated");
+    const std::string path = ".local/tests-generated/resolved-copy.material";
+    { std::ofstream out(path); out << R"({"baseColor":[0.2,0.4,0.6],"roughness":0.3})"; }
+    Engine::Scene::Scene scene;
+    auto* source = scene.AddObject("Prototype")->AddComponent<Material>();
+    auto* copy = scene.AddObject("Batch")->AddComponent<Material>();
+    Check(source->LoadFromFile(path), "resolved material fixture did not load");
+    auto data = source->Serialize();
+    data.Set("shader", "custom.shader").Set("alphaMode", "Mask")
+        .Set("edgeColor", JsonParse("[0.2,0.3,0.4,0.5]"))
+        .Set("sphereTint", JsonParse("[0.4,0.5,0.6,0.7]"))
+        .Set("toonTint", JsonParse("[0.6,0.7,0.8,0.9]"))
+        .Set("textureLodMipBias", 1.5f).Set("baseColorUvSet", 3)
+        .Set("subsurfaceEnabled", true).Set("subsurfaceWeight", 0.7f);
+    source->Deserialize(data);
+    const auto color = Texture::Acquire(".local/tests-generated/resolved-color.png", true);
+    const auto linear = Texture::Acquire(".local/tests-generated/resolved-linear.png", false);
+    source->baseColorTexture = color; source->sphereTexture = color;
+    source->toonTexture = color; source->emissiveTexture = color;
+    source->metallicRoughnessTexture = linear; source->normalTexture = linear;
+    source->heightTexture = linear; source->occlusionTexture = linear;
+    source->subsurfaceThicknessTexture = linear;
+    source->reflectionEnvironmentTexture = linear->GetFilePath();
+    source->reflectionEnvironmentMap = linear;
+    source->Validate();
+    Material legacy;
+    legacy.Deserialize(source->Serialize());
+    const auto expected = JsonWriteCompact(legacy.Serialize());
+    auto* owner = copy->Owner;
+    const auto revision = copy->GetConfigurationRevision();
+    // A batch copies the state of its exact prototype, even if a file changes
+    // halfway through constructing its spatial tiles. Later file loads still
+    // observe the edit normally.
+    { std::ofstream out(path); out << R"({"baseColor":[0.9,0.8,0.7],"roughness":0.8})"; }
+    copy->shaderError = "old diagnostic";
+    copy->CopyResolvedStateFrom(*source);
+    Check(copy->Owner == owner && copy->GetConfigurationRevision() != revision,
+        "resolved material copy lost owner or dirty notification");
+    Check(copy->shaderError.empty() && JsonWriteCompact(copy->Serialize()) == expected,
+        "resolved material copy changed serialized values");
+    Check(copy->baseColorTexture == color && copy->sphereTexture == color &&
+        copy->toonTexture == color && copy->emissiveTexture == color &&
+        copy->metallicRoughnessTexture == linear && copy->normalTexture == linear &&
+        copy->heightTexture == linear && copy->occlusionTexture == linear &&
+        copy->subsurfaceThicknessTexture == linear && copy->reflectionEnvironmentMap == linear,
+        "resolved material copy lost shared texture ownership");
+    Material edited;
+    Check(edited.LoadFromFile(path) && edited.roughnessFactor == 0.8f,
+        "ordinary material loading stopped observing edits");
+    auto modified = copy->Serialize(); modified.Set("roughnessFactor", 0.6f);
+    copy->Deserialize(modified);
+    Check(copy->roughnessFactor == 0.6f && source->roughnessFactor == 0.3f,
+        "resolved material copy retained prototype field bindings");
+    copy->CopyResolvedStateFrom(*source);
+    copy->CopyResolvedStateFrom(*copy);
+    scene.RemoveObject(source->Owner);
+    scene.CommitPendingObjectChanges();
+    Check(copy->Owner == owner && copy->baseColorTexture == color &&
+        JsonWriteCompact(copy->Serialize()) == expected,
+        "destroying prototype invalidated batch material");
+    Material empty;
+    copy->CopyResolvedStateFrom(empty);
+    Check(!copy->baseColorTexture && !copy->reflectionEnvironmentMap && copy->GetFilePath().empty(),
+        "resolved material replacement retained old resources");
+}
+
 void CheckSharedPrefabLayer()
 {
+    CheckGrassPhaseTiming();
+    CheckResolvedMaterialCopy();
+    {
+        using namespace Engine::Serialization;
+        const auto simple=JsonParse("[1,true,null,{},[]]");
+        Check(JsonWriteCompact(simple)=="[1,true,null,{},[]]",
+            "compact JSON retained formatting whitespace");
+        Check(JsonWrite(simple)=="[\n    1,\n    true,\n    null,\n    {},\n    []\n]\n",
+            "compact JSON changed existing pretty output");
+        const auto source=JsonParse(R"({"text":"line\n\"quoted\"\\\t with spaces","values":[1.2345678901234567,1e-300,-10000000000000000],"empty":[]})");
+        const auto compact=JsonWriteCompact(source);
+        Check(JsonWrite(JsonParse(compact))==JsonWrite(source),
+            "compact JSON changed nested values, precision or escaped strings");
+        Check(compact.size()<JsonWrite(source).size(),"compact JSON did not reduce snapshot size");
+    }
     using namespace Engine::Graphics;
+    {
+        using namespace Engine::Serialization;
+        TerrainObjectLayer source;
+        for(int i=0;i<3;++i)
+        {
+            TerrainObjectLayer::Placement placement;
+            placement.id=i<2 ? 7 : 0; // Duplicate and missing authored IDs.
+            placement.asset="fixture.prefab";
+            placement.position={float(i),0.f,0.f};
+            source.placements.push_back(placement);
+        }
+        const auto data=source.Serialize();
+        const auto signature=source.GetPlacementSignature();
+        TerrainObjectLayer restored;
+        restored.Deserialize(data);
+        Check(restored.HasLoadedPreparedData() && restored.GetPlacementSignature()==signature,
+            "normalized placement signature rejected valid baked data");
+        std::set<uint64_t> ids;
+        for(size_t i=0;i<restored.placements.size();++i)
+            Check(restored.placements[i].id!=0 && ids.insert(restored.placements[i].id).second &&
+                restored.placements[i].id==source.placements[i].id,"placement ID normalization changed");
+        Check(JsonWriteCompact(restored.Serialize())==JsonWriteCompact(data),
+            "baked placement roundtrip changed serialized values");
+        auto stale=data;
+        stale["placements"].ArrayAt(0)["position"].ArrayAt(0)=JsonValue(25.f);
+        restored.Deserialize(stale);
+        Check(!restored.HasLoadedPreparedData(),"stale baked placement signature was accepted");
+        Check(restored.GetPreparedSignature(4.f)==restored.GetPlacementSignature(),
+            "stale baked placement fallback failed to rebuild");
+        std::vector<uint8_t> bytes;
+        Check(DecodeHex(data["bakedInstances"].AsString(),bytes),"baked fixture decode failed");
+        // Duplicate a record index while retaining the valid placement signature.
+        std::memcpy(bytes.data()+20+60,bytes.data()+20,sizeof(uint32_t));
+        auto corrupt=data;
+        corrupt.Set("bakedInstances",JsonValue(EncodeHex(bytes)));
+        restored.Deserialize(corrupt);
+        Check(!restored.HasLoadedPreparedData(),"duplicate baked record index was accepted");
+        auto legacy=data;
+        legacy.Erase("bakedInstances");
+        legacy["placements"].ArrayAt(0).Set("id",JsonValue("0"));
+        legacy["placements"].ArrayAt(1).Set("id",JsonValue("0"));
+        restored.Deserialize(legacy);
+        Check(!restored.HasLoadedPreparedData() && restored.placements[0].id!=0 &&
+            restored.placements[1].id!=0 && restored.placements[0].id!=restored.placements[1].id,
+            "legacy placement load skipped missing ID normalization");
+    }
     struct Buffer : IGraphicsBuffer
     {
         Usage usage; AccessMode access; uint32_t stride; std::vector<uint8_t> bytes;
@@ -63,7 +226,89 @@ void CheckSharedPrefabLayer()
             ++allocations; return result;
         }
     } provider;
+    {
+        Provider bufferProvider;
+        std::vector<unsigned char> input(65, 0x5a);
+        for (size_t size=1; size<=63; ++size)
+        {
+            // Exercise every word-tail length with an unaligned input.
+            auto first=Engine::Rendering::AcquireMeshBuffer(&bufferProvider,
+                IGraphicsBuffer::Usage::VertexBuffer,input.data()+1,size,1);
+            auto same=Engine::Rendering::AcquireMeshBuffer(&bufferProvider,
+                IGraphicsBuffer::Usage::VertexBuffer,input.data()+1,size,1);
+            Check(first && first==same,"identical buffer content was not shared");
+            for (size_t byte=1; byte<=size; ++byte)
+            {
+                input[byte]^=1;
+                auto changed=Engine::Rendering::AcquireMeshBuffer(&bufferProvider,
+                    IGraphicsBuffer::Usage::VertexBuffer,input.data()+1,size,1);
+                Check(changed && changed!=first,"different buffer content was shared");
+                Check(std::memcmp(static_cast<Buffer*>(changed.get())->bytes.data(),
+                    input.data()+1,size)==0,"shared buffer lost source bytes");
+                input[byte]^=1;
+            }
+        }
+    }
     std::filesystem::create_directories(".local/tests-generated");
+    {
+        const std::string payload(1024*1024,'x');
+        const std::string path=".local/tests-generated/xml-borrowed-text.prefab";
+        {
+            std::ofstream out(path,std::ios::binary);
+            out << "<Prefab><object enabled=\"true\" disabled=\"false\" number=\"-1.25e2\" "
+                "overflow=\"1e9999\" partial=\"12tail\" empty=\"\" payload=\"" << payload
+                << "\"><numbers _arrayEncoding=\"spaceSeparatedNumbers\"> 1, -2.5 3e2 </numbers>"
+                "<literal _valueType=\"string\">true</literal>"
+                "<entities _valueType=\"string\">Gr&#x61;ss &amp; &lt;trees&gt; &#xE9;</entities></object></Prefab>";
+        }
+        const auto document=Engine::Serialization::SceneSerializer::ReadPrefabFile(path);
+        const auto& object=document["object"];
+        Check(object["enabled"].IsBool() && object["enabled"].AsBool() &&
+            object["disabled"].IsBool() && !object["disabled"].AsBool() &&
+            object["number"].IsNumber() && object["number"].AsDouble()==-125 &&
+            object["overflow"].AsString()=="1e9999" && object["partial"].AsString()=="12tail" &&
+            object["empty"].IsString() && object["empty"].AsString().empty() &&
+            object["payload"].AsString()==payload && object["literal"].AsString()=="true" &&
+            object["entities"].AsString()=="Grass & <trees> \xc3\xa9",
+            "borrowed XML scalar parsing changed values or lost owned string storage");
+        const auto& numbers=object["numbers"];
+        Check(numbers.ArraySize()==3 && numbers.ArrayAt(0).AsDouble()==1 &&
+            numbers.ArrayAt(1).AsDouble()==-2.5 && numbers.ArrayAt(2).AsDouble()==300,
+            "borrowed XML number-array parsing changed values");
+    }
+    {
+        const std::string xml="<Prefab version=\"1\" type=\"prefab\"><object name=\"Read once\"><components/><children/></object></Prefab>";
+        const std::string json="{\"version\":1,\"type\":\"prefab\",\"object\":{\"name\":\"Read once\",\"components\":[],\"children\":[]}}";
+        std::string utf16="\xff\xfe";
+        for (char c:xml) { utf16.push_back(c); utf16.push_back('\0'); }
+        std::string utf16be="\xfe\xff",utf32("\xff\xfe\0\0",4);
+        for (char c:xml)
+        {
+            utf16be.push_back('\0'); utf16be.push_back(c);
+            utf32.push_back(c); utf32.append(3,'\0');
+        }
+        for (const auto& [format,contents]:std::vector<std::pair<std::string,std::string>>{
+            {"xml", " \r\n"+xml}, {"json", " \r\n"+json},
+            {"bom", std::string("\xef\xbb\xbf")+xml}, {"utf16",utf16},
+            {"utf16be",utf16be}, {"utf32",utf32},
+            {"empty", ""}, {"invalid", "<Prefab"}})
+        {
+            const auto path=".local/tests-generated/read-once-"+format+".prefab";
+            { std::ofstream out(path,std::ios::binary); out.write(contents.data(),contents.size()); }
+            bool loaded=false;
+            try
+            {
+                const auto document=Engine::Serialization::SceneSerializer::ReadPrefabFile(path);
+                loaded=document["object"]["name"].AsString()=="Read once";
+            }
+            catch (const std::exception&) {}
+            Check(loaded==(format!="empty" && format!="invalid"),
+                "single-read prefab loader changed format or error handling");
+            std::ifstream input(path,std::ios::binary);
+            Check(std::string(std::istreambuf_iterator<char>(input),{})==contents,
+                "in-place prefab parsing changed source file bytes");
+        }
+    }
     const std::string meshPath=".local/tests-generated/shared-layer.mesh";
     const std::string prefabPath=".local/tests-generated/shared-layer.prefab";
     std::vector<Mesh::Vertex> vertices(3);
@@ -71,20 +316,41 @@ void CheckSharedPrefabLayer()
     for (auto& vertex:vertices) { vertex.normal[2]=1; for (auto& color:vertex.color) color=1; }
     if (!std::filesystem::exists(meshPath))
         Check(Mesh::SaveNativeFile(meshPath,vertices),"fixture mesh save failed");
-    auto writePrefab=[&](float radius,const std::string& destination) {
+    auto writePrefab=[&](float radius,const std::string& destination,float wind=0.f) {
         std::ofstream out(destination);
         out << "<Prefab xmlns:components=\"urn:engine-components\" version=\"1\" type=\"prefab\">"
-            "<object name=\"Shared test tree\"><components><components:Mesh Mesh.file=\"" << meshPath << "\"/>";
+            "<object name=\"Shared test tree\"><components><components:Mesh Mesh.file=\"" << meshPath
+            << "\" Mesh.foliageWindStrength=\"" << wind << "\"/>";
         if (radius>0) out << "<components:PrimitiveObjectCollider PrimitiveObjectCollider.shape=\"Capsule\" "
             "PrimitiveObjectCollider.radius=\"" << radius << "\" PrimitiveObjectCollider.height=\"3\"/>";
         out << "</components><children/></object></Prefab>";
     };
     writePrefab(0,prefabPath);
+    {
+        Engine::Scene::Scene baselineScene;
+        Provider baselineProvider;
+        auto* root=Engine::Serialization::SceneSerializer::InstantiatePrefab(
+            baselineScene,prefabPath,&baselineProvider);
+        Check(root && !root->PrefabSourceSnapshot.empty(),"prefab baseline missing");
+        Check(!Engine::Serialization::SceneSerializer::HasPrefabOverrides(*root),
+            "compact baseline introduced initial overrides");
+        root->name="Edited baseline name";
+        root->InvalidatePrefabOverrideCache();
+        Check(Engine::Serialization::SceneSerializer::HasPrefabOverrides(*root,false),
+            "compact baseline failed to detect an override");
+        Check(Engine::Serialization::SceneSerializer::RevertPrefabOverrides(*root,&baselineProvider) &&
+            root->name=="Shared test tree" &&
+            !Engine::Serialization::SceneSerializer::HasPrefabOverrides(*root),
+            "compact baseline failed to revert an override");
+    }
     std::cerr << "Shared prefab fixture written\n";
     Engine::Scene::Scene scene;
     auto* owner=scene.AddObject("Painted objects"); owner->transform.position={-180,0,-180};
     auto* layer=owner->AddComponent<TerrainObjectLayer>();
     layer->shadowLod=2;
+    layer->shadowFadeWidth=4.f;
+    layer->screenLodSelection=true;
+    layer->screenLod1Pixels=444;
     for (int i=0;i<2;++i)
     {
         TerrainObjectLayer::Placement p; p.asset=prefabPath; p.position={180.f+2*i,0,180};
@@ -95,6 +361,9 @@ void CheckSharedPrefabLayer()
     const auto meshes=scene.GetComponents<Mesh>();
     Check(meshes.size()==1 && meshes.front()->IsInstanced(),"prefab geometry was not shared");
     Check(meshes.front()->prefabShadowLod==0,"single-level prefab lost its fixed shadow fallback");
+    Check(meshes.front()->runtimeShadowFadeWidth==4.f,"layer fade width did not reach shared geometry");
+    Check(meshes.front()->screenLodSelection && meshes.front()->screenLod1Pixels==444,
+        "layer screen policy did not reach shared geometry");
     Check(meshes.front()->GetInstanceData()->transforms.size()==2,"placement instances missing");
     Check(provider.allocations==1,"source vertex buffer duplicated per placement");
     Check(glm::length(meshes.front()->Owner->transform.GetWorldPosition()-glm::vec3(-180,0,-180))<.001f,
@@ -103,6 +372,37 @@ void CheckSharedPrefabLayer()
         "colliders synthesized for collider-free prefab");
     Check(Engine::Serialization::SceneSerializer::SaveToString(scene).find("Shared prefab part:")==std::string::npos,
         "derived instances leaked into authored scene serialization");
+    const auto stableObjectId=scene.GetObjectId(meshes.front()->Owner);
+    const auto stableAllocations=provider.allocations;
+    std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+    layer->PreparePrefabInstances(&provider); scene.CommitPendingObjectChanges();
+    Check(scene.GetObjectId(scene.GetComponents<Mesh>().front()->Owner)==stableObjectId &&
+        provider.allocations==stableAllocations,"unchanged prefab poll rebuilt shared geometry");
+    // Public placement records historically detect in-place edits on polling,
+    // even without MarkConfigurationDirty(). Retain that compatibility.
+    layer->placements.front().position.x+=1.f;
+    std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+    layer->PreparePrefabInstances(&provider); scene.CommitPendingObjectChanges();
+    Check(scene.GetComponents<Mesh>().front()->GetInstanceData()->transforms.front().rows[0].w==181.f,
+        "polling lost an in-place placement edit");
+    owner->transform.rotation={.2f,.4f,-.1f};
+    owner->transform.scale={2.f,.75f,1.25f};
+    layer->MarkConfigurationDirty(); layer->PreparePrefabInstances(&provider); scene.CommitPendingObjectChanges();
+    const auto layerWorld=owner->transform.GetWorldMatrix();
+    for(const auto* mesh:scene.GetComponents<Mesh>())
+    {
+        Check(mesh->Owner->Parent==owner && mesh->Owner->runtimeOnly,
+            "generated prefab batch lost layer ownership");
+        const auto local=mesh->Owner->transform.GetLocalMatrix();
+        const auto world=mesh->Owner->transform.GetWorldMatrix();
+        for(int column=0;column<4;++column) for(int row=0;row<4;++row)
+        {
+            Check(std::abs(local[column][row]-(column==row ? 1.f:0.f))<.00001f,
+                "generated prefab batch did not retain an identity local transform");
+            Check(std::abs(world[column][row]-layerWorld[column][row])<.00001f,
+                "generated prefab batch did not inherit the rotated/scaled layer");
+        }
+    }
     const std::string lodPrefabPath=".local/tests-generated/shared-layer-lod.prefab";
     writePrefab(0,lodPrefabPath);
     TerrainObjectLayer::Placement lodPlacement;
@@ -112,6 +412,19 @@ void CheckSharedPrefabLayer()
     layer->shadowLod=2; // A two-band chain falls back to its last available proxy.
     TerrainObjectLayer roundTrip; roundTrip.Deserialize(layer->Serialize());
     Check(roundTrip.shadowLod==2,"fixed shadow LOD was not serialized");
+    Check(roundTrip.shadowFadeWidth==4.f,"shadow fade width was not serialized");
+    auto legacyData=layer->Serialize(); legacyData.Erase("shadowFadeWidth");
+    TerrainObjectLayer legacy; legacy.Deserialize(legacyData);
+    Check(legacy.shadowFadeWidth==1.f,"legacy layer changed its one-metre fade default");
+    auto invalidFade=layer->Serialize(); invalidFade.Set("shadowFadeWidth",-4.f);
+    legacy.Deserialize(invalidFade);
+    Check(legacy.shadowFadeWidth==0.f,"negative shadow fade was not bounded");
+    invalidFade.Set("shadowFadeWidth",1000.f); legacy.Deserialize(invalidFade);
+    Check(legacy.shadowFadeWidth==legacy.shadowDistance,"shadow fade exceeded caster range");
+    TerrainObjectLayer streamed;
+    streamed.InstallPrepared(std::move(roundTrip));
+    Check(streamed.shadowFadeWidth==4.f,"streaming lost shadow fade width");
+    layer->shadowFadeWidth=2.f;
     layer->MarkConfigurationDirty();
     for (float radius : {.8f,1.25f,0.f})
     {
@@ -121,11 +434,80 @@ void CheckSharedPrefabLayer()
         layer->PreparePrefabInstances(&provider); scene.CommitPendingObjectChanges();
         std::cerr << "Prefab edit prepared\n";
         for(auto* mesh:scene.GetComponents<Mesh>())
+        {
             Check(mesh->prefabShadowLod==1,"fixed shadow LOD did not clamp to the available chain");
+            Check(mesh->runtimeShadowFadeWidth==2.f,"regenerated prefab retained stale shadow fade width");
+        }
         const auto colliders=scene.GetComponents<PrimitiveObjectCollider>();
         Check(colliders.size()==(radius>0 ? 3u:0u),"prefab collider edit did not affect all placements and LODs");
         Check(scene.GetComponents<RigidBody>().size()==colliders.size(),"static prefab bodies missing");
         for (auto* collider:colliders) Check(std::abs(collider->radius-radius)<.0001f,"shared collider radius stale");
+    }
+    writePrefab(0.f,lodPrefabPath,.5f);
+    std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+    layer->PreparePrefabInstances(&provider); scene.CommitPendingObjectChanges();
+    bool editedLodFound=false;
+    for(const auto* mesh:scene.GetComponents<Mesh>()) if(mesh->prefabLodBand==1)
+    {
+        editedLodFound=true;
+        Check(mesh->foliageWindStrength==.5f,"LOD-only prefab edit was not polled");
+    }
+    Check(editedLodFound,"edited prefab LOD disappeared");
+    const auto savedLods=layer->objectLods[prefabPath];
+    layer->objectLods[prefabPath].meshes.resize(1);
+    std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+    layer->PreparePrefabInstances(&provider); scene.CommitPendingObjectChanges();
+    for(const auto* mesh:scene.GetComponents<Mesh>())
+        Check(mesh->prefabLodBand==-1 && mesh->prefabShadowLod==0,
+            "in-place LOD definition edit did not return to single-level geometry");
+    layer->objectLods[prefabPath]=savedLods;
+    std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+    layer->PreparePrefabInstances(&provider); scene.CommitPendingObjectChanges();
+    editedLodFound=false;
+    for(const auto* mesh:scene.GetComponents<Mesh>()) editedLodFound|=mesh->prefabLodBand==1;
+    Check(editedLodFound,"in-place LOD definition restoration was not polled");
+    // A newly appearing original path can override the bundled fallback even
+    // when it deliberately preserves the same file timestamp.
+    {
+        const std::string name="refresh-relocation-"+std::to_string(
+            std::chrono::steady_clock::now().time_since_epoch().count())+".prefab";
+        const auto fallback=std::filesystem::path("Engine/Core/Assets/.local/tests-generated")/name;
+        const auto original=std::filesystem::absolute(std::filesystem::path(".local/tests-generated/relocation")/
+            "Engine/Core/Assets/.local/tests-generated"/name);
+        Check(!std::filesystem::exists(fallback) && !std::filesystem::exists(original),"relocation fixture already exists");
+        struct Cleanup
+        {
+            std::filesystem::path fallback,original;
+            ~Cleanup() { std::error_code error; std::filesystem::remove(fallback,error); std::filesystem::remove(original,error); }
+        } cleanup{fallback,original};
+        std::filesystem::create_directories(fallback.parent_path());
+        std::filesystem::create_directories(original.parent_path());
+        writePrefab(.3f,fallback.generic_string());
+        Engine::Scene::Scene relocated;
+        auto* objects=relocated.AddObject("Relocated prefab")->AddComponent<TerrainObjectLayer>();
+        TerrainObjectLayer::Placement placement; placement.asset=original.generic_string();
+        objects->placements.push_back(placement); objects->MarkConfigurationDirty();
+        const auto prepare=[&] { objects->PreparePrefabInstances(&provider); relocated.CommitPendingObjectChanges(); };
+        const auto checkRadius=[&](float expected) {
+            const auto colliders=relocated.GetComponents<PrimitiveObjectCollider>();
+            Check(colliders.size()==1 && std::abs(colliders.front()->radius-expected)<.0001f,
+                "prefab path override/fallback did not refresh");
+        };
+        prepare(); checkRadius(.3f);
+        writePrefab(.6f,original.generic_string());
+        std::filesystem::last_write_time(original,std::filesystem::last_write_time(fallback));
+        std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+        prepare(); checkRadius(.6f);
+        std::filesystem::remove(original);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+        prepare(); checkRadius(.3f);
+        std::filesystem::remove(fallback);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+        prepare();
+        Check(relocated.GetComponents<Mesh>().empty(),"deleted prefab retained generated geometry");
+        writePrefab(.9f,fallback.generic_string());
+        std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+        prepare(); checkRadius(.9f);
     }
     Engine::Scene::Scene forest;
     Check(Engine::Serialization::SceneSerializer::Load(forest,
@@ -171,11 +553,32 @@ void CheckSharedPrefabLayer()
 
 template<class Renderer> void CaptureOak(const std::string& backend)
 {
-    constexpr unsigned width=960,height=540;
+    const char* requestedScale=std::getenv("ENGINE_OAK_CAPTURE_SCALE");
+    const std::string scaleText=requestedScale ? requestedScale:"1";
+    Check(scaleText=="0.5" || scaleText=="1" || scaleText=="2","oak capture scale must be 0.5, 1 or 2");
+    const float scale=std::stof(scaleText);
+    const unsigned width=unsigned(960*scale),height=unsigned(540*scale);
     Engine::Core::Window window(GetModuleHandleW(nullptr),L"Actual oak meadow validation",width,height);
     ShowWindow(window.GetHWND(),SW_HIDE);
     Renderer renderer;
     Check(renderer.Init(window.GetHWND(),width,height),"oak renderer init failed");
+    if constexpr (std::is_same_v<Renderer,DX11GameRenderer>)
+    {
+        std::vector<uint8_t> pixels;
+        Check(!renderer.ReadSceneCaptureRGBA(pixels),"DX11 capture was ready before a request");
+        for(unsigned channel=0;channel<3;++channel)
+        {
+            renderer.BeginFrame();
+            renderer.Clear(channel==0 ? 1.f:0.f,channel==1 ? 1.f:0.f,channel==2 ? 1.f:0.f,1);
+            renderer.RequestSceneCapture();
+            Check(!renderer.ReadSceneCaptureRGBA(pixels),"DX11 returned an old requested frame");
+            renderer.EndFrame();
+            Check(renderer.ReadSceneCaptureRGBA(pixels),"DX11 current-frame capture failed");
+            const size_t center=(width*(height/2)+width/2)*4;
+            Check(pixels.size()==width*height*4 && pixels[center+channel]>pixels[center+(channel+1)%3]+20,
+                "DX11 screenshot did not contain the just-composed color");
+        }
+    }
     Microsoft::WRL::ComPtr<ID3D12InfoQueue> validation;
     if constexpr (std::is_same_v<Renderer,DX12GameRenderer>)
         if(std::getenv("ENGINE_OAK_DX12_VALIDATION"))
@@ -203,18 +606,37 @@ template<class Renderer> void CaptureOak(const std::string& backend)
     Check(viewer!=nullptr,"authored oak viewer missing");
     auto* camera=viewer->GetComponent<Camera>();
     Check(camera!=nullptr,"authored oak camera missing");
+    const auto entrancePosition=viewer->transform.position;
+    const auto entranceTarget=camera->target;
     const auto fields=scene.GetComponents<GrassField>();
     Check(!fields.empty(),"oak grass scripts missing");
     for (auto* field:fields) { field->useEditorCamera=false; field->Start(); }
     const auto terrains=scene.GetComponents<Terrain>();
     Check(!terrains.empty(),"oak terrain missing");
     auto* terrain=terrains.front();
-    std::filesystem::create_directories(".local/tree-lod-oak-validation");
-    std::ofstream report(".local/tree-lod-oak-validation/"+backend+".log");
+    const char* requestedWalkView=std::getenv("ENGINE_OAK_WALK_VIEW");
+    const std::string walkView=requestedWalkView ? requestedWalkView:"overlook";
+    Check(walkView=="entrance" || walkView=="overlook","unknown oak walking view");
+    const bool screenLodDiagnostic=std::getenv("ENGINE_OAK_SCREEN_LOD")!=nullptr;
+    const char* canopyRoot=std::getenv("ENGINE_OAK_CANOPY_ROOT");
+    bool screenPolicyEnabled=false, screenDistanceOverride=false;
+    const std::string outputRoot=canopyRoot ? std::string(canopyRoot)+"/renderer/"+backend+"/"+scaleText : screenLodDiagnostic ?
+        ".local/screen-lod-validation/"+backend+"/"+scaleText : std::string(".local/tree-lod-oak-validation")+
+        (walkView=="entrance" ? "/entrance":"")+
+        (scale==1 ? "":"/"+std::to_string(width)+"x"+std::to_string(height));
+    std::filesystem::create_directories(outputRoot);
+    std::ofstream report(outputRoot+"/"+backend+".log");
     report << "Source: Engine/Core/Assets/Scenes/terrain/oak_meadow.scene\n"
         << "Actual scene; authored entrance camera and established overlook camera; "
         << width << 'x' << height << "\n";
     bool refreshGrass=true;
+    float renderDelta=0.f;
+    bool terrainOnlyColor=false;
+    bool diagnosticOakWind=false, oakOnlyColor=false;
+    unsigned diagnosticWindMeshes=0;
+    bool forceShadowRefresh=false;
+    bool partialDepthClearSupported=false;
+    const bool groundCapture=std::getenv("ENGINE_OAK_GROUND_CAPTURE")!=nullptr;
     glm::vec3 shadowLookOffset(0);
     std::vector<std::pair<std::string,std::vector<uint8_t>>> capturedImages;
     auto render=[&] {
@@ -224,29 +646,54 @@ template<class Renderer> void CaptureOak(const std::string& backend)
         // Complete the previous submission before mutating shared resources.
         renderer.WaitIdle();
         checkValidation();
-        scene.AdvanceManualFrame(0);
+        scene.AdvanceManualFrame(renderDelta);
         scene.ResetGrassPerformance();
         if (refreshGrass) for (auto* field:fields) field->RefreshEditorPreview();
+        diagnosticWindMeshes=0;
+        if(screenLodDiagnostic)
+            for(auto* mesh:scene.GetComponents<Mesh>()) if(mesh->prefabLodBand>=0)
+            {
+                mesh->screenLodSelection=screenPolicyEnabled;
+                mesh->distanceLodOverride=screenDistanceOverride;
+                mesh->screenLod1Pixels=300; mesh->screenLod2Pixels=80;
+            }
+        if(diagnosticOakWind)
+            for(auto* mesh:scene.GetComponents<Mesh>()) if(mesh->prefabLodBand>=0)
+            { mesh->foliageWindStrength=.5f; ++diagnosticWindMeshes; }
         const auto receiverTarget=camera->target;
         if(glm::length(shadowLookOffset)>0.f)
             camera->target=viewer->transform.position+glm::dvec3(shadowLookOffset);
         renderer.BeginFrame(); scene.PrepareRenderFrame();
         auto context=renderer.CreateFrameGraphicsContext();
+        partialDepthClearSupported=context->SupportsDepthRectangleClear();
         context->SetViewport({0,0,float(width),float(height),0,1});
         context->SetScissorRect({0,0,int(width),int(height)});
+        if(forceShadowRefresh) scene.InvalidateDirectionalShadowCache();
         scene.Render(context.get(),float(width)/height,camera,false,width,height,true);
         camera->target=receiverTarget;
-        if constexpr (std::is_same_v<Renderer,DX12GameRenderer>)
+        if (terrainOnlyColor || oakOnlyColor || std::is_same_v<Renderer,DX12GameRenderer>)
         {
             renderer.EndFrame(); checkValidation(); renderer.WaitIdle();
             renderer.BeginFrame(); context=renderer.CreateFrameGraphicsContext();
+        }
+        std::vector<Mesh*> hiddenMeshes;
+        if(terrainOnlyColor || oakOnlyColor)
+        {
+            for(auto* mesh:scene.GetComponents<Mesh>())
+                if(mesh->IsEditorVisible() && !mesh->Owner->GetComponent<Terrain>() &&
+                    !(oakOnlyColor && mesh->prefabLodBand>=0))
+                { mesh->SetEditorVisible(false); hiddenMeshes.push_back(mesh); }
+            // Shadow commands have completed before replacing the prepared
+            // draw list or its shared buffers. The atlas remains unchanged.
+            scene.PrepareRenderFrame();
         }
         context->SetViewport({0,0,float(width),float(height),0,1});
         context->SetScissorRect({0,0,int(width),int(height)});
         renderer.Clear(.1f,.1f,.1f,1);
         scene.Render(context.get(),float(width)/height,camera,false,width,height);
-        if constexpr (!std::is_same_v<Renderer,DX11GameRenderer>) renderer.RequestSceneCapture();
+        renderer.RequestSceneCapture();
         renderer.EndFrame();
+        for(auto* mesh:hiddenMeshes) mesh->SetEditorVisible(true);
         checkValidation();
         } catch(...) {
             if constexpr (std::is_same_v<Renderer,DX12GameRenderer>)
@@ -279,15 +726,14 @@ template<class Renderer> void CaptureOak(const std::string& backend)
         // Refill flip-model buffers and refresh material bindings after uploads.
         for (int i=0;i<4;++i) render();
         std::vector<uint8_t> pixels;
-        if constexpr (std::is_same_v<Renderer,DX11GameRenderer>)
-            Check(renderer.CaptureFrameRGBA(pixels),"oak capture failed");
-        else Check(renderer.ReadSceneCaptureRGBA(pixels),"oak capture failed");
+        Check(renderer.ReadSceneCaptureRGBA(pixels),"oak capture failed");
         Check(pixels.size()==width*height*4,"oak capture size wrong");
         // Artifact writes can trigger the project's shader watcher. Publish
         // screenshots only after all GPU validation has completed.
         capturedImages.emplace_back(name,pixels);
         for (auto* material:scene.GetComponents<Material>())
-            Check(material->shaderError.empty(),"oak material shader error");
+            if (!material->shaderError.empty())
+                throw std::runtime_error("oak material shader error: " + material->shaderError);
         Check(scene.GetLastRenderCpuTimings().instanceTileBuilt<32,
             "shadow/color LOD metadata cache rebuilt static forest tiles");
         const auto& shadow=scene.GetShadowDebugSnapshot();
@@ -303,6 +749,173 @@ template<class Renderer> void CaptureOak(const std::string& backend)
             << shadow.submittedCasterDrawCount << " grassFields=" << fields.size() << std::endl;
         return pixels;
     };
+    if(canopyRoot)
+    {
+        // Isolated experiment: change resident middle geometry in memory only.
+        // Authored 28/90 m, materials, placements and shadow policy are retained.
+        forceShadowRefresh=true;
+        auto sequence=[&](const std::string& variant) {
+            for(const std::string view : {"entrance","overlook"}) for(float fov : {60.f,30.f})
+            {
+                const glm::dvec3 position=view=="entrance" ? entrancePosition:glm::dvec3(-5,27,-39);
+                const glm::dvec3 target=view=="entrance" ? glm::dvec3(entranceTarget):glm::dvec3(2,1,5);
+                camera->fov=fov;
+                for(int frame=0;frame<12;++frame)
+                {
+                    const glm::dvec3 shift(frame*.35,0,0);
+                    viewer->transform.position=position+shift; camera->target=target+shift;
+                    const auto prefix=view+"-fov"+std::to_string(int(fov))+"-"+std::to_string(frame);
+                    capture(prefix+"-"+variant,frame==0 ? 12:1);
+                    if(frame==0) capture(prefix+"-"+variant+"-repeat",2);
+                }
+            }
+        };
+        for(auto* layer:scene.GetComponents<TerrainObjectLayer>())
+            if(layer->layerName=="Oak forest") ConfigureCanopy(*layer,canopyRoot,false);
+        capture("warmup",90); refreshGrass=false;
+        sequence("baseline");
+        unsigned replaced=0;
+        for(auto* layer:scene.GetComponents<TerrainObjectLayer>())
+        {
+            if(layer->layerName!="Oak forest") continue;
+            for(auto& [asset,chain]:layer->objectLods)
+                for(int variety=1;variety<=4;++variety)
+                {
+                    const std::string name="Large_oak_tree_00"+std::to_string(variety);
+                    if(asset.find(name+"_LOD0.prefab")==std::string::npos) continue;
+                    Check(chain.meshes.size()==3,"canopy experiment requires authored three-band chain");
+                    const auto path=std::filesystem::path(canopyRoot)/name/(name+"_CanopyCandidate.prefab");
+                    if(!std::filesystem::exists(path)) continue; // permit a one-variety pilot
+                    Engine::Scene::Scene candidateValidation;
+                    auto* candidateRoot=Engine::Serialization::SceneSerializer::InstantiatePrefab(
+                        candidateValidation,path.generic_string(),nullptr);
+                    Check(candidateRoot!=nullptr,"canopy candidate prefab failed to instantiate");
+                    const auto candidateMeshes=candidateRoot->GetComponentsInChildren<Mesh>();
+                    Check(candidateMeshes.size()==2,"canopy candidate must load both bark and leaf components");
+                    size_t candidateTriangles=0;
+                    for(auto* mesh:candidateMeshes)
+                    {
+                        Check(!mesh->GetVertices().empty(),"canopy candidate loaded empty geometry");
+                        candidateTriangles+=(mesh->GetIndices().empty() ? mesh->GetVertices().size():mesh->GetIndices().size())/3;
+                    }
+                    report << name << " validatedCandidateTriangles=" << candidateTriangles << '\n';
+                    chain.meshes[1]=path.generic_string(); ++replaced;
+                }
+            layer->MarkConfigurationDirty();
+        }
+        Check(replaced>0,"canopy experiment did not replace any large oaks");
+        report << "Canopy candidate varieties replaced=" << replaced << '\n';
+        sequence("candidate");
+        renderer.WaitIdle(); checkValidation();
+        for(const auto& [name,pixels]:capturedImages)
+        {
+            std::ofstream image(outputRoot+"/"+name+".ppm",std::ios::binary);
+            image << "P6\n" << width << ' ' << height << "\n255\n";
+            for(size_t i=0;i<pixels.size();i+=4) image.write(reinterpret_cast<const char*>(pixels.data()+i),3);
+        }
+        report << "Canopy experiment captured; no visual acceptance or performance claim.\n";
+        scene.ClearObjects(); renderer.WaitIdle(); return;
+    }
+    if(screenLodDiagnostic)
+    {
+        // Serialized authoring and prepared-layer publication must retain policy.
+        TerrainObjectLayer authored;
+        authored.screenLodSelection=true; authored.distanceLodOverride=true;
+        authored.screenLod1Pixels=450; authored.screenLod2Pixels=110; authored.screenLodHysteresis=.15f;
+        TerrainObjectLayer restored; restored.Deserialize(authored.Serialize());
+        Check(restored.screenLodSelection && restored.distanceLodOverride && restored.screenLod1Pixels==450 &&
+            restored.screenLod2Pixels==110 && restored.screenLodHysteresis==.15f,"screen policy serialization");
+        TerrainObjectLayer published; published.InstallPrepared(std::move(restored));
+        Check(published.screenLodSelection && published.screenLod1Pixels==450,"prepared screen policy publication");
+        Mesh serializedMesh; serializedMesh.screenLodSelection=true; serializedMesh.distanceLodOverride=true;
+        serializedMesh.screenLod1Pixels=444; Mesh restoredMesh; restoredMesh.Deserialize(serializedMesh.Serialize());
+        Check(restoredMesh.screenLodSelection && restoredMesh.distanceLodOverride && restoredMesh.screenLod1Pixels==444,
+            "mesh screen policy serialization");
+        forceShadowRefresh=true;
+        capture("warmup",90);
+        refreshGrass=false;
+        for(const std::string viewName : {"entrance","overlook"})
+        {
+            viewer->transform.position=viewName=="entrance" ? entrancePosition:glm::dvec3(-5,27,-39);
+            camera->target=viewName=="entrance" ? entranceTarget:glm::dvec3(2,1,5);
+            for(float fov : {60.f,30.f})
+            {
+                camera->fov=fov;
+                const std::string prefix=viewName+"-fov"+std::to_string(int(fov));
+                screenPolicyEnabled=false;
+                const auto baseline=capture(prefix+"-distance",viewName=="entrance" ? 20:2);
+                const auto baselineRepeat=capture(prefix+"-distance-repeat",2);
+                screenPolicyEnabled=true; screenDistanceOverride=true;
+                const auto overridden=capture(prefix+"-override",2);
+                const auto changedPixels=[&](const auto& first,const auto& second) {
+                    size_t changed=0;
+                    for(size_t pixel=0;pixel<first.size();pixel+=4)
+                        if(std::abs(int(first[pixel])-int(second[pixel]))>3 ||
+                            std::abs(int(first[pixel+1])-int(second[pixel+1]))>3 ||
+                            std::abs(int(first[pixel+2])-int(second[pixel+2]))>3) ++changed;
+                    return changed;
+                };
+                const size_t repeatNoise=changedPixels(baseline,baselineRepeat);
+                const size_t overrideDelta=changedPixels(baselineRepeat,overridden);
+                report << prefix << " unchangedRepeatPixels=" << repeatNoise << " overridePixels=" << overrideDelta << std::endl;
+                Check(overrideDelta<=repeatNoise+width*height/1000,"distance override changed the authored forest image beyond unchanged-repeat noise");
+                screenDistanceOverride=false;
+                const auto projected=capture(prefix+"-screen",2);
+                const auto counts=scene.GetScreenLodCounts();
+                Check(counts[0]+counts[1]+counts[2]>512,"screen renderer lost distinct placement sets");
+                report << prefix << " screenLevels=" << counts[0] << ',' << counts[1] << ',' << counts[2] << '\n';
+                scene.gpuInstanceCulling=false;
+                const auto cpu=capture(prefix+"-screen-cpu",2);
+                Check(scene.GetScreenLodCounts()==counts,"CPU fallback changed projected LOD choices");
+                size_t changed=0;
+                for(size_t i=0;i<cpu.size();i+=4)
+                    if(std::abs(int(cpu[i])-int(projected[i]))>3 || std::abs(int(cpu[i+1])-int(projected[i+1]))>3 ||
+                        std::abs(int(cpu[i+2])-int(projected[i+2]))>3) ++changed;
+                Check(changed<width*height/100,"CPU/GPU screen LOD images differ by more than one percent");
+                scene.gpuInstanceCulling=true;
+                terrainOnlyColor=true;
+                screenPolicyEnabled=false; const auto shadowReference=capture(prefix+"-ground-distance",2);
+                screenPolicyEnabled=true; const auto shadowScreen=capture(prefix+"-ground-screen",2);
+                const auto shadowRepeat=capture(prefix+"-ground-repeat",2);
+                const size_t shadowNoise=changedPixels(shadowScreen,shadowRepeat);
+                const size_t shadowDelta=changedPixels(shadowReference,shadowScreen);
+                report << prefix << " unchangedGroundPixels=" << shadowNoise << " shadowPixels=" << shadowDelta << std::endl;
+                Check(shadowDelta<=shadowNoise+width*height/1000,"visible screen LOD changed ground shadows beyond unchanged-repeat noise");
+                terrainOnlyColor=false;
+            }
+        }
+        camera->fov=60;
+        const auto motionStart=viewer->transform.position;
+        const auto motionTarget=camera->target;
+        for(int frame=0;frame<12;++frame)
+        {
+            viewer->transform.position=motionStart+glm::dvec3(frame*.35,0,0);
+            camera->target=motionTarget+glm::vec3(frame*.35f,0,0);
+            screenPolicyEnabled=false;
+            capture("motion-"+std::to_string(frame)+"-distance",1);
+            screenPolicyEnabled=true;
+            capture("motion-"+std::to_string(frame)+"-screen",1);
+        }
+        for(auto* field:fields)
+            if(auto* grassLayer=field->Owner->GetComponent<TerrainObjectLayer>())
+            { grassLayer->screenLodSelection=true; grassLayer->screenLod1Pixels=222; grassLayer->MarkConfigurationDirty(); }
+        refreshGrass=true;
+        capture("grass-layer-screen-policy",8);
+        size_t screenGrassTiles=0;
+        for(auto* generated:scene.GetComponents<Mesh>())
+            if(generated->grassShadowCaster && generated->screenLodSelection && generated->screenLod1Pixels==222)
+                ++screenGrassTiles;
+        Check(screenGrassTiles>0,"scripted grass tiles did not inherit the layer screen policy");
+        renderer.WaitIdle(); checkValidation();
+        for(const auto& [name,pixels]:capturedImages)
+        {
+            std::ofstream image(outputRoot+"/"+name+".ppm",std::ios::binary);
+            image << "P6\n" << width << ' ' << height << "\n255\n";
+            for(size_t i=0;i<pixels.size();i+=4) image.write(reinterpret_cast<const char*>(pixels.data()+i),3);
+        }
+        report << "Screen LOD forest comparison passed; authored 28/90 m and fixed shadow LOD remain unchanged.\n";
+        scene.ClearObjects(); renderer.WaitIdle(); return;
+    }
     for (const std::string view : {"entrance","overlook"})
     {
         if (view=="overlook") { viewer->transform.position={-5,27,-39}; camera->target={2,1,5}; }
@@ -395,7 +1008,8 @@ template<class Renderer> void CaptureOak(const std::string& backend)
         for(uint32_t cascade=0;cascade<current.cascadeCount;++cascade)
             if(glm::length(current.cascadeCenters[cascade]-previous.cascadeCenters[cascade])>.01f)
             { ++changed; refreshed|=1u<<cascade; }
-        Check(changed>0 && changed<=2,"small camera movement did not budget shadow cascade updates");
+        Check(changed>0 && (partialDepthClearSupported ? changed<=2:changed==current.cascadeCount),
+            "small camera movement did not use the supported cascade refresh policy");
         previous=current;
     }
     Check(refreshed==((1u<<previous.cascadeCount)-1u),"far shadow cascade refresh starved");
@@ -413,9 +1027,276 @@ template<class Renderer> void CaptureOak(const std::string& backend)
             "zoom changed world-space radial shadow coverage");
     renderer.WaitIdle();
     checkValidation();
+    Light* sun=nullptr;
+    for(auto* light:scene.GetComponents<Light>())
+        if(light->GetLightType()==Light::Type::Directional && light->castsShadows)
+        { sun=light; break; }
+    Check(sun!=nullptr,"shadow invalidation test has no sun");
+    const auto savedSunRotation=sun->Owner->transform.rotation;
+    for(int frame=0;frame<3;++frame)
+    {
+        render();
+        const auto stationary=scene.GetShadowDebugSnapshot();
+        Check(!partialDepthClearSupported || stationary.refreshedCascadeMask!=((1u<<stationary.cascadeCount)-1u),
+            "unchanged sun unnecessarily invalidated every cascade");
+    }
+    for(int step=0;step<3;++step)
+    {
+        const auto oldDirection=scene.GetShadowDebugSnapshot().directionToLight;
+        // Small changes used to pass the cosine-based cache-reuse threshold,
+        // leaving retained cascades with a different light-space orientation.
+        sun->Owner->transform.rotation.x+=glm::radians(.05f);
+        render();
+        const auto changedSun=scene.GetShadowDebugSnapshot();
+        Check(glm::length(changedSun.directionToLight-oldDirection)>1.e-5f,
+            "sun regression did not change the selected light direction");
+        report << "small sun step " << step << ": refreshed mask="
+            << changedSun.refreshedCascadeMask << std::endl;
+        Check(changedSun.refreshedCascadeMask==((1u<<changedSun.cascadeCount)-1u),
+            "small sun direction change retained stale shadow cascade tiles");
+    }
+    sun->Owner->transform.rotation=savedSunRotation;
+    render();
+    const auto restoredSun=scene.GetShadowDebugSnapshot();
+    Check(restoredSun.refreshedCascadeMask==((1u<<restoredSun.cascadeCount)-1u),
+        "restoring the sun retained stale shadow cascade tiles");
+    // Repeat identical camera positions with a frozen and an advancing wind
+    // clock. Read each frame immediately; capture() would render extra frames
+    // and hide the retained-tile state we intend to validate.
+    if(walkView=="entrance")
+    { viewer->transform.position=entrancePosition; camera->target=entranceTarget; }
+    report << "Walking view: " << walkView << std::endl;
+    const auto walkStart=viewer->transform.position;
+    const auto walkTarget=camera->target;
+    const auto walkDirection=glm::normalize(glm::vec3(.8f,0,.6f));
+    terrainOnlyColor=groundCapture;
+    const std::string walkPrefix=groundCapture ? "walk-ground-":"walk-";
+    std::ostringstream walkTrace;
+    walkTrace << std::setprecision(9);
+    // Preparation derives generated mesh ranges from their layer. Override
+    // that source policy, not transient meshes which may be rebuilt.
+    std::vector<std::pair<TerrainObjectLayer*,float>> savedCasterRanges;
+    for(auto* layer:scene.GetComponents<TerrainObjectLayer>())
+        if(layer->layerName=="Oak forest") savedCasterRanges.emplace_back(layer,layer->shadowDistance);
+    Check(!savedCasterRanges.empty(),"forest caster-range diagnostic has no layer");
+    constexpr float unrestrictedRange=100000.f;
+    std::vector<float> savedFadeWidths;
+    for(const auto& saved:savedCasterRanges) savedFadeWidths.push_back(saved.first->shadowFadeWidth);
+    const std::vector<std::string> walkPhases=groundCapture
+        ? std::vector<std::string>{"frozen","unrestricted","fully-refreshed","unrestricted-full","frozen-repeat",
+            "fade4","fade4-full","fade8","fade8-full","animated"}
+        : std::vector<std::string>{"frozen","animated"};
+    for(const auto& phase:walkPhases)
+    {
+        const bool animated=phase=="animated";
+        const bool unrestricted=phase=="unrestricted" || phase=="unrestricted-full";
+        forceShadowRefresh=phase=="fully-refreshed" || phase=="unrestricted-full" ||
+            phase=="fade4-full" || phase=="fade8-full";
+        size_t layerIndex=0;
+        for(const auto& saved:savedCasterRanges)
+        {
+            const float range=unrestricted ? unrestrictedRange:saved.second;
+            const float fade=phase.rfind("fade4",0)==0 ? 4.f:
+                phase.rfind("fade8",0)==0 ? 8.f:savedFadeWidths[layerIndex];
+            ++layerIndex;
+            if(saved.first->shadowDistance!=range || saved.first->shadowFadeWidth!=fade)
+            { saved.first->shadowDistance=range; saved.first->shadowFadeWidth=fade; saved.first->MarkConfigurationDirty(); }
+        }
+        viewer->transform.position=walkStart;
+        camera->target=walkTarget;
+        renderDelta=0.f;
+        for(int warm=0;warm<8;++warm) render();
+        std::array<unsigned,4> age{};
+        unsigned retainedFrames=0;
+        const auto initial=scene.GetShadowDebugSnapshot();
+        std::array<glm::vec3,4> anchors{};
+        for(unsigned cascade=0;cascade<initial.cascadeCount;++cascade)
+            anchors[cascade]=glm::vec3(walkStart)+walkDirection*(initial.cascadeSplits[cascade]+1.f);
+        std::array<bool,4> crossed{};
+        const double initialTime=scene.GetElapsedTime();
+        renderDelta=animated ? 1.f/60.f:0.f;
+        for(unsigned frame=0;frame<24;++frame)
+        {
+            const glm::vec3 offset=walkDirection*(.2f*float(frame+1));
+            viewer->transform.position=walkStart+glm::dvec3(offset);
+            camera->target=walkTarget+offset;
+            render();
+            const auto current=scene.GetShadowDebugSnapshot();
+            unsigned oakWindMeshes=0;
+            for(const auto* mesh:scene.GetComponents<Mesh>()) if(mesh->prefabLodBand>=0)
+            {
+                oakWindMeshes+=mesh->foliageWindStrength>0.f;
+                Check(mesh->runtimeShadowDistance==(unrestricted ? unrestrictedRange:savedCasterRanges.front().second),
+                    "caster range override was not retained by preparation");
+                Check(mesh->runtimeShadowFadeWidth==savedCasterRanges.front().first->GetShadowFadeWidth(),
+                    "caster fade override was not retained by preparation");
+            }
+            Check(current.cascadeCount==4,"walk test lost authored cascade count");
+            const unsigned all=(1u<<current.cascadeCount)-1u;
+            Check(current.refreshedCascadeMask && !(current.refreshedCascadeMask & ~all),
+                "walk test received an invalid cascade refresh mask");
+            if(forceShadowRefresh)
+                Check(current.refreshedCascadeMask==all,"reference did not refresh every cascade");
+            retainedFrames+=current.refreshedCascadeMask!=all;
+            const auto position=glm::vec3(viewer->transform.position);
+            walkTrace << "{\"width\":" << width << ",\"height\":" << height
+                << ",\"phase\":\"" << phase << "\",\"frame\":" << frame
+                << ",\"walk_view\":\"" << walkView << "\""
+                << ",\"unrestricted_casters\":" << (unrestricted ? "true":"false")
+                << ",\"forest_caster_range\":" << (unrestricted ? unrestrictedRange:savedCasterRanges.front().second)
+                << ",\"forest_caster_fade_width\":" << savedCasterRanges.front().first->GetShadowFadeWidth()
+                << ",\"diagnostic_oak_wind\":false"
+                << ",\"oak_wind_meshes\":" << oakWindMeshes
+                << ",\"forced_full_refresh\":" << (forceShadowRefresh ? "true":"false")
+                << ",\"partial_depth_clear_supported\":" << (partialDepthClearSupported ? "true":"false")
+                << ",\"time\":" << scene.GetElapsedTime() << ",\"refreshed_mask\":"
+                << current.refreshedCascadeMask << ",\"camera\":["
+                << position.x << ',' << position.y << ',' << position.z << "]";
+            const auto vp=camera->GetProjectionMatrix(float(width)/height)*camera->GetViewMatrix();
+            walkTrace << ",\"view_projection_column_major\":[";
+            for(unsigned i=0;i<16;++i) { if(i) walkTrace << ','; walkTrace << vp[i/4][i%4]; }
+            walkTrace << "],\"cascades\":[";
+            for(unsigned cascade=0;cascade<current.cascadeCount;++cascade)
+            {
+                const bool refreshed=(current.refreshedCascadeMask & (1u<<cascade))!=0;
+                age[cascade]=refreshed ? 0:age[cascade]+1;
+                Check(age[cascade]<=6,"walking starved a retained shadow cascade");
+                const float clearance=current.cascadeRadii[cascade]-
+                    glm::length(position-current.cascadeCenters[cascade])-current.cascadeSplits[cascade];
+                Check(clearance>=.009f,"walking retained a tile outside current receiver coverage");
+                const float anchorDistance=glm::length(anchors[cascade]-position);
+                crossed[cascade]=crossed[cascade] || anchorDistance<current.cascadeSplits[cascade];
+                if(cascade) walkTrace << ',';
+                walkTrace << "{\"split\":" << current.cascadeSplits[cascade]
+                    << ",\"coverage_clearance\":" << clearance << ",\"age\":" << age[cascade]
+                    << ",\"anchor\":[" << anchors[cascade].x << ',' << anchors[cascade].y
+                    << ',' << anchors[cascade].z << "],\"anchor_distance\":" << anchorDistance << '}';
+            }
+            walkTrace << "]}\n";
+            if(frame%4==0)
+            {
+                std::vector<uint8_t> pixels;
+                Check(renderer.ReadSceneCaptureRGBA(pixels),"walking capture failed");
+                Check(pixels.size()==width*height*4,"walking capture size wrong");
+                capturedImages.emplace_back(walkPrefix+phase+"-"+std::to_string(frame),std::move(pixels));
+            }
+        }
+        if(!forceShadowRefresh && partialDepthClearSupported)
+            Check(retainedFrames>0,"walking never exercised retained shadow tiles");
+        for(unsigned cascade=0;cascade<initial.cascadeCount;++cascade)
+            Check(crossed[cascade],"walking did not cross a fixed anchor's radial band boundary");
+        const double elapsed=scene.GetElapsedTime()-initialTime;
+        Check(animated ? elapsed>.39 && elapsed<.41:elapsed==0.,
+            "walking wind clock did not match the requested phase");
+        report << "walk " << phase << ": 24 frames; retained frames=" << retainedFrames
+            << "; elapsed=" << elapsed << std::endl;
+    }
+    renderDelta=0.f;
+    forceShadowRefresh=false;
+    if(groundCapture)
+    {
+        // A matched unshadowed control separates shadow changes from terrain
+        // texture resampling and view-dependent material shading.
+        std::vector<std::pair<Light*,bool>> savedCasts;
+        for(auto* light:scene.GetComponents<Light>())
+        { savedCasts.emplace_back(light,light->castsShadows); light->castsShadows=false; }
+        for(unsigned frame=0;frame<24;frame+=4)
+        {
+            const glm::vec3 offset=walkDirection*(.2f*float(frame+1));
+            viewer->transform.position=walkStart+glm::dvec3(offset);
+            camera->target=walkTarget+offset;
+            render();
+            std::vector<uint8_t> pixels;
+            Check(renderer.ReadSceneCaptureRGBA(pixels),"ground control capture failed");
+            Check(pixels.size()==width*height*4,"ground control capture size wrong");
+            capturedImages.emplace_back("walk-ground-control-"+std::to_string(frame),std::move(pixels));
+        }
+        for(const auto& saved:savedCasts) saved.first->castsShadows=saved.second;
+        report << "Ground color isolation; complete forest shadow pass; six matched unshadowed controls.\n";
+
+        // Authored oaks have zero wind strength, and the shader deliberately
+        // excludes wind from the shadow pass. Prove visible deformation and
+        // the static-caster policy independently of the clock-only walk.
+        diagnosticOakWind=true;
+        forceShadowRefresh=true;
+        viewer->transform.position=walkStart;
+        camera->target=walkTarget;
+        auto windCapture=[&](const std::string& name,bool ground) {
+            terrainOnlyColor=ground; oakOnlyColor=!ground;
+            for(int warm=0;warm<4;++warm) render();
+            Check(diagnosticWindMeshes>0,"wind diagnostic has no enabled oak meshes");
+            const auto shadows=scene.GetShadowDebugSnapshot();
+            Check(shadows.refreshedCascadeMask==((1u<<shadows.cascadeCount)-1u),
+                "wind diagnostic did not fully refresh shadow tiles");
+            std::vector<uint8_t> pixels;
+            Check(renderer.ReadSceneCaptureRGBA(pixels),"wind-policy capture failed");
+            capturedImages.emplace_back(name,pixels);
+            return pixels;
+        };
+        const auto colorBefore=windCapture("wind-policy-color-before",false);
+        const auto groundBefore=windCapture("wind-policy-ground-before",true);
+        const double windStart=scene.GetElapsedTime();
+        renderDelta=1.f/60.f;
+        for(unsigned frame=0;frame<60;++frame) render();
+        renderDelta=0.f;
+        const auto groundAfter=windCapture("wind-policy-ground-after",true);
+        const auto colorAfter=windCapture("wind-policy-color-after",false);
+        Check(scene.GetElapsedTime()-windStart>.99 && scene.GetElapsedTime()-windStart<1.01,
+            "wind-policy diagnostic did not advance one second");
+        size_t movingPixels=0; unsigned groundMaximum=0;
+        for(size_t pixel=0;pixel<colorBefore.size();pixel+=4)
+        {
+            unsigned colorMaximum=0;
+            for(unsigned channel=0;channel<3;++channel)
+            {
+                colorMaximum=std::max(colorMaximum,unsigned(std::abs(int(colorAfter[pixel+channel])-int(colorBefore[pixel+channel]))));
+                groundMaximum=std::max(groundMaximum,unsigned(std::abs(int(groundAfter[pixel+channel])-int(groundBefore[pixel+channel]))));
+            }
+            movingPixels+=colorMaximum>8;
+        }
+        report << "Wind policy: enabled oak meshes=" << diagnosticWindMeshes
+            << "; moving color pixels (>8 RGB)=" << movingPixels
+            << "; fixed-camera ground maximum RGB change=" << groundMaximum << std::endl;
+        Check(movingPixels>100,"diagnostic wind did not visibly deform the oak color pass");
+        Check(groundMaximum<=2,"shader wind changed static-caster ground shadows");
+    }
+    renderer.WaitIdle();
+    checkValidation();
+    std::ofstream trace(outputRoot+"/"+backend+"-"+walkPrefix.substr(0,walkPrefix.size()-1)+".jsonl");
+    trace << walkTrace.str();
+    if(groundCapture)
+    {
+        std::ofstream geometry(outputRoot+"/"+backend+"-ground-geometry.json");
+        geometry << std::setprecision(9) << '[';
+        bool firstMesh=true;
+        for(auto* ground:scene.GetComponents<Terrain>())
+        {
+            const auto* mesh=ground->Owner->GetComponent<Mesh>();
+            if(!mesh || !ground->Owner->IsEnabledInHierarchy() || mesh->GetIndices().empty()) continue;
+            if(!firstMesh) geometry << ',';
+            firstMesh=false;
+            geometry << "{\"vertices\":[";
+            const auto world=ground->Owner->transform.GetWorldMatrix();
+            bool firstVertex=true;
+            const auto writeVertex=[&](const auto& vertex) {
+                const auto p=glm::vec3(world*glm::vec4(vertex.pos[0],vertex.pos[1],vertex.pos[2],1));
+                if(!firstVertex) geometry << ',';
+                firstVertex=false;
+                geometry << '[' << p.x << ',' << p.y << ',' << p.z << ']';
+            };
+            if(!mesh->GetTerrainVertices().empty())
+                for(const auto& vertex:mesh->GetTerrainVertices()) writeVertex(vertex);
+            else for(const auto& vertex:mesh->GetVertices()) writeVertex(vertex);
+            geometry << "],\"indices\":[";
+            for(size_t i=0;i<mesh->GetIndices().size();++i)
+            { if(i) geometry << ','; geometry << mesh->GetIndices()[i]; }
+            geometry << "]}";
+        }
+        geometry << "]\n";
+    }
     for (const auto& [name,pixels]:capturedImages)
     {
-        std::ofstream image(".local/tree-lod-oak-validation/"+backend+"-"+name+".ppm",std::ios::binary);
+        std::ofstream image(outputRoot+"/"+backend+"-"+name+".ppm",std::ios::binary);
         image << "P6\n" << width << ' ' << height << "\n255\n";
         for (size_t i=0;i<pixels.size();i+=4) image.write(reinterpret_cast<const char*>(pixels.data()+i),3);
     }
@@ -442,7 +1323,10 @@ int main(int argc,char** argv)
                 gpuDebug->SetEnableGPUBasedValidation(TRUE);
             }
         }
-        if (backend=="shared-prefabs") CheckSharedPrefabLayer();
+        if (backend=="grass-phase-timing")
+            for(int i=0;i<1000;++i) CheckGrassPhaseTiming();
+        else if (backend=="resolved-material-copy") CheckResolvedMaterialCopy();
+        else if (backend=="shared-prefabs") CheckSharedPrefabLayer();
         else if (backend=="dx11") CaptureOak<DX11GameRenderer>(backend);
         else if (backend=="dx12") CaptureOak<DX12GameRenderer>(backend);
 #if defined(ENGINE_VULKAN_ENABLED)

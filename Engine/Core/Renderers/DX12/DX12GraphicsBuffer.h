@@ -2,6 +2,7 @@
 #include "Core/Graphics/IGraphicsBuffer.h"
 #include <wrl/client.h>
 #include <d3d12.h>
+#include <mutex>
 
 // ---------------------------------------------------------------------------
 // D3D12GraphicsBuffer — DirectX 12 GPU buffer wrapper
@@ -69,5 +70,20 @@ public:
 private:
     ID3D12Device* m_device;
     ID3D12CommandQueue* m_queue;
+    // One bounded upload scratch buffer, returned only after its copy finishes.
+    std::mutex m_staticStagingMutex;
+    std::unique_ptr<Engine::Graphics::IGraphicsBuffer> m_staticStaging;
+    struct StaticUploadCommands
+    {
+        Microsoft::WRL::ComPtr<ID3D12CommandAllocator> allocator;
+        Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> commands;
+        Microsoft::WRL::ComPtr<ID3D12Fence> fence;
+        HANDLE event = nullptr;
+        uint64_t fenceValue = 0;
+        ~StaticUploadCommands() { if (event) CloseHandle(event); }
+    };
+    // One idle bundle. Each upload leases it exclusively and returns it only
+    // after completion. Concurrent uploads use independent local bundles.
+    std::unique_ptr<StaticUploadCommands> m_staticCommands;
 };
 }

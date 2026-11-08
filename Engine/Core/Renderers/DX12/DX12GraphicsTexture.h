@@ -5,6 +5,9 @@
 #include <d3d12.h>
 #include <cstdint>
 #include <wrl/client.h>
+#include <functional>
+#include <mutex>
+#include <vector>
 
 namespace Engine::Renderers
 {
@@ -18,6 +21,12 @@ public:
         Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> dsvHeap = {})
         : m_resource(std::move(resource)), m_heap(std::move(heap)),
           m_handle(handle), m_dsvHeap(std::move(dsvHeap)) {}
+    ~D3D12GraphicsTexture() override { if (m_releaseDescriptor) m_releaseDescriptor(); }
+    bool IsUploadComplete() const override { return !m_uploadFence || m_uploadFence->GetCompletedValue() >= 1; }
+    uint64_t GetAllocationSizeBytes() const override { return m_allocationBytes; }
+    void SetUpload(Microsoft::WRL::ComPtr<ID3D12Fence> fence, uint64_t bytes)
+    { m_uploadFence = std::move(fence); m_allocationBytes = bytes; }
+    void SetDescriptorRelease(std::function<void()> release) { m_releaseDescriptor = std::move(release); }
 
     void* GetNativeHandle() const override { return m_resource.Get(); }
     void* GetUiHandle() const override
@@ -31,6 +40,9 @@ public:
     bool IsDepthTarget() const { return m_dsvHeap != nullptr; }
 
 private:
+    Microsoft::WRL::ComPtr<ID3D12Fence> m_uploadFence;
+    uint64_t m_allocationBytes = 0;
+    std::function<void()> m_releaseDescriptor;
     Microsoft::WRL::ComPtr<ID3D12Resource> m_resource;
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_heap;
     D3D12_GPU_DESCRIPTOR_HANDLE m_handle{};
@@ -40,6 +52,11 @@ private:
 class D3D12TextureFactory final : public Engine::Graphics::IGraphicsTextureFactory
 {
 public:
+    ~D3D12TextureFactory() override;
+    void PollUploads() override;
+    uint64_t GetPendingUploadBytes() const override;
+    uint64_t EstimateAllocationBytes(uint32_t, uint32_t, uint32_t,
+        Engine::Graphics::GraphicsTextureFormat, bool = true) const override;
     D3D12TextureFactory(ID3D12Device* device, ID3D12CommandQueue* queue);
     D3D12TextureFactory(
         ID3D12Device* device,
@@ -56,6 +73,20 @@ public:
     std::shared_ptr<Engine::Graphics::IGraphicsTexture> GetNullTexture();
 
 private:
+    struct DescriptorSlots { std::mutex mutex; std::vector<uint32_t> free; };
+    std::shared_ptr<DescriptorSlots> m_slots = std::make_shared<DescriptorSlots>();
+    uint32_t AllocateDescriptor();
+    void OwnDescriptor(const std::shared_ptr<D3D12GraphicsTexture>&, uint32_t);
+    struct PendingUpload
+    {
+        Microsoft::WRL::ComPtr<ID3D12Resource> staging, texture;
+        Microsoft::WRL::ComPtr<ID3D12CommandAllocator> allocator;
+        Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> commands;
+        Microsoft::WRL::ComPtr<ID3D12Fence> fence;
+        uint64_t bytes = 0;
+        std::shared_ptr<Engine::Graphics::IGraphicsTexture> owner;
+    };
+    std::vector<PendingUpload> m_uploads;
     static constexpr uint32_t kMaxTextures = 1024;
     ID3D12Device* m_device = nullptr;
     ID3D12CommandQueue* m_queue = nullptr;

@@ -1,3 +1,4 @@
+#include "Core/Serialization/PrefabLoadProfile.h"
 #include "Core/Scene/Scene.h"
 #include "Core/SceneManager.h"
 #include "Core/Compoonents/Obj/Mesh.h"
@@ -1037,6 +1038,8 @@ void Scene::ClearObjects()
         (!m_objects.empty() || !m_retiredRenderObjects.empty()))
         m_beforeGpuResourceDestruction();
     m_retiredRenderObjects.clear();
+    m_screenLodHistory.clear();
+    m_screenLodCounts={};
     m_hasStarted = false;
     m_graphicsPreparationPending = false;
     m_graphicsPreparationRestart = false;
@@ -1224,6 +1227,7 @@ void Scene::CommitPendingObjectChanges()
 
 void Scene::PublishSceneSnapshot()
 {
+    Engine::Serialization::PrefabLoadProfile::Stage profile("scene_snapshot_publish");
     AssertOwnerThread();
     if (!m_isCommitting)
         throw std::logic_error("Scene snapshots may only publish at a commit boundary");

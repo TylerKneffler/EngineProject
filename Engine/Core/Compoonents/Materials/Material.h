@@ -205,6 +205,10 @@ public:
     void PrepareTextures(IGraphicsProvider* graphicsProvider);
     MaterialAlphaMode GetAlphaMode() const;
     void Validate();
+    // Copy an already resolved material into an independent component. Texture
+    // resources keep shared ownership; owner/lifecycle/field bindings stay local.
+    // File deserialization still resolves current asset identity normally.
+    void CopyResolvedStateFrom(const Material& source);
     JsonValue Serialize() const override;
     void Deserialize(const JsonValue& value) override;
     void OnAfterDeserialize(IGraphicsProvider* graphicsProvider) override

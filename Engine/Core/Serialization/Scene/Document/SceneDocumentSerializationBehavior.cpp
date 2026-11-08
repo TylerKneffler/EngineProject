@@ -1,5 +1,6 @@
 #include "Core/Serialization/SceneSerializerInternal.h"
 #include "Core/Serialization/Json.h"
+#include "Core/Serialization/PrefabLoadProfile.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Scene/Settings/SceneSettingsSerialization.h"
 #include "Core/Graphics/IGraphicsProvider.h"
@@ -117,7 +118,10 @@ bool Detail::SceneDocumentBehavior::DeserializeScene(Engine::Scene::Scene& scene
     if (version != 1) return false;
 
     // Clear existing scene content
+    {
+    PrefabLoadProfile::Stage stage("restore_clear_objects");
     scene.ClearObjects();
+    }
 
     // Older scene files predate per-scene dimensional mode. Reset this field
     // before reading so loading a legacy scene after a 2D scene cannot inherit
@@ -128,6 +132,7 @@ bool Detail::SceneDocumentBehavior::DeserializeScene(Engine::Scene::Scene& scene
         Engine::Model::SceneDimension::TwoD);
 
     // Top-level objects
+    PrefabLoadProfile::Stage stage("restore_deserialize_objects");
     const JsonValue& objects = root["objects"];
     for (std::size_t i = 0; i < objects.ArraySize(); ++i)
     {

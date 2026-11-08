@@ -1,6 +1,7 @@
 #pragma once
 #include <functional>
 #include "Core/Graphics/IGraphicsContext.h"
+#include "Core/Graphics/IGraphicsTexture.h"
 #include <wrl/client.h>
 #include <d3d12.h>
 #include <vector>
@@ -44,9 +45,12 @@ public:
     void SetVertexBuffer(uint32_t slot, const Engine::Graphics::IGraphicsBuffer* buffer, uint32_t stride, uint64_t offset = 0) override;
     void SetIndexBuffer(const Engine::Graphics::IGraphicsBuffer* buffer, uint32_t indexCount, uint64_t offset = 0) override;
     void SetTexture(uint32_t slot, const Engine::Graphics::IGraphicsTexture* texture) override;
+    void SetTextureOwners(std::shared_ptr<Engine::Graphics::TextureFrameOwners> owners) { m_textureOwners = std::move(owners); }
     bool BeginDepthOnlyPass(const Engine::Graphics::IGraphicsTexture* texture,
         float clearDepth = 1.f) override;
     void EndDepthOnlyPass() override;
+    bool SupportsDepthRectangleClear() const override { return true; }
+    void ClearDepthRectangle(const ScissorRect&, float = 1.f) override;
     // D3D12 command lists cannot query their previously bound framebuffer.
     // Hosts that run a depth pass inside a color frame supply its restoration.
     void SetDepthOnlyPassRestore(std::function<void()> restore) { m_restoreDepthOnlyPass=std::move(restore); }
@@ -81,6 +85,16 @@ public:
 
 private:
     ID3D12GraphicsCommandList* m_cmdList;
+    std::shared_ptr<Engine::Graphics::TextureFrameOwners> m_textureOwners;
+    uint64_t m_textureOwnerGeneration=0;
+    std::unordered_set<const Engine::Graphics::IGraphicsTexture*> m_seenFrameTextures;
+    void RetainTexture(const Engine::Graphics::IGraphicsTexture* texture)
+    {
+        if(!m_textureOwners || !texture) return;
+        const auto generation=m_textureOwners->Generation();
+        if(m_textureOwnerGeneration!=generation) {m_seenFrameTextures.clear();m_textureOwnerGeneration=generation;}
+        if(m_seenFrameTextures.insert(texture).second) m_textureOwners->Retain(texture);
+    }
     ID3D12RootSignature* m_rootSignature = nullptr;
     uint32_t m_indexCount = 0;
     std::shared_ptr<D3D12OcclusionQueryState> m_occlusionState;
@@ -116,10 +130,13 @@ public:
     void FinalizeFrame() override;
     Engine::Graphics::FrameTimingTelemetry GetFrameTimingTelemetry() const override;
     std::unique_ptr<Engine::Graphics::IGraphicsContext> CreateContext() override;
+    bool SupportsDepthRectangleClear() const override { return true; }
     std::unique_ptr<Engine::Graphics::IGraphicsContext> CreateContextForCommandBuffer(void*) override;
 
 private:
     uint32_t m_preparedFrameSlot = 0;
+    std::shared_ptr<Engine::Graphics::TextureFrameOwners> m_textureOwners =
+        std::make_shared<Engine::Graphics::TextureFrameOwners>();
     uint64_t m_preparedFrameSerial = 0;
     ID3D12Device* m_device;
     ID3D12CommandQueue* m_commandQueue;

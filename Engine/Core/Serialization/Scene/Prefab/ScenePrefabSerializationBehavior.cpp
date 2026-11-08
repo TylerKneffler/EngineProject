@@ -234,18 +234,40 @@ std::string PrefabDocumentKey(const std::filesystem::path& path)
 
 JsonValue LoadPrefabDocument(const std::filesystem::path& path)
 {
-    try
+    // Worker reads have their own profile; synchronous reads join the caller.
+    PrefabLoadProfile profile(path.generic_string() + " [document conversion]");
+    std::string source;
     {
-        return JsonParseFile(path.string());
+        PrefabLoadProfile::Stage stage("document_file_read");
+        std::ifstream file(path, std::ios::binary | std::ios::ate);
+        if (!file) throw std::runtime_error("Could not read prefab file: " + path.string());
+        const auto length = file.tellg();
+        if (length < 0) throw std::runtime_error("Could not size prefab file: " + path.string());
+        source.resize(static_cast<size_t>(length), '\0');
+        file.seekg(0);
+        if (!file.read(source.data(), static_cast<std::streamsize>(source.size())))
+            throw std::runtime_error("Could not read prefab file: " + path.string());
     }
-    catch (...)
+    const auto first = source.find_first_not_of(" \t\r\n");
+    if (first == std::string::npos || source[first] != '<')
+    {
+        try { PrefabLoadProfile::Stage stage("document_json_parse"); return JsonParse(source); }
+        catch (...) {} // Preserve XML BOM/encoding support through pugixml.
+    }
     {
         pugi::xml_document document;
-        if (!document.load_file(path.string().c_str()))
-            throw std::runtime_error("Could not parse prefab file: " + path.string());
+        // source already owns a mutable file buffer and outlives document.
+        // ReadNode creates owned JSON values before either buffer is released.
+        // Let pugixml parse it directly instead of copying the whole file again.
+        {
+            PrefabLoadProfile::Stage stage("document_xml_parse");
+            if (!document.load_buffer_inplace(source.data(), source.size()))
+                throw std::runtime_error("Could not parse prefab file: " + path.string());
+        }
         const pugi::xml_node root = document.document_element();
         if (!root)
             throw std::runtime_error("Prefab XML has no root element: " + path.string());
+        PrefabLoadProfile::Stage stage("document_xml_to_json");
         return Detail::SceneXmlBehavior::ReadNode(root);
     }
 }
@@ -326,13 +348,19 @@ Engine::Core::Object* SceneSerializer::InstantiatePrefab(
         if (const auto cached = FindCachedPrefabDocument(resolved, key))
             return InstantiatePrefabFromValue(scene, path, cached->document,
                 graphicsProvider);
-        auto document = [&] {
+        PreparedPrefab transient;
+        transient.path = path;
+        transient.document = [&] {
             PrefabLoadProfile::Stage stage("read_parse");
-            return Engine::Rendering::RenderJobs::Get().Submit([path] {
-                return ReadPrefabFile(path);
+            return Engine::Rendering::RenderJobs::Get().Submit([resolved] {
+                return LoadPrefabDocument(resolved);
             }).get();
         }();
-        return InstantiatePrefabFromValue(scene, path, document, graphicsProvider);
+        // Transfer the worker result into the owner's cache through the same
+        // single-consumer publication path used by asynchronous placement.
+        // No mutable cache entry or live component crosses the worker boundary.
+        PreparedPrefab::Publication publication(transient);
+        return InstantiatePrefabFromValue(scene, path, transient.document, graphicsProvider);
     }
     catch (const std::exception&) { return nullptr; }
 }
@@ -404,8 +432,15 @@ Engine::Core::Object* SceneSerializer::InstantiatePrefabFromValue(
             document->sourceProvider != graphicsProvider)
         {
             PrefabLoadProfile::Stage stage("source_snapshot");
-            Detail::SceneObjectBehavior::SetPrefabSourceSnapshot(*rootObject,
-                Detail::SceneObjectBehavior::SerializeObject(*rootObject, false));
+            JsonValue source;
+            {
+                PrefabLoadProfile::Stage capture("source_snapshot_capture");
+                source = Detail::SceneObjectBehavior::SerializeObject(*rootObject, false);
+            }
+            {
+                PrefabLoadProfile::Stage encode("source_snapshot_encode");
+                Detail::SceneObjectBehavior::SetPrefabSourceSnapshot(*rootObject, source);
+            }
             document->sourceSnapshot = rootObject->PrefabSourceSnapshot;
             document->sourceProvider = graphicsProvider;
             document->sourcePosition = rootObject->PrefabSourcePosition;

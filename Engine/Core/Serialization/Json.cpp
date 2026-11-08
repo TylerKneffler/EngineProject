@@ -192,6 +192,13 @@ JsonValue JsonValue::MakeArray()
     return v;
 }
 
+JsonValue JsonValue::MakeObject(std::size_t memberCapacity)
+{
+    JsonValue v = MakeObject();
+    asObj(v.m_data)->reserve(memberCapacity);
+    return v;
+}
+
 // ============================================================================
 // Writer
 // ============================================================================
@@ -201,18 +208,26 @@ namespace
 void WriteEscaped(std::string& out, const std::string& s)
 {
     out += '"';
-    for (char c : s)
+    // Baked placement payloads and asset paths are mostly ordinary bytes.
+    // Scan them once, then append whole spans instead of growing out per byte.
+    std::size_t span = 0;
+    for (std::size_t i = 0; i < s.size(); ++i)
     {
-        switch (c)
+        const char* escaped;
+        switch (s[i])
         {
-        case '\\': out += "\\\\"; break;
-        case '"':  out += "\\\""; break;
-        case '\n': out += "\\n";  break;
-        case '\r': out += "\\r";  break;
-        case '\t': out += "\\t";  break;
-        default:   out += c;      break;
+        case '\\': escaped = "\\\\"; break;
+        case '"':  escaped = "\\\""; break;
+        case '\n': escaped = "\\n"; break;
+        case '\r': escaped = "\\r"; break;
+        case '\t': escaped = "\\t"; break;
+        default: continue;
         }
+        if (i > span) out.append(s.data() + span, i - span);
+        out.append(escaped, 2);
+        span = i + 1;
     }
+    if (span < s.size()) out.append(s.data() + span, s.size() - span);
     out += '"';
 }
 
@@ -221,7 +236,7 @@ void Indent(std::string& out, int level)
     for (int i = 0; i < level; ++i) out += "    ";
 }
 
-void WriteImpl(const JsonValue& v, std::string& out, int indent)
+void WriteImpl(const JsonValue& v, std::string& out, int indent, bool pretty)
 {
     switch (v.GetType())
     {
@@ -260,15 +275,15 @@ void WriteImpl(const JsonValue& v, std::string& out, int indent)
     {
         std::size_t n = v.ArraySize();
         if (n == 0) { out += "[]"; break; }
-        out += "[\n";
+        out += pretty ? "[\n" : "[";
         for (std::size_t i = 0; i < n; ++i)
         {
-            Indent(out, indent + 1);
-            WriteImpl(v.ArrayAt(i), out, indent + 1);
+            if (pretty) Indent(out, indent + 1);
+            WriteImpl(v.ArrayAt(i), out, indent + 1, pretty);
             if (i + 1 < n) out += ',';
-            out += '\n';
+            if (pretty) out += '\n';
         }
-        Indent(out, indent);
+        if (pretty) Indent(out, indent);
         out += ']';
         break;
     }
@@ -277,17 +292,17 @@ void WriteImpl(const JsonValue& v, std::string& out, int indent)
     {
         std::size_t n = v.ObjectSize();
         if (n == 0) { out += "{}"; break; }
-        out += "{\n";
+        out += pretty ? "{\n" : "{";
         for (std::size_t i = 0; i < n; ++i)
         {
-            Indent(out, indent + 1);
+            if (pretty) Indent(out, indent + 1);
             WriteEscaped(out, v.ObjectKey(i));
-            out += ": ";
-            WriteImpl(v.ObjectValue(i), out, indent + 1);
+            out += pretty ? ": " : ":";
+            WriteImpl(v.ObjectValue(i), out, indent + 1, pretty);
             if (i + 1 < n) out += ',';
-            out += '\n';
+            if (pretty) out += '\n';
         }
-        Indent(out, indent);
+        if (pretty) Indent(out, indent);
         out += '}';
         break;
     }
@@ -300,8 +315,16 @@ std::string JsonWrite(const JsonValue& v, int startIndent)
 {
     std::string out;
     out.reserve(4096);
-    WriteImpl(v, out, startIndent);
+    WriteImpl(v, out, startIndent, true);
     out += '\n';
+    return out;
+}
+
+std::string JsonWriteCompact(const JsonValue& v)
+{
+    std::string out;
+    out.reserve(4096);
+    WriteImpl(v, out, 0, false);
     return out;
 }
 

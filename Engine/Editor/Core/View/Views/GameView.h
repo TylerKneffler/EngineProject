@@ -52,6 +52,8 @@ public:
     void DrawPanel(IEditorUi& ui) override;
     Engine::Scene::Scene* GetScene() const { return m_scene; }
 
+protected:
+    float EffectiveRenderScale() const override;
 private:
     Engine::Scene::Scene* m_scene = nullptr; // non-owning
 

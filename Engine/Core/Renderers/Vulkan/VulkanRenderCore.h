@@ -23,6 +23,7 @@ public:
 
     VkInstance GetInstance() const { return m_instance; }
     VkPhysicalDevice GetPhysicalDevice() const { return m_physicalDevice; }
+    bool PipelineStatisticsEnabled() const { return m_pipelineStatisticsEnabled; }
     VkDevice GetDevice() const { return m_device; }
     VkQueue GetQueue() const { return m_queue; }
     uint32_t GetQueueFamily() const { return m_queueFamily; }
@@ -51,6 +52,7 @@ private:
     uint32_t m_requestedWidth = 0;
     uint32_t m_requestedHeight = 0;
     bool m_mainDepth = false;
+    bool m_pipelineStatisticsEnabled = false;
     bool m_resizePending = false;
     VkInstance m_instance = VK_NULL_HANDLE;
     VkSurfaceKHR m_surface = VK_NULL_HANDLE;

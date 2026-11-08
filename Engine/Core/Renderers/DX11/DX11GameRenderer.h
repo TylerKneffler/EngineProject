@@ -37,9 +37,14 @@ public:
     Engine::Graphics::FrameTimingTelemetry GetFrameTimingTelemetry() const override
     { return m_frameTelemetry; }
 
-    // Legacy synchronous swap-chain capture retained for diagnostics. Video
-    // export uses the off-screen asynchronous queue below.
+    // Legacy synchronous swap-chain readback. Prefer RequestSceneCapture /
+    // ReadSceneCaptureRGBA for frame-accurate diagnostics. Video export uses
+    // the off-screen asynchronous queue below.
     bool CaptureFrameRGBA(std::vector<uint8_t>& pixels);
+    // Snapshot the next composed RGBA8 frame before Present. Readback is
+    // synchronous and only ready after EndFrame; normal rendering does no copy.
+    void RequestSceneCapture() { m_sceneCaptureRequested=true; m_sceneCaptureReady=false; }
+    bool ReadSceneCaptureRGBA(std::vector<uint8_t>& pixels);
     bool EnableOffscreenExport(uint32_t outputWidth, uint32_t outputHeight,
         uint32_t msaaSamples = 1u, uint32_t readbackQueueDepth = 3u,
         bool hdrOutput = false, uint32_t hdrBits = 16u,
@@ -65,6 +70,9 @@ private:
     Microsoft::WRL::ComPtr<ID3D11Texture2D> m_depthTexture;
     Microsoft::WRL::ComPtr<ID3D11DepthStencilView> m_dsv;
     Microsoft::WRL::ComPtr<ID3D11Texture2D> m_captureStaging;
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> m_sceneCaptureStaging;
+    bool m_sceneCaptureRequested=false;
+    bool m_sceneCaptureReady=false;
     Microsoft::WRL::ComPtr<ID3D11Texture2D> m_exportTexture;
     Microsoft::WRL::ComPtr<ID3D11RenderTargetView> m_exportRtv;
     struct ExportReadbackSlot

@@ -5,6 +5,7 @@
 #include <cstring>
 #include <unordered_set>
 #include <vector>
+#include <stdexcept>
 
 namespace Engine::Graphics
 {
@@ -24,6 +25,7 @@ public:
         m_ownedTextures.clear();
         m_seenTextures.clear();
         m_phase = NativePhase::Other;
+        m_depthRectangleClearSupported=false;
         m_replayOcclusionCulled.store(0, std::memory_order_relaxed);
     }
     void RetainBuffer(std::unique_ptr<IGraphicsBuffer> buffer)
@@ -91,6 +93,10 @@ public:
                     skippedDepthPasses = 1;
                 break;
             case Op::EndDepthOnlyPass: target.EndDepthOnlyPass(); break;
+            case Op::ClearDepthRectangle:
+                if(!target.SupportsDepthRectangleClear())
+                    throw std::logic_error("Recorded depth rectangle clear unsupported by replay target");
+                target.ClearDepthRectangle(command.scissor,command.f[0]); break;
             case Op::Viewport: target.SetViewport(command.viewport); break;
             case Op::Scissor: target.SetScissorRect(command.scissor); break;
             case Op::Clear: target.Clear(command.f[0], command.f[1], command.f[2], command.f[3], command.f[4]); break;
@@ -168,6 +174,10 @@ public:
         c.f[0] = depth; return true;
     }
     void EndDepthOnlyPass() override { Add(Op::EndDepthOnlyPass); }
+    void SetDepthRectangleClearSupported(bool supported) { m_depthRectangleClearSupported=supported; }
+    bool SupportsDepthRectangleClear() const override { return m_depthRectangleClearSupported; }
+    void ClearDepthRectangle(const ScissorRect& rect,float depth=1.f) override
+    { auto& c=Add(Op::ClearDepthRectangle); c.scissor=rect; c.f[0]=depth; }
     void SetViewport(const Viewport& viewport) override { Add(Op::Viewport).viewport = viewport; }
     void SetScissorRect(const ScissorRect& scissor) override { Add(Op::Scissor).scissor = scissor; }
     void Clear(float r, float g, float b, float a, float depth = 1.f) override
@@ -195,7 +205,7 @@ private:
         StructuredBuffer, ComputePipeline, ComputeConstants, ComputeRead,
         ComputeWrite, Dispatch, StorageBarrier, BeginCompute, EndCompute,
         DrawIndirect, CopyBuffer, VertexBuffer, IndexBuffer, Texture,
-        BeginDepthOnlyPass, EndDepthOnlyPass, Viewport, Scissor, Clear,
+        BeginDepthOnlyPass, EndDepthOnlyPass, ClearDepthRectangle, Viewport, Scissor, Clear,
         Draw, DrawIndexed, BeginOcclusionFrame, OcclusionDecision,
         BeginOcclusionQuery, EndOcclusionQuery,
         BeginGpuTiming, EndGpuTiming, Transition
@@ -235,6 +245,7 @@ private:
     std::vector<std::shared_ptr<const IGraphicsTexture>> m_ownedTextures;
     std::unordered_set<const IGraphicsTexture*> m_seenTextures;
     NativePhase m_phase = NativePhase::Other;
+    bool m_depthRectangleClearSupported=false;
     mutable std::atomic<uint32_t> m_replayOcclusionCulled{0};
 };
 }

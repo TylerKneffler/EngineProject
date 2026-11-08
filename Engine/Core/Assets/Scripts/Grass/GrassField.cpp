@@ -139,7 +139,7 @@ bool GrassField::LoadSources()
     m_lodDistances.insert(m_lodDistances.end(), tallDistances.begin(), tallDistances.end());
     std::sort(m_lodDistances.begin(), m_lodDistances.end());
     m_lodDistances.erase(std::unique(m_lodDistances.begin(), m_lodDistances.end()), m_lodDistances.end());
-    m_useGpuLodSelection = gpuLodSelection && shortLevels.size() == 3 &&
+    m_useGpuLodSelection = (gpuLodSelection || (m_cachedLayer && m_cachedLayer->screenLodSelection)) && shortLevels.size() == 3 &&
         tallLevels.size() == 3 && shortDistances == tallDistances && m_lodDistances.size() == 2;
     std::vector<std::string> shortPaths, tallPaths;
     for (size_t i = 0; i <= m_lodDistances.size(); ++i)
@@ -544,9 +544,22 @@ bool GrassField::Refresh()
     m_performance = {};
     if (!Owner || !Owner->GetScene()) return false;
     auto& scene = *Owner->GetScene();
+    auto phaseStarted = started;
+    const auto checkpoint = [&](double& milliseconds) {
+        const auto now = Clock::now();
+        milliseconds += std::chrono::duration<double, std::milli>(now-phaseStarted).count();
+        phaseStarted = now;
+    };
+    const auto publish = [&] {
+        checkpoint(m_performance.otherMs);
+        m_performance.totalMs = std::chrono::duration<double, std::milli>(phaseStarted-started).count();
+        scene.AddGrassPerformance(m_performance);
+    };
     const float delta = std::clamp(scene.HasStarted() ? scene.GetDeltaTime() : elapsed, 0.f, .1f);
     bool changed = EnsureAuthoredPreviewHidden();
-    if (!ResolveCachedReferences()) return changed;
+    const bool referencesReady = ResolveCachedReferences();
+    checkpoint(m_performance.referencesMs);
+    if (!referencesReady) { publish(); return changed; }
     const glm::vec3 local = glm::vec3(glm::inverse(
         m_cachedTerrain->Owner->transform.GetWorldMatrix()) *
         glm::vec4(m_cachedViewer->transform.GetWorldPosition(), 1.f));
@@ -564,13 +577,20 @@ bool GrassField::Refresh()
         // generate tile geometry just because they exist in the stress scene.
         if (!m_tiles.empty() || m_build)
         { if (retainDormantTiles) SuspendTiles(); else ClearTiles(); changed = true; }
-        m_performance.totalMs = std::chrono::duration<double, std::milli>(Clock::now() - started).count();
-        scene.AddGrassPerformance(m_performance);
+        checkpoint(m_performance.retirementMs);
+        publish();
         return changed;
     }
     if((!m_cachedLayer || m_cachedLayer->placements.empty()) && !allowProceduralGeneration)
-    { if(!m_tiles.empty() || m_build) { ClearTiles(); changed=true; } return changed; }
-    if (!LoadSources()) return changed;
+    {
+        if(!m_tiles.empty() || m_build) { ClearTiles(); changed=true; }
+        checkpoint(m_performance.retirementMs);
+        publish(); return changed;
+    }
+    checkpoint(m_performance.otherMs);
+    const bool sourcesReady = LoadSources();
+    checkpoint(m_performance.sourcesMs);
+    if (!sourcesReady) { publish(); return changed; }
     RefreshPlacementIndex();
     const uint64_t signature = ComputeGenerationSignature();
     if (!m_hasGenerationSignature || signature != m_lastGenerationSignature)
@@ -579,6 +599,7 @@ bool GrassField::Refresh()
         m_lastGenerationSignature = signature;
         m_hasGenerationSignature = true;
     }
+    checkpoint(m_performance.placementMs);
     const float lod1 = m_lodDistances.empty() ? radius : m_lodDistances.front();
     const float lod2 = m_lodDistances.size() < 2 ? radius : m_lodDistances[1];
     const float hysteresis = layer ? std::max(0.f, layer->lodHysteresis) : 0;
@@ -642,6 +663,14 @@ bool GrassField::Refresh()
             const int lod = m_useGpuLodSelection ? 0 : tile.mesh->ChooseRuntimeLod(distance, m_lodDistances, hysteresis);
             tile.desiredLod = m_useGpuLodSelection ? 0 : lod;
             tile.mesh->gpuLodSelection=m_useGpuLodSelection;
+            tile.mesh->screenLodSelection=m_useGpuLodSelection && layer && layer->screenLodSelection;
+            tile.mesh->distanceLodOverride=layer && layer->distanceLodOverride;
+            if(layer)
+            {
+                tile.mesh->screenLod1Pixels=layer->screenLod1Pixels;
+                tile.mesh->screenLod2Pixels=layer->screenLod2Pixels;
+                tile.mesh->screenLodHysteresis=layer->screenLodHysteresis;
+            }
             tile.mesh->gpuLod1Distance=lod1; tile.mesh->gpuLod2Distance=lod2;
             // Keep caster eligibility stable. The shadow shader fades each
             // surface at the range edge; compute culls distant placements.
@@ -667,6 +696,7 @@ bool GrassField::Refresh()
             changed = ActivateTileLod(tile, tile.desiredLod) || changed;
             tile.object->enabled = tile.mesh->GetActiveRuntimeLod() >= 0 && tile.visibility > 0.f;
         }
+    checkpoint(m_performance.visibilityMs);
     for (auto it = m_tiles.begin(); it != m_tiles.end();)
     {
         if (desired.count(it->first)) { ++it; continue; }
@@ -695,6 +725,7 @@ bool GrassField::Refresh()
         }
         changed = true;
     }
+    checkpoint(m_performance.retirementMs);
     // Prioritize nearby missing tiles. Preparing placements installs all three
     // shared-source LODs together, so resident tiles require no further builds.
     TileState* nearest = nullptr;
@@ -725,6 +756,7 @@ bool GrassField::Refresh()
     const double spent = scene.GetGrassPerformance().generationMs + scene.GetGrassPerformance().uploadMs;
     const double remaining = std::max(0., std::clamp(double(tileWorkBudgetMs), .1, 16.) - spent);
     if (!m_build && nearest && remaining > 0.) BeginBuild(selected, selectedLod, signature);
+    checkpoint(m_performance.schedulingMs);
     if (m_build && remaining > 0.)
     {
         const auto deadline = started + std::chrono::duration_cast<Clock::duration>(
@@ -740,6 +772,7 @@ bool GrassField::Refresh()
                     if (tile.mesh->IsRuntimeLodResident(lod)) { changed = ActivateTileLod(tile, lod) || changed; break; }
         }
     }
+    checkpoint(m_performance.buildMs);
     for (const auto& [key, tile] : m_tiles)
     {
         m_performance.residentLods += tile.mesh->GetResidentRuntimeLodCount();
@@ -760,8 +793,8 @@ bool GrassField::Refresh()
     for (const auto& source : m_sourceMeshes)
         if (source && scene.AccountGrassGpuResource(source->GetGraphicsBuffer()))
             m_performance.gpuBytes += source->GetGraphicsBuffer()->GetSize();
-    m_performance.totalMs = std::chrono::duration<double, std::milli>(Clock::now() - started).count();
-    scene.AddGrassPerformance(m_performance);
+    checkpoint(m_performance.accountingMs);
+    publish();
     return changed;
 }
 
@@ -774,7 +807,15 @@ uint64_t GrassField::SpatialRegionRevision() const
     HashBytes(revision,materialPath.data(),materialPath.size()); HashFloat(revision,windStrength);
     HashBytes(revision,&useEditorCamera,sizeof(useEditorCamera)); HashFloat(revision,tileSize); HashFloat(revision,visibleRadius);
     if(Owner && Owner->GetScene()) { const bool started=Owner->GetScene()->HasStarted(); HashBytes(revision,&started,sizeof(started)); }
-    if(m_cachedLayer) HashFloat(revision,m_cachedLayer->viewDistance);
+    if(m_cachedLayer)
+    {
+        HashFloat(revision,m_cachedLayer->viewDistance);
+        HashBytes(revision,&m_cachedLayer->screenLodSelection,sizeof(bool));
+        HashBytes(revision,&m_cachedLayer->distanceLodOverride,sizeof(bool));
+        HashFloat(revision,m_cachedLayer->screenLod1Pixels);
+        HashFloat(revision,m_cachedLayer->screenLod2Pixels);
+        HashFloat(revision,m_cachedLayer->screenLodHysteresis);
+    }
     if(m_cachedTerrain)
     {
         HashBytes(revision,&m_cachedTerrain->cellsX,sizeof(m_cachedTerrain->cellsX));

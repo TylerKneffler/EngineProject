@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "DX11GraphicsContext.h"
 #include <d3dcompiler.h>
+#include <d3d11_2.h>
 #include "DX11GraphicsBuffer.h"
 #include "DX11PipelineStateBuilder.h"
 #include "DX11GraphicsTexture.h"
@@ -14,6 +15,7 @@ D3D11FrameResourceState::D3D11FrameResourceState(ID3D11Device* device,
     ID3D11DeviceContext* context,std::shared_ptr<Engine::Graphics::NativeSubmissionProbe> probe)
     :native(probe ? std::move(probe):std::make_shared<Engine::Graphics::NativeSubmissionProbe>())
 {
+    textureDevice=device; textureContext=context;
     native->timings.supported=true;
     Microsoft::WRL::ComPtr<ID3D11DeviceContext1> context1;
     D3D11_FEATURE_DATA_D3D11_OPTIONS options{};
@@ -33,6 +35,11 @@ D3D11FrameResourceState::D3D11FrameResourceState(ID3D11Device* device,
             arenaSupported = false;
     }
 
+    D3D11_FEATURE_DATA_D3D11_OPTIONS1 options1{};
+    depthRectangleClearSupported=device && context1 &&
+        SUCCEEDED(device->CheckFeatureSupport(D3D11_FEATURE_D3D11_OPTIONS1,&options1,sizeof(options1))) &&
+        options1.ClearViewAlsoSupportsDepthOnlyFormats;
+
     if (device)
     {
         D3D11_SAMPLER_DESC descriptor{};
@@ -48,6 +55,9 @@ D3D11FrameResourceState::D3D11FrameResourceState(ID3D11Device* device,
 
 void D3D11FrameResourceState::PrepareFrame()
 {
+    while(!textureBatches.empty() && textureContext &&
+        textureContext->GetData(textureBatches.front().fence.Get(),nullptr,0,D3D11_ASYNC_GETDATA_DONOTFLUSH)==S_OK)
+        textureBatches.pop_front();
     arenaCursor = 0;
     ++arenaGeneration;
     firstArenaWrite = true;
@@ -55,11 +65,30 @@ void D3D11FrameResourceState::PrepareFrame()
     discardMaps = 0;
     computeArenaWrites=computeDiscardMaps=0;
 }
+void D3D11FrameResourceState::RetainTexture(const Engine::Graphics::IGraphicsTexture* texture)
+{
+    if(!texture) return;
+    std::lock_guard lock(textureMutex);
+    if(textureSeen.insert(texture).second)
+        if(auto owner=texture->weak_from_this().lock()) textureOwners.push_back(std::move(owner));
+}
+void D3D11FrameResourceState::FinalizeTextures()
+{
+    std::lock_guard lock(textureMutex);
+    if(textureOwners.empty() || !textureDevice || !textureContext) return;
+    D3D11_QUERY_DESC desc{D3D11_QUERY_EVENT,0};
+    Microsoft::WRL::ComPtr<ID3D11Query> fence;
+    if(FAILED(textureDevice->CreateQuery(&desc,&fence))) return; // retain conservatively
+    textureContext->End(fence.Get());
+    textureBatches.push_back({std::move(fence),std::move(textureOwners)});
+    textureOwners.clear();textureSeen.clear();
+}
 
 D3D11GpuTimingState::D3D11GpuTimingState(ID3D11Device* timingDevice,
     ID3D11DeviceContext* timingContext)
     : device(timingDevice), context(timingContext)
 {
+    collectWorkload = std::getenv("ENGINE_GPU_WORKLOAD_COUNTERS") != nullptr;
 }
 
 void D3D11GpuTimingState::PrepareFrame()
@@ -82,6 +111,7 @@ void D3D11GpuTimingState::PrepareFrame()
         }
         std::array<double, static_cast<size_t>(
             Engine::Graphics::GpuTimingStage::Count)> completed{};
+        decltype(telemetry.gpuWorkload) workload{};
         bool available = !disjoint.Disjoint && disjoint.Frequency != 0;
         for (uint32_t index = 0; available && index < frame.regionCount; ++index)
         {
@@ -91,6 +121,19 @@ void D3D11GpuTimingState::PrepareFrame()
                 sizeof(begin), D3D11_ASYNC_GETDATA_DONOTFLUSH) == S_OK &&
                 context->GetData(region.end.Get(), &end,
                 sizeof(end), D3D11_ASYNC_GETDATA_DONOTFLUSH) == S_OK;
+            if (available && collectWorkload)
+            {
+                D3D11_QUERY_DATA_PIPELINE_STATISTICS statistics{};
+                available = context->GetData(region.statistics.Get(), &statistics,
+                    sizeof(statistics), D3D11_ASYNC_GETDATA_DONOTFLUSH) == S_OK;
+                if (available)
+                {
+                    auto& counts = workload[static_cast<size_t>(region.stage)];
+                    counts.vertices += statistics.VSInvocations;
+                    counts.primitives += statistics.IAPrimitives;
+                    counts.fragments += statistics.PSInvocations;
+                }
+            }
             if (available && end >= begin)
                 completed[static_cast<size_t>(region.stage)] +=
                     static_cast<double>(end - begin) * 1000.0 /
@@ -99,9 +142,11 @@ void D3D11GpuTimingState::PrepareFrame()
         if (available)
         {
             telemetry.gpuMilliseconds = completed;
+            telemetry.gpuWorkload = workload;
+            telemetry.gpuWorkloadValid = collectWorkload && !frame.overflow;
             ++telemetry.gpuSampleId;
             telemetry.gpuRegionCount = frame.regionCount;
-            telemetry.gpuTimingsValid = true;
+            telemetry.gpuTimingsValid = !frame.overflow;
             frame.pending = false;
         }
         else if (disjoint.Disjoint)
@@ -121,6 +166,7 @@ void D3D11GpuTimingState::PrepareFrame()
             return;
     }
     frame.regionCount = 0;
+    frame.overflow = false;
     activeRegion = UINT32_MAX;
     recording = true;
     cpuSubmissionStart = std::chrono::steady_clock::now();
@@ -150,8 +196,7 @@ void D3D11GpuTimingState::Begin(Engine::Graphics::GpuTimingStage stage)
     if (!recording || !device || !context || activeRegion != UINT32_MAX)
         return;
     Frame& frame = frames[frameIndex];
-    if (frame.regionCount >= MaximumRegions)
-        return;
+    if (frame.regionCount >= MaximumRegions) { frame.overflow = true; return; }
     if (frame.regionCount == frame.regions.size())
     {
         D3D11_QUERY_DESC descriptor{};
@@ -160,12 +205,18 @@ void D3D11GpuTimingState::Begin(Engine::Graphics::GpuTimingStage stage)
         if (FAILED(device->CreateQuery(&descriptor, &region.begin)) ||
             FAILED(device->CreateQuery(&descriptor, &region.end)))
             return;
+        if (collectWorkload)
+        {
+            descriptor.Query = D3D11_QUERY_PIPELINE_STATISTICS;
+            if (FAILED(device->CreateQuery(&descriptor, &region.statistics))) return;
+        }
         frame.regions.push_back(std::move(region));
     }
     Region& region = frame.regions[frame.regionCount];
     region.stage = stage;
     activeRegion = frame.regionCount++;
     context->End(region.begin.Get());
+    if (collectWorkload) context->Begin(region.statistics.Get());
 }
 
 void D3D11GpuTimingState::End(Engine::Graphics::GpuTimingStage stage)
@@ -175,6 +226,7 @@ void D3D11GpuTimingState::End(Engine::Graphics::GpuTimingStage stage)
     Region& region = frames[frameIndex].regions[activeRegion];
     if (region.stage != stage)
         return;
+    if (collectWorkload) context->End(region.statistics.Get());
     context->End(region.end.Get());
     activeRegion = UINT32_MAX;
 }
@@ -669,6 +721,12 @@ void D3D11GraphicsContext::SetIndexBuffer(const Engine::Graphics::IGraphicsBuffe
 
 void D3D11GraphicsContext::SetTexture(uint32_t slot, const Engine::Graphics::IGraphicsTexture* texture)
 {
+    if(m_frameResources && texture)
+    {
+        if(m_textureOwnerGeneration!=m_frameResources->arenaGeneration)
+        {m_seenFrameTextures.clear();m_textureOwnerGeneration=m_frameResources->arenaGeneration;}
+        if(m_seenFrameTextures.insert(texture).second) m_frameResources->RetainTexture(texture);
+    }
     if (!m_device || !m_context || slot >= D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT)
         return;
     // Logical texture slots 6 and 7 are the reflection panorama and shadow
@@ -728,11 +786,21 @@ bool D3D11GraphicsContext::BeginDepthOnlyPass(
     m_textureSlotInitialized[12] = true;
     ID3D11DepthStencilView* depthView = nativeTexture->GetDepthView();
     m_context->OMSetRenderTargets(0, nullptr, depthView);
+    m_activeDepthOnlyView=depthView;
     if (clearDepth >= 0.f)
         m_context->ClearDepthStencilView(depthView, D3D11_CLEAR_DEPTH,
             std::clamp(clearDepth, 0.f, 1.f), 0);
     m_depthOnlyPassActive = true;
     return true;
+}
+
+void D3D11GraphicsContext::ClearDepthRectangle(const ScissorRect& rect,float depth)
+{
+    if(!SupportsDepthRectangleClear() || !m_depthOnlyPassActive || !m_activeDepthOnlyView ||
+        rect.left>=rect.right || rect.top>=rect.bottom) return;
+    const D3D11_RECT area{rect.left,rect.top,rect.right,rect.bottom};
+    const float value[4]{depth,0,0,0};
+    m_context1->ClearView(m_activeDepthOnlyView.Get(),value,&area,1);
 }
 
 void D3D11GraphicsContext::EndDepthOnlyPass()
@@ -749,6 +817,7 @@ void D3D11GraphicsContext::EndDepthOnlyPass()
             m_savedScissors.data());
     m_savedRenderTarget.Reset();
     m_savedDepthTarget.Reset();
+    m_activeDepthOnlyView.Reset();
     m_savedViewports.clear();
     m_savedScissors.clear();
     m_explicitScissor=m_savedExplicitScissor;

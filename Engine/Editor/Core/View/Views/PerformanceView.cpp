@@ -1,5 +1,7 @@
 #include "PerformanceView.h"
 #include "PerformanceRecording.h"
+#include "Core/Rendering/TextureResidency.h"
+#include "Core/Compoonents/Materials/Texture.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Compoonents/Obj/TerrainManager.h"
@@ -571,7 +573,9 @@ void PerformanceView::SetFrameTimings(const EditorFrameProfileSample& sample,
                     { "Terrain", timing.gpuMilliseconds[static_cast<size_t>(Stage::Terrain)] },
                     { "Grass", timing.gpuMilliseconds[static_cast<size_t>(Stage::Grass)] },
                     { "Portal", timing.gpuMilliseconds[static_cast<size_t>(Stage::Portal)] },
-                    { "Opaque", timing.gpuMilliseconds[static_cast<size_t>(Stage::Opaque)] },
+                    { "Other opaque", timing.gpuMilliseconds[static_cast<size_t>(Stage::Opaque)] },
+                    { "Tree bark", timing.gpuMilliseconds[static_cast<size_t>(Stage::TreeBark)] },
+                    { "Tree leaves/cards", timing.gpuMilliseconds[static_cast<size_t>(Stage::TreeLeaves)] },
                     { "Transparent", timing.gpuMilliseconds[static_cast<size_t>(Stage::Transparent)] }
                 };
             }
@@ -706,9 +710,16 @@ void PerformanceView::DrawTimings(IEditorUi& ui)
             { "Rebuild",prepare.spatialBuildMs }
         });
         const auto& grass = m_scene->GetGrassPerformance();
-        drawGroup("Grass (CPU)", {
+        drawGroup("Grass total and nested work (CPU wall time)", {
             { "Total", grass.totalMs }, { "Placement indexing", grass.scanMs },
             { "Instance preparation", grass.generationMs }, { "GPU upload", grass.uploadMs }
+        });
+        drawGroup("Grass exclusive phases (CPU wall time)", {
+            { "References",grass.referencesMs }, { "Sources",grass.sourcesMs },
+            { "Placement configuration",grass.placementMs }, { "Visibility and tiles",grass.visibilityMs },
+            { "Retirement",grass.retirementMs }, { "Scheduling",grass.schedulingMs },
+            { "Build and activation",grass.buildMs }, { "Resource accounting",grass.accountingMs },
+            { "Other",grass.otherMs }
         });
         ui.ValueLabel("Grass pending tiles", std::to_string(grass.pending).c_str());
         ui.ValueLabel("Grass LOD switches", std::to_string(grass.lodSwitches).c_str());
@@ -746,6 +757,20 @@ void PerformanceView::DrawTimings(IEditorUi& ui)
     ui.ValueLabel("GPU grass batches / reused batches",(std::to_string(m_renderCpu.gpuGrassBatches)+" / "+std::to_string(m_renderCpu.grassBatchCacheHits)).c_str());
     ui.ValueLabel("Grass batch placement uploads",FormatBytes(m_renderCpu.grassPlacementUploadBytes).c_str());
     ui.ValueLabel("Instance pool resident",FormatBytes(m_renderCpu.instances.residentBytes).c_str());
+    const auto textures = Engine::Rendering::TextureResidency::Snapshot();
+    ui.ValueLabel("Texture payload resident / source", (FormatBytes(textures.residentPayloadBytes) +
+        " / " + FormatBytes(textures.sourcePayloadBytes)).c_str());
+    ui.ValueLabel("Texture payload uploaded (lifetime)", FormatBytes(textures.uploadedPayloadBytes).c_str());
+    ui.ValueLabel("Texture resources / uploads / released", (std::to_string(textures.residentResources) +
+        " / " + std::to_string(textures.uploads) + " / " + std::to_string(textures.releasedResources)).c_str());
+    ui.ValueLabel("Texture omitted top mips", std::to_string(textures.omittedTopMips).c_str());
+    const auto streaming=Engine::Components::Texture::GetStreamingSnapshot();
+    ui.ValueLabel("Texture requested / allocated / budget", (FormatBytes(streaming.requestedBytes)+" / "+
+        FormatBytes(streaming.allocatedBytes)+" / "+FormatBytes(streaming.budgetBytes)).c_str());
+    ui.ValueLabel("Texture retiring / staging", (FormatBytes(streaming.retiredBytes)+" / "+FormatBytes(streaming.stagingBytes)).c_str());
+    ui.ValueLabel("Texture pinned allocation",FormatBytes(streaming.pinnedBytes).c_str());
+    ui.ValueLabel("Texture evictions / unmet / blocked", (std::to_string(streaming.evictions)+" / "+
+        std::to_string(streaming.unmet)+" / "+std::to_string(streaming.blocked)).c_str());
     ui.ValueLabel("Instance new / edited / growth bytes",(FormatBytes(m_renderCpu.instances.newBytes)+" / "+FormatBytes(m_renderCpu.instances.editedBytes)+" / "+FormatBytes(m_renderCpu.instances.growthBytes)).c_str());
     ui.ValueLabel("Instance metadata / visible IDs",(FormatBytes(m_renderCpu.instances.metadataBytes)+" / "+FormatBytes(m_renderCpu.instances.visibleIdBytes)).c_str());
     ui.ValueLabel("Custom shader instance fallback uploads",FormatBytes(m_renderCpu.instances.fallbackBytes).c_str());
@@ -888,6 +913,8 @@ void PerformanceView::StopRecording()
 void PerformanceView::RecordSnapshot(float frameRate)
 {
     if (!m_recording || !m_recording->IsRecording()) return;
+    const auto textures = Engine::Rendering::TextureResidency::Snapshot();
+    const auto streaming = Engine::Components::Texture::GetStreamingSnapshot();
     Engine::Threading::CapturedText out;
     out << "\"fps_scope\":\"editor_update_interval\",\"fps\":" << frameRate << ",\"frame_ms\":"
         << (frameRate > 0.f ? 1000.f / frameRate : 0.f)
@@ -906,7 +933,30 @@ void PerformanceView::RecordSnapshot(float frameRate)
         << ",\"commit_limit_bytes\":" << m_snapshot.commitLimit
         << ",\"gpu_memory_used_bytes\":" << m_snapshot.gpuMemoryUsed
         << ",\"gpu_memory_budget_bytes\":" << m_snapshot.gpuMemoryBudget
-        << ",\"gpu_engines_pct\":[";
+        << ",\"texture_resident_payload_bytes\":" << textures.residentPayloadBytes
+        << ",\"texture_source_payload_bytes\":" << textures.sourcePayloadBytes
+        << ",\"texture_uploaded_payload_bytes_total\":" << textures.uploadedPayloadBytes
+        << ",\"texture_uploads_total\":" << textures.uploads
+        << ",\"texture_released_resources_total\":" << textures.releasedResources
+        << ",\"texture_resident_resources\":" << textures.residentResources
+        << ",\"texture_omitted_top_mips\":" << textures.omittedTopMips
+        << ",\"texture_streaming_budget_bytes\":" << streaming.budgetBytes
+        << ",\"texture_requested_bytes\":" << streaming.requestedBytes
+        << ",\"texture_allocated_bytes\":" << streaming.allocatedBytes
+        << ",\"texture_retiring_bytes\":" << streaming.retiredBytes
+        << ",\"texture_pinned_bytes\":" << streaming.pinnedBytes
+        << ",\"texture_staging_bytes\":" << streaming.stagingBytes
+        << ",\"texture_streaming_upload_bytes_total\":" << streaming.uploadBytes
+        << ",\"texture_evictions_total\":" << streaming.evictions
+        << ",\"texture_unmet_demand_count\":" << streaming.unmet
+        << ",\"texture_blocked_admission_count\":" << streaming.blocked
+        << ",\"texture_mip_demand\":[";
+    for(size_t mip=0;mip<streaming.demandMips.size();++mip)
+        out << (mip ? ",":"") << streaming.demandMips[mip];
+    out << "],\"texture_resident_mips\":[";
+    for(size_t mip=0;mip<streaming.residentMips.size();++mip)
+        out << (mip ? ",":"") << streaming.residentMips[mip];
+    out << "],\"gpu_engines_pct\":[";
     for (size_t index = 0; index < m_snapshot.gpuEngines.size(); ++index)
         out << (index ? "," : "") << m_snapshot.gpuEngines[index];
     out << "],\"cpu_cores_pct\":[";

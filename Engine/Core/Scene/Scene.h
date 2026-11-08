@@ -240,6 +240,15 @@ public:
     void AddGrassPerformance(const Engine::Rendering::GrassPerformance& value)
     {
         m_grassPerformance.totalMs += value.totalMs;
+        m_grassPerformance.referencesMs += value.referencesMs;
+        m_grassPerformance.sourcesMs += value.sourcesMs;
+        m_grassPerformance.placementMs += value.placementMs;
+        m_grassPerformance.visibilityMs += value.visibilityMs;
+        m_grassPerformance.retirementMs += value.retirementMs;
+        m_grassPerformance.schedulingMs += value.schedulingMs;
+        m_grassPerformance.buildMs += value.buildMs;
+        m_grassPerformance.accountingMs += value.accountingMs;
+        m_grassPerformance.otherMs += value.otherMs;
         m_grassPerformance.scanMs += value.scanMs;
         m_grassPerformance.generationMs += value.generationMs;
         m_grassPerformance.uploadMs += value.uploadMs;
@@ -281,6 +290,7 @@ public:
     const PrepareTimings& GetLastPrepareTimings() const { return m_lastPrepareTimings; }
     using RenderCpuTimings = Engine::Rendering::RenderCpuTimings;
     const RenderCpuTimings& GetLastRenderCpuTimings() const { return m_lastRenderCpuTimings; }
+    const std::array<uint64_t,3>& GetScreenLodCounts() const { return m_screenLodCounts; }
     void ResetRenderCpuTimings() { m_lastRenderCpuTimings={}; }
     bool automaticInstancing = true;
     bool gpuInstanceCulling = true;
@@ -425,6 +435,7 @@ public:
         uint32_t atlasResolution = 0;
         uint64_t atlasAllocationGeneration = 0;
         uint32_t cascadeCount = 0;
+        uint32_t refreshedCascadeMask = 0; // Tiles rendered in the latest shadow pass.
         glm::vec4 cascadeSplits { 0.f };
         std::array<glm::vec3, 4> cascadeCenters{};
         std::array<float, 4> cascadeRadii{};
@@ -498,6 +509,10 @@ public:
     {
         m_realtimeShadowSettings = shadowSettings;
     }
+    // Discard retained directional tiles after external caster changes, or
+    // to request a complete reference refresh in rendering diagnostics.
+    void InvalidateDirectionalShadowCache()
+    { AssertOwnerThread(); m_directionalShadowCacheValid=false; }
     // Pointer coordinates relative to the surface displaying the game render
     // target, used to keep embedded-view UI hit bounds aligned.
     void SetUiPointerInput(float x, float y, float viewportWidth,
@@ -868,6 +883,7 @@ private:
     uint32_t m_directionalShadowResolution = 0;
     uint64_t m_directionalShadowAllocationGeneration = 0;
     bool m_directionalShadowCacheValid = false;
+    Engine::Model::GraphicsQualityValues m_directionalShadowCachedQuality;
     uint64_t m_directionalShadowFrameCounter = 0;
     uint64_t m_directionalShadowLastRenderedFrame = 0;
     uint32_t m_directionalShadowCachedResolution = 0;
@@ -1089,6 +1105,9 @@ private:
     Engine::Rendering::PersistentInstancePool m_persistentInstances;
     Engine::Rendering::PersistentInstanceBatches m_persistentBatches;
     Engine::Rendering::InstanceTilePreparation m_instanceTilePreparation;
+    // Camera/view, geometry identity, placement, domain. Never shared with shadows.
+    std::map<std::array<uint64_t,4>,std::pair<int,uint64_t>> m_screenLodHistory;
+    std::array<uint64_t,3> m_screenLodCounts{};
     // Directional light indices cover every cluster and do not depend on
     // camera pose or light color. Buffer identities separate GPU frame slots.
     std::map<std::pair<const void*,const void*>,std::array<uint32_t,5>> m_directionalClusterLayouts;

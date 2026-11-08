@@ -196,7 +196,8 @@ MaterialPropertyMorph::JsonValue MaterialPropertyMorph::Serialize() const
             .Set("weight", Value(morph.weight))
             .Set("offsets", std::move(offsets)));
     }
-    return result.Set("morphs", std::move(values));
+    result.Set("morphs", std::move(values));
+    return result;
 }
 
 void MaterialPropertyMorph::Deserialize(const JsonValue& value)

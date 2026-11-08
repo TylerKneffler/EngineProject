@@ -1,5 +1,6 @@
 #include "DX12GraphicsBuffer.h"
 #include "DX12QueueMutex.h"
+#include "Core/Serialization/PrefabLoadProfile.h"
 #include <cstring>
 #include <stdexcept>
 #include <sstream>
@@ -175,22 +176,73 @@ std::unique_ptr<Engine::Graphics::IGraphicsBuffer> D3D12BufferFactory::CreateSta
 
     // Static geometry is read many times per frame by forest instances. Keep
     // it in a default heap rather than repeatedly fetching upload-heap data.
-    auto destination = CreateBuffer(Buffer::Usage::VertexBuffer,
-        Buffer::AccessMode::Default, sizeBytes);
-    auto staging = CreateBuffer(Buffer::Usage::VertexBuffer,
-        Buffer::AccessMode::Upload, sizeBytes, initialData);
+    std::unique_ptr<Buffer> destination, staging;
+    constexpr uint64_t stagingCacheLimit = 16ull * 1024 * 1024;
+    {
+        Engine::Serialization::PrefabLoadProfile::Stage stage("dx12_static_allocate_copy");
+        {
+        Engine::Serialization::PrefabLoadProfile::Stage allocation("dx12_static_destination_allocate");
+        destination = CreateBuffer(Buffer::Usage::VertexBuffer,
+            Buffer::AccessMode::Default, sizeBytes);
+        }
+        {
+        Engine::Serialization::PrefabLoadProfile::Stage allocation("dx12_static_staging_allocate");
+        if (sizeBytes <= stagingCacheLimit)
+        {
+            std::lock_guard lock(m_staticStagingMutex);
+            staging = std::move(m_staticStaging);
+        }
+        if (!staging || staging->GetSize() < sizeBytes)
+        {
+            Engine::Serialization::PrefabLoadProfile::Stage fresh("dx12_static_staging_new");
+            // Grow geometrically within the cap to avoid reallocating for each
+            // slightly larger part. Oversized uploads are never retained.
+            const uint64_t capacity = sizeBytes > stagingCacheLimit ? sizeBytes :
+                std::max(sizeBytes, std::min(stagingCacheLimit,
+                    staging ? staging->GetSize() * 2 : uint64_t(64 * 1024)));
+            staging = CreateBuffer(Buffer::Usage::VertexBuffer,
+                Buffer::AccessMode::Upload, capacity);
+        }
+        }
+        {
+        Engine::Serialization::PrefabLoadProfile::Stage copy("dx12_static_staging_copy");
+        void* mapped = staging->Map();
+        std::memcpy(mapped, initialData, sizeBytes);
+        staging->Unmap();
+        }
+    }
     auto* native = static_cast<D3D12GraphicsBuffer*>(destination.get());
     auto* upload = static_cast<D3D12GraphicsBuffer*>(staging.get());
-    Microsoft::WRL::ComPtr<ID3D12CommandAllocator> allocator;
-    Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> commands;
-    Microsoft::WRL::ComPtr<ID3D12Fence> fence;
-    if (FAILED(m_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,
-            IID_PPV_ARGS(&allocator))) ||
-        FAILED(m_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT,
-            allocator.Get(), nullptr, IID_PPV_ARGS(&commands))) ||
-        FAILED(m_device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence))))
-        throw std::runtime_error("Failed to create static geometry upload commands");
-
+    std::unique_ptr<StaticUploadCommands> bundle;
+    {
+    Engine::Serialization::PrefabLoadProfile::Stage stage("dx12_static_record");
+    {
+        std::lock_guard lock(m_staticStagingMutex);
+        bundle = std::move(m_staticCommands);
+    }
+    if (bundle)
+    {
+        Engine::Serialization::PrefabLoadProfile::Stage reuse("dx12_static_commands_reuse");
+        // A bundle can enter the cache only after its own fence completed.
+        if (FAILED(bundle->allocator->Reset()) ||
+            FAILED(bundle->commands->Reset(bundle->allocator.Get(), nullptr)))
+            throw std::runtime_error("Failed to reset static geometry upload commands");
+    }
+    else
+    {
+        Engine::Serialization::PrefabLoadProfile::Stage fresh("dx12_static_commands_new");
+        bundle = std::make_unique<StaticUploadCommands>();
+        if (FAILED(m_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,
+                IID_PPV_ARGS(&bundle->allocator))) ||
+            FAILED(m_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT,
+                bundle->allocator.Get(), nullptr, IID_PPV_ARGS(&bundle->commands))) ||
+            FAILED(m_device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&bundle->fence))))
+            throw std::runtime_error("Failed to create static geometry upload commands");
+        bundle->event = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        if (!bundle->event)
+            throw std::runtime_error("Failed to create static geometry upload event");
+    }
+    auto* commands = bundle->commands.Get();
     D3D12_RESOURCE_BARRIER barrier{};
     barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
     barrier.Transition.pResource = native->GetResource();
@@ -203,23 +255,41 @@ std::unique_ptr<Engine::Graphics::IGraphicsBuffer> D3D12BufferFactory::CreateSta
     commands->ResourceBarrier(1, &barrier);
     if (FAILED(commands->Close()))
         throw std::runtime_error("Failed to close static geometry upload commands");
-    HANDLE eventHandle = CreateEventW(nullptr, FALSE, FALSE, nullptr);
-    if (!eventHandle)
-        throw std::runtime_error("Failed to create static geometry upload event");
-    struct CloseEvent { HANDLE handle; ~CloseEvent() { CloseHandle(handle); } } closeEvent{eventHandle};
-    if (FAILED(fence->SetEventOnCompletion(1, eventHandle)))
+    }
+    if (bundle->fenceValue == UINT64_MAX)
+        throw std::runtime_error("Static geometry upload fence exhausted");
+    const uint64_t completion = ++bundle->fenceValue;
+    if (FAILED(bundle->fence->SetEventOnCompletion(completion, bundle->event)))
         throw std::runtime_error("Failed to arm static geometry upload fence");
     {
+        Engine::Serialization::PrefabLoadProfile::Stage stage("dx12_static_submit");
         // Use the same submission lock as rendering and texture uploads. Wait
         // outside the lock, and retain staging/commands until the copy finishes.
         std::lock_guard queueLock(DX12QueueMutex());
-        ID3D12CommandList* lists[] = {commands.Get()};
+        ID3D12CommandList* lists[] = {bundle->commands.Get()};
         m_queue->ExecuteCommandLists(1, lists);
-        if (FAILED(m_queue->Signal(fence.Get(), 1)))
+        if (FAILED(m_queue->Signal(bundle->fence.Get(), completion)))
             throw std::runtime_error("Failed to signal static geometry upload fence");
     }
-    if (WaitForSingleObject(eventHandle, INFINITE) != WAIT_OBJECT_0)
-        throw std::runtime_error("Failed to wait for static geometry upload");
+    {
+        Engine::Serialization::PrefabLoadProfile::Stage stage("dx12_static_wait");
+        if (WaitForSingleObject(bundle->event, INFINITE) != WAIT_OBJECT_0 ||
+            bundle->fence->GetCompletedValue() == UINT64_MAX ||
+            bundle->fence->GetCompletedValue() < completion)
+            throw std::runtime_error("Failed to wait for static geometry upload");
+    }
+    {
+        std::lock_guard lock(m_staticStagingMutex);
+        if (!m_staticCommands) m_staticCommands = std::move(bundle);
+    }
+    if (staging->GetSize() <= stagingCacheLimit)
+    {
+        std::lock_guard lock(m_staticStagingMutex);
+        // Concurrent uploads may return another buffer first. Keep the larger
+        // scratch allocation and release the other after leaving this lock.
+        if (!m_staticStaging || m_staticStaging->GetSize() < staging->GetSize())
+            m_staticStaging.swap(staging);
+    }
     return destination;
 }
 

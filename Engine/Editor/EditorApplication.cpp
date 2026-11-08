@@ -5,6 +5,7 @@
 #include "Engine/Editor/Diagnostics/EditorFrameProfiler.h"
 #include "Engine/Editor/Diagnostics/FrameActivity.h"
 #include "Core/Window.h"
+#include "Core/Serialization/PrefabLoadProfile.h"
 #include "Core/Startup/StartupSplash.h"
 #include "Core/ProjectLoader.h"
 #include "Core/SceneManager.h"
@@ -276,16 +277,31 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
         ? std::make_unique<Engine::Editor::EditorPlayPipeline>(*renderer) : nullptr;
     bool pendingPlayStopRestore = false;
     bool pendingPlayStart = false;
+    unsigned playStartFollowupUpdates = 0;
+    unsigned playStopFollowupUpdates = 0;
     bool resetPlayDelta = false;
     const auto finishPlayStop = [&]()
     {
         if (!pendingPlayStopRestore) return;
+        Engine::Editor::FrameActivity::Mark(Engine::Editor::FrameActivity::PlayStop);
+        playStopFollowupUpdates = 2;
+        using StopProfile = Engine::Serialization::PrefabLoadProfile;
+        StopProfile profile("Editor: Stop restoration");
         pendingPlayStopRestore = false;
+        {
+        StopProfile::Stage stage("stop_drain_pipeline");
         if (playPipeline) playPipeline->Drain();
+        }
+        {
+        StopProfile::Stage stage("stop_cancel_and_fence");
         Engine::Core::SceneManager::CancelPendingSceneLoad();
         scene->FenceBackgroundWork();
         Engine::Core::SceneManager::SetOnSceneLoaded({});
+        }
+        {
+        StopProfile::Stage stage("stop_restore_editor_scene");
         editorState->RestorePlayModeScene();
+        }
         scene = editorState->GetScene();
     };
     hotReload->BeforeApply = [&]()
@@ -312,12 +328,15 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
     std::chrono::steady_clock::time_point debuggerDeadline;
     const auto beginPlayScene = [&]()
     {
+        Engine::Editor::FrameActivity::Mark(Engine::Editor::FrameActivity::PlayStart);
+        playStartFollowupUpdates = 2;
         pendingPlayStart = false;
         scene->Start();
         resetPlayDelta = true;
     };
     gameBuildManager->OnPlayStart = [&]()
     {
+        Engine::Editor::FrameActivity::Mark(Engine::Editor::FrameActivity::PlayStart);
         Engine::Core::SceneManager::CancelPendingSceneLoad();
         scene->FenceBackgroundWork();
         scene->SetGameplayInputEnabled(false);
@@ -340,10 +359,12 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
     };
     gameBuildManager->OnPlayStop = [&]()
     {
+        Engine::Editor::FrameActivity::Mark(Engine::Editor::FrameActivity::PlayStop);
         scene->SetGameplayInputEnabled(false);
         window->ReleaseGameplayInput();
         waitingForPlayDebugger = false;
         pendingPlayStart = false;
+        playStartFollowupUpdates = 0;
         Engine::Core::SceneManager::CancelPendingSceneLoad();
         // A toolbar Stop can arrive while RenderIfNeeded still owns a command
         // list. Restore once that frame has been submitted.
@@ -452,12 +473,25 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
     const uint32_t autoProfileWarmup=warmupFrames ? uint32_t(std::clamp(std::atoi(warmupFrames->c_str()),0,1200)):0;
     const auto stopFrames=EnvironmentVariable("ENGINE_EDITOR_AUTO_PROFILE_STOP_FRAMES");
     const uint32_t autoProfileStopFrames=stopFrames ? uint32_t(std::clamp(std::atoi(stopFrames->c_str()),0,1200)):0;
+    const auto profileStep=EnvironmentVariable("ENGINE_EDITOR_AUTO_PROFILE_STEP_SECONDS");
+    const float autoProfileStep=autoProfilePlay && profileStep ? std::strtof(profileStep->c_str(),nullptr):0.f;
     uint32_t autoProfileStoppedFrames=0;
     bool autoProfileComplete=false;
     window->OnUpdate = [&]()
     {
         using Clock = std::chrono::steady_clock;
         const auto frameBegin = Clock::now();
+        // Start() may run after rendering the previous update. Include the
+        // following update's first simulation/recording work and the subsequent
+        // sample reporting that work's update interval in the transition.
+        if (pendingPlayStart || playStartFollowupUpdates)
+            Engine::Editor::FrameActivity::Mark(Engine::Editor::FrameActivity::PlayStart);
+        if (playStartFollowupUpdates) --playStartFollowupUpdates;
+        // Restoration and its first cold rendering work are transitions. Also
+        // tag the following samples carrying their delayed update interval.
+        if (pendingPlayStopRestore || playStopFollowupUpdates)
+            Engine::Editor::FrameActivity::Mark(Engine::Editor::FrameActivity::PlayStop);
+        if (playStopFollowupUpdates) --playStopFollowupUpdates;
         const double updateIntervalMs = previousUpdateBegin == Clock::time_point{} ? 0. :
             std::chrono::duration<double,std::milli>(frameBegin-previousUpdateBegin).count();
         previousUpdateBegin = frameBegin;
@@ -585,6 +619,8 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
                 QueryPerformanceCounter(&lastCounter);
                 resetPlayDelta = false;
             }
+            else if (autoProfileStep>0.f && autoProfileStep<=.1f && std::isfinite(autoProfileStep))
+                dt=autoProfileStep;
             // Physics bounds its own fixed-step work. Keep animation on wall
             // time so a slow render frame does not slow down playback.
             if (!usePlayPipeline)

@@ -2,6 +2,7 @@
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Serialization/SceneSerializer.h"
+#include "Core/Serialization/PrefabLoadProfile.h"
 #include "Core/Compoonents/Materials/Material.h"
 #include "Core/Compoonents/Physics/PrimitiveObjectCollider.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
@@ -18,10 +19,29 @@ namespace Engine::Components
 {
 struct TerrainObjectLayer::PrefabInstances
 {
+    struct Source
+    {
+        std::string resolved;
+        std::filesystem::file_time_type stamp;
+        bool operator==(const Source& other) const
+        { return resolved==other.resolved && stamp==other.stamp; }
+    };
     IGraphicsProvider* provider=nullptr;
     uint64_t signature=UINT64_MAX;
     std::chrono::steady_clock::time_point nextCheck{};
-    std::map<std::string,std::filesystem::file_time_type> stamps;
+    std::map<std::string,Source> sources;
+    std::map<std::string,ObjectLods> lods;
+    bool HasSameLods(const std::map<std::string,ObjectLods>& current) const
+    {
+        if(lods.size()!=current.size()) return false;
+        for(const auto& [asset,expected]:lods)
+        {
+            const auto found=current.find(asset);
+            if(found==current.end() || found->second.meshes!=expected.meshes ||
+                found->second.distances!=expected.distances) return false;
+        }
+        return true;
+    }
     std::vector<uint64_t> generated;
 };
 
@@ -33,26 +53,50 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider)
         m_prefabCheckedData!=placements.data() || m_prefabCheckedCount!=placements.size();
     if (!changed && !m_prefabInstances) return;
     if (!changed && m_prefabInstances->provider==provider && now<m_prefabInstances->nextCheck) return;
-    std::map<std::string,std::vector<const Placement*>> groups;
-    // Grass and other mesh-only layers keep their existing renderer.
+    // Grass and other mesh-only layers keep their existing renderer without
+    // paying for a placement signature when they have no prefab runtime.
     bool hasPrefabs=false;
     for (const auto& placement:placements)
         if (std::filesystem::path(placement.asset).extension()==".prefab") { hasPrefabs=true; break; }
     m_prefabCheckedRevision=GetConfigurationRevision(); m_prefabCheckedData=placements.data();
     m_prefabCheckedCount=placements.size(); m_hasPrefabPlacements=hasPrefabs;
     if (!hasPrefabs && !m_prefabInstances) return;
+    // Keep polling the placement signature so callers editing public placement
+    // records in place retain the existing one-second detection behavior.
     const auto signature=GetPlacementSignature();
-    if (m_prefabInstances && m_prefabInstances->provider==provider &&
-        m_prefabInstances->signature==signature && now<m_prefabInstances->nextCheck && !changed) return;
+    const auto readSource=[](const std::string& asset) {
+        PrefabInstances::Source source;
+        source.resolved=std::filesystem::absolute(Mesh::ResolveFilePath(asset)).lexically_normal().generic_string();
+        std::error_code error;
+        source.stamp=std::filesystem::last_write_time(source.resolved,error);
+        return source;
+    };
+    std::map<std::string,PrefabInstances::Source> sources;
+    if (!changed && m_prefabInstances->provider==provider && m_prefabInstances->signature==signature &&
+        m_prefabInstances->HasSameLods(objectLods))
+    {
+        // Refresh distinct source spellings, not all placement groups. Include
+        // resolved identity: overrides/relocations can preserve the timestamp.
+        bool same=true;
+        for(const auto& [asset,previous]:m_prefabInstances->sources)
+        {
+            auto current=readSource(asset);
+            same=same && current==previous;
+            sources.emplace(asset,std::move(current));
+        }
+        if(same)
+        { m_prefabInstances->nextCheck=now+std::chrono::seconds(1); return; }
+    }
+    using BuildProfile=Engine::Serialization::PrefabLoadProfile;
+    BuildProfile buildProfile("TerrainObjectLayer: "+layerName);
+    std::map<std::string,std::vector<const Placement*>> groups;
     // Thousands of placements reference a small set of prefab paths. Resolve
     // each distinct spelling once per refresh, retaining relocation checks on
     // subsequent refreshes so newly created project overrides are still found.
-    std::map<std::string,std::string> resolvedKeys;
     const auto key=[&](const std::string& path) -> const std::string& {
-        auto [entry,inserted]=resolvedKeys.try_emplace(path);
-        if (inserted)
-            entry->second=std::filesystem::absolute(Mesh::ResolveFilePath(path)).lexically_normal().generic_string();
-        return entry->second;
+        auto [entry,inserted]=sources.try_emplace(path);
+        if (inserted) entry->second=readSource(path);
+        return entry->second.resolved;
     };
     std::map<std::string,std::string> bases;
     for (const auto& [base,lods]:objectLods)
@@ -67,36 +111,23 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider)
             const auto base=bases.find(key(placement.asset));
             groups[base==bases.end() ? placement.asset:base->second].push_back(&placement);
         }
-    std::map<std::string,std::filesystem::file_time_type> stamps;
-    for (const auto& [asset,records]:groups)
-    {
-        std::error_code error;
-        stamps[asset]=std::filesystem::last_write_time(Mesh::ResolveFilePath(asset),error);
-    }
-    for (const auto& [asset,lods]:objectLods)
-        if (std::filesystem::path(asset).extension()==".prefab")
-        {
-            std::error_code error;
-            stamps[asset]=std::filesystem::last_write_time(Mesh::ResolveFilePath(asset),error);
-            for (const auto& variant:lods.meshes)
-                stamps[variant]=std::filesystem::last_write_time(Mesh::ResolveFilePath(variant),error);
-        }
-    if (m_prefabInstances && m_prefabInstances->provider==provider &&
-        m_prefabInstances->signature==signature && m_prefabInstances->stamps==stamps && !changed)
-    { m_prefabInstances->nextCheck=now+std::chrono::seconds(1); return; }
     auto* scene=Owner->GetScene();
     if (m_prefabInstances)
         for (auto id:m_prefabInstances->generated)
             if (auto* object=scene->FindObjectById(id)) scene->RemoveObject(object);
     auto runtime=std::make_shared<PrefabInstances>();
-    runtime->provider=provider; runtime->signature=signature; runtime->stamps=std::move(stamps);
+    runtime->provider=provider; runtime->signature=signature;
     runtime->nextCheck=now+std::chrono::seconds(1);
     // Definitions are needed only while deriving batches and collider copies.
     // Retaining them duplicates every source CPU mesh for the layer lifetime.
     Engine::Scene::Scene prototypes;
     const auto create=[&](const std::string& name) {
         auto* object=scene->AddObject(name); object->runtimeOnly=true;
-        scene->MoveObject(object,Owner,Engine::Scene::Scene::ObjectPlacement::AsChild);
+        // New batches use layer-local coordinates. Preserving the old world
+        // transform here would evaluate the growing scene graph for each batch
+        // only to discard the result immediately below.
+        if(!scene->SetParentLocal(object,Owner))
+            throw std::runtime_error("Unable to parent generated prefab batch");
         object->transform.position={0,0,0}; object->transform.rotation={0,0,0};
         object->transform.scale={1,1,1};
         runtime->generated.push_back(scene->GetObjectId(object)); return object;
@@ -104,8 +135,11 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider)
     std::map<std::string,Engine::Core::Object*> definitions;
     const auto definition=[&](const std::string& asset) {
         auto& root=definitions[asset];
-        if (!root) root=Engine::Serialization::SceneSerializer::InstantiatePrefab(
-            prototypes,Mesh::ResolveFilePath(asset),nullptr);
+        if (!root)
+        {
+            BuildProfile::Stage stage("prototype_definition");
+            root=Engine::Serialization::SceneSerializer::InstantiatePrefab(prototypes,key(asset),nullptr);
+        }
         return root;
     };
     for (const auto& [asset,records]:groups)
@@ -141,36 +175,56 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider)
             if (!original->Owner->IsEnabledInHierarchy()) continue;
             // Expand indexed geometry once per shared prefab part, never per placement.
             auto source=std::make_shared<Mesh>();
-            auto vertices=original->GetVertices();
+            {
+            BuildProfile::Stage stage("batch_source_geometry");
+            std::vector<Mesh::Vertex> vertices;
+            {
+            BuildProfile::Stage copyStage("batch_geometry_copy_expand");
+            vertices=original->GetVertices();
             if (!original->GetIndices().empty())
             {
                 std::vector<Mesh::Vertex> expanded; expanded.reserve(original->GetIndices().size());
                 for (auto index:original->GetIndices()) expanded.push_back(vertices.at(index));
                 vertices=std::move(expanded);
             }
+            }
             if (vertices.empty()) continue;
             // Bake the prefab-part transform once so all parts and LODs can use
             // the exact same resident placement array, including impostors.
+            {
+            BuildProfile::Stage transformStage("batch_geometry_transform");
             const auto part=original->Owner->transform.GetWorldMatrix();
-            const auto normalMatrix=glm::transpose(glm::inverse(glm::mat3(part)));
+            const auto tangentMatrix=glm::mat3(part);
+            const auto normalMatrix=glm::transpose(glm::inverse(tangentMatrix));
             for (auto& vertex:vertices)
             {
                 const auto position=glm::vec3(part*glm::vec4(vertex.pos[0],vertex.pos[1],vertex.pos[2],1));
                 auto normal=normalMatrix*glm::vec3(vertex.normal[0],vertex.normal[1],vertex.normal[2]);
                 normal=glm::length(normal)>1.e-6f ? glm::normalize(normal):glm::vec3(0,1,0);
-                auto tangent=glm::mat3(part)*glm::vec3(vertex.tangent[0],vertex.tangent[1],vertex.tangent[2]);
+                auto tangent=tangentMatrix*glm::vec3(vertex.tangent[0],vertex.tangent[1],vertex.tangent[2]);
                 tangent=glm::length(tangent)>1.e-6f ? glm::normalize(tangent):glm::vec3(1,0,0);
                 for (int axis=0;axis<3;++axis) { vertex.pos[axis]=position[axis]; vertex.normal[axis]=normal[axis]; vertex.tangent[axis]=tangent[axis]; }
             }
+            }
+            {
+            BuildProfile::Stage validationStage("batch_geometry_validate_bounds");
             if (!source->SetAuthoredVertices(std::move(vertices)))
                 throw std::runtime_error("Invalid shared prefab geometry: "+chain[lod]);
+            }
+            {
+            BuildProfile::Stage uploadStage("batch_geometry_buffer_create");
             source->CreateBuffer(provider->GetBufferFactory());
+            }
+            }
+            BuildProfile::Stage instanceStage("batch_instances");
             for (const auto& [tile,tileRecords]:tiles)
             {
             auto& instances=tileInstances[tile];
             const bool initialize=!instances;
             if (initialize) instances=std::make_shared<Mesh::InstanceData>();
             glm::vec3 minimum(std::numeric_limits<float>::max()),maximum(-minimum);
+            {
+            BuildProfile::Stage boundsStage("batch_instance_transforms_bounds");
             for (const auto* placement:tileRecords)
             {
                 const glm::mat4 matrix=placementMatrix(*placement);
@@ -186,12 +240,32 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider)
                     minimum=glm::min(minimum,point); maximum=glm::max(maximum,point);
                 }
             }
+            }
+            BuildProfile::Stage objectStage("batch_instance_objects");
             auto* object=create("Shared prefab part: "+original->Owner->name+" ("+
                 std::to_string(tile.first)+","+std::to_string(tile.second)+")");
             auto* mesh=object->AddComponent<Mesh>();
+            mesh->screenLodSelection=screenLodSelection;
+            mesh->distanceLodOverride=distanceLodOverride;
+            mesh->screenLod1Pixels=screenLod1Pixels;
+            mesh->screenLod2Pixels=screenLod2Pixels;
+            mesh->screenLodHysteresis=screenLodHysteresis;
+            const glm::vec3 windPadding(1.5f*std::max(0.f,source->GetBoundsMax().y)*
+                std::clamp(original->foliageWindStrength,0.f,1.f));
+            const auto lodLow=source->GetBoundsMin()-windPadding;
+            const auto lodHigh=source->GetBoundsMax()+windPadding;
+            if(!instances->hasLodBounds)
+            { instances->lodMinimum=lodLow; instances->lodMaximum=lodHigh; instances->hasLodBounds=true; }
+            else
+            { instances->lodMinimum=glm::min(instances->lodMinimum,lodLow); instances->lodMaximum=glm::max(instances->lodMaximum,lodHigh); }
+            instances->maximumLod=int(chain.size())-1;
             mesh->useBoundsForShadowCulling=true;
             mesh->foliageWindStrength=original->foliageWindStrength;
+            const auto& sourcePath=original->GetFilePath();
+            mesh->treeTimingGeometry=sourcePath.find("/Woodland/Oaks/")!=std::string::npos ||
+                sourcePath.find("\\Woodland\\Oaks\\")!=std::string::npos;
             mesh->runtimeShadowDistance=std::max(0.f,shadowDistance);
+            mesh->runtimeShadowFadeWidth=GetShadowFadeWidth();
             mesh->prefabShadowLod=shadowLod<0 ? -1:std::min(shadowLod,int(chain.size())-1);
             if (chain.size()>1)
             {
@@ -202,8 +276,16 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider)
                 static_cast<uint32_t>(tileRecords.size())}},minimum,maximum);
             if (const auto* material=original->Owner->GetComponent<Material>())
             {
+                BuildProfile::Stage materialStage("batch_instance_materials");
                 auto* copy=object->AddComponent<Material>();
-                copy->Deserialize(material->Serialize()); copy->OnAfterDeserialize(provider);
+                {
+                    BuildProfile::Stage stage("batch_material_copy_resolved");
+                    copy->CopyResolvedStateFrom(*material);
+                }
+                {
+                    BuildProfile::Stage stage("batch_material_graphics");
+                    copy->OnAfterDeserialize(provider);
+                }
                 if (shadowDistance<=0) copy->castsShadows=false;
             }
             }
@@ -211,6 +293,7 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider)
         }
         // Collider policy belongs to the shared prefab. None are synthesized
         // when it has no collider; adding one later applies to every placement.
+        BuildProfile::Stage colliderStage("batch_colliders");
         auto* colliderRoot=root;
         const auto sameAsset=[](const std::string& a,const std::string& b) {
             return std::filesystem::absolute(Mesh::ResolveFilePath(a)).lexically_normal()==
@@ -239,6 +322,8 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider)
             }
         }
     }
+    runtime->sources=std::move(sources);
+    runtime->lods=objectLods;
     m_prefabInstances=std::move(runtime);
 }
 }

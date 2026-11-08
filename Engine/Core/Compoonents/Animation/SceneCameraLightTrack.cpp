@@ -98,7 +98,8 @@ SceneCameraLightTrack::JsonValue SceneCameraLightTrack::Serialize() const
             .Set("color", FloatArray(key.color))
             .Set("position", FloatArray(key.position)));
     result.Set("cameras", std::move(cameraKeys));
-    return result.Set("lights", std::move(lightKeys));
+    result.Set("lights", std::move(lightKeys));
+    return result;
 }
 
 void SceneCameraLightTrack::Deserialize(const JsonValue& value)

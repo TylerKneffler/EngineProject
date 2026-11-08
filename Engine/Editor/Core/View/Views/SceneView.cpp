@@ -1139,3 +1139,8 @@ void SceneView::RenderShadow3D(void* cmd)
             GetWidth(), GetHeight(), true);
 }
 }
+
+float Engine::Editor::SceneView::EffectiveRenderScale() const
+{
+    return m_scene ? std::clamp(m_scene->settings.renderScale * m_scene->settings.graphicsQuality.Resolve().renderScale, .5f, 1.f) : 1.f;
+}

@@ -18,6 +18,8 @@ enum class GpuTimingStage : uint32_t
     Portal,
     Opaque,
     Transparent,
+    TreeBark,
+    TreeLeaves,
     Count
 };
 
@@ -25,6 +27,11 @@ struct FrameTimingTelemetry
 {
     std::array<double, static_cast<size_t>(GpuTimingStage::Count)>
         gpuMilliseconds{};
+    // Pipeline invocation counts, resolved with the same frame as timestamps.
+    // They measure workload, never independent vertex/fragment elapsed time.
+    struct Workload { uint64_t vertices = 0, primitives = 0, fragments = 0; };
+    std::array<Workload, static_cast<size_t>(GpuTimingStage::Count)> gpuWorkload{};
+    bool gpuWorkloadValid = false;
     double cpuSubmissionMilliseconds = 0.0;
     double cpuPresentationMilliseconds = 0.0;
     double cpuGpuQueryResolveMilliseconds = 0.0;
@@ -33,6 +40,26 @@ struct FrameTimingTelemetry
     uint32_t gpuRegionCount = 0;
     bool gpuTimingsValid = false;
     bool flipModelSwapChain = false;
+    double OpaqueMilliseconds() const
+    {
+        return gpuMilliseconds[static_cast<size_t>(GpuTimingStage::Opaque)] +
+            gpuMilliseconds[static_cast<size_t>(GpuTimingStage::TreeBark)] +
+            gpuMilliseconds[static_cast<size_t>(GpuTimingStage::TreeLeaves)];
+    }
+    template<class Stream> void WriteOpaqueJson(Stream& output) const
+    {
+        output << ",\"gpu_workload_valid\":" << (gpuWorkloadValid ? "true" : "false");
+        const char* names[] = {"opaque_other", "tree_bark", "tree_leaves"};
+        const GpuTimingStage stages[] = {GpuTimingStage::Opaque, GpuTimingStage::TreeBark, GpuTimingStage::TreeLeaves};
+        for (size_t i = 0; i < 3; ++i)
+        {
+            const auto index = static_cast<size_t>(stages[i]);
+            output << ",\"gpu_" << names[i] << "_ms\":" << gpuMilliseconds[index];
+            output << ",\"gpu_" << names[i] << "_vs_invocations\":" << gpuWorkload[index].vertices;
+            output << ",\"gpu_" << names[i] << "_primitives\":" << gpuWorkload[index].primitives;
+            output << ",\"gpu_" << names[i] << "_ps_invocations\":" << gpuWorkload[index].fragments;
+        }
+    }
 };
 
 // ---------------------------------------------------------------------------
@@ -116,6 +143,10 @@ public:
     {
         int32_t left, top, right, bottom;
     };
+    // Clear a region of the active depth-only target without touching retained
+    // atlas tiles. Callers must use a full refresh when unsupported.
+    virtual bool SupportsDepthRectangleClear() const { return false; }
+    virtual void ClearDepthRectangle(const ScissorRect&, float = 1.f) {}
     virtual void SetViewport(const Viewport& vp) = 0;
     virtual void SetScissorRect(const ScissorRect& rect) = 0;
 
@@ -203,6 +234,7 @@ public:
     virtual uint32_t GetConstantBufferArenaWrites() const { return 0; }
     virtual uint32_t GetConstantBufferDiscardMaps() const { return 0; }
     virtual std::unique_ptr<IGraphicsContext> CreateContext() = 0;
+    virtual bool SupportsDepthRectangleClear() const { return false; }
     // Build a context around a worker-owned native command stream without
     // changing the factory's current frame stream.
     virtual std::unique_ptr<IGraphicsContext> CreateContextForCommandBuffer(void*)

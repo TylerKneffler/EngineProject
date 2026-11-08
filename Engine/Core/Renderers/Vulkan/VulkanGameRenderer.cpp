@@ -24,7 +24,7 @@ bool VulkanGameRenderer::Init(void* hwnd, uint32_t width, uint32_t height)
     if (!m_core.Init(static_cast<HWND>(hwnd), width, height, true)) return false;
     m_provider = std::make_unique<VulkanGraphicsProvider>(
         m_core.GetPhysicalDevice(), m_core.GetDevice(), m_core.GetOffscreenRenderPass(),
-        m_core.GetQueue(), m_core.GetQueueFamily());
+        m_core.GetQueue(), m_core.GetQueueFamily(), m_core.PipelineStatisticsEnabled());
     m_postProcess.Init(m_core.GetPhysicalDevice(), m_core.GetDevice(),
         m_core.GetOffscreenRenderPass(), m_core.GetMainRenderPass(), width, height);
     for (uint32_t slot = 0; slot < 2; ++slot)

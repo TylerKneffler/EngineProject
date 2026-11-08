@@ -23286,7 +23286,7 @@
                 <item asset="Assets/Prefabs/Woodland/Oaks/Large_oak_tree_001_LOD0.prefab">
                   <meshes>
                     <item>Assets/Prefabs/Woodland/Oaks/Large_oak_tree_001_LOD0.prefab</item>
-                    <item>Assets/Prefabs/Woodland/Oaks/Large_oak_tree_001_LOD1.prefab</item>
+                    <item>Assets/Prefabs/Woodland/Oaks/Large_oak_tree_001_Canopy.prefab</item>
                     <item>Assets/Prefabs/Woodland/Oaks/Large_oak_tree_001_Impostor.prefab</item>
                   </meshes>
                   <distances>
@@ -23297,7 +23297,7 @@
                 <item asset="Assets/Prefabs/Woodland/Oaks/Large_oak_tree_002_LOD0.prefab">
                   <meshes>
                     <item>Assets/Prefabs/Woodland/Oaks/Large_oak_tree_002_LOD0.prefab</item>
-                    <item>Assets/Prefabs/Woodland/Oaks/Large_oak_tree_002_LOD1.prefab</item>
+                    <item>Assets/Prefabs/Woodland/Oaks/Large_oak_tree_002_Canopy.prefab</item>
                     <item>Assets/Prefabs/Woodland/Oaks/Large_oak_tree_002_Impostor.prefab</item>
                   </meshes>
                   <distances>
@@ -23308,7 +23308,7 @@
                 <item asset="Assets/Prefabs/Woodland/Oaks/Large_oak_tree_003_LOD0.prefab">
                   <meshes>
                     <item>Assets/Prefabs/Woodland/Oaks/Large_oak_tree_003_LOD0.prefab</item>
-                    <item>Assets/Prefabs/Woodland/Oaks/Large_oak_tree_003_LOD1.prefab</item>
+                    <item>Assets/Prefabs/Woodland/Oaks/Large_oak_tree_003_Canopy.prefab</item>
                     <item>Assets/Prefabs/Woodland/Oaks/Large_oak_tree_003_Impostor.prefab</item>
                   </meshes>
                   <distances>
@@ -23319,7 +23319,7 @@
                 <item asset="Assets/Prefabs/Woodland/Oaks/Large_oak_tree_004_LOD0.prefab">
                   <meshes>
                     <item>Assets/Prefabs/Woodland/Oaks/Large_oak_tree_004_LOD0.prefab</item>
-                    <item>Assets/Prefabs/Woodland/Oaks/Large_oak_tree_004_LOD1.prefab</item>
+                    <item>Assets/Prefabs/Woodland/Oaks/Large_oak_tree_004_Canopy.prefab</item>
                     <item>Assets/Prefabs/Woodland/Oaks/Large_oak_tree_004_Impostor.prefab</item>
                   </meshes>
                   <distances>

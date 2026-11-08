@@ -45,9 +45,12 @@ public:
     void SetVertexBuffer(uint32_t slot, const Engine::Graphics::IGraphicsBuffer* buffer, uint32_t stride, uint64_t offset = 0) override;
     void SetIndexBuffer(const Engine::Graphics::IGraphicsBuffer* buffer, uint32_t indexCount, uint64_t offset = 0) override;
     void SetTexture(uint32_t slot, const Engine::Graphics::IGraphicsTexture* texture) override;
+    void SetTextureOwners(std::shared_ptr<Engine::Graphics::TextureFrameOwners> owners) { m_textureOwners = std::move(owners); }
     bool BeginDepthOnlyPass(const Engine::Graphics::IGraphicsTexture* texture,
         float clearDepth = 1.f) override;
     void EndDepthOnlyPass() override;
+    bool SupportsDepthRectangleClear() const override { return true; }
+    void ClearDepthRectangle(const ScissorRect&, float = 1.f) override;
     void SetViewport(const Viewport& viewport) override;
     void SetScissorRect(const ScissorRect& rect) override;
     void Clear(float, float, float, float, float = 1.0f) override {}
@@ -64,6 +67,16 @@ public:
     void* GetNativeHandle() const override { return reinterpret_cast<void*>(m_commandBuffer); }
 private:
     VkCommandBuffer m_commandBuffer;
+    std::shared_ptr<Engine::Graphics::TextureFrameOwners> m_textureOwners;
+    uint64_t m_textureOwnerGeneration=0;
+    std::unordered_set<const Engine::Graphics::IGraphicsTexture*> m_seenFrameTextures;
+    void RetainTexture(const Engine::Graphics::IGraphicsTexture* texture)
+    {
+        if(!m_textureOwners || !texture) return;
+        const auto generation=m_textureOwners->Generation();
+        if(m_textureOwnerGeneration!=generation) {m_seenFrameTextures.clear();m_textureOwnerGeneration=generation;}
+        if(m_seenFrameTextures.insert(texture).second) m_textureOwners->Retain(texture);
+    }
     const VulkanPipelineState* m_pipeline = nullptr;
     const class VulkanComputePipeline* m_computePipeline = nullptr;
     const VulkanGraphicsBuffer* m_computeRead = nullptr;
@@ -88,6 +101,7 @@ class VulkanGraphicsContextFactory : public Engine::Graphics::IGraphicsContextFa
 public:
     void SetCommandBuffer(void* commandBuffer) override
     { m_commandBuffer = reinterpret_cast<VkCommandBuffer>(commandBuffer); }
+    bool SupportsDepthRectangleClear() const override { return true; }
     void PrepareFrame(uint32_t frameSlot) override;
     void PrepareFrameForCommandBuffer(uint32_t frameSlot, VkCommandBuffer commandBuffer);
     uint32_t GetPreparedFrameSlot() const override { return m_preparedFrameSlot; }
@@ -96,24 +110,24 @@ public:
     Engine::Graphics::FrameTimingTelemetry GetFrameTimingTelemetry() const override;
     std::unique_ptr<Engine::Graphics::IGraphicsContext> CreateContext() override
     {
-        return m_commandBuffer
-            ? std::make_unique<VulkanGraphicsContext>(
-                m_commandBuffer, m_textureSystem, m_occlusionState, m_gpuTimings,
-                m_computeDescriptors)
-            : nullptr;
+        return CreateContextForCommandBuffer(reinterpret_cast<void*>(m_commandBuffer));
     }
     std::unique_ptr<Engine::Graphics::IGraphicsContext> CreateContextForCommandBuffer(void* commandBuffer) override
     {
         if (!commandBuffer) return nullptr;
-        return std::make_unique<VulkanGraphicsContext>(
+        auto result = std::make_unique<VulkanGraphicsContext>(
             reinterpret_cast<VkCommandBuffer>(commandBuffer), m_textureSystem,
             m_occlusionState, m_gpuTimings, m_computeDescriptors);
+        result->SetTextureOwners(m_textureOwners);
+        return result;
     }
-    void SetDevice(VkDevice device, float timestampPeriod);
+    void SetDevice(VkDevice device, float timestampPeriod, bool pipelineStatisticsEnabled);
     void SetTextureSystem(std::shared_ptr<VulkanTextureSystem> textureSystem)
     { m_textureSystem = std::move(textureSystem); }
 private:
     uint32_t m_preparedFrameSlot = 0;
+    std::shared_ptr<Engine::Graphics::TextureFrameOwners> m_textureOwners =
+        std::make_shared<Engine::Graphics::TextureFrameOwners>();
     uint64_t m_preparedFrameSerial = 0;
     VkCommandBuffer m_commandBuffer = VK_NULL_HANDLE;
     std::shared_ptr<VulkanTextureSystem> m_textureSystem;

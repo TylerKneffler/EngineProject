@@ -16,6 +16,7 @@ public:
     bool Init(void* hwnd, uint32_t width, uint32_t height) override;
     void Resize(uint32_t width, uint32_t height) override;
     uint32_t GetWidth() const override { return m_width; }
+    const char* GetBackendName() const override { return "dx11"; }
     uint32_t GetHeight() const override { return m_height; }
     void Clear(float r, float g, float b, float a = 1.0f) override;
     Engine::Graphics::IGraphicsProvider* GetGraphicsProvider() override { return m_graphicsProvider.get(); }

@@ -1,3 +1,4 @@
+#include <cstdlib>
 #include "DX12GraphicsContext.h"
 #include "Core/Graphics/IGraphicsBuffer.h"
 #include "Core/Graphics/IPipelineState.h"
@@ -113,27 +114,31 @@ struct D3D12OcclusionQueryState
 
 struct D3D12GpuTimingState
 {
-    static constexpr uint32_t QueryCapacity = 128;
+    static constexpr uint32_t QueryCapacity = 2048;
     struct Record { Engine::Graphics::GpuTimingStage stage{}; uint32_t begin = 0; uint32_t end = 0; };
     struct FrameSlot
     {
         Microsoft::WRL::ComPtr<ID3D12QueryHeap> heap;
         Microsoft::WRL::ComPtr<ID3D12Resource> readback;
         uint64_t* mapped = nullptr;
+        Microsoft::WRL::ComPtr<ID3D12QueryHeap> statisticsHeap;
+        Microsoft::WRL::ComPtr<ID3D12Resource> statisticsReadback;
+        D3D12_QUERY_DATA_PIPELINE_STATISTICS* statistics = nullptr;
         std::vector<Record> records;
         uint32_t used = 0;
-        bool pending = false;
+        bool pending = false; bool overflow = false;
     };
     D3D12GpuTimingState(ID3D12Device* value, ID3D12CommandQueue* queue)
         : device(value)
     { if (queue) queue->GetTimestampFrequency(&frequency); }
     ~D3D12GpuTimingState()
-    { for (auto& slot : slots) if (slot.readback && slot.mapped) slot.readback->Unmap(0, nullptr); }
+    { for (auto& slot : slots) if (slot.readback && slot.mapped) slot.readback->Unmap(0, nullptr);
+      for (auto& slot : slots) if (slot.statisticsReadback && slot.statistics) slot.statisticsReadback->Unmap(0, nullptr); }
     bool EnsureSlot(uint32_t index)
     {
         if (!device) return false;
         if (slots.size() <= index) slots.resize(index + 1u);
-        auto& slot = slots[index]; if (slot.heap) return true;
+        auto& slot = slots[index]; if (slot.heap && slot.mapped && (!collectWorkload || slot.statistics)) return true;
         D3D12_QUERY_HEAP_DESC query{}; query.Type = D3D12_QUERY_HEAP_TYPE_TIMESTAMP; query.Count = QueryCapacity;
         if (FAILED(device->CreateQueryHeap(&query, IID_PPV_ARGS(&slot.heap)))) return false;
         D3D12_HEAP_PROPERTIES heap{}; heap.Type = D3D12_HEAP_TYPE_READBACK;
@@ -144,7 +149,18 @@ struct D3D12GpuTimingState
         if (FAILED(device->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &buffer,
             D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&slot.readback)))) return false;
         D3D12_RANGE range{0, static_cast<SIZE_T>(buffer.Width)};
-        return SUCCEEDED(slot.readback->Map(0, &range, reinterpret_cast<void**>(&slot.mapped)));
+        if (FAILED(slot.readback->Map(0, &range, reinterpret_cast<void**>(&slot.mapped)))) return false;
+        if (collectWorkload)
+        {
+            query.Type = D3D12_QUERY_HEAP_TYPE_PIPELINE_STATISTICS;
+            if (FAILED(device->CreateQueryHeap(&query, IID_PPV_ARGS(&slot.statisticsHeap)))) return false;
+            buffer.Width = uint64_t(QueryCapacity) * sizeof(D3D12_QUERY_DATA_PIPELINE_STATISTICS);
+            if (FAILED(device->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &buffer,
+                D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&slot.statisticsReadback)))) return false;
+            range.End = static_cast<SIZE_T>(buffer.Width);
+            if (FAILED(slot.statisticsReadback->Map(0, &range, reinterpret_cast<void**>(&slot.statistics)))) return false;
+        }
+        return true;
     }
     void Prepare(uint32_t index)
     {
@@ -153,28 +169,41 @@ struct D3D12GpuTimingState
         if (slot.pending && frequency)
         {
             telemetry.gpuMilliseconds.fill(0.0);
+            telemetry.gpuWorkload = {};
+            telemetry.gpuWorkloadValid = collectWorkload && slot.statistics;
+            if (telemetry.gpuWorkloadValid)
+                for (size_t i = 0; i < slot.records.size(); ++i)
+                {
+                    auto& workload = telemetry.gpuWorkload[static_cast<size_t>(slot.records[i].stage)];
+                    workload.vertices += slot.statistics[i].VSInvocations;
+                    workload.primitives += slot.statistics[i].IAPrimitives;
+                    workload.fragments += slot.statistics[i].PSInvocations;
+                }
             for (const auto& record : slot.records)
                 if (slot.mapped[record.end] >= slot.mapped[record.begin])
                     telemetry.gpuMilliseconds[static_cast<size_t>(record.stage)] +=
                         double(slot.mapped[record.end] - slot.mapped[record.begin]) * 1000.0 / double(frequency);
-            telemetry.gpuTimingsValid = true; telemetry.gpuRegionCount = static_cast<uint32_t>(slot.records.size());
+            telemetry.gpuTimingsValid = !slot.overflow;
+                if (slot.overflow) telemetry.gpuWorkloadValid = false; telemetry.gpuRegionCount = static_cast<uint32_t>(slot.records.size());
             ++telemetry.gpuSampleId;
         }
-        slot.used = 0; slot.records.clear(); slot.pending = false;
+        slot.used = 0; slot.records.clear(); slot.pending = false; slot.overflow = false;
         currentSlot = index; active = UINT32_MAX; cpuStart = std::chrono::steady_clock::now();
     }
     void Begin(ID3D12GraphicsCommandList* list, Engine::Graphics::GpuTimingStage stage)
     {
         if (!list || currentSlot >= slots.size() || active != UINT32_MAX) return;
-        auto& slot = slots[currentSlot]; if (slot.used + 2 > QueryCapacity) return;
+        auto& slot = slots[currentSlot]; if (slot.used + 2 > QueryCapacity) { slot.overflow = true; return; }
         Record record{stage, slot.used++, slot.used++}; slot.records.push_back(record);
         active = static_cast<uint32_t>(slot.records.size() - 1u);
         list->EndQuery(slot.heap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, record.begin);
+        if (collectWorkload) list->BeginQuery(slot.statisticsHeap.Get(), D3D12_QUERY_TYPE_PIPELINE_STATISTICS, active);
     }
     void End(ID3D12GraphicsCommandList* list, Engine::Graphics::GpuTimingStage stage)
     {
         if (!list || currentSlot >= slots.size() || active == UINT32_MAX) return;
         auto& slot = slots[currentSlot]; auto& record = slot.records[active]; if (record.stage != stage) return;
+        if (collectWorkload) list->EndQuery(slot.statisticsHeap.Get(), D3D12_QUERY_TYPE_PIPELINE_STATISTICS, active);
         list->EndQuery(slot.heap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, record.end); active = UINT32_MAX;
     }
     void Finalize(ID3D12GraphicsCommandList* list)
@@ -184,10 +213,14 @@ struct D3D12GpuTimingState
         if (active != UINT32_MAX) End(list, slot.records[active].stage);
         if (slot.used) list->ResolveQueryData(slot.heap.Get(), D3D12_QUERY_TYPE_TIMESTAMP,
             0, slot.used, slot.readback.Get(), 0);
+        if (collectWorkload && !slot.records.empty())
+            list->ResolveQueryData(slot.statisticsHeap.Get(), D3D12_QUERY_TYPE_PIPELINE_STATISTICS,
+                0, static_cast<UINT>(slot.records.size()), slot.statisticsReadback.Get(), 0);
         slot.pending = slot.used != 0;
         telemetry.cpuSubmissionMilliseconds = std::chrono::duration<double, std::milli>(
             std::chrono::steady_clock::now() - cpuStart).count();
     }
+    const bool collectWorkload = std::getenv("ENGINE_GPU_WORKLOAD_COUNTERS") != nullptr;
     ID3D12Device* device = nullptr; uint64_t frequency = 0; std::vector<FrameSlot> slots;
     uint32_t currentSlot = UINT32_MAX, active = UINT32_MAX;
     Engine::Graphics::FrameTimingTelemetry telemetry{};
@@ -520,6 +553,7 @@ void D3D12GraphicsContext::SetTexture(uint32_t slot, const Engine::Graphics::IGr
     const auto* nativeTexture = dynamic_cast<const D3D12GraphicsTexture*>(texture ? texture:m_nullTexture.get());
     if (!nativeTexture)
         return;
+    RetainTexture(nativeTexture);
     ID3D12DescriptorHeap* heaps[] = { nativeTexture->GetHeap() };
     m_cmdList->SetDescriptorHeaps(1, heaps);
     const uint32_t rootParameter = slot == 10 ? 26 : slot == 11 ? 27 :
@@ -536,6 +570,7 @@ bool D3D12GraphicsContext::BeginDepthOnlyPass(
     auto* depth = dynamic_cast<D3D12GraphicsTexture*>(
         const_cast<Engine::Graphics::IGraphicsTexture*>(texture));
     if (!depth || !depth->IsDepthTarget()) return false;
+    RetainTexture(depth);
     D3D12_RESOURCE_BARRIER barrier{};
     barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
     barrier.Transition.pResource = static_cast<ID3D12Resource*>(depth->GetNativeHandle());
@@ -550,6 +585,14 @@ bool D3D12GraphicsContext::BeginDepthOnlyPass(
             clearDepth, 0, 0, nullptr);
     m_activeDepthTarget = depth;
     return true;
+}
+
+void D3D12GraphicsContext::ClearDepthRectangle(const ScissorRect& rect,float depth)
+{
+    if(!m_cmdList || !m_activeDepthTarget || rect.left>=rect.right || rect.top>=rect.bottom) return;
+    const D3D12_RECT area{rect.left,rect.top,rect.right,rect.bottom};
+    m_cmdList->ClearDepthStencilView(m_activeDepthTarget->GetDsvHandle(),
+        D3D12_CLEAR_FLAG_DEPTH,depth,0,1,&area);
 }
 
 void D3D12GraphicsContext::EndDepthOnlyPass()
@@ -713,16 +756,20 @@ std::unique_ptr<Engine::Graphics::IGraphicsContext> D3D12GraphicsContextFactory:
     // Use the externally-supplied command list if one was set via SetCommandBuffer,
     // otherwise fall back to the factory's own command list.
     auto* list = m_externalCmdList ? m_externalCmdList : m_cmdList.Get();
-    return std::make_unique<D3D12GraphicsContext>(
+    auto result = std::make_unique<D3D12GraphicsContext>(
         list, m_rootSignature, m_occlusionState, m_gpuTimings, m_indirectSignatures, m_nullTexture);
+    result->SetTextureOwners(m_textureOwners);
+    return result;
 }
 
 std::unique_ptr<Engine::Graphics::IGraphicsContext> D3D12GraphicsContextFactory::CreateContextForCommandBuffer(void* commandBuffer)
 {
     if (!commandBuffer) return nullptr;
-    return std::make_unique<D3D12GraphicsContext>(
+    auto result = std::make_unique<D3D12GraphicsContext>(
         static_cast<ID3D12GraphicsCommandList*>(commandBuffer), m_rootSignature,
         m_occlusionState, m_gpuTimings, m_indirectSignatures, m_nullTexture);
+    result->SetTextureOwners(m_textureOwners);
+    return result;
 }
 
 void D3D12GraphicsContextFactory::SetCommandBuffer(void* cmd)
@@ -733,6 +780,7 @@ void D3D12GraphicsContextFactory::SetCommandBuffer(void* cmd)
 void D3D12GraphicsContextFactory::PrepareFrame(uint32_t frameSlot)
 {
     m_preparedFrameSlot = frameSlot;
+    m_textureOwners->Prepare(frameSlot);
     ++m_preparedFrameSerial;
     if (m_occlusionState) m_occlusionState->Prepare(frameSlot);
     if (m_gpuTimings) m_gpuTimings->Prepare(frameSlot);

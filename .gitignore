@@ -84,3 +84,24 @@ ReleaseBuilds/.staging-*/
 
 !.local/tests/StreamedRenderRetirementTests.cpp
 !.local/tests/StableShadowCascadeTests.cpp
+!.local/tests/test_shadow_ground.py
+!.local/tests/test_performance_inputs.py
+!.local/tests/ShadowCommandPacketTests.cpp
+!.local/tests/JsonWriterTests.cpp
+!.local/tests/JsonConstructionTests.cpp
+!.local/tests/TextureSamplingBackendTests.cpp
+
+!.local/tests/test_forest_performance.py
+!.local/tests/test_texture_streaming_plan.py
+!.local/tests/TextureStreamingTests.cpp
+!.local/tests/TextureStreamingBackendTests.cpp
+!.local/tests/TextureStreamingFixtures.h
+!.local/tests/test_material_costs.py
+!.local/tests/test_material_visual.py
+!.local/tests/CanopyLodStudy.cpp
+!.local/tests/test_canopy_lod.py
+!.local/tests/CanopyExperiment.h
+!.local/tests/test_canopy_study.py
+
+# Python asset/validation caches.
+__pycache__/

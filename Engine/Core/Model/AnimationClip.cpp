@@ -113,7 +113,8 @@ Engine::Serialization::JsonValue AnimationClip::Serialize() const
             .Set("node", JsonValue(static_cast<int>(track.node)))
             .Set("keys", std::move(keys)));
     }
-    return value.Set("controllers", std::move(serializedControllers));
+    value.Set("controllers", std::move(serializedControllers));
+    return value;
 }
 
 void AnimationClip::Deserialize(const JsonValue& value)

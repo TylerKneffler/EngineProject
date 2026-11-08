@@ -85,6 +85,7 @@ public:
     virtual void RenderShadow3D(void* cmd) = 0;
 
 protected:
+    virtual float EffectiveRenderScale() const { return 1.f; }
     void RequestRenderSize(float width, float height);
     void SetPanelVisible(bool visible)
     {

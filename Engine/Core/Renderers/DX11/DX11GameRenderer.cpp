@@ -101,6 +101,8 @@ bool DX11GameRenderer::Init(void* hwndHandle, uint32_t width, uint32_t height)
 void DX11GameRenderer::CreateTargets()
 {
     m_captureStaging.Reset();
+    m_sceneCaptureStaging.Reset();
+    m_sceneCaptureRequested=m_sceneCaptureReady=false;
     m_exportTexture.Reset();
     m_exportRtv.Reset();
     m_exportReadbacks.clear();
@@ -194,6 +196,38 @@ void DX11GameRenderer::EndFrame()
         Engine::Graphics::SetPostProcessSettings(postProcess);
     }
     m_postProcess.Compose(m_context.Get(), output, temporalFrame);
+    if(m_sceneCaptureRequested)
+    {
+        m_sceneCaptureRequested=false;
+        Microsoft::WRL::ComPtr<ID3D11Resource> resource;
+        output->GetResource(&resource);
+        Microsoft::WRL::ComPtr<ID3D11Texture2D> texture;
+        ThrowIfFailed(resource.As(&texture));
+        D3D11_TEXTURE2D_DESC description{};
+        texture->GetDesc(&description);
+        // Diagnostic RGBA8 capture is intentionally separate from HDR export.
+        if(description.Format==DXGI_FORMAT_R8G8B8A8_UNORM && description.SampleDesc.Count==1)
+        {
+            if(m_sceneCaptureStaging)
+            {
+                D3D11_TEXTURE2D_DESC previous{};
+                m_sceneCaptureStaging->GetDesc(&previous);
+                if(previous.Width!=description.Width || previous.Height!=description.Height ||
+                    previous.Format!=description.Format)
+                    m_sceneCaptureStaging.Reset();
+            }
+            if(!m_sceneCaptureStaging)
+            {
+                description.BindFlags=description.MiscFlags=0;
+                description.Usage=D3D11_USAGE_STAGING;
+                description.CPUAccessFlags=D3D11_CPU_ACCESS_READ;
+                ThrowIfFailed(m_device->CreateTexture2D(&description,nullptr,&m_sceneCaptureStaging));
+            }
+            // Copy the composed frame before flip-model Present rotates it.
+            m_context->CopyResource(m_sceneCaptureStaging.Get(),texture.Get());
+            m_sceneCaptureReady=true;
+        }
+    }
     SignalFrameCompletion();
     m_temporalSampleTarget = 1u;
     m_temporalSamplesAccumulated = 0u;
@@ -529,6 +563,23 @@ bool DX11GameRenderer::CaptureFrameRGBA(std::vector<uint8_t>& pixels)
         std::memcpy(pixels.data() + static_cast<size_t>(row) * rowBytes,
             source + static_cast<size_t>(row) * mapped.RowPitch, rowBytes);
     m_context->Unmap(m_captureStaging.Get(), 0);
+    return true;
+}
+
+bool DX11GameRenderer::ReadSceneCaptureRGBA(std::vector<uint8_t>& pixels)
+{
+    if(!m_sceneCaptureReady || !m_sceneCaptureStaging) return false;
+    D3D11_MAPPED_SUBRESOURCE mapped{};
+    if(FAILED(m_context->Map(m_sceneCaptureStaging.Get(),0,D3D11_MAP_READ,0,&mapped)))
+        return false;
+    D3D11_TEXTURE2D_DESC description{};
+    m_sceneCaptureStaging->GetDesc(&description);
+    const size_t rowBytes=size_t(description.Width)*4;
+    pixels.resize(rowBytes*description.Height);
+    const auto* source=static_cast<const uint8_t*>(mapped.pData);
+    for(unsigned row=0;row<description.Height;++row)
+        std::memcpy(pixels.data()+row*rowBytes,source+row*mapped.RowPitch,rowBytes);
+    m_context->Unmap(m_sceneCaptureStaging.Get(),0);
     return true;
 }
 

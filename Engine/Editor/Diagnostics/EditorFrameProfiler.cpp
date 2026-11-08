@@ -1,10 +1,12 @@
 #include "Engine/Editor/Diagnostics/EditorFrameProfiler.h"
 #include "Engine/Editor/Diagnostics/FrameActivity.h"
+#include "Engine/Editor/Diagnostics/PerformanceProvenance.h"
 
 #include "Core/Physics/Adapters/BulletPhysicsAdapter.h"
 #include "Core/Renderers/DX11/DX11EditorRenderer.h"
 #include "Core/Renderers/IEditorRenderer.h"
 #include "Core/Scene/Scene.h"
+#include "Core/Compoonents/Camera/Camera.h"
 
 #include <cstdlib>
 #if defined(_WIN32)
@@ -53,6 +55,29 @@ namespace Engine::Editor
         Scene::Scene* scene, Renderers::IEditorRenderer* renderer)
     {
         Engine::Threading::CapturedText output;
+        output << PerformanceProvenanceFields() << ",\"graphics_backend\":"
+            << PerformanceJsonString(renderer->GetBackendName())
+            << ",\"render_scale\":" << renderer->GetRenderScale()
+            << ",\"dynamic_render_scale\":" << (renderer->IsDynamicRenderScaleEnabled() ? "true" : "false")
+            << ",\"temporal_upscaling\":" << (renderer->IsTemporalUpscalingEnabled() ? "true" : "false") << ',';
+        auto effectiveQuality = scene->settings.graphicsQuality.Resolve();
+        auto qualityChannels = Engine::Model::GraphicsQualitySettings::Channels(effectiveQuality);
+        output << "\"quality_preset\":" << scene->settings.graphicsQuality.preset << ',';
+        for (size_t i=0;i<qualityChannels.size();++i)
+            output << "\"quality_" << Engine::Model::GraphicsQualitySettings::Keys[i] << "\":" << *qualityChannels[i] << ',';
+        output << "\"simulation_time_seconds\":" << scene->GetElapsedTime() << ',';
+        if (auto* camera=scene->FindGameCamera())
+        {
+            const auto view=camera->GetViewMatrix();
+            const auto projection=camera->GetProjectionMatrix(sample.gameViewHeight ?
+                float(sample.gameViewWidth)/sample.gameViewHeight : 1.f);
+            const auto matrix=[&](const char* name,const glm::mat4& value) {
+                output << '\"' << name << "\":[";
+                for(int i=0;i<16;++i) { if(i) output << ','; output << value[i/4][i%4]; }
+                output << "],";
+            };
+            matrix("game_camera_view",view); matrix("game_camera_projection",projection);
+        }
         const auto ms = [](auto first, auto last)
         {
             return std::chrono::duration<double, std::milli>(
@@ -229,8 +254,7 @@ namespace Engine::Editor
                 static_cast<size_t>(Engine::Graphics::GpuTimingStage::Grass)]
             << ",\"gpu_portal_ms\":" << gpuTiming.gpuMilliseconds[
                 static_cast<size_t>(Engine::Graphics::GpuTimingStage::Portal)]
-            << ",\"gpu_opaque_ms\":" << gpuTiming.gpuMilliseconds[
-                static_cast<size_t>(Engine::Graphics::GpuTimingStage::Opaque)]
+            << ",\"gpu_opaque_ms\":" << gpuTiming.OpaqueMilliseconds()
             << ",\"gpu_transparent_ms\":" << gpuTiming.gpuMilliseconds[
                 static_cast<size_t>(Engine::Graphics::GpuTimingStage::Transparent)]
             << ",\"pending_load_ms\":" << ms(sample.afterRender, sample.afterPendingLoad)
@@ -242,6 +266,7 @@ namespace Engine::Editor
             << ",\"game_view_height\":" << sample.gameViewHeight
             << ",\"shadow_draws\":" << sample.submittedShadowDraws
             << ",\"physics_substeps\":" << physicsSubsteps;
+        gpuTiming.WriteOpaqueJson(output);
         static constexpr const char* stageNames[]={"pacing","background","update","render","pending_load"};
         output << ",\"stage_work\":[";
         for(size_t i=0;i<sample.stages.size();++i)
@@ -277,6 +302,7 @@ namespace Engine::Editor
         output << ",\"shadow_state_enabled\":" << (shadowState.enabled ? 1:0)
             << ",\"shadow_state_selected_light\":" << (shadowState.hasSelectedLight ? 1:0)
             << ",\"shadow_state_cascade_count\":" << shadowState.cascadeCount
+            << ",\"shadow_state_refreshed_cascade_mask\":" << shadowState.refreshedCascadeMask
             << ",\"shadow_state_atlas_resolution\":" << shadowState.atlasResolution
             << ",\"shadow_state_atlas_generation\":" << shadowState.atlasAllocationGeneration
             << ",\"shadow_state_caster_count\":" << shadowState.casterCount;
@@ -363,6 +389,15 @@ namespace Engine::Editor
             << ",\"gpu_instance_batches\":" << renderCpu.gpuBatches
             << ",\"render_changed_upload_bytes\":" << renderCpu.changedUploadBytes;
         output << ",\"grass_total_ms\":" << grass.totalMs
+            << ",\"grass_references_ms\":" << grass.referencesMs
+            << ",\"grass_sources_ms\":" << grass.sourcesMs
+            << ",\"grass_placement_ms\":" << grass.placementMs
+            << ",\"grass_visibility_ms\":" << grass.visibilityMs
+            << ",\"grass_retirement_ms\":" << grass.retirementMs
+            << ",\"grass_scheduling_ms\":" << grass.schedulingMs
+            << ",\"grass_build_ms\":" << grass.buildMs
+            << ",\"grass_accounting_ms\":" << grass.accountingMs
+            << ",\"grass_other_ms\":" << grass.otherMs
             << ",\"grass_scan_ms\":" << grass.scanMs
             << ",\"grass_generation_ms\":" << grass.generationMs
             << ",\"grass_upload_ms\":" << grass.uploadMs
@@ -395,6 +430,8 @@ namespace Engine::Editor
         activity(FrameActivity::Save, "save");
         activity(FrameActivity::Bake, "bake");
         activity(FrameActivity::Load, "load");
+        activity(FrameActivity::PlayStart, "play_start");
+        activity(FrameActivity::PlayStop, "play_stop");
         output << "]"
             << ",\"ui_thread_cpu_ms\":" << sample.uiCpuMilliseconds
             << ",\"render_thread_cpu_ms\":" << sample.stages[3].mainBusyMs

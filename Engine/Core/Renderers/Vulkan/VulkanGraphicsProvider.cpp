@@ -15,7 +15,7 @@ VulkanGraphicsProvider::VulkanGraphicsProvider(
     VkDevice device,
     VkRenderPass renderPass,
     VkQueue queue,
-    uint32_t queueFamily)
+    uint32_t queueFamily, bool pipelineStatisticsEnabled)
 {
     m_textureSystem = std::make_shared<VulkanTextureSystem>(
         physicalDevice, device, queue, queueFamily);
@@ -33,7 +33,7 @@ VulkanGraphicsProvider::VulkanGraphicsProvider(
     const bool timestampsSupported = queueFamily < queueFamilyCount &&
         queueFamilies[queueFamily].timestampValidBits != 0;
     m_contextFactory.SetDevice(device,
-        timestampsSupported ? properties.limits.timestampPeriod : 0.0f);
+        timestampsSupported ? properties.limits.timestampPeriod : 0.0f, pipelineStatisticsEnabled);
     m_contextFactory.SetTextureSystem(m_textureSystem);
     m_textureFactory = std::make_unique<VulkanTextureFactory>(m_textureSystem);
 }

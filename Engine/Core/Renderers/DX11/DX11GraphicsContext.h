@@ -8,6 +8,9 @@
 #include <unordered_map>
 #include <chrono>
 #include <vector>
+#include <deque>
+#include <mutex>
+#include <unordered_set>
 
 namespace Engine::Renderers
 {
@@ -37,6 +40,19 @@ struct D3D11FrameResourceState
     D3D11FrameResourceState(ID3D11Device* device, ID3D11DeviceContext* context,
         std::shared_ptr<Engine::Graphics::NativeSubmissionProbe> probe={});
     void PrepareFrame();
+    void RetainTexture(const Engine::Graphics::IGraphicsTexture* texture);
+    void FinalizeTextures();
+    Microsoft::WRL::ComPtr<ID3D11Device> textureDevice;
+    Microsoft::WRL::ComPtr<ID3D11DeviceContext> textureContext;
+    std::mutex textureMutex;
+    std::unordered_set<const Engine::Graphics::IGraphicsTexture*> textureSeen;
+    std::vector<std::shared_ptr<const Engine::Graphics::IGraphicsTexture>> textureOwners;
+    struct TextureBatch
+    {
+        Microsoft::WRL::ComPtr<ID3D11Query> fence;
+        std::vector<std::shared_ptr<const Engine::Graphics::IGraphicsTexture>> owners;
+    };
+    std::deque<TextureBatch> textureBatches;
 
     Microsoft::WRL::ComPtr<ID3D11Buffer> constantArena;
     std::shared_ptr<Engine::Graphics::NativeSubmissionProbe> native;
@@ -50,6 +66,7 @@ struct D3D11FrameResourceState
     uint64_t arenaGeneration = 0;
     bool firstArenaWrite = true;
     bool arenaSupported = false;
+    bool depthRectangleClearSupported = false;
     uint32_t arenaWrites = 0;
     uint32_t discardMaps = 0;
     uint32_t computeArenaWrites=0,computeDiscardMaps=0;
@@ -65,6 +82,7 @@ struct D3D11GpuTimingState
         Engine::Graphics::GpuTimingStage stage{};
         Microsoft::WRL::ComPtr<ID3D11Query> begin;
         Microsoft::WRL::ComPtr<ID3D11Query> end;
+        Microsoft::WRL::ComPtr<ID3D11Query> statistics;
     };
     struct Frame
     {
@@ -72,6 +90,7 @@ struct D3D11GpuTimingState
         std::vector<Region> regions;
         uint32_t regionCount = 0;
         bool pending = false;
+        bool overflow = false;
     };
     D3D11GpuTimingState(ID3D11Device*, ID3D11DeviceContext*);
     void PrepareFrame();
@@ -84,6 +103,7 @@ struct D3D11GpuTimingState
     uint32_t frameIndex = 0;
     uint32_t activeRegion = UINT32_MAX;
     bool recording = false;
+    bool collectWorkload = false;
     Engine::Graphics::FrameTimingTelemetry telemetry{};
     std::chrono::steady_clock::time_point cpuSubmissionStart{};
 };
@@ -124,6 +144,9 @@ public:
     bool BeginDepthOnlyPass(const Engine::Graphics::IGraphicsTexture* texture,
         float clearDepth = 1.f) override;
     void EndDepthOnlyPass() override;
+    bool SupportsDepthRectangleClear() const override
+    { return m_context1 && m_frameResources && m_frameResources->depthRectangleClearSupported; }
+    void ClearDepthRectangle(const ScissorRect&, float = 1.f) override;
     void SetViewport(const Viewport& vp) override;
     void SetScissorRect(const ScissorRect& rect) override;
     void Clear(float r, float g, float b, float a, float depth = 1.0f) override;
@@ -161,11 +184,14 @@ private:
     uint32_t m_stencilReference = 0;
     Microsoft::WRL::ComPtr<ID3D11RenderTargetView> m_savedRenderTarget;
     Microsoft::WRL::ComPtr<ID3D11DepthStencilView> m_savedDepthTarget;
+    Microsoft::WRL::ComPtr<ID3D11DepthStencilView> m_activeDepthOnlyView;
     std::vector<D3D11_VIEWPORT> m_savedViewports;
     std::vector<D3D11_RECT> m_savedScissors;
     bool m_depthOnlyPassActive = false;
     std::shared_ptr<D3D11OcclusionQueryState> m_occlusionState;
     std::shared_ptr<D3D11FrameResourceState> m_frameResources;
+    uint64_t m_textureOwnerGeneration=0;
+    std::unordered_set<const Engine::Graphics::IGraphicsTexture*> m_seenFrameTextures;
     std::shared_ptr<D3D11GpuTimingState> m_gpuTimings;
     D3D11OcclusionQueryState::Entry* m_activeOcclusionQuery = nullptr;
     uint64_t m_occlusionViewId = 0;
@@ -192,7 +218,10 @@ public:
     uint64_t GetPreparedFrameSerial() const override { return m_preparedFrameSerial; }
     uint32_t GetPreparedFrameSlot() const override { return 0; }
     void FinalizeFrame() override
-    { if (m_gpuTimings && m_gpuTimingEnabled) m_gpuTimings->FinalizeFrame(); }
+    {
+        if (m_frameResources) m_frameResources->FinalizeTextures();
+        if (m_gpuTimings && m_gpuTimingEnabled) m_gpuTimings->FinalizeFrame();
+    }
     void SetGpuTimingEnabled(bool enabled) override
     {
         m_gpuTimingEnabled=enabled;
@@ -209,6 +238,8 @@ public:
     Engine::Graphics::NativeSubmissionProbe* GetNativeProbe() const
     { return m_frameResources ? m_frameResources->native.get() : nullptr; }
     void SetComputeConstantArenaEnabled(bool enabled) { if(m_frameResources) m_frameResources->computeArenaEnabled=enabled; }
+    bool SupportsDepthRectangleClear() const override
+    { return m_frameResources && m_frameResources->depthRectangleClearSupported; }
     Engine::Graphics::FrameTimingTelemetry GetFrameTimingTelemetry() const override
     { return m_gpuTimings ? m_gpuTimings->telemetry : Engine::Graphics::FrameTimingTelemetry{}; }
     bool UsesPersistentConstantBufferArena() const override
