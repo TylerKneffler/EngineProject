@@ -2,7 +2,6 @@
 #include "DX12GraphicsTexture.h"
 #include "DX12QueueMutex.h"
 
-#include <cstring>
 
 
 namespace Engine::Renderers

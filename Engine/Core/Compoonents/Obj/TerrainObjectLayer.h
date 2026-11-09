@@ -58,11 +58,15 @@ public:
     {
         // Empty inherits the renderer's object definition; editing distances does not copy it.
         std::vector<std::string> meshes;
+        // Optional dedicated shadow-only meshes. Empty uses visible meshes.
+        std::vector<std::string> shadowMeshes;
         std::vector<float> distances;
     };
     // Keyed by the placement's base asset. Resolved N-level chains use N-1 distances.
     std::map<std::string, ObjectLods> objectLods;
     std::map<std::string, std::vector<std::string>> GetDefinedObjectLods() const;
+    std::vector<std::string> GetObjectShadowLodMeshes(
+        const std::string& asset, const std::vector<std::string>& visibleMeshes) const;
     std::vector<float> GetObjectLodDistances(const std::string& asset, size_t lodCount) const;
 
     struct PreparedPlacement { uint32_t index=0; Mesh::InstanceTransform transform{}; };

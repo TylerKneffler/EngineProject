@@ -1,6 +1,5 @@
 #include "pch.h"
 #include "Engine/Editor/UI/ImGui/Panels/ImGuiPanelHost.h"
-#include <chrono>
 #include "Engine/Editor/EditorState.h"
 #include "Engine/Editor/GameBuildManager.h"
 #include "Engine/Editor/Core/View/IEditorPanel.h"
@@ -15,12 +14,7 @@
 #include "Core/Component.h"
 #include "imgui.h"
 #include "imgui_internal.h"
-#include <algorithm>
-#include <cmath>
 #include <cstdio>
-#include <cstring>
-#include <string>
-#include <sstream>
 
 namespace Engine::Editor
 {

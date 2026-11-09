@@ -6,6 +6,7 @@
 #include "Core/Compoonents/Materials/Material.h"
 #include "Core/Compoonents/Physics/PrimitiveObjectCollider.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <limits>
@@ -38,6 +39,7 @@ struct TerrainObjectLayer::PrefabInstances
         {
             const auto found=current.find(asset);
             if(found==current.end() || found->second.meshes!=expected.meshes ||
+                found->second.shadowMeshes!=expected.shadowMeshes ||
                 found->second.distances!=expected.distances) return false;
         }
         return true;
@@ -104,6 +106,7 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider)
         {
             bases[key(base)]=base;
             for (const auto& variant:lods.meshes) bases[key(variant)]=base;
+            for (const auto& variant:lods.shadowMeshes) bases[key(variant)]=base;
         }
     for (const auto& placement:placements)
         if (std::filesystem::path(placement.asset).extension()==".prefab")
@@ -161,136 +164,168 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider)
                 int(std::floor(placement->position.z/prefabGroupSpan))}].push_back(placement);
         std::map<std::pair<int,int>,std::shared_ptr<Mesh::InstanceData>> tileInstances;
         std::vector<std::string> chain{asset};
-        if (const auto lods=objectLods.find(asset); lods!=objectLods.end() && !lods->second.meshes.empty())
-            chain=lods->second.meshes;
+        std::vector<std::string> shadowChain;
+        if (const auto lods=objectLods.find(asset); lods!=objectLods.end())
+        {
+            if (!lods->second.meshes.empty()) chain=lods->second.meshes;
+            shadowChain=lods->second.shadowMeshes;
+        }
+        chain.erase(std::remove(chain.begin(),chain.end(),std::string{}),chain.end());
+        if(chain.empty()) chain.push_back(asset);
+        shadowChain.erase(std::remove(shadowChain.begin(),shadowChain.end(),std::string{}),shadowChain.end());
+        const bool dedicatedShadowProxy=!shadowChain.empty();
+        if(!dedicatedShadowProxy) shadowChain=chain;
         // The renderer's three resident bands support material changes per level.
         if (chain.size()>3) chain={chain.front(),chain[1],chain.back()};
+        if (shadowChain.size()>3) shadowChain={shadowChain.front(),shadowChain[1],shadowChain.back()};
         const auto distances=GetObjectLodDistances(asset,chain.size());
-        for (size_t lod=0;lod<chain.size();++lod)
+        const auto shadowDistances=GetObjectLodDistances(asset,shadowChain.size());
+        const auto buildChain=[&](const std::vector<std::string>& meshes,
+            const std::vector<float>& lodDistances, bool shadowProxyOnly)
         {
-        auto* lodRoot=definition(chain[lod]);
-        if (!lodRoot) continue;
-        for (auto* original:lodRoot->GetComponentsInChildren<Mesh>())
-        {
-            if (!original->Owner->IsEnabledInHierarchy()) continue;
-            // Expand indexed geometry once per shared prefab part, never per placement.
-            auto source=std::make_shared<Mesh>();
+            for (size_t lod=0;lod<meshes.size();++lod)
             {
-            BuildProfile::Stage stage("batch_source_geometry");
-            std::vector<Mesh::Vertex> vertices;
-            {
-            BuildProfile::Stage copyStage("batch_geometry_copy_expand");
-            vertices=original->GetVertices();
-            if (!original->GetIndices().empty())
-            {
-                std::vector<Mesh::Vertex> expanded; expanded.reserve(original->GetIndices().size());
-                for (auto index:original->GetIndices()) expanded.push_back(vertices.at(index));
-                vertices=std::move(expanded);
-            }
-            }
-            if (vertices.empty()) continue;
-            // Bake the prefab-part transform once so all parts and LODs can use
-            // the exact same resident placement array, including impostors.
-            {
-            BuildProfile::Stage transformStage("batch_geometry_transform");
-            const auto part=original->Owner->transform.GetWorldMatrix();
-            const auto tangentMatrix=glm::mat3(part);
-            const auto normalMatrix=glm::transpose(glm::inverse(tangentMatrix));
-            for (auto& vertex:vertices)
-            {
-                const auto position=glm::vec3(part*glm::vec4(vertex.pos[0],vertex.pos[1],vertex.pos[2],1));
-                auto normal=normalMatrix*glm::vec3(vertex.normal[0],vertex.normal[1],vertex.normal[2]);
-                normal=glm::length(normal)>1.e-6f ? glm::normalize(normal):glm::vec3(0,1,0);
-                auto tangent=tangentMatrix*glm::vec3(vertex.tangent[0],vertex.tangent[1],vertex.tangent[2]);
-                tangent=glm::length(tangent)>1.e-6f ? glm::normalize(tangent):glm::vec3(1,0,0);
-                for (int axis=0;axis<3;++axis) { vertex.pos[axis]=position[axis]; vertex.normal[axis]=normal[axis]; vertex.tangent[axis]=tangent[axis]; }
-            }
-            }
-            {
-            BuildProfile::Stage validationStage("batch_geometry_validate_bounds");
-            if (!source->SetAuthoredVertices(std::move(vertices)))
-                throw std::runtime_error("Invalid shared prefab geometry: "+chain[lod]);
-            }
-            {
-            BuildProfile::Stage uploadStage("batch_geometry_buffer_create");
-            source->CreateBuffer(provider->GetBufferFactory());
-            }
-            }
-            BuildProfile::Stage instanceStage("batch_instances");
-            for (const auto& [tile,tileRecords]:tiles)
-            {
-            auto& instances=tileInstances[tile];
-            const bool initialize=!instances;
-            if (initialize) instances=std::make_shared<Mesh::InstanceData>();
-            glm::vec3 minimum(std::numeric_limits<float>::max()),maximum(-minimum);
-            {
-            BuildProfile::Stage boundsStage("batch_instance_transforms_bounds");
-            for (const auto* placement:tileRecords)
-            {
-                const glm::mat4 matrix=placementMatrix(*placement);
-                Mesh::InstanceTransform instance{};
-                for (int row=0;row<3;++row)
-                    instance.rows[row]={matrix[0][row],matrix[1][row],matrix[2][row],matrix[3][row]};
-                if (initialize) { instances->transforms.push_back(instance); instances->placementIds.push_back(placement->id); }
-                for (int corner=0;corner<8;++corner)
+                auto* lodRoot=definition(meshes[lod]);
+                if (!lodRoot) continue;
+                for (auto* original:lodRoot->GetComponentsInChildren<Mesh>())
                 {
-                    const auto low=source->GetBoundsMin(),high=source->GetBoundsMax();
-                    const auto point=glm::vec3(matrix*glm::vec4(corner&1 ? high.x:low.x,
-                        corner&2 ? high.y:low.y,corner&4 ? high.z:low.z,1));
-                    minimum=glm::min(minimum,point); maximum=glm::max(maximum,point);
+                    if (!original->Owner->IsEnabledInHierarchy()) continue;
+                    // Expand indexed geometry once per shared prefab part, never per placement.
+                    auto source=std::make_shared<Mesh>();
+                    {
+                        BuildProfile::Stage stage("batch_source_geometry");
+                        std::vector<Mesh::Vertex> vertices;
+                        {
+                            BuildProfile::Stage copyStage("batch_geometry_copy_expand");
+                            vertices=original->GetVertices();
+                            if (!original->GetIndices().empty())
+                            {
+                                std::vector<Mesh::Vertex> expanded;
+                                expanded.reserve(original->GetIndices().size());
+                                for (auto index:original->GetIndices())
+                                    expanded.push_back(vertices.at(index));
+                                vertices=std::move(expanded);
+                            }
+                        }
+                        if (vertices.empty()) continue;
+                        // Bake the prefab-part transform once so all parts and LODs can use
+                        // the exact same resident placement array, including impostors.
+                        {
+                            BuildProfile::Stage transformStage("batch_geometry_transform");
+                            const auto part=original->Owner->transform.GetWorldMatrix();
+                            const auto tangentMatrix=glm::mat3(part);
+                            const auto normalMatrix=glm::transpose(glm::inverse(tangentMatrix));
+                            for (auto& vertex:vertices)
+                            {
+                                const auto position=glm::vec3(part*glm::vec4(vertex.pos[0],vertex.pos[1],vertex.pos[2],1));
+                                auto normal=normalMatrix*glm::vec3(vertex.normal[0],vertex.normal[1],vertex.normal[2]);
+                                normal=glm::length(normal)>1.e-6f ? glm::normalize(normal):glm::vec3(0,1,0);
+                                auto tangent=tangentMatrix*glm::vec3(vertex.tangent[0],vertex.tangent[1],vertex.tangent[2]);
+                                tangent=glm::length(tangent)>1.e-6f ? glm::normalize(tangent):glm::vec3(1,0,0);
+                                for (int axis=0;axis<3;++axis)
+                                {
+                                    vertex.pos[axis]=position[axis];
+                                    vertex.normal[axis]=normal[axis];
+                                    vertex.tangent[axis]=tangent[axis];
+                                }
+                            }
+                        }
+                        {
+                            BuildProfile::Stage validationStage("batch_geometry_validate_bounds");
+                            if (!source->SetAuthoredVertices(std::move(vertices)))
+                                throw std::runtime_error("Invalid shared prefab geometry: "+meshes[lod]);
+                        }
+                        {
+                            BuildProfile::Stage uploadStage("batch_geometry_buffer_create");
+                            source->CreateBuffer(provider->GetBufferFactory());
+                        }
+                    }
+                    BuildProfile::Stage instanceStage("batch_instances");
+                    for (const auto& [tile,tileRecords]:tiles)
+                    {
+                        auto& instances=tileInstances[tile];
+                        const bool initialize=!instances;
+                        if (initialize) instances=std::make_shared<Mesh::InstanceData>();
+                        glm::vec3 minimum(std::numeric_limits<float>::max()),maximum(-minimum);
+                        {
+                            BuildProfile::Stage boundsStage("batch_instance_transforms_bounds");
+                            for (const auto* placement:tileRecords)
+                            {
+                                const glm::mat4 matrix=placementMatrix(*placement);
+                                Mesh::InstanceTransform instance{};
+                                for (int row=0;row<3;++row)
+                                    instance.rows[row]={matrix[0][row],matrix[1][row],matrix[2][row],matrix[3][row]};
+                                if (initialize)
+                                {
+                                    instances->transforms.push_back(instance);
+                                    instances->placementIds.push_back(placement->id);
+                                }
+                                for (int corner=0;corner<8;++corner)
+                                {
+                                    const auto low=source->GetBoundsMin(),high=source->GetBoundsMax();
+                                    const auto point=glm::vec3(matrix*glm::vec4(corner&1 ? high.x:low.x,
+                                        corner&2 ? high.y:low.y,corner&4 ? high.z:low.z,1));
+                                    minimum=glm::min(minimum,point); maximum=glm::max(maximum,point);
+                                }
+                            }
+                        }
+                        BuildProfile::Stage objectStage("batch_instance_objects");
+                        auto* object=create("Shared prefab part: "+original->Owner->name+" ("+
+                            std::to_string(tile.first)+","+std::to_string(tile.second)+")");
+                        auto* mesh=object->AddComponent<Mesh>();
+                        mesh->screenLodSelection=screenLodSelection;
+                        mesh->distanceLodOverride=distanceLodOverride;
+                        mesh->screenLod1Pixels=screenLod1Pixels;
+                        mesh->screenLod2Pixels=screenLod2Pixels;
+                        mesh->screenLodHysteresis=screenLodHysteresis;
+                        const glm::vec3 windPadding(1.5f*std::max(0.f,source->GetBoundsMax().y)*
+                            std::clamp(original->foliageWindStrength,0.f,1.f));
+                        const auto lodLow=source->GetBoundsMin()-windPadding;
+                        const auto lodHigh=source->GetBoundsMax()+windPadding;
+                        if(!instances->hasLodBounds)
+                        { instances->lodMinimum=lodLow; instances->lodMaximum=lodHigh; instances->hasLodBounds=true; }
+                        else
+                        { instances->lodMinimum=glm::min(instances->lodMinimum,lodLow); instances->lodMaximum=glm::max(instances->lodMaximum,lodHigh); }
+                        instances->maximumLod=std::max(instances->maximumLod,int(meshes.size())-1);
+                        mesh->useBoundsForShadowCulling=true;
+                        mesh->foliageWindStrength=original->foliageWindStrength;
+                        const auto& sourcePath=original->GetFilePath();
+                        mesh->treeTimingGeometry=sourcePath.find("/Woodland/Oaks/")!=std::string::npos ||
+                            sourcePath.find("\\Woodland\\Oaks\\")!=std::string::npos;
+                        mesh->runtimeShadowDistance=std::max(0.f,shadowDistance);
+                        mesh->runtimeShadowFadeWidth=GetShadowFadeWidth();
+                        mesh->prefabDedicatedShadowProxy=dedicatedShadowProxy;
+                        mesh->prefabShadowProxyOnly=shadowProxyOnly;
+                        if (shadowProxyOnly || !dedicatedShadowProxy)
+                            mesh->prefabShadowLod=shadowLod<0 ? -1:std::min(shadowLod,int(meshes.size())-1);
+                        else mesh->prefabShadowLod=-1;
+                        if (meshes.size()>1)
+                        {
+                            mesh->prefabLodBand=int(lod);
+                            mesh->prefabLodDistances={lodDistances[0],lodDistances.size()>1 ? lodDistances[1]:1.e20f};
+                        }
+                        mesh->SetInstancedGeometry(source,instances,{{0,source->GetVertexCount(),0,
+                            static_cast<uint32_t>(tileRecords.size())}},minimum,maximum);
+                        if (const auto* material=original->Owner->GetComponent<Material>())
+                        {
+                            BuildProfile::Stage materialStage("batch_instance_materials");
+                            auto* copy=object->AddComponent<Material>();
+                            {
+                                BuildProfile::Stage stage("batch_material_copy_resolved");
+                                copy->CopyResolvedStateFrom(*material);
+                            }
+                            {
+                                BuildProfile::Stage stage("batch_material_graphics");
+                                copy->OnAfterDeserialize(provider);
+                            }
+                            if (shadowDistance<=0) copy->castsShadows=false;
+                        }
+                    }
                 }
             }
-            }
-            BuildProfile::Stage objectStage("batch_instance_objects");
-            auto* object=create("Shared prefab part: "+original->Owner->name+" ("+
-                std::to_string(tile.first)+","+std::to_string(tile.second)+")");
-            auto* mesh=object->AddComponent<Mesh>();
-            mesh->screenLodSelection=screenLodSelection;
-            mesh->distanceLodOverride=distanceLodOverride;
-            mesh->screenLod1Pixels=screenLod1Pixels;
-            mesh->screenLod2Pixels=screenLod2Pixels;
-            mesh->screenLodHysteresis=screenLodHysteresis;
-            const glm::vec3 windPadding(1.5f*std::max(0.f,source->GetBoundsMax().y)*
-                std::clamp(original->foliageWindStrength,0.f,1.f));
-            const auto lodLow=source->GetBoundsMin()-windPadding;
-            const auto lodHigh=source->GetBoundsMax()+windPadding;
-            if(!instances->hasLodBounds)
-            { instances->lodMinimum=lodLow; instances->lodMaximum=lodHigh; instances->hasLodBounds=true; }
-            else
-            { instances->lodMinimum=glm::min(instances->lodMinimum,lodLow); instances->lodMaximum=glm::max(instances->lodMaximum,lodHigh); }
-            instances->maximumLod=int(chain.size())-1;
-            mesh->useBoundsForShadowCulling=true;
-            mesh->foliageWindStrength=original->foliageWindStrength;
-            const auto& sourcePath=original->GetFilePath();
-            mesh->treeTimingGeometry=sourcePath.find("/Woodland/Oaks/")!=std::string::npos ||
-                sourcePath.find("\\Woodland\\Oaks\\")!=std::string::npos;
-            mesh->runtimeShadowDistance=std::max(0.f,shadowDistance);
-            mesh->runtimeShadowFadeWidth=GetShadowFadeWidth();
-            mesh->prefabShadowLod=shadowLod<0 ? -1:std::min(shadowLod,int(chain.size())-1);
-            if (chain.size()>1)
-            {
-                mesh->prefabLodBand=int(lod);
-                mesh->prefabLodDistances={distances[0],distances.size()>1 ? distances[1]:1.e20f};
-            }
-            mesh->SetInstancedGeometry(source,instances,{{0,source->GetVertexCount(),0,
-                static_cast<uint32_t>(tileRecords.size())}},minimum,maximum);
-            if (const auto* material=original->Owner->GetComponent<Material>())
-            {
-                BuildProfile::Stage materialStage("batch_instance_materials");
-                auto* copy=object->AddComponent<Material>();
-                {
-                    BuildProfile::Stage stage("batch_material_copy_resolved");
-                    copy->CopyResolvedStateFrom(*material);
-                }
-                {
-                    BuildProfile::Stage stage("batch_material_graphics");
-                    copy->OnAfterDeserialize(provider);
-                }
-                if (shadowDistance<=0) copy->castsShadows=false;
-            }
-            }
-        }
-        }
+        };
+        buildChain(chain,distances,false);
+        if (dedicatedShadowProxy) buildChain(shadowChain,shadowDistances,true);
         // Collider policy belongs to the shared prefab. None are synthesized
         // when it has no collider; adding one later applies to every placement.
         BuildProfile::Stage colliderStage("batch_colliders");
@@ -302,7 +337,9 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider)
         for (const auto& [base,lods]:objectLods)
             if (std::filesystem::path(base).extension()==".prefab" &&
                 (sameAsset(base,asset) || std::any_of(lods.meshes.begin(),lods.meshes.end(),
-                    [&](const auto& lod) { return sameAsset(lod,asset); })))
+                    [&](const auto& lod) { return sameAsset(lod,asset); }) ||
+                    std::any_of(lods.shadowMeshes.begin(),lods.shadowMeshes.end(),
+                        [&](const auto& lod) { return sameAsset(lod,asset); })))
             { colliderRoot=definition(base); break; }
         if (!colliderRoot) continue;
         for (auto* collider:colliderRoot->GetComponentsInChildren<PrimitiveObjectCollider>())

@@ -1,7 +1,6 @@
 #include "pch.h"
 #include "WindowFocusHandler.h"
 #include "Engine/Editor/Core/View/IEditorPanel.h"
-#include <algorithm>
 
 namespace Engine::Editor
 {

@@ -6,8 +6,6 @@
 #include "Engine/Editor/Input/EditorKeyBindings.h"
 #include "imgui.h"
 #include "imgui_internal.h"
-#include <algorithm>
-#include <string>
 
 namespace Engine::Editor
 {

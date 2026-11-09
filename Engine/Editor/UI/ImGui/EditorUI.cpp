@@ -2,7 +2,6 @@
 #include "Engine/Editor/UI/ImGui/EditorUI.h"
 #include "Engine/Editor/EditorState.h"
 #include "imgui.h"
-#include <cmath>
 
 namespace Engine::Editor
 {

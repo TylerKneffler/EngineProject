@@ -1,0 +1,152 @@
+^C:\USERS\TYLER\SOURCE\REPOS\ENGINEPROJECT\CMAKE-CHECK\_DEPS\VULKANHEADERS-SUBBUILD\CMAKEFILES\491ABF312B083779078F094AF561C8C3\VULKANHEADERS-POPULATE-MKDIR.RULE
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -Dcfgdir=/Debug -P C:/Users/tyler/source/repos/EngineProject/cmake-check/_deps/vulkanheaders-subbuild/vulkanheaders-populate-prefix/tmp/vulkanheaders-populate-mkdirs.cmake
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E touch C:/Users/tyler/source/repos/EngineProject/cmake-check/_deps/vulkanheaders-subbuild/vulkanheaders-populate-prefix/src/vulkanheaders-populate-stamp/Debug/vulkanheaders-populate-mkdir
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^C:\USERS\TYLER\SOURCE\REPOS\ENGINEPROJECT\CMAKE-CHECK\_DEPS\VULKANHEADERS-SUBBUILD\CMAKEFILES\491ABF312B083779078F094AF561C8C3\VULKANHEADERS-POPULATE-DOWNLOAD.RULE
+setlocal
+cd C:\Users\tyler\source\repos\EngineProject\cmake-check\_deps
+if %errorlevel% neq 0 goto :cmEnd
+C:
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -DCMAKE_MESSAGE_LOG_LEVEL=VERBOSE -P C:/Users/tyler/source/repos/EngineProject/cmake-check/_deps/vulkanheaders-subbuild/vulkanheaders-populate-prefix/tmp/vulkanheaders-populate-gitclone.cmake
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E touch C:/Users/tyler/source/repos/EngineProject/cmake-check/_deps/vulkanheaders-subbuild/vulkanheaders-populate-prefix/src/vulkanheaders-populate-stamp/Debug/vulkanheaders-populate-download
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^C:\USERS\TYLER\SOURCE\REPOS\ENGINEPROJECT\CMAKE-CHECK\_DEPS\VULKANHEADERS-SUBBUILD\CMAKEFILES\491ABF312B083779078F094AF561C8C3\VULKANHEADERS-POPULATE-UPDATE_DISCONNECTED.RULE
+setlocal
+cd C:\Users\tyler\source\repos\EngineProject\cmake-check\_deps\vulkanheaders-src
+if %errorlevel% neq 0 goto :cmEnd
+C:
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -Dcan_fetch=NO -DCMAKE_MESSAGE_LOG_LEVEL=VERBOSE -P C:/Users/tyler/source/repos/EngineProject/cmake-check/_deps/vulkanheaders-subbuild/vulkanheaders-populate-prefix/tmp/vulkanheaders-populate-gitupdate.cmake
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E touch C:/Users/tyler/source/repos/EngineProject/cmake-check/_deps/vulkanheaders-subbuild/vulkanheaders-populate-prefix/src/vulkanheaders-populate-stamp/Debug/vulkanheaders-populate-update_disconnected
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^C:\USERS\TYLER\SOURCE\REPOS\ENGINEPROJECT\CMAKE-CHECK\_DEPS\VULKANHEADERS-SUBBUILD\CMAKEFILES\491ABF312B083779078F094AF561C8C3\VULKANHEADERS-POPULATE-PATCH_DISCONNECTED.RULE
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -E echo_append
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E touch C:/Users/tyler/source/repos/EngineProject/cmake-check/_deps/vulkanheaders-subbuild/vulkanheaders-populate-prefix/src/vulkanheaders-populate-stamp/Debug/vulkanheaders-populate-patch_disconnected
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^C:\USERS\TYLER\SOURCE\REPOS\ENGINEPROJECT\CMAKE-CHECK\_DEPS\VULKANHEADERS-SUBBUILD\CMAKEFILES\491ABF312B083779078F094AF561C8C3\VULKANHEADERS-POPULATE-CONFIGURE.RULE
+setlocal
+cd C:\Users\tyler\source\repos\EngineProject\cmake-check\_deps\vulkanheaders-build
+if %errorlevel% neq 0 goto :cmEnd
+C:
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E echo_append
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E touch C:/Users/tyler/source/repos/EngineProject/cmake-check/_deps/vulkanheaders-subbuild/vulkanheaders-populate-prefix/src/vulkanheaders-populate-stamp/Debug/vulkanheaders-populate-configure
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^C:\USERS\TYLER\SOURCE\REPOS\ENGINEPROJECT\CMAKE-CHECK\_DEPS\VULKANHEADERS-SUBBUILD\CMAKEFILES\491ABF312B083779078F094AF561C8C3\VULKANHEADERS-POPULATE-BUILD.RULE
+setlocal
+cd C:\Users\tyler\source\repos\EngineProject\cmake-check\_deps\vulkanheaders-build
+if %errorlevel% neq 0 goto :cmEnd
+C:
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E echo_append
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E touch C:/Users/tyler/source/repos/EngineProject/cmake-check/_deps/vulkanheaders-subbuild/vulkanheaders-populate-prefix/src/vulkanheaders-populate-stamp/Debug/vulkanheaders-populate-build
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^C:\USERS\TYLER\SOURCE\REPOS\ENGINEPROJECT\CMAKE-CHECK\_DEPS\VULKANHEADERS-SUBBUILD\CMAKEFILES\491ABF312B083779078F094AF561C8C3\VULKANHEADERS-POPULATE-INSTALL.RULE
+setlocal
+cd C:\Users\tyler\source\repos\EngineProject\cmake-check\_deps\vulkanheaders-build
+if %errorlevel% neq 0 goto :cmEnd
+C:
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E echo_append
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E touch C:/Users/tyler/source/repos/EngineProject/cmake-check/_deps/vulkanheaders-subbuild/vulkanheaders-populate-prefix/src/vulkanheaders-populate-stamp/Debug/vulkanheaders-populate-install
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^C:\USERS\TYLER\SOURCE\REPOS\ENGINEPROJECT\CMAKE-CHECK\_DEPS\VULKANHEADERS-SUBBUILD\CMAKEFILES\491ABF312B083779078F094AF561C8C3\VULKANHEADERS-POPULATE-TEST.RULE
+setlocal
+cd C:\Users\tyler\source\repos\EngineProject\cmake-check\_deps\vulkanheaders-build
+if %errorlevel% neq 0 goto :cmEnd
+C:
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E echo_append
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E touch C:/Users/tyler/source/repos/EngineProject/cmake-check/_deps/vulkanheaders-subbuild/vulkanheaders-populate-prefix/src/vulkanheaders-populate-stamp/Debug/vulkanheaders-populate-test
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^C:\USERS\TYLER\SOURCE\REPOS\ENGINEPROJECT\CMAKE-CHECK\_DEPS\VULKANHEADERS-SUBBUILD\CMAKEFILES\1C37238E8CE9378F38F7FCA15D561BFB\VULKANHEADERS-POPULATE-COMPLETE.RULE
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -E make_directory C:/Users/tyler/source/repos/EngineProject/cmake-check/_deps/vulkanheaders-subbuild/CMakeFiles/Debug
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E touch C:/Users/tyler/source/repos/EngineProject/cmake-check/_deps/vulkanheaders-subbuild/CMakeFiles/Debug/vulkanheaders-populate-complete
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E touch C:/Users/tyler/source/repos/EngineProject/cmake-check/_deps/vulkanheaders-subbuild/vulkanheaders-populate-prefix/src/vulkanheaders-populate-stamp/Debug/vulkanheaders-populate-done
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^C:\USERS\TYLER\SOURCE\REPOS\ENGINEPROJECT\CMAKE-CHECK\_DEPS\VULKANHEADERS-SUBBUILD\CMAKEFILES\EF0C9D98979E332D149AB26112DFB767\VULKANHEADERS-POPULATE.RULE
+setlocal
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^C:\USERS\TYLER\SOURCE\REPOS\ENGINEPROJECT\CMAKE-CHECK\_DEPS\VULKANHEADERS-SUBBUILD\CMAKELISTS.TXT
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SC:/Users/tyler/source/repos/EngineProject/cmake-check/_deps/vulkanheaders-subbuild -BC:/Users/tyler/source/repos/EngineProject/cmake-check/_deps/vulkanheaders-subbuild --check-stamp-file C:/Users/tyler/source/repos/EngineProject/cmake-check/_deps/vulkanheaders-subbuild/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd

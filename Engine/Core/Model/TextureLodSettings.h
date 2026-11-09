@@ -11,7 +11,7 @@ struct TextureLodSettings
     float nearDistance = 20.f;
     float farDistance = 80.f;
     float mipBias = 4.f;
-    bool simplifyShading = true;
+    bool simplifyShading = false;
 
     float alphaMipBias = 0.f;
     bool disableAlphaAtFar = false;

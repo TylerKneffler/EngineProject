@@ -37,17 +37,7 @@
 #include "Core/Object.h"
 #include "Core/Prefab/PrefabAsset.h"
 #include "imgui.h"
-#include <algorithm>
-#include <cmath>
-#include <filesystem>
-#include <fstream>
-#include <cstring>
-#include <cctype>
 #include <cstdio>
-#include <iterator>
-#include <limits>
-#include <optional>
-#include <unordered_set>
 #include <glm/gtc/matrix_transform.hpp>
 
 namespace Engine::Editor

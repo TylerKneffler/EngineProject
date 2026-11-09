@@ -50,6 +50,8 @@ struct RenderCpuTimings
     uint64_t gpuGrassBatches=0, grassBatchCacheHits=0, grassPlacementUploadBytes=0;
     uint64_t automaticBatches=0, automaticInstances=0, gpuBatches=0, changedUploadBytes=0;
     uint64_t candidateDraws=0, physicalDraws=0, candidateTriangles=0, views=0;
+    uint64_t submittedInstances=0, submittedTriangles=0;
+    uint64_t terrainOcclusionRejected=0, solidOcclusionRejected=0;
     RenderCpuTimings& operator+=(const RenderCpuTimings& value)
     {
         instances+=value.instances;
@@ -68,6 +70,8 @@ struct RenderCpuTimings
         ADD(totalMs); ADD(startupMs); ADD(terrainPreparationMs); ADD(occlusionMs); ADD(otherMs);
         ADD(automaticBatches); ADD(automaticInstances); ADD(gpuBatches); ADD(changedUploadBytes);
         ADD(candidateDraws); ADD(physicalDraws); ADD(candidateTriangles); ADD(views);
+        ADD(submittedInstances); ADD(submittedTriangles);
+        ADD(terrainOcclusionRejected); ADD(solidOcclusionRejected);
 #undef ADD
         return *this;
     }

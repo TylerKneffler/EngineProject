@@ -145,6 +145,15 @@ template<class Renderer> void Benchmark(const std::string& backend,bool foliageO
     const bool cpuProfile=std::getenv("ENGINE_FOREST_AUDIT_CPU_PROFILE")!=nullptr;
     const bool materialOnly=std::getenv("ENGINE_FOREST_AUDIT_MATERIAL_ONLY")!=nullptr;
     const bool prepassOnly=std::getenv("ENGINE_FOREST_AUDIT_PREPASS_ONLY")!=nullptr;
+    const auto envFlag = [](const char* name, bool fallback)
+    {
+        const char* value = std::getenv(name);
+        if (!value || !*value) return fallback;
+        const char c = value[0];
+        return c != '0' && c != 'f' && c != 'F' && c != 'n' && c != 'N';
+    };
+    const bool terrainOcclusion = envFlag("ENGINE_VISIBILITY_TERRAIN_OCCLUSION", true);
+    const bool solidOcclusion = envFlag("ENGINE_VISIBILITY_SOLID_OCCLUSION", false);
     Check(!prepassOnly || (!materialOnly && !foliageOnly && !cpuProfile),"prepass control requires an independent capture");
     const char* canopyDirectory=std::getenv("ENGINE_FOREST_AUDIT_CANOPY");
     scene.SetUpdateProfilingEnabled(cpuProfile);
@@ -467,6 +476,8 @@ template<class Renderer> void Benchmark(const std::string& backend,bool foliageO
                 <<",\"warmup_frames\":32,\"measurement_frames\":"<<(cpuProfile?120:36)
                 <<",\"cpu_profile\":"<<(cpuProfile?"true":"false")
                 <<",\"workload_counters_requested\":"<<(std::getenv("ENGINE_GPU_WORKLOAD_COUNTERS")?"true":"false")
+                <<",\"terrain_occlusion_enabled\":"<<(terrainOcclusion?"true":"false")
+                <<",\"solid_occlusion_enabled\":"<<(solidOcclusion?"true":"false")
                 <<",\"frame_ms\":"<<wall
                 <<",\"advance_ms\":"<<advanceMs<<",\"begin_frame_ms\":"<<beginMs
                 <<",\"prepare_total_ms\":"<<prepareMs<<",\"scene_render_wall_ms\":"<<sceneRenderMs
@@ -497,6 +508,10 @@ template<class Renderer> void Benchmark(const std::string& backend,bool foliageO
                 <<",\"render_other_ms\":"<<r.otherMs
                 <<",\"render_portal_ms\":"<<r.portalMs
                 <<",\"candidate_triangles\":"<<r.candidateTriangles<<",\"draws\":"<<r.physicalDraws
+                <<",\"submitted_instances\":"<<r.submittedInstances
+                <<",\"submitted_triangles\":"<<r.submittedTriangles
+                <<",\"terrain_occlusion_rejected\":"<<r.terrainOcclusionRejected
+                <<",\"solid_occlusion_rejected\":"<<r.solidOcclusionRejected
                 <<",\"prepass_draws\":"<<prepassDraws
                 <<",\"total_color_draws\":"<<(r.physicalDraws+prepassDraws)
                 <<",\"alpha_prepass\":"<<(alphaPrepass?"true":"false")

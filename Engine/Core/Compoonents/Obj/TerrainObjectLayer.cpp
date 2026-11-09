@@ -47,7 +47,9 @@ std::map<std::string, std::vector<std::string>> TerrainObjectLayer::GetDefinedOb
     for (const auto& placement : placements)
         if (!definitions.count(placement.asset)) definitions[placement.asset] = {placement.asset};
     for (const auto& [asset, settings] : objectLods)
-        if (!settings.meshes.empty()) definitions[asset] = settings.meshes;
+        if (!settings.meshes.empty() || !settings.shadowMeshes.empty())
+            definitions[asset] = settings.meshes.empty()
+                ? std::vector<std::string>{asset} : settings.meshes;
     for (auto& [asset, meshes] : definitions)
     {
         meshes.erase(std::remove(meshes.begin(), meshes.end(), std::string{}), meshes.end());
@@ -55,6 +57,19 @@ std::map<std::string, std::vector<std::string>> TerrainObjectLayer::GetDefinedOb
         if (meshes.size() > MaximumObjectLods) meshes.resize(MaximumObjectLods);
     }
     return definitions;
+}
+
+std::vector<std::string> TerrainObjectLayer::GetObjectShadowLodMeshes(
+    const std::string& asset, const std::vector<std::string>& visibleMeshes) const
+{
+    std::vector<std::string> meshes;
+    if (const auto found = objectLods.find(asset); found != objectLods.end())
+        meshes = found->second.shadowMeshes;
+    meshes.erase(std::remove(meshes.begin(), meshes.end(), std::string{}),
+        meshes.end());
+    if (meshes.size() > MaximumObjectLods) meshes.resize(MaximumObjectLods);
+    if (meshes.empty()) return visibleMeshes;
+    return meshes;
 }
 
 std::vector<float> TerrainObjectLayer::GetObjectLodDistances(const std::string& asset, size_t lodCount) const
@@ -184,12 +199,17 @@ TerrainObjectLayer::JsonValue TerrainObjectLayer::Serialize() const
     JsonValue lodEntries = JsonValue::MakeArray();
     for (const auto& [asset, settings] : objectLods)
     {
-        JsonValue meshes = JsonValue::MakeArray(), distances = JsonValue::MakeArray();
+        JsonValue meshes = JsonValue::MakeArray(), shadowMeshes = JsonValue::MakeArray(),
+            distances = JsonValue::MakeArray();
         for (const auto& mesh : settings.meshes) meshes.Push(JsonValue(mesh));
+        for (const auto& shadowMesh : settings.shadowMeshes)
+            shadowMeshes.Push(JsonValue(shadowMesh));
         const size_t count = settings.meshes.empty() ? settings.distances.size() + 1 : settings.meshes.size();
         for (float distance : GetObjectLodDistances(asset, count)) distances.Push(JsonValue(distance));
         lodEntries.Push(JsonValue::MakeObject().Set("asset", JsonValue(asset))
-            .Set("meshes", std::move(meshes)).Set("distances", std::move(distances)));
+            .Set("meshes", std::move(meshes))
+            .Set("shadowMeshes", std::move(shadowMeshes))
+            .Set("distances", std::move(distances)));
     }
     out.Set("objectLods", std::move(lodEntries));
     {
@@ -241,6 +261,10 @@ void TerrainObjectLayer::Deserialize(const JsonValue& value)
         for (size_t j = 0; j < std::min(meshes.ArraySize(), MaximumObjectLods); ++j)
             if (meshes.ArrayAt(j).IsString() && !meshes.ArrayAt(j).AsString().empty())
                 settings.meshes.push_back(meshes.ArrayAt(j).AsString());
+        const auto& shadowMeshes = entry["shadowMeshes"];
+        for (size_t j = 0; j < std::min(shadowMeshes.ArraySize(), MaximumObjectLods); ++j)
+            if (shadowMeshes.ArrayAt(j).IsString() && !shadowMeshes.ArrayAt(j).AsString().empty())
+                settings.shadowMeshes.push_back(shadowMeshes.ArrayAt(j).AsString());
         const auto& distances = entry["distances"];
         const size_t count = settings.meshes.empty() ? MaximumObjectLods : settings.meshes.size();
         for (size_t j = 0; j < distances.ArraySize() && j + 1 < count; ++j)
@@ -365,6 +389,46 @@ bool TerrainObjectLayer::DrawProperties(::Engine::Editor::IEditorUi& ui)
                 changed = true;
             }
         }
+        std::vector<std::string> shadowMeshes;
+        if (const auto found = objectLods.find(asset); found != objectLods.end())
+            shadowMeshes = found->second.shadowMeshes;
+        bool dedicatedShadowMeshes = !shadowMeshes.empty();
+        const std::string dedicatedLabel = "Dedicated shadow proxy meshes##" + asset;
+        if (ui.Checkbox(dedicatedLabel.c_str(), &dedicatedShadowMeshes))
+        {
+            auto& settings = objectLods[asset];
+            settings.shadowMeshes = dedicatedShadowMeshes ? meshes : std::vector<std::string>{};
+            changed = true;
+            shadowMeshes = settings.shadowMeshes;
+        }
+        if (dedicatedShadowMeshes)
+        {
+            ui.Tooltip("Optional shadow-only proxies. Visible LOD meshes and distances remain unchanged.");
+            bool edited = false;
+            for (size_t i = 0; i < shadowMeshes.size(); ++i)
+            {
+                char path[1024]{};
+                std::memcpy(path, shadowMeshes[i].data(),
+                    std::min(shadowMeshes[i].size(), sizeof(path) - 1));
+                const std::string field = "Shadow LOD " + std::to_string(i) +
+                    " mesh##" + asset;
+                if (ui.InputText(field.c_str(), path, sizeof(path)) && path[0])
+                { shadowMeshes[i] = path; edited = true; }
+            }
+            const std::string add = "Add shadow LOD##" + asset;
+            const std::string remove = "Remove shadow LOD##" + asset;
+            if (shadowMeshes.size() < MaximumObjectLods && !shadowMeshes.empty() &&
+                ui.Button(add.c_str()))
+            { shadowMeshes.push_back(shadowMeshes.back()); edited = true; }
+            if (shadowMeshes.size() > 1 && ui.Button(remove.c_str()))
+            { shadowMeshes.pop_back(); edited = true; }
+            if (edited)
+            {
+                auto& settings = objectLods[asset];
+                settings.shadowMeshes = std::move(shadowMeshes);
+                changed = true;
+            }
+        }
     }
     changed |= ui.DragFloat("LOD transition buffer (m)", &lodHysteresis,
         .1f, 0.f, 10.f);
@@ -386,7 +450,7 @@ bool TerrainObjectLayer::DrawProperties(::Engine::Editor::IEditorUi& ui)
     int shadowChoice=std::clamp(shadowLod+1,0,3);
     if(ui.Combo("Shadow geometry", &shadowChoice, shadowLods, 4))
     { shadowLod=shadowChoice-1; changed=true; }
-    ui.Tooltip("Fixed shadow geometry keeps the canopy silhouette stable as the camera moves. Visible object LODs remain independent. Missing levels use the last available level.");
+    ui.Tooltip("Fixed shadow geometry keeps the canopy silhouette stable as the camera moves. Visible object LODs remain independent. Dedicated shadow proxy meshes (if authored) are shadow-only and use this selection.");
     viewDistance = std::clamp(viewDistance, 1.f, 100000.f);
     lod1Distance = std::clamp(lod1Distance, 0.f, viewDistance);
     lod2Distance = std::clamp(lod2Distance, lod1Distance, viewDistance);

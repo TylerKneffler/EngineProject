@@ -19,10 +19,7 @@
 #include "Core/Prefab/PrefabAsset.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include "imgui.h"
-#include <algorithm>
-#include <cctype>
 #include <cfloat>
-#include <cmath>
 #include <string_view>
 
 namespace Engine::Editor

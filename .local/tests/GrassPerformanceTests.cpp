@@ -3432,8 +3432,8 @@ void TestVariableTerrainObjectLods()
     layer->viewDistance = 100;
     layer->lodHysteresis = 0;
     layer->objectLods[grass->shortMesh] = {{grass->shortMesh, grass->shortMeshLod1,
-        grass->shortMeshLod2, grass->shortMeshLod1, grass->shortMeshLod2}, {5, 10, 15, 20}};
-    layer->objectLods[grass->tallMesh] = {{grass->tallMesh, grass->tallMeshLod1}, {12}};
+        grass->shortMeshLod2, grass->shortMeshLod1, grass->shortMeshLod2}, {}, {5, 10, 15, 20}};
+    layer->objectLods[grass->tallMesh] = {{grass->tallMesh, grass->tallMeshLod1}, {}, {12}};
     for (const auto& asset : {grass->shortMesh, grass->tallMesh})
     {
         Layer::Placement placement;
@@ -3504,8 +3504,8 @@ void TestVariableTerrainObjectLods()
     Require(tile && tile->GetComponent<Mesh>()->GetResidentRuntimeLodCount() == 31,
         "independent 16-level object chains were truncated");
     // A single-level object needs no divider and remains renderable.
-    layer->objectLods[grass->shortMesh] = {{grass->shortMesh}, {}};
-    layer->objectLods[grass->tallMesh] = {{grass->tallMesh}, {}};
+    layer->objectLods[grass->shortMesh] = {{grass->shortMesh}, {}, {}};
+    layer->objectLods[grass->tallMesh] = {{grass->tallMesh}, {}, {}};
     layer->MarkConfigurationDirty();
     for (int i = 0; i < 100; ++i)
     {

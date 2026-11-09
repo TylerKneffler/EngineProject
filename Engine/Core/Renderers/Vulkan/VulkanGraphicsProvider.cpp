@@ -1,7 +1,6 @@
 #include "pch.h"
 #if defined(ENGINE_VULKAN_ENABLED)
 #include "VulkanGraphicsProvider.h"
-#include <vector>
 
 namespace Engine::Renderers
 {

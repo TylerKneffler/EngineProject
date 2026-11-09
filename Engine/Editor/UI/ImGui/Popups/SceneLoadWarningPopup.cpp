@@ -3,7 +3,6 @@
 
 #include "Engine/Editor/EditorState.h"
 #include "imgui.h"
-#include <filesystem>
 
 namespace Engine::Editor
 {

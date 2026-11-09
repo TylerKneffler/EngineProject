@@ -1,10 +1,6 @@
 #include "pch.h"
 #include "Engine/Editor/CodeEditorLink.h"
-#include <chrono>
-#include <cctype>
-#include <fstream>
 #include <shellapi.h>
-#include <unordered_set>
 
 namespace Engine::Editor
 {

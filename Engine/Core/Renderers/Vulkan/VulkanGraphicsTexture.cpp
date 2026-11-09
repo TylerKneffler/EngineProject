@@ -4,8 +4,6 @@
 #include "VulkanGraphicsBuffer.h"
 #include "VulkanQueueMutex.h"
 
-#include <cstring>
-#include <functional>
 
 namespace Engine::Renderers
 {

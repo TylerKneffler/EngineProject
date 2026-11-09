@@ -14,8 +14,6 @@
 #include "Engine/Editor/Core/View/Templates/EditModes/Skeleton/SkinBindingWeights.h"
 #include "Engine/Editor/Core/Paint/BrushPreset.h"
 #include "Engine/Editor/Core/Paint/BrushPreview.h"
-#include <algorithm>
-#include <filesystem>
 
 namespace Engine::Editor
 {

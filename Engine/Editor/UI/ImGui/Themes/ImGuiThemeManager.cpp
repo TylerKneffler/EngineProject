@@ -2,13 +2,6 @@
 #include "Engine/Editor/UI/ImGui/Themes/ImGuiThemeManager.h"
 #include "imgui.h"
 #include <pugixml.hpp>
-#include <algorithm>
-#include <cmath>
-#include <cstring>
-#include <filesystem>
-#include <limits>
-#include <set>
-#include <unordered_map>
 
 #ifndef ENGINE_ROOT_PATH
 #define ENGINE_ROOT_PATH "."

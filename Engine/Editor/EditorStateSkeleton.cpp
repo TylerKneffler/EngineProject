@@ -23,17 +23,8 @@
 #include "Core/Paint/PaintInput.h"
 #include "Core/Paint/BrushTipMask.h"
 #include "Core/SnapshotHistory.h"
-#include <algorithm>
 #include <charconv>
-#include <cctype>
-#include <cmath>
-#include <cstring>
-#include <filesystem>
-#include <numeric>
-#include <sstream>
 #include <string_view>
-#include <unordered_map>
-#include <unordered_set>
 #include <glm/gtc/matrix_inverse.hpp>
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/matrix_decompose.hpp>

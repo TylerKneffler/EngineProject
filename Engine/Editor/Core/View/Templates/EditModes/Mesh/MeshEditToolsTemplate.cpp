@@ -7,10 +7,6 @@
 #include "Core/Compoonents/Obj/Mesh.h"
 #include "Core/MeshEditGeometry.h"
 #include "Engine/Editor/Core/Paint/MeshUvUnwrap.h"
-#include <algorithm>
-#include <cctype>
-#include <filesystem>
-#include <optional>
 
 namespace Engine::Editor
 {

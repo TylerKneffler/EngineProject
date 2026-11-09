@@ -2,7 +2,6 @@
 #if defined(ENGINE_VULKAN_ENABLED)
 #include "VulkanEditorRenderer.h"
 #include "VulkanView.h"
-#include <algorithm>
 
 
 namespace Engine::Renderers

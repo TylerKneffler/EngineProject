@@ -4,8 +4,6 @@
 #include "VulkanRenderCore.h"
 #include "VulkanRenderPassScope.h"
 #include "Core/Graphics/PostProcess.h"
-#include <filesystem>
-#include <fstream>
 
 #ifndef ENGINE_VULKAN_SHADER_PATH
 #define ENGINE_VULKAN_SHADER_PATH "VulkanShaders/"

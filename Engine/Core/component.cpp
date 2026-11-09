@@ -9,12 +9,7 @@
 #include "Core/Graphics/IGraphicsTexture.h"
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
-#include <algorithm>
-#include <cctype>
-#include <string>
 #include <map>
-#include <filesystem>
-#include <unordered_set>
 #include <Windows.h>
 #include <commdlg.h>
 

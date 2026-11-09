@@ -1,7 +1,5 @@
 #include "pch.h"
 #include "DX11GraphicsBuffer.h"
-#include <algorithm>
-#include <cstring>
 
 namespace Engine::Renderers
 {

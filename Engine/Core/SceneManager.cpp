@@ -4,10 +4,7 @@
 #include "Core/Serialization/SceneSerializer.h"
 #include "Core/Serialization/Json.h"
 #include <condition_variable>
-#include <fstream>
-#include <iterator>
 #include <mutex>
-#include <optional>
 #include <thread>
 
 namespace Engine::Core

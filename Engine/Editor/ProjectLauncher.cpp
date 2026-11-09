@@ -8,13 +8,8 @@
 #include "imgui.h"
 #include <commdlg.h>
 #include <shobjidl.h>
-#include <algorithm>
 #include <atomic>
-#include <chrono>
-#include <cstdlib>
 #include <future>
-#include <iterator>
-#include <unordered_set>
 
 #ifndef ENGINE_ROOT_PATH
 #define ENGINE_ROOT_PATH "."

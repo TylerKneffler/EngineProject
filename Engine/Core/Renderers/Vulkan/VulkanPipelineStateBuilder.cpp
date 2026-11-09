@@ -2,7 +2,6 @@
 #if defined(ENGINE_VULKAN_ENABLED)
 #include "VulkanPipelineStateBuilder.h"
 #include "Core/Compoonents/Obj/Mesh.h"
-#include <cstring>
 
 
 namespace Engine::Renderers

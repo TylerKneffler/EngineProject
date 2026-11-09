@@ -1,8 +1,5 @@
 #include "pch.h"
 #include "SimulationClock.h"
-#include <algorithm>
-#include <cmath>
-#include <stdexcept>
 
 namespace Engine::Time
 {

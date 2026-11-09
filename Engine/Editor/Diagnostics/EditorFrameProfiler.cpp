@@ -367,6 +367,10 @@ namespace Engine::Editor
             << ",\"render_candidate_draws\":" << renderCpu.candidateDraws
             << ",\"render_physical_draws\":" << renderCpu.physicalDraws
             << ",\"render_candidate_triangles\":" << renderCpu.candidateTriangles
+            << ",\"render_submitted_instances\":" << renderCpu.submittedInstances
+            << ",\"render_submitted_triangles\":" << renderCpu.submittedTriangles
+            << ",\"render_terrain_occlusion_rejected\":" << renderCpu.terrainOcclusionRejected
+            << ",\"render_solid_occlusion_rejected\":" << renderCpu.solidOcclusionRejected
             << ",\"render_culling_ms\":" << renderCpu.cullingMs
             << ",\"render_sorting_ms\":" << renderCpu.sortingMs
             << ",\"render_material_ms\":" << renderCpu.materialMs

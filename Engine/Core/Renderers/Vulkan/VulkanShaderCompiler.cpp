@@ -1,8 +1,6 @@
 #include "pch.h"
 #if defined(ENGINE_VULKAN_ENABLED)
 #include "VulkanShaderCompiler.h"
-#include <filesystem>
-#include <fstream>
 
 #ifndef ENGINE_VULKAN_SHADER_PATH
 #define ENGINE_VULKAN_SHADER_PATH "VulkanShaders/"

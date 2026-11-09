@@ -62,6 +62,8 @@ public:
     // Transient; all bands share placement records and are selected on the GPU.
     int prefabLodBand = -1;
     int prefabShadowLod = -1; // transient fixed shadow band; -1 follows distance
+    bool prefabDedicatedShadowProxy = false;
+    bool prefabShadowProxyOnly = false;
     glm::vec2 prefabLodDistances{0.f};
     PROPERTY(Inspector,EditAnywhere,Category="LOD")
     float gpuLod1Distance = 8.f;

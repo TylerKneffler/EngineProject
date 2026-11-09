@@ -3,8 +3,6 @@
 #include "Transform.h"
 #include "Core/Object.h"
 #include "Core/Threading/JobScheduler.h"
-#include <chrono>
-#include <unordered_map>
 
 namespace Engine::Components
 {

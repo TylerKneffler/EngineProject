@@ -91,6 +91,28 @@ namespace Engine::Graphics
 
 namespace Engine::Scene
 {
+namespace Renderer
+{
+class SceneRendererFramePreparation;
+class SceneRendererResources;
+class SceneRendererShadows;
+class SceneRendererParticles;
+class ScenePortalViewScheduling;
+class SceneInstanceBatching;
+class SceneRendererVisibility;
+class SceneRendererDrawPreparation;
+class SceneRendererObjectRecordUpload;
+class SceneRendererGeometrySubmission;
+class SceneRendererLodSelection;
+class SceneRendererDirectionalShadowSubmission;
+class SceneRendererMaterialShaders;
+class SceneRendererLighting;
+class SceneRendererPipelines;
+class SceneRendererDebugPipelines;
+class SceneRendererObjectPipelines;
+class SceneRendererViewPreparation;
+}
+
 class Scene
 {
 public:
@@ -749,6 +771,8 @@ public:
     const Engine::Components::Texture* GetSkyboxPreviewTexture();
 
 private:
+    friend class Engine::Scene::Renderer::SceneRendererResources;
+
     bool m_gameplayInputManaged = false;
     bool m_gameplayInputEnabled = true;
     glm::vec2 m_gameplayInputAnchor { 0.f };
@@ -1108,6 +1132,24 @@ private:
     Engine::Rendering::PersistentInstancePool m_persistentInstances;
     Engine::Rendering::PersistentInstanceBatches m_persistentBatches;
     Engine::Rendering::InstanceTilePreparation m_instanceTilePreparation;
+    friend class Engine::Scene::Renderer::SceneRendererFramePreparation;
+    friend class Engine::Scene::Renderer::SceneRendererViewPreparation;
+    friend class Engine::Scene::Renderer::SceneRendererShadows;
+    friend class Engine::Scene::Renderer::SceneRendererParticles;
+    friend class Engine::Scene::Renderer::ScenePortalViewScheduling;
+    friend class Engine::Scene::Renderer::SceneInstanceBatching;
+    friend class Engine::Scene::Renderer::SceneRendererVisibility;
+    friend class Engine::Scene::Renderer::SceneRendererDrawPreparation;
+    friend class Engine::Scene::Renderer::SceneRendererObjectRecordUpload;
+    friend class Engine::Scene::Renderer::SceneRendererGeometrySubmission;
+    friend class Engine::Scene::Renderer::SceneRendererLodSelection;
+    friend class Engine::Scene::Renderer::SceneRendererDirectionalShadowSubmission;
+    friend class Engine::Scene::Renderer::SceneRendererMaterialShaders;
+    friend class Engine::Scene::Renderer::SceneRendererLighting;
+    friend class Engine::Scene::Renderer::SceneRendererPipelines;
+    friend class Engine::Scene::Renderer::SceneRendererDebugPipelines;
+    friend class Engine::Scene::Renderer::SceneRendererObjectPipelines;
+
     // Camera/view, geometry identity, placement, domain. Never shared with shadows.
     std::map<std::array<uint64_t,4>,std::pair<int,uint64_t>> m_screenLodHistory;
     std::array<uint64_t,3> m_screenLodCounts{};

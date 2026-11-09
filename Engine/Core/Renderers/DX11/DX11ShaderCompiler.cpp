@@ -1,7 +1,6 @@
 #include "pch.h"
 #include "DX11ShaderCompiler.h"
 #include "Core/Renderers/HlslFileInclude.h"
-#include <sstream>
 
 namespace Engine::Renderers
 {

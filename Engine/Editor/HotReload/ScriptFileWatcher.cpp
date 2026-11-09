@@ -1,7 +1,5 @@
 #include "ScriptFileWatcher.h"
 #include "pch.h"
-#include <algorithm>
-#include <array>
 #include <cwctype>
 
 namespace Engine::Editor

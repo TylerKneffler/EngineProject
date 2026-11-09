@@ -1,0 +1,10 @@
+^C:\USERS\TYLER\SOURCE\REPOS\ENGINEPROJECT\CMAKE-CHECK\_DEPS\DXC_SPIRV-SUBBUILD\CMAKEFILES\34F9B8F3255BA966A659D0053B22AC6D\GENERATE.STAMP.RULE
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SC:/Users/tyler/source/repos/EngineProject/cmake-check/_deps/dxc_spirv-subbuild -BC:/Users/tyler/source/repos/EngineProject/cmake-check/_deps/dxc_spirv-subbuild --check-stamp-list CMakeFiles/generate.stamp.list --vs-solution-file C:/Users/tyler/source/repos/EngineProject/cmake-check/_deps/dxc_spirv-subbuild/dxc_spirv-populate.sln
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd

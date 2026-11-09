@@ -18,7 +18,6 @@
 #include "Engine/Editor/EditorState.h"
 #include "Engine/Editor/Core/Paint/PaintInput.h"
 #include "Engine/Editor/GameBuildManager.h"
-#include <filesystem>
 #if defined(ENGINE_VULKAN_ENABLED)
 #include "Core/Renderers/Vulkan/VulkanEditorRenderer.h"
 #endif

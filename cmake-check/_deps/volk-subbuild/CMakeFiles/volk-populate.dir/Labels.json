@@ -1,0 +1,46 @@
+{
+	"sources" : 
+	[
+		{
+			"file" : "C:/Users/tyler/source/repos/EngineProject/cmake-check/_deps/volk-subbuild/CMakeFiles/volk-populate"
+		},
+		{
+			"file" : "C:/Users/tyler/source/repos/EngineProject/cmake-check/_deps/volk-subbuild/CMakeFiles/318cf5b5584ec6956694b10941a655e1/volk-populate.rule"
+		},
+		{
+			"file" : "C:/Users/tyler/source/repos/EngineProject/cmake-check/_deps/volk-subbuild/CMakeFiles/970e7c2ff9e4887c52ac3a30ae288500/volk-populate-complete.rule"
+		},
+		{
+			"file" : "C:/Users/tyler/source/repos/EngineProject/cmake-check/_deps/volk-subbuild/CMakeFiles/d15ad659b7e02b5e168ef5218ec035f8/volk-populate-build.rule"
+		},
+		{
+			"file" : "C:/Users/tyler/source/repos/EngineProject/cmake-check/_deps/volk-subbuild/CMakeFiles/d15ad659b7e02b5e168ef5218ec035f8/volk-populate-configure.rule"
+		},
+		{
+			"file" : "C:/Users/tyler/source/repos/EngineProject/cmake-check/_deps/volk-subbuild/CMakeFiles/d15ad659b7e02b5e168ef5218ec035f8/volk-populate-download.rule"
+		},
+		{
+			"file" : "C:/Users/tyler/source/repos/EngineProject/cmake-check/_deps/volk-subbuild/CMakeFiles/d15ad659b7e02b5e168ef5218ec035f8/volk-populate-install.rule"
+		},
+		{
+			"file" : "C:/Users/tyler/source/repos/EngineProject/cmake-check/_deps/volk-subbuild/CMakeFiles/d15ad659b7e02b5e168ef5218ec035f8/volk-populate-mkdir.rule"
+		},
+		{
+			"file" : "C:/Users/tyler/source/repos/EngineProject/cmake-check/_deps/volk-subbuild/CMakeFiles/d15ad659b7e02b5e168ef5218ec035f8/volk-populate-patch_disconnected.rule"
+		},
+		{
+			"file" : "C:/Users/tyler/source/repos/EngineProject/cmake-check/_deps/volk-subbuild/CMakeFiles/d15ad659b7e02b5e168ef5218ec035f8/volk-populate-test.rule"
+		},
+		{
+			"file" : "C:/Users/tyler/source/repos/EngineProject/cmake-check/_deps/volk-subbuild/CMakeFiles/d15ad659b7e02b5e168ef5218ec035f8/volk-populate-update_disconnected.rule"
+		}
+	],
+	"target" : 
+	{
+		"labels" : 
+		[
+			"volk-populate"
+		],
+		"name" : "volk-populate"
+	}
+}

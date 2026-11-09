@@ -1,0 +1,46 @@
+{
+	"sources" : 
+	[
+		{
+			"file" : "C:/Users/tyler/source/repos/EngineProject/cmake-check/_deps/glm-subbuild/CMakeFiles/glm-populate"
+		},
+		{
+			"file" : "C:/Users/tyler/source/repos/EngineProject/cmake-check/_deps/glm-subbuild/CMakeFiles/50199688e13fee1120951650c5e8a719/glm-populate.rule"
+		},
+		{
+			"file" : "C:/Users/tyler/source/repos/EngineProject/cmake-check/_deps/glm-subbuild/CMakeFiles/4fa3ca177d631bceea9a78211d567d91/glm-populate-complete.rule"
+		},
+		{
+			"file" : "C:/Users/tyler/source/repos/EngineProject/cmake-check/_deps/glm-subbuild/CMakeFiles/5280d26b8f5769e9f2eb23c8c934207c/glm-populate-build.rule"
+		},
+		{
+			"file" : "C:/Users/tyler/source/repos/EngineProject/cmake-check/_deps/glm-subbuild/CMakeFiles/5280d26b8f5769e9f2eb23c8c934207c/glm-populate-configure.rule"
+		},
+		{
+			"file" : "C:/Users/tyler/source/repos/EngineProject/cmake-check/_deps/glm-subbuild/CMakeFiles/5280d26b8f5769e9f2eb23c8c934207c/glm-populate-download.rule"
+		},
+		{
+			"file" : "C:/Users/tyler/source/repos/EngineProject/cmake-check/_deps/glm-subbuild/CMakeFiles/5280d26b8f5769e9f2eb23c8c934207c/glm-populate-install.rule"
+		},
+		{
+			"file" : "C:/Users/tyler/source/repos/EngineProject/cmake-check/_deps/glm-subbuild/CMakeFiles/5280d26b8f5769e9f2eb23c8c934207c/glm-populate-mkdir.rule"
+		},
+		{
+			"file" : "C:/Users/tyler/source/repos/EngineProject/cmake-check/_deps/glm-subbuild/CMakeFiles/5280d26b8f5769e9f2eb23c8c934207c/glm-populate-patch_disconnected.rule"
+		},
+		{
+			"file" : "C:/Users/tyler/source/repos/EngineProject/cmake-check/_deps/glm-subbuild/CMakeFiles/5280d26b8f5769e9f2eb23c8c934207c/glm-populate-test.rule"
+		},
+		{
+			"file" : "C:/Users/tyler/source/repos/EngineProject/cmake-check/_deps/glm-subbuild/CMakeFiles/5280d26b8f5769e9f2eb23c8c934207c/glm-populate-update_disconnected.rule"
+		}
+	],
+	"target" : 
+	{
+		"labels" : 
+		[
+			"glm-populate"
+		],
+		"name" : "glm-populate"
+	}
+}

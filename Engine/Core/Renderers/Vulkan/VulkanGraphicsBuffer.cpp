@@ -2,7 +2,6 @@
 #if defined(ENGINE_VULKAN_ENABLED)
 #include "VulkanGraphicsBuffer.h"
 #include "VulkanQueueMutex.h"
-#include <cstring>
 
 
 namespace Engine::Renderers

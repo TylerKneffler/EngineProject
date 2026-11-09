@@ -1,9 +1,6 @@
 #include "pch.h"
 #include "DX11EditorRenderer.h"
 #include "D3D11View.h"
-#include <algorithm>
-#include <chrono>
-#include <fstream>
 
 namespace Engine::Renderers
 {

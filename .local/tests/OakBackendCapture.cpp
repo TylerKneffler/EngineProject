@@ -408,7 +408,7 @@ void CheckSharedPrefabLayer()
     TerrainObjectLayer::Placement lodPlacement;
     lodPlacement.asset=std::filesystem::absolute(lodPrefabPath).generic_string();
     lodPlacement.position={184,0,180}; layer->placements.push_back(lodPlacement);
-    layer->objectLods[prefabPath]={{prefabPath,lodPrefabPath},{28}};
+    layer->objectLods[prefabPath]={{prefabPath,lodPrefabPath},{},{28}};
     layer->shadowLod=2; // A two-band chain falls back to its last available proxy.
     TerrainObjectLayer roundTrip; roundTrip.Deserialize(layer->Serialize());
     Check(roundTrip.shadowLod==2,"fixed shadow LOD was not serialized");
@@ -466,6 +466,46 @@ void CheckSharedPrefabLayer()
     editedLodFound=false;
     for(const auto* mesh:scene.GetComponents<Mesh>()) editedLodFound|=mesh->prefabLodBand==1;
     Check(editedLodFound,"in-place LOD definition restoration was not polled");
+    {
+        const std::string shadowProxyPath=".local/tests-generated/shared-layer-shadow.prefab";
+        writePrefab(0.f,shadowProxyPath,.25f);
+        Engine::Scene::Scene dedicatedShadowScene;
+        auto* dedicatedLayer=dedicatedShadowScene.AddObject("Dedicated shadow objects")
+            ->AddComponent<TerrainObjectLayer>();
+        TerrainObjectLayer::Placement placement;
+        placement.asset=prefabPath;
+        placement.position={180.f,0.f,180.f};
+        dedicatedLayer->placements.push_back(placement);
+        TerrainObjectLayer::ObjectLods lods;
+        lods.meshes={prefabPath,lodPrefabPath};
+        lods.shadowMeshes={shadowProxyPath,lodPrefabPath};
+        lods.distances={28.f};
+        dedicatedLayer->objectLods[prefabPath]=std::move(lods);
+        dedicatedLayer->shadowLod=1;
+        dedicatedLayer->MarkConfigurationDirty();
+        dedicatedLayer->PreparePrefabInstances(&provider);
+        dedicatedShadowScene.CommitPendingObjectChanges();
+        size_t visibleMeshes=0,shadowProxyMeshes=0;
+        for (const auto* mesh:dedicatedShadowScene.GetComponents<Mesh>())
+        {
+            Check(mesh->prefabDedicatedShadowProxy,
+                "dedicated shadow proxy path was not tagged");
+            if (mesh->prefabShadowProxyOnly)
+            {
+                ++shadowProxyMeshes;
+                Check(mesh->prefabShadowLod==1,
+                    "dedicated shadow proxy did not keep the fixed shadow LOD");
+            }
+            else
+            {
+                ++visibleMeshes;
+                Check(mesh->prefabShadowLod==-1,
+                    "visible mesh retained shadow-only proxy selection");
+            }
+        }
+        Check(visibleMeshes && shadowProxyMeshes,
+            "dedicated shadow proxies did not emit both visible and shadow-only meshes");
+    }
     // A newly appearing original path can override the bundled fallback even
     // when it deliberately preserves the same file timestamp.
     {
@@ -1337,4 +1377,3 @@ int main(int argc,char** argv)
     }
     catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }
-

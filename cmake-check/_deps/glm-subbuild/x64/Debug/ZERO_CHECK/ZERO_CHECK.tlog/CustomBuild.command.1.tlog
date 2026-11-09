@@ -1,0 +1,10 @@
+^C:\USERS\TYLER\SOURCE\REPOS\ENGINEPROJECT\CMAKE-CHECK\_DEPS\GLM-SUBBUILD\CMAKEFILES\50199688E13FEE1120951650C5E8A719\GENERATE.STAMP.RULE
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SC:/Users/tyler/source/repos/EngineProject/cmake-check/_deps/glm-subbuild -BC:/Users/tyler/source/repos/EngineProject/cmake-check/_deps/glm-subbuild --check-stamp-list CMakeFiles/generate.stamp.list --vs-solution-file C:/Users/tyler/source/repos/EngineProject/cmake-check/_deps/glm-subbuild/glm-populate.sln
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
