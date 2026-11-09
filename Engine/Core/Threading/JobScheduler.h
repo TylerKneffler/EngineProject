@@ -116,11 +116,26 @@ private:
 public:
     static unsigned DefaultWorkerCount()
     {
+#if defined(_MSC_VER)
+        char* environmentValue = nullptr;
+        size_t environmentLength = 0;
+        const errno_t environmentResult = _dupenv_s(&environmentValue,
+            &environmentLength, "ENGINE_WORKER_COUNT");
+        if(environmentResult == 0 && environmentValue)
+        {
+            char* end = nullptr;
+            const auto count = std::strtoul(environmentValue, &end, 10);
+            const bool valid = end != environmentValue && !*end && count <= 128;
+            std::free(environmentValue);
+            if(valid) return unsigned(count);
+        }
+#else
         if(const char* text=std::getenv("ENGINE_WORKER_COUNT"))
         {
             char* end=nullptr; const auto count=std::strtoul(text,&end,10);
             if(end!=text && !*end && count<=128) return unsigned(count);
         }
+#endif
         const unsigned hardware=std::thread::hardware_concurrency();
         return hardware>2 ? hardware-2:1;
     }

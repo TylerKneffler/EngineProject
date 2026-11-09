@@ -140,7 +140,14 @@ void TerrainStreamingCameraDriver::Update()
                 TerrainPerformanceDriver>();
             const double spanX = manager->cellsX * manager->cellWidth;
             const double spanZ = manager->cellsY * manager->cellDepth;
-            if ((mapDriver && !mapDriver->IsInitialMapDataReady()) ||
+            const bool farTerrainReady = !mapDriver ||
+                !mapDriver->enableFarTerrain || mapDriver->farGrid.empty() ||
+                (manager->AreDesiredFarTilesBuilt() &&
+                    manager->GetPreparingFarTileCount() == 0u &&
+                    manager->GetQueuedFarTileCount() == 0u &&
+                    manager->GetPreparedFarTileCount() == 0u);
+            if ((mapDriver && (!mapDriver->HasLoadedInitialMapData() ||
+                    !farTerrainReady)) ||
                 spanX <= 0.0 || spanZ <= 0.0)
             {
                 holdAtStart();

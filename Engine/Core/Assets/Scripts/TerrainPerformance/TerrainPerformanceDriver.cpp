@@ -235,17 +235,6 @@ void TerrainPerformanceDriver::Start()
     m_farDataReady = !enableFarTerrain || farGrid.empty();
 }
 
-bool TerrainPerformanceDriver::IsInitialMapDataReady() const
-{
-    if (!m_farDataReady || !Owner) return false;
-    const auto* manager = Owner->GetComponent<Engine::Components::TerrainManager>();
-    return manager && (!enableFarTerrain || farGrid.empty() ||
-        (manager->AreDesiredFarTilesBuilt() &&
-            manager->GetPreparingFarTileCount() == 0u &&
-            manager->GetQueuedFarTileCount() == 0u &&
-            manager->GetPreparedFarTileCount() == 0u));
-}
-
 std::vector<Engine::Components::Mesh*>
 TerrainPerformanceDriver::GetFarTileMeshes() const
 {

@@ -45,7 +45,7 @@ public:
     uint64_t GetFarTileUploadCount() const;
     uint64_t GetFarTileUploadedBytes() const;
     double GetFarTileRebuildMilliseconds() const;
-    bool IsInitialMapDataReady() const;
+    bool HasLoadedInitialMapData() const { return m_farDataReady; }
 private:
     struct FarGridLoad
     {

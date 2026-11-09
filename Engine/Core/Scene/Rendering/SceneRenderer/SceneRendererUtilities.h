@@ -60,13 +60,24 @@ public:
 
     static bool ReadEnvFlag(const char* name, bool fallback)
     {
+#if defined(_MSC_VER)
+        char* value = nullptr;
+        size_t valueLength = 0;
+        if (_dupenv_s(&value, &valueLength, name) != 0 || !value)
+            return fallback;
+        const char first = value[0];
+        std::free(value);
+#else
         const char* value = std::getenv(name);
         if (!value || !*value)
             return fallback;
-        if (value[0] == '0')
+#endif
+        if (first == '\0')
+            return fallback;
+        if (first == '0')
             return false;
         const char lower = static_cast<char>(
-            std::tolower(static_cast<unsigned char>(value[0])));
+            std::tolower(static_cast<unsigned char>(first)));
         return lower != 'f' && lower != 'n';
     }
 

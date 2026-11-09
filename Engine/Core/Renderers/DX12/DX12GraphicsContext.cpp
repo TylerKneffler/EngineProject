@@ -15,6 +15,22 @@
 
 namespace Engine::Renderers
 {
+namespace
+{
+bool HasEnvironmentVariable(const char* name)
+{
+#if defined(_MSC_VER)
+    char* value = nullptr;
+    size_t valueLength = 0;
+    const bool present = _dupenv_s(&value, &valueLength, name) == 0 && value;
+    std::free(value);
+    return present;
+#else
+    return std::getenv(name) != nullptr;
+#endif
+}
+}
+
 struct D3D12OcclusionQueryState
 {
     static constexpr uint32_t QueryCapacity = 16384;
@@ -220,7 +236,7 @@ struct D3D12GpuTimingState
         telemetry.cpuSubmissionMilliseconds = std::chrono::duration<double, std::milli>(
             std::chrono::steady_clock::now() - cpuStart).count();
     }
-    const bool collectWorkload = std::getenv("ENGINE_GPU_WORKLOAD_COUNTERS") != nullptr;
+    const bool collectWorkload = HasEnvironmentVariable("ENGINE_GPU_WORKLOAD_COUNTERS");
     ID3D12Device* device = nullptr; uint64_t frequency = 0; std::vector<FrameSlot> slots;
     uint32_t currentSlot = UINT32_MAX, active = UINT32_MAX;
     Engine::Graphics::FrameTimingTelemetry telemetry{};

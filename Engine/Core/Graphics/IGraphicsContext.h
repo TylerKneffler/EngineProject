@@ -103,7 +103,7 @@ public:
     // Callers must issue an explicit storage barrier before graphics reads.
     virtual bool SetComputePipeline(const IPipelineState*) { return false; }
     virtual void SetComputeConstants(const void*, uint32_t) {}
-    virtual void SetComputeReadBuffer(const IGraphicsBuffer*, uint32_t slot = 0) {}
+    virtual void SetComputeReadBuffer(const IGraphicsBuffer*, uint32_t = 0) {}
     virtual void SetComputeWriteBuffer(const IGraphicsBuffer*) {}
     virtual void DispatchCompute(uint32_t, uint32_t = 1, uint32_t = 1) {}
     virtual void StorageBarrier(const IGraphicsBuffer*) {}

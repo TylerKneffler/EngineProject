@@ -48,10 +48,13 @@ namespace Support = Engine::Editor::ModelAssetWriterSupport;
 using Support::AddChild;
 using Support::CompactOffsets;
 using Support::IndexPmxPrimitive;
+using Support::IndexedPrimitiveAsset;
 using Support::QuaternionEuler;
 using Support::SafeName;
 using Support::UniqueDirectory;
 
+namespace
+{
 // PMX rigid bodies are separate from render meshes. Gather rest-pose points
 // across material sections, then save a small convex point cloud in body space.
 std::vector<std::string> BuildWeightFittedColliderMeshes(
