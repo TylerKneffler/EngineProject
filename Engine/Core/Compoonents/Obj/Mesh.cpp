@@ -699,11 +699,13 @@ void Mesh::SetInstancedGeometry(std::shared_ptr<Mesh> source,
     static_assert(sizeof(InstanceTransform) == 48, "Instance transform layout must match Object.hlsl");
     if (!source || source.get() == this || source->IsInstanced() ||
         source->HasMorphTargets() || source->HasSurfaceOffsets() ||
-        source->UsesTerrainVertexFormat() || source->GetIndexCount() || !instances)
+        source->UsesTerrainVertexFormat() || !instances)
         throw std::invalid_argument("Instances require a static triangle-list source mesh");
+    const uint32_t elementCount = source->GetIndexCount()
+        ? source->GetIndexCount() : source->GetVertexCount();
     for (const auto& range : ranges)
         if (range.firstVertex % 3 || range.vertexCount % 3 ||
-            uint64_t(range.firstVertex) + range.vertexCount > source->GetVertexCount() ||
+            uint64_t(range.firstVertex) + range.vertexCount > elementCount ||
             uint64_t(range.firstInstance) + range.instanceCount > instances->transforms.size())
             throw std::invalid_argument("Instance range exceeds shared geometry or placements");
     ClearRuntimeLods();

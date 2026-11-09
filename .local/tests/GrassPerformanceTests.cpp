@@ -2075,7 +2075,7 @@ void CheckFadeRendering()
     instances->slices.clear();
     Require(mesh->IsReady(),"persistent instances require redundant native slice buffers");
     material->useVertexColors = true;
-    bool captureShadow=false, captureNativePacket=false, separateShadowFrames=false;
+    bool captureShadow=false, captureNativePacket=false, separateShadowFrames=false, forceFullShadow=false;
     uint64_t captureClusterUploadBytes=0;
     const auto capture = [&]() {
         captureClusterUploadBytes=0;
@@ -2087,6 +2087,7 @@ void CheckFadeRendering()
             auto context = renderer.CreateFrameGraphicsContext();
             if(captureShadow)
             {
+                if(forceFullShadow) scene.InvalidateDirectionalShadowCache();
                 context->SetViewport({0,0,float(size),float(size),0,1});
                 context->SetScissorRect({0,0,int32_t(size),int32_t(size)});
                 scene.Render(context.get(),1.f,camera,false,size,size,true,drawPacket.get());
@@ -2188,13 +2189,49 @@ void CheckFadeRendering()
     for(auto* instanced:{mesh,secondMesh})
         instanced->SetInstancedGeometry(source,dense,{{0,3,0,32},{3,3,32,32}},{-1,-1,-.2f},{1,1,.2f});
     scene.automaticInstancing=false; const auto denseReference=capture();
+    // Indexed shared sources deliberately have more elements than vertices and
+    // nonzero first-index/first-instance ranges. The leading triangle must never
+    // be drawn, and offset six must validate against indices, not vertices.
+    const auto indexedPath=std::filesystem::path(".local/indexed-instance-source.mesh");
+    {
+        std::ofstream file(indexedPath,std::ios::binary);
+        const uint32_t header[]={0x4853454D,7,uint32_t(combined.size()),9};
+        const uint32_t indices[]={3,4,5,0,1,2,3,4,5};
+        file.write(reinterpret_cast<const char*>(header),sizeof(header));
+        file.write(reinterpret_cast<const char*>(combined.data()),std::streamsize(combined.size()*sizeof(Mesh::Vertex)));
+        file.write(reinterpret_cast<const char*>(indices),sizeof(indices));
+        Require(bool(file),"failed to write indexed instance fixture");
+    }
+    auto indexedSource=std::make_shared<Mesh>();
+    indexedSource->LoadFromFile(indexedPath.generic_string());
+    indexedSource->CreateBuffer(factory);
+    Require(indexedSource->GetIndexCount()==9 && indexedSource->GetIndexBuffer(),"indexed source did not retain indices");
+    std::filesystem::remove(indexedPath);
+    for(auto* instanced:{mesh,secondMesh})
+        instanced->SetInstancedGeometry(indexedSource,dense,{{3,3,0,32},{6,3,32,32}},{-1,-1,-.2f},{1,1,.2f});
+    bool invalidRangeRejected=false;
+    try { Mesh invalid; invalid.SetInstancedGeometry(indexedSource,dense,{{9,3,0,32}},{-1,-1,-1},{1,1,1}); }
+    catch(const std::invalid_argument&) { invalidRangeRejected=true; }
+    Require(invalidRangeRejected,"indexed source accepted out-of-bounds element range");
+    const auto indexedDirect=capture();
+    scene.automaticInstancing=true; scene.gpuInstanceCulling=false;
+    const auto indexedBatched=capture();
     scene.automaticInstancing=true; scene.gpuInstanceCulling=true; const auto denseGpu=capture();
+    for(const auto* image:{&indexedDirect,&indexedBatched})
+    {
+        size_t changed=0;
+        for(size_t i=0;i<image->size();++i) changed+=std::abs(int((*image)[i])-int(denseReference[i]))>2;
+        Require(changed<32,"indexed direct/CPU batching changed nonindexed reference pixels");
+    }
     size_t denseDifferences=0;
     for(size_t i=0;i<denseGpu.size();++i) denseDifferences+=std::abs(int(denseGpu[i])-int(denseReference[i]))>2;
     Require(denseDifferences<32,"GPU grass compaction changed reference pixels");
     Require(scene.GetLastRenderCpuTimings().gpuBatches==2,"explicit grass did not use GPU indirect draws");
     Require(scene.GetLastRenderCpuTimings().changedUploadBytes==0,"unchanged grass placements were uploaded again");
     std::cout << "GPU grass compaction comparison: " << denseDifferences << " differing channels; unchanged upload zero.\n";
+    std::cout << "Indexed shared ranges: direct, CPU batches and GPU indirect match nonindexed reference.\n";
+    for(auto* instanced:{mesh,secondMesh})
+        instanced->SetInstancedGeometry(source,dense,{{0,3,0,32},{3,3,32,32}},{-1,-1,-.2f},{1,1,.2f});
     for(auto* instanced:{mesh,secondMesh})
     {
         for(int lod=0;lod<3;++lod)
@@ -2267,7 +2304,7 @@ void CheckFadeRendering()
     for(size_t i=0;i<6;++i)
     {
         plane[i].pos[0]=coordinates[i].x; plane[i].pos[1]=coordinates[i].y; plane[i].pos[2]=1;
-        plane[i].normal[2]=1; for(int channel=0;channel<4;++channel) plane[i].color[channel]=1;
+        plane[i].normal[2]=-1; for(int channel=0;channel<4;++channel) plane[i].color[channel]=1;
     }
     auto* receiver=scene.AddObject("Shadow receiver"); auto* receiverMesh=receiver->AddComponent<Mesh>();
     receiverMesh->SetAuthoredVertices(plane); receiverMesh->CreateBuffer(factory);
@@ -2284,6 +2321,9 @@ void CheckFadeRendering()
     sun->Owner->transform.rotation.y=.5f;
     // A one-unit test receiver needs a smaller bias than landscape-scale defaults.
     sun->shadowDepthBias=.00001f; sun->shadowNormalBias=0.f;
+    // These comparisons toggle caster participation/fades. Refresh every
+    // cascade rather than comparing a mixture of cached cascade generations.
+    forceFullShadow=true;
     material->castsShadows=secondMaterial->castsShadows=false;
     const auto noCasterShadow=capture();
     material->castsShadows=secondMaterial->castsShadows=true;
@@ -2345,6 +2385,28 @@ void CheckFadeRendering()
     for(auto* caster:{mesh,secondMesh}) caster->runtimeShadowDistance=0;
     captureNativePacket=false;
     std::cout<<"Shadow fade endpoints, partial coverage and repeated native/ordinary frames passed.\n";
+
+    // Compare refreshed shadow receivers as well as color for indexed ranges.
+    // Keep this independent of the preceding LOD/wind/fade fixture state.
+    for(auto* instanced:{mesh,secondMesh})
+    {
+        instanced->gpuLodSelection=false;
+        instanced->SetInstancedGeometry(source,dense,{{0,3,0,32},{3,3,32,32}},{-1,-1,-.2f},{1,1,.2f});
+    }
+    forceFullShadow=true;
+    const auto indexedShadowReference=capture();
+    for(auto* instanced:{mesh,secondMesh})
+        instanced->SetInstancedGeometry(indexedSource,dense,{{3,3,0,32},{6,3,32,32}},{-1,-1,-.2f},{1,1,.2f});
+    for(int mode=0;mode<3;++mode)
+    {
+        scene.automaticInstancing=mode!=0; scene.gpuInstanceCulling=mode==2;
+        const auto image=capture(); size_t changed=0;
+        for(size_t i=0;i<image.size();++i) changed+=std::abs(int(image[i])-int(indexedShadowReference[i]))>2;
+        Require(changed<32,"indexed ranges changed refreshed shadow receiver/color pixels");
+        if(mode==2) Require(scene.GetLastShadowCpuTiming().gpuGrassBatches>0,"indexed shadow did not use GPU indirect draws");
+    }
+    forceFullShadow=false;
+    std::cout<<"Indexed shared-range refreshed shadows match nonindexed reference in all three submission modes.\n";
 
     renderer.WaitIdle();
     std::cout << "GPU instancing matches CPU reference pixels; distinct species ranges and placement offsets verified.\n";

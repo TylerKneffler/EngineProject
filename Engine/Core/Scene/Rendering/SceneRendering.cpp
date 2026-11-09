@@ -5439,7 +5439,13 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                     // SV_InstanceID begins at zero on D3D. Bind the compact
                     // species slice rather than relying on base-instance IDs.
                     context->SetStructuredBuffer(45, geometryMesh->GetInstanceBuffer(range.firstInstance));
-                    context->DrawInstanced(range.vertexCount, range.instanceCount,
+                    if (geometryIndexBuffer)
+                    {
+                        context->SetIndexBuffer(geometryIndexBuffer, geometryIndexCount, 0);
+                        context->DrawIndexedInstanced(range.vertexCount, range.instanceCount,
+                            range.firstVertex, 0, 0);
+                    }
+                    else context->DrawInstanced(range.vertexCount, range.instanceCount,
                         range.firstVertex, 0);
                 }
         }
@@ -5548,6 +5554,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             {
                 const auto& sourceRange=sourceMesh->GetInstanceRanges()[rangeIndex];
                 if(!sourceRange.vertexCount) continue;
+                auto* sourceIndexBuffer=sourceMesh->GetIndexBuffer();
+                const bool indexed=sourceIndexBuffer!=nullptr;
                 std::vector<Engine::Rendering::InstanceTileRecord> tiles;
                 uint32_t count=0;
                 for(auto index:group.members)
@@ -5624,6 +5632,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                     uintptr_t(sourceMesh->GetGraphicsBuffer()),uintptr_t(pipeline),sourceRange.firstVertex,sourceRange.vertexCount,
                     uintptr_t(residentLod) | (uintptr_t(representative.mesh->prefabLodBand+1)<<8),representative.drawData.flags,representative.drawData.lightCount,uintptr_t(representative.doubleSided),uintptr_t(representative.castsShadow)};
                 for(auto* texture:representative.textures) key.push_back(uintptr_t(texture));
+                if(indexed) key.push_back(uintptr_t(sourceIndexBuffer));
                 if(!automaticInstancing) key.push_back(uintptr_t(representative.object));
                 const auto uploadStart=RenderClock::now();
                 auto* pool=residentPlacementPool;
@@ -5661,7 +5670,9 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 context->SetStructuredBuffer(45,buffers.output.get()); context->SetStructuredBuffer(46,pool);
                 context->SetStructuredBuffer(10,m_emptyMorphDeltaBuffer.get()); context->SetStructuredBuffer(11,m_emptyMorphWeightBuffer.get());
                 context->SetVertexBuffer(0,sourceMesh->GetGraphicsBuffer(),sourceMesh->GetVertexStride(),0);
-                if(gpu) context->DrawInstancesIndirect(buffers.output.get(),0,false);
+                if(indexed) context->SetIndexBuffer(sourceIndexBuffer,sourceMesh->GetIndexCount(),0);
+                if(gpu) context->DrawInstancesIndirect(buffers.output.get(),0,indexed);
+                else if(indexed) context->DrawIndexedInstanced(sourceRange.vertexCount,buffers.candidates,sourceRange.firstVertex,0,0);
                 else context->DrawInstanced(sourceRange.vertexCount,buffers.candidates,sourceRange.firstVertex,0);
                 ++submitted; ++m_lastRenderCpuTimings.automaticBatches;
                 m_lastRenderCpuTimings.automaticInstances+=buffers.candidates;

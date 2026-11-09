@@ -115,6 +115,8 @@ public:
     };
     struct InstanceRange
     {
+        // Draw-element offset/count: vertices for nonindexed sources, indices
+        // for indexed sources. Names retain existing aggregate/source compatibility.
         uint32_t firstVertex = 0, vertexCount = 0;
         uint32_t firstInstance = 0, instanceCount = 0;
     };
