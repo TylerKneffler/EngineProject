@@ -2,8 +2,8 @@
 
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
-#include "Core/Compoonents/Obj/Terrain.h"
-#include "Core/Compoonents/Obj/TerrainObjectLayer.h"
+#include "Core/Compoonents/Terrain/Terrain.h"
+#include "Core/Compoonents/Terrain/TerrainObjectLayer.h"
 #include "Core/Compoonents/Materials/Material.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include <algorithm>

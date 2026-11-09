@@ -4,7 +4,7 @@
 #include "Core/Compoonents/Lighting/LightProbe.h"
 #include "Core/Compoonents/Materials/Material.h"
 #include "Core/Compoonents/Materials/Texture.h"
-#include "Core/Compoonents/Obj/Mesh.h"
+#include "Core/Compoonents/Mesh/Mesh.h"
 #include "Core/Rendering/Lighting/BakedLightingData.h"
 #include <algorithm>
 #include <array>

@@ -4,7 +4,7 @@
 #include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Compoonents/Cinematics/CameraTrack.h"
 #include "Core/Compoonents/Lighting/Light.h"
-#include "Core/Compoonents/Obj/Mesh.h"
+#include "Core/Compoonents/Mesh/Mesh.h"
 #include "Core/Compoonents/Animation/SkinnedMesh.h"
 #include "Core/Physics/Physics.h"
 #include "Core/Compoonents/Physics/Cloth.h"

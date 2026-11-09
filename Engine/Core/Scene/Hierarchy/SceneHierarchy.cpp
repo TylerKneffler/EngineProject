@@ -1,7 +1,7 @@
 #include "Core/Serialization/PrefabLoadProfile.h"
 #include "Core/Scene/Scene.h"
 #include "Core/SceneManager.h"
-#include "Core/Compoonents/Obj/Mesh.h"
+#include "Core/Compoonents/Mesh/Mesh.h"
 #include "Core/Compoonents/Materials/Material.h"
 #include <typeinfo>
 #include "Core/Compoonents/Animation/TwoBoneIK.h"

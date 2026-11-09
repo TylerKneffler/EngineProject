@@ -1,6 +1,6 @@
 #include "Core/Scene/Scene.h"
 #include "Core/Compoonents/Camera/Camera.h"
-#include "Core/Compoonents/Obj/Mesh.h"
+#include "Core/Compoonents/Mesh/Mesh.h"
 #include "Core/Compoonents/Particles/ParticleEmitter.h"
 #include <algorithm>
 #include <cmath>

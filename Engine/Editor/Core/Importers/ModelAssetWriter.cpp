@@ -1,7 +1,7 @@
 #include "ModelAssetWriter.h"
 #include "ModelAssetWriterSupport.h"
 #include "AssetJobControl.h"
-#include "Core/AnimationClipMapping.h"
+#include "Core/Animation/AnimationClipMapping.h"
 
 #include "Core/AssetRecord.h"
 #include "Core/Compoonents/Materials/Material.h"

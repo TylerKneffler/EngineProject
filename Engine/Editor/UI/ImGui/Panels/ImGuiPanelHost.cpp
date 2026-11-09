@@ -1,6 +1,6 @@
 #include "pch.h"
 #include "Engine/Editor/UI/ImGui/Panels/ImGuiPanelHost.h"
-#include "Engine/Editor/EditorState.h"
+#include "Engine/Editor/State/EditorState.h"
 #include "Engine/Editor/GameBuildManager.h"
 #include "Engine/Editor/Core/View/IEditorPanel.h"
 #include "Engine/Editor/Core/View/View.h"

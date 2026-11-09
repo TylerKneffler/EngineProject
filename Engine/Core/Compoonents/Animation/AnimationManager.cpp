@@ -1,7 +1,7 @@
 #include "AnimationManager.h"
 #include "Model.h"
 #include "Skeleton.h"
-#include "Core/Compoonents/Obj/Mesh.h"
+#include "Core/Compoonents/Mesh/Mesh.h"
 #include "Core/Compoonents/Animation/TwoBoneIK.h"
 #include "Core/Compoonents/Animation/RigController.h"
 #include "Core/Compoonents/Animation/RigConstraints.h"

@@ -1,5 +1,5 @@
-#include "Core/Compoonents/Obj/Terrain.h"
-#include "Core/Compoonents/Obj/Mesh.h"
+#include "Core/Compoonents/Terrain/Terrain.h"
+#include "Core/Compoonents/Mesh/Mesh.h"
 #include <BulletCollision/CollisionShapes/btTriangleShape.h>
 #include "Core/Physics/Adapters/BulletPhysicsAdapter.h"
 #include "Core/Compoonents/Physics/Cloth.h"

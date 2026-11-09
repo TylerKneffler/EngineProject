@@ -4,7 +4,7 @@
 #include "Core/Serialization/Json.h"
 #include "Core/Compoonents/Materials/Texture.h"
 #include "Core/Compoonents/Materials/Material.h"
-#include "Core/Compoonents/Obj/Mesh.h"
+#include "Core/Compoonents/Mesh/Mesh.h"
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Core/Graphics/IGraphicsTexture.h"
 #include "Core/Object.h"
@@ -524,7 +524,7 @@ static std::string HumanizePropertyName(const std::string& name)
 }
 
 // ---------------------------------------------------------------------------
-// Component::DrawProperties — Generic interactive property editor
+// Component::DrawProperties â€” Generic interactive property editor
 //
 // Automatically creates UI controls for all properties returned by Serialize().
 // Properties marked with PROPERTY(Inspector) in headers should be included in

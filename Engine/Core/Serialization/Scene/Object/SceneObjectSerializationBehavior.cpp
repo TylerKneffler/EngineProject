@@ -8,11 +8,11 @@
 #include "Core/Object.h"
 #include "Core/component.h"
 #include "Core/Script.h"
-#include "Core/Compoonents/Obj/Mesh.h"
+#include "Core/Compoonents/Mesh/Mesh.h"
 #include "Core/Compoonents/Materials/Material.h"
 #include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Compoonents/Lighting/Light.h"
-#include "Core/Compoonents/Obj/Sprite.h"
+#include "Core/Compoonents/Sprite/Sprite.h"
 #include "Core/Compoonents/Audio/AudioSource.h"
 #include "Core/Compoonents/Physics/PrimitiveObjectCollider.h"
 #include "Core/Compoonents/Physics/MeshObjectCollider.h"
@@ -682,7 +682,7 @@ JsonValue SceneObjectBehavior::SerializeScene(const Engine::Scene::Scene& scene)
     // Settings
     root.Set("settings", Engine::Scene::SerializeSceneSettings(scene.settings));
 
-    // Objects — only root-level (no parent)
+    // Objects â€” only root-level (no parent)
     JsonValue objects = JsonValue::MakeArray();
     for (const auto& obj : scene.GetObjects())
         if (obj->Parent == nullptr && !obj->runtimeOnly)

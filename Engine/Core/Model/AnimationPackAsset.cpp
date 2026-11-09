@@ -2,7 +2,7 @@
 #include "Core/Compoonents/Animation/AnimationManager.h"
 #include "Core/Compoonents/Animation/Model.h"
 #include "AnimationRigMapping.h"
-#include "Core/Compoonents/Obj/Mesh.h"
+#include "Core/Compoonents/Mesh/Mesh.h"
 #include "Core/Object.h"
 #include "Core/ComponentReference.h"
 #include "Core/Serialization/Json.h"

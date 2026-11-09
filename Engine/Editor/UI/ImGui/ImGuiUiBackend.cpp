@@ -15,7 +15,7 @@
 #include "Core/Renderers/DX12/DX12EditorRenderer.h"
 #include "Engine/Editor/UI/ImGui/EditorUI.h"
 #include "Engine/Editor/Input/EditorKeyBindings.h"
-#include "Engine/Editor/EditorState.h"
+#include "Engine/Editor/State/EditorState.h"
 #include "Engine/Editor/Core/Paint/PaintInput.h"
 #include "Engine/Editor/GameBuildManager.h"
 #if defined(ENGINE_VULKAN_ENABLED)

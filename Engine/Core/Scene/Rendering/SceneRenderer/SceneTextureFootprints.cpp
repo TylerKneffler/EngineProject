@@ -1,7 +1,7 @@
 #include "Core/Scene/Rendering/SceneRenderer/SceneTextureFootprints.h"
 #include "Core/Compoonents/Materials/Material.h"
 #include "Core/Compoonents/Materials/Texture.h"
-#include "Core/Compoonents/Obj/Mesh.h"
+#include "Core/Compoonents/Mesh/Mesh.h"
 #include "Core/Rendering/TextureFootprint.h"
 #include "Core/Rendering/RenderBoundsCache.h"
 #include <algorithm>

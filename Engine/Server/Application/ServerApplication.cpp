@@ -1,6 +1,6 @@
 #include "Server/Application/ServerApplication.h"
 
-#include "Core/Compoonents/Obj/Mesh.h"
+#include "Core/Compoonents/Mesh/Mesh.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
 #include "Core/Compoonents/Physics/SpatialManipulator.h"
 #include "Core/Object.h"

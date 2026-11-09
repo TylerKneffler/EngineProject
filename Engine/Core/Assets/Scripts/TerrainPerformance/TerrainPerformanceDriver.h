@@ -1,7 +1,7 @@
 #pragma once
 #include "Core/Script.h"
 #include "Core/PropertyMacros.h"
-#include "Core/Compoonents/Obj/TerrainHeightArchive.h"
+#include "Core/Compoonents/Terrain/TerrainHeightArchive.h"
 #include <future>
 #include <string>
 #include <cstdint>

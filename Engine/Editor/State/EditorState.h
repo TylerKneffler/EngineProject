@@ -1,0 +1,1047 @@
+#pragma once
+#include "Core/Model/ProjectSettings.h"
+#include "Core/Model/AnimationClip.h"
+#include "Core/Model/ImportedModel.h"
+#include "Core/Animation/AnimationTimelineEditing.h"
+#include "Core/Model/RigAsset.h"
+#include "pch.h"
+#include "Core/ProjectLoader.h"
+#include "Core/Scene/Scene.h"
+#include "Core/Serialization/Json.h"
+#include "Core/Renderers/IEditorRenderer.h"
+#include "UI/IEditorUi.h"
+#include "Core/Gizmos/EditorGizmoSystem.h"
+#include "Core/View/Templates/EditModes/Skeleton/WeightPaintSurface.h"
+#include "Core/Paint/BrushPreset.h"
+#include "Core/Importers/AssetJobControl.h"
+#include <memory>
+#include <vector>
+#include <functional>
+#include <future>
+#include <deque>
+#include <cstdint>
+#include <chrono>
+#include <unordered_set>
+#include <unordered_map>
+#include <map>
+#include <tuple>
+#include <utility>
+#include <optional>
+#include <filesystem>
+#include <algorithm>
+
+namespace Engine::Core { class Window; }
+namespace Engine::Components { class Mesh; }
+namespace Engine::Components { class Sprite; }
+namespace Engine::Components { class Material; }
+namespace Engine::Components { class Skeleton; }
+namespace Engine::Components { class AnimationManager; }
+
+namespace Engine::Editor
+{
+class ViewFactory;
+class IEditorPanel;
+class PreferencesView;
+class ConsoleView;
+class PropertiesView;
+class HierarchyView;
+class AssetsExplorerView;
+class SceneView;
+class AssetDocumentView;
+class AnimationView;
+class IEditorUi;
+
+// ---------------------------------------------------------------------------
+// EditorState — Encapsulates all editor application state
+// ---------------------------------------------------------------------------
+class EditorState
+{
+public:
+    struct ToolbarVisibility
+    {
+        bool editMode = true;
+        bool playControls = true;
+        bool save = true;
+        bool undoRedo = true;
+        bool modeTools = true;
+        bool transformTools = true;
+        bool sceneDisplay = true;
+        bool toolDetails = true;
+        bool paintTools = true;
+        bool prefabActions = true;
+    };
+
+    enum class ToolbarSection { File, Edit, Mode, Tools, Transform, View, Prefab, Paint };
+
+    EditorState(HINSTANCE hInstance, const Engine::Model::ProjectSettings& projectSettings,
+        std::string projectFilePath);
+    ~EditorState();
+
+    // ---- Initialization ----
+    bool Init();
+    void InitializeUiState();
+    // Release viewport/preview texture registrations before UI backend shutdown.
+    void ReleaseUiPanels();
+    void CheckAssetLocations();
+    bool PollBackgroundWork();
+
+    // ---- Access ----
+    ::Engine::Core::Window* GetWindow() const { return m_window.get(); }
+    ::Engine::Renderers::IEditorRenderer* GetRenderer() const { return m_renderer.get(); }
+    Engine::Scene::Scene* GetScene() const { return m_scene.get(); }
+    ViewFactory* GetViewFactory() const { return m_viewFactory.get(); }
+    ConsoleView* GetConsole() const { return m_primaryConsole; }
+    PreferencesView* GetPreferences() const { return m_preferences.get(); }
+
+    std::vector<std::unique_ptr<IEditorPanel>>& GetPanels() { return m_panels; }
+    const std::vector<std::unique_ptr<IEditorPanel>>& GetPanels() const { return m_panels; }
+
+    // ---- Save/Load State ----
+    bool HasUnsavedChanges() const;
+    bool HasActiveDocumentUnsavedChanges() const;
+    void SetHasUnsavedChanges(bool dirty) { m_hasUnsavedChanges = dirty; }
+
+    void SaveScene();
+    void SaveAll();
+    uint32_t GetEditorMaxFps() const { return m_projectSettings.editorMaxFps; }
+    void LoadScene(const std::string& path);
+    void LoadStartupScene(const std::string& path, bool rememberScene = true);
+    void RequestSceneLoad(const std::string& path);
+    void ProcessPendingSceneLoad();
+    bool ConfirmSceneLoad(bool saveCurrentScene);
+    void CancelSceneLoad();
+    bool HasPendingSceneLoadWarning() const { return m_showUnsavedWarning; }
+    const std::string& GetPendingSceneLoadPath() const { return m_sceneToLoad; }
+    void OpenPrefabStage(const std::string& path);
+    void ProcessPendingPrefabStageOpen();
+    void DrawGlobalToolbar(IEditorUi& ui, ToolbarSection section, bool singleRow,
+        bool* overflow = nullptr);
+    void DrawToolbarTools(IEditorUi& ui, bool singleRow,
+        bool* overflow = nullptr);
+    float GetGlobalToolbarHeight() const;
+    bool HasToolbarSection(ToolbarSection section) const;
+    float GetToolbarSectionMinimumWidth(ToolbarSection section) const;
+    float GetToolbarSectionPreferredWidth(ToolbarSection section) const;
+    ToolbarVisibility& GetToolbarVisibility() { return m_toolbarVisibility; }
+    void ClosePrefabStage();
+    void HandlePrefabPanelClosures();
+    void QueueAssetDocumentOpen(const std::string& path,
+        const std::string& editorType);
+    void ProcessPendingAssetDocumentOpens();
+    void HandleAssetDocumentClosures();
+    void QueueSceneAssetDocumentOpen(const std::string& path);
+    void ProcessPendingSceneAssetDocumentOpens();
+    void HandleSceneAssetDocumentClosures();
+      void QueueAnimationDocumentOpen(const std::string& path,
+          size_t rigIndex = 0);
+    void QueueAnimationAssetOpen(const std::string& path);
+    void OpenAnimationEditor();
+    void QueueAnimationObjectOpen(Engine::Core::Object* object,
+        const std::string& clipName = {});
+    bool CanCreateAnimationClip() const;
+    bool CreateAnimationClip(const std::string& name);
+    void ProcessPendingAnimationDocumentOpens();
+    void RestoreAnimationEditorSession();
+    void SaveAnimationEditorSession() const;
+    void UpdateAnimationPlayback(float deltaTime);
+    void HandleAnimationDocumentClosures();
+    void ReleaseRetiredAnimationDocuments();
+    void DrawAnimationCloseConfirmation(IEditorUi& ui);
+    bool IsAnimationEditorFocused() const;
+    bool IsAnimationPlaying() const;
+    bool CanToggleAnimationPlayback() const;
+    bool CanStopAnimationPlayback() const;
+    void ToggleAnimationPlayback();
+    void StopAnimationPlayback();
+    bool IsEditingPrefab() const;
+    std::string GetActiveDocumentName() const;
+    void BakeLighting();
+    bool IsBakeJobRunning() const
+    { return m_bakeJob.valid() || m_bakePublication.has_value(); }
+    float GetBakeJobProgress() const
+    { return m_bakePublication
+        ? 0.95f + 0.05f * static_cast<float>(m_bakePublicationIndex) /
+            static_cast<float>(std::max<size_t>(1, m_bakePublication->objects.size()))
+        : m_bakeJobControl ? 0.95f * m_bakeJobControl->progress.load() : 1.f; }
+    void CancelBakeJob();
+    bool IsStageImportRunning() const { return m_stageImport.valid(); }
+    float GetStageImportProgress() const
+    { return m_stageImportControl ? m_stageImportControl->progress.load() : 0.f; }
+    void CancelStageImport()
+    { if (m_stageImportControl) m_stageImportControl->cancelled.store(true); }
+    void ClearBakedLighting();
+    void ImportAsset();
+    void OpenCodeEditor();
+    bool RequestCodeEditorAttach(bool openWorkspace = false);
+    void StartObjectImport(const std::string& path, bool intoScene,
+        const std::string& destinationDirectory = {});
+    bool PendingImportSupportsReference() const;
+    bool HasPendingImportAsset() const { return !m_pendingImportAssetPath.empty(); }
+    const std::string& GetPendingImportAssetPath() const { return m_pendingImportAssetPath; }
+    const std::string& GetPendingImportDirectory() const { return m_pendingImportDirectory; }
+    bool IsPendingPmxImport() const;
+    float GetPendingPmxUnitScaleToMeters() const { return m_pendingPmxUnitScaleToMeters; }
+    void SetPendingPmxUnitScaleToMeters(float value)
+    { m_pendingPmxUnitScaleToMeters = value; }
+    bool GetPendingPmxImportMorphs() const { return m_pendingPmxImportMorphs; }
+    bool GetPendingPmxImportRigConstraints() const { return m_pendingPmxImportRigConstraints; }
+    bool GetPendingPmxImportFollowBoneColliders() const
+    { return m_pendingPmxImportFollowBoneColliders; }
+    bool GetPendingPmxImportDynamicPhysics() const
+    { return m_pendingPmxImportDynamicPhysics; }
+    int GetPendingPmxPhysicsQuality() const { return m_pendingPmxPhysicsQuality; }
+    bool GetPendingPmxWeightFittedColliders() const
+    { return m_pendingPmxWeightFittedColliders; }
+    int GetPendingPmxColliderMode() const { return m_pendingPmxColliderMode; }
+    void SetPendingPmxImportMorphs(bool value) { m_pendingPmxImportMorphs = value; }
+    void SetPendingPmxImportRigConstraints(bool value)
+    { m_pendingPmxImportRigConstraints = value; }
+    void SetPendingPmxImportFollowBoneColliders(bool value)
+    { m_pendingPmxImportFollowBoneColliders = value; }
+    void SetPendingPmxImportDynamicPhysics(bool value)
+    { m_pendingPmxImportDynamicPhysics = value; }
+    void SetPendingPmxPhysicsQuality(int value)
+    { m_pendingPmxPhysicsQuality = value; }
+    void SetPendingPmxWeightFittedColliders(bool value)
+    { m_pendingPmxWeightFittedColliders = value; }
+    void SetPendingPmxColliderMode(int value)
+    { m_pendingPmxColliderMode = value; }
+    void SetPendingImportDirectory(std::string directory)
+    { m_pendingImportDirectory = std::move(directory); }
+    bool IsPendingImportIntoScene() const { return m_pendingImportIntoScene; }
+    bool IsPendingImportAsPrefab() const { return m_pendingImportAsPrefab; }
+    bool CanImportIntoScene() const { return m_pendingImportScene != nullptr; }
+    void SetPendingImportIntoScene(bool value)
+    { m_pendingImportIntoScene = value; if (value) m_pendingImportAsPrefab = false;
+      else m_pickingImportReference = false; }
+    void SetPendingImportAsPrefab(bool value)
+    { m_pendingImportAsPrefab = value; if (value)
+      { m_pendingImportIntoScene = false; m_pickingImportReference = false; } }
+    const std::string& GetPendingImportReferenceLabel() const { return m_pendingImportReferenceLabel; }
+    const std::string& GetPendingImportError() const { return m_pendingImportError; }
+    bool IsPickingImportReference() const { return m_pickingImportReference; }
+    void BeginImportReferencePick();
+    void ClearImportReference();
+    void ConfirmPendingImportAsset();
+    void CancelPendingImportAsset();
+    bool IsImportJobRunning() const { return m_importJob.valid(); }
+    float GetImportJobProgress() const
+    { return m_importJobControl ? m_importJobControl->progress.load() : 0.f; }
+    bool IsImportJobCommitting() const
+    { return m_importJobControl && m_importJobControl->committing.load(); }
+    std::string ConsumeImportHierarchyFocusRequest();
+    // Serialized byte capacities only; excludes parsed snapshots and allocator overhead.
+    uint64_t GetPlaySnapshotMemoryBytes() const { return m_playModeSceneSnapshot.capacity(); }
+    uint64_t GetSceneHistoryMemoryBytes() const
+    {
+        uint64_t bytes=m_historyBaseline.scene.capacity()+m_pendingHistoryBefore.scene.capacity();
+        for (const auto& entry:m_undoHistory) bytes+=entry.scene.capacity();
+        for (const auto& entry:m_redoHistory) bytes+=entry.scene.capacity();
+        return bytes;
+    }
+    bool CapturePlayModeScene();
+    void RestorePlayModeScene();
+    void SetLoadingOverlay(bool visible, std::string message = {})
+    {
+        m_loadingOverlayVisible = visible;
+        m_loadingOverlayMessage = std::move(message);
+    }
+    bool IsLoadingOverlayVisible() const { return m_loadingOverlayVisible || !m_queuedScenePath.empty(); }
+    const std::string& GetLoadingOverlayMessage() const
+    {
+        return m_queuedScenePath.empty() ? m_loadingOverlayMessage : m_sceneLoadingMessage;
+    }
+    void RefreshSelectionAfterReload(const ::Engine::Scene::Scene::ObjectPath& selectedPath);
+
+    // ---- Undo/Redo ----
+    void TrackSceneChanges(bool allowHistory = true, bool editInProgress = false);
+    void Undo();
+    void Redo();
+    bool CanUndo() const;
+    bool CanRedo() const;
+    void SetHistoryLimit(uint32_t limit);
+    void ResetSceneEditInProgress() { m_sceneEditInProgress = false; }
+    void ReportSceneEditInProgress(bool active)
+    {
+        m_sceneEditInProgress = m_sceneEditInProgress || active;
+        if (active)
+            MarkSceneEdited();
+    }
+    bool IsSceneEditInProgress() const { return m_sceneEditInProgress; }
+
+    bool IsShowingPreferences() const { return m_showPreferences; }
+    void SetShowPreferences(bool show) { m_showPreferences = show; }
+
+    // ---- Scene Transition Callbacks ----
+    std::function<void(const std::string&)> OnSceneLoadRequested;
+    std::function<void()> OnSceneLoadConfirmed;
+
+    // ---- Frame Timing ----
+    float GetDeltaTime() const;
+    void UpdateDeltaTime();
+
+private:
+    struct MeshEditSession
+    {
+        struct EdgeCache
+        {
+            const Engine::Components::Mesh* mesh = nullptr;
+            size_t vertexCount = 0;
+            std::vector<uint32_t> indices;
+            std::vector<std::pair<uint32_t, uint32_t>> edges;
+        };
+        bool enabled = false;
+        Engine::Components::Mesh* activeMesh = nullptr;
+        bool vertexPaintMode = false;
+        int paintTarget = 0; // vertex color, material texture
+        int textureSlot = 0; // base color, metallic/roughness, normal, occlusion, emissive, height
+        bool paintMirrorX = false;
+        bool vertexSelectionMask = false;
+        bool textureAlphaLock = false;
+        int vertexPaintTool = 0; // cursor, brush, eraser, bucket
+        float vertexPaintColor[4]{ 1.f, .2f, .1f, 1.f };
+        float vertexBucketTolerance = .05f;
+        Paint::BrushPreset vertexBrush;
+        std::string vertexBrushPresetPath;
+        bool vertexPainting = false;
+        bool vertexStrokeChanged = false;
+        std::string vertexStrokeBefore;
+        EditorUiVec2 lastVertexPaintPosition{ -10000.f, -10000.f };
+        std::string texturePaintPath;
+        std::vector<uint8_t> texturePaintPixels;
+        std::vector<uint8_t> textureStrokeBefore;
+        std::deque<std::vector<uint8_t>> textureUndo;
+        std::deque<std::vector<uint8_t>> textureRedo;
+        bool texturePainting = false;
+        bool textureStrokeChanged = false;
+        uint32_t texturePaintWidth = 0;
+        uint32_t texturePaintHeight = 0;
+        int selectionMode = 0; // vertex, edge, face
+        uint32_t selectedElement = 0;
+        std::vector<uint32_t> selectedElements;
+        std::shared_ptr<EdgeCache> edgeCache;
+        int selectionTool = 0; // click, box, lasso
+        int pivotMode = 0;
+        float rotate[3]{};
+        float scale[3]{ 1.f, 1.f, 1.f };
+        float customPivot[3]{};
+        float snapStep = 0.f;
+        float rotationSnap = 0.f;
+        float scaleSnap = 0.f;
+        float bevelWidth = .15f;
+        float unwrapSeamAngle = 65.f;
+        int unwrapUvSet = 0;
+        int unwrapSeamMode = 0; // automatic, automatic plus selected edges
+        std::string toolError;
+        bool selecting = false;
+        EditorUiVec2 selectionStart{};
+        std::vector<EditorUiVec2> lasso;
+        bool gizmoDragging = false;
+        bool gizmoChanged = false;
+        int gizmoAxis = -1;
+        EditorTransformTool gizmoTool = EditorTransformTool::Translate;
+        EditorUiVec2 gizmoStartMouse{};
+        EditorUiVec2 gizmoScreenDirection{};
+        float gizmoUnitsPerPixel = 0.f;
+        float gizmoLastPixels = 0.f;
+        std::vector<std::pair<uint32_t, std::array<float, 3>>>
+            gizmoStartPositions;
+        std::string gizmoBeforeSnapshot;
+        std::string savePath;
+        std::string baseline;
+        std::string savedSnapshot;
+        std::deque<std::string> undo;
+        std::deque<std::string> redo;
+        bool dirty = false;
+        char search[96]{};
+        float move[3]{};
+        float extrudeDistance = 0.25f;
+        float insetAmount = 0.2f;
+    };
+    MeshEditSession* ActiveMeshEditSession();
+    Engine::Components::Mesh* ResolveMeshForSelection(
+        Engine::Core::Object* selected) const;
+    void SyncMeshEditSelection(Engine::Scene::Scene* scene,
+        MeshEditSession& session);
+    void SetMeshEditMode(Engine::Scene::Scene* scene,
+        MeshEditSession& session, bool enabled);
+    void DrawMeshEditTools(IEditorUi& ui);
+    const std::vector<std::pair<uint32_t, uint32_t>>& CachedMeshEdges(
+        MeshEditSession& session, const Engine::Components::Mesh& mesh);
+    bool HandleMeshViewport(IEditorUi& ui,
+        const EditorUiViewportInput& input, Engine::Scene::Scene* scene,
+        MeshEditSession& session, EditorTransformTool tool);
+    void FinishVertexPaintStroke(MeshEditSession& session);
+    void FinishTexturePaintStroke(MeshEditSession& session);
+    bool StepTexturePaintHistory(MeshEditSession& session, bool redo);
+    struct SkeletonEditSession;
+    void DrawObjectEditTools(IEditorUi& ui);
+    bool SaveMeshEditSession(MeshEditSession& session);
+    bool SavePendingMeshEdits();
+    void InvalidateMeshEditPointers();
+    bool ApplyMeshHistory(bool redo);
+    struct SkeletonEditSession
+    {
+        struct WeightAdjacencyCache
+        {
+            const Engine::Components::Mesh* mesh = nullptr;
+            size_t vertexCount = 0;
+            std::vector<uint32_t> indices;
+            std::vector<std::vector<uint32_t>> neighbors;
+        };
+        bool enabled = false;
+        int submode = 0; // bone edit, weight paint, skin binding
+        int boneTool = 0; // edit, add, remove
+        char boneName[128]{};
+        int reparentBoneIndex = -1;
+        int pivotMode = 0; // joint, parent, skeleton root, custom world point
+        float customPivot[3]{};
+        float translationSnap = 0.f;
+        float rotationSnap = 0.f;
+        float scaleSnap = 0.f;
+        int brushOperation = 0; // add, subtract, replace, smooth, normalize
+        int paintTool = 1; // cursor, brush, eraser, bucket
+        float bucketTolerance = .05f;
+        float bucketOpacity = 1.f;
+        int brushShape = 0; // circle, square
+        int brushFalloff = 0; // hard, linear, smooth
+        float brushRadius = 40.f;
+        float brushHardness = 0.5f;
+        float brushStrength = 0.35f;
+        float brushPaintWeight = 1.f;
+        float brushOpacity = 1.f;
+        float brushFlow = 1.f;
+        float brushSpacing = .08f;
+        float brushRotation = 0.f;
+        float brushScatter = 0.f;
+        float brushPressureSize = 0.f;
+        float brushPressureStrength = 0.f;
+        std::string brushTipPath;
+        std::string brushPresetPath;
+        char brushPresetName[128] = "Round";
+        std::vector<bool> lockedBones;
+        std::shared_ptr<WeightAdjacencyCache> adjacency;
+        std::shared_ptr<WeightPaintSurface::Topology> surfaceTopology;
+        Engine::Components::Skeleton* skeleton = nullptr;
+        Engine::Components::Mesh* mesh = nullptr;
+        Engine::Components::Mesh* bindingMesh = nullptr;
+        int boneIndex = -1;
+        int mirrorBoneIndex = -1; // -1 disables paired-bone painting
+        char bindingVertexIds[256]{};
+        std::string bindingStatus;
+        Engine::Core::Object* observedSelection = nullptr;
+        uint64_t observedStructureRevision = 0;
+        int observedSubmode = -1;
+        std::vector<glm::mat4> observedBindTransforms;
+        bool painting = false;
+        bool strokeChanged = false;
+        EditorUiVec2 lastPaintPosition{};
+        std::string strokeBefore;
+        enum class HistoryKind { Scene, Mesh, Binding };
+        struct HistoryAction
+        {
+            struct AssetEdit
+            {
+                ::Engine::Scene::Scene::ObjectPath beforePath;
+                ::Engine::Scene::Scene::ObjectPath afterPath;
+                std::string savePath;
+                std::string before;
+                std::string after;
+            };
+            HistoryKind kind = HistoryKind::Scene;
+            ::Engine::Scene::Scene::ObjectPath meshPath;
+            std::string meshSavePath;
+            std::vector<AssetEdit> assetEdits;
+        };
+        std::deque<HistoryAction> undoOrder;
+        std::deque<HistoryAction> redoOrder;
+        bool pendingBindingMeshHistory = false;
+        std::vector<HistoryAction::AssetEdit> pendingAssetEdits;
+        ::Engine::Scene::Scene::ObjectPath historyMeshPath;
+        std::string error;
+    };
+    SkeletonEditSession* ActiveSkeletonEditSession();
+    void SetSkeletonEditMode(Engine::Scene::Scene* scene,
+        SkeletonEditSession& session, MeshEditSession& meshSession,
+        bool enabled);
+    void SyncSkeletonEditSelection(Engine::Scene::Scene* scene,
+        SkeletonEditSession& session);
+    void DrawSkeletonEditTools(IEditorUi& ui);
+    bool HandleSkeletonViewport(IEditorUi& ui,
+        const EditorUiViewportInput& input, Engine::Scene::Scene* scene,
+        SkeletonEditSession& session);
+    void FinishSkeletonPaintStroke(SkeletonEditSession& session);
+    void RecordSkeletonHistory(SkeletonEditSession& session,
+        SkeletonEditSession::HistoryKind kind);
+    bool ApplySkeletonHistory(bool redo);
+    void RefreshSkeletonBindPose(SkeletonEditSession& session);
+    bool ApplySkeletonBoneAction(Engine::Scene::Scene* scene,
+        SkeletonEditSession& session, int action);
+    bool ApplySkinBindingAction(Engine::Scene::Scene* scene,
+        SkeletonEditSession& session, int action);
+    void CommitSkeletonEdit(Engine::Scene::Scene* scene);
+    void InitializePanels();
+    void WireupCallbacks();
+    Engine::Core::Object* InstantiateAsset(const std::string& path, bool recordChange = true,
+        bool showImportDialog = true);
+    bool PollImportJob();
+    bool PollBakeJob();
+    void PublishImportJob(const std::string& primary,
+        const std::string& source, bool intoScene,
+        Engine::Scene::Scene* scene, Engine::Core::Object* reference);
+    void CaptureImportReference(Engine::Core::Object* object);
+    void SelectObject(Engine::Core::Object* object);
+    struct HistoryEntry
+    {
+        std::string scene;
+        bool hasSelection = false;
+        ::Engine::Scene::Scene::ObjectPath selectionPath;
+    };
+    struct HistoryCapture
+    {
+        HistoryEntry entry;
+        uint64_t revision = 0;
+        uint64_t savedRevision = 0;
+        bool changed = false;
+        bool dirty = false;
+    };
+    HistoryEntry CaptureHistoryEntry() const;
+    void FlushHistoryCapture();
+    void CaptureHistorySelection(HistoryEntry& entry) const;
+    void MarkSceneEdited();
+    void MarkHistorySelectionChanged()
+    {
+        if (!m_activeAnimationDocument)
+            m_historySelectionDirty = true;
+        if (m_renderer) m_renderer->MarkDirty();
+    }
+    void ApplyHistoryEntry(HistoryEntry entry, const char* operation);
+    void ResetHistory(bool sceneIsSaved);
+    void CommitPendingHistoryEdit();
+    void TrimHistory();
+    bool SaveMainScene();
+    struct SceneSaveResult
+    {
+        std::string path, snapshot;
+        uint64_t revision = 0;
+        uint64_t generation = 0;
+        bool succeeded = false;
+    };
+    struct SceneSaveRequest
+    {
+        Engine::Serialization::JsonValue document;
+        std::string path;
+        uint64_t revision = 0;
+        uint64_t generation = 0;
+    };
+    void StartSceneSave(SceneSaveRequest request);
+    bool PollSceneSave();
+    void QueueSceneLoad(const std::string& path);
+    void OpenPrefabStageWithDocument(const std::string& path,
+        const Engine::Serialization::JsonValue& document);
+    void LoadSceneNow(const std::string& path,
+        const Engine::Serialization::JsonValue* parsed = nullptr,
+        bool rememberScene = true);
+    void RemovePrefabPanels();
+    void SetPrefabDocumentFocused(bool focused);
+    void SetPrefabDirty(bool dirty);
+    void RefreshPrefabDocumentTitle();
+    void SetActiveAssetDocument(AssetDocumentView* document);
+    struct SceneAssetDocument
+    {
+        std::string path;
+        std::string identity;
+        bool prefab = false;
+        bool meshStage = false;
+        bool modelStage = false;
+        bool skeletonStage = false;
+        bool objectStage = false;
+        bool showChildHierarchy = true;
+        std::string stageDataPath;
+        Engine::Components::Mesh* mesh = nullptr;
+        Engine::Core::Object* subject = nullptr;
+        Engine::Core::Object* propertiesProjection = nullptr;
+        std::unordered_set<Engine::Core::Object*> selectableObjects;
+        std::unordered_set<Engine::Core::Object*> skeletonMeshObjects;
+        std::unordered_map<Engine::Core::Object*, bool> originalEnabledState;
+        std::unordered_map<Engine::Components::Mesh*, bool> originalMeshVisibility;
+        std::unordered_map<Engine::Components::Sprite*, bool> originalSpriteVisibility;
+        struct GhostMaterialState
+        {
+            Engine::Components::Material* material = nullptr;
+            float alpha = 1.f;
+            std::string alphaMode;
+            bool castsShadows = true;
+        };
+        std::vector<GhostMaterialState> ghostMaterialStates;
+        Engine::Components::Skeleton* skeleton = nullptr;
+        bool showSkeletonMesh = true;
+        Engine::Components::AnimationManager* previewAnimationManager = nullptr;
+        bool previewAnimation = false;
+        std::chrono::steady_clock::time_point lastPreviewTick{};
+        std::string previewRestoreSnapshot;
+        std::string meshSavePath;
+        std::unique_ptr<Engine::Scene::Scene> scene;
+        SceneView* view = nullptr;
+        std::function<void(IEditorUi&)> focusPicker;
+        std::function<void(IEditorUi&)> objectStageTools;
+        std::function<void(IEditorUi&)> meshStageTools;
+        std::function<void(IEditorUi&)> skeletonStageTools;
+        int assetToolsTab = -1;
+        std::string baseline;
+        std::string savedSnapshot;
+        std::deque<std::string> undo;
+        std::deque<std::string> redo;
+        bool dirty = false;
+        uint32_t selectedVertex = 0;
+        int uvMapSet = 0;
+        uint32_t selectedInfluence = 0;
+        MeshEditSession meshEdit;
+        SkeletonEditSession skeletonEdit;
+    };
+    struct AnimationDocument
+    {
+        char propertiesSearch[128]{};
+        bool propertiesOutlineOpen = false;
+        bool drawingProperties = false;
+        int propertiesHeaderOverride = -1;
+        std::string propertiesJumpTarget;
+        struct TimelineKey
+        {
+            size_t rigIndex = 0;
+            int clipIndex = -1;
+            unsigned nodeIndex = 0;
+            float time = 0.f;
+        };
+        struct TimelineRow
+        {
+            size_t rigIndex = 0;
+            int clipIndex = -1;
+            unsigned nodeIndex = 0;
+        };
+        struct RigTrack : AnimationTimelineEditing::Playback
+        {
+            size_t index = 0;
+            std::string name;
+            std::string path;
+            std::vector<std::string> boundMeshes;
+            Engine::Model::RigAsset::ControlMap controls;
+            Engine::Model::HumanoidRig::Mapping humanoid;
+            std::array<float, Engine::Model::HumanoidRig::Count> humanoidConfidence{};
+            char humanoidSearch[128]{};
+            std::vector<Engine::Model::RigAsset::Pose> poses;
+            std::vector<Engine::Model::RigAsset::SymmetryPair> symmetryPairs;
+            bool controlsDirty = false;
+            bool rigConstraintsDirty = false;
+            Engine::Components::Skeleton* sourceSkeleton = nullptr;
+            Engine::Components::Skeleton* poseSkeleton = nullptr;
+            Engine::Components::AnimationManager* sourceManager = nullptr;
+            Engine::Components::AnimationManager* poseManager = nullptr;
+            std::unordered_map<int, bool> expandedClips;
+            std::unordered_map<int, float> clipSettingsHeights;
+            int selectedBone = -1;
+            bool selected = false;
+        };
+        std::vector<RigTrack> tracks;
+        std::string path;
+        std::string identity;
+        Engine::Core::Object* sourceObject = nullptr;
+        std::string standaloneAssetPath;
+        std::unordered_map<std::string, std::string> clipAssetPaths;
+          size_t rigIndex = 0;
+          std::string rigName;
+          std::string rigPath;
+        std::string animationAssetToAdd;
+          std::vector<std::string> boundMeshNames;
+        struct CachedClip
+        {
+            struct UnresolvedRow
+            {
+                std::string path;
+                unsigned nodeIndex = 0;
+                size_t channelIndex = 0;
+                std::vector<float> times;
+            };
+            struct SummaryKey
+            {
+                float time = 0.f;
+                std::vector<std::pair<unsigned, float>> keys;
+            };
+            Engine::Model::AnimationClip compatible;
+            bool mappingReady = true;
+            std::unordered_map<unsigned, std::vector<float>> keyTimes;
+            std::vector<SummaryKey> summaryKeys;
+            std::vector<UnresolvedRow> unresolvedRows;
+        };
+        using ClipCacheKey = std::tuple<
+            const Engine::Components::AnimationManager*,
+            const Engine::Components::Skeleton*, int>;
+        std::map<ClipCacheKey, CachedClip> clipCache;
+        std::unordered_map<const Engine::Components::AnimationManager*,
+            std::string> previewLayouts;
+        uint64_t clipRevision = 0;
+        std::vector<Engine::Model::AnimationClip> durationDragBefore;
+        int durationDragClip = -1;
+        bool durationDragChanged = false;
+        std::unique_ptr<Engine::Scene::Scene> sourceScene;
+        std::unique_ptr<Engine::Scene::Scene> poseScene;
+        Engine::Core::Object* sourceRoot = nullptr;
+        Engine::Components::AnimationManager* sourceManager = nullptr;
+        Engine::Components::AnimationManager* poseManager = nullptr;
+        Engine::Components::Skeleton* poseSkeleton = nullptr;
+        AnimationView* view = nullptr;
+        int clipIndex = -1;
+        int selectedBone = -1;
+        int sampledControllerClip = -2;
+        size_t sampledControllerRig = static_cast<size_t>(-1);
+        int repairIssueChannel = -1;
+        int repairBoneIndex = 0;
+        bool repairAwaitingViewportBone = false;
+        size_t repairRigIndex = 0;
+        int repairClipIndex = -1;
+        float playheadSeconds = 0.f;
+        float timelinePixelsPerSecond = 110.f;
+        bool playing = false;
+        bool playbackStarted = false;
+        bool playheadDragging = false;
+        bool clipDragging = false;
+        std::optional<AnimationTimelineEditing::Playback> clipDragBefore;
+        size_t clipDragRig = 0;
+        int clipDragIndex = -1;
+        float clipDragMouseX = 0.f;
+        float clipDragStart = 0.f;
+        std::vector<TimelineKey> selectedKeys;
+        std::vector<Engine::Model::AnimationChannel> copiedKeys;
+        size_t copiedKeysRig = 0;
+        int pasteClipIndex = -1;
+        std::vector<TimelineRow> selectedRows;
+        std::optional<TimelineRow> rowSelectionAnchor;
+        float keyPressX = 0.f;
+        float keyDragDelta = 0.f;
+        bool keyPressActive = false;
+        bool keyDragging = false;
+        bool marqueeActive = false;
+        float marqueeStartX = 0.f;
+        float marqueeStartY = 0.f;
+        bool marqueeAdditive = false;
+        bool autoKey = false;
+        Engine::Model::AnimationClip::ControllerKey::Space controllerSpace =
+            Engine::Model::AnimationClip::ControllerKey::Space::Body;
+        char poseName[128]{};
+        std::string poseAssetPath;
+        int selectedPose = -1;
+        float poseBlend = 1.f;
+        bool poseMirror = false;
+        bool poseKeyResult = false;
+        bool poseSelectedOnly = false;
+        struct ChainEffector
+        {
+            size_t rigIndex = 0;
+            unsigned rootNode = 0;
+            unsigned tipNode = 0;
+            glm::vec3 target { 0.f };
+            glm::vec3 targetRotation { 0.f };
+            glm::vec3 pole { 0.f };
+            float positionWeight = 1.f;
+            float rotationWeight = 0.f;
+            bool usePole = false;
+        };
+        std::vector<ChainEffector> chainEffectors;
+        int chainIterations = 24;
+        float chainRootTranslation = 0.f;
+        bool gizmoWasActive = false;
+        bool gizmoDragIK = false;
+        int rigHandleKind = -1; // 0 root, 1 pelvis, then target/pole pairs.
+        int rigHandleDrag = -1;
+        glm::vec3 rigHandleDragStart { 0.f };
+        Engine::Core::Object* gizmoDragBone = nullptr;
+        glm::vec3 gizmoDragStartPosition{};
+        glm::vec3 gizmoDragStartRotation{};
+        glm::vec3 gizmoDragStartScale{1.f};
+        bool poseControlEditPending = false;
+        int ikControlTip = -1;
+        float ikControlTime = -1.f;
+        glm::vec3 ikTarget { 0.f };
+        glm::vec3 ikPole { 0.f };
+        glm::vec3 ikTargetRotation { 0.f };
+        Engine::Model::AnimationClip::LimbKey::Space ikSpace =
+            Engine::Model::AnimationClip::LimbKey::Space::Body;
+        int ikSpaceNode = -1;
+        Engine::Core::ComponentReference ikPropReference { "Transform" };
+        float ikPositionWeight = 1.f;
+        float ikRotationWeight = 1.f;
+        float ikBlend = 0.f;
+        bool ikControlEditPending = false;
+        bool dirty = false;
+        std::string savedSnapshot;
+        struct EditSnapshot
+        {
+            size_t rigIndex = 0;
+            std::vector<Engine::Model::AnimationClip> clips;
+            AnimationTimelineEditing::Playback playback;
+        };
+        std::deque<EditSnapshot> undo;
+        std::deque<EditSnapshot> redo;
+        std::string error;
+    };
+    void SetActiveAnimationDocument(AnimationDocument* document);
+    void SelectAnimationDocumentClip(AnimationDocument& document,
+        const std::string& clipName, size_t rigIndex);
+    void FocusAnimationRig(AnimationDocument& document, size_t index);
+    void HandleAnimationEditorDrop(IEditorUi& ui, AnimationDocument* target = nullptr);
+    void DrawAnimationTimeline(IEditorUi& ui, AnimationDocument& document);
+    void DrawAnimationTimelinePanel(IEditorUi& ui);
+    void DrawAnimationKeyTools(IEditorUi& ui, AnimationDocument& document);
+    void DrawAnimationLayerTools(IEditorUi& ui, AnimationDocument& document);
+    void DrawAnimationRigToolbar(IEditorUi& ui,
+        AnimationDocument& document);
+    bool AddAnimationToDocument(AnimationDocument& document, const std::string& path);
+    void RemoveAnimationFromDocument(AnimationDocument& document, size_t rigIndex, int clipIndex);
+    void AnimationPlaybackChanged(AnimationDocument& document, bool recordHistory = true);
+    void DrawAnimationProperties(IEditorUi& ui,
+        AnimationDocument& document);
+    void DrawAnimationRigConstraints(IEditorUi& ui,
+        AnimationDocument& document);
+    void DrawAnimationRigControls(IEditorUi& ui,
+        AnimationDocument& document);
+    void DrawAnimationPoseLibrary(IEditorUi& ui,
+        AnimationDocument& document);
+    void DrawAnimationChainIK(IEditorUi& ui,
+        AnimationDocument& document);
+    bool DrawAnimationRigViewport(IEditorUi& ui,
+        const EditorUiViewportInput& input, AnimationDocument& document);
+    void DrawAnimationMappingRepair(IEditorUi& ui,
+        AnimationDocument& document);
+    bool AssignAnimationChannels(AnimationDocument& document,
+        size_t rigIndex, int clipIndex, size_t channelIndex,
+        size_t boneIndex);
+    void DrawAnimationGraph(AnimationDocument& document,
+        float duration);
+    void SampleAnimationDocument(AnimationDocument& document);
+    bool CopyAnimationKeys(AnimationDocument& document);
+    bool PasteAnimationKeys(AnimationDocument& document);
+    AnimationDocument::CachedClip& CachedAnimationClip(
+        AnimationDocument& document, AnimationDocument::RigTrack& track,
+        int clipIndex);
+    bool AddAnimationKey(AnimationDocument& document, bool exactTime = false);
+    bool AddAnimationPoseKeys(AnimationDocument& document,
+        const std::vector<Engine::Core::Object*>& joints);
+    bool AddAnimationControllerKeys(AnimationDocument& document,
+        bool useExistingUndo = false);
+    bool AddAnimationRowKeys(AnimationDocument& document);
+    bool AddAnimationIKKeys(AnimationDocument& document,
+        Engine::Core::Object& upper, Engine::Core::Object& lower,
+        Engine::Core::Object& tip);
+    bool AddAnimationLimbKey(AnimationDocument& document,
+        Engine::Core::Object& upper, Engine::Core::Object& lower,
+        Engine::Core::Object& tip, bool matchIncoming);
+    bool BakeAnimationLimbs(AnimationDocument& document);
+    void RecordAnimationEdit(AnimationDocument& document,
+        std::vector<Engine::Model::AnimationClip> before,
+        std::optional<AnimationTimelineEditing::Playback> playbackBefore = std::nullopt);
+    bool SaveAnimationDocument(AnimationDocument& document);
+    bool StepAnimationHistory(AnimationDocument& document, bool redo);
+    void RefreshAnimationDocumentTitle(AnimationDocument& document);
+    void DrawObjectStageTools(IEditorUi& ui, SceneAssetDocument& document);
+    void DrawMeshStageTools(IEditorUi& ui, SceneAssetDocument& document);
+    void SetActiveSceneAssetDocument(SceneAssetDocument* document,
+        bool refresh = false);
+    bool SaveSceneAssetDocument(SceneAssetDocument& document);
+    std::string CaptureSceneAssetDocumentSnapshot(
+        SceneAssetDocument& document);
+    bool RestoreSceneAssetDocumentSnapshot(SceneAssetDocument& document,
+        const std::string& snapshot);
+    void ApplySkeletonStageVisibility(SceneAssetDocument& document);
+    void RestoreSkeletonStageVisibility(SceneAssetDocument& document);
+    void RebuildSkeletonStageContext(SceneAssetDocument& document);
+    void RebuildObjectStageContext(SceneAssetDocument& document);
+    void ApplyObjectStageVisibility(SceneAssetDocument& document);
+    void ApplyMeshStageVisibility(SceneAssetDocument& document);
+    void StopSkeletonAnimationPreview(SceneAssetDocument& document);
+    void RefreshSceneAssetDocumentTitle(SceneAssetDocument& document);
+    void RefreshSceneDocumentTitle();
+    Engine::Scene::Scene* GetActiveDocumentScene() const;
+    SceneView* GetGlobalToolbarSceneView() const;
+
+    // Core objects
+    std::unique_ptr<::Engine::Core::Window> m_window;
+    std::unique_ptr<::Engine::Renderers::IEditorRenderer> m_renderer;
+    std::unique_ptr<Engine::Scene::Scene> m_scene;
+    std::unique_ptr<Engine::Scene::Scene> m_prefabScene;
+    std::unique_ptr<ViewFactory> m_viewFactory;
+    std::unique_ptr<PreferencesView> m_preferences;
+
+    // Panels
+    std::vector<std::unique_ptr<IEditorPanel>> m_panels;
+    ConsoleView* m_primaryConsole = nullptr;
+    HierarchyView* m_primaryHierarchy = nullptr;
+    PropertiesView* m_primaryProperties = nullptr;
+    AssetsExplorerView* m_primaryAssets = nullptr;
+    SceneView* m_prefabSceneView = nullptr;
+    std::vector<AssetDocumentView*> m_assetDocuments;
+    AssetDocumentView* m_activeAssetDocument = nullptr;
+    std::vector<std::unique_ptr<SceneAssetDocument>> m_sceneAssetDocuments;
+    std::deque<std::string> m_pendingSceneAssetDocuments;
+    SceneAssetDocument* m_activeSceneAssetDocument = nullptr;
+    std::vector<std::unique_ptr<AnimationDocument>> m_animationDocuments;
+    struct RetiredAnimationDocument
+    {
+        std::unique_ptr<AnimationDocument> document;
+        std::unique_ptr<IEditorPanel> panel;
+        uint32_t srvSlot = UINT32_MAX;
+    };
+    std::vector<RetiredAnimationDocument> m_retiredAnimationDocuments;
+    std::string m_animationDocumentOpenError;
+      std::deque<std::pair<std::string, size_t>> m_pendingAnimationDocuments;
+    std::unordered_map<std::string, std::string> m_pendingAnimationClipSelections;
+    struct AnimationSourceRequest
+    {
+        std::string snapshot;
+        std::string prefabPath;
+        Engine::Core::Object* sourceObject = nullptr;
+        std::string standaloneAssetPath;
+    };
+    std::unordered_map<std::string, AnimationSourceRequest> m_pendingAnimationSources;
+    std::unordered_map<std::string, std::string> m_pendingAnimationClipAssets;
+    AnimationDocument* m_activeAnimationDocument = nullptr;
+    AnimationDocument* m_animationCloseDocument = nullptr;
+    AnimationDocument* m_timelineAnimationDocument = nullptr;
+    MeshEditSession m_mainMeshEdit;
+    MeshEditSession m_prefabMeshEdit;
+    SkeletonEditSession m_mainSkeletonEdit;
+    SkeletonEditSession m_prefabSkeletonEdit;
+    std::unordered_map<std::string, MeshEditSession> m_meshEditCache;
+
+    // State
+    Engine::Model::ProjectSettings m_projectSettings;
+    std::string m_projectFilePath;
+    std::string m_currentScenePath;
+    std::string m_activePrefabPath;
+    std::string m_pendingPrefabPath;
+    std::string m_prefabReadPath;
+    std::future<Engine::Serialization::JsonValue> m_prefabRead;
+    std::deque<std::pair<std::string, std::string>> m_pendingAssetDocuments;
+    bool m_prefabHasUnsavedChanges = false;
+    bool m_prefabDocumentFocused = false;
+    bool m_hasUnsavedChanges = false;
+    bool m_showPreferences = false;
+    bool m_loadingOverlayVisible = false;
+    std::string m_loadingOverlayMessage;
+    std::string m_queuedScenePath;
+    std::future<Engine::Serialization::JsonValue> m_queuedSceneDocument;
+    std::string m_sceneLoadingMessage;
+    std::string m_playModeSceneSnapshot;
+    std::future<Engine::Serialization::JsonValue> m_playModeParsedSnapshot;
+    bool m_prePlayHasUnsavedChanges = false;
+    bool m_prePlayHadObjectSelection = false;
+    ::Engine::Scene::Scene::ObjectPath m_prePlaySelectionPath;
+
+    std::deque<HistoryEntry> m_undoHistory;
+    std::deque<HistoryEntry> m_redoHistory;
+    HistoryEntry m_historyBaseline;
+    HistoryEntry m_pendingHistoryBefore;
+    std::string m_savedSceneSnapshot;
+    std::future<SceneSaveResult> m_sceneSave;
+    std::optional<SceneSaveRequest> m_nextSceneSave;
+    std::string m_loadAfterSceneSave;
+    uint32_t m_historyLimit = 100;
+    bool m_hasPendingHistoryEdit = false;
+    bool m_assetPreviewActive = false;
+    bool m_sceneEditInProgress = false;
+    bool m_mainSceneGizmoWasActive = false;
+    bool m_gameViewFocused = false;
+    ToolbarVisibility m_toolbarVisibility;
+    std::string m_toolbarPopupTool;
+    Engine::Scene::Scene* m_toolbarPopupScene = nullptr;
+    int m_toolbarPopupMode = 0;
+    std::string m_toolbarDirectTool;
+    char m_meshToolbarSearch[64]{};
+    Engine::Scene::Scene* m_meshToolbarScene = nullptr;
+    int m_meshToolbarSelectionMode = 0;
+    uint64_t m_sceneEditRevision = 0;
+    uint64_t m_historyCapturedRevision = 0;
+    uint64_t m_savedSceneRevision = 0;
+    uint64_t m_sceneDocumentGeneration = 0;
+    std::future<HistoryCapture> m_historyCapture;
+    bool m_historySelectionDirty = false;
+
+    std::string m_sceneToLoad;
+    std::string m_pendingImportAssetPath;
+    std::string m_pendingImportDirectory;
+    bool m_pendingImportIntoScene = false;
+    bool m_pendingImportAsPrefab = false;
+    float m_pendingPmxUnitScaleToMeters = 1.f;
+    bool m_pendingPmxImportMorphs = true;
+    bool m_pendingPmxImportRigConstraints = true;
+    bool m_pendingPmxImportFollowBoneColliders = true;
+    bool m_pendingPmxImportDynamicPhysics = false;
+    int m_pendingPmxPhysicsQuality = 1;
+    bool m_pendingPmxWeightFittedColliders = false;
+    int m_pendingPmxColliderMode = 1;
+    std::string m_pendingImportReferenceLabel;
+    std::string m_pendingImportError;
+    struct ImportJobResult
+    {
+        std::string primary;
+        std::string outputDirectory;
+        std::vector<std::filesystem::path> createdPaths;
+        std::string message;
+        std::string bindingError;
+        std::string boundPrefab;
+        bool boundCharacter = false;
+    };
+    std::future<ImportJobResult> m_importJob;
+    std::filesystem::path m_importDestinationRoot;
+    std::shared_ptr<AssetJobControl> m_importJobControl;
+    uint64_t m_importSceneGeneration = 0;
+    Engine::Scene::Scene::ObjectPath m_importReferencePath;
+    Engine::Core::Object* m_importReferenceObject = nullptr;
+    std::future<Engine::Model::ModelImportResult> m_stageImport;
+    std::shared_ptr<AssetJobControl> m_stageImportControl;
+    std::string m_stageImportPath;
+    struct BakeObjectResult
+    {
+        Engine::Scene::Scene::ObjectPath path;
+        bool hasMaterial = false;
+        glm::vec3 irradiance{0.f};
+        glm::vec3 directionalIrradiance{0.f};
+        glm::vec3 lightDirection{0.f, 1.f, 0.f};
+        std::string originalMaterialAsset;
+        std::string originalMaterialSnapshot;
+        std::string bakedMaterialAsset;
+        std::string bakedLightmapAsset;
+        bool hasProbe = false;
+        glm::vec3 probeIrradiance{0.f};
+        glm::vec3 probeDirectional{0.f};
+        glm::vec3 probeDirection{0.f, 1.f, 0.f};
+        bool hasProbeGroup = false;
+        std::vector<glm::vec3> groupIrradiance;
+        std::vector<glm::vec3> groupDirectional;
+        std::vector<glm::vec3> groupDirections;
+    };
+    struct BakeJobResult
+    {
+        Engine::Model::BakeResult status;
+        std::vector<BakeObjectResult> objects;
+        std::filesystem::path outputRoot;
+    };
+    std::future<BakeJobResult> m_bakeJob;
+    std::shared_ptr<AssetJobControl> m_bakeJobControl;
+    std::optional<BakeJobResult> m_bakePublication;
+    size_t m_bakePublicationIndex = 0;
+    bool m_bakePublicationFailed = false;
+    uint64_t m_bakeSceneGeneration = 0;
+    uint64_t m_bakeSceneRevision = 0;
+    Engine::Scene::Scene* m_pendingImportScene = nullptr;
+    Engine::Core::Object* m_pendingImportReferenceObject = nullptr;
+    Engine::Scene::Scene::ObjectPath m_pendingImportReferencePath;
+    bool m_hasImportReference = false;
+    bool m_pickingImportReference = false;
+    bool m_focusImportHierarchy = false;
+    bool m_showUnsavedWarning = false;
+
+    // Timing
+    LARGE_INTEGER m_perfFreq, m_lastCounter;
+    float m_deltaTime = 0.0f;
+};
+}

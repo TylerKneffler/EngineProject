@@ -2,7 +2,7 @@
 #include <chrono>
 #include <stdexcept>
 #include "Core/Compoonents/Materials/Material.h"
-#include "Core/Compoonents/Obj/Mesh.h"
+#include "Core/Compoonents/Mesh/Mesh.h"
 #include "Core/Scene/Rendering/SceneRenderer/SceneRendererUtilities.h"
 
 namespace Engine::Scene::Renderer

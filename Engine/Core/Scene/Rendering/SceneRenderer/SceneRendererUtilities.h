@@ -2,7 +2,7 @@
 
 #include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Compoonents/Materials/Material.h"
-#include "Core/Compoonents/Obj/Mesh.h"
+#include "Core/Compoonents/Mesh/Mesh.h"
 #include "Core/Object.h"
 #include "Core/Model/GraphicsQualitySettings.h"
 #include <algorithm>

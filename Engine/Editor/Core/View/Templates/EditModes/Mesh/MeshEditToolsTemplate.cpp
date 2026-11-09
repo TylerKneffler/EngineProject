@@ -1,11 +1,11 @@
 #include "pch.h"
-#include "Engine/Editor/EditorState.h"
+#include "Engine/Editor/State/EditorState.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 #include "Engine/Editor/Core/View/Views/ConsoleView.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Object.h"
-#include "Core/Compoonents/Obj/Mesh.h"
-#include "Core/MeshEditGeometry.h"
+#include "Core/Compoonents/Mesh/Mesh.h"
+#include "Core/Mesh/MeshEditGeometry.h"
 #include "Engine/Editor/Core/Paint/MeshUvUnwrap.h"
 
 namespace Engine::Editor

@@ -3,8 +3,8 @@
 #include "Core/Script.h"
 #include "Core/Compoonents/SpatialUpdate.h"
 #include "Core/PropertyMacros.h"
-#include "Core/Compoonents/Obj/Mesh.h"
-#include "Core/Compoonents/Obj/TerrainObjectLayer.h"
+#include "Core/Compoonents/Mesh/Mesh.h"
+#include "Core/Compoonents/Terrain/TerrainObjectLayer.h"
 #include "Core/Rendering/GrassPerformance.h"
 #include <chrono>
 #include <optional>

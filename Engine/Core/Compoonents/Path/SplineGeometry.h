@@ -1,6 +1,6 @@
 #pragma once
 #include "Core/component.h"
-#include "Core/Compoonents/Obj/Mesh.h"
+#include "Core/Compoonents/Mesh/Mesh.h"
 #include <string>
 #include <vector>
 

@@ -20,7 +20,7 @@
 #include "Core/Renderers/RendererFactory.h"
 #include "Core/Rendering/RenderJobs.h"
 #include "Core/View/View.h"
-#include "Engine/Editor/EditorState.h"
+#include "Engine/Editor/State/EditorState.h"
 #include "Engine/Editor/GameBuildManager.h"
 #include "Engine/Editor/HotReload/EditorHotReload.h"
 #include "Engine/Editor/ProjectLauncher.h"

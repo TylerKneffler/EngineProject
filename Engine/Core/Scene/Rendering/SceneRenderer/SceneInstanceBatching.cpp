@@ -1,6 +1,6 @@
 #include "Core/Scene/Rendering/SceneRenderer/SceneInstanceBatching.h"
 #include "Core/Scene/Rendering/SceneRenderer/SceneRendererUtilities.h"
-#include "Core/Compoonents/Obj/Mesh.h"
+#include "Core/Compoonents/Mesh/Mesh.h"
 #include "Core/Compoonents/Physics/SpatialManipulator.h"
 #include "Core/Compoonents/Materials/Material.h"
 #include "Core/Graphics/IGraphicsProvider.h"

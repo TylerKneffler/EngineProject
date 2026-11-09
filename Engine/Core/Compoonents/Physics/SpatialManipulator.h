@@ -1,7 +1,7 @@
 #pragma once
 #include "Core/Component.h"
 #include "Core/ComponentReference.h"
-#include "Core/Compoonents/Obj/Mesh.h"
+#include "Core/Compoonents/Mesh/Mesh.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
 #include "Core/Compoonents/Transform.h"
 #include "Core/Physics/Spatial/SpatialTraversalState.h"

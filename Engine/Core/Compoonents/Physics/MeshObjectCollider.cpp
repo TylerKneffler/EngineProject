@@ -2,7 +2,7 @@
 
 #include "Core/Compoonents/Animation/Skeleton.h"
 #include "Core/Compoonents/Animation/SkinnedMesh.h"
-#include "Core/Compoonents/Obj/Mesh.h"
+#include "Core/Compoonents/Mesh/Mesh.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
 #include "Core/Object.h"
 #include "Core/Threading/JobScheduler.h"

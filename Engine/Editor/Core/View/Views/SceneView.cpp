@@ -18,16 +18,16 @@
 #include "Core/Compoonents/Animation/AnimationBone.h"
 #include "Core/Compoonents/Animation/Model.h"
 #include "Core/Compoonents/Animation/AnimationManager.h"
-#include "Core/Compoonents/Obj/Mesh.h"
-#include "Core/Compoonents/Obj/Terrain.h"
-#include "Core/Compoonents/Obj/TerrainObjectLayer.h"
-#include "Core/Compoonents/Obj/TerrainManager.h"
+#include "Core/Compoonents/Mesh/Mesh.h"
+#include "Core/Compoonents/Terrain/Terrain.h"
+#include "Core/Compoonents/Terrain/TerrainObjectLayer.h"
+#include "Core/Compoonents/Terrain/TerrainManager.h"
 #include <set>
 #include <filesystem>
 #include <vector>
 #include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Compoonents/Transform.h"
-#include "Core/Compoonents/Obj/Sprite.h"
+#include "Core/Compoonents/Sprite/Sprite.h"
 #include "Core/Compoonents/Particles/ParticleEmitter.h"
 #include "Core/Compoonents/Sprite/SpriteAnimationManager.h"
 #include "Core/Compoonents/Lighting/LightProbe.h"
@@ -127,7 +127,7 @@ SceneView::~SceneView()
 }
 
 // ---------------------------------------------------------------------------
-// Init — store the scene pointer, then delegate resource creation to View.
+// Init â€” store the scene pointer, then delegate resource creation to View.
 // ---------------------------------------------------------------------------
 void SceneView::SetScene(Engine::Scene::Scene* scene)
 {
@@ -955,14 +955,14 @@ void SceneView::DrawPanel(IEditorUi& ui)
 
             EditorUiVec2 d = input.mouseDelta;
 
-            // Right-button drag → pan.
+            // Right-button drag â†’ pan.
             if (input.rightDown)
             {
                 panDX += d.x;
                 panDY += d.y;
             }
 
-            // Middle-button drag → orbit.
+            // Middle-button drag â†’ orbit.
             if (input.middleDown)
             {
                 orbitDX = d.x;
@@ -977,7 +977,7 @@ void SceneView::DrawPanel(IEditorUi& ui)
                 panDY += d.y;
             }
 
-            // Scroll wheel → zoom.
+            // Scroll wheel â†’ zoom.
             zoom = m_modelManipulation && m_modelScrollDepth &&
                 m_gizmos.IsModelDragging() ? 0.f : input.mouseWheel;
             // Alt+Ctrl+left drag provides a trackpad-friendly dolly gesture.

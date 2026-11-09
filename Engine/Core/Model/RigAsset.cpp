@@ -3,7 +3,7 @@
 #include "Core/Compoonents/Animation/SkinnedMesh.h"
 #include "Core/Compoonents/Animation/Model.h"
 #include "Core/Compoonents/Animation/AnimationBone.h"
-#include "Core/Compoonents/Obj/Mesh.h"
+#include "Core/Compoonents/Mesh/Mesh.h"
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Serialization/Json.h"

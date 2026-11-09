@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Core/Component.h"
-#include "Core/Compoonents/Obj/Mesh.h"
+#include "Core/Compoonents/Mesh/Mesh.h"
 #include "Core/Compoonents/Physics/MeshObjectCollider.h"
 #include <cstdint>
 #include <unordered_set>

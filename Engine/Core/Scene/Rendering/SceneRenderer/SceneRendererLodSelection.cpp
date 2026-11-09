@@ -1,6 +1,6 @@
 #include "Core/Scene/Rendering/SceneRenderer/SceneRendererLodSelection.h"
 
-#include "Core/Compoonents/Obj/Mesh.h"
+#include "Core/Compoonents/Mesh/Mesh.h"
 #include "Core/Rendering/RenderJobs.h"
 #include "Core/Scene/Rendering/SceneRenderer/SceneInstanceBatching.h"
 #include "Core/Scene/Rendering/SceneRenderer/SceneRendererDrawPreparation.h"

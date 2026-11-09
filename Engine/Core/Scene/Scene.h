@@ -105,6 +105,7 @@ class SceneRendererObjectRecordUpload;
 class SceneRendererGeometrySubmission;
 class SceneRendererLodSelection;
 class SceneRendererDirectionalShadowSubmission;
+class ScenePortalRendering;
 class SceneRendererMaterialShaders;
 class SceneRendererLighting;
 class SceneRendererPipelines;
@@ -1144,6 +1145,7 @@ private:
     friend class Engine::Scene::Renderer::SceneRendererGeometrySubmission;
     friend class Engine::Scene::Renderer::SceneRendererLodSelection;
     friend class Engine::Scene::Renderer::SceneRendererDirectionalShadowSubmission;
+    friend class Engine::Scene::Renderer::ScenePortalRendering;
     friend class Engine::Scene::Renderer::SceneRendererMaterialShaders;
     friend class Engine::Scene::Renderer::SceneRendererLighting;
     friend class Engine::Scene::Renderer::SceneRendererPipelines;

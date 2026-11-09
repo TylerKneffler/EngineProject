@@ -2,7 +2,7 @@
 
 #include "Core/Graphics/IGraphicsContext.h"
 #include "Core/Graphics/IPipelineState.h"
-#include "Core/Compoonents/Obj/Mesh.h"
+#include "Core/Compoonents/Mesh/Mesh.h"
 #include "Core/Rendering/RenderJobs.h"
 #include "Core/Scene/Rendering/SceneRenderer/SceneRendererUtilities.h"
 

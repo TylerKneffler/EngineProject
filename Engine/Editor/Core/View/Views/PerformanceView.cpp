@@ -4,7 +4,7 @@
 #include "Core/Compoonents/Materials/Texture.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 #include "Core/Scene/Scene.h"
-#include "Core/Compoonents/Obj/TerrainManager.h"
+#include "Core/Compoonents/Terrain/TerrainManager.h"
 #include "Core/Renderers/IEditorRenderer.h"
 #include "Core/Renderers/DX11/DX11EditorRenderer.h"
 #include "Core/Physics/Adapters/BulletPhysicsAdapter.h"

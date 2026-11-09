@@ -1,6 +1,6 @@
 #include "Scripts/Portals/PortalSplitAfterDelay.h"
 
-#include "Core/Compoonents/Obj/Mesh.h"
+#include "Core/Compoonents/Mesh/Mesh.h"
 #include "Core/Compoonents/Physics/PrimitiveObjectCollider.h"
 #include "Core/Compoonents/Physics/MeshObjectCollider.h"
 #include "Core/Compoonents/Physics/RigidBody.h"

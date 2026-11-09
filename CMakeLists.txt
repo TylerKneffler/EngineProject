@@ -1207,7 +1207,7 @@ if(NOT ENGINE_PROJECT_DIR AND
     enable_testing()
     add_executable(MeshAuthoringTests EXCLUDE_FROM_ALL
         "${ENGINE_LOCAL_TEST_ROOT}/MeshAuthoringTests.cpp"
-        "${ENGINE_ROOT}/Engine/Editor/Core/MeshEditGeometry.cpp")
+        "${ENGINE_ROOT}/Engine/Editor/Core/Mesh/MeshEditGeometry.cpp")
     target_link_libraries(MeshAuthoringTests PRIVATE Engine)
     target_include_directories(MeshAuthoringTests PRIVATE "${ENGINE_ROOT}/Engine")
     add_test(NAME MeshAuthoringRegression COMMAND MeshAuthoringTests)
@@ -1688,8 +1688,8 @@ if(NOT ENGINE_PROJECT_DIR AND
     enable_testing()
     add_executable(SkeletonAuthoringRegressionTests EXCLUDE_FROM_ALL
         "${ENGINE_LOCAL_TEST_ROOT}/SkeletonAuthoringRegressionTests.cpp"
-        "${ENGINE_ROOT}/Engine/Editor/Core/SkeletonBindPose.cpp"
-        "${ENGINE_ROOT}/Engine/Editor/Core/MeshEditSnapshot.cpp")
+        "${ENGINE_ROOT}/Engine/Editor/Core/Animation/SkeletonBindPose.cpp"
+        "${ENGINE_ROOT}/Engine/Editor/Core/Mesh/MeshEditSnapshot.cpp")
     target_link_libraries(SkeletonAuthoringRegressionTests PRIVATE Engine)
     target_include_directories(SkeletonAuthoringRegressionTests PRIVATE
         "${ENGINE_ROOT}/Engine")
@@ -1748,7 +1748,7 @@ if(NOT ENGINE_PROJECT_DIR AND
     enable_testing()
     add_executable(VertexColorPaintTests EXCLUDE_FROM_ALL
         "${ENGINE_LOCAL_TEST_ROOT}/VertexColorPaintTests.cpp"
-        "${ENGINE_ROOT}/Engine/Editor/Core/MeshEditSnapshot.cpp")
+        "${ENGINE_ROOT}/Engine/Editor/Core/Mesh/MeshEditSnapshot.cpp")
     target_link_libraries(VertexColorPaintTests PRIVATE Engine)
     target_include_directories(VertexColorPaintTests PRIVATE
         "${ENGINE_ROOT}/Engine")

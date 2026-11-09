@@ -2,7 +2,7 @@
 #include "Scripts/TerrainGen/TerrainGen.h"
 #include "Scripts/TerrainPerformance/TerrainPerformanceDriver.h"
 
-#include "Core/Compoonents/Obj/TerrainManager.h"
+#include "Core/Compoonents/Terrain/TerrainManager.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"

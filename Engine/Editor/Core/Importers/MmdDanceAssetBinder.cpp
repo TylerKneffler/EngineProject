@@ -10,7 +10,7 @@
 #include "Core/Compoonents/Animation/Skeleton.h"
 #include "Core/Compoonents/Animation/RigConstraints.h"
 #include "Core/Compoonents/Animation/RigMorphControls.h"
-#include "Core/Compoonents/Obj/Mesh.h"
+#include "Core/Compoonents/Mesh/Mesh.h"
 #include "Core/Compoonents/Materials/MaterialPropertyMorph.h"
 #include "Core/Model/AnimationClipAsset.h"
 #include "Core/Model/AnimationPackAsset.h"

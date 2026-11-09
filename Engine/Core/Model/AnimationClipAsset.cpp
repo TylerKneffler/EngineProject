@@ -1,5 +1,5 @@
 #include "AnimationClipAsset.h"
-#include "Core/Compoonents/Obj/Mesh.h"
+#include "Core/Compoonents/Mesh/Mesh.h"
 #include "Core/Compoonents/Animation/Model.h"
 #include "Core/Object.h"
 #include "Core/Serialization/Json.h"

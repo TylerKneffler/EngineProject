@@ -2,7 +2,7 @@
 #include "Core/Physics/IPhysicsAdapter.h"
 #include "Core/Compoonents/Physics/Cloth.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
-#include "Core/Compoonents/Obj/Mesh.h"
+#include "Core/Compoonents/Mesh/Mesh.h"
 #include "Core/Memory/CacheStore.h"
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"

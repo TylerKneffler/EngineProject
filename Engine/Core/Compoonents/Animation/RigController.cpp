@@ -5,7 +5,7 @@
 
 #include "Core/Compoonents/Animation/Model.h"
 #include "Core/Compoonents/Materials/MaterialPropertyMorph.h"
-#include "Core/Compoonents/Obj/Mesh.h"
+#include "Core/Compoonents/Mesh/Mesh.h"
 #include "Core/Object.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 #include <algorithm>

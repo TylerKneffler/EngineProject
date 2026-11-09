@@ -1,10 +1,10 @@
 #include "GltfImporter.h"
 #include "AssetJobControl.h"
-#include "Core/AnimationClipMapping.h"
+#include "Core/Animation/AnimationClipMapping.h"
 
 #include "Core/AssetRecord.h"
 #include "Core/Compoonents/Materials/Material.h"
-#include "Core/Compoonents/Obj/Mesh.h"
+#include "Core/Compoonents/Mesh/Mesh.h"
 #include "Core/Compoonents/Animation/ModelAnimation.h"
 #include "Core/Compoonents/Animation/BoneGroup.h"
 #include "Core/Model/RigAsset.h"

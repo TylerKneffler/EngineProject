@@ -1,6 +1,6 @@
 #include "Material.h"
 #include "Core/Compoonents/Materials/Texture.h"
-#include "Core/Compoonents/Obj/Mesh.h"
+#include "Core/Compoonents/Mesh/Mesh.h"
 #include "Core/Serialization/Json.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 #include <algorithm>
