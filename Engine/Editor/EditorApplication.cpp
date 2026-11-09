@@ -2,6 +2,7 @@
 #include "Engine/Editor/Runtime/EditorPlayPipeline.h"
 #include "Engine/Editor/Startup/EditorCommandLine.h"
 #include "Engine/Editor/Startup/EditorStartupSettings.h"
+#include "Engine/Editor/Startup/EditorSceneSession.h"
 #include "Engine/Editor/Diagnostics/EditorFrameProfiler.h"
 #include "Engine/Editor/Diagnostics/FrameActivity.h"
 #include "Core/Window.h"
@@ -254,11 +255,11 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
         : autoProfilePlay
             ? (std::filesystem::path(ENGINE_ASSETS_PATH) / "Scenes" /
                 "Animation" / "mmd.scene").string()
-            : projectSettings.defaultScene;
+            : Engine::Editor::RestoreLastScene(projectFile, projectSettings.defaultScene);
     if (!startupScene.empty())
     {
-        OutputDebugStringA(("[Main] Loading default scene: " + startupScene + "\n").c_str());
-        editorState->LoadStartupScene(startupScene);
+        OutputDebugStringA(("[Main] Loading startup scene: " + startupScene + "\n").c_str());
+        editorState->LoadStartupScene(startupScene, !autoProfilePlay);
     }
     // Restore the tabs left open at shutdown. Explicitly closed animation
     // documents are removed from the saved session by their close handler.

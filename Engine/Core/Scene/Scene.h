@@ -231,6 +231,9 @@ public:
         double constraintsMs = 0.0, audioMs = 0.0;
     };
     void SetUpdateProfilingEnabled(bool enabled) { m_updateProfilingEnabled = enabled; }
+    // Opt-in alpha-prepass experiment. Never serialized or enabled by policy.
+    void SetDiagnosticOpaqueDepthEqual(bool enabled) { m_diagnosticOpaqueDepthEqual = enabled; }
+    bool DiagnosticOpaqueDepthEqualReady() const { return m_diagnosticOpaqueDepthEqualReady; }
     const UpdateTimings& GetLastUpdateTimings() const { return m_lastUpdateTimings; }
     void ResetGrassPerformance() { m_grassPerformance = {}; m_grassGpuResources.clear(); }
     bool AccountGrassGpuResource(const void* resource)
@@ -1230,6 +1233,8 @@ private:
     void PublishSceneSnapshot();
     bool m_isUpdating = false;
     bool m_updateProfilingEnabled = false;
+    bool m_diagnosticOpaqueDepthEqual = false;
+    bool m_diagnosticOpaqueDepthEqualReady = true;
     UpdateTimings m_lastUpdateTimings{};
     Engine::Rendering::GrassPerformance m_grassPerformance{};
     std::unordered_set<const void*> m_grassGpuResources;

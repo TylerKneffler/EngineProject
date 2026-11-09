@@ -105,7 +105,7 @@ public:
     void SaveAll();
     uint32_t GetEditorMaxFps() const { return m_projectSettings.editorMaxFps; }
     void LoadScene(const std::string& path);
-    void LoadStartupScene(const std::string& path);
+    void LoadStartupScene(const std::string& path, bool rememberScene = true);
     void RequestSceneLoad(const std::string& path);
     void ProcessPendingSceneLoad();
     bool ConfirmSceneLoad(bool saveCurrentScene);
@@ -540,7 +540,8 @@ private:
     void OpenPrefabStageWithDocument(const std::string& path,
         const Engine::Serialization::JsonValue& document);
     void LoadSceneNow(const std::string& path,
-        const Engine::Serialization::JsonValue* parsed = nullptr);
+        const Engine::Serialization::JsonValue* parsed = nullptr,
+        bool rememberScene = true);
     void RemovePrefabPanels();
     void SetPrefabDocumentFocused(bool focused);
     void SetPrefabDirty(bool dirty);

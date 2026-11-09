@@ -102,6 +102,16 @@ ReleaseBuilds/.staging-*/
 !.local/tests/test_canopy_lod.py
 !.local/tests/CanopyExperiment.h
 !.local/tests/test_canopy_study.py
+!.local/tests/test_foliage_cards.py
+!.local/tests/test_foliage_overdraw.py
+!.local/tests/test_foliage_overlap.py
+!.local/tests/test_foliage_prepass.py
+!.local/tests/test_foliage_trim.py
+!.local/tests/test_foliage_interior_trim.py
+!.local/tests/test_foliage_contour.py
+!.local/tests/test_foliage_interior.py
+!.local/tests/test_foliage_order.py
+!.local/tests/test_foliage_order_bank.py
 
 # Python asset/validation caches.
 __pycache__/

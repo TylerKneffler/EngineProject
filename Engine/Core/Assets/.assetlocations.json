@@ -5072,6 +5072,11 @@
             "directory": false
         },
         {
+            "id": "file:a8e05ef1:1d0000:257b2e",
+            "path": "Shaders/Diagnostics/FoliageAlphaMask.hlsl",
+            "directory": false
+        },
+        {
             "id": "file:a8e05ef1:140000:25716f",
             "path": "Prefabs/Woodland/Oaks/Small_oak_tree_002_LOD0.prefab",
             "directory": false
@@ -5379,6 +5384,11 @@
         {
             "id": "file:a8e05ef1:330000:4b935",
             "path": "Shaders",
+            "directory": true
+        },
+        {
+            "id": "file:a8e05ef1:330000:228123",
+            "path": "Shaders/Diagnostics",
             "directory": true
         },
         {

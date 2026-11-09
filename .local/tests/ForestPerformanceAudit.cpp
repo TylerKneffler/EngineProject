@@ -144,6 +144,8 @@ template<class Renderer> void Benchmark(const std::string& backend,bool foliageO
     Engine::Scene::Scene scene; scene.Init(renderer.GetGraphicsProvider());
     const bool cpuProfile=std::getenv("ENGINE_FOREST_AUDIT_CPU_PROFILE")!=nullptr;
     const bool materialOnly=std::getenv("ENGINE_FOREST_AUDIT_MATERIAL_ONLY")!=nullptr;
+    const bool prepassOnly=std::getenv("ENGINE_FOREST_AUDIT_PREPASS_ONLY")!=nullptr;
+    Check(!prepassOnly || (!materialOnly && !foliageOnly && !cpuProfile),"prepass control requires an independent capture");
     const char* canopyDirectory=std::getenv("ENGINE_FOREST_AUDIT_CANOPY");
     scene.SetUpdateProfilingEnabled(cpuProfile);
     scene.SetBeforeGpuResourceDestruction([&] { renderer.WaitIdle(); });
@@ -175,6 +177,9 @@ template<class Renderer> void Benchmark(const std::string& backend,bool foliageO
     double advanceMs=0,beginMs=0,prepareMs=0,sceneRenderMs=0,endMs=0;
     const auto elapsed=[](auto first,auto last) {return std::chrono::duration<double,std::milli>(last-first).count();};
     bool requestCapture=false, vertexOnly=false;
+    bool alphaPrepass=false;
+    uint64_t prepassDraws=0;
+    std::map<Material*,std::string> prepassShaders;
     Engine::Graphics::FrameTimingTelemetry shadowTelemetry;
     auto render=[&] {
         const auto advanceBegin=std::chrono::steady_clock::now();
@@ -194,7 +199,7 @@ template<class Renderer> void Benchmark(const std::string& backend,bool foliageO
         if(shadows) {
             // Force the same complete cascade workload for material ablations;
             // rotating cached-cascade refresh would otherwise mix pass costs.
-            if(materialOnly || canopyDirectory) scene.InvalidateDirectionalShadowCache();
+            if(materialOnly || canopyDirectory || prepassOnly) scene.InvalidateDirectionalShadowCache();
             scene.Render(context.get(),float(width)/height,camera,false,width,height,true);
             if constexpr (std::is_same_v<Renderer,DX12GameRenderer>) {
                 renderer.EndFrame();
@@ -205,10 +210,22 @@ template<class Renderer> void Benchmark(const std::string& backend,bool foliageO
             }
         }
         renderer.Clear(.1f,.1f,.1f,1);
+        prepassDraws=0;
+        if(alphaPrepass) {
+            for(auto& [material,shader]:prepassShaders)
+                material->shader="Assets/Shaders/Diagnostics/FoliageAlphaMask.hlsl";
+            scene.PrepareRenderFrame();
+            scene.Render(context.get(),float(width)/height,camera,false,width,height);
+            prepassDraws=scene.GetLastRenderCpuTimings().physicalDraws;
+            for(auto& [material,shader]:prepassShaders) material->shader=shader;
+            scene.PrepareRenderFrame();
+        }
         if(vertexOnly) context->SetScissorRect({0,0,0,0});
+        scene.SetDiagnosticOpaqueDepthEqual(alphaPrepass);
         scene.Render(context.get(),float(width)/height,camera,false,width,height);
+        scene.SetDiagnosticOpaqueDepthEqual(false);
         if(requestCapture) {
-            if constexpr (!std::is_same_v<Renderer,DX11GameRenderer>) renderer.RequestSceneCapture();
+            renderer.RequestSceneCapture();
         }
         const auto afterSceneRender=std::chrono::steady_clock::now();
         renderer.EndFrame();
@@ -240,7 +257,7 @@ template<class Renderer> void Benchmark(const std::string& backend,bool foliageO
         for(bool candidate:variants)
         {
             renderer.WaitIdle();
-            Check(ConfigureCanopy(*forest,canopyDirectory,candidate)==4,"canopy study requires all four varieties");
+            Check(ConfigureCanopy(*forest,canopyDirectory,candidate,&std::cout)==4,"canopy study requires all four varieties");
             for(const std::string view:{"entrance","overlook","zoom","motion"})
             {
                 const auto origin=view=="entrance" ? glm::dvec3(entrance):glm::dvec3(-5,27,-39);
@@ -276,7 +293,8 @@ template<class Renderer> void Benchmark(const std::string& backend,bool foliageO
                         <<",\"shadow_sample_id\":"<<shadowTelemetry.gpuSampleId
                         <<",\"gpu_shadow_ms\":"<<shadowTelemetry.gpuMilliseconds[shadowIndex]
                         <<",\"shadow_vs\":"<<shadowTelemetry.gpuWorkload[shadowIndex].vertices
-                        <<",\"shadow_primitives\":"<<shadowTelemetry.gpuWorkload[shadowIndex].primitives;
+                        <<",\"shadow_primitives\":"<<shadowTelemetry.gpuWorkload[shadowIndex].primitives
+                        <<",\"shadow_ps\":"<<shadowTelemetry.gpuWorkload[shadowIndex].fragments;
                     gpu.WriteOpaqueJson(output); output<<"}\n";
                 }
                 output.flush();
@@ -302,6 +320,8 @@ template<class Renderer> void Benchmark(const std::string& backend,bool foliageO
     }
     auto measure=[&](const std::string& view,const std::string& mode,float lodDistance,unsigned pixelsWide) {
         vertexOnly=mode.find("-vertex-only")!=std::string::npos;
+        alphaPrepass=mode=="leaves-alpha-prepass";
+        prepassShaders.clear();
         const bool simplified=mode=="foliage" || mode=="trees-foliage";
         const bool fullScene=mode=="full" || mode=="foliage";
         for(auto& [material,shaders]:originalShaders) {
@@ -343,6 +363,9 @@ template<class Renderer> void Benchmark(const std::string& backend,bool foliageO
                     if(mode.rfind("leaves",0)==0) enabled=material->doubleSided;
                     if(material->doubleSided && mode=="leaves-unlit") material->unlit=true;
                     if(material->doubleSided && mode=="leaves-solid") material->alphaCutoff=0.f;
+                    if(material->doubleSided && mode.rfind("leaves-alpha-mask",0)==0)
+                        material->shader="Assets/Shaders/Diagnostics/FoliageAlphaMask.hlsl";
+                    if(alphaPrepass && enabled) prepassShaders[material]=material->shader;
                 }
                 mesh->Owner->enabled=enabled;
             }
@@ -373,6 +396,47 @@ template<class Renderer> void Benchmark(const std::string& backend,bool foliageO
                         std::to_string(bool(material->occlusionTexture)));
                 }
         for(int i=0;i<32;++i) render();
+        if(alphaPrepass) {
+            const auto equalDeadline=std::chrono::steady_clock::now()+std::chrono::seconds(60);
+            while(!scene.DiagnosticOpaqueDepthEqualReady()) {
+                Check(std::chrono::steady_clock::now()<equalDeadline,"equal-depth pipeline activation timed out");
+                render();
+            }
+            for(int i=0;i<32;++i) render();
+        }
+        if(mode=="leaves-alpha-mask") {
+            // Prove the asynchronous custom pipeline is active before samples,
+            // rather than timing the full-shader fallback during compilation.
+            const auto readyDeadline=std::chrono::steady_clock::now()+std::chrono::seconds(60);
+            for(;;) {
+                requestCapture=true;
+                for(int i=0;i<3;++i) render();
+                requestCapture=false;
+                std::vector<uint8_t> proof;
+                bool read;
+                read=renderer.ReadSceneCaptureRGBA(proof);
+                size_t white=0,colored=0;
+                for(size_t i=0;i+3<proof.size();i+=4) {
+                    white+=proof[i]>=250 && proof[i+1]>=250 && proof[i+2]>=250;
+                    colored+=std::max({proof[i],proof[i+1],proof[i+2]})-
+                        std::min({proof[i],proof[i+1],proof[i+2]})>10;
+                }
+                for(auto* material:scene.GetComponents<Material>())
+                    if(material->shader=="Assets/Shaders/Diagnostics/FoliageAlphaMask.hlsl" && !material->shaderError.empty())
+                        throw std::runtime_error(material->shaderError);
+                if(read && proof.size()==size_t(width)*height*4 && white>width*height/20) break;
+                if(std::chrono::steady_clock::now()>=readyDeadline) {
+                    std::cerr<<"alpha mask proof read="<<read<<" bytes="<<proof.size()<<" white="<<white<<" colored="<<colored<<std::endl;
+                    if(proof.size()==size_t(width)*height*4) {
+                        std::ofstream failed(outputDirectory/"failed-mask.ppm",std::ios::binary);
+                        failed<<"P6\n"<<width<<' '<<height<<"\n255\n";
+                        for(size_t i=0;i<proof.size();i+=4) failed.write(reinterpret_cast<const char*>(proof.data()+i),3);
+                    }
+                    Check(false,"alpha-mask shader activation timed out");
+                }
+            }
+            for(int i=0;i<32;++i) render();
+        }
         if(mode=="trees" || mode=="bark" || mode=="leaves")
             Check(scene.GetLastRenderCpuTimings().physicalDraws>0,"isolated tree pass is empty");
         uint64_t workloadSamples=0, isolatedVertices=0, isolatedFragments=0;
@@ -433,6 +497,11 @@ template<class Renderer> void Benchmark(const std::string& backend,bool foliageO
                 <<",\"render_other_ms\":"<<r.otherMs
                 <<",\"render_portal_ms\":"<<r.portalMs
                 <<",\"candidate_triangles\":"<<r.candidateTriangles<<",\"draws\":"<<r.physicalDraws
+                <<",\"prepass_draws\":"<<prepassDraws
+                <<",\"total_color_draws\":"<<(r.physicalDraws+prepassDraws)
+                <<",\"alpha_prepass\":"<<(alphaPrepass?"true":"false")
+                <<",\"equal_depth_ready\":"<<(scene.DiagnosticOpaqueDepthEqualReady()?"true":"false")
+                <<",\"full_shadow_refresh\":"<<((materialOnly || canopyDirectory || prepassOnly)?"true":"false")
                 <<",\"instanced_material_slots\":"<<materialSlots
                 <<",\"instanced_materials\":"<<activeMaterials.size()
                 <<",\"shader_paths\":"<<shaderPaths.size()
@@ -465,14 +534,18 @@ template<class Renderer> void Benchmark(const std::string& backend,bool foliageO
         requestCapture=false;
         std::vector<uint8_t> pixels;
         bool captured;
-        if constexpr (std::is_same_v<Renderer,DX11GameRenderer>) captured=renderer.CaptureFrameRGBA(pixels);
-        else captured=renderer.ReadSceneCaptureRGBA(pixels);
+        captured=renderer.ReadSceneCaptureRGBA(pixels);
         Check(captured && pixels.size()==size_t(width)*height*4,"capture failed");
         size_t colored=0;
         for(size_t i=0;i<pixels.size();i+=4)
             colored+=std::max({pixels[i],pixels[i+1],pixels[i+2]})-
                 std::min({pixels[i],pixels[i+1],pixels[i+2]})>10;
-        Check(colored>width*height/20,"capture was blank or missed the forest color pass");
+        if(mode=="leaves-alpha-mask") {
+            size_t white=0;
+            for(size_t i=0;i<pixels.size();i+=4)
+                white+=pixels[i]>=250 && pixels[i+1]>=250 && pixels[i+2]>=250;
+            Check(white>width*height/20,"alpha-mask shader was inactive or capture was empty");
+        } else Check(colored>width*height/20,"capture was blank or missed the forest color pass");
         const auto name=backend+"-"+view+"-"+mode+"-"+std::to_string(int(lodDistance))+"-"+std::to_string(width);
         // Defer file creation until all cases finish. Creating images in a
         // watched project tree can otherwise trigger shader hot reload and
@@ -482,7 +555,17 @@ template<class Renderer> void Benchmark(const std::string& backend,bool foliageO
     };
     // Restore authored objects separately; derived prefab pointers are transient.
     visibility.erase(std::remove_if(visibility.begin(),visibility.end(),[](auto item){return item.first->runtimeOnly;}),visibility.end());
-    if(!foliageOnly && !materialOnly) {
+    if(prepassOnly) {
+        viewer->transform.position=entrance; camera->target=target;
+        for(unsigned resolution:{primaryWidth,primaryWidth/2}) {
+            measure("entrance","leaves-alpha-mask",90,resolution);
+            measure("entrance","leaves-alpha-mask-vertex-only",90,resolution);
+            std::vector<std::string> modes={"leaves","leaves-alpha-prepass"};
+            if(std::getenv("ENGINE_FOREST_AUDIT_REVERSE")) std::reverse(modes.begin(),modes.end());
+            for(const auto& mode:modes) measure("entrance",mode,90,resolution);
+        }
+    }
+    if(!prepassOnly && !foliageOnly && !materialOnly) {
     for(const std::string view:{"entrance","mid","overlook"}) {
         viewer->transform.position=view=="entrance"?entrance:view=="mid"?glm::vec3(-5,3,-65):glm::vec3(-5,27,-39);
         camera->target=view=="entrance"?target:glm::vec3(2,1,5);
@@ -492,14 +575,14 @@ template<class Renderer> void Benchmark(const std::string& backend,bool foliageO
     if(!cpuProfile) for(unsigned resolution:{primaryWidth,primaryWidth/2})
         for(const std::string mode:{"full","trees","terrain","bark","bark-vertex-only","leaves","leaves-vertex-only","leaves-unlit","leaves-solid","leaves-lod1"}) measure("entrance",mode,90,resolution);
     }
-    if(!foliageOnly && !cpuProfile) {
+    if(!prepassOnly && !foliageOnly && !cpuProfile) {
         viewer->transform.position=entrance; camera->target=target;
         std::vector<std::string> modes={"material-reference","material-mips","material-cheap"};
         if(std::getenv("ENGINE_FOREST_AUDIT_REVERSE")) std::reverse(modes.begin(),modes.end());
         for(const auto& mode:modes)
             measure("entrance",mode,90,primaryWidth);
     }
-    if(!cpuProfile && !materialOnly) for(const std::string view:{"entrance","overlook"}) {
+    if(!prepassOnly && !cpuProfile && !materialOnly) for(const std::string view:{"entrance","overlook"}) {
         viewer->transform.position=view=="entrance"?entrance:glm::vec3(-5,27,-39);
         camera->target=view=="entrance"?target:glm::vec3(2,1,5);
         for(const std::string mode:{"foliage","trees-foliage"}) measure(view,mode,55,primaryWidth);

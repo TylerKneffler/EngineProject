@@ -117,7 +117,11 @@ namespace
             material->GetAlphaMode() == Engine::Components::MaterialAlphaMode::Blend)
             return false;
         return material->shader == "Assets/Shaders/Foliage.hlsl" ||
-            material->shader == "Assets/Shaders/GrassFootBend.hlsl";
+            material->shader == "Assets/Shaders/GrassFootBend.hlsl" ||
+            // This opt-in diagnostic includes Object.hlsl's unchanged vertex
+            // path. Keep its batching, instance culling and LOD contract equal
+            // to the reference instead of treating it as an arbitrary shader.
+            material->shader == "Assets/Shaders/Diagnostics/FoliageAlphaMask.hlsl";
     }
 
     bool IsObjectOrDescendant(const Engine::Core::Object* object, const Engine::Core::Object* root)
@@ -1557,7 +1561,8 @@ void Scene::BuildObjectPipeline()
                                      bool terrainFormat,
                                      bool overlay, const std::string& blendMode)
     {
-        if (blendMode == "Opaque") blend = false;
+        const bool diagnosticDepthEqual = blendMode == "DiagnosticDepthEqual";
+        if (blendMode == "Opaque" || diagnosticDepthEqual) blend = false;
         else if (blendMode == "Alpha" || blendMode == "Additive" || overlay) blend = true;
         auto materialBuilder = pipelineFactory->CreateBuilder();
         if (!materialBuilder)
@@ -1623,11 +1628,13 @@ void Scene::BuildObjectPipeline()
 
         auto pipeline = state.SetDepthEnable(true)
             .SetDepthWriteEnable(
+                diagnosticDepthEqual ? false :
                 stencilMode == PortalStencilMode::ResetDepth ? true :
                 stencilMode == PortalStencilMode::Write ||
                 stencilMode == PortalStencilMode::Increment
                     ? false : (!overlay && !blend))
             .SetDepthFunc(
+                diagnosticDepthEqual ? 2 :
                 stencilMode == PortalStencilMode::ResetDepth ? 7 :
                 stencilMode == PortalStencilMode::Write ||
                 stencilMode == PortalStencilMode::Increment
@@ -4192,6 +4199,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         uint64_t occlusionId = 0;
     };
     std::vector<PreparedDraw> preparedDraws;
+    m_diagnosticOpaqueDepthEqualReady = true;
     preparedDraws.reserve(renderObjects.size());
     // All streamed grass tiles share the same foliage asset and a small set
     // of base pipeline variants. Resolve each variant once per view.
@@ -5016,6 +5024,24 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 preparedDraw.surfaceShaderResolved = true;
             }
             else mat->shaderError = entry->second.second;
+        }
+        if(m_diagnosticOpaqueDepthEqual && !shadowOnly && mat &&
+            !preparedDraw.blended && !isPreview && !sprite &&
+            !preparedDraw.terrain && !preparedDraw.terrainCell)
+        {
+            std::string error;
+            if(auto* equal = ResolveMaterialShaderPipeline(
+                ResolveMaterialShaderSource(*mat,mat->shader),
+                materialPipeline,false,false,"DiagnosticDepthEqual",error))
+            {
+                materialPipeline=equal;
+                preparedDraw.surfaceShaderResolved=true;
+            }
+            else
+            {
+                m_diagnosticOpaqueDepthEqualReady=false;
+                if(!error.empty()) throw std::runtime_error(error);
+            }
         }
         preparedDraw.pipeline = materialPipeline;
         preparedDraw.constantBufferOffset = offset;

@@ -44,8 +44,11 @@ def main():
     parser.add_argument('--counters', action='store_true')
     parser.add_argument('--cpu-profile', action='store_true')
     parser.add_argument('--material-only', action='store_true')
+    parser.add_argument('--prepass-only', action='store_true', help='Coverage-matched alpha prepass controls; full shadow refresh')
     parser.add_argument('--reverse', action='store_true', help='Reverse material case order')
     args = parser.parse_args()
+    if args.prepass_only and (args.material_only or args.cpu_profile):
+        parser.error('--prepass-only requires an independent capture')
     directory = args.directory.resolve()
     directory.mkdir(parents=True, exist_ok=True)
     if any(directory.iterdir()):
@@ -59,6 +62,7 @@ def main():
         'ENGINE_GPU_WORKLOAD_COUNTERS': '1' if args.counters else None,
         'ENGINE_FOREST_AUDIT_CPU_PROFILE': '1' if args.cpu_profile else None,
         'ENGINE_FOREST_AUDIT_MATERIAL_ONLY': '1' if args.material_only else None,
+        'ENGINE_FOREST_AUDIT_PREPASS_ONLY': '1' if args.prepass_only else None,
         'ENGINE_FOREST_AUDIT_REVERSE': '1' if args.reverse else None,
     }.items():
         if value is None:
@@ -93,6 +97,7 @@ def main():
         result = subprocess.run(manifest['command'], cwd=ROOT, env=child_environment, check=False)
         manifest['returncode'] = result.returncode
         manifest['recordings_sha256'] = {p.name: sha256(p) for p in directory.glob('*.jsonl')}
+        manifest['captures_sha256'] = {p.name: sha256(p) for p in directory.glob('*.ppm')}
     finally:
         manifest['inputs_unchanged'] = before == content_identity()
         manifest['executable_unchanged'] = manifest['executable_sha256'] == sha256(executable)

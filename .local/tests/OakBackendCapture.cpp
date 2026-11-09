@@ -771,7 +771,7 @@ template<class Renderer> void CaptureOak(const std::string& backend)
             }
         };
         for(auto* layer:scene.GetComponents<TerrainObjectLayer>())
-            if(layer->layerName=="Oak forest") ConfigureCanopy(*layer,canopyRoot,false);
+            if(layer->layerName=="Oak forest") ConfigureCanopy(*layer,canopyRoot,false,&report);
         capture("warmup",90); refreshGrass=false;
         sequence("baseline");
         unsigned replaced=0;

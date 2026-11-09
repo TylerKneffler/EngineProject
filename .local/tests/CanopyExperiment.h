@@ -3,11 +3,12 @@
 #include "Core/Compoonents/Obj/TerrainObjectLayer.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include <filesystem>
+#include <cstdlib>
 #include <ostream>
 #include <stdexcept>
 
-// Test-only substitution. Always restore explicit original sources for a baseline,
-// even after the accepted scene starts referencing the optimized canopy.
+// Test-only substitution. Historical studies retain the explicit original LOD1
+// baseline; follow-up asset studies can opt into the installed canopy baseline.
 inline unsigned ConfigureCanopy(Engine::Components::TerrainObjectLayer& layer,
     const std::filesystem::path& directory, bool candidate, std::ostream* report=nullptr)
 {
@@ -18,8 +19,10 @@ inline unsigned ConfigureCanopy(Engine::Components::TerrainObjectLayer& layer,
         const std::string name="Large_oak_tree_00"+std::to_string(variety);
         if(asset.find(name+"_LOD0.prefab")==std::string::npos) continue;
         if(chain.meshes.size()!=3) throw std::runtime_error("Expected three canopy bands");
+        const bool installedBaseline=std::getenv("ENGINE_OAK_CANOPY_INSTALLED_BASELINE")!=nullptr;
         const auto path=candidate ? directory/name/(name+"_CanopyCandidate.prefab") :
-            std::filesystem::path("Engine/Core/Assets/Prefabs/Woodland/Oaks")/(name+"_LOD1.prefab");
+            std::filesystem::path("Engine/Core/Assets/Prefabs/Woodland/Oaks")/
+                (name+(installedBaseline ? "_Canopy.prefab":"_LOD1.prefab"));
         if(candidate && !std::filesystem::exists(path)) continue;
         Engine::Scene::Scene validation;
         auto* root=Engine::Serialization::SceneSerializer::InstantiatePrefab(validation,path.generic_string(),nullptr);
@@ -32,7 +35,8 @@ inline unsigned ConfigureCanopy(Engine::Components::TerrainObjectLayer& layer,
             if(mesh->GetVertices().empty()) throw std::runtime_error("Empty canopy geometry");
             triangles+=(mesh->GetIndices().empty()?mesh->GetVertices().size():mesh->GetIndices().size())/3;
         }
-        if(report) *report<<name<<" validatedCandidateTriangles="<<triangles<<'\n';
+        if(report) *report<<name<<" variant="<<(candidate?"candidate":"baseline")
+            <<" prefab="<<path.generic_string()<<" validatedCandidateTriangles="<<triangles<<'\n';
         chain.meshes[1]=path.generic_string(); ++replaced;
     }
     layer.MarkConfigurationDirty();

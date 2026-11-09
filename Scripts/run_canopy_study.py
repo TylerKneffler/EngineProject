@@ -16,7 +16,28 @@ def candidate_identity(root):
     return {str(p.relative_to(ROOT)):sha256(p) for pattern in ('*/*.mesh','*/*.prefab') for p in root.glob(pattern)}
 
 
+def validate_installed_baseline_log(text):
+    for variety in range(1,5):
+        name=f'Large_oak_tree_{variety:03}'
+        expected=f'{name} variant=baseline prefab=Engine/Core/Assets/Prefabs/Woodland/Oaks/{name}_Canopy.prefab '
+        if expected not in text:
+            raise ValueError('Missing installed baseline evidence for '+name)
+
+
 def summarize(directory):
+    provenance=directory/'timing-provenance.json'
+    if provenance.exists():
+        manifest=json.loads(provenance.read_text())
+        if manifest.get('baseline')=='installed':
+            if not all(manifest.get(k) for k in ('complete','inputs_unchanged','candidates_unchanged','runtime_unchanged')):
+                raise ValueError('Incomplete installed-baseline timing provenance')
+            recordings=manifest.get('timing_recordings_sha256')
+            if not recordings or set(recordings)!={p.relative_to(directory).as_posix() for p in (directory/'timings').rglob('*.jsonl')}:
+                raise ValueError('Missing timing recording identities')
+            for name,digest in recordings.items():
+                path=(directory/name).resolve()
+                path.relative_to(directory.resolve())
+                if sha256(path)!=digest: raise ValueError('Timing recording changed after capture')
     summaries=[]
     for backend in ('dx11','dx12','vulkan'):
         runs=[]
@@ -46,7 +67,9 @@ def summarize(directory):
                 for variant,samples in zip(('baseline','candidate'),valid):
                     fields=('gpu_tree_bark_ms','gpu_tree_leaves_ms','gpu_shadow_ms',
                             'gpu_tree_bark_vs_invocations','gpu_tree_leaves_vs_invocations',
-                            'gpu_tree_bark_primitives','gpu_tree_leaves_primitives','shadow_vs','shadow_primitives')
+                            'gpu_tree_bark_primitives','gpu_tree_leaves_primitives','shadow_vs','shadow_primitives',
+                            'gpu_tree_bark_ps_invocations','gpu_tree_leaves_ps_invocations')
+                    if all('shadow_ps' in r for rows in valid for r in rows): fields+=('shadow_ps',)
                     entry[variant]={key:statistics.mean(r[key] for r in samples) for key in fields}
                     entry[variant]['samples']=len(samples)
                     entry[variant]['tree_shadow_ms']=sum(entry[variant][key] for key in fields[:3])
@@ -71,6 +94,8 @@ def main():
     parser.add_argument('--quality-only',action='store_true')
     parser.add_argument('--timing-only',action='store_true')
     parser.add_argument('--study-output',type=Path,help='Use a fresh frozen runtime/evidence directory')
+    parser.add_argument('--baseline',choices=('original','installed'),default='original')
+    parser.add_argument('--runtime-source',type=Path,default=ROOT/'build/Release')
     args=parser.parse_args()
     candidate=args.candidate.resolve()
     if not all((candidate/f'Large_oak_tree_{i:03}'/f'Large_oak_tree_{i:03}_CanopyCandidate.prefab').exists() for i in range(1,5)):
@@ -80,21 +105,25 @@ def main():
     runtime=directory/'runtime/Release'; runtime.mkdir(parents=True,exist_ok=True)
     # Never recopy into an existing frozen runtime during a resumed suite.
     if not (runtime/'ForestPerformanceAudit.exe').exists():
-        source=ROOT/'build/Release'
+        source=args.runtime_source.resolve()
         for path in [*source.glob('*.dll'),source/'ForestPerformanceAudit.exe',source/'TerrainPrefabAndOakTests.exe']:
             shutil.copy2(path,runtime/path.name)
     before=content_identity(); candidates=candidate_identity(candidate)
     manifest=dict(inputs_sha256=identity_digest(before),inputs=before,candidates=candidates,
+                  baseline=args.baseline,
                   runtime={p.name:sha256(p) for p in runtime.iterdir() if p.is_file()},
                   platform=dict(node=platform.node(),system=platform.platform()),complete=False)
     manifest_path=directory/('quality-provenance.json' if args.quality_only else 'timing-provenance.json')
     manifest_path.write_text(json.dumps(manifest,indent=2)+'\n')
     clean={k:v for k,v in os.environ.items() if not k.startswith(('ENGINE_','VK_','DX','D3D'))}
+    if args.baseline=='installed': clean['ENGINE_OAK_CANOPY_INSTALLED_BASELINE']='1'
     for backend in args.backends:
         if not args.timing_only:
             env=dict(clean,ENGINE_OAK_CANOPY_ROOT=str(candidate),ENGINE_OAK_DX12_VALIDATION='1')
             with (directory/(backend+'-quality.log')).open('w') as log:
                 subprocess.run([str(runtime/'TerrainPrefabAndOakTests.exe'),backend],cwd=ROOT,env=env,stdout=log,stderr=subprocess.STDOUT,check=True)
+            if args.baseline=='installed':
+                validate_installed_baseline_log((candidate/'renderer'/backend/'1'/(backend+'.log')).read_text())
             print(backend+' quality complete',flush=True)
         if not args.quality_only:
             for index in range(3):
@@ -105,10 +134,13 @@ def main():
                 if index%2: env['ENGINE_FOREST_AUDIT_REVERSE']='1'
                 with (output/'process.log').open('w') as log:
                     subprocess.run([str(runtime/'ForestPerformanceAudit.exe'),backend],cwd=ROOT,env=env,stdout=log,stderr=subprocess.STDOUT,check=True)
+                if args.baseline=='installed': validate_installed_baseline_log((output/'process.log').read_text())
                 print(f'{backend} paired timing {index+1}/3 complete',flush=True)
     manifest['inputs_unchanged']=before==content_identity()
     manifest['candidates_unchanged']=candidates==candidate_identity(candidate)
     manifest['runtime_unchanged']=manifest['runtime']=={p.name:sha256(p) for p in runtime.iterdir() if p.is_file()}
+    manifest['quality_images_sha256']={str(p.relative_to(candidate)):sha256(p) for p in sorted((candidate/'renderer').rglob('*.ppm'))}
+    manifest['timing_recordings_sha256']={p.relative_to(directory).as_posix():sha256(p) for p in sorted((directory/'timings').rglob('*.jsonl'))}
     manifest['complete']=True
     manifest_path.write_text(json.dumps(manifest,indent=2)+'\n')
     if not all(manifest[key] for key in ('inputs_unchanged','candidates_unchanged','runtime_unchanged')):

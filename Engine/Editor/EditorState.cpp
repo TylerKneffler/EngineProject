@@ -4,6 +4,7 @@
 #include "Core/SceneManager.h"
 #include "Core/Rendering/RenderJobs.h"
 #include "Engine/Editor/CodeEditorLink.h"
+#include "Engine/Editor/Startup/EditorSceneSession.h"
 #include "Core/View/ViewFactory.h"
 #include "Core/View/IEditorPanel.h"
 #include "Core/View/View.h"
@@ -543,6 +544,7 @@ bool EditorState::PollSceneSave()
     if (result.succeeded)
     {
         m_currentScenePath = NormalizeAssetPath(result.path);
+        RememberLastScene(m_projectFilePath, m_currentScenePath);
         m_savedSceneSnapshot = std::move(result.snapshot);
         m_savedSceneRevision = result.revision;
         m_hasUnsavedChanges = result.revision != m_sceneEditRevision;
@@ -2510,14 +2512,14 @@ void EditorState::LoadScene(const std::string& path)
     RequestSceneLoad(path);
 }
 
-void EditorState::LoadStartupScene(const std::string& path)
+void EditorState::LoadStartupScene(const std::string& path, bool rememberScene)
 {
     try
     {
         auto parsed = Engine::Rendering::RenderJobs::Get().Submit([path] {
             return Engine::Serialization::SceneSerializer::ReadSceneFile(path);
         }).get();
-        LoadSceneNow(path, &parsed);
+        LoadSceneNow(path, &parsed, rememberScene);
     }
     catch (const std::exception& error)
     {
@@ -2604,7 +2606,7 @@ void EditorState::CancelSceneLoad()
 }
 
 void EditorState::LoadSceneNow(const std::string& path,
-    const Engine::Serialization::JsonValue* parsed)
+    const Engine::Serialization::JsonValue* parsed, bool rememberScene)
 {
     FrameActivity::Mark(FrameActivity::Load);
 
@@ -2652,6 +2654,7 @@ void EditorState::LoadSceneNow(const std::string& path,
                     m_scene->settings.portalDebugVisuals);
             m_hasUnsavedChanges = false;
             m_currentScenePath = NormalizeAssetPath(resolvedPath);
+            if (rememberScene) RememberLastScene(m_projectFilePath, m_currentScenePath);
             RefreshSceneDocumentTitle();
             ResetHistory(true);
             if (OnSceneLoadConfirmed)
