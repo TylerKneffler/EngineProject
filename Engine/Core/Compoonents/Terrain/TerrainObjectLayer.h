@@ -54,6 +54,11 @@ public:
     // Prefab shadows fade within the final metres of shadowDistance.
     // GrassField tiles retain their own distanceFadeWidth control.
     float shadowFadeWidth = 1.f;
+    // Runtime spatial span used for generated prefab instance groups.
+    // Zero retains the engine default. Not serialized; benchmark-only override.
+    static float prefabInstanceGroupSpanMeters;
+    static void SetPrefabInstanceGroupSpanForBenchmark(float span);
+    void RebuildPrefabInstancesForBenchmark();
     float GetShadowFadeWidth() const;
     // -1 follows distance bands; 0..2 pins the prefab shadow proxy only.
     int shadowLod = -1;

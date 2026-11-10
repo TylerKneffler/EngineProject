@@ -77,6 +77,7 @@ class DX12GameRenderer : public IGameRenderer
 {
 public:
     DX12GameRenderer() = default;
+    explicit DX12GameRenderer(std::string graphicsDevice) : m_graphicsDevice(std::move(graphicsDevice)) {}
     ~DX12GameRenderer();
 
     // IRenderer interface
@@ -135,6 +136,7 @@ private:
     ComPtr<ID3D12Resource>            m_captureReadback;
     uint32_t m_captureRowPitch = 0;
     bool m_captureRequested = false;
+    std::string m_graphicsDevice = "Auto";
     ComPtr<IDXGIFactory6>             m_factory;
     ComPtr<IDXGISwapChain3>           m_swapChain;
 

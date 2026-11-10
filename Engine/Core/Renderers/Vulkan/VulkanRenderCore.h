@@ -12,7 +12,8 @@ public:
     static VkRenderPass CreateRenderPassForDevice(VkDevice device, VkFormat colorFormat,
         bool depth, VkImageLayout finalLayout, bool load = false);
     ~VulkanRenderCore();
-    bool Init(HWND hwnd, uint32_t width, uint32_t height, bool mainDepth);
+    bool Init(HWND hwnd, uint32_t width, uint32_t height, bool mainDepth,
+        const std::string& graphicsDevice = "Auto");
     void Resize(uint32_t width, uint32_t height);
     VkCommandBuffer BeginFrame();
     void EndFrame();
@@ -52,6 +53,7 @@ private:
     uint32_t m_requestedWidth = 0;
     uint32_t m_requestedHeight = 0;
     bool m_mainDepth = false;
+    std::string m_graphicsDevice = "Auto";
     bool m_pipelineStatisticsEnabled = false;
     bool m_resizePending = false;
     VkInstance m_instance = VK_NULL_HANDLE;

@@ -84,6 +84,11 @@ public:
     PROPERTY(Inspector, EditAnywhere, Category = "Material | Subsurface", Range = "0.0, 1.0")
     float subsurfaceTransmission { 0.f };
 
+    // Fractional coverage for masked foliage. The renderer uses stable
+    // stochastic coverage instead of alpha blending and transparent sorting.
+    PROPERTY(Inspector, EditAnywhere, Category = "Material | Alpha", Range = "0.0, 1.0")
+    float alphaCoverageTransmission { 0.f };
+
     PROPERTY(Inspector, EditAnywhere, Category = "Material | PBR", Range = "0.0, 4.0")
     float     environmentDiffuseStrength { 1.f };
 

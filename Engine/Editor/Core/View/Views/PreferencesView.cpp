@@ -984,6 +984,36 @@ void PreferencesView::DrawRenderingSection(IEditorUi& ui)
     if (DrawRendererCombo(ui, "Game Rendering API", m_settings.gameRenderingAPI))
         NotifyChanged();
 
+    const std::vector<std::string> graphicsDevices =
+        ::Engine::Renderers::RendererFactory::GetGraphicsDevices();
+    std::vector<const char*> graphicsDeviceLabels;
+    graphicsDeviceLabels.reserve(graphicsDevices.size());
+    int selectedGraphicsDevice = 0;
+    bool selectedGraphicsDeviceAvailable = m_settings.graphicsDevice.empty() ||
+        m_settings.graphicsDevice == "Auto";
+    for (size_t index = 0; index < graphicsDevices.size(); ++index)
+    {
+        graphicsDeviceLabels.push_back(graphicsDevices[index].c_str());
+        if (graphicsDevices[index] == m_settings.graphicsDevice)
+        {
+            selectedGraphicsDevice = static_cast<int>(index);
+            selectedGraphicsDeviceAvailable = true;
+        }
+    }
+    if (!selectedGraphicsDeviceAvailable)
+        ui.DisabledLabel(("Saved graphics device is unavailable; using Auto: " +
+            m_settings.graphicsDevice).c_str());
+    if (ui.Combo("Graphics Device", &selectedGraphicsDevice, graphicsDeviceLabels.data(),
+        static_cast<int>(graphicsDeviceLabels.size())))
+    {
+        if (selectedGraphicsDevice >= 0 && selectedGraphicsDevice < static_cast<int>(graphicsDevices.size()))
+        {
+            m_settings.graphicsDevice = graphicsDevices[static_cast<size_t>(selectedGraphicsDevice)];
+            NotifyChanged();
+        }
+    }
+    ui.Tooltip("Auto lets the graphics API choose. A named device selects that GPU for the editor and game; restart to apply.");
+
     for (const auto& option : ::Engine::Renderers::RendererFactory::GetRendererOptions())
     {
         if (!option.available)
@@ -1389,6 +1419,12 @@ bool PreferencesView::SaveSettings()
             auto gameRenderingApi = prop.child("GameRenderingAPI");
             if (gameRenderingApi)
                 gameRenderingApi.text().set(m_settings.gameRenderingAPI.c_str());
+
+            auto graphicsDevice = prop.child("GraphicsDevice");
+            if (graphicsDevice)
+                graphicsDevice.text().set(m_settings.graphicsDevice.c_str());
+            else if (defaultSceneNode)
+                prop.append_child("GraphicsDevice").text().set(m_settings.graphicsDevice.c_str());
 
 
             auto hierarchyDebug = prop.child("DebugHierarchyInteractions");

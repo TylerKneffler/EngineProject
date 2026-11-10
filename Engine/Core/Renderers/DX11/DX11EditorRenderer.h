@@ -12,6 +12,8 @@ namespace Engine::Renderers
 class DX11EditorRenderer : public IEditorRenderer
 {
 public:
+    explicit DX11EditorRenderer(std::string graphicsDevice = "Auto")
+        : m_graphicsDevice(std::move(graphicsDevice)) {}
     ~DX11EditorRenderer() override;
     bool Init(void* hwnd, uint32_t width, uint32_t height) override;
     void Resize(uint32_t width, uint32_t height) override;
@@ -48,6 +50,7 @@ public:
     void SetGpuTimingEnabled(bool enabled) { m_gpuTimingEnabled = enabled; }
 
 private:
+    std::string m_graphicsDevice = "Auto";
     void CreateRenderTarget();
 
     Microsoft::WRL::ComPtr<ID3D11Device> m_device;

@@ -24,6 +24,8 @@ public:
     PROPERTY(Inspector, EditAnywhere, Category = "Terrain Performance")
     std::string heightArchive =
         "Assets/TerrainData/TerrainPerformance/world.heights";
+    PROPERTY(Inspector, EditAnywhere, Category = "Terrain Performance")
+    bool mountainTerrain = false;
     // Saved with the authored map so play mode can load baked cells without
     // shipping the source height archive.
     PROPERTY(Inspector, EditAnywhere, Category = "Terrain Performance")
@@ -56,7 +58,8 @@ private:
     static FarGridLoad LoadFarGridData(const std::string& path,
         const std::string& archivePath, const std::string& editDirectory,
         const std::vector<std::pair<int, int>>& editedCells,
-        uint64_t signature, int extent, int cellsX, int cellsY);
+        uint64_t signature, int extent, int cellsX, int cellsY,
+        bool mountain);
     std::future<FarGridLoad> m_farLoad;
     float m_reportElapsed = 0.f;
     size_t m_peakLoaded = 0;

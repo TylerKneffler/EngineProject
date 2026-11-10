@@ -1,3 +1,0 @@
-C:/Users/tyler/source/repos/EngineProject/cmake-check/_deps/dxc_spirv-subbuild/CMakeFiles/dxc_spirv-populate.dir
-C:/Users/tyler/source/repos/EngineProject/cmake-check/_deps/dxc_spirv-subbuild/CMakeFiles/ALL_BUILD.dir
-C:/Users/tyler/source/repos/EngineProject/cmake-check/_deps/dxc_spirv-subbuild/CMakeFiles/ZERO_CHECK.dir

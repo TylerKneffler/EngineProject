@@ -374,6 +374,7 @@ void DX12EditorRenderer::CreateDevice()
         IID_PPV_ARGS(&m_factory)));
 
     ComPtr<IDXGIAdapter1> adapter;
+    bool selectedDeviceFound = m_graphicsDevice.empty() || m_graphicsDevice == "Auto";
     for (uint32_t i = 0;
          m_factory->EnumAdapterByGpuPreference(i,
              DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE,
@@ -383,6 +384,18 @@ void DX12EditorRenderer::CreateDevice()
         DXGI_ADAPTER_DESC1 desc;
         adapter->GetDesc1(&desc);
         if (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) continue;
+        if (!selectedDeviceFound)
+        {
+            const int selectedLength = MultiByteToWideChar(CP_UTF8, 0, m_graphicsDevice.c_str(), -1,
+                nullptr, 0);
+            std::wstring selectedName(static_cast<size_t>(selectedLength > 0 ? selectedLength : 1), L'\0');
+            if (selectedLength > 0)
+                MultiByteToWideChar(CP_UTF8, 0, m_graphicsDevice.c_str(), -1,
+                    selectedName.data(), selectedLength);
+            if (!selectedName.empty() && selectedName.back() == L'\0') selectedName.pop_back();
+            if (desc.Description != selectedName) continue;
+            selectedDeviceFound = true;
+        }
 
         if (SUCCEEDED(D3D12CreateDevice(adapter.Get(),
                 D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&m_device))))
@@ -395,7 +408,9 @@ void DX12EditorRenderer::CreateDevice()
     }
 
     if (!m_device)
-        throw std::runtime_error("No D3D12-capable hardware adapter found.");
+        throw std::runtime_error(selectedDeviceFound
+            ? "No D3D12-capable hardware adapter found."
+            : "Selected graphics device is no longer available: " + m_graphicsDevice);
 }
 
 // ---------------------------------------------------------------------------

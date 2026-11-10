@@ -16,6 +16,8 @@ namespace Engine::Renderers
 class DX11GameRenderer : public IGameRenderer
 {
 public:
+    explicit DX11GameRenderer(std::string graphicsDevice = "Auto")
+        : m_graphicsDevice(std::move(graphicsDevice)) {}
     ~DX11GameRenderer() override;
     bool Init(void* hwnd, uint32_t width, uint32_t height) override;
     void Resize(uint32_t width, uint32_t height) override;
@@ -56,6 +58,7 @@ public:
     size_t GetExportReadbackCapacity() const { return m_exportReadbacks.size(); }
 
 private:
+    std::string m_graphicsDevice = "Auto";
     void CreateTargets();
     void SignalFrameCompletion();
     Microsoft::WRL::ComPtr<ID3D11Device> m_device;

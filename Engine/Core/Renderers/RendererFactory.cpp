@@ -10,6 +10,7 @@
 #include <volk.h>
 #endif
 #include "Core/ProjectLoader.h"
+#include <dxgi1_6.h>
 
 
 namespace Engine::Renderers
@@ -127,15 +128,15 @@ std::unique_ptr<IEditorRenderer> RendererFactory::CreateEditorRenderer(
 
     if (api == "directx12" || api == "directx" || api == "dx12" || api == "d3d12")
     {
-        return std::make_unique<DX12EditorRenderer>();
+        return std::make_unique<DX12EditorRenderer>(settings.graphicsDevice);
     }
     if (api == "directx11" || api == "dx11" || api == "d3d11")
     {
-        return std::make_unique<DX11EditorRenderer>();
+        return std::make_unique<DX11EditorRenderer>(settings.graphicsDevice);
     }
 #if defined(ENGINE_VULKAN_ENABLED)
     if (api == "vulkan" || api == "vk")
-        return std::make_unique<VulkanEditorRenderer>();
+        return std::make_unique<VulkanEditorRenderer>(settings.graphicsDevice);
 #endif
     
     throw std::runtime_error(
@@ -156,15 +157,15 @@ std::unique_ptr<IGameRenderer> RendererFactory::CreateGameRenderer(
 
     if (api == "directx12" || api == "directx" || api == "dx12" || api == "d3d12")
     {
-        return std::make_unique<DX12GameRenderer>();
+        return std::make_unique<DX12GameRenderer>(settings.graphicsDevice);
     }
     if (api == "directx11" || api == "dx11" || api == "d3d11")
     {
-        return std::make_unique<DX11GameRenderer>();
+        return std::make_unique<DX11GameRenderer>(settings.graphicsDevice);
     }
 #if defined(ENGINE_VULKAN_ENABLED)
     if (api == "vulkan" || api == "vk")
-        return std::make_unique<VulkanGameRenderer>();
+        return std::make_unique<VulkanGameRenderer>(settings.graphicsDevice);
 #endif
     
     throw std::runtime_error(
@@ -209,5 +210,41 @@ bool RendererFactory::IsRendererAvailable(const std::string& api, std::string* r
     }
     if (reason) *reason = "This renderer is not included in the current engine build.";
     return false;
+}
+
+std::vector<std::string> RendererFactory::GetGraphicsDevices()
+{
+    std::vector<std::string> devices{"Auto"};
+    Microsoft::WRL::ComPtr<IDXGIFactory1> factory;
+    if (FAILED(CreateDXGIFactory1(IID_PPV_ARGS(&factory))))
+        return devices;
+
+    Microsoft::WRL::ComPtr<IDXGIAdapter1> adapter;
+    for (UINT index = 0; factory->EnumAdapters1(index, &adapter) != DXGI_ERROR_NOT_FOUND; ++index)
+    {
+        DXGI_ADAPTER_DESC1 description{};
+        if (SUCCEEDED(adapter->GetDesc1(&description)) &&
+            !(description.Flags & DXGI_ADAPTER_FLAG_SOFTWARE))
+        {
+            std::wstring wide(description.Description);
+            std::string name;
+            if (!wide.empty())
+            {
+                const int count = WideCharToMultiByte(CP_UTF8, 0, wide.c_str(), -1,
+                    nullptr, 0, nullptr, nullptr);
+                if (count > 1)
+                {
+                    name.resize(static_cast<size_t>(count));
+                    WideCharToMultiByte(CP_UTF8, 0, wide.c_str(), -1,
+                        name.data(), count, nullptr, nullptr);
+                    name.pop_back();
+                }
+            }
+            if (!name.empty() && std::find(devices.begin(), devices.end(), name) == devices.end())
+                devices.push_back(std::move(name));
+        }
+        adapter.Reset();
+    }
+    return devices;
 }
 }

@@ -11,6 +11,8 @@ namespace Engine::Renderers
 class VulkanGameRenderer : public IGameRenderer
 {
 public:
+    explicit VulkanGameRenderer(std::string graphicsDevice = "Auto")
+        : m_graphicsDevice(std::move(graphicsDevice)) {}
     ~VulkanGameRenderer() override;
     bool Init(void* hwnd, uint32_t width, uint32_t height) override;
     void Resize(uint32_t width, uint32_t height) override;
@@ -36,6 +38,7 @@ public:
     Engine::Graphics::FrameTimingTelemetry GetFrameTimingTelemetry() const override
     { return m_frameTelemetry; }
 private:
+    std::string m_graphicsDevice = "Auto";
     void RecordSceneCapture();
     void DestroySceneCapture();
     void BeginMainRenderPass(const float color[4]);

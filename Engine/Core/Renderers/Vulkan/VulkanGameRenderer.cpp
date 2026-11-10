@@ -18,7 +18,7 @@ VulkanGameRenderer::~VulkanGameRenderer()
 bool VulkanGameRenderer::Init(void* hwnd, uint32_t width, uint32_t height)
 {
     m_width = width; m_height = height;
-    if (!m_core.Init(static_cast<HWND>(hwnd), width, height, true)) return false;
+    if (!m_core.Init(static_cast<HWND>(hwnd), width, height, true, m_graphicsDevice)) return false;
     m_provider = std::make_unique<VulkanGraphicsProvider>(
         m_core.GetPhysicalDevice(), m_core.GetDevice(), m_core.GetOffscreenRenderPass(),
         m_core.GetQueue(), m_core.GetQueueFamily(), m_core.PipelineStatisticsEnabled());

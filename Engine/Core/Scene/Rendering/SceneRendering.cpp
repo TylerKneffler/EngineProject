@@ -891,6 +891,10 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 preparedDraw.objectData.textureLodParams=glm::vec4(0.f);
                 preparedDraw.objectData.alphaLodParams=glm::vec4(0.f);
             }
+            if (mat && mat->GetAlphaMode() ==
+                Engine::Components::MaterialAlphaMode::Mask)
+                preparedDraw.objectData.alphaLodParams.z =
+                    std::clamp(mat->alphaCoverageTransmission, 0.f, 1.f);
             preparedDraw.objectData.world = world;
             preparedDraw.objectData.viewProjection = proj * view;
             preparedDraw.objectData.traversalClipPlane =
@@ -1146,6 +1150,9 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         // static objects and material-less meshes without rebuilding their assets.
         objectData.alphaLodParams = mat && mat->overrideTextureLod
             ? settings.graphicsQuality.ResolveTexture(mat->textureLod).AlphaGpuParameters() : settings.graphicsQuality.ResolveTexture(settings.textureLod).AlphaGpuParameters();
+        if (alphaMode == Engine::Components::MaterialAlphaMode::Mask && mat)
+            objectData.alphaLodParams.z =
+                std::clamp(mat->alphaCoverageTransmission, 0.f, 1.f);
         objectData.textureLodParams = mat && mat->overrideTextureLod
             ? settings.graphicsQuality.ResolveTexture(mat->textureLod).GpuParameters() : settings.graphicsQuality.ResolveTexture(settings.textureLod).GpuParameters();
         bool terrainShadowDoubleSided = doubleSided;

@@ -216,6 +216,10 @@ void ProjectLoader::ParseRendering(const pugi::xml_node& projectNode, ProjectSet
         if (gameApi)
             settings.gameRenderingAPI = gameApi.child_value();
 
+        auto graphicsDevice = prop.child("GraphicsDevice");
+        if (graphicsDevice)
+            settings.graphicsDevice = graphicsDevice.child_value();
+
         auto r = prop.child("ClearColorR");
         if (r)
             settings.clearColor.r = std::stof(r.child_value());

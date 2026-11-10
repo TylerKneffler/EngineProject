@@ -50,7 +50,8 @@ namespace Engine::Renderers
 class DX12EditorRenderer : public IEditorRenderer
 {
 public:
-    DX12EditorRenderer() = default;
+    explicit DX12EditorRenderer(std::string graphicsDevice = "Auto")
+        : m_graphicsDevice(std::move(graphicsDevice)) {}
     ~DX12EditorRenderer();
 
     // IRenderer interface
@@ -161,6 +162,7 @@ private:
     // Initialized true so the very first call to RenderIfNeeded always draws.
     uint64_t m_submittedFrameCount = 0;
     bool m_dirty = true;
+    std::string m_graphicsDevice = "Auto";
     bool m_tearingSupported = false;
 
     // Graphics provider for shader compilation, buffer creation, pipeline building

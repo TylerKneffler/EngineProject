@@ -40,6 +40,9 @@ struct ProjectSettings
     std::string renderingAPI;
     std::string editorRenderingAPI;
     std::string gameRenderingAPI;
+    // "Auto" lets the graphics API choose its preferred adapter. A named
+    // adapter selects that device when it is available on this machine.
+    std::string graphicsDevice = "Auto";
     glm::vec4 clearColor;
     uint32_t targetFramerate = 60; // Default video export frame rate.
     uint32_t editorMaxFps = 0;    // 0 means unlimited.

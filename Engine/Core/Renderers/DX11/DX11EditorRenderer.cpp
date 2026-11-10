@@ -41,30 +41,55 @@ bool DX11EditorRenderer::Init(void* hwndHandle, uint32_t width, uint32_t height)
 #if defined(_DEBUG)
         flags |= D3D11_CREATE_DEVICE_DEBUG;
 #endif
-        HRESULT hr = D3D11CreateDeviceAndSwapChain(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr,
-            flags, levels, ARRAYSIZE(levels), D3D11_SDK_VERSION, &swap, &m_swapChain,
-            &m_device, &selected, &m_context);
+        Microsoft::WRL::ComPtr<IDXGIFactory1> dxgiFactory;
+        Microsoft::WRL::ComPtr<IDXGIAdapter1> selectedAdapter;
+        Microsoft::WRL::ComPtr<IDXGIAdapter1> adapter;
+        if (!m_graphicsDevice.empty() && m_graphicsDevice != "Auto" &&
+            SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&dxgiFactory))))
+        {
+            for (UINT index = 0; dxgiFactory->EnumAdapters1(index, &adapter) != DXGI_ERROR_NOT_FOUND; ++index)
+            {
+                DXGI_ADAPTER_DESC1 desc{};
+                adapter->GetDesc1(&desc);
+                const int nameLength = MultiByteToWideChar(CP_UTF8, 0, m_graphicsDevice.c_str(), -1,
+                    nullptr, 0);
+                std::wstring name(static_cast<size_t>(nameLength > 0 ? nameLength : 1), L'\0');
+                if (nameLength > 0)
+                    MultiByteToWideChar(CP_UTF8, 0, m_graphicsDevice.c_str(), -1,
+                        name.data(), nameLength);
+                if (!name.empty() && name.back() == L'\0') name.pop_back();
+                if (!(desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) && desc.Description == name)
+                { selectedAdapter = adapter; break; }
+                adapter.Reset();
+            }
+            if (!selectedAdapter)
+                throw std::runtime_error("Selected graphics device is no longer available: " + m_graphicsDevice);
+        }
+        const auto createDevice = [&](UINT deviceFlags, const D3D_FEATURE_LEVEL* requestedLevels,
+            UINT levelCount) -> HRESULT
+        {
+            if (selectedAdapter)
+                return D3D11CreateDeviceAndSwapChain(selectedAdapter.Get(), D3D_DRIVER_TYPE_UNKNOWN, nullptr,
+                    deviceFlags, requestedLevels, levelCount, D3D11_SDK_VERSION, &swap, &m_swapChain,
+                    &m_device, &selected, &m_context);
+            return D3D11CreateDeviceAndSwapChain(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr,
+                deviceFlags, requestedLevels, levelCount, D3D11_SDK_VERSION, &swap, &m_swapChain,
+                &m_device, &selected, &m_context);
+        };
+        HRESULT hr = createDevice(flags, levels, ARRAYSIZE(levels));
 #if defined(_DEBUG)
         if (hr == DXGI_ERROR_SDK_COMPONENT_MISSING)
-            hr = D3D11CreateDeviceAndSwapChain(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr,
-                D3D11_CREATE_DEVICE_BGRA_SUPPORT, levels, ARRAYSIZE(levels), D3D11_SDK_VERSION,
-                &swap, &m_swapChain, &m_device, &selected, &m_context);
+            hr = createDevice(D3D11_CREATE_DEVICE_BGRA_SUPPORT, levels, ARRAYSIZE(levels));
 #endif
         if (hr == E_INVALIDARG)
-            hr = D3D11CreateDeviceAndSwapChain(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr,
-                flags & ~D3D11_CREATE_DEVICE_DEBUG, levels + 1, 1, D3D11_SDK_VERSION,
-                &swap, &m_swapChain, &m_device, &selected, &m_context);
+            hr = createDevice(flags & ~D3D11_CREATE_DEVICE_DEBUG, levels + 1, 1);
         if (FAILED(hr))
         {
             m_swapChain.Reset(); m_context.Reset(); m_device.Reset();
             swap.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
             swap.Flags = 0;
             m_allowTearing = false;
-            hr = D3D11CreateDeviceAndSwapChain(nullptr,
-                D3D_DRIVER_TYPE_HARDWARE, nullptr,
-                flags & ~D3D11_CREATE_DEVICE_DEBUG, levels + 1, 1,
-                D3D11_SDK_VERSION, &swap, &m_swapChain, &m_device,
-                &selected, &m_context);
+            hr = createDevice(flags & ~D3D11_CREATE_DEVICE_DEBUG, levels + 1, 1);
         }
         ThrowIfFailed(hr);
         m_swapChainFlags = swap.Flags;

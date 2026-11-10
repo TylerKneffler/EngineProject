@@ -2562,6 +2562,10 @@ if(NOT ENGINE_PROJECT_DIR AND WIN32 AND
     target_include_directories(OakBackendCapture PRIVATE
         "${ENGINE_ROOT}/Engine" "${ENGINE_ROOT}/Engine/Core/Assets")
     add_test(NAME TerrainSharedPrefabs COMMAND OakBackendCapture shared-prefabs)
+    add_test(NAME OakClusterBenchmark_dx11 COMMAND OakBackendCapture cluster-benchmark-dx11)
+    add_test(NAME OakClusterBenchmark_dx12 COMMAND OakBackendCapture cluster-benchmark-dx12)
+    set_tests_properties(OakClusterBenchmark_dx11 OakClusterBenchmark_dx12 PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}" RUN_SERIAL TRUE TIMEOUT 600 SKIP_RETURN_CODE 77)
     set_tests_properties(TerrainSharedPrefabs PROPERTIES WORKING_DIRECTORY "${ENGINE_ROOT}" TIMEOUT 180 RUN_SERIAL TRUE)
     set(oak_capture_backends dx11 dx12)
     find_package(Python3 QUIET COMPONENTS Interpreter NumPy)

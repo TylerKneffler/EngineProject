@@ -29,7 +29,8 @@ VulkanRenderCore::~VulkanRenderCore()
     vkDestroyInstance(m_instance, nullptr);
 }
 
-bool VulkanRenderCore::Init(HWND hwnd, uint32_t width, uint32_t height, bool mainDepth)
+bool VulkanRenderCore::Init(HWND hwnd, uint32_t width, uint32_t height, bool mainDepth,
+    const std::string& graphicsDevice)
 {
     try
     {
@@ -37,6 +38,7 @@ bool VulkanRenderCore::Init(HWND hwnd, uint32_t width, uint32_t height, bool mai
         m_requestedWidth = width;
         m_requestedHeight = height;
         m_mainDepth = mainDepth;
+        m_graphicsDevice = graphicsDevice;
         VkCheck(volkInitialize(), "volkInitialize");
         CreateInstance();
         volkLoadInstance(m_instance);
@@ -108,6 +110,10 @@ void VulkanRenderCore::SelectDevice()
             if (!swapchain) continue;
             VkPhysicalDeviceProperties properties{};
             vkGetPhysicalDeviceProperties(device, &properties);
+            const std::string deviceName(properties.deviceName);
+            if (!m_graphicsDevice.empty() && m_graphicsDevice != "Auto" &&
+                deviceName != m_graphicsDevice)
+                continue;
             int score = properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU ? 2 : 1;
             if (score > bestScore)
             {
@@ -117,7 +123,10 @@ void VulkanRenderCore::SelectDevice()
             }
         }
     }
-    if (!m_physicalDevice) throw std::runtime_error("No Vulkan graphics/present queue with swapchain support was found");
+    if (!m_physicalDevice)
+        throw std::runtime_error(m_graphicsDevice.empty() || m_graphicsDevice == "Auto"
+            ? "No Vulkan graphics/present queue with swapchain support was found"
+            : "Selected Vulkan graphics device is unavailable or incompatible: " + m_graphicsDevice);
 }
 
 void VulkanRenderCore::CreateDevice()

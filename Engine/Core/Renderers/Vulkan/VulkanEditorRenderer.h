@@ -11,6 +11,8 @@ namespace Engine::Renderers
 class VulkanEditorRenderer : public IEditorRenderer
 {
 public:
+    explicit VulkanEditorRenderer(std::string graphicsDevice = "Auto")
+        : m_graphicsDevice(std::move(graphicsDevice)) {}
     ~VulkanEditorRenderer() override;
     bool Init(void* hwnd, uint32_t width, uint32_t height) override;
     void Resize(uint32_t width, uint32_t height) override;
@@ -39,6 +41,7 @@ public:
     void* GetCurrentRenderTargetHandle() const override { return nullptr; }
     VulkanRenderCore& GetRenderCore() { return m_core; }
 private:
+    std::string m_graphicsDevice = "Auto";
     VulkanRenderCore m_core;
     VulkanViewDeviceContext m_viewContext{};
     std::unique_ptr<VulkanGraphicsProvider> m_provider;

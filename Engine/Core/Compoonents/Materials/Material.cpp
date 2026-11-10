@@ -30,6 +30,7 @@ Material::Material()
     RegisterField("builtinToon", builtinToon, "MMD");
     RegisterField("alphaMode", alphaMode, "Surface");
     RegisterField("alphaCutoff", alphaCutoff, "Surface");
+    RegisterField("alphaCoverageTransmission", alphaCoverageTransmission, "Alpha");
     RegisterField("doubleSided", doubleSided, "Surface");
     RegisterField("overrideTextureLod", overrideTextureLod, "Texture LOD");
     RegisterField("textureLodEnabled", textureLod.enabled, "Texture LOD");

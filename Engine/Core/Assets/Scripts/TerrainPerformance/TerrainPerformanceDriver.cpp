@@ -21,6 +21,7 @@ TerrainPerformanceDriver::TerrainPerformanceDriver()
     RegisterField("mapHalfExtentCells", mapHalfExtentCells);
     RegisterField("cacheDirectory", cacheDirectory);
     RegisterField("heightArchive", heightArchive);
+    RegisterField("mountainTerrain", mountainTerrain);
     RegisterField("archiveSignature", archiveSignature);
     RegisterField("farGrid", farGrid);
     RegisterField("enableFarTerrain", enableFarTerrain);
@@ -34,12 +35,15 @@ void TerrainPerformanceDriver::FenceBackgroundWork()
 
 namespace
 {
+constexpr std::array<float, 5> MountainMaterialBoundaries{
+    -52.f, -42.f, -30.f, 38.f, 72.f};
 constexpr std::array<float, TerrainHeightArchive::LayerCount - 1>
     TerrainMaterialBoundaries{-36.f, -24.f, -12.f};
 constexpr float TerrainMaterialBlendHalfWidth = 4.f;
 
 std::vector<float> MakeNearWeights(const std::vector<float>& heights,
-    const std::vector<float>& archivedWeights)
+    const std::vector<float>& archivedWeights,
+    const std::array<float, 5>* customBoundaries = nullptr)
 {
     std::vector<float> nearWeights(heights.size() * 6, 0.f);
     if (archivedWeights.size() !=
@@ -47,6 +51,14 @@ std::vector<float> MakeNearWeights(const std::vector<float>& heights,
         return nearWeights;
     for (size_t i = 0; i < heights.size(); ++i)
     {
+        if (customBoundaries)
+        {
+            float bands[6];
+            TerrainHeightArchive::BlendHeightBands(heights[i],
+                *customBoundaries, 3.5f, bands);
+            std::copy(bands, bands + 6, nearWeights.begin() + i * 6);
+            continue;
+        }
         float expected[TerrainHeightArchive::LayerCount];
         float bands[TerrainHeightArchive::LayerCount];
         TerrainHeightArchive::BlendBaseLayers(heights[i],
@@ -75,7 +87,8 @@ struct TerrainPerformanceDriverRegistration
             "TerrainPerformanceDriver");
     }
 } registration;
-Engine::Components::TerrainManager::FarTerrainPalette MakeFarPalette()
+Engine::Components::TerrainManager::FarTerrainPalette MakeFarPalette(
+    bool mountain)
 {
     Engine::Components::TerrainManager::FarTerrainPalette palette;
     palette.farColors = {{
@@ -91,8 +104,26 @@ Engine::Components::TerrainManager::FarTerrainPalette MakeFarPalette()
         {.04927f, .15253f, .03096f},
         {.04270f, .09440f, .02921f}}};
     palette.archiveToNear = {4, 5, 2, 3};
-    palette.heightBoundaries = TerrainMaterialBoundaries;
-    palette.heightBlendHalfWidth = TerrainMaterialBlendHalfWidth;
+    if (mountain)
+    {
+        palette.farColors = {{
+            {.49f, .40f, .27f}, {.58f, .53f, .42f},
+            {.15f, .29f, .12f}, {.34f, .32f, .28f},
+            {.57f, .55f, .50f}, {.88f, .91f, .95f}}};
+        palette.nearColors = {{
+            {.49f, .40f, .27f}, {.58f, .53f, .42f},
+            {.15f, .29f, .12f}, {.34f, .32f, .28f},
+            {.57f, .55f, .50f}, {.88f, .91f, .95f}}};
+        palette.heightBoundaries = MountainMaterialBoundaries;
+        palette.heightBlendHalfWidth = 3.5f;
+    }
+    else
+    {
+        palette.farColors = {{palette.farColors[0], palette.farColors[1],
+            palette.farColors[2], palette.farColors[3],
+            palette.nearColors[4], palette.nearColors[5]}};
+        palette.heightBoundaries = {{-36.f, -24.f, -12.f, 16.f, 48.f}};
+    }
     return palette;
 }
 }
@@ -101,7 +132,8 @@ TerrainPerformanceDriver::FarGridLoad
 TerrainPerformanceDriver::LoadFarGridData(const std::string& path,
     const std::string& archivePath, const std::string& editDirectory,
     const std::vector<std::pair<int, int>>& editedCells,
-    uint64_t signature, int extent, int cellsX, int cellsY)
+    uint64_t signature, int extent, int cellsX, int cellsY,
+    bool mountain)
 {
     FarGridLoad result;
     result.loaded = TerrainHeightArchive::ReadFarGrid(path, signature,
@@ -114,13 +146,13 @@ TerrainPerformanceDriver::LoadFarGridData(const std::string& path,
             extent, cellsX, cellsY, cell.first, cell.second, heights,
             &archivedWeights)) continue;
         std::vector<float> nearWeights = MakeNearWeights(heights,
-            archivedWeights);
+            archivedWeights, mountain ? &MountainMaterialBoundaries : nullptr);
         const auto editPath = std::filesystem::path(editDirectory) /
             (std::to_string(cell.first) + "_" +
                 std::to_string(cell.second) + ".terrainedit");
         if (!TerrainHeightArchive::ApplyEditSurface(editPath.string(),
             cellsX, cellsY, heights, &nearWeights, 6)) continue;
-        const auto palette = MakeFarPalette();
+        const auto palette = MakeFarPalette(mountain);
         std::vector<float> colors(heights.size() * 3, 0.f);
         for (size_t i = 0; i < heights.size(); ++i)
             for (int layer = 0; layer < 6; ++layer)
@@ -195,7 +227,20 @@ bool TerrainPerformanceDriver::ConfigureTerrain()
         // One 512 px color map now covers 4 m, so its texels are about 8 mm
         // across instead of 6 cm in a close, human-scale view.
         terrain.textureTiling = 32.f;
-        terrain.layers = {
+        terrain.layers = mountainTerrain ? std::vector<Engine::Components::Terrain::Layer>{
+            {"Assets/Materials/Terrain/shore_sand.material", -1000.f, -52.f,
+                {.49f, .40f, .27f}},
+            {"Assets/Materials/Terrain/shore_gravel.material", -52.f, -42.f,
+                {.58f, .53f, .42f}},
+            {"Assets/Materials/Terrain/valley_grass.material", -42.f, -30.f,
+                {.15f, .29f, .12f}},
+            {"Assets/Materials/Terrain/woodland_grass.material", -30.f, 38.f,
+                {.21f, .33f, .17f}},
+            {"Assets/Materials/Terrain/weathered_slate.material", 38.f, 72.f,
+                {.34f, .32f, .28f}},
+            {"Assets/Materials/Terrain/alpine_snow.material", 72.f, 1000.f,
+                {.88f, .91f, .95f}}
+        } : std::vector<Engine::Components::Terrain::Layer>{
             {"Assets/Materials/Terrain/dark_soil.material", -1000.f, -12.f,
                 {.26f, .22f, .17f}},
             {"Assets/Materials/Terrain/warm_dirt.material", -12.f, 0.f,
@@ -214,7 +259,8 @@ bool TerrainPerformanceDriver::ConfigureTerrain()
             countX, countY, cell.first, cell.second, terrain.heights,
             &archivedWeights))
             throw std::runtime_error("Could not read saved terrain height cell");
-        terrain.weights = MakeNearWeights(terrain.heights, archivedWeights);
+        terrain.weights = MakeNearWeights(terrain.heights, archivedWeights,
+            mountainTerrain ? &MountainMaterialBoundaries : nullptr);
         terrain.Rebuild();
     }} : std::function<void(Engine::Components::TerrainManager::Cell,
         Engine::Components::Terrain&)>{});
@@ -289,7 +335,7 @@ void TerrainPerformanceDriver::OnAfterDeserialize(IGraphicsProvider*)
             manager->ConfigureFarTerrain(mapHalfExtentCells,
                 std::move(result.heights), std::move(result.patches),
                 Engine::Components::Mesh::ResolveFilePath(heightArchive),
-                m_configuredSignature, MakeFarPalette());
+                m_configuredSignature, MakeFarPalette(mountainTerrain));
             m_farDataReady = true;
         }
     }
@@ -372,7 +418,7 @@ void TerrainPerformanceDriver::Update()
                     manager->ConfigureFarTerrain(mapHalfExtentCells,
                         std::move(result.heights), std::move(result.patches),
                         Engine::Components::Mesh::ResolveFilePath(heightArchive),
-                        m_configuredSignature, MakeFarPalette());
+                        m_configuredSignature, MakeFarPalette(mountainTerrain));
                     m_farDataReady = true;
                 }
             }

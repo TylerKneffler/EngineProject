@@ -156,8 +156,9 @@ inline uint8_t LayerForHeight(float height)
     return nearest;
 }
 
+template<size_t N>
 inline void BlendHeightBands(float height,
-    const std::array<float, LayerCount - 1>& boundaries,
+    const std::array<float, N>& boundaries,
     float halfWidth, float* weights)
 {
     float remaining = 1.f;
@@ -174,9 +175,9 @@ inline void BlendHeightBands(float height,
 
 // Reconstruct soft base paint from the saved height while retaining the
 // archive's two-bit layer choice for any deliberately assigned base layer.
-inline void BlendBaseLayers(float height, uint8_t savedLayer, float* weights)
+inline void BlendBaseLayers(float height, uint8_t savedLayer, float* weights,
+    const std::array<float, LayerCount - 1>& boundaries = {-12.f, 0.f, 16.f})
 {
-    constexpr float boundaries[LayerCount - 1] = {-12.f, 0.f, 16.f};
     constexpr float halfWidth = 8.f;
     for (int layer = 0; layer < LayerCount; ++layer) weights[layer] = 0.f;
     if (savedLayer != LayerForHeight(height))
@@ -203,7 +204,9 @@ inline void BlendBaseLayers(float height, uint8_t savedLayer, float* weights)
 inline bool ReadCell(const std::string& path, uint64_t expectedSignature,
     int expectedExtent, int expectedX, int expectedY,
     int cellX, int cellY, std::vector<float>& heights,
-    std::vector<float>* weights = nullptr)
+    std::vector<float>* weights = nullptr,
+    const std::array<float, LayerCount - 1>& baseBoundaries =
+        {-12.f, 0.f, 16.f})
 {
     if (std::abs(cellX) > expectedExtent || std::abs(cellY) > expectedExtent)
         return false;
@@ -246,7 +249,7 @@ inline bool ReadCell(const std::string& path, uint64_t expectedSignature,
         for (size_t i = 0; i < samples.size(); ++i)
             BlendBaseLayers(heights[i],
                 (packed[i / 4] >> ((i % 4) * 2)) & 3u,
-                weights->data() + i * LayerCount);
+                weights->data() + i * LayerCount, baseBoundaries);
     }
     return true;
 }

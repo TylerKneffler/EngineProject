@@ -54,6 +54,10 @@ public:
     static const std::vector<RendererOption>& GetRendererOptions();
     static bool IsRendererAvailable(const std::string& api, std::string* reason = nullptr);
 
+    // Adapter names exposed in project rendering preferences. "Auto" is
+    // always the first option and is also the fallback for unavailable names.
+    static std::vector<std::string> GetGraphicsDevices();
+
 private:
     RendererFactory() = delete;  // static factory, no instances
 };

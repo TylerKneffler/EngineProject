@@ -4,6 +4,8 @@
 #include "Core/Compoonents/Mesh/Mesh.h"
 #include "Core/Compoonents/Terrain/Terrain.h"
 #include "Core/Compoonents/Terrain/TerrainObjectLayer.h"
+#include "Core/Rendering/RenderPerformance.h"
+#include "Core/Graphics/IGraphicsContext.h"
 #include "Core/Compoonents/Physics/PrimitiveObjectCollider.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
 #include "Core/Serialization/SceneSerializer.h"
@@ -31,6 +33,8 @@
 #include <iomanip>
 #include <iostream>
 #include <stdexcept>
+#include <numeric>
+#include <glm/gtc/matrix_transform.hpp>
 #include <type_traits>
 #include <cstdlib>
 #include <d3d12sdklayers.h>
@@ -1436,12 +1440,97 @@ template<class Renderer> void CaptureOak(const std::string& backend)
     std::cout << backend << ": actual oak captures, shadow comparisons, staggered refresh and camera cuts passed.\n";
 }
 
+template<class Renderer> void BenchmarkOakClusters(const std::string& backend)
+{
+    const char* outputEnv=std::getenv("ENGINE_OAK_CLUSTER_OUTPUT");
+    const std::filesystem::path output=outputEnv ? outputEnv : ".local/oak-cluster-benchmark";
+    std::filesystem::create_directories(output);
+    constexpr unsigned width=960,height=540;
+    Engine::Core::Window window(GetModuleHandleW(nullptr),L"Oak cluster benchmark",width,height);
+    ShowWindow(window.GetHWND(),SW_HIDE);
+    Renderer renderer;
+    Check(renderer.Init(window.GetHWND(),width,height),"oak cluster renderer init failed");
+    Engine::Scene::Scene scene; scene.Init(renderer.GetGraphicsProvider());
+    scene.SetBeforeGpuResourceDestruction([&] { renderer.WaitIdle(); });
+    Check(scene.Load("Engine/Core/Assets/Scenes/terrain/oak_meadow.scene"),"oak scene load failed");
+    auto* viewer=scene.FindObjectByName("Meadow Explorer");
+    Check(viewer!=nullptr,"oak benchmark viewer missing");
+    auto* camera=viewer->GetComponent<Camera>();
+    Check(camera!=nullptr,"oak benchmark camera missing");
+    const glm::vec3 start(viewer->transform.GetWorldPosition());
+    const glm::vec3 target(camera->target);
+    std::vector<TerrainObjectLayer*> forests;
+    for(auto* layer:scene.GetComponents<TerrainObjectLayer>())
+        if(layer->layerName=="Oak forest") forests.push_back(layer);
+    Check(!forests.empty(),"oak benchmark forest layer missing");
+    for(auto* field:scene.GetComponents<GrassField>()) { field->useEditorCamera=false; field->Start(); }
+
+    std::ofstream csv(output/(backend+".csv"));
+    csv << "span_m,phase,frame,cpu_cull_ms,cpu_tile_prepare_ms,cpu_submit_ms,gpu_batches,draws,submitted_instances,submitted_triangles,visible_placements,gpu_timing_valid,gpu_workload_valid,tree_bark_ms,tree_leaves_ms,tree_bark_vs,tree_bark_ps,tree_leaves_vs,tree_leaves_ps\n";
+    const float spans[]={256.f,128.f,64.f,32.f};
+    const int sweepFrames=24;
+    for(float span:spans)
+    {
+        TerrainObjectLayer::SetPrefabInstanceGroupSpanForBenchmark(span);
+        for(auto* layer:forests) layer->RebuildPrefabInstancesForBenchmark();
+        auto render=[&](const char* phase,int frame,float cameraOffset) {
+            renderer.WaitIdle();
+            scene.AdvanceManualFrame(0.f);
+            for(auto* field:scene.GetComponents<GrassField>()) field->RefreshEditorPreview();
+            viewer->transform.position=start+glm::vec3(cameraOffset,0,0);
+            camera->target=target+glm::vec3(cameraOffset,0,0);
+            renderer.BeginFrame();
+            auto context=renderer.CreateFrameGraphicsContext();
+            context->SetViewport({0,0,float(width),float(height),0,1});
+            context->SetScissorRect({0,0,int(width),int(height)});
+            renderer.Clear(.1f,.1f,.1f,1);
+            scene.PrepareRenderFrame();
+            scene.Render(context.get(),float(width)/height,camera,false,width,height);
+            renderer.EndFrame();
+            renderer.WaitIdle();
+            const auto cpu=scene.GetLastRenderCpuTimings();
+            const auto gpu=renderer.GetFrameTimingTelemetry();
+            uint64_t visible=0;
+            const glm::mat4 vp=camera->GetProjectionMatrix(float(width)/height)*camera->GetViewMatrix();
+            const glm::vec3 eye(viewer->transform.GetWorldPosition());
+            const glm::vec3 forward=glm::normalize(glm::vec3(camera->target)-eye);
+            const float tanHalf=std::tan(glm::radians(camera->fov)*.5f);
+            for(auto* layer:forests) for(const auto& placement:layer->placements)
+            {
+                const glm::vec3 p=glm::vec3(layer->Owner->transform.GetWorldMatrix()*glm::vec4(placement.position,1));
+                const glm::vec4 clip=vp*glm::vec4(p,1);
+                const float depth=glm::dot(p-eye,forward);
+                const float radius=std::max(1.f,std::abs(placement.scale)*8.f);
+                if(depth+radius<camera->nearPlane || depth-radius>camera->farPlane) continue;
+                if(clip.w<=0.f || std::abs(clip.x)>clip.w+radius || std::abs(clip.y)>clip.w+radius) continue;
+                ++visible;
+            }
+            const auto bark=static_cast<size_t>(Engine::Graphics::GpuTimingStage::TreeBark);
+            const auto leaves=static_cast<size_t>(Engine::Graphics::GpuTimingStage::TreeLeaves);
+            csv << span << ',' << phase << ',' << frame << ',' << cpu.cullingMs << ','
+                << cpu.instanceTilePrepareMs << ',' << cpu.submissionMs << ',' << cpu.gpuBatches << ','
+                << cpu.physicalDraws << ',' << cpu.submittedInstances << ',' << cpu.submittedTriangles << ','
+                << visible << ',' << gpu.gpuTimingsValid << ',' << gpu.gpuWorkloadValid << ','
+                << gpu.gpuMilliseconds[bark] << ',' << gpu.gpuMilliseconds[leaves] << ','
+                << gpu.gpuWorkload[bark].vertices << ',' << gpu.gpuWorkload[bark].fragments << ','
+                << gpu.gpuWorkload[leaves].vertices << ',' << gpu.gpuWorkload[leaves].fragments << '\n';
+        };
+        for(int i=0;i<8;++i) render("warmup",i,0.f);
+        for(int i=0;i<32;++i) render("steady",i,0.f);
+        for(int i=0;i<sweepFrames;++i)
+            render("camera_sweep",i,(float(i)-float(sweepFrames-1)*.5f)*.75f);
+        std::cout << backend << " span " << span << " m captured\n";
+    }
+}
+
 int main(int argc,char** argv)
 {
     try
     {
         Check(argc==2,"expected renderer backend");
         const std::string backend=argv[1];
+        if (backend=="cluster-benchmark-dx11") { BenchmarkOakClusters<DX11GameRenderer>(backend); return 0; }
+        else if (backend=="cluster-benchmark-dx12") { BenchmarkOakClusters<DX12GameRenderer>(backend); return 0; }
         if(backend=="dx12" && std::getenv("ENGINE_OAK_DX12_VALIDATION"))
         {
             Microsoft::WRL::ComPtr<ID3D12Debug> debug;

@@ -18,6 +18,16 @@
 
 namespace Engine::Components
 {
+float TerrainObjectLayer::prefabInstanceGroupSpanMeters=256.f;
+void TerrainObjectLayer::SetPrefabInstanceGroupSpanForBenchmark(float span)
+{
+    prefabInstanceGroupSpanMeters=std::clamp(span,8.f,256.f);
+}
+void TerrainObjectLayer::RebuildPrefabInstancesForBenchmark()
+{
+    m_prefabInstances.reset();
+    m_prefabCheckedRevision=UINT64_MAX;
+}
 struct TerrainObjectLayer::PrefabInstances
 {
     struct Source
@@ -247,7 +257,7 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider)
         // CPU objects provide coarse spatial bounds; the compute path still
         // selects visibility and LOD for each placement. Small 64 m groups
         // multiplied every prefab part/band into thousands of CPU components.
-        constexpr float prefabGroupSpan=256.f;
+        const float prefabGroupSpan=std::clamp(prefabInstanceGroupSpanMeters,8.f,256.f);
         std::map<std::pair<int,int>,std::vector<const Placement*>> tiles;
         for (const auto* placement:records)
             tiles[{int(std::floor(placement->position.x/prefabGroupSpan)),

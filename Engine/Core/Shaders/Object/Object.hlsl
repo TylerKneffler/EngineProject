@@ -57,7 +57,7 @@ struct ObjectData
     float4 shadowCasterFade; // range, fade width, shadow pass enabled, reserved
     float4 grassAnimation; // scene time, grass enabled, reserved
     float4 textureLodParams; // near, far, maximum mip bias, enabled/shading tier
-    float4 alphaLodParams; // maximum alpha mip bias, disable mask at far distance
+    float4 alphaLodParams; // max alpha mip bias, disable mask at far, masked coverage transmission
     float4 grassCapsules[8];
 };
 
@@ -658,6 +658,26 @@ float TextureLodBias(ObjectData data, float3 worldPosition)
     return TextureLodBlend(data, worldPosition) * data.textureLodParams.z;
 }
 
+float AlphaCoverageNoise(float3 worldPosition)
+{
+    // A world-space subpixel pattern stays stable while the camera moves and
+    // needs only integer ALU. It approximates fractional leaf coverage without
+    // sending dense foliage through the sorted transparent pass.
+    const uint3 cell = (uint3)floor(worldPosition * 512.0);
+    uint hash = cell.x * 1664525u + cell.y * 1013904223u + cell.z * 747796405u;
+    hash ^= hash >> 16u;
+    hash *= 2246822519u;
+    hash ^= hash >> 13u;
+    return (hash & 0x00ffffffu) * (1.0 / 16777216.0);
+}
+
+void ApplyMaskedAlphaTransmission(ObjectData data, float3 worldPosition)
+{
+    const float transmission = saturate(data.alphaLodParams.z);
+    [branch] if (transmission > 0.0)
+        clip(AlphaCoverageNoise(worldPosition) - transmission);
+}
+
 void ApplyAlphaLod(inout ObjectData data, float3 worldPosition)
 {
     if (data.alphaLodParams.y > 0.5 && TextureLodBlend(data, worldPosition) >= 1.0)
@@ -1112,6 +1132,7 @@ float4 PSShadowMain(
                 objectData.pmxTextureTint.a;
         }
         clip(alpha - objectData.viewPositionAlphaCutoff.w);
+        ApplyMaskedAlphaTransmission(objectData, worldPos);
     }
     return 0.0;
 }
@@ -1150,10 +1171,19 @@ float4 PSFoliageMain(
             TextureLodBlend(objectData, worldPos) * objectData.alphaLodParams.x) *
             objectData.pmxTextureTint;
     if (flags & 32u)
+    {
         clip(base.a - objectData.viewPositionAlphaCutoff.w);
+        ApplyMaskedAlphaTransmission(objectData, worldPos);
+    }
     if (objectData.ambientUnlit.w > 0.5)
         return float4(base.rgb + objectData.emissiveOcclusion.rgb, base.a);
 
+    // Texture LOD's optional shading tier is also used by foliage as an
+    // opt-in far-distance lighting simplification. Keep alpha sampling and
+    // coverage above independent from this color-only transition. At the far
+    // end, approximate average canopy shadowing without per-pixel shadow taps.
+    const float shadingBlend = objectData.textureLodParams.w > 1.5
+        ? TextureLodBlend(objectData, worldPos) : 0.0;
     float3 n = normalize(frontFace ? normal : -normal);
     float3 lit = objectData.ambientUnlit.rgb;
     [loop] for (uint i = 0u; i < draw.lightCount; ++i)
@@ -1165,10 +1195,17 @@ float4 PSFoliageMain(
         float3 direction = normalize(light.positionRange.xyz);
         float diffuse = saturate(dot(n, direction));
         if (diffuse <= 0.0) continue;
-        float shadow = objectData.shadowParams.z > 0.0
-            ? EvaluateDirectionalShadow(objectData, light,
-                worldPos, n, direction, 0)
-            : 1.0;
+        float shadow = 1.0;
+        [branch] if (objectData.shadowParams.z > 0.0)
+        {
+            // Retain representative shadowing (0.75) in the simplified tier
+            // to avoid a large brightness jump as detailed shadowing fades.
+            // Branching lets fully distant foliage skip the shadow lookup.
+            shadow = shadingBlend >= 1.0 ? 0.75 :
+                EvaluateDirectionalShadow(objectData, light,
+                    worldPos, n, direction, 0);
+            shadow = lerp(shadow, 0.75, shadingBlend);
+        }
         lit += light.colorIntensity.rgb *
             (light.colorIntensity.w * diffuse * shadow * 0.31830988618);
     }
@@ -1500,7 +1537,10 @@ float4 PSMain(
             objectData.pmxTextureTint;
     // Reject empty leaf-card pixels before fetching normal, roughness or occlusion.
     if (flags & 32u)
+    {
         clip(base.a - objectData.viewPositionAlphaCutoff.w);
+        ApplyMaskedAlphaTransmission(objectData, worldPos);
+    }
     float subsurfaceThickness = objectData.subsurfaceRadiusThickness.w;
     if ((flags & 128u) && objectData.subsurfaceColorWeight.w > 0.0)
         subsurfaceThickness *= subsurfaceThicknessMap.SampleBias(
