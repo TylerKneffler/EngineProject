@@ -1,6 +1,6 @@
 #pragma once
 #include "Core/Scene/Scene.h"
-#include "Core/Compoonents/Obj/TerrainObjectLayer.h"
+#include "Core/Compoonents/Terrain/TerrainObjectLayer.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include <filesystem>
 #include <cstdlib>

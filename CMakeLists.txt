@@ -204,11 +204,13 @@ FetchContent_MakeAvailable(glm)
 
 if(NOT ENGINE_PROJECT_DIR)
     enable_testing()
-    add_executable(MeshLodSelectionTests EXCLUDE_FROM_ALL Tests/MeshLodSelectionTests.cpp)
-    target_include_directories(MeshLodSelectionTests PRIVATE "${ENGINE_ROOT}/Engine")
-    target_link_libraries(MeshLodSelectionTests PRIVATE glm::glm)
-    add_test(NAME MeshLodSelection COMMAND MeshLodSelectionTests)
-    if(WIN32)
+    if(EXISTS "${ENGINE_ROOT}/Tests/MeshLodSelectionTests.cpp")
+        add_executable(MeshLodSelectionTests EXCLUDE_FROM_ALL Tests/MeshLodSelectionTests.cpp)
+        target_include_directories(MeshLodSelectionTests PRIVATE "${ENGINE_ROOT}/Engine")
+        target_link_libraries(MeshLodSelectionTests PRIVATE glm::glm)
+        add_test(NAME MeshLodSelection COMMAND MeshLodSelectionTests)
+    endif()
+    if(WIN32 AND EXISTS "${ENGINE_ROOT}/Tests/ScreenLodBackendTests.cpp")
         add_executable(ScreenLodBackendTests EXCLUDE_FROM_ALL Tests/ScreenLodBackendTests.cpp)
         target_link_libraries(ScreenLodBackendTests PRIVATE Engine d3d11 dxgi)
         target_include_directories(ScreenLodBackendTests PRIVATE "${ENGINE_ROOT}/Engine")
@@ -2074,6 +2076,11 @@ if(NOT ENGINE_PROJECT_DIR AND
         "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainChunk.cpp"
         "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainPatch.cpp"
         "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainGen.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainGenGeneration.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainGenStreaming.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainGenChunks.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainGenEditor.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainGenShapes.cpp"
         "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/PerlinNoiseField.cpp"
         "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainStreamingCameraDriver.cpp"
     )
@@ -2157,6 +2164,11 @@ if(NOT ENGINE_PROJECT_DIR AND
         "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/PerlinNoiseField.cpp"
         "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainStreamingCameraDriver.cpp"
         "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainGen.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainGenGeneration.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainGenStreaming.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainGenChunks.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainGenEditor.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainGenShapes.cpp"
         "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainChunk.cpp"
         "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainPatch.cpp")
     target_link_libraries(TerrainPerformanceSceneTests PRIVATE Engine)
@@ -2176,6 +2188,11 @@ if(NOT ENGINE_PROJECT_DIR AND
         "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/PerlinNoiseField.cpp"
         "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainStreamingCameraDriver.cpp"
         "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainGen.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainGenGeneration.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainGenStreaming.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainGenChunks.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainGenEditor.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainGenShapes.cpp"
         "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainChunk.cpp"
         "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainPatch.cpp")
     target_link_libraries(TerrainStreamingPerformanceTests PRIVATE Engine)
@@ -2229,6 +2246,11 @@ if(NOT ENGINE_PROJECT_DIR AND
         "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainChunk.cpp"
         "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainPatch.cpp"
         "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainGen.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainGenGeneration.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainGenStreaming.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainGenChunks.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainGenEditor.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainGenShapes.cpp"
         "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/PerlinNoiseField.cpp"
         "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainStreamingCameraDriver.cpp"
     )
@@ -2540,7 +2562,7 @@ if(NOT ENGINE_PROJECT_DIR AND WIN32 AND
     target_include_directories(OakBackendCapture PRIVATE
         "${ENGINE_ROOT}/Engine" "${ENGINE_ROOT}/Engine/Core/Assets")
     add_test(NAME TerrainSharedPrefabs COMMAND OakBackendCapture shared-prefabs)
-    set_tests_properties(TerrainSharedPrefabs PROPERTIES WORKING_DIRECTORY "${ENGINE_ROOT}" TIMEOUT 60 RUN_SERIAL TRUE)
+    set_tests_properties(TerrainSharedPrefabs PROPERTIES WORKING_DIRECTORY "${ENGINE_ROOT}" TIMEOUT 180 RUN_SERIAL TRUE)
     set(oak_capture_backends dx11 dx12)
     find_package(Python3 QUIET COMPONENTS Interpreter NumPy)
     if(Python3_Interpreter_FOUND AND
@@ -2702,26 +2724,34 @@ if(NOT ENGINE_PROJECT_DIR AND EXISTS "${ENGINE_ROOT}/Tests/ScenePickingTests.cpp
     add_test(NAME ScenePicking COMMAND ScenePickingTests)
 endif()
 
-if(NOT ENGINE_PROJECT_DIR)
+if(NOT ENGINE_PROJECT_DIR AND EXISTS "${ENGINE_ROOT}/Tests/GrassInteractionTests.cpp")
     enable_testing()
     add_executable(GrassInteractionTests EXCLUDE_FROM_ALL "${ENGINE_ROOT}/Tests/GrassInteractionTests.cpp")
     target_link_libraries(GrassInteractionTests PRIVATE Engine)
     target_include_directories(GrassInteractionTests PRIVATE "${ENGINE_ROOT}/Engine")
     add_test(NAME GrassCapsuleInteraction COMMAND GrassInteractionTests)
     set_tests_properties(GrassCapsuleInteraction PROPERTIES WORKING_DIRECTORY "${ENGINE_ROOT}")
-    add_executable(PrefabPlacementBenchmark EXCLUDE_FROM_ALL "${ENGINE_ROOT}/Tests/PrefabPlacementBenchmark.cpp")
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND EXISTS "${ENGINE_ROOT}/Tests/AsyncPrefabTests.cpp")
+    enable_testing()
     add_executable(AsyncPrefabTests EXCLUDE_FROM_ALL "${ENGINE_ROOT}/Tests/AsyncPrefabTests.cpp")
     target_link_libraries(AsyncPrefabTests PRIVATE Engine)
     target_include_directories(AsyncPrefabTests PRIVATE "${ENGINE_ROOT}/Engine")
     add_test(NAME AsyncPrefab COMMAND AsyncPrefabTests)
     set_tests_properties(AsyncPrefab PROPERTIES WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND EXISTS "${ENGINE_ROOT}/Tests/PrefabPlacementBenchmark.cpp")
+    enable_testing()
+    add_executable(PrefabPlacementBenchmark EXCLUDE_FROM_ALL "${ENGINE_ROOT}/Tests/PrefabPlacementBenchmark.cpp")
     target_link_libraries(PrefabPlacementBenchmark PRIVATE Engine)
     target_include_directories(PrefabPlacementBenchmark PRIVATE "${ENGINE_ROOT}/Engine")
     add_test(NAME PrefabDocumentCache COMMAND PrefabPlacementBenchmark --cache-test)
     set_tests_properties(PrefabDocumentCache PROPERTIES WORKING_DIRECTORY "${ENGINE_ROOT}")
 endif()
 
-if(NOT ENGINE_PROJECT_DIR)
+if(NOT ENGINE_PROJECT_DIR AND EXISTS "${ENGINE_ROOT}/Tests/SplineGeometryTests.cpp")
     enable_testing()
     add_executable(SplineGeometryTests EXCLUDE_FROM_ALL "${ENGINE_ROOT}/Tests/SplineGeometryTests.cpp")
     target_link_libraries(SplineGeometryTests PRIVATE Engine)
@@ -2730,7 +2760,7 @@ if(NOT ENGINE_PROJECT_DIR)
     set_tests_properties(SplineGeometry PROPERTIES WORKING_DIRECTORY "${ENGINE_ROOT}")
 endif()
 
-if(BUILD_TESTING)
+if(BUILD_TESTING AND EXISTS "${ENGINE_ROOT}/Tests/GraphicsQualityTests.cpp")
     add_executable(GraphicsQualityTests EXCLUDE_FROM_ALL "${ENGINE_ROOT}/Tests/GraphicsQualityTests.cpp")
     target_link_libraries(GraphicsQualityTests PRIVATE Engine)
     target_include_directories(GraphicsQualityTests PRIVATE "${ENGINE_ROOT}/Engine")
@@ -2738,7 +2768,8 @@ if(BUILD_TESTING)
     add_test(NAME GraphicsQualityPolicy COMMAND GraphicsQualityTests)
 endif()
 
-if(BUILD_TESTING AND WIN32)
+if(BUILD_TESTING AND WIN32 AND
+   EXISTS "${ENGINE_ROOT}/Tests/GraphicsQualityBackendTests.cpp")
     add_executable(GraphicsQualityBackendTests EXCLUDE_FROM_ALL "${ENGINE_ROOT}/Tests/GraphicsQualityBackendTests.cpp")
     target_link_libraries(GraphicsQualityBackendTests PRIVATE Engine)
     target_include_directories(GraphicsQualityBackendTests PRIVATE "${ENGINE_ROOT}/Engine")

@@ -2,6 +2,7 @@
 
 #include "Engine/Editor/UI/IEditorUi.h"
 #include <glm/glm.hpp>
+#include <cstdint>
 
 namespace Engine::Core { class Object; }
 namespace Engine::Scene { class Scene; }
@@ -34,7 +35,8 @@ public:
         const Engine::Scene::Scene& scene,
         const EditorUiVec2& mousePos,
         const EditorUiVec2& viewportSize,
-        bool preserveMeshChild = false);
+        bool preserveMeshChild = false,
+        uint64_t* pickedPlacementId = nullptr);
     static Engine::Core::Object* PickBoneInViewport(
         const Engine::Scene::Scene& scene,
         const EditorUiVec2& mousePos,

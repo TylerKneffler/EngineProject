@@ -114,6 +114,9 @@ public:
         };
         std::vector<InstanceTransform> transforms;
         std::vector<Slice> slices;
+        uint64_t editorSelectionPlacementId = 0;
+        uint64_t editorSelectionRevision = 0;
+        std::unique_ptr<IGraphicsBuffer> editorSelectionBuffer;
     };
     struct InstanceRange
     {

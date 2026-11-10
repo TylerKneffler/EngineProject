@@ -22,6 +22,11 @@ public:
 class TerrainObjectLayer final : public Engine::Core::Component
 {
 public:
+    struct PrefabPrepareTimings
+    {
+        double placementSignatureMs=0;
+        double sourceProbeMs=0;
+    };
     struct Placement
     {
         mutable uint64_t id=0;
@@ -91,6 +96,8 @@ public:
     // Static prefab placements share source geometry/material definitions.
     // Derived render/physics objects are never saved into the authored layer.
     void PreparePrefabInstances(IGraphicsProvider* provider);
+    const PrefabPrepareTimings& GetLastPrefabPrepareTimings() const
+    { return m_lastPrefabPrepareTimings; }
     bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
 private:
     struct PrefabInstances;
@@ -99,6 +106,7 @@ private:
     const Placement* m_prefabCheckedData=nullptr;
     size_t m_prefabCheckedCount=0;
     bool m_hasPrefabPlacements=false;
+    PrefabPrepareTimings m_lastPrefabPrepareTimings{};
     mutable PreparedTiles m_prepared;
     mutable uint64_t m_preparedRevision=UINT64_MAX,m_preparedSignature=0;
     mutable const Placement* m_preparedData=nullptr;

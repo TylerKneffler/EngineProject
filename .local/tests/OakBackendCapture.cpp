@@ -1,9 +1,9 @@
 #include "Core/Scene/Scene.h"
 #include "CanopyExperiment.h"
 #include "Core/Window.h"
-#include "Core/Compoonents/Obj/Mesh.h"
-#include "Core/Compoonents/Obj/Terrain.h"
-#include "Core/Compoonents/Obj/TerrainObjectLayer.h"
+#include "Core/Compoonents/Mesh/Mesh.h"
+#include "Core/Compoonents/Terrain/Terrain.h"
+#include "Core/Compoonents/Terrain/TerrainObjectLayer.h"
 #include "Core/Compoonents/Physics/PrimitiveObjectCollider.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
 #include "Core/Serialization/SceneSerializer.h"
@@ -378,6 +378,19 @@ void CheckSharedPrefabLayer()
     layer->PreparePrefabInstances(&provider); scene.CommitPendingObjectChanges();
     Check(scene.GetObjectId(scene.GetComponents<Mesh>().front()->Owner)==stableObjectId &&
         provider.allocations==stableAllocations,"unchanged prefab poll rebuilt shared geometry");
+    // Scene restore can deserialize the same content into a new placements
+    // allocation and increment the component revision. Keep the existing
+    // generated batches when the restored content and policy are identical.
+    layer->Deserialize(layer->Serialize());
+    const auto identicalRestoreStarted=std::chrono::steady_clock::now();
+    layer->PreparePrefabInstances(&provider); scene.CommitPendingObjectChanges();
+    const double identicalRestoreMs=std::chrono::duration<double,std::milli>(
+        std::chrono::steady_clock::now()-identicalRestoreStarted).count();
+    Check(scene.GetObjectId(scene.GetComponents<Mesh>().front()->Owner)==stableObjectId &&
+        provider.allocations==stableAllocations,
+        "identical layer restore unnecessarily rebuilt shared prefab geometry");
+    std::cerr << "Identical restore prefab preparation: " << identicalRestoreMs
+        << " ms; generated object and buffer allocations reused\n";
     // Public placement records historically detect in-place edits on polling,
     // even without MarkConfigurationDirty(). Retain that compatibility.
     layer->placements.front().position.x+=1.f;
@@ -431,7 +444,18 @@ void CheckSharedPrefabLayer()
         std::cerr << "Checking prefab collider radius " << radius << '\n';
         writePrefab(radius,prefabPath);
         std::this_thread::sleep_for(std::chrono::milliseconds(1100));
-        layer->PreparePrefabInstances(&provider); scene.CommitPendingObjectChanges();
+        // Stable prefab source probes are spread across successive frame
+        // preparations. Drive the fixture as a frame loop until the changed
+        // source has been reached (or fail after a bounded number of frames).
+        for(int frame=0;frame<64;++frame)
+        {
+            layer->PreparePrefabInstances(&provider); scene.CommitPendingObjectChanges();
+            const auto current=scene.GetComponents<PrimitiveObjectCollider>();
+            if(current.size()==(radius>0 ? 3u:0u) &&
+                std::all_of(current.begin(),current.end(),[&](const auto* collider) {
+                    return std::abs(collider->radius-radius)<.0001f;
+                })) break;
+        }
         std::cerr << "Prefab edit prepared\n";
         for(auto* mesh:scene.GetComponents<Mesh>())
         {
@@ -445,12 +469,15 @@ void CheckSharedPrefabLayer()
     }
     writePrefab(0.f,lodPrefabPath,.5f);
     std::this_thread::sleep_for(std::chrono::milliseconds(1100));
-    layer->PreparePrefabInstances(&provider); scene.CommitPendingObjectChanges();
     bool editedLodFound=false;
-    for(const auto* mesh:scene.GetComponents<Mesh>()) if(mesh->prefabLodBand==1)
+    for(int frame=0;frame<64 && !editedLodFound;++frame)
     {
-        editedLodFound=true;
-        Check(mesh->foliageWindStrength==.5f,"LOD-only prefab edit was not polled");
+        layer->PreparePrefabInstances(&provider); scene.CommitPendingObjectChanges();
+        for(const auto* mesh:scene.GetComponents<Mesh>()) if(mesh->prefabLodBand==1)
+        {
+            editedLodFound=true;
+            Check(mesh->foliageWindStrength==.5f,"LOD-only prefab edit was not polled");
+        }
     }
     Check(editedLodFound,"edited prefab LOD disappeared");
     const auto savedLods=layer->objectLods[prefabPath];
@@ -659,8 +686,9 @@ template<class Renderer> void CaptureOak(const std::string& backend)
     Check(walkView=="entrance" || walkView=="overlook","unknown oak walking view");
     const bool screenLodDiagnostic=std::getenv("ENGINE_OAK_SCREEN_LOD")!=nullptr;
     const char* canopyRoot=std::getenv("ENGINE_OAK_CANOPY_ROOT");
+    const char* requestedOutputRoot=std::getenv("ENGINE_OAK_OUTPUT_ROOT");
     bool screenPolicyEnabled=false, screenDistanceOverride=false;
-    const std::string outputRoot=canopyRoot ? std::string(canopyRoot)+"/renderer/"+backend+"/"+scaleText : screenLodDiagnostic ?
+    const std::string outputRoot=requestedOutputRoot ? std::string(requestedOutputRoot)+"/"+backend+"/"+scaleText : canopyRoot ? std::string(canopyRoot)+"/renderer/"+backend+"/"+scaleText : screenLodDiagnostic ?
         ".local/screen-lod-validation/"+backend+"/"+scaleText : std::string(".local/tree-lod-oak-validation")+
         (walkView=="entrance" ? "/entrance":"")+
         (scale==1 ? "":"/"+std::to_string(width)+"x"+std::to_string(height));
@@ -730,7 +758,10 @@ template<class Renderer> void CaptureOak(const std::string& backend)
         context->SetViewport({0,0,float(width),float(height),0,1});
         context->SetScissorRect({0,0,int(width),int(height)});
         renderer.Clear(.1f,.1f,.1f,1);
-        scene.Render(context.get(),float(width)/height,camera,false,width,height);
+        const bool includeEditorVisuals=
+            std::getenv("ENGINE_OAK_SELECTION_RENDER_CHECK")!=nullptr;
+        scene.Render(context.get(),float(width)/height,camera,
+            includeEditorVisuals,width,height);
         renderer.RequestSceneCapture();
         renderer.EndFrame();
         for(auto* mesh:hiddenMeshes) mesh->SetEditorVisible(true);
@@ -789,6 +820,68 @@ template<class Renderer> void CaptureOak(const std::string& backend)
             << shadow.submittedCasterDrawCount << " grassFields=" << fields.size() << std::endl;
         return pixels;
     };
+    if(std::getenv("ENGINE_OAK_SELECTION_RENDER_CHECK"))
+    {
+        scene.SetSelectedObject(nullptr);
+        scene.SetSelectedPlacementId(0);
+        const auto baseline=capture("selection-none",8);
+        TerrainObjectLayer* selectedLayer=nullptr;
+        Mesh* selectedMesh=nullptr;
+        uint64_t selectedId=0;
+        float nearest=std::numeric_limits<float>::max();
+        const glm::vec3 cameraPosition(viewer->transform.GetWorldPosition());
+        const glm::vec3 cameraForward=glm::normalize(camera->target-cameraPosition);
+        for(auto* layer:scene.GetComponents<TerrainObjectLayer>())
+        {
+            if(layer->layerName!="Oak forest") continue;
+            for(auto* mesh:scene.GetComponents<Mesh>())
+            {
+                if(mesh->Owner->GetComponentInParent<TerrainObjectLayer>()!=layer)
+                    continue;
+                if(!mesh->IsInstanced()) continue;
+                const auto& data=mesh->GetInstanceData();
+                if(!data || data->placementIds.empty()) continue;
+                for(size_t i=0;i<data->placementIds.size() && i<data->transforms.size();++i)
+                {
+                    if(data->placementIds[i]==0) continue;
+                    const auto& transform=data->transforms[i];
+                    const glm::vec3 local(transform.rows[0].w,
+                        transform.rows[1].w,transform.rows[2].w);
+                    const glm::vec3 world(mesh->Owner->transform.GetWorldMatrix()*
+                        glm::vec4(local,1.f));
+                    const glm::vec3 offset=world-cameraPosition;
+                    const float depth=glm::dot(offset,cameraForward);
+                    if(depth<=0.f) continue;
+                    const float distance=glm::dot(offset,offset);
+                    if(distance<nearest)
+                    { nearest=distance; selectedLayer=layer; selectedMesh=mesh;
+                      selectedId=data->placementIds[i]; }
+                }
+            }
+        }
+        Check(selectedLayer && selectedMesh && selectedId,
+            "oak selection render check found no forward foliage placement");
+        scene.SetSelectedObject(selectedMesh->Owner);
+        scene.SetSelectedPlacementId(selectedId,selectedLayer->Owner);
+        const auto selected=capture("selection-one-placement",8);
+        size_t changedPixels=0, outlinePixels=0;
+        for(size_t i=0;i<baseline.size();i+=4)
+        {
+            if(std::abs(int(baseline[i])-int(selected[i]))>12 ||
+                std::abs(int(baseline[i+1])-int(selected[i+1]))>12 ||
+                std::abs(int(baseline[i+2])-int(selected[i+2]))>12)
+                ++changedPixels;
+            if(selected[i]>170 && selected[i+1]>100 && selected[i+2]<100 &&
+                !(baseline[i]>170 && baseline[i+1]>100 && baseline[i+2]<100))
+                ++outlinePixels;
+        }
+        report << "one-placement editor outline changed pixels=" << changedPixels
+            << " yellow outline pixels=" << outlinePixels << '\n';
+        Check(outlinePixels>100 && outlinePixels<size_t(width)*height/20,
+            "selected oak placement outline is missing or spans too much of the forest");
+        scene.SetSelectedObject(nullptr);
+        scene.SetSelectedPlacementId(0);
+    }
     if(canopyRoot)
     {
         // Isolated experiment: change resident middle geometry in memory only.

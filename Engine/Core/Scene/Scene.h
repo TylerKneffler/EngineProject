@@ -292,7 +292,9 @@ public:
     }
     struct PrepareTimings
     {
-        double assetPublicationMs=0,objectCommitMs=0,prefabInstancesMs=0,graphicsPreparationMs=0,nativeBuffersMs=0;
+        double assetPublicationMs=0,texturePublicationMs=0,shaderSourcePollMs=0,shaderPipelinePublicationMs=0;
+        double objectCommitMs=0,prefabInstancesMs=0,prefabSignatureMs=0,prefabSourceProbeMs=0;
+        double graphicsPreparationMs=0,nativeBuffersMs=0;
         double lookupMs = 0.0;
         double itemsMs = 0.0;
         double itemValidationMs=0, itemTexturesMs=0, itemShadersMs=0;
@@ -498,8 +500,19 @@ public:
     {
         return m_lastShadowCpuTiming;
     }
-    void SetSelectedObject(Object* obj) { m_selectedObject = obj; }
+    void SetSelectedObject(Object* obj)
+    {
+        m_selectedObject = obj;
+        m_selectedPlacementId = 0;
+        m_selectedPlacementLayer = nullptr;
+    }
     Object* GetSelectedObject() const { return m_selectedObject; }
+    void SetSelectedPlacementId(uint64_t id, Object* layer = nullptr)
+    {
+        m_selectedPlacementId = id;
+        m_selectedPlacementLayer = id != 0 ? layer : nullptr;
+    }
+    uint64_t GetSelectedPlacementId() const { return m_selectedPlacementId; }
     void SetEditorSelectedMesh(Engine::Components::Mesh* mesh)
     { m_editorSelectedMesh = mesh; }
     Engine::Components::Mesh* GetEditorSelectedMesh() const
@@ -644,6 +657,10 @@ public:
     // Edit previews queue removals while traversing objects, just like scripts.
     // Call only after that traversal; runtime Update commits automatically.
     void CommitPendingObjectChanges();
+    // Keep value snapshots stable while an editor incrementally restores a
+    // document, then publish the completed graph once at the commit point.
+    void BeginIncrementalRestore();
+    void EndIncrementalRestore();
     // A worker must carry the generation captured when its scene work was
     // scheduled. The owner fences tracked jobs before replacing or destroying
     // objects, so no callback from a reloadable module survives that boundary.
@@ -751,7 +768,8 @@ public:
     std::string SaveToString() const;
     std::string SaveSnapshotToString() const;
     // Editor Play restore: skips serializing the runtime graph for rollback.
-    bool RestoreTrustedSnapshot(const Engine::Serialization::JsonValue& snapshot);
+    bool RestoreTrustedSnapshot(const Engine::Serialization::JsonValue& snapshot,
+        bool publishSceneSnapshot = true);
     bool LoadFromString(const std::string& source);
     bool LoadFromValue(const Engine::Serialization::JsonValue& document);
 
@@ -1305,6 +1323,8 @@ private:
     void FlushPendingObjectRemovals();
     void EnforceParticleBudget();
     Object* m_selectedObject = nullptr;
+    uint64_t m_selectedPlacementId = 0;
+    Object* m_selectedPlacementLayer = nullptr;
     Engine::Components::Mesh* m_editorSelectedMesh = nullptr;
     bool m_editorMeshEditPose = false;
     bool m_editorBonesVisible = true;

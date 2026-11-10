@@ -196,15 +196,17 @@ TerrainObjectLayer::JsonValue TerrainObjectLayer::Serialize() const
     JsonValue out = Component::Serialize();
     out.Set("bakedInstances",JsonValue(std::move(baked)));
     out.Set("layerName", JsonValue(layerName));
-    JsonValue lodEntries = JsonValue::MakeArray();
+    JsonValue lodEntries = JsonValue::MakeArray(objectLods.size());
     for (const auto& [asset, settings] : objectLods)
     {
-        JsonValue meshes = JsonValue::MakeArray(), shadowMeshes = JsonValue::MakeArray(),
-            distances = JsonValue::MakeArray();
+        const size_t count = settings.meshes.empty()
+            ? settings.distances.size() + 1 : settings.meshes.size();
+        JsonValue meshes = JsonValue::MakeArray(settings.meshes.size());
+        JsonValue shadowMeshes = JsonValue::MakeArray(settings.shadowMeshes.size());
+        JsonValue distances = JsonValue::MakeArray(count > 0 ? count - 1 : 0);
         for (const auto& mesh : settings.meshes) meshes.Push(JsonValue(mesh));
         for (const auto& shadowMesh : settings.shadowMeshes)
             shadowMeshes.Push(JsonValue(shadowMesh));
-        const size_t count = settings.meshes.empty() ? settings.distances.size() + 1 : settings.meshes.size();
         for (float distance : GetObjectLodDistances(asset, count)) distances.Push(JsonValue(distance));
         lodEntries.Push(JsonValue::MakeObject().Set("asset", JsonValue(asset))
             .Set("meshes", std::move(meshes))
@@ -214,14 +216,14 @@ TerrainObjectLayer::JsonValue TerrainObjectLayer::Serialize() const
     out.Set("objectLods", std::move(lodEntries));
     {
         PrefabLoadProfile::Stage stage("placement_snapshot_records");
-        JsonValue entries = JsonValue::MakeArray();
+        JsonValue entries = JsonValue::MakeArray(placements.size());
         for (const Placement& placement : placements)
         {
             JsonValue entry = JsonValue::MakeObject(6);
-            JsonValue position = JsonValue::MakeArray();
+            JsonValue position = JsonValue::MakeArray(3);
             position.Push(JsonValue(placement.position.x))
                 .Push(JsonValue(placement.position.y)).Push(JsonValue(placement.position.z));
-            JsonValue normal = JsonValue::MakeArray();
+            JsonValue normal = JsonValue::MakeArray(3);
             normal.Push(JsonValue(placement.normal.x))
                 .Push(JsonValue(placement.normal.y)).Push(JsonValue(placement.normal.z));
             entry

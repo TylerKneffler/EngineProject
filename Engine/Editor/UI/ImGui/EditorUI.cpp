@@ -14,6 +14,7 @@ EditorUI::EditorUI(EditorState* state)
 void EditorUI::Render(PlayState playState)
 {
     if (!m_state) return;
+    ImGui::BeginDisabled(m_state->IsSceneRestoreInProgress());
     m_mainMenu.Draw(*m_state, playState, m_gameBuildManager);
     m_panelHost.ReserveToolbar(*m_state);
     m_dockspace.Draw();
@@ -179,23 +180,26 @@ void EditorUI::Render(PlayState playState)
         }
         ImGui::End();
     }
+    ImGui::EndDisabled();
     if (m_state->IsLoadingOverlayVisible())
     {
         ImGuiViewport* viewport = ImGui::GetMainViewport();
-        ImGui::SetNextWindowPos(viewport->WorkPos);
-        ImGui::SetNextWindowSize(viewport->WorkSize);
-        ImGui::SetNextWindowBgAlpha(0.86f);
+        const ImVec2 panelSize(470.0f, 58.0f);
+        ImGui::SetNextWindowPos(ImVec2(
+            viewport->WorkPos.x + (viewport->WorkSize.x - panelSize.x) * 0.5f,
+            viewport->WorkPos.y + 16.0f), ImGuiCond_Always);
+        ImGui::SetNextWindowSize(panelSize, ImGuiCond_Always);
+        ImGui::SetNextWindowBgAlpha(0.94f);
         constexpr ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration |
             ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
-            ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoNav;
+            ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoNav |
+            ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse |
+            ImGuiWindowFlags_NoFocusOnAppearing;
         ImGui::Begin("##editorLoading", nullptr, flags);
         const char* message = m_state->GetLoadingOverlayMessage().empty()
             ? "Loading..." : m_state->GetLoadingOverlayMessage().c_str();
-        const ImVec2 textSize = ImGui::CalcTextSize(message);
-        const ImVec2 windowSize = ImGui::GetWindowSize();
         const ImVec2 windowPos = ImGui::GetWindowPos();
-        const ImVec2 center(windowPos.x + windowSize.x * 0.5f,
-            windowPos.y + windowSize.y * 0.5f - 18.0f);
+        const ImVec2 center(windowPos.x + 29.0f, windowPos.y + 29.0f);
         ImDrawList* drawList = ImGui::GetWindowDrawList();
         drawList->AddCircle(center, 14.0f, IM_COL32(95, 95, 95, 255), 32, 3.0f);
         constexpr float fullTurn = 6.28318530718f;
@@ -209,9 +213,15 @@ void EditorUI::Render(PlayState playState)
         }
         drawList->AddPolyline(arc, 17, IM_COL32(235, 235, 235, 255), 0, 3.0f);
         ImGui::SetCursorPos({
-            (windowSize.x - textSize.x) * 0.5f,
-            windowSize.y * 0.5f + 10.0f });
+            52.0f, (panelSize.y - ImGui::GetTextLineHeight()) * 0.5f });
         ImGui::TextUnformatted(message);
+        if (m_state->IsSceneLoadPending())
+        {
+            ImGui::SetCursorPos({ 396.0f,
+                (panelSize.y - ImGui::GetFrameHeight()) * 0.5f });
+            if (ImGui::Button("Cancel"))
+                m_state->CancelPendingSceneLoad();
+        }
         ImGui::End();
     }
 }

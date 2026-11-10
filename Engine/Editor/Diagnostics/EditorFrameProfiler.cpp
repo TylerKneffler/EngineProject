@@ -169,8 +169,13 @@ namespace Engine::Editor
             << ",\"clear_ms\":" << sample.clearMilliseconds
             << ",\"scene_prepare_ms\":" << sample.scenePrepareMilliseconds
             << ",\"prepare_asset_publication_ms\":" << prepareTimings.assetPublicationMs
+            << ",\"prepare_texture_publication_ms\":" << prepareTimings.texturePublicationMs
+            << ",\"prepare_shader_source_poll_ms\":" << prepareTimings.shaderSourcePollMs
+            << ",\"prepare_shader_pipeline_publication_ms\":" << prepareTimings.shaderPipelinePublicationMs
             << ",\"prepare_object_commit_ms\":" << prepareTimings.objectCommitMs
             << ",\"prepare_prefab_instances_ms\":" << prepareTimings.prefabInstancesMs
+            << ",\"prepare_prefab_signature_ms\":" << prepareTimings.prefabSignatureMs
+            << ",\"prepare_prefab_source_probe_ms\":" << prepareTimings.prefabSourceProbeMs
             << ",\"prepare_graphics_preparation_ms\":" << prepareTimings.graphicsPreparationMs
             << ",\"prepare_native_buffers_ms\":" << prepareTimings.nativeBuffersMs
             << ",\"prepare_transforms_ms\":" << prepareTimings.transformsMs

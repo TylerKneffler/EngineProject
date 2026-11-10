@@ -25,7 +25,8 @@ public:
     Engine::Graphics::IPipelineState* GeometryPipeline(
         const PreparedDraw& draw,
         Engine::Graphics::IPipelineState* base) const;
-    void SubmitGeometry(const PreparedDraw& draw, bool shadowGeometry = false);
+    void SubmitGeometry(const PreparedDraw& draw, bool shadowGeometry = false,
+        uint64_t selectedPlacementId = 0);
     void SubmitMaterialGeometry(
         const PreparedDraw& draw,
         Engine::Graphics::IPipelineState* base,

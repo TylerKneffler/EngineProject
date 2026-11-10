@@ -13,13 +13,14 @@ void Check(bool ok,const char* message)
     if(!ok) throw std::runtime_error(message);
 }
 
-JsonValue Records(size_t count,bool reserve)
+JsonValue Records(size_t count,bool reserveArrays,bool reserveObjects=true)
 {
-    auto records=JsonValue::MakeArray();
+    auto records=reserveArrays ? JsonValue::MakeArray(count) : JsonValue::MakeArray();
     for(size_t i=0;i<count;++i)
     {
-        auto record=reserve ? JsonValue::MakeObject(6) : JsonValue::MakeObject();
-        auto position=JsonValue::MakeArray(),normal=JsonValue::MakeArray();
+        auto record=reserveObjects ? JsonValue::MakeObject(6) : JsonValue::MakeObject();
+        auto position=reserveArrays ? JsonValue::MakeArray(3) : JsonValue::MakeArray();
+        auto normal=reserveArrays ? JsonValue::MakeArray(3) : JsonValue::MakeArray();
         position.Push(JsonValue(float(i))).Push(JsonValue(0.f)).Push(JsonValue(-2.f));
         normal.Push(JsonValue(0.f)).Push(JsonValue(1.f)).Push(JsonValue(0.f));
         record.Set("id",JsonValue(std::to_string(i+1)))
@@ -40,7 +41,7 @@ void Benchmark()
         {
             const int reserve=(round+item)%2; // Alternate which path goes first.
             const auto start=Clock::now();
-            auto records=Records(65536,reserve!=0);
+            auto records=Records(65536,reserve!=0,true);
             const auto built=Clock::now();
             observed+=records.ArraySize();
             records=JsonValue();
@@ -85,11 +86,18 @@ int main(int argc,char** argv)
             Check(copy.ObjectSize()==41 && copy["39"].AsInt()==39,"reserved object failed to grow beyond hint");
             auto moved=std::move(copy);
             Check(moved.ObjectSize()==41 && copy.IsNull(),"reserved object move changed ownership");
+
+            auto array=JsonValue::MakeArray(capacity);
+            Check(array.IsArray() && array.ArraySize()==0 && JsonWriteCompact(array)=="[]",
+                "element capacity created serialized values");
+            for(size_t i=0;i<capacity+2;++i) array.Push(JsonValue(int(i)));
+            Check(array.ArraySize()==capacity+2 && array.ArrayAt(capacity+1).AsInt()==int(capacity+1),
+                "reserved array failed to grow beyond hint");
         }
         const auto normal=Records(31,false),reserved=Records(31,true);
         Check(JsonWrite(normal)==JsonWrite(reserved) && JsonWriteCompact(normal)==JsonWriteCompact(reserved),
             "reserved placement construction changed serialized output");
-        std::cout << "JSON object construction compatibility passed\n";
+        std::cout << "JSON object and array construction compatibility passed\n";
         if(argc>1 && std::string(argv[1])=="--benchmark") Benchmark();
     }
     catch(const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }

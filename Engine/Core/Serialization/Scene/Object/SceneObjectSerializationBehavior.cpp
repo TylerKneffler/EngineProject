@@ -85,6 +85,48 @@ bool DeserializeExpandedObject(
     Engine::Graphics::IGraphicsProvider* graphicsProvider,
     const std::unordered_map<std::string, SceneSerializer::Factory>& registry,
     const SceneObjectBehavior::DeserializeOptions& options);
+bool DeserializeExpandedObjectShallow(
+    Engine::Core::Object& object,
+    Engine::Scene::Scene& scene,
+    const JsonValue& node,
+    Engine::Graphics::IGraphicsProvider* graphicsProvider,
+    const std::unordered_map<std::string, SceneSerializer::Factory>& registry,
+    const SceneObjectBehavior::DeserializeOptions& options);
+
+Engine::Core::Object* DeserializeObjectNodeInternal(
+    Engine::Scene::Scene& scene,
+    const JsonValue& node,
+    Engine::Graphics::IGraphicsProvider* graphicsProvider,
+    const std::unordered_map<std::string, SceneSerializer::Factory>& registry,
+    const SceneObjectBehavior::DeserializeOptions& options)
+{
+    if (!node.IsObject()) return nullptr;
+    if (node.Has("prefab"))
+    {
+        Engine::Core::Object* object = SceneSerializer::InstantiatePrefab(
+            scene, node["prefab"].AsString(), graphicsProvider);
+        if (!object)
+            throw std::runtime_error("Could not instantiate prefab '" +
+                node["prefab"].AsString() + "'");
+        SceneObjectBehavior::DeserializeTransform(object->transform, node["transform"]);
+        if (node.Has("enabled")) object->enabled = node["enabled"].AsBool();
+        if (node.Has("prefabOverrides"))
+            SceneObjectBehavior::ApplyPrefabPatches(
+                *object, node["prefabOverrides"], graphicsProvider);
+        SceneObjectBehavior::ApplyBakedMaterialOverrides(
+            *object, node, graphicsProvider);
+        return object;
+    }
+
+    Engine::Core::Object* object = scene.AddObject();
+    if (!DeserializeExpandedObjectShallow(
+            *object, scene, node, graphicsProvider, registry, options))
+    {
+        scene.RemoveObject(object);
+        return nullptr;
+    }
+    return object;
+}
 
 Engine::Core::Object* DeserializeObjectTreeInternal(
     Engine::Scene::Scene& scene,
@@ -125,7 +167,7 @@ Engine::Core::Object* DeserializeObjectTreeInternal(
     return object;
 }
 
-bool DeserializeExpandedObject(
+bool DeserializeExpandedObjectShallow(
     Engine::Core::Object& object,
     Engine::Scene::Scene& scene,
     const JsonValue& node,
@@ -212,6 +254,20 @@ bool DeserializeExpandedObject(
     if (auto* legacy = object.GetComponent<Engine::Components::RigController>())
         legacy->EnsureComponents();
 
+    return true;
+}
+
+bool DeserializeExpandedObject(
+    Engine::Core::Object& object,
+    Engine::Scene::Scene& scene,
+    const JsonValue& node,
+    Engine::Graphics::IGraphicsProvider* graphicsProvider,
+    const std::unordered_map<std::string, SceneSerializer::Factory>& registry,
+    const SceneObjectBehavior::DeserializeOptions& options)
+{
+    if (!DeserializeExpandedObjectShallow(
+            object, scene, node, graphicsProvider, registry, options))
+        return false;
     const JsonValue& children = node["children"];
     for (std::size_t i = 0; i < children.ArraySize(); ++i)
     {
@@ -221,7 +277,6 @@ bool DeserializeExpandedObject(
             throw std::runtime_error("Could not instantiate child object");
         scene.SetParentLocal(child, &object);
     }
-
     return true;
 }
 }
@@ -247,6 +302,17 @@ Engine::Core::Object* SceneObjectBehavior::DeserializeObjectTree(
     const DeserializeOptions& options)
 {
     return DeserializeObjectTreeInternal(
+        scene, node, graphicsProvider, registry, options);
+}
+
+Engine::Core::Object* SceneObjectBehavior::DeserializeObjectNode(
+    Engine::Scene::Scene& scene,
+    const JsonValue& node,
+    Engine::Graphics::IGraphicsProvider* graphicsProvider,
+    const std::unordered_map<std::string, SceneSerializer::Factory>& registry,
+    const DeserializeOptions& options)
+{
+    return DeserializeObjectNodeInternal(
         scene, node, graphicsProvider, registry, options);
 }
 
@@ -520,10 +586,10 @@ JsonValue SceneObjectBehavior::BuildPrefabPatches(const Engine::Core::Object& in
 {
     PrefabLoadProfile::Stage stage("prefab_patch_build");
     JsonValue patches = JsonValue::MakeArray();
-    if (instance.PrefabSourceSnapshot.empty()) return patches;
+    if (instance.GetPrefabSourceSnapshot().empty()) return patches;
     try
     {
-        const JsonValue baseline = JsonParse(instance.PrefabSourceSnapshot);
+        const JsonValue baseline = JsonParse(instance.GetPrefabSourceSnapshot());
         const JsonValue current = SerializeObject(instance, false);
         DiffJson(baseline, current, JsonValue::MakeArray(), patches,
             !includeRootTransform);
@@ -662,9 +728,9 @@ bool SceneObjectBehavior::ApplyObjectState(Engine::Core::Object& object, const J
 bool SceneObjectBehavior::ApplyPrefabPatches(Engine::Core::Object& instance, const JsonValue& patches,
     Engine::Graphics::IGraphicsProvider* graphicsProvider)
 {
-    if (instance.PrefabSourceSnapshot.empty()) return false;
+    if (instance.GetPrefabSourceSnapshot().empty()) return false;
     JsonValue merged;
-    try { merged = JsonParse(instance.PrefabSourceSnapshot); }
+    try { merged = JsonParse(instance.GetPrefabSourceSnapshot()); }
     catch (...) { return false; }
     for (size_t i = 0; i < patches.ArraySize(); ++i)
         if (!ApplyPatch(merged, patches.ArrayAt(i))) return false;

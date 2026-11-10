@@ -2,9 +2,9 @@
 #include "CanopyExperiment.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Window.h"
-#include "Core/Compoonents/Obj/Mesh.h"
-#include "Core/Compoonents/Obj/Terrain.h"
-#include "Core/Compoonents/Obj/TerrainObjectLayer.h"
+#include "Core/Compoonents/Mesh/Mesh.h"
+#include "Core/Compoonents/Terrain/Terrain.h"
+#include "Core/Compoonents/Terrain/TerrainObjectLayer.h"
 #include "Core/Compoonents/Physics/PrimitiveObjectCollider.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
 #include "Core/Serialization/SceneSerializer.h"
@@ -171,6 +171,10 @@ template<class Renderer> void Benchmark(const std::string& backend,bool foliageO
     TerrainObjectLayer* forest=nullptr;
     for(auto* layer:layers) if(layer->layerName=="Oak forest") forest=layer;
     Check(forest,"forest layer missing");
+    if(const char* shadowRange=std::getenv("ENGINE_FOREST_AUDIT_LAYER_SHADOW_DISTANCE"))
+        forest->shadowDistance=std::strtof(shadowRange,nullptr);
+    const int authoredShadowLod=forest->shadowLod;
+    const char* shadowLodStudy=std::getenv("ENGINE_FOREST_AUDIT_SHADOW_LOD_STUDY");
     // The forest is authored under the terrain. Detach it while preserving
     // its world transform, so hiding terrain does not hide the trees too.
     Check(scene.MoveObject(forest->Owner,nullptr,Engine::Scene::Scene::ObjectPlacement::AsChild),"forest detach failed");
@@ -255,6 +259,80 @@ template<class Renderer> void Benchmark(const std::string& backend,bool foliageO
                 if(texture && !texture->Prepare(renderer.GetGraphicsProvider())) ready=false;
         if(ready && warm>=30) break;
         Check(std::chrono::steady_clock::now()<deadline,"texture warmup timed out");
+    }
+    if(shadowLodStudy)
+    {
+        Check(shadows,"shadow LOD comparison requires shadows");
+        width=primaryWidth; height=width*9/16;
+        renderer.WaitIdle(); renderer.Resize(width,height);
+        std::vector<int> variants={authoredShadowLod,-1};
+        if(const char* requested=std::getenv("ENGINE_FOREST_AUDIT_SHADOW_LOD_ORDER"))
+            if(requested[0]=='1') std::reverse(variants.begin(),variants.end());
+        for(const int shadowLod:variants)
+        {
+            forest->shadowLod=shadowLod;
+            forest->MarkConfigurationDirty();
+            for(const std::string view:{"entrance","overlook","motion"})
+            {
+                const glm::dvec3 origin=view=="entrance" ? glm::dvec3(entrance):glm::dvec3(-5,27,-39);
+                const glm::dvec3 aim=view=="entrance" ? glm::dvec3(target):glm::dvec3(2,1,5);
+                constexpr int samples=120;
+                const auto positionFrame=[&](int frame) {
+                    const auto shift=view=="motion" ? glm::dvec3(3.5*std::sin(frame*6.283185307179586/samples),0,0):glm::dvec3(0);
+                    viewer->transform.position=origin+shift; camera->target=aim+shift;
+                };
+                for(int i=0;i<samples;++i) { positionFrame(i); scene.InvalidateDirectionalShadowCache(); render(); }
+                uint64_t lastGpu=renderer.GetFrameTimingTelemetry().gpuSampleId;
+                uint64_t lastShadow=shadowTelemetry.gpuSampleId;
+                for(int i=0;i<samples;++i)
+                {
+                    positionFrame(i); scene.InvalidateDirectionalShadowCache(); render();
+                    const auto gpu=renderer.GetFrameTimingTelemetry();
+                    const auto shadowIndex=static_cast<size_t>(Engine::Graphics::GpuTimingStage::Shadow);
+                    const bool valid=gpu.gpuTimingsValid && gpu.gpuSampleId!=lastGpu;
+                    const bool shadowValid=shadowTelemetry.gpuTimingsValid &&
+                        shadowTelemetry.gpuSampleId!=lastShadow;
+                    if(valid) lastGpu=gpu.gpuSampleId;
+                    if(shadowValid) lastShadow=shadowTelemetry.gpuSampleId;
+                    output<<"{"<<Engine::Editor::PerformanceProvenanceFields()<<",\"backend\":\""<<backend
+                        <<"\",\"view\":\""<<view<<"\",\"shadow_lod\":"<<shadowLod
+                        <<",\"shadow_distance\":"<<forest->shadowDistance<<",\"shadow_refresh\":\"moving-full-route\""
+                        <<",\"frame\":"<<i<<",\"width\":"<<width<<",\"height\":"<<height
+                        <<",\"x\":"<<viewer->transform.position.x<<",\"y\":"<<viewer->transform.position.y<<",\"z\":"<<viewer->transform.position.z
+                        <<",\"gpu_sample_id\":"<<gpu.gpuSampleId<<",\"gpu_valid\":"<<(valid?"true":"false")
+                        <<",\"shadow_valid\":"<<(shadowValid?"true":"false")
+                        <<",\"shadow_workload_valid\":"<<(shadowTelemetry.gpuWorkloadValid?"true":"false")
+                        <<",\"shadow_sample_id\":"<<shadowTelemetry.gpuSampleId
+                        <<",\"gpu_shadow_ms\":"<<shadowTelemetry.gpuMilliseconds[shadowIndex]
+                        <<",\"shadow_vs\":"<<shadowTelemetry.gpuWorkload[shadowIndex].vertices
+                        <<",\"shadow_primitives\":"<<shadowTelemetry.gpuWorkload[shadowIndex].primitives
+                        <<",\"shadow_ps\":"<<shadowTelemetry.gpuWorkload[shadowIndex].fragments;
+                    gpu.WriteOpaqueJson(output); output<<"}\n";
+                }
+                output.flush();
+                std::cout<<backend<<" shadowLod="<<shadowLod<<' '<<view<<" measured"<<std::endl;
+            }
+            if(envFlag("ENGINE_FOREST_AUDIT_SHADOW_LOD_CAPTURE",false))
+            {
+                for(const std::string view:{"entrance","overlook"})
+                {
+                    viewer->transform.position=view=="entrance"?entrance:glm::vec3(-5,27,-39);
+                    camera->target=view=="entrance"?target:glm::vec3(2,1,5);
+                    requestCapture=true; for(int i=0;i<3;++i) render(); requestCapture=false;
+                    std::vector<uint8_t> pixels;
+                    Check(renderer.ReadSceneCaptureRGBA(pixels) && pixels.size()==size_t(width)*height*4,
+                        "shadow LOD image capture failed");
+                    std::ofstream image(outputDirectory/(backend+"-shadow-lod-"+
+                        std::to_string(shadowLod)+"-"+view+".ppm"),std::ios::binary);
+                    image<<"P6\n"<<width<<' '<<height<<"\n255\n";
+                    for(size_t i=0;i<pixels.size();i+=4)
+                        image.write(reinterpret_cast<const char*>(pixels.data()+i),3);
+                    Check(image.good(),"cannot write shadow LOD capture");
+                }
+            }
+        }
+        forest->shadowLod=authoredShadowLod;
+        renderer.WaitIdle(); scene.ClearObjects(); renderer.WaitIdle(); return;
     }
     if(canopyDirectory)
     {
@@ -582,22 +660,24 @@ template<class Renderer> void Benchmark(const std::string& backend,bool foliageO
     }
     if(!prepassOnly && !foliageOnly && !materialOnly) {
     for(const std::string view:{"entrance","mid","overlook"}) {
+        const char* requestedView=std::getenv("ENGINE_FOREST_AUDIT_VIEW");
+        if(requestedView && view!=requestedView) continue;
         viewer->transform.position=view=="entrance"?entrance:view=="mid"?glm::vec3(-5,3,-65):glm::vec3(-5,27,-39);
         camera->target=view=="entrance"?target:glm::vec3(2,1,5);
         for(float distance:{90.f,55.f}) if(!cpuProfile || distance==90.f) measure(view,"full",distance,primaryWidth);
     }
     viewer->transform.position=entrance; camera->target=target;
-    if(!cpuProfile) for(unsigned resolution:{primaryWidth,primaryWidth/2})
+    if(!cpuProfile && !std::getenv("ENGINE_FOREST_AUDIT_VIEW")) for(unsigned resolution:{primaryWidth,primaryWidth/2})
         for(const std::string mode:{"full","trees","terrain","bark","bark-vertex-only","leaves","leaves-vertex-only","leaves-unlit","leaves-solid","leaves-lod1"}) measure("entrance",mode,90,resolution);
     }
-    if(!prepassOnly && !foliageOnly && !cpuProfile) {
+    if(!prepassOnly && !foliageOnly && !cpuProfile && !std::getenv("ENGINE_FOREST_AUDIT_VIEW")) {
         viewer->transform.position=entrance; camera->target=target;
         std::vector<std::string> modes={"material-reference","material-mips","material-cheap"};
         if(std::getenv("ENGINE_FOREST_AUDIT_REVERSE")) std::reverse(modes.begin(),modes.end());
         for(const auto& mode:modes)
             measure("entrance",mode,90,primaryWidth);
     }
-    if(!prepassOnly && !cpuProfile && !materialOnly) for(const std::string view:{"entrance","overlook"}) {
+    if(!prepassOnly && !cpuProfile && !materialOnly && !std::getenv("ENGINE_FOREST_AUDIT_VIEW")) for(const std::string view:{"entrance","overlook"}) {
         viewer->transform.position=view=="entrance"?entrance:glm::vec3(-5,27,-39);
         camera->target=view=="entrance"?target:glm::vec3(2,1,5);
         for(const std::string mode:{"foliage","trees-foliage"}) measure(view,mode,55,primaryWidth);

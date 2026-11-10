@@ -940,6 +940,8 @@ void Scene::RemoveObject(Engine::Core::Object* obj)
             m_selectedObject) != objectsToRemove.end())
     {
         m_selectedObject = nullptr;
+        m_selectedPlacementId = 0;
+        m_selectedPlacementLayer = nullptr;
     }
     if (m_previewObject &&
         std::find(objectsToRemove.begin(), objectsToRemove.end(),
@@ -1065,6 +1067,8 @@ void Scene::ClearObjects()
     m_objectsById.clear();
     m_componentSnapshotCache.clear();
     m_selectedObject = nullptr;
+    m_selectedPlacementId = 0;
+    m_selectedPlacementLayer = nullptr;
     m_editorSelectedMesh = nullptr;
     m_previewObject = nullptr;
     NotifyStructureChanged();
@@ -1223,6 +1227,19 @@ void Scene::CommitPendingObjectChanges()
     m_componentRegistry.ReleaseSnapshots();
     if (!m_suppressSceneSnapshotPublication)
         PublishSceneSnapshot();
+}
+
+void Scene::BeginIncrementalRestore()
+{
+    AssertOwnerThread();
+    m_suppressSceneSnapshotPublication = true;
+}
+
+void Scene::EndIncrementalRestore()
+{
+    AssertOwnerThread();
+    m_suppressSceneSnapshotPublication = false;
+    CommitPendingObjectChanges();
 }
 
 void Scene::PublishSceneSnapshot()

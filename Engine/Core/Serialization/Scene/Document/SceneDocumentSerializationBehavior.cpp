@@ -147,6 +147,106 @@ bool Detail::SceneDocumentBehavior::DeserializeScene(Engine::Scene::Scene& scene
     return true;
 }
 
+bool SceneSerializer::BeginIncrementalLoadFromValue(Scene& scene,
+    const JsonValue& snapshot)
+{
+    EnsureBuiltinsRegistered();
+    scene.AssertOwnerThread();
+    if (!snapshot.IsObject() || snapshot["version"].AsInt() != 1)
+        return false;
+    try
+    {
+        scene.BeginIncrementalRestore();
+        scene.ClearObjects();
+        scene.settings.dimension = Engine::Model::SceneDimension::ThreeD;
+        Engine::Scene::DeserializeSceneSettings(scene.settings,
+            snapshot["settings"]);
+        scene.SetEditorMode2D(scene.settings.dimension ==
+            Engine::Model::SceneDimension::TwoD);
+        return true;
+    }
+    catch (const std::exception& error)
+    {
+        OutputDebugStringA((std::string("[SceneSerializer] Failed to begin incremental restore: ") +
+            error.what() + "\n").c_str());
+        return false;
+    }
+}
+
+bool SceneSerializer::ContinueIncrementalLoadFromValue(Scene& scene,
+    const JsonValue& snapshot, IncrementalLoadState& state,
+    std::size_t maxObjectNodes, bool& complete)
+{
+    EnsureBuiltinsRegistered();
+    scene.AssertOwnerThread();
+    complete = false;
+    if (!snapshot.IsObject() || snapshot["version"].AsInt() != 1)
+        return false;
+    try
+    {
+        const auto& objects = snapshot["objects"];
+        if (state.nextTopLevelObject > objects.ArraySize() ||
+            state.completedTopLevelObjects > objects.ArraySize())
+            return false;
+        const auto& registry = GetRegistry();
+        const std::size_t budget = std::max<std::size_t>(1, maxObjectNodes);
+        std::size_t restoredNodes = 0;
+        while (restoredNodes < budget)
+        {
+            if (state.pendingNodes.empty())
+            {
+                if (state.topLevelObjectInProgress)
+                {
+                    ++state.completedTopLevelObjects;
+                    state.topLevelObjectInProgress = false;
+                }
+                if (state.nextTopLevelObject >= objects.ArraySize())
+                    break;
+                state.pendingNodes.push_back({
+                    &objects.ArrayAt(state.nextTopLevelObject++), nullptr });
+                state.topLevelObjectInProgress = true;
+            }
+
+            const auto pending = state.pendingNodes.back();
+            state.pendingNodes.pop_back();
+            if (!pending.node)
+                return false;
+            Engine::Core::Object* object =
+                Detail::SceneObjectBehavior::DeserializeObjectNode(
+                    scene, *pending.node, scene.GetGraphicsProvider(), registry);
+            if (!object)
+                return false;
+            if (pending.parent && !scene.SetParentLocal(object, pending.parent))
+                throw std::runtime_error("Could not attach restored scene object");
+
+            if (!pending.node->Has("prefab"))
+            {
+                const auto& children = (*pending.node)["children"];
+                for (std::size_t i = children.ArraySize(); i > 0; --i)
+                    state.pendingNodes.push_back({ &children.ArrayAt(i - 1), object });
+            }
+            ++restoredNodes;
+        }
+
+        if (state.pendingNodes.empty() && state.topLevelObjectInProgress)
+        {
+            ++state.completedTopLevelObjects;
+            state.topLevelObjectInProgress = false;
+        }
+        complete = state.completedTopLevelObjects == objects.ArraySize() &&
+            state.pendingNodes.empty();
+        if (complete)
+            scene.EndIncrementalRestore();
+        return true;
+    }
+    catch (const std::exception& error)
+    {
+        OutputDebugStringA((std::string("[SceneSerializer] Failed during incremental restore: ") +
+            error.what() + "\n").c_str());
+        return false;
+    }
+}
+
 // ---- Load -------------------------------------------------------------------
 bool SceneSerializer::LoadFromString(Engine::Scene::Scene& scene, const std::string& source,
     Engine::Graphics::IGraphicsProvider* graphicsProvider)

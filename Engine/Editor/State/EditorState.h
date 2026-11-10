@@ -8,6 +8,7 @@
 #include "Core/ProjectLoader.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Serialization/Json.h"
+#include "Core/Serialization/SceneSerializer.h"
 #include "Core/Renderers/IEditorRenderer.h"
 #include "UI/IEditorUi.h"
 #include "Core/Gizmos/EditorGizmoSystem.h"
@@ -108,6 +109,7 @@ public:
     void LoadStartupScene(const std::string& path, bool rememberScene = true);
     void RequestSceneLoad(const std::string& path);
     void ProcessPendingSceneLoad();
+    void CancelPendingSceneLoad();
     bool ConfirmSceneLoad(bool saveCurrentScene);
     void CancelSceneLoad();
     bool HasPendingSceneLoadWarning() const { return m_showUnsavedWarning; }
@@ -246,10 +248,15 @@ public:
         m_loadingOverlayVisible = visible;
         m_loadingOverlayMessage = std::move(message);
     }
-    bool IsLoadingOverlayVisible() const { return m_loadingOverlayVisible || !m_queuedScenePath.empty(); }
+    bool IsLoadingOverlayVisible() const
+    { return m_loadingOverlayVisible || !m_queuedScenePath.empty() || m_incrementalSceneRestoreActive; }
+    bool IsSceneRestoreInProgress() const { return m_incrementalSceneRestoreActive; }
+    bool IsSceneLoadPending() const
+    { return !m_queuedScenePath.empty() || m_incrementalSceneRestoreActive; }
     const std::string& GetLoadingOverlayMessage() const
     {
-        return m_queuedScenePath.empty() ? m_loadingOverlayMessage : m_sceneLoadingMessage;
+        return (m_queuedScenePath.empty() && !m_incrementalSceneRestoreActive)
+            ? m_loadingOverlayMessage : m_sceneLoadingMessage;
     }
     void RefreshSelectionAfterReload(const ::Engine::Scene::Scene::ObjectPath& selectedPath);
 
@@ -930,6 +937,12 @@ private:
     std::string m_queuedScenePath;
     std::future<Engine::Serialization::JsonValue> m_queuedSceneDocument;
     std::string m_sceneLoadingMessage;
+    Engine::Serialization::JsonValue m_incrementalSceneDocument;
+    Engine::Serialization::JsonValue m_incrementalSceneRollback;
+    Engine::Serialization::SceneSerializer::IncrementalLoadState m_incrementalSceneState;
+    std::string m_incrementalScenePath;
+    bool m_incrementalSceneRestoreActive = false;
+    std::chrono::steady_clock::time_point m_incrementalSceneStarted{};
     std::string m_playModeSceneSnapshot;
     std::future<Engine::Serialization::JsonValue> m_playModeParsedSnapshot;
     bool m_prePlayHasUnsavedChanges = false;

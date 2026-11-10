@@ -21,7 +21,7 @@ void PropertiesView::UnpackSelectedPrefab()
 
     const std::string prefabPath = prefabRoot->Prefab->GetPath();
     prefabRoot->Prefab.reset();
-    prefabRoot->PrefabSourceSnapshot.clear();
+    prefabRoot->ClearPrefabSourceSnapshot();
     LogAssetDrop("[Properties] Unpacked prefab instance: " + prefabPath);
     if (OnComponentsChanged)
         OnComponentsChanged();

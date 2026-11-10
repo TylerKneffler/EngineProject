@@ -9,6 +9,7 @@
 #include "Core/Compoonents/Materials/Material.h"
 #include "Core/Compoonents/Terrain/Terrain.h"
 #include "Core/Compoonents/Terrain/TerrainManager.h"
+#include "Core/Compoonents/Terrain/TerrainObjectLayer.h"
 #include "Core/Compoonents/Terrain/TerrainBatchAppearance.h"
 #include "Core/Compoonents/Physics/SpatialManipulator.h"
 #include "Core/Compoonents/Sprite/Sprite.h"
@@ -2002,16 +2003,31 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
 
         // Draw selected object outline overlay. Structured buffers remain
         // bound across the pipeline change and do not need rebinding.
+        const uint64_t selectedPlacementId = m_selectedPlacementId;
+        const auto* instanceData = draw.mesh && draw.mesh->IsInstanced()
+            ? draw.mesh->GetInstanceData().get() : nullptr;
+        const auto* drawLayer = draw.object
+            ? draw.object->GetComponentInParent<
+                Engine::Components::TerrainObjectLayer>() : nullptr;
+        const bool selectedPlacement = selectedPlacementId != 0 &&
+            m_selectedPlacementLayer && drawLayer &&
+            drawLayer->Owner == m_selectedPlacementLayer && instanceData &&
+            std::find(instanceData->placementIds.begin(),
+                instanceData->placementIds.end(), selectedPlacementId) !=
+                    instanceData->placementIds.end();
+        const bool selectedObject = selectedPlacementId == 0 &&
+            (m_editorSelectedMesh ? draw.mesh == m_editorSelectedMesh
+                : draw.object == m_selectedObject);
         if (includeEditorVisuals && !draw.preview &&
             draw.mesh != m_editorWeightPaintMesh &&
-            (m_editorSelectedMesh ? draw.mesh == m_editorSelectedMesh
-                : draw.object == m_selectedObject) && m_objectOutlinePipeline)
+            (selectedPlacement || selectedObject) && m_objectOutlinePipeline)
         {
             context->SetPipeline(geometrySubmission.GeometryPipeline(
                 draw, m_objectOutlinePipeline.get()));
             context->SetConstantBuffer(
                 0, m_objectConstantBuffer.get(), draw.constantBufferOffset);
-            geometrySubmission.SubmitGeometry(draw);
+            geometrySubmission.SubmitGeometry(draw, false,
+                selectedPlacement ? selectedPlacementId : 0);
         }
     }
     m_lastRenderCpuTimings.submissionMs=std::max(0.,std::chrono::duration<double,std::milli>(RenderClock::now()-submissionStart).count()-(m_lastRenderCpuTimings.uploadMs-uploadBeforeSubmission));

@@ -192,6 +192,13 @@ JsonValue JsonValue::MakeArray()
     return v;
 }
 
+JsonValue JsonValue::MakeArray(std::size_t elementCapacity)
+{
+    JsonValue v = MakeArray();
+    asArr(v.m_data)->reserve(elementCapacity);
+    return v;
+}
+
 JsonValue JsonValue::MakeObject(std::size_t memberCapacity)
 {
     JsonValue v = MakeObject();

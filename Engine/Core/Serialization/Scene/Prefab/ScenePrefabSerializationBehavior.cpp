@@ -278,7 +278,7 @@ struct CachedPrefabDocument
     std::filesystem::file_time_type modified{};
     std::uintmax_t size = 0;
     JsonValue document;
-    std::string sourceSnapshot;
+    std::shared_ptr<const std::string> sourceSnapshot;
     Engine::Graphics::IGraphicsProvider* sourceProvider = nullptr;
     glm::vec3 sourcePosition { 0.f };
     glm::vec3 sourceRotation { 0.f };
@@ -287,6 +287,11 @@ struct CachedPrefabDocument
 
 thread_local std::array<std::shared_ptr<CachedPrefabDocument>, 8> prefabCache;
 thread_local std::size_t nextPrefabCache = 0;
+// Keep one large document resident while small tree variants churn through
+// the ordinary ring. Meadow-sized placement prefabs are expensive to parse
+// and are commonly instantiated again during play-stop restoration.
+thread_local std::shared_ptr<CachedPrefabDocument> largePrefabCache;
+constexpr std::uintmax_t LargePrefabCacheThresholdBytes = 1024 * 1024;
 
 std::shared_ptr<CachedPrefabDocument> FindCachedPrefabDocument(
     const std::filesystem::path& path, const std::string& key)
@@ -295,6 +300,9 @@ std::shared_ptr<CachedPrefabDocument> FindCachedPrefabDocument(
     const auto modified = std::filesystem::last_write_time(path, modifiedError);
     const auto size = std::filesystem::file_size(path, sizeError);
     if (modifiedError || sizeError) return {};
+    if (largePrefabCache && largePrefabCache->key == key &&
+        largePrefabCache->modified == modified && largePrefabCache->size == size)
+        return largePrefabCache;
     for (const auto& entry : prefabCache)
         if (entry && entry->key == key &&
             entry->modified == modified && entry->size == size)
@@ -322,15 +330,28 @@ std::shared_ptr<CachedPrefabDocument> LoadPrefabDocumentCached(
     };
     if (modifiedError || sizeError)
         return create();
+    if (largePrefabCache && largePrefabCache->key == key &&
+        largePrefabCache->modified == modified && largePrefabCache->size == size)
+        return largePrefabCache;
     for (const auto& entry : prefabCache)
         if (entry && entry->key == key &&
             entry->modified == modified && entry->size == size)
             return entry;
     auto document = create();
-    prefabCache[nextPrefabCache] = document;
-    nextPrefabCache = (nextPrefabCache + 1) % prefabCache.size();
+    if (size >= LargePrefabCacheThresholdBytes)
+        largePrefabCache = document;
+    else
+    {
+        prefabCache[nextPrefabCache] = document;
+        nextPrefabCache = (nextPrefabCache + 1) % prefabCache.size();
+    }
     return document;
 }
+}
+
+void SceneSerializer::ClearLargePrefabDocumentCache()
+{
+    largePrefabCache.reset();
 }
 
 Engine::Core::Object* SceneSerializer::InstantiatePrefab(
@@ -428,7 +449,7 @@ Engine::Core::Object* SceneSerializer::InstantiatePrefabFromValue(
             for (const auto& [object, index] : legacyNodeBindings)
                 model->BindNode(index, object);
         }
-        if (document->sourceSnapshot.empty() ||
+        if (!document->sourceSnapshot ||
             document->sourceProvider != graphicsProvider)
         {
             PrefabLoadProfile::Stage stage("source_snapshot");
@@ -441,15 +462,34 @@ Engine::Core::Object* SceneSerializer::InstantiatePrefabFromValue(
                 PrefabLoadProfile::Stage encode("source_snapshot_encode");
                 Detail::SceneObjectBehavior::SetPrefabSourceSnapshot(*rootObject, source);
             }
-            document->sourceSnapshot = rootObject->PrefabSourceSnapshot;
-            document->sourceProvider = graphicsProvider;
-            document->sourcePosition = rootObject->PrefabSourcePosition;
-            document->sourceRotation = rootObject->PrefabSourceRotation;
-            document->sourceScale = rootObject->PrefabSourceScale;
+            if (document->size < LargePrefabCacheThresholdBytes)
+            {
+                document->sourceSnapshot =
+                    std::make_shared<const std::string>(
+                        rootObject->PrefabSourceSnapshot);
+                document->sourceProvider = graphicsProvider;
+                document->sourcePosition = rootObject->PrefabSourcePosition;
+                document->sourceRotation = rootObject->PrefabSourceRotation;
+                document->sourceScale = rootObject->PrefabSourceScale;
+            }
+            else
+            {
+                // Share the root's immutable override baseline with the large
+                // document cache. This avoids recapturing a placement-heavy
+                // prefab during Play->Stop without retaining a second copy.
+                document->sourceSnapshot = rootObject->SharePrefabSourceSnapshot();
+                document->sourceProvider = graphicsProvider;
+                document->sourcePosition = rootObject->PrefabSourcePosition;
+                document->sourceRotation = rootObject->PrefabSourceRotation;
+                document->sourceScale = rootObject->PrefabSourceScale;
+            }
         }
         else
         {
-            rootObject->PrefabSourceSnapshot = document->sourceSnapshot;
+            if (document->size < LargePrefabCacheThresholdBytes)
+                rootObject->PrefabSourceSnapshot = *document->sourceSnapshot;
+            else
+                rootObject->SetSharedPrefabSourceSnapshot(document->sourceSnapshot);
             rootObject->PrefabSourcePosition = document->sourcePosition;
             rootObject->PrefabSourceRotation = document->sourceRotation;
             rootObject->PrefabSourceScale = document->sourceScale;
@@ -587,11 +627,11 @@ bool SceneSerializer::RevertPrefabOverrides(Engine::Core::Object& instance,
     Engine::Graphics::IGraphicsProvider* graphicsProvider)
 {
     Engine::Core::Object* root = instance.GetPrefabInstanceRoot();
-    if (!root || !root->Prefab || root->PrefabSourceSnapshot.empty()) return false;
+    if (!root || !root->Prefab || root->GetPrefabSourceSnapshot().empty()) return false;
     try
     {
         const bool result = Detail::SceneObjectBehavior::ApplyObjectState(*root,
-            JsonParse(root->PrefabSourceSnapshot), graphicsProvider);
+            JsonParse(root->GetPrefabSourceSnapshot()), graphicsProvider);
         root->PrefabOverrideCacheValid = false;
         return result;
     }

@@ -13,6 +13,45 @@ namespace Engine::Core
 class Object
 {
 public:
+    class PrefabSnapshotString
+    {
+        std::string owned;
+        std::shared_ptr<const std::string> shared;
+    public:
+        const std::string& Get() const
+        {
+            if (!owned.empty()) return owned;
+            static const std::string empty;
+            return shared ? *shared : empty;
+        }
+        bool empty() const { return Get().empty(); }
+        std::size_t size() const { return Get().size(); }
+        const char* c_str() const { return Get().c_str(); }
+        operator const std::string&() const { return Get(); }
+        PrefabSnapshotString& operator=(std::string value)
+        {
+            owned = std::move(value);
+            shared.reset();
+            return *this;
+        }
+        void clear()
+        {
+            owned.clear();
+            shared.reset();
+        }
+        std::shared_ptr<const std::string> Share()
+        {
+            if (!shared && !owned.empty())
+                shared = std::make_shared<const std::string>(std::move(owned));
+            return shared;
+        }
+        void SetShared(std::shared_ptr<const std::string> snapshot)
+        {
+            owned.clear();
+            shared = std::move(snapshot);
+        }
+    };
+
     using Transform = Engine::Components::Transform;
     using PrefabAsset = Engine::Prefab::PrefabAsset;
 
@@ -39,7 +78,24 @@ public:
     std::shared_ptr<const PrefabAsset> Prefab; // null for scene-only objects
     // Full prefab object state at the time this linked instance was loaded.
     // Scene serialization stores only differences from this baseline.
-    std::string PrefabSourceSnapshot;
+    PrefabSnapshotString PrefabSourceSnapshot;
+    const std::string& GetPrefabSourceSnapshot() const
+    {
+        return PrefabSourceSnapshot.Get();
+    }
+    std::shared_ptr<const std::string> SharePrefabSourceSnapshot()
+    {
+        return PrefabSourceSnapshot.Share();
+    }
+    void SetSharedPrefabSourceSnapshot(
+        std::shared_ptr<const std::string> snapshot)
+    {
+        PrefabSourceSnapshot.SetShared(std::move(snapshot));
+    }
+    void ClearPrefabSourceSnapshot()
+    {
+        PrefabSourceSnapshot.clear();
+    }
     mutable bool PrefabOverrideCacheValid = false;
     mutable bool PrefabHasOverrides = false;
     mutable bool PrefabHasNonTransformOverrides = false;

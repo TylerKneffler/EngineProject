@@ -164,9 +164,18 @@ void Scene::PrepareRenderFrame(bool publishSnapshot)
     using PrepareClock = std::chrono::steady_clock;
     const auto prepareBegin=PrepareClock::now();
     m_lastPrepareTimings={};
+    auto stageBegin=PrepareClock::now();
     Engine::Components::Texture::PublishQueued(m_graphicsProvider);
+    auto stageEnd=PrepareClock::now();
+    m_lastPrepareTimings.texturePublicationMs=std::chrono::duration<double,std::milli>(stageEnd-stageBegin).count();
+    stageBegin=stageEnd;
     m_materialShaderSources.Poll();
+    stageEnd=PrepareClock::now();
+    m_lastPrepareTimings.shaderSourcePollMs=std::chrono::duration<double,std::milli>(stageEnd-stageBegin).count();
+    stageBegin=stageEnd;
     PublishMaterialShaderPipelines();
+    stageEnd=PrepareClock::now();
+    m_lastPrepareTimings.shaderPipelinePublicationMs=std::chrono::duration<double,std::milli>(stageEnd-stageBegin).count();
     const auto afterAssetPublication=PrepareClock::now();
     const bool priorPublicationSuppressed = m_suppressSceneSnapshotPublication;
     struct RestorePublication
@@ -182,7 +191,13 @@ void Scene::PrepareRenderFrame(bool publishSnapshot)
     const auto afterInitialCommit=PrepareClock::now();
     // Copy the registry view: deriving prefab batches adds scene components.
     const auto objectLayers=GetComponents<Engine::Components::TerrainObjectLayer>();
-    for (auto* layer:objectLayers) layer->PreparePrefabInstances(m_graphicsProvider);
+    for (auto* layer:objectLayers)
+    {
+        layer->PreparePrefabInstances(m_graphicsProvider);
+        const auto& prefabTimings=layer->GetLastPrefabPrepareTimings();
+        m_lastPrepareTimings.prefabSignatureMs+=prefabTimings.placementSignatureMs;
+        m_lastPrepareTimings.prefabSourceProbeMs+=prefabTimings.sourceProbeMs;
+    }
     const auto afterPrefabInstances=PrepareClock::now();
     const auto splineGeometry=GetComponents<SplineGeometry>();
     for (auto* geometry:splineGeometry) geometry->PrepareGeometry(m_graphicsProvider);

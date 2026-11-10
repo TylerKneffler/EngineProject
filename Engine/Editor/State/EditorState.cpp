@@ -24,6 +24,7 @@
 #include "Core/Serialization/SceneSerializer.h"
 #include "Core/Serialization/Json.h"
 #include "Core/Serialization/PreparedPrefab.h"
+#include "Core/Serialization/PrefabLoadProfile.h"
 #include "Core/Compoonents/Mesh/Mesh.h"
 #include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Compoonents/Materials/Material.h"
@@ -767,23 +768,136 @@ void EditorState::QueueSceneLoad(const std::string& path)
 
 void EditorState::ProcessPendingSceneLoad()
 {
+    const auto processRestoreStep = [this]() {
+        if (!m_incrementalSceneRestoreActive || !m_scene)
+            return;
+        const auto stepStarted = std::chrono::steady_clock::now();
+        bool complete = false;
+        const bool succeeded =
+            Engine::Serialization::SceneSerializer::ContinueIncrementalLoadFromValue(
+                *m_scene, m_incrementalSceneDocument,
+                m_incrementalSceneState, 1, complete);
+        const double stepMs = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - stepStarted).count();
+        if (!succeeded)
+        {
+            const bool rolledBack = m_scene->RestoreTrustedSnapshot(
+                m_incrementalSceneRollback);
+            m_scene->EndIncrementalRestore();
+            if (m_primaryConsole)
+                m_primaryConsole->AddLog(ConsoleView::Level::Error,
+                    "Failed to restore scene: " + m_incrementalScenePath +
+                    (rolledBack ? ". Previous scene restored." :
+                        ". Failed to restore previous scene."));
+            m_incrementalSceneRestoreActive = false;
+            m_incrementalSceneDocument = {};
+            m_incrementalSceneRollback = {};
+            m_incrementalSceneState = {};
+            m_incrementalScenePath.clear();
+            m_sceneLoadingMessage.clear();
+            if (m_renderer) m_renderer->MarkDirty();
+            return;
+        }
+
+        const auto objectCount = m_incrementalSceneDocument["objects"].ArraySize();
+        if (!complete)
+        {
+            m_sceneLoadingMessage = "Loading scene: " +
+                std::filesystem::path(m_incrementalScenePath).filename().string() +
+                " (" + std::to_string(m_incrementalSceneState.completedTopLevelObjects) + "/" +
+                std::to_string(objectCount) + " top-level objects)";
+            if (m_renderer) m_renderer->MarkDirty();
+            return;
+        }
+
+        const std::string path = std::move(m_incrementalScenePath);
+        m_incrementalSceneRestoreActive = false;
+        m_incrementalSceneDocument = {};
+        m_incrementalSceneRollback = {};
+        m_incrementalSceneState = {};
+        m_sceneLoadingMessage.clear();
+        ++m_sceneDocumentGeneration;
+        m_nextSceneSave.reset();
+        m_loadAfterSceneSave.clear();
+        m_mainMeshEdit = {};
+        m_mainSkeletonEdit = {};
+        m_scene->SetEditorSelectedMesh(nullptr);
+        m_scene->SetEditorWeightPaint(nullptr, -1);
+        m_scene->SetEditorMeshEditPose(false);
+        if (m_preferences)
+            m_preferences->SetSpatialDebugVisuals(m_scene->settings.portalDebugVisuals);
+        m_hasUnsavedChanges = false;
+        m_currentScenePath = NormalizeAssetPath(path);
+        RememberLastScene(m_projectFilePath, m_currentScenePath);
+        RefreshSceneDocumentTitle();
+        ResetHistory(true);
+        if (OnSceneLoadConfirmed)
+            OnSceneLoadConfirmed();
+        if (m_primaryConsole)
+            m_primaryConsole->AddLog(ConsoleView::Level::Info,
+                "Scene loaded: " + path);
+        const double totalMs = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - m_incrementalSceneStarted).count();
+        OutputDebugStringA(("[EditorState::LoadScene] Incremental scene restore completed in " +
+            std::to_string(totalMs) + " ms total; final step " +
+            std::to_string(stepMs) + " ms\n").c_str());
+        if (m_renderer) m_renderer->MarkDirty();
+    };
+
+    if (m_incrementalSceneRestoreActive)
+    {
+        processRestoreStep();
+        return;
+    }
+
     if (m_queuedScenePath.empty() || !m_queuedSceneDocument.valid() ||
         m_queuedSceneDocument.wait_for(std::chrono::seconds(0)) !=
             std::future_status::ready) return;
+
     const std::string path = std::move(m_queuedScenePath);
     m_queuedScenePath.clear();
     try
     {
         auto parsed = m_queuedSceneDocument.get();
-        LoadSceneNow(path, &parsed);
+        if (!std::filesystem::exists(path))
+            throw std::runtime_error("Scene file not found: " + path);
+        if (OnSceneLoadRequested)
+            OnSceneLoadRequested(path);
+        m_incrementalSceneRollback =
+            Engine::Serialization::SceneSerializer::CaptureSceneDocument(*m_scene);
+        Engine::Serialization::SceneSerializer::ClearLargePrefabDocumentCache();
+        m_incrementalSceneDocument = std::move(parsed);
+        m_incrementalScenePath = path;
+        m_incrementalSceneState = {};
+        m_incrementalSceneStarted = std::chrono::steady_clock::now();
+        FrameActivity::Mark(FrameActivity::Load);
+        if (!Engine::Serialization::SceneSerializer::BeginIncrementalLoadFromValue(
+                *m_scene, m_incrementalSceneDocument))
+            throw std::runtime_error("Unsupported or invalid scene document");
+        m_incrementalSceneRestoreActive = true;
+        const auto objectCount = m_incrementalSceneDocument["objects"].ArraySize();
+        m_sceneLoadingMessage = "Loading scene: " +
+            std::filesystem::path(path).filename().string() + " (0/" +
+            std::to_string(objectCount) + " top-level objects)";
+        processRestoreStep();
     }
     catch (const std::exception& error)
     {
+        if (!m_incrementalSceneRollback.IsNull() && m_scene)
+        {
+            m_scene->RestoreTrustedSnapshot(m_incrementalSceneRollback);
+            m_scene->EndIncrementalRestore();
+        }
+        m_incrementalSceneRestoreActive = false;
+        m_incrementalSceneDocument = {};
+        m_incrementalSceneRollback = {};
+        m_incrementalSceneState = {};
+        m_incrementalScenePath.clear();
+        m_sceneLoadingMessage.clear();
         if (m_primaryConsole)
             m_primaryConsole->AddLog(ConsoleView::Level::Error,
-                std::string("Failed to read scene: ") + error.what());
+                std::string("Failed to load scene: ") + error.what());
     }
-    m_sceneLoadingMessage.clear();
     if (m_renderer) m_renderer->MarkDirty();
 }
 
@@ -793,6 +907,23 @@ void EditorState::CancelSceneLoad()
     m_showUnsavedWarning = false;
     if (m_renderer)
         m_renderer->MarkDirty();
+}
+
+void EditorState::CancelPendingSceneLoad()
+{
+    if (m_incrementalSceneRestoreActive && m_scene)
+    {
+        m_scene->RestoreTrustedSnapshot(m_incrementalSceneRollback);
+        m_scene->EndIncrementalRestore();
+    }
+    m_incrementalSceneRestoreActive = false;
+    m_incrementalSceneDocument = {};
+    m_incrementalSceneRollback = {};
+    m_incrementalSceneState = {};
+    m_incrementalScenePath.clear();
+    m_queuedScenePath.clear();
+    m_sceneLoadingMessage.clear();
+    if (m_renderer) m_renderer->MarkDirty();
 }
 
 void EditorState::LoadSceneNow(const std::string& path,
@@ -816,6 +947,8 @@ void EditorState::LoadSceneNow(const std::string& path,
         }
         return;
     }
+
+    Engine::Serialization::SceneSerializer::ClearLargePrefabDocumentCache();
 
     // Loading another editor document is a hard runtime boundary. Let the
     // host perform its normal Stop flow before this scene replaces the active
@@ -927,11 +1060,15 @@ void EditorState::RestorePlayModeScene()
 {
     if (!m_scene || m_playModeSceneSnapshot.empty()) return;
     const auto restoreBegin = std::chrono::steady_clock::now();
+    using RestoreProfile=Engine::Serialization::PrefabLoadProfile;
 
-    for (auto& panel : m_panels)
-        if (auto* hierarchy = dynamic_cast<HierarchyView*>(panel.get()))
-            hierarchy->SetSelectedObject(nullptr);
-    if (m_primaryProperties) m_primaryProperties->SetSelectedObject(nullptr);
+    {
+        RestoreProfile::Stage stage("restore_clear_editor_selection");
+        for (auto& panel : m_panels)
+            if (auto* hierarchy = dynamic_cast<HierarchyView*>(panel.get()))
+                hierarchy->SetSelectedObject(nullptr);
+        if (m_primaryProperties) m_primaryProperties->SetSelectedObject(nullptr);
+    }
 
     bool restored = false;
     bool usedCachedSnapshot = false;
@@ -939,8 +1076,16 @@ void EditorState::RestorePlayModeScene()
     {
         try
         {
-            const auto snapshot = m_playModeParsedSnapshot.get();
-            restored = m_scene->RestoreTrustedSnapshot(snapshot);
+            const auto snapshot = [&]
+            {
+                RestoreProfile::Stage stage("restore_wait_for_parsed_snapshot");
+                return m_playModeParsedSnapshot.get();
+            }();
+            {
+                RestoreProfile::Stage sceneStage("restore_apply_trusted_snapshot");
+                restored = m_scene->RestoreTrustedSnapshot(snapshot,
+                    false); // The play snapshot becomes the history baseline below.
+            }
             usedCachedSnapshot = restored;
         }
         catch (const std::exception& error)
@@ -950,10 +1095,14 @@ void EditorState::RestorePlayModeScene()
         }
     }
     if (!restored)
+    {
+        RestoreProfile::Stage stage("restore_fallback_parse_snapshot");
         restored = m_scene->LoadFromString(m_playModeSceneSnapshot);
+    }
 
     if (restored)
     {
+        RestoreProfile::Stage stage("restore_editor_state_after_scene");
         m_mainSkeletonEdit.skeleton = nullptr;
         m_mainSkeletonEdit.bindingMesh = nullptr;
         m_mainSkeletonEdit.mesh = nullptr;
@@ -981,6 +1130,7 @@ void EditorState::RestorePlayModeScene()
         m_historyCapturedRevision = m_sceneEditRevision;
         m_historySelectionDirty = false;
         m_sceneEditInProgress = false;
+        Engine::Serialization::SceneSerializer::ClearLargePrefabDocumentCache();
         if (m_renderer) m_renderer->MarkDirty();
         OutputDebugStringA("[Play] Restored editor scene state.\n");
         if (m_primaryConsole)

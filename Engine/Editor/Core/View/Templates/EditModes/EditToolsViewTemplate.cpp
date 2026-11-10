@@ -1191,7 +1191,7 @@ void EditorState::DrawGlobalToolbar(IEditorUi& ui, ToolbarSection section,
             ui.Button("Unpack Prefab"))
         {
             prefabRoot->Prefab.reset();
-            prefabRoot->PrefabSourceSnapshot.clear();
+            prefabRoot->ClearPrefabSourceSnapshot();
             MarkSceneEdited();
         }
         ImGui::EndDisabled();

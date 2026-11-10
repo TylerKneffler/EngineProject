@@ -68,6 +68,14 @@ public:
         Engine::Graphics::IGraphicsProvider* graphicsProvider,
         const std::unordered_map<std::string, SceneSerializer::Factory>& registry,
         const DeserializeOptions& options = DeserializeOptions{});
+    // Restore just one authored node. Expanded children are left to the
+    // caller; prefab references still instantiate their prefab hierarchy.
+    static Engine::Core::Object* DeserializeObjectNode(
+        Engine::Scene::Scene& scene,
+        const JsonValue& node,
+        Engine::Graphics::IGraphicsProvider* graphicsProvider,
+        const std::unordered_map<std::string, SceneSerializer::Factory>& registry,
+        const DeserializeOptions& options = DeserializeOptions{});
     static bool DeserializeObjectTreeInto(
         Engine::Core::Object& object,
         Engine::Scene::Scene& scene,

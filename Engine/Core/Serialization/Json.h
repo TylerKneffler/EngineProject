@@ -89,6 +89,8 @@ public:
     // Allocation hint only; creates an empty object with normal Set semantics.
     static JsonValue MakeObject(std::size_t memberCapacity);
     static JsonValue MakeArray();
+    // Allocation hint only; creates an empty array with normal Push semantics.
+    static JsonValue MakeArray(std::size_t elementCapacity);
 
 private:
     void swap(JsonValue& o) noexcept;

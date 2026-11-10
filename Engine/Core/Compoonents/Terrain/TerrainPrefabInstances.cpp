@@ -31,7 +31,45 @@ struct TerrainObjectLayer::PrefabInstances
     uint64_t signature=UINT64_MAX;
     std::chrono::steady_clock::time_point nextCheck{};
     std::map<std::string,Source> sources;
+    bool sourceProbeActive=false;
+    std::string sourceProbeCursor;
+    std::map<std::string,Source> sourceProbeResults;
     std::map<std::string,ObjectLods> lods;
+    float viewDistance=0, lod1Distance=0, lod2Distance=0, lodHysteresis=0;
+    bool screenLodSelection=false, distanceLodOverride=false;
+    float screenLod1Pixels=0, screenLod2Pixels=0, screenLodHysteresis=0;
+    float shadowDistance=0, shadowFadeWidth=0;
+    int shadowLod=0;
+    bool HasSameConfiguration(const TerrainObjectLayer& layer) const
+    {
+        return viewDistance==layer.viewDistance && lod1Distance==layer.lod1Distance &&
+            lod2Distance==layer.lod2Distance && lodHysteresis==layer.lodHysteresis &&
+            screenLodSelection==layer.screenLodSelection &&
+            distanceLodOverride==layer.distanceLodOverride &&
+            screenLod1Pixels==layer.screenLod1Pixels &&
+            screenLod2Pixels==layer.screenLod2Pixels &&
+            screenLodHysteresis==layer.screenLodHysteresis &&
+            shadowDistance==layer.shadowDistance &&
+            shadowFadeWidth==layer.GetShadowFadeWidth() && shadowLod==layer.shadowLod;
+    }
+    bool HasGeneratedObjects(const Engine::Scene::Scene& scene) const
+    {
+        return std::all_of(generated.begin(),generated.end(),[&](uint64_t id) {
+            return scene.FindObjectById(id)!=nullptr;
+        });
+    }
+    void StoreConfiguration(const TerrainObjectLayer& layer)
+    {
+        viewDistance=layer.viewDistance; lod1Distance=layer.lod1Distance;
+        lod2Distance=layer.lod2Distance; lodHysteresis=layer.lodHysteresis;
+        screenLodSelection=layer.screenLodSelection;
+        distanceLodOverride=layer.distanceLodOverride;
+        screenLod1Pixels=layer.screenLod1Pixels;
+        screenLod2Pixels=layer.screenLod2Pixels;
+        screenLodHysteresis=layer.screenLodHysteresis;
+        shadowDistance=layer.shadowDistance;
+        shadowFadeWidth=layer.GetShadowFadeWidth(); shadowLod=layer.shadowLod;
+    }
     bool HasSameLods(const std::map<std::string,ObjectLods>& current) const
     {
         if(lods.size()!=current.size()) return false;
@@ -49,12 +87,16 @@ struct TerrainObjectLayer::PrefabInstances
 
 void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider)
 {
+    m_lastPrefabPrepareTimings={};
     if (!Owner || !Owner->GetScene() || !provider) return;
     const auto now=std::chrono::steady_clock::now();
     const bool changed=m_prefabCheckedRevision!=GetConfigurationRevision() ||
         m_prefabCheckedData!=placements.data() || m_prefabCheckedCount!=placements.size();
     if (!changed && !m_prefabInstances) return;
-    if (!changed && m_prefabInstances->provider==provider && now<m_prefabInstances->nextCheck) return;
+    const bool sourceProbeActive=!changed && m_prefabInstances &&
+        m_prefabInstances->provider==provider && m_prefabInstances->sourceProbeActive;
+    if (!changed && m_prefabInstances->provider==provider &&
+        now<m_prefabInstances->nextCheck && !sourceProbeActive) return;
     // Grass and other mesh-only layers keep their existing renderer without
     // paying for a placement signature when they have no prefab runtime.
     bool hasPrefabs=false;
@@ -63,9 +105,20 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider)
     m_prefabCheckedRevision=GetConfigurationRevision(); m_prefabCheckedData=placements.data();
     m_prefabCheckedCount=placements.size(); m_hasPrefabPlacements=hasPrefabs;
     if (!hasPrefabs && !m_prefabInstances) return;
-    // Keep polling the placement signature so callers editing public placement
-    // records in place retain the existing one-second detection behavior.
-    const auto signature=GetPlacementSignature();
+    // Check the placement signature on its normal interval. Source file probes
+    // are spread over subsequent frames to avoid one synchronous filesystem
+    // burst; an in-place placement edit may therefore take a few extra frames
+    // to detect while a source scan is in progress.
+    uint64_t signature=m_prefabInstances && sourceProbeActive
+        ? m_prefabInstances->signature : UINT64_MAX;
+    if (!sourceProbeActive)
+    {
+        const auto signatureStarted=std::chrono::steady_clock::now();
+        signature=GetPlacementSignature();
+        m_lastPrefabPrepareTimings.placementSignatureMs=
+            std::chrono::duration<double,std::milli>(
+                std::chrono::steady_clock::now()-signatureStarted).count();
+    }
     const auto readSource=[](const std::string& asset) {
         PrefabInstances::Source source;
         source.resolved=std::filesystem::absolute(Mesh::ResolveFilePath(asset)).lexically_normal().generic_string();
@@ -74,20 +127,57 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider)
         return source;
     };
     std::map<std::string,PrefabInstances::Source> sources;
-    if (!changed && m_prefabInstances->provider==provider && m_prefabInstances->signature==signature &&
-        m_prefabInstances->HasSameLods(objectLods))
+    auto* scene=Owner->GetScene();
+    if (m_prefabInstances && m_prefabInstances->provider==provider &&
+        m_prefabInstances->signature==signature &&
+        m_prefabInstances->HasSameLods(objectLods) &&
+        m_prefabInstances->HasSameConfiguration(*this) &&
+        (sourceProbeActive || m_prefabInstances->HasGeneratedObjects(*scene)))
     {
         // Refresh distinct source spellings, not all placement groups. Include
         // resolved identity: overrides/relocations can preserve the timestamp.
         bool same=true;
-        for(const auto& [asset,previous]:m_prefabInstances->sources)
+        const auto sourceProbeStarted=std::chrono::steady_clock::now();
+        if (!m_prefabInstances->sourceProbeActive)
         {
-            auto current=readSource(asset);
-            same=same && current==previous;
-            sources.emplace(asset,std::move(current));
+            m_prefabInstances->sourceProbeActive=true;
+            m_prefabInstances->sourceProbeCursor.clear();
+            m_prefabInstances->sourceProbeResults.clear();
+            m_prefabInstances->nextCheck=now+std::chrono::seconds(1);
         }
+        const auto next=m_prefabInstances->sourceProbeCursor.empty()
+            ? m_prefabInstances->sources.begin()
+            : m_prefabInstances->sources.upper_bound(m_prefabInstances->sourceProbeCursor);
+        if (next!=m_prefabInstances->sources.end())
+        {
+            auto current=readSource(next->first);
+            same=current==next->second;
+            m_prefabInstances->sourceProbeResults.emplace(next->first,current);
+            m_prefabInstances->sourceProbeCursor=next->first;
+        }
+        m_lastPrefabPrepareTimings.sourceProbeMs=
+            std::chrono::duration<double,std::milli>(
+                std::chrono::steady_clock::now()-sourceProbeStarted).count();
+        const bool finished=m_prefabInstances->sourceProbeResults.size()==
+            m_prefabInstances->sources.size();
+        if (!same || finished)
+        {
+            sources=std::move(m_prefabInstances->sourceProbeResults);
+            m_prefabInstances->sourceProbeActive=false;
+            m_prefabInstances->sourceProbeCursor.clear();
+        }
+        if (same && !finished) return;
         if(same)
-        { m_prefabInstances->nextCheck=now+std::chrono::seconds(1); return; }
+        {
+            // Scene restore/play-stop can replace the placements vector and
+            // bump the component revision while restoring identical authored
+            // data. Avoid tearing down/rebuilding hundreds of generated batch
+            // objects when the actual content and render policy are unchanged.
+            m_prefabInstances->nextCheck=now+std::chrono::seconds(1);
+            return;
+        }
+        // A changed or newly resolved source falls through to a rebuild. The
+        // remaining paths are resolved by the normal batch builder below.
     }
     using BuildProfile=Engine::Serialization::PrefabLoadProfile;
     BuildProfile buildProfile("TerrainObjectLayer: "+layerName);
@@ -114,12 +204,12 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider)
             const auto base=bases.find(key(placement.asset));
             groups[base==bases.end() ? placement.asset:base->second].push_back(&placement);
         }
-    auto* scene=Owner->GetScene();
     if (m_prefabInstances)
         for (auto id:m_prefabInstances->generated)
             if (auto* object=scene->FindObjectById(id)) scene->RemoveObject(object);
     auto runtime=std::make_shared<PrefabInstances>();
     runtime->provider=provider; runtime->signature=signature;
+    runtime->StoreConfiguration(*this);
     runtime->nextCheck=now+std::chrono::seconds(1);
     // Definitions are needed only while deriving batches and collider copies.
     // Retaining them duplicates every source CPU mesh for the layer lifetime.
@@ -241,6 +331,10 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider)
                         }
                     }
                     BuildProfile::Stage instanceStage("batch_instances");
+                    const auto sourceMinimum=source->GetBoundsMin();
+                    const auto sourceMaximum=source->GetBoundsMax();
+                    const auto sourceCenter=(sourceMinimum+sourceMaximum)*0.5f;
+                    const auto sourceExtents=(sourceMaximum-sourceMinimum)*0.5f;
                     for (const auto& [tile,tileRecords]:tiles)
                     {
                         auto& instances=tileInstances[tile];
@@ -260,13 +354,20 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider)
                                     instances->transforms.push_back(instance);
                                     instances->placementIds.push_back(placement->id);
                                 }
-                                for (int corner=0;corner<8;++corner)
-                                {
-                                    const auto low=source->GetBoundsMin(),high=source->GetBoundsMax();
-                                    const auto point=glm::vec3(matrix*glm::vec4(corner&1 ? high.x:low.x,
-                                        corner&2 ? high.y:low.y,corner&4 ? high.z:low.z,1));
-                                    minimum=glm::min(minimum,point); maximum=glm::max(maximum,point);
-                                }
+                                // Transform the source AABB with center/extents rather
+                                // than transforming eight corners for every placement,
+                                // part, and LOD. This is exact for affine transforms and
+                                // avoids repeated bounds queries in large foliage layers.
+                                const glm::vec3 center(matrix*glm::vec4(sourceCenter,1.f));
+                                const glm::mat3 linear(matrix);
+                                const auto absolute=[](const glm::vec3& value) {
+                                    return glm::vec3(std::abs(value.x),std::abs(value.y),std::abs(value.z));
+                                };
+                                const glm::vec3 extents=absolute(linear[0])*sourceExtents.x+
+                                    absolute(linear[1])*sourceExtents.y+
+                                    absolute(linear[2])*sourceExtents.z;
+                                minimum=glm::min(minimum,center-extents);
+                                maximum=glm::max(maximum,center+extents);
                             }
                         }
                         BuildProfile::Stage objectStage("batch_instance_objects");

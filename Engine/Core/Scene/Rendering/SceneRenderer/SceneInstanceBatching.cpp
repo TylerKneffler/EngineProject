@@ -3,6 +3,7 @@
 #include "Core/Compoonents/Mesh/Mesh.h"
 #include "Core/Compoonents/Physics/SpatialManipulator.h"
 #include "Core/Compoonents/Materials/Material.h"
+#include "Core/Compoonents/Terrain/TerrainObjectLayer.h"
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Core/Rendering/RenderJobs.h"
 #include <algorithm>
@@ -38,7 +39,22 @@ SceneInstanceBatching::Result SceneInstanceBatching::Prepare(Scene& scene,
         const bool custom = draw.material &&
             !IsFastFoliageSurface(draw.material) &&
             !draw.material->shader.empty();
-        const bool selected=includeEditorVisuals && (draw.object==scene.m_selectedObject || draw.mesh==scene.m_editorSelectedMesh || draw.mesh==scene.m_editorWeightPaintMesh);
+        const auto* instanceData = draw.mesh && draw.mesh->IsInstanced()
+            ? draw.mesh->GetInstanceData().get() : nullptr;
+        const auto* drawLayer = draw.object
+            ? draw.object->GetComponentInParent<
+                Engine::Components::TerrainObjectLayer>() : nullptr;
+        const bool selectedPlacement = includeEditorVisuals &&
+            scene.m_selectedPlacementId != 0 && scene.m_selectedPlacementLayer &&
+            drawLayer && drawLayer->Owner == scene.m_selectedPlacementLayer &&
+            instanceData &&
+            std::find(instanceData->placementIds.begin(),
+                instanceData->placementIds.end(), scene.m_selectedPlacementId) !=
+                    instanceData->placementIds.end();
+        const bool selected=includeEditorVisuals && (selectedPlacement ||
+            draw.object==scene.m_selectedObject ||
+            draw.mesh==scene.m_editorSelectedMesh ||
+            draw.mesh==scene.m_editorWeightPaintMesh);
         if ((!automaticInstancing && !(draw.drawData.flags & (0x00100000u|0x00800000u))) || scene.m_editorMode2D || hasPortalViews || !draw.mesh || draw.blended ||
             draw.preview || draw.pmxOutline || draw.spatialManipulator || draw.traversalChartPortal ||
             draw.objectData.skinParams.y>0 || draw.mesh->HasMorphTargets() || draw.mesh->HasSurfaceOffsets() ||

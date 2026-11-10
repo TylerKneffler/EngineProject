@@ -50,22 +50,29 @@ bool Scene::LoadFromString(const std::string& source)
     return LoadFromValue(document);
 }
 
-bool Scene::RestoreTrustedSnapshot(const Engine::Serialization::JsonValue& snapshot)
+bool Scene::RestoreTrustedSnapshot(const Engine::Serialization::JsonValue& snapshot,
+    bool publishSceneSnapshot)
 {
     AssertOwnerThread();
     if (!m_graphicsProvider || !snapshot.IsObject() ||
         snapshot["version"].AsInt() != 1)
         return false;
+    const bool previousSuppression=m_suppressSceneSnapshotPublication;
     m_suppressSceneSnapshotPublication = true;
     struct PublicationGuard
     {
         bool& suppressed;
-        ~PublicationGuard() { suppressed = false; }
-    } publication{m_suppressSceneSnapshotPublication};
+        bool previous;
+        ~PublicationGuard() { suppressed = previous; }
+    } publication{m_suppressSceneSnapshotPublication,previousSuppression};
     if (!Engine::Serialization::SceneSerializer::LoadFromValue(
             *this, snapshot, m_graphicsProvider))
         return false;
-    m_suppressSceneSnapshotPublication = false;
+    // Play-mode restoration already has the trusted snapshot as its editor
+    // history baseline. Avoid serializing the just-restored scene a second
+    // time at this commit boundary. Ordinary scene loads still publish it.
+    if (publishSceneSnapshot)
+        m_suppressSceneSnapshotPublication = previousSuppression;
     CommitPendingObjectChanges();
     return true;
 }

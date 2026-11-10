@@ -999,9 +999,17 @@ void SceneView::DrawPanel(IEditorUi& ui)
         Engine::Core::Object* bone = Engine::Core::Component::HasEditorReferencePick()
             ? ScenePlacementAndPicking::PickBoneInViewport(*m_scene,
                 input.mousePosInViewport, input.available) : nullptr;
-        OnObjectSelected(bone ? bone :
+        uint64_t pickedPlacementId = 0;
+        Engine::Core::Object* pickedObject = bone ? bone :
             ScenePlacementAndPicking::PickObjectInViewport(*m_scene,
-                input.mousePosInViewport, input.available));
+                input.mousePosInViewport, input.available, false,
+                &pickedPlacementId);
+        OnObjectSelected(pickedObject);
+        auto* placementLayer = pickedObject
+            ? pickedObject->GetComponentInParent<
+                Engine::Components::TerrainObjectLayer>() : nullptr;
+        m_scene->SetSelectedPlacementId(pickedPlacementId,
+            placementLayer ? placementLayer->Owner : nullptr);
     }
     if (OnDrawBottomPanel)
     {

@@ -3,6 +3,7 @@
 #include <unordered_map>
 #include <functional>
 #include <vector>
+#include <cstddef>
 
 namespace Engine::Core { class Component; class Object; }
 namespace Engine::Scene { class Scene; }
@@ -59,6 +60,18 @@ public:
     using Object = Engine::Core::Object;
     using Scene = Engine::Scene::Scene;
     using IGraphicsProvider = Engine::Graphics::IGraphicsProvider;
+    struct IncrementalLoadState
+    {
+        struct PendingNode
+        {
+            const JsonValue* node = nullptr;
+            Object* parent = nullptr;
+        };
+        std::size_t nextTopLevelObject = 0;
+        std::size_t completedTopLevelObjects = 0;
+        bool topLevelObjectInProgress = false;
+        std::vector<PendingNode> pendingNodes;
+    };
 
     // Factory function: creates a default-constructed Component of the named type.
     using Factory = std::function<Component*()>;
@@ -100,6 +113,14 @@ public:
     // The caller owns rollback if a component or prefab fails during restore.
     static bool LoadFromValue(Scene& scene, const JsonValue& snapshot,
         IGraphicsProvider* graphicsProvider = nullptr);
+    // Editor-only incremental restore. Begin replaces scene contents and
+    // applies settings; each step restores at most maxTopLevelObjects trees.
+    // The caller must restore its own snapshot if a step returns false.
+    static bool BeginIncrementalLoadFromValue(Scene& scene,
+        const JsonValue& snapshot);
+    static bool ContinueIncrementalLoadFromValue(Scene& scene,
+        const JsonValue& snapshot, IncrementalLoadState& state,
+        std::size_t maxObjectNodes, bool& complete);
 
     // Capture and recreate one object plus its complete child hierarchy.
     // Used by editor copy/paste without touching the filesystem.
@@ -123,6 +144,9 @@ public:
     static Object* InstantiatePrefab(Scene& scene, const std::string& path,
         IGraphicsProvider* graphicsProvider = nullptr);
     static JsonValue ReadPrefabFile(const std::string& path);
+    // Release the owner-thread cache entry for a large prefab document.
+    // The editor calls this at scene-session boundaries to cap retained memory.
+    static void ClearLargePrefabDocumentCache();
     static Object* InstantiatePrefabFromValue(Scene& scene, const std::string& path,
         const JsonValue& document, IGraphicsProvider* graphicsProvider = nullptr);
     // Reload every scene instance that references path while preserving each

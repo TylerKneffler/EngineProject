@@ -7,6 +7,8 @@
 #include "Core/Rendering/PersistentInstanceBatches.h"
 #include "Core/Scene/Rendering/SceneRenderer/SceneRendererMaterialShaders.h"
 
+#include <algorithm>
+
 namespace Engine::Scene::Renderer
 {
 SceneRendererGeometrySubmission::SceneRendererGeometrySubmission(
@@ -29,7 +31,8 @@ Engine::Graphics::IPipelineState* SceneRendererGeometrySubmission::GeometryPipel
 
 void SceneRendererGeometrySubmission::SubmitGeometry(
     const PreparedDraw& draw,
-    bool shadowGeometry)
+    bool shadowGeometry,
+    uint64_t selectedPlacementId)
 {
     auto* geometryMesh = shadowGeometry && draw.shadowMesh
         ? draw.shadowMesh : draw.mesh;
@@ -44,9 +47,33 @@ void SceneRendererGeometrySubmission::SubmitGeometry(
     const uint32_t indexCount = shadowGeometry && draw.shadowIndexCount > 0
         ? draw.shadowIndexCount : draw.indexCount;
 
+    uint32_t selectedInstance = UINT32_MAX;
     if (geometryMesh && geometryMesh->IsInstanced())
     {
         auto& instances = *geometryMesh->GetInstanceData();
+        if (selectedPlacementId != 0)
+        {
+            const auto found = std::find(instances.placementIds.begin(),
+                instances.placementIds.end(), selectedPlacementId);
+            if (found == instances.placementIds.end()) return;
+            selectedInstance = static_cast<uint32_t>(
+                std::distance(instances.placementIds.begin(), found));
+            if (instances.editorSelectionRevision != instances.revision ||
+                instances.editorSelectionPlacementId != selectedPlacementId)
+            {
+                if (instances.editorSelectionBuffer)
+                    m_scene.m_persistentInstances.Retire(
+                        std::move(instances.editorSelectionBuffer));
+                instances.editorSelectionBuffer =
+                    m_scene.m_graphicsProvider->GetBufferFactory()->
+                        CreateStaticShaderResource(
+                            sizeof(Engine::Components::Mesh::InstanceTransform),
+                            &instances.transforms[selectedInstance],
+                            sizeof(Engine::Components::Mesh::InstanceTransform));
+                instances.editorSelectionPlacementId = selectedPlacementId;
+                instances.editorSelectionRevision = instances.revision;
+            }
+        }
         if (instances.slicesRevision != instances.revision)
         {
             for (auto& slice : instances.slices)
@@ -85,6 +112,30 @@ void SceneRendererGeometrySubmission::SubmitGeometry(
 
     if (geometryMesh && geometryMesh->IsInstanced())
     {
+        const auto& instances = *geometryMesh->GetInstanceData();
+        if (selectedPlacementId != 0)
+        {
+            for (const auto& range : geometryMesh->GetInstanceRanges())
+            {
+                if (selectedInstance < range.firstInstance ||
+                    selectedInstance >= range.firstInstance + range.instanceCount ||
+                    !range.vertexCount)
+                    continue;
+                m_context->SetStructuredBuffer(45,
+                    instances.editorSelectionBuffer.get());
+                if (geometryIndexBuffer)
+                {
+                    m_context->SetIndexBuffer(geometryIndexBuffer, indexCount, 0);
+                    m_context->DrawIndexedInstanced(range.vertexCount, 1,
+                        range.firstVertex, 0, 0);
+                }
+                else
+                    m_context->DrawInstanced(range.vertexCount, 1,
+                        range.firstVertex, 0);
+                break;
+            }
+            return;
+        }
         for (const auto& range : geometryMesh->GetInstanceRanges())
         {
             if (!range.instanceCount || !range.vertexCount)

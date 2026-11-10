@@ -247,7 +247,7 @@ void HierarchyView::DrawPanel(IEditorUi& ui)
             m_pendingPrefabRoot->Prefab)
         {
             m_pendingPrefabRoot->Prefab.reset();
-            m_pendingPrefabRoot->PrefabSourceSnapshot.clear();
+            m_pendingPrefabRoot->ClearPrefabSourceSnapshot();
             changed = true;
         }
         m_pendingPrefabRoot = nullptr;

@@ -226,6 +226,7 @@ SpatialCache spatialCache;
 struct HoverCandidate
 {
     Engine::Core::Object* object = nullptr;
+    uint64_t placementId = 0;
     glm::vec3 origin{}, direction{}, minimum{}, maximum{};
     std::shared_ptr<const TriangleIndex> triangles;
     float travelled = 0.f, maximumDistance = FLT_MAX;
@@ -284,6 +285,7 @@ std::vector<HoverCandidate> StaticCandidates(const Engine::Core::Object& object,
 {
     std::vector<HoverCandidate> result;
     const auto append = [&](const glm::mat4& world, size_t first, size_t count,
+                            uint64_t placementId,
                             const Engine::Components::Mesh& source) {
         if (std::abs(glm::determinant(world)) < 1e-8f) return;
         const auto inverse = glm::inverse(world);
@@ -295,10 +297,11 @@ std::vector<HoverCandidate> StaticCandidates(const Engine::Core::Object& object,
         candidate.triangles = StaticIndex(source);
         candidate.firstVertex = first;
         candidate.vertexCount = count;
+        candidate.placementId = placementId;
         result.push_back(std::move(candidate));
     };
     const auto world = object.transform.GetWorldMatrix();
-    if (!mesh.IsInstanced()) append(world, 0, SIZE_MAX, mesh);
+    if (!mesh.IsInstanced()) append(world, 0, SIZE_MAX, 0, mesh);
     else if (const auto& data = mesh.GetInstanceData())
         for (const auto& range : mesh.GetInstanceRanges())
             for (size_t i = range.firstInstance;
@@ -309,6 +312,7 @@ std::vector<HoverCandidate> StaticCandidates(const Engine::Core::Object& object,
                     for (int column = 0; column < 4; ++column)
                         instance[column][row] = data->transforms[i].rows[row][column];
                 append(world * instance, range.firstVertex, range.vertexCount,
+                    i < data->placementIds.size() ? data->placementIds[i] : 0,
                     *mesh.GetInstanceSource());
             }
     return result;
@@ -316,11 +320,19 @@ std::vector<HoverCandidate> StaticCandidates(const Engine::Core::Object& object,
 
 bool IntersectStaticMesh(const Engine::Core::Object& object,
     const Engine::Components::Mesh& mesh, const glm::vec3& origin,
-    const glm::vec3& direction, float& distance)
+    const glm::vec3& direction, float& distance, uint64_t* placementId = nullptr)
 {
     distance = FLT_MAX;
+    if (placementId) *placementId = 0;
     for (const auto& candidate : StaticCandidates(object, mesh, origin, direction))
-        distance = std::min(distance, candidate.Intersect());
+    {
+        const float hitDistance = candidate.Intersect();
+        if (hitDistance < distance)
+        {
+            distance = hitDistance;
+            if (placementId) *placementId = candidate.placementId;
+        }
+    }
     return distance < FLT_MAX;
 }
 
@@ -927,8 +939,10 @@ Engine::Core::Object* ScenePlacementAndPicking::PickSkinnedBoneInViewport(
 
 Engine::Core::Object* ScenePlacementAndPicking::PickObjectInViewport(
     const Engine::Scene::Scene& scene, const EditorUiVec2& mousePos,
-    const EditorUiVec2& viewportSize, bool preserveMeshChild)
+    const EditorUiVec2& viewportSize, bool preserveMeshChild,
+    uint64_t* pickedPlacementId)
 {
+    if (pickedPlacementId) *pickedPlacementId = 0;
     if (viewportSize.x <= 1.f || viewportSize.y <= 1.f)
         return nullptr;
 
@@ -1020,6 +1034,7 @@ Engine::Core::Object* ScenePlacementAndPicking::PickObjectInViewport(
     }
 
     Engine::Core::Object* best = nullptr;
+    uint64_t bestPlacementId = 0;
     float bestDistance = FLT_MAX;
     float travelledDistance = 0.f;
     const std::vector<Engine::Scene::Scene::PortalRaySegment> segments =
@@ -1051,17 +1066,19 @@ Engine::Core::Object* ScenePlacementAndPicking::PickObjectInViewport(
             {
                 const auto* skinned =
                     obj->GetComponent<Engine::Components::SkinnedMesh>();
+                uint64_t placementId = 0;
                 const bool hit = skinned
                     ? IntersectSkinnedMesh(*obj, *mesh, *skinned,
                         segment.ray.origin, segment.ray.direction, distance)
                     : IntersectStaticMesh(*obj, *mesh, segment.ray.origin,
-                        segment.ray.direction, distance);
+                        segment.ray.direction, distance, &placementId);
                 if (hit && distance < segment.maxDistance &&
                     travelledDistance + distance < bestDistance)
                 {
                     bestDistance = travelledDistance + distance;
                     best = !preserveMeshChild && skinned && obj->GetPrefabInstanceRoot()
                         ? obj->GetPrefabInstanceRoot() : obj;
+                    bestPlacementId = placementId;
                 }
                 continue;
             }
@@ -1095,6 +1112,7 @@ Engine::Core::Object* ScenePlacementAndPicking::PickObjectInViewport(
         travelledDistance += segment.maxDistance;
     }
 
+    if (pickedPlacementId) *pickedPlacementId = bestPlacementId;
     return best;
 }
 }
