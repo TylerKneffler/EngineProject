@@ -119,13 +119,12 @@ void TerrainManager::FarPrepareLoop()
                     return std::nullopt;
                 };
                 const auto setColor = [&](Mesh::Vertex& vertex, float height) {
-                    float weights[TerrainHeightArchive::LayerCount];
+                    float weights[6];
                     TerrainHeightArchive::BlendHeightBands(height,
                         task.palette.heightBoundaries,
                         task.palette.heightBlendHalfWidth, weights);
                     glm::vec3 color(0.f);
-                    for (int layer = 0;
-                        layer < TerrainHeightArchive::LayerCount; ++layer)
+                    for (int layer = 0; layer < 6; ++layer)
                         color += task.palette.farColors[layer] * weights[layer];
                     vertex.color[0] = color.r;
                     vertex.color[1] = color.g;

@@ -249,10 +249,8 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider)
     {
         auto* root=definition(asset);
         if (!root) continue;
-        const auto placementMatrix=[](const Placement& placement) {
-            return glm::translate(glm::mat4(1),placement.position)*
-                glm::toMat4(SurfaceRotation(placement.normal,placement.yawDegrees))*
-                glm::scale(glm::mat4(1),glm::vec3(placement.scale));
+        const auto placementMatrix=[this](const Placement& placement) {
+            return PlacementTransform(placement);
         };
         // CPU objects provide coarse spatial bounds; the compute path still
         // selects visibility and LOD for each placement. Small 64 m groups

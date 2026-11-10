@@ -85,7 +85,7 @@ void EditorHotReload::StartCompile()
     }
 
     const std::string command = "cmake --build \"" + m_buildDirectory.string() +
-        "\" --config Debug --target ProjectScripts --parallel 1";
+        "\" --config Debug --target Lib --parallel 1";
     std::vector<char> buffer(command.begin(), command.end());
     buffer.push_back('\0');
     STARTUPINFOA startup{};
@@ -214,7 +214,7 @@ void EditorHotReload::PollCompile()
             std::filesystem::create_directories(runtimeDirectory, error);
             if (error) return result;
             const auto directory = runtimeDirectory /
-                ("ProjectScripts_" + std::to_string(generation));
+                ("Lib_" + std::to_string(generation));
             std::filesystem::create_directories(directory, error);
             if (error) return result;
             const auto candidate = directory / source.filename();

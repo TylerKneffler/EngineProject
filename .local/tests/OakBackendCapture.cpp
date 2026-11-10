@@ -34,6 +34,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <numeric>
+#include <limits>
 #include <glm/gtc/matrix_transform.hpp>
 #include <type_traits>
 #include <cstdlib>

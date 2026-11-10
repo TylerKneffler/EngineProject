@@ -22,6 +22,7 @@ TerrainObjectLayer::TerrainObjectLayer()
     RegisterField("lodHysteresis", lodHysteresis, "Object LOD");
     RegisterField("screenLodSelection", screenLodSelection, "Object LOD");
     RegisterField("distanceLodOverride", distanceLodOverride, "Object LOD");
+    RegisterField("conformToGround", conformToGround, "Placement");
     RegisterField("screenLod1Pixels", screenLod1Pixels, "Object LOD");
     RegisterField("screenLod2Pixels", screenLod2Pixels, "Object LOD");
     RegisterField("screenLodHysteresis", screenLodHysteresis, "Object LOD");
@@ -98,16 +99,119 @@ glm::quat TerrainObjectLayer::SurfaceRotation(const glm::vec3& normal,
         glm::angleAxis(glm::radians(yawDegrees), glm::vec3(0.f, 1.f, 0.f)));
 }
 
+glm::mat4 TerrainObjectLayer::PlacementTransform(
+    const Placement& placement) const
+{
+    const glm::quat rotation = conformToGround
+        ? glm::angleAxis(glm::radians(placement.yawDegrees),
+            glm::vec3(0.f, 1.f, 0.f))
+        : SurfaceRotation(placement.normal, placement.yawDegrees);
+    glm::mat4 transform = glm::translate(glm::mat4(1.f), placement.position) *
+        glm::toMat4(rotation) *
+        glm::scale(glm::mat4(1.f), glm::vec3(placement.scale));
+    if (conformToGround && placement.normal.y > .05f)
+    {
+        // A shear changes each vertex's base height to follow the sampled
+        // ground plane. The local Y axis remains vertical, so the plant itself
+        // does not lean with the terrain.
+        const float gradientX = -placement.normal.x / placement.normal.y;
+        const float gradientZ = -placement.normal.z / placement.normal.y;
+        transform[0][1] = gradientX * transform[0][0] +
+            gradientZ * transform[0][2];
+        transform[2][1] = gradientX * transform[2][0] +
+            gradientZ * transform[2][2];
+    }
+    return transform;
+}
+
 namespace
 {
 void PlacementHash(uint64_t& hash,const void* data,size_t size)
 { const auto* bytes=static_cast<const uint8_t*>(data); for(size_t i=0;i<size;++i) { hash^=bytes[i]; hash*=1099511628211ull; } }
 template<class T> void AppendBytes(std::vector<uint8_t>& out,const T& value)
 { const auto* bytes=reinterpret_cast<const uint8_t*>(&value); out.insert(out.end(),bytes,bytes+sizeof(value)); }
+std::string EncodePackedPlacements(
+    const std::vector<TerrainObjectLayer::Placement>& placements)
+{
+    std::map<std::string, uint32_t> assetIds;
+    for (const auto& placement : placements)
+        if (!assetIds.count(placement.asset))
+            assetIds.emplace(placement.asset,
+                static_cast<uint32_t>(assetIds.size()));
+    std::vector<uint8_t> bytes;
+    AppendBytes(bytes, uint32_t(0x31504c54));
+    AppendBytes(bytes, static_cast<uint32_t>(placements.size()));
+    AppendBytes(bytes, static_cast<uint32_t>(assetIds.size()));
+    for (const auto& [asset, index] : assetIds)
+    {
+        (void)index;
+        AppendBytes(bytes, static_cast<uint32_t>(asset.size()));
+        bytes.insert(bytes.end(), asset.begin(), asset.end());
+    }
+    for (const auto& placement : placements)
+    {
+        AppendBytes(bytes, placement.id);
+        AppendBytes(bytes, assetIds.at(placement.asset));
+        for (float value : {placement.position.x, placement.position.y,
+            placement.position.z, placement.normal.x, placement.normal.y,
+            placement.normal.z, placement.yawDegrees, placement.scale})
+            AppendBytes(bytes, value);
+    }
+    return Engine::Serialization::EncodeHex(bytes);
+}
+bool DecodePackedPlacements(const std::string& text,
+    std::vector<TerrainObjectLayer::Placement>& placements)
+{
+    std::vector<uint8_t> bytes;
+    if (!Engine::Serialization::DecodeHex(text, bytes)) return false;
+    size_t cursor = 0;
+    auto read = [&](auto& value) {
+        if (cursor + sizeof(value) > bytes.size()) return false;
+        std::memcpy(&value, bytes.data() + cursor, sizeof(value));
+        cursor += sizeof(value);
+        return true;
+    };
+    uint32_t magic = 0, count = 0, assetCount = 0;
+    if (!read(magic) || magic != 0x31504c54 || !read(count) ||
+        count > 1000000 || !read(assetCount) || assetCount > 4096) return false;
+    std::vector<std::string> assets;
+    assets.reserve(assetCount);
+    for (uint32_t i = 0; i < assetCount; ++i)
+    {
+        uint32_t length = 0;
+        if (!read(length) || length == 0 || length > 4096 ||
+            cursor + length > bytes.size()) return false;
+        assets.emplace_back(reinterpret_cast<const char*>(bytes.data() + cursor),
+            length);
+        cursor += length;
+    }
+    std::vector<TerrainObjectLayer::Placement> decoded;
+    decoded.reserve(count);
+    for (uint32_t i = 0; i < count; ++i)
+    {
+        TerrainObjectLayer::Placement placement;
+        uint32_t assetIndex = 0;
+        float values[8]{};
+        if (!read(placement.id) || !read(assetIndex) || assetIndex >= assets.size())
+            return false;
+        for (float& value : values) if (!read(value) || !std::isfinite(value))
+            return false;
+        placement.asset = assets[assetIndex];
+        placement.position = {values[0], values[1], values[2]};
+        placement.normal = {values[3], values[4], values[5]};
+        placement.yawDegrees = values[6];
+        placement.scale = std::max(0.f, values[7]);
+        decoded.push_back(std::move(placement));
+    }
+    if (cursor != bytes.size()) return false;
+    placements = std::move(decoded);
+    return true;
+}
 }
 uint64_t TerrainObjectLayer::GetPlacementSignature() const
 {
     uint64_t signature=1469598103934665603ull; std::unordered_set<uint64_t> used;
+    PlacementHash(signature, &conformToGround, sizeof(conformToGround));
     for(uint32_t index=0;index<placements.size();++index)
     {
         const auto& p=placements[index];
@@ -143,9 +247,11 @@ const TerrainObjectLayer::PreparedTiles& TerrainObjectLayer::GetPreparedTiles(fl
     for(uint32_t index=0;index<placements.size();++index)
     {
         const auto& p=placements[index]; const int x=int(std::floor(p.position.x/span)),z=int(std::floor(p.position.z/span));
-        const auto rotation=glm::mat3_cast(SurfaceRotation(p.normal,p.yawDegrees));
-        const auto translation=p.position-glm::vec3(x*span,0,z*span); PreparedPlacement record; record.index=index;
-        for(int row=0;row<3;++row) record.transform.rows[row]={rotation[0][row]*p.scale,rotation[1][row]*p.scale,rotation[2][row]*p.scale,translation[row]};
+        glm::mat4 matrix = PlacementTransform(p);
+        matrix[3].x -= x * span;
+        matrix[3].z -= z * span;
+        PreparedPlacement record; record.index=index;
+        for(int row=0;row<3;++row) record.transform.rows[row]={matrix[0][row],matrix[1][row],matrix[2][row],matrix[3][row]};
         AddPrepared(x,z,record);
     }
     m_preparedRevision=GetConfigurationRevision(); m_preparedData=placements.data(); m_preparedCount=placements.size(); return m_prepared;
@@ -196,6 +302,7 @@ TerrainObjectLayer::JsonValue TerrainObjectLayer::Serialize() const
     JsonValue out = Component::Serialize();
     out.Set("bakedInstances",JsonValue(std::move(baked)));
     out.Set("layerName", JsonValue(layerName));
+    out.Set("conformToGround", JsonValue(conformToGround));
     JsonValue lodEntries = JsonValue::MakeArray(objectLods.size());
     for (const auto& [asset, settings] : objectLods)
     {
@@ -216,26 +323,31 @@ TerrainObjectLayer::JsonValue TerrainObjectLayer::Serialize() const
     out.Set("objectLods", std::move(lodEntries));
     {
         PrefabLoadProfile::Stage stage("placement_snapshot_records");
-        JsonValue entries = JsonValue::MakeArray(placements.size());
-        for (const Placement& placement : placements)
+        if (placements.size() > 32)
+            out.Set("placementsPacked", JsonValue(EncodePackedPlacements(placements)));
+        else
         {
-            JsonValue entry = JsonValue::MakeObject(6);
-            JsonValue position = JsonValue::MakeArray(3);
-            position.Push(JsonValue(placement.position.x))
-                .Push(JsonValue(placement.position.y)).Push(JsonValue(placement.position.z));
-            JsonValue normal = JsonValue::MakeArray(3);
-            normal.Push(JsonValue(placement.normal.x))
-                .Push(JsonValue(placement.normal.y)).Push(JsonValue(placement.normal.z));
-            entry
-                .Set("id", JsonValue(std::to_string(placement.id)))
-                .Set("asset", JsonValue(placement.asset))
-                .Set("position", std::move(position))
-                .Set("normal", std::move(normal))
-                .Set("yawDegrees", JsonValue(placement.yawDegrees))
-                .Set("scale", JsonValue(placement.scale));
-            entries.Push(std::move(entry));
+            JsonValue entries = JsonValue::MakeArray(placements.size());
+            for (const Placement& placement : placements)
+            {
+                JsonValue entry = JsonValue::MakeObject(6);
+                JsonValue position = JsonValue::MakeArray(3);
+                position.Push(JsonValue(placement.position.x))
+                    .Push(JsonValue(placement.position.y)).Push(JsonValue(placement.position.z));
+                JsonValue normal = JsonValue::MakeArray(3);
+                normal.Push(JsonValue(placement.normal.x))
+                    .Push(JsonValue(placement.normal.y)).Push(JsonValue(placement.normal.z));
+                entry
+                    .Set("id", JsonValue(std::to_string(placement.id)))
+                    .Set("asset", JsonValue(placement.asset))
+                    .Set("position", std::move(position))
+                    .Set("normal", std::move(normal))
+                    .Set("yawDegrees", JsonValue(placement.yawDegrees))
+                    .Set("scale", JsonValue(placement.scale));
+                entries.Push(std::move(entry));
+            }
+            out.Set("placements", std::move(entries));
         }
-        out.Set("placements", std::move(entries));
     }
     return out;
 }
@@ -251,6 +363,8 @@ void TerrainObjectLayer::Deserialize(const JsonValue& value)
     shadowFadeWidth = GetShadowFadeWidth();
     shadowLod = std::clamp(shadowLod, -1, 2);
     layerName = value.Has("layerName") ? value["layerName"].AsString() : "Objects";
+    conformToGround = value.Has("conformToGround") &&
+        value["conformToGround"].AsBool();
     objectLods.clear();
     const auto& lodEntries = value["objectLods"];
     for (size_t i = 0; i < lodEntries.ArraySize(); ++i)
@@ -277,9 +391,11 @@ void TerrainObjectLayer::Deserialize(const JsonValue& value)
         objectLods[asset].distances = GetObjectLodDistances(asset, normalizedCount);
     }
     placements.clear();
+    const bool hasPackedPlacements = value["placementsPacked"].IsString() &&
+        DecodePackedPlacements(value["placementsPacked"].AsString(), placements);
     const auto& entries = value["placements"];
-    placements.reserve(entries.ArraySize());
-    for (size_t i = 0; i < entries.ArraySize(); ++i)
+    if (!hasPackedPlacements) placements.reserve(entries.ArraySize());
+    for (size_t i = 0; !hasPackedPlacements && i < entries.ArraySize(); ++i)
     {
         const auto& entry = entries.ArrayAt(i);
         const auto& position = entry["position"];
@@ -321,6 +437,7 @@ void TerrainObjectLayer::InstallPrepared(TerrainObjectLayer&& source)
     lodHysteresis = source.lodHysteresis;
     screenLodSelection = source.screenLodSelection;
     distanceLodOverride = source.distanceLodOverride;
+    conformToGround = source.conformToGround;
     screenLod1Pixels = source.screenLod1Pixels;
     screenLod2Pixels = source.screenLod2Pixels;
     screenLodHysteresis = source.screenLodHysteresis;
@@ -343,6 +460,9 @@ bool TerrainObjectLayer::DrawProperties(::Engine::Editor::IEditorUi& ui)
 {
     bool changed = false;
     ui.ValueLabel("Layer", layerName.c_str());
+    changed |= ui.Checkbox("Conform mesh to ground while upright",
+        &conformToGround);
+    ui.Tooltip("Shears placement vertices to follow local terrain height without tilting the object's vertical axis. Best for small grass clumps.");
     changed |= ui.DragFloat("Object view distance (m)", &viewDistance,
         .25f, 1.f, 100000.f);
     ui.Tooltip("Objects beyond this distance are hidden. Distances are measured to each object tile center.");

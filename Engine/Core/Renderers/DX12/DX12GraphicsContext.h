@@ -6,6 +6,8 @@
 #include <d3d12.h>
 #include <vector>
 #include <memory>
+#include <mutex>
+#include <unordered_set>
 
 namespace Engine::Renderers
 {
@@ -13,6 +15,37 @@ class D3D12GraphicsTexture;
 struct D3D12OcclusionQueryState;
 struct D3D12GpuTimingState;
 struct D3D12IndirectSignatures;
+
+class D3D12BufferFrameOwners
+{
+public:
+    void Prepare(uint32_t slot)
+    {
+        std::lock_guard lock(m_mutex);
+        if (m_slots.size() <= slot) m_slots.resize(size_t(slot) + 1);
+        m_slot = slot;
+        m_slots[slot].owners.clear();
+        m_slots[slot].seen.clear();
+    }
+    void Retain(ID3D12Resource* resource)
+    {
+        if (!resource) return;
+        std::lock_guard lock(m_mutex);
+        if (m_slots.empty()) m_slots.resize(1);
+        auto& slot = m_slots[m_slot];
+        if (slot.seen.insert(resource).second)
+            slot.owners.emplace_back(resource);
+    }
+private:
+    struct Slot
+    {
+        std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>> owners;
+        std::unordered_set<ID3D12Resource*> seen;
+    };
+    std::mutex m_mutex;
+    std::vector<Slot> m_slots;
+    size_t m_slot = 0;
+};
 
 // ---------------------------------------------------------------------------
 // D3D12GraphicsContext — DirectX 12 command recording wrapper
@@ -46,6 +79,7 @@ public:
     void SetIndexBuffer(const Engine::Graphics::IGraphicsBuffer* buffer, uint32_t indexCount, uint64_t offset = 0) override;
     void SetTexture(uint32_t slot, const Engine::Graphics::IGraphicsTexture* texture) override;
     void SetTextureOwners(std::shared_ptr<Engine::Graphics::TextureFrameOwners> owners) { m_textureOwners = std::move(owners); }
+    void SetBufferOwners(std::shared_ptr<D3D12BufferFrameOwners> owners) { m_bufferOwners = std::move(owners); }
     bool BeginDepthOnlyPass(const Engine::Graphics::IGraphicsTexture* texture,
         float clearDepth = 1.f) override;
     void EndDepthOnlyPass() override;
@@ -86,6 +120,7 @@ public:
 private:
     ID3D12GraphicsCommandList* m_cmdList;
     std::shared_ptr<Engine::Graphics::TextureFrameOwners> m_textureOwners;
+    std::shared_ptr<D3D12BufferFrameOwners> m_bufferOwners;
     uint64_t m_textureOwnerGeneration=0;
     std::unordered_set<const Engine::Graphics::IGraphicsTexture*> m_seenFrameTextures;
     void RetainTexture(const Engine::Graphics::IGraphicsTexture* texture)
@@ -95,6 +130,8 @@ private:
         if(m_textureOwnerGeneration!=generation) {m_seenFrameTextures.clear();m_textureOwnerGeneration=generation;}
         if(m_seenFrameTextures.insert(texture).second) m_textureOwners->Retain(texture);
     }
+    void RetainBuffer(ID3D12Resource* resource)
+    { if (m_bufferOwners) m_bufferOwners->Retain(resource); }
     ID3D12RootSignature* m_rootSignature = nullptr;
     uint32_t m_indexCount = 0;
     std::shared_ptr<D3D12OcclusionQueryState> m_occlusionState;
@@ -137,6 +174,8 @@ private:
     uint32_t m_preparedFrameSlot = 0;
     std::shared_ptr<Engine::Graphics::TextureFrameOwners> m_textureOwners =
         std::make_shared<Engine::Graphics::TextureFrameOwners>();
+    std::shared_ptr<D3D12BufferFrameOwners> m_bufferOwners =
+        std::make_shared<D3D12BufferFrameOwners>();
     uint64_t m_preparedFrameSerial = 0;
     ID3D12Device* m_device;
     ID3D12CommandQueue* m_commandQueue;

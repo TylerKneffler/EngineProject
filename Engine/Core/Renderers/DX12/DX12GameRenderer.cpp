@@ -1,5 +1,6 @@
 #include "DX12GameRenderer.h"
 #include "DX12QueueMutex.h"
+#include "DX12DredDiagnostics.h"
 #include <chrono>
 #include <algorithm>
 #include <cmath>
@@ -453,6 +454,7 @@ D3D12_CPU_DESCRIPTOR_HANDLE DX12GameRenderer::GetCurrentRTV() const
 // ---------------------------------------------------------------------------
 void DX12GameRenderer::CreateDevice()
 {
+    EnableDredDiagnostics();
     // ---- Debug layer ----
     // The D3D12 debug layer intercepts every API call and validates usage:
     // wrong resource states, missing barriers, descriptor heap misuse, leaked

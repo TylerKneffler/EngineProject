@@ -150,12 +150,12 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
     };
     const auto setColor = [&](Mesh::Vertex& vertex,
         float height) {
-        float weights[TerrainHeightArchive::LayerCount];
+        float weights[6];
         TerrainHeightArchive::BlendHeightBands(height,
             m_farPalette.heightBoundaries,
             m_farPalette.heightBlendHalfWidth, weights);
         glm::vec3 color(0.f);
-        for (int layer = 0; layer < TerrainHeightArchive::LayerCount; ++layer)
+        for (int layer = 0; layer < 6; ++layer)
             color += m_farPalette.farColors[layer] * weights[layer];
         vertex.color[0] = color.r;
         vertex.color[1] = color.g;
@@ -950,6 +950,9 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
                     HashValue(fingerprint, color[channel]);
             for (int layer : m_farPalette.archiveToNear)
                 HashValue(fingerprint, layer);
+            for (float boundary : m_farPalette.heightBoundaries)
+                HashValue(fingerprint, boundary);
+            HashValue(fingerprint, m_farPalette.heightBlendHalfWidth);
             for (int y = tile.startY - 1; y <= tile.endY + 1; ++y)
                 for (int x = tile.startX - 1; x <= tile.endX + 1; ++x)
                 {

@@ -1,13 +1,50 @@
 #include "DX12GraphicsBuffer.h"
 #include "DX12QueueMutex.h"
+#include "DX12DredDiagnostics.h"
 #include "Core/Serialization/PrefabLoadProfile.h"
 #include <cstring>
 #include <stdexcept>
 #include <sstream>
 #include <fstream>
+#include <atomic>
+#include <mutex>
 
 namespace Engine::Renderers
 {
+namespace
+{
+void LogD3D12BufferAddress(ID3D12Resource* resource,
+    Engine::Graphics::IGraphicsBuffer::Usage usage,
+    Engine::Graphics::IGraphicsBuffer::AccessMode access,
+    uint64_t sizeBytes)
+{
+#if defined(_DEBUG)
+    static std::atomic<uint64_t> nextId{1};
+    static std::mutex logMutex;
+    const uint64_t id = nextId.fetch_add(1, std::memory_order_relaxed);
+    std::ostringstream name;
+    name << "EngineBuffer#" << id << " bytes=" << sizeBytes
+        << " usage=" << static_cast<int>(usage)
+        << " access=" << static_cast<int>(access);
+    const std::string label = name.str();
+    std::wstring wideLabel(label.begin(), label.end());
+    resource->SetName(wideLabel.c_str());
+    std::lock_guard lock(logMutex);
+    std::ofstream log("dx12-buffer-addresses.log", std::ios::app);
+    if (log)
+        log << "id=" << id << " gpuVA=0x" << std::hex
+            << resource->GetGPUVirtualAddress() << std::dec
+            << " bytes=" << sizeBytes
+            << " usage=" << static_cast<int>(usage)
+            << " access=" << static_cast<int>(access) << '\n';
+#else
+    (void)resource;
+    (void)usage;
+    (void)access;
+    (void)sizeBytes;
+#endif
+}
+}
 
 D3D12GraphicsBuffer::D3D12GraphicsBuffer(
     Microsoft::WRL::ComPtr<ID3D12Resource> resource,
@@ -85,26 +122,11 @@ std::unique_ptr<Engine::Graphics::IGraphicsBuffer> D3D12BufferFactory::CreateBuf
             break;
     }
 
-    // Set initial state based on usage
+    // D3D12 buffers are created in COMMON regardless of the requested
+    // InitialState. Keep the tracker in COMMON as well; the first binding
+    // then emits an explicit transition to vertex/index/SRV/UAV state.
     if (access == Engine::Graphics::IGraphicsBuffer::AccessMode::Default)
-    {
-        switch (usage)
-        {
-            case Engine::Graphics::IGraphicsBuffer::Usage::ConstantBuffer:
-            case Engine::Graphics::IGraphicsBuffer::Usage::VertexBuffer:
-                initialState = D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER;
-                break;
-            case Engine::Graphics::IGraphicsBuffer::Usage::IndexBuffer:
-                initialState = D3D12_RESOURCE_STATE_INDEX_BUFFER;
-                break;
-            case Engine::Graphics::IGraphicsBuffer::Usage::ShaderResource:
-                initialState = D3D12_RESOURCE_STATE_COMMON;
-                break;
-            case Engine::Graphics::IGraphicsBuffer::Usage::StorageBuffer:
-                initialState = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
-                break;
-        }
-    }
+        initialState = D3D12_RESOURCE_STATE_COMMON;
 
     D3D12_HEAP_PROPERTIES heapProps{};
     heapProps.Type = heapType;
@@ -144,6 +166,7 @@ std::unique_ptr<Engine::Graphics::IGraphicsBuffer> D3D12BufferFactory::CreateBuf
         if (FAILED(removedReason))
             message << ", deviceRemovedReason=0x" << std::hex
                 << static_cast<unsigned long>(removedReason);
+        AppendDredDiagnostics(m_device, message);
         OutputDebugStringA((message.str() + "\n").c_str());
         // Preserve allocation diagnostics even when the editor exits without
         // an attached debugger or a visible console.
@@ -153,6 +176,7 @@ std::unique_ptr<Engine::Graphics::IGraphicsBuffer> D3D12BufferFactory::CreateBuf
     }
 
     auto buffer = std::make_unique<D3D12GraphicsBuffer>(resource, usage, access, sizeBytes);
+    LogD3D12BufferAddress(resource.Get(), usage, access, sizeBytes);
     buffer->SetResourceState(initialState);
     buffer->SetElementStride(elementStride);
 
@@ -247,7 +271,7 @@ std::unique_ptr<Engine::Graphics::IGraphicsBuffer> D3D12BufferFactory::CreateSta
     barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
     barrier.Transition.pResource = native->GetResource();
     barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-    barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER;
+    barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COMMON;
     barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_DEST;
     commands->ResourceBarrier(1, &barrier);
     commands->CopyBufferRegion(native->GetResource(), 0, upload->GetResource(), 0, sizeBytes);
@@ -278,6 +302,7 @@ std::unique_ptr<Engine::Graphics::IGraphicsBuffer> D3D12BufferFactory::CreateSta
             bundle->fence->GetCompletedValue() < completion)
             throw std::runtime_error("Failed to wait for static geometry upload");
     }
+    native->SetResourceState(D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
     {
         std::lock_guard lock(m_staticStagingMutex);
         if (!m_staticCommands) m_staticCommands = std::move(bundle);

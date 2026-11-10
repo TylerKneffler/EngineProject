@@ -116,6 +116,7 @@ Engine::Components::TerrainManager::FarTerrainPalette MakeFarPalette(
             {.57f, .55f, .50f}, {.88f, .91f, .95f}}};
         palette.heightBoundaries = MountainMaterialBoundaries;
         palette.heightBlendHalfWidth = 3.5f;
+        palette.archiveToNear = {0, 1, 3, 4};
     }
     else
     {
@@ -329,7 +330,8 @@ void TerrainPerformanceDriver::OnAfterDeserialize(IGraphicsProvider*)
             Engine::Components::Mesh::ResolveFilePath(heightArchive),
             Engine::Components::Mesh::ResolveFilePath(manager->cellDataDirectory),
             manager->GetEditedProceduralCells(), m_configuredSignature,
-            mapHalfExtentCells, manager->cellsX, manager->cellsY);
+            mapHalfExtentCells, manager->cellsX, manager->cellsY,
+            mountainTerrain);
         if (result.loaded)
         {
             manager->ConfigureFarTerrain(mapHalfExtentCells,
@@ -341,11 +343,14 @@ void TerrainPerformanceDriver::OnAfterDeserialize(IGraphicsProvider*)
     }
     if (auto* scene = Owner->GetScene())
     {
-        scene->editorCamera.transform.position = {0.f, 180.f, -300.f};
+        scene->editorCamera.transform.position = mountainTerrain
+            ? glm::dvec3{0.0, 330.0, -520.0}
+            : glm::dvec3{0.0, 180.0, -300.0};
         if (auto* camera = scene->editorCamera.GetComponent<Engine::Components::Camera>())
         {
             camera->target = {0.f, 0.f, 0.f};
-            camera->farPlane = enableFarTerrain ? 3218.f : 1000.f;
+            camera->farPlane = enableFarTerrain
+                ? (mountainTerrain ? 25000.f : 3218.f) : 1000.f;
         }
     }
     m_previewLoaded = true;
@@ -400,12 +405,13 @@ void TerrainPerformanceDriver::Update()
                         manager->cellDataDirectory);
                 const auto editedCells = manager->GetEditedProceduralCells();
                 const int cellsX = manager->cellsX, cellsY = manager->cellsY;
+                const bool mountain = mountainTerrain;
                 m_farLoad = SubmitJob(
                     [path, archivePath, editDirectory, editedCells,
-                        signature, extent, cellsX, cellsY] {
+                        signature, extent, cellsX, cellsY, mountain] {
                         return LoadFarGridData(path, archivePath,
                             editDirectory, editedCells, signature, extent,
-                            cellsX, cellsY);
+                            cellsX, cellsY, mountain);
                     });
             }
             if (m_farLoad.valid() &&

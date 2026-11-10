@@ -1,5 +1,6 @@
 #include "DX12EditorRenderer.h"
 #include "D3D12View.h"
+#include "DX12DredDiagnostics.h"
 #include <d3d12sdklayers.h>
 #include <fstream>
 #include <sstream>
@@ -248,6 +249,7 @@ void DX12EditorRenderer::EndFrame()
                     message << '\n' << entry->pDescription;
             }
         }
+        AppendDredDiagnostics(m_device.Get(), message);
         std::ofstream log("dx12-frame-error.log", std::ios::app);
         if (log) log << message.str() << std::endl;
         OutputDebugStringA((message.str() + "\n").c_str());
@@ -359,6 +361,7 @@ uint32_t DX12EditorRenderer::GetAvailableSrvSlots() const
 // ---------------------------------------------------------------------------
 void DX12EditorRenderer::CreateDevice()
 {
+    EnableDredDiagnostics();
 #if defined(_DEBUG)
     ComPtr<ID3D12Debug> debugController;
     if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debugController))))

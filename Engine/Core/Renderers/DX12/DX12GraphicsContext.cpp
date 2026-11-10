@@ -405,6 +405,7 @@ void D3D12GraphicsContext::SetConstantBuffer(uint32_t slot, const Engine::Graphi
     if (!buffer || !m_cmdList) return;
 
     auto* d3dBuffer = static_cast<D3D12GraphicsBuffer*>(const_cast<Engine::Graphics::IGraphicsBuffer*>(buffer));
+    RetainBuffer(d3dBuffer->GetResource());
     D3D12_GPU_VIRTUAL_ADDRESS gpuAddr = d3dBuffer->GetGPUVirtualAddress() + offset;
     m_cmdList->SetGraphicsRootConstantBufferView(slot, gpuAddr);
 }
@@ -414,6 +415,7 @@ void D3D12GraphicsContext::SetVertexBuffer(uint32_t slot, const Engine::Graphics
     if (!buffer || !m_cmdList) return;
 
     auto* d3dBuffer = static_cast<D3D12GraphicsBuffer*>(const_cast<Engine::Graphics::IGraphicsBuffer*>(buffer));
+    RetainBuffer(d3dBuffer->GetResource());
     
     D3D12_VERTEX_BUFFER_VIEW vbv{};
     vbv.BufferLocation = d3dBuffer->GetGPUVirtualAddress() + offset;
@@ -428,6 +430,7 @@ void D3D12GraphicsContext::SetIndexBuffer(const Engine::Graphics::IGraphicsBuffe
     if (!buffer || !m_cmdList) return;
 
     auto* d3dBuffer = static_cast<D3D12GraphicsBuffer*>(const_cast<Engine::Graphics::IGraphicsBuffer*>(buffer));
+    RetainBuffer(d3dBuffer->GetResource());
     
     D3D12_INDEX_BUFFER_VIEW ibv{};
     ibv.BufferLocation = d3dBuffer->GetGPUVirtualAddress() + offset;
@@ -445,6 +448,7 @@ void D3D12GraphicsContext::SetStructuredBuffer(uint32_t slot, const Engine::Grap
           (slot >= 14 && slot <= 15) || (slot == 45 || slot == 46))) return;
     const auto* structured = dynamic_cast<const D3D12GraphicsBuffer*>(buffer);
     if (!structured) return;
+    RetainBuffer(structured->GetResource());
     // Root parameters 7-9 and 11-12 are root SRVs matching t6-t8/t10-t11.
     const uint32_t rootParameter = slot + 1;
     m_cmdList->SetGraphicsRootShaderResourceView(
@@ -491,6 +495,7 @@ void D3D12GraphicsContext::SetComputeReadBuffer(
     auto* native = dynamic_cast<D3D12GraphicsBuffer*>(
         const_cast<Engine::Graphics::IGraphicsBuffer*>(buffer));
     if (!m_cmdList || !native) return;
+    RetainBuffer(native->GetResource());
     TransitionComputeBuffer(m_cmdList, native,
         D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
     m_cmdList->SetComputeRootShaderResourceView(slot == 1 ? 3 : 1,
@@ -504,6 +509,7 @@ void D3D12GraphicsContext::SetComputeWriteBuffer(
         const_cast<Engine::Graphics::IGraphicsBuffer*>(buffer));
     if (!m_cmdList || !native || native->GetUsage() !=
         Engine::Graphics::IGraphicsBuffer::Usage::StorageBuffer) return;
+    RetainBuffer(native->GetResource());
     TransitionComputeBuffer(m_cmdList, native,
         D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     m_cmdList->SetComputeRootUnorderedAccessView(2,
@@ -521,6 +527,7 @@ void D3D12GraphicsContext::StorageBarrier(
     auto* native = dynamic_cast<D3D12GraphicsBuffer*>(
         const_cast<Engine::Graphics::IGraphicsBuffer*>(buffer));
     if (!m_cmdList || !native) return;
+    RetainBuffer(native->GetResource());
     D3D12_RESOURCE_BARRIER barrier{};
     barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
     barrier.UAV.pResource = native->GetResource();
@@ -536,6 +543,7 @@ bool D3D12GraphicsContext::DrawInstancesIndirect(const Engine::Graphics::IGraphi
     const auto* native = dynamic_cast<const D3D12GraphicsBuffer*>(buffer);
     if (!m_cmdList || !native || offset + (indexed ? 20u : 16u) > buffer->GetSize()) return false;
     if(!m_indirectSignatures) return false;
+    RetainBuffer(native->GetResource());
     m_cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     m_cmdList->ExecuteIndirect(m_indirectSignatures->signatures[indexed?1:0].Get(),1,native->GetResource(),offset,nullptr,0);
     return true;
@@ -554,6 +562,8 @@ bool D3D12GraphicsContext::CopyBuffer(
     const uint64_t size = bytes ? bytes : source->GetSize();
     if (!size || size > source->GetSize() || size > destination->GetSize())
         return false;
+    RetainBuffer(src->GetResource());
+    RetainBuffer(dst->GetResource());
     const auto previous = src->GetResourceState();
     TransitionComputeBuffer(m_cmdList, src, D3D12_RESOURCE_STATE_COPY_SOURCE);
     m_cmdList->CopyBufferRegion(dst->GetResource(), 0,
@@ -775,6 +785,7 @@ std::unique_ptr<Engine::Graphics::IGraphicsContext> D3D12GraphicsContextFactory:
     auto result = std::make_unique<D3D12GraphicsContext>(
         list, m_rootSignature, m_occlusionState, m_gpuTimings, m_indirectSignatures, m_nullTexture);
     result->SetTextureOwners(m_textureOwners);
+    result->SetBufferOwners(m_bufferOwners);
     return result;
 }
 
@@ -785,6 +796,7 @@ std::unique_ptr<Engine::Graphics::IGraphicsContext> D3D12GraphicsContextFactory:
         static_cast<ID3D12GraphicsCommandList*>(commandBuffer), m_rootSignature,
         m_occlusionState, m_gpuTimings, m_indirectSignatures, m_nullTexture);
     result->SetTextureOwners(m_textureOwners);
+    result->SetBufferOwners(m_bufferOwners);
     return result;
 }
 
@@ -797,6 +809,7 @@ void D3D12GraphicsContextFactory::PrepareFrame(uint32_t frameSlot)
 {
     m_preparedFrameSlot = frameSlot;
     m_textureOwners->Prepare(frameSlot);
+    m_bufferOwners->Prepare(frameSlot);
     ++m_preparedFrameSerial;
     if (m_occlusionState) m_occlusionState->Prepare(frameSlot);
     if (m_gpuTimings) m_gpuTimings->Prepare(frameSlot);

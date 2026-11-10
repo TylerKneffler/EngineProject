@@ -176,6 +176,16 @@ public:
         return component;
     }
 
+    Component* AddComponent(Component* component)
+    {
+        AssertSceneOwner();
+        if (!component) return nullptr;
+        component->Owner = this;
+        Components.push_back(component);
+        NotifyStructureChanged();
+        return component;
+    }
+
     template<typename T>
     T* GetComponent()
     {

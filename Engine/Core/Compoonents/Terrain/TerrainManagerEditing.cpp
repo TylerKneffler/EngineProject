@@ -52,14 +52,48 @@ void TerrainManager::RestoreObjectLayers(Cell cell,
     };
     const auto makeLayer = [&](const std::string& name,
         const JsonValue* saved) {
-        if (name.empty() || findLayer(name)) return;
-        auto* child = cellObject.GetScene()->AddObject(name);
-        child->runtimeOnly = true;
-        cellObject.GetScene()->MoveObject(child, &cellObject,
-            Engine::Scene::Scene::ObjectPlacement::AsChild);
-        auto* layer = child->AddComponent<TerrainObjectLayer>();
-        if (saved) layer->Deserialize(*saved);
-        layer->layerName = name;
+        if (name.empty()) return;
+        auto* layer = findLayer(name);
+        Engine::Core::Object* child = layer ? layer->Owner : nullptr;
+        if (!layer)
+        {
+            child = cellObject.GetScene()->AddObject(name);
+            child->runtimeOnly = true;
+            cellObject.GetScene()->MoveObject(child, &cellObject,
+                Engine::Scene::Scene::ObjectPlacement::AsChild);
+            layer = child->AddComponent<TerrainObjectLayer>();
+            if (saved) layer->Deserialize(*saved);
+            layer->layerName = name;
+        }
+        if (name == "Meadow grass" && !viewerObjectName.empty())
+        {
+            const bool hasGrassField = std::any_of(child->Components.begin(),
+                child->Components.end(), [](const auto* component) {
+                    return component && component->GetTypeName() == "GrassField";
+                });
+            if (!hasGrassField)
+            if (auto* grass = Engine::Serialization::SceneSerializer::
+                    CreateRegisteredComponent("GrassField"))
+            {
+                auto settings = Engine::Serialization::JsonValue::MakeObject();
+                settings.Set("shortMesh", "Assets/Mesh/Grass/meadow_short.obj")
+                    .Set("tallMesh", "Assets/Mesh/Grass/field_tall.obj")
+                    .Set("shortMeshLod1", "Assets/Mesh/Grass/meadow_short_lod1.obj")
+                    .Set("shortMeshLod2", "Assets/Mesh/Grass/meadow_short_lod2.obj")
+                    .Set("tallMeshLod1", "Assets/Mesh/Grass/field_tall_lod1.obj")
+                    .Set("tallMeshLod2", "Assets/Mesh/Grass/field_tall_lod2.obj")
+                    .Set("viewerObjectName", viewerObjectName)
+                    .Set("useEditorCamera", false).Set("visibleRadius", 11.f)
+                    .Set("tileSize", 4.f).Set("shortPatchesPerSquareMeter", .5f)
+                    .Set("tallPatchesPerSquareMeter", .16f).Set("seed", 18731)
+                    .Set("maxTileBuildsPerUpdate", 8).Set("castShadows", false)
+                    .Set("tileWorkBudgetMs", 2.f).Set("fadeDuration", .35f)
+                    .Set("distanceFadeWidth", 2.f).Set("retainDormantTiles", false)
+                    .Set("allowProceduralGeneration", false);
+                grass->Deserialize(settings);
+                child->AddComponent(grass);
+            }
+        }
     };
     if (const auto found = m_objectLayers.find(cell);
         found != m_objectLayers.end())

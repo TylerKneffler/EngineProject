@@ -818,22 +818,27 @@ engine_add_executable_icon(Editor "${ENGINE_EDITOR_ICON}")
 
 # Project scripts are also built as a reloadable module. The editor loads a
 # versioned copy so this canonical output remains writable on the next edit.
-add_library(ProjectScripts SHARED
+add_library(Lib SHARED
     ${ASSET_SOURCES}
     "${ENGINE_ROOT}/Engine/Editor/HotReload/ProjectScriptModule.cpp"
 )
-target_compile_definitions(ProjectScripts PRIVATE ENGINE_RELOADABLE_SCRIPT_MODULE)
-target_link_libraries(ProjectScripts PRIVATE Engine)
-target_include_directories(ProjectScripts PRIVATE
+target_compile_definitions(Lib PRIVATE ENGINE_RELOADABLE_SCRIPT_MODULE)
+target_link_libraries(Lib PRIVATE Engine)
+target_include_directories(Lib PRIVATE
     ${ENGINE_ROOT}
     ${ENGINE_ROOT}/Engine
     ${ENGINE_ROOT}/Engine/Editor
     ${ENGINE_ROOT}/Engine/Core/Assets
     ${ENGINE_PROJECT_DIR}/Assets
 )
-set_target_properties(ProjectScripts PROPERTIES PREFIX "" OUTPUT_NAME "ProjectScripts")
-target_precompile_headers(ProjectScripts REUSE_FROM Engine)
-add_dependencies(Editor ProjectScripts)
+set_target_properties(Lib PROPERTIES
+    PREFIX ""
+    OUTPUT_NAME "Lib"
+    DEBUG_POSTFIX ""
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/Lib"
+)
+target_precompile_headers(Lib REUSE_FROM Engine)
+add_dependencies(Editor Lib)
 if(EXISTS "${ENGINE_ROOT}/.local/tools/TerrainCacheBake.cpp")
     add_executable(TerrainCacheBake EXCLUDE_FROM_ALL
         "${ENGINE_ROOT}/.local/tools/TerrainCacheBake.cpp"
@@ -869,7 +874,7 @@ target_compile_definitions(Editor PRIVATE
     ENGINE_ASSETS_PATH="${ENGINE_COMPILED_ASSETS_PATH}"
     ENGINE_ROOT_PATH="${ENGINE_COMPILED_ROOT_PATH}"
     GAME_EXECUTABLE_PATH="${ENGINE_COMPILED_GAME_PATH}"
-    PROJECT_SCRIPTS_PATH="$<TARGET_FILE:ProjectScripts>"
+    PROJECT_SCRIPTS_PATH="$<TARGET_FILE:Lib>"
     ENGINE_EDITOR_UI_IMGUI
     $<$<NOT:$<BOOL:${ENGINE_PROJECT_DIR}>>:ENGINE_BUILTIN_ASSET_SCRIPTS>
 )
@@ -985,7 +990,7 @@ set_target_properties(Server PROPERTIES
 # parallelize source files inside one project. Engine already uses /MP; apply it
 # to the other first-party targets, including the editor's hot-reload module.
 if(MSVC)
-    foreach(target Editor ProjectScripts Game VideoExporter Server)
+    foreach(target Editor Lib Game VideoExporter Server)
         target_compile_options(${target} PRIVATE /MP)
     endforeach()
 endif()
@@ -1026,7 +1031,7 @@ if(NOT ENGINE_PROJECT_DIR AND WIN32 AND
     if(MSVC)
         target_compile_options(EditorPlaySessionTests PRIVATE /MP)
     endif()
-    add_dependencies(EditorPlaySessionTests ProjectScripts)
+    add_dependencies(EditorPlaySessionTests Lib)
     add_test(NAME EditorPlaySession COMMAND EditorPlaySessionTests)
     set_tests_properties(EditorPlaySession PROPERTIES
         WORKING_DIRECTORY "${ENGINE_ROOT}" TIMEOUT 120)

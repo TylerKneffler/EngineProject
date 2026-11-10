@@ -48,6 +48,9 @@ public:
     float lodHysteresis = .75f;
     bool screenLodSelection = false;
     bool distanceLodOverride = false;
+    // Warp instance vertices across the sampled ground plane while retaining
+    // a vertical local Y axis (useful for upright grass on uneven terrain).
+    bool conformToGround = false;
     float screenLod1Pixels = 300.f, screenLod2Pixels = 80.f;
     float screenLodHysteresis = .1f;
     float shadowDistance = 8.f;
@@ -95,6 +98,7 @@ public:
     // Align local Y to the sampled terrain normal, then turn about that axis.
     static glm::quat SurfaceRotation(const glm::vec3& normal,
         float yawDegrees);
+    glm::mat4 PlacementTransform(const Placement& placement) const;
     JsonValue Serialize() const override;
     void Deserialize(const JsonValue& value) override;
     void InstallPrepared(TerrainObjectLayer&& source);

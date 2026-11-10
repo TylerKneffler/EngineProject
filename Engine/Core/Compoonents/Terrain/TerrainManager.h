@@ -173,7 +173,7 @@ public:
         std::array<glm::vec3, 6> nearColors{};
         std::array<int, TerrainHeightArchive::LayerCount> archiveToNear{};
         std::array<float, 5>
-            heightBoundaries{-12.f, 0.f, 16.f};
+            heightBoundaries{-36.f, -24.f, -12.f, 16.f, 48.f};
         float heightBlendHalfWidth = 8.f;
     };
     // Distant visual tiles share this manager's cell grid and scene lifetime.

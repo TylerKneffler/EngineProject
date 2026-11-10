@@ -162,7 +162,7 @@ inline void BlendHeightBands(float height,
     float halfWidth, float* weights)
 {
     float remaining = 1.f;
-    for (int layer = 0; layer < LayerCount - 1; ++layer)
+    for (size_t layer = 0; layer < N; ++layer)
     {
         const float t = std::clamp((height - boundaries[layer] + halfWidth) /
             (2.f * halfWidth), 0.f, 1.f);
@@ -170,7 +170,7 @@ inline void BlendHeightBands(float height,
         weights[layer] = remaining * (1.f - above);
         remaining *= above;
     }
-    weights[LayerCount - 1] = remaining;
+    weights[N] = remaining;
 }
 
 // Reconstruct soft base paint from the saved height while retaining the

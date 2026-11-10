@@ -38,6 +38,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
+#include <deque>
 #include <filesystem>
 #include <fstream>
 #include <optional>
@@ -50,7 +51,7 @@
 #define ENGINE_BUILD_DIR "build/Debug"
 #endif
 #ifndef PROJECT_SCRIPTS_PATH
-#define PROJECT_SCRIPTS_PATH "build/Debug/Debug/ProjectScripts.dll"
+#define PROJECT_SCRIPTS_PATH "build/Lib/Debug/Lib.dll"
 #endif
 
 namespace
@@ -209,6 +210,7 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
     }
     Engine::Core::SceneManager::SetActiveScene(scene);
     scene->SetBeforeGpuResourceDestruction([renderer] { renderer->WaitIdle(); });
+    scene->SetDeferredGraphicsRetirement(true);
     scene->SetGameplayInputEnabled(false);
     Engine::Core::SceneManager::SetDefaultScenePath(projectSettings.defaultScene);
 
@@ -478,6 +480,12 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
     const float autoProfileStep=autoProfilePlay && profileStep ? std::strtof(profileStep->c_str(),nullptr):0.f;
     uint32_t autoProfileStoppedFrames=0;
     bool autoProfileComplete=false;
+    struct RetiredSceneFrame
+    {
+        uint64_t token = 0;
+        Engine::Scene::Scene::RetiredGraphicsResources resources;
+    };
+    std::deque<RetiredSceneFrame> retiredSceneFrames;
     window->OnUpdate = [&]()
     {
         using Clock = std::chrono::steady_clock;
@@ -663,6 +671,8 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
         uint32_t gameViewHeight = 0;
         uint32_t submittedShadowDraws = 0;
         Engine::Rendering::RenderCpuTimings renderCpu;
+        std::vector<Engine::Scene::Scene*> frameScenes;
+        bool pipelineFrameSubmitted = false;
 
         const auto needsContinuousRendering = [&]()
         {
@@ -727,6 +737,7 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
                     view && view->IsOpen() && view->IsRenderVisible())
                     view->ApplyRequestedRenderSize(renderer->GetNativeDeviceHandle());
         const auto submissionBefore = renderer->GetSubmittedFrameCount();
+        const uint64_t submissionTokenBefore = renderer->GetSubmittedFrameToken();
         submittingEditorFrame = true;
         renderer->RenderIfNeeded([&]()
         {
@@ -760,21 +771,33 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
                 {
                     if (!sceneView->IsRenderVisible()) continue;
                     if (Engine::Scene::Scene* panelScene = sceneView->GetScene())
+                    {
+                        panelScene->SetBeforeGpuResourceDestruction(
+                            [renderer] { renderer->WaitIdle(); });
+                        panelScene->SetDeferredGraphicsRetirement(true);
                         if (preparedScenes.insert(panelScene).second)
                             panelScene->PrepareRenderFrame(!usePlayPipeline);
+                    }
                     continue;
                 }
                 if (auto* gameView = dynamic_cast<Engine::Editor::GameView*>(panel.get()))
                 {
                     if (!gameView->IsRenderVisible()) continue;
                     if (Engine::Scene::Scene* panelScene = gameView->GetScene())
+                    {
+                        panelScene->SetBeforeGpuResourceDestruction(
+                            [renderer] { renderer->WaitIdle(); });
+                        panelScene->SetDeferredGraphicsRetirement(true);
                         if (preparedScenes.insert(panelScene).second)
                             panelScene->PrepareRenderFrame(!usePlayPipeline);
+                    }
                 }
             }
+            frameScenes.assign(preparedScenes.begin(), preparedScenes.end());
             const auto afterPrepare = Clock::now();
             if (usePlayPipeline)
             {
+                pipelineFrameSubmitted = true;
                 const auto recordStart = Clock::now();
                 computeCommands = playPipeline->AcquireCommands();
                 scene->RecordGpuParticleSimulation(computeCommands.get());
@@ -955,6 +978,34 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
         }
         const auto afterRender = Clock::now();
         const auto submissionAfter = renderer->GetSubmittedFrameCount();
+        const auto collectRetiredSceneFrames = [&]()
+        {
+            while (!retiredSceneFrames.empty() &&
+                renderer->IsFrameComplete(retiredSceneFrames.front().token))
+                retiredSceneFrames.pop_front();
+        };
+        collectRetiredSceneFrames();
+        const bool submittedEditorFrame = renderer->GetSubmittedFrameToken() >
+            submissionTokenBefore;
+        if (submittedEditorFrame && !pipelineFrameSubmitted)
+        {
+            const uint64_t token = renderer->GetSubmittedFrameToken();
+            for (auto* frameScene : frameScenes)
+            {
+                if (!frameScene) continue;
+                auto resources = frameScene->TakeRetiredGraphicsResources();
+                if (!resources.Empty())
+                    retiredSceneFrames.push_back({token, std::move(resources)});
+            }
+        }
+        while (retiredSceneFrames.size() >= 3u)
+        {
+            renderer->WaitForFrame(retiredSceneFrames.front().token);
+            collectRetiredSceneFrames();
+            if (!retiredSceneFrames.empty() &&
+                !renderer->IsFrameComplete(retiredSceneFrames.front().token))
+                break;
+        }
         const auto renderCounters=stageCounters();
         if (!pausedFenced &&
             previousPlayState == Engine::Editor::PlayState::Playing &&
@@ -1135,6 +1186,7 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
     scene->SetBeforeGpuResourceDestruction({});
     playPipeline.reset();
     renderer->WaitIdle();
+    retiredSceneFrames.clear();
     editorState->ReleaseUiPanels();
     // ImGui's Vulkan backend destroys device resources. It must shut down
     // after view registrations, while EditorState still owns a live device.
