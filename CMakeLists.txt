@@ -839,19 +839,6 @@ set_target_properties(Lib PROPERTIES
 )
 target_precompile_headers(Lib REUSE_FROM Engine)
 add_dependencies(Editor Lib)
-if(EXISTS "${ENGINE_ROOT}/.local/tools/TerrainCacheBake.cpp")
-    add_executable(TerrainCacheBake EXCLUDE_FROM_ALL
-        "${ENGINE_ROOT}/.local/tools/TerrainCacheBake.cpp"
-        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainPerformance/TerrainPerformanceDriver.cpp"
-        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/PerlinNoiseField.cpp"
-        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/TerrainGen/TerrainStreamingCameraDriver.cpp"
-    )
-    target_link_libraries(TerrainCacheBake PRIVATE Engine)
-    target_include_directories(TerrainCacheBake PRIVATE
-        "${ENGINE_ROOT}/Engine"
-        "${ENGINE_ROOT}/Engine/Core/Assets"
-    )
-endif()
 source_group(TREE "${ENGINE_ROOT}" FILES
     ${EDITOR_SOURCES} ${EDITOR_HEADERS} ${EDITOR_RESOURCE_FILES})
 if(ENGINE_PROJECT_DIR)
