@@ -18,6 +18,17 @@
 
 namespace Engine::Components
 {
+namespace
+{
+// A prototype is shared only while a streamed layer uses it. It has no
+// graphics provider and is never attached to the live scene.
+struct SharedPrefabPrototype
+{
+    Engine::Scene::Scene scene;
+    Engine::Core::Object* root = nullptr;
+    std::map<std::pair<const Mesh*, Engine::Graphics::IGraphicsProvider*>, std::weak_ptr<Mesh>> geometry;
+};
+}
 float TerrainObjectLayer::prefabInstanceGroupSpanMeters=256.f;
 void TerrainObjectLayer::SetPrefabInstanceGroupSpanForBenchmark(float span)
 {
@@ -93,6 +104,7 @@ struct TerrainObjectLayer::PrefabInstances
         return true;
     }
     std::vector<uint64_t> generated;
+    std::vector<std::shared_ptr<SharedPrefabPrototype>> prototypes;
 };
 
 void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider)
@@ -221,9 +233,10 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider)
     runtime->provider=provider; runtime->signature=signature;
     runtime->StoreConfiguration(*this);
     runtime->nextCheck=now+std::chrono::seconds(1);
-    // Definitions are needed only while deriving batches and collider copies.
-    // Retaining them duplicates every source CPU mesh for the layer lifetime.
-    Engine::Scene::Scene prototypes;
+    // Neighboring streamed cells frequently use the same prefab. Keep one
+    // provider-free prototype while at least one such cell remains loaded.
+    using PrototypeKey = std::pair<std::string, std::filesystem::file_time_type>;
+    static std::map<PrototypeKey, std::weak_ptr<SharedPrefabPrototype>> prototypeCache;
     const auto create=[&](const std::string& name) {
         auto* object=scene->AddObject(name); object->runtimeOnly=true;
         // New batches use layer-local coordinates. Preserving the old world
@@ -235,15 +248,27 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider)
         object->transform.scale={1,1,1};
         runtime->generated.push_back(scene->GetObjectId(object)); return object;
     };
-    std::map<std::string,Engine::Core::Object*> definitions;
+    std::map<std::string,std::shared_ptr<SharedPrefabPrototype>> definitions;
     const auto definition=[&](const std::string& asset) {
-        auto& root=definitions[asset];
-        if (!root)
+        auto& prototype=definitions[asset];
+        if (!prototype)
         {
             BuildProfile::Stage stage("prototype_definition");
-            root=Engine::Serialization::SceneSerializer::InstantiatePrefab(prototypes,key(asset),nullptr);
+            const auto& resolved = key(asset);
+            const PrototypeKey cacheKey{resolved, sources.at(asset).stamp};
+            if (const auto found = prototypeCache.find(cacheKey); found != prototypeCache.end())
+                prototype = found->second.lock();
+            if (!prototype)
+            {
+                prototype = std::make_shared<SharedPrefabPrototype>();
+                prototype->root = Engine::Serialization::SceneSerializer::InstantiatePrefab(
+                    prototype->scene, resolved, nullptr);
+                if (!prototype->root) { prototype.reset(); return static_cast<Engine::Core::Object*>(nullptr); }
+                prototypeCache[cacheKey] = prototype;
+            }
+            runtime->prototypes.push_back(prototype);
         }
-        return root;
+        return prototype->root;
     };
     for (const auto& [asset,records]:groups)
     {
@@ -289,8 +314,12 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider)
                 {
                     if (!original->Owner->IsEnabledInHierarchy()) continue;
                     // Expand indexed geometry once per shared prefab part, never per placement.
-                    auto source=std::make_shared<Mesh>();
+                    auto& prototype = definitions.at(meshes[lod]);
+                    auto& sharedGeometry = prototype->geometry[{original, provider}];
+                    auto source = sharedGeometry.lock();
+                    if (!source)
                     {
+                        source = std::make_shared<Mesh>();
                         BuildProfile::Stage stage("batch_source_geometry");
                         std::vector<Mesh::Vertex> vertices;
                         {
@@ -337,6 +366,7 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider)
                             BuildProfile::Stage uploadStage("batch_geometry_buffer_create");
                             source->CreateBuffer(provider->GetBufferFactory());
                         }
+                        sharedGeometry = source;
                     }
                     BuildProfile::Stage instanceStage("batch_instances");
                     const auto sourceMinimum=source->GetBoundsMin();
