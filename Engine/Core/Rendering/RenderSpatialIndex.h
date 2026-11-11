@@ -6,6 +6,7 @@
 #include <array>
 #include <vector>
 #include <cstdint>
+#include <utility>
 
 namespace Engine::Rendering
 {
@@ -24,6 +25,12 @@ inline RenderBounds TransformBounds(glm::vec3 minimum, glm::vec3 maximum, const 
         glm::abs(glm::vec3(world[1])) * extent.y + glm::abs(glm::vec3(world[2])) * extent.z;
     return {center - radius, center + radius, true};
 }
+struct RenderSpatialQueryStatistics
+{
+    uint64_t nodesVisited = 0;
+    uint64_t boundsTested = 0;
+    uint64_t visibleSlots = 0;
+};
 class RenderSpatialIndex
 {
     static constexpr uint32_t NoNode=UINT32_MAX;
@@ -45,12 +52,24 @@ class RenderSpatialIndex
     bool m_incremental=true,m_ready=true;
     static RenderBounds Merge(const RenderBounds& a,const RenderBounds& b);
     static double Area(const RenderBounds& bounds);
-    struct ViewCache { glm::mat4 clip{1}; std::vector<uint8_t> visible; bool valid=false; };
+    struct ViewCache
+    {
+        glm::mat4 clip{1};
+        std::vector<uint8_t> visible;
+        std::vector<uint32_t> visibleItems;
+        RenderSpatialQueryStatistics visibleItemsStatistics;
+        bool valid=false, visibleValid=false, visibleItemsValid=false;
+    };
     mutable std::array<ViewCache,8> m_views;
     mutable size_t m_nextView=0;
     uint32_t BuildNode(uint32_t first,uint32_t count,uint32_t parent=NoNode,uint32_t depth=0);
     void Rebuild();
 public:
+    struct VisibleSlotsQuery
+    {
+        std::vector<uint32_t> slots;
+        RenderSpatialQueryStatistics statistics;
+    };
     void SetIncrementalUpdatesEnabled(bool enabled) { m_incremental=enabled; }
     struct UpdateStatistics
     {
@@ -149,14 +168,106 @@ public:
         if (!m_nodes.empty()) query(query,0);
         return visible;
     }
+    // Return only visible slots for consumers that can expand slots to their
+    // associated render items. This avoids scanning the full slot array after
+    // the BVH has already rejected entire branches.
+    VisibleSlotsQuery QueryVisibleSlotsUncached(const glm::mat4& clip) const
+    {
+        VisibleSlotsQuery result;
+        if (!m_ready)
+        {
+            result.slots.resize(m_bounds.size());
+            std::iota(result.slots.begin(), result.slots.end(), 0u);
+            result.statistics.visibleSlots = result.slots.size();
+            return result;
+        }
+        auto& visible = result.slots;
+        visible = m_unbounded;
+        glm::vec4 row[4];
+        for (int i = 0; i < 4; ++i)
+            row[i] = { clip[0][i], clip[1][i], clip[2][i], clip[3][i] };
+        const glm::vec4 planes[6] = {
+            row[3] + row[0], row[3] - row[0], row[3] + row[1],
+            row[3] - row[1], row[2], row[3] - row[2] };
+        const auto outside = [&](const RenderBounds& bounds)
+        {
+            ++result.statistics.boundsTested;
+            const auto center = (bounds.minimum + bounds.maximum) * .5f;
+            const auto extent = (bounds.maximum - bounds.minimum) * .5f;
+            for (const auto& plane : planes)
+                if (glm::dot(glm::vec3(plane), center) + plane.w +
+                    glm::dot(glm::abs(glm::vec3(plane)), extent) < -1.e-4f)
+                    return true;
+            return false;
+        };
+        const auto query = [&](auto&& self, uint32_t index) -> void
+        {
+            ++result.statistics.nodesVisited;
+            const auto& node = m_nodes[index];
+            if (outside(node.bounds)) return;
+            if (node.count)
+            {
+                for (uint32_t i = 0; i < node.count; ++i)
+                {
+                    const uint32_t item = m_order[node.first + i];
+                    if (!outside(m_bounds[item])) visible.push_back(item);
+                }
+            }
+            else
+            {
+                self(self, node.left);
+                self(self, node.right);
+            }
+        };
+        if (!m_nodes.empty()) query(query, 0);
+        result.statistics.visibleSlots = visible.size();
+        return result;
+    }
+    const std::vector<uint32_t>& QueryVisibleSlots(const glm::mat4& clip,
+        RenderSpatialQueryStatistics* statistics = nullptr) const
+    {
+        for (const auto& view : m_views)
+            if (view.valid && view.visibleItemsValid && view.clip == clip)
+            {
+                if (statistics) *statistics = view.visibleItemsStatistics;
+                return view.visibleItems;
+            }
+        ViewCache* selected = nullptr;
+        for (auto& view : m_views)
+            if (view.valid && view.clip == clip) { selected = &view; break; }
+        if (!selected)
+        {
+            selected = &m_views[m_nextView++ % m_views.size()];
+            selected->visibleValid = false;
+            selected->visibleItemsValid = false;
+        }
+        selected->clip = clip;
+        auto result = QueryVisibleSlotsUncached(clip);
+        selected->visibleItems = std::move(result.slots);
+        selected->visibleItemsStatistics = result.statistics;
+        selected->visibleItemsValid = true;
+        selected->valid = true;
+        if (statistics) *statistics = selected->visibleItemsStatistics;
+        return selected->visibleItems;
+    }
     const std::vector<uint8_t>& Query(const glm::mat4& clip) const
     {
-        for(const auto& view:m_views) if(view.valid && view.clip==clip) return view.visible;
-        auto& cache=m_views[m_nextView++ % m_views.size()];
-        cache.clip=clip;
-        cache.visible=QueryUncached(clip);
-        cache.valid=true;
-        return cache.visible;
+        for(const auto& view:m_views)
+            if(view.valid && view.visibleValid && view.clip==clip) return view.visible;
+        ViewCache* selected=nullptr;
+        for(auto& view:m_views)
+            if(view.valid && view.clip==clip) { selected=&view; break; }
+        if(!selected)
+        {
+            selected=&m_views[m_nextView++ % m_views.size()];
+            selected->visibleValid=false;
+            selected->visibleItemsValid=false;
+        }
+        selected->clip=clip;
+        selected->visible=QueryUncached(clip);
+        selected->visibleValid=true;
+        selected->valid=true;
+        return selected->visible;
     }
 };
 }

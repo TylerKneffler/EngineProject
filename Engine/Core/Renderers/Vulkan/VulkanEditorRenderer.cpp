@@ -39,6 +39,8 @@ void VulkanEditorRenderer::Clear(float r, float g, float b, float a)
 
 void VulkanEditorRenderer::RenderIfNeeded(std::function<void()> drawFn)
 {
+    m_lastPresentationMilliseconds = 0.0;
+    m_lastQueueSubmissionMilliseconds = 0.0;
     try
     {
     if (!m_dirty) return;
@@ -61,6 +63,8 @@ void VulkanEditorRenderer::RenderIfNeeded(std::function<void()> drawFn)
     vkCmdEndRenderPass(m_commandBuffer);
     if (m_uiHooks.endFrame) m_uiHooks.endFrame();
     m_core.EndFrame(); m_commandBuffer = VK_NULL_HANDLE;
+    m_lastPresentationMilliseconds = m_core.GetLastPresentationMilliseconds();
+    m_lastQueueSubmissionMilliseconds = m_core.GetLastQueueSubmissionMilliseconds();
     }
     catch (const std::exception& error)
     {

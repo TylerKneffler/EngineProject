@@ -43,6 +43,9 @@ public:
     // Returns nullptr if buffer is not mappable
     virtual void* Map() = 0;
     virtual void Unmap() = 0;
+    // Nonblocking readiness check for asynchronous readback. Explicit APIs
+    // may rely on the retired frame-slot fence; DX11 uses an event query.
+    virtual bool IsReadbackReady() const { return true; }
     // Makes a written byte range visible when a backend uses a CPU shadow
     // allocation (currently D3D11). Other backends are coherent. UINT64_MAX
     // means the remainder of the buffer.
@@ -93,5 +96,9 @@ public:
     virtual std::unique_ptr<IGraphicsBuffer> CreateStaticVertexBufferDeferred(
         uint64_t sizeBytes, const void* initialData)
     { return CreateStaticVertexBuffer(sizeBytes, initialData); }
+
+    // Opt in only when device resource creation and static uploads are safe
+    // from a worker thread. The default preserves backend thread affinity.
+    virtual bool SupportsWorkerThreadStaticVertexBufferCreation() const { return false; }
 };
 }

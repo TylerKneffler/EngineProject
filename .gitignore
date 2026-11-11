@@ -13,6 +13,7 @@ build/
 /Engine/Core/Assets/TerrainData/TerrainPerformance/BakedCells/
 
 !.local\tests\OakBackendCapture.cpp
+!.local/tests/RenderSpatialIndexTests.cpp
 
 # Python asset/validation caches.
 __pycache__/

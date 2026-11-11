@@ -1,5 +1,4 @@
 #include "Core/Scene/Scene.h"
-#include "CanopyExperiment.h"
 #include "Core/Window.h"
 #include "Core/Compoonents/Mesh/Mesh.h"
 #include "Core/Compoonents/Terrain/Terrain.h"
@@ -43,6 +42,10 @@
 using namespace Engine::Renderers;
 using namespace Engine::Components;
 void Check(bool ok, const char* text) { if (!ok) throw std::runtime_error(text); }
+void ConfigureCanopy(TerrainObjectLayer&, const char*, bool, std::ostream*)
+{
+    throw std::runtime_error("Canopy experiment helper is unavailable in this checkout");
+}
 
 void CheckGrassPhaseTiming()
 {
@@ -817,7 +820,7 @@ template<class Renderer> void CaptureOak(const std::string& backend)
         for(auto* mesh:scene.GetComponents<Mesh>()) if(mesh->prefabLodBand>=0)
         {
             Check(mesh->prefabShadowLod==1,"authored forest does not pin its shadow proxy");
-            Check(mesh->prefabLodDistances==glm::vec2(28,90),"fixed shadows changed visible tree LODs");
+            Check(mesh->prefabLodDistances==glm::vec2(20,60),"fixed shadows changed visible tree LODs");
             fixedProxies+=mesh->prefabLodBand==1;
         }
         Check(shadow.casterCount<=fixedProxies,"non-proxy forest bands entered shadow preparation");
@@ -890,7 +893,7 @@ template<class Renderer> void CaptureOak(const std::string& backend)
     if(canopyRoot)
     {
         // Isolated experiment: change resident middle geometry in memory only.
-        // Authored 28/90 m, materials, placements and shadow policy are retained.
+        // Authored 20/60 m, materials, placements and shadow policy are retained.
         forceShadowRefresh=true;
         auto sequence=[&](const std::string& variant) {
             for(const std::string view : {"entrance","overlook"}) for(float fov : {60.f,30.f})
@@ -1051,7 +1054,7 @@ template<class Renderer> void CaptureOak(const std::string& backend)
             image << "P6\n" << width << ' ' << height << "\n255\n";
             for(size_t i=0;i<pixels.size();i+=4) image.write(reinterpret_cast<const char*>(pixels.data()+i),3);
         }
-        report << "Screen LOD forest comparison passed; authored 28/90 m and fixed shadow LOD remain unchanged.\n";
+        report << "Screen LOD forest comparison passed; authored 20/60 m and fixed shadow LOD remain unchanged.\n";
         scene.ClearObjects(); renderer.WaitIdle(); return;
     }
     for (const std::string view : {"entrance","overlook"})
@@ -1445,6 +1448,19 @@ template<class Renderer> void BenchmarkOakClusters(const std::string& backend)
 {
     const char* outputEnv=std::getenv("ENGINE_OAK_CLUSTER_OUTPUT");
     const std::filesystem::path output=outputEnv ? outputEnv : ".local/oak-cluster-benchmark";
+    float lod1Distance=20.f, lod2Distance=60.f;
+    if(const char* distances=std::getenv("ENGINE_OAK_LOD_DISTANCES"))
+    {
+        std::istringstream input(distances);
+        char comma=0;
+        Check(bool(input>>lod1Distance>>comma>>lod2Distance) && comma==',' && input.eof() &&
+            std::isfinite(lod1Distance) && std::isfinite(lod2Distance) &&
+            lod1Distance>0.f && lod2Distance>lod1Distance,
+            "oak LOD distances must be two increasing positive values, such as 20,60");
+    }
+    const int displayLod=std::getenv("ENGINE_OAK_DISPLAY_LOD")
+        ? std::atoi(std::getenv("ENGINE_OAK_DISPLAY_LOD")) : -1;
+    Check(displayLod>=-1 && displayLod<=2,"oak display LOD must be -1, 0, 1 or 2");
     std::filesystem::create_directories(output);
     constexpr unsigned width=960,height=540;
     Engine::Core::Window window(GetModuleHandleW(nullptr),L"Oak cluster benchmark",width,height);
@@ -1462,15 +1478,32 @@ template<class Renderer> void BenchmarkOakClusters(const std::string& backend)
     const glm::vec3 target(camera->target);
     std::vector<TerrainObjectLayer*> forests;
     for(auto* layer:scene.GetComponents<TerrainObjectLayer>())
-        if(layer->layerName=="Oak forest") forests.push_back(layer);
+        if(layer->layerName=="Oak forest")
+        {
+            forests.push_back(layer);
+            for(auto& [asset,lods]:layer->objectLods)
+                if(lods.meshes.size()>=3)
+                    lods.distances={lod1Distance,lod2Distance};
+            layer->MarkConfigurationDirty();
+        }
     Check(!forests.empty(),"oak benchmark forest layer missing");
     for(auto* field:scene.GetComponents<GrassField>()) { field->useEditorCamera=false; field->Start(); }
 
     std::ofstream csv(output/(backend+".csv"));
     csv << "span_m,phase,frame,cpu_cull_ms,cpu_tile_prepare_ms,cpu_submit_ms,gpu_batches,draws,submitted_instances,submitted_triangles,visible_placements,gpu_timing_valid,gpu_workload_valid,tree_bark_ms,tree_leaves_ms,tree_bark_vs,tree_bark_ps,tree_leaves_vs,tree_leaves_ps\n";
     const float spans[]={256.f,128.f,64.f,32.f};
+    std::vector<float> selectedSpans;
+    if(const char* span=std::getenv("ENGINE_OAK_CLUSTER_SPAN"))
+    {
+        const float value=std::strtof(span,nullptr);
+        Check(std::isfinite(value) && value>=8.f && value<=256.f,
+            "oak benchmark span must be in [8,256]");
+        selectedSpans.push_back(value);
+    }
+    else for(float span:spans) selectedSpans.push_back(span);
     const int sweepFrames=24;
-    for(float span:spans)
+    const bool saveSweepCapture=std::getenv("ENGINE_OAK_CLUSTER_CAPTURE")!=nullptr;
+    for(float span:selectedSpans)
     {
         TerrainObjectLayer::SetPrefabInstanceGroupSpanForBenchmark(span);
         for(auto* layer:forests) layer->RebuildPrefabInstancesForBenchmark();
@@ -1486,9 +1519,23 @@ template<class Renderer> void BenchmarkOakClusters(const std::string& backend)
             context->SetScissorRect({0,0,int(width),int(height)});
             renderer.Clear(.1f,.1f,.1f,1);
             scene.PrepareRenderFrame();
-            scene.Render(context.get(),float(width)/height,camera,false,width,height);
+            scene.Render(context.get(),float(width)/height,camera,displayLod>=0,width,height,
+                false,nullptr,displayLod);
+            const bool captureThisFrame=saveSweepCapture && std::strcmp(phase,"camera_sweep")==0 &&
+                frame==sweepFrames-1;
+            if(captureThisFrame) renderer.RequestSceneCapture();
             renderer.EndFrame();
             renderer.WaitIdle();
+            if(captureThisFrame)
+            {
+                std::vector<uint8_t> pixels;
+                Check(renderer.ReadSceneCaptureRGBA(pixels) && pixels.size()==size_t(width)*height*4,
+                    "oak LOD sweep screenshot capture failed");
+                std::ofstream image(output/(backend+"-sweep.ppm"),std::ios::binary);
+                image << "P6\n" << width << ' ' << height << "\n255\n";
+                for(size_t i=0;i<pixels.size();i+=4)
+                    image.write(reinterpret_cast<const char*>(pixels.data()+i),3);
+            }
             const auto cpu=scene.GetLastRenderCpuTimings();
             const auto gpu=renderer.GetFrameTimingTelemetry();
             uint64_t visible=0;
@@ -1520,7 +1567,9 @@ template<class Renderer> void BenchmarkOakClusters(const std::string& backend)
         for(int i=0;i<32;++i) render("steady",i,0.f);
         for(int i=0;i<sweepFrames;++i)
             render("camera_sweep",i,(float(i)-float(sweepFrames-1)*.5f)*.75f);
-        std::cout << backend << " span " << span << " m captured\n";
+        std::cout << backend << " span " << span << " m, LOD distances "
+            << lod1Distance << '/' << lod2Distance << " m, display LOD "
+            << displayLod << " captured\n";
     }
 }
 

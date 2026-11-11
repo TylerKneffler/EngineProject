@@ -20,10 +20,19 @@ public:
     void SetPreFrameCommandBuffer(VkCommandBuffer command) { m_preFrameCommandBuffer = command; }
     void WaitIdle() const;
     uint64_t GetSubmittedFrameToken() const { return m_submittedSerial; }
+    double GetLastPresentationMilliseconds() const { return m_lastPresentationMilliseconds; }
+    double GetLastQueueSubmissionMilliseconds() const { return m_lastQueueSubmissionMilliseconds; }
     bool IsFrameComplete(uint64_t token);
 
     VkInstance GetInstance() const { return m_instance; }
     VkPhysicalDevice GetPhysicalDevice() const { return m_physicalDevice; }
+    std::string GetPhysicalDeviceName() const
+    {
+        if (!m_physicalDevice) return "unknown";
+        VkPhysicalDeviceProperties properties{};
+        vkGetPhysicalDeviceProperties(m_physicalDevice, &properties);
+        return properties.deviceName;
+    }
     bool PipelineStatisticsEnabled() const { return m_pipelineStatisticsEnabled; }
     VkDevice GetDevice() const { return m_device; }
     VkQueue GetQueue() const { return m_queue; }
@@ -77,10 +86,12 @@ private:
     static constexpr uint32_t FRAME_COUNT = 2;
     VkCommandBuffer m_commandBuffers[FRAME_COUNT]{};
     VkSemaphore m_imageAvailable[FRAME_COUNT]{};
-    VkSemaphore m_renderFinished[FRAME_COUNT]{};
+    std::vector<VkSemaphore> m_renderFinished;
     VkFence m_inFlight[FRAME_COUNT]{};
     uint64_t m_frameSerial[FRAME_COUNT]{};
     uint64_t m_submittedSerial = 0;
+    double m_lastPresentationMilliseconds = 0.0;
+    double m_lastQueueSubmissionMilliseconds = 0.0;
     mutable uint64_t m_completedSerial = 0;
     uint32_t m_frameIndex = 0;
     uint32_t m_imageIndex = 0;

@@ -29,6 +29,7 @@ namespace Engine::Editor
         TimePoint afterRender, afterPendingLoad;
         float deltaSeconds = 0.f; // Simulation delta; may reset on play transitions.
         double updateIntervalMs = 0, submissionIntervalMs = 0, idleWaitMs = 0;
+        std::string scenePath;
         uint64_t submittedFrames = 0;
         bool submissionCountValid = false;
         uint64_t playSnapshotBytes=0, sceneHistoryBytes=0;

@@ -3,6 +3,8 @@
 #include "Core/Scene/Rendering/SceneRenderer/SceneRendererDrawPreparation.h"
 #include "Core/Rendering/MeshLodSelection.h"
 
+#include <array>
+#include <cstdint>
 #include <map>
 #include <vector>
 
@@ -22,9 +24,11 @@ public:
         uint64_t instanceViewOrdinal,
         bool shadowOnly,
         bool hasPortalViews,
-        bool includeEditorVisuals);
+        bool includeEditorVisuals,
+        int instanceLodDisplayOverride = -1);
 
     bool IsSelected(const PreparedDraw& draw, bool shadow = false) const;
+    std::array<uint64_t, 3> SelectedGpuLodDraws(bool shadow) const;
     int ChooseScreen(
         const Engine::Components::Mesh& policy,
         glm::vec3 minimum,

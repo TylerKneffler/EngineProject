@@ -314,9 +314,14 @@ double TerrainPerformanceDriver::GetFarTileRebuildMilliseconds() const
 
 void TerrainPerformanceDriver::OnAfterDeserialize(IGraphicsProvider*)
 {
-    if (!ConfigureTerrain() || !Owner) return;
+    if (!Owner) return;
     auto* manager = Owner->GetComponent<Engine::Components::TerrainManager>();
     if (!manager || m_previewLoaded) return;
+    // This driver also supplies diagnostics for authored maps such as Large
+    // Oak Meadow. Its default height archive and procedural builder belong to
+    // the Terrain Performance test map and must not replace an Oak manager's
+    // own baked cells and forest generator during scene restoration.
+    if (!manager->proceduralOakMeadow && !ConfigureTerrain()) return;
     // Scene editing does not run the play-mode streaming loop. Load only the
     // nearby saved cells so the map is visible as soon as the scene opens.
     const int previousFarRadius = manager->farRadius;

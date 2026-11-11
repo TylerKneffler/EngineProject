@@ -7,6 +7,8 @@
 #include "Core/component.h"
 #include "Core/Script.h"
 #include "Core/Compoonents/Mesh/Mesh.h"
+#include "Core/Compoonents/Mesh/MeshInstanceLayer.h"
+#include "Core/Compoonents/Mesh/MeshLodProfile.h"
 #include "Core/Compoonents/Terrain/Terrain.h"
 #include "Core/Compoonents/Terrain/TerrainObjectLayer.h"
 #include "Core/Compoonents/Terrain/TerrainManager.h"
@@ -50,6 +52,7 @@
 #include "Core/Compoonents/Physics/SpatialManipulator.h"
 #include "Core/Compoonents/Path/SplinePath.h"
 #include "Core/Compoonents/Path/SplineGeometry.h"
+#include "Core/Compoonents/Path/SplineInstancePlacementProvider.h"
 #include "Core/Compoonents/Path/SplineFollower.h"
 #include "Core/Compoonents/Cinematics/CameraTrack.h"
 #include "Core/Rendering/Lighting/BakedLightingData.h"
@@ -186,6 +189,8 @@ void SceneSerializer::EnsureBuiltinsRegistered()
     s_done = true;
 
     RegisterComponentType<Engine::Components::Mesh>();
+    RegisterComponentType<Engine::Components::MeshInstanceLayer>();
+    RegisterComponentType<Engine::Components::MeshLodProfile>();
     RegisterComponentType<Engine::Components::Terrain>();
     RegisterComponentType<Engine::Components::TerrainObjectLayer>();
     RegisterComponentType<Engine::Components::TerrainManager>();
@@ -230,6 +235,7 @@ void SceneSerializer::EnsureBuiltinsRegistered()
     RegisterComponentType<Engine::Components::SpatialManipulator>();
     RegisterComponentType<SplinePath>();
     RegisterComponentType<SplineGeometry>();
+    RegisterComponentType<SplineInstancePlacementProvider>();
     RegisterComponentType<SplineFollower>();
     RegisterComponentType<CameraTrack>();
     RegisterComponentType<Engine::Rendering::BakedLightingData>();

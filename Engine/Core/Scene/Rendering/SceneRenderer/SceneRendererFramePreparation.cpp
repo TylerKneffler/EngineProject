@@ -23,6 +23,7 @@
 #include <chrono>
 #include <cstring>
 #include <limits>
+#include <numeric>
 #include <optional>
 #include <unordered_map>
 
@@ -154,7 +155,7 @@ void SceneRendererFramePreparation::PrepareFrameItems(
                             item.gpuMaximumLod = mesh->IsRuntimeLodResident(2) ? 2 : 1;
                             item.gpuLodDistances = { std::max(0.f, mesh->gpuLod1Distance), std::max(mesh->gpuLod1Distance, mesh->gpuLod2Distance) };
                             if (item.gpuMaximumLod == 1) item.gpuLodDistances.y = 1.e20f;
-                            item.geometryFade = { 0, item.gpuLodDistances.x, item.gpuLodDistances.y, 2.f + mesh->GetRuntimeVisibility() };
+                            item.geometryFade = { mesh->lodTransitionWidth, item.gpuLodDistances.x, item.gpuLodDistances.y, 2.f + mesh->GetRuntimeVisibility() };
                         }
                         ++scene.m_lastPrepareTimings.instancedRenderItemsReused;
                     }
@@ -419,6 +420,13 @@ void SceneRendererFramePreparation::PrepareFrameItems(
                 {
                     current.boundsMinimum = current.mesh->GetBoundsMin();
                     current.boundsMaximum = current.mesh->GetBoundsMax();
+                    // Every resident LOD of one ordinary object shares the
+                    // root's conservative bounds so the BVH and shadow
+                    // cascades cannot reject a representation that extends
+                    // beyond the currently selected mesh.
+                    if (source && !source->IsInstanced() && current.mesh != source)
+                        source->GetRuntimeLodAggregateBounds(
+                            current.boundsMinimum, current.boundsMaximum);
                 }
                 scene.m_frameRenderItems.push_back(current);
             };
@@ -433,7 +441,7 @@ void SceneRendererFramePreparation::PrepareFrameItems(
                 draw.gpuMaximumLod=source->IsRuntimeLodResident(2) ? 2:1;
                 draw.gpuLodDistances={std::max(0.f,source->gpuLod1Distance),std::max(source->gpuLod1Distance,source->gpuLod2Distance)};
                 if(draw.gpuMaximumLod==1) draw.gpuLodDistances.y=1.e20f;
-                draw.geometryFade={0,draw.gpuLodDistances.x,draw.gpuLodDistances.y,2.f+source->GetRuntimeVisibility()};
+                draw.geometryFade={source->lodTransitionWidth,draw.gpuLodDistances.x,draw.gpuLodDistances.y,2.f+source->GetRuntimeVisibility()};
                 publish(draw);
                 return;
             }
@@ -448,13 +456,14 @@ void SceneRendererFramePreparation::PrepareFrameItems(
                 {
                     draw.mesh=source->GetRuntimeLodMesh(lod);
                     draw.mesh->useLightProbes=source->useLightProbes;
-                    draw.mesh->grassShadowCaster=source->grassShadowCaster;
+                    draw.mesh->usesGrassShadowBudget=source->usesGrassShadowBudget;
                     draw.mesh->useBoundsForShadowCulling=source->useBoundsForShadowCulling;
+                    draw.mesh->deformationBoundsPadding=source->deformationBoundsPadding;
                     draw.gpuLod=lod; draw.gpuMaximumLod=maximumLod;
                     draw.gpuLodDistances={std::max(0.f,source->gpuLod1Distance),
                         std::max(source->gpuLod1Distance,source->gpuLod2Distance)};
                     if(source->IsInstanced() && maximumLod==1) draw.gpuLodDistances.y=1.e20f;
-                    if(source->IsInstanced()) draw.geometryFade={float(lod),draw.gpuLodDistances.x,draw.gpuLodDistances.y,2.f+source->GetRuntimeVisibility()};
+                    if(source->IsInstanced()) draw.geometryFade={source->lodTransitionWidth,draw.gpuLodDistances.x,draw.gpuLodDistances.y,2.f+source->GetRuntimeVisibility()};
                     publish(draw);
                 }
                 return;
@@ -465,7 +474,8 @@ void SceneRendererFramePreparation::PrepareFrameItems(
                 {
                     draw.mesh = previous;
                     draw.previousLod=true;
-                    previous->grassShadowCaster=source->grassShadowCaster;
+                    previous->usesGrassShadowBudget=source->usesGrassShadowBudget;
+                    previous->deformationBoundsPadding=source->deformationBoundsPadding;
                     draw.geometryFade = source->GetRuntimeGeometryFade(true);
                     publish(draw);
                 }
@@ -498,7 +508,10 @@ void SceneRendererFramePreparation::PrepareFrameItems(
     }
 
     if (boneDataChanged)
+    {
         scene.m_boneDataBuffer->FlushMappedWrites();
+        scene.RecordFrameUploadBytes(uint64_t(boneMatrixOffset) * sizeof(glm::mat4));
+    }
     const auto afterBoneUpload = scene.m_updateProfilingEnabled
         ? PrepareClock::now() : PrepareClock::time_point{};
     scene.m_lastSkinnedObjectCount = skinPaletteSlot;
@@ -515,6 +528,8 @@ void SceneRendererFramePreparation::PrepareFrameItems(
             else ++it;
         scene.m_renderObjectSlotsRevision=scene.GetStructureRevision();
     }
+    scene.m_frameItemsByRenderSlotOffsets.assign(
+        size_t(scene.m_renderObjectSlotCount) + 1u, 0u);
     for(auto& item:scene.m_frameRenderItems)
     {
         Scene::RenderObjectKey key{uintptr_t(item.object),item.gpuLod,uintptr_t(item.traversalChartPortal),item.previousLod};
@@ -527,6 +542,17 @@ void SceneRendererFramePreparation::PrepareFrameItems(
             found=scene.m_renderObjectSlots.emplace(key,index).first;
         }
         item.objectSlot=found->second;
+        ++scene.m_frameItemsByRenderSlotOffsets[size_t(item.objectSlot) + 1u];
+    }
+    std::partial_sum(scene.m_frameItemsByRenderSlotOffsets.begin(),
+        scene.m_frameItemsByRenderSlotOffsets.end(),
+        scene.m_frameItemsByRenderSlotOffsets.begin());
+    scene.m_frameItemsByRenderSlot.resize(scene.m_frameRenderItems.size());
+    auto nextFrameItem = scene.m_frameItemsByRenderSlotOffsets;
+    for (uint32_t index = 0; index < scene.m_frameRenderItems.size(); ++index)
+    {
+        const uint32_t slot = scene.m_frameRenderItems[index].objectSlot;
+        scene.m_frameItemsByRenderSlot[nextFrameItem[slot]++] = index;
     }
     scene.EnsureObjectRenderCapacity(scene.m_renderObjectSlotCount);
     if (scene.m_updateProfilingEnabled)

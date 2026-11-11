@@ -18,6 +18,8 @@ public:
     void Resize(uint32_t width, uint32_t height) override;
     uint32_t GetWidth() const override { return m_width; }
     uint32_t GetHeight() const override { return m_height; }
+    const char* GetBackendName() const override { return "vulkan"; }
+    std::string GetGraphicsDeviceName() const override { return m_core.GetPhysicalDeviceName(); }
     void Clear(float r, float g, float b, float a = 1.0f) override;
     Engine::Graphics::IGraphicsProvider* GetGraphicsProvider() override { return m_provider.get(); }
     void WaitIdle() override { m_core.WaitIdle(); }
@@ -37,6 +39,10 @@ public:
     void SubmitWorkerCommands() override;
     Engine::Graphics::FrameTimingTelemetry GetFrameTimingTelemetry() const override
     { return m_frameTelemetry; }
+    double GetLastQueueSubmissionMilliseconds() const override
+    { return m_core.GetLastQueueSubmissionMilliseconds(); }
+    double GetLastPresentationMilliseconds() const override
+    { return m_core.GetLastPresentationMilliseconds(); }
 private:
     std::string m_graphicsDevice = "Auto";
     void RecordSceneCapture();

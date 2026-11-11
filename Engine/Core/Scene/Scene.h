@@ -315,6 +315,17 @@ public:
         uint64_t spatialChangedBounds=0,spatialReusedBounds=0,spatialDirtyLeaves=0,spatialRefitNodes=0;
         uint64_t spatialRebuilds=0,spatialQualityRebuilds=0;
     };
+    struct FrameUploadStats
+    {
+        uint64_t bytes=0, bufferAllocations=0, allocatorGrowths=0;
+    };
+    FrameUploadStats GetCurrentFrameUploadStats() const
+    {
+        if (!m_activeFrameUploadContext) return {};
+        return {m_activeFrameUploadContext->uploadedBytes,
+            m_activeFrameUploadContext->bufferAllocations,
+            m_activeFrameUploadContext->allocatorGrowths};
+    }
     const PrepareTimings& GetLastPrepareTimings() const { return m_lastPrepareTimings; }
     using RenderCpuTimings = Engine::Rendering::RenderCpuTimings;
     const RenderCpuTimings& GetLastRenderCpuTimings() const { return m_lastRenderCpuTimings; }
@@ -420,7 +431,8 @@ public:
         Camera* cameraOverride = nullptr, bool includeEditorVisuals = true,
           uint32_t viewportWidth = 0u, uint32_t viewportHeight = 0u,
           bool shadowOnly = false,
-          const NativeRenderPacket* nativePacket = nullptr);
+          const NativeRenderPacket* nativePacket = nullptr,
+          int terrainObjectDisplayLod = -1);
     // Bytes of object records made visible to the GPU by the most recent
     // Render call. This excludes vertex, light, and bone buffers.
     uint64_t GetLastObjectDataUploadBytes() const
@@ -1030,9 +1042,6 @@ private:
         uint32_t clusterHeaderCapacity = 0;
         uint32_t clusterIndexCapacity = 0;
     };
-    std::vector<std::unique_ptr<NativeFrameBuffers>> m_nativeFrameBuffers;
-    NativeFrameBuffers* m_activeNativeFrameBuffers = nullptr;
-    void SelectNativeFrameBuffers();
     std::unique_ptr<Engine::Renderers::UIRenderer> m_uiRenderer;
     std::vector<Engine::Model::UITextLayout> m_preparedNativeUiLayout;
     std::unique_ptr<Engine::Physics::Physics> m_physics;
@@ -1105,6 +1114,10 @@ private:
     };
 
     std::vector<FrameRenderItem> m_frameRenderItems;
+    // Compact reverse map from stable render-object slots to the frame items
+    // that use them. Several LOD or portal items may share a slot.
+    std::vector<uint32_t> m_frameItemsByRenderSlotOffsets;
+    std::vector<uint32_t> m_frameItemsByRenderSlot;
     struct StaticRenderItemCache
     {
         FrameRenderItem item;
@@ -1192,8 +1205,24 @@ private:
         size_t cursor=0;
         std::vector<std::unique_ptr<RenderPassBuffers>> passes;
     };
-    std::vector<RenderPassBufferSlot> m_renderPassBufferSlots;
+    // All dynamic scene uploads for one renderer frame slot share this owner.
+    // The renderer only returns the slot after its completion fence retires.
+    struct FrameUploadContext
+    {
+        uint64_t serial=UINT64_MAX;
+        NativeFrameBuffers native;
+        RenderPassBufferSlot renderPasses;
+        uint64_t uploadedBytes=0;
+        uint64_t bufferAllocations=0;
+        uint64_t allocatorGrowths=0;
+    };
+    std::vector<std::unique_ptr<FrameUploadContext>> m_frameUploadContexts;
+    FrameUploadContext* m_activeFrameUploadContext=nullptr;
+    NativeFrameBuffers* m_activeNativeFrameBuffers = nullptr;
     RenderPassBuffers* m_activeRenderPassBuffers=nullptr;
+    void SelectNativeFrameBuffers();
+    void RecordFrameUploadBytes(uint64_t bytes)
+    { if (m_activeFrameUploadContext) m_activeFrameUploadContext->uploadedBytes += bytes; }
     void SelectRenderPassBuffers(uint32_t requiredObjectSlots);
     struct CachedRenderMaterial
     {

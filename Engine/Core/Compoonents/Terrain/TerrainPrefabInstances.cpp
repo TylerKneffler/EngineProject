@@ -7,14 +7,19 @@
 #include "Core/Rendering/RenderJobs.h"
 #include "Core/Rendering/SharedMeshBuffers.h"
 #include "Core/Compoonents/Materials/Material.h"
+#include "Core/Compoonents/Mesh/MeshInstanceLayerData.h"
+#include "Core/Compoonents/Mesh/MeshInstanceSourceSet.h"
 #include "Core/Compoonents/Physics/PrimitiveObjectCollider.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <limits>
 #include <cmath>
 #include <future>
+#include <mutex>
+#include <optional>
 #include "Core/Graphics/IGraphicsProvider.h"
 #include <glm/gtc/matrix_transform.hpp>
 #define GLM_ENABLE_EXPERIMENTAL
@@ -32,14 +37,20 @@ struct SharedPrefabPrototype
     {
         std::shared_ptr<Mesh> mesh;
         Engine::Rendering::PreparedMeshBuffer buffer;
+        std::shared_ptr<Engine::Graphics::IGraphicsBuffer> graphicsBuffer;
     };
     Engine::Scene::Scene scene;
     Engine::Core::Object* root = nullptr;
     using GeometryKey = std::pair<const Mesh*, Engine::Graphics::IGraphicsProvider*>;
-    std::map<GeometryKey, std::shared_ptr<Mesh>> geometry;
+    MeshInstanceSourceSet sources;
     std::map<GeometryKey, std::future<PreparedGeometry>> pendingGeometry;
-    std::map<const Material*, Engine::Serialization::JsonValue> materials;
 };
+
+std::string SharedSourcePartKey(const SharedPrefabPrototype::GeometryKey& key)
+{
+    return std::to_string(reinterpret_cast<uintptr_t>(key.first)) + ":" +
+        std::to_string(reinterpret_cast<uintptr_t>(key.second));
+}
 }
 float TerrainObjectLayer::prefabInstanceGroupSpanMeters=256.f;
 void TerrainObjectLayer::SetPrefabInstanceGroupSpanForBenchmark(float span)
@@ -63,6 +74,7 @@ struct TerrainObjectLayer::PrefabInstances
     IGraphicsProvider* provider=nullptr;
     uint64_t signature=UINT64_MAX;
     std::chrono::steady_clock::time_point nextCheck{};
+    std::chrono::steady_clock::time_point nextPlacementSignatureCheck{};
     std::map<std::string,Source> sources;
     bool sourceProbeActive=false;
     std::string sourceProbeCursor;
@@ -111,7 +123,21 @@ struct TerrainObjectLayer::PrefabInstances
             const auto found=current.find(asset);
             if(found==current.end() || found->second.meshes!=expected.meshes ||
                 found->second.shadowMeshes!=expected.shadowMeshes ||
-                found->second.distances!=expected.distances) return false;
+                found->second.distances!=expected.distances ||
+                found->second.screenThresholdsPixels!=expected.screenThresholdsPixels ||
+                found->second.hysteresis!=expected.hysteresis ||
+                found->second.screenSizeSelection!=expected.screenSizeSelection ||
+                found->second.distanceOverride!=expected.distanceOverride ||
+                found->second.ditherTransition!=expected.ditherTransition ||
+                found->second.transitionWidth!=expected.transitionWidth ||
+                found->second.shadowDistance!=expected.shadowDistance ||
+                found->second.cullAfterLastLod!=expected.cullAfterLastLod ||
+                found->second.finalLodCullDistance!=expected.finalLodCullDistance) return false;
+            if (found->second.parts.size() != expected.parts.size()) return false;
+            for (size_t part = 0; part < expected.parts.size(); ++part)
+                if (found->second.parts[part].key != expected.parts[part].key ||
+                    found->second.parts[part].meshes != expected.parts[part].meshes)
+                    return false;
         }
         return true;
     }
@@ -122,27 +148,30 @@ struct TerrainObjectLayer::PrefabInstances
     std::string nextAsset;
     size_t nextPart = 0;
     size_t groupStart = 0;
-    std::map<std::pair<int,int>, std::shared_ptr<Mesh::InstanceData>> tileInstances;
+    std::map<std::pair<int,int>, MeshInstanceLayerData> tileLayers;
     using PrototypeKey = std::pair<std::string, std::filesystem::file_time_type>;
     std::shared_ptr<std::atomic_bool> canceled = std::make_shared<std::atomic_bool>(false);
     std::map<PrototypeKey, std::future<std::unique_ptr<Engine::Serialization::PreparedPrefab>>> pending;
     std::map<PrototypeKey, std::unique_ptr<Engine::Serialization::PreparedPrefab>> prepared;
+    std::map<PrototypeKey, std::future<std::shared_ptr<SharedPrefabPrototype>>> pendingPrototypes;
     ~PrefabInstances() { canceled->store(true); }
 };
 
 bool TerrainObjectLayer::IsPrefabPreparationPending() const
 {
-    return m_prefabInstances && m_prefabInstances->building;
+    return m_prefabSourcePreparationPending ||
+        (m_prefabInstances && m_prefabInstances->building);
 }
 
-void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider)
+void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, bool* uploadAvailable)
 {
+    using BuildProfile=Engine::Serialization::PrefabLoadProfile;
     m_lastPrefabPrepareTimings={};
     if (!Owner || !Owner->GetScene() || !provider) return;
     const auto now=std::chrono::steady_clock::now();
     const bool changed=m_prefabCheckedRevision!=GetConfigurationRevision() ||
         m_prefabCheckedData!=placements.data() || m_prefabCheckedCount!=placements.size();
-    if (!changed && !m_prefabInstances) return;
+    if (!changed && !m_prefabInstances && !m_prefabSourcePreparationPending) return;
     const bool sourceProbeActive=!changed && m_prefabInstances &&
         m_prefabInstances->provider==provider && m_prefabInstances->sourceProbeActive;
     if (!changed && m_prefabInstances->provider==provider && !m_prefabInstances->building &&
@@ -155,21 +184,34 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider)
     m_prefabCheckedRevision=GetConfigurationRevision(); m_prefabCheckedData=placements.data();
     m_prefabCheckedCount=placements.size(); m_hasPrefabPlacements=hasPrefabs;
     if (!hasPrefabs && !m_prefabInstances) return;
+    std::map<std::string,ObjectLods> lodProfiles;
+    for (const auto& [asset, meshes] : GetDefinedObjectLods())
+    {
+        ObjectLods profile = GetObjectLodProfile(asset);
+        if (profile.meshes.empty()) profile.meshes = meshes;
+        lodProfiles.emplace(asset,std::move(profile));
+    }
     // Check the placement signature on its normal interval. Source file probes
     // are spread over subsequent frames to avoid one synchronous filesystem
     // burst; an in-place placement edit may therefore take a few extra frames
     // to detect while a source scan is in progress.
-    uint64_t signature=m_prefabInstances && sourceProbeActive
+    const bool reuseBuildingSignature=!changed && m_prefabInstances &&
+        m_prefabInstances->provider==provider && m_prefabInstances->building &&
+        now<m_prefabInstances->nextPlacementSignatureCheck;
+    uint64_t signature=m_prefabInstances && (sourceProbeActive || reuseBuildingSignature)
         ? m_prefabInstances->signature : UINT64_MAX;
-    if (!sourceProbeActive)
+    if (!sourceProbeActive && !reuseBuildingSignature)
     {
         const auto signatureStarted=std::chrono::steady_clock::now();
         signature=GetPlacementSignature();
         m_lastPrefabPrepareTimings.placementSignatureMs=
             std::chrono::duration<double,std::milli>(
                 std::chrono::steady_clock::now()-signatureStarted).count();
+        if (m_prefabInstances && m_prefabInstances->building)
+            m_prefabInstances->nextPlacementSignatureCheck=now+std::chrono::milliseconds(100);
     }
     const auto readSource=[](const std::string& asset) {
+        BuildProfile::Stage stage("prefab_source_resolution");
         PrefabInstances::Source source;
         source.resolved=std::filesystem::absolute(Mesh::ResolveFilePath(asset)).lexically_normal().generic_string();
         std::error_code error;
@@ -177,10 +219,72 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider)
         return source;
     };
     std::map<std::string,PrefabInstances::Source> sources;
+    // Resolve and stat the full set of prefab sources off the scene thread.
+    // Reuse recent results across neighboring cells, while retaining the
+    // existing per-source periodic probe for edits and asset relocation.
+    {
+        struct AsyncSource
+        {
+            std::shared_future<PrefabInstances::Source> future;
+            std::optional<PrefabInstances::Source> value;
+            std::chrono::steady_clock::time_point checked{};
+        };
+        static std::mutex sourceCacheMutex;
+        static std::map<std::string,AsyncSource> sourceCache;
+        std::map<std::string,bool> requiredSources;
+        const auto addSource=[&](const std::string& path) {
+            if (!path.empty() && std::filesystem::path(path).extension()==".prefab")
+                requiredSources.try_emplace(path,true);
+        };
+        for (const auto& [base,lods]:lodProfiles)
+        {
+            addSource(base);
+            for (const auto& path:lods.meshes) addSource(path);
+            for (const auto& path:lods.shadowMeshes) addSource(path);
+        }
+        for (const auto& placement:placements) addSource(placement.asset);
+        bool allReady=true;
+        for (const auto& [path,unused]:requiredSources)
+        {
+            (void)unused;
+            if (sources.count(path)) continue;
+            std::lock_guard lock(sourceCacheMutex);
+            auto& entry=sourceCache[path];
+            const auto time=std::chrono::steady_clock::now();
+            if (!entry.value && !entry.future.valid())
+            {
+                entry.future=Engine::Rendering::RenderJobs::Get().Submit([path,readSource] {
+                    return readSource(path);
+                }).share();
+            }
+            else if (entry.value && time-entry.checked>=std::chrono::seconds(1))
+            {
+                entry.value.reset();
+                entry.future=Engine::Rendering::RenderJobs::Get().Submit([path,readSource] {
+                    return readSource(path);
+                }).share();
+            }
+            if (entry.future.valid() && entry.future.wait_for(std::chrono::seconds(0))==std::future_status::ready)
+            {
+                entry.value=entry.future.get();
+                entry.checked=time;
+            }
+            if (entry.value) sources.emplace(path,*entry.value);
+            else allReady=false;
+        }
+        m_prefabSourcePreparationPending=!allReady;
+        if (!allReady)
+        {
+            // A future revision check must revisit the in-flight scan even
+            // though this call already recorded the observed placements.
+            m_prefabCheckedRevision=UINT64_MAX;
+            return;
+        }
+    }
     auto* scene=Owner->GetScene();
     if (m_prefabInstances && !m_prefabInstances->building && m_prefabInstances->provider==provider &&
         m_prefabInstances->signature==signature &&
-        m_prefabInstances->HasSameLods(objectLods) &&
+        m_prefabInstances->HasSameLods(lodProfiles) &&
         m_prefabInstances->HasSameConfiguration(*this) &&
         (sourceProbeActive || m_prefabInstances->HasGeneratedObjects(*scene)))
     {
@@ -229,29 +333,34 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider)
         // A changed or newly resolved source falls through to a rebuild. The
         // remaining paths are resolved by the normal batch builder below.
     }
-    using BuildProfile=Engine::Serialization::PrefabLoadProfile;
     BuildProfile buildProfile("TerrainObjectLayer: "+layerName);
     std::map<std::string,std::vector<const Placement*>> groups;
     // Thousands of placements reference a small set of prefab paths. Resolve
     // each distinct spelling once per refresh, retaining relocation checks on
     // subsequent refreshes so newly created project overrides are still found.
     const auto key=[&](const std::string& path) -> const std::string& {
+        BuildProfile::Stage stage("prefab_source_lookup");
         auto [entry,inserted]=sources.try_emplace(path);
         if (inserted) entry->second=readSource(path);
         return entry->second.resolved;
     };
     std::map<std::string,std::string> bases;
-    for (const auto& [base,lods]:objectLods)
+    {
+    BuildProfile::Stage stage("prefab_lod_source_index");
+    for (const auto& [base,lods]:lodProfiles)
         if (std::filesystem::path(base).extension()==".prefab")
         {
             bases[key(base)]=base;
             for (const auto& variant:lods.meshes) bases[key(variant)]=base;
             for (const auto& variant:lods.shadowMeshes) bases[key(variant)]=base;
         }
+    }
     // Resolve and classify each asset spelling once, not once per placement.
     // Dense streamed cells often contain thousands of identical paths, and
     // constructing filesystem paths repeatedly is expensive in debug builds.
     std::map<std::string,std::string> placementGroups;
+    {
+    BuildProfile::Stage stage("prefab_placement_grouping");
     for (const auto& placement:placements)
     {
         auto [group,inserted]=placementGroups.try_emplace(placement.asset);
@@ -262,11 +371,12 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider)
         }
         if (!group->second.empty()) groups[group->second].push_back(&placement);
     }
+    }
     const bool resume = m_prefabInstances && m_prefabInstances->building &&
         m_prefabInstances->provider == provider &&
         m_prefabInstances->signature == signature &&
         m_prefabInstances->sources == sources &&
-        m_prefabInstances->HasSameLods(objectLods) &&
+        m_prefabInstances->HasSameLods(lodProfiles) &&
         m_prefabInstances->HasSameConfiguration(*this) &&
         m_prefabInstances->HasGeneratedObjects(*scene);
     std::shared_ptr<PrefabInstances> previous;
@@ -284,9 +394,10 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider)
     if (!resume)
     {
         runtime->provider=provider; runtime->signature=signature;
+        runtime->nextPlacementSignatureCheck=now+std::chrono::milliseconds(100);
         runtime->previous=std::move(previous);
         runtime->StoreConfiguration(*this);
-        runtime->lods=objectLods;
+        runtime->lods=lodProfiles;
     }
     runtime->building = false;
     runtime->nextCheck=now+std::chrono::seconds(1);
@@ -308,6 +419,7 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider)
     };
     std::map<std::string,std::shared_ptr<SharedPrefabPrototype>> definitions;
     bool constructedPrototype = false;
+    bool prototypeWorkStarted = false;
     const auto definition=[&](const std::string& asset) {
         auto& prototype=definitions[asset];
         if (!prototype)
@@ -319,18 +431,42 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider)
                 prototype = found->second.lock();
             if (!prototype)
             {
-                prototype = std::make_shared<SharedPrefabPrototype>();
-                auto prepared = runtime->prepared.find(cacheKey);
-                if (prepared != runtime->prepared.end() && prepared->second)
+                auto pendingPrototype=runtime->pendingPrototypes.find(cacheKey);
+                if (pendingPrototype!=runtime->pendingPrototypes.end())
                 {
-                    Engine::Serialization::PreparedPrefab::Publication publication(*prepared->second);
-                    prototype->root = Engine::Serialization::SceneSerializer::InstantiatePrefabFromValue(
-                        prototype->scene, resolved, prepared->second->document, nullptr, false);
-                    runtime->prepared.erase(prepared);
+                    if (pendingPrototype->second.wait_for(std::chrono::seconds(0))!=std::future_status::ready)
+                        return static_cast<Engine::Core::Object*>(nullptr);
+                    try { prototype=pendingPrototype->second.get(); }
+                    catch (...) { prototype.reset(); }
+                    runtime->pendingPrototypes.erase(pendingPrototype);
                 }
                 else
-                    prototype->root = Engine::Serialization::SceneSerializer::InstantiatePrefab(
-                        prototype->scene, resolved, nullptr);
+                {
+                    std::unique_ptr<Engine::Serialization::PreparedPrefab> prepared;
+                    if (auto found=runtime->prepared.find(cacheKey);found!=runtime->prepared.end())
+                    {
+                        prepared=std::move(found->second);
+                        runtime->prepared.erase(found);
+                    }
+                    auto future=Engine::Rendering::RenderJobs::Get().Submit(
+                        [resolved,prepared=std::move(prepared)]() mutable {
+                            auto result=std::make_shared<SharedPrefabPrototype>();
+                            if (prepared)
+                            {
+                                Engine::Serialization::PreparedPrefab::Publication publication(*prepared);
+                                result->root=Engine::Serialization::SceneSerializer::InstantiatePrefabFromValue(
+                                    result->scene,resolved,prepared->document,nullptr,false);
+                            }
+                            else
+                                result->root=Engine::Serialization::SceneSerializer::InstantiatePrefab(
+                                    result->scene,resolved,nullptr);
+                            return result;
+                        });
+                    runtime->pendingPrototypes.emplace(cacheKey,std::move(future));
+                    prototypeWorkStarted=true;
+                    return static_cast<Engine::Core::Object*>(nullptr);
+                }
+                if (!prototype) return static_cast<Engine::Core::Object*>(nullptr);
                 if (!prototype->root) { prototype.reset(); return static_cast<Engine::Core::Object*>(nullptr); }
                 constructedPrototype = true;
                 prototypeCache[cacheKey] = prototype;
@@ -352,7 +488,7 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider)
         }
         processed = true;
         std::vector<std::string> required{asset};
-        if (const auto found = objectLods.find(asset); found != objectLods.end())
+        if (const auto found = lodProfiles.find(asset); found != lodProfiles.end())
         {
             const auto addResidentLods = [&](std::vector<std::string> paths) {
                 paths.erase(std::remove(paths.begin(), paths.end(), std::string{}), paths.end());
@@ -370,6 +506,13 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider)
             const PrototypeKey cacheKey{resolved, sources.at(path).stamp};
             if (const auto cached = prototypeCache.find(cacheKey);
                 cached != prototypeCache.end() && !cached->second.expired()) continue;
+            if (auto pendingPrototype=runtime->pendingPrototypes.find(cacheKey);
+                pendingPrototype!=runtime->pendingPrototypes.end())
+            {
+                if (pendingPrototype->second.wait_for(std::chrono::seconds(0))!=std::future_status::ready)
+                    waiting=true;
+                continue;
+            }
             if (runtime->prepared.count(cacheKey)) continue;
             auto pending = runtime->pending.find(cacheKey);
             if (pending == runtime->pending.end())
@@ -408,7 +551,9 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider)
                 publishedPrototype = true;
                 break;
             }
+            if (prototypeWorkStarted) break;
         }
+        if (prototypeWorkStarted) publishedPrototype=true;
         if (publishedPrototype)
         {
             runtime->building = true;
@@ -427,15 +572,21 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider)
             {
                 if (!original->Owner->IsEnabledInHierarchy()) continue;
                 const SharedPrefabPrototype::GeometryKey geometryKey{original, provider};
-                if (prototype->geometry.count(geometryKey)) continue;
+                const std::string sourceKey = SharedSourcePartKey(geometryKey);
+                if (const auto* part = prototype->sources.FindPart(sourceKey);
+                    part && !part->representations.empty()) continue;
                 auto pendingGeometry = prototype->pendingGeometry.find(geometryKey);
                 if (pendingGeometry == prototype->pendingGeometry.end())
                 {
                     auto vertices = original->GetVertices();
                     auto indices = original->GetIndices();
                     const auto part = original->Owner->transform.GetWorldMatrix();
+                    auto* bufferFactory = provider->GetBufferFactory();
+                    const bool createBufferOnWorker = uploadAvailable &&
+                        bufferFactory->SupportsWorkerThreadStaticVertexBufferCreation();
                     auto future = Engine::Rendering::RenderJobs::Get().Submit(
-                        [vertices = std::move(vertices), indices = std::move(indices), part]() mutable {
+                        [vertices = std::move(vertices), indices = std::move(indices), part,
+                            bufferFactory, createBufferOnWorker]() mutable {
                             if (!indices.empty())
                             {
                                 std::vector<Mesh::Vertex> expanded;
@@ -461,19 +612,40 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider)
                                 throw std::runtime_error("Invalid shared prefab geometry");
                             auto buffer = Engine::Rendering::PrepareMeshBuffer(source->GetVertices().data(),
                                 source->GetVertices().size() * sizeof(Mesh::Vertex));
-                            return SharedPrefabPrototype::PreparedGeometry{std::move(source), std::move(buffer)};
+                            std::shared_ptr<Engine::Graphics::IGraphicsBuffer> graphicsBuffer;
+                            if (createBufferOnWorker)
+                                graphicsBuffer = Engine::Rendering::AcquireMeshBuffer(bufferFactory,
+                                    Engine::Graphics::IGraphicsBuffer::Usage::VertexBuffer,
+                                    source->GetVertices().data(),
+                                    source->GetVertices().size() * sizeof(Mesh::Vertex),
+                                    sizeof(Mesh::Vertex), &buffer);
+                            return SharedPrefabPrototype::PreparedGeometry{
+                                std::move(source), std::move(buffer), std::move(graphicsBuffer)};
                         });
                     prototype->pendingGeometry.emplace(geometryKey, std::move(future));
+                    if (createBufferOnWorker) *uploadAvailable = false;
                     geometryWaiting = true;
                 }
-                else if (uploadedGeometry || pendingGeometry->second.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+                else if (uploadedGeometry || (uploadAvailable && !*uploadAvailable) ||
+                    pendingGeometry->second.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
                     geometryWaiting = true;
                 else
                 {
                     auto prepared = pendingGeometry->second.get();
                     prototype->pendingGeometry.erase(pendingGeometry);
-                    if (prepared.mesh) prepared.mesh->CreateBuffer(provider->GetBufferFactory(), &prepared.buffer);
-                    prototype->geometry.emplace(geometryKey, std::move(prepared.mesh));
+                    if (prepared.mesh)
+                    {
+                        if (prepared.graphicsBuffer)
+                            prepared.mesh->InstallPreparedStaticVertexBuffer(
+                                std::move(prepared.graphicsBuffer), provider->GetBufferFactory());
+                        else
+                        {
+                            if (uploadAvailable) *uploadAvailable = false;
+                            prepared.mesh->CreateBuffer(provider->GetBufferFactory(), &prepared.buffer);
+                        }
+                    }
+                    prototype->sources.SetRepresentations(sourceKey,
+                        {std::move(prepared.mesh)});
                     uploadedGeometry = true;
                 }
             }
@@ -497,19 +669,32 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider)
         for (const auto* placement:records)
             tiles[{int(std::floor(placement->position.x/prefabGroupSpan)),
                 int(std::floor(placement->position.z/prefabGroupSpan))}].push_back(placement);
-        auto& tileInstances = runtime->tileInstances;
+        std::map<std::pair<int,int>,MeshInstanceLayerData> tileLayers;
+        for (const auto& [tile,tileRecords]:tiles)
+        {
+            std::vector<glm::mat4> transforms;
+            std::vector<uint64_t> ids;
+            transforms.reserve(tileRecords.size());
+            ids.reserve(tileRecords.size());
+            for (const auto* placement:tileRecords)
+            {
+                transforms.push_back(placementMatrix(*placement));
+                ids.push_back(placement->id);
+            }
+            tileLayers[tile].SetPlacements(std::move(transforms),std::move(ids));
+        }
+        auto& tileInstances = runtime->tileLayers;
         if (runtime->nextPart == 0)
         {
-            tileInstances.clear();
+            tileInstances=std::move(tileLayers);
             runtime->groupStart = runtime->generated.size();
         }
-        std::vector<std::string> chain{asset};
-        std::vector<std::string> shadowChain;
-        if (const auto lods=objectLods.find(asset); lods!=objectLods.end())
-        {
-            if (!lods->second.meshes.empty()) chain=lods->second.meshes;
-            shadowChain=lods->second.shadowMeshes;
-        }
+        const auto profileEntry=lodProfiles.find(asset);
+        const auto lodProfile=profileEntry==lodProfiles.end()
+            ? GetObjectLodProfile(asset) : profileEntry->second;
+        std::vector<std::string> chain=lodProfile.meshes.empty()
+            ? std::vector<std::string>{asset} : lodProfile.meshes;
+        std::vector<std::string> shadowChain=lodProfile.shadowMeshes;
         chain.erase(std::remove(chain.begin(),chain.end(),std::string{}),chain.end());
         if(chain.empty()) chain.push_back(asset);
         shadowChain.erase(std::remove(shadowChain.begin(),shadowChain.end(),std::string{}),shadowChain.end());
@@ -539,94 +724,86 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider)
                     runtime->nextPart = partIndex;
                     // Expand indexed geometry once per shared prefab part, never per placement.
                     auto& prototype = definitions.at(meshes[lod]);
-                    auto source = prototype->geometry.at({original, provider});
+                    const auto geometryKey = SharedPrefabPrototype::GeometryKey{
+                        original, provider};
+                    const std::string sourceKey = SharedSourcePartKey(geometryKey);
+                    auto* sourcePart = prototype->sources.FindPart(sourceKey);
+                    if (!sourcePart || sourcePart->representations.empty()) continue;
+                    auto source = sourcePart->representations.front();
                     if (!source) continue;
                     BuildProfile::Stage instanceStage("batch_instances");
-                    const auto sourceMinimum=source->GetBoundsMin();
-                    const auto sourceMaximum=source->GetBoundsMax();
-                    const auto sourceCenter=(sourceMinimum+sourceMaximum)*0.5f;
-                    const auto sourceExtents=(sourceMaximum-sourceMinimum)*0.5f;
                     for (const auto& [tile,tileRecords]:tiles)
                     {
-                        auto& instances=tileInstances[tile];
-                        const bool initialize=!instances;
-                        if (initialize) instances=std::make_shared<Mesh::InstanceData>();
-                        glm::vec3 minimum(std::numeric_limits<float>::max()),maximum(-minimum);
+                        auto& layerData=tileInstances[tile];
+                        const glm::vec3 windPadding(1.5f*std::max(0.f,source->GetBoundsMax().y)*
+                            std::clamp(original->foliageWindStrength,0.f,1.f));
+                        MeshInstanceLayerData::Batch batch;
                         {
                             BuildProfile::Stage boundsStage("batch_instance_transforms_bounds");
-                            for (const auto* placement:tileRecords)
-                            {
-                                const glm::mat4 matrix=placementMatrix(*placement);
-                                Mesh::InstanceTransform instance{};
-                                for (int row=0;row<3;++row)
-                                    instance.rows[row]={matrix[0][row],matrix[1][row],matrix[2][row],matrix[3][row]};
-                                if (initialize)
-                                {
-                                    instances->transforms.push_back(instance);
-                                    instances->placementIds.push_back(placement->id);
-                                }
-                                // Transform the source AABB with center/extents rather
-                                // than transforming eight corners for every placement,
-                                // part, and LOD. This is exact for affine transforms and
-                                // avoids repeated bounds queries in large foliage layers.
-                                const glm::vec3 center(matrix*glm::vec4(sourceCenter,1.f));
-                                const glm::mat3 linear(matrix);
-                                const auto absolute=[](const glm::vec3& value) {
-                                    return glm::vec3(std::abs(value.x),std::abs(value.y),std::abs(value.z));
-                                };
-                                const glm::vec3 extents=absolute(linear[0])*sourceExtents.x+
-                                    absolute(linear[1])*sourceExtents.y+
-                                    absolute(linear[2])*sourceExtents.z;
-                                minimum=glm::min(minimum,center-extents);
-                                maximum=glm::max(maximum,center+extents);
-                            }
+                            batch=layerData.BuildBatch(*source,windPadding);
                         }
+                        const auto& instances=layerData.GetInstanceData();
                         BuildProfile::Stage objectStage("batch_instance_objects");
                         auto* object=create("Shared prefab part: "+original->Owner->name+" ("+
                             std::to_string(tile.first)+","+std::to_string(tile.second)+")");
                         auto* mesh=object->AddComponent<Mesh>();
-                        mesh->screenLodSelection=screenLodSelection;
-                        mesh->distanceLodOverride=distanceLodOverride;
-                        mesh->screenLod1Pixels=screenLod1Pixels;
-                        mesh->screenLod2Pixels=screenLod2Pixels;
-                        mesh->screenLodHysteresis=screenLodHysteresis;
-                        const glm::vec3 windPadding(1.5f*std::max(0.f,source->GetBoundsMax().y)*
-                            std::clamp(original->foliageWindStrength,0.f,1.f));
-                        const auto lodLow=source->GetBoundsMin()-windPadding;
-                        const auto lodHigh=source->GetBoundsMax()+windPadding;
-                        if(!instances->hasLodBounds)
-                        { instances->lodMinimum=lodLow; instances->lodMaximum=lodHigh; instances->hasLodBounds=true; }
-                        else
-                        { instances->lodMinimum=glm::min(instances->lodMinimum,lodLow); instances->lodMaximum=glm::max(instances->lodMaximum,lodHigh); }
+                        mesh->screenLodSelection=lodProfile.screenSizeSelection || screenLodSelection;
+                        mesh->distanceLodOverride=lodProfile.distanceOverride || distanceLodOverride;
+                        mesh->screenLod1Pixels=lodProfile.screenThresholdsPixels.size()>0 &&
+                            std::isfinite(lodProfile.screenThresholdsPixels[0])
+                            ? std::clamp(lodProfile.screenThresholdsPixels[0],0.f,100000.f)
+                            : screenLod1Pixels;
+                        const float requestedLod2Pixels=lodProfile.screenThresholdsPixels.size()>1 &&
+                            std::isfinite(lodProfile.screenThresholdsPixels[1])
+                            ? std::clamp(lodProfile.screenThresholdsPixels[1],0.f,100000.f)
+                            : screenLod2Pixels;
+                        mesh->screenLod2Pixels=std::min(mesh->screenLod1Pixels,
+                            requestedLod2Pixels);
+                        mesh->screenLodHysteresis=lodProfile.screenSizeSelection
+                            ? std::clamp(std::isfinite(lodProfile.hysteresis)
+                                ? lodProfile.hysteresis : screenLodHysteresis,0.f,.5f)
+                            : screenLodHysteresis;
                         instances->maximumLod=std::max(instances->maximumLod,int(meshes.size())-1);
                         mesh->useBoundsForShadowCulling=true;
                         mesh->foliageWindStrength=original->foliageWindStrength;
                         const auto& sourcePath=original->GetFilePath();
                         mesh->treeTimingGeometry=sourcePath.find("/Woodland/Oaks/")!=std::string::npos ||
                             sourcePath.find("\\Woodland\\Oaks\\")!=std::string::npos;
-                        mesh->runtimeShadowDistance=std::max(0.f,shadowDistance);
+                        mesh->runtimeShadowDistance=std::max(0.f,
+                            lodProfile.shadowDistance > 0.f
+                                ? std::min(shadowDistance,lodProfile.shadowDistance)
+                                : shadowDistance);
+                        mesh->cullAfterLastLod = lodProfile.cullAfterLastLod &&
+                            std::isfinite(lodProfile.finalLodCullDistance) &&
+                            lodProfile.finalLodCullDistance > 0.f;
+                        mesh->finalLodCullDistance = mesh->cullAfterLastLod
+                            ? lodProfile.finalLodCullDistance : 0.f;
                         mesh->runtimeShadowFadeWidth=GetShadowFadeWidth();
-                        mesh->prefabDedicatedShadowProxy=dedicatedShadowProxy;
-                        mesh->prefabShadowProxyOnly=shadowProxyOnly;
+                        mesh->dedicatedShadowProxy=dedicatedShadowProxy;
+                        mesh->shadowProxyOnly=shadowProxyOnly;
                         if (shadowProxyOnly || !dedicatedShadowProxy)
-                            mesh->prefabShadowLod=shadowLod<0 ? -1:std::min(shadowLod,int(meshes.size())-1);
-                        else mesh->prefabShadowLod=-1;
+                            mesh->fixedShadowLodBand=shadowLod<0 ? -1:std::min(shadowLod,int(meshes.size())-1);
+                        else mesh->fixedShadowLodBand=-1;
                         if (meshes.size()>1)
                         {
-                            mesh->prefabLodBand=int(lod);
-                            mesh->prefabLodDistances={lodDistances[0],lodDistances.size()>1 ? lodDistances[1]:1.e20f};
+                            mesh->instanceLodBand=int(lod);
+                            mesh->instanceLodDistances={lodDistances[0],lodDistances.size()>1 ? lodDistances[1]:1.e20f};
                         }
                         mesh->SetInstancedGeometry(source,instances,{{0,source->GetVertexCount(),0,
-                            static_cast<uint32_t>(tileRecords.size())}},minimum,maximum);
+                            static_cast<uint32_t>(tileRecords.size())}},batch.minimum,batch.maximum);
                         if (const auto* material=original->Owner->GetComponent<Material>())
                         {
+                            sourcePart = prototype->sources.FindPart(sourceKey);
+                            if (!sourcePart->hasMaterialState)
+                                prototype->sources.SetMaterialState(sourceKey,
+                                    material->Serialize());
+                            sourcePart = prototype->sources.FindPart(sourceKey);
                             BuildProfile::Stage materialStage("batch_instance_materials");
                             auto* copy=object->AddComponent<Material>();
                             {
                                 BuildProfile::Stage stage("batch_material_copy_resolved");
-                                auto [snapshot, inserted] = prototype->materials.try_emplace(material);
-                                if (inserted) snapshot->second = material->Serialize();
-                                copy->CopyResolvedStateFrom(*material, &snapshot->second);
+                                copy->CopyResolvedStateFrom(*material,
+                                    &sourcePart->materialState);
                             }
                             {
                                 BuildProfile::Stage stage("batch_material_graphics");
@@ -653,7 +830,7 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider)
         // Groups have already been canonicalized to their authored base above.
         // Resolving every LOD path again here performs many filesystem probes
         // for every batch part, even when the prefab has no colliders.
-        if (const auto found = objectLods.find(asset); found != objectLods.end())
+        if (const auto found = lodProfiles.find(asset); found != lodProfiles.end())
             colliderRoot = definition(found->first);
         if (colliderRoot) for (auto* collider:colliderRoot->GetComponentsInChildren<PrimitiveObjectCollider>())
         {
@@ -686,7 +863,7 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider)
             if (auto* object = scene->FindObjectById(id)) object->enabled = true;
     }
     runtime->sources=std::move(sources);
-    runtime->lods=objectLods;
+    runtime->lods=lodProfiles;
     m_prefabInstances=std::move(runtime);
 }
 }

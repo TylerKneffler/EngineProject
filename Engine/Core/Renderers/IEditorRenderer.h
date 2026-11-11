@@ -40,7 +40,7 @@ struct EditorUiTextureHooks
 class IEditorRenderer : public IRenderer
 {
 public:
-    virtual const char* GetBackendName() const { return "unknown"; }
+    const char* GetBackendName() const override { return "unknown"; }
     virtual ~IEditorRenderer() = default;
 
     // Mark the back-buffer as needing a redraw. Call after any change

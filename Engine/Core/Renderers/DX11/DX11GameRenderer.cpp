@@ -1,11 +1,24 @@
 #include "pch.h"
 #include "DX11GameRenderer.h"
+#include "Core/Renderers/GraphicsDeviceName.h"
 #include "Core/Graphics/PostProcess.h"
 #include "Core/Graphics/GraphicsCommandPacket.h"
 #include <d3d11_4.h>
 
 namespace Engine::Renderers
 {
+std::string DX11GameRenderer::GetGraphicsDeviceName() const
+{
+    if (!m_device) return "unknown";
+    Microsoft::WRL::ComPtr<IDXGIDevice> dxgiDevice;
+    Microsoft::WRL::ComPtr<IDXGIAdapter> adapter;
+    DXGI_ADAPTER_DESC description{};
+    if (FAILED(m_device.As(&dxgiDevice)) ||
+        FAILED(dxgiDevice->GetAdapter(&adapter)) ||
+        FAILED(adapter->GetDesc(&description))) return "unknown";
+    return Details::GraphicsDeviceNameFromWide(description.Description);
+}
+
 DX11GameRenderer::~DX11GameRenderer()
 {
     if (m_context) m_context->ClearState();

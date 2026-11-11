@@ -90,6 +90,7 @@ public:
     ::Engine::Core::Window* GetWindow() const { return m_window.get(); }
     ::Engine::Renderers::IEditorRenderer* GetRenderer() const { return m_renderer.get(); }
     Engine::Scene::Scene* GetScene() const { return m_scene.get(); }
+    const std::string& GetCurrentScenePath() const { return m_currentScenePath; }
     ViewFactory* GetViewFactory() const { return m_viewFactory.get(); }
     ConsoleView* GetConsole() const { return m_primaryConsole; }
     PreferencesView* GetPreferences() const { return m_preferences.get(); }

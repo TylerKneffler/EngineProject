@@ -48,6 +48,7 @@
 #include <glm/glm.hpp>
 #include <glm/ext/matrix_clip_space.hpp>
 #include <glm/ext/matrix_transform.hpp>
+#include <set>
 
 #ifndef ENGINE_SHADERS_PATH
 #define ENGINE_SHADERS_PATH "Engine/Core/Shaders/"
@@ -171,7 +172,7 @@ static_assert(sizeof(Engine::Model::LightData) == 128,
 void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     Engine::Components::Camera* cameraOverride, bool includeEditorVisuals,
     uint32_t viewportWidth, uint32_t viewportHeight, bool shadowOnly,
-    const NativeRenderPacket* nativePacket)
+    const NativeRenderPacket* nativePacket, int instanceLodDisplayOverride)
 {
     // Render phase 1: validate the prepared frame and resolve its active camera.
     m_screenLodCounts={};
@@ -258,6 +259,11 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     if (!m_renderFramePrepared)
         PrepareRenderFrame();
     const auto& frameRenderItems = nativePacket ? nativePacket->items : m_frameRenderItems;
+    m_lastRenderCpuTimings.visibilityFrameItems += frameRenderItems.size();
+    const auto& frameItemSlotOffsets = nativePacket
+        ? nativePacket->renderSlotItemOffsets : m_frameItemsByRenderSlotOffsets;
+    const auto& frameItemSlotIndices = nativePacket
+        ? nativePacket->renderSlotItems : m_frameItemsByRenderSlot;
     uint32_t requiredObjectSlots=1;
     for(const auto& item:frameRenderItems)
     {
@@ -300,6 +306,10 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     const bool newInstanceFrame=m_instanceViewSerial!=instanceSerial;
     if(m_instanceViewSerial!=instanceSerial) { m_instanceViewSerial=instanceSerial; m_instanceViewUses.clear(); }
     const uint32_t instanceViewOrdinal=m_instanceViewUses[{cam,shadowOnly}]++;
+    const uint64_t diagnosticViewIdentity =
+        (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(cam)) >> 4u) ^
+        (static_cast<uint64_t>(instanceViewOrdinal) << 48u) ^
+        (shadowOnly ? (uint64_t(1) << 63u) : 0u);
     m_persistentInstances.BeginFrame(m_graphicsProvider);
     const auto poolBefore=m_persistentInstances.stats;
     m_lastRenderCpuTimings.instances.retirements=newInstanceFrame ? poolBefore.retirements:0;
@@ -452,6 +462,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         &m_lastRenderCpuTimings.clusterPreparationMs,
         &m_lastRenderCpuTimings.clusterUploadBytes,
         &m_lastRenderCpuTimings.clusterCacheHits);
+    RecordFrameUploadBytes(m_lastRenderCpuTimings.clusterUploadBytes);
     const uint32_t clusterTileSize = std::clamp(m_distanceLightingSettings.clusterTileSize, 16u, 256u);
     const float clusterNear = std::max(0.001f, cam->nearPlane);
     const float clusterFar = std::max(clusterNear + 0.001f, cam->farPlane);
@@ -489,6 +500,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         }
     }
     m_lightDataBuffer->FlushMappedWrites();
+    RecordFrameUploadBytes(static_cast<uint64_t>(m_frameLightCount) *
+        sizeof(Engine::Model::LightData));
     m_shadowDebugSnapshot.hasSelectedLight = shadowSelection.valid;
     m_shadowDebugSnapshot.selectedLight = shadowSelection.stableLightKey;
     m_shadowDebugSnapshot.directionToLight =
@@ -602,6 +615,13 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         ReadEnvFlag("ENGINE_VISIBILITY_TERRAIN_OCCLUSION", true);
     const bool solidOcclusionEnabled = useTerrainOcclusion &&
         ReadEnvFlag("ENGINE_VISIBILITY_SOLID_OCCLUSION", false);
+    auto& viewVisibility = shadowOnly
+        ? m_lastRenderCpuTimings.shadowVisibility
+        : m_lastRenderCpuTimings.cameraVisibility;
+    viewVisibility.viewIdentity=diagnosticViewIdentity;
+    viewVisibility.viewIdentities.push_back({diagnosticViewIdentity,false,shadowOnly});
+    ++viewVisibility.views;
+    viewVisibility.frameItems += frameRenderItems.size();
     Engine::Scene::Renderer::SceneRendererVisibility::PrepareTerrainOcclusion(
         *this,
         frameRenderItems,
@@ -613,30 +633,62 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         terrainWarpActive,
         terrainBlockers,
         solidBlockers);
-    std::future<std::vector<uint8_t>> cameraVisibilityJob;
+    using VisibleSlotsQuery = Engine::Rendering::RenderSpatialIndex::VisibleSlotsQuery;
+    std::future<VisibleSlotsQuery> cameraVisibilityJob;
     struct CameraVisibilityFence
     {
-        std::future<std::vector<uint8_t>>& job;
+        std::future<VisibleSlotsQuery>& job;
         ~CameraVisibilityFence() { if (job.valid()) job.wait(); }
     } cameraVisibilityFence{cameraVisibilityJob};
     if (terrainOcclusionEnabled || solidOcclusionEnabled)
         cameraVisibilityJob = Engine::Rendering::RenderJobs::Get().Submit(
             [this, viewProjection] {
-                return m_renderSpatialIndex.QueryUncached(viewProjection);
+                return m_renderSpatialIndex.QueryVisibleSlotsUncached(viewProjection);
             });
     const auto terrainPreparationStart=RenderClock::now();
     m_lastRenderCpuTimings.startupMs=std::chrono::duration<double,std::milli>(terrainPreparationStart-measurement.start).count();
     m_lastRenderCpuTimings.terrainPreparationMs=std::chrono::duration<double,std::milli>(RenderClock::now()-terrainPreparationStart).count();
     const auto cullingStart = RenderClock::now();
-    static const std::vector<uint8_t> emptyVisibility;
-    std::vector<uint8_t> preparedCameraVisibility;
+    const bool useSpatialCandidates = !shadowOnly && !hasPortalViews &&
+        !m_editorMode2D;
+    std::vector<uint32_t> visibleRenderSlots;
+    Engine::Rendering::RenderSpatialQueryStatistics spatialQueryStatistics;
     const bool hasPreparedCameraVisibility = cameraVisibilityJob.valid();
     if (hasPreparedCameraVisibility)
-        preparedCameraVisibility = cameraVisibilityJob.get();
-    const auto& spatialVisible = hasPreparedCameraVisibility
-        ? preparedCameraVisibility
-        : (!shadowOnly && !hasPortalViews && !m_editorMode2D
-            ? m_renderSpatialIndex.Query(viewProjection) : emptyVisibility);
+    {
+        auto query = cameraVisibilityJob.get();
+        visibleRenderSlots = std::move(query.slots);
+        spatialQueryStatistics = query.statistics;
+    }
+    else if (useSpatialCandidates)
+        visibleRenderSlots = m_renderSpatialIndex.QueryVisibleSlots(viewProjection,
+            &spatialQueryStatistics);
+    std::vector<uint32_t> candidateFrameItems;
+    if (useSpatialCandidates)
+    {
+        size_t candidateCount = 0;
+        for (const uint32_t slot : visibleRenderSlots)
+            if (size_t(slot) + 1u < frameItemSlotOffsets.size())
+                candidateCount += frameItemSlotOffsets[size_t(slot) + 1u] -
+                    frameItemSlotOffsets[slot];
+        candidateFrameItems.reserve(candidateCount);
+        for (const uint32_t slot : visibleRenderSlots)
+        {
+            if (size_t(slot) + 1u >= frameItemSlotOffsets.size()) continue;
+            const auto first = frameItemSlotOffsets[slot];
+            const auto last = frameItemSlotOffsets[size_t(slot) + 1u];
+            candidateFrameItems.insert(candidateFrameItems.end(),
+                frameItemSlotIndices.begin() + first,
+                frameItemSlotIndices.begin() + last);
+        }
+    }
+    m_lastRenderCpuTimings.visibilityCandidates += useSpatialCandidates
+        ? candidateFrameItems.size() : frameRenderItems.size();
+    viewVisibility.candidateItems += useSpatialCandidates
+        ? candidateFrameItems.size() : frameRenderItems.size();
+    viewVisibility.visibleSlots += spatialQueryStatistics.visibleSlots;
+    viewVisibility.bvhNodesVisited += spatialQueryStatistics.nodesVisited;
+    viewVisibility.bvhBoundsTested += spatialQueryStatistics.boundsTested;
     const auto hiddenByTerrain = [&](const FrameRenderItem& item)
     {
         if (!terrainOcclusionEnabled || !item.terrainSurface)
@@ -656,7 +708,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     auto visibilityState = Engine::Scene::Renderer::SceneRendererViewPreparation::PrepareVisibleSet(
         *this,
         frameRenderItems,
-        spatialVisible,
+        candidateFrameItems,
+        useSpatialCandidates,
         cameraPosition,
         shadowOnly,
         includeEditorVisuals,
@@ -679,15 +732,13 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         sourceChartWorld);
     auto& renderObjects = m_viewRenderItemScratch;
     renderObjects = std::move(visibilityState.renderObjects);
-    auto accepted = std::move(visibilityState.accepted);
-    auto terrainRejected = std::move(visibilityState.terrainRejected);
-    auto solidRejected = std::move(visibilityState.solidRejected);
-    for (size_t index = 0; index < terrainRejected.size(); ++index)
-    {
-        m_lastTerrainOcclusionCulledCount += terrainRejected[index];
-        m_lastRenderCpuTimings.terrainOcclusionRejected += terrainRejected[index];
-        m_lastRenderCpuTimings.solidOcclusionRejected += solidRejected[index];
-    }
+    m_lastRenderCpuTimings.visibilityAccepted += renderObjects.size();
+    viewVisibility.acceptedItems += renderObjects.size();
+    m_lastTerrainOcclusionCulledCount += visibilityState.terrainOcclusionCulled;
+    m_lastRenderCpuTimings.terrainOcclusionRejected +=
+        visibilityState.terrainOcclusionCulled;
+    m_lastRenderCpuTimings.solidOcclusionRejected +=
+        visibilityState.solidOcclusionCulled;
     const auto sortingStart = RenderClock::now();
     m_lastRenderCpuTimings.cullingMs = std::chrono::duration<double,std::milli>(sortingStart-cullingStart).count();
     std::future<void> sortJob;
@@ -727,7 +778,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     m_lastRenderCpuTimings.occlusionMs=std::chrono::duration<double,std::milli>(RenderClock::now()-occlusionStart).count();
     // Shadow maps need less geometry than the camera color pass. Keep the
     // per-placement culling bands and pixel dither bands on the same policy,
-    // including independently authored prefab LOD meshes.
+    // including independently authored instance LOD bands.
     const auto scaledShadowLodDistances = [&](const glm::vec2 distances)
     {
         return Renderer::SceneInstanceBatching::ScaleShadowLodDistances(distances, shadowOnly);
@@ -753,21 +804,21 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         slot=renderItem->objectSlot;
         Engine::Core::Object* obj = renderItem->object;
         Engine::Components::Mesh* mesh = renderItem->mesh;
-        const bool fixedPrefabShadow = shadowOnly && mesh &&
-            mesh->prefabShadowLod>=0;
+        const bool fixedShadowBand = shadowOnly && mesh &&
+            mesh->fixedShadowLodBand>=0;
         if (mesh)
         {
-            if (!shadowOnly && mesh->prefabShadowProxyOnly) continue;
-            if (shadowOnly && mesh->prefabDedicatedShadowProxy &&
-                !mesh->prefabShadowProxyOnly) continue;
-            if(fixedPrefabShadow && mesh->prefabLodBand>=0 &&
-                mesh->prefabLodBand!=mesh->prefabShadowLod) continue;
+            if (!shadowOnly && mesh->shadowProxyOnly) continue;
+            if (shadowOnly && mesh->dedicatedShadowProxy &&
+                !mesh->shadowProxyOnly) continue;
+            if(fixedShadowBand && mesh->instanceLodBand>=0 &&
+                mesh->instanceLodBand!=mesh->fixedShadowLodBand) continue;
         }
         if (!shadowOnly && mesh && mesh->HasBounds() && (quality.viewDistance < 1.f || quality.vegetation < 1.f)) {
             const auto bounds = Engine::Rendering::TransformBounds(mesh->GetBoundsMin(), mesh->GetBoundsMax(), renderItem->world);
             const auto delta = glm::clamp(cameraPosition, bounds.minimum, bounds.maximum) - cameraPosition;
-            const bool vegetation = mesh->grassShadowCaster || mesh->foliageWindStrength > 0.f;
-            const float range = cam->farPlane * quality.viewDistance * (vegetation ? quality.vegetation : 1.f);
+            const bool deforming = mesh->GetDeformationBoundsPadding() > 0.f;
+            const float range = cam->farPlane * quality.viewDistance * (deforming ? quality.vegetation : 1.f);
             if (glm::dot(delta, delta) > range * range) continue;
         }
         Engine::Components::Sprite* sprite = renderItem->sprite;
@@ -810,12 +861,12 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         preparedDraw.gpuLod=renderItem->gpuLod;
         preparedDraw.gpuMaximumLod=renderItem->gpuMaximumLod;
         preparedDraw.gpuLodDistances=renderItem->gpuLodDistances;
-        if (mesh && mesh->prefabLodBand>=0)
+        if (mesh && mesh->instanceLodBand>=0)
         {
-            preparedDraw.gpuLod=mesh->prefabLodBand;
+            preparedDraw.gpuLod=mesh->instanceLodBand;
             preparedDraw.gpuMaximumLod=2;
-            preparedDraw.gpuLodDistances=mesh->prefabLodDistances;
-            if(fixedPrefabShadow) preparedDraw.gpuLod=-1;
+            preparedDraw.gpuLodDistances=mesh->instanceLodDistances;
+            if(fixedShadowBand) preparedDraw.gpuLod=-1;
         }
         preparedDraw.gpuLodDistances *= quality.geometry;
         preparedDraw.object = obj;
@@ -844,7 +895,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             !sortedItem.blended && !belongsToPreview &&
             (!mat || mat->castsShadows);
         glm::vec2 casterFade=renderItem->shadowCasterFade * quality.shadows;
-        if(mesh && mesh->grassShadowCaster)
+        if(mesh && mesh->usesGrassShadowBudget)
         {
             const float budget=std::max(0.f,m_realtimeShadowSettings.grassCasterDistance);
             if(budget<=0.f) preparedDraw.castsShadow=false;
@@ -875,7 +926,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 mesh->GetPosedVertexBuffer() &&
                 !mesh->IsPortalPoseSnapshot() &&
                 (useSourceChart || !renderItem->warpedVertexBuffer);
-            preparedDraw.objectData.geometryFade=mesh->prefabLodBand>=0 ? glm::vec4(float(mesh->prefabLodBand),scaledShadowLodDistances(mesh->prefabLodDistances),4.f) : (hasPortalViews && renderItem->geometryFade.w>=2.f ? mesh->GetRuntimeGeometryFade():renderItem->geometryFade);
+            preparedDraw.objectData.geometryFade=mesh->instanceLodBand>=0 ? glm::vec4(float(mesh->instanceLodBand),scaledShadowLodDistances(mesh->instanceLodDistances),4.f) : (hasPortalViews && renderItem->geometryFade.w>=2.f ? mesh->GetRuntimeGeometryFade():renderItem->geometryFade);
             preparedDraw.objectData.shadowCasterFade={casterFade.x,std::min(casterFade.x,casterFade.y),1.f,0.f};
             preparedDraw.objectData.grassAnimation={0.f,0.f,0.f,0.f};
             preparedDraw.objectData.viewPositionAlphaCutoff=glm::vec4(cameraPosition,.001f);
@@ -883,7 +934,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 ? settings.graphicsQuality.ResolveTexture(mat->textureLod).AlphaGpuParameters() : settings.graphicsQuality.ResolveTexture(settings.textureLod).AlphaGpuParameters();
             preparedDraw.objectData.textureLodParams = mat && mat->overrideTextureLod
                 ? settings.graphicsQuality.ResolveTexture(mat->textureLod).GpuParameters() : settings.graphicsQuality.ResolveTexture(settings.textureLod).GpuParameters();
-            if(fixedPrefabShadow)
+            if(fixedShadowBand)
             {
                 // Camera distance must not reshape a fixed shadow proxy, via
                 // either geometry dithering or distance-biased leaf cutouts.
@@ -938,7 +989,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             preparedDraw.doubleSided = !preparedDraw.terrainCell &&
                 (mat && mat->doubleSided);
             // Independent prefab cards carry their authored caster sidedness.
-            if (mesh->prefabLodBand>=0)
+            if (mesh->instanceLodBand>=0)
                 preparedDraw.shadowDoubleSided=preparedDraw.doubleSided;
             preparedDraw.drawData = { slot, 0u, mesh->IsInstanced() ? (0x20000000u | (renderItem->geometryFade.w>=2.f && !hasPortalViews ? 0x00100000u:0u)):0u, 0u };
             preparedDraw.traversalChartPortal =
@@ -1233,14 +1284,14 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             (clusteredLightingEnabled ? kClusteredLightingFlag : 0u) |
                 (mesh && mesh->IsInstanced() ? (0x20000000u | (renderItem->geometryFade.w>=2.f && !hasPortalViews ? 0x00100000u:0u)):0u), 0u };
         preparedDraw.drawData = drawData;
-        objectData.geometryFade = mesh && mesh->prefabLodBand>=0 ? glm::vec4(float(mesh->prefabLodBand),mesh->prefabLodDistances.x,mesh->prefabLodDistances.y,4.f) : (hasPortalViews && renderItem->geometryFade.w>=2.f ? mesh->GetRuntimeGeometryFade():renderItem->geometryFade);
+        objectData.geometryFade = mesh && mesh->instanceLodBand>=0 ? glm::vec4(float(mesh->instanceLodBand),mesh->instanceLodDistances.x,mesh->instanceLodDistances.y,4.f) : (hasPortalViews && renderItem->geometryFade.w>=2.f ? mesh->GetRuntimeGeometryFade():renderItem->geometryFade);
         if (objectData.geometryFade.w >= 2.f) {
             objectData.geometryFade.y *= quality.geometry;
             objectData.geometryFade.z *= quality.geometry;
         }
         objectData.shadowCasterFade={casterFade.x,std::min(casterFade.x,casterFade.y),0.f,0.f};
-        objectData.grassAnimation={mesh && (mesh->grassShadowCaster || mesh->foliageWindStrength>0.f) ? static_cast<float>(GetElapsedTime()):0.f,
-            mesh && (mesh->grassShadowCaster || mesh->foliageWindStrength>0.f) ? 1.f : 0.f,
+        objectData.grassAnimation={mesh && mesh->foliageWindStrength>0.f ? static_cast<float>(GetElapsedTime()):0.f,
+            mesh && mesh->foliageWindStrength>0.f ? 1.f : 0.f,
             mesh && mesh->foliageWindStrength>0.f ? std::clamp(mesh->foliageWindStrength,0.f,1.f):1.f, 0.f};
         objectData.grassAnimation.w = static_cast<float>(grassInteraction.count);
         std::copy(grassInteraction.data.begin(), grassInteraction.data.end(), objectData.grassCapsules);
@@ -1301,6 +1352,15 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     auto& automaticGroups = instanceBatching.automaticGroups;
     auto& instanceTiles = instanceBatching.instanceTiles;
     auto* residentPlacementPool = instanceBatching.residentPlacementPool;
+    auto& drawViewStats = shadowOnly
+        ? m_lastRenderCpuTimings.shadowVisibility
+        : m_lastRenderCpuTimings.cameraVisibility;
+    drawViewStats.drawGroups += automaticGroups.size();
+    std::set<std::pair<uintptr_t, uintptr_t>> materialGroupKeys;
+    for (const auto& draw : preparedDraws)
+        materialGroupKeys.emplace(reinterpret_cast<uintptr_t>(draw.material),
+            reinterpret_cast<uintptr_t>(draw.pipeline));
+    drawViewStats.materialGroups += materialGroupKeys.size();
 
     const auto ensureRecordsUploaded = [&recordUpload]()
     {
@@ -1324,7 +1384,14 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     Renderer::SceneRendererLodSelection lodSelection;
     lodSelection.Prepare(*this, preparedDraws, cam, cameraPosition,
         viewProjection, viewportWidth, viewportHeight, instanceViewOrdinal,
-        shadowOnly, hasPortalViews, includeEditorVisuals);
+        shadowOnly, hasPortalViews, includeEditorVisuals,
+        instanceLodDisplayOverride);
+    const auto selectedLodDraws = lodSelection.SelectedGpuLodDraws(shadowOnly);
+    auto& lodDrawMetrics = shadowOnly
+        ? m_lastRenderCpuTimings.shadowSelectedLodDraws
+        : m_lastRenderCpuTimings.colorSelectedLodDraws;
+    for (size_t lod = 0; lod < selectedLodDraws.size(); ++lod)
+        lodDrawMetrics[lod] += selectedLodDraws[lod];
     auto& screenPlacementLevels = lodSelection.PlacementLevels();
     const auto submitAutomaticGroup = [&](const AutomaticGroup& group,
         const glm::mat4& cullViewProjection, uint32_t objectBase,
@@ -1363,11 +1430,12 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                         if(created)
                         {
                             glm::vec3 low=glm::vec3(tile.minimum),high=glm::vec3(tile.maximum);
-                            const int maximum=draw.mesh->prefabLodBand>=0 ? data.maximumLod:draw.gpuMaximumLod;
+                            const int maximum=draw.mesh->instanceLodBand>=0 ? data.maximumLod:draw.gpuMaximumLod;
                             if(data.hasLodBounds) {
-                                const glm::vec3 windPadding(1.5f*std::max(0.f,data.lodMaximum.y)*
-                                    std::clamp(draw.mesh->foliageWindStrength,0.f,1.f));
-                                low=data.lodMinimum-windPadding; high=data.lodMaximum+windPadding;
+                                const float padding=draw.mesh->GetDeformationBoundsPadding();
+                                const glm::vec3 deformationPadding(padding);
+                                low=data.lodMinimum-deformationPadding;
+                                high=data.lodMaximum+deformationPadding;
                             }
                             decisions->second.reserve(data.transforms.size());
                             for(size_t placement=0;placement<data.transforms.size();++placement)
@@ -1379,7 +1447,19 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                                 decisions->second.push_back(lodSelection.ChooseScreen(*Renderer::SceneRendererDrawPreparation::ScreenLodPolicy(*this, draw, hasPortalViews, includeEditorVisuals),low,high,
                                     draw.objectData.world*matrix,data.lodIdentity,placement,1,maximum));
                             }
-                            for(int selected:decisions->second) ++m_screenLodCounts[selected];
+                            for (int selected : decisions->second)
+                            {
+                                ++m_screenLodCounts[selected];
+                                auto& screenStats = m_lastRenderCpuTimings
+                                    .cameraVisibility;
+                                ++screenStats.screenSelectedInstancesByLod[selected];
+                                const auto* geometry = draw.mesh->GetRuntimeLodMesh(selected);
+                                if (geometry)
+                                    screenStats.screenSelectedTrianglesByLod[selected] +=
+                                        (geometry->GetIndexBuffer()
+                                            ? geometry->GetIndexCount()
+                                            : geometry->GetVertexCount()) / 3u;
+                            }
                         }
                         const int band=gpuLod ? residentLod:draw.gpuLod;
                         // Emit contiguous runs into the existing persistent placement pool.
@@ -1402,11 +1482,24 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                     else { tiles.push_back(tile); count+=tile.range.y; }
                 }
                 if(!count) continue;
+                auto& viewStats = shadowOnly
+                    ? m_lastRenderCpuTimings.shadowVisibility
+                    : m_lastRenderCpuTimings.cameraVisibility;
+                const size_t lodMetric = static_cast<size_t>(std::clamp(
+                    gpuLod ? residentLod : representative.gpuLod, 0, 2));
+                viewStats.instanceTilesSubmitted += tiles.size();
+                // This submission path is for ordinary Mesh instance ranges;
+                // terrain-managed placements have their own terrain counters.
+                viewStats.nonTerrainInstanceTilesSubmitted += tiles.size();
+                viewStats.placementCandidates += count;
+                viewStats.placementCandidatesByLod[lodMetric] += count;
+                viewStats.placementTrianglesByLod[lodMetric] +=
+                    uint64_t(sourceRange.vertexCount / 3u) * count;
                 // Camera sorting must not invalidate unchanged tile metadata.
                 std::sort(tiles.begin(),tiles.end(),[](const auto& first,const auto& second) {
                     return std::tie(first.range.z,first.range.x)<std::tie(second.range.z,second.range.x);
                 });
-                bool gpu=gpuInstanceCulling && context->SupportsIndirectDraws() && (count>=32 || gpuLod || representative.mesh->prefabLodBand>=0);
+                bool gpu=gpuInstanceCulling && context->SupportsIndirectDraws() && (count>=32 || gpuLod || representative.mesh->instanceLodBand>=0);
                 if(gpu && !m_instanceCullAttempted)
                 {
                     m_instanceCullAttempted=true;
@@ -1422,13 +1515,25 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 Engine::Rendering::PersistentInstanceBatches::Key key{
                     uintptr_t(cam),uintptr_t(shadowOnly),instanceViewOrdinal,objectBase/m_objectCapacity,
                     uintptr_t(sourceMesh->GetGraphicsBuffer()),uintptr_t(pipeline),sourceRange.firstVertex,sourceRange.vertexCount,
-                    uintptr_t(residentLod) | (uintptr_t(representative.mesh->prefabLodBand+1)<<8),representative.drawData.flags,representative.drawData.lightCount,uintptr_t(representative.doubleSided),uintptr_t(representative.castsShadow)};
+                    uintptr_t(residentLod) | (uintptr_t(representative.mesh->instanceLodBand+1)<<8),representative.drawData.flags,representative.drawData.lightCount,uintptr_t(representative.doubleSided),uintptr_t(representative.castsShadow)};
                 for(auto* texture:representative.textures) key.push_back(uintptr_t(texture));
                 if(indexed) key.push_back(uintptr_t(sourceIndexBuffer));
                 if(!automaticInstancing) key.push_back(uintptr_t(representative.object));
                 const auto uploadStart=RenderClock::now();
                 auto* pool=residentPlacementPool;
                 auto& buffers=m_persistentBatches.Acquire(m_graphicsProvider,std::move(key),gpu,tiles,&constants,m_persistentInstances,m_lastRenderCpuTimings.changedUploadBytes);
+                if (buffers.completedReadback)
+                {
+                    auto& completed = buffers.readbackShadow
+                        ? m_lastRenderCpuTimings.shadowVisibility
+                        : m_lastRenderCpuTimings.cameraVisibility;
+                    const size_t completedLod=std::min<size_t>(buffers.readbackLod,2);
+                    completed.gpuSelectedInstancesByLod[completedLod]+=buffers.completedGpuCandidates;
+                    completed.gpuTransitionBandInstancesByLod[completedLod]+=buffers.completedTransitionCandidates;
+                    ++completed.gpuReadbackSamples;
+                    completed.gpuReadbackViewIdentity=buffers.readbackViewIdentity;
+                    buffers.completedReadback=false;
+                }
                 m_lastRenderCpuTimings.uploadMs+=std::chrono::duration<double,std::milli>(RenderClock::now()-uploadStart).count();
                 m_lastRenderCpuTimings.grassBatchCacheHits+=!buffers.metadataChanged;
                 auto& storage=m_lastRenderCpuTimings.instances;
@@ -1448,7 +1553,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                     cull.viewProjection=cullViewProjection; cull.cameraPosition=glm::vec4(cameraPosition,1);
                     cull.counts={uint32_t(tiles.size()),sourceRange.vertexCount,sourceRange.firstVertex,1};
                     cull.selection={screenColor ? -1:gpuLod ? residentLod:representative.gpuLod,2,representative.gpuMaximumLod,
-                        (shadowOnly ? 1:0) | (representative.mesh->prefabLodBand>=0 ? 2:0)};
+                        (shadowOnly ? 1:0) | (representative.mesh->instanceLodBand>=0 ? 2:0)};
                     context->SetComputeReadBuffer(buffers.input.get()); context->SetComputeReadBuffer(pool,1); context->SetComputeWriteBuffer(buffers.output.get());
                     context->SetComputeConstants(&cull,sizeof(cull)); context->DispatchCompute(1); context->StorageBarrier(buffers.output.get());
                     cull.counts.w=0;
@@ -1456,6 +1561,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                     context->SetComputeReadBuffer(buffers.input.get()); context->SetComputeReadBuffer(pool,1); context->SetComputeWriteBuffer(buffers.output.get());
                     context->SetComputeConstants(&cull,sizeof(cull)); context->DispatchCompute(uint32_t(tiles.size()));
                     context->StorageBarrier(buffers.output.get()); context->EndComputePass(); ++m_lastRenderCpuTimings.gpuBatches;
+                    Engine::Rendering::PersistentInstanceBatches::ScheduleVisibilityReadback(
+                        context,buffers,static_cast<uint32_t>(lodMetric),shadowOnly,diagnosticViewIdentity);
                 }
                 ensureRecordsUploaded();
                 context->SetPipeline(pipeline); context->SetConstantBuffer(0,buffers.draw.get());
@@ -1510,7 +1617,11 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             const auto origin=glm::vec3(draw.objectData.world[3]);
             instance.meta={draw.drawData.objectIndex,uint32_t(draw.gpuMaximumLod),
                 glm::floatBitsToUint(origin.x),glm::floatBitsToUint(origin.y)};
-            instance.lod={draw.gpuLodDistances,origin.z,0}; instances.push_back(instance);
+            const auto* lodPolicy = draw.object
+                ? draw.object->GetComponent<Engine::Components::Mesh>() : draw.mesh;
+            const float finalCullDistance = lodPolicy && lodPolicy->cullAfterLastLod
+                ? std::max(0.f, lodPolicy->finalLodCullDistance) : 0.f;
+            instance.lod={draw.gpuLodDistances,origin.z,finalCullDistance}; instances.push_back(instance);
         }
         if(instances.empty()) { if(gpu) context->EndComputePass(); return {}; }
         DrawCBData constants=representative.drawData;
@@ -1518,6 +1629,17 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         if(shadowOnly) { constants.lightCount=0; constants.flags&=~kClusteredLightingFlag; }
         const auto batchUploadStart=RenderClock::now();
         auto& buffers=m_automaticInstanceCache.Acquire(m_graphicsProvider,gpu,instances,&constants,m_lastRenderCpuTimings.changedUploadBytes);
+        if (buffers.completedReadback)
+        {
+            auto& completed=buffers.readbackShadow
+                ? m_lastRenderCpuTimings.shadowVisibility
+                : m_lastRenderCpuTimings.cameraVisibility;
+            const size_t completedLod=std::min<size_t>(buffers.readbackLod,2);
+            completed.gpuSelectedInstancesByLod[completedLod]+=buffers.completedGpuCandidates;
+            ++completed.gpuReadbackSamples;
+            completed.gpuReadbackViewIdentity=buffers.readbackViewIdentity;
+            buffers.completedReadback=false;
+        }
         m_lastRenderCpuTimings.uploadMs+=std::chrono::duration<double,std::milli>(RenderClock::now()-batchUploadStart).count();
         if(gpu)
         {
@@ -1534,6 +1656,9 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             context->SetComputeWriteBuffer(buffers.output.get()); context->SetComputeReadBuffer(buffers.input.get());
             context->SetComputeConstants(&cull,sizeof(cull)); context->DispatchCompute((uint32_t(instances.size())+63)/64);
             context->StorageBarrier(buffers.output.get()); context->EndComputePass(); ++m_lastRenderCpuTimings.gpuBatches;
+            Engine::Rendering::AutomaticInstanceCache::ScheduleVisibilityReadback(
+                context,buffers,static_cast<uint32_t>(std::clamp(representative.gpuLod,0,2)),
+                shadowOnly,diagnosticViewIdentity);
         }
         ensureRecordsUploaded();
         context->SetPipeline(pipeline);
@@ -1609,7 +1734,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                     const float lodPenalty = draw.gpuLod >= 0
                         ? static_cast<float>(draw.gpuLod) * 8.f : 0.f;
                     const float grassPenalty =
-                        draw.mesh && draw.mesh->grassShadowCaster ? 10.f : 0.f;
+                        draw.mesh && draw.mesh->usesGrassShadowBudget ? 10.f : 0.f;
                     const float terrainPenalty = draw.terrainCell ? 4.f : 0.f;
                     candidates.emplace_back(distance + lodPenalty +
                         grassPenalty + terrainPenalty, drawIndex);
@@ -1688,6 +1813,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             const uint64_t bytes=uint64_t(lastDirtyShadow-firstDirtyShadow+1)*sizeof(ObjectGPUData);
             m_shadowObjectDataBuffer->FlushMappedWrites(uint64_t(firstDirtyShadow)*sizeof(ObjectGPUData),bytes);
             m_lastRenderCpuTimings.changedUploadBytes+=bytes;
+            RecordFrameUploadBytes(bytes);
         }
         context->SetStructuredBuffer(6, m_lightDataBuffer.get());
         context->SetStructuredBuffer(7, m_shadowObjectDataBuffer.get());
@@ -1918,7 +2044,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     {
         using Stage = Engine::Graphics::GpuTimingStage;
         if (draw.terrain || draw.terrainCell) return Stage::Terrain;
-        if (draw.mesh && draw.mesh->grassShadowCaster) return Stage::Grass;
+        if (draw.mesh && draw.mesh->usesGrassShadowBudget) return Stage::Grass;
         if (draw.blended) return Stage::Transparent;
         // Bundled oak source geometry, including shared prefab instances.
         if (draw.treeGeometry)

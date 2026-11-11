@@ -1,4 +1,6 @@
 #include "Terrain.h"
+#include "Core/Compoonents/Terrain/TerrainObjectLayer.h"
+#include "Core/Compoonents/Terrain/TerrainSurfaceSample.h"
 #include "Core/Compoonents/Terrain/TerrainSurfaceWinding.h"
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
@@ -265,7 +267,37 @@ bool Terrain::ApplyBrush(float x, float z, float radius, float strength,
                 changed |= target != heights[i]; heights[i] = target;
             }
         }
-    if (changed) { NormalizeWeights(); Rebuild(); MarkConfigurationDirty(); }
+    if (changed)
+    {
+        NormalizeWeights(); Rebuild(); MarkConfigurationDirty();
+        if (brush != Brush::Paint && Owner)
+            for (auto* child : Owner->Children)
+                if (child)
+                    if (auto* objects = child->GetComponent<TerrainObjectLayer>(); objects &&
+                        (objects->layerName == "Meadow grass" ||
+                            objects->layerName == "Procedural meadow grass"))
+                    {
+                        bool placementsChanged = false;
+                        for (auto& placement : objects->placements)
+                        {
+                            const float dx = placement.position.x - x;
+                            const float dz = placement.position.z - z;
+                            if (dx * dx + dz * dz >= radius * radius) continue;
+                            float height = placement.position.y;
+                            glm::vec3 normal = placement.normal;
+                            if (SampleTerrainSurface(heights, cellsX, cellsY,
+                                cellWidth, cellDepth, placement.position.x,
+                                placement.position.z, height, &normal) &&
+                                (height != placement.position.y || normal != placement.normal))
+                            {
+                                placement.position.y = height;
+                                placement.normal = normal;
+                                placementsChanged = true;
+                            }
+                        }
+                        if (placementsChanged) objects->MarkConfigurationDirty();
+                    }
+    }
     return changed;
 }
 

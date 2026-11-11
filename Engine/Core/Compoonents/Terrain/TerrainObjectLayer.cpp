@@ -37,14 +37,51 @@ float TerrainObjectLayer::GetShadowFadeWidth() const
         0.f, std::max(0.f, shadowDistance));
 }
 
+ObjectLodProfileData TerrainObjectLayer::GetObjectLodProfile(
+    const std::string& asset) const
+{
+    ObjectLodProfileData profile;
+    if (Owner)
+        for (const auto* component : Owner->Components)
+            if (const auto* provider = dynamic_cast<const ObjectLodProvider*>(component))
+                if (const auto profiles = provider->GetObjectLodProfiles();
+                    profiles.count(asset))
+                {
+                    profile = profiles.at(asset);
+                    break;
+                }
+
+    if (const auto found = objectLods.find(asset); found != objectLods.end())
+    {
+        const auto& authored = found->second;
+        if (!authored.meshes.empty()) profile.meshes = authored.meshes;
+        if (!authored.shadowMeshes.empty()) profile.shadowMeshes = authored.shadowMeshes;
+        if (!authored.distances.empty()) profile.distances = authored.distances;
+        // Layer-level LOD selection remains the compatibility fallback. A
+        // provider can opt in to screen-size selection and tune its thresholds.
+        if (authored.screenSizeSelection || authored.distanceOverride ||
+            !authored.screenThresholdsPixels.empty())
+        {
+            profile.screenSizeSelection = authored.screenSizeSelection;
+            profile.distanceOverride = authored.distanceOverride;
+            if (!authored.screenThresholdsPixels.empty())
+                profile.screenThresholdsPixels = authored.screenThresholdsPixels;
+            profile.hysteresis = authored.hysteresis;
+        }
+        if (authored.shadowDistance > 0.f)
+            profile.shadowDistance = authored.shadowDistance;
+    }
+    return profile;
+}
+
 std::map<std::string, std::vector<std::string>> TerrainObjectLayer::GetDefinedObjectLods() const
 {
     std::map<std::string, std::vector<std::string>> definitions;
     if (Owner)
         for (const auto* component : Owner->Components)
-            if (const auto* provider = dynamic_cast<const TerrainObjectLodProvider*>(component))
-                for (const auto& [asset, meshes] : provider->GetTerrainObjectLodMeshes())
-                    definitions[asset] = meshes;
+            if (const auto* provider = dynamic_cast<const ObjectLodProvider*>(component))
+                for (const auto& [asset, profile] : provider->GetObjectLodProfiles())
+                    definitions[asset] = profile.meshes;
     for (const auto& placement : placements)
         if (!definitions.count(placement.asset)) definitions[placement.asset] = {placement.asset};
     for (const auto& [asset, settings] : objectLods)
@@ -63,9 +100,7 @@ std::map<std::string, std::vector<std::string>> TerrainObjectLayer::GetDefinedOb
 std::vector<std::string> TerrainObjectLayer::GetObjectShadowLodMeshes(
     const std::string& asset, const std::vector<std::string>& visibleMeshes) const
 {
-    std::vector<std::string> meshes;
-    if (const auto found = objectLods.find(asset); found != objectLods.end())
-        meshes = found->second.shadowMeshes;
+    std::vector<std::string> meshes = GetObjectLodProfile(asset).shadowMeshes;
     meshes.erase(std::remove(meshes.begin(), meshes.end(), std::string{}),
         meshes.end());
     if (meshes.size() > MaximumObjectLods) meshes.resize(MaximumObjectLods);
@@ -77,13 +112,13 @@ std::vector<float> TerrainObjectLayer::GetObjectLodDistances(const std::string& 
 {
     const size_t count = std::min(lodCount, MaximumObjectLods);
     std::vector<float> result;
-    const auto found = objectLods.find(asset);
+    const auto authoredDistances = GetObjectLodProfile(asset).distances;
     const float maximum = std::isfinite(viewDistance) ? std::clamp(viewDistance, 1.f, 100000.f) : 18.f;
     for (size_t i = 1; i < count; ++i)
     {
         float distance = count == 3 ? (i == 1 ? lod1Distance : lod2Distance) : maximum * float(i) / float(count);
-        if (found != objectLods.end() && i <= found->second.distances.size())
-            distance = found->second.distances[i - 1];
+        if (i <= authoredDistances.size())
+            distance = authoredDistances[i - 1];
         if (!std::isfinite(distance)) distance = maximum * float(i) / float(count);
         result.push_back(std::clamp(distance, result.empty() ? 0.f : result.back(), maximum));
     }

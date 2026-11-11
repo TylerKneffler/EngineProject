@@ -74,6 +74,7 @@ Mesh::Mesh()
     SetTypeName(COMPONENT_TYPE_NAME(Mesh));
     RegisterField("file", m_filePath);
     RegisterField("foliageWindStrength",foliageWindStrength,"Foliage");
+    RegisterField("deformationBoundsPadding",deformationBoundsPadding,"Rendering");
     RegisterField("useLightProbes",useLightProbes,"Lighting");
     RegisterField("gpuLodSelection",gpuLodSelection,"LOD");
     RegisterField("gpuLod1Distance",gpuLod1Distance,"LOD");

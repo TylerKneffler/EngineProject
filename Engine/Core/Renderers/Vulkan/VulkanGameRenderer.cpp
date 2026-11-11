@@ -94,11 +94,11 @@ void VulkanGameRenderer::EndFrame()
     m_postProcess.BeginComposition(m_commandBuffer,
         m_core.GetCurrentFramebuffer(), extent.width, extent.height, m_clearColor);
     m_postProcess.EndComposition(m_commandBuffer);
-    const auto presentationStart = std::chrono::steady_clock::now();
     m_core.EndFrame();
     m_frameTelemetry.cpuPresentationMilliseconds =
-        std::chrono::duration<double, std::milli>(
-            std::chrono::steady_clock::now() - presentationStart).count();
+        m_core.GetLastPresentationMilliseconds();
+    m_frameTelemetry.cpuSubmissionMilliseconds =
+        m_core.GetLastQueueSubmissionMilliseconds();
     // DXGI's flip-model designation does not apply to Vulkan swap chains.
     m_frameTelemetry.flipModelSwapChain = false;
     m_commandBuffer = VK_NULL_HANDLE; m_renderPassActive = false;

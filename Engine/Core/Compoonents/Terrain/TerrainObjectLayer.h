@@ -7,15 +7,26 @@
 #include <vector>
 #include <map>
 #include "Core/Compoonents/Mesh/Mesh.h"
+#include "Core/Compoonents/Obj/ObjectLodProvider.h"
 
 namespace Engine::Components
 {
 // Implemented by terrain object renderers so the inspector uses their authored LODs.
-class TerrainObjectLodProvider
+// Compatibility bridge for existing terrain-authored providers. New
+// components should implement ObjectLodProvider directly.
+class TerrainObjectLodProvider : public ObjectLodProvider
 {
 public:
-    virtual ~TerrainObjectLodProvider() = default;
     virtual std::map<std::string, std::vector<std::string>> GetTerrainObjectLodMeshes() const = 0;
+    std::map<std::string, ObjectLodProfileData>
+        GetObjectLodProfiles() const override
+    {
+        std::map<std::string, ObjectLodProfileData> result;
+        for (auto& [asset, meshes] : GetTerrainObjectLodMeshes())
+            result.emplace(std::move(asset),
+                ObjectLodProfileData{std::move(meshes)});
+        return result;
+    }
 };
 // Place on a direct child of a Terrain cell. Positions are cell-local; the
 // owning TerrainManager saves this data when it streams the cell out.
@@ -67,16 +78,10 @@ public:
     int shadowLod = -1;
     std::vector<Placement> placements;
     static constexpr size_t MaximumObjectLods = 16;
-    struct ObjectLods
-    {
-        // Empty inherits the renderer's object definition; editing distances does not copy it.
-        std::vector<std::string> meshes;
-        // Optional dedicated shadow-only meshes. Empty uses visible meshes.
-        std::vector<std::string> shadowMeshes;
-        std::vector<float> distances;
-    };
+    using ObjectLods = ObjectLodProfileData;
     // Keyed by the placement's base asset. Resolved N-level chains use N-1 distances.
     std::map<std::string, ObjectLods> objectLods;
+    ObjectLodProfileData GetObjectLodProfile(const std::string& asset) const;
     std::map<std::string, std::vector<std::string>> GetDefinedObjectLods() const;
     std::vector<std::string> GetObjectShadowLodMeshes(
         const std::string& asset, const std::vector<std::string>& visibleMeshes) const;
@@ -104,7 +109,7 @@ public:
     void InstallPrepared(TerrainObjectLayer&& source);
     // Static prefab placements share source geometry/material definitions.
     // Derived render/physics objects are never saved into the authored layer.
-    void PreparePrefabInstances(IGraphicsProvider* provider);
+    void PreparePrefabInstances(IGraphicsProvider* provider, bool* uploadAvailable = nullptr);
     bool IsPrefabPreparationPending() const;
     const PrefabPrepareTimings& GetLastPrefabPrepareTimings() const
     { return m_lastPrefabPrepareTimings; }
@@ -116,6 +121,7 @@ private:
     const Placement* m_prefabCheckedData=nullptr;
     size_t m_prefabCheckedCount=0;
     bool m_hasPrefabPlacements=false;
+    bool m_prefabSourcePreparationPending=false;
     PrefabPrepareTimings m_lastPrefabPrepareTimings{};
     mutable PreparedTiles m_prepared;
     mutable uint64_t m_preparedRevision=UINT64_MAX,m_preparedSignature=0;

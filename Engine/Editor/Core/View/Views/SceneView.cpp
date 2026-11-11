@@ -135,6 +135,7 @@ void SceneView::SetScene(Engine::Scene::Scene* scene)
     CancelPrefabPreview();
     ScenePlacementAndPicking::ClearCaches();
     m_previousSelectedObject = nullptr;
+    m_terrainObjectDisplayLod = -1;
     // Gestures and model pins contain pointers into the previous graph.
     m_gizmos.ResetInteraction();
     const auto tool = m_toolbar.GetTransformTool();
@@ -1099,7 +1100,8 @@ void SceneView::Render3D(void* cmd)
         factory->SetCommandBuffer(cmd);
         auto ctx = factory->CreateContext();
         m_scene->Render(ctx.get(), m_aspect, nullptr, true,
-            GetWidth(), GetHeight());
+            GetWidth(), GetHeight(), false, nullptr,
+            m_terrainObjectDisplayLod);
     }
 }
 
@@ -1111,7 +1113,8 @@ void SceneView::RecordRenderCommands(Engine::Graphics::GraphicsCommandPacket& sh
     m_scene->UpdateEditorCameraFollow();
     m_scene->PrepareNativeUiLayout(m_aspect);
     m_scene->Render(&shadow, m_aspect, nullptr, false, GetWidth(), GetHeight(), true, packet);
-    m_scene->Render(&color, m_aspect, nullptr, true, GetWidth(), GetHeight(), false, packet);
+    m_scene->Render(&color, m_aspect, nullptr, true, GetWidth(), GetHeight(), false,
+        packet, m_terrainObjectDisplayLod);
 }
 
 void SceneView::RenderShadow3D(void* cmd)

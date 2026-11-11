@@ -7,6 +7,7 @@
 #include "Core/Compoonents/Sprite/Sprite.h"
 #include "Core/Compoonents/Terrain/TerrainObjectLayer.h"
 #include "Core/Compoonents/Path/SplineGeometry.h"
+#include "Core/Compoonents/Path/SplineInstancePlacementProvider.h"
 #include "Core/Compoonents/Physics/SpatialManipulator.h"
 #include "Core/Graphics/GraphicsCommandPacket.h"
 #include "Core/Graphics/IGraphicsBuffer.h"
@@ -31,6 +32,8 @@ std::shared_ptr<const Scene::NativeRenderPacket> Scene::TakeNativeRenderPacket()
     auto packet = std::make_shared<NativeRenderPacket>();
     packet->grassCapsules = m_frameGrassCapsules;
     packet->items = std::move(m_frameRenderItems);
+    packet->renderSlotItemOffsets = m_frameItemsByRenderSlotOffsets;
+    packet->renderSlotItems = m_frameItemsByRenderSlot;
     packet->meshBuffers.reserve(packet->items.size() * 2);
     for (const FrameRenderItem& item : packet->items)
     {
@@ -57,11 +60,22 @@ void Scene::SelectNativeFrameBuffers()
         !m_graphicsProvider->GetContextFactory()) return;
     const uint32_t slotIndex = m_graphicsProvider->GetContextFactory()
         ->GetPreparedFrameSlot();
-    if (m_nativeFrameBuffers.size() <= slotIndex)
-        m_nativeFrameBuffers.resize(static_cast<size_t>(slotIndex) + 1u);
-    if (!m_nativeFrameBuffers[slotIndex])
-        m_nativeFrameBuffers[slotIndex] = std::make_unique<NativeFrameBuffers>();
-    auto* selected = m_nativeFrameBuffers[slotIndex].get();
+    if (m_frameUploadContexts.size() <= slotIndex)
+        m_frameUploadContexts.resize(static_cast<size_t>(slotIndex) + 1u);
+    if (!m_frameUploadContexts[slotIndex])
+        m_frameUploadContexts[slotIndex] = std::make_unique<FrameUploadContext>();
+    auto& frame = *m_frameUploadContexts[slotIndex];
+    if (frame.serial != m_graphicsProvider->GetContextFactory()->GetPreparedFrameSerial())
+    {
+        frame.serial = m_graphicsProvider->GetContextFactory()->GetPreparedFrameSerial();
+        frame.uploadedBytes = 0;
+        frame.bufferAllocations = 0;
+        frame.allocatorGrowths = 0;
+        frame.renderPasses.cursor = 0;
+        frame.renderPasses.serial = frame.serial;
+    }
+    m_activeFrameUploadContext = &frame;
+    auto* selected = &frame.native;
     if (selected == m_activeNativeFrameBuffers) return;
     if (!m_activeNativeFrameBuffers)
     {
@@ -103,6 +117,7 @@ void Scene::SelectNativeFrameBuffers()
         mapped = destination ? destination->Map() : nullptr;
         if (!mapped)
             throw std::runtime_error("Failed to allocate native frame upload buffer");
+        ++frame.bufferAllocations;
     };
     createLike(previous->grid, m_gridConstantBuffer, m_gridCBMapped);
     createLike(previous->skybox, m_skyboxConstantBuffer, m_skyboxCBMapped);
@@ -195,10 +210,13 @@ void Scene::PrepareRenderFrame(bool publishSnapshot)
     size_t prefabVisited = 0;
     const size_t prefabCount = objectLayers.size();
     const size_t prefabStart = prefabCount ? m_prefabPreparationCursor % prefabCount : 0;
+    // Share the upload allowance across cells. The elapsed-time budget below
+    // cannot preempt a buffer creation once it has started.
+    bool prefabUploadAvailable = true;
     for (; prefabVisited < prefabCount; ++prefabVisited)
     {
         auto* layer = objectLayers[(prefabStart + prefabVisited) % prefabCount];
-        layer->PreparePrefabInstances(m_graphicsProvider);
+        layer->PreparePrefabInstances(m_graphicsProvider, &prefabUploadAvailable);
         const auto& prefabTimings=layer->GetLastPrefabPrepareTimings();
         m_lastPrepareTimings.prefabSignatureMs+=prefabTimings.placementSignatureMs;
         m_lastPrepareTimings.prefabSourceProbeMs+=prefabTimings.sourceProbeMs;
@@ -210,6 +228,8 @@ void Scene::PrepareRenderFrame(bool publishSnapshot)
     const auto afterPrefabInstances=PrepareClock::now();
     const auto splineGeometry=GetComponents<SplineGeometry>();
     for (auto* geometry:splineGeometry) geometry->PrepareGeometry(m_graphicsProvider);
+    const auto splineInstanceProviders=GetComponents<SplineInstancePlacementProvider>();
+    for (auto* provider:splineInstanceProviders) provider->PreparePlacements();
     CommitPendingObjectChanges();
     const auto afterPrefabCommit=PrepareClock::now();
     ProcessGraphicsPreparation(m_graphicsProvider);

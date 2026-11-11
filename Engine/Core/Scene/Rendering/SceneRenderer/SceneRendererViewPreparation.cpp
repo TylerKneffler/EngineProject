@@ -155,7 +155,8 @@ bool SceneRendererViewPreparation::ResolveCameraUsesSourceWarpChart(
 void SceneRendererViewPreparation::PrepareVisibleItems(
     const Scene& scene,
     const std::vector<Scene::FrameRenderItem>& frameRenderItems,
-    const std::vector<uint8_t>& spatialVisible,
+    const std::vector<uint32_t>& candidateFrameItems,
+    bool useSpatialCandidates,
     const glm::vec3& cameraPosition,
     bool shadowOnly,
     bool includeEditorVisuals,
@@ -169,48 +170,47 @@ void SceneRendererViewPreparation::PrepareVisibleItems(
     const std::function<bool(const Scene::FrameRenderItem&)>& useSourceChartMesh,
     const std::function<glm::mat4(const Scene::FrameRenderItem&)>& sourceChartWorld,
     std::vector<Scene::ViewRenderItem>& renderObjects,
-    std::vector<uint8_t>* accepted,
     std::vector<uint8_t>* terrainRejected,
     std::vector<uint8_t>* solidRejected)
 {
+    const size_t candidateCount = useSpatialCandidates
+        ? candidateFrameItems.size() : frameRenderItems.size();
     renderObjects.clear();
-    renderObjects.reserve(frameRenderItems.size());
+    renderObjects.reserve(candidateCount);
+    std::vector<Scene::ViewRenderItem> classified(candidateCount);
+    std::vector<uint8_t> localAccepted(candidateCount, 0),
+        localTerrainRejected(candidateCount, 0),
+        localSolidRejected(candidateCount, 0);
 
-    const size_t itemCount = frameRenderItems.size();
-    std::vector<Scene::ViewRenderItem> classified(itemCount);
-    std::vector<uint8_t> localAccepted(itemCount, 0),
-        localTerrainRejected(itemCount, 0),
-        localSolidRejected(itemCount, 0);
-
-    Engine::Rendering::RenderJobs::Get().For(itemCount,
+    Engine::Rendering::RenderJobs::Get().For(candidateCount,
         cameraUsesSourceWarpChart ? SIZE_MAX : 128,
-        [&](size_t index)
+        [&](size_t candidateIndex)
         {
+            const size_t index = useSpatialCandidates
+                ? candidateFrameItems[candidateIndex] : candidateIndex;
             const auto& item = frameRenderItems[index];
             if (shadowOnly && (!item.mesh || !item.castsShadows)) return;
-            if (!spatialVisible.empty() && !spatialVisible[item.objectSlot]) return;
             if (item.belongsToPreview && !includeEditorVisuals) return;
             const auto world = useSourceChartMesh(item) ? sourceChartWorld(item) : item.world;
-            if (!shadowOnly && !hasPortalViews && spatialVisible.empty() && outsideViewFrustum(item, world)) return;
-            if (hiddenByTerrain(item)) { localTerrainRejected[index] = 1; return; }
-            if (hiddenBySolid(item)) { localSolidRejected[index] = 1; return; }
+            if (!shadowOnly && !hasPortalViews && !useSpatialCandidates &&
+                outsideViewFrustum(item, world)) return;
+            if (hiddenByTerrain(item)) { localTerrainRejected[candidateIndex] = 1; return; }
+            if (hiddenBySolid(item)) { localSolidRejected[candidateIndex] = 1; return; }
             const auto delta = glm::vec3(world[3]) - cameraPosition;
-            classified[index] = { &item, glm::dot(delta, delta),
+            classified[candidateIndex] = { &item, glm::dot(delta, delta),
                 shadowOnly ? 0.f : nearestLightingDistanceSquared(item, world),
                 world[3].z, item.sortingLayer,
                 item.blended && !(includeEditorVisuals && item.mesh == scene.m_editorWeightPaintMesh) };
-            localAccepted[index] = 1;
+            localAccepted[candidateIndex] = 1;
         });
 
-    if (accepted) accepted->assign(itemCount, 0);
-    if (terrainRejected) terrainRejected->assign(itemCount, 0);
-    if (solidRejected) solidRejected->assign(itemCount, 0);
+    if (terrainRejected) terrainRejected->assign(candidateCount, 0);
+    if (solidRejected) solidRejected->assign(candidateCount, 0);
 
     for (size_t index = 0; index < classified.size(); ++index)
     {
         if (localAccepted[index])
             renderObjects.push_back(classified[index]);
-        if (accepted) (*accepted)[index] = localAccepted[index];
         if (terrainRejected) (*terrainRejected)[index] = localTerrainRejected[index];
         if (solidRejected) (*solidRejected)[index] = localSolidRejected[index];
     }
@@ -219,7 +219,8 @@ void SceneRendererViewPreparation::PrepareVisibleItems(
 SceneRendererViewPreparation::PreparedVisibility SceneRendererViewPreparation::PrepareVisibleSet(
     const Scene& scene,
     const std::vector<Scene::FrameRenderItem>& frameRenderItems,
-    const std::vector<uint8_t>& spatialVisible,
+    const std::vector<uint32_t>& candidateFrameItems,
+    bool useSpatialCandidates,
     const glm::vec3& cameraPosition,
     bool shadowOnly,
     bool includeEditorVisuals,
@@ -234,14 +235,16 @@ SceneRendererViewPreparation::PreparedVisibility SceneRendererViewPreparation::P
     const std::function<glm::mat4(const Scene::FrameRenderItem&)>& sourceChartWorld)
 {
     PreparedVisibility result{};
-    result.accepted.assign(frameRenderItems.size(), 0u);
-    result.terrainRejected.assign(frameRenderItems.size(), 0u);
-    result.solidRejected.assign(frameRenderItems.size(), 0u);
+    const size_t candidateCount = useSpatialCandidates
+        ? candidateFrameItems.size() : frameRenderItems.size();
+    result.terrainRejected.reserve(candidateCount);
+    result.solidRejected.reserve(candidateCount);
 
     PrepareVisibleItems(
         scene,
         frameRenderItems,
-        spatialVisible,
+        candidateFrameItems,
+        useSpatialCandidates,
         cameraPosition,
         shadowOnly,
         includeEditorVisuals,
@@ -255,7 +258,6 @@ SceneRendererViewPreparation::PreparedVisibility SceneRendererViewPreparation::P
         useSourceChartMesh,
         sourceChartWorld,
         result.renderObjects,
-        &result.accepted,
         &result.terrainRejected,
         &result.solidRejected);
 

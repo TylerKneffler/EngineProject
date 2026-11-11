@@ -42,6 +42,18 @@ void* D3D11GraphicsBuffer::Map()
     return m_shadowData.data();
 }
 
+bool D3D11GraphicsBuffer::IsReadbackReady() const
+{
+    if (m_access != AccessMode::Readback || !m_readbackFence) return false;
+    Microsoft::WRL::ComPtr<ID3D11Device> device;
+    m_buffer->GetDevice(&device);
+    if (!device) return false;
+    Microsoft::WRL::ComPtr<ID3D11DeviceContext> context;
+    device->GetImmediateContext(&context);
+    return context && context->GetData(m_readbackFence.Get(),nullptr,0,
+        D3D11_ASYNC_GETDATA_DONOTFLUSH)==S_OK;
+}
+
 void D3D11GraphicsBuffer::Unmap()
 {
     if (m_access == AccessMode::Readback)

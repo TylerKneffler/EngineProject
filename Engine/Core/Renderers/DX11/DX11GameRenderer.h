@@ -23,6 +23,8 @@ public:
     void Resize(uint32_t width, uint32_t height) override;
     uint32_t GetWidth() const override { return m_width; }
     uint32_t GetHeight() const override { return m_height; }
+    const char* GetBackendName() const override { return "dx11"; }
+    std::string GetGraphicsDeviceName() const override;
     void Clear(float r, float g, float b, float a = 1.0f) override;
     Engine::Graphics::IGraphicsProvider* GetGraphicsProvider() override { return m_graphicsProvider.get(); }
     void WaitIdle() override;

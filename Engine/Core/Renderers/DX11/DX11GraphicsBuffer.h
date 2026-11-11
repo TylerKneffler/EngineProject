@@ -31,6 +31,9 @@ public:
     }
     void* Map() override;
     void Unmap() override;
+    bool IsReadbackReady() const override;
+    void SetReadbackFence(Microsoft::WRL::ComPtr<ID3D11Query> query)
+    { m_readbackFence=std::move(query); }
     void FlushMappedWrites(uint64_t offset = 0,
         uint64_t size = UINT64_MAX) override;
     void* GetNativeHandle() const override { return m_buffer.Get(); }
@@ -48,6 +51,7 @@ private:
     uint32_t m_elementStride = 0;
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_srv;
     Microsoft::WRL::ComPtr<ID3D11UnorderedAccessView> m_uav;
+    Microsoft::WRL::ComPtr<ID3D11Query> m_readbackFence;
     Microsoft::WRL::ComPtr<ID3D11DeviceContext> m_readbackContext;
     std::vector<uint8_t> m_shadowData;
     std::shared_ptr<Engine::Graphics::NativeSubmissionProbe> m_native;

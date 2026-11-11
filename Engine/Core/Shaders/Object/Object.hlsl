@@ -1057,9 +1057,10 @@ void ApplyGeometryFade(ObjectData data, float3 worldPosition)
     if (data.geometryFade.w >= 2.0)
     {
         const float distance=length((data.geometryFade.w>=4.0 ? worldPosition:mul(data.world,float4(0,0,0,1)).xyz)-data.viewPositionAlphaCutoff.xyz);
-        const float width=max(.001,min(.5,(data.geometryFade.z-data.geometryFade.y)*.25));
-        const float first=smoothstep(data.geometryFade.y-width,data.geometryFade.y+width,distance);
-        const float second=smoothstep(data.geometryFade.z-width,data.geometryFade.z+width,distance);
+        const float widthFraction=data.geometryFade.w>=4.0 ? .25 : data.geometryFade.x;
+        const float width=max(0.0,min(.5,(data.geometryFade.z-data.geometryFade.y)*widthFraction));
+        const float first=width>0.0 ? smoothstep(data.geometryFade.y-width,data.geometryFade.y+width,distance) : step(data.geometryFade.y,distance);
+        const float second=width>0.0 ? smoothstep(data.geometryFade.z-width,data.geometryFade.z+width,distance) : step(data.geometryFade.z,distance);
         const uint lod=data.geometryFade.w>=4.0 ? (uint)data.geometryFade.x:(draw.drawFlags >> 21u) & 3u;
         const float visibility=saturate(data.geometryFade.w-2.0);
         if(lod==0) data.geometryFade=float4(0,(1-first)*visibility,0,1);

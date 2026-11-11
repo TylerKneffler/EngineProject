@@ -4,6 +4,7 @@
 #include "Core/Compoonents/SpatialUpdate.h"
 #include "Core/PropertyMacros.h"
 #include "Core/Compoonents/Mesh/Mesh.h"
+#include "Core/Compoonents/Mesh/MeshInstanceLayerData.h"
 #include "Core/Compoonents/Terrain/TerrainObjectLayer.h"
 #include "Core/Rendering/GrassPerformance.h"
 #include <chrono>
@@ -25,7 +26,7 @@ namespace Engine::Scene { class Scene; }
 
 // Deterministic tiles sharing species geometry. Only compact placement records
 // are prepared on the CPU; all blade vertex transforms run on the GPU.
-class GrassField final : public Engine::Core::Script, public Engine::Components::SpatialUpdate, public Engine::Components::TerrainObjectLodProvider
+class GrassField final : public Engine::Core::Script, public Engine::Components::SpatialUpdate, public Engine::Components::ObjectLodProvider
 {
 public:
     GrassField();
@@ -81,7 +82,8 @@ public:
     PROPERTY(Inspector, EditAnywhere, Category = "Grass | LOD", ClampMin = "0")
     float distanceFadeWidth = 2.f;
 
-    std::map<std::string, std::vector<std::string>> GetTerrainObjectLodMeshes() const override;
+    std::map<std::string, Engine::Components::ObjectLodProfileData>
+        GetObjectLodProfiles() const override;
     void Start() override;
     void Update() override;
     bool RequiresUpdate() const override { return false; }
@@ -121,7 +123,7 @@ private:
         uint64_t signature = 0;
         std::vector<Placement> placements;
         size_t placement = 0;
-        std::shared_ptr<Engine::Components::Mesh::InstanceData> instances;
+        Engine::Components::MeshInstanceLayerData instanceLayer;
         uint32_t shortCount = 0,totalCount=0;
         bool prepared=false;
         glm::vec3 minimum{0}, maximum{0};

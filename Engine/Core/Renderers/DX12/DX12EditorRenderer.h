@@ -59,6 +59,7 @@ public:
     void Resize(uint32_t width, uint32_t height) override;
     uint32_t GetWidth() const override { return m_width; }
     const char* GetBackendName() const override { return "dx12"; }
+    std::string GetGraphicsDeviceName() const override { return m_actualGraphicsDeviceName; }
     uint32_t GetHeight() const override { return m_height; }
     void Clear(float r, float g, float b, float a = 1.0f) override;
     Engine::Graphics::IGraphicsProvider* GetGraphicsProvider() override;
@@ -75,6 +76,8 @@ public:
     bool IsDirty() const override { return m_dirty; }
     void SetUiRenderHooks(EditorUiRenderHooks hooks) override { m_uiHooks = std::move(hooks); }
     void RenderIfNeeded(std::function<void()> drawFn = nullptr) override;
+    double GetLastPresentationMilliseconds() const override { return m_lastPresentMilliseconds; }
+    double GetLastQueueSubmissionMilliseconds() const override { return m_lastQueueSubmissionMilliseconds; }
     std::pair<std::pair<void*, void*>, uint32_t> AllocateSrvSlot() override;
     void FreeSrvSlot(uint32_t slotIndex) override;
     bool CanAllocateSrvSlot() const override;
@@ -161,8 +164,11 @@ private:
 
     // Initialized true so the very first call to RenderIfNeeded always draws.
     uint64_t m_submittedFrameCount = 0;
+    double m_lastPresentMilliseconds = 0.0;
+    double m_lastQueueSubmissionMilliseconds = 0.0;
     bool m_dirty = true;
     std::string m_graphicsDevice = "Auto";
+    std::string m_actualGraphicsDeviceName = "unknown";
     bool m_tearingSupported = false;
 
     // Graphics provider for shader compilation, buffer creation, pipeline building

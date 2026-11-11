@@ -1,6 +1,7 @@
 #include "ViewFactory.h"
 #include "Views/PerformanceRecording.h"
 #include <stdexcept>
+#include <cstdlib>
 
 namespace Engine::Editor
 {
@@ -24,6 +25,16 @@ ViewFactory::ViewFactory(::Engine::Renderers::IEditorRenderer*    renderer,
     , m_settings(settings)
     , m_performanceRecording(std::make_shared<PerformanceRecording>())
 {
+    if (const char* path = std::getenv("ENGINE_EDITOR_PERFORMANCE_LOG");
+        path && *path)
+    {
+        const std::filesystem::path output(path);
+        if (!output.parent_path().empty())
+            std::filesystem::create_directories(output.parent_path());
+        m_performanceRecording->Start(output);
+        m_performanceRecording->Event("benchmark", "info",
+            "Automated editor benchmark performance recording.");
+    }
     OutputDebugStringA("[ViewFactory] Constructor called\n");
     OutputDebugStringA("[ViewFactory] Constructor completed\n");
 }

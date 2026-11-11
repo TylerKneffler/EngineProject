@@ -19,6 +19,7 @@
 #include "Core/Renderers/DX11/DX11EditorRenderer.h"
 #include "Core/Renderers/RendererFactory.h"
 #include "Core/Rendering/RenderJobs.h"
+#include "Core/Rendering/RenderFramePlan.h"
 #include "Core/View/View.h"
 #include "Engine/Editor/State/EditorState.h"
 #include "Engine/Editor/GameBuildManager.h"
@@ -155,10 +156,18 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
         EnvironmentVariable("ENGINE_EDITOR_AUTO_PROFILE_MMD").has_value();
     if (standardBenchmark)
     {
-        projectSettings.viewportWidth = 1920;
-        projectSettings.viewportHeight = 1080;
+        const auto benchmarkWidth = EnvironmentVariable("ENGINE_EDITOR_BENCHMARK_WIDTH");
+        const auto benchmarkHeight = EnvironmentVariable("ENGINE_EDITOR_BENCHMARK_HEIGHT");
+        const uint32_t width = benchmarkWidth
+            ? static_cast<uint32_t>(std::clamp(std::atoi(benchmarkWidth->c_str()), 320, 7680))
+            : 1920u;
+        const uint32_t height = benchmarkHeight
+            ? static_cast<uint32_t>(std::clamp(std::atoi(benchmarkHeight->c_str()), 200, 4320))
+            : 1080u;
+        projectSettings.viewportWidth = width;
+        projectSettings.viewportHeight = height;
         projectSettings.aspectRatioMode = Engine::Model::ProjectSettings::AspectRatioMode::Locked;
-        projectSettings.gameAspectRatio = 1920.f / 1080.f;
+        projectSettings.gameAspectRatio = static_cast<float>(width) / height;
     }
 
     const auto startupBackground =
@@ -227,14 +236,28 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
     });
     editorState->InitializeUiState();
     if (standardBenchmark)
+    {
+        const auto benchmarkWidth = EnvironmentVariable("ENGINE_EDITOR_BENCHMARK_WIDTH");
+        const auto benchmarkHeight = EnvironmentVariable("ENGINE_EDITOR_BENCHMARK_HEIGHT");
+        const uint32_t width = benchmarkWidth
+            ? static_cast<uint32_t>(std::clamp(std::atoi(benchmarkWidth->c_str()), 320, 7680))
+            : 1920u;
+        const uint32_t height = benchmarkHeight
+            ? static_cast<uint32_t>(std::clamp(std::atoi(benchmarkHeight->c_str()), 200, 4320))
+            : 1080u;
         for (const auto& panel : editorState->GetPanels())
             if (auto* view = dynamic_cast<Engine::Editor::View*>(panel.get()))
-                view->SetFixedRenderSize(renderer->GetNativeDeviceHandle(), 1920, 1080);
-    if (EnvironmentVariable("ENGINE_EDITOR_AUTO_PROFILE_GAME_VIEW").has_value())
+                view->SetFixedRenderSize(renderer->GetNativeDeviceHandle(), width, height);
+    }
+    if (const auto benchmarkViews = EnvironmentVariable("ENGINE_EDITOR_AUTO_PROFILE_GAME_VIEW");
+        benchmarkViews.has_value())
         for (const auto& panel : editorState->GetPanels())
         {
-            if (auto* sceneView = dynamic_cast<Engine::Editor::SceneView*>(panel.get()))
-                sceneView->SetOpen(false);
+            if (*benchmarkViews == "scene")
+            {
+                if (auto* sceneView = dynamic_cast<Engine::Editor::SceneView*>(panel.get()))
+                    sceneView->SetOpen(false);
+            }
             if (auto* gameView = dynamic_cast<Engine::Editor::GameView*>(panel.get()))
                 gameView->SetOpen(true);
         }
@@ -753,15 +776,11 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
                 if (!pipelineViewsMatch()) usePlayPipeline = false;
             }
             if (usePlayPipeline) scene->SetDeferredGraphicsRetirement(true);
-            renderer->Clear(projectSettings.clearColor.r, projectSettings.clearColor.g, projectSettings.clearColor.b);
-            const auto afterClear = Clock::now();
-            clearMilliseconds = std::chrono::duration<double, std::milli>(
-                afterClear - drawBegin).count();
-
             // Prepare render data for every scene that will render this frame.
             // Prefab edit opens its own scene-backed viewport, so relying on
             // the main scene alone can leave prefab views with stale/missing
             // draw state.
+            const auto scenePrepareStart = Clock::now();
             std::unordered_set<Engine::Scene::Scene*> preparedScenes;
             for (auto& panel : editorState->GetPanels())
             {
@@ -839,34 +858,69 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
                 recordedGrass = scene->GetGrassPerformance();
                 playPipeline->Begin(*scene, std::max(dt, 0.f), std::move(input));
             }
-            if (auto* provider = renderer->GetGraphicsProvider())
-                if (auto* factory = provider->GetContextFactory())
-                {
-                    factory->SetCommandBuffer(renderer->GetCurrentCommandBuffer());
-                    auto computeContext = factory->CreateContext();
-                    if (usePlayPipeline)
-                    {
-                        if (computeContext) computeCommands->Replay(*computeContext);
-                    }
-                    else for (Engine::Scene::Scene* prepared : preparedScenes)
-                        prepared->RecordGpuParticleSimulation(computeContext.get());
-                }
             prepareMilliseconds = std::chrono::duration<double, std::milli>(
                 afterPrepare - afterSceneUpdate).count();
             scenePrepareMilliseconds = std::chrono::duration<double, std::milli>(
-                afterPrepare - afterClear).count();
+                afterPrepare - scenePrepareStart).count();
 
-            // Render 3D panels
-            for (auto& panel : editorState->GetPanels())
+            using FramePlan = Engine::Rendering::RenderFramePlan;
+            constexpr FramePlan::ResourceId EditorSceneData = 1;
+            constexpr FramePlan::ResourceId EditorParticleState = 2;
+            constexpr FramePlan::ResourceId MainWindowColor = 3;
+            constexpr FramePlan::ResourceId FirstViewResource = 16;
+            FramePlan framePlan;
+            framePlan.AddPass("Clear editor window",
+                {{MainWindowColor, FramePlan::Access::Write}}, [&]()
             {
-                if (!panel) continue;
-                if (!panel->NeedsRender() || !panel->IsOpen()) continue;
-                Engine::Editor::View* view = dynamic_cast<Engine::Editor::View*>(panel.get());
-                if (!view || !view->IsRenderVisible()) continue;
-                if (sizeDx11ViewsToPanels && !uiDrawn)
-                    view->ApplyRequestedRenderSize(renderer->GetNativeDeviceHandle());
-                renderedViewPixels += static_cast<uint64_t>(view->GetWidth()) *
-                    view->GetHeight();
+                const auto started = Clock::now();
+                renderer->Clear(projectSettings.clearColor.r, projectSettings.clearColor.g,
+                    projectSettings.clearColor.b);
+                clearMilliseconds = std::chrono::duration<double, std::milli>(
+                    Clock::now() - started).count();
+            });
+            framePlan.AddPass("Particle simulation",
+                {{EditorSceneData, FramePlan::Access::Read},
+                 {EditorParticleState, FramePlan::Access::ReadWrite}}, [&]()
+            {
+                if (auto* provider = renderer->GetGraphicsProvider())
+                    if (auto* factory = provider->GetContextFactory())
+                    {
+                        factory->SetCommandBuffer(renderer->GetCurrentCommandBuffer());
+                        auto computeContext = factory->CreateContext();
+                        if (usePlayPipeline)
+                        {
+                            if (computeContext) computeCommands->Replay(*computeContext);
+                        }
+                        else for (Engine::Scene::Scene* prepared : preparedScenes)
+                            prepared->RecordGpuParticleSimulation(computeContext.get());
+                    }
+            });
+
+            std::vector<FramePlan::ResourceUse> viewUses{
+                {EditorSceneData, FramePlan::Access::Read},
+                {EditorParticleState, FramePlan::Access::Read},
+                {MainWindowColor, FramePlan::Access::ReadWrite}};
+            FramePlan::ResourceId nextViewResource = FirstViewResource;
+            for (auto& panel : editorState->GetPanels())
+                if (panel && panel->NeedsRender() && panel->IsOpen())
+                    if (auto* view = dynamic_cast<Engine::Editor::View*>(panel.get());
+                        view && view->IsRenderVisible())
+                    {
+                        viewUses.push_back({nextViewResource++, FramePlan::Access::Write});
+                        viewUses.push_back({nextViewResource++, FramePlan::Access::Write});
+                    }
+            framePlan.AddPass("Editor scene and game views", std::move(viewUses), [&]()
+            {
+                for (auto& panel : editorState->GetPanels())
+                {
+                    if (!panel) continue;
+                    if (!panel->NeedsRender() || !panel->IsOpen()) continue;
+                    Engine::Editor::View* view = dynamic_cast<Engine::Editor::View*>(panel.get());
+                    if (!view || !view->IsRenderVisible()) continue;
+                    if (sizeDx11ViewsToPanels && !uiDrawn)
+                        view->ApplyRequestedRenderSize(renderer->GetNativeDeviceHandle());
+                    renderedViewPixels += static_cast<uint64_t>(view->GetWidth()) *
+                        view->GetHeight();
                 
                 void* cmdList = renderer->GetCurrentCommandBuffer();
                 void* rtvHandle = renderer->GetCurrentRenderTargetHandle();
@@ -886,7 +940,7 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
                     if (context) commands.Replay(*context);
                 };
                 const auto viewBegin = Clock::now();
-                view->Render(cmdList, rtvHandle,
+                    view->Render(cmdList, rtvHandle,
                     [&, view](void* cmd)
                     {
                         const auto begin = Clock::now();
@@ -929,10 +983,17 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
                         submittedShadowDraws += panelScene->GetShadowDebugSnapshot()
                             .submittedCasterDrawCount;
                 }
-            }
+                }
+            });
 
             // No live scene reads are allowed once simulation starts.
-            if (!uiDrawn) drawEditorUi();
+            framePlan.AddPass("Build editor UI", {}, [&]()
+            {
+                if (!uiDrawn) drawEditorUi();
+            });
+            framePlan.AddRendererPass("Editor UI overlay",
+                {{MainWindowColor, FramePlan::Access::ReadWrite}});
+            framePlan.Execute();
         });
         submittingEditorFrame = false;
         editorState->ReleaseRetiredAnimationDocuments();
@@ -1061,6 +1122,7 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
             sample.afterSceneUpdate = afterSceneUpdate;
             sample.afterRender = afterRender;
             sample.afterPendingLoad = afterPendingLoad;
+            sample.scenePath = editorState->GetCurrentScenePath();
             sample.playPipeline = usePlayPipeline;
             sample.uiCpuMilliseconds = uiCpuMilliseconds;
             for (const auto& panel : editorState->GetPanels())

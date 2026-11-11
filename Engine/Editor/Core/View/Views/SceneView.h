@@ -84,6 +84,9 @@ public:
     void DrawPoseToolbar(const std::function<bool(float)>& next,
         bool animationEditor = false, bool inlineOptions = false);
     void DrawTerrainToolbar(const std::function<bool(float)>& next);
+    int GetTerrainObjectDisplayLod() const { return m_terrainObjectDisplayLod; }
+    void SetTerrainObjectDisplayLod(int lod)
+    { m_terrainObjectDisplayLod = std::clamp(lod, -1, 15); }
     bool UseGlobalToolbar = false;
     bool UseGlobalBoneVisibility = true;
     void SetDocumentPath(std::string path) { m_documentPath = std::move(path); }
@@ -147,6 +150,7 @@ private:
     bool m_focusOnNextDraw = false;
     SceneEditMode m_editMode = SceneEditMode::Object;
     int m_terrainBrush = 0;
+    int m_terrainObjectDisplayLod = -1;
     int m_terrainLayer = 0;
     float m_terrainRadius = 3.f;
     float m_terrainStrength = .25f;

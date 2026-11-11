@@ -111,6 +111,16 @@ void ScenePortalRendering::Render(ScenePortalRenderingContext& input)
 
     auto portalViewJobs = Renderer::ScenePortalViewScheduling::Build(
         scene, portalPasses, view, proj, cam, cameraUsesSourceWarpChart);
+    auto& viewVisibility = scene.m_lastRenderCpuTimings.cameraVisibility;
+    for (size_t jobIndex=0; jobIndex<portalViewJobs.size(); ++jobIndex)
+    {
+        const auto* source=portalViewJobs[jobIndex].portal
+            ? portalViewJobs[jobIndex].portal->source : nullptr;
+        const uint64_t sourceId=static_cast<uint64_t>(reinterpret_cast<uintptr_t>(source));
+        const uint64_t identity=(sourceId>>4u) ^ (uint64_t(jobIndex+1u)<<48u) ^
+            (uint64_t(portalViewJobs[jobIndex].depth)<<40u);
+        viewVisibility.viewIdentities.push_back({identity,true,false});
+    }
     const auto apertureScissorInView = [&](const PortalStencilPass& pass,
         const glm::mat4& candidateView)
     {
@@ -372,6 +382,7 @@ void ScenePortalRendering::Render(ScenePortalRenderingContext& input)
         const uint64_t portalBytes = portalRecords * sizeof(ObjectGPUData);
         scene.m_portalObjectDataBuffer->FlushMappedWrites(0, portalBytes);
         scene.m_lastObjectDataUploadBytes += portalBytes;
+        scene.RecordFrameUploadBytes(portalBytes);
         // Aperture-mask draws are the first portal commands and also index
         // portal object data, so switch before issuing any portal work.
         context->SetStructuredBuffer(7, scene.m_portalObjectDataBuffer.get());
@@ -386,6 +397,7 @@ void ScenePortalRendering::Render(ScenePortalRenderingContext& input)
         const uint64_t debugBytes = debugRecords * sizeof(ObjectGPUData);
         scene.m_objectDataBuffer->FlushMappedWrites(0, debugBytes);
         scene.m_lastObjectDataUploadBytes += debugBytes;
+        scene.RecordFrameUploadBytes(debugBytes);
     }
 
     const auto drawConnectedSkybox = [&](const PortalViewJob& portalJob)
@@ -833,6 +845,7 @@ void ScenePortalRendering::Render(ScenePortalRenderingContext& input)
         const uint64_t restoredBytes = restoredRecords * sizeof(ObjectGPUData);
         scene.m_objectDataBuffer->FlushMappedWrites(0, restoredBytes);
         scene.m_lastObjectDataUploadBytes += restoredBytes;
+        scene.RecordFrameUploadBytes(restoredBytes);
         context->SetStructuredBuffer(6, scene.m_lightDataBuffer.get());
         context->SetStructuredBuffer(7, scene.m_objectDataBuffer.get());
         context->SetStructuredBuffer(8, scene.m_boneDataBuffer.get());

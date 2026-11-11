@@ -39,8 +39,12 @@ public:
     // Procedural rigid meshes can opt into cascade AABB culling. Skinned and
     // shader-deformed meshes need conservative bounds before enabling this.
     bool useBoundsForShadowCulling = false;
-    // Runtime classification; the project grass shadow budget supplements the layer budget.
-    bool grassShadowCaster = false;
+    // Optional local-space padding for vertex or procedural deformation.
+    // The wind-derived envelope remains as a conservative fallback.
+    PROPERTY(Inspector,EditAnywhere,Category="Rendering",ClampMin="0")
+    float deformationBoundsPadding = 0.f;
+    // Explicit opt-in to the project's grass caster distance budget.
+    bool usesGrassShadowBudget = false;
     // Transient provenance for transformed shared prefab geometry, whose source
     // buffer intentionally has no file path. Does not affect rendering policy.
     bool treeTimingGeometry = false;
@@ -59,13 +63,18 @@ public:
     float screenLod1Pixels = 300.f;
     float screenLod2Pixels = 80.f;
     float screenLodHysteresis = .1f;
-    // Independent resident prefab bands may use different materials (e.g. impostors).
-    // Transient; all bands share placement records and are selected on the GPU.
-    int prefabLodBand = -1;
-    int prefabShadowLod = -1; // transient fixed shadow band; -1 follows distance
-    bool prefabDedicatedShadowProxy = false;
-    bool prefabShadowProxyOnly = false;
-    glm::vec2 prefabLodDistances{0.f};
+    // Fraction of each distance LOD interval used for dither overlap.
+    float lodTransitionWidth = .25f;
+    // Runtime policy from an ObjectLodProvider. Zero distance disables range culling.
+    bool cullAfterLastLod = false;
+    float finalLodCullDistance = 0.f;
+    // Independent resident instance LOD bands may use different materials.
+    // Transient; bands share placement records and are selected on the GPU.
+    int instanceLodBand = -1;
+    int fixedShadowLodBand = -1; // transient fixed shadow band; -1 follows distance
+    bool dedicatedShadowProxy = false;
+    bool shadowProxyOnly = false;
+    glm::vec2 instanceLodDistances{0.f};
     PROPERTY(Inspector,EditAnywhere,Category="LOD")
     float gpuLod1Distance = 8.f;
     PROPERTY(Inspector,EditAnywhere,Category="LOD")
@@ -85,6 +94,8 @@ public:
     // bufferFactory: creates GPU vertex buffers (API-agnostic)
     void CreateBuffer(IGraphicsBufferFactory* bufferFactory,
         Engine::Rendering::PreparedMeshBuffer* prepared = nullptr);
+    void InstallPreparedStaticVertexBuffer(
+        std::shared_ptr<IGraphicsBuffer> buffer, IGraphicsBufferFactory* bufferFactory);
 
     // Get the underlying graphics buffer (API-agnostic)
     IGraphicsBuffer* GetGraphicsBuffer() const { return m_instanceSource ? m_instanceSource->GetGraphicsBuffer() : m_vertexBuffer.get(); }
@@ -280,10 +291,19 @@ public:
     const std::string& GetFilePath() const { return m_filePath; }
     void SetAuthoredFilePath(std::string path);
     bool HasBounds() const { return m_hasBounds; }
-    float GetFoliageWindPadding() const
-    { return 1.5f * std::max(0.f,m_boundsMax.y) * std::clamp(foliageWindStrength,0.f,1.f); }
-    glm::vec3 GetBoundsMin() const { return m_boundsMin-glm::vec3(GetFoliageWindPadding()); }
-    glm::vec3 GetBoundsMax() const { return m_boundsMax+glm::vec3(GetFoliageWindPadding()); }
+    // Conservative local-space envelope for vertex deformation. Bounds
+    // consumers use this value without depending on the deformation source.
+    float GetDeformationBoundsPadding() const
+    { return std::max(std::max(0.f,deformationBoundsPadding),
+        1.5f * std::max(0.f,m_boundsMax.y) * std::clamp(foliageWindStrength,0.f,1.f)); }
+    glm::vec3 GetBoundsMin() const { return m_boundsMin-glm::vec3(GetDeformationBoundsPadding()); }
+    glm::vec3 GetBoundsMax() const { return m_boundsMax+glm::vec3(GetDeformationBoundsPadding()); }
+    // Conservative local bounds for every currently resident runtime LOD.
+    // Returns false when any resident representation lacks bounds.
+    bool GetRuntimeLodAggregateBounds(glm::vec3& minimum,
+        glm::vec3& maximum) const;
+    void SetRuntimeLodBoundsEnvelope(const glm::vec3& minimum,
+        const glm::vec3& maximum);
     unsigned GetMorphNodeIndex() const { return m_morphNodeIndex; }
     void SetMorphData(unsigned nodeIndex, std::vector<MorphTarget> targets,
         std::vector<float> weights);
@@ -350,6 +370,9 @@ private:
     // Lazy storage keeps ordinary meshes free of per-LOD allocations. The
     // active level lives in this mesh; its cache entry is an empty holder.
     std::vector<std::unique_ptr<Mesh>> m_runtimeLods;
+    glm::vec3 m_runtimeLodEnvelopeMin{0.f};
+    glm::vec3 m_runtimeLodEnvelopeMax{0.f};
+    bool m_hasRuntimeLodEnvelope = false;
     int m_activeRuntimeLod = -1;
     int m_previousRuntimeLod = -1;
     float m_runtimeLodProgress = 1.f;

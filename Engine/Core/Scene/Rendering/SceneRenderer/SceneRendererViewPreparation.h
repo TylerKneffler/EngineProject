@@ -16,7 +16,6 @@ public:
     struct PreparedVisibility
     {
         std::vector<Scene::ViewRenderItem> renderObjects;
-        std::vector<uint8_t> accepted;
         std::vector<uint8_t> terrainRejected;
         std::vector<uint8_t> solidRejected;
         uint32_t terrainOcclusionCulled = 0u;
@@ -38,7 +37,8 @@ public:
     static void PrepareVisibleItems(
         const Scene& scene,
         const std::vector<Scene::FrameRenderItem>& frameRenderItems,
-        const std::vector<uint8_t>& spatialVisible,
+        const std::vector<uint32_t>& candidateFrameItems,
+        bool useSpatialCandidates,
         const glm::vec3& cameraPosition,
         bool shadowOnly,
         bool includeEditorVisuals,
@@ -52,14 +52,14 @@ public:
         const std::function<bool(const Scene::FrameRenderItem&)>& useSourceChartMesh,
         const std::function<glm::mat4(const Scene::FrameRenderItem&)>& sourceChartWorld,
         std::vector<Scene::ViewRenderItem>& renderObjects,
-        std::vector<uint8_t>* accepted = nullptr,
         std::vector<uint8_t>* terrainRejected = nullptr,
         std::vector<uint8_t>* solidRejected = nullptr);
 
     static PreparedVisibility PrepareVisibleSet(
         const Scene& scene,
         const std::vector<Scene::FrameRenderItem>& frameRenderItems,
-        const std::vector<uint8_t>& spatialVisible,
+        const std::vector<uint32_t>& candidateFrameItems,
+        bool useSpatialCandidates,
         const glm::vec3& cameraPosition,
         bool shadowOnly,
         bool includeEditorVisuals,

@@ -1,6 +1,7 @@
 #include "DX12EditorRenderer.h"
 #include "D3D12View.h"
 #include "DX12DredDiagnostics.h"
+#include "Core/Renderers/GraphicsDeviceName.h"
 #include <d3d12sdklayers.h>
 #include <fstream>
 #include <sstream>
@@ -129,6 +130,8 @@ Engine::Graphics::IGraphicsProvider* DX12EditorRenderer::GetGraphicsProvider()
 // ---------------------------------------------------------------------------
 void DX12EditorRenderer::RenderIfNeeded(std::function<void()> drawFn)
 {
+    m_lastPresentMilliseconds = 0.0;
+    m_lastQueueSubmissionMilliseconds = 0.0;
     if (!m_dirty)
         return;
     m_dirty = false;
@@ -258,12 +261,18 @@ void DX12EditorRenderer::EndFrame()
     checkSubmission(m_commandList->Close(), "Command list Close");
 
     ID3D12CommandList* lists[] = { m_commandList.Get() };
+    const auto submissionStart = std::chrono::steady_clock::now();
     m_commandQueue->ExecuteCommandLists(1, lists);
+    m_lastQueueSubmissionMilliseconds = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - submissionStart).count();
     ++m_submittedFrameCount;
 
     // Present without a vblank wait; allow tearing when the swap chain supports it.
+    const auto presentStart = std::chrono::steady_clock::now();
     checkSubmission(m_swapChain->Present(0,
         m_tearingSupported ? DXGI_PRESENT_ALLOW_TEARING : 0u), "Present");
+    m_lastPresentMilliseconds = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - presentStart).count();
 
     m_fenceValues[m_frameIndex] = ++m_fenceValue;
     ThrowIfFailed(m_commandQueue->Signal(m_fence.Get(), m_fenceValues[m_frameIndex]));
@@ -403,6 +412,7 @@ void DX12EditorRenderer::CreateDevice()
         if (SUCCEEDED(D3D12CreateDevice(adapter.Get(),
                 D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&m_device))))
         {
+            m_actualGraphicsDeviceName = Details::GraphicsDeviceNameFromWide(desc.Description);
             std::wstring msg = std::wstring(L"[DX12Editor] Using adapter: ") + desc.Description
                 + L"  VRAM: " + std::to_wstring(desc.DedicatedVideoMemory / (1024 * 1024)) + L" MB\n";
             OutputDebugStringW(msg.c_str());

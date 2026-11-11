@@ -158,22 +158,23 @@ SceneInstanceBatching::Result SceneInstanceBatching::Prepare(Scene& scene,
             input.minimum=glm::min(input.minimum,variant->GetBoundsMin());
             input.maximum=glm::max(input.maximum,variant->GetBoundsMax());
         }
-        if (draw.mesh->grassShadowCaster)
-        {
-            // Expanded in source space before placement/world transforms so
-            // individual GPU-culled patches include the full sway envelope.
-            const float padding = 1.5f * std::max(0.f, input.maximum.y);
-            input.minimum -= glm::vec3(padding);
-            input.maximum += glm::vec3(padding);
-        }
+        // Mesh bounds include the source's authored deformation envelope, so
+        // every instance tile (camera and cascade) uses the same conservative
+        // bounds without needing to identify the deformation type.
+        input.minimum = glm::min(input.minimum, draw.mesh->GetBoundsMin());
+        input.maximum = glm::max(input.maximum, draw.mesh->GetBoundsMax());
         float shadowRange = draw.objectData.shadowCasterFade.x;
-        if (shadowOnly && draw.gpuLod >= 0 && draw.mesh->prefabLodBand<0)
+        if (shadowOnly && draw.gpuLod >= 0 && draw.mesh->instanceLodBand<0)
         {
             if (draw.gpuLod == 1) shadowRange *= .7f;
             else if (draw.gpuLod >= 2) shadowRange *= .4f;
         }
-        input.lod={ScaleShadowLodDistances(draw.gpuLodDistances, shadowOnly),shadowRange,
-            std::min(shadowRange, draw.objectData.shadowCasterFade.y)};
+        const auto* lodPolicy = draw.object
+            ? draw.object->GetComponent<Engine::Components::Mesh>() : draw.mesh;
+        const float finalCullDistance = lodPolicy && lodPolicy->cullAfterLastLod
+            ? std::max(0.f, lodPolicy->finalLodCullDistance) : 0.f;
+        input.lod={ScaleShadowLodDistances(draw.gpuLodDistances, shadowOnly),
+            shadowRange,finalCullDistance};
         for(const auto& range:draw.mesh->GetInstanceRanges())
             input.ranges.emplace_back(range.firstInstance,range.instanceCount);
         tileInputs.push_back(std::move(input));

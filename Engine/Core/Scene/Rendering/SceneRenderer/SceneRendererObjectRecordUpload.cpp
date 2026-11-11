@@ -24,6 +24,7 @@ struct DirtyRange
 struct SceneRendererObjectRecordUpload::BufferedRecords
 {
     std::vector<std::future<DirtyRange>> jobs;
+    uint64_t drawRecordCount=0;
 
     ~BufferedRecords()
     {
@@ -48,6 +49,7 @@ SceneRendererObjectRecordUpload::SceneRendererObjectRecordUpload(
         return;
 
     const size_t count = draws.size();
+    m_recordSnapshot.drawRecordCount = count;
     scene.m_objectUploadCache.Prepare(
         size_t(scene.m_objectDataBuffer->GetSize() / sizeof(ObjectGPUData)),
         sizeof(ObjectGPUData));
@@ -118,7 +120,9 @@ void SceneRendererObjectRecordUpload::EnsureUploaded()
             uint64_t(m_firstDirtyObject) * sizeof(ObjectGPUData), bytes);
         m_scene.m_lastObjectDataUploadBytes += bytes;
         timings.changedUploadBytes += bytes;
+        m_scene.RecordFrameUploadBytes(bytes);
     }
+    m_scene.RecordFrameUploadBytes(m_recordSnapshot.drawRecordCount * sizeof(DrawCBData));
     timings.uploadMs += std::chrono::duration<double, std::milli>(
         Clock::now() - uploadStart).count();
     m_uploaded = true;

@@ -85,6 +85,10 @@ public:
     void Resize(uint32_t width, uint32_t height) override;
     uint32_t GetWidth() const override { return m_width; }
     uint32_t GetHeight() const override { return m_height; }
+    const char* GetBackendName() const override { return "dx12"; }
+    std::string GetGraphicsDeviceName() const override { return m_actualGraphicsDeviceName; }
+    double GetLastQueueSubmissionMilliseconds() const override
+    { return m_lastQueueSubmissionMilliseconds; }
     void Clear(float r, float g, float b, float a = 1.0f) override;
     Engine::Graphics::IGraphicsProvider* GetGraphicsProvider() override;
     void WaitIdle() override { FlushGPU(); }
@@ -137,6 +141,7 @@ private:
     uint32_t m_captureRowPitch = 0;
     bool m_captureRequested = false;
     std::string m_graphicsDevice = "Auto";
+    std::string m_actualGraphicsDeviceName = "unknown";
     ComPtr<IDXGIFactory6>             m_factory;
     ComPtr<IDXGISwapChain3>           m_swapChain;
 
@@ -216,6 +221,7 @@ private:
     // because DWM can still throttle to the monitor refresh rate.
     bool m_tearingSupported = false;
     Engine::Graphics::FrameTimingTelemetry m_frameTelemetry{};
+    double m_lastQueueSubmissionMilliseconds = 0.0;
 
     // Graphics provider for shader compilation, buffer creation, pipeline building
     std::unique_ptr<D3D12GraphicsProvider> m_graphicsProvider;

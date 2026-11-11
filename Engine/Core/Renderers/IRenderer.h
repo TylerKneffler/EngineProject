@@ -2,6 +2,7 @@
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Core/Model/RendererData.h"
 #include <algorithm>
+#include <string>
 
 namespace Engine::Renderers
 {
@@ -28,6 +29,8 @@ public:
     // Get the current render target width and height.
     virtual uint32_t GetWidth() const = 0;
     virtual uint32_t GetHeight() const = 0;
+    virtual const char* GetBackendName() const { return "unknown"; }
+    virtual std::string GetGraphicsDeviceName() const { return "unknown"; }
 
     // Clear the frame. The exact semantics (immediate vs deferred) depend on
     // the renderer implementation (see DX12EditorRenderer vs DX12GameRenderer).
@@ -64,6 +67,10 @@ public:
     virtual void WaitIdle() {}
     virtual Engine::Graphics::FrameTimingTelemetry GetFrameTimingTelemetry() const
     { return {}; }
+    virtual double GetLastPresentationMilliseconds() const
+    { return GetFrameTimingTelemetry().cpuPresentationMilliseconds; }
+    virtual double GetLastQueueSubmissionMilliseconds() const
+    { return GetFrameTimingTelemetry().cpuSubmissionMilliseconds; }
 
 protected:
     float m_renderScale = 1.0f;

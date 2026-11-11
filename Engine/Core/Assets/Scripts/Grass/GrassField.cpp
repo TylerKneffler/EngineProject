@@ -93,16 +93,18 @@ GrassField::GrassField()
     RegisterField("retainDormantTiles", retainDormantTiles, "Tiles");
 }
 
-std::map<std::string, std::vector<std::string>> GrassField::GetTerrainObjectLodMeshes() const
+std::map<std::string, Engine::Components::ObjectLodProfileData>
+GrassField::GetObjectLodProfiles() const
 {
-    std::map<std::string, std::vector<std::string>> definitions;
+    std::map<std::string, Engine::Components::ObjectLodProfileData> definitions;
     for (const auto& paths : {std::vector<std::string>{shortMesh, shortMeshLod1, shortMeshLod2},
             std::vector<std::string>{tallMesh, tallMeshLod1, tallMeshLod2}})
     {
         if (paths.front().empty()) continue;
-        auto& levels = definitions[paths.front()];
-        if (!levels.empty()) continue;
-        for (const auto& path : paths) if (!path.empty()) levels.push_back(path);
+        auto& profile = definitions[paths.front()];
+        if (!profile.meshes.empty()) continue;
+        for (const auto& path : paths)
+            if (!path.empty()) profile.meshes.push_back(path);
     }
     return definitions;
 }
@@ -111,7 +113,7 @@ bool GrassField::LoadSources()
 {
     auto* provider = Owner->GetScene()->GetGraphicsProvider();
     auto* factory = provider ? provider->GetBufferFactory() : nullptr;
-    auto definitions = GetTerrainObjectLodMeshes();
+    auto definitions = ObjectLodProvider::GetObjectLodMeshes();
     // Resolve only the rendered species here; enumerating every placement belongs
     // in the inspector, not in the per-frame streaming path.
     if (m_cachedLayer)
@@ -400,24 +402,41 @@ void GrassField::BeginBuild(Tile tile, int lod, uint64_t signature)
     if (m_placementCount && m_placementTiles)
     {
         const auto found=m_placementTiles->find(tile);
-        job.instances=std::make_shared<Engine::Components::Mesh::InstanceData>();
         if(found!=m_placementTiles->end())
         {
             const auto& prepared=found->second;
+            std::vector<glm::mat4> transforms;
+            std::vector<uint64_t> placementIds;
+            size_t placementCount=0;
+            for (const auto& [asset, records] : prepared.groups)
+                placementCount += records.size();
+            transforms.reserve(placementCount);
+            placementIds.reserve(placementCount);
             for(bool tall:{false,true}) for(const auto& [asset,records]:prepared.groups) if((asset==tallMesh)==tall)
                 for(const auto& record:records)
                 {
-                    job.instances->transforms.push_back(record.transform);
-                    job.instances->placementIds.push_back(m_cachedLayer->placements[record.index].id);
+                    glm::mat4 transform(1.f);
+                    for (int row = 0; row < 3; ++row)
+                    {
+                        transform[0][row] = record.transform.rows[row].x;
+                        transform[1][row] = record.transform.rows[row].y;
+                        transform[2][row] = record.transform.rows[row].z;
+                        transform[3][row] = record.transform.rows[row].w;
+                    }
+                    transforms.push_back(transform);
+                    placementIds.push_back(m_cachedLayer->placements[record.index].id);
                     if(!tall) ++job.shortCount;
                 }
+            job.instanceLayer.SetPlacements(std::move(transforms),
+                std::move(placementIds));
             const float radius=glm::length(glm::max(glm::abs(m_sourceMinimum),glm::abs(m_sourceMaximum)))*prepared.maximumScale;
             job.minimum=prepared.minimum-glm::vec3(radius); job.maximum=prepared.maximum+glm::vec3(radius);
         }
-        job.totalCount=uint32_t(job.instances->transforms.size()); job.placement=job.totalCount; job.prepared=true;
+        job.totalCount=uint32_t(job.instanceLayer.Size()); job.placement=job.totalCount; job.prepared=true;
         uint64_t identity=HashOffset;
         for(auto* owner=Owner;owner;owner=owner->Parent) HashBytes(identity,owner->name.data(),owner->name.size());
-        HashBytes(identity,&tile.first,sizeof(tile.first)); HashBytes(identity,&tile.second,sizeof(tile.second)); job.instances->stableId=identity;
+        HashBytes(identity,&tile.first,sizeof(tile.first)); HashBytes(identity,&tile.second,sizeof(tile.second));
+        job.instanceLayer.GetInstanceData()->stableId=identity;
         return;
     }
     else
@@ -455,8 +474,7 @@ void GrassField::BeginBuild(Tile tile, int lod, uint64_t signature)
         [&](const Placement& p) { return p.asset != tallMesh; });
     job.shortCount = static_cast<uint32_t>(std::count_if(job.placements.begin(), job.placements.end(),
         [&](const Placement& p) { return p.asset != tallMesh; }));
-    job.instances = std::make_shared<Engine::Components::Mesh::InstanceData>();
-    job.instances->transforms.reserve(job.placements.size());
+    job.instanceLayer.Reserve(job.placements.size());
 }
 
 bool GrassField::AdvanceBuild(Clock::time_point deadline)
@@ -466,18 +484,22 @@ bool GrassField::AdvanceBuild(Clock::time_point deadline)
     const float span = std::max(1.f, tileSize);
     while (!job.prepared && job.placement < job.placements.size())
     {
-        const auto& p = job.placements[job.placement++];
+        const size_t placementIndex = job.placement++;
+        const auto& p = job.placements[placementIndex];
         glm::mat4 transform = m_cachedLayer
             ? m_cachedLayer->PlacementTransform(p)
             : glm::translate(glm::mat4(1.f), p.position) *
                 glm::mat4_cast(Engine::Components::TerrainObjectLayer::SurfaceRotation(p.normal, p.yawDegrees)) *
                 glm::scale(glm::mat4(1.f), glm::vec3(p.scale));
         transform[3] -= glm::vec4(job.tile.first * span, 0.f, job.tile.second * span, 0.f);
-        Engine::Components::Mesh::InstanceTransform instance{};
-        for (int axis = 0; axis < 3; ++axis)
-            instance.rows[axis] = {transform[0][axis], transform[1][axis],
-                transform[2][axis], transform[3][axis]};
-        job.instances->transforms.push_back(instance);
+        uint64_t placementId = HashOffset;
+        HashBytes(placementId, &seed, sizeof(seed));
+        HashBytes(placementId, &job.tile.first, sizeof(job.tile.first));
+        HashBytes(placementId, &job.tile.second, sizeof(job.tile.second));
+        HashBytes(placementId, &placementIndex, sizeof(placementIndex));
+        if (!placementId) placementId = 1;
+        p.id = placementId;
+        job.instanceLayer.AddPlacement(transform, placementId);
         // Eight bounding corners per placement, independent of blade complexity.
         for (int corner = 0; corner < 8; ++corner)
         {
@@ -514,7 +536,9 @@ bool GrassField::AdvanceBuild(Clock::time_point deadline)
             {0, shortVertices, 0, job.shortCount},
             {shortVertices, static_cast<uint32_t>(m_tallVertices[lod]->size()), job.shortCount,
                 job.totalCount - job.shortCount}};
-        geometry->SetInstancedGeometry(m_sourceMeshes[lod], job.instances, std::move(ranges), job.minimum, job.maximum);
+        geometry->SetInstancedGeometry(m_sourceMeshes[lod],
+            job.instanceLayer.GetInstanceData(), std::move(ranges),
+            job.minimum, job.maximum);
         tile.mesh->StoreRuntimeLod(lod, std::move(geometry));
     }
     ++m_performance.tilesBuilt;
@@ -628,7 +652,7 @@ bool GrassField::Refresh()
                 tile.object->transform.position = {x * span, 0, z * span};
                 tile.mesh = tile.object->AddComponent<Engine::Components::Mesh>();
                 tile.mesh->useBoundsForShadowCulling = true;
-                tile.mesh->grassShadowCaster = true;
+                tile.mesh->usesGrassShadowBudget = true;
                 tile.mesh->SetRuntimeVisibility(0.f);
                 auto* material = tile.object->AddComponent<Engine::Components::Material>();
                 material->diffuseColor = {1,1,1};
@@ -685,7 +709,7 @@ bool GrassField::Refresh()
                     tileMaterial->PrepareTextures(scene.GetGraphicsProvider());
             }
             tile.mesh->foliageWindStrength=std::clamp(windStrength,0.f,1.f);
-            tile.mesh->grassShadowCaster=windStrength>0.f;
+            tile.mesh->usesGrassShadowBudget=windStrength>0.f;
             tileMaterial->castsShadows = shadows;
             tileMaterial->shader = shaderPath;
             changed = ActivateTileLod(tile, tile.desiredLod) || changed;

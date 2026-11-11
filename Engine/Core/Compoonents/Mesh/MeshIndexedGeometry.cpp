@@ -167,6 +167,16 @@ void Mesh::CreateBuffer(IGraphicsBufferFactory* bufferFactory,
     else ReplaceIndexBuffer({});
     m_ready = true;
 }
+
+void Mesh::InstallPreparedStaticVertexBuffer(
+    std::shared_ptr<IGraphicsBuffer> buffer, IGraphicsBufferFactory* bufferFactory)
+{
+    if (!buffer || m_vertices.empty()) return;
+    m_bufferFactory = bufferFactory;
+    ReplaceVertexBuffer(std::move(buffer));
+    m_sharedVertexBuffer = true;
+    m_ready = true;
+}
 #pragma endregion
 
 } // namespace Engine::Components

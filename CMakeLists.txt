@@ -2422,10 +2422,9 @@ if(NOT ENGINE_PROJECT_DIR AND
    EXISTS "${ENGINE_LOCAL_TEST_ROOT}/RenderSpatialIndexTests.cpp")
     enable_testing()
     add_executable(RenderSpatialIndexTests EXCLUDE_FROM_ALL
-        "${ENGINE_LOCAL_TEST_ROOT}/RenderSpatialIndexTests.cpp"
-        "${ENGINE_ROOT}/Engine/Core/Rendering/RenderSpatialIndex.cpp")
+        "${ENGINE_LOCAL_TEST_ROOT}/RenderSpatialIndexTests.cpp")
     target_include_directories(RenderSpatialIndexTests PRIVATE "${ENGINE_ROOT}/Engine")
-    target_link_libraries(RenderSpatialIndexTests PRIVATE glm::glm)
+    target_link_libraries(RenderSpatialIndexTests PRIVATE Engine)
     add_test(NAME RenderSpatialIndex COMMAND RenderSpatialIndexTests)
     set_tests_properties(RenderSpatialIndex PROPERTIES WORKING_DIRECTORY "${ENGINE_ROOT}")
 endif()

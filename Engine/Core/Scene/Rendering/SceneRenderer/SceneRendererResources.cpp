@@ -43,8 +43,10 @@ void SceneRendererResources::Initialize(Scene& scene, Engine::Graphics::IGraphic
 
     if (scene.m_activeNativeFrameBuffers)
         scene.WaitForGpuResourceDestruction();
-    scene.m_nativeFrameBuffers.clear();
+    scene.m_frameUploadContexts.clear();
+    scene.m_activeFrameUploadContext = nullptr;
     scene.m_activeNativeFrameBuffers = nullptr;
+    scene.m_activeRenderPassBuffers = nullptr;
 
     scene.m_graphicsProvider = graphicsProvider;
     scene.m_staticRenderItemCache.clear();
@@ -277,6 +279,11 @@ void SceneRendererResources::EnsureObjectRenderCapacity(Scene& scene, uint32_t r
     scene.m_shadowCBMapped = shadowConstantMapped;
     scene.m_shadowObjectDataMapped = shadowObjectMapped;
     scene.m_objectCapacity = capacity;
+    if (scene.m_activeFrameUploadContext)
+    {
+        scene.m_activeFrameUploadContext->bufferAllocations += 5;
+        ++scene.m_activeFrameUploadContext->allocatorGrowths;
+    }
 }
 
 void SceneRendererResources::SelectRenderPassBuffers(Scene& scene, uint32_t requiredObjectSlots)
@@ -284,9 +291,20 @@ void SceneRendererResources::SelectRenderPassBuffers(Scene& scene, uint32_t requ
     auto* contexts = scene.m_graphicsProvider->GetContextFactory();
     const auto frameSlot = contexts->GetPreparedFrameSlot();
     const auto serial = contexts->GetPreparedFrameSerial();
-    if (scene.m_renderPassBufferSlots.size() <= frameSlot)
-        scene.m_renderPassBufferSlots.resize(size_t(frameSlot) + 1);
-    auto& slot = scene.m_renderPassBufferSlots[frameSlot];
+    if (scene.m_frameUploadContexts.size() <= frameSlot)
+        scene.m_frameUploadContexts.resize(size_t(frameSlot) + 1);
+    if (!scene.m_frameUploadContexts[frameSlot])
+        scene.m_frameUploadContexts[frameSlot] = std::make_unique<Scene::FrameUploadContext>();
+    auto& frame = *scene.m_frameUploadContexts[frameSlot];
+    if (frame.serial != serial)
+    {
+        frame.serial = serial;
+        frame.uploadedBytes = 0;
+        frame.bufferAllocations = 0;
+        frame.allocatorGrowths = 0;
+    }
+    scene.m_activeFrameUploadContext = &frame;
+    auto& slot = frame.renderPasses;
     if (slot.serial != serial) { slot.serial = serial; slot.cursor = 0; }
     if (slot.passes.size() <= slot.cursor) slot.passes.push_back(std::make_unique<Scene::RenderPassBuffers>());
     auto* selected = slot.passes[slot.cursor++].get();
@@ -321,6 +339,8 @@ void SceneRendererResources::SelectRenderPassBuffers(Scene& scene, uint32_t requ
         selected->shadowObjects = factory->CreateBuffer(Buffer::Usage::ShaderResource, Buffer::AccessMode::Upload, capacity * 4 * kObjectGPUDataSize, nullptr, kObjectGPUDataSize);
         selected->constantsMapped = selected->constants->Map(); selected->objectsMapped = selected->objects->Map();
         selected->shadowConstantsMapped = selected->shadowConstants->Map(); selected->shadowObjectsMapped = selected->shadowObjects->Map();
+        frame.bufferAllocations += 4;
+        ++frame.allocatorGrowths;
     }
     exchange(*selected); scene.m_activeRenderPassBuffers = selected;
     EnsureObjectRenderCapacity(scene, requiredObjectSlots);
@@ -350,5 +370,10 @@ void SceneRendererResources::EnsureSkinPaletteCapacity(Scene& scene, uint32_t re
     scene.m_boneDataBuffer = std::move(buffer);
     scene.m_boneDataMapped = mapped;
     scene.m_boneMatrixCapacity = capacity;
+    if (scene.m_activeFrameUploadContext)
+    {
+        ++scene.m_activeFrameUploadContext->bufferAllocations;
+        ++scene.m_activeFrameUploadContext->allocatorGrowths;
+    }
 }
 }

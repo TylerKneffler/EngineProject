@@ -1,5 +1,6 @@
 #pragma once
 #include "Core/Graphics/IGraphicsProvider.h"
+#include "Core/Graphics/IGraphicsContext.h"
 #include <glm/glm.hpp>
 #include <array>
 #include <cstring>
@@ -29,6 +30,10 @@ public:
         std::vector<uint8_t> previousDraw;
         std::vector<glm::uvec4> directRecords;
         std::unique_ptr<Graphics::IGraphicsBuffer> input, output, draw;
+        std::unique_ptr<Graphics::IGraphicsBuffer> visibilityReadback;
+        bool visibilityReadbackPending=false,completedReadback=false,readbackShadow=false;
+        uint32_t completedGpuCandidates=0,readbackLod=0;
+        uint64_t readbackViewIdentity=0;
         bool gpu = false;
     };
 private:
@@ -45,10 +50,31 @@ public:
         const auto serial=contexts->GetPreparedFrameSerial();
         if(m_slots.size()<=slotIndex) m_slots.resize(size_t(slotIndex)+1);
         auto& slot=m_slots[slotIndex];
-        if(slot.serial!=serial) { slot.serial=serial; slot.cursor=0; }
+        if(slot.serial!=serial)
+        {
+            for (auto& previous : slot.batches)
+            {
+                if (!previous->visibilityReadbackPending || !previous->visibilityReadback)
+                    continue;
+                if (!previous->visibilityReadback->IsReadbackReady()) continue;
+                if (auto* mapped=static_cast<const uint8_t*>(previous->visibilityReadback->Map()))
+                {
+                    std::memcpy(&previous->completedGpuCandidates,mapped+sizeof(uint32_t),
+                        sizeof(previous->completedGpuCandidates));
+                    previous->completedReadback=true;
+                    previous->visibilityReadbackPending=false;
+                    previous->visibilityReadback->Unmap();
+                }
+            }
+            slot.serial=serial; slot.cursor=0;
+        }
         if(slot.batches.size()<=slot.cursor) slot.batches.push_back(std::make_unique<Batch>());
         auto& batch=*slot.batches[slot.cursor++];
         auto* factory=provider->GetBufferFactory();
+        if (gpu && !batch.visibilityReadback)
+            batch.visibilityReadback=factory->CreateBuffer(
+                Graphics::IGraphicsBuffer::Usage::StorageBuffer,
+                Graphics::IGraphicsBuffer::AccessMode::Readback,48,nullptr,48);
         const bool changed=batch.gpu!=gpu || batch.previousInput.size()!=instances.size() ||
             std::memcmp(batch.previousInput.data(),instances.data(),instances.size()*sizeof(AutomaticInstance))!=0;
         if(changed || !batch.output)
@@ -92,6 +118,17 @@ public:
             batch.previousDraw=std::move(constants); uploadBytes+=256;
         }
         return batch;
+    }
+    static bool ScheduleVisibilityReadback(Graphics::IGraphicsContext* context,
+        Batch& batch,uint32_t lod,bool shadow,uint64_t viewIdentity)
+    {
+        if (!context || !batch.gpu || !batch.output || !batch.visibilityReadback ||
+            batch.visibilityReadbackPending ||
+            !context->CopyBuffer(batch.output.get(),batch.visibilityReadback.get(),8))
+            return false;
+        batch.readbackLod=lod; batch.readbackShadow=shadow;
+        batch.readbackViewIdentity=viewIdentity; batch.visibilityReadbackPending=true;
+        return true;
     }
 };
 }

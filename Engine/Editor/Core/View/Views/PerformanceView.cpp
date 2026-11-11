@@ -669,7 +669,19 @@ void PerformanceView::DrawTimings(IEditorUi& ui)
     {
         ui.ValueLabel("Compute constant arena writes",std::to_string(m_nativeTimings.computeArenaWrites).c_str());
         ui.ValueLabel("Compute constant fallback discards",std::to_string(m_nativeTimings.computeDiscardMaps).c_str());
+        uint64_t resourceCreateCalls = 0;
+        double nativeFenceWaitMs = 0.0;
+        for (const auto& phase : m_nativeTimings.phases)
+        {
+            resourceCreateCalls += phase[static_cast<size_t>(Graphics::NativeOperation::ResourceCreate)].calls;
+            nativeFenceWaitMs += phase[static_cast<size_t>(Graphics::NativeOperation::FenceWait)].milliseconds;
+        }
+        ui.ValueLabel("Native resource creation calls",std::to_string(resourceCreateCalls).c_str());
+        ui.ValueLabel("Native fence wait (CPU)",(std::to_string(nativeFenceWaitMs)+" ms").c_str());
     }
+    const uint64_t trackedUploadBytes = m_renderCpu.changedUploadBytes +
+        m_renderCpu.clusterUploadBytes + m_renderCpu.grassPlacementUploadBytes;
+    ui.ValueLabel("Tracked changed / cluster / grass uploads",FormatBytes(trackedUploadBytes).c_str());
     if(m_nativeTimings.enabled)
     {
         static const char* names[]={"Map","Unmap","Upload","Bindings","Dispatch","Indirect argument copy","Draw","Resource creation","Readback","Fence wait"};
@@ -814,8 +826,97 @@ void PerformanceView::DrawTimings(IEditorUi& ui)
     ui.ValueLabel("Reused batch compatibility keys",std::to_string(m_renderCpu.batchReusedKeys).c_str());
     ui.ValueLabel("Automatic instance candidates",std::to_string(m_renderCpu.automaticInstances).c_str());
     ui.ValueLabel("Triangle candidates",std::to_string(m_renderCpu.candidateTriangles).c_str());
+    const auto visibilityText = [](const Engine::Rendering::RenderVisibilityMetrics& visibility)
+    {
+        return std::to_string(visibility.frameItems) + " / " +
+            std::to_string(visibility.candidateItems) + " / " +
+            std::to_string(visibility.acceptedItems);
+    };
+    ui.ValueLabel("Camera frame items / candidates / accepted",
+        visibilityText(m_renderCpu.cameraVisibility).c_str());
+    ui.ValueLabel("Shadow frame items / candidates / accepted",
+        visibilityText(m_renderCpu.shadowVisibility).c_str());
+    ui.ValueLabel("Camera BVH nodes / bounds tested / visible slots",
+        (std::to_string(m_renderCpu.cameraVisibility.bvhNodesVisited) + " / " +
+            std::to_string(m_renderCpu.cameraVisibility.bvhBoundsTested) + " / " +
+            std::to_string(m_renderCpu.cameraVisibility.visibleSlots)).c_str());
+    ui.ValueLabel("Shadow BVH nodes / bounds tested / visible slots",
+        (std::to_string(m_renderCpu.shadowVisibility.bvhNodesVisited) + " / " +
+            std::to_string(m_renderCpu.shadowVisibility.bvhBoundsTested) + " / " +
+            std::to_string(m_renderCpu.shadowVisibility.visibleSlots)).c_str());
+    ui.ValueLabel("Camera instance tiles / placement candidates",
+        (std::to_string(m_renderCpu.cameraVisibility.instanceTilesSubmitted) + " / " +
+            std::to_string(m_renderCpu.cameraVisibility.placementCandidates)).c_str());
+    ui.ValueLabel("Camera non-terrain instance tiles",
+        std::to_string(m_renderCpu.cameraVisibility.nonTerrainInstanceTilesSubmitted).c_str());
+    ui.ValueLabel("Shadow instance tiles / placement candidates",
+        (std::to_string(m_renderCpu.shadowVisibility.instanceTilesSubmitted) + " / " +
+            std::to_string(m_renderCpu.shadowVisibility.placementCandidates)).c_str());
+    ui.ValueLabel("Shadow non-terrain instance tiles",
+        std::to_string(m_renderCpu.shadowVisibility.nonTerrainInstanceTilesSubmitted).c_str());
+    ui.ValueLabel("Camera placement candidates by LOD L0 / L1 / L2",
+        (std::to_string(m_renderCpu.cameraVisibility.placementCandidatesByLod[0]) + " / " +
+            std::to_string(m_renderCpu.cameraVisibility.placementCandidatesByLod[1]) + " / " +
+            std::to_string(m_renderCpu.cameraVisibility.placementCandidatesByLod[2])).c_str());
+    ui.ValueLabel("Shadow placement candidates by LOD L0 / L1 / L2",
+        (std::to_string(m_renderCpu.shadowVisibility.placementCandidatesByLod[0]) + " / " +
+            std::to_string(m_renderCpu.shadowVisibility.placementCandidatesByLod[1]) + " / " +
+            std::to_string(m_renderCpu.shadowVisibility.placementCandidatesByLod[2])).c_str());
+    ui.ValueLabel("Camera draw / material groups",
+        (std::to_string(m_renderCpu.cameraVisibility.drawGroups) + " / " +
+            std::to_string(m_renderCpu.cameraVisibility.materialGroups)).c_str());
+    ui.ValueLabel("Shadow draw / material groups",
+        (std::to_string(m_renderCpu.shadowVisibility.drawGroups) + " / " +
+            std::to_string(m_renderCpu.shadowVisibility.materialGroups)).c_str());
+    ui.ValueLabel("Screen-selected instances by LOD L0 / L1 / L2",
+        (std::to_string(m_renderCpu.cameraVisibility.screenSelectedInstancesByLod[0]) + " / " +
+            std::to_string(m_renderCpu.cameraVisibility.screenSelectedInstancesByLod[1]) + " / " +
+            std::to_string(m_renderCpu.cameraVisibility.screenSelectedInstancesByLod[2])).c_str());
+    ui.ValueLabel("Screen-selected triangles by LOD L0 / L1 / L2",
+        (std::to_string(m_renderCpu.cameraVisibility.screenSelectedTrianglesByLod[0]) + " / " +
+            std::to_string(m_renderCpu.cameraVisibility.screenSelectedTrianglesByLod[1]) + " / " +
+            std::to_string(m_renderCpu.cameraVisibility.screenSelectedTrianglesByLod[2])).c_str());
+    ui.ValueLabel("GPU-selected instances by LOD L0 / L1 / L2 (delayed readback)",
+        (std::to_string(m_renderCpu.cameraVisibility.gpuSelectedInstancesByLod[0]) + " / " +
+            std::to_string(m_renderCpu.cameraVisibility.gpuSelectedInstancesByLod[1]) + " / " +
+            std::to_string(m_renderCpu.cameraVisibility.gpuSelectedInstancesByLod[2])).c_str());
+    ui.ValueLabel("GPU transition-band placements by LOD L0 / L1 / L2 (delayed readback)",
+        (std::to_string(m_renderCpu.cameraVisibility.gpuTransitionBandInstancesByLod[0]) + " / " +
+            std::to_string(m_renderCpu.cameraVisibility.gpuTransitionBandInstancesByLod[1]) + " / " +
+            std::to_string(m_renderCpu.cameraVisibility.gpuTransitionBandInstancesByLod[2])).c_str());
+    ui.ValueLabel("Camera GPU visibility readback samples / view ID",
+        (std::to_string(m_renderCpu.cameraVisibility.gpuReadbackSamples) + " / " +
+            std::to_string(m_renderCpu.cameraVisibility.gpuReadbackViewIdentity)).c_str());
+    ui.ValueLabel("Shadow GPU-selected instances by LOD L0 / L1 / L2",
+        (std::to_string(m_renderCpu.shadowVisibility.gpuSelectedInstancesByLod[0]) + " / " +
+            std::to_string(m_renderCpu.shadowVisibility.gpuSelectedInstancesByLod[1]) + " / " +
+            std::to_string(m_renderCpu.shadowVisibility.gpuSelectedInstancesByLod[2])).c_str());
+    ui.ValueLabel("Shadow transition-band placements by LOD L0 / L1 / L2",
+        (std::to_string(m_renderCpu.shadowVisibility.gpuTransitionBandInstancesByLod[0]) + " / " +
+            std::to_string(m_renderCpu.shadowVisibility.gpuTransitionBandInstancesByLod[1]) + " / " +
+            std::to_string(m_renderCpu.shadowVisibility.gpuTransitionBandInstancesByLod[2])).c_str());
+    ui.ValueLabel("Camera and portal view IDs",
+        [&]() { std::string ids; for (const auto& id : m_renderCpu.cameraVisibility.viewIdentities) {
+            if (!ids.empty()) ids += ", "; ids += (id.portal ? "portal:" : "camera:") + std::to_string(id.id);
+        } return ids; }().c_str());
+    const auto& colorLods = m_renderCpu.colorSelectedLodDraws;
+    const auto& shadowLods = m_renderCpu.shadowSelectedLodDraws;
+    ui.ValueLabel("CPU-selected LOD draw groups: color L0 / L1 / L2",
+        (std::to_string(colorLods[0]) + " / " + std::to_string(colorLods[1]) +
+            " / " + std::to_string(colorLods[2])).c_str());
+    ui.ValueLabel("CPU-selected LOD draw groups: shadow L0 / L1 / L2",
+        (std::to_string(shadowLods[0]) + " / " + std::to_string(shadowLods[1]) +
+            " / " + std::to_string(shadowLods[2])).c_str());
     ui.ValueLabel("Changed rendering uploads",FormatBytes(m_renderCpu.changedUploadBytes).c_str());
-    ui.DisabledLabel("Instance and triangle candidates are counted before GPU visibility and LOD selection. Timing groups contain nested totals.");
+    if (m_scene)
+    {
+        const auto uploads = m_scene->GetCurrentFrameUploadStats();
+        ui.ValueLabel("Frame upload bytes / dynamic buffer allocations",
+            (FormatBytes(uploads.bytes)+" / "+std::to_string(uploads.bufferAllocations)).c_str());
+        ui.ValueLabel("Frame upload allocator growths",
+            std::to_string(uploads.allocatorGrowths).c_str());
+    }
+    ui.DisabledLabel("Visibility totals are summed by camera or shadow render. Placement candidates are sent to each LOD cull and can overlap across transition bands; they are not post-GPU visible counts. Screen-size selected instance counts are CPU-resolved. BVH counters omit portal/warped fallback culling. Timing groups contain nested totals.");
     ui.Separator();
     if (m_gpuTimingsValid)
         drawGroup("GPU stages (latest resolved sample)", m_gpuTimings);

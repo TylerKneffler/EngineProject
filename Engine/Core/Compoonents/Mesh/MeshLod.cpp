@@ -27,6 +27,7 @@ bool Mesh::StoreRuntimeLod(int lod, std::unique_ptr<Mesh> geometry)
         m_runtimeLods[lod] = std::make_unique<Mesh>();
     }
     else m_runtimeLods[lod] = std::move(geometry);
+    MarkConfigurationDirty();
     return true;
 }
 
@@ -136,19 +137,8 @@ int Mesh::ChooseScreenRuntimeLod(const glm::mat4& world,
 {
     if (distanceOverride) return std::clamp(*distanceOverride, 0, MaximumRuntimeLods - 1);
     if (!HasBounds()) return 0;
-    glm::vec3 minimum = m_boundsMin, maximum = m_boundsMax;
-    float windStrength = foliageWindStrength;
-    // Use the same wind-expanded union regardless of the selected geometry.
-    // Streaming callers must retain an authored envelope for nonresident LODs.
-    for (const auto& lod : m_runtimeLods)
-        if (lod && lod->HasBounds())
-        {
-            minimum = glm::min(minimum, lod->m_boundsMin);
-            maximum = glm::max(maximum, lod->m_boundsMax);
-            windStrength = std::max(windStrength, lod->foliageWindStrength);
-        }
-    const glm::vec3 windPadding(1.5f * std::max(0.f, maximum.y) * std::clamp(windStrength, 0.f, 1.f));
-    minimum -= windPadding; maximum += windPadding;
+    glm::vec3 minimum, maximum;
+    if (!GetRuntimeLodAggregateBounds(minimum, maximum)) return 0;
     return std::min(MaximumRuntimeLods - 1, Engine::Rendering::SelectScreenMeshLod(
         Engine::Rendering::ProjectedLodPixels(minimum, maximum, world, view),
         pixelThresholds, m_activeRuntimeLod, hysteresis));
@@ -158,6 +148,39 @@ size_t Mesh::GetResidentRuntimeLodCount() const
 {
     return std::count_if(m_runtimeLods.begin(), m_runtimeLods.end(),
         [](const auto& geometry) { return geometry != nullptr; });
+}
+
+bool Mesh::GetRuntimeLodAggregateBounds(glm::vec3& minimum,
+    glm::vec3& maximum) const
+{
+    if (!HasBounds()) return false;
+    minimum = GetBoundsMin();
+    maximum = GetBoundsMax();
+    if (m_hasRuntimeLodEnvelope)
+    {
+        minimum = glm::min(minimum, m_runtimeLodEnvelopeMin);
+        maximum = glm::max(maximum, m_runtimeLodEnvelopeMax);
+    }
+    for (const auto& lod : m_runtimeLods)
+    {
+        if (!lod) continue;
+        if (!lod->HasBounds()) return false;
+        minimum = glm::min(minimum, lod->GetBoundsMin());
+        maximum = glm::max(maximum, lod->GetBoundsMax());
+    }
+    return true;
+}
+
+void Mesh::SetRuntimeLodBoundsEnvelope(const glm::vec3& minimum,
+    const glm::vec3& maximum)
+{
+    if (m_hasRuntimeLodEnvelope &&
+        glm::all(glm::equal(m_runtimeLodEnvelopeMin, minimum)) &&
+        glm::all(glm::equal(m_runtimeLodEnvelopeMax, maximum))) return;
+    m_runtimeLodEnvelopeMin = glm::min(minimum, maximum);
+    m_runtimeLodEnvelopeMax = glm::max(minimum, maximum);
+    m_hasRuntimeLodEnvelope = true;
+    MarkConfigurationDirty();
 }
 
 uint64_t Mesh::GetRuntimeLodGpuMemoryBytes() const
@@ -186,6 +209,7 @@ uint64_t Mesh::GetRuntimeLodGpuMemoryBytes() const
 void Mesh::ClearRuntimeLods()
 {
     m_runtimeLods.clear();
+    m_hasRuntimeLodEnvelope = false;
     m_activeRuntimeLod = -1;
     m_previousRuntimeLod = -1;
     m_runtimeLodProgress = 1.f;

@@ -34,16 +34,24 @@ void TerrainManager::GroundOakObjects(Terrain& terrain)
     for (auto* child : terrain.Owner->Children)
         if (child)
             if (auto* objects = child->GetComponent<TerrainObjectLayer>();
-                objects && objects->layerName == "Oak forest")
+                objects && (objects->layerName == "Oak forest" ||
+                    objects->layerName == "Procedural meadow grass" ||
+                    objects->layerName == "Meadow grass"))
             {
                 bool changed = false;
                 for (auto& placement : objects->placements)
                 {
                     float height = placement.position.y;
+                    glm::vec3 normal = placement.normal;
                     if (SampleTerrainSurface(terrain.heights, cellsX, cellsY,
                         cellWidth, cellDepth, placement.position.x,
-                        placement.position.z, height) && height != placement.position.y)
-                    { placement.position.y = height; changed = true; }
+                        placement.position.z, height, &normal) &&
+                        (height != placement.position.y || normal != placement.normal))
+                    {
+                        placement.position.y = height;
+                        placement.normal = normal;
+                        changed = true;
+                    }
                 }
                 if (changed) objects->MarkConfigurationDirty();
             }

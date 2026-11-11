@@ -1,5 +1,6 @@
 #pragma once
 #include "PersistentInstancePool.h"
+#include "Core/Graphics/IGraphicsContext.h"
 #include <array>
 
 namespace Engine::Rendering
@@ -28,6 +29,11 @@ public:
         std::vector<VisibleInstanceRecord> ids;
         std::array<uint8_t,256> constants{};
         std::unique_ptr<Graphics::IGraphicsBuffer> input,output,draw;
+        std::unique_ptr<Graphics::IGraphicsBuffer> visibilityReadback;
+        bool visibilityReadbackPending=false;
+        uint32_t completedGpuCandidates=0,completedTransitionCandidates=0,readbackLod=0;
+        bool completedReadback=false,readbackShadow=false;
+        uint64_t readbackViewIdentity=0;
     };
 private:
     struct Slot { uint64_t serial=UINT64_MAX; std::map<Key,Batch> batches;
@@ -45,8 +51,25 @@ public:
         auto& slot=m_slots[index];
         if(slot.serial!=serial)
         {
-            slot.serial=serial;
             // The context factory has waited this slot's GPU fence.
+            for (auto& entry : slot.batches)
+            {
+                auto& previous = entry.second;
+                if (!previous.visibilityReadbackPending || !previous.visibilityReadback)
+                    continue;
+                if (!previous.visibilityReadback->IsReadbackReady()) continue;
+                if (auto* mapped = static_cast<const uint8_t*>(previous.visibilityReadback->Map()))
+                {
+                    std::memcpy(&previous.completedGpuCandidates, mapped + sizeof(uint32_t),
+                        sizeof(previous.completedGpuCandidates));
+                    std::memcpy(&previous.completedTransitionCandidates, mapped + 20,
+                        sizeof(previous.completedTransitionCandidates));
+                    previous.visibilityReadback->Unmap();
+                    previous.completedReadback = true;
+                    previous.visibilityReadbackPending = false;
+                }
+            }
+            slot.serial=serial;
             slot.retired.clear();
             for(auto it=slot.batches.begin();it!=slot.batches.end();)
                 if(serial>it->second.serial && serial-it->second.serial>240) it=slot.batches.erase(it); else ++it;
@@ -63,6 +86,10 @@ public:
         batch.metadataChanged=batch.gpu!=gpu || batch.previous.size()!=tiles.size() ||
             std::memcmp(batch.previous.data(),tiles.data(),bytes)!=0;
         auto* factory=provider->GetBufferFactory();
+        if (gpu && !batch.visibilityReadback)
+            batch.visibilityReadback=factory->CreateBuffer(
+                Graphics::IGraphicsBuffer::Usage::StorageBuffer,
+                Graphics::IGraphicsBuffer::AccessMode::Readback,48,nullptr,48);
         batch.candidates=0; for(const auto& tile:tiles) batch.candidates+=tile.range.y;
         if(gpu && (!batch.input || batch.metadataChanged))
         {
@@ -107,6 +134,20 @@ public:
             batch.constants=constants; uploadBytes+=256;
         }
         return batch;
+    }
+    static bool ScheduleVisibilityReadback(Graphics::IGraphicsContext* context,
+        Batch& batch, uint32_t lod, bool shadow, uint64_t viewIdentity)
+    {
+        if (!context || !batch.gpu || !batch.output || !batch.visibilityReadback ||
+            batch.visibilityReadbackPending)
+            return false;
+        if (!context->CopyBuffer(batch.output.get(), batch.visibilityReadback.get(), 24))
+            return false;
+        batch.readbackLod=lod;
+        batch.readbackShadow=shadow;
+        batch.readbackViewIdentity=viewIdentity;
+        batch.visibilityReadbackPending=true;
+        return true;
     }
 };
 }

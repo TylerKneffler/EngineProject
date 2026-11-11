@@ -300,8 +300,7 @@ void SceneRendererVisibility::PrepareTerrainOcclusion(
             item.material->doubleSided ||
             item.material->GetAlphaMode() !=
                 Engine::Components::MaterialAlphaMode::Opaque ||
-            item.mesh->grassShadowCaster ||
-            item.mesh->foliageWindStrength > 0.f)
+            item.mesh->GetDeformationBoundsPadding() > 0.f)
             continue;
         solidBlockers.push_back(*footprint);
     }

@@ -16,6 +16,7 @@
 #include "Core/Compoonents/Lighting/LightProbe.h"
 #include "Core/Compoonents/Materials/Material.h"
 #include "Core/Compoonents/Materials/Texture.h"
+#include "Core/Compoonents/Terrain/TerrainObjectLayer.h"
 #include "Core/Prefab/PrefabAsset.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include "imgui.h"
@@ -1342,6 +1343,38 @@ void EditorState::DrawGlobalToolbar(IEditorUi& ui, ToolbarSection section,
                 scene->settings.renderMode =
                     static_cast<Engine::Model::SceneRenderMode>(renderMode);
             ui.Tooltip("Scene render mode");
+        }
+        int maximumObjectLods = 1;
+        for (const auto& object : scene->GetObjects())
+            if (object)
+                for (const auto* component : object->Components)
+                    if (const auto* layer = dynamic_cast<const Engine::Components::TerrainObjectLayer*>(component))
+                        for (const auto& [asset, meshes] : layer->GetDefinedObjectLods())
+                            maximumObjectLods = std::max(maximumObjectLods,
+                                static_cast<int>(meshes.size()));
+        maximumObjectLods = std::clamp(maximumObjectLods, 1,
+            static_cast<int>(Engine::Components::TerrainObjectLayer::MaximumObjectLods));
+        int displayLod = view->GetTerrainObjectDisplayLod();
+        if (displayLod < 0) displayLod = maximumObjectLods / 2;
+        displayLod = std::clamp(displayLod, 0, maximumObjectLods - 1);
+        view->SetTerrainObjectDisplayLod(displayLod);
+        std::string lodLabel = "Object LOD " + std::to_string(
+            displayLod + 1);
+        if (row.Next(112.f))
+        {
+            ui.SetNextItemWidth(112.f);
+            if (ImGui::BeginCombo("##TerrainObjectDisplayLod", lodLabel.c_str()))
+            {
+                for (int lod = 0; lod < maximumObjectLods; ++lod)
+                {
+                    const std::string label = "LOD " + std::to_string(lod + 1);
+                    if (ImGui::Selectable(label.c_str(),
+                        displayLod == lod))
+                        view->SetTerrainObjectDisplayLod(lod);
+                }
+                ImGui::EndCombo();
+            }
+            ui.Tooltip("Display terrain objects at a shared LOD index; objects with fewer levels use their last available LOD.");
         }
         if (row.Next(28.f) && ViewIconButton("##ViewUi", ViewIcon::Ui,
             scene->settings.sceneViewUiOverlay,

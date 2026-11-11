@@ -1,4 +1,5 @@
 #include "DX12GameRenderer.h"
+#include "Core/Renderers/GraphicsDeviceName.h"
 #include "DX12QueueMutex.h"
 #include "DX12DredDiagnostics.h"
 #include <chrono>
@@ -166,6 +167,7 @@ void DX12GameRenderer::Resize(uint32_t width, uint32_t height)
 // ---------------------------------------------------------------------------
 void DX12GameRenderer::BeginFrame()
 {
+    m_lastQueueSubmissionMilliseconds = 0.0;
     // ---- Per-frame fence wait ----
     // m_fenceValues[m_frameIndex] is the value we signalled at the end of the
     // *last* time we rendered into this slot (FRAME_COUNT frames ago in steady
@@ -291,7 +293,10 @@ void DX12GameRenderer::EndFrame()
 
     ID3D12CommandList* lists[] = { m_commandList.Get() };
     std::lock_guard queueLock(DX12QueueMutex());
+    const auto submissionStart = std::chrono::steady_clock::now();
     m_commandQueue->ExecuteCommandLists(1, lists);
+    m_lastQueueSubmissionMilliseconds = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - submissionStart).count();
 
     // Present — pass ALLOW_TEARING when supported so DWM does not throttle
     // the frame rate to the monitor refresh rate in windowed mode.
@@ -523,6 +528,7 @@ void DX12GameRenderer::CreateDevice()
         if (SUCCEEDED(D3D12CreateDevice(adapter.Get(),
                 D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&m_device))))
         {
+            m_actualGraphicsDeviceName = Details::GraphicsDeviceNameFromWide(desc.Description);
             std::wstring msg = std::wstring(L"[DX12] Using adapter: ") + desc.Description
                 + L"  VRAM: " + std::to_wstring(desc.DedicatedVideoMemory / (1024 * 1024)) + L" MB\n";
             OutputDebugStringW(msg.c_str());

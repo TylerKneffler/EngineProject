@@ -39,8 +39,8 @@ void CSMain(uint3 id : SV_DispatchThreadID, uint3 group : SV_GroupID, uint3 thre
         InstanceRecord world=inputInstances[group.x*3];
         InstanceRecord bounds=inputInstances[group.x*3+1];
         InstanceRecord lodData=inputInstances[group.x*3+2];
-        // Existing grass LOD uses a shared tile-origin fade. Independent prefab
-        // bands use per-fragment fades and conservative per-placement selection.
+        // Shared LOD uses a tile-origin fade. Independent instance bands use
+        // per-fragment fades and conservative per-placement selection.
         if(constants.selection.x>=0 && (constants.selection.w & 2)==0)
         {
             const float distance=length(lodData.sphere.xyz-constants.cameraPosition.xyz);
@@ -58,6 +58,7 @@ void CSMain(uint3 id : SV_DispatchThreadID, uint3 group : SV_GroupID, uint3 thre
         float4 planes[6]={rows[3]+rows[0],rows[3]-rows[0],rows[3]+rows[1],rows[3]-rows[1],rows[2],rows[3]-rows[2]};
         for(uint index=thread.x;index<bounds.meta.y;index+=64)
         {
+            bool isTransitionPlacement=false;
             const uint placementIndex=bounds.meta.x+index;
             PersistentInstance placement=placementPool[placementIndex];
             const float4 center=float4(localCenter,1);
@@ -67,6 +68,10 @@ void CSMain(uint3 id : SV_DispatchThreadID, uint3 group : SV_GroupID, uint3 thre
             const float3 worldExtent=float3(dot(abs(worldX),instanceExtent),dot(abs(worldY),instanceExtent),dot(abs(worldZ),instanceExtent));
             const float radius=length(worldExtent);
             const bool shadowPass=(constants.selection.w & 1)!=0;
+            const float nearestDistance=shadowPass
+                ? length(max(abs(worldCenter.xyz-constants.cameraPosition.xyz)-worldExtent,0.0))
+                : max(0.0,length(worldCenter.xyz-constants.cameraPosition.xyz)-radius);
+            if(lodData.lod.w>0.0 && nearestDistance>=lodData.lod.w) continue;
             if(constants.selection.x>=0 && (constants.selection.w & 2)!=0)
             {
                 // Conservative per-placement bands. Shader dithering resolves the
@@ -79,6 +84,9 @@ void CSMain(uint3 id : SV_DispatchThreadID, uint3 group : SV_GroupID, uint3 thre
                 const float farthest=shadowPass ? length(delta+worldExtent)
                     : length(delta)+radius;
                 const float width=max(.001,min(.5,(lodData.lod.y-lodData.lod.x)*.25));
+                isTransitionPlacement = constants.selection.x>=0 &&
+                    ((nearest <= lodData.lod.x+width && farthest >= lodData.lod.x-width) ||
+                     (nearest <= lodData.lod.y+width && farthest >= lodData.lod.y-width));
                 if ((constants.selection.x==0 && nearest>lodData.lod.x+width) ||
                     (constants.selection.x==1 && (farthest<lodData.lod.x-width || nearest>lodData.lod.y+width)) ||
                     (constants.selection.x==2 && farthest<lodData.lod.y-width)) continue;
@@ -93,6 +101,7 @@ void CSMain(uint3 id : SV_DispatchThreadID, uint3 group : SV_GroupID, uint3 thre
                     ? dot(abs(planes[plane].xyz),worldExtent)
                     : radius*length(planes[plane].xyz))) visible=false;
             if(!visible) continue;
+            if (isTransitionPlacement) InterlockedAdd(outputInstances[0].row1.y,1);
             uint destination; InterlockedAdd(outputInstances[0].row0.y,1,destination);
             OutputRecord result; result.row0=uint4(bounds.meta.z,placementIndex,0,0); result.row1=placement.identity; result.row2=0;
             outputInstances[destination+1]=result;
@@ -109,10 +118,12 @@ void CSMain(uint3 id : SV_DispatchThreadID, uint3 group : SV_GroupID, uint3 thre
     float4 planes[6] = {rows[3]+rows[0],rows[3]-rows[0],rows[3]+rows[1],rows[3]-rows[1],rows[2],rows[3]-rows[2]};
     [unroll] for (uint plane=0;plane<6;++plane)
         if (dot(planes[plane],center) < -instance.sphere.w * length(planes[plane].xyz)) return;
+    const float3 origin=float3(asfloat(instance.meta.z),asfloat(instance.meta.w),instance.lod.z);
+    const float distance = length(origin - constants.cameraPosition.xyz);
+    if(instance.lod.w>0.0 &&
+        max(0.0,length(instance.sphere.xyz-constants.cameraPosition.xyz)-instance.sphere.w)>=instance.lod.w) return;
     if (constants.selection.x >= 0)
     {
-        const float3 origin=float3(asfloat(instance.meta.z),asfloat(instance.meta.w),instance.lod.z);
-        const float distance = length(origin - constants.cameraPosition.xyz);
         const uint lod = distance < instance.lod.x ? 0 : distance < instance.lod.y ? 1 : 2;
         if (explicitMesh)
         {

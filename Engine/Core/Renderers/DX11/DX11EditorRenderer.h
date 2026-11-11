@@ -19,6 +19,7 @@ public:
     void Resize(uint32_t width, uint32_t height) override;
     uint32_t GetWidth() const override { return m_width; }
     const char* GetBackendName() const override { return "dx11"; }
+    std::string GetGraphicsDeviceName() const override;
     uint32_t GetHeight() const override { return m_height; }
     void Clear(float r, float g, float b, float a = 1.0f) override;
     Engine::Graphics::IGraphicsProvider* GetGraphicsProvider() override { return m_graphicsProvider.get(); }
@@ -44,6 +45,8 @@ public:
     ID3D11DeviceContext* GetDeviceContext() const { return m_context.Get(); }
     double GetLastUiRenderMilliseconds() const { return m_lastUiRenderMilliseconds; }
     double GetLastPresentMilliseconds() const { return m_lastPresentMilliseconds; }
+    double GetLastPresentationMilliseconds() const override { return m_lastPresentMilliseconds; }
+    double GetLastQueueSubmissionMilliseconds() const override { return m_lastQueueSubmissionMilliseconds; }
     double GetLastPrepareFrameMilliseconds() const { return m_lastPrepareFrameMilliseconds; }
     double GetLastBeginUiMilliseconds() const { return m_lastBeginUiMilliseconds; }
     double GetLastRenderSetupMilliseconds() const { return m_lastRenderSetupMilliseconds; }
@@ -67,6 +70,7 @@ private:
     EditorUiRenderHooks m_uiHooks;
     double m_lastUiRenderMilliseconds = 0.0;
     double m_lastPresentMilliseconds = 0.0;
+    double m_lastQueueSubmissionMilliseconds = 0.0;
     double m_lastPrepareFrameMilliseconds = 0.0;
     double m_lastBeginUiMilliseconds = 0.0;
     double m_lastRenderSetupMilliseconds = 0.0;

@@ -18,6 +18,7 @@ public:
     void Resize(uint32_t width, uint32_t height) override;
     uint32_t GetWidth() const override { return m_width; }
     const char* GetBackendName() const override { return "vulkan"; }
+    std::string GetGraphicsDeviceName() const override { return m_core.GetPhysicalDeviceName(); }
     uint32_t GetHeight() const override { return m_height; }
     void Clear(float r, float g, float b, float a = 1.0f) override;
     Engine::Graphics::IGraphicsProvider* GetGraphicsProvider() override { return m_provider.get(); }
@@ -31,6 +32,10 @@ public:
     void SetUiRenderHooks(EditorUiRenderHooks hooks) override { m_uiHooks = std::move(hooks); }
     void SetUiTextureHooks(EditorUiTextureHooks hooks) override;
     void RenderIfNeeded(std::function<void()> drawFn = nullptr) override;
+    double GetLastPresentationMilliseconds() const override
+    { return m_lastPresentationMilliseconds; }
+    double GetLastQueueSubmissionMilliseconds() const override
+    { return m_lastQueueSubmissionMilliseconds; }
     std::pair<std::pair<void*, void*>, uint32_t> AllocateSrvSlot() override;
     void FreeSrvSlot(uint32_t slot) override;
     bool CanAllocateSrvSlot() const override { return !m_freeSlots.empty(); }
@@ -50,6 +55,8 @@ private:
     float m_clearColor[4] = { 0.18f, 0.18f, 0.18f, 1.0f };
     uint32_t m_width = 0, m_height = 0;
     bool m_dirty = true;
+    double m_lastPresentationMilliseconds = 0.0;
+    double m_lastQueueSubmissionMilliseconds = 0.0;
     EditorUiRenderHooks m_uiHooks;
 };
 }

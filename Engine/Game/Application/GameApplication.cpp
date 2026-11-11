@@ -15,6 +15,7 @@
 #include "Core/SceneManager.h"
 #include "Core/Timing/FramePacer.h"
 #include "Core/Input/NativeInputSnapshot.h"
+#include "Core/Rendering/RenderFramePlan.h"
 #include <atomic>
 #include <condition_variable>
 #include <chrono>
@@ -22,6 +23,7 @@
 #include <exception>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <mutex>
 #include <thread>
 #include <utility>
@@ -38,6 +40,18 @@ namespace Engine::Game
 {
 namespace
 {
+std::string CsvField(const std::string& value)
+{
+    std::string escaped = "\"";
+    for (char character : value)
+    {
+        if (character == '"') escaped += '"';
+        escaped += character;
+    }
+    escaped += '"';
+    return escaped;
+}
+
 void RegisterGameComponents()
 {
 #ifdef ENGINE_BUILTIN_ASSET_SCRIPTS
@@ -84,10 +98,19 @@ class SimulationLoop
 public:
     struct TickResult
     {
+        struct Timings
+        {
+            double simulationUpdateMs = 0.0;
+            double updateHandoffWaitMs = 0.0;
+            double scenePreparationMs = 0.0;
+            double commandRecordingMs = 0.0;
+            double prepareHandoffWaitMs = 0.0;
+        } timings;
         std::chrono::steady_clock::time_point startedAt;
         ::Engine::Core::NativeInputSnapshot input;
         std::shared_ptr<const ::Engine::Scene::Scene::SceneSnapshot> snapshot;
         ::Engine::Scene::Scene::RetiredGraphicsResources retired;
+        std::shared_ptr<const ::Engine::Graphics::GraphicsCommandPacket> computeCommands;
         std::shared_ptr<const ::Engine::Graphics::GraphicsCommandPacket> shadowCommands;
         std::shared_ptr<const ::Engine::Graphics::GraphicsCommandPacket> sceneCommands;
     };
@@ -115,6 +138,7 @@ public:
             throw std::logic_error("Simulation handoff already has a frame");
         m_deltaTime = deltaTime;
         m_frameStartedAt = std::chrono::steady_clock::now();
+        m_timings = {};
         m_input = std::move(input);
         m_busy = true;
         m_work = Work::Update;
@@ -126,7 +150,10 @@ public:
         std::unique_lock lock(m_mutex);
         if (!m_busy)
             throw std::logic_error("Simulation update was not started");
+        auto waitStart = std::chrono::steady_clock::now();
         m_wake.wait(lock, [this] { return m_updateCompleted; });
+        m_timings.updateHandoffWaitMs = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - waitStart).count();
         m_updateCompleted = false;
         if (m_failure)
         {
@@ -137,12 +164,19 @@ public:
         if (!renderFrame)
         {
             m_busy = false;
-            return {m_frameStartedAt, std::move(m_input), {}, {}, {}, {}};
+            TickResult result;
+            result.timings = m_timings;
+            result.startedAt = m_frameStartedAt;
+            result.input = std::move(m_input);
+            return result;
         }
         m_previousOcclusionCulled = previousOcclusionCulled;
         m_work = Work::Prepare;
         m_wake.notify_one();
+        waitStart = std::chrono::steady_clock::now();
         m_wake.wait(lock, [this] { return m_completed; });
+        m_timings.prepareHandoffWaitMs = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - waitStart).count();
         m_completed = false;
         m_busy = false;
         if (m_failure)
@@ -150,9 +184,16 @@ public:
             auto failure = std::exchange(m_failure, nullptr);
             std::rethrow_exception(failure);
         }
-        return {m_frameStartedAt, std::move(m_input), std::move(m_snapshot),
-            std::move(m_retired),
-            std::move(m_shadowCommands), std::move(m_sceneCommands)};
+        TickResult result;
+        result.timings = m_timings;
+        result.startedAt = m_frameStartedAt;
+        result.input = std::move(m_input);
+        result.computeCommands = std::move(m_computeCommands);
+        result.snapshot = std::move(m_snapshot);
+        result.retired = std::move(m_retired);
+        result.shadowCommands = std::move(m_shadowCommands);
+        result.sceneCommands = std::move(m_sceneCommands);
+        return result;
     }
 
     void Stop()
@@ -185,22 +226,31 @@ private:
                 ::Engine::Core::SetCurrentNativeInputSnapshot(&m_input);
                 if (work == Work::Update)
                 {
+                    const auto updateStart = std::chrono::steady_clock::now();
                     m_scene.Update(m_deltaTime);
                     if (::Engine::Core::SceneManager::ProcessPendingSceneLoad() &&
                         m_input.clientWidth && m_input.clientHeight)
                         m_scene.PrepareNativeUiLayout(
                             static_cast<float>(m_input.clientWidth) /
                             static_cast<float>(m_input.clientHeight));
+                    m_timings.simulationUpdateMs = std::chrono::duration<double,
+                        std::milli>(std::chrono::steady_clock::now() - updateStart).count();
                 }
                 else
                 {
+                    const auto prepareStart = std::chrono::steady_clock::now();
                     m_scene.PrepareRenderFrame();
+                    m_timings.scenePreparationMs = std::chrono::duration<double,
+                        std::milli>(std::chrono::steady_clock::now() - prepareStart).count();
+                    const auto recordStart = std::chrono::steady_clock::now();
                     auto drawPacket = m_scene.TakeNativeRenderPacket();
+                    auto computeCommands = std::make_shared<
+                        ::Engine::Graphics::GraphicsCommandPacket>();
                     auto shadowCommands = std::make_shared<
                         ::Engine::Graphics::GraphicsCommandPacket>();
                     auto sceneCommands = std::make_shared<
                         ::Engine::Graphics::GraphicsCommandPacket>();
-                    m_scene.RecordGpuParticleSimulation(shadowCommands.get());
+                    m_scene.RecordGpuParticleSimulation(computeCommands.get());
                     if (m_input.clientWidth && m_input.clientHeight)
                         if (auto* gameCamera = m_scene.FindGameCamera())
                         {
@@ -217,8 +267,11 @@ private:
                         *shadowCommands);
                     m_scene.SetLastNativeOcclusionCulledCount(
                         m_previousOcclusionCulled);
+                    m_timings.commandRecordingMs = std::chrono::duration<double,
+                        std::milli>(std::chrono::steady_clock::now() - recordStart).count();
                     m_snapshot = m_scene.GetPublishedSceneSnapshot();
                     m_retired = m_scene.TakeRetiredGraphicsResources();
+                    m_computeCommands = std::move(computeCommands);
                     m_shadowCommands = std::move(shadowCommands);
                     m_sceneCommands = std::move(sceneCommands);
                 }
@@ -243,11 +296,13 @@ private:
     ::Engine::Core::NativeInputSnapshot m_input;
     std::shared_ptr<const ::Engine::Scene::Scene::SceneSnapshot> m_snapshot;
     ::Engine::Scene::Scene::RetiredGraphicsResources m_retired;
+    std::shared_ptr<const ::Engine::Graphics::GraphicsCommandPacket> m_computeCommands;
     std::shared_ptr<const ::Engine::Graphics::GraphicsCommandPacket> m_shadowCommands;
     std::shared_ptr<const ::Engine::Graphics::GraphicsCommandPacket> m_sceneCommands;
     std::exception_ptr m_failure;
     float m_deltaTime = 0.f;
     std::chrono::steady_clock::time_point m_frameStartedAt;
+    TickResult::Timings m_timings;
     uint32_t m_previousOcclusionCulled = 0;
     bool m_ready = false;
     bool m_busy = false;
@@ -263,8 +318,8 @@ private:
 class RenderLoop
 {
 public:
-    explicit RenderLoop(::Engine::Renderers::IGameRenderer& renderer)
-        : m_renderer(renderer)
+    RenderLoop(::Engine::Renderers::IGameRenderer& renderer, std::string scenePath)
+        : m_renderer(renderer), m_scenePath(std::move(scenePath))
     {
         char workerFlag[2]{};
         m_workerRecordingEnabled = GetEnvironmentVariableA(
@@ -279,7 +334,11 @@ public:
         {
             m_benchmark.open(std::filesystem::path(path), std::ios::trunc);
             if (m_benchmark)
-                m_benchmark << "frame,worker,shadow_ms,frame_ms,latency_ms\n";
+                m_benchmark << "frame,worker,shadow_ms,frame_ms,latency_ms,backend,scene,gpu,width,height,"
+                    "simulation_update_ms,update_handoff_wait_ms,scene_prepare_ms,command_record_ms,"
+                    "prepare_handoff_wait_ms,particle_replay_ms,worker_record_ms,shadow_replay_ms,clear_ms,scene_replay_ms,end_frame_ms,queue_submission_ms,"
+                    "present_ms,gpu_valid,gpu_stage_sum_ms,gpu_shadow_ms,gpu_terrain_ms,gpu_grass_ms,"
+                    "gpu_portal_ms,gpu_opaque_ms,gpu_transparent_ms\n";
         }
         m_worker = std::thread([this] { Run(); });
     }
@@ -307,8 +366,10 @@ public:
         packet.startedAt = tick.startedAt;
         packet.snapshot = std::move(tick.snapshot);
         packet.retired = std::move(tick.retired);
+        packet.computeCommands = std::move(tick.computeCommands);
         packet.shadowCommands = std::move(tick.shadowCommands);
         packet.sceneCommands = std::move(tick.sceneCommands);
+        packet.simulationTimings = tick.timings;
         packet.width = width;
         packet.height = height;
         SubmitAsync(Work::Frame, std::move(packet));
@@ -355,8 +416,10 @@ private:
         std::chrono::steady_clock::time_point startedAt;
         std::shared_ptr<const ::Engine::Scene::Scene::SceneSnapshot> snapshot;
         ::Engine::Scene::Scene::RetiredGraphicsResources retired;
+        std::shared_ptr<const ::Engine::Graphics::GraphicsCommandPacket> computeCommands;
         std::shared_ptr<const ::Engine::Graphics::GraphicsCommandPacket> shadowCommands;
         std::shared_ptr<const ::Engine::Graphics::GraphicsCommandPacket> sceneCommands;
+        SimulationLoop::TickResult::Timings simulationTimings;
         uint32_t width = 0, height = 0;
     };
 
@@ -409,41 +472,146 @@ private:
     void Draw(Packet packet)
     {
         const auto frameStart = std::chrono::steady_clock::now();
-        if (!packet.snapshot ||
+        if (!packet.snapshot || !packet.computeCommands ||
             !packet.shadowCommands || !packet.sceneCommands)
             throw std::logic_error("Render handoff has no recorded frame");
         auto graphicsContext = m_renderer.CreateFrameGraphicsContext();
-        const auto shadowStart = std::chrono::steady_clock::now();
-        // The shadow stream has its own native allocator/pool. Keep the render
-        // owner's frame context untouched while its recording worker runs.
+        using FramePlan = ::Engine::Rendering::RenderFramePlan;
+        constexpr FramePlan::ResourceId SceneData = 1;
+        constexpr FramePlan::ResourceId ParticleState = 2;
+        constexpr FramePlan::ResourceId ShadowMap = 3;
+        constexpr FramePlan::ResourceId SceneColor = 4;
+        constexpr FramePlan::ResourceId SceneDepth = 5;
+        constexpr FramePlan::ResourceId SwapChain = 6;
+        FramePlan plan;
+        double particleReplayMs = 0.0;
+        double shadowMs = 0.0;
         bool workerRecorded = false;
-        if (m_workerRecordingEnabled && m_renderer.SupportsWorkerCommands())
-        {
-            auto shadowRecording = ::Engine::Rendering::RenderJobs::Get().Submit(
-                [this, shadow = packet.shadowCommands]
-                { return m_renderer.RecordWorkerCommands(*shadow); });
-            workerRecorded = shadowRecording.get();
-        }
-        if (workerRecorded)
-            m_renderer.SubmitWorkerCommands();
-        else if (graphicsContext)
-            packet.shadowCommands->Replay(*graphicsContext);
-        const double shadowMs = std::chrono::duration<double, std::milli>(
-            std::chrono::steady_clock::now() - shadowStart).count();
-        m_renderer.Clear(0.1f, 0.1f, 0.1f);
-        if (graphicsContext)
-            packet.sceneCommands->Replay(*graphicsContext);
-        m_lastOcclusionCulled.store(
-            packet.sceneCommands->GetReplayOcclusionCulledCount(),
-            std::memory_order_release);
-        m_renderer.EndFrame();
+        double workerRecordMs = 0.0;
+        double shadowReplayMs = 0.0;
+        double clearMs = 0.0;
+        double sceneReplayMs = 0.0;
+        double endFrameMs = 0.0;
+        plan.AddPass("Particle simulation",
+            {{SceneData, FramePlan::Access::Read},
+             {ParticleState, FramePlan::Access::ReadWrite}},
+            [&]
+            {
+                const auto started = std::chrono::steady_clock::now();
+                if (graphicsContext) packet.computeCommands->Replay(*graphicsContext);
+                particleReplayMs = std::chrono::duration<double, std::milli>(
+                    std::chrono::steady_clock::now() - started).count();
+            });
+        plan.AddPass("Shadow rendering",
+            {{SceneData, FramePlan::Access::Read},
+             {ParticleState, FramePlan::Access::Read},
+             {ShadowMap, FramePlan::Access::Write}},
+            [&]
+            {
+                const auto shadowStart = std::chrono::steady_clock::now();
+                // The shadow stream has its own native allocator/pool. Keep
+                // the render owner's frame context untouched while it records.
+                if (m_workerRecordingEnabled && m_renderer.SupportsWorkerCommands())
+                {
+                    const auto workerRecordStart = std::chrono::steady_clock::now();
+                    auto shadowRecording = ::Engine::Rendering::RenderJobs::Get().Submit(
+                        [this, shadow = packet.shadowCommands]
+                        { return m_renderer.RecordWorkerCommands(*shadow); });
+                    workerRecorded = shadowRecording.get();
+                    workerRecordMs = std::chrono::duration<double, std::milli>(
+                        std::chrono::steady_clock::now() - workerRecordStart).count();
+                }
+                if (workerRecorded)
+                    m_renderer.SubmitWorkerCommands();
+                else if (graphicsContext)
+                {
+                    const auto replayStart = std::chrono::steady_clock::now();
+                    packet.shadowCommands->Replay(*graphicsContext);
+                    shadowReplayMs = std::chrono::duration<double, std::milli>(
+                        std::chrono::steady_clock::now() - replayStart).count();
+                }
+                shadowMs = std::chrono::duration<double, std::milli>(
+                    std::chrono::steady_clock::now() - shadowStart).count();
+            });
+        plan.AddPass("Clear scene color and depth",
+            {{SceneColor, FramePlan::Access::Write},
+             {SceneDepth, FramePlan::Access::Write}},
+            [&]
+            {
+                const auto started = std::chrono::steady_clock::now();
+                m_renderer.Clear(0.1f, 0.1f, 0.1f);
+                clearMs = std::chrono::duration<double, std::milli>(
+                    std::chrono::steady_clock::now() - started).count();
+            });
+        plan.AddPass("Scene color and depth",
+            {{SceneData, FramePlan::Access::Read},
+             {ParticleState, FramePlan::Access::Read},
+             {ShadowMap, FramePlan::Access::Read},
+             {SceneColor, FramePlan::Access::Write},
+             {SceneDepth, FramePlan::Access::Write}},
+            [&]
+            {
+                const auto started = std::chrono::steady_clock::now();
+                if (graphicsContext) packet.sceneCommands->Replay(*graphicsContext);
+                sceneReplayMs = std::chrono::duration<double, std::milli>(
+                    std::chrono::steady_clock::now() - started).count();
+                m_lastOcclusionCulled.store(
+                    packet.sceneCommands->GetReplayOcclusionCulledCount(),
+                    std::memory_order_release);
+            });
+        plan.AddPass("Post-process, composition, and present",
+            {{SceneColor, FramePlan::Access::Read},
+             {SceneDepth, FramePlan::Access::Read},
+             {SwapChain, FramePlan::Access::Write}},
+            [&]
+            {
+                const auto started = std::chrono::steady_clock::now();
+                m_renderer.EndFrame();
+                endFrameMs = std::chrono::duration<double, std::milli>(
+                    std::chrono::steady_clock::now() - started).count();
+            });
+        plan.Execute();
+        const double frameMs = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - frameStart).count();
+        const double latencyMs = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - packet.startedAt).count();
+        const auto telemetry = m_renderer.GetFrameTimingTelemetry();
+        double gpuTotalMs = 0.0;
+        for (double stageMs : telemetry.gpuMilliseconds) gpuTotalMs += stageMs;
         if (m_benchmark)
-            m_benchmark << ++m_benchmarkFrame << ',' << (workerRecorded ? 1 : 0)
-                << ',' << shadowMs << ',' <<
-                std::chrono::duration<double, std::milli>(
-                    std::chrono::steady_clock::now() - frameStart).count()
-                << ',' << std::chrono::duration<double, std::milli>(
-                    std::chrono::steady_clock::now() - packet.startedAt).count()
+            m_benchmark << std::fixed << std::setprecision(4)
+                << ++m_benchmarkFrame << ',' << (workerRecorded ? 1 : 0)
+                << ',' << shadowMs << ',' << frameMs << ',' << latencyMs
+                << ',' << CsvField(m_renderer.GetBackendName())
+                << ',' << CsvField(m_scenePath)
+                << ',' << CsvField(m_renderer.GetGraphicsDeviceName())
+                << ',' << m_renderer.GetWidth() << ',' << m_renderer.GetHeight()
+                << ',' << packet.simulationTimings.simulationUpdateMs
+                << ',' << packet.simulationTimings.updateHandoffWaitMs
+                << ',' << packet.simulationTimings.scenePreparationMs
+                << ',' << packet.simulationTimings.commandRecordingMs
+                << ',' << packet.simulationTimings.prepareHandoffWaitMs
+                << ',' << particleReplayMs
+                << ',' << workerRecordMs
+                << ',' << shadowReplayMs
+                << ',' << clearMs
+                << ',' << sceneReplayMs
+                << ',' << endFrameMs
+                << ',' << m_renderer.GetLastQueueSubmissionMilliseconds()
+                << ',' << m_renderer.GetLastPresentationMilliseconds()
+                << ',' << (telemetry.gpuTimingsValid ? 1 : 0)
+                << ',' << gpuTotalMs
+                << ',' << telemetry.gpuMilliseconds[static_cast<size_t>(
+                    ::Engine::Graphics::GpuTimingStage::Shadow)]
+                << ',' << telemetry.gpuMilliseconds[static_cast<size_t>(
+                    ::Engine::Graphics::GpuTimingStage::Terrain)]
+                << ',' << telemetry.gpuMilliseconds[static_cast<size_t>(
+                    ::Engine::Graphics::GpuTimingStage::Grass)]
+                << ',' << telemetry.gpuMilliseconds[static_cast<size_t>(
+                    ::Engine::Graphics::GpuTimingStage::Portal)]
+                << ',' << telemetry.OpaqueMilliseconds()
+                << ',' << telemetry.gpuMilliseconds[static_cast<size_t>(
+                    ::Engine::Graphics::GpuTimingStage::Transparent)]
                 << '\n';
         const uint64_t token = m_renderer.GetSubmittedFrameToken();
         if (token)
@@ -451,7 +619,7 @@ private:
         // The packet owns mesh buffer references used by this submission.
         // Keep the packet and replaced scene resources until the GPU fence.
         m_retiredFrames.push_back({token, std::move(packet.retired),
-            packet.shadowCommands, packet.sceneCommands});
+            packet.computeCommands, packet.shadowCommands, packet.sceneCommands});
         RetireCompletedFrames();
     }
 
@@ -521,6 +689,7 @@ private:
     }
 
     ::Engine::Renderers::IGameRenderer& m_renderer;
+    std::string m_scenePath;
     bool m_workerRecordingEnabled = false;
     std::ofstream m_benchmark;
     uint64_t m_benchmarkFrame = 0;
@@ -533,6 +702,7 @@ private:
     {
         uint64_t token = 0;
         ::Engine::Scene::Scene::RetiredGraphicsResources resources;
+        std::shared_ptr<const ::Engine::Graphics::GraphicsCommandPacket> computeCommands;
         std::shared_ptr<const ::Engine::Graphics::GraphicsCommandPacket> shadowCommands;
         std::shared_ptr<const ::Engine::Graphics::GraphicsCommandPacket> sceneCommands;
     };
@@ -581,11 +751,15 @@ int GameApplication::Run(HINSTANCE instance)
     const std::string defaultScene = settings.defaultScene.empty()
         ? GetFallbackScenePath() : settings.defaultScene;
     Engine::Core::SceneManager::SetDefaultScenePath(defaultScene);
-    if (!scene.Load(defaultScene))
-        scene.Load(GetFallbackScenePath());
+    std::string loadedScenePath = defaultScene;
+    if (!scene.Load(loadedScenePath))
+    {
+        loadedScenePath = GetFallbackScenePath();
+        scene.Load(loadedScenePath);
+    }
 
     scene.Start();
-    RenderLoop renderLoop(*renderer);
+    RenderLoop renderLoop(*renderer, loadedScenePath);
     scene.SetBeforeGpuResourceDestruction([&renderLoop] { renderLoop.WaitIdle(); });
     SimulationLoop simulation(scene);
     splash.SetProgress(0.90f, L"Starting game...");

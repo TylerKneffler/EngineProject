@@ -57,6 +57,15 @@ namespace Engine::Editor
         Engine::Threading::CapturedText output;
         output << PerformanceProvenanceFields() << ",\"graphics_backend\":"
             << PerformanceJsonString(renderer->GetBackendName())
+            << ",\"graphics_device\":"
+            << PerformanceJsonString(renderer->GetGraphicsDeviceName())
+            << ",\"scene_path\":"
+            << PerformanceJsonString(sample.scenePath)
+            << ",\"benchmark_scope\":"
+            << PerformanceJsonString(std::getenv("ENGINE_EDITOR_BENCHMARK_SCOPE")
+                ? std::getenv("ENGINE_EDITOR_BENCHMARK_SCOPE") : "editor")
+            << ",\"render_width\":" << renderer->GetWidth()
+            << ",\"render_height\":" << renderer->GetHeight()
             << ",\"render_scale\":" << renderer->GetRenderScale()
             << ",\"dynamic_render_scale\":" << (renderer->IsDynamicRenderScaleEnabled() ? "true" : "false")
             << ",\"temporal_upscaling\":" << (renderer->IsTemporalUpscalingEnabled() ? "true" : "false") << ',';
@@ -91,17 +100,17 @@ namespace Engine::Editor
             ? scene->GetLastUpdateTimings() : Scene::Scene::UpdateTimings{};
         const auto& prepareTimings = scene->GetLastPrepareTimings();
         double uiRenderMilliseconds = 0.0;
-        double presentMilliseconds = 0.0;
+        const double presentMilliseconds = renderer->GetLastPresentationMilliseconds();
         double prepareFrameMilliseconds = 0.0;
         double beginUiMilliseconds = 0.0;
         double renderSetupMilliseconds = 0.0;
         const auto gpuTiming = renderer->GetGraphicsProvider()
             ->GetContextFactory()->GetFrameTimingTelemetry();
-        if (auto* dx11 = dynamic_cast<Engine::Renderers::DX11EditorRenderer*>(
-            renderer))
+        const double queueSubmissionMilliseconds =
+            renderer->GetLastQueueSubmissionMilliseconds();
+        if (auto* dx11 = dynamic_cast<Engine::Renderers::DX11EditorRenderer*>(renderer))
         {
             uiRenderMilliseconds = dx11->GetLastUiRenderMilliseconds();
-            presentMilliseconds = dx11->GetLastPresentMilliseconds();
             prepareFrameMilliseconds = dx11->GetLastPrepareFrameMilliseconds();
             beginUiMilliseconds = dx11->GetLastBeginUiMilliseconds();
             renderSetupMilliseconds = dx11->GetLastRenderSetupMilliseconds();
@@ -242,6 +251,7 @@ namespace Engine::Editor
             << ",\"pipeline_retained_frames\":" << sample.pipelineRetainedFrames
             << ",\"ui_render_ms\":" << uiRenderMilliseconds
             << ",\"present_ms\":" << presentMilliseconds
+            << ",\"queue_submission_ms\":" << queueSubmissionMilliseconds
             << ",\"gpu_valid\":"
             << (gpuTiming.gpuTimingsValid ? "true" : "false")
             << ",\"gpu_sample_id\":" << gpuTiming.gpuSampleId
@@ -343,8 +353,12 @@ namespace Engine::Editor
             << ",\"spatial_dormant_fields\":" << scene->GetSpatialUpdateScheduler().dormantCount;
         const auto& grass = scene->GetGrassPerformance();
         const auto& renderCpu=sample.renderCpu;
+        const auto frameUploadStats = scene->GetCurrentFrameUploadStats();
         renderCpu.instances.WriteJson(output);
         output << ",\"render_metrics_scope\":\"all_main_views\""
+            << ",\"frame_upload_bytes\":" << frameUploadStats.bytes
+            << ",\"frame_upload_buffer_allocations\":" << frameUploadStats.bufferAllocations
+            << ",\"frame_upload_allocator_growths\":" << frameUploadStats.allocatorGrowths
             << ",\"render_cpu_total_ms\":" << renderCpu.totalMs
             << ",\"render_startup_ms\":" << renderCpu.startupMs
             << ",\"render_cluster_prepare_ms\":" << renderCpu.clusterPreparationMs
@@ -372,6 +386,73 @@ namespace Engine::Editor
             << ",\"render_candidate_draws\":" << renderCpu.candidateDraws
             << ",\"render_physical_draws\":" << renderCpu.physicalDraws
             << ",\"render_candidate_triangles\":" << renderCpu.candidateTriangles
+            << ",\"render_visibility_frame_items\":" << renderCpu.visibilityFrameItems
+            << ",\"render_visibility_candidates\":" << renderCpu.visibilityCandidates
+            << ",\"render_visibility_accepted\":" << renderCpu.visibilityAccepted
+            << ",\"render_camera_visibility_views\":" << renderCpu.cameraVisibility.views
+            << ",\"render_camera_visibility_frame_items\":" << renderCpu.cameraVisibility.frameItems
+            << ",\"render_camera_visibility_candidates\":" << renderCpu.cameraVisibility.candidateItems
+            << ",\"render_camera_visibility_accepted\":" << renderCpu.cameraVisibility.acceptedItems
+            << ",\"render_camera_bvh_nodes_visited\":" << renderCpu.cameraVisibility.bvhNodesVisited
+            << ",\"render_camera_bvh_bounds_tested\":" << renderCpu.cameraVisibility.bvhBoundsTested
+            << ",\"render_camera_visible_slots\":" << renderCpu.cameraVisibility.visibleSlots
+            << ",\"render_camera_instance_tiles_submitted\":" << renderCpu.cameraVisibility.instanceTilesSubmitted
+            << ",\"render_camera_non_terrain_instance_tiles_submitted\":" << renderCpu.cameraVisibility.nonTerrainInstanceTilesSubmitted
+            << ",\"render_camera_placement_candidates\":" << renderCpu.cameraVisibility.placementCandidates
+            << ",\"render_camera_draw_groups\":" << renderCpu.cameraVisibility.drawGroups
+            << ",\"render_camera_material_groups\":" << renderCpu.cameraVisibility.materialGroups
+            << ",\"render_camera_screen_selected_instances_lod0\":" << renderCpu.cameraVisibility.screenSelectedInstancesByLod[0]
+            << ",\"render_camera_screen_selected_instances_lod1\":" << renderCpu.cameraVisibility.screenSelectedInstancesByLod[1]
+            << ",\"render_camera_screen_selected_instances_lod2\":" << renderCpu.cameraVisibility.screenSelectedInstancesByLod[2]
+            << ",\"render_camera_screen_selected_triangles_lod0\":" << renderCpu.cameraVisibility.screenSelectedTrianglesByLod[0]
+            << ",\"render_camera_screen_selected_triangles_lod1\":" << renderCpu.cameraVisibility.screenSelectedTrianglesByLod[1]
+            << ",\"render_camera_screen_selected_triangles_lod2\":" << renderCpu.cameraVisibility.screenSelectedTrianglesByLod[2]
+            << ",\"render_camera_placement_candidates_lod0\":" << renderCpu.cameraVisibility.placementCandidatesByLod[0]
+            << ",\"render_camera_placement_candidates_lod1\":" << renderCpu.cameraVisibility.placementCandidatesByLod[1]
+            << ",\"render_camera_placement_candidates_lod2\":" << renderCpu.cameraVisibility.placementCandidatesByLod[2]
+            << ",\"render_camera_placement_triangles_lod0\":" << renderCpu.cameraVisibility.placementTrianglesByLod[0]
+            << ",\"render_camera_placement_triangles_lod1\":" << renderCpu.cameraVisibility.placementTrianglesByLod[1]
+            << ",\"render_camera_placement_triangles_lod2\":" << renderCpu.cameraVisibility.placementTrianglesByLod[2]
+            << ",\"render_shadow_visibility_views\":" << renderCpu.shadowVisibility.views
+            << ",\"render_shadow_visibility_frame_items\":" << renderCpu.shadowVisibility.frameItems
+            << ",\"render_shadow_visibility_candidates\":" << renderCpu.shadowVisibility.candidateItems
+            << ",\"render_shadow_visibility_accepted\":" << renderCpu.shadowVisibility.acceptedItems
+            << ",\"render_shadow_bvh_nodes_visited\":" << renderCpu.shadowVisibility.bvhNodesVisited
+            << ",\"render_shadow_bvh_bounds_tested\":" << renderCpu.shadowVisibility.bvhBoundsTested
+            << ",\"render_shadow_visible_slots\":" << renderCpu.shadowVisibility.visibleSlots
+            << ",\"render_shadow_instance_tiles_submitted\":" << renderCpu.shadowVisibility.instanceTilesSubmitted
+            << ",\"render_shadow_non_terrain_instance_tiles_submitted\":" << renderCpu.shadowVisibility.nonTerrainInstanceTilesSubmitted
+            << ",\"render_shadow_placement_candidates\":" << renderCpu.shadowVisibility.placementCandidates
+            << ",\"render_shadow_draw_groups\":" << renderCpu.shadowVisibility.drawGroups
+            << ",\"render_shadow_material_groups\":" << renderCpu.shadowVisibility.materialGroups
+            << ",\"render_shadow_placement_candidates_lod0\":" << renderCpu.shadowVisibility.placementCandidatesByLod[0]
+            << ",\"render_shadow_placement_candidates_lod1\":" << renderCpu.shadowVisibility.placementCandidatesByLod[1]
+            << ",\"render_shadow_placement_candidates_lod2\":" << renderCpu.shadowVisibility.placementCandidatesByLod[2]
+            << ",\"render_shadow_placement_triangles_lod0\":" << renderCpu.shadowVisibility.placementTrianglesByLod[0]
+            << ",\"render_shadow_placement_triangles_lod1\":" << renderCpu.shadowVisibility.placementTrianglesByLod[1]
+            << ",\"render_shadow_placement_triangles_lod2\":" << renderCpu.shadowVisibility.placementTrianglesByLod[2]
+            << ",\"render_camera_gpu_selected_instances_lod0\":" << renderCpu.cameraVisibility.gpuSelectedInstancesByLod[0]
+            << ",\"render_camera_gpu_selected_instances_lod1\":" << renderCpu.cameraVisibility.gpuSelectedInstancesByLod[1]
+            << ",\"render_camera_gpu_selected_instances_lod2\":" << renderCpu.cameraVisibility.gpuSelectedInstancesByLod[2]
+            << ",\"render_camera_gpu_transition_instances_lod0\":" << renderCpu.cameraVisibility.gpuTransitionBandInstancesByLod[0]
+            << ",\"render_camera_gpu_transition_instances_lod1\":" << renderCpu.cameraVisibility.gpuTransitionBandInstancesByLod[1]
+            << ",\"render_camera_gpu_transition_instances_lod2\":" << renderCpu.cameraVisibility.gpuTransitionBandInstancesByLod[2]
+            << ",\"render_camera_gpu_readback_samples\":" << renderCpu.cameraVisibility.gpuReadbackSamples
+            << ",\"render_shadow_gpu_selected_instances_lod0\":" << renderCpu.shadowVisibility.gpuSelectedInstancesByLod[0]
+            << ",\"render_shadow_gpu_selected_instances_lod1\":" << renderCpu.shadowVisibility.gpuSelectedInstancesByLod[1]
+            << ",\"render_shadow_gpu_selected_instances_lod2\":" << renderCpu.shadowVisibility.gpuSelectedInstancesByLod[2]
+            << ",\"render_shadow_gpu_transition_instances_lod0\":" << renderCpu.shadowVisibility.gpuTransitionBandInstancesByLod[0]
+            << ",\"render_shadow_gpu_transition_instances_lod1\":" << renderCpu.shadowVisibility.gpuTransitionBandInstancesByLod[1]
+            << ",\"render_shadow_gpu_transition_instances_lod2\":" << renderCpu.shadowVisibility.gpuTransitionBandInstancesByLod[2]
+            << ",\"render_shadow_gpu_readback_samples\":" << renderCpu.shadowVisibility.gpuReadbackSamples
+            << ",\"render_camera_view_identity\":" << renderCpu.cameraVisibility.viewIdentity
+            << ",\"render_shadow_view_identity\":" << renderCpu.shadowVisibility.viewIdentity
+            << ",\"render_color_selected_lod0_draws\":" << renderCpu.colorSelectedLodDraws[0]
+            << ",\"render_color_selected_lod1_draws\":" << renderCpu.colorSelectedLodDraws[1]
+            << ",\"render_color_selected_lod2_draws\":" << renderCpu.colorSelectedLodDraws[2]
+            << ",\"render_shadow_selected_lod0_draws\":" << renderCpu.shadowSelectedLodDraws[0]
+            << ",\"render_shadow_selected_lod1_draws\":" << renderCpu.shadowSelectedLodDraws[1]
+            << ",\"render_shadow_selected_lod2_draws\":" << renderCpu.shadowSelectedLodDraws[2]
             << ",\"render_submitted_instances\":" << renderCpu.submittedInstances
             << ",\"render_submitted_triangles\":" << renderCpu.submittedTriangles
             << ",\"render_terrain_occlusion_rejected\":" << renderCpu.terrainOcclusionRejected
@@ -418,6 +499,22 @@ namespace Engine::Editor
             << ",\"grass_gpu_bytes\":" << grass.gpuBytes
             << ",\"grass_instances\":" << grass.instances
             << ",\"grass_instance_upload_bytes\":" << grass.instanceUploadBytes;
+        const auto writeViewIdentities = [&output](const char* field,
+            const Engine::Rendering::RenderVisibilityMetrics& visibility)
+        {
+            output << ",\"" << field << "\":[";
+            for (size_t i=0;i<visibility.viewIdentities.size();++i)
+            {
+                if (i) output << ',';
+                const auto& id=visibility.viewIdentities[i];
+                output << "{\"id\":" << id.id << ",\"portal\":"
+                    << (id.portal ? "true":"false") << ",\"shadow\":"
+                    << (id.shadow ? "true":"false") << '}';
+            }
+            output << ']';
+        };
+        writeViewIdentities("render_camera_view_identities",renderCpu.cameraVisibility);
+        writeViewIdentities("render_shadow_view_identities",renderCpu.shadowVisibility);
         output << ",\"grass_active_tiles\":" << grass.activeTiles
             << ",\"grass_lod_transition_tiles\":" << grass.transitionTiles
             << ",\"grass_fading_tiles\":" << grass.fadingTiles;

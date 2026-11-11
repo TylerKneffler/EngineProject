@@ -693,6 +693,15 @@ bool D3D11GraphicsContext::CopyBuffer(
     region.back = 1;
     m_context->CopySubresourceRegion(dst->GetBuffer(), 0, 0, 0, 0,
         src->GetBuffer(), 0, &region);
+    D3D11_QUERY_DESC queryDesc{D3D11_QUERY_EVENT,0};
+    Microsoft::WRL::ComPtr<ID3D11Query> fence;
+    Microsoft::WRL::ComPtr<ID3D11Device> device;
+    m_context->GetDevice(&device);
+    if (device && SUCCEEDED(device->CreateQuery(&queryDesc,&fence)))
+    {
+        m_context->End(fence.Get());
+        dst->SetReadbackFence(std::move(fence));
+    }
     return true;
 }
 

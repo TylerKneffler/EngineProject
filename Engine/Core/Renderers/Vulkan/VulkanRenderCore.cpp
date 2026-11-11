@@ -20,7 +20,6 @@ VulkanRenderCore::~VulkanRenderCore()
     for (uint32_t i = 0; i < FRAME_COUNT; ++i)
     {
         if (m_imageAvailable[i]) vkDestroySemaphore(m_device, m_imageAvailable[i], nullptr);
-        if (m_renderFinished[i]) vkDestroySemaphore(m_device, m_renderFinished[i], nullptr);
         if (m_inFlight[i]) vkDestroyFence(m_device, m_inFlight[i], nullptr);
     }
     if (m_commandPool) vkDestroyCommandPool(m_device, m_commandPool, nullptr);
@@ -172,7 +171,6 @@ void VulkanRenderCore::CreateSyncResources()
     for (uint32_t i = 0; i < FRAME_COUNT; ++i)
     {
         VkCheck(vkCreateSemaphore(m_device, &semaphoreInfo, nullptr, &m_imageAvailable[i]), "vkCreateSemaphore");
-        VkCheck(vkCreateSemaphore(m_device, &semaphoreInfo, nullptr, &m_renderFinished[i]), "vkCreateSemaphore");
         VkCheck(vkCreateFence(m_device, &fenceInfo, nullptr, &m_inFlight[i]), "vkCreateFence");
     }
 }
@@ -285,6 +283,11 @@ void VulkanRenderCore::CreateSwapchain()
     vkGetSwapchainImagesKHR(m_device, m_swapchain, &imageCount, nullptr);
     m_images.resize(imageCount);
     vkGetSwapchainImagesKHR(m_device, m_swapchain, &imageCount, m_images.data());
+    m_renderFinished.resize(imageCount, VK_NULL_HANDLE);
+    VkSemaphoreCreateInfo semaphoreInfo{ VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
+    for (VkSemaphore& semaphore : m_renderFinished)
+        VkCheck(vkCreateSemaphore(m_device, &semaphoreInfo, nullptr, &semaphore),
+            "vkCreateSemaphore(render finished)");
 
     // The post-process pipeline and its composition commands use this render pass.
     // Swapchain recreation must retain the handle for their lifetime.
@@ -328,8 +331,11 @@ void VulkanRenderCore::DestroySwapchain()
     for (auto framebuffer : m_framebuffers) if (framebuffer) vkDestroyFramebuffer(m_device, framebuffer, nullptr);
     for (auto& depth : m_depthImages) VulkanDestroyImage(m_device, depth);
     for (auto view : m_imageViews) if (view) vkDestroyImageView(m_device, view, nullptr);
+    for (VkSemaphore semaphore : m_renderFinished)
+        if (semaphore) vkDestroySemaphore(m_device, semaphore, nullptr);
     if (m_swapchain) vkDestroySwapchainKHR(m_device, m_swapchain, nullptr);
     m_framebuffers.clear(); m_depthImages.clear(); m_imageViews.clear(); m_images.clear();
+    m_renderFinished.clear();
     m_swapchain = VK_NULL_HANDLE;
 }
 
@@ -341,6 +347,8 @@ void VulkanRenderCore::Resize(uint32_t width, uint32_t height)
 
 VkCommandBuffer VulkanRenderCore::BeginFrame()
 {
+    m_lastPresentationMilliseconds = 0.0;
+    m_lastQueueSubmissionMilliseconds = 0.0;
     if (m_resizePending)
     {
         {
@@ -376,14 +384,20 @@ void VulkanRenderCore::EndFrame()
     VkCommandBuffer commands[2] = { m_preFrameCommandBuffer, m_currentCommandBuffer };
     submit.commandBufferCount = m_preFrameCommandBuffer ? 2u : 1u;
     submit.pCommandBuffers = m_preFrameCommandBuffer ? commands : &m_currentCommandBuffer;
-    submit.signalSemaphoreCount = 1; submit.pSignalSemaphores = &m_renderFinished[m_frameIndex];
+    submit.signalSemaphoreCount = 1; submit.pSignalSemaphores = &m_renderFinished[m_imageIndex];
     std::lock_guard queueLock(VulkanQueueMutex());
+    const auto submissionStart = std::chrono::steady_clock::now();
     VkCheck(vkQueueSubmit(m_queue, 1, &submit, m_inFlight[m_frameIndex]), "vkQueueSubmit");
+    m_lastQueueSubmissionMilliseconds = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - submissionStart).count();
     m_frameSerial[m_frameIndex] = ++m_submittedSerial;
     VkPresentInfoKHR present{ VK_STRUCTURE_TYPE_PRESENT_INFO_KHR };
-    present.waitSemaphoreCount = 1; present.pWaitSemaphores = &m_renderFinished[m_frameIndex];
+    present.waitSemaphoreCount = 1; present.pWaitSemaphores = &m_renderFinished[m_imageIndex];
     present.swapchainCount = 1; present.pSwapchains = &m_swapchain; present.pImageIndices = &m_imageIndex;
+    const auto presentationStart = std::chrono::steady_clock::now();
     VkResult result = vkQueuePresentKHR(m_queue, &present);
+    m_lastPresentationMilliseconds = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - presentationStart).count();
     if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) m_resizePending = true;
     else VkCheck(result, "vkQueuePresentKHR");
     m_currentCommandBuffer = VK_NULL_HANDLE;

@@ -1,9 +1,22 @@
 #include "pch.h"
 #include "DX11EditorRenderer.h"
 #include "D3D11View.h"
+#include "Core/Renderers/GraphicsDeviceName.h"
 
 namespace Engine::Renderers
 {
+std::string DX11EditorRenderer::GetGraphicsDeviceName() const
+{
+    if (!m_device) return "unknown";
+    Microsoft::WRL::ComPtr<IDXGIDevice> dxgiDevice;
+    Microsoft::WRL::ComPtr<IDXGIAdapter> adapter;
+    DXGI_ADAPTER_DESC description{};
+    if (FAILED(m_device.As(&dxgiDevice)) ||
+        FAILED(dxgiDevice->GetAdapter(&adapter)) ||
+        FAILED(adapter->GetDesc(&description))) return "unknown";
+    return Details::GraphicsDeviceNameFromWide(description.Description);
+}
+
 DX11EditorRenderer::~DX11EditorRenderer()
 {
     if (m_context) m_context->ClearState();
@@ -143,6 +156,7 @@ void DX11EditorRenderer::Clear(float r, float g, float b, float a)
 
 void DX11EditorRenderer::RenderIfNeeded(std::function<void()> drawFn)
 {
+    m_lastQueueSubmissionMilliseconds = 0.0;
     m_lastUiRenderMilliseconds = 0.0;
     m_lastPresentMilliseconds = 0.0;
     m_lastPrepareFrameMilliseconds = 0.0;
@@ -181,6 +195,9 @@ void DX11EditorRenderer::RenderIfNeeded(std::function<void()> drawFn)
     if (m_uiHooks.endFrame) m_uiHooks.endFrame();
     if (m_graphicsProvider)
         m_graphicsProvider->GetContextFactory()->FinalizeFrame();
+    if (m_graphicsProvider)
+        m_lastQueueSubmissionMilliseconds = m_graphicsProvider->GetContextFactory()
+            ->GetFrameTimingTelemetry().cpuSubmissionMilliseconds;
     const auto presentBegin = std::chrono::steady_clock::now();
     m_lastUiRenderMilliseconds = std::chrono::duration<double, std::milli>(
         presentBegin - uiBegin).count();
