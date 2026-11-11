@@ -3,6 +3,7 @@
 #include <wrl/client.h>
 #include <d3d12.h>
 #include <mutex>
+#include <vector>
 
 // ---------------------------------------------------------------------------
 // D3D12GraphicsBuffer — DirectX 12 GPU buffer wrapper
@@ -56,6 +57,7 @@ class D3D12BufferFactory : public Engine::Graphics::IGraphicsBufferFactory
 public:
     explicit D3D12BufferFactory(ID3D12Device* device, ID3D12CommandQueue* queue = nullptr)
         : m_device(device), m_queue(queue) {}
+    ~D3D12BufferFactory() override;
 
     std::unique_ptr<Engine::Graphics::IGraphicsBuffer> CreateBuffer(
         Engine::Graphics::IGraphicsBuffer::Usage usage,
@@ -65,6 +67,8 @@ public:
         uint32_t elementStride = 0) override;
 
     std::unique_ptr<Engine::Graphics::IGraphicsBuffer> CreateStaticVertexBuffer(
+        uint64_t sizeBytes, const void* initialData) override;
+    std::unique_ptr<Engine::Graphics::IGraphicsBuffer> CreateStaticVertexBufferDeferred(
         uint64_t sizeBytes, const void* initialData) override;
 
 private:
@@ -85,5 +89,15 @@ private:
     // One idle bundle. Each upload leases it exclusively and returns it only
     // after completion. Concurrent uploads use independent local bundles.
     std::unique_ptr<StaticUploadCommands> m_staticCommands;
+    struct PendingStaticUpload
+    {
+        std::unique_ptr<Engine::Graphics::IGraphicsBuffer> staging;
+        std::unique_ptr<StaticUploadCommands> commands;
+        Microsoft::WRL::ComPtr<ID3D12Resource> destination;
+    };
+    std::vector<PendingStaticUpload> m_pendingStaticUploads;
+    void CollectCompletedStaticUploads();
+    std::unique_ptr<Engine::Graphics::IGraphicsBuffer> CreateStaticVertexBufferImpl(
+        uint64_t sizeBytes, const void* initialData, bool deferred);
 };
 }

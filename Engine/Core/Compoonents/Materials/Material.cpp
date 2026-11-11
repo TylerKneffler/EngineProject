@@ -610,14 +610,16 @@ Material::JsonValue Material::Serialize() const
     return value;
 }
 
-void Material::CopyResolvedStateFrom(const Material& source)
+void Material::CopyResolvedStateFrom(const Material& source,
+    const JsonValue* serializedSource)
 {
     if (&source == this) return;
     // Registered fields write through this component's bindings, never copy the
     // source's callbacks, Owner or lifecycle state. Serialized textures are not
     // registered fields; retain the exact resolved resources below instead of
     // reloading the material file and resolving ten texture paths per batch.
-    Component::Deserialize(source.Serialize());
+    if (serializedSource) Component::Deserialize(*serializedSource);
+    else Component::Deserialize(source.Serialize());
     m_filePath = source.m_filePath;
     shader = source.shader;
     shaderError.clear();

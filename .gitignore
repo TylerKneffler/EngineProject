@@ -4,6 +4,12 @@ build/
 .vscode/engine-attach-request.json
 .vscode/engine-last-code-file.txt
 .local/
+!.local/
+.local/*
+!.local/tests/
+.local/tests/*
+!.local/tests/StreamedPrefabBenchmark.cpp
+!.local/tests/DX12DeferredUploadTests.cpp
 /Engine/Core/Assets/TerrainData/TerrainPerformance/BakedCells/
 
 !.local\tests\OakBackendCapture.cpp

@@ -396,7 +396,8 @@ JsonValue SceneSerializer::ReadPrefabFile(const std::string& path)
 Engine::Core::Object* SceneSerializer::InstantiatePrefabFromValue(
     Engine::Scene::Scene& scene,
     const std::string& path, const JsonValue& parsed,
-    Engine::Graphics::IGraphicsProvider* graphicsProvider)
+    Engine::Graphics::IGraphicsProvider* graphicsProvider,
+    bool captureSourceSnapshot)
 {
     PrefabLoadProfile profile(path);
     EnsureBuiltinsRegistered();
@@ -449,6 +450,9 @@ Engine::Core::Object* SceneSerializer::InstantiatePrefabFromValue(
             for (const auto& [object, index] : legacyNodeBindings)
                 model->BindNode(index, object);
         }
+        // Read-only rendering prototypes are not prefab instances and never
+        // participate in override editing or scene serialization.
+        if (!captureSourceSnapshot) return rootObject;
         if (!document->sourceSnapshot ||
             document->sourceProvider != graphicsProvider)
         {

@@ -3,6 +3,9 @@
 #include "Core/Scene/Scene.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include "Core/Serialization/PrefabLoadProfile.h"
+#include "Core/Serialization/PreparedPrefab.h"
+#include "Core/Rendering/RenderJobs.h"
+#include "Core/Rendering/SharedMeshBuffers.h"
 #include "Core/Compoonents/Materials/Material.h"
 #include "Core/Compoonents/Physics/PrimitiveObjectCollider.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
@@ -11,6 +14,7 @@
 #include <filesystem>
 #include <limits>
 #include <cmath>
+#include <future>
 #include "Core/Graphics/IGraphicsProvider.h"
 #include <glm/gtc/matrix_transform.hpp>
 #define GLM_ENABLE_EXPERIMENTAL
@@ -24,9 +28,17 @@ namespace
 // graphics provider and is never attached to the live scene.
 struct SharedPrefabPrototype
 {
+    struct PreparedGeometry
+    {
+        std::shared_ptr<Mesh> mesh;
+        Engine::Rendering::PreparedMeshBuffer buffer;
+    };
     Engine::Scene::Scene scene;
     Engine::Core::Object* root = nullptr;
-    std::map<std::pair<const Mesh*, Engine::Graphics::IGraphicsProvider*>, std::weak_ptr<Mesh>> geometry;
+    using GeometryKey = std::pair<const Mesh*, Engine::Graphics::IGraphicsProvider*>;
+    std::map<GeometryKey, std::shared_ptr<Mesh>> geometry;
+    std::map<GeometryKey, std::future<PreparedGeometry>> pendingGeometry;
+    std::map<const Material*, Engine::Serialization::JsonValue> materials;
 };
 }
 float TerrainObjectLayer::prefabInstanceGroupSpanMeters=256.f;
@@ -105,7 +117,23 @@ struct TerrainObjectLayer::PrefabInstances
     }
     std::vector<uint64_t> generated;
     std::vector<std::shared_ptr<SharedPrefabPrototype>> prototypes;
+    std::shared_ptr<PrefabInstances> previous;
+    bool building = false;
+    std::string nextAsset;
+    size_t nextPart = 0;
+    size_t groupStart = 0;
+    std::map<std::pair<int,int>, std::shared_ptr<Mesh::InstanceData>> tileInstances;
+    using PrototypeKey = std::pair<std::string, std::filesystem::file_time_type>;
+    std::shared_ptr<std::atomic_bool> canceled = std::make_shared<std::atomic_bool>(false);
+    std::map<PrototypeKey, std::future<std::unique_ptr<Engine::Serialization::PreparedPrefab>>> pending;
+    std::map<PrototypeKey, std::unique_ptr<Engine::Serialization::PreparedPrefab>> prepared;
+    ~PrefabInstances() { canceled->store(true); }
 };
+
+bool TerrainObjectLayer::IsPrefabPreparationPending() const
+{
+    return m_prefabInstances && m_prefabInstances->building;
+}
 
 void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider)
 {
@@ -117,7 +145,7 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider)
     if (!changed && !m_prefabInstances) return;
     const bool sourceProbeActive=!changed && m_prefabInstances &&
         m_prefabInstances->provider==provider && m_prefabInstances->sourceProbeActive;
-    if (!changed && m_prefabInstances->provider==provider &&
+    if (!changed && m_prefabInstances->provider==provider && !m_prefabInstances->building &&
         now<m_prefabInstances->nextCheck && !sourceProbeActive) return;
     // Grass and other mesh-only layers keep their existing renderer without
     // paying for a placement signature when they have no prefab runtime.
@@ -150,7 +178,7 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider)
     };
     std::map<std::string,PrefabInstances::Source> sources;
     auto* scene=Owner->GetScene();
-    if (m_prefabInstances && m_prefabInstances->provider==provider &&
+    if (m_prefabInstances && !m_prefabInstances->building && m_prefabInstances->provider==provider &&
         m_prefabInstances->signature==signature &&
         m_prefabInstances->HasSameLods(objectLods) &&
         m_prefabInstances->HasSameConfiguration(*this) &&
@@ -220,25 +248,55 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider)
             for (const auto& variant:lods.meshes) bases[key(variant)]=base;
             for (const auto& variant:lods.shadowMeshes) bases[key(variant)]=base;
         }
+    // Resolve and classify each asset spelling once, not once per placement.
+    // Dense streamed cells often contain thousands of identical paths, and
+    // constructing filesystem paths repeatedly is expensive in debug builds.
+    std::map<std::string,std::string> placementGroups;
     for (const auto& placement:placements)
-        if (std::filesystem::path(placement.asset).extension()==".prefab")
+    {
+        auto [group,inserted]=placementGroups.try_emplace(placement.asset);
+        if (inserted && std::filesystem::path(placement.asset).extension()==".prefab")
         {
             const auto base=bases.find(key(placement.asset));
-            groups[base==bases.end() ? placement.asset:base->second].push_back(&placement);
+            group->second=base==bases.end() ? placement.asset:base->second;
         }
-    if (m_prefabInstances)
-        for (auto id:m_prefabInstances->generated)
-            if (auto* object=scene->FindObjectById(id)) scene->RemoveObject(object);
-    auto runtime=std::make_shared<PrefabInstances>();
-    runtime->provider=provider; runtime->signature=signature;
-    runtime->StoreConfiguration(*this);
+        if (!group->second.empty()) groups[group->second].push_back(&placement);
+    }
+    const bool resume = m_prefabInstances && m_prefabInstances->building &&
+        m_prefabInstances->provider == provider &&
+        m_prefabInstances->signature == signature &&
+        m_prefabInstances->sources == sources &&
+        m_prefabInstances->HasSameLods(objectLods) &&
+        m_prefabInstances->HasSameConfiguration(*this) &&
+        m_prefabInstances->HasGeneratedObjects(*scene);
+    std::shared_ptr<PrefabInstances> previous;
+    if (!resume && m_prefabInstances)
+    {
+        if (m_prefabInstances->building)
+        {
+            for (auto id:m_prefabInstances->generated)
+                if (auto* object=scene->FindObjectById(id)) scene->RemoveObject(object);
+            previous = m_prefabInstances->previous;
+        }
+        else previous = m_prefabInstances;
+    }
+    auto runtime=resume ? m_prefabInstances : std::make_shared<PrefabInstances>();
+    if (!resume)
+    {
+        runtime->provider=provider; runtime->signature=signature;
+        runtime->previous=std::move(previous);
+        runtime->StoreConfiguration(*this);
+        runtime->lods=objectLods;
+    }
+    runtime->building = false;
     runtime->nextCheck=now+std::chrono::seconds(1);
     // Neighboring streamed cells frequently use the same prefab. Keep one
     // provider-free prototype while at least one such cell remains loaded.
-    using PrototypeKey = std::pair<std::string, std::filesystem::file_time_type>;
+    using PrototypeKey = PrefabInstances::PrototypeKey;
     static std::map<PrototypeKey, std::weak_ptr<SharedPrefabPrototype>> prototypeCache;
     const auto create=[&](const std::string& name) {
         auto* object=scene->AddObject(name); object->runtimeOnly=true;
+        object->enabled=false;
         // New batches use layer-local coordinates. Preserving the old world
         // transform here would evaluate the growing scene graph for each batch
         // only to discard the result immediately below.
@@ -249,6 +307,7 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider)
         runtime->generated.push_back(scene->GetObjectId(object)); return object;
     };
     std::map<std::string,std::shared_ptr<SharedPrefabPrototype>> definitions;
+    bool constructedPrototype = false;
     const auto definition=[&](const std::string& asset) {
         auto& prototype=definitions[asset];
         if (!prototype)
@@ -261,17 +320,170 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider)
             if (!prototype)
             {
                 prototype = std::make_shared<SharedPrefabPrototype>();
-                prototype->root = Engine::Serialization::SceneSerializer::InstantiatePrefab(
-                    prototype->scene, resolved, nullptr);
+                auto prepared = runtime->prepared.find(cacheKey);
+                if (prepared != runtime->prepared.end() && prepared->second)
+                {
+                    Engine::Serialization::PreparedPrefab::Publication publication(*prepared->second);
+                    prototype->root = Engine::Serialization::SceneSerializer::InstantiatePrefabFromValue(
+                        prototype->scene, resolved, prepared->second->document, nullptr, false);
+                    runtime->prepared.erase(prepared);
+                }
+                else
+                    prototype->root = Engine::Serialization::SceneSerializer::InstantiatePrefab(
+                        prototype->scene, resolved, nullptr);
                 if (!prototype->root) { prototype.reset(); return static_cast<Engine::Core::Object*>(nullptr); }
+                constructedPrototype = true;
                 prototypeCache[cacheKey] = prototype;
             }
-            runtime->prototypes.push_back(prototype);
+            if (std::find(runtime->prototypes.begin(), runtime->prototypes.end(), prototype) == runtime->prototypes.end())
+                runtime->prototypes.push_back(prototype);
         }
         return prototype->root;
     };
+    bool processed = false;
     for (const auto& [asset,records]:groups)
     {
+        if (resume && asset < runtime->nextAsset) continue;
+        if (processed)
+        {
+            runtime->building = true;
+            runtime->nextAsset = asset;
+            break;
+        }
+        processed = true;
+        std::vector<std::string> required{asset};
+        if (const auto found = objectLods.find(asset); found != objectLods.end())
+        {
+            const auto addResidentLods = [&](std::vector<std::string> paths) {
+                paths.erase(std::remove(paths.begin(), paths.end(), std::string{}), paths.end());
+                if (paths.size() > 3) paths = {paths.front(), paths[1], paths.back()};
+                required.insert(required.end(), paths.begin(), paths.end());
+            };
+            addResidentLods(found->second.meshes);
+            addResidentLods(found->second.shadowMeshes);
+        }
+        bool waiting = false;
+        for (const auto& path : required)
+        {
+            if (path.empty()) continue;
+            const auto& resolved = key(path);
+            const PrototypeKey cacheKey{resolved, sources.at(path).stamp};
+            if (const auto cached = prototypeCache.find(cacheKey);
+                cached != prototypeCache.end() && !cached->second.expired()) continue;
+            if (runtime->prepared.count(cacheKey)) continue;
+            auto pending = runtime->pending.find(cacheKey);
+            if (pending == runtime->pending.end())
+            {
+                auto canceled = runtime->canceled;
+                auto future = Engine::Rendering::RenderJobs::Get().Submit([resolved, canceled] {
+                    return Engine::Serialization::PreparedPrefab::Load(resolved, canceled);
+                });
+                runtime->pending.emplace(cacheKey, std::move(future));
+                waiting = true;
+            }
+            else if (pending->second.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+                waiting = true;
+            else
+            {
+                try { runtime->prepared[cacheKey] = pending->second.get(); }
+                catch (...) { runtime->prepared[cacheKey] = nullptr; }
+                runtime->pending.erase(pending);
+            }
+        }
+        if (waiting)
+        {
+            runtime->building = true;
+            runtime->nextAsset = asset;
+            break;
+        }
+        // Publishing a prefab prototype and creating a graphics buffer can each
+        // take several milliseconds. Keep them in separate preparation steps,
+        // even when worker-produced geometry is already ready to upload.
+        bool publishedPrototype = false;
+        for (const auto& path : required)
+        {
+            if (path.empty()) continue;
+            if (definition(path) && constructedPrototype)
+            {
+                publishedPrototype = true;
+                break;
+            }
+        }
+        if (publishedPrototype)
+        {
+            runtime->building = true;
+            runtime->nextAsset = asset;
+            break;
+        }
+        bool geometryWaiting = false;
+        bool uploadedGeometry = false;
+        for (const auto& path : required)
+        {
+            if (path.empty()) continue;
+            auto* prototypeRoot = definition(path);
+            if (!prototypeRoot) continue;
+            const auto& prototype = definitions.at(path);
+            for (auto* original : prototypeRoot->GetComponentsInChildren<Mesh>())
+            {
+                if (!original->Owner->IsEnabledInHierarchy()) continue;
+                const SharedPrefabPrototype::GeometryKey geometryKey{original, provider};
+                if (prototype->geometry.count(geometryKey)) continue;
+                auto pendingGeometry = prototype->pendingGeometry.find(geometryKey);
+                if (pendingGeometry == prototype->pendingGeometry.end())
+                {
+                    auto vertices = original->GetVertices();
+                    auto indices = original->GetIndices();
+                    const auto part = original->Owner->transform.GetWorldMatrix();
+                    auto future = Engine::Rendering::RenderJobs::Get().Submit(
+                        [vertices = std::move(vertices), indices = std::move(indices), part]() mutable {
+                            if (!indices.empty())
+                            {
+                                std::vector<Mesh::Vertex> expanded;
+                                expanded.reserve(indices.size());
+                                for (auto index : indices) expanded.push_back(vertices.at(index));
+                                vertices = std::move(expanded);
+                            }
+                            if (vertices.empty()) return SharedPrefabPrototype::PreparedGeometry{};
+                            const auto tangentMatrix = glm::mat3(part);
+                            const auto normalMatrix = glm::transpose(glm::inverse(tangentMatrix));
+                            for (auto& vertex : vertices)
+                            {
+                                const auto position = glm::vec3(part * glm::vec4(vertex.pos[0], vertex.pos[1], vertex.pos[2], 1));
+                                auto normal = normalMatrix * glm::vec3(vertex.normal[0], vertex.normal[1], vertex.normal[2]);
+                                normal = glm::length(normal) > 1.e-6f ? glm::normalize(normal) : glm::vec3(0, 1, 0);
+                                auto tangent = tangentMatrix * glm::vec3(vertex.tangent[0], vertex.tangent[1], vertex.tangent[2]);
+                                tangent = glm::length(tangent) > 1.e-6f ? glm::normalize(tangent) : glm::vec3(1, 0, 0);
+                                for (int axis = 0; axis < 3; ++axis)
+                                { vertex.pos[axis] = position[axis]; vertex.normal[axis] = normal[axis]; vertex.tangent[axis] = tangent[axis]; }
+                            }
+                            auto source = std::make_shared<Mesh>();
+                            if (!source->SetAuthoredVertices(std::move(vertices)))
+                                throw std::runtime_error("Invalid shared prefab geometry");
+                            auto buffer = Engine::Rendering::PrepareMeshBuffer(source->GetVertices().data(),
+                                source->GetVertices().size() * sizeof(Mesh::Vertex));
+                            return SharedPrefabPrototype::PreparedGeometry{std::move(source), std::move(buffer)};
+                        });
+                    prototype->pendingGeometry.emplace(geometryKey, std::move(future));
+                    geometryWaiting = true;
+                }
+                else if (uploadedGeometry || pendingGeometry->second.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+                    geometryWaiting = true;
+                else
+                {
+                    auto prepared = pendingGeometry->second.get();
+                    prototype->pendingGeometry.erase(pendingGeometry);
+                    if (prepared.mesh) prepared.mesh->CreateBuffer(provider->GetBufferFactory(), &prepared.buffer);
+                    prototype->geometry.emplace(geometryKey, std::move(prepared.mesh));
+                    uploadedGeometry = true;
+                }
+            }
+        }
+        if (geometryWaiting || uploadedGeometry)
+        {
+            runtime->building = true;
+            runtime->nextAsset = asset;
+            break;
+        }
         auto* root=definition(asset);
         if (!root) continue;
         const auto placementMatrix=[this](const Placement& placement) {
@@ -285,7 +497,12 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider)
         for (const auto* placement:records)
             tiles[{int(std::floor(placement->position.x/prefabGroupSpan)),
                 int(std::floor(placement->position.z/prefabGroupSpan))}].push_back(placement);
-        std::map<std::pair<int,int>,std::shared_ptr<Mesh::InstanceData>> tileInstances;
+        auto& tileInstances = runtime->tileInstances;
+        if (runtime->nextPart == 0)
+        {
+            tileInstances.clear();
+            runtime->groupStart = runtime->generated.size();
+        }
         std::vector<std::string> chain{asset};
         std::vector<std::string> shadowChain;
         if (const auto lods=objectLods.find(asset); lods!=objectLods.end())
@@ -303,6 +520,9 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider)
         if (shadowChain.size()>3) shadowChain={shadowChain.front(),shadowChain[1],shadowChain.back()};
         const auto distances=GetObjectLodDistances(asset,chain.size());
         const auto shadowDistances=GetObjectLodDistances(asset,shadowChain.size());
+        size_t partIndex = 0;
+        bool processedPart = false;
+        bool moreParts = false;
         const auto buildChain=[&](const std::vector<std::string>& meshes,
             const std::vector<float>& lodDistances, bool shadowProxyOnly)
         {
@@ -313,61 +533,14 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider)
                 for (auto* original:lodRoot->GetComponentsInChildren<Mesh>())
                 {
                     if (!original->Owner->IsEnabledInHierarchy()) continue;
+                    if (partIndex++ < runtime->nextPart) continue;
+                    if (processedPart) { moreParts = true; return; }
+                    processedPart = true;
+                    runtime->nextPart = partIndex;
                     // Expand indexed geometry once per shared prefab part, never per placement.
                     auto& prototype = definitions.at(meshes[lod]);
-                    auto& sharedGeometry = prototype->geometry[{original, provider}];
-                    auto source = sharedGeometry.lock();
-                    if (!source)
-                    {
-                        source = std::make_shared<Mesh>();
-                        BuildProfile::Stage stage("batch_source_geometry");
-                        std::vector<Mesh::Vertex> vertices;
-                        {
-                            BuildProfile::Stage copyStage("batch_geometry_copy_expand");
-                            vertices=original->GetVertices();
-                            if (!original->GetIndices().empty())
-                            {
-                                std::vector<Mesh::Vertex> expanded;
-                                expanded.reserve(original->GetIndices().size());
-                                for (auto index:original->GetIndices())
-                                    expanded.push_back(vertices.at(index));
-                                vertices=std::move(expanded);
-                            }
-                        }
-                        if (vertices.empty()) continue;
-                        // Bake the prefab-part transform once so all parts and LODs can use
-                        // the exact same resident placement array, including impostors.
-                        {
-                            BuildProfile::Stage transformStage("batch_geometry_transform");
-                            const auto part=original->Owner->transform.GetWorldMatrix();
-                            const auto tangentMatrix=glm::mat3(part);
-                            const auto normalMatrix=glm::transpose(glm::inverse(tangentMatrix));
-                            for (auto& vertex:vertices)
-                            {
-                                const auto position=glm::vec3(part*glm::vec4(vertex.pos[0],vertex.pos[1],vertex.pos[2],1));
-                                auto normal=normalMatrix*glm::vec3(vertex.normal[0],vertex.normal[1],vertex.normal[2]);
-                                normal=glm::length(normal)>1.e-6f ? glm::normalize(normal):glm::vec3(0,1,0);
-                                auto tangent=tangentMatrix*glm::vec3(vertex.tangent[0],vertex.tangent[1],vertex.tangent[2]);
-                                tangent=glm::length(tangent)>1.e-6f ? glm::normalize(tangent):glm::vec3(1,0,0);
-                                for (int axis=0;axis<3;++axis)
-                                {
-                                    vertex.pos[axis]=position[axis];
-                                    vertex.normal[axis]=normal[axis];
-                                    vertex.tangent[axis]=tangent[axis];
-                                }
-                            }
-                        }
-                        {
-                            BuildProfile::Stage validationStage("batch_geometry_validate_bounds");
-                            if (!source->SetAuthoredVertices(std::move(vertices)))
-                                throw std::runtime_error("Invalid shared prefab geometry: "+meshes[lod]);
-                        }
-                        {
-                            BuildProfile::Stage uploadStage("batch_geometry_buffer_create");
-                            source->CreateBuffer(provider->GetBufferFactory());
-                        }
-                        sharedGeometry = source;
-                    }
+                    auto source = prototype->geometry.at({original, provider});
+                    if (!source) continue;
                     BuildProfile::Stage instanceStage("batch_instances");
                     const auto sourceMinimum=source->GetBoundsMin();
                     const auto sourceMaximum=source->GetBoundsMax();
@@ -451,7 +624,9 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider)
                             auto* copy=object->AddComponent<Material>();
                             {
                                 BuildProfile::Stage stage("batch_material_copy_resolved");
-                                copy->CopyResolvedStateFrom(*material);
+                                auto [snapshot, inserted] = prototype->materials.try_emplace(material);
+                                if (inserted) snapshot->second = material->Serialize();
+                                copy->CopyResolvedStateFrom(*material, &snapshot->second);
                             }
                             {
                                 BuildProfile::Stage stage("batch_material_graphics");
@@ -464,24 +639,23 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider)
             }
         };
         buildChain(chain,distances,false);
-        if (dedicatedShadowProxy) buildChain(shadowChain,shadowDistances,true);
+        if (dedicatedShadowProxy && !moreParts) buildChain(shadowChain,shadowDistances,true);
+        if (moreParts)
+        {
+            runtime->building = true;
+            runtime->nextAsset = asset;
+            break;
+        }
         // Collider policy belongs to the shared prefab. None are synthesized
         // when it has no collider; adding one later applies to every placement.
         BuildProfile::Stage colliderStage("batch_colliders");
         auto* colliderRoot=root;
-        const auto sameAsset=[](const std::string& a,const std::string& b) {
-            return std::filesystem::absolute(Mesh::ResolveFilePath(a)).lexically_normal()==
-                std::filesystem::absolute(Mesh::ResolveFilePath(b)).lexically_normal();
-        };
-        for (const auto& [base,lods]:objectLods)
-            if (std::filesystem::path(base).extension()==".prefab" &&
-                (sameAsset(base,asset) || std::any_of(lods.meshes.begin(),lods.meshes.end(),
-                    [&](const auto& lod) { return sameAsset(lod,asset); }) ||
-                    std::any_of(lods.shadowMeshes.begin(),lods.shadowMeshes.end(),
-                        [&](const auto& lod) { return sameAsset(lod,asset); })))
-            { colliderRoot=definition(base); break; }
-        if (!colliderRoot) continue;
-        for (auto* collider:colliderRoot->GetComponentsInChildren<PrimitiveObjectCollider>())
+        // Groups have already been canonicalized to their authored base above.
+        // Resolving every LOD path again here performs many filesystem probes
+        // for every batch part, even when the prefab has no colliders.
+        if (const auto found = objectLods.find(asset); found != objectLods.end())
+            colliderRoot = definition(found->first);
+        if (colliderRoot) for (auto* collider:colliderRoot->GetComponentsInChildren<PrimitiveObjectCollider>())
         {
             if (!collider->Owner->IsEnabledInHierarchy()) continue;
             for (const auto* placement:records)
@@ -497,6 +671,19 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider)
                 else body->bodyType="Static";
             }
         }
+        if (!runtime->previous)
+            for (size_t i = runtime->groupStart; i < runtime->generated.size(); ++i)
+                if (auto* object = scene->FindObjectById(runtime->generated[i])) object->enabled = true;
+        runtime->nextPart = 0;
+        tileInstances.clear();
+    }
+    if (!runtime->building && runtime->previous)
+    {
+        for (auto id : runtime->previous->generated)
+            if (auto* object = scene->FindObjectById(id)) scene->RemoveObject(object);
+        runtime->previous.reset();
+        for (auto id : runtime->generated)
+            if (auto* object = scene->FindObjectById(id)) object->enabled = true;
     }
     runtime->sources=std::move(sources);
     runtime->lods=objectLods;

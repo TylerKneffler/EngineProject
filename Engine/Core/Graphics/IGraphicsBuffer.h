@@ -87,5 +87,11 @@ public:
         return CreateBuffer(IGraphicsBuffer::Usage::VertexBuffer,
             IGraphicsBuffer::AccessMode::Upload, sizeBytes, initialData);
     }
+    // The returned buffer may still be uploading. Callers must submit its use
+    // to the same graphics queue after this call; backends without deferred
+    // upload support retain the synchronous behavior.
+    virtual std::unique_ptr<IGraphicsBuffer> CreateStaticVertexBufferDeferred(
+        uint64_t sizeBytes, const void* initialData)
+    { return CreateStaticVertexBuffer(sizeBytes, initialData); }
 };
 }

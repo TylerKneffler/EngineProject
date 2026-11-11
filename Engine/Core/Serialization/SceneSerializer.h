@@ -148,7 +148,8 @@ public:
     // The editor calls this at scene-session boundaries to cap retained memory.
     static void ClearLargePrefabDocumentCache();
     static Object* InstantiatePrefabFromValue(Scene& scene, const std::string& path,
-        const JsonValue& document, IGraphicsProvider* graphicsProvider = nullptr);
+        const JsonValue& document, IGraphicsProvider* graphicsProvider = nullptr,
+        bool captureSourceSnapshot = true);
     // Reload every scene instance that references path while preserving each
     // root placement transform. preservedInstance can identify the instance
     // already edited in-place; it will not be rebuilt. Returns false if the

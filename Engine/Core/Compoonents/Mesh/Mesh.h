@@ -13,6 +13,7 @@
 #include <initializer_list>
 #include <atomic>
 
+namespace Engine::Rendering { struct PreparedMeshBuffer; }
 namespace Engine::Components
 {
 class Mesh : public Engine::Core::Component
@@ -82,7 +83,8 @@ public:
 
     // Create a graphics buffer from loaded vertex data.
     // bufferFactory: creates GPU vertex buffers (API-agnostic)
-    void CreateBuffer(IGraphicsBufferFactory* bufferFactory);
+    void CreateBuffer(IGraphicsBufferFactory* bufferFactory,
+        Engine::Rendering::PreparedMeshBuffer* prepared = nullptr);
 
     // Get the underlying graphics buffer (API-agnostic)
     IGraphicsBuffer* GetGraphicsBuffer() const { return m_instanceSource ? m_instanceSource->GetGraphicsBuffer() : m_vertexBuffer.get(); }

@@ -120,7 +120,8 @@ void Mesh::MakeGeometryWritable()
     m_sharedVertexBuffer = m_sharedIndexBuffer = false;
 }
 
-void Mesh::CreateBuffer(IGraphicsBufferFactory* bufferFactory)
+void Mesh::CreateBuffer(IGraphicsBufferFactory* bufferFactory,
+    Engine::Rendering::PreparedMeshBuffer* prepared)
 {
     if (!bufferFactory || (m_vertices.empty() && m_terrainVertices.empty()))
         return;
@@ -146,7 +147,7 @@ void Mesh::CreateBuffer(IGraphicsBufferFactory* bufferFactory)
     const uint64_t byteSize = m_vertices.size() * sizeof(Vertex);
 
     ReplaceVertexBuffer(Engine::Rendering::AcquireMeshBuffer(bufferFactory,
-        IGraphicsBuffer::Usage::VertexBuffer, m_vertices.data(), byteSize, sizeof(Vertex)));
+        IGraphicsBuffer::Usage::VertexBuffer, m_vertices.data(), byteSize, sizeof(Vertex), prepared));
     m_sharedVertexBuffer = true;
 
     if (!m_vertexBuffer)

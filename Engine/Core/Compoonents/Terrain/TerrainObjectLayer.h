@@ -105,6 +105,7 @@ public:
     // Static prefab placements share source geometry/material definitions.
     // Derived render/physics objects are never saved into the authored layer.
     void PreparePrefabInstances(IGraphicsProvider* provider);
+    bool IsPrefabPreparationPending() const;
     const PrefabPrepareTimings& GetLastPrefabPrepareTimings() const
     { return m_lastPrefabPrepareTimings; }
     bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;

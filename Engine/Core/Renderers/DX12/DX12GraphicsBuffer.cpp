@@ -191,12 +191,52 @@ std::unique_ptr<Engine::Graphics::IGraphicsBuffer> D3D12BufferFactory::CreateBuf
     return buffer;
 }
 
+D3D12BufferFactory::~D3D12BufferFactory()
+{
+    for (auto& pending : m_pendingStaticUploads)
+        if (pending.commands && pending.commands->fence &&
+            pending.commands->fence->GetCompletedValue() != UINT64_MAX &&
+            pending.commands->fence->GetCompletedValue() < pending.commands->fenceValue)
+            WaitForSingleObject(pending.commands->event, INFINITE);
+}
+
+void D3D12BufferFactory::CollectCompletedStaticUploads()
+{
+    std::lock_guard lock(m_staticStagingMutex);
+    for (auto it = m_pendingStaticUploads.begin(); it != m_pendingStaticUploads.end(); )
+    {
+        const auto completed = it->commands->fence->GetCompletedValue();
+        if (completed != UINT64_MAX && completed < it->commands->fenceValue)
+        { ++it; continue; }
+        if (!m_staticCommands) m_staticCommands = std::move(it->commands);
+        if (it->staging && it->staging->GetSize() <= 16ull * 1024 * 1024 &&
+            (!m_staticStaging || m_staticStaging->GetSize() < it->staging->GetSize()))
+            m_staticStaging = std::move(it->staging);
+        it = m_pendingStaticUploads.erase(it);
+    }
+}
+
 std::unique_ptr<Engine::Graphics::IGraphicsBuffer> D3D12BufferFactory::CreateStaticVertexBuffer(
     uint64_t sizeBytes, const void* initialData)
+{ return CreateStaticVertexBufferImpl(sizeBytes, initialData, false); }
+
+std::unique_ptr<Engine::Graphics::IGraphicsBuffer> D3D12BufferFactory::CreateStaticVertexBufferDeferred(
+    uint64_t sizeBytes, const void* initialData)
+{ return CreateStaticVertexBufferImpl(sizeBytes, initialData, true); }
+
+std::unique_ptr<Engine::Graphics::IGraphicsBuffer> D3D12BufferFactory::CreateStaticVertexBufferImpl(
+    uint64_t sizeBytes, const void* initialData, bool deferred)
 {
     using Buffer = Engine::Graphics::IGraphicsBuffer;
     if (!m_queue || !initialData || !sizeBytes)
         return IGraphicsBufferFactory::CreateStaticVertexBuffer(sizeBytes, initialData);
+    CollectCompletedStaticUploads();
+    if (deferred)
+    {
+        std::lock_guard lock(m_staticStagingMutex);
+        // Bound retained staging and command resources if the GPU falls behind.
+        if (m_pendingStaticUploads.size() >= 4) deferred = false;
+    }
 
     // Static geometry is read many times per frame by forest instances. Keep
     // it in a default heap rather than repeatedly fetching upload-heap data.
@@ -283,6 +323,7 @@ std::unique_ptr<Engine::Graphics::IGraphicsBuffer> D3D12BufferFactory::CreateSta
     if (bundle->fenceValue == UINT64_MAX)
         throw std::runtime_error("Static geometry upload fence exhausted");
     const uint64_t completion = ++bundle->fenceValue;
+    ResetEvent(bundle->event);
     if (FAILED(bundle->fence->SetEventOnCompletion(completion, bundle->event)))
         throw std::runtime_error("Failed to arm static geometry upload fence");
     {
@@ -294,6 +335,26 @@ std::unique_ptr<Engine::Graphics::IGraphicsBuffer> D3D12BufferFactory::CreateSta
         m_queue->ExecuteCommandLists(1, lists);
         if (FAILED(m_queue->Signal(bundle->fence.Get(), completion)))
             throw std::runtime_error("Failed to signal static geometry upload fence");
+    }
+    if (deferred)
+    {
+        native->SetResourceState(D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
+        PendingStaticUpload pending;
+        pending.staging = std::move(staging);
+        pending.commands = std::move(bundle);
+        pending.destination = native->GetResource();
+        try
+        {
+            std::lock_guard lock(m_staticStagingMutex);
+            m_pendingStaticUploads.push_back(std::move(pending));
+        }
+        catch (...)
+        {
+            // A failed bookkeeping allocation must not free in-flight resources.
+            if (pending.commands) WaitForSingleObject(pending.commands->event, INFINITE);
+            throw;
+        }
+        return destination;
     }
     {
         Engine::Serialization::PrefabLoadProfile::Stage stage("dx12_static_wait");

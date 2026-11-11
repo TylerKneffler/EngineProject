@@ -1317,6 +1317,7 @@ private:
     uint64_t m_updateRegistryRevision = 0;
     std::vector<Object*> m_updateObjects, m_poseObjects;
     Engine::Components::SpatialUpdateScheduler m_spatialUpdates;
+    size_t m_prefabPreparationCursor = 0;
     void RefreshUpdateRegistry();
     Object* AddObjectWithId(ObjectId id);
     void FlushPendingObjectAdditions();

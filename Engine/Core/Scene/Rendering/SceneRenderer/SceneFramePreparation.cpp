@@ -191,13 +191,22 @@ void Scene::PrepareRenderFrame(bool publishSnapshot)
     const auto afterInitialCommit=PrepareClock::now();
     // Copy the registry view: deriving prefab batches adds scene components.
     const auto objectLayers=GetComponents<Engine::Components::TerrainObjectLayer>();
-    for (auto* layer:objectLayers)
+    const auto prefabBudgetStart = PrepareClock::now();
+    size_t prefabVisited = 0;
+    const size_t prefabCount = objectLayers.size();
+    const size_t prefabStart = prefabCount ? m_prefabPreparationCursor % prefabCount : 0;
+    for (; prefabVisited < prefabCount; ++prefabVisited)
     {
+        auto* layer = objectLayers[(prefabStart + prefabVisited) % prefabCount];
         layer->PreparePrefabInstances(m_graphicsProvider);
         const auto& prefabTimings=layer->GetLastPrefabPrepareTimings();
         m_lastPrepareTimings.prefabSignatureMs+=prefabTimings.placementSignatureMs;
         m_lastPrepareTimings.prefabSourceProbeMs+=prefabTimings.sourceProbeMs;
+        if (std::chrono::duration<double, std::milli>(
+                PrepareClock::now() - prefabBudgetStart).count() >= 3.0)
+        { ++prefabVisited; break; }
     }
+    m_prefabPreparationCursor = prefabCount ? (prefabStart + prefabVisited) % prefabCount : 0;
     const auto afterPrefabInstances=PrepareClock::now();
     const auto splineGeometry=GetComponents<SplineGeometry>();
     for (auto* geometry:splineGeometry) geometry->PrepareGeometry(m_graphicsProvider);
