@@ -1,5 +1,6 @@
 #include "TerrainManager.h"
 #include "TerrainObjectLayer.h"
+#include "TerrainSurfaceSample.h"
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Compoonents/Terrain/TerrainBatchAppearance.h"
@@ -27,6 +28,26 @@
 
 namespace Engine::Components
 {
+void TerrainManager::GroundOakObjects(Terrain& terrain)
+{
+    if (!proceduralOakMeadow || !terrain.Owner) return;
+    for (auto* child : terrain.Owner->Children)
+        if (child)
+            if (auto* objects = child->GetComponent<TerrainObjectLayer>();
+                objects && objects->layerName == "Oak forest")
+            {
+                bool changed = false;
+                for (auto& placement : objects->placements)
+                {
+                    float height = placement.position.y;
+                    if (SampleTerrainSurface(terrain.heights, cellsX, cellsY,
+                        cellWidth, cellDepth, placement.position.x,
+                        placement.position.z, height) && height != placement.position.y)
+                    { placement.position.y = height; changed = true; }
+                }
+                if (changed) objects->MarkConfigurationDirty();
+            }
+}
 void TerrainManager::CaptureObjectLayers(Cell cell,
     const Engine::Core::Object& cellObject)
 {
@@ -59,14 +80,20 @@ void TerrainManager::RestoreObjectLayers(Cell cell,
         {
             child = cellObject.GetScene()->AddObject(name);
             child->runtimeOnly = true;
-            cellObject.GetScene()->MoveObject(child, &cellObject,
-                Engine::Scene::Scene::ObjectPlacement::AsChild);
+            cellObject.GetScene()->SetParentLocal(child, &cellObject);
             layer = child->AddComponent<TerrainObjectLayer>();
             if (saved) layer->Deserialize(*saved);
             layer->layerName = name;
         }
-        if (name == "Meadow grass" && !viewerObjectName.empty())
+        if ((name == "Meadow grass" || name == "Procedural meadow grass") && !viewerObjectName.empty())
         {
+            if (name == "Procedural meadow grass")
+            {
+                layer->conformToGround = true;
+                layer->viewDistance = 35.f;
+                layer->lod1Distance = 12.f;
+                layer->lod2Distance = 25.f;
+            }
             const bool hasGrassField = std::any_of(child->Components.begin(),
                 child->Components.end(), [](const auto* component) {
                     return component && component->GetTypeName() == "GrassField";
@@ -83,13 +110,13 @@ void TerrainManager::RestoreObjectLayers(Cell cell,
                     .Set("tallMeshLod1", "Assets/Mesh/Grass/field_tall_lod1.obj")
                     .Set("tallMeshLod2", "Assets/Mesh/Grass/field_tall_lod2.obj")
                     .Set("viewerObjectName", viewerObjectName)
-                    .Set("useEditorCamera", false).Set("visibleRadius", 11.f)
+                    .Set("useEditorCamera", name == "Procedural meadow grass").Set("visibleRadius", 11.f)
                     .Set("tileSize", 4.f).Set("shortPatchesPerSquareMeter", .5f)
                     .Set("tallPatchesPerSquareMeter", .16f).Set("seed", 18731)
                     .Set("maxTileBuildsPerUpdate", 8).Set("castShadows", false)
                     .Set("tileWorkBudgetMs", 2.f).Set("fadeDuration", .35f)
                     .Set("distanceFadeWidth", 2.f).Set("retainDormantTiles", false)
-                    .Set("allowProceduralGeneration", false);
+                    .Set("allowProceduralGeneration", name == "Procedural meadow grass");
                 grass->Deserialize(settings);
                 child->AddComponent(grass);
             }
@@ -219,6 +246,8 @@ void TerrainManager::Stitch(Cell cell)
         {
             anyChanged = true;
             neighbor->Rebuild();
+            neighbor->MarkConfigurationDirty();
+            GroundOakObjects(*neighbor);
             if (m_proceduralCells.count(neighborCell) && !cellDataDirectory.empty())
             {
                 m_editedProcedural.insert(neighborCell);
@@ -235,6 +264,8 @@ void TerrainManager::Stitch(Cell cell)
     {
         anyChanged = true;
         terrain->Rebuild();
+        terrain->MarkConfigurationDirty();
+        GroundOakObjects(*terrain);
         if (m_proceduralCells.count(cell) && !cellDataDirectory.empty())
         {
             m_editedProcedural.insert(cell);
@@ -404,10 +435,15 @@ bool TerrainManager::ApplyBrush(double x, double z, float radius, float strength
         }
     }
     for (Cell cell : seamChanged)
-        GetLoadedCell(cell.first, cell.second)->Rebuild();
+    {
+        auto* terrain = GetLoadedCell(cell.first, cell.second);
+        terrain->Rebuild();
+        terrain->MarkConfigurationDirty();
+    }
     for (Cell cell : changedCells)
     {
         auto* terrain = GetLoadedCell(cell.first, cell.second);
+        if (brush != Terrain::Brush::Paint) GroundOakObjects(*terrain);
         if (m_proceduralCells.count(cell) && !cellDataDirectory.empty())
         {
             m_editedProcedural.insert(cell);
@@ -428,6 +464,11 @@ void TerrainManager::SyncLoadedCells(int centerX, int centerY)
 {
     if (manageAuthoredCellColliders)
     { StreamPrefabCells(centerX, centerY); RefreshAuthoredCollisionCells(); RefreshColliderActivation(centerX, centerY); return; }
+    if (proceduralOakMeadow && asyncStreaming)
+    {
+        StreamCells(centerX, centerY, loadedRadius);
+        return;
+    }
     const int radius = m_editorStreaming ? std::clamp(editorRadius, 0, 32) :
         std::clamp(m_farEnabled && !m_farHeights.empty() ? loadedRadius :
             std::max(loadedRadius, farRadius), 0, 32);

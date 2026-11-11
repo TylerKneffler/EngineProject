@@ -7,7 +7,7 @@
 namespace Engine::Components::FarTerrainInternal
 {
 constexpr uint64_t FarTileCacheMagic = 0x31454c4954524146ull;
-constexpr uint32_t FarTileCacheVersion = 3;
+constexpr uint32_t FarTileCacheVersion = 4;
 void HashBytes(uint64_t& hash, const void* data, size_t bytes)
 {
     const auto* begin = static_cast<const unsigned char*>(data);

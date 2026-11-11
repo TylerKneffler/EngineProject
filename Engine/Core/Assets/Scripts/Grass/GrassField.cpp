@@ -4,6 +4,8 @@
 #include "Core/Scene/Scene.h"
 #include "Core/Compoonents/Terrain/Terrain.h"
 #include "Core/Compoonents/Terrain/TerrainObjectLayer.h"
+#include "Core/Compoonents/Terrain/TerrainSurfaceSample.h"
+#include <glm/gtc/matrix_transform.hpp>
 #include "Core/Compoonents/Materials/Material.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include <algorithm>
@@ -329,7 +331,7 @@ bool GrassField::ResolveCachedReferences()
     return m_cachedViewer && m_cachedTerrain;
 }
 
-float GrassField::SampleHeight(float x, float z) const
+float GrassField::SampleHeight(float x, float z, glm::vec3* normal) const
 {
     const auto* terrain = Owner
         ? Owner->GetComponentInParent<Engine::Components::Terrain>() : nullptr;
@@ -337,20 +339,10 @@ float GrassField::SampleHeight(float x, float z) const
         terrain->cellWidth <= 0.f || terrain->cellDepth <= 0.f ||
         terrain->heights.size() != static_cast<size_t>(terrain->cellsX + 1) *
             static_cast<size_t>(terrain->cellsY + 1)) return 0.f;
-    const float sx = std::clamp(x / terrain->cellWidth, 0.f,
-        static_cast<float>(terrain->cellsX));
-    const float sz = std::clamp(z / terrain->cellDepth, 0.f,
-        static_cast<float>(terrain->cellsY));
-    const int x0 = static_cast<int>(sx), z0 = static_cast<int>(sz);
-    const int x1 = std::min(x0 + 1, terrain->cellsX);
-    const int z1 = std::min(z0 + 1, terrain->cellsY);
-    const auto at = [&](int col, int row) {
-        return terrain->heights[static_cast<size_t>(row) *
-            static_cast<size_t>(terrain->cellsX + 1) + static_cast<size_t>(col)];
-    };
-    const float a = at(x0, z0) + (at(x1, z0) - at(x0, z0)) * (sx - x0);
-    const float b = at(x0, z1) + (at(x1, z1) - at(x0, z1)) * (sx - x0);
-    return a + (b - a) * (sz - z0);
+    float height = 0.f;
+    Engine::Components::SampleTerrainSurface(terrain->heights, terrain->cellsX,
+        terrain->cellsY, terrain->cellWidth, terrain->cellDepth, x, z, height, normal);
+    return height;
 }
 
 void GrassField::RefreshPlacementIndex()
@@ -447,7 +439,7 @@ void GrassField::BeginBuild(Tile tile, int lod, uint64_t signature)
                 if (p.position.x < .3f || p.position.z < .3f ||
                     p.position.x > width - .3f || p.position.z > depth - .3f) continue;
                 p.asset = asset;
-                p.position.y = SampleHeight(p.position.x, p.position.z);
+                p.position.y = SampleHeight(p.position.x, p.position.z, &p.normal);
                 p.yawDegrees = unit(rng) * 360.f;
                 p.scale = .8f + .4f * unit(rng);
                 job.placements.push_back(std::move(p));
@@ -475,13 +467,16 @@ bool GrassField::AdvanceBuild(Clock::time_point deadline)
     while (!job.prepared && job.placement < job.placements.size())
     {
         const auto& p = job.placements[job.placement++];
-        const glm::mat3 rotation = glm::mat3_cast(
-            Engine::Components::TerrainObjectLayer::SurfaceRotation(p.normal, p.yawDegrees));
-        const glm::vec3 translation = p.position - glm::vec3(job.tile.first * span, 0, job.tile.second * span);
+        glm::mat4 transform = m_cachedLayer
+            ? m_cachedLayer->PlacementTransform(p)
+            : glm::translate(glm::mat4(1.f), p.position) *
+                glm::mat4_cast(Engine::Components::TerrainObjectLayer::SurfaceRotation(p.normal, p.yawDegrees)) *
+                glm::scale(glm::mat4(1.f), glm::vec3(p.scale));
+        transform[3] -= glm::vec4(job.tile.first * span, 0.f, job.tile.second * span, 0.f);
         Engine::Components::Mesh::InstanceTransform instance{};
         for (int axis = 0; axis < 3; ++axis)
-            instance.rows[axis] = {rotation[0][axis] * p.scale, rotation[1][axis] * p.scale,
-                rotation[2][axis] * p.scale, translation[axis]};
+            instance.rows[axis] = {transform[0][axis], transform[1][axis],
+                transform[2][axis], transform[3][axis]};
         job.instances->transforms.push_back(instance);
         // Eight bounding corners per placement, independent of blade complexity.
         for (int corner = 0; corner < 8; ++corner)
@@ -489,7 +484,7 @@ bool GrassField::AdvanceBuild(Clock::time_point deadline)
             const glm::vec3 point{corner & 1 ? m_sourceMaximum.x : m_sourceMinimum.x,
                 corner & 2 ? m_sourceMaximum.y : m_sourceMinimum.y,
                 corner & 4 ? m_sourceMaximum.z : m_sourceMinimum.z};
-            const glm::vec3 position = rotation * (p.scale * point) + translation;
+            const glm::vec3 position = glm::vec3(transform * glm::vec4(point, 1.f));
             if (job.placement == 1 && corner == 0) job.minimum = job.maximum = position;
             else { job.minimum = glm::min(job.minimum, position);
                 job.maximum = glm::max(job.maximum, position); }

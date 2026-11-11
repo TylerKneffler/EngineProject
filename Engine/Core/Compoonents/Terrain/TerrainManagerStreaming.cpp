@@ -69,7 +69,7 @@ void TerrainManager::UpdateStreamingAtPosition(
     const double fractionY = cellY - centerY;
     const int aheadX = fractionX >= .875 ? 1 : fractionX < .125 ? -1 : 0;
     const int aheadY = fractionY >= .875 ? 1 : fractionY < .125 ? -1 : 0;
-    m_prefetchCenter = asyncStreaming && !m_editorStreaming &&
+    m_prefetchCenter = asyncStreaming && prefetchAdjacentCells && !m_editorStreaming &&
         (aheadX || aheadY)
         ? std::optional<Cell>{{centerX + aheadX, centerY + aheadY}}
         : std::nullopt;
@@ -314,6 +314,7 @@ void TerrainManager::StreamCells(int centerX, int centerY, int initialRadius)
             task.sceneGeneration = task.scene->CaptureSceneGeneration();
             task.cacheSignature = m_cacheSignature;
             task.cellsX = cellsX; task.cellsY = cellsY;
+            task.proceduralOakMeadow = proceduralOakMeadow;
             task.cellWidth = cellWidth; task.cellDepth = cellDepth;
             task.lodStride = DesiredPrepareLodStride(cell, centerX, centerY);
             const auto saved = m_cells.find(cell);

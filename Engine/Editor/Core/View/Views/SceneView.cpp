@@ -527,28 +527,6 @@ void SceneView::DrawPanel(IEditorUi& ui)
     RequestRenderSize(input.available.x, input.available.y);
     m_viewportScreenMin = input.screenMin;
     m_viewportScreenMax = input.screenMax;
-    if (m_scene && !m_scene->HasStarted())
-    {
-        const glm::dvec3 viewer =
-            m_scene->editorCamera.transform.GetWorldPositionD();
-        std::vector<Engine::Components::TerrainManager*> terrainWorlds;
-        for (const auto& object : m_scene->GetObjects())
-            if (object)
-                if (auto* world = object->GetComponent<Engine::Components::TerrainManager>();
-                    world && world->asyncStreaming)
-                    terrainWorlds.push_back(world);
-        for (auto* world : terrainWorlds)
-        {
-            const glm::dvec3 local = glm::dvec3(
-                glm::inverse(world->Owner->transform.GetWorldMatrixD()) *
-                glm::dvec4(viewer, 1.0));
-            world->UpdateStreaming(
-                static_cast<int>(std::floor(local.x /
-                    (world->cellsX * world->cellWidth))),
-                static_cast<int>(std::floor(local.z /
-                    (world->cellsY * world->cellDepth))));
-        }
-    }
     bool terrainConsumedClick = false;
     auto* selected = m_scene ? m_scene->GetSelectedObject() : nullptr;
     auto* terrain = selected

@@ -41,6 +41,8 @@ TerrainManager::JsonValue TerrainManager::Serialize() const
         .Set("maxLoadsPerUpdate", JsonValue(maxLoadsPerUpdate))
         .Set("maxUnloadsPerUpdate", JsonValue(maxUnloadsPerUpdate))
         .Set("asyncStreaming", JsonValue(asyncStreaming))
+        .Set("prefetchAdjacentCells", JsonValue(prefetchAdjacentCells))
+        .Set("proceduralOakMeadow", JsonValue(proceduralOakMeadow))
         .Set("maxPreparedCells", JsonValue(maxPreparedCells))
         .Set("maxUploadsPerUpdate", JsonValue(maxUploadsPerUpdate))
         .Set("maxFarRebuildMilliseconds", JsonValue(maxFarRebuildMilliseconds))
@@ -198,6 +200,8 @@ void TerrainManager::Deserialize(const JsonValue& value)
     maxUnloadsPerUpdate = value.Has("maxUnloadsPerUpdate")
         ? std::clamp(value["maxUnloadsPerUpdate"].AsInt(), 1, 64) : 4;
     asyncStreaming = value.Has("asyncStreaming") && value["asyncStreaming"].AsBool();
+    prefetchAdjacentCells = !value.Has("prefetchAdjacentCells") || value["prefetchAdjacentCells"].AsBool();
+    proceduralOakMeadow = value.Has("proceduralOakMeadow") && value["proceduralOakMeadow"].AsBool();
     maxPreparedCells = value.Has("maxPreparedCells")
         ? std::clamp(value["maxPreparedCells"].AsInt(), 1, 64) : 4;
     maxUploadsPerUpdate = value.Has("maxUploadsPerUpdate")

@@ -257,7 +257,7 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
         : autoProfilePlay
             ? (std::filesystem::path(ENGINE_ASSETS_PATH) / "Scenes" /
                 "Animation" / "mmd.scene").string()
-            : Engine::Editor::RestoreLastScene(projectFile, projectSettings.defaultScene);
+            : projectSettings.defaultScene;
     if (!startupScene.empty())
     {
         OutputDebugStringA(("[Main] Loading startup scene: " + startupScene + "\n").c_str());

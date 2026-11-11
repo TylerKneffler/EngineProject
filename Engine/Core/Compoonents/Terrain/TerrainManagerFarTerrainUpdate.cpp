@@ -1,3 +1,4 @@
+#include "TerrainFarLodEdges.h"
 #include "TerrainManager.h"
 #include "TerrainManagerFarTerrainCache.h"
 #include "TerrainObjectLayer.h"
@@ -1146,14 +1147,23 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
             }
         if (tile.lodStride > 1)
         {
-            for (int row = 0; row < depth - 1; ++row)
-                for (int col = 0; col < width - 1; ++col)
-                {
-                    const uint32_t a = row * width + col;
-                    const uint32_t b = a + width;
-                    indices.insert(indices.end(),
-                        {a, b, a + 1, a + 1, b, b + 1});
-                }
+            const auto edgeVertex = [&](int x, int y) {
+                Mesh::Vertex vertex{};
+                const float height = gridHeight(x, y);
+                vertex.pos[0] = (x - tile.startX) * spanX;
+                vertex.pos[1] = height;
+                vertex.pos[2] = (y - tile.startY) * spanZ;
+                const glm::vec3 normal = glm::normalize(glm::vec3(
+                    (gridHeight(x - 1, y) - gridHeight(x + 1, y)) / (2.f * spanX), 1.f,
+                    (gridHeight(x, y - 1) - gridHeight(x, y + 1)) / (2.f * spanZ)));
+                vertex.normal[0] = normal.x; vertex.normal[1] = normal.y; vertex.normal[2] = normal.z;
+                vertex.uv[0] = static_cast<float>(x + m_farHalfExtentCells) / (side - 1);
+                vertex.uv[1] = static_cast<float>(y + m_farHalfExtentCells) / (side - 1);
+                setColor(vertex, height);
+                return vertex;
+            };
+            BuildFarLodIndices(vertices, indices, width, depth, tile.startX, tile.startY,
+                tile.endX, tile.endY, tile.lodStride, edgeVertex);
         }
         else for (int y = tile.startY; y < tile.endY; ++y)
             for (int x = tile.startX; x < tile.endX; ++x)
@@ -1245,47 +1255,6 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
                 const uint32_t b = a + width;
                 indices.insert(indices.end(), {a, b, a + 1, a + 1, b, b + 1});
             }
-        // A vertical skirt closes the height difference where a stride-two
-        // parent borders a stride-one child. It uses the same X/Z edge as the
-        // tile, so either side can change LOD without rebuilding its neighbor.
-        if (!indices.empty())
-        {
-            float minimumHeight = std::numeric_limits<float>::max();
-            float maximumHeight = std::numeric_limits<float>::lowest();
-            const size_t baseVertexCount = static_cast<size_t>(width) * depth;
-            for (size_t index = 0; index < baseVertexCount; ++index)
-            {
-                minimumHeight = std::min(minimumHeight, vertices[index].pos[1]);
-                maximumHeight = std::max(maximumHeight, vertices[index].pos[1]);
-            }
-            const float skirtBottom = minimumHeight -
-                std::max(2.f, maximumHeight - minimumHeight);
-            const auto addSkirtEdge = [&](uint32_t first, uint32_t second) {
-                Mesh::Vertex lowFirst = vertices[first];
-                Mesh::Vertex lowSecond = vertices[second];
-                lowFirst.pos[1] = skirtBottom;
-                lowSecond.pos[1] = skirtBottom;
-                const uint32_t lowIndex = static_cast<uint32_t>(vertices.size());
-                vertices.push_back(lowFirst);
-                vertices.push_back(lowSecond);
-                indices.insert(indices.end(), {first, lowIndex, second,
-                    second, lowIndex, lowIndex + 1,
-                    second, lowIndex, first,
-                    lowIndex + 1, lowIndex, second});
-            };
-            for (int col = 0; col < width - 1; ++col)
-            {
-                addSkirtEdge(col, col + 1);
-                addSkirtEdge((depth - 1) * width + col,
-                    (depth - 1) * width + col + 1);
-            }
-            for (int row = 0; row < depth - 1; ++row)
-            {
-                addSkirtEdge(row * width, (row + 1) * width);
-                addSkirtEdge(row * width + width - 1,
-                    (row + 1) * width + width - 1);
-            }
-        }
         for (size_t patchIndex : tile.patchIndices)
         {
             const auto& patch = m_farPatches[patchIndex];

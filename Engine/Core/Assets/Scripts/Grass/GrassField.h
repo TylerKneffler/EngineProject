@@ -165,5 +165,5 @@ private:
     bool ActivateTileLod(TileState& tile, int lod);
     uint64_t ComputeGenerationSignature() const;
 
-    float SampleHeight(float localX, float localZ) const;
+    float SampleHeight(float localX, float localZ, glm::vec3* normal = nullptr) const;
 };

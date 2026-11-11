@@ -45,6 +45,9 @@ public:
     int maxLoadsPerUpdate = 2;
     int maxUnloadsPerUpdate = 4;
     bool asyncStreaming = false;
+    bool prefetchAdjacentCells = true;
+    // Populate previously unauthored cells with a deterministic oak meadow.
+    bool proceduralOakMeadow = false;
     int maxPreparedCells = 4;
     int maxUploadsPerUpdate = 2;
     float maxFarRebuildMilliseconds = 4.f;
@@ -260,6 +263,7 @@ private:
     std::string m_newObjectLayerName = "Objects";
     void RestoreObjectLayers(Cell cell, Engine::Core::Object& cellObject);
     void CaptureObjectLayers(Cell cell, const Engine::Core::Object& cellObject);
+    void GroundOakObjects(Terrain& terrain);
     std::set<Cell> m_proceduralCells;
     std::set<Cell> m_editedProcedural;
     mutable std::set<Cell> m_dirtyProceduralEdits;
@@ -383,6 +387,7 @@ private:
         int cellsX = 0, cellsY = 0, lodStride = 1;
         float cellWidth = 1.f, cellDepth = 1.f;
         bool hasSaved = false, edited = false;
+        bool proceduralOakMeadow = false;
         bool requireBake = false;
         JsonValue saved;
         std::string cachePath, editPath;

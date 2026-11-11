@@ -1,3 +1,4 @@
+#include "TerrainFarLodEdges.h"
 #include "TerrainManager.h"
 #include "TerrainManagerFarTerrainCache.h"
 #include "Core/Compoonents/Mesh/Mesh.h"
@@ -166,8 +167,6 @@ void TerrainManager::FarPrepareLoop()
                     vertex.color[2] = color.b;
                 };
                 result.vertices.resize(static_cast<size_t>(width) * depth);
-                float minimumHeight = std::numeric_limits<float>::max();
-                float maximumHeight = std::numeric_limits<float>::lowest();
                 for (int row = 0; row < depth; ++row)
                     for (int col = 0; col < width; ++col)
                     {
@@ -178,8 +177,6 @@ void TerrainManager::FarPrepareLoop()
                         auto& vertex = result.vertices[
                             static_cast<size_t>(row) * width + col];
                         const float height = sample(x, y);
-                        minimumHeight = std::min(minimumHeight, height);
-                        maximumHeight = std::max(maximumHeight, height);
                         vertex.pos[0] = (x - task.startX) * task.spanX;
                         vertex.pos[1] = height;
                         vertex.pos[2] = (y - task.startY) * task.spanZ;
@@ -199,14 +196,24 @@ void TerrainManager::FarPrepareLoop()
                     }
                 if (task.lodStride > 1)
                 {
-                    for (int row = 0; row < depth - 1; ++row)
-                        for (int col = 0; col < width - 1; ++col)
-                        {
-                            const uint32_t a = row * width + col;
-                            const uint32_t b = a + width;
-                            result.indices.insert(result.indices.end(),
-                                {a, b, a + 1, a + 1, b, b + 1});
-                        }
+                    const auto edgeVertex = [&](int x, int y) {
+                        Mesh::Vertex vertex{};
+                        const float height = sample(x, y);
+                        vertex.pos[0] = (x - task.startX) * task.spanX;
+                        vertex.pos[1] = height;
+                        vertex.pos[2] = (y - task.startY) * task.spanZ;
+                        const glm::vec3 normal = glm::normalize(glm::vec3(
+                            (sample(x - 1, y) - sample(x + 1, y)) / (2.f * task.spanX), 1.f,
+                            (sample(x, y - 1) - sample(x, y + 1)) / (2.f * task.spanZ)));
+                        vertex.normal[0] = normal.x; vertex.normal[1] = normal.y; vertex.normal[2] = normal.z;
+                        vertex.uv[0] = static_cast<float>(x + task.halfExtent) / (task.side - 1);
+                        vertex.uv[1] = static_cast<float>(y + task.halfExtent) / (task.side - 1);
+                        setColor(vertex, height);
+                        return vertex;
+                    };
+                    BuildFarLodIndices(result.vertices, result.indices, width, depth,
+                        task.startX, task.startY, task.endX, task.endY,
+                        task.lodStride, edgeVertex);
                 }
                 else for (int y = task.startY; y < task.endY; ++y)
                     for (int x = task.startX; x < task.endX; ++x)
@@ -305,36 +312,6 @@ void TerrainManager::FarPrepareLoop()
                         result.indices.insert(result.indices.end(),
                             {a, b, a + 1, a + 1, b, b + 1});
                     }
-                if (!result.indices.empty())
-                {
-                const float skirtBottom = minimumHeight -
-                    std::max(2.f, maximumHeight - minimumHeight);
-                const auto addSkirtEdge = [&](uint32_t first, uint32_t second) {
-                    Mesh::Vertex lowFirst = result.vertices[first];
-                    Mesh::Vertex lowSecond = result.vertices[second];
-                    lowFirst.pos[1] = lowSecond.pos[1] = skirtBottom;
-                    const uint32_t lowIndex = static_cast<uint32_t>(
-                        result.vertices.size());
-                    result.vertices.push_back(lowFirst);
-                    result.vertices.push_back(lowSecond);
-                    result.indices.insert(result.indices.end(),
-                        {first, lowIndex, second, second, lowIndex,
-                            lowIndex + 1, second, lowIndex, first,
-                            lowIndex + 1, lowIndex, second});
-                };
-                for (int col = 0; col < width - 1; ++col)
-                {
-                    addSkirtEdge(col, col + 1);
-                    addSkirtEdge((depth - 1) * width + col,
-                        (depth - 1) * width + col + 1);
-                }
-                for (int row = 0; row < depth - 1; ++row)
-                {
-                    addSkirtEdge(row * width, (row + 1) * width);
-                    addSkirtEdge(row * width + width - 1,
-                        (row + 1) * width + width - 1);
-                }
-                }
                 for (const auto& [patchIndex, patch] : task.patches)
                 {
                     if (!visibleCell(patch.x, patch.y)) continue;

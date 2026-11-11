@@ -346,11 +346,21 @@ void TerrainPerformanceDriver::OnAfterDeserialize(IGraphicsProvider*)
         scene->editorCamera.transform.position = mountainTerrain
             ? glm::dvec3{0.0, 330.0, -520.0}
             : glm::dvec3{0.0, 180.0, -300.0};
+        const auto* meadowViewer = manager->proceduralOakMeadow
+            ? Owner->FindObjectInSceneByName(viewerObjectName) : nullptr;
+        if (meadowViewer)
+            scene->editorCamera.transform.position =
+                meadowViewer->transform.GetWorldPositionD() + glm::dvec3{0.0, 4.0, -12.0};
         if (auto* camera = scene->editorCamera.GetComponent<Engine::Components::Camera>())
         {
             camera->target = {0.f, 0.f, 0.f};
+            if (meadowViewer)
+                camera->target = glm::vec3(meadowViewer->transform.GetWorldPositionD() +
+                    glm::dvec3{0.0, -1.0, 12.0});
             camera->farPlane = enableFarTerrain
                 ? (mountainTerrain ? 25000.f : 3218.f) : 1000.f;
+            if (manager->proceduralOakMeadow && !enableFarTerrain)
+                camera->farPlane = 120.f;
         }
     }
     m_previewLoaded = true;
