@@ -1,3 +1,4 @@
+#define GLM_ENABLE_EXPERIMENTAL
 #include "pch.h"
 #include "MeshLodGenerator.h"
 #include <algorithm>

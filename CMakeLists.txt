@@ -983,6 +983,16 @@ if(MSVC)
 endif()
 
 set(ENGINE_LOCAL_TEST_ROOT "${ENGINE_ROOT}/.local/tests")
+if(NOT ENGINE_PROJECT_DIR AND WIN32 AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/SceneBackendCapture.cpp")
+    add_executable(SceneBackendCapture EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/SceneBackendCapture.cpp"
+        ${ASSET_SOURCES})
+    target_link_libraries(SceneBackendCapture PRIVATE Engine d3d11 dxgi)
+    target_compile_definitions(SceneBackendCapture PRIVATE NOMINMAX ENGINE_BUILTIN_ASSET_SCRIPTS)
+    target_include_directories(SceneBackendCapture PRIVATE
+        "${ENGINE_ROOT}/Engine" "${ENGINE_ROOT}/Engine/Core/Assets")
+endif()
 if(NOT ENGINE_PROJECT_DIR AND WIN32 AND EXISTS "${ENGINE_LOCAL_TEST_ROOT}/DX12DeferredUploadTests.cpp")
     add_executable(DX12DeferredUploadTests EXCLUDE_FROM_ALL "${ENGINE_LOCAL_TEST_ROOT}/DX12DeferredUploadTests.cpp")
     target_link_libraries(DX12DeferredUploadTests PRIVATE Engine d3d12 dxgi)
