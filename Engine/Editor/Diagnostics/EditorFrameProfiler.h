@@ -37,6 +37,9 @@ namespace Engine::Editor
         bool measured = true;
         bool playPipeline = false;
         bool startup = false;
+        bool viewObservationValid = false, viewSetChanged = false, viewVisibilityChanged = false, viewSizeRequested = false;
+        double viewResizeMilliseconds = 0;
+        uint32_t viewResizeCount = 0;
         uint32_t activity = 0;
         double uiCpuMilliseconds = 0;
         bool uiToolbarTimingValid = false;
@@ -51,6 +54,9 @@ namespace Engine::Editor
             std::string kind;
             uint32_t width=0, height=0;
             Engine::Rendering::RenderCpuTimings renderCpu;
+            double recordMs=0, setupMs=0, shadowRecordMs=0, colorRecordMs=0;
+            double shadowReplayMs=0, colorReplayMs=0;
+            bool recordingValid=false, nativeReplayValid=false;
         };
         std::vector<ViewRender> viewRenders;
         uint64_t workerPending = 0;

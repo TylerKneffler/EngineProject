@@ -23,8 +23,8 @@ public:
     void Clear(float r, float g, float b, float a = 1.0f) override;
     Engine::Graphics::IGraphicsProvider* GetGraphicsProvider() override { return m_provider.get(); }
     void WaitIdle() override { m_core.WaitIdle(); }
-    void RequestSceneCapture() { m_captureRequested = true; }
-    bool ReadSceneCaptureRGBA(std::vector<uint8_t>& pixels);
+    void RequestSceneCapture() override { m_captureRequested = true; }
+    bool ReadSceneCaptureRGBA(std::vector<uint8_t>& pixels) override;
     void BeginFrame() override;
     void EndFrame() override;
     uint64_t GetSubmittedFrameToken() const override

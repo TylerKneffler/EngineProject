@@ -285,6 +285,12 @@ namespace Engine::Editor
             << ",\"views\":" << sample.renderedViews
             << ",\"scene_views\":" << sample.renderedSceneViews
             << ",\"game_views\":" << sample.renderedGameViews
+            << ",\"view_observation_valid\":" << (sample.viewObservationValid ? "true" : "false")
+            << ",\"view_set_changed\":" << (sample.viewSetChanged ? "true" : "false")
+            << ",\"view_visibility_changed\":" << (sample.viewVisibilityChanged ? "true" : "false")
+            << ",\"view_size_requested\":" << (sample.viewSizeRequested ? "true" : "false")
+            << ",\"panel_view_resize_count\":" << sample.viewResizeCount
+            << ",\"panel_view_resize_ms\":" << sample.viewResizeMilliseconds
             << ",\"view_pixels\":" << sample.renderedViewPixels
             << ",\"game_view_width\":" << sample.gameViewWidth
             << ",\"game_view_height\":" << sample.gameViewHeight
@@ -469,6 +475,11 @@ namespace Engine::Editor
             << ",\"render_culling_ms\":" << renderCpu.cullingMs
             << ",\"render_sorting_ms\":" << renderCpu.sortingMs
             << ",\"render_material_ms\":" << renderCpu.materialMs
+            << ",\"render_material_pipeline_ms\":" << renderCpu.materialPipelineMs
+            << ",\"render_material_geometry_binding_ms\":" << renderCpu.materialGeometryBindingMs
+            << ",\"render_material_other_ms\":" << renderCpu.materialOtherMs
+            << ",\"render_material_shader_pipeline_cache_hits\":" << renderCpu.materialShaderPipelineCacheHits
+            << ",\"render_material_shader_pipeline_cache_misses\":" << renderCpu.materialShaderPipelineCacheMisses
             << ",\"render_upload_ms\":" << renderCpu.uploadMs
             << ",\"render_submission_ms\":" << renderCpu.submissionMs
             << ",\"render_batching_ms\":" << renderCpu.batchingMs
@@ -534,6 +545,17 @@ namespace Engine::Editor
             output << "{\"kind\":" << PerformanceJsonString(view.kind)
                 << ",\"width\":" << view.width
                 << ",\"height\":" << view.height
+                << ",\"record_timing_valid\":" << (view.recordingValid ? "true" : "false")
+                << ",\"record_ms\":" << view.recordMs
+                << ",\"record_setup_ms\":" << view.setupMs
+                << ",\"record_shadow_ms\":" << view.shadowRecordMs
+                << ",\"record_color_ms\":" << view.colorRecordMs
+                << ",\"native_replay_timing_valid\":" << (view.nativeReplayValid ? "true" : "false")
+                << ",\"native_shadow_replay_ms\":" << view.shadowReplayMs
+                << ",\"native_color_replay_ms\":" << view.colorReplayMs
+                << ",\"material_pipeline_ms\":" << cpu.materialPipelineMs
+                << ",\"material_pipeline_cache_hits\":" << cpu.materialShaderPipelineCacheHits
+                << ",\"material_pipeline_cache_misses\":" << cpu.materialShaderPipelineCacheMisses
                 << ",\"metrics_scope\":\"color_pass_cpu\""
                 << ",\"render_cpu_total_ms\":" << cpu.totalMs
                 << ",\"render_startup_ms\":" << cpu.startupMs

@@ -49,6 +49,7 @@ set(FETCHCONTENT_UPDATES_DISCONNECTED ON)
 option(ENGINE_ENABLE_VULKAN "Build the Vulkan renderer" ON)
 option(ENGINE_PORTABLE_EXPORT "Link the game with the static MSVC runtime for portable exports" OFF)
 option(ENGINE_DISTRIBUTION_BUILD "Use paths relative to a packaged engine release" OFF)
+option(ENGINE_SHADER_UNOPTIMIZED_DEBUG "Compile D3D shaders without optimization for shader stepping" OFF)
 if(MSVC AND ENGINE_PORTABLE_EXPORT)
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()
@@ -763,6 +764,7 @@ if(MSVC)
     target_compile_definitions(Engine PUBLIC
         UNICODE
         _UNICODE
+        $<$<BOOL:${ENGINE_SHADER_UNOPTIMIZED_DEBUG}>:ENGINE_SHADER_UNOPTIMIZED_DEBUG>
         $<$<CONFIG:Debug>:_DEBUG>
         $<$<CONFIG:Release>:NDEBUG>
     )
@@ -983,6 +985,45 @@ if(MSVC)
 endif()
 
 set(ENGINE_LOCAL_TEST_ROOT "${ENGINE_ROOT}/.local/tests")
+if(WIN32 AND EXISTS "${ENGINE_LOCAL_TEST_ROOT}/GameBackendCapture.cpp")
+    set(GAME_BENCHMARK_SOURCES ${GAME_SOURCES})
+    list(FILTER GAME_BENCHMARK_SOURCES EXCLUDE REGEX "[/\\\\]Main\\.cpp$")
+    add_executable(GameBackendCapture EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/GameBackendCapture.cpp"
+        ${GAME_BENCHMARK_SOURCES} ${ASSET_SOURCES})
+    target_link_libraries(GameBackendCapture PRIVATE Engine comctl32.lib)
+    target_include_directories(GameBackendCapture PRIVATE
+        "${ENGINE_ROOT}/Engine" "${ENGINE_ROOT}/Engine/Core/Assets" "${ENGINE_PROJECT_DIR}/Assets")
+    target_compile_definitions(GameBackendCapture PRIVATE
+        PROJECT_FILE="${ENGINE_PROJECT_FILE}"
+        ENGINE_ASSETS_PATH="${ENGINE_COMPILED_ASSETS_PATH}"
+        ENGINE_BUILD_CONFIGURATION="$<CONFIG>"
+        $<$<NOT:$<BOOL:${ENGINE_PROJECT_DIR}>>:ENGINE_BUILTIN_ASSET_SCRIPTS>)
+    target_precompile_headers(GameBackendCapture REUSE_FROM Engine)
+    if(NOT ENGINE_PROJECT_DIR AND EXISTS "${ENGINE_LOCAL_TEST_ROOT}/GameBackendPlayable.scene")
+        enable_testing()
+        foreach(backend dx11 dx12 vulkan)
+            if(backend STREQUAL "vulkan" AND NOT ENGINE_VULKAN_ENABLED)
+                continue()
+            endif()
+            foreach(lighting clustered unclustered)
+                set(cluster_option)
+                if(lighting STREQUAL "unclustered")
+                    set(cluster_option --disable-clustered-lighting)
+                endif()
+                add_test(NAME GameStandalone_${backend}_${lighting}
+                    COMMAND GameBackendCapture
+                        --scene "${ENGINE_LOCAL_TEST_ROOT}/GameBackendPlayable.scene"
+                        --backend "${backend}" --device Auto --width 320 --height 240
+                        --warmup 20 --frames 100 --drive-forward 60 --require-movement
+                        --wait-for-residency 30 --max-fps 60 ${cluster_option}
+                        --out "${ENGINE_LOCAL_TEST_ROOT}/game-backend-regression")
+                set_tests_properties(GameStandalone_${backend}_${lighting} PROPERTIES
+                    WORKING_DIRECTORY "${ENGINE_ROOT}" TIMEOUT 180 RUN_SERIAL TRUE)
+            endforeach()
+        endforeach()
+    endif()
+endif()
 if(NOT ENGINE_PROJECT_DIR AND WIN32 AND
    EXISTS "${ENGINE_LOCAL_TEST_ROOT}/SceneBackendCapture.cpp")
     add_executable(SceneBackendCapture EXCLUDE_FROM_ALL
@@ -2448,6 +2489,18 @@ if(NOT ENGINE_PROJECT_DIR AND
     target_include_directories(DrawBatchPreparationTests PRIVATE "${ENGINE_ROOT}/Engine")
     add_test(NAME DrawBatchPreparation COMMAND DrawBatchPreparationTests)
     set_tests_properties(DrawBatchPreparation PROPERTIES WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/InstanceTilePreparationTests.cpp")
+    enable_testing()
+    add_executable(InstanceTilePreparationTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/InstanceTilePreparationTests.cpp")
+    target_include_directories(InstanceTilePreparationTests PRIVATE "${ENGINE_ROOT}/Engine")
+    target_compile_definitions(InstanceTilePreparationTests PRIVATE NOMINMAX)
+    target_link_libraries(InstanceTilePreparationTests PRIVATE glm::glm)
+    add_test(NAME InstanceTilePreparation COMMAND InstanceTilePreparationTests)
+    set_tests_properties(InstanceTilePreparation PROPERTIES WORKING_DIRECTORY "${ENGINE_ROOT}")
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND

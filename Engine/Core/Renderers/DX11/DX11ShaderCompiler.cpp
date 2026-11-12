@@ -32,9 +32,11 @@ std::unique_ptr<Engine::Graphics::IShader> D3D11ShaderCompiler::CompileFromFile(
 
     Microsoft::WRL::ComPtr<ID3DBlob> bytecode;
     Microsoft::WRL::ComPtr<ID3DBlob> errors;
-    const UINT flags = D3DCOMPILE_ENABLE_STRICTNESS
-#if defined(_DEBUG)
-        | D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION
+    const UINT flags = D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_DEBUG
+#if defined(ENGINE_SHADER_UNOPTIMIZED_DEBUG)
+        | D3DCOMPILE_SKIP_OPTIMIZATION
+#else
+        | D3DCOMPILE_OPTIMIZATION_LEVEL3
 #endif
         ;
 

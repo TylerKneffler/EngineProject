@@ -492,6 +492,8 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
         scene, renderer, autoProfilePlay);
     uint32_t autoProfileTick = 0,autoProfilePlayingFrames=0;
     uint64_t recordedFrameCount = 0;
+    std::vector<uintptr_t> previousRenderedViewIds;
+    bool haveRenderedViewIds = false;
     std::chrono::steady_clock::time_point previousUpdateBegin{}, previousSubmissionSample{};
     double previousIdleWaitMs = 0;
     const bool autoProfileKeepOpen=EnvironmentVariable("ENGINE_EDITOR_AUTO_PROFILE_KEEP_OPEN").has_value();
@@ -501,6 +503,20 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
     const uint32_t autoProfileStopFrames=stopFrames ? uint32_t(std::clamp(std::atoi(stopFrames->c_str()),0,1200)):0;
     const auto profileStep=EnvironmentVariable("ENGINE_EDITOR_AUTO_PROFILE_STEP_SECONDS");
     const float autoProfileStep=autoProfilePlay && profileStep ? std::strtof(profileStep->c_str(),nullptr):0.f;
+    const auto switchInterval=EnvironmentVariable("ENGINE_EDITOR_AUTO_PROFILE_SWITCH_VIEWS");
+    const uint32_t autoViewSwitchInterval=autoProfilePlay && switchInterval
+        ? uint32_t(std::clamp(std::atoi(switchInterval->c_str()),1,1200)) : 0;
+    uint32_t autoViewSwitchTicks=0;
+    bool autoViewShowGame=true;
+    std::vector<std::pair<Engine::Editor::View*,bool>> autoViewOriginalOpen;
+    if(autoViewSwitchInterval)
+        for(const auto& panel:editorState->GetPanels())
+            if(auto* view=dynamic_cast<Engine::Editor::View*>(panel.get());
+                dynamic_cast<Engine::Editor::SceneView*>(view) || dynamic_cast<Engine::Editor::GameView*>(view))
+            {
+                autoViewOriginalOpen.emplace_back(view,view->IsOpen());
+                view->SetOpen(dynamic_cast<Engine::Editor::GameView*>(view)!=nullptr);
+            }
     uint32_t autoProfileStoppedFrames=0;
     bool autoProfileComplete=false;
     struct RetiredSceneFrame
@@ -687,6 +703,11 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
         double mainSubmitMilliseconds = 0.0;
         double editorUiMilliseconds = 0.0;
         uint32_t renderedViews = 0;
+        bool viewObservationAvailable=false;
+        std::vector<uintptr_t> renderedViewIds;
+        bool viewVisibilityChanged=false, viewSizeRequested=false;
+        double viewResizeMs=0;
+        uint32_t viewResizeCount=0;
         uint32_t renderedSceneViews = 0;
         uint32_t renderedGameViews = 0;
         uint64_t renderedViewPixels = 0;
@@ -723,6 +744,7 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
             Engine::Editor::View* view;
             std::shared_ptr<Engine::Graphics::GraphicsCommandPacket> shadow, color;
             uint32_t shadowDraws;
+            size_t profileIndex=0;
         };
         std::vector<RecordedView> recordedViews;
         std::vector<Engine::Editor::EditorPlayPipeline::Commands> frameCommands;
@@ -750,22 +772,34 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
                 {
                     const bool visibilityChanged = view->ConsumeVisibilityChanged();
                     const bool renderSizeChanged = view->ConsumeRenderSizeChanged();
+                    viewVisibilityChanged |= visibilityChanged;
+                    viewSizeRequested |= renderSizeChanged;
                     if (visibilityChanged || renderSizeChanged) renderer->MarkDirty();
                 }
         };
         // Render frame
         // A viewport resize can replace the texture referenced by ImGui. Apply
         // last frame's size before building UI draw data, never afterwards.
+        const auto applyViewSize = [&](Engine::Editor::View* view) {
+            const auto width=view->GetWidth(), height=view->GetHeight();
+            const auto begin=Clock::now();
+            view->ApplyRequestedRenderSize(renderer->GetNativeDeviceHandle());
+            if(width!=view->GetWidth() || height!=view->GetHeight()) {
+                ++viewResizeCount;
+                viewResizeMs+=std::chrono::duration<double,std::milli>(Clock::now()-begin).count();
+            }
+        };
         if (usePlayPipeline && sizeDx11ViewsToPanels)
             for (const auto& panel : editorState->GetPanels())
                 if (auto* view = dynamic_cast<Engine::Editor::View*>(panel.get());
                     view && view->IsOpen() && view->IsRenderVisible())
-                    view->ApplyRequestedRenderSize(renderer->GetNativeDeviceHandle());
+                    applyViewSize(view);
         const auto submissionBefore = renderer->GetSubmittedFrameCount();
         const uint64_t submissionTokenBefore = renderer->GetSubmittedFrameToken();
         submittingEditorFrame = true;
         renderer->RenderIfNeeded([&]()
         {
+            viewObservationAvailable=true;
             const auto drawBegin = Clock::now();
             renderEntryMilliseconds = std::chrono::duration<double, std::milli>(
                 drawBegin - afterSceneUpdate).count();
@@ -838,18 +872,22 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
                             playPipeline->AcquireCommands(),
                             playPipeline->AcquireCommands(), 0};
                         const auto viewRecordStart=Clock::now();
+                        Engine::Editor::View::RecordingTimings viewRecordTimings;
                         if (auto* sceneView = dynamic_cast<Engine::Editor::SceneView*>(view))
-                            sceneView->RecordRenderCommands(*recorded.shadow, *recorded.color, drawPacket.get());
+                            sceneView->RecordRenderCommands(*recorded.shadow, *recorded.color, drawPacket.get(), &viewRecordTimings);
                         else if (auto* gameView = dynamic_cast<Engine::Editor::GameView*>(view))
-                            gameView->RecordRenderCommands(*recorded.shadow, *recorded.color, drawPacket.get());
+                            gameView->RecordRenderCommands(*recorded.shadow, *recorded.color, drawPacket.get(), &viewRecordTimings);
                         else continue;
-                        pipelineViewRecordMs+=std::chrono::duration<double,std::milli>(Clock::now()-viewRecordStart).count();
+                        const double viewRecordMs=std::chrono::duration<double,std::milli>(Clock::now()-viewRecordStart).count();
+                        pipelineViewRecordMs+=viewRecordMs;
                         recorded.shadowDraws = scene->GetShadowDebugSnapshot().submittedCasterDrawCount;
                         const auto viewCpu=scene->GetLastRenderCpuTimings();
                         renderCpu += viewCpu;
                         viewRenders.push_back({
                             dynamic_cast<Engine::Editor::GameView*>(view) ? "game" : "scene",
-                            view->GetWidth(),view->GetHeight(),viewCpu});
+                            view->GetWidth(),view->GetHeight(),viewCpu,viewRecordMs,
+                            viewRecordTimings.setupMs,viewRecordTimings.shadowMs,viewRecordTimings.colorMs,0,0,true,false});
+                        recorded.profileIndex=viewRenders.size()-1;
                         frameCommands.push_back(recorded.shadow);
                         frameCommands.push_back(recorded.color);
                         recordedViews.push_back(std::move(recorded));
@@ -924,7 +962,7 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
                     Engine::Editor::View* view = dynamic_cast<Engine::Editor::View*>(panel.get());
                     if (!view || !view->IsRenderVisible()) continue;
                     if (sizeDx11ViewsToPanels && !uiDrawn)
-                        view->ApplyRequestedRenderSize(renderer->GetNativeDeviceHandle());
+                        applyViewSize(view);
                     renderedViewPixels += static_cast<uint64_t>(view->GetWidth()) *
                         view->GetHeight();
                 
@@ -946,6 +984,7 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
                     if (context) commands.Replay(*context);
                 };
                 const auto viewBegin = Clock::now();
+                double shadowReplayMs=0, colorReplayMs=0;
                     view->Render(cmdList, rtvHandle,
                     [&, view](void* cmd)
                     {
@@ -964,20 +1003,31 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
                                     view->GetWidth(),view->GetHeight(),viewCpu});
                             }
                         }
-                        mainSubmitMilliseconds += std::chrono::duration<double,
+                        const double elapsed=std::chrono::duration<double,
                             std::milli>(Clock::now() - begin).count();
+                        mainSubmitMilliseconds += elapsed;
+                        if(recorded) colorReplayMs=elapsed;
                     },
                     [&, view](void* cmd)
                     {
                         const auto begin = Clock::now();
                         if (recorded) replay(*recorded->shadow, cmd);
                         else view->RenderShadow3D(cmd);
-                        shadowSubmitMilliseconds += std::chrono::duration<double,
+                        const double elapsed=std::chrono::duration<double,
                             std::milli>(Clock::now() - begin).count();
+                        shadowSubmitMilliseconds += elapsed;
+                        if(recorded) shadowReplayMs=elapsed;
                     });
+                if(recorded) {
+                    auto& timings=viewRenders[recorded->profileIndex];
+                    timings.shadowReplayMs=shadowReplayMs;
+                    timings.colorReplayMs=colorReplayMs;
+                    timings.nativeReplayValid=true;
+                }
                 viewMilliseconds += std::chrono::duration<double,
                     std::milli>(Clock::now() - viewBegin).count();
                 ++renderedViews;
+                renderedViewIds.push_back(reinterpret_cast<uintptr_t>(view));
                 if (auto* sceneView = dynamic_cast<Engine::Editor::SceneView*>(view))
                 {
                     ++renderedSceneViews;
@@ -1137,6 +1187,17 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
             sample.afterPendingLoad = afterPendingLoad;
             sample.scenePath = editorState->GetCurrentScenePath();
             sample.playPipeline = usePlayPipeline;
+            sample.viewObservationValid=viewObservationAvailable;
+            if (viewObservationAvailable)
+            {
+                sample.viewSetChanged=haveRenderedViewIds && previousRenderedViewIds!=renderedViewIds;
+                previousRenderedViewIds=std::move(renderedViewIds);
+                haveRenderedViewIds=true;
+            }
+            sample.viewVisibilityChanged=viewVisibilityChanged;
+            sample.viewSizeRequested=viewSizeRequested;
+            sample.viewResizeMilliseconds=viewResizeMs;
+            sample.viewResizeCount=viewResizeCount;
             sample.uiCpuMilliseconds = uiCpuMilliseconds;
             if (uiDrawn)
             {
@@ -1211,6 +1272,16 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
         }
         if(autoProfilePlay)
         {
+            if(autoViewSwitchInterval && !autoProfileComplete &&
+                playState==Engine::Editor::PlayState::Playing && !waitingForPlayDebugger &&
+                ++autoViewSwitchTicks%autoViewSwitchInterval==0)
+            {
+                autoViewShowGame=!autoViewShowGame;
+                for(const auto& entry:autoViewOriginalOpen)
+                    entry.first->SetOpen(dynamic_cast<Engine::Editor::GameView*>(entry.first)
+                        ? autoViewShowGame : !autoViewShowGame);
+                renderer->MarkDirty();
+            }
             if (autoProfileComplete && autoProfileStopFrames>0 &&
                 autoProfileStoppedFrames<autoProfileStopFrames)
             {
@@ -1228,6 +1299,7 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
                 ++autoProfilePlayingFrames>=autoProfileWarmup+autoProfilePlayFrames)
             {
                 autoProfileComplete=true;
+                for(const auto& entry:autoViewOriginalOpen) entry.first->SetOpen(entry.second);
                 if (autoProfileStopFrames>0) gameBuildManager->Stop();
                 else
                 {

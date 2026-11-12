@@ -1,0 +1,43 @@
+<?xml version="1.0"?>
+<Scene xmlns:components="urn:engine-components" version="1">
+  <settings dimension="0" showGrid="true" gridHalfSize="10" gridCellSize="1" gridOpacity="0.40000000596046448" gridFadeDistance="80" skyboxEnabled="true" skyboxTexture="" hdriLightingEnabled="false" hdriIntensity="1" hdriExposure="0" hdriRotation="0" toneMapping="1" outputExposure="0" renderMode="0" sceneViewUiOverlay="false" portalDebugVisuals="false" sceneCameraWarpLookThrough="false" portalDebugWireframe="false" portalDebugTintRemoteView="true" portalDebugOverlayAlpha="0.44999998807907104" portalRecursionDepth="2" portalConnectionRepeatLimit="2" portalMaxViewsPerFrame="24">
+    <gridColor _arrayEncoding="spaceSeparatedNumbers">0.44999998807907104 0.44999998807907104 0.44999998807907104</gridColor>
+    <gridOriginColor _arrayEncoding="spaceSeparatedNumbers">0.30000001192092896 0.5 0.80000001192092896</gridOriginColor>
+    <ambientColor _arrayEncoding="spaceSeparatedNumbers">0.11999999731779099 0.11999999731779099 0.11999999731779099</ambientColor>
+  </settings>
+  <objects>
+    <item name="Camera" enabled="true">
+      <transform>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">0 1.5 -3</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0.4636479914188385 0 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+      </transform>
+      <components>
+        <components:Camera Camera.active="true" Camera.useTransformRotation="true" Camera.fov="60" Camera.near="0.0099999997764825821" Camera.far="100" Camera.orthographic="false" Camera.orthographicSize="5">
+          <Camera.target _arrayEncoding="spaceSeparatedNumbers">0 0 0</Camera.target>
+          <Camera.up _arrayEncoding="spaceSeparatedNumbers">0 1 0</Camera.up>
+        </components:Camera>
+        <components:FirstPersonController FirstPersonController.moveSpeed="4" FirstPersonController.lockCursor="false" />
+      </components>
+      <children />
+    </item>
+    <item name="Global Light" enabled="true">
+      <transform>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">1 1 -1</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0.55000001192092896 0.75 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+      </transform>
+      <components>
+        <components:Light Light.lightType="1" Light.intensity="1.8999999761581421" Light.range="9.9099998474121094" Light.falloff="1.3999999761581421" Light.intensityMode="0" Light.innerConeAngle="25" Light.outerConeAngle="35" Light.lightingChannels="-1" Light.cookieTexture="" Light.iesProfileTexture="" Light.cookieScale="1" Light.baked="false" Light.castsShadows="true" Light.shadowStrength="1" Light.shadowDepthBias="0.001500000013038516" Light.shadowNormalBias="0.0099999997764825821" Light.shadowResolutionScale="1" Light.shadowFilterScale="1">
+          <Light.color _arrayEncoding="spaceSeparatedNumbers">1 0.94999998807907104 0.85000002384185791</Light.color>
+        </components:Light>
+      </components>
+      <children />
+    </item>
+    <item name="Benchmark cube" enabled="true">
+      <transform><Transform.position _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.position><Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation><Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale></transform>
+      <components><components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj" /><components:Material /></components><children />
+    </item>
+    <item name="Benchmark ground" enabled="true"><transform><Transform.position _arrayEncoding="spaceSeparatedNumbers">0 -1 8</Transform.position><Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation><Transform.scale _arrayEncoding="spaceSeparatedNumbers">5 0.25 24</Transform.scale></transform><components><components:Mesh Mesh.file="Assets/Mesh/diagnostic_cube.obj" /><components:Material /></components><children /></item>
+  </objects>
+</Scene>

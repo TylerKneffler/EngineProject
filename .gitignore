@@ -10,6 +10,10 @@ build/
 .local/tests/*
 !.local/tests/StreamedPrefabBenchmark.cpp
 !.local/tests/DX12DeferredUploadTests.cpp
+!.local/tests/GameBackendCapture.cpp
+!.local/tests/DrawBatchPreparationTests.cpp
+!.local/tests/InstanceTilePreparationTests.cpp
+!.local/tests/GameBackendPlayable.scene
 /Engine/Core/Assets/TerrainData/TerrainPerformance/BakedCells/
 
 !.local\tests\OakBackendCapture.cpp

@@ -1767,11 +1767,6 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:130000:343487",
-            "path": "TerrainData/LargeOakMeadow/-1_-1.terrainedit",
-            "directory": false
-        },
-        {
             "id": "asset:70948269-a1b6-40b2-a970-ffdc9bf3f1a5",
             "path": "Models/mmd/Mococo/Mococo Prefab/Materials/Headphones 15.material",
             "directory": false
@@ -5242,11 +5237,6 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:310000:227ca1",
-            "path": "Scenes/terrain/oak_meadow_large.scene",
-            "directory": false
-        },
-        {
             "id": "file:a8e05ef1:b0000:30b47c",
             "path": "Scenes/UI",
             "directory": true
@@ -5455,16 +5445,6 @@
             "id": "file:a8e05ef1:150000:31d2f7",
             "path": "TerrainData",
             "directory": true
-        },
-        {
-            "id": "file:a8e05ef1:170000:f6bfc",
-            "path": "TerrainData/LargeOakMeadow",
-            "directory": true
-        },
-        {
-            "id": "file:a8e05ef1:5f0000:2178d8",
-            "path": "TerrainData/LargeOakMeadow/0_-1.terrainedit",
-            "directory": false
         },
         {
             "id": "file:a8e05ef1:1350000:f0933",

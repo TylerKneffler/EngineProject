@@ -47,8 +47,8 @@ public:
     bool CaptureFrameRGBA(std::vector<uint8_t>& pixels);
     // Snapshot the next composed RGBA8 frame before Present. Readback is
     // synchronous and only ready after EndFrame; normal rendering does no copy.
-    void RequestSceneCapture() { m_sceneCaptureRequested=true; m_sceneCaptureReady=false; }
-    bool ReadSceneCaptureRGBA(std::vector<uint8_t>& pixels);
+    void RequestSceneCapture() override { m_sceneCaptureRequested=true; m_sceneCaptureReady=false; }
+    bool ReadSceneCaptureRGBA(std::vector<uint8_t>& pixels) override;
     bool EnableOffscreenExport(uint32_t outputWidth, uint32_t outputHeight,
         uint32_t msaaSamples = 1u, uint32_t readbackQueueDepth = 3u,
         bool hdrOutput = false, uint32_t hdrBits = 16u,

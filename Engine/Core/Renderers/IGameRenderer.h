@@ -45,5 +45,9 @@ public:
     // Poll only on the renderer's owning thread. Token zero means no submission.
     virtual uint64_t GetSubmittedFrameToken() const = 0;
     virtual bool IsFrameComplete(uint64_t token) = 0;
+
+    // Optional frame-accurate readback for standalone diagnostics.
+    virtual void RequestSceneCapture() {}
+    virtual bool ReadSceneCaptureRGBA(std::vector<uint8_t>&) { return false; }
 };
 }

@@ -41,7 +41,8 @@ SceneInstanceBatching::Result SceneInstanceBatching::Prepare(Scene& scene,
             !draw.material->shader.empty();
         const auto* instanceData = draw.mesh && draw.mesh->IsInstanced()
             ? draw.mesh->GetInstanceData().get() : nullptr;
-        const auto* drawLayer = draw.object
+        const auto* drawLayer = includeEditorVisuals && scene.m_selectedPlacementId != 0 &&
+            scene.m_selectedPlacementLayer && instanceData && draw.object
             ? draw.object->GetComponentInParent<
                 Engine::Components::TerrainObjectLayer>() : nullptr;
         const bool selectedPlacement = includeEditorVisuals &&

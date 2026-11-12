@@ -47,7 +47,7 @@ public:
     void RenderShadow3D(void* cmd) override;
     void RecordRenderCommands(Engine::Graphics::GraphicsCommandPacket& shadow,
         Engine::Graphics::GraphicsCommandPacket& color,
-        const Engine::Scene::Scene::NativeRenderPacket* packet);
+        const Engine::Scene::Scene::NativeRenderPacket* packet, RecordingTimings* timings = nullptr);
 
     // Shows the offscreen texture with letterboxing/pillarboxing based on
     // aspect ratio settings, captures mouse input, and drives the

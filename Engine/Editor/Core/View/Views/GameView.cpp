@@ -6,6 +6,7 @@
 #include "Core/Graphics/IGraphicsContext.h"
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "../Focus/WindowFocusHandler.h"
+#include <chrono>
 
 namespace Engine::Editor
 {
@@ -123,15 +124,24 @@ void GameView::Render3D(void* cmd)
 
 void GameView::RecordRenderCommands(Engine::Graphics::GraphicsCommandPacket& shadow,
     Engine::Graphics::GraphicsCommandPacket& color,
-    const Engine::Scene::Scene::NativeRenderPacket* packet)
+    const Engine::Scene::Scene::NativeRenderPacket* packet, RecordingTimings* timings)
 {
+    using Clock=std::chrono::steady_clock;
+    const auto started=Clock::now();
     if (!m_scene) return;
     auto* camera = m_scene->FindGameCamera();
     if (!camera) camera = m_scene->editorCamera.GetComponent<Engine::Components::Camera>();
     if (!camera) return;
     m_scene->PrepareNativeUiLayout(m_aspect);
+    const auto setupEnd=Clock::now();
     m_scene->Render(&shadow, m_aspect, camera, false, GetWidth(), GetHeight(), true, packet);
+    const auto shadowEnd=Clock::now();
     m_scene->Render(&color, m_aspect, camera, false, GetWidth(), GetHeight(), false, packet);
+    if(timings) {
+        timings->setupMs=std::chrono::duration<double,std::milli>(setupEnd-started).count();
+        timings->shadowMs=std::chrono::duration<double,std::milli>(shadowEnd-setupEnd).count();
+        timings->colorMs=std::chrono::duration<double,std::milli>(Clock::now()-shadowEnd).count();
+    }
 }
 
 void GameView::RenderShadow3D(void* cmd)

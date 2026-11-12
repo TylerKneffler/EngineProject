@@ -113,9 +113,11 @@ Scene::IPipelineState* SceneRendererMaterialShaders::ResolveMaterialShaderPipeli
     auto found = scene.m_materialShaderPipelines.find(key);
     if (found != scene.m_materialShaderPipelines.end() && found->second.sourceStamp == stamp)
     {
+        ++scene.m_lastRenderCpuTimings.materialShaderPipelineCacheHits;
         error = found->second.error;
         return found->second.pipeline.get();
     }
+    ++scene.m_lastRenderCpuTimings.materialShaderPipelineCacheMisses;
     auto& cached = scene.m_materialShaderPipelines[key];
     if (cached.pipeline)
         scene.m_retiredMaterialShaderPipelines.push_back(std::move(cached.pipeline));

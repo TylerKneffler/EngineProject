@@ -92,8 +92,8 @@ public:
     void Clear(float r, float g, float b, float a = 1.0f) override;
     Engine::Graphics::IGraphicsProvider* GetGraphicsProvider() override;
     void WaitIdle() override { FlushGPU(); }
-    void RequestSceneCapture() { m_captureRequested = true; }
-    bool ReadSceneCaptureRGBA(std::vector<uint8_t>& pixels);
+    void RequestSceneCapture() override { m_captureRequested = true; }
+    bool ReadSceneCaptureRGBA(std::vector<uint8_t>& pixels) override;
 
     // IGameRenderer interface
     void BeginFrame() override;   // reset allocator + list, transition backbuffer to RENDER_TARGET

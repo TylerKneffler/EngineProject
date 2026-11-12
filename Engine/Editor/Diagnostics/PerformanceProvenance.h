@@ -50,9 +50,16 @@ static inline const std::string& PerformanceProvenanceFields()
 #else
         const char* assertions = "true";
 #endif
+#if defined(ENGINE_SHADER_UNOPTIMIZED_DEBUG)
+        const char* d3dShaderOptimization = "disabled";
+#else
+        const char* d3dShaderOptimization = "level3";
+#endif
         return "\"executable_path\":" + PerformanceJsonString(executable) +
             ",\"build_configuration\":" + PerformanceJsonString(configuration) +
-            ",\"assertions_enabled\":" + assertions;
+            ",\"assertions_enabled\":" + assertions +
+            ",\"d3d_shader_optimization\":" + PerformanceJsonString(d3dShaderOptimization) +
+            ",\"d3d_shader_debug_info\":true";
     }();
     return fields;
 }

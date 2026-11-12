@@ -368,7 +368,9 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             glm::vec3(0.f, 1.f, 0.f));
     }
     const glm::mat4 proj = cam->GetProjectionMatrix(aspect, m_editorMode2D);
-    const glm::vec3 cameraPosition = glm::vec3(glm::inverse(view)[3]);
+    const glm::mat4 inverseView = glm::inverse(view);
+    const glm::vec3 cameraPosition = glm::vec3(inverseView[3]);
+    const glm::vec3 cameraDirection = glm::normalize(glm::vec3(inverseView[2]));
     const auto grassInteraction = Engine::Rendering::SelectGrassInteractionCapsules(
         nativePacket ? nativePacket->grassCapsules : m_frameGrassCapsules, cameraPosition);
     bool cameraUsesSourceWarpChart = false;
@@ -802,6 +804,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     Renderer::TerrainMaterialState terrainMaterialState;
 
     const auto materialStart = RenderClock::now();
+    double materialPipelineMs = 0.0;
+    double materialGeometryBindingMs = 0.0;
     UINT slot = 0;
     for (const ViewRenderItem& sortedItem : renderObjects)
     {
@@ -953,7 +957,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 preparedDraw.objectData.alphaLodParams.z =
                     std::clamp(mat->alphaCoverageTransmission, 0.f, 1.f);
             preparedDraw.objectData.world = world;
-            preparedDraw.objectData.viewProjection = proj * view;
+            preparedDraw.objectData.viewProjection = viewProjection;
             preparedDraw.objectData.traversalClipPlane =
                 renderItem->traversalClipPlane;
             preparedDraw.objectData.spriteUvRect = { 0.f, 0.f, 1.f, 1.f };
@@ -1085,8 +1089,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             static_cast<float>(clusterTilesX),
             static_cast<float>(clusterTilesY),
             static_cast<float>(clusterDepthSlices));
-        objectData.lightingCameraData = glm::vec4(glm::normalize(glm::vec3(
-            glm::inverse(view)[2])), clusterLogScale);
+        objectData.lightingCameraData = glm::vec4(cameraDirection, clusterLogScale);
         objectData.shadowCameraData.w = clusterNear;
         if (settings.hdriLightingEnabled && skybox &&
             (allowEnvironmentDiffuse || allowReflections))
@@ -1102,7 +1105,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             if (preparedDraw.textures[6])
                 objectData.reflectionEnvironmentParams.w = 1.f;
         }
-        objectData.viewProjection = proj * view;
+        objectData.viewProjection = viewProjection;
         objectData.sphereView = view;
         objectData.world = world;
         objectData.traversalClipPlane = renderItem->traversalClipPlane;
@@ -1330,14 +1333,20 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                     : (doubleSided
                         ? m_objectDoubleSidedPipeline.get()
                         : m_objectPipeline.get());
+        const auto pipelineResolveStart = RenderClock::now();
         materialPipeline = Renderer::SceneRendererMaterialShaders::ResolveObjectPipeline(
             *this, preparedDraw, mat, mesh, materialPipeline, isPreview,
             preparedDraw.blended, sprite != nullptr, wireframeMode, shadowOnly,
             preparedDraw.terrain, preparedDraw.terrainCell,
             renderItem->skinJointCount, foliagePipelines);
+        materialPipelineMs += std::chrono::duration<double,std::milli>(
+            RenderClock::now()-pipelineResolveStart).count();
         preparedDraw.constantBufferOffset = offset;
+        const auto geometryBindStart = RenderClock::now();
         Renderer::SceneRendererDrawPreparation::BindObjectGeometry(
             preparedDraw, *renderItem, useSourceChart, useSoftSurface);
+        materialGeometryBindingMs += std::chrono::duration<double,std::milli>(
+            RenderClock::now()-geometryBindStart).count();
         preparedDraws.push_back(preparedDraw);
 
         ++slot;
@@ -1351,6 +1360,10 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     Renderer::SceneRendererObjectRecordUpload recordUpload(
         *this, preparedDraws, shadowOnly);
     m_lastRenderCpuTimings.materialMs = std::chrono::duration<double,std::milli>(RenderClock::now()-materialStart).count();
+    m_lastRenderCpuTimings.materialPipelineMs = materialPipelineMs;
+    m_lastRenderCpuTimings.materialGeometryBindingMs = materialGeometryBindingMs;
+    m_lastRenderCpuTimings.materialOtherMs = std::max(0.0,
+        m_lastRenderCpuTimings.materialMs-materialPipelineMs-materialGeometryBindingMs);
     m_lastRenderCpuTimings.candidateDraws=preparedDraws.size();
     using AutomaticGroup = Engine::Rendering::DrawBatchPreparation::Group;
     auto instanceBatching = Renderer::SceneInstanceBatching::Prepare(*this,
@@ -1372,12 +1385,18 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     {
         recordUpload.EnsureUploaded();
     };
-    if(!shadowOnly && !preparedDraws.empty())
+    if(!shadowOnly)
     {
         context->SetStructuredBuffer(6,m_lightDataBuffer.get()); context->SetStructuredBuffer(7,m_objectDataBuffer.get());
         context->SetStructuredBuffer(8,m_boneDataBuffer.get()); context->SetStructuredBuffer(10,m_emptyMorphDeltaBuffer.get());
         context->SetStructuredBuffer(11,m_emptyMorphWeightBuffer.get());
-        if(clusteredLightingEnabled) { context->SetStructuredBuffer(14,m_clusterHeaderBuffer.get()); context->SetStructuredBuffer(15,m_clusterLightIndexBuffer.get()); }
+        // The material shader declares these buffers even when its clustered
+        // branch is disabled. Bind valid zero data so DX12 never leaves the
+        // corresponding root descriptors unset.
+        context->SetStructuredBuffer(14, clusteredLightingEnabled
+            ? m_clusterHeaderBuffer.get() : m_emptyMorphDeltaBuffer.get());
+        context->SetStructuredBuffer(15, clusteredLightingEnabled
+            ? m_clusterLightIndexBuffer.get() : m_emptyMorphWeightBuffer.get());
     }
 
     const auto isSpatialManipulatorCarrierDraw = [&](const PreparedDraw& draw)

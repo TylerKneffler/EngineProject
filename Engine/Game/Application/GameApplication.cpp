@@ -2,6 +2,8 @@
 
 #include "Game/Startup/GameProjectStartup.h"
 #include "Game/Startup/RendererStartup.h"
+#include "Game/Benchmark/GameBenchmark.h"
+#include "Core/ProjectLoader.h"
 #include "Core/Window.h"
 #include "Core/Startup/StartupSplash.h"
 #include "Core/Graphics/IGraphicsContext.h"
@@ -24,6 +26,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
+#include <iostream>
 #include <mutex>
 #include <thread>
 #include <utility>
@@ -67,7 +70,7 @@ void RegisterGameComponents()
 
 std::unique_ptr<::Engine::Renderers::IGameRenderer> CreateRenderer(
     const Engine::Model::ProjectSettings& settings,
-    ::Engine::Core::Window& window)
+    ::Engine::Core::Window& window, bool interactive)
 {
     try
     {
@@ -81,6 +84,7 @@ std::unique_ptr<::Engine::Renderers::IGameRenderer> CreateRenderer(
     }
     catch (const std::exception& error)
     {
+        if (!interactive) throw;
         const std::string message = "Failed to initialize the " +
             settings.gameRenderingAPI + " renderer.\n\n"
             "Please ensure it is installed, supported by your GPU, and that "
@@ -113,9 +117,13 @@ public:
         std::shared_ptr<const ::Engine::Graphics::GraphicsCommandPacket> computeCommands;
         std::shared_ptr<const ::Engine::Graphics::GraphicsCommandPacket> shadowCommands;
         std::shared_ptr<const ::Engine::Graphics::GraphicsCommandPacket> sceneCommands;
+        GameBenchmarkSceneSample benchmarkScene;
+        double benchmarkCollectionMs = 0, intervalMs = 0, residencyWaitMs = 0;
+        uint64_t benchmarkFrame = UINT64_MAX;
     };
-    explicit SimulationLoop(::Engine::Scene::Scene& scene)
-        : m_scene(scene), m_windowThread(std::this_thread::get_id())
+    explicit SimulationLoop(::Engine::Scene::Scene& scene, bool collectBenchmark)
+        : m_scene(scene), m_windowThread(std::this_thread::get_id()),
+          m_collectBenchmark(collectBenchmark)
     {
         m_worker = std::thread([this] { Run(); });
         m_scene.TransferOwnerTo(m_worker.get_id());
@@ -193,6 +201,8 @@ public:
         result.retired = std::move(m_retired);
         result.shadowCommands = std::move(m_shadowCommands);
         result.sceneCommands = std::move(m_sceneCommands);
+        result.benchmarkScene = std::move(m_benchmarkScene);
+        result.benchmarkCollectionMs = m_benchmarkCollectionMs;
         return result;
     }
 
@@ -260,7 +270,8 @@ private:
                                 gameCamera, false, m_input.clientWidth,
                                 m_input.clientHeight, true, drawPacket.get());
                             m_scene.Render(sceneCommands.get(), aspect,
-                                gameCamera, false, 0u, 0u, false,
+                                gameCamera, false, m_input.clientWidth,
+                                m_input.clientHeight, false,
                                 drawPacket.get());
                         }
                     m_scene.RetainNativePacketMeshBuffers(*drawPacket,
@@ -269,6 +280,13 @@ private:
                         m_previousOcclusionCulled);
                     m_timings.commandRecordingMs = std::chrono::duration<double,
                         std::milli>(std::chrono::steady_clock::now() - recordStart).count();
+                    if (m_collectBenchmark)
+                    {
+                        const auto collectionStart = std::chrono::steady_clock::now();
+                        m_benchmarkScene = GameBenchmark::CollectScene(m_scene);
+                        m_benchmarkCollectionMs = std::chrono::duration<double, std::milli>(
+                            std::chrono::steady_clock::now() - collectionStart).count();
+                    }
                     m_snapshot = m_scene.GetPublishedSceneSnapshot();
                     m_retired = m_scene.TakeRetiredGraphicsResources();
                     m_computeCommands = std::move(computeCommands);
@@ -291,6 +309,9 @@ private:
 
     ::Engine::Scene::Scene& m_scene;
     const std::thread::id m_windowThread;
+    const bool m_collectBenchmark;
+    GameBenchmarkSceneSample m_benchmarkScene;
+    double m_benchmarkCollectionMs = 0;
     std::mutex m_mutex;
     std::condition_variable m_wake;
     ::Engine::Core::NativeInputSnapshot m_input;
@@ -318,8 +339,10 @@ private:
 class RenderLoop
 {
 public:
-    RenderLoop(::Engine::Renderers::IGameRenderer& renderer, std::string scenePath)
-        : m_renderer(renderer), m_scenePath(std::move(scenePath))
+    RenderLoop(::Engine::Renderers::IGameRenderer& renderer, std::string scenePath,
+        GameBenchmark* gameBenchmark, const GameBenchmarkOptions* benchmarkOptions)
+        : m_renderer(renderer), m_scenePath(std::move(scenePath)),
+          m_gameBenchmark(gameBenchmark), m_benchmarkOptions(benchmarkOptions)
     {
         char workerFlag[2]{};
         m_workerRecordingEnabled = GetEnvironmentVariableA(
@@ -370,6 +393,11 @@ public:
         packet.shadowCommands = std::move(tick.shadowCommands);
         packet.sceneCommands = std::move(tick.sceneCommands);
         packet.simulationTimings = tick.timings;
+        packet.benchmarkScene = std::move(tick.benchmarkScene);
+        packet.benchmarkCollectionMs = tick.benchmarkCollectionMs;
+        packet.intervalMs = tick.intervalMs;
+        packet.residencyWaitMs = tick.residencyWaitMs;
+        packet.benchmarkFrame = tick.benchmarkFrame;
         packet.width = width;
         packet.height = height;
         SubmitAsync(Work::Frame, std::move(packet));
@@ -420,6 +448,9 @@ private:
         std::shared_ptr<const ::Engine::Graphics::GraphicsCommandPacket> shadowCommands;
         std::shared_ptr<const ::Engine::Graphics::GraphicsCommandPacket> sceneCommands;
         SimulationLoop::TickResult::Timings simulationTimings;
+        GameBenchmarkSceneSample benchmarkScene;
+        double benchmarkCollectionMs = 0, intervalMs = 0, residencyWaitMs = 0;
+        uint64_t benchmarkFrame = UINT64_MAX;
         uint32_t width = 0, height = 0;
     };
 
@@ -566,6 +597,9 @@ private:
             [&]
             {
                 const auto started = std::chrono::steady_clock::now();
+                if (m_gameBenchmark && packet.benchmarkFrame ==
+                    uint64_t(m_benchmarkOptions->warmup) + m_benchmarkOptions->frames)
+                    m_renderer.RequestSceneCapture();
                 m_renderer.EndFrame();
                 endFrameMs = std::chrono::duration<double, std::milli>(
                     std::chrono::steady_clock::now() - started).count();
@@ -576,6 +610,35 @@ private:
         const double latencyMs = std::chrono::duration<double, std::milli>(
             std::chrono::steady_clock::now() - packet.startedAt).count();
         const auto telemetry = m_renderer.GetFrameTimingTelemetry();
+        if (m_gameBenchmark && packet.benchmarkFrame != UINT64_MAX)
+        {
+            const uint64_t warmup = m_benchmarkOptions->warmup;
+            if (packet.benchmarkFrame >= warmup &&
+                packet.benchmarkFrame < warmup + m_benchmarkOptions->frames)
+            {
+                GameBenchmarkFrameSample sample;
+                sample.intervalMs = packet.intervalMs;
+                sample.updateMs = packet.simulationTimings.simulationUpdateMs;
+                sample.prepareMs = packet.simulationTimings.scenePreparationMs;
+                sample.recordMs = packet.simulationTimings.commandRecordingMs;
+                sample.updateWaitMs = packet.simulationTimings.updateHandoffWaitMs;
+                sample.prepareWaitMs = packet.simulationTimings.prepareHandoffWaitMs;
+                sample.replayMs = sceneReplayMs;
+                sample.endFrameMs = endFrameMs;
+                sample.renderThreadMs = frameMs;
+                sample.latencyMs = latencyMs;
+                sample.metricsCollectionMs = packet.benchmarkCollectionMs;
+                sample.residencyWaitMs = packet.residencyWaitMs;
+                sample.width = m_renderer.GetWidth();
+                sample.height = m_renderer.GetHeight();
+                sample.renderScale = m_renderer.GetRenderScale();
+                sample.gpu = telemetry;
+                sample.scene = std::move(packet.benchmarkScene);
+                m_gameBenchmark->Record(packet.benchmarkFrame - warmup, sample);
+            }
+            else if (packet.benchmarkFrame == warmup + m_benchmarkOptions->frames)
+                m_gameBenchmark->Capture(m_renderer);
+        }
         double gpuTotalMs = 0.0;
         for (double stageMs : telemetry.gpuMilliseconds) gpuTotalMs += stageMs;
         if (m_benchmark)
@@ -690,6 +753,8 @@ private:
 
     ::Engine::Renderers::IGameRenderer& m_renderer;
     std::string m_scenePath;
+    GameBenchmark* m_gameBenchmark;
+    const GameBenchmarkOptions* m_benchmarkOptions;
     bool m_workerRecordingEnabled = false;
     std::ofstream m_benchmark;
     uint64_t m_benchmarkFrame = 0;
@@ -717,11 +782,24 @@ private:
 };
 }
 
-int GameApplication::Run(HINSTANCE instance)
+int GameApplication::Run(HINSTANCE instance, const GameBenchmarkOptions* benchmark)
 {
+    const auto startupStart = std::chrono::steady_clock::now();
     RegisterGameComponents();
-    Engine::Model::ProjectSettings settings = LoadGameProjectSettings();
-    if (!SelectStartupRenderer(settings))
+    Engine::Model::ProjectSettings settings = benchmark && !benchmark->project.empty()
+        ? Engine::Core::ProjectLoader{}.LoadProject(benchmark->project.string())
+        : LoadGameProjectSettings();
+    if (benchmark)
+    {
+        settings.gameRenderingAPI = benchmark->backend == "dx11" ? "DirectX11" :
+            benchmark->backend == "dx12" ? "DirectX12" : "Vulkan";
+        settings.viewportWidth = benchmark->width;
+        settings.viewportHeight = benchmark->height;
+        if (!benchmark->device.empty()) settings.graphicsDevice = benchmark->device;
+        if (benchmark->maxFpsOverride) settings.gameMaxFps = *benchmark->maxFpsOverride;
+        if (benchmark->disableClusteredLighting) settings.distanceLighting.clusteredLighting = false;
+    }
+    if (!benchmark && !SelectStartupRenderer(settings))
         return 0;
 
     const auto startupBackground =
@@ -734,7 +812,8 @@ int GameApplication::Run(HINSTANCE instance)
     auto window = std::make_unique<::Engine::Core::Window>(instance, L"Game",
         settings.viewportWidth, settings.viewportHeight);
     splash.SetProgress(0.35f, L"Initializing renderer...");
-    std::unique_ptr<::Engine::Renderers::IGameRenderer> renderer = CreateRenderer(settings, *window);
+    std::unique_ptr<::Engine::Renderers::IGameRenderer> renderer =
+        CreateRenderer(settings, *window, benchmark == nullptr);
     if (!renderer)
         return 1;
 
@@ -748,20 +827,27 @@ int GameApplication::Run(HINSTANCE instance)
     scene.SetRealtimeShadowSettings(settings.realtimeShadows);
     scene.SetDistanceLightingSettings(settings.distanceLighting);
     Engine::Core::SceneManager::SetActiveScene(&scene);
-    const std::string defaultScene = settings.defaultScene.empty()
+    const std::string defaultScene = benchmark ? benchmark->scene.string() : settings.defaultScene.empty()
         ? GetFallbackScenePath() : settings.defaultScene;
     Engine::Core::SceneManager::SetDefaultScenePath(defaultScene);
     std::string loadedScenePath = defaultScene;
     if (!scene.Load(loadedScenePath))
     {
+        if (benchmark) throw std::runtime_error("could not load benchmark scene: " + loadedScenePath);
         loadedScenePath = GetFallbackScenePath();
         scene.Load(loadedScenePath);
     }
 
     scene.Start();
-    RenderLoop renderLoop(*renderer, loadedScenePath);
+    std::unique_ptr<GameBenchmark> gameBenchmark;
+    if (benchmark)
+        gameBenchmark = std::make_unique<GameBenchmark>(*benchmark, *renderer,
+            loadedScenePath, settings.gameMaxFps, settings.distanceLighting.clusteredLighting,
+            std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - startupStart).count());
+    RenderLoop renderLoop(*renderer, loadedScenePath, gameBenchmark.get(), benchmark);
     scene.SetBeforeGpuResourceDestruction([&renderLoop] { renderLoop.WaitIdle(); });
-    SimulationLoop simulation(scene);
+    SimulationLoop simulation(scene, benchmark != nullptr);
     splash.SetProgress(0.90f, L"Starting game...");
 
     LARGE_INTEGER performanceFrequency{};
@@ -769,6 +855,11 @@ int GameApplication::Run(HINSTANCE instance)
     QueryPerformanceFrequency(&performanceFrequency);
     QueryPerformanceCounter(&lastCounter);
     Engine::Core::FramePacer gameFramePacer;
+    bool benchmarkStarted = false;
+    bool benchmarkReady = !benchmark || benchmark->residencyTimeoutSeconds == 0;
+    auto benchmarkWaitStart = std::chrono::steady_clock::now();
+    double residencyWaitMs = 0;
+    uint64_t benchmarkFrame = 0;
 
     window->OnResize = [&renderLoop](uint32_t width, uint32_t height)
     {
@@ -786,17 +877,61 @@ int GameApplication::Run(HINSTANCE instance)
 
         const uint32_t width = window->GetWidth();
         const uint32_t height = window->GetHeight();
-        simulation.BeginUpdate(deltaTime,
-            ::Engine::Core::CaptureNativeInput(window->GetHWND()));
+        auto input = ::Engine::Core::CaptureNativeInput(window->GetHWND());
+        if (benchmark && benchmarkStarted && benchmarkReady && benchmark->driveForwardFrames)
+        {
+            // Feed a reproducible click and W hold through the normal input
+            // snapshot path without moving the host cursor or keyboard.
+            input.focused = true;
+            input.keys.fill(0);
+            if (input.hasCenter) input.cursor = input.center;
+            const uint64_t clickStart = uint64_t(benchmark->warmup) + 5u;
+            if (benchmarkFrame >= clickStart && benchmarkFrame < clickStart + 3u)
+                input.keys[VK_LBUTTON] = static_cast<SHORT>(0x8000);
+            const uint64_t moveStart = clickStart + 3u;
+            if (benchmarkFrame >= moveStart &&
+                benchmarkFrame < moveStart + benchmark->driveForwardFrames)
+                input.keys['W'] = static_cast<SHORT>(0x8000);
+        }
+        simulation.BeginUpdate(deltaTime, std::move(input));
         uint32_t previousOcclusionCulled = 0;
         if (width && height)
             previousOcclusionCulled = renderLoop.BeginFrame();
         auto tick = simulation.FinishFrame(width && height,
             previousOcclusionCulled);
-        ::Engine::Core::ApplyNativeCursorRequests(tick.input);
+        if (benchmarkStarted && width && height)
+        {
+            if (!benchmarkReady)
+            {
+                const auto& state = tick.benchmarkScene;
+                residencyWaitMs = std::chrono::duration<double, std::milli>(
+                    std::chrono::steady_clock::now() - benchmarkWaitStart).count();
+                benchmarkReady = state.camera && state.render.physicalDraws &&
+                    state.render.submittedTriangles &&
+                    (!benchmark->requireTerrain || state.terrains) &&
+                    (!benchmark->requireStreamedCells || state.loadedCells);
+                if (!benchmarkReady && residencyWaitMs >=
+                    1000.0 * benchmark->residencyTimeoutSeconds)
+                {
+                    std::cerr << "Timed out waiting for benchmark scene residency\n";
+                    PostQuitMessage(2);
+                }
+            }
+            if (benchmarkReady)
+            {
+                tick.benchmarkFrame = benchmarkFrame++;
+                tick.intervalMs = double(deltaTime) * 1000.0;
+                tick.residencyWaitMs = residencyWaitMs;
+            }
+        }
+        if (!benchmark || !benchmark->driveForwardFrames)
+            ::Engine::Core::ApplyNativeCursorRequests(tick.input);
 
         if (width && height)
             renderLoop.Render(width, height, std::move(tick));
+        if (benchmarkStarted && benchmarkFrame >
+            uint64_t(benchmark->warmup) + benchmark->frames)
+            PostQuitMessage(0);
     };
 
     // Keep the native window hidden until it has a rendered frame to show.
@@ -807,13 +942,16 @@ int GameApplication::Run(HINSTANCE instance)
     // Hidden swap chains may discard Present, so submit a visible frame too.
     window->OnUpdate();
     splash.Close();
+    benchmarkWaitStart = std::chrono::steady_clock::now();
+    benchmarkStarted = benchmark != nullptr;
     const int result = window->Run();
     simulation.Stop();
     Engine::Core::SceneManager::CancelPendingSceneLoad();
     scene.FenceBackgroundWork();
     renderLoop.Stop();
+    const bool benchmarkValid = !gameBenchmark || gameBenchmark->Finish();
     scene.SetBeforeGpuResourceDestruction({});
     Engine::Core::SceneManager::SetActiveScene(nullptr);
-    return result;
+    return benchmarkValid ? result : 2;
 }
 }

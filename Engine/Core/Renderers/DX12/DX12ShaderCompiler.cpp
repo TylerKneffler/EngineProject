@@ -38,9 +38,9 @@ std::unique_ptr<Engine::Graphics::IShader> D3D12ShaderCompiler::CompileFromFile(
     MultiByteToWideChar(CP_UTF8, 0, filePath.c_str(), -1, wpath.data(), wlen);
     wpath.pop_back();
 
-    const UINT flags = D3DCOMPILE_ENABLE_STRICTNESS
-#if defined(_DEBUG)
-        | D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION
+    const UINT flags = D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_DEBUG
+#if defined(ENGINE_SHADER_UNOPTIMIZED_DEBUG)
+        | D3DCOMPILE_SKIP_OPTIMIZATION
 #else
         | D3DCOMPILE_OPTIMIZATION_LEVEL3
 #endif

@@ -17,6 +17,7 @@ namespace Engine::Editor
 class View : public IEditorPanel
 {
 public:
+    struct RecordingTimings { double setupMs=0, shadowMs=0, colorMs=0; };
     View();
     virtual ~View();
 
