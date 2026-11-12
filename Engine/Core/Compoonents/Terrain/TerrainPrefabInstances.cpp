@@ -773,28 +773,31 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
         // CPU objects provide coarse spatial bounds; the compute path still
         // selects visibility and LOD for each placement. Small 64 m groups
         // multiplied every prefab part/band into thousands of CPU components.
-        const float prefabGroupSpan=std::clamp(prefabInstanceGroupSpanMeters,8.f,256.f);
-        std::map<std::pair<int,int>,std::vector<const Placement*>> tiles;
-        for (const auto* placement:records)
-            tiles[{int(std::floor(placement->position.x/prefabGroupSpan)),
-                int(std::floor(placement->position.z/prefabGroupSpan))}].push_back(placement);
-        std::map<std::pair<int,int>,MeshInstanceLayerData> tileLayers;
-        for (const auto& [tile,tileRecords]:tiles)
-        {
-            std::vector<glm::mat4> transforms;
-            std::vector<uint64_t> ids;
-            transforms.reserve(tileRecords.size());
-            ids.reserve(tileRecords.size());
-            for (const auto* placement:tileRecords)
-            {
-                transforms.push_back(placementMatrix(*placement));
-                ids.push_back(placement->id);
-            }
-            tileLayers[tile].SetPlacements(std::move(transforms),std::move(ids));
-        }
         auto& tileInstances = runtime->tileLayers;
+        // Resuming another mesh part already owns these placement transforms.
+        // Rebuilding and discarding them on every budgeted call made dense
+        // layers pay the full placement cost repeatedly during load/restore.
         if (runtime->nextPart == 0)
         {
+            const float prefabGroupSpan=std::clamp(prefabInstanceGroupSpanMeters,8.f,256.f);
+            std::map<std::pair<int,int>,std::vector<const Placement*>> tiles;
+            for (const auto* placement:records)
+                tiles[{int(std::floor(placement->position.x/prefabGroupSpan)),
+                    int(std::floor(placement->position.z/prefabGroupSpan))}].push_back(placement);
+            std::map<std::pair<int,int>,MeshInstanceLayerData> tileLayers;
+            for (const auto& [tile,tileRecords]:tiles)
+            {
+                std::vector<glm::mat4> transforms;
+                std::vector<uint64_t> ids;
+                transforms.reserve(tileRecords.size());
+                ids.reserve(tileRecords.size());
+                for (const auto* placement:tileRecords)
+                {
+                    transforms.push_back(placementMatrix(*placement));
+                    ids.push_back(placement->id);
+                }
+                tileLayers[tile].SetPlacements(std::move(transforms),std::move(ids));
+            }
             tileInstances=std::move(tileLayers);
             runtime->groupStart = runtime->generated.size();
         }
@@ -844,9 +847,8 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
                     auto source = sourcePart->representations.front();
                     if (!source) continue;
                     BuildProfile::Stage instanceStage("batch_instances");
-                    for (const auto& [tile,tileRecords]:tiles)
+                    for (auto& [tile,layerData]:tileInstances)
                     {
-                        auto& layerData=tileInstances[tile];
                         const glm::vec3 windPadding(1.5f*std::max(0.f,source->GetBoundsMax().y)*
                             std::clamp(original->foliageWindStrength,0.f,1.f));
                         MeshInstanceLayerData::Batch batch;
@@ -902,7 +904,7 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
                             mesh->instanceLodDistances={lodDistances[0],lodDistances.size()>1 ? lodDistances[1]:1.e20f};
                         }
                         mesh->SetInstancedGeometry(source,instances,{{0,source->GetVertexCount(),0,
-                            static_cast<uint32_t>(tileRecords.size())}},batch.minimum,batch.maximum);
+                            static_cast<uint32_t>(layerData.Size())}},batch.minimum,batch.maximum);
                         if (const auto* material=original->Owner->GetComponent<Material>())
                         {
                             sourcePart = prototype->sources.FindPart(sourceKey);

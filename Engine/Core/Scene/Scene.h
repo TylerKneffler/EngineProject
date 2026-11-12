@@ -297,6 +297,7 @@ public:
         double prefabPlacementAssetsMs=0,prefabLodProfilesMs=0,prefabSourceSetMs=0;
         double prefabRegistryMs=0,prefabValidationMs=0,prefabSourceLookupMs=0;
         double prefabBuildMs=0,prefabMainBufferCreateMs=0;
+        double prefabBudgetOverrunMs=0,prefabMaxLayerMs=0;
         double graphicsPreparationMs=0,nativeBuffersMs=0;
         double lookupMs = 0.0;
         double itemsMs = 0.0;
