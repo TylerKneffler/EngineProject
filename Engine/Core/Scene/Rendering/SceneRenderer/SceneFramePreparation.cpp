@@ -204,9 +204,13 @@ void Scene::PrepareRenderFrame(bool publishSnapshot)
     // frames publish on their simulation commit instead of scanning twice.
     CommitPendingObjectChanges();
     const auto afterInitialCommit=PrepareClock::now();
+    const auto prefabBudgetStart = afterInitialCommit;
+    const auto prefabDeadline = prefabBudgetStart + std::chrono::milliseconds(3);
     // Copy the registry view: deriving prefab batches adds scene components.
     const auto objectLayers=GetComponents<Engine::Components::TerrainObjectLayer>();
-    const auto prefabBudgetStart = PrepareClock::now();
+    const auto afterPrefabRegistry=PrepareClock::now();
+    m_lastPrepareTimings.prefabRegistryMs=std::chrono::duration<double,std::milli>(
+        afterPrefabRegistry-afterInitialCommit).count();
     size_t prefabVisited = 0;
     const size_t prefabCount = objectLayers.size();
     const size_t prefabStart = prefabCount ? m_prefabPreparationCursor % prefabCount : 0;
@@ -216,15 +220,26 @@ void Scene::PrepareRenderFrame(bool publishSnapshot)
     for (; prefabVisited < prefabCount; ++prefabVisited)
     {
         auto* layer = objectLayers[(prefabStart + prefabVisited) % prefabCount];
-        layer->PreparePrefabInstances(m_graphicsProvider, &prefabUploadAvailable);
+        layer->PreparePrefabInstances(m_graphicsProvider, &prefabUploadAvailable, prefabDeadline);
         const auto& prefabTimings=layer->GetLastPrefabPrepareTimings();
         m_lastPrepareTimings.prefabSignatureMs+=prefabTimings.placementSignatureMs;
         m_lastPrepareTimings.prefabSourceProbeMs+=prefabTimings.sourceProbeMs;
-        if (std::chrono::duration<double, std::milli>(
-                PrepareClock::now() - prefabBudgetStart).count() >= 3.0)
+        m_lastPrepareTimings.prefabPlacementAssetsMs+=prefabTimings.placementAssetsMs;
+        m_lastPrepareTimings.prefabLodProfilesMs+=prefabTimings.lodProfilesMs;
+        m_lastPrepareTimings.prefabSourceSetMs+=prefabTimings.sourceSetMs;
+        m_lastPrepareTimings.prefabValidationMs+=prefabTimings.validationMs;
+        m_lastPrepareTimings.prefabSourceLookupMs+=prefabTimings.sourceLookupMs;
+        m_lastPrepareTimings.prefabBuildMs+=prefabTimings.buildMs;
+        m_lastPrepareTimings.prefabMainBufferCreateMs+=prefabTimings.mainBufferCreateMs;
+        if (PrepareClock::now() >= prefabDeadline)
         { ++prefabVisited; break; }
     }
     m_prefabPreparationCursor = prefabCount ? (prefabStart + prefabVisited) % prefabCount : 0;
+    if (!m_restorePrefabPrototypes.empty() &&
+        std::all_of(objectLayers.begin(),objectLayers.end(),[&](const auto* layer) {
+            return !layer || layer->IsPrefabPreparationComplete(m_graphicsProvider);
+        }))
+        m_restorePrefabPrototypes.clear();
     const auto afterPrefabInstances=PrepareClock::now();
     const auto splineGeometry=GetComponents<SplineGeometry>();
     for (auto* geometry:splineGeometry) geometry->PrepareGeometry(m_graphicsProvider);

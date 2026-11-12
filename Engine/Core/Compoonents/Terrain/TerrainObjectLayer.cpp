@@ -74,7 +74,8 @@ ObjectLodProfileData TerrainObjectLayer::GetObjectLodProfile(
     return profile;
 }
 
-std::map<std::string, std::vector<std::string>> TerrainObjectLayer::GetDefinedObjectLods() const
+std::map<std::string, std::vector<std::string>> TerrainObjectLayer::GetDefinedObjectLods(
+    const std::vector<std::string>* placementAssets) const
 {
     std::map<std::string, std::vector<std::string>> definitions;
     if (Owner)
@@ -82,8 +83,16 @@ std::map<std::string, std::vector<std::string>> TerrainObjectLayer::GetDefinedOb
             if (const auto* provider = dynamic_cast<const ObjectLodProvider*>(component))
                 for (const auto& [asset, profile] : provider->GetObjectLodProfiles())
                     definitions[asset] = profile.meshes;
-    for (const auto& placement : placements)
-        if (!definitions.count(placement.asset)) definitions[placement.asset] = {placement.asset};
+    if (placementAssets)
+    {
+        for (const auto& asset : *placementAssets)
+            if (!definitions.count(asset)) definitions[asset] = {asset};
+    }
+    else
+    {
+        for (const auto& placement : placements)
+            if (!definitions.count(placement.asset)) definitions[placement.asset] = {placement.asset};
+    }
     for (const auto& [asset, settings] : objectLods)
         if (!settings.meshes.empty() || !settings.shadowMeshes.empty())
             definitions[asset] = settings.meshes.empty()
@@ -95,6 +104,32 @@ std::map<std::string, std::vector<std::string>> TerrainObjectLayer::GetDefinedOb
         if (meshes.size() > MaximumObjectLods) meshes.resize(MaximumObjectLods);
     }
     return definitions;
+}
+
+size_t TerrainObjectLayer::GetMaximumDefinedObjectLodCount() const
+{
+    // Match provider precedence and layer overrides in GetDefinedObjectLods.
+    // Assets present only in placements contribute one level and cannot raise
+    // the minimum result, so avoid scanning the potentially huge list.
+    std::map<std::string, std::vector<std::string>> definitions;
+    if (Owner)
+        for (const auto* component : Owner->Components)
+            if (const auto* provider = dynamic_cast<const ObjectLodProvider*>(component))
+                for (const auto& [asset, profile] : provider->GetObjectLodProfiles())
+                    definitions[asset] = profile.meshes;
+    for (const auto& [asset, settings] : objectLods)
+        if (!settings.meshes.empty() || !settings.shadowMeshes.empty())
+            definitions[asset] = settings.meshes;
+
+    size_t maximum = 1;
+    for (const auto& [asset, meshes] : definitions)
+    {
+        (void)asset;
+        const size_t count = static_cast<size_t>(std::count_if(meshes.begin(),
+            meshes.end(), [](const std::string& mesh) { return !mesh.empty(); }));
+        maximum = std::max(maximum, std::min(count, MaximumObjectLods));
+    }
+    return maximum;
 }
 
 std::vector<std::string> TerrainObjectLayer::GetObjectShadowLodMeshes(

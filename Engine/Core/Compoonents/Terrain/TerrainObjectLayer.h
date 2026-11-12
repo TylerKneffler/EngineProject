@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <chrono>
 #include "Core/Compoonents/Mesh/Mesh.h"
 #include "Core/Compoonents/Obj/ObjectLodProvider.h"
 
@@ -37,6 +38,15 @@ public:
     {
         double placementSignatureMs=0;
         double sourceProbeMs=0;
+        double placementAssetsMs=0;
+        double lodProfilesMs=0;
+        double sourceSetMs=0;
+        // Validation includes the signature, profile and source subphases.
+        // Build includes synchronous buffer creation; worker work is separate.
+        double validationMs=0;
+        double sourceLookupMs=0;
+        double buildMs=0;
+        double mainBufferCreateMs=0;
     };
     struct Placement
     {
@@ -82,7 +92,11 @@ public:
     // Keyed by the placement's base asset. Resolved N-level chains use N-1 distances.
     std::map<std::string, ObjectLods> objectLods;
     ObjectLodProfileData GetObjectLodProfile(const std::string& asset) const;
-    std::map<std::string, std::vector<std::string>> GetDefinedObjectLods() const;
+    std::map<std::string, std::vector<std::string>> GetDefinedObjectLods(
+        const std::vector<std::string>* placementAssets = nullptr) const;
+    // Placement-only assets always have one level, so a summary need only
+    // inspect authored profiles rather than every placement in a dense layer.
+    size_t GetMaximumDefinedObjectLodCount() const;
     std::vector<std::string> GetObjectShadowLodMeshes(
         const std::string& asset, const std::vector<std::string>& visibleMeshes) const;
     std::vector<float> GetObjectLodDistances(const std::string& asset, size_t lodCount) const;
@@ -109,8 +123,13 @@ public:
     void InstallPrepared(TerrainObjectLayer&& source);
     // Static prefab placements share source geometry/material definitions.
     // Derived render/physics objects are never saved into the authored layer.
-    void PreparePrefabInstances(IGraphicsProvider* provider, bool* uploadAvailable = nullptr);
+    void PreparePrefabInstances(IGraphicsProvider* provider, bool* uploadAvailable = nullptr,
+        std::chrono::steady_clock::time_point deadline = {});
     bool IsPrefabPreparationPending() const;
+    // Retain shared prototypes and prepared buffers across a trusted scene
+    // restore. Cache keys validate source paths and timestamps before reuse.
+    void AppendPrefabPrototypeRetention(std::vector<std::shared_ptr<void>>& output) const;
+    bool IsPrefabPreparationComplete(IGraphicsProvider* provider) const;
     const PrefabPrepareTimings& GetLastPrefabPrepareTimings() const
     { return m_lastPrefabPrepareTimings; }
     bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
@@ -122,6 +141,18 @@ private:
     size_t m_prefabCheckedCount=0;
     bool m_hasPrefabPlacements=false;
     bool m_prefabSourcePreparationPending=false;
+    bool m_prefabPlacementAssetsValid=false;
+    uint64_t m_prefabPlacementAssetsSignature=0;
+    std::vector<std::string> m_prefabPlacementAssets;
+    // Configuration revisions provide immediate invalidation. The periodic
+    // refresh also catches direct field edits that bypass revision tracking.
+    const void* m_prefabProfileCacheOwner=nullptr;
+    std::vector<std::pair<const void*, uint64_t>> m_prefabProfileComponents;
+    uint64_t m_prefabProfilePlacementSignature=0;
+    bool m_prefabProfilesValid=false;
+    std::chrono::steady_clock::time_point m_prefabProfilesChecked{};
+    std::map<std::string,ObjectLods> m_prefabLodProfiles;
+    std::vector<std::string> m_prefabRequiredSources;
     PrefabPrepareTimings m_lastPrefabPrepareTimings{};
     mutable PreparedTiles m_prepared;
     mutable uint64_t m_preparedRevision=UINT64_MAX,m_preparedSignature=0;

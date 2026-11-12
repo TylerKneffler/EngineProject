@@ -294,6 +294,9 @@ public:
     {
         double assetPublicationMs=0,texturePublicationMs=0,shaderSourcePollMs=0,shaderPipelinePublicationMs=0;
         double objectCommitMs=0,prefabInstancesMs=0,prefabSignatureMs=0,prefabSourceProbeMs=0;
+        double prefabPlacementAssetsMs=0,prefabLodProfilesMs=0,prefabSourceSetMs=0;
+        double prefabRegistryMs=0,prefabValidationMs=0,prefabSourceLookupMs=0;
+        double prefabBuildMs=0,prefabMainBufferCreateMs=0;
         double graphicsPreparationMs=0,nativeBuffersMs=0;
         double lookupMs = 0.0;
         double itemsMs = 0.0;
@@ -432,7 +435,8 @@ public:
           uint32_t viewportWidth = 0u, uint32_t viewportHeight = 0u,
           bool shadowOnly = false,
           const NativeRenderPacket* nativePacket = nullptr,
-          int terrainObjectDisplayLod = -1);
+          int terrainObjectDisplayLod = -1,
+          int sceneViewRenderMode = -1);
     // Bytes of object records made visible to the GPU by the most recent
     // Render call. This excludes vertex, light, and bone buffers.
     uint64_t GetLastObjectDataUploadBytes() const
@@ -781,7 +785,8 @@ public:
     std::string SaveSnapshotToString() const;
     // Editor Play restore: skips serializing the runtime graph for rollback.
     bool RestoreTrustedSnapshot(const Engine::Serialization::JsonValue& snapshot,
-        bool publishSceneSnapshot = true);
+        bool publishSceneSnapshot = true, bool retainPrefabPrototypes = false);
+    size_t GetRestoreRetainedPrefabPrototypeCount() const { return m_restorePrefabPrototypes.size(); }
     bool LoadFromString(const std::string& source);
     bool LoadFromValue(const Engine::Serialization::JsonValue& document);
 
@@ -1347,6 +1352,9 @@ private:
     std::vector<Object*> m_updateObjects, m_poseObjects;
     Engine::Components::SpatialUpdateScheduler m_spatialUpdates;
     size_t m_prefabPreparationCursor = 0;
+    // Keeps immutable prefab prototypes alive while a trusted play restore
+    // recreates its layers. Released once those layers finish preparing.
+    std::vector<std::shared_ptr<void>> m_restorePrefabPrototypes;
     void RefreshUpdateRegistry();
     Object* AddObjectWithId(ObjectId id);
     void FlushPendingObjectAdditions();

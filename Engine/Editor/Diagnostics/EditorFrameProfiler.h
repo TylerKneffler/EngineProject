@@ -39,6 +39,11 @@ namespace Engine::Editor
         bool startup = false;
         uint32_t activity = 0;
         double uiCpuMilliseconds = 0;
+        bool uiToolbarTimingValid = false;
+        double uiToolbarMilliseconds = 0, uiToolbarLodSummaryMilliseconds = 0;
+        std::array<double, 9> uiToolbarSectionMilliseconds{};
+        std::array<uint32_t, 9> uiToolbarSectionDraws{};
+        uint32_t uiToolbarLodSummaryCalls = 0;
         struct UiPanel { std::string title; double milliseconds = 0; };
         std::vector<UiPanel> uiPanels;
         uint64_t workerPending = 0;

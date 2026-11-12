@@ -172,7 +172,8 @@ static_assert(sizeof(Engine::Model::LightData) == 128,
 void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     Engine::Components::Camera* cameraOverride, bool includeEditorVisuals,
     uint32_t viewportWidth, uint32_t viewportHeight, bool shadowOnly,
-    const NativeRenderPacket* nativePacket, int instanceLodDisplayOverride)
+    const NativeRenderPacket* nativePacket, int instanceLodDisplayOverride,
+    int sceneViewRenderMode)
 {
     // Render phase 1: validate the prepared frame and resolve its active camera.
     m_screenLodCounts={};
@@ -510,10 +511,15 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         ? m_directionalShadowResolution : 0u;
     m_shadowDebugSnapshot.atlasAllocationGeneration =
         m_directionalShadowAllocationGeneration;
-    const bool wireframeMode =
-        settings.renderMode == Engine::Model::SceneRenderMode::Wireframe;
-    const bool forceUnlitMode =
-        settings.renderMode == Engine::Model::SceneRenderMode::Unlit;
+    // Display modes belong to the editor scene viewport. Runtime/game views
+    // always use the authored lit rendering path.
+    const auto renderMode = includeEditorVisuals && sceneViewRenderMode >= 0
+        ? static_cast<Engine::Model::SceneRenderMode>(sceneViewRenderMode)
+        : Engine::Model::SceneRenderMode::Lit;
+    const bool wireframeMode = renderMode ==
+        Engine::Model::SceneRenderMode::Wireframe;
+    const bool forceUnlitMode = renderMode ==
+        Engine::Model::SceneRenderMode::Unlit;
     const auto cascadePreparation = Engine::Scene::Renderer::SceneRendererShadows::PrepareDirectionalShadowCascades(
         *this,
         context,
@@ -1400,7 +1406,10 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         -> Renderer::SubmittedGeometry
     {
         const auto& representative=preparedDraws[group.members.front()];
-        const bool screenColor=!shadowOnly && !visibility && Renderer::SceneRendererDrawPreparation::ScreenLodPolicy(*this, representative, hasPortalViews, includeEditorVisuals);
+        const bool screenColor=!shadowOnly && !visibility &&
+            instanceLodDisplayOverride < 0 &&
+            Renderer::SceneRendererDrawPreparation::ScreenLodPolicy(*this,
+                representative, hasPortalViews, includeEditorVisuals);
         if(representative.mesh->IsInstanced())
         {
             Renderer::SubmittedGeometry submitted{};
@@ -1420,11 +1429,30 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 for(auto index:group.members)
                 {
                     if(visibility && !(*visibility)[index]) continue;
+                    const auto& draw = preparedDraws[index];
+                    if (includeEditorVisuals && !shadowOnly &&
+                        instanceLodDisplayOverride >= 0)
+                    {
+                        if (draw.mesh->instanceLodBand >= 0)
+                        {
+                            const auto data = draw.mesh->GetInstanceData();
+                            const int maximum = data
+                                ? std::max(0, data->maximumLod) : 0;
+                            if (draw.mesh->instanceLodBand !=
+                                std::min(instanceLodDisplayOverride, maximum))
+                                continue;
+                        }
+                        else if (gpuLod && residentLod !=
+                            std::min(instanceLodDisplayOverride,
+                                std::max(0, draw.gpuMaximumLod)))
+                            continue;
+                        else if (!gpuLod && !lodSelection.IsSelected(draw))
+                            continue;
+                    }
                     const auto& tile=(*instanceTiles[index])[rangeIndex];
                     if(!tile.range.y) continue;
                     if(screenColor)
                     {
-                        const auto& draw=preparedDraws[index];
                         const auto& data=*draw.mesh->GetInstanceData();
                         auto [decisions,created]=screenPlacementLevels.try_emplace(data.lodIdentity);
                         if(created)
@@ -1499,7 +1527,9 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 std::sort(tiles.begin(),tiles.end(),[](const auto& first,const auto& second) {
                     return std::tie(first.range.z,first.range.x)<std::tie(second.range.z,second.range.x);
                 });
-                bool gpu=gpuInstanceCulling && context->SupportsIndirectDraws() && (count>=32 || gpuLod || representative.mesh->instanceLodBand>=0);
+                bool gpu=instanceLodDisplayOverride < 0 && gpuInstanceCulling &&
+                    context->SupportsIndirectDraws() &&
+                    (count>=32 || gpuLod || representative.mesh->instanceLodBand>=0);
                 if(gpu && !m_instanceCullAttempted)
                 {
                     m_instanceCullAttempted=true;
@@ -1593,7 +1623,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 poolBefore.newBytes-poolBefore.editedBytes-poolBefore.growthBytes;
             return submitted;
         }
-        bool gpu=gpuInstanceCulling && context->SupportsIndirectDraws() &&
+        bool gpu=instanceLodDisplayOverride < 0 && gpuInstanceCulling &&
+            context->SupportsIndirectDraws() &&
             (group.members.size()>=32 || representative.gpuLod>=0);
         if (gpu && !m_instanceCullAttempted)
         {

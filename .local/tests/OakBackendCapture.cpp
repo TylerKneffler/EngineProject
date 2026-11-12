@@ -3,6 +3,7 @@
 #include "Core/Compoonents/Mesh/Mesh.h"
 #include "Core/Compoonents/Terrain/Terrain.h"
 #include "Core/Compoonents/Terrain/TerrainObjectLayer.h"
+#include "Core/Compoonents/Terrain/TerrainManager.h"
 #include "Core/Rendering/RenderPerformance.h"
 #include "Core/Graphics/IGraphicsContext.h"
 #include "Core/Compoonents/Physics/PrimitiveObjectCollider.h"
@@ -234,6 +235,26 @@ void CheckSharedPrefabLayer()
             ++allocations; return result;
         }
     } provider;
+    // Prefab source discovery and prototype construction are asynchronous.
+    // Drive frame preparation until pending work and incremental probes settle.
+    const auto preparePrefab = [&](TerrainObjectLayer* layer, Engine::Scene::Scene& scene)
+    {
+        const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(15);
+        unsigned settled=0;
+        do
+        {
+            layer->PreparePrefabInstances(&provider);
+            scene.CommitPendingObjectChanges();
+            settled=layer->IsPrefabPreparationPending() ? 0 : settled+1;
+            if (settled>=32) return;
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        } while (std::chrono::steady_clock::now()<deadline);
+        const auto& timings=layer->GetLastPrefabPrepareTimings();
+        std::cerr << "Prefab wait expired: pending=" << layer->IsPrefabPreparationPending()
+            << " validation_ms=" << timings.validationMs << " build_ms=" << timings.buildMs
+            << " source_lookup_ms=" << timings.sourceLookupMs << '\n';
+        throw std::runtime_error("prefab preparation did not settle");
+    };
     {
         Provider bufferProvider;
         std::vector<unsigned char> input(65, 0x5a);
@@ -364,11 +385,11 @@ void CheckSharedPrefabLayer()
         TerrainObjectLayer::Placement p; p.asset=prefabPath; p.position={180.f+2*i,0,180};
         p.scale=i+1.f; layer->placements.push_back(p);
     }
-    layer->MarkConfigurationDirty(); layer->PreparePrefabInstances(&provider); scene.CommitPendingObjectChanges();
+    layer->MarkConfigurationDirty(); preparePrefab(layer,scene);
     std::cerr << "Shared prefab first preparation complete\n";
     const auto meshes=scene.GetComponents<Mesh>();
     Check(meshes.size()==1 && meshes.front()->IsInstanced(),"prefab geometry was not shared");
-    Check(meshes.front()->prefabShadowLod==0,"single-level prefab lost its fixed shadow fallback");
+    Check(meshes.front()->fixedShadowLodBand==0,"single-level prefab lost its fixed shadow fallback");
     Check(meshes.front()->runtimeShadowFadeWidth==4.f,"layer fade width did not reach shared geometry");
     Check(meshes.front()->screenLodSelection && meshes.front()->screenLod1Pixels==444,
         "layer screen policy did not reach shared geometry");
@@ -383,7 +404,7 @@ void CheckSharedPrefabLayer()
     const auto stableObjectId=scene.GetObjectId(meshes.front()->Owner);
     const auto stableAllocations=provider.allocations;
     std::this_thread::sleep_for(std::chrono::milliseconds(1100));
-    layer->PreparePrefabInstances(&provider); scene.CommitPendingObjectChanges();
+    preparePrefab(layer,scene);
     Check(scene.GetObjectId(scene.GetComponents<Mesh>().front()->Owner)==stableObjectId &&
         provider.allocations==stableAllocations,"unchanged prefab poll rebuilt shared geometry");
     // Scene restore can deserialize the same content into a new placements
@@ -391,7 +412,7 @@ void CheckSharedPrefabLayer()
     // generated batches when the restored content and policy are identical.
     layer->Deserialize(layer->Serialize());
     const auto identicalRestoreStarted=std::chrono::steady_clock::now();
-    layer->PreparePrefabInstances(&provider); scene.CommitPendingObjectChanges();
+    preparePrefab(layer,scene);
     const double identicalRestoreMs=std::chrono::duration<double,std::milli>(
         std::chrono::steady_clock::now()-identicalRestoreStarted).count();
     Check(scene.GetObjectId(scene.GetComponents<Mesh>().front()->Owner)==stableObjectId &&
@@ -403,12 +424,12 @@ void CheckSharedPrefabLayer()
     // even without MarkConfigurationDirty(). Retain that compatibility.
     layer->placements.front().position.x+=1.f;
     std::this_thread::sleep_for(std::chrono::milliseconds(1100));
-    layer->PreparePrefabInstances(&provider); scene.CommitPendingObjectChanges();
+    preparePrefab(layer,scene);
     Check(scene.GetComponents<Mesh>().front()->GetInstanceData()->transforms.front().rows[0].w==181.f,
         "polling lost an in-place placement edit");
     owner->transform.rotation={.2f,.4f,-.1f};
     owner->transform.scale={2.f,.75f,1.25f};
-    layer->MarkConfigurationDirty(); layer->PreparePrefabInstances(&provider); scene.CommitPendingObjectChanges();
+    layer->MarkConfigurationDirty(); preparePrefab(layer,scene);
     const auto layerWorld=owner->transform.GetWorldMatrix();
     for(const auto* mesh:scene.GetComponents<Mesh>())
     {
@@ -457,7 +478,7 @@ void CheckSharedPrefabLayer()
         // source has been reached (or fail after a bounded number of frames).
         for(int frame=0;frame<64;++frame)
         {
-            layer->PreparePrefabInstances(&provider); scene.CommitPendingObjectChanges();
+            preparePrefab(layer,scene);
             const auto current=scene.GetComponents<PrimitiveObjectCollider>();
             if(current.size()==(radius>0 ? 3u:0u) &&
                 std::all_of(current.begin(),current.end(),[&](const auto* collider) {
@@ -467,7 +488,11 @@ void CheckSharedPrefabLayer()
         std::cerr << "Prefab edit prepared\n";
         for(auto* mesh:scene.GetComponents<Mesh>())
         {
-            Check(mesh->prefabShadowLod==1,"fixed shadow LOD did not clamp to the available chain");
+            if (mesh->fixedShadowLodBand!=1)
+                std::cerr << "Unexpected shadow band " << mesh->fixedShadowLodBand
+                    << " on " << mesh->Owner->name << " visible band " << mesh->instanceLodBand
+                    << " placements " << (mesh->GetInstanceData() ? mesh->GetInstanceData()->transforms.size() : 0) << '\n';
+            Check(mesh->fixedShadowLodBand==1,"fixed shadow LOD did not clamp to the available chain");
             Check(mesh->runtimeShadowFadeWidth==2.f,"regenerated prefab retained stale shadow fade width");
         }
         const auto colliders=scene.GetComponents<PrimitiveObjectCollider>();
@@ -480,8 +505,8 @@ void CheckSharedPrefabLayer()
     bool editedLodFound=false;
     for(int frame=0;frame<64 && !editedLodFound;++frame)
     {
-        layer->PreparePrefabInstances(&provider); scene.CommitPendingObjectChanges();
-        for(const auto* mesh:scene.GetComponents<Mesh>()) if(mesh->prefabLodBand==1)
+        preparePrefab(layer,scene);
+        for(const auto* mesh:scene.GetComponents<Mesh>()) if(mesh->instanceLodBand==1)
         {
             editedLodFound=true;
             Check(mesh->foliageWindStrength==.5f,"LOD-only prefab edit was not polled");
@@ -491,15 +516,15 @@ void CheckSharedPrefabLayer()
     const auto savedLods=layer->objectLods[prefabPath];
     layer->objectLods[prefabPath].meshes.resize(1);
     std::this_thread::sleep_for(std::chrono::milliseconds(1100));
-    layer->PreparePrefabInstances(&provider); scene.CommitPendingObjectChanges();
+    preparePrefab(layer,scene);
     for(const auto* mesh:scene.GetComponents<Mesh>())
-        Check(mesh->prefabLodBand==-1 && mesh->prefabShadowLod==0,
+        Check(mesh->instanceLodBand==-1 && mesh->fixedShadowLodBand==0,
             "in-place LOD definition edit did not return to single-level geometry");
     layer->objectLods[prefabPath]=savedLods;
     std::this_thread::sleep_for(std::chrono::milliseconds(1100));
-    layer->PreparePrefabInstances(&provider); scene.CommitPendingObjectChanges();
+    preparePrefab(layer,scene);
     editedLodFound=false;
-    for(const auto* mesh:scene.GetComponents<Mesh>()) editedLodFound|=mesh->prefabLodBand==1;
+    for(const auto* mesh:scene.GetComponents<Mesh>()) editedLodFound|=mesh->instanceLodBand==1;
     Check(editedLodFound,"in-place LOD definition restoration was not polled");
     {
         const std::string shadowProxyPath=".local/tests-generated/shared-layer-shadow.prefab";
@@ -518,23 +543,22 @@ void CheckSharedPrefabLayer()
         dedicatedLayer->objectLods[prefabPath]=std::move(lods);
         dedicatedLayer->shadowLod=1;
         dedicatedLayer->MarkConfigurationDirty();
-        dedicatedLayer->PreparePrefabInstances(&provider);
-        dedicatedShadowScene.CommitPendingObjectChanges();
+        preparePrefab(dedicatedLayer,dedicatedShadowScene);
         size_t visibleMeshes=0,shadowProxyMeshes=0;
         for (const auto* mesh:dedicatedShadowScene.GetComponents<Mesh>())
         {
-            Check(mesh->prefabDedicatedShadowProxy,
+            Check(mesh->dedicatedShadowProxy,
                 "dedicated shadow proxy path was not tagged");
-            if (mesh->prefabShadowProxyOnly)
+            if (mesh->shadowProxyOnly)
             {
                 ++shadowProxyMeshes;
-                Check(mesh->prefabShadowLod==1,
+                Check(mesh->fixedShadowLodBand==1,
                     "dedicated shadow proxy did not keep the fixed shadow LOD");
             }
             else
             {
                 ++visibleMeshes;
-                Check(mesh->prefabShadowLod==-1,
+                Check(mesh->fixedShadowLodBand==-1,
                     "visible mesh retained shadow-only proxy selection");
             }
         }
@@ -562,7 +586,7 @@ void CheckSharedPrefabLayer()
         auto* objects=relocated.AddObject("Relocated prefab")->AddComponent<TerrainObjectLayer>();
         TerrainObjectLayer::Placement placement; placement.asset=original.generic_string();
         objects->placements.push_back(placement); objects->MarkConfigurationDirty();
-        const auto prepare=[&] { objects->PreparePrefabInstances(&provider); relocated.CommitPendingObjectChanges(); };
+        const auto prepare=[&] { preparePrefab(objects,relocated); };
         const auto checkRadius=[&](float expected) {
             const auto colliders=relocated.GetComponents<PrimitiveObjectCollider>();
             Check(colliders.size()==1 && std::abs(colliders.front()->radius-expected)<.0001f,
@@ -584,6 +608,72 @@ void CheckSharedPrefabLayer()
         std::this_thread::sleep_for(std::chrono::milliseconds(1100));
         prepare(); checkRadius(.9f);
     }
+    // A streamed cell destroys its runtime layer and restores it from authored
+    // data on re-entry. Its prefab profile cache must be rebuilt for the new
+    // component and retain both the placement and authored LOD chain.
+    {
+        Engine::Scene::Scene streamed;
+        auto* manager=streamed.AddObject("Streamed terrain")->AddComponent<TerrainManager>();
+        manager->cellsX=manager->cellsY=4;
+        manager->cellWidth=manager->cellDepth=4.f;
+        manager->loadedRadius=manager->farRadius=0;
+        manager->asyncStreaming=false;
+        manager->generateColliders=false;
+        Check(manager->AddCell(0,0) && manager->AddCell(1,0),"streaming cells could not be created");
+        manager->SyncLoadedCells(0,0);
+        streamed.CommitPendingObjectChanges();
+        auto* cell=manager->GetLoadedCell(0,0);
+        Check(cell && cell->Owner,"first streaming cell did not load");
+        auto* layerObject=streamed.AddObject("Streamed prefab layer");
+        Check(streamed.SetParentLocal(layerObject,cell->Owner),"could not attach streaming layer");
+        auto* streamedLayer=layerObject->AddComponent<TerrainObjectLayer>();
+        streamedLayer->layerName="Streamed prefab layer";
+        const std::string streamedBase=".local/tests-generated/streamed-retention-base.prefab";
+        const std::string streamedLod=".local/tests-generated/streamed-retention-lod.prefab";
+        writePrefab(0.f,streamedBase);
+        writePrefab(0.f,streamedLod);
+        TerrainObjectLayer::Placement placement;
+        placement.asset=streamedBase;
+        placement.position={2.f,0.f,2.f};
+        streamedLayer->placements.push_back(placement);
+        streamedLayer->objectLods[streamedBase]={{streamedBase,streamedLod},{},{28}};
+        streamedLayer->shadowLod=1;
+        streamedLayer->MarkConfigurationDirty();
+        preparePrefab(streamedLayer,streamed);
+        const auto hasBothBands=[&](TerrainObjectLayer* target) {
+            bool found[2]={false,false};
+            for (const auto* mesh:streamed.GetComponents<Mesh>())
+                if (mesh->Owner && mesh->Owner->Parent==target->Owner &&
+                    mesh->instanceLodBand>=0 && mesh->instanceLodBand<2)
+                    found[mesh->instanceLodBand]=true;
+            return found[0] && found[1];
+        };
+        Check(hasBothBands(streamedLayer),"streaming layer did not prepare its LOD chain");
+        std::vector<std::shared_ptr<void>> retainedPrototypes;
+        streamedLayer->AppendPrefabPrototypeRetention(retainedPrototypes);
+        Check(retainedPrototypes.size()>=2,"streaming did not retain both prefab prototypes");
+        std::weak_ptr<void> retainedBase=retainedPrototypes.front();
+        manager->SyncLoadedCells(1,0);
+        streamed.CommitPendingObjectChanges();
+        Check(!manager->GetLoadedCell(0,0) && manager->GetLoadedCell(1,0),
+            "streaming did not unload the first cell");
+        manager->SyncLoadedCells(0,0);
+        streamed.CommitPendingObjectChanges();
+        cell=manager->GetLoadedCell(0,0);
+        Check(cell && cell->Owner,"streaming did not reload the first cell");
+        streamedLayer=nullptr;
+        for (auto* child:cell->Owner->Children)
+            if (child)
+                if (auto* candidate=child->GetComponent<TerrainObjectLayer>();
+                    candidate && candidate->layerName=="Streamed prefab layer")
+                    streamedLayer=candidate;
+        Check(streamedLayer && streamedLayer->placements.size()==1,
+            "streaming did not restore the prefab placement");
+        preparePrefab(streamedLayer,streamed);
+        Check(hasBothBands(streamedLayer),"streaming lost the authored LOD chain");
+        retainedPrototypes.clear();
+        Check(!retainedBase.expired(),"restored layer did not reuse its retained prefab prototype");
+    }
     Engine::Scene::Scene forest;
     Check(Engine::Serialization::SceneSerializer::Load(forest,
         "Engine/Core/Assets/Scenes/terrain/oak_meadow.scene",nullptr),"headless oak load failed");
@@ -592,7 +682,7 @@ void CheckSharedPrefabLayer()
     for (auto* objects:forestLayers)
     {
         if (objects->layerName=="Oak forest") placements=objects->placements.size();
-        objects->PreparePrefabInstances(&provider);
+        preparePrefab(objects,forest);
     }
     forest.CommitPendingObjectChanges();
     Check(placements==2048,"headless forest lost authored placements");
@@ -727,14 +817,14 @@ template<class Renderer> void CaptureOak(const std::string& backend)
         if (refreshGrass) for (auto* field:fields) field->RefreshEditorPreview();
         diagnosticWindMeshes=0;
         if(screenLodDiagnostic)
-            for(auto* mesh:scene.GetComponents<Mesh>()) if(mesh->prefabLodBand>=0)
+            for(auto* mesh:scene.GetComponents<Mesh>()) if(mesh->instanceLodBand>=0)
             {
                 mesh->screenLodSelection=screenPolicyEnabled;
                 mesh->distanceLodOverride=screenDistanceOverride;
                 mesh->screenLod1Pixels=300; mesh->screenLod2Pixels=80;
             }
         if(diagnosticOakWind)
-            for(auto* mesh:scene.GetComponents<Mesh>()) if(mesh->prefabLodBand>=0)
+            for(auto* mesh:scene.GetComponents<Mesh>()) if(mesh->instanceLodBand>=0)
             { mesh->foliageWindStrength=.5f; ++diagnosticWindMeshes; }
         const auto receiverTarget=camera->target;
         if(glm::length(shadowLookOffset)>0.f)
@@ -757,7 +847,7 @@ template<class Renderer> void CaptureOak(const std::string& backend)
         {
             for(auto* mesh:scene.GetComponents<Mesh>())
                 if(mesh->IsEditorVisible() && !mesh->Owner->GetComponent<Terrain>() &&
-                    !(oakOnlyColor && mesh->prefabLodBand>=0))
+                    !(oakOnlyColor && mesh->instanceLodBand>=0))
                 { mesh->SetEditorVisible(false); hiddenMeshes.push_back(mesh); }
             // Shadow commands have completed before replacing the prepared
             // draw list or its shared buffers. The atlas remains unchanged.
@@ -817,11 +907,11 @@ template<class Renderer> void CaptureOak(const std::string& backend)
             "shadow/color LOD metadata cache rebuilt static forest tiles");
         const auto& shadow=scene.GetShadowDebugSnapshot();
         size_t fixedProxies=0;
-        for(auto* mesh:scene.GetComponents<Mesh>()) if(mesh->prefabLodBand>=0)
+        for(auto* mesh:scene.GetComponents<Mesh>()) if(mesh->instanceLodBand>=0)
         {
-            Check(mesh->prefabShadowLod==1,"authored forest does not pin its shadow proxy");
-            Check(mesh->prefabLodDistances==glm::vec2(20,60),"fixed shadows changed visible tree LODs");
-            fixedProxies+=mesh->prefabLodBand==1;
+            Check(mesh->fixedShadowLodBand==1,"authored forest does not pin its shadow proxy");
+            Check(mesh->instanceLodDistances==glm::vec2(20,60),"fixed shadows changed visible tree LODs");
+            fixedProxies+=mesh->instanceLodBand==1;
         }
         Check(shadow.casterCount<=fixedProxies,"non-proxy forest bands entered shadow preparation");
         report << name << ": selectedShadow=" << shadow.hasSelectedLight << " casters="
@@ -1044,7 +1134,7 @@ template<class Renderer> void CaptureOak(const std::string& backend)
         capture("grass-layer-screen-policy",8);
         size_t screenGrassTiles=0;
         for(auto* generated:scene.GetComponents<Mesh>())
-            if(generated->grassShadowCaster && generated->screenLodSelection && generated->screenLod1Pixels==222)
+            if(generated->usesGrassShadowBudget && generated->screenLodSelection && generated->screenLod1Pixels==222)
                 ++screenGrassTiles;
         Check(screenGrassTiles>0,"scripted grass tiles did not inherit the layer screen policy");
         renderer.WaitIdle(); checkValidation();
@@ -1264,7 +1354,7 @@ template<class Renderer> void CaptureOak(const std::string& backend)
             render();
             const auto current=scene.GetShadowDebugSnapshot();
             unsigned oakWindMeshes=0;
-            for(const auto* mesh:scene.GetComponents<Mesh>()) if(mesh->prefabLodBand>=0)
+            for(const auto* mesh:scene.GetComponents<Mesh>()) if(mesh->instanceLodBand>=0)
             {
                 oakWindMeshes+=mesh->foliageWindStrength>0.f;
                 Check(mesh->runtimeShadowDistance==(unrestricted ? unrestrictedRange:savedCasterRanges.front().second),

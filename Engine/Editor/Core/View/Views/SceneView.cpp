@@ -1101,7 +1101,7 @@ void SceneView::Render3D(void* cmd)
         auto ctx = factory->CreateContext();
         m_scene->Render(ctx.get(), m_aspect, nullptr, true,
             GetWidth(), GetHeight(), false, nullptr,
-            m_terrainObjectDisplayLod);
+            m_terrainObjectDisplayLod, m_sceneRenderMode);
     }
 }
 
@@ -1114,7 +1114,7 @@ void SceneView::RecordRenderCommands(Engine::Graphics::GraphicsCommandPacket& sh
     m_scene->PrepareNativeUiLayout(m_aspect);
     m_scene->Render(&shadow, m_aspect, nullptr, false, GetWidth(), GetHeight(), true, packet);
     m_scene->Render(&color, m_aspect, nullptr, true, GetWidth(), GetHeight(), false,
-        packet, m_terrainObjectDisplayLod);
+        packet, m_terrainObjectDisplayLod, m_sceneRenderMode);
 }
 
 void SceneView::RenderShadow3D(void* cmd)

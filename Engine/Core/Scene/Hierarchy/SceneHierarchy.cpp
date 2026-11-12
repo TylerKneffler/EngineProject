@@ -1039,6 +1039,7 @@ void Scene::ClearObjects()
     if (m_beforeGpuResourceDestruction &&
         (!m_objects.empty() || !m_retiredRenderObjects.empty()))
         m_beforeGpuResourceDestruction();
+    m_restorePrefabPrototypes.clear();
     m_retiredRenderObjects.clear();
     m_screenLodHistory.clear();
     m_screenLodCounts={};

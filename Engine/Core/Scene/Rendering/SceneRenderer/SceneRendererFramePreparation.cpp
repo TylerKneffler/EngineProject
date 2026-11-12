@@ -542,6 +542,13 @@ void SceneRendererFramePreparation::PrepareFrameItems(
             found=scene.m_renderObjectSlots.emplace(key,index).first;
         }
         item.objectSlot=found->second;
+        // New render keys can grow the slot count while this frame is being
+        // packed. Keep the offsets array large enough for every slot before
+        // counting items into its [slot + 1] bucket.
+        if (scene.m_frameItemsByRenderSlotOffsets.size() <=
+            size_t(item.objectSlot) + 1u)
+            scene.m_frameItemsByRenderSlotOffsets.resize(
+                size_t(item.objectSlot) + 2u, 0u);
         ++scene.m_frameItemsByRenderSlotOffsets[size_t(item.objectSlot) + 1u];
     }
     std::partial_sum(scene.m_frameItemsByRenderSlotOffsets.begin(),

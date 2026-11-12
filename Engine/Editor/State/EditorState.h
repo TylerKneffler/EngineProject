@@ -30,6 +30,7 @@
 #include <optional>
 #include <filesystem>
 #include <algorithm>
+#include <array>
 
 namespace Engine::Core { class Window; }
 namespace Engine::Components { class Mesh; }
@@ -73,6 +74,17 @@ public:
     };
 
     enum class ToolbarSection { File, Edit, Mode, Tools, Transform, View, Prefab, Paint };
+
+    struct ToolbarTimings
+    {
+        // File, edit, mode, tools, transform, view, prefab, paint, playback.
+        std::array<double, 9> sectionMilliseconds{};
+        std::array<uint32_t, 9> sectionDraws{};
+        double totalMilliseconds = 0;
+        double lodSummaryMilliseconds = 0;
+        uint32_t lodSummaryCalls = 0;
+    };
+    ToolbarTimings& GetToolbarTimings() { return m_toolbarTimings; }
 
     EditorState(HINSTANCE hInstance, const Engine::Model::ProjectSettings& projectSettings,
         std::string projectFilePath);
@@ -965,6 +977,7 @@ private:
     bool m_mainSceneGizmoWasActive = false;
     bool m_gameViewFocused = false;
     ToolbarVisibility m_toolbarVisibility;
+    ToolbarTimings m_toolbarTimings;
     std::string m_toolbarPopupTool;
     Engine::Scene::Scene* m_toolbarPopupScene = nullptr;
     int m_toolbarPopupMode = 0;

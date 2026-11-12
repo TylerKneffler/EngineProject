@@ -57,19 +57,27 @@ void SceneRendererLodSelection::Prepare(
         [&](size_t index)
         {
             const auto& draw = draws[index];
-            if (isBeyondFinalLod(draw))
+            const bool forceDisplayLod = !shadowOnly && includeEditorVisuals &&
+                instanceLodDisplayOverride >= 0;
+            if (!forceDisplayLod && isBeyondFinalLod(draw))
             {
                 m_selectedLods[index] = 0;
                 return;
             }
-            if (draw.mesh->instanceLodBand >= 0 && !shadowOnly &&
-                includeEditorVisuals && instanceLodDisplayOverride >= 0)
+            if (forceDisplayLod)
             {
                 int maximum = 0;
-                if (const auto data = draw.mesh->GetInstanceData())
-                    maximum = std::max(0, data->maximumLod);
+                if (draw.mesh->instanceLodBand >= 0)
+                {
+                    if (const auto data = draw.mesh->GetInstanceData())
+                        maximum = std::max(0, data->maximumLod);
+                }
+                else
+                    maximum = std::max(0, draw.gpuMaximumLod);
                 const int selected = std::min(instanceLodDisplayOverride, maximum);
-                m_selectedLods[index] = draw.mesh->instanceLodBand == selected;
+                m_selectedLods[index] = draw.mesh->instanceLodBand >= 0
+                    ? draw.mesh->instanceLodBand == selected
+                    : (draw.gpuLod < 0 || draw.gpuLod == selected);
                 return;
             }
             if (draw.gpuLod < 0 || draw.mesh->instanceLodBand >= 0)
@@ -112,7 +120,8 @@ void SceneRendererLodSelection::Prepare(
         { static_cast<float>(viewportWidth), static_cast<float>(viewportHeight) },
         true };
 
-    if (shadowOnly)
+    if (shadowOnly || (includeEditorVisuals &&
+        instanceLodDisplayOverride >= 0))
         return;
     const auto quality = scene.settings.graphicsQuality.Resolve();
     for (size_t index = 0; index < draws.size(); ++index)

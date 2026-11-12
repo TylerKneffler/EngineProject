@@ -292,6 +292,13 @@ void ImGuiPanelHost::ReserveToolbar(EditorState& state)
 void ImGuiPanelHost::DrawToolbar(EditorState& state, PlayState playState,
     GameBuildManager* buildManager)
 {
+    struct Timer
+    {
+        double& output;
+        std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
+        ~Timer() { output += std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - start).count(); }
+    } toolbarTimer{state.GetToolbarTimings().totalMilliseconds};
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(6.f, 4.f));
     if (ImGui::Begin("##EditorToolbar", nullptr, ToolbarWindowFlags))
     {
@@ -328,6 +335,8 @@ void ImGuiPanelHost::DrawToolbar(EditorState& state, PlayState playState,
         { return index == PlaybackSection ? minimumWidth(index) : state.GetToolbarSectionPreferredWidth(sections[index]); };
         const auto drawSection = [&](int index, bool singleRow, bool* overflow)
         {
+            ++state.GetToolbarTimings().sectionDraws[static_cast<size_t>(index)];
+            Timer sectionTimer{state.GetToolbarTimings().sectionMilliseconds[static_cast<size_t>(index)]};
             if (index != PlaybackSection)
             {
                 state.DrawGlobalToolbar(m_ui, sections[index], singleRow, overflow);

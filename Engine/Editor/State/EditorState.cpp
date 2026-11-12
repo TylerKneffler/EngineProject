@@ -1084,7 +1084,7 @@ void EditorState::RestorePlayModeScene()
             {
                 RestoreProfile::Stage sceneStage("restore_apply_trusted_snapshot");
                 restored = m_scene->RestoreTrustedSnapshot(snapshot,
-                    false); // The play snapshot becomes the history baseline below.
+                    false, true); // Preserve reusable prototypes across the scene clear.
             }
             usedCachedSnapshot = restored;
         }

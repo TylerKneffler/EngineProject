@@ -87,6 +87,8 @@ public:
     int GetTerrainObjectDisplayLod() const { return m_terrainObjectDisplayLod; }
     void SetTerrainObjectDisplayLod(int lod)
     { m_terrainObjectDisplayLod = std::clamp(lod, -1, 15); }
+    int GetSceneRenderMode() const { return m_sceneRenderMode; }
+    void SetSceneRenderMode(int mode) { m_sceneRenderMode = std::clamp(mode, 0, 2); }
     bool UseGlobalToolbar = false;
     bool UseGlobalBoneVisibility = true;
     void SetDocumentPath(std::string path) { m_documentPath = std::move(path); }
@@ -151,6 +153,7 @@ private:
     SceneEditMode m_editMode = SceneEditMode::Object;
     int m_terrainBrush = 0;
     int m_terrainObjectDisplayLod = -1;
+    int m_sceneRenderMode = 0;
     int m_terrainLayer = 0;
     float m_terrainRadius = 3.f;
     float m_terrainStrength = .25f;

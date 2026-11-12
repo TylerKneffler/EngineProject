@@ -1334,26 +1334,39 @@ void EditorState::DrawGlobalToolbar(IEditorUi& ui, ToolbarSection section,
             }
             ImGui::EndPopup();
         }
-        int renderMode = static_cast<int>(scene->settings.renderMode);
+        int renderMode = view->GetSceneRenderMode();
         const char* renderNames[]{ "Lit", "Unlit", "Wireframe" };
         if (row.Next(92.f))
         {
             ui.SetNextItemWidth(92.f);
             if (ui.Combo("##GlobalRenderMode", &renderMode, renderNames, 3))
-                scene->settings.renderMode =
-                    static_cast<Engine::Model::SceneRenderMode>(renderMode);
+                view->SetSceneRenderMode(renderMode);
             ui.Tooltip("Scene render mode");
         }
+        const auto lodSummaryStart = std::chrono::steady_clock::now();
+        ++m_toolbarTimings.lodSummaryCalls;
         int maximumObjectLods = 1;
         for (const auto& object : scene->GetObjects())
+        {
             if (object)
                 for (const auto* component : object->Components)
+                {
+                    if (const auto* residentMesh = dynamic_cast<const Engine::Components::Mesh*>(component))
+                        maximumObjectLods = std::max(maximumObjectLods,
+                            static_cast<int>(std::min<size_t>(
+                                residentMesh->GetResidentRuntimeLodCount(), 3)));
                     if (const auto* layer = dynamic_cast<const Engine::Components::TerrainObjectLayer*>(component))
-                        for (const auto& [asset, meshes] : layer->GetDefinedObjectLods())
-                            maximumObjectLods = std::max(maximumObjectLods,
-                                static_cast<int>(meshes.size()));
+                        maximumObjectLods = std::max(maximumObjectLods,
+                            static_cast<int>(std::min<size_t>(
+                                layer->GetMaximumDefinedObjectLodCount(), 3)));
+                    if (maximumObjectLods >= 3) break;
+                }
+            if (maximumObjectLods >= 3) break;
+        }
         maximumObjectLods = std::clamp(maximumObjectLods, 1,
             static_cast<int>(Engine::Components::TerrainObjectLayer::MaximumObjectLods));
+        m_toolbarTimings.lodSummaryMilliseconds += std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - lodSummaryStart).count();
         int displayLod = view->GetTerrainObjectDisplayLod();
         if (displayLod < 0) displayLod = maximumObjectLods / 2;
         displayLod = std::clamp(displayLod, 0, maximumObjectLods - 1);

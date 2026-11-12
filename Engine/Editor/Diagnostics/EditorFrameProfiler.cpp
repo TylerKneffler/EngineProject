@@ -183,8 +183,17 @@ namespace Engine::Editor
             << ",\"prepare_shader_pipeline_publication_ms\":" << prepareTimings.shaderPipelinePublicationMs
             << ",\"prepare_object_commit_ms\":" << prepareTimings.objectCommitMs
             << ",\"prepare_prefab_instances_ms\":" << prepareTimings.prefabInstancesMs
+            << ",\"prepare_prefab_retained_prototypes\":" << scene->GetRestoreRetainedPrefabPrototypeCount()
             << ",\"prepare_prefab_signature_ms\":" << prepareTimings.prefabSignatureMs
             << ",\"prepare_prefab_source_probe_ms\":" << prepareTimings.prefabSourceProbeMs
+            << ",\"prepare_prefab_placement_assets_ms\":" << prepareTimings.prefabPlacementAssetsMs
+            << ",\"prepare_prefab_lod_profiles_ms\":" << prepareTimings.prefabLodProfilesMs
+            << ",\"prepare_prefab_source_set_ms\":" << prepareTimings.prefabSourceSetMs
+            << ",\"prepare_prefab_registry_ms\":" << prepareTimings.prefabRegistryMs
+            << ",\"prepare_prefab_validation_ms\":" << prepareTimings.prefabValidationMs
+            << ",\"prepare_prefab_source_lookup_ms\":" << prepareTimings.prefabSourceLookupMs
+            << ",\"prepare_prefab_build_ms\":" << prepareTimings.prefabBuildMs
+            << ",\"prepare_prefab_main_buffer_create_ms\":" << prepareTimings.prefabMainBufferCreateMs
             << ",\"prepare_graphics_preparation_ms\":" << prepareTimings.graphicsPreparationMs
             << ",\"prepare_native_buffers_ms\":" << prepareTimings.nativeBuffersMs
             << ",\"prepare_transforms_ms\":" << prepareTimings.transformsMs
@@ -569,7 +578,27 @@ namespace Engine::Editor
             panelTotal += panel.milliseconds;
         }
         output << "],\"ui_panels_ms\":" << panelTotal
-            << ",\"ui_other_ms\":" << std::max(0.0, sample.editorUiMilliseconds - panelTotal);
+            << ",\"ui_other_ms\":" << std::max(0.0, sample.editorUiMilliseconds - panelTotal)
+            << ",\"ui_toolbar_timing_valid\":" << (sample.uiToolbarTimingValid ? "true" : "false")
+            << ",\"ui_toolbar_ms\":" << sample.uiToolbarMilliseconds
+            << ",\"ui_toolbar_lod_summary_ms\":" << sample.uiToolbarLodSummaryMilliseconds
+            << ",\"ui_toolbar_lod_summary_calls\":" << sample.uiToolbarLodSummaryCalls
+            << ",\"ui_toolbar_sections_ms\":{";
+        constexpr const char* toolbarNames[] = {
+            "file", "edit", "mode", "tools", "transform", "view", "prefab", "paint", "playback" };
+        for (size_t i = 0; i < sample.uiToolbarSectionMilliseconds.size(); ++i)
+        {
+            if (i) output << ',';
+            output << '\"' << toolbarNames[i] << "\":" << sample.uiToolbarSectionMilliseconds[i];
+        }
+        output << "},\"ui_toolbar_section_draws\":{";
+        for (size_t i = 0; i < sample.uiToolbarSectionDraws.size(); ++i)
+        {
+            if (i) output << ',';
+            output << '\"' << toolbarNames[i] << "\":" << sample.uiToolbarSectionDraws[i];
+        }
+        output << "},\"ui_unattributed_ms\":" << (sample.uiToolbarTimingValid
+            ? std::max(0.0, sample.editorUiMilliseconds - panelTotal - sample.uiToolbarMilliseconds) : 0.0);
         return output;
     }
 

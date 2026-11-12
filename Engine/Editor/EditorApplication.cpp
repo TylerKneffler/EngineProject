@@ -735,6 +735,7 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
         const auto drawEditorUi = [&]()
         {
             if (uiDrawn) return;
+            editorState->GetToolbarTimings() = {};
             const auto beforeUi = Clock::now();
             const auto beforeUiCounters = stageCounters();
             uiBackend->DrawEditor(*editorState, playState, gameBuildManager.get());
@@ -1125,6 +1126,16 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
             sample.scenePath = editorState->GetCurrentScenePath();
             sample.playPipeline = usePlayPipeline;
             sample.uiCpuMilliseconds = uiCpuMilliseconds;
+            if (uiDrawn)
+            {
+                const auto& timings = editorState->GetToolbarTimings();
+                sample.uiToolbarTimingValid = true;
+                sample.uiToolbarMilliseconds = timings.totalMilliseconds;
+                sample.uiToolbarLodSummaryMilliseconds = timings.lodSummaryMilliseconds;
+                sample.uiToolbarSectionMilliseconds = timings.sectionMilliseconds;
+                sample.uiToolbarSectionDraws = timings.sectionDraws;
+                sample.uiToolbarLodSummaryCalls = timings.lodSummaryCalls;
+            }
             for (const auto& panel : editorState->GetPanels())
                 if (panel)
                     sample.uiPanels.push_back({panel->GetTitle(), panel->GetLastUiDrawMilliseconds()});

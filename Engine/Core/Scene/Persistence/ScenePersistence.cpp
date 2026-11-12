@@ -2,6 +2,7 @@
 #include "Core/Serialization/SceneSerializer.h"
 #include "Core/Serialization/Json.h"
 #include "Core/Rendering/RenderJobs.h"
+#include "Core/Compoonents/Terrain/TerrainObjectLayer.h"
 #include <stdexcept>
 
 namespace Engine::Scene
@@ -51,12 +52,16 @@ bool Scene::LoadFromString(const std::string& source)
 }
 
 bool Scene::RestoreTrustedSnapshot(const Engine::Serialization::JsonValue& snapshot,
-    bool publishSceneSnapshot)
+    bool publishSceneSnapshot, bool retainPrefabPrototypes)
 {
     AssertOwnerThread();
     if (!m_graphicsProvider || !snapshot.IsObject() ||
         snapshot["version"].AsInt() != 1)
         return false;
+    std::vector<std::shared_ptr<void>> retainedPrototypes;
+    if (retainPrefabPrototypes)
+        for (const auto* layer:GetComponents<Engine::Components::TerrainObjectLayer>())
+            if (layer) layer->AppendPrefabPrototypeRetention(retainedPrototypes);
     const bool previousSuppression=m_suppressSceneSnapshotPublication;
     m_suppressSceneSnapshotPublication = true;
     struct PublicationGuard
@@ -68,6 +73,7 @@ bool Scene::RestoreTrustedSnapshot(const Engine::Serialization::JsonValue& snaps
     if (!Engine::Serialization::SceneSerializer::LoadFromValue(
             *this, snapshot, m_graphicsProvider))
         return false;
+    m_restorePrefabPrototypes=std::move(retainedPrototypes);
     // Play-mode restoration already has the trusted snapshot as its editor
     // history baseline. Avoid serializing the just-restored scene a second
     // time at this commit boundary. Ordinary scene loads still publish it.

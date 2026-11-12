@@ -20,6 +20,7 @@
 #include <future>
 #include <mutex>
 #include <optional>
+#include <unordered_set>
 #include "Core/Graphics/IGraphicsProvider.h"
 #include <glm/gtc/matrix_transform.hpp>
 #define GLM_ENABLE_EXPERIMENTAL
@@ -68,8 +69,9 @@ struct TerrainObjectLayer::PrefabInstances
     {
         std::string resolved;
         std::filesystem::file_time_type stamp;
+        bool available=false;
         bool operator==(const Source& other) const
-        { return resolved==other.resolved && stamp==other.stamp; }
+        { return resolved==other.resolved && stamp==other.stamp && available==other.available; }
     };
     IGraphicsProvider* provider=nullptr;
     uint64_t signature=UINT64_MAX;
@@ -163,12 +165,47 @@ bool TerrainObjectLayer::IsPrefabPreparationPending() const
         (m_prefabInstances && m_prefabInstances->building);
 }
 
-void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, bool* uploadAvailable)
+void TerrainObjectLayer::AppendPrefabPrototypeRetention(
+    std::vector<std::shared_ptr<void>>& output) const
+{
+    for (auto runtime=m_prefabInstances; runtime; runtime=runtime->previous)
+        for (const auto& prototype:runtime->prototypes)
+            if (prototype) output.push_back(prototype);
+}
+
+bool TerrainObjectLayer::IsPrefabPreparationComplete(IGraphicsProvider* provider) const
+{
+    if (m_prefabCheckedRevision!=GetConfigurationRevision() ||
+        m_prefabCheckedData!=placements.data() || m_prefabCheckedCount!=placements.size() ||
+        m_prefabSourcePreparationPending) return false;
+    if (!m_hasPrefabPlacements) return true;
+    return m_prefabInstances && m_prefabInstances->provider==provider &&
+        !m_prefabInstances->building;
+}
+
+void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, bool* uploadAvailable,
+    std::chrono::steady_clock::time_point deadline)
 {
     using BuildProfile=Engine::Serialization::PrefabLoadProfile;
     m_lastPrefabPrepareTimings={};
+    struct ScopedMilliseconds
+    {
+        double& output;
+        std::chrono::steady_clock::time_point start=std::chrono::steady_clock::now();
+        bool active=true;
+        void Stop()
+        {
+            if (!active) return;
+            output+=std::chrono::duration<double,std::milli>(
+                std::chrono::steady_clock::now()-start).count();
+            active=false;
+        }
+        ~ScopedMilliseconds() { Stop(); }
+    } validationTimer{m_lastPrefabPrepareTimings.validationMs};
     if (!Owner || !Owner->GetScene() || !provider) return;
     const auto now=std::chrono::steady_clock::now();
+    if (deadline==std::chrono::steady_clock::time_point{})
+        deadline=now+std::chrono::milliseconds(3);
     const bool changed=m_prefabCheckedRevision!=GetConfigurationRevision() ||
         m_prefabCheckedData!=placements.data() || m_prefabCheckedCount!=placements.size();
     if (!changed && !m_prefabInstances && !m_prefabSourcePreparationPending) return;
@@ -184,13 +221,6 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
     m_prefabCheckedRevision=GetConfigurationRevision(); m_prefabCheckedData=placements.data();
     m_prefabCheckedCount=placements.size(); m_hasPrefabPlacements=hasPrefabs;
     if (!hasPrefabs && !m_prefabInstances) return;
-    std::map<std::string,ObjectLods> lodProfiles;
-    for (const auto& [asset, meshes] : GetDefinedObjectLods())
-    {
-        ObjectLods profile = GetObjectLodProfile(asset);
-        if (profile.meshes.empty()) profile.meshes = meshes;
-        lodProfiles.emplace(asset,std::move(profile));
-    }
     // Check the placement signature on its normal interval. Source file probes
     // are spread over subsequent frames to avoid one synchronous filesystem
     // burst; an in-place placement edit may therefore take a few extra frames
@@ -210,12 +240,81 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
         if (m_prefabInstances && m_prefabInstances->building)
             m_prefabInstances->nextPlacementSignatureCheck=now+std::chrono::milliseconds(100);
     }
+    const auto placementAssetsStarted=std::chrono::steady_clock::now();
+    if (!m_prefabPlacementAssetsValid || m_prefabPlacementAssetsSignature!=signature)
+    {
+        std::unordered_set<std::string> unique;
+        m_prefabPlacementAssets.clear();
+        for (const auto& placement : placements)
+            if (unique.insert(placement.asset).second)
+                m_prefabPlacementAssets.push_back(placement.asset);
+        m_prefabPlacementAssetsSignature=signature;
+        m_prefabPlacementAssetsValid=true;
+    }
+    m_lastPrefabPrepareTimings.placementAssetsMs=std::chrono::duration<double,std::milli>(
+        std::chrono::steady_clock::now()-placementAssetsStarted).count();
+    const auto lodProfilesStarted=std::chrono::steady_clock::now();
+    std::vector<std::pair<const void*,uint64_t>> profileComponents;
+    profileComponents.reserve(Owner->Components.size());
+    for (const auto* component : Owner->Components)
+        if (component)
+            profileComponents.emplace_back(component,component->GetConfigurationRevision());
+    const bool refreshProfiles=!m_prefabProfilesValid || m_prefabProfileCacheOwner!=Owner ||
+        m_prefabProfilePlacementSignature!=signature ||
+        m_prefabProfileComponents!=profileComponents ||
+        now-m_prefabProfilesChecked>=std::chrono::milliseconds(100);
+    if (refreshProfiles)
+    {
+        std::map<std::string,ObjectLods> profiles;
+        for (const auto& [asset, meshes] : GetDefinedObjectLods(&m_prefabPlacementAssets))
+        {
+            ObjectLods profile = GetObjectLodProfile(asset);
+            if (profile.meshes.empty()) profile.meshes = meshes;
+            profiles.emplace(asset,std::move(profile));
+        }
+        m_lastPrefabPrepareTimings.lodProfilesMs=std::chrono::duration<double,std::milli>(
+            std::chrono::steady_clock::now()-lodProfilesStarted).count();
+        const auto sourceSetStarted=std::chrono::steady_clock::now();
+        std::map<std::string,bool> requiredSources;
+        const auto addSource=[&](const std::string& path) {
+            if (!path.empty() && std::filesystem::path(path).extension()==".prefab")
+                requiredSources.try_emplace(path,true);
+        };
+        for (const auto& [base,lods]:profiles)
+        {
+            addSource(base);
+            for (const auto& path:lods.meshes) addSource(path);
+            for (const auto& path:lods.shadowMeshes) addSource(path);
+        }
+        for (const auto& asset:m_prefabPlacementAssets) addSource(asset);
+        std::vector<std::string> sources;
+        sources.reserve(requiredSources.size());
+        for (const auto& [path,unused]:requiredSources)
+        {
+            (void)unused;
+            sources.push_back(path);
+        }
+        m_prefabLodProfiles=std::move(profiles);
+        m_prefabRequiredSources=std::move(sources);
+        m_prefabProfileCacheOwner=Owner;
+        m_prefabProfileComponents=std::move(profileComponents);
+        m_prefabProfilePlacementSignature=signature;
+        m_prefabProfilesChecked=now;
+        m_prefabProfilesValid=true;
+        m_lastPrefabPrepareTimings.sourceSetMs=std::chrono::duration<double,std::milli>(
+            std::chrono::steady_clock::now()-sourceSetStarted).count();
+    }
+    else
+        m_lastPrefabPrepareTimings.lodProfilesMs=std::chrono::duration<double,std::milli>(
+            std::chrono::steady_clock::now()-lodProfilesStarted).count();
+    const auto& lodProfiles=m_prefabLodProfiles;
     const auto readSource=[](const std::string& asset) {
         BuildProfile::Stage stage("prefab_source_resolution");
         PrefabInstances::Source source;
         source.resolved=std::filesystem::absolute(Mesh::ResolveFilePath(asset)).lexically_normal().generic_string();
         std::error_code error;
         source.stamp=std::filesystem::last_write_time(source.resolved,error);
+        source.available=!error;
         return source;
     };
     std::map<std::string,PrefabInstances::Source> sources;
@@ -223,6 +322,7 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
     // Reuse recent results across neighboring cells, while retaining the
     // existing per-source periodic probe for edits and asset relocation.
     {
+        ScopedMilliseconds sourceLookupTimer{m_lastPrefabPrepareTimings.sourceLookupMs};
         struct AsyncSource
         {
             std::shared_future<PrefabInstances::Source> future;
@@ -231,22 +331,9 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
         };
         static std::mutex sourceCacheMutex;
         static std::map<std::string,AsyncSource> sourceCache;
-        std::map<std::string,bool> requiredSources;
-        const auto addSource=[&](const std::string& path) {
-            if (!path.empty() && std::filesystem::path(path).extension()==".prefab")
-                requiredSources.try_emplace(path,true);
-        };
-        for (const auto& [base,lods]:lodProfiles)
-        {
-            addSource(base);
-            for (const auto& path:lods.meshes) addSource(path);
-            for (const auto& path:lods.shadowMeshes) addSource(path);
-        }
-        for (const auto& placement:placements) addSource(placement.asset);
         bool allReady=true;
-        for (const auto& [path,unused]:requiredSources)
+        for (const auto& path:m_prefabRequiredSources)
         {
-            (void)unused;
             if (sources.count(path)) continue;
             std::lock_guard lock(sourceCacheMutex);
             auto& entry=sourceCache[path];
@@ -267,6 +354,9 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
             if (entry.future.valid() && entry.future.wait_for(std::chrono::seconds(0))==std::future_status::ready)
             {
                 entry.value=entry.future.get();
+                // A shared_future remains valid after get(). Clear it so later
+                // lookups do not keep resetting checked and prevent refreshes.
+                entry.future={};
                 entry.checked=time;
             }
             if (entry.value) sources.emplace(path,*entry.value);
@@ -333,6 +423,8 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
         // A changed or newly resolved source falls through to a rebuild. The
         // remaining paths are resolved by the normal batch builder below.
     }
+    validationTimer.Stop();
+    ScopedMilliseconds buildTimer{m_lastPrefabPrepareTimings.buildMs};
     BuildProfile buildProfile("TerrainObjectLayer: "+layerName);
     std::map<std::string,std::vector<const Placement*>> groups;
     // Thousands of placements reference a small set of prefab paths. Resolve
@@ -347,12 +439,23 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
     std::map<std::string,std::string> bases;
     {
     BuildProfile::Stage stage("prefab_lod_source_index");
+    // Register standalone bases first. A placement may also name a prefab
+    // that is an authored LOD variant; its fallback single-level profile must
+    // not overwrite the explicit chain that owns that variant.
+    for (const auto& [base,lods]:lodProfiles)
+        if (std::filesystem::path(base).extension()==".prefab")
+            bases[key(base)]=base;
     for (const auto& [base,lods]:lodProfiles)
         if (std::filesystem::path(base).extension()==".prefab")
         {
-            bases[key(base)]=base;
-            for (const auto& variant:lods.meshes) bases[key(variant)]=base;
-            for (const auto& variant:lods.shadowMeshes) bases[key(variant)]=base;
+            const auto& resolvedBase=key(base);
+            const auto registerVariant=[&](const std::string& variant) {
+                if (variant.empty()) return;
+                const auto& resolvedVariant=key(variant);
+                if (resolvedVariant!=resolvedBase) bases[resolvedVariant]=base;
+            };
+            for (const auto& variant:lods.meshes) registerVariant(variant);
+            for (const auto& variant:lods.shadowMeshes) registerVariant(variant);
         }
     }
     // Resolve and classify each asset spelling once, not once per placement.
@@ -480,7 +583,12 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
     for (const auto& [asset,records]:groups)
     {
         if (resume && asset < runtime->nextAsset) continue;
-        if (processed)
+        // A removed source has no prototype to publish. Finish the rebuild so
+        // previous generated objects can retire; periodic probes can detect
+        // the source reappearing later.
+        key(asset);
+        if (!sources.at(asset).available) continue;
+        if (processed && std::chrono::steady_clock::now()>=deadline)
         {
             runtime->building = true;
             runtime->nextAsset = asset;
@@ -641,6 +749,7 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
                         else
                         {
                             if (uploadAvailable) *uploadAvailable = false;
+                            ScopedMilliseconds bufferTimer{m_lastPrefabPrepareTimings.mainBufferCreateMs};
                             prepared.mesh->CreateBuffer(provider->GetBufferFactory(), &prepared.buffer);
                         }
                     }
@@ -719,7 +828,10 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
                 {
                     if (!original->Owner->IsEnabledInHierarchy()) continue;
                     if (partIndex++ < runtime->nextPart) continue;
-                    if (processedPart) { moreParts = true; return; }
+                    // Complete at least one part for forward progress, then
+                    // use the remaining shared frame budget for other parts.
+                    if (processedPart && std::chrono::steady_clock::now()>=deadline)
+                    { moreParts = true; return; }
                     processedPart = true;
                     runtime->nextPart = partIndex;
                     // Expand indexed geometry once per shared prefab part, never per placement.
