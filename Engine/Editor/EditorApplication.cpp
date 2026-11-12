@@ -694,6 +694,7 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
         uint32_t gameViewHeight = 0;
         uint32_t submittedShadowDraws = 0;
         Engine::Rendering::RenderCpuTimings renderCpu;
+        std::vector<Engine::Editor::EditorFrameProfileSample::ViewRender> viewRenders;
         std::vector<Engine::Scene::Scene*> frameScenes;
         bool pipelineFrameSubmitted = false;
 
@@ -844,7 +845,11 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
                         else continue;
                         pipelineViewRecordMs+=std::chrono::duration<double,std::milli>(Clock::now()-viewRecordStart).count();
                         recorded.shadowDraws = scene->GetShadowDebugSnapshot().submittedCasterDrawCount;
-                        renderCpu += scene->GetLastRenderCpuTimings();
+                        const auto viewCpu=scene->GetLastRenderCpuTimings();
+                        renderCpu += viewCpu;
+                        viewRenders.push_back({
+                            dynamic_cast<Engine::Editor::GameView*>(view) ? "game" : "scene",
+                            view->GetWidth(),view->GetHeight(),viewCpu});
                         frameCommands.push_back(recorded.shadow);
                         frameCommands.push_back(recorded.color);
                         recordedViews.push_back(std::move(recorded));
@@ -950,7 +955,14 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
                         {
                             if(renderedScene) renderedScene->ResetRenderCpuTimings();
                             view->Render3D(cmd);
-                            if(renderedScene) renderCpu+=renderedScene->GetLastRenderCpuTimings();
+                            if(renderedScene)
+                            {
+                                const auto viewCpu=renderedScene->GetLastRenderCpuTimings();
+                                renderCpu+=viewCpu;
+                                viewRenders.push_back({
+                                    dynamic_cast<Engine::Editor::GameView*>(view) ? "game" : "scene",
+                                    view->GetWidth(),view->GetHeight(),viewCpu});
+                            }
                         }
                         mainSubmitMilliseconds += std::chrono::duration<double,
                             std::milli>(Clock::now() - begin).count();
@@ -1164,6 +1176,7 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
             sample.shadowSubmitMilliseconds = shadowSubmitMilliseconds;
             sample.mainSubmitMilliseconds = mainSubmitMilliseconds;
             sample.renderCpu=renderCpu;
+            sample.viewRenders=std::move(viewRenders);
             sample.editorUiMilliseconds = editorUiMilliseconds;
             sample.renderedViews = renderedViews;
             sample.renderedSceneViews = renderedSceneViews;

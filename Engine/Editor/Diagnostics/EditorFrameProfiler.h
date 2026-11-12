@@ -46,6 +46,13 @@ namespace Engine::Editor
         uint32_t uiToolbarLodSummaryCalls = 0;
         struct UiPanel { std::string title; double milliseconds = 0; };
         std::vector<UiPanel> uiPanels;
+        struct ViewRender
+        {
+            std::string kind;
+            uint32_t width=0, height=0;
+            Engine::Rendering::RenderCpuTimings renderCpu;
+        };
+        std::vector<ViewRender> viewRenders;
         uint64_t workerPending = 0;
         unsigned workerCount = 0;
         Engine::Threading::AsyncTextWriter::Statistics writer;

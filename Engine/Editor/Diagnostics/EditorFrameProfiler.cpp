@@ -524,6 +524,54 @@ namespace Engine::Editor
         };
         writeViewIdentities("render_camera_view_identities",renderCpu.cameraVisibility);
         writeViewIdentities("render_shadow_view_identities",renderCpu.shadowVisibility);
+        output << ",\"render_views\":[";
+        for (size_t i=0;i<sample.viewRenders.size();++i)
+        {
+            if (i) output << ',';
+            const auto& view=sample.viewRenders[i];
+            const auto& cpu=view.renderCpu;
+            const auto& visibility=cpu.cameraVisibility;
+            output << "{\"kind\":" << PerformanceJsonString(view.kind)
+                << ",\"width\":" << view.width
+                << ",\"height\":" << view.height
+                << ",\"metrics_scope\":\"color_pass_cpu\""
+                << ",\"render_cpu_total_ms\":" << cpu.totalMs
+                << ",\"render_startup_ms\":" << cpu.startupMs
+                << ",\"render_culling_ms\":" << cpu.cullingMs
+                << ",\"render_submission_ms\":" << cpu.submissionMs
+                << ",\"candidate_draws\":" << cpu.candidateDraws
+                << ",\"physical_draws\":" << cpu.physicalDraws
+                << ",\"submitted_instances\":" << cpu.submittedInstances
+                << ",\"submitted_triangles\":" << cpu.submittedTriangles
+                << ",\"visibility_views\":" << visibility.views
+                << ",\"visibility_frame_items\":" << visibility.frameItems
+                << ",\"visibility_candidates\":" << visibility.candidateItems
+                << ",\"visibility_accepted\":" << visibility.acceptedItems
+                << ",\"bvh_nodes_visited\":" << visibility.bvhNodesVisited
+                << ",\"bvh_bounds_tested\":" << visibility.bvhBoundsTested
+                << ",\"visible_slots\":" << visibility.visibleSlots
+                << ",\"instance_tiles_submitted\":" << visibility.instanceTilesSubmitted
+                << ",\"placement_candidates\":" << visibility.placementCandidates
+                << ",\"placement_candidates_by_lod\":["
+                << visibility.placementCandidatesByLod[0] << ','
+                << visibility.placementCandidatesByLod[1] << ','
+                << visibility.placementCandidatesByLod[2] << ']'
+                << ",\"placement_triangles_by_lod\":["
+                << visibility.placementTrianglesByLod[0] << ','
+                << visibility.placementTrianglesByLod[1] << ','
+                << visibility.placementTrianglesByLod[2] << ']'
+                << ",\"view_identities\":[";
+            for (size_t idIndex=0;idIndex<visibility.viewIdentities.size();++idIndex)
+            {
+                if (idIndex) output << ',';
+                const auto& id=visibility.viewIdentities[idIndex];
+                output << "{\"id\":" << id.id << ",\"portal\":"
+                    << (id.portal ? "true":"false") << ",\"shadow\":"
+                    << (id.shadow ? "true":"false") << '}';
+            }
+            output << "]}";
+        }
+        output << ']';
         output << ",\"grass_active_tiles\":" << grass.activeTiles
             << ",\"grass_lod_transition_tiles\":" << grass.transitionTiles
             << ",\"grass_fading_tiles\":" << grass.fadingTiles;
