@@ -1368,16 +1368,17 @@ void EditorState::DrawGlobalToolbar(IEditorUi& ui, ToolbarSection section,
         m_toolbarTimings.lodSummaryMilliseconds += std::chrono::duration<double, std::milli>(
             std::chrono::steady_clock::now() - lodSummaryStart).count();
         int displayLod = view->GetTerrainObjectDisplayLod();
-        if (displayLod < 0) displayLod = maximumObjectLods / 2;
-        displayLod = std::clamp(displayLod, 0, maximumObjectLods - 1);
+        displayLod = std::clamp(displayLod, -1, maximumObjectLods - 1);
         view->SetTerrainObjectDisplayLod(displayLod);
-        std::string lodLabel = "Object LOD " + std::to_string(
-            displayLod + 1);
+        std::string lodLabel = displayLod < 0 ? "Object LOD Auto"
+            : "Object LOD " + std::to_string(displayLod + 1);
         if (row.Next(112.f))
         {
             ui.SetNextItemWidth(112.f);
             if (ImGui::BeginCombo("##TerrainObjectDisplayLod", lodLabel.c_str()))
             {
+                if (ImGui::Selectable("Auto", displayLod < 0))
+                    view->SetTerrainObjectDisplayLod(-1);
                 for (int lod = 0; lod < maximumObjectLods; ++lod)
                 {
                     const std::string label = "LOD " + std::to_string(lod + 1);
@@ -1387,7 +1388,7 @@ void EditorState::DrawGlobalToolbar(IEditorUi& ui, ToolbarSection section,
                 }
                 ImGui::EndCombo();
             }
-            ui.Tooltip("Display terrain objects at a shared LOD index; objects with fewer levels use their last available LOD.");
+            ui.Tooltip("Auto adjusts object detail with distance. A fixed LOD previews that detail at every distance; objects with fewer levels use their last available LOD.");
         }
         if (row.Next(28.f) && ViewIconButton("##ViewUi", ViewIcon::Ui,
             scene->settings.sceneViewUiOverlay,

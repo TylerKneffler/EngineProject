@@ -7,6 +7,16 @@
 
 namespace Engine::Rendering
 {
+// A fixed editor LOD has no replacement band to crossfade to. Its geometry
+// must remain visible at every distance; automatic and shadow views retain
+// their authored fades. This is draw state only, never an asset mutation.
+inline glm::vec4 ResolveLodPreviewFade(const glm::vec4& authoredFade,
+    bool editorView, bool shadowView, int displayLod)
+{
+    return editorView && !shadowView && displayLod >= 0
+        ? glm::vec4(0.f) : authoredFade;
+}
+
 // Visible geometry policy only. Shadow selection must use its own policy/state.
 struct MeshLodView
 {

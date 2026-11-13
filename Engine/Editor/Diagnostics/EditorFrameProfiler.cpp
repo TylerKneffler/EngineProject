@@ -565,6 +565,7 @@ namespace Engine::Editor
                 << ",\"render_submission_ms\":" << cpu.submissionMs
                 << ",\"candidate_draws\":" << cpu.candidateDraws
                 << ",\"physical_draws\":" << cpu.physicalDraws
+                << ",\"foliage_depth_draws\":" << cpu.foliageDepthDraws
                 << ",\"submitted_instances\":" << cpu.submittedInstances
                 << ",\"submitted_triangles\":" << cpu.submittedTriangles
                 << ",\"visibility_views\":" << visibility.views

@@ -93,9 +93,11 @@ public:
     // Create a graphics buffer from loaded vertex data.
     // bufferFactory: creates GPU vertex buffers (API-agnostic)
     void CreateBuffer(IGraphicsBufferFactory* bufferFactory,
-        Engine::Rendering::PreparedMeshBuffer* prepared = nullptr);
+        Engine::Rendering::PreparedMeshBuffer* prepared = nullptr,
+        Engine::Rendering::PreparedMeshBuffer* preparedIndices = nullptr);
     void InstallPreparedStaticVertexBuffer(
-        std::shared_ptr<IGraphicsBuffer> buffer, IGraphicsBufferFactory* bufferFactory);
+        std::shared_ptr<IGraphicsBuffer> buffer, IGraphicsBufferFactory* bufferFactory,
+        Engine::Rendering::PreparedMeshBuffer* preparedIndices = nullptr);
 
     // Get the underlying graphics buffer (API-agnostic)
     IGraphicsBuffer* GetGraphicsBuffer() const { return m_instanceSource ? m_instanceSource->GetGraphicsBuffer() : m_vertexBuffer.get(); }
@@ -298,6 +300,11 @@ public:
         1.5f * std::max(0.f,m_boundsMax.y) * std::clamp(foliageWindStrength,0.f,1.f)); }
     glm::vec3 GetBoundsMin() const { return m_boundsMin-glm::vec3(GetDeformationBoundsPadding()); }
     glm::vec3 GetBoundsMax() const { return m_boundsMax+glm::vec3(GetDeformationBoundsPadding()); }
+    // One source in placement-local space, before any instance transform.
+    // GetBoundsMin/Max on an instanced mesh describe the entire batch instead.
+    // Runtime LOD variants can inherit the owning mesh's deformation settings.
+    bool GetInstanceGeometryBounds(glm::vec3& minimum, glm::vec3& maximum,
+        const Mesh* deformationPolicy = nullptr) const;
     // Conservative local bounds for every currently resident runtime LOD.
     // Returns false when any resident representation lacks bounds.
     bool GetRuntimeLodAggregateBounds(glm::vec3& minimum,

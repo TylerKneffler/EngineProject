@@ -2,7 +2,19 @@
 
 ## Debug editor performance
 
+Large-map target: 120 FPS at 1920x1080 (8.33 ms). The new [expanded oak meadow](oak-meadow-expanded.md) is a self-contained 1.8 km streamed map derived from the current meadow. Initial rendering/residency and cell-boundary traversal checks pass; the performance target remains open.
+
+Current architectural priority: [large-scene rendering overhaul](large-scene-rendering.md). Added reusable view-local draw records and a matching foliage coverage-depth/visible-surface lighting path. Controlled Release DX12 opaque GPU time fell from 9.29 to 5.61 ms, but complete frame time was 13.98 versus 14.85 ms: CPU preparation/recording and the added submissions remain limiting. Next: persistent scene draw/material data with edit and streaming deltas, followed by conservative GPU cluster visibility and error-based mesh LOD. Preserve placement IDs, editable coverage, and resource lifetimes; a full persistent GPU scene and 120 FPS remain unfinished.
+
+Implemented [indexed foliage and preparation improvements](indexed-foliage-rendering.md): Release DX12 expanded-scene median 27.86 → 16.74 ms, with unchanged density and candidate triangles. Shared geometry storage is 65% lower. Next: canopy/far LOD and overdraw reduction; 120 FPS remains open.
+
+Fixed [per-instance culling bounds](instance-culling-bounds.md): GPU culling now transforms source-local bounds instead of a whole placement tile. Final Release DX12 median is 14.60 ms with an identical canopy capture; opaque GPU time is 8.21 ms. Command recording and further geometry/overdraw reduction remain above the 120 FPS budget.
+
 Target: responsive editing and playback in Debug with assertions enabled. Address repeated CPU work and shader compilation policy before reducing scene quality, draw distance, density, or resolution.
+
+Fixed [Scene-view foliage LOD preview](editor-foliage-lod-preview.md): a forced toolbar LOD was still being discarded by runtime distance fades, leaving no replacement geometry. Fixed previews now suppress that fade, and the toolbar defaults to Auto. Debug regression and editor build pass; interactive toolbar/camera verification remains.
+
+Added [CPU recording diagnostics and material fast paths](cpu-material-recording.md). Timing variation and overlapping editor activity prevent claiming an overall FPS improvement from this smaller change.
 
 Audit source: `.local/performance-logs/performance-20261111-174034-921.jsonl` (2026-11-11, DX12, oak meadow).
 

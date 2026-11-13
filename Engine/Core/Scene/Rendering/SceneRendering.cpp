@@ -2,6 +2,7 @@
 #include "Core/Rendering/ShadowReceiverCulling.h"
 #include "Core/Rendering/StableShadowCascade.h"
 #include "Core/Rendering/RenderJobs.h"
+#include "Core/Rendering/PreparedInstanceDraw.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Graphics/GraphicsCommandPacket.h"
 #include "Core/Compoonents/Camera/Camera.h"
@@ -804,6 +805,26 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     Renderer::TerrainMaterialState terrainMaterialState;
 
     const auto materialStart = RenderClock::now();
+    // Scene texture policy is identical for every draw in this view. Resolve
+    // it once; only materials with an explicit override need per-draw work.
+    const auto sceneTextureLod = settings.graphicsQuality.ResolveTexture(settings.textureLod);
+    const auto sceneAlphaLodParameters = sceneTextureLod.AlphaGpuParameters();
+    const auto sceneTextureLodParameters = sceneTextureLod.GpuParameters();
+    const auto applyTextureLod = [&](ObjectGPUData& data,
+        const Engine::Components::Material* material)
+    {
+        if (material && material->overrideTextureLod)
+        {
+            const auto textureLod = settings.graphicsQuality.ResolveTexture(material->textureLod);
+            data.alphaLodParams = textureLod.AlphaGpuParameters();
+            data.textureLodParams = textureLod.GpuParameters();
+        }
+        else
+        {
+            data.alphaLodParams = sceneAlphaLodParameters;
+            data.textureLodParams = sceneTextureLodParameters;
+        }
+    };
     double materialPipelineMs = 0.0;
     double materialGeometryBindingMs = 0.0;
     UINT slot = 0;
@@ -940,10 +961,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             preparedDraw.objectData.shadowCasterFade={casterFade.x,std::min(casterFade.x,casterFade.y),1.f,0.f};
             preparedDraw.objectData.grassAnimation={0.f,0.f,0.f,0.f};
             preparedDraw.objectData.viewPositionAlphaCutoff=glm::vec4(cameraPosition,.001f);
-            preparedDraw.objectData.alphaLodParams = mat && mat->overrideTextureLod
-                ? settings.graphicsQuality.ResolveTexture(mat->textureLod).AlphaGpuParameters() : settings.graphicsQuality.ResolveTexture(settings.textureLod).AlphaGpuParameters();
-            preparedDraw.objectData.textureLodParams = mat && mat->overrideTextureLod
-                ? settings.graphicsQuality.ResolveTexture(mat->textureLod).GpuParameters() : settings.graphicsQuality.ResolveTexture(settings.textureLod).GpuParameters();
+            applyTextureLod(preparedDraw.objectData, mat);
             if(fixedShadowBand)
             {
                 // Camera distance must not reshape a fixed shadow proxy, via
@@ -1208,13 +1226,10 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         }
         // Resolve after cached material assembly: scene settings must also affect
         // static objects and material-less meshes without rebuilding their assets.
-        objectData.alphaLodParams = mat && mat->overrideTextureLod
-            ? settings.graphicsQuality.ResolveTexture(mat->textureLod).AlphaGpuParameters() : settings.graphicsQuality.ResolveTexture(settings.textureLod).AlphaGpuParameters();
+        applyTextureLod(objectData, mat);
         if (alphaMode == Engine::Components::MaterialAlphaMode::Mask && mat)
             objectData.alphaLodParams.z =
                 std::clamp(mat->alphaCoverageTransmission, 0.f, 1.f);
-        objectData.textureLodParams = mat && mat->overrideTextureLod
-            ? settings.graphicsQuality.ResolveTexture(mat->textureLod).GpuParameters() : settings.graphicsQuality.ResolveTexture(settings.textureLod).GpuParameters();
         bool terrainShadowDoubleSided = doubleSided;
         // Height fields have a single upward-facing surface, including cached
         // terrain and streamed batches. Backfaces do not contribute color or shadows.
@@ -1355,7 +1370,15 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         viewportWidth, viewportHeight, shadowViewProjections, shadowCascadeCount,
         m_directionalShadowResolution);
     // Render phase 6: apply screen LOD, upload object records, and build instance batches.
-    if(!shadowOnly) for(auto& draw:preparedDraws)
+    // Fixed editor LOD selection suppresses the other bands. Remove their
+    // distance crossfade before publishing records or the selected band fades
+    // into missing geometry (near LOD disappears beyond its first threshold).
+    if (includeEditorVisuals && !shadowOnly && instanceLodDisplayOverride >= 0)
+        for (auto& draw : preparedDraws)
+            draw.objectData.geometryFade = Engine::Rendering::ResolveLodPreviewFade(
+                draw.objectData.geometryFade, includeEditorVisuals, shadowOnly,
+                instanceLodDisplayOverride);
+    if(!shadowOnly && !(includeEditorVisuals && instanceLodDisplayOverride >= 0)) for(auto& draw:preparedDraws)
         if(Renderer::SceneRendererDrawPreparation::ScreenLodPolicy(*this, draw, hasPortalViews, includeEditorVisuals)) draw.drawData.flags|=0x00800000u;
     Renderer::SceneRendererObjectRecordUpload recordUpload(
         *this, preparedDraws, shadowOnly);
@@ -1418,6 +1441,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     for (size_t lod = 0; lod < selectedLodDraws.size(); ++lod)
         lodDrawMetrics[lod] += selectedLodDraws[lod];
     auto& screenPlacementLevels = lodSelection.PlacementLevels();
+    std::vector<Engine::Rendering::PreparedInstanceDraw>* instanceDrawCapture = nullptr;
     const auto submitAutomaticGroup = [&](const AutomaticGroup& group,
         const glm::mat4& cullViewProjection, uint32_t objectBase,
         Engine::Graphics::IPipelineState* pipeline,
@@ -1526,7 +1550,14 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                             }
                         }
                     }
-                    else { tiles.push_back(tile); count+=tile.range.y; }
+                    else
+                    {
+                        // CPU render blocks can contain thousands of placements.
+                        // Keep compute work bounded per group without creating
+                        // more CPU objects, materials, draws or placement copies.
+                        Engine::Rendering::AppendInstanceCullChunks(tiles, tile);
+                        count += tile.range.y;
+                    }
                 }
                 if(!count) continue;
                 auto& viewStats = shadowOnly
@@ -1614,14 +1645,14 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                         context,buffers,static_cast<uint32_t>(lodMetric),shadowOnly,diagnosticViewIdentity);
                 }
                 ensureRecordsUploaded();
-                context->SetPipeline(pipeline); context->SetConstantBuffer(0,buffers.draw.get());
-                context->SetStructuredBuffer(45,buffers.output.get()); context->SetStructuredBuffer(46,pool);
-                context->SetStructuredBuffer(10,m_emptyMorphDeltaBuffer.get()); context->SetStructuredBuffer(11,m_emptyMorphWeightBuffer.get());
-                context->SetVertexBuffer(0,sourceMesh->GetGraphicsBuffer(),sourceMesh->GetVertexStride(),0);
-                if(indexed) context->SetIndexBuffer(sourceIndexBuffer,sourceMesh->GetIndexCount(),0);
-                if(gpu) context->DrawInstancesIndirect(buffers.output.get(),0,indexed);
-                else if(indexed) context->DrawIndexedInstanced(sourceRange.vertexCount,buffers.candidates,sourceRange.firstVertex,0,0);
-                else context->DrawInstanced(sourceRange.vertexCount,buffers.candidates,sourceRange.firstVertex,0);
+                const Engine::Rendering::PreparedInstanceDraw instanceDraw{
+                    buffers.draw.get(), buffers.output.get(), pool,
+                    sourceMesh->GetGraphicsBuffer(), sourceIndexBuffer,
+                    sourceMesh->GetVertexStride(), sourceMesh->GetIndexCount(),
+                    sourceRange.vertexCount, sourceRange.firstVertex, buffers.candidates, gpu};
+                instanceDraw.Submit(*context, pipeline, m_emptyMorphDeltaBuffer.get(),
+                    m_emptyMorphWeightBuffer.get());
+                if (instanceDrawCapture) instanceDrawCapture->push_back(instanceDraw);
                 ++submitted.draws;
                 submitted.instances += buffers.candidates;
                 submitted.triangles += static_cast<uint64_t>(
@@ -2105,6 +2136,54 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     // Render phase 9: submit camera geometry, portal views, and debug overlays.
     const auto submissionStart=RenderClock::now();
     const double uploadBeforeSubmission=m_lastRenderCpuTimings.uploadMs;
+    // Resolve coverage before expensive masked-surface lighting. Both passes
+    // consume the SAME visibility/LOD output and constants, including editor
+    // LOD overrides. Unsupported shader/geometry policies keep the normal path.
+    std::vector<std::vector<Engine::Rendering::PreparedInstanceDraw>> foliageDepthDraws(automaticGroups.size());
+    std::vector<uint8_t> foliageDepthPrepared(automaticGroups.size(), 0);
+    const bool foliageDepthEnabled = !wireframeMode && !hasPortalViews &&
+        !m_diagnosticOpaqueDepthEqual && ReadEnvFlag("ENGINE_FOLIAGE_DEPTH_PREPASS", true);
+    const auto depthEligible = [&](const PreparedDraw& draw)
+    {
+        const auto flags = static_cast<uint32_t>(draw.objectData.materialParams.w);
+        return draw.mesh && draw.mesh->IsInstanced() && draw.material &&
+            draw.material->shader.empty() && !draw.blended && !draw.preview &&
+            !draw.terrain && !draw.terrainCell && !draw.pmxOutline &&
+            !draw.spatialManipulator && !draw.traversalChartPortal &&
+            !draw.mesh->usesGrassShadowBudget && (flags & 32u) && !(flags & 64u) &&
+            draw.objectData.skinParams.y <= 0.f && !draw.mesh->HasMorphTargets() &&
+            !draw.mesh->HasSurfaceOffsets() &&
+            draw.vertexBuffer == draw.mesh->GetGraphicsBuffer() &&
+            draw.pipeline == (draw.doubleSided ? m_objectDoubleSidedPipeline.get() : m_objectPipeline.get());
+    };
+    if (foliageDepthEnabled)
+        for (size_t groupIndex = 0; groupIndex < automaticGroups.size(); ++groupIndex)
+        {
+            const auto& group = automaticGroups[groupIndex];
+            if (group.members.empty() || !std::all_of(group.members.begin(), group.members.end(),
+                [&](auto index) {
+                    // Singleton candidates can remain on the ordinary draw
+                    // path and have no prepared instance tiles to replay.
+                    return preparedDraws[index].automaticGroup == groupIndex &&
+                        depthEligible(preparedDraws[index]);
+                })) continue;
+            const auto& draw = preparedDraws[group.members.front()];
+            auto* depthPipeline = m_foliageDepthPipelines[draw.doubleSided ? 1 : 0].get();
+            if (!depthPipeline || !m_foliageEqualPipelines[draw.doubleSided ? 1 : 0]) continue;
+            switchGpuStage(Engine::Graphics::GpuTimingStage::FoliageDepth);
+            for (uint32_t textureSlot = 0; textureSlot < std::max(draw.textureSlotCount, boundTextureSlotCount); ++textureSlot)
+                if (!texturesBound || boundTextures[textureSlot] != draw.textures[textureSlot])
+                    context->SetTexture(textureSlot, draw.textures[textureSlot]);
+            boundTextures = draw.textures; boundTextureSlotCount = draw.textureSlotCount; texturesBound = true;
+            instanceDrawCapture = &foliageDepthDraws[groupIndex];
+            const auto submitted = submitAutomaticGroup(group, viewProjection, 0, depthPipeline, nullptr);
+            instanceDrawCapture = nullptr;
+            foliageDepthPrepared[groupIndex] = 1;
+            m_lastOrdinaryDrawCount += static_cast<uint32_t>(submitted.draws);
+            m_lastRenderCpuTimings.foliageDepthDraws += submitted.draws;
+            m_lastRenderCpuTimings.submittedInstances += submitted.instances;
+            m_lastRenderCpuTimings.submittedTriangles += submitted.triangles;
+        }
     std::vector<uint8_t> submittedAutomaticGroups(automaticGroups.size(),0);
     for (const PreparedDraw& draw : preparedDraws)
     {
@@ -2116,6 +2195,21 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             for(uint32_t textureSlot=0;textureSlot<std::max(draw.textureSlotCount,boundTextureSlotCount);++textureSlot)
                 if(!texturesBound || boundTextures[textureSlot]!=draw.textures[textureSlot]) context->SetTexture(textureSlot,draw.textures[textureSlot]);
             boundTextures=draw.textures; boundTextureSlotCount=draw.textureSlotCount; texturesBound=true;
+            if (foliageDepthPrepared[draw.automaticGroup])
+            {
+                for (const auto& instanceDraw : foliageDepthDraws[draw.automaticGroup])
+                {
+                    instanceDraw.Submit(*context, m_foliageEqualPipelines[draw.doubleSided ? 1 : 0].get(),
+                        m_emptyMorphDeltaBuffer.get(), m_emptyMorphWeightBuffer.get());
+                    ++m_lastOrdinaryDrawCount;
+                    ++m_lastRenderCpuTimings.automaticBatches;
+                    m_lastRenderCpuTimings.automaticInstances += instanceDraw.instanceCount;
+                    m_lastRenderCpuTimings.submittedInstances += instanceDraw.instanceCount;
+                    m_lastRenderCpuTimings.submittedTriangles +=
+                        uint64_t(instanceDraw.elementCount / 3u) * instanceDraw.instanceCount;
+                }
+                continue;
+            }
             const auto submitted = submitAutomaticGroup(automaticGroups[draw.automaticGroup],viewProjection,0,geometrySubmission.GeometryPipeline(draw,draw.pipeline),nullptr);
             m_lastOrdinaryDrawCount += static_cast<uint32_t>(submitted.draws);
             m_lastRenderCpuTimings.submittedInstances += submitted.instances;

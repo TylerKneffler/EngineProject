@@ -248,4 +248,26 @@ private:
     bool m_depthRectangleClearSupported=false;
     mutable std::atomic<uint32_t> m_replayOcclusionCulled{0};
 };
+
+// Single producer. Submitted frames must retain packets until GPU completion;
+// reader ownership then prevents recycling while replay or the GPU still uses
+// their resources. Each pass can keep a pool to preserve its command layout.
+class GraphicsCommandPacketPool
+{
+public:
+    std::shared_ptr<GraphicsCommandPacket> Acquire()
+    {
+        for (auto& packet : m_packets)
+            if (packet.use_count() == 1)
+            {
+                packet->Reset();
+                return packet;
+            }
+        auto packet = std::make_shared<GraphicsCommandPacket>();
+        if (m_packets.size() < 8) m_packets.push_back(packet);
+        return packet;
+    }
+private:
+    std::vector<std::shared_ptr<GraphicsCommandPacket>> m_packets;
+};
 }

@@ -607,22 +607,24 @@ if(ENGINE_VULKAN_ENABLED)
         )
         list(APPEND VULKAN_SHADER_OUTPUTS "${SHADER_OUTPUT}")
     endforeach()
-    set(SHADER_SOURCE
-        "${ENGINE_ROOT}/Engine/Core/Shaders/Object/Object.hlsl")
-    set(SHADER_OUTPUT
-        "${VULKAN_SHADER_DIR}/Object.PSShadowMain.PS.spv")
-    add_custom_command(
-        OUTPUT "${SHADER_OUTPUT}"
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${VULKAN_SHADER_DIR}"
-        COMMAND "${DXC_SPIRV_EXECUTABLE}" -spirv -fspv-target-env=vulkan1.1
-                -fvk-use-dx-layout -fspv-entrypoint-name=PSMain
-                -D VULKAN=1 -T ps_6_0
-                -E PSShadowMain -Fo "${SHADER_OUTPUT}" "${SHADER_SOURCE}"
-        DEPENDS "${SHADER_SOURCE}"
-        VERBATIM
-        COMMENT "Compiling Object.PSShadowMain.PS for Vulkan"
-    )
-    list(APPEND VULKAN_SHADER_OUTPUTS "${SHADER_OUTPUT}")
+    foreach(SHADER_ENTRY PSShadowMain PSDepthEqualMain)
+        set(SHADER_SOURCE
+            "${ENGINE_ROOT}/Engine/Core/Shaders/Object/Object.hlsl")
+        set(SHADER_OUTPUT
+            "${VULKAN_SHADER_DIR}/Object.${SHADER_ENTRY}.PS.spv")
+        add_custom_command(
+            OUTPUT "${SHADER_OUTPUT}"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${VULKAN_SHADER_DIR}"
+            COMMAND "${DXC_SPIRV_EXECUTABLE}" -spirv -fspv-target-env=vulkan1.1
+                    -fvk-use-dx-layout -fspv-entrypoint-name=PSMain
+                    -D VULKAN=1 -T ps_6_0
+                    -E ${SHADER_ENTRY} -Fo "${SHADER_OUTPUT}" "${SHADER_SOURCE}"
+            DEPENDS "${SHADER_SOURCE}"
+            VERBATIM
+            COMMENT "Compiling Object.${SHADER_ENTRY}.PS for Vulkan"
+        )
+        list(APPEND VULKAN_SHADER_OUTPUTS "${SHADER_OUTPUT}")
+    endforeach()
     foreach(SHADER_ENTRY VSMmdMain PSMmdMain)
         if(SHADER_ENTRY STREQUAL "VSMmdMain")
             set(SHADER_PROFILE vs_6_0)
@@ -1264,6 +1266,27 @@ if(NOT ENGINE_PROJECT_DIR AND
     add_test(NAME MaterialShaderRegression COMMAND MaterialShaderTests)
     set_tests_properties(MaterialShaderRegression PROPERTIES
         WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/IndexedInstanceGeometryTests.cpp")
+    enable_testing()
+    add_executable(IndexedInstanceGeometryTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/IndexedInstanceGeometryTests.cpp")
+    target_link_libraries(IndexedInstanceGeometryTests PRIVATE Engine)
+    target_include_directories(IndexedInstanceGeometryTests PRIVATE "${ENGINE_ROOT}/Engine")
+    add_test(NAME IndexedInstanceGeometry COMMAND IndexedInstanceGeometryTests)
+    set_tests_properties(IndexedInstanceGeometry PROPERTIES WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/EditorLodPreviewTests.cpp")
+    enable_testing()
+    add_executable(EditorLodPreviewTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/EditorLodPreviewTests.cpp")
+    target_link_libraries(EditorLodPreviewTests PRIVATE glm::glm)
+    target_include_directories(EditorLodPreviewTests PRIVATE "${ENGINE_ROOT}/Engine")
+    add_test(NAME EditorLodPreview COMMAND EditorLodPreviewTests)
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND

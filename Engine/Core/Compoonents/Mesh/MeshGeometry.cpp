@@ -203,6 +203,23 @@ void Mesh::SetInstancedGeometry(std::shared_ptr<Mesh> source,
     MarkConfigurationDirty();
 }
 
+bool Mesh::GetInstanceGeometryBounds(glm::vec3& minimum, glm::vec3& maximum,
+    const Mesh* deformationPolicy) const
+{
+    if (!m_instanceSource || !m_instanceSource->HasBounds()) return false;
+    minimum = m_instanceSource->GetBoundsMin();
+    maximum = m_instanceSource->GetBoundsMax();
+    // Runtime foliage settings live on the batch, while geometry is shared.
+    // Wind height must come from the source, not translated placement bounds.
+    const auto& policy = deformationPolicy ? *deformationPolicy : *this;
+    const float wind = std::clamp(std::max(foliageWindStrength, policy.foliageWindStrength), 0.f, 1.f);
+    const float padding = std::max({0.f, deformationBoundsPadding, policy.deformationBoundsPadding,
+        1.5f * std::max(0.f, maximum.y) * wind});
+    minimum -= glm::vec3(padding);
+    maximum += glm::vec3(padding);
+    return true;
+}
+
 bool Mesh::ExchangeStaticGeometry(Mesh& other)
 {
     if (HasMorphTargets() || other.HasMorphTargets() ||

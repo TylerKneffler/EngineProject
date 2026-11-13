@@ -873,6 +873,8 @@ private:
 
     std::unique_ptr<IPipelineState> m_objectPipeline;
     std::unique_ptr<IPipelineState> m_objectDoubleSidedPipeline;
+    std::array<std::unique_ptr<IPipelineState>, 2> m_foliageDepthPipelines;
+    std::array<std::unique_ptr<IPipelineState>, 2> m_foliageEqualPipelines;
     std::unique_ptr<IPipelineState> m_objectBlendPipeline;
     std::unique_ptr<IPipelineState> m_objectBlendDoubleSidedPipeline;
     std::unique_ptr<IPipelineState> m_objectWirePipeline;

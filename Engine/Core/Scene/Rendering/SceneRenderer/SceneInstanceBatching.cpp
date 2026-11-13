@@ -151,19 +151,19 @@ SceneInstanceBatching::Result SceneInstanceBatching::Prepare(Scene& scene,
         input.base=base->second;
         input.maximumLod=uint32_t(draw.gpuMaximumLod);
         input.world=draw.objectData.world;
-        input.minimum=draw.mesh->GetInstanceSource()->GetBoundsMin();
-        input.maximum=draw.mesh->GetInstanceSource()->GetBoundsMax();
+        if (!draw.mesh->GetInstanceGeometryBounds(input.minimum, input.maximum))
+            throw std::logic_error("Instanced geometry requires source bounds");
         if(draw.drawData.flags & 0x00100000u) for(int lod=1;lod<=draw.gpuMaximumLod;++lod)
         {
-            const auto* variant=draw.mesh->GetRuntimeLodMesh(lod)->GetInstanceSource();
-            input.minimum=glm::min(input.minimum,variant->GetBoundsMin());
-            input.maximum=glm::max(input.maximum,variant->GetBoundsMax());
+            glm::vec3 minimum, maximum;
+            if (!draw.mesh->GetRuntimeLodMesh(lod)->GetInstanceGeometryBounds(minimum, maximum, draw.mesh))
+                throw std::logic_error("Instanced LOD requires source bounds");
+            input.minimum=glm::min(input.minimum,minimum);
+            input.maximum=glm::max(input.maximum,maximum);
         }
-        // Mesh bounds include the source's authored deformation envelope, so
-        // every instance tile (camera and cascade) uses the same conservative
-        // bounds without needing to identify the deformation type.
-        input.minimum = glm::min(input.minimum, draw.mesh->GetBoundsMin());
-        input.maximum = glm::max(input.maximum, draw.mesh->GetBoundsMax());
+        // Never union the aggregate batch bounds here: compute applies each
+        // placement transform to this source-local box. Applying placements
+        // again to an entire tile defeats frustum, range and LOD rejection.
         float shadowRange = draw.objectData.shadowCasterFade.x;
         if (shadowOnly && draw.gpuLod >= 0 && draw.mesh->instanceLodBand<0)
         {

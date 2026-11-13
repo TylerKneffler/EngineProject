@@ -576,6 +576,7 @@ void PerformanceView::SetFrameTimings(const EditorFrameProfileSample& sample,
                     { "Other opaque", timing.gpuMilliseconds[static_cast<size_t>(Stage::Opaque)] },
                     { "Tree bark", timing.gpuMilliseconds[static_cast<size_t>(Stage::TreeBark)] },
                     { "Tree leaves/cards", timing.gpuMilliseconds[static_cast<size_t>(Stage::TreeLeaves)] },
+                    { "Foliage coverage depth", timing.gpuMilliseconds[static_cast<size_t>(Stage::FoliageDepth)] },
                     { "Transparent", timing.gpuMilliseconds[static_cast<size_t>(Stage::Transparent)] }
                 };
             }

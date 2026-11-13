@@ -4342,6 +4342,11 @@
             "directory": false
         },
         {
+            "id": "file:a8e05ef1:430000:f5375",
+            "path": "Prefabs/Terrain/OakMeadowStreamCell.prefab",
+            "directory": false
+        },
+        {
             "id": "asset:ed239960-30a6-4df1-b8f4-baccbd1294a3",
             "path": "Models/Woodland/Oaks/Meshes/Small_oak_tree_001_LOD0 43_2.mesh",
             "directory": false
@@ -5019,6 +5024,11 @@
         {
             "id": "file:a8e05ef1:120000:25711d",
             "path": "Prefabs/Woodland/Oaks/Large_oak_tree_004_Impostor.prefab",
+            "directory": false
+        },
+        {
+            "id": "file:a8e05ef1:70000:368508",
+            "path": "Scenes/terrain/oak_meadow_expanded.scene",
             "directory": false
         },
         {

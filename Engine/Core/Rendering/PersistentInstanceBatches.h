@@ -12,6 +12,19 @@ struct InstanceTileRecord
     glm::vec4 origin{0}; glm::uvec4 reserved{0}; glm::vec4 lod{0};
 };
 static_assert(sizeof(InstanceTileRecord)==144);
+inline void AppendInstanceCullChunks(std::vector<InstanceTileRecord>& records,
+    const InstanceTileRecord& tile)
+{
+    constexpr uint32_t placementsPerGroup = 256;
+    for (uint32_t offset = 0; offset < tile.range.y;)
+    {
+        auto chunk = tile;
+        chunk.range.x += offset;
+        chunk.range.y = std::min(placementsPerGroup, tile.range.y - offset);
+        records.push_back(chunk);
+        offset += chunk.range.y;
+    }
+}
 struct VisibleInstanceRecord { glm::uvec4 rows[3]{}; };
 
 class PersistentInstanceBatches
@@ -141,7 +154,10 @@ public:
         if (!context || !batch.gpu || !batch.output || !batch.visibilityReadback ||
             batch.visibilityReadbackPending)
             return false;
-        if (!context->CopyBuffer(batch.output.get(), batch.visibilityReadback.get(), 24))
+        // The counters occupy the first structured record. Copy the complete
+        // element so backends requiring structure-aligned regions can read it.
+        if (!context->CopyBuffer(batch.output.get(), batch.visibilityReadback.get(),
+            sizeof(VisibleInstanceRecord)))
             return false;
         batch.readbackLod=lod;
         batch.readbackShadow=shadow;

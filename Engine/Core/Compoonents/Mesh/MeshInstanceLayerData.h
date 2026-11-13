@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <map>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -16,6 +17,25 @@ class MeshInstanceLayerData
 {
 public:
     using Batch = MeshInstanceBatchBuilder::Result;
+
+    // Preserve spatial ordering and placement identity, while decoupling CPU
+    // render-object count from the authored tile grid. Never mutates sources.
+    template<class Key, class Placement>
+    static std::vector<std::vector<const Placement*>> PackPlacementBlocks(
+        const std::map<Key, std::vector<const Placement*>>& tiles,
+        size_t maximumPlacements = 4096)
+    {
+        if (!maximumPlacements) throw std::invalid_argument("Empty instance block capacity");
+        std::vector<std::vector<const Placement*>> blocks;
+        for (const auto& [key, placements] : tiles)
+            for (const auto* placement : placements)
+            {
+                if (blocks.empty() || blocks.back().size() == maximumPlacements)
+                    blocks.emplace_back();
+                blocks.back().push_back(placement);
+            }
+        return blocks;
+    }
 
     void Reserve(size_t placementCount)
     {

@@ -6,6 +6,7 @@
 #include "Core/Serialization/PreparedPrefab.h"
 #include "Core/Rendering/RenderJobs.h"
 #include "Core/Rendering/SharedMeshBuffers.h"
+#include "Core/Rendering/IndexedMeshPreparation.h"
 #include "Core/Compoonents/Materials/Material.h"
 #include "Core/Compoonents/Mesh/MeshInstanceLayerData.h"
 #include "Core/Compoonents/Mesh/MeshInstanceSourceSet.h"
@@ -14,6 +15,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <limits>
 #include <cmath>
@@ -39,6 +41,7 @@ struct SharedPrefabPrototype
         std::shared_ptr<Mesh> mesh;
         Engine::Rendering::PreparedMeshBuffer buffer;
         std::shared_ptr<Engine::Graphics::IGraphicsBuffer> graphicsBuffer;
+        Engine::Rendering::PreparedMeshBuffer indexBuffer;
     };
     Engine::Scene::Scene scene;
     Engine::Core::Object* root = nullptr;
@@ -394,7 +397,11 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
             : m_prefabInstances->sources.upper_bound(m_prefabInstances->sourceProbeCursor);
         if (next!=m_prefabInstances->sources.end())
         {
-            auto current=readSource(next->first);
+            // The shared worker scan above already resolved these paths. Do
+            // not repeat synchronous filesystem resolution on the scene owner.
+            const auto resolvedSource = sources.find(next->first);
+            auto current = resolvedSource != sources.end()
+                ? resolvedSource->second : readSource(next->first);
             same=current==next->second;
             m_prefabInstances->sourceProbeResults.emplace(next->first,current);
             m_prefabInstances->sourceProbeCursor=next->first;
@@ -695,14 +702,8 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
                     auto future = Engine::Rendering::RenderJobs::Get().Submit(
                         [vertices = std::move(vertices), indices = std::move(indices), part,
                             bufferFactory, createBufferOnWorker]() mutable {
-                            if (!indices.empty())
-                            {
-                                std::vector<Mesh::Vertex> expanded;
-                                expanded.reserve(indices.size());
-                                for (auto index : indices) expanded.push_back(vertices.at(index));
-                                vertices = std::move(expanded);
-                            }
                             if (vertices.empty()) return SharedPrefabPrototype::PreparedGeometry{};
+                            Engine::Rendering::IndexTriangleList(vertices, indices);
                             const auto tangentMatrix = glm::mat3(part);
                             const auto normalMatrix = glm::transpose(glm::inverse(tangentMatrix));
                             for (auto& vertex : vertices)
@@ -716,10 +717,17 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
                                 { vertex.pos[axis] = position[axis]; vertex.normal[axis] = normal[axis]; vertex.tangent[axis] = tangent[axis]; }
                             }
                             auto source = std::make_shared<Mesh>();
-                            if (!source->SetAuthoredVertices(std::move(vertices)))
+                            const bool valid = indices.empty()
+                                ? source->SetAuthoredVertices(std::move(vertices))
+                                : source->SetIndexedGeometry(std::move(vertices), std::move(indices));
+                            if (!valid)
                                 throw std::runtime_error("Invalid shared prefab geometry");
                             auto buffer = Engine::Rendering::PrepareMeshBuffer(source->GetVertices().data(),
                                 source->GetVertices().size() * sizeof(Mesh::Vertex));
+                            Engine::Rendering::PreparedMeshBuffer indexBuffer;
+                            if (source->GetIndexCount())
+                                indexBuffer = Engine::Rendering::PrepareMeshBuffer(source->GetIndices().data(),
+                                    source->GetIndices().size() * sizeof(uint32_t));
                             std::shared_ptr<Engine::Graphics::IGraphicsBuffer> graphicsBuffer;
                             if (createBufferOnWorker)
                                 graphicsBuffer = Engine::Rendering::AcquireMeshBuffer(bufferFactory,
@@ -728,7 +736,7 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
                                     source->GetVertices().size() * sizeof(Mesh::Vertex),
                                     sizeof(Mesh::Vertex), &buffer);
                             return SharedPrefabPrototype::PreparedGeometry{
-                                std::move(source), std::move(buffer), std::move(graphicsBuffer)};
+                                std::move(source), std::move(buffer), std::move(graphicsBuffer), std::move(indexBuffer)};
                         });
                     prototype->pendingGeometry.emplace(geometryKey, std::move(future));
                     if (createBufferOnWorker) *uploadAvailable = false;
@@ -743,14 +751,14 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
                     prototype->pendingGeometry.erase(pendingGeometry);
                     if (prepared.mesh)
                     {
+                        ScopedMilliseconds bufferTimer{m_lastPrefabPrepareTimings.mainBufferCreateMs};
+                        if (uploadAvailable) *uploadAvailable = false;
                         if (prepared.graphicsBuffer)
                             prepared.mesh->InstallPreparedStaticVertexBuffer(
-                                std::move(prepared.graphicsBuffer), provider->GetBufferFactory());
+                                std::move(prepared.graphicsBuffer), provider->GetBufferFactory(), &prepared.indexBuffer);
                         else
                         {
-                            if (uploadAvailable) *uploadAvailable = false;
-                            ScopedMilliseconds bufferTimer{m_lastPrefabPrepareTimings.mainBufferCreateMs};
-                            prepared.mesh->CreateBuffer(provider->GetBufferFactory(), &prepared.buffer);
+                            prepared.mesh->CreateBuffer(provider->GetBufferFactory(), &prepared.buffer, &prepared.indexBuffer);
                         }
                     }
                     prototype->sources.SetRepresentations(sourceKey,
@@ -770,9 +778,9 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
         const auto placementMatrix=[this](const Placement& placement) {
             return PlacementTransform(placement);
         };
-        // CPU objects provide coarse spatial bounds; the compute path still
-        // selects visibility and LOD for each placement. Small 64 m groups
-        // multiplied every prefab part/band into thousands of CPU components.
+        // CPU records represent shared prefab parts. Spatial placement ordering
+        // remains useful to GPU culling without multiplying every tile by each
+        // mesh part, material and LOD in the object/component hierarchy.
         auto& tileInstances = runtime->tileLayers;
         // Resuming another mesh part already owns these placement transforms.
         // Rebuilding and discarding them on every budgeted call made dense
@@ -784,6 +792,21 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
             for (const auto* placement:records)
                 tiles[{int(std::floor(placement->position.x/prefabGroupSpan)),
                     int(std::floor(placement->position.z/prefabGroupSpan))}].push_back(placement);
+            static const bool renderBlocks = [] {
+                const char* value = std::getenv("ENGINE_PREFAB_RENDER_BLOCKS");
+                return !value || value[0] != '0';
+            }();
+            if (renderBlocks)
+            {
+                // Bounded blocks share placements across all parts/bands. A
+                // streamed layer remains an independent residency/edit unit;
+                // no placement is removed or moved into another layer.
+                std::map<std::pair<int,int>,std::vector<const Placement*>> blocks;
+                auto packed = MeshInstanceLayerData::PackPlacementBlocks(tiles);
+                for (size_t block = 0; block < packed.size(); ++block)
+                    blocks.emplace(std::make_pair(int(block), 0), std::move(packed[block]));
+                tiles = std::move(blocks);
+            }
             std::map<std::pair<int,int>,MeshInstanceLayerData> tileLayers;
             for (const auto& [tile,tileRecords]:tiles)
             {
@@ -837,7 +860,7 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
                     { moreParts = true; return; }
                     processedPart = true;
                     runtime->nextPart = partIndex;
-                    // Expand indexed geometry once per shared prefab part, never per placement.
+                    // Share indexed geometry across placements, tiles and streamed cells.
                     auto& prototype = definitions.at(meshes[lod]);
                     const auto geometryKey = SharedPrefabPrototype::GeometryKey{
                         original, provider};
@@ -903,7 +926,9 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
                             mesh->instanceLodBand=int(lod);
                             mesh->instanceLodDistances={lodDistances[0],lodDistances.size()>1 ? lodDistances[1]:1.e20f};
                         }
-                        mesh->SetInstancedGeometry(source,instances,{{0,source->GetVertexCount(),0,
+                        const auto elementCount = source->GetIndexCount()
+                            ? source->GetIndexCount() : source->GetVertexCount();
+                        mesh->SetInstancedGeometry(source,instances,{{0,elementCount,0,
                             static_cast<uint32_t>(layerData.Size())}},batch.minimum,batch.maximum);
                         if (const auto* material=original->Owner->GetComponent<Material>())
                         {

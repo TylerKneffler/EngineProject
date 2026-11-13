@@ -20,6 +20,7 @@ enum class GpuTimingStage : uint32_t
     Transparent,
     TreeBark,
     TreeLeaves,
+    FoliageDepth,
     Count
 };
 
@@ -44,14 +45,15 @@ struct FrameTimingTelemetry
     {
         return gpuMilliseconds[static_cast<size_t>(GpuTimingStage::Opaque)] +
             gpuMilliseconds[static_cast<size_t>(GpuTimingStage::TreeBark)] +
-            gpuMilliseconds[static_cast<size_t>(GpuTimingStage::TreeLeaves)];
+            gpuMilliseconds[static_cast<size_t>(GpuTimingStage::TreeLeaves)] +
+            gpuMilliseconds[static_cast<size_t>(GpuTimingStage::FoliageDepth)];
     }
     template<class Stream> void WriteOpaqueJson(Stream& output) const
     {
         output << ",\"gpu_workload_valid\":" << (gpuWorkloadValid ? "true" : "false");
-        const char* names[] = {"opaque_other", "tree_bark", "tree_leaves"};
-        const GpuTimingStage stages[] = {GpuTimingStage::Opaque, GpuTimingStage::TreeBark, GpuTimingStage::TreeLeaves};
-        for (size_t i = 0; i < 3; ++i)
+        const char* names[] = {"opaque_other", "tree_bark", "tree_leaves", "foliage_depth"};
+        const GpuTimingStage stages[] = {GpuTimingStage::Opaque, GpuTimingStage::TreeBark, GpuTimingStage::TreeLeaves, GpuTimingStage::FoliageDepth};
+        for (size_t i = 0; i < 4; ++i)
         {
             const auto index = static_cast<size_t>(stages[i]);
             output << ",\"gpu_" << names[i] << "_ms\":" << gpuMilliseconds[index];

@@ -1,0 +1,115 @@
+<?xml version='1.0' encoding='utf-8'?>
+<Scene xmlns:components="urn:engine-components" version="1">
+  <settings textureLodEnabled="true" textureLodNearDistance="12" textureLodFarDistance="48" textureLodMipBias="4" textureLodSimplifyShading="false" dimension="0" showGrid="false" gridHalfSize="10" gridCellSize="1" gridOpacity="0.40000000596046448" gridFadeDistance="80" skyboxEnabled="true" skyboxTexture="Assets/Textures/Skyboxes/editor-default-sky.png" hdriLightingEnabled="true" hdriIntensity=".55" hdriExposure="0" hdriRotation="0" toneMapping="1" outputExposure="-.2" renderMode="0" sceneViewUiOverlay="false" portalDebugVisuals="false" sceneCameraWarpLookThrough="false" portalDebugWireframe="false" portalDebugTintRemoteView="true" portalDebugOverlayAlpha="0.44999998807907104" portalRecursionDepth="2" portalConnectionRepeatLimit="2" portalMaxViewsPerFrame="24">
+    <gridColor _arrayEncoding="spaceSeparatedNumbers">0.44999998807907104 0.44999998807907104 0.44999998807907104</gridColor>
+    <gridOriginColor _arrayEncoding="spaceSeparatedNumbers">0.30000001192092896 0.5 0.80000001192092896</gridOriginColor>
+    <ambientColor>
+      <item>0.1</item>
+      <item>0.13</item>
+      <item>0.15</item>
+    </ambientColor>
+  </settings>
+  <objects>
+    <item name="Meadow Explorer" enabled="true">
+      <components>
+        <components:Camera Camera.active="true" Camera.useTransformRotation="false" Camera.fov="67" Camera.near="0.059999998658895493" Camera.far="220" Camera.orthographic="false" Camera.orthographicSize="5">
+          <Camera.up _arrayEncoding="spaceSeparatedNumbers">0 1 0</Camera.up>
+          <Camera.target>
+            <item>2.155052</item>
+            <item>1.35</item>
+            <item>5</item>
+          </Camera.target>
+        </components:Camera>
+        <components:FirstPersonController FirstPersonController.moveSpeed="3.5" FirstPersonController.sprintMultiplier="1.7000000476837158" FirstPersonController.lookSensitivity="0.0024999999441206455" FirstPersonController.invertY="false" FirstPersonController.lockCursor="true" />
+        <components:PrimitiveObjectCollider PrimitiveObjectCollider.collisionEnabled="true" PrimitiveObjectCollider.shape="Capsule" PrimitiveObjectCollider.radius="0.34999999403953552" PrimitiveObjectCollider.height="1.7999999523162842" PrimitiveObjectCollider.alignToBoneChild="false" PrimitiveObjectCollider.fitToSkinnedMesh="false" PrimitiveObjectCollider.childBone="">
+          <PrimitiveObjectCollider.center _arrayEncoding="spaceSeparatedNumbers">0 0 0</PrimitiveObjectCollider.center>
+          <PrimitiveObjectCollider.size _arrayEncoding="spaceSeparatedNumbers">1 1 1</PrimitiveObjectCollider.size>
+        </components:PrimitiveObjectCollider>
+        <components:RigidBody RigidBody.bodyType="Dynamic" RigidBody.mass="75" RigidBody.useGravity="true" RigidBody.gravityScale="1" RigidBody.linearDamping="0.05000000074505806" RigidBody.angularDamping="0.05000000074505806" RigidBody.friction="0.80000001192092896" RigidBody.restitution="0" RigidBody.isTrigger="false" RigidBody.continuousCollision="true" RigidBody.freezePositionX="false" RigidBody.freezePositionY="false" RigidBody.freezePositionZ="false" RigidBody.freezeRotationX="true" RigidBody.freezeRotationY="true" RigidBody.freezeRotationZ="true" RigidBody.collisionLayer="1" RigidBody.collisionMask="-1" RigidBody.collisionIdentifier="">
+          <RigidBody.gravityDirection _arrayEncoding="spaceSeparatedNumbers">0 -1 0</RigidBody.gravityDirection>
+          <RigidBody.initialLinearVelocity _arrayEncoding="spaceSeparatedNumbers">0 0 0</RigidBody.initialLinearVelocity>
+          <RigidBody.initialAngularVelocity _arrayEncoding="spaceSeparatedNumbers">0 0 0</RigidBody.initialAngularVelocity>
+          <RigidBody.frictionBehaviors />
+        </components:RigidBody>
+      </components>
+      <children />
+      <transform>
+        <Transform.position>
+          <item>-0.2268898</item>
+          <item>1.087865</item>
+          <item>-26</item>
+        </Transform.position>
+        <Transform.rotation>
+          <item>0</item>
+          <item>0</item>
+          <item>0</item>
+        </Transform.rotation>
+        <Transform.scale>
+          <item>1</item>
+          <item>1</item>
+          <item>1</item>
+        </Transform.scale>
+      </transform>
+    </item>
+    <item name="Late afternoon sun" enabled="true">
+      <components>
+        <components:Light Light.lightType="1" Light.intensity="3.2" Light.range="8" Light.falloff="2" Light.intensityMode="0" Light.innerConeAngle="25" Light.outerConeAngle="35" Light.lightingChannels="-1" Light.cookieTexture="" Light.iesProfileTexture="" Light.cookieScale="1" Light.baked="false" Light.castsShadows="true" Light.shadowStrength="1" Light.shadowDepthBias="0.00050000002374872565" Light.shadowNormalBias="0.0020000000949949026" Light.shadowResolutionScale="1" Light.shadowFilterScale="1">
+          <Light.color>
+            <item>1</item>
+            <item>0.91</item>
+            <item>0.77</item>
+          </Light.color>
+        </components:Light>
+      </components>
+      <children />
+      <transform>
+        <Transform.position>
+          <item>0</item>
+          <item>20</item>
+          <item>-10</item>
+        </Transform.position>
+        <Transform.rotation>
+          <item>0.7</item>
+          <item>2.4</item>
+          <item>0</item>
+        </Transform.rotation>
+        <Transform.scale>
+          <item>1</item>
+          <item>1</item>
+          <item>1</item>
+        </Transform.scale>
+      </transform>
+    </item>
+    <item name="Large oak meadow - 1.8 km streamed grid" enabled="true">
+      <transform>
+        <Transform.position>
+          <item>-180</item>
+          <item>0</item>
+          <item>-180</item>
+        </Transform.position>
+        <Transform.rotation>
+          <item>0</item>
+          <item>0</item>
+          <item>0</item>
+        </Transform.rotation>
+        <Transform.scale>
+          <item>1</item>
+          <item>1</item>
+          <item>1</item>
+        </Transform.scale>
+      </transform>
+      <components>
+        <components:TerrainManager TerrainManager.cellsX="60" TerrainManager.cellsY="60" TerrainManager.cellWidth="6.0" TerrainManager.cellDepth="6.0" TerrainManager.viewerObjectName="Meadow Explorer" TerrainManager.generateColliders="true" TerrainManager.streamCollidersByDistance="true" TerrainManager.manageAuthoredCellColliders="true" TerrainManager.colliderActivationDistance="8" TerrainManager.streamedPrefabPath="Assets/Prefabs/Terrain/OakMeadowStreamCell.prefab" TerrainManager.reuseStreamedPrefabCells="true" TerrainManager.streamedPrefabCellName="Oak meadow cell" TerrainManager.streamedPrefabHalfExtent="2" TerrainManager.streamedPrefabRadius="1" TerrainManager.maxLoadsPerUpdate="1" />
+      </components>
+      <children>
+        <item prefab="Assets/Prefabs/Terrain/OakMeadowStreamCell.prefab" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+        </item>
+      </children>
+    </item>
+  </objects>
+</Scene>
