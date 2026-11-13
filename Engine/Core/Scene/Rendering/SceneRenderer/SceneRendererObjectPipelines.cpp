@@ -51,6 +51,11 @@ void SceneRendererObjectPipelines::BuildObjectPipeline(Scene& scene)
     if (!shadowPsShader)
         throw std::runtime_error("Failed to compile shadow pixel shader: " +
             shaderCompiler->GetLastError());
+    auto equalPsShader = shaderCompiler->CompileFromFile(shaderPath.c_str(),
+        "PSDepthEqualMain", Engine::Graphics::IShaderCompiler::CompileProfile::PS_5_0);
+    if (!equalPsShader)
+        throw std::runtime_error("Failed to compile depth-equal pixel shader: " +
+            shaderCompiler->GetLastError());
 
     Engine::Graphics::IPipelineStateBuilder::VertexElement layout[] =
     {
@@ -109,8 +114,8 @@ void SceneRendererObjectPipelines::BuildObjectPipeline(Scene& scene)
                                          bool overlay,
                                          const std::string& blendMode)
     {
-        const bool diagnosticDepthEqual = blendMode == "DiagnosticDepthEqual";
-        if (blendMode == "Opaque" || diagnosticDepthEqual) blend = false;
+        const bool depthEqual = blendMode == "DepthEqual" || blendMode == "DiagnosticDepthEqual";
+        if (blendMode == "Opaque" || depthEqual) blend = false;
         else if (blendMode == "Alpha" || blendMode == "Additive" || overlay) blend = true;
         auto materialBuilder = pipelineFactory->CreateBuilder();
         if (!materialBuilder)
@@ -176,13 +181,13 @@ void SceneRendererObjectPipelines::BuildObjectPipeline(Scene& scene)
 
         auto pipeline = state.SetDepthEnable(true)
             .SetDepthWriteEnable(
-                diagnosticDepthEqual ? false :
+                depthEqual ? false :
                 stencilMode == PortalStencilMode::ResetDepth ? true :
                 stencilMode == PortalStencilMode::Write ||
                 stencilMode == PortalStencilMode::Increment
                     ? false : (!overlay && !blend))
             .SetDepthFunc(
-                diagnosticDepthEqual ? 2 :
+                depthEqual ? 2 :
                 stencilMode == PortalStencilMode::ResetDepth ? 7 :
                 stencilMode == PortalStencilMode::Write ||
                 stencilMode == PortalStencilMode::Increment
@@ -254,6 +259,16 @@ void SceneRendererObjectPipelines::BuildObjectPipeline(Scene& scene)
     scene.m_objectBlendPipeline =
         buildMaterialPipeline(false, true, false, PortalStencilMode::None,
             true, "blended material");
+    for (size_t sided = 0; sided < 2; ++sided)
+    {
+        scene.m_foliageDepthPipelines[sided] = buildConfiguredMaterialPipeline(
+            vsShader.get(), shadowPsShader.get(), sided != 0, false, false,
+            PortalStencilMode::None, false, "foliage coverage depth", false, false, "Auto");
+        scene.m_foliageEqualPipelines[sided] = buildConfiguredMaterialPipeline(
+            vsShader.get(), equalPsShader.get(), sided != 0, false, false,
+            PortalStencilMode::None, true, "foliage visible-surface lighting", false, false,
+            "DepthEqual");
+    }
     scene.m_objectBlendDoubleSidedPipeline =
         buildMaterialPipeline(true, true, false, PortalStencilMode::None,
             true,

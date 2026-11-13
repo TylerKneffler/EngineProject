@@ -194,6 +194,8 @@ namespace Engine::Editor
             << ",\"prepare_prefab_source_lookup_ms\":" << prepareTimings.prefabSourceLookupMs
             << ",\"prepare_prefab_build_ms\":" << prepareTimings.prefabBuildMs
             << ",\"prepare_prefab_main_buffer_create_ms\":" << prepareTimings.prefabMainBufferCreateMs
+            << ",\"prepare_prefab_budget_overrun_ms\":" << prepareTimings.prefabBudgetOverrunMs
+            << ",\"prepare_prefab_max_layer_ms\":" << prepareTimings.prefabMaxLayerMs
             << ",\"prepare_graphics_preparation_ms\":" << prepareTimings.graphicsPreparationMs
             << ",\"prepare_native_buffers_ms\":" << prepareTimings.nativeBuffersMs
             << ",\"prepare_transforms_ms\":" << prepareTimings.transformsMs
@@ -563,6 +565,7 @@ namespace Engine::Editor
                 << ",\"render_submission_ms\":" << cpu.submissionMs
                 << ",\"candidate_draws\":" << cpu.candidateDraws
                 << ",\"physical_draws\":" << cpu.physicalDraws
+                << ",\"foliage_depth_draws\":" << cpu.foliageDepthDraws
                 << ",\"submitted_instances\":" << cpu.submittedInstances
                 << ",\"submitted_triangles\":" << cpu.submittedTriangles
                 << ",\"visibility_views\":" << visibility.views

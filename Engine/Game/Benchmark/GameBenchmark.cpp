@@ -15,6 +15,7 @@
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
+#include <unordered_set>
 
 namespace Engine::Game
 {
@@ -98,6 +99,8 @@ GameBenchmarkSceneSample GameBenchmark::CollectScene(Engine::Scene::Scene& scene
 {
     GameBenchmarkSceneSample result;
     result.render = scene.GetLastRenderCpuTimings();
+    result.shadow = scene.GetLastShadowCpuTiming();
+    result.preparation = scene.GetLastPrepareTimings();
     result.sceneGeneration = scene.CaptureSceneGeneration();
     const auto* camera = scene.FindGameCamera();
     result.camera = camera && camera->Owner;
@@ -113,11 +116,25 @@ GameBenchmarkSceneSample GameBenchmark::CollectScene(Engine::Scene::Scene& scene
     result.meshes = scene.GetComponents<Engine::Components::Mesh>().size();
     result.terrains = scene.GetComponents<Engine::Components::Terrain>().size();
     for (auto* layer : scene.GetComponents<Engine::Components::TerrainObjectLayer>())
+    {
         result.placements += layer->placements.size();
+        result.pendingPrefabLayers += layer->IsPrefabPreparationPending() ? 1 : 0;
+    }
+    std::unordered_set<const Engine::Components::Mesh*> sources;
+    for (auto* mesh : scene.GetComponents<Engine::Components::Mesh>())
+        if (const auto* source = mesh->GetInstanceSource(); source && sources.insert(source).second)
+        {
+            result.sharedPrefabVertices += source->GetVertexCount();
+            result.sharedPrefabIndices += source->GetIndexCount();
+            result.sharedPrefabGeometryBytes += uint64_t(source->GetVertexCount()) * source->GetVertexStride()
+                + uint64_t(source->GetIndexCount()) * sizeof(uint32_t);
+        }
     for (auto* manager : scene.GetComponents<Engine::Components::TerrainManager>())
     {
-        result.storedCells += manager->GetCellCount();
-        result.loadedCells += manager->GetLoadedCellCount();
+        result.storedCells += manager->GetCellCount() + manager->GetStreamedPrefabCellCount();
+        result.loadedCells += manager->GetLoadedCellCount() + manager->GetLoadedPrefabCellCount();
+        result.loadedPrefabCells += manager->GetLoadedPrefabCellCount();
+        result.pooledPrefabCells += manager->GetPooledPrefabCellCount();
         result.preparingCells += manager->GetPreparingCellCount();
     }
     return result;
@@ -126,6 +143,7 @@ GameBenchmarkSceneSample GameBenchmark::CollectScene(Engine::Scene::Scene& scene
 void GameBenchmark::Record(uint64_t frame, const GameBenchmarkFrameSample& s)
 {
     const auto& r = s.scene.render;
+    const auto& p = s.scene.preparation;
     m_intervals.push_back(s.intervalMs);
     m_cameraSeen |= s.scene.camera;
     if (s.scene.camera)
@@ -160,7 +178,27 @@ void GameBenchmark::Record(uint64_t frame, const GameBenchmarkFrameSample& s)
         << ",\"frame_interval_ms\":" << s.intervalMs
         << ",\"simulation_update_ms\":" << s.updateMs
         << ",\"scene_prepare_ms\":" << s.prepareMs
+        << ",\"prepare_assets_ms\":" << p.assetPublicationMs
+        << ",\"prepare_commit_ms\":" << p.objectCommitMs
+        << ",\"prepare_prefabs_ms\":" << p.prefabInstancesMs
+        << ",\"prepare_graphics_ms\":" << p.graphicsPreparationMs
+        << ",\"prepare_transforms_ms\":" << p.transformsMs
+        << ",\"prepare_items_ms\":" << p.itemsMs
+        << ",\"prepare_material_validation_ms\":" << p.itemValidationMs
+        << ",\"prepare_material_textures_ms\":" << p.itemTexturesMs
+        << ",\"prepare_material_shaders_ms\":" << p.itemShadersMs
+        << ",\"prepare_spatial_ms\":" << p.spatialMs
+        << ",\"prepare_instances_reused\":" << p.instancedRenderItemsReused
+        << ",\"prepare_instances_updated\":" << p.instancedRenderItemsUpdated
+        << ",\"prefab_layers_pending\":" << s.scene.pendingPrefabLayers
+        << ",\"shared_instance_vertices\":" << s.scene.sharedPrefabVertices
+        << ",\"shared_instance_indices\":" << s.scene.sharedPrefabIndices
+        << ",\"shared_instance_geometry_bytes\":" << s.scene.sharedPrefabGeometryBytes
         << ",\"command_record_ms\":" << s.recordMs
+        << ",\"packet_prepare_ms\":" << s.packetPrepareMs
+        << ",\"shadow_record_ms\":" << s.shadowRecordMs
+        << ",\"camera_record_ms\":" << s.cameraRecordMs
+        << ",\"resource_retain_ms\":" << s.resourceRetainMs
         << ",\"update_handoff_wait_ms\":" << s.updateWaitMs
         << ",\"prepare_handoff_wait_ms\":" << s.prepareWaitMs
         << ",\"scene_replay_ms\":" << s.replayMs
@@ -183,6 +221,7 @@ void GameBenchmark::Record(uint64_t frame, const GameBenchmarkFrameSample& s)
     gpuStage("terrain", Engine::Graphics::GpuTimingStage::Terrain);
     gpuStage("grass", Engine::Graphics::GpuTimingStage::Grass);
     gpuStage("transparent", Engine::Graphics::GpuTimingStage::Transparent);
+    s.gpu.WriteOpaqueJson(m_log);
     m_log << ",\"scene_objects_loaded\":" << s.scene.objects
         << ",\"scene_generation\":" << s.scene.sceneGeneration
         << ",\"mesh_components\":" << s.scene.meshes
@@ -190,12 +229,15 @@ void GameBenchmark::Record(uint64_t frame, const GameBenchmarkFrameSample& s)
         << ",\"authored_foliage_placements\":" << s.scene.placements
         << ",\"terrain_cells_stored\":" << s.scene.storedCells
         << ",\"terrain_cells_loaded\":" << s.scene.loadedCells
+        << ",\"terrain_prefab_cells_loaded\":" << s.scene.loadedPrefabCells
+        << ",\"terrain_prefab_cells_pooled\":" << s.scene.pooledPrefabCells
         << ",\"terrain_cells_preparing\":" << s.scene.preparingCells
         << ",\"game_camera_present\":" << (s.scene.camera ? "true" : "false")
         << ",\"game_camera_position\":[" << s.scene.cameraPosition[0] << ','
         << s.scene.cameraPosition[1] << ',' << s.scene.cameraPosition[2] << ']'
         << ",\"draws_candidate\":" << r.candidateDraws
         << ",\"draws_submitted\":" << r.physicalDraws
+        << ",\"foliage_depth_draws\":" << r.foliageDepthDraws
         << ",\"triangles_candidate\":" << r.candidateTriangles
         << ",\"triangles_submitted\":" << r.submittedTriangles
         << ",\"instances_submitted\":" << r.submittedInstances
@@ -204,7 +246,30 @@ void GameBenchmark::Record(uint64_t frame, const GameBenchmarkFrameSample& s)
         << ",\"foliage_screen_selected_lod0\":" << r.cameraVisibility.screenSelectedInstancesByLod[0]
         << ",\"foliage_screen_selected_lod1\":" << r.cameraVisibility.screenSelectedInstancesByLod[1]
         << ",\"foliage_screen_selected_lod2\":" << r.cameraVisibility.screenSelectedInstancesByLod[2]
+        << ",\"foliage_gpu_readback_samples\":" << r.cameraVisibility.gpuReadbackSamples
+        << ",\"foliage_gpu_selected_lod0\":" << r.cameraVisibility.gpuSelectedInstancesByLod[0]
+        << ",\"foliage_gpu_selected_lod1\":" << r.cameraVisibility.gpuSelectedInstancesByLod[1]
+        << ",\"foliage_gpu_selected_lod2\":" << r.cameraVisibility.gpuSelectedInstancesByLod[2]
+        << ",\"foliage_gpu_transition_lod0\":" << r.cameraVisibility.gpuTransitionBandInstancesByLod[0]
+        << ",\"foliage_gpu_transition_lod1\":" << r.cameraVisibility.gpuTransitionBandInstancesByLod[1]
+        << ",\"foliage_gpu_transition_lod2\":" << r.cameraVisibility.gpuTransitionBandInstancesByLod[2]
         << ",\"render_cpu_ms\":" << r.totalMs
+        << ",\"render_startup_ms\":" << r.startupMs
+        << ",\"render_terrain_prepare_ms\":" << r.terrainPreparationMs
+        << ",\"render_culling_ms\":" << r.cullingMs
+        << ",\"render_sorting_ms\":" << r.sortingMs
+        << ",\"render_occlusion_ms\":" << r.occlusionMs
+        << ",\"render_upload_ms\":" << r.uploadMs
+        << ",\"render_submission_ms\":" << r.submissionMs
+        << ",\"render_other_ms\":" << r.otherMs
+        << ",\"render_record_packing_ms\":" << r.recordPackingMs
+        << ",\"render_record_wait_ms\":" << r.recordWaitMs
+        << ",\"render_instance_tile_prepare_ms\":" << r.instanceTilePrepareMs
+        << ",\"shadow_cpu_ms\":" << s.scene.shadow.totalMs
+        << ",\"shadow_scene_prepare_ms\":" << s.scene.shadow.scenePreparationMs
+        << ",\"shadow_culling_ms\":" << s.scene.shadow.cascadeCullingMs
+        << ",\"shadow_upload_ms\":" << s.scene.shadow.recordUploadMs
+        << ",\"shadow_submission_ms\":" << s.scene.shadow.drawSubmissionMs
         << ",\"render_cluster_prepare_ms\":" << r.clusterPreparationMs
         << ",\"render_cluster_cache_hits\":" << r.clusterCacheHits
         << ",\"render_cluster_upload_bytes\":" << r.clusterUploadBytes

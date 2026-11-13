@@ -121,7 +121,8 @@ void Mesh::MakeGeometryWritable()
 }
 
 void Mesh::CreateBuffer(IGraphicsBufferFactory* bufferFactory,
-    Engine::Rendering::PreparedMeshBuffer* prepared)
+    Engine::Rendering::PreparedMeshBuffer* prepared,
+    Engine::Rendering::PreparedMeshBuffer* preparedIndices)
 {
     if (!bufferFactory || (m_vertices.empty() && m_terrainVertices.empty()))
         return;
@@ -137,7 +138,7 @@ void Mesh::CreateBuffer(IGraphicsBufferFactory* bufferFactory,
             IGraphicsBuffer::Usage::VertexBuffer, m_terrainVertices.data(), vertexBytes, sizeof(TerrainVertex)));
         m_sharedVertexBuffer = true;
         ReplaceIndexBuffer(Engine::Rendering::AcquireMeshBuffer(bufferFactory,
-            IGraphicsBuffer::Usage::IndexBuffer, m_indices.data(), indexBytes, sizeof(uint32_t)));
+            IGraphicsBuffer::Usage::IndexBuffer, m_indices.data(), indexBytes, sizeof(uint32_t), preparedIndices));
         m_sharedIndexBuffer = true;
         if (!m_vertexBuffer || !m_indexBuffer)
             throw std::runtime_error("Failed to create indexed terrain buffers");
@@ -159,7 +160,7 @@ void Mesh::CreateBuffer(IGraphicsBufferFactory* bufferFactory,
         const uint64_t indexBytes = static_cast<uint64_t>(m_indices.size()) *
             sizeof(uint32_t);
         ReplaceIndexBuffer(Engine::Rendering::AcquireMeshBuffer(bufferFactory,
-            IGraphicsBuffer::Usage::IndexBuffer, m_indices.data(), indexBytes, sizeof(uint32_t)));
+            IGraphicsBuffer::Usage::IndexBuffer, m_indices.data(), indexBytes, sizeof(uint32_t), preparedIndices));
         m_sharedIndexBuffer = true;
         if (!m_indexBuffer)
             throw std::runtime_error("Failed to create mesh index buffer");
@@ -169,12 +170,25 @@ void Mesh::CreateBuffer(IGraphicsBufferFactory* bufferFactory,
 }
 
 void Mesh::InstallPreparedStaticVertexBuffer(
-    std::shared_ptr<IGraphicsBuffer> buffer, IGraphicsBufferFactory* bufferFactory)
+    std::shared_ptr<IGraphicsBuffer> buffer, IGraphicsBufferFactory* bufferFactory,
+    Engine::Rendering::PreparedMeshBuffer* preparedIndices)
 {
-    if (!buffer || m_vertices.empty()) return;
+    if (!buffer || !bufferFactory || m_vertices.empty()) return;
+    // Only vertex uploads are guaranteed worker-safe by the factory. Publish
+    // the matching index buffer on the owner before making the mesh ready.
+    std::shared_ptr<IGraphicsBuffer> indices;
+    if (!m_indices.empty())
+    {
+        indices = Engine::Rendering::AcquireMeshBuffer(bufferFactory,
+            IGraphicsBuffer::Usage::IndexBuffer, m_indices.data(),
+            m_indices.size() * sizeof(uint32_t), sizeof(uint32_t), preparedIndices);
+        if (!indices) throw std::runtime_error("Failed to create prepared mesh index buffer");
+    }
     m_bufferFactory = bufferFactory;
     ReplaceVertexBuffer(std::move(buffer));
+    ReplaceIndexBuffer(std::move(indices));
     m_sharedVertexBuffer = true;
+    m_sharedIndexBuffer = !m_indices.empty();
     m_ready = true;
 }
 #pragma endregion

@@ -108,6 +108,8 @@ public:
             double updateHandoffWaitMs = 0.0;
             double scenePreparationMs = 0.0;
             double commandRecordingMs = 0.0;
+            double packetPreparationMs = 0.0, shadowRecordingMs = 0.0;
+            double cameraRecordingMs = 0.0, resourceRetentionMs = 0.0;
             double prepareHandoffWaitMs = 0.0;
         } timings;
         std::chrono::steady_clock::time_point startedAt;
@@ -125,6 +127,7 @@ public:
         : m_scene(scene), m_windowThread(std::this_thread::get_id()),
           m_collectBenchmark(collectBenchmark)
     {
+        if (collectBenchmark) m_scene.SetUpdateProfilingEnabled(true);
         m_worker = std::thread([this] { Run(); });
         m_scene.TransferOwnerTo(m_worker.get_id());
         {
@@ -249,18 +252,21 @@ private:
                 else
                 {
                     const auto prepareStart = std::chrono::steady_clock::now();
-                    m_scene.PrepareRenderFrame();
+                    // Update already publishes the simulation snapshot. Native
+                    // rendering consumes its own owned draw packet, so avoid
+                    // two more full-scene snapshot scans during preparation.
+                    m_scene.PrepareRenderFrame(false);
                     m_timings.scenePreparationMs = std::chrono::duration<double,
                         std::milli>(std::chrono::steady_clock::now() - prepareStart).count();
                     const auto recordStart = std::chrono::steady_clock::now();
                     auto drawPacket = m_scene.TakeNativeRenderPacket();
-                    auto computeCommands = std::make_shared<
-                        ::Engine::Graphics::GraphicsCommandPacket>();
-                    auto shadowCommands = std::make_shared<
-                        ::Engine::Graphics::GraphicsCommandPacket>();
-                    auto sceneCommands = std::make_shared<
-                        ::Engine::Graphics::GraphicsCommandPacket>();
+                    auto computeCommands = AcquireCommands(0);
+                    auto shadowCommands = AcquireCommands(1);
+                    auto sceneCommands = AcquireCommands(2);
                     m_scene.RecordGpuParticleSimulation(computeCommands.get());
+                    const auto packetPrepared = std::chrono::steady_clock::now();
+                    m_timings.packetPreparationMs = std::chrono::duration<double,
+                        std::milli>(packetPrepared - recordStart).count();
                     if (m_input.clientWidth && m_input.clientHeight)
                         if (auto* gameCamera = m_scene.FindGameCamera())
                         {
@@ -269,15 +275,23 @@ private:
                             m_scene.Render(shadowCommands.get(), aspect,
                                 gameCamera, false, m_input.clientWidth,
                                 m_input.clientHeight, true, drawPacket.get());
+                            const auto shadowRecorded = std::chrono::steady_clock::now();
+                            m_timings.shadowRecordingMs = std::chrono::duration<double,
+                                std::milli>(shadowRecorded - packetPrepared).count();
                             m_scene.Render(sceneCommands.get(), aspect,
                                 gameCamera, false, m_input.clientWidth,
                                 m_input.clientHeight, false,
                                 drawPacket.get());
+                            m_timings.cameraRecordingMs = std::chrono::duration<double,
+                                std::milli>(std::chrono::steady_clock::now() - shadowRecorded).count();
                         }
+                    const auto retainStart = std::chrono::steady_clock::now();
                     m_scene.RetainNativePacketMeshBuffers(*drawPacket,
                         *shadowCommands);
                     m_scene.SetLastNativeOcclusionCulledCount(
                         m_previousOcclusionCulled);
+                    m_timings.resourceRetentionMs = std::chrono::duration<double,
+                        std::milli>(std::chrono::steady_clock::now() - retainStart).count();
                     m_timings.commandRecordingMs = std::chrono::duration<double,
                         std::milli>(std::chrono::steady_clock::now() - recordStart).count();
                     if (m_collectBenchmark)
@@ -317,6 +331,19 @@ private:
     ::Engine::Core::NativeInputSnapshot m_input;
     std::shared_ptr<const ::Engine::Scene::Scene::SceneSnapshot> m_snapshot;
     ::Engine::Scene::Scene::RetiredGraphicsResources m_retired;
+    // RenderLoop retains submitted packets through GPU completion. An idle
+    // pool entry is therefore safe only when this is its sole remaining owner.
+    std::shared_ptr<::Engine::Graphics::GraphicsCommandPacket> AcquireCommands(size_t stream)
+    {
+        using Commands = ::Engine::Graphics::GraphicsCommandPacket;
+        static const bool reuse = [] {
+            char value[8]{};
+            return GetEnvironmentVariableA("ENGINE_REUSE_GAME_COMMANDS", value, sizeof(value)) == 0 || value[0] != '0';
+        }();
+        if (!reuse) return std::make_shared<Commands>();
+        return m_commandPools[stream].Acquire();
+    }
+    std::array<::Engine::Graphics::GraphicsCommandPacketPool, 3> m_commandPools;
     std::shared_ptr<const ::Engine::Graphics::GraphicsCommandPacket> m_computeCommands;
     std::shared_ptr<const ::Engine::Graphics::GraphicsCommandPacket> m_shadowCommands;
     std::shared_ptr<const ::Engine::Graphics::GraphicsCommandPacket> m_sceneCommands;
@@ -621,6 +648,10 @@ private:
                 sample.updateMs = packet.simulationTimings.simulationUpdateMs;
                 sample.prepareMs = packet.simulationTimings.scenePreparationMs;
                 sample.recordMs = packet.simulationTimings.commandRecordingMs;
+                sample.packetPrepareMs = packet.simulationTimings.packetPreparationMs;
+                sample.shadowRecordMs = packet.simulationTimings.shadowRecordingMs;
+                sample.cameraRecordMs = packet.simulationTimings.cameraRecordingMs;
+                sample.resourceRetainMs = packet.simulationTimings.resourceRetentionMs;
                 sample.updateWaitMs = packet.simulationTimings.updateHandoffWaitMs;
                 sample.prepareWaitMs = packet.simulationTimings.prepareHandoffWaitMs;
                 sample.replayMs = sceneReplayMs;

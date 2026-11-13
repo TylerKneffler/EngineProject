@@ -102,6 +102,7 @@ struct RenderCpuTimings
     uint64_t workerJobs=0, workerTasks=0;
     uint64_t gpuGrassBatches=0, grassBatchCacheHits=0, grassPlacementUploadBytes=0;
     uint64_t automaticBatches=0, automaticInstances=0, gpuBatches=0, changedUploadBytes=0;
+    uint64_t foliageDepthDraws=0;
     uint64_t candidateDraws=0, physicalDraws=0, candidateTriangles=0, views=0;
     uint64_t visibilityFrameItems=0,visibilityCandidates=0,visibilityAccepted=0;
     std::array<uint64_t,3> colorSelectedLodDraws{},shadowSelectedLodDraws{};
@@ -128,6 +129,7 @@ struct RenderCpuTimings
         ADD(gpuGrassBatches); ADD(grassBatchCacheHits); ADD(grassPlacementUploadBytes);
         ADD(totalMs); ADD(startupMs); ADD(terrainPreparationMs); ADD(occlusionMs); ADD(otherMs);
         ADD(automaticBatches); ADD(automaticInstances); ADD(gpuBatches); ADD(changedUploadBytes);
+        ADD(foliageDepthDraws);
         ADD(candidateDraws); ADD(physicalDraws); ADD(candidateTriangles); ADD(views);
         ADD(visibilityFrameItems); ADD(visibilityCandidates); ADD(visibilityAccepted);
         for (std::size_t lod = 0; lod < colorSelectedLodDraws.size(); ++lod)

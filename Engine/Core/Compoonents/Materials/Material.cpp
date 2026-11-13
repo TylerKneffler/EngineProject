@@ -515,6 +515,12 @@ void Material::PrepareTextures(IGraphicsProvider* graphicsProvider)
 
 MaterialAlphaMode Material::GetAlphaMode() const
 {
+    // Validation and authored assets use these canonical names. Avoid copying
+    // and locale-folding them for every frame item, camera draw and shadow draw.
+    // Keep the tolerant path for public-field edits and older mixed-case assets.
+    if (alphaMode == "Opaque") return MaterialAlphaMode::Opaque;
+    if (alphaMode == "Mask") return MaterialAlphaMode::Mask;
+    if (alphaMode == "Blend") return MaterialAlphaMode::Blend;
     std::string mode = alphaMode;
     std::transform(mode.begin(), mode.end(), mode.begin(),
         [](unsigned char value)

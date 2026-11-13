@@ -298,6 +298,7 @@ public:
         double prefabPlacementAssetsMs=0,prefabLodProfilesMs=0,prefabSourceSetMs=0;
         double prefabRegistryMs=0,prefabValidationMs=0,prefabSourceLookupMs=0;
         double prefabBuildMs=0,prefabMainBufferCreateMs=0;
+        double prefabBudgetOverrunMs=0,prefabMaxLayerMs=0;
         double graphicsPreparationMs=0,nativeBuffersMs=0;
         double lookupMs = 0.0;
         double itemsMs = 0.0;
@@ -878,6 +879,8 @@ private:
 
     std::unique_ptr<IPipelineState> m_objectPipeline;
     std::unique_ptr<IPipelineState> m_objectDoubleSidedPipeline;
+    std::array<std::unique_ptr<IPipelineState>, 2> m_foliageDepthPipelines;
+    std::array<std::unique_ptr<IPipelineState>, 2> m_foliageEqualPipelines;
     std::unique_ptr<IPipelineState> m_objectBlendPipeline;
     std::unique_ptr<IPipelineState> m_objectBlendDoubleSidedPipeline;
     std::unique_ptr<IPipelineState> m_objectWirePipeline;

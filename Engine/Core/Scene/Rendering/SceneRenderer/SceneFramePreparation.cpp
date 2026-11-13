@@ -220,7 +220,10 @@ void Scene::PrepareRenderFrame(bool publishSnapshot)
     for (; prefabVisited < prefabCount; ++prefabVisited)
     {
         auto* layer = objectLayers[(prefabStart + prefabVisited) % prefabCount];
+        const auto layerStarted = PrepareClock::now();
         layer->PreparePrefabInstances(m_graphicsProvider, &prefabUploadAvailable, prefabDeadline);
+        m_lastPrepareTimings.prefabMaxLayerMs = std::max(m_lastPrepareTimings.prefabMaxLayerMs,
+            std::chrono::duration<double,std::milli>(PrepareClock::now()-layerStarted).count());
         const auto& prefabTimings=layer->GetLastPrefabPrepareTimings();
         m_lastPrepareTimings.prefabSignatureMs+=prefabTimings.placementSignatureMs;
         m_lastPrepareTimings.prefabSourceProbeMs+=prefabTimings.sourceProbeMs;
@@ -241,6 +244,8 @@ void Scene::PrepareRenderFrame(bool publishSnapshot)
         }))
         m_restorePrefabPrototypes.clear();
     const auto afterPrefabInstances=PrepareClock::now();
+    m_lastPrepareTimings.prefabBudgetOverrunMs=std::max(0.0,
+        std::chrono::duration<double,std::milli>(afterPrefabInstances-prefabDeadline).count());
     const auto splineGeometry=GetComponents<SplineGeometry>();
     for (auto* geometry:splineGeometry) geometry->PrepareGeometry(m_graphicsProvider);
     const auto splineInstanceProviders=GetComponents<SplineInstancePlacementProvider>();
