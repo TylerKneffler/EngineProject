@@ -666,6 +666,7 @@ void AssetInspectorTemplate::Draw(IEditorUi& ui, Engine::Scene::Scene* scene)
                     0.01f, 0.f, 2.f);
                 changed |= ui.DragFloat("Height Scale", &material.heightScale,
                     0.001f, 0.f, 0.2f);
+                changed |= ui.Checkbox("Height Is Depth", &material.heightIsDepth);
                 changed |= ui.DragFloat("Height Min Steps", &material.heightMinSteps,
                     1.f, 4.f, 64.f);
                 changed |= ui.DragFloat("Height Max Steps", &material.heightMaxSteps,

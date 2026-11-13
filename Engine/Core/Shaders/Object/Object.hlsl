@@ -701,38 +701,67 @@ float4 SampleObjectBaseColor(ObjectData data, float2 sourceUv, float textureBias
     return baseColorMap.SampleBias(materialSampler, sourceUv, textureBias);
 }
 
+// Height textures are white = raised unless the material marks them as depth
+// maps (parallaxParams.w bit 0). The march below works in depth below the
+// surface, so a raised texel has depth 0.
+float SampleParallaxDepth(float2 uv, float2 uvDx, float2 uvDy, bool heightIsDepth)
+{
+    const float value = heightMap.SampleGrad(materialSampler, uv, uvDx, uvDy).r;
+    return heightIsDepth ? value : 1.0 - value;
+}
+
+// uvDx/uvDy are the screen derivatives of sourceUv, taken by the caller in
+// uniform control flow. Every step samples with those gradients so the height
+// fetches use the mip the surface footprint needs (plus the texture LOD bias)
+// instead of the full-resolution level.
 float2 ParallaxOcclusionUv(
-    float2 sourceUv, float3 viewDirectionTangent,
-    float heightScale, float minimumSteps, float maximumSteps, float textureBias)
+    float2 sourceUv, float2 uvDx, float2 uvDy, float3 viewDirectionTangent,
+    float heightScale, float minimumSteps, float maximumSteps,
+    float textureBias, bool heightIsDepth)
 {
     float viewAngle = saturate(abs(viewDirectionTangent.z));
-    float layerCount = round(lerp(maximumSteps, minimumSteps, viewAngle));
-    layerCount = clamp(layerCount, 4.0, 64.0);
-    float layerDepth = 1.0 / layerCount;
     float2 ray = viewDirectionTangent.xy /
         max(abs(viewDirectionTangent.z), 0.08) * heightScale;
+
+    // Largest on-screen shift, in pixels, that the relief can produce. Below
+    // about half a pixel parallax is invisible, so distant and grazing-far
+    // surfaces skip the march entirely. Steps finer than one per traversed
+    // pixel add no visible detail.
+    const float uvPerPixel = sqrt(max(abs(uvDx.x * uvDy.y - uvDx.y * uvDy.x),
+        1e-14));
+    const float parallaxPixels = length(ray) / uvPerPixel;
+    [branch] if (parallaxPixels < 0.5)
+        return sourceUv;
+    float layerCount = round(lerp(maximumSteps, minimumSteps, viewAngle));
+    layerCount = clamp(min(layerCount, ceil(parallaxPixels)), 4.0, 64.0);
+    float layerDepth = 1.0 / layerCount;
     float2 uvStep = ray / layerCount;
+
+    const float gradientScale = exp2(textureBias);
+    const float2 sampleDx = uvDx * gradientScale;
+    const float2 sampleDy = uvDy * gradientScale;
 
     float2 currentUv = sourceUv;
     float currentLayerDepth = 0.0;
-    float currentHeight = heightMap.SampleLevel(
-        materialSampler, currentUv, textureBias).r;
+    float currentDepth = SampleParallaxDepth(currentUv, sampleDx, sampleDy,
+        heightIsDepth);
     [loop]
     for (int step = 0; step < 64; ++step)
     {
-        if (currentLayerDepth >= currentHeight || step >= (int)layerCount)
+        if (currentLayerDepth >= currentDepth || step >= (int)layerCount)
             break;
         currentUv -= uvStep;
         currentLayerDepth += layerDepth;
-        currentHeight = heightMap.SampleLevel(
-            materialSampler, currentUv, textureBias).r;
+        currentDepth = SampleParallaxDepth(currentUv, sampleDx, sampleDy,
+            heightIsDepth);
     }
 
+    // Secant refinement between the last two layers.
     float2 previousUv = currentUv + uvStep;
-    float afterDepth = currentHeight - currentLayerDepth;
-    float previousHeight = heightMap.SampleLevel(
-        materialSampler, previousUv, textureBias).r;
-    float beforeDepth = previousHeight -
+    float afterDepth = currentDepth - currentLayerDepth;
+    float previousDepth = SampleParallaxDepth(previousUv, sampleDx, sampleDy,
+        heightIsDepth);
+    float beforeDepth = previousDepth -
         (currentLayerDepth - layerDepth);
     float depthDifference = afterDepth - beforeDepth;
     float interpolation = abs(depthDifference) > 0.00001
@@ -1550,6 +1579,9 @@ float4 PSMain(
     float3 viewDirection = normalize(
         objectData.viewPositionAlphaCutoff.xyz - worldPos);
 
+    // Derivatives must be taken in uniform control flow, before the branch.
+    const float2 heightUvDx = ddx(heightUv);
+    const float2 heightUvDy = ddy(heightUv);
     if (materialDetail > 0.0 && (flags & 64u) && hasTangents && objectData.parallaxParams.x > 0.0)
     {
         float3 viewDirectionTangent = float3(
@@ -1557,8 +1589,10 @@ float4 PSMain(
             dot(viewDirection, bitangentDirection),
             dot(viewDirection, geometryNormal));
         float2 parallaxUv = ParallaxOcclusionUv(
-            heightUv, viewDirectionTangent, objectData.parallaxParams.x * materialDetail,
-            objectData.parallaxParams.y, objectData.parallaxParams.z, textureBias);
+            heightUv, heightUvDx, heightUvDy, viewDirectionTangent,
+            objectData.parallaxParams.x * materialDetail,
+            objectData.parallaxParams.y, objectData.parallaxParams.z, textureBias,
+            ((uint)objectData.parallaxParams.w & 1u) != 0u);
         float2 parallaxOffset = parallaxUv - heightUv;
         baseUv += parallaxOffset; metallicRoughnessUv += parallaxOffset;
         normalUv += parallaxOffset; occlusionUv += parallaxOffset;

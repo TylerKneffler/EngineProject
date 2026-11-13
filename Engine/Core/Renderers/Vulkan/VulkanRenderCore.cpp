@@ -144,6 +144,8 @@ void VulkanRenderCore::CreateDevice()
     VkPhysicalDeviceFeatures supported{}, enabled{};
     vkGetPhysicalDeviceFeatures(m_physicalDevice, &supported);
     enabled.pipelineStatisticsQuery = supported.pipelineStatisticsQuery;
+    // Material sampling uses anisotropic filtering when the device allows it.
+    enabled.samplerAnisotropy = supported.samplerAnisotropy;
     createInfo.pEnabledFeatures = &enabled;
     VkCheck(vkCreateDevice(m_physicalDevice, &createInfo, nullptr, &m_device), "vkCreateDevice");
     m_pipelineStatisticsEnabled = enabled.pipelineStatisticsQuery != VK_FALSE;

@@ -264,8 +264,9 @@ ResolvedMaterialRecord SceneRendererDrawPreparation::ResolveMaterialRecord(
             data.subsurfaceTransmission.x = mat->subsurfaceTransmission;
         }
         data.viewPositionAlphaCutoff = glm::vec4(cameraPosition, mat->alphaCutoff);
+        // w: parallax flags (1 = height texture stores depth, white = recessed).
         data.parallaxParams = { mat->heightScale, mat->heightMinSteps,
-            mat->heightMaxSteps, 0.f };
+            mat->heightMaxSteps, mat->heightIsDepth ? 1.f : 0.f };
         data.environmentParams.z = allowEnvironmentDiffuse
             ? mat->environmentDiffuseStrength : 0.f;
         data.environmentParams.w = allowReflections ? mat->reflectionStrength : 0.f;

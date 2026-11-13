@@ -125,7 +125,9 @@ CreateD3D12MaterialRootSignature(ID3D12Device* device)
     parameters[47].ShaderVisibility=D3D12_SHADER_VISIBILITY_VERTEX;
 
     D3D12_STATIC_SAMPLER_DESC sampler{};
-    sampler.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+    // Anisotropic filtering keeps grazing-angle ground and wall materials sharp.
+    sampler.Filter = D3D12_FILTER_ANISOTROPIC;
+    sampler.MaxAnisotropy = 16;
     sampler.AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
     sampler.AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
     sampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;

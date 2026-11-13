@@ -41,7 +41,7 @@ D3D11FrameResourceState::D3D11FrameResourceState(ID3D11Device* device,
     {
         D3D11_SAMPLER_DESC descriptor{};
         descriptor.Filter = D3D11_FILTER_ANISOTROPIC;
-        descriptor.MaxAnisotropy = 8;
+        descriptor.MaxAnisotropy = 16;
         descriptor.AddressU = D3D11_TEXTURE_ADDRESS_WRAP;
         descriptor.AddressV = D3D11_TEXTURE_ADDRESS_WRAP;
         descriptor.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;

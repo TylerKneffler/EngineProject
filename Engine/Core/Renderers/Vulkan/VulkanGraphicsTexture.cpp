@@ -156,6 +156,20 @@ VulkanTextureSystem::VulkanTextureSystem(
     samplerInfo.magFilter = VK_FILTER_LINEAR;
     samplerInfo.minFilter = VK_FILTER_LINEAR;
     samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    {
+        // Ground and wall materials are mostly viewed at grazing angles;
+        // trilinear filtering alone blurs them toward the coarsest mip.
+        VkPhysicalDeviceFeatures features{};
+        vkGetPhysicalDeviceFeatures(m_physicalDevice, &features);
+        VkPhysicalDeviceProperties properties{};
+        vkGetPhysicalDeviceProperties(m_physicalDevice, &properties);
+        if (features.samplerAnisotropy)
+        {
+            samplerInfo.anisotropyEnable = VK_TRUE;
+            samplerInfo.maxAnisotropy = std::min(16.0f,
+                properties.limits.maxSamplerAnisotropy);
+        }
+    }
     samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
     samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
     samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;

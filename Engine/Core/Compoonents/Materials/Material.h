@@ -138,6 +138,11 @@ public:
     PROPERTY(Inspector, EditAnywhere, Category = "Material | PBR", Range = "0.0, 0.2")
     float     heightScale { 0.05f };
 
+    // Height textures are white = raised by default. Enable for depth maps
+    // authored white = recessed (some relief/POM tutorials use this form).
+    PROPERTY(Inspector, EditAnywhere, Category = "Material | PBR")
+    bool      heightIsDepth { false };
+
     // Optional terrain-only paint transition driven by heightTexture.r.
     PROPERTY(Inspector, EditAnywhere, Category = "Material | Terrain", Range = "0.0, 1.0")
     float     terrainHeightBlendStrength { 0.f };

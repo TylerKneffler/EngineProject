@@ -60,6 +60,7 @@ Material::Material()
     RegisterField("reflectionEnvironmentRotation", reflectionEnvironmentRotation, "Reflections");
     RegisterField("normalScale", normalScale, "Height and Normal", false);
     RegisterField("heightScale", heightScale, "Height and Normal", false);
+    RegisterField("heightIsDepth", heightIsDepth, "Height and Normal", false);
     RegisterField("terrainHeightBlendStrength", terrainHeightBlendStrength,
         "Terrain", false);
     RegisterField("terrainMacroColor", terrainMacroColor, "Terrain", false);
@@ -249,6 +250,7 @@ bool Material::LoadFromFile(const std::string& path)
         if (root.Has("textureLodAlphaMipBias")) textureLod.alphaMipBias = root["textureLodAlphaMipBias"].AsFloat();
         if (root.Has("normalScale")) normalScale = root["normalScale"].AsFloat();
         if (root.Has("heightScale")) heightScale = root["heightScale"].AsFloat();
+        if (root.Has("heightIsDepth")) heightIsDepth = root["heightIsDepth"].AsBool();
         if (root.Has("terrainHeightBlendStrength"))
             terrainHeightBlendStrength = root["terrainHeightBlendStrength"].AsFloat();
         terrainMacroColor = from3(root["terrainMacroColor"], terrainMacroColor);
@@ -345,6 +347,7 @@ bool Material::SaveToFile(const std::string& path) const
     root.Set("textureLodAlphaMipBias", JsonValue(textureLod.alphaMipBias));
     root.Set("normalScale", JsonValue(normalScale));
     root.Set("heightScale", JsonValue(heightScale));
+    if (heightIsDepth) root.Set("heightIsDepth", JsonValue(true));
     root.Set("terrainHeightBlendStrength", JsonValue(terrainHeightBlendStrength));
     root.Set("terrainMacroColor", J3(terrainMacroColor));
     root.Set("heightMinSteps", JsonValue(heightMinSteps));

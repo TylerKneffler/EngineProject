@@ -40,7 +40,7 @@ struct ObjectGPUData
     glm::vec4 viewPositionAlphaCutoff;
     glm::vec4 bakedDirectional;
     glm::vec4 bakedLightDirection;
-    glm::vec4 parallaxParams; // scale, minimum steps, maximum steps, reserved
+    glm::vec4 parallaxParams; // scale, minimum steps, maximum steps, flags (1 = height is depth)
     glm::vec4 spriteUvRect; // offset.xy, scale.xy
     glm::vec4 textureUvSets0;
     glm::vec4 textureUvSets1;
