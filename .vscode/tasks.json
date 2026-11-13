@@ -175,6 +175,21 @@
                 "panel": "shared"
             },
             "problemMatcher": "$msCompile"
+        },
+        {
+            "label": "CMake: Build Editor Dev Optimized",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "--build", "--preset", "devoptimized",
+                "--target", "Editor",
+                "--parallel"
+            ],
+            "dependsOn": "CMake: Configure (Debug)",
+            "dependsOrder": "sequence",
+            "group": "build",
+            "presentation": { "reveal": "always", "panel": "shared" },
+            "problemMatcher": "$msCompile"
         }
     ],
     "inputs": [

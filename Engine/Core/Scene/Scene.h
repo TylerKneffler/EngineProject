@@ -25,6 +25,7 @@
 #include "Core/Rendering/RenderPerformance.h"
 #include "Core/Rendering/RenderSpatialIndex.h"
 #include "Core/Rendering/AutomaticInstancing.h"
+#include "Core/Scene/Rendering/SceneRenderer/ScenePerformanceHeat.h"
 #include "Core/Physics/Physics.h"
 #include "Core/Scene/Spatial/WarpVolume.h"
 #include <glm/glm.hpp>
@@ -332,6 +333,11 @@ public:
     const PrepareTimings& GetLastPrepareTimings() const { return m_lastPrepareTimings; }
     using RenderCpuTimings = Engine::Rendering::RenderCpuTimings;
     const RenderCpuTimings& GetLastRenderCpuTimings() const { return m_lastRenderCpuTimings; }
+    // Most expensive draws from the last Performance render mode frame.
+    Renderer::PerformanceHeatSnapshot GetPerformanceHeatSnapshot() const
+    {
+        return m_performanceHeat.GetSnapshot();
+    }
     const std::array<uint64_t,3>& GetScreenLodCounts() const { return m_screenLodCounts; }
     void ResetRenderCpuTimings() { m_lastRenderCpuTimings={}; }
     bool automaticInstancing = true;
@@ -1367,6 +1373,7 @@ private:
     bool m_editorMeshEditPose = false;
     bool m_editorBonesVisible = true;
     Engine::Components::Mesh* m_editorWeightPaintMesh = nullptr;
+    Renderer::PerformanceHeatMap m_performanceHeat;
     int m_editorWeightPaintBone = -1;
     Object* m_previewObject = nullptr;
     bool m_editorMode2D = false;

@@ -3,6 +3,10 @@
 #include "Core/Serialization/SceneSerializer.h"
 #include <system_error>
 
+#ifndef ENGINE_EDITOR_BUILD_CONFIG
+#define ENGINE_EDITOR_BUILD_CONFIG "Debug"
+#endif
+
 namespace Engine::Editor
 {
 EditorHotReload::EditorHotReload(EditorState& editorState, ConsoleView* console,
@@ -85,7 +89,7 @@ void EditorHotReload::StartCompile()
     }
 
     const std::string command = "cmake --build \"" + m_buildDirectory.string() +
-        "\" --config Debug --target Lib --parallel 1";
+        "\" --config " ENGINE_EDITOR_BUILD_CONFIG " --target Lib --parallel 1";
     std::vector<char> buffer(command.begin(), command.end());
     buffer.push_back('\0');
     STARTUPINFOA startup{};
@@ -230,6 +234,20 @@ void EditorHotReload::PollCompile()
                 std::filesystem::copy_file(symbols, directory / symbols.filename(),
                     std::filesystem::copy_options::overwrite_existing, error);
                 if (error) result.symbolsError = error.message();
+            }
+            // C++ Dynamic Debugging (/dynamicdeopt) looks for the
+            // deoptimized Lib.alt.dll/.pdb beside the loaded module. They
+            // only exist in RelWithDebInfo builds; without them the scripts
+            // still run, just without on-demand deoptimization.
+            for (const char* extension : { ".alt.dll", ".alt.pdb" })
+            {
+                auto alternate = source;
+                alternate.replace_extension(extension);
+                error.clear();
+                if (std::filesystem::exists(alternate, error))
+                    std::filesystem::copy_file(alternate,
+                        directory / alternate.filename(),
+                        std::filesystem::copy_options::overwrite_existing, error);
             }
             result.path = candidate;
             return result;

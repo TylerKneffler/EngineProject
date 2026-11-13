@@ -3,6 +3,8 @@
 #include "Core/Rendering/StableShadowCascade.h"
 #include "Core/Rendering/RenderJobs.h"
 #include "Core/Scene/Scene.h"
+#include "Core/Scene/Rendering/SceneRenderer/ScenePerformanceHeat.h"
+#include <bitset>
 #include "Core/Graphics/GraphicsCommandPacket.h"
 #include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Compoonents/Mesh/Mesh.h"
@@ -522,6 +524,11 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         Engine::Model::SceneRenderMode::Wireframe;
     const bool forceUnlitMode = renderMode ==
         Engine::Model::SceneRenderMode::Unlit;
+    // Draws are prepared exactly as in Lit mode so the measured CPU cost and
+    // the estimated GPU workload describe normal rendering; only the final
+    // object records are recolored (see the Performance heat pass below).
+    const bool performanceHeatMode = !shadowOnly && renderMode ==
+        Engine::Model::SceneRenderMode::Performance;
     const auto cascadePreparation = Engine::Scene::Renderer::SceneRendererShadows::PrepareDirectionalShadowCascades(
         *this,
         context,
@@ -806,9 +813,13 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     const auto materialStart = RenderClock::now();
     double materialPipelineMs = 0.0;
     double materialGeometryBindingMs = 0.0;
+    std::vector<Renderer::PerformanceHeatDrawInput> performanceHeatInputs;
+    std::vector<size_t> performanceHeatDraws;
     UINT slot = 0;
     for (const ViewRenderItem& sortedItem : renderObjects)
     {
+        const auto drawPreparationStart = performanceHeatMode
+            ? RenderClock::now() : RenderClock::time_point{};
         // Reject candidates that cannot contribute to this camera or shadow view.
         const FrameRenderItem* renderItem = sortedItem.source;
         slot=renderItem->objectSlot;
@@ -1347,6 +1358,69 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             preparedDraw, *renderItem, useSourceChart, useSoftSurface);
         materialGeometryBindingMs += std::chrono::duration<double,std::milli>(
             RenderClock::now()-geometryBindStart).count();
+        if (performanceHeatMode)
+        {
+            Renderer::PerformanceHeatDrawInput heat;
+            heat.key = Renderer::PerformanceHeatMap::MakeKey(obj, mesh ? static_cast<const void*>(mesh) : sprite);
+            heat.name = obj ? &obj->name : nullptr;
+            heat.cpuMicroseconds = std::chrono::duration<double,std::micro>(
+                RenderClock::now() - drawPreparationStart).count();
+            glm::vec3 boundsMin(-0.5f, -0.5f, 0.f), boundsMax(0.5f, 0.5f, 0.f);
+            if (mesh)
+            {
+                const uint64_t perInstance = mesh->GetIndexCount()
+                    ? mesh->GetIndexCount() : mesh->GetVertexCount();
+                if (mesh->IsInstanced())
+                    for (const auto& range : mesh->GetInstanceRanges())
+                        heat.vertexElements += static_cast<uint64_t>(
+                            range.vertexCount ? range.vertexCount : perInstance) *
+                            range.instanceCount;
+                else
+                    heat.vertexElements = perInstance;
+                if (mesh->HasBounds())
+                {
+                    boundsMin = mesh->GetBoundsMin();
+                    boundsMax = mesh->GetBoundsMax();
+                }
+            }
+            else if (sprite)
+                heat.vertexElements = 6;
+            heat.vertexShaderWeight = 1.f +
+                (renderItem->skinJointCount > 0 && !useSoftSurface ? 1.5f : 0.f) +
+                (useGpuMorphs ? 0.25f * static_cast<float>(mesh->GetActiveMorphTargetCount()) : 0.f) +
+                (mesh && mesh->foliageWindStrength > 0.f ? 0.5f : 0.f);
+            heat.projectedPixels = (mesh && !mesh->HasBounds()) ? 0.f :
+                Renderer::PerformanceHeatMap::ProjectedPixels(boundsMin, boundsMax,
+                    world, viewProjection, viewportWidth, viewportHeight);
+            const uint32_t materialFlags =
+                static_cast<uint32_t>(objectData.materialParams.w);
+            // 1 base, 2 metal/rough, 4 normal, 8 occlusion, 16 emissive,
+            // 128 subsurface thickness, 256 sphere, 512 toon.
+            float pixelWeight = 1.f + 0.3f * static_cast<float>(
+                std::bitset<32>(materialFlags & 0x39Fu).count());
+            if (materialFlags & 64u) pixelWeight += 3.f;    // parallax occlusion
+            if (materialFlags & 2048u) pixelWeight += 2.f;  // painted terrain layers
+            if (materialFlags & 32u) pixelWeight += 0.5f;   // alpha test/coverage
+            const bool unlitSurface = objectData.ambientUnlit.w > 0.5f ||
+                (materialFlags & 16384u) != 0u;
+            if (!unlitSurface)
+            {
+                pixelWeight += 0.5f + 0.4f * static_cast<float>(
+                    std::min(drawData.lightCount, 8u));
+                if (objectData.shadowParams.z > 0.f)
+                    pixelWeight += 0.5f + 0.25f * objectData.shadowParams.w;
+                if (objectData.subsurfaceColorWeight.w > 0.f) pixelWeight += 1.f;
+                if (objectData.environmentParams.w > 0.f ||
+                    objectData.reflectionEnvironmentParams.w > 0.f)
+                    pixelWeight += 0.5f;
+            }
+            if (preparedDraw.blended) pixelWeight *= 1.5f;
+            heat.pixelShaderWeight = pixelWeight;
+            heat.shadowElements = preparedDraw.castsShadow
+                ? heat.vertexElements * shadowCascadeCount : 0u;
+            performanceHeatDraws.push_back(preparedDraws.size());
+            performanceHeatInputs.push_back(heat);
+        }
         preparedDraws.push_back(preparedDraw);
 
         ++slot;
@@ -1354,6 +1428,16 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     Renderer::SceneTextureFootprints::Request(preparedDraws, viewProjection,
         viewportWidth, viewportHeight, shadowViewProjections, shadowCascadeCount,
         m_directionalShadowResolution);
+    if (performanceHeatMode)
+    {
+        // Object.hlsl reads a negative editor-bone slot as "Performance view":
+        // morphParams.z = -(1 + heat), heat in [0, 1] from cold (blue) to hot (red).
+        std::vector<float> heat;
+        m_performanceHeat.Resolve(performanceHeatInputs, heat);
+        for (size_t index = 0; index < performanceHeatDraws.size(); ++index)
+            preparedDraws[performanceHeatDraws[index]].objectData.morphParams.z =
+                -(1.f + heat[index]);
+    }
     // Render phase 6: apply screen LOD, upload object records, and build instance batches.
     if(!shadowOnly) for(auto& draw:preparedDraws)
         if(Renderer::SceneRendererDrawPreparation::ScreenLodPolicy(*this, draw, hasPortalViews, includeEditorVisuals)) draw.drawData.flags|=0x00800000u;

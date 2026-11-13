@@ -1335,13 +1335,72 @@ void EditorState::DrawGlobalToolbar(IEditorUi& ui, ToolbarSection section,
             ImGui::EndPopup();
         }
         int renderMode = view->GetSceneRenderMode();
-        const char* renderNames[]{ "Lit", "Unlit", "Wireframe" };
-        if (row.Next(92.f))
+        const char* renderNames[]{ "Lit", "Unlit", "Wireframe", "Performance" };
+        if (row.Next(108.f))
         {
-            ui.SetNextItemWidth(92.f);
-            if (ui.Combo("##GlobalRenderMode", &renderMode, renderNames, 3))
+            ui.SetNextItemWidth(108.f);
+            if (ui.Combo("##GlobalRenderMode", &renderMode, renderNames, 4))
                 view->SetSceneRenderMode(renderMode);
             ui.Tooltip("Scene render mode");
+        }
+        if (renderMode == static_cast<int>(Engine::Model::SceneRenderMode::Performance) &&
+            row.Next(56.f))
+        {
+            // Legend swatch matching Object.hlsl's cold-to-hot heat ramp; hover
+            // lists the draws that cost the most in the last rendered frame.
+            const ImVec2 size(56.f, ImGui::GetFrameHeight());
+            const ImVec2 minimum = ImGui::GetCursorScreenPos();
+            ImGui::InvisibleButton("##PerformanceHeatLegend", size);
+            const ImU32 ramp[5]{
+                IM_COL32(26, 51, 242, 255),   // blue   (cheapest)
+                IM_COL32(13, 204, 242, 255),  // cyan
+                IM_COL32(26, 217, 51, 255),   // green
+                IM_COL32(255, 217, 13, 255),  // yellow
+                IM_COL32(255, 20, 8, 255) };  // red    (most expensive)
+            const float segmentWidth = size.x / 4.f;
+            for (int segment = 0; segment < 4; ++segment)
+            {
+                const ImVec2 from(minimum.x + segmentWidth * segment, minimum.y);
+                const ImVec2 to(from.x + segmentWidth, minimum.y + size.y);
+                ImGui::GetWindowDrawList()->AddRectFilledMultiColor(from, to,
+                    ramp[segment], ramp[segment + 1], ramp[segment + 1], ramp[segment]);
+            }
+            if (ImGui::IsItemHovered())
+            {
+                const auto snapshot = scene->GetPerformanceHeatSnapshot();
+                ImGui::BeginTooltip();
+                ImGui::TextUnformatted("Performance view: blue = cheap, red = expensive");
+                ImGui::TextDisabled("Relative to this view, log scale. CPU is measured draw");
+                ImGui::TextDisabled("preparation; GPU is estimated from vertices, instances,");
+                ImGui::TextDisabled("screen coverage, material features, lights and shadows.");
+                ImGui::Separator();
+                ImGui::Text("%u draws, ~%.2f ms total", snapshot.drawCount,
+                    snapshot.totalMicroseconds / 1000.f);
+                if (!snapshot.hottest.empty() &&
+                    ImGui::BeginTable("##PerformanceHeatHottest", 4,
+                        ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_RowBg))
+                {
+                    ImGui::TableSetupColumn("Object");
+                    ImGui::TableSetupColumn("Total us");
+                    ImGui::TableSetupColumn("CPU us");
+                    ImGui::TableSetupColumn("GPU est. us");
+                    ImGui::TableHeadersRow();
+                    for (const auto& entry : snapshot.hottest)
+                    {
+                        ImGui::TableNextRow();
+                        ImGui::TableNextColumn();
+                        ImGui::TextUnformatted(entry.name.c_str());
+                        ImGui::TableNextColumn();
+                        ImGui::Text("%.1f", entry.totalMicroseconds);
+                        ImGui::TableNextColumn();
+                        ImGui::Text("%.1f", entry.cpuMicroseconds);
+                        ImGui::TableNextColumn();
+                        ImGui::Text("%.1f", entry.gpuMicroseconds);
+                    }
+                    ImGui::EndTable();
+                }
+                ImGui::EndTooltip();
+            }
         }
         const auto lodSummaryStart = std::chrono::steady_clock::now();
         ++m_toolbarTimings.lodSummaryCalls;

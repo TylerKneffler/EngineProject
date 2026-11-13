@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "Core/Renderers/GraphicsDebugLayer.h"
 #include "DX11GameRenderer.h"
 #include "Core/Renderers/GraphicsDeviceName.h"
 #include "Core/Graphics/PostProcess.h"
@@ -51,9 +52,8 @@ bool DX11GameRenderer::Init(void* hwndHandle, uint32_t width, uint32_t height)
         const D3D_FEATURE_LEVEL levels[] = { D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0 };
         D3D_FEATURE_LEVEL selected{};
         UINT flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
-#if defined(_DEBUG)
-        flags |= D3D11_CREATE_DEVICE_DEBUG;
-#endif
+        if (IsGraphicsDebugLayerEnabled())
+            flags |= D3D11_CREATE_DEVICE_DEBUG;
         Microsoft::WRL::ComPtr<IDXGIFactory1> dxgiFactory;
         Microsoft::WRL::ComPtr<IDXGIAdapter1> selectedAdapter;
         Microsoft::WRL::ComPtr<IDXGIAdapter1> adapter;
@@ -91,10 +91,11 @@ bool DX11GameRenderer::Init(void* hwndHandle, uint32_t width, uint32_t height)
         };
         HRESULT hr = createDevice(flags,
             levels, ARRAYSIZE(levels));
-#if defined(_DEBUG)
         if (hr == DXGI_ERROR_SDK_COMPONENT_MISSING)
-            hr = createDevice(D3D11_CREATE_DEVICE_BGRA_SUPPORT, levels, ARRAYSIZE(levels));
-#endif
+        {
+            flags &= ~D3D11_CREATE_DEVICE_DEBUG;
+            hr = createDevice(flags, levels, ARRAYSIZE(levels));
+        }
         if (hr == E_INVALIDARG)
             hr = createDevice(flags & ~D3D11_CREATE_DEVICE_DEBUG, levels + 1, 1);
         m_flipModelSwapChain = SUCCEEDED(hr);

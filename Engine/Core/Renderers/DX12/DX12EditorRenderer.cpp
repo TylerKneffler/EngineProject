@@ -371,18 +371,19 @@ uint32_t DX12EditorRenderer::GetAvailableSrvSlots() const
 void DX12EditorRenderer::CreateDevice()
 {
     EnableDredDiagnostics();
-#if defined(_DEBUG)
-    ComPtr<ID3D12Debug> debugController;
-    if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debugController))))
-        debugController->EnableDebugLayer();
-#endif
+    bool debugLayerActive = false;
+    if (IsGraphicsDebugLayerEnabled())
+    {
+        ComPtr<ID3D12Debug> debugController;
+        if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debugController))))
+        {
+            debugController->EnableDebugLayer();
+            debugLayerActive = true;
+        }
+    }
 
     ThrowIfFailed(CreateDXGIFactory2(
-#if defined(_DEBUG)
-        DXGI_CREATE_FACTORY_DEBUG,
-#else
-        0,
-#endif
+        debugLayerActive ? DXGI_CREATE_FACTORY_DEBUG : 0u,
         IID_PPV_ARGS(&m_factory)));
 
     ComPtr<IDXGIAdapter1> adapter;

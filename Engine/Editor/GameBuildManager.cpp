@@ -10,6 +10,9 @@ namespace Engine::Editor
 #ifndef ENGINE_BUILD_DIR
 #define ENGINE_BUILD_DIR "build/Debug"
 #endif
+#ifndef ENGINE_EDITOR_BUILD_CONFIG
+#define ENGINE_EDITOR_BUILD_CONFIG "Debug"
+#endif
 #ifndef GAME_EXECUTABLE_PATH
 #define GAME_EXECUTABLE_PATH "build/Debug/Debug/Game.exe"
 #endif
@@ -450,7 +453,7 @@ static HANDLE StartGameBuild(HANDLE& outReadPipe, HANDLE& outJob)
 
     std::string cmd =
         "cmake --build \"" ENGINE_BUILD_DIR
-        "\" --config Debug --target Game --parallel 1";
+        "\" --config " ENGINE_EDITOR_BUILD_CONFIG " --target Game --parallel 1";
 
     std::vector<char> buf(cmd.begin(), cmd.end());
     buf.push_back('\0');

@@ -53,6 +53,42 @@ option(ENGINE_SHADER_UNOPTIMIZED_DEBUG "Compile D3D shaders without optimization
 if(MSVC AND ENGINE_PORTABLE_EXPORT)
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()
+
+# ---------------------------------------------------------------------------
+# RelWithDebInfo: the day-to-day "fast but debuggable" configuration
+# ---------------------------------------------------------------------------
+# Optimized code with symbols. With ENGINE_DYNAMIC_DEBUGGING, MSVC's C++
+# Dynamic Debugging (VS 2022 17.14+, x64) also emits a deoptimized copy of
+# every function (*.alt.exe/*.alt.dll); when you set a breakpoint or step in,
+# the debugger swaps in the deoptimized function so locals and stepping behave
+# like Debug while the rest of the program keeps running optimized.
+# Incompatible with /GL, /RTC*, /INCREMENTAL and /DEBUG:FASTLINK, which is why
+# this lives in RelWithDebInfo rather than Release (Release keeps /GL + /LTCG).
+option(ENGINE_DYNAMIC_DEBUGGING
+    "Build RelWithDebInfo with MSVC C++ Dynamic Debugging (/dynamicdeopt)" ON)
+if(MSVC)
+    # CMake's default /Ob1 inlines only functions marked inline; match Release.
+    foreach(lang C CXX)
+        string(REPLACE "/Ob1" "/Ob2" CMAKE_${lang}_FLAGS_RELWITHDEBINFO
+            "${CMAKE_${lang}_FLAGS_RELWITHDEBINFO}")
+    endforeach()
+    if(ENGINE_DYNAMIC_DEBUGGING AND CMAKE_SIZEOF_VOID_P EQUAL 8 AND
+       CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 19.44)
+        # Applied before FetchContent dependencies are added so every object
+        # and static library participates, as the feature requires.
+        add_compile_options(
+            "$<$<AND:$<CONFIG:RelWithDebInfo>,$<COMPILE_LANGUAGE:C,CXX>>:/dynamicdeopt>")
+        add_link_options("$<$<CONFIG:RelWithDebInfo>:/DYNAMICDEOPT>")
+        string(APPEND CMAKE_STATIC_LINKER_FLAGS_RELWITHDEBINFO " /dynamicdeopt")
+        foreach(kind EXE SHARED MODULE)
+            string(REGEX REPLACE "/INCREMENTAL(:[A-Za-z]+)?" "/INCREMENTAL:NO"
+                CMAKE_${kind}_LINKER_FLAGS_RELWITHDEBINFO
+                "${CMAKE_${kind}_LINKER_FLAGS_RELWITHDEBINFO}")
+        endforeach()
+    elseif(ENGINE_DYNAMIC_DEBUGGING)
+        message(STATUS "[Build] C++ Dynamic Debugging needs x64 MSVC 19.44+ (VS 2022 17.14); disabled.")
+    endif()
+endif()
 set(ENGINE_VULKAN_ENABLED OFF)
 
 if(ENGINE_DISTRIBUTION_BUILD)
@@ -864,6 +900,10 @@ target_compile_definitions(Editor PRIVATE
     ENGINE_ROOT_PATH="${ENGINE_COMPILED_ROOT_PATH}"
     GAME_EXECUTABLE_PATH="${ENGINE_COMPILED_GAME_PATH}"
     PROJECT_SCRIPTS_PATH="$<TARGET_FILE:Lib>"
+    # Hot reload and in-editor game builds must use the editor's own
+    # configuration: Lib.dll shares STL/CRT types with the editor, so a
+    # Debug script module inside an optimized editor would be ABI-incompatible.
+    ENGINE_EDITOR_BUILD_CONFIG="$<CONFIG>"
     ENGINE_EDITOR_UI_IMGUI
     $<$<NOT:$<BOOL:${ENGINE_PROJECT_DIR}>>:ENGINE_BUILTIN_ASSET_SCRIPTS>
 )

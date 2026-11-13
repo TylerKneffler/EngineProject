@@ -1140,6 +1140,35 @@ float4 PSShadowMain(
 
 // Opaque foliage keeps the shared instancing and LOD vertex path, but skips
 // clustered lighting, specular BRDFs, reflections and the wide shadow kernel.
+// Editor Performance render mode. The CPU writes morphParams.z = -(1 + heat)
+// (positive values are the weight-paint bone), heat in [0, 1] ranking the
+// draw's CPU + GPU cost. Shading by the view angle keeps shapes readable.
+bool IsPerformanceHeatDraw(ObjectData data)
+{
+    return data.morphParams.z < -0.5;
+}
+
+float4 PerformanceHeatColor(ObjectData data, float3 worldPos, float3 normal,
+    bool frontFace, float alpha)
+{
+    // Cold-to-hot ramp: blue, cyan, green, yellow, red at quarter steps.
+    // Keep in sync with the legend swatch in EditToolsViewTemplate.cpp.
+    float heat = saturate(-data.morphParams.z - 1.0);
+    float3 ramp[5] = {
+        float3(0.10, 0.20, 0.95),
+        float3(0.05, 0.80, 0.95),
+        float3(0.10, 0.85, 0.20),
+        float3(1.00, 0.85, 0.05),
+        float3(1.00, 0.08, 0.03) };
+    float position = heat * 4.0;
+    uint segment = min((uint)position, 3u);
+    float3 color = lerp(ramp[segment], ramp[segment + 1u], position - segment);
+    float3 n = normalize(frontFace ? normal : -normal);
+    float3 v = normalize(data.viewPositionAlphaCutoff.xyz - worldPos);
+    float facing = saturate(abs(dot(n, v)));
+    return float4(color * (0.35 + 0.65 * facing), alpha);
+}
+
 float4 PSFoliageMain(
     float4 pos : SV_POSITION,
     float3 worldPos : TEXCOORD2,
@@ -1176,6 +1205,8 @@ float4 PSFoliageMain(
         clip(base.a - objectData.viewPositionAlphaCutoff.w);
         ApplyMaskedAlphaTransmission(objectData, worldPos);
     }
+    if (IsPerformanceHeatDraw(objectData))
+        return PerformanceHeatColor(objectData, worldPos, normal, frontFace, base.a);
     if (objectData.ambientUnlit.w > 0.5)
         return float4(base.rgb + objectData.emissiveOcclusion.rgb, base.a);
 
@@ -1253,6 +1284,9 @@ float4 PSMain(
         dot(float4(worldPos, 1.0), objectData.portalClipPlane) < 0.0)
         clip(-1.0);
     float4 base = objectData.baseColor * ((flags & 4096u) ? float4(1, 1, 1, 1) : vertexColor);
+    // Alpha-tested surfaces fall through to keep their cutout silhouettes.
+    if (IsPerformanceHeatDraw(objectData) && !(flags & 32u))
+        return PerformanceHeatColor(objectData, worldPos, normal, frontFace, base.a);
     if (flags & 32768u)
     {
         // The ruler repeats every 100 metres in world space. Cell borders use
@@ -1541,6 +1575,8 @@ float4 PSMain(
     {
         clip(base.a - objectData.viewPositionAlphaCutoff.w);
         ApplyMaskedAlphaTransmission(objectData, worldPos);
+        if (IsPerformanceHeatDraw(objectData))
+            return PerformanceHeatColor(objectData, worldPos, normal, frontFace, base.a);
     }
     float subsurfaceThickness = objectData.subsurfaceRadiusThickness.w;
     if ((flags & 128u) && objectData.subsurfaceColorWeight.w > 0.0)

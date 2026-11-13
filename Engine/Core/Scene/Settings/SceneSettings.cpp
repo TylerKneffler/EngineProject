@@ -209,6 +209,9 @@ void DeserializeSceneSettings(Engine::Model::SceneSettings& settings, const Engi
         case 2:
             settings.renderMode = Engine::Model::SceneRenderMode::Wireframe;
             break;
+        case 3:
+            settings.renderMode = Engine::Model::SceneRenderMode::Performance;
+            break;
         default:
             settings.renderMode = Engine::Model::SceneRenderMode::Lit;
             break;

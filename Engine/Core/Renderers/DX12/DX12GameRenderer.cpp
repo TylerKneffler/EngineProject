@@ -464,28 +464,30 @@ void DX12GameRenderer::CreateDevice()
     // The D3D12 debug layer intercepts every API call and validates usage:
     // wrong resource states, missing barriers, descriptor heap misuse, leaked
     // objects, etc. It prints detailed messages to the VS Output window.
-    // Overhead is significant (can halve frame rate), so Debug-only.
+    // Overhead is significant (can halve frame rate), so it is on by default
+    // only in Debug builds; ENGINE_GPU_DEBUG overrides it (GraphicsDebugLayer.h).
     //
     // CRITICAL: EnableDebugLayer() must be called BEFORE any D3D12 or DXGI
     // object is created; enabling it afterwards has no effect and the runtime
     // will warn. That’s why it is literally the first thing we do here.
-#if defined(_DEBUG)
-    ComPtr<ID3D12Debug> debugController;
-    if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debugController))))
-        debugController->EnableDebugLayer();
-#endif
+    bool debugLayerActive = false;
+    if (IsGraphicsDebugLayerEnabled())
+    {
+        ComPtr<ID3D12Debug> debugController;
+        if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debugController))))
+        {
+            debugController->EnableDebugLayer();
+            debugLayerActive = true;
+        }
+    }
 
     // ---- DXGI factory ----
     // DXGI (DirectX Graphics Infrastructure) is the layer between D3D and the
     // OS display system. IDXGIFactory lets us enumerate GPUs and create swap
     // chains. DXGI_CREATE_FACTORY_DEBUG enables the DXGI validation layer
-    // alongside the D3D12 layer for richer diagnostics in Debug builds.
+    // alongside the D3D12 layer for richer diagnostics.
     ThrowIfFailed(CreateDXGIFactory2(
-#if defined(_DEBUG)
-        DXGI_CREATE_FACTORY_DEBUG,
-#else
-        0,
-#endif
+        debugLayerActive ? DXGI_CREATE_FACTORY_DEBUG : 0u,
         IID_PPV_ARGS(&m_factory)));
 
     // ---- Adapter enumeration ----

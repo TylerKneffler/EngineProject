@@ -45,6 +45,12 @@
       "configuration": "Release"
     },
     {
+      "name": "devoptimized",
+      "displayName": "Build Dev Optimized (RelWithDebInfo + Dynamic Debugging)",
+      "configurePreset": "debug",
+      "configuration": "RelWithDebInfo"
+    },
+    {
       "name": "export",
       "displayName": "Build Portable Export",
       "configurePreset": "export",

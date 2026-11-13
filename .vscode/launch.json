@@ -20,6 +20,25 @@
             }
         },
         {
+            "name": "Dev Optimized x64 (fast + breakpoints)",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/Debug/RelWithDebInfo/Editor.exe",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            // Set ENGINE_GPU_DEBUG to "1" to turn on D3D11/D3D12 validation.
+            "environment": [{ "name": "ENGINE_GPU_DEBUG", "value": "0" }],
+            "console": "internalConsole",
+            "preLaunchTask": "CMake: Build Editor Dev Optimized",
+            "symbolOptions": {
+                "searchPaths": [
+                    "${workspaceFolder}/build/Debug/lib/RelWithDebInfo",
+                    "${workspaceFolder}/build/Debug/.hotreload"
+                ]
+            }
+        },
+        {
             "name": "Release x64 (performance)",
             "type": "cppvsdbg",
             "request": "launch",

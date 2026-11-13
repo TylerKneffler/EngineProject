@@ -18,7 +18,9 @@ void LogD3D12BufferAddress(ID3D12Resource* resource,
     Engine::Graphics::IGraphicsBuffer::AccessMode access,
     uint64_t sizeBytes)
 {
-#if defined(_DEBUG)
+    if (!IsGraphicsDebugLayerEnabled())
+        return;
+
     static std::atomic<uint64_t> nextId{1};
     static std::mutex logMutex;
     const uint64_t id = nextId.fetch_add(1, std::memory_order_relaxed);
@@ -37,12 +39,6 @@ void LogD3D12BufferAddress(ID3D12Resource* resource,
             << " bytes=" << sizeBytes
             << " usage=" << static_cast<int>(usage)
             << " access=" << static_cast<int>(access) << '\n';
-#else
-    (void)resource;
-    (void)usage;
-    (void)access;
-    (void)sizeBytes;
-#endif
 }
 }
 

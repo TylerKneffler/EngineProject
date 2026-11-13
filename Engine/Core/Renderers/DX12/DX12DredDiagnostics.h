@@ -4,25 +4,26 @@
 #include <wrl/client.h>
 #include <algorithm>
 #include <sstream>
+#include "Core/Renderers/GraphicsDebugLayer.h"
 
 namespace Engine::Renderers
 {
 inline void EnableDredDiagnostics()
 {
-#if defined(_DEBUG)
+    if (!IsGraphicsDebugLayerEnabled())
+        return;
+
     Microsoft::WRL::ComPtr<ID3D12DeviceRemovedExtendedDataSettings> settings;
     if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&settings))))
     {
         settings->SetAutoBreadcrumbsEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
         settings->SetPageFaultEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
     }
-#endif
 }
 
 inline void AppendDredDiagnostics(ID3D12Device* device, std::ostream& output)
 {
-#if defined(_DEBUG)
-    if (!device)
+    if (!device || !IsGraphicsDebugLayerEnabled())
         return;
 
     Microsoft::WRL::ComPtr<ID3D12DeviceRemovedExtendedData> dred;
@@ -84,9 +85,5 @@ inline void AppendDredDiagnostics(ID3D12Device* device, std::ostream& output)
         appendAllocations("recently freed allocation",
             pageFault.pHeadRecentFreedAllocationNode);
     }
-#else
-    (void)device;
-    (void)output;
-#endif
 }
 }
