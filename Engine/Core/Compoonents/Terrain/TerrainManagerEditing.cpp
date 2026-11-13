@@ -28,34 +28,6 @@
 
 namespace Engine::Components
 {
-void TerrainManager::GroundOakObjects(Terrain& terrain)
-{
-    if (!proceduralOakMeadow || !terrain.Owner) return;
-    for (auto* child : terrain.Owner->Children)
-        if (child)
-            if (auto* objects = child->GetComponent<TerrainObjectLayer>();
-                objects && (objects->layerName == "Oak forest" ||
-                    objects->layerName == "Procedural meadow grass" ||
-                    objects->layerName == "Meadow grass"))
-            {
-                bool changed = false;
-                for (auto& placement : objects->placements)
-                {
-                    float height = placement.position.y;
-                    glm::vec3 normal = placement.normal;
-                    if (SampleTerrainSurface(terrain.heights, cellsX, cellsY,
-                        cellWidth, cellDepth, placement.position.x,
-                        placement.position.z, height, &normal) &&
-                        (height != placement.position.y || normal != placement.normal))
-                    {
-                        placement.position.y = height;
-                        placement.normal = normal;
-                        changed = true;
-                    }
-                }
-                if (changed) objects->MarkConfigurationDirty();
-            }
-}
 void TerrainManager::CaptureObjectLayers(Cell cell,
     const Engine::Core::Object& cellObject)
 {
@@ -255,7 +227,6 @@ void TerrainManager::Stitch(Cell cell)
             anyChanged = true;
             neighbor->Rebuild();
             neighbor->MarkConfigurationDirty();
-            GroundOakObjects(*neighbor);
             if (m_proceduralCells.count(neighborCell) && !cellDataDirectory.empty())
             {
                 m_editedProcedural.insert(neighborCell);
@@ -273,7 +244,6 @@ void TerrainManager::Stitch(Cell cell)
         anyChanged = true;
         terrain->Rebuild();
         terrain->MarkConfigurationDirty();
-        GroundOakObjects(*terrain);
         if (m_proceduralCells.count(cell) && !cellDataDirectory.empty())
         {
             m_editedProcedural.insert(cell);
@@ -333,7 +303,7 @@ bool TerrainManager::RemoveCell(int x, int y)
 }
 
 bool TerrainManager::ApplyBrush(double x, double z, float radius, float strength,
-    Terrain::Brush brush, int layer)
+    Terrain::Brush brush, int layer, bool realignObjects)
 {
     if (Owner && Owner->GetScene() && Owner->GetScene()->HasStarted()) return false;
     if (!std::isfinite(x) || !std::isfinite(z) || !std::isfinite(radius) ||
@@ -377,7 +347,7 @@ bool TerrainManager::ApplyBrush(double x, double z, float radius, float strength
             if (terrain->ApplyBrush(
                 static_cast<float>(static_cast<double>(x) - cell.first * spanX),
                 static_cast<float>(static_cast<double>(z) - cell.second * spanZ),
-                radius, strength, brush, layer))
+                radius, strength, brush, layer, realignObjects))
                 changedCells.insert(cell);
     if (changedCells.empty()) return false;
 
@@ -451,7 +421,6 @@ bool TerrainManager::ApplyBrush(double x, double z, float radius, float strength
     for (Cell cell : changedCells)
     {
         auto* terrain = GetLoadedCell(cell.first, cell.second);
-        if (brush != Terrain::Brush::Paint) GroundOakObjects(*terrain);
         if (m_proceduralCells.count(cell) && !cellDataDirectory.empty())
         {
             m_editedProcedural.insert(cell);

@@ -600,7 +600,9 @@ void TerrainManager::PrepareLoop()
                         layer->placements.push_back(std::move(placement));
                     }
                 }
-                if (task.proceduralOakMeadow && name == "Oak forest")
+                // Ground generated oaks once; saved placements keep the
+                // height they were authored at.
+                if (saved.IsNull() && task.proceduralOakMeadow && name == "Oak forest")
                 {
                     for (auto& placement : layer->placements)
                         SampleTerrainSurface(result.terrain.heights, task.cellsX,
@@ -717,7 +719,6 @@ int TerrainManager::CommitPrepared(int centerX, int centerY, int radius,
         RestoreObjectLayers(cell, *object);
         const auto sceneInstalled = std::chrono::steady_clock::now();
         Stitch(cell);
-        GroundOakObjects(*terrain);
         const auto stitched = std::chrono::steady_clock::now();
         const auto lodInstalled = std::chrono::steady_clock::now();
         terrain->FinalizePreparedGraphics(m_provider);
@@ -969,7 +970,6 @@ void TerrainManager::LoadCell(Cell cell, int lodStride)
     m_loaded[cell] = terrain;
     RestoreObjectLayers(cell, *object);
     Stitch(cell);
-    GroundOakObjects(*terrain);
     terrain->SetMeshLodStride(lodStride);
     ConfigureCellPhysics(*object);
 }

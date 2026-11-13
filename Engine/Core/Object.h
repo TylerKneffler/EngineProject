@@ -61,6 +61,9 @@ public:
 
     std::string name;
     bool enabled = true;
+    // Editor-only, never serialized: hides an object (and its children) from
+    // rendering, picking and update without touching the authored state.
+    bool editorHidden = false;
     // Editor viewport overlays are transient and start hidden for each object.
     enum EditorOverlay : uint8_t { PositionOverlay = 1, RotationOverlay = 2,
         ScaleOverlay = 4, BoneOverlay = 8, SkeletonOverlay = 16,
@@ -137,7 +140,7 @@ public:
     bool IsEnabledInHierarchy() const
     {
         for (const Object* current = this; current; current = current->Parent)
-            if (!current->enabled)
+            if (!current->enabled || current->editorHidden)
                 return false;
         return true;
     }

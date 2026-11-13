@@ -643,6 +643,21 @@ void EditorState::WireupCallbacks()
         SelectObject(obj);
     };
     m_viewFactory->OnDeleteSelectionRequested = [this]() {
+        // A selected terrain placement is a record in its layer, not an
+        // object: delete the record and drop the selection proxy with it.
+        if (Engine::Scene::Scene* scene = GetActiveDocumentScene())
+            if (auto* selected = scene->GetSelectedObject())
+                if (auto* handle = selected->GetComponent<
+                        Engine::Components::TerrainPlacementHandle>())
+                {
+                    if (handle->RemovePlacement())
+                    {
+                        m_hasUnsavedChanges = true;
+                        MarkSceneEdited();
+                    }
+                    SelectObject(nullptr);
+                    return;
+                }
         if (m_prefabDocumentFocused)
         {
             if (m_primaryHierarchy)

@@ -240,7 +240,7 @@ public:
     { return {m_editedProcedural.begin(), m_editedProcedural.end()}; }
     bool RemoveCell(int x, int y);
     bool ApplyBrush(double x, double z, float radius, float strength,
-        Terrain::Brush brush, int layer = 0);
+        Terrain::Brush brush, int layer = 0, bool realignObjects = false);
     void SyncLoadedCells(int centerX, int centerY);
     void UpdateStreaming(int centerX, int centerY);
     void UpdateStreamingAtPosition(const glm::dvec3& worldPosition);
@@ -263,7 +263,6 @@ private:
     std::string m_newObjectLayerName = "Objects";
     void RestoreObjectLayers(Cell cell, Engine::Core::Object& cellObject);
     void CaptureObjectLayers(Cell cell, const Engine::Core::Object& cellObject);
-    void GroundOakObjects(Terrain& terrain);
     std::set<Cell> m_proceduralCells;
     std::set<Cell> m_editedProcedural;
     mutable std::set<Cell> m_dirtyProceduralEdits;

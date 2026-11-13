@@ -20,6 +20,12 @@ public:
         const Engine::Core::Object* terrainRoot,
         const EditorUiVec2& mousePos, const EditorUiVec2& viewportSize,
         glm::vec3& placement, glm::vec3& normal);
+    // Sculpt/paint brush target: the nearest height-field hit among enabled
+    // Terrain cells at or below terrainRoot, in world space.
+    static bool FindTerrainSurfaceHit(const Engine::Scene::Scene& scene,
+        const Engine::Core::Object* terrainRoot,
+        const EditorUiVec2& mousePos, const EditorUiVec2& viewportSize,
+        glm::dvec3& hit);
     // Returns the last completed hover only while its camera, pose, and scene
     // snapshot still match. A new query is queued when any input changes.
     static Engine::Core::Object* PickObjectHoverAsync(

@@ -26,6 +26,7 @@
 #include "Core/Rendering/RenderSpatialIndex.h"
 #include "Core/Rendering/AutomaticInstancing.h"
 #include "Core/Scene/Rendering/SceneRenderer/ScenePerformanceHeat.h"
+#include "Core/Compoonents/Terrain/TerrainPlacementHandle.h"
 #include "Core/Physics/Physics.h"
 #include "Core/Scene/Spatial/WarpVolume.h"
 #include <glm/glm.hpp>
@@ -528,6 +529,15 @@ public:
         m_selectedObject = obj;
         m_selectedPlacementId = 0;
         m_selectedPlacementLayer = nullptr;
+        // A terrain placement proxy selects (and outlines) its single
+        // instance, whichever UI path made the selection.
+        if (const auto* handle = obj
+                ? obj->GetComponent<Engine::Components::TerrainPlacementHandle>() : nullptr;
+            handle && handle->placementId != 0 && obj->Parent)
+        {
+            m_selectedPlacementId = handle->placementId;
+            m_selectedPlacementLayer = obj->Parent;
+        }
     }
     Object* GetSelectedObject() const { return m_selectedObject; }
     void SetSelectedPlacementId(uint64_t id, Object* layer = nullptr)

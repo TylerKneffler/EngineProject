@@ -25,7 +25,7 @@ public:
         float maxHeight = 10.f;
         glm::vec3 previewColor{.35f, .55f, .25f};
     };
-    enum class Brush { Raise, Lower, Average, Blend, Paint };
+    enum class Brush { Raise, Lower, Blend, Paint };
     struct BakedAppearance
     {
         float normal[3];
@@ -61,11 +61,19 @@ public:
     std::string bakedAssetPath;
     void Resize(int x, int y, float width, float depth);
     void AssignLayersByHeight();
+    // Sculpting carries resting placements up/down with the surface. With
+    // realignObjects, placements that were aligned to the old surface also
+    // tilt to the new one; otherwise orientation is left as painted.
     bool ApplyBrush(float x, float z, float radius, float strength,
-        Brush brush, int layer = 0);
+        Brush brush, int layer = 0, bool realignObjects = false);
     bool ApplyBrushFromLocalRay(const glm::vec3& nearPoint,
         const glm::vec3& farPoint, float radius, float strength,
         Brush brush, int layer = 0);
+    // Intersects a terrain-local ray with the height field (the same two
+    // triangles per cell that Rebuild meshes). distance is in units of
+    // direction, so an affine-transformed world ray keeps its parameter.
+    bool RaycastLocal(const glm::vec3& origin, const glm::vec3& direction,
+        float& distance) const;
     void Rebuild();
     void SetMeshLodStride(int stride);
     int GetMeshLodStride() const { return m_meshLodStride; }

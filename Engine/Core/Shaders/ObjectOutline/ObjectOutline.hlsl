@@ -102,12 +102,6 @@ void VSMain(
 {
     ObjectData objectData = objects[draw.objectIndex];
     float4 localPosition = float4(pos, 1.0);
-    if ((draw.drawFlags & 0x20000000u) != 0u)
-    {
-        InstanceTransform instance = meshInstances[instanceId];
-        localPosition = float4(dot(instance.row0, localPosition),
-            dot(instance.row1, localPosition), dot(instance.row2, localPosition), 1.0);
-    }
     uint activeMorphCount = (uint)objectData.morphParams.x;
     uint morphVertexCount = (uint)objectData.morphParams.y;
     uint morphStride = (uint)objectData.morphParams.w;
@@ -127,7 +121,17 @@ void VSMain(
             joints0, weights0, joints1, weights1, sdefCenterAndMode,
             sdefRadius0, sdefRadius1, paletteOffset, jointCount);
     }
+    // Inflate about the mesh pivot. For instanced batches this must happen
+    // before the instance transform: afterwards the position is in layer
+    // space, and scaling there shifts every outline away from the layer
+    // origin (3% of each placement's distance from it).
     localPosition.xyz *= 1.03;
+    if ((draw.drawFlags & 0x20000000u) != 0u)
+    {
+        InstanceTransform instance = meshInstances[instanceId];
+        localPosition = float4(dot(instance.row0, localPosition),
+            dot(instance.row1, localPosition), dot(instance.row2, localPosition), 1.0);
+    }
     const float4 worldPosition = mul(objectData.world, localPosition);
     oPos = mul(objectData.viewProjection, worldPosition);
 }

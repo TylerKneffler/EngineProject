@@ -628,6 +628,35 @@ bool ScenePlacementAndPicking::FindTerrainPlacement(
     return found;
 }
 
+bool ScenePlacementAndPicking::FindTerrainSurfaceHit(
+    const Engine::Scene::Scene& scene, const Engine::Core::Object* terrainRoot,
+    const EditorUiVec2& mousePos, const EditorUiVec2& viewportSize,
+    glm::dvec3& hit)
+{
+    glm::vec3 origin{}, direction{};
+    if (!terrainRoot || !BuildViewportRay(scene, mousePos, viewportSize,
+            origin, direction)) return false;
+    float nearest = FLT_MAX;
+    for (const auto& entry : scene.GetObjects())
+    {
+        auto* object = entry.get();
+        auto* terrain = object && object->IsEnabledInHierarchy() &&
+            IsInObjectHierarchy(object, terrainRoot)
+            ? object->GetComponent<Engine::Components::Terrain>() : nullptr;
+        if (!terrain) continue;
+        const glm::dmat4 toLocal = glm::inverse(object->transform.GetWorldMatrixD());
+        const glm::vec3 localOrigin(toLocal * glm::dvec4(glm::dvec3(origin), 1.0));
+        const glm::vec3 localDirection(toLocal * glm::dvec4(glm::dvec3(direction), 0.0));
+        float distance = 0.f;
+        if (terrain->RaycastLocal(localOrigin, localDirection, distance) &&
+            distance > 0.f && distance < nearest)
+            nearest = distance;
+    }
+    if (nearest == FLT_MAX) return false;
+    hit = glm::dvec3(origin) + glm::dvec3(direction) * static_cast<double>(nearest);
+    return true;
+}
+
 void ScenePlacementAndPicking::ClearCaches()
 {
     skinnedEntries.clear();

@@ -1,8 +1,11 @@
 #pragma once
 #include <algorithm>
+#include <set>
+#include <string>
 #include "View/View.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 #include "Core/Scene/Scene.h"
+#include "Core/Compoonents/Terrain/Terrain.h"
 #include "Core/ProjectLoader.h"
 #include "Engine/Editor/Core/Gizmos/EditorGizmoSystem.h"
 #include "Scene/SceneViewportToolbar.h"
@@ -151,6 +154,10 @@ private:
     void CommitPrefabPreview();
     bool m_focusOnNextDraw = false;
     SceneEditMode m_editMode = SceneEditMode::Object;
+    // Toolbar brush index: Terrain::Brush values, then the object painter.
+    static constexpr int kPaintBrush =
+        static_cast<int>(Engine::Components::Terrain::Brush::Paint);
+    static constexpr int kObjectBrush = kPaintBrush + 1;
     int m_terrainBrush = 0;
     int m_terrainObjectDisplayLod = -1;
     int m_sceneRenderMode = 0;
@@ -160,9 +167,24 @@ private:
     bool m_editTerrainCells = false;
     std::string m_terrainObjectPrefab;
     bool m_terrainAlignObjects = true;
+    // Sculpt brushes: tilt surface-aligned placements to the reshaped ground.
+    bool m_terrainRealignObjects = false;
     float m_terrainObjectSpacing = 2.f;
     glm::vec3 m_lastTerrainObjectPosition{0.f};
     bool m_terrainObjectStroke = false;
+    // True while a sculpt/paint stroke or cell edit is changing terrain, so
+    // the edit is reported like a gizmo drag (undo + unsaved changes).
+    bool m_terrainEditActive = false;
+    // Runtime-only proxy standing in for a selected TerrainObjectLayer placement.
+    Engine::Scene::Scene::ObjectId m_placementProxy = 0;
+    void SynchronizePlacementProxy();
+    // Editor-only visibility of terrain object layers (trees, grass, rocks...),
+    // keyed by layer name so it covers every streamed cell. Applied only while
+    // terrain tools are active; leaving them shows everything again.
+    std::set<std::string> m_hiddenTerrainLayers;
+    bool m_hideAllTerrainLayers = false;
+    bool m_terrainLayersHiddenApplied = false;
+    void ApplyTerrainLayerVisibility(Engine::Core::Object* terrainRoot);
     bool m_modelManipulation = false;
     int m_modelSelectionMode = 2;
     int m_modelAction = 0;

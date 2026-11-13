@@ -15,6 +15,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <type_traits>
 
 namespace
@@ -219,7 +220,7 @@ void Terrain::AssignLayersByHeight()
 }
 
 bool Terrain::ApplyBrush(float x, float z, float radius, float strength,
-    Brush brush, int layer)
+    Brush brush, int layer, bool realignObjects)
 {
     if (Owner && Owner->GetScene() && Owner->GetScene()->HasStarted()) return false;
     if (radius <= 0.f || strength <= 0.f || heights.empty()) return false;
@@ -248,8 +249,9 @@ bool Terrain::ApplyBrush(float x, float z, float radius, float strength,
                 float target = before[i];
                 if (brush == Brush::Raise) target += amount;
                 if (brush == Brush::Lower) target -= amount;
-                if (brush == Brush::Average || brush == Brush::Blend)
+                if (brush == Brush::Blend)
                 {
+                    // Smooth toward the 3x3 neighborhood mean.
                     float sum = 0.f; int count = 0;
                     for (int oy = -1; oy <= 1; ++oy)
                         for (int ox = -1; ox <= 1; ++ox)
@@ -258,11 +260,7 @@ bool Terrain::ApplyBrush(float x, float z, float radius, float strength,
                             if (nx >= 0 && nx <= cellsX && ny >= 0 && ny <= cellsY)
                             { sum += before[ny * (cellsX + 1) + nx]; ++count; }
                         }
-                    const float average = sum / count;
-                    target = brush == Brush::Average ? average :
-                        before[i] + (average - before[i]) * amount;
-                    if (brush == Brush::Average)
-                        target = before[i] + (target - before[i]) * amount;
+                    target = before[i] + (sum / count - before[i]) * amount;
                 }
                 changed |= target != heights[i]; heights[i] = target;
             }
@@ -272,44 +270,132 @@ bool Terrain::ApplyBrush(float x, float z, float radius, float strength,
         NormalizeWeights(); Rebuild(); MarkConfigurationDirty();
         if (brush != Brush::Paint && Owner)
             for (auto* child : Owner->Children)
-                if (child)
-                    if (auto* objects = child->GetComponent<TerrainObjectLayer>(); objects &&
-                        (objects->layerName == "Meadow grass" ||
-                            objects->layerName == "Procedural meadow grass"))
+                if (auto* objects = child ? child->GetComponent<TerrainObjectLayer>() : nullptr)
+                {
+                    // Sculpting moves placements vertically; orientation
+                    // changes only when the brush's realign option is on.
+                    // Generated meadow grass always hugs the ground. Any other
+                    // placement follows the surface only if it was resting on
+                    // the old surface, keeping its own offset; objects lifted
+                    // or sunk on purpose stay where they are.
+                    const bool alwaysSnap = objects->layerName == "Meadow grass" ||
+                        objects->layerName == "Procedural meadow grass";
+                    const glm::mat4 layerToCell = child->transform.GetLocalMatrix();
+                    const glm::mat4 cellToLayer = glm::inverse(layerToCell);
+                    constexpr float restingTolerance = .05f;
+                    bool placementsChanged = false;
+                    for (auto& placement : objects->placements)
                     {
-                        bool placementsChanged = false;
-                        for (auto& placement : objects->placements)
+                        glm::vec3 cell = glm::vec3(layerToCell * glm::vec4(placement.position, 1.f));
+                        const float dx = cell.x - x, dz = cell.z - z;
+                        if (dx * dx + dz * dz >= radius * radius) continue;
+                        float oldHeight = cell.y, newHeight = cell.y;
+                        glm::vec3 oldNormal(0.f, 1.f, 0.f), newNormal(0.f, 1.f, 0.f);
+                        if (!SampleTerrainSurface(before, cellsX, cellsY, cellWidth,
+                                cellDepth, cell.x, cell.z, oldHeight, &oldNormal) ||
+                            !SampleTerrainSurface(heights, cellsX, cellsY, cellWidth,
+                                cellDepth, cell.x, cell.z, newHeight, &newNormal))
+                            continue;
+                        if (!alwaysSnap && std::abs(cell.y - oldHeight) > restingTolerance)
+                            continue;
+                        cell.y = alwaysSnap ? newHeight : newHeight + (cell.y - oldHeight);
+                        const glm::vec3 position = glm::vec3(cellToLayer * glm::vec4(cell, 1.f));
+                        // Ground-conforming layers stay upright and use the
+                        // normal only to shear their base onto the slope, so
+                        // it always tracks the surface. With realignment on,
+                        // placements painted aligned to the old surface tilt
+                        // with it; upright ones stay upright either way.
+                        const glm::vec3 layerOldNormal = glm::normalize(
+                            glm::vec3(cellToLayer * glm::vec4(oldNormal, 0.f)));
+                        const bool realign = objects->conformToGround ||
+                            (realignObjects && (alwaysSnap ||
+                                (placement.normal != glm::vec3(0.f, 1.f, 0.f) &&
+                                    glm::dot(placement.normal, layerOldNormal) > .999f)));
+                        const glm::vec3 normal = realign
+                            ? glm::normalize(glm::vec3(cellToLayer * glm::vec4(newNormal, 0.f)))
+                            : placement.normal;
+                        if (position != placement.position || normal != placement.normal)
                         {
-                            const float dx = placement.position.x - x;
-                            const float dz = placement.position.z - z;
-                            if (dx * dx + dz * dz >= radius * radius) continue;
-                            float height = placement.position.y;
-                            glm::vec3 normal = placement.normal;
-                            if (SampleTerrainSurface(heights, cellsX, cellsY,
-                                cellWidth, cellDepth, placement.position.x,
-                                placement.position.z, height, &normal) &&
-                                (height != placement.position.y || normal != placement.normal))
-                            {
-                                placement.position.y = height;
-                                placement.normal = normal;
-                                placementsChanged = true;
-                            }
+                            placement.position = position;
+                            placement.normal = normal;
+                            placementsChanged = true;
                         }
-                        if (placementsChanged) objects->MarkConfigurationDirty();
                     }
+                    if (placementsChanged) objects->MarkConfigurationDirty();
+                }
     }
     return changed;
+}
+
+bool Terrain::RaycastLocal(const glm::vec3& origin, const glm::vec3& direction,
+    float& distance) const
+{
+    if (heights.size() != static_cast<size_t>(cellsX + 1) * (cellsY + 1) ||
+        cellWidth <= 0.f || cellDepth <= 0.f) return false;
+    const float length = glm::length(direction);
+    if (!(length > 1.e-8f)) return false;
+    const auto [lowest, highest] = std::minmax_element(heights.begin(), heights.end());
+    const glm::vec3 minimum(0.f, *lowest - .01f, 0.f);
+    const glm::vec3 maximum(cellsX * cellWidth, *highest + .01f, cellsY * cellDepth);
+    float enter = 0.f, exit = std::numeric_limits<float>::max();
+    for (int axis = 0; axis < 3; ++axis)
+    {
+        if (std::abs(direction[axis]) < 1.e-12f)
+        {
+            if (origin[axis] < minimum[axis] || origin[axis] > maximum[axis]) return false;
+            continue;
+        }
+        float a = (minimum[axis] - origin[axis]) / direction[axis];
+        float b = (maximum[axis] - origin[axis]) / direction[axis];
+        if (a > b) std::swap(a, b);
+        enter = std::max(enter, a);
+        exit = std::min(exit, b);
+        if (enter > exit) return false;
+    }
+    const auto clearance = [&](float t) {
+        const glm::vec3 point = origin + direction * t;
+        float height = point.y;
+        SampleTerrainSurface(heights, cellsX, cellsY, cellWidth, cellDepth,
+            point.x, point.z, height);
+        return point.y - height;
+    };
+    float previousT = enter;
+    if (clearance(enter) <= 0.f)
+    {
+        // Entering through a side wall below the surface is a hit; starting
+        // underground (camera inside the bounds) is not.
+        if (enter <= 0.f) return false;
+        distance = enter;
+        return true;
+    }
+    // Quarter-cell steps cannot skip a triangle; bisection then refines.
+    const float step = .25f * std::min(cellWidth, cellDepth) / length;
+    for (float t = enter + step;; t += step)
+    {
+        t = std::min(t, exit);
+        if (clearance(t) <= 0.f)
+        {
+            float above = previousT, below = t;
+            for (int iteration = 0; iteration < 24; ++iteration)
+            {
+                const float middle = .5f * (above + below);
+                (clearance(middle) > 0.f ? above : below) = middle;
+            }
+            distance = below;
+            return true;
+        }
+        if (t >= exit) return false;
+        previousT = t;
+    }
 }
 
 bool Terrain::ApplyBrushFromLocalRay(const glm::vec3& nearPoint,
     const glm::vec3& farPoint, float radius, float strength,
     Brush brush, int layer)
 {
-    const glm::vec3 direction = farPoint - nearPoint;
-    if (std::abs(direction.y) <= .00001f) return false;
-    const float t = -nearPoint.y / direction.y;
-    if (t < 0.f || t > 1.f) return false;
-    const glm::vec3 hit = nearPoint + direction * t;
+    float t = 0.f;
+    if (!RaycastLocal(nearPoint, farPoint - nearPoint, t) || t > 1.f) return false;
+    const glm::vec3 hit = nearPoint + (farPoint - nearPoint) * t;
     if (hit.x < 0.f || hit.z < 0.f ||
         hit.x > cellsX * cellWidth || hit.z > cellsY * cellDepth)
         return false;
