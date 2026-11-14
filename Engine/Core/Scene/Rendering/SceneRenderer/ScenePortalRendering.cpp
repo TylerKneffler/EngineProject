@@ -632,8 +632,12 @@ void ScenePortalRendering::Render(ScenePortalRenderingContext& input)
         auto resolveStencilReadPipeline =
             [&](Engine::Graphics::IPipelineState* base)
         {
-            if (base == scene.m_objectPipeline.get())
+            // Depth-offset parallax falls back to flat depth inside portals.
+            if (base == scene.m_objectPipeline.get() ||
+                base == scene.m_objectParallaxDepthPipelines[0].get())
                 return scene.m_objectPortalStencilReadPipeline.get();
+            if (base == scene.m_objectParallaxDepthPipelines[1].get())
+                return scene.m_objectPortalStencilReadDoubleSidedPipeline.get();
             if (base == scene.m_objectDoubleSidedPipeline.get())
                 return scene.m_objectPortalStencilReadDoubleSidedPipeline.get();
             if (base == scene.m_objectBlendPipeline.get())

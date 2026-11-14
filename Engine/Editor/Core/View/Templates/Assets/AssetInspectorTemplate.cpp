@@ -667,6 +667,14 @@ void AssetInspectorTemplate::Draw(IEditorUi& ui, Engine::Scene::Scene* scene)
                 changed |= ui.DragFloat("Height Scale", &material.heightScale,
                     0.001f, 0.f, 0.2f);
                 changed |= ui.Checkbox("Height Is Depth", &material.heightIsDepth);
+                changed |= ui.Checkbox("Relief Self-Shadow", &material.parallaxSelfShadow);
+                if (material.parallaxSelfShadow)
+                    changed |= ui.DragFloat("Relief Shadow Strength",
+                        &material.parallaxShadowStrength, 0.01f, 0.f, 1.f);
+                changed |= ui.Checkbox("Clip Parallax To 0..1 UV", &material.parallaxClampUv);
+                changed |= ui.Checkbox("Parallax Depth Offset", &material.parallaxDepthOffset);
+                // Not saved: a live view of fetches per pixel for tuning steps.
+                ui.Checkbox("Show Parallax Cost", &material.parallaxCostView);
                 changed |= ui.DragFloat("Height Min Steps", &material.heightMinSteps,
                     1.f, 4.f, 64.f);
                 changed |= ui.DragFloat("Height Max Steps", &material.heightMaxSteps,

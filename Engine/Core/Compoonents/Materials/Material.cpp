@@ -61,9 +61,14 @@ Material::Material()
     RegisterField("normalScale", normalScale, "Height and Normal", false);
     RegisterField("heightScale", heightScale, "Height and Normal", false);
     RegisterField("heightIsDepth", heightIsDepth, "Height and Normal", false);
+    RegisterField("parallaxSelfShadow", parallaxSelfShadow, "Height and Normal", false);
+    RegisterField("parallaxShadowStrength", parallaxShadowStrength, "Height and Normal", false);
+    RegisterField("parallaxClampUv", parallaxClampUv, "Height and Normal", false);
+    RegisterField("parallaxDepthOffset", parallaxDepthOffset, "Height and Normal", false);
     RegisterField("terrainHeightBlendStrength", terrainHeightBlendStrength,
         "Terrain", false);
     RegisterField("terrainMacroColor", terrainMacroColor, "Terrain", false);
+    RegisterField("terrainUvScale", terrainUvScale, "Terrain", false);
     RegisterField("heightMinSteps", heightMinSteps, "Height and Normal", false);
     RegisterField("heightMaxSteps", heightMaxSteps, "Height and Normal", false);
     RegisterField("baseColorUvSet", baseColorUvSet, "Texture Coordinates", false);
@@ -168,7 +173,9 @@ bool Material::LoadFromFile(const std::string& path)
 {
     try
     {
-        const JsonValue root = Engine::Serialization::JsonParseFile(path);
+        // Scenes store project-relative paths ("Assets/Materials/x.material");
+        // resolve them like textures and meshes instead of against the CWD.
+        const JsonValue root = Engine::Serialization::JsonParseFile(ResolveTexturePath(path));
         overrideTextureLod = false;
         textureLod = {};
         shader = ReadSurfaceShader(root);
@@ -251,9 +258,16 @@ bool Material::LoadFromFile(const std::string& path)
         if (root.Has("normalScale")) normalScale = root["normalScale"].AsFloat();
         if (root.Has("heightScale")) heightScale = root["heightScale"].AsFloat();
         if (root.Has("heightIsDepth")) heightIsDepth = root["heightIsDepth"].AsBool();
+        if (root.Has("parallaxSelfShadow")) parallaxSelfShadow = root["parallaxSelfShadow"].AsBool();
+        if (root.Has("parallaxShadowStrength"))
+            parallaxShadowStrength = root["parallaxShadowStrength"].AsFloat();
+        if (root.Has("parallaxClampUv")) parallaxClampUv = root["parallaxClampUv"].AsBool();
+        if (root.Has("parallaxDepthOffset"))
+            parallaxDepthOffset = root["parallaxDepthOffset"].AsBool();
         if (root.Has("terrainHeightBlendStrength"))
             terrainHeightBlendStrength = root["terrainHeightBlendStrength"].AsFloat();
         terrainMacroColor = from3(root["terrainMacroColor"], terrainMacroColor);
+        if (root.Has("terrainUvScale")) terrainUvScale = root["terrainUvScale"].AsFloat();
         if (root.Has("heightMinSteps")) heightMinSteps = root["heightMinSteps"].AsFloat();
         if (root.Has("heightMaxSteps")) heightMaxSteps = root["heightMaxSteps"].AsFloat();
         if (root.Has("occlusionStrength")) occlusionStrength = root["occlusionStrength"].AsFloat();
@@ -348,8 +362,14 @@ bool Material::SaveToFile(const std::string& path) const
     root.Set("normalScale", JsonValue(normalScale));
     root.Set("heightScale", JsonValue(heightScale));
     if (heightIsDepth) root.Set("heightIsDepth", JsonValue(true));
+    if (parallaxSelfShadow) root.Set("parallaxSelfShadow", JsonValue(true));
+    if (parallaxSelfShadow || parallaxShadowStrength != 1.f)
+        root.Set("parallaxShadowStrength", JsonValue(parallaxShadowStrength));
+    if (parallaxClampUv) root.Set("parallaxClampUv", JsonValue(true));
+    if (parallaxDepthOffset) root.Set("parallaxDepthOffset", JsonValue(true));
     root.Set("terrainHeightBlendStrength", JsonValue(terrainHeightBlendStrength));
     root.Set("terrainMacroColor", J3(terrainMacroColor));
+    if (terrainUvScale != 1.f) root.Set("terrainUvScale", JsonValue(terrainUvScale));
     root.Set("heightMinSteps", JsonValue(heightMinSteps));
     root.Set("heightMaxSteps", JsonValue(heightMaxSteps));
     root.Set("occlusionStrength", JsonValue(occlusionStrength));
@@ -541,7 +561,7 @@ void Material::Validate()
 {
     // Public fields can change without configuration notifications. Keep this
     // normalized-input snapshot in sync with every clamp below.
-    const auto captureFloats=[&] { return std::array<float,29>{
+    const auto captureFloats=[&] { return std::array<float,31>{
         metallicFactor, roughnessFactor, subsurfaceWeight,
         subsurfaceRadius[0], subsurfaceRadius[1], subsurfaceRadius[2],
         subsurfaceColor[0], subsurfaceColor[1], subsurfaceColor[2],
@@ -549,8 +569,9 @@ void Material::Validate()
         reflectionStrength, reflectionEnvironmentExposure, baseColorAlpha, alphaCutoff,
         normalScale, heightScale, terrainHeightBlendStrength,
         terrainMacroColor[0], terrainMacroColor[1], terrainMacroColor[2],
-        heightMinSteps, heightMaxSteps, occlusionStrength,
-        textureLod.nearDistance, textureLod.farDistance, textureLod.mipBias, textureLod.alphaMipBias}; };
+        heightMinSteps, heightMaxSteps, occlusionStrength, parallaxShadowStrength,
+        textureLod.nearDistance, textureLod.farDistance, textureLod.mipBias, textureLod.alphaMipBias,
+        terrainUvScale}; };
     const auto captureUvSets=[&] { return std::array<int,6>{baseColorUvSet,
         metallicRoughnessUvSet, normalUvSet, occlusionUvSet, emissiveUvSet, heightUvSet}; };
     if(m_validationCached && (specularModel=="BlinnPhong" || specularModel=="MetallicRoughness") &&
@@ -577,9 +598,11 @@ void Material::Validate()
     terrainHeightBlendStrength = std::clamp(terrainHeightBlendStrength, 0.f, 1.f);
     terrainMacroColor = glm::clamp(terrainMacroColor,
         glm::vec3(0.f), glm::vec3(1.f));
+    terrainUvScale = std::clamp(terrainUvScale, 0.05f, 16.f);
     heightMinSteps = std::clamp(heightMinSteps, 4.f, 64.f);
     heightMaxSteps = std::clamp(heightMaxSteps, heightMinSteps, 64.f);
     occlusionStrength = std::clamp(occlusionStrength, 0.f, 1.f);
+    parallaxShadowStrength = std::clamp(parallaxShadowStrength, 0.f, 1.f);
     baseColorUvSet = std::clamp(baseColorUvSet, 0, 9);
     metallicRoughnessUvSet = std::clamp(metallicRoughnessUvSet, 0, 9);
     normalUvSet = std::clamp(normalUvSet, 0, 9);

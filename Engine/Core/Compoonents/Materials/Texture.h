@@ -76,7 +76,7 @@ public:
     GraphicsTextureFormat GetFormat() const { return m_format; }
     bool HasPixels() const { return !m_pixels.empty(); }
     // Decode on demand for editor tools after the render upload has released
-    // its CPU copy.
+    // its CPU copy. Always RGBA8 (or RGBA32F), even when the GPU copy is BC.
     const std::vector<uint8_t>& GetPixels() const;
     bool IsSrgb() const { return m_srgb; }
     const IGraphicsTexture* GetGraphicsTexture() const { return m_graphicsTexture.get(); }
@@ -101,6 +101,9 @@ private:
     GraphicsTextureFormat m_format = GraphicsTextureFormat::Rgba8;
     bool m_srgb = true;
     bool m_generateMips = true;
+    // Decode to RGBA8 even when the source holds GPU block-compressed data.
+    bool m_cpuRgba = false;
+    mutable std::shared_ptr<Texture> m_cpuCopy;
     bool m_retainPixelsForCpu = false;
     IGraphicsProvider* m_preparedProvider = nullptr;
     std::shared_ptr<IGraphicsTexture> m_graphicsTexture;

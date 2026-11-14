@@ -419,16 +419,8 @@ uint64_t TerrainManager::GetTerrainTextureMemoryBytes() const
     const auto countTexture = [&](const std::shared_ptr<Texture>& texture) {
         if (!texture || !texture->GetGraphicsTexture() ||
             !unique.insert(texture.get()).second) return;
-        uint32_t width = texture->GetWidth();
-        uint32_t height = texture->GetHeight();
-        const uint32_t pixelBytes =
-            Engine::Graphics::GraphicsTextureBytesPerPixel(texture->GetFormat());
-        for (uint32_t level = 0; level < texture->GetMipLevels(); ++level)
-        {
-            bytes += static_cast<uint64_t>(width) * height * pixelBytes;
-            width = std::max(1u, width / 2);
-            height = std::max(1u, height / 2);
-        }
+        bytes += Engine::Graphics::GraphicsTextureChainBytes(texture->GetFormat(),
+            texture->GetWidth(), texture->GetHeight(), texture->GetMipLevels());
     };
     for (const auto& [cell, terrain] : m_loaded)
         if (terrain && terrain->Owner)

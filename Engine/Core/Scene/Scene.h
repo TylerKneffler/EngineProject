@@ -889,6 +889,8 @@ private:
 
     std::unique_ptr<IPipelineState> m_objectPipeline;
     std::unique_ptr<IPipelineState> m_objectDoubleSidedPipeline;
+    // [doubleSided]: opaque materials with parallaxDepthOffset.
+    std::array<std::unique_ptr<IPipelineState>, 2> m_objectParallaxDepthPipelines;
     std::array<std::unique_ptr<IPipelineState>, 2> m_foliageDepthPipelines;
     std::array<std::unique_ptr<IPipelineState>, 2> m_foliageEqualPipelines;
     std::unique_ptr<IPipelineState> m_objectBlendPipeline;

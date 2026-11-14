@@ -68,13 +68,22 @@ public:
         uint32_t width, uint32_t height, const uint8_t* rgbaPixels,
         uint32_t mipLevels, Engine::Graphics::GraphicsTextureFormat format,
         bool srgb = true) override;
+    std::shared_ptr<Engine::Graphics::IGraphicsTexture> CreateTexture2DArray(
+        uint32_t width, uint32_t height, uint32_t layers, const uint8_t* pixels,
+        uint32_t mipLevels, Engine::Graphics::GraphicsTextureFormat format,
+        bool srgb = true) override;
     std::shared_ptr<Engine::Graphics::IGraphicsTexture> CreateDepthTexture2D(
         uint32_t width, uint32_t height) override;
     std::shared_ptr<Engine::Graphics::IGraphicsTexture> GetNullTexture();
+    std::shared_ptr<Engine::Graphics::IGraphicsTexture> GetNullArrayTexture();
 
 private:
     struct DescriptorSlots { std::mutex mutex; std::vector<uint32_t> free; };
     std::shared_ptr<DescriptorSlots> m_slots = std::make_shared<DescriptorSlots>();
+    std::shared_ptr<Engine::Graphics::IGraphicsTexture> Create(
+        uint32_t width, uint32_t height, uint32_t layers, bool asArray,
+        const uint8_t* pixels, uint32_t mipLevels,
+        Engine::Graphics::GraphicsTextureFormat format, bool srgb);
     uint32_t AllocateDescriptor();
     void OwnDescriptor(const std::shared_ptr<D3D12GraphicsTexture>&, uint32_t);
     struct PendingUpload
@@ -96,5 +105,6 @@ private:
     uint32_t m_descriptorCount = 0;
     uint32_t m_nextDescriptor = 0;
     std::shared_ptr<Engine::Graphics::IGraphicsTexture> m_nullTexture;
+    std::shared_ptr<Engine::Graphics::IGraphicsTexture> m_nullArrayTexture;
 };
 }

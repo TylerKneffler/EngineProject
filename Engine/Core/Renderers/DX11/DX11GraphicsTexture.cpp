@@ -3,6 +3,23 @@
 
 namespace Engine::Renderers
 {
+namespace
+{
+DXGI_FORMAT D3D11TextureFormat(Engine::Graphics::GraphicsTextureFormat format, bool srgb)
+{
+    using Engine::Graphics::GraphicsTextureFormat;
+    switch (format)
+    {
+    case GraphicsTextureFormat::Rgba32Float: return DXGI_FORMAT_R32G32B32A32_FLOAT;
+    case GraphicsTextureFormat::Bc1: return srgb ? DXGI_FORMAT_BC1_UNORM_SRGB : DXGI_FORMAT_BC1_UNORM;
+    case GraphicsTextureFormat::Bc4: return DXGI_FORMAT_BC4_UNORM;
+    case GraphicsTextureFormat::Bc5: return DXGI_FORMAT_BC5_UNORM;
+    case GraphicsTextureFormat::Bc7: return srgb ? DXGI_FORMAT_BC7_UNORM_SRGB : DXGI_FORMAT_BC7_UNORM;
+    default: return srgb ? DXGI_FORMAT_R8G8B8A8_UNORM_SRGB : DXGI_FORMAT_R8G8B8A8_UNORM;
+    }
+}
+}
+
 std::shared_ptr<Engine::Graphics::IGraphicsTexture> D3D11TextureFactory::CreateTexture2D(
     uint32_t width,
     uint32_t height,
@@ -11,38 +28,62 @@ std::shared_ptr<Engine::Graphics::IGraphicsTexture> D3D11TextureFactory::CreateT
     Engine::Graphics::GraphicsTextureFormat format,
     bool srgb)
 {
-    if (!m_device || !width || !height || !rgbaPixels || !mipLevels)
+    return Create(width, height, 1, false, rgbaPixels, mipLevels, format, srgb);
+}
+
+std::shared_ptr<Engine::Graphics::IGraphicsTexture> D3D11TextureFactory::CreateTexture2DArray(
+    uint32_t width, uint32_t height, uint32_t layers, const uint8_t* pixels,
+    uint32_t mipLevels, Engine::Graphics::GraphicsTextureFormat format, bool srgb)
+{
+    return Create(width, height, layers, true, pixels, mipLevels, format, srgb);
+}
+
+std::shared_ptr<Engine::Graphics::IGraphicsTexture> D3D11TextureFactory::Create(
+    uint32_t width, uint32_t height, uint32_t layers, bool asArray,
+    const uint8_t* rgbaPixels, uint32_t mipLevels,
+    Engine::Graphics::GraphicsTextureFormat format, bool srgb)
+{
+    if (!m_device || !width || !height || !layers || !rgbaPixels || !mipLevels ||
+        !Engine::Graphics::GraphicsTextureIsValidBase(format, width, height))
         return nullptr;
 
     D3D11_TEXTURE2D_DESC desc{};
     desc.Width = width;
     desc.Height = height;
     desc.MipLevels = mipLevels;
-    desc.ArraySize = 1;
-    desc.Format = format == Engine::Graphics::GraphicsTextureFormat::Rgba32Float
-        ? DXGI_FORMAT_R32G32B32A32_FLOAT
-        : (srgb ? DXGI_FORMAT_R8G8B8A8_UNORM_SRGB : DXGI_FORMAT_R8G8B8A8_UNORM);
+    desc.ArraySize = layers;
+    desc.Format = D3D11TextureFormat(format, srgb);
     desc.SampleDesc.Count = 1;
     desc.Usage = D3D11_USAGE_IMMUTABLE;
     desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
 
-    std::vector<D3D11_SUBRESOURCE_DATA> initial(mipLevels);
-    const uint32_t bytesPerPixel = GraphicsTextureBytesPerPixel(format);
+    // Subresource index is mip + layer * mipLevels, the source order.
+    std::vector<D3D11_SUBRESOURCE_DATA> initial(size_t(mipLevels) * layers);
     size_t offset = 0;
-    uint32_t mipWidth = width, mipHeight = height;
-    for (uint32_t mip = 0; mip < mipLevels; ++mip)
+    for (uint32_t layer = 0; layer < layers; ++layer)
     {
-        initial[mip].pSysMem = rgbaPixels + offset;
-        initial[mip].SysMemPitch = mipWidth * bytesPerPixel;
-        offset += static_cast<size_t>(mipWidth) * mipHeight * bytesPerPixel;
-        mipWidth = std::max(1u, mipWidth / 2);
-        mipHeight = std::max(1u, mipHeight / 2);
+        uint32_t mipWidth = width, mipHeight = height;
+        for (uint32_t mip = 0; mip < mipLevels; ++mip)
+        {
+            auto& level = initial[size_t(layer) * mipLevels + mip];
+            level.pSysMem = rgbaPixels + offset;
+            level.SysMemPitch = GraphicsTextureRowBytes(format, mipWidth);
+            offset += static_cast<size_t>(GraphicsTextureMipBytes(format, mipWidth, mipHeight));
+            mipWidth = std::max(1u, mipWidth / 2);
+            mipHeight = std::max(1u, mipHeight / 2);
+        }
     }
 
     Microsoft::WRL::ComPtr<ID3D11Texture2D> texture;
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> view;
+    D3D11_SHADER_RESOURCE_VIEW_DESC srv{};
+    srv.Format = desc.Format;
+    srv.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
+    srv.Texture2DArray.MipLevels = mipLevels;
+    srv.Texture2DArray.ArraySize = layers;
     if (FAILED(m_device->CreateTexture2D(&desc, initial.data(), &texture)) ||
-        FAILED(m_device->CreateShaderResourceView(texture.Get(), nullptr, &view)))
+        FAILED(m_device->CreateShaderResourceView(texture.Get(),
+            asArray ? &srv : nullptr, &view)))
         return nullptr;
     return std::make_shared<D3D11GraphicsTexture>(std::move(texture), std::move(view));
 }

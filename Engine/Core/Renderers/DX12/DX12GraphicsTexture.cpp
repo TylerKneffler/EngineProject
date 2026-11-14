@@ -6,6 +6,26 @@
 
 namespace Engine::Renderers
 {
+namespace
+{
+// Uncompressed 8-bit resources stay typeless so one resource can be viewed in
+// either color space; block formats are created in their final color space.
+DXGI_FORMAT D3D12TextureFormat(Engine::Graphics::GraphicsTextureFormat format, bool srgb, bool view)
+{
+    using Engine::Graphics::GraphicsTextureFormat;
+    switch (format)
+    {
+    case GraphicsTextureFormat::Rgba32Float: return DXGI_FORMAT_R32G32B32A32_FLOAT;
+    case GraphicsTextureFormat::Bc1: return srgb ? DXGI_FORMAT_BC1_UNORM_SRGB : DXGI_FORMAT_BC1_UNORM;
+    case GraphicsTextureFormat::Bc4: return DXGI_FORMAT_BC4_UNORM;
+    case GraphicsTextureFormat::Bc5: return DXGI_FORMAT_BC5_UNORM;
+    case GraphicsTextureFormat::Bc7: return srgb ? DXGI_FORMAT_BC7_UNORM_SRGB : DXGI_FORMAT_BC7_UNORM;
+    default:
+        return !view ? DXGI_FORMAT_R8G8B8A8_TYPELESS
+            : (srgb ? DXGI_FORMAT_R8G8B8A8_UNORM_SRGB : DXGI_FORMAT_R8G8B8A8_UNORM);
+    }
+}
+}
 
 uint32_t D3D12TextureFactory::AllocateDescriptor()
 {
@@ -45,15 +65,14 @@ D3D12TextureFactory::~D3D12TextureFactory()
     }
 }
 uint64_t D3D12TextureFactory::EstimateAllocationBytes(uint32_t width, uint32_t height,
-    uint32_t levels, Engine::Graphics::GraphicsTextureFormat format, bool) const
+    uint32_t levels, Engine::Graphics::GraphicsTextureFormat format, bool srgb) const
 {
-    if (!m_device) return 0;
+    if (!m_device || !Engine::Graphics::GraphicsTextureIsValidBase(format, width, height)) return 0;
     D3D12_RESOURCE_DESC desc{};
     desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
     desc.Width = width; desc.Height = height; desc.DepthOrArraySize = 1;
     desc.MipLevels = static_cast<UINT16>(levels); desc.SampleDesc.Count = 1;
-    desc.Format = format == Engine::Graphics::GraphicsTextureFormat::Rgba32Float
-        ? DXGI_FORMAT_R32G32B32A32_FLOAT : DXGI_FORMAT_R8G8B8A8_TYPELESS;
+    desc.Format = D3D12TextureFormat(format, srgb, false);
     return m_device->GetResourceAllocationInfo(0, 1, &desc).SizeInBytes;
 }
 D3D12_HEAP_PROPERTIES HeapProperties(D3D12_HEAP_TYPE type)
@@ -124,6 +143,29 @@ std::shared_ptr<Engine::Graphics::IGraphicsTexture> D3D12TextureFactory::GetNull
     return m_nullTexture;
 }
 
+std::shared_ptr<Engine::Graphics::IGraphicsTexture> D3D12TextureFactory::GetNullArrayTexture()
+{
+    if(m_nullArrayTexture || !m_device || !m_heap) return m_nullArrayTexture;
+    const uint32_t slot=AllocateDescriptor();
+    if(slot==UINT32_MAX) return nullptr;
+    auto cpu=m_heap->GetCPUDescriptorHandleForHeapStart();
+    auto gpu=m_heap->GetGPUDescriptorHandleForHeapStart();
+    const auto index=m_firstDescriptor+slot;
+    cpu.ptr+=SIZE_T(index)*m_descriptorSize;
+    gpu.ptr+=UINT64(index)*m_descriptorSize;
+    // Null descriptors must carry the dimension the shader declares.
+    D3D12_SHADER_RESOURCE_VIEW_DESC view{};
+    view.Format=DXGI_FORMAT_R8G8B8A8_UNORM;
+    view.ViewDimension=D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
+    view.Shader4ComponentMapping=D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    view.Texture2DArray.MipLevels=1;
+    view.Texture2DArray.ArraySize=1;
+    m_device->CreateShaderResourceView(nullptr,&view,cpu);
+    m_nullArrayTexture=std::make_shared<D3D12GraphicsTexture>(
+        Microsoft::WRL::ComPtr<ID3D12Resource>{},m_heap,gpu);
+    return m_nullArrayTexture;
+}
+
 std::shared_ptr<Engine::Graphics::IGraphicsTexture> D3D12TextureFactory::CreateTexture2D(
     uint32_t width,
     uint32_t height,
@@ -132,8 +174,23 @@ std::shared_ptr<Engine::Graphics::IGraphicsTexture> D3D12TextureFactory::CreateT
     Engine::Graphics::GraphicsTextureFormat format,
     bool srgb)
 {
-    if (!m_device || !m_queue || !m_heap || !width || !height || !rgbaPixels ||
-        !mipLevels)
+    return Create(width, height, 1, false, rgbaPixels, mipLevels, format, srgb);
+}
+
+std::shared_ptr<Engine::Graphics::IGraphicsTexture> D3D12TextureFactory::CreateTexture2DArray(
+    uint32_t width, uint32_t height, uint32_t layers, const uint8_t* pixels,
+    uint32_t mipLevels, Engine::Graphics::GraphicsTextureFormat format, bool srgb)
+{
+    return Create(width, height, layers, true, pixels, mipLevels, format, srgb);
+}
+
+std::shared_ptr<Engine::Graphics::IGraphicsTexture> D3D12TextureFactory::Create(
+    uint32_t width, uint32_t height, uint32_t layers, bool asArray,
+    const uint8_t* rgbaPixels, uint32_t mipLevels,
+    Engine::Graphics::GraphicsTextureFormat format, bool srgb)
+{
+    if (!m_device || !m_queue || !m_heap || !width || !height || !layers || !rgbaPixels ||
+        !mipLevels || !Engine::Graphics::GraphicsTextureIsValidBase(format, width, height))
         return nullptr;
     PollUploads();
     const uint32_t slot = AllocateDescriptor();
@@ -148,10 +205,9 @@ std::shared_ptr<Engine::Graphics::IGraphicsTexture> D3D12TextureFactory::CreateT
     textureDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
     textureDesc.Width = width;
     textureDesc.Height = height;
-    textureDesc.DepthOrArraySize = 1;
+    textureDesc.DepthOrArraySize = static_cast<UINT16>(layers);
     textureDesc.MipLevels = static_cast<UINT16>(mipLevels);
-    textureDesc.Format = format == Engine::Graphics::GraphicsTextureFormat::Rgba32Float
-        ? DXGI_FORMAT_R32G32B32A32_FLOAT : DXGI_FORMAT_R8G8B8A8_TYPELESS;
+    textureDesc.Format = D3D12TextureFormat(format, srgb, false);
     textureDesc.SampleDesc.Count = 1;
     textureDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
 
@@ -162,12 +218,14 @@ std::shared_ptr<Engine::Graphics::IGraphicsTexture> D3D12TextureFactory::CreateT
             D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&texture))))
         return nullptr;
 
-    std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> footprints(mipLevels);
-    std::vector<UINT> rowCounts(mipLevels);
-    std::vector<UINT64> rowBytes(mipLevels);
+    // Subresource index is mip + layer * mipLevels, the source order.
+    const uint32_t subresources = mipLevels * layers;
+    std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> footprints(subresources);
+    std::vector<UINT> rowCounts(subresources);
+    std::vector<UINT64> rowBytes(subresources);
     UINT64 uploadSize = 0;
     m_device->GetCopyableFootprints(
-        &textureDesc, 0, mipLevels, 0, footprints.data(), rowCounts.data(),
+        &textureDesc, 0, subresources, 0, footprints.data(), rowCounts.data(),
         rowBytes.data(), &uploadSize);
     if (GetPendingUploadBytes() + uploadSize > 256ull * 1024 * 1024) return nullptr;
 
@@ -190,19 +248,22 @@ std::shared_ptr<Engine::Graphics::IGraphicsTexture> D3D12TextureFactory::CreateT
     uint8_t* mapped = nullptr;
     if (FAILED(upload->Map(0, nullptr, reinterpret_cast<void**>(&mapped))))
         return nullptr;
-    const uint32_t bytesPerPixel = GraphicsTextureBytesPerPixel(format);
     size_t sourceOffset = 0;
-    uint32_t mipWidth = width, mipHeight = height;
-    for (uint32_t mip = 0; mip < mipLevels; ++mip)
+    for (uint32_t subresource = 0; subresource < subresources; ++subresource)
     {
-        for (uint32_t row = 0; row < mipHeight; ++row)
+        const uint32_t mip = subresource % mipLevels;
+        const uint32_t mipWidth = std::max(1u, width >> mip);
+        const uint32_t mipHeight = std::max(1u, height >> mip);
+        // Rows of pixels, or rows of 4x4 blocks for compressed formats.
+        const size_t rowSize = GraphicsTextureRowBytes(format, mipWidth);
+        const uint32_t rows = GraphicsTextureRowCount(format, mipHeight);
+        const auto& footprint = footprints[subresource];
+        for (uint32_t row = 0; row < rows; ++row)
             std::memcpy(
-                mapped + footprints[mip].Offset + static_cast<size_t>(row) * footprints[mip].Footprint.RowPitch,
-                rgbaPixels + sourceOffset + static_cast<size_t>(row) * mipWidth * bytesPerPixel,
-                static_cast<size_t>(mipWidth) * bytesPerPixel);
-        sourceOffset += static_cast<size_t>(mipWidth) * mipHeight * bytesPerPixel;
-        mipWidth = std::max(1u, mipWidth / 2);
-        mipHeight = std::max(1u, mipHeight / 2);
+                mapped + footprint.Offset + static_cast<size_t>(row) * footprint.Footprint.RowPitch,
+                rgbaPixels + sourceOffset + static_cast<size_t>(row) * rowSize,
+                rowSize);
+        sourceOffset += rowSize * rows;
     }
     upload->Unmap(0, nullptr);
 
@@ -215,16 +276,16 @@ std::shared_ptr<Engine::Graphics::IGraphicsTexture> D3D12TextureFactory::CreateT
             IID_PPV_ARGS(&commands))))
         return nullptr;
 
-    for (uint32_t mip = 0; mip < mipLevels; ++mip)
+    for (uint32_t subresource = 0; subresource < subresources; ++subresource)
     {
         D3D12_TEXTURE_COPY_LOCATION destination{};
         destination.pResource = texture.Get();
         destination.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-        destination.SubresourceIndex = mip;
+        destination.SubresourceIndex = subresource;
         D3D12_TEXTURE_COPY_LOCATION source{};
         source.pResource = upload.Get();
         source.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
-        source.PlacedFootprint = footprints[mip];
+        source.PlacedFootprint = footprints[subresource];
         commands->CopyTextureRegion(&destination, 0, 0, 0, &source, nullptr);
     }
 
@@ -259,12 +320,16 @@ std::shared_ptr<Engine::Graphics::IGraphicsTexture> D3D12TextureFactory::CreateT
     gpu.ptr += static_cast<UINT64>(descriptorIndex) * m_descriptorSize;
 
     D3D12_SHADER_RESOURCE_VIEW_DESC srv{};
-    srv.Format = format == Engine::Graphics::GraphicsTextureFormat::Rgba32Float
-        ? DXGI_FORMAT_R32G32B32A32_FLOAT
-        : (srgb ? DXGI_FORMAT_R8G8B8A8_UNORM_SRGB : DXGI_FORMAT_R8G8B8A8_UNORM);
-    srv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+    srv.Format = D3D12TextureFormat(format, srgb, true);
+    srv.ViewDimension = asArray ? D3D12_SRV_DIMENSION_TEXTURE2DARRAY : D3D12_SRV_DIMENSION_TEXTURE2D;
     srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-    srv.Texture2D.MipLevels = mipLevels;
+    if (asArray)
+    {
+        srv.Texture2DArray.MipLevels = mipLevels;
+        srv.Texture2DArray.ArraySize = layers;
+    }
+    else
+        srv.Texture2D.MipLevels = mipLevels;
     m_device->CreateShaderResourceView(texture.Get(), &srv, cpu);
     auto result = std::make_shared<D3D12GraphicsTexture>(texture, m_heap, gpu);
     result->SetUpload(fence, m_device->GetResourceAllocationInfo(0, 1, &textureDesc).SizeInBytes);

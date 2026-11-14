@@ -1,0 +1,42 @@
+{
+    "version": 1,
+    "baseColor": [
+        1,
+        1,
+        1
+    ],
+    "ambientColor": [
+        0.02,
+        0.02,
+        0.02
+    ],
+    "specularColor": [
+        1,
+        1,
+        1
+    ],
+    "emissive": [
+        0,
+        0,
+        0
+    ],
+    "shininess": 32,
+    "metallic": 1,
+    "roughness": 1,
+    "baseColorAlpha": 1,
+    "alphaMode": "Opaque",
+    "alphaCutoff": 0.5,
+    "normalScale": 1,
+    "heightScale": 0.025,
+    "parallaxSelfShadow": true,
+    "heightMinSteps": 12,
+    "heightMaxSteps": 40,
+    "occlusionStrength": 1,
+    "doubleSided": false,
+    "unlit": false,
+    "baseColorTexture": "Engine/Core/Assets/Textures/PBRDemo/Cooked/CopperSlate_BaseColor.ktx2",
+    "metallicRoughnessTexture": "Engine/Core/Assets/Textures/PBRDemo/Cooked/CopperSlate_MetallicRoughness.ktx2",
+    "normalTexture": "Engine/Core/Assets/Textures/PBRDemo/Cooked/CopperSlate_Normal.ktx2",
+    "heightTexture": "Engine/Core/Assets/Textures/PBRDemo/Cooked/CopperSlate_Height.ktx2",
+    "occlusionTexture": "Engine/Core/Assets/Textures/PBRDemo/Cooked/CopperSlate_Occlusion.ktx2"
+}

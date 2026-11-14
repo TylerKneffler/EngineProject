@@ -146,6 +146,8 @@ void VulkanRenderCore::CreateDevice()
     enabled.pipelineStatisticsQuery = supported.pipelineStatisticsQuery;
     // Material sampling uses anisotropic filtering when the device allows it.
     enabled.samplerAnisotropy = supported.samplerAnisotropy;
+    // Cooked material textures are BC1/4/5/7.
+    enabled.textureCompressionBC = supported.textureCompressionBC;
     createInfo.pEnabledFeatures = &enabled;
     VkCheck(vkCreateDevice(m_physicalDevice, &createInfo, nullptr, &m_device), "vkCreateDevice");
     m_pipelineStatisticsEnabled = enabled.pipelineStatisticsQuery != VK_FALSE;

@@ -56,6 +56,11 @@ void SceneRendererObjectPipelines::BuildObjectPipeline(Scene& scene)
     if (!equalPsShader)
         throw std::runtime_error("Failed to compile depth-equal pixel shader: " +
             shaderCompiler->GetLastError());
+    auto parallaxDepthPsShader = shaderCompiler->CompileFromFile(shaderPath.c_str(),
+        "PSParallaxDepthMain", Engine::Graphics::IShaderCompiler::CompileProfile::PS_5_0);
+    if (!parallaxDepthPsShader)
+        throw std::runtime_error("Failed to compile parallax depth pixel shader: " +
+            shaderCompiler->GetLastError());
 
     Engine::Graphics::IPipelineStateBuilder::VertexElement layout[] =
     {
@@ -261,6 +266,10 @@ void SceneRendererObjectPipelines::BuildObjectPipeline(Scene& scene)
             true, "blended material");
     for (size_t sided = 0; sided < 2; ++sided)
     {
+        scene.m_objectParallaxDepthPipelines[sided] = buildConfiguredMaterialPipeline(
+            vsShader.get(), parallaxDepthPsShader.get(), sided != 0, false, false,
+            PortalStencilMode::None, true, "parallax depth-offset material", false,
+            false, "Opaque");
         scene.m_foliageDepthPipelines[sided] = buildConfiguredMaterialPipeline(
             vsShader.get(), shadowPsShader.get(), sided != 0, false, false,
             PortalStencilMode::None, false, "foliage coverage depth", false, false, "Auto");

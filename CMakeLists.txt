@@ -397,6 +397,23 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(ktx)
 
+# BC1/BC4/BC5/BC7 block encoders (TextureCook) and decoders (CPU readback of
+# cooked textures). Only the library sources are built; the upstream
+# CMakeLists builds a command-line tool with ISPC, so it is skipped.
+FetchContent_Declare(
+    bc7enc_rdo
+    GIT_REPOSITORY https://github.com/richgel999/bc7enc_rdo.git
+    GIT_TAG        b9438627eef73a1157e84201b6fa6eb2ffd6d9f0
+    SOURCE_SUBDIR  engine-no-cmake
+)
+FetchContent_MakeAvailable(bc7enc_rdo)
+add_library(bc7enc STATIC
+    "${bc7enc_rdo_SOURCE_DIR}/bc7enc.cpp"
+    "${bc7enc_rdo_SOURCE_DIR}/bc7decomp.cpp"
+    "${bc7enc_rdo_SOURCE_DIR}/rgbcx.cpp")
+target_include_directories(bc7enc SYSTEM PUBLIC "${bc7enc_rdo_SOURCE_DIR}")
+target_compile_options(bc7enc PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/w /O2>)
+
 # Audio decoding, mixing and spatialization. miniaudio includes native WAV/MP3
 # decoding; its pinned stb_vorbis extra supplies OGG/Vorbis decoding.
 set(MINIAUDIO_NO_LIBVORBIS ON CACHE BOOL "" FORCE)
@@ -497,6 +514,7 @@ target_link_libraries(Engine PUBLIC
     pugixml
     tinyexr
     ktx_read
+    bc7enc
     miniaudio
     BulletDynamics
     BulletCollision
@@ -643,7 +661,7 @@ if(ENGINE_VULKAN_ENABLED)
         )
         list(APPEND VULKAN_SHADER_OUTPUTS "${SHADER_OUTPUT}")
     endforeach()
-    foreach(SHADER_ENTRY PSShadowMain PSDepthEqualMain)
+    foreach(SHADER_ENTRY PSShadowMain PSDepthEqualMain PSParallaxDepthMain)
         set(SHADER_SOURCE
             "${ENGINE_ROOT}/Engine/Core/Shaders/Object/Object.hlsl")
         set(SHADER_OUTPUT
@@ -983,6 +1001,19 @@ target_compile_definitions(VideoExporter PRIVATE
 set_target_properties(VideoExporter PROPERTIES
     VS_DEBUGGER_WORKING_DIRECTORY "${ENGINE_RUNTIME_WORKING_DIRECTORY}"
 )
+
+# ---------------------------------------------------------------------------
+# TextureCook — offline PNG/JPG/TGA -> block-compressed KTX2 (BC7/BC5/BC4)
+# with usage-aware mips. Standalone: it links the full libktx writer, which
+# cannot share a binary with the Engine's ktx_read.
+# ---------------------------------------------------------------------------
+if(NOT ENGINE_PROJECT_DIR)
+    add_executable(TextureCook "${ENGINE_ROOT}/tools/TextureCook/TextureCook.cpp")
+    target_link_libraries(TextureCook PRIVATE ktx bc7enc)
+    target_include_directories(TextureCook SYSTEM PRIVATE
+        ${assimp_SOURCE_DIR}/contrib/stb)
+    target_compile_features(TextureCook PRIVATE cxx_std_20)
+endif()
 
 # ---------------------------------------------------------------------------
 # Server — headless authoritative scene simulation.  This intentionally uses
@@ -2423,6 +2454,29 @@ if(NOT ENGINE_PROJECT_DIR AND
         "${tinyexr_SOURCE_DIR}/test/unit/regression/2by2.exr"
         "${ktx_SOURCE_DIR}/tests/cts/clitests/golden/create/compare/output_uastc_0_psnr_2d_r8g8b8a8_unorm.ktx2")
     set_tests_properties(TextureDecodingAndMipGeneration PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}")
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/TextureCompressionTests.cpp")
+    enable_testing()
+    add_executable(TextureCompressionTests
+        "${ENGINE_LOCAL_TEST_ROOT}/TextureCompressionTests.cpp")
+    target_link_libraries(TextureCompressionTests PRIVATE Engine)
+    target_include_directories(TextureCompressionTests PRIVATE "${ENGINE_ROOT}/Engine")
+    set(_texture_cook_dir "${CMAKE_CURRENT_BINARY_DIR}/TextureCookTest")
+    set(_texture_cook_src "${ENGINE_ROOT}/Engine/Core/Assets/Textures/PBRDemo")
+    add_test(NAME TextureCookCopperSlate
+        COMMAND ${CMAKE_COMMAND}
+            -DCOOK=$<TARGET_FILE:TextureCook>
+            -DSRC=${_texture_cook_src}
+            -DOUT=${_texture_cook_dir}
+            -P "${ENGINE_LOCAL_TEST_ROOT}/TextureCookCopperSlate.cmake")
+    set_tests_properties(TextureCookCopperSlate PROPERTIES FIXTURES_SETUP CookedCopperSlate)
+    add_test(NAME TextureBlockCompression COMMAND TextureCompressionTests
+        "${_texture_cook_dir}" "${_texture_cook_src}")
+    set_tests_properties(TextureBlockCompression PROPERTIES
+        FIXTURES_REQUIRED CookedCopperSlate
         WORKING_DIRECTORY "${ENGINE_ROOT}")
 endif()
 

@@ -107,24 +107,10 @@ struct PersistentInstance { float4 row0; float4 row1; float4 row2; uint4 identit
 [[vk::binding(25, 0)]] Texture2D subsurfaceThicknessMap;
 [[vk::binding(26, 0)]] Texture2D sphereMap;
 [[vk::binding(27, 0)]] Texture2D toonMap;
-[[vk::binding(28, 0)]] Texture2D terrainNormal0;
-[[vk::binding(29, 0)]] Texture2D terrainNormal1;
-[[vk::binding(30, 0)]] Texture2D terrainNormal2;
-[[vk::binding(31, 0)]] Texture2D terrainNormal3;
-[[vk::binding(32, 0)]] Texture2D terrainNormal4;
-[[vk::binding(33, 0)]] Texture2D terrainNormal5;
-[[vk::binding(34, 0)]] Texture2D terrainRoughness0;
-[[vk::binding(35, 0)]] Texture2D terrainRoughness1;
-[[vk::binding(36, 0)]] Texture2D terrainRoughness2;
-[[vk::binding(37, 0)]] Texture2D terrainRoughness3;
-[[vk::binding(38, 0)]] Texture2D terrainRoughness4;
-[[vk::binding(39, 0)]] Texture2D terrainRoughness5;
-[[vk::binding(40, 0)]] Texture2D terrainHeight0;
-[[vk::binding(41, 0)]] Texture2D terrainHeight1;
-[[vk::binding(42, 0)]] Texture2D terrainHeight2;
-[[vk::binding(43, 0)]] Texture2D terrainHeight3;
-[[vk::binding(44, 0)]] Texture2D terrainHeight4;
-[[vk::binding(45, 0)]] Texture2D terrainHeight5;
+// Terrain layer arrays (logical texture slots 12-14); slice = painted layer.
+[[vk::binding(28, 0)]] Texture2DArray terrainAlbedoHeight;
+[[vk::binding(29, 0)]] Texture2DArray terrainNormal;
+[[vk::binding(30, 0)]] Texture2DArray terrainRoughAo;
 [[vk::binding(6, 0)]] SamplerState materialSampler;
 #else
 cbuffer DrawBuffer : register(b0)
@@ -149,24 +135,10 @@ Texture2D ies2 : register(t22); Texture2D ies3 : register(t23);
 Texture2D subsurfaceThicknessMap : register(t24);
 Texture2D sphereMap : register(t25);
 Texture2D toonMap : register(t26);
-Texture2D terrainNormal0 : register(t27);
-Texture2D terrainNormal1 : register(t28);
-Texture2D terrainNormal2 : register(t29);
-Texture2D terrainNormal3 : register(t30);
-Texture2D terrainNormal4 : register(t31);
-Texture2D terrainNormal5 : register(t32);
-Texture2D terrainRoughness0 : register(t33);
-Texture2D terrainRoughness1 : register(t34);
-Texture2D terrainRoughness2 : register(t35);
-Texture2D terrainRoughness3 : register(t36);
-Texture2D terrainRoughness4 : register(t37);
-Texture2D terrainRoughness5 : register(t38);
-Texture2D terrainHeight0 : register(t39);
-Texture2D terrainHeight1 : register(t40);
-Texture2D terrainHeight2 : register(t41);
-Texture2D terrainHeight3 : register(t42);
-Texture2D terrainHeight4 : register(t43);
-Texture2D terrainHeight5 : register(t44);
+// Terrain layer arrays (logical texture slots 12-14); slice = painted layer.
+Texture2DArray terrainAlbedoHeight : register(t27);
+Texture2DArray terrainNormal : register(t28);
+Texture2DArray terrainRoughAo : register(t29);
 StructuredBuffer<SceneLightData> sceneLights : register(t6);
 StructuredBuffer<ObjectData> objects : register(t7);
 StructuredBuffer<float4x4> boneMatrices : register(t8);
@@ -704,69 +676,154 @@ float4 SampleObjectBaseColor(ObjectData data, float2 sourceUv, float textureBias
 // Height textures are white = raised unless the material marks them as depth
 // maps (parallaxParams.w bit 0). The march below works in depth below the
 // surface, so a raised texel has depth 0.
+// Tangent-space normal from either a 3-channel map or a BC5 (two-channel)
+// map. BC5 samples return blue = 0, which no valid tangent-space normal
+// encodes (z >= 0), so Z is rebuilt from XY in that case.
+float3 UnpackNormal(float3 encoded)
+{
+    float3 n = encoded * 2.0 - 1.0;
+    if (encoded.z <= 0.0)
+        n.z = sqrt(saturate(1.0 - dot(n.xy, n.xy)));
+    return n;
+}
+
 float SampleParallaxDepth(float2 uv, float2 uvDx, float2 uvDy, bool heightIsDepth)
 {
     const float value = heightMap.SampleGrad(materialSampler, uv, uvDx, uvDy).r;
     return heightIsDepth ? value : 1.0 - value;
 }
 
+// parallaxParams.w packs the parallax flags in its integer part and the
+// self-shadow strength (0..1, stored as 0..0.5) in its fraction.
+static const uint ParallaxFlagHeightIsDepth = 1u;
+static const uint ParallaxFlagSelfShadow = 2u;
+static const uint ParallaxFlagClampUv = 4u;
+static const uint ParallaxFlagDepthOffset = 8u;
+static const uint ParallaxFlagCostView = 16u; // editor: fetch-count heat map
+
+// Clip-space depth of the parallax hit, written by PSMain for
+// PSParallaxDepthMain. Negative = no relief offset for this pixel.
+static float g_parallaxClipDepth = -1.0;
+
+struct ParallaxHit
+{
+    float2 uv;
+    float depth;       // 0 = surface, 1 = heightScale below it
+    float2 sampleDx;   // gradients every relief fetch uses
+    float2 sampleDy;
+    bool marched;      // false when the relief is below half a pixel
+    float fetches;     // height-map samples taken (cost view)
+};
+
 // uvDx/uvDy are the screen derivatives of sourceUv, taken by the caller in
 // uniform control flow. Every step samples with those gradients so the height
 // fetches use the mip the surface footprint needs (plus the texture LOD bias)
 // instead of the full-resolution level.
-float2 ParallaxOcclusionUv(
+//
+// A coarse linear march (half the authored step count) brackets the first
+// intersection, then binary search plus a final secant step refines it.
+// Refinement converges far faster than more linear steps, so edges stay
+// smooth with fewer fetches (contact refinement).
+ParallaxHit ParallaxOcclusion(
     float2 sourceUv, float2 uvDx, float2 uvDy, float3 viewDirectionTangent,
     float heightScale, float minimumSteps, float maximumSteps,
     float textureBias, bool heightIsDepth)
 {
+    ParallaxHit hit;
+    hit.uv = sourceUv;
+    hit.depth = 0.0;
+    const float gradientScale = exp2(textureBias);
+    hit.sampleDx = uvDx * gradientScale;
+    hit.sampleDy = uvDy * gradientScale;
+    hit.marched = false;
+    hit.fetches = 0.0;
+
     float viewAngle = saturate(abs(viewDirectionTangent.z));
     float2 ray = viewDirectionTangent.xy /
         max(abs(viewDirectionTangent.z), 0.08) * heightScale;
 
     // Largest on-screen shift, in pixels, that the relief can produce. Below
     // about half a pixel parallax is invisible, so distant and grazing-far
-    // surfaces skip the march entirely. Steps finer than one per traversed
-    // pixel add no visible detail.
+    // surfaces skip the march entirely. With refinement, one linear step per
+    // two traversed pixels is enough to find the right intersection.
     const float uvPerPixel = sqrt(max(abs(uvDx.x * uvDy.y - uvDx.y * uvDy.x),
         1e-14));
     const float parallaxPixels = length(ray) / uvPerPixel;
     [branch] if (parallaxPixels < 0.5)
-        return sourceUv;
-    float layerCount = round(lerp(maximumSteps, minimumSteps, viewAngle));
-    layerCount = clamp(min(layerCount, ceil(parallaxPixels)), 4.0, 64.0);
+        return hit;
+    hit.marched = true;
+    float layerCount = round(lerp(maximumSteps, minimumSteps, viewAngle) * 0.5);
+    layerCount = clamp(min(layerCount, ceil(parallaxPixels * 0.5)), 4.0, 32.0);
     float layerDepth = 1.0 / layerCount;
-    float2 uvStep = ray / layerCount;
 
-    const float gradientScale = exp2(textureBias);
-    const float2 sampleDx = uvDx * gradientScale;
-    const float2 sampleDy = uvDy * gradientScale;
-
-    float2 currentUv = sourceUv;
     float currentLayerDepth = 0.0;
-    float currentDepth = SampleParallaxDepth(currentUv, sampleDx, sampleDy,
-        heightIsDepth);
+    float currentDepth = SampleParallaxDepth(sourceUv, hit.sampleDx,
+        hit.sampleDy, heightIsDepth);
+    float previousDepth = currentDepth;
     [loop]
-    for (int step = 0; step < 64; ++step)
+    for (int step = 0; step < 32; ++step)
     {
         if (currentLayerDepth >= currentDepth || step >= (int)layerCount)
             break;
-        currentUv -= uvStep;
+        previousDepth = currentDepth;
         currentLayerDepth += layerDepth;
-        currentDepth = SampleParallaxDepth(currentUv, sampleDx, sampleDy,
-            heightIsDepth);
+        currentDepth = SampleParallaxDepth(sourceUv - ray * currentLayerDepth,
+            hit.sampleDx, hit.sampleDy, heightIsDepth);
     }
+    hit.fetches = 1.0 + round(currentLayerDepth * layerCount);
+    [branch] if (currentLayerDepth <= 0.0)
+        return hit; // raised texel right at the surface
+    hit.fetches += 4.0;
 
-    // Secant refinement between the last two layers.
-    float2 previousUv = currentUv + uvStep;
-    float afterDepth = currentDepth - currentLayerDepth;
-    float previousDepth = SampleParallaxDepth(previousUv, sampleDx, sampleDy,
-        heightIsDepth);
-    float beforeDepth = previousDepth -
-        (currentLayerDepth - layerDepth);
-    float depthDifference = afterDepth - beforeDepth;
-    float interpolation = abs(depthDifference) > 0.00001
-        ? saturate(afterDepth / depthDifference) : 0.0;
-    return lerp(currentUv, previousUv, interpolation);
+    // f(t) = t - depth(t): negative above the relief, >= 0 inside it.
+    float above = currentLayerDepth - layerDepth;
+    float below = currentLayerDepth;
+    float aboveError = above - previousDepth;
+    float belowError = below - currentDepth;
+    [unroll]
+    for (int refine = 0; refine < 4; ++refine)
+    {
+        float middle = 0.5 * (above + below);
+        float middleDepth = SampleParallaxDepth(sourceUv - ray * middle,
+            hit.sampleDx, hit.sampleDy, heightIsDepth);
+        float middleError = middle - middleDepth;
+        if (middleError >= 0.0) { below = middle; belowError = middleError; }
+        else { above = middle; aboveError = middleError; }
+    }
+    float errorRange = belowError - aboveError;
+    float t = errorRange > 0.00001
+        ? lerp(above, below, saturate(-aboveError / errorRange)) : below;
+    hit.uv = sourceUv - ray * t;
+    hit.depth = t;
+    return hit;
+}
+
+// Soft self-shadow from the relief toward one light (Tatarchuk 2006): march
+// from the hit point up to the surface and keep the largest blocker height,
+// weighted so near blockers cast harder shadows than distant ones.
+// Returns 1 = lit, 0 = fully occluded.
+float ParallaxSelfShadow(ParallaxHit hit, float3 lightDirectionTangent,
+    float heightScale, bool heightIsDepth, float steps)
+{
+    [branch] if (hit.depth <= 0.001 || lightDirectionTangent.z <= 0.0)
+        return 1.0;
+    // UV shift per unit of depth climbed toward the light.
+    const float2 ray = lightDirectionTangent.xy /
+        max(lightDirectionTangent.z, 0.08) * heightScale;
+    const float stepDepth = hit.depth / steps;
+    float occlusion = 0.0;
+    [loop]
+    for (float i = 1.0; i <= steps; i += 1.0)
+    {
+        const float rayDepth = hit.depth - stepDepth * i;
+        const float surfaceDepth = SampleParallaxDepth(
+            hit.uv + ray * (stepDepth * i), hit.sampleDx, hit.sampleDy,
+            heightIsDepth);
+        // Positive when the relief rises above the ray toward the light.
+        occlusion = max(occlusion,
+            (rayDepth - surfaceDepth) * (1.0 - (i - 1.0) / steps));
+    }
+    return 1.0 - saturate(occlusion * 8.0);
 }
 
 // Gather returns the same four depths as a bilinear comparison footprint.
@@ -997,7 +1054,7 @@ float2 SelectMaterialUv(float set, float2 uv, float2 uv1,
 }
 
 // Smooth, world-anchored offset breaks up the short repeating period of the
-// terrain color maps without adding another texture fetch per painted layer.
+// terrain color maps when hex-tiling is off.
 float2 TerrainTextureHash(float2 gridPoint)
 {
     float3 value = frac(float3(gridPoint.x, gridPoint.y, gridPoint.x) * 0.1031);
@@ -1018,58 +1075,206 @@ float2 TerrainTextureOffset(float2 worldXZ)
     return lerp(lerp(a, b, blend.x), lerp(c, d, blend.x), blend.y) - 0.5;
 }
 
-float3 SampleTerrainColor(Texture2D colorMap, float2 uv,
-    float2 alternateUv, float blendAmount, float textureBias)
+// ---------------------------------------------------------------------------
+// Terrain layer arrays. Slice i of each array is painted layer i.
+//   terrainAlbedoHeight: rgb albedo (sRGB view), a height (white = raised)
+//   terrainNormal:       rg tangent normal XY (BC5)
+//   terrainRoughAo:      r roughness, g occlusion (BC5)
+// The shader works on a packed float4 (normal XY, roughness, occlusion).
+// Layers are sampled with explicit gradients so hex-tiling and the
+// biplanar cliff projection keep correct mip selection.
+// ---------------------------------------------------------------------------
+static const float TerrainHexTileRate = 0.6;  // hex cells per texture repeat
+static const float TerrainHexRotation = 1.0;  // fraction of a full random turn
+static const float TerrainHexContrast = 0.6;  // height-weighted seam contrast
+
+struct TerrainLayerSample
 {
-    float3 color = colorMap.SampleBias(materialSampler, uv, textureBias).rgb;
-    if (blendAmount > 0.0)
-        color = lerp(color,
-            colorMap.SampleBias(materialSampler, alternateUv, textureBias).rgb,
-            blendAmount);
-    return color;
+    float3 albedo;
+    float height;
+    float3 normal; // world space, unnormalised
+    float roughness;
+    float occlusion;
+};
+
+uint2 TerrainPcg2d(uint2 v)
+{
+    v = v * 1664525u + 1013904223u;
+    v.x += v.y * 1664525u;
+    v.y += v.x * 1664525u;
+    v ^= v >> 16u;
+    v.x += v.y * 1664525u;
+    v.y += v.x * 1664525u;
+    v ^= v >> 16u;
+    return v;
 }
 
-float3 SampleTerrainLayerColor(uint layer, float2 uv, float2 alternateUv,
-    float blendAmount, float macroBlend, float3 macroColor, float textureBias)
+float3 UnpackTerrainNormal(float2 encoded)
 {
-    float3 color;
-    if (layer == 0u) color = SampleTerrainColor(baseColorMap, uv, alternateUv, blendAmount, textureBias);
-    else if (layer == 1u) color = SampleTerrainColor(metallicRoughnessMap, uv, alternateUv, blendAmount, textureBias);
-    else if (layer == 2u) color = SampleTerrainColor(normalMap, uv, alternateUv, blendAmount, textureBias);
-    else if (layer == 3u) color = SampleTerrainColor(occlusionMap, uv, alternateUv, blendAmount, textureBias);
-    else if (layer == 4u) color = SampleTerrainColor(emissiveMap, uv, alternateUv, blendAmount, textureBias);
-    else color = SampleTerrainColor(heightMap, uv, alternateUv, blendAmount, textureBias);
-    return lerp(color, macroColor, macroBlend);
+    float3 n;
+    n.xy = encoded * 2.0 - 1.0;
+    n.z = sqrt(saturate(1.0 - dot(n.xy, n.xy)));
+    return n;
 }
 
-float3 SampleTerrainLayerNormal(uint layer, float2 uv, float textureBias)
+// Mikkelsen, "Practical Real-Time Hex-Tiling" (JCGT 2022): three randomly
+// offset and rotated copies on a triangle grid, blended with a contrast ramp.
+// Returns the blend of the copies; tangent normals are rotated back into the
+// unrotated UV frame.
+void SampleTerrainHex(float2 uv, float2 uvDx, float2 uvDy, float slice,
+    bool sampleNormal, out float4 albedoHeight, out float4 normalRough)
 {
-    if (layer == 0u) return terrainNormal0.SampleBias(materialSampler, uv, textureBias).xyz;
-    if (layer == 1u) return terrainNormal1.SampleBias(materialSampler, uv, textureBias).xyz;
-    if (layer == 2u) return terrainNormal2.SampleBias(materialSampler, uv, textureBias).xyz;
-    if (layer == 3u) return terrainNormal3.SampleBias(materialSampler, uv, textureBias).xyz;
-    if (layer == 4u) return terrainNormal4.SampleBias(materialSampler, uv, textureBias).xyz;
-    return terrainNormal5.SampleBias(materialSampler, uv, textureBias).xyz;
+    const float2 st = uv * (TerrainHexTileRate * 3.46410162);
+    const float2 skewed = float2(st.x - 0.57735027 * st.y, 1.15470054 * st.y);
+    const float2 baseCell = floor(skewed);
+    float3 temp = float3(frac(skewed), 0.0);
+    temp.z = 1.0 - temp.x - temp.y;
+    const float s = step(0.0, -temp.z);
+    const float s2 = 2.0 * s - 1.0;
+    const float3 barycentric = float3(-temp.z * s2, s - temp.y * s2, s - temp.x * s2);
+    const float2 vertices[3] = {
+        baseCell + float2(s, s),
+        baseCell + float2(s, 1.0 - s),
+        baseCell + float2(1.0 - s, s) };
+
+    float4 a[3];
+    float4 b[3];
+    float2x2 rotation[3];
+    [unroll] for (uint i = 0u; i < 3u; ++i)
+    {
+        const uint2 hash = TerrainPcg2d(asuint(int2(vertices[i])));
+        const float2 offset = float2(hash.x & 0xffffu, hash.x >> 16u) / 65535.0;
+        const float angle = ((hash.y & 0xffffu) / 65535.0 * 2.0 - 1.0) *
+            3.14159265 * TerrainHexRotation;
+        float sine, cosine;
+        sincos(angle, sine, cosine);
+        rotation[i] = float2x2(cosine, -sine, sine, cosine);
+        // Hex centre back in UV space.
+        const float2 centre = float2(vertices[i].x + 0.5 * vertices[i].y,
+            0.8660254 * vertices[i].y) / (TerrainHexTileRate * 3.46410162);
+        const float2 copyUv = mul(uv - centre, rotation[i]) + centre + offset;
+        const float2 copyDx = mul(uvDx, rotation[i]);
+        const float2 copyDy = mul(uvDy, rotation[i]);
+        a[i] = terrainAlbedoHeight.SampleGrad(materialSampler,
+            float3(copyUv, slice), copyDx, copyDy);
+        b[i] = sampleNormal ? float4(
+            terrainNormal.SampleGrad(materialSampler, float3(copyUv, slice), copyDx, copyDy).rg,
+            terrainRoughAo.SampleGrad(materialSampler, float3(copyUv, slice), copyDx, copyDy).rg)
+            : float4(0.5, 0.5, 1.0, 1.0);
+    }
+    // Sharp falloff toward each hex edge; taller texels win the overlap.
+    float3 weights = pow(barycentric, 7.0) *
+        lerp(1.0, float3(a[0].a, a[1].a, a[2].a), TerrainHexContrast);
+    weights /= max(dot(weights, 1.0), 1e-6);
+    albedoHeight = a[0] * weights.x + a[1] * weights.y + a[2] * weights.z;
+    float2 normalXy = 0.0;
+    float2 rest = 0.0;
+    [unroll] for (uint j = 0u; j < 3u; ++j)
+    {
+        // A copy sampled at uv' = R^T (uv - c) has gradients R * g in uv.
+        normalXy += mul(rotation[j], b[j].rg * 2.0 - 1.0) * weights[j];
+        rest += b[j].ba * weights[j];
+    }
+    normalRough = float4(normalXy * 0.5 + 0.5, rest);
 }
 
-float SampleTerrainLayerRoughness(uint layer, float2 uv, float textureBias)
+void SampleTerrainPlain(float2 uv, float2 uvDx, float2 uvDy, float slice,
+    bool sampleNormal, out float4 albedoHeight, out float4 normalRough)
 {
-    if (layer == 0u) return terrainRoughness0.SampleBias(materialSampler, uv, textureBias).g;
-    if (layer == 1u) return terrainRoughness1.SampleBias(materialSampler, uv, textureBias).g;
-    if (layer == 2u) return terrainRoughness2.SampleBias(materialSampler, uv, textureBias).g;
-    if (layer == 3u) return terrainRoughness3.SampleBias(materialSampler, uv, textureBias).g;
-    if (layer == 4u) return terrainRoughness4.SampleBias(materialSampler, uv, textureBias).g;
-    return terrainRoughness5.SampleBias(materialSampler, uv, textureBias).g;
+    albedoHeight = terrainAlbedoHeight.SampleGrad(materialSampler,
+        float3(uv, slice), uvDx, uvDy);
+    normalRough = sampleNormal ? float4(
+        terrainNormal.SampleGrad(materialSampler, float3(uv, slice), uvDx, uvDy).rg,
+        terrainRoughAo.SampleGrad(materialSampler, float3(uv, slice), uvDx, uvDy).rg)
+        : float4(0.5, 0.5, 1.0, 1.0);
 }
 
-float SampleTerrainLayerHeight(uint layer, float2 uv, float textureBias)
+// One planar projection of one layer: hex-tiled near (hexAmount 1), plain
+// far (0), both in the narrow band between.
+void SampleTerrainProjection(float2 uv, float2 uvDx, float2 uvDy, float slice,
+    bool sampleNormal, float hexAmount, out float4 albedoHeight, out float4 normalRough)
 {
-    if (layer == 0u) return terrainHeight0.SampleBias(materialSampler, uv, textureBias).r;
-    if (layer == 1u) return terrainHeight1.SampleBias(materialSampler, uv, textureBias).r;
-    if (layer == 2u) return terrainHeight2.SampleBias(materialSampler, uv, textureBias).r;
-    if (layer == 3u) return terrainHeight3.SampleBias(materialSampler, uv, textureBias).r;
-    if (layer == 4u) return terrainHeight4.SampleBias(materialSampler, uv, textureBias).r;
-    return terrainHeight5.SampleBias(materialSampler, uv, textureBias).r;
+    albedoHeight = 0.0;
+    normalRough = 0.0;
+    [branch] if (hexAmount > 0.0)
+        SampleTerrainHex(uv, uvDx, uvDy, slice, sampleNormal, albedoHeight, normalRough);
+    [branch] if (hexAmount < 1.0)
+    {
+        float4 plainAlbedo, plainNormal;
+        SampleTerrainPlain(uv, uvDx, uvDy, slice, sampleNormal, plainAlbedo, plainNormal);
+        albedoHeight = lerp(plainAlbedo, albedoHeight, hexAmount);
+        normalRough = lerp(plainNormal, normalRough, hexAmount);
+    }
+}
+
+struct TerrainProjection
+{
+    // Top projection (terrain UV) and its tangent frame.
+    float2 topUv, topDx, topDy;
+    float3 tangent, bitangent, normal;
+    // Side projections for cliffs, in world metres scaled to texture repeats.
+    float2 sideXUv, sideXDx, sideXDy;
+    float2 sideZUv, sideZDx, sideZDy;
+    float3 weights; // top, x-facing, z-facing
+    float hexAmount;
+};
+
+TerrainLayerSample SampleTerrainLayer(TerrainProjection projection, uint layer,
+    float uvScale, bool sampleNormal, float normalStrength)
+{
+    TerrainLayerSample result = (TerrainLayerSample)0;
+    const float slice = (float)layer;
+    const float3 n = projection.normal;
+    float4 albedoHeight, normalRough;
+    [branch] if (projection.weights.x > 0.0)
+    {
+        SampleTerrainProjection(projection.topUv * uvScale, projection.topDx * uvScale,
+            projection.topDy * uvScale, slice, sampleNormal, projection.hexAmount,
+            albedoHeight, normalRough);
+        float3 tn = UnpackTerrainNormal(normalRough.rg);
+        tn.xy *= normalStrength;
+        const float w = projection.weights.x;
+        result.albedo += albedoHeight.rgb * w;
+        result.height += albedoHeight.a * w;
+        result.roughness += normalRough.b * w;
+        result.occlusion += normalRough.a * w;
+        result.normal += (projection.tangent * tn.x + projection.bitangent * tn.y +
+            n * tn.z) * w;
+    }
+    // Cliffs: world-aligned projections, normals reoriented with a UDN blend
+    // (Golus, "Normal Mapping for a Triplanar Shader"). No hex here; rock
+    // faces vary enough and the side bands are narrow.
+    [branch] if (projection.weights.y > 0.0)
+    {
+        SampleTerrainPlain(projection.sideXUv * uvScale, projection.sideXDx * uvScale,
+            projection.sideXDy * uvScale, slice, sampleNormal, albedoHeight, normalRough);
+        float3 tn = UnpackTerrainNormal(normalRough.rg);
+        tn.xy *= normalStrength;
+        const float side = n.x >= 0.0 ? 1.0 : -1.0;
+        tn.x *= side;
+        const float w = projection.weights.y;
+        result.albedo += albedoHeight.rgb * w;
+        result.height += albedoHeight.a * w;
+        result.roughness += normalRough.b * w;
+        result.occlusion += normalRough.a * w;
+        result.normal += float3(n.x, tn.y + n.y, tn.x + n.z) * w;
+    }
+    [branch] if (projection.weights.z > 0.0)
+    {
+        SampleTerrainPlain(projection.sideZUv * uvScale, projection.sideZDx * uvScale,
+            projection.sideZDy * uvScale, slice, sampleNormal, albedoHeight, normalRough);
+        float3 tn = UnpackTerrainNormal(normalRough.rg);
+        tn.xy *= normalStrength;
+        const float side = n.z >= 0.0 ? 1.0 : -1.0;
+        tn.x *= -side;
+        const float w = projection.weights.z;
+        result.albedo += albedoHeight.rgb * w;
+        result.height += albedoHeight.a * w;
+        result.roughness += normalRough.b * w;
+        result.occlusion += normalRough.a * w;
+        result.normal += float3(tn.x + n.x, tn.y + n.y, n.z) * w;
+    }
+    return result;
 }
 
 // World-anchored coverage is stable as the camera moves. Both LODs and their
@@ -1337,35 +1542,32 @@ float4 PSMain(
     // Height-field triangles and normals consistently face the top surface.
     float3 terrainNormalForLighting = normalize(normal);
     float terrainRoughness = 1.0;
+    float terrainOcclusion = 1.0;
     // Authored terrain stores six painted weights in the spare UV channels.
     // Vertex color carries the contribution of layers without a texture.
     if (flags & 2048u)
     {
-        float2 terrainUv = uv * max(1.0, objectData.textureUvSets1.z);
-        if (objectData.textureUvSets1.x > 0.0)
-            terrainUv = worldPos.xz *
-                (objectData.textureUvSets1.z / objectData.textureUvSets1.x);
+        // Texture repeats per metre. Runtime cells map world X/Z; without a
+        // known span the terrain's own 0..1 UV is tiled.
+        const bool worldMapped = objectData.textureUvSets1.x > 0.0;
+        const float repeatsPerMetre = worldMapped
+            ? objectData.textureUvSets1.z / objectData.textureUvSets1.x : 0.0;
+        const float uvTiling = max(1.0, objectData.textureUvSets1.z);
+        // Gradients for every projection, taken before any per-pixel branch.
+        // The texture-LOD bias becomes a gradient scale for SampleGrad.
+        const float gradientScale = exp2(textureBias);
+        const float3 worldDx = ddx(worldPos) * gradientScale;
+        const float3 worldDy = ddy(worldPos) * gradientScale;
+        float2 terrainUv = worldMapped ? worldPos.xz * repeatsPerMetre : uv * uvTiling;
+        const float2 terrainDx = worldMapped ? worldDx.xz * repeatsPerMetre
+            : ddx(uv) * uvTiling * gradientScale;
+        const float2 terrainDy = worldMapped ? worldDy.xz * repeatsPerMetre
+            : ddy(uv) * uvTiling * gradientScale;
         const float2 terrainVariation = TerrainTextureOffset(worldPos.xz);
         const float nearDistance = distance(worldPos,
             objectData.viewPositionAlphaCutoff.xyz);
-        const bool stochastic = (flags & 65536u) != 0u;
-        if (!stochastic) terrainUv += terrainVariation * 0.9;
-        float2 alternateUv = float2(-terrainUv.y, terrainUv.x) * 0.73 +
-            float2(0.173, 0.617);
-        float detailBlend = 0.5 * (1.0 - smoothstep(16.0, 48.0,
-            nearDistance));
-        if (stochastic)
-        {
-            const float2 tile = worldPos.xz / 24.0;
-            const float2 local = frac(tile);
-            const float edge = min(min(local.x, 1.0 - local.x),
-                min(local.y, 1.0 - local.y));
-            const float2 randomOffset = TerrainTextureHash(floor(tile));
-            alternateUv = float2(-terrainUv.y, terrainUv.x) * 0.73 +
-                randomOffset;
-            detailBlend = 0.5 * smoothstep(0.0, 0.18, edge) *
-                (1.0 - smoothstep(16.0, 48.0, nearDistance));
-        }
+        const bool hexTiling = (flags & 65536u) != 0u;
+        if (!hexTiling) terrainUv += terrainVariation * 0.9;
         // Measured lowest-mip colors supply inexpensive macro appearance.
         const float macroBlend = (flags & 131072u)
             ? smoothstep(512.0, 2048.0, nearDistance) : 0.0;
@@ -1374,149 +1576,176 @@ float4 PSMain(
         float originalWeightSum = 0.0;
         [unroll] for (uint layer = 0u; layer < 6u; ++layer)
             originalWeightSum += weights[layer];
-        [branch] if (objectData.terrainMapMasks.x == 0u &&
-            objectData.terrainMapMasks.y == 0u &&
-            objectData.terrainMapMasks.z == 0u)
+        const uint4 masks = objectData.terrainMapMasks;
+
+        [branch] if ((flags & 262144u) == 0u || macroBlend >= 0.999)
         {
-            [branch] if ((flags & 131072u) == 0u)
+            // Layer arrays not resident yet, or beyond detail range: the
+            // measured mean color of each layer.
+            float roughnessSum = 0.0;
+            [unroll] for (uint layer = 0u; layer < 6u; ++layer)
             {
-                if (weights[0] > 0.0 && (objectData.terrainMapMasks.w & 1u))
-                    base.rgb += SampleTerrainColor(baseColorMap, terrainUv,
-                        alternateUv, detailBlend, textureBias) * weights[0];
-                if (weights[1] > 0.0 && (objectData.terrainMapMasks.w & 2u))
-                    base.rgb += SampleTerrainColor(metallicRoughnessMap,
-                        terrainUv, alternateUv, detailBlend, textureBias) * weights[1];
-                if (weights[2] > 0.0 && (objectData.terrainMapMasks.w & 4u))
-                    base.rgb += SampleTerrainColor(normalMap, terrainUv,
-                        alternateUv, detailBlend, textureBias) * weights[2];
-                if (weights[3] > 0.0 && (objectData.terrainMapMasks.w & 8u))
-                    base.rgb += SampleTerrainColor(occlusionMap, terrainUv,
-                        alternateUv, detailBlend, textureBias) * weights[3];
-                if (weights[4] > 0.0 && (objectData.terrainMapMasks.w & 16u))
-                    base.rgb += SampleTerrainColor(emissiveMap, terrainUv,
-                        alternateUv, detailBlend, textureBias) * weights[4];
-                if (weights[5] > 0.0 && (objectData.terrainMapMasks.w & 32u))
-                    base.rgb += SampleTerrainColor(heightMap, terrainUv,
-                        alternateUv, detailBlend, textureBias) * weights[5];
-            }
-            else
-            {
-                [branch] if (macroBlend >= 0.999)
-                {
-                    [unroll] for (uint layer = 0u; layer < 6u; ++layer)
-                        if (objectData.terrainMapMasks.w & (1u << layer))
-                            base.rgb += objectData.terrainMacroColors[layer].rgb *
-                                weights[layer];
-                }
-                else
-                {
-                    if (weights[0] > 0.0 && (objectData.terrainMapMasks.w & 1u))
-                        base.rgb += lerp(SampleTerrainColor(baseColorMap,
-                            terrainUv, alternateUv, detailBlend, textureBias),
-                            objectData.terrainMacroColors[0].rgb, macroBlend) * weights[0];
-                    if (weights[1] > 0.0 && (objectData.terrainMapMasks.w & 2u))
-                        base.rgb += lerp(SampleTerrainColor(metallicRoughnessMap,
-                            terrainUv, alternateUv, detailBlend, textureBias),
-                            objectData.terrainMacroColors[1].rgb, macroBlend) * weights[1];
-                    if (weights[2] > 0.0 && (objectData.terrainMapMasks.w & 4u))
-                        base.rgb += lerp(SampleTerrainColor(normalMap,
-                            terrainUv, alternateUv, detailBlend, textureBias),
-                            objectData.terrainMacroColors[2].rgb, macroBlend) * weights[2];
-                    if (weights[3] > 0.0 && (objectData.terrainMapMasks.w & 8u))
-                        base.rgb += lerp(SampleTerrainColor(occlusionMap,
-                            terrainUv, alternateUv, detailBlend, textureBias),
-                            objectData.terrainMacroColors[3].rgb, macroBlend) * weights[3];
-                    if (weights[4] > 0.0 && (objectData.terrainMapMasks.w & 16u))
-                        base.rgb += lerp(SampleTerrainColor(emissiveMap,
-                            terrainUv, alternateUv, detailBlend, textureBias),
-                            objectData.terrainMacroColors[4].rgb, macroBlend) * weights[4];
-                    if (weights[5] > 0.0 && (objectData.terrainMapMasks.w & 32u))
-                        base.rgb += lerp(SampleTerrainColor(heightMap,
-                            terrainUv, alternateUv, detailBlend, textureBias),
-                            objectData.terrainMacroColors[5].rgb, macroBlend) * weights[5];
-                }
+                if (masks.w & (1u << layer))
+                    base.rgb += objectData.terrainMacroColors[layer].rgb * weights[layer];
+                roughnessSum += weights[layer] * objectData.terrainLayerParams[layer].x;
             }
             if (originalWeightSum > 0.00001)
-            {
-                float roughnessSum = 0.0;
-                [unroll] for (uint layer = 0u; layer < 6u; ++layer)
-                    roughnessSum += weights[layer] *
-                        objectData.terrainLayerParams[layer].x;
-                terrainRoughness = clamp(roughnessSum / originalWeightSum,
-                    0.045, 1.0);
-            }
+                terrainRoughness = clamp(roughnessSum / originalWeightSum, 0.045, 1.0);
         }
-        else if (originalWeightSum > 0.00001)
+        else
         {
-            [unroll] for (uint layer = 0u; layer < 6u; ++layer)
-                weights[layer] /= originalWeightSum;
-            float heightWeightSum = 0.0;
+            // Shade the three strongest layers; weaker ones are dropped.
+            uint selected[3] = {0u, 0u, 0u};
+            float selectedWeight[3] = {0.0, 0.0, 0.0};
             [unroll] for (uint layer = 0u; layer < 6u; ++layer)
             {
-                if (materialDetail > 0.0 && weights[layer] > 0.0 &&
-                    (objectData.terrainMapMasks.z & (1u << layer)))
+                const float w = weights[layer];
+                if (w > selectedWeight[0])
                 {
-                    const float height = SampleTerrainLayerHeight(layer,
-                        terrainUv, textureBias);
-                    weights[layer] = max(0.0, weights[layer] +
-                        objectData.terrainLayerParams[layer].z * materialDetail *
-                        (height - 0.5));
+                    selected[2] = selected[1]; selectedWeight[2] = selectedWeight[1];
+                    selected[1] = selected[0]; selectedWeight[1] = selectedWeight[0];
+                    selected[0] = layer; selectedWeight[0] = w;
                 }
-                heightWeightSum += weights[layer];
-            }
-            if (heightWeightSum <= 0.00001)
-            {
-                weights[0] = uvChannels2.x / originalWeightSum;
-                weights[1] = uvChannels2.y / originalWeightSum;
-                weights[2] = uvChannels2.z / originalWeightSum;
-                weights[3] = uvChannels2.w / originalWeightSum;
-                weights[4] = uvChannels3.x / originalWeightSum;
-                weights[5] = uvChannels3.y / originalWeightSum;
-                heightWeightSum = 1.0;
-            }
-            if (heightWeightSum > 0.00001)
-            {
-                float3 tangentNormal = float3(0.0, 0.0, 0.0);
-                float roughnessSum = 0.0;
-                [unroll] for (uint layer = 0u; layer < 6u; ++layer)
+                else if (w > selectedWeight[1])
                 {
-                    const float weight = weights[layer] / heightWeightSum;
-                    if (weight <= 0.0) continue;
-                    if (objectData.terrainMapMasks.w & (1u << layer))
-                        base.rgb += SampleTerrainLayerColor(layer, terrainUv,
-                            alternateUv, detailBlend, macroBlend,
-                            objectData.terrainMacroColors[layer].rgb, textureBias) *
-                            (weight * originalWeightSum);
-                    float layerRoughness =
-                        objectData.terrainLayerParams[layer].x;
-                    if (materialDetail > 0.0 && (objectData.terrainMapMasks.y & (1u << layer)))
-                        layerRoughness *= lerp(1.0, SampleTerrainLayerRoughness(layer,
-                            terrainUv, textureBias), materialDetail);
-                    roughnessSum += layerRoughness * weight;
-                    float3 layerNormal = float3(0.0, 0.0, 1.0);
-                    if (materialDetail > 0.0 && (objectData.terrainMapMasks.x & (1u << layer)))
+                    selected[2] = selected[1]; selectedWeight[2] = selectedWeight[1];
+                    selected[1] = layer; selectedWeight[1] = w;
+                }
+                else if (w > selectedWeight[2])
+                {
+                    selected[2] = layer; selectedWeight[2] = w;
+                }
+            }
+            float selectedSum = 0.0;
+            [unroll] for (uint k = 0u; k < 3u; ++k)
+            {
+                if (selectedWeight[k] < 0.01) selectedWeight[k] = 0.0;
+                selectedSum += selectedWeight[k];
+            }
+
+            TerrainProjection projection;
+            projection.normal = terrainNormalForLighting;
+            const float3 tangentAxis = tangent.xyz - projection.normal *
+                dot(projection.normal, tangent.xyz);
+            projection.tangent = dot(tangentAxis, tangentAxis) > 1e-8
+                ? normalize(tangentAxis) : float3(1.0, 0.0, 0.0);
+            projection.bitangent = cross(projection.normal, projection.tangent) * tangent.w;
+            projection.topUv = terrainUv;
+            projection.topDx = terrainDx;
+            projection.topDy = terrainDy;
+            // Slope-gated biplanar mapping: faces steeper than ~37 degrees
+            // fade to world-aligned side projections, which do not stretch.
+            const float3 n = projection.normal;
+            const float sideAmount = worldMapped
+                ? saturate((0.80 - n.y) / 0.15) : 0.0;
+            const float xShare = saturate((abs(n.x) - abs(n.z)) * 4.0 + 0.5);
+            projection.weights = float3(1.0 - sideAmount,
+                sideAmount * xShare, sideAmount * (1.0 - xShare));
+            const float signX = n.x >= 0.0 ? 1.0 : -1.0;
+            const float signZ = n.z >= 0.0 ? 1.0 : -1.0;
+            projection.sideXUv = float2(worldPos.z * signX, worldPos.y) * repeatsPerMetre;
+            projection.sideXDx = float2(worldDx.z * signX, worldDx.y) * repeatsPerMetre;
+            projection.sideXDy = float2(worldDy.z * signX, worldDy.y) * repeatsPerMetre;
+            projection.sideZUv = float2(-worldPos.x * signZ, worldPos.y) * repeatsPerMetre;
+            projection.sideZDx = float2(-worldDx.x * signZ, worldDx.y) * repeatsPerMetre;
+            projection.sideZDy = float2(-worldDy.x * signZ, worldDy.y) * repeatsPerMetre;
+            // Hex-tiling near; one sample per map beyond 40 m.
+            projection.hexAmount = hexTiling
+                ? 1.0 - smoothstep(24.0, 40.0, nearDistance) : 0.0;
+
+            TerrainLayerSample samples[3];
+            [unroll] for (uint k = 0u; k < 3u; ++k)
+            {
+                samples[k] = (TerrainLayerSample)0;
+                samples[k].normal = projection.normal;
+                samples[k].roughness = 1.0;
+                samples[k].occlusion = 1.0;
+                [branch] if (selectedWeight[k] > 0.0)
+                {
+                    const uint layer = selected[k];
+                    const float4 params = objectData.terrainLayerParams[layer];
+                    const bool sampleNormal = materialDetail > 0.0 &&
+                        ((masks.x | masks.y) & (1u << layer)) != 0u;
+                    samples[k] = SampleTerrainLayer(projection, layer,
+                        params.w > 0.0 ? params.w : 1.0, sampleNormal,
+                        params.y * materialDetail);
+                }
+            }
+
+            // Height-lerp: w' = max(w + s*h - (max(w + s*h) - depth), 0), so
+            // the taller layer shows through in the transition (stones over
+            // sand) instead of a linear cross-fade.
+            float finalWeight[3];
+            float heightTop = -1e9;
+            float heightValue[3];
+            [unroll] for (uint k = 0u; k < 3u; ++k)
+            {
+                const uint layer = selected[k];
+                const float strength = (masks.z & (1u << layer))
+                    ? objectData.terrainLayerParams[layer].z : 0.0;
+                heightValue[k] = selectedWeight[k] / max(selectedSum, 1e-6) +
+                    strength * samples[k].height;
+                if (selectedWeight[k] > 0.0) heightTop = max(heightTop, heightValue[k]);
+            }
+            float heightSum = 0.0;
+            [unroll] for (uint k = 0u; k < 3u; ++k)
+            {
+                finalWeight[k] = selectedWeight[k] > 0.0
+                    ? max(heightValue[k] - (heightTop - 0.2), 0.0) : 0.0;
+                heightSum += finalWeight[k];
+            }
+            const float heightBlend = materialDetail *
+                (((masks.z & ((1u << selected[0]) | (1u << selected[1]) |
+                    (1u << selected[2]))) != 0u) ? 1.0 : 0.0);
+            [unroll] for (uint k = 0u; k < 3u; ++k)
+                finalWeight[k] = lerp(selectedWeight[k] / max(selectedSum, 1e-6),
+                    finalWeight[k] / max(heightSum, 1e-6), heightBlend);
+
+            // Large-scale variation beyond 32 m: a 1/8-scale, rotated sample
+            // modulates brightness against the layer's mean color.
+            const float detailAmount = smoothstep(32.0, 96.0, nearDistance) *
+                (1.0 - macroBlend);
+            float3 blendedNormal = 0.0;
+            float roughnessSum = 0.0;
+            float occlusionSum = 0.0;
+            [unroll] for (uint k = 0u; k < 3u; ++k)
+            {
+                const float w = finalWeight[k];
+                if (w <= 0.0) continue;
+                const uint layer = selected[k];
+                const float4 params = objectData.terrainLayerParams[layer];
+                const float3 macroColor = objectData.terrainMacroColors[layer].rgb;
+                if (masks.w & (1u << layer))
+                {
+                    float3 albedo = samples[k].albedo;
+                    [branch] if (detailAmount > 0.0)
                     {
-                        layerNormal = SampleTerrainLayerNormal(layer,
-                            terrainUv, textureBias) * 2.0 - 1.0;
-                        layerNormal.xy *=
-                            objectData.terrainLayerParams[layer].y * materialDetail;
+                        const float scale = (params.w > 0.0 ? params.w : 1.0) * 0.125;
+                        const float3 far = terrainAlbedoHeight.SampleGrad(materialSampler,
+                            float3(float2(-terrainUv.y, terrainUv.x) * scale, (float)layer),
+                            float2(-terrainDx.y, terrainDx.x) * scale,
+                            float2(-terrainDy.y, terrainDy.x) * scale).rgb;
+                        const float3 luminance = float3(0.2126, 0.7152, 0.0722);
+                        const float variation = dot(far, luminance) /
+                            max(dot(macroColor, luminance), 0.02);
+                        albedo *= lerp(1.0, clamp(variation, 0.75, 1.25), detailAmount * 0.75);
                     }
-                    tangentNormal += normalize(layerNormal) * weight;
+                    base.rgb += lerp(albedo, macroColor, macroBlend) *
+                        (w * originalWeightSum);
                 }
+                roughnessSum += params.x * lerp(1.0, samples[k].roughness, materialDetail) * w;
+                occlusionSum += lerp(1.0, samples[k].occlusion, materialDetail) * w;
+                blendedNormal += samples[k].normal * w;
+            }
+            if (selectedSum > 0.00001)
+            {
                 terrainRoughness = clamp(roughnessSum, 0.045, 1.0);
-                if (objectData.terrainMapMasks.x != 0u)
-                {
-                    const float3 terrainTangent = normalize(tangent.xyz);
-                    const float3 terrainBitangent = normalize(cross(
-                        terrainNormalForLighting, terrainTangent)) * tangent.w;
-                    terrainNormalForLighting = normalize(
-                        terrainTangent * tangentNormal.x +
-                        terrainBitangent * tangentNormal.y +
-                        terrainNormalForLighting * tangentNormal.z);
-                }
+                terrainOcclusion = saturate(occlusionSum);
+                if (dot(blendedNormal, blendedNormal) > 1e-8)
+                    terrainNormalForLighting = normalize(blendedNormal);
             }
         }
-        if (!stochastic)
+        if (!hexTiling)
             base.rgb *= 1.0 + (terrainVariation.x + terrainVariation.y) * 0.10;
     }
     // Static runtime terrain shares one global sun at every view distance.
@@ -1524,7 +1753,8 @@ float4 PSMain(
     if ((flags & 8192u) && objectData.ambientUnlit.w < 0.5)
     {
         float3 terrainNormal = terrainNormalForLighting;
-        float3 diffuseLight = objectData.ambientUnlit.rgb;
+        float3 diffuseLight = objectData.ambientUnlit.rgb * terrainOcclusion;
+        float3 specularLight = 0.0;
         float3 sunDirection = objectData.bakedLightDirection.xyz;
         float sunFacing = saturate(dot(terrainNormal, sunDirection));
         if (sunFacing > 0.0)
@@ -1546,14 +1776,31 @@ float4 PSMain(
             }
             diffuseLight += objectData.bakedDirectional.rgb *
                 (sunFacing * shadow / PI);
+            // Near ring: one GGX sun lobe on the blended normal and roughness
+            // so wet rock and packed soil keep a highlight. Dielectric F0.
+            const float specularFade = 1.0 - smoothstep(64.0, 96.0,
+                distance(worldPos, objectData.viewPositionAlphaCutoff.xyz));
+            [branch] if (specularFade > 0.0)
+            {
+                const float3 viewDir = normalize(
+                    objectData.viewPositionAlphaCutoff.xyz - worldPos);
+                const float3 halfDir = normalize(viewDir + sunDirection);
+                const float nDotV = max(dot(terrainNormal, viewDir), 0.001);
+                const float specular = DistributionGGX(terrainNormal, halfDir, terrainRoughness) *
+                    GeometrySmith(terrainNormal, viewDir, sunDirection, terrainRoughness) /
+                    (4.0 * nDotV * sunFacing + 0.0001) *
+                    FresnelSchlick(saturate(dot(halfDir, viewDir)), 0.04).x;
+                specularLight = objectData.bakedDirectional.rgb *
+                    (specular * sunFacing * shadow * specularFade);
+            }
         }
-        return float4(base.rgb * diffuseLight + objectData.emissiveOcclusion.rgb,
-            base.a);
+        return float4(base.rgb * diffuseLight + specularLight +
+            objectData.emissiveOcclusion.rgb, base.a);
     }
     float metallic = saturate(objectData.materialParams.x);
     float roughness = (flags & 2048u) ? terrainRoughness :
         clamp(objectData.materialParams.y, 0.045, 1.0);
-    float occlusion = 1.0;
+    float occlusion = (flags & 2048u) ? terrainOcclusion : 1.0;
     float3 emissive = objectData.emissiveOcclusion.rgb;
     float2 baseUv = SelectMaterialUv(objectData.textureUvSets0.x, uv, uv1,
         uvChannels0, uvChannels1, uvChannels2, uvChannels3, uvChannels4);
@@ -1582,18 +1829,45 @@ float4 PSMain(
     // Derivatives must be taken in uniform control flow, before the branch.
     const float2 heightUvDx = ddx(heightUv);
     const float2 heightUvDy = ddy(heightUv);
+    // World metres per UV unit, for converting relief depth to world depth.
+    const float worldPerUv = sqrt(length(cross(ddx(worldPos), ddy(worldPos))) /
+        max(abs(heightUvDx.x * heightUvDy.y - heightUvDx.y * heightUvDy.x), 1e-14));
+    const uint parallaxFlags = (uint)objectData.parallaxParams.w;
+    const bool heightIsDepth = (parallaxFlags & ParallaxFlagHeightIsDepth) != 0u;
+    const float parallaxHeightScale = objectData.parallaxParams.x * materialDetail;
+    ParallaxHit parallaxHit = (ParallaxHit)0;
+    // Relief self-shadow weight: material strength, faded out by 15 m.
+    float parallaxShadowWeight = 0.0;
     if (materialDetail > 0.0 && (flags & 64u) && hasTangents && objectData.parallaxParams.x > 0.0)
     {
         float3 viewDirectionTangent = float3(
             dot(viewDirection, tangentDirection),
             dot(viewDirection, bitangentDirection),
             dot(viewDirection, geometryNormal));
-        float2 parallaxUv = ParallaxOcclusionUv(
+        parallaxHit = ParallaxOcclusion(
             heightUv, heightUvDx, heightUvDy, viewDirectionTangent,
-            objectData.parallaxParams.x * materialDetail,
+            parallaxHeightScale,
             objectData.parallaxParams.y, objectData.parallaxParams.z, textureBias,
-            ((uint)objectData.parallaxParams.w & 1u) != 0u);
-        float2 parallaxOffset = parallaxUv - heightUv;
+            heightIsDepth);
+        // Decals and trim sheets: relief that leaves the 0..1 tile is cut.
+        if (parallaxFlags & ParallaxFlagClampUv)
+            clip(min(min(parallaxHit.uv.x, parallaxHit.uv.y),
+                1.0 - max(parallaxHit.uv.x, parallaxHit.uv.y)));
+        if ((parallaxFlags & ParallaxFlagSelfShadow) && parallaxHit.marched)
+            parallaxShadowWeight = saturate(frac(objectData.parallaxParams.w) * 2.0) *
+                (1.0 - smoothstep(10.0, 15.0, distance(worldPos,
+                    objectData.viewPositionAlphaCutoff.xyz)));
+        // Push the pixel along the view ray to the relief hit so props and
+        // contact with other geometry intersect the visible surface.
+        [branch] if ((parallaxFlags & ParallaxFlagDepthOffset) && parallaxHit.depth > 0.0)
+        {
+            const float rayLength = parallaxHit.depth * parallaxHeightScale *
+                worldPerUv / max(abs(viewDirectionTangent.z), 0.08);
+            const float4 hitClip = mul(objectData.viewProjection,
+                float4(worldPos - viewDirection * rayLength, 1.0));
+            g_parallaxClipDepth = hitClip.z / hitClip.w;
+        }
+        float2 parallaxOffset = parallaxHit.uv - heightUv;
         baseUv += parallaxOffset; metallicRoughnessUv += parallaxOffset;
         normalUv += parallaxOffset; occlusionUv += parallaxOffset;
         emissiveUv += parallaxOffset;
@@ -1636,7 +1910,7 @@ float4 PSMain(
     normal = (flags & 2048u) ? terrainNormalForLighting : geometryNormal;
     [branch] if ((flags & 4u) && hasTangents && materialDetail > 0.0)
     {
-        float3 sampledNormal = normalMap.SampleBias(materialSampler, normalUv, textureBias).xyz * 2.0 - 1.0;
+        float3 sampledNormal = UnpackNormal(normalMap.SampleBias(materialSampler, normalUv, textureBias).xyz);
         sampledNormal.xy *= objectData.materialParams.z * materialDetail;
         normal = normalize(
             sampledNormal.x * tangentDirection +
@@ -1775,6 +2049,20 @@ float4 PSMain(
             centerShadow = EvaluateDirectionalShadow(
                 objectData, light, worldPos, n, lightDirection,
                 (int)objectData.shadowParams.w);
+        // Relief self-shadow for directional lights, near the camera only.
+        [branch] if (directional && nDotL > 0.0 && parallaxShadowWeight > 0.0)
+        {
+            const float3 lightDirectionTangent = float3(
+                dot(lightDirection, tangentDirection),
+                dot(lightDirection, bitangentDirection),
+                dot(lightDirection, geometryNormal));
+            const float shadowSteps = round(lerp(6.0, 16.0, parallaxHit.depth));
+            centerShadow *= lerp(1.0, ParallaxSelfShadow(parallaxHit,
+                lightDirectionTangent, parallaxHeightScale, heightIsDepth,
+                shadowSteps), parallaxShadowWeight);
+            if (parallaxHit.depth > 0.001 && lightDirectionTangent.z > 0.0)
+                parallaxHit.fetches += shadowSteps;
+        }
         [branch] if (nDotL > 0.0)
         directLight += EvaluatePbrBrdf(
             base.rgb, metallic, roughness, f0, n, v, lightDirection, materialDetail) *
@@ -1874,6 +2162,16 @@ float4 PSMain(
             toon * objectData.pmxToonTint.rgb,
             saturate(objectData.pmxToonTint.a));
     }
+    // Parallax cost view: height fetches per pixel on the performance ramp,
+    // 0 = blue, 32 (the worst-case ground budget) = red; grey = no march.
+    [branch] if (parallaxFlags & ParallaxFlagCostView)
+    {
+        if (parallaxHit.fetches <= 0.0)
+            return float4(0.25, 0.25, 0.25, base.a);
+        ObjectData heat = objectData;
+        heat.morphParams.z = -1.0 - saturate(parallaxHit.fetches / 32.0);
+        return PerformanceHeatColor(heat, worldPos, geometryNormal, true, base.a);
+    }
     return float4(litColor + emissive, base.a);
 }
 
@@ -1894,4 +2192,26 @@ float4 PSDepthEqualMain(
     return PSMain(pos, worldPos, normal, uv, uv1, vertexColor, tangent,
         uvChannels0, uvChannels1, uvChannels2, uvChannels3, uvChannels4,
         objectIndex, frontFace);
+}
+
+// Opaque parallax materials with parallaxDepthOffset. Depth only moves away
+// from the camera, so SV_DepthGreaterEqual keeps early-Z rejection against
+// geometry already in front of the flat surface.
+float4 PSParallaxDepthMain(
+    noperspective centroid float4 pos : SV_POSITION, float3 worldPos : TEXCOORD2,
+    float3 normal : NORMAL, float2 uv : TEXCOORD, float2 uv1 : TEXCOORD1,
+    float4 vertexColor : COLOR, float4 tangent : TANGENT,
+    float4 uvChannels0 : TEXCOORD3, float4 uvChannels1 : TEXCOORD4,
+    float4 uvChannels2 : TEXCOORD5, float4 uvChannels3 : TEXCOORD6,
+    float4 uvChannels4 : TEXCOORD7,
+    nointerpolation uint objectIndex : TEXCOORD11,
+    bool frontFace : SV_IsFrontFace,
+    out float depth : SV_DepthGreaterEqual) : SV_TARGET
+{
+    const float4 color = PSMain(pos, worldPos, normal, uv, uv1, vertexColor,
+        tangent, uvChannels0, uvChannels1, uvChannels2, uvChannels3,
+        uvChannels4, objectIndex, frontFace);
+    depth = g_parallaxClipDepth >= 0.0
+        ? clamp(g_parallaxClipDepth, pos.z, 1.0) : pos.z;
+    return color;
 }

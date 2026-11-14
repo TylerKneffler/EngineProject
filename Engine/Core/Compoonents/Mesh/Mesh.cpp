@@ -176,6 +176,80 @@ Mesh::Vertex SphereVertex(float longitude, float latitude, float u, float v)
     return vertex;
 }
 
+// Tangents for a triangle list without authored ones (OBJ). T follows +U and
+// w orients cross(N, T) along +V, matching the procedural sphere and the
+// shader's bitangent = cross(N, T) * w. Corners with identical position,
+// normal and UV share one accumulated frame so curved primitives stay smooth.
+void GenerateTriangleTangents(std::vector<Mesh::Vertex>& vertices)
+{
+    struct Key
+    {
+        float data[8];
+        bool operator==(const Key& other) const { return std::memcmp(data, other.data, sizeof(data)) == 0; }
+    };
+    struct KeyHash
+    {
+        size_t operator()(const Key& key) const
+        {
+            size_t hash = 0;
+            for (float value : key.data)
+            {
+                uint32_t bits = 0;
+                std::memcpy(&bits, &value, sizeof(bits));
+                hash = hash * 1099511628211ull ^ bits;
+            }
+            return hash;
+        }
+    };
+    struct Frame { glm::vec3 tangent{0.f}, bitangent{0.f}; };
+    std::unordered_map<Key, Frame, KeyHash> frames;
+    const auto keyOf = [](const Mesh::Vertex& v) {
+        Key key{};
+        std::memcpy(key.data, v.pos, sizeof(float) * 3);
+        std::memcpy(key.data + 3, v.normal, sizeof(float) * 3);
+        std::memcpy(key.data + 6, v.uv, sizeof(float) * 2);
+        return key;
+    };
+    for (size_t i = 0; i + 2 < vertices.size(); i += 3)
+    {
+        const auto& a = vertices[i];
+        const auto& b = vertices[i + 1];
+        const auto& c = vertices[i + 2];
+        const glm::vec3 e1(b.pos[0] - a.pos[0], b.pos[1] - a.pos[1], b.pos[2] - a.pos[2]);
+        const glm::vec3 e2(c.pos[0] - a.pos[0], c.pos[1] - a.pos[1], c.pos[2] - a.pos[2]);
+        const float du1 = b.uv[0] - a.uv[0], dv1 = b.uv[1] - a.uv[1];
+        const float du2 = c.uv[0] - a.uv[0], dv2 = c.uv[1] - a.uv[1];
+        const float det = du1 * dv2 - du2 * dv1;
+        if (std::abs(det) < 1e-12f) continue; // no UV mapping on this face
+        // Area-weighted (unnormalised) so large faces dominate shared corners.
+        const float sign = det < 0.f ? -1.f : 1.f;
+        const glm::vec3 tangent = (e1 * dv2 - e2 * dv1) * sign;
+        const glm::vec3 bitangent = (e2 * du1 - e1 * du2) * sign;
+        for (size_t corner = 0; corner < 3; ++corner)
+        {
+            auto& frame = frames[keyOf(vertices[i + corner])];
+            frame.tangent += tangent;
+            frame.bitangent += bitangent;
+        }
+    }
+    for (auto& vertex : vertices)
+    {
+        const auto found = frames.find(keyOf(vertex));
+        if (found == frames.end()) continue;
+        glm::vec3 normal(vertex.normal[0], vertex.normal[1], vertex.normal[2]);
+        if (glm::dot(normal, normal) < 1e-12f) continue;
+        normal = glm::normalize(normal);
+        glm::vec3 tangent = found->second.tangent - normal * glm::dot(normal, found->second.tangent);
+        if (glm::dot(tangent, tangent) < 1e-12f) continue;
+        tangent = glm::normalize(tangent);
+        const float w = glm::dot(glm::cross(normal, tangent), found->second.bitangent) < 0.f ? -1.f : 1.f;
+        vertex.tangent[0] = tangent.x;
+        vertex.tangent[1] = tangent.y;
+        vertex.tangent[2] = tangent.z;
+        vertex.tangent[3] = w;
+    }
+}
+
 std::vector<Mesh::Vertex> GenerateSmoothSphere()
 {
     constexpr uint32_t longitudeSegments = 48;
@@ -492,6 +566,8 @@ void Mesh::LoadFromFile(const std::string& path)
         }
     }
 
+    // OBJ carries no tangents; without them normal and height maps are skipped.
+    GenerateTriangleTangents(m_vertices);
     UpdateBounds();
     m_ready = false;
 }

@@ -29,7 +29,8 @@ struct VulkanImageResource
 VulkanImageResource VulkanCreateImage(VkPhysicalDevice physicalDevice, VkDevice device,
                                       uint32_t width, uint32_t height, VkFormat format,
                                       VkImageUsageFlags usage, VkImageAspectFlags aspect,
-                                      uint32_t mipLevels = 1);
+                                      uint32_t mipLevels = 1, uint32_t arrayLayers = 1,
+                                      bool arrayView = false);
 void VulkanDestroyImage(VkDevice device, VulkanImageResource& image);
 
 struct VulkanViewDeviceContext

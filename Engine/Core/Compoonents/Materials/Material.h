@@ -143,6 +143,26 @@ public:
     PROPERTY(Inspector, EditAnywhere, Category = "Material | PBR")
     bool      heightIsDepth { false };
 
+    // Soft relief shadows from directional lights (POM only, fades by 15 m).
+    PROPERTY(Inspector, EditAnywhere, Category = "Material | PBR")
+    bool      parallaxSelfShadow { false };
+
+    PROPERTY(Inspector, EditAnywhere, Category = "Material | PBR", Range = "0.0, 1.0")
+    float     parallaxShadowStrength { 1.f };
+
+    // Discard pixels whose parallax-shifted UV leaves 0..1 (decals, trims).
+    PROPERTY(Inspector, EditAnywhere, Category = "Material | PBR")
+    bool      parallaxClampUv { false };
+
+    // Write the relief depth (opaque, non-terrain draws) so props sink into
+    // the visible surface. Costs early-Z precision for this draw.
+    PROPERTY(Inspector, EditAnywhere, Category = "Material | PBR")
+    bool      parallaxDepthOffset { false };
+
+    // Editor-only, not serialized: shade with the per-pixel parallax fetch
+    // count (blue 0 .. red 32) instead of lighting.
+    bool      parallaxCostView { false };
+
     // Optional terrain-only paint transition driven by heightTexture.r.
     PROPERTY(Inspector, EditAnywhere, Category = "Material | Terrain", Range = "0.0, 1.0")
     float     terrainHeightBlendStrength { 0.f };
@@ -150,6 +170,11 @@ public:
     // Linear RGB average of the layer albedo's lowest mip for distant terrain.
     PROPERTY(Inspector, EditAnywhere, Category = "Material | Terrain")
     glm::vec3 terrainMacroColor { 0.f };
+
+    // Terrain layer repeats relative to the terrain's texture tiling: 2 packs
+    // the texture twice as densely (small pebbles), 0.5 spreads it (rock).
+    PROPERTY(Inspector, EditAnywhere, Category = "Material | Terrain", Range = "0.05, 16.0")
+    float     terrainUvScale { 1.f };
 
     PROPERTY(Inspector, EditAnywhere, Category = "Material | PBR", Range = "4.0, 64.0")
     float     heightMinSteps { 8.f };
@@ -232,7 +257,7 @@ public:
 
 private:
     bool m_validationCached=false;
-    std::array<float,29> m_validatedFloats{};
+    std::array<float,31> m_validatedFloats{};
     std::array<int,6> m_validatedUvSets{};
     std::array<const Texture*,10> m_preparedTextures{};
     IGraphicsProvider* m_preparedTextureProvider=nullptr;

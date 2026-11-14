@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Surface-detail material test (see .md/surface-detail-materials-plan.md).
+  Left = CopperSlatePBRDemo (PNG, RGBA8 + runtime mips).
+  Right = CopperSlatePBRDemo_BC (TextureCook KTX2: BC7 / BC5 / BC4, Toksvig roughness mips).
+  Ground, back wall and side wall use the BC material; the side wall and the
+  far ground are seen at grazing angles (anisotropic filtering, POM fade).
+  The low sun rakes across the relief so parallax and normal direction read clearly.
+-->
+<Scene xmlns:components="urn:engine-components" version="1">
+  <settings dimension="0" showGrid="false" gridHalfSize="10" gridCellSize="1" gridOpacity="0.25" gridFadeDistance="80" skyboxEnabled="true" skyboxTexture="Engine/Core/Assets/Textures/Skyboxes/editor-default-sky.png" hdriLightingEnabled="true" hdriIntensity="1" hdriExposure="0" hdriRotation="0" toneMapping="1" outputExposure="0" renderMode="0" sceneViewUiOverlay="false">
+    <gridColor _arrayEncoding="spaceSeparatedNumbers">0.3 0.3 0.35</gridColor>
+    <gridOriginColor _arrayEncoding="spaceSeparatedNumbers">0.4 0.5 0.8</gridOriginColor>
+    <ambientColor _arrayEncoding="spaceSeparatedNumbers">0.03 0.03 0.03</ambientColor>
+  </settings>
+  <objects>
+    <item name="Camera" enabled="true">
+      <transform>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">0 1.7 -5.5</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0.18 0 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+      </transform>
+      <components>
+        <components:Camera Camera.active="true" Camera.useTransformRotation="true" Camera.fov="60" Camera.near="0.01" Camera.far="200" Camera.orthographic="false" Camera.orthographicSize="5">
+          <Camera.target _arrayEncoding="spaceSeparatedNumbers">0 1 0</Camera.target>
+          <Camera.up _arrayEncoding="spaceSeparatedNumbers">0 1 0</Camera.up>
+        </components:Camera>
+      </components>
+      <children />
+    </item>
+    <item name="Low Sun" enabled="true">
+      <transform>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">3 4 -3</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0.42 -0.7 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+      </transform>
+      <components>
+        <components:Light Light.lightType="1" Light.intensity="2.5" Light.range="10" Light.falloff="1.4" Light.intensityMode="0" Light.innerConeAngle="25" Light.outerConeAngle="35" Light.lightingChannels="-1" Light.cookieTexture="" Light.iesProfileTexture="" Light.cookieScale="1" Light.baked="false" Light.castsShadows="true" Light.shadowStrength="1" Light.shadowDepthBias="0.0015" Light.shadowNormalBias="0.01" Light.shadowResolutionScale="1" Light.shadowFilterScale="1">
+          <Light.color _arrayEncoding="spaceSeparatedNumbers">1 0.93 0.82</Light.color>
+        </components:Light>
+      </components>
+      <children />
+    </item>
+    <item name="Ground (BC, 2 m tiles)" enabled="true">
+      <transform>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/surface_detail_ground.obj" />
+        <components:Material Material.materialAsset="Assets/Materials/CopperSlatePBRDemo_BC.material" />
+      </components>
+      <children />
+    </item>
+    <item name="Back Wall (BC)" enabled="true">
+      <transform>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">0 0 6</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/surface_detail_wall.obj" />
+        <components:Material Material.materialAsset="Assets/Materials/CopperSlatePBRDemo_BC.material" />
+      </components>
+      <children />
+    </item>
+    <item name="Side Wall (BC, grazing)" enabled="true">
+      <transform>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">6 0 0</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 1.5707963 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/surface_detail_wall.obj" />
+        <components:Material Material.materialAsset="Assets/Materials/CopperSlatePBRDemo_BC.material" Material.doubleSided="true" />
+      </components>
+      <children />
+    </item>
+    <item name="Panel - PNG (RGBA8)" enabled="true">
+      <transform>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">-1.4 1.3 0</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">2.4 2.4 1</Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/quad.obj" />
+        <components:Material Material.materialAsset="Assets/Materials/CopperSlatePBRDemo.material" />
+      </components>
+      <children />
+    </item>
+    <item name="Panel - BC (KTX2)" enabled="true">
+      <transform>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">1.4 1.3 0</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">2.4 2.4 1</Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/quad.obj" />
+        <components:Material Material.materialAsset="Assets/Materials/CopperSlatePBRDemo_BC.material" />
+      </components>
+      <children />
+    </item>
+    <item name="Sphere - PNG (RGBA8)" enabled="true">
+      <transform>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">-3.5 0.6 -1.5</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1.2 1.2 1.2</Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/sphere.obj" />
+        <components:Material Material.materialAsset="Assets/Materials/CopperSlatePBRDemo.material" />
+      </components>
+      <children />
+    </item>
+    <item name="Sphere - BC (KTX2)" enabled="true">
+      <transform>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">3.5 0.6 -1.5</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1.2 1.2 1.2</Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/sphere.obj" />
+        <components:Material Material.materialAsset="Assets/Materials/CopperSlatePBRDemo_BC.material" />
+      </components>
+      <children />
+    </item>
+    <item name="Cylinder - BC (smooth OBJ tangents)" enabled="true">
+      <transform>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">0 0.5 -2.2</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">0.8 1 0.8</Transform.scale>
+      </transform>
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/cylinder.obj" />
+        <components:Material Material.materialAsset="Assets/Materials/CopperSlatePBRDemo_BC.material" />
+      </components>
+      <children />
+    </item>
+  </objects>
+</Scene>

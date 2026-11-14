@@ -7,6 +7,30 @@
 
 namespace Engine::Renderers
 {
+namespace
+{
+VkFormat VulkanTextureFormat(Engine::Graphics::GraphicsTextureFormat format, bool srgb)
+{
+    using Engine::Graphics::GraphicsTextureFormat;
+    switch (format)
+    {
+    case GraphicsTextureFormat::Rgba32Float: return VK_FORMAT_R32G32B32A32_SFLOAT;
+    case GraphicsTextureFormat::Bc1: return srgb ? VK_FORMAT_BC1_RGBA_SRGB_BLOCK : VK_FORMAT_BC1_RGBA_UNORM_BLOCK;
+    case GraphicsTextureFormat::Bc4: return VK_FORMAT_BC4_UNORM_BLOCK;
+    case GraphicsTextureFormat::Bc5: return VK_FORMAT_BC5_UNORM_BLOCK;
+    case GraphicsTextureFormat::Bc7: return srgb ? VK_FORMAT_BC7_SRGB_BLOCK : VK_FORMAT_BC7_UNORM_BLOCK;
+    default: return srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
+    }
+}
+}
+
+bool VulkanTextureSystem::SupportsBlockCompression() const
+{
+    VkPhysicalDeviceFeatures features{};
+    vkGetPhysicalDeviceFeatures(m_physicalDevice, &features);
+    return features.textureCompressionBC != VK_FALSE;
+}
+
 size_t VulkanTextureSystem::TextureKeyHash::operator()(const TextureKey& key) const
 {
     size_t hash = 0;
@@ -199,6 +223,8 @@ VulkanTextureSystem::VulkanTextureSystem(
 
     const uint8_t white[] = { 255, 255, 255, 255 };
     m_white = Upload(1, 1, white, 1, Engine::Graphics::GraphicsTextureFormat::Rgba8);
+    m_whiteArray = Upload(1, 1, white, 1, Engine::Graphics::GraphicsTextureFormat::Rgba8,
+        true, 1, true);
 }
 
 VulkanTextureSystem::~VulkanTextureSystem()
@@ -225,6 +251,7 @@ void VulkanTextureSystem::Shutdown()
         if (texture) texture->ReleaseImage(m_device);
     m_liveTextures.clear();
     VulkanDestroyImage(m_device, m_white);
+    VulkanDestroyImage(m_device, m_whiteArray);
     if (m_dummyBuffer) vkDestroyBuffer(m_device, m_dummyBuffer, nullptr);
     if (m_dummyBufferMemory) vkFreeMemory(m_device, m_dummyBufferMemory, nullptr);
     if (m_sampler) vkDestroySampler(m_device, m_sampler, nullptr);
@@ -244,18 +271,16 @@ VulkanImageResource VulkanTextureSystem::Upload(
     const uint8_t* pixels,
     uint32_t mipLevels,
     Engine::Graphics::GraphicsTextureFormat textureFormat,
-    bool srgb)
+    bool srgb,
+    uint32_t layers,
+    bool arrayView)
 {
     PollUploads();
-    const uint32_t bytesPerPixel = GraphicsTextureBytesPerPixel(textureFormat);
-    VkDeviceSize size = 0;
+    if (GraphicsTextureIsBlockCompressed(textureFormat) && !SupportsBlockCompression())
+        throw std::runtime_error("Device does not support BC texture compression");
+    const VkDeviceSize layerSize = GraphicsTextureChainBytes(textureFormat, width, height, mipLevels);
+    const VkDeviceSize size = layerSize * layers;
     uint32_t mipWidth = width, mipHeight = height;
-    for (uint32_t mip = 0; mip < mipLevels; ++mip)
-    {
-        size += static_cast<VkDeviceSize>(mipWidth) * mipHeight * bytesPerPixel;
-        mipWidth = std::max(1u, mipWidth / 2);
-        mipHeight = std::max(1u, mipHeight / 2);
-    }
     if (PendingUploadBytes() + size > 256ull * 1024 * 1024)
         throw std::runtime_error("Texture staging budget exhausted; retry later");
     VkBuffer staging = VK_NULL_HANDLE;
@@ -300,11 +325,9 @@ VulkanImageResource VulkanTextureSystem::Upload(
 
     image = VulkanCreateImage(
         m_physicalDevice, m_device, width, height,
-        textureFormat == Engine::Graphics::GraphicsTextureFormat::Rgba32Float
-            ? VK_FORMAT_R32G32B32A32_SFLOAT
-            : (srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM),
+        VulkanTextureFormat(textureFormat, srgb),
         VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
-        VK_IMAGE_ASPECT_COLOR_BIT, mipLevels);
+        VK_IMAGE_ASPECT_COLOR_BIT, mipLevels, layers, arrayView);
 
     VkCommandPoolCreateInfo poolInfo{ VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
     poolInfo.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
@@ -331,27 +354,32 @@ VulkanImageResource VulkanTextureSystem::Upload(
     toCopy.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     toCopy.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     toCopy.image = image.image;
-    toCopy.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevels, 0, 1 };
+    toCopy.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevels, 0, layers };
     vkCmdPipelineBarrier(
         commands, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
         0, 0, nullptr, 0, nullptr, 1, &toCopy);
 
-    std::vector<VkBufferImageCopy> copies(mipLevels);
+    // Source order is each layer's full mip chain, layer after layer.
+    std::vector<VkBufferImageCopy> copies(size_t(mipLevels) * layers);
     VkDeviceSize copyOffset = 0;
-    mipWidth = width;
-    mipHeight = height;
-    for (uint32_t mip = 0; mip < mipLevels; ++mip)
+    for (uint32_t layer = 0; layer < layers; ++layer)
     {
-        copies[mip].bufferOffset = copyOffset;
-        copies[mip].imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, mip, 0, 1 };
-        copies[mip].imageExtent = { mipWidth, mipHeight, 1 };
-        copyOffset += static_cast<VkDeviceSize>(mipWidth) * mipHeight * bytesPerPixel;
-        mipWidth = std::max(1u, mipWidth / 2);
-        mipHeight = std::max(1u, mipHeight / 2);
+        mipWidth = width;
+        mipHeight = height;
+        for (uint32_t mip = 0; mip < mipLevels; ++mip)
+        {
+            auto& copy = copies[size_t(layer) * mipLevels + mip];
+            copy.bufferOffset = copyOffset;
+            copy.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, mip, layer, 1 };
+            copy.imageExtent = { mipWidth, mipHeight, 1 };
+            copyOffset += GraphicsTextureMipBytes(textureFormat, mipWidth, mipHeight);
+            mipWidth = std::max(1u, mipWidth / 2);
+            mipHeight = std::max(1u, mipHeight / 2);
+        }
     }
     vkCmdCopyBufferToImage(
         commands, staging, image.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        mipLevels, copies.data());
+        static_cast<uint32_t>(copies.size()), copies.data());
 
     VkImageMemoryBarrier toShader = toCopy;
     toShader.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
@@ -417,8 +445,7 @@ uint64_t VulkanTextureSystem::EstimateAllocationBytes(uint32_t width, uint32_t h
     VkImageCreateInfo info{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
     info.imageType = VK_IMAGE_TYPE_2D;
     info.extent = {width,height,1}; info.mipLevels = levels; info.arrayLayers = 1;
-    info.format = format == Engine::Graphics::GraphicsTextureFormat::Rgba32Float
-        ? VK_FORMAT_R32G32B32A32_SFLOAT : (srgb ? VK_FORMAT_R8G8B8A8_SRGB:VK_FORMAT_R8G8B8A8_UNORM);
+    info.format = VulkanTextureFormat(format, srgb);
     info.tiling = VK_IMAGE_TILING_OPTIMAL; info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     info.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
     info.samples = VK_SAMPLE_COUNT_1_BIT; info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
@@ -436,12 +463,15 @@ std::shared_ptr<VulkanGraphicsTexture> VulkanTextureSystem::CreateTexture(
     const uint8_t* rgbaPixels,
     uint32_t mipLevels,
     Engine::Graphics::GraphicsTextureFormat format,
-    bool srgb)
+    bool srgb,
+    uint32_t layers,
+    bool arrayView)
 {
-    if (!width || !height || !rgbaPixels || !mipLevels)
+    if (!width || !height || !rgbaPixels || !mipLevels || !layers)
         return nullptr;
     auto result = std::make_shared<VulkanGraphicsTexture>(
-        shared_from_this(), Upload(width, height, rgbaPixels, mipLevels, format, srgb));
+        shared_from_this(), Upload(width, height, rgbaPixels, mipLevels, format, srgb,
+            layers, arrayView));
     m_uploads.back().owner=result;
     return result;
 }
@@ -642,7 +672,8 @@ void VulkanTextureSystem::Bind(
         for (uint32_t index = 0; index < 18; ++index)
         {
             images[20 + index].imageView = textures[12 + index]
-                ? textures[12 + index]->GetView() : m_white.view;
+                ? textures[12 + index]->GetView()
+                : (index < 3 ? m_whiteArray.view : m_white.view);
             images[20 + index].imageLayout =
                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
             writes[28 + index] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
@@ -738,6 +769,15 @@ std::shared_ptr<Engine::Graphics::IGraphicsTexture> VulkanTextureFactory::Create
 {
     return m_system
         ? m_system->CreateTexture(width, height, rgbaPixels, mipLevels, format, srgb)
+        : nullptr;
+}
+
+std::shared_ptr<Engine::Graphics::IGraphicsTexture> VulkanTextureFactory::CreateTexture2DArray(
+    uint32_t width, uint32_t height, uint32_t layers, const uint8_t* pixels,
+    uint32_t mipLevels, Engine::Graphics::GraphicsTextureFormat format, bool srgb)
+{
+    return m_system
+        ? m_system->CreateTexture(width, height, pixels, mipLevels, format, srgb, layers, true)
         : nullptr;
 }
 

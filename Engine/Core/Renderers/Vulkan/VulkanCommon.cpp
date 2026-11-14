@@ -19,14 +19,14 @@ uint32_t VulkanFindMemoryType(VkPhysicalDevice physicalDevice, uint32_t typeBits
 VulkanImageResource VulkanCreateImage(VkPhysicalDevice physicalDevice, VkDevice device,
                                       uint32_t width, uint32_t height, VkFormat format,
                                       VkImageUsageFlags usage, VkImageAspectFlags aspect,
-                                      uint32_t mipLevels)
+                                      uint32_t mipLevels, uint32_t arrayLayers, bool arrayView)
 {
     VulkanImageResource result;
     VkImageCreateInfo imageInfo{ VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
     imageInfo.imageType = VK_IMAGE_TYPE_2D;
     imageInfo.extent = { width, height, 1 };
     imageInfo.mipLevels = mipLevels;
-    imageInfo.arrayLayers = 1;
+    imageInfo.arrayLayers = arrayLayers;
     imageInfo.format = format;
     imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
     imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -46,11 +46,11 @@ VulkanImageResource VulkanCreateImage(VkPhysicalDevice physicalDevice, VkDevice 
 
     VkImageViewCreateInfo viewInfo{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
     viewInfo.image = result.image;
-    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    viewInfo.viewType = arrayView ? VK_IMAGE_VIEW_TYPE_2D_ARRAY : VK_IMAGE_VIEW_TYPE_2D;
     viewInfo.format = format;
     viewInfo.subresourceRange.aspectMask = aspect;
     viewInfo.subresourceRange.levelCount = mipLevels;
-    viewInfo.subresourceRange.layerCount = 1;
+    viewInfo.subresourceRange.layerCount = arrayLayers;
     VkCheck(vkCreateImageView(device, &viewInfo, nullptr, &result.view), "vkCreateImageView");
     return result;
 }

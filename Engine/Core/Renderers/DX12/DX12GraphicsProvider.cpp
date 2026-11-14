@@ -167,7 +167,7 @@ D3D12GraphicsProvider::D3D12GraphicsProvider(
     OutputDebugStringA("[D3D12GraphicsProvider] Creating context factory...\n");
     m_textureFactory = std::make_unique<D3D12TextureFactory>(device, commandQueue);
     m_contextFactory = std::make_unique<D3D12GraphicsContextFactory>(device, commandQueue, rootSig,
-        m_textureFactory->GetNullTexture());
+        m_textureFactory->GetNullTexture(), m_textureFactory->GetNullArrayTexture());
     OutputDebugStringA("[D3D12GraphicsProvider] All factories created\n");
 }
 
@@ -190,7 +190,7 @@ D3D12GraphicsProvider::D3D12GraphicsProvider(
         std::move(sharedTextureHeap), sharedTextureFirstDescriptor,
         sharedTextureDescriptorCount);
     m_contextFactory = std::make_unique<D3D12GraphicsContextFactory>(device, commandQueue, rootSig,
-        m_textureFactory->GetNullTexture());
+        m_textureFactory->GetNullTexture(), m_textureFactory->GetNullArrayTexture());
     OutputDebugStringA("[D3D12GraphicsProvider] All factories created (shared texture heap)\n");
 }
 }

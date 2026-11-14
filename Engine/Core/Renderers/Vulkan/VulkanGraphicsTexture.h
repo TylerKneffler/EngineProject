@@ -32,7 +32,7 @@ public:
     std::shared_ptr<VulkanGraphicsTexture> CreateTexture(
         uint32_t width, uint32_t height, const uint8_t* rgbaPixels,
         uint32_t mipLevels, Engine::Graphics::GraphicsTextureFormat format,
-        bool srgb = true);
+        bool srgb = true, uint32_t layers = 1, bool arrayView = false);
     std::shared_ptr<VulkanGraphicsTexture> CreateDepthTexture(
         uint32_t width, uint32_t height);
     void Bind(
@@ -50,6 +50,7 @@ public:
     void ReleaseUploadedImage(VulkanImageResource& image);
     uint64_t EstimateAllocationBytes(uint32_t, uint32_t, uint32_t,
         Engine::Graphics::GraphicsTextureFormat, bool) const;
+    bool SupportsBlockCompression() const;
 
 private:
     struct TextureKey
@@ -71,7 +72,7 @@ private:
     VulkanImageResource Upload(
         uint32_t width, uint32_t height, const uint8_t* rgbaPixels,
         uint32_t mipLevels, Engine::Graphics::GraphicsTextureFormat format,
-        bool srgb = true);
+        bool srgb = true, uint32_t layers = 1, bool arrayView = false);
 
     VkPhysicalDevice m_physicalDevice = VK_NULL_HANDLE;
     VkDevice m_device = VK_NULL_HANDLE;
@@ -82,6 +83,9 @@ private:
     VkBuffer m_dummyBuffer = VK_NULL_HANDLE;
     VkDeviceMemory m_dummyBufferMemory = VK_NULL_HANDLE;
     VulkanImageResource m_white;
+    // Default for the terrain layer array bindings (logical slots 12-14),
+    // whose shader declarations are 2D arrays.
+    VulkanImageResource m_whiteArray;
     struct DescriptorFrame
     {
         std::vector<VkDescriptorPool> pools;
@@ -163,8 +167,14 @@ public:
     uint64_t EstimateAllocationBytes(uint32_t w, uint32_t h, uint32_t levels,
         Engine::Graphics::GraphicsTextureFormat format, bool srgb = true) const override
     { return m_system->EstimateAllocationBytes(w,h,levels,format,srgb); }
+    bool SupportsBlockCompression() const override
+    { return m_system && m_system->SupportsBlockCompression(); }
     std::shared_ptr<Engine::Graphics::IGraphicsTexture> CreateTexture2D(
         uint32_t width, uint32_t height, const uint8_t* rgbaPixels,
+        uint32_t mipLevels, Engine::Graphics::GraphicsTextureFormat format,
+        bool srgb = true) override;
+    std::shared_ptr<Engine::Graphics::IGraphicsTexture> CreateTexture2DArray(
+        uint32_t width, uint32_t height, uint32_t layers, const uint8_t* pixels,
         uint32_t mipLevels, Engine::Graphics::GraphicsTextureFormat format,
         bool srgb = true) override;
     std::shared_ptr<Engine::Graphics::IGraphicsTexture> CreateDepthTexture2D(

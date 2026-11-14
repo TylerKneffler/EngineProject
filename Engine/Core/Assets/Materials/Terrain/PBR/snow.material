@@ -1,0 +1,18 @@
+{
+    "version": 1,
+    "baseColor": [
+        0.85,
+        0.88,
+        0.92
+    ],
+    "metallic": 0,
+    "roughness": 1.0,
+    "normalScale": 1,
+    "terrainHeightBlendStrength": 0.5,
+    "terrainUvScale": 0.5,
+    "baseColorTexture": "Assets/Textures/Terrain/PBR/Snow006/Snow006_Color.jpg",
+    "normalTexture": "Assets/Textures/Terrain/PBR/Snow006/Snow006_NormalGL.jpg",
+    "metallicRoughnessTexture": "Assets/Textures/Terrain/PBR/Snow006/Snow006_Roughness.jpg",
+    "occlusionTexture": "Assets/Textures/Terrain/PBR/Snow006/Snow006_AmbientOcclusion.jpg",
+    "heightTexture": "Assets/Textures/Terrain/PBR/Snow006/Snow006_Displacement.jpg"
+}

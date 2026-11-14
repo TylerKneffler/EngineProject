@@ -1365,6 +1365,14 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             preparedDraw.blended, sprite != nullptr, wireframeMode, shadowOnly,
             preparedDraw.terrain, preparedDraw.terrainCell,
             renderItem->skinJointCount, foliagePipelines);
+        // Opaque parallax with depth offset writes SV_DepthGreaterEqual.
+        if (mat && mat->parallaxDepthOffset &&
+            (static_cast<uint32_t>(preparedDraw.objectData.materialParams.w) & 64u) &&
+            (materialPipeline == m_objectPipeline.get() ||
+             materialPipeline == m_objectDoubleSidedPipeline.get()))
+            if (auto* depthPipeline = m_objectParallaxDepthPipelines[
+                    materialPipeline == m_objectDoubleSidedPipeline.get() ? 1 : 0].get())
+                preparedDraw.pipeline = materialPipeline = depthPipeline;
         materialPipelineMs += std::chrono::duration<double,std::milli>(
             RenderClock::now()-pipelineResolveStart).count();
         preparedDraw.constantBufferOffset = offset;

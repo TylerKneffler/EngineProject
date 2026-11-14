@@ -59,7 +59,8 @@ public:
         std::shared_ptr<D3D12OcclusionQueryState> occlusionState = {},
         std::shared_ptr<D3D12GpuTimingState> gpuTimings = {},
         std::shared_ptr<D3D12IndirectSignatures> indirectSignatures = {},
-        std::shared_ptr<Engine::Graphics::IGraphicsTexture> nullTexture = {});
+        std::shared_ptr<Engine::Graphics::IGraphicsTexture> nullTexture = {},
+        std::shared_ptr<Engine::Graphics::IGraphicsTexture> nullArrayTexture = {});
     void SetPipeline(const Engine::Graphics::IPipelineState* pipeline) override;
     void SetStencilReference(uint32_t reference) override;
     void SetConstantBuffer(uint32_t slot, const Engine::Graphics::IGraphicsBuffer* buffer, uint64_t offset = 0) override;
@@ -138,6 +139,7 @@ private:
     std::shared_ptr<D3D12GpuTimingState> m_gpuTimings;
     std::shared_ptr<D3D12IndirectSignatures> m_indirectSignatures;
     std::shared_ptr<Engine::Graphics::IGraphicsTexture> m_nullTexture;
+    std::shared_ptr<Engine::Graphics::IGraphicsTexture> m_nullArrayTexture;
     uint64_t m_occlusionViewId = 0;
     uint64_t m_occlusionSceneSignature = 0;
     uint64_t m_activeOcclusionKey = 0;
@@ -158,7 +160,8 @@ public:
         ID3D12Device* device,
         ID3D12CommandQueue* commandQueue,
         ID3D12RootSignature* rootSignature,
-        std::shared_ptr<Engine::Graphics::IGraphicsTexture> nullTexture = {});
+        std::shared_ptr<Engine::Graphics::IGraphicsTexture> nullTexture = {},
+        std::shared_ptr<Engine::Graphics::IGraphicsTexture> nullArrayTexture = {});
 
     void SetCommandBuffer(void* cmd) override;
     void PrepareFrame(uint32_t frameSlot) override;
@@ -187,5 +190,6 @@ private:
     std::shared_ptr<D3D12GpuTimingState> m_gpuTimings;
     std::shared_ptr<D3D12IndirectSignatures> m_indirectSignatures;
     std::shared_ptr<Engine::Graphics::IGraphicsTexture> m_nullTexture;
+    std::shared_ptr<Engine::Graphics::IGraphicsTexture> m_nullArrayTexture;
 };
 }

@@ -1,0 +1,18 @@
+{
+    "version": 1,
+    "baseColor": [
+        0.4,
+        0.38,
+        0.34
+    ],
+    "metallic": 0,
+    "roughness": 1.0,
+    "normalScale": 1,
+    "terrainHeightBlendStrength": 1.0,
+    "terrainUvScale": 0.5,
+    "baseColorTexture": "Assets/Textures/Terrain/PBR/Rock030/Rock030_Color.jpg",
+    "normalTexture": "Assets/Textures/Terrain/PBR/Rock030/Rock030_NormalGL.jpg",
+    "metallicRoughnessTexture": "Assets/Textures/Terrain/PBR/Rock030/Rock030_Roughness.jpg",
+    "occlusionTexture": "Assets/Textures/Terrain/PBR/Rock030/Rock030_AmbientOcclusion.jpg",
+    "heightTexture": "Assets/Textures/Terrain/PBR/Rock030/Rock030_Displacement.jpg"
+}

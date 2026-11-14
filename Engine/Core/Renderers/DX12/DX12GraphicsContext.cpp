@@ -280,9 +280,11 @@ D3D12GraphicsContext::D3D12GraphicsContext(ID3D12GraphicsCommandList* cmdList,
     std::shared_ptr<D3D12OcclusionQueryState> occlusionState,
     std::shared_ptr<D3D12GpuTimingState> gpuTimings,
     std::shared_ptr<D3D12IndirectSignatures> indirectSignatures,
-    std::shared_ptr<Engine::Graphics::IGraphicsTexture> nullTexture)
+    std::shared_ptr<Engine::Graphics::IGraphicsTexture> nullTexture,
+    std::shared_ptr<Engine::Graphics::IGraphicsTexture> nullArrayTexture)
     : m_cmdList(cmdList), m_rootSignature(rootSig),
-      m_occlusionState(std::move(occlusionState)), m_gpuTimings(std::move(gpuTimings)), m_indirectSignatures(std::move(indirectSignatures)), m_nullTexture(std::move(nullTexture))
+      m_occlusionState(std::move(occlusionState)), m_gpuTimings(std::move(gpuTimings)), m_indirectSignatures(std::move(indirectSignatures)), m_nullTexture(std::move(nullTexture)),
+      m_nullArrayTexture(std::move(nullArrayTexture))
 {
     // Set the root signature immediately if provided
     if (m_cmdList && m_rootSignature)
@@ -574,15 +576,18 @@ bool D3D12GraphicsContext::CopyBuffer(
 
 void D3D12GraphicsContext::SetTexture(uint32_t slot, const Engine::Graphics::IGraphicsTexture* texture)
 {
-    if (!m_cmdList || (slot >= 12 && (slot < 16 || slot >= 24)))
+    // Logical slots 12-14 are the terrain layer arrays (t27-t29).
+    const bool terrainArray = slot >= 12 && slot <= 14;
+    if (!m_cmdList || (slot >= 12 && !terrainArray && (slot < 16 || slot >= 24)))
         return;
-    const auto* nativeTexture = dynamic_cast<const D3D12GraphicsTexture*>(texture ? texture:m_nullTexture.get());
+    const auto* nullTexture = terrainArray ? m_nullArrayTexture.get() : m_nullTexture.get();
+    const auto* nativeTexture = dynamic_cast<const D3D12GraphicsTexture*>(texture ? texture : nullTexture);
     if (!nativeTexture)
         return;
     RetainTexture(nativeTexture);
     ID3D12DescriptorHeap* heaps[] = { nativeTexture->GetHeap() };
     m_cmdList->SetDescriptorHeaps(1, heaps);
-    const uint32_t rootParameter = slot == 10 ? 26 : slot == 11 ? 27 :
+    const uint32_t rootParameter = terrainArray ? slot + 16 : slot == 10 ? 26 : slot == 11 ? 27 :
         slot >= 16 ? slot + 2 : slot == 6 ? 10 :
         (slot == 7 ? 13 : (slot == 8 ? 14 : (slot == 9 ? 17 : slot + 1)));
     m_cmdList->SetGraphicsRootDescriptorTable(
@@ -750,12 +755,14 @@ D3D12GraphicsContextFactory::D3D12GraphicsContextFactory(
     ID3D12Device* device,
     ID3D12CommandQueue* commandQueue,
     ID3D12RootSignature* rootSignature,
-    std::shared_ptr<Engine::Graphics::IGraphicsTexture> nullTexture)
+    std::shared_ptr<Engine::Graphics::IGraphicsTexture> nullTexture,
+    std::shared_ptr<Engine::Graphics::IGraphicsTexture> nullArrayTexture)
     : m_device(device), m_commandQueue(commandQueue), m_rootSignature(rootSignature),
       m_occlusionState(std::make_shared<D3D12OcclusionQueryState>(device)),
       m_gpuTimings(std::make_shared<D3D12GpuTimingState>(device, commandQueue)),
       m_indirectSignatures(std::make_shared<D3D12IndirectSignatures>(device)),
-      m_nullTexture(std::move(nullTexture))
+      m_nullTexture(std::move(nullTexture)),
+      m_nullArrayTexture(std::move(nullArrayTexture))
 {
     // Create command allocator
     HRESULT hr = device->CreateCommandAllocator(
@@ -783,7 +790,7 @@ std::unique_ptr<Engine::Graphics::IGraphicsContext> D3D12GraphicsContextFactory:
     // otherwise fall back to the factory's own command list.
     auto* list = m_externalCmdList ? m_externalCmdList : m_cmdList.Get();
     auto result = std::make_unique<D3D12GraphicsContext>(
-        list, m_rootSignature, m_occlusionState, m_gpuTimings, m_indirectSignatures, m_nullTexture);
+        list, m_rootSignature, m_occlusionState, m_gpuTimings, m_indirectSignatures, m_nullTexture, m_nullArrayTexture);
     result->SetTextureOwners(m_textureOwners);
     result->SetBufferOwners(m_bufferOwners);
     return result;
@@ -794,7 +801,7 @@ std::unique_ptr<Engine::Graphics::IGraphicsContext> D3D12GraphicsContextFactory:
     if (!commandBuffer) return nullptr;
     auto result = std::make_unique<D3D12GraphicsContext>(
         static_cast<ID3D12GraphicsCommandList*>(commandBuffer), m_rootSignature,
-        m_occlusionState, m_gpuTimings, m_indirectSignatures, m_nullTexture);
+        m_occlusionState, m_gpuTimings, m_indirectSignatures, m_nullTexture, m_nullArrayTexture);
     result->SetTextureOwners(m_textureOwners);
     result->SetBufferOwners(m_bufferOwners);
     return result;

@@ -6,6 +6,7 @@
 #include "Core/Compoonents/Terrain/Terrain.h"
 #include "Core/Compoonents/Terrain/TerrainManager.h"
 #include "Core/Compoonents/Terrain/TerrainBatchAppearance.h"
+#include "Core/Compoonents/Terrain/TerrainLayerArrays.h"
 #include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Compoonents/Materials/Texture.h"
 #include "Core/Rendering/Lighting/EnvironmentMap.h"
@@ -264,9 +265,16 @@ ResolvedMaterialRecord SceneRendererDrawPreparation::ResolveMaterialRecord(
             data.subsurfaceTransmission.x = mat->subsurfaceTransmission;
         }
         data.viewPositionAlphaCutoff = glm::vec4(cameraPosition, mat->alphaCutoff);
-        // w: parallax flags (1 = height texture stores depth, white = recessed).
+        // w: parallax flags in the integer part (1 = height texture stores
+        // depth, 2 = relief self-shadow, 4 = clip outside 0..1 UV, 8 = depth
+        // offset, 16 = editor cost view) and the self-shadow strength * 0.5
+        // in the fraction (see Object.hlsl).
+        const int parallaxFlags = (mat->heightIsDepth ? 1 : 0) |
+            (mat->parallaxSelfShadow ? 2 : 0) | (mat->parallaxClampUv ? 4 : 0) |
+            (mat->parallaxDepthOffset ? 8 : 0) | (mat->parallaxCostView ? 16 : 0);
         data.parallaxParams = { mat->heightScale, mat->heightMinSteps,
-            mat->heightMaxSteps, mat->heightIsDepth ? 1.f : 0.f };
+            mat->heightMaxSteps, static_cast<float>(parallaxFlags) +
+                std::clamp(mat->parallaxShadowStrength, 0.f, 1.f) * 0.5f };
         data.environmentParams.z = allowEnvironmentDiffuse
             ? mat->environmentDiffuseStrength : 0.f;
         data.environmentParams.w = allowReflections ? mat->reflectionStrength : 0.f;
@@ -356,42 +364,54 @@ void SceneRendererDrawPreparation::PrepareTerrainMaterial(
     bool textured = false;
     for (uint32_t slot = 0; slot < 6; ++slot)
         draw.textures[slot] = nullptr;
+    // Masks: w albedo, x normal, y roughness or AO, z height blend. Slices a
+    // layer lacks hold neutral values, so the masks only skip fetches.
     for (size_t layer = 0; layer < std::min<size_t>(materials.size(), 6); ++layer)
     {
         const auto* material = materials[layer].get();
-        const auto* baseColor = material && material->baseColorTexture
-            ? material->baseColorTexture->GetGraphicsTexture() : nullptr;
-        draw.textures[layer] = baseColor;
-        textured |= baseColor != nullptr;
-        if (baseColor) objectData.terrainMapMasks.w |= 1u << layer;
+        const uint32_t bit = 1u << layer;
         objectData.terrainLayerParams[layer] = {
             material ? material->roughnessFactor : 1.f,
             material ? material->normalScale : 1.f,
-            material ? material->terrainHeightBlendStrength : 0.f, 0.f };
-        if (material)
-            objectData.terrainMacroColors[layer] = glm::vec4(
-                glm::length(material->terrainMacroColor) > 0.f
-                    ? material->terrainMacroColor : material->diffuseColor, 0.f);
-
-        const auto* normal = material && material->normalTexture
-            ? material->normalTexture->GetGraphicsTexture() : nullptr;
-        const auto* roughness = material && material->metallicRoughnessTexture
-            ? material->metallicRoughnessTexture->GetGraphicsTexture() : nullptr;
-        const auto* height = material && material->heightTexture
-            ? material->heightTexture->GetGraphicsTexture() : nullptr;
-        draw.textures[12 + layer] = normal;
-        draw.textures[18 + layer] = roughness;
-        draw.textures[24 + layer] = height;
-        if (normal || roughness || height) draw.textureSlotCount = 30;
-        if (normal) objectData.terrainMapMasks.x |= 1u << layer;
-        if (roughness) objectData.terrainMapMasks.y |= 1u << layer;
-        if (height && material->terrainHeightBlendStrength > 0.f)
-            objectData.terrainMapMasks.z |= 1u << layer;
-        textured |= normal || roughness || height;
+            material ? material->terrainHeightBlendStrength : 0.f,
+            material ? material->terrainUvScale : 1.f };
+        if (!material) continue;
+        objectData.terrainMacroColors[layer] = glm::vec4(
+            glm::length(material->terrainMacroColor) > 0.f
+                ? material->terrainMacroColor : material->diffuseColor, 0.f);
+        if (material->baseColorTexture) objectData.terrainMapMasks.w |= bit;
+        if (material->normalTexture) objectData.terrainMapMasks.x |= bit;
+        if (material->metallicRoughnessTexture || material->occlusionTexture)
+            objectData.terrainMapMasks.y |= bit;
+        if (material->heightTexture && material->terrainHeightBlendStrength > 0.f)
+            objectData.terrainMapMasks.z |= bit;
+        textured |= material->baseColorTexture || material->normalTexture ||
+            material->metallicRoughnessTexture || material->occlusionTexture ||
+            material->heightTexture;
+    }
+    // Layers are shaded from three Texture2DArrays (slots 12-14, slice = layer).
+    // Until they are built the shader shows each layer's mean color.
+    const auto* arrays = textured ? Engine::Components::TerrainLayerArrays::Acquire(
+        materials, scene.m_graphicsProvider) : nullptr;
+    if (arrays)
+    {
+        draw.textures[12] = arrays->albedoHeight.get();
+        draw.textures[13] = arrays->normal.get();
+        draw.textures[14] = arrays->roughAo.get();
+        draw.textureSlotCount = std::max(draw.textureSlotCount, 15u);
+        // Measured means replace the material's flat color when no macro
+        // color was authored.
+        for (size_t layer = 0; layer < std::min<size_t>(materials.size(), 6); ++layer)
+            if (const auto* material = materials[layer].get();
+                material && glm::length(material->terrainMacroColor) <= 0.f &&
+                (arrays->albedoMask & (1u << layer)))
+                objectData.terrainMacroColors[layer] =
+                    glm::vec4(arrays->meanAlbedo[layer], 0.f);
     }
 
     objectData.baseColor = glm::vec4(1.f);
     objectData.materialParams.w = textured ? 2048.f : 0.f;
+    if (textured && arrays) objectData.materialParams.w += 262144.f;
     auto* terrainManager = object->GetComponentInParent<Engine::Components::TerrainManager>();
     if (!includeEditorVisuals && !forceUnlitMode && terrainManager &&
         terrainManager->fastRuntimeLighting)
@@ -408,7 +428,14 @@ void SceneRendererDrawPreparation::PrepareTerrainMaterial(
         objectData.textureUvSets1.x = std::max(
             terrainManager->cellsX * terrainManager->cellWidth,
             terrainManager->cellsY * terrainManager->cellDepth);
-    if (terrainManager && terrainManager->stochasticTerrainVariation)
+    // A standalone terrain maps world X/Z over its own extent, which also
+    // enables the cliff side projections.
+    if (!terrainManager && terrain)
+        objectData.textureUvSets1.x = std::max(terrain->cellsX * terrain->cellWidth,
+            terrain->cellsY * terrain->cellDepth);
+    // Hex-tiling: the manager's stochastic variation switch; always on for
+    // standalone terrain.
+    if (!terrainManager || terrainManager->stochasticTerrainVariation)
         objectData.materialParams.w += 65536.f;
     if (terrainManager && terrainManager->terrainMacroColorEnabled)
         objectData.materialParams.w += 131072.f;

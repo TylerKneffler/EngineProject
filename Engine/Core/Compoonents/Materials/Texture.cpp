@@ -16,6 +16,8 @@
 #include <stb_image.h>
 #include <tinyexr.h>
 #include <ktx.h>
+#include <bc7decomp.h>
+#include <rgbcx.h>
 
 #include <algorithm>
 #include <cctype>
@@ -96,6 +98,65 @@ uint32_t FullMipCount(uint32_t width, uint32_t height)
         ++count;
     }
     return count;
+}
+
+// Native block-compressed KTX2 payloads the GPU samples directly.
+bool KtxBlockFormat(uint32_t vkFormat, Engine::Graphics::GraphicsTextureFormat& format)
+{
+    using Engine::Graphics::GraphicsTextureFormat;
+    switch (vkFormat)
+    {
+    case 131u: case 132u: case 133u: case 134u: format = GraphicsTextureFormat::Bc1; return true;
+    case 139u: format = GraphicsTextureFormat::Bc4; return true;
+    case 141u: format = GraphicsTextureFormat::Bc5; return true;
+    case 145u: case 146u: format = GraphicsTextureFormat::Bc7; return true;
+    default: return false;
+    }
+}
+
+// CPU decode of one block-compressed level to RGBA8 for editor/baking reads.
+// One-channel data is replicated to grey; BC5 normals get Z rebuilt.
+std::vector<uint8_t> DecodeBlockLevel(Engine::Graphics::GraphicsTextureFormat format,
+    const uint8_t* blocks, uint32_t width, uint32_t height)
+{
+    using Engine::Graphics::GraphicsTextureFormat;
+    static std::once_flag rgbcxInit;
+    std::call_once(rgbcxInit, [] { rgbcx::init(); });
+    const uint32_t blocksWide = (width + 3) / 4, blocksHigh = (height + 3) / 4;
+    const uint32_t blockBytes = Engine::Graphics::GraphicsTextureBytesPerBlock(format);
+    std::vector<uint8_t> rgba(static_cast<size_t>(width) * height * 4);
+    for (uint32_t by = 0; by < blocksHigh; ++by)
+    for (uint32_t bx = 0; bx < blocksWide; ++bx)
+    {
+        const uint8_t* block = blocks + (static_cast<size_t>(by) * blocksWide + bx) * blockBytes;
+        uint8_t texels[16 * 4];
+        std::memset(texels, 255, sizeof(texels));
+        switch (format)
+        {
+        case GraphicsTextureFormat::Bc1: rgbcx::unpack_bc1(block, texels, true); break;
+        case GraphicsTextureFormat::Bc4:
+            rgbcx::unpack_bc4(block, texels, 4);
+            for (uint32_t i = 0; i < 16; ++i) texels[i * 4 + 1] = texels[i * 4 + 2] = texels[i * 4];
+            break;
+        case GraphicsTextureFormat::Bc5:
+            rgbcx::unpack_bc5(block, texels, 0, 1, 4);
+            for (uint32_t i = 0; i < 16; ++i)
+            {
+                const float x = texels[i * 4] / 127.5f - 1.f, y = texels[i * 4 + 1] / 127.5f - 1.f;
+                const float z = std::sqrt(std::max(0.f, 1.f - x * x - y * y));
+                texels[i * 4 + 2] = static_cast<uint8_t>(std::clamp(z * 127.5f + 127.5f, 0.f, 255.f));
+            }
+            break;
+        default:
+            bc7decomp::unpack_bc7(block, reinterpret_cast<bc7decomp::color_rgba*>(texels));
+            break;
+        }
+        for (uint32_t y = 0; y < 4 && by * 4 + y < height; ++y)
+        for (uint32_t x = 0; x < 4 && bx * 4 + x < width; ++x)
+            std::memcpy(rgba.data() + ((static_cast<size_t>(by) * 4 + y) * width + bx * 4 + x) * 4,
+                texels + (y * 4 + x) * 4, 4);
+    }
+    return rgba;
 }
 
 float SrgbToLinear(uint8_t value)
@@ -310,6 +371,7 @@ std::shared_ptr<Texture> Texture::DecodeDetached(const std::string& path, bool s
     auto decoded=std::shared_ptr<Texture>(new Texture(
         std::filesystem::path(path).lexically_normal().generic_string(),srgb));
     decoded->m_generateMips=false;
+    decoded->m_cpuRgba=true;
     return decoded->Load() ? decoded:nullptr;
 }
 
@@ -339,6 +401,7 @@ void Texture::InvalidateCache()
     m_queuedProvider = nullptr;
     m_decodeFailed = false;
     m_pixels.clear();
+    m_cpuCopy.reset();
     m_width = m_height = 0;
     m_mipLevels = 0;
     m_format = GraphicsTextureFormat::Rgba8;
@@ -356,6 +419,7 @@ bool Texture::Load()
         [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
 
     bool success = false;
+    bool storedMips = false;
     if (extension == ".hdr")
     {
         int width = 0, height = 0, channels = 0;
@@ -413,13 +477,83 @@ bool Texture::Load()
             std::unique_ptr<ktxTexture2, void(*)(ktxTexture2*)> texture(raw,
                 [](ktxTexture2* value) { ktxTexture_Destroy(ktxTexture(value)); });
             const bool basis = ktxTexture2_NeedsTranscoding(texture.get());
-            bool rgba = true;
+            const bool plain2d = texture->numDimensions == 2 && !texture->isArray &&
+                texture->numFaces == 1 && texture->baseDepth == 1;
+            GraphicsTextureFormat blockFormat = GraphicsTextureFormat::Rgba8;
+            // Render textures keep (or transcode to) BC so the GPU samples the
+            // compressed data. Basis always goes to BC7: its BC4/BC5 targets
+            // read G from separate slices and only suit 2-channel encodes.
+            // CPU consumers (thumbnails, baking, paint tips) need RGBA8.
+            bool compressed = false;
             if (basis)
+                compressed = !m_cpuRgba && plain2d &&
+                    Engine::Graphics::GraphicsTextureIsValidBase(GraphicsTextureFormat::Bc7,
+                        texture->baseWidth, texture->baseHeight) &&
+                    ktxTexture2_TranscodeBasis(texture.get(), KTX_TTF_BC7_RGBA, 0) == KTX_SUCCESS;
+            if (compressed) blockFormat = GraphicsTextureFormat::Bc7;
+            else if (!basis && KtxBlockFormat(texture->vkFormat, blockFormat))
+                compressed = !m_cpuRgba && plain2d &&
+                    Engine::Graphics::GraphicsTextureIsValidBase(blockFormat,
+                        texture->baseWidth, texture->baseHeight);
+            if (compressed)
+            {
+                const uint32_t levels = std::max(1u, texture->numLevels);
+                uint64_t total = Engine::Graphics::GraphicsTextureChainBytes(
+                    blockFormat, texture->baseWidth, texture->baseHeight, levels);
+                std::vector<uint8_t> chain;
+                chain.reserve(static_cast<size_t>(total));
+                uint32_t w = texture->baseWidth, h = texture->baseHeight;
+                bool complete = true;
+                for (uint32_t level = 0; level < levels && complete; ++level)
+                {
+                    ktx_size_t offset = 0;
+                    const size_t expected = static_cast<size_t>(
+                        Engine::Graphics::GraphicsTextureMipBytes(blockFormat, w, h));
+                    complete = ktxTexture_GetImageOffset(ktxTexture(texture.get()), level, 0, 0, &offset) == KTX_SUCCESS &&
+                        ktxTexture_GetImageSize(ktxTexture(texture.get()), level) == expected;
+                    if (complete)
+                    {
+                        const uint8_t* source = ktxTexture_GetData(ktxTexture(texture.get())) + offset;
+                        chain.insert(chain.end(), source, source + expected);
+                    }
+                    w = std::max(1u, w / 2); h = std::max(1u, h / 2);
+                }
+                if (complete)
+                {
+                    m_width = texture->baseWidth;
+                    m_height = texture->baseHeight;
+                    m_format = blockFormat;
+                    m_mipLevels = m_generateMips ? levels : 1u;
+                    if (!m_generateMips)
+                        chain.resize(static_cast<size_t>(Engine::Graphics::GraphicsTextureMipBytes(
+                            blockFormat, m_width, m_height)));
+                    m_pixels = std::move(chain);
+                    storedMips = true;
+                    success = true;
+                }
+            }
+            if (!compressed && !basis && m_cpuRgba && plain2d &&
+                KtxBlockFormat(texture->vkFormat, blockFormat))
+            {
+                ktx_size_t offset = 0;
+                if (ktxTexture_GetImageOffset(ktxTexture(texture.get()), 0, 0, 0, &offset) == KTX_SUCCESS &&
+                    ktxTexture_GetImageSize(ktxTexture(texture.get()), 0) ==
+                        Engine::Graphics::GraphicsTextureMipBytes(blockFormat,
+                            texture->baseWidth, texture->baseHeight))
+                {
+                    m_width = texture->baseWidth;
+                    m_height = texture->baseHeight;
+                    m_pixels = DecodeBlockLevel(blockFormat,
+                        ktxTexture_GetData(ktxTexture(texture.get())) + offset, m_width, m_height);
+                    success = true;
+                }
+            }
+            bool rgba = !compressed && !success;
+            if (rgba && basis)
                 rgba = ktxTexture2_TranscodeBasis(texture.get(), KTX_TTF_RGBA32, 0) == KTX_SUCCESS;
             const uint32_t format = texture->vkFormat;
             const bool bgra = !basis && (format == 44u || format == 50u);
-            const bool supported = rgba && texture->numDimensions == 2 && !texture->isArray &&
-                texture->numFaces == 1 && texture->baseDepth == 1 &&
+            const bool supported = rgba && plain2d &&
                 (basis || format == 37u || format == 43u || bgra);
             ktx_size_t offset = 0;
             if (supported && ktxTexture_GetImageOffset(ktxTexture(texture.get()), 0, 0, 0, &offset) == KTX_SUCCESS)
@@ -481,8 +615,11 @@ bool Texture::Load()
     }
     if (success)
     {
-        m_mipLevels = m_generateMips ? FullMipCount(m_width, m_height):1;
-        if(m_generateMips) GenerateMipChain(m_pixels, m_width, m_height, m_format, m_srgb);
+        if (!storedMips)
+        {
+            m_mipLevels = m_generateMips ? FullMipCount(m_width, m_height):1;
+            if(m_generateMips) GenerateMipChain(m_pixels, m_width, m_height, m_format, m_srgb);
+        }
     }
     else
     {
@@ -495,9 +632,25 @@ bool Texture::Load()
 
 const std::vector<uint8_t>& Texture::GetPixels() const
 {
-    if (m_pixels.empty())
-        const_cast<Texture*>(this)->Load();
-    return m_pixels;
+    using Engine::Graphics::GraphicsTextureIsBlockCompressed;
+    if (!GraphicsTextureIsBlockCompressed(m_format))
+    {
+        if (m_pixels.empty())
+            const_cast<Texture*>(this)->Load();
+        if (!GraphicsTextureIsBlockCompressed(m_format))
+            return m_pixels;
+    }
+    // The render copy is block-compressed; editor callers expect RGBA8.
+    // Basis sources transcode to RGBA; native BC files have no CPU decoder
+    // and yield an empty image, which callers already treat as unavailable.
+    if (!m_cpuCopy)
+    {
+        auto copy = std::shared_ptr<Texture>(new Texture(m_filePath, m_srgb));
+        copy->m_cpuRgba = true;
+        copy->Load();
+        m_cpuCopy = std::move(copy);
+    }
+    return m_cpuCopy->m_pixels;
 }
 
 void Texture::Reload()
@@ -668,7 +821,14 @@ std::vector<Texture::StreamingTextureInfo> Texture::GetStreamingInventory()
 }
 bool Texture::IsStreamable() const
 {
-    return m_generateMips && m_mipLevels > 1 && m_format == GraphicsTextureFormat::Rgba8 && !m_retainPixelsForCpu;
+    if (!m_generateMips || m_mipLevels <= 1 || m_format == GraphicsTextureFormat::Rgba32Float ||
+        m_retainPixelsForCpu)
+        return false;
+    // Any level down to one block may become a streamed tail's top level,
+    // which D3D requires to be a whole number of blocks.
+    for (uint32_t w = m_width, h = m_height; std::min(w, h) >= 4; w /= 2, h /= 2)
+        if (!Engine::Graphics::GraphicsTextureIsValidBase(m_format, w, h)) return false;
+    return true;
 }
 void Texture::RequestMipFootprint(float pixelsPerUvRepeat)
 {
@@ -696,10 +856,11 @@ bool Texture::UploadMipTail(IGraphicsProvider* provider, uint32_t firstMip, bool
     size_t offset=0;
     for (uint32_t mip=0;mip<firstMip;++mip)
     {
-        offset += size_t(w)*h*4;
+        offset += size_t(Engine::Graphics::GraphicsTextureMipBytes(m_format,w,h));
         w=std::max(1u,w/2); h=std::max(1u,h/2);
     }
-    const auto bytes=TextureResidency::Payload(w,h,m_mipLevels-firstMip,4);
+    if (!Engine::Graphics::GraphicsTextureIsValidBase(m_format,w,h)) return false;
+    const auto bytes=Engine::Graphics::GraphicsTextureChainBytes(m_format,w,h,m_mipLevels-firstMip);
     const auto allocation=factory->EstimateAllocationBytes(w,h,m_mipLevels-firstMip,m_format,m_srgb);
     const auto& settings=StreamingSettings();
     auto& uploadThisFrame=s_providerStreamingFrames[provider].uploaded;
@@ -722,7 +883,7 @@ bool Texture::UploadMipTail(IGraphicsProvider* provider, uint32_t firstMip, bool
     if (!resource || !resource->GetNativeHandle()) return false;
     m_budgetDenied=false;
     {std::lock_guard lock(s_graphicsTextureOwnersMutex);s_graphicsTextureOwners[resource.get()]={resource,weak_from_this()};}
-    TextureResidency::Record(resource,bytes,TextureResidency::Payload(m_width,m_height,m_mipLevels,4),
+    TextureResidency::Record(resource,bytes,Engine::Graphics::GraphicsTextureChainBytes(m_format,m_width,m_height,m_mipLevels),
         firstMip,provider,allocation);
     uploadThisFrame+=bytes; s_streamUploads+=bytes;
     if (replacement) { m_pendingTexture=std::move(resource); m_pendingFirstMip=firstMip; }
@@ -814,7 +975,7 @@ void Texture::StreamFrame(IGraphicsProvider* provider)
         t.m_targetFirstMip=t.m_mipHistory.Update(providerFrame.frame,t.m_demandFirstMip,settings.holdFrames);
         w=t.m_width; h=t.m_height;
         for(uint32_t mip=0;mip<t.m_demandFirstMip;++mip) {w=std::max(1u,w/2);h=std::max(1u,h/2);}
-        s_streamSnapshot.requestedBytes+=Engine::Rendering::TextureResidency::Payload(w,h,t.m_mipLevels-t.m_demandFirstMip,4);
+        s_streamSnapshot.requestedBytes+=Engine::Graphics::GraphicsTextureChainBytes(t.m_format,w,h,t.m_mipLevels-t.m_demandFirstMip);
         candidates.push_back({texture,pixels,t.m_targetFirstMip});
     }
     // Stable visual priority. Every texture has an already-admitted fallback;
@@ -853,7 +1014,7 @@ void Texture::StreamFrame(IGraphicsProvider* provider)
             {
                 uint32_t w=t.m_width,h=t.m_height;
                 for(uint32_t mip=0;mip<admitted;++mip) {w=std::max(1u,w/2);h=std::max(1u,h/2);}
-                const auto bytes=Engine::Rendering::TextureResidency::Payload(w,h,t.m_mipLevels-admitted,4);
+                const auto bytes=Engine::Graphics::GraphicsTextureChainBytes(t.m_format,w,h,t.m_mipLevels-admitted);
                 if(allocated<=settings.budgetBytes && t.m_mipAllocations[admitted]<=settings.budgetBytes-allocated &&
                     uploadThisFrame<=settings.uploadBytesPerFrame && bytes<=settings.uploadBytesPerFrame-uploadThisFrame) break;
                 ++admitted;
@@ -865,7 +1026,7 @@ void Texture::StreamFrame(IGraphicsProvider* provider)
                 uint32_t w=t.m_width,h=t.m_height;
                 const uint32_t next=t.m_residentFirstMip ? t.m_residentFirstMip-1:0;
                 for(uint32_t mip=0;mip<next;++mip) {w=std::max(1u,w/2);h=std::max(1u,h/2);}
-                const uint64_t nextBytes=Engine::Rendering::TextureResidency::Payload(w,h,t.m_mipLevels-next,4);
+                const uint64_t nextBytes=Engine::Graphics::GraphicsTextureChainBytes(t.m_format,w,h,t.m_mipLevels-next);
                 // An upload cap is not memory pressure. Keep the best attainable
                 // resident tail instead of repeatedly evicting/reloading it.
                 if(t.m_graphicsTexture!=t.m_fallbackTexture && !uploadThisFrame && nextBytes<=settings.uploadBytesPerFrame)
@@ -919,12 +1080,20 @@ bool Texture::PrepareImmediate(IGraphicsProvider* graphicsProvider)
     Engine::Graphics::IGraphicsTextureFactory* factory = graphicsProvider->GetTextureFactory();
     if (!factory)
         return false;
+    if (Engine::Graphics::GraphicsTextureIsBlockCompressed(m_format) &&
+        !factory->SupportsBlockCompression())
+    {
+        OutputDebugStringA(("[Texture] Device cannot sample BC textures: " + m_filePath + "\n").c_str());
+        m_decodeFailed = true;
+        return false;
+    }
     if (StreamingSettings().budgetBytes && IsStreamable())
     {
         uint32_t firstMip=0,w=m_width,h=m_height;
         const auto cap=ResidentTextureDimensionCap();
         const uint32_t fallbackDimension=cap ? std::min(64u,cap):64u;
-        while(std::max(w,h)>fallbackDimension && firstMip+1<m_mipLevels)
+        while(std::max(w,h)>fallbackDimension && firstMip+1<m_mipLevels &&
+            Engine::Graphics::GraphicsTextureIsValidBase(m_format,std::max(1u,w/2),std::max(1u,h/2)))
         {++firstMip;w=std::max(1u,w/2);h=std::max(1u,h/2);}
         return UploadMipTail(graphicsProvider, firstMip, false);
     }
@@ -939,11 +1108,13 @@ bool Texture::PrepareImmediate(IGraphicsProvider* graphicsProvider)
         // limit is disabled or larger. Source metadata/pixels stay unchanged.
         if (m_format == GraphicsTextureFormat::Rgba32Float)
             dimensionCap = dimensionCap ? std::min(dimensionCap, 2048u) : 2048u;
-        const uint32_t bytesPerPixel = GraphicsTextureBytesPerPixel(m_format);
         while (dimensionCap && std::max(uploadWidth, uploadHeight) > dimensionCap &&
-               uploadMipLevels > 1)
+               uploadMipLevels > 1 &&
+               Engine::Graphics::GraphicsTextureIsValidBase(m_format,
+                   std::max(1u, uploadWidth / 2), std::max(1u, uploadHeight / 2)))
         {
-            uploadOffset += static_cast<size_t>(uploadWidth) * uploadHeight * bytesPerPixel;
+            uploadOffset += static_cast<size_t>(
+                Engine::Graphics::GraphicsTextureMipBytes(m_format, uploadWidth, uploadHeight));
             uploadWidth = std::max(1u, uploadWidth / 2);
             uploadHeight = std::max(1u, uploadHeight / 2);
             --uploadMipLevels;
@@ -956,10 +1127,10 @@ bool Texture::PrepareImmediate(IGraphicsProvider* graphicsProvider)
         m_graphicsTexture=std::move(resource);
         m_forceFull=false;
         Engine::Rendering::TextureResidency::Record(m_graphicsTexture,
-            Engine::Rendering::TextureResidency::Payload(uploadWidth, uploadHeight,
-                uploadMipLevels, bytesPerPixel),
-            Engine::Rendering::TextureResidency::Payload(m_width, m_height,
-                m_mipLevels, bytesPerPixel), m_mipLevels - uploadMipLevels,
+            Engine::Graphics::GraphicsTextureChainBytes(m_format, uploadWidth, uploadHeight,
+                uploadMipLevels),
+            Engine::Graphics::GraphicsTextureChainBytes(m_format, m_width, m_height,
+                m_mipLevels), m_mipLevels - uploadMipLevels,
             graphicsProvider, factory->EstimateAllocationBytes(uploadWidth,uploadHeight,uploadMipLevels,m_format,m_srgb));
         if(m_graphicsTexture) m_residentFirstMip=m_mipLevels-uploadMipLevels;
     }
@@ -972,7 +1143,7 @@ bool Texture::PrepareImmediate(IGraphicsProvider* graphicsProvider)
     m_preparedProvider = m_graphicsTexture ? graphicsProvider : nullptr;
     // Ordinary material textures remain on the GPU. Editors can decode the
     // source again through GetPixels() when they actually need CPU pixels.
-    if (m_graphicsTexture && m_format == GraphicsTextureFormat::Rgba8 &&
+    if (m_graphicsTexture && m_format != GraphicsTextureFormat::Rgba32Float &&
         !m_retainPixelsForCpu)
         std::vector<uint8_t>().swap(m_pixels);
     return static_cast<bool>(m_graphicsTexture);

@@ -35,10 +35,18 @@ public:
         uint32_t width, uint32_t height, const uint8_t* rgbaPixels,
         uint32_t mipLevels, Engine::Graphics::GraphicsTextureFormat format,
         bool srgb = true) override;
+    std::shared_ptr<Engine::Graphics::IGraphicsTexture> CreateTexture2DArray(
+        uint32_t width, uint32_t height, uint32_t layers, const uint8_t* pixels,
+        uint32_t mipLevels, Engine::Graphics::GraphicsTextureFormat format,
+        bool srgb = true) override;
     std::shared_ptr<Engine::Graphics::IGraphicsTexture> CreateDepthTexture2D(
         uint32_t width, uint32_t height) override;
 
 private:
+    std::shared_ptr<Engine::Graphics::IGraphicsTexture> Create(
+        uint32_t width, uint32_t height, uint32_t layers, bool asArray,
+        const uint8_t* pixels, uint32_t mipLevels,
+        Engine::Graphics::GraphicsTextureFormat format, bool srgb);
     ID3D11Device* m_device = nullptr;
 };
 }

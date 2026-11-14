@@ -924,11 +924,10 @@ void Terrain::RefreshMaterials()
         m_materials[i].reset();
         if (layers[i].material.empty()) continue;
         auto material = std::make_shared<Material>();
+        // Layer textures are not uploaded individually: the renderer packs
+        // them into TerrainLayerArrays.
         if (material->LoadFromFile(Mesh::ResolveFilePath(layers[i].material)))
-        {
-            if (m_provider) material->PrepareTextures(m_provider);
             m_materials[i] = std::move(material);
-        }
     }
 }
 
@@ -1001,8 +1000,6 @@ void Terrain::OnAfterDeserialize(IGraphicsProvider* provider)
 void Terrain::PrepareGraphicsResources(IGraphicsProvider* provider)
 {
     m_provider = provider;
-    for (auto& material : m_materials)
-        if (material) material->PrepareTextures(provider);
     if (Owner)
         if (auto* mesh = Owner->GetComponent<Mesh>())
             mesh->PrepareGraphicsResources(provider);

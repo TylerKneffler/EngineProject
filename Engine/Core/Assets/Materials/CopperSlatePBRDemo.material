@@ -27,7 +27,7 @@
     "alphaMode": "Opaque",
     "alphaCutoff": 0.5,
     "normalScale": 1,
-    "heightScale": 0.08,
+    "heightScale": 0.025,
     "heightMinSteps": 12,
     "heightMaxSteps": 40,
     "occlusionStrength": 1,

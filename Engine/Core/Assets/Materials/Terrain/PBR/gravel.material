@@ -1,0 +1,18 @@
+{
+    "version": 1,
+    "baseColor": [
+        0.45,
+        0.43,
+        0.4
+    ],
+    "metallic": 0,
+    "roughness": 1.0,
+    "normalScale": 1,
+    "terrainHeightBlendStrength": 1.0,
+    "terrainUvScale": 1.5,
+    "baseColorTexture": "Assets/Textures/Terrain/PBR/Gravel022/Gravel022_Color.jpg",
+    "normalTexture": "Assets/Textures/Terrain/PBR/Gravel022/Gravel022_NormalGL.jpg",
+    "metallicRoughnessTexture": "Assets/Textures/Terrain/PBR/Gravel022/Gravel022_Roughness.jpg",
+    "occlusionTexture": "Assets/Textures/Terrain/PBR/Gravel022/Gravel022_AmbientOcclusion.jpg",
+    "heightTexture": "Assets/Textures/Terrain/PBR/Gravel022/Gravel022_Displacement.jpg"
+}

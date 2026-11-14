@@ -119,7 +119,43 @@ pending.
 Validation: oak_meadow and terrain_performance captures before/after; POM plane
 test scene with CopperSlate at 0.5 m, 5 m, 30 m, grazing angles.
 
-### Phase 1 — Compressed, usage-aware texture pipeline (1–2 weeks)
+### Phase 1 — Compressed, usage-aware texture pipeline (1–2 weeks) — implemented 2026-11-13
+
+Status: items 1, 3, 4, 5 done; item 2 only in the cook tool (see below). GPU
+upload on DX11/DX12/Vulkan compiles and the loader is covered by
+`.local/tests/TextureCompressionTests.cpp` (CTest `TextureCookCopperSlate` +
+`TextureBlockCompression`), but an in-editor visual check is still pending.
+- `GraphicsTextureFormat` gained `Bc1/Bc4/Bc5/Bc7`; size math lives in
+  `GraphicsTextureMipBytes/ChainBytes/RowBytes` (IGraphicsTexture.h) and is
+  used by all three uploaders, streaming and residency accounting. BC chains
+  stream only when every level down to 4×4 is a whole number of blocks.
+- `tools/TextureCook/TextureCook.cpp` (`TextureCook.exe`): PNG/JPG/TGA →
+  zstd KTX2. Color → BC7 sRGB (linear-light mips), normal → BC5 (unnormalised
+  average, renormalised), mask → BC7 linear (`--toksvig normal.png` widens
+  roughness per mip), height/single → BC4. Non power-of-two sources are
+  resampled to the nearest power of two. Usage: `--usage`, else
+  `importSettings.textureUsage` in the source `.meta`, else the file name.
+- Runtime: native BC KTX2 loads all stored mips as-is. Basis KTX2 transcodes to
+  **BC7, not BC4/BC5**: libktx's Basis→BC5 reads G from the alpha slice, which
+  is only correct for 2-channel normal-mode encodes. CPU readers
+  (`GetPixels`, `DecodeDetached`) decode BC back to RGBA8 via bc7enc_rdo.
+- Shader: `UnpackNormal()` rebuilds Z when blue is 0 (BC5), so legacy RGB
+  normal maps and BC5 maps share one path (material and terrain normals).
+- Not done: no editor UI for `textureUsage` and no import-time cooking;
+  materials must point at the `.ktx2` explicitly.
+- Test scene: `Scenes/Rendering/surface_detail_materials.scene` puts
+  `CopperSlatePBRDemo` (PNG) next to `CopperSlatePBRDemo_BC` (cooked into
+  `Textures/PBRDemo/Cooked/`) on panels and spheres, with BC ground and walls
+  (2 m tiles via `Mesh/surface_detail_ground.obj` / `surface_detail_wall.obj`),
+  a grazing side wall, and a low sun. Verified with GameBackendCapture on
+  DX12, DX11 and Vulkan (use `--max-fps 60 --warmup 120` so the PNG set has
+  time to decode). Visible baseline for Phase 2: the ground POM shows
+  layer stair-stepping on the inlay walls near the camera.
+- Fixed along the way: OBJ meshes had no tangents, so normal/height maps were
+  silently skipped on every OBJ primitive (Mesh.cpp now generates them), and
+  `Material::LoadFromFile` did not resolve `Assets/...` paths, so scene
+  `materialAsset` links only worked when the scene also inlined the textures.
+
 1. Extend `GraphicsTextureFormat` with `Bc1, Bc4, Bc5, Bc7` (+ sRGB flag already
    tracked). Update bytes-per-pixel → bytes-per-block math in streaming
    (`TextureStreamingPolicy`, `UploadMipTail`, mip allocation sizes) and the three
@@ -138,7 +174,37 @@ test scene with CopperSlate at 0.5 m, 5 m, 30 m, grazing angles.
    both for POM stability).
 5. Shader: `UnpackNormal()` helper that handles BC5 (2-channel) and legacy RGB.
 
-### Phase 2 — POM v2 for general materials (1 week)
+### Phase 2 — POM v2 for general materials (1 week) — implemented 2026-11-13
+
+Status: `ParallaxOcclusion()` in Object.hlsl marches half the authored steps
+(max 32, one per two traversed pixels) then 4 binary steps + a secant step;
+the earlier stair-stepping on the test scene's inlay walls is gone.
+`ParallaxSelfShadow()` (6–16 steps by hit depth) multiplies directional-light
+shadow when `Material::parallaxSelfShadow` is set, scaled by
+`parallaxShadowStrength`, faded 10–15 m from the camera. `parallaxClampUv`
+clips relief outside 0..1. Flags pack into `parallaxParams.w` (integer part:
+1 depth, 2 self-shadow, 4 clamp; fraction: strength × 0.5), so the GPU struct
+is unchanged. `CopperSlatePBRDemo_BC` enables self-shadow; verified on
+DX12/DX11/Vulkan.
+- Item 3: `parallaxDepthOffset` (flag 8) routes opaque, non-terrain draws to
+  `m_objectParallaxDepthPipelines` (`PSParallaxDepthMain`,
+  `SV_DepthGreaterEqual`, position input `noperspective centroid` as the
+  validator requires). Parallax draws were already outside the depth
+  prepass; inside portals they fall back to the flat-depth stencil-read
+  pipelines. Verified with a sphere sunk into the BC ground on all backends.
+  Vulkan needs the entry in the CMake SPIR-V list.
+- Item 5: the material inspector's "Show Parallax Cost" (editor-only, not
+  serialized, flag 16) shades fetches per pixel on the performance-heat ramp
+  (blue 0 … red 32). Test scene ground: ~24 near with self-shadow, ~10 without.
+- Cost: self-shadow on the test scene (most of the 1600×900 frame is POM)
+  adds ~0.2 ms to `gpu_opaque_ms` on the RTX 4090 (≈0.29 ms at 1080p, at
+  the 0.3 ms guardrail); it stays opt-in.
+- Content: both CopperSlate materials now use `heightScale` 0.025 (was
+  0.08 = 16 cm of relief on 2 m tiles). The height map's tops are authored
+  bumpy (copper 0.76–0.95, slate 0.37–0.54), so at 0.08 they rendered as
+  centimetre spikes. Relief this deep wants a smoothed height map for POM and
+  the fine detail in the normal map; a `--height-smooth` cook option is the
+  natural follow-up if a material needs a large scale.
 1. Linear march with half the current steps + 4–5 binary/secant refinement steps
    (contact refinement).
 2. **Soft self-shadow** for the main directional light only: march from the hit
@@ -154,7 +220,65 @@ test scene with CopperSlate at 0.5 m, 5 m, 30 m, grazing angles.
 5. Material inspector: live step-count / cost readout, debug views (height, POM
    step heatmap — reuse `PerformanceHeatColor` plumbing).
 
-### Phase 3 — Terrain material overhaul (2–3 weeks)
+### Phase 3 — Terrain material overhaul (2–3 weeks) — first slice implemented 2026-11-14
+
+Status (first slice: items 1, 3, 4, 5, 6, 8, 9 done; 2 and 7 open):
+- **Arrays (1).** `IGraphicsTextureFactory::CreateTexture2DArray` on DX11, DX12
+  (with a `TEXTURE2DARRAY` null descriptor) and Vulkan (a 1-slice white array
+  default). `TerrainLayerArrays` builds two arrays on a worker thread, cached
+  by the layers' texture paths: `albedoHeight` (sRGB rgb + height in A) and
+  `normalRough` (normal XY, roughness, AO). They use logical slots 12/13
+  (t27/t28, Vulkan bindings 28/29), replacing the 18 per-layer bindings.
+  - Those bindings overlapped the light cookie/IES slots 16–23, and DX12 never
+    bound the terrain normal/height slots; both problems are gone.
+  - Update (later on 2026-11-14): the normal and roughness maps are now
+    separate arrays, so there are three, in slots 12–14 (t27–t29, Vulkan
+    bindings 28–30). `albedoHeight` is BC7 sRGB; `normal` and `roughAo` are
+    BC5. Slices go up to 2048², about 100 MiB for six layers.
+  - The BC encode runs on worker threads with bc7enc at uber level 0. Devices
+    without BC sampling fall back to RGBA8 at 1024².
+  - Mips are built on the CPU (normals renormalised, Toksvig roughness).
+  - The first build takes seconds. The result is cached on disk at
+    `%TEMP%/EngineTerrainLayerArrays/<hash>.bin`, keyed by source paths,
+    sizes and write times.
+  - Missing maps get neutral values. Until the arrays are ready the shader
+    shows each layer's mean color.
+  - `Terrain` no longer uploads each layer texture separately.
+  - Open: cooking the arrays offline (TextureCook) so release builds ship
+    them instead of encoding at runtime, plus uber level 2 quality.
+- **Top-3 and height-lerp (3).** The shader keeps the three strongest vertex
+  weights and applies the height-lerp (depth 0.2, scaled by
+  `terrainHeightBlendStrength`), fading to linear blending with texture-LOD
+  detail.
+- **Hex-tiling (4).** Mikkelsen tiling with three rotated copies and a
+  height-weighted contrast falloff. Sampling uses `SampleGrad`, and normals
+  are rotated back into the UV frame. It runs within 24–40 m and is enabled by
+  the manager's `stochasticTerrainVariation`; it is always on for standalone
+  terrain.
+- **Biplanar (5).** Faces steeper than about 37° (fully side-projected by
+  about 49°) fade to world X or Z projections with a UDN normal blend. Side
+  projections skip hex-tiling.
+- **Distance detail (6).** From 32 to 96 m, a rotated 1/8-scale sample
+  modulates brightness against the layer's mean color.
+- **Fast tier (8).** AO is applied to ambient, and one GGX sun lobe is added
+  within 96 m.
+- **New material field.** `Material::terrainUvScale` sets per-layer texture
+  density.
+- **Content (9).** Six ambientCG CC0 2K sets in
+  `Textures/Terrain/PBR/` (133 MB of source JPGs): sand, grass, forest soil,
+  gravel, rock and snow. Their materials are in `Materials/Terrain/PBR/`, and
+  `Scenes/terrain/terrain_materials.scene` is a test scene. Both are written
+  by `Textures/Terrain/PBR/generate_terrain_pbr_content.py`. The streamed
+  demo scenes still use the old 512² albedo-only materials.
+- **Cost.** RTX 4090, 1600×900, full-screen terrain, uncapped (GPU at full
+  clock):
+  - Terrain pass: 0.37 ms total, against 0.20 ms with mean colors only.
+  - Hex-tiling adds about 0.04 ms; biplanar costs nothing measurable on flat
+    ground.
+  - `terrain_performance` (fast tier): 0.18 ms.
+  - Capped captures (60 fps pacing) leave the GPU at low clocks and vary 2–4×;
+    measure uncapped, with a warmup long enough for the arrays to build.
+
 1. **Texture arrays.** Build per-terrain `Texture2DArray`s: albedo(+height in A,
    BC7), normal (BC5), roughness/AO (BC4/BC7). Replace the 24 bindings and the
    `if (layer==N)` chains with `array.Sample(..., float3(uv, layerIndex))`.
