@@ -19,26 +19,28 @@ ASSETS = HERE.parents[2]           # Engine/Core/Assets
 MATERIALS = ASSETS / "Materials" / "Terrain" / "PBR"
 SCENE = ASSETS / "Scenes" / "terrain" / "terrain_materials.scene"
 
-# name, folder, uv scale, height-blend strength, roughness factor, preview color
+# name, folder, uv scale, height-blend strength, roughness factor, preview
+# color, relief depth (heightScale, in texture repeats)
 LAYERS = [
-    ("sand", "Ground054", 1.0, 0.6, 1.0, (0.62, 0.55, 0.42)),
-    ("grass", "Grass004", 1.0, 0.4, 1.0, (0.24, 0.32, 0.12)),
-    ("forest_soil", "Ground048", 1.0, 0.6, 1.0, (0.22, 0.15, 0.10)),
-    ("gravel", "Gravel022", 1.5, 1.0, 1.0, (0.45, 0.43, 0.40)),
-    ("rock", "Rock030", 0.5, 1.0, 1.0, (0.40, 0.38, 0.34)),
-    ("snow", "Snow006", 0.5, 0.5, 1.0, (0.85, 0.88, 0.92)),
+    ("sand", "Ground054", 1.0, 0.6, 1.0, (0.62, 0.55, 0.42), 0.01),
+    ("grass", "Grass004", 1.0, 0.4, 0.9, (0.24, 0.32, 0.12), 0.008),
+    ("forest_soil", "Ground048", 1.0, 0.6, 1.0, (0.22, 0.15, 0.10), 0.012),
+    ("gravel", "Gravel022", 1.5, 1.0, 1.0, (0.45, 0.43, 0.40), 0.02),
+    ("rock", "Rock030", 0.5, 1.0, 1.0, (0.40, 0.38, 0.34), 0.015),
+    ("snow", "Snow006", 0.5, 0.5, 1.0, (0.85, 0.88, 0.92), 0.008),
 ]
 
 
 def write_materials():
     MATERIALS.mkdir(parents=True, exist_ok=True)
-    for name, folder, uv_scale, blend, roughness, preview in LAYERS:
+    for name, folder, uv_scale, blend, roughness, preview, relief in LAYERS:
         prefix = f"Assets/Textures/Terrain/PBR/{folder}/{folder}"
         material = {
             "version": 1,
             "baseColor": list(preview),
             "metallic": 0,
             "roughness": roughness,
+            "heightScale": relief,
             "normalScale": 1,
             "terrainHeightBlendStrength": blend,
             "terrainUvScale": uv_scale,
@@ -48,6 +50,10 @@ def write_materials():
             "occlusionTexture": f"{prefix}_AmbientOcclusion.jpg",
             "heightTexture": f"{prefix}_Displacement.jpg",
         }
+        # Grass004's roughness map is glossy single blades (mean 0.26); the
+        # layer uses the constant roughness instead.
+        if folder == "Grass004":
+            del material["metallicRoughnessTexture"]
         (MATERIALS / f"{name}.material").write_text(
             json.dumps(material, indent=4) + "\n", encoding="utf-8")
 
@@ -112,7 +118,7 @@ def write_scene():
         f'minHeight="-100" maxHeight="100">\n'
         f'                  <color _arrayEncoding="spaceSeparatedNumbers">{numbers(preview)}</color>\n'
         f'                </item>'
-        for name, _, _, _, _, preview in LAYERS)
+        for name, _, _, _, _, preview, _ in LAYERS)
     scene = f'''<?xml version="1.0" encoding="utf-8"?>
 <!--
   Terrain material test (Phase 3 of .md/surface-detail-materials-plan.md).

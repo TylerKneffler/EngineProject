@@ -1,13 +1,30 @@
 {
-  "version": 1,
-  "baseColor": [
-    0.48,
-    0.53,
-    0.36
-  ],
-  "metallic": 0,
-  "roughness": 1,
-  "useVertexColors": true,
-  "baseColorTexture": "Assets/Textures/Terrain/meadow_grass.png",
-  "castsShadows": false
+    "version": 1,
+    "baseColor": [
+        0.48,
+        0.53,
+        0.36
+    ],
+    "metallic": 0,
+    "roughness": 0.9,
+    "useVertexColors": true,
+    "baseColorTexture": "Assets/Textures/Terrain/PBR/Grass004/Grass004_Color.jpg",
+    "castsShadows": false,
+    "normalScale": 1,
+    "terrainHeightBlendStrength": 0.4,
+    "terrainUvScale": 1.0,
+    "terrainMacroColor": [
+        0.09539,
+        0.16784,
+        0.03532
+    ],
+    "baseColorTextureTint": [
+        0.7368,
+        1.026,
+        0.9985
+    ],
+    "heightScale": 0.008,
+    "normalTexture": "Assets/Textures/Terrain/PBR/Grass004/Grass004_NormalGL.jpg",
+    "occlusionTexture": "Assets/Textures/Terrain/PBR/Grass004/Grass004_AmbientOcclusion.jpg",
+    "heightTexture": "Assets/Textures/Terrain/PBR/Grass004/Grass004_Displacement.jpg"
 }

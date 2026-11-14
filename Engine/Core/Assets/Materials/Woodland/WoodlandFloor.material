@@ -1,13 +1,31 @@
 {
-  "version": 1,
-  "baseColor": [
-    0.48,
-    0.55,
-    0.4
-  ],
-  "metallic": 0,
-  "roughness": 1,
-  "useVertexColors": true,
-  "baseColorTexture": "Assets/Textures/Terrain/shaded_moss.png",
-  "castsShadows": false
+    "version": 1,
+    "baseColor": [
+        0.48,
+        0.55,
+        0.4
+    ],
+    "metallic": 0,
+    "roughness": 1,
+    "useVertexColors": true,
+    "baseColorTexture": "Assets/Textures/Terrain/PBR/Ground048/Ground048_Color.jpg",
+    "castsShadows": false,
+    "normalScale": 1,
+    "terrainHeightBlendStrength": 0.6,
+    "terrainUvScale": 1.0,
+    "terrainMacroColor": [
+        0.11434,
+        0.06123,
+        0.0411
+    ],
+    "baseColorTextureTint": [
+        1.0,
+        1.0,
+        1.0
+    ],
+    "heightScale": 0.012,
+    "normalTexture": "Assets/Textures/Terrain/PBR/Ground048/Ground048_NormalGL.jpg",
+    "metallicRoughnessTexture": "Assets/Textures/Terrain/PBR/Ground048/Ground048_Roughness.jpg",
+    "occlusionTexture": "Assets/Textures/Terrain/PBR/Ground048/Ground048_AmbientOcclusion.jpg",
+    "heightTexture": "Assets/Textures/Terrain/PBR/Ground048/Ground048_Displacement.jpg"
 }

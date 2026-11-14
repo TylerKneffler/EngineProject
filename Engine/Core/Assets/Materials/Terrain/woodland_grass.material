@@ -1,1 +1,28 @@
-{"version":1,"baseColor":[1,1,1],"roughness":1,"metallic":0,"terrainMacroColor":[0.04270,0.09440,0.02921],"baseColorTexture":"Assets/Textures/Terrain/woodland_grass.png"}
+{
+    "version": 1,
+    "baseColor": [
+        1,
+        1,
+        1
+    ],
+    "roughness": 0.9,
+    "metallic": 0,
+    "terrainMacroColor": [
+        0.07435,
+        0.12427,
+        0.03214
+    ],
+    "baseColorTexture": "Assets/Textures/Terrain/PBR/Grass004/Grass004_Color.jpg",
+    "normalScale": 1,
+    "terrainHeightBlendStrength": 0.4,
+    "terrainUvScale": 1.0,
+    "baseColorTextureTint": [
+        0.5743,
+        0.7597,
+        0.9087
+    ],
+    "heightScale": 0.008,
+    "normalTexture": "Assets/Textures/Terrain/PBR/Grass004/Grass004_NormalGL.jpg",
+    "occlusionTexture": "Assets/Textures/Terrain/PBR/Grass004/Grass004_AmbientOcclusion.jpg",
+    "heightTexture": "Assets/Textures/Terrain/PBR/Grass004/Grass004_Displacement.jpg"
+}

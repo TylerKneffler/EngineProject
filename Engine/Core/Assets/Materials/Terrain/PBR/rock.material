@@ -7,6 +7,7 @@
     ],
     "metallic": 0,
     "roughness": 1.0,
+    "heightScale": 0.015,
     "normalScale": 1,
     "terrainHeightBlendStrength": 1.0,
     "terrainUvScale": 0.5,

@@ -792,11 +792,6 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:150000:31d302",
-            "path": "Textures/Terrain/valley_grass.png",
-            "directory": false
-        },
-        {
             "id": "asset:101084d2-9522-40fd-ae95-6fbec21f581a",
             "path": "Models/Woodland/Bushes/Meshes/Small_bush_2 7_1.mesh",
             "directory": false
@@ -3262,11 +3257,6 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:1f00000:719cc",
-            "path": "Textures/Terrain/generate_terrain_textures.py",
-            "directory": false
-        },
-        {
             "id": "file:a8e05ef1:250000:e8d68",
             "path": "Models/Woodland/Grass/Grass.prefab",
             "directory": false
@@ -4252,11 +4242,6 @@
             "directory": false
         },
         {
-            "id": "file:a8e05ef1:e40000:4c9e1",
-            "path": "Textures/Terrain/dark_soil.png",
-            "directory": false
-        },
-        {
             "id": "asset:5e96c1f0-8284-452b-b756-13eb13f55ed6",
             "path": "Models/Woodland/Oaks/Meshes/Sapling_oak_tree_001_LOD1 35_1.mesh",
             "directory": false
@@ -4749,11 +4734,6 @@
         {
             "id": "file:a8e05ef1:310000:29fe45",
             "path": "Other/oak_trees_pack_17var_lods_seasons_gameready/textures/Medium_oak_tree__002_Billboard_Mat_metallicRoughness.png",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:5250000:a1d7",
-            "path": "Textures/Terrain/meadow_grass.png",
             "directory": false
         },
         {
@@ -5617,53 +5597,8 @@
             "directory": true
         },
         {
-            "id": "file:a8e05ef1:1990000:48e7e",
-            "path": "Textures/Terrain/alpine_snow.png",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:330000:50778",
-            "path": "Textures/Terrain/field_grass.png",
-            "directory": false
-        },
-        {
             "id": "file:a8e05ef1:700000:71838",
             "path": "Textures/Terrain/generate_measurement_grid.py",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:2210000:71a43",
-            "path": "Textures/Terrain/highland_grass.png",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:40000:355503",
-            "path": "Textures/Terrain/shaded_moss.png",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:720000:4ccc6",
-            "path": "Textures/Terrain/shore_gravel.png",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:e80000:4f29c",
-            "path": "Textures/Terrain/shore_sand.png",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:1d70000:71d07",
-            "path": "Textures/Terrain/warm_dirt.png",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:40000:355504",
-            "path": "Textures/Terrain/weathered_slate.png",
-            "directory": false
-        },
-        {
-            "id": "file:a8e05ef1:2300000:3a29",
-            "path": "Textures/Terrain/woodland_grass.png",
             "directory": false
         }
     ]

@@ -2,6 +2,7 @@
 #include "Core/Compoonents/Terrain/TerrainHeightArchive.h"
 #include "Core/Compoonents/Terrain/TerrainManager.h"
 #include "Core/Compoonents/Mesh/Mesh.h"
+#include "Core/Compoonents/Materials/Material.h"
 #include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
@@ -87,43 +88,55 @@ struct TerrainPerformanceDriverRegistration
             "TerrainPerformanceDriver");
     }
 } registration;
+// Near layer materials, in the order the procedural builder assigns them.
+const std::array<const char*, 6> LowlandLayerMaterials{
+    "Assets/Materials/Terrain/dark_soil.material",
+    "Assets/Materials/Terrain/warm_dirt.material",
+    "Assets/Materials/Terrain/shaded_moss.material",
+    "Assets/Materials/Terrain/weathered_slate.material",
+    "Assets/Materials/Terrain/valley_grass.material",
+    "Assets/Materials/Terrain/woodland_grass.material"};
+const std::array<const char*, 6> MountainLayerMaterials{
+    "Assets/Materials/Terrain/shore_sand.material",
+    "Assets/Materials/Terrain/shore_gravel.material",
+    "Assets/Materials/Terrain/valley_grass.material",
+    "Assets/Materials/Terrain/woodland_grass.material",
+    "Assets/Materials/Terrain/weathered_slate.material",
+    "Assets/Materials/Terrain/alpine_snow.material"};
+
+// Far tiles use each layer's measured mean color, so distant terrain stays
+// consistent with the textured near cells whatever the layer content.
+glm::vec3 LayerMacroColor(const char* path)
+{
+    Engine::Components::Material material;
+    if (!material.LoadFromFile(Engine::Components::Mesh::ResolveFilePath(path)))
+        return glm::vec3(0.2f);
+    return glm::length(material.terrainMacroColor) > 0.f
+        ? material.terrainMacroColor : material.diffuseColor;
+}
+
 Engine::Components::TerrainManager::FarTerrainPalette MakeFarPalette(
     bool mountain)
 {
     Engine::Components::TerrainManager::FarTerrainPalette palette;
-    palette.farColors = {{
-        {.04926f, .15254f, .03097f},
-        {.04270f, .09440f, .02921f},
-        {.04561f, .07992f, .03262f},
-        {.07032f, .07998f, .06848f}}};
-    palette.nearColors = {{
-        {.05856f, .04472f, .02751f},
-        {.19217f, .11348f, .05328f},
-        {.04561f, .07992f, .03262f},
-        {.07032f, .07998f, .06848f},
-        {.04927f, .15253f, .03096f},
-        {.04270f, .09440f, .02921f}}};
-    palette.archiveToNear = {4, 5, 2, 3};
+    const auto& layers = mountain ? MountainLayerMaterials : LowlandLayerMaterials;
+    for (size_t layer = 0; layer < layers.size(); ++layer)
+        palette.nearColors[layer] = LayerMacroColor(layers[layer]);
     if (mountain)
     {
-        palette.farColors = {{
-            {.49f, .40f, .27f}, {.58f, .53f, .42f},
-            {.15f, .29f, .12f}, {.34f, .32f, .28f},
-            {.57f, .55f, .50f}, {.88f, .91f, .95f}}};
-        palette.nearColors = {{
-            {.49f, .40f, .27f}, {.58f, .53f, .42f},
-            {.15f, .29f, .12f}, {.34f, .32f, .28f},
-            {.57f, .55f, .50f}, {.88f, .91f, .95f}}};
+        palette.farColors = palette.nearColors;
         palette.heightBoundaries = MountainMaterialBoundaries;
         palette.heightBlendHalfWidth = 3.5f;
         palette.archiveToNear = {0, 1, 3, 4};
     }
     else
     {
-        palette.farColors = {{palette.farColors[0], palette.farColors[1],
-            palette.farColors[2], palette.farColors[3],
-            palette.nearColors[4], palette.nearColors[5]}};
+        // Far height bands: valley grass, woodland grass, moss, slate, then
+        // the two grasses again above.
+        const auto& layer = palette.nearColors;
+        palette.farColors = {{layer[4], layer[5], layer[2], layer[3], layer[4], layer[5]}};
         palette.heightBoundaries = {{-36.f, -24.f, -12.f, 16.f, 48.f}};
+        palette.archiveToNear = {4, 5, 2, 3};
     }
     return palette;
 }
@@ -219,42 +232,35 @@ bool TerrainPerformanceDriver::ConfigureTerrain()
     if (!sourceAvailable && !manager->requireRuntimeBake) return false;
     // Mesh caches include reconstructed paint weights and texture tiling.
     // Refresh them when either appearance setting changes.
-    manager->SetStaticCache(cacheDirectory, signature ^ 0x4c41524745555636ull);
+    manager->SetStaticCache(cacheDirectory, signature ^ 0x4c41524745555637ull);
     manager->SetProceduralBuilder(sourceAvailable ?
         std::function<void(Engine::Components::TerrainManager::Cell,
             Engine::Components::Terrain&)>{[=](Engine::Components::TerrainManager::Cell cell,
         Engine::Components::Terrain& terrain)
     {
-        // One 512 px color map now covers 4 m, so its texels are about 8 mm
-        // across instead of 6 cm in a close, human-scale view.
-        terrain.textureTiling = 32.f;
-        terrain.layers = mountainTerrain ? std::vector<Engine::Components::Terrain::Layer>{
-            {"Assets/Materials/Terrain/shore_sand.material", -1000.f, -52.f,
-                {.49f, .40f, .27f}},
-            {"Assets/Materials/Terrain/shore_gravel.material", -52.f, -42.f,
-                {.58f, .53f, .42f}},
-            {"Assets/Materials/Terrain/valley_grass.material", -42.f, -30.f,
-                {.15f, .29f, .12f}},
-            {"Assets/Materials/Terrain/woodland_grass.material", -30.f, 38.f,
-                {.21f, .33f, .17f}},
-            {"Assets/Materials/Terrain/weathered_slate.material", 38.f, 72.f,
-                {.34f, .32f, .28f}},
-            {"Assets/Materials/Terrain/alpine_snow.material", 72.f, 1000.f,
-                {.88f, .91f, .95f}}
-        } : std::vector<Engine::Components::Terrain::Layer>{
-            {"Assets/Materials/Terrain/dark_soil.material", -1000.f, -12.f,
-                {.26f, .22f, .17f}},
-            {"Assets/Materials/Terrain/warm_dirt.material", -12.f, 0.f,
-                {.47f, .36f, .24f}},
-            {"Assets/Materials/Terrain/shaded_moss.material", -24.f, -12.f,
-                {.23f, .31f, .19f}},
-            {"Assets/Materials/Terrain/weathered_slate.material", -12.f, 1000.f,
-                {.29f, .31f, .28f}},
-            {"Assets/Materials/Terrain/valley_grass.material", -1000.f, -36.f,
-                {.23f, .41f, .17f}},
-            {"Assets/Materials/Terrain/woodland_grass.material", -36.f, -24.f,
-                {.21f, .33f, .17f}}
-        };
+        // The CC0 PBR layer sets are photographed at about 2 m per repeat:
+        // 64 repeats over a 128 m cell keeps grass blades and pebbles at
+        // their real size (2K maps, about 1 mm texels).
+        terrain.textureTiling = 64.f;
+        static const std::array<glm::vec3, 6> lowlandPreview{{
+            {.26f, .22f, .17f}, {.47f, .36f, .24f}, {.23f, .31f, .19f},
+            {.29f, .31f, .28f}, {.23f, .41f, .17f}, {.21f, .33f, .17f}}};
+        static const std::array<std::pair<float, float>, 6> lowlandRanges{{
+            {-1000.f, -12.f}, {-12.f, 0.f}, {-24.f, -12.f},
+            {-12.f, 1000.f}, {-1000.f, -36.f}, {-36.f, -24.f}}};
+        static const std::array<glm::vec3, 6> mountainPreview{{
+            {.49f, .40f, .27f}, {.58f, .53f, .42f}, {.15f, .29f, .12f},
+            {.21f, .33f, .17f}, {.34f, .32f, .28f}, {.88f, .91f, .95f}}};
+        static const std::array<std::pair<float, float>, 6> mountainRanges{{
+            {-1000.f, -52.f}, {-52.f, -42.f}, {-42.f, -30.f},
+            {-30.f, 38.f}, {38.f, 72.f}, {72.f, 1000.f}}};
+        const auto& paths = mountainTerrain ? MountainLayerMaterials : LowlandLayerMaterials;
+        const auto& previews = mountainTerrain ? mountainPreview : lowlandPreview;
+        const auto& ranges = mountainTerrain ? mountainRanges : lowlandRanges;
+        terrain.layers.clear();
+        for (size_t layer = 0; layer < paths.size(); ++layer)
+            terrain.layers.push_back({paths[layer], ranges[layer].first,
+                ranges[layer].second, previews[layer]});
         std::vector<float> archivedWeights;
         if (!TerrainHeightArchive::ReadCell(archivePath, signature, extent,
             countX, countY, cell.first, cell.second, terrain.heights,
