@@ -71,6 +71,13 @@ public:
     // Measured lowest-mip layer colors can replace distant detail in the
     // resident terrain window. Keep opt-in until its GPU cost is lower.
     bool terrainMacroColorEnabled = false;
+    // Paint samples per cell edge for authored cells (0 = vertex paint).
+    // Cells adopt it when a paint stroke first touches them; procedural cells
+    // keep vertex paint because their edit archives store vertex weights.
+    int paintResolution = 0;
+    // Parallax relief within 15 m of the camera (see Terrain::reliefMapping).
+    bool reliefMapping = true;
+    bool reliefShadows = false; // see Terrain::reliefShadows
     // Show a world-space metric ruler and cell boundaries on every terrain mesh.
     bool measurementGrid = false;
     // Adds static mesh colliders to streamed terrain cells for physics actors.
@@ -240,7 +247,8 @@ public:
     { return {m_editedProcedural.begin(), m_editedProcedural.end()}; }
     bool RemoveCell(int x, int y);
     bool ApplyBrush(double x, double z, float radius, float strength,
-        Terrain::Brush brush, int layer = 0, bool realignObjects = false);
+        Terrain::Brush brush, int layer = 0, bool realignObjects = false,
+        const Terrain::BrushOptions& options = {});
     void SyncLoadedCells(int centerX, int centerY);
     void UpdateStreaming(int centerX, int centerY);
     void UpdateStreamingAtPosition(const glm::dvec3& worldPosition);

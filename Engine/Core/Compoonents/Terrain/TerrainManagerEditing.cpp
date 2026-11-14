@@ -65,6 +65,8 @@ void TerrainManager::RestoreObjectLayers(Cell cell,
             if (saved) layer->Deserialize(*saved);
             layer->layerName = name;
         }
+        if (name == "Meadow grass" || name == "Procedural meadow grass")
+            layer->snapToGround = true;
         if ((name == "Meadow grass" || name == "Procedural meadow grass") && !viewerObjectName.empty())
         {
             if (name == "Procedural meadow grass")
@@ -303,7 +305,8 @@ bool TerrainManager::RemoveCell(int x, int y)
 }
 
 bool TerrainManager::ApplyBrush(double x, double z, float radius, float strength,
-    Terrain::Brush brush, int layer, bool realignObjects)
+    Terrain::Brush brush, int layer, bool realignObjects,
+    const Terrain::BrushOptions& options)
 {
     if (Owner && Owner->GetScene() && Owner->GetScene()->HasStarted()) return false;
     if (!std::isfinite(x) || !std::isfinite(z) || !std::isfinite(radius) ||
@@ -341,15 +344,81 @@ bool TerrainManager::ApplyBrush(double x, double z, float radius, float strength
             LoadCell(cell, m_haveLastCenter
                 ? DesiredLodStride(cell, m_lastCenter.first, m_lastCenter.second)
                 : 1);
+    // Authored cells adopt the manager's paint detail on their first stroke.
+    if (brush == Terrain::Brush::Paint && paintResolution > 0)
+        for (Cell cell : targets)
+            if (auto* terrain = GetLoadedCell(cell.first, cell.second);
+                terrain && !m_proceduralCells.count(cell) &&
+                terrain->paintResolution != paintResolution)
+                terrain->SetPaintResolution(paintResolution);
     std::set<Cell> changedCells;
     for (Cell cell : targets)
         if (auto* terrain = GetLoadedCell(cell.first, cell.second))
             if (terrain->ApplyBrush(
                 static_cast<float>(static_cast<double>(x) - cell.first * spanX),
                 static_cast<float>(static_cast<double>(z) - cell.second * spanZ),
-                radius, strength, brush, layer, realignObjects))
+                radius, strength, brush, layer, realignObjects, options))
                 changedCells.insert(cell);
     if (changedCells.empty()) return false;
+
+    // Paint maps: border samples are shared like vertices. Average the copies
+    // held by cells of equal paint resolution so painting across a cell edge
+    // leaves no seam; the vertex weights follow when each cell rebuilds.
+    if (brush == Terrain::Brush::Paint)
+    {
+        using PaintKey = std::pair<int64_t, int64_t>;
+        std::map<PaintKey, std::vector<std::pair<Terrain*, size_t>>> paintShared;
+        for (Cell cell : changedCells)
+        {
+            auto* terrain = GetLoadedCell(cell.first, cell.second);
+            if (!terrain || !terrain->HasPaintMap()) continue;
+            const int resolution = terrain->paintResolution;
+            const int width = terrain->PaintWidth(), height = terrain->PaintHeight();
+            const double stepX = double(terrain->cellWidth) / resolution;
+            const double stepZ = double(terrain->cellDepth) / resolution;
+            for (int row = 0; row < height; ++row)
+                for (int col = 0; col < width; ++col)
+                {
+                    if (col != 0 && col != width - 1 && row != 0 && row != height - 1) continue;
+                    const int64_t sx = int64_t(cell.first) * (width - 1) + col;
+                    const int64_t sz = int64_t(cell.second) * (height - 1) + row;
+                    const double dx = sx * stepX - x, dz = sz * stepZ - z;
+                    if (dx * dx + dz * dz >= double(radius) * radius) continue;
+                    // Resolution is part of the key: only equal grids share samples.
+                    paintShared[{sx * 32 + resolution, sz}].emplace_back(terrain,
+                        size_t(row) * width + col);
+                }
+        }
+        std::set<Terrain*> stitched;
+        for (const auto& [key, owners] : paintShared)
+        {
+            if (owners.size() < 2) continue;
+            const size_t layerCount = owners.front().first->layers.size();
+            std::vector<float> average(layerCount, 0.f);
+            size_t contributors = 0;
+            for (const auto& [terrain, index] : owners)
+            {
+                if (terrain->layers.size() != layerCount) continue;
+                for (size_t l = 0; l < layerCount; ++l)
+                    average[l] += terrain->paintWeights[index * layerCount + l];
+                ++contributors;
+            }
+            if (contributors < 2) continue;
+            for (float& value : average) value /= float(contributors);
+            for (const auto& [terrain, index] : owners)
+            {
+                if (terrain->layers.size() != layerCount) continue;
+                std::copy(average.begin(), average.end(),
+                    terrain->paintWeights.begin() + std::ptrdiff_t(index * layerCount));
+                stitched.insert(terrain);
+            }
+        }
+        for (auto* terrain : stitched)
+        {
+            terrain->NotifyPaintChanged();
+            terrain->Rebuild();
+        }
+    }
 
     // A border sample belongs to two cells (four at a corner). Average the
     // cells changed by this stroke once, then write the same value to every

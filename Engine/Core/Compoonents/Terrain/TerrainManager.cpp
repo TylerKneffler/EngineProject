@@ -603,7 +603,8 @@ void TerrainManager::PrepareLoop()
                     layer->MarkConfigurationDirty();
                     layer->GetPreparedTiles(4.f);
                 }
-                if (name == "Procedural meadow grass") layer->conformToGround = true;
+                if (name == "Procedural meadow grass")
+                    layer->conformToGround = layer->snapToGround = true;
                 if (!layer->HasLoadedPreparedData()) layer->GetPreparedTiles(4.f);
                 result.objectLayers.push_back(std::move(layer));
             }

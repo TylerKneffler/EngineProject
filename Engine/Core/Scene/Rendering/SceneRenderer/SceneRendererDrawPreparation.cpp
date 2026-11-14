@@ -407,11 +407,32 @@ void SceneRendererDrawPreparation::PrepareTerrainMaterial(
                 (arrays->albedoMask & (1u << layer)))
                 objectData.terrainMacroColors[layer] =
                     glm::vec4(arrays->meanAlbedo[layer], 0.f);
+        // Relief depth per layer (macro color w), only where a height map exists.
+        for (size_t layer = 0; layer < std::min<size_t>(materials.size(), 6); ++layer)
+            if (const auto* material = materials[layer].get();
+                material && (arrays->heightMask & (1u << layer)))
+                objectData.terrainMacroColors[layer].w = std::max(material->heightScale, 0.f);
     }
 
     objectData.baseColor = glm::vec4(1.f);
     objectData.materialParams.w = textured ? 2048.f : 0.f;
     if (textured && arrays) objectData.materialParams.w += 262144.f;
+    const auto* reliefManager = object->GetComponentInParent<Engine::Components::TerrainManager>();
+    if (textured && arrays &&
+        (reliefManager ? reliefManager->reliefMapping : (terrain && terrain->reliefMapping)))
+    {
+        objectData.materialParams.w += 1048576.f;
+        if (reliefManager ? reliefManager->reliefShadows : (terrain && terrain->reliefShadows))
+            objectData.materialParams.w += 2097152.f;
+    }
+    // Paint map (slot 15) replaces the vertex weights where a cell has one.
+    if (terrain && textured)
+        if (const auto* paint = terrain->GetPaintTexture(scene.m_graphicsProvider))
+        {
+            draw.textures[15] = paint;
+            draw.textureSlotCount = std::max(draw.textureSlotCount, 16u);
+            objectData.materialParams.w += 524288.f;
+        }
     auto* terrainManager = object->GetComponentInParent<Engine::Components::TerrainManager>();
     if (!includeEditorVisuals && !forceUnlitMode && terrainManager &&
         terrainManager->fastRuntimeLighting)

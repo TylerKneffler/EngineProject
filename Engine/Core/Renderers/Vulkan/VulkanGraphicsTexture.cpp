@@ -673,7 +673,7 @@ void VulkanTextureSystem::Bind(
         {
             images[20 + index].imageView = textures[12 + index]
                 ? textures[12 + index]->GetView()
-                : (index < 3 ? m_whiteArray.view : m_white.view);
+                : (index < 4 ? m_whiteArray.view : m_white.view);
             images[20 + index].imageLayout =
                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
             writes[28 + index] = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };

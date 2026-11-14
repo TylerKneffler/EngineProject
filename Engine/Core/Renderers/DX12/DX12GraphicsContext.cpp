@@ -576,8 +576,8 @@ bool D3D12GraphicsContext::CopyBuffer(
 
 void D3D12GraphicsContext::SetTexture(uint32_t slot, const Engine::Graphics::IGraphicsTexture* texture)
 {
-    // Logical slots 12-14 are the terrain layer arrays (t27-t29).
-    const bool terrainArray = slot >= 12 && slot <= 14;
+    // Logical slots 12-15 are the terrain layer arrays and paint map (t27-t30).
+    const bool terrainArray = slot >= 12 && slot <= 15;
     if (!m_cmdList || (slot >= 12 && !terrainArray && (slot < 16 || slot >= 24)))
         return;
     const auto* nullTexture = terrainArray ? m_nullArrayTexture.get() : m_nullTexture.get();

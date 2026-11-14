@@ -1,3 +1,6 @@
+#include <miniz.h>
+#include "Core/Graphics/IGraphicsProvider.h"
+#include "Core/Graphics/IGraphicsTexture.h"
 #include "Terrain.h"
 #include "Core/Compoonents/Terrain/TerrainObjectLayer.h"
 #include "Core/Compoonents/Terrain/TerrainSurfaceSample.h"
@@ -151,12 +154,281 @@ void ReduceMeshForLod(std::vector<Engine::Components::Mesh::Vertex>& vertices,
 
 namespace Engine::Components
 {
+namespace
+{
+constexpr char Base64Alphabet[] =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+std::string Base64Encode(const std::vector<uint8_t>& data)
+{
+    std::string out;
+    out.reserve((data.size() + 2) / 3 * 4);
+    for (size_t i = 0; i < data.size(); i += 3)
+    {
+        const uint32_t a = data[i];
+        const uint32_t b = i + 1 < data.size() ? data[i + 1] : 0;
+        const uint32_t c = i + 2 < data.size() ? data[i + 2] : 0;
+        const uint32_t triple = (a << 16) | (b << 8) | c;
+        out += Base64Alphabet[(triple >> 18) & 63];
+        out += Base64Alphabet[(triple >> 12) & 63];
+        out += i + 1 < data.size() ? Base64Alphabet[(triple >> 6) & 63] : '=';
+        out += i + 2 < data.size() ? Base64Alphabet[triple & 63] : '=';
+    }
+    return out;
+}
+
+bool Base64Decode(const std::string& text, std::vector<uint8_t>& out)
+{
+    int8_t lookup[256];
+    std::fill(std::begin(lookup), std::end(lookup), int8_t(-1));
+    for (int i = 0; i < 64; ++i) lookup[uint8_t(Base64Alphabet[i])] = int8_t(i);
+    out.clear();
+    uint32_t buffer = 0;
+    int bits = 0;
+    for (const char character : text)
+    {
+        if (character == '=' || character == ' ' || character == '\n' ||
+            character == '\r' || character == '\t') continue;
+        const int8_t value = lookup[uint8_t(character)];
+        if (value < 0) return false;
+        buffer = (buffer << 6) | uint32_t(value);
+        bits += 6;
+        if (bits >= 8) { bits -= 8; out.push_back(uint8_t((buffer >> bits) & 0xff)); }
+    }
+    return true;
+}
+
+// Paint maps serialize as 8-bit weights: a size header, then deflate.
+std::string EncodePaintMap(const std::vector<float>& weights)
+{
+    std::vector<uint8_t> bytes(weights.size());
+    for (size_t i = 0; i < weights.size(); ++i)
+        bytes[i] = uint8_t(std::lround(std::clamp(weights[i], 0.f, 1.f) * 255.f));
+    mz_ulong length = mz_compressBound(mz_ulong(bytes.size()));
+    std::vector<uint8_t> packed(8 + length);
+    const uint64_t raw = bytes.size();
+    std::memcpy(packed.data(), &raw, 8);
+    if (mz_compress2(packed.data() + 8, &length, bytes.data(), mz_ulong(bytes.size()),
+            MZ_BEST_COMPRESSION) != MZ_OK) return {};
+    packed.resize(8 + length);
+    return Base64Encode(packed);
+}
+
+bool DecodePaintMap(const std::string& text, size_t expected, std::vector<float>& weights)
+{
+    std::vector<uint8_t> packed;
+    if (!Base64Decode(text, packed) || packed.size() < 8) return false;
+    uint64_t raw = 0;
+    std::memcpy(&raw, packed.data(), 8);
+    if (raw != expected) return false;
+    std::vector<uint8_t> bytes(static_cast<size_t>(raw));
+    mz_ulong length = mz_ulong(bytes.size());
+    if (mz_uncompress(bytes.data(), &length, packed.data() + 8,
+            mz_ulong(packed.size() - 8)) != MZ_OK || length != bytes.size()) return false;
+    weights.resize(bytes.size());
+    for (size_t i = 0; i < bytes.size(); ++i) weights[i] = bytes[i] / 255.f;
+    return true;
+}
+
+// Bilinear sample of a vertex-aligned weight grid at fractional sample
+// coordinates, clamped to the grid.
+void SampleWeightGrid(const std::vector<float>& grid, int width, int height,
+    size_t layerCount, float x, float y, float* out)
+{
+    x = std::clamp(x, 0.f, float(width - 1));
+    y = std::clamp(y, 0.f, float(height - 1));
+    const int x0 = std::min(int(x), width - 1), y0 = std::min(int(y), height - 1);
+    const int x1 = std::min(x0 + 1, width - 1), y1 = std::min(y0 + 1, height - 1);
+    const float tx = x - x0, ty = y - y0;
+    const auto at = [&](int col, int row, size_t layer)
+    { return grid[(size_t(row) * width + col) * layerCount + layer]; };
+    for (size_t layer = 0; layer < layerCount; ++layer)
+        out[layer] = (at(x0, y0, layer) * (1 - tx) + at(x1, y0, layer) * tx) * (1 - ty) +
+            (at(x0, y1, layer) * (1 - tx) + at(x1, y1, layer) * tx) * ty;
+}
+
+void NormalizeSample(float* sample, size_t layerCount)
+{
+    float sum = 0.f;
+    for (size_t l = 0; l < layerCount; ++l) sum += sample[l] = std::clamp(sample[l], 0.f, 1.f);
+    if (sum < 1e-5f) { sample[0] = 1.f; return; }
+    for (size_t l = 0; l < layerCount; ++l) sample[l] /= sum;
+}
+
+// One paint or erase step on a single weight sample.
+bool PaintSample(float* sample, size_t layerCount, int layer, float amount, bool erase)
+{
+    if (amount <= 0.f) return false;
+    if (erase)
+    {
+        // Hand the removed weight to the other layers in proportion; with
+        // none left, the first other layer takes it.
+        if (layerCount < 2) return false;
+        const float removed = sample[layer] * amount;
+        if (removed <= 0.f) return false;
+        float others = 0.f;
+        for (size_t l = 0; l < layerCount; ++l)
+            if (int(l) != layer) others += sample[l];
+        sample[layer] -= removed;
+        if (others > 1e-5f)
+        {
+            for (size_t l = 0; l < layerCount; ++l)
+                if (int(l) != layer) sample[l] += removed * sample[l] / others;
+        }
+        else
+            sample[layer == 0 ? 1 : 0] += removed;
+        return true;
+    }
+    const float old = sample[layer];
+    for (size_t l = 0; l < layerCount; ++l) sample[l] *= 1.f - amount;
+    sample[layer] += amount;
+    return sample[layer] != old;
+}
+}
+
 Terrain::Terrain()
 {
     SetTypeName(COMPONENT_TYPE_NAME(Terrain));
     singlecomponent = true;
     layers.push_back({"", 0.f, 10.f, {.35f, .55f, .25f}});
     Resize(cellsX, cellsY, cellWidth, cellDepth);
+}
+
+bool Terrain::HasPaintMap() const
+{
+    return paintResolution > 0 && !layers.empty() && paintWeights.size() ==
+        size_t(PaintWidth()) * PaintHeight() * layers.size();
+}
+
+void Terrain::EnsurePaintMap()
+{
+    if (paintResolution <= 0) { paintWeights.clear(); return; }
+    while (paintResolution > 1 && (cellsX * paintResolution + 1 > MaxPaintSamples ||
+        cellsY * paintResolution + 1 > MaxPaintSamples)) paintResolution /= 2;
+    if (HasPaintMap() || layers.empty() ||
+        weights.size() != heights.size() * layers.size()) return;
+    // Seed from the vertex weights.
+    const int width = PaintWidth(), height = PaintHeight();
+    paintWeights.assign(size_t(width) * height * layers.size(), 0.f);
+    for (int row = 0; row < height; ++row)
+        for (int col = 0; col < width; ++col)
+            SampleWeightGrid(weights, cellsX + 1, cellsY + 1, layers.size(),
+                float(col) / paintResolution, float(row) / paintResolution,
+                &paintWeights[(size_t(row) * width + col) * layers.size()]);
+    m_paintTextureDirty = true;
+}
+
+void Terrain::SyncVertexWeightsFromPaint()
+{
+    if (!HasPaintMap()) return;
+    const size_t layerCount = layers.size();
+    weights.resize(heights.size() * layerCount, 0.f);
+    const int width = PaintWidth();
+    for (int row = 0; row <= cellsY; ++row)
+        for (int col = 0; col <= cellsX; ++col)
+        {
+            const float* source = &paintWeights[(size_t(row * paintResolution) * width +
+                size_t(col * paintResolution)) * layerCount];
+            std::copy_n(source, layerCount,
+                &weights[(size_t(row) * (cellsX + 1) + col) * layerCount]);
+        }
+}
+
+void Terrain::SetPaintResolution(int resolution)
+{
+    resolution = resolution <= 0 ? 0 : resolution <= 2 ? 2 : resolution <= 4 ? 4 :
+        resolution <= 8 ? 8 : 16;
+    while (resolution > 1 && (cellsX * resolution + 1 > MaxPaintSamples ||
+        cellsY * resolution + 1 > MaxPaintSamples)) resolution /= 2;
+    if (resolution == paintResolution && (resolution == 0 || HasPaintMap())) return;
+    if (resolution == 0)
+    {
+        SyncVertexWeightsFromPaint();
+        paintResolution = 0;
+        paintWeights.clear();
+        m_paintTexture.reset();
+        Rebuild();
+        return;
+    }
+    const size_t layerCount = layers.size();
+    const bool fromMap = HasPaintMap();
+    const int oldWidth = fromMap ? PaintWidth() : cellsX + 1;
+    const int oldHeight = fromMap ? PaintHeight() : cellsY + 1;
+    const float oldScale = fromMap ? float(paintResolution) : 1.f;
+    const std::vector<float> source = fromMap ? paintWeights : weights;
+    paintResolution = resolution;
+    const int width = PaintWidth(), height = PaintHeight();
+    std::vector<float> next(size_t(width) * height * layerCount, 0.f);
+    for (int row = 0; row < height; ++row)
+        for (int col = 0; col < width; ++col)
+        {
+            float* sample = &next[(size_t(row) * width + col) * layerCount];
+            SampleWeightGrid(source, oldWidth, oldHeight, layerCount,
+                float(col) / resolution * oldScale, float(row) / resolution * oldScale, sample);
+            NormalizeSample(sample, layerCount);
+        }
+    paintWeights = std::move(next);
+    m_paintTextureDirty = true;
+    Rebuild();
+}
+
+const Engine::Graphics::IGraphicsTexture* Terrain::GetPaintTexture(IGraphicsProvider* provider)
+{
+    if (!HasPaintMap() || !provider) return nullptr;
+    if (m_paintTexture && !m_paintTextureDirty && m_paintTextureProvider == provider)
+        return m_paintTexture.get();
+    auto* factory = provider->GetTextureFactory();
+    if (!factory) return m_paintTexture.get();
+    const int width = PaintWidth(), height = PaintHeight();
+    const size_t layerCount = layers.size();
+    uint32_t mips = 1;
+    while ((std::max(width, height) >> mips) >= 1) ++mips;
+    // Slice 0: layers 0-3; slice 1: layers 4-5 (b, a unused).
+    std::vector<uint8_t> bytes;
+    for (int slice = 0; slice < 2; ++slice)
+    {
+        std::vector<float> level(size_t(width) * height * 4, 0.f);
+        for (size_t i = 0; i < size_t(width) * height; ++i)
+            for (int c = 0; c < 4; ++c)
+            {
+                const size_t layer = size_t(slice * 4 + c);
+                if (layer < layerCount && layer < 6) level[i * 4 + c] = paintWeights[i * layerCount + layer];
+            }
+        int levelWidth = width, levelHeight = height;
+        for (uint32_t mip = 0; mip < mips; ++mip)
+        {
+            for (float value : level)
+                bytes.push_back(uint8_t(std::lround(std::clamp(value, 0.f, 1.f) * 255.f)));
+            if (mip + 1 == mips) break;
+            const int nextWidth = std::max(1, levelWidth / 2), nextHeight = std::max(1, levelHeight / 2);
+            std::vector<float> next(size_t(nextWidth) * nextHeight * 4, 0.f);
+            for (int y = 0; y < nextHeight; ++y)
+                for (int x = 0; x < nextWidth; ++x)
+                    for (int c = 0; c < 4; ++c)
+                    {
+                        float sum = 0.f;
+                        for (int dy = 0; dy < 2; ++dy)
+                            for (int dx = 0; dx < 2; ++dx)
+                            {
+                                const int sx = std::min(x * 2 + dx, levelWidth - 1);
+                                const int sy = std::min(y * 2 + dy, levelHeight - 1);
+                                sum += level[(size_t(sy) * levelWidth + sx) * 4 + c];
+                            }
+                        next[(size_t(y) * nextWidth + x) * 4 + c] = sum * .25f;
+                    }
+            level = std::move(next);
+            levelWidth = nextWidth;
+            levelHeight = nextHeight;
+        }
+    }
+    auto texture = factory->CreateTexture2DArray(uint32_t(width), uint32_t(height), 2,
+        bytes.data(), mips, Engine::Graphics::GraphicsTextureFormat::Rgba8, false);
+    // A full upload queue returns null: keep the previous copy and retry.
+    if (!texture) return m_paintTexture.get();
+    m_paintTexture = std::move(texture);
+    m_paintTextureProvider = provider;
+    m_paintTextureDirty = false;
+    return m_paintTexture.get();
 }
 
 void Terrain::Resize(int x, int y, float width, float depth)
@@ -177,6 +449,7 @@ void Terrain::Resize(int x, int y, float width, float depth)
                         nextWeights[newIndex * layers.size() + layer] =
                             weights[oldIndex * layers.size() + layer];
             }
+    if (x != cellsX || y != cellsY) { SyncVertexWeightsFromPaint(); paintWeights.clear(); }
     cellsX = x; cellsY = y; cellWidth = width; cellDepth = depth;
     heights = std::move(next);
     weights = std::move(nextWeights);
@@ -216,11 +489,22 @@ void Terrain::AssignLayersByHeight()
         }
         weights[i * layers.size() + nearest] = 1.f;
     }
+    paintWeights.clear();
     Rebuild(); MarkConfigurationDirty();
 }
 
+float Terrain::BrushFalloff(float distance, float radius, float hardness)
+{
+    if (radius <= 0.f || distance >= radius) return 0.f;
+    if (hardness < 0.f) return 1.f - distance / radius;
+    const float inner = radius * std::min(hardness, .999f);
+    if (distance <= inner) return 1.f;
+    const float t = 1.f - (distance - inner) / (radius - inner);
+    return t * t * (3.f - 2.f * t);
+}
+
 bool Terrain::ApplyBrush(float x, float z, float radius, float strength,
-    Brush brush, int layer, bool realignObjects)
+    Brush brush, int layer, bool realignObjects, const BrushOptions& options)
 {
     if (Owner && Owner->GetScene() && Owner->GetScene()->HasStarted()) return false;
     if (radius <= 0.f || strength <= 0.f || heights.empty()) return false;
@@ -228,27 +512,71 @@ bool Terrain::ApplyBrush(float x, float z, float radius, float strength,
         return false;
     const std::vector<float> before = heights;
     bool changed = false;
-    for (int row = 0; row <= cellsY; ++row)
-        for (int col = 0; col <= cellsX; ++col)
+    EnsurePaintMap();
+    if (brush == Brush::Paint && HasPaintMap())
+    {
+        // Paint at the map's resolution; the vertex weights follow in Rebuild.
+        const size_t layerCount = layers.size();
+        const int width = PaintWidth(), height = PaintHeight();
+        const float stepX = cellWidth / paintResolution, stepZ = cellDepth / paintResolution;
+        const int minCol = std::max(0, int(std::floor((x - radius) / stepX)));
+        const int maxCol = std::min(width - 1, int(std::ceil((x + radius) / stepX)));
+        const int minRow = std::max(0, int(std::floor((z - radius) / stepZ)));
+        const int maxRow = std::min(height - 1, int(std::ceil((z + radius) / stepZ)));
+        for (int row = minRow; row <= maxRow; ++row)
+            for (int col = minCol; col <= maxCol; ++col)
+            {
+                const float dx = col * stepX - x, dz = row * stepZ - z;
+                const float amount = std::clamp(strength * BrushFalloff(
+                    std::sqrt(dx * dx + dz * dz), radius, options.hardness), 0.f, 1.f);
+                float* sample = &paintWeights[(size_t(row) * width + col) * layerCount];
+                if (PaintSample(sample, layerCount, layer, amount, options.erase))
+                {
+                    NormalizeSample(sample, layerCount);
+                    changed = true;
+                }
+            }
+        if (changed)
+        {
+            m_paintTextureDirty = true;
+            RebuildRegion(int(std::floor(float(minCol) / paintResolution)),
+                int(std::floor(float(minRow) / paintResolution)),
+                int(std::ceil(float(maxCol) / paintResolution)),
+                int(std::ceil(float(maxRow) / paintResolution)));
+            MarkConfigurationDirty();
+        }
+        return changed;
+    }
+    const int firstCol = std::max(0, int(std::floor((x - radius) / cellWidth)));
+    const int lastCol = std::min(cellsX, int(std::ceil((x + radius) / cellWidth)));
+    const int firstRow = std::max(0, int(std::floor((z - radius) / cellDepth)));
+    const int lastRow = std::min(cellsY, int(std::ceil((z + radius) / cellDepth)));
+    for (int row = firstRow; row <= lastRow; ++row)
+        for (int col = firstCol; col <= lastCol; ++col)
         {
             const float dx = col * cellWidth - x, dz = row * cellDepth - z;
             const float distance = std::sqrt(dx * dx + dz * dz);
             if (distance >= radius) continue;
-            const float amount = std::clamp(strength * (1.f - distance / radius), 0.f, 1.f);
+            const float amount = std::clamp(strength *
+                BrushFalloff(distance, radius, options.hardness), 0.f, 1.f);
+            if (amount <= 0.f) continue;
             const size_t i = static_cast<size_t>(row * (cellsX + 1) + col);
             if (brush == Brush::Paint)
             {
-                const float old = weights[i * layers.size() + layer];
-                for (size_t l = 0; l < layers.size(); ++l)
-                    weights[i * layers.size() + l] *= 1.f - amount;
-                weights[i * layers.size() + layer] += amount;
-                changed |= weights[i * layers.size() + layer] != old;
+                if (PaintSample(&weights[i * layers.size()], layers.size(),
+                        layer, amount, options.erase))
+                {
+                    NormalizeSample(&weights[i * layers.size()], layers.size());
+                    changed = true;
+                }
             }
             else
             {
                 float target = before[i];
                 if (brush == Brush::Raise) target += amount;
                 if (brush == Brush::Lower) target -= amount;
+                if (brush == Brush::Flatten)
+                    target = before[i] + (options.flattenHeight - before[i]) * amount;
                 if (brush == Brush::Blend)
                 {
                     // Smooth toward the 3x3 neighborhood mean.
@@ -267,7 +595,9 @@ bool Terrain::ApplyBrush(float x, float z, float radius, float strength,
         }
     if (changed)
     {
-        NormalizeWeights(); Rebuild(); MarkConfigurationDirty();
+        // Paint keeps each touched sample normalized itself.
+        RebuildRegion(firstCol, firstRow, lastCol, lastRow);
+        MarkConfigurationDirty();
         if (brush != Brush::Paint && Owner)
             for (auto* child : Owner->Children)
                 if (auto* objects = child ? child->GetComponent<TerrainObjectLayer>() : nullptr)
@@ -278,8 +608,7 @@ bool Terrain::ApplyBrush(float x, float z, float radius, float strength,
                     // placement follows the surface only if it was resting on
                     // the old surface, keeping its own offset; objects lifted
                     // or sunk on purpose stay where they are.
-                    const bool alwaysSnap = objects->layerName == "Meadow grass" ||
-                        objects->layerName == "Procedural meadow grass";
+                    const bool alwaysSnap = objects->snapToGround;
                     const glm::mat4 layerToCell = child->transform.GetLocalMatrix();
                     const glm::mat4 cellToLayer = glm::inverse(layerToCell);
                     constexpr float restingTolerance = .05f;
@@ -408,10 +737,12 @@ void Terrain::Rebuild()
     m_bakedAppearance.clear();
     for (auto& lod : m_bakedLods) lod = {};
     NormalizeWeights();
+    EnsurePaintMap();
+    SyncVertexWeightsFromPaint();
     RefreshMaterials();
-    bool textured[6]{};
+    m_layerTextured.fill(false);
     for (size_t layer = 0; layer < std::min<size_t>(layers.size(), 6); ++layer)
-        textured[layer] = layer < m_materials.size() && m_materials[layer] &&
+        m_layerTextured[layer] = layer < m_materials.size() && m_materials[layer] &&
             m_materials[layer]->baseColorTexture &&
             std::filesystem::exists(m_materials[layer]->baseColorTexture->GetFilePath());
     Mesh* mesh = Owner->GetComponent<Mesh>();
@@ -421,33 +752,7 @@ void Terrain::Rebuild()
     indices.reserve(static_cast<size_t>(cellsX) * cellsY * 6);
     for (int row = 0; row <= cellsY; ++row)
         for (int col = 0; col <= cellsX; ++col)
-        {
-            const size_t i = static_cast<size_t>(row * (cellsX + 1) + col);
-            auto sample = [&](int sx, int sy) {
-                return heights[static_cast<size_t>(std::clamp(sy, 0, cellsY) *
-                    (cellsX + 1) + std::clamp(sx, 0, cellsX))];
-            };
-            const glm::vec3 normal = glm::normalize(glm::vec3(
-                (sample(col - 1, row) - sample(col + 1, row)) / (2.f * cellWidth),
-                1.f, (sample(col, row - 1) - sample(col, row + 1)) / (2.f * cellDepth)));
-            auto& v = vertices[i];
-            v.pos[0] = col * cellWidth; v.pos[1] = heights[i]; v.pos[2] = row * cellDepth;
-            v.normal[0] = normal.x; v.normal[1] = normal.y; v.normal[2] = normal.z;
-            v.uv[0] = static_cast<float>(col) / cellsX;
-            v.uv[1] = static_cast<float>(row) / cellsY;
-            glm::vec3 color(0.f);
-            for (size_t l = 0; l < layers.size(); ++l)
-            {
-                const float weight = weights[i * layers.size() + l];
-                if (l < 6)
-                    v.uvChannels[2 + l / 4][l % 4] = weight;
-                if (l >= 6 || !textured[l])
-                    color += (l < m_materials.size() && m_materials[l]
-                    ? m_materials[l]->diffuseColor : layers[l].previewColor) * weight;
-            }
-            v.color[0] = color.x; v.color[1] = color.y; v.color[2] = color.z;
-            v.color[3] = 1.f;
-        }
+            BuildVertex(col, row, vertices[static_cast<size_t>(row * (cellsX + 1) + col)]);
     for (int row = 0; row < cellsY; ++row)
         for (int col = 0; col < cellsX; ++col)
         {
@@ -458,6 +763,67 @@ void Terrain::Rebuild()
     OrientTerrainSurfaceUp(vertices, indices);
     mesh->SetIndexedGeometry(std::move(vertices), std::move(indices));
     if (m_provider && !mesh->IsReady()) mesh->OnAfterDeserialize(m_provider);
+}
+
+void Terrain::BuildVertex(int col, int row, Mesh::Vertex& v) const
+{
+    const size_t i = static_cast<size_t>(row * (cellsX + 1) + col);
+    const auto sample = [&](int sx, int sy) {
+        return heights[static_cast<size_t>(std::clamp(sy, 0, cellsY) *
+            (cellsX + 1) + std::clamp(sx, 0, cellsX))];
+    };
+    const glm::vec3 normal = glm::normalize(glm::vec3(
+        (sample(col - 1, row) - sample(col + 1, row)) / (2.f * cellWidth),
+        1.f, (sample(col, row - 1) - sample(col, row + 1)) / (2.f * cellDepth)));
+    v = {};
+    v.pos[0] = col * cellWidth; v.pos[1] = heights[i]; v.pos[2] = row * cellDepth;
+    v.normal[0] = normal.x; v.normal[1] = normal.y; v.normal[2] = normal.z;
+    v.uv[0] = static_cast<float>(col) / cellsX;
+    v.uv[1] = static_cast<float>(row) / cellsY;
+    glm::vec3 color(0.f);
+    for (size_t l = 0; l < layers.size(); ++l)
+    {
+        const float weight = weights[i * layers.size() + l];
+        if (l < 6)
+            v.uvChannels[2 + l / 4][l % 4] = weight;
+        if (l >= 6 || !m_layerTextured[l])
+            color += (l < m_materials.size() && m_materials[l]
+            ? m_materials[l]->diffuseColor : layers[l].previewColor) * weight;
+    }
+    v.color[0] = color.x; v.color[1] = color.y; v.color[2] = color.z;
+    v.color[3] = 1.f;
+}
+
+void Terrain::RebuildRegion(int minCol, int minRow, int maxCol, int maxRow)
+{
+    Mesh* mesh = Owner ? Owner->GetComponent<Mesh>() : nullptr;
+    bool materialsCurrent = m_materialPaths.size() == layers.size();
+    for (size_t i = 0; materialsCurrent && i < layers.size(); ++i)
+        materialsCurrent = m_materialPaths[i] == layers[i].material;
+    if (!mesh || m_meshLodStride != 1 || mesh->UsesTerrainVertexFormat() ||
+        mesh->GetVertices().size() != heights.size() || !materialsCurrent ||
+        weights.size() != heights.size() * layers.size())
+    {
+        Rebuild();
+        return;
+    }
+    m_bakedAppearance.clear();
+    for (auto& lod : m_bakedLods) lod = {};
+    // Normals read one sample either side.
+    minRow = std::clamp(minRow - 1, 0, cellsY);
+    maxRow = std::clamp(maxRow + 1, 0, cellsY);
+    minCol = std::clamp(minCol - 1, 0, cellsX);
+    maxCol = std::clamp(maxCol + 1, 0, cellsX);
+    if (minRow > maxRow || minCol > maxCol) return;
+    SyncVertexWeightsFromPaint();
+    // Whole rows form one contiguous vertex range.
+    std::vector<Mesh::Vertex> vertices(mesh->GetVertices().begin() + size_t(minRow) * (cellsX + 1),
+        mesh->GetVertices().begin() + size_t(maxRow + 1) * (cellsX + 1));
+    for (int row = minRow; row <= maxRow; ++row)
+        for (int col = minCol; col <= maxCol; ++col)
+            BuildVertex(col, row, vertices[size_t(row - minRow) * (cellsX + 1) + col]);
+    if (!mesh->UpdateIndexedVertexRange(size_t(minRow) * (cellsX + 1), vertices))
+        Rebuild();
 }
 
 void Terrain::SetMeshLodStride(int stride)
@@ -532,6 +898,8 @@ Terrain::Prepared Terrain::TakePrepared()
     result.textureTiling = textureTiling; result.lodStride = m_meshLodStride;
     result.heights = std::move(heights);
     result.weights = std::move(weights);
+    result.paintResolution = paintResolution;
+    result.paintWeights = std::move(paintWeights);
     result.layers = std::move(layers);
     result.materials = std::move(m_materials);
     result.materialPaths = std::move(m_materialPaths);
@@ -555,6 +923,9 @@ bool Terrain::InstallPrepared(Prepared prepared, IGraphicsProvider* provider)
     m_meshLodStride = prepared.lodStride;
     heights = std::move(prepared.heights);
     weights = std::move(prepared.weights);
+    paintResolution = prepared.paintResolution;
+    paintWeights = std::move(prepared.paintWeights);
+    m_paintTextureDirty = true;
     layers = std::move(prepared.layers);
     m_materials = std::move(prepared.materials);
     m_materialPaths = std::move(prepared.materialPaths);
@@ -937,7 +1308,9 @@ Terrain::JsonValue Terrain::Serialize() const
     out.Set("cellsX", JsonValue(cellsX)).Set("cellsY", JsonValue(cellsY))
         .Set("cellWidth", JsonValue(cellWidth)).Set("cellDepth", JsonValue(cellDepth))
         .Set("textureTiling", JsonValue(textureTiling))
-        .Set("bakedAssetPath", JsonValue(bakedAssetPath));
+        .Set("bakedAssetPath", JsonValue(bakedAssetPath))
+        .Set("reliefMapping", JsonValue(reliefMapping))
+        .Set("reliefShadows", JsonValue(reliefShadows));
     JsonValue h = JsonValue::MakeArray(), w = JsonValue::MakeArray(), ls = JsonValue::MakeArray();
     for (float value : heights) h.Push(JsonValue(value));
     for (float value : weights) w.Push(JsonValue(value));
@@ -949,6 +1322,9 @@ Terrain::JsonValue Terrain::Serialize() const
                 .Push(JsonValue(layer.previewColor.y)).Push(JsonValue(layer.previewColor.z))));
     out.Set("heights", std::move(h)).Set("weights", std::move(w))
         .Set("layers", std::move(ls));
+    if (HasPaintMap())
+        out.Set("paintResolution", JsonValue(paintResolution))
+            .Set("paintMap", JsonValue(EncodePaintMap(paintWeights)));
     return out;
 }
 
@@ -963,6 +1339,8 @@ void Terrain::Deserialize(const JsonValue& value)
         ? std::max(1.f, value["textureTiling"].AsFloat()) : 4.f;
     bakedAssetPath = value.Has("bakedAssetPath")
         ? value["bakedAssetPath"].AsString() : std::string{};
+    reliefMapping = !value.Has("reliefMapping") || value["reliefMapping"].AsBool();
+    reliefShadows = value.Has("reliefShadows") && value["reliefShadows"].AsBool();
     heights.assign(static_cast<size_t>(cellsX + 1) * (cellsY + 1), 0.f);
     for (size_t i = 0; i < std::min(heights.size(), value["heights"].ArraySize()); ++i)
         heights[i] = value["heights"].ArrayAt(i).AsFloat();
@@ -984,7 +1362,23 @@ void Terrain::Deserialize(const JsonValue& value)
     weights.assign(heights.size() * layers.size(), 0.f);
     for (size_t i = 0; i < std::min(weights.size(), value["weights"].ArraySize()); ++i)
         weights[i] = value["weights"].ArrayAt(i).AsFloat();
-    NormalizeWeights(); Rebuild();
+    NormalizeWeights();
+    paintResolution = value.Has("paintResolution")
+        ? std::clamp(value["paintResolution"].AsInt(), 0, 16) : 0;
+    paintWeights.clear();
+    m_paintTextureDirty = true;
+    // A map that does not decode to this terrain's size is reseeded from the
+    // vertex weights by Rebuild.
+    if (paintResolution > 0 && value.Has("paintMap"))
+    {
+        const size_t expected = size_t(PaintWidth()) * PaintHeight() * layers.size();
+        if (DecodePaintMap(value["paintMap"].AsString(), expected, paintWeights))
+            for (size_t i = 0; i < paintWeights.size(); i += layers.size())
+                NormalizeSample(&paintWeights[i], layers.size());
+        else
+            paintWeights.clear();
+    }
+    Rebuild();
 }
 
 void Terrain::OnAfterDeserialize(IGraphicsProvider* provider)
@@ -1023,6 +1417,22 @@ bool Terrain::DrawProperties(::Engine::Editor::IEditorUi& ui)
     geometryChanged |= ui.DragFloat("Cell width", &width, .1f, .001f, 1000.f);
     geometryChanged |= ui.DragFloat("Cell depth", &depth, .1f, .001f, 1000.f);
     geometryChanged |= ui.DragFloat("Texture tiling", &textureTiling, .25f, 1.f, 128.f);
+    changed |= ui.Checkbox("Near-camera relief (parallax)", &reliefMapping);
+    changed |= ui.Checkbox("Relief shadows (costly)", &reliefShadows);
+    // Paint samples per cell edge: off (vertices), 2, 4, 8 or 16.
+    static constexpr int paintSteps[] = {0, 2, 4, 8, 16};
+    int paintStep = 0;
+    while (paintStep < 4 && paintSteps[paintStep] < paintResolution) ++paintStep;
+    const int shownStep = paintStep;
+    if (ui.SliderInt(paintResolution ? ("Paint detail (" + std::to_string(paintResolution) +
+            " per cell)##PaintDetail").c_str() : "Paint detail (vertices)##PaintDetail",
+            &paintStep, 0, 4) &&
+        paintStep != shownStep)
+    {
+        SetPaintResolution(paintSteps[paintStep]);
+        MarkConfigurationDirty();
+        changed = true;
+    }
     char bakePath[512]{};
     std::memcpy(bakePath, bakedAssetPath.data(),
         std::min(bakedAssetPath.size(), sizeof(bakePath) - 1));
@@ -1043,6 +1453,16 @@ bool Terrain::DrawProperties(::Engine::Editor::IEditorUi& ui)
             for (size_t l = 0; l < oldCount; ++l)
                 next[i * layers.size() + l] = weights[i * oldCount + l];
         weights = std::move(next); appearanceChanged = true;
+        if (paintResolution > 0 && oldCount > 0 &&
+            paintWeights.size() == size_t(PaintWidth()) * PaintHeight() * oldCount)
+        {
+            std::vector<float> nextPaint(paintWeights.size() / oldCount * layers.size(), 0.f);
+            for (size_t i = 0; i < paintWeights.size() / oldCount; ++i)
+                for (size_t l = 0; l < oldCount; ++l)
+                    nextPaint[i * layers.size() + l] = paintWeights[i * oldCount + l];
+            paintWeights = std::move(nextPaint);
+            m_paintTextureDirty = true;
+        }
     }
     for (size_t l = 0; l < layers.size(); ++l)
     {

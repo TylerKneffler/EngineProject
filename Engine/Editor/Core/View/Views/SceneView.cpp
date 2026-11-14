@@ -7,6 +7,7 @@
 #include "Editor/Core/View/EditorViewportSettings.h"
 #include "Scene/SceneCameraController.h"
 #include "Scene/ScenePlacementAndPicking.h"
+#include "Scene/SceneTerrainTools.h"
 #include "Scene/SurfacePlacement.h"
 #include "Engine/Editor/Core/View/Templates/EditModes/Object/ObjectViewportTemplate.h"
 #include "Engine/Editor/Core/View/Templates/EditModes/Mesh/MeshViewportTemplate.h"
@@ -411,14 +412,17 @@ void SceneView::DrawTerrainToolbar(const std::function<bool(float)>& next)
         ImGui::PopID();
         return;
     }
-    const char* modes[] = {"Raise", "Lower", "Blend", "Paint", "Objects"};
+    const char* modes[] = {"Raise", "Lower", "Smooth", "Flatten", "Paint", "Objects"};
     if (next(112.f))
     {
         ImGui::SetNextItemWidth(112.f);
         ImGui::Combo("##TerrainBrush", &m_terrainBrush, modes, IM_ARRAYSIZE(modes));
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Terrain brush");
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Terrain tool. Hold Shift to invert it while painting:\n"
+                "Raise <-> Lower, Paint -> erase the layer, Objects -> erase objects.\n"
+                "Flatten levels to the height where the stroke starts.");
     }
-    if (m_terrainBrush != kObjectBrush && next(120.f))
+    if (next(120.f))
     {
         ImGui::SetNextItemWidth(120.f);
         ImGui::DragFloat("##TerrainRadius", &m_terrainRadius,
@@ -430,16 +434,70 @@ void SceneView::DrawTerrainToolbar(const std::function<bool(float)>& next)
         ImGui::DragFloat("##TerrainStrength", &m_terrainStrength,
             .01f, .001f, 2.f, "Strength %.2f");
     }
-    if (m_terrainBrush == kPaintBrush && terrain)
+    if (m_terrainBrush != kObjectBrush && next(130.f))
     {
-        m_terrainLayer = std::clamp(m_terrainLayer, 0,
-            std::max(0, static_cast<int>(terrain->layers.size()) - 1));
-        if (next(100.f))
+        ImGui::SetNextItemWidth(130.f);
+        ImGui::SliderFloat("##TerrainHardness", &m_terrainHardness, 0.f, 1.f, "Hardness %.2f");
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Share of the radius at full strength; the rest fades out smoothly.");
+    }
+    if (m_terrainBrush == kPaintBrush)
+    {
+        // Layer names come from the selected cell, or any loaded cell of the
+        // manager (cells of one manager share their layer list).
+        const Engine::Components::Terrain* layerSource = terrain;
+        if (!layerSource && manager)
+            for (const auto& cell : manager->GetCells())
+                if ((layerSource = manager->GetLoadedCell(cell.first, cell.second))) break;
+        const int layerCount = layerSource ? static_cast<int>(layerSource->layers.size()) : 0;
+        m_terrainLayer = std::clamp(m_terrainLayer, 0, std::max(0, layerCount - 1));
+        if (next(170.f))
         {
-            ImGui::SetNextItemWidth(100.f);
-            ImGui::SliderInt("##TerrainLayer", &m_terrainLayer, 0,
-                std::max(0, static_cast<int>(terrain->layers.size()) - 1),
-                "Layer %d");
+            const auto layerName = [&](int index) {
+                if (!layerSource || index >= layerCount) return std::to_string(index);
+                const auto& material = layerSource->layers[static_cast<size_t>(index)].material;
+                return std::to_string(index) + "  " + (material.empty() ? std::string("(no material)")
+                    : std::filesystem::path(material).stem().string());
+            };
+            ImGui::SetNextItemWidth(170.f);
+            if (ImGui::BeginCombo("##TerrainLayer", layerName(m_terrainLayer).c_str()))
+            {
+                for (int index = 0; index < layerCount; ++index)
+                {
+                    const auto& color = layerSource->layers[static_cast<size_t>(index)].previewColor;
+                    ImGui::ColorButton(("##LayerColor" + std::to_string(index)).c_str(),
+                        {color.r, color.g, color.b, 1.f}, ImGuiColorEditFlags_NoTooltip, {14.f, 14.f});
+                    ImGui::SameLine();
+                    if (ImGui::Selectable(layerName(index).c_str(), index == m_terrainLayer))
+                        m_terrainLayer = index;
+                }
+                ImGui::EndCombo();
+            }
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Paint layer (Shift erases it)");
+        }
+        // Paint detail: weight samples per cell edge. A single terrain is
+        // resampled now; a manager's cells adopt it on their next stroke.
+        if (next(130.f))
+        {
+            static constexpr int steps[] = {0, 2, 4, 8, 16};
+            static constexpr const char* names[] = {"Detail: vertices", "Detail: 2 / cell",
+                "Detail: 4 / cell", "Detail: 8 / cell", "Detail: 16 / cell"};
+            const int current = manager ? manager->paintResolution
+                : (terrain ? terrain->paintResolution : 0);
+            int index = 0;
+            while (index < 4 && steps[index] < current) ++index;
+            ImGui::SetNextItemWidth(130.f);
+            if (ImGui::Combo("##PaintDetail", &index, names, IM_ARRAYSIZE(names)) &&
+                steps[index] != current)
+            {
+                if (manager) { manager->paintResolution = steps[index]; manager->MarkConfigurationDirty(); }
+                else if (terrain) { terrain->SetPaintResolution(steps[index]); terrain->MarkConfigurationDirty(); }
+                m_terrainSettingChanged = true;
+            }
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Paint resolution, independent of the mesh: weight samples per cell edge.\n"
+                    "Manager cells adopt it the next time a stroke touches them\n"
+                    "(procedural cells keep vertex paint).");
         }
     }
     if (m_terrainBrush == kObjectBrush)
@@ -451,7 +509,10 @@ void SceneView::DrawTerrainToolbar(const std::function<bool(float)>& next)
                 std::filesystem::path(m_terrainObjectPrefab).filename().string() + "##ObjectBrush";
             ImGui::Button(label.c_str(), {210.f, 0.f});
             if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("Drag a prefab from Assets here, then drag on terrain to paint objects.");
+                ImGui::SetTooltip("Drag a prefab from Assets here, then drag on terrain to paint objects.\n"
+                    "Shift-drag erases this prefab (or, with no prefab, any painted object).\n"
+                    "Right-click to clear.");
+            if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) m_terrainObjectPrefab.clear();
             if (ImGui::BeginDragDropTarget())
             {
                 if (const auto* payload = ImGui::AcceptDragDropPayload("ENGINE_ASSET_PATH"))
@@ -465,13 +526,29 @@ void SceneView::DrawTerrainToolbar(const std::function<bool(float)>& next)
                 ImGui::EndDragDropTarget();
             }
         }
-        if (next(145.f)) ImGui::Checkbox("Align to surface", &m_terrainAlignObjects);
+        if (next(90.f))
+        {
+            ImGui::SetNextItemWidth(90.f);
+            ImGui::DragInt("##ObjectCount", &m_terrainObjectCount, .1f, 1, 64, "Count %d");
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Objects per dab, scattered inside the radius (1 = at the cursor).");
+        }
         if (next(135.f))
         {
             ImGui::SetNextItemWidth(135.f);
             ImGui::DragFloat("##ObjectSpacing", &m_terrainObjectSpacing,
                 .05f, .1f, 100.f, "Spacing %.1f");
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Distance the cursor travels between dabs.");
         }
+        if (next(150.f))
+        {
+            ImGui::SetNextItemWidth(150.f);
+            ImGui::DragFloatRange2("##ObjectScale", &m_terrainObjectScaleMin, &m_terrainObjectScaleMax,
+                .01f, .05f, 10.f, "Scale %.2f", "%.2f");
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Random scale range for painted objects.");
+        }
+        if (next(110.f)) ImGui::Checkbox("Random yaw", &m_terrainObjectRandomYaw);
+        if (next(145.f)) ImGui::Checkbox("Align to surface", &m_terrainAlignObjects);
     }
     if (m_terrainBrush != kObjectBrush && m_terrainBrush != kPaintBrush && next(135.f))
     {
@@ -687,6 +764,31 @@ void SceneView::DrawPanel(IEditorUi& ui)
     ApplyTerrainLayerVisibility(terrainTools
         ? (manager ? manager->Owner : selected) : nullptr);
     const bool objectBrush = terrainTools && m_terrainBrush == kObjectBrush;
+    const bool invert = ImGui::GetIO().KeyShift;
+    SceneTerrainTools::Target terrainTarget;
+    terrainTarget.manager = manager;
+    terrainTarget.terrain = manager ? nullptr : terrain;
+    terrainTarget.root = manager ? manager->Owner : selected;
+    // World view-projection of the editor camera, for the brush ring.
+    glm::dmat4 terrainViewProjection(1.0);
+    bool terrainRingVisible = false;
+    if (terrainTools && m_scene && input.available.x > 0.f && input.available.y > 0.f)
+        if (auto* camera = m_scene->editorCamera.GetComponent<Engine::Components::Camera>())
+        {
+            terrainViewProjection = camera->GetProjectionMatrixD(
+                static_cast<double>(input.available.x) / input.available.y) *
+                camera->GetViewMatrixD();
+            terrainRingVisible = true;
+        }
+    const auto drawRing = [&](const glm::dvec3& localCenter, float hardness, uint32_t color)
+    {
+        if (!terrainRingVisible) return;
+        SceneTerrainTools::DrawBrushRing(terrainTarget, localCenter, m_terrainRadius,
+            hardness, terrainViewProjection, {input.screenMin.x, input.screenMin.y},
+            {input.available.x, input.available.y}, color);
+    };
+    if (!input.leftDown) { m_terrainFlattenSampled = false; m_terrainObjectStrokeReported = false; }
+    if (m_terrainSettingChanged) { m_terrainEditActive = true; m_terrainSettingChanged = false; }
     if (!objectBrush || !input.leftDown || !input.hovered ||
         input.rightDown || input.middleDown)
         m_terrainObjectStroke = false;
@@ -696,91 +798,93 @@ void SceneView::DrawPanel(IEditorUi& ui)
         terrainConsumedClick = input.hovered && (input.leftDown || input.leftClicked);
         glm::vec3 position{}, normal{};
         if (input.hovered && !input.rightDown && !input.middleDown &&
-            ScenePlacementAndPicking::FindTerrainPlacement(*m_scene,
-                manager ? manager->Owner : selected,
+            ScenePlacementAndPicking::FindTerrainPlacement(*m_scene, terrainTarget.root,
                 input.mousePosInViewport, input.available, position, normal))
         {
-            ui.DrawViewportCircle(input.mousePosInViewport, 6.f, {1.f, .8f, .15f, 1.f}, false, 2.f);
-            const bool spaced = !m_terrainObjectStroke ||
-                glm::distance(position, m_lastTerrainObjectPosition) >=
-                    std::max(.1f, m_terrainObjectSpacing);
-            if (AllowObjectCreation && input.leftDown && !m_terrainObjectPrefab.empty() && spaced)
+            const glm::dvec3 local = SceneTerrainTools::ToLocal(terrainTarget, glm::dvec3(position));
+            drawRing(local, 0.f, invert ? IM_COL32(255, 80, 60, 230) : IM_COL32(255, 205, 40, 230));
+            int changed = 0;
+            if (AllowObjectCreation && input.leftDown && invert)
+                changed = SceneTerrainTools::Erase(terrainTarget, local, m_terrainRadius,
+                    m_terrainObjectPrefab);
+            else if (AllowObjectCreation && input.leftDown && !m_terrainObjectPrefab.empty() &&
+                (!m_terrainObjectStroke || glm::distance(position, m_lastTerrainObjectPosition) >=
+                    std::max(.1f, m_terrainObjectSpacing)))
             {
-                auto* cell=manager ? nullptr:terrain;
-                if (manager)
-                    for (auto* candidate:m_scene->GetComponents<Engine::Components::Terrain>())
-                    {
-                        if (candidate->Owner->GetComponentInParent<Engine::Components::TerrainManager>()!=manager) continue;
-                        const auto local=glm::vec3(glm::inverse(candidate->Owner->transform.GetWorldMatrix())*glm::vec4(position,1));
-                        if (local.x>=0 && local.z>=0 && local.x<=candidate->cellsX*candidate->cellWidth &&
-                            local.z<=candidate->cellsY*candidate->cellDepth) { cell=candidate; break; }
-                    }
-                if (cell)
-                {
-                    // Prefer the layer that already holds this prefab, then the
-                    // brush's own "Objects" layer. Never fall back to another
-                    // layer (such as grass): its LOD, view distance and ground
-                    // conforming settings would apply to the painted objects.
-                    Engine::Components::TerrainObjectLayer* layer=nullptr;
-                    Engine::Components::TerrainObjectLayer* objectsLayer=nullptr;
-                    for (auto* child:cell->Owner->Children)
-                        if (auto* candidate=child ? child->GetComponent<Engine::Components::TerrainObjectLayer>() : nullptr)
-                        {
-                            if (!layer && std::any_of(candidate->placements.begin(), candidate->placements.end(),
-                                    [&](const auto& existing) { return existing.asset==m_terrainObjectPrefab; }))
-                                layer=candidate;
-                            if (!objectsLayer && candidate->layerName=="Objects" && !candidate->conformToGround)
-                                objectsLayer=candidate;
-                        }
-                    if (!layer) layer=objectsLayer;
-                    if (!layer)
-                    {
-                        auto* child=m_scene->AddObject("Objects");
-                        m_scene->MoveObject(child,cell->Owner,Engine::Scene::Scene::ObjectPlacement::AsChild);
-                        child->transform.position={0,0,0}; child->transform.rotation={0,0,0};
-                        child->transform.scale={1,1,1};
-                        layer=child->AddComponent<Engine::Components::TerrainObjectLayer>();
-                    }
-                    Engine::Components::TerrainObjectLayer::Placement placement;
-                    placement.asset=m_terrainObjectPrefab;
-                    const auto inverse=glm::inverse(layer->Owner->transform.GetWorldMatrix());
-                    placement.position=glm::vec3(inverse*glm::vec4(position,1));
-                    placement.normal=m_terrainAlignObjects ? glm::normalize(glm::vec3(inverse*glm::vec4(normal,0))):glm::vec3(0,1,0);
-                    layer->placements.push_back(placement); layer->MarkConfigurationDirty();
-                    if (OnObjectCreated) OnObjectCreated(selected);
-                    // Keep terrain selected for the rest of the brush stroke.
-                    m_scene->SetSelectedObject(selected);
-                    if (OnObjectSelected) OnObjectSelected(selected);
-                    m_lastTerrainObjectPosition = position;
-                    m_terrainObjectStroke = true;
-                }
+                SceneTerrainTools::ScatterSettings settings;
+                settings.prefab = m_terrainObjectPrefab;
+                settings.count = std::clamp(m_terrainObjectCount, 1, 64);
+                settings.alignToSurface = m_terrainAlignObjects;
+                settings.randomYaw = m_terrainObjectRandomYaw;
+                settings.minScale = m_terrainObjectScaleMin;
+                settings.maxScale = m_terrainObjectScaleMax;
+                changed = SceneTerrainTools::Scatter(*m_scene, terrainTarget, local,
+                    m_terrainRadius, settings, m_terrainRandom);
+                m_lastTerrainObjectPosition = position;
+                m_terrainObjectStroke = true;
+            }
+            if (changed > 0)
+            {
+                // One undo step per stroke: the edit stays "in progress" while
+                // the button is held, like a sculpt stroke.
+                m_terrainEditActive = true;
+                if (!m_terrainObjectStrokeReported && OnObjectCreated) OnObjectCreated(selected);
+                m_terrainObjectStrokeReported = true;
+                // Keep terrain selected for the rest of the brush stroke.
+                m_scene->SetSelectedObject(selected);
             }
         }
     }
-    if ((terrain || manager) && m_editMode == SceneEditMode::Terrain && !objectBrush)
+    if ((terrain || manager) && m_editMode == SceneEditMode::Terrain && !objectBrush &&
+        !(manager && m_editTerrainCells))
     {
         glm::dvec3 hit{};
-        if (input.hovered && input.leftDown && !input.rightDown && !input.middleDown &&
-            !(manager && m_editTerrainCells) &&
-            ScenePlacementAndPicking::FindTerrainSurfaceHit(*m_scene,
-                manager ? manager->Owner : selected,
+        if (input.hovered && !input.rightDown && !input.middleDown &&
+            ScenePlacementAndPicking::FindTerrainSurfaceHit(*m_scene, terrainTarget.root,
                 input.mousePosInViewport, input.available, hit))
         {
-            // A press on the terrain belongs to the stroke even where the
-            // brush changes nothing, so it cannot select objects underneath.
-            terrainConsumedClick = true;
-            const glm::dvec3 local = glm::dvec3(glm::inverse(
-                (manager ? manager->Owner : selected)->transform.GetWorldMatrixD()) *
-                glm::dvec4(hit, 1.0));
-            const float strength = m_terrainStrength * ImGui::GetIO().DeltaTime * 30.f;
-            const auto brush = static_cast<Engine::Components::Terrain::Brush>(m_terrainBrush);
-            const bool changed = manager
-                ? manager->ApplyBrush(local.x, local.z, m_terrainRadius, strength,
-                    brush, m_terrainLayer, m_terrainRealignObjects)
-                : terrain->ApplyBrush(static_cast<float>(local.x),
-                    static_cast<float>(local.z), m_terrainRadius, strength,
-                    brush, m_terrainLayer, m_terrainRealignObjects);
-            m_terrainEditActive = m_terrainEditActive || changed;
+            const glm::dvec3 local = SceneTerrainTools::ToLocal(terrainTarget, hit);
+            static constexpr Engine::Components::Terrain::Brush toolBrush[] = {
+                Engine::Components::Terrain::Brush::Raise,
+                Engine::Components::Terrain::Brush::Lower,
+                Engine::Components::Terrain::Brush::Blend,
+                Engine::Components::Terrain::Brush::Flatten,
+                Engine::Components::Terrain::Brush::Paint};
+            auto brush = toolBrush[std::clamp(m_terrainBrush, 0, kPaintBrush)];
+            if (invert && brush == Engine::Components::Terrain::Brush::Raise)
+                brush = Engine::Components::Terrain::Brush::Lower;
+            else if (invert && brush == Engine::Components::Terrain::Brush::Lower)
+                brush = Engine::Components::Terrain::Brush::Raise;
+            const bool erase = invert && brush == Engine::Components::Terrain::Brush::Paint;
+            uint32_t color = IM_COL32(110, 230, 120, 230);
+            if (brush == Engine::Components::Terrain::Brush::Lower) color = IM_COL32(255, 140, 70, 230);
+            if (brush == Engine::Components::Terrain::Brush::Blend) color = IM_COL32(110, 210, 255, 230);
+            if (brush == Engine::Components::Terrain::Brush::Flatten) color = IM_COL32(150, 150, 255, 230);
+            if (erase) color = IM_COL32(255, 80, 60, 230);
+            drawRing(local, m_terrainHardness, color);
+            if (input.leftDown)
+            {
+                // A press on the terrain belongs to the stroke even where the
+                // brush changes nothing, so it cannot select objects underneath.
+                terrainConsumedClick = true;
+                if (!m_terrainFlattenSampled)
+                {
+                    m_terrainFlattenHeight = static_cast<float>(local.y);
+                    m_terrainFlattenSampled = true;
+                }
+                Engine::Components::Terrain::BrushOptions options;
+                options.hardness = m_terrainHardness;
+                options.flattenHeight = m_terrainFlattenHeight;
+                options.erase = erase;
+                const float strength = m_terrainStrength * ImGui::GetIO().DeltaTime * 30.f;
+                const bool changed = manager
+                    ? manager->ApplyBrush(local.x, local.z, m_terrainRadius, strength,
+                        brush, m_terrainLayer, m_terrainRealignObjects, options)
+                    : terrain->ApplyBrush(static_cast<float>(local.x),
+                        static_cast<float>(local.z), m_terrainRadius, strength,
+                        brush, m_terrainLayer, m_terrainRealignObjects, options);
+                m_terrainEditActive = m_terrainEditActive || changed;
+            }
         }
     }
     if (manager && m_editMode == SceneEditMode::Terrain && !objectBrush &&

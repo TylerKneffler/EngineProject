@@ -11,6 +11,8 @@
 #include <map>
 #include <optional>
 
+namespace Engine::Graphics { class IGraphicsTexture; }
+
 namespace Engine::Components
 {
 class Material;
@@ -25,7 +27,20 @@ public:
         float maxHeight = 10.f;
         glm::vec3 previewColor{.35f, .55f, .25f};
     };
-    enum class Brush { Raise, Lower, Blend, Paint };
+    // Blend smooths toward the local average; Flatten pulls toward
+    // BrushOptions::flattenHeight (terrain-local Y).
+    enum class Brush { Raise, Lower, Blend, Paint, Flatten };
+    struct BrushOptions
+    {
+        // Fraction of the radius at full strength before a smoothstep
+        // falloff to the edge. Negative keeps the legacy linear cone.
+        float hardness = -1.f;
+        float flattenHeight = 0.f;
+        // Paint only: remove the layer, handing its weight to the others.
+        bool erase = false;
+    };
+    // Brush weight at a distance from the brush center (0 outside).
+    static float BrushFalloff(float distance, float radius, float hardness);
     struct BakedAppearance
     {
         float normal[3];
@@ -41,6 +56,8 @@ public:
         int cellsX = 0, cellsY = 0, lodStride = 1;
         float cellWidth = 1.f, cellDepth = 1.f, textureTiling = 4.f;
         std::vector<float> heights, weights;
+        int paintResolution = 0;
+        std::vector<float> paintWeights;
         std::vector<Layer> layers;
         std::vector<Mesh::Vertex> vertices;
         std::vector<uint32_t> indices;
@@ -58,6 +75,31 @@ public:
     std::vector<float> heights;
     std::vector<Layer> layers;
     std::vector<float> weights; // one weight per vertex and layer
+    // Paint detail, in weight samples per cell edge. 0 keeps paint on the
+    // vertices. Otherwise paintWeights holds one weight per layer per sample
+    // on a grid aligned with the vertices, PaintWidth() x PaintHeight(), and
+    // the vertex weights are resynced from it (LODs, far tiles, vertex color).
+    // Serialized as 8-bit weights, deflated and base64 encoded.
+    int paintResolution = 0;
+    std::vector<float> paintWeights;
+    // Parallax relief within 15 m of the camera, from each layer material's
+    // height map and heightScale (in that layer's texture repeats).
+    bool reliefMapping = true;
+    // Relief self-shadowing from directional lights within 12 m. Costs about
+    // as much again as the relief itself, so it is opt-in.
+    bool reliefShadows = false;
+    static constexpr int MaxPaintSamples = 2049; // per side
+    int PaintWidth() const { return paintResolution > 0 ? cellsX * paintResolution + 1 : 0; }
+    int PaintHeight() const { return paintResolution > 0 ? cellsY * paintResolution + 1 : 0; }
+    bool HasPaintMap() const;
+    // Resamples the current paint (map or vertex weights) to a new
+    // resolution; 0 drops the map and keeps its vertex-sampled weights.
+    void SetPaintResolution(int resolution);
+    // GPU copy of the paint map: a two-slice RGBA8 array (layers 0-3, 4-5)
+    // with mips, re-uploaded after edits. Null without a paint map.
+    const Engine::Graphics::IGraphicsTexture* GetPaintTexture(IGraphicsProvider* provider);
+    // Call after writing paintWeights directly (seam stitching), then Rebuild.
+    void NotifyPaintChanged() { m_paintTextureDirty = true; }
     std::string bakedAssetPath;
     void Resize(int x, int y, float width, float depth);
     void AssignLayersByHeight();
@@ -65,7 +107,8 @@ public:
     // realignObjects, placements that were aligned to the old surface also
     // tilt to the new one; otherwise orientation is left as painted.
     bool ApplyBrush(float x, float z, float radius, float strength,
-        Brush brush, int layer = 0, bool realignObjects = false);
+        Brush brush, int layer = 0, bool realignObjects = false,
+        const BrushOptions& options = {});
     bool ApplyBrushFromLocalRay(const glm::vec3& nearPoint,
         const glm::vec3& farPoint, float radius, float strength,
         Brush brush, int layer = 0);
@@ -109,6 +152,19 @@ public:
     bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
 private:
     IGraphicsProvider* m_provider = nullptr;
+    std::shared_ptr<Engine::Graphics::IGraphicsTexture> m_paintTexture;
+    const IGraphicsProvider* m_paintTextureProvider = nullptr;
+    bool m_paintTextureDirty = true;
+    // Rebuilds the map from vertex weights when its size no longer matches.
+    void EnsurePaintMap();
+    void SyncVertexWeightsFromPaint();
+    // Brush strokes: rebuild only vertex rows minRow..maxRow (plus one row
+    // of normals either side) in place. Falls back to Rebuild when the mesh
+    // is not a full-resolution copy of the grid (LOD stride, new materials).
+    void RebuildRegion(int minCol, int minRow, int maxCol, int maxRow);
+    void BuildVertex(int col, int row, Mesh::Vertex& vertex) const;
+    // Base color map present per layer, refreshed by Rebuild.
+    std::array<bool, 6> m_layerTextured{};
     int m_meshLodStride = 1;
     std::vector<std::shared_ptr<Material>> m_materials;
     std::vector<std::string> m_materialPaths;

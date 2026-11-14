@@ -238,9 +238,13 @@ Status (first slice: items 1, 3, 4, 5, 6, 8, 9 done; 2 and 7 open):
   - The BC encode runs on worker threads with bc7enc at uber level 0. Devices
     without BC sampling fall back to RGBA8 at 1024².
   - Mips are built on the CPU (normals renormalised, Toksvig roughness).
-  - The first build takes seconds. The result is cached on disk at
-    `%TEMP%/EngineTerrainLayerArrays/<hash>.bin`, keyed by source paths,
-    sizes and write times.
+  - The first build of six 2K layers takes 2.6 s. It used to take 5.1 s;
+    the five maps of a layer now decode concurrently, and mip packing runs
+    by rows with sRGB/roughness lookup tables. The result is cached on disk
+    at `%TEMP%/EngineTerrainLayerArrays/<hash>.bin`, keyed by source paths,
+    sizes and write times; loading it takes 0.08 s.
+  - Pre-cooked arrays were not committed: each distinct layer combination
+    would add about 100 MB of BC data to the repo.
   - Missing maps get neutral values. Until the arrays are ready the shader
     shows each layer's mean color.
   - `Terrain` no longer uploads each layer texture separately.
@@ -268,8 +272,28 @@ Status (first slice: items 1, 3, 4, 5, 6, 8, 9 done; 2 and 7 open):
   `Textures/Terrain/PBR/` (133 MB of source JPGs): sand, grass, forest soil,
   gravel, rock and snow. Their materials are in `Materials/Terrain/PBR/`, and
   `Scenes/terrain/terrain_materials.scene` is a test scene. Both are written
-  by `Textures/Terrain/PBR/generate_terrain_pbr_content.py`. The streamed
-  demo scenes still use the old 512² albedo-only materials.
+  by `Textures/Terrain/PBR/generate_terrain_pbr_content.py`.
+  - The source JPGs were re-encoded from quality 100 to 98 (138 → 110 MB).
+    Measured through the engine's BC encoder, this costs 0.1–1.1 dB, well
+    below BC compression's own error.
+  - Existing scenes moved onto the sets by
+    `Textures/Terrain/PBR/update_terrain_layer_materials.py`, which rewrites
+    `Materials/Terrain/*.material` and `Materials/Woodland/{Meadow,Path,
+    WoodlandFloor}.material`. That covers `oak_meadow`,
+    `oak_meadow_expanded`, `terrain_performance` and the grass test scenes.
+    - Materials that share a set (five grasses on Grass004) keep their
+      palette through `baseColorTextureTint`, which the array builder bakes
+      into the slice. Each tint moves the set's mean halfway toward the old
+      measured color.
+    - `terrainMacroColor` is the tinted mean.
+    - Grass004's roughness map (mean 0.26, glossy blades) is replaced by a
+      constant 0.9.
+  - `TerrainPerformanceDriver` now takes its layer list and far palette from
+    the material files instead of hardcoded colors. Its tiling is now 64 (a
+    2 m repeat, as in every other scene).
+  - The old 512² procedural PNGs and `generate_terrain_textures.py` were
+    deleted on 2026-11-14 (only `measurement_grid.png` and its generator
+    remain).
 - **Cost.** RTX 4090, 1600×900, full-screen terrain, uncapped (GPU at full
   clock):
   - Terrain pass: 0.37 ms total, against 0.20 ms with mean colors only.
@@ -307,7 +331,118 @@ Status (first slice: items 1, 3, 4, 5, 6, 8, 9 done; 2 and 7 open):
    physically plausible values (~0.04–0.5 linear for soils/grass). This matters
    as much as any shader work.
 
+### Terrain editing tools — review and first update (2026-11-14)
+
+Review of the editor's terrain mode (`SceneView` toolbar and viewport,
+`Terrain::ApplyBrush`, `TerrainManager::ApplyBrush`):
+
+| Finding | Status |
+|---|---|
+| No brush preview on the surface (only a 6 px dot for objects) | Fixed: ring draped on the terrain, inner ring at the hardness radius, colored per tool |
+| Linear cone falloff, no hardness | Fixed: `BrushOptions::hardness`, a full-strength core, then a smoothstep edge |
+| No flatten; "Blend" was the only smoothing tool | Fixed: Flatten (to the height under the stroke's first dab); Blend renamed Smooth in the UI |
+| Paint could only add a layer | Fixed: Shift erases the layer and hands its weight to the others (falls back to another layer where nothing else is painted) |
+| Layer picker hidden with the manager selected, layers shown as numbers | Fixed: named combo (material stem + preview color), taken from any loaded cell |
+| Object brush: one object per spacing step, no rotation or scale variety, no erase | Fixed: Count per dab scattered in the radius, random yaw, scale range; Shift erases (that prefab, or any non-grass object with no prefab set); right-click clears the prefab |
+| Object strokes recorded an edit per object | Fixed: one undo step per stroke, like sculpting |
+| Paint detail only in the inspector | Fixed: "Detail" combo on the terrain toolbar in Paint mode (one undo step) |
+| Raise/lower capped at 1 m per dab, scaled by frame time | Unchanged (works; strength reads per second) |
+| Every stroke frame rebuilds the whole cell mesh and re-checks material files | Fixed: strokes visit only samples under the brush and update the touched vertex rows in place (`Terrain::RebuildRegion`, `Mesh::UpdateIndexedVertexRange`). 256² cell with a 4 m dab: 18 ms → 1.5 ms per frame. Test checks the result matches a full rebuild |
+| Paint resolution equals vertex spacing (6 m in `oak_meadow`, 4 m in `terrain_performance`) | Fixed for authored terrain: paint map (below) |
+| Grass layers are regenerated by name ("Meadow grass") special cases | Fixed for editing: `TerrainObjectLayer::snapToGround` ("Ground cover" in the inspector) drives sculpt snapping and eraser protection. Old saves migrate by name. The meadow `GrassField` setup in `TerrainManager::RestoreObjectLayers` is still keyed by name; it is demo content and belongs in a scene script |
+
+Code: `Terrain::BrushOptions` and `Terrain::BrushFalloff`
+(`Terrain.h`). Editor helpers live in
+`Editor/Core/View/Views/Scene/SceneTerrainTools.{h,cpp}`: surface sampling,
+the ring, scatter and erase. Regression tests are in
+`.local/tests/TerrainEditingToolsTests.cpp` (falloff, flatten, layer erase,
+flatten across a manager seam, scatter/erase).
+
+### Paint map (Phase 3 item 2) — implemented 2026-11-14
+
+- **Resolution.** `Terrain::paintResolution`: 0 keeps paint on the vertices
+  (the default; existing scenes are unchanged). 2, 4, 8 or 16 weight samples
+  per cell edge, capped at 2049 samples per side.
+- **Grid.** `paintWeights` holds one weight per layer per sample on a grid
+  aligned with the vertices. Vertex weights are resynced from it on every
+  rebuild, so LODs, far tiles, vertex colors and baked caches keep working.
+- **Changing resolution.** Resamples bilinearly; the first map is seeded
+  from the vertex weights. Turning it off keeps the vertex-sampled weights.
+- **Storage.** Inline in the cell, not a sidecar file: scene undo restores
+  serialized snapshots, and sidecar files would sit outside them, as would
+  copy/paste and prefab instancing. The map is 8-bit, deflated (miniz) and
+  base64 encoded in `paintMap`. A 64×64-cell terrain at 4 samples per cell
+  (257² samples × 6 layers) with painted stripes encodes to 22 KB.
+- **Rendering.** A two-slice RGBA8 array with mips (layers 0–3 and 4–5)
+  in logical slot 15 (t30, Vulkan binding 31), flagged by material bit
+  524288. The shader reads the layer weights from it instead of the vertex
+  channels. It is re-uploaded after each stroke.
+- **Managers.** `TerrainManager::paintResolution` applies to authored cells
+  the first time a paint stroke touches them. Border samples shared between
+  cells are averaged so strokes across cell edges leave no seam. Procedural
+  cells (`terrain_performance`) keep vertex paint, because their
+  `.terrainedit` archives store vertex weights only.
+- **UI.** "Paint detail" slider in the Terrain and Terrain Manager
+  inspectors.
+- **Verified.** 0.5 m painted stripes on a 1 m vertex grid render the same on
+  DX12, DX11 and Vulkan. Tests cover sub-vertex painting, the serialization
+  round trip, resampling, and the manager seam.
+
+### Terrain relief (Phase 3 item 7) — implemented 2026-11-14
+
+- **What it does.** Parallax occlusion on the dominant layer's height within
+  15 m of the camera (faded over 10–15 m). The hit offsets the top
+  projection of every layer, so all blended layers move together. Cliffs
+  (side projections) are not marched.
+- **Matching the visible texture.** Heights are sampled exactly as the
+  albedo shows them: hex-tiled, with the same copy weights (the hex helpers
+  `TerrainHexGrid`, `TerrainHexCopyUv` and `TerrainHexWeights` are shared).
+  This prevents swimming relief.
+- **March.** One step per two pixels of travel: 4–8 steps with hex-tiling
+  (3 fetches each), 4–16 without, then a secant refinement. Below half a
+  pixel of travel nothing is marched.
+- **Depth.** The material's `heightScale`, in that layer's texture repeats,
+  is passed in `terrainMacroColors[layer].w`, and only for layers with a
+  height map. The content scripts set 0.008–0.02, which is 1.6–6 cm of
+  relief.
+- **Switch.** `Terrain::reliefMapping` and `TerrainManager::reliefMapping`
+  (on by default; "Near-camera relief" in the inspectors). Shader flag bit
+  1048576.
+- **Cost.** 0.06 ms at 1600×900 (0.53 → 0.59 ms terrain pass, uncapped
+  4090) with near ground over most of the frame. DX12, DX11 and Vulkan
+  match.
+- **Relief shadows** (added later, 2026-11-14). An opt-in tier:
+  `Terrain::reliefShadows` and `TerrainManager::reliefShadows`, "Relief
+  shadows (costly)" in the inspectors, flag bit 2097152.
+  - A Tatarchuk march from the relief hit toward the first directional light
+    (normally the sun): 3–6 steps with hex-tiling, 3–10 without, faded out
+    by 12 m.
+  - Resolved before the lighting loops, so they carry only one float and a
+    light index. This applies to both the full-PBR and fast lighting tiers.
+  - Visually subtle at 1.6–6 cm relief: crevices and stone undersides darken
+    (about 1% of the frame in the test view at a mid sun).
+  - Cost on an uncapped 4090 at 1600×900, close view (terrain pass):
+    0.53 ms without relief, 0.59 ms with relief, 0.66 ms with relief shadows
+    (about 0.19 ms at 1080p for both).
+  - A first version kept the relief state live through the light loop and
+    slowed all terrain by about 0.06 ms even with relief off. Resolving the
+    shadow before the loop removed that.
+- **Not done.** Depth offset for terrain.
+
 ### Phase 4 — Terrain runtime virtual texture / clipmap cache (3–4 weeks)
+
+Deferred (2026-11-14):
+- It first needs colour render targets on DX11, DX12 and Vulkan; only
+  depth-only offscreen passes exist today.
+- A practical cache (1024² rings, about 3 cm texels inside) cannot replace
+  near shading of ~1 mm source texels, so it would only take over beyond
+  ~20–40 m.
+- Shading there costs under 0.1 ms on the target 4090.
+- Revisit when decals, roads, more than 6 layers, or Phase 5 displacement
+  need baked terrain.
+- Low-risk path: bake into RGBA16F array slices one output per pass, using
+  the scene's colour and depth formats, so the existing pipelines stay
+  compatible on Vulkan.
 - Clipmap of 4–6 rings around the camera (e.g. 2048² per ring, ~10 texels/m in
   the inner ring), storing blended albedo+height (BC7 or RGBA8),
   normal (RG16 or BC5 after GPU compress), roughness/AO.

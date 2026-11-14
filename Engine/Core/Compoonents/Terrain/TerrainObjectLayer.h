@@ -72,6 +72,11 @@ public:
     // Warp instance vertices across the sampled ground plane while retaining
     // a vertical local Y axis (useful for upright grass on uneven terrain).
     bool conformToGround = false;
+    // Ground cover (grass): sculpting always moves placements onto the new
+    // surface, even ones that were not resting on the old one, and the
+    // object eraser leaves the layer alone unless a prefab is chosen.
+    // Layers saved before the flag existed get it from their name.
+    bool snapToGround = false;
     float screenLod1Pixels = 300.f, screenLod2Pixels = 80.f;
     float screenLodHysteresis = .1f;
     float shadowDistance = 8.f;

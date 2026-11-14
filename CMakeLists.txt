@@ -2327,6 +2327,21 @@ if(NOT ENGINE_PROJECT_DIR AND
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/TerrainEditingToolsTests.cpp")
+    enable_testing()
+    add_executable(TerrainEditingToolsTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/TerrainEditingToolsTests.cpp"
+        "${ENGINE_ROOT}/Engine/Editor/Core/View/Views/Scene/SceneTerrainTools.cpp")
+    target_link_libraries(TerrainEditingToolsTests PRIVATE Engine ImGui)
+    target_include_directories(TerrainEditingToolsTests PRIVATE
+        "${ENGINE_ROOT}" "${ENGINE_ROOT}/Engine")
+    target_compile_definitions(TerrainEditingToolsTests PRIVATE NOMINMAX)
+    add_test(NAME TerrainEditingTools COMMAND TerrainEditingToolsTests)
+    set_tests_properties(TerrainEditingTools PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}" TIMEOUT 120)
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
    EXISTS "${ENGINE_LOCAL_TEST_ROOT}/TerrainPerformanceSceneTests.cpp")
     enable_testing()
     add_executable(TerrainPerformanceSceneTests EXCLUDE_FROM_ALL

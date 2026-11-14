@@ -154,11 +154,28 @@ private:
     void CommitPrefabPreview();
     bool m_focusOnNextDraw = false;
     SceneEditMode m_editMode = SceneEditMode::Object;
-    // Toolbar brush index: Terrain::Brush values, then the object painter.
-    static constexpr int kPaintBrush =
-        static_cast<int>(Engine::Components::Terrain::Brush::Paint);
-    static constexpr int kObjectBrush = kPaintBrush + 1;
+    // Toolbar tool index: Raise, Lower, Smooth, Flatten, Paint, Objects.
+    // Shift inverts the tool while held (raise/lower, paint/erase layer,
+    // place/erase objects).
+    static constexpr int kSmoothBrush = 2;
+    static constexpr int kFlattenBrush = 3;
+    static constexpr int kPaintBrush = 4;
+    static constexpr int kObjectBrush = 5;
     int m_terrainBrush = 0;
+    // Fraction of the radius at full strength before the smooth falloff.
+    float m_terrainHardness = .5f;
+    // Flatten target: the surface height where the stroke started.
+    float m_terrainFlattenHeight = 0.f;
+    bool m_terrainFlattenSampled = false;
+    int m_terrainObjectCount = 1;
+    bool m_terrainObjectRandomYaw = true;
+    float m_terrainObjectScaleMin = 1.f;
+    float m_terrainObjectScaleMax = 1.f;
+    uint32_t m_terrainRandom = 0x9e3779b9u;
+    bool m_terrainObjectStrokeReported = false;
+    // A toolbar setting that edits terrain data (paint detail) is reported
+    // by the next viewport frame as a one-frame edit, i.e. one undo step.
+    bool m_terrainSettingChanged = false;
     int m_terrainObjectDisplayLod = -1;
     int m_sceneRenderMode = 0;
     int m_terrainLayer = 0;

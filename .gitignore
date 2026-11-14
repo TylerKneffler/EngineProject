@@ -18,6 +18,7 @@ build/
 !.local/tests/GameBackendPlayable.scene
 !.local/tests/TextureCompressionTests.cpp
 !.local/tests/TextureCookCopperSlate.cmake
+!.local/tests/TerrainEditingToolsTests.cpp
 /Engine/Core/Assets/TerrainData/TerrainPerformance/BakedCells/
 
 !.local\tests\OakBackendCapture.cpp

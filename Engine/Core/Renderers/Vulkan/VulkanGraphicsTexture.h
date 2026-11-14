@@ -83,7 +83,7 @@ private:
     VkBuffer m_dummyBuffer = VK_NULL_HANDLE;
     VkDeviceMemory m_dummyBufferMemory = VK_NULL_HANDLE;
     VulkanImageResource m_white;
-    // Default for the terrain layer array bindings (logical slots 12-14),
+    // Default for the terrain array bindings (logical slots 12-15),
     // whose shader declarations are 2D arrays.
     VulkanImageResource m_whiteArray;
     struct DescriptorFrame

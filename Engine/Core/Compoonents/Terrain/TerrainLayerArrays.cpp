@@ -6,11 +6,15 @@
 #include "Core/Graphics/IGraphicsTexture.h"
 #include "Core/Rendering/RenderJobs.h"
 
+#define NOMINMAX
+#include <Windows.h>
 #include <stb_image.h>
 #include <bc7enc.h>
 #include <rgbcx.h>
 
 #include <algorithm>
+#include <array>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <filesystem>
@@ -29,6 +33,9 @@ using Engine::Graphics::GraphicsTextureFormat;
 struct LayerSources
 {
     std::string albedo, normal, roughness, occlusion, height;
+    // Material baseColorTextureTint, baked into the slice so layers that
+    // share one photo set can still differ in color.
+    glm::vec3 tint{ 1.f };
 };
 
 // Encoded arrays, ready to upload: each slice's full mip chain, slice after
@@ -77,6 +84,25 @@ float LinearToSrgb(float value)
 uint8_t ToByte(float value)
 {
     return static_cast<uint8_t>(std::lround(std::clamp(value, 0.f, 1.f) * 255.f));
+}
+
+uint8_t LinearToSrgbByte(float value)
+{
+    static const auto table = []
+    {
+        std::array<uint8_t, 4097> result{};
+        for (size_t i = 0; i < result.size(); ++i)
+            result[i] = ToByte(LinearToSrgb(float(i) / 4096.f));
+        return result;
+    }();
+    return table[size_t(std::clamp(value, 0.f, 1.f) * 4096.f + .5f)];
+}
+
+// Rows of an image processed in parallel on the engine's worker pool.
+template<class Function> void ParallelRows(uint32_t rows, Function&& function)
+{
+    Engine::Rendering::RenderJobs::Get().For(rows, 16, [&](size_t row)
+    { function(uint32_t(row)); });
 }
 
 // Float RGBA image, wrapped at the edges (terrain maps tile).
@@ -205,24 +231,27 @@ std::vector<LevelImages> BuildMips(Slice slice, uint32_t mips, glm::vec3& mean)
         level.albedoHeight.resize(texels * 4);
         level.normal.resize(texels * 4);
         level.roughAo.resize(texels * 4);
-        for (size_t i = 0; i < texels; ++i)
+        ParallelRows(size, [&](uint32_t row)
+        {
+        for (size_t i = size_t(row) * size; i < size_t(row + 1) * size; ++i)
         {
             const float* a = &albedo.texels[i * 4];
             const float* n = &normal.texels[i * 4];
-            level.albedoHeight[i * 4 + 0] = ToByte(LinearToSrgb(a[0]));
-            level.albedoHeight[i * 4 + 1] = ToByte(LinearToSrgb(a[1]));
-            level.albedoHeight[i * 4 + 2] = ToByte(LinearToSrgb(a[2]));
+            level.albedoHeight[i * 4 + 0] = LinearToSrgbByte(a[0]);
+            level.albedoHeight[i * 4 + 1] = LinearToSrgbByte(a[1]);
+            level.albedoHeight[i * 4 + 2] = LinearToSrgbByte(a[2]);
             level.albedoHeight[i * 4 + 3] = ToByte(a[3]);
             level.normal[i * 4 + 0] = ToByte(n[0] * 0.5f + 0.5f);
             level.normal[i * 4 + 1] = ToByte(n[1] * 0.5f + 0.5f);
             level.normal[i * 4 + 2] = 0;
             level.normal[i * 4 + 3] = 255;
             // Back to perceptual roughness: alpha^2 -> r = alpha^(1/2).
-            level.roughAo[i * 4 + 0] = ToByte(std::pow(std::max(rough.texels[i * 4], 0.f), 0.25f));
+            level.roughAo[i * 4 + 0] = ToByte(std::sqrt(std::sqrt(std::max(rough.texels[i * 4], 0.f))));
             level.roughAo[i * 4 + 1] = ToByte(n[3]);
             level.roughAo[i * 4 + 2] = 0;
             level.roughAo[i * 4 + 3] = 255;
         }
+        });
         levels.push_back(std::move(level));
         if (size == 1)
         {
@@ -236,7 +265,8 @@ std::vector<LevelImages> BuildMips(Slice slice, uint32_t mips, glm::vec3& mean)
             image->width = image->height = half;
             image->texels.assign(size_t(half) * half * 4, 0.f);
         }
-        for (uint32_t y = 0; y < half; ++y)
+        ParallelRows(half, [&](uint32_t y)
+        {
             for (uint32_t x = 0; x < half; ++x)
             {
                 float sumN[4] = {}, sumA[4] = {}, sumR = 0.f;
@@ -260,6 +290,7 @@ std::vector<LevelImages> BuildMips(Slice slice, uint32_t mips, glm::vec3& mean)
                 const float variance = std::clamp((1.f - length) / length, 0.f, 1.f);
                 nextRough.At(x, y)[0] = std::min(sumR * 0.25f + variance, 1.f);
             }
+        });
         albedo = std::move(nextAlbedo);
         normal = std::move(nextNormal);
         rough = std::move(nextRough);
@@ -319,7 +350,7 @@ void AppendLevel(const LevelImages& level, bool blockCompressed, CpuArrays& out)
 
 // ---- Disk cache -----------------------------------------------------------
 constexpr uint64_t CacheMagic = 0x3159415252414c54ull; // TLARRAY1
-constexpr uint32_t CacheVersion = 1;
+constexpr uint32_t CacheVersion = 2;
 
 uint64_t Fnv(uint64_t hash, const void* data, size_t size)
 {
@@ -337,6 +368,8 @@ uint64_t SourceSignature(const std::vector<LayerSources>& sources, bool blockCom
     hash = Fnv(hash, &blockCompressed, sizeof(blockCompressed));
     hash = Fnv(hash, &cap, sizeof(cap));
     for (const auto& source : sources)
+    {
+        hash = Fnv(hash, &source.tint, sizeof(source.tint));
         for (const std::string* path : { &source.albedo, &source.normal,
             &source.roughness, &source.occlusion, &source.height })
         {
@@ -348,6 +381,7 @@ uint64_t SourceSignature(const std::vector<LayerSources>& sources, bool blockCom
                 error ? 0 : int64_t(time.time_since_epoch().count()) };
             hash = Fnv(hash, stamp, sizeof(stamp));
         }
+    }
     return hash;
 }
 
@@ -429,6 +463,7 @@ std::shared_ptr<CpuArrays> Build(const std::vector<LayerSources>& sources, bool 
     if (sources.empty()) return nullptr;
     const uint32_t cap = blockCompressed ? TerrainLayerArrays::MaxSliceSizeCompressed
                                          : TerrainLayerArrays::MaxSliceSize;
+    const auto started = std::chrono::steady_clock::now();
     const uint64_t signature = SourceSignature(sources, blockCompressed, cap);
     const auto cachePath = CachePath(signature);
     if (auto cached = LoadCache(cachePath, signature)) return cached;
@@ -469,26 +504,33 @@ std::shared_ptr<CpuArrays> Build(const std::vector<LayerSources>& sources, bool 
             n[2] = 1.f; n[3] = 1.f;                            // flat, no occlusion
             slice.roughness.texels[i * 4] = 1.f;               // roughness 1
         }
-        Image image;
-        if (Decode(s.albedo, true, size, image))
+        // The layer's five maps decode concurrently.
+        Image decoded[5];
+        bool present[5] = {};
+        const std::string* paths[5] = {&s.albedo, &s.height, &s.normal, &s.roughness, &s.occlusion};
+        Engine::Rendering::RenderJobs::Get().For(5, 1, [&](size_t map)
+        { present[map] = Decode(*paths[map], map == 0, size, decoded[map]); });
+        Image& image = decoded[0];
+        if (present[0])
         {
             result->info.albedoMask |= bit;
             for (size_t i = 0; i < texels; ++i)
                 for (uint32_t c = 0; c < 3; ++c)
-                    slice.albedo.texels[i * 4 + c] = image.texels[i * 4 + c];
+                    slice.albedo.texels[i * 4 + c] = image.texels[i * 4 + c] * s.tint[c];
         }
-        if (Decode(s.height, false, size, image))
+        if (present[1])
         {
             result->info.heightMask |= bit;
             for (size_t i = 0; i < texels; ++i)
-                slice.albedo.texels[i * 4 + 3] = image.texels[i * 4];
+                slice.albedo.texels[i * 4 + 3] = decoded[1].texels[i * 4];
         }
-        if (Decode(s.normal, false, size, image))
+        if (present[2])
         {
+            const Image& normalMap = decoded[2];
             result->info.normalMask |= bit;
             for (size_t i = 0; i < texels; ++i)
             {
-                glm::vec3 n(image.texels[i * 4] * 2.f - 1.f, image.texels[i * 4 + 1] * 2.f - 1.f, 0.f);
+                glm::vec3 n(normalMap.texels[i * 4] * 2.f - 1.f, normalMap.texels[i * 4 + 1] * 2.f - 1.f, 0.f);
                 n.z = std::sqrt(std::max(0.f, 1.f - n.x * n.x - n.y * n.y));
                 n = glm::normalize(n);
                 slice.normal.texels[i * 4] = n.x;
@@ -497,27 +539,31 @@ std::shared_ptr<CpuArrays> Build(const std::vector<LayerSources>& sources, bool 
             }
         }
         // Roughness in the metallic-roughness map's G channel (glTF).
-        if (Decode(s.roughness, false, size, image))
+        if (present[3])
         {
             result->info.roughnessMask |= bit;
             for (size_t i = 0; i < texels; ++i)
             {
-                const float r = image.texels[i * 4 + 1];
+                const float r = decoded[3].texels[i * 4 + 1];
                 slice.roughness.texels[i * 4] = r * r * r * r; // GGX alpha^2
             }
         }
-        if (Decode(s.occlusion, false, size, image))
+        if (present[4])
         {
             result->info.roughnessMask |= bit;
             for (size_t i = 0; i < texels; ++i)
-                slice.normal.texels[i * 4 + 3] = image.texels[i * 4];
+                slice.normal.texels[i * 4 + 3] = decoded[4].texels[i * 4];
         }
-        image = {};
+        for (Image& map : decoded) map = {};
         const auto levels = BuildMips(std::move(slice), mips, result->info.meanAlbedo[layer]);
         for (const auto& level : levels)
             AppendLevel(level, blockCompressed, *result);
     }
     SaveCache(cachePath, signature, *result);
+    OutputDebugStringA(("[TerrainLayerArrays] built " + std::to_string(sources.size()) +
+        " layers at " + std::to_string(size) + " px in " + std::to_string(
+            std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count()) +
+        " s (cached for later runs)\n").c_str());
     return result;
 }
 
@@ -544,11 +590,13 @@ const TerrainLayerArrays::Arrays* TerrainLayerArrays::Acquire(
             source.roughness = TexturePath(material->metallicRoughnessTexture);
             source.occlusion = TexturePath(material->occlusionTexture);
             source.height = TexturePath(material->heightTexture);
+            source.tint = glm::clamp(material->baseColorTextureTint, glm::vec3(0.f), glm::vec3(4.f));
         }
         for (const std::string* path : { &source.albedo, &source.normal,
             &source.roughness, &source.occlusion, &source.height })
             key += *path + '|';
-        key += ';';
+        key += std::to_string(source.tint.r) + ',' + std::to_string(source.tint.g) + ',' +
+            std::to_string(source.tint.b) + ';';
         sources.push_back(std::move(source));
     }
 

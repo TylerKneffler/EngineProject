@@ -25,6 +25,7 @@ class Material;
 // Devices without BC sampling get RGBA8 arrays at a smaller cap. Every slice
 // shares one size (the largest layer map, capped). Maps a layer lacks are
 // filled with neutral values: flat normal, roughness 1, AO 1, height 0.5.
+// A layer material's baseColorTextureTint is multiplied into its albedo.
 // Arrays are built and BC-encoded on worker threads, cached on disk (temp
 // directory, keyed by source sizes and write times) and in memory by the
 // layers' texture paths, so cells that share materials share one set.

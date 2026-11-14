@@ -23,6 +23,7 @@ TerrainObjectLayer::TerrainObjectLayer()
     RegisterField("screenLodSelection", screenLodSelection, "Object LOD");
     RegisterField("distanceLodOverride", distanceLodOverride, "Object LOD");
     RegisterField("conformToGround", conformToGround, "Placement");
+    RegisterField("snapToGround", snapToGround, "Placement");
     RegisterField("screenLod1Pixels", screenLod1Pixels, "Object LOD");
     RegisterField("screenLod2Pixels", screenLod2Pixels, "Object LOD");
     RegisterField("screenLodHysteresis", screenLodHysteresis, "Object LOD");
@@ -373,6 +374,7 @@ TerrainObjectLayer::JsonValue TerrainObjectLayer::Serialize() const
     out.Set("bakedInstances",JsonValue(std::move(baked)));
     out.Set("layerName", JsonValue(layerName));
     out.Set("conformToGround", JsonValue(conformToGround));
+    out.Set("snapToGround", JsonValue(snapToGround));
     JsonValue lodEntries = JsonValue::MakeArray(objectLods.size());
     for (const auto& [asset, settings] : objectLods)
     {
@@ -435,6 +437,11 @@ void TerrainObjectLayer::Deserialize(const JsonValue& value)
     layerName = value.Has("layerName") ? value["layerName"].AsString() : "Objects";
     conformToGround = value.Has("conformToGround") &&
         value["conformToGround"].AsBool();
+    {
+        const std::string name = value.Has("layerName") ? value["layerName"].AsString() : layerName;
+        snapToGround = value.Has("snapToGround") ? value["snapToGround"].AsBool()
+            : (name == "Meadow grass" || name == "Procedural meadow grass");
+    }
     objectLods.clear();
     const auto& lodEntries = value["objectLods"];
     for (size_t i = 0; i < lodEntries.ArraySize(); ++i)
@@ -508,6 +515,7 @@ void TerrainObjectLayer::InstallPrepared(TerrainObjectLayer&& source)
     screenLodSelection = source.screenLodSelection;
     distanceLodOverride = source.distanceLodOverride;
     conformToGround = source.conformToGround;
+    snapToGround = source.snapToGround;
     screenLod1Pixels = source.screenLod1Pixels;
     screenLod2Pixels = source.screenLod2Pixels;
     screenLodHysteresis = source.screenLodHysteresis;
@@ -533,6 +541,8 @@ bool TerrainObjectLayer::DrawProperties(::Engine::Editor::IEditorUi& ui)
     changed |= ui.Checkbox("Conform mesh to ground while upright",
         &conformToGround);
     ui.Tooltip("Shears placement vertices to follow local terrain height without tilting the object's vertical axis. Best for small grass clumps.");
+    changed |= ui.Checkbox("Ground cover (always follows sculpting)", &snapToGround);
+    ui.Tooltip("Sculpting moves every placement onto the new surface. The object eraser skips this layer unless a prefab is chosen.");
     changed |= ui.DragFloat("Object view distance (m)", &viewDistance,
         .25f, 1.f, 100000.f);
     ui.Tooltip("Objects beyond this distance are hidden. Distances are measured to each object tile center.");

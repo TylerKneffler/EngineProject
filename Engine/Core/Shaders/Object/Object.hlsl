@@ -111,6 +111,8 @@ struct PersistentInstance { float4 row0; float4 row1; float4 row2; uint4 identit
 [[vk::binding(28, 0)]] Texture2DArray terrainAlbedoHeight;
 [[vk::binding(29, 0)]] Texture2DArray terrainNormal;
 [[vk::binding(30, 0)]] Texture2DArray terrainRoughAo;
+// Paint map (logical slot 15): slice 0 = layer weights 0-3, slice 1 = 4-5.
+[[vk::binding(31, 0)]] Texture2DArray terrainPaint;
 [[vk::binding(6, 0)]] SamplerState materialSampler;
 #else
 cbuffer DrawBuffer : register(b0)
@@ -139,6 +141,7 @@ Texture2D toonMap : register(t26);
 Texture2DArray terrainAlbedoHeight : register(t27);
 Texture2DArray terrainNormal : register(t28);
 Texture2DArray terrainRoughAo : register(t29);
+Texture2DArray terrainPaint : register(t30);
 StructuredBuffer<SceneLightData> sceneLights : register(t6);
 StructuredBuffer<ObjectData> objects : register(t7);
 StructuredBuffer<float4x4> boneMatrices : register(t8);
@@ -1121,8 +1124,8 @@ float3 UnpackTerrainNormal(float2 encoded)
 // offset and rotated copies on a triangle grid, blended with a contrast ramp.
 // Returns the blend of the copies; tangent normals are rotated back into the
 // unrotated UV frame.
-void SampleTerrainHex(float2 uv, float2 uvDx, float2 uvDy, float slice,
-    bool sampleNormal, out float4 albedoHeight, out float4 normalRough)
+// Triangle grid cell of a UV: barycentric weights and the three vertices.
+void TerrainHexGrid(float2 uv, out float3 barycentric, out float2 vertices[3])
 {
     const float2 st = uv * (TerrainHexTileRate * 3.46410162);
     const float2 skewed = float2(st.x - 0.57735027 * st.y, 1.15470054 * st.y);
@@ -1131,28 +1134,143 @@ void SampleTerrainHex(float2 uv, float2 uvDx, float2 uvDy, float slice,
     temp.z = 1.0 - temp.x - temp.y;
     const float s = step(0.0, -temp.z);
     const float s2 = 2.0 * s - 1.0;
-    const float3 barycentric = float3(-temp.z * s2, s - temp.y * s2, s - temp.x * s2);
-    const float2 vertices[3] = {
-        baseCell + float2(s, s),
-        baseCell + float2(s, 1.0 - s),
-        baseCell + float2(1.0 - s, s) };
+    barycentric = float3(-temp.z * s2, s - temp.y * s2, s - temp.x * s2);
+    vertices[0] = baseCell + float2(s, s);
+    vertices[1] = baseCell + float2(s, 1.0 - s);
+    vertices[2] = baseCell + float2(1.0 - s, s);
+}
+
+// UV of the copy belonging to one grid vertex: random offset and rotation
+// about the hex centre.
+float2 TerrainHexCopyUv(float2 uv, float2 vertex, out float2x2 rotation)
+{
+    const uint2 hash = TerrainPcg2d(asuint(int2(vertex)));
+    const float2 offset = float2(hash.x & 0xffffu, hash.x >> 16u) / 65535.0;
+    const float angle = ((hash.y & 0xffffu) / 65535.0 * 2.0 - 1.0) *
+        3.14159265 * TerrainHexRotation;
+    float sine, cosine;
+    sincos(angle, sine, cosine);
+    rotation = float2x2(cosine, -sine, sine, cosine);
+    const float2 centre = float2(vertex.x + 0.5 * vertex.y, 0.8660254 * vertex.y) /
+        (TerrainHexTileRate * 3.46410162);
+    return mul(uv - centre, rotation) + centre + offset;
+}
+
+// Blend weights of the three copies: sharp toward the hex edges, taller
+// texels winning the overlap.
+float3 TerrainHexWeights(float3 barycentric, float3 heights)
+{
+    float3 weights = pow(barycentric, 7.0) * lerp(1.0, heights, TerrainHexContrast);
+    return weights / max(dot(weights, 1.0), 1e-6);
+}
+
+// Height (white = raised) exactly as the hex-tiled or plain albedo sample
+// shows it, for the relief march.
+float SampleTerrainHeight(float2 uv, float2 uvDx, float2 uvDy, float slice, bool hex)
+{
+    if (!hex)
+        return terrainAlbedoHeight.SampleGrad(materialSampler, float3(uv, slice), uvDx, uvDy).a;
+    float3 barycentric;
+    float2 vertices[3];
+    TerrainHexGrid(uv, barycentric, vertices);
+    float3 heights;
+    [unroll] for (uint i = 0u; i < 3u; ++i)
+    {
+        float2x2 rotation;
+        const float2 copyUv = TerrainHexCopyUv(uv, vertices[i], rotation);
+        heights[i] = terrainAlbedoHeight.SampleGrad(materialSampler, float3(copyUv, slice),
+            mul(uvDx, rotation), mul(uvDy, rotation)).a;
+    }
+    return dot(TerrainHexWeights(barycentric, heights), heights);
+}
+
+// Relief march on one layer's height. shift is the UV offset, in the
+// caller's (unscaled) UV units, at full relief depth along the view ray.
+// Returns the UV where the ray meets the surface.
+float2 TerrainParallax(float2 uv, float2 uvDx, float2 uvDy, float uvScale, float slice,
+    bool hex, float2 shift, out float hitDepth)
+{
+    hitDepth = 0.0;
+    const float2 layerDx = uvDx * uvScale, layerDy = uvDy * uvScale;
+    const float uvPerPixel = sqrt(max(abs(layerDx.x * layerDy.y - layerDx.y * layerDy.x), 1e-14));
+    const float pixels = length(shift * uvScale) / uvPerPixel;
+    [branch] if (pixels < 0.5) return uv;
+    // One step per two pixels of travel; hex heights cost three fetches.
+    const float steps = clamp(ceil(pixels * 0.5), 4.0, hex ? 8.0 : 16.0);
+    const float stepDepth = 1.0 / steps;
+    float rayDepth = 0.0;
+    float surfaceDepth = 1.0 - SampleTerrainHeight(uv * uvScale, layerDx, layerDy, slice, hex);
+    float previousRay = 0.0, previousSurface = surfaceDepth;
+    [loop] for (int i = 0; i < 16; ++i)
+    {
+        if (rayDepth >= surfaceDepth || i >= (int)steps) break;
+        previousRay = rayDepth;
+        previousSurface = surfaceDepth;
+        rayDepth += stepDepth;
+        surfaceDepth = 1.0 - SampleTerrainHeight((uv - shift * rayDepth) * uvScale,
+            layerDx, layerDy, slice, hex);
+    }
+    // Secant step between the last point above and the first below.
+    const float above = previousSurface - previousRay;
+    const float below = rayDepth - surfaceDepth;
+    const float t = saturate(above / max(above + below, 1e-5));
+    hitDepth = lerp(previousRay, rayDepth, t);
+    return uv - shift * hitDepth;
+}
+
+// Relief state the lighting needs after the march (top projection).
+struct TerrainRelief
+{
+    float weight;        // 0 = no relief shadow
+    float2 uv;           // hit, in terrain UV units
+    float depth;         // hit depth, 0..1 of the relief
+    float depthToUv;     // terrain UV travelled per unit of depth at 45 degrees
+    float layerScale;
+    float slice;
+    float2 uvDx, uvDy;
+    bool hex;
+    float3 tangent, bitangent, normal;
+};
+
+// Soft self-shadow of the relief toward a light (Tatarchuk): march from the
+// hit toward the light and keep the strongest occluder, weighted down with
+// distance along the ray. Same falloff and gain as the mesh version.
+float TerrainReliefShadow(TerrainRelief relief, float3 lightDirection)
+{
+    const float3 lightTangent = float3(dot(lightDirection, relief.tangent),
+        dot(lightDirection, relief.bitangent), dot(lightDirection, relief.normal));
+    [branch] if (relief.weight <= 0.0 || relief.depth <= 0.001 || lightTangent.z <= 0.0)
+        return 1.0;
+    const float2 ray = lightTangent.xy / max(lightTangent.z, 0.08) * relief.depthToUv;
+    const float steps = round(lerp(3.0, relief.hex ? 6.0 : 10.0, relief.depth));
+    const float stepDepth = relief.depth / steps;
+    const float2 layerDx = relief.uvDx * relief.layerScale;
+    const float2 layerDy = relief.uvDy * relief.layerScale;
+    float occlusion = 0.0;
+    [loop] for (float i = 1.0; i <= steps; i += 1.0)
+    {
+        const float rayDepth = relief.depth - stepDepth * i;
+        const float surfaceDepth = 1.0 - SampleTerrainHeight(
+            (relief.uv + ray * (stepDepth * i)) * relief.layerScale,
+            layerDx, layerDy, relief.slice, relief.hex);
+        occlusion = max(occlusion, (rayDepth - surfaceDepth) * (1.0 - (i - 1.0) / steps));
+    }
+    return lerp(1.0, 1.0 - saturate(occlusion * 8.0), relief.weight);
+}
+
+void SampleTerrainHex(float2 uv, float2 uvDx, float2 uvDy, float slice,
+    bool sampleNormal, out float4 albedoHeight, out float4 normalRough)
+{
+    float3 barycentric;
+    float2 vertices[3];
+    TerrainHexGrid(uv, barycentric, vertices);
 
     float4 a[3];
     float4 b[3];
     float2x2 rotation[3];
     [unroll] for (uint i = 0u; i < 3u; ++i)
     {
-        const uint2 hash = TerrainPcg2d(asuint(int2(vertices[i])));
-        const float2 offset = float2(hash.x & 0xffffu, hash.x >> 16u) / 65535.0;
-        const float angle = ((hash.y & 0xffffu) / 65535.0 * 2.0 - 1.0) *
-            3.14159265 * TerrainHexRotation;
-        float sine, cosine;
-        sincos(angle, sine, cosine);
-        rotation[i] = float2x2(cosine, -sine, sine, cosine);
-        // Hex centre back in UV space.
-        const float2 centre = float2(vertices[i].x + 0.5 * vertices[i].y,
-            0.8660254 * vertices[i].y) / (TerrainHexTileRate * 3.46410162);
-        const float2 copyUv = mul(uv - centre, rotation[i]) + centre + offset;
+        const float2 copyUv = TerrainHexCopyUv(uv, vertices[i], rotation[i]);
         const float2 copyDx = mul(uvDx, rotation[i]);
         const float2 copyDy = mul(uvDy, rotation[i]);
         a[i] = terrainAlbedoHeight.SampleGrad(materialSampler,
@@ -1163,9 +1281,7 @@ void SampleTerrainHex(float2 uv, float2 uvDx, float2 uvDy, float slice,
             : float4(0.5, 0.5, 1.0, 1.0);
     }
     // Sharp falloff toward each hex edge; taller texels win the overlap.
-    float3 weights = pow(barycentric, 7.0) *
-        lerp(1.0, float3(a[0].a, a[1].a, a[2].a), TerrainHexContrast);
-    weights /= max(dot(weights, 1.0), 1e-6);
+    const float3 weights = TerrainHexWeights(barycentric, float3(a[0].a, a[1].a, a[2].a));
     albedoHeight = a[0] * weights.x + a[1] * weights.y + a[2] * weights.z;
     float2 normalXy = 0.0;
     float2 rest = 0.0;
@@ -1543,6 +1659,10 @@ float4 PSMain(
     float3 terrainNormalForLighting = normalize(normal);
     float terrainRoughness = 1.0;
     float terrainOcclusion = 1.0;
+    // Relief self-shadow toward the first directional light (normally the
+    // sun), resolved here so the lighting loops carry one float.
+    float terrainReliefShadow = 1.0;
+    uint terrainReliefLight = 0xffffffffu;
     // Authored terrain stores six painted weights in the spare UV channels.
     // Vertex color carries the contribution of layers without a texture.
     if (flags & 2048u)
@@ -1573,6 +1693,20 @@ float4 PSMain(
             ? smoothstep(512.0, 2048.0, nearDistance) : 0.0;
         float weights[6] = {uvChannels2.x, uvChannels2.y,
             uvChannels2.z, uvChannels2.w, uvChannels3.x, uvChannels3.y};
+        // Paint map: weights at finer than vertex spacing. Its samples sit on
+        // the vertex grid, so texel centres map to uv 0 and 1 exactly.
+        [branch] if (flags & 524288u)
+        {
+            uint paintWidth, paintHeight, paintSlices;
+            terrainPaint.GetDimensions(paintWidth, paintHeight, paintSlices);
+            const float2 paintSize = float2(paintWidth, paintHeight);
+            const float2 paintUv = (saturate(uv) * (paintSize - 1.0) + 0.5) / paintSize;
+            const float4 paintA = terrainPaint.Sample(materialSampler, float3(paintUv, 0.0));
+            const float2 paintB = terrainPaint.Sample(materialSampler, float3(paintUv, 1.0)).rg;
+            weights[0] = paintA.x; weights[1] = paintA.y;
+            weights[2] = paintA.z; weights[3] = paintA.w;
+            weights[4] = paintB.x; weights[5] = paintB.y;
+        }
         float originalWeightSum = 0.0;
         [unroll] for (uint layer = 0u; layer < 6u; ++layer)
             originalWeightSum += weights[layer];
@@ -1652,6 +1786,61 @@ float4 PSMain(
             // Hex-tiling near; one sample per map beyond 40 m.
             projection.hexAmount = hexTiling
                 ? 1.0 - smoothstep(24.0, 40.0, nearDistance) : 0.0;
+
+            // Relief near the camera: march the dominant layer's height and
+            // shift the top projection of every layer to the hit. Height
+            // scale is in the layer's texture repeats (terrainMacroColors.w).
+            [branch] if ((flags & 1048576u) && materialDetail > 0.0 &&
+                projection.weights.x > 0.5 && selectedWeight[0] > 0.0 &&
+                nearDistance < 15.0)
+            {
+                const uint layer = selected[0];
+                const float layerScale = objectData.terrainLayerParams[layer].w > 0.0
+                    ? objectData.terrainLayerParams[layer].w : 1.0;
+                const float relief = objectData.terrainMacroColors[layer].w *
+                    (1.0 - smoothstep(10.0, 15.0, nearDistance)) * materialDetail;
+                [branch] if (relief > 0.0)
+                {
+                    const float3 viewDir = normalize(
+                        objectData.viewPositionAlphaCutoff.xyz - worldPos);
+                    const float3 viewTangent = float3(dot(viewDir, projection.tangent),
+                        dot(viewDir, projection.bitangent), dot(viewDir, projection.normal));
+                    const float2 shift = viewTangent.xy / max(viewTangent.z, 0.15) *
+                        (relief / layerScale);
+                    float hitDepth;
+                    TerrainRelief terrainRelief = (TerrainRelief)0;
+                    projection.topUv = TerrainParallax(projection.topUv, projection.topDx,
+                        projection.topDy, layerScale, (float)layer,
+                        projection.hexAmount >= 0.5, shift, hitDepth);
+                    // Relief shadows are their own, costlier quality tier.
+                    terrainRelief.weight = (flags & 2097152u)
+                        ? (1.0 - smoothstep(8.0, 12.0, nearDistance)) *
+                            materialDetail * projection.weights.x : 0.0;
+                    terrainRelief.uv = projection.topUv;
+                    terrainRelief.depth = hitDepth;
+                    terrainRelief.depthToUv = relief / layerScale;
+                    terrainRelief.layerScale = layerScale;
+                    terrainRelief.slice = (float)layer;
+                    terrainRelief.uvDx = projection.topDx;
+                    terrainRelief.uvDy = projection.topDy;
+                    terrainRelief.hex = projection.hexAmount >= 0.5;
+                    terrainRelief.tangent = projection.tangent;
+                    terrainRelief.bitangent = projection.bitangent;
+                    terrainRelief.normal = projection.normal;
+                    [branch] if (terrainRelief.weight > 0.0)
+                    {
+                        [loop] for (uint lightIndex = 0u; lightIndex < draw.lightCount; ++lightIndex)
+                        {
+                            const SceneLightData light = sceneLights[lightIndex];
+                            if (abs(light.params.y - 1.0) >= 0.25) continue;
+                            terrainReliefLight = lightIndex;
+                            terrainReliefShadow = TerrainReliefShadow(terrainRelief,
+                                normalize(light.positionRange.xyz));
+                            break;
+                        }
+                    }
+                }
+            }
 
             TerrainLayerSample samples[3];
             [unroll] for (uint k = 0u; k < 3u; ++k)
@@ -1774,6 +1963,7 @@ float4 PSMain(
                         smoothstep(48.0, 96.0, cameraDistance));
                 }
             }
+            shadow *= terrainReliefShadow;
             diffuseLight += objectData.bakedDirectional.rgb *
                 (sunFacing * shadow / PI);
             // Near ring: one GGX sun lobe on the blended normal and roughness
@@ -2063,6 +2253,7 @@ float4 PSMain(
             if (parallaxHit.depth > 0.001 && lightDirectionTangent.z > 0.0)
                 parallaxHit.fetches += shadowSteps;
         }
+        if (index == terrainReliefLight) centerShadow *= terrainReliefShadow;
         [branch] if (nDotL > 0.0)
         directLight += EvaluatePbrBrdf(
             base.rgb, metallic, roughness, f0, n, v, lightDirection, materialDetail) *

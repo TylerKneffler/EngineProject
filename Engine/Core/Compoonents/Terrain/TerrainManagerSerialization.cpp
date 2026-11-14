@@ -62,6 +62,9 @@ TerrainManager::JsonValue TerrainManager::Serialize() const
         .Set("fastRuntimeLighting", JsonValue(fastRuntimeLighting))
         .Set("stochasticTerrainVariation", JsonValue(stochasticTerrainVariation))
         .Set("terrainMacroColorEnabled", JsonValue(terrainMacroColorEnabled))
+        .Set("paintResolution", JsonValue(paintResolution))
+        .Set("reliefMapping", JsonValue(reliefMapping))
+        .Set("reliefShadows", JsonValue(reliefShadows))
         .Set("measurementGrid", JsonValue(measurementGrid))
         .Set("generateColliders", JsonValue(generateColliders))
         .Set("streamCollidersByDistance",
@@ -241,6 +244,10 @@ void TerrainManager::Deserialize(const JsonValue& value)
         value["stochasticTerrainVariation"].AsBool();
     terrainMacroColorEnabled = value.Has("terrainMacroColorEnabled") &&
         value["terrainMacroColorEnabled"].AsBool();
+    paintResolution = value.Has("paintResolution")
+        ? std::clamp(value["paintResolution"].AsInt(), 0, 16) : 0;
+    reliefMapping = !value.Has("reliefMapping") || value["reliefMapping"].AsBool();
+    reliefShadows = value.Has("reliefShadows") && value["reliefShadows"].AsBool();
     measurementGrid = value.Has("measurementGrid") &&
         value["measurementGrid"].AsBool();
     generateColliders = value.Has("generateColliders") &&
@@ -445,6 +452,19 @@ bool TerrainManager::DrawProperties(::Engine::Editor::IEditorUi& ui)
             &terrainMacroColorEnabled);
         changed |= ui.Checkbox("Measurement grid (metres and cell borders)",
             &measurementGrid);
+        changed |= ui.Checkbox("Near-camera relief (parallax)", &reliefMapping);
+        changed |= ui.Checkbox("Relief shadows (costly)", &reliefShadows);
+        static constexpr int paintSteps[] = {0, 2, 4, 8, 16};
+        int paintStep = 0;
+        while (paintStep < 4 && paintSteps[paintStep] < paintResolution) ++paintStep;
+        const int shownStep = paintStep;
+        if (ui.SliderInt(paintResolution ? ("Paint detail (" + std::to_string(paintResolution) +
+                " per cell)##PaintDetail").c_str() : "Paint detail (vertices)##PaintDetail",
+                &paintStep, 0, 4) && paintStep != shownStep)
+        {
+            paintResolution = paintSteps[paintStep];
+            changed = true;
+        }
     }
     if (ui.CollapsingHeader("Terrain collision", false))
     {
