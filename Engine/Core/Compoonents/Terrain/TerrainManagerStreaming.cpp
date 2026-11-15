@@ -76,6 +76,10 @@ void TerrainManager::UpdateStreamingAtPosition(
     if (m_editorStreaming) InvalidatePrepared();
     m_editorStreaming = false;
     StreamCells(centerX, centerY);
+    const auto farObjectsStart = std::chrono::steady_clock::now();
+    UpdateFarObjects(centerX, centerY);
+    m_lastStreamingTiming.farObjectsMs = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - farObjectsStart).count();
 }
 
 void TerrainManager::UpdateEditorStreaming(const glm::dvec3& worldPosition,
@@ -282,9 +286,17 @@ void TerrainManager::StreamCells(int centerX, int centerY, int initialRadius)
             if (wanted({x, y}) && HasCell(x, y) && !GetLoadedCell(x, y) &&
                 (!asyncStreaming || !m_preparingCells.count({x, y})))
                 pending.emplace_back(x, y);
+    const auto inCurrentWindow = [&](Cell cell) {
+        return std::abs(cell.first - centerX) <= radius &&
+            std::abs(cell.second - centerY) <= radius;
+    };
+    // Prefetch-only cells rank after every cell of the current window: their
+    // results park until the viewer crosses into them, so scheduling them
+    // first could leave the window's corners waiting indefinitely.
     const auto priority = [&](Cell cell) {
         const int dx = cell.first - centerX, dy = cell.second - centerY;
-        return StreamingRequestScore(dx, dy, travel.first, travel.second);
+        return StreamingRequestScore(dx, dy, travel.first, travel.second) +
+            (inCurrentWindow(cell) ? 0 : 1 << 20);
     };
     std::sort(pending.begin(), pending.end(), [&](Cell a, Cell b) {
         const int da = priority(a), db = priority(b);
@@ -298,6 +310,17 @@ void TerrainManager::StreamCells(int centerX, int centerY, int initialRadius)
     const bool memoryFull =
         beforeLoads.cpuBytes >= (static_cast<uint64_t>(std::max(1, cpuBudgetMiB)) << 20) ||
         beforeLoads.gpuBytes >= (static_cast<uint64_t>(std::max(1, gpuBudgetMiB)) << 20);
+    // Finished prefetch results waiting outside the current window do not
+    // occupy worker slots, so they must not count against maxPreparedCells.
+    size_t parkedPrefetches = 0;
+    if (asyncStreaming && !pending.empty())
+    {
+        std::lock_guard<std::mutex> lock(m_prepareMutex);
+        for (const auto& prepared : m_preparedCells)
+            if (prepared.revision == m_prepareRevision &&
+                !inCurrentWindow(prepared.cell) &&
+                m_preparingCells.count(prepared.cell)) ++parkedPrefetches;
+    }
     for (Cell cell : pending)
     {
         if (loaded >= std::clamp(maxLoadsPerUpdate, 1, 64)) break;
@@ -305,7 +328,7 @@ void TerrainManager::StreamCells(int centerX, int centerY, int initialRadius)
         if (memoryFull) break;
         if (asyncStreaming)
         {
-            if (m_preparingCells.size() >=
+            if (m_preparingCells.size() >= parkedPrefetches +
                 static_cast<size_t>(std::clamp(maxPreparedCells, 1, 64))) break;
             PrepareTask task;
             task.cell = cell;
@@ -321,6 +344,7 @@ void TerrainManager::StreamCells(int centerX, int centerY, int initialRadius)
             task.hasSaved = saved != m_cells.end();
             if (task.hasSaved) task.saved = saved->second;
             task.builder = m_proceduralBuilder;
+            task.layerGenerator = m_objectLayerGenerator;
             if (!task.hasSaved && !task.builder &&
                 !(Owner->GetScene()->HasStarted() && requireRuntimeBake)) continue;
             task.cachePath = GetCacheFilePath(cell.first, cell.second);

@@ -1,3 +1,4 @@
+#include "Core/Rendering/DetailBudget.h"
 #include "Scripts/Grass/GrassField.h"
 
 #include "Core/Object.h"
@@ -90,6 +91,7 @@ GrassField::GrassField()
     RegisterField("distanceFadeWidth", distanceFadeWidth, "LOD");
     RegisterField("gpuLodSelection", gpuLodSelection, "LOD");
     RegisterField("allowProceduralGeneration", allowProceduralGeneration, "Tiles");
+    RegisterField("proceduralLayerMask", proceduralLayerMask, "Tiles");
     RegisterField("retainDormantTiles", retainDormantTiles, "Tiles");
 }
 
@@ -380,6 +382,7 @@ uint64_t GrassField::ComputeGenerationSignature() const
     HashFloat(hash, tallPatchesPerSquareMeter);
     HashBytes(hash, &seed, sizeof(seed));
     HashBytes(hash,&allowProceduralGeneration,sizeof(allowProceduralGeneration));
+    HashBytes(hash,&proceduralLayerMask,sizeof(proceduralLayerMask));
     if (m_cachedTerrain)
     {
         const auto revision = m_cachedTerrain->GetConfigurationRevision();
@@ -446,6 +449,23 @@ void GrassField::BeginBuild(Tile tile, int lod, uint64_t signature)
         const float depth = m_cachedTerrain->cellsY * m_cachedTerrain->cellDepth;
         std::mt19937 rng(TileSeed(seed, tile.first, tile.second));
         std::uniform_real_distribution<float> unit(0.f, 1.f);
+        // Paint weight of the masked layers at the nearest terrain vertex.
+        const auto& terrain = *m_cachedTerrain;
+        const size_t layerCount = terrain.layers.size();
+        const bool masked = proceduralLayerMask != 0 && layerCount > 0 &&
+            terrain.weights.size() == terrain.heights.size() * layerCount;
+        const auto grows = [&](float x, float z)
+        {
+            if (!masked) return true;
+            const int col = std::clamp(static_cast<int>(std::lround(x / terrain.cellWidth)), 0, terrain.cellsX);
+            const int row = std::clamp(static_cast<int>(std::lround(z / terrain.cellDepth)), 0, terrain.cellsY);
+            const float* sample = &terrain.weights[(static_cast<size_t>(row) *
+                (terrain.cellsX + 1) + col) * layerCount];
+            float weight = 0.f;
+            for (size_t layer = 0; layer < layerCount && layer < 31; ++layer)
+                if (proceduralLayerMask & (1 << layer)) weight += sample[layer];
+            return weight >= .5f;
+        };
         const auto append = [&](const std::string& asset, float density, int cap)
         {
             const int count = std::clamp(static_cast<int>(std::round(
@@ -457,6 +477,7 @@ void GrassField::BeginBuild(Tile tile, int lod, uint64_t signature)
                 p.position.z = tile.second * span + unit(rng) * span;
                 if (p.position.x < .3f || p.position.z < .3f ||
                     p.position.x > width - .3f || p.position.z > depth - .3f) continue;
+                if (!grows(p.position.x, p.position.z)) continue;
                 p.asset = asset;
                 p.position.y = SampleHeight(p.position.x, p.position.z, &p.normal);
                 p.yawDegrees = unit(rng) * 360.f;
@@ -584,7 +605,8 @@ bool GrassField::Refresh()
         glm::vec4(m_cachedViewer->transform.GetWorldPosition(), 1.f));
     const auto* layer = m_cachedLayer;
     const float span = std::max(1.f, tileSize);
-    const float radius = layer ? std::max(1.f, layer->viewDistance) : std::max(2.f, visibleRadius);
+    const float radius = (layer ? std::max(1.f, layer->viewDistance) : std::max(2.f, visibleRadius)) *
+        DetailRadiusScale();
     const float terrainWidth = m_cachedTerrain->cellsX * m_cachedTerrain->cellWidth;
     const float terrainDepth = m_cachedTerrain->cellsY * m_cachedTerrain->cellDepth;
     const float cellEdgeX = local.x - std::clamp(local.x, 0.f, terrainWidth);
@@ -646,6 +668,7 @@ bool GrassField::Refresh()
                 char name[64];
                 std::snprintf(name, sizeof(name), "Grass Tile (%d, %d)", x, z);
                 tile.object = scene.AddObject(name);
+                if (Owner) tile.object->layer = Owner->layer;
                 tile.object->runtimeOnly = true;
                 tile.object->enabled = false;
                 scene.SetParentLocal(tile.object, Owner);
@@ -852,7 +875,7 @@ Engine::Components::SpatialUpdateRegion GrassField::DescribeSpatialRegion()
     if(!terrain.heights.empty()) { const auto range=std::minmax_element(terrain.heights.begin(),terrain.heights.end()); low=*range.first; high=*range.second; }
     auto bounds=Engine::Rendering::TransformBounds({0,low,0},
         {terrain.cellsX*terrain.cellWidth,high,terrain.cellsY*terrain.cellDepth},world);
-    const float radius=(m_cachedLayer ? std::max(1.f,m_cachedLayer->viewDistance):std::max(2.f,visibleRadius))+2.f*std::max(1.f,tileSize);
+    const float radius=(m_cachedLayer ? std::max(1.f,m_cachedLayer->viewDistance):std::max(2.f,visibleRadius))*DetailRadiusScale()+2.f*std::max(1.f,tileSize);
     const float scale=glm::length(glm::vec3(glm::length(glm::vec3(world[0])),glm::length(glm::vec3(world[1])),glm::length(glm::vec3(world[2]))));
     bounds.minimum-=glm::vec3(radius*scale); bounds.maximum+=glm::vec3(radius*scale);
     return {Owner,m_cachedViewer,bounds};
@@ -864,4 +887,13 @@ bool GrassField::RefreshEditorPreview()
 {
     if (!Owner || !Owner->GetScene() || Owner->GetScene()->HasStarted()) return false;
     return Refresh();
+}
+
+float GrassField::DetailRadiusScale() const
+{
+    // The project layer's detail scale (see DetailBudget). Generation is CPU
+    // work the GPU budget cannot see, so grass reach stays within half to
+    // twice its authored radius.
+    const int layer = Owner ? Owner->layer : 0;
+    return std::clamp(Engine::Rendering::DetailBudget::Get().LayerLodScale(layer), .5f, 2.f);
 }

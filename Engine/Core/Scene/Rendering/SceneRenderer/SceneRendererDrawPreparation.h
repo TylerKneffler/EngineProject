@@ -119,6 +119,9 @@ struct PreparedDraw
     int gpuLod = -1;
     int gpuMaximumLod = 0;
     glm::vec2 gpuLodDistances{ 0.f };
+    // Quality x project-layer detail scale already applied to
+    // gpuLodDistances; detail distances derived later (final LOD cull) use it.
+    float lodScale = 1.f;
     uint32_t automaticGroup = UINT32_MAX;
     uint32_t frameItemIndex = 0;
 

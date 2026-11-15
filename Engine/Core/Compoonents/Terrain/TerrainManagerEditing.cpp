@@ -1,3 +1,4 @@
+#include "Core/Rendering/DetailBudget.h"
 #include "TerrainManager.h"
 #include "TerrainObjectLayer.h"
 #include "TerrainSurfaceSample.h"
@@ -64,6 +65,24 @@ void TerrainManager::RestoreObjectLayers(Cell cell,
             layer = child->AddComponent<TerrainObjectLayer>();
             if (saved) layer->Deserialize(*saved);
             layer->layerName = name;
+            // Synchronous loads generate here; streamed cells arrive with
+            // their generated layers already installed.
+            const auto* terrain = cellObject.GetComponent<Terrain>();
+            if (!saved && m_objectLayerGenerator && terrain)
+            {
+                ObjectLayerContext context;
+                context.cell = cell;
+                context.cellsX = terrain->cellsX;
+                context.cellsY = terrain->cellsY;
+                context.cellWidth = terrain->cellWidth;
+                context.cellDepth = terrain->cellDepth;
+                context.heights = &terrain->heights;
+                context.weights = &terrain->weights;
+                context.terrainLayerCount = terrain->layers.size();
+                const size_t before = layer->placements.size();
+                m_objectLayerGenerator(context, name, *layer);
+                if (layer->placements.size() != before) layer->MarkConfigurationDirty();
+            }
         }
         if (name == "Meadow grass" || name == "Procedural meadow grass")
             layer->snapToGround = true;
@@ -84,6 +103,11 @@ void TerrainManager::RestoreObjectLayers(Cell cell,
             if (auto* grass = Engine::Serialization::SceneSerializer::
                     CreateRegisteredComponent("GrassField"))
             {
+                // JsonValue(bool) is explicit: a bare bool converts to a number,
+                // which bool fields do not read as true.
+                const bool procedural = name == "Procedural meadow grass";
+                const Engine::Serialization::JsonValue proceduralValue(procedural);
+                const Engine::Serialization::JsonValue falseValue(false);
                 auto settings = Engine::Serialization::JsonValue::MakeObject();
                 settings.Set("shortMesh", "Assets/Mesh/Grass/meadow_short.obj")
                     .Set("tallMesh", "Assets/Mesh/Grass/field_tall.obj")
@@ -92,17 +116,26 @@ void TerrainManager::RestoreObjectLayers(Cell cell,
                     .Set("tallMeshLod1", "Assets/Mesh/Grass/field_tall_lod1.obj")
                     .Set("tallMeshLod2", "Assets/Mesh/Grass/field_tall_lod2.obj")
                     .Set("viewerObjectName", viewerObjectName)
-                    .Set("useEditorCamera", name == "Procedural meadow grass").Set("visibleRadius", 11.f)
+                    .Set("useEditorCamera", proceduralValue).Set("visibleRadius", 11.f)
                     .Set("tileSize", 4.f).Set("shortPatchesPerSquareMeter", .5f)
                     .Set("tallPatchesPerSquareMeter", .16f).Set("seed", 18731)
-                    .Set("maxTileBuildsPerUpdate", 8).Set("castShadows", false)
+                    .Set("maxTileBuildsPerUpdate", 8).Set("castShadows", falseValue)
                     .Set("tileWorkBudgetMs", 2.f).Set("fadeDuration", .35f)
-                    .Set("distanceFadeWidth", 2.f).Set("retainDormantTiles", false)
-                    .Set("allowProceduralGeneration", name == "Procedural meadow grass");
+                    .Set("distanceFadeWidth", 2.f).Set("retainDormantTiles", falseValue)
+                    .Set("allowProceduralGeneration", proceduralValue);
                 grass->Deserialize(settings);
                 child->AddComponent(grass);
             }
         }
+        // Project layer for budgets and filtering: grass layers in "Grass",
+        // other placements in "Props". The setup hook may override it.
+        const bool grassLayer = std::any_of(child->Components.begin(),
+            child->Components.end(), [](const auto* component) {
+                return component && component->GetTypeName() == "GrassField";
+            });
+        child->layer = Engine::Rendering::DetailBudget::Get().FindLayerOrDefault(
+            grassLayer ? "Grass" : "Props");
+        if (m_objectLayerSetup) m_objectLayerSetup(cell, *layer);
     };
     if (const auto found = m_objectLayers.find(cell);
         found != m_objectLayers.end())

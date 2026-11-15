@@ -63,6 +63,7 @@ private:
     void DrawKeybindsSection(IEditorUi& ui);
     void DrawDiagnosticsSection(IEditorUi& ui);
     void DrawAspectRatioSection(IEditorUi& ui);
+    void DrawLayersSection(IEditorUi& ui);
     void DrawExportSection(IEditorUi& ui);
     void StartPortableExport();
     void UpdatePortableExport();

@@ -61,6 +61,9 @@ public:
 
     std::string name;
     bool enabled = true;
+    // Project layer (index into ProjectSettings::layers, 0 = Default). Used
+    // for reference and by the detail budget to scale this object's LODs.
+    int layer = 0;
     // Editor-only, never serialized: hides an object (and its children) from
     // rendering, picking and update without touching the authored state.
     bool editorHidden = false;

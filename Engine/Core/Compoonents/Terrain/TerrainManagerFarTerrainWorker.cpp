@@ -120,6 +120,16 @@ void TerrainManager::FarPrepareLoop()
                     return std::nullopt;
                 };
                 const auto setColor = [&](Mesh::Vertex& vertex, float height) {
+                    glm::vec3 gridColor;
+                    if (task.palette.SampleGridColor(task.startX + vertex.pos[0] / task.spanX,
+                            task.startY + vertex.pos[2] / task.spanZ, gridColor))
+                    {
+                        vertex.color[0] = gridColor.r;
+                        vertex.color[1] = gridColor.g;
+                        vertex.color[2] = gridColor.b;
+                        vertex.color[3] = 1.f;
+                        return;
+                    }
                     float weights[6];
                     TerrainHeightArchive::BlendHeightBands(height,
                         task.palette.heightBoundaries,
@@ -135,6 +145,7 @@ void TerrainManager::FarPrepareLoop()
                 const auto blendSeamColor = [&](Mesh::Vertex& vertex,
                     const FarPrepareTask::SeamSurface* surface,
                     int seam, int col, int row, float u, float v) {
+                    if (!task.palette.gridColors.empty()) return;
                     if (!surface || (surface->layerCount != 4 &&
                         surface->layerCount != 6) ||
                         surface->weights.size() != surface->heights.size() *

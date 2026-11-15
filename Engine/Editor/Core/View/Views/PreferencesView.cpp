@@ -1,3 +1,4 @@
+#include "Core/Rendering/DetailBudget.h"
 #include "Engine/Editor/Core/View/Views/PreferencesView.h"
 #include "Engine/Editor/CodeEditorLink.h"
 #include "Engine/Editor/UI/IEditorUi.h"
@@ -428,6 +429,12 @@ void PreferencesView::DrawWindow(IEditorUi& ui, bool& isOpen)
             if (ui.BeginTab("Rendering"))
             {
                 DrawRenderingSection(ui);
+                ui.EndTab();
+            }
+
+            if (ui.BeginTab("Layers"))
+            {
+                DrawLayersSection(ui);
                 ui.EndTab();
             }
 
@@ -1338,6 +1345,113 @@ void PreferencesView::DrawRenderingSection(IEditorUi& ui)
 // ---------------------------------------------------------------------------
 // DrawAspectRatioSection
 // ---------------------------------------------------------------------------
+void PreferencesView::DrawLayersSection(IEditorUi& ui)
+{
+    ui.Label("Layers");
+    ui.DisabledLabel("Object categories. Every object belongs to one (Inspector > Layer).");
+    ui.DisabledLabel("Distance Scale multiplies the layer's LOD distances. Budget Weight sets how");
+    ui.DisabledLabel("strongly the detail budget moves it: 0 = never, 1 = normal, 2 = first.");
+    auto& layers = m_settings.layers;
+    int removeIndex = -1, moveUp = -1;
+    for (size_t i = 0; i < layers.size(); ++i)
+    {
+        auto& layer = layers[i];
+        ui.PushId(&layer);
+        ui.Separator();
+        const std::string label = std::to_string(i) + (i == 0 ? "  (fixed)" : "");
+        ui.DisabledLabel(label.c_str());
+        char name[64];
+        strncpy_s(name, layer.name.c_str(), sizeof(name));
+        if (i == 0)
+            ui.ValueLabel("Name", layer.name.c_str());
+        else if (ui.InputText("Name", name, sizeof(name)))
+        {
+            layer.name = name;
+            NotifyChanged();
+        }
+        if (ui.DragFloat("Distance Scale", &layer.lodDistanceScale, .01f, 0.f, 100.f))
+        {
+            layer.lodDistanceScale = std::clamp(layer.lodDistanceScale, 0.f, 100.f);
+            NotifyChanged();
+        }
+        if (ui.DragFloat("Budget Weight", &layer.budgetWeight, .01f, 0.f, 4.f))
+        {
+            layer.budgetWeight = std::clamp(layer.budgetWeight, 0.f, 4.f);
+            NotifyChanged();
+        }
+        if (i > 1)
+        {
+            if (ui.Button("Move Up")) moveUp = static_cast<int>(i);
+            ui.SameLine();
+        }
+        if (i > 0 && ui.Button("Remove")) removeIndex = static_cast<int>(i);
+        ui.PopId();
+    }
+    // Objects store layer indices, so reordering or removing renumbers the
+    // layers after it; objects keep their index (as in Unity).
+    if (moveUp > 1)
+    {
+        std::swap(layers[static_cast<size_t>(moveUp)], layers[static_cast<size_t>(moveUp - 1)]);
+        NotifyChanged();
+    }
+    if (removeIndex > 0)
+    {
+        layers.erase(layers.begin() + removeIndex);
+        NotifyChanged();
+    }
+    ui.Separator();
+    if (layers.size() < Engine::Model::MaxProjectLayers && ui.Button("Add Layer"))
+    {
+        layers.push_back({ "Layer " + std::to_string(layers.size()), 1.f, 1.f });
+        NotifyChanged();
+    }
+    ui.SameLine();
+    if (ui.Button("Reset to Defaults"))
+    {
+        layers = Engine::Model::DefaultProjectLayers();
+        NotifyChanged();
+    }
+
+    ui.Separator();
+    ui.Label("Detail Budget");
+    ui.DisabledLabel("Scales every layer's LOD distances so the GPU time of geometry");
+    ui.DisabledLabel("(opaque, terrain, grass, trees, shadows) and the CPU time of recording");
+    ui.DisabledLabel("render passes stay within their budgets; the tighter one decides.");
+    auto& budget = m_settings.detailBudget;
+    if (ui.Checkbox("Enable Detail Budget", &budget.enabled))
+        NotifyChanged();
+    if (ui.DragFloat("Geometry Budget (ms)", &budget.geometryBudgetMs, .05f, .1f, 1000.f))
+    {
+        budget.geometryBudgetMs = std::clamp(budget.geometryBudgetMs, .1f, 1000.f);
+        NotifyChanged();
+    }
+    if (ui.DragFloat("CPU Render Budget (ms)", &budget.cpuRenderBudgetMs, .05f, .1f, 1000.f))
+    {
+        budget.cpuRenderBudgetMs = std::clamp(budget.cpuRenderBudgetMs, .1f, 1000.f);
+        NotifyChanged();
+    }
+    if (ui.DragFloat("Minimum Scale", &budget.minimumScale, .01f, .05f, 1.f))
+    {
+        budget.minimumScale = std::clamp(budget.minimumScale, .05f, 1.f);
+        NotifyChanged();
+    }
+    if (ui.DragFloat("Maximum Scale", &budget.maximumScale, .01f, 1.f, 10.f))
+    {
+        budget.maximumScale = std::clamp(budget.maximumScale, 1.f, 10.f);
+        NotifyChanged();
+    }
+    if (ui.DragFloat("Response (s)", &budget.responseSeconds, .05f, .05f, 30.f))
+    {
+        budget.responseSeconds = std::clamp(budget.responseSeconds, .05f, 30.f);
+        NotifyChanged();
+    }
+    const auto& live = Engine::Rendering::DetailBudget::Get();
+    char status[128];
+    snprintf(status, sizeof(status), "Live: scale %.2f, GPU geometry %.2f ms, CPU render %.2f ms",
+        live.GlobalScale(), live.LastGeometryMs(), live.LastCpuRenderMs());
+    ui.DisabledLabel(status);
+}
+
 void PreferencesView::DrawAspectRatioSection(IEditorUi& ui)
 {
     ui.Label("Game Resolution & Aspect Ratio"); ui.Separator();
@@ -1587,6 +1701,37 @@ bool PreferencesView::SaveSettings()
                     bandNode.append_attribute("MinimumProjectedPixels").set_value(
                         band.minimumProjectedPixels);
                 }
+
+                auto layersNode = prop.child("Layers");
+                if (!layersNode)
+                    layersNode = prop.append_child("Layers");
+                while (auto layerNode = layersNode.child("Layer"))
+                    layersNode.remove_child(layerNode);
+                for (const auto& layer : m_settings.layers)
+                {
+                    auto layerNode = layersNode.append_child("Layer");
+                    layerNode.append_attribute("Name").set_value(layer.name.c_str());
+                    layerNode.append_attribute("LodDistanceScale").set_value(
+                        layer.lodDistanceScale);
+                    layerNode.append_attribute("BudgetWeight").set_value(
+                        layer.budgetWeight);
+                }
+                auto budgetNode = prop.child("DetailBudget");
+                if (!budgetNode)
+                    budgetNode = prop.append_child("DetailBudget");
+                budgetNode.remove_attributes();
+                budgetNode.append_attribute("Enabled").set_value(
+                    m_settings.detailBudget.enabled);
+                budgetNode.append_attribute("GeometryBudgetMs").set_value(
+                    m_settings.detailBudget.geometryBudgetMs);
+                budgetNode.append_attribute("CpuRenderBudgetMs").set_value(
+                    m_settings.detailBudget.cpuRenderBudgetMs);
+                budgetNode.append_attribute("MinimumScale").set_value(
+                    m_settings.detailBudget.minimumScale);
+                budgetNode.append_attribute("MaximumScale").set_value(
+                    m_settings.detailBudget.maximumScale);
+                budgetNode.append_attribute("ResponseSeconds").set_value(
+                    m_settings.detailBudget.responseSeconds);
             }
 
             auto modeNode = prop.child("AspectRatioMode");

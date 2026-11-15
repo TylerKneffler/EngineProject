@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Core/Model/LightingData.h"
+#include "Core/Model/ProjectLayers.h"
 #include <cstdint>
 #include <glm/glm.hpp>
 #include <string>
@@ -52,6 +53,11 @@ struct ProjectSettings
     Engine::Model::BakedLightingSettings bakedLighting;
     Engine::Model::RealtimeShadowSettings realtimeShadows;
     Engine::Model::DistanceLightingSettings distanceLighting;
+    // Object categories (Object::layer indexes this list) and the adaptive
+    // detail budget that scales LOD distances per layer.
+    std::vector<Engine::Model::ProjectLayer> layers =
+        Engine::Model::DefaultProjectLayers();
+    Engine::Model::DetailBudgetSettings detailBudget;
     enum class AspectRatioMode { Free, Locked, Hardcoded };
     AspectRatioMode aspectRatioMode = AspectRatioMode::Locked;
     float gameAspectRatio = 1.777f;

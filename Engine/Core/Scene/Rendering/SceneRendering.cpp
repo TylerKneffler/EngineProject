@@ -1,3 +1,4 @@
+#include "Core/Rendering/DetailBudget.h"
 #include "pch.h"
 #include "Core/Rendering/ShadowReceiverCulling.h"
 #include "Core/Rendering/StableShadowCascade.h"
@@ -178,6 +179,18 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     const NativeRenderPacket* nativePacket, int instanceLodDisplayOverride,
     int sceneViewRenderMode)
 {
+    // CPU time of every render pass (cameras and shadows) feeds the detail
+    // budget alongside the GPU geometry time.
+    struct DetailCpuTimer
+    {
+        std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
+        ~DetailCpuTimer()
+        {
+            Engine::Rendering::DetailBudget::Get().AddCpuRenderTime(
+                std::chrono::duration<double, std::milli>(
+                    std::chrono::steady_clock::now() - start).count());
+        }
+    } detailCpuTimer;
     // Render phase 1: validate the prepared frame and resolve its active camera.
     m_screenLodCounts={};
     const auto quality = settings.graphicsQuality.Resolve();
@@ -516,9 +529,10 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         ? m_directionalShadowResolution : 0u;
     m_shadowDebugSnapshot.atlasAllocationGeneration =
         m_directionalShadowAllocationGeneration;
-    // Display modes belong to the editor scene viewport. Runtime/game views
-    // always use the authored lit rendering path.
-    const auto renderMode = includeEditorVisuals && sceneViewRenderMode >= 0
+    // Display modes belong to the editor scene viewport; runtime/game views
+    // pass -1 and use the authored lit path. Diagnostics (benchmark heat
+    // captures) may request a mode explicitly for a game camera.
+    const auto renderMode = sceneViewRenderMode >= 0
         ? static_cast<Engine::Model::SceneRenderMode>(sceneViewRenderMode)
         : Engine::Model::SceneRenderMode::Lit;
     const bool wireframeMode = renderMode ==
@@ -557,6 +571,26 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     }
 
     const auto* skybox = shadowOnly ? nullptr : ResolveSkyboxTexture();
+    // Feed the detail budget the GPU time of the last resolved frame's
+    // geometry passes. Stages are exclusive, so they sum without overlap.
+    if (!shadowOnly && m_graphicsProvider)
+        if (auto* factory = m_graphicsProvider->GetContextFactory())
+        {
+            auto& budget = Engine::Rendering::DetailBudget::Get();
+            // Only ever switch timing on: profilers own switching it off.
+            if (budget.Enabled()) factory->SetGpuTimingEnabled(true);
+            const auto telemetry = factory->GetFrameTimingTelemetry();
+            if (budget.Enabled() && telemetry.gpuTimingsValid)
+            {
+                using Stage = Engine::Graphics::GpuTimingStage;
+                double geometryMs = 0.0;
+                for (const Stage stage : { Stage::Shadow, Stage::Terrain, Stage::Grass,
+                        Stage::Opaque, Stage::TreeBark, Stage::TreeLeaves,
+                        Stage::FoliageDepth })
+                    geometryMs += telemetry.gpuMilliseconds[static_cast<size_t>(stage)];
+                budget.ReportGeometryCost(telemetry.gpuSampleId, geometryMs);
+            }
+        }
     Engine::Scene::Renderer::SceneRendererLighting::PrepareSkyboxAndEnvironment(
         *this,
         context,
@@ -795,6 +829,13 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     // Shadow maps need less geometry than the camera color pass. Keep the
     // per-placement culling bands and pixel dither bands on the same policy,
     // including independently authored instance LOD bands.
+    // Distance-faded LOD records (w >= 2) carry their switch distances in
+    // y and z; other modes pass through unchanged.
+    const auto scaleGeometryFade = [](glm::vec4 fade, float scale)
+    {
+        if (fade.w >= 2.f) { fade.y *= scale; fade.z *= scale; }
+        return fade;
+    };
     const auto scaledShadowLodDistances = [&](const glm::vec2 distances)
     {
         return Renderer::SceneInstanceBatching::ScaleShadowLodDistances(distances, shadowOnly);
@@ -863,6 +904,34 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             const float range = cam->farPlane * quality.viewDistance * (deforming ? quality.vegetation : 1.f);
             if (glm::dot(delta, delta) > range * range) continue;
         }
+        // Every LOD distance of this draw (GPU cull, per-pixel bands, CPU
+        // selection) scales by the quality setting and the object's project
+        // layer, which the detail budget adjusts to hold its GPU budget.
+        const float lodScale = quality.geometry *
+            Engine::Rendering::DetailBudget::Get().LayerLodScale(obj ? obj->layer : 0);
+        // Instanced LOD bands pick their pixels by world distance (Object.hlsl,
+        // dither under 0.5 m), so a band whose distance range misses the
+        // block's bounds draws nothing. Skipping it here saves recording the
+        // near bands of every distant forest block.
+        if (!shadowOnly && !hasPortalViews && mesh && mesh->instanceLodBand >= 0 &&
+            mesh->HasBounds())
+        {
+            const auto bounds = Engine::Rendering::TransformBounds(
+                mesh->GetBoundsMin(), mesh->GetBoundsMax(), renderItem->world);
+            const glm::vec3 nearest = glm::clamp(cameraPosition,
+                bounds.minimum, bounds.maximum) - cameraPosition;
+            const glm::vec3 farthest = glm::max(glm::abs(bounds.minimum - cameraPosition),
+                glm::abs(bounds.maximum - cameraPosition));
+            const float nearDistance = glm::length(nearest);
+            const float farDistance = glm::length(farthest);
+            constexpr float margin = 2.f;
+            const glm::vec2 band = mesh->instanceLodDistances * lodScale;
+            const int lod = mesh->instanceLodBand;
+            const float bandStart = lod == 0 ? 0.f : lod == 1 ? band.x : band.y;
+            const float bandEnd = lod == 0 ? band.x : lod == 1 ? band.y : 1.e30f;
+            if (nearDistance > bandEnd + margin || farDistance < bandStart - margin)
+                continue;
+        }
         Engine::Components::Sprite* sprite = renderItem->sprite;
         Engine::Components::Material* mat = renderItem->material;
         const Engine::Rendering::BakedLightingData* bakedLighting =
@@ -910,7 +979,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             preparedDraw.gpuLodDistances=mesh->instanceLodDistances;
             if(fixedShadowBand) preparedDraw.gpuLod=-1;
         }
-        preparedDraw.gpuLodDistances *= quality.geometry;
+        preparedDraw.gpuLodDistances *= lodScale;
+        preparedDraw.lodScale = lodScale;
         preparedDraw.object = obj;
         preparedDraw.mesh = mesh;
         preparedDraw.material = sprite ? nullptr : mat;
@@ -968,7 +1038,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 mesh->GetPosedVertexBuffer() &&
                 !mesh->IsPortalPoseSnapshot() &&
                 (useSourceChart || !renderItem->warpedVertexBuffer);
-            preparedDraw.objectData.geometryFade=mesh->instanceLodBand>=0 ? glm::vec4(float(mesh->instanceLodBand),scaledShadowLodDistances(mesh->instanceLodDistances),4.f) : (hasPortalViews && renderItem->geometryFade.w>=2.f ? mesh->GetRuntimeGeometryFade():renderItem->geometryFade);
+            preparedDraw.objectData.geometryFade=mesh->instanceLodBand>=0 ? glm::vec4(float(mesh->instanceLodBand),scaledShadowLodDistances(preparedDraw.gpuLodDistances),4.f) : scaleGeometryFade(hasPortalViews && renderItem->geometryFade.w>=2.f ? mesh->GetRuntimeGeometryFade():renderItem->geometryFade, lodScale);
             preparedDraw.objectData.shadowCasterFade={casterFade.x,std::min(casterFade.x,casterFade.y),1.f,0.f};
             preparedDraw.objectData.grassAnimation={0.f,0.f,0.f,0.f};
             preparedDraw.objectData.viewPositionAlphaCutoff=glm::vec4(cameraPosition,.001f);
@@ -1319,13 +1389,14 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             (clusteredLightingEnabled ? kClusteredLightingFlag : 0u) |
                 (mesh && mesh->IsInstanced() ? (0x20000000u | (renderItem->geometryFade.w>=2.f && !hasPortalViews ? 0x00100000u:0u)):0u), 0u };
         preparedDraw.drawData = drawData;
-        objectData.geometryFade = mesh && mesh->instanceLodBand>=0 ? glm::vec4(float(mesh->instanceLodBand),mesh->instanceLodDistances.x,mesh->instanceLodDistances.y,4.f) : (hasPortalViews && renderItem->geometryFade.w>=2.f ? mesh->GetRuntimeGeometryFade():renderItem->geometryFade);
+        objectData.geometryFade = mesh && mesh->instanceLodBand>=0 ? glm::vec4(float(mesh->instanceLodBand),preparedDraw.gpuLodDistances.x,preparedDraw.gpuLodDistances.y,4.f) : scaleGeometryFade(hasPortalViews && renderItem->geometryFade.w>=2.f ? mesh->GetRuntimeGeometryFade():renderItem->geometryFade, lodScale);
         if (objectData.geometryFade.w >= 2.f) {
             objectData.geometryFade.y *= quality.geometry;
             objectData.geometryFade.z *= quality.geometry;
         }
         objectData.shadowCasterFade={casterFade.x,std::min(casterFade.x,casterFade.y),0.f,0.f};
-        objectData.grassAnimation={mesh && mesh->foliageWindStrength>0.f ? static_cast<float>(GetElapsedTime()):0.f,
+        objectData.grassAnimation={(mesh && mesh->foliageWindStrength>0.f) || (mat && mat->shaderUsesTime)
+                ? static_cast<float>(GetElapsedTime()):0.f,
             mesh && mesh->foliageWindStrength>0.f ? 1.f : 0.f,
             mesh && mesh->foliageWindStrength>0.f ? std::clamp(mesh->foliageWindStrength,0.f,1.f):1.f, 0.f};
         objectData.grassAnimation.w = static_cast<float>(grassInteraction.count);
@@ -1793,7 +1864,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             const auto* lodPolicy = draw.object
                 ? draw.object->GetComponent<Engine::Components::Mesh>() : draw.mesh;
             const float finalCullDistance = lodPolicy && lodPolicy->cullAfterLastLod
-                ? std::max(0.f, lodPolicy->finalLodCullDistance) : 0.f;
+                ? std::max(0.f, lodPolicy->finalLodCullDistance) * draw.lodScale : 0.f;
             instance.lod={draw.gpuLodDistances,origin.z,finalCullDistance}; instances.push_back(instance);
         }
         if(instances.empty()) { if(gpu) context->EndComputePass(); return {}; }

@@ -21,6 +21,13 @@ struct GameBenchmarkSceneSample
     uint64_t sharedPrefabVertices = 0, sharedPrefabIndices = 0, sharedPrefabGeometryBytes = 0;
     uint64_t objects = 0, meshes = 0, terrains = 0, placements = 0;
     uint64_t storedCells = 0, loadedCells = 0, preparingCells = 0;
+    // Terrain streaming phases of the first manager (milliseconds).
+    double streamTotalMs = 0, streamUnloadMs = 0, streamScheduleMs = 0, streamLodMs = 0,
+        streamCommitMs = 0, streamCommitSceneMs = 0, streamCommitGraphicsMs = 0,
+        streamCommitPhysicsMs = 0, streamColliderMs = 0, streamBatchMs = 0,
+        streamTrimMs = 0, streamFarObjectsMs = 0;
+    double streamCommitTerrainMs = 0, streamCommitLayersMs = 0, streamCommitRestoreMs = 0;
+    double updateObjectsMs = 0, updatePhysicsMs = 0, updatePostPhysicsMs = 0, grassMs = 0;
     uint64_t loadedPrefabCells = 0, pooledPrefabCells = 0;
     uint64_t sceneGeneration = 0;
     bool camera = false;

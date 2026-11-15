@@ -1,3 +1,4 @@
+#include "Core/Rendering/DetailBudget.h"
 #include "pch.h"
 #include "Core/Renderers/GraphicsDebugLayer.h"
 #include "DX11EditorRenderer.h"
@@ -169,7 +170,9 @@ void DX11EditorRenderer::RenderIfNeeded(std::function<void()> drawFn)
     if (m_graphicsProvider)
     {
         auto* factory=m_graphicsProvider->GetContextFactory();
-        factory->SetGpuTimingEnabled(m_gpuTimingEnabled);
+        // The detail budget adapts LODs from these GPU timings.
+        factory->SetGpuTimingEnabled(m_gpuTimingEnabled ||
+            Engine::Rendering::DetailBudget::Get().Enabled());
         factory->PrepareFrame(0);
     }
     const auto afterPrepareFrame = std::chrono::steady_clock::now();

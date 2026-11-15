@@ -18,6 +18,11 @@ struct GameBenchmarkOptions
     uint32_t width = 1920, height = 1080, warmup = 120, frames = 300;
     uint32_t residencyTimeoutSeconds = 0;
     uint32_t driveForwardFrames = 0;
+    // Also hold Ctrl (sprint / flight boost) while driving forward.
+    bool driveBoost = false;
+    // Scene view render mode for the game camera (-1 normal, 3 Performance
+    // heat map); diagnostics only.
+    int renderMode = -1;
     std::optional<uint32_t> maxFpsOverride;
     bool requireTerrain = false, requireStreamedCells = false, requireMovement = false;
     bool disableClusteredLighting = false;

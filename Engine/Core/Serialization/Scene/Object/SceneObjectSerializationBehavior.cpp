@@ -110,6 +110,7 @@ Engine::Core::Object* DeserializeObjectNodeInternal(
                 node["prefab"].AsString() + "'");
         SceneObjectBehavior::DeserializeTransform(object->transform, node["transform"]);
         if (node.Has("enabled")) object->enabled = node["enabled"].AsBool();
+        if (node.Has("layer")) object->layer = std::max(0, node["layer"].AsInt());
         if (node.Has("prefabOverrides"))
             SceneObjectBehavior::ApplyPrefabPatches(
                 *object, node["prefabOverrides"], graphicsProvider);
@@ -149,6 +150,8 @@ Engine::Core::Object* DeserializeObjectTreeInternal(
         SceneObjectBehavior::DeserializeTransform(object->transform, node["transform"]);
         if (node.Has("enabled"))
             object->enabled = node["enabled"].AsBool();
+        if (node.Has("layer"))
+            object->layer = std::max(0, node["layer"].AsInt());
         if (node.Has("prefabOverrides"))
             SceneObjectBehavior::ApplyPrefabPatches(
                 *object, node["prefabOverrides"], graphicsProvider);
@@ -183,6 +186,7 @@ bool DeserializeExpandedObjectShallow(
     else if (options.assignDefaultNameIfMissing)
         object.name = "Object";
     object.enabled = !node.Has("enabled") || node["enabled"].AsBool();
+    object.layer = node.Has("layer") ? std::max(0, node["layer"].AsInt()) : 0;
 
     SceneObjectBehavior::DeserializeTransform(object.transform, node["transform"]);
 
@@ -435,6 +439,7 @@ JsonValue SceneObjectBehavior::SerializeObject(
     {
         node.Set("prefab", JsonValue(obj.Prefab->GetPath()));
         node.Set("transform", SerializeTransform(obj.transform));
+        if (obj.layer != 0) node.Set("layer", JsonValue(obj.layer));
         EnsurePrefabPatchCache(obj);
         JsonValue prefabOverrides = JsonValue::MakeArray();
         try
@@ -453,6 +458,8 @@ JsonValue SceneObjectBehavior::SerializeObject(
 
     node.Set("name", JsonValue(obj.name));
     node.Set("enabled", JsonValue(obj.enabled));
+    // Written only off the Default layer so existing files stay unchanged.
+    if (obj.layer != 0) node.Set("layer", JsonValue(obj.layer));
 
     // Engine::Components::Transform
     node.Set("transform", SerializeTransform(obj.transform));
@@ -650,6 +657,7 @@ bool SceneObjectBehavior::ApplyObjectState(Engine::Core::Object& object, const J
     {
         if (node.Has("name")) object.name = node["name"].AsString();
         object.enabled = !node.Has("enabled") || node["enabled"].AsBool();
+    object.layer = node.Has("layer") ? std::max(0, node["layer"].AsInt()) : 0;
         DeserializeTransform(object.transform, node["transform"]);
         return true;
     }
@@ -696,6 +704,7 @@ bool SceneObjectBehavior::ApplyObjectState(Engine::Core::Object& object, const J
     }
     if (node.Has("name")) object.name = node["name"].AsString();
     object.enabled = !node.Has("enabled") || node["enabled"].AsBool();
+    object.layer = node.Has("layer") ? std::max(0, node["layer"].AsInt()) : 0;
     DeserializeTransform(object.transform, node["transform"]);
     auto component = object.Components.begin();
     for (size_t i = 0; i < components.ArraySize(); ++i, ++component)

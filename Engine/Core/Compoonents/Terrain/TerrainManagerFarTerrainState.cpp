@@ -99,6 +99,7 @@ void TerrainManager::RefreshFarTerrainEditedCells(
 
 void TerrainManager::ClearFarTerrain()
 {
+    ClearFarObjects();
     {
         std::lock_guard<std::mutex> lock(m_farPrepareMutex);
         ++m_farPrepareRevision;

@@ -1,3 +1,4 @@
+#include "Core/Rendering/DetailBudget.h"
 #include "Game/Benchmark/GameBenchmark.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Object.h"
@@ -113,6 +114,10 @@ GameBenchmarkSceneSample GameBenchmark::CollectScene(Engine::Scene::Scene& scene
     }
     if (!result.camera) result.render = {};
     result.objects = scene.GetObjects().size();
+    result.updateObjectsMs = scene.GetLastUpdateTimings().objectsMs;
+    result.updatePhysicsMs = scene.GetLastUpdateTimings().physicsMs;
+    result.updatePostPhysicsMs = scene.GetLastUpdateTimings().postPhysicsMs;
+    result.grassMs = scene.GetGrassPerformance().totalMs;
     result.meshes = scene.GetComponents<Engine::Components::Mesh>().size();
     result.terrains = scene.GetComponents<Engine::Components::Terrain>().size();
     for (auto* layer : scene.GetComponents<Engine::Components::TerrainObjectLayer>())
@@ -136,6 +141,21 @@ GameBenchmarkSceneSample GameBenchmark::CollectScene(Engine::Scene::Scene& scene
         result.loadedPrefabCells += manager->GetLoadedPrefabCellCount();
         result.pooledPrefabCells += manager->GetPooledPrefabCellCount();
         result.preparingCells += manager->GetPreparingCellCount();
+        if (manager == scene.GetComponents<Engine::Components::TerrainManager>().front())
+        {
+            const auto& t = manager->GetLastStreamingTiming();
+            result.streamTotalMs = t.totalMs; result.streamUnloadMs = t.unloadMs;
+            result.streamScheduleMs = t.loadOrScheduleMs; result.streamLodMs = t.lodMs;
+            result.streamCommitMs = t.commitMs; result.streamCommitSceneMs = t.commitSceneMs;
+            result.streamCommitGraphicsMs = t.commitGraphicsMs;
+            result.streamCommitPhysicsMs = t.commitPhysicsMs;
+            result.streamColliderMs = t.colliderActivationMs;
+            result.streamBatchMs = t.batchRefreshMs; result.streamTrimMs = t.memoryTrimMs;
+            result.streamFarObjectsMs = t.farObjectsMs;
+            result.streamCommitTerrainMs = t.commitTerrainMs;
+            result.streamCommitLayersMs = t.commitLayersMs;
+            result.streamCommitRestoreMs = t.commitRestoreMs;
+        }
     }
     return result;
 }
@@ -207,6 +227,10 @@ void GameBenchmark::Record(uint64_t frame, const GameBenchmarkFrameSample& s)
         << ",\"frame_latency_ms\":" << s.latencyMs
         << ",\"metrics_collection_ms\":" << s.metricsCollectionMs
         << ",\"residency_wait_ms\":" << s.residencyWaitMs
+        << ",\"detail_scale\":" << Engine::Rendering::DetailBudget::Get().GlobalScale()
+        << ",\"detail_applied_scale\":" << Engine::Rendering::DetailBudget::Get().AppliedScale()
+        << ",\"detail_geometry_ms\":" << Engine::Rendering::DetailBudget::Get().LastGeometryMs()
+        << ",\"detail_cpu_render_ms\":" << Engine::Rendering::DetailBudget::Get().LastCpuRenderMs()
         << ",\"gpu_timing_valid\":" << (s.gpu.gpuTimingsValid ? "true" : "false")
         << ",\"gpu_sample_id\":" << s.gpu.gpuSampleId
         << ",\"gpu_opaque_ms\":";
@@ -227,6 +251,25 @@ void GameBenchmark::Record(uint64_t frame, const GameBenchmarkFrameSample& s)
         << ",\"mesh_components\":" << s.scene.meshes
         << ",\"terrain_components\":" << s.scene.terrains
         << ",\"authored_foliage_placements\":" << s.scene.placements
+        << ",\"update_objects_ms\":" << s.scene.updateObjectsMs
+        << ",\"update_physics_ms\":" << s.scene.updatePhysicsMs
+        << ",\"update_post_physics_ms\":" << s.scene.updatePostPhysicsMs
+        << ",\"grass_total_ms\":" << s.scene.grassMs
+        << ",\"stream_total_ms\":" << s.scene.streamTotalMs
+        << ",\"stream_unload_ms\":" << s.scene.streamUnloadMs
+        << ",\"stream_schedule_ms\":" << s.scene.streamScheduleMs
+        << ",\"stream_lod_ms\":" << s.scene.streamLodMs
+        << ",\"stream_commit_ms\":" << s.scene.streamCommitMs
+        << ",\"stream_commit_scene_ms\":" << s.scene.streamCommitSceneMs
+        << ",\"stream_commit_graphics_ms\":" << s.scene.streamCommitGraphicsMs
+        << ",\"stream_commit_physics_ms\":" << s.scene.streamCommitPhysicsMs
+        << ",\"stream_collider_ms\":" << s.scene.streamColliderMs
+        << ",\"stream_batch_ms\":" << s.scene.streamBatchMs
+        << ",\"stream_trim_ms\":" << s.scene.streamTrimMs
+        << ",\"stream_far_objects_ms\":" << s.scene.streamFarObjectsMs
+        << ",\"stream_commit_terrain_ms\":" << s.scene.streamCommitTerrainMs
+        << ",\"stream_commit_layers_ms\":" << s.scene.streamCommitLayersMs
+        << ",\"stream_commit_restore_ms\":" << s.scene.streamCommitRestoreMs
         << ",\"terrain_cells_stored\":" << s.scene.storedCells
         << ",\"terrain_cells_loaded\":" << s.scene.loadedCells
         << ",\"terrain_prefab_cells_loaded\":" << s.scene.loadedPrefabCells

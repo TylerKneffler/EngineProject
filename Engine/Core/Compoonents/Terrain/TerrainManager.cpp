@@ -1,3 +1,4 @@
+#include "Core/Rendering/DetailBudget.h"
 #include "TerrainManager.h"
 #include "TerrainObjectLayer.h"
 #include "TerrainSurfaceSample.h"
@@ -59,6 +60,7 @@ TerrainManager::~TerrainManager()
 
 void TerrainManager::FenceBackgroundWork()
 {
+    FenceFarObjectJobs();
     {
         std::lock_guard<std::mutex> lock(m_farPrepareMutex);
         m_stopFarWorker = true;
@@ -98,6 +100,12 @@ void TerrainManager::SetProceduralBuilder(std::function<void(Cell, Terrain&)> bu
 {
     InvalidatePrepared();
     m_proceduralBuilder = std::move(builder);
+}
+
+void TerrainManager::SetObjectLayerGenerator(ObjectLayerGenerator generator)
+{
+    InvalidatePrepared();
+    m_objectLayerGenerator = std::move(generator);
 }
 
 void TerrainManager::SetStaticCache(std::string directory, uint64_t signature)
@@ -603,6 +611,25 @@ void TerrainManager::PrepareLoop()
                     layer->MarkConfigurationDirty();
                     layer->GetPreparedTiles(4.f);
                 }
+                if (saved.IsNull() && task.layerGenerator)
+                {
+                    ObjectLayerContext context;
+                    context.cell = task.cell;
+                    context.cellsX = result.terrain.cellsX;
+                    context.cellsY = result.terrain.cellsY;
+                    context.cellWidth = result.terrain.cellWidth;
+                    context.cellDepth = result.terrain.cellDepth;
+                    context.heights = &result.terrain.heights;
+                    context.weights = &result.terrain.weights;
+                    context.terrainLayerCount = result.terrain.layers.size();
+                    const size_t before = layer->placements.size();
+                    task.layerGenerator(context, name, *layer);
+                    if (layer->placements.size() != before)
+                    {
+                        layer->MarkConfigurationDirty();
+                        layer->GetPreparedTiles(4.f);
+                    }
+                }
                 if (name == "Procedural meadow grass")
                     layer->conformToGround = layer->snapToGround = true;
                 if (!layer->HasLoadedPreparedData()) layer->GetPreparedTiles(4.f);
@@ -623,8 +650,15 @@ int TerrainManager::CommitPrepared(int centerX, int centerY, int radius,
 {
     const int limit = std::clamp(uploadBudget, 0, 64);
     int uploaded = 0;
+    const auto commitBudgetStart = std::chrono::steady_clock::now();
+    const auto commitBudget = std::chrono::duration<double, std::milli>(
+        std::clamp(maxCommitMilliseconds, .1f, 100.f));
     for (; uploaded < limit; )
     {
+        // Spread commits over updates: a burst of cells arriving together
+        // (fast flight) would otherwise stall one frame for many ms.
+        if (uploaded > 0 &&
+            std::chrono::steady_clock::now() - commitBudgetStart >= commitBudget) break;
         PreparedCell prepared;
         {
             std::lock_guard<std::mutex> lock(m_prepareMutex);
@@ -688,6 +722,7 @@ int TerrainManager::CommitPrepared(int centerX, int centerY, int radius,
         auto* object = Owner->GetScene()->AddObject("Terrain cell " +
             std::to_string(cell.first) + "," + std::to_string(cell.second));
         object->runtimeOnly = true;
+        object->layer = Engine::Rendering::DetailBudget::Get().FindLayerOrDefault("Terrain");
         Owner->GetScene()->MoveObject(object, Owner,
             Engine::Scene::Scene::ObjectPlacement::AsChild);
         object->transform.position = {
@@ -701,16 +736,25 @@ int TerrainManager::CommitPrepared(int centerX, int centerY, int radius,
         }
         if (prepared.cacheHit) ++m_cacheHits;
         m_loaded[cell] = terrain;
+        const auto terrainInstalled = std::chrono::steady_clock::now();
         for (auto& preparedLayer : prepared.objectLayers)
         {
             auto* child = Owner->GetScene()->AddObject(preparedLayer->layerName);
             child->runtimeOnly = true;
+            child->layer = Engine::Rendering::DetailBudget::Get().FindLayerOrDefault("Props");
             Owner->GetScene()->SetParentLocal(child, object);
             child->AddComponent<TerrainObjectLayer>()->InstallPrepared(
                 std::move(*preparedLayer));
         }
+        const auto layersInstalled = std::chrono::steady_clock::now();
         RestoreObjectLayers(cell, *object);
         const auto sceneInstalled = std::chrono::steady_clock::now();
+        m_lastStreamingTiming.commitTerrainMs += std::chrono::duration<double, std::milli>(
+            terrainInstalled - commitStart).count();
+        m_lastStreamingTiming.commitLayersMs += std::chrono::duration<double, std::milli>(
+            layersInstalled - terrainInstalled).count();
+        m_lastStreamingTiming.commitRestoreMs += std::chrono::duration<double, std::milli>(
+            sceneInstalled - layersInstalled).count();
         Stitch(cell);
         const auto stitched = std::chrono::steady_clock::now();
         const auto lodInstalled = std::chrono::steady_clock::now();
@@ -919,6 +963,7 @@ void TerrainManager::LoadCell(Cell cell, int lodStride)
     auto* object = Owner->GetScene()->AddObject("Terrain cell " +
         std::to_string(cell.first) + "," + std::to_string(cell.second));
     object->runtimeOnly = true;
+    object->layer = Engine::Rendering::DetailBudget::Get().FindLayerOrDefault("Terrain");
     Owner->GetScene()->MoveObject(object, Owner,
         Engine::Scene::Scene::ObjectPlacement::AsChild);
     object->transform.position = {

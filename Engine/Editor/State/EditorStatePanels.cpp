@@ -1,3 +1,4 @@
+#include "Core/Rendering/DetailBudget.h"
 #include "pch.h"
 #include "Engine/Editor/State/EditorState.h"
 #include "Engine/Editor/Diagnostics/FrameActivity.h"
@@ -125,6 +126,8 @@ void EditorState::InitializePanels()
         m_scene && m_scene->settings.portalDebugVisuals);
     m_preferences->OnSettingsChanged = [this]() {
         m_projectSettings = m_preferences->GetSettings();
+        Engine::Rendering::DetailBudget::Get().Configure(
+            m_projectSettings.layers, m_projectSettings.detailBudget);
         if (m_primaryAssets)
             m_primaryAssets->SetCodeEditor(m_projectSettings.codeEditor);
         if (m_scene)

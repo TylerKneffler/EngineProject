@@ -1,6 +1,7 @@
 #pragma once
 #include "Core/Component.h"
 #include "Core/Compoonents/Terrain/Terrain.h"
+#include "Core/Compoonents/Terrain/TerrainObjectLayer.h"
 #include "Core/Compoonents/Terrain/TerrainHeightArchive.h"
 #include "Core/Compoonents/Physics/MeshObjectCollider.h"
 #include <map>
@@ -18,6 +19,8 @@
 #include <filesystem>
 #include <chrono>
 #include <vector>
+#include <future>
+#include <string>
 
 namespace Engine::Scene { class Scene; }
 
@@ -52,6 +55,18 @@ public:
     int maxUploadsPerUpdate = 2;
     float maxFarRebuildMilliseconds = 4.f;
     float farTileScreenErrorPixels = 3.f;
+    // Far objects: beyond the loaded cells, out to this radius (cells), the
+    // object layers' placements are drawn with only the last level of their
+    // LOD chains (tree impostors), batched into blocks of
+    // farObjectBlockCells x farObjectBlockCells cells. Only placements whose
+    // asset has a LOD chain take part. 0 disables.
+    int farObjectRadius = 0;
+    // Main-thread time per update for installing streamed cells into the
+    // scene. At least one cell commits each update; more only within this.
+    float maxCommitMilliseconds = 2.f;
+    int farObjectBlockCells = 8;
+    // Project layer for far object blocks (see Rendering::DetailBudget).
+    std::string farObjectProjectLayer = "Trees";
     // Negative values inherit the legacy shared threshold.
     float farTileErrorPixelsLod2 = -1.f;
     float farTileErrorPixelsLod4 = -1.f;
@@ -127,6 +142,8 @@ public:
         double lodMs = 0.0;
         double commitMs = 0.0;
         double commitSceneMs = 0.0;
+        // Parts of commitSceneMs: terrain object, prepared layers, restore.
+        double commitTerrainMs = 0.0, commitLayersMs = 0.0, commitRestoreMs = 0.0;
         double commitStitchMs = 0.0;
         double commitLodMs = 0.0;
         double commitGraphicsMs = 0.0;
@@ -134,6 +151,7 @@ public:
         double colliderActivationMs = 0.0;
         double batchRefreshMs = 0.0;
         double memoryTrimMs = 0.0;
+        double farObjectsMs = 0.0;
         int scheduledCells = 0;
         int committedCells = 0;
         int changedLods = 0;
@@ -168,6 +186,27 @@ public:
     bool AddCell(int x, int y);
     bool AddProceduralCell(int x, int y);
     void SetProceduralBuilder(std::function<void(Cell, Terrain&)> builder);
+    // The surface a generated object layer may read.
+    struct ObjectLayerContext
+    {
+        Cell cell;
+        int cellsX = 0, cellsY = 0;
+        float cellWidth = 1.f, cellDepth = 1.f;
+        const std::vector<float>* heights = nullptr;
+        const std::vector<float>* weights = nullptr; // per vertex and terrain layer
+        size_t terrainLayerCount = 0;
+    };
+    // Fills a named object layer that has no saved placements, such as the
+    // forests of a procedural map. Runs on streaming workers (and on the main
+    // thread for synchronous loads), so it may only touch the layer and the
+    // context. Generated layers are saved with the cell like painted ones.
+    using ObjectLayerGenerator = std::function<void(const ObjectLayerContext&,
+        const std::string& layerName, TerrainObjectLayer&)>;
+    void SetObjectLayerGenerator(ObjectLayerGenerator generator);
+    // Main thread, whenever a cell's named layer is restored: the place for
+    // a scene script to attach or configure components on the layer object.
+    using ObjectLayerSetup = std::function<void(Cell, TerrainObjectLayer&)>;
+    void SetObjectLayerSetup(ObjectLayerSetup setup) { m_objectLayerSetup = std::move(setup); }
     void SetStaticCache(std::string directory, uint64_t signature);
     bool ReadBakedCellHeights(Cell cell, std::vector<float>& heights,
         std::vector<float>* weights = nullptr,
@@ -185,6 +224,28 @@ public:
         std::array<float, 5>
             heightBoundaries{-36.f, -24.f, -12.f, 16.f, 48.f};
         float heightBlendHalfWidth = 8.f;
+        // Optional color per far-grid vertex (cell corner), row-major from
+        // cell (-halfExtent, -halfExtent), (2 * halfExtent + 2)^2 entries.
+        // When present it replaces the height bands, so far tiles can show
+        // what the near paint shows (forests, rock, lake beds).
+        std::vector<glm::vec3> gridColors;
+        int gridHalfExtent = 0;
+        // Bilinear grid color at fractional cell coordinates.
+        bool SampleGridColor(float cellX, float cellY, glm::vec3& color) const
+        {
+            const int side = gridHalfExtent * 2 + 2;
+            if (gridHalfExtent <= 0 ||
+                gridColors.size() != static_cast<size_t>(side) * side) return false;
+            const float gx = std::clamp(cellX + gridHalfExtent, 0.f, float(side - 1));
+            const float gy = std::clamp(cellY + gridHalfExtent, 0.f, float(side - 1));
+            const int x0 = std::min(static_cast<int>(gx), side - 2);
+            const int y0 = std::min(static_cast<int>(gy), side - 2);
+            const float tx = gx - x0, ty = gy - y0;
+            const auto at = [&](int x, int y) { return gridColors[static_cast<size_t>(y) * side + x]; };
+            color = glm::mix(glm::mix(at(x0, y0), at(x0 + 1, y0), tx),
+                glm::mix(at(x0, y0 + 1), at(x0 + 1, y0 + 1), tx), ty);
+            return true;
+        }
     };
     // Distant visual tiles share this manager's cell grid and scene lifetime.
     void ConfigureFarTerrain(int halfExtentCells, std::vector<float> heights,
@@ -275,6 +336,34 @@ private:
     std::set<Cell> m_editedProcedural;
     mutable std::set<Cell> m_dirtyProceduralEdits;
     std::function<void(Cell, Terrain&)> m_proceduralBuilder;
+    ObjectLayerGenerator m_objectLayerGenerator;
+    ObjectLayerSetup m_objectLayerSetup;
+
+    // Far objects (TerrainManagerFarObjects.cpp).
+    struct FarObjectCell
+    {
+        // Cell-local placements; asset is the far (last LOD) representation.
+        std::vector<TerrainObjectLayer::Placement> placements;
+    };
+    struct FarObjectBlock
+    {
+        Engine::Core::Object* object = nullptr;
+        TerrainObjectLayer* layer = nullptr;
+        uint64_t membership = 0;
+    };
+    struct FarObjectJob
+    {
+        std::vector<Cell> cells;
+        std::future<std::vector<std::pair<Cell, FarObjectCell>>> result;
+    };
+    void UpdateFarObjects(int centerX, int centerY);
+    void ClearFarObjects();
+    void FenceFarObjectJobs();
+    std::map<Cell, FarObjectCell> m_farObjectCells;
+    std::set<Cell> m_farObjectPending;
+    std::vector<FarObjectJob> m_farObjectJobs;
+    std::map<Cell, FarObjectBlock> m_farObjectBlocks;
+    uint64_t m_farObjectSignature = 0;
     std::string m_cacheDirectory;
     uint64_t m_cacheSignature = 0;
     size_t m_cacheHits = 0;
@@ -401,6 +490,7 @@ private:
         std::string bakePath;
         uint64_t bakeOffset = 0, bakeSize = 0;
         std::function<void(Cell, Terrain&)> builder;
+        ObjectLayerGenerator layerGenerator;
         std::optional<Terrain::Prepared> prepared;
         bool preparedCacheHit = false;
         std::vector<std::pair<std::string, JsonValue>> objectLayers;

@@ -2,6 +2,7 @@
 #include "Scripts/Controllers/FirstPersonController.h"
 #include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
+#include "Core/Compoonents/Terrain/TerrainManager.h"
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Input/NativeInputSnapshot.h"
@@ -43,6 +44,10 @@ FirstPersonController::FirstPersonController()
     RegisterField("lookSensitivity", lookSensitivity);
     RegisterField("invertY", invertY);
     RegisterField("lockCursor", lockCursor);
+    RegisterField("flightMode", flightMode);
+    RegisterField("flightResponse", flightResponse);
+    RegisterField("flightGroundClearance", flightGroundClearance);
+    RegisterField("flightMinimumHeight", flightMinimumHeight);
 }
 
 FirstPersonController::~FirstPersonController()
@@ -261,10 +266,67 @@ void FirstPersonController::UpdateLook()
     }
 }
 
+void FirstPersonController::UpdateFlight(float deltaTime)
+{
+    auto* body = Owner->GetComponent<Engine::Components::RigidBody>();
+    if (body && body->useGravity) body->useGravity = false;
+    const float moveX = static_cast<float>(IsKeyDown('D') || IsKeyDown(VK_RIGHT)) -
+        static_cast<float>(IsKeyDown('A') || IsKeyDown(VK_LEFT));
+    const float moveZ = static_cast<float>(IsKeyDown('W') || IsKeyDown(VK_UP)) -
+        static_cast<float>(IsKeyDown('S') || IsKeyDown(VK_DOWN));
+    const float moveY = static_cast<float>(IsKeyDown(VK_SPACE)) -
+        static_cast<float>(IsKeyDown(VK_SHIFT));
+    const float boost = IsKeyDown(VK_CONTROL) ? sprintMultiplier : 1.f;
+    // Horizontal axes follow the view's heading; Space/Shift are world up.
+    const glm::vec3 up(0.f, 1.f, 0.f);
+    const glm::vec3 rawForward = glm::vec3(Owner->transform.GetWorldMatrix()[2]);
+    const glm::vec3 forward = SafeNormalize(rawForward - up * glm::dot(rawForward, up),
+        PerpendicularForward(up));
+    const glm::vec3 right = SafeNormalize(glm::cross(up, forward),
+        glm::cross(up, PerpendicularForward(up)));
+    glm::vec3 input = forward * moveZ + right * moveX + up * moveY;
+    if (glm::length2(input) > 1.f) input = glm::normalize(input);
+    const glm::vec3 target = input * moveSpeed * boost;
+    const float blend = 1.f - std::exp(-std::max(.5f, flightResponse) * deltaTime);
+    m_flightVelocity += (target - m_flightVelocity) * blend;
+
+    // Ground clearance from the streamed terrain, independent of colliders.
+    if (auto* scene = Owner->GetScene())
+        for (auto* manager : scene->GetComponents<Engine::Components::TerrainManager>())
+        {
+            const glm::dvec3 next = Owner->transform.GetWorldPositionD() +
+                glm::dvec3(m_flightVelocity) * static_cast<double>(deltaTime);
+            double ground = 0.0;
+            if (!manager->TryGetHeightAtWorldPosition(next, ground)) continue;
+            // Climb back to the clearance within this step (physics owns the
+            // transform when there is a rigid body, so steer by velocity).
+            const double floor = ground + flightGroundClearance;
+            if (next.y < floor && deltaTime > 0.f)
+                m_flightVelocity.y = static_cast<float>(
+                    (floor - Owner->transform.GetWorldPositionD().y) / deltaTime);
+            break;
+        }
+    // Stay above the minimum height (water) as well as the ground.
+    if (deltaTime > 0.f)
+    {
+        const double current = Owner->transform.GetWorldPositionD().y;
+        const double next = current + static_cast<double>(m_flightVelocity.y) * deltaTime;
+        if (next < flightMinimumHeight)
+            m_flightVelocity.y = static_cast<float>((flightMinimumHeight - current) / deltaTime);
+    }
+    if (body) body->SetLinearVelocity(m_flightVelocity);
+    else Owner->transform.position += m_flightVelocity * deltaTime;
+}
+
 void FirstPersonController::UpdateMovement(float deltaTime)
 {
     if (!Owner)
         return;
+    if (flightMode)
+    {
+        UpdateFlight(deltaTime);
+        return;
+    }
 
     const float moveX = static_cast<float>(IsKeyDown('D') || IsKeyDown(VK_RIGHT)) -
         static_cast<float>(IsKeyDown('A') || IsKeyDown(VK_LEFT));

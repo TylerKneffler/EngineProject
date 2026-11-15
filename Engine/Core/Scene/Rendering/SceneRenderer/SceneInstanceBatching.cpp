@@ -173,7 +173,7 @@ SceneInstanceBatching::Result SceneInstanceBatching::Prepare(Scene& scene,
         const auto* lodPolicy = draw.object
             ? draw.object->GetComponent<Engine::Components::Mesh>() : draw.mesh;
         const float finalCullDistance = lodPolicy && lodPolicy->cullAfterLastLod
-            ? std::max(0.f, lodPolicy->finalLodCullDistance) : 0.f;
+            ? std::max(0.f, lodPolicy->finalLodCullDistance) * draw.lodScale : 0.f;
         input.lod={ScaleShadowLodDistances(draw.gpuLodDistances, shadowOnly),
             shadowRange,finalCullDistance};
         for(const auto& range:draw.mesh->GetInstanceRanges())

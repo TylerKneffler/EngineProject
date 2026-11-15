@@ -1,3 +1,4 @@
+#include "Core/Rendering/DetailBudget.h"
 #include "TerrainManager.h"
 #include "TerrainObjectLayer.h"
 #include "Core/Object.h"
@@ -224,6 +225,7 @@ void TerrainManager::RefreshRenderBatches(int uploadBudget, int centerX,
         auto* object = Owner->GetScene()->AddObject("Terrain batch " +
             std::to_string(group.first) + "," + std::to_string(group.second));
         object->runtimeOnly = true;
+        object->layer = Engine::Rendering::DetailBudget::Get().FindLayerOrDefault("Terrain");
         Owner->GetScene()->MoveObject(object, Owner,
             Engine::Scene::Scene::ObjectPlacement::AsChild);
         auto* batchMesh = object->AddComponent<Mesh>();

@@ -517,6 +517,8 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
     static std::map<PrototypeKey, std::weak_ptr<SharedPrefabPrototype>> prototypeCache;
     const auto create=[&](const std::string& name) {
         auto* object=scene->AddObject(name); object->runtimeOnly=true;
+        // Instance parts render under the layer object's project layer.
+        if (Owner) object->layer=Owner->layer;
         object->enabled=false;
         // New batches use layer-local coordinates. Preserving the old world
         // transform here would evaluate the growing scene graph for each batch

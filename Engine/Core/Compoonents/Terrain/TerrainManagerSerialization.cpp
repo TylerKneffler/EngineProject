@@ -47,6 +47,10 @@ TerrainManager::JsonValue TerrainManager::Serialize() const
         .Set("maxUploadsPerUpdate", JsonValue(maxUploadsPerUpdate))
         .Set("maxFarRebuildMilliseconds", JsonValue(maxFarRebuildMilliseconds))
         .Set("farTileScreenErrorPixels", JsonValue(farTileScreenErrorPixels))
+        .Set("farObjectRadius", JsonValue(farObjectRadius))
+        .Set("maxCommitMilliseconds", JsonValue(maxCommitMilliseconds))
+        .Set("farObjectBlockCells", JsonValue(farObjectBlockCells))
+        .Set("farObjectProjectLayer", JsonValue(farObjectProjectLayer))
         .Set("farTileErrorPixelsLod2", JsonValue(farTileErrorPixelsLod2))
         .Set("farTileErrorPixelsLod4", JsonValue(farTileErrorPixelsLod4))
         .Set("farTileErrorPixelsLod8", JsonValue(farTileErrorPixelsLod8))
@@ -214,6 +218,14 @@ void TerrainManager::Deserialize(const JsonValue& value)
         : 4.f;
     farTileScreenErrorPixels = value.Has("farTileScreenErrorPixels")
         ? std::clamp(value["farTileScreenErrorPixels"].AsFloat(), .1f, 64.f) : 3.f;
+    maxCommitMilliseconds = value.Has("maxCommitMilliseconds")
+        ? std::clamp(value["maxCommitMilliseconds"].AsFloat(), .1f, 100.f) : 2.f;
+    farObjectRadius = value.Has("farObjectRadius")
+        ? std::clamp(value["farObjectRadius"].AsInt(), 0, 64) : 0;
+    farObjectBlockCells = value.Has("farObjectBlockCells")
+        ? std::clamp(value["farObjectBlockCells"].AsInt(), 1, 32) : 8;
+    farObjectProjectLayer = value.Has("farObjectProjectLayer")
+        ? value["farObjectProjectLayer"].AsString() : std::string("Trees");
     const auto levelError = [&](const char* name) {
         return value.Has(name) ? std::clamp(value[name].AsFloat(), -1.f, 64.f)
             : -1.f;
@@ -401,6 +413,8 @@ bool TerrainManager::DrawProperties(::Engine::Editor::IEditorUi& ui)
         ui.Tooltip("Loaded cells beyond full detail use half-resolution terrain (LOD 2) through this radius. Applies when distant terrain tiles are unavailable.");
         changed |= ui.SliderInt("Low detail ends (cells)", &lod4Radius, 0, 32);
         ui.Tooltip("Loaded cells beyond medium detail use quarter-resolution terrain (LOD 4) through this radius, then eighth-resolution terrain. Keep this at least as large as the medium detail radius.");
+        changed |= ui.SliderInt("Far object distance (cells)", &farObjectRadius, 0, 64);
+        ui.Tooltip("Beyond the full-detail cells, object layer placements with LOD chains (trees) draw as their last level (impostors) out to this radius, batched into large blocks. 0 disables.");
         changed |= ui.SliderInt("Editor detail distance (cells)", &editorRadius, 0, 32);
         ui.Tooltip("Editable full-resolution cell radius around the Scene view camera, separate from play mode.");
         ui.Label("Object view distance, LOD distances and shadow distance: Terrain Object Layer.");

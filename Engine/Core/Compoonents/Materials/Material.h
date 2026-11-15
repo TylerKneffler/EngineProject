@@ -187,6 +187,10 @@ public:
     
     PROPERTY(Inspector, EditAnywhere, Category = "Material | Properties")
     bool      doubleSided { false };
+    // The material's custom shader animates with scene time (read from
+    // ObjectData.grassAnimation.x). Off by default so static draws keep
+    // identical per-frame object data.
+    bool      shaderUsesTime { false };
 
     bool overrideTextureLod = false;
     Engine::Model::TextureLodSettings textureLod;

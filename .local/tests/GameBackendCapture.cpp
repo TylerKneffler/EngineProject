@@ -48,6 +48,9 @@ Engine::Game::GameBenchmarkOptions Parse(int argc, char** argv)
             Number(value(), "residency timeout seconds", 3600);
         else if (key == "--drive-forward") options.driveForwardFrames =
             Number(value(), "forward input frames", 100000);
+        else if (key == "--drive-boost") options.driveBoost = true;
+        else if (key == "--render-mode") options.renderMode =
+            static_cast<int>(Number(value(), "render mode", 3, true));
         else if (key == "--max-fps") options.maxFpsOverride = Number(value(), "max fps", 1000, true);
         else if (key == "--require-terrain") options.requireTerrain = true;
         else if (key == "--require-streamed-cells") options.requireStreamedCells = true;

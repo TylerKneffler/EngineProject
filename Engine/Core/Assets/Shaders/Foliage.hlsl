@@ -18,8 +18,11 @@ float4 PSMain(
     float4 uvChannels3 : TEXCOORD6,
     float4 uvChannels4 : TEXCOORD7,
     nointerpolation uint objectIndex : TEXCOORD11,
+    float instanceLodDistance : TEXCOORD12,
     bool frontFace : SV_IsFrontFace) : SV_TARGET
 {
+    // Instanced LOD bands dissolve per tree (see ApplyGeometryFade).
+    g_instanceLodDistance = instanceLodDistance;
     return PSFoliageMain(pos, worldPos, normal, uv, vertexColor,
         objectIndex, frontFace);
 }

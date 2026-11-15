@@ -49,6 +49,8 @@ public:
     bool useEditorCamera = false;
     PROPERTY(Inspector, EditAnywhere, Category = "Grass | Viewer", ClampMin = "2")
     float visibleRadius = 11.f;
+    // Multiplier on the grass reach from the owner's project layer.
+    float DetailRadiusScale() const;
     PROPERTY(Inspector, EditAnywhere, Category = "Grass | Tiles", ClampMin = "1")
     float tileSize = 4.f;
     PROPERTY(Inspector, EditAnywhere, Category = "Grass | Tiles", ClampMin = "0")
@@ -77,6 +79,10 @@ public:
     bool gpuLodSelection = true;
     PROPERTY(Inspector, EditAnywhere, Category = "Grass | Tiles")
     bool allowProceduralGeneration = false;
+    // Procedural patches grow only where these terrain paint layers (bit per
+    // layer index) together hold at least half the weight. 0 grows anywhere.
+    PROPERTY(Inspector, EditAnywhere, Category = "Grass | Tiles")
+    int proceduralLayerMask = 0;
     PROPERTY(Inspector, EditAnywhere, Category = "Grass | Tiles")
     bool retainDormantTiles = false;
     PROPERTY(Inspector, EditAnywhere, Category = "Grass | LOD", ClampMin = "0")

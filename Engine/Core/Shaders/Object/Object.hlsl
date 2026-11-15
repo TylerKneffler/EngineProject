@@ -226,10 +226,12 @@ void VSMain(
     out float4 oUvChannels2 : TEXCOORD5,
     out float4 oUvChannels3 : TEXCOORD6,
     out float4 oUvChannels4 : TEXCOORD7,
-    out nointerpolation uint oObjectIndex : TEXCOORD11)
+    out nointerpolation uint oObjectIndex : TEXCOORD11,
+    out float oInstanceLodDistance : TEXCOORD12)
 {
     oObjectIndex = ResolveObjectIndex(instanceId);
     ObjectData objectData = objects[oObjectIndex];
+    oInstanceLodDistance = -1.0;
     float4 localPosition = float4(pos, 1.0);
     float3 localNormal = normal;
     float3 localTangent = tangent.xyz;
@@ -304,6 +306,12 @@ void VSMain(
     // Adjacent terrain patches can own different transforms while still
     // producing bit-identical clip positions along their common border.
     float4 worldPosition = mul(objectData.world, localPosition);
+    // Instanced LOD bands choose a band per placement (see ApplyGeometryFade):
+    // every vertex of a placement carries the distance to its origin, so the
+    // interpolated value is constant across it.
+    if ((draw.drawFlags & 0x20000000u) != 0u && objectData.geometryFade.w >= 4.0)
+        oInstanceLodDistance = length(mul(objectData.world, float4(grassRoot, 1.0)).xyz -
+            objectData.viewPositionAlphaCutoff.xyz);
     float3 worldNormal = normalize(mul((float3x3)objectData.world, localNormal));
     float3 worldTangent = mul((float3x3)objectData.world, localTangent);
     float3 worldUp = mul((float3x3)objectData.world, grassUp);
@@ -403,10 +411,12 @@ void VSTerrainMain(
     out float4 oUvChannels2 : TEXCOORD5,
     out float4 oUvChannels3 : TEXCOORD6,
     out float4 oUvChannels4 : TEXCOORD7,
-    out nointerpolation uint oObjectIndex : TEXCOORD11)
+    out nointerpolation uint oObjectIndex : TEXCOORD11,
+    out float oInstanceLodDistance : TEXCOORD12)
 {
     oObjectIndex = ResolveObjectIndex(instanceId);
     ObjectData objectData = objects[oObjectIndex];
+    oInstanceLodDistance = -1.0;
     const float3 localNormal = normalize(normal);
     float3 localTangent = float3(1.0, 0.0, 0.0) -
         localNormal * localNormal.x;
@@ -951,8 +961,12 @@ float EvaluateDirectionalShadow(ObjectData objectData, SceneLightData light,
         return 1.0;
 
     float normalFacing = saturate(dot(surfaceNormal, lightDirection));
-    float3 biasedPosition = worldPosition + surfaceNormal *
-        objectData.shadowParams.y * (1.0 - normalFacing);
+    // Normal offset in world units, grown with each cascade's extent: far
+    // cascades have proportionally larger texels, and a fixed offset that
+    // suits the first one leaves grazing-lit ground (terrain at a low sun)
+    // banded with self-shadowing acne farther out.
+    const float normalOffset = objectData.shadowParams.y * (1.0 - normalFacing);
+    const float firstExtent = max(objectData.shadowCascadeSplits.x, 0.001);
     uint cascadeCount = clamp((uint)objectData.shadowCascadeData.x, 1u, 4u);
     // Radial bands keep a fixed receiver in the same cascade when the player
     // turns in place. Camera-forward depth makes shadows change with look.
@@ -968,6 +982,10 @@ float EvaluateDirectionalShadow(ObjectData objectData, SceneLightData light,
     if (cascadeCount > 3u && viewDistance > objectData.shadowCascadeSplits.z)
         cascade = 3u;
 
+    const float cascadeExtent = cascade == 0u ? firstExtent :
+        max(objectData.shadowCascadeSplits[cascade], firstExtent);
+    float3 biasedPosition = worldPosition + surfaceNormal *
+        normalOffset * (cascadeExtent / firstExtent);
     float filtered = SampleDirectionalShadowCascade(
         objectData, cascade, biasedPosition, pcfRadius);
     if (cascade + 1u < cascadeCount)
@@ -981,8 +999,11 @@ float EvaluateDirectionalShadow(ObjectData objectData, SceneLightData light,
             (viewDistance - (boundary - blendWidth)) / blendWidth);
         if (cascadeBlend > 0.0)
         {
+            const float nextExtent = max(cascade + 1u < 4u ?
+                objectData.shadowCascadeSplits[cascade + 1u] : cascadeExtent, cascadeExtent);
             float nextFiltered = SampleDirectionalShadowCascade(
-                objectData, cascade + 1u, biasedPosition, pcfRadius);
+                objectData, cascade + 1u, worldPosition + surfaceNormal *
+                    normalOffset * (nextExtent / firstExtent), pcfRadius);
             filtered = lerp(filtered, nextFiltered, cascadeBlend);
         }
     }
@@ -1396,7 +1417,25 @@ TerrainLayerSample SampleTerrainLayer(TerrainProjection projection, uint layer,
 // World-anchored coverage is stable as the camera moves. Both LODs and their
 // shadows use the same intervals, so transitioning surfaces do not alpha-blend
 // or require transparent sorting.
-void ApplyGeometryFade(ObjectData data, float3 worldPosition)
+// Distance from the camera to the origin of the instanced placement being
+// shaded, or negative when unknown. Pixel-shader entry points set it from the
+// vertex shader's TEXCOORD12 before any shading function runs.
+static float g_instanceLodDistance = -1.0;
+
+// Half-width of the dissolve at an instanced LOD switch distance. Must match
+// the per-placement band test in InstanceCull.hlsl.
+float InstanceLodFadeWidth(float switchDistance)
+{
+    return clamp(switchDistance * 0.04, 0.5, 6.0);
+}
+
+// Interleaved gradient noise: a well-spread threshold per screen pixel.
+float ScreenDitherThreshold(float2 screenPosition)
+{
+    return frac(52.9829189 * frac(dot(floor(screenPosition), float2(0.06711056, 0.00583715))));
+}
+
+void ApplyGeometryFade(ObjectData data, float3 worldPosition, float2 screenPosition)
 {
     // Screen LOD candidates were selected with per-view hysteresis. Preserve
     // appearance/range fade, but do not apply the authored distance LOD again.
@@ -1404,17 +1443,26 @@ void ApplyGeometryFade(ObjectData data, float3 worldPosition)
     if ((draw.drawFlags & 0x00800000u) != 0u && data.shadowCasterFade.z < 0.5)
         data.geometryFade = float4(0, data.geometryFade.w >= 4.0 ? 1.0 :
             data.geometryFade.w >= 2.0 ? saturate(data.geometryFade.w-2.0) : data.geometryFade.y, 0, 1);
+    // Instanced LOD bands with a known placement distance: the whole
+    // placement (a tree) takes one band and dissolves as a unit, with
+    // screen-space thresholds so the outgoing and incoming LODs cover exactly
+    // complementary pixels. Per-pixel distances would slice large objects
+    // with a sphere around the camera that sweeps through them as it moves.
+    const bool perPlacement = data.geometryFade.w >= 4.0 && g_instanceLodDistance >= 0.0;
     if (data.geometryFade.w >= 2.0)
     {
-        const float distance=length((data.geometryFade.w>=4.0 ? worldPosition:mul(data.world,float4(0,0,0,1)).xyz)-data.viewPositionAlphaCutoff.xyz);
+        const float distance=perPlacement ? g_instanceLodDistance :
+            length((data.geometryFade.w>=4.0 ? worldPosition:mul(data.world,float4(0,0,0,1)).xyz)-data.viewPositionAlphaCutoff.xyz);
         const float widthFraction=data.geometryFade.w>=4.0 ? .25 : data.geometryFade.x;
         const float width=max(0.0,min(.5,(data.geometryFade.z-data.geometryFade.y)*widthFraction));
-        const float first=width>0.0 ? smoothstep(data.geometryFade.y-width,data.geometryFade.y+width,distance) : step(data.geometryFade.y,distance);
-        const float second=width>0.0 ? smoothstep(data.geometryFade.z-width,data.geometryFade.z+width,distance) : step(data.geometryFade.z,distance);
+        const float widthFirst=perPlacement ? InstanceLodFadeWidth(data.geometryFade.y) : width;
+        const float widthSecond=perPlacement ? InstanceLodFadeWidth(data.geometryFade.z) : width;
+        const float first=widthFirst>0.0 ? smoothstep(data.geometryFade.y-widthFirst,data.geometryFade.y+widthFirst,distance) : step(data.geometryFade.y,distance);
+        const float second=widthSecond>0.0 ? smoothstep(data.geometryFade.z-widthSecond,data.geometryFade.z+widthSecond,distance) : step(data.geometryFade.z,distance);
         const uint lod=data.geometryFade.w>=4.0 ? (uint)data.geometryFade.x:(draw.drawFlags >> 21u) & 3u;
         const float visibility=saturate(data.geometryFade.w-2.0);
         if(lod==0) data.geometryFade=float4(0,(1-first)*visibility,0,1);
-        else if(lod==1) data.geometryFade=distance<data.geometryFade.z-width ? float4((1-first)*visibility,visibility,0,1):float4(0,(1-second)*visibility,0,1);
+        else if(lod==1) data.geometryFade=distance<data.geometryFade.z-widthSecond ? float4((1-first)*visibility,visibility,0,1):float4(0,(1-second)*visibility,0,1);
         else data.geometryFade=float4((1-second)*visibility,visibility,0,1);
     }
     if (data.shadowCasterFade.z > 0.5 && data.shadowCasterFade.x > 0.0)
@@ -1436,7 +1484,8 @@ void ApplyGeometryFade(ObjectData data, float3 worldPosition)
         [branch] if (data.geometryFade.x <= 0.0 && data.geometryFade.y >= 1.0)
             return;
         float3 cell = floor(worldPosition * 96.0);
-        float threshold = frac(sin(dot(cell, float3(12.9898, 78.233, 37.719))) * 43758.5453);
+        float threshold = perPlacement ? ScreenDitherThreshold(screenPosition) :
+            frac(sin(dot(cell, float3(12.9898, 78.233, 37.719))) * 43758.5453);
         clip(threshold - data.geometryFade.x);
         clip(data.geometryFade.y - threshold);
     }
@@ -1455,10 +1504,12 @@ float4 PSShadowMain(
     float4 uvChannels2 : TEXCOORD5,
     float4 uvChannels3 : TEXCOORD6,
     float4 uvChannels4 : TEXCOORD7,
-    nointerpolation uint objectIndex : TEXCOORD11) : SV_TARGET
+    nointerpolation uint objectIndex : TEXCOORD11,
+    float instanceLodDistance : TEXCOORD12) : SV_TARGET
 {
+    g_instanceLodDistance = instanceLodDistance;
     ObjectData objectData = objects[(draw.drawFlags & 0x13080000u) != 0u ? objectIndex : draw.objectIndex];
-    ApplyGeometryFade(objectData, worldPos);
+    ApplyGeometryFade(objectData, worldPos, pos.xy);
     ApplyAlphaLod(objectData, worldPos);
     if (dot(objectData.traversalClipPlane.xyz,
         objectData.traversalClipPlane.xyz) > 0.0 &&
@@ -1530,7 +1581,7 @@ float4 PSFoliageMain(
 {
     ObjectData objectData = objects[(draw.drawFlags & 0x13080000u) != 0u
         ? objectIndex : draw.objectIndex];
-    ApplyGeometryFade(objectData, worldPos);
+    ApplyGeometryFade(objectData, worldPos, pos.xy);
     ApplyAlphaLod(objectData, worldPos);
     if (dot(objectData.traversalClipPlane.xyz,
         objectData.traversalClipPlane.xyz) > 0.0 &&
@@ -1595,7 +1646,9 @@ float4 PSFoliageMain(
         base.a);
 }
 
-float4 PSMain(
+// The object surface shader. PSMain below is its entry point; material
+// shaders that wrap this file call it through their renamed PSMain.
+float4 ObjectSurfacePS(
     float4 pos : SV_POSITION,
     float3 worldPos : TEXCOORD2,
     float3 normal : NORMAL,
@@ -1612,7 +1665,7 @@ float4 PSMain(
     bool frontFace : SV_IsFrontFace) : SV_TARGET
 {
     ObjectData objectData = objects[(draw.drawFlags & 0x13080000u) != 0u ? objectIndex : draw.objectIndex];
-    ApplyGeometryFade(objectData, worldPos);
+    ApplyGeometryFade(objectData, worldPos, pos.xy);
     ApplyAlphaLod(objectData, worldPos);
     float textureBias = TextureLodBias(objectData, worldPos);
     uint flags = (uint)objectData.materialParams.w;
@@ -2366,6 +2419,43 @@ float4 PSMain(
     return float4(litColor + emissive, base.a);
 }
 
+#ifdef PSMain
+// A material shader renamed PSMain before including this file to define its
+// own entry point: give it the surface shader under that name. It sets
+// g_instanceLodDistance itself if it reads TEXCOORD12.
+float4 PSMain(
+    float4 pos : SV_POSITION, float3 worldPos : TEXCOORD2,
+    float3 normal : NORMAL, float2 uv : TEXCOORD, float2 uv1 : TEXCOORD1,
+    float4 vertexColor : COLOR, float4 tangent : TANGENT,
+    float4 uvChannels0 : TEXCOORD3, float4 uvChannels1 : TEXCOORD4,
+    float4 uvChannels2 : TEXCOORD5, float4 uvChannels3 : TEXCOORD6,
+    float4 uvChannels4 : TEXCOORD7,
+    nointerpolation uint objectIndex : TEXCOORD11,
+    bool frontFace : SV_IsFrontFace) : SV_TARGET
+{
+    return ObjectSurfacePS(pos, worldPos, normal, uv, uv1, vertexColor, tangent,
+        uvChannels0, uvChannels1, uvChannels2, uvChannels3, uvChannels4,
+        objectIndex, frontFace);
+}
+#else
+float4 PSMain(
+    float4 pos : SV_POSITION, float3 worldPos : TEXCOORD2,
+    float3 normal : NORMAL, float2 uv : TEXCOORD, float2 uv1 : TEXCOORD1,
+    float4 vertexColor : COLOR, float4 tangent : TANGENT,
+    float4 uvChannels0 : TEXCOORD3, float4 uvChannels1 : TEXCOORD4,
+    float4 uvChannels2 : TEXCOORD5, float4 uvChannels3 : TEXCOORD6,
+    float4 uvChannels4 : TEXCOORD7,
+    nointerpolation uint objectIndex : TEXCOORD11,
+    float instanceLodDistance : TEXCOORD12,
+    bool frontFace : SV_IsFrontFace) : SV_TARGET
+{
+    g_instanceLodDistance = instanceLodDistance;
+    return ObjectSurfacePS(pos, worldPos, normal, uv, uv1, vertexColor, tangent,
+        uvChannels0, uvChannels1, uvChannels2, uvChannels3, uvChannels4,
+        objectIndex, frontFace);
+}
+#endif
+
 // Only used with depth-equal testing and depth writes disabled, after the
 // matching alpha/LOD coverage pass. Early rejection avoids lighting hidden
 // leaf layers; discards cannot write depth through transparent leaf holes.
@@ -2378,9 +2468,11 @@ float4 PSDepthEqualMain(
     float4 uvChannels2 : TEXCOORD5, float4 uvChannels3 : TEXCOORD6,
     float4 uvChannels4 : TEXCOORD7,
     nointerpolation uint objectIndex : TEXCOORD11,
+    float instanceLodDistance : TEXCOORD12,
     bool frontFace : SV_IsFrontFace) : SV_TARGET
 {
-    return PSMain(pos, worldPos, normal, uv, uv1, vertexColor, tangent,
+    g_instanceLodDistance = instanceLodDistance;
+    return ObjectSurfacePS(pos, worldPos, normal, uv, uv1, vertexColor, tangent,
         uvChannels0, uvChannels1, uvChannels2, uvChannels3, uvChannels4,
         objectIndex, frontFace);
 }
@@ -2396,10 +2488,12 @@ float4 PSParallaxDepthMain(
     float4 uvChannels2 : TEXCOORD5, float4 uvChannels3 : TEXCOORD6,
     float4 uvChannels4 : TEXCOORD7,
     nointerpolation uint objectIndex : TEXCOORD11,
+    float instanceLodDistance : TEXCOORD12,
     bool frontFace : SV_IsFrontFace,
     out float depth : SV_DepthGreaterEqual) : SV_TARGET
 {
-    const float4 color = PSMain(pos, worldPos, normal, uv, uv1, vertexColor,
+    g_instanceLodDistance = instanceLodDistance;
+    const float4 color = ObjectSurfacePS(pos, worldPos, normal, uv, uv1, vertexColor,
         tangent, uvChannels0, uvChannels1, uvChannels2, uvChannels3,
         uvChannels4, objectIndex, frontFace);
     depth = g_parallaxClipDepth >= 0.0

@@ -254,6 +254,53 @@ inline bool ReadCell(const std::string& path, uint64_t expectedSignature,
     return true;
 }
 
+// Heights plus the raw two-bit code stored with every sample. Maps whose
+// codes are not base paint layers (for example a rock class computed over
+// the whole map, so it matches across cell borders) read them with this.
+inline bool ReadCellCodes(const std::string& path, uint64_t expectedSignature,
+    int expectedExtent, int expectedX, int expectedY,
+    int cellX, int cellY, std::vector<float>& heights,
+    std::vector<uint8_t>& codes)
+{
+    if (std::abs(cellX) > expectedExtent || std::abs(cellY) > expectedExtent)
+        return false;
+    std::ifstream file(path, std::ios::binary);
+    uint64_t magic = 0, signature = 0;
+    uint32_t version = 0;
+    int extent = 0, cellsX = 0, cellsY = 0;
+    float scale = 0.f;
+    if (!file || !Read(file, magic) || magic != Magic ||
+        !Read(file, version) || version != Version ||
+        !Read(file, signature) || signature != expectedSignature ||
+        !Read(file, extent) || extent != expectedExtent ||
+        !Read(file, cellsX) || cellsX != expectedX ||
+        !Read(file, cellsY) || cellsY != expectedY ||
+        !Read(file, scale) || scale != Scale)
+        return false;
+    const uint64_t side = static_cast<uint64_t>(extent) * 2 + 1;
+    const uint64_t sampleCount = static_cast<uint64_t>(cellsX + 1) * (cellsY + 1);
+    const uint64_t packedCount = (sampleCount + 3) / 4;
+    const uint64_t cellIndex = static_cast<uint64_t>(cellY + extent) * side +
+        static_cast<uint64_t>(cellX + extent);
+    file.seekg(HeaderBytes + static_cast<std::streamoff>(
+        cellIndex * (sampleCount * sizeof(int16_t) + packedCount)));
+    std::vector<int16_t> samples(static_cast<size_t>(sampleCount));
+    std::vector<uint8_t> packed(static_cast<size_t>(packedCount));
+    file.read(reinterpret_cast<char*>(samples.data()),
+        static_cast<std::streamsize>(samples.size() * sizeof(int16_t)));
+    file.read(reinterpret_cast<char*>(packed.data()),
+        static_cast<std::streamsize>(packed.size()));
+    if (!file) return false;
+    heights.resize(samples.size());
+    codes.resize(samples.size());
+    for (size_t i = 0; i < samples.size(); ++i)
+    {
+        heights[i] = static_cast<float>(samples[i]) / Scale;
+        codes[i] = (packed[i / 4] >> ((i % 4) * 2)) & 3u;
+    }
+    return true;
+}
+
 // One archived height at every cell corner. At 129 by 129 cells this is only
 // 33,800 bytes of height data, and is enough for a distant static silhouette.
 inline bool BakeFarGrid(const std::string& archivePath,

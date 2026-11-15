@@ -1,3 +1,4 @@
+#include "Core/Rendering/DetailBudget.h"
 #include "pch.h"
 #include "Engine/Editor/State/EditorState.h"
 #include "Engine/Editor/Diagnostics/FrameActivity.h"
@@ -279,6 +280,8 @@ bool EditorState::Init()
             m_projectSettings.physicsMaximumSubsteps);
         m_scene->SetRealtimeShadowSettings(m_projectSettings.realtimeShadows);
         m_scene->SetDistanceLightingSettings(m_projectSettings.distanceLighting);
+        Engine::Rendering::DetailBudget::Get().Configure(
+            m_projectSettings.layers, m_projectSettings.detailBudget);
         OutputDebugStringA("[EditorState] Scene initialized\n");
     }
     catch (const std::exception& e)

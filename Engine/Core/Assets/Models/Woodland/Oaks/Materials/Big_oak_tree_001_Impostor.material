@@ -22,7 +22,7 @@
     0
   ],
   "shininess": 32,
-  "specularModel": "BlinnPhong",
+  "specularModel": "MetallicRoughness",
   "metallic": 0,
   "roughness": 0.86,
   "subsurfaceEnabled": false,
@@ -101,7 +101,8 @@
   "heightUvSet": 0,
   "baseColorTexture": "Assets/Other/oak_trees_pack_17var_lods_seasons_gameready/textures/Big_oak_tree__001_Billboard_Mat_baseColor.png",
   "metallicRoughnessTexture": "",
-  "normalTexture": "",
+  "normalTexture": "Assets/Other/oak_trees_pack_17var_lods_seasons_gameready/textures/Big_oak_tree__001_Billboard_Mat_normal.png",
   "occlusionTexture": "",
-  "shader": ""
+  "shader": "",
+  "alphaCoverageTransmission": 0.15
 }

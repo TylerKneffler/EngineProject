@@ -83,13 +83,17 @@ void CSMain(uint3 id : SV_DispatchThreadID, uint3 group : SV_GroupID, uint3 thre
                     : length(delta)-radius;
                 const float farthest=shadowPass ? length(delta+worldExtent)
                     : length(delta)+radius;
-                const float width=max(.001,min(.5,(lodData.lod.y-lodData.lod.x)*.25));
+                // Object.hlsl picks each placement's band from the distance to
+                // its origin and dissolves the whole placement over
+                // InstanceLodFadeWidth either side of a switch; keep in sync.
+                const float widthX=clamp(lodData.lod.x*.04,.5,6.0);
+                const float widthY=clamp(lodData.lod.y*.04,.5,6.0);
                 isTransitionPlacement = constants.selection.x>=0 &&
-                    ((nearest <= lodData.lod.x+width && farthest >= lodData.lod.x-width) ||
-                     (nearest <= lodData.lod.y+width && farthest >= lodData.lod.y-width));
-                if ((constants.selection.x==0 && nearest>lodData.lod.x+width) ||
-                    (constants.selection.x==1 && (farthest<lodData.lod.x-width || nearest>lodData.lod.y+width)) ||
-                    (constants.selection.x==2 && farthest<lodData.lod.y-width)) continue;
+                    ((nearest <= lodData.lod.x+widthX && farthest >= lodData.lod.x-widthX) ||
+                     (nearest <= lodData.lod.y+widthY && farthest >= lodData.lod.y-widthY));
+                if ((constants.selection.x==0 && nearest>lodData.lod.x+widthX) ||
+                    (constants.selection.x==1 && (farthest<lodData.lod.x-widthX || nearest>lodData.lod.y+widthY)) ||
+                    (constants.selection.x==2 && farthest<lodData.lod.y-widthY)) continue;
             }
             // Range culling is shadow-only. Keep boundary-crossing placements
             // for the per-fragment fade instead of dropping the whole tile.

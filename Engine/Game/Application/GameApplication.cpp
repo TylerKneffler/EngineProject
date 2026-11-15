@@ -1,3 +1,4 @@
+#include "Core/Rendering/DetailBudget.h"
 #include "Game/Application/GameApplication.h"
 
 #include "Game/Startup/GameProjectStartup.h"
@@ -38,6 +39,9 @@
 #include "Core/Assets/Scripts/Physics/FoxRagdollBlend.h"
 #include "Core/Serialization/SceneSerializer.h"
 #endif
+
+// Benchmark-only scene view render mode for the game camera (-1 = normal).
+static int g_benchmarkRenderMode = -1;
 
 namespace Engine::Game
 {
@@ -281,7 +285,7 @@ private:
                             m_scene.Render(sceneCommands.get(), aspect,
                                 gameCamera, false, m_input.clientWidth,
                                 m_input.clientHeight, false,
-                                drawPacket.get());
+                                drawPacket.get(), -1, g_benchmarkRenderMode);
                             m_timings.cameraRecordingMs = std::chrono::duration<double,
                                 std::milli>(std::chrono::steady_clock::now() - shadowRecorded).count();
                         }
@@ -857,6 +861,10 @@ int GameApplication::Run(HINSTANCE instance, const GameBenchmarkOptions* benchma
         settings.physicsMaximumSubsteps);
     scene.SetRealtimeShadowSettings(settings.realtimeShadows);
     scene.SetDistanceLightingSettings(settings.distanceLighting);
+    Engine::Rendering::DetailBudget::Get().Configure(settings.layers,
+        settings.detailBudget);
+    if (benchmark) scene.SetUpdateProfilingEnabled(true);
+    if (benchmark) g_benchmarkRenderMode = benchmark->renderMode;
     Engine::Core::SceneManager::SetActiveScene(&scene);
     const std::string defaultScene = benchmark ? benchmark->scene.string() : settings.defaultScene.empty()
         ? GetFallbackScenePath() : settings.defaultScene;
@@ -922,7 +930,14 @@ int GameApplication::Run(HINSTANCE instance, const GameBenchmarkOptions* benchma
             const uint64_t moveStart = clickStart + 3u;
             if (benchmarkFrame >= moveStart &&
                 benchmarkFrame < moveStart + benchmark->driveForwardFrames)
+            {
                 input.keys['W'] = static_cast<SHORT>(0x8000);
+                if (benchmark->driveBoost)
+                {
+                    input.keys[VK_CONTROL] = static_cast<SHORT>(0x8000);
+                    input.keys[VK_LCONTROL] = static_cast<SHORT>(0x8000);
+                }
+            }
         }
         simulation.BeginUpdate(deltaTime, std::move(input));
         uint32_t previousOcclusionCulled = 0;

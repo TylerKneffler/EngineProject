@@ -379,6 +379,42 @@ void ProjectLoader::ParseRendering(const pugi::xml_node& projectNode, ProjectSet
                 settings.distanceLighting.bands = std::move(bands);
         }
 
+        if (auto layersNode = prop.child("Layers"))
+        {
+            std::vector<Engine::Model::ProjectLayer> layers;
+            for (auto layerNode : layersNode.children("Layer"))
+            {
+                if (layers.size() >= Engine::Model::MaxProjectLayers) break;
+                Engine::Model::ProjectLayer layer;
+                layer.name = layerNode.attribute("Name").as_string();
+                layer.lodDistanceScale = std::clamp(
+                    layerNode.attribute("LodDistanceScale").as_float(1.f), 0.f, 100.f);
+                layer.budgetWeight = std::clamp(
+                    layerNode.attribute("BudgetWeight").as_float(1.f), 0.f, 4.f);
+                layers.push_back(std::move(layer));
+            }
+            if (!layers.empty())
+            {
+                if (layers.front().name.empty()) layers.front().name = "Default";
+                settings.layers = std::move(layers);
+            }
+        }
+        if (auto budgetNode = prop.child("DetailBudget"))
+        {
+            auto& budget = settings.detailBudget;
+            budget.enabled = budgetNode.attribute("Enabled").as_bool(true);
+            budget.geometryBudgetMs = std::clamp(
+                budgetNode.attribute("GeometryBudgetMs").as_float(6.f), .1f, 1000.f);
+            budget.cpuRenderBudgetMs = std::clamp(
+                budgetNode.attribute("CpuRenderBudgetMs").as_float(4.f), .1f, 1000.f);
+            budget.minimumScale = std::clamp(
+                budgetNode.attribute("MinimumScale").as_float(.6f), .05f, 1.f);
+            budget.maximumScale = std::clamp(
+                budgetNode.attribute("MaximumScale").as_float(2.5f), 1.f, 10.f);
+            budget.responseSeconds = std::clamp(
+                budgetNode.attribute("ResponseSeconds").as_float(1.5f), .05f, 30.f);
+        }
+
         if (!settings.renderingAPI.empty() || !settings.editorRenderingAPI.empty())
             break;
     }

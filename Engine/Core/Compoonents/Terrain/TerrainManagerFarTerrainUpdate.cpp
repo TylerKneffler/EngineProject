@@ -1,3 +1,4 @@
+#include "Core/Rendering/DetailBudget.h"
 #include "TerrainFarLodEdges.h"
 #include "TerrainManager.h"
 #include "TerrainManagerFarTerrainCache.h"
@@ -149,8 +150,20 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
             return detailedNormal(*nearHeights, col, cellsY);
         return std::nullopt;
     };
+    // Cell of the tile being built, for the palette's optional color grid.
+    int farColorOriginX = 0, farColorOriginY = 0;
     const auto setColor = [&](Mesh::Vertex& vertex,
         float height) {
+        glm::vec3 gridColor;
+        if (m_farPalette.SampleGridColor(farColorOriginX + vertex.pos[0] / spanX,
+                farColorOriginY + vertex.pos[2] / spanZ, gridColor))
+        {
+            vertex.color[0] = gridColor.r;
+            vertex.color[1] = gridColor.g;
+            vertex.color[2] = gridColor.b;
+            vertex.color[3] = 1.f;
+            return;
+        }
         float weights[6];
         TerrainHeightArchive::BlendHeightBands(height,
             m_farPalette.heightBoundaries,
@@ -166,6 +179,9 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
     const auto blendSeamColor = [&](Mesh::Vertex& vertex,
         const SeamSurface* surface, int seam, int col, int row,
         float u, float v) {
+        // A palette color grid already matches the map's own paint; archive
+        // weights may not be paint layers for such maps.
+        if (!m_farPalette.gridColors.empty()) return;
         if (!surface || !surface->weights ||
             (surface->layerCount != 4 && surface->layerCount != 6))
             return;
@@ -628,8 +644,14 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
                 ? farTileErrorPixelsLod2 : parent.lodStride == 4
                 ? farTileErrorPixelsLod4 : parent.lodStride == 8
                 ? farTileErrorPixelsLod8 : farTileErrorPixelsLod16;
-            const double threshold = std::clamp(levelError >= 0.f
-                ? levelError : farTileScreenErrorPixels, .1f, 64.f);
+            const double terrainDetailScale = std::max(.05f,
+                Engine::Rendering::DetailBudget::Get().LayerLodScale(
+                    Engine::Rendering::DetailBudget::Get().FindLayerOrDefault("Terrain")));
+            // Screen error falls with distance, so dividing the allowed error
+            // by the Terrain layer's detail scale moves every far-tile LOD
+            // switch out (or in) by that factor.
+            const double threshold = std::clamp(static_cast<double>(levelError >= 0.f
+                ? levelError : farTileScreenErrorPixels) / terrainDetailScale, .05, 64.0);
             const double hysteresis = std::clamp(farTileLodHysteresis, 0.f, .9f);
             if (!inView) parent.coarseSelected = true;
             else if (parent.coarseSelected)
@@ -828,6 +850,8 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
                 std::clamp(maxFarRebuildMilliseconds, .001f, 100.f)) break;
         ++workedTiles;
         auto& tile = m_farTiles[tileIndex];
+        farColorOriginX = tile.startX;
+        farColorOriginY = tile.startY;
         const auto rebuildStart = std::chrono::steady_clock::now();
         if (!canUpload && !tile.dirtyPatchIndices.empty()) continue;
         if (tile.built && tile.mesh && !needsRebuild(tile) &&
@@ -947,6 +971,9 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
                 for (int channel = 0; channel < 3; ++channel)
                     HashValue(fingerprint, color[channel]);
             for (const auto& color : m_farPalette.nearColors)
+                for (int channel = 0; channel < 3; ++channel)
+                    HashValue(fingerprint, color[channel]);
+            for (const auto& color : m_farPalette.gridColors)
                 for (int channel = 0; channel < 3; ++channel)
                     HashValue(fingerprint, color[channel]);
             for (int layer : m_farPalette.archiveToNear)
@@ -1510,6 +1537,7 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
                 std::to_string(tile.startX) + "," +
                 std::to_string(tile.startY));
             tile.object->runtimeOnly = true;
+            tile.object->layer = Engine::Rendering::DetailBudget::Get().FindLayerOrDefault("Terrain");
             scene->MoveObject(tile.object, Owner,
                 Engine::Scene::Scene::ObjectPlacement::AsChild);
             tile.object->transform.position = {

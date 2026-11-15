@@ -32,6 +32,7 @@ Material::Material()
     RegisterField("alphaCutoff", alphaCutoff, "Surface");
     RegisterField("alphaCoverageTransmission", alphaCoverageTransmission, "Alpha");
     RegisterField("doubleSided", doubleSided, "Surface");
+    RegisterField("shaderUsesTime", shaderUsesTime, "Surface");
     RegisterField("overrideTextureLod", overrideTextureLod, "Texture LOD");
     RegisterField("textureLodEnabled", textureLod.enabled, "Texture LOD");
     RegisterField("textureLodNearDistance", textureLod.nearDistance, "Texture LOD");
@@ -272,6 +273,7 @@ bool Material::LoadFromFile(const std::string& path)
         if (root.Has("heightMaxSteps")) heightMaxSteps = root["heightMaxSteps"].AsFloat();
         if (root.Has("occlusionStrength")) occlusionStrength = root["occlusionStrength"].AsFloat();
         if (root.Has("doubleSided")) doubleSided = root["doubleSided"].AsBool();
+        shaderUsesTime = root.Has("shaderUsesTime") && root["shaderUsesTime"].AsBool();
         if (root.Has("castsShadows")) castsShadows = root["castsShadows"].AsBool();
         if (root.Has("unlit")) unlit = root["unlit"].AsBool();
         if (root.Has("lightingChannels")) lightingChannels = root["lightingChannels"].AsInt();
@@ -374,6 +376,7 @@ bool Material::SaveToFile(const std::string& path) const
     root.Set("heightMaxSteps", JsonValue(heightMaxSteps));
     root.Set("occlusionStrength", JsonValue(occlusionStrength));
     root.Set("doubleSided", JsonValue(doubleSided));
+    if (shaderUsesTime) root.Set("shaderUsesTime", JsonValue(shaderUsesTime));
     root.Set("castsShadows", JsonValue(castsShadows));
     root.Set("unlit", JsonValue(unlit));
     root.Set("lightingChannels", JsonValue(lightingChannels));

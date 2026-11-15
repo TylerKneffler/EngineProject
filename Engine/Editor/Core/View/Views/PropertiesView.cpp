@@ -1,3 +1,4 @@
+#include "Core/Rendering/DetailBudget.h"
 #include "PropertiesView.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 #include "Core/Compoonents/Materials/Texture.h"
@@ -28,6 +29,26 @@ PropertiesView::PropertiesView()
 
 namespace
 {
+// Project layer picker. Returns true and the new index when it changes.
+bool DrawLayerCombo(Engine::Editor::IEditorUi& ui, int current, bool mixed,
+    int& selected)
+{
+    const auto layers = Engine::Rendering::DetailBudget::Get().GetLayers();
+    std::vector<std::string> names;
+    for (size_t i = 0; i < layers.size(); ++i)
+        names.push_back(std::to_string(i) + ": " + layers[i].name);
+    // An index beyond the list (layer removed) stays visible until changed.
+    if (current >= static_cast<int>(names.size()))
+        for (int i = static_cast<int>(names.size()); i <= current; ++i)
+            names.push_back(std::to_string(i) + ": (missing)");
+    std::vector<const char*> items;
+    for (const auto& name : names) items.push_back(name.c_str());
+    selected = std::max(0, current);
+    ui.SetNextItemMixedValue(mixed);
+    return ui.Combo("Layer", &selected, items.data(), static_cast<int>(items.size())) &&
+        selected != current;
+}
+
 bool IsObjectInScene(const Engine::Scene::Scene* scene,
     const Engine::Core::Object* object)
 {
@@ -158,6 +179,21 @@ void PropertiesView::DrawMultiSelection(IEditorUi& ui)
         for (Engine::Core::Object* object : m_selectedObjects)
         {
             enabled ? object->Enabled() : object->Disabled();
+            object->InvalidatePrefabOverrideCache();
+        }
+        if (OnComponentsChanged) OnComponentsChanged();
+    }
+
+    bool sameLayer = true;
+    const int firstLayer = m_selectedObjects.front()->layer;
+    for (Engine::Core::Object* object : m_selectedObjects)
+        sameLayer &= object->layer == firstLayer;
+    int layer = 0;
+    if (DrawLayerCombo(ui, firstLayer, !sameLayer, layer))
+    {
+        for (Engine::Core::Object* object : m_selectedObjects)
+        {
+            object->layer = layer;
             object->InvalidatePrefabOverrideCache();
         }
         if (OnComponentsChanged) OnComponentsChanged();
@@ -589,6 +625,14 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
     if (header.enabledChanged)
     {
         enabled ? m_selectedObject->Enabled() : m_selectedObject->Disabled();
+        m_selectedObject->InvalidatePrefabOverrideCache();
+        if (OnComponentsChanged)
+            OnComponentsChanged();
+    }
+    int layer = 0;
+    if (DrawLayerCombo(ui, m_selectedObject->layer, false, layer))
+    {
+        m_selectedObject->layer = layer;
         m_selectedObject->InvalidatePrefabOverrideCache();
         if (OnComponentsChanged)
             OnComponentsChanged();
