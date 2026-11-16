@@ -2,6 +2,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
+#include <mutex>
 #include <vector>
 #include <glm/glm.hpp>
 
@@ -35,11 +37,21 @@ public:
         const uint32_t* indices = nullptr;
         size_t indexCount = 0;
         glm::mat4 world{ 1.f };
+        // Optional local-space bounds. Occluders whose projected bounds are
+        // narrower or shorter than minimumPixels (buffer pixels), or off
+        // screen, are skipped untransformed. Below 2 pixels nothing survives
+        // the erosion; meshes use more, so only large ones pay their cost.
+        glm::vec3 boundsMinimum{ 0.f }, boundsMaximum{ 0.f };
+        bool hasBounds = false;
+        float minimumPixels = 2.f;
+        // Changes whenever the geometry behind the pointers changes; part of
+        // the reuse key (OcclusionBufferCache).
+        uint64_t revision = 0;
     };
 
     struct Statistics
     {
-        uint64_t occluders = 0, triangles = 0, rasterizedTriangles = 0;
+        uint64_t occluders = 0, skippedOccluders = 0, triangles = 0, rasterizedTriangles = 0;
         double buildMilliseconds = 0.0;
     };
 
@@ -69,9 +81,15 @@ public:
     // The game view publishes what its buffer did each frame (benchmark log).
     struct FrameStatistics
     {
-        uint64_t occluders = 0, triangles = 0, rasterizedTriangles = 0;
+        uint64_t occluders = 0, skippedOccluders = 0, triangles = 0, rasterizedTriangles = 0;
+        // Of occluders: opaque mesh placements (rocks, logs), not terrain.
+        uint64_t meshOccluders = 0;
         uint32_t tested = 0, hidden = 0;
+        // The previous frame's buffer was reused (same camera and occluders).
+        bool reused = false;
         double buildMilliseconds = 0.0;
+        // Time the render thread spent waiting for the build job.
+        double waitMilliseconds = 0.0;
     };
     static void PublishFrameStatistics(const FrameStatistics& statistics);
     static FrameStatistics LastFrameStatistics();
@@ -89,5 +107,30 @@ private:
     std::vector<glm::ivec2> m_levelSizes;
     std::vector<float> m_empty;
     Statistics m_statistics;
+};
+
+// Keeps the last built buffer and returns it again while the camera and the
+// occluder set are unchanged (bit-identical view-projection, same geometry
+// pointers, revisions and transforms), so a still camera costs nothing.
+class OcclusionBufferCache
+{
+public:
+    std::shared_ptr<const OcclusionBuffer> Acquire(const glm::mat4& viewProjection, float aspect,
+        const std::vector<OcclusionBuffer::Occluder>& occluders, bool& reused);
+    void Clear();
+
+private:
+    struct Key
+    {
+        const void* vertices; size_t vertexStride, vertexCount;
+        const uint32_t* indices; size_t indexCount;
+        glm::mat4 world;
+        uint64_t revision;
+    };
+    std::mutex m_mutex;
+    std::shared_ptr<const OcclusionBuffer> m_buffer;
+    glm::mat4 m_viewProjection{ 0.f };
+    float m_aspect = 0.f;
+    std::vector<Key> m_keys;
 };
 }

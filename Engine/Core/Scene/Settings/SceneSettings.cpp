@@ -138,7 +138,8 @@ void DeserializeSceneSettings(Engine::Model::SceneSettings& settings, const Engi
         return;
     if (const auto* quality = FindField(value, "graphicsQuality")) {
         if (const auto* preset = FindField(*quality, "preset"))
-            settings.graphicsQuality.preset = std::clamp(preset->AsInt(), 0, 3);
+            settings.graphicsQuality.preset = std::clamp(preset->AsInt(), 0,
+                Engine::Model::GraphicsQualitySettings::AutoPreset);
         auto channels = Engine::Model::GraphicsQualitySettings::Channels(settings.graphicsQuality.overrides);
         for (size_t i=0;i<channels.size();++i)
             if (const auto* field = FindField(*quality, Engine::Model::GraphicsQualitySettings::Keys[i]))

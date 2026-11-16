@@ -680,3 +680,179 @@ Target: sustained **100+ FPS** in the 2,048-tree forest at **1920x1080** on the 
 - [x] Record effective D3D shader optimization/debug settings in performance provenance. DX11/DX12 compile from source and have no persistent shader bytecode cache requiring a cache-key update.
 - [x] Profile unchanged-state work within command recording. In the stationary normal Oak standalone Game capture (Release DX12, RTX A2000 Laptop GPU, 1920x1080; 300 warmup and 180 measured frames), command recording median/p95 was 5.367/7.870 ms, including material 1.262/2.001 ms and batching 0.461/0.723 ms. Material pipeline resolution was 0.057/0.107 ms, geometry binding 0.028/0.052 ms, and other material work 1.173/1.852 ms; batch snapshot, build, and wait medians were 0.254, 0.151, and 0.187 ms. All measured frames reported a batch cache hit with 504 reused keys and a shader pipeline cache hit with zero misses. These stages are nested or may overlap; do not sum them. Evidence: `.local/performance-logs/oak-standalone/oak_meadow-game-dx12-20261112-111543-051/frames.jsonl`. The earlier 19.3/4.1/2.6 ms measurements were from a different workload and are not a matched comparison.
 - [x] Reuse unchanged draw/material preparation and batch metadata. Exact unchanged batch inputs reuse grouped membership; Game batching skips editor-only selection lookup; view inverse, direction and view-projection are prepared once per view instead of per draw. A focused 504-input CPU test measured 0.015 ms reuse versus 0.045 ms forced regrouping. A normal Oak Release DX12 capture measured batch build median/p95 0.092/0.176 ms versus 0.151/0.243 ms in the earlier capture, but variable CPU/GPU timings and an intervening noisy run limit the comparison. Further lifetime and multi-view validation remains a separate item. Capture: `.local/performance-logs/oak-standalone/oak_meadow-game-dx12-20261112-113312-447/frames.jsonl`.
+
+
+## Occlusion culling for all objects
+
+### Route
+
+The backends do not expose the main depth buffer to shaders, and compute
+passes bind only buffers (three fixed bindings: input, output, placement
+pool). A GPU depth pyramid would need that plumbing in DX11, DX12 and
+Vulkan first.
+
+So occlusion starts as a **CPU occlusion buffer**
+(`Engine/Core/Rendering/OcclusionBuffer.h`), built for the current frame:
+
+- No one-frame lag, and no trouble with objects coming into view in fast
+  turns.
+- It works on every backend.
+- Occluders are the terrain meshes drawn this frame (their vertices stay on
+  the CPU), rasterized at 256 × 144. Other meshes are added later (step 4).
+
+### Done (stage A)
+
+- [x] **Occlusion buffer:**
+  - Terrain is rasterized on worker threads with near-plane clipping, row
+    bands and centre sampling.
+  - A 3×3 erosion keeps partly covered silhouette pixels from hiding
+    anything.
+  - A max-depth mip pyramid answers box and sphere tests in at most 9
+    reads.
+  - Bounds crossing the near plane or wholly off screen count as visible.
+- [x] **Build:**
+  - It runs as a job started right after the camera matrix, alongside the
+    cascade and lighting preparation. Shadow views do not use it.
+  - It is off for editor views, portal views and warp volumes, like the
+    existing terrain tests.
+  - `ENGINE_VISIBILITY_OCCLUSION_BUFFER=0` turns it off.
+- [x] **Ordinary objects and whole instanced tiles:** their world bounds are
+      tested in `PrepareVisibleItems`, next to `HiddenByTerrain` /
+      `HiddenBySolid`. Skinned, morphing, offset, blended, preview, portal
+      and warped items are skipped.
+- [x] **Detail budget:** the cost model drops placements hidden behind
+      terrain before its disc coverage grid, so they cost nothing.
+- [x] **Benchmark fields:** `occlusion_occluders`, `occlusion_triangles`,
+      `occlusion_rasterized`, `occlusion_build_ms`, `occlusion_tested`,
+      `occlusion_hidden`.
+- [x] **Unit tests:** `.local/tests/OcclusionBufferTests.cpp` (CMake target
+      `OcclusionBufferTests`, guarded like the other local tests). It covers
+      hidden and visible cases, silhouettes, the near plane, off-screen
+      bounds and the empty buffer, plus tiny-occluder skipping, seamed
+      strips and the reuse cache. The first version was never committed;
+      it was rewritten and the `.gitignore` exception added.
+
+### Measured (landscape demo start view, 1080p, RTX 4090)
+
+| Backend | Build | Triangles in / rasterized | Items tested / hidden |
+|---------|-------|---------------------------|-----------------------|
+| DX12    | 0.7–1.3 ms | 97k / 24k | about 976 / 23 |
+| DX11    | 1.3 ms     |           | 942 / 23 |
+| Vulkan  | 1.2 ms     |           | 976 / 23 |
+
+- With the detail scale pinned at 1, frames with occlusion on and off are
+  identical apart from wind in the near grass, so nothing visible is
+  dropped.
+- The render thread pays about 0.9 ms, waiting on the build.
+- In this meadow view, terrain hides only about 2% of tested items, and
+  GPU geometry time does not change measurably. The landscape's hills are
+  low (at most about 120 m), and most hidden placements sit inside tiles
+  that are partly visible, so stage B is where the gain should come from.
+- With the budget adapting, hidden placements count as free, so the
+  budget settles higher (scale 1.41 against 1.25). The grass layer's
+  spawn radius grows with it, and that CPU work is outside the budget.
+  The demo is currently CPU-bound at about 21 ms a frame, with GPU geometry
+  at about 5.5 ms.
+
+### Done (stage B)
+
+- [x] **Fourth compute read binding:**
+  - DX11: `t2`.
+  - DX12: a fifth root parameter, SRV `t2`.
+  - Vulkan: binding 3, with the compute descriptor pool grown to four
+    buffers per set. The extra binding is cleared whenever a compute
+    pipeline is set.
+- [x] **GPU upload:** the occlusion buffer goes up once per view as a float
+      array (`OcclusionBuffer::SerializeForGpu`), using a ring of upload
+      buffers per prepared frame slot. An empty buffer (level count 0) is
+      bound for shadow passes and when occlusion is off.
+- [x] **Instance cull:** `InstanceCull.hlsl` (`IsBoxOccluded`, matching
+      `IsBoxHidden`) tests every placement in the per-placement path (trees,
+      rocks, grass tiles) and every instance in the automatic path, in
+      camera passes only. `ENGINE_VISIBILITY_OCCLUSION_GPU=0` turns this off
+      and keeps the CPU tests.
+- [x] **Debug overlay:** `ENGINE_OCCLUSION_DEBUG=1` with the Detail render
+      mode keeps everything occlusion would hide and paints it magenta, so
+      any magenta on screen is something visible that would have been
+      culled. `=2` marks everything tested, as a check that the overlay
+      works.
+
+#### Results (landscape demo start view, detail scale pinned at 1)
+
+- **Placements hidden:** LOD0 foliage placements selected fall from about
+  15,500 to about 900 (94% hidden behind terrain). DX12, DX11 and Vulkan
+  agree.
+- **No visible errors:** the debug overlay shows no magenta pixels in the
+  start and west views on all three backends. The control mode paints the
+  whole ground and every tree magenta.
+- **GPU time:** tree leaves fall from 0.71–0.86 ms to 0.52–0.54 ms, and
+  foliage depth from 1.24–1.27 ms to 1.04–1.19 ms.
+- **Not comparable yet:** total frame times. The explorer's start position
+  currently varies from run to run, so paired runs do not share a camera.
+### Done (build cost)
+
+Measured on an RTX A2000 laptop, landscape start view, DX12, 1080p. Run-to-run
+variance on this machine is large, so the figures are approximate.
+
+| | Before | After |
+|---|---|---|
+| Build, camera moving (`ENGINE_VISIBILITY_OCCLUSION_REUSE=0`) | 3.08 ms | 2.02 ms |
+| Render-thread wait, camera moving | 2.55 ms | 1.68 ms |
+| Build, camera still | 3.08 ms | 0.06 ms, no wait |
+| Items tested / hidden | 942 / 23 | 942 / 23 |
+
+- [x] **Start the job earlier:** it is submitted right after the camera
+      matrix, overlapping light collection, clustered lighting, shadow
+      cascades and environment preparation. Field `occlusion_wait_ms`.
+- [x] **Reuse while still:** `OcclusionBufferCache` returns the previous
+      buffer when the view-projection, occluder pointers, transforms and
+      revisions are bit-identical (field `occlusion_reused`). The key uses
+      `Mesh::GetCpuGeometryRevision()`, drawn from one process-wide counter
+      and bumped by `SetTerrainGeometry`, `TakeTerrainGeometry` and
+      `SetDeformedVertices`.
+- [x] **Skip tiny occluders:** projected bounds below a per-occluder minimum
+      (2 buffer pixels for terrain), off screen or wholly behind the camera
+      are skipped before vertex work (field `occlusion_skipped`). No terrain
+      tile is skipped in the start view.
+- [x] **Faster build:** vertices transformed and projected once each, in
+      chunks of 4096; triangles set up in chunks of 2048, each binned by band
+      on its worker (replacing the serial binning pass); raster uses edge
+      stepping and keeps the largest 1/w per pixel. Raster fell from 1.02 to
+      0.34 ms; setup is the remaining bulk (~1.3–1.6 ms).
+- Not met: under 0.5 ms with a moving camera. A serial build takes 6.6 ms
+  for setup alone, so the parallel batches matter, but they queue behind the
+  frame's other jobs in the shared `JobScheduler` FIFO.
+
+### Done (mesh occluders, off by default)
+
+- [x] **Large opaque meshes as occluders:** instanced placements with an
+      opaque material (`MaterialAlphaMode::Opaque`), no wind
+      (`foliageWindStrength == 0`), not skinned or morphing. Each uses its
+      lowest LOD band's source geometry, shrunk 10% toward its bounds
+      centre so a simplified surface never sticks out past the drawn one.
+      A bounding-sphere estimate rejects placements behind the camera or
+      under 6 buffer pixels before any record is made. Field
+      `occlusion_mesh_occluders`.
+- [x] **Foliage stays out:** masked and blended materials and anything with
+      wind never occlude.
+- **Off by default** (`ENGINE_VISIBILITY_OCCLUSION_MESHES=1` enables it).
+  In the landscape demo the start view keeps 0 of ~2,000 rock and log
+  placements (all too small), and the job costs 0.51 ms instead of 0.14 ms.
+  A drive-forward run drew up to 7 rocks or logs as occluders, but showed
+  no clear gain in hidden items (median 21 against 25 with them off; the
+  runs follow different camera paths) and a higher build median (2.9 against
+  2.2 ms). The magenta overlay stays clean with them on. Worth enabling for
+  scenes with buildings or other large solid meshes.
+
+- [x] Find out why few trees near the landscape start view get LOD0.
+      Not a bug; three factors stack. Authored LOD0 is 60 m; screen coverage
+      (camera FOV wider than the 60° reference) × 0.872 gives 52.3 m; the
+      detail budget at its 0.6 floor (applied 0.636) gives ≈ 33 m, before
+      placement scale (÷ 0.8–1.25). The nearest meadow trees are about
+      40–60 m away, so they draw LOD1. Pinned at scale 1
+      (`ENGINE_DETAIL_SCALE=1`) the nearest two reach LOD0, as authored.
+      The budget sits at its floor because the absolute 6 ms GPU geometry
+      budget (`DetailBudgetSettings::geometryBudgetMs`, tuned on an RTX 4090)
+      cannot be met on the RTX A2000 laptop: after 3 ms of terrain only 3 ms
+      remain for ~8 ms of LOD-dependent work, so the cost budget collapses
+      to 1. Fix: auto quality (below).

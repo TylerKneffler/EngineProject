@@ -1,4 +1,5 @@
 #include "Core/Rendering/DetailBudget.h"
+#include "Core/Rendering/AutoQuality.h"
 #include "Core/Rendering/MaterialCachePolicy.h"
 #include "Game/Application/GameApplication.h"
 
@@ -885,6 +886,12 @@ int GameApplication::Run(HINSTANCE instance, const GameBenchmarkOptions* benchma
         scene.Load(loadedScenePath);
     }
 
+    // Diagnostics: ENGINE_QUALITY_PRESET selects the graphics quality preset
+    // (0 Reference .. 3 Low, 4 Auto) without editing the scene, e.g. for
+    // captures.
+    if (const char* preset = std::getenv("ENGINE_QUALITY_PRESET"))
+        scene.settings.graphicsQuality.preset = std::clamp(std::atoi(preset), 0,
+            Engine::Model::GraphicsQualitySettings::AutoPreset);
     scene.Start();
     std::unique_ptr<GameBenchmark> gameBenchmark;
     if (benchmark)
@@ -921,6 +928,17 @@ int GameApplication::Run(HINSTANCE instance, const GameBenchmarkOptions* benchma
             static_cast<float>(currentCounter.QuadPart - lastCounter.QuadPart) /
             static_cast<float>(performanceFrequency.QuadPart);
         lastCounter = currentCounter;
+        // Auto quality holds the frame-time target: the FPS limit when one is
+        // set, otherwise the scene's render-scale target. The frame's work
+        // time leaves out the limiter's sleep.
+        {
+            const double targetMs = settings.gameMaxFps > 0
+                ? 1000.0 / settings.gameMaxFps : static_cast<double>(scene.settings.renderScaleTargetMs);
+            const double workMs = std::max(0.0, (static_cast<double>(deltaTime) - gameFramePacer.LastWaitSeconds()) * 1000.0);
+            Engine::Rendering::AutoQuality::Get().Update(
+                scene.settings.graphicsQuality.preset == Engine::Model::GraphicsQualitySettings::AutoPreset,
+                workMs, targetMs, deltaTime);
+        }
 
         const uint32_t width = window->GetWidth();
         const uint32_t height = window->GetHeight();

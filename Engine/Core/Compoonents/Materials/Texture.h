@@ -63,8 +63,13 @@ public:
     static std::vector<StreamingTextureInfo> GetStreamingInventory();
     static void StreamFrame(IGraphicsProvider* provider);
     // Called for every submitted color/shadow view, outside material caches.
-    void RequestMipFootprint(float pixelsPerUvRepeat);
-    static void RequestGraphicsFootprint(const IGraphicsTexture*, float pixelsPerUvRepeat);
+    // pixelsPerUvRepeat picks the mip the surface needs; screenCoverage (the
+    // fraction of the view the surface covers, summed over requests) ranks
+    // textures when the budget is short: mips go first where they show least.
+    // A negative coverage means unknown and counts as the whole screen.
+    void RequestMipFootprint(float pixelsPerUvRepeat, float screenCoverage = -1.f);
+    static void RequestGraphicsFootprint(const IGraphicsTexture*, float pixelsPerUvRepeat,
+        float screenCoverage = -1.f);
     uint32_t GetResidentFirstMip() const { return m_residentFirstMip; }
     uint32_t GetDemandFirstMip() const { return m_demandFirstMip; }
     void RetainPixelsForCpu() { m_retainPixelsForCpu = true; }
@@ -113,6 +118,7 @@ private:
     bool m_decodeFailed = false;
     uint64_t m_generation = 0;
     std::atomic<float> m_projectedPixels{0.f};
+    std::atomic<float> m_screenCoverage{0.f};
     uint32_t m_residentFirstMip = 0, m_demandFirstMip = 0, m_pendingFirstMip = 0;
     uint32_t m_targetFirstMip = 0;
     uint32_t m_fallbackFirstMip = 0;

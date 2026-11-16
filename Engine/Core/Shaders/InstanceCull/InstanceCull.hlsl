@@ -6,7 +6,8 @@ struct CullConstants
     float4x4 viewProjection;
     float4 cameraPosition;
     uint4 counts; // instance count, vertex/index count, indexed, reset phase
-    int4 selection; // target LOD, mode, maximum LOD, flags (1 shadow, 2 per-placement bands)
+    int4 selection; // target LOD, mode, maximum LOD, flags (1 shadow, 2 per-placement bands,
+                    // 4 occlusion, 8/16 occlusion debug, 32 placement-scaled band distances)
 };
 #ifdef VULKAN
 [[vk::push_constant]] CullConstants constants;
@@ -125,12 +126,18 @@ void CSMain(uint3 id : SV_DispatchThreadID, uint3 group : SV_GroupID, uint3 thre
                 // Conservative per-placement bands. Shader dithering resolves the
                 // overlap; testing the tile center would lose trees at boundaries.
                 const float3 delta=abs(worldCenter.xyz-constants.cameraPosition.xyz);
+                // Screen coverage (bit 32): a placement scaled by s covers s
+                // times the pixels, so its distance counts as distance / s
+                // (Core/Rendering/ScreenCoverage.h). Object.hlsl divides the
+                // same way for geometryFade.w 5; keep the clamp in sync.
+                const float coverage=(constants.selection.w & 32)!=0
+                    ? clamp(length(placement.row0.xyz),0.25,4.0) : 1.0;
                 // Shadow vertices are static. Color vertices can bend in wind,
                 // so retain their original conservative spherical envelope.
-                const float nearest=shadowPass ? length(max(delta-worldExtent,0.0))
-                    : length(delta)-radius;
-                const float farthest=shadowPass ? length(delta+worldExtent)
-                    : length(delta)+radius;
+                const float nearest=(shadowPass ? length(max(delta-worldExtent,0.0))
+                    : length(delta)-radius)/coverage;
+                const float farthest=(shadowPass ? length(delta+worldExtent)
+                    : length(delta)+radius)/coverage;
                 // Object.hlsl picks each placement's band from the distance to
                 // its origin and dissolves the whole placement over
                 // InstanceLodFadeWidth either side of a switch; keep in sync.

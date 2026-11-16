@@ -1,3 +1,4 @@
+#include "Core/Rendering/AutoQuality.h"
 #include "Core/Rendering/DetailBudget.h"
 #include "Core/Rendering/OcclusionBuffer.h"
 #include "Game/Benchmark/GameBenchmark.h"
@@ -112,6 +113,8 @@ GameBenchmarkSceneSample GameBenchmark::CollectScene(Engine::Scene::Scene& scene
         result.cameraPosition[0] = position.x;
         result.cameraPosition[1] = position.y;
         result.cameraPosition[2] = position.z;
+        const glm::vec3 forward = glm::normalize(glm::vec3(glm::inverse(camera->GetViewMatrix())[2]));
+        for (int axis = 0; axis < 3; ++axis) result.cameraForward[axis] = forward[axis];
     }
     if (!result.camera) result.render = {};
     result.objects = scene.GetObjects().size();
@@ -242,6 +245,19 @@ void GameBenchmark::Record(uint64_t frame, const GameBenchmarkFrameSample& s)
         << ",\"occlusion_triangles\":" << Engine::Rendering::OcclusionBuffer::LastFrameStatistics().triangles
         << ",\"occlusion_rasterized\":" << Engine::Rendering::OcclusionBuffer::LastFrameStatistics().rasterizedTriangles
         << ",\"occlusion_build_ms\":" << Engine::Rendering::OcclusionBuffer::LastFrameStatistics().buildMilliseconds
+        << ",\"occlusion_wait_ms\":" << Engine::Rendering::OcclusionBuffer::LastFrameStatistics().waitMilliseconds
+        << ",\"occlusion_mesh_occluders\":" << Engine::Rendering::OcclusionBuffer::LastFrameStatistics().meshOccluders
+        << ",\"occlusion_skipped\":" << Engine::Rendering::OcclusionBuffer::LastFrameStatistics().skippedOccluders
+        << ",\"occlusion_reused\":" << (Engine::Rendering::OcclusionBuffer::LastFrameStatistics().reused ? "true" : "false")
+        << ",\"auto_quality_active\":" << (Engine::Rendering::AutoQuality::Get().GetStatus().active ? "true" : "false")
+        << ",\"auto_quality_target_ms\":" << Engine::Rendering::AutoQuality::Get().GetStatus().targetMs
+        << ",\"auto_quality_frame_ms\":" << Engine::Rendering::AutoQuality::Get().GetStatus().frameMs
+        << ",\"auto_quality_vegetation\":" << Engine::Rendering::AutoQuality::Get().GetStatus().values.vegetation
+        << ",\"auto_quality_view_distance\":" << Engine::Rendering::AutoQuality::Get().GetStatus().values.viewDistance
+        << ",\"auto_quality_texture\":" << Engine::Rendering::AutoQuality::Get().GetStatus().values.texture
+        << ",\"auto_quality_material\":" << Engine::Rendering::AutoQuality::Get().GetStatus().values.material
+        << ",\"auto_quality_shadows\":" << Engine::Rendering::AutoQuality::Get().GetStatus().values.shadows
+        << ",\"detail_geometry_budget_ms\":" << Engine::Rendering::DetailBudget::Get().GetSettings().geometryBudgetMs
         << ",\"occlusion_tested\":" << Engine::Rendering::OcclusionBuffer::LastFrameStatistics().tested
         << ",\"occlusion_hidden\":" << Engine::Rendering::OcclusionBuffer::LastFrameStatistics().hidden
         << ",\"texture_budget_mib\":" << Engine::Rendering::DetailBudget::Get().GetTextureBudgetStatus().budgetBytes / 1048576
@@ -294,6 +310,8 @@ void GameBenchmark::Record(uint64_t frame, const GameBenchmarkFrameSample& s)
         << ",\"game_camera_present\":" << (s.scene.camera ? "true" : "false")
         << ",\"game_camera_position\":[" << s.scene.cameraPosition[0] << ','
         << s.scene.cameraPosition[1] << ',' << s.scene.cameraPosition[2] << ']'
+        << ",\"game_camera_forward\":[" << s.scene.cameraForward[0] << ','
+        << s.scene.cameraForward[1] << ',' << s.scene.cameraForward[2] << ']'
         << ",\"draws_candidate\":" << r.candidateDraws
         << ",\"draws_submitted\":" << r.physicalDraws
         << ",\"foliage_depth_draws\":" << r.foliageDepthDraws

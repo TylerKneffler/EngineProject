@@ -168,6 +168,11 @@ public:
     }
     const std::vector<uint32_t>& GetIndices() const { return m_indices; }
     uint64_t GetAuthoredGeometryRevision() const { return m_authoredGeometryRevision; }
+    // Changes whenever CPU positions change without an authored revision:
+    // terrain geometry replaced or taken, or deformed vertices written.
+    // Drawn from one process-wide counter, so no two such changes (even in
+    // different meshes) share a value.
+    uint64_t GetCpuGeometryRevision() const { return m_cpuGeometryRevision; }
     float GetTextureUvWorldScale(uint32_t uvSet = 0) const;
     struct PoseSnapshot
     {
@@ -399,6 +404,8 @@ private:
     std::vector<TerrainVertex> m_terrainVertices;
     std::vector<uint32_t> m_indices;
     uint64_t m_authoredGeometryRevision = 1;
+    uint64_t m_cpuGeometryRevision = 0;
+    static uint64_t NextCpuGeometryRevision();
     mutable uint64_t m_textureUvRevision = 0;
     mutable std::array<float,2> m_textureUvScale{};
     std::shared_ptr<IGraphicsBuffer> m_vertexBuffer;

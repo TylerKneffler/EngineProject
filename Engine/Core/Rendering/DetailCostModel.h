@@ -51,6 +51,10 @@ struct DetailCostInput
     glm::vec3 cameraPosition{ 0.f };
     // Optional: placements hidden behind terrain cost nothing.
     std::shared_ptr<const OcclusionBuffer> occlusion;
+    // Screen coverage (ScreenCoverage.h): a placement scaled by s keeps each
+    // band out to s times the distance, as the GPU cull and Object.hlsl do.
+    // Band distances arrive already scaled by the view's coverage scale.
+    bool placementScaleLod = false;
     float viewportWidth = 1920.f, viewportHeight = 1080.f;
 };
 

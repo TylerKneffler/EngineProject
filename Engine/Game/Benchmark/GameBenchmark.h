@@ -32,6 +32,9 @@ struct GameBenchmarkSceneSample
     uint64_t sceneGeneration = 0;
     bool camera = false;
     double cameraPosition[3]{};
+    // View direction (inverse view matrix z axis), to check paired runs
+    // share a camera.
+    double cameraForward[3]{};
 };
 
 struct GameBenchmarkFrameSample

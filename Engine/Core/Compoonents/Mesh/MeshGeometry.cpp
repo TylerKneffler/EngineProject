@@ -30,6 +30,7 @@ namespace Engine::Components
 {
 bool Mesh::SetDeformedVertices(const std::vector<Vertex>& vertices)
 {
+    m_cpuGeometryRevision = NextCpuGeometryRevision();
     const size_t byteSize = vertices.size() * sizeof(Vertex);
     if (byteSize == 0 ||
         (vertices.size() == m_vertices.size() &&
@@ -88,6 +89,7 @@ bool Mesh::SetDeformedVertices(const std::vector<Vertex>& vertices)
 
 bool Mesh::SetDeformedVertices(std::vector<Vertex>&& vertices)
 {
+    m_cpuGeometryRevision = NextCpuGeometryRevision();
     const size_t byteSize = vertices.size() * sizeof(Vertex);
     if (byteSize == 0 ||
         (vertices.size() == m_vertices.size() &&

@@ -479,8 +479,12 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
             ui.Separator();
             ui.Label("Graphics Quality");
             auto& quality = m_scene->settings.graphicsQuality;
-            const char* presets[] = {"Reference (authored)", "High", "Medium", "Low"};
-            bool qualityChanged = ui.Combo("Preset", &quality.preset, presets, 4);
+            const char* presets[] = {"Reference (authored)", "High", "Medium", "Low", "Auto"};
+            bool qualityChanged = ui.Combo("Preset", &quality.preset, presets, 5);
+            if (quality.preset == Engine::Model::GraphicsQualitySettings::AutoPreset)
+                ui.Tooltip("Auto adjusts shadows, vegetation, view distance, texture and material quality "
+                    "while the game runs, for the best quality that holds the frame-time target "
+                    "(the game's FPS cap, or Render Scale Target ms when uncapped). Overrides below cap it.");
             auto channels = Engine::Model::GraphicsQualitySettings::Channels(quality.overrides);
             for (size_t i=0;i<channels.size();++i) {
                 qualityChanged |= ui.DragFloat(Engine::Model::GraphicsQualitySettings::Keys[i], channels[i], .05f, -1.f, 1.f);

@@ -199,7 +199,10 @@ void DetailBudget::ReportGeometryCost(uint64_t sampleId, double geometryMs, doub
             // The CPU render budget only drives the reactive controller below:
             // recording cost barely depends on instanced LOD distances, and
             // letting it hold this budget pinned detail at the minimum.
-            m_costBudget = std::max(m_costBudget, 1.0);
+            // Never below what the minimum scale costs: the target is the
+            // minimum either way, and when headroom returns the budget grows
+            // from there instead of doubling up from nothing.
+            m_costBudget = std::max({ m_costBudget, 1.0, m_curve.CostAt(minimum) });
             m_modelTarget = m_curve.LargestScaleWithin(m_costBudget, minimum, maximum);
             const float current = GlobalScale();
             const float blend = static_cast<float>(1.0 - std::exp(-dt / (.5 * m_settings.responseSeconds)));
@@ -218,6 +221,12 @@ void DetailBudget::ReportGeometryCost(uint64_t sampleId, double geometryMs, doub
         }
     }
     PublishScales(dt);
+}
+
+void DetailBudget::SetGeometryBudgetMs(float milliseconds)
+{
+    std::lock_guard lock(m_mutex);
+    m_settings.geometryBudgetMs = std::max(.1f, milliseconds);
 }
 
 void DetailBudget::SetFixedGlobalScale(float scale)

@@ -70,6 +70,9 @@ public:
     // Test and tool hook: fixes the global scale (and disables adaptation
     // until the next Configure).
     void SetFixedGlobalScale(float scale);
+    // GPU geometry budget in milliseconds. Auto quality sets it from its
+    // frame-time target; Configure restores the project value.
+    void SetGeometryBudgetMs(float milliseconds);
 
     // Predicted cost of the main view's LOD'd instances at every scale (see
     // DetailCostModel.h). While a recent curve exists, the scale is the

@@ -1,6 +1,7 @@
 #include "Core/Scene/Rendering/SceneRenderer/SceneRendererLodSelection.h"
 
 #include "Core/Compoonents/Mesh/Mesh.h"
+#include "Core/Rendering/DetailBudget.h"
 #include "Core/Rendering/RenderJobs.h"
 #include "Core/Scene/Rendering/SceneRenderer/SceneInstanceBatching.h"
 #include "Core/Scene/Rendering/SceneRenderer/SceneRendererDrawPreparation.h"
@@ -50,8 +51,10 @@ void SceneRendererLodSelection::Prepare(
             glm::length(glm::vec3(draw.objectData.world[1])),
             glm::length(glm::vec3(draw.objectData.world[2])));
         const float radius = glm::length(localExtent * axisLengths);
+        // Scaled like every other LOD distance of the draw (quality, detail
+        // budget, screen coverage), matching the GPU cull's final range.
         return std::max(0.f, glm::length(center - cameraPosition) - radius) >=
-            policy->finalLodCullDistance;
+            policy->finalLodCullDistance * draw.lodScale;
     };
     Engine::Rendering::RenderJobs::Get().For(draws.size(), 512,
         [&](size_t index)
@@ -137,7 +140,8 @@ void SceneRendererLodSelection::Prepare(
             continue;
         const int selected = ChooseScreen(*policy, minimum, maximum,
             draw.objectData.world, scene.GetObjectId(draw.object), 0, 0,
-            draw.gpuMaximumLod);
+            draw.gpuMaximumLod, Engine::Rendering::DetailBudget::Get().LayerLodScale(
+                draw.object ? draw.object->layer : 0));
         m_selectedLods[index] = draw.gpuLod == selected;
         if (draw.gpuLod == 0)
         {
@@ -185,7 +189,8 @@ int SceneRendererLodSelection::ChooseScreen(
     uint64_t identity,
     uint64_t placement,
     uint64_t domain,
-    int maximumLod)
+    int maximumLod,
+    float detailScale)
 {
     const std::array<uint64_t, 4> key{
         uint64_t(reinterpret_cast<uintptr_t>(m_camera)), identity, placement,
@@ -197,7 +202,8 @@ int SceneRendererLodSelection::ChooseScreen(
         thresholds.push_back(policy.screenLod2Pixels);
     const auto quality = m_scene->settings.graphicsQuality.Resolve();
     const float pixels = Engine::Rendering::ProjectedLodPixels(
-        minimum, maximum, world, m_screenView) * quality.geometry;
+        minimum, maximum, world, m_screenView) * quality.geometry *
+        (std::isfinite(detailScale) && detailScale > 0.f ? detailScale : 1.f);
     const int selected = Engine::Rendering::SelectScreenMeshLod(pixels,
         thresholds, entry->second.first, policy.screenLodHysteresis);
     entry->second = { std::min(selected, maximumLod), m_screenSerial };

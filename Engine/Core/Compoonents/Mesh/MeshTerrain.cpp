@@ -7,6 +7,7 @@
 #include "Core/Model/MeshPackAsset.h"
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Engine/Editor/UI/IEditorUi.h"
+#include <atomic>
 #include <fstream>
 #include <algorithm>
 #include <sstream>
@@ -85,6 +86,12 @@ Mesh::TerrainMeshData Mesh::BuildIndexedTerrain(
     return result;
 }
 
+uint64_t Mesh::NextCpuGeometryRevision()
+{
+    static std::atomic<uint64_t> s_revision{ 0 };
+    return s_revision.fetch_add(1, std::memory_order_relaxed) + 1;
+}
+
 bool Mesh::SetTerrainGeometry(TerrainMeshData&& geometry,
     bool retainExpandedVertices)
 {
@@ -97,6 +104,7 @@ bool Mesh::SetTerrainGeometry(TerrainMeshData&& geometry,
     OrientTerrainSurfaceUp(geometry.vertices, geometry.indices);
     m_terrainVertices = std::move(geometry.vertices);
     m_indices = std::move(geometry.indices);
+    m_cpuGeometryRevision = NextCpuGeometryRevision();
     m_vertices.clear();
     if (retainExpandedVertices)
     {
@@ -159,6 +167,7 @@ Mesh::TerrainMeshData Mesh::TakeTerrainGeometry()
     ClearRuntimeLods();
     ClearSurfaceOffsets();
     TerrainMeshData result{ std::move(m_terrainVertices), std::move(m_indices) };
+    m_cpuGeometryRevision = NextCpuGeometryRevision();
     m_vertices.clear();
     m_ready = false;
     m_hasBounds = false;

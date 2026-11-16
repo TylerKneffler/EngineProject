@@ -1,4 +1,5 @@
 #pragma once
+#include "Core/Rendering/ScreenCoverage.h"
 #include <glm/glm.hpp>
 #include <algorithm>
 #include <cmath>
@@ -8,10 +9,14 @@ namespace Engine::Rendering
 {
 // Conservative projective Jacobian bound, in pixels per local unit. Includes
 // FOV, zoom, actual target resolution, nonuniform scale and near-plane clipping.
+// screenCoverage, when given, receives the fraction of the view the box's
+// screen rectangle covers (ProjectedScreenCoverage), from the same corners.
 inline float ProjectedTextureFootprint(glm::vec3 low, glm::vec3 high,
-    const glm::mat4& localToClip, glm::vec2 viewport, float unitsPerUvRepeat)
+    const glm::mat4& localToClip, glm::vec2 viewport, float unitsPerUvRepeat,
+    float* screenCoverage = nullptr)
 {
     const float infinity=std::numeric_limits<float>::infinity();
+    if(screenCoverage) *screenCoverage=1.f;
     glm::vec4 clips[8];
     bool outside[6]={true,true,true,true,true,true};
     float minW=infinity,maxX=0.f,maxY=0.f;
@@ -25,9 +30,10 @@ inline float ProjectedTextureFootprint(glm::vec3 low, glm::vec3 high,
         outside[4]&=p.z < 0.f; outside[5]&=p.z > p.w;
         minW=std::min(minW,p.w);maxX=std::max(maxX,std::abs(p.x));maxY=std::max(maxY,std::abs(p.y));
     }
-    for(bool rejected:outside) if(rejected) return 0.f;
+    for(bool rejected:outside) if(rejected) { if(screenCoverage) *screenCoverage=0.f; return 0.f; }
     if(minW<=1e-5f || !(viewport.x>0.f && viewport.y>0.f)) return infinity;
     for(const auto& clip:clips) if(clip.z<=0.f) return infinity;
+    if(screenCoverage) *screenCoverage=ProjectedScreenCoverage(clips);
     const auto row=[&](int i) { return glm::vec3(localToClip[0][i],localToClip[1][i],localToClip[2][i]); };
     const float dw=glm::length(row(3))/(minW*minW);
     const float x=viewport.x*.5f*(glm::length(row(0))/minW+maxX*dw);

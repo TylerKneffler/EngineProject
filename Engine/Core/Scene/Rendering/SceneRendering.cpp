@@ -1,4 +1,5 @@
 #include "Core/Rendering/DetailBudget.h"
+#include "Core/Rendering/ScreenCoverage.h"
 #include "Core/Rendering/OcclusionBuffer.h"
 #include "pch.h"
 #include "Core/Rendering/ShadowReceiverCulling.h"
@@ -405,6 +406,236 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     const glm::mat4 inverseView = glm::inverse(view);
     const glm::vec3 cameraPosition = glm::vec3(inverseView[3]);
     const glm::vec3 cameraDirection = glm::normalize(glm::vec3(inverseView[2]));
+    const glm::mat4 viewProjection = proj * view;
+    // Detail follows screen coverage: LOD distances are authored for a
+    // reference camera, so they scale by this view's focal length in pixels
+    // (Core/Rendering/ScreenCoverage.h). Shadow views render with the main
+    // camera and viewport, so their bands match the color pass.
+    const float viewCoverageScale = Engine::Rendering::ViewLodCoverageScale(
+        proj[1][1], static_cast<float>(viewportHeight),
+        cam->orthographic || m_editorMode2D);
+    // Instanced LOD bands also scale per placement by its size. Object.hlsl
+    // reads geometryFade.w 5 (rather than 4) as "divide each placement's
+    // distance by its scale"; InstanceCull.hlsl takes selection.w bit 32.
+    const bool placementCoverageLod = Engine::Rendering::ScreenCoverageLodEnabled();
+    const float instanceBandFadeMode = placementCoverageLod ? 5.f : 4.f;
+    const auto resolvePortalTarget =[&](Engine::Components::SpatialManipulator* source)
+        -> Engine::Components::SpatialManipulator*
+    {
+        if (!source)
+            return nullptr;
+        if (Engine::Components::SpatialManipulator* target = source->ResolveTarget())
+            return target;
+        // Support older and edit-mode scenes whose serialized link exists on
+        // only one endpoint. Connections belong to manipulators, not meshes,
+        // so inspect every scene object rather than the render draw list.
+        for (Engine::Components::SpatialManipulator* candidate :
+            m_frameSpatialManipulatorScratch)
+        {
+            if (!candidate || candidate->Owner == source->Owner)
+                continue;
+            if (candidate->ResolveTarget() == source)
+                return candidate;
+        }
+        return nullptr;
+    };
+    const bool hasPortalViews = std::any_of(
+        m_frameSpatialManipulatorScratch.begin(),
+        m_frameSpatialManipulatorScratch.end(),
+        [&](Engine::Components::SpatialManipulator* portal)
+        {
+            if (!portal || !portal->Owner ||
+                !portal->Owner->IsEnabledInHierarchy() || !portal->enabled)
+                return false;
+            const auto mode = static_cast<Engine::Components::
+                SpatialManipulator::ConnectionMode>(portal->connectionMode);
+            if (mode != Engine::Components::SpatialManipulator::
+                    ConnectionMode::Portal &&
+                mode != Engine::Components::SpatialManipulator::
+                    ConnectionMode::LinkedPortal)
+                return false;
+            const auto* target = resolvePortalTarget(portal);
+            return target && target->enabled && target->Owner &&
+                portal->HasCompatiblePortalShapeWith(*target);
+        });
+    const bool terrainWarpActive = std::any_of(
+        m_frameSpatialManipulatorScratch.begin(),
+        m_frameSpatialManipulatorScratch.end(),
+        [](const Engine::Components::SpatialManipulator* manipulator)
+        {
+            return manipulator && manipulator->enabled &&
+                manipulator->definesWarpVolume && manipulator->Owner &&
+                manipulator->Owner->IsEnabledInHierarchy();
+        });
+    const bool useTerrainOcclusion = !shadowOnly && !includeEditorVisuals &&
+        !hasPortalViews && !m_editorMode2D && !terrainWarpActive;
+    // Software occlusion buffer for this camera: the terrain drawn this
+    // frame is rasterized at low resolution, and anything whose bounds lie
+    // entirely behind it is skipped (OcclusionBuffer.h). Terrain meshes keep
+    // their vertices on the CPU, so the occluders are exactly the drawn
+    // surface. Shadow views keep everything: hidden objects still cast.
+    // Frame items and their meshes stay unchanged for the whole Render call.
+    // The job starts as soon as the camera matrix is known, so it runs
+    // alongside the light, cluster, shadow-cascade and environment
+    // preparation below. A camera and occluder set identical to the last
+    // build reuses that buffer (OcclusionBufferCache).
+    struct OcclusionBufferResult
+    {
+        std::shared_ptr<const Engine::Rendering::OcclusionBuffer> buffer;
+        bool reused = false;
+        double jobMilliseconds = 0.0;
+        uint64_t meshOccluders = 0;
+    };
+    std::future<OcclusionBufferResult> occlusionBufferJob;
+    struct OcclusionBufferFence
+    {
+        std::future<OcclusionBufferResult>& job;
+        ~OcclusionBufferFence() { if (job.valid()) job.wait(); }
+    } occlusionBufferFence{occlusionBufferJob};
+    if (useTerrainOcclusion && ReadEnvFlag("ENGINE_VISIBILITY_OCCLUSION_BUFFER", true))
+        occlusionBufferJob = Engine::Rendering::RenderJobs::Get().Submit(
+            [this, &frameRenderItems, viewProjection,
+             projectionScale = glm::vec2(std::abs(proj[0][0]), std::abs(proj[1][1])),
+             aspect =static_cast<float>(std::max(1u, viewportWidth)) /
+                static_cast<float>(std::max(1u, viewportHeight))]()
+    {
+        const auto jobStart = std::chrono::steady_clock::now();
+        const bool reusable = ReadEnvFlag("ENGINE_VISIBILITY_OCCLUSION_REUSE", true);
+
+        // Large opaque placements (rocks, logs) also occlude: their lowest
+        // LOD, shrunk toward its centre so a simplified surface never sticks
+        // out past the drawn one. Foliage and cutout or blended materials
+        // only partly hide what is behind them and stay out.
+        // Off by default: in the landscape demo the rocks and logs are small
+        // on screen, so walking ~2,000 placements a frame cost 0.4-0.7 ms
+        // with no measurable gain in hidden items. Enable for scenes with
+        // large solid meshes (buildings): ENGINE_VISIBILITY_OCCLUSION_MESHES=1.
+        const bool meshOccluders = ReadEnvFlag("ENGINE_VISIBILITY_OCCLUSION_MESHES", false);
+        constexpr float MeshOccluderShrink = .9f;
+        constexpr float MeshOccluderPixels = 6.f;
+        std::vector<Engine::Rendering::OcclusionBuffer::Occluder> occluders;
+        uint64_t meshOccluderCount = 0;
+        for (const auto& item : frameRenderItems)
+        {
+            if (!item.mesh || item.blended || item.warpedVertexBuffer || item.traversalChartPortal)
+                continue;
+            if (!item.terrainSurface)
+            {
+                const auto* mesh = item.mesh;
+                const auto& data = mesh->GetInstanceData();
+                const auto* source = mesh->GetInstanceSource();
+                if (!meshOccluders || !mesh->IsInstanced() || !data || !source ||
+                    mesh->instanceLodBand < 0 || mesh->instanceLodBand != data->maximumLod ||
+                    mesh->foliageWindStrength > 0.f || item.skinnedMesh || item.hasMorphTargets ||
+                    !item.material || item.material->GetAlphaMode() !=
+                        Engine::Components::MaterialAlphaMode::Opaque ||
+                    !source->HasBounds()) continue;
+                const auto& vertices = source->GetVertices();
+                const auto& indices = source->GetIndices();
+                if (vertices.empty() || indices.size() < 3) continue;
+                if (item.hasBounds && Engine::Scene::Renderer::SceneRendererViewPreparation::IsOutsideViewFrustum(
+                    item, item.world, viewProjection)) continue;
+                const glm::vec3 center = (source->GetBoundsMin() + source->GetBoundsMax()) * .5f;
+                const float localRadius = glm::length(source->GetBoundsMax() - source->GetBoundsMin()) * .5f;
+                const glm::mat4 shrink = glm::translate(glm::mat4(1.f), center) *
+                    glm::scale(glm::mat4(1.f), glm::vec3(MeshOccluderShrink)) *
+                    glm::translate(glm::mat4(1.f), -center);
+                const uint64_t revision = source->GetCpuGeometryRevision() * 0x9E3779B97F4A7C15ull +
+                    source->GetAuthoredGeometryRevision();
+                for (const auto& range : mesh->GetInstanceRanges())
+                {
+                    if (range.vertexCount < 3 ||
+                        static_cast<size_t>(range.firstVertex) + range.vertexCount > indices.size()) continue;
+                    const size_t last = std::min<size_t>(data->transforms.size(),
+                        static_cast<size_t>(range.firstInstance) + range.instanceCount);
+                    for (size_t placement = range.firstInstance; placement < last; ++placement)
+                    {
+                        const auto& affine = data->transforms[placement];
+                        glm::mat4 matrix(1.f);
+                        for (int row = 0; row < 3; ++row)
+                            for (int column = 0; column < 4; ++column)
+                                matrix[column][row] = affine.rows[row][column];
+                        // Most placements are far too small on screen: a
+                        // bounding-sphere estimate rejects them before any
+                        // record is made. The sphere never projects smaller
+                        // than the box, so Build would skip these anyway.
+                        const glm::mat4 placementWorld = item.world * matrix;
+                        const float scale = std::max({ glm::length(glm::vec3(placementWorld[0])),
+                            glm::length(glm::vec3(placementWorld[1])), glm::length(glm::vec3(placementWorld[2])) });
+                        const float radius = localRadius * scale;
+                        const float w = (viewProjection * placementWorld * glm::vec4(center, 1.f)).w;
+                        // Wholly behind the camera, or in front and small.
+                        if (w + radius < 0.f) continue;
+                        if (w > radius && radius * std::min(projectionScale.x * Engine::Rendering::OcclusionBuffer::Width,
+                            projectionScale.y * Engine::Rendering::OcclusionBuffer::Width / aspect) <
+                            MeshOccluderPixels * (w - radius)) continue;
+                        Engine::Rendering::OcclusionBuffer::Occluder occluder;
+                        occluder.vertices = vertices.data();
+                        occluder.vertexStride = sizeof(vertices.front());
+                        occluder.vertexCount = vertices.size();
+                        occluder.indices = indices.data() + range.firstVertex;
+                        occluder.indexCount = range.vertexCount;
+                        occluder.world = placementWorld * shrink;
+                        occluder.boundsMinimum = source->GetBoundsMin();
+                        occluder.boundsMaximum = source->GetBoundsMax();
+                        occluder.hasBounds = true;
+                        occluder.minimumPixels = MeshOccluderPixels;
+                        occluder.revision = revision;
+                        occluders.push_back(occluder);
+                        ++meshOccluderCount;
+                    }
+                }
+                continue;
+            }
+            if (item.mesh->IsInstanced()) continue;
+            const auto& indices = item.mesh->GetIndices();
+            if (indices.size() < 3) continue;
+            if (item.hasBounds && Engine::Scene::Renderer::SceneRendererViewPreparation::IsOutsideViewFrustum(
+                item, item.world, viewProjection)) continue;
+            Engine::Rendering::OcclusionBuffer::Occluder occluder;
+            const auto& terrainVertices = item.mesh->GetTerrainVertices();
+            const auto& vertices = item.mesh->GetVertices();
+            if (!terrainVertices.empty())
+            {
+                occluder.vertices = terrainVertices.data();
+                occluder.vertexStride = sizeof(terrainVertices.front());
+                occluder.vertexCount = terrainVertices.size();
+            }
+            else if (!vertices.empty())
+            {
+                occluder.vertices = vertices.data();
+                occluder.vertexStride = sizeof(vertices.front());
+                occluder.vertexCount = vertices.size();
+            }
+            else continue;
+            occluder.indices = indices.data();
+            occluder.indexCount = indices.size();
+            occluder.world = item.world;
+            occluder.boundsMinimum = item.boundsMinimum;
+            occluder.boundsMaximum = item.boundsMaximum;
+            occluder.hasBounds = item.hasBounds;
+            occluder.revision = item.mesh->GetCpuGeometryRevision() * 0x9E3779B97F4A7C15ull +
+                item.mesh->GetAuthoredGeometryRevision();
+            occluders.push_back(occluder);
+        }
+        OcclusionBufferResult result;
+        result.meshOccluders = meshOccluderCount;
+        if (!occluders.empty())
+        {
+            if (reusable)
+                result.buffer = m_occlusionBufferCache.Acquire(viewProjection, aspect, occluders,
+                    result.reused);
+            else
+            {
+                auto buffer = std::make_shared<Engine::Rendering::OcclusionBuffer>();
+                buffer->Build(viewProjection, aspect, occluders);
+                result.buffer = std::move(buffer);
+            }
+        }
+        result.jobMilliseconds = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - jobStart).count();
+        return result;
+    });
     const auto grassInteraction = Engine::Rendering::SelectGrassInteractionCapsules(
         nativePacket ? nativePacket->grassCapsules : m_frameGrassCapsules, cameraPosition);
     bool cameraUsesSourceWarpChart = false;
@@ -628,111 +859,6 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     // Opaque and masked materials render first. Blended materials render
     // back-to-front with depth writes disabled. Build the complete view sort
     // key once so the comparator performs field comparisons only.
-    const glm::mat4 viewProjection = proj * view;
-    const auto resolvePortalTarget = [&](Engine::Components::SpatialManipulator* source)
-        -> Engine::Components::SpatialManipulator*
-    {
-        if (!source)
-            return nullptr;
-        if (Engine::Components::SpatialManipulator* target = source->ResolveTarget())
-            return target;
-        // Support older and edit-mode scenes whose serialized link exists on
-        // only one endpoint. Connections belong to manipulators, not meshes,
-        // so inspect every scene object rather than the render draw list.
-        for (Engine::Components::SpatialManipulator* candidate :
-            m_frameSpatialManipulatorScratch)
-        {
-            if (!candidate || candidate->Owner == source->Owner)
-                continue;
-            if (candidate->ResolveTarget() == source)
-                return candidate;
-        }
-        return nullptr;
-    };
-    const bool hasPortalViews = std::any_of(
-        m_frameSpatialManipulatorScratch.begin(),
-        m_frameSpatialManipulatorScratch.end(),
-        [&](Engine::Components::SpatialManipulator* portal)
-        {
-            if (!portal || !portal->Owner ||
-                !portal->Owner->IsEnabledInHierarchy() || !portal->enabled)
-                return false;
-            const auto mode = static_cast<Engine::Components::
-                SpatialManipulator::ConnectionMode>(portal->connectionMode);
-            if (mode != Engine::Components::SpatialManipulator::
-                    ConnectionMode::Portal &&
-                mode != Engine::Components::SpatialManipulator::
-                    ConnectionMode::LinkedPortal)
-                return false;
-            const auto* target = resolvePortalTarget(portal);
-            return target && target->enabled && target->Owner &&
-                portal->HasCompatiblePortalShapeWith(*target);
-        });
-    const bool terrainWarpActive = std::any_of(
-        m_frameSpatialManipulatorScratch.begin(),
-        m_frameSpatialManipulatorScratch.end(),
-        [](const Engine::Components::SpatialManipulator* manipulator)
-        {
-            return manipulator && manipulator->enabled &&
-                manipulator->definesWarpVolume && manipulator->Owner &&
-                manipulator->Owner->IsEnabledInHierarchy();
-        });
-    const bool useTerrainOcclusion = !shadowOnly && !includeEditorVisuals &&
-        !hasPortalViews && !m_editorMode2D && !terrainWarpActive;
-    // Software occlusion buffer for this camera: the terrain drawn this
-    // frame is rasterized at low resolution, and anything whose bounds lie
-    // entirely behind it is skipped (OcclusionBuffer.h). Terrain meshes keep
-    // their vertices on the CPU, so the occluders are exactly the drawn
-    // surface. Shadow views keep everything: hidden objects still cast.
-    // Frame items and their meshes stay unchanged for the whole Render call.
-    std::future<std::shared_ptr<Engine::Rendering::OcclusionBuffer>> occlusionBufferJob;
-    struct OcclusionBufferFence
-    {
-        std::future<std::shared_ptr<Engine::Rendering::OcclusionBuffer>>& job;
-        ~OcclusionBufferFence() { if (job.valid()) job.wait(); }
-    } occlusionBufferFence{occlusionBufferJob};
-    if (useTerrainOcclusion && ReadEnvFlag("ENGINE_VISIBILITY_OCCLUSION_BUFFER", true))
-        occlusionBufferJob = Engine::Rendering::RenderJobs::Get().Submit(
-            [&frameRenderItems, viewProjection,
-             aspect = static_cast<float>(std::max(1u, viewportWidth)) /
-                static_cast<float>(std::max(1u, viewportHeight))]()
-    {
-
-        std::vector<Engine::Rendering::OcclusionBuffer::Occluder> occluders;
-        for (const auto& item : frameRenderItems)
-        {
-            if (!item.terrainSurface || !item.mesh || item.blended || item.warpedVertexBuffer ||
-                item.traversalChartPortal || item.mesh->IsInstanced()) continue;
-            const auto& indices = item.mesh->GetIndices();
-            if (indices.size() < 3) continue;
-            if (item.hasBounds && Engine::Scene::Renderer::SceneRendererViewPreparation::IsOutsideViewFrustum(
-                item, item.world, viewProjection)) continue;
-            Engine::Rendering::OcclusionBuffer::Occluder occluder;
-            const auto& terrainVertices = item.mesh->GetTerrainVertices();
-            const auto& vertices = item.mesh->GetVertices();
-            if (!terrainVertices.empty())
-            {
-                occluder.vertices = terrainVertices.data();
-                occluder.vertexStride = sizeof(terrainVertices.front());
-                occluder.vertexCount = terrainVertices.size();
-            }
-            else if (!vertices.empty())
-            {
-                occluder.vertices = vertices.data();
-                occluder.vertexStride = sizeof(vertices.front());
-                occluder.vertexCount = vertices.size();
-            }
-            else continue;
-            occluder.indices = indices.data();
-            occluder.indexCount = indices.size();
-            occluder.world = item.world;
-            occluders.push_back(occluder);
-        }
-        if (occluders.empty()) return std::shared_ptr<Engine::Rendering::OcclusionBuffer>{};
-        auto buffer = std::make_shared<Engine::Rendering::OcclusionBuffer>();
-        buffer->Build(viewProjection, aspect, occluders);
-        return buffer;
-    });
     // A terrain cell covers its rectangular footprint. Bound the entry and
     // exit of each sightline through that surface; a draw is hidden only when
     // every sightline crosses a nearer cell. Rebuild for each camera position.
@@ -761,10 +887,15 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         terrainWarpActive,
         terrainBlockers,
         solidBlockers);
-    // The occlusion buffer job started after the camera matrix; it runs
-    // alongside the shadow-cascade and lighting preparation above.
-    std::shared_ptr<Engine::Rendering::OcclusionBuffer> occlusionBuffer =
-        occlusionBufferJob.valid() ? occlusionBufferJob.get() : nullptr;
+    // The occlusion buffer job started after the camera matrix; it ran
+    // alongside the lighting and shadow-cascade preparation above.
+    const auto occlusionWaitStart = RenderClock::now();
+    OcclusionBufferResult occlusionResult =
+        occlusionBufferJob.valid() ? occlusionBufferJob.get() : OcclusionBufferResult{};
+    const std::shared_ptr<const Engine::Rendering::OcclusionBuffer> occlusionBuffer =
+        occlusionResult.buffer;
+    const double occlusionWaitMs = std::chrono::duration<double, std::milli>(
+        RenderClock::now() - occlusionWaitStart).count();
     // The instance cull tests each placement against a GPU copy of the
     // buffer (InstanceCull.hlsl, IsBoxOccluded). Uploaded once per view and
     // shared by every cull dispatch of this view.
@@ -956,7 +1087,13 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         frame.occluders = built.occluders;
         frame.triangles = built.triangles;
         frame.rasterizedTriangles = built.rasterizedTriangles;
-        frame.buildMilliseconds = built.buildMilliseconds;
+        frame.skippedOccluders = built.skippedOccluders;
+        frame.meshOccluders = occlusionResult.meshOccluders;
+        frame.reused = occlusionResult.reused;
+        // A reused buffer cost only the job's key comparison this frame.
+        frame.buildMilliseconds = occlusionResult.reused
+            ? occlusionResult.jobMilliseconds : built.buildMilliseconds;
+        frame.waitMilliseconds = occlusionWaitMs;
         frame.tested = occlusionTested.load(std::memory_order_relaxed);
         frame.hidden = occlusionHidden.load(std::memory_order_relaxed);
         Engine::Rendering::OcclusionBuffer::PublishFrameStatistics(frame);
@@ -1071,8 +1208,41 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             detailCostInput.viewportWidth = static_cast<float>(std::max(1u, viewportWidth));
             detailCostInput.viewportHeight = static_cast<float>(std::max(1u, viewportHeight));
             detailCostInput.occlusion = occlusionBuffer;
+            detailCostInput.placementScaleLod = placementCoverageLod;
         }
     }
+    // Smallest and largest placement LOD scale of an instanced tile, cached
+    // per tile revision (camera views only; shadows never skip bands).
+    if (!shadowOnly)
+        for (auto it = m_placementLodScaleRanges.begin(); it != m_placementLodScaleRanges.end();)
+            if (instanceSerial > it->second.serial && instanceSerial - it->second.serial > 240)
+                it = m_placementLodScaleRanges.erase(it);
+            else
+                ++it;
+    const auto placementLodScaleRange = [&](const Engine::Components::Mesh::InstanceData& data)
+        -> glm::vec2
+    {
+        if (!placementCoverageLod) return glm::vec2(1.f);
+        auto& range = m_placementLodScaleRanges[data.lodIdentity];
+        range.serial = instanceSerial;
+        if (range.revision != data.revision)
+        {
+            range.revision = data.revision;
+            range.minimum = range.maximum = 1.f;
+            if (!data.transforms.empty())
+            {
+                range.minimum = Engine::Rendering::MaximumLodCoverageScale;
+                range.maximum = Engine::Rendering::MinimumLodCoverageScale;
+                for (const auto& transform : data.transforms)
+                {
+                    const float scale = Engine::Rendering::PlacementLodScale(transform.rows[0]);
+                    range.minimum = std::min(range.minimum, scale);
+                    range.maximum = std::max(range.maximum, scale);
+                }
+            }
+        }
+        return { range.minimum, range.maximum };
+    };
     UINT slot = 0;
     for (const ViewRenderItem& sortedItem : renderObjects)
     {
@@ -1101,9 +1271,10 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             if (glm::dot(delta, delta) > range * range) continue;
         }
         // Every LOD distance of this draw (GPU cull, per-pixel bands, CPU
-        // selection) scales by the quality setting and the object's project
-        // layer, which the detail budget adjusts to hold its GPU budget.
-        const float lodScale = quality.geometry *
+        // selection) scales by the quality setting, the object's project
+        // layer (which the detail budget adjusts to hold its GPU budget) and
+        // the view's screen coverage, so detail goes where it shows.
+        const float lodScale = quality.geometry * viewCoverageScale *
             Engine::Rendering::DetailBudget::Get().LayerLodScale(obj ? obj->layer : 0);
         // Every visible LOD band of an instanced tile feeds the cost model
         // with its unscaled distance range and triangle count. Bands of one
@@ -1133,7 +1304,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                     std::memcpy(group.transforms.data(), data->transforms.data(),
                         data->transforms.size() * sizeof(Engine::Components::Mesh::InstanceTransform));
             }
-            const glm::vec2 distances = mesh->instanceLodDistances * quality.geometry;
+            const glm::vec2 distances = mesh->instanceLodDistances * quality.geometry * viewCoverageScale;
             const int band = mesh->instanceLodBand;
             Engine::Rendering::DetailCostInput::Band costBand;
             costBand.start = band == 0 ? 0.f : band == 1 ? distances.x : distances.y;
@@ -1159,12 +1330,16 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             const float nearDistance = glm::length(nearest);
             const float farDistance = glm::length(farthest);
             // Covers the per-tree dissolve either side of a switch
-            // (InstanceLodFadeWidth in Object.hlsl, at most 6 m).
-            constexpr float margin = 6.5f;
+            // (InstanceLodFadeWidth in Object.hlsl, at most 6 m, in
+            // placement-scaled distance).
+            const glm::vec2 scales = mesh->GetInstanceData()
+                ? placementLodScaleRange(*mesh->GetInstanceData()) : glm::vec2(1.f);
+            const float margin = 6.5f * scales.y;
             const glm::vec2 band = mesh->instanceLodDistances * lodScale;
             const int lod = mesh->instanceLodBand;
-            const float bandStart = lod == 0 ? 0.f : lod == 1 ? band.x : band.y;
-            const float bandEnd = lod == 0 ? band.x : lod == 1 ? band.y : 1.e30f;
+            // A placement scaled by s keeps a band out to s times its distance.
+            const float bandStart = (lod == 0 ? 0.f : lod == 1 ? band.x : band.y) * scales.x;
+            const float bandEnd = lod == 0 ? band.x * scales.y : lod == 1 ? band.y * scales.y : 1.e30f;
             if (nearDistance > bandEnd + margin || farDistance < bandStart - margin)
                 continue;
         }
@@ -1274,7 +1449,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 mesh->GetPosedVertexBuffer() &&
                 !mesh->IsPortalPoseSnapshot() &&
                 (useSourceChart || !renderItem->warpedVertexBuffer);
-            preparedDraw.objectData.geometryFade=mesh->instanceLodBand>=0 ? glm::vec4(float(mesh->instanceLodBand),scaledShadowLodDistances(preparedDraw.gpuLodDistances),4.f) : scaleGeometryFade(hasPortalViews && renderItem->geometryFade.w>=2.f ? mesh->GetRuntimeGeometryFade():renderItem->geometryFade, lodScale);
+            preparedDraw.objectData.geometryFade=mesh->instanceLodBand>=0 ? glm::vec4(float(mesh->instanceLodBand),scaledShadowLodDistances(preparedDraw.gpuLodDistances),instanceBandFadeMode) : scaleGeometryFade(hasPortalViews && renderItem->geometryFade.w>=2.f ? mesh->GetRuntimeGeometryFade():renderItem->geometryFade, lodScale);
             preparedDraw.objectData.shadowCasterFade={casterFade.x,std::min(casterFade.x,casterFade.y),1.f,0.f};
             preparedDraw.objectData.grassAnimation={0.f,0.f,0.f,0.f};
             preparedDraw.objectData.viewPositionAlphaCutoff=glm::vec4(cameraPosition,.001f);
@@ -1635,7 +1810,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             (clusteredLightingEnabled ? kClusteredLightingFlag : 0u) |
                 (mesh && mesh->IsInstanced() ? (0x20000000u | (renderItem->geometryFade.w>=2.f && !hasPortalViews ? 0x00100000u:0u)):0u), 0u };
         preparedDraw.drawData = drawData;
-        objectData.geometryFade = mesh && mesh->instanceLodBand>=0 ? glm::vec4(float(mesh->instanceLodBand),preparedDraw.gpuLodDistances.x,preparedDraw.gpuLodDistances.y,4.f) : scaleGeometryFade(hasPortalViews && renderItem->geometryFade.w>=2.f ? mesh->GetRuntimeGeometryFade():renderItem->geometryFade, lodScale);
+        objectData.geometryFade = mesh && mesh->instanceLodBand>=0 ? glm::vec4(float(mesh->instanceLodBand),preparedDraw.gpuLodDistances.x,preparedDraw.gpuLodDistances.y,instanceBandFadeMode) : scaleGeometryFade(hasPortalViews && renderItem->geometryFade.w>=2.f ? mesh->GetRuntimeGeometryFade():renderItem->geometryFade, lodScale);
         if (objectData.geometryFade.w >= 2.f) {
             objectData.geometryFade.y *= quality.geometry;
             objectData.geometryFade.z *= quality.geometry;
@@ -1964,7 +2139,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                                 for(int row=0;row<3;++row) for(int column=0;column<4;++column)
                                     matrix[column][row]=affine.rows[row][column];
                                 decisions->second.push_back(lodSelection.ChooseScreen(*Renderer::SceneRendererDrawPreparation::ScreenLodPolicy(*this, draw, hasPortalViews, includeEditorVisuals),low,high,
-                                    draw.objectData.world*matrix,data.lodIdentity,placement,1,maximum));
+                                    draw.objectData.world*matrix,data.lodIdentity,placement,1,maximum,
+                                    Engine::Rendering::DetailBudget::Get().LayerLodScale(draw.object ? draw.object->layer : 0)));
                             }
                             for (int selected : decisions->second)
                             {
@@ -2081,7 +2257,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                     cull.viewProjection=cullViewProjection; cull.cameraPosition=glm::vec4(cameraPosition,1);
                     cull.counts={uint32_t(tiles.size()),sourceRange.vertexCount,sourceRange.firstVertex,1};
                     cull.selection={screenColor ? -1:gpuLod ? residentLod:representative.gpuLod,2,representative.gpuMaximumLod,
-                        (shadowOnly ? 1:0) | (representative.mesh->instanceLodBand>=0 ? 2:0) | cullOcclusionFlag};
+                        (shadowOnly ? 1:0) | (representative.mesh->instanceLodBand>=0 ? (placementCoverageLod ? 2|32:2):0) | cullOcclusionFlag};
                     context->SetComputeReadBuffer(buffers.input.get()); context->SetComputeReadBuffer(pool,1); context->SetComputeWriteBuffer(buffers.output.get());
                     context->SetComputeReadBuffer(cullOcclusion,2);
                     context->SetComputeConstants(&cull,sizeof(cull)); context->DispatchCompute(1); context->StorageBarrier(buffers.output.get());

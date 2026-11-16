@@ -1,5 +1,6 @@
 #pragma once
 #include "Core/Rendering/GrassInteraction.h"
+#include "Core/Rendering/OcclusionBuffer.h"
 #include "Core/Rendering/RenderBoundsCache.h"
 #include "Core/Rendering/DrawBatchPreparation.h"
 #include "Core/Rendering/ShaderSourceCache.h"
@@ -1051,6 +1052,8 @@ private:
     };
     std::vector<OcclusionPyramidRing> m_occlusionPyramidRings;
     std::unique_ptr<IGraphicsBuffer> m_occlusionPyramidEmpty;
+    // Last camera occlusion buffer, reused while camera and terrain are still.
+    Engine::Rendering::OcclusionBufferCache m_occlusionBufferCache;
     std::unique_ptr<IGraphicsBuffer> m_emptyMorphWeightBuffer;
     std::shared_ptr<Engine::Graphics::IGraphicsTexture> m_brdfIntegrationLut;
     std::unique_ptr<IGraphicsBuffer> m_clusterHeaderBuffer;
@@ -1223,6 +1226,16 @@ private:
     // Camera/view, geometry identity, placement, domain. Never shared with shadows.
     std::map<std::array<uint64_t,4>,std::pair<int,uint64_t>> m_screenLodHistory;
     std::array<uint64_t,3> m_screenLodCounts{};
+    // Per instanced tile (InstanceData::lodIdentity): the range of its
+    // placements' LOD scales (ScreenCoverage.h), so band skipping stays
+    // conservative when scaled placements keep a band further out. Rebuilt
+    // when the tile's revision changes; entries unused for a while expire.
+    struct PlacementLodScaleRange
+    {
+        uint64_t revision = 0, serial = 0;
+        float minimum = 1.f, maximum = 1.f;
+    };
+    std::unordered_map<uint64_t, PlacementLodScaleRange> m_placementLodScaleRanges;
     // Directional light indices cover every cluster and do not depend on
     // camera pose or light color. Buffer identities separate GPU frame slots.
     std::map<std::pair<const void*,const void*>,std::array<uint32_t,5>> m_directionalClusterLayouts;

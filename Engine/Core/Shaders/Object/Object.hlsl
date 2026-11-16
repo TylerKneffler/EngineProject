@@ -276,6 +276,7 @@ void VSMain(
     float3 localTangent = tangent.xyz;
     float3 grassRoot = float3(0, 0, 0);
     float3 grassUp = float3(0, 1, 0);
+    float3 grassScaleRow = float3(1, 0, 0);
     [branch] if ((draw.drawFlags & 0x20000000u) != 0u)
     {
         InstanceTransform instance = meshInstances[(draw.drawFlags & 0x01000000u) != 0u ? instanceId * 2 + 1 :
@@ -287,6 +288,7 @@ void VSMain(
         }
         grassRoot = float3(instance.row0.w, instance.row1.w, instance.row2.w);
         grassUp = float3(instance.row0.y, instance.row1.y, instance.row2.y);
+        grassScaleRow = instance.row0.xyz;
         localPosition = float4(dot(instance.row0, localPosition),
             dot(instance.row1, localPosition), dot(instance.row2, localPosition), 1.0);
         localNormal = float3(dot(instance.row0.xyz, localNormal),
@@ -347,10 +349,17 @@ void VSMain(
     float4 worldPosition = mul(objectData.world, localPosition);
     // Instanced LOD bands choose a band per placement (see ApplyGeometryFade):
     // every vertex of a placement carries the distance to its origin, so the
-    // interpolated value is constant across it.
+    // interpolated value is constant across it. With screen coverage
+    // (geometryFade.w 5) a placement scaled by s covers s times the pixels,
+    // so its distance counts as distance / s; InstanceCull.hlsl (bit 32)
+    // divides the same way.
     if ((draw.drawFlags & 0x20000000u) != 0u && objectData.geometryFade.w >= 4.0)
+    {
         oInstanceLodDistance = length(mul(objectData.world, float4(grassRoot, 1.0)).xyz -
             objectData.viewPositionAlphaCutoff.xyz);
+        if (objectData.geometryFade.w >= 4.5)
+            oInstanceLodDistance /= clamp(length(grassScaleRow), 0.25, 4.0);
+    }
     // Detail view occlusion debug: -2 marks a placement the cull would hide.
     [branch] if (objectData.morphParams.z < -50.0 && ResolveOcclusionMark(instanceId))
         oInstanceLodDistance = -2.0;

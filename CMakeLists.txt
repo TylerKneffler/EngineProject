@@ -2363,6 +2363,20 @@ if(NOT ENGINE_PROJECT_DIR AND
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/AutoQualityTests.cpp")
+    enable_testing()
+    add_executable(AutoQualityTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/AutoQualityTests.cpp")
+    target_link_libraries(AutoQualityTests PRIVATE Engine)
+    target_include_directories(AutoQualityTests PRIVATE
+        "${ENGINE_ROOT}" "${ENGINE_ROOT}/Engine")
+    target_compile_definitions(AutoQualityTests PRIVATE NOMINMAX)
+    add_test(NAME AutoQuality COMMAND AutoQualityTests)
+    set_tests_properties(AutoQuality PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}" TIMEOUT 60)
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
    EXISTS "${ENGINE_LOCAL_TEST_ROOT}/TerrainPerformanceSceneTests.cpp")
     enable_testing()
     add_executable(TerrainPerformanceSceneTests EXCLUDE_FROM_ALL

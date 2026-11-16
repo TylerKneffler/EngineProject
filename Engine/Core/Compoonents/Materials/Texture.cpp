@@ -28,6 +28,8 @@
 #include <filesystem>
 #include <cmath>
 #include <cstring>
+#include <functional>
+#include <queue>
 #include <memory>
 #include <deque>
 #include <mutex>
@@ -401,7 +403,7 @@ void Texture::InvalidateCache()
 {
     m_pendingTexture.reset(); m_fallbackTexture.reset();
     m_streamDecode = {}; m_streamDecoded.reset(); m_mipHistory.Reset();
-    m_managed = false; m_projectedPixels = 0.f;
+    m_managed = false; m_projectedPixels = 0.f; m_screenCoverage = 0.f;
     m_forceFull=false;m_budgetDenied=false;
     m_mipAllocations.clear();
     ++m_generation;
@@ -839,13 +841,20 @@ bool Texture::IsStreamable() const
         if (!Engine::Graphics::GraphicsTextureIsValidBase(m_format, w, h)) return false;
     return true;
 }
-void Texture::RequestMipFootprint(float pixelsPerUvRepeat)
+void Texture::RequestMipFootprint(float pixelsPerUvRepeat, float screenCoverage)
 {
     if (!std::isfinite(pixelsPerUvRepeat)) pixelsPerUvRepeat = std::numeric_limits<float>::max();
     float previous=m_projectedPixels.load(std::memory_order_relaxed);
     while(previous<pixelsPerUvRepeat && !m_projectedPixels.compare_exchange_weak(previous,pixelsPerUvRepeat,std::memory_order_relaxed)) {}
+    // Coverage adds up over draws and views; it only ranks textures, so a
+    // generous cap (several full screens) keeps one hot texture from
+    // drowning out the order of the rest.
+    if (!(screenCoverage >= 0.f) || !std::isfinite(screenCoverage)) screenCoverage = 1.f;
+    if (screenCoverage <= 0.f) return;
+    float coverage=m_screenCoverage.load(std::memory_order_relaxed);
+    while(!m_screenCoverage.compare_exchange_weak(coverage,std::min(8.f,coverage+screenCoverage),std::memory_order_relaxed)) {}
 }
-void Texture::RequestGraphicsFootprint(const IGraphicsTexture* resource, float pixels)
+void Texture::RequestGraphicsFootprint(const IGraphicsTexture* resource, float pixels, float screenCoverage)
 {
     if (!resource) return;
     std::shared_ptr<Texture> texture;
@@ -854,7 +863,7 @@ void Texture::RequestGraphicsFootprint(const IGraphicsTexture* resource, float p
         const auto found=s_graphicsTextureOwners.find(resource);
         if(found!=s_graphicsTextureOwners.end()) texture=found->second.texture.lock();
     }
-    if(texture) texture->RequestMipFootprint(pixels);
+    if(texture) texture->RequestMipFootprint(pixels, screenCoverage);
 }
 bool Texture::UploadMipTail(IGraphicsProvider* provider, uint32_t firstMip, bool replacement)
 {
@@ -954,7 +963,7 @@ void Texture::StreamFrame(IGraphicsProvider* provider)
             if (auto texture=it->lock()) { textures.push_back(std::move(texture)); ++it; }
             else it=s_textureRegistry.erase(it);
     }
-    struct Candidate { std::shared_ptr<Texture> texture; float pixels; uint32_t target; };
+    struct Candidate { std::shared_ptr<Texture> texture; float pixels; float coverage; uint32_t target; };
     std::vector<Candidate> candidates;
     uint32_t decodes=0;
     for (auto& texture:textures)
@@ -991,6 +1000,7 @@ void Texture::StreamFrame(IGraphicsProvider* provider)
             }
         }
         const float pixels=t.m_projectedPixels.exchange(0.f,std::memory_order_relaxed);
+        const float coverage=t.m_screenCoverage.exchange(0.f,std::memory_order_relaxed);
         t.m_demandFirstMip=Engine::Rendering::TextureDemandMip(t.m_width,t.m_height,t.m_mipLevels,pixels,settings.prefetchMips);
         uint32_t capMip=0,w=t.m_width,h=t.m_height;
         const uint32_t cap=ResidentTextureDimensionCap();
@@ -1002,7 +1012,7 @@ void Texture::StreamFrame(IGraphicsProvider* provider)
         w=t.m_width; h=t.m_height;
         for(uint32_t mip=0;mip<t.m_demandFirstMip;++mip) {w=std::max(1u,w/2);h=std::max(1u,h/2);}
         s_streamSnapshot.requestedBytes+=Engine::Graphics::GraphicsTextureChainBytes(t.m_format,w,h,t.m_mipLevels-t.m_demandFirstMip);
-        candidates.push_back({texture,pixels,t.m_targetFirstMip});
+        candidates.push_back({texture,pixels,coverage,t.m_targetFirstMip});
     }
     // Stable visual priority. Every texture has an already-admitted fallback;
     // pressure may override temporal holds but never removes that fallback.
@@ -1015,13 +1025,37 @@ void Texture::StreamFrame(IGraphicsProvider* provider)
         if(candidate.target<t.m_fallbackFirstMip) planned+=t.m_mipAllocations[candidate.target];
     }
     const uint64_t planningBudget=settings.budgetBytes>s_streamSnapshot.pinnedBytes ? settings.budgetBytes-s_streamSnapshot.pinnedBytes:0;
-    for(auto it=candidates.rbegin();it!=candidates.rend() && planned>planningBudget;++it)
+    if(planned>planningBudget)
     {
-        auto& t=*it->texture;
-        while(it->target<t.m_fallbackFirstMip && planned>planningBudget)
+        // Over budget: give up detail where it shows least. Each step drops
+        // the top planned mip of the texture whose loss touches the fewest
+        // screen pixels per byte freed (its screen coverage over the bytes
+        // that mip adds). Large, focal surfaces keep their mips; small, far
+        // or offscreen ones (shadow-only casters, coverage 0) go first. Ties
+        // fall back to the texel-density order above.
+        const auto bytesFreed=[](const Texture& t,uint32_t target) {
+            const uint64_t current=t.m_mipAllocations[target];
+            const uint64_t next=target+1<t.m_fallbackFirstMip ? t.m_mipAllocations[target+1]:0;
+            return std::max<uint64_t>(1,current>next ? current-next:0);
+        };
+        using Entry=std::pair<double,size_t>; // (coverage per byte, reversed index)
+        std::priority_queue<Entry,std::vector<Entry>,std::greater<Entry>> trim;
+        const size_t last=candidates.size()-1;
+        const auto push=[&](size_t index) {
+            const auto& candidate=candidates[index];
+            const auto& t=*candidate.texture;
+            if(candidate.target<t.m_fallbackFirstMip)
+                trim.emplace(double(candidate.coverage)/double(bytesFreed(t,candidate.target)),last-index);
+        };
+        for(size_t index=0;index<candidates.size();++index) push(index);
+        while(planned>planningBudget && !trim.empty())
         {
-            planned-=t.m_mipAllocations[it->target++];
-            if(it->target<t.m_fallbackFirstMip) planned+=t.m_mipAllocations[it->target];
+            const size_t index=last-trim.top().second; trim.pop();
+            auto& candidate=candidates[index];
+            const auto& t=*candidate.texture;
+            planned-=t.m_mipAllocations[candidate.target++];
+            if(candidate.target<t.m_fallbackFirstMip) planned+=t.m_mipAllocations[candidate.target];
+            push(index);
         }
     }
     for(auto& candidate:candidates)

@@ -29,6 +29,9 @@ public:
 
     bool IsSelected(const PreparedDraw& draw, bool shadow = false) const;
     std::array<uint64_t, 3> SelectedGpuLodDraws(bool shadow) const;
+    // Pixel-threshold LOD by projected screen size. detailScale is the
+    // detail budget's layer scale (DetailBudget::LayerLodScale): a distance
+    // scale s is the same as seeing the object s times larger.
     int ChooseScreen(
         const Engine::Components::Mesh& policy,
         glm::vec3 minimum,
@@ -37,7 +40,8 @@ public:
         uint64_t identity,
         uint64_t placement,
         uint64_t domain,
-        int maximumLod);
+        int maximumLod,
+        float detailScale = 1.f);
     std::map<uint64_t, std::vector<int>>& PlacementLevels();
 
 private:

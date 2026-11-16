@@ -21,6 +21,10 @@ void SceneTextureFootprints::Request(const std::vector<PreparedDraw>& preparedDr
         for(const auto& draw:preparedDraws)
         {
             float pixels=std::numeric_limits<float>::infinity();
+            // Share of the camera view this draw covers (box rectangles, so
+            // overlap is counted twice). Ranks textures under budget pressure;
+            // shadow cascades need mips but add no coverage of their own.
+            float coverage=1.f;
             const auto* mesh=draw.mesh && draw.mesh->IsInstanced() ? draw.mesh->GetInstanceSource():draw.mesh;
             if(mesh && mesh->HasBounds() && draw.objectData.skinParams.y<=0.f &&
                 !mesh->HasMorphTargets() && !mesh->HasSurfaceOffsets() &&
@@ -32,7 +36,7 @@ void SceneTextureFootprints::Request(const std::vector<PreparedDraw>& preparedDr
                     draw.material->emissiveUvSet || draw.material->heightUvSet))
                     uvScale=std::max(uvScale,mesh->GetTextureUvWorldScale(1));
                 if(draw.terrain || draw.terrainCell) uvScale=uvScale*1.5f/std::max(1.f,draw.objectData.textureUvSets1.z);
-                const auto footprint=[&](const glm::mat4& world) {
+                const auto footprint=[&](const glm::mat4& world,float& covered) {
                     auto low=mesh->GetBoundsMin(),high=mesh->GetBoundsMax();
                     auto projectionWorld=world;
                     float units=uvScale;
@@ -43,25 +47,33 @@ void SceneTextureFootprints::Request(const std::vector<PreparedDraw>& preparedDr
                         units=1.5f*draw.objectData.textureUvSets1.x/std::max(1.f,draw.objectData.textureUvSets1.z);
                     }
                     float demand=Engine::Rendering::ProjectedTextureFootprint(low,high,
-                        viewProjection*projectionWorld,{float(viewportWidth),float(viewportHeight)},units);
+                        viewProjection*projectionWorld,{float(viewportWidth),float(viewportHeight)},units,&covered);
                     if(draw.castsShadow) for(uint32_t cascade=0;cascade<shadowCascadeCount;++cascade)
                         demand=std::max(demand,Engine::Rendering::ProjectedTextureFootprint(low,high,
                             shadowViewProjections[cascade]*projectionWorld,glm::vec2(float(shadowResolution)/2.f),units));
                     return demand;
                 };
                 pixels=0.f;
+                coverage=0.f;
                 if(draw.mesh->IsInstanced() && draw.mesh->GetInstanceData())
+                {
                     for(const auto& affine:draw.mesh->GetInstanceData()->transforms)
                     {
                         glm::mat4 matrix(1.f);
                         for(int row=0;row<3;++row) for(int column=0;column<4;++column) matrix[column][row]=affine.rows[row][column];
-                        pixels=std::max(pixels,footprint(draw.objectData.world*matrix));
+                        float covered=0.f;
+                        pixels=std::max(pixels,footprint(draw.objectData.world*matrix,covered));
+                        coverage+=covered;
                     }
-                else pixels=footprint(draw.objectData.world);
+                    // One draw cannot cover more than the whole view.
+                    coverage=std::min(coverage,1.f);
+                }
+                else pixels=footprint(draw.objectData.world,coverage);
             }
             for(size_t slot=0;slot<draw.textures.size();++slot)
                 Engine::Components::Texture::RequestGraphicsFootprint(draw.textures[slot],
-                    slot==10 || slot==11 ? std::numeric_limits<float>::infinity():pixels);
+                    slot==10 || slot==11 ? std::numeric_limits<float>::infinity():pixels,
+                    slot==10 || slot==11 ? 1.f:coverage);
         }
     }
 }

@@ -1,5 +1,6 @@
 #include "Core/Rendering/DetailCostModel.h"
 #include "Core/Rendering/OcclusionBuffer.h"
+#include "Core/Rendering/ScreenCoverage.h"
 
 #include <algorithm>
 #include <cmath>
@@ -48,7 +49,7 @@ constexpr int GridWidth = 64, GridHeight = 36;
 
 struct Placement
 {
-    float distance;     // camera to placement origin (what LOD bands use)
+    float distance;     // camera to placement origin over its coverage scale (what LOD bands use)
     float order;        // front-to-back key: nearest point of the bounds
     float x, y, radius; // screen disc, pixels
     uint32_t group;
@@ -113,6 +114,8 @@ DetailCostCurve BuildDetailCostCurve(const DetailCostInput& input)
             const glm::vec4 clip = m * worldCenter;
             Placement placement{};
             placement.distance = glm::length(worldOrigin - input.cameraPosition);
+            if (input.placementScaleLod)
+                placement.distance /= PlacementLodScale(r[0]);
             placement.order = std::max(0.f, glm::length(glm::vec3(worldCenter) - input.cameraPosition) - radius);
             placement.group = groupIndex;
             if (clip.w <= radius)

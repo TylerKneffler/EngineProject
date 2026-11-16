@@ -18,6 +18,8 @@ build/
 !.local/tests/GameBackendPlayable.scene
 !.local/tests/TextureCompressionTests.cpp
 !.local/tests/TextureCookCopperSlate.cmake
+!.local/tests/OcclusionBufferTests.cpp
+!.local/tests/AutoQualityTests.cpp
 !.local/tests/TerrainEditingToolsTests.cpp
 /Engine/Core/Assets/TerrainData/TerrainPerformance/BakedCells/
 
