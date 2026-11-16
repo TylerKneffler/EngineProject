@@ -2349,6 +2349,20 @@ if(NOT ENGINE_PROJECT_DIR AND
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/OcclusionBufferTests.cpp")
+    enable_testing()
+    add_executable(OcclusionBufferTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/OcclusionBufferTests.cpp")
+    target_link_libraries(OcclusionBufferTests PRIVATE Engine)
+    target_include_directories(OcclusionBufferTests PRIVATE
+        "${ENGINE_ROOT}" "${ENGINE_ROOT}/Engine")
+    target_compile_definitions(OcclusionBufferTests PRIVATE NOMINMAX)
+    add_test(NAME OcclusionBuffer COMMAND OcclusionBufferTests)
+    set_tests_properties(OcclusionBuffer PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}" TIMEOUT 60)
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
    EXISTS "${ENGINE_LOCAL_TEST_ROOT}/TerrainPerformanceSceneTests.cpp")
     enable_testing()
     add_executable(TerrainPerformanceSceneTests EXCLUDE_FROM_ALL

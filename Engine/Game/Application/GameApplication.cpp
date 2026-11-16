@@ -864,6 +864,11 @@ int GameApplication::Run(HINSTANCE instance, const GameBenchmarkOptions* benchma
     scene.SetDistanceLightingSettings(settings.distanceLighting);
     Engine::Rendering::DetailBudget::Get().Configure(settings.layers,
         settings.detailBudget);
+    // Diagnostics: ENGINE_DETAIL_SCALE pins the global detail scale (the
+    // budget stops adapting), e.g. to compare LOD bands in the Detail view.
+    if (const char* fixedScale = std::getenv("ENGINE_DETAIL_SCALE"))
+        if (const float scale = static_cast<float>(std::atof(fixedScale)); scale > 0.f)
+            Engine::Rendering::DetailBudget::Get().SetFixedGlobalScale(scale);
     Engine::Rendering::MaterialCachePolicy::Get().SetProjectSettings(
         settings.materialCache);
     if (benchmark) scene.SetUpdateProfilingEnabled(true);

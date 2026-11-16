@@ -81,6 +81,7 @@ private:
     const class VulkanComputePipeline* m_computePipeline = nullptr;
     const VulkanGraphicsBuffer* m_computeRead = nullptr;
     const VulkanGraphicsBuffer* m_computePool = nullptr;
+    const VulkanGraphicsBuffer* m_computeExtra = nullptr;
     const VulkanGraphicsBuffer* m_computeWrite = nullptr;
     std::shared_ptr<VulkanComputeDescriptorArena> m_computeDescriptors;
     std::shared_ptr<VulkanTextureSystem> m_textureSystem;

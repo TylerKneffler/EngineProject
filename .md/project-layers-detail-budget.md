@@ -44,21 +44,76 @@ that rendering stays within two budgets:
 - **CPU render time:** the time spent in `Scene::Render` for every pass in a
   frame (cameras and shadows). The default budget is 4 ms.
 
-The tighter of the two decides. When there is spare time, detail moves
-farther out; when either budget is exceeded, detail pulls in.
+The scale comes from a cost model when one is available, and from a
+reactive controller otherwise.
+
+### Cost model (predictive)
+
+The game view hands every visible instanced LOD band (trees, rocks, logs) to
+a background job about ten times a second (`DetailCostModel.h`). The job
+predicts what those instances would cost at every global scale:
+
+- Placements hidden behind terrain cost nothing: they are tested against
+  the view's occlusion buffer (`OcclusionBuffer.h`, the terrain drawn this
+  frame rasterized at 256 × 144). The same buffer skips hidden objects and
+  whole hidden instanced tiles at draw preparation.
+- Each remaining placement is projected and processed front to back over a 64 × 36
+  screen coverage grid. A placement counts only for the part of it not
+  already covered by placements in front of it; foliage covers half of
+  what is behind it, solid meshes all of it. Trees inside a forest, behind
+  its first rows, therefore cost almost nothing.
+- Each LOD band adds its triangles, times that visibility, for the range of
+  scales at which the band is the one drawn.
+
+The budget is a cost in these visibility-weighted triangles. The scale is
+the largest the budget affords for the current view (up to
+`maximumScale`), so detail spreads as soon as the view allows it. For
+example, one near tree and a hundred open-field trees far away is cheap,
+so the far trees get full detail. A dense view pulls detail in before the
+GPU time even moves.
+
+GPU feedback calibrates the budget:
+
+- Terrain and grass time do not change with LOD distances, so the budget
+  compares the remaining geometry time with what is left of the GPU budget.
+- Over budget, the cost budget shrinks.
+- Under budget, it is at least what is drawn now, and it grows (when it
+  is what limits the scale) while there is more than 5% headroom.
+- The CPU render budget does not limit the cost model. Recording cost
+  barely depends on instanced LOD distances, and letting it hold the
+  budget pinned detail at the minimum.
+
+Benchmark frames log the model (`detail_model_active`,
+`detail_cost_budget`, `detail_predicted_cost`, `detail_target_scale`,
+`detail_placements`, `detail_occluded`).
+
+The model only covers instanced LOD bands. Everything else scales along
+with them, by its layer weight.
+
+### Reactive controller (fallback)
+
+Used when there is no recent cost curve, for example in a scene without
+instanced LOD bands. The tighter of the two budgets decides:
 
 - The global scale moves toward `scale × sqrt(budget / cost)`. Cost grows
   with the area kept at high detail, which is why the square root is used.
-- Both costs are smoothed (0.25 s) before the controller uses them.
-- The scale eases over `responseSeconds` (1.5 s) and stays within
-  `minimumScale` to `maximumScale` (0.6 to 2.5).
 - Between 85% and 100% of the budget, the scale holds steady, so it does not
   hunt around the target.
+
+### Both modes
+
+- Both costs are smoothed (0.25 s) before the controller uses them.
+- The scale eases over `responseSeconds` (1.5 s) and stays within
+  `minimumScale` to `maximumScale` (0.6 to 8).
 - The scale LODs use (`AppliedScale`) follows a copy of the controller
   output quantized to 12% steps, with hysteresis. It glides toward each
-  step at up to 4% a second when gaining detail and 12% a second when
+  step at up to 12% a second when gaining detail and 25% a second when
   shedding it. Jumping a whole step at once would move every switch distance
-  together and pop a ring of objects at the same moment.
+  together and pop a ring of objects at the same moment. At a 60 m switch,
+  the glide moves the switch ring at 7–15 m/s, about the camera's own
+  speed, and instanced LODs dissolve per placement.
+- `ENGINE_DETAIL_SCALE=<scale>` pins the global scale and stops
+  adaptation, for comparing LOD bands.
 
 Each layer's scale is:
 
@@ -97,7 +152,7 @@ project file:
 
 ```xml
 <DetailBudget Enabled="true" GeometryBudgetMs="6" CpuRenderBudgetMs="4"
-  MinimumScale="0.6" MaximumScale="2.5" ResponseSeconds="1.5"
+  MinimumScale="0.6" MaximumScale="8" ResponseSeconds="1.5"
   TextureBudgetEnabled="true" TextureBudgetMiB="1024" ExtendedTextureBudget="0.5" />
 ```
 
@@ -119,6 +174,40 @@ Without valid timings, the scale holds at its last value.
 
 After a load, heavy streaming frames dip the scale for a few seconds before
 it recovers.
+
+## Detail view
+
+Scene render mode **Detail**, the fifth entry in the scene view's render-mode
+menu (`--render-mode 4` in `GameBackendCapture`), colours every pixel from
+red (full detail) to blue (least). It takes the lower of two terms:
+
+- **Geometry:**
+  - Instanced LOD bands rate by the band drawn: LOD0 red, LOD1 green,
+    impostor blue. This is what the detail budget moves.
+  - Other meshes (terrain cells, far tiles, props) rate by their mean
+    triangle edge on screen. An edge of up to 3 pixels is full detail; 96
+    pixels is none.
+- **Texture:** texels of the finest resident base-color mip per screen
+  pixel. One or more texels per pixel is full detail; one texel per 8 pixels
+  is none. This shows streaming, distance mips and textures too small for
+  the view alike.
+
+With `ENGINE_OCCLUSION_DEBUG=1`, the Detail view also shows occlusion
+culling: everything the occlusion buffer would hide is drawn anyway and
+painted magenta. Magenta on screen means something visible would have been
+culled. `ENGINE_OCCLUSION_DEBUG=2` marks everything tested, to check that
+the overlay works.
+
+In the landscape demo (DX12, 1080p), with the budget settled at about 1.4:
+
+- Trees are LOD0 to about 85 m. Rocks are LOD0 to about 50 m (authored at
+  35 m, the cheapest place to buy more detail).
+- Near terrain reads blue to cyan. Its grid is 0.5–1 m, so its triangles
+  cover 50–100 pixels next to the camera; near-camera relief mapping adds
+  detail by shading, which this view does not rate. Mid-range terrain is
+  green to yellow and distant hills orange.
+- At a pinned scale of 8, everything near is red, but GPU geometry costs
+  13 ms against the 6 ms budget.
 
 ## Texture budget
 
@@ -168,3 +257,10 @@ every texture, at coarser mips.
   near terrain only the far tiles respond.
 - Per-layer GPU costs are not measured separately. The weights only express
   priority.
+- Occlusion only weights the cost model. Hidden placements are still drawn:
+  the GPU instance cull has no per-placement occlusion test (for example a
+  hierarchical depth buffer), so a deep forest still pays for its hidden
+  trees, at whatever band the scale gives them.
+- The cost model uses one global scale. Cheap objects (rocks, about 1,400
+  triangles at LOD0) and expensive ones (oaks) share it through their layer
+  weights, rather than each getting the detail its cost would allow.

@@ -1,4 +1,5 @@
 #include "Core/Rendering/DetailBudget.h"
+#include "Core/Rendering/OcclusionBuffer.h"
 #include "pch.h"
 #include "Core/Rendering/ShadowReceiverCulling.h"
 #include "Core/Rendering/StableShadowCascade.h"
@@ -667,12 +668,6 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             return target && target->enabled && target->Owner &&
                 portal->HasCompatiblePortalShapeWith(*target);
         });
-    // A terrain cell covers its rectangular footprint. Bound the entry and
-    // exit of each sightline through that surface; a draw is hidden only when
-    // every sightline crosses a nearer cell. Rebuild for each camera position.
-    using TerrainFootprint = Engine::Scene::Renderer::TerrainFootprint;
-    std::vector<TerrainFootprint> terrainBlockers;
-    std::vector<TerrainFootprint> solidBlockers;
     const bool terrainWarpActive = std::any_of(
         m_frameSpatialManipulatorScratch.begin(),
         m_frameSpatialManipulatorScratch.end(),
@@ -684,6 +679,66 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         });
     const bool useTerrainOcclusion = !shadowOnly && !includeEditorVisuals &&
         !hasPortalViews && !m_editorMode2D && !terrainWarpActive;
+    // Software occlusion buffer for this camera: the terrain drawn this
+    // frame is rasterized at low resolution, and anything whose bounds lie
+    // entirely behind it is skipped (OcclusionBuffer.h). Terrain meshes keep
+    // their vertices on the CPU, so the occluders are exactly the drawn
+    // surface. Shadow views keep everything: hidden objects still cast.
+    // Frame items and their meshes stay unchanged for the whole Render call.
+    std::future<std::shared_ptr<Engine::Rendering::OcclusionBuffer>> occlusionBufferJob;
+    struct OcclusionBufferFence
+    {
+        std::future<std::shared_ptr<Engine::Rendering::OcclusionBuffer>>& job;
+        ~OcclusionBufferFence() { if (job.valid()) job.wait(); }
+    } occlusionBufferFence{occlusionBufferJob};
+    if (useTerrainOcclusion && ReadEnvFlag("ENGINE_VISIBILITY_OCCLUSION_BUFFER", true))
+        occlusionBufferJob = Engine::Rendering::RenderJobs::Get().Submit(
+            [&frameRenderItems, viewProjection,
+             aspect = static_cast<float>(std::max(1u, viewportWidth)) /
+                static_cast<float>(std::max(1u, viewportHeight))]()
+    {
+
+        std::vector<Engine::Rendering::OcclusionBuffer::Occluder> occluders;
+        for (const auto& item : frameRenderItems)
+        {
+            if (!item.terrainSurface || !item.mesh || item.blended || item.warpedVertexBuffer ||
+                item.traversalChartPortal || item.mesh->IsInstanced()) continue;
+            const auto& indices = item.mesh->GetIndices();
+            if (indices.size() < 3) continue;
+            if (item.hasBounds && Engine::Scene::Renderer::SceneRendererViewPreparation::IsOutsideViewFrustum(
+                item, item.world, viewProjection)) continue;
+            Engine::Rendering::OcclusionBuffer::Occluder occluder;
+            const auto& terrainVertices = item.mesh->GetTerrainVertices();
+            const auto& vertices = item.mesh->GetVertices();
+            if (!terrainVertices.empty())
+            {
+                occluder.vertices = terrainVertices.data();
+                occluder.vertexStride = sizeof(terrainVertices.front());
+                occluder.vertexCount = terrainVertices.size();
+            }
+            else if (!vertices.empty())
+            {
+                occluder.vertices = vertices.data();
+                occluder.vertexStride = sizeof(vertices.front());
+                occluder.vertexCount = vertices.size();
+            }
+            else continue;
+            occluder.indices = indices.data();
+            occluder.indexCount = indices.size();
+            occluder.world = item.world;
+            occluders.push_back(occluder);
+        }
+        if (occluders.empty()) return std::shared_ptr<Engine::Rendering::OcclusionBuffer>{};
+        auto buffer = std::make_shared<Engine::Rendering::OcclusionBuffer>();
+        buffer->Build(viewProjection, aspect, occluders);
+        return buffer;
+    });
+    // A terrain cell covers its rectangular footprint. Bound the entry and
+    // exit of each sightline through that surface; a draw is hidden only when
+    // every sightline crosses a nearer cell. Rebuild for each camera position.
+    using TerrainFootprint = Engine::Scene::Renderer::TerrainFootprint;
+    std::vector<TerrainFootprint> terrainBlockers;
+    std::vector<TerrainFootprint> solidBlockers;
     const bool terrainOcclusionEnabled = useTerrainOcclusion &&
         ReadEnvFlag("ENGINE_VISIBILITY_TERRAIN_OCCLUSION", true);
     const bool solidOcclusionEnabled = useTerrainOcclusion &&
@@ -706,6 +761,71 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         terrainWarpActive,
         terrainBlockers,
         solidBlockers);
+    // The occlusion buffer job started after the camera matrix; it runs
+    // alongside the shadow-cascade and lighting preparation above.
+    std::shared_ptr<Engine::Rendering::OcclusionBuffer> occlusionBuffer =
+        occlusionBufferJob.valid() ? occlusionBufferJob.get() : nullptr;
+    // The instance cull tests each placement against a GPU copy of the
+    // buffer (InstanceCull.hlsl, IsBoxOccluded). Uploaded once per view and
+    // shared by every cull dispatch of this view.
+    const Engine::Graphics::IGraphicsBuffer* occlusionPyramid = nullptr;
+    if (occlusionBuffer && m_graphicsProvider && m_graphicsProvider->GetBufferFactory() &&
+        m_graphicsProvider->GetContextFactory() &&
+        ReadEnvFlag("ENGINE_VISIBILITY_OCCLUSION_GPU", true))
+    {
+        auto* contexts = m_graphicsProvider->GetContextFactory();
+        const uint32_t frameSlot = contexts->GetPreparedFrameSlot();
+        const uint64_t frameSerial = contexts->GetPreparedFrameSerial();
+        if (m_occlusionPyramidRings.size() <= frameSlot)
+            m_occlusionPyramidRings.resize(size_t(frameSlot) + 1);
+        auto& ring = m_occlusionPyramidRings[frameSlot];
+        if (ring.serial != frameSerial) { ring.serial = frameSerial; ring.used = 0; }
+        std::vector<float> data;
+        occlusionBuffer->SerializeForGpu(data);
+        const uint64_t bytes = data.size() * sizeof(float);
+        if (ring.used < 4)
+        {
+            if (ring.buffers.size() <= ring.used) ring.buffers.resize(ring.used + 1);
+            auto& buffer = ring.buffers[ring.used];
+            if (!buffer || buffer->GetSize() < bytes)
+            {
+                // Sized for the tallest buffer, so a viewport change rarely reallocates.
+                const uint64_t capacity = std::max<uint64_t>(bytes,
+                    Engine::Rendering::OcclusionBuffer::GpuFloatCount(512) * sizeof(float));
+                buffer = m_graphicsProvider->GetBufferFactory()->CreateBuffer(
+                    Engine::Graphics::IGraphicsBuffer::Usage::ShaderResource,
+                    Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
+                    capacity, nullptr, sizeof(float));
+            }
+            if (buffer)
+                if (auto* mapped = buffer->Map())
+                {
+                    std::memcpy(mapped, data.data(), bytes);
+                    buffer->FlushMappedWrites(0, bytes);
+                    occlusionPyramid = buffer.get();
+                    ++ring.used;
+                }
+        }
+    }
+    if (!m_occlusionPyramidEmpty && m_graphicsProvider && m_graphicsProvider->GetBufferFactory())
+    {
+        std::vector<float> empty(Engine::Rendering::OcclusionBuffer::GpuHeaderFloats, 0.f);
+        m_occlusionPyramidEmpty = m_graphicsProvider->GetBufferFactory()->CreateBuffer(
+            Engine::Graphics::IGraphicsBuffer::Usage::ShaderResource,
+            Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
+            empty.size() * sizeof(float), empty.data(), sizeof(float));
+    }
+    const Engine::Graphics::IGraphicsBuffer* cullOcclusion = !shadowOnly && occlusionPyramid
+        ? occlusionPyramid : m_occlusionPyramidEmpty.get();
+    const int cullOcclusionFlag = !shadowOnly && occlusionPyramid
+        ? (!std::getenv("ENGINE_OCCLUSION_DEBUG") ? 4
+            : std::atoi(std::getenv("ENGINE_OCCLUSION_DEBUG")) == 2 ? 28 : 12) : 0;
+    std::atomic<uint32_t> occlusionTested{0}, occlusionHidden{0};
+    // Debug: the Detail view paints what occlusion would hide instead of
+    // hiding it (ENGINE_OCCLUSION_DEBUG=1).
+    const bool occlusionDebug = occlusionBuffer && std::getenv("ENGINE_OCCLUSION_DEBUG") != nullptr;
+    std::vector<uint8_t> occlusionMarked(occlusionDebug ? frameRenderItems.size() : 0, 0);
+    const bool occlusionMarkAll = occlusionDebug && std::atoi(std::getenv("ENGINE_OCCLUSION_DEBUG")) == 2;
     using VisibleSlotsQuery = Engine::Rendering::RenderSpatialIndex::VisibleSlotsQuery;
     std::future<VisibleSlotsQuery> cameraVisibilityJob;
     struct CameraVisibilityFence
@@ -771,12 +891,29 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     };
     const auto hiddenBySolid = [&](const FrameRenderItem& item)
     {
-        if (!solidOcclusionEnabled || !item.mesh || item.blended ||
-            item.sprite || item.warpedVertexBuffer ||
+        if (!item.mesh || item.blended || item.sprite || item.warpedVertexBuffer ||
             item.traversalChartPortal || !item.hasBounds)
             return false;
-        return Engine::Scene::Renderer::SceneRendererVisibility::HiddenBySolid(
-            item, cameraPosition, solidBlockers);
+        if (solidOcclusionEnabled && Engine::Scene::Renderer::SceneRendererVisibility::HiddenBySolid(
+            item, cameraPosition, solidBlockers))
+            return true;
+        // Skinned, morphing and offset surfaces may leave their bounds.
+        if (!occlusionBuffer || item.skinJointCount || item.hasMorphTargets ||
+            item.hasSurfaceOffsets || item.belongsToPreview)
+            return false;
+        const auto bounds = Engine::Rendering::TransformBounds(
+            item.boundsMinimum, item.boundsMaximum, item.world);
+        occlusionTested.fetch_add(1, std::memory_order_relaxed);
+        // ENGINE_OCCLUSION_DEBUG=2 is the overlay's control: mark everything tested.
+        if (!occlusionMarkAll && !occlusionBuffer->IsBoxHidden(bounds.minimum, bounds.maximum)) return false;
+        occlusionHidden.fetch_add(1, std::memory_order_relaxed);
+        if (occlusionDebug)
+        {
+            const size_t index = static_cast<size_t>(&item - frameRenderItems.data());
+            if (index < occlusionMarked.size()) occlusionMarked[index] = 1;
+            return false;
+        }
+        return true;
     };
     auto visibilityState = Engine::Scene::Renderer::SceneRendererViewPreparation::PrepareVisibleSet(
         *this,
@@ -812,6 +949,18 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         visibilityState.terrainOcclusionCulled;
     m_lastRenderCpuTimings.solidOcclusionRejected +=
         visibilityState.solidOcclusionCulled;
+    if (occlusionBuffer)
+    {
+        Engine::Rendering::OcclusionBuffer::FrameStatistics frame;
+        const auto& built = occlusionBuffer->GetStatistics();
+        frame.occluders = built.occluders;
+        frame.triangles = built.triangles;
+        frame.rasterizedTriangles = built.rasterizedTriangles;
+        frame.buildMilliseconds = built.buildMilliseconds;
+        frame.tested = occlusionTested.load(std::memory_order_relaxed);
+        frame.hidden = occlusionHidden.load(std::memory_order_relaxed);
+        Engine::Rendering::OcclusionBuffer::PublishFrameStatistics(frame);
+    }
     const auto sortingStart = RenderClock::now();
     m_lastRenderCpuTimings.cullingMs = std::chrono::duration<double,std::milli>(sortingStart-cullingStart).count();
     std::future<void> sortJob;
@@ -921,6 +1070,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             detailCostInput.cameraPosition = cameraPosition;
             detailCostInput.viewportWidth = static_cast<float>(std::max(1u, viewportWidth));
             detailCostInput.viewportHeight = static_cast<float>(std::max(1u, viewportHeight));
+            detailCostInput.occlusion = occlusionBuffer;
         }
     }
     UINT slot = 0;
@@ -1630,9 +1780,35 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     }
     if (detailHeatMode)
     {
-        // Object.hlsl colours each pixel by its LOD band and texture detail.
+        // Object.hlsl colours each pixel by its geometry and texture detail.
+        // Meshes without instanced LOD bands pass their mean triangle edge,
+        // which the shader compares with the pixel footprint. Terrain is a
+        // height grid, so its edge is the grid spacing (ground area over
+        // triangles); other meshes use half their box surface as the area.
         for (auto& draw : preparedDraws)
-            if (draw.objectData.morphParams.z <= 0.f) draw.objectData.morphParams.z = -100.f;
+        {
+            if (draw.objectData.morphParams.z > 0.f) continue;
+            draw.objectData.morphParams.z = -100.f;
+            const auto* mesh = draw.mesh;
+            if (!mesh || mesh->instanceLodBand >= 0 || draw.frameItemIndex >= frameRenderItems.size())
+                continue;
+            const auto* source = mesh->IsInstanced() ? mesh->GetInstanceSource() : mesh;
+            if (!source || !source->HasBounds()) continue;
+            const uint32_t elements = source->GetIndexCount() ? source->GetIndexCount() : source->GetVertexCount();
+            if (elements < 3) continue;
+            const auto& item = frameRenderItems[draw.frameItemIndex];
+            const glm::mat4 world = mesh->IsInstanced() ? glm::mat4(1.f) : item.world;
+            const auto bounds = Engine::Rendering::TransformBounds(source->GetBoundsMin(), source->GetBoundsMax(), world);
+            const glm::vec3 size = glm::max(bounds.maximum - bounds.minimum, glm::vec3(1.e-3f));
+            const float area = item.terrainSurface ? size.x * size.z
+                : size.x * size.y + size.y * size.z + size.z * size.x;
+            const float edge = std::sqrt(2.f * area / (elements / 3.f));
+            draw.objectData.morphParams.z = -1000.f - std::min(edge, 6000.f);
+        }
+        // Occlusion debug: draws the CPU test would hide (-9000 = magenta).
+        for (auto& draw : preparedDraws)
+            if (draw.frameItemIndex < occlusionMarked.size() && occlusionMarked[draw.frameItemIndex])
+                draw.objectData.morphParams.z = -9000.f;
     }
     // Render phase 6: apply screen LOD, upload object records, and build instance batches.
     // Fixed editor LOD selection suppresses the other bands. Remove their
@@ -1905,12 +2081,14 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                     cull.viewProjection=cullViewProjection; cull.cameraPosition=glm::vec4(cameraPosition,1);
                     cull.counts={uint32_t(tiles.size()),sourceRange.vertexCount,sourceRange.firstVertex,1};
                     cull.selection={screenColor ? -1:gpuLod ? residentLod:representative.gpuLod,2,representative.gpuMaximumLod,
-                        (shadowOnly ? 1:0) | (representative.mesh->instanceLodBand>=0 ? 2:0)};
+                        (shadowOnly ? 1:0) | (representative.mesh->instanceLodBand>=0 ? 2:0) | cullOcclusionFlag};
                     context->SetComputeReadBuffer(buffers.input.get()); context->SetComputeReadBuffer(pool,1); context->SetComputeWriteBuffer(buffers.output.get());
+                    context->SetComputeReadBuffer(cullOcclusion,2);
                     context->SetComputeConstants(&cull,sizeof(cull)); context->DispatchCompute(1); context->StorageBarrier(buffers.output.get());
                     cull.counts.w=0;
                     context->SetComputePipeline(m_instanceCullPipeline.get());
                     context->SetComputeReadBuffer(buffers.input.get()); context->SetComputeReadBuffer(pool,1); context->SetComputeWriteBuffer(buffers.output.get());
+                    context->SetComputeReadBuffer(cullOcclusion,2);
                     context->SetComputeConstants(&cull,sizeof(cull)); context->DispatchCompute(uint32_t(tiles.size()));
                     context->StorageBarrier(buffers.output.get()); context->EndComputePass(); ++m_lastRenderCpuTimings.gpuBatches;
                     Engine::Rendering::PersistentInstanceBatches::ScheduleVisibilityReadback(
@@ -2002,11 +2180,14 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             cull.viewProjection=cullViewProjection; cull.cameraPosition=glm::vec4(cameraPosition,1);
             cull.counts={uint32_t(instances.size()),representative.indexBuffer ? representative.indexCount : representative.vertexCount,
                 representative.indexBuffer ? 1u:0u,1u}; cull.selection.x=screenColor ? -1:representative.gpuLod;
+            cull.selection.w|=cullOcclusionFlag;
             context->SetComputeReadBuffer(buffers.input.get()); context->SetComputeWriteBuffer(buffers.output.get());
+            context->SetComputeReadBuffer(cullOcclusion,2);
             context->SetComputeConstants(&cull,sizeof(cull)); context->DispatchCompute(1); context->StorageBarrier(buffers.output.get());
             cull.counts.w=0;
             context->SetComputePipeline(m_instanceCullPipeline.get());
             context->SetComputeWriteBuffer(buffers.output.get()); context->SetComputeReadBuffer(buffers.input.get());
+            context->SetComputeReadBuffer(cullOcclusion,2);
             context->SetComputeConstants(&cull,sizeof(cull)); context->DispatchCompute((uint32_t(instances.size())+63)/64);
             context->StorageBarrier(buffers.output.get()); context->EndComputePass(); ++m_lastRenderCpuTimings.gpuBatches;
             Engine::Rendering::AutomaticInstanceCache::ScheduleVisibilityReadback(

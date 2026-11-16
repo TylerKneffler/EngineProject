@@ -1040,6 +1040,17 @@ private:
     bool m_deferGraphicsRetirement = false;
     std::function<void()> m_beforeGpuResourceDestruction;
     std::unique_ptr<IGraphicsBuffer> m_emptyMorphDeltaBuffer;
+    // GPU copies of camera occlusion buffers for the instance cull, one ring
+    // per prepared frame slot (several views may upload in one frame), and
+    // an empty one (level count 0) bound when a dispatch has none.
+    struct OcclusionPyramidRing
+    {
+        uint64_t serial = UINT64_MAX;
+        size_t used = 0;
+        std::vector<std::unique_ptr<IGraphicsBuffer>> buffers;
+    };
+    std::vector<OcclusionPyramidRing> m_occlusionPyramidRings;
+    std::unique_ptr<IGraphicsBuffer> m_occlusionPyramidEmpty;
     std::unique_ptr<IGraphicsBuffer> m_emptyMorphWeightBuffer;
     std::shared_ptr<Engine::Graphics::IGraphicsTexture> m_brdfIntegrationLut;
     std::unique_ptr<IGraphicsBuffer> m_clusterHeaderBuffer;

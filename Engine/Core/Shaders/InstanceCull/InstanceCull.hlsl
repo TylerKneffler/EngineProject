@@ -13,12 +13,60 @@ struct CullConstants
 [[vk::binding(0, 0)]] StructuredBuffer<InstanceRecord> inputInstances;
 [[vk::binding(1, 0)]] RWStructuredBuffer<OutputRecord> outputInstances;
 [[vk::binding(2, 0)]] StructuredBuffer<PersistentInstance> placementPool;
+[[vk::binding(3, 0)]] StructuredBuffer<float> occlusionPyramid;
 #else
 cbuffer Constants : register(b0) { CullConstants constants; };
 StructuredBuffer<InstanceRecord> inputInstances : register(t0);
 RWStructuredBuffer<OutputRecord> outputInstances : register(u0);
 StructuredBuffer<PersistentInstance> placementPool : register(t1);
+StructuredBuffer<float> occlusionPyramid : register(t2);
 #endif
+
+// Occlusion test against the camera's software occlusion buffer (CPU-built
+// from this frame's terrain; layout in Core/Rendering/OcclusionBuffer.h,
+// SerializeForGpu). Must match OcclusionBuffer::IsBoxHidden: the box is
+// hidden only when its nearest point lies behind the farthest occluder depth
+// over its whole screen rectangle. Bounds crossing the near plane or wholly
+// off screen stay visible. selection.w bit 4 enables it (camera passes only).
+bool IsBoxOccluded(float3 center, float3 extent)
+{
+    const uint levels = (uint)occlusionPyramid[0];
+    if (levels == 0u) return false;
+    const float width = occlusionPyramid[1], height = occlusionPyramid[2];
+    float4x4 viewProjection;
+    [unroll] for (uint row = 0u; row < 4u; ++row)
+        viewProjection[row] = float4(occlusionPyramid[64u + row * 4u], occlusionPyramid[65u + row * 4u],
+            occlusionPyramid[66u + row * 4u], occlusionPyramid[67u + row * 4u]);
+    float2 low = float2(3.0e38, 3.0e38), high = float2(-3.0e38, -3.0e38);
+    float nearest = 3.0e38;
+    [unroll] for (uint corner = 0u; corner < 8u; ++corner)
+    {
+        const float3 offset = float3((corner & 1u) ? 1.0 : -1.0, (corner & 2u) ? 1.0 : -1.0,
+            (corner & 4u) ? 1.0 : -1.0);
+        const float4 clip = mul(viewProjection, float4(center + extent * offset, 1.0));
+        if (clip.w <= 0.05) return false;
+        const float2 screen = float2((clip.x / clip.w * 0.5 + 0.5) * width,
+            (0.5 - clip.y / clip.w * 0.5) * height);
+        low = min(low, screen); high = max(high, screen);
+        nearest = min(nearest, clip.w);
+    }
+    if (high.x < 0.0 || high.y < 0.0 || low.x >= width || low.y >= height) return false;
+    const int2 first = clamp(int2(floor(low)), int2(0, 0), int2(width - 1.0, height - 1.0));
+    const int2 last = clamp(int2(floor(high)), int2(0, 0), int2(width - 1.0, height - 1.0));
+    uint level = 0u;
+    [loop] while (level + 1u < levels &&
+        ((last.x >> level) - (first.x >> level) > 1 || (last.y >> level) - (first.y >> level) > 1))
+        ++level;
+    const uint offset = (uint)occlusionPyramid[4u + level * 3u];
+    const int levelWidth = (int)occlusionPyramid[5u + level * 3u];
+    const int levelHeight = (int)occlusionPyramid[6u + level * 3u];
+    float farthest = 0.0;
+    [loop] for (int y = first.y >> level; y <= min(levelHeight - 1, last.y >> level); ++y)
+        [loop] for (int x = first.x >> level; x <= min(levelWidth - 1, last.x >> level); ++x)
+            farthest = max(farthest, occlusionPyramid[offset + (uint)(y * levelWidth + x)]);
+    if (farthest >= 3.0e38) return false;
+    return nearest > farthest * 1.002 + 0.05;
+}
 [numthreads(64,1,1)]
 void CSMain(uint3 id : SV_DispatchThreadID, uint3 group : SV_GroupID, uint3 thread : SV_GroupThreadID)
 {
@@ -105,9 +153,19 @@ void CSMain(uint3 id : SV_DispatchThreadID, uint3 group : SV_GroupID, uint3 thre
                     ? dot(abs(planes[plane].xyz),worldExtent)
                     : radius*length(planes[plane].xyz))) visible=false;
             if(!visible) continue;
+            // Behind terrain (camera passes only; shadows still need it).
+            // Debug (bit 8): keep it and mark it for the Detail view instead.
+            uint occludedMark=0u;
+            // Bit 16 (debug control): treat everything tested as hidden.
+            if(!shadowPass && (constants.selection.w & 4)!=0 &&
+                ((constants.selection.w & 16)!=0 || IsBoxOccluded(worldCenter.xyz, worldExtent)))
+            {
+                if((constants.selection.w & 8)==0) continue;
+                occludedMark=1u;
+            }
             if (isTransitionPlacement) InterlockedAdd(outputInstances[0].row1.y,1);
             uint destination; InterlockedAdd(outputInstances[0].row0.y,1,destination);
-            OutputRecord result; result.row0=uint4(bounds.meta.z,placementIndex,0,0); result.row1=placement.identity; result.row2=0;
+            OutputRecord result; result.row0=uint4(bounds.meta.z,placementIndex,occludedMark,0); result.row1=placement.identity; result.row2=0;
             outputInstances[destination+1]=result;
         }
         return;
@@ -122,6 +180,13 @@ void CSMain(uint3 id : SV_DispatchThreadID, uint3 group : SV_GroupID, uint3 thre
     float4 planes[6] = {rows[3]+rows[0],rows[3]-rows[0],rows[3]+rows[1],rows[3]-rows[1],rows[2],rows[3]-rows[2]};
     [unroll] for (uint plane=0;plane<6;++plane)
         if (dot(planes[plane],center) < -instance.sphere.w * length(planes[plane].xyz)) return;
+    uint occludedMark = 0u;
+    if ((constants.selection.w & 5) == 4 &&
+        ((constants.selection.w & 16) != 0 || IsBoxOccluded(instance.sphere.xyz, instance.sphere.www)))
+    {
+        if ((constants.selection.w & 8) == 0) return;
+        occludedMark = 1u;
+    }
     const float3 origin=float3(asfloat(instance.meta.z),asfloat(instance.meta.w),instance.lod.z);
     const float distance = length(origin - constants.cameraPosition.xyz);
     if(instance.lod.w>0.0 &&
@@ -142,7 +207,7 @@ void CSMain(uint3 id : SV_DispatchThreadID, uint3 group : SV_GroupID, uint3 thre
     uint destination;
     InterlockedAdd(outputInstances[0].row0.y,1,destination);
     OutputRecord result;
-    result.row0 = uint4(instance.meta.x,0,0,0); result.row1=0; result.row2=0;
+    result.row0 = uint4(instance.meta.x,0,occludedMark,0); result.row1=0; result.row2=0;
     if (explicitMesh)
     {
         InstanceRecord transform=inputInstances[id.x*2];

@@ -1,12 +1,15 @@
 #pragma once
 
 #include <array>
+#include <memory>
 #include <cstdint>
 #include <vector>
 #include <glm/glm.hpp>
 
 namespace Engine::Rendering
 {
+class OcclusionBuffer;
+
 // Predicts what the visible LOD'd instances of one view would cost at every
 // detail scale, so the detail budget can choose the scale directly instead
 // of nudging it by measured time alone.
@@ -46,6 +49,8 @@ struct DetailCostInput
     std::vector<Group> groups;
     glm::mat4 viewProjection{ 1.f };
     glm::vec3 cameraPosition{ 0.f };
+    // Optional: placements hidden behind terrain cost nothing.
+    std::shared_ptr<const OcclusionBuffer> occlusion;
     float viewportWidth = 1920.f, viewportHeight = 1080.f;
 };
 

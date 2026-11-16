@@ -1,4 +1,5 @@
 #include "Core/Rendering/DetailCostModel.h"
+#include "Core/Rendering/OcclusionBuffer.h"
 
 #include <algorithm>
 #include <cmath>
@@ -79,6 +80,7 @@ DetailCostCurve BuildDetailCostCurve(const DetailCostInput& input)
     const float pixelsPerUnit = input.viewportHeight * .5f * focal;
 
     std::vector<Placement> placements;
+    uint32_t hiddenByOcclusion = 0;
     size_t total = 0;
     for (const auto& group : input.groups) total += group.transforms.size();
     placements.reserve(total);
@@ -102,6 +104,12 @@ DetailCostCurve BuildDetailCostCurve(const DetailCostInput& input)
             for (int plane = 0; plane < 6 && visible; ++plane)
                 if (glm::dot(planes[plane], worldCenter) < -radius * planeLengths[plane]) visible = false;
             if (!visible) continue;
+            // Behind terrain: in view but costs nothing (and covers nothing).
+            if (input.occlusion && input.occlusion->IsSphereHidden(glm::vec3(worldCenter), radius))
+            {
+                ++hiddenByOcclusion;
+                continue;
+            }
             const glm::vec4 clip = m * worldCenter;
             Placement placement{};
             placement.distance = glm::length(worldOrigin - input.cameraPosition);
@@ -192,9 +200,10 @@ DetailCostCurve BuildDetailCostCurve(const DetailCostInput& input)
         running += difference[index];
         curve.cost[index] = std::max(0.0, running) + fixed;
     }
-    curve.placements = static_cast<uint32_t>(placements.size());
-    curve.occludedFraction = placements.empty() ? 0.0 : 1.0 - visibilitySum / placements.size();
-    curve.valid = !placements.empty();
+    const size_t inView = placements.size() + hiddenByOcclusion;
+    curve.placements = static_cast<uint32_t>(inView);
+    curve.occludedFraction = inView == 0 ? 0.0 : 1.0 - visibilitySum / inView;
+    curve.valid = inView > 0;
     return curve;
 }
 }

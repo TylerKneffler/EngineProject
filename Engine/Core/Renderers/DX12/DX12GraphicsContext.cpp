@@ -500,7 +500,7 @@ void D3D12GraphicsContext::SetComputeReadBuffer(
     RetainBuffer(native->GetResource());
     TransitionComputeBuffer(m_cmdList, native,
         D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-    m_cmdList->SetComputeRootShaderResourceView(slot == 1 ? 3 : 1,
+    m_cmdList->SetComputeRootShaderResourceView(slot == 2 ? 4 : slot == 1 ? 3 : 1,
         native->GetGPUVirtualAddress());
 }
 

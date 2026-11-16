@@ -188,6 +188,19 @@ uint ResolveObjectIndex(uint instanceId)
     return draw.objectIndex + asuint(meshInstances[instanceId + 1].row0.x);
 }
 
+// Occlusion debug mark written by InstanceCull.hlsl (ENGINE_OCCLUSION_DEBUG):
+// row0.z of the same record ResolveObjectIndex reads. Explicit-mesh records
+// carry other data there and are never marked.
+bool ResolveOcclusionMark(uint instanceId)
+{
+    [branch] if ((draw.drawFlags & 0x00080000u) != 0u)
+        return asuint(meshInstances[instanceId+1].row0.z) != 0u;
+    [branch] if ((draw.drawFlags & 0x13080000u) == 0u ||
+        (draw.drawFlags & 0x03000000u) != 0u)
+        return false;
+    return asuint(meshInstances[instanceId + 1].row0.z) != 0u;
+}
+
 #include "../GrassWind.hlsli"
 #ifdef GRASS_CAPSULE_INTERACTION
 #include "../GrassFootBend.hlsli"
@@ -338,6 +351,9 @@ void VSMain(
     if ((draw.drawFlags & 0x20000000u) != 0u && objectData.geometryFade.w >= 4.0)
         oInstanceLodDistance = length(mul(objectData.world, float4(grassRoot, 1.0)).xyz -
             objectData.viewPositionAlphaCutoff.xyz);
+    // Detail view occlusion debug: -2 marks a placement the cull would hide.
+    [branch] if (objectData.morphParams.z < -50.0 && ResolveOcclusionMark(instanceId))
+        oInstanceLodDistance = -2.0;
     float3 worldNormal = normalize(mul((float3x3)objectData.world, localNormal));
     float3 worldTangent = mul((float3x3)objectData.world, localTangent);
     float3 worldUp = mul((float3x3)objectData.world, grassUp);
@@ -758,7 +774,8 @@ void ApplyAlphaLod(inout ObjectData data, float3 worldPosition)
 // Alpha quality is independent of color quality; zero bias preserves coverage.
 // Color and shadow masks use the same distance-based alpha bias.
 // Editor/capture Detail render mode (SceneRenderMode::Detail): the CPU writes
-// morphParams.z = -100. g_detailTexture is how well the resident base color
+// morphParams.z = -100, or -1000 - (mean triangle edge, m) for meshes without
+// instanced LOD bands. g_detailTexture is how well the resident base color
 // texture covers this pixel: 1 at one texel per pixel or more, falling to 0
 // at one texel per 8 pixels (blurred by streaming, distance mips or a
 // texture too small for the view).
@@ -1666,12 +1683,31 @@ float4 PerformanceHeatColor(ObjectData data, float3 worldPos, float3 normal,
     if (IsDetailHeatDraw(data))
     {
         // Detail view: red = full geometry and full texture detail, blue =
-        // least. Geometry is the instanced LOD band (LOD0 1, LOD1 .55,
-        // impostor .2); meshes without bands count as full. The texture term
-        // is g_detailTexture; the lower of the two decides.
-        const float band = data.geometryFade.w >= 4.0 ? data.geometryFade.x : 0.0;
-        const float geometry = band < .5 ? 1.0 : band < 1.5 ? .55 : .2;
+        // least; the lower of the two decides.
+        // Geometry: instanced LOD bands rate by band (LOD0 1, LOD1 .55,
+        // impostor .2), which is what the detail budget moves. Other meshes
+        // (terrain cells and far tiles, props) carry their mean triangle
+        // edge in metres (morphParams.z = -1000 - edge) and rate by its size
+        // on screen here: up to 3 pixels is full detail, 96 pixels none.
+        float geometry = 1.0;
+        if (data.geometryFade.w >= 4.0)
+        {
+            const float band = data.geometryFade.x;
+            geometry = band < .5 ? 1.0 : band < 1.5 ? .55 : .2;
+        }
+        else if (-data.morphParams.z >= 1000.0 && -data.morphParams.z < 8000.0)
+        {
+            const float edge = -data.morphParams.z - 1000.0;
+            const float pixelWorld = sqrt(length(ddx(worldPos)) * length(ddy(worldPos)));
+            const float edgePixels = edge / max(pixelWorld, 1.0e-5);
+            geometry = saturate(1.0 - log2(max(edgePixels, 1.0) / 3.0) / 5.0);
+        }
         heat = min(geometry, g_detailTexture);
+        // Occlusion debug (ENGINE_OCCLUSION_DEBUG): anything the occlusion
+        // buffer would hide is kept and painted magenta. Magenta on screen
+        // means something visible would have been culled.
+        if (-data.morphParams.z >= 8000.0 || g_instanceLodDistance < -1.5)
+            return float4(1.0, 0.0, 1.0, alpha);
     }
     float3 ramp[5] = {
         float3(0.10, 0.20, 0.95),

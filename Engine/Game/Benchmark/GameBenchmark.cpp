@@ -1,4 +1,5 @@
 #include "Core/Rendering/DetailBudget.h"
+#include "Core/Rendering/OcclusionBuffer.h"
 #include "Game/Benchmark/GameBenchmark.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Object.h"
@@ -237,6 +238,12 @@ void GameBenchmark::Record(uint64_t frame, const GameBenchmarkFrameSample& s)
         << ",\"detail_target_scale\":" << Engine::Rendering::DetailBudget::Get().GetModelStatus().targetScale
         << ",\"detail_placements\":" << Engine::Rendering::DetailBudget::Get().GetModelStatus().placements
         << ",\"detail_occluded\":" << Engine::Rendering::DetailBudget::Get().GetModelStatus().occludedFraction
+        << ",\"occlusion_occluders\":" << Engine::Rendering::OcclusionBuffer::LastFrameStatistics().occluders
+        << ",\"occlusion_triangles\":" << Engine::Rendering::OcclusionBuffer::LastFrameStatistics().triangles
+        << ",\"occlusion_rasterized\":" << Engine::Rendering::OcclusionBuffer::LastFrameStatistics().rasterizedTriangles
+        << ",\"occlusion_build_ms\":" << Engine::Rendering::OcclusionBuffer::LastFrameStatistics().buildMilliseconds
+        << ",\"occlusion_tested\":" << Engine::Rendering::OcclusionBuffer::LastFrameStatistics().tested
+        << ",\"occlusion_hidden\":" << Engine::Rendering::OcclusionBuffer::LastFrameStatistics().hidden
         << ",\"texture_budget_mib\":" << Engine::Rendering::DetailBudget::Get().GetTextureBudgetStatus().budgetBytes / 1048576
         << ",\"texture_resident_mib\":" << Engine::Rendering::DetailBudget::Get().GetTextureBudgetStatus().textureBytes / 1048576
         << ",\"vram_usage_mib\":" << Engine::Rendering::DetailBudget::Get().GetTextureBudgetStatus().vramUsageBytes / 1048576

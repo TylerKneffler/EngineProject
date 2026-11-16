@@ -17,7 +17,7 @@ D3D12PipelineStateFactory::CreateComputePipeline(
 {
     if (!m_device || !shader || !shader->GetBytecode() ||
         !shader->GetBytecodeSize()) return nullptr;
-    D3D12_ROOT_PARAMETER parameters[4]{};
+    D3D12_ROOT_PARAMETER parameters[5]{};
     parameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
     parameters[0].Constants = { 0, 0, 32 };
     parameters[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
@@ -29,7 +29,11 @@ D3D12PipelineStateFactory::CreateComputePipeline(
     D3D12_ROOT_SIGNATURE_DESC signatureDesc{};
     parameters[3].ParameterType=D3D12_ROOT_PARAMETER_TYPE_SRV;
     parameters[3].Descriptor={1,0};
-    signatureDesc.NumParameters = 4;
+    // t2: optional third read buffer (the instance cull's occlusion pyramid).
+    parameters[4].ParameterType=D3D12_ROOT_PARAMETER_TYPE_SRV;
+    parameters[4].Descriptor={2,0};
+    parameters[4].ShaderVisibility=D3D12_SHADER_VISIBILITY_ALL;
+    signatureDesc.NumParameters = 5;
     signatureDesc.pParameters = parameters;
     Microsoft::WRL::ComPtr<ID3DBlob> signatureBytes;
     Microsoft::WRL::ComPtr<ID3DBlob> errors;
