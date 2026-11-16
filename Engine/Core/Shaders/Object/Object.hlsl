@@ -739,11 +739,21 @@ float AlphaCoverageThreshold(float2 uv, float2 uvDx, float2 uvDy)
     return 1.0 - (1.0 - x) * (1.0 - x) / spread;
 }
 
-void ApplyMaskedAlphaTransmission(ObjectData data, float2 uv, float2 uvDx, float2 uvDy)
+// edgeFade is CardEdgeFade(): besides eroding alpha it dissolves coverage, so
+// cards whose texels are fully opaque still fade smoothly as they turn
+// edge-on instead of streaking until a hard cut. One hash serves both: a
+// pixel survives when transmission <= h < transmission + edgeFade *
+// (1 - transmission), so the two coverages multiply exactly.
+void ApplyMaskedAlphaTransmission(ObjectData data, float2 uv, float2 uvDx, float2 uvDy,
+    float edgeFade)
 {
     const float transmission = saturate(data.alphaLodParams.z);
-    [branch] if (transmission > 0.0)
-        clip(AlphaCoverageThreshold(uv, uvDx, uvDy) - transmission);
+    [branch] if (transmission > 0.0 || edgeFade < 1.0)
+    {
+        const float h = AlphaCoverageThreshold(uv, uvDx, uvDy);
+        clip(h - transmission);
+        clip(transmission + saturate(edgeFade) * (1.0 - transmission) - h);
+    }
 }
 
 // Flat triangle normal (unnormalized) from position derivatives. Take it
@@ -1661,14 +1671,14 @@ float4 PSShadowMain(
     uint flags = (uint)objectData.materialParams.w;
     if (flags & 32u)
     {
+        const float edgeFade = CardEdgeFade(objectData, worldPos, facet);
         float alpha = objectData.baseColor.a *
-            ((flags & 4096u) ? 1.0 : vertexColor.a) *
-            CardEdgeFade(objectData, worldPos, facet);
+            ((flags & 4096u) ? 1.0 : vertexColor.a) * edgeFade;
         if (flags & 1u)
             alpha *= baseColorMap.SampleBias(materialSampler, baseUv, TextureLodBlend(objectData, worldPos) * objectData.alphaLodParams.x).a *
                 objectData.pmxTextureTint.a;
         clip(alpha - objectData.viewPositionAlphaCutoff.w);
-        ApplyMaskedAlphaTransmission(objectData, baseUv, baseUvDx, baseUvDy);
+        ApplyMaskedAlphaTransmission(objectData, baseUv, baseUvDx, baseUvDy, edgeFade);
     }
     return 0.0;
 }
@@ -1762,7 +1772,8 @@ float4 PSFoliageMain(
     uint flags = (uint)objectData.materialParams.w;
     float4 base = objectData.baseColor *
         ((flags & 4096u) ? float4(1.0, 1.0, 1.0, 1.0) : vertexColor);
-    base.a *= CardEdgeFade(objectData, worldPos, facet);
+    const float edgeFade = CardEdgeFade(objectData, worldPos, facet);
+    base.a *= edgeFade;
     if (flags & 1u)
         base *= SampleObjectBaseColor(objectData, uv, textureBias,
             base.a * objectData.pmxTextureTint.a,
@@ -1771,7 +1782,7 @@ float4 PSFoliageMain(
     if (flags & 32u)
     {
         clip(base.a - objectData.viewPositionAlphaCutoff.w);
-        ApplyMaskedAlphaTransmission(objectData, uv, uvDx, uvDy);
+        ApplyMaskedAlphaTransmission(objectData, uv, uvDx, uvDy, edgeFade);
     }
     if (IsPerformanceHeatDraw(objectData))
         return PerformanceHeatColor(objectData, worldPos, normal, frontFace, base.a);
@@ -1848,7 +1859,8 @@ float4 PSGrassMain(
     uint flags = (uint)objectData.materialParams.w;
     float4 base = objectData.baseColor *
         ((flags & 4096u) ? float4(1.0, 1.0, 1.0, 1.0) : vertexColor);
-    base.a *= CardEdgeFade(objectData, worldPos, facet);
+    const float edgeFade = CardEdgeFade(objectData, worldPos, facet);
+    base.a *= edgeFade;
     const bool textured = (flags & 1u) != 0u;
     if (textured)
         base *= SampleObjectBaseColor(objectData, uv, textureBias,
@@ -1858,7 +1870,7 @@ float4 PSGrassMain(
     if (flags & 32u)
     {
         clip(base.a - objectData.viewPositionAlphaCutoff.w);
-        ApplyMaskedAlphaTransmission(objectData, uv, uvDx, uvDy);
+        ApplyMaskedAlphaTransmission(objectData, uv, uvDx, uvDy, edgeFade);
     }
     if (IsPerformanceHeatDraw(objectData))
         return PerformanceHeatColor(objectData, worldPos, normal, frontFace, base.a);
@@ -1978,7 +1990,8 @@ float4 ObjectSurfacePS(
         dot(float4(worldPos, 1.0), objectData.portalClipPlane) < 0.0)
         clip(-1.0);
     float4 base = objectData.baseColor * ((flags & 4096u) ? float4(1, 1, 1, 1) : vertexColor);
-    base.a *= CardEdgeFade(objectData, worldPos, facet);
+    const float edgeFade = CardEdgeFade(objectData, worldPos, facet);
+    base.a *= edgeFade;
     // Alpha-tested surfaces fall through to keep their cutout silhouettes.
     if (IsPerformanceHeatDraw(objectData) && !(flags & 32u))
     {
@@ -2423,7 +2436,7 @@ float4 ObjectSurfacePS(
     if (flags & 32u)
     {
         clip(base.a - objectData.viewPositionAlphaCutoff.w);
-        ApplyMaskedAlphaTransmission(objectData, maskUv, maskUvDx, maskUvDy);
+        ApplyMaskedAlphaTransmission(objectData, maskUv, maskUvDx, maskUvDy, edgeFade);
         if (IsPerformanceHeatDraw(objectData))
             return PerformanceHeatColor(objectData, worldPos, normal, frontFace, base.a);
     }

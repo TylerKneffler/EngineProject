@@ -21,6 +21,8 @@ enum class GpuTimingStage : uint32_t
     TreeBark,
     TreeLeaves,
     FoliageDepth,
+    // Hardware simulation's calibrated GPU load (Rendering/HardwareSimulation.h).
+    SyntheticLoad,
     Count
 };
 

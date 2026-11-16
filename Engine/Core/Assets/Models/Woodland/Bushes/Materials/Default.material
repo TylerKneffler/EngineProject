@@ -78,6 +78,7 @@
   "toonTexture": "",
   "alphaMode": "Mask",
   "alphaCutoff": 0.32,
+  "alphaEdgeFade": 1.0,
   "normalScale": 0.55,
   "heightScale": 0.05000000074505806,
   "terrainHeightBlendStrength": 0,

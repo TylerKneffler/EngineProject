@@ -1,4 +1,6 @@
 #include "Material.h"
+#include "Core/Compoonents/Obj/LodPathListEditor.h"
+#include "Core/Serialization/PrefabLod.h"
 #include "Core/Compoonents/Materials/Texture.h"
 #include "Core/Compoonents/Mesh/Mesh.h"
 #include "Core/Serialization/Json.h"
@@ -643,7 +645,22 @@ Material::JsonValue Material::Serialize() const
     value.Set("subsurfaceThicknessTexture",
         JsonValue(TexturePath(subsurfaceThicknessTexture)));
     value.Set("reflectionEnvironmentTexture", JsonValue(reflectionEnvironmentTexture));
+    if (!lodMaterials.empty())
+        value.Set("lodMaterials", Engine::Serialization::PrefabLod::WritePaths(lodMaterials));
     return value;
+}
+
+bool Material::DrawProperties(::Engine::Editor::IEditorUi& ui)
+{
+    bool changed = Component::DrawProperties(ui);
+    if (EditLodPathList(ui, "Prefab LOD materials", lodMaterials,
+            Engine::Serialization::PrefabLod::MaximumLevels - 1,
+            "Material asset per level; empty keeps this material"))
+    {
+        MarkConfigurationDirty();
+        changed = true;
+    }
+    return changed;
 }
 
 void Material::CopyResolvedStateFrom(const Material& source,
@@ -657,6 +674,7 @@ void Material::CopyResolvedStateFrom(const Material& source,
     if (serializedSource) Component::Deserialize(*serializedSource);
     else Component::Deserialize(source.Serialize());
     m_filePath = source.m_filePath;
+    lodMaterials = source.lodMaterials;
     shader = source.shader;
     shaderError.clear();
     edgeColor = source.edgeColor;
@@ -693,6 +711,8 @@ void Material::Deserialize(const JsonValue& value)
     edgeColor = from4(value["edgeColor"], edgeColor);
     sphereTint = from4(value["sphereTint"], sphereTint);
     toonTint = from4(value["toonTint"], toonTint);
+    if (value.Has("lodMaterials"))
+        lodMaterials = Engine::Serialization::PrefabLod::ReadPaths(value["lodMaterials"]);
     if (value.Has("baseColorTexture"))
         SetBaseColorTexture(value["baseColorTexture"].AsString());
     if (value.Has("sphereTexture"))

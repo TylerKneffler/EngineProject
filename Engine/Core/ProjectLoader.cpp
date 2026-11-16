@@ -420,6 +420,31 @@ void ProjectLoader::ParseRendering(const pugi::xml_node& projectNode, ProjectSet
             budget.extendedTextureBudget = std::clamp(
                 budgetNode.attribute("ExtendedTextureBudget").as_float(.5f), 0.f, 1.f);
         }
+        if (auto profilesNode = prop.child("VideoProfiles"))
+        {
+            // A present (even empty) list replaces the defaults, so deleted
+            // profiles stay deleted.
+            settings.videoProfiles.clear();
+            settings.activeVideoProfile = profilesNode.attribute("Active").as_string();
+            for (auto profileNode : profilesNode.children("Profile"))
+            {
+                Engine::Model::VideoProfile profile;
+                profile.name = profileNode.attribute("Name").as_string();
+                if (profile.name.empty()) continue;
+                profile.qualityPreset = profileNode.attribute("QualityPreset").as_int(-1);
+                profile.width = profileNode.attribute("Width").as_uint(0);
+                profile.height = profileNode.attribute("Height").as_uint(0);
+                profile.maxFps = profileNode.attribute("MaxFps").as_int(-1);
+                profile.textureBudgetMiB = profileNode.attribute("TextureBudgetMiB").as_float(0.f);
+                profile.cpuWorkers = profileNode.attribute("CpuWorkers").as_uint(0);
+                profile.cpuLoadMs = profileNode.attribute("CpuLoadMs").as_float(0.f);
+                profile.gpuLoadMs = profileNode.attribute("GpuLoadMs").as_float(0.f);
+                profile.Normalize();
+                settings.videoProfiles.push_back(std::move(profile));
+            }
+            if (!Engine::Model::FindVideoProfile(settings.videoProfiles, settings.activeVideoProfile))
+                settings.activeVideoProfile.clear();
+        }
         if (auto cacheNode = prop.child("MaterialCache"))
         {
             auto& cache = settings.materialCache;

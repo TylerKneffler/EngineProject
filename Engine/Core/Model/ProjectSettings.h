@@ -3,6 +3,7 @@
 #include "Core/Model/LightingData.h"
 #include "Core/Model/MaterialCacheSettings.h"
 #include "Core/Model/ProjectLayers.h"
+#include "Core/Model/VideoProfiles.h"
 #include <cstdint>
 #include <glm/glm.hpp>
 #include <string>
@@ -62,6 +63,11 @@ struct ProjectSettings
     std::vector<Engine::Model::ProjectLayer> layers =
         Engine::Model::DefaultProjectLayers();
     Engine::Model::DetailBudgetSettings detailBudget;
+    // Video profiles for testing lesser hardware (VideoProfiles.h). The game
+    // applies the active one; empty applies none.
+    std::vector<Engine::Model::VideoProfile> videoProfiles =
+        Engine::Model::DefaultVideoProfiles();
+    std::string activeVideoProfile;
     enum class AspectRatioMode { Free, Locked, Hardcoded };
     AspectRatioMode aspectRatioMode = AspectRatioMode::Locked;
     float gameAspectRatio = 1.777f;

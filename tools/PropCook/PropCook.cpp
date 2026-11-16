@@ -1,6 +1,6 @@
 // PropCook: turns a scanned or high-poly source model (FBX or OBJ, via ufbx)
 // into game-ready terrain props: native .mesh LOD chains with a ground pivot,
-// plus one prefab per LOD for TerrainObjectLayer LOD chains.
+// plus one prefab carrying every level (Mesh.lodMeshes) for TerrainObjectLayer.
 //
 //   PropCook <source.fbx|obj> <outMeshDir> [options]
 //
@@ -17,7 +17,7 @@
 //                          its triangle target rather than exceed the budget.
 //   --mesh-asset <path>    asset path of outMeshDir as prefabs reference it
 //                          (e.g. Assets/Models/Woodland/Rocks/Meshes)
-//   --prefab-dir <dir>     write <name>_LOD<i>.prefab files here
+//   --prefab-dir <dir>     write <name>.prefab here (LOD1..n in Mesh.lodMeshes)
 //   --material <asset>     Material.materialAsset written into the prefabs
 //
 // Geometry is converted to metres, Y up, with V flipped like the engine's FBX
@@ -482,7 +482,8 @@ std::vector<Mesh::Vertex> BuildEngineVertices(const std::vector<SourceVertex>& v
     return result;
 }
 
-std::string PrefabText(const std::string& name, const std::string& meshAsset,
+// meshAssets[0] is LOD0; the rest become Mesh.lodMeshes (LOD1..n).
+std::string PrefabText(const std::string& name, const std::vector<std::string>& meshAssets,
     const std::string& material)
 {
     std::ostringstream xml;
@@ -490,9 +491,17 @@ std::string PrefabText(const std::string& name, const std::string& meshAsset,
         << "<Prefab xmlns:components=\"urn:engine-components\" version=\"1\" type=\"prefab\">\n"
         << "  <object name=\"" << name << "\" enabled=\"true\">\n"
         << "    <components>\n"
-        << "      <components:Mesh Mesh.file=\"" << meshAsset
-        << "\" Mesh.foliageWindStrength=\"0\" Mesh.useLightProbes=\"false\" Mesh.gpuLodSelection=\"false\" />\n"
-        << "      <components:Material Material.materialAsset=\"" << material << "\" />\n"
+        << "      <components:Mesh Mesh.file=\"" << meshAssets.front()
+        << "\" Mesh.foliageWindStrength=\"0\" Mesh.useLightProbes=\"false\" Mesh.gpuLodSelection=\"false\"";
+    if (meshAssets.size() < 2) xml << " />\n";
+    else
+    {
+        xml << ">\n        <Mesh.lodMeshes>\n";
+        for (size_t lod = 1; lod < meshAssets.size(); ++lod)
+            xml << "          <item>" << meshAssets[lod] << "</item>\n";
+        xml << "        </Mesh.lodMeshes>\n      </components:Mesh>\n";
+    }
+    xml << "      <components:Material Material.materialAsset=\"" << material << "\" />\n"
         << "    </components>\n"
         << "    <children />\n"
         << "    <transform>\n"
@@ -531,6 +540,7 @@ bool Cook(Geometry geometry, const fs::path& meshDir, const std::string& name,
     std::printf("%s: source %zu triangles, %zu vertices, %.2f x %.2f x %.2f m\n", name.c_str(),
         indices.size() / 3, vertexCount, (maximum[0] - minimum[0]) * scale, height * scale,
         (maximum[2] - minimum[2]) * scale);
+    std::vector<std::string> meshAssets;
     for (size_t lod = 0; lod < lods.size(); ++lod)
     {
         const size_t target = size_t(std::max(lods[lod], 4));
@@ -551,12 +561,13 @@ bool Cook(Geometry geometry, const fs::path& meshDir, const std::string& name,
         }
         std::printf("  LOD%zu: %zu triangles, %zu vertices -> %s\n", lod, count / 3,
             used, meshPath.string().c_str());
-        if (!prefabDir.empty())
-        {
-            std::ofstream prefab(prefabDir / (lodName + ".prefab"), std::ios::binary | std::ios::trunc);
-            prefab << PrefabText(lodName, meshAsset + "/" + lodName + ".mesh", material);
-            if (!prefab) return false;
-        }
+        meshAssets.push_back(meshAsset + "/" + lodName + ".mesh");
+    }
+    if (!prefabDir.empty() && !meshAssets.empty())
+    {
+        std::ofstream prefab(prefabDir / (name + ".prefab"), std::ios::binary | std::ios::trunc);
+        prefab << PrefabText(name, meshAssets, material);
+        if (!prefab) return false;
     }
     return true;
 }

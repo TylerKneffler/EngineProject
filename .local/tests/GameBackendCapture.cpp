@@ -52,6 +52,7 @@ Engine::Game::GameBenchmarkOptions Parse(int argc, char** argv)
         else if (key == "--render-mode") options.renderMode =
             static_cast<int>(Number(value(), "render mode", 4, true));
         else if (key == "--max-fps") options.maxFpsOverride = Number(value(), "max fps", 1000, true);
+        else if (key == "--profile") options.profile = value();
         else if (key == "--require-terrain") options.requireTerrain = true;
         else if (key == "--require-streamed-cells") options.requireStreamedCells = true;
         else if (key == "--require-movement") options.requireMovement = true;
@@ -62,7 +63,7 @@ Engine::Game::GameBenchmarkOptions Parse(int argc, char** argv)
                 "[--backend dx11|dx12|vulkan] [--device <adapter>] [--width 1920 --height 1080] "
                 "[--warmup 120 --frames 300 --out .local/performance-logs] "
                 "[--require-terrain] [--require-streamed-cells] [--wait-for-residency <seconds>] "
-                "[--drive-forward <frames>] [--require-movement] [--max-fps <fps>] "
+                "[--drive-forward <frames>] [--require-movement] [--max-fps <fps>] [--profile <video profile>] "
                 "[--disable-clustered-lighting]\n"
                 "Defaults to oak_meadow.scene. Runs the standalone Game loop, writes frames.jsonl and capture.ppm, "
                 "and returns 2 if capture validity checks fail.\n";

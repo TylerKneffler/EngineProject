@@ -6,6 +6,8 @@
 #include "Core/Model/MeshPackAsset.h"
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Engine/Editor/UI/IEditorUi.h"
+#include "Core/Compoonents/Obj/LodPathListEditor.h"
+#include "Core/Serialization/PrefabLod.h"
 #include <fstream>
 #include <algorithm>
 #include <sstream>
@@ -122,6 +124,13 @@ bool Mesh::DrawProperties(::Engine::Editor::IEditorUi& ui)
         changed=ui.DragFloat("LOD 1 Distance",&gpuLod1Distance,.1f,0.f,100000.f)||changed;
         changed=ui.DragFloat("LOD 2 Distance",&gpuLod2Distance,.1f,gpuLod1Distance,100000.f)||changed;
     }
+    if (EditLodPathList(ui, "Prefab LOD meshes", lodMeshes,
+            Engine::Serialization::PrefabLod::MaximumLevels - 1,
+            "Mesh asset per level; empty hides this part at that level"))
+    {
+        MarkConfigurationDirty();
+        changed = true;
+    }
     if (!m_morphWeights.empty() &&
         ui.PropertyGroupHeader("Morph Weights", false))
     {
@@ -144,6 +153,8 @@ bool Mesh::DrawProperties(::Engine::Editor::IEditorUi& ui)
 Mesh::JsonValue Mesh::Serialize() const
 {
     JsonValue result = Component::Serialize();
+    if (!lodMeshes.empty())
+        result.Set("lodMeshes", Engine::Serialization::PrefabLod::WritePaths(lodMeshes));
     if (m_morphTargets.empty()) return result;
     result.Set("morphNodeIndex", JsonValue(static_cast<int>(m_morphNodeIndex)));
     result.Set("morphWeights", FloatArray(m_morphWeights));
@@ -208,6 +219,7 @@ void Mesh::Deserialize(const JsonValue& v)
     if(v.Has("screenLodHysteresis")) screenLodHysteresis=v["screenLodHysteresis"].AsFloat();
     if(v.Has("gpuLod1Distance")) gpuLod1Distance=std::max(0.f,v["gpuLod1Distance"].AsFloat());
     if(v.Has("gpuLod2Distance")) gpuLod2Distance=std::max(gpuLod1Distance,v["gpuLod2Distance"].AsFloat());
+    if(v.Has("lodMeshes")) lodMeshes=Engine::Serialization::PrefabLod::ReadPaths(v["lodMeshes"]);
     if (v.Has("file") && !v["file"].AsString().empty())
         LoadFromFile(v["file"].AsString());
     if (v.Has("morphFile") && !v["morphFile"].AsString().empty())

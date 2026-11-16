@@ -1,0 +1,91 @@
+<?xml version='1.0' encoding='utf-8'?>
+<Prefab xmlns:components="urn:engine-components" version="1" type="prefab">
+  <object name="Medium_oak_tree_003" enabled="true">
+    <components>
+      </components>
+    <children>
+      <item name="Primitive 1" enabled="true">
+        <transform>
+          <Transform.position>
+            <item>0</item>
+            <item>0</item>
+            <item>0</item>
+          </Transform.position>
+          <Transform.rotation>
+            <item>0</item>
+            <item>0</item>
+            <item>0</item>
+          </Transform.rotation>
+          <Transform.scale>
+            <item>1</item>
+            <item>1</item>
+            <item>1</item>
+          </Transform.scale>
+        </transform>
+        <components>
+          <components:Mesh Mesh.file="Assets/Models/Woodland/Oaks/Meshes/Medium_oak_tree_003_LOD0 31_1.mesh" Mesh.foliageWindStrength="0" Mesh.useLightProbes="false" Mesh.gpuLodSelection="false" Mesh.gpuLod1Distance="8" Mesh.gpuLod2Distance="16">
+            <Mesh.lodMeshes>
+              <item>Assets/Models/Woodland/Oaks/Meshes/Medium_oak_tree_003_LOD1 32_1.mesh</item>
+              <item>Assets/Models/Woodland/Oaks/Meshes/Medium_oak_tree_003_LOD2 33_1.mesh</item>
+              <item>Assets/Models/Woodland/Oaks/Meshes/Medium_oak_tree_003_Impostor.mesh</item>
+            </Mesh.lodMeshes>
+          </components:Mesh>
+          <components:Material Material.materialAsset="Engine/Core/Assets/Models/Woodland/Oaks/Materials/Bark_Mat 1.material">
+            <Material.lodMaterials>
+              <item _valueType="string" />
+              <item _valueType="string" />
+              <item>Engine/Core/Assets/Models/Woodland/Oaks/Materials/Medium_oak_tree_003_Impostor.material</item>
+            </Material.lodMaterials>
+          </components:Material>
+        </components>
+        <children />
+      </item>
+      <item name="Primitive 2" enabled="true">
+        <transform>
+          <Transform.position>
+            <item>0</item>
+            <item>0</item>
+            <item>0</item>
+          </Transform.position>
+          <Transform.rotation>
+            <item>0</item>
+            <item>0</item>
+            <item>0</item>
+          </Transform.rotation>
+          <Transform.scale>
+            <item>1</item>
+            <item>1</item>
+            <item>1</item>
+          </Transform.scale>
+        </transform>
+        <components>
+          <components:Mesh Mesh.file="Assets/Models/Woodland/Oaks/Meshes/Medium_oak_tree_003_LOD0 31_2.mesh" Mesh.foliageWindStrength="0" Mesh.useLightProbes="false" Mesh.gpuLodSelection="false" Mesh.gpuLod1Distance="8" Mesh.gpuLod2Distance="16">
+            <Mesh.lodMeshes>
+              <item>Assets/Models/Woodland/Oaks/Meshes/Medium_oak_tree_003_LOD1 32_2.mesh</item>
+              <item>Assets/Models/Woodland/Oaks/Meshes/Medium_oak_tree_003_LOD2 33_2.mesh</item>
+            </Mesh.lodMeshes>
+          </components:Mesh>
+          <components:Material Material.materialAsset="Engine/Core/Assets/Models/Woodland/Oaks/Materials/Cluster_Mat 2.material" />
+        </components>
+        <children />
+      </item>
+    </children>
+    <transform>
+      <Transform.position>
+        <item>0</item>
+        <item>0</item>
+        <item>0</item>
+      </Transform.position>
+      <Transform.rotation>
+        <item>0</item>
+        <item>0</item>
+        <item>0</item>
+      </Transform.rotation>
+      <Transform.scale>
+        <item>1</item>
+        <item>1</item>
+        <item>1</item>
+      </Transform.scale>
+    </transform>
+  </object>
+</Prefab>

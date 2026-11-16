@@ -439,6 +439,12 @@ void PreferencesView::DrawWindow(IEditorUi& ui, bool& isOpen)
                 ui.EndTab();
             }
 
+            if (ui.BeginTab("Video Profiles"))
+            {
+                DrawVideoProfilesSection(ui);
+                ui.EndTab();
+            }
+
             if (ui.BeginTab("Game"))
             {
                 DrawAspectRatioSection(ui);
@@ -1376,6 +1382,102 @@ void PreferencesView::DrawRenderingSection(IEditorUi& ui)
 }
 
 // ---------------------------------------------------------------------------
+// DrawVideoProfilesSection
+// ---------------------------------------------------------------------------
+void PreferencesView::DrawVideoProfilesSection(IEditorUi& ui)
+{
+    ui.Label("Video Profiles");
+    ui.DisabledLabel("Named video settings for testing how the game runs on lesser hardware.");
+    ui.DisabledLabel("The game applies the active profile at start; captures can pick one with");
+    ui.DisabledLabel("--profile <name>, and ENGINE_VIDEO_PROFILE overrides it.");
+    ui.DisabledLabel("Hardware simulation costs real time on this machine: fewer CPU workers,");
+    ui.DisabledLabel("extra main-thread ms, and a calibrated GPU pass that adds GPU ms.");
+    auto& profiles = m_settings.videoProfiles;
+
+    // Active profile: None or one of the list.
+    std::vector<const char*> names{ "None (project and scene settings)" };
+    for (const auto& profile : profiles) names.push_back(profile.name.c_str());
+    int active = 0;
+    for (size_t i = 0; i < profiles.size(); ++i)
+        if (profiles[i].name == m_settings.activeVideoProfile) active = static_cast<int>(i) + 1;
+    if (ui.Combo("Active Profile", &active, names.data(), static_cast<int>(names.size())))
+    {
+        m_settings.activeVideoProfile = active > 0 ? profiles[static_cast<size_t>(active - 1)].name : std::string{};
+        NotifyChanged();
+    }
+
+    // Integer fields edit through a float drag and round.
+    const auto dragUnsigned = [&](const char* label, uint32_t& value, float speed, float maximum)
+    {
+        float edited = static_cast<float>(value);
+        if (!ui.DragFloat(label, &edited, speed, 0.f, maximum)) return false;
+        value = static_cast<uint32_t>(std::lround(std::clamp(edited, 0.f, maximum)));
+        return true;
+    };
+    const char* presets[] = { "Keep scene's", "Reference", "High", "Medium", "Low", "Auto" };
+    int removeIndex = -1;
+    for (size_t i = 0; i < profiles.size(); ++i)
+    {
+        auto& profile = profiles[i];
+        ui.PushId(&profile);
+        ui.Separator();
+        bool changed = false;
+        char name[64];
+        strncpy_s(name, profile.name.c_str(), sizeof(name));
+        if (ui.InputText("Name", name, sizeof(name)) && name[0])
+        {
+            const bool wasActive = m_settings.activeVideoProfile == profile.name;
+            profile.name = name;
+            if (wasActive) m_settings.activeVideoProfile = profile.name;
+            changed = true;
+        }
+        int preset = profile.qualityPreset + 1;
+        if (ui.Combo("Quality Preset", &preset, presets, 6)) { profile.qualityPreset = preset - 1; changed = true; }
+        changed |= dragUnsigned("Width (0 = project)", profile.width, 8.f, 16384.f);
+        changed |= dragUnsigned("Height (0 = project)", profile.height, 8.f, 16384.f);
+        int fps = profile.maxFps;
+        if (ui.SliderInt("Max FPS (-1 project, 0 unlimited)", &fps, -1, 360)) { profile.maxFps = fps; changed = true; }
+        if (ui.DragFloat("Texture Budget MiB (0 = project)", &profile.textureBudgetMiB, 8.f, 0.f, 65536.f)) changed = true;
+        ui.DisabledLabel("Hardware simulation");
+        changed |= dragUnsigned("CPU Workers (0 = all)", profile.cpuWorkers, .1f, 128.f);
+        if (ui.DragFloat("Extra CPU ms / frame", &profile.cpuLoadMs, .1f, 0.f, 200.f)) changed = true;
+        if (ui.DragFloat("Extra GPU ms / frame", &profile.gpuLoadMs, .1f, 0.f, 200.f)) changed = true;
+        if (changed)
+        {
+            profile.Normalize();
+            NotifyChanged();
+        }
+        if (ui.Button("Remove")) removeIndex = static_cast<int>(i);
+        ui.PopId();
+    }
+    if (removeIndex >= 0)
+    {
+        if (profiles[static_cast<size_t>(removeIndex)].name == m_settings.activeVideoProfile)
+            m_settings.activeVideoProfile.clear();
+        profiles.erase(profiles.begin() + removeIndex);
+        NotifyChanged();
+    }
+    ui.Separator();
+    if (ui.Button("Add Profile"))
+    {
+        std::string name = "Profile " + std::to_string(profiles.size() + 1);
+        while (Engine::Model::FindVideoProfile(profiles, name)) name += "+";
+        Engine::Model::VideoProfile profile;
+        profile.name = name;
+        profiles.push_back(profile);
+        NotifyChanged();
+    }
+    ui.SameLine();
+    if (ui.Button("Reset to Defaults"))
+    {
+        profiles = Engine::Model::DefaultVideoProfiles();
+        if (!Engine::Model::FindVideoProfile(profiles, m_settings.activeVideoProfile))
+            m_settings.activeVideoProfile.clear();
+        NotifyChanged();
+    }
+}
+
+// ---------------------------------------------------------------------------
 // DrawAspectRatioSection
 // ---------------------------------------------------------------------------
 void PreferencesView::DrawLayersSection(IEditorUi& ui)
@@ -1800,6 +1902,25 @@ bool PreferencesView::SaveSettings()
                     m_settings.detailBudget.textureBudgetMiB);
                 budgetNode.append_attribute("ExtendedTextureBudget").set_value(
                     m_settings.detailBudget.extendedTextureBudget);
+
+                if (auto oldProfiles = prop.child("VideoProfiles"))
+                    prop.remove_child(oldProfiles);
+                auto profilesNode = prop.append_child("VideoProfiles");
+                profilesNode.append_attribute("Active").set_value(
+                    m_settings.activeVideoProfile.c_str());
+                for (const auto& profile : m_settings.videoProfiles)
+                {
+                    auto node = profilesNode.append_child("Profile");
+                    node.append_attribute("Name").set_value(profile.name.c_str());
+                    node.append_attribute("QualityPreset").set_value(profile.qualityPreset);
+                    node.append_attribute("Width").set_value(profile.width);
+                    node.append_attribute("Height").set_value(profile.height);
+                    node.append_attribute("MaxFps").set_value(profile.maxFps);
+                    node.append_attribute("TextureBudgetMiB").set_value(profile.textureBudgetMiB);
+                    node.append_attribute("CpuWorkers").set_value(profile.cpuWorkers);
+                    node.append_attribute("CpuLoadMs").set_value(profile.cpuLoadMs);
+                    node.append_attribute("GpuLoadMs").set_value(profile.gpuLoadMs);
+                }
 
                 auto cacheNode = prop.child("MaterialCache");
                 if (!cacheNode)

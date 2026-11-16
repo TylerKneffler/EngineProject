@@ -9,6 +9,7 @@
 #include <unordered_set>
 #include "Core/Serialization/HexBytes.h"
 #include "Core/Serialization/PrefabLoadProfile.h"
+#include "Core/Serialization/PrefabLod.h"
 #include <glm/gtc/matrix_transform.hpp>
 
 namespace Engine::Components
@@ -72,6 +73,11 @@ ObjectLodProfileData TerrainObjectLayer::GetObjectLodProfile(
         if (authored.shadowDistance > 0.f)
             profile.shadowDistance = authored.shadowDistance;
     }
+    // Without an authored chain, a prefab supplies its own levels
+    // (Mesh.lodMeshes / Material.lodMaterials, see PrefabLod.h).
+    if (profile.meshes.empty() && Engine::Serialization::PrefabLod::IsPrefab(asset))
+        if (auto chain = Engine::Serialization::PrefabLod::Chain(asset); chain.size() > 1)
+            profile.meshes = std::move(chain);
     return profile;
 }
 
@@ -84,20 +90,26 @@ std::map<std::string, std::vector<std::string>> TerrainObjectLayer::GetDefinedOb
             if (const auto* provider = dynamic_cast<const ObjectLodProvider*>(component))
                 for (const auto& [asset, profile] : provider->GetObjectLodProfiles())
                     definitions[asset] = profile.meshes;
+    // Placement-only prefabs use the levels the prefab itself defines.
+    const auto ownChain = [](const std::string& asset) {
+        return Engine::Serialization::PrefabLod::IsPrefab(asset)
+            ? Engine::Serialization::PrefabLod::Chain(asset)
+            : std::vector<std::string>{asset};
+    };
     if (placementAssets)
     {
         for (const auto& asset : *placementAssets)
-            if (!definitions.count(asset)) definitions[asset] = {asset};
+            if (!definitions.count(asset)) definitions[asset] = ownChain(asset);
     }
     else
     {
         for (const auto& placement : placements)
-            if (!definitions.count(placement.asset)) definitions[placement.asset] = {placement.asset};
+            if (!definitions.count(placement.asset)) definitions[placement.asset] = ownChain(placement.asset);
     }
     for (const auto& [asset, settings] : objectLods)
         if (!settings.meshes.empty() || !settings.shadowMeshes.empty())
             definitions[asset] = settings.meshes.empty()
-                ? std::vector<std::string>{asset} : settings.meshes;
+                ? ownChain(asset) : settings.meshes;
     for (auto& [asset, meshes] : definitions)
     {
         meshes.erase(std::remove(meshes.begin(), meshes.end(), std::string{}), meshes.end());
@@ -110,9 +122,29 @@ std::map<std::string, std::vector<std::string>> TerrainObjectLayer::GetDefinedOb
 size_t TerrainObjectLayer::GetMaximumDefinedObjectLodCount() const
 {
     // Match provider precedence and layer overrides in GetDefinedObjectLods.
-    // Assets present only in placements contribute one level and cannot raise
-    // the minimum result, so avoid scanning the potentially huge list.
+    // Placement-only prefabs contribute their own levels. Use the distinct
+    // asset list kept by prefab preparation rather than scanning a dense
+    // layer's placements; before it exists, distinct spellings are collected.
     std::map<std::string, std::vector<std::string>> definitions;
+    {
+        std::vector<std::string> collected;
+        const std::vector<std::string>* assets = &m_prefabPlacementAssets;
+        if (!m_prefabPlacementAssetsValid)
+        {
+            const std::string* previous = nullptr;
+            for (const auto& placement : placements)
+            {
+                if (previous && *previous == placement.asset) continue;
+                previous = &placement.asset;
+                if (std::find(collected.begin(), collected.end(), placement.asset) == collected.end())
+                    collected.push_back(placement.asset);
+            }
+            assets = &collected;
+        }
+        for (const auto& asset : *assets)
+            if (Engine::Serialization::PrefabLod::IsPrefab(asset))
+                definitions[asset] = Engine::Serialization::PrefabLod::Chain(asset);
+    }
     if (Owner)
         for (const auto* component : Owner->Components)
             if (const auto* provider = dynamic_cast<const ObjectLodProvider*>(component))
@@ -120,7 +152,9 @@ size_t TerrainObjectLayer::GetMaximumDefinedObjectLodCount() const
                     definitions[asset] = profile.meshes;
     for (const auto& [asset, settings] : objectLods)
         if (!settings.meshes.empty() || !settings.shadowMeshes.empty())
-            definitions[asset] = settings.meshes;
+            definitions[asset] = settings.meshes.empty() &&
+                Engine::Serialization::PrefabLod::IsPrefab(asset)
+                ? Engine::Serialization::PrefabLod::Chain(asset) : settings.meshes;
 
     size_t maximum = 1;
     for (const auto& [asset, meshes] : definitions)

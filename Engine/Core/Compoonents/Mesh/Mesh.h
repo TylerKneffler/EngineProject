@@ -55,6 +55,12 @@ public:
     // the GPU so distance changes do not toggle whole instance tiles.
     float runtimeShadowDistance = 0.f;
     float runtimeShadowFadeWidth = 1.f;
+    // Detail levels carried by the prefab that owns this part: entry i is the
+    // mesh asset used at LOD i + 1. An empty entry, or a level past the end of
+    // a non-empty list, hides the part at that level (e.g. bark under an
+    // impostor card). Placement systems address a level of the prefab as
+    // "X.prefab#lodN"; see Core/Serialization/PrefabLod.h.
+    std::vector<std::string> lodMeshes;
     PROPERTY(Inspector,EditAnywhere,Category="LOD")
     bool gpuLodSelection = false;
     // Opt in to pixel thresholds; distance override restores authored policy.

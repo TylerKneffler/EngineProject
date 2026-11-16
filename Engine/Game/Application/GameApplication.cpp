@@ -1,5 +1,6 @@
 #include "Core/Rendering/DetailBudget.h"
 #include "Core/Rendering/AutoQuality.h"
+#include "Core/Rendering/HardwareSimulation.h"
 #include "Core/Rendering/MaterialCachePolicy.h"
 #include "Game/Application/GameApplication.h"
 
@@ -836,6 +837,49 @@ int GameApplication::Run(HINSTANCE instance, const GameBenchmarkOptions* benchma
         if (benchmark->maxFpsOverride) settings.gameMaxFps = *benchmark->maxFpsOverride;
         if (benchmark->disableClusteredLighting) settings.distanceLighting.clusteredLighting = false;
     }
+    // Video profile (Preferences > Video Profiles): --profile, then
+    // ENGINE_VIDEO_PROFILE, then the project's active profile. Applied before
+    // the window, the renderer and the job workers exist.
+    std::optional<Engine::Model::VideoProfile> videoProfile;
+    GameBenchmarkOptions profiledBenchmark;
+    {
+        std::string name = settings.activeVideoProfile;
+        if (const char* environment = std::getenv("ENGINE_VIDEO_PROFILE")) name = environment;
+        if (benchmark && !benchmark->profile.empty()) name = benchmark->profile;
+        if (!name.empty())
+        {
+            if (const auto* found = Engine::Model::FindVideoProfile(settings.videoProfiles, name))
+                videoProfile = *found;
+            else if (benchmark)
+                throw std::runtime_error("unknown video profile: " + name);
+        }
+    }
+    if (videoProfile)
+    {
+        if (videoProfile->width && videoProfile->height)
+        {
+            settings.viewportWidth = videoProfile->width;
+            settings.viewportHeight = videoProfile->height;
+            if (benchmark)
+            {
+                // The capture checks it got the size it asked for.
+                profiledBenchmark = *benchmark;
+                profiledBenchmark.width = videoProfile->width;
+                profiledBenchmark.height = videoProfile->height;
+                benchmark = &profiledBenchmark;
+            }
+        }
+        if (videoProfile->maxFps >= 0 && !(benchmark && benchmark->maxFpsOverride))
+            settings.gameMaxFps = static_cast<uint32_t>(videoProfile->maxFps);
+        if (videoProfile->textureBudgetMiB > 0.f)
+            settings.detailBudget.textureBudgetMiB = videoProfile->textureBudgetMiB;
+        // The job scheduler reads its worker count when first used.
+        if (videoProfile->cpuWorkers > 0)
+            _putenv_s("ENGINE_WORKER_COUNT", std::to_string(videoProfile->cpuWorkers).c_str());
+        Engine::Rendering::HardwareSimulation::Get().Configure(
+            videoProfile->cpuLoadMs, videoProfile->gpuLoadMs);
+        Engine::Rendering::HardwareSimulation::Get().SetProfileName(videoProfile->name);
+    }
     if (!benchmark && !SelectStartupRenderer(settings))
         return 0;
 
@@ -886,6 +930,8 @@ int GameApplication::Run(HINSTANCE instance, const GameBenchmarkOptions* benchma
         scene.Load(loadedScenePath);
     }
 
+    if (videoProfile && videoProfile->qualityPreset >= 0)
+        scene.settings.graphicsQuality.preset = videoProfile->qualityPreset;
     // Diagnostics: ENGINE_QUALITY_PRESET selects the graphics quality preset
     // (0 Reference .. 3 Low, 4 Auto) without editing the scene, e.g. for
     // captures.
@@ -939,6 +985,8 @@ int GameApplication::Run(HINSTANCE instance, const GameBenchmarkOptions* benchma
                 scene.settings.graphicsQuality.preset == Engine::Model::GraphicsQualitySettings::AutoPreset,
                 workMs, targetMs, deltaTime);
         }
+        // Video profile hardware simulation: a slower CPU's extra frame time.
+        Engine::Rendering::HardwareSimulation::Get().SpendCpu();
 
         const uint32_t width = window->GetWidth();
         const uint32_t height = window->GetHeight();

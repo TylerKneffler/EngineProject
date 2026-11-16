@@ -238,8 +238,9 @@ void GenerateForest(const TerrainManager::ObjectLayerContext& context,
             (context.cellsY + 1)) return;
     // Forests read to the horizon of the loaded area: full trees near, then
     // the authored impostors (a few textured quads each) from 220 m out to
-    // 900 m. Instanced layers keep three bands, so the chain names them
-    // directly: LOD0, LOD1, impostor.
+    // 900 m. Each oak prefab carries LOD0, LOD1, LOD2 (and for large oaks a
+    // canopy level) plus the impostor; instanced layers keep three resident
+    // bands, so the prefab's own chain resolves to LOD0, LOD1, impostor.
     layer.viewDistance = 900.f;
     layer.lod1Distance = 60.f;
     layer.lod2Distance = 220.f;
@@ -248,9 +249,7 @@ void GenerateForest(const TerrainManager::ObjectLayerContext& context,
     const std::string prefix = "Assets/Prefabs/Woodland/Oaks/";
     for (const char* species : Species)
     {
-        auto& lod = layer.objectLods[prefix + species + "_LOD0.prefab"];
-        lod.meshes = {prefix + species + "_LOD0.prefab", prefix + species + "_LOD1.prefab",
-            prefix + species + "_Impostor.prefab"};
+        auto& lod = layer.objectLods[prefix + species + ".prefab"];
         lod.distances = {60.f, 220.f};
     }
     const float width = context.cellsX * context.cellWidth;
@@ -293,7 +292,7 @@ void GenerateForest(const TerrainManager::ObjectLayerContext& context,
         const float interior = ForestMask(worldX, worldZ);
         const float sizeClass = pick * .6f + (1.f - interior) * .4f;
         const size_t index = standSpecies[sizeClass < .5f ? 0 : sizeClass < .75f ? 1 : 2];
-        placement.asset = prefix + Species[index] + "_LOD0.prefab";
+        placement.asset = prefix + Species[index] + ".prefab";
         placement.position = {x, height - .08f, z};
         placement.yawDegrees = yaw * 360.f;
         placement.scale = .8f + size * .45f;
@@ -302,7 +301,7 @@ void GenerateForest(const TerrainManager::ObjectLayerContext& context,
 }
 
 // Ground detail cooked by tools/PropCook: rocks from one scanned pack and a
-// fallen log, each a LOD0/LOD1/LOD2 prefab chain, and the woodland bush pack
+// fallen log, each one prefab carrying three levels, and the woodland bush pack
 // (single LOD). As with trees, the map-wide asset count costs CPU time, so
 // the landscape uses six of the twelve cooked rocks and six bushes.
 constexpr int RockCount = 12;
@@ -311,17 +310,17 @@ const std::array<const char*, 6> Bushes{
     "Small_bush_1", "Small_bush_2", "Medium_bush_1", "Medium_bush_2",
     "tall_bush_2", "tall_bush_3"};
 
-std::string RockPrefab(int index, int lod)
+std::string RockPrefab(int index)
 {
     char name[96];
-    std::snprintf(name, sizeof(name), "Assets/Prefabs/Woodland/Rocks/Rock_%02d_LOD%d.prefab",
-        index + 1, lod);
+    std::snprintf(name, sizeof(name), "Assets/Prefabs/Woodland/Rocks/Rock_%02d.prefab",
+        index + 1);
     return name;
 }
 
-std::string LogPrefab(int lod)
+std::string LogPrefab()
 {
-    return "Assets/Prefabs/Woodland/Logs/FallenLog_LOD" + std::to_string(lod) + ".prefab";
+    return "Assets/Prefabs/Woodland/Logs/FallenLog.prefab";
 }
 
 // Rocks and fallen logs, or bushes (undergrowth), for one cell, from the same
@@ -354,15 +353,10 @@ void GenerateProps(const TerrainManager::ObjectLayerContext& context,
         layer.lod2Distance = 100.f;
         layer.shadowDistance = 80.f;
         layer.shadowLod = 1;
+        // The prefabs carry their own LOD0-2 chains; only distances are set.
         for (int rock : LandscapeRocks)
-        {
-            auto& lod = layer.objectLods[RockPrefab(rock, 0)];
-            lod.meshes = {RockPrefab(rock, 0), RockPrefab(rock, 1), RockPrefab(rock, 2)};
-            lod.distances = {35.f, 100.f};
-        }
-        auto& log = layer.objectLods[LogPrefab(0)];
-        log.meshes = {LogPrefab(0), LogPrefab(1), LogPrefab(2)};
-        log.distances = {35.f, 100.f};
+            layer.objectLods[RockPrefab(rock)].distances = {35.f, 100.f};
+        layer.objectLods[LogPrefab()].distances = {35.f, 100.f};
     }
     // Bushes have a single LOD; an explicit one-entry chain gives them a stable
     // profile like every other asset in the layer.
@@ -456,7 +450,7 @@ void GenerateProps(const TerrainManager::ObjectLayerContext& context,
         if (kind < .16f)
         {
             if (normal.y < .93f || height < waterLevel + 2.f || chance >= .9f * forest) continue;
-            place(LogPrefab(0), x, height - .04f, z, normal, yaw, .8f + .6f * size);
+            place(LogPrefab(), x, height - .04f, z, normal, yaw, .8f + .6f * size);
             continue;
         }
         const float rocky = std::min(1.f, paint(x, z, Rock) + .5f * paint(x, z, Snow));
@@ -470,7 +464,7 @@ void GenerateProps(const TerrainManager::ObjectLayerContext& context,
         // Rocks lean partway with the slope, so they read as resting on it.
         const glm::vec3 lean = glm::normalize(glm::mix(normal, glm::vec3(0.f, 1.f, 0.f), .45f));
         const int rock = standRocks[pick < .5f ? 0 : 1];
-        place(RockPrefab(rock, 0), x, height - .08f * scale, z, lean, yaw, scale);
+        place(RockPrefab(rock), x, height - .08f * scale, z, lean, yaw, scale);
     }
 }
 }

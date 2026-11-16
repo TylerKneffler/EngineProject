@@ -26,6 +26,10 @@ struct GameBenchmarkOptions
     std::optional<uint32_t> maxFpsOverride;
     bool requireTerrain = false, requireStreamedCells = false, requireMovement = false;
     bool disableClusteredLighting = false;
+    // Video profile to apply (Preferences > Video Profiles); empty uses
+    // ENGINE_VIDEO_PROFILE or the project's active profile. Its resolution
+    // replaces width/height; an explicit maxFpsOverride beats its limit.
+    std::string profile;
 };
 
 class GameApplication

@@ -4,6 +4,7 @@
 #include "Core/Serialization/SceneSerializer.h"
 #include "Core/Serialization/PrefabLoadProfile.h"
 #include "Core/Serialization/PreparedPrefab.h"
+#include "Core/Serialization/PrefabLod.h"
 #include "Core/Rendering/RenderJobs.h"
 #include "Core/Rendering/SharedMeshBuffers.h"
 #include "Core/Rendering/IndexedMeshPreparation.h"
@@ -220,7 +221,7 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
     // paying for a placement signature when they have no prefab runtime.
     bool hasPrefabs=false;
     for (const auto& placement:placements)
-        if (std::filesystem::path(placement.asset).extension()==".prefab") { hasPrefabs=true; break; }
+        if (Engine::Serialization::PrefabLod::IsPrefab(placement.asset)) { hasPrefabs=true; break; }
     m_prefabCheckedRevision=GetConfigurationRevision(); m_prefabCheckedData=placements.data();
     m_prefabCheckedCount=placements.size(); m_hasPrefabPlacements=hasPrefabs;
     if (!hasPrefabs && !m_prefabInstances) return;
@@ -280,7 +281,7 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
         const auto sourceSetStarted=std::chrono::steady_clock::now();
         std::map<std::string,bool> requiredSources;
         const auto addSource=[&](const std::string& path) {
-            if (!path.empty() && std::filesystem::path(path).extension()==".prefab")
+            if (Engine::Serialization::PrefabLod::IsPrefab(path))
                 requiredSources.try_emplace(path,true);
         };
         for (const auto& [base,lods]:profiles)
@@ -314,9 +315,13 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
     const auto readSource=[](const std::string& asset) {
         BuildProfile::Stage stage("prefab_source_resolution");
         PrefabInstances::Source source;
-        source.resolved=std::filesystem::absolute(Mesh::ResolveFilePath(asset)).lexically_normal().generic_string();
+        // A level path ("Oak.prefab#lod2") shares its prefab file's stamp but
+        // keeps its suffix, so each level is a distinct prototype.
+        const auto variant=Engine::Serialization::PrefabLod::Split(asset);
+        const auto file=std::filesystem::absolute(Mesh::ResolveFilePath(variant.base)).lexically_normal().generic_string();
+        source.resolved=Engine::Serialization::PrefabLod::Path(file,variant.lod);
         std::error_code error;
-        source.stamp=std::filesystem::last_write_time(source.resolved,error);
+        source.stamp=std::filesystem::last_write_time(file,error);
         source.available=!error;
         return source;
     };
@@ -450,10 +455,10 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
     // that is an authored LOD variant; its fallback single-level profile must
     // not overwrite the explicit chain that owns that variant.
     for (const auto& [base,lods]:lodProfiles)
-        if (std::filesystem::path(base).extension()==".prefab")
+        if (Engine::Serialization::PrefabLod::IsPrefab(base))
             bases[key(base)]=base;
     for (const auto& [base,lods]:lodProfiles)
-        if (std::filesystem::path(base).extension()==".prefab")
+        if (Engine::Serialization::PrefabLod::IsPrefab(base))
         {
             const auto& resolvedBase=key(base);
             const auto registerVariant=[&](const std::string& variant) {
@@ -474,7 +479,7 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
     for (const auto& placement:placements)
     {
         auto [group,inserted]=placementGroups.try_emplace(placement.asset);
-        if (inserted && std::filesystem::path(placement.asset).extension()==".prefab")
+        if (inserted && Engine::Serialization::PrefabLod::IsPrefab(placement.asset))
         {
             const auto base=bases.find(key(placement.asset));
             group->second=base==bases.end() ? placement.asset:base->second;

@@ -1,4 +1,6 @@
 #include "Core/Rendering/AutoQuality.h"
+#include "Core/Rendering/HardwareSimulation.h"
+#include "Core/Threading/JobScheduler.h"
 #include "Core/Rendering/DetailBudget.h"
 #include "Core/Rendering/OcclusionBuffer.h"
 #include "Game/Benchmark/GameBenchmark.h"
@@ -249,6 +251,12 @@ void GameBenchmark::Record(uint64_t frame, const GameBenchmarkFrameSample& s)
         << ",\"occlusion_mesh_occluders\":" << Engine::Rendering::OcclusionBuffer::LastFrameStatistics().meshOccluders
         << ",\"occlusion_skipped\":" << Engine::Rendering::OcclusionBuffer::LastFrameStatistics().skippedOccluders
         << ",\"occlusion_reused\":" << (Engine::Rendering::OcclusionBuffer::LastFrameStatistics().reused ? "true" : "false")
+        << ",\"video_profile\":" << Json(Engine::Rendering::HardwareSimulation::Get().ProfileName())
+        << ",\"cpu_workers\":" << Engine::Threading::JobScheduler::Get().WorkerCount()
+        << ",\"sim_cpu_load_ms\":" << Engine::Rendering::HardwareSimulation::Get().CpuLoadMs()
+        << ",\"sim_gpu_load_ms\":" << Engine::Rendering::HardwareSimulation::Get().GpuLoadMs()
+        << ",\"sim_gpu_load_measured_ms\":" << Engine::Rendering::HardwareSimulation::Get().LastGpuLoadMs()
+        << ",\"sim_gpu_load_iterations\":" << Engine::Rendering::HardwareSimulation::Get().GpuIterations()
         << ",\"auto_quality_active\":" << (Engine::Rendering::AutoQuality::Get().GetStatus().active ? "true" : "false")
         << ",\"auto_quality_target_ms\":" << Engine::Rendering::AutoQuality::Get().GetStatus().targetMs
         << ",\"auto_quality_frame_ms\":" << Engine::Rendering::AutoQuality::Get().GetStatus().frameMs

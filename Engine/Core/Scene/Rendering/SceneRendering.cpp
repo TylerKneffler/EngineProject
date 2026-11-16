@@ -1,6 +1,7 @@
 #include "Core/Rendering/DetailBudget.h"
 #include "Core/Rendering/ScreenCoverage.h"
 #include "Core/Rendering/OcclusionBuffer.h"
+#include "Core/Rendering/HardwareSimulation.h"
 #include "pch.h"
 #include "Core/Rendering/ShadowReceiverCulling.h"
 #include "Core/Rendering/StableShadowCascade.h"
@@ -844,6 +845,52 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                     telemetry.gpuMilliseconds[static_cast<size_t>(Stage::Terrain)] +
                     telemetry.gpuMilliseconds[static_cast<size_t>(Stage::Grass)];
                 budget.ReportGeometryCost(telemetry.gpuSampleId, geometryMs, fixedMs);
+            }
+            // Hardware simulation (video profiles): a compute pass that adds
+            // GPU time, calibrated from its own measured stage time.
+            auto& simulation = Engine::Rendering::HardwareSimulation::Get();
+            if (context && simulation.GpuLoadMs() > 0.f)
+            {
+                factory->SetGpuTimingEnabled(true);
+                if (telemetry.gpuTimingsValid)
+                    simulation.ReportGpuLoad(telemetry.gpuSampleId, telemetry.gpuMilliseconds[
+                        static_cast<size_t>(Engine::Graphics::GpuTimingStage::SyntheticLoad)]);
+                if (!m_gpuLoadAttempted)
+                {
+                    m_gpuLoadAttempted = true;
+                    auto shader = m_graphicsProvider->GetShaderCompiler()->CompileFromFile(
+                        EngineShaderPath("GpuLoad.hlsl"), "CSMain",
+                        Engine::Graphics::IShaderCompiler::CompileProfile::CS_5_0);
+                    if (shader)
+                        m_gpuLoadPipeline = m_graphicsProvider->GetPipelineStateFactory()->CreateComputePipeline(shader.get());
+                    if (auto* buffers = m_graphicsProvider->GetBufferFactory())
+                    {
+                        std::vector<glm::vec4> seeds(64);
+                        for (size_t i = 0; i < seeds.size(); ++i)
+                            seeds[i] = glm::vec4(.1f, .2f, .3f, .4f) + static_cast<float>(i) * .01f;
+                        m_gpuLoadSeeds = buffers->CreateBuffer(Engine::Graphics::IGraphicsBuffer::Usage::ShaderResource,
+                            Engine::Graphics::IGraphicsBuffer::AccessMode::Upload, seeds.size() * sizeof(glm::vec4),
+                            seeds.data(), sizeof(glm::vec4));
+                        m_gpuLoadSink = buffers->CreateBuffer(Engine::Graphics::IGraphicsBuffer::Usage::StorageBuffer,
+                            Engine::Graphics::IGraphicsBuffer::AccessMode::Default, 1024 * sizeof(glm::vec4),
+                            nullptr, sizeof(glm::vec4));
+                    }
+                }
+                if (m_gpuLoadPipeline && m_gpuLoadSeeds && m_gpuLoadSink && context->BeginComputePass())
+                {
+                    struct { uint32_t iterations, padding[3]; } constants{ simulation.GpuIterations(), {} };
+                    context->BeginGpuTiming(Engine::Graphics::GpuTimingStage::SyntheticLoad);
+                    context->SetComputePipeline(m_gpuLoadPipeline.get());
+                    context->SetComputeReadBuffer(m_gpuLoadSeeds.get());
+                    context->SetComputeWriteBuffer(m_gpuLoadSink.get());
+                    context->SetComputeConstants(&constants, sizeof(constants));
+                    // 16k threads: enough to fill a GPU, so time follows the
+                    // iteration count.
+                    context->DispatchCompute(256);
+                    context->StorageBarrier(m_gpuLoadSink.get());
+                    context->EndGpuTiming(Engine::Graphics::GpuTimingStage::SyntheticLoad);
+                    context->EndComputePass();
+                }
             }
         }
     Engine::Scene::Renderer::SceneRendererLighting::PrepareSkyboxAndEnvironment(

@@ -257,8 +257,12 @@ public:
     // File deserialization still resolves current asset identity normally.
     void CopyResolvedStateFrom(const Material& source,
         const JsonValue* serializedSource = nullptr);
+    // Material asset per prefab detail level: entry i applies at LOD i + 1;
+    // an empty or missing entry keeps this material. See Mesh::lodMeshes.
+    std::vector<std::string> lodMaterials;
     JsonValue Serialize() const override;
     void Deserialize(const JsonValue& value) override;
+    bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
     void OnAfterDeserialize(IGraphicsProvider* graphicsProvider) override
     {
         if (graphicsProvider && !DeferGraphicsPreparation(graphicsProvider))

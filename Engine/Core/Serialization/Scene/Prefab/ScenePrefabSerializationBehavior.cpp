@@ -2,6 +2,7 @@
 #include "Core/Serialization/Json.h"
 #include "Core/Serialization/PrefabLoadProfile.h"
 #include "Core/Serialization/PreparedPrefab.h"
+#include "Core/Serialization/PrefabLod.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Scene/Settings/SceneSettingsSerialization.h"
 #include "Core/Graphics/IGraphicsProvider.h"
@@ -200,7 +201,7 @@ std::string SceneSerializer::SavePrefabToString(const Engine::Core::Object& obje
 
 namespace
 {
-std::filesystem::path ResolvePrefabPath(const std::string& path)
+std::filesystem::path ResolveBasePrefabPath(const std::string& path)
 {
     const std::filesystem::path requested(path);
     if (std::filesystem::exists(requested))
@@ -220,6 +221,22 @@ std::filesystem::path ResolvePrefabPath(const std::string& path)
     return requested;
 }
 
+// "Oak.prefab#lod2" names one level of Oak.prefab (see PrefabLod.h). The
+// suffix survives resolution so each level caches as its own document.
+std::filesystem::path ResolvePrefabPath(const std::string& path)
+{
+    const auto variant = PrefabLod::Split(path);
+    const auto resolved = ResolveBasePrefabPath(variant.base);
+    return variant.lod == 0 ? resolved :
+        std::filesystem::path(PrefabLod::Path(resolved.generic_string(), variant.lod));
+}
+
+// The file on disk behind a (possibly level-qualified) prefab path.
+std::filesystem::path PrefabSourceFile(const std::filesystem::path& path)
+{
+    return std::filesystem::path(PrefabLod::Split(path.generic_string()).base);
+}
+
 std::string PrefabDocumentKey(const std::filesystem::path& path)
 {
     std::error_code error;
@@ -234,6 +251,12 @@ std::string PrefabDocumentKey(const std::filesystem::path& path)
 
 JsonValue LoadPrefabDocument(const std::filesystem::path& path)
 {
+    if (const auto variant = PrefabLod::Split(path.generic_string()); variant.lod != 0)
+    {
+        JsonValue document = LoadPrefabDocument(std::filesystem::path(variant.base));
+        PrefabLod::Apply(document, variant.lod);
+        return document;
+    }
     // Worker reads have their own profile; synchronous reads join the caller.
     PrefabLoadProfile profile(path.generic_string() + " [document conversion]");
     std::string source;
@@ -297,8 +320,8 @@ std::shared_ptr<CachedPrefabDocument> FindCachedPrefabDocument(
     const std::filesystem::path& path, const std::string& key)
 {
     std::error_code modifiedError, sizeError;
-    const auto modified = std::filesystem::last_write_time(path, modifiedError);
-    const auto size = std::filesystem::file_size(path, sizeError);
+    const auto modified = std::filesystem::last_write_time(PrefabSourceFile(path), modifiedError);
+    const auto size = std::filesystem::file_size(PrefabSourceFile(path), sizeError);
     if (modifiedError || sizeError) return {};
     if (largePrefabCache && largePrefabCache->key == key &&
         largePrefabCache->modified == modified && largePrefabCache->size == size)
@@ -318,8 +341,8 @@ std::shared_ptr<CachedPrefabDocument> LoadPrefabDocumentCached(
     // owner-thread cache of parsed documents, keyed by the file's current
     // version. Each instantiation still gets independent component objects.
     std::error_code modifiedError, sizeError;
-    const auto modified = std::filesystem::last_write_time(path, modifiedError);
-    const auto size = std::filesystem::file_size(path, sizeError);
+    const auto modified = std::filesystem::last_write_time(PrefabSourceFile(path), modifiedError);
+    const auto size = std::filesystem::file_size(PrefabSourceFile(path), sizeError);
     auto create = [&] {
         auto entry = std::make_shared<CachedPrefabDocument>();
         entry->key = key;

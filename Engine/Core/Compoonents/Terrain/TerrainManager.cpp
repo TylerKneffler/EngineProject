@@ -1,6 +1,7 @@
 #include "Core/Rendering/DetailBudget.h"
 #include "TerrainManager.h"
 #include "TerrainObjectLayer.h"
+#include "Core/Serialization/PrefabLod.h"
 #include "TerrainSurfaceSample.h"
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
@@ -575,10 +576,13 @@ void TerrainManager::PrepareLoop()
                         "Big_oak_tree_001", "Medium_oak_tree_001", "Small_oak_tree_001"};
                     for (const auto& speciesName : species)
                     {
-                        auto& lod = layer->objectLods[prefix + speciesName + "_LOD0.prefab"];
-                        lod.meshes = {prefix + speciesName + "_LOD0.prefab",
-                            prefix + speciesName + "_LOD1.prefab",
-                            prefix + speciesName + "_LOD2.prefab"};
+                        // Full geometry levels only: LOD0-2 of the
+                        // prefab, skipping its impostor.
+                        const std::string asset = prefix + speciesName + ".prefab";
+                        auto& lod = layer->objectLods[asset];
+                        lod.meshes = {asset,
+                            Engine::Serialization::PrefabLod::Path(asset, 1),
+                            Engine::Serialization::PrefabLod::Path(asset, 2)};
                         lod.distances = {28.f, 90.f};
                     }
                     uint32_t state = static_cast<uint32_t>(task.cell.first) * 0x9e3779b9u ^
@@ -591,7 +595,7 @@ void TerrainManager::PrepareLoop()
                     {
                         TerrainObjectLayer::Placement placement;
                         placement.id = i + 1;
-                        placement.asset = prefix + species[i % species.size()] + "_LOD0.prefab";
+                        placement.asset = prefix + species[i % species.size()] + ".prefab";
                         const float sx = random() * task.cellsX;
                         const float sz = random() * task.cellsY;
                         placement.position = {sx * task.cellWidth, 0.f, sz * task.cellDepth};
