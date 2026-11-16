@@ -52,8 +52,21 @@ struct DetailBudgetSettings
     float cpuRenderBudgetMs = 4.f;
     // Range of the global detail scale (1 = authored distances).
     float minimumScale = .6f;
-    float maximumScale = 2.5f;
+    float maximumScale = 8.f;
     // Seconds for the scale to settle after a change in load.
     float responseSeconds = 1.5f;
+
+    // Texture memory, modelled on GTA V's texture budget. Streamed textures
+    // share one pool: the base size is always available, and the extended
+    // budget adds a share of the GPU's spare video memory (what the OS grants
+    // the process, minus everything that is not texture and a safety
+    // reserve). Within the pool, textures covering the most screen pixels
+    // keep their finest mips; when it is full the rest fall back to coarser
+    // mips rather than disappear. Off keeps every texture fully resident.
+    bool textureBudgetEnabled = true;
+    // Base pool, MiB.
+    float textureBudgetMiB = 1024.f;
+    // 0..1: share of the spare video memory added on top of the base pool.
+    float extendedTextureBudget = .5f;
 };
 }

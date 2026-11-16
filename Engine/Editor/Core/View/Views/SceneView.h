@@ -91,7 +91,7 @@ public:
     void SetTerrainObjectDisplayLod(int lod)
     { m_terrainObjectDisplayLod = std::clamp(lod, -1, 15); }
     int GetSceneRenderMode() const { return m_sceneRenderMode; }
-    void SetSceneRenderMode(int mode) { m_sceneRenderMode = std::clamp(mode, 0, 3); }
+    void SetSceneRenderMode(int mode) { m_sceneRenderMode = std::clamp(mode, 0, 4); }
     bool UseGlobalToolbar = false;
     bool UseGlobalBoneVisibility = true;
     void SetDocumentPath(std::string path) { m_documentPath = std::move(path); }

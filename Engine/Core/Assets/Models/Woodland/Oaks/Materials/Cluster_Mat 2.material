@@ -40,6 +40,7 @@
   "subsurfaceThickness": 0,
   "subsurfaceTransmission": 0,
   "alphaCoverageTransmission": 0.15,
+  "alphaEdgeFade": 0.75,
   "environmentDiffuseStrength": 1,
   "reflectionStrength": 0.18,
   "useCustomReflectionEnvironment": false,

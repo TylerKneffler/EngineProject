@@ -3,6 +3,7 @@
 #include "VulkanGraphicsTexture.h"
 #include "VulkanGraphicsBuffer.h"
 #include "VulkanQueueMutex.h"
+#include "Core/Rendering/MaterialCachePolicy.h"
 
 
 namespace Engine::Renderers
@@ -47,16 +48,16 @@ size_t VulkanTextureSystem::TextureKeyHash::operator()(const TextureKey& key) co
     return hash;
 }
 
-VkDescriptorPool VulkanTextureSystem::CreateDescriptorPool()
+VkDescriptorPool VulkanTextureSystem::CreateDescriptorPool(uint32_t setsPerPool)
 {
     VkDescriptorPoolSize sizes[3]{
-        { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 38 * 512 },
-        { VK_DESCRIPTOR_TYPE_SAMPLER, 512 },
-        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 9 * 512 }
+        { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 38 * setsPerPool },
+        { VK_DESCRIPTOR_TYPE_SAMPLER, setsPerPool },
+        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 9 * setsPerPool }
     };
     VkDescriptorPoolCreateInfo poolInfo{
         VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
-    poolInfo.maxSets = 512;
+    poolInfo.maxSets = setsPerPool;
     poolInfo.poolSizeCount = ARRAYSIZE(sizes);
     poolInfo.pPoolSizes = sizes;
     VkDescriptorPool pool=VK_NULL_HANDLE;
@@ -70,10 +71,20 @@ void VulkanTextureSystem::PrepareFrame(uint32_t frameSlot)
     if(m_descriptorFrames.size()<=frameSlot) m_descriptorFrames.resize(size_t(frameSlot)+1);
     m_descriptorFrame=frameSlot;
     auto& frame=m_descriptorFrames[frameSlot];
-    if(frame.pools.empty()) frame.pools.push_back(CreateDescriptorPool());
-    // The renderer has waited for this slot's fence. Reset only when stale
-    // resources have filled its cache; descriptors in other slots remain live.
-    if(frame.sets.size()>384)
+    const auto policy=Engine::Rendering::MaterialCachePolicy::Get().Effective();
+    // The renderer has waited for this slot's fence, so its pools are idle.
+    // A changed pool size rebuilds this slot's pools; other slots follow when
+    // their turn comes.
+    if(frame.setsPerPool!=policy.descriptorSetsPerPool && !frame.pools.empty())
+    {
+        for(auto pool:frame.pools) vkDestroyDescriptorPool(m_device,pool,nullptr);
+        frame.pools.clear(); frame.sets.clear(); frame.activePool=0;
+    }
+    frame.setsPerPool=policy.descriptorSetsPerPool;
+    if(frame.pools.empty()) frame.pools.push_back(CreateDescriptorPool(frame.setsPerPool));
+    // Reset only when stale resources have filled its cache; descriptors in
+    // other slots remain live.
+    if(frame.sets.size()>policy.descriptorCacheLimit)
     {
         for(auto pool:frame.pools) VkCheck(vkResetDescriptorPool(m_device,pool,0),"vkResetDescriptorPool(material)");
         frame.sets.clear(); frame.activePool=0;
@@ -588,7 +599,7 @@ void VulkanTextureSystem::Bind(
         VkResult allocation=vkAllocateDescriptorSets(m_device,&allocate,&set);
         if(allocation==VK_ERROR_OUT_OF_POOL_MEMORY || allocation==VK_ERROR_FRAGMENTED_POOL)
         {
-            if(++frame.activePool>=frame.pools.size()) frame.pools.push_back(CreateDescriptorPool());
+            if(++frame.activePool>=frame.pools.size()) frame.pools.push_back(CreateDescriptorPool(frame.setsPerPool));
             allocate.descriptorPool=frame.pools[frame.activePool];
             allocation=vkAllocateDescriptorSets(m_device,&allocate,&set);
         }

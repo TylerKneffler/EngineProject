@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdio>
 #include <filesystem>
 #include <stdexcept>
 
@@ -218,7 +219,10 @@ std::vector<glm::vec3> ComputeFarColors(const std::string& archivePath, uint64_t
     return colors;
 }
 
-// Oak species with authored LOD chains, smallest last.
+// Oak species with authored LOD chains, smallest last. Instanced batches
+// merge across cells only when they share an asset, so the map-wide species
+// count costs CPU time too: all seventeen species measured about 8 ms more
+// per frame than these eight.
 const std::array<const char*, 8> Species{
     "Big_oak_tree_001", "Big_oak_tree_002", "Large_oak_tree_001",
     "Large_oak_tree_002", "Medium_oak_tree_001", "Medium_oak_tree_002",
@@ -296,6 +300,179 @@ void GenerateForest(const TerrainManager::ObjectLayerContext& context,
         layer.placements.push_back(std::move(placement));
     }
 }
+
+// Ground detail cooked by tools/PropCook: rocks from one scanned pack and a
+// fallen log, each a LOD0/LOD1/LOD2 prefab chain, and the woodland bush pack
+// (single LOD). As with trees, the map-wide asset count costs CPU time, so
+// the landscape uses six of the twelve cooked rocks and six bushes.
+constexpr int RockCount = 12;
+const std::array<int, 6> LandscapeRocks{0, 2, 3, 7, 9, 11};
+const std::array<const char*, 6> Bushes{
+    "Small_bush_1", "Small_bush_2", "Medium_bush_1", "Medium_bush_2",
+    "tall_bush_2", "tall_bush_3"};
+
+std::string RockPrefab(int index, int lod)
+{
+    char name[96];
+    std::snprintf(name, sizeof(name), "Assets/Prefabs/Woodland/Rocks/Rock_%02d_LOD%d.prefab",
+        index + 1, lod);
+    return name;
+}
+
+std::string LogPrefab(int lod)
+{
+    return "Assets/Prefabs/Woodland/Logs/FallenLog_LOD" + std::to_string(lod) + ".prefab";
+}
+
+// Rocks and fallen logs, or bushes (undergrowth), for one cell, from the same
+// paint and forest mask as the terrain. Both normally share one layer: every
+// terrain object layer costs fixed per-cell bookkeeping (prefab profile and
+// source checks), which measured more than the instances themselves.
+//  * rocks gather on rock paint (slopes, ridges, above the tree line), in
+//    scattered boulder fields, and as small stones along gravel shores;
+//  * logs lie on gentle forest floor;
+//  * bushes ring the forest edges, fill some of the forest floor and dot the
+//    meadows in clumps.
+// Both layers end inside the loaded cells, so they have no far representation.
+void GenerateProps(const TerrainManager::ObjectLayerContext& context,
+    TerrainObjectLayer& layer, float waterLevel, bool undergrowth, float density)
+{
+    if (!context.heights || context.cellsX <= 0 || context.cellsY <= 0 ||
+        context.heights->size() != static_cast<size_t>(context.cellsX + 1) *
+            (context.cellsY + 1)) return;
+    if (undergrowth && layer.objectLods.empty())
+    {
+        // A dedicated undergrowth layer (bushes have a single LOD).
+        layer.viewDistance = 150.f;
+        layer.lod1Distance = layer.lod2Distance = 150.f;
+        layer.shadowDistance = 45.f;
+    }
+    else if (!undergrowth)
+    {
+        layer.viewDistance = 220.f;
+        layer.lod1Distance = 35.f;
+        layer.lod2Distance = 100.f;
+        layer.shadowDistance = 80.f;
+        layer.shadowLod = 1;
+        for (int rock : LandscapeRocks)
+        {
+            auto& lod = layer.objectLods[RockPrefab(rock, 0)];
+            lod.meshes = {RockPrefab(rock, 0), RockPrefab(rock, 1), RockPrefab(rock, 2)};
+            lod.distances = {35.f, 100.f};
+        }
+        auto& log = layer.objectLods[LogPrefab(0)];
+        log.meshes = {LogPrefab(0), LogPrefab(1), LogPrefab(2)};
+        log.distances = {35.f, 100.f};
+    }
+    // Bushes have a single LOD; an explicit one-entry chain gives them a stable
+    // profile like every other asset in the layer.
+    if (undergrowth)
+        for (const char* bush : Bushes)
+        {
+            const std::string path = std::string("Assets/Prefabs/Woodland/Bushes/") + bush + ".prefab";
+            auto& lod = layer.objectLods[path];
+            lod.meshes = {path};
+            lod.distances.clear();
+        }
+    const float width = context.cellsX * context.cellWidth;
+    const float depth = context.cellsY * context.cellDepth;
+    uint32_t state = Hash(context.cell.first, context.cell.second,
+        undergrowth ? 0x62757368u : 0x726f636bu) | 1u;
+    const auto random = [&state]
+    {
+        state ^= state << 13; state ^= state >> 17; state ^= state << 5;
+        return (state & 0xffffffu) / float(0x1000000);
+    };
+    const size_t layerCount = context.terrainLayerCount;
+    const bool painted = context.weights && layerCount >= LayerCount &&
+        context.weights->size() == context.heights->size() * layerCount;
+    // Paint weights at the nearest terrain vertex.
+    const auto paint = [&](float x, float z, int layerIndex)
+    {
+        if (!painted) return layerIndex == Grass ? 1.f : 0.f;
+        const int col = std::clamp(static_cast<int>(std::lround(x / context.cellWidth)), 0, context.cellsX);
+        const int row = std::clamp(static_cast<int>(std::lround(z / context.cellDepth)), 0, context.cellsY);
+        return (*context.weights)[(static_cast<size_t>(row) * (context.cellsX + 1) + col) *
+            layerCount + layerIndex];
+    };
+    uint64_t id = layer.placements.size();
+    const auto place = [&](std::string asset, float x, float y, float z,
+        const glm::vec3& normal, float yaw, float scale)
+    {
+        TerrainObjectLayer::Placement placement;
+        placement.id = ++id;
+        placement.asset = std::move(asset);
+        placement.position = {x, y, z};
+        placement.normal = normal;
+        placement.yawDegrees = yaw * 360.f;
+        placement.scale = scale;
+        layer.placements.push_back(std::move(placement));
+    };
+    // Each cell uses a stand of two rock shapes (plus the log) or two bushes
+    // (one low, one tall): every distinct asset in a cell is a set of
+    // instanced draws, so stands keep the per-cell cost flat while
+    // neighbouring cells still mix the whole set.
+    const uint32_t stand = Hash(context.cell.first, context.cell.second, 0x70726f70u);
+    const std::array<int, 2> standRocks{LandscapeRocks[stand % 3u],
+        LandscapeRocks[3u + (stand >> 8) % 3u]};
+    const std::array<size_t, 2> standBushes{(stand >> 4) % 4u, 4u + (stand >> 12) % 2u};
+    const int attempts = static_cast<int>(std::lround((undergrowth ? 420.f : 300.f) *
+        std::clamp(density, 0.f, 4.f)));
+    for (int attempt = 0; attempt < attempts; ++attempt)
+    {
+        // Every attempt draws the same randoms so layouts stay stable when
+        // one rule changes.
+        const float x = (.01f + .98f * random()) * width;
+        const float z = (.01f + .98f * random()) * depth;
+        const float chance = random(), pick = random(), yaw = random(), size = random(),
+            kind = random();
+        float height = 0.f;
+        glm::vec3 normal(0.f, 1.f, 0.f);
+        if (!Engine::Components::SampleTerrainSurface(*context.heights, context.cellsX,
+                context.cellsY, context.cellWidth, context.cellDepth, x, z, height, &normal))
+            continue;
+        const float worldX = context.cell.first * width + x;
+        const float worldZ = context.cell.second * depth + z;
+        const float forest = ForestMask(worldX, worldZ) * ForestBand(height, waterLevel);
+        if (undergrowth)
+        {
+            if (height < waterLevel + 1.5f || normal.y < .82f) continue;
+            const float edge = 4.f * forest * (1.f - forest);
+            const float clump = SmoothStep(.45f, .75f, ValueNoise(worldX, worldZ, 16.f, 211u));
+            const float meadow = paint(x, z, Grass);
+            const float odds = (.5f * edge + .08f * forest + .1f * meadow) * (.35f + 1.3f * clump) *
+                (1.f - paint(x, z, Snow)) * (1.f - paint(x, z, Rock));
+            if (chance >= odds) continue;
+            // Small bushes in the open, tall ones under and beside trees.
+            const float shade = std::clamp(forest + edge * .5f, 0.f, 1.f);
+            const float tallness = pick * .55f + shade * .45f;
+            const size_t bush = standBushes[tallness < .5f ? 0 : 1];
+            place(std::string("Assets/Prefabs/Woodland/Bushes/") + Bushes[bush] + ".prefab",
+                x, height - .05f, z, glm::vec3(0.f, 1.f, 0.f), yaw, .7f + .6f * size);
+            continue;
+        }
+        if (height < waterLevel - .8f) continue;
+        // Logs: gentle forest floor only.
+        if (kind < .16f)
+        {
+            if (normal.y < .93f || height < waterLevel + 2.f || chance >= .9f * forest) continue;
+            place(LogPrefab(0), x, height - .04f, z, normal, yaw, .8f + .6f * size);
+            continue;
+        }
+        const float rocky = std::min(1.f, paint(x, z, Rock) + .5f * paint(x, z, Snow));
+        const float shore = paint(x, z, Gravel);
+        const float field = SmoothStep(.66f, .82f, ValueNoise(worldX, worldZ, 70.f, 101u));
+        const float odds = .025f + .45f * rocky + .3f * field + .25f * shore;
+        if (chance >= odds) continue;
+        // Mostly small stones; boulders in rock fields and on rock paint.
+        float scale = .35f + 2.4f * std::pow(size, 2.4f) * (.45f + .55f * std::max(rocky, field));
+        if (shore > .5f) scale = .25f + .45f * size;
+        // Rocks lean partway with the slope, so they read as resting on it.
+        const glm::vec3 lean = glm::normalize(glm::mix(normal, glm::vec3(0.f, 1.f, 0.f), .45f));
+        const int rock = standRocks[pick < .5f ? 0 : 1];
+        place(RockPrefab(rock, 0), x, height - .08f * scale, z, lean, yaw, scale);
+    }
+}
 }
 
 LandscapeDriver::LandscapeDriver()
@@ -311,6 +488,9 @@ LandscapeDriver::LandscapeDriver()
     RegisterField("treesPerCell", treesPerCell);
     RegisterField("forestLayerName", forestLayerName);
     RegisterField("grassRadius", grassRadius);
+    RegisterField("propsLayerName", propsLayerName);
+    RegisterField("undergrowthLayerName", undergrowthLayerName);
+    RegisterField("propsDensity", propsDensity);
     RegisterField("enableWater", enableWater);
     RegisterField("waterMaterial", waterMaterial);
 }
@@ -342,6 +522,8 @@ bool LandscapeDriver::ConfigureTerrain()
     const float level = waterLevel;
     const int trees = std::clamp(treesPerCell, 0, 600);
     const std::string forestName = forestLayerName;
+    const std::string propsName = propsLayerName, undergrowthName = undergrowthLayerName;
+    const float propDensity = std::clamp(propsDensity, 0.f, 4.f);
     const float tiling = manager->cellsX * manager->cellWidth / 2.f; // 2 m repeats
 
     manager->SetStaticCache(cacheDirectory, signature ^ PaintRevision ^
@@ -374,6 +556,17 @@ bool LandscapeDriver::ConfigureTerrain()
         const std::string& layerName, TerrainObjectLayer& layer)
     {
         if (layerName == forestName) GenerateForest(context, layer, level, trees);
+        // Props end inside the loaded cells; far cells never need them.
+        else if (context.farObjects) return;
+        else if (!propsName.empty() && layerName == propsName)
+        {
+            GenerateProps(context, layer, level, false, propDensity);
+            // Bushes join the props layer unless they have their own.
+            if (undergrowthName.empty() || undergrowthName == propsName)
+                GenerateProps(context, layer, level, true, propDensity);
+        }
+        else if (!undergrowthName.empty() && layerName == undergrowthName)
+            GenerateProps(context, layer, level, true, propDensity);
     });
     // The manager attaches a GrassField to its procedural grass layer; keep
     // the grass on the meadow layer and give it this map's density.
@@ -387,8 +580,11 @@ bool LandscapeDriver::ConfigureTerrain()
         if (!grass || grass->proceduralLayerMask == (1 << Grass)) return;
         grass->proceduralLayerMask = 1 << Grass;
         grass->visibleRadius = radius;
-        grass->shortPatchesPerSquareMeter = 1.6f;
-        grass->tallPatchesPerSquareMeter = .3f;
+        // Dense enough that blades close over the ground like a pelt.
+        grass->shortPatchesPerSquareMeter = 2.6f;
+        grass->tallPatchesPerSquareMeter = .45f;
+        // Wildflower and weed drifts (meshes come from the manager's defaults).
+        grass->accentPatchesPerSquareMeter = .18f;
         grass->MarkConfigurationDirty();
         layer.viewDistance = radius + 10.f;
         layer.lod1Distance = 7.f;

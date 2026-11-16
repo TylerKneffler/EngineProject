@@ -99,9 +99,9 @@
   "occlusionUvSet": 0,
   "emissiveUvSet": 0,
   "heightUvSet": 0,
-  "baseColorTexture": "Assets/Models/Woodland/Bushes/Textures/Texture 3 3.png",
-  "metallicRoughnessTexture": "Assets/Models/Woodland/Bushes/Textures/Texture 2 2.png",
-  "normalTexture": "Assets/Models/Woodland/Bushes/Textures/Texture 1 1.png",
-  "occlusionTexture": "Assets/Models/Woodland/Bushes/Textures/Texture 2 2.png",
+  "baseColorTexture": "Assets/Models/Woodland/Bushes/Textures/Bush_Color.ktx2",
+  "metallicRoughnessTexture": "Assets/Models/Woodland/Bushes/Textures/Bush_MetalRough.ktx2",
+  "normalTexture": "Assets/Models/Woodland/Bushes/Textures/Bush_Normal.ktx2",
+  "occlusionTexture": "Assets/Models/Woodland/Bushes/Textures/Bush_MetalRough.ktx2",
   "shader": "Assets/Shaders/Foliage.hlsl"
 }

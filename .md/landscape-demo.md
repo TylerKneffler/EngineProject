@@ -30,7 +30,50 @@ shores, carved 3-16 m below the water level (`LandscapeDriver.waterLevel`,
   small ones at the edges; nothing grows on slopes over 30 degrees.
 - **Grass:** the manager's "Procedural meadow grass" layer, limited to the
   meadow paint layer with the new `GrassField::proceduralLayerMask`
-  (26 m radius).
+  (26 m radius, 2.6 short / 0.45 tall patches per m²).
+- **Rocks, logs and bushes:** the "Landscape props" layer (220 m reach,
+  `LandscapeDriver::propsLayerName`, `propsDensity`). Rocks gather on rock
+  paint (slopes, ridges, above the tree line), in noise-driven boulder fields
+  and as small stones on gravel shores, leaning partway with the slope;
+  fallen logs lie on gentle forest floor; bushes ring forest edges and clump
+  in meadows. Each cell uses a stand of two rock shapes, the log and two
+  bushes. Map-wide, the layer draws from six of the twelve cooked rocks and
+  six bushes, because every distinct asset in a cell is another set of
+  instanced draws and the map-wide asset count also costs CPU (all seventeen
+  oak species measured about 8 ms per frame more than the forest's eight).
+  Bushes share the props layer: a second layer per cell measured more
+  bookkeeping than its instances. Props never reach far cells:
+  `ObjectLayerContext::farObjects` lets generators skip them, and far blocks
+  skip any layer whose view distance ends inside the loaded cells.
+  - Assets: `tools/PropCook` (offline) cooked
+    `Models/Woodland/Rocks/Rocks_series_02.fbx` (12 of its 50 rocks, about
+    1 m each, scaled 0.25-2.8 at placement) and the scanned
+    `Logs/4k wood log/log.fbx` (214k triangles, scaled 6x to a 2 m log) into
+    LOD0/LOD1/LOD2 `.mesh` chains with one prefab per LOD under
+    `Prefabs/Woodland/Rocks` and `Prefabs/Woodland/Logs`. Textures are
+    TextureCook KTX2: rocks at 4K (one atlas for all rocks), the log at 2K,
+    with roughness/metal/AO packed by `--orm`. The bush pack now uses KTX2
+    cooked with `--alpha-cutoff 0.32`; its PNGs had white behind the
+    cutouts, which bled into the mips and drew bushes as white specks.
+- **Far-object churn fix:** a loaded cell takes over from far impostors once
+  its layers finish preparing. That check is now latched per loaded terrain
+  (`TerrainManager::m_farNearCovered`); the once-a-second prefab source
+  probe briefly reports "preparing", which used to flip far-block membership
+  and rebuild thousands of far placements, with or without props.
+- **Wildflowers and weeds:** `GrassField::accentMeshes` adds daisy,
+  buttercup, clover, plantain, knapweed and dandelion clumps
+  (`tools/generate_meadow_accents.py`, three LODs each) at 0.18 per m².
+  Each 7 m drift cell (`accentDriftSize`) favours one species and has its
+  own richness, so flowers gather in patches. Accents are extra instance
+  ranges in the same grass tiles, so they share the grass wind, LODs and
+  fades.
+- **Grass shading** (`GrassFootBend.hlsl` defines `GRASS_SURFACE_SHADING`,
+  `PSGrassMain` in `Object.hlsl`): normals bent toward the sky and rounded
+  across each blade, root occlusion, back-lit transmission and a Kajiya-Kay
+  sheen along the wind-bent blade. Per-clump brightness and hue, plus broad
+  dry/lush patches, are keyed to each placement root. Wind adds per-blade
+  flutter (`GrassBladePhase`), so the blades of one clump no longer move as
+  one card. Non-green colours (petals, seed heads) keep their own normals.
 - **View range:** eleven by eleven loaded cells (about 700 m each way) at
   full detail. Beyond them, far terrain tiles and far tree blocks
   (`TerrainManager::farObjectRadius`, impostors only, batched into 1 km
@@ -110,9 +153,19 @@ replaces the generated files. Generated cell meshes cache under
   window. Before, a still viewer at a large `loadedRadius` never loaded the
   window corners.
 - Rendering: instanced LOD bands whose distance range misses a block's
-  bounds are skipped at draw preparation (exact, since bands select per
-  pixel by distance). Distant forest blocks now record only their impostor
-  band.
+  bounds are skipped at draw preparation. Distant forest blocks now record
+  only their impostor band.
+- Rendering: instanced LOD bands pick a band per placement (per tree), from
+  the distance between the camera and the placement's origin. A tree
+  dissolves as a unit within `InstanceLodFadeWidth` (4% of the switch
+  distance, 0.5–6 m) either side of a switch. The dither uses screen-space
+  thresholds, so the outgoing and incoming LODs cover complementary pixels.
+  Before, bands were picked per pixel with a 1 m world-space dither: a
+  camera-centred sphere cut large trees into half LOD0 and half LOD1, swept
+  through them as the camera moved, and swaying leaves flickered across it.
+  The vertex shader passes the distance in `TEXCOORD12`; material shaders
+  that define their own entry point set `g_instanceLodDistance` from it
+  (see `Foliage.hlsl`). Without it the old per-pixel selection is used.
 - Oak impostor materials use metallic-roughness shading with the pack's
   billboard normal maps; they were BlinnPhong with white specular and
   rendered as pale, flat silhouettes.

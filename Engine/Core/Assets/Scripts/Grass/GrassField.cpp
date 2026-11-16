@@ -93,14 +93,66 @@ GrassField::GrassField()
     RegisterField("allowProceduralGeneration", allowProceduralGeneration, "Tiles");
     RegisterField("proceduralLayerMask", proceduralLayerMask, "Tiles");
     RegisterField("retainDormantTiles", retainDormantTiles, "Tiles");
+    RegisterField("accentMeshes", accentMeshes, "Accents");
+    RegisterField("accentPatchesPerSquareMeter", accentPatchesPerSquareMeter, "Accents");
+    RegisterField("accentDriftSize", accentDriftSize, "Accents");
+}
+
+const std::vector<std::vector<std::string>>& GrassField::AccentLods() const
+{
+    if (m_accentSource == accentMeshes) return m_accentLods;
+    m_accentSource = accentMeshes;
+    m_accentLods.clear();
+    const auto exists = [](const std::string& path) {
+        std::error_code error;
+        return std::filesystem::exists(Engine::Components::Mesh::ResolveFilePath(path), error);
+    };
+    size_t start = 0;
+    while (start <= accentMeshes.size())
+    {
+        size_t end = accentMeshes.find_first_of(";,", start);
+        if (end == std::string::npos) end = accentMeshes.size();
+        std::string path = accentMeshes.substr(start, end - start);
+        start = end + 1;
+        const auto first = path.find_first_not_of(" \t\r\n");
+        if (first == std::string::npos) continue;
+        path = path.substr(first, path.find_last_not_of(" \t\r\n") - first + 1);
+        if (path == shortMesh || path == tallMesh) continue;
+        if (!exists(path))
+        {
+            std::fprintf(stderr, "GrassField: accent mesh not found: %s\n", path.c_str());
+            continue;
+        }
+        std::vector<std::string> chain{path};
+        const auto dot = path.find_last_of('.');
+        const std::string stem = dot == std::string::npos ? path : path.substr(0, dot);
+        const std::string extension = dot == std::string::npos ? std::string{} : path.substr(dot);
+        for (const char* suffix : {"_lod1", "_lod2"})
+        {
+            const std::string lod = stem + suffix + extension;
+            if (!exists(lod)) break;
+            chain.push_back(lod);
+        }
+        m_accentLods.push_back(std::move(chain));
+    }
+    return m_accentLods;
+}
+
+size_t GrassField::SpeciesOf(const std::string& asset) const
+{
+    const auto found = m_speciesIndex.find(asset);
+    return found == m_speciesIndex.end() ? 0 : found->second;
 }
 
 std::map<std::string, Engine::Components::ObjectLodProfileData>
 GrassField::GetObjectLodProfiles() const
 {
     std::map<std::string, Engine::Components::ObjectLodProfileData> definitions;
-    for (const auto& paths : {std::vector<std::string>{shortMesh, shortMeshLod1, shortMeshLod2},
-            std::vector<std::string>{tallMesh, tallMeshLod1, tallMeshLod2}})
+    std::vector<std::vector<std::string>> chains{
+        {shortMesh, shortMeshLod1, shortMeshLod2}, {tallMesh, tallMeshLod1, tallMeshLod2}};
+    const auto& accents = AccentLods();
+    chains.insert(chains.end(), accents.begin(), accents.end());
+    for (const auto& paths : chains)
     {
         if (paths.front().empty()) continue;
         auto& profile = definitions[paths.front()];
@@ -116,10 +168,12 @@ bool GrassField::LoadSources()
     auto* provider = Owner->GetScene()->GetGraphicsProvider();
     auto* factory = provider ? provider->GetBufferFactory() : nullptr;
     auto definitions = ObjectLodProvider::GetObjectLodMeshes();
+    std::vector<std::string> assets{shortMesh, tallMesh};
+    for (const auto& chain : AccentLods()) assets.push_back(chain.front());
     // Resolve only the rendered species here; enumerating every placement belongs
     // in the inspector, not in the per-frame streaming path.
     if (m_cachedLayer)
-        for (const auto& asset : {shortMesh, tallMesh})
+        for (const auto& asset : assets)
             if (const auto found = m_cachedLayer->objectLods.find(asset);
                 found != m_cachedLayer->objectLods.end() && !found->second.meshes.empty())
             {
@@ -129,44 +183,62 @@ bool GrassField::LoadSources()
                     meshes.resize(Engine::Components::TerrainObjectLayer::MaximumObjectLods);
                 if (!meshes.empty()) definitions[asset] = std::move(meshes);
             }
-    auto shortLevels = definitions[shortMesh], tallLevels = definitions[tallMesh];
-    if (shortLevels.empty() || tallLevels.empty()) return false;
+    std::vector<std::vector<std::string>> levels;
+    for (const auto& asset : assets) levels.push_back(definitions[asset]);
+    if (levels[0].empty() || levels[1].empty()) return false;
+    for (size_t species = levels.size(); species-- > 2;)
+        if (levels[species].empty())
+        {
+            levels.erase(levels.begin() + species);
+            assets.erase(assets.begin() + species);
+        }
     const auto distances = [&](const std::string& asset, size_t count) {
         if (m_cachedLayer) return m_cachedLayer->GetObjectLodDistances(asset, count);
         std::vector<float> result;
         for (size_t i = 1; i < count; ++i) result.push_back(std::max(2.f, visibleRadius));
         return result;
     };
-    const auto shortDistances = distances(shortMesh, shortLevels.size());
-    const auto tallDistances = distances(tallMesh, tallLevels.size());
+    std::vector<std::vector<float>> speciesDistances;
+    for (size_t species = 0; species < assets.size(); ++species)
+        speciesDistances.push_back(distances(assets[species], levels[species].size()));
     // A shared tile changes only the species whose boundary was crossed.
     // The sorted union supports different LOD counts and distances per asset.
-    m_lodDistances = shortDistances;
-    m_lodDistances.insert(m_lodDistances.end(), tallDistances.begin(), tallDistances.end());
+    m_lodDistances.clear();
+    for (const auto& thresholds : speciesDistances)
+        m_lodDistances.insert(m_lodDistances.end(), thresholds.begin(), thresholds.end());
     std::sort(m_lodDistances.begin(), m_lodDistances.end());
     m_lodDistances.erase(std::unique(m_lodDistances.begin(), m_lodDistances.end()), m_lodDistances.end());
-    m_useGpuLodSelection = (gpuLodSelection || (m_cachedLayer && m_cachedLayer->screenLodSelection)) && shortLevels.size() == 3 &&
-        tallLevels.size() == 3 && shortDistances == tallDistances && m_lodDistances.size() == 2;
-    std::vector<std::string> shortPaths, tallPaths;
+    m_useGpuLodSelection = (gpuLodSelection || (m_cachedLayer && m_cachedLayer->screenLodSelection)) &&
+        m_lodDistances.size() == 2;
+    for (size_t species = 0; species < assets.size(); ++species)
+        m_useGpuLodSelection = m_useGpuLodSelection && levels[species].size() == 3 &&
+            speciesDistances[species] == speciesDistances[0];
+    std::vector<std::vector<std::string>> paths(assets.size());
     for (size_t i = 0; i <= m_lodDistances.size(); ++i)
-    {
-        const auto level = [&](const std::vector<float>& thresholds) {
-            return i == 0 ? size_t(0) : size_t(std::upper_bound(thresholds.begin(), thresholds.end(), m_lodDistances[i - 1]) - thresholds.begin());
-        };
-        shortPaths.push_back(shortLevels[level(shortDistances)]);
-        tallPaths.push_back(tallLevels[level(tallDistances)]);
-    }
-    if (m_loaded && m_loadedFactory == factory && m_loadedShortPaths == shortPaths &&
-        m_loadedTallPaths == tallPaths)
-        return m_shortVertices[0] && m_tallVertices[0] && !m_shortVertices[0]->empty() && !m_tallVertices[0]->empty();
+        for (size_t species = 0; species < assets.size(); ++species)
+        {
+            const auto& thresholds = speciesDistances[species];
+            const size_t level = i == 0 ? size_t(0) : size_t(std::upper_bound(thresholds.begin(),
+                thresholds.end(), m_lodDistances[i - 1]) - thresholds.begin());
+            paths[species].push_back(levels[species][level]);
+        }
+    const auto ready = [&] {
+        return m_speciesVertices.size() >= 2 && m_speciesVertices[0][0] && m_speciesVertices[1][0] &&
+            !m_speciesVertices[0][0]->empty() && !m_speciesVertices[1][0]->empty();
+    };
+    if (m_loaded && m_loadedFactory == factory && m_loadedSpeciesPaths == paths)
+        return ready();
     m_loaded = true;
     m_loadedFactory = factory;
     m_hasGenerationSignature = false;
-    m_shortVertices.resize(shortPaths.size());
-    m_tallVertices.resize(tallPaths.size());
-    m_sourceMeshes.resize(shortPaths.size());
-    m_loadedShortPaths = shortPaths;
-    m_loadedTallPaths = tallPaths;
+    const size_t lodCount = paths[0].size();
+    m_speciesAssets = assets;
+    m_speciesIndex.clear();
+    for (size_t species = 0; species < assets.size(); ++species)
+        m_speciesIndex.emplace(assets[species], species);
+    m_speciesVertices.assign(assets.size(), std::vector<std::shared_ptr<const Source>>(lodCount));
+    m_sourceMeshes.assign(lodCount, nullptr);
+    m_loadedSpeciesPaths = paths;
     try
     {
         const auto load = [](const std::string& path) -> std::shared_ptr<const Source> {
@@ -189,26 +261,26 @@ bool GrassField::LoadSources()
                     return std::make_shared<Source>(mesh.TakeVertices());
                 });
         };
-        for (int lod = 0; lod < static_cast<int>(m_sourceMeshes.size()); ++lod)
-        {
-            m_shortVertices[lod] = load(shortPaths[lod]);
-            m_tallVertices[lod] = load(tallPaths[lod]);
-        }
+        for (size_t species = 0; species < paths.size(); ++species)
+            for (size_t lod = 0; lod < lodCount; ++lod)
+                m_speciesVertices[species][lod] = load(paths[species][lod]);
         // Weak ownership keeps GPU resources tied to their users/device instead
         // of retaining them forever in the process-wide CPU asset cache.
         using Mesh = Engine::Components::Mesh;
-        static std::map<std::tuple<const void*, const void*, const void*>, std::weak_ptr<Mesh>> sharedMeshes;
+        static std::map<std::pair<const void*, std::vector<const void*>>, std::weak_ptr<Mesh>> sharedMeshes;
         for (auto it = sharedMeshes.begin(); it != sharedMeshes.end();)
             if (it->second.expired()) it = sharedMeshes.erase(it); else ++it;
         bool first = true;
         for (int lod = 0; lod < static_cast<int>(m_sourceMeshes.size()); ++lod)
         {
-            const auto key = std::make_tuple(factory, m_shortVertices[lod].get(), m_tallVertices[lod].get());
+            std::pair<const void*, std::vector<const void*>> key{factory, {}};
+            for (const auto& species : m_speciesVertices) key.second.push_back(species[lod].get());
             auto mesh = sharedMeshes[key].lock();
             if (!mesh)
             {
-                Source vertices = *m_shortVertices[lod];
-                vertices.insert(vertices.end(), m_tallVertices[lod]->begin(), m_tallVertices[lod]->end());
+                Source vertices;
+                for (const auto& species : m_speciesVertices)
+                    vertices.insert(vertices.end(), species[lod]->begin(), species[lod]->end());
                 mesh = std::make_shared<Mesh>();
                 mesh->SetAuthoredVertices(std::move(vertices));
                 if (factory) mesh->CreateBuffer(factory);
@@ -229,11 +301,11 @@ bool GrassField::LoadSources()
     {
         std::fprintf(stderr, "GrassField: unable to load source mesh: %s\n",
             error.what());
-        for (auto& source : m_shortVertices) source.reset();
-        for (auto& source : m_tallVertices) source.reset();
+        for (auto& species : m_speciesVertices)
+            for (auto& source : species) source.reset();
         for (auto& source : m_sourceMeshes) source.reset();
     }
-    return m_shortVertices[0] && m_tallVertices[0] && !m_shortVertices[0]->empty() && !m_tallVertices[0]->empty();
+    return ready();
 }
 
 void GrassField::Start()
@@ -377,6 +449,9 @@ uint64_t GrassField::ComputeGenerationSignature() const
     for (const auto* path : {&shortMesh, &tallMesh, &shortMeshLod1,
             &shortMeshLod2, &tallMeshLod1, &tallMeshLod2})
         HashBytes(hash, path->data(), path->size());
+    HashBytes(hash, accentMeshes.data(), accentMeshes.size());
+    HashFloat(hash, accentPatchesPerSquareMeter);
+    HashFloat(hash, accentDriftSize);
     HashFloat(hash, tileSize);
     HashFloat(hash, shortPatchesPerSquareMeter);
     HashFloat(hash, tallPatchesPerSquareMeter);
@@ -402,6 +477,8 @@ void GrassField::BeginBuild(Tile tile, int lod, uint64_t signature)
     job.tile = tile;
     job.lod = lod;
     job.signature = signature;
+    const size_t speciesCount = std::max<size_t>(2, m_speciesAssets.size());
+    job.speciesCounts.assign(speciesCount, 0);
     if (m_placementCount && m_placementTiles)
     {
         const auto found=m_placementTiles->find(tile);
@@ -415,7 +492,9 @@ void GrassField::BeginBuild(Tile tile, int lod, uint64_t signature)
                 placementCount += records.size();
             transforms.reserve(placementCount);
             placementIds.reserve(placementCount);
-            for(bool tall:{false,true}) for(const auto& [asset,records]:prepared.groups) if((asset==tallMesh)==tall)
+            // Group instances by species so each source vertex range is drawn once.
+            for(size_t species=0;species<speciesCount;++species)
+                for(const auto& [asset,records]:prepared.groups) if(SpeciesOf(asset)==species)
                 for(const auto& record:records)
                 {
                     glm::mat4 transform(1.f);
@@ -428,7 +507,7 @@ void GrassField::BeginBuild(Tile tile, int lod, uint64_t signature)
                     }
                     transforms.push_back(transform);
                     placementIds.push_back(m_cachedLayer->placements[record.index].id);
-                    if(!tall) ++job.shortCount;
+                    ++job.speciesCounts[species];
                 }
             job.instanceLayer.SetPlacements(std::move(transforms),
                 std::move(placementIds));
@@ -487,14 +566,48 @@ void GrassField::BeginBuild(Tile tile, int lod, uint64_t signature)
         };
         append(shortMesh, shortPatchesPerSquareMeter, 64);
         append(tallMesh, tallPatchesPerSquareMeter, 32);
+        // Accents grow in drifts. Each world cell of accentDriftSize favours
+        // one species and has its own richness (some cells stay bare), so
+        // flowers gather in patches instead of an even sprinkle. Cells are
+        // keyed in terrain space, so drifts continue across tile borders.
+        const size_t accentCount = m_speciesAssets.size() > 2 ? m_speciesAssets.size() - 2 : 0;
+        if (accentCount && accentPatchesPerSquareMeter > 0.f)
+        {
+            // Richness is uniform in [-.3, 1.5]: mean acceptance 1/1.8.
+            const int count = std::clamp(static_cast<int>(std::round(
+                accentPatchesPerSquareMeter * span * span * 1.8f)), 0, 96);
+            const float drift = std::max(1.f, accentDriftSize);
+            for (int i = 0; i < count; ++i)
+            {
+                Placement p;
+                p.position.x = tile.first * span + unit(rng) * span;
+                p.position.z = tile.second * span + unit(rng) * span;
+                const float accept = unit(rng), pick = unit(rng);
+                p.yawDegrees = unit(rng) * 360.f;
+                p.scale = .85f + .3f * unit(rng);
+                if (p.position.x < .3f || p.position.z < .3f ||
+                    p.position.x > width - .3f || p.position.z > depth - .3f) continue;
+                const uint32_t cell = TileSeed(seed ^ 0x2c1b3c6d,
+                    static_cast<int>(std::floor(p.position.x / drift)),
+                    static_cast<int>(std::floor(p.position.z / drift)));
+                const float richness = static_cast<float>(cell & 1023u) / 1023.f * 1.8f - .3f;
+                if (accept >= richness) continue;
+                if (!grows(p.position.x, p.position.z)) continue;
+                const size_t favoured = (cell >> 10u) % accentCount;
+                const size_t species = pick < .7f ? favoured :
+                    std::min(accentCount - 1, static_cast<size_t>((pick - .7f) / .3f * accentCount));
+                p.asset = m_speciesAssets[2 + species];
+                p.position.y = SampleHeight(p.position.x, p.position.z, &p.normal);
+                job.placements.push_back(std::move(p));
+            }
+        }
     }
     job.totalCount=uint32_t(job.placements.size());
     // Procedural opt-in data still needs preparation; saved layers use baked records.
     // Group instances by species so each source vertex range is drawn once.
-    std::stable_partition(job.placements.begin(), job.placements.end(),
-        [&](const Placement& p) { return p.asset != tallMesh; });
-    job.shortCount = static_cast<uint32_t>(std::count_if(job.placements.begin(), job.placements.end(),
-        [&](const Placement& p) { return p.asset != tallMesh; }));
+    std::stable_sort(job.placements.begin(), job.placements.end(),
+        [&](const Placement& a, const Placement& b) { return SpeciesOf(a.asset) < SpeciesOf(b.asset); });
+    for (const auto& p : job.placements) ++job.speciesCounts[SpeciesOf(p.asset)];
     job.instanceLayer.Reserve(job.placements.size());
 }
 
@@ -552,11 +665,16 @@ bool GrassField::AdvanceBuild(Clock::time_point deadline)
     for (int lod = 0; lod < static_cast<int>(m_sourceMeshes.size()); ++lod)
     {
         auto geometry = std::make_unique<Mesh>();
-        const auto shortVertices = static_cast<uint32_t>(m_shortVertices[lod]->size());
-        std::vector<Mesh::InstanceRange> ranges{
-            {0, shortVertices, 0, job.shortCount},
-            {shortVertices, static_cast<uint32_t>(m_tallVertices[lod]->size()), job.shortCount,
-                job.totalCount - job.shortCount}};
+        std::vector<Mesh::InstanceRange> ranges;
+        uint32_t firstVertex = 0, firstInstance = 0;
+        for (size_t species = 0; species < m_speciesVertices.size(); ++species)
+        {
+            const auto vertexCount = static_cast<uint32_t>(m_speciesVertices[species][lod]->size());
+            const uint32_t instanceCount = species < job.speciesCounts.size() ? job.speciesCounts[species] : 0;
+            ranges.push_back({firstVertex, vertexCount, firstInstance, instanceCount});
+            firstVertex += vertexCount;
+            firstInstance += instanceCount;
+        }
         geometry->SetInstancedGeometry(m_sourceMeshes[lod],
             job.instanceLayer.GetInstanceData(), std::move(ranges),
             job.minimum, job.maximum);

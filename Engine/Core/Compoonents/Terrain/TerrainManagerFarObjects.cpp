@@ -29,6 +29,8 @@ struct FarObjectInputs
     std::function<void(Cell, Terrain&)> builder;
     TerrainManager::ObjectLayerGenerator generator;
     std::vector<std::string> layerNames;
+    // Distance the loaded cells reach; far cells all lie beyond it.
+    float nearReach = 0.f;
 };
 
 struct FarCellInput
@@ -83,10 +85,14 @@ std::vector<TerrainObjectLayer::Placement> FarPlacements(
             context.heights = &terrain->heights;
             context.weights = &terrain->weights;
             context.terrainLayerCount = terrain->layers.size();
+            context.farObjects = true;
             inputs.generator(context, name, *layer);
         }
         // Ground cover (grass) has its own reach and no far representation.
         if (layer->conformToGround || layer->snapToGround) continue;
+        // Layers that fade out inside the loaded cells (rocks, logs, bushes)
+        // can never show in a far cell.
+        if (layer->viewDistance <= inputs.nearReach) continue;
         for (const auto& placement : layer->placements)
         {
             auto chain = layer->GetObjectLodProfile(placement.asset).meshes;
@@ -114,6 +120,7 @@ void TerrainManager::ClearFarObjects()
 {
     FenceFarObjectJobs();
     m_farObjectCells.clear();
+    m_farNearCovered.clear();
     if (Owner && Owner->GetScene())
         for (auto& [key, block] : m_farObjectBlocks)
             if (block.object) Owner->GetScene()->RemoveObject(block.object);
@@ -173,6 +180,7 @@ void TerrainManager::UpdateFarObjects(int centerX, int centerY)
         inputs.builder = m_proceduralBuilder;
         inputs.generator = m_objectLayerGenerator;
         inputs.layerNames = m_objectLayerNames;
+        inputs.nearReach = std::max(0, loadedRadius) * std::min(cellsX * cellWidth, cellsY * cellDepth);
         size_t next = 0;
         while (m_farObjectJobs.size() < maximumJobs && next < missing.size())
         {
@@ -231,10 +239,17 @@ void TerrainManager::UpdateFarObjects(int centerX, int centerY)
     auto* provider = scene->GetGraphicsProvider();
     const auto nearCovers = [&](Cell cell) {
         const auto found = m_loaded.find(cell);
-        if (found == m_loaded.end() || !found->second || !found->second->Owner) return false;
+        if (found == m_loaded.end() || !found->second || !found->second->Owner)
+        {
+            m_farNearCovered.erase(cell);
+            return false;
+        }
+        if (const auto latched = m_farNearCovered.find(cell);
+            latched != m_farNearCovered.end() && latched->second == found->second) return true;
         for (const auto* child : found->second->Owner->Children)
             if (const auto* layer = child ? child->GetComponent<TerrainObjectLayer>() : nullptr)
                 if (!layer->IsPrefabPreparationComplete(provider)) return false;
+        m_farNearCovered[cell] = found->second;
         return true;
     };
     std::set<Cell> activeBlocks;

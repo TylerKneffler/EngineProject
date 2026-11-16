@@ -18,11 +18,12 @@ float4 PSMain(
     float4 uvChannels3 : TEXCOORD6,
     float4 uvChannels4 : TEXCOORD7,
     nointerpolation uint objectIndex : TEXCOORD11,
+    float instanceLodDistance : TEXCOORD12,
     bool frontFace : SV_IsFrontFace) : SV_TARGET
 {
     PSShadowMain(pos, worldPos, normal, uv, uv1, vertexColor, tangent,
         uvChannels0, uvChannels1, uvChannels2, uvChannels3, uvChannels4,
-        objectIndex);
+        objectIndex, instanceLodDistance);
     // Saturate the diagnostic mask through DX11's display tone mapping too;
     // explicit-backend scene readbacks clamp HDR directly to display white.
     return float4(65504, 65504, 65504, 1);

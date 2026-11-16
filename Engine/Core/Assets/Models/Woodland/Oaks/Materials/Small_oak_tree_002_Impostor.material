@@ -104,5 +104,6 @@
   "normalTexture": "Assets/Other/oak_trees_pack_17var_lods_seasons_gameready/textures/Small_oak_tree__002_Billboard_Mat_normal.png",
   "occlusionTexture": "",
   "shader": "",
-  "alphaCoverageTransmission": 0.15
+  "alphaCoverageTransmission": 0.15,
+  "alphaEdgeFade": 1.0
 }

@@ -231,6 +231,15 @@ void GameBenchmark::Record(uint64_t frame, const GameBenchmarkFrameSample& s)
         << ",\"detail_applied_scale\":" << Engine::Rendering::DetailBudget::Get().AppliedScale()
         << ",\"detail_geometry_ms\":" << Engine::Rendering::DetailBudget::Get().LastGeometryMs()
         << ",\"detail_cpu_render_ms\":" << Engine::Rendering::DetailBudget::Get().LastCpuRenderMs()
+        << ",\"detail_model_active\":" << (Engine::Rendering::DetailBudget::Get().GetModelStatus().active ? "true" : "false")
+        << ",\"detail_cost_budget\":" << Engine::Rendering::DetailBudget::Get().GetModelStatus().costBudget
+        << ",\"detail_predicted_cost\":" << Engine::Rendering::DetailBudget::Get().GetModelStatus().predictedCost
+        << ",\"detail_target_scale\":" << Engine::Rendering::DetailBudget::Get().GetModelStatus().targetScale
+        << ",\"detail_placements\":" << Engine::Rendering::DetailBudget::Get().GetModelStatus().placements
+        << ",\"detail_occluded\":" << Engine::Rendering::DetailBudget::Get().GetModelStatus().occludedFraction
+        << ",\"texture_budget_mib\":" << Engine::Rendering::DetailBudget::Get().GetTextureBudgetStatus().budgetBytes / 1048576
+        << ",\"texture_resident_mib\":" << Engine::Rendering::DetailBudget::Get().GetTextureBudgetStatus().textureBytes / 1048576
+        << ",\"vram_usage_mib\":" << Engine::Rendering::DetailBudget::Get().GetTextureBudgetStatus().vramUsageBytes / 1048576
         << ",\"gpu_timing_valid\":" << (s.gpu.gpuTimingsValid ? "true" : "false")
         << ",\"gpu_sample_id\":" << s.gpu.gpuSampleId
         << ",\"gpu_opaque_ms\":";

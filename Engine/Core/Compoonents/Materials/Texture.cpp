@@ -6,6 +6,7 @@
 #include "Core/Memory/CacheStore.h"
 #include "Core/Rendering/Lighting/EnvironmentMap.h"
 #include "Core/Rendering/RenderJobs.h"
+#include "Core/Rendering/DetailBudget.h"
 #include "Core/Rendering/TextureResidency.h"
 
 #include <Windows.h>
@@ -51,6 +52,14 @@ std::mutex s_streamStatsMutex;
 uint64_t s_streamUploads = 0, s_streamEvictions = 0;
 struct ProviderStreamingFrame { uint64_t serial=0, frame=0, uploaded=0; };
 std::unordered_map<const Engine::Graphics::IGraphicsProvider*,ProviderStreamingFrame> s_providerStreamingFrames;
+// ENGINE_TEXTURE_STREAMING_BUDGET_MB fixes the pool size (0 turns streaming
+// off) and overrides the project's texture budget, for tests and captures.
+bool StreamingBudgetFromEnvironment()
+{
+    static const bool fromEnvironment = std::getenv("ENGINE_TEXTURE_STREAMING_BUDGET_MB") != nullptr;
+    return fromEnvironment;
+}
+
 Engine::Rendering::TextureStreamingSettings& StreamingSettings()
 {
     static auto settings = [] {
@@ -903,6 +912,23 @@ bool Texture::UploadMipTail(IGraphicsProvider* provider, uint32_t firstMip, bool
 void Texture::StreamFrame(IGraphicsProvider* provider)
 {
     if (!provider || !provider->GetTextureFactory()) return;
+    // The project's texture budget (DetailBudget) sizes the pool from the
+    // video memory textures may use; it re-samples about once a second.
+    if (!StreamingBudgetFromEnvironment())
+    {
+        uint64_t textureBytes = 0;
+        {
+            std::lock_guard lock(s_streamStatsMutex);
+            textureBytes = s_streamSnapshot.allocatedBytes + s_streamSnapshot.pinnedBytes;
+        }
+        const uint64_t budget = Engine::Rendering::DetailBudget::Get().UpdateTextureBudget(textureBytes);
+        if (budget != StreamingSettings().budgetBytes)
+        {
+            auto settings = StreamingSettings();
+            settings.budgetBytes = budget;
+            ConfigureStreaming(settings);
+        }
+    }
     std::lock_guard statsLock(s_streamStatsMutex);
     auto* factory=provider->GetTextureFactory();
     factory->PollUploads();

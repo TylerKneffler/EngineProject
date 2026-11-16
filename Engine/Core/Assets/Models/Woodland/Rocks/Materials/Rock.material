@@ -1,0 +1,13 @@
+{
+    "version": 1,
+    "baseColor": [1, 1, 1],
+    "metallic": 1,
+    "roughness": 1,
+    "specularModel": "MetallicRoughness",
+    "castsShadows": true,
+    "doubleSided": false,
+    "normalScale": 1,
+    "baseColorTexture": "Assets/Models/Woodland/Rocks/Textures/Rock_Color.ktx2",
+    "normalTexture": "Assets/Models/Woodland/Rocks/Textures/Rock_Normal.ktx2",
+    "metallicRoughnessTexture": "Assets/Models/Woodland/Rocks/Textures/Rock_ORM.ktx2"
+}

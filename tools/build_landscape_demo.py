@@ -277,7 +277,7 @@ def write_scene(height, origin):
             "runtimeBakeDirectory": "", "requireRuntimeBake": "false"}.items()})
     ET.SubElement(manager, "TerrainManager.cells")
     names = ET.SubElement(manager, "TerrainManager.objectLayerNames")
-    for name in ("Landscape forest", "Procedural meadow grass"):
+    for name in ("Landscape forest", "Procedural meadow grass", "Landscape props"):
         ET.SubElement(names, "item").text = name
     runs = ET.SubElement(manager, "TerrainManager.proceduralRuns")
     for y in range(-EXTENT, EXTENT + 1):

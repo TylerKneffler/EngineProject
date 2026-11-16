@@ -1,4 +1,5 @@
 #include "Core/Rendering/DetailBudget.h"
+#include "Core/Rendering/MaterialCachePolicy.h"
 #include "Game/Application/GameApplication.h"
 
 #include "Game/Startup/GameProjectStartup.h"
@@ -863,6 +864,8 @@ int GameApplication::Run(HINSTANCE instance, const GameBenchmarkOptions* benchma
     scene.SetDistanceLightingSettings(settings.distanceLighting);
     Engine::Rendering::DetailBudget::Get().Configure(settings.layers,
         settings.detailBudget);
+    Engine::Rendering::MaterialCachePolicy::Get().SetProjectSettings(
+        settings.materialCache);
     if (benchmark) scene.SetUpdateProfilingEnabled(true);
     if (benchmark) g_benchmarkRenderMode = benchmark->renderMode;
     Engine::Core::SceneManager::SetActiveScene(&scene);

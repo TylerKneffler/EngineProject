@@ -1,4 +1,5 @@
 #include "Core/Rendering/DetailBudget.h"
+#include "Core/Rendering/MaterialCachePolicy.h"
 #include "Engine/Editor/Core/View/Views/PreferencesView.h"
 #include "Engine/Editor/CodeEditorLink.h"
 #include "Engine/Editor/UI/IEditorUi.h"
@@ -1340,6 +1341,38 @@ void PreferencesView::DrawRenderingSection(IEditorUi& ui)
     else
         ui.DisabledLabel("Highest quality and cost. Every scheduled recursive portal view receives an atlas.");
     ui.DisabledLabel("One cascade uses the full atlas; two to four cascades use 2x2 tiles on DirectX 11, DirectX 12, and Vulkan.");
+
+    ui.Separator();
+    ui.Label("Material Cache");
+    ui.DisabledLabel("Project defaults. Player settings may override these at runtime.");
+    auto& cache = m_settings.materialCache;
+    if (ui.Checkbox("Render Material Cache", &cache.renderMaterialCache))
+        NotifyChanged();
+    ui.DisabledLabel("Reuses each material's prepared GPU record across draws in a frame.");
+    ui.DisabledLabel("Turn off only to profile or debug material preparation.");
+    if (ui.InputUInt("Descriptor Sets Per Pool (Vulkan)", &cache.descriptorSetsPerPool))
+    {
+        cache.Normalize();
+        NotifyChanged();
+    }
+    if (ui.InputUInt("Descriptor Cache Limit (Vulkan)", &cache.descriptorCacheLimit))
+    {
+        cache.Normalize();
+        NotifyChanged();
+    }
+    ui.DisabledLabel("Sets kept per frame slot before its pools reset. Raise for scenes with");
+    ui.DisabledLabel("many unique materials to avoid rebuilds; pools grow on demand either way.");
+    const auto& policy = Engine::Rendering::MaterialCachePolicy::Get();
+    if (policy.HasOverride())
+    {
+        const auto effective = policy.Effective();
+        char status[192];
+        snprintf(status, sizeof(status),
+            "Overridden at runtime: cache %s, %u sets per pool, limit %u",
+            effective.renderMaterialCache ? "on" : "off",
+            effective.descriptorSetsPerPool, effective.descriptorCacheLimit);
+        ui.DisabledLabel(status);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1435,9 +1468,9 @@ void PreferencesView::DrawLayersSection(IEditorUi& ui)
         budget.minimumScale = std::clamp(budget.minimumScale, .05f, 1.f);
         NotifyChanged();
     }
-    if (ui.DragFloat("Maximum Scale", &budget.maximumScale, .01f, 1.f, 10.f))
+    if (ui.DragFloat("Maximum Scale", &budget.maximumScale, .01f, 1.f, 20.f))
     {
-        budget.maximumScale = std::clamp(budget.maximumScale, 1.f, 10.f);
+        budget.maximumScale = std::clamp(budget.maximumScale, 1.f, 20.f);
         NotifyChanged();
     }
     if (ui.DragFloat("Response (s)", &budget.responseSeconds, .05f, .05f, 30.f))
@@ -1446,9 +1479,38 @@ void PreferencesView::DrawLayersSection(IEditorUi& ui)
         NotifyChanged();
     }
     const auto& live = Engine::Rendering::DetailBudget::Get();
-    char status[128];
+    char status[256];
     snprintf(status, sizeof(status), "Live: scale %.2f, GPU geometry %.2f ms, CPU render %.2f ms",
         live.GlobalScale(), live.LastGeometryMs(), live.LastCpuRenderMs());
+    ui.DisabledLabel(status);
+
+    ui.Separator();
+    ui.Label("Texture Budget");
+    ui.DisabledLabel("Video memory for streamed textures. The base pool is always available;");
+    ui.DisabledLabel("the extended budget adds a share of the GPU's spare memory. When the");
+    ui.DisabledLabel("pool is full, textures with the least screen coverage drop to coarser mips.");
+    if (ui.Checkbox("Enable Texture Budget", &budget.textureBudgetEnabled))
+        NotifyChanged();
+    if (ui.DragFloat("Base Texture Budget (MiB)", &budget.textureBudgetMiB, 16.f, 64.f, 65536.f))
+    {
+        budget.textureBudgetMiB = std::clamp(budget.textureBudgetMiB, 64.f, 65536.f);
+        NotifyChanged();
+    }
+    float extendedPercent = budget.extendedTextureBudget * 100.f;
+    if (ui.DragFloat("Extended Texture Budget (%)", &extendedPercent, 1.f, 0.f, 100.f))
+    {
+        budget.extendedTextureBudget = std::clamp(extendedPercent / 100.f, 0.f, 1.f);
+        NotifyChanged();
+    }
+    const auto textures = live.GetTextureBudgetStatus();
+    if (textures.budgetBytes)
+        snprintf(status, sizeof(status),
+            "Live: %.0f / %.0f MiB textures (base %.0f + extended %.0f), VRAM %.0f / %.0f MiB",
+            textures.textureBytes / 1048576.0, textures.budgetBytes / 1048576.0,
+            textures.baseBytes / 1048576.0, textures.extendedBytes / 1048576.0,
+            textures.vramUsageBytes / 1048576.0, textures.vramBudgetBytes / 1048576.0);
+    else
+        snprintf(status, sizeof(status), "Live: off, every texture stays fully resident");
     ui.DisabledLabel(status);
 }
 
@@ -1732,6 +1794,23 @@ bool PreferencesView::SaveSettings()
                     m_settings.detailBudget.maximumScale);
                 budgetNode.append_attribute("ResponseSeconds").set_value(
                     m_settings.detailBudget.responseSeconds);
+                budgetNode.append_attribute("TextureBudgetEnabled").set_value(
+                    m_settings.detailBudget.textureBudgetEnabled);
+                budgetNode.append_attribute("TextureBudgetMiB").set_value(
+                    m_settings.detailBudget.textureBudgetMiB);
+                budgetNode.append_attribute("ExtendedTextureBudget").set_value(
+                    m_settings.detailBudget.extendedTextureBudget);
+
+                auto cacheNode = prop.child("MaterialCache");
+                if (!cacheNode)
+                    cacheNode = prop.append_child("MaterialCache");
+                cacheNode.remove_attributes();
+                cacheNode.append_attribute("RenderMaterialCache").set_value(
+                    m_settings.materialCache.renderMaterialCache);
+                cacheNode.append_attribute("DescriptorSetsPerPool").set_value(
+                    m_settings.materialCache.descriptorSetsPerPool);
+                cacheNode.append_attribute("DescriptorCacheLimit").set_value(
+                    m_settings.materialCache.descriptorCacheLimit);
             }
 
             auto modeNode = prop.child("AspectRatioMode");

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Core/Model/ProjectLayers.h"
+#include "Core/Rendering/DetailCostModel.h"
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -46,7 +47,8 @@ public:
     }
     // The eased controller output.
     float GlobalScale() const { return m_globalScale.load(std::memory_order_relaxed); }
-    // The stepped scale LODs actually use (see PublishScales).
+    // The scale LODs actually use: it glides toward a stepped copy of the
+    // controller output (see PublishScales).
     float AppliedScale() const { std::lock_guard lock(m_mutex); return m_publishedGlobal; }
     // Incremented whenever the layer scales change. Systems with expensive
     // detail changes (terrain cell LODs, grass) compare it to react.
@@ -62,14 +64,42 @@ public:
     void AddCpuRenderTime(double milliseconds);
     // One measured frame of geometry GPU time. Call once per resolved GPU
     // frame; repeated sample ids are ignored.
-    void ReportGeometryCost(uint64_t sampleId, double geometryMs);
+    // fixedMs is the part LOD distances do not change (terrain, grass); the
+    // cost model calibrates against the rest.
+    void ReportGeometryCost(uint64_t sampleId, double geometryMs, double fixedMs = 0.0);
     // Test and tool hook: fixes the global scale (and disables adaptation
     // until the next Configure).
     void SetFixedGlobalScale(float scale);
 
+    // Predicted cost of the main view's LOD'd instances at every scale (see
+    // DetailCostModel.h). While a recent curve exists, the scale is the
+    // largest the cost budget affords; otherwise the reactive controller runs.
+    void SubmitCostCurve(const DetailCostCurve& curve);
+    struct ModelStatus
+    {
+        bool active = false;
+        double costBudget = 0.0, predictedCost = 0.0, occludedFraction = 0.0;
+        uint32_t placements = 0;
+        float targetScale = 1.f;
+    };
+    ModelStatus GetModelStatus() const;
+
+    // Texture budget (DetailBudgetSettings::textureBudget*). The texture
+    // streamer calls this once per frame with the bytes textures occupy now
+    // (streamed and fully resident); it returns the pool size in bytes, 0 when
+    // the budget is off. Video memory is sampled about once a second.
+    uint64_t UpdateTextureBudget(uint64_t textureBytes);
+    struct TextureBudgetStatus
+    {
+        uint64_t budgetBytes = 0, baseBytes = 0, extendedBytes = 0, textureBytes = 0;
+        uint64_t vramBudgetBytes = 0, vramUsageBytes = 0;
+    };
+    TextureBudgetStatus GetTextureBudgetStatus() const;
+
 private:
     DetailBudget();
-    void PublishScales();
+    // seconds > 0 glides the applied scale toward its step; 0 jumps to it.
+    void PublishScales(double seconds = 0.0);
 
     mutable std::mutex m_mutex;
     std::vector<Engine::Model::ProjectLayer> m_layers;
@@ -80,11 +110,18 @@ private:
     std::atomic<double> m_lastGeometryMs{ 0.0 };
     std::atomic<double> m_lastCpuMs{ 0.0 };
     double m_cpuAccumulatedMs = 0.0;
-    double m_smoothedGpuMs = 0.0, m_smoothedCpuMs = 0.0;
+    double m_smoothedGpuMs = 0.0, m_smoothedCpuMs = 0.0, m_smoothedFixedMs = 0.0;
     std::atomic<bool> m_enabled{ true };
     bool m_fixed = false;
     uint64_t m_lastSampleId = 0;
     std::chrono::steady_clock::time_point m_lastReport{};
+    float m_steppedGlobal = 1.f;
     float m_publishedGlobal = 1.f;
+    DetailCostCurve m_curve;
+    std::chrono::steady_clock::time_point m_curveTime{};
+    double m_costBudget = 0.0;
+    float m_modelTarget = 1.f;
+    TextureBudgetStatus m_texture;
+    std::chrono::steady_clock::time_point m_lastTextureSample{};
 };
 }

@@ -1013,6 +1013,13 @@ if(NOT ENGINE_PROJECT_DIR)
     target_include_directories(TextureCook SYSTEM PRIVATE
         ${assimp_SOURCE_DIR}/contrib/stb)
     target_compile_features(TextureCook PRIVATE cxx_std_20)
+
+    # PropCook — offline FBX/OBJ -> native .mesh LOD chains and prefabs for
+    # terrain props (tools/PropCook).
+    add_executable(PropCook EXCLUDE_FROM_ALL "${ENGINE_ROOT}/tools/PropCook/PropCook.cpp")
+    target_link_libraries(PropCook PRIVATE Engine ufbx comctl32.lib)
+    target_include_directories(PropCook PRIVATE "${ENGINE_ROOT}/Engine")
+    target_compile_features(PropCook PRIVATE cxx_std_20)
 endif()
 
 # ---------------------------------------------------------------------------

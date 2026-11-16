@@ -16,6 +16,18 @@
 //   --roughness-channel r|g|b|a  channel holding roughness (default g, glTF)
 //   --height-mips average|max     (default average)
 //   --keep-size     fail instead of resampling non power-of-two sources
+//   --max-size N    drop top mips until both sides are at most N (the kept
+//                   levels are the usage-aware chain, not a plain resample)
+//   --flip-green    invert G (DirectX-convention normal maps -> OpenGL)
+//   --alpha-cutoff C  color only, for alpha-tested foliage: transparent texels
+//                   take the alpha-weighted colour around them (push-pull), so
+//                   mips and filtering never bleed in the background colour,
+//                   and each mip's alpha is rescaled to keep the share of
+//                   texels above C, so cutouts do not thin out with distance
+//   --orm <ao|-> <roughness> <metal|->
+//                   pack grayscale maps into one glTF mask texture (R occlusion,
+//                   G roughness, B metal; "-" gives 1 for AO, 0 for metal) in
+//                   place of <source>; the output path is required
 //   --no-zstd       write without Zstandard supercompression
 //
 // Non power-of-two sources are resampled to the nearest power of two so every
@@ -118,6 +130,35 @@ bool MetaUsage(const fs::path& source, Usage& usage)
     std::smatch match;
     static const std::regex pattern("\"textureUsage\"\\s*:\\s*\"([A-Za-z]+)\"");
     return std::regex_search(json, match, pattern) && ParseUsage(match[1].str(), usage);
+}
+
+bool LoadImage(const fs::path& path, Image& image, std::string& error);
+
+// R occlusion, G roughness, B metal from the red channel of grayscale maps.
+bool PackOrm(const std::vector<fs::path>& paths, Image& packed, std::string& error)
+{
+    Image channels[3];
+    bool present[3]{};
+    for (int c = 0; c < 3; ++c)
+    {
+        if (paths[c] == "-") continue;
+        if (!LoadImage(paths[c], channels[c], error)) return false;
+        present[c] = true;
+    }
+    if (!present[1]) { error = "--orm needs a roughness map"; return false; }
+    packed.width = channels[1].width;
+    packed.height = channels[1].height;
+    for (int c : {0, 2})
+        if (present[c] && (channels[c].width != packed.width || channels[c].height != packed.height))
+        { error = "--orm maps must share one size"; return false; }
+    packed.texels.assign(size_t(packed.width) * packed.height * 4, 1.f);
+    for (size_t i = 0; i < size_t(packed.width) * packed.height; ++i)
+    {
+        packed.texels[i * 4 + 0] = present[0] ? channels[0].texels[i * 4] : 1.f;
+        packed.texels[i * 4 + 1] = channels[1].texels[i * 4];
+        packed.texels[i * 4 + 2] = present[2] ? channels[2].texels[i * 4] : 0.f;
+    }
+    return true;
 }
 
 bool LoadImage(const fs::path& path, Image& image, std::string& error)
@@ -231,6 +272,101 @@ Image Reduce(const Image& source, bool maxFilter = false)
         }
     }
     return target;
+}
+
+// Push-pull fill: every texel with alpha below `threshold` takes the
+// alpha-weighted colour of its neighbourhood from the coarsest level that has
+// coverage there. Sizes are powers of two (see main).
+void FillTransparent(Image& image, float threshold)
+{
+    // Push: premultiplied colour and alpha summed down to 1x1.
+    std::vector<Image> sums;
+    Image level = image;
+    for (size_t i = 0; i < level.texels.size(); i += 4)
+        for (int c = 0; c < 3; ++c) level.texels[i + c] *= level.texels[i + 3];
+    sums.push_back(std::move(level));
+    while (sums.back().width > 1 || sums.back().height > 1)
+    {
+        const Image& source = sums.back();
+        Image target;
+        target.width = std::max(1u, source.width / 2);
+        target.height = std::max(1u, source.height / 2);
+        target.texels.assign(size_t(target.width) * target.height * 4, 0.f);
+        for (uint32_t y = 0; y < target.height; ++y)
+        for (uint32_t x = 0; x < target.width; ++x)
+        {
+            float* out = target.At(x, y);
+            for (uint32_t dy = 0; dy < 2; ++dy)
+            for (uint32_t dx = 0; dx < 2; ++dx)
+            {
+                const float* in = source.At(std::min(source.width - 1, x * 2 + dx),
+                                            std::min(source.height - 1, y * 2 + dy));
+                for (int c = 0; c < 4; ++c) out[c] += in[c];
+            }
+        }
+        sums.push_back(std::move(target));
+    }
+    // Pull: a level's colour is its own weighted average where it has any
+    // coverage, else the resolved colour of the level above.
+    std::vector<std::vector<float>> colour(sums.size());
+    for (size_t l = sums.size(); l-- > 0;)
+    {
+        const Image& sum = sums[l];
+        colour[l].resize(size_t(sum.width) * sum.height * 3);
+        for (uint32_t y = 0; y < sum.height; ++y)
+        for (uint32_t x = 0; x < sum.width; ++x)
+        {
+            const float* t = sum.At(x, y);
+            float* out = &colour[l][(size_t(y) * sum.width + x) * 3];
+            if (t[3] > 1e-6f || l + 1 == sums.size())
+                for (int c = 0; c < 3; ++c) out[c] = t[3] > 1e-6f ? t[c] / t[3] : 0.f;
+            else
+            {
+                const uint32_t w = sums[l + 1].width;
+                const float* up = &colour[l + 1][(size_t(std::min(sums[l + 1].height - 1, y / 2)) * w +
+                    std::min(w - 1, x / 2)) * 3];
+                for (int c = 0; c < 3; ++c) out[c] = up[c];
+            }
+        }
+    }
+    // Texels below the cutoff take their neighbourhood's colour (one level up),
+    // which excludes their own background colour.
+    const size_t upper = sums.size() > 1 ? 1 : 0;
+    const uint32_t upperWidth = sums[upper].width, upperHeight = sums[upper].height;
+    for (uint32_t y = 0; y < image.height; ++y)
+    for (uint32_t x = 0; x < image.width; ++x)
+    {
+        float* t = image.At(x, y);
+        if (t[3] >= threshold) continue;
+        const float* fill = &colour[upper][(size_t(std::min(upperHeight - 1, upper ? y / 2 : y)) * upperWidth +
+            std::min(upperWidth - 1, upper ? x / 2 : x)) * 3];
+        for (int c = 0; c < 3; ++c) t[c] = fill[c];
+    }
+}
+
+// Share of texels whose alpha reaches `cutoff` after scaling by `scale`.
+float Coverage(const Image& image, float cutoff, float scale)
+{
+    size_t covered = 0;
+    for (size_t i = 3; i < image.texels.size(); i += 4) covered += image.texels[i] * scale >= cutoff;
+    return float(covered) / float(image.texels.size() / 4);
+}
+
+// Rescales each mip's alpha so the alpha-tested coverage matches level 0.
+void PreserveCoverage(std::vector<Image>& chain, float cutoff)
+{
+    const float target = Coverage(chain[0], cutoff, 1.f);
+    for (size_t level = 1; level < chain.size(); ++level)
+    {
+        float low = 0.f, high = 8.f;
+        for (int step = 0; step < 20; ++step)
+        {
+            const float mid = (low + high) * .5f;
+            if (Coverage(chain[level], cutoff, mid) < target) low = mid; else high = mid;
+        }
+        for (size_t i = 3; i < chain[level].texels.size(); i += 4)
+            chain[level].texels[i] = std::min(1.f, chain[level].texels[i] * high);
+    }
 }
 
 // Mip chain in the space mips should be averaged in. For normals the chain
@@ -354,6 +490,10 @@ int main(int argc, char** argv)
     Usage usage = Usage::Auto;
     bool usageGiven = false, keepSize = false, zstd = true, heightMax = false;
     int roughnessChannel = 1;
+    uint32_t maxSize = 0;
+    std::vector<fs::path> orm;
+    bool flipGreen = false;
+    float alphaCutoff = -1.f;
     fs::path source, output, toksvigNormal;
     for (int i = 1; i < argc; ++i)
     {
@@ -369,16 +509,37 @@ int main(int argc, char** argv)
         }
         else if (arg == "--height-mips") heightMax = Lower(next()) == "max";
         else if (arg == "--keep-size") keepSize = true;
+        else if (arg == "--max-size")
+        {
+            const std::string value = next();
+            maxSize = value.empty() || value.find_first_not_of("0123456789") != std::string::npos
+                ? 0u : uint32_t(std::stoul(value));
+            if (maxSize < 4) return Fail("--max-size takes a size of at least 4");
+        }
         else if (arg == "--no-zstd") zstd = false;
+        else if (arg == "--flip-green") flipGreen = true;
+        else if (arg == "--alpha-cutoff") alphaCutoff = std::stof(next());
+        else if (arg == "--orm")
+        {
+            for (int c = 0; c < 3; ++c) orm.push_back(next());
+            if (orm.back().empty()) return Fail("--orm takes three paths (use - for none)");
+            usage = Usage::Mask;
+            usageGiven = true;
+        }
         else if (!arg.empty() && arg[0] == '-') return Fail("unknown option " + arg);
-        else if (source.empty()) source = arg;
+        else if (source.empty() && orm.empty()) source = arg;
         else if (output.empty()) output = arg;
         else return Fail("too many arguments");
+    }
+    if (!orm.empty())
+    {
+        if (output.empty()) return Fail("--orm needs an output path");
+        source = orm[1];
     }
     if (source.empty())
         return Fail("usage: TextureCook [--usage color|normal|mask|height|single|auto] "
                     "[--toksvig normal.png] [--roughness-channel g] [--height-mips average|max] "
-                    "[--keep-size] [--no-zstd] <source> [<output.ktx2>]");
+                    "[--keep-size] [--max-size N] [--no-zstd] <source> [<output.ktx2>]");
     if (output.empty()) output = fs::path(source).replace_extension(".ktx2");
     if (!usageGiven) MetaUsage(source, usage);
     if (usage == Usage::Auto) usage = GuessUsage(source);
@@ -387,16 +548,23 @@ int main(int argc, char** argv)
 
     std::string error;
     Image base;
-    if (!LoadImage(source, base, error)) return Fail(error);
+    if (!(orm.empty() ? LoadImage(source, base, error) : PackOrm(orm, base, error)))
+        return Fail(error);
+    if (flipGreen)
+        for (size_t i = 1; i < base.texels.size(); i += 4) base.texels[i] = 1.f - base.texels[i];
     const uint32_t sourceWidth = base.width, sourceHeight = base.height;
-    const uint32_t width = NearestPowerOfTwo(base.width), height = NearestPowerOfTwo(base.height);
+    uint32_t width = NearestPowerOfTwo(base.width), height = NearestPowerOfTwo(base.height);
     if (width != base.width || height != base.height)
     {
         if (keepSize) return Fail("source is not a power of two and --keep-size was given");
         base = Resample(base, width, height);
     }
 
+    if (alphaCutoff > 0.f && usage != Usage::Color)
+        return Fail("--alpha-cutoff applies to color textures only");
+    if (alphaCutoff > 0.f) FillTransparent(base, alphaCutoff);
     std::vector<Image> chain = BuildChain(std::move(base), usage, heightMax);
+    if (alphaCutoff > 0.f) PreserveCoverage(chain, alphaCutoff);
     if (!toksvigNormal.empty())
     {
         Image normal;
@@ -404,6 +572,15 @@ int main(int argc, char** argv)
         if (normal.width != width || normal.height != height)
             normal = Resample(normal, NearestPowerOfTwo(normal.width), NearestPowerOfTwo(normal.height));
         ApplyToksvig(chain, BuildChain(std::move(normal), Usage::Normal, false), roughnessChannel);
+    }
+    if (maxSize)
+    {
+        size_t drop = 0;
+        while (drop + 1 < chain.size() &&
+            (chain[drop].width > maxSize || chain[drop].height > maxSize)) ++drop;
+        chain.erase(chain.begin(), chain.begin() + drop);
+        width = chain.front().width;
+        height = chain.front().height;
     }
 
     const Block block = usage == Usage::Normal ? Block::Bc5

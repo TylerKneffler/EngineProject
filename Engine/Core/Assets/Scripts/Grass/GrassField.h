@@ -57,6 +57,17 @@ public:
     float shortPatchesPerSquareMeter = .5f;
     PROPERTY(Inspector, EditAnywhere, Category = "Grass | Tiles", ClampMin = "0")
     float tallPatchesPerSquareMeter = .16f;
+    // Wildflowers and weeds scattered through the grass: semicolon-separated
+    // LOD0 meshes. "<name>_lod1.obj"/"<name>_lod2.obj" siblings are used when
+    // present (tools/generate_meadow_accents.py writes all three).
+    PROPERTY(Inspector, EditAnywhere, Category = "Grass | Accents")
+    std::string accentMeshes;
+    PROPERTY(Inspector, EditAnywhere, Category = "Grass | Accents", ClampMin = "0")
+    float accentPatchesPerSquareMeter = 0.f;
+    // Procedural accents grow in drifts: each cell of this size (metres)
+    // favours one species and has its own richness.
+    PROPERTY(Inspector, EditAnywhere, Category = "Grass | Accents", ClampMin = "1")
+    float accentDriftSize = 7.f;
     PROPERTY(Inspector, EditAnywhere, Category = "Grass | Tiles")
     int seed = 18731;
     // Retained for scene compatibility; placement publication is capped at one
@@ -105,8 +116,13 @@ public:
 private:
     using Tile = std::pair<int, int>;
     using Source = std::vector<Engine::Components::Mesh::Vertex>;
-    std::vector<std::shared_ptr<const Source>> m_shortVertices;
-    std::vector<std::shared_ptr<const Source>> m_tallVertices;
+    // Species 0 is shortMesh, 1 tallMesh, then each accent. Every species owns
+    // one vertex range of the shared per-LOD source mesh and one instance range
+    // per tile. Unknown authored assets render as species 0.
+    std::vector<std::string> m_speciesAssets;
+    std::map<std::string, size_t> m_speciesIndex;
+    // [species][lod]
+    std::vector<std::vector<std::shared_ptr<const Source>>> m_speciesVertices;
     std::vector<std::shared_ptr<Engine::Components::Mesh>> m_sourceMeshes;
     Engine::Graphics::IGraphicsBufferFactory* m_loadedFactory = nullptr;
     glm::vec3 m_sourceMinimum{0}, m_sourceMaximum{0};
@@ -130,7 +146,8 @@ private:
         std::vector<Placement> placements;
         size_t placement = 0;
         Engine::Components::MeshInstanceLayerData instanceLayer;
-        uint32_t shortCount = 0,totalCount=0;
+        std::vector<uint32_t> speciesCounts;
+        uint32_t totalCount=0;
         bool prepared=false;
         glm::vec3 minimum{0}, maximum{0};
     };
@@ -150,8 +167,13 @@ private:
     bool m_authoredPreviewHidden = false;
     uint64_t m_lastGenerationSignature = 0;
     bool m_hasGenerationSignature = false;
-    std::vector<std::string> m_loadedShortPaths;
-    std::vector<std::string> m_loadedTallPaths;
+    // [species][lod]
+    std::vector<std::vector<std::string>> m_loadedSpeciesPaths;
+    // Accent LOD chains, re-resolved only when accentMeshes changes.
+    mutable std::string m_accentSource;
+    mutable std::vector<std::vector<std::string>> m_accentLods;
+    const std::vector<std::vector<std::string>>& AccentLods() const;
+    size_t SpeciesOf(const std::string& asset) const;
     Engine::Core::Object* m_cachedViewer = nullptr;
     Engine::Components::Terrain* m_cachedTerrain = nullptr;
     Engine::Components::TerrainObjectLayer* m_cachedLayer = nullptr;

@@ -89,6 +89,14 @@ public:
     PROPERTY(Inspector, EditAnywhere, Category = "Material | Alpha", Range = "0.0, 1.0")
     float alphaCoverageTransmission { 0.f };
 
+    // Masked cards thin out as they turn edge-on to the camera, hiding the
+    // smeared texels of low-LOD cross and horizontal planes. Uses the flat
+    // triangle normal, so it suits flat cards, not round masked geometry.
+    // 0 disables; 1 removes cards within ~6 degrees of edge-on and fades them
+    // in fully by ~27 degrees. Camera views only: shadows are unaffected.
+    PROPERTY(Inspector, EditAnywhere, Category = "Material | Alpha", Range = "0.0, 2.0")
+    float alphaEdgeFade { 0.f };
+
     PROPERTY(Inspector, EditAnywhere, Category = "Material | PBR", Range = "0.0, 4.0")
     float     environmentDiffuseStrength { 1.f };
 

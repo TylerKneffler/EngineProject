@@ -10,6 +10,7 @@
 #include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Compoonents/Materials/Texture.h"
 #include "Core/Rendering/Lighting/EnvironmentMap.h"
+#include "Core/Rendering/MaterialCachePolicy.h"
 #include "Core/Scene/Rendering/SceneRenderer/SceneRendererUtilities.h"
 
 #include <algorithm>
@@ -197,8 +198,14 @@ ResolvedMaterialRecord SceneRendererDrawPreparation::ResolveMaterialRecord(
         (allowEnvironmentDiffuse ? 4u : 0u) |
         (allowReflections ? 8u : 0u) |
         (allowSubsurfaceScattering ? 16u : 0u);
-    auto& cached = scene.m_renderMaterialCache[&material][variant];
-    if (cached.frame == scene.m_materialPreparationSerial &&
+    // With the render material cache off, the record is built into a scratch
+    // entry that is never reused (MaterialCacheSettings::renderMaterialCache).
+    Scene::CachedRenderMaterial uncached;
+    const bool useCache =
+        Engine::Rendering::MaterialCachePolicy::Get().RenderMaterialCacheEnabled();
+    auto& cached = useCache
+        ? scene.m_renderMaterialCache[&material][variant] : uncached;
+    if (useCache && cached.frame == scene.m_materialPreparationSerial &&
         cached.revision == material.GetConfigurationRevision() &&
         cached.data.size() == sizeof(ObjectGPUData))
     {

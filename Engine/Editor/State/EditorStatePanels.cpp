@@ -1,4 +1,5 @@
 #include "Core/Rendering/DetailBudget.h"
+#include "Core/Rendering/MaterialCachePolicy.h"
 #include "pch.h"
 #include "Engine/Editor/State/EditorState.h"
 #include "Engine/Editor/Diagnostics/FrameActivity.h"
@@ -128,6 +129,8 @@ void EditorState::InitializePanels()
         m_projectSettings = m_preferences->GetSettings();
         Engine::Rendering::DetailBudget::Get().Configure(
             m_projectSettings.layers, m_projectSettings.detailBudget);
+        Engine::Rendering::MaterialCachePolicy::Get().SetProjectSettings(
+            m_projectSettings.materialCache);
         if (m_primaryAssets)
             m_primaryAssets->SetCodeEditor(m_projectSettings.codeEditor);
         if (m_scene)

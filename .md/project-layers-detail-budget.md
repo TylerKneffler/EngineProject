@@ -54,6 +54,11 @@ farther out; when either budget is exceeded, detail pulls in.
   `minimumScale` to `maximumScale` (0.6 to 2.5).
 - Between 85% and 100% of the budget, the scale holds steady, so it does not
   hunt around the target.
+- The scale LODs use (`AppliedScale`) follows a copy of the controller
+  output quantized to 12% steps, with hysteresis. It glides toward each
+  step at up to 4% a second when gaining detail and 12% a second when
+  shedding it. Jumping a whole step at once would move every switch distance
+  together and pop a ring of objects at the same moment.
 
 Each layer's scale is:
 
@@ -65,8 +70,9 @@ detail first.
 ### What the scale drives
 
 - **Every LOD'd mesh**, instanced or not:
-  - The draw's LOD switch distances. The GPU instance cull, the per-pixel
-    band selection and CPU LOD selection all read the same scaled values.
+  - The draw's LOD switch distances. The GPU instance cull, the
+    per-placement band selection in the pixel shader and CPU LOD selection
+    all read the same scaled values.
   - Cull-after-last-LOD distances.
   - The CPU rejection of instanced LOD bands that cannot draw.
   - The existing quality `geometry` setting multiplies in as before.
@@ -91,7 +97,8 @@ project file:
 
 ```xml
 <DetailBudget Enabled="true" GeometryBudgetMs="6" CpuRenderBudgetMs="4"
-  MinimumScale="0.6" MaximumScale="2.5" ResponseSeconds="1.5" />
+  MinimumScale="0.6" MaximumScale="2.5" ResponseSeconds="1.5"
+  TextureBudgetEnabled="true" TextureBudgetMiB="1024" ExtendedTextureBudget="0.5" />
 ```
 
 The live scale and both measured costs show under the settings. Benchmark
@@ -112,6 +119,46 @@ Without valid timings, the scale holds at its last value.
 
 After a load, heavy streaming frames dip the scale for a few seconds before
 it recovers.
+
+## Texture budget
+
+Video memory for textures, modelled on GTA V's texture budget and its
+Extended Texture Budget slider. It is under Project Preferences > Layers >
+Texture Budget, below the detail budget.
+
+- **Base Texture Budget (MiB):** a pool that is always available, whatever
+  the GPU. The default is 1024.
+- **Extended Texture Budget (%):** adds this share of the GPU's spare video
+  memory on top of the base pool. The default is 50%.
+  - Spare memory is the OS budget for the process
+    (`QueryVideoMemoryInfo`), minus everything that is not texture (buffers,
+    render targets, terrain) and minus a reserve of 10%, or at least 512 MiB.
+  - It is sampled about once a second. Changes under 256 MiB are ignored, so
+    mips are not evicted and reloaded back and forth.
+- **Enable Texture Budget:** off keeps every texture fully resident, as
+  before.
+
+The pool feeds the texture streamer (`Texture::StreamFrame`):
+
+- Textures that cover the most screen pixels keep their finest mips first.
+- When the pool is full, the rest fall back to coarser mips. Nothing
+  disappears: every texture keeps its smallest mips. In GTA V, by contrast,
+  an exhausted pool can leave textures missing.
+- Textures that cannot stream (no mips, CPU-retained) count against the pool
+  but are never reduced.
+
+The live line under the settings shows textures in use, the pool (base plus
+extended) and process VRAM. Benchmark frames log `texture_budget_mib`,
+`texture_resident_mib` and `vram_usage_mib`.
+
+`ENGINE_TEXTURE_STREAMING_BUDGET_MB` still overrides the project setting.
+It fixes the pool, and 0 turns streaming off, which is useful for reference
+captures.
+
+On an RTX 4090 at 50%, the landscape demo gets a pool of about 10.9 GB and
+uses about 220 MiB. So nothing is reduced: frames are pixel-identical to
+streaming off, apart from wind and dither noise. A 128 MiB pool still draws
+every texture, at coarser mips.
 
 ## Not yet covered
 

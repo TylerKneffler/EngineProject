@@ -91,6 +91,7 @@
           <TerrainManager.objectLayerNames>
             <item>Landscape forest</item>
             <item>Procedural meadow grass</item>
+            <item>Landscape props</item>
           </TerrainManager.objectLayerNames>
           <TerrainManager.proceduralRuns>
             <item y="-20" start="-20" end="20" />

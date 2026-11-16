@@ -9,7 +9,9 @@ namespace Engine::Rendering
 {
 struct TextureStreamingSettings
 {
-    // Startup opt-in: preserve full-quality reference captures when zero.
+    // Pool size; zero keeps every texture fully resident. Set each frame from
+    // the project's texture budget (DetailBudget::UpdateTextureBudget) unless
+    // ENGINE_TEXTURE_STREAMING_BUDGET_MB fixes it.
     uint64_t budgetBytes = 0;
     uint64_t uploadBytesPerFrame = 128ull * 1024 * 1024;
     uint32_t holdFrames = 30;

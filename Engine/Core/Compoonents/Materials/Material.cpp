@@ -31,6 +31,7 @@ Material::Material()
     RegisterField("alphaMode", alphaMode, "Surface");
     RegisterField("alphaCutoff", alphaCutoff, "Surface");
     RegisterField("alphaCoverageTransmission", alphaCoverageTransmission, "Alpha");
+    RegisterField("alphaEdgeFade", alphaEdgeFade, "Alpha");
     RegisterField("doubleSided", doubleSided, "Surface");
     RegisterField("shaderUsesTime", shaderUsesTime, "Surface");
     RegisterField("overrideTextureLod", overrideTextureLod, "Texture LOD");

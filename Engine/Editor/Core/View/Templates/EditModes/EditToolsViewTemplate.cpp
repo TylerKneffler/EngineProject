@@ -1335,14 +1335,17 @@ void EditorState::DrawGlobalToolbar(IEditorUi& ui, ToolbarSection section,
             ImGui::EndPopup();
         }
         int renderMode = view->GetSceneRenderMode();
-        const char* renderNames[]{ "Lit", "Unlit", "Wireframe", "Performance" };
+        const char* renderNames[]{ "Lit", "Unlit", "Wireframe", "Performance", "Detail" };
         if (row.Next(108.f))
         {
             ui.SetNextItemWidth(108.f);
-            if (ui.Combo("##GlobalRenderMode", &renderMode, renderNames, 4))
+            if (ui.Combo("##GlobalRenderMode", &renderMode, renderNames, 5))
                 view->SetSceneRenderMode(renderMode);
             ui.Tooltip("Scene render mode");
         }
+        if (renderMode == static_cast<int>(Engine::Model::SceneRenderMode::Detail))
+            ui.Tooltip("Detail view: red = full LOD and full texture resolution on screen; "
+                "blue = low LOD band or blurred texture (fewer than 1 texel per 8 pixels)");
         if (renderMode == static_cast<int>(Engine::Model::SceneRenderMode::Performance) &&
             row.Next(56.f))
         {

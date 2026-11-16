@@ -14,7 +14,10 @@ enum class SceneRenderMode
     Unlit = 1,
     Wireframe = 2,
     // Editor-only: blue-to-red heat map of per-draw CPU + GPU cost.
-    Performance = 3
+    Performance = 3,
+    // Blue-to-red per-pixel detail: instanced LOD band and resident texture
+    // resolution against the screen. Close range should read red.
+    Detail = 4
 };
 
 enum class SceneDimension

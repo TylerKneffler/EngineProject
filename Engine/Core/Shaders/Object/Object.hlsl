@@ -57,7 +57,7 @@ struct ObjectData
     float4 shadowCasterFade; // range, fade width, shadow pass enabled, reserved
     float4 grassAnimation; // scene time, grass enabled, reserved
     float4 textureLodParams; // near, far, maximum mip bias, enabled/shading tier
-    float4 alphaLodParams; // max alpha mip bias, disable mask at far, masked coverage transmission
+    float4 alphaLodParams; // max alpha mip bias, disable mask at far, masked coverage transmission, card edge fade
     float4 grassCapsules[8];
 };
 
@@ -191,6 +191,32 @@ uint ResolveObjectIndex(uint instanceId)
 #include "../GrassWind.hlsli"
 #ifdef GRASS_CAPSULE_INTERACTION
 #include "../GrassFootBend.hlsli"
+#endif
+
+#ifdef GRASS_SURFACE_SHADING
+// How green a colour is: 1 for blades and leaves, 0 for petals, seed heads
+// and straw tips, which keep their authored colour and flat shading.
+float GrassLeafiness(float3 color)
+{
+    return saturate((color.g - max(color.r, color.b)) * 8.0);
+}
+
+// Meadow colour variation keyed to the placement root (stable under wind):
+// broad dry/lush patches plus a per-clump brightness and hue jitter.
+float3 GrassColorVariation(float3 color, float3 root)
+{
+    float leafy = GrassLeafiness(color);
+    if (leafy <= 0.0) return color;
+    float dry = saturate(GrassWindPerlin(root.xz / 11.0, 0x51ed270bu) * .9 + .05);
+    uint clumpHash = GrassWindHash(int2(floor(root.xz * 4.0)), 0x2545f491u);
+    float brightness = lerp(.86, 1.14, (float)(clumpHash & 255u) / 255.0);
+    float hue = (float)((clumpHash >> 8) & 255u) / 255.0 - .5;
+    float luminance = dot(color, float3(.2126, .7152, .0722));
+    float3 straw = luminance * float3(1.3, 1.05, .4);
+    float3 varied = lerp(color, straw, dry * .35);
+    varied *= brightness * float3(1.0 + hue * .16, 1.0, 1.0 - hue * .2);
+    return lerp(color, varied, leafy);
+}
 #endif
 
 void VSMain(
@@ -329,7 +355,8 @@ void VSMain(
     if (useGrassWind)
         ApplyGrassWind(objectData.grassAnimation.x, objectData.grassAnimation.z,
             mul(objectData.world, float4(grassRoot, 1)).xyz, worldUp / upLength,
-            max(0.0, pos.y) * upLength, worldPosition.xyz, worldNormal, worldTangent);
+            max(0.0, pos.y) * upLength, GrassBladePhase(pos),
+            worldPosition.xyz, worldNormal, worldTangent);
 #ifdef GRASS_CAPSULE_INTERACTION
     if (objectData.shadowCasterFade.z <= 0.5)
         ApplyGrassFootBend(objectData.grassCapsules, (uint)objectData.grassAnimation.w,
@@ -358,6 +385,11 @@ void VSMain(
     oUvChannels3 = fullUv3;
     oUvChannels4 = fullUv4;
     oColor = color;
+#ifdef GRASS_SURFACE_SHADING
+    if ((draw.drawFlags & 0x20000000u) != 0u)
+        oColor.rgb = GrassColorVariation(oColor.rgb,
+            mul(objectData.world, float4(grassRoot, 1)).xyz);
+#endif
     if (((uint)objectData.materialParams.w & 16384u) != 0u)
     {
         float sunFacing = saturate(dot(oNormal,
@@ -643,24 +675,78 @@ float TextureLodBias(ObjectData data, float3 worldPosition)
     return TextureLodBlend(data, worldPosition) * data.textureLodParams.z;
 }
 
-float AlphaCoverageNoise(float3 worldPosition)
+float AlphaCoverageHash(int2 cell, int level)
 {
-    // A world-space subpixel pattern stays stable while the camera moves and
-    // needs only integer ALU. It approximates fractional leaf coverage without
-    // sending dense foliage through the sorted transparent pass.
-    const uint3 cell = (uint3)floor(worldPosition * 512.0);
-    uint hash = cell.x * 1664525u + cell.y * 1013904223u + cell.z * 747796405u;
+    uint hash = (uint)cell.x * 1664525u + (uint)cell.y * 1013904223u +
+        (uint)level * 747796405u;
     hash ^= hash >> 16u;
     hash *= 2246822519u;
     hash ^= hash >> 13u;
+    hash *= 3266489917u;
+    hash ^= hash >> 16u;
     return (hash & 0x00ffffffu) * (1.0 / 16777216.0);
 }
 
-void ApplyMaskedAlphaTransmission(ObjectData data, float3 worldPosition)
+// Fractional leaf coverage without the sorted transparent pass, as hashed
+// alpha testing (Wyman and McGuire 2017). The pattern is anchored to the
+// surface's texture coordinates, so it rides along with wind-swayed cards and
+// does not crawl as the camera moves, and its cells are sized to about one
+// pixel at every distance. (A fixed 2 mm world-space pattern was subpixel on
+// distant trees: any sway or camera motion resampled it, so low-LOD leaves
+// sparkled every frame.) Two neighbouring power-of-two cell sizes blend as
+// the footprint changes, and the blend is remapped through its CDF so the
+// discarded fraction stays exact.
+// uvDx/uvDy must be taken before any clip(): a discard may end quad lanes.
+float AlphaCoverageThreshold(float2 uv, float2 uvDx, float2 uvDy)
+{
+    const float footprint = max(max(length(uvDx), length(uvDy)), 1.0e-7);
+    const float level = -log2(footprint);
+    const float lower = floor(level);
+    const float t = level - lower;
+    const float a = AlphaCoverageHash(int2(floor(uv * exp2(lower))), (int)lower);
+    const float b = AlphaCoverageHash(int2(floor(uv * exp2(lower + 1.0))), (int)lower + 1);
+    const float x = lerp(a, b, t);
+    const float m = min(t, 1.0 - t);
+    if (m < 1.0e-4) return x;
+    const float spread = 2.0 * m * (1.0 - m);
+    if (x < m) return x * x / spread;
+    if (x < 1.0 - m) return (x - 0.5 * m) / (1.0 - m);
+    return 1.0 - (1.0 - x) * (1.0 - x) / spread;
+}
+
+void ApplyMaskedAlphaTransmission(ObjectData data, float2 uv, float2 uvDx, float2 uvDy)
 {
     const float transmission = saturate(data.alphaLodParams.z);
     [branch] if (transmission > 0.0)
-        clip(AlphaCoverageNoise(worldPosition) - transmission);
+        clip(AlphaCoverageThreshold(uv, uvDx, uvDy) - transmission);
+}
+
+// Flat triangle normal (unnormalized) from position derivatives. Take it
+// before any clip(): a discard may end quad lanes and break derivatives.
+float3 SurfaceFacet(float3 worldPosition)
+{
+    return cross(ddx(worldPosition), ddy(worldPosition));
+}
+
+// Masked cards seen edge-on smear their texels into streaks; low-LOD tree
+// crosses and horizontal canopy planes are the worst case. Scaling alpha by
+// how squarely the card faces the camera erodes its least opaque texels
+// first, so a turning card thins out while the overlapping cards that face
+// the viewer carry the silhouette. The flat triangle normal comes from
+// position derivatives: authored card normals are often bent toward the
+// canopy for lighting and would not reveal the card's real orientation.
+// facet is SurfaceFacet(worldPosition), taken before any clip(). Shadow views
+// leave the strength zero.
+float CardEdgeFade(ObjectData data, float3 worldPosition, float3 facet)
+{
+    const float strength = data.alphaLodParams.w;
+    [branch] if (strength <= 0.0 || ((uint)data.materialParams.w & 32u) == 0u)
+        return 1.0;
+    const float facetLength = length(facet);
+    if (facetLength <= 1.0e-12) return 1.0;
+    const float3 toCamera = normalize(data.viewPositionAlphaCutoff.xyz - worldPosition);
+    const float facing = abs(dot(facet / facetLength, toCamera));
+    return saturate((facing - 0.1 * strength) / (0.35 * strength));
 }
 
 void ApplyAlphaLod(inout ObjectData data, float3 worldPosition)
@@ -671,9 +757,29 @@ void ApplyAlphaLod(inout ObjectData data, float3 worldPosition)
 
 // Alpha quality is independent of color quality; zero bias preserves coverage.
 // Color and shadow masks use the same distance-based alpha bias.
+// Editor/capture Detail render mode (SceneRenderMode::Detail): the CPU writes
+// morphParams.z = -100. g_detailTexture is how well the resident base color
+// texture covers this pixel: 1 at one texel per pixel or more, falling to 0
+// at one texel per 8 pixels (blurred by streaming, distance mips or a
+// texture too small for the view).
+static float g_detailTexture = 1.0;
+bool IsDetailHeatDraw(ObjectData data) { return data.morphParams.z < -50.0; }
+
 float4 SampleObjectBaseColor(ObjectData data, float2 sourceUv, float textureBias,
     float alphaMultiplier, float alphaBias)
 {
+    [branch] if (IsDetailHeatDraw(data))
+    {
+        // Streamed textures are created from their resident mips, so level
+        // 0 of the bound view is the finest resident level.
+        uint width, height, levels;
+        baseColorMap.GetDimensions(0, width, height, levels);
+        const float2 size = float2(width, height);
+        const float2 dx = ddx(sourceUv) * size, dy = ddy(sourceUv) * size;
+        // Texels the finest resident level spans per screen pixel.
+        const float texelsPerPixel = sqrt(max(max(dot(dx, dx), dot(dy, dy)), 1.0e-12));
+        g_detailTexture = saturate(1.0 + log2(texelsPerPixel) / 3.0);
+    }
     [branch] if ((uint)data.materialParams.w & 32u)
     {
         float4 color = baseColorMap.SampleBias(materialSampler, sourceUv, alphaBias);
@@ -1509,6 +1615,12 @@ float4 PSShadowMain(
 {
     g_instanceLodDistance = instanceLodDistance;
     ObjectData objectData = objects[(draw.drawFlags & 0x13080000u) != 0u ? objectIndex : draw.objectIndex];
+    // Derivatives before any clip() below.
+    const float3 facet = SurfaceFacet(worldPos);
+    const float2 baseUv = SelectMaterialUv(objectData.textureUvSets0.x,
+        uv, uv1, uvChannels0, uvChannels1, uvChannels2,
+        uvChannels3, uvChannels4);
+    const float2 baseUvDx = ddx(baseUv), baseUvDy = ddy(baseUv);
     ApplyGeometryFade(objectData, worldPos, pos.xy);
     ApplyAlphaLod(objectData, worldPos);
     if (dot(objectData.traversalClipPlane.xyz,
@@ -1524,17 +1636,13 @@ float4 PSShadowMain(
     if (flags & 32u)
     {
         float alpha = objectData.baseColor.a *
-            ((flags & 4096u) ? 1.0 : vertexColor.a);
+            ((flags & 4096u) ? 1.0 : vertexColor.a) *
+            CardEdgeFade(objectData, worldPos, facet);
         if (flags & 1u)
-        {
-            float2 baseUv = SelectMaterialUv(objectData.textureUvSets0.x,
-                uv, uv1, uvChannels0, uvChannels1, uvChannels2,
-                uvChannels3, uvChannels4);
             alpha *= baseColorMap.SampleBias(materialSampler, baseUv, TextureLodBlend(objectData, worldPos) * objectData.alphaLodParams.x).a *
                 objectData.pmxTextureTint.a;
-        }
         clip(alpha - objectData.viewPositionAlphaCutoff.w);
-        ApplyMaskedAlphaTransmission(objectData, worldPos);
+        ApplyMaskedAlphaTransmission(objectData, baseUv, baseUvDx, baseUvDy);
     }
     return 0.0;
 }
@@ -1555,6 +1663,16 @@ float4 PerformanceHeatColor(ObjectData data, float3 worldPos, float3 normal,
     // Cold-to-hot ramp: blue, cyan, green, yellow, red at quarter steps.
     // Keep in sync with the legend swatch in EditToolsViewTemplate.cpp.
     float heat = saturate(-data.morphParams.z - 1.0);
+    if (IsDetailHeatDraw(data))
+    {
+        // Detail view: red = full geometry and full texture detail, blue =
+        // least. Geometry is the instanced LOD band (LOD0 1, LOD1 .55,
+        // impostor .2); meshes without bands count as full. The texture term
+        // is g_detailTexture; the lower of the two decides.
+        const float band = data.geometryFade.w >= 4.0 ? data.geometryFade.x : 0.0;
+        const float geometry = band < .5 ? 1.0 : band < 1.5 ? .55 : .2;
+        heat = min(geometry, g_detailTexture);
+    }
     float3 ramp[5] = {
         float3(0.10, 0.20, 0.95),
         float3(0.05, 0.80, 0.95),
@@ -1581,6 +1699,9 @@ float4 PSFoliageMain(
 {
     ObjectData objectData = objects[(draw.drawFlags & 0x13080000u) != 0u
         ? objectIndex : draw.objectIndex];
+    // Derivatives before any clip() below.
+    const float3 facet = SurfaceFacet(worldPos);
+    const float2 uvDx = ddx(uv), uvDy = ddy(uv);
     ApplyGeometryFade(objectData, worldPos, pos.xy);
     ApplyAlphaLod(objectData, worldPos);
     if (dot(objectData.traversalClipPlane.xyz,
@@ -1596,6 +1717,7 @@ float4 PSFoliageMain(
     uint flags = (uint)objectData.materialParams.w;
     float4 base = objectData.baseColor *
         ((flags & 4096u) ? float4(1.0, 1.0, 1.0, 1.0) : vertexColor);
+    base.a *= CardEdgeFade(objectData, worldPos, facet);
     if (flags & 1u)
         base *= SampleObjectBaseColor(objectData, uv, textureBias,
             base.a * objectData.pmxTextureTint.a,
@@ -1604,7 +1726,7 @@ float4 PSFoliageMain(
     if (flags & 32u)
     {
         clip(base.a - objectData.viewPositionAlphaCutoff.w);
-        ApplyMaskedAlphaTransmission(objectData, worldPos);
+        ApplyMaskedAlphaTransmission(objectData, uv, uvDx, uvDy);
     }
     if (IsPerformanceHeatDraw(objectData))
         return PerformanceHeatColor(objectData, worldPos, normal, frontFace, base.a);
@@ -1646,6 +1768,123 @@ float4 PSFoliageMain(
         base.a);
 }
 
+#ifdef GRASS_SURFACE_SHADING
+// Grass and meadow plants shade as a pelt rather than as flat cards:
+//  * normals lean toward the sky, so a field lights as one soft surface, and
+//    green ribbons are rounded across u like a real blade;
+//  * wrapped diffuse and root occlusion (uv.y runs root to tip);
+//  * transmission when the sun is behind the blades;
+//  * a Kajiya-Kay highlight along each blade, the anisotropic sheen of fur.
+//    The blade direction comes from the wind-bent tangent frame, so passing
+//    gusts sweep bright waves across the field.
+// Petals and other non-green colours keep their own normals and skip the
+// sheen, but still transmit light.
+float4 PSGrassMain(
+    float4 pos, float3 worldPos, float3 normal, float2 uv, float4 vertexColor,
+    float4 tangent, uint objectIndex, bool frontFace)
+{
+    ObjectData objectData = objects[(draw.drawFlags & 0x13080000u) != 0u
+        ? objectIndex : draw.objectIndex];
+    // Derivatives before any clip() below.
+    const float3 facet = SurfaceFacet(worldPos);
+    const float2 uvDx = ddx(uv), uvDy = ddy(uv);
+    ApplyGeometryFade(objectData, worldPos, pos.xy);
+    ApplyAlphaLod(objectData, worldPos);
+    if (dot(objectData.traversalClipPlane.xyz,
+        objectData.traversalClipPlane.xyz) > 0.0 &&
+        dot(float4(worldPos, 1.0), objectData.traversalClipPlane) < 0.0)
+        clip(-1.0);
+    if (dot(objectData.portalClipPlane.xyz,
+        objectData.portalClipPlane.xyz) > 0.0 &&
+        dot(float4(worldPos, 1.0), objectData.portalClipPlane) < 0.0)
+        clip(-1.0);
+
+    float textureBias = TextureLodBias(objectData, worldPos);
+    uint flags = (uint)objectData.materialParams.w;
+    float4 base = objectData.baseColor *
+        ((flags & 4096u) ? float4(1.0, 1.0, 1.0, 1.0) : vertexColor);
+    base.a *= CardEdgeFade(objectData, worldPos, facet);
+    const bool textured = (flags & 1u) != 0u;
+    if (textured)
+        base *= SampleObjectBaseColor(objectData, uv, textureBias,
+            base.a * objectData.pmxTextureTint.a,
+            TextureLodBlend(objectData, worldPos) * objectData.alphaLodParams.x) *
+            objectData.pmxTextureTint;
+    if (flags & 32u)
+    {
+        clip(base.a - objectData.viewPositionAlphaCutoff.w);
+        ApplyMaskedAlphaTransmission(objectData, uv, uvDx, uvDy);
+    }
+    if (IsPerformanceHeatDraw(objectData))
+        return PerformanceHeatColor(objectData, worldPos, normal, frontFace, base.a);
+    if (objectData.ambientUnlit.w > 0.5)
+        return float4(base.rgb + objectData.emissiveOcclusion.rgb, base.a);
+
+    const float shadingBlend = objectData.textureLodParams.w > 1.5
+        ? TextureLodBlend(objectData, worldPos) : 0.0;
+    // Textured grass cards carry atlas UVs, not a root-to-tip blade layout.
+    const float height = textured ? 1.0 : saturate(uv.y);
+    const float leafy = GrassLeafiness(base.rgb);
+    const float3 up = float3(0.0, 1.0, 0.0);
+    float3 geometric = normalize(frontFace ? normal : -normal);
+    float3 across = tangent.xyz - geometric * dot(tangent.xyz, geometric);
+    const bool hasTangent = dot(across, across) > 1.0e-6;
+    across = hasTangent ? normalize(across) : float3(0.0, 0.0, 0.0);
+    // Sign does not matter: Kajiya-Kay uses the fibre axis only.
+    float3 blade = hasTangent ? normalize(cross(geometric, across)) : up;
+    float3 n = geometric;
+    if (!textured)
+        n = normalize(n + across * ((uv.x - 0.5) * 1.3 * leafy));
+    n = normalize(lerp(n, up, 0.55 * leafy));
+    float3 v = normalize(objectData.viewPositionAlphaCutoff.xyz - worldPos);
+
+    float ambientOcclusion = lerp(1.0,
+        lerp(0.6, 1.0, smoothstep(0.0, 0.8, height)), leafy);
+    float directOcclusion = lerp(1.0, lerp(0.82, 1.0, height), leafy);
+    float3 lit = objectData.ambientUnlit.rgb * ambientOcclusion *
+        (0.9 + 0.1 * saturate(n.y));
+    float3 transmitted = 0.0;
+    float3 sheen = 0.0;
+    [loop] for (uint i = 0u; i < draw.lightCount; ++i)
+    {
+        SceneLightData light = sceneLights[i];
+        if (abs(light.params.y - 1.0) >= 0.25 ||
+            (objectData.lightingChannels.x & asuint(light.attenuation.z)) == 0u)
+            continue;
+        float3 direction = normalize(light.positionRange.xyz);
+        float wrapped = saturate((dot(n, direction) + 0.35) / 1.35);
+        // Thin tissue lights the side away from the sun, most strongly when
+        // looking toward it; tips are thinner than roots.
+        float backlight = (saturate(-dot(geometric, direction)) * 0.35 +
+            pow(saturate(dot(-v, direction)), 4.0) * 0.65) *
+            lerp(0.35, 1.0, height);
+        if (wrapped <= 0.0 && backlight <= 0.0) continue;
+        float shadow = 1.0;
+        [branch] if (objectData.shadowParams.z > 0.0)
+        {
+            // Same representative far-tier shadowing as PSFoliageMain.
+            shadow = shadingBlend >= 1.0 ? 0.75 :
+                EvaluateDirectionalShadow(objectData, light,
+                    worldPos, geometric, direction, 0);
+            shadow = lerp(shadow, 0.75, shadingBlend);
+        }
+        float3 radiance = light.colorIntensity.rgb *
+            (light.colorIntensity.w * shadow * 0.31830988618);
+        lit += radiance * (wrapped * directOcclusion);
+        transmitted += radiance * backlight;
+        float3 halfVector = normalize(direction + v);
+        float alongBlade = dot(blade, halfVector);
+        float sinAngle = sqrt(saturate(1.0 - alongBlade * alongBlade));
+        sheen += radiance * (pow(sinAngle, 24.0) * wrapped);
+    }
+    float3 color = base.rgb * lit +
+        base.rgb * transmitted * float3(0.55, 0.7, 0.33) +
+        sheen * (0.07 * leafy * height * (1.0 - 0.6 * shadingBlend)) *
+            float3(0.85, 1.0, 0.7);
+    return float4(color + objectData.emissiveOcclusion.rgb, base.a);
+}
+#endif
+
 // The object surface shader. PSMain below is its entry point; material
 // shaders that wrap this file call it through their renamed PSMain.
 float4 ObjectSurfacePS(
@@ -1665,6 +1904,13 @@ float4 ObjectSurfacePS(
     bool frontFace : SV_IsFrontFace) : SV_TARGET
 {
     ObjectData objectData = objects[(draw.drawFlags & 0x13080000u) != 0u ? objectIndex : draw.objectIndex];
+    // Derivatives before any clip() below (the coverage hash ignores parallax
+    // offsets: it needs a stable surface anchor, not the exact texel).
+    const float3 facet = SurfaceFacet(worldPos);
+    const float2 maskUv = SelectMaterialUv(objectData.textureUvSets0.x,
+        uv, uv1, uvChannels0, uvChannels1, uvChannels2,
+        uvChannels3, uvChannels4);
+    const float2 maskUvDx = ddx(maskUv), maskUvDy = ddy(maskUv);
     ApplyGeometryFade(objectData, worldPos, pos.xy);
     ApplyAlphaLod(objectData, worldPos);
     float textureBias = TextureLodBias(objectData, worldPos);
@@ -1687,9 +1933,16 @@ float4 ObjectSurfacePS(
         dot(float4(worldPos, 1.0), objectData.portalClipPlane) < 0.0)
         clip(-1.0);
     float4 base = objectData.baseColor * ((flags & 4096u) ? float4(1, 1, 1, 1) : vertexColor);
+    base.a *= CardEdgeFade(objectData, worldPos, facet);
     // Alpha-tested surfaces fall through to keep their cutout silhouettes.
     if (IsPerformanceHeatDraw(objectData) && !(flags & 32u))
+    {
+        // The Detail view also rates the base color texture (the mask UV set
+        // is the base color set unless a material splits them).
+        [branch] if (IsDetailHeatDraw(objectData) && (flags & 1u))
+            SampleObjectBaseColor(objectData, maskUv, 0.0, 1.0, 0.0);
         return PerformanceHeatColor(objectData, worldPos, normal, frontFace, base.a);
+    }
     if (flags & 32768u)
     {
         // The ruler repeats every 100 metres in world space. Cell borders use
@@ -2125,7 +2378,7 @@ float4 ObjectSurfacePS(
     if (flags & 32u)
     {
         clip(base.a - objectData.viewPositionAlphaCutoff.w);
-        ApplyMaskedAlphaTransmission(objectData, worldPos);
+        ApplyMaskedAlphaTransmission(objectData, maskUv, maskUvDx, maskUvDy);
         if (IsPerformanceHeatDraw(objectData))
             return PerformanceHeatColor(objectData, worldPos, normal, frontFace, base.a);
     }

@@ -41,8 +41,16 @@ float GrassWindPerlin(float2 position, uint seed)
     return clamp(1.41421356 * lerp(bottom, top, fade.y), -1.0, 1.0);
 }
 
+// A smooth phase per blade from its mesh-space position. Every blade in a
+// clump shares the instance root, so without it a clump bends as one card.
+// Continuous in position, so a curved blade or a flower head never tears.
+float GrassBladePhase(float3 meshPosition)
+{
+    return dot(meshPosition.xz, float2(8.3, 6.1));
+}
+
 void ApplyGrassWind(float sceneTime, float strength,
-    float3 root, float3 up, float height,
+    float3 root, float3 up, float height, float bladePhase,
     inout float3 position, inout float3 normal, inout float3 tangent)
 {
     float direction = radians(GrassWindDirectionDegrees);
@@ -67,6 +75,14 @@ void ApplyGrassWind(float sceneTime, float strength,
     // ways and return through upright, instead of imposing a permanent lean.
     float gust = clamp(2.1 * (broad * .68 + detail * .32), -1.0, 1.0);
     float crossSway = .5 * detail;
+    // Per-blade flutter rides on the shared gust field and grows with it:
+    // calm air leaves a faint shimmer, a passing front sets blades and
+    // flower stems quivering out of step with their neighbours.
+    float gustEnergy = .3 + .7 * abs(broad);
+    float flutter = sin(wind.w * 5.3 + bladePhase) * .6 +
+        sin(wind.w * 8.9 + bladePhase * 1.73) * .4;
+    gust = clamp(gust + .24 * flutter * gustEnergy, -1.0, 1.0);
+    crossSway += .45 * sin(wind.w * 3.7 + bladePhase * 2.31) * gustEnergy;
     float2 heading = wind.xy + side * crossSway;
     float3 bendDirection = float3(heading.x, 0.0, heading.y);
     bendDirection -= up * dot(bendDirection, up);

@@ -90,11 +90,14 @@ private:
     {
         std::vector<VkDescriptorPool> pools;
         size_t activePool=0;
+        // Sets per pool these pools were created with
+        // (MaterialCacheSettings::descriptorSetsPerPool).
+        uint32_t setsPerPool=0;
         std::unordered_map<TextureKey,VkDescriptorSet,TextureKeyHash> sets;
     };
     std::vector<DescriptorFrame> m_descriptorFrames;
     size_t m_descriptorFrame=0;
-    VkDescriptorPool CreateDescriptorPool();
+    VkDescriptorPool CreateDescriptorPool(uint32_t setsPerPool);
     std::unordered_set<VulkanGraphicsTexture*> m_liveTextures;
     struct PendingUpload
     {

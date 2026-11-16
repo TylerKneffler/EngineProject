@@ -58,6 +58,23 @@
 #define ENGINE_SHADERS_PATH "Engine/Core/Shaders/"
 #endif
 
+namespace
+{
+// Detail budget cost model (DetailCostModel.h). The game view hands its
+// LOD'd instances to a background job about ten times a second; the curve it
+// returns tells the budget what every detail scale would cost in this view.
+struct DetailCostCollector
+{
+    std::future<Engine::Rendering::DetailCostCurve> job;
+    std::chrono::steady_clock::time_point lastLaunch{};
+};
+DetailCostCollector& GetDetailCostCollector()
+{
+    static DetailCostCollector collector;
+    return collector;
+}
+}
+
 namespace Engine::Scene
 {
 void Scene::CaptureEmbeddedUiInput(Engine::Core::NativeInputSnapshot& input) const
@@ -544,6 +561,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     // object records are recolored (see the Performance heat pass below).
     const bool performanceHeatMode = !shadowOnly && renderMode ==
         Engine::Model::SceneRenderMode::Performance;
+    const bool detailHeatMode = !shadowOnly && renderMode ==
+        Engine::Model::SceneRenderMode::Detail;
     const auto cascadePreparation = Engine::Scene::Renderer::SceneRendererShadows::PrepareDirectionalShadowCascades(
         *this,
         context,
@@ -588,7 +607,11 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                         Stage::Opaque, Stage::TreeBark, Stage::TreeLeaves,
                         Stage::FoliageDepth })
                     geometryMs += telemetry.gpuMilliseconds[static_cast<size_t>(stage)];
-                budget.ReportGeometryCost(telemetry.gpuSampleId, geometryMs);
+                // Terrain and grass do not change with instanced LOD distances.
+                const double fixedMs =
+                    telemetry.gpuMilliseconds[static_cast<size_t>(Stage::Terrain)] +
+                    telemetry.gpuMilliseconds[static_cast<size_t>(Stage::Grass)];
+                budget.ReportGeometryCost(telemetry.gpuSampleId, geometryMs, fixedMs);
             }
         }
     Engine::Scene::Renderer::SceneRendererLighting::PrepareSkyboxAndEnvironment(
@@ -877,6 +900,29 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     double materialGeometryBindingMs = 0.0;
     std::vector<Renderer::PerformanceHeatDrawInput> performanceHeatInputs;
     std::vector<size_t> performanceHeatDraws;
+    // Gather the cost model's input at most every 100 ms, while no job runs.
+    Engine::Rendering::DetailCostInput detailCostInput;
+    std::unordered_map<const Engine::Components::Mesh::InstanceData*, size_t> detailCostGroups;
+    std::vector<Engine::Model::ProjectLayer> detailCostLayers;
+    bool collectDetailCost = false;
+    if (!shadowOnly && !hasPortalViews && !includeEditorVisuals &&
+        Engine::Rendering::DetailBudget::Get().Enabled())
+    {
+        auto& collector = GetDetailCostCollector();
+        if (collector.job.valid() &&
+            collector.job.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
+            Engine::Rendering::DetailBudget::Get().SubmitCostCurve(collector.job.get());
+        const auto now = std::chrono::steady_clock::now();
+        if (!collector.job.valid() && now - collector.lastLaunch >= std::chrono::milliseconds(100))
+        {
+            collectDetailCost = true;
+            detailCostLayers = Engine::Rendering::DetailBudget::Get().GetLayers();
+            detailCostInput.viewProjection = viewProjection;
+            detailCostInput.cameraPosition = cameraPosition;
+            detailCostInput.viewportWidth = static_cast<float>(std::max(1u, viewportWidth));
+            detailCostInput.viewportHeight = static_cast<float>(std::max(1u, viewportHeight));
+        }
+    }
     UINT slot = 0;
     for (const ViewRenderItem& sortedItem : renderObjects)
     {
@@ -909,6 +955,44 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         // layer, which the detail budget adjusts to hold its GPU budget.
         const float lodScale = quality.geometry *
             Engine::Rendering::DetailBudget::Get().LayerLodScale(obj ? obj->layer : 0);
+        // Every visible LOD band of an instanced tile feeds the cost model
+        // with its unscaled distance range and triangle count. Bands of one
+        // tile share placements, so they share one group.
+        if (collectDetailCost && mesh && mesh->instanceLodBand >= 0 && mesh->IsInstanced() &&
+            mesh->GetInstanceData() && mesh->GetInstanceSource() &&
+            mesh->GetInstanceSource()->HasBounds())
+        {
+            const auto* data = mesh->GetInstanceData().get();
+            const auto [found, inserted] = detailCostGroups.try_emplace(data, detailCostInput.groups.size());
+            if (inserted)
+            {
+                auto& group = detailCostInput.groups.emplace_back();
+                const auto* source = mesh->GetInstanceSource();
+                group.world = renderItem->world;
+                group.localCenter = (source->GetBoundsMin() + source->GetBoundsMax()) * .5f;
+                group.localRadius = glm::length(source->GetBoundsMax() - source->GetBoundsMin()) * .5f;
+                const int layer = obj ? obj->layer : 0;
+                group.weight = layer >= 0 && static_cast<size_t>(layer) < detailCostLayers.size()
+                    ? std::max(0.f, detailCostLayers[static_cast<size_t>(layer)].budgetWeight) : 1.f;
+                // Foliage lets about half the view through.
+                group.opacity = mesh->foliageWindStrength > 0.f ? .5f : 1.f;
+                group.transforms.resize(data->transforms.size());
+                static_assert(sizeof(Engine::Rendering::DetailCostInput::Rows) ==
+                    sizeof(Engine::Components::Mesh::InstanceTransform));
+                if (!data->transforms.empty())
+                    std::memcpy(group.transforms.data(), data->transforms.data(),
+                        data->transforms.size() * sizeof(Engine::Components::Mesh::InstanceTransform));
+            }
+            const glm::vec2 distances = mesh->instanceLodDistances * quality.geometry;
+            const int band = mesh->instanceLodBand;
+            Engine::Rendering::DetailCostInput::Band costBand;
+            costBand.start = band == 0 ? 0.f : band == 1 ? distances.x : distances.y;
+            costBand.end = band == 0 ? distances.x : band == 1 ? distances.y : 1.e20f;
+            if (mesh->instanceLodDistances.y >= 1.e19f && band == 1) costBand.end = 1.e20f;
+            const uint32_t elements = mesh->GetIndexCount() ? mesh->GetIndexCount() : mesh->GetVertexCount();
+            costBand.triangles = elements / 3.0;
+            detailCostInput.groups[found->second].bands.push_back(costBand);
+        }
         // Instanced LOD bands pick their pixels by world distance (Object.hlsl,
         // dither under 0.5 m), so a band whose distance range misses the
         // block's bounds draws nothing. Skipping it here saves recording the
@@ -924,7 +1008,9 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 glm::abs(bounds.maximum - cameraPosition));
             const float nearDistance = glm::length(nearest);
             const float farDistance = glm::length(farthest);
-            constexpr float margin = 2.f;
+            // Covers the per-tree dissolve either side of a switch
+            // (InstanceLodFadeWidth in Object.hlsl, at most 6 m).
+            constexpr float margin = 6.5f;
             const glm::vec2 band = mesh->instanceLodDistances * lodScale;
             const int lod = mesh->instanceLodBand;
             const float bandStart = lod == 0 ? 0.f : lod == 1 ? band.x : band.y;
@@ -1053,8 +1139,13 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             }
             if (mat && mat->GetAlphaMode() ==
                 Engine::Components::MaterialAlphaMode::Mask)
+            {
                 preparedDraw.objectData.alphaLodParams.z =
                     std::clamp(mat->alphaCoverageTransmission, 0.f, 1.f);
+                // Edge-on fading follows the camera; shadow casters keep full cards.
+                preparedDraw.objectData.alphaLodParams.w = shadowOnly ? 0.f :
+                    std::clamp(mat->alphaEdgeFade, 0.f, 2.f);
+            }
             preparedDraw.objectData.world = world;
             preparedDraw.objectData.viewProjection = viewProjection;
             preparedDraw.objectData.traversalClipPlane =
@@ -1309,8 +1400,13 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         // static objects and material-less meshes without rebuilding their assets.
         applyTextureLod(objectData, mat);
         if (alphaMode == Engine::Components::MaterialAlphaMode::Mask && mat)
+        {
             objectData.alphaLodParams.z =
                 std::clamp(mat->alphaCoverageTransmission, 0.f, 1.f);
+            // Edge-on fading follows the camera; shadow casters keep full cards.
+            objectData.alphaLodParams.w = shadowOnly ? 0.f :
+                std::clamp(mat->alphaEdgeFade, 0.f, 2.f);
+        }
         bool terrainShadowDoubleSided = doubleSided;
         // Height fields have a single upward-facing surface, including cached
         // terrain and streamed batches. Backfaces do not contribute color or shadows.
@@ -1532,6 +1628,12 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             preparedDraws[performanceHeatDraws[index]].objectData.morphParams.z =
                 -(1.f + heat[index]);
     }
+    if (detailHeatMode)
+    {
+        // Object.hlsl colours each pixel by its LOD band and texture detail.
+        for (auto& draw : preparedDraws)
+            if (draw.objectData.morphParams.z <= 0.f) draw.objectData.morphParams.z = -100.f;
+    }
     // Render phase 6: apply screen LOD, upload object records, and build instance batches.
     // Fixed editor LOD selection suppresses the other bands. Remove their
     // distance crossfade before publishing records or the selected band fades
@@ -1546,6 +1648,13 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     Renderer::SceneRendererObjectRecordUpload recordUpload(
         *this, preparedDraws, shadowOnly);
     m_lastRenderCpuTimings.materialMs = std::chrono::duration<double,std::milli>(RenderClock::now()-materialStart).count();
+    if (collectDetailCost && !detailCostInput.groups.empty())
+    {
+        auto& collector = GetDetailCostCollector();
+        collector.lastLaunch = std::chrono::steady_clock::now();
+        collector.job = Engine::Rendering::RenderJobs::Get().Submit(
+            [input = std::move(detailCostInput)]() { return Engine::Rendering::BuildDetailCostCurve(input); });
+    }
     m_lastRenderCpuTimings.materialPipelineMs = materialPipelineMs;
     m_lastRenderCpuTimings.materialGeometryBindingMs = materialGeometryBindingMs;
     m_lastRenderCpuTimings.materialOtherMs = std::max(0.0,

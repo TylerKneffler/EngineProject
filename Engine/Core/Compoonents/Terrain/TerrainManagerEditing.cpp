@@ -122,7 +122,14 @@ void TerrainManager::RestoreObjectLayers(Cell cell,
                     .Set("maxTileBuildsPerUpdate", 8).Set("castShadows", falseValue)
                     .Set("tileWorkBudgetMs", 2.f).Set("fadeDuration", .35f)
                     .Set("distanceFadeWidth", 2.f).Set("retainDormantTiles", falseValue)
-                    .Set("allowProceduralGeneration", proceduralValue);
+                    .Set("allowProceduralGeneration", proceduralValue)
+                    // Wildflowers and weeds in drifts (procedural layers only;
+                    // authored layers draw accents placed with these assets).
+                    .Set("accentMeshes", "Assets/Mesh/Grass/meadow_daisy.obj;"
+                        "Assets/Mesh/Grass/meadow_buttercup.obj;Assets/Mesh/Grass/meadow_clover.obj;"
+                        "Assets/Mesh/Grass/meadow_plantain.obj;Assets/Mesh/Grass/meadow_knapweed.obj;"
+                        "Assets/Mesh/Grass/meadow_dandelion.obj")
+                    .Set("accentPatchesPerSquareMeter", .08f).Set("accentDriftSize", 7.f);
                 grass->Deserialize(settings);
                 child->AddComponent(grass);
             }

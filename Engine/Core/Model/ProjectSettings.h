@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Core/Model/LightingData.h"
+#include "Core/Model/MaterialCacheSettings.h"
 #include "Core/Model/ProjectLayers.h"
 #include <cstdint>
 #include <glm/glm.hpp>
@@ -53,6 +54,9 @@ struct ProjectSettings
     Engine::Model::BakedLightingSettings bakedLighting;
     Engine::Model::RealtimeShadowSettings realtimeShadows;
     Engine::Model::DistanceLightingSettings distanceLighting;
+    // Project defaults for material caching; player settings may override
+    // them at runtime (Engine::Rendering::MaterialCachePolicy).
+    Engine::Model::MaterialCacheSettings materialCache;
     // Object categories (Object::layer indexes this list) and the adaptive
     // detail budget that scales LOD distances per layer.
     std::vector<Engine::Model::ProjectLayer> layers =

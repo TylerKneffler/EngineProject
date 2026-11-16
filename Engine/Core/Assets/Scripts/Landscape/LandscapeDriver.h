@@ -43,6 +43,17 @@ public:
     std::string forestLayerName = "Landscape forest";
     PROPERTY(Inspector, EditAnywhere, Category = "Landscape", ClampMin = "4", ClampMax = "80")
     float grassRadius = 26.f;
+    // Terrain object layer (listed in the TerrainManager) that receives
+    // rocks, fallen logs and bushes; empty disables props. A non-empty
+    // undergrowthLayerName moves the bushes to a layer of their own, at the
+    // cost of one more layer per cell.
+    PROPERTY(Inspector, EditAnywhere, Category = "Landscape")
+    std::string propsLayerName = "Landscape props";
+    PROPERTY(Inspector, EditAnywhere, Category = "Landscape")
+    std::string undergrowthLayerName;
+    // Multiplier on rock, log and bush attempts per cell.
+    PROPERTY(Inspector, EditAnywhere, Category = "Landscape", ClampMin = "0", ClampMax = "4")
+    float propsDensity = 1.f;
     // A flat water plane at waterLevel over the whole map fills the lakes.
     PROPERTY(Inspector, EditAnywhere, Category = "Water")
     bool enableWater = true;

@@ -1,4 +1,5 @@
 #include "Core/Rendering/DetailBudget.h"
+#include "Core/Rendering/MaterialCachePolicy.h"
 #include "pch.h"
 #include "Engine/Editor/State/EditorState.h"
 #include "Engine/Editor/Diagnostics/FrameActivity.h"
@@ -282,6 +283,8 @@ bool EditorState::Init()
         m_scene->SetDistanceLightingSettings(m_projectSettings.distanceLighting);
         Engine::Rendering::DetailBudget::Get().Configure(
             m_projectSettings.layers, m_projectSettings.detailBudget);
+        Engine::Rendering::MaterialCachePolicy::Get().SetProjectSettings(
+            m_projectSettings.materialCache);
         OutputDebugStringA("[EditorState] Scene initialized\n");
     }
     catch (const std::exception& e)

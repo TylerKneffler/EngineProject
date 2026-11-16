@@ -195,6 +195,10 @@ public:
         const std::vector<float>* heights = nullptr;
         const std::vector<float>* weights = nullptr; // per vertex and terrain layer
         size_t terrainLayerCount = 0;
+        // True when the layer is generated only to collect far-object
+        // placements (impostors beyond the loaded cells). Generators can skip
+        // layers that never draw that far.
+        bool farObjects = false;
     };
     // Fills a named object layer that has no saved placements, such as the
     // forests of a procedural map. Runs on streaming workers (and on the main
@@ -360,6 +364,10 @@ private:
     void ClearFarObjects();
     void FenceFarObjectJobs();
     std::map<Cell, FarObjectCell> m_farObjectCells;
+    // Loaded cells whose object layers finished preparing once, keyed to the
+    // terrain that did. Their periodic source re-checks briefly report
+    // "preparing" again; latching keeps far blocks from rebuilding each time.
+    std::map<Cell, const Terrain*> m_farNearCovered;
     std::set<Cell> m_farObjectPending;
     std::vector<FarObjectJob> m_farObjectJobs;
     std::map<Cell, FarObjectBlock> m_farObjectBlocks;

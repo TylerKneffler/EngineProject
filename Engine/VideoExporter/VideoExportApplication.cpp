@@ -6,6 +6,7 @@
 #include "Core/Audio/AudioMixer.h"
 #include "Core/Audio/Audio.h"
 #include "Core/Model/ProjectSettings.h"
+#include "Core/Rendering/MaterialCachePolicy.h"
 #include "Core/Object.h"
 #include "Core/ProjectLoader.h"
 #include "Core/Scene/Scene.h"
@@ -1044,6 +1045,8 @@ int VideoExportApplication::Run(HINSTANCE instance)
     scene.Init(renderer.GetGraphicsProvider());
     scene.SetRealtimeShadowSettings(shadowSettings);
     scene.SetDistanceLightingSettings(lightingSettings);
+    Engine::Rendering::MaterialCachePolicy::Get().SetProjectSettings(
+        settings.materialCache);
     Engine::Core::SceneManager::SetActiveScene(&scene);
     Engine::Core::SceneManager::SetDefaultScenePath(scenePath);
     if (!scene.Load(scenePath))

@@ -410,9 +410,26 @@ void ProjectLoader::ParseRendering(const pugi::xml_node& projectNode, ProjectSet
             budget.minimumScale = std::clamp(
                 budgetNode.attribute("MinimumScale").as_float(.6f), .05f, 1.f);
             budget.maximumScale = std::clamp(
-                budgetNode.attribute("MaximumScale").as_float(2.5f), 1.f, 10.f);
+                budgetNode.attribute("MaximumScale").as_float(8.f), 1.f, 20.f);
             budget.responseSeconds = std::clamp(
                 budgetNode.attribute("ResponseSeconds").as_float(1.5f), .05f, 30.f);
+            budget.textureBudgetEnabled =
+                budgetNode.attribute("TextureBudgetEnabled").as_bool(true);
+            budget.textureBudgetMiB = std::clamp(
+                budgetNode.attribute("TextureBudgetMiB").as_float(1024.f), 64.f, 65536.f);
+            budget.extendedTextureBudget = std::clamp(
+                budgetNode.attribute("ExtendedTextureBudget").as_float(.5f), 0.f, 1.f);
+        }
+        if (auto cacheNode = prop.child("MaterialCache"))
+        {
+            auto& cache = settings.materialCache;
+            cache.renderMaterialCache =
+                cacheNode.attribute("RenderMaterialCache").as_bool(true);
+            cache.descriptorSetsPerPool =
+                cacheNode.attribute("DescriptorSetsPerPool").as_uint(512u);
+            cache.descriptorCacheLimit =
+                cacheNode.attribute("DescriptorCacheLimit").as_uint(384u);
+            cache.Normalize();
         }
 
         if (!settings.renderingAPI.empty() || !settings.editorRenderingAPI.empty())

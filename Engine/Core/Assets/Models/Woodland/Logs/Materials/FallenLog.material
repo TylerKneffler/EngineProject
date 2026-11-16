@@ -1,0 +1,15 @@
+{
+    "version": 1,
+    "baseColor": [1, 1, 1],
+    "metallic": 0,
+    "roughness": 1,
+    "specularModel": "MetallicRoughness",
+    "castsShadows": true,
+    "doubleSided": false,
+    "normalScale": 1,
+    "occlusionStrength": 1,
+    "baseColorTexture": "Assets/Models/Woodland/Logs/Textures/FallenLog_Color.ktx2",
+    "normalTexture": "Assets/Models/Woodland/Logs/Textures/FallenLog_Normal.ktx2",
+    "metallicRoughnessTexture": "Assets/Models/Woodland/Logs/Textures/FallenLog_ORM.ktx2",
+    "occlusionTexture": "Assets/Models/Woodland/Logs/Textures/FallenLog_ORM.ktx2"
+}

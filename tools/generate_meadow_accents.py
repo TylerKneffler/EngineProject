@@ -1,0 +1,441 @@
+#!/usr/bin/env python3
+"""Generate meadow accent plants (wildflowers and weeds) for GrassField.
+
+Writes Engine/Core/Assets/Mesh/Grass/<plant>.obj plus <plant>_lod1.obj and
+<plant>_lod2.obj. GrassField picks up the _lod1/_lod2 siblings automatically
+for every path listed in its accentMeshes field.
+
+Conventions match meadow_short.obj / field_tall.obj:
+  * metres, Y up, root at the origin; use Material.useVertexColors and
+    doubleSided (GrassField's tile materials already do);
+  * per-vertex colors (OBJ "v x y z r g b"), linear;
+  * v = height / plant height, the grass shader's root-to-tip coordinate
+    (height occlusion, transmission, sheen), and u runs 0..1 across each
+    ribbon (the shader rounds green ribbons across u);
+  * wind bends every vertex about the root by its height, so stems sway and
+    flower heads ride on top while ground rosettes barely move.
+
+Each plant draws its layout from a fixed seed before any detail decision, so
+all three LODs place stems, leaves and heads identically and only lose
+tessellation, petals and small parts.
+
+Usage: python tools/generate_meadow_accents.py
+"""
+from __future__ import annotations
+
+import math
+import random
+from pathlib import Path
+
+OUT = Path(__file__).resolve().parents[1] / "Engine" / "Core" / "Assets" / "Mesh" / "Grass"
+
+
+# --- small vector helpers -------------------------------------------------
+
+def add(a, b): return (a[0] + b[0], a[1] + b[1], a[2] + b[2])
+def sub(a, b): return (a[0] - b[0], a[1] - b[1], a[2] - b[2])
+def mul(a, s): return (a[0] * s, a[1] * s, a[2] * s)
+def dot(a, b): return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+def cross(a, b):
+    return (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0])
+def length(a): return math.sqrt(dot(a, a))
+def norm(a):
+    n = length(a)
+    return (0.0, 1.0, 0.0) if n < 1e-9 else mul(a, 1.0 / n)
+def mix(a, b, t): return tuple(x + (y - x) * t for x, y in zip(a, b))
+def horizontal(yaw): return (math.cos(yaw), 0.0, math.sin(yaw))
+
+UP = (0.0, 1.0, 0.0)
+
+# Flower heads are drawn larger than life so they still read as colour from
+# standing height, slightly more at the coarser LODs seen from farther away.
+HEAD_SCALES = (1.3, 1.6, 1.9)
+head_scale = HEAD_SCALES[0]
+
+
+def perpendicular(axis, hint):
+    """Unit vector perpendicular to axis, as close to hint as possible."""
+    side = sub(hint, mul(axis, dot(hint, axis)))
+    if length(side) < 1e-6:
+        side = cross(axis, (1.0, 0.0, 0.0) if abs(axis[0]) < 0.9 else (0.0, 0.0, 1.0))
+    return norm(side)
+
+
+# --- mesh builder ---------------------------------------------------------
+
+class Mesh:
+    def __init__(self):
+        self.positions: list[tuple] = []
+        self.colors: list[tuple] = []
+        self.us: list[float] = []
+        self.triangles: list[tuple] = []
+
+    def vertex(self, position, color, u):
+        self.positions.append(position)
+        self.colors.append(color)
+        self.us.append(u)
+        return len(self.positions) - 1
+
+    def triangle(self, a, b, c):
+        self.triangles.append((a, b, c))
+
+    def quad(self, left_bottom, right_bottom, left_top, right_top):
+        # Same winding as the blade meshes: (1 3 2) (2 3 4).
+        self.triangle(left_bottom, left_top, right_bottom)
+        self.triangle(right_bottom, left_top, right_top)
+
+    def ribbon(self, points, sides, widths, colors, columns=2, fold=0.0, normals=None):
+        """A strip along points. columns=3 adds a raised midrib (leaf fold)."""
+        rows = []
+        for i, (p, s, w, c) in enumerate(zip(points, sides, widths, colors)):
+            row = []
+            for k in range(columns):
+                u = k / (columns - 1)
+                offset = mul(s, (u - 0.5) * w)
+                if columns == 3 and k == 1 and normals is not None:
+                    offset = add(offset, mul(normals[i], fold * w))
+                row.append(self.vertex(add(p, offset), c, u))
+            rows.append(row)
+        for a, b in zip(rows, rows[1:]):
+            for k in range(columns - 1):
+                self.quad(a[k], a[k + 1], b[k], b[k + 1])
+
+    def fan(self, center, rim, center_color, rim_color):
+        c = self.vertex(center, center_color, 0.5)
+        ring = [self.vertex(p, rim_color, 0.5) for p in rim]
+        for i in range(len(ring)):
+            self.triangle(c, ring[i], ring[(i + 1) % len(ring)])
+
+    def write(self, path: Path, header: str):
+        height = max(p[1] for p in self.positions)
+        normals = [(0.0, 0.0, 0.0)] * len(self.positions)
+        for a, b, c in self.triangles:
+            face = cross(sub(self.positions[b], self.positions[a]),
+                         sub(self.positions[c], self.positions[a]))
+            for index in (a, b, c):
+                normals[index] = add(normals[index], face)
+        normals = [norm(n) for n in normals]
+        lines = [f"# {header}; meters, Y up",
+                 "# Generated by tools/generate_meadow_accents.py. "
+                 "Set Material.useVertexColors=true and doubleSided=true."]
+        for p, c in zip(self.positions, self.colors):
+            lines.append(f"v {p[0]:.6f} {p[1]:.6f} {p[2]:.6f} {c[0]:.5f} {c[1]:.5f} {c[2]:.5f}")
+        for p, u in zip(self.positions, self.us):
+            lines.append(f"vt {u:.5f} {min(1.0, max(0.0, p[1] / height)):.5f}")
+        for n in normals:
+            lines.append(f"vn {n[0]:.6f} {n[1]:.6f} {n[2]:.6f}")
+        for a, b, c in self.triangles:
+            lines.append(f"f {a + 1}/{a + 1}/{a + 1} {b + 1}/{b + 1}/{b + 1} {c + 1}/{c + 1}/{c + 1}")
+        path.write_text("\n".join(lines) + "\n", encoding="ascii", newline="\n")
+        return len(self.triangles)
+
+
+# --- shared parts ---------------------------------------------------------
+
+STEM_ROOT = (0.055, 0.14, 0.03)
+STEM_TOP = (0.20, 0.34, 0.075)
+
+
+def stem_curve(base, yaw, height, lean, segments):
+    """Points and tangents of a stem rising from base and arching downwind."""
+    direction = horizontal(yaw)
+    points, tangents = [], []
+    for i in range(segments + 1):
+        t = i / segments
+        points.append(add(base, add(mul(UP, height * t), mul(direction, lean * height * t * t))))
+        tangents.append(norm(add(mul(UP, height), mul(direction, 2.0 * lean * height * t))))
+    return points, tangents
+
+
+def stem(mesh, base, yaw, height, lean, width, segments, root=STEM_ROOT, top=STEM_TOP):
+    points, tangents = stem_curve(base, yaw, height, lean, segments)
+    sides = [perpendicular(t, horizontal(yaw + math.pi * 0.5)) for t in tangents]
+    widths = [width * (1.0 - 0.45 * i / segments) for i in range(segments + 1)]
+    colors = [mix(root, top, i / segments) for i in range(segments + 1)]
+    mesh.ribbon(points, sides, widths, colors)
+    return points[-1], tangents[-1]
+
+
+def leaf(mesh, base, yaw, rise, length_, width, droop, segments, root_color, tip_color,
+         shape=lambda t: math.sin(math.pi * min(1.0, t ** 0.75)), fold=0.18):
+    """A strap or ovate leaf with a folded midrib, rising then drooping."""
+    direction = horizontal(yaw)
+    side = horizontal(yaw + math.pi * 0.5)
+    points, widths, colors, normals = [], [], [], []
+    for i in range(segments + 1):
+        t = i / segments
+        lift = length_ * (math.sin(rise) * t - droop * t * t)
+        reach = length_ * math.cos(rise) * t
+        points.append(add(base, add(mul(direction, reach), mul(UP, max(0.004, lift + 0.004)))))
+        widths.append(max(0.002, width * shape(t)))
+        colors.append(mix(root_color, tip_color, t))
+    for i in range(segments + 1):
+        a = points[max(0, i - 1)]
+        b = points[min(segments, i + 1)]
+        normals.append(norm(cross(side, sub(b, a))))
+    mesh.ribbon(points, [side] * len(points), widths, colors,
+                columns=3 if fold > 0 else 2, fold=fold, normals=normals)
+
+
+def petal_ring(mesh, center, axis, count, inner, length_, width, cup, color_base, color_tip,
+               segments, phase=0.0):
+    """Radial petals around axis; cup tilts them up (0 flat, 1 vertical)."""
+    inner, length_, width = inner * head_scale, length_ * head_scale, width * head_scale
+    reference = perpendicular(axis, (1.0, 0.0, 0.0))
+    other = cross(axis, reference)
+    for k in range(count):
+        angle = phase + 2.0 * math.pi * k / count
+        radial = add(mul(reference, math.cos(angle)), mul(other, math.sin(angle)))
+        across = cross(axis, radial)
+        out = norm(add(mul(radial, math.cos(cup * math.pi * 0.5)), mul(axis, math.sin(cup * math.pi * 0.5))))
+        start = add(center, mul(radial, inner))
+        points, widths, colors = [], [], []
+        for i in range(segments + 1):
+            t = i / segments
+            points.append(add(start, mul(out, length_ * t)))
+            # Narrow claw, broad blade, rounded tip.
+            widths.append(width * (0.35 + 0.65 * math.sin(math.pi * min(1.0, 0.25 + 0.75 * t))))
+            colors.append(mix(color_base, color_tip, t))
+        mesh.ribbon(points, [across] * len(points), widths, colors)
+
+
+def disc(mesh, center, axis, radius, dome, sides, color_center, color_rim):
+    radius, dome = radius * head_scale, dome * head_scale
+    reference = perpendicular(axis, (1.0, 0.0, 0.0))
+    other = cross(axis, reference)
+    rim = [add(center, add(mul(reference, radius * math.cos(2 * math.pi * k / sides)),
+                           mul(other, radius * math.sin(2 * math.pi * k / sides))))
+           for k in range(sides)]
+    mesh.fan(add(center, mul(axis, dome)), rim, color_center, color_rim)
+
+
+def tuft(mesh, center, axis, count, length_, width, color_base, color_tip, rng_values, spread=0.85):
+    """Radiating florets (clover, knapweed); rng_values supplies count pairs."""
+    length_, width = length_ * head_scale, width * head_scale
+    reference = perpendicular(axis, (1.0, 0.0, 0.0))
+    other = cross(axis, reference)
+    for k in range(count):
+        angle, tilt = rng_values[k]
+        radial = add(mul(reference, math.cos(angle)), mul(other, math.sin(angle)))
+        out = norm(add(mul(radial, spread * (0.35 + 0.65 * tilt)), mul(axis, 1.0)))
+        across = perpendicular(out, cross(axis, radial))
+        tip = add(center, mul(out, length_))
+        a = mesh.vertex(add(center, mul(across, -0.5 * width)), color_base, 0.0)
+        b = mesh.vertex(add(center, mul(across, 0.5 * width)), color_base, 1.0)
+        c = mesh.vertex(tip, color_tip, 0.5)
+        mesh.triangle(a, c, b)
+
+
+def ball(mesh, center, radius, color_inner, color_outer, subdivide):
+    """Octahedron sphere (dandelion clock)."""
+    radius *= head_scale
+    vertices = [(1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)]
+    faces = [(0, 4, 2), (4, 1, 2), (1, 5, 2), (5, 0, 2), (4, 0, 3), (1, 4, 3), (5, 1, 3), (0, 5, 3)]
+    for _ in range(subdivide):
+        cache = {}
+        def midpoint(i, j):
+            key = (min(i, j), max(i, j))
+            if key not in cache:
+                vertices.append(norm(mul(add(vertices[i], vertices[j]), 0.5)))
+                cache[key] = len(vertices) - 1
+            return cache[key]
+        refined = []
+        for a, b, c in faces:
+            ab, bc, ca = midpoint(a, b), midpoint(b, c), midpoint(c, a)
+            refined += [(a, ab, ca), (ab, b, bc), (ca, bc, c), (ab, bc, ca)]
+        faces = refined
+    indices = [mesh.vertex(add(center, mul(v, radius)), mix(color_inner, color_outer, 0.5 + 0.5 * v[1]), 0.5)
+               for v in vertices]
+    for a, b, c in faces:
+        mesh.triangle(indices[a], indices[c], indices[b])
+
+
+def scatter(rng, count, radius):
+    """Stem bases spread inside a clump."""
+    result = []
+    for _ in range(count):
+        r = radius * math.sqrt(rng.random())
+        a = rng.random() * 2 * math.pi
+        result.append((r * math.cos(a), 0.0, r * math.sin(a)))
+    return result
+
+
+# --- plants ---------------------------------------------------------------
+# Each takes detail 0 (LOD0), 1 or 2 and must consume the same random values
+# at every detail level.
+
+LEAF_DARK = (0.07, 0.17, 0.04)
+LEAF_MID = (0.16, 0.31, 0.07)
+
+
+def oxeye_daisy(detail):
+    rng = random.Random(4101)
+    mesh = Mesh()
+    segments = (5, 3, 2)[detail]
+    for base in scatter(rng, 7, 0.16):
+        yaw, rise, length_ = rng.random() * 6.283, 0.5 + 0.4 * rng.random(), 0.05 + 0.04 * rng.random()
+        if detail < 2:
+            leaf(mesh, base, yaw, rise, length_, 0.016, 0.9, (3, 2, 2)[detail], LEAF_DARK, LEAF_MID)
+    for base in scatter(rng, 8, 0.13):
+        yaw, height, lean = rng.random() * 6.283, 0.24 + 0.16 * rng.random(), 0.06 + 0.12 * rng.random()
+        phase = rng.random()
+        top, axis = stem(mesh, base, yaw, height, lean, 0.0045, segments)
+        axis = norm(add(axis, mul(UP, 1.5)))
+        petals = (13, 9, 6)[detail]
+        petal_ring(mesh, top, axis, petals, 0.007, 0.019, (0.0075, 0.009, 0.012)[detail], 0.12,
+                   (0.58, 0.58, 0.52), (0.72, 0.72, 0.68), (2, 1, 1)[detail], phase * 6.283)
+        disc(mesh, top, axis, 0.0085, 0.004, (7, 5, 4)[detail], (0.95, 0.62, 0.03), (0.80, 0.52, 0.02))
+    return mesh
+
+
+def buttercup(detail):
+    rng = random.Random(4211)
+    mesh = Mesh()
+    segments = (6, 3, 2)[detail]
+    lobed = lambda t: math.sin(math.pi * min(1.0, t ** 0.6)) * (0.75 + 0.25 * math.cos(t * 18.0))
+    for base in scatter(rng, 6, 0.14):
+        yaw, rise, length_ = rng.random() * 6.283, 0.45 + 0.35 * rng.random(), 0.06 + 0.04 * rng.random()
+        if detail < 2:
+            leaf(mesh, base, yaw, rise, length_, 0.04, 0.8, (4, 2, 2)[detail], LEAF_DARK,
+                 (0.13, 0.30, 0.06), shape=lobed)
+    for base in scatter(rng, 10, 0.16):
+        yaw, height, lean = rng.random() * 6.283, 0.28 + 0.2 * rng.random(), 0.08 + 0.14 * rng.random()
+        phase = rng.random()
+        top, axis = stem(mesh, base, yaw, height, lean, 0.0035, segments)
+        axis = norm(add(axis, mul(UP, 1.0)))
+        petal_ring(mesh, top, axis, 5, 0.003, 0.012, (0.011, 0.012, 0.016)[detail], 0.45,
+                   (0.85, 0.58, 0.02), (1.0, 0.78, 0.06), (2, 1, 1)[detail], phase * 6.283)
+        if detail == 0:
+            disc(mesh, add(top, mul(axis, 0.002)), axis, 0.004, 0.002, 5,
+                 (0.55, 0.55, 0.05), (0.85, 0.60, 0.03))
+    return mesh
+
+
+def red_clover(detail):
+    rng = random.Random(4327)
+    mesh = Mesh()
+    heart = lambda t: math.sin(math.pi * min(1.0, t ** 0.9)) * (0.6 + 0.4 * t)
+    for base in scatter(rng, 12, 0.17):
+        yaw, height, lean = rng.random() * 6.283, 0.05 + 0.06 * rng.random(), 0.15 + 0.2 * rng.random()
+        spin = rng.random() * 6.283
+        if detail == 2 and spin > 3.6:
+            continue  # LOD2 keeps roughly half the leaves
+        top, axis = stem(mesh, base, yaw, height, lean, 0.0025, (3, 2, 1)[detail])
+        for k in range(3):
+            leaflet_yaw = spin + k * 2.094
+            leaf(mesh, top, leaflet_yaw, 0.15, 0.03, 0.024, 0.35, (2, 1, 1)[detail],
+                 (0.09, 0.25, 0.06), (0.17, 0.36, 0.09), shape=heart, fold=0.0)
+    for base in scatter(rng, 6, 0.13):
+        yaw, height, lean = rng.random() * 6.283, 0.12 + 0.08 * rng.random(), 0.1 + 0.15 * rng.random()
+        florets = [(rng.random() * 6.283, rng.random()) for _ in range(14)]
+        top, axis = stem(mesh, base, yaw, height, lean, 0.003, (3, 2, 1)[detail])
+        axis = norm(add(axis, mul(UP, 0.8)))
+        count = (14, 9, 6)[detail]
+        center = add(top, mul(axis, -0.004))
+        tuft(mesh, center, axis, count, 0.016, 0.006, (0.62, 0.30, 0.42), (0.78, 0.30, 0.55),
+             florets, spread=1.3)
+    return mesh
+
+
+def plantain(detail):
+    """Broadleaf rosette with tall seed spikes."""
+    rng = random.Random(4441)
+    mesh = Mesh()
+    ovate = lambda t: math.sin(math.pi * min(1.0, t ** 0.65))
+    for k in range(8):
+        yaw = k * 0.785 + rng.random() * 0.5
+        rise, length_, width = 0.35 + 0.35 * rng.random(), 0.12 + 0.07 * rng.random(), 0.045 + 0.015 * rng.random()
+        leaf(mesh, (0.0, 0.0, 0.0), yaw, rise, length_, width, 0.55, (5, 3, 2)[detail],
+             (0.08, 0.19, 0.045), (0.17, 0.33, 0.08), shape=ovate, fold=0.22 if detail < 2 else 0.0)
+    for base in scatter(rng, 4, 0.05):
+        yaw, height, lean = rng.random() * 6.283, 0.22 + 0.16 * rng.random(), 0.08 + 0.1 * rng.random()
+        top, axis = stem(mesh, base, yaw, height, lean, 0.003, (4, 2, 2)[detail],
+                         root=(0.08, 0.15, 0.04), top=(0.22, 0.30, 0.10))
+        # Seed spike: crossed ribbons continuing the stem.
+        spike = [add(top, mul(axis, 0.045 * i / 3)) for i in range(4)]
+        for turn in ((0.0, 1.0) if detail < 2 else (0.0,)):
+            side = perpendicular(axis, horizontal(yaw + math.pi * (0.5 + 0.5 * turn)))
+            mesh.ribbon(spike, [side] * 4, [0.009, 0.010, 0.009, 0.004],
+                        [(0.30, 0.27, 0.12), (0.40, 0.36, 0.18), (0.45, 0.40, 0.22), (0.50, 0.44, 0.26)])
+    return mesh
+
+
+def knapweed(detail):
+    """Tall purple-headed weed with narrow stem leaves."""
+    rng = random.Random(4567)
+    mesh = Mesh()
+    segments = (7, 4, 3)[detail]
+    for base in scatter(rng, 4, 0.1):
+        yaw, height, lean = rng.random() * 6.283, 0.45 + 0.25 * rng.random(), 0.08 + 0.1 * rng.random()
+        leaves = [(rng.random(), rng.random() * 6.283, rng.random()) for _ in range(5)]
+        florets = [(rng.random() * 6.283, rng.random()) for _ in range(16)]
+        points, _ = stem_curve(base, yaw, height, lean, segments)
+        top, axis = stem(mesh, base, yaw, height, lean, 0.005, segments,
+                         root=(0.06, 0.13, 0.035), top=(0.17, 0.27, 0.07))
+        for at, leaf_yaw, size in leaves[: (5, 3, 0)[detail]]:
+            index = min(segments - 1, int((0.15 + 0.55 * at) * segments))
+            leaf(mesh, points[index], leaf_yaw, 0.6, 0.06 + 0.04 * size, 0.012, 0.9,
+                 (3, 2, 1)[detail], (0.09, 0.20, 0.05), (0.16, 0.29, 0.07), fold=0.0)
+        axis = norm(add(axis, mul(UP, 1.2)))
+        # Scaly bulb, then a crown of purple florets.
+        disc(mesh, add(top, mul(axis, -0.006)), mul(axis, -1.0), 0.009, 0.006, (6, 5, 4)[detail],
+             (0.16, 0.18, 0.07), (0.24, 0.22, 0.10))
+        disc(mesh, top, axis, 0.0095, 0.002, (6, 5, 4)[detail], (0.28, 0.20, 0.12), (0.22, 0.20, 0.09))
+        tuft(mesh, add(top, mul(axis, 0.002)), axis, (16, 10, 7)[detail], 0.017, 0.005,
+             (0.40, 0.12, 0.42), (0.55, 0.18, 0.62), florets, spread=0.9)
+    return mesh
+
+
+def dandelion(detail):
+    """Toothed rosette, yellow heads and a couple of seed clocks."""
+    rng = random.Random(4673)
+    mesh = Mesh()
+    toothed = lambda t: math.sin(math.pi * min(1.0, t ** 0.7)) * (0.55 + 0.45 * abs(math.sin(t * 14.0)))
+    for k in range(7):
+        yaw = k * 0.9 + rng.random() * 0.4
+        rise, length_ = 0.2 + 0.3 * rng.random(), 0.11 + 0.06 * rng.random()
+        leaf(mesh, (0.0, 0.0, 0.0), yaw, rise, length_, 0.03, 0.35, (5, 3, 2)[detail],
+             (0.08, 0.20, 0.05), (0.15, 0.32, 0.07), shape=toothed, fold=0.15 if detail < 2 else 0.0)
+    for index, base in enumerate(scatter(rng, 4, 0.04)):
+        yaw, height, lean = rng.random() * 6.283, 0.14 + 0.12 * rng.random(), 0.1 + 0.15 * rng.random()
+        phase = rng.random()
+        top, axis = stem(mesh, base, yaw, height, lean, 0.004, (4, 2, 2)[detail],
+                         root=(0.30, 0.32, 0.20), top=(0.24, 0.34, 0.10))
+        axis = norm(add(axis, mul(UP, 1.2)))
+        if index < 3:
+            for ring, (count, size, cup) in enumerate(((16, 0.018, 0.15), (11, 0.012, 0.45))):
+                if detail == 2 and ring:
+                    continue
+                petal_ring(mesh, top, axis, (count, max(6, count * 2 // 3), max(6, count // 2))[detail],
+                           0.002, size, (0.0045, 0.006, 0.009)[detail], cup,
+                           (0.90, 0.56, 0.02), (1.0, 0.74, 0.05), 1, phase * 6.283 + ring)
+        else:
+            ball(mesh, add(top, mul(axis, 0.014)), 0.017, (0.50, 0.50, 0.46), (0.70, 0.70, 0.66),
+                 (1, 1, 0)[detail])
+    return mesh
+
+
+PLANTS = {
+    "meadow_daisy": (oxeye_daisy, "oxeye-style daisies over a leaf rosette"),
+    "meadow_buttercup": (buttercup, "yellow cup flowers over lobed leaves"),
+    "meadow_clover": (red_clover, "red clover heads over trefoil leaves"),
+    "meadow_plantain": (plantain, "broadleaf plantain rosette with seed spikes"),
+    "meadow_knapweed": (knapweed, "tall purple knapweed with stem leaves"),
+    "meadow_dandelion": (dandelion, "dandelion rosette, flowers and seed clocks"),
+}
+
+
+def main():
+    OUT.mkdir(parents=True, exist_ok=True)
+    for name, (build, description) in PLANTS.items():
+        counts = []
+        for detail, suffix in enumerate(("", "_lod1", "_lod2")):
+            global head_scale
+            head_scale = HEAD_SCALES[detail]
+            mesh = build(detail)
+            counts.append(mesh.write(OUT / f"{name}{suffix}.obj", f"{name}: {description}"))
+        print(f"{name}: triangles LOD0/1/2 = {counts[0]}/{counts[1]}/{counts[2]}")
+
+
+if __name__ == "__main__":
+    main()
