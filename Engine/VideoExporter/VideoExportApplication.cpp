@@ -11,7 +11,6 @@
 #include "Core/Scene/Object.h"
 #include "Core/ProjectLoader.h"
 #include "Core/Scene/Scene.h"
-#include "Core/Scene/SceneManager.h"
 #include "Core/Window.h"
 #include "Core/Graphics/IGraphicsContext.h"
 #include "Core/Graphics/PostProcess.h"
@@ -1048,8 +1047,6 @@ int VideoExportApplication::Run(HINSTANCE instance)
     scene.SetDistanceLightingSettings(lightingSettings);
     Engine::Rendering::MaterialCachePolicy::Get().SetProjectSettings(
         settings.materialCache);
-    Engine::Core::SceneManager::SetActiveScene(&scene);
-    Engine::Core::SceneManager::SetDefaultScenePath(scenePath);
     if (!scene.Load(scenePath))
     {
         std::cerr << "Could not load scene: " << scenePath << '\n';
@@ -1065,6 +1062,7 @@ int VideoExportApplication::Run(HINSTANCE instance)
         (static_cast<double>(options.frameRate.numerator) *
             simulationTicksPerOutputFrame);
     Engine::Runtime::Game game(scene);
+    game.SetDefaultScenePath(scenePath);
     game.SetFixedTimeStep(fixedDelta);
     scene.GetPhysics().ConfigureFixedStep(
         1.0 / static_cast<double>(options.physicsFps),
@@ -1502,7 +1500,6 @@ int VideoExportApplication::Run(HINSTANCE instance)
                 success = false;
         }
     }
-    Engine::Core::SceneManager::SetActiveScene(nullptr);
     if (!success)
         return 9;
     std::cout << (imageSequence ? "Image sequence complete: " : "Video export complete: ")

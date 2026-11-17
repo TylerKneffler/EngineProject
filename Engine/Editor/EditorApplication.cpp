@@ -11,7 +11,6 @@
 #include "Core/Serialization/PrefabLoadProfile.h"
 #include "Core/Startup/StartupSplash.h"
 #include "Core/ProjectLoader.h"
-#include "Core/Scene/SceneManager.h"
 #include "Core/Components/Particles/ParticleEmitter.h"
 #include "Core/Components/Animation/AnimationManager.h"
 #include "Core/Assets/Scripts/Grass/GrassField.h"
@@ -219,11 +218,9 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
         WriteStartupLog("Editor did not create all required core components");
         return 1;
     }
-    Engine::Core::SceneManager::SetActiveScene(scene);
     scene->SetBeforeGpuResourceDestruction([renderer] { renderer->WaitIdle(); });
     scene->SetDeferredGraphicsRetirement(true);
     scene->SetGameplayInputEnabled(false);
-    Engine::Core::SceneManager::SetDefaultScenePath(projectSettings.defaultScene);
 
     auto uiBackend = Engine::Editor::CreateEditorUiBackend();
     if (!uiBackend->Initialize(window->GetHWND(), *renderer))
@@ -324,9 +321,7 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
         }
         {
         StopProfile::Stage stage("stop_cancel_and_fence");
-        Engine::Core::SceneManager::CancelPendingSceneLoad();
         scene->FenceBackgroundWork();
-        Engine::Core::SceneManager::SetOnSceneLoaded({});
         }
         {
         StopProfile::Stage stage("stop_restore_editor_scene");
@@ -339,9 +334,7 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
     {
         gameBuildManager->Stop();
         finishPlayStop();
-        Engine::Core::SceneManager::CancelPendingSceneLoad();
         scene->FenceBackgroundWork();
-        Engine::Core::SceneManager::SetOnSceneLoaded({});
     };
     OutputDebugStringA("[Main] GameBuildManager created\n");
     OutputDebugStringA("[Main] Getting window, renderer, scene...\n");
@@ -363,13 +356,14 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
         playStartFollowupUpdates = 2;
         pendingPlayStart = false;
         playGame = std::make_unique<Engine::Runtime::Game>(*scene);
+        playGame->SetDefaultScenePath(projectSettings.defaultScene);
         playGame->Start();
         resetPlayDelta = true;
     };
     gameBuildManager->OnPlayStart = [&]()
     {
         Engine::Editor::FrameActivity::Mark(Engine::Editor::FrameActivity::PlayStart);
-        Engine::Core::SceneManager::CancelPendingSceneLoad();
+        if (playGame) playGame->CancelPendingSceneLoad();
         scene->FenceBackgroundWork();
         scene->SetGameplayInputEnabled(false);
         const bool requested = editorState->RequestCodeEditorAttach();
@@ -397,7 +391,7 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
         waitingForPlayDebugger = false;
         pendingPlayStart = false;
         playStartFollowupUpdates = 0;
-        Engine::Core::SceneManager::CancelPendingSceneLoad();
+        if (playGame) playGame->CancelPendingSceneLoad();
         // A toolbar Stop can arrive while RenderIfNeeded still owns a command
         // list. Restore once that frame has been submitted.
         pendingPlayStopRestore = true;
@@ -680,7 +674,7 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
             if (!usePlayPipeline)
             {
                 if (playGame) playGame->Update(std::max(dt, 0.f));
-                Engine::Core::SceneManager::ProcessPendingSceneLoad();
+                if (playGame) playGame->ProcessPendingSceneLoad();
             }
         }
         else if (playState == Engine::Editor::PlayState::Stopped)
@@ -1084,7 +1078,7 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
             for (const auto& recorded : recordedViews)
                 occlusionCulled += recorded.color->GetReplayOcclusionCulledCount();
             scene->SetLastNativeOcclusionCulledCount(occlusionCulled);
-            Engine::Core::SceneManager::ProcessPendingSceneLoad();
+            if (playGame) playGame->ProcessPendingSceneLoad();
         }
         if (deferredClearGameplayFocus)
         {
@@ -1343,10 +1337,8 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
     finishPlayStop();
     gameBuildManager.reset();
     hotReload.reset();
-    Engine::Core::SceneManager::CancelPendingSceneLoad();
-    Engine::Core::SceneManager::SetOnSceneLoaded({});
+    playGame.reset();
     scene->FenceBackgroundWork();
-    Engine::Core::SceneManager::SetActiveScene(nullptr);
     scene->SetBeforeGpuResourceDestruction({});
     playPipeline.reset();
     renderer->WaitIdle();

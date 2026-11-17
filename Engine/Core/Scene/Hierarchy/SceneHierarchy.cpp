@@ -1,6 +1,5 @@
 #include "Core/Serialization/PrefabLoadProfile.h"
 #include "Core/Scene/Scene.h"
-#include "Core/Scene/SceneManager.h"
 #include "Core/Runtime/Game.h"
 #include "Core/Components/Mesh/Mesh.h"
 #include "Core/Components/Materials/Material.h"
@@ -120,8 +119,8 @@ void Scene::FenceBackgroundWork()
     AssertOwnerThread();
     if (m_isUpdating)
         throw std::logic_error("Background work cannot be fenced during Update");
-    if (Engine::Core::SceneManager::GetActiveScene() == this)
-        Engine::Core::SceneManager::CancelPendingSceneLoad();
+    if (m_game)
+        m_game->CancelPendingSceneLoad();
     FenceSceneGeneration();
     // A worker can execute code from a reloadable script module. Join it
     // before replacing scene objects or unloading that module.

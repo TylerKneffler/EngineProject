@@ -1,8 +1,9 @@
 #include "Scripts/Gameplay/MainMenuGameManager.h"
+#include "Core/Runtime/Game.h"
+#include "Core/Scene/Scene.h"
 
 #include "Core/Components/UI/UIButton.h"
 #include "Core/Scene/Object.h"
-#include "Core/Scene/SceneManager.h"
 #include "Core/Serialization/SceneSerializer.h"
 
 MainMenuGameManager::MainMenuGameManager()
@@ -36,8 +37,10 @@ void MainMenuGameManager::Start()
 
     // The callback captures no scene object. The requested transition is
     // performed at the safe post-update transition point on the next frame.
-    playButton->AddOnClickListener([](Engine::Components::UIButton&)
+    playButton->AddOnClickListener([](Engine::Components::UIButton& button)
     {
-        Engine::Core::SceneManager::RequestDefaultSceneLoad();
+        auto* scene = button.Owner ? button.Owner->GetScene() : nullptr;
+        if (auto* game = scene ? scene->GetGame() : nullptr)
+            game->RequestDefaultSceneLoad();
     });
 }

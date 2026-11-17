@@ -3,13 +3,17 @@
 #include "Core/Scene/SceneObserver.h"
 #include "Core/Time/SimulationClock.h"
 #include <cstdint>
+#include <functional>
 #include <memory>
+#include <string>
 
 namespace Engine::Scene { class Scene; }
 namespace Engine::Audio { class Audio; }
 
 namespace Engine::Runtime
 {
+class AsyncSceneReader;
+
 // The running simulation over a scene. Drives the lifecycle (Start, per-frame
 // Update with physics/audio/pose phases, fixed steps) and owns the simulation
 // clock. The scene stays the owner of object memory; Object and Component keep
@@ -64,6 +68,27 @@ public:
     float GetDeltaTime() const { return m_deltaTime; }
     uint64_t GetFrameIndex() const { return m_clock.GetFrameIndex(); }
 
+    // ---- Scene transitions ------------------------------------------------------
+    // Loads replace the contents of this Game's scene in place and restart it.
+    // Immediate load (owner thread). Returns false if the file could not load.
+    bool LoadScene(const std::string& path);
+    // Queues a transition for a safe point after updates; hosts apply it with
+    // ProcessPendingSceneLoad(). UI listeners should use these, not LoadScene.
+    void RequestSceneLoad(const std::string& path);
+    bool RequestDefaultSceneLoad();
+    // Reads the file on a worker; the callback runs on the owner thread when
+    // ProcessPendingSceneLoad applies it (null on failure). Replaced or
+    // canceled requests do not invoke their callbacks.
+    void LoadSceneAsync(const std::string& path,
+        std::function<void(Scene*)> onComplete);
+    bool ProcessPendingSceneLoad();
+    void CancelPendingSceneLoad();
+    void SetDefaultScenePath(const std::string& path) { m_defaultScenePath = path; }
+    const std::string& GetDefaultScenePath() const { return m_defaultScenePath; }
+    // Called after every successful load (immediate or async).
+    using SceneLoadedCallback = std::function<void(Scene*)>;
+    void SetOnSceneLoaded(SceneLoadedCallback callback) { m_onSceneLoaded = std::move(callback); }
+
     // ---- Systems ----------------------------------------------------------------
     // Listener tracking and mixer command draining for the scene's AudioSources.
     // Sources stop when the scene is cleared and when the Game ends.
@@ -82,5 +107,9 @@ private:
     float m_deltaTime = 0.f;
     UpdateTimings m_lastUpdateTimings{};
     std::unique_ptr<Engine::Audio::Audio> m_audio;
+    std::unique_ptr<AsyncSceneReader> m_sceneReader;
+    std::string m_defaultScenePath;
+    SceneLoadedCallback m_onSceneLoaded;
+    uint64_t m_loadGeneration = 0;
 };
 }

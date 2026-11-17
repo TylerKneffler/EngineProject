@@ -20,7 +20,6 @@
 #include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Physics/Physics.h"
-#include "Core/Scene/SceneManager.h"
 #include "Core/Time/FramePacer.h"
 #include "Core/Input/NativeInputSnapshot.h"
 #include "Core/Rendering/RenderFramePlan.h"
@@ -255,7 +254,7 @@ private:
                     const auto updateStart = std::chrono::steady_clock::now();
                     if (auto* game = m_scene.GetGame())
                         game->Update(m_deltaTime);
-                    if (::Engine::Core::SceneManager::ProcessPendingSceneLoad() &&
+                    if (m_scene.GetGame() && m_scene.GetGame()->ProcessPendingSceneLoad() &&
                         m_input.clientWidth && m_input.clientHeight)
                         m_scene.PrepareNativeUiLayout(
                             static_cast<float>(m_input.clientWidth) /
@@ -930,10 +929,8 @@ int GameApplication::Run(HINSTANCE instance, const GameBenchmarkOptions* benchma
         settings.materialCache);
     if (benchmark) scene.SetUpdateProfilingEnabled(true);
     if (benchmark) g_benchmarkRenderMode = benchmark->renderMode;
-    Engine::Core::SceneManager::SetActiveScene(&scene);
     const std::string defaultScene = benchmark ? benchmark->scene.string() : settings.defaultScene.empty()
         ? GetFallbackScenePath() : settings.defaultScene;
-    Engine::Core::SceneManager::SetDefaultScenePath(defaultScene);
     std::string loadedScenePath = defaultScene;
     if (!scene.Load(loadedScenePath))
     {
@@ -951,6 +948,7 @@ int GameApplication::Run(HINSTANCE instance, const GameBenchmarkOptions* benchma
         scene.settings.graphicsQuality.preset = std::clamp(std::atoi(preset), 0,
             Engine::Model::GraphicsQualitySettings::AutoPreset);
     Engine::Runtime::Game game(scene);
+    game.SetDefaultScenePath(defaultScene);
     game.Start();
     std::unique_ptr<GameBenchmark> gameBenchmark;
     if (benchmark)
@@ -1079,12 +1077,11 @@ int GameApplication::Run(HINSTANCE instance, const GameBenchmarkOptions* benchma
     benchmarkStarted = benchmark != nullptr;
     const int result = window->Run();
     simulation.Stop();
-    Engine::Core::SceneManager::CancelPendingSceneLoad();
+    if (auto* game = scene.GetGame()) game->CancelPendingSceneLoad();
     scene.FenceBackgroundWork();
     renderLoop.Stop();
     const bool benchmarkValid = !gameBenchmark || gameBenchmark->Finish();
     scene.SetBeforeGpuResourceDestruction({});
-    Engine::Core::SceneManager::SetActiveScene(nullptr);
     return benchmarkValid ? result : 2;
 }
 }

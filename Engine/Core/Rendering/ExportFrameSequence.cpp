@@ -2,7 +2,6 @@
 #include "Core/Runtime/Game.h"
 
 #include "Core/Scene/Scene.h"
-#include "Core/Scene/SceneManager.h"
 
 #include <stdexcept>
 
@@ -49,7 +48,7 @@ bool ExportFrameSequence::AdvanceFixedSteps(uint32_t stepCount,
         if (!game)
             throw std::logic_error("ExportFrameSequence requires a running Game");
         game->UpdateFixedFrame();
-        Engine::Core::SceneManager::ProcessPendingSceneLoad();
+        game->ProcessPendingSceneLoad();
     }
     return true;
 }

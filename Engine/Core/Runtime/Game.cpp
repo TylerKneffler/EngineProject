@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "Core/Runtime/Game.h"
+#include "Core/Runtime/AsyncSceneReader.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Scene/Object.h"
 #include "Core/Audio/Audio.h"
@@ -26,6 +27,7 @@ namespace Engine::Runtime
 Game::Game(Scene& scene)
     : m_scene(scene)
     , m_audio(std::make_unique<Engine::Audio::Audio>(scene))
+    , m_sceneReader(std::make_unique<AsyncSceneReader>())
 {
     m_scene.AssertOwnerThread();
     m_scene.BindGame(this);
@@ -34,6 +36,8 @@ Game::Game(Scene& scene)
 
 Game::~Game()
 {
+    // Joins the reader worker before the scene can be released.
+    m_sceneReader.reset();
     // Sources stop with the simulation that played them.
     m_audio->Reset();
     m_scene.RemoveObserver(this);
@@ -44,6 +48,72 @@ Game::~Game()
 void Game::OnObjectsClearing()
 {
     m_audio->Reset();
+}
+
+bool Game::LoadScene(const std::string& path)
+{
+    m_scene.AssertOwnerThread();
+    m_sceneReader->Cancel();
+    if (!m_scene.Load(path))
+        return false;
+    if (m_onSceneLoaded)
+        m_onSceneLoaded(&m_scene);
+    return true;
+}
+
+void Game::RequestSceneLoad(const std::string& path)
+{
+    if (path.empty()) return;
+    m_scene.AssertOwnerThread();
+    LoadSceneAsync(path, {});
+}
+
+bool Game::RequestDefaultSceneLoad()
+{
+    if (m_defaultScenePath.empty())
+        return false;
+    RequestSceneLoad(m_defaultScenePath);
+    return true;
+}
+
+void Game::LoadSceneAsync(const std::string& path,
+    std::function<void(Scene*)> onComplete)
+{
+    if (path.empty())
+    {
+        if (onComplete) onComplete(nullptr);
+        return;
+    }
+    m_scene.AssertOwnerThread();
+    m_sceneReader->Submit(path, std::move(onComplete), m_loadGeneration,
+        m_scene.CaptureSceneGeneration());
+}
+
+void Game::CancelPendingSceneLoad()
+{
+    m_scene.AssertOwnerThread();
+    ++m_loadGeneration;
+    m_sceneReader->Cancel();
+}
+
+bool Game::ProcessPendingSceneLoad()
+{
+    m_scene.AssertOwnerThread();
+    auto result = m_sceneReader->TakeCompleted();
+    if (!result || result->generation != m_loadGeneration ||
+        result->sceneGeneration != m_scene.CaptureSceneGeneration())
+        return false;
+    Scene* loaded = nullptr;
+    if (result->readSucceeded && m_scene.LoadFromValue(result->document))
+    {
+        Start();
+        loaded = &m_scene;
+        if (m_onSceneLoaded)
+            m_onSceneLoaded(loaded);
+    }
+    if (result->callback)
+        result->callback(loaded);
+    return loaded != nullptr;
 }
 
 bool Game::HasStarted() const
