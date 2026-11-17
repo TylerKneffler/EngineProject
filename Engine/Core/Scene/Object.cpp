@@ -60,10 +60,8 @@ Object::Object(Transform initialTransform)
 Object::~Object()
 {
     if (OwnerScene) AssertSceneOwner();
-    for (Component* component : Components)
-        if (component) component->FenceBackgroundWork();
-    for (Component* component : Components)
-        if (component) component->DispatchDestroy();
+    FenceBackgroundWork();
+    DispatchComponentDestroy();
     for (Component* component : Components)
         delete component;
     Components.clear();
@@ -152,6 +150,40 @@ void Object::Update()
             comp->Update();
             comp->PublishUpdateOnOwner();
         }
+}
+
+void Object::FenceBackgroundWork()
+{
+    for (Component* component : Components)
+        if (component) component->FenceBackgroundWork();
+}
+
+void Object::DispatchComponentDestroy()
+{
+    for (Component* component : Components)
+        if (component) component->DispatchDestroy();
+}
+
+bool Object::CollectWorkerUpdates(
+    std::vector<Engine::Threading::ComponentUpdateScheduler::Node>& nodes) const
+{
+    std::vector<Engine::Threading::ComponentUpdateScheduler::Node> updates;
+    for (Component* component : Components)
+    {
+        if (!component || !component->RequiresUpdate()) continue;
+        const auto policy = component->GetCallbackPolicy();
+        if (policy.updateThread != Component::UpdateThreadAffinity::Worker)
+            return false;
+        if (policy.updateSafety != Component::UpdateParallelSafety::DeclaredAccess)
+            throw std::logic_error("Worker component update requires declared parallel safety");
+        auto access = component->GetUpdateAccess();
+        if (!access)
+            throw std::logic_error("Worker component update requires an access declaration");
+        updates.push_back({component, std::move(*access)});
+    }
+    nodes.insert(nodes.end(), std::make_move_iterator(updates.begin()),
+        std::make_move_iterator(updates.end()));
+    return true;
 }
 
 void Object::Destroy()

@@ -211,33 +211,13 @@ void Game::Update(float deltaTime)
             continue;
         }
         if (!object->IsEnabledInHierarchy()) continue;
-        std::vector<Engine::Threading::ComponentUpdateScheduler::Node> objectUpdates;
-        bool serial = false;
-        for (auto* component : object->Components)
-        {
-            if (!component || !component->RequiresUpdate()) continue;
-            const auto policy = component->GetCallbackPolicy();
-            if (policy.updateThread != Engine::Core::Component::UpdateThreadAffinity::Worker)
-            {
-                serial = true;
-                break;
-            }
-            if (policy.updateSafety != Engine::Core::Component::UpdateParallelSafety::DeclaredAccess)
-                throw std::logic_error("Worker component update requires declared parallel safety");
-            auto access = component->GetUpdateAccess();
-            if (!access)
-                throw std::logic_error("Worker component update requires an access declaration");
-            objectUpdates.push_back({component, std::move(*access)});
-        }
-        if (serial)
+        // Worker-safe objects contribute their component updates to the
+        // current parallel segment; otherwise the object updates serially.
+        if (!object->CollectWorkerUpdates(parallelUpdates))
         {
             finishParallelUpdates();
             object->Update();
         }
-        else
-            parallelUpdates.insert(parallelUpdates.end(),
-                std::make_move_iterator(objectUpdates.begin()),
-                std::make_move_iterator(objectUpdates.end()));
     }
     finishParallelUpdates();
     };

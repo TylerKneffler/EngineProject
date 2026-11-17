@@ -2,7 +2,8 @@
 #include "pch.h"
 #include <list>
 #include <algorithm>
-#include "Core/Components/Component.h"         
+#include "Core/Components/Component.h"
+#include "Core/Threading/ComponentUpdateScheduler.h"         
 #include "Core/Components/Transform.h"
 #include "Core/Prefab/PrefabAsset.h"
 
@@ -151,6 +152,20 @@ public:
     virtual void Update();
     virtual void Destroy();
     void DisableLifecycleInHierarchy();
+
+    // ---- Lifecycle dispatch to this object's own components ----------------
+    // Scene and Game reach components only through these (Scene -> Object ->
+    // Component). They act on this object only; callers walk the subtree.
+    // Joins background work started by this object's components.
+    void FenceBackgroundWork();
+    // Delivers OnDestroy to each component (idempotent per component).
+    void DispatchComponentDestroy();
+    // For the update driver: appends this object's worker-thread component
+    // updates to `nodes` and returns true, or returns false (appending nothing)
+    // when any updating component needs the owner thread, in which case the
+    // whole object must run Update() serially.
+    bool CollectWorkerUpdates(
+        std::vector<Engine::Threading::ComponentUpdateScheduler::Node>& nodes) const;
 
     // Get the scene this object belongs to
     Engine::Scene::Scene* GetScene() const { return OwnerScene; }

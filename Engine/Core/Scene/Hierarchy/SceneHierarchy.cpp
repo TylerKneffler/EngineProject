@@ -124,8 +124,8 @@ void Scene::FenceBackgroundWork()
     FenceSceneGeneration();
     // A worker can execute code from a reloadable script module. Join it
     // before replacing scene objects or unloading that module.
-    for (auto* component : GetComponents<Engine::Core::Component>())
-        component->FenceBackgroundWork();
+    for (const auto& object : m_objects)
+        if (object) object->FenceBackgroundWork();
 }
 
 void Scene::RefreshUpdateRegistry()
@@ -663,8 +663,7 @@ void Scene::RemoveObject(Engine::Core::Object* obj)
     collect(obj);
 
     for (Engine::Core::Object* object : objectsToRemove)
-        for (Engine::Core::Component* component : object->Components)
-            if (component) component->FenceBackgroundWork();
+        object->FenceBackgroundWork();
 
     // Observers drop pointers into the subtree while it is still valid.
     {
@@ -712,7 +711,7 @@ void Scene::RemoveObject(Engine::Core::Object* obj)
     {
         // Deliver logical destruction now, on the scene owner. The fence
         // releases storage later; DispatchDestroy is idempotent at that point.
-        for(auto* component:obj->Components) if(component) component->DispatchDestroy();
+        obj->DispatchComponentDestroy();
         auto found=std::find_if(m_objects.begin(),m_objects.end(),
             [obj](const auto& candidate) { return candidate.get()==obj; });
         if(found!=m_objects.end())
