@@ -2,7 +2,7 @@
 #include "Core/Serialization/SceneSerializer.h"
 #include "Core/Serialization/Json.h"
 #include "Core/Rendering/RenderJobs.h"
-#include "Core/Compoonents/Terrain/TerrainObjectLayer.h"
+#include "Core/Components/Terrain/TerrainObjectLayer.h"
 #include <stdexcept>
 
 namespace Engine::Scene

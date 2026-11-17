@@ -1,8 +1,8 @@
 #include "VideoExporter/VideoExportApplication.h"
 
-#include "Core/Compoonents/Camera/Camera.h"
-#include "Core/Compoonents/Audio/AudioSource.h"
-#include "Core/Compoonents/Cinematics/CameraTrack.h"
+#include "Core/Components/Camera/Camera.h"
+#include "Core/Components/Audio/AudioSource.h"
+#include "Core/Components/Cinematics/CameraTrack.h"
 #include "Core/Audio/AudioMixer.h"
 #include "Core/Audio/Audio.h"
 #include "Core/Model/ProjectSettings.h"

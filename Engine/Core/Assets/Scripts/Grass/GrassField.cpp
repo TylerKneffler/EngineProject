@@ -3,11 +3,11 @@
 
 #include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
-#include "Core/Compoonents/Terrain/Terrain.h"
-#include "Core/Compoonents/Terrain/TerrainObjectLayer.h"
-#include "Core/Compoonents/Terrain/TerrainSurfaceSample.h"
+#include "Core/Components/Terrain/Terrain.h"
+#include "Core/Components/Terrain/TerrainObjectLayer.h"
+#include "Core/Components/Terrain/TerrainSurfaceSample.h"
 #include <glm/gtc/matrix_transform.hpp>
-#include "Core/Compoonents/Materials/Material.h"
+#include "Core/Components/Materials/Material.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include <algorithm>
 #include <cmath>

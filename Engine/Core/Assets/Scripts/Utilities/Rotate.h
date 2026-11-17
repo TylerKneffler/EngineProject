@@ -1,6 +1,6 @@
 #pragma once
-#include "Core/Compoonents/Script.h"
-#include "Core/Compoonents/PropertyMacros.h"
+#include "Core/Components/Script.h"
+#include "Core/Components/PropertyMacros.h"
 #include <glm/glm.hpp>
 
 // ---------------------------------------------------------------------------

@@ -1,7 +1,7 @@
 #pragma once
 
-#include "Core/Compoonents/Animation/Model.h"
-#include "Core/Compoonents/Animation/Skeleton.h"
+#include "Core/Components/Animation/Model.h"
+#include "Core/Components/Animation/Skeleton.h"
 #include "Core/Model/AnimationClip.h"
 #include "Core/Scene/Object.h"
 #include <algorithm>

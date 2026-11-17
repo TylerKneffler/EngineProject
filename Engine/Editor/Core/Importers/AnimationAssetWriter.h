@@ -1,8 +1,8 @@
 #pragma once
 
 #include "Core/AssetRecord.h"
-#include "Core/Compoonents/Animation/AnimationManager.h"
-#include "Core/Compoonents/Animation/Model.h"
+#include "Core/Components/Animation/AnimationManager.h"
+#include "Core/Components/Animation/Model.h"
 #include "Core/Model/AnimationClipAsset.h"
 #include "Core/Model/RigAsset.h"
 #include <cctype>

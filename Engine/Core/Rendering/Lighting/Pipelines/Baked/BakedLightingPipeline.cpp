@@ -1,10 +1,10 @@
 #include "BakedLightingPipeline.h"
 #include "Core/Scene/Scene.h"
-#include "Core/Compoonents/Lighting/Light.h"
-#include "Core/Compoonents/Lighting/LightProbe.h"
-#include "Core/Compoonents/Materials/Material.h"
-#include "Core/Compoonents/Materials/Texture.h"
-#include "Core/Compoonents/Mesh/Mesh.h"
+#include "Core/Components/Lighting/Light.h"
+#include "Core/Components/Lighting/LightProbe.h"
+#include "Core/Components/Materials/Material.h"
+#include "Core/Components/Materials/Texture.h"
+#include "Core/Components/Mesh/Mesh.h"
 #include "Core/Rendering/Lighting/BakedLightingData.h"
 #include <algorithm>
 #include <array>

@@ -1,7 +1,7 @@
 #pragma once
 
-#include "Core/Compoonents/Script.h"
-#include "Core/Compoonents/PropertyMacros.h"
+#include "Core/Components/Script.h"
+#include "Core/Components/PropertyMacros.h"
 #include <string>
 
 // Owns main-menu behavior independently from the retained UI hierarchy.

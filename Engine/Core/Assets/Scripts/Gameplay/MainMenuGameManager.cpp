@@ -1,6 +1,6 @@
 #include "Scripts/Gameplay/MainMenuGameManager.h"
 
-#include "Core/Compoonents/UI/UIButton.h"
+#include "Core/Components/UI/UIButton.h"
 #include "Core/Scene/Object.h"
 #include "Core/Scene/SceneManager.h"
 #include "Core/Serialization/SceneSerializer.h"

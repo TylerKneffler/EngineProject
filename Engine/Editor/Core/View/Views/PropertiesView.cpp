@@ -1,11 +1,12 @@
+#include "Core/Inspection/ComponentInspector.h"
 #include "Core/Rendering/DetailBudget.h"
 #include "PropertiesView.h"
 #include "Engine/Editor/UI/IEditorUi.h"
-#include "Core/Compoonents/Materials/Texture.h"
+#include "Core/Components/Materials/Texture.h"
 #include "Engine/Editor/UI/EditorComponentIcons.h"
 #include "Engine/Editor/UI/EditorIcons.h"
-#include "Core/Compoonents/Physics/RigidBody.h"
-#include "Core/Compoonents/Animation/AnimationManager.h"
+#include "Core/Components/Physics/RigidBody.h"
+#include "Core/Components/Animation/AnimationManager.h"
 #include "Core/Component.h"
 #include "Core/Graphics/IGraphicsTexture.h"
 #include "Core/Scene/Scene.h"
@@ -98,7 +99,7 @@ void PropertiesView::ApplySelectedObjects(
     Engine::Core::Object* obj = objects.empty() ? nullptr : objects.back();
     if (obj != m_selectedObject)
     {
-        Engine::Core::Component::ClearEditorReferenceSearches();
+        Engine::Core::ComponentInspector::ClearReferenceSearches();
         if (m_deferredTransformPrefabRoot && HasLiveSelectedObject())
             m_deferredTransformPrefabRoot->PrefabOverrideCacheValid = false;
         m_deferredTransformPrefabRoot = nullptr;

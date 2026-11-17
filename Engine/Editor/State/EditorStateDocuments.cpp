@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "Core/Inspection/ComponentInspector.h"
 #include "Engine/Editor/State/EditorState.h"
 #include "Engine/Editor/Diagnostics/FrameActivity.h"
 #include "Core/Scene/SceneManager.h"
@@ -19,18 +20,18 @@
 #include "Core/Serialization/SceneSerializer.h"
 #include "Core/Serialization/Json.h"
 #include "Core/Serialization/PreparedPrefab.h"
-#include "Core/Compoonents/Mesh/Mesh.h"
-#include "Core/Compoonents/Camera/Camera.h"
-#include "Core/Compoonents/Materials/Material.h"
-#include "Core/Compoonents/Materials/Texture.h"
-#include "Core/Compoonents/Animation/Skeleton.h"
-#include "Core/Compoonents/Animation/AnimationBone.h"
-#include "Core/Compoonents/Animation/SkinnedMesh.h"
-#include "Core/Compoonents/Animation/AnimationManager.h"
-#include "Core/Compoonents/Animation/Model.h"
-#include "Core/Compoonents/Transform.h"
-#include "Core/Compoonents/Sprite/Sprite.h"
-#include "Core/Compoonents/Sprite/SpriteAnimationManager.h"
+#include "Core/Components/Mesh/Mesh.h"
+#include "Core/Components/Camera/Camera.h"
+#include "Core/Components/Materials/Material.h"
+#include "Core/Components/Materials/Texture.h"
+#include "Core/Components/Animation/Skeleton.h"
+#include "Core/Components/Animation/AnimationBone.h"
+#include "Core/Components/Animation/SkinnedMesh.h"
+#include "Core/Components/Animation/AnimationManager.h"
+#include "Core/Components/Animation/Model.h"
+#include "Core/Components/Transform.h"
+#include "Core/Components/Sprite/Sprite.h"
+#include "Core/Components/Sprite/SpriteAnimationManager.h"
 #include "Core/Importers/ModelImporter.h"
 #include "Core/Threading/JobScheduler.h"
 #include "Engine/Editor/Core/View/Templates/Assets/AssetPreviewCache.h"
@@ -117,7 +118,7 @@ void EditorState::OpenPrefabStageWithDocument(const std::string& path,
     m_prefabSceneView->SetTitle(prefabName + "###PrefabDocument:" + normalized);
     m_prefabSceneView->OnObjectSelected = [this](Engine::Core::Object* object)
     {
-        if (Engine::Core::Component::CaptureEditorReferencePick(object))
+        if (Engine::Core::ComponentInspector::CaptureReferencePick(object))
         {
             SetPrefabDirty(true);
             if (m_primaryProperties && m_primaryProperties->OnComponentsChanged)
@@ -554,7 +555,7 @@ void EditorState::ProcessPendingSceneAssetDocumentOpens()
         };
         view->OnObjectSelected = [this, raw](Engine::Core::Object* object)
         {
-            if (Engine::Core::Component::CaptureEditorReferencePick(object))
+            if (Engine::Core::ComponentInspector::CaptureReferencePick(object))
             {
                 if (m_primaryProperties && m_primaryProperties->OnComponentsChanged)
                     m_primaryProperties->OnComponentsChanged();

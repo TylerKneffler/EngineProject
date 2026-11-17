@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Core/Compoonents/Mesh/Mesh.h"
+#include "Core/Components/Mesh/Mesh.h"
 #include <glm/glm.hpp>
 #include <memory>
 #include <vector>

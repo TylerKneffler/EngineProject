@@ -5,8 +5,8 @@
 #include "Engine/Editor/Core/View/Views/PropertiesView.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Scene/Object.h"
-#include "Core/Compoonents/Transform.h"
-#include "Core/Compoonents/Physics/RigidBody.h"
+#include "Core/Components/Transform.h"
+#include "Core/Components/Physics/RigidBody.h"
 
 namespace Engine::Editor
 {

@@ -1,6 +1,6 @@
 #include "RealtimeLightingPipeline.h"
 #include "Core/Scene/Scene.h"
-#include "Core/Compoonents/Lighting/Light.h"
+#include "Core/Components/Lighting/Light.h"
 #include <algorithm>
 #include <cmath>
 #include <glm/geometric.hpp>

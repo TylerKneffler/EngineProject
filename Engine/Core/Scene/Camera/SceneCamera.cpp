@@ -1,7 +1,7 @@
 #include "Core/Scene/Scene.h"
-#include "Core/Compoonents/Camera/Camera.h"
-#include "Core/Compoonents/Mesh/Mesh.h"
-#include "Core/Compoonents/Particles/ParticleEmitter.h"
+#include "Core/Components/Camera/Camera.h"
+#include "Core/Components/Mesh/Mesh.h"
+#include "Core/Components/Particles/ParticleEmitter.h"
 #include <algorithm>
 #include <cmath>
 #include <glm/trigonometric.hpp>
@@ -87,7 +87,7 @@ Scene::Camera* Scene::FindGameCamera()
 
 void Scene::FocusEditorCamera(Object* obj)
 {
-    m_editorCameraFollowTarget = obj;
+    m_editorView.cameraFollowTarget = obj;
     Camera* cam = editorCamera.GetComponent<Camera>();
     if (!cam)
         return;
@@ -100,10 +100,10 @@ void Scene::FocusEditorCamera(Object* obj)
     const FocusBounds& bounds = meshes.hasPoints ? meshes : origins;
     const glm::vec3 targetPos = bounds.hasPoints
         ? (bounds.minimum + bounds.maximum) * 0.5f : objectPos;
-    m_editorCameraFollowPosition = objectPos;
+    m_editorView.cameraFollowPosition = objectPos;
     if (obj)
-        m_editorCameraFollowRotation = WorldRotation(*obj);
-    if (m_editorMode2D)
+        m_editorView.cameraFollowRotation = WorldRotation(*obj);
+    if (m_editorView.mode2D)
     {
         editorCamera.transform.position.x = targetPos.x;
         editorCamera.transform.position.y = targetPos.y;
@@ -134,26 +134,26 @@ void Scene::FocusEditorCamera(Object* obj)
 
 void Scene::UpdateEditorCameraFollow()
 {
-    if (!m_editorCameraFollowTarget)
+    if (!m_editorView.cameraFollowTarget)
         return;
 
-    const glm::vec3 current = m_editorCameraFollowTarget->transform.GetWorldPosition();
-    const glm::quat rotation = WorldRotation(*m_editorCameraFollowTarget);
-    const glm::quat change = rotation * glm::inverse(m_editorCameraFollowRotation);
+    const glm::vec3 current = m_editorView.cameraFollowTarget->transform.GetWorldPosition();
+    const glm::quat rotation = WorldRotation(*m_editorView.cameraFollowTarget);
+    const glm::quat change = rotation * glm::inverse(m_editorView.cameraFollowRotation);
     editorCamera.transform.position = current +
-        change * (glm::vec3(editorCamera.transform.position) - m_editorCameraFollowPosition);
+        change * (glm::vec3(editorCamera.transform.position) - m_editorView.cameraFollowPosition);
     if (Camera* cam = editorCamera.GetComponent<Camera>())
     {
-        cam->target = current + change * (cam->target - m_editorCameraFollowPosition);
+        cam->target = current + change * (cam->target - m_editorView.cameraFollowPosition);
         cam->up = change * cam->up;
     }
-    m_editorCameraFollowPosition = current;
-    m_editorCameraFollowRotation = rotation;
+    m_editorView.cameraFollowPosition = current;
+    m_editorView.cameraFollowRotation = rotation;
 }
 
 void Scene::StopEditorCameraFollow()
 {
-    m_editorCameraFollowTarget = nullptr;
+    m_editorView.cameraFollowTarget = nullptr;
 }
 
 }

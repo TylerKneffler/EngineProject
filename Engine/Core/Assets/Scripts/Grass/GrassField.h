@@ -1,11 +1,11 @@
 #pragma once
 
-#include "Core/Compoonents/Script.h"
-#include "Core/Compoonents/SpatialUpdate.h"
-#include "Core/Compoonents/PropertyMacros.h"
-#include "Core/Compoonents/Mesh/Mesh.h"
-#include "Core/Compoonents/Mesh/MeshInstanceLayerData.h"
-#include "Core/Compoonents/Terrain/TerrainObjectLayer.h"
+#include "Core/Components/Script.h"
+#include "Core/Components/SpatialUpdate.h"
+#include "Core/Components/PropertyMacros.h"
+#include "Core/Components/Mesh/Mesh.h"
+#include "Core/Components/Mesh/MeshInstanceLayerData.h"
+#include "Core/Components/Terrain/TerrainObjectLayer.h"
 #include "Core/Rendering/GrassPerformance.h"
 #include <chrono>
 #include <optional>

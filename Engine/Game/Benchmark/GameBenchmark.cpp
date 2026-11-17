@@ -6,11 +6,11 @@
 #include "Game/Benchmark/GameBenchmark.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Scene/Object.h"
-#include "Core/Compoonents/Camera/Camera.h"
-#include "Core/Compoonents/Mesh/Mesh.h"
-#include "Core/Compoonents/Terrain/Terrain.h"
-#include "Core/Compoonents/Terrain/TerrainManager.h"
-#include "Core/Compoonents/Terrain/TerrainObjectLayer.h"
+#include "Core/Components/Camera/Camera.h"
+#include "Core/Components/Mesh/Mesh.h"
+#include "Core/Components/Terrain/Terrain.h"
+#include "Core/Components/Terrain/TerrainManager.h"
+#include "Core/Components/Terrain/TerrainObjectLayer.h"
 #include "Core/Renderers/IGameRenderer.h"
 #include <algorithm>
 #include <chrono>

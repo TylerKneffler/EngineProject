@@ -1,6 +1,6 @@
 #include "Core/Serialization/PrefabLod.h"
 
-#include "Core/Compoonents/Mesh/Mesh.h"
+#include "Core/Components/Mesh/Mesh.h"
 #include "Core/Serialization/SceneSerializer.h"
 
 #include <algorithm>

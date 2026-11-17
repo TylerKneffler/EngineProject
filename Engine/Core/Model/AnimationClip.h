@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Core/Model/AnimationData.h"
-#include "Core/Compoonents/ComponentReference.h"
+#include "Core/Components/ComponentReference.h"
 #include "Core/Serialization/Json.h"
 #include <string>
 #include <vector>

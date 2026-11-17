@@ -1,5 +1,5 @@
 #pragma once
-#include "Core/Compoonents/Component.h"
+#include "Core/Components/Component.h"
 #include <vector>
 
 namespace Engine::Threading

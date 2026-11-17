@@ -2,7 +2,7 @@
 #include <cstdint>
 #include <string>
 #include <vector>
-#include "Core/Compoonents/Mesh/Mesh.h"
+#include "Core/Components/Mesh/Mesh.h"
 
 namespace Engine::Model
 {

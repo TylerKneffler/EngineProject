@@ -2,7 +2,7 @@
 #include "Core/Scene/Rendering/SceneRenderer/SceneRendererUtilities.h"
 
 #include "Core/Graphics/IGraphicsContext.h"
-#include "Core/Compoonents/Materials/Texture.h"
+#include "Core/Components/Materials/Texture.h"
 #include "Core/Model/LightingData.h"
 #include "Core/Scene/Scene.h"
 
@@ -300,7 +300,7 @@ void SceneRendererLighting::ResolveSkySun(const Scene& scene,
     const auto& settings = scene.settings;
     direction = glm::vec4(0.f);
     radiance = glm::vec4(0.f);
-    if (!settings.sunDiscEnabled || scene.m_editorMode2D ||
+    if (!settings.sunDiscEnabled || scene.m_editorView.mode2D ||
         glm::dot(sunDirection, sunDirection) < 1e-8f ||
         glm::dot(sunRadiance, sunRadiance) <= 0.f)
         return;
@@ -354,7 +354,7 @@ void SceneRendererLighting::PrepareSkyboxAndEnvironment(
         const glm::mat4 skyboxView = glm::mat4(glm::mat3(view));
         skyboxData.invVP = glm::inverse(proj * skyboxView);
         skyboxData.displayParams = {
-            scene.m_editorMode2D ? 1.f : 0.f,
+            scene.m_editorView.mode2D ? 1.f : 0.f,
             std::exp2(scene.settings.hdriExposure),
             glm::radians(scene.settings.hdriRotation),
             std::max(scene.settings.sunGlowIntensity, 0.f)};

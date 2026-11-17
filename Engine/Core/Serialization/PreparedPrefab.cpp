@@ -1,10 +1,10 @@
 #include "PreparedPrefab.h"
 #include "Core/Serialization/SceneSerializer.h"
-#include "Core/Compoonents/Mesh/Mesh.h"
-#include "Core/Compoonents/Materials/Material.h"
-#include "Core/Compoonents/Animation/Skeleton.h"
-#include "Core/Compoonents/Animation/SkinnedMesh.h"
-#include "Core/Compoonents/Animation/AnimationManager.h"
+#include "Core/Components/Mesh/Mesh.h"
+#include "Core/Components/Materials/Material.h"
+#include "Core/Components/Animation/Skeleton.h"
+#include "Core/Components/Animation/SkinnedMesh.h"
+#include "Core/Components/Animation/AnimationManager.h"
 #include <algorithm>
 #include <cctype>
 #include <filesystem>

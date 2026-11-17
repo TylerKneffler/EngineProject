@@ -1,8 +1,8 @@
 #pragma once
 
-#include "Core/Compoonents/Camera/Camera.h"
-#include "Core/Compoonents/Materials/Material.h"
-#include "Core/Compoonents/Mesh/Mesh.h"
+#include "Core/Components/Camera/Camera.h"
+#include "Core/Components/Materials/Material.h"
+#include "Core/Components/Mesh/Mesh.h"
 #include "Core/Scene/Object.h"
 #include "Core/Model/GraphicsQualitySettings.h"
 #include <algorithm>

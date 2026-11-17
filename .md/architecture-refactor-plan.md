@@ -23,8 +23,8 @@ concentrated in a few god classes and in directory sprawl.
 | `Scene` (`Core/Scene/Scene.h`) | 1,455-line header, ~196 methods, 19 friend classes | Physics, audio, clock, particle budget, GPU resources/pipelines, shadow caches, perf stats, UI input, portal raycasts, editor selection, editor camera follow, editor weight paint |
 | `Scene::Render` (`Core/Scene/Rendering/SceneRendering.cpp`) | ~2,857 lines in one function | Entire frame. The 19 `SceneRenderer*` friend classes reach into Scene private state instead of owning it |
 | `EditorState` (`Editor/State/EditorState.h`) | 1,074-line header, ~247 methods, 20 .cpp files | Animation, timeline, rig UI, mesh editing, skeleton, lighting, import, documents, history, panels |
-| `TerrainManager` (`Core/Compoonents/Terrain/TerrainManager.h`) | ~111 methods, 14 .cpp files | Streaming, far-terrain cache/worker, colliders, sun shadow, serialization, editing, prefab instances: a subsystem posing as a component |
-| `Mesh` (`Core/Compoonents/Mesh/Mesh.h`) | ~134 methods, 10 .cpp files | Geometry, LOD, morph, pose, slicing, serialization, terrain |
+| `TerrainManager` (`Core/Components/Terrain/TerrainManager.h`) | ~111 methods, 14 .cpp files | Streaming, far-terrain cache/worker, colliders, sun shadow, serialization, editing, prefab instances: a subsystem posing as a component |
+| `Mesh` (`Core/Components/Mesh/Mesh.h`) | ~134 methods, 10 .cpp files | Geometry, LOD, morph, pose, slicing, serialization, terrain |
 | `Component` base (`Core/component.cpp`) | ~800 of 1,247 lines are inspector UI | `DrawProperties`, asset picker, reference picking, static editor state |
 | `Object` (`Core/Object.h`) | ~half the header is prefab bookkeeping | Prefab snapshot/override caches, editor-only flags |
 
@@ -42,14 +42,14 @@ produce a real collaborating class with its own state.
 ### Directory problems
 
 - Base types loose in `Core/`: `Object.h`, `component.h`, `Script.h`, `SceneManager.h`, `ComponentReference.h`, `PropertyMacros.h`.
-- Component implementations away from their headers: `RigidBody`/`Cloth` headers in `Compoonents/Physics`, implementations in `Core/Physics/{RigidBody,Cloth}`.
+- Component implementations away from their headers: `RigidBody`/`Cloth` headers in `Components/Physics`, implementations in `Core/Physics/{RigidBody,Cloth}`.
 - Rendering in 4 roots: `Graphics/`, `Renderers/`, `Rendering/`, `Scene/Rendering/`.
-- Lighting in 3 places: `Compoonents/Lighting`, `Rendering/Lighting`, `Scene/Lighting`.
+- Lighting in 3 places: `Components/Lighting`, `Rendering/Lighting`, `Scene/Lighting`.
 - `Time/` and `Timing/` both exist.
 - `Model/` is a grab bag of settings, asset formats and an algorithm (`MeshLodGenerator`).
 - Stale serialization copies at `Serialization/Scene*SerializationBehavior.cpp` (excluded by CMake regex; diverged from live copies).
 - Empty `Physics/World/`.
-- `Compoonents/Obj/` holds only LOD headers. `Animation/SceneCameraLightTrack` belongs in `Cinematics/`.
+- `Components/Obj/` holds only LOD headers. `Animation/SceneCameraLightTrack` belongs in `Cinematics/`.
 - `Editor/Core/` is confusing next to `Engine/Core`. Loose build files in `Editor/` root.
 
 Accepted exceptions: small single-purpose dirs (`IO`, `Math`, `Memory`, `Input`,
@@ -64,11 +64,10 @@ Accepted exceptions: small single-purpose dirs (`IO`, `Math`, `Memory`, `Input`,
 - [x] Remove empty `Core/Physics/World/`.
 - [x] Merge `Core/Timing/` into `Core/Time/` (`FramePacer.h`; namespace unchanged).
 - [x] Move `RigidBody`/`Cloth` component implementations next to their headers:
-  `Core/Physics/RigidBody/RigidBodyPhysics.cpp` → `Core/Compoonents/Physics/RigidBody.cpp`,
-  `Core/Physics/Cloth/ClothPhysics.cpp` → `Core/Compoonents/Physics/Cloth.cpp`.
-- [?] Rename `Compoonents` → `Components`. `agents.md` says the spelling is
-  intentional. Needs owner decision. If approved: one dedicated commit, `git mv`
-  plus include rewrite, update `agents.md` and `.local/tests`.
+  `Core/Physics/RigidBody/RigidBodyPhysics.cpp` → `Core/Components/Physics/RigidBody.cpp`,
+  `Core/Physics/Cloth/ClothPhysics.cpp` → `Core/Components/Physics/Cloth.cpp`.
+- [x] Rename `Compoonents` → `Components` (owner confirmed the spelling was not intentional). `git mv` plus include rewrite across 285 files. `agents.md` is updated.
+  - **Breaking for external projects** that include `Core/Compoonents/...` paths directly; no forwarders were added for that directory.
 
 ## Phase 2: Base types at their roots
 
@@ -76,7 +75,7 @@ Target layout:
 
 ```
 Core/Scene/        Scene.h, SceneManager.h, ComponentRegistry.h, Object.h
-Core/Compoonents/  Component.h, Script.h, ComponentReference.h, PropertyMacros.h
+Core/Components/  Component.h, Script.h, ComponentReference.h, PropertyMacros.h
                    Transform.h, ...subclass dirs (Animation/, Mesh/, Physics/, ...)
 ```
 
@@ -84,14 +83,16 @@ Core/Compoonents/  Component.h, Script.h, ComponentReference.h, PropertyMacros.h
 - [x] Move `component.{h,cpp}` (renamed `Component.*`), `Script.h`, `ComponentReference.*`, `PropertyMacros.h` into the components root.
 - [x] Rewrite all engine and `.local/tests` includes to the new paths (220 files).
 - [x] Leave forwarding headers at the old `Core/*.h` paths so external projects keep compiling. **Follow-up:** delete them once projects have migrated.
-- [x] `Compoonents/Obj/` → `Compoonents/Mesh/Lod/`.
+- [x] `Components/Obj/` → `Components/Mesh/Lod/`.
 - [x] `Animation/SceneCameraLightTrack` → `Cinematics/`.
 - [ ] Remaining loose `Core/` files (`Project`, `ProjectLoader`, `AssetRecord`, `Window`) → decide on `Core/Project/` and `Core/Platform/` homes.
 
 ## Phase 3: Remove Core → Editor dependency and editor state from runtime types
 
-- [ ] Move `IEditorUi` into Core as an inspection interface (e.g. `Core/Inspection/IInspectorUi.h`); Editor implements it. Core includes of `Engine/Editor/...` go to zero.
-- [ ] Extract generic inspector code from `component.cpp` (`DrawProperties`, `DrawPropertiesMulti`, reference/asset pickers, static pick state) into `ComponentInspector`. `Component` keeps only the field registry and metadata.
+- [x] Split a narrow `Engine::Core::IInspectorUi` (`Core/Inspection/IInspectorUi.h`) out of `IEditorUi`: the 37 widget methods component inspectors use, plus `InspectorColor` (`EditorUiColor` is now an alias of it). `IEditorUi` derives from it and keeps the 88 editor-only methods. `DrawProperties` and the picker helpers take `IInspectorUi&`. Core includes of `Editor/...` went from 52 to **0**.
+  - **Breaking for external projects:** scripts overriding `DrawProperties(Engine::Editor::IEditorUi&)` must change to `DrawProperties(Engine::Core::IInspectorUi&)`. The in-repo scripts (`FoxRagdollBlend`, `TerrainGen`, `Rotate`) are updated.
+- [x] Extract generic inspector code from `Component.cpp` into `Engine::Core::ComponentInspector` (`Core/Inspection/ComponentInspector.{h,cpp}`): the generic field drawer, reference and asset pickers, multi-edit, static session state and the Win32 file dialog. `Component.cpp` went from 1,247 to ~110 lines. `Component` keeps one-line delegates (`DrawProperties`, `DrawPropertiesMulti`, `DrawReferenceProperty`, `DrawAssetPathPicker`), so component overrides are unchanged. `m_multiEditTargets` and `IsEditorValueMixed` are gone from `Component`; field groups are exposed read-only through `FindEditorFieldMetadata`. Editor session calls moved from `Component::*Editor*` to `ComponentInspector::{SetAssetDirectory, ClearReferenceSearches, HasReferencePick, CancelReferencePick, CaptureReferencePick}`.
+  - Follow-up: `DrawGeneric` still special-cases `Material` (the shader field) and `Mesh` (meshPath drops). Replace these with a per-field custom-drawer hook.
 - [ ] Move editor selection, preview object, mesh-edit pose, weight paint, bone visibility, 2D mode and camera follow off `Scene` into an editor-side `EditorSceneContext`. The renderer reads it through a small overlay/debug-view struct passed into render.
 - [ ] Move `editorHidden`/`editorOverlays` off `Object` into an editor-side map keyed by `ObjectId`.
 - [ ] Extract prefab-instance bookkeeping from `Object` into `PrefabInstanceLink` (held by pointer, null for non-prefab objects).
@@ -109,7 +110,7 @@ Core/Compoonents/  Component.h, Script.h, ComponentReference.h, PropertyMacros.h
   Core/Rendering/           SceneRenderer + passes, Lighting/, Portal/, Sprites/, culling, LOD
   ```
   Move `PostProcess.cpp` out of `Graphics/`; move `ExportFrameSequence`, `HardwareSimulation`, `AutoQuality` to fitting homes (export / quality).
-- [ ] Consolidate lighting: components stay in `Compoonents/Lighting`; scene-side lighting code joins `Rendering/Lighting`.
+- [ ] Consolidate lighting: components stay in `Components/Lighting`; scene-side lighting code joins `Rendering/Lighting`.
 
 ## Phase 5: Split remaining god classes
 

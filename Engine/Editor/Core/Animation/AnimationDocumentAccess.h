@@ -1,11 +1,11 @@
 #pragma once
-#include "Core/Compoonents/ComponentReference.h"
+#include "Core/Components/ComponentReference.h"
 #include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
-#include "Core/Compoonents/Animation/AnimationManager.h"
-#include "Core/Compoonents/Animation/Model.h"
-#include "Core/Compoonents/Animation/Skeleton.h"
-#include "Core/Compoonents/Animation/SkinnedMesh.h"
+#include "Core/Components/Animation/AnimationManager.h"
+#include "Core/Components/Animation/Model.h"
+#include "Core/Components/Animation/Skeleton.h"
+#include "Core/Components/Animation/SkinnedMesh.h"
 #include "Core/Model/RigAsset.h"
 #include <algorithm>
 #include <cctype>

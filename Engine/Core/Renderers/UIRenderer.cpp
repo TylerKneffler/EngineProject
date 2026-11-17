@@ -2,12 +2,12 @@
 #include "Core/Graphics/GraphicsCommandPacket.h"
 
 #include "Core/UI/UILayout.h"
-#include "Core/Compoonents/UI/Canvas.h"
-#include "Core/Compoonents/UI/UIButton.h"
-#include "Core/Compoonents/UI/UIImage.h"
-#include "Core/Compoonents/UI/UIObject.h"
-#include "Core/Compoonents/UI/UIText.h"
-#include "Core/Compoonents/Materials/Texture.h"
+#include "Core/Components/UI/Canvas.h"
+#include "Core/Components/UI/UIButton.h"
+#include "Core/Components/UI/UIImage.h"
+#include "Core/Components/UI/UIObject.h"
+#include "Core/Components/UI/UIText.h"
+#include "Core/Components/Materials/Texture.h"
 #include <limits>
 #include "Core/Graphics/IGraphicsBuffer.h"
 #include "Core/Graphics/IGraphicsContext.h"

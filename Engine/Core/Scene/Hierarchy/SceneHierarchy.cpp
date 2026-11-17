@@ -1,30 +1,30 @@
 #include "Core/Serialization/PrefabLoadProfile.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Scene/SceneManager.h"
-#include "Core/Compoonents/Mesh/Mesh.h"
-#include "Core/Compoonents/Materials/Material.h"
+#include "Core/Components/Mesh/Mesh.h"
+#include "Core/Components/Materials/Material.h"
 #include <typeinfo>
-#include "Core/Compoonents/Animation/TwoBoneIK.h"
-#include "Core/Compoonents/Animation/ChainIK.h"
-#include "Core/Compoonents/Animation/AnimationManager.h"
-#include "Core/Compoonents/Animation/RigController.h"
-#include "Core/Compoonents/Animation/RigConstraints.h"
-#include "Core/Compoonents/Animation/RigMorphControls.h"
-#include "Core/Compoonents/Physics/RigPhysicsBinding.h"
-#include "Core/Compoonents/Materials/MaterialPropertyMorph.h"
-#include "Core/Compoonents/Constraints/TransformConstraint.h"
+#include "Core/Components/Animation/TwoBoneIK.h"
+#include "Core/Components/Animation/ChainIK.h"
+#include "Core/Components/Animation/AnimationManager.h"
+#include "Core/Components/Animation/RigController.h"
+#include "Core/Components/Animation/RigConstraints.h"
+#include "Core/Components/Animation/RigMorphControls.h"
+#include "Core/Components/Physics/RigPhysicsBinding.h"
+#include "Core/Components/Materials/MaterialPropertyMorph.h"
+#include "Core/Components/Constraints/TransformConstraint.h"
 #include "Core/Audio/Audio.h"
-#include "Core/Compoonents/Physics/SpatialManipulator.h"
-#include "Core/Compoonents/Animation/SoftTissueSurface.h"
-#include "Core/Compoonents/Physics/RigidBody.h"
-#include "Core/Compoonents/Physics/Cloth.h"
-#include "Core/Compoonents/Animation/IKBone.h"
-#include "Core/Compoonents/Particles/ParticleEmitter.h"
+#include "Core/Components/Physics/SpatialManipulator.h"
+#include "Core/Components/Animation/SoftTissueSurface.h"
+#include "Core/Components/Physics/RigidBody.h"
+#include "Core/Components/Physics/Cloth.h"
+#include "Core/Components/Animation/IKBone.h"
+#include "Core/Components/Particles/ParticleEmitter.h"
 #include "Core/Physics/Physics.h"
 #include "Core/Physics/IPhysicsAdapter.h"
 #include "Core/Renderers/UIRenderer.h"
 #include "Core/UI/UILayout.h"
-#include "Core/Compoonents/UI/Canvas.h"
+#include "Core/Components/UI/Canvas.h"
 #include "Core/Input/NativeInputSnapshot.h"
 #include "Core/Threading/ComponentUpdateScheduler.h"
 #include "Core/Threading/JobScheduler.h"
@@ -895,7 +895,7 @@ void Scene::RemoveObject(Engine::Core::Object* obj)
             if (component) component->FenceBackgroundWork();
 
     if (std::find(objectsToRemove.begin(), objectsToRemove.end(),
-            m_editorCameraFollowTarget) != objectsToRemove.end())
+            m_editorView.cameraFollowTarget) != objectsToRemove.end())
         StopEditorCameraFollow();
 
     // Sever external links while every endpoint and hierarchy path is still
@@ -933,24 +933,24 @@ void Scene::RemoveObject(Engine::Core::Object* obj)
             siblings.end());
         obj->Parent = nullptr;
     }
-    if (m_selectedObject &&
+    if (m_editorView.selectedObject &&
         std::find(
             objectsToRemove.begin(),
             objectsToRemove.end(),
-            m_selectedObject) != objectsToRemove.end())
+            m_editorView.selectedObject) != objectsToRemove.end())
     {
-        m_selectedObject = nullptr;
-        m_selectedPlacementId = 0;
-        m_selectedPlacementLayer = nullptr;
+        m_editorView.selectedObject = nullptr;
+        m_editorView.selectedPlacementId = 0;
+        m_editorView.selectedPlacementLayer = nullptr;
     }
-    if (m_previewObject &&
+    if (m_editorView.previewObject &&
         std::find(objectsToRemove.begin(), objectsToRemove.end(),
-            m_previewObject) != objectsToRemove.end())
+            m_editorView.previewObject) != objectsToRemove.end())
     {
-        m_previewObject = nullptr;
+        m_editorView.previewObject = nullptr;
     }
 
-    m_editorSelectedMesh = nullptr;
+    m_editorView.selectedMesh = nullptr;
     if(retireRenderLeaf)
     {
         // Deliver logical destruction now, on the scene owner. The fence
@@ -1067,11 +1067,11 @@ void Scene::ClearObjects()
     m_objectIds.clear();
     m_objectsById.clear();
     m_componentSnapshotCache.clear();
-    m_selectedObject = nullptr;
-    m_selectedPlacementId = 0;
-    m_selectedPlacementLayer = nullptr;
-    m_editorSelectedMesh = nullptr;
-    m_previewObject = nullptr;
+    m_editorView.selectedObject = nullptr;
+    m_editorView.selectedPlacementId = 0;
+    m_editorView.selectedPlacementLayer = nullptr;
+    m_editorView.selectedMesh = nullptr;
+    m_editorView.previewObject = nullptr;
     NotifyStructureChanged();
     CommitPendingObjectChanges();
 }

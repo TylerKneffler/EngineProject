@@ -1,4 +1,5 @@
 
+#include "Core/Inspection/ComponentInspector.h"
 #include "SceneView.h"
 #include <chrono>
 #include "Core/Graphics/GraphicsCommandPacket.h"
@@ -16,24 +17,24 @@
 #include "Engine/Editor/Core/View/Templates/Common/AssetPathTemplate.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 #include "Core/Scene/Scene.h"
-#include "Core/Compoonents/Camera/Camera.h"
-#include "Core/Compoonents/Animation/AnimationBone.h"
-#include "Core/Compoonents/Animation/Model.h"
-#include "Core/Compoonents/Animation/AnimationManager.h"
-#include "Core/Compoonents/Mesh/Mesh.h"
-#include "Core/Compoonents/Terrain/Terrain.h"
-#include "Core/Compoonents/Terrain/TerrainObjectLayer.h"
-#include "Core/Compoonents/Terrain/TerrainManager.h"
-#include "Core/Compoonents/Terrain/TerrainPlacementHandle.h"
+#include "Core/Components/Camera/Camera.h"
+#include "Core/Components/Animation/AnimationBone.h"
+#include "Core/Components/Animation/Model.h"
+#include "Core/Components/Animation/AnimationManager.h"
+#include "Core/Components/Mesh/Mesh.h"
+#include "Core/Components/Terrain/Terrain.h"
+#include "Core/Components/Terrain/TerrainObjectLayer.h"
+#include "Core/Components/Terrain/TerrainManager.h"
+#include "Core/Components/Terrain/TerrainPlacementHandle.h"
 #include <set>
 #include <filesystem>
 #include <vector>
-#include "Core/Compoonents/Camera/Camera.h"
-#include "Core/Compoonents/Transform.h"
-#include "Core/Compoonents/Sprite/Sprite.h"
-#include "Core/Compoonents/Particles/ParticleEmitter.h"
-#include "Core/Compoonents/Sprite/SpriteAnimationManager.h"
-#include "Core/Compoonents/Lighting/LightProbe.h"
+#include "Core/Components/Camera/Camera.h"
+#include "Core/Components/Transform.h"
+#include "Core/Components/Sprite/Sprite.h"
+#include "Core/Components/Particles/ParticleEmitter.h"
+#include "Core/Components/Sprite/SpriteAnimationManager.h"
+#include "Core/Components/Lighting/LightProbe.h"
 #include "Core/Graphics/IGraphicsContext.h"
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "../Focus/WindowFocusHandler.h"
@@ -1591,7 +1592,7 @@ void SceneView::DrawPanel(IEditorUi& ui)
     if (selectSceneObject && !documentToolsConsumedClick &&
         !meshConsumedClick && AllowObjectTransform)
     {
-        Engine::Core::Object* bone = Engine::Core::Component::HasEditorReferencePick()
+        Engine::Core::Object* bone = Engine::Core::ComponentInspector::HasReferencePick()
             ? ScenePlacementAndPicking::PickBoneInViewport(*m_scene,
                 input.mousePosInViewport, input.available) : nullptr;
         uint64_t pickedPlacementId = 0;

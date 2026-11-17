@@ -6,7 +6,7 @@
 #include "Core/Renderers/DX11/DX11EditorRenderer.h"
 #include "Core/Renderers/IEditorRenderer.h"
 #include "Core/Scene/Scene.h"
-#include "Core/Compoonents/Camera/Camera.h"
+#include "Core/Components/Camera/Camera.h"
 
 #include <cstdlib>
 #if defined(_WIN32)

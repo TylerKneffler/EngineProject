@@ -1,7 +1,7 @@
 #pragma once
 
-#include "Core/Compoonents/Script.h"
-#include "Core/Compoonents/PropertyMacros.h"
+#include "Core/Components/Script.h"
+#include "Core/Components/PropertyMacros.h"
 #include <string>
 
 // Runs animation, then blends into IK. Mesh-collider scenes keep the bones

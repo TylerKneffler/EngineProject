@@ -2,11 +2,11 @@
 
 #include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
-#include "Core/Compoonents/Terrain/Terrain.h"
-#include "Core/Compoonents/Terrain/TerrainManager.h"
-#include "Core/Compoonents/Terrain/TerrainObjectLayer.h"
-#include "Core/Compoonents/Terrain/TerrainRegionEdit.h"
-#include "Core/Compoonents/Terrain/TerrainSurfaceSample.h"
+#include "Core/Components/Terrain/Terrain.h"
+#include "Core/Components/Terrain/TerrainManager.h"
+#include "Core/Components/Terrain/TerrainObjectLayer.h"
+#include "Core/Components/Terrain/TerrainRegionEdit.h"
+#include "Core/Components/Terrain/TerrainSurfaceSample.h"
 #include "imgui.h"
 
 #include <algorithm>

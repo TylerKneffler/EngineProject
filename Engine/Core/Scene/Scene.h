@@ -5,11 +5,11 @@
 #include "Core/Rendering/DrawBatchPreparation.h"
 #include "Core/Rendering/ShaderSourceCache.h"
 #include "Core/Rendering/UploadRecordCache.h"
-#include "Core/Compoonents/TransformHierarchy.h"
+#include "Core/Components/TransformHierarchy.h"
 #include "Core/Scene/ComponentRegistry.h"
 #include "Core/Rendering/PersistentInstanceBatches.h"
 #include "Core/Rendering/InstanceTilePreparation.h"
-#include "Core/Compoonents/SpatialUpdate.h"
+#include "Core/Components/SpatialUpdate.h"
 #include <glm/gtc/quaternion.hpp>
 #include "Core/Scene/Object.h"
 #include "Core/Graphics/IPipelineState.h"
@@ -27,9 +27,9 @@
 #include "Core/Rendering/RenderSpatialIndex.h"
 #include "Core/Rendering/AutomaticInstancing.h"
 #include "Core/Scene/Rendering/SceneRenderer/ScenePerformanceHeat.h"
-#include "Core/Compoonents/Terrain/TerrainPlacementHandle.h"
 #include "Core/Physics/Physics.h"
 #include "Core/Scene/Spatial/WarpVolume.h"
+#include "Core/Scene/EditorViewState.h"
 #include <glm/glm.hpp>
 #include <array>
 #include <atomic>
@@ -525,53 +525,41 @@ public:
     {
         return m_lastShadowCpuTiming;
     }
-    void SetSelectedObject(Object* obj)
-    {
-        m_selectedObject = obj;
-        m_selectedPlacementId = 0;
-        m_selectedPlacementLayer = nullptr;
-        // A terrain placement proxy selects (and outlines) its single
-        // instance, whichever UI path made the selection.
-        if (const auto* handle = obj
-                ? obj->GetComponent<Engine::Components::TerrainPlacementHandle>() : nullptr;
-            handle && handle->placementId != 0 && obj->Parent)
-        {
-            m_selectedPlacementId = handle->placementId;
-            m_selectedPlacementLayer = obj->Parent;
-        }
-    }
-    Object* GetSelectedObject() const { return m_selectedObject; }
+    // ---- Editor view state ----------------------------------------------------
+    // All editor-only selection/overlay/camera state lives in EditorViewState.
+    // The accessors below forward to it for existing editor call sites.
+    EditorViewState& GetEditorView() { return m_editorView; }
+    const EditorViewState& GetEditorView() const { return m_editorView; }
+    void SetSelectedObject(Object* obj) { m_editorView.SelectObject(obj); }
+    Object* GetSelectedObject() const { return m_editorView.selectedObject; }
     void SetSelectedPlacementId(uint64_t id, Object* layer = nullptr)
-    {
-        m_selectedPlacementId = id;
-        m_selectedPlacementLayer = id != 0 ? layer : nullptr;
-    }
-    uint64_t GetSelectedPlacementId() const { return m_selectedPlacementId; }
+    { m_editorView.SelectPlacement(id, layer); }
+    uint64_t GetSelectedPlacementId() const { return m_editorView.selectedPlacementId; }
     void SetEditorSelectedMesh(Engine::Components::Mesh* mesh)
-    { m_editorSelectedMesh = mesh; }
+    { m_editorView.selectedMesh = mesh; }
     Engine::Components::Mesh* GetEditorSelectedMesh() const
-    { return m_editorSelectedMesh; }
+    { return m_editorView.selectedMesh; }
     void SetEditorMeshEditPose(bool enabled)
     {
-        if (m_editorMeshEditPose == enabled) return;
-        m_editorMeshEditPose = enabled;
+        if (m_editorView.meshEditPose == enabled) return;
+        m_editorView.meshEditPose = enabled;
         m_renderFramePrepared = false;
     }
-    bool IsEditorMeshEditPose() const { return m_editorMeshEditPose; }
+    bool IsEditorMeshEditPose() const { return m_editorView.meshEditPose; }
     // Viewport preference only; leave individual rig visibility and saved assets intact.
-    void SetEditorBonesVisible(bool visible) { m_editorBonesVisible = visible; }
-    bool AreEditorBonesVisible() const { return m_editorBonesVisible; }
+    void SetEditorBonesVisible(bool visible) { m_editorView.bonesVisible = visible; }
+    bool AreEditorBonesVisible() const { return m_editorView.bonesVisible; }
     void SetEditorWeightPaint(Engine::Components::Mesh* mesh, int bone)
     {
-        if (m_editorWeightPaintMesh == mesh && m_editorWeightPaintBone == bone)
+        if (m_editorView.weightPaintMesh == mesh && m_editorView.weightPaintBone == bone)
             return;
-        m_editorWeightPaintMesh = mesh;
-        m_editorWeightPaintBone = bone;
+        m_editorView.weightPaintMesh = mesh;
+        m_editorView.weightPaintBone = bone;
         m_renderFramePrepared = false;
     }
-    void SetPreviewObject(Object* obj) { m_previewObject = obj; }
+    void SetPreviewObject(Object* obj) { m_editorView.previewObject = obj; }
     void SetEditorMode2D(bool enabled);
-    bool IsEditorMode2D() const { return m_editorMode2D; }
+    bool IsEditorMode2D() const { return m_editorView.mode2D; }
     void SetDistanceLightingSettings(
         const Engine::Model::DistanceLightingSettings& distanceSettings)
     {
@@ -1412,21 +1400,8 @@ private:
     void FlushPendingObjectAdditions();
     void FlushPendingObjectRemovals();
     void EnforceParticleBudget();
-    Object* m_selectedObject = nullptr;
-    uint64_t m_selectedPlacementId = 0;
-    Object* m_selectedPlacementLayer = nullptr;
-    Engine::Components::Mesh* m_editorSelectedMesh = nullptr;
-    bool m_editorMeshEditPose = false;
-    bool m_editorBonesVisible = true;
-    Engine::Components::Mesh* m_editorWeightPaintMesh = nullptr;
+    EditorViewState m_editorView;
     Renderer::PerformanceHeatMap m_performanceHeat;
-    int m_editorWeightPaintBone = -1;
-    Object* m_previewObject = nullptr;
-    bool m_editorMode2D = false;
-    bool m_editorCameraModeInitialized = false;
-    Object* m_editorCameraFollowTarget = nullptr;
-    glm::vec3 m_editorCameraFollowPosition { 0.f };
-    glm::quat m_editorCameraFollowRotation { 1.f, 0.f, 0.f, 0.f };
 
     // Long-range terrain alone can contribute 289 patch meshes. Truncating
     // ordinary views at 64 draws left square background holes even though the

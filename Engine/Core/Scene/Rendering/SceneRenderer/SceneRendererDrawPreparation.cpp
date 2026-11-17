@@ -1,14 +1,14 @@
 #include "Core/Scene/Rendering/SceneRenderer/SceneRendererDrawPreparation.h"
 
-#include "Core/Compoonents/Materials/Material.h"
-#include "Core/Compoonents/Mesh/Mesh.h"
-#include "Core/Compoonents/Sprite/Sprite.h"
-#include "Core/Compoonents/Terrain/Terrain.h"
-#include "Core/Compoonents/Terrain/TerrainManager.h"
-#include "Core/Compoonents/Terrain/TerrainBatchAppearance.h"
-#include "Core/Compoonents/Terrain/TerrainLayerArrays.h"
-#include "Core/Compoonents/Camera/Camera.h"
-#include "Core/Compoonents/Materials/Texture.h"
+#include "Core/Components/Materials/Material.h"
+#include "Core/Components/Mesh/Mesh.h"
+#include "Core/Components/Sprite/Sprite.h"
+#include "Core/Components/Terrain/Terrain.h"
+#include "Core/Components/Terrain/TerrainManager.h"
+#include "Core/Components/Terrain/TerrainBatchAppearance.h"
+#include "Core/Components/Terrain/TerrainLayerArrays.h"
+#include "Core/Components/Camera/Camera.h"
+#include "Core/Components/Materials/Texture.h"
 #include "Core/Rendering/Lighting/EnvironmentMap.h"
 #include "Core/Rendering/MaterialCachePolicy.h"
 #include "Core/Scene/Rendering/SceneRenderer/SceneRendererUtilities.h"
@@ -104,12 +104,12 @@ Engine::Components::Mesh* SceneRendererDrawPreparation::ScreenLodPolicy(
     auto* source = draw.object
         ? draw.object->GetComponent<Engine::Components::Mesh>() : nullptr;
     const bool editorSelection = includeEditorVisuals &&
-        (draw.object == scene.m_selectedObject ||
-            source == scene.m_editorSelectedMesh ||
-            source == scene.m_editorWeightPaintMesh);
+        (draw.object == scene.m_editorView.selectedObject ||
+            source == scene.m_editorView.selectedMesh ||
+            source == scene.m_editorView.weightPaintMesh);
     const bool eligible = source && source->screenLodSelection &&
         !source->distanceLodOverride && !hasPortalViews &&
-        !scene.m_editorMode2D && !draw.blended && !draw.preview &&
+        !scene.m_editorView.mode2D && !draw.blended && !draw.preview &&
         !draw.pmxOutline && draw.mesh && draw.mesh->HasBounds() &&
         !draw.mesh->HasMorphTargets() && !draw.mesh->HasSurfaceOffsets() &&
         draw.objectData.skinParams.y <= 0.f &&

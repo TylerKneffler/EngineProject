@@ -1,8 +1,8 @@
 #include "Core/Scene/Rendering/SceneRenderer/SceneRendererParticles.h"
 
 #include "Core/Scene/Scene.h"
-#include "Core/Compoonents/Particles/ParticleEmitter.h"
-#include "Core/Compoonents/Materials/Texture.h"
+#include "Core/Components/Particles/ParticleEmitter.h"
+#include "Core/Components/Materials/Texture.h"
 #include "Core/Graphics/IGraphicsBuffer.h"
 #include "Core/Graphics/IGraphicsContext.h"
 #include "Core/Graphics/IGraphicsProvider.h"

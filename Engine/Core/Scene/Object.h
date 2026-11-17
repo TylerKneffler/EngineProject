@@ -2,8 +2,8 @@
 #include "pch.h"
 #include <list>
 #include <algorithm>
-#include "Core/Compoonents/Component.h"         
-#include "Core/Compoonents/Transform.h"
+#include "Core/Components/Component.h"         
+#include "Core/Components/Transform.h"
 #include "Core/Prefab/PrefabAsset.h"
 
 namespace Engine::Scene { class Scene; }

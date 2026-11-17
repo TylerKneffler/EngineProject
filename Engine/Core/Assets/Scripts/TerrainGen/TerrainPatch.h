@@ -1,7 +1,7 @@
 #pragma once
 
-#include "Core/Compoonents/PropertyMacros.h"
-#include "Core/Compoonents/Script.h"
+#include "Core/Components/PropertyMacros.h"
+#include "Core/Components/Script.h"
 
 // Identifies one independently renderable mesh batch inside a terrain chunk.
 class TerrainPatch final : public Engine::Core::Script

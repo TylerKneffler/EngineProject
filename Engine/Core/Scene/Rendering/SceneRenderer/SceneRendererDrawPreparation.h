@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Core/Scene/Scene.h"
-#include "Core/Compoonents/Materials/Material.h"
+#include "Core/Components/Materials/Material.h"
 
 #include <array>
 #include <cstdint>

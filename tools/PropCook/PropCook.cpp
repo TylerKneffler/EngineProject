@@ -28,7 +28,7 @@
 // stay locked. Every LOD is simplified from the full source; tangents are
 // rebuilt per LOD.
 
-#include "Core/Compoonents/Mesh/Mesh.h"
+#include "Core/Components/Mesh/Mesh.h"
 
 #include <ufbx.h>
 

@@ -3,13 +3,13 @@
 // through the scene view's SceneTerrainTools.
 #include "Core/Scene/Scene.h"
 #include "Core/Scene/Object.h"
-#include "Core/Compoonents/Mesh/Mesh.h"
-#include "Core/Compoonents/Terrain/Terrain.h"
-#include "Core/Compoonents/Terrain/TerrainManager.h"
-#include "Core/Compoonents/Terrain/TerrainObjectLayer.h"
-#include "Core/Compoonents/Terrain/TerrainSurfaceSample.h"
-#include "Core/Compoonents/Terrain/TerrainHeightArchive.h"
-#include "Core/Compoonents/Terrain/TerrainRegionEdit.h"
+#include "Core/Components/Mesh/Mesh.h"
+#include "Core/Components/Terrain/Terrain.h"
+#include "Core/Components/Terrain/TerrainManager.h"
+#include "Core/Components/Terrain/TerrainObjectLayer.h"
+#include "Core/Components/Terrain/TerrainSurfaceSample.h"
+#include "Core/Components/Terrain/TerrainHeightArchive.h"
+#include "Core/Components/Terrain/TerrainRegionEdit.h"
 #include "Editor/Core/View/Views/Scene/SceneTerrainTools.h"
 
 #include <chrono>

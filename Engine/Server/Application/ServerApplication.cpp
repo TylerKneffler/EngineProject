@@ -1,8 +1,8 @@
 #include "Server/Application/ServerApplication.h"
 
-#include "Core/Compoonents/Mesh/Mesh.h"
-#include "Core/Compoonents/Physics/RigidBody.h"
-#include "Core/Compoonents/Physics/SpatialManipulator.h"
+#include "Core/Components/Mesh/Mesh.h"
+#include "Core/Components/Physics/RigidBody.h"
+#include "Core/Components/Physics/SpatialManipulator.h"
 #include "Core/Scene/Object.h"
 #include "Core/Physics/Physics.h"
 #include "Core/Scene/Scene.h"

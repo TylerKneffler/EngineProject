@@ -1,9 +1,9 @@
 #include "Core/Scene/Rendering/SceneRenderer/SceneInstanceBatching.h"
 #include "Core/Scene/Rendering/SceneRenderer/SceneRendererUtilities.h"
-#include "Core/Compoonents/Mesh/Mesh.h"
-#include "Core/Compoonents/Physics/SpatialManipulator.h"
-#include "Core/Compoonents/Materials/Material.h"
-#include "Core/Compoonents/Terrain/TerrainObjectLayer.h"
+#include "Core/Components/Mesh/Mesh.h"
+#include "Core/Components/Physics/SpatialManipulator.h"
+#include "Core/Components/Materials/Material.h"
+#include "Core/Components/Terrain/TerrainObjectLayer.h"
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Core/Rendering/RenderJobs.h"
 #include <algorithm>
@@ -41,22 +41,22 @@ SceneInstanceBatching::Result SceneInstanceBatching::Prepare(Scene& scene,
             !draw.material->shader.empty();
         const auto* instanceData = draw.mesh && draw.mesh->IsInstanced()
             ? draw.mesh->GetInstanceData().get() : nullptr;
-        const auto* drawLayer = includeEditorVisuals && scene.m_selectedPlacementId != 0 &&
-            scene.m_selectedPlacementLayer && instanceData && draw.object
+        const auto* drawLayer = includeEditorVisuals && scene.m_editorView.selectedPlacementId != 0 &&
+            scene.m_editorView.selectedPlacementLayer && instanceData && draw.object
             ? draw.object->GetComponentInParent<
                 Engine::Components::TerrainObjectLayer>() : nullptr;
         const bool selectedPlacement = includeEditorVisuals &&
-            scene.m_selectedPlacementId != 0 && scene.m_selectedPlacementLayer &&
-            drawLayer && drawLayer->Owner == scene.m_selectedPlacementLayer &&
+            scene.m_editorView.selectedPlacementId != 0 && scene.m_editorView.selectedPlacementLayer &&
+            drawLayer && drawLayer->Owner == scene.m_editorView.selectedPlacementLayer &&
             instanceData &&
             std::find(instanceData->placementIds.begin(),
-                instanceData->placementIds.end(), scene.m_selectedPlacementId) !=
+                instanceData->placementIds.end(), scene.m_editorView.selectedPlacementId) !=
                     instanceData->placementIds.end();
         const bool selected=includeEditorVisuals && (selectedPlacement ||
-            draw.object==scene.m_selectedObject ||
-            draw.mesh==scene.m_editorSelectedMesh ||
-            draw.mesh==scene.m_editorWeightPaintMesh);
-        if ((!automaticInstancing && !(draw.drawData.flags & (0x00100000u|0x00800000u))) || scene.m_editorMode2D || hasPortalViews || !draw.mesh || draw.blended ||
+            draw.object==scene.m_editorView.selectedObject ||
+            draw.mesh==scene.m_editorView.selectedMesh ||
+            draw.mesh==scene.m_editorView.weightPaintMesh);
+        if ((!automaticInstancing && !(draw.drawData.flags & (0x00100000u|0x00800000u))) || scene.m_editorView.mode2D || hasPortalViews || !draw.mesh || draw.blended ||
             draw.preview || draw.pmxOutline || draw.spatialManipulator || draw.traversalChartPortal ||
             draw.objectData.skinParams.y>0 || draw.mesh->HasMorphTargets() || draw.mesh->HasSurfaceOffsets() ||
             draw.vertexBuffer!=draw.mesh->GetGraphicsBuffer() || custom || selected || !draw.mesh->HasBounds()) continue;

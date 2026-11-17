@@ -1,7 +1,7 @@
 #include "Scripts/Demos/Pong/PongUI.h"
 
-#include "Core/Compoonents/UI/UIObject.h"
-#include "Core/Compoonents/UI/UIText.h"
+#include "Core/Components/UI/UIObject.h"
+#include "Core/Components/UI/UIText.h"
 #include "Core/Scene/Object.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include <algorithm>

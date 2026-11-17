@@ -2,16 +2,16 @@
 
 #include "Core/Rendering/RenderJobs.h"
 #include "Core/Scene/Rendering/SceneRenderer/SceneRendererUtilities.h"
-#include "Core/Compoonents/Mesh/Mesh.h"
-#include "Core/Compoonents/Materials/Material.h"
-#include "Core/Compoonents/Terrain/Terrain.h"
-#include "Core/Compoonents/Terrain/TerrainBatchAppearance.h"
-#include "Core/Compoonents/Animation/SkinnedMesh.h"
-#include "Core/Compoonents/Animation/Skeleton.h"
-#include "Core/Compoonents/Sprite/Sprite.h"
-#include "Core/Compoonents/Particles/ParticleEmitter.h"
-#include "Core/Compoonents/SpatialUpdate.h"
-#include "Core/Compoonents/Physics/SpatialManipulator.h"
+#include "Core/Components/Mesh/Mesh.h"
+#include "Core/Components/Materials/Material.h"
+#include "Core/Components/Terrain/Terrain.h"
+#include "Core/Components/Terrain/TerrainBatchAppearance.h"
+#include "Core/Components/Animation/SkinnedMesh.h"
+#include "Core/Components/Animation/Skeleton.h"
+#include "Core/Components/Sprite/Sprite.h"
+#include "Core/Components/Particles/ParticleEmitter.h"
+#include "Core/Components/SpatialUpdate.h"
+#include "Core/Components/Physics/SpatialManipulator.h"
 #include "Core/Model/MeshData.h"
 #include "Core/Rendering/Lighting/BakedLightingData.h"
 #include "Core/Rendering/RenderBoundsCache.h"
@@ -106,7 +106,7 @@ void SceneRendererFramePreparation::PrepareFrameItems(
             return preparedTransforms ? scene.m_transformHierarchy.ReadPreparedWorldRevision(candidate->transform) : candidate->transform.GetWorldRevision();
         };
         const bool staticCandidate = mesh && !sprite && !lookup.skinnedMesh &&
-            !hasActiveWarpVolume && !scene.m_previewObject &&
+            !hasActiveWarpVolume && !scene.m_editorView.previewObject &&
             (!(mesh->gpuLodSelection || mesh->screenLodSelection) || mesh->IsInstanced()) &&
             !mesh->HasMorphTargets() && !mesh->HasSurfaceOffsets() &&
             !mesh->GetPreviousRuntimeLodMesh() &&
@@ -146,8 +146,8 @@ void SceneRendererFramePreparation::PrepareFrameItems(
                     {
                         item.gpuMaximumLod = 0;
                         item.gpuLodDistances = { 0, 0 };
-                        if ((mesh->gpuLodSelection || mesh->screenLodSelection) && candidate != scene.m_selectedObject &&
-                            mesh != scene.m_editorSelectedMesh && mesh != scene.m_editorWeightPaintMesh &&
+                        if ((mesh->gpuLodSelection || mesh->screenLodSelection) && candidate != scene.m_editorView.selectedObject &&
+                            mesh != scene.m_editorView.selectedMesh && mesh != scene.m_editorView.weightPaintMesh &&
                             mesh->IsRuntimeLodResident(0) && mesh->IsRuntimeLodResident(1) &&
                             (!item.material || Engine::Scene::Renderer::IsFastFoliageSurface(item.material) ||
                                 item.material->shader.empty()))
@@ -192,7 +192,7 @@ void SceneRendererFramePreparation::PrepareFrameItems(
             item.terrainSurface = true;
             item.completeTerrainFootprint = batch->completeFootprint && !batch->distantVisual;
         }
-        item.belongsToPreview = scene.m_previewObject && Engine::Scene::Renderer::IsObjectOrDescendant(candidate, scene.m_previewObject);
+        item.belongsToPreview = scene.m_editorView.previewObject && Engine::Scene::Renderer::IsObjectOrDescendant(candidate, scene.m_editorView.previewObject);
         glm::mat4 authoredWorld = preparedTransforms ? scene.m_transformHierarchy.ReadPreparedWorldMatrix(candidate->transform) : candidate->transform.GetWorldMatrix();
         if (candidate->transform.matrixLayer.enabled)
         {
@@ -433,7 +433,7 @@ void SceneRendererFramePreparation::PrepareFrameItems(
             if (source && !draw.warpedVertexBuffer)
                 draw.geometryFade = source->GetRuntimeGeometryFade();
             if(source && source->IsInstanced() && (source->gpuLodSelection || source->screenLodSelection) &&
-                draw.object!=scene.m_selectedObject && source!=scene.m_editorSelectedMesh && source!=scene.m_editorWeightPaintMesh &&
+                draw.object!=scene.m_editorView.selectedObject && source!=scene.m_editorView.selectedMesh && source!=scene.m_editorView.weightPaintMesh &&
                 !draw.warpedVertexBuffer && !draw.traversalChartPortal && source->IsRuntimeLodResident(0) && source->IsRuntimeLodResident(1) &&
                 (!draw.material || Renderer::IsFastFoliageSurface(draw.material) ||
                     draw.material->shader.empty()))
@@ -445,8 +445,8 @@ void SceneRendererFramePreparation::PrepareFrameItems(
                 publish(draw);
                 return;
             }
-            if (source && (source->gpuLodSelection || source->screenLodSelection) && draw.object!=scene.m_selectedObject &&
-                source!=scene.m_editorSelectedMesh && source!=scene.m_editorWeightPaintMesh && !source->IsInstanced() &&
+            if (source && (source->gpuLodSelection || source->screenLodSelection) && draw.object!=scene.m_editorView.selectedObject &&
+                source!=scene.m_editorView.selectedMesh && source!=scene.m_editorView.weightPaintMesh && !source->IsInstanced() &&
                 !source->HasMorphTargets() && !source->HasSurfaceOffsets() && !draw.skinJointCount &&
                 !draw.warpedVertexBuffer && !draw.traversalChartPortal && source->IsRuntimeLodResident(0) &&
                 source->IsRuntimeLodResident(1))

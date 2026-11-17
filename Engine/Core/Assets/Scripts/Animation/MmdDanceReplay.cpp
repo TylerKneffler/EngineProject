@@ -1,5 +1,5 @@
 #include "Core/Assets/Scripts/Animation/MmdDanceReplay.h"
-#include "Core/Compoonents/Animation/AnimationManager.h"
+#include "Core/Components/Animation/AnimationManager.h"
 #include "Core/Serialization/SceneSerializer.h"
 
 namespace

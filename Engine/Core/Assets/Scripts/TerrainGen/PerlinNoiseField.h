@@ -1,7 +1,7 @@
 #pragma once
 
-#include "Core/Compoonents/PropertyMacros.h"
-#include "Core/Compoonents/Script.h"
+#include "Core/Components/PropertyMacros.h"
+#include "Core/Components/Script.h"
 #include <glm/glm.hpp>
 
 // Deterministic, seedable coherent-noise source shared by procedural scene

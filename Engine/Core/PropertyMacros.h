@@ -1,4 +1,4 @@
 #pragma once
-// Compatibility forwarder: moved to Core/Compoonents/PropertyMacros.h (architecture refactor phase 2).
+// Compatibility forwarder: moved to Core/Components/PropertyMacros.h (architecture refactor phase 2).
 // Remove after projects have migrated; see .md/architecture-refactor-plan.md.
-#include "Core/Compoonents/PropertyMacros.h"
+#include "Core/Components/PropertyMacros.h"

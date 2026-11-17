@@ -1,10 +1,10 @@
 #include "SkeletonBindPose.h"
-#include "Core/Compoonents/Animation/Skeleton.h"
-#include "Core/Compoonents/Animation/Model.h"
-#include "Core/Compoonents/Animation/SkinnedMesh.h"
+#include "Core/Components/Animation/Skeleton.h"
+#include "Core/Components/Animation/Model.h"
+#include "Core/Components/Animation/SkinnedMesh.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Scene/Object.h"
-#include "Core/Compoonents/Transform.h"
+#include "Core/Components/Transform.h"
 #include <algorithm>
 #include <cmath>
 #include <numeric>

@@ -1,18 +1,19 @@
+#include "Core/Inspection/ComponentInspector.h"
 #include "HierarchyView.h"
 #include "Engine/Editor/Core/PrimitiveObjectFactory.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Scene/Object.h"
 #include "Core/Component.h"
-#include "Core/Compoonents/Materials/Material.h"
-#include "Core/Compoonents/Mesh/Mesh.h"
-#include "Core/Compoonents/Sprite/Sprite.h"
-#include "Core/Compoonents/Particles/ParticleEmitter.h"
-#include "Core/Compoonents/Sprite/SpriteAnimationManager.h"
-#include "Core/Compoonents/Lighting/LightProbe.h"
-#include "Core/Compoonents/Animation/Skeleton.h"
-#include "Core/Compoonents/Camera/Camera.h"
-#include "Core/Compoonents/Lighting/Light.h"
+#include "Core/Components/Materials/Material.h"
+#include "Core/Components/Mesh/Mesh.h"
+#include "Core/Components/Sprite/Sprite.h"
+#include "Core/Components/Particles/ParticleEmitter.h"
+#include "Core/Components/Sprite/SpriteAnimationManager.h"
+#include "Core/Components/Lighting/LightProbe.h"
+#include "Core/Components/Animation/Skeleton.h"
+#include "Core/Components/Camera/Camera.h"
+#include "Core/Components/Lighting/Light.h"
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include "../Focus/WindowFocusHandler.h"
@@ -617,7 +618,7 @@ void HierarchyView::SetSelectedObject(Engine::Core::Object* obj)
 {
     if (m_selectedObject == obj && m_selectedObjects.size() == (obj ? 1u : 0u))
     {
-        if (Engine::Core::Component::HasEditorReferencePick())
+        if (Engine::Core::ComponentInspector::HasReferencePick())
             NotifySelectionChanged();
         return;
     }

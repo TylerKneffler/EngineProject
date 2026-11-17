@@ -1,7 +1,7 @@
 #include "Engine/Editor/Core/View/Views/PropertiesView.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 #include "Engine/Editor/UI/EditorComponentIcons.h"
-#include "Core/Compoonents/Physics/RigidBody.h"
+#include "Core/Components/Physics/RigidBody.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Serialization/SceneSerializer.h"
 

@@ -1,6 +1,6 @@
 #include "SceneCameraController.h"
 
-#include "Core/Compoonents/Camera/Camera.h"
+#include "Core/Components/Camera/Camera.h"
 #include "Core/Scene/Scene.h"
 #include <algorithm>
 #include <cassert>

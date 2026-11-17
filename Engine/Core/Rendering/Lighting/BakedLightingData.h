@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Core/Compoonents/Component.h"
+#include "Core/Components/Component.h"
 #include <glm/glm.hpp>
 
 namespace Engine::Rendering

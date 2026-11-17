@@ -1,7 +1,7 @@
 #include "pch.h"
 #if defined(ENGINE_VULKAN_ENABLED)
 #include "VulkanPipelineStateBuilder.h"
-#include "Core/Compoonents/Mesh/Mesh.h"
+#include "Core/Components/Mesh/Mesh.h"
 
 
 namespace Engine::Renderers

@@ -1,3 +1,5 @@
+#include "Core/Inspection/ComponentInspector.h"
+#include "Core/Components/Terrain/TerrainPlacementHandle.h"
 #include "Core/Rendering/DetailBudget.h"
 #include "Core/Rendering/MaterialCachePolicy.h"
 #include "pch.h"
@@ -24,10 +26,10 @@
 #include "Core/Serialization/SceneSerializer.h"
 #include "Core/Serialization/Json.h"
 #include "Core/Serialization/PreparedPrefab.h"
-#include "Core/Compoonents/Mesh/Mesh.h"
-#include "Core/Compoonents/Camera/Camera.h"
-#include "Core/Compoonents/Animation/Skeleton.h"
-#include "Core/Compoonents/Transform.h"
+#include "Core/Components/Mesh/Mesh.h"
+#include "Core/Components/Camera/Camera.h"
+#include "Core/Components/Animation/Skeleton.h"
+#include "Core/Components/Transform.h"
 #include "Core/AssetRecord.h"
 #include "Core/Importers/ModelImporter.h"
 
@@ -581,7 +583,7 @@ void EditorState::WireupCallbacks()
 
     // Wire up selection changed callback (for hierarchy -> properties)
     m_viewFactory->OnSelectionChanged = [this](Engine::Core::Object* obj) {
-        if (Engine::Core::Component::CaptureEditorReferencePick(obj))
+        if (Engine::Core::ComponentInspector::CaptureReferencePick(obj))
         {
             if (m_primaryProperties && m_primaryProperties->OnComponentsChanged)
                 m_primaryProperties->OnComponentsChanged();
@@ -607,7 +609,7 @@ void EditorState::WireupCallbacks()
     m_viewFactory->OnSelectionSetChanged = [this](
         const std::vector<Engine::Core::Object*>& objects) {
         Engine::Core::Object* active = objects.empty() ? nullptr : objects.back();
-        if (Engine::Core::Component::CaptureEditorReferencePick(active))
+        if (Engine::Core::ComponentInspector::CaptureReferencePick(active))
         {
             if (m_primaryProperties && m_primaryProperties->OnComponentsChanged)
                 m_primaryProperties->OnComponentsChanged();
@@ -627,7 +629,7 @@ void EditorState::WireupCallbacks()
 
     // Scene viewport click-selection -> hierarchy/properties + render selection state
     m_viewFactory->OnObjectSelected = [this](Engine::Core::Object* obj) {
-        if (Engine::Core::Component::CaptureEditorReferencePick(obj))
+        if (Engine::Core::ComponentInspector::CaptureReferencePick(obj))
         {
             if (m_primaryProperties && m_primaryProperties->OnComponentsChanged)
                 m_primaryProperties->OnComponentsChanged();
