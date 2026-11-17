@@ -8,9 +8,9 @@
 #include "Core/Inspection/IInspectorUi.h"
 #include "Core/Components/Mesh/Lod/LodPathListEditor.h"
 #include "Core/Serialization/PrefabLod.h"
-#include "Core/Compoonents/Mesh/MeshLodProfile.h"
-#include "Core/Compoonents/Materials/Material.h"
-#include "Core/Compoonents/Animation/SkinnedMesh.h"
+#include "Core/Components/Mesh/MeshLodProfile.h"
+#include "Core/Components/Materials/Material.h"
+#include "Core/Components/Animation/SkinnedMesh.h"
 #include <fstream>
 #include <algorithm>
 #include <sstream>
