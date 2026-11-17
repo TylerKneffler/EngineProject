@@ -4,6 +4,7 @@
 #include "Core/Rendering/RenderBoundsCache.h"
 #include "Core/Rendering/DrawBatchPreparation.h"
 #include "Core/Rendering/ShaderSourceCache.h"
+#include "Core/Rendering/TextureFootprintCache.h"
 #include "Core/Rendering/UploadRecordCache.h"
 #include "Core/Compoonents/TransformHierarchy.h"
 #include "Core/Scene/ComponentRegistry.h"
@@ -38,6 +39,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <stdexcept>
 #include <unordered_map>
@@ -59,6 +61,8 @@ namespace Engine::Components
     class SpatialManipulator;
     class SkinnedMesh;
     class ParticleEmitter;
+    class Terrain;
+    class TerrainBatchAppearance;
 }
 namespace Engine::Rendering
 {
@@ -704,6 +708,10 @@ public:
     Engine::Threading::JobScheduler::Handle ScheduleSceneJob(
         std::function<void(SceneGeneration)> work);
     void FenceSceneGeneration();
+    // The standalone game has no reader for per-object snapshot contents
+    // (only the editor does). Disabling them publishes snapshots without the
+    // object list, saving a full-scene compare/rebuild every commit.
+    void SetSceneSnapshotObjectsEnabled(bool enabled) { m_sceneSnapshotObjects = enabled; }
     std::shared_ptr<const SceneSnapshot> GetPublishedSceneSnapshot() const
     { return std::atomic_load_explicit(&m_publishedSceneSnapshot, std::memory_order_acquire); }
     double GetLastSceneSnapshotPublishMs() const { return m_lastSnapshotPublishMs; }
@@ -938,13 +946,42 @@ private:
     };
     using MaterialShaderFuture = std::shared_future<MaterialShaderBytecode>;
     std::unordered_map<std::string, MaterialShaderFuture> m_materialShaderBytecode;
+    // Bumped whenever m_materialShaderBytecode is cleared (pipeline rebuild).
+    uint64_t m_materialShaderBytecodeEpoch = 0;
     MaterialShaderFuture QueueMaterialShaderBytecode(const std::string& path,
         bool terrain, int64_t stamp);
     Engine::Rendering::ShaderSourceCache m_materialShaderSources;
     const Engine::Rendering::ShaderSourceCache::Source& ResolveMaterialShaderSource(
         const Engine::Components::Material& material, const std::string& path);
     // Deduplicate prewarm requests per frame; source resolution survives frames.
-    std::set<std::tuple<std::string, std::string, bool>> m_preparedMaterialShaderSources;
+    // Ordered by (terrain, shader, material file); the transparent comparator
+    // lets each per-item lookup use string views, so only a new combination
+    // allocates.
+    struct PreparedMaterialShaderKey
+    {
+        bool terrain = false;
+        std::string_view shader, file;
+    };
+    struct PreparedMaterialShaderSource
+    {
+        bool terrain = false;
+        std::string shader, file;
+        PreparedMaterialShaderKey View() const { return { terrain, shader, file }; }
+    };
+    struct PreparedMaterialShaderLess
+    {
+        using is_transparent = void;
+        static PreparedMaterialShaderKey View(const PreparedMaterialShaderKey& key) { return key; }
+        static PreparedMaterialShaderKey View(const PreparedMaterialShaderSource& key) { return key.View(); }
+        template<class A, class B> bool operator()(const A& left, const B& right) const
+        {
+            const auto a = View(left), b = View(right);
+            if (a.terrain != b.terrain) return a.terrain < b.terrain;
+            if (const int order = a.shader.compare(b.shader)) return order < 0;
+            return a.file < b.file;
+        }
+    };
+    std::set<PreparedMaterialShaderSource, PreparedMaterialShaderLess> m_preparedMaterialShaderSources;
     void PrewarmMaterialShaders(const Engine::Components::Material& material,
         bool terrain);
     struct MaterialShaderPipeline
@@ -966,6 +1003,7 @@ private:
     void PublishMaterialShaderPipelines(size_t maxPipelines = 2);
     std::shared_ptr<Engine::Graphics::IGraphicsTexture> m_directionalShadowMap;
     uint32_t m_directionalShadowResolution = 0;
+    Engine::Rendering::TextureFootprintCache m_textureFootprintCache;
     uint64_t m_directionalShadowAllocationGeneration = 0;
     bool m_directionalShadowCacheValid = false;
     Engine::Model::GraphicsQualityValues m_directionalShadowCachedQuality;
@@ -988,6 +1026,9 @@ private:
     std::array<uint64_t, 4> m_directionalShadowCascadeLastRenderedFrame{
         0u, 0u, 0u, 0u };
     uint32_t m_directionalShadowRefreshCursor = 0;
+    // Structure revision the far shadow tile was last rendered with
+    // (SceneRendererShadows): it refreshes when objects stream in or out.
+    uint64_t m_directionalShadowFarStructureRevision = 0;
     struct PortalShadowCacheEntry
     {
         uint64_t key = 0;
@@ -1187,8 +1228,37 @@ private:
         Engine::Components::SpatialManipulator* spatialManipulator = nullptr;
         Engine::Components::SkinnedMesh* skinnedMesh = nullptr;
         const Engine::Rendering::BakedLightingData* bakedLighting = nullptr;
+        // Resolved with the rest so per-frame item preparation avoids two
+        // dynamic_cast scans per object.
+        Engine::Components::Terrain* terrain = nullptr;
+        const Engine::Components::TerrainBatchAppearance* terrainBatch = nullptr;
     };
     std::vector<FrameComponentLookup> m_frameComponentLookupScratch;
+    struct OcclusionBufferResult
+    {
+        std::shared_ptr<const Engine::Rendering::OcclusionBuffer> buffer;
+        bool reused = false;
+        double jobMilliseconds = 0.0;
+        uint64_t meshOccluders = 0;
+    };
+    // Rasterizes the frame's terrain (and optional mesh occluders) into a
+    // software occlusion buffer for one camera view. Runs on a job.
+    OcclusionBufferResult BuildCameraOcclusionBuffer(
+        const std::vector<FrameRenderItem>& frameRenderItems, const glm::mat4& viewProjection,
+        glm::vec2 projectionScale, float aspect);
+    // Started by a camera's shadow pass, adopted by its color pass when the
+    // view matches exactly. Holds a reference to the frame items: joined by
+    // every color pass, by frame preparation and by FenceBackgroundWork.
+    struct EarlyCameraOcclusion
+    {
+        std::future<OcclusionBufferResult> job;
+        const void* camera = nullptr;
+        const std::vector<FrameRenderItem>* items = nullptr;
+        uint64_t serial = 0;
+        uint32_t width = 0, height = 0;
+        glm::mat4 viewProjection{ 1.f };
+    } m_earlyCameraOcclusion;
+    void JoinEarlyCameraOcclusion();
     Engine::Rendering::RenderSpatialIndex m_renderSpatialIndex;
     Engine::Rendering::RenderBoundsCache m_worldBoundsCache;
     // Spatial index positions follow persistent draw slots, not the compact
@@ -1369,6 +1439,7 @@ private:
     std::vector<Engine::Threading::JobScheduler::Handle> m_sceneJobs;
     std::shared_ptr<const SceneSnapshot> m_publishedSceneSnapshot;
     bool m_suppressSceneSnapshotPublication = false;
+    bool m_sceneSnapshotObjects = true;
     uint64_t m_snapshotGeneration = 0;
     double m_lastSnapshotPublishMs = 0;
     bool m_isCommitting = false;

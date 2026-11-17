@@ -94,6 +94,7 @@ void SceneRendererObjectPipelines::BuildObjectPipeline(Scene& scene)
     scene.m_materialShaderBuilders.clear();
     scene.m_materialShaderPipelines.clear();
     scene.m_materialShaderBytecode.clear();
+    ++scene.m_materialShaderBytecodeEpoch;
     if (!scene.m_deferGraphicsRetirement)
         scene.m_retiredMaterialShaderPipelines.clear();
 

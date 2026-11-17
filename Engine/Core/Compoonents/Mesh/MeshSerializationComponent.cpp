@@ -8,6 +8,9 @@
 #include "Engine/Editor/UI/IEditorUi.h"
 #include "Core/Compoonents/Obj/LodPathListEditor.h"
 #include "Core/Serialization/PrefabLod.h"
+#include "Core/Compoonents/Mesh/MeshLodProfile.h"
+#include "Core/Compoonents/Materials/Material.h"
+#include "Core/Compoonents/Animation/SkinnedMesh.h"
 #include <fstream>
 #include <algorithm>
 #include <sstream>
@@ -253,6 +256,109 @@ void Mesh::PrepareGraphicsResources(IGraphicsProvider* graphicsProvider)
 {
     if (graphicsProvider && !m_ready)
         CreateBuffer(graphicsProvider->GetBufferFactory());
+    PrepareAuthoredLods(graphicsProvider);
+}
+
+void Mesh::PrepareAuthoredLods(IGraphicsProvider* graphicsProvider)
+{
+    if (!graphicsProvider || !Owner) return;
+    // A MeshLodProfile owns this mesh's runtime levels; so do placement
+    // systems for instanced parts.
+    if (IsInstanced() || Owner->GetComponent<MeshLodProfile>() ||
+        Owner->GetComponent<SkinnedMesh>()) return;
+
+    // Ordinary objects draw LOD 0..2 (see SceneRendererFramePreparation).
+    constexpr size_t MaximumAlternates = 2;
+    size_t wanted = 0;
+    while (wanted < MaximumAlternates && wanted < lodMeshes.size() &&
+        !lodMeshes[wanted].empty())
+        ++wanted;
+
+    uint64_t signature = 0;
+    if (wanted > 0)
+    {
+        // FNV-1a over the base file, its geometry revision (a reload clears
+        // runtime levels) and the installed alternates.
+        signature = 1469598103934665603ull;
+        const auto mix = [&signature](const void* data, size_t size) {
+            const auto* bytes = static_cast<const unsigned char*>(data);
+            for (size_t index = 0; index < size; ++index)
+            { signature ^= bytes[index]; signature *= 1099511628211ull; }
+        };
+        mix(m_filePath.data(), m_filePath.size());
+        const uint64_t revision = m_authoredGeometryRevision;
+        mix(&revision, sizeof(revision));
+        for (size_t index = 0; index < wanted; ++index)
+        {
+            mix(lodMeshes[index].data(), lodMeshes[index].size());
+            mix("\n", 1);
+        }
+        if (signature == 0) signature = 1;
+    }
+    if (signature != m_authoredLodSignature)
+    {
+        // The list changed (or was cleared): drop the levels installed for
+        // the previous list before installing the new one.
+        if (m_authoredLodSignature != 0)
+        {
+            ClearRuntimeLods();
+            if (wanted == 0 && gpuLodSelection)
+            {
+                gpuLodSelection = false;
+                MarkConfigurationDirty();
+            }
+        }
+        m_authoredLodSignature = signature;
+        m_authoredLodsFailed = false;
+    }
+    if (wanted == 0 || m_authoredLodsFailed) return;
+    if (HasMorphTargets() || HasSurfaceOffsets()) return;
+    if (!IsReady())
+    {
+        DeferGraphicsPreparation(graphicsProvider);
+        return;
+    }
+
+    auto* material = Owner->GetComponent<Material>();
+    int next = 1;
+    while (next <= static_cast<int>(wanted) && IsRuntimeLodResident(next)) ++next;
+    if (next <= static_cast<int>(wanted))
+    {
+        try
+        {
+            auto alternate = std::make_unique<Mesh>();
+            alternate->LoadFromFile(lodMeshes[next - 1]);
+            alternate->foliageWindStrength = foliageWindStrength;
+            alternate->deformationBoundsPadding = deformationBoundsPadding;
+            alternate->PrepareGraphicsResources(graphicsProvider);
+            if (!alternate->IsReady() || !StoreRuntimeLod(next, std::move(alternate)))
+                m_authoredLodsFailed = true;
+        }
+        catch (...)
+        {
+            m_authoredLodsFailed = true;
+        }
+        if (m_authoredLodsFailed)
+        {
+            ClearRuntimeLods();
+            return;
+        }
+        // Resolve the level's material now, not on the first frame it shows.
+        if (material)
+            if (auto* levelMaterial = material->GetLodMaterial(next); levelMaterial != material)
+                levelMaterial->PrepareTextures(graphicsProvider);
+        if (next < static_cast<int>(wanted))
+        {
+            DeferGraphicsPreparation(graphicsProvider);
+            return;
+        }
+    }
+    // All levels are resident: the renderer selects among them by distance.
+    if (!gpuLodSelection && !screenLodSelection)
+    {
+        gpuLodSelection = true;
+        MarkConfigurationDirty();
+    }
 }
 } // namespace Engine::Components
 

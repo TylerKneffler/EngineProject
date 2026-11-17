@@ -1287,6 +1287,11 @@ void PreferencesView::DrawRenderingSection(IEditorUi& ui)
     if (ui.DragFloat("Directional Shadow Distance",
             &shadows.directionalDistance, 1.f, 1.f, 100000.f))
         shadowEdited();
+    if (ui.DragFloat("Far Shadow Distance",
+            &shadows.directionalFarDistance, 10.f, 0.f, 100000.f))
+        shadowEdited();
+    ui.Tooltip("The last cascade covers Directional Shadow Distance to this "
+        "distance with coarse texels, for hills and forests. 0 disables.");
     if (ui.DragFloat("Grass Shadow Caster Distance", &shadows.grassCasterDistance, .5f, 0.f, 100000.f))
         shadowEdited();
     ui.Tooltip("Additional distance limit for grass shadows. Each terrain layer may impose a shorter range.");
@@ -1799,6 +1804,8 @@ bool PreferencesView::SaveSettings()
                             .directionalCascadeCasterBudget);
                 shadowNode.append_attribute("DirectionalDistance").set_value(
                     m_settings.realtimeShadows.directionalDistance);
+                shadowNode.append_attribute("DirectionalFarDistance").set_value(
+                    m_settings.realtimeShadows.directionalFarDistance);
                 shadowNode.append_attribute("GrassCasterDistance").set_value(
                     m_settings.realtimeShadows.grassCasterDistance);
                 shadowNode.append_attribute("FoliageCasterDistance").set_value(

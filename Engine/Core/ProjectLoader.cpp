@@ -288,6 +288,10 @@ void ProjectLoader::ParseRendering(const pugi::xml_node& projectNode, ProjectSet
             settings.realtimeShadows.directionalDistance = std::clamp(
                 realtimeShadows.attribute("DirectionalDistance").as_float(150.f),
                 1.f, 100000.f);
+            // Projects written before the far range existed keep it off.
+            settings.realtimeShadows.directionalFarDistance = std::clamp(
+                realtimeShadows.attribute("DirectionalFarDistance").as_float(0.f),
+                0.f, 100000.f);
             settings.realtimeShadows.grassCasterDistance = std::clamp(
                 realtimeShadows.attribute("GrassCasterDistance").as_float(150.f),0.f,100000.f);
             settings.realtimeShadows.foliageCasterDistance = std::clamp(

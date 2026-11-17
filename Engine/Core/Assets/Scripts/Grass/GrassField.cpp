@@ -96,23 +96,29 @@ GrassField::GrassField()
     RegisterField("accentMeshes", accentMeshes, "Accents");
     RegisterField("accentPatchesPerSquareMeter", accentPatchesPerSquareMeter, "Accents");
     RegisterField("accentDriftSize", accentDriftSize, "Accents");
+    RegisterField("shrubMeshes", shrubMeshes, "Shrubs");
+    RegisterField("shrubPatchesPerSquareMeter", shrubPatchesPerSquareMeter, "Shrubs");
+    RegisterField("shrubThicketSize", shrubThicketSize, "Shrubs");
+    RegisterField("shrubCoverage", shrubCoverage, "Shrubs");
 }
 
-const std::vector<std::vector<std::string>>& GrassField::AccentLods() const
+const std::vector<std::vector<std::string>>& GrassField::ResolveLodChains(
+    const std::string& list, LodChains& cache) const
 {
-    if (m_accentSource == accentMeshes) return m_accentLods;
-    m_accentSource = accentMeshes;
-    m_accentLods.clear();
+    if (cache.resolved && cache.source == list) return cache.chains;
+    cache.resolved = true;
+    cache.source = list;
+    cache.chains.clear();
     const auto exists = [](const std::string& path) {
         std::error_code error;
         return std::filesystem::exists(Engine::Components::Mesh::ResolveFilePath(path), error);
     };
     size_t start = 0;
-    while (start <= accentMeshes.size())
+    while (start <= list.size())
     {
-        size_t end = accentMeshes.find_first_of(";,", start);
-        if (end == std::string::npos) end = accentMeshes.size();
-        std::string path = accentMeshes.substr(start, end - start);
+        size_t end = list.find_first_of(";,", start);
+        if (end == std::string::npos) end = list.size();
+        std::string path = list.substr(start, end - start);
         start = end + 1;
         const auto first = path.find_first_not_of(" \t\r\n");
         if (first == std::string::npos) continue;
@@ -120,7 +126,7 @@ const std::vector<std::vector<std::string>>& GrassField::AccentLods() const
         if (path == shortMesh || path == tallMesh) continue;
         if (!exists(path))
         {
-            std::fprintf(stderr, "GrassField: accent mesh not found: %s\n", path.c_str());
+            std::fprintf(stderr, "GrassField: mesh not found: %s\n", path.c_str());
             continue;
         }
         std::vector<std::string> chain{path};
@@ -133,9 +139,37 @@ const std::vector<std::vector<std::string>>& GrassField::AccentLods() const
             if (!exists(lod)) break;
             chain.push_back(lod);
         }
-        m_accentLods.push_back(std::move(chain));
+        cache.chains.push_back(std::move(chain));
     }
-    return m_accentLods;
+    return cache.chains;
+}
+
+float GrassField::ShrubThicket(float x, float z) const
+{
+    // Two octaves of value noise; thickets are where it rises over a
+    // threshold chosen from shrubCoverage (value noise clusters around .5).
+    const auto noise = [&](float period, uint32_t salt) {
+        const float u = x / period, v = z / period;
+        const float fx = std::floor(u), fz = std::floor(v);
+        const int ix = static_cast<int>(fx), iz = static_cast<int>(fz);
+        float tx = u - fx, tz = v - fz;
+        tx = tx * tx * (3.f - 2.f * tx); tz = tz * tz * (3.f - 2.f * tz);
+        // A full avalanche hash: TileSeed leaves axis-aligned stripes in
+        // smooth noise over consecutive lattice points.
+        const auto corner = [&](int dx, int dz) {
+            uint32_t h = static_cast<uint32_t>(ix + dx) * 0x8da6b343u ^
+                static_cast<uint32_t>(iz + dz) * 0xd8163841u ^ static_cast<uint32_t>(seed) ^ salt;
+            h ^= h >> 16; h *= 0x7feb352du; h ^= h >> 15; h *= 0x846ca68bu; h ^= h >> 16;
+            return static_cast<float>(h & 0xffffu) / 65535.f;
+        };
+        return (corner(0, 0) * (1.f - tx) + corner(1, 0) * tx) * (1.f - tz) +
+            (corner(0, 1) * (1.f - tx) + corner(1, 1) * tx) * tz;
+    };
+    const float thicket = std::max(1.f, shrubThicketSize);
+    const float n = .68f * noise(thicket, 0x5b1d7a3u) + .32f * noise(thicket * .37f, 0x2f6e2b1u);
+    const float threshold = .5f + (.5f - std::clamp(shrubCoverage, 0.f, 1.f)) * .5f;
+    const float t = std::clamp((n - (threshold - .04f)) / .14f, 0.f, 1.f);
+    return t * t * (3.f - 2.f * t);
 }
 
 size_t GrassField::SpeciesOf(const std::string& asset) const
@@ -152,6 +186,8 @@ GrassField::GetObjectLodProfiles() const
         {shortMesh, shortMeshLod1, shortMeshLod2}, {tallMesh, tallMeshLod1, tallMeshLod2}};
     const auto& accents = AccentLods();
     chains.insert(chains.end(), accents.begin(), accents.end());
+    const auto& shrubs = ShrubLods();
+    chains.insert(chains.end(), shrubs.begin(), shrubs.end());
     for (const auto& paths : chains)
     {
         if (paths.front().empty()) continue;
@@ -169,7 +205,16 @@ bool GrassField::LoadSources()
     auto* factory = provider ? provider->GetBufferFactory() : nullptr;
     auto definitions = ObjectLodProvider::GetObjectLodMeshes();
     std::vector<std::string> assets{shortMesh, tallMesh};
-    for (const auto& chain : AccentLods()) assets.push_back(chain.front());
+    // Kind per species: 0 grass, 1 accent, 2 shrub. A path listed twice
+    // keeps its first role.
+    std::vector<int> kinds{0, 0};
+    for (int kind = 1; kind <= 2; ++kind)
+        for (const auto& chain : kind == 1 ? AccentLods() : ShrubLods())
+            if (std::find(assets.begin(), assets.end(), chain.front()) == assets.end())
+            {
+                assets.push_back(chain.front());
+                kinds.push_back(kind);
+            }
     // Resolve only the rendered species here; enumerating every placement belongs
     // in the inspector, not in the per-frame streaming path.
     if (m_cachedLayer)
@@ -191,7 +236,10 @@ bool GrassField::LoadSources()
         {
             levels.erase(levels.begin() + species);
             assets.erase(assets.begin() + species);
+            kinds.erase(kinds.begin() + species);
         }
+    m_accentSpecies = static_cast<size_t>(std::count(kinds.begin(), kinds.end(), 1));
+    m_shrubSpecies = static_cast<size_t>(std::count(kinds.begin(), kinds.end(), 2));
     const auto distances = [&](const std::string& asset, size_t count) {
         if (m_cachedLayer) return m_cachedLayer->GetObjectLodDistances(asset, count);
         std::vector<float> result;
@@ -452,6 +500,10 @@ uint64_t GrassField::ComputeGenerationSignature() const
     HashBytes(hash, accentMeshes.data(), accentMeshes.size());
     HashFloat(hash, accentPatchesPerSquareMeter);
     HashFloat(hash, accentDriftSize);
+    HashBytes(hash, shrubMeshes.data(), shrubMeshes.size());
+    HashFloat(hash, shrubPatchesPerSquareMeter);
+    HashFloat(hash, shrubThicketSize);
+    HashFloat(hash, shrubCoverage);
     HashFloat(hash, tileSize);
     HashFloat(hash, shortPatchesPerSquareMeter);
     HashFloat(hash, tallPatchesPerSquareMeter);
@@ -545,6 +597,9 @@ void GrassField::BeginBuild(Tile tile, int lod, uint64_t signature)
                 if (proceduralLayerMask & (1 << layer)) weight += sample[layer];
             return weight >= .5f;
         };
+        const size_t accentCount = m_accentSpecies;
+        const size_t shrubCount = m_shrubSpecies;
+        const bool thickets = shrubCount && shrubPatchesPerSquareMeter > 0.f;
         const auto append = [&](const std::string& asset, float density, int cap)
         {
             const int count = std::clamp(static_cast<int>(std::round(
@@ -556,6 +611,9 @@ void GrassField::BeginBuild(Tile tile, int lod, uint64_t signature)
                 p.position.z = tile.second * span + unit(rng) * span;
                 if (p.position.x < .3f || p.position.z < .3f ||
                     p.position.x > width - .3f || p.position.z > depth - .3f) continue;
+                // Grass thins under shrub thickets (the extra random is drawn
+                // only with thickets on, so other layouts stay unchanged).
+                if (thickets && unit(rng) < .4f * ShrubThicket(p.position.x, p.position.z)) continue;
                 if (!grows(p.position.x, p.position.z)) continue;
                 p.asset = asset;
                 p.position.y = SampleHeight(p.position.x, p.position.z, &p.normal);
@@ -570,7 +628,6 @@ void GrassField::BeginBuild(Tile tile, int lod, uint64_t signature)
         // one species and has its own richness (some cells stay bare), so
         // flowers gather in patches instead of an even sprinkle. Cells are
         // keyed in terrain space, so drifts continue across tile borders.
-        const size_t accentCount = m_speciesAssets.size() > 2 ? m_speciesAssets.size() - 2 : 0;
         if (accentCount && accentPatchesPerSquareMeter > 0.f)
         {
             // Richness is uniform in [-.3, 1.5]: mean acceptance 1/1.8.
@@ -598,6 +655,45 @@ void GrassField::BeginBuild(Tile tile, int lod, uint64_t signature)
                     std::min(accentCount - 1, static_cast<size_t>((pick - .7f) / .3f * accentCount));
                 p.asset = m_speciesAssets[2 + species];
                 p.position.y = SampleHeight(p.position.x, p.position.z, &p.normal);
+                job.placements.push_back(std::move(p));
+            }
+        }
+        // Shrubs gather in thickets keyed in terrain space (so they continue
+        // across tiles). Each thicket cell favours one species; density
+        // rises from the thicket rim to its heart, so they close over the
+        // ground there and thin out into the meadow at the edges.
+        if (thickets)
+        {
+            const int count = std::clamp(static_cast<int>(std::round(
+                shrubPatchesPerSquareMeter * span * span)), 0, 128);
+            const float thicket = std::max(1.f, shrubThicketSize);
+            for (int i = 0; i < count; ++i)
+            {
+                Placement p;
+                p.position.x = tile.first * span + unit(rng) * span;
+                p.position.z = tile.second * span + unit(rng) * span;
+                const float accept = unit(rng), pick = unit(rng);
+                p.yawDegrees = unit(rng) * 360.f;
+                p.scale = .7f + .6f * unit(rng);
+                if (p.position.x < .5f || p.position.z < .5f ||
+                    p.position.x > width - .5f || p.position.z > depth - .5f) continue;
+                if (accept >= ShrubThicket(p.position.x, p.position.z)) continue;
+                if (!grows(p.position.x, p.position.z)) continue;
+                const uint32_t cell = TileSeed(seed ^ 0x6b43a9b5,
+                    static_cast<int>(std::floor(p.position.x / thicket)),
+                    static_cast<int>(std::floor(p.position.z / thicket)));
+                const size_t favoured = cell % shrubCount;
+                const size_t species = pick < .75f ? favoured :
+                    std::min(shrubCount - 1, static_cast<size_t>((pick - .75f) / .25f * shrubCount));
+                p.asset = m_speciesAssets[2 + accentCount + species];
+                p.position.y = SampleHeight(p.position.x, p.position.z, &p.normal);
+                // Woody plants grow mostly upright on slopes (a conforming
+                // layer already keeps them upright and shears only the base)
+                // and sit a little into the ground so no gap shows under
+                // their lowest leaves.
+                if (!m_cachedLayer || !m_cachedLayer->conformToGround)
+                    p.normal = glm::normalize(glm::mix(p.normal, glm::vec3(0.f, 1.f, 0.f), .6f));
+                p.position.y -= .03f * p.scale;
                 job.placements.push_back(std::move(p));
             }
         }
@@ -768,7 +864,8 @@ bool GrassField::Refresh()
     const int centerZ = static_cast<int>(std::floor(local.z / span));
     const int maxX = static_cast<int>(std::ceil(m_cachedTerrain->cellsX * m_cachedTerrain->cellWidth / span));
     const int maxZ = static_cast<int>(std::ceil(m_cachedTerrain->cellsY * m_cachedTerrain->cellDepth / span));
-    std::set<Tile> desired;
+    // Tiles wanted this refresh carry the serial; no per-frame set of keys.
+    const uint64_t refresh = ++m_refreshSerial;
     for (int z = std::max(0, centerZ - reach); z < std::min(maxZ, centerZ + reach + 1); ++z)
         for (int x = std::max(0, centerX - reach); x < std::min(maxX, centerX + reach + 1); ++x)
         {
@@ -779,8 +876,8 @@ bool GrassField::Refresh()
             if (edgeX * edgeX + edgeZ * edgeZ > radius * radius) continue;
             if (m_placementCount && !m_placementTiles->count({x,z})) continue;
             const Tile key{x,z};
-            desired.insert(key);
             auto& tile = m_tiles[key];
+            tile.desiredRefresh = refresh;
             if (!tile.object)
             {
                 char name[64];
@@ -796,6 +893,7 @@ bool GrassField::Refresh()
                 tile.mesh->usesGrassShadowBudget = true;
                 tile.mesh->SetRuntimeVisibility(0.f);
                 auto* material = tile.object->AddComponent<Engine::Components::Material>();
+                tile.material = material;
                 material->diffuseColor = {1,1,1};
                 material->useVertexColors = true;
                 if (!shaderPath.empty())
@@ -838,7 +936,7 @@ bool GrassField::Refresh()
             tile.mesh->runtimeShadowDistance=shadowRadius;
             tile.mesh->runtimeShadowFadeWidth=std::min(shadowRadius,std::max(.25f,distanceFadeWidth));
             tile.castsShadows = shadows;
-            auto* tileMaterial = tile.object->GetComponent<Engine::Components::Material>();
+            auto* tileMaterial = tile.material;
             if (!materialPath.empty())
             {
                 if (m_loadedMaterialPath!=materialPath)
@@ -852,14 +950,14 @@ bool GrassField::Refresh()
             tile.mesh->foliageWindStrength=std::clamp(windStrength,0.f,1.f);
             tile.mesh->usesGrassShadowBudget=windStrength>0.f;
             tileMaterial->castsShadows = shadows;
-            tileMaterial->shader = shaderPath;
+            if (tileMaterial->shader != shaderPath) tileMaterial->shader = shaderPath;
             changed = ActivateTileLod(tile, tile.desiredLod) || changed;
             tile.object->enabled = tile.mesh->GetActiveRuntimeLod() >= 0 && tile.visibility > 0.f;
         }
     checkpoint(m_performance.visibilityMs);
     for (auto it = m_tiles.begin(); it != m_tiles.end();)
     {
-        if (desired.count(it->first)) { ++it; continue; }
+        if (it->second.desiredRefresh == refresh) { ++it; continue; }
         const float edgeX = std::max(0.f, std::abs((it->first.first + .5f) * span - local.x) - span * .5f);
         const float edgeZ = std::max(0.f, std::abs((it->first.second + .5f) * span - local.z) - span * .5f);
         if (edgeX * edgeX + edgeZ * edgeZ <= retentionRadius * retentionRadius)
@@ -894,7 +992,7 @@ bool GrassField::Refresh()
     bool urgent = false;
     for (auto& [key, tile] : m_tiles)
     {
-        if (!desired.count(key)) continue;
+        if (tile.desiredRefresh != refresh) continue;
         int missing = !tile.mesh->IsRuntimeLodResident(tile.desiredLod) ? tile.desiredLod : -1;
         const bool required = missing >= 0;
         if (missing < 0)

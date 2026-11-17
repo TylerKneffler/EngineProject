@@ -23,7 +23,7 @@
           </Transform.scale>
         </transform>
         <components>
-          <components:Mesh Mesh.file="Assets/Models/Woodland/Oaks/Meshes/Medium_oak_tree_003_LOD0 31_1.mesh" Mesh.foliageWindStrength="0" Mesh.useLightProbes="false" Mesh.gpuLodSelection="false" Mesh.gpuLod1Distance="8" Mesh.gpuLod2Distance="16">
+          <components:Mesh Mesh.file="Assets/Models/Woodland/Oaks/Meshes/Medium_oak_tree_003_LOD0 31_1.mesh" Mesh.foliageWindStrength="0" Mesh.useLightProbes="false" Mesh.gpuLodSelection="true" Mesh.gpuLod1Distance="60" Mesh.gpuLod2Distance="220">
             <Mesh.lodMeshes>
               <item>Assets/Models/Woodland/Oaks/Meshes/Medium_oak_tree_003_LOD1 32_1.mesh</item>
               <item>Assets/Models/Woodland/Oaks/Meshes/Medium_oak_tree_003_LOD2 33_1.mesh</item>
@@ -59,7 +59,7 @@
           </Transform.scale>
         </transform>
         <components>
-          <components:Mesh Mesh.file="Assets/Models/Woodland/Oaks/Meshes/Medium_oak_tree_003_LOD0 31_2.mesh" Mesh.foliageWindStrength="0" Mesh.useLightProbes="false" Mesh.gpuLodSelection="false" Mesh.gpuLod1Distance="8" Mesh.gpuLod2Distance="16">
+          <components:Mesh Mesh.file="Assets/Models/Woodland/Oaks/Meshes/Medium_oak_tree_003_LOD0 31_2.mesh" Mesh.foliageWindStrength="0" Mesh.useLightProbes="false" Mesh.gpuLodSelection="true" Mesh.gpuLod1Distance="60" Mesh.gpuLod2Distance="220">
             <Mesh.lodMeshes>
               <item>Assets/Models/Woodland/Oaks/Meshes/Medium_oak_tree_003_LOD1 32_2.mesh</item>
               <item>Assets/Models/Woodland/Oaks/Meshes/Medium_oak_tree_003_LOD2 33_2.mesh</item>

@@ -55,6 +55,17 @@ std::string Timestamp()
 }
 }
 
+namespace
+{
+std::string Vector3Json(const std::optional<std::array<double, 3>>& value)
+{
+    if (!value) return "null";
+    std::ostringstream out;
+    out << '[' << (*value)[0] << ',' << (*value)[1] << ',' << (*value)[2] << ']';
+    return out.str();
+}
+}
+
 GameBenchmark::GameBenchmark(const GameBenchmarkOptions& options,
     Engine::Renderers::IGameRenderer& renderer, const std::string& scene,
     uint32_t maxFps, bool clusteredLighting, double startupMs) : m_options(options)
@@ -76,6 +87,9 @@ GameBenchmark::GameBenchmark(const GameBenchmarkOptions& options,
         << ",\"warmup_frames\":" << options.warmup << ",\"sample_frames\":" << options.frames
         << ",\"residency_timeout_seconds\":" << options.residencyTimeoutSeconds
         << ",\"synthetic_forward_frames\":" << options.driveForwardFrames
+        << ",\"synthetic_look_yaw_pixels\":" << options.lookYawPixels
+        << ",\"camera_position_override\":" << Vector3Json(options.cameraPosition)
+        << ",\"camera_target_override\":" << Vector3Json(options.cameraTarget)
         << ",\"game_max_fps\":" << maxFps << ",\"startup_to_scene_start_ms\":" << startupMs
         << ",\"clustered_lighting_setting\":" << (clusteredLighting ? "true" : "false")
         << ",\"render_scale\":" << renderer.GetRenderScale()
@@ -124,6 +138,7 @@ GameBenchmarkSceneSample GameBenchmark::CollectScene(Engine::Scene::Scene& scene
     result.updatePhysicsMs = scene.GetLastUpdateTimings().physicsMs;
     result.updatePostPhysicsMs = scene.GetLastUpdateTimings().postPhysicsMs;
     result.grassMs = scene.GetGrassPerformance().totalMs;
+    result.grass = scene.GetGrassPerformance();
     result.meshes = scene.GetComponents<Engine::Components::Mesh>().size();
     result.terrains = scene.GetComponents<Engine::Components::Terrain>().size();
     for (auto* layer : scene.GetComponents<Engine::Components::TerrainObjectLayer>())
@@ -285,6 +300,7 @@ void GameBenchmark::Record(uint64_t frame, const GameBenchmarkFrameSample& s)
     gpuStage("terrain", Engine::Graphics::GpuTimingStage::Terrain);
     gpuStage("grass", Engine::Graphics::GpuTimingStage::Grass);
     gpuStage("transparent", Engine::Graphics::GpuTimingStage::Transparent);
+    gpuStage("sky", Engine::Graphics::GpuTimingStage::Sky);
     s.gpu.WriteOpaqueJson(m_log);
     m_log << ",\"scene_objects_loaded\":" << s.scene.objects
         << ",\"scene_generation\":" << s.scene.sceneGeneration
@@ -295,6 +311,16 @@ void GameBenchmark::Record(uint64_t frame, const GameBenchmarkFrameSample& s)
         << ",\"update_physics_ms\":" << s.scene.updatePhysicsMs
         << ",\"update_post_physics_ms\":" << s.scene.updatePostPhysicsMs
         << ",\"grass_total_ms\":" << s.scene.grassMs
+        << ",\"grass_references_ms\":" << s.scene.grass.referencesMs
+        << ",\"grass_sources_ms\":" << s.scene.grass.sourcesMs
+        << ",\"grass_placement_ms\":" << s.scene.grass.placementMs
+        << ",\"grass_visibility_ms\":" << s.scene.grass.visibilityMs
+        << ",\"grass_retirement_ms\":" << s.scene.grass.retirementMs
+        << ",\"grass_scheduling_ms\":" << s.scene.grass.schedulingMs
+        << ",\"grass_build_ms\":" << s.scene.grass.buildMs
+        << ",\"grass_accounting_ms\":" << s.scene.grass.accountingMs
+        << ",\"grass_other_ms\":" << s.scene.grass.otherMs
+        << ",\"grass_active_tiles\":" << s.scene.grass.activeTiles
         << ",\"stream_total_ms\":" << s.scene.streamTotalMs
         << ",\"stream_unload_ms\":" << s.scene.streamUnloadMs
         << ",\"stream_schedule_ms\":" << s.scene.streamScheduleMs
@@ -362,6 +388,9 @@ void GameBenchmark::Record(uint64_t frame, const GameBenchmarkFrameSample& s)
         << ",\"render_material_pipeline_ms\":" << r.materialPipelineMs
         << ",\"render_material_geometry_binding_ms\":" << r.materialGeometryBindingMs
         << ",\"render_material_other_ms\":" << r.materialOtherMs
+        << ",\"render_material_draw_loop_ms\":" << r.materialDrawLoopMs
+        << ",\"render_material_footprint_ms\":" << r.materialFootprintMs
+        << ",\"render_material_record_upload_ms\":" << r.materialRecordUploadMs
         << ",\"render_material_shader_pipeline_cache_hits\":" << r.materialShaderPipelineCacheHits
         << ",\"render_material_shader_pipeline_cache_misses\":" << r.materialShaderPipelineCacheMisses
         << ",\"render_batching_ms\":" << r.batchingMs

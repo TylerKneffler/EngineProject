@@ -60,6 +60,12 @@ public:
     // a non-empty list, hides the part at that level (e.g. bark under an
     // impostor card). Placement systems address a level of the prefab as
     // "X.prefab#lodN"; see Core/Serialization/PrefabLod.h.
+    //
+    // An ordinary scene object switches levels itself: the mesh keeps LOD 1
+    // and 2 of this list resident (see PrepareAuthoredLods), the sibling
+    // Material supplies Material.lodMaterials for each level, and
+    // gpuLod1Distance / gpuLod2Distance are the switch distances. One object,
+    // one Mesh, one Material; no per-level objects or prefabs.
     std::vector<std::string> lodMeshes;
     PROPERTY(Inspector,EditAnywhere,Category="LOD")
     bool gpuLodSelection = false;
@@ -78,6 +84,12 @@ public:
     // Transient; bands share placement records and are selected on the GPU.
     int instanceLodBand = -1;
     int fixedShadowLodBand = -1; // transient fixed shadow band; -1 follows distance
+    // Transient far caster (TerrainObjectLayer::farShadowDistance): this band
+    // casts even when another band is the fixed shadow band, for placements
+    // beyond farShadowMinDistance (its shadow fades in where the fixed band's
+    // fades out) and out to runtimeShadowDistance.
+    bool farShadowCaster = false;
+    float farShadowMinDistance = 0.f;
     bool dedicatedShadowProxy = false;
     bool shadowProxyOnly = false;
     glm::vec2 instanceLodDistances{0.f};
@@ -363,6 +375,12 @@ public:
     void        DeserializeLegacyMorphTargets(const JsonValue& value);
     void        OnAfterDeserialize(IGraphicsProvider* graphicsProvider) override;
     void PrepareGraphicsResources(IGraphicsProvider* graphicsProvider) override;
+    // Installs lodMeshes as this object's own resident levels, one level per
+    // preparation pass. Ordinary objects keep LOD 0..2 resident (the renderer's
+    // per-object limit); an empty entry ends the chain. Skipped when a
+    // MeshLodProfile drives this mesh, and for instanced, skinned or morphing
+    // meshes. Placement systems build their own bands and never call this.
+    void PrepareAuthoredLods(IGraphicsProvider* graphicsProvider);
     // CPU-only preprocessing for detached meshes on a loading worker.
     void PrepareDeferredGraphicsData();
     void DeferGraphicsBuffers() { m_bufferFactory = nullptr; m_ready = false; }
@@ -397,6 +415,9 @@ private:
     float m_runtimeLodDuration = 0.f;
     float m_runtimeVisibility = 1.f;
     uint64_t m_runtimeFadeRevision = 0;
+    // PrepareAuthoredLods state: the base file and lodMeshes it installed.
+    uint64_t m_authoredLodSignature = 0;
+    bool m_authoredLodsFailed = false;
     IndexedGeometryTiming m_lastIndexedGeometryTiming;
     void ObserveMorphWeights() const;
     void AdvanceMorphWeightsRevision() const;

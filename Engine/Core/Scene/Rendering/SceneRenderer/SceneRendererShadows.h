@@ -27,6 +27,8 @@ public:
         std::array<float, 4> radii{};
         std::array<Engine::Rendering::ShadowReceiverCulling, 4> receivers{};
         uint32_t count = 1u;
+        // The last cascade is the far range (BuildCascades).
+        bool hasFarCascade = false;
     };
 
     struct PrepareResult

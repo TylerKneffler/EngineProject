@@ -55,11 +55,11 @@ static_assert(sizeof(ParticleCBData) == 128, "Particle constants must fit Vulkan
 void SceneRendererParticles::RecordGpuSimulation(Scene& scene, IGraphicsContext* context)
 {
     if (!context) return;
-    for (const auto& object : scene.m_objects)
-        if (object && object->IsEnabledInHierarchy())
-            if (auto* emitter = object->GetComponent<
-                    Engine::Components::ParticleEmitter>())
-                emitter->RecordGpuSimulation(context);
+    // The component registry lists emitters directly; scanning every scene
+    // object with GetComponent cost milliseconds in large landscapes.
+    for (auto* emitter : scene.GetComponents<Engine::Components::ParticleEmitter>())
+        if (emitter->Owner && emitter->Owner->IsEnabledInHierarchy())
+            emitter->RecordGpuSimulation(context);
 }
 
 void SceneRendererParticles::Render(Scene& scene, IGraphicsContext* context,
@@ -75,6 +75,7 @@ void SceneRendererParticles::Render(Scene& scene, IGraphicsContext* context,
     auto* bufferFactory = scene.m_graphicsProvider->GetBufferFactory();
     if (!contextFactory || !bufferFactory)
         return;
+    const auto& emitters = scene.GetComponents<Engine::Components::ParticleEmitter>();
     const uint32_t frameSlot = contextFactory->GetPreparedFrameSlot();
     if (frameSlot >= scene.m_particleDrawSlots.size())
         scene.m_particleDrawSlots.resize(static_cast<size_t>(frameSlot) + 1u);
@@ -88,11 +89,10 @@ void SceneRendererParticles::Render(Scene& scene, IGraphicsContext* context,
         slot.fluidSurfaces.clear();
         std::vector<ParticleGPUData> records;
         constexpr size_t RenderLimit = 100000;
-        for (const auto& object : scene.m_objects)
+        for (auto* emitter : emitters)
         {
+            Object* const object = emitter->Owner;
             if (!object || !object->IsEnabledInHierarchy()) continue;
-            auto* emitter = object->GetComponent<Engine::Components::ParticleEmitter>();
-            if (!emitter) continue;
             const uint32_t batchFirst = static_cast<uint32_t>(records.size());
             const glm::mat4 world = object->transform.GetWorldMatrix();
             constexpr size_t FluidSurfaceLimit = 512;
@@ -124,7 +124,7 @@ void SceneRendererParticles::Render(Scene& scene, IGraphicsContext* context,
                     surface.data(), sizeof(surface[0]));
                 if (!buffer)
                     throw std::runtime_error("Could not create fluid surface buffer");
-                slot.fluidSurfaces.push_back({ std::move(buffer), object.get(),
+                slot.fluidSurfaces.push_back({ std::move(buffer), object,
                     std::clamp(emitter->opacity, 0.f, 1.f),
                     static_cast<uint32_t>(particles.size()) });
                 continue;
@@ -152,7 +152,7 @@ void SceneRendererParticles::Render(Scene& scene, IGraphicsContext* context,
                     emitter->PrepareTexture(scene.m_graphicsProvider),
                     emitter->blendMode == static_cast<int>(
                         Engine::Components::ParticleEmitter::BlendMode::Alpha),
-                    object.get() });
+                    object });
             if (records.size() >= RenderLimit) break;
         }
         slot.particleCount = static_cast<uint32_t>(records.size());
@@ -179,11 +179,9 @@ void SceneRendererParticles::Render(Scene& scene, IGraphicsContext* context,
         }
     }
     uint32_t gpuBatchCount = 0;
-    for (const auto& object : scene.m_objects)
-        if (object && object->IsEnabledInHierarchy())
-            if (const auto* emitter = object->GetComponent<
-                    Engine::Components::ParticleEmitter>())
-                if (emitter->GetGpuDrawBuffer()) ++gpuBatchCount;
+    for (const auto* emitter : emitters)
+        if (emitter->Owner && emitter->Owner->IsEnabledInHierarchy() &&
+            emitter->GetGpuDrawBuffer()) ++gpuBatchCount;
     if ((!slot.particleCount || !slot.vertices) && !gpuBatchCount &&
         slot.fluidSurfaces.empty()) return;
 
@@ -256,13 +254,13 @@ void SceneRendererParticles::Render(Scene& scene, IGraphicsContext* context,
         context->DrawInstanced(6, 1);
         if (portalView) scene.m_lastParticlePortalDrawCount += surface.count;
     }
-    for (const auto& object : scene.m_objects)
+    for (auto* emitter : emitters)
     {
+        Object* const object = emitter->Owner;
         if (!object || !object->IsEnabledInHierarchy() ||
-            (portalView && !scene.IsObjectInSpatialRegion(object.get(),
+            (portalView && !scene.IsObjectInSpatialRegion(object,
                 contentScopeRoot))) continue;
-        auto* emitter = object->GetComponent<Engine::Components::ParticleEmitter>();
-        if (!emitter || !emitter->GetGpuDrawBuffer()) continue;
+        if (!emitter->GetGpuDrawBuffer()) continue;
         const auto texture = emitter->PrepareTexture(scene.m_graphicsProvider);
         const uint64_t offset = static_cast<uint64_t>(slot.constantCursor++) * 256u;
         constants.particleParams.x = texture ? 1.f : 0.f;

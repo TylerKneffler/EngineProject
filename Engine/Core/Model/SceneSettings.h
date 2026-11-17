@@ -4,6 +4,7 @@
 #include "Core/Model/TextureLodSettings.h"
 #include "Core/Model/GraphicsQualitySettings.h"
 #include <glm/glm.hpp>
+#include <algorithm>
 #include <string>
 
 namespace Engine::Model
@@ -33,6 +34,46 @@ enum class ToneMappingOperator
     Reinhard = 2
 };
 
+// Analytic exponential height fog applied per pixel by every forward shader
+// and the skybox (Shaders/AtmosphereFog.hlsli). Distances are scene units
+// (metres in the landscape scenes).
+struct AtmosphereFogSettings
+{
+    bool enabled = false;
+    // Extinction per unit distance at baseHeight.
+    float density = 0.0002f;
+    // Density falls off as exp(-heightFalloff * (y - baseHeight)).
+    float heightFalloff = 0.004f;
+    float baseHeight = 0.f;
+    // Fog starts this far from the camera (keeps the foreground crisp).
+    float startDistance = 0.f;
+    // Upper bound on fog opacity for surfaces; 1 lets distant ridges fully
+    // dissolve into the haze.
+    float maxOpacity = 1.f;
+    // Linear HDR color of ambient (sky-lit) in-scatter.
+    glm::vec3 inscatterColor = glm::vec3(0.55f, 0.65f, 0.8f);
+    float inscatterIntensity = 1.f;
+    // Henyey-Greenstein forward-scatter glow around the main directional
+    // light, tinted by that light's color.
+    float sunGlowStrength = 0.25f;
+    float sunGlowAnisotropy = 0.7f;
+    // Length of the view ray used to haze the sky toward the horizon.
+    float skyDistance = 30000.f;
+
+    void Normalize()
+    {
+        density = std::clamp(density, 0.f, 1.f);
+        heightFalloff = std::clamp(heightFalloff, 0.f, 1.f);
+        startDistance = std::max(0.f, startDistance);
+        maxOpacity = std::clamp(maxOpacity, 0.f, 1.f);
+        inscatterColor = glm::max(inscatterColor, glm::vec3(0.f));
+        inscatterIntensity = std::max(0.f, inscatterIntensity);
+        sunGlowStrength = std::max(0.f, sunGlowStrength);
+        sunGlowAnisotropy = std::clamp(sunGlowAnisotropy, 0.f, 0.95f);
+        skyDistance = std::clamp(skyDistance, 0.f, 1000000.f);
+    }
+};
+
 struct SceneSettings
 {
     // Dimensional editing and rendering behavior belongs to the scene so one
@@ -57,6 +98,7 @@ struct SceneSettings
     float hdriRotation = 0.f;
     ToneMappingOperator toneMapping = ToneMappingOperator::Aces;
     float outputExposure = 0.f;
+    AtmosphereFogSettings atmosphereFog;
     SceneRenderMode renderMode = SceneRenderMode::Lit;
     GraphicsQualitySettings graphicsQuality;
     TextureLodSettings textureLod;

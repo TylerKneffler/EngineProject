@@ -131,5 +131,6 @@ float4 PSMain(
     const float distanceOpacity = smoothstep(20.0, 160.0, length(toEye));
     const float alpha = lerp(surface.a, 1.0,
         saturate(max(fresnel * 3.0, distanceOpacity * 0.85)));
-    return float4(color, alpha);
+    return ApplyObjectAtmosphereFog(float4(color, alpha), worldPos,
+        objectIndex);
 }

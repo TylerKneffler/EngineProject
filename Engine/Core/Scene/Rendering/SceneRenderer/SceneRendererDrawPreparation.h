@@ -88,6 +88,9 @@ struct ObjectGPUData
     glm::vec4 textureLodParams{0.f}; // near, far, maximum mip bias, enabled/shading tier
     glm::vec4 alphaLodParams{0.f};
     glm::vec4 grassCapsules[8]{}; // four start/radius + end/reach pairs
+    // Height fog, packed by PackAtmosphereFog (AtmosphereFog.hlsli layout);
+    // zero leaves fog disabled for editor/debug draws.
+    glm::vec4 atmosphereFog[4]{};
 };
 
 struct PreparedDraw

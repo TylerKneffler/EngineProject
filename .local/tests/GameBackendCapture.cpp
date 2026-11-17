@@ -1,4 +1,9 @@
 #include "Game/Application/GameApplication.h"
+#include "CpuSampler.h"
+#include <memory>
+#pragma comment(lib, "winmm.lib")
+#include <array>
+#include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
@@ -22,6 +27,29 @@ uint32_t Number(const char* text, const char* name, uint32_t maximum, bool allow
         throw std::runtime_error(std::string("invalid ") + name);
     return static_cast<uint32_t>(parsed);
 }
+
+std::array<double, 3> Vector3(const char* text, const char* name)
+{
+    std::array<double, 3> result{};
+    std::string value(text);
+    for (char& c : value) if (c == ',') c = ' ';
+    char* cursor = value.data();
+    for (double& component : result)
+    {
+        char* end = nullptr;
+        component = std::strtod(cursor, &end);
+        if (end == cursor || !std::isfinite(component))
+            throw std::runtime_error(std::string("invalid ") + name + " (expected x,y,z)");
+        cursor = end;
+    }
+    while (*cursor == ' ') ++cursor;
+    if (*cursor) throw std::runtime_error(std::string("invalid ") + name + " (expected x,y,z)");
+    return result;
+}
+
+// --cpu-sample: in-process sampling profile of the measured frames, written
+// to <out>/cpu-profile.txt after the run.
+bool g_cpuSample = false;
 
 Engine::Game::GameBenchmarkOptions Parse(int argc, char** argv)
 {
@@ -56,15 +84,21 @@ Engine::Game::GameBenchmarkOptions Parse(int argc, char** argv)
         else if (key == "--require-terrain") options.requireTerrain = true;
         else if (key == "--require-streamed-cells") options.requireStreamedCells = true;
         else if (key == "--require-movement") options.requireMovement = true;
+        else if (key == "--look-yaw") options.lookYawPixels =
+            static_cast<int>(Number(value(), "look yaw pixels", 2000, true));
         else if (key == "--disable-clustered-lighting") options.disableClusteredLighting = true;
+        else if (key == "--camera-position") options.cameraPosition = Vector3(value(), "camera position");
+        else if (key == "--camera-target") options.cameraTarget = Vector3(value(), "camera target");
+        else if (key == "--cpu-sample") g_cpuSample = true;
         else if (key == "--help" || key == "-h")
         {
             std::cout << "GameBackendCapture [--scene <file.scene>] [--project <file.proj>] "
                 "[--backend dx11|dx12|vulkan] [--device <adapter>] [--width 1920 --height 1080] "
                 "[--warmup 120 --frames 300 --out .local/performance-logs] "
                 "[--require-terrain] [--require-streamed-cells] [--wait-for-residency <seconds>] "
-                "[--drive-forward <frames>] [--require-movement] [--max-fps <fps>] [--profile <video profile>] "
-                "[--disable-clustered-lighting]\n"
+                "[--drive-forward <frames>] [--look-yaw <pixels/frame>] [--require-movement] [--max-fps <fps>] [--profile <video profile>] "
+                "[--disable-clustered-lighting] [--camera-position x,y,z] [--camera-target x,y,z] "
+                "[--cpu-sample]\n"
                 "Defaults to oak_meadow.scene. Runs the standalone Game loop, writes frames.jsonl and capture.ppm, "
                 "and returns 2 if capture validity checks fail.\n";
             std::exit(0);
@@ -92,8 +126,23 @@ int main(int argc, char** argv)
 {
     try
     {
-        const auto options = Parse(argc, argv);
-        return Engine::Game::GameApplication::Run(GetModuleHandleW(nullptr), &options);
+        auto options = Parse(argc, argv);
+        std::unique_ptr<CpuSampler> sampler;
+        if (g_cpuSample)
+        {
+            sampler = std::make_unique<CpuSampler>();
+            options.onMeasurementStart = [&sampler] { sampler->Begin(); };
+            options.onMeasurementEnd = [&sampler] { sampler->End(); };
+        }
+        const int result = Engine::Game::GameApplication::Run(GetModuleHandleW(nullptr), &options);
+        if (sampler)
+        {
+            std::filesystem::create_directories(options.output);
+            const auto report = options.output / "cpu-profile.txt";
+            sampler->Report(report);
+            std::cout << "CPU profile: " << std::filesystem::absolute(report).string() << std::endl;
+        }
+        return result;
     }
     catch (const std::exception& error)
     {

@@ -118,6 +118,14 @@ public:
         Engine::Graphics::IGraphicsContext* context,
         const std::array<std::shared_ptr<Engine::Components::Texture>, 8>& photometryTextures);
 
+    // Packs SceneSettings::atmosphereFog for the object shaders
+    // (AtmosphereFog.hlsli: fog0..fog3). All zero when fog is disabled.
+    static std::array<glm::vec4, 4> PackAtmosphereFog(
+        const Engine::Model::AtmosphereFogSettings& fog,
+        const glm::vec3& sunDirection,
+        const glm::vec3& sunRadiance,
+        bool hasSun);
+
     static void PrepareSkyboxAndEnvironment(
         Scene& scene,
         Engine::Graphics::IGraphicsContext* context,
@@ -125,7 +133,9 @@ public:
         const glm::mat4& proj,
         uint32_t viewportWidth,
         uint32_t viewportHeight,
-        bool shadowOnly);
+        bool shadowOnly,
+        const glm::vec3& cameraPosition,
+        const std::array<glm::vec4, 4>& atmosphereFog);
 
 private:
     LightingContext m_context;

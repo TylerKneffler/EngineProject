@@ -108,13 +108,22 @@ void TerrainManager::RestoreObjectLayers(Cell cell,
                 const bool procedural = name == "Procedural meadow grass";
                 const Engine::Serialization::JsonValue proceduralValue(procedural);
                 const Engine::Serialization::JsonValue falseValue(false);
+                // Procedural layers grow tussock patches (blades from shared
+                // crowns over a low sward, tools/generate_meadow_grass.py).
+                // Authored layers keep the scattered-blade patches their
+                // placements name.
+                const std::string shortPatch = procedural ? "meadow_tussock" : "meadow_short";
+                const std::string tallPatch = procedural ? "field_tussock" : "field_tall";
+                const auto grassMesh = [](const std::string& stem, const char* suffix) {
+                    return "Assets/Mesh/Grass/" + stem + suffix + ".obj";
+                };
                 auto settings = Engine::Serialization::JsonValue::MakeObject();
-                settings.Set("shortMesh", "Assets/Mesh/Grass/meadow_short.obj")
-                    .Set("tallMesh", "Assets/Mesh/Grass/field_tall.obj")
-                    .Set("shortMeshLod1", "Assets/Mesh/Grass/meadow_short_lod1.obj")
-                    .Set("shortMeshLod2", "Assets/Mesh/Grass/meadow_short_lod2.obj")
-                    .Set("tallMeshLod1", "Assets/Mesh/Grass/field_tall_lod1.obj")
-                    .Set("tallMeshLod2", "Assets/Mesh/Grass/field_tall_lod2.obj")
+                settings.Set("shortMesh", grassMesh(shortPatch, ""))
+                    .Set("tallMesh", grassMesh(tallPatch, ""))
+                    .Set("shortMeshLod1", grassMesh(shortPatch, "_lod1"))
+                    .Set("shortMeshLod2", grassMesh(shortPatch, "_lod2"))
+                    .Set("tallMeshLod1", grassMesh(tallPatch, "_lod1"))
+                    .Set("tallMeshLod2", grassMesh(tallPatch, "_lod2"))
                     .Set("viewerObjectName", viewerObjectName)
                     .Set("useEditorCamera", proceduralValue).Set("visibleRadius", 11.f)
                     .Set("tileSize", 4.f).Set("shortPatchesPerSquareMeter", .5f)
@@ -129,7 +138,12 @@ void TerrainManager::RestoreObjectLayers(Cell cell,
                         "Assets/Mesh/Grass/meadow_buttercup.obj;Assets/Mesh/Grass/meadow_clover.obj;"
                         "Assets/Mesh/Grass/meadow_plantain.obj;Assets/Mesh/Grass/meadow_knapweed.obj;"
                         "Assets/Mesh/Grass/meadow_dandelion.obj")
-                    .Set("accentPatchesPerSquareMeter", .08f).Set("accentDriftSize", 7.f);
+                    .Set("accentPatchesPerSquareMeter", .08f).Set("accentDriftSize", 7.f)
+                    // Low shrubs in thickets (procedural layers only, like accents).
+                    .Set("shrubMeshes", "Assets/Mesh/Grass/meadow_shrub.obj;"
+                        "Assets/Mesh/Grass/meadow_bramble.obj;Assets/Mesh/Grass/meadow_fern.obj")
+                    .Set("shrubPatchesPerSquareMeter", procedural ? .6f : 0.f)
+                    .Set("shrubThicketSize", 9.f).Set("shrubCoverage", .25f);
                 grass->Deserialize(settings);
                 child->AddComponent(grass);
             }

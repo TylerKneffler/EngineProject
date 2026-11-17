@@ -18,6 +18,7 @@
 
 namespace Engine::Components
 {
+class Material;
 class Terrain;
 class TerrainObjectLayer;
 }
@@ -68,6 +69,20 @@ public:
     // favours one species and has its own richness.
     PROPERTY(Inspector, EditAnywhere, Category = "Grass | Accents", ClampMin = "1")
     float accentDriftSize = 7.f;
+    // Low ground-cover shrubs (semicolon-separated LOD0 meshes with optional
+    // _lod1/_lod2 siblings, as for accents; tools/generate_meadow_grass.py).
+    // Procedural shrubs grow in thickets that close over the ground.
+    PROPERTY(Inspector, EditAnywhere, Category = "Grass | Shrubs")
+    std::string shrubMeshes;
+    // Shrubs per square metre at the heart of a thicket.
+    PROPERTY(Inspector, EditAnywhere, Category = "Grass | Shrubs", ClampMin = "0")
+    float shrubPatchesPerSquareMeter = 0.f;
+    // Typical distance between thickets (metres): the period of the thicket noise.
+    PROPERTY(Inspector, EditAnywhere, Category = "Grass | Shrubs", ClampMin = "1")
+    float shrubThicketSize = 9.f;
+    // Roughly the share of the ground that thickets cover (0..1).
+    PROPERTY(Inspector, EditAnywhere, Category = "Grass | Shrubs", ClampMin = "0", ClampMax = "1")
+    float shrubCoverage = .3f;
     PROPERTY(Inspector, EditAnywhere, Category = "Grass | Tiles")
     int seed = 18731;
     // Retained for scene compatibility; placement publication is capped at one
@@ -116,7 +131,8 @@ public:
 private:
     using Tile = std::pair<int, int>;
     using Source = std::vector<Engine::Components::Mesh::Vertex>;
-    // Species 0 is shortMesh, 1 tallMesh, then each accent. Every species owns
+    // Species 0 is shortMesh, 1 tallMesh, then each accent, then each shrub
+    // (m_accentSpecies and m_shrubSpecies count the loaded ones). Every species owns
     // one vertex range of the shared per-LOD source mesh and one instance range
     // per tile. Unknown authored assets render as species 0.
     std::vector<std::string> m_speciesAssets;
@@ -132,6 +148,8 @@ private:
     {
         Engine::Core::Object* object = nullptr;
         Engine::Components::Mesh* mesh = nullptr;
+        Engine::Components::Material* material = nullptr; // the tile object's own
+        uint64_t desiredRefresh = 0; // m_refreshSerial of the last Refresh that wanted it
         int desiredLod = 0;
         bool castsShadows = false;
         float distanceSquared = 0;
@@ -166,13 +184,27 @@ private:
     Clock::time_point m_lastRefresh{};
     bool m_authoredPreviewHidden = false;
     uint64_t m_lastGenerationSignature = 0;
+    uint64_t m_refreshSerial = 0;
     bool m_hasGenerationSignature = false;
     // [species][lod]
     std::vector<std::vector<std::string>> m_loadedSpeciesPaths;
-    // Accent LOD chains, re-resolved only when accentMeshes changes.
-    mutable std::string m_accentSource;
-    mutable std::vector<std::vector<std::string>> m_accentLods;
-    const std::vector<std::vector<std::string>>& AccentLods() const;
+    size_t m_accentSpecies = 0, m_shrubSpecies = 0;
+    // Accent and shrub LOD chains, re-resolved only when their lists change.
+    struct LodChains
+    {
+        std::string source;
+        bool resolved = false;
+        std::vector<std::vector<std::string>> chains;
+    };
+    mutable LodChains m_accentLods, m_shrubLods;
+    const std::vector<std::vector<std::string>>& ResolveLodChains(
+        const std::string& list, LodChains& cache) const;
+    const std::vector<std::vector<std::string>>& AccentLods() const
+    { return ResolveLodChains(accentMeshes, m_accentLods); }
+    const std::vector<std::vector<std::string>>& ShrubLods() const
+    { return ResolveLodChains(shrubMeshes, m_shrubLods); }
+    // 0 outside thickets, 1 at their heart (terrain-local metres).
+    float ShrubThicket(float x, float z) const;
     size_t SpeciesOf(const std::string& asset) const;
     Engine::Core::Object* m_cachedViewer = nullptr;
     Engine::Components::Terrain* m_cachedTerrain = nullptr;

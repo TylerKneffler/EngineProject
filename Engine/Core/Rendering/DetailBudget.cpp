@@ -73,6 +73,8 @@ void DetailBudget::Configure(const std::vector<Engine::Model::ProjectLayer>& lay
         m_settings.extendedTextureBudget = std::clamp(m_settings.extendedTextureBudget, 0.f, 1.f);
         m_lastTextureSample = {};
         m_costBudget = 0.0;
+        m_smoothedDrawnCost = 0.0;
+        m_lowerUrgency = 0.f;
         m_enabled.store(m_settings.enabled, std::memory_order_relaxed);
         if (!m_settings.enabled)
         {
@@ -126,7 +128,8 @@ void DetailBudget::AddCpuRenderTime(double milliseconds)
     m_cpuAccumulatedMs += std::max(0.0, milliseconds);
 }
 
-void DetailBudget::ReportGeometryCost(uint64_t sampleId, double geometryMs, double fixedMs)
+void DetailBudget::ReportGeometryCost(uint64_t sampleId, double geometryMs, double fixedMs,
+    std::chrono::steady_clock::time_point now)
 {
     double dt = 0.0;
     {
@@ -141,7 +144,6 @@ void DetailBudget::ReportGeometryCost(uint64_t sampleId, double geometryMs, doub
         m_lastSampleId = sampleId;
         m_lastGeometryMs.store(geometryMs, std::memory_order_relaxed);
         m_lastCpuMs.store(cpuMs, std::memory_order_relaxed);
-        const auto now = std::chrono::steady_clock::now();
         dt = m_lastReport == std::chrono::steady_clock::time_point{}
             ? 0.0 : std::min(.25, std::chrono::duration<double>(now - m_lastReport).count());
         m_lastReport = now;
@@ -176,42 +178,52 @@ void DetailBudget::ReportGeometryCost(uint64_t sampleId, double geometryMs, doub
             // a sparse view pushes detail far out at once and a dense one
             // pulls it in, without waiting for the GPU time to move.
             const float minimum = m_settings.minimumScale, maximum = m_settings.maximumScale;
-            if (m_costBudget <= 0.0)
-                m_costBudget = std::max(1.0, m_curve.CostAt(std::clamp(m_publishedGlobal, minimum, maximum)));
-            const double exponent = dt / m_settings.responseSeconds;
+            // Calibrate GPU time per unit of predicted cost from what is drawn:
+            // the applied scale's predicted cost, smoothed like the GPU time
+            // so a view change moves both together. The affordable cost
+            // follows directly from that rate. An integrating budget (grow
+            // while under budget) winds up here: the applied scale glides
+            // behind the target, so the GPU keeps reporting headroom while
+            // the target is already far beyond it, then overshoots by 2x.
+            const double drawnCost = std::max(1.0,
+                m_curve.CostAt(std::clamp(m_publishedGlobal, minimum, maximum)));
+            m_smoothedDrawnCost = m_smoothedDrawnCost <= 0.0 ? drawnCost
+                : m_smoothedDrawnCost + (drawnCost - m_smoothedDrawnCost) * smoothing;
             // Only the part LOD distances change scales with the cost: the
             // budget left after terrain and grass over the time of the rest.
-            const double variableBudget = m_settings.geometryBudgetMs - m_smoothedFixedMs;
+            const double variableBudget = std::max(.05,
+                m_settings.geometryBudgetMs - m_smoothedFixedMs);
             const double variableMs = std::max(.05, m_smoothedGpuMs - m_smoothedFixedMs);
-            const double costRatio = std::max(.05, variableBudget) / variableMs;
-            if (costRatio < 1.0)
-                m_costBudget *= std::pow(std::max(costRatio, .25), exponent);
-            else
-            {
-                // Within the GPU budget, what is drawn now is affordable.
-                m_costBudget = std::max(m_costBudget,
-                    m_curve.CostAt(std::clamp(m_publishedGlobal, minimum, maximum)));
-                // Grow only while the budget is what limits the scale. The
-                // band is narrow: the measured part is all detail-dependent.
-                if (costRatio >= 1.05 && m_costBudget < m_curve.CostAt(maximum))
-                    m_costBudget *= std::pow(std::min(costRatio, 2.0), exponent);
-            }
+            const double msPerCost = variableMs / m_smoothedDrawnCost;
+            // A small margin keeps the settled point just inside the budget.
+            const double affordable = .95 * variableBudget / msPerCost;
+            if (m_costBudget <= 0.0) m_costBudget = drawnCost;
+            // Cut quickly, grow over the response time.
+            const double seconds = affordable < m_costBudget ? .2 : m_settings.responseSeconds;
+            m_costBudget += (affordable - m_costBudget) * (1.0 - std::exp(-dt / seconds));
             // The CPU render budget only drives the reactive controller below:
             // recording cost barely depends on instanced LOD distances, and
             // letting it hold this budget pinned detail at the minimum.
-            // Never below what the minimum scale costs: the target is the
-            // minimum either way, and when headroom returns the budget grows
-            // from there instead of doubling up from nothing.
             m_costBudget = std::max({ m_costBudget, 1.0, m_curve.CostAt(minimum) });
             m_modelTarget = m_curve.LargestScaleWithin(m_costBudget, minimum, maximum);
+            // Measured (not predicted) overload: well over the budget, shed
+            // detail faster than the anti-popping glide allows. The model's
+            // per-view predictions can be far off (occlusion it cannot see),
+            // so they only choose the target, never the urgency.
+            const double overload = variableMs / variableBudget;
+            m_lowerUrgency = static_cast<float>(std::clamp((overload - 1.1) / .9, 0.0, 1.0));
             const float current = GlobalScale();
-            const float blend = static_cast<float>(1.0 - std::exp(-dt / (.5 * m_settings.responseSeconds)));
+            // A denser view needs less detail now; following it slowly here
+            // would stack on top of the applied-scale glide below.
+            const double follow = m_modelTarget < current ? .1 : .5 * m_settings.responseSeconds;
+            const float blend = static_cast<float>(1.0 - std::exp(-dt / follow));
             m_globalScale.store(current + (m_modelTarget - current) * blend, std::memory_order_relaxed);
         }
         // Inside the dead band the controller holds, but the applied scale
         // still finishes gliding to its step below.
         else if (tightest < 1.0 || tightest >= 1.0 / .85)
         {
+            m_lowerUrgency = 0.f;
             const double ratio = std::clamp(tightest, .25, 4.);
             const float current = GlobalScale();
             const float target = std::clamp(static_cast<float>(current * std::sqrt(ratio)),
@@ -240,11 +252,12 @@ void DetailBudget::SetFixedGlobalScale(float scale)
     PublishScales();
 }
 
-void DetailBudget::SubmitCostCurve(const DetailCostCurve& curve)
+void DetailBudget::SubmitCostCurve(const DetailCostCurve& curve,
+    std::chrono::steady_clock::time_point now)
 {
     std::lock_guard lock(m_mutex);
     m_curve = curve;
-    m_curveTime = std::chrono::steady_clock::now();
+    m_curveTime = now;
 }
 
 DetailBudget::ModelStatus DetailBudget::GetModelStatus() const
@@ -325,7 +338,10 @@ void DetailBudget::PublishScales(double seconds)
     // shed at about 25%, so an over-budget frame rate recovers sooner. At a
     // 60 m switch that moves the switch ring 7-15 m/s, about the camera's own
     // speed, so trees still cross it one at a time (and dissolve per tree).
-    constexpr double raisePerSecond = .12, lowerPerSecond = .25;
+    // Far over budget (m_lowerUrgency) detail drops up to ~5x faster: a few
+    // LODs switching together beat a run of slow frames.
+    constexpr double raisePerSecond = .12;
+    const double lowerPerSecond = .25 + 1.0 * m_lowerUrgency;
     const float logStep = std::log(step);
     const float global = GlobalScale();
     const float offset = std::log(global) - std::log(m_steppedGlobal);

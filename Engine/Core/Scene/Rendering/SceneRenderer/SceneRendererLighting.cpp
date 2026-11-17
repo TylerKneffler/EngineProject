@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <limits>
 #include <map>
@@ -293,6 +294,35 @@ void SceneRendererLighting::BindPhotometryTextures(
     }
 }
 
+std::array<glm::vec4, 4> SceneRendererLighting::PackAtmosphereFog(
+    const Engine::Model::AtmosphereFogSettings& fog,
+    const glm::vec3& sunDirection,
+    const glm::vec3& sunRadiance,
+    bool hasSun)
+{
+    std::array<glm::vec4, 4> packed{};
+    if (!fog.enabled || fog.density <= 0.f)
+        return packed;
+    // The glow takes the sun's hue, not its absolute radiance, so the
+    // strength slider behaves the same across differently lit scenes.
+    glm::vec3 sunTint(0.f);
+    if (hasSun)
+    {
+        const float peak = std::max({ sunRadiance.r, sunRadiance.g,
+            sunRadiance.b, 1e-4f });
+        sunTint = sunRadiance / peak;
+    }
+    const glm::vec3 toSun = glm::length(sunDirection) > 1e-4f
+        ? glm::normalize(sunDirection) : glm::vec3(0.f, 1.f, 0.f);
+    packed[0] = { fog.density, fog.heightFalloff, fog.baseHeight, 1.f };
+    packed[1] = { fog.inscatterColor * fog.inscatterIntensity,
+        fog.startDistance };
+    packed[2] = { toSun, fog.sunGlowAnisotropy };
+    packed[3] = { sunTint * fog.sunGlowStrength * fog.inscatterIntensity,
+        fog.maxOpacity };
+    return packed;
+}
+
 void SceneRendererLighting::PrepareSkyboxAndEnvironment(
     Scene& scene,
     Engine::Graphics::IGraphicsContext* context,
@@ -300,7 +330,9 @@ void SceneRendererLighting::PrepareSkyboxAndEnvironment(
     const glm::mat4& proj,
     uint32_t viewportWidth,
     uint32_t viewportHeight,
-    bool shadowOnly)
+    bool shadowOnly,
+    const glm::vec3& cameraPosition,
+    const std::array<glm::vec4, 4>& atmosphereFog)
 {
     const Engine::Components::Texture* skybox = shadowOnly
         ? nullptr
@@ -315,8 +347,31 @@ void SceneRendererLighting::PrepareSkyboxAndEnvironment(
             skybox->GetGraphicsTexture(),
             4.f * float(std::max(viewportWidth, viewportHeight)));
 
-        struct SkyboxCBData { glm::mat4 invVP; glm::vec4 displayParams; };
+        // 128 bytes: the Vulkan push-constant limit this layout must fit.
+        struct SkyboxCBData
+        {
+            glm::mat4 invVP;
+            glm::vec4 displayParams; // 2D, exposure, rotation, sun dir z
+            // density at camera, falloff, sky distance, anisotropy;
+            // inscatter rgb, sun dir x; sun glow rgb, sun dir y
+            glm::vec4 fog[3];
+        };
+        static_assert(sizeof(SkyboxCBData) == 128);
         SkyboxCBData skyboxData{};
+        if (atmosphereFog[0].w > 0.5f &&
+            scene.settings.atmosphereFog.skyDistance > 0.f &&
+            !scene.m_editorMode2D)
+        {
+            const float densityAtCamera = atmosphereFog[0].x * std::exp(
+                std::clamp(-atmosphereFog[0].y *
+                    (cameraPosition.y - atmosphereFog[0].z), -60.f, 60.f));
+            skyboxData.fog[0] = { densityAtCamera, atmosphereFog[0].y,
+                scene.settings.atmosphereFog.skyDistance, atmosphereFog[2].w };
+            skyboxData.fog[1] = { glm::vec3(atmosphereFog[1]),
+                atmosphereFog[2].x };
+            skyboxData.fog[2] = { glm::vec3(atmosphereFog[3]),
+                atmosphereFog[2].y };
+        }
         // A skybox represents direction only. Excluding camera translation
         // prevents cancellation in the shader's farPoint - nearPoint math
         // when the editor camera is far from the world origin.
@@ -326,13 +381,15 @@ void SceneRendererLighting::PrepareSkyboxAndEnvironment(
             scene.m_editorMode2D ? 1.f : 0.f,
             std::exp2(scene.settings.hdriExposure),
             glm::radians(scene.settings.hdriRotation),
-            0.f};
+            atmosphereFog[2].z};
 
         std::memcpy(scene.m_skyboxCBMapped, &skyboxData, sizeof(skyboxData));
         context->SetPipeline(scene.m_skyboxPipeline.get());
         context->SetConstantBuffer(0, scene.m_skyboxConstantBuffer.get(), 0);
         context->SetTexture(0, skybox->GetGraphicsTexture());
+        context->BeginGpuTiming(Engine::Graphics::GpuTimingStage::Sky);
         context->DrawInstanced(3, 1, 0, 0);
+        context->EndGpuTiming(Engine::Graphics::GpuTimingStage::Sky);
     }
 }
 }

@@ -21,6 +21,10 @@ build/
 !.local/tests/OcclusionBufferTests.cpp
 !.local/tests/AutoQualityTests.cpp
 !.local/tests/TerrainEditingToolsTests.cpp
+!.local/tests/AtmosphereFogSettingsTests.cpp
+!.local/tests/DetailBudgetTests.cpp
+!.local/tests/D3DShaderCacheTests.cpp
+!.local/tests/CpuSampler.h
 /Engine/Core/Assets/TerrainData/TerrainPerformance/BakedCells/
 
 !.local\tests\OakBackendCapture.cpp

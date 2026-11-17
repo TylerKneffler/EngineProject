@@ -80,6 +80,11 @@ public:
     float screenLod1Pixels = 300.f, screenLod2Pixels = 80.f;
     float screenLodHysteresis = .1f;
     float shadowDistance = 8.f;
+    // Beyond shadowDistance, the last LOD of each prefab (a tree's impostor)
+    // keeps casting out to this distance, into the far shadow cascade
+    // (RealtimeShadowSettings::directionalFarDistance). It takes over where
+    // the regular casters fade out. 0 (or <= shadowDistance) disables.
+    float farShadowDistance = 0.f;
     // Prefab shadows fade within the final metres of shadowDistance.
     // GrassField tiles retain their own distanceFadeWidth control.
     float shadowFadeWidth = 1.f;

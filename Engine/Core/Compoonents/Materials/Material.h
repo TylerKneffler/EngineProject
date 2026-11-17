@@ -97,6 +97,17 @@ public:
     PROPERTY(Inspector, EditAnywhere, Category = "Material | Alpha", Range = "0.0, 2.0")
     float alphaEdgeFade { 0.f };
 
+    // View-baked impostor cards (a tree's far level): every vertical card of
+    // the mesh is a plane through the object's up axis whose normal is the
+    // direction its view was baked from. The vertex shader turns each card
+    // about that axis to face the camera and shows only the one or two views
+    // nearest the camera direction, cross-faded through vertex alpha, so the
+    // object never shows a card edge-on or a crossed-plane seam. Horizontal
+    // (top-down) cards appear only when looking steeply down. Needs Mask
+    // alpha and vertex colors (white) for the cross-fade.
+    PROPERTY(Inspector, EditAnywhere, Category = "Material | Alpha")
+    bool impostorBillboard { false };
+
     PROPERTY(Inspector, EditAnywhere, Category = "Material | PBR", Range = "0.0, 4.0")
     float     environmentDiffuseStrength { 1.f };
 
@@ -250,6 +261,25 @@ public:
     void SetSubsurfaceThicknessTexture(const std::string& path);
     void SetReflectionEnvironmentTexture(const std::string& path);
     void PrepareTextures(IGraphicsProvider* graphicsProvider);
+    // Read-only: false when PrepareTextures would do nothing (same textures,
+    // all resident for this provider). Safe to call from worker threads for
+    // different materials.
+    bool NeedsTexturePreparation(const IGraphicsProvider* graphicsProvider) const;
+    // Shader prewarm memo for the renderer: a material whose shader, asset
+    // path and terrain use are unchanged since it was prewarmed under the
+    // same scene shader epoch skips the per-frame prewarm request.
+    struct ShaderPrewarmEpoch
+    {
+        const void* scene = nullptr;
+        int64_t sourceGeneration = 0;
+        uint64_t bytecodeEpoch = 0;
+        bool operator==(const ShaderPrewarmEpoch& other) const
+        { return scene == other.scene && sourceGeneration == other.sourceGeneration &&
+            bytecodeEpoch == other.bytecodeEpoch; }
+    };
+    // Read-only; safe from worker threads for different materials.
+    bool NeedsShaderPrewarm(const ShaderPrewarmEpoch& epoch, bool terrain) const;
+    void MarkShaderPrewarmed(const ShaderPrewarmEpoch& epoch, bool terrain);
     MaterialAlphaMode GetAlphaMode() const;
     void Validate();
     // Copy an already resolved material into an independent component. Texture
@@ -260,6 +290,11 @@ public:
     // Material asset per prefab detail level: entry i applies at LOD i + 1;
     // an empty or missing entry keeps this material. See Mesh::lodMeshes.
     std::vector<std::string> lodMaterials;
+    // The material this object draws with at detail level `lod`: this
+    // component for level 0 or an empty entry, otherwise the lodMaterials
+    // asset, loaded on first request and owned here. A missing asset falls
+    // back to this material.
+    Material* GetLodMaterial(int lod);
     JsonValue Serialize() const override;
     void Deserialize(const JsonValue& value) override;
     bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
@@ -278,7 +313,19 @@ private:
     std::array<const Texture*,10> m_preparedTextures{};
     IGraphicsProvider* m_preparedTextureProvider=nullptr;
     bool m_texturesCached=false;
+    struct
+    {
+        ShaderPrewarmEpoch epoch;
+        std::string shader, file;
+        bool terrain = false, valid = false;
+    } m_shaderPrewarm;
     static std::string TexturePath(const std::shared_ptr<Texture>& texture);
     std::string m_filePath;
+    struct LodMaterialInstance
+    {
+        std::string path;
+        std::unique_ptr<Material> material; // null when the asset failed to load
+    };
+    std::vector<LodMaterialInstance> m_lodMaterialInstances;
 };
 }

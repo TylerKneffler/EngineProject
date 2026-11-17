@@ -49,7 +49,11 @@ public:
         uint64_t readbackViewIdentity=0;
     };
 private:
+    // A batch unused this many frames gives its buffers to the spare list.
+    static constexpr uint64_t SpareAfterFrames=8;
+    static constexpr size_t MaxSpareBatches=256;
     struct Slot { uint64_t serial=UINT64_MAX; std::map<Key,Batch> batches;
+        std::vector<Batch> spare;
         std::vector<std::unique_ptr<Graphics::IGraphicsBuffer>> retired;
         Slot()=default; Slot(const Slot&)=delete; Slot& operator=(const Slot&)=delete;
         Slot(Slot&&) noexcept=default; Slot& operator=(Slot&&) noexcept=default; };
@@ -84,11 +88,35 @@ public:
             }
             slot.serial=serial;
             slot.retired.clear();
+            // This slot's fence has passed, so buffers of batches it no longer
+            // uses are idle. Park them for reuse by new keys (bounded).
             for(auto it=slot.batches.begin();it!=slot.batches.end();)
-                if(serial>it->second.serial && serial-it->second.serial>240) it=slot.batches.erase(it); else ++it;
+                if(serial>it->second.serial && serial-it->second.serial>SpareAfterFrames)
+                {
+                    if(it->second.output && slot.spare.size()<MaxSpareBatches)
+                    {
+                        it->second.visibilityReadbackPending=false;
+                        slot.spare.push_back(std::move(it->second));
+                    }
+                    it=slot.batches.erase(it);
+                }
+                else ++it;
         }
-        auto& batch=slot.batches[std::move(key)];
-        batch.cold=!batch.output;
+        auto [found,inserted]=slot.batches.try_emplace(std::move(key));
+        auto& batch=found->second;
+        if(inserted && !slot.spare.empty())
+        {
+            // Keys change whenever streaming replaces a bound texture or mesh
+            // buffer, which happens constantly while the view turns. The
+            // buffers below do not depend on those resources; recycle a
+            // retired batch's buffers instead of creating new ones.
+            auto& spare=slot.spare.back();
+            batch.input=std::move(spare.input); batch.output=std::move(spare.output);
+            batch.draw=std::move(spare.draw); batch.visibilityReadback=std::move(spare.visibilityReadback);
+            batch.gpu=spare.gpu; batch.constants=spare.constants;
+            slot.spare.pop_back();
+        }
+        batch.cold=inserted || !batch.output;
         batch.modeChanged=!batch.cold && batch.gpu!=gpu;
         batch.membershipChanged=!batch.cold && batch.previous.size()!=tiles.size();
         if(!batch.cold && !batch.membershipChanged)
@@ -96,7 +124,7 @@ public:
                 if(batch.previous[i].range!=tiles[i].range) { batch.membershipChanged=true; break; }
         batch.serial=serial; batch.metadataUploadBytes=0; batch.idUploadBytes=0; batch.allocations=0;
         const auto bytes=tiles.size()*sizeof(InstanceTileRecord);
-        batch.metadataChanged=batch.gpu!=gpu || batch.previous.size()!=tiles.size() ||
+        batch.metadataChanged=batch.cold || batch.gpu!=gpu || batch.previous.size()!=tiles.size() ||
             std::memcmp(batch.previous.data(),tiles.data(),bytes)!=0;
         auto* factory=provider->GetBufferFactory();
         if (gpu && !batch.visibilityReadback)

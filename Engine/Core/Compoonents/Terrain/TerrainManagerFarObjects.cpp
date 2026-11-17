@@ -298,6 +298,9 @@ void TerrainManager::UpdateFarObjects(int centerX, int centerY)
                 block.layer->lod1Distance = 100000.f;
                 block.layer->lod2Distance = 100000.f;
                 block.layer->shadowDistance = 0.f;
+                // Far trees cast only into the far shadow cascade, which
+                // bounds the range; near cascades cull them by their bounds.
+                block.layer->farShadowDistance = block.layer->viewDistance;
             }
             std::vector<TerrainObjectLayer::Placement> placements;
             uint64_t id = 0;

@@ -6,6 +6,8 @@
 #include "Core/Compoonents/Mesh/Mesh.h"
 #include "Core/Compoonents/Sprite/Sprite.h"
 #include "Core/Compoonents/Terrain/TerrainObjectLayer.h"
+#include "Core/Compoonents/Terrain/Terrain.h"
+#include "Core/Compoonents/Terrain/TerrainBatchAppearance.h"
 #include "Core/Compoonents/Path/SplineGeometry.h"
 #include "Core/Compoonents/Path/SplineInstancePlacementProvider.h"
 #include "Core/Compoonents/Physics/SpatialManipulator.h"
@@ -175,6 +177,8 @@ void Scene::ProcessGraphicsPreparation(IGraphicsProvider* graphicsProvider)
 
 void Scene::PrepareRenderFrame(bool publishSnapshot)
 {
+    // Frame items are about to change; no job may still read them.
+    JoinEarlyCameraOcclusion();
     AssertOwnerThread();
     using PrepareClock = std::chrono::steady_clock;
     const auto prepareBegin=PrepareClock::now();
@@ -302,7 +306,9 @@ void Scene::PrepareRenderFrame(bool publishSnapshot)
             lookup.material=object->GetComponent<Engine::Components::Material>();
             lookup.spatialManipulator=object->GetComponent<Engine::Components::SpatialManipulator>();
             lookup.skinnedMesh=m_editorMeshEditPose ? nullptr:object->GetComponent<Engine::Components::SkinnedMesh>();
-            lookup.bakedLighting=object->GetComponent<Engine::Rendering::BakedLightingData>(); return lookup;
+            lookup.bakedLighting=object->GetComponent<Engine::Rendering::BakedLightingData>();
+            lookup.terrain=object->GetComponent<Engine::Components::Terrain>();
+            lookup.terrainBatch=object->GetComponent<Engine::Components::TerrainBatchAppearance>(); return lookup;
         };
         if(m_frameLookupFull || m_frameLookupEditPose!=m_editorMeshEditPose)
         {

@@ -1,4 +1,5 @@
 #pragma once
+#include "Core/Rendering/GrassPerformance.h"
 
 #include "Game/Application/GameApplication.h"
 #include "Core/Rendering/RenderPerformance.h"
@@ -28,6 +29,7 @@ struct GameBenchmarkSceneSample
         streamTrimMs = 0, streamFarObjectsMs = 0;
     double streamCommitTerrainMs = 0, streamCommitLayersMs = 0, streamCommitRestoreMs = 0;
     double updateObjectsMs = 0, updatePhysicsMs = 0, updatePostPhysicsMs = 0, grassMs = 0;
+    Engine::Rendering::GrassPerformance grass;
     uint64_t loadedPrefabCells = 0, pooledPrefabCells = 0;
     uint64_t sceneGeneration = 0;
     bool camera = false;

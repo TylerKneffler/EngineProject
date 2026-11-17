@@ -68,6 +68,33 @@ std::unordered_map<std::string, std::shared_ptr<Entry>>& Cache()
     return cache;
 }
 
+// Per-draw fast path. Terrain draws ask every frame; the path-keyed lookup
+// below builds a long string (paths + formatted tints) each time. Identical
+// texture objects and tints resolve to the same entry, so remember the last
+// few combinations by identity. The weak references reject a key whose
+// texture died and whose address was reused by another texture.
+struct IdentityKey
+{
+    static constexpr size_t Maps = 5;
+    std::array<const Texture*, TerrainLayerArrays::MaxLayers * Maps> textures{};
+    std::array<glm::vec3, TerrainLayerArrays::MaxLayers> tints{};
+    size_t layers = 0;
+    bool operator==(const IdentityKey& other) const
+    { return layers == other.layers && textures == other.textures && tints == other.tints; }
+};
+struct IdentityEntry
+{
+    IdentityKey key;
+    std::vector<std::weak_ptr<Texture>> alive;
+    std::shared_ptr<Entry> entry;
+    Engine::Graphics::IGraphicsProvider* provider = nullptr;
+};
+std::vector<IdentityEntry>& IdentityCache()
+{
+    static std::vector<IdentityEntry> cache;
+    return cache;
+}
+
 float SrgbToLinear(float value)
 {
     return value <= 0.04045f ? value / 12.92f
@@ -578,6 +605,26 @@ const TerrainLayerArrays::Arrays* TerrainLayerArrays::Acquire(
     Engine::Graphics::IGraphicsProvider* provider)
 {
     if (!provider || materials.empty()) return nullptr;
+    IdentityKey identity;
+    identity.layers = std::min<size_t>(materials.size(), MaxLayers);
+    for (size_t layer = 0; layer < identity.layers; ++layer)
+        if (const auto* material = materials[layer].get())
+        {
+            const std::shared_ptr<Texture>* maps[IdentityKey::Maps] = { &material->baseColorTexture,
+                &material->normalTexture, &material->metallicRoughnessTexture,
+                &material->occlusionTexture, &material->heightTexture };
+            for (size_t map = 0; map < IdentityKey::Maps; ++map)
+                identity.textures[layer * IdentityKey::Maps + map] = maps[map]->get();
+            identity.tints[layer] = glm::clamp(material->baseColorTextureTint, glm::vec3(0.f), glm::vec3(4.f));
+        }
+    {
+        std::lock_guard lock(CacheMutex());
+        for (const auto& known : IdentityCache())
+            if (known.provider == provider && known.key == identity && known.entry->ready &&
+                std::none_of(known.alive.begin(), known.alive.end(),
+                    [](const std::weak_ptr<Texture>& texture) { return texture.expired(); }))
+                return &known.entry->arrays;
+    }
     std::vector<LayerSources> sources;
     std::string key;
     for (size_t layer = 0; layer < std::min<size_t>(materials.size(), MaxLayers); ++layer)
@@ -613,7 +660,21 @@ const TerrainLayerArrays::Arrays* TerrainLayerArrays::Acquire(
         entry->build = Engine::Rendering::RenderJobs::Get().Submit(
             [sources, blockCompressed] { return Build(sources, blockCompressed); }).share();
     }
-    if (entry->ready) return &entry->arrays;
+    const auto remember = [&]
+    {
+        auto& known = IdentityCache();
+        known.erase(std::remove_if(known.begin(), known.end(), [&](const IdentityEntry& old)
+            { return old.provider == provider && old.key == identity; }), known.end());
+        if (known.size() >= 16) known.erase(known.begin());
+        IdentityEntry added{ identity, {}, entry, provider };
+        for (size_t layer = 0; layer < identity.layers; ++layer)
+            if (const auto* material = materials[layer].get())
+                for (const auto* texture : { &material->baseColorTexture, &material->normalTexture,
+                    &material->metallicRoughnessTexture, &material->occlusionTexture, &material->heightTexture })
+                    if (*texture) added.alive.push_back(*texture);
+        known.push_back(std::move(added));
+    };
+    if (entry->ready) { remember(); return &entry->arrays; }
     if (entry->failed) return nullptr;
     if (entry->build.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
         return nullptr;
@@ -639,6 +700,7 @@ const TerrainLayerArrays::Arrays* TerrainLayerArrays::Acquire(
     entry->arrays.roughAo = std::move(roughAo);
     entry->ready = true;
     entry->build = {};
+    remember();
     return &entry->arrays;
 }
 
@@ -646,5 +708,6 @@ void TerrainLayerArrays::Clear()
 {
     std::lock_guard lock(CacheMutex());
     Cache().clear();
+    IdentityCache().clear();
 }
 }

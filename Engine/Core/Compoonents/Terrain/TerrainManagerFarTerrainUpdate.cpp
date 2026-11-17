@@ -1548,7 +1548,8 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
                 Material>();
             material->diffuseColor = {1.f, 1.f, 1.f};
             material->unlit = true;
-            material->castsShadows = false;
+            // Distant hills shade valleys through the far shadow cascade.
+            material->castsShadows = true;
             tile.object->AddComponent<
                 TerrainBatchAppearance>()->distantVisual = true;
         }

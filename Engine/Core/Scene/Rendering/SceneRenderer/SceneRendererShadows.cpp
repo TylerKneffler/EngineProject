@@ -26,20 +26,29 @@ SceneRendererShadows::ShadowCascadeSet SceneRendererShadows::BuildCascades(
         const float cameraFar = std::max(cameraNear + 0.001f, cam->farPlane);
         const float cascadeFar = std::min(cameraFar,
             std::max(cameraNear + 0.001f, shadowDistance));
+        // Far range: the last cascade alone covers shadowDistance .. far, so
+        // distant hills and forests keep their shadows (see
+        // RealtimeShadowSettings::directionalFarDistance).
+        const float farDistance = std::min(cameraFar,
+            scene.m_realtimeShadowSettings.directionalFarDistance * quality.shadows);
+        out.hasFarCascade = out.count >= 2u && farDistance > cascadeFar * 1.5f;
+        const uint32_t nearCount = out.hasFarCascade ? out.count - 1u : out.count;
         const float splitLambda = std::clamp(
             scene.m_realtimeShadowSettings.cascadeSplitLambda, 0.f, 1.f);
-        for (uint32_t cascade = 0; cascade < out.count; ++cascade)
+        for (uint32_t cascade = 0; cascade < nearCount; ++cascade)
         {
             const float fraction = static_cast<float>(cascade + 1u) /
-                static_cast<float>(out.count);
+                static_cast<float>(nearCount);
             const float logarithmic = cameraNear * std::pow(
                 cascadeFar / cameraNear, fraction);
             const float uniform = cameraNear +
                 (cascadeFar - cameraNear) * fraction;
             out.splits[cascade] = glm::mix(uniform, logarithmic, splitLambda);
         }
+        if (out.hasFarCascade) out.splits[nearCount] = farDistance;
+        const float lastSplit = out.splits[out.count - 1u];
         for (uint32_t cascade = out.count; cascade < 4u; ++cascade)
-            out.splits[cascade] = cascadeFar;
+            out.splits[cascade] = lastSplit;
 
         const auto cascadePosition = glm::vec3(glm::inverse(cascadeView)[3]);
         const uint32_t tileResolution = out.count > 1u
@@ -47,12 +56,17 @@ SceneRendererShadows::ShadowCascadeSet SceneRendererShadows::BuildCascades(
             : atlasResolution;
         for (uint32_t cascade = 0; cascade < out.count; ++cascade)
         {
+            const bool farCascade = out.hasFarCascade && cascade == out.count - 1u;
+            // The far tile keeps its own depth range (its constant depth bias
+            // scales with it, matching its texels) and moves in steps of
+            // 1/8 of its range, so it is re-rendered only every ~250 m.
             const auto stable = Engine::Rendering::BuildStableShadowCascade(
                 cascadePosition,
                 shadowSelection.directionToLight,
                 out.splits[cascade],
-                shadowDistance,
-                tileResolution);
+                farCascade ? out.splits[cascade] : shadowDistance,
+                tileResolution,
+                farCascade ? out.splits[cascade] / 8.f : 0.f);
             out.centers[cascade] = stable.center;
             out.radii[cascade] = stable.radius;
             out.viewProjections[cascade] = stable.viewProjection;
@@ -184,9 +198,17 @@ SceneRendererShadows::PrepareResult SceneRendererShadows::PrepareDirectionalShad
                             (centerDelta > 0.05f || radiusDelta > 0.05f ||
                                 projectionDelta > 1e-4f) ? 1u : 0u;
                     }
+                    // The far tile is not in the fast rotation: it holds
+                    // terrain and distant trees, and costs several ms of
+                    // CPU to draw. Besides its stepped center or the sun
+                    // moving, it refreshes when objects have streamed in or
+                    // out (at most every 240 shadow frames: streaming changes
+                    // the scene almost every frame while flying), or every 600.
+                    const uint32_t refreshCount = requestedShadowCascades.hasFarCascade
+                        ? requestedShadowCascades.count - 1u
+                        : requestedShadowCascades.count;
                     const uint32_t refreshCascade =
-                        scene.m_directionalShadowRefreshCursor %
-                        requestedShadowCascades.count;
+                        scene.m_directionalShadowRefreshCursor % refreshCount;
                     const bool temporalRefreshDue =
                         (scene.m_directionalShadowFrameCounter -
                             scene.m_directionalShadowCascadeLastRenderedFrame[refreshCascade]) >= 2u;
@@ -194,8 +216,17 @@ SceneRendererShadows::PrepareResult SceneRendererShadows::PrepareDirectionalShad
                     {
                         directionalShadowDirtyMask[refreshCascade] = 1u;
                         scene.m_directionalShadowRefreshCursor =
-                            (refreshCascade + 1u) %
-                            requestedShadowCascades.count;
+                            (refreshCascade + 1u) % refreshCount;
+                    }
+                    if (requestedShadowCascades.hasFarCascade)
+                    {
+                        const uint32_t farCascade = requestedShadowCascades.count - 1u;
+                        const uint64_t age = scene.m_directionalShadowFrameCounter -
+                            scene.m_directionalShadowCascadeLastRenderedFrame[farCascade];
+                        const bool contentChanged = scene.GetStructureRevision() !=
+                            scene.m_directionalShadowFarStructureRevision;
+                        if ((contentChanged && age >= 240u) || age >= 600u)
+                            directionalShadowDirtyMask[farCascade] = 1u;
                     }
                 }
             }

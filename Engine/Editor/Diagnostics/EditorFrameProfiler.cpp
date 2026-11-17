@@ -283,6 +283,8 @@ namespace Engine::Editor
             << ",\"gpu_opaque_ms\":" << gpuTiming.OpaqueMilliseconds()
             << ",\"gpu_transparent_ms\":" << gpuTiming.gpuMilliseconds[
                 static_cast<size_t>(Engine::Graphics::GpuTimingStage::Transparent)]
+            << ",\"gpu_sky_ms\":" << gpuTiming.gpuMilliseconds[
+                static_cast<size_t>(Engine::Graphics::GpuTimingStage::Sky)]
             << ",\"pending_load_ms\":" << ms(sample.afterRender, sample.afterPendingLoad)
             << ",\"views\":" << sample.renderedViews
             << ",\"scene_views\":" << sample.renderedSceneViews

@@ -30,7 +30,25 @@ shores, carved 3-16 m below the water level (`LandscapeDriver.waterLevel`,
   small ones at the edges; nothing grows on slopes over 30 degrees.
 - **Grass:** the manager's "Procedural meadow grass" layer, limited to the
   meadow paint layer with the new `GrassField::proceduralLayerMask`
-  (26 m radius, 2.6 short / 0.45 tall patches per m²).
+  (26 m radius, 2.6 short / 0.4 tall patches per m²). Procedural layers draw
+  tussock patches (`meadow_tussock`, `field_tussock` from
+  `tools/generate_meadow_grass.py`): four crowns of 16-23 blades each,
+  upright at the core and splaying at the rim, over a low sward of 84 short
+  blades lying across the soil. The older scattered-blade patches
+  (`meadow_short`, `field_tall`) spread single blades evenly, so soil showed
+  between every blade; authored grass layers still use them. Coarser LODs keep
+  55% / 32% of the blades and widen the survivors, so the far band still
+  closes over the ground.
+- **Shrub thickets:** `GrassField::shrubMeshes` adds a low shrub, a bramble and
+  a bracken-like fern (same generator, three LODs each) in thickets:
+  two octaves of value noise (`shrubThicketSize` 11 m) over a threshold set
+  by `shrubCoverage` (0.22, about a fifth of the meadow), with density rising
+  to 0.9 per m² at a thicket's heart. Each thicket cell favours one species,
+  and grass thins by up to 40% underneath. Shrubs are extra species in the
+  grass tiles, so they share tile streaming, LODs and fades. Their vertex
+  alpha is a wind response (shrub 0.3, bramble 0.45, fern 0.85): the grass
+  vertex shader scales the wind and foot-bend height by it for instanced
+  draws, so woody plants sway less than blades.
 - **Rocks, logs and bushes:** the "Landscape props" layer (220 m reach,
   `LandscapeDriver::propsLayerName`, `propsDensity`). Rocks gather on rock
   paint (slopes, ridges, above the tree line), in noise-driven boulder fields

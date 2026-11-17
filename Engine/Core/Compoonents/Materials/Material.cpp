@@ -34,6 +34,7 @@ Material::Material()
     RegisterField("alphaCutoff", alphaCutoff, "Surface");
     RegisterField("alphaCoverageTransmission", alphaCoverageTransmission, "Alpha");
     RegisterField("alphaEdgeFade", alphaEdgeFade, "Alpha");
+    RegisterField("impostorBillboard", impostorBillboard, "Alpha");
     RegisterField("doubleSided", doubleSided, "Surface");
     RegisterField("shaderUsesTime", shaderUsesTime, "Surface");
     RegisterField("overrideTextureLod", overrideTextureLod, "Texture LOD");
@@ -251,6 +252,10 @@ bool Material::LoadFromFile(const std::string& path)
         if (root.Has("builtinToon")) builtinToon = root["builtinToon"].AsInt();
         if (root.Has("alphaMode")) alphaMode = root["alphaMode"].AsString();
         if (root.Has("alphaCutoff")) alphaCutoff = root["alphaCutoff"].AsFloat();
+        alphaCoverageTransmission = root.Has("alphaCoverageTransmission")
+            ? root["alphaCoverageTransmission"].AsFloat() : 0.f;
+        alphaEdgeFade = root.Has("alphaEdgeFade") ? root["alphaEdgeFade"].AsFloat() : 0.f;
+        impostorBillboard = root.Has("impostorBillboard") && root["impostorBillboard"].AsBool();
         if (root.Has("overrideTextureLod")) overrideTextureLod = root["overrideTextureLod"].AsBool();
         if (root.Has("textureLodEnabled")) textureLod.enabled = root["textureLodEnabled"].AsBool();
         if (root.Has("textureLodNearDistance")) textureLod.nearDistance = root["textureLodNearDistance"].AsFloat();
@@ -356,6 +361,10 @@ bool Material::SaveToFile(const std::string& path) const
     root.Set("toonTexture", JsonValue(TexturePath(toonTexture)));
     root.Set("alphaMode", JsonValue(alphaMode));
     root.Set("alphaCutoff", JsonValue(alphaCutoff));
+    if (alphaCoverageTransmission != 0.f)
+        root.Set("alphaCoverageTransmission", JsonValue(alphaCoverageTransmission));
+    if (alphaEdgeFade != 0.f) root.Set("alphaEdgeFade", JsonValue(alphaEdgeFade));
+    if (impostorBillboard) root.Set("impostorBillboard", JsonValue(true));
     root.Set("overrideTextureLod", JsonValue(overrideTextureLod));
     root.Set("textureLodEnabled", JsonValue(textureLod.enabled));
     root.Set("textureLodNearDistance", JsonValue(textureLod.nearDistance));
@@ -519,6 +528,39 @@ void Material::SetReflectionEnvironmentTexture(const std::string& path)
     if (reflectionEnvironmentMap) reflectionEnvironmentMap->RetainPixelsForCpu();
 }
 
+bool Material::NeedsShaderPrewarm(const ShaderPrewarmEpoch& epoch, bool terrain) const
+{
+    if (shader.empty()) return false;
+    return !m_shaderPrewarm.valid || !(m_shaderPrewarm.epoch == epoch) ||
+        m_shaderPrewarm.terrain != terrain || m_shaderPrewarm.shader != shader ||
+        m_shaderPrewarm.file != m_filePath;
+}
+
+void Material::MarkShaderPrewarmed(const ShaderPrewarmEpoch& epoch, bool terrain)
+{
+    m_shaderPrewarm.epoch = epoch;
+    m_shaderPrewarm.terrain = terrain;
+    m_shaderPrewarm.shader = shader;
+    m_shaderPrewarm.file = m_filePath;
+    m_shaderPrewarm.valid = true;
+}
+
+bool Material::NeedsTexturePreparation(const IGraphicsProvider* graphicsProvider) const
+{
+    if (!m_texturesCached || m_preparedTextureProvider != graphicsProvider) return true;
+    if (!reflectionEnvironmentTexture.empty() &&
+        (!reflectionEnvironmentMap ||
+            reflectionEnvironmentMap->GetFilePath() != reflectionEnvironmentTexture))
+        return true;
+    const std::array<const Texture*,10> textures={baseColorTexture.get(), metallicRoughnessTexture.get(),
+        normalTexture.get(), heightTexture.get(), occlusionTexture.get(), emissiveTexture.get(),
+        subsurfaceThicknessTexture.get(), sphereTexture.get(), toonTexture.get(), reflectionEnvironmentMap.get()};
+    if (!std::equal(textures.begin(), textures.end(), m_preparedTextures.begin())) return true;
+    return !std::all_of(textures.begin(), textures.end(), [&](const Texture* texture) {
+        return !texture || texture->IsPreparedFor(graphicsProvider);
+    });
+}
+
 void Material::PrepareTextures(IGraphicsProvider* graphicsProvider)
 {
     if (!reflectionEnvironmentTexture.empty() &&
@@ -663,10 +705,33 @@ bool Material::DrawProperties(::Engine::Editor::IEditorUi& ui)
     return changed;
 }
 
+Material* Material::GetLodMaterial(int lod)
+{
+    if (lod <= 0 || static_cast<size_t>(lod) > lodMaterials.size()) return this;
+    const std::string& path = lodMaterials[static_cast<size_t>(lod) - 1];
+    if (path.empty()) return this;
+    if (m_lodMaterialInstances.size() < lodMaterials.size())
+        m_lodMaterialInstances.resize(lodMaterials.size());
+    auto& entry = m_lodMaterialInstances[static_cast<size_t>(lod) - 1];
+    if (entry.path != path)
+    {
+        entry.path = path;
+        entry.material.reset();
+        auto material = std::make_unique<Material>();
+        if (material->LoadFromFile(path))
+        {
+            material->Validate();
+            entry.material = std::move(material);
+        }
+    }
+    return entry.material ? entry.material.get() : this;
+}
+
 void Material::CopyResolvedStateFrom(const Material& source,
     const JsonValue* serializedSource)
 {
     if (&source == this) return;
+    m_lodMaterialInstances.clear();
     // Registered fields write through this component's bindings, never copy the
     // source's callbacks, Owner or lifecycle state. Serialized textures are not
     // registered fields; retain the exact resolved resources below instead of

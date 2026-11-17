@@ -89,7 +89,7 @@ struct TerrainObjectLayer::PrefabInstances
     float viewDistance=0, lod1Distance=0, lod2Distance=0, lodHysteresis=0;
     bool screenLodSelection=false, distanceLodOverride=false;
     float screenLod1Pixels=0, screenLod2Pixels=0, screenLodHysteresis=0;
-    float shadowDistance=0, shadowFadeWidth=0;
+    float shadowDistance=0, shadowFadeWidth=0, farShadowDistance=0;
     int shadowLod=0;
     bool HasSameConfiguration(const TerrainObjectLayer& layer) const
     {
@@ -101,6 +101,7 @@ struct TerrainObjectLayer::PrefabInstances
             screenLod2Pixels==layer.screenLod2Pixels &&
             screenLodHysteresis==layer.screenLodHysteresis &&
             shadowDistance==layer.shadowDistance &&
+            farShadowDistance==layer.farShadowDistance &&
             shadowFadeWidth==layer.GetShadowFadeWidth() && shadowLod==layer.shadowLod;
     }
     bool HasGeneratedObjects(const Engine::Scene::Scene& scene) const
@@ -119,6 +120,7 @@ struct TerrainObjectLayer::PrefabInstances
         screenLod2Pixels=layer.screenLod2Pixels;
         screenLodHysteresis=layer.screenLodHysteresis;
         shadowDistance=layer.shadowDistance;
+        farShadowDistance=layer.farShadowDistance;
         shadowFadeWidth=layer.GetShadowFadeWidth(); shadowLod=layer.shadowLod;
     }
     bool HasSameLods(const std::map<std::string,ObjectLods>& current) const
@@ -928,6 +930,22 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
                         if (shadowProxyOnly || !dedicatedShadowProxy)
                             mesh->fixedShadowLodBand=shadowLod<0 ? -1:std::min(shadowLod,int(meshes.size())-1);
                         else mesh->fixedShadowLodBand=-1;
+                        // Far casters: the chain's last level (a tree's
+                        // impostor) keeps casting out to farShadowDistance,
+                        // into the far cascade. With a fixed shadow band it
+                        // starts where that band's shadows fade out.
+                        const bool farCaster = !shadowProxyOnly &&
+                            lod + 1 == meshes.size() &&
+                            farShadowDistance > mesh->runtimeShadowDistance + 1.f;
+                        if (farCaster)
+                        {
+                            mesh->farShadowCaster = true;
+                            mesh->farShadowMinDistance =
+                                mesh->fixedShadowLodBand >= 0 &&
+                                mesh->fixedShadowLodBand != int(lod)
+                                ? mesh->runtimeShadowDistance : 0.f;
+                            mesh->runtimeShadowDistance = farShadowDistance;
+                        }
                         if (meshes.size()>1)
                         {
                             mesh->instanceLodBand=int(lod);
@@ -955,7 +973,8 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
                                 BuildProfile::Stage stage("batch_material_graphics");
                                 copy->OnAfterDeserialize(provider);
                             }
-                            if (shadowDistance<=0) copy->castsShadows=false;
+                            if (shadowDistance<=0 && !mesh->farShadowCaster)
+                                copy->castsShadows=false;
                         }
                     }
                 }

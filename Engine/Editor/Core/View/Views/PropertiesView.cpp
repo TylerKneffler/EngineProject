@@ -529,6 +529,60 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
                 OnComponentsChanged();
 
             ui.Separator();
+            ui.Label("Atmosphere");
+            auto& fog = m_scene->settings.atmosphereFog;
+            bool fogChanged = ui.Checkbox("Height Fog", &fog.enabled);
+            ui.Tooltip("Distance haze that pools in low ground. Applies to every "
+                "surface and the sky horizon in Lit views.");
+            if (fog.enabled)
+            {
+                fogChanged |= ui.DragFloat("Fog Density", &fog.density,
+                    0.00001f, 0.f, 1.f);
+                ui.Tooltip("Extinction per metre at the base height. 0.0002 "
+                    "hides terrain about 15 km away; 0.002 about 1.5 km.");
+                fogChanged |= ui.DragFloat("Fog Height Falloff",
+                    &fog.heightFalloff, 0.0001f, 0.f, 1.f);
+                ui.Tooltip("How quickly fog thins with altitude, per metre. "
+                    "0.004 halves density every ~170 m; 0 is uniform fog.");
+                fogChanged |= ui.DragFloat("Fog Base Height", &fog.baseHeight,
+                    1.f, -100000.f, 100000.f);
+                ui.Tooltip("World height where the density applies; set near "
+                    "the valley floor.");
+                fogChanged |= ui.DragFloat("Fog Start Distance",
+                    &fog.startDistance, 1.f, 0.f, 100000.f);
+                fogChanged |= ui.DragFloat("Fog Max Opacity", &fog.maxOpacity,
+                    0.01f, 0.f, 1.f);
+                fogChanged |= ui.ColorEdit3("Fog Inscatter Color",
+                    &fog.inscatterColor.x);
+                fogChanged |= ui.DragFloat("Fog Inscatter Intensity",
+                    &fog.inscatterIntensity, 0.02f, 0.f, 64.f);
+                ui.Tooltip("Brightness of the haze (linear HDR). Match it to the "
+                    "sky near the horizon.");
+                fogChanged |= ui.DragFloat("Sun Glow Strength",
+                    &fog.sunGlowStrength, 0.01f, 0.f, 16.f);
+                fogChanged |= ui.DragFloat("Sun Glow Anisotropy",
+                    &fog.sunGlowAnisotropy, 0.01f, 0.f, 0.95f);
+                ui.Tooltip("How tightly the haze glows around the brightest "
+                    "directional light (Henyey-Greenstein g).");
+                fogChanged |= ui.DragFloat("Sky Haze Distance",
+                    &fog.skyDistance, 100.f, 0.f, 1000000.f);
+                ui.Tooltip("Ray length used to haze the skybox toward the "
+                    "horizon. 0 leaves the sky untouched.");
+                if (ui.Button("Reset Atmosphere"))
+                {
+                    fog = Engine::Model::AtmosphereFogSettings{};
+                    fog.enabled = true;
+                    fogChanged = true;
+                }
+            }
+            if (fogChanged)
+            {
+                fog.Normalize();
+                if (OnComponentsChanged)
+                    OnComponentsChanged();
+            }
+
+            ui.Separator();
             ui.Label("Spatial Debug");
             bool portalDebugChanged = false;
             portalDebugChanged |= ui.Checkbox("Enable Spatial Debug Visuals",

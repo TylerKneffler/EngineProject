@@ -1,5 +1,5 @@
 #include "DX12ShaderCompiler.h"
-#include "Core/Renderers/HlslFileInclude.h"
+#include "Core/Renderers/D3DShaderCache.h"
 #include <d3dcompiler.h>
 #include <sstream>
 
@@ -24,20 +24,6 @@ std::unique_ptr<Engine::Graphics::IShader> D3D12ShaderCompiler::CompileFromFile(
             return nullptr;
     }
 
-    Microsoft::WRL::ComPtr<ID3DBlob> bytecode;
-    Microsoft::WRL::ComPtr<ID3DBlob> errors;
-
-    // Convert string path to LPCWSTR
-    int wlen = MultiByteToWideChar(CP_UTF8, 0, filePath.c_str(), -1, nullptr, 0);
-    if (wlen <= 1)
-    {
-        m_lastError = "Invalid shader path";
-        return nullptr;
-    }
-    std::wstring wpath(static_cast<size_t>(wlen), L'\0');
-    MultiByteToWideChar(CP_UTF8, 0, filePath.c_str(), -1, wpath.data(), wlen);
-    wpath.pop_back();
-
     const UINT flags = D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_DEBUG
 #if defined(ENGINE_SHADER_UNOPTIMIZED_DEBUG)
         | D3DCOMPILE_SKIP_OPTIMIZATION
@@ -45,35 +31,11 @@ std::unique_ptr<Engine::Graphics::IShader> D3D12ShaderCompiler::CompileFromFile(
         | D3DCOMPILE_OPTIMIZATION_LEVEL3
 #endif
         ;
-    HlslFileInclude includes(filePath);
-    HRESULT hr = D3DCompileFromFile(
-        wpath.c_str(),
-        nullptr,
-        &includes,
-        entryPoint,
-        target,
-        flags,
-        0,
-        &bytecode,
-        &errors);
-
-    if (FAILED(hr))
-    {
-        if (errors)
-        {
-            m_lastError = std::string(
-                static_cast<const char*>(errors->GetBufferPointer()),
-                errors->GetBufferSize());
-        }
-        else
-        {
-            std::ostringstream oss;
-            oss << "D3DCompileFromFile failed with HRESULT 0x" << std::hex << hr;
-            m_lastError = oss.str();
-        }
+    // Persistent bytecode cache; a miss compiles exactly as before.
+    auto bytecode = D3DShaderCache::CompileFromFile(filePath, entryPoint,
+        target, flags, m_lastError);
+    if (!bytecode)
         return nullptr;
-    }
-
-    return std::make_unique<D3D12Shader>(bytecode);
+    return std::make_unique<D3D12Shader>(std::move(bytecode));
 }
 }

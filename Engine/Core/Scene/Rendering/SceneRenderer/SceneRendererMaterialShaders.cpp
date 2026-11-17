@@ -59,7 +59,11 @@ void SceneRendererMaterialShaders::PrewarmMaterialShaders(
     if (!scene.m_graphicsProvider || !scene.m_graphicsProvider->GetShaderCompiler()) return;
     if (material.shader.empty()) return;
     ++scene.m_lastPrepareTimings.itemShaderRequests;
-    if (!scene.m_preparedMaterialShaderSources.emplace(material.GetFilePath(), material.shader, terrain).second) return;
+    const Scene::PreparedMaterialShaderKey key{ terrain, material.shader, material.GetFilePath() };
+    auto& prepared = scene.m_preparedMaterialShaderSources;
+    const auto found = prepared.lower_bound(key);
+    if (found != prepared.end() && !prepared.key_comp()(key, *found)) return;
+    prepared.insert(found, { terrain, material.shader, material.GetFilePath() });
     const auto& source = ResolveMaterialShaderSource(scene, material, material.shader);
     if (source.hlsl && source.exists)
         QueueMaterialShaderBytecode(scene, source.path, terrain, source.revision);

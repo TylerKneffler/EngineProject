@@ -59,6 +59,11 @@ struct ObjectData
     float4 textureLodParams; // near, far, maximum mip bias, enabled/shading tier
     float4 alphaLodParams; // max alpha mip bias, disable mask at far, masked coverage transmission, card edge fade
     float4 grassCapsules[8];
+    // Height fog (see AtmosphereFog.hlsli); fog0.w = 0 disables it.
+    float4 atmosphereFog0;
+    float4 atmosphereFog1;
+    float4 atmosphereFog2;
+    float4 atmosphereFog3;
 };
 
 struct SceneLightData
@@ -202,6 +207,20 @@ bool ResolveOcclusionMark(uint instanceId)
 }
 
 #include "../GrassWind.hlsli"
+#include "../AtmosphereFog.hlsli"
+
+// Applies the scene height fog to a final surface color. Entry points call
+// this once on their output; material shaders that wrap the surface function
+// (Water, Foliage) call it after their own shading.
+float4 ApplyObjectAtmosphereFog(float4 color, float3 worldPos, uint objectIndex)
+{
+    const ObjectData fogObject = objects[(draw.drawFlags & 0x13080000u) != 0u
+        ? objectIndex : draw.objectIndex];
+    return float4(ApplyAtmosphereFog(color.rgb, worldPos,
+        fogObject.viewPositionAlphaCutoff.xyz, fogObject.atmosphereFog0,
+        fogObject.atmosphereFog1, fogObject.atmosphereFog2,
+        fogObject.atmosphereFog3), color.a);
+}
 #ifdef GRASS_CAPSULE_INTERACTION
 #include "../GrassFootBend.hlsli"
 #endif
@@ -367,6 +386,64 @@ void VSMain(
     float3 worldTangent = mul((float3x3)objectData.world, localTangent);
     float3 worldUp = mul((float3x3)objectData.world, grassUp);
     float upLength = max(length(worldUp), 0.0001);
+    // View-baked impostor cards (Material::impostorBillboard). Each vertical
+    // card is a plane through the placement's up axis, and its normal is the
+    // direction its view was baked from. Turn every card about that axis to
+    // face the camera, and keep only the views nearest the camera direction:
+    // a view owns +-20 degrees and hands over to its neighbour (60 degrees
+    // apart for the 6-view oak atlases) across the next 20. The two weights
+    // are w and 1 - w, so the pixel shader splits the screen between them
+    // with one dither (ApplyGeometryFade, billboardFade): the card turned
+    // one way keeps hash < w, the other hash >= 1 - w. No pixel is drawn by
+    // both coplanar cards, so they cannot depth-fight at any distance.
+    // Cards with no weight collapse to a point and rasterize nothing; the
+    // horizontal top-down card only shows when looking steeply down.
+    float billboardAlpha = 1.0;
+    float billboardFade = 1.0;
+    [branch] if (((uint)objectData.materialParams.w & 1024u) != 0u)
+    {
+        const float3 axis = worldUp / upLength;
+        const float3 root = mul(objectData.world, float4(grassRoot, 1.0)).xyz;
+        // Shadow views turn the cards toward the light so the caster has the
+        // tree's silhouette as the sun sees it: light-space depth is
+        // dot(viewProjection[2], p), so that row is the light axis (either
+        // sign gives a valid, mirrored silhouette).
+        const float3 toCamera = objectData.shadowCasterFade.z > 0.5
+            ? -objectData.viewProjection[2].xyz * (1000.0 /
+                max(length(objectData.viewProjection[2].xyz), 1.0e-8))
+            : objectData.viewPositionAlphaCutoff.xyz - root;
+        const float cameraDistance = max(length(toCamera), 1.0e-4);
+        float3 cameraFlat = toCamera - axis * dot(toCamera, axis);
+        const float flatLength = length(cameraFlat);
+        const float axisFacing = dot(worldNormal, axis);
+        if (abs(axisFacing) > 0.7)
+        {
+            // sin(50) .. sin(70): top card fades in as the view steepens.
+            billboardAlpha = smoothstep(0.77, 0.94, dot(toCamera, axis) / cameraDistance);
+            billboardFade = billboardAlpha;
+        }
+        else if (flatLength > 1.0e-4)
+        {
+            cameraFlat /= flatLength;
+            const float3 viewFlat = normalize(worldNormal - axis * axisFacing);
+            const float cosine = clamp(dot(viewFlat, cameraFlat), -1.0, 1.0);
+            const float sine = dot(cross(viewFlat, cameraFlat), axis);
+            billboardAlpha = saturate((40.0 - degrees(acos(cosine))) / 20.0);
+            // Neighbouring views turn opposite ways toward the camera.
+            billboardFade = sine >= 0.0 ? billboardAlpha : -billboardAlpha;
+            // Rodrigues rotation about the placement axis: viewFlat -> cameraFlat.
+            const float3 offset = worldPosition.xyz - root;
+            worldPosition.xyz = root + offset * cosine + cross(axis, offset) * sine +
+                axis * (dot(axis, offset) * (1.0 - cosine));
+            worldTangent = worldTangent * cosine + cross(axis, worldTangent) * sine +
+                axis * (dot(axis, worldTangent) * (1.0 - cosine));
+            // A canopy seen from afar is lit like a dome, not a wall: bend the
+            // card normal up so a back-lit card does not turn black.
+            worldNormal = normalize(cameraFlat + axis * 0.5);
+        }
+        if (billboardAlpha <= 0.0)
+            worldPosition.xyz = root;
+    }
 #ifdef GRASS_CAPSULE_INTERACTION
     float3 restWorldPosition = worldPosition.xyz;
     float3 restWorldNormal = worldNormal;
@@ -377,16 +454,24 @@ void VSMain(
     // light pass.
     const bool useGrassWind = objectData.grassAnimation.y > 0.5 &&
         objectData.shadowCasterFade.z <= 0.5;
+    float windHeight = max(0.0, pos.y) * upLength;
+#ifdef GRASS_SURFACE_SHADING
+    // Instanced meadow meshes carry a wind response in vertex alpha: 1 for
+    // grass blades (the default), lower for woody shrubs, which then sway
+    // and give way underfoot as if they were shorter.
+    if ((draw.drawFlags & 0x20000000u) != 0u)
+        windHeight *= saturate(color.a);
+#endif
     if (useGrassWind)
         ApplyGrassWind(objectData.grassAnimation.x, objectData.grassAnimation.z,
             mul(objectData.world, float4(grassRoot, 1)).xyz, worldUp / upLength,
-            max(0.0, pos.y) * upLength, GrassBladePhase(pos),
+            windHeight, GrassBladePhase(pos),
             worldPosition.xyz, worldNormal, worldTangent);
 #ifdef GRASS_CAPSULE_INTERACTION
     if (objectData.shadowCasterFade.z <= 0.5)
         ApplyGrassFootBend(objectData.grassCapsules, (uint)objectData.grassAnimation.w,
             mul(objectData.world, float4(grassRoot, 1)).xyz, worldUp / upLength,
-            max(0.0, pos.y) * upLength, restWorldPosition, restWorldNormal, restWorldTangent,
+            windHeight, restWorldPosition, restWorldNormal, restWorldTangent,
             worldPosition.xyz, worldNormal, worldTangent);
 #endif
     oPos = mul(objectData.viewProjection, worldPosition);
@@ -410,17 +495,30 @@ void VSMain(
     oUvChannels3 = fullUv3;
     oUvChannels4 = fullUv4;
     oColor = color;
+    // Billboard impostor cards carry their signed dither weight in the spare
+    // w of UV set 4 (their materials never sample that set).
+    if (((uint)objectData.materialParams.w & 1024u) != 0u)
+        oUvChannels4.w = billboardFade;
 #ifdef GRASS_SURFACE_SHADING
     if ((draw.drawFlags & 0x20000000u) != 0u)
+    {
         oColor.rgb = GrassColorVariation(oColor.rgb,
             mul(objectData.world, float4(grassRoot, 1)).xyz);
+        oColor.a = 1.0; // the wind response above, not coverage
+    }
 #endif
     if (((uint)objectData.materialParams.w & 16384u) != 0u)
     {
         float sunFacing = saturate(dot(oNormal,
             objectData.bakedLightDirection.xyz));
-        oColor.rgb *= objectData.ambientUnlit.rgb +
-            objectData.bakedDirectional.rgb * (sunFacing * 0.31830988618);
+        const float3 sunLight = objectData.bakedDirectional.rgb *
+            (sunFacing * 0.31830988618);
+        const float3 light = objectData.ambientUnlit.rgb + sunLight;
+        oColor.rgb *= light;
+        // Alpha carries the sun's share of the light (distant tiles are
+        // opaque), so the pixel shader can remove it where shadowed.
+        const float3 luma = float3(0.2126, 0.7152, 0.0722);
+        oColor.a = saturate(dot(sunLight, luma) / max(dot(light, luma), 1.0e-4));
     }
     if (objectData.morphParams.z > 0.0)
     {
@@ -1102,6 +1200,12 @@ float EvaluateDirectionalShadow(ObjectData objectData, SceneLightData light,
     [branch] if (light.params.z < 0.0 || light.params.w <= 0.0)
         return 1.0;
 
+    // A billboard impostor's camera-facing card lies inside its own caster
+    // (that card turned toward the light). Test from a point beyond the crown
+    // toward the light, so hills and neighbouring trees still shade it but
+    // its own caster cannot.
+    if (((uint)objectData.materialParams.w & 1024u) != 0u)
+        worldPosition += lightDirection * 14.0;
     float normalFacing = saturate(dot(surfaceNormal, lightDirection));
     // Normal offset in world units, grown with each cascade's extent: far
     // cascades have proportionally larger texels, and a fixed offset that
@@ -1563,6 +1667,10 @@ TerrainLayerSample SampleTerrainLayer(TerrainProjection projection, uint layer,
 // shaded, or negative when unknown. Pixel-shader entry points set it from the
 // vertex shader's TEXCOORD12 before any shading function runs.
 static float g_instanceLodDistance = -1.0;
+// Billboard impostor card dither weight (VSMain, billboardFade): w > 0
+// keeps screen hash < w, w < 0 keeps hash >= 1 - |w|. Set by the same entry
+// points from TEXCOORD7.w; only read for impostorBillboard materials.
+static float g_billboardFade = 1.0;
 
 // Half-width of the dissolve at an instanced LOD switch distance. Must match
 // the per-placement band test in InstanceCull.hlsl.
@@ -1579,6 +1687,16 @@ float ScreenDitherThreshold(float2 screenPosition)
 
 void ApplyGeometryFade(ObjectData data, float3 worldPosition, float2 screenPosition)
 {
+    // Billboard impostors hand one view to the next with complementary
+    // screen dither (weights w and 1 - w), so coplanar cards never overlap.
+    [branch] if (((uint)data.materialParams.w & 1024u) != 0u &&
+        abs(g_billboardFade) < 1.0)
+    {
+        const float threshold = ScreenDitherThreshold(screenPosition);
+        clip(g_billboardFade >= 0.0
+            ? g_billboardFade - threshold
+            : threshold - (1.0 + g_billboardFade));
+    }
     // Screen LOD candidates were selected with per-view hysteresis. Preserve
     // appearance/range fade, but do not apply the authored distance LOD again.
     // Shadow records retain their independent distance/fixed-proxy policy.
@@ -1612,7 +1730,12 @@ void ApplyGeometryFade(ObjectData data, float3 worldPosition, float2 screenPosit
         const float range=data.shadowCasterFade.x;
         const float width=max(0.001,data.shadowCasterFade.y);
         const float distance=length(worldPosition-data.viewPositionAlphaCutoff.xyz);
-        const float opacity=1.0-smoothstep(max(0.0,range-width),range,distance);
+        float opacity=1.0-smoothstep(max(0.0,range-width),range,distance);
+        // A far caster (w: minimum distance) fades in over the window where
+        // the near fixed-band caster fades out, so the two hand over.
+        if(data.shadowCasterFade.w>0.0)
+            opacity*=smoothstep(max(0.0,data.shadowCasterFade.w-width),
+                data.shadowCasterFade.w,distance);
         // Scale complementary LOD intervals together, preserving their union.
         if(data.geometryFade.w>0.5) data.geometryFade.xy*=opacity;
         // A fully covered fixed proxy needs neither a dither hash nor clips.
@@ -1650,6 +1773,7 @@ float4 PSShadowMain(
     float instanceLodDistance : TEXCOORD12) : SV_TARGET
 {
     g_instanceLodDistance = instanceLodDistance;
+    g_billboardFade = uvChannels4.w;
     ObjectData objectData = objects[(draw.drawFlags & 0x13080000u) != 0u ? objectIndex : draw.objectIndex];
     // Derivatives before any clip() below.
     const float3 facet = SurfaceFacet(worldPos);
@@ -2016,9 +2140,24 @@ float4 ObjectSurfacePS(
         return float4(gridColor, 1.0);
     }
     // Distant tiles already received directional light in the vertex shader.
-    // Their unlit material has no texture or per-pixel lighting work.
+    // Their unlit material has no texture or per-pixel lighting work apart
+    // from one far-cascade shadow tap, which removes the sun's share (vertex
+    // alpha) where hills and forests shade them.
     if (flags & 16384u)
-        return float4(base.rgb + objectData.emissiveOcclusion.rgb, base.a);
+    {
+        float shadow = 1.0;
+        [branch] if (objectData.bakedDirectional.w > 0.5 &&
+            objectData.shadowParams.z > 0.5 && vertexColor.a > 0.0)
+        {
+            SceneLightData sun = sceneLights[
+                (uint)objectData.bakedDirectional.w - 1u];
+            shadow = EvaluateDirectionalShadow(objectData, sun, worldPos,
+                normalize(normal), objectData.bakedLightDirection.xyz, 0);
+        }
+        const float sunShare = saturate(vertexColor.a);
+        return float4(base.rgb * (1.0 - sunShare * (1.0 - shadow)) +
+            objectData.emissiveOcclusion.rgb, 1.0);
+    }
     // Height-field triangles and normals consistently face the top surface.
     float3 terrainNormalForLighting = normalize(normal);
     float terrainRoughness = 1.0;
@@ -2302,7 +2441,9 @@ float4 ObjectSurfacePS(
             base.rgb *= 1.0 + (terrainVariation.x + terrainVariation.y) * 0.10;
     }
     // Static runtime terrain shares one global sun at every view distance.
-    // Only the closest terrain receives a single-tap realtime shadow.
+    // It takes a single-tap realtime shadow across the whole shadow range,
+    // including the far cascade: hills and forests shade the ground at any
+    // distance, and the cascades fade out on their own at the range's end.
     if ((flags & 8192u) && objectData.ambientUnlit.w < 0.5)
     {
         float3 terrainNormal = terrainNormalForLighting;
@@ -2316,16 +2457,10 @@ float4 ObjectSurfacePS(
             [branch] if (objectData.bakedDirectional.w > 0.5 &&
                 objectData.shadowParams.z > 0.5)
             {
-                float cameraDistance = distance(worldPos,
-                    objectData.viewPositionAlphaCutoff.xyz);
-                [branch] if (cameraDistance < 96.0)
-                {
-                    SceneLightData sun = sceneLights[
-                        (uint)objectData.bakedDirectional.w - 1u];
-                    shadow = lerp(EvaluateDirectionalShadow(objectData, sun,
-                        worldPos, terrainNormal, sunDirection, 0), 1.0,
-                        smoothstep(48.0, 96.0, cameraDistance));
-                }
+                SceneLightData sun = sceneLights[
+                    (uint)objectData.bakedDirectional.w - 1u];
+                shadow = EvaluateDirectionalShadow(objectData, sun,
+                    worldPos, terrainNormal, sunDirection, 0);
             }
             shadow *= terrainReliefShadow;
             diffuseLight += objectData.bakedDirectional.rgb *
@@ -2761,9 +2896,11 @@ float4 PSMain(
     bool frontFace : SV_IsFrontFace) : SV_TARGET
 {
     g_instanceLodDistance = instanceLodDistance;
-    return ObjectSurfacePS(pos, worldPos, normal, uv, uv1, vertexColor, tangent,
-        uvChannels0, uvChannels1, uvChannels2, uvChannels3, uvChannels4,
-        objectIndex, frontFace);
+    g_billboardFade = uvChannels4.w;
+    return ApplyObjectAtmosphereFog(ObjectSurfacePS(pos, worldPos, normal, uv,
+        uv1, vertexColor, tangent, uvChannels0, uvChannels1, uvChannels2,
+        uvChannels3, uvChannels4, objectIndex, frontFace), worldPos,
+        objectIndex);
 }
 #endif
 
@@ -2783,9 +2920,11 @@ float4 PSDepthEqualMain(
     bool frontFace : SV_IsFrontFace) : SV_TARGET
 {
     g_instanceLodDistance = instanceLodDistance;
-    return ObjectSurfacePS(pos, worldPos, normal, uv, uv1, vertexColor, tangent,
-        uvChannels0, uvChannels1, uvChannels2, uvChannels3, uvChannels4,
-        objectIndex, frontFace);
+    g_billboardFade = uvChannels4.w;
+    return ApplyObjectAtmosphereFog(ObjectSurfacePS(pos, worldPos, normal, uv,
+        uv1, vertexColor, tangent, uvChannels0, uvChannels1, uvChannels2,
+        uvChannels3, uvChannels4, objectIndex, frontFace), worldPos,
+        objectIndex);
 }
 
 // Opaque parallax materials with parallaxDepthOffset. Depth only moves away
@@ -2804,9 +2943,11 @@ float4 PSParallaxDepthMain(
     out float depth : SV_DepthGreaterEqual) : SV_TARGET
 {
     g_instanceLodDistance = instanceLodDistance;
-    const float4 color = ObjectSurfacePS(pos, worldPos, normal, uv, uv1, vertexColor,
+    g_billboardFade = uvChannels4.w;
+    float4 color = ObjectSurfacePS(pos, worldPos, normal, uv, uv1, vertexColor,
         tangent, uvChannels0, uvChannels1, uvChannels2, uvChannels3,
         uvChannels4, objectIndex, frontFace);
+    color = ApplyObjectAtmosphereFog(color, worldPos, objectIndex);
     depth = g_parallaxClipDepth >= 0.0
         ? clamp(g_parallaxClipDepth, pos.z, 1.0) : pos.z;
     return color;

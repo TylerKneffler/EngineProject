@@ -196,6 +196,9 @@ void SceneRendererDirectionalShadowSubmission::Submit(
             input.cascades.radii[cascade];
         scene.m_directionalShadowCascadeLastRenderedFrame[cascade] =
             scene.m_directionalShadowFrameCounter;
+        if (input.cascades.hasFarCascade && cascade + 1u == input.cascadeCount)
+            scene.m_directionalShadowFarStructureRevision =
+                scene.GetStructureRevision();
     }
     scene.m_directionalShadowCachedCascadeSplits = input.cascades.splits;
     scene.m_directionalShadowCachedCascadeData = input.cascades.data;

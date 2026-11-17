@@ -46,9 +46,11 @@ struct PortalSkyboxCBData
 {
     glm::mat4 invVP;
     glm::vec4 displayParams;
+    // Skybox.hlsl sky fog; left zero, so portal skies are not fogged.
+    glm::vec4 fog[3]{};
 };
 static_assert(sizeof(PortalGridCBData) == 128);
-static_assert(sizeof(PortalSkyboxCBData) == 80);
+static_assert(sizeof(PortalSkyboxCBData) == 128);
 }
 
 void ScenePortalRendering::Render(ScenePortalRenderingContext& input)

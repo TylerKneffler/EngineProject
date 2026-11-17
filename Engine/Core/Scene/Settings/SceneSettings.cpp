@@ -92,6 +92,22 @@ Engine::Serialization::JsonValue SerializeSceneSettings(const Engine::Model::Sce
     value.Set("textureLodDisableAlphaAtFar", Engine::Serialization::JsonValue(settings.textureLod.disableAlphaAtFar));
     value.Set("textureLodAlphaMipBias", Engine::Serialization::JsonValue(settings.textureLod.alphaMipBias));
     value.Set("outputExposure", Engine::Serialization::JsonValue(settings.outputExposure));
+    {
+        const auto& fog = settings.atmosphereFog;
+        auto fogValue = Engine::Serialization::JsonValue::MakeObject();
+        fogValue.Set("enabled", Engine::Serialization::JsonValue(fog.enabled));
+        fogValue.Set("density", Engine::Serialization::JsonValue(fog.density));
+        fogValue.Set("heightFalloff", Engine::Serialization::JsonValue(fog.heightFalloff));
+        fogValue.Set("baseHeight", Engine::Serialization::JsonValue(fog.baseHeight));
+        fogValue.Set("startDistance", Engine::Serialization::JsonValue(fog.startDistance));
+        fogValue.Set("maxOpacity", Engine::Serialization::JsonValue(fog.maxOpacity));
+        fogValue.Set("inscatterColor", Vec3ToJson(fog.inscatterColor));
+        fogValue.Set("inscatterIntensity", Engine::Serialization::JsonValue(fog.inscatterIntensity));
+        fogValue.Set("sunGlowStrength", Engine::Serialization::JsonValue(fog.sunGlowStrength));
+        fogValue.Set("sunGlowAnisotropy", Engine::Serialization::JsonValue(fog.sunGlowAnisotropy));
+        fogValue.Set("skyDistance", Engine::Serialization::JsonValue(fog.skyDistance));
+        value.Set("atmosphereFog", fogValue);
+    }
     value.Set("renderMode",
         Engine::Serialization::JsonValue(static_cast<int>(settings.renderMode)));
     value.Set("renderScaleMode",
@@ -199,6 +215,30 @@ void DeserializeSceneSettings(Engine::Model::SceneSettings& settings, const Engi
     if (const auto* outputExposure = FindField(value, "outputExposure"))
         settings.outputExposure = std::clamp(
             outputExposure->AsFloat(), -16.f, 16.f);
+    settings.atmosphereFog = {};
+    if (const auto* fogValue = FindField(value, "atmosphereFog"))
+    {
+        auto& fog = settings.atmosphereFog;
+        auto readFloat = [&](const char* key, float& target)
+        {
+            if (const auto* field = FindField(*fogValue, key))
+                target = field->AsFloat();
+        };
+        if (const auto* enabled = FindField(*fogValue, "enabled"))
+            fog.enabled = enabled->AsBool();
+        readFloat("density", fog.density);
+        readFloat("heightFalloff", fog.heightFalloff);
+        readFloat("baseHeight", fog.baseHeight);
+        readFloat("startDistance", fog.startDistance);
+        readFloat("maxOpacity", fog.maxOpacity);
+        if (const auto* color = FindField(*fogValue, "inscatterColor"))
+            fog.inscatterColor = Vec3FromJson(*color, fog.inscatterColor);
+        readFloat("inscatterIntensity", fog.inscatterIntensity);
+        readFloat("sunGlowStrength", fog.sunGlowStrength);
+        readFloat("sunGlowAnisotropy", fog.sunGlowAnisotropy);
+        readFloat("skyDistance", fog.skyDistance);
+        fog.Normalize();
+    }
     if (const auto* renderMode = FindField(value, "renderMode"))
     {
         const int mode = renderMode->AsInt();

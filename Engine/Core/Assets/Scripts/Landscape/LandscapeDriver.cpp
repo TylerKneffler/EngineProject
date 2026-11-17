@@ -246,6 +246,9 @@ void GenerateForest(const TerrainManager::ObjectLayerContext& context,
     layer.lod2Distance = 220.f;
     layer.shadowDistance = 90.f;
     layer.shadowLod = 1;
+    // Beyond 90 m the impostors cast into the far shadow cascade, so forests
+    // keep their shadows on the ground and on each other at any distance.
+    layer.farShadowDistance = layer.viewDistance;
     const std::string prefix = "Assets/Prefabs/Woodland/Oaks/";
     for (const char* species : Species)
     {
@@ -574,11 +577,16 @@ bool LandscapeDriver::ConfigureTerrain()
         if (!grass || grass->proceduralLayerMask == (1 << Grass)) return;
         grass->proceduralLayerMask = 1 << Grass;
         grass->visibleRadius = radius;
-        // Dense enough that blades close over the ground like a pelt.
+        // Tussock patches (the manager's procedural default) close over the
+        // ground like a pelt: crowns of blades over a low sward.
         grass->shortPatchesPerSquareMeter = 2.6f;
-        grass->tallPatchesPerSquareMeter = .45f;
+        grass->tallPatchesPerSquareMeter = .4f;
         // Wildflower and weed drifts (meshes come from the manager's defaults).
         grass->accentPatchesPerSquareMeter = .18f;
+        // Low shrub, bramble and fern thickets over about a fifth of the meadow.
+        grass->shrubPatchesPerSquareMeter = .7f;
+        grass->shrubThicketSize = 11.f;
+        grass->shrubCoverage = .22f;
         grass->MarkConfigurationDirty();
         layer.viewDistance = radius + 10.f;
         layer.lod1Distance = 7.f;

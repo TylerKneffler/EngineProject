@@ -1,6 +1,6 @@
 #include "pch.h"
 #include "DX11ShaderCompiler.h"
-#include "Core/Renderers/HlslFileInclude.h"
+#include "Core/Renderers/D3DShaderCache.h"
 
 namespace Engine::Renderers
 {
@@ -20,18 +20,6 @@ std::unique_ptr<Engine::Graphics::IShader> D3D11ShaderCompiler::CompileFromFile(
         default: m_lastError = "Unknown shader profile"; return nullptr;
     }
 
-    int length = MultiByteToWideChar(CP_UTF8, 0, filePath.c_str(), -1, nullptr, 0);
-    if (length <= 1)
-    {
-        m_lastError = "Invalid shader path";
-        return nullptr;
-    }
-    std::wstring widePath(static_cast<size_t>(length), L'\0');
-    MultiByteToWideChar(CP_UTF8, 0, filePath.c_str(), -1, widePath.data(), length);
-    widePath.pop_back();
-
-    Microsoft::WRL::ComPtr<ID3DBlob> bytecode;
-    Microsoft::WRL::ComPtr<ID3DBlob> errors;
     const UINT flags = D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_DEBUG
 #if defined(ENGINE_SHADER_UNOPTIMIZED_DEBUG)
         | D3DCOMPILE_SKIP_OPTIMIZATION
@@ -39,24 +27,11 @@ std::unique_ptr<Engine::Graphics::IShader> D3D11ShaderCompiler::CompileFromFile(
         | D3DCOMPILE_OPTIMIZATION_LEVEL3
 #endif
         ;
-
-    HlslFileInclude includes(filePath);
-    HRESULT hr = D3DCompileFromFile(
-        widePath.c_str(), nullptr, &includes,
-        entryPoint, target, flags, 0, &bytecode, &errors);
-    if (FAILED(hr))
-    {
-        if (errors)
-            m_lastError.assign(static_cast<const char*>(errors->GetBufferPointer()), errors->GetBufferSize());
-        else
-        {
-            std::ostringstream out;
-            out << "D3DCompileFromFile failed with HRESULT 0x" << std::hex << hr;
-            m_lastError = out.str();
-        }
+    // Persistent bytecode cache; a miss compiles exactly as before.
+    auto bytecode = D3DShaderCache::CompileFromFile(filePath, entryPoint,
+        target, flags, m_lastError);
+    if (!bytecode)
         return nullptr;
-    }
-
     return std::make_unique<D3D11Shader>(std::move(bytecode));
 }
 }

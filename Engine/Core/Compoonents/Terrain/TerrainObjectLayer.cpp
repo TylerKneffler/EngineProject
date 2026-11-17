@@ -29,6 +29,7 @@ TerrainObjectLayer::TerrainObjectLayer()
     RegisterField("screenLod2Pixels", screenLod2Pixels, "Object LOD");
     RegisterField("screenLodHysteresis", screenLodHysteresis, "Object LOD");
     RegisterField("shadowDistance", shadowDistance, "Object LOD");
+    RegisterField("farShadowDistance", farShadowDistance, "Object LOD");
     RegisterField("shadowFadeWidth", shadowFadeWidth, "Object LOD");
     RegisterField("shadowLod", shadowLod, "Object LOD");
 }
@@ -466,6 +467,7 @@ void TerrainObjectLayer::Deserialize(const JsonValue& value)
     lod2Distance = std::clamp(lod2Distance, lod1Distance, viewDistance);
     lodHysteresis = std::clamp(lodHysteresis, 0.f, 10.f);
     shadowDistance = std::clamp(shadowDistance, 0.f, viewDistance);
+    farShadowDistance = std::clamp(farShadowDistance, 0.f, viewDistance);
     shadowFadeWidth = GetShadowFadeWidth();
     shadowLod = std::clamp(shadowLod, -1, 2);
     layerName = value.Has("layerName") ? value["layerName"].AsString() : "Objects";
@@ -554,6 +556,7 @@ void TerrainObjectLayer::InstallPrepared(TerrainObjectLayer&& source)
     screenLod2Pixels = source.screenLod2Pixels;
     screenLodHysteresis = source.screenLodHysteresis;
     shadowDistance = source.shadowDistance;
+    farShadowDistance = source.farShadowDistance;
     shadowFadeWidth = source.GetShadowFadeWidth();
     shadowLod = source.shadowLod;
     objectLods = std::move(source.objectLods);
@@ -671,6 +674,9 @@ bool TerrainObjectLayer::DrawProperties(::Engine::Editor::IEditorUi& ui)
     changed |= ui.DragFloat("Shadow distance (m)", &shadowDistance,
         .25f, 0.f, viewDistance);
     ui.Tooltip("Objects stop casting shadows beyond this distance. Zero disables object shadows. Shadow quality is set in Preferences > Rendering > Realtime Shadows.");
+    changed |= ui.DragFloat("Far shadow distance (m)", &farShadowDistance,
+        1.f, 0.f, viewDistance);
+    ui.Tooltip("Beyond the shadow distance, each prefab's last LOD (a tree's impostor) keeps casting out to this distance, into the far shadow cascade (Preferences > Rendering > Realtime Shadows > Far Shadow Distance). Zero disables.");
     changed |= ui.DragFloat("Prefab shadow fade width (m)", &shadowFadeWidth,
         .25f, 0.f, shadowDistance);
     ui.Tooltip("Fades prefab shadows within the last metres of their range. A wider fade smooths transitions but makes shadows diminish earlier. Zero gives a hard cutoff. Grass tiles use GrassField's distance fade width.");
@@ -691,6 +697,7 @@ bool TerrainObjectLayer::DrawProperties(::Engine::Editor::IEditorUi& ui)
     lod1Distance = std::clamp(lod1Distance, 0.f, viewDistance);
     lod2Distance = std::clamp(lod2Distance, lod1Distance, viewDistance);
     shadowDistance = std::clamp(shadowDistance, 0.f, viewDistance);
+    farShadowDistance = std::clamp(farShadowDistance, 0.f, viewDistance);
     shadowFadeWidth = GetShadowFadeWidth();
     shadowLod = std::clamp(shadowLod, -1, 2);
     const std::string count = "Stored placements: " +

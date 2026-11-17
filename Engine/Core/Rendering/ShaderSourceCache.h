@@ -31,6 +31,8 @@ public:
     const Source& Resolve(const std::string& path);
     struct Statistics { uint64_t resolutions=0, metadataChecks=0, notifications=0; };
     Statistics GetStatistics() const;
+    // Bumped by Poll whenever a watched source may have changed.
+    int64_t Generation() const;
 private:
     struct State;
     std::unique_ptr<State> m_state;

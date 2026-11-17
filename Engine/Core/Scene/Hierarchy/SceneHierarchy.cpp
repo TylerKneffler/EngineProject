@@ -105,6 +105,7 @@ void Scene::FenceBackgroundWork()
     if (Engine::Core::SceneManager::GetActiveScene() == this)
         Engine::Core::SceneManager::CancelPendingSceneLoad();
     FenceSceneGeneration();
+    JoinEarlyCameraOcclusion();
     // A worker can execute code from a reloadable script module. Join it
     // before replacing scene objects or unloading that module.
     for (auto* component : GetComponents<Engine::Core::Component>())
@@ -1251,6 +1252,22 @@ void Scene::PublishSceneSnapshot()
         throw std::logic_error("Scene snapshots may only publish at a commit boundary");
     const auto publishBegin = std::chrono::steady_clock::now();
     const auto current = GetPublishedSceneSnapshot();
+    if (!m_sceneSnapshotObjects)
+    {
+        if (!current || current->structureRevision != m_structureRevision ||
+            !current->objects.empty())
+        {
+            auto snapshot = std::make_shared<SceneSnapshot>();
+            snapshot->generation = ++m_snapshotGeneration;
+            snapshot->structureRevision = m_structureRevision;
+            std::shared_ptr<const SceneSnapshot> immutable = std::move(snapshot);
+            std::atomic_store_explicit(&m_publishedSceneSnapshot,
+                std::move(immutable), std::memory_order_release);
+        }
+        m_lastSnapshotPublishMs = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - publishBegin).count();
+        return;
+    }
     bool unchanged = current && current->structureRevision == m_structureRevision &&
         current->objects.size() == m_objects.size();
     if (unchanged)

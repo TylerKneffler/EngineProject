@@ -3,6 +3,7 @@
 #include "Core/Graphics/IGraphicsBuffer.h"
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Core/Scene/Rendering/SceneRenderer/SceneRendererUtilities.h"
+#include "Core/Scene/Rendering/SceneRenderer/SceneRendererDrawPreparation.h"
 
 #include <array>
 #include <limits>
@@ -13,7 +14,8 @@ namespace Engine::Scene::Renderer
 {
 namespace
 {
-constexpr std::size_t kObjectGPUDataSize = 1680u;
+constexpr std::size_t kObjectGPUDataSize = sizeof(ObjectGPUData);
+static_assert(kObjectGPUDataSize == 1744u, "Object buffer layout must match Object.hlsl");
 
 std::vector<float> GenerateBrdfIntegrationLut(uint32_t resolution)
 {

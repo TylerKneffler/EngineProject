@@ -245,6 +245,8 @@ ResolvedMaterialRecord SceneRendererDrawPreparation::ResolveMaterialRecord(
         if (allowParallaxMapping) prepareTexture(5, mat->heightTexture, 64u);
         if (alphaMode == Engine::Components::MaterialAlphaMode::Mask)
             textureFlags |= 32u;
+        // Camera-facing view-baked impostor cards (Object.hlsl VSMain).
+        if (mat->impostorBillboard) textureFlags |= 1024u;
 
         data.baseColor = glm::vec4(mat->diffuseColor, mat->baseColorAlpha);
         data.pmxTextureTint = glm::vec4(mat->baseColorTextureTint,
@@ -360,7 +362,9 @@ void SceneRendererDrawPreparation::PrepareTerrainMaterial(
 {
     auto* mesh = item.mesh;
     auto* object = item.object;
-    if (!mesh || mesh->UsesTerrainVertexFormat())
+    // Only terrain cells and batches carry layer materials; skip the
+    // component scans for every other draw.
+    if (!mesh || mesh->UsesTerrainVertexFormat() || !item.terrainSurface)
         return;
     auto* terrain = object->GetComponent<Engine::Components::Terrain>();
     auto* batch = object->GetComponent<Engine::Components::TerrainBatchAppearance>();
@@ -440,7 +444,7 @@ void SceneRendererDrawPreparation::PrepareTerrainMaterial(
             draw.textureSlotCount = std::max(draw.textureSlotCount, 16u);
             objectData.materialParams.w += 524288.f;
         }
-    auto* terrainManager = object->GetComponentInParent<Engine::Components::TerrainManager>();
+    auto* terrainManager = reliefManager;
     if (!includeEditorVisuals && !forceUnlitMode && terrainManager &&
         terrainManager->fastRuntimeLighting)
     {

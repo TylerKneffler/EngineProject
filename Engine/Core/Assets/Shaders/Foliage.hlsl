@@ -24,10 +24,11 @@ float4 PSMain(
     // Instanced LOD bands dissolve per tree (see ApplyGeometryFade).
     g_instanceLodDistance = instanceLodDistance;
 #ifdef GRASS_SURFACE_SHADING
-    return PSGrassMain(pos, worldPos, normal, uv, vertexColor, tangent,
-        objectIndex, frontFace);
+    const float4 color = PSGrassMain(pos, worldPos, normal, uv, vertexColor,
+        tangent, objectIndex, frontFace);
 #else
-    return PSFoliageMain(pos, worldPos, normal, uv, vertexColor,
+    const float4 color = PSFoliageMain(pos, worldPos, normal, uv, vertexColor,
         objectIndex, frontFace);
 #endif
+    return ApplyObjectAtmosphereFog(color, worldPos, objectIndex);
 }

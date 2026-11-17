@@ -48,15 +48,27 @@ struct PrepareItemTimer
 };
 }
 
-void SceneRendererFramePreparation::PrepareItemMaterial(Scene& scene, Scene::FrameRenderItem& item)
+Engine::Components::Material::ShaderPrewarmEpoch SceneRendererFramePreparation::ShaderPrewarmEpoch(
+    const Scene& scene)
+{
+    return { &scene, scene.m_materialShaderSources.Generation(), scene.m_materialShaderBytecodeEpoch };
+}
+
+void SceneRendererFramePreparation::PrepareItemMaterial(Scene& scene, Scene::FrameRenderItem& item,
+    bool validated, bool texturesNeeded, bool shadersNeeded)
 {
     if (!item.material) return;
+    if (!validated)
     { PrepareItemTimer timer(scene.m_lastPrepareTimings.itemValidationMs, scene.m_updateProfilingEnabled);
       item.material->Validate(); }
+    if (!validated || texturesNeeded)
     { PrepareItemTimer timer(scene.m_lastPrepareTimings.itemTexturesMs, scene.m_updateProfilingEnabled);
       item.material->PrepareTextures(scene.m_graphicsProvider); }
+    if (!validated || shadersNeeded)
     { PrepareItemTimer timer(scene.m_lastPrepareTimings.itemShadersMs, scene.m_updateProfilingEnabled);
-      scene.PrewarmMaterialShaders(*item.material, item.terrainSurface); }
+      scene.PrewarmMaterialShaders(*item.material, item.terrainSurface);
+      if (scene.m_graphicsProvider && scene.m_graphicsProvider->GetShaderCompiler())
+          item.material->MarkShaderPrewarmed(ShaderPrewarmEpoch(scene), item.terrainSurface); }
     item.castsShadows = item.material->castsShadows;
     item.blended = item.material->GetAlphaMode() == Engine::Components::MaterialAlphaMode::Blend;
 }
@@ -91,6 +103,35 @@ void SceneRendererFramePreparation::PrepareFrameItems(
     uint32_t boneMatrixOffset = 0;
     const auto afterLookup = scene.m_updateProfilingEnabled
         ? PrepareClock::now() : PrepareClock::time_point{};
+    // Validation compares ~40 public fields spread over each large Material
+    // (cache misses dominate). Every lookup entry is a different object and
+    // components belong to exactly one object, so each Material appears at
+    // most once here and the work is independent per entry. The read-only
+    // texture residency check rides along; the serial loop then queues
+    // texture preparation only for materials that need it.
+    // Shader prewarm also skips materials unchanged since their last prewarm
+    // under the current shader sources and bytecode cache.
+    enum : uint8_t { NeedsTextures = 1, NeedsShaders = 2 };
+    std::vector<uint8_t> materialWork(frameComponentLookupScratch.size(), 0);
+    {
+        PrepareItemTimer timer(scene.m_lastPrepareTimings.itemValidationMs, scene.m_updateProfilingEnabled);
+        const auto* provider = scene.m_graphicsProvider;
+        const auto epoch = ShaderPrewarmEpoch(scene);
+        Engine::Rendering::RenderJobs::Get().For(frameComponentLookupScratch.size(), 256, [&](size_t index)
+        {
+            const auto& lookup = frameComponentLookupScratch[index];
+            if (auto* material = lookup.material)
+            {
+                material->Validate();
+                const bool terrain = lookup.terrain || lookup.terrainBatch;
+                materialWork[index] = uint8_t(
+                    (material->NeedsTexturePreparation(provider) ? NeedsTextures : 0) |
+                    (material->NeedsShaderPrewarm(epoch, terrain) ? NeedsShaders : 0));
+            }
+        });
+    }
+    const auto lookupIndex = [&](const Scene::FrameComponentLookup& lookup)
+    { return static_cast<size_t>(&lookup - frameComponentLookupScratch.data()); };
     std::unordered_map<const Engine::Components::Skeleton*,
         std::vector<glm::mat4>> jointSkinMatrices;
     bool boneDataChanged = false;
@@ -120,8 +161,8 @@ void SceneRendererFramePreparation::PrepareFrameItems(
             {
                 auto& entry = cached->second;
                 const auto& layer = candidate->transform.matrixLayer;
-                const bool terrainCell = candidate->GetComponent<Engine::Components::Terrain>() != nullptr;
-                const auto* terrainBatch = candidate->GetComponent<Engine::Components::TerrainBatchAppearance>();
+                const bool terrainCell = lookup.terrain != nullptr;
+                const auto* terrainBatch = lookup.terrainBatch;
                 if (entry.item.mesh == mesh && entry.item.material == lookup.material &&
                     entry.item.spatialManipulator == lookup.spatialManipulator &&
                     entry.item.bakedLighting == lookup.bakedLighting &&
@@ -139,7 +180,9 @@ void SceneRendererFramePreparation::PrepareFrameItems(
                     (!layer.enabled || std::memcmp(&entry.matrixLayer, &layer.localToLayer, sizeof(layer.localToLayer)) == 0))
                 {
                     Scene::FrameRenderItem item = entry.item;
-                    PrepareItemMaterial(scene, item);
+                    PrepareItemMaterial(scene, item, true,
+                        (materialWork[lookupIndex(lookup)] & NeedsTextures) != 0,
+                        (materialWork[lookupIndex(lookup)] & NeedsShaders) != 0);
                     item.geometryFade = mesh->GetRuntimeGeometryFade();
                     item.shadowCasterFade = { std::max(0.f, mesh->runtimeShadowDistance), std::max(0.f, mesh->runtimeShadowFadeWidth) };
                     if (mesh->IsInstanced())
@@ -185,9 +228,9 @@ void SceneRendererFramePreparation::PrepareFrameItems(
         item.skinnedMesh = lookup.skinnedMesh;
         item.bakedLighting = lookup.bakedLighting;
         item.castsShadows = !lookup.material || lookup.material->castsShadows;
-        item.terrainCell = candidate->GetComponent<Engine::Components::Terrain>() != nullptr;
+        item.terrainCell = lookup.terrain != nullptr;
         item.terrainSurface = item.terrainCell;
-        if (const auto* batch = candidate->GetComponent<Engine::Components::TerrainBatchAppearance>())
+        if (const auto* batch = lookup.terrainBatch)
         {
             item.terrainSurface = true;
             item.completeTerrainFootprint = batch->completeFootprint && !batch->distantVisual;
@@ -358,7 +401,9 @@ void SceneRendererFramePreparation::PrepareFrameItems(
         }
         else if (item.material)
         {
-            PrepareItemMaterial(scene, item);
+            PrepareItemMaterial(scene, item, true,
+                        (materialWork[lookupIndex(lookup)] & NeedsTextures) != 0,
+                        (materialWork[lookupIndex(lookup)] & NeedsShaders) != 0);
         }
         item.blended = item.belongsToPreview || item.blended;
 
@@ -452,8 +497,16 @@ void SceneRendererFramePreparation::PrepareFrameItems(
                 source->IsRuntimeLodResident(1))
             {
                 const int maximumLod = source->IsRuntimeLodResident(2) ? 2 : 1;
+                // One object, one Material: each level draws with that
+                // material's lodMaterials entry (or the material itself).
+                Engine::Components::Material* const baseMaterial = draw.material;
+                const bool baseCastsShadows = draw.castsShadows;
+                const bool baseBlended = draw.blended;
                 for (int lod=0;lod<=maximumLod;++lod)
                 {
+                    draw.material = baseMaterial ? baseMaterial->GetLodMaterial(lod) : nullptr;
+                    if (draw.material != baseMaterial) PrepareItemMaterial(scene, draw);
+                    else { draw.castsShadows = baseCastsShadows; draw.blended = baseBlended; }
                     draw.mesh=source->GetRuntimeLodMesh(lod);
                     draw.mesh->useLightProbes=source->useLightProbes;
                     draw.mesh->usesGrassShadowBudget=source->usesGrassShadowBudget;

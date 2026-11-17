@@ -17,6 +17,7 @@
 #include "Core/Renderers/IGameRenderer.h"
 #include "Core/Object.h"
 #include "Core/Scene/Scene.h"
+#include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Physics/Physics.h"
 #include "Core/SceneManager.h"
 #include "Core/Timing/FramePacer.h"
@@ -672,10 +673,16 @@ private:
                 sample.renderScale = m_renderer.GetRenderScale();
                 sample.gpu = telemetry;
                 sample.scene = std::move(packet.benchmarkScene);
+                if (packet.benchmarkFrame == warmup && m_benchmarkOptions->onMeasurementStart)
+                    m_benchmarkOptions->onMeasurementStart();
                 m_gameBenchmark->Record(packet.benchmarkFrame - warmup, sample);
             }
             else if (packet.benchmarkFrame == warmup + m_benchmarkOptions->frames)
+            {
+                if (m_benchmarkOptions->onMeasurementEnd)
+                    m_benchmarkOptions->onMeasurementEnd();
                 m_gameBenchmark->Capture(m_renderer);
+            }
         }
         double gpuTotalMs = 0.0;
         for (double stageMs : telemetry.gpuMilliseconds) gpuTotalMs += stageMs;
@@ -930,6 +937,28 @@ int GameApplication::Run(HINSTANCE instance, const GameBenchmarkOptions* benchma
         scene.Load(loadedScenePath);
     }
 
+    // Only the editor reads per-object scene snapshot contents.
+    scene.SetSceneSnapshotObjectsEnabled(false);
+    if (benchmark && (benchmark->cameraPosition || benchmark->cameraTarget))
+    {
+        auto* camera = scene.FindGameCamera();
+        if (!camera || !camera->Owner)
+            throw std::runtime_error("benchmark camera pose needs a scene game camera");
+        auto& transform = camera->Owner->transform;
+        if (benchmark->cameraPosition)
+        {
+            const auto& p = *benchmark->cameraPosition;
+            transform.position = glm::dvec3(p[0], p[1], p[2]);
+            transform.MarkDirty();
+        }
+        if (benchmark->cameraTarget)
+        {
+            const auto& t = *benchmark->cameraTarget;
+            camera->target = glm::vec3(float(t[0]), float(t[1]), float(t[2]));
+            // Aim by target point; FirstPersonController keeps aiming at it.
+            camera->useTransformRotation = false;
+        }
+    }
     if (videoProfile && videoProfile->qualityPreset >= 0)
         scene.settings.graphicsQuality.preset = videoProfile->qualityPreset;
     // Diagnostics: ENGINE_QUALITY_PRESET selects the graphics quality preset
@@ -938,6 +967,10 @@ int GameApplication::Run(HINSTANCE instance, const GameBenchmarkOptions* benchma
     if (const char* preset = std::getenv("ENGINE_QUALITY_PRESET"))
         scene.settings.graphicsQuality.preset = std::clamp(std::atoi(preset), 0,
             Engine::Model::GraphicsQualitySettings::AutoPreset);
+    // Diagnostics: ENGINE_ATMOSPHERE_FOG=0/1 forces the scene height fog off
+    // or on (with the scene's or default parameters) for A/B captures.
+    if (const char* fog = std::getenv("ENGINE_ATMOSPHERE_FOG"))
+        scene.settings.atmosphereFog.enabled = std::atoi(fog) != 0;
     scene.Start();
     std::unique_ptr<GameBenchmark> gameBenchmark;
     if (benchmark)
@@ -991,7 +1024,8 @@ int GameApplication::Run(HINSTANCE instance, const GameBenchmarkOptions* benchma
         const uint32_t width = window->GetWidth();
         const uint32_t height = window->GetHeight();
         auto input = ::Engine::Core::CaptureNativeInput(window->GetHWND());
-        if (benchmark && benchmarkStarted && benchmarkReady && benchmark->driveForwardFrames)
+        if (benchmark && benchmarkStarted && benchmarkReady &&
+            (benchmark->driveForwardFrames || benchmark->lookYawPixels))
         {
             // Feed a reproducible click and W hold through the normal input
             // snapshot path without moving the host cursor or keyboard.
@@ -1002,6 +1036,8 @@ int GameApplication::Run(HINSTANCE instance, const GameBenchmarkOptions* benchma
             if (benchmarkFrame >= clickStart && benchmarkFrame < clickStart + 3u)
                 input.keys[VK_LBUTTON] = static_cast<SHORT>(0x8000);
             const uint64_t moveStart = clickStart + 3u;
+            if (benchmark->lookYawPixels && benchmarkFrame >= moveStart && input.hasCenter)
+                input.cursor.x = input.center.x + benchmark->lookYawPixels;
             if (benchmarkFrame >= moveStart &&
                 benchmarkFrame < moveStart + benchmark->driveForwardFrames)
             {
@@ -1044,7 +1080,7 @@ int GameApplication::Run(HINSTANCE instance, const GameBenchmarkOptions* benchma
                 tick.residencyWaitMs = residencyWaitMs;
             }
         }
-        if (!benchmark || !benchmark->driveForwardFrames)
+        if (!benchmark || (!benchmark->driveForwardFrames && !benchmark->lookYawPixels))
             ::Engine::Core::ApplyNativeCursorRequests(tick.input);
 
         if (width && height)

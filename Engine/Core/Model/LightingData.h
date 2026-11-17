@@ -41,6 +41,13 @@ namespace Engine::Model
         uint32_t directionalCascadeCount = 4;
         uint32_t directionalCascadeCasterBudget = 0;
         float directionalDistance = 150.f;
+        // Far shadow range. When greater than directionalDistance (and two or
+        // more cascades are enabled), the earlier cascades share the near
+        // range and the last cascade alone covers directionalDistance ..
+        // directionalFarDistance: coarse texels for hills, forests and
+        // distant buildings, refreshed only when the camera crosses a coarse
+        // grid step. 0 disables.
+        float directionalFarDistance = 2000.f;
         float grassCasterDistance = 150.f;
         float foliageCasterDistance = 150.f;
         uint32_t pcfRadius = 1;
@@ -65,6 +72,7 @@ namespace Engine::Model
         settings.portalAtlasResolution = 1024;
         settings.portalCascadeCount = 2;
         settings.portalViewBudget = 2;
+        settings.directionalFarDistance = 0.f;
         switch (quality)
         {
         case ShadowQualityPreset::Off:
@@ -105,6 +113,7 @@ namespace Engine::Model
             settings.directionalCascadeCount = 4;
             settings.directionalCascadeCasterBudget = 0;
             settings.directionalDistance = 150.f;
+            settings.directionalFarDistance = 2000.f;
             settings.grassCasterDistance = 16.f;
             settings.foliageCasterDistance = 56.f;
             settings.pcfRadius = 1;
@@ -114,6 +123,7 @@ namespace Engine::Model
             settings.directionalCascadeCount = 4;
             settings.directionalCascadeCasterBudget = 0;
             settings.directionalDistance = 250.f;
+            settings.directionalFarDistance = 3000.f;
             settings.grassCasterDistance = 24.f;
             settings.foliageCasterDistance = 96.f;
             settings.pcfRadius = 2;
@@ -147,7 +157,9 @@ namespace Engine::Model
     struct DistanceLightingSettings
     {
         bool enabled = true;
-        float maximumDistance = 1000.f;
+        // Reaches the far shadow range (RealtimeShadowSettings::
+        // directionalFarDistance): the Low band keeps only realtime shadows.
+        float maximumDistance = 3000.f;
         uint32_t maximumRealtimeLights = MaxRealtimeLights;
         bool clusteredLighting = true;
         uint32_t clusterTileSize = 64;
@@ -158,8 +170,8 @@ namespace Engine::Model
                 true, true, 1.f, 4u, 0.f },
             { "Medium", 600.f, 8u, true, false, false, true, false,
                 true, 0.65f, 1u, 1.f },
-            { "Low", 1000.f, 2u, false, false, false, false, false,
-                false, 0.f, 0u, 2.f }
+            { "Low", 3000.f, 2u, false, false, false, false, false,
+                true, 1.f, 0u, 2.f }
         };
     };
 

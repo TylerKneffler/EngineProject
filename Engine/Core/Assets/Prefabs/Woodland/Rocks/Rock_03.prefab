@@ -2,7 +2,7 @@
 <Prefab xmlns:components="urn:engine-components" version="1" type="prefab">
   <object name="Rock_03" enabled="true">
     <components>
-      <components:Mesh Mesh.file="Assets/Models/Woodland/Rocks/Meshes/Rock_03_LOD0.mesh" Mesh.foliageWindStrength="0" Mesh.useLightProbes="false" Mesh.gpuLodSelection="false">
+      <components:Mesh Mesh.file="Assets/Models/Woodland/Rocks/Meshes/Rock_03_LOD0.mesh" Mesh.foliageWindStrength="0" Mesh.useLightProbes="false" Mesh.gpuLodSelection="true" Mesh.gpuLod1Distance="35" Mesh.gpuLod2Distance="100">
         <Mesh.lodMeshes>
           <item>Assets/Models/Woodland/Rocks/Meshes/Rock_03_LOD1.mesh</item>
           <item>Assets/Models/Woodland/Rocks/Meshes/Rock_03_LOD2.mesh</item>

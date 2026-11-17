@@ -23,6 +23,8 @@ enum class GpuTimingStage : uint32_t
     FoliageDepth,
     // Hardware simulation's calibrated GPU load (Rendering/HardwareSimulation.h).
     SyntheticLoad,
+    // Skybox (with its horizon fog) drawn behind the scene.
+    Sky,
     Count
 };
 

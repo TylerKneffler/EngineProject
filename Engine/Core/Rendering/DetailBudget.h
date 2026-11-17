@@ -66,7 +66,11 @@ public:
     // frame; repeated sample ids are ignored.
     // fixedMs is the part LOD distances do not change (terrain, grass); the
     // cost model calibrates against the rest.
-    void ReportGeometryCost(uint64_t sampleId, double geometryMs, double fixedMs = 0.0);
+    void ReportGeometryCost(uint64_t sampleId, double geometryMs, double fixedMs = 0.0)
+    { ReportGeometryCost(sampleId, geometryMs, fixedMs, std::chrono::steady_clock::now()); }
+    // Same, at an explicit time (tests drive the controller in simulated time).
+    void ReportGeometryCost(uint64_t sampleId, double geometryMs, double fixedMs,
+        std::chrono::steady_clock::time_point now);
     // Test and tool hook: fixes the global scale (and disables adaptation
     // until the next Configure).
     void SetFixedGlobalScale(float scale);
@@ -77,7 +81,9 @@ public:
     // Predicted cost of the main view's LOD'd instances at every scale (see
     // DetailCostModel.h). While a recent curve exists, the scale is the
     // largest the cost budget affords; otherwise the reactive controller runs.
-    void SubmitCostCurve(const DetailCostCurve& curve);
+    void SubmitCostCurve(const DetailCostCurve& curve)
+    { SubmitCostCurve(curve, std::chrono::steady_clock::now()); }
+    void SubmitCostCurve(const DetailCostCurve& curve, std::chrono::steady_clock::time_point now);
     struct ModelStatus
     {
         bool active = false;
@@ -123,6 +129,9 @@ private:
     DetailCostCurve m_curve;
     std::chrono::steady_clock::time_point m_curveTime{};
     double m_costBudget = 0.0;
+    double m_smoothedDrawnCost = 0.0;
+    // 0..1: how far over budget the applied scale is; speeds up lowering.
+    float m_lowerUrgency = 0.f;
     float m_modelTarget = 1.f;
     TextureBudgetStatus m_texture;
     std::chrono::steady_clock::time_point m_lastTextureSample{};

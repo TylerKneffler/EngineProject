@@ -16,9 +16,13 @@ struct StableShadowCascade
 
 // Cover a radial receiver band in every viewing direction. Neither camera
 // orientation nor lens/aspect participates in the light-space texel grid.
+// centerStep > 0 (the far cascade): the light-space center moves in steps of
+// about that many metres instead of one texel, and the radius grows to keep
+// the receiver sphere covered anywhere within a step, so a cached far tile is
+// re-rendered only when the camera crosses a step.
 inline StableShadowCascade BuildStableShadowCascade(glm::vec3 cameraPosition,
     glm::vec3 directionToLight,float receiverDistance,float shadowDistance,
-    unsigned tileResolution)
+    unsigned tileResolution,float centerStep=0.f)
 {
     StableShadowCascade result;
     directionToLight=glm::normalize(directionToLight);
@@ -28,12 +32,19 @@ inline StableShadowCascade BuildStableShadowCascade(glm::vec3 cameraPosition,
     // One metre of slack allows bounded staggered updates during walking.
     // Two texels additionally cover snapping and the filter footprint.
     const float resolution=float(std::max(8u,tileResolution));
-    result.radius=(float(std::ceil(double(receiverDistance)*16.0)/16.0)+1.f)/
-        (1.f-4.f/resolution);
+    centerStep=std::max(0.f,centerStep);
+    // A center snapped to the step grid lies within half a step diagonal
+    // (x and y in light space) of the camera.
+    result.radius=(float(std::ceil(double(receiverDistance)*16.0)/16.0)+1.f+
+        centerStep*.7072f)/(1.f-4.f/resolution);
     const float texel=2.f*result.radius/resolution;
+    // Whole texels, so a stepped center never shifts the texel grid.
+    const float step=centerStep>texel ? std::round(centerStep/texel)*texel:texel;
     auto lightCenter=glm::vec3(orientation*glm::vec4(cameraPosition,1));
+    // Depth (z) takes the same step: the depth range (2 * depthExtent)
+    // spans casters far beyond half a step either way.
     for(unsigned axis=0;axis<3;++axis)
-        lightCenter[axis]=std::round(lightCenter[axis]/texel)*texel;
+        lightCenter[axis]=std::round(lightCenter[axis]/step)*step;
     result.center=glm::vec3(glm::inverse(orientation)*glm::vec4(lightCenter,1));
     // Keep a common depth scale across cascades, including upstream casters.
     const float depthExtent=shadowDistance+2.f;

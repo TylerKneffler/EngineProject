@@ -2386,6 +2386,48 @@ if(NOT ENGINE_PROJECT_DIR AND
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/D3DShaderCacheTests.cpp")
+    enable_testing()
+    add_executable(D3DShaderCacheTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/D3DShaderCacheTests.cpp")
+    target_link_libraries(D3DShaderCacheTests PRIVATE Engine)
+    target_include_directories(D3DShaderCacheTests PRIVATE
+        "${ENGINE_ROOT}" "${ENGINE_ROOT}/Engine")
+    target_compile_definitions(D3DShaderCacheTests PRIVATE NOMINMAX)
+    add_test(NAME D3DShaderCache COMMAND D3DShaderCacheTests)
+    set_tests_properties(D3DShaderCache PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}" TIMEOUT 120)
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/DetailBudgetTests.cpp")
+    enable_testing()
+    add_executable(DetailBudgetTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/DetailBudgetTests.cpp")
+    target_link_libraries(DetailBudgetTests PRIVATE Engine)
+    target_include_directories(DetailBudgetTests PRIVATE
+        "${ENGINE_ROOT}" "${ENGINE_ROOT}/Engine")
+    target_compile_definitions(DetailBudgetTests PRIVATE NOMINMAX)
+    add_test(NAME DetailBudget COMMAND DetailBudgetTests)
+    set_tests_properties(DetailBudget PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}" TIMEOUT 60)
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/AtmosphereFogSettingsTests.cpp")
+    enable_testing()
+    add_executable(AtmosphereFogSettingsTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/AtmosphereFogSettingsTests.cpp")
+    target_link_libraries(AtmosphereFogSettingsTests PRIVATE Engine pugixml)
+    target_include_directories(AtmosphereFogSettingsTests PRIVATE
+        "${ENGINE_ROOT}" "${ENGINE_ROOT}/Engine")
+    target_compile_definitions(AtmosphereFogSettingsTests PRIVATE NOMINMAX)
+    add_test(NAME AtmosphereFogSettings COMMAND AtmosphereFogSettingsTests)
+    set_tests_properties(AtmosphereFogSettings PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}" TIMEOUT 60)
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
    EXISTS "${ENGINE_LOCAL_TEST_ROOT}/TerrainPerformanceSceneTests.cpp")
     enable_testing()
     add_executable(TerrainPerformanceSceneTests EXCLUDE_FROM_ALL

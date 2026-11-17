@@ -87,6 +87,9 @@ struct RenderCpuTimings
     RenderVisibilityMetrics cameraVisibility,shadowVisibility;
     double cullingMs=0, sortingMs=0, materialMs=0, uploadMs=0, submissionMs=0, batchingMs=0;
     double materialPipelineMs=0,materialGeometryBindingMs=0,materialOtherMs=0;
+    // Material phase sections: per-draw loop, texture footprint requests,
+    // screen LOD + object record upload (nested in materialMs).
+    double materialDrawLoopMs=0,materialFootprintMs=0,materialRecordUploadMs=0;
     uint64_t materialShaderPipelineCacheHits=0,materialShaderPipelineCacheMisses=0;
     double totalMs=0, startupMs=0, terrainPreparationMs=0, occlusionMs=0, otherMs=0;
     double recordPackingMs=0, recordWaitMs=0;
@@ -116,6 +119,7 @@ struct RenderCpuTimings
 #define ADD(field) field+=value.field
         ADD(cullingMs); ADD(sortingMs); ADD(materialMs); ADD(uploadMs); ADD(submissionMs); ADD(batchingMs);
         ADD(materialPipelineMs); ADD(materialGeometryBindingMs); ADD(materialOtherMs);
+        ADD(materialDrawLoopMs); ADD(materialFootprintMs); ADD(materialRecordUploadMs);
         ADD(materialShaderPipelineCacheHits); ADD(materialShaderPipelineCacheMisses);
         ADD(recordPackingMs); ADD(recordWaitMs);
         ADD(batchSnapshotMs); ADD(batchBuildMs); ADD(batchWaitMs);

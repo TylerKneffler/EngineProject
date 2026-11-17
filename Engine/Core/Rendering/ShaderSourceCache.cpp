@@ -206,5 +206,6 @@ const ShaderSourceCache::Source& ShaderSourceCache::Resolve(const std::string& l
 }
 const ShaderSourceCache::Source& ShaderSourceCache::Resolve(const std::string& path)
 { return Resolve({},path,[&]{return SearchPaths{path};}); }
+int64_t ShaderSourceCache::Generation() const { return m_state->generation; }
 ShaderSourceCache::Statistics ShaderSourceCache::GetStatistics() const { return m_state->stats; }
 }
