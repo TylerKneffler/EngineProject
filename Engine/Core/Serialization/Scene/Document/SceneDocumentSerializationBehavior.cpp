@@ -128,7 +128,7 @@ bool Detail::SceneDocumentBehavior::DeserializeScene(Engine::Scene::Scene& scene
     // the previous document's mode.
     scene.settings.dimension = Engine::Model::SceneDimension::ThreeD;
     Engine::Scene::DeserializeSceneSettings(scene.settings, root["settings"]);
-    scene.SetEditorMode2D(scene.settings.dimension ==
+    scene.SetMode2D(scene.settings.dimension ==
         Engine::Model::SceneDimension::TwoD);
 
     // Top-level objects
@@ -161,7 +161,7 @@ bool SceneSerializer::BeginIncrementalLoadFromValue(Scene& scene,
         scene.settings.dimension = Engine::Model::SceneDimension::ThreeD;
         Engine::Scene::DeserializeSceneSettings(scene.settings,
             snapshot["settings"]);
-        scene.SetEditorMode2D(scene.settings.dimension ==
+        scene.SetMode2D(scene.settings.dimension ==
             Engine::Model::SceneDimension::TwoD);
         return true;
     }

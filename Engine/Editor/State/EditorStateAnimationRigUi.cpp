@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "Engine/Editor/State/EditorViewState.h"
 #include "Engine/Editor/State/EditorState.h"
 #include "Core/Animation/AnimationDocumentAccess.h"
 #include "Core/Animation/AnimationTimelineVisuals.h"
@@ -148,7 +149,7 @@ void EditorState::DrawAnimationMappingRepair(IEditorUi& ui,
         document.view->SetPoseEditing(true);
         document.view->SetModelManipulation(true);
         document.view->SetModelSelectionMode(1);
-        document.poseScene->SetEditorBonesVisible(true);
+        Engine::Editor::EditorViewState::For(*document.poseScene).bonesVisible = true;
     }
     if (document.repairAwaitingViewportBone)
         ui.DisabledLabel("Click a bone in the 3D view to assign it.");
@@ -242,7 +243,7 @@ void EditorState::DrawAnimationRigControls(IEditorUi& ui,
                 {
                     document.selectedBone = int(found - palette.begin());
                     auto* object = model->ResolveNode(unsigned(current));
-                    document.poseScene->SetSelectedObject(object);
+                    Engine::Editor::EditorViewState::For(*document.poseScene).SelectObject(object);
                     if (m_primaryHierarchy) m_primaryHierarchy->SetSelectedObject(object);
                     if (m_primaryProperties) m_primaryProperties->SetSelectedObject(object);
                     if (m_renderer) m_renderer->MarkDirty();
@@ -1052,7 +1053,7 @@ bool EditorState::DrawAnimationRigViewport(IEditorUi& ui,
             if (static_cast<int>(palette[i]) == node && i < joints.size())
             {
                 document.selectedBone = static_cast<int>(i);
-                document.poseScene->SetSelectedObject(joints[i]);
+                Engine::Editor::EditorViewState::For(*document.poseScene).SelectObject(joints[i]);
                 if (m_primaryHierarchy)
                     m_primaryHierarchy->SetSelectedObject(joints[i]);
                 if (m_primaryProperties)

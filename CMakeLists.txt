@@ -1391,7 +1391,8 @@ if(NOT ENGINE_PROJECT_DIR AND
     enable_testing()
     add_executable(TerrainPlacementEditingTests EXCLUDE_FROM_ALL
         "${ENGINE_LOCAL_TEST_ROOT}/TerrainPlacementEditingTests.cpp"
-        "${ENGINE_ROOT}/Engine/Editor/Core/View/Views/Scene/ScenePlacementAndPicking.cpp")
+        "${ENGINE_ROOT}/Engine/Editor/Core/View/Views/Scene/ScenePlacementAndPicking.cpp"
+        "${ENGINE_ROOT}/Engine/Editor/State/EditorViewState.cpp")
     target_link_libraries(TerrainPlacementEditingTests PRIVATE Engine d3d11 dxgi)
     target_include_directories(TerrainPlacementEditingTests PRIVATE
         "${ENGINE_ROOT}" "${ENGINE_ROOT}/Engine")

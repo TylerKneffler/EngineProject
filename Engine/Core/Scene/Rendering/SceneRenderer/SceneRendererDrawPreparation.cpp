@@ -104,12 +104,12 @@ Engine::Components::Mesh* SceneRendererDrawPreparation::ScreenLodPolicy(
     auto* source = draw.object
         ? draw.object->GetComponent<Engine::Components::Mesh>() : nullptr;
     const bool editorSelection = includeEditorVisuals &&
-        (draw.object == scene.m_editorView.selectedObject ||
-            source == scene.m_editorView.selectedMesh ||
-            source == scene.m_editorView.weightPaintMesh);
+        (draw.object == scene.GetViewOverlays().selectedObject ||
+            source == scene.GetViewOverlays().selectedMesh ||
+            source == scene.GetViewOverlays().weightPaintMesh);
     const bool eligible = source && source->screenLodSelection &&
         !source->distanceLodOverride && !hasPortalViews &&
-        !scene.m_editorView.mode2D && !draw.blended && !draw.preview &&
+        !scene.m_mode2D && !draw.blended && !draw.preview &&
         !draw.pmxOutline && draw.mesh && draw.mesh->HasBounds() &&
         !draw.mesh->HasMorphTargets() && !draw.mesh->HasSurfaceOffsets() &&
         draw.objectData.skinParams.y <= 0.f &&

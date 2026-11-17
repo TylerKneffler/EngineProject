@@ -1,6 +1,7 @@
 #include "Core/Rendering/DetailBudget.h"
 #include "Core/Rendering/MaterialCachePolicy.h"
 #include "pch.h"
+#include "Engine/Editor/State/EditorViewState.h"
 #include "Engine/Editor/State/EditorState.h"
 #include "Engine/Editor/Diagnostics/FrameActivity.h"
 #include "Core/Scene/SceneManager.h"
@@ -531,8 +532,8 @@ void EditorState::SaveScene()
         if (m_scene)
         {
             ::Engine::Scene::Scene::ObjectPath selectionPath;
-            const bool hadSelection = m_scene->GetSelectedObject() &&
-                m_scene->TryGetObjectPath(m_scene->GetSelectedObject(), selectionPath);
+            const bool hadSelection = Engine::Editor::EditorViewState::For(*m_scene).selectedObject &&
+                m_scene->TryGetObjectPath(Engine::Editor::EditorViewState::For(*m_scene).selectedObject, selectionPath);
             if (!Engine::Serialization::SceneSerializer::RefreshPrefabInstances(*m_scene,
                 m_activePrefabPath, m_scene->GetGraphicsProvider()) && m_primaryConsole)
                 m_primaryConsole->AddLog(ConsoleView::Level::Error,
@@ -827,9 +828,9 @@ void EditorState::ProcessPendingSceneLoad()
         m_loadAfterSceneSave.clear();
         m_mainMeshEdit = {};
         m_mainSkeletonEdit = {};
-        m_scene->SetEditorSelectedMesh(nullptr);
-        m_scene->SetEditorWeightPaint(nullptr, -1);
-        m_scene->SetEditorMeshEditPose(false);
+        Engine::Editor::EditorViewState::For(*m_scene).selectedMesh = nullptr;
+        Engine::Editor::EditorViewState::For(*m_scene).SetWeightPaint(nullptr, -1);
+        Engine::Editor::EditorViewState::For(*m_scene).SetMeshEditPose(false);
         if (m_preferences)
             m_preferences->SetSpatialDebugVisuals(m_scene->settings.portalDebugVisuals);
         m_hasUnsavedChanges = false;
@@ -973,9 +974,9 @@ void EditorState::LoadSceneNow(const std::string& path,
             m_loadAfterSceneSave.clear();
             m_mainMeshEdit = {};
             m_mainSkeletonEdit = {};
-            m_scene->SetEditorSelectedMesh(nullptr);
-            m_scene->SetEditorWeightPaint(nullptr, -1);
-            m_scene->SetEditorMeshEditPose(false);
+            Engine::Editor::EditorViewState::For(*m_scene).selectedMesh = nullptr;
+            Engine::Editor::EditorViewState::For(*m_scene).SetWeightPaint(nullptr, -1);
+            Engine::Editor::EditorViewState::For(*m_scene).SetMeshEditPose(false);
             OutputDebugStringA("[EditorState::LoadScene] Scene loaded successfully\n");
             LogStartupFailure("Scene loaded successfully: " + resolvedPath);
             if (m_preferences)
@@ -1116,8 +1117,8 @@ void EditorState::RestorePlayModeScene()
         m_mainSkeletonEdit.observedBindTransforms.clear();
         m_mainSkeletonEdit.observedSubmode = -1;
         m_mainMeshEdit.activeMesh = nullptr;
-        m_scene->SetEditorWeightPaint(nullptr, -1);
-        m_scene->SetEditorMeshEditPose(m_mainMeshEdit.enabled ||
+        Engine::Editor::EditorViewState::For(*m_scene).SetWeightPaint(nullptr, -1);
+        Engine::Editor::EditorViewState::For(*m_scene).SetMeshEditPose(m_mainMeshEdit.enabled ||
             m_mainSkeletonEdit.enabled);
         m_hasUnsavedChanges = m_prePlayHasUnsavedChanges;
         RefreshSceneDocumentTitle();
@@ -1191,7 +1192,7 @@ void EditorState::SetPrefabDocumentFocused(bool focused)
         return;
     Engine::Scene::Scene* activeScene = GetActiveDocumentScene();
     Engine::Core::Object* selected = activeScene
-        ? activeScene->GetSelectedObject() : nullptr;
+        ? Engine::Editor::EditorViewState::For(*activeScene).selectedObject : nullptr;
 
     if (m_primaryHierarchy)
     {
@@ -1237,7 +1238,7 @@ void EditorState::SelectObject(Engine::Core::Object* object)
     if (m_primaryProperties)
         m_primaryProperties->SetSelectedObject(object);
     if (Engine::Scene::Scene* scene = GetActiveDocumentScene())
-        scene->SetSelectedObject(object);
+        Engine::Editor::EditorViewState::For(*scene).SelectObject(object);
     MarkHistorySelectionChanged();
 }
 

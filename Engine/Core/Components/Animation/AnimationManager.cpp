@@ -610,7 +610,7 @@ void AnimationManager::Update()
 void AnimationManager::Tick(float frameDelta)
 {
     if (Owner && Owner->GetScene() &&
-        Owner->GetScene()->IsEditorMeshEditPose()) return;
+        Owner->GetScene()->GetViewOverlays().meshEditPose) return;
     if (!playing && holdCurrentPoseWhenStopped)
         return;
     if (m_restPose.empty()) Start();

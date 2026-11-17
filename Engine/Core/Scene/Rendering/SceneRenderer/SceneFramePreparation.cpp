@@ -293,7 +293,7 @@ void Scene::PrepareRenderFrame(bool publishSnapshot)
     // rebuilding a whole hierarchy index to evaluate a handful of new leaves.
     const auto afterTransforms=PrepareClock::now();
 
-    if(m_frameLookupRevision!=GetStructureRevision() || m_frameLookupEditPose!=m_editorView.meshEditPose || m_frameLookupFull)
+    if(m_frameLookupRevision!=GetStructureRevision() || m_frameLookupEditPose!=GetViewOverlays().meshEditPose || m_frameLookupFull)
     {
         const auto describe=[&](Engine::Core::Object* object) {
             FrameComponentLookup lookup{}; lookup.object=object;
@@ -301,10 +301,10 @@ void Scene::PrepareRenderFrame(bool publishSnapshot)
             lookup.sprite=object->GetComponent<Engine::Components::Sprite>();
             lookup.material=object->GetComponent<Engine::Components::Material>();
             lookup.spatialManipulator=object->GetComponent<Engine::Components::SpatialManipulator>();
-            lookup.skinnedMesh=m_editorView.meshEditPose ? nullptr:object->GetComponent<Engine::Components::SkinnedMesh>();
+            lookup.skinnedMesh=GetViewOverlays().meshEditPose ? nullptr:object->GetComponent<Engine::Components::SkinnedMesh>();
             lookup.bakedLighting=object->GetComponent<Engine::Rendering::BakedLightingData>(); return lookup;
         };
-        if(m_frameLookupFull || m_frameLookupEditPose!=m_editorView.meshEditPose)
+        if(m_frameLookupFull || m_frameLookupEditPose!=GetViewOverlays().meshEditPose)
         {
             m_staticRenderItemCache.clear();
             m_frameComponentLookupScratch.clear(); m_frameLookupIndices.clear(); m_frameLookupFree.clear();
@@ -334,7 +334,7 @@ void Scene::PrepareRenderFrame(bool publishSnapshot)
         m_frameSpatialManipulatorScratch.clear();
         for(const auto& lookup:m_frameComponentLookupScratch) if(lookup.spatialManipulator) m_frameSpatialManipulatorScratch.push_back(lookup.spatialManipulator);
         m_frameLookupDirty.clear(); m_frameLookupFull=false;
-        m_frameLookupRevision=GetStructureRevision(); m_frameLookupEditPose=m_editorView.meshEditPose;
+        m_frameLookupRevision=GetStructureRevision(); m_frameLookupEditPose=GetViewOverlays().meshEditPose;
     }
     if(m_materialCacheStructureRevision!=GetStructureRevision())
     {

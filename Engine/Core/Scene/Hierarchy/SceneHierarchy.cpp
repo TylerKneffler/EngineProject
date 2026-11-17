@@ -69,6 +69,19 @@ Scene::Scene()
 {
 }
 
+void Scene::AddObserver(ISceneObserver* observer)
+{
+    if (observer && std::find(m_observers.begin(), m_observers.end(),
+            observer) == m_observers.end())
+        m_observers.push_back(observer);
+}
+
+void Scene::RemoveObserver(ISceneObserver* observer)
+{
+    m_observers.erase(std::remove(m_observers.begin(), m_observers.end(),
+        observer), m_observers.end());
+}
+
 Scene::Scene(PhysicsAdapterFactory physicsAdapterFactory)
 {
     m_physics = std::make_unique<Engine::Physics::Physics>(
@@ -79,6 +92,12 @@ Scene::Scene(PhysicsAdapterFactory physicsAdapterFactory)
 
 Scene::~Scene()
 {
+    // Observers may unregister (or delete themselves) while notified.
+    const auto observers = m_observers;
+    for (ISceneObserver* observer : observers)
+        observer->OnSceneDestroying();
+    m_observers.clear();
+    m_viewOverlays = nullptr;
     try
     {
         FenceBackgroundWork();
@@ -894,9 +913,12 @@ void Scene::RemoveObject(Engine::Core::Object* obj)
         for (Engine::Core::Component* component : object->Components)
             if (component) component->FenceBackgroundWork();
 
-    if (std::find(objectsToRemove.begin(), objectsToRemove.end(),
-            m_editorView.cameraFollowTarget) != objectsToRemove.end())
-        StopEditorCameraFollow();
+    // Observers drop pointers into the subtree while it is still valid.
+    {
+        const auto observers = m_observers;
+        for (ISceneObserver* observer : observers)
+            observer->OnObjectsRemoving(objectsToRemove);
+    }
 
     // Sever external links while every endpoint and hierarchy path is still
     // valid. Component destructors then only need to clear local state.
@@ -933,24 +955,6 @@ void Scene::RemoveObject(Engine::Core::Object* obj)
             siblings.end());
         obj->Parent = nullptr;
     }
-    if (m_editorView.selectedObject &&
-        std::find(
-            objectsToRemove.begin(),
-            objectsToRemove.end(),
-            m_editorView.selectedObject) != objectsToRemove.end())
-    {
-        m_editorView.selectedObject = nullptr;
-        m_editorView.selectedPlacementId = 0;
-        m_editorView.selectedPlacementLayer = nullptr;
-    }
-    if (m_editorView.previewObject &&
-        std::find(objectsToRemove.begin(), objectsToRemove.end(),
-            m_editorView.previewObject) != objectsToRemove.end())
-    {
-        m_editorView.previewObject = nullptr;
-    }
-
-    m_editorView.selectedMesh = nullptr;
     if(retireRenderLeaf)
     {
         // Deliver logical destruction now, on the scene owner. The fence
@@ -1036,6 +1040,11 @@ void Scene::ClearObjects()
     if (m_isUpdating)
         throw std::logic_error("Clearing a scene during Update requires a commit boundary");
     FenceBackgroundWork();
+    {
+        const auto observers = m_observers;
+        for (ISceneObserver* observer : observers)
+            observer->OnObjectsClearing();
+    }
     if (m_beforeGpuResourceDestruction &&
         (!m_objects.empty() || !m_retiredRenderObjects.empty()))
         m_beforeGpuResourceDestruction();
@@ -1067,11 +1076,6 @@ void Scene::ClearObjects()
     m_objectIds.clear();
     m_objectsById.clear();
     m_componentSnapshotCache.clear();
-    m_editorView.selectedObject = nullptr;
-    m_editorView.selectedPlacementId = 0;
-    m_editorView.selectedPlacementLayer = nullptr;
-    m_editorView.selectedMesh = nullptr;
-    m_editorView.previewObject = nullptr;
     NotifyStructureChanged();
     CommitPendingObjectChanges();
 }

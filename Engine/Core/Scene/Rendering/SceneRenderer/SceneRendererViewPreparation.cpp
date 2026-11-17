@@ -200,7 +200,7 @@ void SceneRendererViewPreparation::PrepareVisibleItems(
             classified[candidateIndex] = { &item, glm::dot(delta, delta),
                 shadowOnly ? 0.f : nearestLightingDistanceSquared(item, world),
                 world[3].z, item.sortingLayer,
-                item.blended && !(includeEditorVisuals && item.mesh == scene.m_editorView.weightPaintMesh) };
+                item.blended && !(includeEditorVisuals && item.mesh == scene.GetViewOverlays().weightPaintMesh) };
             localAccepted[candidateIndex] = 1;
         });
 

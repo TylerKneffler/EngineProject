@@ -1,3 +1,4 @@
+#include "Engine/Editor/State/EditorViewState.h"
 #include "pch.h"
 #include "Engine/Editor/Core/View/Views/AssetDocumentView.h"
 #include "Engine/Editor/Core/Paint/BrushPreview.h"
@@ -285,7 +286,7 @@ bool EditorState::HasToolbarSection(ToolbarSection section) const
     case ToolbarSection::View: return m_toolbarVisibility.sceneDisplay;
     case ToolbarSection::Prefab:
     {
-        Engine::Core::Object* selected = scene->GetSelectedObject();
+        Engine::Core::Object* selected = Engine::Editor::EditorViewState::For(*scene).selectedObject;
         Engine::Core::Object* root = selected
             ? selected->GetPrefabInstanceRoot() : nullptr;
         return m_toolbarVisibility.prefabActions && root && root->Prefab;
@@ -692,9 +693,9 @@ void EditorState::DrawGlobalToolbar(IEditorUi& ui, ToolbarSection section,
             ToolbarRow row{singleRow, overflow};
             if (preview && row.Next(28.f) &&
                 ViewIconButton("##AnimationViewBones", ViewIcon::Bones,
-                    preview->AreEditorBonesVisible(), "Show or hide animation bones"))
+                    Engine::Editor::EditorViewState::For(*preview).bonesVisible, "Show or hide animation bones"))
             {
-                preview->SetEditorBonesVisible(!preview->AreEditorBonesVisible());
+                Engine::Editor::EditorViewState::For(*preview).bonesVisible = !Engine::Editor::EditorViewState::For(*preview).bonesVisible;
                 if (m_renderer) m_renderer->MarkDirty();
             }
         }
@@ -1150,7 +1151,7 @@ void EditorState::DrawGlobalToolbar(IEditorUi& ui, ToolbarSection section,
         ImGui::EndDisabled();
     }
 
-    Engine::Core::Object* selectedObject = scene->GetSelectedObject();
+    Engine::Core::Object* selectedObject = Engine::Editor::EditorViewState::For(*scene).selectedObject;
     Engine::Core::Object* prefabRoot = selectedObject
         ? selectedObject->GetPrefabInstanceRoot() : nullptr;
     if (section == ToolbarSection::Prefab && m_toolbarVisibility.prefabActions && prefabRoot && prefabRoot->Prefab)
@@ -1208,7 +1209,7 @@ void EditorState::DrawGlobalToolbar(IEditorUi& ui, ToolbarSection section,
             if (ui.Combo("##GlobalSkeletonTool", &submode, submodes, 2))
             {
                 FinishSkeletonPaintStroke(skeleton);
-                scene->SetEditorWeightPaint(nullptr, -1);
+                Engine::Editor::EditorViewState::For(*scene).SetWeightPaint(nullptr, -1);
                 skeleton.submode = submode;
                 view->AllowObjectTransform = (submode == 0 &&
                     skeleton.boneTool == 0) ||
@@ -1261,17 +1262,17 @@ void EditorState::DrawGlobalToolbar(IEditorUi& ui, ToolbarSection section,
     if (section == ToolbarSection::View && m_toolbarVisibility.sceneDisplay)
     {
         if (row.Next(28.f) && ViewIconButton("##ViewBones", ViewIcon::Bones,
-            scene->AreEditorBonesVisible(),
+            Engine::Editor::EditorViewState::For(*scene).bonesVisible,
             "Show or hide all bone overlays in the Scene View"))
         {
-            EditorViewportSettings::SetBonesVisible(!scene->AreEditorBonesVisible());
+            EditorViewportSettings::SetBonesVisible(!Engine::Editor::EditorViewState::For(*scene).bonesVisible);
             EditorViewportSettings::Apply(*scene);
         }
         if (row.Next(28.f) && ViewIconButton("##ViewGrid", ViewIcon::Grid,
             scene->settings.showGrid, "Show or hide the scene grid"))
             scene->settings.showGrid = !scene->settings.showGrid;
-        Engine::Core::Object* selected = scene->GetSelectedObject();
-        const bool hasOverlays = (selected && selected->editorOverlays != 0) ||
+        Engine::Core::Object* selected = Engine::Editor::EditorViewState::For(*scene).selectedObject;
+        const bool hasOverlays = (selected && Engine::Editor::EditorViewState::OverlaysOf(selected) != 0) ||
             EditorViewportSettings::AreCollidersVisible() ||
             EditorViewportSettings::AreMeshNormalsVisible() ||
             EditorViewportSettings::AreBoundsVisible() ||
@@ -1309,28 +1310,28 @@ void EditorState::DrawGlobalToolbar(IEditorUi& ui, ToolbarSection section,
                 const auto overlayItem = [&](const char* label, uint8_t flag)
                 {
                     if (ImGui::MenuItem(label, nullptr,
-                        (selected->editorOverlays & flag) != 0))
-                        selected->editorOverlays ^= flag;
+                        (Engine::Editor::EditorViewState::OverlaysOf(selected) & flag) != 0))
+                        *Engine::Editor::EditorViewState::MutableOverlays(selected) ^= flag;
                 };
-                overlayItem("Position arrows", Engine::Core::Object::PositionOverlay);
-                overlayItem("Rotation ellipses", Engine::Core::Object::RotationOverlay);
-                overlayItem("Scale handles", Engine::Core::Object::ScaleOverlay);
+                overlayItem("Position arrows", Engine::Editor::EditorViewState::PositionOverlay);
+                overlayItem("Rotation ellipses", Engine::Editor::EditorViewState::RotationOverlay);
+                overlayItem("Scale handles", Engine::Editor::EditorViewState::ScaleOverlay);
                 if (selected->GetComponent<Engine::Components::Skeleton>())
                 {
                     ImGui::Separator();
-                    overlayItem("Bones", Engine::Core::Object::BoneOverlay);
-                    overlayItem("Skeleton joints", Engine::Core::Object::SkeletonOverlay);
-                    if (!scene->AreEditorBonesVisible())
+                    overlayItem("Bones", Engine::Editor::EditorViewState::BoneOverlay);
+                    overlayItem("Skeleton joints", Engine::Editor::EditorViewState::SkeletonOverlay);
+                    if (!Engine::Editor::EditorViewState::For(*scene).bonesVisible)
                         ImGui::TextDisabled("Enable the toolbar bone icon to see these.");
                 }
                 if (selected->GetComponent<Engine::Components::Mesh>() ||
                     selected->GetComponent<Engine::Components::Sprite>() ||
                     selected->GetComponent<Engine::Components::LightProbeGroup>())
-                    overlayItem("Object bounds", Engine::Core::Object::BoundsOverlay);
+                    overlayItem("Object bounds", Engine::Editor::EditorViewState::BoundsOverlay);
                 if (selected->GetComponent<Engine::Components::Light>())
-                    overlayItem("Light range or cone", Engine::Core::Object::LightVolumeOverlay);
+                    overlayItem("Light range or cone", Engine::Editor::EditorViewState::LightVolumeOverlay);
                 if (selected->GetComponent<Engine::Components::Camera>())
-                    overlayItem("Camera frustum", Engine::Core::Object::CameraFrustumOverlay);
+                    overlayItem("Camera frustum", Engine::Editor::EditorViewState::CameraFrustumOverlay);
             }
             ImGui::EndPopup();
         }

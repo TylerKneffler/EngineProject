@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "Engine/Editor/State/EditorViewState.h"
 #include "Engine/Editor/State/EditorState.h"
 #include "Core/Animation/AnimationTimelineVisuals.h"
 #include "Engine/Editor/Diagnostics/FrameActivity.h"
@@ -617,7 +618,7 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
                 document.view->SetPoseEditing(true);
                 document.view->SetModelManipulation(true);
                 document.view->SetModelSelectionMode(1);
-                document.poseScene->SetEditorBonesVisible(true);
+                Engine::Editor::EditorViewState::For(*document.poseScene).bonesVisible = true;
             }
             ImGui::EndPopup();
         }
@@ -900,7 +901,7 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
             selectRow(row, ImGui::GetIO().KeyCtrl,
                 ImGui::GetIO().KeyShift);
             document.selectedBone = static_cast<int>(row.boneIndex);
-            document.poseScene->SetSelectedObject(row.joint);
+            Engine::Editor::EditorViewState::For(*document.poseScene).SelectObject(row.joint);
             if (m_primaryHierarchy) m_primaryHierarchy->SetSelectedObject(row.joint);
             if (m_primaryProperties) m_primaryProperties->SetSelectedObject(row.joint);
         }
@@ -987,7 +988,7 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
             {
                 if (!additive) selectRow(*hit->row, false, false);
                 document.selectedBone = static_cast<int>(hit->row->boneIndex);
-                document.poseScene->SetSelectedObject(hit->row->joint);
+                Engine::Editor::EditorViewState::For(*document.poseScene).SelectObject(hit->row->joint);
                 if (m_primaryHierarchy)
                     m_primaryHierarchy->SetSelectedObject(hit->row->joint);
                 if (m_primaryProperties)
@@ -1072,7 +1073,7 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
             selectRow(*row, ImGui::GetIO().KeyCtrl,
                 ImGui::GetIO().KeyShift);
             document.selectedBone = static_cast<int>(row->boneIndex);
-            document.poseScene->SetSelectedObject(row->joint);
+            Engine::Editor::EditorViewState::For(*document.poseScene).SelectObject(row->joint);
             if (m_primaryHierarchy)
                 m_primaryHierarchy->SetSelectedObject(row->joint);
             if (m_primaryProperties)

@@ -49,7 +49,7 @@ void PropertiesView::DrawTransform(IEditorUi& ui)
         const glm::dvec3 previousPosition = t.position;
         const glm::vec3 previousRotation = t.rotation;
         const glm::vec3 previousScale = t.scale;
-        if (m_scene && m_scene->IsEditorMode2D())
+        if (m_scene && m_scene->IsMode2D())
         {
             // In a 2D scene X/Y are spatial axes while Z is only the painter's
             // ordering value.  Present that model directly instead of exposing

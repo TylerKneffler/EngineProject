@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "Engine/Editor/State/EditorViewState.h"
 #include "Engine/Editor/State/EditorState.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Components/Animation/AnimationBone.h"
@@ -139,9 +140,9 @@ void EditorState::SetSkeletonEditMode(Engine::Scene::Scene* scene,
     FinishSkeletonPaintStroke(session);
     session.enabled = enabled;
     session.observedSubmode = -1;
-    scene->SetEditorWeightPaint(nullptr, -1);
-    scene->SetEditorMeshEditPose(enabled);
-    scene->SetEditorSelectedMesh(nullptr);
+    Engine::Editor::EditorViewState::For(*scene).SetWeightPaint(nullptr, -1);
+    Engine::Editor::EditorViewState::For(*scene).SetMeshEditPose(enabled);
+    Engine::Editor::EditorViewState::For(*scene).selectedMesh = nullptr;
     if (enabled)
     {
         meshSession.enabled = false;
@@ -388,15 +389,15 @@ void EditorState::SyncSkeletonEditSelection(Engine::Scene::Scene* scene,
     SkeletonEditSession& session)
 {
     if (!scene || !session.enabled) return;
-    Engine::Core::Object* selected = scene->GetSelectedObject();
+    Engine::Core::Object* selected = Engine::Editor::EditorViewState::For(*scene).selectedObject;
     const uint64_t structureRevision = scene->GetStructureRevision();
     if (session.skeleton && selected == session.observedSelection &&
         structureRevision == session.observedStructureRevision &&
         session.submode == session.observedSubmode)
     {
-        scene->SetEditorWeightPaint(session.submode == 1 ? session.mesh : nullptr,
+        Engine::Editor::EditorViewState::For(*scene).SetWeightPaint(session.submode == 1 ? session.mesh : nullptr,
             session.submode == 1 ? session.boneIndex : -1);
-        scene->SetEditorSelectedMesh(nullptr);
+        Engine::Editor::EditorViewState::For(*scene).selectedMesh = nullptr;
         return;
     }
     Engine::Core::Object* previousSelection = session.observedSelection;
@@ -529,10 +530,10 @@ void EditorState::SyncSkeletonEditSelection(Engine::Scene::Scene* scene,
                 }
         session.mesh = mesh ? mesh : firstMesh;
     }
-    scene->SetEditorMeshEditPose(true);
-    scene->SetEditorWeightPaint(session.submode == 1 ? session.mesh : nullptr,
+    Engine::Editor::EditorViewState::For(*scene).SetMeshEditPose(true);
+    Engine::Editor::EditorViewState::For(*scene).SetWeightPaint(session.submode == 1 ? session.mesh : nullptr,
         session.submode == 1 ? session.boneIndex : -1);
-    scene->SetEditorSelectedMesh(nullptr);
+    Engine::Editor::EditorViewState::For(*scene).selectedMesh = nullptr;
 }
 
 void EditorState::CommitSkeletonEdit(Engine::Scene::Scene* scene)
@@ -856,7 +857,7 @@ bool EditorState::ApplySkeletonBoneAction(Engine::Scene::Scene* scene,
         session.boneIndex < static_cast<int>(bones.size()) &&
         bones[session.boneIndex] ? bones[session.boneIndex] : nullptr;
     const auto* selectedGroup = Engine::Components::BoneGroup::ForSelection(
-        scene->GetSelectedObject());
+        Engine::Editor::EditorViewState::For(*scene).selectedObject);
     if (selectedGroup && (!selected || !selectedGroup->Contains(selected)))
     { session.error = "Select a bone in this bone group."; return false; }
     if (selectedGroup && action == 3 && selected == selectedGroup->Owner)
@@ -905,7 +906,7 @@ bool EditorState::ApplySkeletonBoneAction(Engine::Scene::Scene* scene,
         skeleton->inverseBindMatrices.push_back(glm::inverse(
             glm::inverse(modelWorld) * object->transform.GetWorldMatrix()));
         session.boneIndex = bone->paletteIndex;
-        scene->SetSelectedObject(object);
+        Engine::Editor::EditorViewState::For(*scene).SelectObject(object);
         if (m_primaryHierarchy) m_primaryHierarchy->SetSelectedObject(object);
         if (m_primaryProperties) m_primaryProperties->SetSelectedObject(object);
     }
@@ -1009,7 +1010,7 @@ bool EditorState::ApplySkeletonBoneAction(Engine::Scene::Scene* scene,
         const auto retained = captureNodes();
         const std::vector<Engine::Core::Object*> oldJoints(bones.begin(), bones.end());
         const unsigned removedNode = skeleton->jointNodes[session.boneIndex];
-        scene->SetSelectedObject(nullptr);
+        Engine::Editor::EditorViewState::For(*scene).SelectObject(nullptr);
         if (m_primaryHierarchy) m_primaryHierarchy->SetSelectedObject(nullptr);
         if (m_primaryProperties) m_primaryProperties->SetSelectedObject(nullptr);
         scene->RemoveObject(selected);
@@ -1091,7 +1092,7 @@ bool EditorState::ApplySkeletonBoneAction(Engine::Scene::Scene* scene,
         session.lockedBones.push_back(false);
         skeleton->inverseBindMatrices.push_back(glm::mat4(1.f));
         session.boneIndex = bone->paletteIndex;
-        scene->SetSelectedObject(copy);
+        Engine::Editor::EditorViewState::For(*scene).SelectObject(copy);
         if (m_primaryHierarchy) m_primaryHierarchy->SetSelectedObject(copy);
         if (m_primaryProperties) m_primaryProperties->SetSelectedObject(copy);
     }

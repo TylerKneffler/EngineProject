@@ -380,7 +380,7 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
                 Engine::Model::SceneDimension::TwoD ? 1 : 0;
             if (ui.Combo("Dimension", &dimension, dimensions, 2))
             {
-                m_scene->SetEditorMode2D(dimension == 1);
+                m_scene->SetMode2D(dimension == 1);
                 if (OnComponentsChanged)
                     OnComponentsChanged();
             }

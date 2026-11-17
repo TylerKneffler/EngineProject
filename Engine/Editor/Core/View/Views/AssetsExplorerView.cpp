@@ -1,3 +1,4 @@
+#include "Engine/Editor/State/EditorViewState.h"
 #include "AssetsExplorerView.h"
 #include "Engine/Editor/CodeEditorLink.h"
 #include "Engine/Editor/Core/View/Templates/Common/AssetPathTemplate.h"
@@ -263,7 +264,7 @@ void AssetsExplorerView::BeginTrackAnimation(const std::string& sourcePath)
     m_trackAnimationSource = sourcePath;
     m_trackAnimationError.clear();
     m_trackAnimationPrefab.clear();
-    if (auto* selected = m_scene ? m_scene->GetSelectedObject() : nullptr)
+    if (auto* selected = m_scene ? Engine::Editor::EditorViewState::For(*m_scene).selectedObject : nullptr)
         if (auto* root = selected->GetPrefabInstanceRoot(); root && root->Prefab)
             m_trackAnimationPrefab = root->Prefab->GetPath();
     const auto source = fs::path(sourcePath);

@@ -1,3 +1,4 @@
+#include "Engine/Editor/State/EditorViewState.h"
 #include "EditorViewportSettings.h"
 #include "Core/Scene/Scene.h"
 #include "imgui.h"
@@ -84,6 +85,6 @@ void EditorViewportSettings::SetCameraFrustumsVisible(bool value) { SetPreferenc
 
 void EditorViewportSettings::Apply(Engine::Scene::Scene& scene)
 {
-    scene.SetEditorBonesVisible(preferences.bones);
+    Engine::Editor::EditorViewState::For(scene).bonesVisible = preferences.bones;
 }
 }

@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "Engine/Editor/State/EditorViewState.h"
 #include "Engine/Editor/State/EditorState.h"
 #include "Engine/Editor/Diagnostics/FrameActivity.h"
 #include "Core/Scene/SceneManager.h"
@@ -112,7 +113,7 @@ void EditorState::StartObjectImport(const std::string& path, bool intoScene,
     ClearImportReference();
     if (m_pendingImportScene)
     {
-        auto* selected = m_pendingImportScene->GetSelectedObject();
+        auto* selected = Engine::Editor::EditorViewState::For(*m_pendingImportScene).selectedObject;
         auto* root = selected ? selected->GetPrefabInstanceRoot() : nullptr;
         if (selected && (!PendingImportSupportsReference() ||
             (intoScene && root && root->GetComponent<Engine::Components::Model>())))

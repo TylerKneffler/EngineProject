@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "Engine/Editor/State/EditorViewState.h"
 #include "Core/Inspection/ComponentInspector.h"
 #include "Engine/Editor/State/EditorState.h"
 #include "Engine/Editor/Diagnostics/FrameActivity.h"
@@ -74,7 +75,7 @@ void EditorState::OpenPrefabStageWithDocument(const std::string& path,
     Engine::Core::Object* root = nullptr;
     try
     {
-        prefabScene->SetEditorMode2D(m_scene->IsEditorMode2D());
+        prefabScene->SetMode2D(m_scene->IsMode2D());
         prefabScene->Init(m_renderer->GetGraphicsProvider());
         prefabScene->SetRealtimeShadowSettings(
             m_projectSettings.realtimeShadows);
@@ -125,14 +126,14 @@ void EditorState::OpenPrefabStageWithDocument(const std::string& path,
                 m_primaryProperties->OnComponentsChanged();
             return;
         }
-        if (m_prefabScene) m_prefabScene->SetSelectedObject(object);
+        if (m_prefabScene) Engine::Editor::EditorViewState::For(*m_prefabScene).SelectObject(object);
         if (m_primaryHierarchy) m_primaryHierarchy->SetSelectedObject(object);
         if (m_primaryProperties) m_primaryProperties->SetSelectedObject(object);
     };
     m_prefabSceneView->OnObjectCreated = [this](Engine::Core::Object* object)
     {
         SetPrefabDirty(true);
-        if (m_prefabScene) m_prefabScene->SetSelectedObject(object);
+        if (m_prefabScene) Engine::Editor::EditorViewState::For(*m_prefabScene).SelectObject(object);
         if (m_primaryHierarchy) m_primaryHierarchy->SetSelectedObject(object);
         if (m_primaryProperties) m_primaryProperties->SetSelectedObject(object);
     };
@@ -196,7 +197,7 @@ void EditorState::OpenPrefabStageWithDocument(const std::string& path,
     m_activePrefabPath = normalized;
     SetPrefabDirty(false);
     RefreshPrefabDocumentTitle();
-    m_prefabScene->SetSelectedObject(root);
+    Engine::Editor::EditorViewState::For(*m_prefabScene).SelectObject(root);
     SetPrefabDocumentFocused(true);
     if (m_primaryHierarchy) m_primaryHierarchy->SetSelectedObject(root);
     if (m_primaryProperties) m_primaryProperties->SetSelectedObject(root);
@@ -420,7 +421,7 @@ void EditorState::ProcessPendingSceneAssetDocumentOpens()
             document->meshSavePath = nativePath.string();
         }
         document->scene = std::make_unique<Engine::Scene::Scene>();
-        document->scene->SetEditorMode2D(m_scene && m_scene->IsEditorMode2D());
+        document->scene->SetMode2D(m_scene && m_scene->IsMode2D());
         document->scene->Init(m_renderer->GetGraphicsProvider());
         document->scene->SetRealtimeShadowSettings(m_projectSettings.realtimeShadows);
         document->scene->SetDistanceLightingSettings(m_projectSettings.distanceLighting);
@@ -439,7 +440,7 @@ void EditorState::ProcessPendingSceneAssetDocumentOpens()
                         GetGraphicsProvider()->GetBufferFactory());
                 subject->AddComponent<Engine::Components::Material>();
                 document->subject = subject;
-                document->scene->SetSelectedObject(subject);
+                Engine::Editor::EditorViewState::For(*document->scene).SelectObject(subject);
                 loaded = true;
             }
         }
@@ -458,7 +459,7 @@ void EditorState::ProcessPendingSceneAssetDocumentOpens()
                 {
                     root->Prefab.reset();
                     document->subject = root;
-                    document->scene->SetSelectedObject(root);
+                    Engine::Editor::EditorViewState::For(*document->scene).SelectObject(root);
                     loaded = true;
                 }
             }
@@ -476,7 +477,7 @@ void EditorState::ProcessPendingSceneAssetDocumentOpens()
             {
                 root->Prefab.reset();
                 document->subject = root;
-                document->scene->SetSelectedObject(root);
+                Engine::Editor::EditorViewState::For(*document->scene).SelectObject(root);
                 loaded = true;
             }
         }
@@ -494,7 +495,7 @@ void EditorState::ProcessPendingSceneAssetDocumentOpens()
             else
             {
                 document->skeletonEdit.enabled = true;
-                document->scene->SetEditorMeshEditPose(true);
+                Engine::Editor::EditorViewState::For(*document->scene).SetMeshEditPose(true);
                 SyncSkeletonEditSelection(document->scene.get(),
                     document->skeletonEdit);
             }
@@ -502,7 +503,7 @@ void EditorState::ProcessPendingSceneAssetDocumentOpens()
         if (loaded && document->meshStage)
         {
             document->meshEdit.enabled = true;
-            document->scene->SetEditorMeshEditPose(true);
+            Engine::Editor::EditorViewState::For(*document->scene).SetMeshEditPose(true);
             ApplyMeshStageVisibility(*document);
         }
         if (document->skeletonStage && !document->selectableObjects.empty())
@@ -510,7 +511,7 @@ void EditorState::ProcessPendingSceneAssetDocumentOpens()
             if (document->selectableObjects.find(document->subject) ==
                 document->selectableObjects.end())
                 document->subject = *document->selectableObjects.begin();
-            document->scene->SetSelectedObject(document->subject);
+            Engine::Editor::EditorViewState::For(*document->scene).SelectObject(document->subject);
         }
         if (!loaded)
         {
@@ -580,13 +581,13 @@ void EditorState::ProcessPendingSceneAssetDocumentOpens()
                     return;
             }
             raw->propertiesProjection = nullptr;
-            raw->scene->SetSelectedObject(object);
+            Engine::Editor::EditorViewState::For(*raw->scene).SelectObject(object);
             if (m_primaryHierarchy) m_primaryHierarchy->SetSelectedObject(object);
             if (m_primaryProperties) m_primaryProperties->SetSelectedObject(object);
         };
         view->OnObjectCreated = [this, raw](Engine::Core::Object* object)
         {
-            raw->scene->SetSelectedObject(object);
+            Engine::Editor::EditorViewState::For(*raw->scene).SelectObject(object);
             const std::string current = CaptureSceneAssetDocumentSnapshot(*raw);
             if (HistoryDiffers(raw->baseline, current))
             {
@@ -691,7 +692,7 @@ void EditorState::ProcessPendingSceneAssetDocumentOpens()
                     if (raw->meshSavePath.empty())
                         raw->meshSavePath = (std::filesystem::path(raw->path).parent_path() /
                             (raw->subject->name + ".mesh")).string();
-                    raw->scene->SetSelectedObject(raw->subject);
+                    Engine::Editor::EditorViewState::For(*raw->scene).SelectObject(raw->subject);
                     ApplyMeshStageVisibility(*raw);
                 }
                 else if (selectedMode == skeletonMode && skeletonMode >= 0)
@@ -702,8 +703,8 @@ void EditorState::ProcessPendingSceneAssetDocumentOpens()
                 raw->skeletonEdit.enabled = raw->skeletonStage;
                 raw->skeletonEdit.painting = false;
                 raw->skeletonEdit.observedSubmode = -1;
-                raw->scene->SetEditorSelectedMesh(nullptr);
-                raw->scene->SetEditorMeshEditPose(raw->meshStage ||
+                Engine::Editor::EditorViewState::For(*raw->scene).selectedMesh = nullptr;
+                Engine::Editor::EditorViewState::For(*raw->scene).SetMeshEditPose(raw->meshStage ||
                     raw->skeletonStage);
                 if (raw->view)
                 {
@@ -718,7 +719,7 @@ void EditorState::ProcessPendingSceneAssetDocumentOpens()
                 if (raw->skeletonStage)
                     SyncSkeletonEditSelection(raw->scene.get(),
                         raw->skeletonEdit);
-                else raw->scene->SetEditorWeightPaint(nullptr, -1);
+                else Engine::Editor::EditorViewState::For(*raw->scene).SetWeightPaint(nullptr, -1);
                 SetActiveSceneAssetDocument(raw, true);
                 if (m_renderer) m_renderer->MarkDirty();
             }
@@ -950,7 +951,7 @@ void EditorState::SetActiveSceneAssetDocument(SceneAssetDocument* document,
         m_primaryHierarchy->SetSkeletonContextActions(document &&
             document->skeletonStage,
             document ? document->subject : nullptr);
-        Engine::Core::Object* selected = scene ? scene->GetSelectedObject() : nullptr;
+        Engine::Core::Object* selected = scene ? Engine::Editor::EditorViewState::For(*scene).selectedObject : nullptr;
         if (document && document->meshStage && selected != document->subject)
             selected = document->subject;
         if (document && document->objectStage && !document->showChildHierarchy &&
@@ -970,7 +971,7 @@ void EditorState::SetActiveSceneAssetDocument(SceneAssetDocument* document,
         m_primaryProperties->SetSelectedObject(document &&
             document->propertiesProjection
             ? document->propertiesProjection
-            : (scene ? scene->GetSelectedObject() : nullptr));
+            : (scene ? Engine::Editor::EditorViewState::For(*scene).selectedObject : nullptr));
         m_primaryProperties->SetSelectedAsset("");
     }
     if (m_renderer) m_renderer->MarkDirty();
@@ -1134,8 +1135,8 @@ bool EditorState::RestoreSceneAssetDocumentSnapshot(
         document.skeletonEdit.mesh = nullptr;
         document.skeletonEdit.adjacency.reset();
         document.skeletonEdit.observedBindTransforms.clear();
-        document.scene->SetEditorWeightPaint(nullptr, -1);
-        document.scene->SetEditorMeshEditPose(document.meshEdit.enabled ||
+        Engine::Editor::EditorViewState::For(*document.scene).SetWeightPaint(nullptr, -1);
+        Engine::Editor::EditorViewState::For(*document.scene).SetMeshEditPose(document.meshEdit.enabled ||
             document.skeletonEdit.enabled);
         if (document.skeletonStage)
             RebuildSkeletonStageContext(document);
@@ -1297,7 +1298,7 @@ void EditorState::RebuildSkeletonStageContext(SceneAssetDocument& document)
         document.selectableObjects.find(document.subject) ==
             document.selectableObjects.end())
         document.subject = *document.selectableObjects.begin();
-    document.scene->SetSelectedObject(document.subject);
+    Engine::Editor::EditorViewState::For(*document.scene).SelectObject(document.subject);
     ApplySkeletonStageVisibility(document);
 }
 
@@ -1318,7 +1319,7 @@ void EditorState::RebuildObjectStageContext(SceneAssetDocument& document)
     if (!root) return;
     document.objectStage = true;
     document.subject = root;
-    document.scene->SetSelectedObject(root);
+    Engine::Editor::EditorViewState::For(*document.scene).SelectObject(root);
     ApplyObjectStageVisibility(document);
 }
 

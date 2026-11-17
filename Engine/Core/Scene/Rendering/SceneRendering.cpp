@@ -394,7 +394,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     // a warp volume. The editor needs an explicit opt-in for that behavior so
     // its default view remains an accurate inspection of the embedded space.
     if (((!cameraOverride && !settings.sceneCameraWarpLookThrough) ||
-        cameraInsideInteriorOnlyWarp) && !m_editorView.mode2D && cam->Owner)
+        cameraInsideInteriorOnlyWarp) && !m_mode2D && cam->Owner)
     {
         glm::mat4 embeddedWorld = authoredCameraWorld;
         embeddedWorld = MapSpatialMatrix(embeddedWorld,
@@ -413,14 +413,14 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             view = glm::lookAtLH(eye, eye + forward, up);
         }
     }
-    if (m_editorView.mode2D && cam->Owner)
+    if (m_mode2D && cam->Owner)
     {
         const glm::vec3 cameraWorld = cam->Owner->transform.GetWorldPosition();
         const glm::vec3 eye(cameraWorld.x, cameraWorld.y, -10.f);
         view = glm::lookAtLH(eye, eye + glm::vec3(0.f, 0.f, 1.f),
             glm::vec3(0.f, 1.f, 0.f));
     }
-    const glm::mat4 proj = cam->GetProjectionMatrix(aspect, m_editorView.mode2D);
+    const glm::mat4 proj = cam->GetProjectionMatrix(aspect, m_mode2D);
     const glm::mat4 inverseView = glm::inverse(view);
     const glm::vec3 cameraPosition = glm::vec3(inverseView[3]);
     const glm::vec3 cameraDirection = glm::normalize(glm::vec3(inverseView[2]));
@@ -431,7 +431,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     // camera and viewport, so their bands match the color pass.
     const float viewCoverageScale = Engine::Rendering::ViewLodCoverageScale(
         proj[1][1], static_cast<float>(viewportHeight),
-        cam->orthographic || m_editorView.mode2D);
+        cam->orthographic || m_mode2D);
     // Instanced LOD bands also scale per placement by its size. Object.hlsl
     // reads geometryFade.w 5 (rather than 4) as "divide each placement's
     // distance by its scale"; InstanceCull.hlsl takes selection.w bit 32.
@@ -486,7 +486,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 manipulator->Owner->IsEnabledInHierarchy();
         });
     const bool useTerrainOcclusion = !shadowOnly && !includeEditorVisuals &&
-        !hasPortalViews && !m_editorView.mode2D && !terrainWarpActive;
+        !hasPortalViews && !m_mode2D && !terrainWarpActive;
     // Software occlusion buffer for this camera: the terrain drawn this
     // frame is rasterized at low resolution, and anything whose bounds lie
     // entirely behind it is skipped (OcclusionBuffer.h). Terrain meshes keep
@@ -665,7 +665,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             authoredCameraWorld,
             cameraInsideInteriorOnlyWarp,
             cameraOverride,
-            m_editorView.mode2D,
+            m_mode2D,
             proj,
             view,
             m_frameSpatialManipulatorScratch,
@@ -951,7 +951,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         shadowOnly,
         includeEditorVisuals,
         hasPortalViews,
-        m_editorView.mode2D,
+        m_mode2D,
         terrainWarpActive,
         terrainBlockers,
         solidBlockers);
@@ -1042,7 +1042,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     m_lastRenderCpuTimings.terrainPreparationMs=std::chrono::duration<double,std::milli>(RenderClock::now()-terrainPreparationStart).count();
     const auto cullingStart = RenderClock::now();
     const bool useSpatialCandidates = !shadowOnly && !hasPortalViews &&
-        !m_editorView.mode2D;
+        !m_mode2D;
     std::vector<uint32_t> visibleRenderSlots;
     Engine::Rendering::RenderSpatialQueryStatistics spatialQueryStatistics;
     const bool hasPreparedCameraVisibility = cameraVisibilityJob.valid();
@@ -1123,7 +1123,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         shadowOnly,
         includeEditorVisuals,
         hasPortalViews,
-        m_editorView.mode2D,
+        m_mode2D,
         cameraUsesSourceWarpChart,
         hiddenByTerrain,
         hiddenBySolid,
@@ -1171,14 +1171,14 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     std::future<void> sortJob;
     if (renderObjects.size() >= 128)
         sortJob = Engine::Rendering::RenderJobs::Get().Submit(
-            [&renderObjects, editorMode2D = m_editorView.mode2D]()
+            [&renderObjects, editorMode2D = m_mode2D]()
             {
                 Engine::Scene::Renderer::SceneRendererViewPreparation::SortViewItems(
                     renderObjects, editorMode2D);
             });
     else
         Engine::Scene::Renderer::SceneRendererViewPreparation::SortViewItems(
-            renderObjects, m_editorView.mode2D);
+            renderObjects, m_mode2D);
     bool hasSceneLightProbeContributors = false;
     for (auto* group : GetComponents<Engine::Components::LightProbeGroup>())
         hasSceneLightProbeContributors |= group->valid && group->Owner->IsEnabledInHierarchy();
@@ -1513,7 +1513,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             const bool useSourceChart = useSourceChartMesh(*renderItem);
             const glm::mat4 world = useSourceChart
                 ? sourceChartWorld(*renderItem) : renderItem->world;
-            const bool useSoftSurface = !m_editorView.meshEditPose &&
+            const bool useSoftSurface = !GetViewOverlays().meshEditPose &&
                 mesh->GetPosedVertexBuffer() &&
                 !mesh->IsPortalPoseSnapshot() &&
                 (useSourceChart || !renderItem->warpedVertexBuffer);
@@ -1548,7 +1548,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 preparedDraw.objectData.skinParams = {
                     static_cast<float>(renderItem->skinPaletteOffset),
                     static_cast<float>(renderItem->skinJointCount), 0.f, 0.f };
-            if (!useSoftSurface && !m_editorView.meshEditPose &&
+            if (!useSoftSurface && !GetViewOverlays().meshEditPose &&
                 !mesh->IsPortalPoseSnapshot() && mesh->HasMorphTargets() &&
                 mesh->GetMorphDeltaBuffer() && mesh->GetMorphWeightBuffer() &&
                 (useSourceChart || !renderItem->warpedVertexBuffer))
@@ -1656,7 +1656,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             ? sourceChartWorld(*renderItem) : renderItem->world;
         if (sprite)
         {
-            if (m_editorView.mode2D)
+            if (m_mode2D)
                 world[3].z = 0.f;
             world = world * glm::scale(glm::mat4(1.f),
                 glm::vec3(renderItem->spriteWorldSize, 1.f));
@@ -1693,7 +1693,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         objectData.world = world;
         objectData.traversalClipPlane = renderItem->traversalClipPlane;
         objectData.spriteUvRect = { 0.f, 0.f, 1.f, 1.f };
-        const bool useSoftSurface = !m_editorView.meshEditPose && mesh &&
+        const bool useSoftSurface = !GetViewOverlays().meshEditPose && mesh &&
             mesh->GetPosedVertexBuffer() &&
             !mesh->IsPortalPoseSnapshot() &&
             (useSourceChart || !renderItem->warpedVertexBuffer);
@@ -1703,7 +1703,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                 static_cast<float>(renderItem->skinPaletteOffset),
                 static_cast<float>(renderItem->skinJointCount), 0.f, 0.f };
         }
-        const bool useGpuMorphs = !useSoftSurface && !m_editorView.meshEditPose && mesh && !sprite &&
+        const bool useGpuMorphs = !useSoftSurface && !GetViewOverlays().meshEditPose && mesh && !sprite &&
             !mesh->IsPortalPoseSnapshot() && mesh->HasMorphTargets() &&
             mesh->GetMorphDeltaBuffer() && mesh->GetMorphWeightBuffer() &&
             (useSourceChart || !renderItem->warpedVertexBuffer);
@@ -1774,8 +1774,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         Renderer::SceneRendererDrawPreparation::PrepareTerrainMaterial(
             *this, *renderItem, preparedDraw, objectData, includeEditorVisuals,
             forceUnlitMode, terrainMaterialState);
-        if (includeEditorVisuals && mesh == m_editorView.weightPaintMesh &&
-            m_editorView.weightPaintBone >= 0)
+        if (includeEditorVisuals && mesh == GetViewOverlays().weightPaintMesh &&
+            GetViewOverlays().weightPaintBone >= 0)
         {
             // The visualization is transient GPU state. Authored materials,
             // textures, vertex colors, and mesh data remain untouched.
@@ -1784,7 +1784,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             objectData.ambientUnlit = { 0.f, 0.f, 0.f, 1.f };
             objectData.emissiveOcclusion = { 0.f, 0.f, 0.f, 1.f };
             objectData.materialParams = { 0.f, 1.f, 1.f, 0.f };
-            objectData.morphParams.z = static_cast<float>(m_editorView.weightPaintBone + 1);
+            objectData.morphParams.z = static_cast<float>(GetViewOverlays().weightPaintBone + 1);
             objectData.environmentParams.z = 0.f;
             objectData.environmentParams.w = 0.f;
             alphaMode = Engine::Components::MaterialAlphaMode::Opaque;
@@ -3000,23 +3000,23 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
 
         // Draw selected object outline overlay. Structured buffers remain
         // bound across the pipeline change and do not need rebinding.
-        const uint64_t selectedPlacementId = m_editorView.selectedPlacementId;
+        const uint64_t selectedPlacementId = GetViewOverlays().selectedPlacementId;
         const auto* instanceData = draw.mesh && draw.mesh->IsInstanced()
             ? draw.mesh->GetInstanceData().get() : nullptr;
         const auto* drawLayer = draw.object
             ? draw.object->GetComponentInParent<
                 Engine::Components::TerrainObjectLayer>() : nullptr;
         const bool selectedPlacement = selectedPlacementId != 0 &&
-            m_editorView.selectedPlacementLayer && drawLayer &&
-            drawLayer->Owner == m_editorView.selectedPlacementLayer && instanceData &&
+            GetViewOverlays().selectedPlacementLayer && drawLayer &&
+            drawLayer->Owner == GetViewOverlays().selectedPlacementLayer && instanceData &&
             std::find(instanceData->placementIds.begin(),
                 instanceData->placementIds.end(), selectedPlacementId) !=
                     instanceData->placementIds.end();
         const bool selectedObject = selectedPlacementId == 0 &&
-            (m_editorView.selectedMesh ? draw.mesh == m_editorView.selectedMesh
-                : draw.object == m_editorView.selectedObject);
+            (GetViewOverlays().selectedMesh ? draw.mesh == GetViewOverlays().selectedMesh
+                : draw.object == GetViewOverlays().selectedObject);
         if (includeEditorVisuals && !draw.preview &&
-            draw.mesh != m_editorView.weightPaintMesh &&
+            draw.mesh != GetViewOverlays().weightPaintMesh &&
             (selectedPlacement || selectedObject) && m_objectOutlinePipeline)
         {
             context->SetPipeline(geometrySubmission.GeometryPipeline(

@@ -106,7 +106,7 @@ void SceneRendererFramePreparation::PrepareFrameItems(
             return preparedTransforms ? scene.m_transformHierarchy.ReadPreparedWorldRevision(candidate->transform) : candidate->transform.GetWorldRevision();
         };
         const bool staticCandidate = mesh && !sprite && !lookup.skinnedMesh &&
-            !hasActiveWarpVolume && !scene.m_editorView.previewObject &&
+            !hasActiveWarpVolume && !scene.GetViewOverlays().previewObject &&
             (!(mesh->gpuLodSelection || mesh->screenLodSelection) || mesh->IsInstanced()) &&
             !mesh->HasMorphTargets() && !mesh->HasSurfaceOffsets() &&
             !mesh->GetPreviousRuntimeLodMesh() &&
@@ -146,8 +146,8 @@ void SceneRendererFramePreparation::PrepareFrameItems(
                     {
                         item.gpuMaximumLod = 0;
                         item.gpuLodDistances = { 0, 0 };
-                        if ((mesh->gpuLodSelection || mesh->screenLodSelection) && candidate != scene.m_editorView.selectedObject &&
-                            mesh != scene.m_editorView.selectedMesh && mesh != scene.m_editorView.weightPaintMesh &&
+                        if ((mesh->gpuLodSelection || mesh->screenLodSelection) && candidate != scene.GetViewOverlays().selectedObject &&
+                            mesh != scene.GetViewOverlays().selectedMesh && mesh != scene.GetViewOverlays().weightPaintMesh &&
                             mesh->IsRuntimeLodResident(0) && mesh->IsRuntimeLodResident(1) &&
                             (!item.material || Engine::Scene::Renderer::IsFastFoliageSurface(item.material) ||
                                 item.material->shader.empty()))
@@ -192,7 +192,7 @@ void SceneRendererFramePreparation::PrepareFrameItems(
             item.terrainSurface = true;
             item.completeTerrainFootprint = batch->completeFootprint && !batch->distantVisual;
         }
-        item.belongsToPreview = scene.m_editorView.previewObject && Engine::Scene::Renderer::IsObjectOrDescendant(candidate, scene.m_editorView.previewObject);
+        item.belongsToPreview = scene.GetViewOverlays().previewObject && Engine::Scene::Renderer::IsObjectOrDescendant(candidate, scene.GetViewOverlays().previewObject);
         glm::mat4 authoredWorld = preparedTransforms ? scene.m_transformHierarchy.ReadPreparedWorldMatrix(candidate->transform) : candidate->transform.GetWorldMatrix();
         if (candidate->transform.matrixLayer.enabled)
         {
@@ -433,7 +433,7 @@ void SceneRendererFramePreparation::PrepareFrameItems(
             if (source && !draw.warpedVertexBuffer)
                 draw.geometryFade = source->GetRuntimeGeometryFade();
             if(source && source->IsInstanced() && (source->gpuLodSelection || source->screenLodSelection) &&
-                draw.object!=scene.m_editorView.selectedObject && source!=scene.m_editorView.selectedMesh && source!=scene.m_editorView.weightPaintMesh &&
+                draw.object!=scene.GetViewOverlays().selectedObject && source!=scene.GetViewOverlays().selectedMesh && source!=scene.GetViewOverlays().weightPaintMesh &&
                 !draw.warpedVertexBuffer && !draw.traversalChartPortal && source->IsRuntimeLodResident(0) && source->IsRuntimeLodResident(1) &&
                 (!draw.material || Renderer::IsFastFoliageSurface(draw.material) ||
                     draw.material->shader.empty()))
@@ -445,8 +445,8 @@ void SceneRendererFramePreparation::PrepareFrameItems(
                 publish(draw);
                 return;
             }
-            if (source && (source->gpuLodSelection || source->screenLodSelection) && draw.object!=scene.m_editorView.selectedObject &&
-                source!=scene.m_editorView.selectedMesh && source!=scene.m_editorView.weightPaintMesh && !source->IsInstanced() &&
+            if (source && (source->gpuLodSelection || source->screenLodSelection) && draw.object!=scene.GetViewOverlays().selectedObject &&
+                source!=scene.GetViewOverlays().selectedMesh && source!=scene.GetViewOverlays().weightPaintMesh && !source->IsInstanced() &&
                 !source->HasMorphTargets() && !source->HasSurfaceOffsets() && !draw.skinJointCount &&
                 !draw.warpedVertexBuffer && !draw.traversalChartPortal && source->IsRuntimeLodResident(0) &&
                 source->IsRuntimeLodResident(1))

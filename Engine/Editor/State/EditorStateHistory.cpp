@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "Engine/Editor/State/EditorViewState.h"
 #include "Engine/Editor/State/EditorState.h"
 #include "Engine/Editor/Diagnostics/FrameActivity.h"
 #include "Core/Scene/SceneManager.h"
@@ -365,8 +366,8 @@ void EditorState::ApplyHistoryEntry(
     m_mainSkeletonEdit.mesh = nullptr;
     m_mainSkeletonEdit.adjacency.reset();
     m_mainSkeletonEdit.observedBindTransforms.clear();
-    m_scene->SetEditorWeightPaint(nullptr, -1);
-    m_scene->SetEditorMeshEditPose(m_mainMeshEdit.enabled ||
+    Engine::Editor::EditorViewState::For(*m_scene).SetWeightPaint(nullptr, -1);
+    Engine::Editor::EditorViewState::For(*m_scene).SetMeshEditPose(m_mainMeshEdit.enabled ||
         m_mainSkeletonEdit.enabled);
 
     SelectObject(entry.hasSelection

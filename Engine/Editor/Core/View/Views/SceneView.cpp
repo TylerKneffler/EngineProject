@@ -1,3 +1,4 @@
+#include "Engine/Editor/State/EditorViewState.h"
 
 #include "Core/Inspection/ComponentInspector.h"
 #include "SceneView.h"
@@ -172,9 +173,9 @@ void SceneView::Init(void* device,
 void SceneView::DrawPoseToolbar(const std::function<bool(float)>& next,
     bool animationEditor, bool inlineOptions)
 {
-    if (m_scene && m_scene->IsEditorMode2D()) return;
+    if (m_scene && m_scene->IsMode2D()) return;
     ImGui::PushID(this);
-    auto* selected = m_scene ? m_scene->GetSelectedObject() : nullptr;
+    auto* selected = m_scene ? Engine::Editor::EditorViewState::For(*m_scene).selectedObject : nullptr;
     auto* controller = selected
         ? selected->GetComponent<Engine::Components::AnimationBone>() : nullptr;
     if (!animationEditor && next(ImGui::CalcTextSize("Pose").x +
@@ -361,7 +362,7 @@ void SceneView::DrawPoseToolbar(const std::function<bool(float)>& next,
                     newController->poseControlOnly = true;
                     newController->poseControllerTarget =
                         point->transform.GetWorldPosition();
-                    m_scene->SetSelectedObject(point);
+                    Engine::Editor::EditorViewState::For(*m_scene).SelectObject(point);
                     if (OnObjectCreated) OnObjectCreated(point);
                 }
                 else m_scene->RemoveObject(point);
@@ -531,7 +532,7 @@ void SceneView::DrawTerrainRegionToolbar(const std::function<bool(float)>& next)
 void SceneView::DrawTerrainToolbar(const std::function<bool(float)>& next)
 {
     if (m_editMode != SceneEditMode::Terrain || !m_scene) return;
-    auto* selected = m_scene->GetSelectedObject();
+    auto* selected = Engine::Editor::EditorViewState::For(*m_scene).selectedObject;
     auto* terrain = selected
         ? selected->GetComponent<Engine::Components::Terrain>() : nullptr;
     // Only a Terrain cell or a TerrainManager is a terrain-editing target. A
@@ -812,7 +813,7 @@ void SceneView::SynchronizePlacementProxy()
 {
     if (!m_scene) { m_placementProxy = 0; return; }
     using Handle = Engine::Components::TerrainPlacementHandle;
-    auto* selected = m_scene->GetSelectedObject();
+    auto* selected = Engine::Editor::EditorViewState::For(*m_scene).selectedObject;
     auto* tracked = m_placementProxy ? m_scene->FindObjectById(m_placementProxy) : nullptr;
     if (selected && selected != tracked && selected->GetComponent<Handle>())
     {
@@ -846,7 +847,7 @@ void SceneView::DrawPanel(IEditorUi& ui)
         m_focusOnNextDraw = false;
     }
 
-    const bool mode2D = m_scene && m_scene->IsEditorMode2D();
+    const bool mode2D = m_scene && m_scene->IsMode2D();
     SetClearColor(mode2D ? 0.28f : 0.0f,
         mode2D ? 0.30f : 0.0f,
         mode2D ? 0.34f : 0.502f);
@@ -898,7 +899,7 @@ void SceneView::DrawPanel(IEditorUi& ui)
     // A terrain edit spans the frames the left button is held; once released
     // the stroke ends and the editor captures one undo step for it.
     if (!input.leftDown) m_terrainEditActive = false;
-    auto* selected = m_scene ? m_scene->GetSelectedObject() : nullptr;
+    auto* selected = m_scene ? Engine::Editor::EditorViewState::For(*m_scene).selectedObject : nullptr;
     auto* terrain = selected
         ? selected->GetComponent<Engine::Components::Terrain>() : nullptr;
     // Only a Terrain cell or a TerrainManager is a terrain-editing target. A
@@ -989,7 +990,7 @@ void SceneView::DrawPanel(IEditorUi& ui)
                 if (!m_terrainObjectStrokeReported && OnObjectCreated) OnObjectCreated(selected);
                 m_terrainObjectStrokeReported = true;
                 // Keep terrain selected for the rest of the brush stroke.
-                m_scene->SetSelectedObject(selected);
+                Engine::Editor::EditorViewState::For(*m_scene).SelectObject(selected);
             }
         }
     }
@@ -1337,7 +1338,7 @@ void SceneView::DrawPanel(IEditorUi& ui)
             m_scene, m_toolbar, AllowObjectTransform);
         break;
     }
-    if (OnDrawRigControls && m_scene && m_scene->AreEditorBonesVisible())
+    if (OnDrawRigControls && m_scene && Engine::Editor::EditorViewState::For(*m_scene).bonesVisible)
         overlayConsumedClick = OnDrawRigControls(ui, input) || overlayConsumedClick;
     const EditorUiContextMenuResult createMenu = AllowObjectCreation
         ? ui.ContextMenu(this, "Create", nullptr, true)
@@ -1632,7 +1633,7 @@ void SceneView::DrawPanel(IEditorUi& ui)
     {
         SceneCameraController::Apply(*m_scene,
             panDX, panDY, orbitDX, orbitDY, zoom, dolly);
-        m_scene->UpdateEditorCameraFollow();
+        Engine::Editor::EditorViewState::For(*m_scene).UpdateCameraFollow();
         const glm::dvec3 cameraPosition =
             m_scene->editorCamera.transform.GetWorldPositionD();
         std::vector<Engine::Components::TerrainManager*> terrainManagers;
@@ -1671,7 +1672,7 @@ void SceneView::PollPrefabPreparation()
         if (!m_prefabPreview) throw std::runtime_error("Could not create prefab: " + prepared->path);
         if (m_prefabPreviewHasPlacement)
             m_prefabPreview->transform.position = m_prefabPlacement;
-        m_scene->SetPreviewObject(m_prefabPreview);
+        Engine::Editor::EditorViewState::For(*m_scene).previewObject = m_prefabPreview;
         if (m_prefabDropPending) CommitPrefabPreview();
     }
     catch (const std::exception& error)
@@ -1690,7 +1691,7 @@ void SceneView::CommitPrefabPreview()
     m_prefabPreviewHasPlacement = false;
     m_prefabDropPending = false;
     m_prefabPreparationCanceled.reset();
-    if (m_scene) m_scene->SetPreviewObject(nullptr);
+    if (m_scene) Engine::Editor::EditorViewState::For(*m_scene).previewObject = nullptr;
     if (placed && OnAssetPreviewCommitted) OnAssetPreviewCommitted(placed, path);
 }
 
@@ -1701,7 +1702,7 @@ void SceneView::CancelPrefabPreview()
     m_prefabPreparationCanceled.reset();
     m_prefabDropPending = false;
     if (m_scene)
-        m_scene->SetPreviewObject(nullptr);
+        Engine::Editor::EditorViewState::For(*m_scene).previewObject = nullptr;
     if (m_prefabPreview && OnAssetPreviewCancelled && m_scene &&
         m_scene->CaptureSceneGeneration() == m_prefabPreparationGeneration)
         OnAssetPreviewCancelled(m_prefabPreview);
@@ -1717,7 +1718,7 @@ void SceneView::Render3D(void* cmd)
 {
     if (m_scene)
     {
-        m_scene->UpdateEditorCameraFollow();
+        Engine::Editor::EditorViewState::For(*m_scene).UpdateCameraFollow();
         auto* factory = m_scene->GetGraphicsProvider()->GetContextFactory();
         factory->SetCommandBuffer(cmd);
         auto ctx = factory->CreateContext();
@@ -1734,7 +1735,7 @@ void SceneView::RecordRenderCommands(Engine::Graphics::GraphicsCommandPacket& sh
     using Clock=std::chrono::steady_clock;
     const auto started=Clock::now();
     if (!m_scene) return;
-    m_scene->UpdateEditorCameraFollow();
+    Engine::Editor::EditorViewState::For(*m_scene).UpdateCameraFollow();
     m_scene->PrepareNativeUiLayout(m_aspect);
     const auto setupEnd=Clock::now();
     m_scene->Render(&shadow, m_aspect, nullptr, false, GetWidth(), GetHeight(), true, packet);

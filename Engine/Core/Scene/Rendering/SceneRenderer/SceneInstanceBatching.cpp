@@ -41,22 +41,22 @@ SceneInstanceBatching::Result SceneInstanceBatching::Prepare(Scene& scene,
             !draw.material->shader.empty();
         const auto* instanceData = draw.mesh && draw.mesh->IsInstanced()
             ? draw.mesh->GetInstanceData().get() : nullptr;
-        const auto* drawLayer = includeEditorVisuals && scene.m_editorView.selectedPlacementId != 0 &&
-            scene.m_editorView.selectedPlacementLayer && instanceData && draw.object
+        const auto* drawLayer = includeEditorVisuals && scene.GetViewOverlays().selectedPlacementId != 0 &&
+            scene.GetViewOverlays().selectedPlacementLayer && instanceData && draw.object
             ? draw.object->GetComponentInParent<
                 Engine::Components::TerrainObjectLayer>() : nullptr;
         const bool selectedPlacement = includeEditorVisuals &&
-            scene.m_editorView.selectedPlacementId != 0 && scene.m_editorView.selectedPlacementLayer &&
-            drawLayer && drawLayer->Owner == scene.m_editorView.selectedPlacementLayer &&
+            scene.GetViewOverlays().selectedPlacementId != 0 && scene.GetViewOverlays().selectedPlacementLayer &&
+            drawLayer && drawLayer->Owner == scene.GetViewOverlays().selectedPlacementLayer &&
             instanceData &&
             std::find(instanceData->placementIds.begin(),
-                instanceData->placementIds.end(), scene.m_editorView.selectedPlacementId) !=
+                instanceData->placementIds.end(), scene.GetViewOverlays().selectedPlacementId) !=
                     instanceData->placementIds.end();
         const bool selected=includeEditorVisuals && (selectedPlacement ||
-            draw.object==scene.m_editorView.selectedObject ||
-            draw.mesh==scene.m_editorView.selectedMesh ||
-            draw.mesh==scene.m_editorView.weightPaintMesh);
-        if ((!automaticInstancing && !(draw.drawData.flags & (0x00100000u|0x00800000u))) || scene.m_editorView.mode2D || hasPortalViews || !draw.mesh || draw.blended ||
+            draw.object==scene.GetViewOverlays().selectedObject ||
+            draw.mesh==scene.GetViewOverlays().selectedMesh ||
+            draw.mesh==scene.GetViewOverlays().weightPaintMesh);
+        if ((!automaticInstancing && !(draw.drawData.flags & (0x00100000u|0x00800000u))) || scene.m_mode2D || hasPortalViews || !draw.mesh || draw.blended ||
             draw.preview || draw.pmxOutline || draw.spatialManipulator || draw.traversalChartPortal ||
             draw.objectData.skinParams.y>0 || draw.mesh->HasMorphTargets() || draw.mesh->HasSurfaceOffsets() ||
             draw.vertexBuffer!=draw.mesh->GetGraphicsBuffer() || custom || selected || !draw.mesh->HasBounds()) continue;

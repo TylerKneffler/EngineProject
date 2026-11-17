@@ -93,24 +93,91 @@ Core/Components/  Component.h, Script.h, ComponentReference.h, PropertyMacros.h
   - **Breaking for external projects:** scripts overriding `DrawProperties(Engine::Editor::IEditorUi&)` must change to `DrawProperties(Engine::Core::IInspectorUi&)`. The in-repo scripts (`FoxRagdollBlend`, `TerrainGen`, `Rotate`) are updated.
 - [x] Extract generic inspector code from `Component.cpp` into `Engine::Core::ComponentInspector` (`Core/Inspection/ComponentInspector.{h,cpp}`): the generic field drawer, reference and asset pickers, multi-edit, static session state and the Win32 file dialog. `Component.cpp` went from 1,247 to ~110 lines. `Component` keeps one-line delegates (`DrawProperties`, `DrawPropertiesMulti`, `DrawReferenceProperty`, `DrawAssetPathPicker`), so component overrides are unchanged. `m_multiEditTargets` and `IsEditorValueMixed` are gone from `Component`; field groups are exposed read-only through `FindEditorFieldMetadata`. Editor session calls moved from `Component::*Editor*` to `ComponentInspector::{SetAssetDirectory, ClearReferenceSearches, HasReferencePick, CancelReferencePick, CaptureReferencePick}`.
   - Follow-up: `DrawGeneric` still special-cases `Material` (the shader field) and `Mesh` (meshPath drops). Replace these with a per-field custom-drawer hook.
-- [ ] Move editor selection, preview object, mesh-edit pose, weight paint, bone visibility, 2D mode and camera follow off `Scene` into an editor-side `EditorSceneContext`. The renderer reads it through a small overlay/debug-view struct passed into render.
-- [ ] Move `editorHidden`/`editorOverlays` off `Object` into an editor-side map keyed by `ObjectId`.
+- [~] Move editor selection, preview object, mesh-edit pose, weight paint, bone visibility, 2D mode and camera follow off `Scene`.
+  - [x] **Step A:** consolidated the 14 editor fields into `Engine::Scene::EditorViewState` (`Core/Scene/EditorViewState.{h,cpp}`), held by `Scene` as `m_editorView`, with the terrain-placement selection logic moved into `EditorViewState::SelectObject`. The renderer (11 files) reads `m_editorView.*`. `Scene`'s existing accessors forward to it, and `Scene::GetEditorView()` exposes it. `Scene.h` no longer includes `TerrainPlacementHandle.h`.
+  - [x] **Step B:** deleted 10 forwarding accessors from `Scene` (`Set/GetSelectedObject`, `Set/GetSelectedPlacementId`, `Set/GetEditorSelectedMesh`, `SetEditorBonesVisible`, `AreEditorBonesVisible`, `SetPreviewObject`, `IsEditorMode2D`). The compiler identified each Scene call site, so same-named methods on `HierarchyView`/`PropertiesView` were left alone. 108 sites in 23 editor files plus `.local/tests/TerrainPlacementEditingTests.cpp` now use `GetEditorView()`. Four methods stay on `Scene` because they do real scene work: `SetEditorMeshEditPose`/`IsEditorMeshEditPose` and `SetEditorWeightPaint` mark the prepared render frame stale, and `SetEditorMode2D` reconfigures graphics.
+  - [ ] **Step C:** superseded. Editor state leaves `Scene` entirely in Phase 4, step 4.1.
+- [x] Move `editorOverlays` (and its flag enum) off `Object`. **Correction:** it went into `Scene`'s `EditorViewState`, which gave `Scene` new editor bookkeeping. Phase 4, step 4.1 moves it into the editor.
+- [x] Keep `editorHidden` on `Object` (deliberate exception). `IsEnabledInHierarchy()` checks it on every ancestor in update, render and pick loops, so moving it to a map would put hash lookups in those hot paths.
 - [ ] Extract prefab-instance bookkeeping from `Object` into `PrefabInstanceLink` (held by pointer, null for non-prefab objects).
 
-## Phase 4: Scene renderer extraction (highest payoff)
+## Phase 4: Scene is the object memory manager
 
-- [ ] Introduce `SceneRenderer`, owned by `Scene`, holding all GPU resources, pipelines, shadow caches, occlusion pyramid, frame buffers and render stats currently on `Scene`.
-- [ ] Give `SceneRenderer` a narrow read interface into the scene (objects, component registry, settings, snapshot) instead of 19 `friend` declarations.
-- [ ] Break `Scene::Render` into passes: frame prep → visibility/LOD → shadows → opaque → particles → portals → post/UI. Target: no function over ~200 lines.
-- [ ] Move render perf counters (`GetLast*Count`, grass perf, shadow timing) into a `RenderStats` struct owned by the renderer.
-- [ ] Consolidate rendering directories:
-  ```
-  Core/Graphics/            RHI interfaces (IGraphicsContext, IShader, ...)
-  Core/Graphics/Backends/   DX11/, DX12/, Vulkan/, RendererFactory
-  Core/Rendering/           SceneRenderer + passes, Lighting/, Portal/, Sprites/, culling, LOD
-  ```
-  Move `PostProcess.cpp` out of `Graphics/`; move `ExportFrameSequence`, `HardwareSimulation`, `AutoQuality` to fitting homes (export / quality).
-- [ ] Consolidate lighting: components stay in `Components/Lighting`; scene-side lighting code joins `Rendering/Lighting`.
+**Definition (owner-confirmed, revised 2026-11-17):** `Scene` manages **object
+memory**: creating, storing, identifying, parenting, moving and destroying
+`Object`s, publishing structural changes, and indexing which objects need
+ticking. The **lifecycle driver** lives in `Engine::Runtime::Game`, which uses
+scenes. `Object` and `Component` keep their lifecycle **methods** and cascade.
+
+### Target ownership
+
+```
+Core/Runtime/Game             the simulation, shared by the exe and editor play mode
+├── Scene(s)                  object memory (below); Game absorbs SceneManager
+│                             (active scene, transitions)
+├── SimulationClock           delta time, fixed step, frame index
+├── Physics, Audio            moved out of Scene
+├── lifecycle driver          Start → Update → fixed/physics → late, parallel
+│                             scheduling, update timings
+│                             Game → Scene's update index → Object → Component
+└── SpatialSystem             portal/warp mapping and raycasts
+
+Scene                         objects, ids, hierarchy, add/remove/move, queued
+                              mutations, generation/snapshot, component registry,
+                              update index, structure events (ISceneObserver)
+Object / Component            lifecycle methods + cascade (Object → its
+                              components → child objects)
+
+SceneRenderer (Core/Rendering) reads a Scene; owns all GPU state; takes optional
+                              SceneViewOverlays (render input) per view.
+
+Engine/Game (exe)             GameApplication: window, input, renderer, pacing; owns a Game
+Engine/Editor                 edit mode: scenes only, no Game ticking.
+                              play mode: a Game over a copy of the scene (same
+                              loop as the exe). Owns EditorViewState per scene.
+```
+
+**Lifecycle: methods vs driver.** The methods (`Start`/`Update`/`Enabled`/
+`Disabled`/`OnDestroy`) and their cascade stay on `Object`/`Component`. The
+driver (when to tick, fixed step, play/pause, parallel scheduling, ordering
+against physics and audio) is host policy, so it lives in `Game`. Running the
+exe and editor play mode through the same `Game` stops their loops drifting
+apart. Edit mode doesn't create a `Game`.
+
+**Strict cascade.** `Game`/`Scene` talk only to `Object`s; only `Object`s talk to
+their `Component`s. Two current bypasses get fixed: worker-thread updates (Scene
+reads `object->Components` to build scheduler nodes, which becomes
+`Object::CollectWorkerUpdates`) and removal (Scene calls
+`component->DispatchDestroy()`, which becomes an `Object` method).
+
+**Service access:** `Object::GetScene()->GetGame()` (non-owning), so the ~40
+files using `GetScene()->GetPhysics()` / `GetDeltaTime()` keep a direct path.
+
+### Inventory (2026-11-17): ~230 `Scene` members
+
+| Group | ~Members | Destination |
+|---|---|---|
+| Object memory: objects, pending add/remove, ids, queued mutations, generation, snapshot, registry, structure revision | ~20 | **stays in Scene** |
+| Render: pipelines (~60), buffers/mapped ptrs, shadow/occlusion/cluster caches, material shaders, frame items, LOD/instancing, UI renderer, lighting pipelines, skybox/environment, render stats | ~190 | `SceneRenderer` |
+| Physics, audio, particle budget | 3 | `Game` |
+| Clock, delta time, lifecycle driver (`Start`/`Update`/`UpdateFixedFrame`), update timings | ~10 | `Game` |
+| Update registry (index of objects to tick), lifecycle revision | ~5 | **stays in Scene** (memory index) |
+| Graphics-preparation queue, prepare timings | ~6 | `SceneRenderer` |
+| Spatial update scheduler | 1 | `SpatialSystem` (in `Game`) |
+| Grass/perf heat stats, diagnostics | ~6 | `SceneRenderer` (RenderStats) |
+| Gameplay/UI input routing | 3 | `Game` (input) |
+| Editor view state | 1 (`m_editorView`) | Editor |
+
+### Steps (build + `.local/tests` after each)
+
+- [x] **4.1 Editor state out.** `Core/Rendering/SceneViewOverlays.h` is render input (selection, placement, edit mesh, pose, weight paint, preview), bound with `Scene::SetViewOverlays` (null = defaults). `Core/Scene/SceneObserver.h` (`ISceneObserver`) carries the removing/clearing/destroying events; `Scene` no longer clears editor fields itself. `EditorViewState` moves to `Engine/Editor/State`: one per scene, it binds overlays, observes its scene, and owns selection, the overlays map, bones visible, and camera focus/follow. `SetEditorMode2D` turned out to be scene/settings state (called on load and in `Init`, games included), so it stays as `Scene::SetMode2D`/`IsMode2D`. `editorCamera` is the scene's fallback viewer (render, audio listener, scripts) and stays until 4.4. **Done:** 195 editor call sites in 27 files now use `Engine::Editor::EditorViewState::For(scene)`. `Scene` has no editor members or editor methods left; `AdvanceEditorPreviews` moves out in 4.2 and `includeEditorVisuals` in 4.4. Clearing a scene now also stops camera follow, which previously kept a dangling target. `TerrainPlacementEditingTests` also compiles `EditorViewState.cpp`.
+- [ ] **4.2 `Game` runtime.** Add `Core/Runtime/Game.{h,cpp}`: owns the clock, Physics and Audio, drives lifecycle (`Start`, `Update`, `UpdateFixedFrame`, update timings) over its scene, and absorbs `SceneManager`. `Scene` keeps the update index and gets a non-owning `Game*`. Hosts: `GameApplication`, `ServerApplication`, `VideoExportApplication` and editor play mode create a `Game`. Edit mode and asset/preview scenes don't.
+- [ ] **4.3 Strict cascade.** `Object::CollectWorkerUpdates(nodes)` replaces Scene reading `object->Components` for scheduler nodes, and an `Object` destroy-dispatch method replaces Scene calling `component->DispatchDestroy()`.
+- [ ] **4.4 `SceneRenderer`.** Move the ~190 render members and `Render`, `PrepareRenderFrame`, graphics preparation, native packets and retirement into `SceneRenderer`. The 19 `friend` helper classes take `SceneRenderer&` plus a read-only scene view. Render stats go into `RenderStats`.
+- [ ] **4.5 Break up `Render`** (~2,850 lines) into passes: frame prep → visibility/LOD → shadows → opaque → particles → portals → post/UI. Target: no function over ~200 lines.
+- [ ] **4.6 Spatial.** Portal/warp mapping and raycasts plus the spatial update scheduler → `SpatialSystem` in `World`.
+- [ ] **4.7 Directories.** `Core/Graphics/` (RHI interfaces) with `Core/Graphics/Backends/{DX11,DX12,Vulkan}`. `Core/Rendering/` (SceneRenderer, passes, lighting, portal, sprites, culling, LOD). Move `Core/Scene/Rendering/*` there. Move `PostProcess.cpp` out of `Graphics/`. Rehome `ExportFrameSequence`, `HardwareSimulation`, `AutoQuality`.
+- [ ] **Done when:** `Scene.h` declares only object-memory and lifecycle members, and `Scene::` methods live only in `Core/Scene/` (hierarchy, lifecycle, persistence, snapshot).
 
 ## Phase 5: Split remaining god classes
 

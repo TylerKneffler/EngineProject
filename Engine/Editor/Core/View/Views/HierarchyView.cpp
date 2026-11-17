@@ -1,3 +1,4 @@
+#include "Engine/Editor/State/EditorViewState.h"
 #include "Core/Inspection/ComponentInspector.h"
 #include "HierarchyView.h"
 #include "Engine/Editor/Core/PrimitiveObjectFactory.h"
@@ -692,19 +693,19 @@ void HierarchyView::DrawObjectNode(
         !hasChildren, readOnlySkeletonRow,
         obj->IsEnabledInHierarchy(),
         depth, lastSibling, ancestorGuideMask, m_search[0] != '\0',
-        &obj->editorOverlays,
+        Engine::Editor::EditorViewState::MutableOverlays(obj),
         static_cast<uint8_t>(
             (obj->GetComponent<Engine::Components::Skeleton>()
-                ? Engine::Core::Object::BoneOverlay |
-                  Engine::Core::Object::SkeletonOverlay : 0) |
+                ? Engine::Editor::EditorViewState::BoneOverlay |
+                  Engine::Editor::EditorViewState::SkeletonOverlay : 0) |
             (obj->GetComponent<Engine::Components::Mesh>() ||
              obj->GetComponent<Engine::Components::Sprite>() ||
              obj->GetComponent<Engine::Components::LightProbeGroup>()
-                ? Engine::Core::Object::BoundsOverlay : 0) |
+                ? Engine::Editor::EditorViewState::BoundsOverlay : 0) |
             (obj->GetComponent<Engine::Components::Light>()
-                ? Engine::Core::Object::LightVolumeOverlay : 0) |
+                ? Engine::Editor::EditorViewState::LightVolumeOverlay : 0) |
             (obj->GetComponent<Engine::Components::Camera>()
-                ? Engine::Core::Object::CameraFrustumOverlay : 0)));
+                ? Engine::Editor::EditorViewState::CameraFrustumOverlay : 0)));
     const bool editableHierarchy = prefabRoot == nullptr;
     const bool deletable = editableHierarchy || prefabRoot == obj;
     EditorUiContextMenuResult menu;

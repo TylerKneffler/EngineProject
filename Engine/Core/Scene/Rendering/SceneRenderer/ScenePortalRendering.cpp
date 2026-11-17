@@ -338,7 +338,7 @@ void ScenePortalRendering::Render(ScenePortalRenderingContext& input)
             glm::mat4(glm::mat3(portalJob.mappedView));
         skyboxData.invVP = glm::inverse(proj * directionOnlyView);
         skyboxData.displayParams = {
-            scene.m_editorView.mode2D ? 1.f : 0.f,
+            scene.m_mode2D ? 1.f : 0.f,
             std::exp2(settings.hdriExposure),
             glm::radians(settings.hdriRotation),
             std::max(settings.sunGlowIntensity, 0.f) };
@@ -907,7 +907,7 @@ void ScenePortalRendering::Render(ScenePortalRenderingContext& input)
         // One zoom level for the whole plane keeps the grid's hierarchy
         // stable as the camera moves. The shader uses axisColor.a for it.
         const float gridBaseSpacing = std::max(std::abs(settings.gridCellSize), 0.000001f);
-        const float gridZoomLevel = scene.m_editorView.mode2D ? 0.f : std::clamp(
+        const float gridZoomLevel = scene.m_mode2D ? 0.f : std::clamp(
             std::log10(std::max(std::abs(cameraPosition.y) / gridBaseSpacing,
                 0.000001f)), -6.f, 8.f);
         gridData.axisColor = { settings.gridOriginColor.x, settings.gridOriginColor.y,
@@ -915,7 +915,7 @@ void ScenePortalRendering::Render(ScenePortalRenderingContext& input)
         gridData.fadeDistance = settings.gridFadeDistance;
         gridData.nearPlane = cam->nearPlane;
         gridData.farPlane = cam->farPlane;
-        gridData.mode2D = scene.m_editorView.mode2D ? 1.f : 0.f;
+        gridData.mode2D = scene.m_mode2D ? 1.f : 0.f;
 
         // Write to constant buffer
         memcpy(scene.m_gridCBMapped, &gridData, sizeof(PortalGridCBData));

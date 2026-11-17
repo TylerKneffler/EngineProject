@@ -90,7 +90,7 @@ void Scene::Init(Engine::Graphics::IGraphicsProvider* graphicsProvider)
     Engine::Components::Camera* editorCameraComponent = editorCamera.AddComponent<Engine::Components::Camera>();
     editorCameraComponent->useTransformRotation = false;
     editorCameraComponent->farPlane = 1000.f;
-    SetEditorMode2D(
+    SetMode2D(
         settings.dimension == Engine::Model::SceneDimension::TwoD);
 
     // Build pipeline states
@@ -117,18 +117,18 @@ void Scene::EnsureSkinPaletteCapacity(uint32_t requiredMatrices)
     Engine::Scene::Renderer::SceneRendererResources::EnsureSkinPaletteCapacity(*this, requiredMatrices);
 }
 
-void Scene::SetEditorMode2D(bool enabled)
+void Scene::SetMode2D(bool enabled)
 {
     settings.dimension = enabled
         ? Engine::Model::SceneDimension::TwoD
         : Engine::Model::SceneDimension::ThreeD;
-    if (m_editorView.cameraModeInitialized && m_editorView.mode2D == enabled)
+    if (m_fallbackCameraConfigured && m_mode2D == enabled)
         return;
-    m_editorView.mode2D = enabled;
+    m_mode2D = enabled;
     Engine::Components::Camera* camera = editorCamera.GetComponent<Engine::Components::Camera>();
     if (!camera)
         return;
-    m_editorView.cameraModeInitialized = true;
+    m_fallbackCameraConfigured = true;
     camera->useTransformRotation = false;
     camera->orthographic = enabled;
     camera->target = { 0.f, 0.f, 0.f };

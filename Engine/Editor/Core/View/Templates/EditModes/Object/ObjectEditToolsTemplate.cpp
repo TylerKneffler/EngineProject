@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "Engine/Editor/State/EditorViewState.h"
 #include "Engine/Editor/State/EditorState.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 #include "Engine/Editor/Core/View/Views/HierarchyView.h"
@@ -13,7 +14,7 @@ namespace Engine::Editor
 void EditorState::DrawObjectEditTools(IEditorUi& ui)
 {
     Engine::Scene::Scene* scene = GetActiveDocumentScene();
-    Engine::Core::Object* object = scene ? scene->GetSelectedObject() : nullptr;
+    Engine::Core::Object* object = scene ? Engine::Editor::EditorViewState::For(*scene).selectedObject : nullptr;
     if (!object)
     {
         ui.DisabledLabel("Select an object in the hierarchy.");
@@ -66,7 +67,7 @@ void EditorState::DrawObjectStageTools(IEditorUi& ui,
                     ApplyObjectStageVisibility(*raw);
                     if (!raw->showChildHierarchy)
                     {
-                        raw->scene->SetSelectedObject(raw->subject);
+                        Engine::Editor::EditorViewState::For(*raw->scene).SelectObject(raw->subject);
                         if (m_primaryHierarchy)
                             m_primaryHierarchy->SetSelectedObject(raw->subject);
                         if (m_primaryProperties)

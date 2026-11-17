@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "Engine/Editor/State/EditorViewState.h"
 #include "Engine/Editor/State/EditorState.h"
 #include "Core/Animation/AnimationDocumentAccess.h"
 #include "Core/Animation/AnimationTimelineVisuals.h"
@@ -250,8 +251,8 @@ void EditorState::ProcessPendingAnimationDocumentOpens()
             document->tracks.push_back(std::move(track));
         }
         if (document->tracks.empty()) continue;
-        document->poseScene->SetEditorMeshEditPose(false);
-        document->poseScene->SetEditorWeightPaint(nullptr, -1);
+        Engine::Editor::EditorViewState::For(*document->poseScene).SetMeshEditPose(false);
+        Engine::Editor::EditorViewState::For(*document->poseScene).SetWeightPaint(nullptr, -1);
         document->poseManager->playing = false;
         document->poseManager->holdCurrentPoseWhenStopped = false;
         document->poseManager->looping = false;
@@ -279,12 +280,12 @@ void EditorState::ProcessPendingAnimationDocumentOpens()
         if (!joints.empty() && joints[0])
         {
             document->selectedBone = 0;
-            document->poseScene->SetSelectedObject(joints[0]);
+            Engine::Editor::EditorViewState::For(*document->poseScene).SelectObject(joints[0]);
         }
         Engine::Core::Object* poseRoot = document->poseSkeleton->Owner;
         while (poseRoot && poseRoot->Parent) poseRoot = poseRoot->Parent;
-        document->poseScene->FocusEditorCamera(poseRoot);
-        document->poseScene->StopEditorCameraFollow();
+        Engine::Editor::EditorViewState::For(*document->poseScene).FocusCamera(poseRoot);
+        Engine::Editor::EditorViewState::For(*document->poseScene).StopCameraFollow();
         const std::string filename = std::filesystem::path(path).filename().string();
         auto view = m_viewFactory->CreateAnimationView(
             document->poseScene.get(), "Animation: " + filename);
@@ -297,7 +298,7 @@ void EditorState::ProcessPendingAnimationDocumentOpens()
         }
         // Animation authoring starts with its rig visible, independently of
         // the Scene View's saved overlay preferences.
-        document->poseScene->SetEditorBonesVisible(true);
+        Engine::Editor::EditorViewState::For(*document->poseScene).bonesVisible = true;
         for (const auto& object : document->poseScene->GetObjects())
             for (auto* component : object->Components)
                 if (auto* skeleton = dynamic_cast<Engine::Components::Skeleton*>(component))
@@ -361,7 +362,7 @@ void EditorState::ProcessPendingAnimationDocumentOpens()
                             }
                             FocusAnimationRig(*raw, track.index);
                             raw->selectedBone = static_cast<int>(index);
-                            raw->poseScene->SetSelectedObject(object);
+                            Engine::Editor::EditorViewState::For(*raw->poseScene).SelectObject(object);
                             if (m_primaryHierarchy)
                                 m_primaryHierarchy->SetSelectedObject(object);
                             if (m_primaryProperties)
@@ -381,7 +382,7 @@ void EditorState::ProcessPendingAnimationDocumentOpens()
                                 {
                                     FocusAnimationRig(*raw, track.index);
                                     raw->selectedBone = -1;
-                                    raw->poseScene->SetSelectedObject(object);
+                                    Engine::Editor::EditorViewState::For(*raw->poseScene).SelectObject(object);
                                     if (m_primaryHierarchy)
                                         m_primaryHierarchy->SetSelectedObject(object);
                                     if (m_primaryProperties)
@@ -446,7 +447,7 @@ void EditorState::ProcessPendingAnimationDocumentOpens()
                 raw->gizmoDragIK = false;
                 raw->gizmoWasActive = true;
                 raw->gizmoDragBone = raw->poseScene
-                    ? raw->poseScene->GetSelectedObject() : nullptr;
+                    ? Engine::Editor::EditorViewState::For(*raw->poseScene).selectedObject : nullptr;
                 if (raw->gizmoDragBone)
                 {
                     const auto& transform = raw->gizmoDragBone->transform;

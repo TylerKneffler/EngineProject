@@ -29,7 +29,8 @@
 #include "Core/Scene/Rendering/SceneRenderer/ScenePerformanceHeat.h"
 #include "Core/Physics/Physics.h"
 #include "Core/Scene/Spatial/WarpVolume.h"
-#include "Core/Scene/EditorViewState.h"
+#include "Core/Scene/SceneObserver.h"
+#include "Core/Rendering/SceneViewOverlays.h"
 #include <glm/glm.hpp>
 #include <array>
 #include <atomic>
@@ -374,7 +375,10 @@ public:
     const Engine::Audio::Audio& GetAudio() const { return *m_audio; }
 
     // --- Editor Settings ---
-    Object editorCamera; // not used by the game runtime, used for editor scene view navigation
+    // Fallback viewer: rendered from when no game camera is active, the audio
+    // listener fallback, and the editor's navigation camera. Moves out of Scene
+    // when the renderer takes its view camera as input (refactor plan 4.4).
+    Object editorCamera;
 
     // Build GPU resources (grid vertex buffer, PSO).
     // Must be called once before the first Render() call.
@@ -525,41 +529,28 @@ public:
     {
         return m_lastShadowCpuTiming;
     }
-    // ---- Editor view state ----------------------------------------------------
-    // All editor-only selection/overlay/camera state lives in EditorViewState.
-    // The accessors below forward to it for existing editor call sites.
-    EditorViewState& GetEditorView() { return m_editorView; }
-    const EditorViewState& GetEditorView() const { return m_editorView; }
-    void SetSelectedObject(Object* obj) { m_editorView.SelectObject(obj); }
-    Object* GetSelectedObject() const { return m_editorView.selectedObject; }
-    void SetSelectedPlacementId(uint64_t id, Object* layer = nullptr)
-    { m_editorView.SelectPlacement(id, layer); }
-    uint64_t GetSelectedPlacementId() const { return m_editorView.selectedPlacementId; }
-    void SetEditorSelectedMesh(Engine::Components::Mesh* mesh)
-    { m_editorView.selectedMesh = mesh; }
-    Engine::Components::Mesh* GetEditorSelectedMesh() const
-    { return m_editorView.selectedMesh; }
-    void SetEditorMeshEditPose(bool enabled)
+    // ---- View overlays (render input) ---------------------------------------
+    // A host (the editor) binds overlays it owns; the pointer must outlive the
+    // binding. Unbound scenes render with defaults.
+    void SetViewOverlays(const Engine::Rendering::SceneViewOverlays* overlays)
+    { m_viewOverlays = overlays; m_renderFramePrepared = false; }
+    const Engine::Rendering::SceneViewOverlays& GetViewOverlays() const
     {
-        if (m_editorView.meshEditPose == enabled) return;
-        m_editorView.meshEditPose = enabled;
-        m_renderFramePrepared = false;
+        static const Engine::Rendering::SceneViewOverlays none;
+        return m_viewOverlays ? *m_viewOverlays : none;
     }
-    bool IsEditorMeshEditPose() const { return m_editorView.meshEditPose; }
-    // Viewport preference only; leave individual rig visibility and saved assets intact.
-    void SetEditorBonesVisible(bool visible) { m_editorView.bonesVisible = visible; }
-    bool AreEditorBonesVisible() const { return m_editorView.bonesVisible; }
-    void SetEditorWeightPaint(Engine::Components::Mesh* mesh, int bone)
-    {
-        if (m_editorView.weightPaintMesh == mesh && m_editorView.weightPaintBone == bone)
-            return;
-        m_editorView.weightPaintMesh = mesh;
-        m_editorView.weightPaintBone = bone;
-        m_renderFramePrepared = false;
-    }
-    void SetPreviewObject(Object* obj) { m_editorView.previewObject = obj; }
-    void SetEditorMode2D(bool enabled);
-    bool IsEditorMode2D() const { return m_editorView.mode2D; }
+    // Call after changing bound overlays that affect prepared frame data
+    // (mesh edit pose, weight paint).
+    void InvalidatePreparedFrame() { m_renderFramePrepared = false; }
+
+    // ---- Structure observers ---------------------------------------------------
+    void AddObserver(ISceneObserver* observer);
+    void RemoveObserver(ISceneObserver* observer);
+
+    // 2D scenes use an orthographic fallback camera and 2D render paths.
+    // Kept in sync with settings.dimension.
+    void SetMode2D(bool enabled);
+    bool IsMode2D() const { return m_mode2D; }
     void SetDistanceLightingSettings(
         const Engine::Model::DistanceLightingSettings& distanceSettings)
     {
@@ -636,12 +627,6 @@ public:
     glm::mat4 WarpWorldMatrix(const glm::mat4& worldMatrix,
         const Object* excludedOwner = nullptr) const;
 
-    // Move the editor camera to frame the given object, keeping a comfortable
-    // viewing distance and looking directly at its world-space origin.
-    // Pass nullptr to reset to the default startup position.
-    void FocusEditorCamera(Object* obj);
-    void UpdateEditorCameraFollow();
-    void StopEditorCameraFollow();
 
     // Object management
     // Legacy editor and script callbacks run on the scene owner. Their direct
@@ -1400,7 +1385,10 @@ private:
     void FlushPendingObjectAdditions();
     void FlushPendingObjectRemovals();
     void EnforceParticleBudget();
-    EditorViewState m_editorView;
+    const Engine::Rendering::SceneViewOverlays* m_viewOverlays = nullptr;
+    std::vector<ISceneObserver*> m_observers;
+    bool m_mode2D = false;
+    bool m_fallbackCameraConfigured = false;
     Renderer::PerformanceHeatMap m_performanceHeat;
 
     // Long-range terrain alone can contribute 289 patch meshes. Truncating

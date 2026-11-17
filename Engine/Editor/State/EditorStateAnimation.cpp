@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "Engine/Editor/State/EditorViewState.h"
 #include "Engine/Editor/State/EditorState.h"
 #include "Core/Animation/AnimationDocumentAccess.h"
 #include "Core/Animation/AnimationTimelineVisuals.h"
@@ -448,7 +449,7 @@ void EditorState::SetActiveAnimationDocument(AnimationDocument* document)
         m_primaryHierarchy->SetFilteredObjectContextActions(false, nullptr);
         m_primaryHierarchy->SetSkeletonContextActions(false, nullptr);
         m_primaryHierarchy->SetSelectedObject(
-            document->poseScene->GetSelectedObject());
+            Engine::Editor::EditorViewState::For(*document->poseScene).selectedObject);
     }
     if (m_primaryProperties)
     {
@@ -457,7 +458,7 @@ void EditorState::SetActiveAnimationDocument(AnimationDocument* document)
         m_primaryProperties->SetAllowComponentStructureEdits(false);
         m_primaryProperties->SetSelectedAsset("");
         m_primaryProperties->SetSelectedObject(
-            document->poseScene->GetSelectedObject());
+            Engine::Editor::EditorViewState::For(*document->poseScene).selectedObject);
         m_primaryProperties->OnDrawContext = [this, document](IEditorUi& ui)
         {
             DrawAnimationProperties(ui, *document);
