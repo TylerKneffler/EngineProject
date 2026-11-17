@@ -1,4 +1,5 @@
 #include "Server/Application/ServerApplication.h"
+#include "Core/Runtime/Game.h"
 
 #include "Core/Components/Mesh/Mesh.h"
 #include "Core/Components/Physics/RigidBody.h"
@@ -398,8 +399,9 @@ int ServerApplication::Run(int argc, char** argv)
         return 1;
     }
 
-    scene.Start();
-    scene.Update(0.f);
+    Engine::Runtime::Game game(scene);
+    game.Start();
+    game.Update(0.f);
     std::cout << "{\"type\":\"scene_loaded\",\"scene\":";
     WriteJsonString(std::cout, options.scenePath);
     std::cout << ",\"headless\":true,\"frames\":" << options.frames << ",\"dt\":"
@@ -415,7 +417,7 @@ int ServerApplication::Run(int argc, char** argv)
             {
                 lastFrame = frame;
                 lastUpdateLabel = "Update";
-                scene.Update(options.deltaTime);
+                game.Update(options.deltaTime);
                 if (frame % options.every == 0 || frame == options.frames)
                 {
                     lastUpdateLabel = "WriteState";

@@ -93,6 +93,8 @@ namespace Engine::Graphics
 //   scene.Render(graphicsContext);
 // ---------------------------------------------------------------------------
 
+namespace Engine::Runtime { class Game; }
+
 namespace Engine::Scene
 {
 namespace Renderer
@@ -240,28 +242,36 @@ public:
     explicit Scene(PhysicsAdapterFactory physicsAdapterFactory);
     ~Scene();
 
-    // Runtime lifecycle shared by the standalone game and Editor Play mode.
-    void Start();
+    // ---- Lifecycle ------------------------------------------------------------
+    // Engine::Runtime::Game drives the lifecycle (Start/Update/fixed step) and
+    // owns the simulation clock. A scene with no Game bound (editor edit mode,
+    // asset previews, importers) is never ticked; its time reads return zero.
+    Engine::Runtime::Game* GetGame() const { return m_game; }
+    // Called by Game on construction/destruction only.
+    void BindGame(Engine::Runtime::Game* game) { m_game = game; }
+    // True once Game::Start ran; objects added afterwards start on commit.
     bool HasStarted() const { return m_hasStarted; }
-    void Update(float deltaTime);
-    // Advance explicit edit-mode previews without running gameplay callbacks.
-    // Live scene phases use the same owner-thread dependency scheduler as Update().
-    bool AdvanceEditorPreviews(float deltaTime);
+    void MarkStarted() { m_hasStarted = true; }
+
+    // ---- Simulation-step support (used by Game::Update) ----------------------
+    // Marks the update pass: structural edits are deferred to the next commit.
+    void BeginUpdatePass();
+    void EndUpdatePass() { m_isUpdating = false; }
+    bool IsInUpdatePass() const { return m_isUpdating; }
+    // Objects that have components needing Update / pose evaluation, refreshed
+    // from the structure revision.
+    const std::vector<Object*>& GetUpdateObjects();
+    void PrepareTransformHierarchy();
+    void ClearPreparedNativeUiLayout() { m_preparedNativeUiLayout.clear(); }
+
     bool UpdateSpatialScripts(bool editor=false) { return m_spatialUpdates.Tick(*this,editor); }
     const auto& GetSpatialUpdateScheduler() const { return m_spatialUpdates; }
-    struct UpdateTimings
-    {
-        double objectsMs = 0.0;
-        double poseMs = 0.0;
-        double physicsMs = 0.0;
-        double postPhysicsMs = 0.0;
-        double constraintsMs = 0.0, audioMs = 0.0;
-    };
+    // Diagnostics flag shared by Game update timings and render timings.
     void SetUpdateProfilingEnabled(bool enabled) { m_updateProfilingEnabled = enabled; }
+    bool IsUpdateProfilingEnabled() const { return m_updateProfilingEnabled; }
     // Opt-in alpha-prepass experiment. Never serialized or enabled by policy.
     void SetDiagnosticOpaqueDepthEqual(bool enabled) { m_diagnosticOpaqueDepthEqual = enabled; }
     bool DiagnosticOpaqueDepthEqualReady() const { return m_diagnosticOpaqueDepthEqualReady; }
-    const UpdateTimings& GetLastUpdateTimings() const { return m_lastUpdateTimings; }
     void ResetGrassPerformance() { m_grassPerformance = {}; m_grassGpuResources.clear(); }
     bool AccountGrassGpuResource(const void* resource)
     { return resource && m_grassGpuResources.insert(resource).second; }
@@ -347,28 +357,24 @@ public:
     bool automaticInstancing = true;
     bool gpuInstanceCulling = true;
     // Re-evaluate animation-facing solvers after a manually sampled pose.
+    // Evaluates pose/constraint components on the pose index. Game::Update runs
+    // it each frame; editor pose tools call it directly in edit mode.
     void ApplyPoseConstraints();
-    // Advances exactly one configured fixed frame. Offline exporters use this
-    // instead of supplying or sampling wall-clock deltas.
-    void UpdateFixedFrame();
-    void SetFixedTimeStep(double seconds) { AssertOwnerThread(); m_clock.SetFixedStep(seconds); }
-    void UseVariableTimeStep() { AssertOwnerThread(); m_clock.UseVariableStep(); }
-    float GetDeltaTime() const { return m_deltaTime; }
+    // ---- Time (read-through to the bound Game's clock; zero without one) ------
+    float GetDeltaTime() const;
     // CPU particle storage is capped across all emitters. Existing particles
     // keep their slots in scene object order; new spawns are dropped at budget.
     // The default matches the current particle renderer's 100k draw limit.
     void SetParticleBudget(size_t capacity);
+    // Trims emitters to the budget in scene order (Game runs it each update).
+    void EnforceParticleBudget();
     size_t GetParticleBudget() const { return m_particleBudget; }
     size_t GetParticleLiveCount() const;
     size_t GetParticleCapacityFor(
         const Engine::Components::ParticleEmitter* emitter) const;
-    double GetElapsedTime() const { return m_clock.GetElapsedTime(); }
-    uint64_t GetFrameIndex() const { return m_clock.GetFrameIndex(); }
-    // Manual render loops can advance the shared streaming/upload frame
-    // budget without running the scene's component and physics updates.
-    void AdvanceManualFrame(float deltaTime)
-    { AssertOwnerThread(); m_deltaTime = m_clock.Advance(deltaTime); }
-    const Engine::Time::SimulationClock& GetClock() const { return m_clock; }
+    double GetElapsedTime() const { return GetClock().GetElapsedTime(); }
+    uint64_t GetFrameIndex() const { return GetClock().GetFrameIndex(); }
+    const Engine::Time::SimulationClock& GetClock() const;
     Engine::Physics::Physics& GetPhysics() { return *m_physics; }
     const Engine::Physics::Physics& GetPhysics() const { return *m_physics; }
     Engine::Audio::Audio& GetAudio() { return *m_audio; }
@@ -1356,7 +1362,6 @@ private:
     bool m_updateProfilingEnabled = false;
     bool m_diagnosticOpaqueDepthEqual = false;
     bool m_diagnosticOpaqueDepthEqualReady = true;
-    UpdateTimings m_lastUpdateTimings{};
     Engine::Rendering::GrassPerformance m_grassPerformance{};
     std::unordered_set<const void*> m_grassGpuResources;
     PrepareTimings m_lastPrepareTimings{};
@@ -1368,8 +1373,7 @@ private:
     size_t m_graphicsPreparationCursor = 0;
     uint64_t m_lifecycleRevision = 0;
     size_t m_particleBudget = 100000;
-    float m_deltaTime = 0.f;
-    Engine::Time::SimulationClock m_clock;
+    Engine::Runtime::Game* m_game = nullptr;
     uint64_t m_structureRevision = 1;
     mutable Engine::Scene::ComponentRegistry m_componentRegistry;
     uint64_t m_physicsActivityRevision=0;
@@ -1384,7 +1388,6 @@ private:
     Object* AddObjectWithId(ObjectId id);
     void FlushPendingObjectAdditions();
     void FlushPendingObjectRemovals();
-    void EnforceParticleBudget();
     const Engine::Rendering::SceneViewOverlays* m_viewOverlays = nullptr;
     std::vector<ISceneObserver*> m_observers;
     bool m_mode2D = false;

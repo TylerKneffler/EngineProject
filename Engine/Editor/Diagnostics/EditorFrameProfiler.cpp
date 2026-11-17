@@ -1,4 +1,5 @@
 #include "Engine/Editor/Diagnostics/EditorFrameProfiler.h"
+#include "Core/Runtime/Game.h"
 #include "Engine/Editor/Diagnostics/FrameActivity.h"
 #include "Engine/Editor/Diagnostics/PerformanceProvenance.h"
 
@@ -96,8 +97,9 @@ namespace Engine::Editor
         double physicsDroppedMilliseconds = 0.0;
         double physicsPendingMilliseconds = 0.0;
         Engine::Physics::BulletPhysicsAdapter::StepTimings bulletTimings{};
-        const auto updateTimings = sample.playing
-            ? scene->GetLastUpdateTimings() : Scene::Scene::UpdateTimings{};
+        const auto updateTimings = sample.playing && scene->GetGame()
+            ? scene->GetGame()->GetLastUpdateTimings()
+            : Engine::Runtime::Game::UpdateTimings{};
         const auto& prepareTimings = scene->GetLastPrepareTimings();
         double uiRenderMilliseconds = 0.0;
         const double presentMilliseconds = renderer->GetLastPresentationMilliseconds();

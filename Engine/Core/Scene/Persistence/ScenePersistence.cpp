@@ -1,4 +1,5 @@
 #include "Core/Scene/Scene.h"
+#include "Core/Runtime/Game.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include "Core/Serialization/Json.h"
 #include "Core/Rendering/RenderJobs.h"
@@ -96,7 +97,7 @@ bool Scene::LoadFromValue(const Engine::Serialization::JsonValue& document)
     if (GetStructureRevision() == previousRevision) return false;
     if (!RestoreTrustedSnapshot(previous))
         throw std::runtime_error("Failed to restore the scene after a failed load");
-    if (wasStarted) Start();
+    if (wasStarted && m_game) m_game->Start();
     return false;
 }
 

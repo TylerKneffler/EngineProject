@@ -1,4 +1,5 @@
 #include "VideoExporter/VideoExportApplication.h"
+#include "Core/Runtime/Game.h"
 
 #include "Core/Components/Camera/Camera.h"
 #include "Core/Components/Audio/AudioSource.h"
@@ -1063,11 +1064,12 @@ int VideoExportApplication::Run(HINSTANCE instance)
     const double fixedDelta = static_cast<double>(options.frameRate.denominator) /
         (static_cast<double>(options.frameRate.numerator) *
             simulationTicksPerOutputFrame);
-    scene.SetFixedTimeStep(fixedDelta);
+    Engine::Runtime::Game game(scene);
+    game.SetFixedTimeStep(fixedDelta);
     scene.GetPhysics().ConfigureFixedStep(
         1.0 / static_cast<double>(options.physicsFps),
         options.maximumPhysicsSubsteps, options.physicsSolverIterations);
-    scene.Start();
+    game.Start();
 
     const uint64_t maximumFrames = options.frameRate.FramesForDuration(
         options.timeoutSeconds);

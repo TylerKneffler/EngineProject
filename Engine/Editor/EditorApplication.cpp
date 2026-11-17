@@ -1,4 +1,6 @@
 #include "Engine/Editor/EditorApplication.h"
+#include "Engine/Editor/Runtime/EditorPreviews.h"
+#include "Core/Runtime/Game.h"
 #include "Engine/Editor/Runtime/EditorPlayPipeline.h"
 #include "Engine/Editor/Startup/EditorCommandLine.h"
 #include "Engine/Editor/Startup/EditorStartupSettings.h"
@@ -303,6 +305,8 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
         ? std::make_unique<Engine::Editor::EditorPlayPipeline>(*renderer) : nullptr;
     bool pendingPlayStopRestore = false;
     bool pendingPlayStart = false;
+    // The running simulation while in Play mode; edit mode has none.
+    std::unique_ptr<Engine::Runtime::Game> playGame;
     unsigned playStartFollowupUpdates = 0;
     unsigned playStopFollowupUpdates = 0;
     bool resetPlayDelta = false;
@@ -326,6 +330,7 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
         }
         {
         StopProfile::Stage stage("stop_restore_editor_scene");
+        playGame.reset();
         editorState->RestorePlayModeScene();
         }
         scene = editorState->GetScene();
@@ -357,7 +362,8 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
         Engine::Editor::FrameActivity::Mark(Engine::Editor::FrameActivity::PlayStart);
         playStartFollowupUpdates = 2;
         pendingPlayStart = false;
-        scene->Start();
+        playGame = std::make_unique<Engine::Runtime::Game>(*scene);
+        playGame->Start();
         resetPlayDelta = true;
     };
     gameBuildManager->OnPlayStart = [&]()
@@ -673,7 +679,7 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
             // time so a slow render frame does not slow down playback.
             if (!usePlayPipeline)
             {
-                scene->Update(std::max(dt, 0.f));
+                if (playGame) playGame->Update(std::max(dt, 0.f));
                 Engine::Core::SceneManager::ProcessPendingSceneLoad();
             }
         }
@@ -688,7 +694,7 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
                     view && view->IsOpen() && view->GetScene())
                     previewScenes.insert(view->GetScene());
             for (auto* previewScene : previewScenes)
-                previewAdvanced = previewScene->AdvanceEditorPreviews(dt) || previewAdvanced;
+                previewAdvanced = Engine::Editor::AdvanceEditorPreviews(*previewScene, dt) || previewAdvanced;
             if (previewAdvanced) renderer->MarkDirty();
         }
         const auto afterSceneUpdate = Clock::now();

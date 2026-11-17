@@ -1,4 +1,5 @@
 #include "Core/Rendering/DetailBudget.h"
+#include "Core/Runtime/Game.h"
 #include "Core/Rendering/AutoQuality.h"
 #include "Core/Rendering/HardwareSimulation.h"
 #include "Core/Rendering/MaterialCachePolicy.h"
@@ -252,7 +253,8 @@ private:
                 if (work == Work::Update)
                 {
                     const auto updateStart = std::chrono::steady_clock::now();
-                    m_scene.Update(m_deltaTime);
+                    if (auto* game = m_scene.GetGame())
+                        game->Update(m_deltaTime);
                     if (::Engine::Core::SceneManager::ProcessPendingSceneLoad() &&
                         m_input.clientWidth && m_input.clientHeight)
                         m_scene.PrepareNativeUiLayout(
@@ -948,7 +950,8 @@ int GameApplication::Run(HINSTANCE instance, const GameBenchmarkOptions* benchma
     if (const char* preset = std::getenv("ENGINE_QUALITY_PRESET"))
         scene.settings.graphicsQuality.preset = std::clamp(std::atoi(preset), 0,
             Engine::Model::GraphicsQualitySettings::AutoPreset);
-    scene.Start();
+    Engine::Runtime::Game game(scene);
+    game.Start();
     std::unique_ptr<GameBenchmark> gameBenchmark;
     if (benchmark)
         gameBenchmark = std::make_unique<GameBenchmark>(*benchmark, *renderer,

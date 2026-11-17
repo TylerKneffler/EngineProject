@@ -1,4 +1,5 @@
 #include "Core/Rendering/AutoQuality.h"
+#include "Core/Runtime/Game.h"
 #include "Core/Rendering/HardwareSimulation.h"
 #include "Core/Threading/JobScheduler.h"
 #include "Core/Rendering/DetailBudget.h"
@@ -120,9 +121,11 @@ GameBenchmarkSceneSample GameBenchmark::CollectScene(Engine::Scene::Scene& scene
     }
     if (!result.camera) result.render = {};
     result.objects = scene.GetObjects().size();
-    result.updateObjectsMs = scene.GetLastUpdateTimings().objectsMs;
-    result.updatePhysicsMs = scene.GetLastUpdateTimings().physicsMs;
-    result.updatePostPhysicsMs = scene.GetLastUpdateTimings().postPhysicsMs;
+    const auto updateTimings = scene.GetGame()
+        ? scene.GetGame()->GetLastUpdateTimings() : Engine::Runtime::Game::UpdateTimings{};
+    result.updateObjectsMs = updateTimings.objectsMs;
+    result.updatePhysicsMs = updateTimings.physicsMs;
+    result.updatePostPhysicsMs = updateTimings.postPhysicsMs;
     result.grassMs = scene.GetGrassPerformance().totalMs;
     result.meshes = scene.GetComponents<Engine::Components::Mesh>().size();
     result.terrains = scene.GetComponents<Engine::Components::Terrain>().size();

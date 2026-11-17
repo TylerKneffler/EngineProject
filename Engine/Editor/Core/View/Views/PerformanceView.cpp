@@ -1,4 +1,5 @@
 #include "PerformanceView.h"
+#include "Core/Runtime/Game.h"
 #include "PerformanceRecording.h"
 #include "Core/Rendering/TextureResidency.h"
 #include "Core/Components/Materials/Texture.h"
@@ -501,7 +502,9 @@ void PerformanceView::SetFrameTimings(const EditorFrameProfileSample& sample,
     m_updateTimings.clear();
     if (m_scene && sample.playing)
     {
-        const auto& update = m_scene->GetLastUpdateTimings();
+        const auto update = m_scene->GetGame()
+            ? m_scene->GetGame()->GetLastUpdateTimings()
+            : Engine::Runtime::Game::UpdateTimings{};
         m_updateTimings = {
             { "Objects", update.objectsMs }, { "Pose / constraints", update.constraintsMs }, { "Audio", update.audioMs },
             { "Physics", update.physicsMs },

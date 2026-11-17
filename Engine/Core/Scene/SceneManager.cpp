@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "Core/Runtime/Game.h"
 #include "Core/Scene/SceneManager.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Serialization/SceneSerializer.h"
@@ -202,7 +203,8 @@ bool SceneManager::ProcessPendingSceneLoad()
     Engine::Scene::Scene* loaded = nullptr;
     if (result->readSucceeded && s_activeScene->LoadFromValue(result->document))
     {
-        s_activeScene->Start();
+        if (auto* game = s_activeScene->GetGame())
+            game->Start();
         loaded = s_activeScene;
         if (s_onSceneLoaded)
             s_onSceneLoaded(loaded);
