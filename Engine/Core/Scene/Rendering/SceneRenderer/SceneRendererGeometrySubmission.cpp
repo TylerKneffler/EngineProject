@@ -1,6 +1,6 @@
 #include "Core/Scene/Rendering/SceneRenderer/SceneRendererGeometrySubmission.h"
 
-#include "Core/Compoonents/Mesh/Mesh.h"
+#include "Core/Components/Mesh/Mesh.h"
 #include "Core/Graphics/IGraphicsBuffer.h"
 #include "Core/Graphics/IGraphicsContext.h"
 #include "Core/Graphics/IPipelineState.h"

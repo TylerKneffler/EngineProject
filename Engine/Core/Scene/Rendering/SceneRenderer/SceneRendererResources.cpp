@@ -15,7 +15,7 @@ namespace Engine::Scene::Renderer
 namespace
 {
 constexpr std::size_t kObjectGPUDataSize = sizeof(ObjectGPUData);
-static_assert(kObjectGPUDataSize == 1744u, "Object buffer layout must match Object.hlsl");
+static_assert(kObjectGPUDataSize == 1760u, "Object buffer layout must match Object.hlsl");
 
 std::vector<float> GenerateBrdfIntegrationLut(uint32_t resolution)
 {

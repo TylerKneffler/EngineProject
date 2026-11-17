@@ -1,8 +1,8 @@
 #include "Core/Scene/Rendering/SceneRenderer/SceneRendererShadows.h"
 
 #include "Core/Rendering/StableShadowCascade.h"
-#include "Core/Compoonents/Camera/Camera.h"
-#include "Core/Compoonents/Mesh/Mesh.h"
+#include "Core/Components/Camera/Camera.h"
+#include "Core/Components/Mesh/Mesh.h"
 #include "Core/Scene/Rendering/SceneRenderer/SceneRendererDrawPreparation.h"
 
 #include <algorithm>

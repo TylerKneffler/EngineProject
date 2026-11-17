@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Core/Scene/Scene.h"
-#include "Core/Compoonents/Materials/Material.h"
+#include "Core/Components/Materials/Material.h"
 
 #include <array>
 #include <cstdint>
@@ -91,6 +91,9 @@ struct ObjectGPUData
     // Height fog, packed by PackAtmosphereFog (AtmosphereFog.hlsli layout);
     // zero leaves fog disabled for editor/debug draws.
     glm::vec4 atmosphereFog[4]{};
+    // Terrain long-range sun shadow map (texture slot 4): world X/Z of the
+    // map corner, 1 / extent X, 1 / extent Z. Zero extent disables it.
+    glm::vec4 terrainSunShadow{0.f};
 };
 
 struct PreparedDraw

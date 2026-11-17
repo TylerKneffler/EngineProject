@@ -1,5 +1,5 @@
 #include "Core/Scene/Rendering/SceneRenderer/SceneRendererPipelines.h"
-#include "Core/Compoonents/Materials/Texture.h"
+#include "Core/Components/Materials/Texture.h"
 #include "Core/Rendering/Lighting/EnvironmentMap.h"
 #ifndef ENGINE_ASSETS_PATH
 #define ENGINE_ASSETS_PATH "Engine/Core/Assets/"

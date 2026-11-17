@@ -1,30 +1,30 @@
 #include "Core/Serialization/PrefabLoadProfile.h"
 #include "Core/Scene/Scene.h"
-#include "Core/SceneManager.h"
-#include "Core/Compoonents/Mesh/Mesh.h"
-#include "Core/Compoonents/Materials/Material.h"
+#include "Core/Runtime/Game.h"
+#include "Core/Components/Mesh/Mesh.h"
+#include "Core/Components/Materials/Material.h"
 #include <typeinfo>
-#include "Core/Compoonents/Animation/TwoBoneIK.h"
-#include "Core/Compoonents/Animation/ChainIK.h"
-#include "Core/Compoonents/Animation/AnimationManager.h"
-#include "Core/Compoonents/Animation/RigController.h"
-#include "Core/Compoonents/Animation/RigConstraints.h"
-#include "Core/Compoonents/Animation/RigMorphControls.h"
-#include "Core/Compoonents/Physics/RigPhysicsBinding.h"
-#include "Core/Compoonents/Materials/MaterialPropertyMorph.h"
-#include "Core/Compoonents/Constraints/TransformConstraint.h"
+#include "Core/Components/Animation/TwoBoneIK.h"
+#include "Core/Components/Animation/ChainIK.h"
+#include "Core/Components/Animation/AnimationManager.h"
+#include "Core/Components/Animation/RigController.h"
+#include "Core/Components/Animation/RigConstraints.h"
+#include "Core/Components/Animation/RigMorphControls.h"
+#include "Core/Components/Physics/RigPhysicsBinding.h"
+#include "Core/Components/Materials/MaterialPropertyMorph.h"
+#include "Core/Components/Constraints/TransformConstraint.h"
 #include "Core/Audio/Audio.h"
-#include "Core/Compoonents/Physics/SpatialManipulator.h"
-#include "Core/Compoonents/Animation/SoftTissueSurface.h"
-#include "Core/Compoonents/Physics/RigidBody.h"
-#include "Core/Compoonents/Physics/Cloth.h"
-#include "Core/Compoonents/Animation/IKBone.h"
-#include "Core/Compoonents/Particles/ParticleEmitter.h"
+#include "Core/Components/Physics/SpatialManipulator.h"
+#include "Core/Components/Animation/SoftTissueSurface.h"
+#include "Core/Components/Physics/RigidBody.h"
+#include "Core/Components/Physics/Cloth.h"
+#include "Core/Components/Animation/IKBone.h"
+#include "Core/Components/Particles/ParticleEmitter.h"
 #include "Core/Physics/Physics.h"
 #include "Core/Physics/IPhysicsAdapter.h"
 #include "Core/Renderers/UIRenderer.h"
 #include "Core/UI/UILayout.h"
-#include "Core/Compoonents/UI/Canvas.h"
+#include "Core/Components/UI/Canvas.h"
 #include "Core/Input/NativeInputSnapshot.h"
 #include "Core/Threading/ComponentUpdateScheduler.h"
 #include "Core/Threading/JobScheduler.h"
@@ -69,16 +69,34 @@ Scene::Scene()
 {
 }
 
+void Scene::AddObserver(ISceneObserver* observer)
+{
+    if (observer && std::find(m_observers.begin(), m_observers.end(),
+            observer) == m_observers.end())
+        m_observers.push_back(observer);
+}
+
+void Scene::RemoveObserver(ISceneObserver* observer)
+{
+    m_observers.erase(std::remove(m_observers.begin(), m_observers.end(),
+        observer), m_observers.end());
+}
+
 Scene::Scene(PhysicsAdapterFactory physicsAdapterFactory)
 {
     m_physics = std::make_unique<Engine::Physics::Physics>(
         *this, physicsAdapterFactory ? physicsAdapterFactory(*this) : nullptr);
-    m_audio = std::make_unique<Engine::Audio::Audio>(*this);
     CommitPendingObjectChanges();
 }
 
 Scene::~Scene()
 {
+    // Observers may unregister (or delete themselves) while notified.
+    const auto observers = m_observers;
+    for (ISceneObserver* observer : observers)
+        observer->OnSceneDestroying();
+    m_observers.clear();
+    m_viewOverlays = nullptr;
     try
     {
         FenceBackgroundWork();
@@ -88,7 +106,6 @@ Scene::~Scene()
             m_beforeGpuResourceDestruction();
     }
     catch (...) { /* Component destructors still join their own workers. */ }
-    m_audio->Reset();
     m_physics->Reset();
     for (const auto& object : m_objects)
         DisconnectSpatialManipulators(object.get());
@@ -102,38 +119,14 @@ void Scene::FenceBackgroundWork()
     AssertOwnerThread();
     if (m_isUpdating)
         throw std::logic_error("Background work cannot be fenced during Update");
-    if (Engine::Core::SceneManager::GetActiveScene() == this)
-        Engine::Core::SceneManager::CancelPendingSceneLoad();
+    if (m_game)
+        m_game->CancelPendingSceneLoad();
     FenceSceneGeneration();
     JoinEarlyCameraOcclusion();
     // A worker can execute code from a reloadable script module. Join it
     // before replacing scene objects or unloading that module.
-    for (auto* component : GetComponents<Engine::Core::Component>())
-        component->FenceBackgroundWork();
-}
-
-void Scene::Start()
-{
-    AssertOwnerThread();
-    FenceBackgroundWork();
-    m_clock.Reset();
-    m_deltaTime = 0.f;
     for (const auto& object : m_objects)
-        if (object)
-            object->transform.ClearEditorOverride();
-    // Component Start() can remove preview objects (terrain does this when
-    // switching to its runtime bake), invalidating an m_objects iterator.
-    std::vector<Engine::Core::Object*> startingObjects;
-    startingObjects.reserve(m_objects.size());
-    for (const auto& object : m_objects)
-        if (object)
-            startingObjects.push_back(object.get());
-    for (Engine::Core::Object* object : startingObjects)
-        if (std::any_of(m_objects.begin(), m_objects.end(),
-            [object](const auto& current) { return current.get() == object; }))
-            object->Start();
-    m_hasStarted = true;
-    CommitPendingObjectChanges();
+        if (object) object->FenceBackgroundWork();
 }
 
 void Scene::RefreshUpdateRegistry()
@@ -174,249 +167,36 @@ void Scene::RefreshUpdateRegistry()
     m_updateRegistryDirty.clear(); m_updateRegistryFull=false; m_updateRegistryRevision=GetStructureRevision();
 }
 
-bool Scene::AdvanceEditorPreviews(float deltaTime)
+void Scene::BeginUpdatePass()
 {
-    AssertOwnerThread();
-    const float seconds = std::max(deltaTime, 0.f);
-    bool advanced = false;
-    auto& jobs = Engine::Threading::JobScheduler::Get();
-    std::vector<Engine::Threading::JobScheduler::Handle> phases;
-    phases.reserve(4);
-    try
-    {
-        phases.push_back(jobs.ScheduleOnOwner([&]
-        {
-            for (auto* emitter : GetComponents<Engine::Components::ParticleEmitter>())
-                if (emitter->Owner && emitter->Owner->IsEnabledInHierarchy() &&
-                    emitter->IsEditorPreviewRunning())
-                {
-                    emitter->Advance(seconds, emitter->Owner->transform.GetWorldMatrix());
-                    advanced = true;
-                }
-        }));
-        phases.push_back(jobs.ScheduleOnOwner([&]
-        {
-            for (auto* animation : GetComponents<Engine::Components::AnimationManager>())
-                if (animation->Owner && animation->Owner->IsEnabledInHierarchy() &&
-                    animation->IsEditorPreviewRunning())
-                {
-                    animation->Tick(seconds);
-                    advanced = true;
-                }
-        }, {phases.back()}));
-        phases.push_back(jobs.ScheduleOnOwner([&]
-        {
-            advanced = UpdateSpatialScripts(true) || advanced;
-        }, {phases.back()}));
-        phases.push_back(jobs.ScheduleOnOwner([&]
-        {
-            CommitPendingObjectChanges();
-        }, {phases.back()}));
-        jobs.Wait(phases.back());
-    }
-    catch (...)
-    {
-        // Every queued closure captures this scene and local state. Fence all
-        // phases before either can be destroyed during exception unwinding.
-        for (const auto& phase : phases)
-            try { jobs.Wait(phase); } catch (...) {}
-        throw;
-    }
-    return advanced;
-}
-
-void Scene::Update(float deltaTime)
-{
-    AssertOwnerThread();
-    ResetGrassPerformance();
-    using Clock = std::chrono::steady_clock;
-    const auto updateBegin = m_updateProfilingEnabled ? Clock::now() : Clock::time_point{};
-    m_deltaTime = m_clock.Advance(deltaTime);
-    EnforceParticleBudget();
     m_componentRegistry.ReleaseSnapshots();
     m_isUpdating = true;
-    struct UpdatingGuard
-    {
-        bool& flag;
-        ~UpdatingGuard() { flag = false; }
-    } updatingGuard{m_isUpdating};
-    const double physicsDelta = m_clock.IsFixedStep()
-        ? m_clock.GetFixedStep() : static_cast<double>(m_deltaTime);
-    Clock::time_point afterObjects{}, afterConstraints{}, afterPose{}, afterPhysics{};
-    const auto componentUpdates = [&]
-    {
+}
+
+const std::vector<Engine::Core::Object*>& Scene::GetUpdateObjects()
+{
     RefreshUpdateRegistry();
-    const auto updateObjects = m_updateObjects; // callbacks may change the registry
-    std::vector<Engine::Threading::ComponentUpdateScheduler::Node> parallelUpdates;
-    const auto finishParallelUpdates = [&]
-    {
-        Engine::Threading::ComponentUpdateScheduler::Run(parallelUpdates);
-        parallelUpdates.clear();
-    };
-    for (auto* object : updateObjects)
-    {
-        // Object subclasses may override Update and must retain their exact
-        // owner-thread dispatch. A legacy component makes its whole object
-        // serial so callbacks can still edit the live component list.
-        if (typeid(*object) != typeid(Engine::Core::Object))
-        {
-            finishParallelUpdates();
-            object->Update();
-            continue;
-        }
-        if (!object->IsEnabledInHierarchy()) continue;
-        std::vector<Engine::Threading::ComponentUpdateScheduler::Node> objectUpdates;
-        bool serial = false;
-        for (auto* component : object->Components)
-        {
-            if (!component || !component->RequiresUpdate()) continue;
-            const auto policy = component->GetCallbackPolicy();
-            if (policy.updateThread != Engine::Core::Component::UpdateThreadAffinity::Worker)
-            {
-                serial = true;
-                break;
-            }
-            if (policy.updateSafety != Engine::Core::Component::UpdateParallelSafety::DeclaredAccess)
-                throw std::logic_error("Worker component update requires declared parallel safety");
-            auto access = component->GetUpdateAccess();
-            if (!access)
-                throw std::logic_error("Worker component update requires an access declaration");
-            objectUpdates.push_back({component, std::move(*access)});
-        }
-        if (serial)
-        {
-            finishParallelUpdates();
-            object->Update();
-        }
-        else
-            parallelUpdates.insert(parallelUpdates.end(),
-                std::make_move_iterator(objectUpdates.begin()),
-                std::make_move_iterator(objectUpdates.end()));
-    }
-    finishParallelUpdates();
-    };
-    const auto spatialScripts = [&]
-    {
-        UpdateSpatialScripts();
-        afterObjects = m_updateProfilingEnabled ? Clock::now() : Clock::time_point{};
-    };
-    const auto transforms = [&]
-    {
-        std::vector<Engine::Components::Transform*> values;
-        values.reserve(m_objects.size());
-        for (const auto& object : m_objects)
-            values.push_back(&object->transform);
-        m_transformHierarchy.Prepare(values);
-    };
-    const auto animationConstraints = [&]
-    {
-        ApplyPoseConstraints();
-        afterConstraints = m_updateProfilingEnabled ? Clock::now() : Clock::time_point{};
-        m_audio->Update(m_deltaTime);
-        afterPose = m_updateProfilingEnabled ? Clock::now() : Clock::time_point{};
-    };
-    const auto physicsPreparation = [&] { m_physics->PrepareStep(physicsDelta); };
-    const auto physicsSimulation = [&] { m_physics->SimulatePreparedStep(); };
-    const auto postPhysics = [&]
-    {
-    m_physics->FinishPreparedStep();
-    afterPhysics = m_updateProfilingEnabled ? Clock::now() : Clock::time_point{};
-    for (auto* binding : GetComponents<Engine::Components::RigPhysicsBinding>())
-        if (binding->Owner->IsEnabledInHierarchy()) binding->PostPhysicsUpdate();
-    for (auto* constraints : GetComponents<Engine::Components::RigConstraints>())
-        if (constraints->Owner->IsEnabledInHierarchy())
-        { constraints->RefreshPoseOutputs(); constraints->PostPhysicsUpdate(); }
-    for (auto* morphs : GetComponents<Engine::Components::RigMorphControls>())
-        if (morphs->Owner->IsEnabledInHierarchy() && !morphs->Owner->GetComponent<Engine::Components::RigConstraints>())
-            morphs->RefreshPoseOutputs();
-    // Bullet has now published current-frame poses and overlap pairs. Portal
-    // traversal deliberately runs here rather than in Component::Update so a
-    // crossing is evaluated against the motion that just occurred.
-    struct OrderedPortal
-    {
-        Engine::Components::SpatialManipulator* manipulator = nullptr;
-        ObjectPath path;
-    };
-    std::vector<OrderedPortal> portals;
-    for (auto* manipulator : GetComponents<Engine::Components::SpatialManipulator>())
-        if (manipulator->Owner->IsEnabledInHierarchy())
-        {
-            ObjectPath path;
-            TryGetObjectPath(manipulator->Owner, path);
-            portals.push_back({manipulator, std::move(path)});
-        }
-    std::sort(portals.begin(), portals.end(),
-        [](const OrderedPortal& first, const OrderedPortal& second)
-        {
-            if (first.manipulator->portalTraversalPriority !=
-                second.manipulator->portalTraversalPriority)
-            {
-                return first.manipulator->portalTraversalPriority >
-                    second.manipulator->portalTraversalPriority;
-            }
-            return first.path < second.path;
-        });
-    std::unordered_set<const Engine::Components::RigidBody*> claimedBodies;
-    for (const OrderedPortal& portal : portals)
-        portal.manipulator->PostPhysicsUpdate(&claimedBodies);
-    // Contacts and final bone/portal poses are available only after physics.
-    for (auto* tissue : GetComponents<Engine::Components::SoftTissueSurface>())
-        if (tissue->Owner->IsEnabledInHierarchy())
-        {
-            for (const auto* body : claimedBodies)
-                if (body && tissue->IsBoundUnder(body->Owner)) { tissue->Reset(); break; }
-            tissue->PostPhysicsUpdate(static_cast<float>(physicsDelta));
-        }
-    if (const auto* input = Engine::Core::CurrentNativeInputSnapshot())
-    {
-        if (input->clientWidth && input->clientHeight)
-            Engine::Renderers::UIRenderer::UpdateNativeInteraction(*this, *input);
-    }
-    };
-    const auto publishRenderSnapshot = [&]
-    {
-    m_isUpdating = false;
-    CommitPendingObjectChanges();
-    if (const auto* input = Engine::Core::CurrentNativeInputSnapshot())
-    {
-        if (input->clientWidth && input->clientHeight)
-            PrepareNativeUiLayout(static_cast<float>(input->clientWidth) /
-                static_cast<float>(input->clientHeight));
-        else
-            m_preparedNativeUiLayout.clear();
-    }
-    EnforceParticleBudget();
-    if (m_updateProfilingEnabled)
-    {
-        const auto ms = [](auto first, auto last)
-        { return std::chrono::duration<double, std::milli>(last - first).count(); };
-        m_lastUpdateTimings = { ms(updateBegin, afterObjects),
-            ms(afterObjects, afterPose), ms(afterPose, afterPhysics),
-            ms(afterPhysics, Clock::now()), ms(afterObjects,afterConstraints), ms(afterConstraints,afterPose) };
-    }
-    };
-    auto& jobs = Engine::Threading::JobScheduler::Get();
-    std::vector<Engine::Threading::JobScheduler::Handle> phases;
-    phases.reserve(8);
-    try
-    {
-        phases.push_back(jobs.ScheduleOnOwner(componentUpdates));
-        phases.push_back(jobs.ScheduleOnOwner(spatialScripts, {phases.back()}));
-        phases.push_back(jobs.ScheduleOnOwner(transforms, {phases.back()}));
-        phases.push_back(jobs.ScheduleOnOwner(animationConstraints, {phases.back()}));
-        phases.push_back(jobs.ScheduleOnOwner(physicsPreparation, {phases.back()}));
-        phases.push_back(jobs.ScheduleOnOwner(physicsSimulation, {phases.back()}));
-        phases.push_back(jobs.ScheduleOnOwner(postPhysics, {phases.back()}));
-        phases.push_back(jobs.ScheduleOnOwner(publishRenderSnapshot, {phases.back()}));
-        jobs.Wait(phases.back());
-    }
-    catch (...)
-    {
-        for (const auto& phase : phases)
-            try { jobs.Wait(phase); } catch (...) {}
-        m_physics->AbortPreparedStep();
-        throw;
-    }
+    return m_updateObjects;
+}
+
+void Scene::PrepareTransformHierarchy()
+{
+    std::vector<Engine::Components::Transform*> values;
+    values.reserve(m_objects.size());
+    for (const auto& object : m_objects)
+        values.push_back(&object->transform);
+    m_transformHierarchy.Prepare(values);
+}
+
+float Scene::GetDeltaTime() const
+{
+    return m_game ? m_game->GetDeltaTime() : 0.f;
+}
+
+const Engine::Time::SimulationClock& Scene::GetClock() const
+{
+    static const Engine::Time::SimulationClock stopped;
+    return m_game ? m_game->GetClock() : stopped;
 }
 
 void Scene::SetParticleBudget(size_t capacity)
@@ -583,14 +363,6 @@ void Scene::ApplyPoseConstraints()
         return okay;
     };
     for (auto* constraint : constraints) evaluate(evaluate, constraint);
-}
-
-void Scene::UpdateFixedFrame()
-{
-    AssertOwnerThread();
-    if (!m_clock.IsFixedStep())
-        throw std::logic_error("UpdateFixedFrame requires a configured fixed time step");
-    Update(0.f);
 }
 
 Engine::Core::Object* Scene::AddObject()
@@ -892,12 +664,14 @@ void Scene::RemoveObject(Engine::Core::Object* obj)
     collect(obj);
 
     for (Engine::Core::Object* object : objectsToRemove)
-        for (Engine::Core::Component* component : object->Components)
-            if (component) component->FenceBackgroundWork();
+        object->FenceBackgroundWork();
 
-    if (std::find(objectsToRemove.begin(), objectsToRemove.end(),
-            m_editorCameraFollowTarget) != objectsToRemove.end())
-        StopEditorCameraFollow();
+    // Observers drop pointers into the subtree while it is still valid.
+    {
+        const auto observers = m_observers;
+        for (ISceneObserver* observer : observers)
+            observer->OnObjectsRemoving(objectsToRemove);
+    }
 
     // Sever external links while every endpoint and hierarchy path is still
     // valid. Component destructors then only need to clear local state.
@@ -934,29 +708,11 @@ void Scene::RemoveObject(Engine::Core::Object* obj)
             siblings.end());
         obj->Parent = nullptr;
     }
-    if (m_selectedObject &&
-        std::find(
-            objectsToRemove.begin(),
-            objectsToRemove.end(),
-            m_selectedObject) != objectsToRemove.end())
-    {
-        m_selectedObject = nullptr;
-        m_selectedPlacementId = 0;
-        m_selectedPlacementLayer = nullptr;
-    }
-    if (m_previewObject &&
-        std::find(objectsToRemove.begin(), objectsToRemove.end(),
-            m_previewObject) != objectsToRemove.end())
-    {
-        m_previewObject = nullptr;
-    }
-
-    m_editorSelectedMesh = nullptr;
     if(retireRenderLeaf)
     {
         // Deliver logical destruction now, on the scene owner. The fence
         // releases storage later; DispatchDestroy is idempotent at that point.
-        for(auto* component:obj->Components) if(component) component->DispatchDestroy();
+        obj->DispatchComponentDestroy();
         auto found=std::find_if(m_objects.begin(),m_objects.end(),
             [obj](const auto& candidate) { return candidate.get()==obj; });
         if(found!=m_objects.end())
@@ -1037,6 +793,11 @@ void Scene::ClearObjects()
     if (m_isUpdating)
         throw std::logic_error("Clearing a scene during Update requires a commit boundary");
     FenceBackgroundWork();
+    {
+        const auto observers = m_observers;
+        for (ISceneObserver* observer : observers)
+            observer->OnObjectsClearing();
+    }
     if (m_beforeGpuResourceDestruction &&
         (!m_objects.empty() || !m_retiredRenderObjects.empty()))
         m_beforeGpuResourceDestruction();
@@ -1057,7 +818,6 @@ void Scene::ClearObjects()
     m_pendingObjectAdditions.clear();
     m_pendingObjectRemovals.clear();
     m_preparedNativeUiLayout.clear();
-    m_audio->Reset();
     m_physics->Reset();
     for (const auto& object : m_objects)
         DisconnectSpatialManipulators(object.get());
@@ -1068,11 +828,6 @@ void Scene::ClearObjects()
     m_objectIds.clear();
     m_objectsById.clear();
     m_componentSnapshotCache.clear();
-    m_selectedObject = nullptr;
-    m_selectedPlacementId = 0;
-    m_selectedPlacementLayer = nullptr;
-    m_editorSelectedMesh = nullptr;
-    m_previewObject = nullptr;
     NotifyStructureChanged();
     CommitPendingObjectChanges();
 }

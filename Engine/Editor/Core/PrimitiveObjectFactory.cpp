@@ -1,9 +1,9 @@
 #include "PrimitiveObjectFactory.h"
 
-#include "Core/Compoonents/Materials/Material.h"
-#include "Core/Compoonents/Mesh/Mesh.h"
+#include "Core/Components/Materials/Material.h"
+#include "Core/Components/Mesh/Mesh.h"
 #include "Core/Graphics/IGraphicsProvider.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
 
 #include <stdexcept>

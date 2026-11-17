@@ -1,7 +1,7 @@
 #include "AssetDocumentView.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 #include "Core/Scene/Scene.h"
-#include "Core/Compoonents/Materials/Texture.h"
+#include "Core/Components/Materials/Texture.h"
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Engine/Editor/Core/Paint/ImagePaint.h"
 #include "Engine/Editor/Core/Paint/BrushPreview.h"

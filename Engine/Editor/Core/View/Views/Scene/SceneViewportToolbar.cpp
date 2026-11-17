@@ -1,9 +1,10 @@
+#include "Engine/Editor/State/EditorViewState.h"
 #include "SceneViewportToolbar.h"
 
 #include "SceneCameraController.h"
-#include "Core/Object.h"
-#include "Core/Compoonents/Camera/Camera.h"
-#include "Core/Compoonents/Physics/RigidBody.h"
+#include "Core/Scene/Object.h"
+#include "Core/Components/Camera/Camera.h"
+#include "Core/Components/Physics/RigidBody.h"
 #include "Core/Scene/Scene.h"
 #include <algorithm>
 #include <array>
@@ -123,7 +124,7 @@ bool SceneViewportToolbar::DrawOrientationGizmo(IEditorUi& ui,
         m_cubeDragObject = nullptr;
         m_cubeDragAxis = -1;
     }
-    if(!scene||scene->IsEditorMode2D()||input.available.x<90.f||
+    if(!scene||scene->IsMode2D()||input.available.x<90.f||
         input.available.y<70.f)
     {
         m_cubeDragObject=nullptr;
@@ -217,7 +218,7 @@ bool SceneViewportToolbar::DrawOrientationGizmo(IEditorUi& ui,
     }
 
     Engine::Core::Object* selected=allowObjectTransform
-        ? scene->GetSelectedObject() : nullptr;
+        ? Engine::Editor::EditorViewState::For(*scene).selectedObject : nullptr;
     constexpr glm::vec3 worldAxes[3]={{1.f,0.f,0.f},{0.f,1.f,0.f},
         {0.f,0.f,1.f}};
     constexpr EditorUiColor axisColors[3]={{.95f,.20f,.18f,1.f},

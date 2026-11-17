@@ -6,7 +6,7 @@ low-poly meshes, within the large-scene budget in
 
 ## 1. Current state (audited 2026-11-13)
 
-### Materials (`Engine/Core/Compoonents/Materials/Material.h`)
+### Materials (`Engine/Core/Components/Materials/Material.h`)
 - One metallic-roughness PBR material: base color, metallic-roughness, normal,
   occlusion, emissive, **height**, SSS thickness, per-map UV set selection.
 - Parallax params exist: `heightScale` (0–0.2), `heightMinSteps`, `heightMaxSteps`.

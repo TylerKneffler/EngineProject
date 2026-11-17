@@ -1,3 +1,4 @@
+#include "Engine/Editor/State/EditorViewState.h"
 #include "Engine/Editor/HotReload/EditorHotReload.h"
 #include "Engine/Editor/State/EditorState.h"
 #include "Core/Serialization/SceneSerializer.h"
@@ -346,7 +347,7 @@ bool EditorHotReload::ApplyModule(const std::filesystem::path& candidatePath)
     if (m_moduleJobs) m_moduleJobs->CloseAndWait();
     const std::string snapshot = scene->SaveToString();
     ::Engine::Scene::Scene::ObjectPath selectedPath;
-    scene->TryGetObjectPath(scene->GetSelectedObject(), selectedPath);
+    scene->TryGetObjectPath(Engine::Editor::EditorViewState::For(*scene).selectedObject, selectedPath);
     scene->ClearObjects();
 
     const HMODULE previousModule = m_module;

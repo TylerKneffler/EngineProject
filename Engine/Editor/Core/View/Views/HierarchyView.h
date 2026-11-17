@@ -2,7 +2,7 @@
 #include "pch.h"
 
 #include "Core/Scene/Scene.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "View/IEditorPanel.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 

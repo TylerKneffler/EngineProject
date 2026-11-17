@@ -1,5 +1,5 @@
 #include "BakedLightingData.h"
-#include "Engine/Editor/UI/IEditorUi.h"
+#include "Core/Inspection/IInspectorUi.h"
 
 namespace Engine::Rendering
 {
@@ -18,7 +18,7 @@ BakedLightingData::BakedLightingData()
     RegisterField("version", version);
 }
 
-bool BakedLightingData::DrawProperties(::Engine::Editor::IEditorUi& ui)
+bool BakedLightingData::DrawProperties(Engine::Core::IInspectorUi& ui)
 {
     ui.DisabledLabel(valid
         ? "Generated baked material mapping (read-only)."

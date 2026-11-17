@@ -1,6 +1,6 @@
 #include "EnvironmentMap.h"
 
-#include "Core/Compoonents/Materials/Texture.h"
+#include "Core/Components/Materials/Texture.h"
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Core/Memory/CacheStore.h"
 

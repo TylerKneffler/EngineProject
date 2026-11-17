@@ -1,13 +1,13 @@
 #include "ScenePlacementAndPicking.h"
 #include "SurfacePlacement.h"
-#include "Core/Compoonents/Terrain/Terrain.h"
+#include "Core/Components/Terrain/Terrain.h"
 
-#include "Core/Compoonents/Camera/Camera.h"
-#include "Core/Compoonents/Animation/SkinnedMesh.h"
-#include "Core/Compoonents/Animation/AnimationBone.h"
-#include "Core/Compoonents/Animation/Skeleton.h"
-#include "Core/Compoonents/Mesh/Mesh.h"
-#include "Core/Compoonents/Sprite/Sprite.h"
+#include "Core/Components/Camera/Camera.h"
+#include "Core/Components/Animation/SkinnedMesh.h"
+#include "Core/Components/Animation/AnimationBone.h"
+#include "Core/Components/Animation/Skeleton.h"
+#include "Core/Components/Mesh/Mesh.h"
+#include "Core/Components/Sprite/Sprite.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Rendering/RenderSpatialIndex.h"
 #include "Core/Threading/JobScheduler.h"
@@ -692,7 +692,7 @@ Engine::Core::Object* ScenePlacementAndPicking::PickObjectHoverAsync(
     const Engine::Scene::Scene& scene, const EditorUiVec2& mousePos,
     const EditorUiVec2& viewportSize)
 {
-    if (scene.IsEditorMode2D())
+    if (scene.IsMode2D())
         return PickObjectInViewport(scene, mousePos, viewportSize, true);
     glm::vec3 rayOrigin{}, rayDirection{};
     if (!BuildViewportRay(scene, mousePos, viewportSize,
@@ -830,7 +830,7 @@ bool ScenePlacementAndPicking::FindPrefabPlacement(
         }
     }
 
-    if (scene.IsEditorMode2D())
+    if (scene.IsMode2D())
     {
         if (std::abs(rayDirection.z) <= 0.000001f)
             return found;
@@ -997,7 +997,7 @@ Engine::Core::Object* ScenePlacementAndPicking::PickObjectInViewport(
     const glm::vec3 rayDir = glm::normalize(rayTarget - rayOrigin);
     UpdateSpatialCache(scene);
 
-    if (scene.IsEditorMode2D())
+    if (scene.IsMode2D())
     {
         Engine::Core::Object* frontmost = nullptr;
         int frontLayer = std::numeric_limits<int>::min();

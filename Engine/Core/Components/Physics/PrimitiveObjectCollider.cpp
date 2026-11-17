@@ -1,0 +1,17 @@
+#include "Core/Components/Physics/PrimitiveObjectCollider.h"
+
+namespace Engine::Components
+{
+PrimitiveObjectCollider::PrimitiveObjectCollider()
+{
+    SetTypeName(COMPONENT_TYPE_NAME(PrimitiveObjectCollider));
+    RegisterField("shape", shape, "Shape");
+    RegisterField("size", size, "Shape");
+    RegisterField("radius", radius, "Shape");
+    RegisterField("height", height, "Shape");
+    RegisterField("bendGrass", bendGrass, "Grass interaction");
+    RegisterField("alignToBoneChild", alignToBoneChild, "Shape");
+    RegisterField("fitToSkinnedMesh", fitToSkinnedMesh, "Shape");
+    RegisterField("childBone", childBone, "Shape");
+}
+}

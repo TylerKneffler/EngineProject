@@ -1,9 +1,9 @@
 #include "Scripts/Demos/Pong/PongBall.h"
 
 #include "Scripts/Demos/Pong/PongGameManager.h"
-#include "Core/Compoonents/Physics/PrimitiveObjectCollider.h"
-#include "Core/Compoonents/Physics/MeshObjectCollider.h"
-#include "Core/Object.h"
+#include "Core/Components/Physics/PrimitiveObjectCollider.h"
+#include "Core/Components/Physics/MeshObjectCollider.h"
+#include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include <algorithm>

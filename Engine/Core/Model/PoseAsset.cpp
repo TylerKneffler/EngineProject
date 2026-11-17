@@ -1,5 +1,5 @@
 #include "PoseAsset.h"
-#include "Core/Compoonents/Mesh/Mesh.h"
+#include "Core/Components/Mesh/Mesh.h"
 #include "Core/Serialization/Json.h"
 #include <chrono>
 #include <cmath>

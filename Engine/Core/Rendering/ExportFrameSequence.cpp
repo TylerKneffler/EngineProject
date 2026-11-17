@@ -1,7 +1,7 @@
 #include "ExportFrameSequence.h"
+#include "Core/Runtime/Game.h"
 
 #include "Core/Scene/Scene.h"
-#include "Core/SceneManager.h"
 
 #include <stdexcept>
 
@@ -44,8 +44,11 @@ bool ExportFrameSequence::AdvanceFixedSteps(uint32_t stepCount,
         const double stepDuration = m_scene.GetClock().GetFixedStep();
         if (beforeStep && !beforeStep(stepStartTime, stepDuration))
             return false;
-        m_scene.UpdateFixedFrame();
-        Engine::Core::SceneManager::ProcessPendingSceneLoad();
+        Engine::Runtime::Game* game = m_scene.GetGame();
+        if (!game)
+            throw std::logic_error("ExportFrameSequence requires a running Game");
+        game->UpdateFixedFrame();
+        game->ProcessPendingSceneLoad();
     }
     return true;
 }

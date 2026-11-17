@@ -1,4 +1,5 @@
 #include "Engine/Editor/Runtime/EditorPlayPipeline.h"
+#include "Core/Runtime/Game.h"
 #include "Core/Renderers/IEditorRenderer.h"
 #include <algorithm>
 #include <stdexcept>
@@ -196,7 +197,8 @@ void EditorPlayPipeline::Run()
         try
         {
             Core::SetCurrentNativeInputSnapshot(&m_input);
-            m_scene->Update(m_delta);
+            if (auto* game = m_scene->GetGame())
+                game->Update(m_delta);
         }
         catch (...) { failure = std::current_exception(); }
         Core::SetCurrentNativeInputSnapshot(nullptr);

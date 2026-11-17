@@ -1,3 +1,4 @@
+#include "Core/Inspection/ComponentInspector.h"
 #include "ViewFactory.h"
 #include "Views/PerformanceRecording.h"
 #include <stdexcept>
@@ -199,7 +200,7 @@ std::unique_ptr<IEditorPanel> ViewFactory::Create(const std::string& typeName)
 
     if (typeName == "Properties")
     {
-        Engine::Core::Component::SetEditorAssetDirectory(
+        Engine::Core::ComponentInspector::SetAssetDirectory(
             m_settings.assetsDirectory);
         auto view = std::make_unique<PropertiesView>();
         AssignLowestAvailableTitle(typeName, view.get());

@@ -135,7 +135,36 @@ public:
         uint32_t viewportHeight,
         bool shadowOnly,
         const glm::vec3& cameraPosition,
-        const std::array<glm::vec4, 4>& atmosphereFog);
+        const std::array<glm::vec4, 4>& atmosphereFog,
+        const glm::vec3& sunDirection = glm::vec3(0.f),
+        const glm::vec3& sunRadiance = glm::vec3(0.f));
+
+    // Sun disc constants shared by the main and portal skybox draws:
+    // direction (xyz, w = cosine of the disc radius) and radiance (rgb,
+    // w = disc intensity); zero radiance disables the disc.
+    static void ResolveSkySun(const Scene& scene, const glm::vec3& sunDirection,
+        const glm::vec3& sunRadiance, glm::vec4& direction, glm::vec4& radiance);
+
+    // Skybox.hlsl constants. 128 bytes: the Vulkan push-constant limit.
+    // The world view ray is affine in NDC, so rayX * ndc.x + rayY * ndc.y +
+    // rayOrigin replaces the inverse view-projection; the w components carry
+    // the sky fog density at the camera, height falloff and ray length.
+    struct SkyboxConstants
+    {
+        glm::vec4 rayX{0.f};
+        glm::vec4 rayY{0.f};
+        glm::vec4 rayOrigin{0.f};
+        glm::vec4 displayParams{0.f}; // 2D, exposure, rotation, sun glow
+        glm::vec4 sunDirection{0.f};  // toward the sun, w = cos(disc radius)
+        glm::vec4 sunRadiance{0.f};   // rgb, w = disc intensity
+        glm::vec4 fogInscatter{0.f};  // ambient inscatter rgb, w = anisotropy
+        glm::vec4 fogSunGlow{0.f};    // fog sun glow rgb
+    };
+    static_assert(sizeof(SkyboxConstants) == 128);
+
+    // Sets the ray basis (xyz only) for a direction-only view (no translation).
+    static void SetSkyboxRays(SkyboxConstants& constants, const glm::mat4& proj,
+        const glm::mat4& directionOnlyView);
 
 private:
     LightingContext m_context;

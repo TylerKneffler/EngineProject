@@ -1,5 +1,5 @@
 #include "Core/Scene/Rendering/SceneRenderer/SceneSpatialDebugGeometry.h"
-#include "Core/Compoonents/Physics/SpatialManipulator.h"
+#include "Core/Components/Physics/SpatialManipulator.h"
 #include <algorithm>
 #include <cmath>
 #include <utility>

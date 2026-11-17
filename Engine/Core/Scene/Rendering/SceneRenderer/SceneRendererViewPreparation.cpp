@@ -1,6 +1,6 @@
 #include "Core/Scene/Rendering/SceneRenderer/SceneRendererViewPreparation.h"
-#include "Core/Compoonents/Camera/Camera.h"
-#include "Core/Compoonents/Physics/SpatialManipulator.h"
+#include "Core/Components/Camera/Camera.h"
+#include "Core/Components/Physics/SpatialManipulator.h"
 
 #include "Core/Rendering/RenderSpatialIndex.h"
 
@@ -200,7 +200,7 @@ void SceneRendererViewPreparation::PrepareVisibleItems(
             classified[candidateIndex] = { &item, glm::dot(delta, delta),
                 shadowOnly ? 0.f : nearestLightingDistanceSquared(item, world),
                 world[3].z, item.sortingLayer,
-                item.blended && !(includeEditorVisuals && item.mesh == scene.m_editorWeightPaintMesh) };
+                item.blended && !(includeEditorVisuals && item.mesh == scene.GetViewOverlays().weightPaintMesh) };
             localAccepted[candidateIndex] = 1;
         });
 

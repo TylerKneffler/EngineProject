@@ -1,8 +1,8 @@
 #include "Core/Scene/Rendering/SceneRenderer/SceneRendererMaterialShaders.h"
 #include <chrono>
 #include <stdexcept>
-#include "Core/Compoonents/Materials/Material.h"
-#include "Core/Compoonents/Mesh/Mesh.h"
+#include "Core/Components/Materials/Material.h"
+#include "Core/Components/Mesh/Mesh.h"
 #include "Core/Scene/Rendering/SceneRenderer/SceneRendererUtilities.h"
 
 namespace Engine::Scene::Renderer

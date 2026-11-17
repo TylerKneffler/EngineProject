@@ -1,8 +1,8 @@
 #include "Scripts/Spatial/WarpVolumeTraversalRepeater.h"
 
-#include "Core/Compoonents/Physics/RigidBody.h"
-#include "Core/Compoonents/Physics/SpatialManipulator.h"
-#include "Core/Object.h"
+#include "Core/Components/Physics/RigidBody.h"
+#include "Core/Components/Physics/SpatialManipulator.h"
+#include "Core/Scene/Object.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include <algorithm>
 #include <glm/gtc/matrix_inverse.hpp>

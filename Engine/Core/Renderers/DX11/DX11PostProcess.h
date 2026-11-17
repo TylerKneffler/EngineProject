@@ -3,6 +3,7 @@
 #include <d3d11.h>
 #include <wrl/client.h>
 #include <cstdint>
+#include <vector>
 
 namespace Engine::Renderers
 {
@@ -20,6 +21,10 @@ public:
     ID3D11Texture2D* GetSceneTexture() const { return m_sceneColor.Get(); }
 
 private:
+    void UploadConstants(ID3D11DeviceContext* context, const void* data);
+    // Builds the bloom chain from source; leaves level 0 holding the sum.
+    void RenderBloom(ID3D11DeviceContext* context, ID3D11ShaderResourceView* source);
+
     Microsoft::WRL::ComPtr<ID3D11Texture2D> m_sceneColor;
     Microsoft::WRL::ComPtr<ID3D11Texture2D> m_resolvedColor;
     Microsoft::WRL::ComPtr<ID3D11Texture2D> m_accumulationColor;
@@ -28,8 +33,14 @@ private:
     Microsoft::WRL::ComPtr<ID3D11RenderTargetView> m_resolvedRtv;
     Microsoft::WRL::ComPtr<ID3D11RenderTargetView> m_accumulationRtv;
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_accumulationSrv;
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> m_bloom;
+    std::vector<Microsoft::WRL::ComPtr<ID3D11RenderTargetView>> m_bloomRtvs;
+    std::vector<Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>> m_bloomSrvs;
+    uint32_t m_bloomLevels = 0;
     Microsoft::WRL::ComPtr<ID3D11VertexShader> m_vertexShader;
     Microsoft::WRL::ComPtr<ID3D11PixelShader> m_pixelShader;
+    Microsoft::WRL::ComPtr<ID3D11PixelShader> m_bloomDownsampleShader;
+    Microsoft::WRL::ComPtr<ID3D11PixelShader> m_bloomUpsampleShader;
     Microsoft::WRL::ComPtr<ID3D11SamplerState> m_sampler;
     Microsoft::WRL::ComPtr<ID3D11Buffer> m_constants;
     Microsoft::WRL::ComPtr<ID3D11DepthStencilState> m_depthDisabled;

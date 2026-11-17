@@ -1,10 +1,11 @@
 #include "pch.h"
+#include "Engine/Editor/State/EditorViewState.h"
 #include "Engine/Editor/State/EditorState.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 #include "Engine/Editor/Core/View/Views/ConsoleView.h"
 #include "Core/Scene/Scene.h"
-#include "Core/Object.h"
-#include "Core/Compoonents/Mesh/Mesh.h"
+#include "Core/Scene/Object.h"
+#include "Core/Components/Mesh/Mesh.h"
 #include "Core/Mesh/MeshEditGeometry.h"
 #include "Engine/Editor/Core/Paint/MeshUvUnwrap.h"
 
@@ -338,7 +339,7 @@ void EditorState::DrawMeshStageTools(IEditorUi& ui,
                             raw->meshSavePath =
                                 (std::filesystem::path(raw->path).parent_path() /
                                     (raw->subject->name + ".mesh")).string();
-                        raw->scene->SetSelectedObject(raw->subject);
+                        Engine::Editor::EditorViewState::For(*raw->scene).SelectObject(raw->subject);
                         ApplyMeshStageVisibility(*raw);
                         SetActiveSceneAssetDocument(raw, true);
                         if (m_renderer) m_renderer->MarkDirty();

@@ -3,10 +3,11 @@
 #include "Core/Graphics/IGraphicsBuffer.h"
 #include "Core/Graphics/IPipelineState.h"
 #include "Core/Graphics/IGraphicsTexture.h"
-#include "Core/Compoonents/Physics/SpatialManipulator.h"
-#include "Core/Compoonents/Materials/Texture.h"
+#include "Core/Components/Physics/SpatialManipulator.h"
+#include "Core/Components/Materials/Texture.h"
 #include "Core/Rendering/Portal/PortalRenderPolicy.h"
 #include "Core/Rendering/TextureFootprint.h"
+#include "Core/Scene/Rendering/SceneRenderer/SceneRendererLighting.h"
 #include "Core/Scene/Rendering/SceneRenderer/SceneRendererUtilities.h"
 #include "Core/Renderers/UIRenderer.h"
 #include <algorithm>
@@ -42,15 +43,7 @@ struct PortalGridCBData
     float farPlane;
     float mode2D;
 };
-struct PortalSkyboxCBData
-{
-    glm::mat4 invVP;
-    glm::vec4 displayParams;
-    // Skybox.hlsl sky fog; left zero, so portal skies are not fogged.
-    glm::vec4 fog[3]{};
-};
 static_assert(sizeof(PortalGridCBData) == 128);
-static_assert(sizeof(PortalSkyboxCBData) == 128);
 }
 
 void ScenePortalRendering::Render(ScenePortalRenderingContext& input)
@@ -333,14 +326,17 @@ void ScenePortalRendering::Render(ScenePortalRenderingContext& input)
                 &mappedData, sizeof(mappedData));
         }
 
-        PortalSkyboxCBData skyboxData{};
-        const glm::mat4 directionOnlyView =
-            glm::mat4(glm::mat3(portalJob.mappedView));
-        skyboxData.invVP = glm::inverse(proj * directionOnlyView);
+        // Portal skies are not fogged (the fog terms stay zero).
+        SceneRendererLighting::SkyboxConstants skyboxData{};
+        SceneRendererLighting::SetSkyboxRays(skyboxData, proj,
+            glm::mat4(glm::mat3(portalJob.mappedView)));
         skyboxData.displayParams = {
-            scene.m_editorMode2D ? 1.f : 0.f,
+            scene.m_mode2D ? 1.f : 0.f,
             std::exp2(settings.hdriExposure),
-            glm::radians(settings.hdriRotation), 0.f };
+            glm::radians(settings.hdriRotation),
+            std::max(settings.sunGlowIntensity, 0.f) };
+        skyboxData.sunDirection = scene.m_skySunDirection;
+        skyboxData.sunRadiance = scene.m_skySunRadiance;
         memcpy(static_cast<uint8_t*>(scene.m_skyboxCBMapped) +
             portalJob.skyboxConstantBufferOffset,
             &skyboxData, sizeof(skyboxData));
@@ -904,7 +900,7 @@ void ScenePortalRendering::Render(ScenePortalRenderingContext& input)
         // One zoom level for the whole plane keeps the grid's hierarchy
         // stable as the camera moves. The shader uses axisColor.a for it.
         const float gridBaseSpacing = std::max(std::abs(settings.gridCellSize), 0.000001f);
-        const float gridZoomLevel = scene.m_editorMode2D ? 0.f : std::clamp(
+        const float gridZoomLevel = scene.m_mode2D ? 0.f : std::clamp(
             std::log10(std::max(std::abs(cameraPosition.y) / gridBaseSpacing,
                 0.000001f)), -6.f, 8.f);
         gridData.axisColor = { settings.gridOriginColor.x, settings.gridOriginColor.y,
@@ -912,7 +908,7 @@ void ScenePortalRendering::Render(ScenePortalRenderingContext& input)
         gridData.fadeDistance = settings.gridFadeDistance;
         gridData.nearPlane = cam->nearPlane;
         gridData.farPlane = cam->farPlane;
-        gridData.mode2D = scene.m_editorMode2D ? 1.f : 0.f;
+        gridData.mode2D = scene.m_mode2D ? 1.f : 0.f;
 
         // Write to constant buffer
         memcpy(scene.m_gridCBMapped, &gridData, sizeof(PortalGridCBData));

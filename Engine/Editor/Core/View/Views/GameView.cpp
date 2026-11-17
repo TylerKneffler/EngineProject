@@ -1,7 +1,7 @@
 #include "GameView.h"
 #include "Core/Graphics/GraphicsCommandPacket.h"
 #include "Engine/Editor/UI/IEditorUi.h"
-#include "Core/Compoonents/Camera/Camera.h"
+#include "Core/Components/Camera/Camera.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Graphics/IGraphicsContext.h"
 #include "Core/Graphics/IGraphicsProvider.h"

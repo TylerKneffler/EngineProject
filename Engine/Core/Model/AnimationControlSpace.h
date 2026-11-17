@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Core/Model/AnimationClip.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include <glm/gtc/matrix_inverse.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/matrix_transform.hpp>

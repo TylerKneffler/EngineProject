@@ -1,5 +1,5 @@
 #pragma once
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include <functional>
 #include <typeindex>
 #include <unordered_map>

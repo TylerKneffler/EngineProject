@@ -1,10 +1,10 @@
 #include "AssetPreviewCache.h"
 #include "Engine/Editor/Core/Paint/BrushPreset.h"
 
-#include "Core/Compoonents/Materials/Material.h"
-#include "Core/Compoonents/Materials/Texture.h"
-#include "Core/Compoonents/Mesh/Mesh.h"
-#include "Core/Compoonents/Camera/Camera.h"
+#include "Core/Components/Materials/Material.h"
+#include "Core/Components/Materials/Texture.h"
+#include "Core/Components/Mesh/Mesh.h"
+#include "Core/Components/Camera/Camera.h"
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Core/Graphics/IGraphicsTexture.h"
 #include "Core/Memory/CacheStore.h"
@@ -12,7 +12,7 @@
 #include <atomic>
 #include "Core/Model/RigAsset.h"
 #include "Core/Serialization/Json.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
 
 #include <algorithm>

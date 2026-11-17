@@ -3,10 +3,11 @@
 #include <glm/glm.hpp>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace Engine::Core { class Object; }
 namespace Engine::Scene { class Scene; }
-namespace Engine::Components { class Terrain; class TerrainManager; }
+namespace Engine::Components { class Terrain; class TerrainManager; struct TerrainRegionMask; }
 
 namespace Engine::Editor
 {
@@ -38,6 +39,24 @@ public:
     // falloff starts. Points behind the camera break the outline.
     static void DrawBrushRing(const Target& target, const glm::dvec3& localCenter,
         float radius, float hardness, const glm::dmat4& viewProjection,
+        const glm::vec2& screenMin, const glm::vec2& screenSize, uint32_t color);
+
+    // Screen position of the surface under a root-local X/Z point. False
+    // outside loaded terrain or behind the camera.
+    static bool ProjectSurface(const Target& target, const glm::dvec2& local,
+        const glm::dmat4& viewProjection, const glm::vec2& screenMin,
+        const glm::vec2& screenSize, glm::vec2& screen);
+
+    // Polyline through root-local X/Z points, draped over the surface (long
+    // segments are subdivided). Gaps where the surface is missing.
+    static void DrawDrapedPolyline(const Target& target, const std::vector<glm::dvec2>& points,
+        bool closed, const glm::dmat4& viewProjection, const glm::vec2& screenMin,
+        const glm::vec2& screenSize, uint32_t color, float thickness = 2.f);
+
+    // Selection highlight: the surface under the mask tinted by its weight
+    // (so the feather shows as a fade), plus the outline.
+    static void DrawRegionHighlight(const Target& target,
+        const Engine::Components::TerrainRegionMask& mask, const glm::dmat4& viewProjection,
         const glm::vec2& screenMin, const glm::vec2& screenSize, uint32_t color);
 
     struct ScatterSettings

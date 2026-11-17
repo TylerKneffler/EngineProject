@@ -1,5 +1,5 @@
 #pragma once
-#include "Core/Compoonents/Mesh/Mesh.h"
+#include "Core/Components/Mesh/Mesh.h"
 #include <cstdint>
 #include <array>
 #include <utility>

@@ -1,7 +1,7 @@
-#include "Core/Compoonents/Mesh/Mesh.h"
+#include "Core/Components/Mesh/Mesh.h"
 #include "Core/Rendering/SharedMeshBuffers.h"
 #include "Core/Rendering/IndexedMeshPreparation.h"
-#include "Core/Compoonents/Mesh/MeshInstanceLayerData.h"
+#include "Core/Components/Mesh/MeshInstanceLayerData.h"
 #include <cstdlib>
 #include <cstring>
 #include <stdexcept>

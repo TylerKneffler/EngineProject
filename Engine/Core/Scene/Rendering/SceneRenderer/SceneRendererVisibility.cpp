@@ -287,7 +287,7 @@ void SceneRendererVisibility::PrepareTerrainOcclusion(
     for (const auto& item : frameRenderItems)
     {
         if (!item.object || item.belongsToPreview ||
-            (scene.m_previewObject && IsObjectOrDescendant(item.object, scene.m_previewObject)))
+            (scene.GetViewOverlays().previewObject && IsObjectOrDescendant(item.object, scene.GetViewOverlays().previewObject)))
             continue;
         const auto footprint = TerrainFootprintForItem(item, cameraPosition);
         if (!footprint)

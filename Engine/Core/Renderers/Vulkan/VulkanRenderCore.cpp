@@ -148,6 +148,9 @@ void VulkanRenderCore::CreateDevice()
     enabled.samplerAnisotropy = supported.samplerAnisotropy;
     // Cooked material textures are BC1/4/5/7.
     enabled.textureCompressionBC = supported.textureCompressionBC;
+    // Object pixel shaders read SV_PrimitiveID (editor Triangles view), which
+    // SPIR-V gates behind the Geometry capability.
+    enabled.geometryShader = supported.geometryShader;
     createInfo.pEnabledFeatures = &enabled;
     VkCheck(vkCreateDevice(m_physicalDevice, &createInfo, nullptr, &m_device), "vkCreateDevice");
     m_pipelineStatisticsEnabled = enabled.pipelineStatisticsQuery != VK_FALSE;

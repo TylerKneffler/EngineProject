@@ -19,8 +19,10 @@ float4 PSMain(
     float4 uvChannels4 : TEXCOORD7,
     nointerpolation uint objectIndex : TEXCOORD11,
     float instanceLodDistance : TEXCOORD12,
-    bool frontFace : SV_IsFrontFace) : SV_TARGET
+    bool frontFace : SV_IsFrontFace,
+    uint primitiveId : SV_PrimitiveID) : SV_TARGET
 {
+    g_primitiveId = primitiveId; // editor Triangles view
     // Instanced LOD bands dissolve per tree (see ApplyGeometryFade).
     g_instanceLodDistance = instanceLodDistance;
 #ifdef GRASS_SURFACE_SHADING

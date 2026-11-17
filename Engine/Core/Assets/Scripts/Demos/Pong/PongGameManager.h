@@ -1,7 +1,7 @@
 #pragma once
 
-#include "Core/Script.h"
-#include "Core/PropertyMacros.h"
+#include "Core/Components/Script.h"
+#include "Core/Components/PropertyMacros.h"
 #include <string>
 
 class PongBall;

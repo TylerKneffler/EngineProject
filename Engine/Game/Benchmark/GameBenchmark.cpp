@@ -1,16 +1,17 @@
 #include "Core/Rendering/AutoQuality.h"
+#include "Core/Runtime/Game.h"
 #include "Core/Rendering/HardwareSimulation.h"
 #include "Core/Threading/JobScheduler.h"
 #include "Core/Rendering/DetailBudget.h"
 #include "Core/Rendering/OcclusionBuffer.h"
 #include "Game/Benchmark/GameBenchmark.h"
 #include "Core/Scene/Scene.h"
-#include "Core/Object.h"
-#include "Core/Compoonents/Camera/Camera.h"
-#include "Core/Compoonents/Mesh/Mesh.h"
-#include "Core/Compoonents/Terrain/Terrain.h"
-#include "Core/Compoonents/Terrain/TerrainManager.h"
-#include "Core/Compoonents/Terrain/TerrainObjectLayer.h"
+#include "Core/Scene/Object.h"
+#include "Core/Components/Camera/Camera.h"
+#include "Core/Components/Mesh/Mesh.h"
+#include "Core/Components/Terrain/Terrain.h"
+#include "Core/Components/Terrain/TerrainManager.h"
+#include "Core/Components/Terrain/TerrainObjectLayer.h"
 #include "Core/Renderers/IGameRenderer.h"
 #include <algorithm>
 #include <chrono>
@@ -134,9 +135,11 @@ GameBenchmarkSceneSample GameBenchmark::CollectScene(Engine::Scene::Scene& scene
     }
     if (!result.camera) result.render = {};
     result.objects = scene.GetObjects().size();
-    result.updateObjectsMs = scene.GetLastUpdateTimings().objectsMs;
-    result.updatePhysicsMs = scene.GetLastUpdateTimings().physicsMs;
-    result.updatePostPhysicsMs = scene.GetLastUpdateTimings().postPhysicsMs;
+    const auto updateTimings = scene.GetGame()
+        ? scene.GetGame()->GetLastUpdateTimings() : Engine::Runtime::Game::UpdateTimings{};
+    result.updateObjectsMs = updateTimings.objectsMs;
+    result.updatePhysicsMs = updateTimings.physicsMs;
+    result.updatePostPhysicsMs = updateTimings.postPhysicsMs;
     result.grassMs = scene.GetGrassPerformance().totalMs;
     result.grass = scene.GetGrassPerformance();
     result.meshes = scene.GetComponents<Engine::Components::Mesh>().size();

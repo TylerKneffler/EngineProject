@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "Engine/Editor/State/EditorViewState.h"
 #include "Engine/Editor/State/EditorState.h"
 #include "Core/Animation/AnimationDocumentAccess.h"
 #include "Core/Animation/AnimationTimelineVisuals.h"
@@ -17,27 +18,27 @@
 #include "Core/View/Views/ConsoleView.h"
 #include "Engine/Editor/UI/EditorIcons.h"
 #include "Core/Animation/SkeletonBindPose.h"
-#include "Core/Compoonents/Animation/AnimationBone.h"
-#include "Core/Compoonents/Animation/AnimationManager.h"
-#include "Core/Compoonents/Animation/RigConstraints.h"
-#include "Core/Compoonents/Animation/TwoBoneIK.h"
-#include "Core/Compoonents/Animation/ChainIK.h"
+#include "Core/Components/Animation/AnimationBone.h"
+#include "Core/Components/Animation/AnimationManager.h"
+#include "Core/Components/Animation/RigConstraints.h"
+#include "Core/Components/Animation/TwoBoneIK.h"
+#include "Core/Components/Animation/ChainIK.h"
 #include "Core/Model/AnimationControlSpace.h"
-#include "Core/Compoonents/Animation/Model.h"
-#include "Core/Compoonents/Animation/Skeleton.h"
-#include "Core/Compoonents/Animation/SkinnedMesh.h"
-#include "Core/Compoonents/Camera/Camera.h"
-#include "Core/Compoonents/Mesh/Mesh.h"
-#include "Core/Compoonents/Transform.h"
+#include "Core/Components/Animation/Model.h"
+#include "Core/Components/Animation/Skeleton.h"
+#include "Core/Components/Animation/SkinnedMesh.h"
+#include "Core/Components/Camera/Camera.h"
+#include "Core/Components/Mesh/Mesh.h"
+#include "Core/Components/Transform.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include "Core/Serialization/Json.h"
-#include "Core/ComponentReference.h"
+#include "Core/Components/ComponentReference.h"
 #include "Core/Model/RigAsset.h"
 #include "Core/Model/PoseAsset.h"
 #include "Core/Model/AnimationClipAsset.h"
 #include "Core/Model/AnimationPackAsset.h"
 #include "Core/Model/AnimationRigMapping.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Prefab/PrefabAsset.h"
 #include "imgui.h"
 #include <cstdio>
@@ -148,7 +149,7 @@ void EditorState::DrawAnimationMappingRepair(IEditorUi& ui,
         document.view->SetPoseEditing(true);
         document.view->SetModelManipulation(true);
         document.view->SetModelSelectionMode(1);
-        document.poseScene->SetEditorBonesVisible(true);
+        Engine::Editor::EditorViewState::For(*document.poseScene).bonesVisible = true;
     }
     if (document.repairAwaitingViewportBone)
         ui.DisabledLabel("Click a bone in the 3D view to assign it.");
@@ -242,7 +243,7 @@ void EditorState::DrawAnimationRigControls(IEditorUi& ui,
                 {
                     document.selectedBone = int(found - palette.begin());
                     auto* object = model->ResolveNode(unsigned(current));
-                    document.poseScene->SetSelectedObject(object);
+                    Engine::Editor::EditorViewState::For(*document.poseScene).SelectObject(object);
                     if (m_primaryHierarchy) m_primaryHierarchy->SetSelectedObject(object);
                     if (m_primaryProperties) m_primaryProperties->SetSelectedObject(object);
                     if (m_renderer) m_renderer->MarkDirty();
@@ -1052,7 +1053,7 @@ bool EditorState::DrawAnimationRigViewport(IEditorUi& ui,
             if (static_cast<int>(palette[i]) == node && i < joints.size())
             {
                 document.selectedBone = static_cast<int>(i);
-                document.poseScene->SetSelectedObject(joints[i]);
+                Engine::Editor::EditorViewState::For(*document.poseScene).SelectObject(joints[i]);
                 if (m_primaryHierarchy)
                     m_primaryHierarchy->SetSelectedObject(joints[i]);
                 if (m_primaryProperties)

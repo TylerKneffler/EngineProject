@@ -1,7 +1,7 @@
 #include "pch.h"
+#include "Engine/Editor/State/EditorViewState.h"
 #include "Engine/Editor/State/EditorState.h"
 #include "Engine/Editor/Diagnostics/FrameActivity.h"
-#include "Core/SceneManager.h"
 #include "Core/Rendering/RenderJobs.h"
 #include "Core/View/ViewFactory.h"
 #include "Core/View/IEditorPanel.h"
@@ -16,10 +16,10 @@
 #include "Core/Scene/Scene.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include "Core/Serialization/Json.h"
-#include "Core/Compoonents/Mesh/Mesh.h"
-#include "Core/Compoonents/Materials/Texture.h"
-#include "Core/Compoonents/Animation/Skeleton.h"
-#include "Core/Compoonents/Transform.h"
+#include "Core/Components/Mesh/Mesh.h"
+#include "Core/Components/Materials/Texture.h"
+#include "Core/Components/Animation/Skeleton.h"
+#include "Core/Components/Transform.h"
 #include "Core/Mesh/MeshEditSnapshot.h"
 #include "Core/SnapshotHistory.h"
 
@@ -365,8 +365,8 @@ void EditorState::ApplyHistoryEntry(
     m_mainSkeletonEdit.mesh = nullptr;
     m_mainSkeletonEdit.adjacency.reset();
     m_mainSkeletonEdit.observedBindTransforms.clear();
-    m_scene->SetEditorWeightPaint(nullptr, -1);
-    m_scene->SetEditorMeshEditPose(m_mainMeshEdit.enabled ||
+    Engine::Editor::EditorViewState::For(*m_scene).SetWeightPaint(nullptr, -1);
+    Engine::Editor::EditorViewState::For(*m_scene).SetMeshEditPose(m_mainMeshEdit.enabled ||
         m_mainSkeletonEdit.enabled);
 
     SelectObject(entry.hasSelection

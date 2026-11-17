@@ -6,7 +6,7 @@
 // Expects CopperSlate_{BaseColor,Normal,Height,MetallicRoughness}.ktx2 in the
 // cooked dir and the original PNGs in the source dir.
 
-#include "Core/Compoonents/Materials/Texture.h"
+#include "Core/Components/Materials/Texture.h"
 #include "Core/Graphics/IGraphicsTexture.h"
 
 #include <algorithm>

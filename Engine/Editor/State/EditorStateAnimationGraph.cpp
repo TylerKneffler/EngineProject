@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "Engine/Editor/State/EditorViewState.h"
 #include "Engine/Editor/State/EditorState.h"
 #include "Core/Animation/AnimationTimelineVisuals.h"
 #include "Engine/Editor/Diagnostics/FrameActivity.h"
@@ -15,27 +16,27 @@
 #include "Core/View/Views/ConsoleView.h"
 #include "Engine/Editor/UI/EditorIcons.h"
 #include "Core/Animation/SkeletonBindPose.h"
-#include "Core/Compoonents/Animation/AnimationBone.h"
-#include "Core/Compoonents/Animation/AnimationManager.h"
-#include "Core/Compoonents/Animation/RigConstraints.h"
-#include "Core/Compoonents/Animation/TwoBoneIK.h"
-#include "Core/Compoonents/Animation/ChainIK.h"
+#include "Core/Components/Animation/AnimationBone.h"
+#include "Core/Components/Animation/AnimationManager.h"
+#include "Core/Components/Animation/RigConstraints.h"
+#include "Core/Components/Animation/TwoBoneIK.h"
+#include "Core/Components/Animation/ChainIK.h"
 #include "Core/Model/AnimationControlSpace.h"
-#include "Core/Compoonents/Animation/Model.h"
-#include "Core/Compoonents/Animation/Skeleton.h"
-#include "Core/Compoonents/Animation/SkinnedMesh.h"
-#include "Core/Compoonents/Camera/Camera.h"
-#include "Core/Compoonents/Mesh/Mesh.h"
-#include "Core/Compoonents/Transform.h"
+#include "Core/Components/Animation/Model.h"
+#include "Core/Components/Animation/Skeleton.h"
+#include "Core/Components/Animation/SkinnedMesh.h"
+#include "Core/Components/Camera/Camera.h"
+#include "Core/Components/Mesh/Mesh.h"
+#include "Core/Components/Transform.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include "Core/Serialization/Json.h"
-#include "Core/ComponentReference.h"
+#include "Core/Components/ComponentReference.h"
 #include "Core/Model/RigAsset.h"
 #include "Core/Model/PoseAsset.h"
 #include "Core/Model/AnimationClipAsset.h"
 #include "Core/Model/AnimationPackAsset.h"
 #include "Core/Model/AnimationRigMapping.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Prefab/PrefabAsset.h"
 #include "imgui.h"
 #include <cstdio>
@@ -617,7 +618,7 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
                 document.view->SetPoseEditing(true);
                 document.view->SetModelManipulation(true);
                 document.view->SetModelSelectionMode(1);
-                document.poseScene->SetEditorBonesVisible(true);
+                Engine::Editor::EditorViewState::For(*document.poseScene).bonesVisible = true;
             }
             ImGui::EndPopup();
         }
@@ -900,7 +901,7 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
             selectRow(row, ImGui::GetIO().KeyCtrl,
                 ImGui::GetIO().KeyShift);
             document.selectedBone = static_cast<int>(row.boneIndex);
-            document.poseScene->SetSelectedObject(row.joint);
+            Engine::Editor::EditorViewState::For(*document.poseScene).SelectObject(row.joint);
             if (m_primaryHierarchy) m_primaryHierarchy->SetSelectedObject(row.joint);
             if (m_primaryProperties) m_primaryProperties->SetSelectedObject(row.joint);
         }
@@ -987,7 +988,7 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
             {
                 if (!additive) selectRow(*hit->row, false, false);
                 document.selectedBone = static_cast<int>(hit->row->boneIndex);
-                document.poseScene->SetSelectedObject(hit->row->joint);
+                Engine::Editor::EditorViewState::For(*document.poseScene).SelectObject(hit->row->joint);
                 if (m_primaryHierarchy)
                     m_primaryHierarchy->SetSelectedObject(hit->row->joint);
                 if (m_primaryProperties)
@@ -1072,7 +1073,7 @@ void EditorState::DrawAnimationGraph(AnimationDocument& document,
             selectRow(*row, ImGui::GetIO().KeyCtrl,
                 ImGui::GetIO().KeyShift);
             document.selectedBone = static_cast<int>(row->boneIndex);
-            document.poseScene->SetSelectedObject(row->joint);
+            Engine::Editor::EditorViewState::For(*document.poseScene).SelectObject(row->joint);
             if (m_primaryHierarchy)
                 m_primaryHierarchy->SetSelectedObject(row->joint);
             if (m_primaryProperties)

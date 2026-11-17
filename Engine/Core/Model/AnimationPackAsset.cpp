@@ -1,10 +1,10 @@
 #include "AnimationPackAsset.h"
-#include "Core/Compoonents/Animation/AnimationManager.h"
-#include "Core/Compoonents/Animation/Model.h"
+#include "Core/Components/Animation/AnimationManager.h"
+#include "Core/Components/Animation/Model.h"
 #include "AnimationRigMapping.h"
-#include "Core/Compoonents/Mesh/Mesh.h"
-#include "Core/Object.h"
-#include "Core/ComponentReference.h"
+#include "Core/Components/Mesh/Mesh.h"
+#include "Core/Scene/Object.h"
+#include "Core/Components/ComponentReference.h"
 #include "Core/Serialization/Json.h"
 #include <algorithm>
 #include <chrono>

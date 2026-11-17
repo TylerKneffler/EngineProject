@@ -1,4 +1,5 @@
 #include "Engine/Editor/Diagnostics/EditorFrameProfiler.h"
+#include "Core/Runtime/Game.h"
 #include "Engine/Editor/Diagnostics/FrameActivity.h"
 #include "Engine/Editor/Diagnostics/PerformanceProvenance.h"
 
@@ -6,7 +7,7 @@
 #include "Core/Renderers/DX11/DX11EditorRenderer.h"
 #include "Core/Renderers/IEditorRenderer.h"
 #include "Core/Scene/Scene.h"
-#include "Core/Compoonents/Camera/Camera.h"
+#include "Core/Components/Camera/Camera.h"
 
 #include <cstdlib>
 #if defined(_WIN32)
@@ -96,8 +97,9 @@ namespace Engine::Editor
         double physicsDroppedMilliseconds = 0.0;
         double physicsPendingMilliseconds = 0.0;
         Engine::Physics::BulletPhysicsAdapter::StepTimings bulletTimings{};
-        const auto updateTimings = sample.playing
-            ? scene->GetLastUpdateTimings() : Scene::Scene::UpdateTimings{};
+        const auto updateTimings = sample.playing && scene->GetGame()
+            ? scene->GetGame()->GetLastUpdateTimings()
+            : Engine::Runtime::Game::UpdateTimings{};
         const auto& prepareTimings = scene->GetLastPrepareTimings();
         double uiRenderMilliseconds = 0.0;
         const double presentMilliseconds = renderer->GetLastPresentationMilliseconds();

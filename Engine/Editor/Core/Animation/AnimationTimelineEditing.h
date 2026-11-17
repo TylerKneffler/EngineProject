@@ -1,5 +1,5 @@
 #pragma once
-#include "Core/Compoonents/Animation/AnimationManager.h"
+#include "Core/Components/Animation/AnimationManager.h"
 #include <algorithm>
 
 namespace Engine::Editor::AnimationTimelineEditing

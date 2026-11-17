@@ -6,13 +6,13 @@
 #include "Core/Rendering/ShaderSourceCache.h"
 #include "Core/Rendering/TextureFootprintCache.h"
 #include "Core/Rendering/UploadRecordCache.h"
-#include "Core/Compoonents/TransformHierarchy.h"
+#include "Core/Components/TransformHierarchy.h"
 #include "Core/Scene/ComponentRegistry.h"
 #include "Core/Rendering/PersistentInstanceBatches.h"
 #include "Core/Rendering/InstanceTilePreparation.h"
-#include "Core/Compoonents/SpatialUpdate.h"
+#include "Core/Components/SpatialUpdate.h"
 #include <glm/gtc/quaternion.hpp>
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Graphics/IPipelineState.h"
 #include "Core/Graphics/IGraphicsBuffer.h"
 #include "Core/Rendering/Lighting/Pipelines/Realtime/RealtimeLightingPipeline.h"
@@ -28,9 +28,10 @@
 #include "Core/Rendering/RenderSpatialIndex.h"
 #include "Core/Rendering/AutomaticInstancing.h"
 #include "Core/Scene/Rendering/SceneRenderer/ScenePerformanceHeat.h"
-#include "Core/Compoonents/Terrain/TerrainPlacementHandle.h"
 #include "Core/Physics/Physics.h"
 #include "Core/Scene/Spatial/WarpVolume.h"
+#include "Core/Scene/SceneObserver.h"
+#include "Core/Rendering/SceneViewOverlays.h"
 #include <glm/glm.hpp>
 #include <array>
 #include <atomic>
@@ -95,6 +96,8 @@ namespace Engine::Graphics
 //   // inside SceneView drawFn:
 //   scene.Render(graphicsContext);
 // ---------------------------------------------------------------------------
+
+namespace Engine::Runtime { class Game; }
 
 namespace Engine::Scene
 {
@@ -243,28 +246,36 @@ public:
     explicit Scene(PhysicsAdapterFactory physicsAdapterFactory);
     ~Scene();
 
-    // Runtime lifecycle shared by the standalone game and Editor Play mode.
-    void Start();
+    // ---- Lifecycle ------------------------------------------------------------
+    // Engine::Runtime::Game drives the lifecycle (Start/Update/fixed step) and
+    // owns the simulation clock. A scene with no Game bound (editor edit mode,
+    // asset previews, importers) is never ticked; its time reads return zero.
+    Engine::Runtime::Game* GetGame() const { return m_game; }
+    // Called by Game on construction/destruction only.
+    void BindGame(Engine::Runtime::Game* game) { m_game = game; }
+    // True once Game::Start ran; objects added afterwards start on commit.
     bool HasStarted() const { return m_hasStarted; }
-    void Update(float deltaTime);
-    // Advance explicit edit-mode previews without running gameplay callbacks.
-    // Live scene phases use the same owner-thread dependency scheduler as Update().
-    bool AdvanceEditorPreviews(float deltaTime);
+    void MarkStarted() { m_hasStarted = true; }
+
+    // ---- Simulation-step support (used by Game::Update) ----------------------
+    // Marks the update pass: structural edits are deferred to the next commit.
+    void BeginUpdatePass();
+    void EndUpdatePass() { m_isUpdating = false; }
+    bool IsInUpdatePass() const { return m_isUpdating; }
+    // Objects that have components needing Update / pose evaluation, refreshed
+    // from the structure revision.
+    const std::vector<Object*>& GetUpdateObjects();
+    void PrepareTransformHierarchy();
+    void ClearPreparedNativeUiLayout() { m_preparedNativeUiLayout.clear(); }
+
     bool UpdateSpatialScripts(bool editor=false) { return m_spatialUpdates.Tick(*this,editor); }
     const auto& GetSpatialUpdateScheduler() const { return m_spatialUpdates; }
-    struct UpdateTimings
-    {
-        double objectsMs = 0.0;
-        double poseMs = 0.0;
-        double physicsMs = 0.0;
-        double postPhysicsMs = 0.0;
-        double constraintsMs = 0.0, audioMs = 0.0;
-    };
+    // Diagnostics flag shared by Game update timings and render timings.
     void SetUpdateProfilingEnabled(bool enabled) { m_updateProfilingEnabled = enabled; }
+    bool IsUpdateProfilingEnabled() const { return m_updateProfilingEnabled; }
     // Opt-in alpha-prepass experiment. Never serialized or enabled by policy.
     void SetDiagnosticOpaqueDepthEqual(bool enabled) { m_diagnosticOpaqueDepthEqual = enabled; }
     bool DiagnosticOpaqueDepthEqualReady() const { return m_diagnosticOpaqueDepthEqualReady; }
-    const UpdateTimings& GetLastUpdateTimings() const { return m_lastUpdateTimings; }
     void ResetGrassPerformance() { m_grassPerformance = {}; m_grassGpuResources.clear(); }
     bool AccountGrassGpuResource(const void* resource)
     { return resource && m_grassGpuResources.insert(resource).second; }
@@ -350,35 +361,32 @@ public:
     bool automaticInstancing = true;
     bool gpuInstanceCulling = true;
     // Re-evaluate animation-facing solvers after a manually sampled pose.
+    // Evaluates pose/constraint components on the pose index. Game::Update runs
+    // it each frame; editor pose tools call it directly in edit mode.
     void ApplyPoseConstraints();
-    // Advances exactly one configured fixed frame. Offline exporters use this
-    // instead of supplying or sampling wall-clock deltas.
-    void UpdateFixedFrame();
-    void SetFixedTimeStep(double seconds) { AssertOwnerThread(); m_clock.SetFixedStep(seconds); }
-    void UseVariableTimeStep() { AssertOwnerThread(); m_clock.UseVariableStep(); }
-    float GetDeltaTime() const { return m_deltaTime; }
+    // ---- Time (read-through to the bound Game's clock; zero without one) ------
+    float GetDeltaTime() const;
     // CPU particle storage is capped across all emitters. Existing particles
     // keep their slots in scene object order; new spawns are dropped at budget.
     // The default matches the current particle renderer's 100k draw limit.
     void SetParticleBudget(size_t capacity);
+    // Trims emitters to the budget in scene order (Game runs it each update).
+    void EnforceParticleBudget();
     size_t GetParticleBudget() const { return m_particleBudget; }
     size_t GetParticleLiveCount() const;
     size_t GetParticleCapacityFor(
         const Engine::Components::ParticleEmitter* emitter) const;
-    double GetElapsedTime() const { return m_clock.GetElapsedTime(); }
-    uint64_t GetFrameIndex() const { return m_clock.GetFrameIndex(); }
-    // Manual render loops can advance the shared streaming/upload frame
-    // budget without running the scene's component and physics updates.
-    void AdvanceManualFrame(float deltaTime)
-    { AssertOwnerThread(); m_deltaTime = m_clock.Advance(deltaTime); }
-    const Engine::Time::SimulationClock& GetClock() const { return m_clock; }
+    double GetElapsedTime() const { return GetClock().GetElapsedTime(); }
+    uint64_t GetFrameIndex() const { return GetClock().GetFrameIndex(); }
+    const Engine::Time::SimulationClock& GetClock() const;
     Engine::Physics::Physics& GetPhysics() { return *m_physics; }
     const Engine::Physics::Physics& GetPhysics() const { return *m_physics; }
-    Engine::Audio::Audio& GetAudio() { return *m_audio; }
-    const Engine::Audio::Audio& GetAudio() const { return *m_audio; }
 
     // --- Editor Settings ---
-    Object editorCamera; // not used by the game runtime, used for editor scene view navigation
+    // Fallback viewer: rendered from when no game camera is active, the audio
+    // listener fallback, and the editor's navigation camera. Moves out of Scene
+    // when the renderer takes its view camera as input (refactor plan 4.4).
+    Object editorCamera;
 
     // Build GPU resources (grid vertex buffer, PSO).
     // Must be called once before the first Render() call.
@@ -529,53 +537,28 @@ public:
     {
         return m_lastShadowCpuTiming;
     }
-    void SetSelectedObject(Object* obj)
+    // ---- View overlays (render input) ---------------------------------------
+    // A host (the editor) binds overlays it owns; the pointer must outlive the
+    // binding. Unbound scenes render with defaults.
+    void SetViewOverlays(const Engine::Rendering::SceneViewOverlays* overlays)
+    { m_viewOverlays = overlays; m_renderFramePrepared = false; }
+    const Engine::Rendering::SceneViewOverlays& GetViewOverlays() const
     {
-        m_selectedObject = obj;
-        m_selectedPlacementId = 0;
-        m_selectedPlacementLayer = nullptr;
-        // A terrain placement proxy selects (and outlines) its single
-        // instance, whichever UI path made the selection.
-        if (const auto* handle = obj
-                ? obj->GetComponent<Engine::Components::TerrainPlacementHandle>() : nullptr;
-            handle && handle->placementId != 0 && obj->Parent)
-        {
-            m_selectedPlacementId = handle->placementId;
-            m_selectedPlacementLayer = obj->Parent;
-        }
+        static const Engine::Rendering::SceneViewOverlays none;
+        return m_viewOverlays ? *m_viewOverlays : none;
     }
-    Object* GetSelectedObject() const { return m_selectedObject; }
-    void SetSelectedPlacementId(uint64_t id, Object* layer = nullptr)
-    {
-        m_selectedPlacementId = id;
-        m_selectedPlacementLayer = id != 0 ? layer : nullptr;
-    }
-    uint64_t GetSelectedPlacementId() const { return m_selectedPlacementId; }
-    void SetEditorSelectedMesh(Engine::Components::Mesh* mesh)
-    { m_editorSelectedMesh = mesh; }
-    Engine::Components::Mesh* GetEditorSelectedMesh() const
-    { return m_editorSelectedMesh; }
-    void SetEditorMeshEditPose(bool enabled)
-    {
-        if (m_editorMeshEditPose == enabled) return;
-        m_editorMeshEditPose = enabled;
-        m_renderFramePrepared = false;
-    }
-    bool IsEditorMeshEditPose() const { return m_editorMeshEditPose; }
-    // Viewport preference only; leave individual rig visibility and saved assets intact.
-    void SetEditorBonesVisible(bool visible) { m_editorBonesVisible = visible; }
-    bool AreEditorBonesVisible() const { return m_editorBonesVisible; }
-    void SetEditorWeightPaint(Engine::Components::Mesh* mesh, int bone)
-    {
-        if (m_editorWeightPaintMesh == mesh && m_editorWeightPaintBone == bone)
-            return;
-        m_editorWeightPaintMesh = mesh;
-        m_editorWeightPaintBone = bone;
-        m_renderFramePrepared = false;
-    }
-    void SetPreviewObject(Object* obj) { m_previewObject = obj; }
-    void SetEditorMode2D(bool enabled);
-    bool IsEditorMode2D() const { return m_editorMode2D; }
+    // Call after changing bound overlays that affect prepared frame data
+    // (mesh edit pose, weight paint).
+    void InvalidatePreparedFrame() { m_renderFramePrepared = false; }
+
+    // ---- Structure observers ---------------------------------------------------
+    void AddObserver(ISceneObserver* observer);
+    void RemoveObserver(ISceneObserver* observer);
+
+    // 2D scenes use an orthographic fallback camera and 2D render paths.
+    // Kept in sync with settings.dimension.
+    void SetMode2D(bool enabled);
+    bool IsMode2D() const { return m_mode2D; }
     void SetDistanceLightingSettings(
         const Engine::Model::DistanceLightingSettings& distanceSettings)
     {
@@ -652,12 +635,6 @@ public:
     glm::mat4 WarpWorldMatrix(const glm::mat4& worldMatrix,
         const Object* excludedOwner = nullptr) const;
 
-    // Move the editor camera to frame the given object, keeping a comfortable
-    // viewing distance and looking directly at its world-space origin.
-    // Pass nullptr to reset to the default startup position.
-    void FocusEditorCamera(Object* obj);
-    void UpdateEditorCameraFollow();
-    void StopEditorCameraFollow();
 
     // Object management
     // Legacy editor and script callbacks run on the scene owner. Their direct
@@ -889,6 +866,9 @@ private:
     std::unique_ptr<IPipelineState> m_portalSkyboxStencilReadPipeline;
     std::unique_ptr<IGraphicsBuffer> m_skyboxConstantBuffer;
     void* m_skyboxCBMapped = nullptr;
+    // Sun disc constants of the current view (see SceneRendererLighting::ResolveSkySun).
+    glm::vec4 m_skySunDirection{ 0.f };
+    glm::vec4 m_skySunRadiance{ 0.f };
     std::shared_ptr<Engine::Components::Texture> m_defaultSkyboxTexture;
     std::shared_ptr<Engine::Components::Texture> m_sceneSkyboxTexture;
     std::string m_loadedSkyboxPath;
@@ -1126,7 +1106,6 @@ private:
     std::unique_ptr<Engine::Renderers::UIRenderer> m_uiRenderer;
     std::vector<Engine::Model::UITextLayout> m_preparedNativeUiLayout;
     std::unique_ptr<Engine::Physics::Physics> m_physics;
-    std::unique_ptr<Engine::Audio::Audio> m_audio;
 
     Engine::Rendering::RealtimeLightingPipeline m_realtimeLightingPipeline;
     Engine::Rendering::BakedLightingPipeline m_bakedLightingPipeline;
@@ -1451,7 +1430,6 @@ private:
     bool m_updateProfilingEnabled = false;
     bool m_diagnosticOpaqueDepthEqual = false;
     bool m_diagnosticOpaqueDepthEqualReady = true;
-    UpdateTimings m_lastUpdateTimings{};
     Engine::Rendering::GrassPerformance m_grassPerformance{};
     std::unordered_set<const void*> m_grassGpuResources;
     PrepareTimings m_lastPrepareTimings{};
@@ -1463,8 +1441,7 @@ private:
     size_t m_graphicsPreparationCursor = 0;
     uint64_t m_lifecycleRevision = 0;
     size_t m_particleBudget = 100000;
-    float m_deltaTime = 0.f;
-    Engine::Time::SimulationClock m_clock;
+    Engine::Runtime::Game* m_game = nullptr;
     uint64_t m_structureRevision = 1;
     mutable Engine::Scene::ComponentRegistry m_componentRegistry;
     uint64_t m_physicsActivityRevision=0;
@@ -1479,22 +1456,11 @@ private:
     Object* AddObjectWithId(ObjectId id);
     void FlushPendingObjectAdditions();
     void FlushPendingObjectRemovals();
-    void EnforceParticleBudget();
-    Object* m_selectedObject = nullptr;
-    uint64_t m_selectedPlacementId = 0;
-    Object* m_selectedPlacementLayer = nullptr;
-    Engine::Components::Mesh* m_editorSelectedMesh = nullptr;
-    bool m_editorMeshEditPose = false;
-    bool m_editorBonesVisible = true;
-    Engine::Components::Mesh* m_editorWeightPaintMesh = nullptr;
+    const Engine::Rendering::SceneViewOverlays* m_viewOverlays = nullptr;
+    std::vector<ISceneObserver*> m_observers;
+    bool m_mode2D = false;
+    bool m_fallbackCameraConfigured = false;
     Renderer::PerformanceHeatMap m_performanceHeat;
-    int m_editorWeightPaintBone = -1;
-    Object* m_previewObject = nullptr;
-    bool m_editorMode2D = false;
-    bool m_editorCameraModeInitialized = false;
-    Object* m_editorCameraFollowTarget = nullptr;
-    glm::vec3 m_editorCameraFollowPosition { 0.f };
-    glm::quat m_editorCameraFollowRotation { 1.f, 0.f, 0.f, 0.f };
 
     // Long-range terrain alone can contribute 289 patch meshes. Truncating
     // ordinary views at 64 draws left square background holes even though the

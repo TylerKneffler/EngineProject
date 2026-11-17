@@ -1,7 +1,7 @@
 #include "Engine/Editor/Core/View/Views/PropertiesView.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 #include "Engine/Editor/UI/EditorComponentIcons.h"
-#include "Core/Compoonents/Physics/RigidBody.h"
+#include "Core/Components/Physics/RigidBody.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Serialization/SceneSerializer.h"
 
@@ -49,7 +49,7 @@ void PropertiesView::DrawTransform(IEditorUi& ui)
         const glm::dvec3 previousPosition = t.position;
         const glm::vec3 previousRotation = t.rotation;
         const glm::vec3 previousScale = t.scale;
-        if (m_scene && m_scene->IsEditorMode2D())
+        if (m_scene && m_scene->IsMode2D())
         {
             // In a 2D scene X/Y are spatial axes while Z is only the painter's
             // ordering value.  Present that model directly instead of exposing

@@ -10,8 +10,10 @@ float4 PSMain(
     float4 uvChannels0 : TEXCOORD3, float4 uvChannels1 : TEXCOORD4,
     float4 uvChannels2 : TEXCOORD5, float4 uvChannels3 : TEXCOORD6,
     float4 uvChannels4 : TEXCOORD7, nointerpolation uint objectIndex : TEXCOORD11,
-    bool frontFace : SV_IsFrontFace) : SV_TARGET
+    bool frontFace : SV_IsFrontFace,
+    uint primitiveId : SV_PrimitiveID) : SV_TARGET
 {
+    g_primitiveId = primitiveId; // editor Triangles view
     // Calling the surface function preserves alpha masking and portal clips.
     float4 surface = EngineSurfacePS(pos, worldPos, normal, uv, uv1,
         vertexColor, tangent, uvChannels0, uvChannels1, uvChannels2,

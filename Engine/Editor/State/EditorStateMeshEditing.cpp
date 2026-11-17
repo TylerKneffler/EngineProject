@@ -1,6 +1,6 @@
 #include "pch.h"
+#include "Engine/Editor/State/EditorViewState.h"
 #include "Engine/Editor/State/EditorState.h"
-#include "Core/SceneManager.h"
 #include "Core/Rendering/RenderJobs.h"
 #include "Core/View/ViewFactory.h"
 #include "Core/View/IEditorPanel.h"
@@ -13,12 +13,12 @@
 #include "Core/Scene/Scene.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include "Core/Serialization/Json.h"
-#include "Core/Compoonents/Mesh/Mesh.h"
-#include "Core/Compoonents/Camera/Camera.h"
-#include "Core/Compoonents/Materials/Material.h"
-#include "Core/Compoonents/Materials/Texture.h"
-#include "Core/Compoonents/Animation/Skeleton.h"
-#include "Core/Compoonents/Transform.h"
+#include "Core/Components/Mesh/Mesh.h"
+#include "Core/Components/Camera/Camera.h"
+#include "Core/Components/Materials/Material.h"
+#include "Core/Components/Materials/Texture.h"
+#include "Core/Components/Animation/Skeleton.h"
+#include "Core/Components/Transform.h"
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Core/Mesh/MeshEditGeometry.h"
 #include "Core/Mesh/MeshEditSnapshot.h"
@@ -97,9 +97,9 @@ void EditorState::SyncMeshEditSelection(Engine::Scene::Scene* scene,
     MeshEditSession& session)
 {
     if (!scene || !session.enabled) return;
-    scene->SetEditorMeshEditPose(true);
+    Engine::Editor::EditorViewState::For(*scene).SetMeshEditPose(true);
     Engine::Components::Mesh* mesh = ResolveMeshForSelection(
-        scene->GetSelectedObject());
+        Engine::Editor::EditorViewState::For(*scene).selectedObject);
     if (session.activeMesh != mesh)
     {
         FinishVertexPaintStroke(session);
@@ -164,7 +164,7 @@ void EditorState::SyncMeshEditSelection(Engine::Scene::Scene* scene,
             }
         if (m_renderer) m_renderer->MarkDirty();
     }
-    scene->SetEditorSelectedMesh(mesh);
+    Engine::Editor::EditorViewState::For(*scene).selectedMesh = mesh;
 }
 
 void EditorState::SetMeshEditMode(Engine::Scene::Scene* scene,
@@ -178,8 +178,8 @@ void EditorState::SetMeshEditMode(Engine::Scene::Scene* scene,
     session.enabled = enabled;
     if (scene)
     {
-        scene->SetEditorSelectedMesh(nullptr);
-        scene->SetEditorMeshEditPose(enabled);
+        Engine::Editor::EditorViewState::For(*scene).selectedMesh = nullptr;
+        Engine::Editor::EditorViewState::For(*scene).SetMeshEditPose(enabled);
     }
     for (const auto& panel : m_panels)
         if (auto* view = dynamic_cast<SceneView*>(panel.get());
@@ -1400,14 +1400,14 @@ void EditorState::InvalidateMeshEditPointers()
 {
     m_mainMeshEdit.activeMesh = nullptr;
     m_prefabMeshEdit.activeMesh = nullptr;
-    if (m_scene) m_scene->SetEditorSelectedMesh(nullptr);
-    if (m_prefabScene) m_prefabScene->SetEditorSelectedMesh(nullptr);
+    if (m_scene) Engine::Editor::EditorViewState::For(*m_scene).selectedMesh = nullptr;
+    if (m_prefabScene) Engine::Editor::EditorViewState::For(*m_prefabScene).selectedMesh = nullptr;
     for (const auto& document : m_sceneAssetDocuments)
         if (document)
         {
             document->meshEdit.activeMesh = nullptr;
             if (document->scene)
-                document->scene->SetEditorSelectedMesh(nullptr);
+                Engine::Editor::EditorViewState::For(*document->scene).selectedMesh = nullptr;
         }
 }
 

@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "Engine/Editor/State/EditorViewState.h"
 #include "Engine/Editor/State/EditorState.h"
 #include "Core/Animation/AnimationDocumentAccess.h"
 #include "Core/Animation/AnimationTimelineVisuals.h"
@@ -17,27 +18,27 @@
 #include "Core/View/Views/ConsoleView.h"
 #include "Engine/Editor/UI/EditorIcons.h"
 #include "Core/Animation/SkeletonBindPose.h"
-#include "Core/Compoonents/Animation/AnimationBone.h"
-#include "Core/Compoonents/Animation/AnimationManager.h"
-#include "Core/Compoonents/Animation/RigConstraints.h"
-#include "Core/Compoonents/Animation/TwoBoneIK.h"
-#include "Core/Compoonents/Animation/ChainIK.h"
+#include "Core/Components/Animation/AnimationBone.h"
+#include "Core/Components/Animation/AnimationManager.h"
+#include "Core/Components/Animation/RigConstraints.h"
+#include "Core/Components/Animation/TwoBoneIK.h"
+#include "Core/Components/Animation/ChainIK.h"
 #include "Core/Model/AnimationControlSpace.h"
-#include "Core/Compoonents/Animation/Model.h"
-#include "Core/Compoonents/Animation/Skeleton.h"
-#include "Core/Compoonents/Animation/SkinnedMesh.h"
-#include "Core/Compoonents/Camera/Camera.h"
-#include "Core/Compoonents/Mesh/Mesh.h"
-#include "Core/Compoonents/Transform.h"
+#include "Core/Components/Animation/Model.h"
+#include "Core/Components/Animation/Skeleton.h"
+#include "Core/Components/Animation/SkinnedMesh.h"
+#include "Core/Components/Camera/Camera.h"
+#include "Core/Components/Mesh/Mesh.h"
+#include "Core/Components/Transform.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include "Core/Serialization/Json.h"
-#include "Core/ComponentReference.h"
+#include "Core/Components/ComponentReference.h"
 #include "Core/Model/RigAsset.h"
 #include "Core/Model/PoseAsset.h"
 #include "Core/Model/AnimationClipAsset.h"
 #include "Core/Model/AnimationPackAsset.h"
 #include "Core/Model/AnimationRigMapping.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Prefab/PrefabAsset.h"
 #include "imgui.h"
 #include <cstdio>
@@ -448,7 +449,7 @@ void EditorState::SetActiveAnimationDocument(AnimationDocument* document)
         m_primaryHierarchy->SetFilteredObjectContextActions(false, nullptr);
         m_primaryHierarchy->SetSkeletonContextActions(false, nullptr);
         m_primaryHierarchy->SetSelectedObject(
-            document->poseScene->GetSelectedObject());
+            Engine::Editor::EditorViewState::For(*document->poseScene).selectedObject);
     }
     if (m_primaryProperties)
     {
@@ -457,7 +458,7 @@ void EditorState::SetActiveAnimationDocument(AnimationDocument* document)
         m_primaryProperties->SetAllowComponentStructureEdits(false);
         m_primaryProperties->SetSelectedAsset("");
         m_primaryProperties->SetSelectedObject(
-            document->poseScene->GetSelectedObject());
+            Engine::Editor::EditorViewState::For(*document->poseScene).selectedObject);
         m_primaryProperties->OnDrawContext = [this, document](IEditorUi& ui)
         {
             DrawAnimationProperties(ui, *document);

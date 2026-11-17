@@ -1,10 +1,11 @@
 #include "PerformanceView.h"
+#include "Core/Runtime/Game.h"
 #include "PerformanceRecording.h"
 #include "Core/Rendering/TextureResidency.h"
-#include "Core/Compoonents/Materials/Texture.h"
+#include "Core/Components/Materials/Texture.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 #include "Core/Scene/Scene.h"
-#include "Core/Compoonents/Terrain/TerrainManager.h"
+#include "Core/Components/Terrain/TerrainManager.h"
 #include "Core/Renderers/IEditorRenderer.h"
 #include "Core/Renderers/DX11/DX11EditorRenderer.h"
 #include "Core/Physics/Adapters/BulletPhysicsAdapter.h"
@@ -501,7 +502,9 @@ void PerformanceView::SetFrameTimings(const EditorFrameProfileSample& sample,
     m_updateTimings.clear();
     if (m_scene && sample.playing)
     {
-        const auto& update = m_scene->GetLastUpdateTimings();
+        const auto update = m_scene->GetGame()
+            ? m_scene->GetGame()->GetLastUpdateTimings()
+            : Engine::Runtime::Game::UpdateTimings{};
         m_updateTimings = {
             { "Objects", update.objectsMs }, { "Pose / constraints", update.constraintsMs }, { "Audio", update.audioMs },
             { "Physics", update.physicsMs },

@@ -57,6 +57,7 @@ struct ObjectData
     float4 alphaLodParams; // maximum alpha mip bias, disable mask at far distance
     float4 grassCapsules[8];
     float4 atmosphereFog[4];
+    float4 terrainSunShadow; // map corner x/z, 1 / extent x/z (texture slot 4)
 };
 
 struct InstanceTransform { float4 row0; float4 row1; float4 row2; };

@@ -64,6 +64,7 @@ struct ObjectData
     float4 atmosphereFog1;
     float4 atmosphereFog2;
     float4 atmosphereFog3;
+    float4 terrainSunShadow; // map corner x/z, 1 / extent x/z (texture slot 4)
 };
 
 struct SceneLightData
@@ -507,7 +508,8 @@ void VSMain(
         oColor.a = 1.0; // the wind response above, not coverage
     }
 #endif
-    if (((uint)objectData.materialParams.w & 16384u) != 0u)
+    if (((uint)objectData.materialParams.w & 16384u) != 0u &&
+        objectData.terrainSunShadow.z <= 0.0)
     {
         float sunFacing = saturate(dot(oNormal,
             objectData.bakedLightDirection.xyz));
@@ -897,7 +899,16 @@ void ApplyAlphaLod(inout ObjectData data, float3 worldPosition)
 // at one texel per 8 pixels (blurred by streaming, distance mips or a
 // texture too small for the view).
 static float g_detailTexture = 1.0;
-bool IsDetailHeatDraw(ObjectData data) { return data.morphParams.z < -50.0; }
+// Editor Triangles view (morphParams.z = -20000): every triangle gets its
+// own colour, so triangle size and count read directly as geometric detail.
+// The entry points record SV_PrimitiveID and the resolved object record.
+static uint g_primitiveId = 0u;
+static uint g_triangleObject = 0u;
+bool IsTriangleDraw(ObjectData data) { return data.morphParams.z < -15000.0; }
+bool IsDetailHeatDraw(ObjectData data)
+{
+    return data.morphParams.z < -50.0 && !IsTriangleDraw(data);
+}
 
 float4 SampleObjectBaseColor(ObjectData data, float2 sourceUv, float textureBias,
     float alphaMultiplier, float alphaBias)
@@ -1189,6 +1200,20 @@ float SampleDirectionalShadowCascade(ObjectData objectData,
     }
     float diameter = 2.0 * radius + 1.0;
     return litSamples / (diameter * diameter);
+}
+
+// Terrain-scale sun visibility from the far height grid (see
+// TerrainManager::GetSunShadowMap), bound in the emissive slot, which terrain
+// does not use. Outside the map, and when disabled, the sun is unoccluded.
+float TerrainLongRangeShadow(ObjectData objectData, float3 worldPosition)
+{
+    [branch] if (objectData.terrainSunShadow.z <= 0.0)
+        return 1.0;
+    const float2 uv = (worldPosition.xz - objectData.terrainSunShadow.xy) *
+        objectData.terrainSunShadow.zw;
+    if (any(uv < 0.0) || any(uv > 1.0))
+        return 1.0;
+    return emissiveMap.SampleLevel(materialSampler, uv, 0.0).r;
 }
 
 float EvaluateDirectionalShadow(ObjectData objectData, SceneLightData light,
@@ -1774,7 +1799,8 @@ float4 PSShadowMain(
 {
     g_instanceLodDistance = instanceLodDistance;
     g_billboardFade = uvChannels4.w;
-    ObjectData objectData = objects[(draw.drawFlags & 0x13080000u) != 0u ? objectIndex : draw.objectIndex];
+    g_triangleObject = (draw.drawFlags & 0x13080000u) != 0u ? objectIndex : draw.objectIndex;
+    ObjectData objectData = objects[g_triangleObject];
     // Derivatives before any clip() below.
     const float3 facet = SurfaceFacet(worldPos);
     const float2 baseUv = SelectMaterialUv(objectData.textureUvSets0.x,
@@ -1817,9 +1843,43 @@ bool IsPerformanceHeatDraw(ObjectData data)
     return data.morphParams.z < -0.5;
 }
 
+uint TriangleHash(uint value)
+{
+    value ^= value >> 16; value *= 0x7feb352du;
+    value ^= value >> 15; value *= 0x846ca68bu;
+    return value ^ (value >> 16);
+}
+
+float3 HueToRgb(float hue)
+{
+    return saturate(abs(frac(hue + float3(0.0, 2.0 / 3.0, 1.0 / 3.0)) * 6.0 - 3.0) - 1.0);
+}
+
+// Neighbouring triangles have nearby primitive IDs (strips, grid rows). The
+// R2 low-discrepancy sequence (plastic-number steps) spreads consecutive IDs
+// as far apart as possible in hue x lightness for every offset, unlike a
+// random hash, which repeats close colours by chance. Each object record
+// starts the sequence at its own hashed offset.
+float3 TriangleColor(ObjectData data, float3 worldPos, float3 normal, bool frontFace)
+{
+    const float sequence = float(g_primitiveId % 1048576u) +
+        float(TriangleHash(g_triangleObject) % 65536u);
+    const float2 r2 = frac(sequence * float2(0.7548776662, 0.5698402910) + 0.5);
+    const float3 hue = HueToRgb(r2.x);
+    const float level = 0.45 + 0.55 * r2.y;
+    float3 color = lerp(level.xxx, hue * level, 0.85);
+    // Light view-angle shading keeps silhouettes readable without blending
+    // neighbouring colours together.
+    float3 n = normalize(frontFace ? normal : -normal);
+    float3 v = normalize(data.viewPositionAlphaCutoff.xyz - worldPos);
+    return color * (0.7 + 0.3 * saturate(abs(dot(n, v))));
+}
+
 float4 PerformanceHeatColor(ObjectData data, float3 worldPos, float3 normal,
     bool frontFace, float alpha)
 {
+    if (IsTriangleDraw(data))
+        return float4(TriangleColor(data, worldPos, normal, frontFace), alpha);
     // Cold-to-hot ramp: blue, cyan, green, yellow, red at quarter steps.
     // Keep in sync with the legend swatch in EditToolsViewTemplate.cpp.
     float heat = saturate(-data.morphParams.z - 1.0);
@@ -1876,8 +1936,10 @@ float4 PSFoliageMain(
     nointerpolation uint objectIndex : TEXCOORD11,
     bool frontFace : SV_IsFrontFace) : SV_TARGET
 {
-    ObjectData objectData = objects[(draw.drawFlags & 0x13080000u) != 0u
-        ? objectIndex : draw.objectIndex];
+    // Called as a function by Foliage.hlsl, which records g_primitiveId.
+    g_triangleObject = (draw.drawFlags & 0x13080000u) != 0u
+        ? objectIndex : draw.objectIndex;
+    ObjectData objectData = objects[g_triangleObject];
     // Derivatives before any clip() below.
     const float3 facet = SurfaceFacet(worldPos);
     const float2 uvDx = ddx(uv), uvDy = ddy(uv);
@@ -1963,8 +2025,9 @@ float4 PSGrassMain(
     float4 pos, float3 worldPos, float3 normal, float2 uv, float4 vertexColor,
     float4 tangent, uint objectIndex, bool frontFace)
 {
-    ObjectData objectData = objects[(draw.drawFlags & 0x13080000u) != 0u
-        ? objectIndex : draw.objectIndex];
+    g_triangleObject = (draw.drawFlags & 0x13080000u) != 0u
+        ? objectIndex : draw.objectIndex;
+    ObjectData objectData = objects[g_triangleObject];
     // Derivatives before any clip() below.
     const float3 facet = SurfaceFacet(worldPos);
     const float2 uvDx = ddx(uv), uvDy = ddy(uv);
@@ -2084,7 +2147,8 @@ float4 ObjectSurfacePS(
     nointerpolation uint objectIndex : TEXCOORD11,
     bool frontFace : SV_IsFrontFace) : SV_TARGET
 {
-    ObjectData objectData = objects[(draw.drawFlags & 0x13080000u) != 0u ? objectIndex : draw.objectIndex];
+    g_triangleObject = (draw.drawFlags & 0x13080000u) != 0u ? objectIndex : draw.objectIndex;
+    ObjectData objectData = objects[g_triangleObject];
     // Derivatives before any clip() below (the coverage hash ignores parallax
     // offsets: it needs a stable surface anchor, not the exact texel).
     const float3 facet = SurfaceFacet(worldPos);
@@ -2139,12 +2203,21 @@ float4 ObjectSurfacePS(
         gridColor = lerp(gridColor, float3(1.0, 0.66, 0.15), border);
         return float4(gridColor, 1.0);
     }
-    // Distant tiles already received directional light in the vertex shader.
-    // Their unlit material has no texture or per-pixel lighting work apart
-    // from one far-cascade shadow tap, which removes the sun's share (vertex
-    // alpha) where hills and forests shade them.
+    // Distant tiles are lit in the vertex shader unless a long-range shadow
+    // map is bound: then the sun term is applied here, shadowed per pixel.
+    // Without the map, one far-cascade shadow tap removes the sun's share
+    // (vertex alpha) where hills and forests shade them. Their unlit material
+    // has no other texture or per-pixel lighting work.
     if (flags & 16384u)
     {
+        [branch] if (objectData.terrainSunShadow.z > 0.0)
+        {
+            const float sunFacing = saturate(dot(normalize(normal),
+                objectData.bakedLightDirection.xyz));
+            base.rgb *= objectData.ambientUnlit.rgb + objectData.bakedDirectional.rgb *
+                (sunFacing * TerrainLongRangeShadow(objectData, worldPos) * 0.31830988618);
+            return float4(base.rgb + objectData.emissiveOcclusion.rgb, base.a);
+        }
         float shadow = 1.0;
         [branch] if (objectData.bakedDirectional.w > 0.5 &&
             objectData.shadowParams.z > 0.5 && vertexColor.a > 0.0)
@@ -2462,7 +2535,8 @@ float4 ObjectSurfacePS(
                 shadow = EvaluateDirectionalShadow(objectData, sun,
                     worldPos, terrainNormal, sunDirection, 0);
             }
-            shadow *= terrainReliefShadow;
+            shadow *= terrainReliefShadow *
+                TerrainLongRangeShadow(objectData, worldPos);
             diffuseLight += objectData.bakedDirectional.rgb *
                 (sunFacing * shadow / PI);
             // Near ring: one GGX sun lobe on the blended normal and roughness
@@ -2893,8 +2967,10 @@ float4 PSMain(
     float4 uvChannels4 : TEXCOORD7,
     nointerpolation uint objectIndex : TEXCOORD11,
     float instanceLodDistance : TEXCOORD12,
-    bool frontFace : SV_IsFrontFace) : SV_TARGET
+    bool frontFace : SV_IsFrontFace,
+    uint primitiveId : SV_PrimitiveID) : SV_TARGET
 {
+    g_primitiveId = primitiveId;
     g_instanceLodDistance = instanceLodDistance;
     g_billboardFade = uvChannels4.w;
     return ApplyObjectAtmosphereFog(ObjectSurfacePS(pos, worldPos, normal, uv,
@@ -2917,8 +2993,10 @@ float4 PSDepthEqualMain(
     float4 uvChannels4 : TEXCOORD7,
     nointerpolation uint objectIndex : TEXCOORD11,
     float instanceLodDistance : TEXCOORD12,
-    bool frontFace : SV_IsFrontFace) : SV_TARGET
+    bool frontFace : SV_IsFrontFace,
+    uint primitiveId : SV_PrimitiveID) : SV_TARGET
 {
+    g_primitiveId = primitiveId;
     g_instanceLodDistance = instanceLodDistance;
     g_billboardFade = uvChannels4.w;
     return ApplyObjectAtmosphereFog(ObjectSurfacePS(pos, worldPos, normal, uv,
@@ -2940,8 +3018,10 @@ float4 PSParallaxDepthMain(
     nointerpolation uint objectIndex : TEXCOORD11,
     float instanceLodDistance : TEXCOORD12,
     bool frontFace : SV_IsFrontFace,
+    uint primitiveId : SV_PrimitiveID,
     out float depth : SV_DepthGreaterEqual) : SV_TARGET
 {
+    g_primitiveId = primitiveId;
     g_instanceLodDistance = instanceLodDistance;
     g_billboardFade = uvChannels4.w;
     float4 color = ObjectSurfacePS(pos, worldPos, normal, uv, uv1, vertexColor,

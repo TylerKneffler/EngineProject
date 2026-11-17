@@ -1,6 +1,6 @@
 #include "MeshEditSnapshot.h"
 #include "SnapshotHistory.h"
-#include "Core/Compoonents/Mesh/Mesh.h"
+#include "Core/Components/Mesh/Mesh.h"
 #include <cstdint>
 #include <cstring>
 #include <vector>

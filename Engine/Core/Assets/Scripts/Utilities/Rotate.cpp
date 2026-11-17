@@ -1,7 +1,7 @@
 #include "Scripts/Utilities/Rotate.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Serialization/SceneSerializer.h"
-#include "Engine/Editor/UI/IEditorUi.h"
+#include "Core/Inspection/IInspectorUi.h"
 #include <glm/gtc/matrix_transform.hpp>
 
 Rotate::Rotate()
@@ -36,7 +36,7 @@ void Rotate::Update()
     Owner->transform.rotation += axis * glm::radians(speed) * kFixedDt;
 }
 
-bool Rotate::DrawProperties(::Engine::Editor::IEditorUi& ui)
+bool Rotate::DrawProperties(Engine::Core::IInspectorUi& ui)
 {
     // Custom interactive editor for Rotate script properties
     const bool axisChanged =

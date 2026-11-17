@@ -1,4 +1,5 @@
 #include "Core/Rendering/DetailBudget.h"
+#include "Core/Runtime/Game.h"
 #include "Core/Rendering/AutoQuality.h"
 #include "Core/Rendering/HardwareSimulation.h"
 #include "Core/Rendering/MaterialCachePolicy.h"
@@ -12,15 +13,15 @@
 #include "Core/Startup/StartupSplash.h"
 #include "Core/Graphics/IGraphicsContext.h"
 #include "Core/Graphics/GraphicsCommandPacket.h"
+#include "Core/Graphics/PostProcess.h"
 #include "Core/Rendering/RenderJobs.h"
 #include "Core/Renderers/RendererFactory.h"
 #include "Core/Renderers/IGameRenderer.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
-#include "Core/Compoonents/Camera/Camera.h"
+#include "Core/Components/Camera/Camera.h"
 #include "Core/Physics/Physics.h"
-#include "Core/SceneManager.h"
-#include "Core/Timing/FramePacer.h"
+#include "Core/Time/FramePacer.h"
 #include "Core/Input/NativeInputSnapshot.h"
 #include "Core/Rendering/RenderFramePlan.h"
 #include <atomic>
@@ -127,6 +128,9 @@ public:
         std::shared_ptr<const ::Engine::Graphics::GraphicsCommandPacket> computeCommands;
         std::shared_ptr<const ::Engine::Graphics::GraphicsCommandPacket> shadowCommands;
         std::shared_ptr<const ::Engine::Graphics::GraphicsCommandPacket> sceneCommands;
+        // Captured while recording sceneCommands; the render worker composes
+        // on another thread, where the thread-local settings are not set.
+        ::Engine::Graphics::PostProcessSettings postProcess;
         GameBenchmarkSceneSample benchmarkScene;
         double benchmarkCollectionMs = 0, intervalMs = 0, residencyWaitMs = 0;
         uint64_t benchmarkFrame = UINT64_MAX;
@@ -212,6 +216,7 @@ public:
         result.retired = std::move(m_retired);
         result.shadowCommands = std::move(m_shadowCommands);
         result.sceneCommands = std::move(m_sceneCommands);
+        result.postProcess = m_postProcess;
         result.benchmarkScene = std::move(m_benchmarkScene);
         result.benchmarkCollectionMs = m_benchmarkCollectionMs;
         return result;
@@ -248,8 +253,9 @@ private:
                 if (work == Work::Update)
                 {
                     const auto updateStart = std::chrono::steady_clock::now();
-                    m_scene.Update(m_deltaTime);
-                    if (::Engine::Core::SceneManager::ProcessPendingSceneLoad() &&
+                    if (auto* game = m_scene.GetGame())
+                        game->Update(m_deltaTime);
+                    if (m_scene.GetGame() && m_scene.GetGame()->ProcessPendingSceneLoad() &&
                         m_input.clientWidth && m_input.clientHeight)
                         m_scene.PrepareNativeUiLayout(
                             static_cast<float>(m_input.clientWidth) /
@@ -290,6 +296,7 @@ private:
                                 gameCamera, false, m_input.clientWidth,
                                 m_input.clientHeight, false,
                                 drawPacket.get(), -1, g_benchmarkRenderMode);
+                            m_postProcess = ::Engine::Graphics::GetPostProcessSettings();
                             m_timings.cameraRecordingMs = std::chrono::duration<double,
                                 std::milli>(std::chrono::steady_clock::now() - shadowRecorded).count();
                         }
@@ -355,6 +362,7 @@ private:
     std::shared_ptr<const ::Engine::Graphics::GraphicsCommandPacket> m_computeCommands;
     std::shared_ptr<const ::Engine::Graphics::GraphicsCommandPacket> m_shadowCommands;
     std::shared_ptr<const ::Engine::Graphics::GraphicsCommandPacket> m_sceneCommands;
+    ::Engine::Graphics::PostProcessSettings m_postProcess;
     std::exception_ptr m_failure;
     float m_deltaTime = 0.f;
     std::chrono::steady_clock::time_point m_frameStartedAt;
@@ -427,6 +435,7 @@ public:
         packet.computeCommands = std::move(tick.computeCommands);
         packet.shadowCommands = std::move(tick.shadowCommands);
         packet.sceneCommands = std::move(tick.sceneCommands);
+        packet.postProcess = tick.postProcess;
         packet.simulationTimings = tick.timings;
         packet.benchmarkScene = std::move(tick.benchmarkScene);
         packet.benchmarkCollectionMs = tick.benchmarkCollectionMs;
@@ -482,6 +491,7 @@ private:
         std::shared_ptr<const ::Engine::Graphics::GraphicsCommandPacket> computeCommands;
         std::shared_ptr<const ::Engine::Graphics::GraphicsCommandPacket> shadowCommands;
         std::shared_ptr<const ::Engine::Graphics::GraphicsCommandPacket> sceneCommands;
+        ::Engine::Graphics::PostProcessSettings postProcess;
         SimulationLoop::TickResult::Timings simulationTimings;
         GameBenchmarkSceneSample benchmarkScene;
         double benchmarkCollectionMs = 0, intervalMs = 0, residencyWaitMs = 0;
@@ -635,6 +645,7 @@ private:
                 if (m_gameBenchmark && packet.benchmarkFrame ==
                     uint64_t(m_benchmarkOptions->warmup) + m_benchmarkOptions->frames)
                     m_renderer.RequestSceneCapture();
+                ::Engine::Graphics::SetPostProcessSettings(packet.postProcess);
                 m_renderer.EndFrame();
                 endFrameMs = std::chrono::duration<double, std::milli>(
                     std::chrono::steady_clock::now() - started).count();
@@ -925,10 +936,8 @@ int GameApplication::Run(HINSTANCE instance, const GameBenchmarkOptions* benchma
         settings.materialCache);
     if (benchmark) scene.SetUpdateProfilingEnabled(true);
     if (benchmark) g_benchmarkRenderMode = benchmark->renderMode;
-    Engine::Core::SceneManager::SetActiveScene(&scene);
     const std::string defaultScene = benchmark ? benchmark->scene.string() : settings.defaultScene.empty()
         ? GetFallbackScenePath() : settings.defaultScene;
-    Engine::Core::SceneManager::SetDefaultScenePath(defaultScene);
     std::string loadedScenePath = defaultScene;
     if (!scene.Load(loadedScenePath))
     {
@@ -971,7 +980,9 @@ int GameApplication::Run(HINSTANCE instance, const GameBenchmarkOptions* benchma
     // or on (with the scene's or default parameters) for A/B captures.
     if (const char* fog = std::getenv("ENGINE_ATMOSPHERE_FOG"))
         scene.settings.atmosphereFog.enabled = std::atoi(fog) != 0;
-    scene.Start();
+    Engine::Runtime::Game game(scene);
+    game.SetDefaultScenePath(defaultScene);
+    game.Start();
     std::unique_ptr<GameBenchmark> gameBenchmark;
     if (benchmark)
         gameBenchmark = std::make_unique<GameBenchmark>(*benchmark, *renderer,
@@ -1102,12 +1113,11 @@ int GameApplication::Run(HINSTANCE instance, const GameBenchmarkOptions* benchma
     benchmarkStarted = benchmark != nullptr;
     const int result = window->Run();
     simulation.Stop();
-    Engine::Core::SceneManager::CancelPendingSceneLoad();
+    if (auto* game = scene.GetGame()) game->CancelPendingSceneLoad();
     scene.FenceBackgroundWork();
     renderLoop.Stop();
     const bool benchmarkValid = !gameBenchmark || gameBenchmark->Finish();
     scene.SetBeforeGpuResourceDestruction({});
-    Engine::Core::SceneManager::SetActiveScene(nullptr);
     return benchmarkValid ? result : 2;
 }
 }

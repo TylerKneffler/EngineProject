@@ -1,16 +1,17 @@
 #include "pch.h"
+#include "Engine/Editor/State/EditorViewState.h"
 #include "Engine/Editor/State/EditorState.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 #include "Engine/Editor/Core/View/Views/SceneView.h"
 #include "Engine/Editor/Core/View/Views/HierarchyView.h"
 #include "Engine/Editor/Core/View/Views/PropertiesView.h"
 #include "Core/Scene/Scene.h"
-#include "Core/Object.h"
-#include "Core/Compoonents/Animation/Skeleton.h"
-#include "Core/Compoonents/Animation/BoneGroup.h"
-#include "Core/Compoonents/Animation/Model.h"
-#include "Core/Compoonents/Animation/SkinnedMesh.h"
-#include "Core/Compoonents/Mesh/Mesh.h"
+#include "Core/Scene/Object.h"
+#include "Core/Components/Animation/Skeleton.h"
+#include "Core/Components/Animation/BoneGroup.h"
+#include "Core/Components/Animation/Model.h"
+#include "Core/Components/Animation/SkinnedMesh.h"
+#include "Core/Components/Mesh/Mesh.h"
 #include "Engine/Editor/Core/View/Templates/EditModes/Skeleton/SkinBindingWeights.h"
 #include "Engine/Editor/Core/Paint/BrushPreset.h"
 #include "Engine/Editor/Core/Paint/BrushPreview.h"
@@ -73,7 +74,7 @@ void EditorState::DrawSkeletonEditTools(IEditorUi& ui)
     if (!toolbarPopup && ui.Combo("Skeleton tool", &session->submode, modes, 3))
     {
         FinishSkeletonPaintStroke(*session);
-        scene->SetEditorWeightPaint(nullptr, -1);
+        Engine::Editor::EditorViewState::For(*scene).SetWeightPaint(nullptr, -1);
         for (const auto& panel : m_panels)
             if (auto* view = dynamic_cast<SceneView*>(panel.get());
                 view && view->GetScene() == scene)
@@ -89,7 +90,7 @@ void EditorState::DrawSkeletonEditTools(IEditorUi& ui)
         QueueAnimationObjectOpen(skeleton->Owner);
     const auto& bones = skeleton->ResolveJoints();
     const auto* selectedGroup = Engine::Components::BoneGroup::ForSelection(
-        scene->GetSelectedObject());
+        Engine::Editor::EditorViewState::For(*scene).selectedObject);
     std::vector<std::string> labels;
     std::vector<const char*> names;
     std::vector<int> boneChoices;
@@ -115,7 +116,7 @@ void EditorState::DrawSkeletonEditTools(IEditorUi& ui)
         auto* object = bones[session->boneIndex];
         if (object)
         {
-            scene->SetSelectedObject(object);
+            Engine::Editor::EditorViewState::For(*scene).SelectObject(object);
             if (m_primaryHierarchy) m_primaryHierarchy->SetSelectedObject(object);
             if (m_primaryProperties) m_primaryProperties->SetSelectedObject(object);
         }
@@ -205,11 +206,11 @@ void EditorState::DrawSkeletonEditTools(IEditorUi& ui)
         if (!toolbarPopup && ui.Button("Apply bind pose"))
             ApplySkeletonBoneAction(scene, *session, 2);
         if (!toolbarPopup && session->boneTool == 0 &&
-            ValidBone(skeleton, scene->GetSelectedObject()) &&
-            (!selectedGroup || selectedGroup->Contains(scene->GetSelectedObject())))
+            ValidBone(skeleton, Engine::Editor::EditorViewState::For(*scene).selectedObject) &&
+            (!selectedGroup || selectedGroup->Contains(Engine::Editor::EditorViewState::For(*scene).selectedObject)))
         {
             ui.Separator();
-            auto* joint = scene->GetSelectedObject();
+            auto* joint = Engine::Editor::EditorViewState::For(*scene).selectedObject;
             auto& transform = joint->transform;
             const glm::dvec3 oldPosition = transform.position;
             const glm::vec3 oldRotation = transform.rotation;
@@ -275,8 +276,8 @@ void EditorState::DrawSkeletonEditTools(IEditorUi& ui)
                 FinishSkeletonPaintStroke(*session);
                 session->mesh = meshes[selectedMesh];
                 mesh = session->mesh;
-                scene->SetEditorWeightPaint(mesh, session->boneIndex);
-                scene->SetEditorSelectedMesh(nullptr);
+                Engine::Editor::EditorViewState::For(*scene).SetWeightPaint(mesh, session->boneIndex);
+                Engine::Editor::EditorViewState::For(*scene).selectedMesh = nullptr;
             }
         }
         ui.ValueLabel("Mesh", mesh->Owner ? mesh->Owner->name.c_str() : "Mesh");

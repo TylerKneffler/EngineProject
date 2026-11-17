@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Core/Script.h"
+#include "Core/Components/Script.h"
 #include <glm/glm.hpp>
 
 class SnakePlayer final : public Engine::Core::Script

@@ -4,27 +4,27 @@
 #include "Core/Scene/Scene.h"
 #include "Core/Scene/Settings/SceneSettingsSerialization.h"
 #include "Core/Graphics/IGraphicsProvider.h"
-#include "Core/Object.h"
-#include "Core/component.h"
-#include "Core/Script.h"
-#include "Core/Compoonents/Mesh/Mesh.h"
-#include "Core/Compoonents/Materials/Material.h"
-#include "Core/Compoonents/Camera/Camera.h"
-#include "Core/Compoonents/Lighting/Light.h"
-#include "Core/Compoonents/Sprite/Sprite.h"
-#include "Core/Compoonents/Audio/AudioSource.h"
-#include "Core/Compoonents/Physics/PrimitiveObjectCollider.h"
-#include "Core/Compoonents/Physics/MeshObjectCollider.h"
-#include "Core/Compoonents/Physics/Cloth.h"
-#include "Core/Compoonents/Physics/RigidBody.h"
-#include "Core/Compoonents/UI/Canvas.h"
-#include "Core/Compoonents/UI/UIObject.h"
-#include "Core/Compoonents/UI/UIText.h"
-#include "Core/Compoonents/Sprite/SpriteAnimationManager.h"
-#include "Core/Compoonents/Animation/Model.h"
-#include "Core/Compoonents/Animation/AnimationManager.h"
-#include "Core/Compoonents/Animation/Skeleton.h"
-#include "Core/Compoonents/Animation/SkinnedMesh.h"
+#include "Core/Scene/Object.h"
+#include "Core/Components/Component.h"
+#include "Core/Components/Script.h"
+#include "Core/Components/Mesh/Mesh.h"
+#include "Core/Components/Materials/Material.h"
+#include "Core/Components/Camera/Camera.h"
+#include "Core/Components/Lighting/Light.h"
+#include "Core/Components/Sprite/Sprite.h"
+#include "Core/Components/Audio/AudioSource.h"
+#include "Core/Components/Physics/PrimitiveObjectCollider.h"
+#include "Core/Components/Physics/MeshObjectCollider.h"
+#include "Core/Components/Physics/Cloth.h"
+#include "Core/Components/Physics/RigidBody.h"
+#include "Core/Components/UI/Canvas.h"
+#include "Core/Components/UI/UIObject.h"
+#include "Core/Components/UI/UIText.h"
+#include "Core/Components/Sprite/SpriteAnimationManager.h"
+#include "Core/Components/Animation/Model.h"
+#include "Core/Components/Animation/AnimationManager.h"
+#include "Core/Components/Animation/Skeleton.h"
+#include "Core/Components/Animation/SkinnedMesh.h"
 #include "Core/Rendering/Lighting/BakedLightingData.h"
 #include <pugixml.hpp>
 #include <fstream>
@@ -128,7 +128,7 @@ bool Detail::SceneDocumentBehavior::DeserializeScene(Engine::Scene::Scene& scene
     // the previous document's mode.
     scene.settings.dimension = Engine::Model::SceneDimension::ThreeD;
     Engine::Scene::DeserializeSceneSettings(scene.settings, root["settings"]);
-    scene.SetEditorMode2D(scene.settings.dimension ==
+    scene.SetMode2D(scene.settings.dimension ==
         Engine::Model::SceneDimension::TwoD);
 
     // Top-level objects
@@ -161,7 +161,7 @@ bool SceneSerializer::BeginIncrementalLoadFromValue(Scene& scene,
         scene.settings.dimension = Engine::Model::SceneDimension::ThreeD;
         Engine::Scene::DeserializeSceneSettings(scene.settings,
             snapshot["settings"]);
-        scene.SetEditorMode2D(scene.settings.dimension ==
+        scene.SetMode2D(scene.settings.dimension ==
             Engine::Model::SceneDimension::TwoD);
         return true;
     }

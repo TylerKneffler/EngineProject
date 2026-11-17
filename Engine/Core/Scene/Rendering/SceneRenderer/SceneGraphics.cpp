@@ -5,23 +5,23 @@
 #include "Core/Scene/Scene.h"
 #include "Core/Graphics/GraphicsCommandPacket.h"
 #include <chrono>
-#include "Core/Compoonents/Camera/Camera.h"
-#include "Core/Compoonents/Mesh/Mesh.h"
-#include "Core/Compoonents/Materials/Material.h"
-#include "Core/Compoonents/Terrain/Terrain.h"
-#include "Core/Compoonents/Terrain/TerrainObjectLayer.h"
-#include "Core/Compoonents/Path/SplineGeometry.h"
-#include "Core/Compoonents/Terrain/TerrainManager.h"
-#include "Core/Compoonents/Terrain/TerrainBatchAppearance.h"
-#include "Core/Compoonents/Physics/SpatialManipulator.h"
-#include "Core/Compoonents/Sprite/Sprite.h"
-#include "Core/Compoonents/Animation/SkinnedMesh.h"
-#include "Core/Compoonents/Animation/Skeleton.h"
-#include "Core/Compoonents/Materials/Texture.h"
+#include "Core/Components/Camera/Camera.h"
+#include "Core/Components/Mesh/Mesh.h"
+#include "Core/Components/Materials/Material.h"
+#include "Core/Components/Terrain/Terrain.h"
+#include "Core/Components/Terrain/TerrainObjectLayer.h"
+#include "Core/Components/Path/SplineGeometry.h"
+#include "Core/Components/Terrain/TerrainManager.h"
+#include "Core/Components/Terrain/TerrainBatchAppearance.h"
+#include "Core/Components/Physics/SpatialManipulator.h"
+#include "Core/Components/Sprite/Sprite.h"
+#include "Core/Components/Animation/SkinnedMesh.h"
+#include "Core/Components/Animation/Skeleton.h"
+#include "Core/Components/Materials/Texture.h"
 #include "Core/Rendering/TextureFootprint.h"
 #include "Core/Rendering/Lighting/BakedLightingData.h"
 #include "Core/Rendering/Lighting/EnvironmentMap.h"
-#include "Core/Compoonents/Lighting/LightProbe.h"
+#include "Core/Components/Lighting/LightProbe.h"
 #include "Core/Rendering/Portal/PortalRenderPolicy.h"
 #include "Core/Model/LightingData.h"
 #include "Core/Graphics/IGraphicsProvider.h"
@@ -90,7 +90,7 @@ void Scene::Init(Engine::Graphics::IGraphicsProvider* graphicsProvider)
     Engine::Components::Camera* editorCameraComponent = editorCamera.AddComponent<Engine::Components::Camera>();
     editorCameraComponent->useTransformRotation = false;
     editorCameraComponent->farPlane = 1000.f;
-    SetEditorMode2D(
+    SetMode2D(
         settings.dimension == Engine::Model::SceneDimension::TwoD);
 
     // Build pipeline states
@@ -117,18 +117,18 @@ void Scene::EnsureSkinPaletteCapacity(uint32_t requiredMatrices)
     Engine::Scene::Renderer::SceneRendererResources::EnsureSkinPaletteCapacity(*this, requiredMatrices);
 }
 
-void Scene::SetEditorMode2D(bool enabled)
+void Scene::SetMode2D(bool enabled)
 {
     settings.dimension = enabled
         ? Engine::Model::SceneDimension::TwoD
         : Engine::Model::SceneDimension::ThreeD;
-    if (m_editorCameraModeInitialized && m_editorMode2D == enabled)
+    if (m_fallbackCameraConfigured && m_mode2D == enabled)
         return;
-    m_editorMode2D = enabled;
+    m_mode2D = enabled;
     Engine::Components::Camera* camera = editorCamera.GetComponent<Engine::Components::Camera>();
     if (!camera)
         return;
-    m_editorCameraModeInitialized = true;
+    m_fallbackCameraConfigured = true;
     camera->useTransformRotation = false;
     camera->orthographic = enabled;
     camera->target = { 0.f, 0.f, 0.f };

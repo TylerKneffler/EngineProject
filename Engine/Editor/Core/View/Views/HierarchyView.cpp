@@ -1,18 +1,20 @@
+#include "Engine/Editor/State/EditorViewState.h"
+#include "Core/Inspection/ComponentInspector.h"
 #include "HierarchyView.h"
 #include "Engine/Editor/Core/PrimitiveObjectFactory.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 #include "Core/Scene/Scene.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Component.h"
-#include "Core/Compoonents/Materials/Material.h"
-#include "Core/Compoonents/Mesh/Mesh.h"
-#include "Core/Compoonents/Sprite/Sprite.h"
-#include "Core/Compoonents/Particles/ParticleEmitter.h"
-#include "Core/Compoonents/Sprite/SpriteAnimationManager.h"
-#include "Core/Compoonents/Lighting/LightProbe.h"
-#include "Core/Compoonents/Animation/Skeleton.h"
-#include "Core/Compoonents/Camera/Camera.h"
-#include "Core/Compoonents/Lighting/Light.h"
+#include "Core/Components/Materials/Material.h"
+#include "Core/Components/Mesh/Mesh.h"
+#include "Core/Components/Sprite/Sprite.h"
+#include "Core/Components/Particles/ParticleEmitter.h"
+#include "Core/Components/Sprite/SpriteAnimationManager.h"
+#include "Core/Components/Lighting/LightProbe.h"
+#include "Core/Components/Animation/Skeleton.h"
+#include "Core/Components/Camera/Camera.h"
+#include "Core/Components/Lighting/Light.h"
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include "../Focus/WindowFocusHandler.h"
@@ -617,7 +619,7 @@ void HierarchyView::SetSelectedObject(Engine::Core::Object* obj)
 {
     if (m_selectedObject == obj && m_selectedObjects.size() == (obj ? 1u : 0u))
     {
-        if (Engine::Core::Component::HasEditorReferencePick())
+        if (Engine::Core::ComponentInspector::HasReferencePick())
             NotifySelectionChanged();
         return;
     }
@@ -691,19 +693,19 @@ void HierarchyView::DrawObjectNode(
         !hasChildren, readOnlySkeletonRow,
         obj->IsEnabledInHierarchy(),
         depth, lastSibling, ancestorGuideMask, m_search[0] != '\0',
-        &obj->editorOverlays,
+        Engine::Editor::EditorViewState::MutableOverlays(obj),
         static_cast<uint8_t>(
             (obj->GetComponent<Engine::Components::Skeleton>()
-                ? Engine::Core::Object::BoneOverlay |
-                  Engine::Core::Object::SkeletonOverlay : 0) |
+                ? Engine::Editor::EditorViewState::BoneOverlay |
+                  Engine::Editor::EditorViewState::SkeletonOverlay : 0) |
             (obj->GetComponent<Engine::Components::Mesh>() ||
              obj->GetComponent<Engine::Components::Sprite>() ||
              obj->GetComponent<Engine::Components::LightProbeGroup>()
-                ? Engine::Core::Object::BoundsOverlay : 0) |
+                ? Engine::Editor::EditorViewState::BoundsOverlay : 0) |
             (obj->GetComponent<Engine::Components::Light>()
-                ? Engine::Core::Object::LightVolumeOverlay : 0) |
+                ? Engine::Editor::EditorViewState::LightVolumeOverlay : 0) |
             (obj->GetComponent<Engine::Components::Camera>()
-                ? Engine::Core::Object::CameraFrustumOverlay : 0)));
+                ? Engine::Editor::EditorViewState::CameraFrustumOverlay : 0)));
     const bool editableHierarchy = prefabRoot == nullptr;
     const bool deletable = editableHierarchy || prefabRoot == obj;
     EditorUiContextMenuResult menu;

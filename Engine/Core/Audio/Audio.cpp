@@ -1,8 +1,8 @@
 #include "Core/Audio/Audio.h"
 #include "Core/Audio/AudioMixer.h"
 
-#include "Core/Compoonents/Audio/AudioSource.h"
-#include "Core/Object.h"
+#include "Core/Components/Audio/AudioSource.h"
+#include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
 
 

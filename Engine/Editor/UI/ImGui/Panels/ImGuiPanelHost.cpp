@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "Core/Inspection/ComponentInspector.h"
 #include "Engine/Editor/UI/ImGui/Panels/ImGuiPanelHost.h"
 #include "Engine/Editor/State/EditorState.h"
 #include "Engine/Editor/GameBuildManager.h"
@@ -950,7 +951,7 @@ void ImGuiPanelHost::DrawPanels(EditorState& state)
             }
         }
 
-    if (Engine::Core::Component::HasEditorReferencePick())
+    if (Engine::Core::ComponentInspector::HasReferencePick())
     {
         const bool confirmed = ImGui::IsKeyPressed(ImGuiKey_Enter, false) ||
             ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false);
@@ -972,7 +973,7 @@ void ImGuiPanelHost::DrawPanels(EditorState& state)
             }
         }
         if (confirmed || !allowedFocus)
-            Engine::Core::Component::CancelEditorReferencePick();
+            Engine::Core::ComponentInspector::CancelReferencePick();
     }
 
     // Asset callbacks may request panels to be added. Apply those requests only

@@ -1,7 +1,7 @@
 #include "pch.h"
+#include "Engine/Editor/State/EditorViewState.h"
 #include "Engine/Editor/State/EditorState.h"
 #include "Engine/Editor/Diagnostics/FrameActivity.h"
-#include "Core/SceneManager.h"
 #include "Core/Rendering/RenderJobs.h"
 #include "Core/View/ViewFactory.h"
 #include "Core/View/IEditorPanel.h"
@@ -17,17 +17,17 @@
 #include "Core/Serialization/SceneSerializer.h"
 #include "Core/Serialization/Json.h"
 #include "Core/Serialization/PreparedPrefab.h"
-#include "Core/Compoonents/Mesh/Mesh.h"
-#include "Core/Compoonents/Camera/Camera.h"
-#include "Core/Compoonents/Materials/Material.h"
-#include "Core/Compoonents/Animation/Skeleton.h"
-#include "Core/Compoonents/Animation/AnimationBone.h"
-#include "Core/Compoonents/Animation/SkinnedMesh.h"
-#include "Core/Compoonents/Animation/AnimationManager.h"
-#include "Core/Compoonents/Animation/Model.h"
-#include "Core/Compoonents/Transform.h"
-#include "Core/Compoonents/Sprite/Sprite.h"
-#include "Core/Compoonents/Sprite/SpriteAnimationManager.h"
+#include "Core/Components/Mesh/Mesh.h"
+#include "Core/Components/Camera/Camera.h"
+#include "Core/Components/Materials/Material.h"
+#include "Core/Components/Animation/Skeleton.h"
+#include "Core/Components/Animation/AnimationBone.h"
+#include "Core/Components/Animation/SkinnedMesh.h"
+#include "Core/Components/Animation/AnimationManager.h"
+#include "Core/Components/Animation/Model.h"
+#include "Core/Components/Transform.h"
+#include "Core/Components/Sprite/Sprite.h"
+#include "Core/Components/Sprite/SpriteAnimationManager.h"
 #include "Core/AssetRecord.h"
 #include "Core/Importers/ModelImporter.h"
 #include "Core/Importers/VmdSceneImporter.h"
@@ -112,7 +112,7 @@ void EditorState::StartObjectImport(const std::string& path, bool intoScene,
     ClearImportReference();
     if (m_pendingImportScene)
     {
-        auto* selected = m_pendingImportScene->GetSelectedObject();
+        auto* selected = Engine::Editor::EditorViewState::For(*m_pendingImportScene).selectedObject;
         auto* root = selected ? selected->GetPrefabInstanceRoot() : nullptr;
         if (selected && (!PendingImportSupportsReference() ||
             (intoScene && root && root->GetComponent<Engine::Components::Model>())))

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Core/component.h"
+#include "Core/Components/Component.h"
 #include <glm/glm.hpp>
 
 namespace Engine::Rendering
@@ -27,6 +27,6 @@ public:
     bool valid = false;
     int version = 3;
 
-    bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
+    bool DrawProperties(Engine::Core::IInspectorUi& ui) override;
 };
 }

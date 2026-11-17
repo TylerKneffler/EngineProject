@@ -1,6 +1,7 @@
+#include "Engine/Editor/State/EditorViewState.h"
 #include "SceneCameraController.h"
 
-#include "Core/Compoonents/Camera/Camera.h"
+#include "Core/Components/Camera/Camera.h"
 #include "Core/Scene/Scene.h"
 #include <algorithm>
 #include <cassert>
@@ -45,10 +46,10 @@ void SceneCameraController::Apply(Engine::Scene::Scene& scene,
         scene.editorCamera.GetComponent<Engine::Components::Camera>();
     assert(cam && "Scene editorCamera must have a Camera component");
     if (panDX != 0.f || panDY != 0.f || dolly != 0.f)
-        scene.StopEditorCameraFollow();
+        Engine::Editor::EditorViewState::For(scene).StopCameraFollow();
     glm::dvec3& pos = scene.editorCamera.transform.position;
 
-    if (scene.IsEditorMode2D())
+    if (scene.IsMode2D())
     {
         const float dragX = panDX + orbitDX;
         const float dragY = panDY + orbitDY;

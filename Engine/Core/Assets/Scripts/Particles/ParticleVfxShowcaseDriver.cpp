@@ -1,6 +1,6 @@
 #include "Scripts/Particles/ParticleVfxShowcaseDriver.h"
-#include "Core/Compoonents/Particles/ParticleEmitter.h"
-#include "Core/Object.h"
+#include "Core/Components/Particles/ParticleEmitter.h"
+#include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include <algorithm>

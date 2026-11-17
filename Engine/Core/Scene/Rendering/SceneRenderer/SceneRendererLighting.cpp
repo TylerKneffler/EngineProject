@@ -2,7 +2,7 @@
 #include "Core/Scene/Rendering/SceneRenderer/SceneRendererUtilities.h"
 
 #include "Core/Graphics/IGraphicsContext.h"
-#include "Core/Compoonents/Materials/Texture.h"
+#include "Core/Components/Materials/Texture.h"
 #include "Core/Model/LightingData.h"
 #include "Core/Scene/Scene.h"
 
@@ -323,6 +323,42 @@ std::array<glm::vec4, 4> SceneRendererLighting::PackAtmosphereFog(
     return packed;
 }
 
+void SceneRendererLighting::ResolveSkySun(const Scene& scene,
+    const glm::vec3& sunDirection, const glm::vec3& sunRadiance,
+    glm::vec4& direction, glm::vec4& radiance)
+{
+    const auto& settings = scene.settings;
+    direction = glm::vec4(0.f);
+    radiance = glm::vec4(0.f);
+    if (!settings.sunDiscEnabled || scene.m_mode2D ||
+        glm::dot(sunDirection, sunDirection) < 1e-8f ||
+        glm::dot(sunRadiance, sunRadiance) <= 0.f)
+        return;
+    const float radius = glm::radians(std::clamp(
+        settings.sunDiscAngularDiameter, 0.05f, 20.f) * 0.5f);
+    direction = glm::vec4(glm::normalize(sunDirection), std::cos(radius));
+    radiance = glm::vec4(sunRadiance, std::max(settings.sunDiscIntensity, 0.f));
+}
+
+void SceneRendererLighting::SetSkyboxRays(SkyboxConstants& constants,
+    const glm::mat4& proj, const glm::mat4& directionOnlyView)
+{
+    // Near-to-far plane vector through an NDC point. Both planes map to
+    // planes for perspective and orthographic projections, so the vector is
+    // affine in NDC and three samples reproduce it exactly.
+    const glm::mat4 invVP = glm::inverse(proj * directionOnlyView);
+    const auto ray = [&](float x, float y)
+    {
+        const glm::vec4 nearPoint = invVP * glm::vec4(x, y, 0.f, 1.f);
+        const glm::vec4 farPoint = invVP * glm::vec4(x, y, 1.f, 1.f);
+        return glm::vec3(farPoint) / farPoint.w - glm::vec3(nearPoint) / nearPoint.w;
+    };
+    const glm::vec3 origin = ray(0.f, 0.f);
+    constants.rayX = glm::vec4(ray(1.f, 0.f) - origin, constants.rayX.w);
+    constants.rayY = glm::vec4(ray(0.f, 1.f) - origin, constants.rayY.w);
+    constants.rayOrigin = glm::vec4(origin, constants.rayOrigin.w);
+}
+
 void SceneRendererLighting::PrepareSkyboxAndEnvironment(
     Scene& scene,
     Engine::Graphics::IGraphicsContext* context,
@@ -332,8 +368,13 @@ void SceneRendererLighting::PrepareSkyboxAndEnvironment(
     uint32_t viewportHeight,
     bool shadowOnly,
     const glm::vec3& cameraPosition,
-    const std::array<glm::vec4, 4>& atmosphereFog)
+    const std::array<glm::vec4, 4>& atmosphereFog,
+    const glm::vec3& sunDirection,
+    const glm::vec3& sunRadiance)
 {
+    if (!shadowOnly)
+        ResolveSkySun(scene, sunDirection, sunRadiance,
+            scene.m_skySunDirection, scene.m_skySunRadiance);
     const Engine::Components::Texture* skybox = shadowOnly
         ? nullptr
         : scene.ResolveSkyboxTexture();
@@ -347,41 +388,34 @@ void SceneRendererLighting::PrepareSkyboxAndEnvironment(
             skybox->GetGraphicsTexture(),
             4.f * float(std::max(viewportWidth, viewportHeight)));
 
-        // 128 bytes: the Vulkan push-constant limit this layout must fit.
-        struct SkyboxCBData
-        {
-            glm::mat4 invVP;
-            glm::vec4 displayParams; // 2D, exposure, rotation, sun dir z
-            // density at camera, falloff, sky distance, anisotropy;
-            // inscatter rgb, sun dir x; sun glow rgb, sun dir y
-            glm::vec4 fog[3];
-        };
-        static_assert(sizeof(SkyboxCBData) == 128);
-        SkyboxCBData skyboxData{};
+        SkyboxConstants skyboxData{};
+        skyboxData.sunDirection = scene.m_skySunDirection;
+        skyboxData.sunRadiance = scene.m_skySunRadiance;
+        // A skybox represents direction only. Excluding camera translation
+        // prevents cancellation in the far - near ray math when the editor
+        // camera is far from the world origin.
+        SetSkyboxRays(skyboxData, proj, glm::mat4(glm::mat3(view)));
         if (atmosphereFog[0].w > 0.5f &&
             scene.settings.atmosphereFog.skyDistance > 0.f &&
-            !scene.m_editorMode2D)
+            !scene.m_mode2D)
         {
-            const float densityAtCamera = atmosphereFog[0].x * std::exp(
+            skyboxData.rayX.w = atmosphereFog[0].x * std::exp(
                 std::clamp(-atmosphereFog[0].y *
                     (cameraPosition.y - atmosphereFog[0].z), -60.f, 60.f));
-            skyboxData.fog[0] = { densityAtCamera, atmosphereFog[0].y,
-                scene.settings.atmosphereFog.skyDistance, atmosphereFog[2].w };
-            skyboxData.fog[1] = { glm::vec3(atmosphereFog[1]),
-                atmosphereFog[2].x };
-            skyboxData.fog[2] = { glm::vec3(atmosphereFog[3]),
-                atmosphereFog[2].y };
+            skyboxData.rayY.w = atmosphereFog[0].y;
+            skyboxData.rayOrigin.w = scene.settings.atmosphereFog.skyDistance;
+            skyboxData.fogInscatter = { glm::vec3(atmosphereFog[1]), atmosphereFog[2].w };
+            skyboxData.fogSunGlow = { glm::vec3(atmosphereFog[3]), 0.f };
+            // The fog glow needs the sun even when its disc is not drawn
+            // (zero radiance keeps the disc and its halo off).
+            if (glm::dot(glm::vec3(skyboxData.sunDirection), glm::vec3(skyboxData.sunDirection)) < 1e-8f)
+                skyboxData.sunDirection = { glm::vec3(atmosphereFog[2]), skyboxData.sunDirection.w };
         }
-        // A skybox represents direction only. Excluding camera translation
-        // prevents cancellation in the shader's farPoint - nearPoint math
-        // when the editor camera is far from the world origin.
-        const glm::mat4 skyboxView = glm::mat4(glm::mat3(view));
-        skyboxData.invVP = glm::inverse(proj * skyboxView);
         skyboxData.displayParams = {
-            scene.m_editorMode2D ? 1.f : 0.f,
+            scene.m_mode2D ? 1.f : 0.f,
             std::exp2(scene.settings.hdriExposure),
             glm::radians(scene.settings.hdriRotation),
-            atmosphereFog[2].z};
+            std::max(scene.settings.sunGlowIntensity, 0.f)};
 
         std::memcpy(scene.m_skyboxCBMapped, &skyboxData, sizeof(skyboxData));
         context->SetPipeline(scene.m_skyboxPipeline.get());

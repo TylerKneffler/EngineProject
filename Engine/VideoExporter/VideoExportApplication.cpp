@@ -1,16 +1,16 @@
 #include "VideoExporter/VideoExportApplication.h"
+#include "Core/Runtime/Game.h"
 
-#include "Core/Compoonents/Camera/Camera.h"
-#include "Core/Compoonents/Audio/AudioSource.h"
-#include "Core/Compoonents/Cinematics/CameraTrack.h"
+#include "Core/Components/Camera/Camera.h"
+#include "Core/Components/Audio/AudioSource.h"
+#include "Core/Components/Cinematics/CameraTrack.h"
 #include "Core/Audio/AudioMixer.h"
 #include "Core/Audio/Audio.h"
 #include "Core/Model/ProjectSettings.h"
 #include "Core/Rendering/MaterialCachePolicy.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/ProjectLoader.h"
 #include "Core/Scene/Scene.h"
-#include "Core/SceneManager.h"
 #include "Core/Window.h"
 #include "Core/Graphics/IGraphicsContext.h"
 #include "Core/Graphics/PostProcess.h"
@@ -1047,8 +1047,6 @@ int VideoExportApplication::Run(HINSTANCE instance)
     scene.SetDistanceLightingSettings(lightingSettings);
     Engine::Rendering::MaterialCachePolicy::Get().SetProjectSettings(
         settings.materialCache);
-    Engine::Core::SceneManager::SetActiveScene(&scene);
-    Engine::Core::SceneManager::SetDefaultScenePath(scenePath);
     if (!scene.Load(scenePath))
     {
         std::cerr << "Could not load scene: " << scenePath << '\n';
@@ -1063,11 +1061,13 @@ int VideoExportApplication::Run(HINSTANCE instance)
     const double fixedDelta = static_cast<double>(options.frameRate.denominator) /
         (static_cast<double>(options.frameRate.numerator) *
             simulationTicksPerOutputFrame);
-    scene.SetFixedTimeStep(fixedDelta);
+    Engine::Runtime::Game game(scene);
+    game.SetDefaultScenePath(scenePath);
+    game.SetFixedTimeStep(fixedDelta);
     scene.GetPhysics().ConfigureFixedStep(
         1.0 / static_cast<double>(options.physicsFps),
         options.maximumPhysicsSubsteps, options.physicsSolverIterations);
-    scene.Start();
+    game.Start();
 
     const uint64_t maximumFrames = options.frameRate.FramesForDuration(
         options.timeoutSeconds);
@@ -1250,7 +1250,7 @@ int VideoExportApplication::Run(HINSTANCE instance)
                 const uint64_t framesToRender = targetAudioFrames - writtenAudioFrames;
                 std::vector<float> samples(static_cast<size_t>(framesToRender) *
                     audioChannels);
-                scene.GetAudio().SynchronizeToTime(sceneTime);
+                game.GetAudio().SynchronizeToTime(sceneTime);
                 if (!Engine::Audio::AudioMixer::Get().ReadOfflineFrames(
                     samples.data(), framesToRender))
                     return false;
@@ -1500,7 +1500,6 @@ int VideoExportApplication::Run(HINSTANCE instance)
                 success = false;
         }
     }
-    Engine::Core::SceneManager::SetActiveScene(nullptr);
     if (!success)
         return 9;
     std::cout << (imageSequence ? "Image sequence complete: " : "Video export complete: ")

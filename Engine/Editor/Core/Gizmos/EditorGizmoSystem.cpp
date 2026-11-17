@@ -1,24 +1,25 @@
+#include "Engine/Editor/State/EditorViewState.h"
 #include "EditorGizmoSystem.h"
 #include "EditorGizmoGeometry.h"
 #include "Editor/Core/View/EditorViewportSettings.h"
 #include "Core/Scene/Scene.h"
-#include "Core/Object.h"
-#include "Core/Compoonents/Camera/Camera.h"
-#include "Core/Compoonents/Lighting/Light.h"
-#include "Core/Compoonents/Lighting/LightProbe.h"
-#include "Core/Compoonents/Mesh/Mesh.h"
-#include "Core/Compoonents/Sprite/Sprite.h"
-#include "Core/Compoonents/Particles/ParticleEmitter.h"
-#include "Core/Compoonents/Physics/RigidBody.h"
-#include "Core/Compoonents/Physics/Collider.h"
-#include "Core/Compoonents/Physics/PrimitiveObjectCollider.h"
-#include "Core/Compoonents/Physics/MeshObjectCollider.h"
-#include "Core/Compoonents/Animation/Skeleton.h"
-#include "Core/Compoonents/Animation/BoneGroup.h"
-#include "Core/Compoonents/Animation/AnimationBone.h"
-#include "Core/Compoonents/Animation/Model.h"
-#include "Core/Compoonents/Animation/TwoBoneIK.h"
-#include "Core/Compoonents/Animation/ChainIK.h"
+#include "Core/Scene/Object.h"
+#include "Core/Components/Camera/Camera.h"
+#include "Core/Components/Lighting/Light.h"
+#include "Core/Components/Lighting/LightProbe.h"
+#include "Core/Components/Mesh/Mesh.h"
+#include "Core/Components/Sprite/Sprite.h"
+#include "Core/Components/Particles/ParticleEmitter.h"
+#include "Core/Components/Physics/RigidBody.h"
+#include "Core/Components/Physics/Collider.h"
+#include "Core/Components/Physics/PrimitiveObjectCollider.h"
+#include "Core/Components/Physics/MeshObjectCollider.h"
+#include "Core/Components/Animation/Skeleton.h"
+#include "Core/Components/Animation/BoneGroup.h"
+#include "Core/Components/Animation/AnimationBone.h"
+#include "Core/Components/Animation/Model.h"
+#include "Core/Components/Animation/TwoBoneIK.h"
+#include "Core/Components/Animation/ChainIK.h"
 #include "Editor/Core/View/Views/Scene/ScenePlacementAndPicking.h"
 #include <algorithm>
 #include <cmath>
@@ -170,12 +171,12 @@ void EditorGizmoSystem::DrawSkeletonOverlay(
     const EditorUiViewportInput& input, int selectedPaletteIndex)
 {
     const auto& displaySkeleton = DisplaySkeleton(skeleton);
-    if (!scene.AreEditorBonesVisible() ||
+    if (!Engine::Editor::EditorViewState::For(scene).bonesVisible ||
         (!displaySkeleton.showBones &&
-            (!skeleton.Owner || !(skeleton.Owner->editorOverlays &
-                Engine::Core::Object::BoneOverlay)) &&
-            (!displaySkeleton.Owner || !(displaySkeleton.Owner->editorOverlays &
-                Engine::Core::Object::BoneOverlay))))
+            (!skeleton.Owner || !(Engine::Editor::EditorViewState::OverlaysOf(skeleton.Owner) &
+                Engine::Editor::EditorViewState::BoneOverlay)) &&
+            (!displaySkeleton.Owner || !(Engine::Editor::EditorViewState::OverlaysOf(displaySkeleton.Owner) &
+                Engine::Editor::EditorViewState::BoneOverlay))))
         return;
     const auto* camera = scene.editorCamera.GetComponent<
         Engine::Components::Camera>();
@@ -293,7 +294,7 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
     for (const ModelPin& pin : m_modelPins)
     {
         EditorUiVec2 point{};
-        if (!scene.AreEditorBonesVisible()) continue;
+        if (!Engine::Editor::EditorViewState::For(scene).bonesVisible) continue;
         const glm::vec3 marker = pin.position ? pin.worldPosition
             : WorldPosition(pin.joint);
         if (!ProjectPoint(viewProjection, marker,
@@ -734,10 +735,10 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
     {
         Engine::Core::Object* object = objectPointer.get();
         if (!object || !object->IsEnabledInHierarchy()) continue;
-        const uint8_t overlays = object->editorOverlays;
-        if (!(overlays & (Engine::Core::Object::PositionOverlay |
-            Engine::Core::Object::RotationOverlay |
-            Engine::Core::Object::ScaleOverlay))) continue;
+        const uint8_t overlays = Engine::Editor::EditorViewState::OverlaysOf(object);
+        if (!(overlays & (Engine::Editor::EditorViewState::PositionOverlay |
+            Engine::Editor::EditorViewState::RotationOverlay |
+            Engine::Editor::EditorViewState::ScaleOverlay))) continue;
         const glm::vec3 center = WorldPosition(object);
         EditorUiVec2 origin{};
         if (!ProjectPoint(viewProjection, center, input.available, origin)) continue;
@@ -751,7 +752,7 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
         for (int axis=0;axis<3;++axis)
         {
             EditorUiVec2 end{};
-            if ((overlays & Engine::Core::Object::PositionOverlay) &&
+            if ((overlays & Engine::Editor::EditorViewState::PositionOverlay) &&
                 ProjectPoint(viewProjection,center+axes[axis]*axisScale,
                     input.available,end))
             {
@@ -768,14 +769,14 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
                         colors[axis]);
                 }
             }
-            if ((overlays & Engine::Core::Object::ScaleOverlay) &&
+            if ((overlays & Engine::Editor::EditorViewState::ScaleOverlay) &&
                 ProjectPoint(viewProjection,center+axes[axis]*axisScale*.8f,
                     input.available,end))
             {
                 ui.DrawViewportLine(origin,end,colors[axis],2.f);
                 DrawBoxHandle(ui,end,5.f,colors[axis]);
             }
-            if (overlays & Engine::Core::Object::RotationOverlay)
+            if (overlays & Engine::Editor::EditorViewState::RotationOverlay)
             {
                 EditorUiVec2 previous{};
                 bool previousVisible=false;
@@ -799,8 +800,8 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
     {
         Engine::Core::Object* object=objectPointer.get();
         if (!object || !object->IsEnabledInHierarchy()) continue;
-        const uint8_t overlays=object->editorOverlays;
-        if (object == scene.GetSelectedObject())
+        const uint8_t overlays=Engine::Editor::EditorViewState::OverlaysOf(object);
+        if (object == Engine::Editor::EditorViewState::For(scene).selectedObject)
             if (const auto* emitter=object->GetComponent<Engine::Components::ParticleEmitter>())
             {
                 const glm::mat4 world=object->transform.GetWorldMatrix();
@@ -842,7 +843,7 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
             if (const auto* mesh = object->GetComponent<Engine::Components::Mesh>();
                 mesh && mesh->IsEditorVisible())
                 DrawMeshNormals(ui, viewProjection, input.available, *object, *mesh);
-        if ((overlays & Engine::Core::Object::BoundsOverlay) ||
+        if ((overlays & Engine::Editor::EditorViewState::BoundsOverlay) ||
             EditorViewportSettings::AreBoundsVisible())
         {
             const glm::mat4 world=object->transform.GetWorldMatrix();
@@ -870,16 +871,16 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
                     -glm::abs(probes->size)*.5f,
                     glm::abs(probes->size)*.5f,color);
         }
-        if ((overlays & Engine::Core::Object::LightVolumeOverlay) ||
+        if ((overlays & Engine::Editor::EditorViewState::LightVolumeOverlay) ||
             EditorViewportSettings::AreLightVolumesVisible())
             if (const auto* light=object->GetComponent<Engine::Components::Light>())
                 DrawLightVolume(ui,viewProjection,input.available,*object,*light);
-        if ((overlays & Engine::Core::Object::CameraFrustumOverlay) ||
+        if ((overlays & Engine::Editor::EditorViewState::CameraFrustumOverlay) ||
             EditorViewportSettings::AreCameraFrustumsVisible())
             if (const auto* sceneCamera=object->GetComponent<Engine::Components::Camera>())
                 DrawCameraFrustum(ui,viewProjection,input.available,*sceneCamera);
     }
-    Engine::Core::Object* selected = scene.GetSelectedObject();
+    Engine::Core::Object* selected = Engine::Editor::EditorViewState::For(scene).selectedObject;
     const auto* selectedGroup = Engine::Components::BoneGroup::ForSelection(selected);
     const Engine::Components::Skeleton* selectedSkeleton = nullptr;
     if (m_boneEditing && selected)
@@ -934,16 +935,16 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
         for (Engine::Core::Component* component : owner->Components)
         {
             auto* skeleton = dynamic_cast<Engine::Components::Skeleton*>(component);
-            if (!scene.AreEditorBonesVisible() || !skeleton) continue;
+            if (!Engine::Editor::EditorViewState::For(scene).bonesVisible || !skeleton) continue;
             const auto& displaySkeleton = DisplaySkeleton(*skeleton);
             const uint8_t displayOverlays = displaySkeleton.Owner
-                ? displaySkeleton.Owner->editorOverlays : 0;
+                ? Engine::Editor::EditorViewState::OverlaysOf(displaySkeleton.Owner) : 0;
             const bool drawBones = displaySkeleton.showBones ||
-                (owner->editorOverlays & Engine::Core::Object::BoneOverlay) ||
-                (displayOverlays & Engine::Core::Object::BoneOverlay);
+                (Engine::Editor::EditorViewState::OverlaysOf(owner) & Engine::Editor::EditorViewState::BoneOverlay) ||
+                (displayOverlays & Engine::Editor::EditorViewState::BoneOverlay);
             const bool drawJoints = displaySkeleton.showBones ||
-                (owner->editorOverlays & Engine::Core::Object::SkeletonOverlay) ||
-                (displayOverlays & Engine::Core::Object::SkeletonOverlay);
+                (Engine::Editor::EditorViewState::OverlaysOf(owner) & Engine::Editor::EditorViewState::SkeletonOverlay) ||
+                (displayOverlays & Engine::Editor::EditorViewState::SkeletonOverlay);
             if (!drawBones && !drawJoints) continue;
             const auto* rootSkeleton = owner->GetComponent<Engine::Components::Skeleton>();
             if (rootSkeleton != skeleton && rootSkeleton &&
@@ -1038,7 +1039,7 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
     glm::vec3 pointHitTwistAxis{};
     glm::vec3 pointHitTwistBase{};
     float pointHitDistance = FLT_MAX;
-    if (scene.AreEditorBonesVisible() && m_modelManipulation && m_modelSelectionMode == 3)
+    if (Engine::Editor::EditorViewState::For(scene).bonesVisible && m_modelManipulation && m_modelSelectionMode == 3)
     {
         std::unordered_set<Engine::Core::Object*> drawnPoints;
         for (const auto& ownerPointer : scene.GetObjects())
@@ -1462,7 +1463,7 @@ EditorGizmoResult EditorGizmoSystem::DrawAndHandle(
         {
             DrawLightIcon(ui, center, object == selected);
             if (object == selected &&
-                !(object->editorOverlays & Engine::Core::Object::LightVolumeOverlay) &&
+                !(Engine::Editor::EditorViewState::OverlaysOf(object) & Engine::Editor::EditorViewState::LightVolumeOverlay) &&
                 !EditorViewportSettings::AreLightVolumesVisible() &&
                 light->GetLightType() ==
                 Engine::Components::Light::Type::Spot)
