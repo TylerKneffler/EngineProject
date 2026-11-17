@@ -87,7 +87,6 @@ Scene::Scene(PhysicsAdapterFactory physicsAdapterFactory)
 {
     m_physics = std::make_unique<Engine::Physics::Physics>(
         *this, physicsAdapterFactory ? physicsAdapterFactory(*this) : nullptr);
-    m_audio = std::make_unique<Engine::Audio::Audio>(*this);
     CommitPendingObjectChanges();
 }
 
@@ -108,7 +107,6 @@ Scene::~Scene()
             m_beforeGpuResourceDestruction();
     }
     catch (...) { /* Component destructors still join their own workers. */ }
-    m_audio->Reset();
     m_physics->Reset();
     for (const auto& object : m_objects)
         DisconnectSpatialManipulators(object.get());
@@ -821,7 +819,6 @@ void Scene::ClearObjects()
     m_pendingObjectAdditions.clear();
     m_pendingObjectRemovals.clear();
     m_preparedNativeUiLayout.clear();
-    m_audio->Reset();
     m_physics->Reset();
     for (const auto& object : m_objects)
         DisconnectSpatialManipulators(object.get());

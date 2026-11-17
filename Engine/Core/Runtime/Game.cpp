@@ -25,15 +25,25 @@ namespace Engine::Runtime
 {
 Game::Game(Scene& scene)
     : m_scene(scene)
+    , m_audio(std::make_unique<Engine::Audio::Audio>(scene))
 {
     m_scene.AssertOwnerThread();
     m_scene.BindGame(this);
+    m_scene.AddObserver(this);
 }
 
 Game::~Game()
 {
+    // Sources stop with the simulation that played them.
+    m_audio->Reset();
+    m_scene.RemoveObserver(this);
     if (m_scene.GetGame() == this)
         m_scene.BindGame(nullptr);
+}
+
+void Game::OnObjectsClearing()
+{
+    m_audio->Reset();
 }
 
 bool Game::HasStarted() const
@@ -174,7 +184,7 @@ void Game::Update(float deltaTime)
     {
         m_scene.ApplyPoseConstraints();
         afterConstraints = profiling ? Clock::now() : Clock::time_point{};
-        m_scene.GetAudio().Update(m_deltaTime);
+        m_audio->Update(m_deltaTime);
         afterPose = profiling ? Clock::now() : Clock::time_point{};
     };
     const auto physicsPreparation = [&] { m_scene.GetPhysics().PrepareStep(physicsDelta); };

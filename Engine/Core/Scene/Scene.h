@@ -377,8 +377,6 @@ public:
     const Engine::Time::SimulationClock& GetClock() const;
     Engine::Physics::Physics& GetPhysics() { return *m_physics; }
     const Engine::Physics::Physics& GetPhysics() const { return *m_physics; }
-    Engine::Audio::Audio& GetAudio() { return *m_audio; }
-    const Engine::Audio::Audio& GetAudio() const { return *m_audio; }
 
     // --- Editor Settings ---
     // Fallback viewer: rendered from when no game camera is active, the audio
@@ -1067,7 +1065,6 @@ private:
     std::unique_ptr<Engine::Renderers::UIRenderer> m_uiRenderer;
     std::vector<Engine::Model::UITextLayout> m_preparedNativeUiLayout;
     std::unique_ptr<Engine::Physics::Physics> m_physics;
-    std::unique_ptr<Engine::Audio::Audio> m_audio;
 
     Engine::Rendering::RealtimeLightingPipeline m_realtimeLightingPipeline;
     Engine::Rendering::BakedLightingPipeline m_bakedLightingPipeline;

@@ -1,9 +1,12 @@
 #pragma once
 
+#include "Core/Scene/SceneObserver.h"
 #include "Core/Time/SimulationClock.h"
 #include <cstdint>
+#include <memory>
 
 namespace Engine::Scene { class Scene; }
+namespace Engine::Audio { class Audio; }
 
 namespace Engine::Runtime
 {
@@ -18,7 +21,7 @@ namespace Engine::Runtime
 //
 // The Game binds itself to the scene for its lifetime (Scene::GetGame()), and
 // must not outlive the scene.
-class Game
+class Game final : public Engine::Scene::ISceneObserver
 {
 public:
     using Scene = Engine::Scene::Scene;
@@ -61,6 +64,14 @@ public:
     float GetDeltaTime() const { return m_deltaTime; }
     uint64_t GetFrameIndex() const { return m_clock.GetFrameIndex(); }
 
+    // ---- Systems ----------------------------------------------------------------
+    // Listener tracking and mixer command draining for the scene's AudioSources.
+    // Sources stop when the scene is cleared and when the Game ends.
+    Engine::Audio::Audio& GetAudio() { return *m_audio; }
+
+    // ---- ISceneObserver -----------------------------------------------------------
+    void OnObjectsClearing() override;
+
     // ---- Diagnostics ------------------------------------------------------------
     // Timings are recorded while Scene::SetUpdateProfilingEnabled(true).
     const UpdateTimings& GetLastUpdateTimings() const { return m_lastUpdateTimings; }
@@ -70,5 +81,6 @@ private:
     Engine::Time::SimulationClock m_clock;
     float m_deltaTime = 0.f;
     UpdateTimings m_lastUpdateTimings{};
+    std::unique_ptr<Engine::Audio::Audio> m_audio;
 };
 }

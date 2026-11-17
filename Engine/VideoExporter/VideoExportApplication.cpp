@@ -1252,7 +1252,7 @@ int VideoExportApplication::Run(HINSTANCE instance)
                 const uint64_t framesToRender = targetAudioFrames - writtenAudioFrames;
                 std::vector<float> samples(static_cast<size_t>(framesToRender) *
                     audioChannels);
-                scene.GetAudio().SynchronizeToTime(sceneTime);
+                game.GetAudio().SynchronizeToTime(sceneTime);
                 if (!Engine::Audio::AudioMixer::Get().ReadOfflineFrames(
                     samples.data(), framesToRender))
                     return false;
