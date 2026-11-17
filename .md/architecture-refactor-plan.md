@@ -7,6 +7,49 @@ root → base classes → subclasses.
 
 Status legend: `[ ]` todo · `[~]` in progress · `[x]` done · `[?]` needs decision
 
+## Status (2026-11-17)
+
+**Done:** Phases 1–2, most of Phase 3, and Phase 4 steps 4.1–4.3. `Scene` now
+holds object memory, the update index, structure events, the physics world
+(by decision) and, until 4.4, the renderer state. Lifecycle driving, the clock,
+audio, scene transitions and editor state have moved out.
+
+| Commit | Step |
+|---|---|
+| `02ca6ee` | Phases 1–2, Phase 3 inspector split (`IInspectorUi`, `ComponentInspector`), `Compoonents` → `Components` |
+| `e970af8` | 4.1 Editor view state out of `Scene` (`SceneViewOverlays`, `ISceneObserver`, `Editor/State/EditorViewState`) |
+| `26c18e7` | 4.2a Lifecycle driver → `Engine::Runtime::Game` |
+| `09090d7` | 4.2b Audio → `Game` |
+| `0ec265c` | 4.2c `SceneManager` folded into `Game`; physics world stays with `Scene` |
+| `b377f25` | 4.3 Strict cascade for generic lifecycle dispatch |
+
+**How 4.2–4.3 were verified:** all hosts (Engine, Editor, Game, Server,
+VideoExporter) build. Headless Server output is bit-identical to the
+pre-refactor build on 6 scenes × 180 frames (physics, ragdoll, portals,
+scripts), and wall time is unchanged within noise.
+
+**Still needs a manual check (UI and runtime paths not covered headlessly):**
+- Editor: Properties panel (texture path edit/Browse/Apply, asset drag-drop, reference "Pick", multi-select edit), hierarchy and edit-tools overlay toggles, terrain placement selection outline, deleting objects that have overlays.
+- Editor play mode: play → stop → play, and a scene transition during play.
+- Game exe: main-menu Play button (async scene transition), audio playback.
+
+**Known issues found during the refactor (not caused by it):**
+- `TerrainPlacementEditingTests` fails at "scene load failed": it loads `oak_meadow.scene`, deleted in `cda4fcd`.
+- `skinned_soft_tissue_demo` segfaults intermittently in the headless Server, both before and after the refactor.
+- The plain `Debug` configuration can't build `bc7enc` (`/O2` with `/RTC1`). The `devoptimized` preset (RelWithDebInfo) works.
+
+**Breaking changes for external projects / scripts:**
+- Include paths: `Core/Compoonents/...` → `Core/Components/...` (no forwarders). `Core/Object.h`, `Core/component.h`, `Core/Script.h`, `Core/ComponentReference.h`, `Core/PropertyMacros.h` still forward.
+- `DrawProperties(Engine::Editor::IEditorUi&)` → `DrawProperties(Engine::Core::IInspectorUi&)`.
+- `Engine::Core::SceneManager` removed → `Owner->GetScene()->GetGame()->RequestSceneLoad(path)` / `LoadScene` / `RequestDefaultSceneLoad`.
+- `Scene::Start/Update/UpdateFixedFrame/SetFixedTimeStep/GetAudio/GetLastUpdateTimings` → `Engine::Runtime::Game`. `GetDeltaTime/GetClock/HasStarted` remain on `Scene`.
+
+**Next:** 4.4 `SceneRenderer` extraction (~190 render members and the
+~2,850-line `Render` out of `Scene`), then 4.5 break up `Render`. Smaller items
+still open: `PrefabInstanceLink` (Phase 3), loose `Core/` files (Phase 2),
+removing the `Core/*.h` forwarders, and the `Material`/`Mesh` special cases in
+`ComponentInspector::DrawGeneric`.
+
 ---
 
 ## Audit summary
@@ -171,7 +214,7 @@ files using `GetScene()->GetPhysics()` / `GetDeltaTime()` keep a direct path.
 ### Steps (build + `.local/tests` after each)
 
 - [x] **4.1 Editor state out.** `Core/Rendering/SceneViewOverlays.h` is render input (selection, placement, edit mesh, pose, weight paint, preview), bound with `Scene::SetViewOverlays` (null = defaults). `Core/Scene/SceneObserver.h` (`ISceneObserver`) carries the removing/clearing/destroying events; `Scene` no longer clears editor fields itself. `EditorViewState` moves to `Engine/Editor/State`: one per scene, it binds overlays, observes its scene, and owns selection, the overlays map, bones visible, and camera focus/follow. `SetEditorMode2D` turned out to be scene/settings state (called on load and in `Init`, games included), so it stays as `Scene::SetMode2D`/`IsMode2D`. `editorCamera` is the scene's fallback viewer (render, audio listener, scripts) and stays until 4.4. **Done:** 195 editor call sites in 27 files now use `Engine::Editor::EditorViewState::For(scene)`. `Scene` has no editor members or editor methods left; `AdvanceEditorPreviews` moves out in 4.2 and `includeEditorVisuals` in 4.4. Clearing a scene now also stops camera follow, which previously kept a dangling target. `TerrainPlacementEditingTests` also compiles `EditorViewState.cpp`.
-- [~] **4.2 `Game` runtime** (`Engine::Runtime::Game`, `Core/Runtime/Game.{h,cpp}`), in three steps:
+- [x] **4.2 `Game` runtime** (`Engine::Runtime::Game`, `Core/Runtime/Game.{h,cpp}`), in three steps:
   - [x] **4.2a Lifecycle driver.** `Game(Scene&)` uses the scene, binds itself (`Scene::GetGame()`), owns the `SimulationClock`, and runs `Start`, `Update` (the 8-phase job graph, unchanged), `UpdateFixedFrame`, `AdvanceManualFrame`, fixed/variable step and update timings. `Scene` lost `Start/Update/UpdateFixedFrame/AdvanceManualFrame/SetFixedTimeStep/UseVariableTimeStep/GetLastUpdateTimings/AdvanceEditorPreviews` and the clock. It keeps a small, documented simulation-step support API (`BeginUpdatePass`/`EndUpdatePass`, `GetUpdateObjects`, `PrepareTransformHierarchy`, `ApplyPoseConstraints`, `EnforceParticleBudget`) plus read-throughs: `GetDeltaTime/GetClock/GetFrameIndex/GetElapsedTime` read the bound Game (zero/stopped without one), and `HasStarted` is set by `Game::Start` so objects added to a running scene still start on commit. Hosts: `GameApplication`, `ServerApplication`, `VideoExportApplication`, editor play mode (a `Game` per play session, destroyed before the edit scene is restored), `EditorPlayPipeline`, `ExportFrameSequence`, `SceneManager` (restarts loaded scenes through the bound Game; none in edit mode), the failed-load restore in `ScenePersistence`, profilers/benchmark, and tests. `AdvanceEditorPreviews` moved to `Engine/Editor/Runtime/EditorPreviews`. `SetUpdateProfilingEnabled` stays on `Scene` for now because the renderer uses the same flag for its timings (moves in 4.4).
   - [x] **4.2b Audio → `Game`.** `Game` owns `Engine::Audio::Audio`: it updates the listener and drains the mixer each frame, stops sources when the scene clears (it observes the scene as an `ISceneObserver`) and when the Game ends, and handles `SynchronizeToTime` for the exporter. `Scene` lost `m_audio`/`GetAudio`. Server output is still bit-identical.
   - [x] **Physics world stays with `Scene` (owner decision); `Game` steps it.** The world is the scene's collision representation and is used without a running simulation: `GroundedFootIK::FindGround`/`ChainIK::ApplyGroup` raycast during edit-mode pose evaluation, `ParticleEmitter::ResolveCollisions` runs in edit-mode previews, and `~RigidBody`/`~Cloth`/`Disabled`/`SpatialManipulator::ClearSpatialWarpState` tear down bodies when the editor deletes objects. `Game::Update` does prepare/simulate/finish. The step settings (`ConfigureFixedStep`/`ConfigureStepBudget`) also stay on the world: they are stored by the Bullet adapter with its accumulator and substep state, and the editor sets the budget once on the scene.
