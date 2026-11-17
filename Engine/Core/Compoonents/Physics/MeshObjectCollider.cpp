@@ -4,7 +4,7 @@
 #include "Core/Compoonents/Animation/SkinnedMesh.h"
 #include "Core/Compoonents/Mesh/Mesh.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Threading/JobScheduler.h"
 #include <algorithm>
 #include <cmath>

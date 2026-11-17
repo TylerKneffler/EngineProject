@@ -3,7 +3,7 @@
 
 #include "Core/Compoonents/UI/Canvas.h"
 #include "Core/Compoonents/UI/UIText.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
 #include <algorithm>
 #include <cmath>

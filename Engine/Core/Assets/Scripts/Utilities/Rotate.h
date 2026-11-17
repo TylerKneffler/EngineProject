@@ -1,6 +1,6 @@
 #pragma once
-#include "Core/Script.h"
-#include "Core/PropertyMacros.h"
+#include "Core/Compoonents/Script.h"
+#include "Core/Compoonents/PropertyMacros.h"
 #include <glm/glm.hpp>
 
 // ---------------------------------------------------------------------------
@@ -26,5 +26,5 @@ public:
     void Update() override;
 
     // Custom property editor
-    bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
+    bool DrawProperties(Engine::Core::IInspectorUi& ui) override;
 };

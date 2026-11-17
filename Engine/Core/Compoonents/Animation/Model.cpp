@@ -1,7 +1,7 @@
 #include "Model.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
-#include "Engine/Editor/UI/IEditorUi.h"
+#include "Core/Inspection/IInspectorUi.h"
 #include <algorithm>
 #include <sstream>
 
@@ -126,7 +126,7 @@ void Model::Deserialize(const JsonValue& value)
         m_nodePaths.push_back(paths.ArrayAt(i).AsString());
 }
 
-bool Model::DrawProperties(::Engine::Editor::IEditorUi& ui)
+bool Model::DrawProperties(Engine::Core::IInspectorUi& ui)
 {
     const std::string count = std::to_string(m_nodePaths.size());
     ui.ValueLabel("Imported Nodes", count.c_str());

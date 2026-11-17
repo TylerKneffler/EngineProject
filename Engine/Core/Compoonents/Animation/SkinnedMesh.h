@@ -32,7 +32,7 @@ public:
     const std::vector<glm::mat4>& BuildPalette(
         const std::vector<glm::mat4>& jointSkinMatrices) const;
     Skeleton* ResolveSkeleton() const;
-    bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
+    bool DrawProperties(Engine::Core::IInspectorUi& ui) override;
     JsonValue Serialize() const override;
     void Deserialize(const JsonValue& value) override;
 

@@ -88,6 +88,9 @@ struct ObjectGPUData
     glm::vec4 textureLodParams{0.f}; // near, far, maximum mip bias, enabled/shading tier
     glm::vec4 alphaLodParams{0.f};
     glm::vec4 grassCapsules[8]{}; // four start/radius + end/reach pairs
+    // Terrain long-range sun shadow map (texture slot 4): world X/Z of the
+    // map corner, 1 / extent X, 1 / extent Z. Zero extent disables it.
+    glm::vec4 terrainSunShadow{0.f};
 };
 
 struct PreparedDraw

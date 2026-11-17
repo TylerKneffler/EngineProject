@@ -1,7 +1,7 @@
 #include "pch.h"
 #include "TransformHierarchy.h"
 #include "Transform.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Threading/JobScheduler.h"
 
 namespace Engine::Components

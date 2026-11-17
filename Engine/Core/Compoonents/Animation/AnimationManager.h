@@ -60,7 +60,7 @@ public:
     bool IsEditorPreviewRunning() const { return m_editorPreviewRunning && playing; }
     JsonValue Serialize() const override;
     void Deserialize(const JsonValue& value) override;
-    bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
+    bool DrawProperties(Engine::Core::IInspectorUi& ui) override;
     // Consumed by PropertiesView after drawing; opening an editor does not
     // change component playback or mark the scene edited.
     std::string editAnimationRequest;

@@ -46,9 +46,11 @@ struct PortalSkyboxCBData
 {
     glm::mat4 invVP;
     glm::vec4 displayParams;
+    glm::vec4 sunDirection;
+    glm::vec4 sunRadiance;
 };
 static_assert(sizeof(PortalGridCBData) == 128);
-static_assert(sizeof(PortalSkyboxCBData) == 80);
+static_assert(sizeof(PortalSkyboxCBData) == 112);
 }
 
 void ScenePortalRendering::Render(ScenePortalRenderingContext& input)
@@ -338,7 +340,10 @@ void ScenePortalRendering::Render(ScenePortalRenderingContext& input)
         skyboxData.displayParams = {
             scene.m_editorMode2D ? 1.f : 0.f,
             std::exp2(settings.hdriExposure),
-            glm::radians(settings.hdriRotation), 0.f };
+            glm::radians(settings.hdriRotation),
+            std::max(settings.sunGlowIntensity, 0.f) };
+        skyboxData.sunDirection = scene.m_skySunDirection;
+        skyboxData.sunRadiance = scene.m_skySunRadiance;
         memcpy(static_cast<uint8_t*>(scene.m_skyboxCBMapped) +
             portalJob.skyboxConstantBufferOffset,
             &skyboxData, sizeof(skyboxData));

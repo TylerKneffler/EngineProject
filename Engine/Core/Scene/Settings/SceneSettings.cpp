@@ -92,6 +92,18 @@ Engine::Serialization::JsonValue SerializeSceneSettings(const Engine::Model::Sce
     value.Set("textureLodDisableAlphaAtFar", Engine::Serialization::JsonValue(settings.textureLod.disableAlphaAtFar));
     value.Set("textureLodAlphaMipBias", Engine::Serialization::JsonValue(settings.textureLod.alphaMipBias));
     value.Set("outputExposure", Engine::Serialization::JsonValue(settings.outputExposure));
+    value.Set("bloomEnabled", Engine::Serialization::JsonValue(settings.bloomEnabled));
+    value.Set("bloomIntensity", Engine::Serialization::JsonValue(settings.bloomIntensity));
+    value.Set("colorGradingEnabled", Engine::Serialization::JsonValue(settings.colorGradingEnabled));
+    value.Set("gradingShadowTint", Vec3ToJson(settings.gradingShadowTint));
+    value.Set("gradingHighlightTint", Vec3ToJson(settings.gradingHighlightTint));
+    value.Set("gradingBalance", Engine::Serialization::JsonValue(settings.gradingBalance));
+    value.Set("gradingContrast", Engine::Serialization::JsonValue(settings.gradingContrast));
+    value.Set("gradingSaturation", Engine::Serialization::JsonValue(settings.gradingSaturation));
+    value.Set("sunDiscEnabled", Engine::Serialization::JsonValue(settings.sunDiscEnabled));
+    value.Set("sunDiscAngularDiameter", Engine::Serialization::JsonValue(settings.sunDiscAngularDiameter));
+    value.Set("sunDiscIntensity", Engine::Serialization::JsonValue(settings.sunDiscIntensity));
+    value.Set("sunGlowIntensity", Engine::Serialization::JsonValue(settings.sunGlowIntensity));
     value.Set("renderMode",
         Engine::Serialization::JsonValue(static_cast<int>(settings.renderMode)));
     value.Set("renderScaleMode",
@@ -199,6 +211,40 @@ void DeserializeSceneSettings(Engine::Model::SceneSettings& settings, const Engi
     if (const auto* outputExposure = FindField(value, "outputExposure"))
         settings.outputExposure = std::clamp(
             outputExposure->AsFloat(), -16.f, 16.f);
+    {
+        // Older scenes predate these fields and keep the struct defaults.
+        const Engine::Model::SceneSettings defaults{};
+        const auto readBool = [&](const char* key, bool& target, bool fallback)
+        {
+            const auto* field = FindField(value, key);
+            target = field ? field->AsBool() : fallback;
+        };
+        const auto readFloat = [&](const char* key, float& target, float fallback,
+            float minimum, float maximum)
+        {
+            const auto* field = FindField(value, key);
+            target = std::clamp(field ? field->AsFloat() : fallback, minimum, maximum);
+        };
+        const auto readColor = [&](const char* key, glm::vec3& target, glm::vec3 fallback)
+        {
+            const auto* field = FindField(value, key);
+            target = glm::clamp(field ? Vec3FromJson(*field, fallback) : fallback,
+                glm::vec3(0.f), glm::vec3(4.f));
+        };
+        readBool("bloomEnabled", settings.bloomEnabled, defaults.bloomEnabled);
+        readFloat("bloomIntensity", settings.bloomIntensity, defaults.bloomIntensity, 0.f, 1.f);
+        readBool("colorGradingEnabled", settings.colorGradingEnabled, defaults.colorGradingEnabled);
+        readColor("gradingShadowTint", settings.gradingShadowTint, defaults.gradingShadowTint);
+        readColor("gradingHighlightTint", settings.gradingHighlightTint, defaults.gradingHighlightTint);
+        readFloat("gradingBalance", settings.gradingBalance, defaults.gradingBalance, -1.f, 1.f);
+        readFloat("gradingContrast", settings.gradingContrast, defaults.gradingContrast, 0.25f, 4.f);
+        readFloat("gradingSaturation", settings.gradingSaturation, defaults.gradingSaturation, 0.f, 4.f);
+        readBool("sunDiscEnabled", settings.sunDiscEnabled, defaults.sunDiscEnabled);
+        readFloat("sunDiscAngularDiameter", settings.sunDiscAngularDiameter,
+            defaults.sunDiscAngularDiameter, 0.05f, 20.f);
+        readFloat("sunDiscIntensity", settings.sunDiscIntensity, defaults.sunDiscIntensity, 0.f, 100000.f);
+        readFloat("sunGlowIntensity", settings.sunGlowIntensity, defaults.sunGlowIntensity, 0.f, 100.f);
+    }
     if (const auto* renderMode = FindField(value, "renderMode"))
     {
         const int mode = renderMode->AsInt();
@@ -215,6 +261,9 @@ void DeserializeSceneSettings(Engine::Model::SceneSettings& settings, const Engi
             break;
         case 4:
             settings.renderMode = Engine::Model::SceneRenderMode::Detail;
+            break;
+        case 5:
+            settings.renderMode = Engine::Model::SceneRenderMode::Triangles;
             break;
         default:
             settings.renderMode = Engine::Model::SceneRenderMode::Lit;

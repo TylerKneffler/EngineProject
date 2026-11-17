@@ -1,13 +1,13 @@
 #include "pch.h"
 #include "Component.h"
-#include "Engine/Editor/UI/IEditorUi.h"
+#include "Core/Inspection/IInspectorUi.h"
 #include "Core/Serialization/Json.h"
 #include "Core/Compoonents/Materials/Texture.h"
 #include "Core/Compoonents/Materials/Material.h"
 #include "Core/Compoonents/Mesh/Mesh.h"
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Core/Graphics/IGraphicsTexture.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
 #include <map>
 #include <Windows.h>
@@ -210,7 +210,7 @@ static std::vector<std::string> FindAssetReferences(const std::string& key)
     return assets;
 }
 
-bool Component::DrawAssetPathPicker(::Engine::Editor::IEditorUi& ui,
+bool Component::DrawAssetPathPicker(Engine::Core::IInspectorUi& ui,
     const void* context, const char* fieldKey, const char* label,
     const char* assetKind, std::string& path)
 {
@@ -293,7 +293,7 @@ bool Component::DrawAssetPathPicker(::Engine::Editor::IEditorUi& ui,
     return changed;
 }
 
-bool Component::DrawReferenceProperty(::Engine::Editor::IEditorUi& ui,
+bool Component::DrawReferenceProperty(Engine::Core::IInspectorUi& ui,
     const char* fieldKey, const char* label, ComponentReference& reference,
     const Component* defaultTarget, const char* defaultDescription)
 {
@@ -547,7 +547,7 @@ static std::string HumanizePropertyName(const std::string& name)
 // Override in derived classes only when you need specialized UI controls
 // or logic beyond this automatic property editing.
 // ---------------------------------------------------------------------------
-bool Component::DrawProperties(::Engine::Editor::IEditorUi& ui)
+bool Component::DrawProperties(Engine::Core::IInspectorUi& ui)
 {
     // Get current serialized state
     JsonValue originalData = Serialize();
@@ -1163,7 +1163,7 @@ bool Component::DrawProperties(::Engine::Editor::IEditorUi& ui)
     return modified;
 }
 
-bool Component::DrawPropertiesMulti(::Engine::Editor::IEditorUi& ui,
+bool Component::DrawPropertiesMulti(Engine::Core::IInspectorUi& ui,
     const std::vector<Component*>& targets)
 {
     m_multiEditTargets = &targets;

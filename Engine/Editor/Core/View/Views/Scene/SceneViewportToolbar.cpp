@@ -1,7 +1,7 @@
 #include "SceneViewportToolbar.h"
 
 #include "SceneCameraController.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
 #include "Core/Scene/Scene.h"

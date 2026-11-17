@@ -1,6 +1,6 @@
 #include "GrassInteraction.h"
 #include "Core/Scene/Scene.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Compoonents/Physics/PrimitiveObjectCollider.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
 #include "Core/Compoonents/Animation/AnimationBone.h"

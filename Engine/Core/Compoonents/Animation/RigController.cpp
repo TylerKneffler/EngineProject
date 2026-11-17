@@ -6,8 +6,8 @@
 #include "Core/Compoonents/Animation/Model.h"
 #include "Core/Compoonents/Materials/MaterialPropertyMorph.h"
 #include "Core/Compoonents/Mesh/Mesh.h"
-#include "Core/Object.h"
-#include "Engine/Editor/UI/IEditorUi.h"
+#include "Core/Scene/Object.h"
+#include "Core/Inspection/IInspectorUi.h"
 #include <algorithm>
 #include <cstring>
 #include <glm/gtc/quaternion.hpp>
@@ -161,7 +161,7 @@ void RigController::PostPhysicsUpdate()
     }
 }
 
-bool RigController::DrawProperties(::Engine::Editor::IEditorUi& ui)
+bool RigController::DrawProperties(Engine::Core::IInspectorUi& ui)
 {
     bool changed = Component::DrawProperties(ui);
     const std::string appendCount = std::to_string(appendRules.size());

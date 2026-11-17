@@ -7,10 +7,10 @@
 #include "Core/Compoonents/Physics/PrimitiveObjectCollider.h"
 #include "Core/Compoonents/Physics/MeshObjectCollider.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Serialization/SceneSerializer.h"
-#include "Engine/Editor/UI/IEditorUi.h"
+#include "Core/Inspection/IInspectorUi.h"
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -25,7 +25,7 @@
 #include <Windows.h>
 #endif
 
-bool TerrainGen::DrawProperties(::Engine::Editor::IEditorUi& ui)
+bool TerrainGen::DrawProperties(Engine::Core::IInspectorUi& ui)
 {
     bool changed = false;
     char viewerName[256]{};

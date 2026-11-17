@@ -2,7 +2,7 @@
 
 #include "Core/Compoonents/Animation/Skeleton.h"
 #include "Core/Compoonents/Animation/SkinnedMesh.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 
 namespace Engine::Editor::AnimationRigSelection
 {

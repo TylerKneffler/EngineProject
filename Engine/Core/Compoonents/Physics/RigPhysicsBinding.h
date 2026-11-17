@@ -19,7 +19,7 @@ public:
     RigidBody* ResolveBody(const std::string& name) const;
     JsonValue Serialize() const override;
     void Deserialize(const JsonValue& value) override;
-    bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
+    bool DrawProperties(Engine::Core::IInspectorUi& ui) override;
 private:
     bool m_initialized = false;
     mutable uint64_t m_bodyStructureRevision = 0;

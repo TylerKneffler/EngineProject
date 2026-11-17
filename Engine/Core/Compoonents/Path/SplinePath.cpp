@@ -1,8 +1,8 @@
 #include "Core/Compoonents/Path/SplinePath.h"
 
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
-#include "Engine/Editor/UI/IEditorUi.h"
+#include "Core/Inspection/IInspectorUi.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -223,7 +223,7 @@ size_t SplinePath::GetControlPointCount() const
     return CollectPoints().size();
 }
 
-bool SplinePath::DrawProperties(Engine::Editor::IEditorUi& ui)
+bool SplinePath::DrawProperties(Engine::Core::IInspectorUi& ui)
 {
     bool changed = false;
     static const char* interpolationNames[] = { "Linear", "Catmull-Rom" };

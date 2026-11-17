@@ -17,7 +17,10 @@ enum class SceneRenderMode
     Performance = 3,
     // Blue-to-red per-pixel detail: instanced LOD band and resident texture
     // resolution against the screen. Close range should read red.
-    Detail = 4
+    Detail = 4,
+    // Editor-only: every triangle in its own distinct colour. Many small
+    // patches mean dense geometry; large flat patches mean little detail.
+    Triangles = 5
 };
 
 enum class SceneDimension
@@ -57,6 +60,26 @@ struct SceneSettings
     float hdriRotation = 0.f;
     ToneMappingOperator toneMapping = ToneMappingOperator::Aces;
     float outputExposure = 0.f;
+    // Energy-conserving bloom: the compose pass mixes this fraction of a
+    // wide, multi-scale blur of the HDR scene into the image before tone
+    // mapping. Bright pixels (the sun disc, speculars) bleed the most.
+    bool bloomEnabled = true;
+    float bloomIntensity = 0.04f;
+    // Split-tone grade applied after tone mapping: shadows are multiplied by
+    // shadowTint and highlights by highlightTint, split around mid grey
+    // (balance shifts the split, -1..1).
+    bool colorGradingEnabled = false;
+    glm::vec3 gradingShadowTint = glm::vec3(0.90f, 0.96f, 1.08f);
+    glm::vec3 gradingHighlightTint = glm::vec3(1.06f, 0.99f, 0.90f);
+    float gradingBalance = 0.f;
+    float gradingContrast = 1.f;
+    float gradingSaturation = 1.f;
+    // Sun disc and forward-scattering glow drawn by the skybox toward the
+    // brightest directional light. Intensity scales that light's radiance.
+    bool sunDiscEnabled = false;
+    float sunDiscAngularDiameter = 0.53f; // degrees
+    float sunDiscIntensity = 40.f;
+    float sunGlowIntensity = 0.35f;
     SceneRenderMode renderMode = SceneRenderMode::Lit;
     GraphicsQualitySettings graphicsQuality;
     TextureLodSettings textureLod;

@@ -3,7 +3,7 @@
 #include "SkinnedMesh.h"
 #include "Skeleton.h"
 #include "Core/Compoonents/Physics/MeshObjectCollider.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Compoonents/Camera/Camera.h"
 #include <algorithm>

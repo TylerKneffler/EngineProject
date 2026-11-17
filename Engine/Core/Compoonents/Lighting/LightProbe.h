@@ -1,7 +1,7 @@
 #pragma once
 
-#include "Core/component.h"
-#include "Core/PropertyMacros.h"
+#include "Core/Compoonents/Component.h"
+#include "Core/Compoonents/PropertyMacros.h"
 #include <glm/glm.hpp>
 #include <vector>
 
@@ -28,7 +28,7 @@ public:
     glm::vec3 lightDirection{0.f,1.f,0.f};
     bool valid=false;
 
-    bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
+    bool DrawProperties(Engine::Core::IInspectorUi& ui) override;
 };
 
 // A box-shaped regular grid of baked probes. Samples are stored in X-major,
@@ -66,7 +66,7 @@ public:
 
     JsonValue Serialize() const override;
     void Deserialize(const JsonValue& value) override;
-    bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
+    bool DrawProperties(Engine::Core::IInspectorUi& ui) override;
 };
 
 ProbeLightingSample SampleLightProbes(const Engine::Scene::Scene& scene,

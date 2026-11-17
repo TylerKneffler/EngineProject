@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include <algorithm>
 #include <cctype>
 #include <filesystem>

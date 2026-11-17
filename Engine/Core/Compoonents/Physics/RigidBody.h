@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Core/Component.h"
-#include "Core/PropertyMacros.h"
+#include "Core/Compoonents/PropertyMacros.h"
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <memory>
@@ -123,7 +123,7 @@ public:
 
     JsonValue Serialize() const override;
     void Deserialize(const JsonValue& value) override;
-    bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
+    bool DrawProperties(Engine::Core::IInspectorUi& ui) override;
 
     // Transient residency gate used by terrain collision streaming. Suspension
     // removes the native body without disabling rendering or changing body settings.

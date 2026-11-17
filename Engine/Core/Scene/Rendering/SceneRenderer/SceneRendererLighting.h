@@ -125,7 +125,15 @@ public:
         const glm::mat4& proj,
         uint32_t viewportWidth,
         uint32_t viewportHeight,
-        bool shadowOnly);
+        bool shadowOnly,
+        const glm::vec3& sunDirection = glm::vec3(0.f),
+        const glm::vec3& sunRadiance = glm::vec3(0.f));
+
+    // Sun disc constants shared by the main and portal skybox draws:
+    // direction (xyz, w = cosine of the disc radius) and radiance (rgb,
+    // w = disc intensity); zero radiance disables the disc.
+    static void ResolveSkySun(const Scene& scene, const glm::vec3& sunDirection,
+        const glm::vec3& sunRadiance, glm::vec4& direction, glm::vec4& radiance);
 
 private:
     LightingContext m_context;

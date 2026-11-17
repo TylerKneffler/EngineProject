@@ -1,6 +1,6 @@
 #include "SpatialManipulator.h"
 
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Compoonents/Animation/SkinnedMesh.h"
 #include "Core/Compoonents/Materials/Material.h"

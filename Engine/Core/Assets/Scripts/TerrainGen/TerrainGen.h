@@ -1,7 +1,7 @@
 #pragma once
 
-#include "Core/PropertyMacros.h"
-#include "Core/Script.h"
+#include "Core/Compoonents/PropertyMacros.h"
+#include "Core/Compoonents/Script.h"
 #include "Core/Model/MeshData.h"
 #include <glm/glm.hpp>
 #include <cstdint>
@@ -139,7 +139,7 @@ public:
     void Update() override;
     void OnDestroy() override;
     void FenceBackgroundWork() override;
-    bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
+    bool DrawProperties(Engine::Core::IInspectorUi& ui) override;
 
     // Rebuilds the configured terrain ring immediately. This is also exposed
     // by the custom editor UI and does not require the scene runtime to start.

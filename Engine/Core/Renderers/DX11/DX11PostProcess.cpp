@@ -2,27 +2,22 @@
 #include "DX11PostProcess.h"
 #include "Core/Graphics/PostProcess.h"
 #include <d3dcompiler.h>
+#include <stdexcept>
 
 namespace Engine::Renderers
 {
 namespace
 {
-constexpr char ShaderSource[] = R"(
-Texture2D<float4> sceneColor : register(t0);
-SamplerState sceneSampler : register(s0);
-cbuffer Params : register(b0) { float exposure; uint op; float2 padding; };
-struct V { float4 p : SV_Position; float2 uv : TEXCOORD0; };
-V VSMain(uint id : SV_VertexID) { V o; o.uv=float2((id<<1)&2,id&2); o.p=float4(o.uv*float2(2,-2)+float2(-1,1),0,1); return o; }
-float3 linearToSrgb(float3 c) { c=max(c,0); return lerp(c*12.92,1.055*pow(c,1.0/2.4)-0.055,step(0.0031308,c)); }
-float3 linearToPq(float3 c) { const float m1=2610.0/16384.0, m2=2523.0/32.0; const float c1=3424.0/4096.0, c2=2413.0/128.0, c3=2392.0/128.0; float3 l=pow(saturate(c*0.1),m1); return pow((c1+c2*l)/(1+c3*l),m2); }
-float4 PSMain(V i) : SV_Target { float4 s=sceneColor.Sample(sceneSampler,i.uv); if(op==4)return s*padding.x; float3 c=max(s.rgb*max(exposure,0),0); if(op==5)return float4(c,s.a); if(op==3) { c=mul(float3x3(0.6274,0.3293,0.0433,0.0691,0.9195,0.0114,0.0164,0.0880,0.8956),c); return float4(linearToPq(c),1); } if(op==1)c=saturate((c*(2.51*c+0.03))/(c*(2.43*c+0.59)+0.14)); else if(op==2)c=c/(1+c); return float4(linearToSrgb(c),s.a); }
-)";
-
-Microsoft::WRL::ComPtr<ID3DBlob> Compile(const char* entry, const char* target)
+Microsoft::WRL::ComPtr<ID3DBlob> Compile(const std::string& source,
+    const char* entry, const char* target)
 {
     Microsoft::WRL::ComPtr<ID3DBlob> blob, errors;
-    ThrowIfFailed(D3DCompile(ShaderSource, sizeof(ShaderSource) - 1,
-        "PostProcess", nullptr, nullptr, entry, target, 0, 0, &blob, &errors));
+    const HRESULT result = D3DCompile(source.data(), source.size(),
+        "PostProcess.hlsl", nullptr, nullptr, entry, target,
+        D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &blob, &errors);
+    if (FAILED(result))
+        throw std::runtime_error(std::string("Post-process shader ") + entry + ": " +
+            (errors ? static_cast<const char*>(errors->GetBufferPointer()) : "compile failed"));
     return blob;
 }
 }
@@ -33,6 +28,7 @@ void DX11PostProcess::Create(ID3D11Device* device, uint32_t width, uint32_t heig
     m_sceneColor.Reset(); m_sceneRtv.Reset(); m_sceneSrv.Reset();
     m_resolvedColor.Reset(); m_resolvedRtv.Reset();
     m_accumulationColor.Reset(); m_accumulationRtv.Reset(); m_accumulationSrv.Reset();
+    m_bloom.Reset(); m_bloomRtvs.clear(); m_bloomSrvs.clear();
     m_width = width; m_height = height;
     m_sampleCount = std::max(1u, sampleCount);
     m_sceneFormat = hdrBits >= 32u ? DXGI_FORMAT_R32G32B32A32_FLOAT
@@ -69,18 +65,49 @@ void DX11PostProcess::Create(ID3D11Device* device, uint32_t width, uint32_t heig
     ThrowIfFailed(device->CreateShaderResourceView(m_accumulationColor.Get(), nullptr,
         &m_accumulationSrv));
 
+    // Bloom chain: half resolution, one render target and view per level.
+    m_bloomLevels = Engine::Graphics::BloomLevelCount(width, height);
+    D3D11_TEXTURE2D_DESC bloom{};
+    bloom.Width = Engine::Graphics::BloomLevelExtent(width, 0);
+    bloom.Height = Engine::Graphics::BloomLevelExtent(height, 0);
+    bloom.MipLevels = m_bloomLevels; bloom.ArraySize = 1;
+    bloom.Format = DXGI_FORMAT_R16G16B16A16_FLOAT; bloom.SampleDesc.Count = 1;
+    bloom.Usage = D3D11_USAGE_DEFAULT;
+    bloom.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+    ThrowIfFailed(device->CreateTexture2D(&bloom, nullptr, &m_bloom));
+    m_bloomRtvs.resize(m_bloomLevels);
+    m_bloomSrvs.resize(m_bloomLevels);
+    for (uint32_t level = 0; level < m_bloomLevels; ++level)
+    {
+        D3D11_RENDER_TARGET_VIEW_DESC rtv{};
+        rtv.Format = bloom.Format; rtv.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
+        rtv.Texture2D.MipSlice = level;
+        ThrowIfFailed(device->CreateRenderTargetView(m_bloom.Get(), &rtv, &m_bloomRtvs[level]));
+        D3D11_SHADER_RESOURCE_VIEW_DESC srv{};
+        srv.Format = bloom.Format; srv.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+        srv.Texture2D.MostDetailedMip = level; srv.Texture2D.MipLevels = 1;
+        ThrowIfFailed(device->CreateShaderResourceView(m_bloom.Get(), &srv, &m_bloomSrvs[level]));
+    }
+
     if (!m_vertexShader)
     {
-        const auto vs = Compile("VSMain", "vs_5_0");
-        const auto ps = Compile("PSMain", "ps_5_0");
+        const std::string source = Engine::Graphics::LoadPostProcessShaderSource();
+        const auto vs = Compile(source, "VSMain", "vs_5_0");
+        const auto ps = Compile(source, "PSMain", "ps_5_0");
+        const auto down = Compile(source, "BloomDownsamplePS", "ps_5_0");
+        const auto up = Compile(source, "BloomUpsamplePS", "ps_5_0");
         ThrowIfFailed(device->CreateVertexShader(vs->GetBufferPointer(), vs->GetBufferSize(), nullptr, &m_vertexShader));
         ThrowIfFailed(device->CreatePixelShader(ps->GetBufferPointer(), ps->GetBufferSize(), nullptr, &m_pixelShader));
+        ThrowIfFailed(device->CreatePixelShader(down->GetBufferPointer(), down->GetBufferSize(), nullptr, &m_bloomDownsampleShader));
+        ThrowIfFailed(device->CreatePixelShader(up->GetBufferPointer(), up->GetBufferSize(), nullptr, &m_bloomUpsampleShader));
         D3D11_SAMPLER_DESC sampler{};
         sampler.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
         sampler.AddressU = sampler.AddressV = sampler.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
         sampler.MaxLOD = D3D11_FLOAT32_MAX;
         ThrowIfFailed(device->CreateSamplerState(&sampler, &m_sampler));
-        D3D11_BUFFER_DESC cb{}; cb.ByteWidth = 16; cb.Usage = D3D11_USAGE_DYNAMIC;
+        D3D11_BUFFER_DESC cb{};
+        cb.ByteWidth = sizeof(Engine::Graphics::PostProcessConstants);
+        cb.Usage = D3D11_USAGE_DYNAMIC;
         cb.BindFlags = D3D11_BIND_CONSTANT_BUFFER; cb.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
         ThrowIfFailed(device->CreateBuffer(&cb, nullptr, &m_constants));
         D3D11_DEPTH_STENCIL_DESC depth{}; depth.DepthEnable = FALSE; depth.StencilEnable = FALSE;
@@ -98,11 +125,19 @@ void DX11PostProcess::Create(ID3D11Device* device, uint32_t width, uint32_t heig
     }
 }
 
+void DX11PostProcess::UploadConstants(ID3D11DeviceContext* context, const void* data)
+{
+    D3D11_MAPPED_SUBRESOURCE mapped{};
+    ThrowIfFailed(context->Map(m_constants.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped));
+    memcpy(mapped.pData, data, sizeof(Engine::Graphics::PostProcessConstants));
+    context->Unmap(m_constants.Get(), 0);
+}
+
 void DX11PostProcess::BindScene(ID3D11DeviceContext* context,
     ID3D11DepthStencilView* depth, const float clearColor[4])
 {
-    ID3D11ShaderResourceView* nullView = nullptr;
-    context->PSSetShaderResources(0, 1, &nullView);
+    ID3D11ShaderResourceView* nullViews[2] = {};
+    context->PSSetShaderResources(0, 2, nullViews);
     ID3D11RenderTargetView* target = m_sceneRtv.Get();
     context->OMSetRenderTargets(1, &target, depth);
     context->ClearRenderTargetView(target, clearColor);
@@ -133,13 +168,10 @@ void DX11PostProcess::AccumulateScene(ID3D11DeviceContext* context,
     context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     context->VSSetShader(m_vertexShader.Get(), nullptr, 0);
     context->PSSetShader(m_pixelShader.Get(), nullptr, 0);
-    struct Constants { float exposure; uint32_t op; float padding[2]; } values{
-        1.f, 4u, { sampleWeight, 0.f } };
-    D3D11_MAPPED_SUBRESOURCE mapped{};
-    ThrowIfFailed(context->Map(m_constants.Get(), 0, D3D11_MAP_WRITE_DISCARD,
-        0, &mapped));
-    memcpy(mapped.pData, &values, sizeof(values));
-    context->Unmap(m_constants.Get(), 0);
+    Engine::Graphics::PostProcessSettings accumulate{};
+    accumulate.toneMapping = 4u;
+    const auto values = Engine::Graphics::MakeComposeConstants(accumulate, 1u, sampleWeight);
+    UploadConstants(context, &values);
     ID3D11Buffer* cb = m_constants.Get();
     ID3D11ShaderResourceView* srv = m_sceneSrv.Get();
     ID3D11SamplerState* sampler = m_sampler.Get();
@@ -152,6 +184,63 @@ void DX11PostProcess::AccumulateScene(ID3D11DeviceContext* context,
     context->OMSetBlendState(nullptr, nullptr, 0xffffffffu);
 }
 
+void DX11PostProcess::RenderBloom(ID3D11DeviceContext* context,
+    ID3D11ShaderResourceView* source)
+{
+    // Bloom passes change viewport and rasterizer state; restore both so the
+    // caller's compose viewport is unaffected.
+    UINT savedViewportCount = D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE;
+    D3D11_VIEWPORT savedViewports[D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE]{};
+    context->RSGetViewports(&savedViewportCount, savedViewports);
+    Microsoft::WRL::ComPtr<ID3D11RasterizerState> savedRasterizer;
+    context->RSGetState(&savedRasterizer);
+    context->RSSetState(nullptr);
+
+    ID3D11Buffer* cb = m_constants.Get();
+    ID3D11SamplerState* sampler = m_sampler.Get();
+    context->PSSetConstantBuffers(0, 1, &cb);
+    context->PSSetSamplers(0, 1, &sampler);
+    ID3D11ShaderResourceView* nullView = nullptr;
+    const uint32_t bloomWidth = Engine::Graphics::BloomLevelExtent(m_width, 0);
+    const uint32_t bloomHeight = Engine::Graphics::BloomLevelExtent(m_height, 0);
+    const auto drawLevel = [&](uint32_t target, ID3D11ShaderResourceView* input,
+        uint32_t inputWidth, uint32_t inputHeight)
+    {
+        context->PSSetShaderResources(0, 1, &nullView);
+        ID3D11RenderTargetView* rtv = m_bloomRtvs[target].Get();
+        context->OMSetRenderTargets(1, &rtv, nullptr);
+        const D3D11_VIEWPORT viewport{ 0.f, 0.f,
+            static_cast<float>(std::max(1u, bloomWidth >> target)),
+            static_cast<float>(std::max(1u, bloomHeight >> target)), 0.f, 1.f };
+        context->RSSetViewports(1, &viewport);
+        const auto values = Engine::Graphics::MakeBloomPassConstants(inputWidth, inputHeight);
+        UploadConstants(context, &values);
+        context->PSSetShaderResources(0, 1, &input);
+        context->Draw(3, 0);
+    };
+
+    context->OMSetBlendState(nullptr, nullptr, 0xffffffffu);
+    context->PSSetShader(m_bloomDownsampleShader.Get(), nullptr, 0);
+    drawLevel(0, source, m_width, m_height);
+    for (uint32_t level = 1; level < m_bloomLevels; ++level)
+        drawLevel(level, m_bloomSrvs[level - 1].Get(),
+            std::max(1u, bloomWidth >> (level - 1)), std::max(1u, bloomHeight >> (level - 1)));
+
+    const float blendFactor[4] = {};
+    context->OMSetBlendState(m_additiveBlend.Get(), blendFactor, 0xffffffffu);
+    context->PSSetShader(m_bloomUpsampleShader.Get(), nullptr, 0);
+    for (uint32_t level = m_bloomLevels; level-- > 1;)
+        drawLevel(level - 1, m_bloomSrvs[level].Get(),
+            std::max(1u, bloomWidth >> level), std::max(1u, bloomHeight >> level));
+
+    context->PSSetShaderResources(0, 1, &nullView);
+    context->OMSetRenderTargets(0, nullptr, nullptr);
+    context->OMSetBlendState(nullptr, nullptr, 0xffffffffu);
+    context->RSSetState(savedRasterizer.Get());
+    if (savedViewportCount > 0)
+        context->RSSetViewports(savedViewportCount, savedViewports);
+}
+
 void DX11PostProcess::Compose(ID3D11DeviceContext* context,
     ID3D11RenderTargetView* output, bool useAccumulation)
 {
@@ -161,24 +250,32 @@ void DX11PostProcess::Compose(ID3D11DeviceContext* context,
         context->ResolveSubresource(m_resolvedColor.Get(), 0, m_sceneColor.Get(), 0,
             m_sceneFormat);
     }
-    context->OMSetRenderTargets(1, &output, nullptr);
+    const auto settings = Engine::Graphics::GetPostProcessSettings();
+    ID3D11ShaderResourceView* srv =
+        useAccumulation ? m_accumulationSrv.Get() : m_sceneSrv.Get();
     context->OMSetDepthStencilState(m_depthDisabled.Get(), 0);
-    context->OMSetBlendState(nullptr, nullptr, 0xffffffffu);
     context->IASetInputLayout(nullptr);
     context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     context->VSSetShader(m_vertexShader.Get(), nullptr, 0);
+    const bool bloom = settings.bloomIntensity > 0.f && !m_bloomRtvs.empty();
+    if (bloom)
+    {
+        context->OMSetRenderTargets(0, nullptr, nullptr);
+        RenderBloom(context, srv);
+    }
+    context->OMSetRenderTargets(1, &output, nullptr);
+    context->OMSetBlendState(nullptr, nullptr, 0xffffffffu);
     context->PSSetShader(m_pixelShader.Get(), nullptr, 0);
-    const auto settings = Engine::Graphics::GetPostProcessSettings();
-    struct Constants { float exposure; uint32_t op; float padding[2]; } values{
-        settings.exposure, settings.toneMapping, {} };
-    D3D11_MAPPED_SUBRESOURCE mapped{};
-    ThrowIfFailed(context->Map(m_constants.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped));
-    memcpy(mapped.pData, &values, sizeof(values)); context->Unmap(m_constants.Get(), 0);
-    ID3D11Buffer* cb = m_constants.Get(); ID3D11ShaderResourceView* srv =
-        useAccumulation ? m_accumulationSrv.Get() : m_sceneSrv.Get();
+    auto composeSettings = settings;
+    if (!bloom) composeSettings.bloomIntensity = 0.f;
+    const auto values = Engine::Graphics::MakeComposeConstants(composeSettings, m_bloomLevels);
+    UploadConstants(context, &values);
+    ID3D11Buffer* cb = m_constants.Get();
+    ID3D11ShaderResourceView* views[2] = { srv, bloom ? m_bloomSrvs[0].Get() : nullptr };
     ID3D11SamplerState* sampler = m_sampler.Get();
-    context->PSSetConstantBuffers(0, 1, &cb); context->PSSetShaderResources(0, 1, &srv);
+    context->PSSetConstantBuffers(0, 1, &cb); context->PSSetShaderResources(0, 2, views);
     context->PSSetSamplers(0, 1, &sampler); context->Draw(3, 0);
-    ID3D11ShaderResourceView* nullView = nullptr; context->PSSetShaderResources(0, 1, &nullView);
+    ID3D11ShaderResourceView* nullViews[2] = {};
+    context->PSSetShaderResources(0, 2, nullViews);
 }
 }

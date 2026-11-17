@@ -1,6 +1,6 @@
 #include "SpatialManipulator.h"
 
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Scene/Spatial/PortalAperture.h"
 #include "Core/Scene/Spatial/PortalMapping.h"

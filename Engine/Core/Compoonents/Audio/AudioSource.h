@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Core/Component.h"
-#include "Core/PropertyMacros.h"
+#include "Core/Compoonents/PropertyMacros.h"
 #include <string>
 
 namespace Engine::Audio { class Audio; }
@@ -56,7 +56,7 @@ public:
     void Pause();
     void Stop();
     bool IsPlaying() const;
-    bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
+    bool DrawProperties(Engine::Core::IInspectorUi& ui) override;
 
     void Start() override;
     void Update() override;

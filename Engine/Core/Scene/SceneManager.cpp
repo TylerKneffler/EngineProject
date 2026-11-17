@@ -1,5 +1,5 @@
 #include "pch.h"
-#include "Core/SceneManager.h"
+#include "Core/Scene/SceneManager.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include "Core/Serialization/Json.h"

@@ -7,7 +7,7 @@
 #include "Core/Compoonents/Physics/PrimitiveObjectCollider.h"
 #include "Core/Compoonents/Physics/MeshObjectCollider.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Physics/Internal/PhysicsInternal.h"
 #include "Core/Physics/IPhysicsAdapter.h"
 #include "Core/Scene/Scene.h"

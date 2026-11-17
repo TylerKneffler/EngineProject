@@ -1,11 +1,11 @@
 #pragma once
 #include "Core/Component.h"
-#include "Core/ComponentReference.h"
+#include "Core/Compoonents/ComponentReference.h"
 #include "Core/Compoonents/Mesh/Mesh.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
 #include "Core/Compoonents/Transform.h"
 #include "Core/Physics/Spatial/SpatialTraversalState.h"
-#include "Core/PropertyMacros.h"
+#include "Core/Compoonents/PropertyMacros.h"
 #include "Core/Scene/Spatial/WarpVolume.h"
 #include <array>
 #include <memory>
@@ -281,7 +281,7 @@ public:
     };
     void AppendTraversalRenderInstances(
         std::vector<TraversalRenderInstance>& output) const;
-    bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
+    bool DrawProperties(Engine::Core::IInspectorUi& ui) override;
 
 private:
     static constexpr int kMaxPortalShapePoints = 8;

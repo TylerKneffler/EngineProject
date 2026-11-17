@@ -1,7 +1,7 @@
 #pragma once
 
-#include "Core/PropertyMacros.h"
-#include "Core/Script.h"
+#include "Core/Compoonents/PropertyMacros.h"
+#include "Core/Compoonents/Script.h"
 #include <string>
 
 // Reverses a rigid body's velocity after it clears either longitudinal end of

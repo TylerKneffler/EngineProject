@@ -1,7 +1,7 @@
 #pragma once
 
-#include "Core/PropertyMacros.h"
-#include "Core/component.h"
+#include "Core/Compoonents/PropertyMacros.h"
+#include "Core/Compoonents/Component.h"
 #include <glm/glm.hpp>
 #include <cstdint>
 #include <vector>
@@ -34,7 +34,7 @@ public:
     float GetLength(bool forceClosed = false) const;
     size_t GetControlPointCount() const;
     uint64_t GetPointSignature() const { return BuildPointSignature(closed); }
-    bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
+    bool DrawProperties(Engine::Core::IInspectorUi& ui) override;
 
 private:
     struct ArcSample { float parameter = 0.f; float distance = 0.f; };

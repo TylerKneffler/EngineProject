@@ -1,5 +1,5 @@
 #include "Transform.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
 #include <glm/gtc/matrix_transform.hpp>
 

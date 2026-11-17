@@ -1,6 +1,6 @@
 #pragma once
-#include "Core/component.h"
-#include "Core/PropertyMacros.h"
+#include "Core/Compoonents/Component.h"
+#include "Core/Compoonents/PropertyMacros.h"
 #include <glm/glm.hpp>
 #include <string>
 
@@ -111,6 +111,6 @@ public:
             ? IntensityMode::Physical : IntensityMode::Legacy;
     }
 
-    bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
+    bool DrawProperties(Engine::Core::IInspectorUi& ui) override;
 };
 }

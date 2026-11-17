@@ -2,7 +2,7 @@
 #include "Engine/Editor/Core/PrimitiveObjectFactory.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 #include "Core/Scene/Scene.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Component.h"
 #include "Core/Compoonents/Materials/Material.h"
 #include "Core/Compoonents/Mesh/Mesh.h"

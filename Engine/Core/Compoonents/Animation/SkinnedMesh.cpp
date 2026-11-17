@@ -1,8 +1,8 @@
 #include "SkinnedMesh.h"
 #include "Skeleton.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
-#include "Engine/Editor/UI/IEditorUi.h"
+#include "Core/Inspection/IInspectorUi.h"
 #include <cmath>
 #include <glm/gtc/matrix_inverse.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -55,7 +55,7 @@ SkinnedMesh::SkinnedMesh()
     RegisterField("skeletonReference", skeletonReference);
 }
 
-bool SkinnedMesh::DrawProperties(::Engine::Editor::IEditorUi& ui)
+bool SkinnedMesh::DrawProperties(Engine::Core::IInspectorUi& ui)
 {
     bool changed = false;
     changed = DrawReferenceProperty(ui, "meshReference", "Mesh",

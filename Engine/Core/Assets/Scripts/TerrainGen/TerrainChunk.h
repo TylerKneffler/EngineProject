@@ -1,7 +1,7 @@
 #pragma once
 
-#include "Core/PropertyMacros.h"
-#include "Core/Script.h"
+#include "Core/Compoonents/PropertyMacros.h"
+#include "Core/Compoonents/Script.h"
 
 // Runtime metadata attached to a streamed terrain chunk. Keeping this as a
 // component makes generated hierarchy nodes inspectable and reusable by other

@@ -18,7 +18,7 @@ public:
     void SetAnimatedMorphWeights(const std::unordered_map<std::string, float>& weights);
     JsonValue Serialize() const override;
     void Deserialize(const JsonValue& value) override;
-    bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
+    bool DrawProperties(Engine::Core::IInspectorUi& ui) override;
 private:
     struct LastPose {
         glm::vec3 inputPosition {0.f}, inputRotation {0.f};

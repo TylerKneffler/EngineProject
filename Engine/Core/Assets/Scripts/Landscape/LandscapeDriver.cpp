@@ -8,7 +8,7 @@
 #include "Core/Compoonents/Mesh/Mesh.h"
 #include "Core/Compoonents/Materials/Material.h"
 #include "Core/Compoonents/Camera/Camera.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include <algorithm>
@@ -46,12 +46,15 @@ const std::array<glm::vec3, LayerCount> LayerPreview{{
     {.22f, .15f, .10f}, {.40f, .38f, .34f}, {.85f, .88f, .92f}}};
 
 // Mesh caches store the painted weights: change this with the paint rules.
-constexpr uint64_t PaintRevision = 0x4c414e4453435035ull;
-// Heights where rock and snow take over regardless of slope. Snow stays on
-// the summits (the ranges reach about 120 m).
-constexpr float RockLine = 58.f, SnowLine = 102.f;
-// Forests grow between the shore and this height.
-constexpr float TreeLine = 46.f;
+constexpr uint64_t PaintRevision = 0x4c414e4453435036ull;
+
+// Heights the paint and forests follow (see LandscapeDriver's properties).
+// blend scales the height transitions above the shore, so taller maps get
+// proportionally wider rock and snow fringes.
+struct Altitudes
+{
+    float water = -40.f, rock = 58.f, snow = 102.f, tree = 46.f, blend = 1.f;
+};
 
 float SmoothStep(float a, float b, float x)
 {
@@ -91,27 +94,30 @@ float ForestMask(float x, float z)
 }
 
 // Share of forest allowed at a height: none on shores or above the tree line.
-float ForestBand(float height, float waterLevel)
+float ForestBand(float height, const Altitudes& a)
 {
-    return SmoothStep(waterLevel + 4.f, waterLevel + 9.f, height) *
-        (1.f - SmoothStep(TreeLine - 8.f, TreeLine, height));
+    return SmoothStep(a.water + 4.f, a.water + 9.f, height) *
+        (1.f - SmoothStep(a.tree - 8.f * a.blend, a.tree, height));
 }
 
 // Six layer weights for one sample. rockClass is the archive's 0..3 code:
 // slope and ridge rockiness computed over the whole map by the generator.
 void PaintSample(float height, uint8_t rockClass, float worldX, float worldZ,
-    float waterLevel, float* weights)
+    const Altitudes& a, float* weights)
 {
+    const float waterLevel = a.water;
     const float detail = ValueNoise(worldX, worldZ, 22.f, 51u) - .5f;
     const float land = SmoothStep(waterLevel + 1.5f, waterLevel + 4.f, height);
     const float shore = SmoothStep(waterLevel - 3.5f, waterLevel - 1.f, height);
     const float rockSlope = rockClass / 3.f;
-    const float rockHigh = SmoothStep(RockLine - 8.f, RockLine + 8.f, height + detail * 14.f);
+    const float rockHigh = SmoothStep(a.rock - 8.f * a.blend, a.rock + 8.f * a.blend,
+        height + detail * 14.f * a.blend);
     const float rock = land * std::max(rockSlope, rockHigh);
-    const float snow = SmoothStep(SnowLine - 6.f, SnowLine + 6.f, height + detail * 10.f) *
+    const float snow = SmoothStep(a.snow - 6.f * a.blend, a.snow + 6.f * a.blend,
+        height + detail * 10.f * a.blend) *
         (1.f - .55f * rockSlope);
     const float soil = land * (1.f - rock) * ForestMask(worldX, worldZ) *
-        ForestBand(height, waterLevel) * .85f;
+        ForestBand(height, a) * .85f;
     weights[Sand] = 1.f - shore;
     weights[Gravel] = shore * (1.f - land);
     weights[Snow] = land * snow;
@@ -137,8 +143,9 @@ glm::vec3 LayerMacroColor(const char* path)
 // sand, gravel, meadow, a darker band where forests grow, rock, and summits
 // where snow lies between rock faces. They are 15% darker than the layer
 // means because near shading adds occlusion and texture contrast.
-TerrainManager::FarTerrainPalette MakePalette(float waterLevel)
+TerrainManager::FarTerrainPalette MakePalette(const Altitudes& a)
 {
+    const float waterLevel = a.water;
     TerrainManager::FarTerrainPalette palette;
     for (int layer = 0; layer < LayerCount; ++layer)
         palette.nearColors[layer] = LayerMacroColor(LayerMaterials[layer]);
@@ -148,8 +155,8 @@ TerrainManager::FarTerrainPalette MakePalette(float waterLevel)
     palette.farColors = {{mean[Sand] * .85f, mean[Gravel] * .85f, mean[Grass] * .85f,
         wooded * .85f, mean[Rock] * .85f, summit * .85f}};
     palette.heightBoundaries = {{waterLevel - 2.f, waterLevel + 3.f,
-        waterLevel + 30.f, RockLine, SnowLine}};
-    palette.heightBlendHalfWidth = 5.f;
+        waterLevel + 30.f, a.rock, a.snow}};
+    palette.heightBlendHalfWidth = 5.f * a.blend;
     palette.archiveToNear = {Sand, Gravel, Grass, Rock};
     return palette;
 }
@@ -157,65 +164,58 @@ TerrainManager::FarTerrainPalette MakePalette(float waterLevel)
 // Far-tile colors per cell corner: the near paint averaged over the corner's
 // cell-sized neighborhood, with forest canopy over forest soil, so distant
 // terrain shows the forests, rock, snow and lake beds the near cells show.
+// Streams the archive a cell at a time (large maps do not fit in memory at
+// full resolution) and paints every fourth sample, 16 m on the demo map.
 std::vector<glm::vec3> ComputeFarColors(const std::string& archivePath, uint64_t signature,
-    int extent, int cellsX, int cellsY, float cellWidth, float cellDepth, float waterLevel,
+    int extent, int cellsX, int cellsY, float cellWidth, float cellDepth, const Altitudes& a,
     const std::array<glm::vec3, LayerCount>& means)
 {
-    const int cellSide = extent * 2 + 1;
-    const int sampleSide = cellSide * cellsX + 1;
     if (cellsX != cellsY) return {};
-    std::vector<float> heights(static_cast<size_t>(sampleSide) * sampleSide, 0.f);
-    std::vector<uint8_t> codes(heights.size(), 0);
-    std::vector<float> cellHeights;
-    std::vector<uint8_t> cellCodes;
-    for (int cy = -extent; cy <= extent; ++cy)
-        for (int cx = -extent; cx <= extent; ++cx)
-        {
-            if (!TerrainHeightArchive::ReadCellCodes(archivePath, signature, extent,
-                    cellsX, cellsY, cx, cy, cellHeights, cellCodes)) return {};
-            const size_t originRow = static_cast<size_t>(cy + extent) * cellsY;
-            const size_t originCol = static_cast<size_t>(cx + extent) * cellsX;
-            for (int row = 0; row <= cellsY; ++row)
-                for (int col = 0; col <= cellsX; ++col)
-                {
-                    const size_t source = static_cast<size_t>(row) * (cellsX + 1) + col;
-                    const size_t target = (originRow + row) * sampleSide + originCol + col;
-                    heights[target] = cellHeights[source];
-                    codes[target] = cellCodes[source];
-                }
-        }
+    const int cellSide = extent * 2 + 1;
+    const int cornerSide = cellSide + 1;
+    std::vector<glm::vec4> sums(static_cast<size_t>(cornerSide) * cornerSide, glm::vec4(0.f));
     // Canopy seen from afar: dark leaf green.
     const glm::vec3 canopy(.030f, .052f, .020f);
-    const int cornerSide = cellSide + 1;
-    std::vector<glm::vec3> colors(static_cast<size_t>(cornerSide) * cornerSide);
-    const int step = 2; // every second sample: 8 m
-    for (int gy = 0; gy < cornerSide; ++gy)
-        for (int gx = 0; gx < cornerSide; ++gx)
-        {
-            glm::vec3 sum(0.f);
-            float count = 0.f;
-            const int centerRow = gy * cellsY, centerCol = gx * cellsX;
-            for (int dr = -cellsY / 2; dr <= cellsY / 2; dr += step)
-                for (int dc = -cellsX / 2; dc <= cellsX / 2; dc += step)
-                {
-                    const int row = centerRow + dr, col = centerCol + dc;
-                    if (row < 0 || col < 0 || row >= sampleSide || col >= sampleSide) continue;
-                    const size_t index = static_cast<size_t>(row) * sampleSide + col;
-                    const float worldX = (col - extent * cellsX) * cellWidth;
-                    const float worldZ = (row - extent * cellsY) * cellDepth;
-                    float weights[LayerCount];
-                    PaintSample(heights[index], codes[index], worldX, worldZ, waterLevel, weights);
-                    glm::vec3 color(0.f);
-                    for (int layer = 0; layer < LayerCount; ++layer)
-                        color += means[layer] * weights[layer];
-                    // Forest soil is .85 of the forest share; trees cover it.
-                    color = glm::mix(color, canopy, std::min(1.f, weights[ForestSoil] / .85f));
-                    sum += color;
-                    count += 1.f;
-                }
-            colors[static_cast<size_t>(gy) * cornerSide + gx] = count > 0.f ? sum / count * .85f
-                : glm::vec3(.1f);
-        }
+    const int step = std::max(1, cellsX / 8);
+    const int half = cellsX / 2;
+    const bool read = TerrainHeightArchive::ForEachCell(archivePath, signature, extent,
+        cellsX, cellsY, [&](int cx, int cy, const std::vector<float>& heights,
+            const std::vector<uint8_t>& codes)
+    {
+        // Rows and columns shared with the next cell are visited there,
+        // except along the map's far edges.
+        const int lastRow = cy == extent ? cellsY : cellsY - 1;
+        const int lastCol = cx == extent ? cellsX : cellsX - 1;
+        for (int row = 0; row <= lastRow; row += step)
+            for (int col = 0; col <= lastCol; col += step)
+            {
+                const size_t index = static_cast<size_t>(row) * (cellsX + 1) + col;
+                const float worldX = (cx * cellsX + col) * cellWidth;
+                const float worldZ = (cy * cellsY + row) * cellDepth;
+                float weights[LayerCount];
+                PaintSample(heights[index], codes[index], worldX, worldZ, a, weights);
+                glm::vec3 color(0.f);
+                for (int layer = 0; layer < LayerCount; ++layer)
+                    color += means[layer] * weights[layer];
+                // Forest soil is .85 of the forest share; trees cover it.
+                color = glm::mix(color, canopy, std::min(1.f, weights[ForestSoil] / .85f));
+                // Every corner within half a cell on both axes.
+                for (int dy = 0; dy <= 1; ++dy)
+                    for (int dx = 0; dx <= 1; ++dx)
+                    {
+                        if (std::abs(row - dy * cellsY) > half ||
+                            std::abs(col - dx * cellsX) > half) continue;
+                        const size_t corner = static_cast<size_t>(cy + extent + dy) *
+                            cornerSide + cx + extent + dx;
+                        sums[corner] += glm::vec4(color, 1.f);
+                    }
+            }
+        return true;
+    });
+    if (!read) return {};
+    std::vector<glm::vec3> colors(sums.size());
+    for (size_t i = 0; i < sums.size(); ++i)
+        colors[i] = sums[i].w > 0.f ? glm::vec3(sums[i]) / sums[i].w * .85f : glm::vec3(.1f);
     return colors;
 }
 
@@ -231,7 +231,7 @@ const std::array<const char*, 8> Species{
 // Forest for one cell: random candidates kept where the forest mask, the
 // height band and the slope allow, plus a few lone trees in the meadows.
 void GenerateForest(const TerrainManager::ObjectLayerContext& context,
-    TerrainObjectLayer& layer, float waterLevel, int treesPerCell)
+    TerrainObjectLayer& layer, const Altitudes& a, int treesPerCell)
 {
     if (!context.heights || context.cellsX <= 0 || context.cellsY <= 0 ||
         context.heights->size() != static_cast<size_t>(context.cellsX + 1) *
@@ -284,7 +284,7 @@ void GenerateForest(const TerrainManager::ObjectLayerContext& context,
         const float worldZ = context.cell.second * depth + z;
         // Lone meadow trees keep a 3% chance outside the forest mask.
         const float density = std::max(ForestMask(worldX, worldZ), .03f) *
-            ForestBand(height, waterLevel);
+            ForestBand(height, a);
         if (chance >= density) continue;
         TerrainObjectLayer::Placement placement;
         placement.id = ++id;
@@ -334,8 +334,9 @@ std::string LogPrefab()
 //    meadows in clumps.
 // Both layers end inside the loaded cells, so they have no far representation.
 void GenerateProps(const TerrainManager::ObjectLayerContext& context,
-    TerrainObjectLayer& layer, float waterLevel, bool undergrowth, float density)
+    TerrainObjectLayer& layer, const Altitudes& a, bool undergrowth, float density)
 {
+    const float waterLevel = a.water;
     if (!context.heights || context.cellsX <= 0 || context.cellsY <= 0 ||
         context.heights->size() != static_cast<size_t>(context.cellsX + 1) *
             (context.cellsY + 1)) return;
@@ -427,7 +428,7 @@ void GenerateProps(const TerrainManager::ObjectLayerContext& context,
             continue;
         const float worldX = context.cell.first * width + x;
         const float worldZ = context.cell.second * depth + z;
-        const float forest = ForestMask(worldX, worldZ) * ForestBand(height, waterLevel);
+        const float forest = ForestMask(worldX, worldZ) * ForestBand(height, a);
         if (undergrowth)
         {
             if (height < waterLevel + 1.5f || normal.y < .82f) continue;
@@ -469,6 +470,12 @@ void GenerateProps(const TerrainManager::ObjectLayerContext& context,
 }
 }
 
+Altitudes AltitudesOf(const LandscapeDriver& driver)
+{
+    return {driver.waterLevel, driver.rockLine, driver.snowLine, driver.treeLine,
+        std::clamp(driver.altitudeBlend, .1f, 50.f)};
+}
+
 LandscapeDriver::LandscapeDriver()
 {
     SetTypeName(COMPONENT_TYPE_NAME(LandscapeDriver));
@@ -479,6 +486,10 @@ LandscapeDriver::LandscapeDriver()
     RegisterField("cacheDirectory", cacheDirectory);
     RegisterField("enableFarTerrain", enableFarTerrain);
     RegisterField("waterLevel", waterLevel);
+    RegisterField("rockLine", rockLine);
+    RegisterField("snowLine", snowLine);
+    RegisterField("treeLine", treeLine);
+    RegisterField("altitudeBlend", altitudeBlend);
     RegisterField("treesPerCell", treesPerCell);
     RegisterField("forestLayerName", forestLayerName);
     RegisterField("grassRadius", grassRadius);
@@ -513,15 +524,18 @@ bool LandscapeDriver::ConfigureTerrain()
     const std::string archivePath = Engine::Components::Mesh::ResolveFilePath(heightArchive);
     const int countX = manager->cellsX, countY = manager->cellsY;
     const int extent = mapHalfExtentCells;
-    const float level = waterLevel;
+    const Altitudes level = AltitudesOf(*this);
     const int trees = std::clamp(treesPerCell, 0, 600);
     const std::string forestName = forestLayerName;
     const std::string propsName = propsLayerName, undergrowthName = undergrowthLayerName;
     const float propDensity = std::clamp(propsDensity, 0.f, 4.f);
     const float tiling = manager->cellsX * manager->cellWidth / 2.f; // 2 m repeats
 
-    manager->SetStaticCache(cacheDirectory, signature ^ PaintRevision ^
-        static_cast<uint64_t>(std::lround(level * 16.f)));
+    uint64_t paintKey = 0;
+    for (float value : {level.water, level.rock, level.snow, level.tree, level.blend})
+        paintKey = paintKey * 0x100000001b3ull ^
+            static_cast<uint64_t>(std::llround(value * 16.f));
+    manager->SetStaticCache(cacheDirectory, signature ^ PaintRevision ^ paintKey);
     // Everything captured by value: these run on streaming workers.
     manager->SetProceduralBuilder([=](TerrainManager::Cell cell, Terrain& terrain)
     {
@@ -625,11 +639,11 @@ void LandscapeDriver::OnAfterDeserialize(IGraphicsProvider*)
             mapHalfExtentCells, result.heights, &result.patches);
         if (result.loaded)
         {
-            auto palette = MakePalette(waterLevel);
+            auto palette = MakePalette(AltitudesOf(*this));
             palette.gridColors = ComputeFarColors(
                 Engine::Components::Mesh::ResolveFilePath(heightArchive), m_configuredSignature,
                 mapHalfExtentCells, manager->cellsX, manager->cellsY, manager->cellWidth,
-                manager->cellDepth, waterLevel, palette.nearColors);
+                manager->cellDepth, AltitudesOf(*this), palette.nearColors);
             palette.gridHalfExtent = mapHalfExtentCells;
             manager->ConfigureFarTerrain(mapHalfExtentCells, std::move(result.heights),
                 std::move(result.patches),
@@ -644,7 +658,8 @@ void LandscapeDriver::OnAfterDeserialize(IGraphicsProvider*)
         if (auto* camera = scene->editorCamera.GetComponent<Engine::Components::Camera>())
         {
             camera->target = glm::vec3(start);
-            camera->farPlane = 8000.f;
+            // See the whole map from its centre.
+            camera->farPlane = std::max(8000.f, 1.5f * (mapHalfExtentCells + 1) * std::max(spanX, spanZ));
         }
     }
     m_previewLoaded = true;
@@ -744,7 +759,7 @@ void LandscapeDriver::Update()
         const int extent = mapHalfExtentCells;
         const int cellsX = manager->cellsX, cellsY = manager->cellsY;
         const float cellWidth = manager->cellWidth, cellDepth = manager->cellDepth;
-        const float level = waterLevel;
+        const Altitudes level = AltitudesOf(*this);
         // Layer means come from material files: read them here, not on the job.
         const auto means = MakePalette(level).nearColors;
         m_farLoad = SubmitJob([=]
@@ -764,7 +779,7 @@ void LandscapeDriver::Update()
         FarGridLoad result = m_farLoad.get();
         if (result.loaded)
         {
-            auto palette = MakePalette(waterLevel);
+            auto palette = MakePalette(AltitudesOf(*this));
             palette.gridColors = std::move(result.gridColors);
             palette.gridHalfExtent = mapHalfExtentCells;
             manager->ConfigureFarTerrain(mapHalfExtentCells, std::move(result.heights),

@@ -4,8 +4,8 @@
 #include "Core/Compoonents/Materials/MaterialPropertyMorph.h"
 #include "Core/Compoonents/Mesh/Mesh.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
-#include "Core/Object.h"
-#include "Engine/Editor/UI/IEditorUi.h"
+#include "Core/Scene/Object.h"
+#include "Core/Inspection/IInspectorUi.h"
 #include <algorithm>
 #include <cmath>
 #include <glm/gtc/quaternion.hpp>
@@ -153,7 +153,7 @@ void RigMorphControls::ApplyImpulseMorphs() {
             }
     }
 }
-bool RigMorphControls::DrawProperties(::Engine::Editor::IEditorUi& ui) {
+bool RigMorphControls::DrawProperties(Engine::Core::IInspectorUi& ui) {
     bool changed = Component::DrawProperties(ui);
     struct Control {
         std::string name;

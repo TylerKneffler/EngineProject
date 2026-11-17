@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Core/Model/ImportedModel.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
 
 #include <cstdint>

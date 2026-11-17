@@ -1,7 +1,7 @@
 #pragma once
 
-#include "Core/Script.h"
-#include "Core/PropertyMacros.h"
+#include "Core/Compoonents/Script.h"
+#include "Core/Compoonents/PropertyMacros.h"
 #include <string>
 
 // Scene timing for the ordinary particle gallery. The emitter remains reusable;

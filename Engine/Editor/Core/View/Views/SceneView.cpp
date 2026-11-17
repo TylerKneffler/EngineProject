@@ -389,6 +389,144 @@ void SceneView::DrawPoseToolbar(const std::function<bool(float)>& next,
     ImGui::PopID();
 }
 
+namespace
+{
+// Select-tool operations, in m_regionOperation order.
+constexpr const char* kRegionOperations[] = {"Hydraulic erosion", "Thermal erosion", "Smooth",
+    "Noise", "Terrace", "Flatten", "Raise / lower", "Paint layer"};
+constexpr const char* kRegionShapes[] = {"Rectangle", "Ellipse", "Lasso", "Polygon"};
+}
+
+Engine::Components::TerrainRegionOperation::Kind SceneView::RegionOperationKind(int operation)
+{
+    using Kind = Engine::Components::TerrainRegionOperation::Kind;
+    static constexpr Kind kinds[] = {Kind::Hydraulic, Kind::Thermal, Kind::Smooth, Kind::Noise,
+        Kind::Terrace, Kind::Flatten, Kind::Raise, Kind::Raise};
+    return kinds[std::clamp(operation, 0, int(IM_ARRAYSIZE(kinds)) - 1)];
+}
+
+void SceneView::DrawRegionOperationSettings(Engine::Components::TerrainRegionOperation& op,
+    int operation, bool brush)
+{
+    ImGui::PushItemWidth(170.f);
+    if (!brush && operation != kRegionPaint)
+    {
+        ImGui::SliderFloat("Blend", &op.strength, 0.f, 1.f, "%.2f");
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("How much of the result replaces the terrain.");
+    }
+    switch (operation)
+    {
+    case 0:
+        if (!brush)
+        {
+            ImGui::DragFloat("Droplets / m2", &op.dropletDensity, .01f, .01f, 20.f, "%.2f");
+            ImGui::DragInt("Max droplets", &op.maxDroplets, 1000.f, 1000, 4000000);
+        }
+        ImGui::DragInt("Droplet lifetime", &op.maxSteps, .2f, 4, 400);
+        ImGui::SliderFloat("Erosion rate", &op.erodeSpeed, .01f, 1.f, "%.2f");
+        ImGui::SliderFloat("Deposition rate", &op.depositSpeed, .01f, 1.f, "%.2f");
+        ImGui::DragFloat("Capacity", &op.capacity, .05f, .1f, 32.f, "%.2f");
+        ImGui::SliderFloat("Inertia", &op.inertia, 0.f, .95f, "%.2f");
+        ImGui::SliderFloat("Evaporation", &op.evaporation, .001f, .2f, "%.3f");
+        ImGui::SliderInt("Erosion brush (samples)", &op.erosionRadius, 1, 8);
+        ImGui::DragFloat("Gentleness", &op.erosionUnit, .5f, 1.f, 1000.f, "%.0f");
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Height unit of the droplet rules, in grid spacings.\n"
+                "Lower carves deeper channels per droplet; 60 suits mountain-scale relief,\n"
+                "5-20 suits small hand-made hills.");
+        break;
+    case 1:
+        ImGui::SliderFloat("Talus angle", &op.talusDegrees, 5.f, 80.f, "%.0f deg");
+        if (!brush) ImGui::SliderInt("Iterations", &op.iterations, 1, 200);
+        break;
+    case 2:
+        ImGui::SliderInt("Iterations", &op.iterations, 1, 200);
+        break;
+    case 3:
+        ImGui::DragFloat("Scale (m)", &op.noiseScale, .1f, .5f, 4000.f, "%.1f");
+        ImGui::DragFloat("Amplitude (m)", &op.noiseAmplitude, .05f, 0.f, 500.f, "%.2f");
+        {
+            int seed = int(op.seed);
+            if (ImGui::DragInt("Seed", &seed, 1.f, 0, 1 << 20)) op.seed = uint32_t(std::max(0, seed));
+        }
+        break;
+    case 4:
+        ImGui::DragFloat("Step height (m)", &op.terraceStep, .05f, .05f, 500.f, "%.2f");
+        ImGui::SliderFloat("Flatness", &op.terraceSharpness, 0.f, .95f, "%.2f");
+        break;
+    case 5:
+        ImGui::DragFloat("Height", &op.height, .05f, -10000.f, 10000.f, "%.2f");
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Ctrl+click the terrain to pick a height.");
+        break;
+    case 6:
+        ImGui::DragFloat("Amount (m)", &op.amount, .05f, -10000.f, 10000.f, "%.2f");
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Negative lowers.");
+        break;
+    case kRegionPaint:
+        ImGui::SliderFloat("Opacity", &op.strength, 0.f, 1.f, "%.2f");
+        ImGui::TextDisabled("Layer: toolbar combo. Shift+Apply erases it.");
+        break;
+    default: break;
+    }
+    ImGui::PopItemWidth();
+}
+
+void SceneView::DrawTerrainRegionToolbar(const std::function<bool(float)>& next)
+{
+    if (next(105.f))
+    {
+        ImGui::SetNextItemWidth(105.f);
+        if (ImGui::Combo("##RegionShape", &m_regionShape, kRegionShapes, IM_ARRAYSIZE(kRegionShapes)))
+            m_regionDrawing = false;
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Selection shape.\n"
+                "Rectangle / Ellipse: drag corner to corner.\n"
+                "Lasso: drag to draw the outline.\n"
+                "Polygon: click points; click the first point, double-click or Enter closes.\n"
+                "Backspace removes the last point, Esc clears the selection.");
+    }
+    if (next(120.f))
+    {
+        ImGui::SetNextItemWidth(120.f);
+        if (ImGui::DragFloat("##RegionFeather", &m_regionFeather, .1f, 0.f, 1000.f, "Feather %.1f"))
+            m_regionMask.feather = std::max(0.f, m_regionFeather);
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Soft edge inside the selection, in metres.");
+    }
+    if (next(150.f))
+    {
+        ImGui::SetNextItemWidth(150.f);
+        ImGui::Combo("##RegionOperation", &m_regionOperation, kRegionOperations,
+            IM_ARRAYSIZE(kRegionOperations));
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Operation applied to the selection by Apply.");
+    }
+    if (next(80.f))
+    {
+        if (ImGui::Button("Settings##RegionOperation")) ImGui::OpenPopup("RegionOperationSettings");
+        if (ImGui::BeginPopup("RegionOperationSettings"))
+        {
+            DrawRegionOperationSettings(m_regionSettings, m_regionOperation, false);
+            ImGui::EndPopup();
+        }
+    }
+    const bool hasSelection = !m_regionMask.Empty();
+    if (next(70.f))
+    {
+        ImGui::BeginDisabled(!hasSelection);
+        if (ImGui::Button("Apply##Region")) m_regionApplyRequested = true;
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            ImGui::SetTooltip(hasSelection ? "Run the operation on the selection (one undo step).\n"
+                "Enter over the viewport does the same." : "Draw a selection on the terrain first.");
+    }
+    if (next(60.f))
+    {
+        ImGui::BeginDisabled(!hasSelection && !m_regionDrawing);
+        if (ImGui::Button("Clear##Region")) ClearRegionSelection();
+        ImGui::EndDisabled();
+    }
+    if (!m_regionStatus.empty() && next(170.f)) ImGui::TextDisabled("%s", m_regionStatus.c_str());
+}
+
 void SceneView::DrawTerrainToolbar(const std::function<bool(float)>& next)
 {
     if (m_editMode != SceneEditMode::Terrain || !m_scene) return;
@@ -412,36 +550,55 @@ void SceneView::DrawTerrainToolbar(const std::function<bool(float)>& next)
         ImGui::PopID();
         return;
     }
-    const char* modes[] = {"Raise", "Lower", "Smooth", "Flatten", "Paint", "Objects"};
+    const char* modes[] = {"Raise", "Lower", "Smooth", "Flatten", "Paint", "Objects",
+        "Erode", "Weather", "Noise", "Terrace", "Select"};
     if (next(112.f))
     {
         ImGui::SetNextItemWidth(112.f);
-        ImGui::Combo("##TerrainBrush", &m_terrainBrush, modes, IM_ARRAYSIZE(modes));
+        if (ImGui::Combo("##TerrainBrush", &m_terrainBrush, modes, IM_ARRAYSIZE(modes)))
+            m_regionDrawing = false;
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("Terrain tool. Hold Shift to invert it while painting:\n"
-                "Raise <-> Lower, Paint -> erase the layer, Objects -> erase objects.\n"
-                "Flatten levels to the height where the stroke starts.");
+                "Raise <-> Lower, Paint -> erase the layer, Objects -> erase objects,\n"
+                "Noise -> negative noise.\n"
+                "Flatten levels to the height where the stroke starts.\n"
+                "Erode: hydraulic erosion under the brush (droplets carve and settle).\n"
+                "Weather: thermal erosion, steep slopes slump to the talus angle.\n"
+                "Select: draw a rectangle, ellipse, lasso or polygon, then Apply an\n"
+                "operation (erosion, smoothing, paint...) to the whole region at once.");
     }
-    if (next(120.f))
+    const bool selectTool = m_terrainBrush == kSelectTool;
+    if (selectTool) DrawTerrainRegionToolbar(next);
+    if (!selectTool && next(120.f))
     {
         ImGui::SetNextItemWidth(120.f);
         ImGui::DragFloat("##TerrainRadius", &m_terrainRadius,
             .05f, .05f, 100.f, "Radius %.1f");
     }
-    if (m_terrainBrush != kObjectBrush && next(135.f))
+    if (m_terrainBrush != kObjectBrush && !selectTool && next(135.f))
     {
         ImGui::SetNextItemWidth(135.f);
         ImGui::DragFloat("##TerrainStrength", &m_terrainStrength,
             .01f, .001f, 2.f, "Strength %.2f");
     }
-    if (m_terrainBrush != kObjectBrush && next(130.f))
+    if (m_terrainBrush != kObjectBrush && !selectTool && next(130.f))
     {
         ImGui::SetNextItemWidth(130.f);
         ImGui::SliderFloat("##TerrainHardness", &m_terrainHardness, 0.f, 1.f, "Hardness %.2f");
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("Share of the radius at full strength; the rest fades out smoothly.");
     }
-    if (m_terrainBrush == kPaintBrush)
+    if (m_terrainBrush >= kErodeBrush && m_terrainBrush <= kTerraceBrush && next(80.f))
+    {
+        if (ImGui::Button("Settings##BrushOperation")) ImGui::OpenPopup("BrushOperationSettings");
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Settings of this brush");
+        if (ImGui::BeginPopup("BrushOperationSettings"))
+        {
+            DrawRegionOperationSettings(m_brushOperation, BrushOperationKind(m_terrainBrush), true);
+            ImGui::EndPopup();
+        }
+    }
+    if (m_terrainBrush == kPaintBrush || (selectTool && m_regionOperation == kRegionPaint))
     {
         // Layer names come from the selected cell, or any loaded cell of the
         // manager (cells of one manager share their layer list).
@@ -558,7 +715,7 @@ void SceneView::DrawTerrainToolbar(const std::function<bool(float)>& next)
                 "When on, objects painted aligned to the surface also tilt to the new slope;\n"
                 "when off, they keep the orientation they were painted with.");
     }
-    if (m_terrainBrush != kObjectBrush && manager && next(125.f))
+    if (m_terrainBrush != kObjectBrush && !selectTool && manager && next(125.f))
         ImGui::Checkbox("Edit cells", &m_editTerrainCells);
     if (next(110.f))
     {
@@ -836,7 +993,7 @@ void SceneView::DrawPanel(IEditorUi& ui)
         }
     }
     if ((terrain || manager) && m_editMode == SceneEditMode::Terrain && !objectBrush &&
-        !(manager && m_editTerrainCells))
+        m_terrainBrush <= kPaintBrush && !(manager && m_editTerrainCells))
     {
         glm::dvec3 hit{};
         if (input.hovered && !input.rightDown && !input.middleDown &&
@@ -887,7 +1044,224 @@ void SceneView::DrawPanel(IEditorUi& ui)
             }
         }
     }
-    if (manager && m_editMode == SceneEditMode::Terrain && !objectBrush &&
+    // Region-operation brushes: each frame the button is held runs a small
+    // operation under the brush through the same cross-cell window as the
+    // Select tool, so erosion flows over cell borders without seams.
+    const bool operationBrush = terrainTools && m_terrainBrush >= kErodeBrush &&
+        m_terrainBrush <= kTerraceBrush;
+    if (operationBrush)
+    {
+        glm::dvec3 hit{};
+        if (input.hovered && !input.rightDown && !input.middleDown &&
+            ScenePlacementAndPicking::FindTerrainSurfaceHit(*m_scene, terrainTarget.root,
+                input.mousePosInViewport, input.available, hit))
+        {
+            const glm::dvec3 local = SceneTerrainTools::ToLocal(terrainTarget, hit);
+            static constexpr uint32_t colors[] = {IM_COL32(90, 170, 255, 230),
+                IM_COL32(210, 175, 120, 230), IM_COL32(220, 120, 255, 230),
+                IM_COL32(255, 220, 110, 230)};
+            drawRing(local, m_terrainHardness, colors[m_terrainBrush - kErodeBrush]);
+            if (input.leftDown)
+            {
+                terrainConsumedClick = true;
+                auto op = m_brushOperation;
+                op.kind = RegionOperationKind(BrushOperationKind(m_terrainBrush));
+                const float rate = std::clamp(m_terrainStrength * ImGui::GetIO().DeltaTime * 30.f,
+                    0.f, 4.f);
+                const float spacing = manager ? std::max(manager->cellWidth, manager->cellDepth)
+                    : std::max(terrain->cellWidth, terrain->cellDepth);
+                op.strength = 1.f;
+                switch (m_terrainBrush)
+                {
+                case kErodeBrush:
+                    // About half a droplet per covered sample per frame at
+                    // strength 1, new droplets every frame.
+                    op.dropletDensity = .5f * rate / std::max(1e-4f, spacing * spacing);
+                    op.seed = m_brushSeed++;
+                    break;
+                case kWeatherBrush:
+                    op.iterations = 1;
+                    op.strength = std::min(1.f, rate);
+                    break;
+                case kNoiseBrush:
+                    op.noiseAmplitude = m_brushOperation.noiseAmplitude * .1f * rate *
+                        (invert ? -1.f : 1.f);
+                    break;
+                default:
+                    op.strength = std::min(1.f, .2f * rate);
+                    break;
+                }
+                const auto mask = Engine::Components::TerrainRegionMask::Circle(
+                    {local.x, local.z}, m_terrainRadius, m_terrainHardness);
+                const bool changed = manager
+                    ? manager->EditRegion(mask, op, m_terrainRealignObjects)
+                    : terrain->EditRegion(mask, op, m_terrainRealignObjects);
+                m_terrainEditActive = m_terrainEditActive || changed;
+            }
+        }
+    }
+    // Select tool: draw a region, then Apply (toolbar or Enter) runs the
+    // chosen operation once over all of it as a single undo step.
+    const bool regionTool = terrainTools && m_terrainBrush == kSelectTool;
+    if (!regionTool) m_regionDrawing = false;
+    if (regionTool)
+    {
+        const auto& io = ImGui::GetIO();
+        glm::dvec3 hit{};
+        glm::dvec3 local{};
+        const bool overTerrain = input.hovered && !input.rightDown && !input.middleDown &&
+            ScenePlacementAndPicking::FindTerrainSurfaceHit(*m_scene, terrainTarget.root,
+                input.mousePosInViewport, input.available, hit);
+        if (overTerrain) local = SceneTerrainTools::ToLocal(terrainTarget, hit);
+        const glm::dvec2 point(local.x, local.z);
+        const glm::vec2 mouse(io.MousePos.x, io.MousePos.y);
+        const glm::vec2 screenMin(input.screenMin.x, input.screenMin.y);
+        const glm::vec2 screenSize(input.available.x, input.available.y);
+        const auto commitPolygon = [&] {
+            if (m_regionPoints.size() >= 3)
+                m_regionMask = Engine::Components::TerrainRegionMask::Polygon(m_regionPoints,
+                    m_regionFeather);
+            m_regionPoints.clear();
+            m_regionDrawing = false;
+        };
+        if (input.hovered && !io.WantTextInput)
+        {
+            if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) ClearRegionSelection();
+            if (m_regionShape == 3 && m_regionDrawing && !m_regionPoints.empty() &&
+                ImGui::IsKeyPressed(ImGuiKey_Backspace, false))
+            {
+                m_regionPoints.pop_back();
+                m_regionDrawing = !m_regionPoints.empty();
+            }
+            if (ImGui::IsKeyPressed(ImGuiKey_Enter, false) ||
+                ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false))
+            {
+                if (m_regionShape == 3 && m_regionDrawing) commitPolygon();
+                else if (!m_regionMask.Empty()) m_regionApplyRequested = true;
+            }
+        }
+        if (overTerrain && io.KeyCtrl && input.leftClicked)
+            // Ctrl+click: pick the Flatten height from the surface.
+            m_regionSettings.height = float(local.y);
+        else if (input.hovered && !io.KeyCtrl)
+        {
+            if (m_regionShape <= 1)
+            {
+                if (input.leftDown && !m_regionDrawing && overTerrain)
+                {
+                    m_regionStart = m_regionLast = point;
+                    m_regionDrawing = true;
+                }
+                if (m_regionDrawing && overTerrain) m_regionLast = point;
+                if (m_regionDrawing && !input.leftDown)
+                {
+                    auto mask = Engine::Components::TerrainRegionMask::Box(m_regionStart,
+                        m_regionLast, m_regionShape == 1, m_regionFeather);
+                    // A click without a drag clears the selection.
+                    m_regionMask = mask.Empty() ? Engine::Components::TerrainRegionMask{} : mask;
+                    m_regionDrawing = false;
+                }
+            }
+            else if (m_regionShape == 2)
+            {
+                if (input.leftDown && !m_regionDrawing && overTerrain)
+                {
+                    m_regionPoints = {point};
+                    m_regionLastScreen = mouse;
+                    m_regionDrawing = true;
+                }
+                else if (m_regionDrawing && input.leftDown && overTerrain &&
+                    glm::distance(mouse, m_regionLastScreen) >= 6.f)
+                {
+                    m_regionPoints.push_back(point);
+                    m_regionLastScreen = mouse;
+                }
+                if (m_regionDrawing && !input.leftDown)
+                {
+                    if (m_regionPoints.size() < 3) m_regionMask = {};
+                    commitPolygon();
+                }
+            }
+            else if (input.leftClicked && overTerrain)
+            {
+                glm::vec2 first;
+                const bool closes = m_regionDrawing && m_regionPoints.size() >= 3 &&
+                    (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) ||
+                        (SceneTerrainTools::ProjectSurface(terrainTarget, m_regionPoints.front(),
+                            terrainViewProjection, screenMin, screenSize, first) &&
+                            glm::distance(first, mouse) <= 10.f));
+                if (closes) commitPolygon();
+                else
+                {
+                    if (!m_regionDrawing) { m_regionPoints.clear(); m_regionDrawing = true; }
+                    m_regionPoints.push_back(point);
+                }
+            }
+        }
+        terrainConsumedClick = terrainConsumedClick ||
+            (input.hovered && (input.leftDown || input.leftClicked));
+        if (terrainRingVisible)
+        {
+            const uint32_t selectionColor = IM_COL32(80, 200, 255, 230);
+            const uint32_t draftColor = IM_COL32(255, 230, 120, 230);
+            if (!m_regionMask.Empty())
+                SceneTerrainTools::DrawRegionHighlight(terrainTarget, m_regionMask,
+                    terrainViewProjection, screenMin, screenSize, selectionColor);
+            if (m_regionDrawing && m_regionShape <= 1)
+            {
+                const auto draft = Engine::Components::TerrainRegionMask::Box(m_regionStart,
+                    m_regionLast, m_regionShape == 1, m_regionFeather);
+                if (!draft.Empty())
+                    SceneTerrainTools::DrawRegionHighlight(terrainTarget, draft,
+                        terrainViewProjection, screenMin, screenSize, draftColor);
+            }
+            else if (m_regionDrawing && !m_regionPoints.empty())
+            {
+                auto line = m_regionPoints;
+                if (m_regionShape == 3 && overTerrain) line.push_back(point);
+                SceneTerrainTools::DrawDrapedPolyline(terrainTarget, line, false,
+                    terrainViewProjection, screenMin, screenSize, draftColor, 2.f);
+                glm::vec2 first;
+                if (m_regionShape == 3 && SceneTerrainTools::ProjectSurface(terrainTarget,
+                        m_regionPoints.front(), terrainViewProjection, screenMin, screenSize, first))
+                    ImGui::GetForegroundDrawList()->AddCircle({first.x, first.y}, 6.f,
+                        draftColor, 0, 2.f);
+            }
+        }
+    }
+    if (m_regionApplyRequested)
+    {
+        m_regionApplyRequested = false;
+        if (terrainTools && !m_regionMask.Empty())
+        {
+            const auto begin = std::chrono::steady_clock::now();
+            m_regionMask.feather = std::max(0.f, m_regionFeather);
+            bool changed = false;
+            if (m_regionOperation == kRegionPaint)
+                changed = manager
+                    ? manager->PaintRegion(m_regionMask, m_regionSettings.strength, m_terrainLayer, invert)
+                    : terrain->PaintRegion(m_regionMask, m_regionSettings.strength, m_terrainLayer, invert);
+            else
+            {
+                auto op = m_regionSettings;
+                op.kind = RegionOperationKind(m_regionOperation);
+                changed = manager ? manager->EditRegion(m_regionMask, op, m_terrainRealignObjects)
+                    : terrain->EditRegion(m_regionMask, op, m_terrainRealignObjects);
+                // Repeated erosion applies fresh droplets.
+                if (op.kind == Engine::Components::TerrainRegionOperation::Kind::Hydraulic)
+                    ++m_regionSettings.seed;
+            }
+            const double ms = std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - begin).count();
+            char status[96];
+            std::snprintf(status, sizeof(status), changed ? "Applied in %.0f ms" :
+                "No change (%.0f ms)", ms);
+            m_regionStatus = status;
+            // Reported as a one-frame edit: one undo step.
+            if (changed) m_terrainEditActive = true;
+        }
+    }
+    if (manager && m_editMode == SceneEditMode::Terrain && !objectBrush && !regionTool &&
         input.available.x > 0.f && input.available.y > 0.f)
     {
         if (m_editTerrainCells)

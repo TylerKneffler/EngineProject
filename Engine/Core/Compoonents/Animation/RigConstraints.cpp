@@ -1,9 +1,9 @@
 #include "RigConstraints.h"
 #include "RigController.h" // legacy scene data conversion
 #include "Core/Compoonents/Animation/Model.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
-#include "Engine/Editor/UI/IEditorUi.h"
+#include "Core/Inspection/IInspectorUi.h"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -375,7 +375,7 @@ void RigConstraints::PostPhysicsUpdate()
         ApplyConstraints(*model, true);
 }
 
-bool RigConstraints::DrawProperties(::Engine::Editor::IEditorUi& ui)
+bool RigConstraints::DrawProperties(Engine::Core::IInspectorUi& ui)
 {
     bool changed = Component::DrawProperties(ui);
     const std::string appendCount = std::to_string(appendRules.size());

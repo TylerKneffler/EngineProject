@@ -4,10 +4,10 @@
 #include "Core/Compoonents/Animation/IKBone.h"
 #include "Core/Compoonents/Animation/Skeleton.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Serialization/SceneSerializer.h"
-#include "Engine/Editor/UI/IEditorUi.h"
+#include "Core/Inspection/IInspectorUi.h"
 #include <algorithm>
 #include <cstdio>
 
@@ -177,7 +177,7 @@ void FoxRagdollBlend::Update()
     }
 }
 
-bool FoxRagdollBlend::DrawProperties(Engine::Editor::IEditorUi& ui)
+bool FoxRagdollBlend::DrawProperties(Engine::Core::IInspectorUi& ui)
 {
     const bool changed = Engine::Core::Component::DrawProperties(ui);
     const char* phase = m_elapsed < std::max(animationSeconds, 0.f)

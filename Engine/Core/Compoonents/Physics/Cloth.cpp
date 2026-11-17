@@ -4,7 +4,7 @@
 #include "Core/Compoonents/Physics/RigidBody.h"
 #include "Core/Compoonents/Mesh/Mesh.h"
 #include "Core/Memory/CacheStore.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Physics/Internal/PhysicsInternal.h"
 #include "Core/Physics/Cloth/ClothSimulationMeshCache.h"

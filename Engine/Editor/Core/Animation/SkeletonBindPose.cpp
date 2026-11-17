@@ -3,7 +3,7 @@
 #include "Core/Compoonents/Animation/Model.h"
 #include "Core/Compoonents/Animation/SkinnedMesh.h"
 #include "Core/Scene/Scene.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Compoonents/Transform.h"
 #include <algorithm>
 #include <cmath>

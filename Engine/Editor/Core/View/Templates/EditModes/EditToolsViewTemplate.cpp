@@ -7,7 +7,7 @@
 #include "Engine/Editor/Core/View/Views/AnimationView.h"
 #include "Editor/Core/View/EditorViewportSettings.h"
 #include "Core/Scene/Scene.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Compoonents/Mesh/Mesh.h"
 #include "Core/Compoonents/Sprite/Sprite.h"
 #include "Core/Compoonents/Animation/Skeleton.h"
@@ -1335,14 +1335,17 @@ void EditorState::DrawGlobalToolbar(IEditorUi& ui, ToolbarSection section,
             ImGui::EndPopup();
         }
         int renderMode = view->GetSceneRenderMode();
-        const char* renderNames[]{ "Lit", "Unlit", "Wireframe", "Performance", "Detail" };
+        const char* renderNames[]{ "Lit", "Unlit", "Wireframe", "Performance", "Detail", "Triangles" };
         if (row.Next(108.f))
         {
             ui.SetNextItemWidth(108.f);
-            if (ui.Combo("##GlobalRenderMode", &renderMode, renderNames, 5))
+            if (ui.Combo("##GlobalRenderMode", &renderMode, renderNames, 6))
                 view->SetSceneRenderMode(renderMode);
             ui.Tooltip("Scene render mode");
         }
+        if (renderMode == static_cast<int>(Engine::Model::SceneRenderMode::Triangles))
+            ui.Tooltip("Triangles view: every triangle gets its own colour, distinct from its neighbours. "
+                "Fine confetti = dense geometry; large patches = few, large triangles");
         if (renderMode == static_cast<int>(Engine::Model::SceneRenderMode::Detail))
             ui.Tooltip("Detail view: red = full LOD and full texture resolution on screen; "
                 "blue = low LOD band or blurred texture (fewer than 1 texel per 8 pixels)");

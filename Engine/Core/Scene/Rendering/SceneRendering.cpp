@@ -185,7 +185,8 @@ void ApplyResolvedMaterialRecord(const ResolvedMaterialRecord& material,
 
 static_assert(sizeof(DrawCBData) == 16, "Draw constants must remain small");
 static_assert(offsetof(ObjectGPUData, grassCapsules) == 1552, "Grass capsule data must follow the existing object fields");
-static_assert(sizeof(ObjectGPUData) == 1680, "Object buffer layout must match Object.hlsl");
+static_assert(sizeof(ObjectGPUData) == 1696, "Object buffer layout must match Object.hlsl");
+static_assert(offsetof(ObjectGPUData, terrainSunShadow) == 1680, "Terrain sun shadow data must follow the grass capsules");
 static_assert(sizeof(Engine::Model::LightData) == 128,
     "Light buffer layout must match Object.hlsl");
 
@@ -287,9 +288,25 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     }
 
     if (!shadowOnly)
-        Engine::Graphics::SetPostProcessSettings({
-            std::exp2(std::clamp(settings.outputExposure, -16.f, 16.f)),
-            static_cast<uint32_t>(settings.toneMapping) });
+    {
+        Engine::Graphics::PostProcessSettings postProcess{};
+        postProcess.exposure = std::exp2(std::clamp(settings.outputExposure, -16.f, 16.f));
+        postProcess.toneMapping = static_cast<uint32_t>(settings.toneMapping);
+        // Debug views (unlit, wireframe, heat maps) show raw values.
+        const bool lookEffects = settings.renderMode == Engine::Model::SceneRenderMode::Lit;
+        postProcess.bloomIntensity = lookEffects && settings.bloomEnabled
+            ? settings.bloomIntensity : 0.f;
+        postProcess.colorGrading = lookEffects && settings.colorGradingEnabled;
+        for (int channel = 0; channel < 3; ++channel)
+        {
+            postProcess.shadowTint[channel] = settings.gradingShadowTint[channel];
+            postProcess.highlightTint[channel] = settings.gradingHighlightTint[channel];
+        }
+        postProcess.gradingBalance = settings.gradingBalance;
+        postProcess.gradingContrast = settings.gradingContrast;
+        postProcess.gradingSaturation = settings.gradingSaturation;
+        Engine::Graphics::SetPostProcessSettings(postProcess);
+    }
 
     if (m_nativeRenderPacketTaken && !nativePacket)
         throw std::logic_error("Native frame draw list was transferred to a render packet");
@@ -796,6 +813,8 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         Engine::Model::SceneRenderMode::Performance;
     const bool detailHeatMode = !shadowOnly && renderMode ==
         Engine::Model::SceneRenderMode::Detail;
+    const bool triangleMode = !shadowOnly && renderMode ==
+        Engine::Model::SceneRenderMode::Triangles;
     const auto cascadePreparation = Engine::Scene::Renderer::SceneRendererShadows::PrepareDirectionalShadowCascades(
         *this,
         context,
@@ -900,7 +919,9 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         proj,
         viewportWidth,
         viewportHeight,
-        shadowOnly);
+        shadowOnly,
+        terrainSunIndex >= 0 ? terrainSunDirection : glm::vec3(0.f),
+        terrainSunIndex >= 0 ? terrainSunRadiance : glm::vec3(0.f));
 
     // Render phase 4: build the visible, sorted draw candidates.
     // Opaque and masked materials render first. Blended materials render
@@ -1846,6 +1867,21 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
                     static_cast<int>(shadowSelection.lightIndex)
                     ? static_cast<float>(terrainSunIndex + 1) : 0.f);
             objectData.bakedLightDirection = glm::vec4(terrainSunDirection, 0.f);
+            // Long-range sun shadow from the far height grid. Terrain leaves
+            // material slots 0-5 empty, so the map borrows slot 4.
+            const auto* terrainManager = terrainSunIndex >= 0 && renderItem->object
+                ? renderItem->object->GetComponentInParent<
+                    Engine::Components::TerrainManager>() : nullptr;
+            if (terrainManager && terrainManager->longRangeShadows)
+            {
+                const auto sunShadow = const_cast<Engine::Components::TerrainManager*>(
+                    terrainManager)->GetSunShadowMap(m_graphicsProvider, terrainSunDirection);
+                if (sunShadow.texture)
+                {
+                    preparedDraw.textures[4] = sunShadow.texture;
+                    objectData.terrainSunShadow = sunShadow.mapping;
+                }
+            }
         }
         const uint32_t qualityLightCount = fastTerrainLighting
             ? 0u : beyondLightingDistance ? 0u :
@@ -2031,6 +2067,14 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         for (auto& draw : preparedDraws)
             if (draw.frameItemIndex < occlusionMarked.size() && occlusionMarked[draw.frameItemIndex])
                 draw.objectData.morphParams.z = -9000.f;
+    }
+    if (triangleMode)
+    {
+        // Object.hlsl colours each triangle from SV_PrimitiveID (see
+        // IsTriangleDraw). Positive values are the editor weight-paint bone.
+        for (auto& draw : preparedDraws)
+            if (draw.objectData.morphParams.z <= 0.f)
+                draw.objectData.morphParams.z = -20000.f;
     }
     // Render phase 6: apply screen LOD, upload object records, and build instance batches.
     // Fixed editor LOD selection suppresses the other bands. Remove their

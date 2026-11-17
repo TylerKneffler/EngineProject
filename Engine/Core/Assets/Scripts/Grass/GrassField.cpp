@@ -1,7 +1,7 @@
 #include "Core/Rendering/DetailBudget.h"
 #include "Scripts/Grass/GrassField.h"
 
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Compoonents/Terrain/Terrain.h"
 #include "Core/Compoonents/Terrain/TerrainObjectLayer.h"

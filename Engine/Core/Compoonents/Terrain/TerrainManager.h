@@ -81,6 +81,22 @@ public:
     bool batchFarCells = true;
     // Optional fast directional diffuse shading for static play-mode terrain.
     bool fastRuntimeLighting = false;
+    // Sun shadows from distant ridges, beyond the realtime cascades: a soft
+    // visibility map over the far height grid, ray-marched toward the sun on
+    // a worker thread whenever the sun moves. Softness is the penumbra width
+    // in degrees of sun elevation.
+    bool longRangeShadows = true;
+    float longRangeShadowSoftness = 1.5f;
+    struct SunShadowMap
+    {
+        const Engine::Graphics::IGraphicsTexture* texture = nullptr;
+        // World X/Z of the map's corner, and 1 / extent along X and Z.
+        glm::vec4 mapping{ 0.f };
+    };
+    // The latest finished map for roughly this sun direction (it may lag a
+    // moving sun by one build); empty until the first build completes.
+    SunShadowMap GetSunShadowMap(IGraphicsProvider* provider,
+        const glm::vec3& directionToSun);
     // Compare stochastic tile variation with the low-cost world-space UV warp.
     bool stochasticTerrainVariation = false;
     // Measured lowest-mip layer colors can replace distant detail in the
@@ -314,6 +330,13 @@ public:
     bool ApplyBrush(double x, double z, float radius, float strength,
         Terrain::Brush brush, int layer = 0, bool realignObjects = false,
         const Terrain::BrushOptions& options = {});
+    // Region editing across cells (TerrainRegionEdit.h), in the manager's
+    // local X/Z. Cells under the mask (plus the operation's margin) load if
+    // needed and form one height window, so erosion and smoothing flow over
+    // cell borders and shared samples stay identical.
+    bool EditRegion(const TerrainRegionMask& mask, const TerrainRegionOperation& operation,
+        bool realignObjects = false);
+    bool PaintRegion(const TerrainRegionMask& mask, float strength, int layer, bool erase);
     void SyncLoadedCells(int centerX, int centerY);
     void UpdateStreaming(int centerX, int centerY);
     void UpdateStreamingAtPosition(const glm::dvec3& worldPosition);
@@ -328,7 +351,7 @@ public:
     void Deserialize(const JsonValue& value) override;
     void OnAfterDeserialize(IGraphicsProvider* provider) override;
     void PrepareGraphicsResources(IGraphicsProvider* provider) override;
-    bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
+    bool DrawProperties(Engine::Core::IInspectorUi& ui) override;
 private:
     std::map<Cell, JsonValue> m_cells;
     std::map<Cell, JsonValue> m_objectLayers;
@@ -410,6 +433,24 @@ private:
         bool preparing = false;
         std::optional<std::chrono::steady_clock::time_point> requestedAt;
     };
+    struct SunShadowBuild
+    {
+        glm::vec3 direction{ 0.f };
+        float softness = 0.f;
+        uint32_t side = 0;
+        std::vector<uint8_t> pixels;
+        std::shared_ptr<const std::vector<float>> heights;
+    };
+    std::mutex m_sunShadowMutex;
+    std::future<SunShadowBuild> m_sunShadowJob;
+    // A finished build waiting for room in the texture upload queue.
+    SunShadowBuild m_sunShadowPending;
+    std::shared_ptr<Engine::Graphics::IGraphicsTexture> m_sunShadowTexture;
+    IGraphicsProvider* m_sunShadowProvider = nullptr;
+    // Heights of the uploaded texture, and inputs of the newest request.
+    std::shared_ptr<const std::vector<float>> m_sunShadowHeights;
+    SunShadowBuild m_sunShadowRequest;
+    void ResetSunShadow();
     int m_farHalfExtentCells = 0;
     std::vector<float> m_farHeights;
     std::shared_ptr<const std::vector<float>> m_farHeightsSnapshot;
@@ -417,6 +458,11 @@ private:
     std::set<Cell> m_farPatchCells;
     std::vector<FarTile> m_farTiles;
     void RefreshFarTerrainEditedCells(const std::set<Cell>& changedCells);
+    // Loads the existing cells overlapping a local X/Z box (for editing).
+    std::set<Cell> LoadCellsForEdit(double minX, double minZ, double maxX, double maxZ);
+    // Records edited cells for saving (procedural edits or authored cells)
+    // and refreshes the far terrain over them.
+    void RecordEditedCells(const std::set<Cell>& changedCells);
     std::string m_farHeightArchivePath;
     FarTerrainPalette m_farPalette;
     uint64_t m_farSourceSignature = 0;

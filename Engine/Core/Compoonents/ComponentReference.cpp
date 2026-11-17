@@ -1,7 +1,7 @@
-#include "Core/ComponentReference.h"
+#include "Core/Compoonents/ComponentReference.h"
 
 #include "Core/Component.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
 #include <sstream>
 

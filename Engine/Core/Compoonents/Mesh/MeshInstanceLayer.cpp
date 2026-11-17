@@ -2,11 +2,11 @@
 
 #include "Core/Compoonents/Materials/Material.h"
 #include "Core/Compoonents/Mesh/Mesh.h"
-#include "Core/Compoonents/Obj/ObjectLodProvider.h"
+#include "Core/Compoonents/Mesh/Lod/ObjectLodProvider.h"
 #include "Core/Graphics/IGraphicsProvider.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
-#include "Engine/Editor/UI/IEditorUi.h"
+#include "Core/Inspection/IInspectorUi.h"
 
 #include <algorithm>
 #include <atomic>
@@ -779,7 +779,7 @@ void MeshInstanceLayer::Deserialize(const JsonValue& value)
     SetPlacements(std::move(placements));
 }
 
-bool MeshInstanceLayer::DrawProperties(::Engine::Editor::IEditorUi& ui)
+bool MeshInstanceLayer::DrawProperties(Engine::Core::IInspectorUi& ui)
 {
     bool changed = Component::DrawProperties(ui);
     for (auto& placement : m_placements)

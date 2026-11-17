@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Engine/Editor/UI/IEditorUi.h"
+#include "Core/Inspection/IInspectorUi.h"
 
 #include <algorithm>
 #include <cstring>
@@ -12,7 +12,7 @@ namespace Engine::Components
 // Inspector rows for a per-level asset list (Mesh.lodMeshes,
 // Material.lodMaterials). Row i edits LOD i + 1; an empty row is allowed and
 // keeps its meaning to the owning component.
-inline bool EditLodPathList(::Engine::Editor::IEditorUi& ui, const char* header,
+inline bool EditLodPathList(Engine::Core::IInspectorUi& ui, const char* header,
     std::vector<std::string>& paths, size_t maximum, const char* emptyHint)
 {
     bool changed = false;

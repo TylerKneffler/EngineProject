@@ -1,7 +1,7 @@
 #include "EditorGizmoSystem.h"
 #include "Editor/Core/View/EditorViewportSettings.h"
 #include "Core/Scene/Scene.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Compoonents/Lighting/Light.h"
 #include "Core/Compoonents/Lighting/LightProbe.h"

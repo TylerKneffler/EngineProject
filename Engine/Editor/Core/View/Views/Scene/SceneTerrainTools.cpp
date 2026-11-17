@@ -1,10 +1,11 @@
 #include "SceneTerrainTools.h"
 
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Compoonents/Terrain/Terrain.h"
 #include "Core/Compoonents/Terrain/TerrainManager.h"
 #include "Core/Compoonents/Terrain/TerrainObjectLayer.h"
+#include "Core/Compoonents/Terrain/TerrainRegionEdit.h"
 #include "Core/Compoonents/Terrain/TerrainSurfaceSample.h"
 #include "imgui.h"
 
@@ -152,6 +153,89 @@ void SceneTerrainTools::DrawBrushRing(const Target& target, const glm::dvec3& lo
     ring(radius, 2.f, color);
     if (hardness > 0.02f && hardness < 0.98f)
         ring(radius * hardness, 1.f, (color & 0x00ffffffu) | 0x80000000u);
+}
+
+bool SceneTerrainTools::ProjectSurface(const Target& target, const glm::dvec2& local,
+    const glm::dmat4& viewProjection, const glm::vec2& screenMin, const glm::vec2& screenSize,
+    glm::vec2& screen)
+{
+    glm::dvec3 world;
+    glm::vec3 normal;
+    if (!SampleSurface(target, local.x, local.y, world, normal)) return false;
+    const glm::dvec4 clip = viewProjection * glm::dvec4(world + glm::dvec3(normal) * 0.02, 1.0);
+    if (clip.w <= 1e-6) return false;
+    screen = {float(screenMin.x + (clip.x / clip.w + 1.0) * screenSize.x * 0.5),
+        float(screenMin.y + (1.0 - clip.y / clip.w) * screenSize.y * 0.5)};
+    return true;
+}
+
+void SceneTerrainTools::DrawDrapedPolyline(const Target& target,
+    const std::vector<glm::dvec2>& points, bool closed, const glm::dmat4& viewProjection,
+    const glm::vec2& screenMin, const glm::vec2& screenSize, uint32_t color, float thickness)
+{
+    if (points.size() < 2) return;
+    auto* draw = ImGui::GetForegroundDrawList();
+    // Subdivide to about 1/64 of the outline's extent so it follows relief.
+    glm::dvec2 low = points.front(), high = points.front();
+    for (const auto& point : points) { low = glm::min(low, point); high = glm::max(high, point); }
+    const double step = std::max(0.25, std::max(high.x - low.x, high.y - low.y) / 64.0);
+    std::vector<ImVec2> run;
+    const auto flush = [&] {
+        if (run.size() > 1) draw->AddPolyline(run.data(), int(run.size()), color, 0, thickness);
+        run.clear();
+    };
+    const size_t segments = closed ? points.size() : points.size() - 1;
+    for (size_t i = 0; i < segments; ++i)
+    {
+        const glm::dvec2 a = points[i], b = points[(i + 1) % points.size()];
+        const int pieces = std::clamp(int(std::ceil(glm::length(b - a) / step)), 1, 256);
+        for (int piece = (i == 0 ? 0 : 1); piece <= pieces; ++piece)
+        {
+            glm::vec2 screen;
+            if (ProjectSurface(target, glm::mix(a, b, double(piece) / pieces), viewProjection,
+                    screenMin, screenSize, screen))
+                run.push_back({screen.x, screen.y});
+            else
+                flush();
+        }
+    }
+    flush();
+}
+
+void SceneTerrainTools::DrawRegionHighlight(const Target& target,
+    const Engine::Components::TerrainRegionMask& mask, const glm::dmat4& viewProjection,
+    const glm::vec2& screenMin, const glm::vec2& screenSize, uint32_t color)
+{
+    glm::dvec2 low, high;
+    if (!mask.Bounds(low, high)) return;
+    auto* draw = ImGui::GetForegroundDrawList();
+    constexpr int grid = 48;
+    std::vector<glm::vec2> screen(size_t(grid + 1) * (grid + 1));
+    std::vector<float> weight(screen.size(), -1.f);
+    for (int row = 0; row <= grid; ++row)
+        for (int col = 0; col <= grid; ++col)
+        {
+            const glm::dvec2 local = glm::mix(low, high, glm::dvec2(col, row) / double(grid));
+            const size_t i = size_t(row) * (grid + 1) + col;
+            if (ProjectSurface(target, local, viewProjection, screenMin, screenSize, screen[i]))
+                weight[i] = mask.Weight(local.x, local.y);
+        }
+    const float alpha = float((color >> IM_COL32_A_SHIFT) & 0xffu) / 255.f;
+    for (int row = 0; row < grid; ++row)
+        for (int col = 0; col < grid; ++col)
+        {
+            const size_t a = size_t(row) * (grid + 1) + col, b = a + 1;
+            const size_t c = a + grid + 1, d = c + 1;
+            if (weight[a] < 0.f || weight[b] < 0.f || weight[c] < 0.f || weight[d] < 0.f) continue;
+            const float average = .25f * (weight[a] + weight[b] + weight[c] + weight[d]);
+            if (average <= .01f) continue;
+            const uint32_t fill = (color & ~IM_COL32_A_MASK) |
+                (uint32_t(std::clamp(alpha * .35f * average, 0.f, 1.f) * 255.f) << IM_COL32_A_SHIFT);
+            draw->AddQuadFilled({screen[a].x, screen[a].y}, {screen[b].x, screen[b].y},
+                {screen[d].x, screen[d].y}, {screen[c].x, screen[c].y}, fill);
+        }
+    DrawDrapedPolyline(target, mask.Outline(), true, viewProjection, screenMin, screenSize,
+        color, 2.f);
 }
 
 int SceneTerrainTools::Scatter(Engine::Scene::Scene& scene, const Target& target,

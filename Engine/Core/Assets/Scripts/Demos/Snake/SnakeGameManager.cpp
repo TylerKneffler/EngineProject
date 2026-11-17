@@ -4,7 +4,7 @@
 #include "Scripts/Demos/Snake/SnakeFood.h"
 #include "Scripts/Demos/Snake/SnakePlayer.h"
 #include "Scripts/Demos/Snake/SnakeUI.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include <algorithm>

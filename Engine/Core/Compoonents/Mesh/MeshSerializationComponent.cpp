@@ -1,12 +1,12 @@
 #include "Mesh.h"
 #include "Core/Rendering/SharedMeshBuffers.h"
 #include "Core/Threading/JobScheduler.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Model/MeshPackAsset.h"
 #include "Core/Graphics/IGraphicsProvider.h"
-#include "Engine/Editor/UI/IEditorUi.h"
-#include "Core/Compoonents/Obj/LodPathListEditor.h"
+#include "Core/Inspection/IInspectorUi.h"
+#include "Core/Compoonents/Mesh/Lod/LodPathListEditor.h"
 #include "Core/Serialization/PrefabLod.h"
 #include <fstream>
 #include <algorithm>
@@ -85,7 +85,7 @@ std::vector<glm::vec4> ReadVec4Array(const Engine::Serialization::JsonValue& val
 }
 
 }
-bool Mesh::DrawProperties(::Engine::Editor::IEditorUi& ui)
+bool Mesh::DrawProperties(Engine::Core::IInspectorUi& ui)
 {
     ui.ValueLabel("Asset", m_filePath.empty() ? "(generated mesh)" : m_filePath.c_str());
     const std::string vertexCount = std::to_string(GetVertexCount());

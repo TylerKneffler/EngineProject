@@ -2,8 +2,8 @@
 #include "Core/Compoonents/Sprite/SpriteAnimationManager.h"
 #include "Core/Compoonents/Materials/Texture.h"
 #include "Core/Graphics/IGraphicsProvider.h"
-#include "Core/Object.h"
-#include "Engine/Editor/UI/IEditorUi.h"
+#include "Core/Scene/Object.h"
+#include "Core/Inspection/IInspectorUi.h"
 #include <algorithm>
 
 namespace Engine::Components
@@ -39,7 +39,7 @@ void Sprite::PrepareGraphicsResources(IGraphicsProvider* graphicsProvider)
     Prepare(graphicsProvider);
 }
 
-bool Sprite::DrawProperties(::Engine::Editor::IEditorUi& ui)
+bool Sprite::DrawProperties(Engine::Core::IInspectorUi& ui)
 {
     bool changed = false;
     if (DrawReferenceProperty(ui, "animationManagerReference",

@@ -45,7 +45,7 @@ public:
     std::vector<glm::mat4> inverseBindMatrices;
     JsonValue Serialize() const override;
     void Deserialize(const JsonValue& value) override;
-    bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
+    bool DrawProperties(Engine::Core::IInspectorUi& ui) override;
     Object* GetHierarchyRoot() const;
     const std::vector<Object*>& ResolveJoints() const;
     // AnimationBone components are returned in skinning-palette order. Root bones are

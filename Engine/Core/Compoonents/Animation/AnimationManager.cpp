@@ -12,10 +12,10 @@
 #include "Core/Model/AnimationPackAsset.h"
 #include "Core/Model/AnimationControlSpace.h"
 #include "Core/AssetRecord.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Threading/JobScheduler.h"
-#include "Engine/Editor/UI/IEditorUi.h"
+#include "Core/Inspection/IInspectorUi.h"
 #include <algorithm>
 #include <cstdint>
 #include <cmath>
@@ -1107,7 +1107,7 @@ void AnimationManager::Deserialize(const JsonValue& value)
     }
 }
 
-bool AnimationManager::DrawProperties(::Engine::Editor::IEditorUi& ui)
+bool AnimationManager::DrawProperties(Engine::Core::IInspectorUi& ui)
 {
     // The generic inspector calls virtual Serialize(), which builds a JSON
     // tree for every embedded key. Keep routine UI work independent of keys.

@@ -1,5 +1,5 @@
 #include "BoneGroup.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 
 namespace Engine::Components
 {

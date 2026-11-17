@@ -1,6 +1,6 @@
 #include "TerrainManager.h"
 #include "TerrainObjectLayer.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Compoonents/Terrain/TerrainBatchAppearance.h"
 #include "Core/Compoonents/Camera/Camera.h"
@@ -9,7 +9,7 @@
 #include "Core/Compoonents/Materials/Texture.h"
 #include "Core/Compoonents/Physics/MeshObjectCollider.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
-#include "Engine/Editor/UI/IEditorUi.h"
+#include "Core/Inspection/IInspectorUi.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include <algorithm>
 #include <cctype>
@@ -64,6 +64,8 @@ TerrainManager::JsonValue TerrainManager::Serialize() const
             JsonValue(farVegetationImpostorBudgetPerTile))
         .Set("batchFarCells", JsonValue(batchFarCells))
         .Set("fastRuntimeLighting", JsonValue(fastRuntimeLighting))
+        .Set("longRangeShadows", JsonValue(longRangeShadows))
+        .Set("longRangeShadowSoftness", JsonValue(longRangeShadowSoftness))
         .Set("stochasticTerrainVariation", JsonValue(stochasticTerrainVariation))
         .Set("terrainMacroColorEnabled", JsonValue(terrainMacroColorEnabled))
         .Set("paintResolution", JsonValue(paintResolution))
@@ -252,6 +254,10 @@ void TerrainManager::Deserialize(const JsonValue& value)
     batchFarCells = !value.Has("batchFarCells") || value["batchFarCells"].AsBool();
     fastRuntimeLighting = value.Has("fastRuntimeLighting") &&
         value["fastRuntimeLighting"].AsBool();
+    longRangeShadows = !value.Has("longRangeShadows") ||
+        value["longRangeShadows"].AsBool();
+    longRangeShadowSoftness = value.Has("longRangeShadowSoftness")
+        ? std::clamp(value["longRangeShadowSoftness"].AsFloat(), 0.1f, 20.f) : 1.5f;
     stochasticTerrainVariation = value.Has("stochasticTerrainVariation") &&
         value["stochasticTerrainVariation"].AsBool();
     terrainMacroColorEnabled = value.Has("terrainMacroColorEnabled") &&
@@ -391,7 +397,7 @@ void TerrainManager::PrepareGraphicsResources(IGraphicsProvider* provider)
     m_provider = provider;
 }
 
-bool TerrainManager::DrawProperties(::Engine::Editor::IEditorUi& ui)
+bool TerrainManager::DrawProperties(Engine::Core::IInspectorUi& ui)
 {
     bool changed = false;
     const int previousX = cellsX, previousY = cellsY;
@@ -460,6 +466,12 @@ bool TerrainManager::DrawProperties(::Engine::Editor::IEditorUi& ui)
     if (ui.CollapsingHeader("Terrain appearance", false))
     {
         changed |= ui.Checkbox("Fast runtime terrain lighting", &fastRuntimeLighting);
+        changed |= ui.Checkbox("Long-range sun shadows", &longRangeShadows);
+        ui.Tooltip("Shadows cast by distant ridges and valleys beyond the realtime cascades. "
+            "Ray-marched over the far height grid on a worker thread when the sun moves. "
+            "Applies to runtime terrain with fast lighting and to distant tiles.");
+        changed |= ui.DragFloat("Long-range shadow softness (deg)",
+            &longRangeShadowSoftness, 0.05f, 0.1f, 20.f);
         changed |= ui.Checkbox("Stochastic terrain tile variation",
             &stochasticTerrainVariation);
         changed |= ui.Checkbox("Terrain macro color blend",

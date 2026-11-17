@@ -1,6 +1,6 @@
 #include "AnimationBone.h"
 
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include <cmath>
 #include <functional>
 

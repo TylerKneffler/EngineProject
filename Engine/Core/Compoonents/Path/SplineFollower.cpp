@@ -1,9 +1,9 @@
 #include "Core/Compoonents/Path/SplineFollower.h"
 
 #include "Core/Compoonents/Path/SplinePath.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
-#include "Engine/Editor/UI/IEditorUi.h"
+#include "Core/Inspection/IInspectorUi.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -208,7 +208,7 @@ void SplineFollower::ApplyCurrentPose()
     }
 }
 
-bool SplineFollower::DrawProperties(Engine::Editor::IEditorUi& ui)
+bool SplineFollower::DrawProperties(Engine::Core::IInspectorUi& ui)
 {
     bool changed = false;
     char pathName[256]{};

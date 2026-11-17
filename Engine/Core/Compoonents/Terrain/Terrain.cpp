@@ -3,15 +3,16 @@
 #include "Core/Graphics/IGraphicsTexture.h"
 #include "Terrain.h"
 #include "Core/Compoonents/Terrain/TerrainObjectLayer.h"
+#include "Core/Compoonents/Terrain/TerrainRegionEdit.h"
 #include "Core/Compoonents/Terrain/TerrainSurfaceSample.h"
 #include "Core/Compoonents/Terrain/TerrainSurfaceWinding.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Compoonents/Mesh/Mesh.h"
 #include "Core/Compoonents/Materials/Material.h"
 #include "Core/Compoonents/Materials/Texture.h"
 #include "Core/Graphics/IGraphicsProvider.h"
-#include "Engine/Editor/UI/IEditorUi.h"
+#include "Core/Inspection/IInspectorUi.h"
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -598,62 +599,69 @@ bool Terrain::ApplyBrush(float x, float z, float radius, float strength,
         // Paint keeps each touched sample normalized itself.
         RebuildRegion(firstCol, firstRow, lastCol, lastRow);
         MarkConfigurationDirty();
-        if (brush != Brush::Paint && Owner)
-            for (auto* child : Owner->Children)
-                if (auto* objects = child ? child->GetComponent<TerrainObjectLayer>() : nullptr)
-                {
-                    // Sculpting moves placements vertically; orientation
-                    // changes only when the brush's realign option is on.
-                    // Generated meadow grass always hugs the ground. Any other
-                    // placement follows the surface only if it was resting on
-                    // the old surface, keeping its own offset; objects lifted
-                    // or sunk on purpose stay where they are.
-                    const bool alwaysSnap = objects->snapToGround;
-                    const glm::mat4 layerToCell = child->transform.GetLocalMatrix();
-                    const glm::mat4 cellToLayer = glm::inverse(layerToCell);
-                    constexpr float restingTolerance = .05f;
-                    bool placementsChanged = false;
-                    for (auto& placement : objects->placements)
-                    {
-                        glm::vec3 cell = glm::vec3(layerToCell * glm::vec4(placement.position, 1.f));
-                        const float dx = cell.x - x, dz = cell.z - z;
-                        if (dx * dx + dz * dz >= radius * radius) continue;
-                        float oldHeight = cell.y, newHeight = cell.y;
-                        glm::vec3 oldNormal(0.f, 1.f, 0.f), newNormal(0.f, 1.f, 0.f);
-                        if (!SampleTerrainSurface(before, cellsX, cellsY, cellWidth,
-                                cellDepth, cell.x, cell.z, oldHeight, &oldNormal) ||
-                            !SampleTerrainSurface(heights, cellsX, cellsY, cellWidth,
-                                cellDepth, cell.x, cell.z, newHeight, &newNormal))
-                            continue;
-                        if (!alwaysSnap && std::abs(cell.y - oldHeight) > restingTolerance)
-                            continue;
-                        cell.y = alwaysSnap ? newHeight : newHeight + (cell.y - oldHeight);
-                        const glm::vec3 position = glm::vec3(cellToLayer * glm::vec4(cell, 1.f));
-                        // Ground-conforming layers stay upright and use the
-                        // normal only to shear their base onto the slope, so
-                        // it always tracks the surface. With realignment on,
-                        // placements painted aligned to the old surface tilt
-                        // with it; upright ones stay upright either way.
-                        const glm::vec3 layerOldNormal = glm::normalize(
-                            glm::vec3(cellToLayer * glm::vec4(oldNormal, 0.f)));
-                        const bool realign = objects->conformToGround ||
-                            (realignObjects && (alwaysSnap ||
-                                (placement.normal != glm::vec3(0.f, 1.f, 0.f) &&
-                                    glm::dot(placement.normal, layerOldNormal) > .999f)));
-                        const glm::vec3 normal = realign
-                            ? glm::normalize(glm::vec3(cellToLayer * glm::vec4(newNormal, 0.f)))
-                            : placement.normal;
-                        if (position != placement.position || normal != placement.normal)
-                        {
-                            placement.position = position;
-                            placement.normal = normal;
-                            placementsChanged = true;
-                        }
-                    }
-                    if (placementsChanged) objects->MarkConfigurationDirty();
-                }
+        if (brush != Brush::Paint)
+            FollowSurfaceEdit(before, x - radius, z - radius, x + radius, z + radius,
+                realignObjects);
     }
     return changed;
+}
+
+void Terrain::FollowSurfaceEdit(const std::vector<float>& before, float minX, float minZ,
+    float maxX, float maxZ, bool realignObjects)
+{
+    if (!Owner || before.size() != heights.size()) return;
+    for (auto* child : Owner->Children)
+        if (auto* objects = child ? child->GetComponent<TerrainObjectLayer>() : nullptr)
+        {
+            // Sculpting moves placements vertically; orientation
+            // changes only when the brush's realign option is on.
+            // Generated meadow grass always hugs the ground. Any other
+            // placement follows the surface only if it was resting on
+            // the old surface, keeping its own offset; objects lifted
+            // or sunk on purpose stay where they are.
+            const bool alwaysSnap = objects->snapToGround;
+            const glm::mat4 layerToCell = child->transform.GetLocalMatrix();
+            const glm::mat4 cellToLayer = glm::inverse(layerToCell);
+            constexpr float restingTolerance = .05f;
+            bool placementsChanged = false;
+            for (auto& placement : objects->placements)
+            {
+                glm::vec3 cell = glm::vec3(layerToCell * glm::vec4(placement.position, 1.f));
+                if (cell.x < minX || cell.x > maxX || cell.z < minZ || cell.z > maxZ) continue;
+                float oldHeight = cell.y, newHeight = cell.y;
+                glm::vec3 oldNormal(0.f, 1.f, 0.f), newNormal(0.f, 1.f, 0.f);
+                if (!SampleTerrainSurface(before, cellsX, cellsY, cellWidth,
+                        cellDepth, cell.x, cell.z, oldHeight, &oldNormal) ||
+                    !SampleTerrainSurface(heights, cellsX, cellsY, cellWidth,
+                        cellDepth, cell.x, cell.z, newHeight, &newNormal))
+                    continue;
+                if (!alwaysSnap && std::abs(cell.y - oldHeight) > restingTolerance)
+                    continue;
+                cell.y = alwaysSnap ? newHeight : newHeight + (cell.y - oldHeight);
+                const glm::vec3 position = glm::vec3(cellToLayer * glm::vec4(cell, 1.f));
+                // Ground-conforming layers stay upright and use the
+                // normal only to shear their base onto the slope, so
+                // it always tracks the surface. With realignment on,
+                // placements painted aligned to the old surface tilt
+                // with it; upright ones stay upright either way.
+                const glm::vec3 layerOldNormal = glm::normalize(
+                    glm::vec3(cellToLayer * glm::vec4(oldNormal, 0.f)));
+                const bool realign = objects->conformToGround ||
+                    (realignObjects && (alwaysSnap ||
+                        (placement.normal != glm::vec3(0.f, 1.f, 0.f) &&
+                            glm::dot(placement.normal, layerOldNormal) > .999f)));
+                const glm::vec3 normal = realign
+                    ? glm::normalize(glm::vec3(cellToLayer * glm::vec4(newNormal, 0.f)))
+                    : placement.normal;
+                if (position != placement.position || normal != placement.normal)
+                {
+                    placement.position = position;
+                    placement.normal = normal;
+                    placementsChanged = true;
+                }
+            }
+            if (placementsChanged) objects->MarkConfigurationDirty();
+        }
 }
 
 bool Terrain::RaycastLocal(const glm::vec3& origin, const glm::vec3& direction,
@@ -1405,7 +1413,7 @@ void Terrain::Start()
         LoadCache(Mesh::ResolveFilePath(bakedAssetPath), 0, m_provider);
 }
 
-bool Terrain::DrawProperties(::Engine::Editor::IEditorUi& ui)
+bool Terrain::DrawProperties(Engine::Core::IInspectorUi& ui)
 {
     bool changed = false;
     bool geometryChanged = false;
@@ -1501,3 +1509,111 @@ bool Terrain::DrawProperties(::Engine::Editor::IEditorUi& ui)
 }
 }
 
+
+namespace Engine::Components
+{
+bool Terrain::WriteHeightGrid(const TerrainHeightGrid& grid, double offsetX, double offsetZ,
+    bool realignObjects)
+{
+    if (heights.size() != static_cast<size_t>(cellsX + 1) * (cellsY + 1) ||
+        grid.width <= 0 || grid.height <= 0) return false;
+    const std::vector<float> before = heights;
+    int minCol = cellsX + 1, minRow = cellsY + 1, maxCol = -1, maxRow = -1;
+    for (int row = 0; row <= cellsY; ++row)
+    {
+        const double gz = (offsetZ + double(row) * cellDepth - grid.originZ) / grid.spacingZ;
+        const int gridRow = int(std::lround(gz));
+        if (gridRow < 0 || gridRow >= grid.height || std::abs(gz - gridRow) > 1e-3) continue;
+        for (int col = 0; col <= cellsX; ++col)
+        {
+            const double gx = (offsetX + double(col) * cellWidth - grid.originX) / grid.spacingX;
+            const int gridCol = int(std::lround(gx));
+            if (gridCol < 0 || gridCol >= grid.width || std::abs(gx - gridCol) > 1e-3) continue;
+            const size_t source = size_t(gridRow) * grid.width + gridCol;
+            if (!grid.valid.empty() && !grid.valid[source]) continue;
+            float& target = heights[size_t(row) * (cellsX + 1) + col];
+            if (target == grid.heights[source]) continue;
+            target = grid.heights[source];
+            minCol = std::min(minCol, col); maxCol = std::max(maxCol, col);
+            minRow = std::min(minRow, row); maxRow = std::max(maxRow, row);
+        }
+    }
+    if (maxCol < 0) return false;
+    RebuildRegion(minCol, minRow, maxCol, maxRow);
+    MarkConfigurationDirty();
+    FollowSurfaceEdit(before, minCol * cellWidth - cellWidth, minRow * cellDepth - cellDepth,
+        maxCol * cellWidth + cellWidth, maxRow * cellDepth + cellDepth, realignObjects);
+    return true;
+}
+
+bool Terrain::EditRegion(const TerrainRegionMask& mask, const TerrainRegionOperation& operation,
+    bool realignObjects)
+{
+    if (Owner && Owner->GetScene() && Owner->GetScene()->HasStarted()) return false;
+    if (mask.Empty() || heights.size() != static_cast<size_t>(cellsX + 1) * (cellsY + 1))
+        return false;
+    // The whole cell is the window: operations see all of it as context.
+    TerrainHeightGrid grid;
+    grid.spacingX = cellWidth;
+    grid.spacingZ = cellDepth;
+    grid.width = cellsX + 1;
+    grid.height = cellsY + 1;
+    grid.heights = heights;
+    grid.valid.assign(heights.size(), 1);
+    if (!ApplyRegionOperation(grid, mask, operation)) return false;
+    return WriteHeightGrid(grid, 0.0, 0.0, realignObjects);
+}
+
+bool Terrain::PaintRegion(const TerrainRegionMask& mask, float strength, int layer, bool erase,
+    double offsetX, double offsetZ)
+{
+    if (Owner && Owner->GetScene() && Owner->GetScene()->HasStarted()) return false;
+    if (mask.Empty() || strength <= 0.f || layer < 0 ||
+        layer >= static_cast<int>(layers.size()) || heights.empty()) return false;
+    glm::dvec2 minimum, maximum;
+    if (!mask.Bounds(minimum, maximum)) return false;
+    minimum -= glm::dvec2(offsetX, offsetZ);
+    maximum -= glm::dvec2(offsetX, offsetZ);
+    if (maximum.x < 0.0 || maximum.y < 0.0 || minimum.x > cellsX * cellWidth ||
+        minimum.y > cellsY * cellDepth) return false;
+    const size_t layerCount = layers.size();
+    EnsurePaintMap();
+    const bool map = HasPaintMap();
+    const int width = map ? PaintWidth() : cellsX + 1;
+    const int height = map ? PaintHeight() : cellsY + 1;
+    const double stepX = map ? double(cellWidth) / paintResolution : cellWidth;
+    const double stepZ = map ? double(cellDepth) / paintResolution : cellDepth;
+    std::vector<float>& target = map ? paintWeights : weights;
+    if (target.size() != size_t(width) * height * layerCount) return false;
+    const int minCol = std::max(0, int(std::floor(minimum.x / stepX)));
+    const int maxCol = std::min(width - 1, int(std::ceil(maximum.x / stepX)));
+    const int minRow = std::max(0, int(std::floor(minimum.y / stepZ)));
+    const int maxRow = std::min(height - 1, int(std::ceil(maximum.y / stepZ)));
+    bool changed = false;
+    for (int row = minRow; row <= maxRow; ++row)
+        for (int col = minCol; col <= maxCol; ++col)
+        {
+            const float amount = std::clamp(strength * mask.Weight(offsetX + col * stepX,
+                offsetZ + row * stepZ), 0.f, 1.f);
+            float* sample = &target[(size_t(row) * width + col) * layerCount];
+            if (PaintSample(sample, layerCount, layer, amount, erase))
+            {
+                NormalizeSample(sample, layerCount);
+                changed = true;
+            }
+        }
+    if (!changed) return false;
+    if (map)
+    {
+        m_paintTextureDirty = true;
+        RebuildRegion(int(std::floor(float(minCol) / paintResolution)),
+            int(std::floor(float(minRow) / paintResolution)),
+            int(std::ceil(float(maxCol) / paintResolution)),
+            int(std::ceil(float(maxRow) / paintResolution)));
+    }
+    else
+        RebuildRegion(minCol, minRow, maxCol, maxRow);
+    MarkConfigurationDirty();
+    return true;
+}
+}

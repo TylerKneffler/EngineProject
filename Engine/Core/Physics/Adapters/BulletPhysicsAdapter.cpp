@@ -8,7 +8,7 @@
 #include "Core/Compoonents/Animation/IKBone.h"
 #include "Core/Compoonents/Animation/Skeleton.h"
 #include "Core/Compoonents/Physics/RigPhysicsBinding.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Physics/Internal/PhysicsInternal.h"
 #include "Core/Threading/JobScheduler.h"

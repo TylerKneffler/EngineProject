@@ -1,6 +1,6 @@
 #pragma once
-#include "Core/component.h"
-#include "Core/Object.h"
+#include "Core/Compoonents/Component.h"
+#include "Core/Scene/Object.h"
 #include "Core/Threading/ScriptModuleJobs.h"
 #include <future>
 #include <type_traits>
@@ -136,6 +136,6 @@ public:
     }
     
     // Override in derived classes to draw custom properties in the inspector
-    // bool DrawProperties(::Engine::Editor::IEditorUi& ui) override { /* custom UI */ return false; }
+    // bool DrawProperties(Engine::Core::IInspectorUi& ui) override { /* custom UI */ return false; }
 };
 }

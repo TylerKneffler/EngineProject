@@ -1,7 +1,7 @@
 #include "Core/Compoonents/Constraints/TransformConstraint.h"
 #include "Core/Compoonents/Transform.h"
-#include "Core/Object.h"
-#include "Engine/Editor/UI/IEditorUi.h"
+#include "Core/Scene/Object.h"
+#include "Core/Inspection/IInspectorUi.h"
 #include <algorithm>
 #include <cmath>
 #include <unordered_set>
@@ -77,7 +77,7 @@ std::string TransformConstraint::ValidationError() const
     return {};
 }
 
-bool TransformConstraint::DrawProperties(Engine::Editor::IEditorUi& ui)
+bool TransformConstraint::DrawProperties(Engine::Core::IInspectorUi& ui)
 {
     const bool changed = Component::DrawProperties(ui);
     ui.ValueLabel("Evaluation", "After animation and IK; targets before dependents");

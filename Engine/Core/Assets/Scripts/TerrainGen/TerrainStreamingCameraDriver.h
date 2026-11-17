@@ -1,7 +1,7 @@
 #pragma once
 
-#include "Core/PropertyMacros.h"
-#include "Core/Script.h"
+#include "Core/Compoonents/PropertyMacros.h"
+#include "Core/Compoonents/Script.h"
 #include <glm/glm.hpp>
 #include <string>
 

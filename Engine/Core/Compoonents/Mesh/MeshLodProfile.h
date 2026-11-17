@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Core/Component.h"
-#include "Core/Compoonents/Obj/ObjectLodProvider.h"
+#include "Core/Compoonents/Mesh/Lod/ObjectLodProvider.h"
 
 #include <cstdint>
 #include <glm/glm.hpp>
@@ -42,7 +42,7 @@ public:
     void OnDestroy() override;
     JsonValue Serialize() const override;
     void Deserialize(const JsonValue& value) override;
-    bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
+    bool DrawProperties(Engine::Core::IInspectorUi& ui) override;
     bool RequiresUpdate() const override { return false; }
 
 private:

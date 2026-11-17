@@ -1,11 +1,11 @@
 #include "Mesh.h"
 #include "Core/Rendering/SharedMeshBuffers.h"
 #include "Core/Threading/JobScheduler.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Model/MeshPackAsset.h"
 #include "Core/Graphics/IGraphicsProvider.h"
-#include "Engine/Editor/UI/IEditorUi.h"
+#include "Core/Inspection/IInspectorUi.h"
 #include <fstream>
 #include <algorithm>
 #include <sstream>

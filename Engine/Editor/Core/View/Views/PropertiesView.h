@@ -1,6 +1,6 @@
 #pragma once
 #include "pch.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "View/IEditorPanel.h"
 #include "Engine/Editor/Core/View/Templates/Assets/AssetInspectorTemplate.h"
 #include <chrono>

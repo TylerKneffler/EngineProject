@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Core/Script.h"
+#include "Core/Compoonents/Script.h"
 #include <string>
 
 // Scene choreography for the bundled fox soft-tissue demonstration.

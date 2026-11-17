@@ -3,7 +3,7 @@
 #include "TerrainObjectLayer.h"
 #include "Core/Serialization/PrefabLod.h"
 #include "TerrainSurfaceSample.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Compoonents/Terrain/TerrainBatchAppearance.h"
 #include "Core/Compoonents/Camera/Camera.h"
@@ -12,7 +12,7 @@
 #include "Core/Compoonents/Materials/Texture.h"
 #include "Core/Compoonents/Physics/MeshObjectCollider.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
-#include "Engine/Editor/UI/IEditorUi.h"
+#include "Core/Inspection/IInspectorUi.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include <algorithm>
 #include <cctype>

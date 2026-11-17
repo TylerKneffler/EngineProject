@@ -2,13 +2,13 @@
 #include "AnimationBone.h"
 #include "IKBone.h"
 #include "Model.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Compoonents/Physics/PrimitiveObjectCollider.h"
 #include "Core/Compoonents/Physics/MeshObjectCollider.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
 #include "Core/Model/RigAsset.h"
-#include "Engine/Editor/UI/IEditorUi.h"
+#include "Core/Inspection/IInspectorUi.h"
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -131,7 +131,7 @@ void Skeleton::Deserialize(const JsonValue& value)
     ResetMeshContactResponse();
 }
 
-bool Skeleton::DrawProperties(::Engine::Editor::IEditorUi& ui)
+bool Skeleton::DrawProperties(Engine::Core::IInspectorUi& ui)
 {
     bool changed = false;
     changed = DrawReferenceProperty(ui, "modelReference", "Model",

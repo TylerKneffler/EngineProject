@@ -11,7 +11,7 @@
 #include "Core/Rendering/InstanceTilePreparation.h"
 #include "Core/Compoonents/SpatialUpdate.h"
 #include <glm/gtc/quaternion.hpp>
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Graphics/IPipelineState.h"
 #include "Core/Graphics/IGraphicsBuffer.h"
 #include "Core/Rendering/Lighting/Pipelines/Realtime/RealtimeLightingPipeline.h"
@@ -881,6 +881,9 @@ private:
     std::unique_ptr<IPipelineState> m_portalSkyboxStencilReadPipeline;
     std::unique_ptr<IGraphicsBuffer> m_skyboxConstantBuffer;
     void* m_skyboxCBMapped = nullptr;
+    // Sun disc constants of the current view (see SceneRendererLighting::ResolveSkySun).
+    glm::vec4 m_skySunDirection{ 0.f };
+    glm::vec4 m_skySunRadiance{ 0.f };
     std::shared_ptr<Engine::Components::Texture> m_defaultSkyboxTexture;
     std::shared_ptr<Engine::Components::Texture> m_sceneSkyboxTexture;
     std::string m_loadedSkyboxPath;

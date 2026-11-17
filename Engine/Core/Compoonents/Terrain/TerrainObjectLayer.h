@@ -8,7 +8,7 @@
 #include <map>
 #include <chrono>
 #include "Core/Compoonents/Mesh/Mesh.h"
-#include "Core/Compoonents/Obj/ObjectLodProvider.h"
+#include "Core/Compoonents/Mesh/Lod/ObjectLodProvider.h"
 
 namespace Engine::Components
 {
@@ -137,7 +137,7 @@ public:
     bool IsPrefabPreparationComplete(IGraphicsProvider* provider) const;
     const PrefabPrepareTimings& GetLastPrefabPrepareTimings() const
     { return m_lastPrefabPrepareTimings; }
-    bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
+    bool DrawProperties(Engine::Core::IInspectorUi& ui) override;
 private:
     struct PrefabInstances;
     std::shared_ptr<PrefabInstances> m_prefabInstances;

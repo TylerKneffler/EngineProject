@@ -51,7 +51,7 @@ public:
     void OnDestroy() override;
     JsonValue Serialize() const override;
     void Deserialize(const JsonValue& value) override;
-    bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
+    bool DrawProperties(Engine::Core::IInspectorUi& ui) override;
     bool RequiresUpdate() const override { return false; }
 
 private:

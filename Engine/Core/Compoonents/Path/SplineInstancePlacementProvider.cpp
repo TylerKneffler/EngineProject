@@ -2,9 +2,9 @@
 
 #include "Core/Compoonents/Path/SplinePath.h"
 #include "Core/Compoonents/Mesh/MeshInstanceLayer.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
-#include "Engine/Editor/UI/IEditorUi.h"
+#include "Core/Inspection/IInspectorUi.h"
 
 #include <algorithm>
 #include <cmath>
@@ -189,7 +189,7 @@ void SplineInstancePlacementProvider::OnDestroy()
 }
 
 bool SplineInstancePlacementProvider::DrawProperties(
-    Engine::Editor::IEditorUi& ui)
+    Engine::Core::IInspectorUi& ui)
 {
     const bool changed = Component::DrawProperties(ui);
     if (changed)

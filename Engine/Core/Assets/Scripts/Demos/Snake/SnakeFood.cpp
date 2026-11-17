@@ -1,6 +1,6 @@
 #include "Scripts/Demos/Snake/SnakeFood.h"
 
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include <algorithm>
 #include <cmath>

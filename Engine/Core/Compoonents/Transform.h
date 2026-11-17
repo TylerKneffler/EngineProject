@@ -1,6 +1,6 @@
 #pragma once
 #include "Core/Component.h"
-#include "Core/PropertyMacros.h"
+#include "Core/Compoonents/PropertyMacros.h"
 #include <cstdint>
 #include <string>
 #include <glm/glm.hpp>

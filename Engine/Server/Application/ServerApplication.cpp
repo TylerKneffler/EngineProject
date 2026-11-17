@@ -3,7 +3,7 @@
 #include "Core/Compoonents/Mesh/Mesh.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
 #include "Core/Compoonents/Physics/SpatialManipulator.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Physics/Physics.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Serialization/SceneSerializer.h"

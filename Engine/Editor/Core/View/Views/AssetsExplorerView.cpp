@@ -9,7 +9,7 @@
 #include "Engine/Editor/Core/Importers/ModelImporter.h"
 #include "Engine/Editor/Core/Importers/AssetDataExtractor.h"
 #include "Engine/Editor/Core/Importers/MmdDanceAssetBinder.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Prefab/PrefabAsset.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include "Core/Threading/JobScheduler.h"

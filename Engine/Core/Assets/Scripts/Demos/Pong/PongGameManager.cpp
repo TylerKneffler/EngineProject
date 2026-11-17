@@ -3,7 +3,7 @@
 
 #include "Scripts/Demos/Pong/PongBall.h"
 #include "Scripts/Demos/Pong/PongUI.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include <algorithm>
 

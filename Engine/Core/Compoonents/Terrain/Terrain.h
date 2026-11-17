@@ -16,6 +16,9 @@ namespace Engine::Graphics { class IGraphicsTexture; }
 namespace Engine::Components
 {
 class Material;
+struct TerrainRegionMask;
+struct TerrainRegionOperation;
+struct TerrainHeightGrid;
 class Terrain : public Engine::Core::Component
 {
 public:
@@ -109,6 +112,23 @@ public:
     bool ApplyBrush(float x, float z, float radius, float strength,
         Brush brush, int layer = 0, bool realignObjects = false,
         const BrushOptions& options = {});
+    // Region editing (TerrainRegionEdit.h). Masks are in this cell's local
+    // X/Z. EditRegion runs a whole-cell operation (erosion, smoothing...);
+    // PaintRegion paints a layer by mask weight; offsets place the cell in
+    // the mask's space (a manager passes the cell's origin).
+    bool EditRegion(const TerrainRegionMask& mask, const TerrainRegionOperation& operation,
+        bool realignObjects = false);
+    bool PaintRegion(const TerrainRegionMask& mask, float strength, int layer, bool erase,
+        double offsetX = 0.0, double offsetZ = 0.0);
+    // Copies the grid's valid samples that land on this cell's vertices (the
+    // grid's frame places this cell's origin at offset), rebuilds, and moves
+    // resting placements with the surface. False when nothing changed.
+    bool WriteHeightGrid(const TerrainHeightGrid& grid, double offsetX, double offsetZ,
+        bool realignObjects);
+    // Placements over the box follow a height change from before (see
+    // ApplyBrush): resting ones keep their offset, grass snaps.
+    void FollowSurfaceEdit(const std::vector<float>& before, float minX, float minZ,
+        float maxX, float maxZ, bool realignObjects);
     bool ApplyBrushFromLocalRay(const glm::vec3& nearPoint,
         const glm::vec3& farPoint, float radius, float strength,
         Brush brush, int layer = 0);
@@ -149,7 +169,7 @@ public:
     void OnAfterDeserialize(IGraphicsProvider* provider) override;
     void PrepareGraphicsResources(IGraphicsProvider* provider) override;
     void Start() override;
-    bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
+    bool DrawProperties(Engine::Core::IInspectorUi& ui) override;
 private:
     IGraphicsProvider* m_provider = nullptr;
     std::shared_ptr<Engine::Graphics::IGraphicsTexture> m_paintTexture;

@@ -6,6 +6,7 @@
 #include "Engine/Editor/UI/IEditorUi.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Compoonents/Terrain/Terrain.h"
+#include "Core/Compoonents/Terrain/TerrainRegionEdit.h"
 #include "Core/ProjectLoader.h"
 #include "Engine/Editor/Core/Gizmos/EditorGizmoSystem.h"
 #include "Scene/SceneViewportToolbar.h"
@@ -87,11 +88,13 @@ public:
     void DrawPoseToolbar(const std::function<bool(float)>& next,
         bool animationEditor = false, bool inlineOptions = false);
     void DrawTerrainToolbar(const std::function<bool(float)>& next);
+    // Select tool controls: shape, feather, operation, its settings, Apply.
+    void DrawTerrainRegionToolbar(const std::function<bool(float)>& next);
     int GetTerrainObjectDisplayLod() const { return m_terrainObjectDisplayLod; }
     void SetTerrainObjectDisplayLod(int lod)
     { m_terrainObjectDisplayLod = std::clamp(lod, -1, 15); }
     int GetSceneRenderMode() const { return m_sceneRenderMode; }
-    void SetSceneRenderMode(int mode) { m_sceneRenderMode = std::clamp(mode, 0, 4); }
+    void SetSceneRenderMode(int mode) { m_sceneRenderMode = std::clamp(mode, 0, 5); }
     bool UseGlobalToolbar = false;
     bool UseGlobalBoneVisibility = true;
     void SetDocumentPath(std::string path) { m_documentPath = std::move(path); }
@@ -154,13 +157,49 @@ private:
     void CommitPrefabPreview();
     bool m_focusOnNextDraw = false;
     SceneEditMode m_editMode = SceneEditMode::Object;
-    // Toolbar tool index: Raise, Lower, Smooth, Flatten, Paint, Objects.
+    // Toolbar tool index: Raise, Lower, Smooth, Flatten, Paint, Objects,
+    // then the region-operation brushes (Erode, Weather, Noise, Terrace),
+    // which run a TerrainRegionOperation under the brush every frame, and
+    // Select, which draws a region and applies a heavy operation on commit.
     // Shift inverts the tool while held (raise/lower, paint/erase layer,
-    // place/erase objects).
+    // place/erase objects, noise sign).
     static constexpr int kSmoothBrush = 2;
     static constexpr int kFlattenBrush = 3;
     static constexpr int kPaintBrush = 4;
     static constexpr int kObjectBrush = 5;
+    static constexpr int kErodeBrush = 6;
+    static constexpr int kWeatherBrush = 7;
+    static constexpr int kNoiseBrush = 8;
+    static constexpr int kTerraceBrush = 9;
+    static constexpr int kSelectTool = 10;
+    // Settings of the region-operation brushes (one set, read per tool).
+    Engine::Components::TerrainRegionOperation m_brushOperation;
+    uint32_t m_brushSeed = 1;
+    // Select tool. Shapes: 0 rectangle, 1 ellipse, 2 lasso (drag), 3 polygon
+    // (click points; click the first point, double-click or Enter closes).
+    int m_regionShape = 0;
+    float m_regionFeather = 4.f;
+    Engine::Components::TerrainRegionMask m_regionMask;   // committed selection
+    bool m_regionDrawing = false;
+    glm::dvec2 m_regionStart{0.0}, m_regionLast{0.0};
+    std::vector<glm::dvec2> m_regionPoints;
+    glm::vec2 m_regionLastScreen{0.f};
+    // Operations: see kRegionOperations in SceneView.cpp.
+    int m_regionOperation = 0;
+    static constexpr int kRegionPaint = 7;
+    static Engine::Components::TerrainRegionOperation::Kind RegionOperationKind(int operation);
+    // Settings widgets for one operation (index into kRegionOperations);
+    // brush mode hides settings that only make sense for a committed region.
+    static void DrawRegionOperationSettings(Engine::Components::TerrainRegionOperation& op,
+        int operation, bool brush);
+    static int BrushOperationKind(int tool)
+    { return tool == kErodeBrush ? 0 : tool == kWeatherBrush ? 1 : tool == kNoiseBrush ? 3 : 4; }
+    Engine::Components::TerrainRegionOperation m_regionSettings;
+    bool m_regionApplyRequested = false;
+    std::string m_regionStatus;
+    void ClearRegionSelection()
+    { m_regionMask = {};
+      m_regionDrawing = false; m_regionPoints.clear(); }
     int m_terrainBrush = 0;
     // Fraction of the radius at full strength before the smooth falloff.
     float m_terrainHardness = .5f;

@@ -19,8 +19,10 @@ float4 PSMain(
     float4 uvChannels4 : TEXCOORD7,
     nointerpolation uint objectIndex : TEXCOORD11,
     float instanceLodDistance : TEXCOORD12,
-    bool frontFace : SV_IsFrontFace) : SV_TARGET
+    bool frontFace : SV_IsFrontFace,
+    uint primitiveId : SV_PrimitiveID) : SV_TARGET
 {
+    g_primitiveId = primitiveId; // editor Triangles view
     PSShadowMain(pos, worldPos, normal, uv, uv1, vertexColor, tangent,
         uvChannels0, uvChannels1, uvChannels2, uvChannels3, uvChannels4,
         objectIndex, instanceLodDistance);

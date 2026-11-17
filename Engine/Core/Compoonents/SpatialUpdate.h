@@ -1,5 +1,5 @@
 #pragma once
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Rendering/RenderSpatialIndex.h"
 #include <unordered_map>
 #include <unordered_set>

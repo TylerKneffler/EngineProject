@@ -1,6 +1,6 @@
 #pragma once
-#include "Core/component.h"
-#include "Core/PropertyMacros.h"
+#include "Core/Compoonents/Component.h"
+#include "Core/Compoonents/PropertyMacros.h"
 #include "Core/Graphics/IGraphicsBuffer.h"
 #include "Core/Model/MeshData.h"
 #include "Core/Rendering/MeshLodSelection.h"
@@ -357,7 +357,7 @@ public:
     static SliceResult SliceByPlane(const std::vector<Vertex>& vertices,
         const glm::vec3& planePoint, const glm::vec3& planeNormal);
 
-    bool        DrawProperties(::Engine::Editor::IEditorUi& ui) override;
+    bool        DrawProperties(Engine::Core::IInspectorUi& ui) override;
     JsonValue   Serialize() const override;
     void        Deserialize(const JsonValue& v) override;
     void        DeserializeLegacyMorphTargets(const JsonValue& value);

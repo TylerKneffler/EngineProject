@@ -1,6 +1,6 @@
 #pragma once
-#include "Core/Script.h"
-#include "Core/PropertyMacros.h"
+#include "Core/Compoonents/Script.h"
+#include "Core/Compoonents/PropertyMacros.h"
 #include <glm/glm.hpp>
 
 // FirstPersonController — simple free-look movement for a camera-bearing player.

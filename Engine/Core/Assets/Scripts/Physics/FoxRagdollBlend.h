@@ -1,7 +1,7 @@
 #pragma once
 
-#include "Core/Script.h"
-#include "Core/PropertyMacros.h"
+#include "Core/Compoonents/Script.h"
+#include "Core/Compoonents/PropertyMacros.h"
 #include <string>
 
 // Runs animation, then blends into IK. Mesh-collider scenes keep the bones
@@ -42,7 +42,7 @@ public:
 
     void Start() override;
     void Update() override;
-    bool DrawProperties(Engine::Editor::IEditorUi& ui) override;
+    bool DrawProperties(Engine::Core::IInspectorUi& ui) override;
     float GetInfluence() const { return m_influence; }
 
 private:

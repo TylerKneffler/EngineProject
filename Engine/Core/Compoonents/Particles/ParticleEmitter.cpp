@@ -1,12 +1,12 @@
 #include "ParticleEmitter.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Compoonents/Materials/Texture.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
 #include "Core/Physics/Physics.h"
 #include "Core/Graphics/IGraphicsContext.h"
 #include "Core/Graphics/IGraphicsProvider.h"
-#include "Engine/Editor/UI/IEditorUi.h"
+#include "Core/Inspection/IInspectorUi.h"
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
@@ -894,7 +894,7 @@ void ParticleEmitter::ResolveCollisions(const glm::mat4& emitterWorld,
     }
 }
 
-bool ParticleEmitter::DrawProperties(::Engine::Editor::IEditorUi& ui)
+bool ParticleEmitter::DrawProperties(Engine::Core::IInspectorUi& ui)
 {
     bool changed = false;
     bool renderChanged = false;

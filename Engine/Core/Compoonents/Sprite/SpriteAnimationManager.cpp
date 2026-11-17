@@ -2,7 +2,7 @@
 #include "Core/Compoonents/Materials/Texture.h"
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Core/Scene/Scene.h"
-#include "Engine/Editor/UI/IEditorUi.h"
+#include "Core/Inspection/IInspectorUi.h"
 #include <algorithm>
 #include <cstring>
 
@@ -111,7 +111,7 @@ void SpriteAnimationManager::PrepareGraphicsResources(IGraphicsProvider* graphic
     Prepare(graphicsProvider);
 }
 
-bool SpriteAnimationManager::DrawProperties(::Engine::Editor::IEditorUi& ui)
+bool SpriteAnimationManager::DrawProperties(Engine::Core::IInspectorUi& ui)
 {
     const std::string previousFile = animationFile;
     bool changed = Component::DrawProperties(ui);

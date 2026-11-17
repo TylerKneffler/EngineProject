@@ -3,9 +3,9 @@
 #include "Core/Compoonents/Mesh/Mesh.h"
 #include "Core/Compoonents/Animation/SkinnedMesh.h"
 #include "Core/Graphics/IGraphicsProvider.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
-#include "Engine/Editor/UI/IEditorUi.h"
+#include "Core/Inspection/IInspectorUi.h"
 #include "Core/Model/MeshLodGenerator.h"
 
 #include <algorithm>
@@ -390,7 +390,7 @@ void MeshLodProfile::Deserialize(const JsonValue& value)
     MarkConfigurationDirty();
 }
 
-bool MeshLodProfile::DrawProperties(::Engine::Editor::IEditorUi& ui)
+bool MeshLodProfile::DrawProperties(Engine::Core::IInspectorUi& ui)
 {
     bool changed = Component::DrawProperties(ui);
     ui.ValueLabel("Base mesh", baseMeshAsset.empty()

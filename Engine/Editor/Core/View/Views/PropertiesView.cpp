@@ -529,6 +529,40 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
                 OnComponentsChanged();
 
             ui.Separator();
+            ui.Label("Bloom and Color Grading");
+            auto& output = m_scene->settings;
+            bool postChanged = ui.Checkbox("Bloom", &output.bloomEnabled);
+            postChanged |= ui.DragFloat("Bloom Intensity", &output.bloomIntensity,
+                0.002f, 0.f, 1.f);
+            ui.Tooltip("Fraction of a wide multi-scale blur mixed into the HDR image. "
+                "Bright sources such as the sun disc bleed the most.");
+            postChanged |= ui.Checkbox("Color Grading", &output.colorGradingEnabled);
+            postChanged |= ui.ColorEdit3("Shadow Tint", &output.gradingShadowTint.x);
+            postChanged |= ui.ColorEdit3("Highlight Tint", &output.gradingHighlightTint.x);
+            postChanged |= ui.DragFloat("Shadow/Highlight Balance",
+                &output.gradingBalance, 0.01f, -1.f, 1.f);
+            postChanged |= ui.DragFloat("Contrast", &output.gradingContrast,
+                0.01f, 0.25f, 4.f);
+            postChanged |= ui.DragFloat("Saturation", &output.gradingSaturation,
+                0.01f, 0.f, 4.f);
+            if (postChanged && OnComponentsChanged)
+                OnComponentsChanged();
+
+            ui.Separator();
+            ui.Label("Sun Disc");
+            bool sunChanged = ui.Checkbox("Draw Sun Disc", &output.sunDiscEnabled);
+            ui.Tooltip("Draws the brightest directional light into the skybox, "
+                "with a forward-scattering glow around it.");
+            sunChanged |= ui.DragFloat("Angular Diameter (deg)",
+                &output.sunDiscAngularDiameter, 0.01f, 0.05f, 20.f);
+            sunChanged |= ui.DragFloat("Disc Intensity", &output.sunDiscIntensity,
+                0.5f, 0.f, 100000.f);
+            sunChanged |= ui.DragFloat("Glow Intensity", &output.sunGlowIntensity,
+                0.01f, 0.f, 100.f);
+            if (sunChanged && OnComponentsChanged)
+                OnComponentsChanged();
+
+            ui.Separator();
             ui.Label("Spatial Debug");
             bool portalDebugChanged = false;
             portalDebugChanged |= ui.Checkbox("Enable Spatial Debug Visuals",

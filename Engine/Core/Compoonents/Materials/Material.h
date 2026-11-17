@@ -1,7 +1,7 @@
 #pragma once
 #include "Core/Model/TextureLodSettings.h"
-#include "Core/component.h"
-#include "Core/PropertyMacros.h"
+#include "Core/Compoonents/Component.h"
+#include "Core/Compoonents/PropertyMacros.h"
 #include <glm/glm.hpp>
 #include <memory>
 #include <array>
@@ -34,7 +34,7 @@ public:
     std::string ResolveShaderPath(const std::string& path) const;
     // Ordered candidates, including absent higher-priority locations for watching.
     std::vector<std::filesystem::path> ShaderSearchPaths(const std::string& path) const;
-    bool DrawShaderProperties(::Engine::Editor::IEditorUi& ui,
+    bool DrawShaderProperties(Engine::Core::IInspectorUi& ui,
         const void* context = nullptr);
     // Runtime diagnostic displayed by the inspector; never serialized.
     std::string shaderError;
@@ -262,7 +262,7 @@ public:
     std::vector<std::string> lodMaterials;
     JsonValue Serialize() const override;
     void Deserialize(const JsonValue& value) override;
-    bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
+    bool DrawProperties(Engine::Core::IInspectorUi& ui) override;
     void OnAfterDeserialize(IGraphicsProvider* graphicsProvider) override
     {
         if (graphicsProvider && !DeferGraphicsPreparation(graphicsProvider))

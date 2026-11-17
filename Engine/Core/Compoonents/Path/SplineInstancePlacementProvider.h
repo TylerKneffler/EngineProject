@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Core/component.h"
+#include "Core/Compoonents/Component.h"
 
 #include <glm/glm.hpp>
 #include <cstdint>
@@ -23,7 +23,7 @@ public:
     void Enabled() override { m_signature = 0; }
     void Disabled() override;
     void OnDestroy() override;
-    bool DrawProperties(Engine::Editor::IEditorUi& ui) override;
+    bool DrawProperties(Engine::Core::IInspectorUi& ui) override;
     bool RequiresUpdate() const override { return false; }
     const std::string& GetBuildMessage() const { return m_message; }
 

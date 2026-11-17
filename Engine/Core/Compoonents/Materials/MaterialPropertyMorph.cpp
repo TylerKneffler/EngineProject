@@ -1,8 +1,8 @@
 #include "MaterialPropertyMorph.h"
 
 #include "Core/Compoonents/Materials/Material.h"
-#include "Core/Object.h"
-#include "Engine/Editor/UI/IEditorUi.h"
+#include "Core/Scene/Object.h"
+#include "Core/Inspection/IInspectorUi.h"
 #include <algorithm>
 
 namespace Engine::Components
@@ -152,7 +152,7 @@ void MaterialPropertyMorph::Apply()
     m_output = capture();
 }
 
-bool MaterialPropertyMorph::DrawProperties(::Engine::Editor::IEditorUi& ui)
+bool MaterialPropertyMorph::DrawProperties(Engine::Core::IInspectorUi& ui)
 {
     bool changed = Component::DrawProperties(ui);
     if (ui.PropertyGroupHeader("Material Property Morphs"))

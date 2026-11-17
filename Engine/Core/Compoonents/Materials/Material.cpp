@@ -1,10 +1,10 @@
 #include "Material.h"
-#include "Core/Compoonents/Obj/LodPathListEditor.h"
+#include "Core/Compoonents/Mesh/Lod/LodPathListEditor.h"
 #include "Core/Serialization/PrefabLod.h"
 #include "Core/Compoonents/Materials/Texture.h"
 #include "Core/Compoonents/Mesh/Mesh.h"
 #include "Core/Serialization/Json.h"
-#include "Engine/Editor/UI/IEditorUi.h"
+#include "Core/Inspection/IInspectorUi.h"
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
@@ -437,7 +437,7 @@ std::string Material::ResolveShaderPath(const std::string& path) const
     return std::filesystem::path(path).lexically_normal().generic_string();
 }
 
-bool Material::DrawShaderProperties(::Engine::Editor::IEditorUi& ui, const void* context)
+bool Material::DrawShaderProperties(Engine::Core::IInspectorUi& ui, const void* context)
 {
     ui.PushId("surfaceShader");
     bool changed = DrawAssetPathPicker(ui, context ? context : this,
@@ -650,7 +650,7 @@ Material::JsonValue Material::Serialize() const
     return value;
 }
 
-bool Material::DrawProperties(::Engine::Editor::IEditorUi& ui)
+bool Material::DrawProperties(Engine::Core::IInspectorUi& ui)
 {
     bool changed = Component::DrawProperties(ui);
     if (EditLodPathList(ui, "Prefab LOD materials", lodMaterials,

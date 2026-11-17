@@ -3,7 +3,7 @@
 #include "AnimationClipAsset.h"
 #include "RigAsset.h"
 #include "Core/Compoonents/Animation/Model.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>

@@ -156,12 +156,6 @@ file(GLOB_RECURSE ENGINE_SOURCES CONFIGURE_DEPENDS
 )
 # Engine/Core/Assets contains project template content, not engine code.
 list(FILTER ENGINE_SOURCES EXCLUDE REGEX "[/\\\\]Assets[/\\\\]")
-# The scene-serialization implementation was reorganized under Scene/* while
-# byte-identical compatibility copies remained at Serialization/*. Compiling
-# both paths gives MSVC colliding .obj names and duplicate definitions
-# (LNK4006); keep the structured implementation as the single source of truth.
-list(FILTER ENGINE_SOURCES EXCLUDE REGEX
-    "[/\\\\]Serialization[/\\\\]Scene(Document|Object|Prefab)SerializationBehavior\\.cpp$")
 file(GLOB_RECURSE ENGINE_HEADERS CONFIGURE_DEPENDS
     "${ENGINE_ROOT}/Engine/Core/*.h"
     "${ENGINE_ROOT}/Engine/Core/*.hpp"
@@ -554,6 +548,22 @@ if(ENGINE_VULKAN_ENABLED)
             )
             list(APPEND VULKAN_SHADER_OUTPUTS "${SHADER_OUTPUT}")
         endforeach()
+    endforeach()
+    # Bloom mip-chain passes share PostProcess.hlsl with the compose shader.
+    foreach(SHADER_SPEC "BloomDown:BloomDownsamplePS" "BloomUp:BloomUpsamplePS")
+        string(REPLACE ":" ";" SHADER_PARTS "${SHADER_SPEC}")
+        list(GET SHADER_PARTS 0 SHADER_PASS)
+        list(GET SHADER_PARTS 1 SHADER_ENTRY)
+        set(SHADER_SOURCE "${ENGINE_ROOT}/Engine/Core/Shaders/PostProcess/PostProcess.hlsl")
+        set(SHADER_OUTPUT "${VULKAN_SHADER_DIR}/PostProcess.${SHADER_PASS}.PS.spv")
+        add_custom_command(OUTPUT "${SHADER_OUTPUT}"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${VULKAN_SHADER_DIR}"
+            COMMAND "${DXC_SPIRV_EXECUTABLE}" -spirv -fspv-target-env=vulkan1.1
+                -fvk-use-dx-layout -fspv-entrypoint-name=PSMain -D VULKAN=1 -T ps_6_0
+                -E ${SHADER_ENTRY} -Fo "${SHADER_OUTPUT}" "${SHADER_SOURCE}"
+            DEPENDS "${SHADER_SOURCE}" VERBATIM
+            COMMENT "Compiling PostProcess.${SHADER_PASS}.PS for Vulkan")
+        list(APPEND VULKAN_SHADER_OUTPUTS "${SHADER_OUTPUT}")
     endforeach()
     set(SHADER_SOURCE "${ENGINE_ROOT}/Engine/Core/Shaders/InstanceCull/InstanceCull.hlsl")
     set(SHADER_OUTPUT "${VULKAN_SHADER_DIR}/InstanceCull.CS.spv")

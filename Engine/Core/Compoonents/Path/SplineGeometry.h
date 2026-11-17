@@ -1,5 +1,5 @@
 #pragma once
-#include "Core/component.h"
+#include "Core/Compoonents/Component.h"
 #include "Core/Compoonents/Mesh/Mesh.h"
 #include <string>
 #include <vector>
@@ -33,7 +33,7 @@ public:
         std::string& error) const;
     void PrepareGeometry(IGraphicsProvider* provider);
     void OnDestroy() override;
-    bool DrawProperties(Engine::Editor::IEditorUi& ui) override;
+    bool DrawProperties(Engine::Core::IInspectorUi& ui) override;
     const std::string& GetBuildMessage() const { return m_message; }
 private:
     uint64_t m_signature = 0;

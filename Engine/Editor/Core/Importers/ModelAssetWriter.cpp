@@ -21,7 +21,7 @@
 #include "Core/Model/RigAsset.h"
 #include "Core/Model/PoseAsset.h"
 #include "AnimationAssetWriter.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Serialization/SceneSerializer.h"
 

@@ -37,7 +37,7 @@ public:
     void Deserialize(const JsonValue& value) override;
     void OnAfterDeserialize(IGraphicsProvider* graphicsProvider) override;
     void PrepareGraphicsResources(IGraphicsProvider* graphicsProvider) override;
-    bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
+    bool DrawProperties(Engine::Core::IInspectorUi& ui) override;
     bool Prepare(IGraphicsProvider* graphicsProvider);
     bool IsReady() const;
     const SpriteSheetFrame* GetCurrentFrame() const;

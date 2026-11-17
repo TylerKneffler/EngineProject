@@ -1,7 +1,7 @@
 #pragma once
 
-#include "Core/PropertyMacros.h"
-#include "Core/component.h"
+#include "Core/Compoonents/PropertyMacros.h"
+#include "Core/Compoonents/Component.h"
 #include <string>
 
 class SplinePath;
@@ -52,7 +52,7 @@ public:
 
     void Start() override;
     void Update() override;
-    bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
+    bool DrawProperties(Engine::Core::IInspectorUi& ui) override;
     void Play();
     void Pause();
     void Restart();

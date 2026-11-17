@@ -1,5 +1,5 @@
 #include "Camera.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
 #include <cassert>
 #include <algorithm>

@@ -1,7 +1,7 @@
 #include "Scripts/Portals/MovingPortalPairDriver.h"
 #include "Scripts/Portals/MovingPortalPairDriver.h"
 
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include <algorithm>

@@ -1,5 +1,5 @@
 #include "Core/Compoonents/Animation/TwoBoneIK.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
 #include <algorithm>
 #include <cmath>

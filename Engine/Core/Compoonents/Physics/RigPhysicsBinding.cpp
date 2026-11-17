@@ -2,9 +2,9 @@
 #include "Core/Compoonents/Animation/RigController.h" // legacy scene data conversion
 #include "Core/Compoonents/Animation/Model.h"
 #include "Core/Compoonents/Physics/RigidBody.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
-#include "Engine/Editor/UI/IEditorUi.h"
+#include "Core/Inspection/IInspectorUi.h"
 #include <cmath>
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -105,7 +105,7 @@ void RigPhysicsBinding::PostPhysicsUpdate()
     }
 }
 
-bool RigPhysicsBinding::DrawProperties(::Engine::Editor::IEditorUi& ui) {
+bool RigPhysicsBinding::DrawProperties(Engine::Core::IInspectorUi& ui) {
     bool changed = Component::DrawProperties(ui);
     const std::string bodies = std::to_string(physicsBones.size());
     const std::string joints = std::to_string(physicsJoints.size());

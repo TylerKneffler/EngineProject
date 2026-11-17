@@ -1,5 +1,5 @@
 #include "Core/Compoonents/Physics/RigidBody.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Physics/Internal/PhysicsInternal.h"
 #include <glm/gtc/quaternion.hpp>
 #include <algorithm>

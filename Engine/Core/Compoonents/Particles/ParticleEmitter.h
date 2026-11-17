@@ -101,7 +101,7 @@ public:
     void Start() override;
     void Update() override;
     void Deserialize(const JsonValue& value) override;
-    bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
+    bool DrawProperties(Engine::Core::IInspectorUi& ui) override;
 
     void Reset();
     void Restart();

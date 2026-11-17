@@ -23,7 +23,7 @@ public:
     void SetAnimatedIkSwitches(const std::unordered_map<std::string, bool>& switches);
     JsonValue Serialize() const override;
     void Deserialize(const JsonValue& value) override;
-    bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
+    bool DrawProperties(Engine::Core::IInspectorUi& ui) override;
 private:
     void ApplyConstraints(Model& model, bool afterPhysics);
     struct DeformStep {

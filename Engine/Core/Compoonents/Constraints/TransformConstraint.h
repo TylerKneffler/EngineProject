@@ -25,7 +25,7 @@ public:
     void Apply();
     Engine::Core::Object* Target() const;
     std::string ValidationError() const;
-    bool DrawProperties(Engine::Editor::IEditorUi& ui) override;
+    bool DrawProperties(Engine::Core::IInspectorUi& ui) override;
 
 protected:
     virtual bool WantsPosition() const = 0;

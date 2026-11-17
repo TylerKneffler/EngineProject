@@ -1,6 +1,6 @@
 #include "TerrainObjectLayer.h"
-#include "Core/Object.h"
-#include "Engine/Editor/UI/IEditorUi.h"
+#include "Core/Scene/Object.h"
+#include "Core/Inspection/IInspectorUi.h"
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/quaternion.hpp>
 #include <algorithm>
@@ -568,7 +568,7 @@ void TerrainObjectLayer::InstallPrepared(TerrainObjectLayer&& source)
     m_preparedRevision = GetConfigurationRevision();
 }
 
-bool TerrainObjectLayer::DrawProperties(::Engine::Editor::IEditorUi& ui)
+bool TerrainObjectLayer::DrawProperties(Engine::Core::IInspectorUi& ui)
 {
     bool changed = false;
     ui.ValueLabel("Layer", layerName.c_str());

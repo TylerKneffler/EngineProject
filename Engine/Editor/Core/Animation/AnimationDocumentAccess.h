@@ -1,6 +1,6 @@
 #pragma once
-#include "Core/ComponentReference.h"
-#include "Core/Object.h"
+#include "Core/Compoonents/ComponentReference.h"
+#include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Compoonents/Animation/AnimationManager.h"
 #include "Core/Compoonents/Animation/Model.h"

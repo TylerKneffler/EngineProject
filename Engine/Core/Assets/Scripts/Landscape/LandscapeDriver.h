@@ -1,6 +1,6 @@
 #pragma once
-#include "Core/Script.h"
-#include "Core/PropertyMacros.h"
+#include "Core/Compoonents/Script.h"
+#include "Core/Compoonents/PropertyMacros.h"
 #include "Core/Compoonents/Terrain/TerrainHeightArchive.h"
 #include <cstdint>
 #include <glm/glm.hpp>
@@ -36,6 +36,18 @@ public:
     // Height of the (future) lake surface; the generator carves basins below it.
     PROPERTY(Inspector, EditAnywhere, Category = "Landscape")
     float waterLevel = -40.f;
+    // Heights where rock, then snow, take over regardless of slope, and the
+    // top of the forests. The defaults suit a map whose ranges reach 120 m.
+    PROPERTY(Inspector, EditAnywhere, Category = "Landscape")
+    float rockLine = 58.f;
+    PROPERTY(Inspector, EditAnywhere, Category = "Landscape")
+    float snowLine = 102.f;
+    PROPERTY(Inspector, EditAnywhere, Category = "Landscape")
+    float treeLine = 46.f;
+    // Widens the rock, snow and tree-line transitions (1 = 16 m rock band);
+    // scale it with the map's relief.
+    PROPERTY(Inspector, EditAnywhere, Category = "Landscape", ClampMin = "0.1", ClampMax = "50")
+    float altitudeBlend = 1.f;
     // Trees tried per fully forested 128 m cell.
     PROPERTY(Inspector, EditAnywhere, Category = "Landscape", ClampMin = "0", ClampMax = "600")
     int treesPerCell = 220;

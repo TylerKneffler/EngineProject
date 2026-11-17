@@ -32,7 +32,7 @@ public:
     void Start() override;
     JsonValue Serialize() const override;
     void Deserialize(const JsonValue& value) override;
-    bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
+    bool DrawProperties(Engine::Core::IInspectorUi& ui) override;
 
 private:
     std::unordered_map<std::string, bool> m_animatedIkSwitches;

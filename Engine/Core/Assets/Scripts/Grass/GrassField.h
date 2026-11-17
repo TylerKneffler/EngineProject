@@ -1,8 +1,8 @@
 #pragma once
 
-#include "Core/Script.h"
+#include "Core/Compoonents/Script.h"
 #include "Core/Compoonents/SpatialUpdate.h"
-#include "Core/PropertyMacros.h"
+#include "Core/Compoonents/PropertyMacros.h"
 #include "Core/Compoonents/Mesh/Mesh.h"
 #include "Core/Compoonents/Mesh/MeshInstanceLayerData.h"
 #include "Core/Compoonents/Terrain/TerrainObjectLayer.h"

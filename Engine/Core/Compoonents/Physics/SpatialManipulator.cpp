@@ -1,11 +1,11 @@
 #include "SpatialManipulator.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Compoonents/Physics/PrimitiveObjectCollider.h"
 #include "Core/Compoonents/Physics/MeshObjectCollider.h"
 #include "Core/Physics/Physics.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Scene/Spatial/WarpVolume.h"
-#include "Engine/Editor/UI/IEditorUi.h"
+#include "Core/Inspection/IInspectorUi.h"
 #include <algorithm>
 #include <cmath>
 #include <functional>
@@ -663,7 +663,7 @@ void SpatialManipulator::PostPhysicsUpdate(
     UpdateTriggerTraversal(target, claimedBodies);
 }
 
-bool SpatialManipulator::DrawProperties(::Engine::Editor::IEditorUi& ui)
+bool SpatialManipulator::DrawProperties(Engine::Core::IInspectorUi& ui)
 {
     bool changed = false;
 

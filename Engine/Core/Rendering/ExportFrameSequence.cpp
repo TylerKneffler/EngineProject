@@ -1,7 +1,7 @@
 #include "ExportFrameSequence.h"
 
 #include "Core/Scene/Scene.h"
-#include "Core/SceneManager.h"
+#include "Core/Scene/SceneManager.h"
 
 #include <stdexcept>
 

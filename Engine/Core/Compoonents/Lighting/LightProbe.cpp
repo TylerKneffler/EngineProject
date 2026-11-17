@@ -1,6 +1,6 @@
 #include "LightProbe.h"
-#include "Engine/Editor/UI/IEditorUi.h"
-#include "Core/Object.h"
+#include "Core/Inspection/IInspectorUi.h"
+#include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
 #include <algorithm>
 #include <array>
@@ -55,7 +55,7 @@ LightProbe::LightProbe()
     RegisterField("valid",valid);
 }
 
-bool LightProbe::DrawProperties(::Engine::Editor::IEditorUi& ui)
+bool LightProbe::DrawProperties(Engine::Core::IInspectorUi& ui)
 {
     ui.DisabledLabel(valid?"Baked probe sample.":
         "Unbaked probe. Run Lighting > Bake Lighting.");
@@ -174,7 +174,7 @@ void LightProbeGroup::Deserialize(const JsonValue& value)
         valid=false;
 }
 
-bool LightProbeGroup::DrawProperties(::Engine::Editor::IEditorUi& ui)
+bool LightProbeGroup::DrawProperties(Engine::Core::IInspectorUi& ui)
 {
     bool changed=ui.DragFloat3("Size",&size.x,.1f,.01f,10000.f);
     changed=ui.SliderInt("Probes X",&countX,2,32)||changed;

@@ -3,7 +3,7 @@
 #include "pch.h"
 #include "Engine/Editor/State/EditorState.h"
 #include "Engine/Editor/Diagnostics/FrameActivity.h"
-#include "Core/SceneManager.h"
+#include "Core/Scene/SceneManager.h"
 #include "Core/Rendering/RenderJobs.h"
 #include "Engine/Editor/CodeEditorLink.h"
 #include "Core/View/ViewFactory.h"

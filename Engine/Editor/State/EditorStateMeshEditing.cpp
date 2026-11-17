@@ -1,6 +1,6 @@
 #include "pch.h"
 #include "Engine/Editor/State/EditorState.h"
-#include "Core/SceneManager.h"
+#include "Core/Scene/SceneManager.h"
 #include "Core/Rendering/RenderJobs.h"
 #include "Core/View/ViewFactory.h"
 #include "Core/View/IEditorPanel.h"

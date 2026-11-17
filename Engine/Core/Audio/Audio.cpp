@@ -2,7 +2,7 @@
 #include "Core/Audio/AudioMixer.h"
 
 #include "Core/Compoonents/Audio/AudioSource.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
 
 

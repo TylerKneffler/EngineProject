@@ -2,9 +2,9 @@
 
 #include "Core/Audio/AudioMixer.h"
 #include "Core/Compoonents/Camera/Camera.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
-#include "Editor/UI/IEditorUi.h"
+#include "Core/Inspection/IInspectorUi.h"
 #include <miniaudio.h>
 #include <glm/gtc/constants.hpp>
 #include <algorithm>
@@ -339,7 +339,7 @@ bool AudioSource::IsPlaying() const
                                   : ma_sound_is_playing(&m_impl->sound));
 }
 
-bool AudioSource::DrawProperties(::Engine::Editor::IEditorUi& ui)
+bool AudioSource::DrawProperties(Engine::Core::IInspectorUi& ui)
 {
     const bool changed = Component::DrawProperties(ui);
     ui.Separator();

@@ -2,7 +2,7 @@
 #include "TerrainObjectLayer.h"
 #include "Core/Compoonents/Camera/Camera.h"
 #include "Core/Compoonents/Mesh/Mesh.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
 #include <algorithm>
 #include <cmath>
@@ -112,6 +112,7 @@ void TerrainManager::ClearFarTerrain()
     m_farTiles.clear();
     m_farHeights.clear();
     m_farHeightsSnapshot.reset();
+    ResetSunShadow();
     m_farPatches.clear();
     m_farPatchCells.clear();
     m_farHeightArchivePath.clear();

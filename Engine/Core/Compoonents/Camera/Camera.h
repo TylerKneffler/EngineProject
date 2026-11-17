@@ -1,6 +1,6 @@
 #pragma once
-#include "Core/component.h"
-#include "Core/PropertyMacros.h"
+#include "Core/Compoonents/Component.h"
+#include "Core/Compoonents/PropertyMacros.h"
 #include <glm/glm.hpp>
 
 namespace Engine::Components

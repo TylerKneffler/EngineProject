@@ -3,7 +3,7 @@
 #include "Engine/Editor/UI/IEditorUi.h"
 #include "Engine/Editor/Core/View/Views/ConsoleView.h"
 #include "Core/Scene/Scene.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Compoonents/Mesh/Mesh.h"
 #include "Core/Mesh/MeshEditGeometry.h"
 #include "Engine/Editor/Core/Paint/MeshUvUnwrap.h"

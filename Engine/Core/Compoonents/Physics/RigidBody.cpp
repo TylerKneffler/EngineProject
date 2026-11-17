@@ -6,10 +6,10 @@
 #include "Core/Compoonents/Mesh/Mesh.h"
 #include "Core/Compoonents/Animation/Skeleton.h"
 #include "Core/Compoonents/Animation/SkinnedMesh.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Physics/Internal/PhysicsInternal.h"
-#include "Editor/UI/IEditorUi.h"
+#include "Core/Inspection/IInspectorUi.h"
 #include <btBulletDynamicsCommon.h>
 #include <glm/gtc/quaternion.hpp>
 #define GLM_ENABLE_EXPERIMENTAL
@@ -1249,7 +1249,7 @@ void Engine::Components::RigidBody::Deserialize(const JsonValue& value)
 }
 
 bool Engine::Components::RigidBody::DrawProperties(
-    ::Engine::Editor::IEditorUi& ui)
+    Engine::Core::IInspectorUi& ui)
 {
     bool changed = Component::DrawProperties(ui);
     ui.Separator();

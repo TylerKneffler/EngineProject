@@ -21,7 +21,7 @@ public:
     size_t GetNodeCount() const { return m_nodePaths.size(); }
     JsonValue Serialize() const override;
     void Deserialize(const JsonValue& value) override;
-    bool DrawProperties(::Engine::Editor::IEditorUi& ui) override;
+    bool DrawProperties(Engine::Core::IInspectorUi& ui) override;
 
 private:
     void RefreshNodeCache() const;

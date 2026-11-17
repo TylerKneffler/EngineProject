@@ -1,5 +1,5 @@
 #include "Light.h"
-#include "Engine/Editor/UI/IEditorUi.h"
+#include "Core/Inspection/IInspectorUi.h"
 #include <algorithm>
 #include <cstring>
 #include <cstdio>
@@ -31,7 +31,7 @@ Light::Light()
     RegisterField("shadowFilterScale", shadowFilterScale, "Shadows");
 }
 
-bool Light::DrawProperties(::Engine::Editor::IEditorUi& ui)
+bool Light::DrawProperties(Engine::Core::IInspectorUi& ui)
 {
     bool changed = false;
     const char* types[] = { "Point", "Directional", "Spot" };

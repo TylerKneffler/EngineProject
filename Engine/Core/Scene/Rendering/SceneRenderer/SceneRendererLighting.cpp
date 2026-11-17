@@ -293,6 +293,23 @@ void SceneRendererLighting::BindPhotometryTextures(
     }
 }
 
+void SceneRendererLighting::ResolveSkySun(const Scene& scene,
+    const glm::vec3& sunDirection, const glm::vec3& sunRadiance,
+    glm::vec4& direction, glm::vec4& radiance)
+{
+    const auto& settings = scene.settings;
+    direction = glm::vec4(0.f);
+    radiance = glm::vec4(0.f);
+    if (!settings.sunDiscEnabled || scene.m_editorMode2D ||
+        glm::dot(sunDirection, sunDirection) < 1e-8f ||
+        glm::dot(sunRadiance, sunRadiance) <= 0.f)
+        return;
+    const float radius = glm::radians(std::clamp(
+        settings.sunDiscAngularDiameter, 0.05f, 20.f) * 0.5f);
+    direction = glm::vec4(glm::normalize(sunDirection), std::cos(radius));
+    radiance = glm::vec4(sunRadiance, std::max(settings.sunDiscIntensity, 0.f));
+}
+
 void SceneRendererLighting::PrepareSkyboxAndEnvironment(
     Scene& scene,
     Engine::Graphics::IGraphicsContext* context,
@@ -300,8 +317,13 @@ void SceneRendererLighting::PrepareSkyboxAndEnvironment(
     const glm::mat4& proj,
     uint32_t viewportWidth,
     uint32_t viewportHeight,
-    bool shadowOnly)
+    bool shadowOnly,
+    const glm::vec3& sunDirection,
+    const glm::vec3& sunRadiance)
 {
+    if (!shadowOnly)
+        ResolveSkySun(scene, sunDirection, sunRadiance,
+            scene.m_skySunDirection, scene.m_skySunRadiance);
     const Engine::Components::Texture* skybox = shadowOnly
         ? nullptr
         : scene.ResolveSkyboxTexture();
@@ -315,8 +337,17 @@ void SceneRendererLighting::PrepareSkyboxAndEnvironment(
             skybox->GetGraphicsTexture(),
             4.f * float(std::max(viewportWidth, viewportHeight)));
 
-        struct SkyboxCBData { glm::mat4 invVP; glm::vec4 displayParams; };
+        struct SkyboxCBData
+        {
+            glm::mat4 invVP;
+            glm::vec4 displayParams;
+            glm::vec4 sunDirection;
+            glm::vec4 sunRadiance;
+        };
+        static_assert(sizeof(SkyboxCBData) == 112);
         SkyboxCBData skyboxData{};
+        skyboxData.sunDirection = scene.m_skySunDirection;
+        skyboxData.sunRadiance = scene.m_skySunRadiance;
         // A skybox represents direction only. Excluding camera translation
         // prevents cancellation in the shader's farPoint - nearPoint math
         // when the editor camera is far from the world origin.
@@ -326,7 +357,7 @@ void SceneRendererLighting::PrepareSkyboxAndEnvironment(
             scene.m_editorMode2D ? 1.f : 0.f,
             std::exp2(scene.settings.hdriExposure),
             glm::radians(scene.settings.hdriRotation),
-            0.f};
+            std::max(scene.settings.sunGlowIntensity, 0.f)};
 
         std::memcpy(scene.m_skyboxCBMapped, &skyboxData, sizeof(skyboxData));
         context->SetPipeline(scene.m_skyboxPipeline.get());

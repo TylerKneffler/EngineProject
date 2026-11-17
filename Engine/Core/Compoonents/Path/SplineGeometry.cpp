@@ -1,10 +1,10 @@
 #include "Core/Compoonents/Path/SplineGeometry.h"
 #include "Core/Compoonents/Path/SplinePath.h"
 #include "Core/Compoonents/Materials/Material.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Graphics/IGraphicsProvider.h"
-#include "Engine/Editor/UI/IEditorUi.h"
+#include "Core/Inspection/IInspectorUi.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -284,7 +284,7 @@ void SplineGeometry::OnDestroy()
     m_outputId=0;
 }
 
-bool SplineGeometry::DrawProperties(Engine::Editor::IEditorUi& ui)
+bool SplineGeometry::DrawProperties(Engine::Core::IInspectorUi& ui)
 {
     static const char* modes[]={"Road", "Pipe", "Repeat Mesh", "Bend Mesh"};
     static const char* axes[]={"X", "Y", "Z"};

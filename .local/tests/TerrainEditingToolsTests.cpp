@@ -2,18 +2,22 @@
 // seam-consistent flatten across manager cells, and object scatter / erase
 // through the scene view's SceneTerrainTools.
 #include "Core/Scene/Scene.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Compoonents/Mesh/Mesh.h"
 #include "Core/Compoonents/Terrain/Terrain.h"
 #include "Core/Compoonents/Terrain/TerrainManager.h"
 #include "Core/Compoonents/Terrain/TerrainObjectLayer.h"
 #include "Core/Compoonents/Terrain/TerrainSurfaceSample.h"
+#include "Core/Compoonents/Terrain/TerrainHeightArchive.h"
+#include "Core/Compoonents/Terrain/TerrainRegionEdit.h"
 #include "Editor/Core/View/Views/Scene/SceneTerrainTools.h"
 
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <stdexcept>
 
@@ -314,6 +318,209 @@ void TimeLargeCellStroke()
     std::cout << "256x256 cell, radius 4 m dab: raise " << raise << " ms, paint " << paint << " ms\n";
 }
 
+// ---- Region editing (TerrainRegionEdit.h) ----
+
+void TestRegionMasks()
+{
+    using Engine::Components::TerrainRegionMask;
+    const auto circle = TerrainRegionMask::Circle({0.0, 0.0}, 10.f, .5f);
+    Require(Near(circle.Weight(0.0, 0.0), 1.f));
+    Require(Near(circle.Weight(4.9, 0.0), 1.f));       // inside the hard core
+    Require(circle.Weight(7.5, 0.0) > 0.f && circle.Weight(7.5, 0.0) < 1.f);
+    Require(Near(circle.Weight(10.5, 0.0), 0.f));
+    const auto box = TerrainRegionMask::Box({-5.0, -2.0}, {5.0, 2.0}, false, 0.f);
+    Require(Near(box.Weight(4.9, 1.9), 1.f) && Near(box.Weight(5.1, 0.0), 0.f));
+    const auto ellipse = TerrainRegionMask::Box({-5.0, -2.0}, {5.0, 2.0}, true, 0.f);
+    Require(Near(ellipse.Weight(4.5, 0.0), 1.f) && Near(ellipse.Weight(4.5, 1.9), 0.f));
+    // An L-shaped lasso: inside the arms, outside the notch.
+    const auto lasso = TerrainRegionMask::Polygon({{0, 0}, {10, 0}, {10, 4}, {4, 4}, {4, 10}, {0, 10}}, 1.f);
+    Require(Near(lasso.Weight(2.0, 8.0), 1.f));
+    Require(Near(lasso.Weight(8.0, 8.0), 0.f));
+    Require(lasso.Weight(9.6, 2.0) > 0.f && lasso.Weight(9.6, 2.0) < 1.f);
+    glm::dvec2 low, high;
+    Require(lasso.Bounds(low, high) && low == glm::dvec2(0.0) && high == glm::dvec2(10.0));
+    Require(TerrainRegionMask{}.Empty());
+}
+
+TerrainManager* MakeHillManager(Engine::Scene::Scene& scene)
+{
+    auto* object = scene.AddObject("Manager");
+    auto* manager = object->AddComponent<TerrainManager>();
+    manager->cellsX = manager->cellsY = 32;
+    manager->cellWidth = manager->cellDepth = 1.f;
+    manager->loadedRadius = 1;
+    manager->farRadius = 0;
+    manager->generateColliders = false;
+    Require(manager->AddCell(0, 0));
+    Require(manager->AddCell(1, 0));
+    // A ridged hill straddling the border between the cells at x = 32.
+    for (auto cell : {std::pair{0, 0}, std::pair{1, 0}})
+        if (auto* terrain = manager->GetLoadedCell(cell.first, cell.second))
+        {
+            for (int row = 0; row <= 32; ++row)
+                for (int col = 0; col <= 32; ++col)
+                {
+                    const double x = cell.first * 32.0 + col, z = row;
+                    const double d = std::hypot(x - 32.0, z - 16.0);
+                    terrain->heights[size_t(row) * 33 + col] = float(
+                        12.0 * std::exp(-d * d / 150.0) + 1.5 * std::sin(x * .7) * std::cos(z * .5));
+                }
+            terrain->Rebuild();
+        }
+    return manager;
+}
+
+void RequireSeam(TerrainManager* manager)
+{
+    auto* left = manager->GetLoadedCell(0, 0);
+    auto* right = manager->GetLoadedCell(1, 0);
+    Require(left && right);
+    if (!left || !right) return;
+    for (int row = 0; row <= 32; ++row)
+        Require(left->heights[size_t(row) * 33 + 32] == right->heights[size_t(row) * 33]);
+}
+
+void TestRegionErosionSeam()
+{
+    using Engine::Components::TerrainRegionMask;
+    using Engine::Components::TerrainRegionOperation;
+    Engine::Scene::Scene scene;
+    auto* manager = MakeHillManager(scene);
+    const auto before = manager->GetLoadedCell(0, 0)->heights;
+    TerrainRegionOperation op;
+    op.kind = TerrainRegionOperation::Kind::Hydraulic;
+    op.dropletDensity = 4.f;
+    op.erosionUnit = 4.f;
+    const auto mask = TerrainRegionMask::Box({16.0, 2.0}, {48.0, 30.0}, false, 3.f);
+    const auto start = std::chrono::steady_clock::now();
+    Require(manager->EditRegion(mask, op));
+    const double ms = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - start).count();
+    std::cout << "Region hydraulic erosion, 32x28 m, ~3600 droplets: " << ms << " ms\n";
+    RequireSeam(manager);
+    // Changed inside, untouched far outside the mask (corner sample).
+    double change = 0.0;
+    const auto& after = manager->GetLoadedCell(0, 0)->heights;
+    for (size_t i = 0; i < after.size(); ++i) change += std::abs(after[i] - before[i]);
+    Require(change > 1.0);
+    Require(after[0] == before[0]);
+    // Erosion moves material, so it should not create or destroy much.
+    for (auto kind : {TerrainRegionOperation::Kind::Thermal, TerrainRegionOperation::Kind::Smooth,
+                      TerrainRegionOperation::Kind::Noise, TerrainRegionOperation::Kind::Terrace})
+    {
+        TerrainRegionOperation other;
+        other.kind = kind;
+        other.talusDegrees = 20.f;
+        other.iterations = 8;
+        Require(manager->EditRegion(TerrainRegionMask::Circle({32.0, 16.0}, 10.f, .4f), other));
+        RequireSeam(manager);
+    }
+    // Flatten with blend 1 and no feather reaches the height exactly.
+    TerrainRegionOperation flatten;
+    flatten.kind = TerrainRegionOperation::Kind::Flatten;
+    flatten.height = 3.f;
+    Require(manager->EditRegion(TerrainRegionMask::Box({30.0, 10.0}, {34.0, 14.0}, false, 0.f), flatten));
+    Require(Near(manager->GetLoadedCell(0, 0)->heights[12 * 33 + 32], 3.f));
+    Require(Near(manager->GetLoadedCell(1, 0)->heights[12 * 33 + 1], 3.f));
+    RequireSeam(manager);
+}
+
+void TestRegionPaint()
+{
+    using Engine::Components::TerrainRegionMask;
+    Engine::Scene::Scene scene;
+    auto* terrain = MakeTerrain(scene, 2);
+    const auto lasso = TerrainRegionMask::Polygon({{2, 2}, {10, 2}, {10, 10}, {2, 10}}, 0.f);
+    Require(terrain->PaintRegion(lasso, 1.f, 1, false));
+    Require(Near(terrain->weights[(6 * 17 + 6) * 2 + 1], 1.f));
+    Require(Near(terrain->weights[(14 * 17 + 14) * 2 + 1], 0.f));
+    Require(terrain->PaintRegion(lasso, 1.f, 1, true));
+    Require(Near(terrain->weights[(6 * 17 + 6) * 2 + 1], 0.f));
+}
+
+// ---- Height archive v3: per-file scale and coarse cells ----
+
+void TestArchiveV3()
+{
+    namespace A = TerrainHeightArchive;
+    const auto path = (std::filesystem::temp_directory_path() / "terrain_archive_v3_test.heights").string();
+    const int extent = 1, cells = 8, stride = 4;
+    const float scale = 16.f;
+    {
+        std::ofstream file(path, std::ios::binary | std::ios::trunc);
+        const uint64_t signature = 77;
+        const int fine = 0;
+        A::Write(file, A::Magic); A::Write(file, uint32_t(3)); A::Write(file, signature);
+        A::Write(file, extent); A::Write(file, cells); A::Write(file, cells); A::Write(file, scale);
+        A::Write(file, fine); A::Write(file, stride);
+        for (int y = -1; y <= 1; ++y)
+            for (int x = -1; x <= 1; ++x)
+            {
+                const int n = (x == 0 && y == 0) ? cells + 1 : cells / stride + 1;
+                for (int i = 0; i < n * n; ++i)
+                    A::Write(file, int16_t(i * 37 - 200 + x * 1000 + y * 3));
+                for (int i = 0; i < (n * n + 3) / 4; ++i) A::Write(file, uint8_t(0xe4));
+            }
+    }
+    uint64_t signature = 0;
+    Require(A::ReadSignature(path, extent, cells, cells, signature) && signature == 77);
+    std::vector<float> heights;
+    std::vector<uint8_t> codes;
+    Require(A::ReadCellCodes(path, 77, extent, cells, cells, 0, 0, heights, codes));
+    Require(heights.size() == 81 && Near(heights[1], (37 - 200) / 16.f));
+    // Coarse cell: corners are the stored corners exactly; the middle of the
+    // first edge is the rounded mean of its two stored neighbours.
+    Require(A::ReadCellCodes(path, 77, extent, cells, cells, 1, -1, heights, codes));
+    Require(heights.size() == 81);
+    const float a = (-200 + 1000 - 3) / 16.f, b = (37 - 200 + 1000 - 3) / 16.f;
+    Require(Near(heights[0], a) && Near(heights[4], b));
+    Require(Near(heights[2], std::floor((a + b) * 8.f + .5f) / 16.f));
+    Require(codes[0] == 0 && codes[3] == 1 && codes[6] == 2);
+    int visited = 0;
+    Require(A::ForEachCell(path, 77, extent, cells, cells,
+        [&](int, int, const std::vector<float>& h, const std::vector<uint8_t>&)
+        { visited += h.size() == 81; return true; }));
+    Require(visited == 9);
+    std::filesystem::remove(path);
+}
+
+// The generated landscape: fine play-area cells must share their border
+// samples exactly with the coarse cells around them.
+void TestLandscapeArchiveSeams()
+{
+    namespace A = TerrainHeightArchive;
+    const std::string path = "Engine/Core/Assets/TerrainData/Landscape/world.heights";
+    std::ifstream file(path, std::ios::binary);
+    A::Layout layout;
+    if (!A::ReadLayout(file, layout, 0, 94, 32, 32))
+    {
+        std::cout << "Landscape archive not found or not the 94-cell map; seam check skipped\n";
+        return;
+    }
+    file.close();
+    uint64_t signature = 0;
+    Require(A::ReadSignature(path, layout.extent, 32, 32, signature));
+    const int f = layout.fineHalfExtent;
+    std::vector<float> inner, outer;
+    for (int c = -f; c <= f; c += 7)
+    {
+        // East edge of the play area: fine (f, c) against coarse (f + 1, c).
+        Require(A::ReadCell(path, signature, 94, 32, 32, f, c, inner));
+        Require(A::ReadCell(path, signature, 94, 32, 32, f + 1, c, outer));
+        for (int row = 0; row <= 32; ++row)
+            Require(inner[size_t(row) * 33 + 32] == outer[size_t(row) * 33]);
+        // South edge: fine (c, -f) against coarse (c, -f - 1).
+        Require(A::ReadCell(path, signature, 94, 32, 32, c, -f, inner));
+        Require(A::ReadCell(path, signature, 94, 32, 32, c, -f - 1, outer));
+        for (int col = 0; col <= 32; ++col)
+            Require(inner[col] == outer[size_t(32) * 33 + col]);
+    }
+    std::vector<float> farGrid;
+    Require(A::ReadFarGrid("Engine/Core/Assets/TerrainData/Landscape/world.fargrid", signature, 94, farGrid));
+    Require(A::ReadCell(path, signature, 94, 32, 32, 0, 0, inner));
+    Require(farGrid.size() == 190u * 190u && farGrid[size_t(94) * 190 + 94] == inner[0]);
+}
+
 int main()
 {
     try
@@ -325,6 +532,11 @@ int main()
         TestScatterAndErase();
         TestPaintMap();
         TestManagerPaintSeam();
+        TestRegionMasks();
+        TestRegionErosionSeam();
+        TestRegionPaint();
+        TestArchiveV3();
+        TestLandscapeArchiveSeams();
         TimeLargeCellStroke();
     }
     catch (const std::exception& error)

@@ -97,8 +97,10 @@ float4 PSMain(
     float4 uvChannels0 : TEXCOORD3, float4 uvChannels1 : TEXCOORD4,
     float4 uvChannels2 : TEXCOORD5, float4 uvChannels3 : TEXCOORD6,
     float4 uvChannels4 : TEXCOORD7, nointerpolation uint objectIndex : TEXCOORD11,
-    bool frontFace : SV_IsFrontFace) : SV_TARGET
+    bool frontFace : SV_IsFrontFace,
+    uint primitiveId : SV_PrimitiveID) : SV_TARGET
 {
+    g_primitiveId = primitiveId; // editor Triangles view
     ObjectData objectData = objects[(draw.drawFlags & 0x13080000u) != 0u
         ? objectIndex : draw.objectIndex];
     const float time = objectData.grassAnimation.x;
@@ -117,6 +119,8 @@ float4 PSMain(
     const float4 surface = EngineSurfacePS(pos, worldPos, waveNormal, uv, uv1,
         vertexColor, tangent, uvChannels0, uvChannels1, uvChannels2,
         uvChannels3, uvChannels4, objectIndex, frontFace);
+    if (IsTriangleDraw(objects[g_triangleObject]))
+        return surface;
 
     // Schlick Fresnel for water (F0 = 0.02) and the reflected sky.
     const float facing = saturate(dot(waveNormal, view));

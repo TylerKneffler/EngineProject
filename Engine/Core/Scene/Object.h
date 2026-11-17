@@ -2,7 +2,7 @@
 #include "pch.h"
 #include <list>
 #include <algorithm>
-#include "Core/component.h"         
+#include "Core/Compoonents/Component.h"         
 #include "Core/Compoonents/Transform.h"
 #include "Core/Prefab/PrefabAsset.h"
 

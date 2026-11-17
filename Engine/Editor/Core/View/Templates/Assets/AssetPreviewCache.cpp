@@ -12,7 +12,7 @@
 #include <atomic>
 #include "Core/Model/RigAsset.h"
 #include "Core/Serialization/Json.h"
-#include "Core/Object.h"
+#include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
 
 #include <algorithm>
