@@ -4,6 +4,7 @@
 #include "Core/Components/Terrain/TerrainObjectLayer.h"
 #include "Core/Components/Terrain/TerrainHeightArchive.h"
 #include "Core/Components/Physics/MeshObjectCollider.h"
+#include <climits>
 #include <map>
 #include <array>
 #include <set>
@@ -102,6 +103,45 @@ public:
     // Measured lowest-mip layer colors can replace distant detail in the
     // resident terrain window. Keep opt-in until its GPU cost is lower.
     bool terrainMacroColorEnabled = false;
+    // Macro color map: one albedo per sample over the whole map, composed by
+    // a scene script (SetMacroColorSource) from paint, erosion and forest
+    // cover. Distant tiles take their color from it, and loaded cells blend
+    // to it between macroColorNear and macroColorFar (metres from the
+    // camera), so both sides of the loaded-cell border show the same color.
+    bool macroColorMap = true;
+    float macroColorNear = 256.f;
+    float macroColorFar = 640.f;
+    struct MacroColorImage
+    {
+        int width = 0, height = 0;
+        // Manager-local X/Z of sample (0, 0); samples are spacing metres apart.
+        float originX = 0.f, originZ = 0.f, spacing = 16.f;
+        // sRGB RGBA8 (alpha: forest cover), full mip chain, mip 0 first.
+        std::vector<uint8_t> mips;
+        uint32_t mipLevels = 0;
+    };
+    // Encodes linear RGB + alpha samples (rows along +Z) into a MacroColorImage.
+    static MacroColorImage EncodeMacroColorImage(int width, int height,
+        float originX, float originZ, float spacing, const std::vector<glm::vec4>& linear);
+    struct MacroColorSource
+    {
+        // Cheap fingerprint of the inputs, polled on the scene thread.
+        std::function<uint64_t()> revision;
+        // Snapshots the inputs (scene thread) and returns the build, which
+        // runs on a worker.
+        std::function<std::function<MacroColorImage()>()> makeBuild;
+    };
+    // Registers (or with an empty source, removes) the composer. Rebuilds
+    // whenever its revision changes, also in the editor.
+    void SetMacroColorSource(MacroColorSource source);
+    struct MacroColorBinding
+    {
+        const Engine::Graphics::IGraphicsTexture* texture = nullptr;
+        // World X/Z of the texture corner, 1 / extent X, 1 / extent Z.
+        glm::vec4 mapping{ 0.f };
+    };
+    // The current map (texture slot 5), polling the source for changes.
+    MacroColorBinding GetMacroColorMap(IGraphicsProvider* provider);
     // Paint samples per cell edge for authored cells (0 = vertex paint).
     // Cells adopt it when a paint stroke first touches them; procedural cells
     // keep vertex paint because their edit archives store vertex weights.
@@ -395,6 +435,20 @@ private:
     std::vector<FarObjectJob> m_farObjectJobs;
     std::map<Cell, FarObjectBlock> m_farObjectBlocks;
     uint64_t m_farObjectSignature = 0;
+    // Incremental bookkeeping, so a frame touches only what changed instead
+    // of the whole (2 * farObjectRadius + 1)^2 window (16k cells at 64).
+    // The queue holds cells still to compute, nearest block first, and is
+    // rebuilt only when the center cell, radius or cell set changes.
+    Cell m_farScanCenter{ INT_MIN, INT_MIN };
+    int m_farScanRadius = -1;
+    size_t m_farScanCellCount = 0;
+    std::vector<Cell> m_farObjectQueue;
+    size_t m_farObjectQueueNext = 0;
+    // Blocks to re-evaluate. Urgent ones (near coverage or radius changed)
+    // rebuild at once; the rest wait until none of their cells is still
+    // being computed, so a block re-prepares once instead of per batch.
+    std::set<Cell> m_farDirtyBlocks;
+    std::set<Cell> m_farUrgentBlocks;
     std::string m_cacheDirectory;
     uint64_t m_cacheSignature = 0;
     size_t m_cacheHits = 0;
@@ -446,6 +500,14 @@ private:
     // A finished build waiting for room in the texture upload queue.
     SunShadowBuild m_sunShadowPending;
     std::shared_ptr<Engine::Graphics::IGraphicsTexture> m_sunShadowTexture;
+    // Macro color map (TerrainManagerMacroColor.cpp).
+    MacroColorSource m_macroSource;
+    std::future<MacroColorImage> m_macroJob;
+    MacroColorImage m_macroImage; // geometry of the uploaded texture
+    std::shared_ptr<Engine::Graphics::IGraphicsTexture> m_macroTexture;
+    IGraphicsProvider* m_macroProvider = nullptr;
+    uint64_t m_macroRequested = 0;
+    std::chrono::steady_clock::time_point m_macroChecked{};
     IGraphicsProvider* m_sunShadowProvider = nullptr;
     // Heights of the uploaded texture, and inputs of the newest request.
     std::shared_ptr<const std::vector<float>> m_sunShadowHeights;

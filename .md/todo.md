@@ -27,7 +27,48 @@ Order is by dependency and visual payoff, not by section number in older notes.
 - [ ] DX11 vista differs from DX12/Vulkan: weaker sun glow, sparser far forest; not investigated
 - [ ] The vista pose predates the 24 km regeneration: eye at 123 m is now low in the valley rather than on a peak.
   Re-pick it from the editor (Viewpoints > Set "Vista" from Scene View) and copy it into `VISTA_EYE`/`VISTA_TARGET`
-- [ ] Depth precision: forward Z with D32F and near 0.06 gives ~25 m depth steps at 5 km and ~100 m at 10 km. Switch to reverse-Z (compare GREATER, clear 0, near/far swapped in projection, depth reads in shaders/occlusion/Hi-Z); the world is now 24 km and Camera.far is 24192
+- [x] Depth precision: forward Z with D32F and near 0.06 gave ~25 m depth steps at 5 km and ~100 m at 10 km. Every
+  depth buffer (camera, portal views, shadow atlases) is now reverse-Z; `Graphics/DepthConvention.h` holds the
+  convention (clear 0, `CompareNearer` = GREATER as the builder default, `CompareNearerOrEqual`). Projections are
+  built with near/far swapped in double (`Camera::GetRenderProjectionMatrix`, `BuildStableShadowCascade`);
+  `Camera::GetProjectionMatrix` stays forward-Z for editor picking/overlay math. Shader sites: shadow compares
+  (`receiver + bias >= stored`), skybox/grid far-plane triangles and grid plane depth, fluid front depth, parallax
+  `SV_DepthLessEqual`, portal aperture near clamp (`z = min(z, w)`) and depth-reset far plane (`z = 0`),
+  sky ray unprojection, `ProjectedTextureFootprint` near test. The software occlusion buffer and GPU cull work in
+  clip w, and frustum tests are symmetric in z, so neither changed. Verified: DX12 vista vs HEAD 0.10% of pixels
+  differ (noise floor 0.01%, all in distant canopy), Vulkan matches, DX11 unchanged apart from its known sky
+  difference; portal_traversal_demo, room_larger_inside (DX12/DX11/Vulkan), particle_fluid_river and
+  surface_detail_materials match HEAD up to animation/streaming timing; `.local/tests` pass. Vista frame time
+  unchanged (A/B on the same machine: HEAD 26.3/27.0 ms, reverse-Z 25.9/26.5 ms). Not checked: editor grid
+  (editor-only pass, math changed in `Grid.hlsl`)
+- [x] Vista "regressed" from ~10 ms (2026-11-16) to ~26.5 ms at `ec249b3d`. Two causes, neither a code regression:
+  - Unfocused captures were throttled. Since background launches (`ec249b3d`), the capture window never has focus
+    and Windows 11 power throttling (EcoQoS) ran every CPU stage 2-3x slower on this hybrid CPU. The old 5.2 km
+    world at the old pose, current code: 25.2 ms throttled, 10.4 ms with `Engine::Core::DisablePowerThrottling()`
+    (`Startup/LaunchActivation`), i.e. the 11-16 number. GameBackendCapture always opts out; Game/Editor opt out
+    when launched in the background. Captures from before 11-17 18:00 ran focused; later ones before this fix were
+    throttled, so neither set compares with new numbers
+  - The 24 km world is heavier at the same pose: 16k far-object cells (radius 64 x 128 m) instead of ~1.6k
+  - [x] `TerrainManager::UpdateFarObjects` rescanned the whole far window each frame (map lookups per cell, a sort
+    of every uncomputed cell) and rebuilt a block after every 8-cell batch: 4.4 ms/frame plus constant prefab
+    re-preparation. Now incremental: the nearest-block-first queue is rebuilt only when the center cell changes,
+    only loaded/latched cells are checked for near coverage, and a block rebuilds once its data is complete
+    (coverage/radius changes still apply at once). 2-6 far jobs instead of 2. 4.4 -> 0.02 ms; drive-forward
+    A/B: median 29.0 -> 21.4 ms, far time over the drive 7.7 s -> 0.46 s
+  - [x] Far blocks re-hashed every placement once per second per block (`GetPlacementSignature`) to catch
+    in-place edits they never get: `TerrainObjectLayer::placementsChangeOnlyWhenMarked`. Prefabs 3.0 -> 1.4 ms
+  - [x] Texture footprints: shadow cascades are orthographic, so each instance chunk's world box with its
+    largest scale bounds all its shadow demand in one projection; chunks 4x their diagonal away also use the box
+    for the camera. Per-instance work is now camera-only for near chunks. 5.2 -> 2.5-2.9 ms, image identical
+  - Result (DX12, 1920x1080, settled after 5000 warmup frames): 24.8 -> 16.8-20.7 ms. CPU path now update 1.7 +
+    prepare 5.0 + record 10.5 ms; the GPU varies 11-20 ms between runs (other apps share the GPU)
+- [ ] With all far blocks loaded the vista is GPU-bound on far forest: foliage depth 6-11 ms + leaves 3.5-7 ms,
+  at detail_scale 0.82-0.94 because far blocks are outside the detail budget. Belongs with section 6's far-forest
+  clusters/impostors, or let the far blocks' density follow the budget
+- [ ] Benchmarks measure while far objects still stream (600 warmup frames is ~half of the 16k cells): add far
+  objects to `--wait-for-residency`, or warm up ~5000 frames
+- [ ] Cell-crossing spikes while moving (old and new far code alike): ~35 ms far-block membership rebuilds plus
+  ~22 ms near-cell streaming on the same frames; spread block rebuilds over frames
 - [ ] Camera-relative precision check at 16 km from origin (transforms are double, check vertex/shader paths)
 
 Vista capture (RTX 4090, DX12, 1920x1080, RelWithDebInfo, uncapped):
@@ -180,9 +221,24 @@ record 5.9 (camera 4.5, shadow 1.1); GPU opaque 5.4.
 - [x] Region operations: hydraulic + thermal erosion, smooth, noise, terrace, flatten (Ctrl+click picks height), raise/lower, paint layer
 
 ### 3. Distant terrain color + forest coverage
-- [ ] Bake low-res macro color map from height/slope/flow/deposition; drive `terrainMacroColors` from it at distance
-- [ ] Use flow for lush valley floors / streams, deposition for scree, steep + high flow for bare rock
-- [ ] Forest-density map baked with the macro map; far terrain shades forested areas as canopy (canopy color/roughness + canopy normal/height noise so hills read as bumpy forest without instances)
+- [x] Macro color map at 16 m (1513^2, the erosion grid) instead of the far palette's one color per 128 m cell
+  corner. `LandscapeDriver` composes it on a worker from the near paint rules (`PaintSample`), slope, and the
+  generator's `world.flow`/`world.deposition` (`TerrainHydrologyMap.h`, validated against the archive signature);
+  `TerrainManager` uploads it as an sRGB mip chain and binds it in texture slot 5 (`ObjectGPUData::terrainMacroMap`,
+  `terrainMacroParams`). Distant tiles take their albedo from it; loaded cells blend to it between
+  `macroColorNear`/`macroColorFar` (256/640 m) so both sides of the loaded-cell border match. Alpha holds forest
+  cover. Editor: TerrainManager "Terrain appearance" (Macro color map, start/full distance, tooltips) and
+  LandscapeDriver "Macro color" group (map paths, lushness, flow threshold, scree, scree depth, gully rock,
+  brightness, with tooltips via the new `Component::RegisterFieldTooltip`). Draw preparation polls the composer's
+  settings every 100 ms, so edits rebuild it live in the editor and in play (0.8 s per build). Verified on DX12,
+  DX11 and Vulkan: slopes gain gully and scree detail, mid-distance ground fades into the far colors
+- [x] Use flow for lush valley floors / streams, deposition for scree, steep + high flow for bare rock (in the macro
+  map, i.e. at distance; the near paint does not read the erosion maps yet)
+- [ ] Macro colors use the materials' authored means while the near cells' distant blend uses measured layer-array
+  means; at 0.85 brightness distant meadows read a little duller than textured near meadows. Tune, or feed the
+  measured means into the composer
+- [ ] Forest-density map baked with the macro map (done: macro alpha = canopy cover, and the color already takes the
+  canopy tint); far terrain shades forested areas as canopy (canopy color/roughness + canopy normal/height noise so hills read as bumpy forest without instances)
 - [ ] Baked horizon / terrain-occlusion map for large-scale self-shadowing
 - [ ] Editor: paintable forest-density / macro-color overrides on the terrain component
 

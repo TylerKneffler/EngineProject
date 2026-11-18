@@ -6,6 +6,7 @@
 #include "Core/Rendering/RenderBoundsCache.h"
 #include "Core/Rendering/RenderJobs.h"
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <limits>
 
@@ -134,7 +135,7 @@ void SceneTextureFootprints::Request(const std::vector<PreparedDraw>& preparedDr
         const auto& draw=preparedDraws[chunk.draw];
         const auto& footprintDraw=draws[chunk.draw];
         const auto* mesh=footprintDraw.mesh;
-        const auto footprint=[&](const glm::mat4& world,float& covered) {
+        const auto footprint=[&](const glm::mat4& world,float& covered,bool shadows) {
             auto low=mesh->GetBoundsMin(),high=mesh->GetBoundsMax();
             auto projectionWorld=world;
             float units=footprintDraw.uvScale;
@@ -146,7 +147,7 @@ void SceneTextureFootprints::Request(const std::vector<PreparedDraw>& preparedDr
             }
             float demand=Engine::Rendering::ProjectedTextureFootprint(low,high,
                 viewProjection*projectionWorld,{float(viewportWidth),float(viewportHeight)},units,&covered);
-            if(draw.castsShadow) for(uint32_t cascade=0;cascade<shadowCascadeCount;++cascade)
+            if(shadows && draw.castsShadow) for(uint32_t cascade=0;cascade<shadowCascadeCount;++cascade)
                 demand=std::max(demand,Engine::Rendering::ProjectedTextureFootprint(low,high,
                     shadowViewProjections[cascade]*projectionWorld,glm::vec2(float(shadowResolution)/2.f),units));
             return demand;
@@ -154,17 +155,76 @@ void SceneTextureFootprints::Request(const std::vector<PreparedDraw>& preparedDr
         if(footprintDraw.instanced)
         {
             const auto& transforms=draw.mesh->GetInstanceData()->transforms;
-            for(size_t instance=chunk.begin;instance<chunk.end;++instance)
-            {
+            const auto instanceWorld=[&](size_t instance) {
                 const auto& affine=transforms[instance];
                 glm::mat4 matrix(1.f);
                 for(int row=0;row<3;++row) for(int column=0;column<4;++column) matrix[column][row]=affine.rows[row][column];
+                return draw.objectData.world*matrix;
+            };
+            bool shadowsPerInstance=draw.castsShadow;
+            float shadowDemand=0.f;
+            if(!draw.terrain && !draw.terrainCell && chunk.end>chunk.begin)
+            {
+                // World box of the chunk and the largest instance scale; fixed
+                // for a cache key (instance revision and draw state).
+                Engine::Rendering::TextureFootprintCache::ChunkResult local;
+                auto* bounds=chunk.cached ? chunk.cached:&local;
+                if(!bounds->boundsValid)
+                {
+                    glm::vec3 low(std::numeric_limits<float>::max()),high(-std::numeric_limits<float>::max());
+                    float maxScale=0.f;
+                    for(size_t instance=chunk.begin;instance<chunk.end;++instance)
+                    {
+                        const auto world=instanceWorld(instance);
+                        const auto box=Engine::Rendering::TransformBounds(mesh->GetBoundsMin(),mesh->GetBoundsMax(),world);
+                        low=glm::min(low,box.minimum);high=glm::max(high,box.maximum);
+                        maxScale=std::max({maxScale,glm::length(glm::vec3(world[0])),
+                            glm::length(glm::vec3(world[1])),glm::length(glm::vec3(world[2]))});
+                    }
+                    bounds->boundsMin=low;bounds->boundsMax=high;bounds->maxScale=maxScale;
+                    bounds->boundsValid=true;
+                }
+                const glm::vec3 low=bounds->boundsMin,high=bounds->boundsMax;
+                const float units=footprintDraw.uvScale*bounds->maxScale;
+                // Shadow cascades are orthographic: texel density does not
+                // depend on depth, so the box with the largest scale bounds
+                // every instance's shadow demand in one projection. A box
+                // reaching past the light's near plane reports infinity; those
+                // chunks keep the per-instance shadow projection.
+                if(draw.castsShadow)
+                {
+                    for(uint32_t cascade=0;cascade<shadowCascadeCount;++cascade)
+                        shadowDemand=std::max(shadowDemand,Engine::Rendering::ProjectedTextureFootprint(low,high,
+                            shadowViewProjections[cascade],glm::vec2(float(shadowResolution)/2.f),units));
+                    shadowsPerInstance=!std::isfinite(shadowDemand);
+                    if(shadowsPerInstance) shadowDemand=0.f;
+                }
+                // A chunk far away relative to its own size (distant forest)
+                // is bounded in the camera by one projection of its box too:
+                // at 4x its diagonal away the over-estimate stays under ~25%.
+                // Nearer chunks keep the exact per-instance projection.
+                float nearestDepth=std::numeric_limits<float>::max();
+                for(int corner=0;corner<8;++corner)
+                    nearestDepth=std::min(nearestDepth,(viewProjection*glm::vec4(corner&1?high.x:low.x,
+                        corner&2?high.y:low.y,corner&4?high.z:low.z,1.f)).w);
+                if(!shadowsPerInstance && nearestDepth>4.f*glm::length(high-low))
+                {
+                    float covered=0.f;
+                    chunk.pixels=std::max(shadowDemand,Engine::Rendering::ProjectedTextureFootprint(low,high,
+                        viewProjection,{float(viewportWidth),float(viewportHeight)},units,&covered));
+                    chunk.coverage=covered;
+                    return;
+                }
+            }
+            chunk.pixels=shadowDemand;
+            for(size_t instance=chunk.begin;instance<chunk.end;++instance)
+            {
                 float covered=0.f;
-                chunk.pixels=std::max(chunk.pixels,footprint(draw.objectData.world*matrix,covered));
+                chunk.pixels=std::max(chunk.pixels,footprint(instanceWorld(instance),covered,shadowsPerInstance));
                 chunk.coverage+=covered;
             }
         }
-        else chunk.pixels=footprint(draw.objectData.world,chunk.coverage);
+        else chunk.pixels=footprint(draw.objectData.world,chunk.coverage,true);
     });
 
     if(view)

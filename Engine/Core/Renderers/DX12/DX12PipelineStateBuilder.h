@@ -114,7 +114,7 @@ private:
 
     BOOL m_depthEnable = TRUE;
     BOOL m_depthWriteEnable = TRUE;
-    D3D12_COMPARISON_FUNC m_depthFunc = D3D12_COMPARISON_FUNC_LESS;
+    D3D12_COMPARISON_FUNC m_depthFunc = D3D12_COMPARISON_FUNC_GREATER; // reverse-Z (Graphics/DepthConvention.h)
     BOOL m_stencilEnable = FALSE;
     UINT8 m_stencilReadMask = 0xFF;
     UINT8 m_stencilWriteMask = 0xFF;

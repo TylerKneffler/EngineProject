@@ -5,6 +5,7 @@
 #include <glm/glm.hpp>
 #include <functional>
 #include <cstdint>
+#include <utility>
 #include <vector>
 #include <string>
 #include <optional>
@@ -155,6 +156,13 @@ public:
             if (field.name == key) return &field;
         return nullptr;
     }
+    // Hover text the generic inspector shows for a serialized field, or null.
+    const char* FindEditorFieldTooltip(const std::string& key) const
+    {
+        for (const auto& [name, text] : m_editorFieldTooltips)
+            if (name == key) return text.c_str();
+        return nullptr;
+    }
     static JsonValue ComponentReferenceToJson(const ComponentReference& value) { return ToJson(value); }
     static void ComponentReferenceFromJson(const JsonValue& value, ComponentReference& out) { FromJson(value, out); }
 
@@ -186,6 +194,13 @@ protected:
             [&member](const JsonValue& value) { FromJson(value, member); }
         });
         RegisterEditorFieldGroup(name, editorGroup, groupDefaultOpen);
+    }
+
+    // Hover text for a registered field in the generic inspector.
+    void RegisterFieldTooltip(const char* name, const char* tooltip)
+    {
+        if (name && tooltip && tooltip[0])
+            m_editorFieldTooltips.emplace_back(name, tooltip);
     }
 
     // Supplies inspector grouping for fields emitted by an overridden
@@ -266,6 +281,7 @@ private:
 
     std::vector<SerializedField> m_serializedFields;
     std::vector<EditorFieldMetadata> m_editorFieldMetadata;
+    std::vector<std::pair<std::string, std::string>> m_editorFieldTooltips;
     std::string m_typeName = "Component";
     uint64_t m_configurationRevision = 1;
 };

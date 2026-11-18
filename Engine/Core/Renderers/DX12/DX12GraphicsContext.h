@@ -82,10 +82,10 @@ public:
     void SetTextureOwners(std::shared_ptr<Engine::Graphics::TextureFrameOwners> owners) { m_textureOwners = std::move(owners); }
     void SetBufferOwners(std::shared_ptr<D3D12BufferFrameOwners> owners) { m_bufferOwners = std::move(owners); }
     bool BeginDepthOnlyPass(const Engine::Graphics::IGraphicsTexture* texture,
-        float clearDepth = 1.f) override;
+        float clearDepth = Engine::Graphics::Depth::ClearValue) override;
     void EndDepthOnlyPass() override;
     bool SupportsDepthRectangleClear() const override { return true; }
-    void ClearDepthRectangle(const ScissorRect&, float = 1.f) override;
+    void ClearDepthRectangle(const ScissorRect&, float = Engine::Graphics::Depth::ClearValue) override;
     // D3D12 command lists cannot query their previously bound framebuffer.
     // Hosts that run a depth pass inside a color frame supply its restoration.
     void SetDepthOnlyPassRestore(std::function<void()> restore) { m_restoreDepthOnlyPass=std::move(restore); }

@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "Core/Graphics/DepthConvention.h"
 #include "Core/Renderers/GraphicsDebugLayer.h"
 #include "DX11GameRenderer.h"
 #include "Core/Renderers/GraphicsDeviceName.h"
@@ -186,7 +187,7 @@ void DX11GameRenderer::BeginFrame()
     D3D11_RECT scissor{ 0, 0, static_cast<LONG>(m_width), static_cast<LONG>(m_height) };
     m_context->RSSetScissorRects(1, &scissor);
     m_context->ClearDepthStencilView(
-        m_dsv.Get(), D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
+        m_dsv.Get(), D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, Engine::Graphics::Depth::ClearValue, 0);
 }
 
 void DX11GameRenderer::Clear(float r, float g, float b, float a)

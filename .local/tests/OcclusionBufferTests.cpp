@@ -21,10 +21,11 @@ void Require(bool value, const char* what)
 
 constexpr float Aspect = 16.f / 9.f;
 
-// Camera at the origin looking down +z (left-handed, depth 0..1, as Camera).
+// Camera at the origin looking down +z (left-handed, reverse-Z depth with
+// near and far swapped, as Camera::GetRenderProjectionMatrix).
 glm::mat4 ViewProjection(const glm::vec3& eye = glm::vec3(0.f), const glm::vec3& forward = { 0.f, 0.f, 1.f })
 {
-    return glm::perspectiveLH_ZO(glm::radians(60.f), Aspect, .1f, 1000.f) *
+    return glm::perspectiveLH_ZO(glm::radians(60.f), Aspect, 1000.f, .1f) *
         glm::lookAtLH(eye, eye + forward, glm::vec3(0.f, 1.f, 0.f));
 }
 

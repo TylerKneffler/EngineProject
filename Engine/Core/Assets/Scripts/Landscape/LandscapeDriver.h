@@ -8,6 +8,8 @@
 #include <string>
 #include <vector>
 
+namespace Engine::Components { class TerrainManager; }
+
 // Drives the landscape demo map (mountains, forests, lake basins) on a
 // TerrainManager. The map is a height archive written by
 // tools/build_landscape_demo.py; this script streams it, paints the six PBR
@@ -71,9 +73,34 @@ public:
     bool enableWater = true;
     PROPERTY(Inspector, EditAnywhere, Category = "Water")
     std::string waterMaterial = "Engine/Core/Assets/Materials/Water/LakeWater.material";
+    // Macro color map for distant terrain (TerrainManager::macroColorMap):
+    // the near paint at 16 m, shaped by the generator's erosion maps.
+    PROPERTY(Inspector, EditAnywhere, Category = "Macro color")
+    bool enableMacroColors = true;
+    PROPERTY(Inspector, EditAnywhere, Category = "Macro color")
+    std::string flowMap = "Assets/TerrainData/Landscape/world.flow";
+    PROPERTY(Inspector, EditAnywhere, Category = "Macro color")
+    std::string depositionMap = "Assets/TerrainData/Landscape/world.deposition";
+    // Valley floors and streams (high erosion flow) turn a deeper green.
+    PROPERTY(Inspector, EditAnywhere, Category = "Macro color", ClampMin = "0", ClampMax = "1")
+    float macroLushness = .6f;
+    // Normalized (log) flow where the lush tint begins; streams reach 1.
+    PROPERTY(Inspector, EditAnywhere, Category = "Macro color", ClampMin = "0", ClampMax = "1")
+    float macroFlowThreshold = .55f;
+    // Sediment fans below rock (deposition) show as pale scree.
+    PROPERTY(Inspector, EditAnywhere, Category = "Macro color", ClampMin = "0", ClampMax = "1")
+    float macroScree = .6f;
+    PROPERTY(Inspector, EditAnywhere, Category = "Macro color", ClampMin = "0.1", ClampMax = "100")
+    float macroScreeDepth = 6.f;
+    // Steep slopes that carry a lot of water are scoured to bare rock.
+    PROPERTY(Inspector, EditAnywhere, Category = "Macro color", ClampMin = "0", ClampMax = "1")
+    float macroGullyRock = .5f;
+    PROPERTY(Inspector, EditAnywhere, Category = "Macro color", ClampMin = "0.1", ClampMax = "2")
+    float macroBrightness = .85f;
 
     void Start() override;
     void Update() override;
+    void OnDestroy() override;
     void FenceBackgroundWork() override;
     void OnAfterDeserialize(IGraphicsProvider* provider) override;
     bool ConfigureTerrain();
@@ -88,6 +115,9 @@ private:
         std::vector<glm::vec3> gridColors;
     };
     uint64_t SourceSignature() const;
+    // Registers the macro color composer with the TerrainManager.
+    void RegisterMacroColors(Engine::Components::TerrainManager& manager);
+    uint64_t MacroColorRevision() const;
     // Creates, updates or removes the lake water plane.
     void UpdateWater();
     uint64_t m_waterObjectId = 0;

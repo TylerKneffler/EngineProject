@@ -94,6 +94,11 @@ struct ObjectGPUData
     // Terrain long-range sun shadow map (texture slot 4): world X/Z of the
     // map corner, 1 / extent X, 1 / extent Z. Zero extent disables it.
     glm::vec4 terrainSunShadow{0.f};
+    // Terrain macro color map (texture slot 5): world X/Z of the texture
+    // corner, 1 / extent X, 1 / extent Z; params: blend start and full
+    // distance for loaded cells, z = 1 when bound.
+    glm::vec4 terrainMacroMap{0.f};
+    glm::vec4 terrainMacroParams{0.f};
 };
 
 struct PreparedDraw

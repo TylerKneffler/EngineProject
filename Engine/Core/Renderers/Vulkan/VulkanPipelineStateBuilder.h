@@ -103,7 +103,7 @@ private:
     VkBlendOp m_blendOpAlpha = VK_BLEND_OP_ADD;
     bool m_depth = true;
     bool m_depthWrite = true;
-    VkCompareOp m_depthCompare = VK_COMPARE_OP_LESS;
+    VkCompareOp m_depthCompare = VK_COMPARE_OP_GREATER; // reverse-Z (Graphics/DepthConvention.h)
     bool m_stencilEnable = false;
     uint8_t m_stencilReadMask = 0xFF;
     uint8_t m_stencilWriteMask = 0xFF;

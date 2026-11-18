@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "Core/Graphics/DepthConvention.h"
 #include "D3D12View.h"
 
 namespace Engine::Renderers
@@ -114,7 +115,7 @@ void D3D12View::CreateResources(void* device, uint32_t width, uint32_t height)
 
     D3D12_CLEAR_VALUE depthClear{};
     depthClear.Format               = DXGI_FORMAT_D32_FLOAT_S8X24_UINT;
-    depthClear.DepthStencil.Depth   = 1.0f;
+    depthClear.DepthStencil.Depth   = Engine::Graphics::Depth::ClearValue;
     depthClear.DepthStencil.Stencil = 0;
 
     ThrowIfFailed(d3dDevice->CreateCommittedResource(
@@ -173,7 +174,7 @@ void D3D12View::Render(void* cmdList,
     m_postProcess.BindScene(d3dCmdList, dsv, m_clearColor);
     d3dCmdList->ClearDepthStencilView(
         dsv, D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL,
-        1.0f, 0, 0, nullptr);
+        Engine::Graphics::Depth::ClearValue, 0, 0, nullptr);
 
     if (drawFn)
         drawFn(cmdList);

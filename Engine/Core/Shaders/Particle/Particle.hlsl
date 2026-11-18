@@ -138,7 +138,7 @@ bool ProjectFluidParticle(GpuParticle particle, out float2 center,
     radii = 0.0;
     flowAxis = float2(1.0, 0.0);
     stretch = 1.0;
-    depth = 1.0;
+    depth = 0.0; // far plane (reverse-Z)
     if (dot(portalClipPlane.xyz, portalClipPlane.xyz) > 0.0 &&
         dot(float4(particle.positionAge.xyz, 1.0), portalClipPlane) < 0.0)
         return false;
@@ -198,7 +198,7 @@ FluidVertex VSMainFluid(uint vertexId : SV_VertexID)
         (vertexId == 2 || vertexId == 3 || vertexId == 5) ? 1.0 : 0.0);
     FluidVertex result;
     result.ndc = lerp(minimum, maximum, corner);
-    result.position = float4(result.ndc, 0.0, 1.0);
+    result.position = float4(result.ndc, 1.0, 1.0); // near plane; PS writes depth
     return result;
 }
 
@@ -211,7 +211,7 @@ struct FluidPixel
 FluidPixel PSMainFluid(FluidVertex input)
 {
     float density = 0.0;
-    float frontDepth = 1.0;
+    float frontDepth = 0.0; // reverse-Z: nearest is the largest depth
     float3 colorSum = 0.0;
     float speedSum = 0.0;
     [loop] for (uint i = 0; i < min(gpuParticles[0].meta.x, 512u); ++i)
@@ -232,7 +232,7 @@ FluidPixel PSMainFluid(FluidVertex input)
         density += weight;
         colorSum += particle.colorSize.xyz * weight;
         speedSum += length(particle.velocityLife.xyz) * weight;
-        if (weight > 0.015) frontDepth = min(frontDepth, depth);
+        if (weight > 0.015) frontDepth = max(frontDepth, depth);
     }
     clip(density - 0.12);
     float3 tint = colorSum / max(density, 0.001);

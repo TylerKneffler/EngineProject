@@ -1,4 +1,5 @@
 #include "Core/Scene/Rendering/SceneRenderer/SceneRendererPipelines.h"
+#include "Core/Graphics/DepthConvention.h"
 #include "Core/Components/Materials/Texture.h"
 #include "Core/Rendering/Lighting/EnvironmentMap.h"
 #ifndef ENGINE_ASSETS_PATH
@@ -40,7 +41,7 @@ void SceneRendererPipelines::BuildSkyboxPipeline(Scene& scene)
             .SetBlendEnable(false)
             .SetDepthEnable(false)
             .SetDepthWriteEnable(false)
-            .SetDepthFunc(7)
+            .SetDepthFunc(Engine::Graphics::Depth::CompareAlways)
             .SetInputLayout(nullptr, 0)
             .SetPrimitiveTopology(
                 Engine::Graphics::IPipelineStateBuilder::PrimitiveTopology::TriangleList)
@@ -113,7 +114,7 @@ void SceneRendererPipelines::BuildGridPipeline(Scene& scene)
         .SetBlendOpAlpha(0)
         .SetDepthEnable(true)
         .SetDepthWriteEnable(false)
-        .SetDepthFunc(3)
+        .SetDepthFunc(Engine::Graphics::Depth::CompareNearerOrEqual)
         .SetInputLayout(nullptr, 0)
         .SetPrimitiveTopology(Engine::Graphics::IPipelineStateBuilder::PrimitiveTopology::TriangleList)
         .SetRenderTargetFormat(10, 20)
@@ -175,7 +176,7 @@ void SceneRendererPipelines::BuildParticlePipeline(Scene& scene)
             .SetBlendOpAlpha(0)
             .SetDepthEnable(true)
             .SetDepthWriteEnable(false)
-            .SetDepthFunc(3);
+            .SetDepthFunc(Engine::Graphics::Depth::CompareNearerOrEqual);
         if (portalView)
             state.SetStencilEnable(true)
                 .SetStencilReadMask(0xFF)
@@ -217,7 +218,7 @@ void SceneRendererPipelines::BuildParticlePipeline(Scene& scene)
             .SetBlendEnable(true).SetSrcBlend(4).SetDestBlend(5)
             .SetBlendOp(0).SetSrcBlendAlpha(1).SetDestBlendAlpha(5)
             .SetBlendOpAlpha(0).SetDepthEnable(true)
-            .SetDepthWriteEnable(false).SetDepthFunc(3);
+            .SetDepthWriteEnable(false).SetDepthFunc(Engine::Graphics::Depth::CompareNearerOrEqual);
         if (portalView)
             state.SetStencilEnable(true).SetStencilReadMask(0xFF)
                 .SetStencilWriteMask(0x00).SetStencilFunc(2)

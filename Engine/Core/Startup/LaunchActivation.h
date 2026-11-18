@@ -22,4 +22,11 @@ void ShowStartupWindow(HWND window, int showCommand = SW_SHOWDEFAULT);
 
 // True while another process owns the foreground window.
 bool IsAnotherProcessInForeground();
+
+// Opts this process out of Windows power throttling (EcoQoS). Windows 11
+// otherwise lowers the QoS of a process whose window is not in the
+// foreground: on hybrid CPUs its threads move to efficiency cores and its
+// timer-resolution requests are ignored, which slowed every CPU stage of an
+// unfocused benchmark 2-3x. Returns false where the OS does not support it.
+bool DisablePowerThrottling();
 }

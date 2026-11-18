@@ -1143,6 +1143,9 @@ bool ComponentInspector::DrawGeneric(Component& inspected,
                 ui.ValueLabel(displayName.c_str(), "{object}");
             }
         }
+        if (const char* tooltip = inspected.FindEditorFieldTooltip(key);
+            tooltip && ui.IsItemHovered())
+            ui.Tooltip(tooltip);
     }
     
     if (groupIndented)

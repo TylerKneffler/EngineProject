@@ -151,4 +151,27 @@ glm::dmat4 Camera::GetProjectionMatrixD(double aspect,
     return glm::perspectiveLH_ZO(glm::radians(static_cast<double>(fov)), aspect,
         static_cast<double>(nearPlane), static_cast<double>(farPlane));
 }
+
+glm::dmat4 Camera::GetRenderProjectionMatrixD(double aspect,
+    bool forceOrthographic) const
+{
+    // Swapping near and far in the ZO builders yields exactly the reversed
+    // depth row (z' = w - z) without the float cancellation of converting a
+    // forward matrix.
+    if (orthographic || forceOrthographic)
+    {
+        const double halfHeight = std::max(static_cast<double>(orthographicSize), .01);
+        const double halfWidth = halfHeight * std::max(aspect, .01);
+        return glm::orthoLH_ZO(-halfWidth, halfWidth, -halfHeight, halfHeight,
+            static_cast<double>(farPlane), static_cast<double>(nearPlane));
+    }
+    return glm::perspectiveLH_ZO(glm::radians(static_cast<double>(fov)), aspect,
+        static_cast<double>(farPlane), static_cast<double>(nearPlane));
+}
+
+glm::mat4 Camera::GetRenderProjectionMatrix(float aspect,
+    bool forceOrthographic) const
+{
+    return glm::mat4(GetRenderProjectionMatrixD(aspect, forceOrthographic));
+}
 }

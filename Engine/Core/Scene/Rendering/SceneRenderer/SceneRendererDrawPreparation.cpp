@@ -471,6 +471,19 @@ void SceneRendererDrawPreparation::PrepareTerrainMaterial(
         objectData.materialParams.w += 65536.f;
     if (terrainManager && terrainManager->terrainMacroColorEnabled)
         objectData.materialParams.w += 131072.f;
+    // Macro color map: terrain leaves material slots 0-5 empty (slot 4 holds
+    // the long-range sun shadow), so the map borrows slot 5.
+    if (terrainManager)
+        if (const auto macro = const_cast<Engine::Components::TerrainManager*>(
+                terrainManager)->GetMacroColorMap(scene.m_graphicsProvider); macro.texture)
+        {
+            draw.textures[5] = macro.texture;
+            draw.textureSlotCount = std::max(draw.textureSlotCount, 6u);
+            objectData.terrainMacroMap = macro.mapping;
+            objectData.terrainMacroParams = glm::vec4(terrainManager->macroColorNear,
+                std::max(terrainManager->macroColorFar, terrainManager->macroColorNear + 1.f),
+                1.f, 0.f);
+        }
     if (!terrainManager || !terrainManager->measurementGrid)
         return;
 

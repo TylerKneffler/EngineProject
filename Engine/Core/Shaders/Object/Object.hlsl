@@ -65,6 +65,8 @@ struct ObjectData
     float4 atmosphereFog2;
     float4 atmosphereFog3;
     float4 terrainSunShadow; // map corner x/z, 1 / extent x/z (texture slot 4)
+    float4 terrainMacroMap; // map corner x/z, 1 / extent x/z (texture slot 5)
+    float4 terrainMacroParams; // blend start, full distance, bound, reserved
 };
 
 struct SceneLightData
@@ -480,12 +482,12 @@ void VSMain(
     // mask in front of the near plane rasterizable while the camera approaches
     // it, otherwise the connected view abruptly disappears before crossing.
     if ((draw.drawFlags & 0x40000000u) != 0u && oPos.w > 0.0)
-        oPos.z = max(oPos.z, 0.0);
+        oPos.z = min(oPos.z, oPos.w); // reverse-Z: the near plane is z = w
     // Portal depth reset draws reuse the procedural aperture geometry but
     // place it at the far plane, clearing local-scene depth only inside the
     // aperture's stencil mask before the connected view is rendered.
     if ((draw.drawFlags & 0x80000000u) != 0u)
-        oPos.z = oPos.w;
+        oPos.z = 0.0; // reverse-Z far plane
     oWorldPos = worldPosition.xyz;
     oNormal = worldNormal;
     oUv = objectData.spriteUvRect.xy + localUv.xy * objectData.spriteUvRect.zw;
@@ -516,7 +518,9 @@ void VSMain(
         const float3 sunLight = objectData.bakedDirectional.rgb *
             (sunFacing * 0.31830988618);
         const float3 light = objectData.ambientUnlit.rgb + sunLight;
-        oColor.rgb *= light;
+        // With a macro color map the pixel shader supplies the albedo, so
+        // the vertex carries only the light.
+        oColor.rgb = objectData.terrainMacroParams.z > 0.5 ? light : oColor.rgb * light;
         // Alpha carries the sun's share of the light (distant tiles are
         // opaque), so the pixel shader can remove it where shadowed.
         const float3 luma = float3(0.2126, 0.7152, 0.0722);
@@ -586,9 +590,9 @@ void VSTerrainMain(
     const float4 worldPosition = mul(objectData.world, float4(pos, 1.0));
     oPos = mul(objectData.viewProjection, worldPosition);
     if ((draw.drawFlags & 0x40000000u) != 0u && oPos.w > 0.0)
-        oPos.z = max(oPos.z, 0.0);
+        oPos.z = min(oPos.z, oPos.w); // reverse-Z: the near plane is z = w
     if ((draw.drawFlags & 0x80000000u) != 0u)
-        oPos.z = oPos.w;
+        oPos.z = 0.0; // reverse-Z far plane
     oWorldPos = worldPosition.xyz;
     oNormal = normalize(mul((float3x3)objectData.world, localNormal));
     oUv = objectData.spriteUvRect.xy + uv * objectData.spriteUvRect.zw;
@@ -1136,19 +1140,21 @@ float SampleDirectionalShadowCascade(ObjectData objectData,
     float2 texelFraction = frac(texelPosition);
     int2 tileMaximum = tileOrigin + int2(
         (int)tileWidth - 1, (int)tileHeight - 1);
+    // Shadow maps are reverse-Z (near the light = 1): a receiver is lit when
+    // its biased depth is at least the stored caster depth.
     // Terrain asks for a single bilinear shadow tap. Keep that path to four
     // depth reads instead of entering the general PCF loop for every pixel.
     [branch] if (radius == 0)
     {
-        float receiverDepth = projected.z - objectData.shadowParams.x;
-        float4 comparisons = float4(receiverDepth.xxxx <= GatherShadowDepths(
+        float receiverDepth = projected.z + objectData.shadowParams.x;
+        float4 comparisons = float4(receiverDepth.xxxx >= GatherShadowDepths(
             center, tileOrigin, tileMaximum, float2(width, height)));
         float s00 = comparisons.x, s10 = comparisons.y;
         float s01 = comparisons.z, s11 = comparisons.w;
         return lerp(lerp(s00, s10, texelFraction.x),
             lerp(s01, s11, texelFraction.x), texelFraction.y);
     }
-    float receiverDepth = projected.z - objectData.shadowParams.x;
+    float receiverDepth = projected.z + objectData.shadowParams.x;
     float litSamples = 0.0;
     [branch] if (radius == 1)
     {
@@ -1160,7 +1166,7 @@ float SampleDirectionalShadowCascade(ObjectData objectData,
                 : float2(1.0, texelFraction.x);
             float2 weightsY = y == -1 ? float2(1.0 - texelFraction.y, 1.0)
                 : float2(1.0, texelFraction.y);
-            float4 comparisons = float4(receiverDepth.xxxx <= GatherShadowDepths(
+            float4 comparisons = float4(receiverDepth.xxxx >= GatherShadowDepths(
                 center + int2(x, y), tileOrigin, tileMaximum, float2(width, height)));
             litSamples += dot(comparisons, weightsX.xyxy * weightsY.xxyy);
         }
@@ -1178,7 +1184,7 @@ float SampleDirectionalShadowCascade(ObjectData objectData,
             int2 coordinate = clamp(center + int2(x, y),
                 tileOrigin, tileMaximum);
             float storedDepth = shadowMap.Load(int3(coordinate, 0));
-            litSamples += (receiverDepth <= storedDepth ? 1.0 : 0.0) *
+            litSamples += (receiverDepth >= storedDepth ? 1.0 : 0.0) *
                 weightX * weightY;
         }
         return litSamples / 25.0;
@@ -1195,11 +1201,24 @@ float SampleDirectionalShadowCascade(ObjectData objectData,
         int2 coordinate = clamp(center + int2(x, y),
             tileOrigin, tileMaximum);
         float storedDepth = shadowMap.Load(int3(coordinate, 0));
-        litSamples += (receiverDepth <= storedDepth ? 1.0 : 0.0) *
+        litSamples += (receiverDepth >= storedDepth ? 1.0 : 0.0) *
             weightX * weightY;
     }
     float diameter = 2.0 * radius + 1.0;
     return litSamples / (diameter * diameter);
+}
+
+// Terrain macro color map (TerrainManager::GetMacroColorMap), bound in the
+// height slot (logical 5), which terrain does not use: linear albedo of the
+// map sample under worldPosition, alpha = forest cover. Gradients come from
+// the caller so it may be sampled inside divergent branches.
+float4 SampleTerrainMacroColor(ObjectData objectData, float3 worldPosition,
+    float3 worldDx, float3 worldDy)
+{
+    const float2 scale = objectData.terrainMacroMap.zw;
+    return heightMap.SampleGrad(materialSampler,
+        (worldPosition.xz - objectData.terrainMacroMap.xy) * scale,
+        worldDx.xz * scale, worldDy.xz * scale);
 }
 
 // Terrain-scale sun visibility from the far height grid (see
@@ -2210,6 +2229,15 @@ float4 ObjectSurfacePS(
     // has no other texture or per-pixel lighting work.
     if (flags & 16384u)
     {
+        // Macro color map: its albedo replaces the far palette's vertex
+        // color (which is then the vertex light, see VSMain).
+        [branch] if (objectData.terrainMacroParams.z > 0.5)
+        {
+            const float3 macroColor = SampleTerrainMacroColor(objectData, worldPos,
+                ddx(worldPos), ddy(worldPos)).rgb;
+            base.rgb = objectData.baseColor.rgb * macroColor *
+                (objectData.terrainSunShadow.z > 0.0 ? 1.0 : vertexColor.rgb);
+        }
         [branch] if (objectData.terrainSunShadow.z > 0.0)
         {
             const float sunFacing = saturate(dot(normalize(normal),
@@ -2512,6 +2540,16 @@ float4 ObjectSurfacePS(
         }
         if (!hexTiling)
             base.rgb *= 1.0 + (terrainVariation.x + terrainVariation.y) * 0.10;
+        // Toward the edge of the loaded cells, fade to the macro color map
+        // the distant tiles beyond use, so both sides meet with one color.
+        [branch] if (objectData.terrainMacroParams.z > 0.5)
+        {
+            const float macroAmount = smoothstep(objectData.terrainMacroParams.x,
+                objectData.terrainMacroParams.y, nearDistance);
+            [branch] if (macroAmount > 0.0)
+                base.rgb = lerp(base.rgb, SampleTerrainMacroColor(objectData,
+                    worldPos, worldDx, worldDy).rgb, macroAmount);
+        }
     }
     // Static runtime terrain shares one global sun at every view distance.
     // It takes a single-tap realtime shadow across the whole shadow range,
@@ -3006,8 +3044,9 @@ float4 PSDepthEqualMain(
 }
 
 // Opaque parallax materials with parallaxDepthOffset. Depth only moves away
-// from the camera, so SV_DepthGreaterEqual keeps early-Z rejection against
-// geometry already in front of the flat surface.
+// from the camera, which under reverse-Z is toward 0, so SV_DepthLessEqual
+// keeps early-Z rejection against geometry already in front of the flat
+// surface.
 float4 PSParallaxDepthMain(
     noperspective centroid float4 pos : SV_POSITION, float3 worldPos : TEXCOORD2,
     float3 normal : NORMAL, float2 uv : TEXCOORD, float2 uv1 : TEXCOORD1,
@@ -3019,7 +3058,7 @@ float4 PSParallaxDepthMain(
     float instanceLodDistance : TEXCOORD12,
     bool frontFace : SV_IsFrontFace,
     uint primitiveId : SV_PrimitiveID,
-    out float depth : SV_DepthGreaterEqual) : SV_TARGET
+    out float depth : SV_DepthLessEqual) : SV_TARGET
 {
     g_primitiveId = primitiveId;
     g_instanceLodDistance = instanceLodDistance;
@@ -3029,6 +3068,6 @@ float4 PSParallaxDepthMain(
         uvChannels4, objectIndex, frontFace);
     color = ApplyObjectAtmosphereFog(color, worldPos, objectIndex);
     depth = g_parallaxClipDepth >= 0.0
-        ? clamp(g_parallaxClipDepth, pos.z, 1.0) : pos.z;
+        ? clamp(g_parallaxClipDepth, 0.0, pos.z) : pos.z;
     return color;
 }

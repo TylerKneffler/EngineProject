@@ -60,6 +60,24 @@ void SetBackgroundLaunch(bool background)
     g_background = background ? 1 : 0;
 }
 
+bool DisablePowerThrottling()
+{
+    PROCESS_POWER_THROTTLING_STATE state{};
+    state.Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION;
+    // Controlled flags with a clear state bit: always run at high QoS and
+    // honour timer resolution, whatever window has focus.
+    state.ControlMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED |
+        PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION;
+    state.StateMask = 0;
+    if (SetProcessInformation(GetCurrentProcess(), ProcessPowerThrottling,
+        &state, sizeof(state)))
+        return true;
+    // Older Windows 10 builds reject the timer-resolution flag.
+    state.ControlMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED;
+    return SetProcessInformation(GetCurrentProcess(), ProcessPowerThrottling,
+        &state, sizeof(state)) != FALSE;
+}
+
 bool IsAnotherProcessInForeground()
 {
     HWND foreground = GetForegroundWindow();

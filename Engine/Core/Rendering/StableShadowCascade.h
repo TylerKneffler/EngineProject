@@ -50,8 +50,10 @@ inline StableShadowCascade BuildStableShadowCascade(glm::vec3 cameraPosition,
     const float depthExtent=shadowDistance+2.f;
     const auto lightView=glm::lookAtLH(result.center+directionToLight*depthExtent,
         result.center,up);
+    // Reverse-Z like every depth buffer (Graphics/DepthConvention.h): near
+    // and far swapped, so casters nearest the light store 1.
     result.viewProjection=glm::orthoLH_ZO(-result.radius,result.radius,
-        -result.radius,result.radius,.1f,2.f*depthExtent)*lightView;
+        -result.radius,result.radius,2.f*depthExtent,.1f)*lightView;
     return result;
 }
 }

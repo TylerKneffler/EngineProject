@@ -2,6 +2,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <unordered_map>
+#include <glm/vec3.hpp>
 
 namespace Engine::Rendering
 {
@@ -44,6 +45,11 @@ struct TextureFootprintCache
     {
         float pixels = 0.f, coverage = 0.f;
         uint64_t due = 0, used = 0;
+        // World bounds of the chunk's instances and their largest scale,
+        // fixed for a key (instance revision and draw state are in it).
+        bool boundsValid = false;
+        glm::vec3 boundsMin{0.f}, boundsMax{0.f};
+        float maxScale = 0.f;
     };
     struct View
     {

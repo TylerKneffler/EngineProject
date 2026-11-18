@@ -459,7 +459,7 @@ void ScenePortalRendering::Render(ScenePortalRenderingContext& input)
                         D3D11_DEPTH_STENCIL_DESC descriptor{};
                         descriptor.DepthEnable = TRUE;
                         descriptor.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;
-                        descriptor.DepthFunc = D3D11_COMPARISON_LESS_EQUAL;
+                        descriptor.DepthFunc = D3D11_COMPARISON_GREATER_EQUAL; // reverse-Z
                         descriptor.StencilEnable = TRUE;
                         descriptor.StencilReadMask = 0xFF;
                         descriptor.StencilWriteMask = 0xFF;
@@ -493,7 +493,7 @@ void ScenePortalRendering::Render(ScenePortalRenderingContext& input)
                         D3D11_DEPTH_STENCIL_DESC descriptor{};
                         descriptor.DepthEnable = TRUE;
                         descriptor.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;
-                        descriptor.DepthFunc = D3D11_COMPARISON_LESS_EQUAL;
+                        descriptor.DepthFunc = D3D11_COMPARISON_GREATER_EQUAL; // reverse-Z
                         descriptor.StencilEnable = TRUE;
                         descriptor.StencilReadMask = 0xFF;
                         descriptor.StencilWriteMask = 0xFF;

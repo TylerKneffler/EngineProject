@@ -32,7 +32,9 @@ inline float ProjectedTextureFootprint(glm::vec3 low, glm::vec3 high,
     }
     for(bool rejected:outside) if(rejected) { if(screenCoverage) *screenCoverage=0.f; return 0.f; }
     if(minW<=1e-5f || !(viewport.x>0.f && viewport.y>0.f)) return infinity;
-    for(const auto& clip:clips) if(clip.z<=0.f) return infinity;
+    // Reverse-Z (Graphics/DepthConvention.h): a corner at or in front of the
+    // near plane has z >= w.
+    for(const auto& clip:clips) if(clip.z>=clip.w) return infinity;
     if(screenCoverage) *screenCoverage=ProjectedScreenCoverage(clips);
     const auto row=[&](int i) { return glm::vec3(localToClip[0][i],localToClip[1][i],localToClip[2][i]); };
     const float dw=glm::length(row(3))/(minW*minW);

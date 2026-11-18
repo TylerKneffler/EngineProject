@@ -142,11 +142,11 @@ public:
     void SetIndexBuffer(const Engine::Graphics::IGraphicsBuffer* buffer, uint32_t indexCount, uint64_t offset = 0) override;
     void SetTexture(uint32_t slot, const Engine::Graphics::IGraphicsTexture* texture) override;
     bool BeginDepthOnlyPass(const Engine::Graphics::IGraphicsTexture* texture,
-        float clearDepth = 1.f) override;
+        float clearDepth = Engine::Graphics::Depth::ClearValue) override;
     void EndDepthOnlyPass() override;
     bool SupportsDepthRectangleClear() const override
     { return m_context1 && m_frameResources && m_frameResources->depthRectangleClearSupported; }
-    void ClearDepthRectangle(const ScissorRect&, float = 1.f) override;
+    void ClearDepthRectangle(const ScissorRect&, float = Engine::Graphics::Depth::ClearValue) override;
     void SetViewport(const Viewport& vp) override;
     void SetScissorRect(const ScissorRect& rect) override;
     void Clear(float r, float g, float b, float a, float depth = 1.0f) override;

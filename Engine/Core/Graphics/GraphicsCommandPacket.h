@@ -164,7 +164,7 @@ public:
                 m_ownedTextures.push_back(std::move(owner));
         auto& c = Add(Op::Texture); c.pointer = texture; c.n[0] = slot;
     }
-    bool BeginDepthOnlyPass(const IGraphicsTexture* texture, float depth = 1.f) override
+    bool BeginDepthOnlyPass(const IGraphicsTexture* texture, float depth = Depth::ClearValue) override
     {
         if (!texture) return false;
         if (m_seenTextures.insert(texture).second)
@@ -176,7 +176,7 @@ public:
     void EndDepthOnlyPass() override { Add(Op::EndDepthOnlyPass); }
     void SetDepthRectangleClearSupported(bool supported) { m_depthRectangleClearSupported=supported; }
     bool SupportsDepthRectangleClear() const override { return m_depthRectangleClearSupported; }
-    void ClearDepthRectangle(const ScissorRect& rect,float depth=1.f) override
+    void ClearDepthRectangle(const ScissorRect& rect,float depth=Depth::ClearValue) override
     { auto& c=Add(Op::ClearDepthRectangle); c.scissor=rect; c.f[0]=depth; }
     void SetViewport(const Viewport& viewport) override { Add(Op::Viewport).viewport = viewport; }
     void SetScissorRect(const ScissorRect& scissor) override { Add(Op::Scissor).scissor = scissor; }

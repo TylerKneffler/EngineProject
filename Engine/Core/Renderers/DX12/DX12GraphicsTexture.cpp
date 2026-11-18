@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "Core/Graphics/DepthConvention.h"
 #include "DX12GraphicsTexture.h"
 #include "DX12QueueMutex.h"
 
@@ -357,7 +358,7 @@ D3D12TextureFactory::CreateDepthTexture2D(uint32_t width, uint32_t height)
     desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
     D3D12_CLEAR_VALUE clear{};
     clear.Format = DXGI_FORMAT_D32_FLOAT_S8X24_UINT;
-    clear.DepthStencil.Depth = 1.f;
+    clear.DepthStencil.Depth = Engine::Graphics::Depth::ClearValue;
     clear.DepthStencil.Stencil = 0;
     const auto heapProperties = HeapProperties(D3D12_HEAP_TYPE_DEFAULT);
     Microsoft::WRL::ComPtr<ID3D12Resource> texture;

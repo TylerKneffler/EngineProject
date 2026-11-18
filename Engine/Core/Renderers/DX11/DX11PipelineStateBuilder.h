@@ -89,7 +89,7 @@ private:
     D3D11_BLEND_OP m_blendOpAlpha = D3D11_BLEND_OP_ADD;
     BOOL m_depthEnable = TRUE;
     BOOL m_depthWrite = TRUE;
-    D3D11_COMPARISON_FUNC m_depthFunc = D3D11_COMPARISON_LESS;
+    D3D11_COMPARISON_FUNC m_depthFunc = D3D11_COMPARISON_GREATER; // reverse-Z (Graphics/DepthConvention.h)
     BOOL m_stencilEnable = FALSE;
     UINT8 m_stencilReadMask = 0xFF;
     UINT8 m_stencilWriteMask = 0xFF;

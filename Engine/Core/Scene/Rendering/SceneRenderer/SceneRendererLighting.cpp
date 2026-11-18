@@ -343,14 +343,16 @@ void SceneRendererLighting::ResolveSkySun(const Scene& scene,
 void SceneRendererLighting::SetSkyboxRays(SkyboxConstants& constants,
     const glm::mat4& proj, const glm::mat4& directionOnlyView)
 {
-    // Near-to-far plane vector through an NDC point. Both planes map to
+    // Near-to-far plane vector through an NDC point (proj is reverse-Z). Both planes map to
     // planes for perspective and orthographic projections, so the vector is
     // affine in NDC and three samples reproduce it exactly.
     const glm::mat4 invVP = glm::inverse(proj * directionOnlyView);
     const auto ray = [&](float x, float y)
     {
-        const glm::vec4 nearPoint = invVP * glm::vec4(x, y, 0.f, 1.f);
-        const glm::vec4 farPoint = invVP * glm::vec4(x, y, 1.f, 1.f);
+        const glm::vec4 nearPoint = invVP *
+            glm::vec4(x, y, Engine::Graphics::Depth::Near, 1.f);
+        const glm::vec4 farPoint = invVP *
+            glm::vec4(x, y, Engine::Graphics::Depth::Far, 1.f);
         return glm::vec3(farPoint) / farPoint.w - glm::vec3(nearPoint) / nearPoint.w;
     };
     const glm::vec3 origin = ray(0.f, 0.f);

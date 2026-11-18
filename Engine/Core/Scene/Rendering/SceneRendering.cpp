@@ -187,7 +187,8 @@ static_assert(sizeof(DrawCBData) == 16, "Draw constants must remain small");
 static_assert(offsetof(ObjectGPUData, grassCapsules) == 1552, "Grass capsule data must follow the existing object fields");
 static_assert(offsetof(ObjectGPUData, atmosphereFog) == 1680, "Fog data must follow the grass capsules");
 static_assert(offsetof(ObjectGPUData, terrainSunShadow) == 1744, "Terrain sun shadow data must follow the fog");
-static_assert(sizeof(ObjectGPUData) == 1760, "Object buffer layout must match Object.hlsl");
+static_assert(offsetof(ObjectGPUData, terrainMacroMap) == 1760, "Terrain macro map data must follow the sun shadow");
+static_assert(sizeof(ObjectGPUData) == 1792, "Object buffer layout must match Object.hlsl");
 static_assert(sizeof(Engine::Model::LightData) == 128,
     "Light buffer layout must match Object.hlsl");
 
@@ -569,7 +570,9 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
         view = glm::lookAtLH(eye, eye + glm::vec3(0.f, 0.f, 1.f),
             glm::vec3(0.f, 1.f, 0.f));
     }
-    const glm::mat4 proj = cam->GetProjectionMatrix(aspect, m_mode2D);
+    // Reverse-Z (Graphics/DepthConvention.h): every view-projection derived
+    // from this one, CPU culling included, maps near to 1 and far to 0.
+    const glm::mat4 proj = cam->GetRenderProjectionMatrix(aspect, m_mode2D);
     const glm::mat4 inverseView = glm::inverse(view);
     const glm::vec3 cameraPosition = glm::vec3(inverseView[3]);
     const glm::vec3 cameraDirection = glm::normalize(glm::vec3(inverseView[2]));
@@ -2603,7 +2606,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
     if (shadowOnly && shadowSelection.valid && renderMainDirectionalShadow &&
         m_directionalShadowPipeline &&
         context->BeginDepthOnlyPass(m_directionalShadowMap.get(),
-            preserveDirectionalShadowAtlas ? -1.f : 1.f))
+            preserveDirectionalShadowAtlas ? -1.f : Engine::Graphics::Depth::ClearValue))
     {
         m_shadowUploadCache.Prepare(size_t(m_shadowObjectDataBuffer->GetSize()/sizeof(ObjectGPUData)),sizeof(ObjectGPUData));
         context->BeginGpuTiming(Engine::Graphics::GpuTimingStage::Shadow);
@@ -2858,7 +2861,7 @@ void Scene::Render(Engine::Graphics::IGraphicsContext* context, float aspect,
             entry.objectBuffer->FlushMappedWrites(0,
                 static_cast<uint64_t>(portalCascades.count) *
                     m_objectCapacity * sizeof(ObjectGPUData));
-            if (!context->BeginDepthOnlyPass(entry.atlas.get(), 1.f))
+            if (!context->BeginDepthOnlyPass(entry.atlas.get(), Engine::Graphics::Depth::ClearValue))
                 continue;
             context->SetStructuredBuffer(6, m_lightDataBuffer.get());
             context->SetStructuredBuffer(7, entry.objectBuffer.get());

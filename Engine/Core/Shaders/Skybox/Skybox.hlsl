@@ -55,7 +55,7 @@ void VSMain(uint id : SV_VertexID,
 {
     oNDC.x = (id == 1) ? 3.0 : -1.0;
     oNDC.y = (id == 2) ? 3.0 : -1.0;
-    oPos = float4(oNDC, 1.0, 1.0);
+    oPos = float4(oNDC, 0.0, 1.0); // far plane (reverse-Z)
 }
 
 float3 ApplySkyFog(float3 color, float3 direction)

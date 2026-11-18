@@ -47,10 +47,10 @@ public:
     void SetTexture(uint32_t slot, const Engine::Graphics::IGraphicsTexture* texture) override;
     void SetTextureOwners(std::shared_ptr<Engine::Graphics::TextureFrameOwners> owners) { m_textureOwners = std::move(owners); }
     bool BeginDepthOnlyPass(const Engine::Graphics::IGraphicsTexture* texture,
-        float clearDepth = 1.f) override;
+        float clearDepth = Engine::Graphics::Depth::ClearValue) override;
     void EndDepthOnlyPass() override;
     bool SupportsDepthRectangleClear() const override { return true; }
-    void ClearDepthRectangle(const ScissorRect&, float = 1.f) override;
+    void ClearDepthRectangle(const ScissorRect&, float = Engine::Graphics::Depth::ClearValue) override;
     void SetViewport(const Viewport& viewport) override;
     void SetScissorRect(const ScissorRect& rect) override;
     void Clear(float, float, float, float, float = 1.0f) override {}

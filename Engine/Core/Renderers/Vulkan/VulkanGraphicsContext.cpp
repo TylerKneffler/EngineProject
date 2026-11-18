@@ -451,7 +451,7 @@ bool VulkanGraphicsContext::BeginDepthOnlyPass(
     if (!depth || !depth->IsDepthTarget()) return false;
     RetainTexture(depth);
     VkClearValue clears[2]{};
-    clears[1].depthStencil = { clearDepth < 0.f ? 1.f : clearDepth, 0 };
+    clears[1].depthStencil = { clearDepth < 0.f ? Engine::Graphics::Depth::ClearValue : clearDepth, 0 };
     VkRenderPassBeginInfo begin{ VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
     // A negative clear depth requests preservation of an existing atlas.
     // Partial directional-cascade refreshes use the same contract as DX11/12.

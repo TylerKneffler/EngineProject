@@ -2,6 +2,7 @@
 #include "Scripts/Landscape/LandscapeDriver.h"
 #include "Scripts/Grass/GrassField.h"
 #include "Core/Components/Terrain/TerrainHeightArchive.h"
+#include "Core/Components/Terrain/TerrainHydrologyMap.h"
 #include "Core/Components/Terrain/TerrainManager.h"
 #include "Core/Components/Terrain/TerrainObjectLayer.h"
 #include "Core/Components/Terrain/TerrainSurfaceSample.h"
@@ -216,6 +217,86 @@ std::vector<glm::vec3> ComputeFarColors(const std::string& archivePath, uint64_t
     std::vector<glm::vec3> colors(sums.size());
     for (size_t i = 0; i < sums.size(); ++i)
         colors[i] = sums[i].w > 0.f ? glm::vec3(sums[i]) / sums[i].w * .85f : glm::vec3(.1f);
+    return colors;
+}
+
+// Macro color rules (LandscapeDriver "Macro color" properties).
+struct MacroColorRules
+{
+    float lushness = .6f, flowThreshold = .55f, scree = .6f, screeDepth = 6.f;
+    float gullyRock = .5f, brightness = .85f;
+};
+
+// The macro color map: the near paint every fourth sample (16 m on the demo
+// map, the generator's erosion grid), shaped by erosion. Valley floors and
+// streams that carried a lot of water turn lush, steep gullies scour to bare
+// rock, and sediment fans show as scree; forest canopy covers forest soil
+// (alpha = canopy cover). Rows along +Z from the map's -X/-Z corner.
+std::vector<glm::vec4> ComputeMacroColors(const std::string& archivePath, uint64_t signature,
+    int extent, int cellsX, int cellsY, float cellWidth, float cellDepth, const Altitudes& a,
+    const std::array<glm::vec3, LayerCount>& means, const TerrainHydrologyMap& flow,
+    const TerrainHydrologyMap& deposition, const MacroColorRules& rules, int& side)
+{
+    side = 0;
+    if (cellsX != cellsY || cellsX % 4 != 0) return {};
+    const int step = 4;
+    const int perCell = cellsX / step;
+    side = (extent * 2 + 1) * perCell + 1;
+    std::vector<glm::vec4> colors(static_cast<size_t>(side) * side, glm::vec4(.1f, .1f, .1f, 0.f));
+    const glm::vec3 canopy(.030f, .052f, .020f);
+    const glm::vec3 lush = means[Grass] * glm::vec3(.72f, .92f, .55f);
+    const glm::vec3 screeColor = glm::mix(means[Gravel], means[Rock], .4f) * 1.15f;
+    const bool read = TerrainHeightArchive::ForEachCell(archivePath, signature, extent,
+        cellsX, cellsY, [&](int cx, int cy, const std::vector<float>& heights,
+            const std::vector<uint8_t>& codes)
+    {
+        const auto height = [&](int row, int col) {
+            row = std::clamp(row, 0, cellsY); col = std::clamp(col, 0, cellsX);
+            return heights[static_cast<size_t>(row) * (cellsX + 1) + col];
+        };
+        for (int row = 0; row <= cellsY; row += step)
+            for (int col = 0; col <= cellsX; col += step)
+            {
+                const size_t index = static_cast<size_t>(row) * (cellsX + 1) + col;
+                const float worldX = (cx * cellsX + col) * cellWidth;
+                const float worldZ = (cy * cellsY + row) * cellDepth;
+                float weights[LayerCount];
+                PaintSample(heights[index], codes[index], worldX, worldZ, a, weights);
+                glm::vec3 color(0.f);
+                for (int layer = 0; layer < LayerCount; ++layer)
+                    color += means[layer] * weights[layer];
+                // Rise over run across one sample spacing each way.
+                const float dx = (height(row, col + step) - height(row, col - step)) /
+                    (2.f * step * cellWidth);
+                const float dz = (height(row + step, col) - height(row - step, col)) /
+                    (2.f * step * cellDepth);
+                const float slope = std::sqrt(dx * dx + dz * dz);
+                const float wet = SmoothStep(rules.flowThreshold, 1.f,
+                    flow.Normalized(worldX, worldZ));
+                // Lush valley floors on meadow and under forest.
+                const float vegetated = weights[Grass] + weights[ForestSoil];
+                color = glm::mix(color, lush, rules.lushness * wet * vegetated *
+                    (1.f - SmoothStep(.35f, .7f, slope)));
+                // Scree where sediment settled below rock and on alpine ground.
+                const float alpine = std::max(weights[Rock] + weights[Gravel],
+                    SmoothStep(a.tree, a.tree + 12.f * a.blend, heights[index]));
+                const float sediment = deposition.Normalized(worldX, worldZ) * deposition.scale;
+                color = glm::mix(color, screeColor, rules.scree * alpine *
+                    std::clamp(sediment / std::max(rules.screeDepth, .1f), 0.f, 1.f) *
+                    (1.f - weights[Snow]));
+                // Steep, heavily drained slopes: bare rock gullies.
+                color = glm::mix(color, means[Rock], rules.gullyRock * wet *
+                    SmoothStep(.45f, .9f, slope) * (1.f - weights[Snow]));
+                // Forest soil is .85 of the forest share; trees cover it.
+                const float cover = std::min(1.f, weights[ForestSoil] / .85f);
+                color = glm::mix(color, canopy, cover);
+                const size_t sample = static_cast<size_t>((cy + extent) * perCell + row / step) *
+                    side + static_cast<size_t>((cx + extent) * perCell + col / step);
+                colors[sample] = glm::vec4(color * rules.brightness, cover);
+            }
+        return true;
+    });
+    if (!read) { side = 0; return {}; }
     return colors;
 }
 
@@ -501,6 +582,24 @@ LandscapeDriver::LandscapeDriver()
     RegisterField("propsDensity", propsDensity);
     RegisterField("enableWater", enableWater);
     RegisterField("waterMaterial", waterMaterial);
+    RegisterField("enableMacroColors", enableMacroColors, "Macro color");
+    RegisterField("flowMap", flowMap, "Macro color");
+    RegisterField("depositionMap", depositionMap, "Macro color");
+    RegisterField("macroLushness", macroLushness, "Macro color");
+    RegisterField("macroFlowThreshold", macroFlowThreshold, "Macro color");
+    RegisterField("macroScree", macroScree, "Macro color");
+    RegisterField("macroScreeDepth", macroScreeDepth, "Macro color");
+    RegisterField("macroGullyRock", macroGullyRock, "Macro color");
+    RegisterField("macroBrightness", macroBrightness, "Macro color");
+    RegisterFieldTooltip("enableMacroColors", "Compose the 16 m macro color map that distant terrain shows (needs TerrainManager > Macro color map). Rebuilds on a worker when these settings change.");
+    RegisterFieldTooltip("flowMap", "Erosion flow map written by tools/build_landscape_demo.py (world.flow). Missing or from another map: no lush valleys or gullies.");
+    RegisterFieldTooltip("depositionMap", "Erosion deposition map written by tools/build_landscape_demo.py (world.deposition). Missing or from another map: no scree.");
+    RegisterFieldTooltip("macroLushness", "How strongly valley floors and streams (high erosion flow) turn a deeper green on meadow and forest floor.");
+    RegisterFieldTooltip("macroFlowThreshold", "Normalized (logarithmic) flow where the lush tint and gully rock begin. 0 = everywhere water ran, 1 = only the largest streams.");
+    RegisterFieldTooltip("macroScree", "How strongly sediment fans below rock and on alpine ground show as pale scree.");
+    RegisterFieldTooltip("macroScreeDepth", "Metres of deposited sediment that give full scree.");
+    RegisterFieldTooltip("macroGullyRock", "Steep slopes that carry a lot of water are scoured to bare rock; this sets how much.");
+    RegisterFieldTooltip("macroBrightness", "Overall multiplier on the macro colors. Below 1 compensates for the occlusion and texture contrast the near shading adds.");
 }
 
 void LandscapeDriver::FenceBackgroundWork()
@@ -608,11 +707,77 @@ bool LandscapeDriver::ConfigureTerrain()
         layer.MarkConfigurationDirty();
     });
     m_configuredSignature = signature;
+    RegisterMacroColors(*manager);
     manager->ClearFarTerrain();
     m_farLoad = {};
     m_farAttempted = false;
     m_farDataReady = false;
     return true;
+}
+
+uint64_t LandscapeDriver::MacroColorRevision() const
+{
+    if (!enableMacroColors || !m_configuredSignature) return 0;
+    uint64_t revision = m_configuredSignature ^ 0x4d4143524f434c52ull;
+    const auto mix = [&](uint64_t value) { revision = (revision ^ value) * 0x100000001b3ull; };
+    for (float value : {macroLushness, macroFlowThreshold, macroScree, macroScreeDepth,
+            macroGullyRock, macroBrightness, waterLevel, rockLine, snowLine, treeLine,
+            altitudeBlend})
+        mix(static_cast<uint64_t>(std::llround(double(value) * 4096.0)));
+    mix(std::hash<std::string>{}(flowMap));
+    mix(std::hash<std::string>{}(depositionMap));
+    mix(static_cast<uint64_t>(mapHalfExtentCells));
+    return revision ? revision : 1;
+}
+
+void LandscapeDriver::RegisterMacroColors(TerrainManager& manager)
+{
+    TerrainManager::MacroColorSource source;
+    source.revision = [this] { return MacroColorRevision(); };
+    source.makeBuild = [this]() -> std::function<TerrainManager::MacroColorImage()>
+    {
+        const auto* manager = Owner ? Owner->GetComponent<TerrainManager>() : nullptr;
+        if (!manager || !m_configuredSignature) return {};
+        // Snapshot everything: the build runs on a worker.
+        const std::string archive = Engine::Components::Mesh::ResolveFilePath(heightArchive);
+        const std::string flowPath = Engine::Components::Mesh::ResolveFilePath(flowMap);
+        const std::string depositionPath = Engine::Components::Mesh::ResolveFilePath(depositionMap);
+        const uint64_t signature = m_configuredSignature;
+        const int extent = mapHalfExtentCells;
+        const int cellsX = manager->cellsX, cellsY = manager->cellsY;
+        const float cellWidth = manager->cellWidth, cellDepth = manager->cellDepth;
+        const Altitudes level = AltitudesOf(*this);
+        // Layer means come from material files: read them here, not on the job.
+        const auto means = MakePalette(level).nearColors;
+        MacroColorRules rules;
+        rules.lushness = std::clamp(macroLushness, 0.f, 1.f);
+        rules.flowThreshold = std::clamp(macroFlowThreshold, 0.f, .99f);
+        rules.scree = std::clamp(macroScree, 0.f, 1.f);
+        rules.screeDepth = std::clamp(macroScreeDepth, .1f, 100.f);
+        rules.gullyRock = std::clamp(macroGullyRock, 0.f, 1.f);
+        rules.brightness = std::clamp(macroBrightness, .1f, 2.f);
+        return [=]
+        {
+            // Missing or mismatched erosion maps leave just the paint.
+            TerrainHydrologyMap flowSamples, depositionSamples;
+            flowSamples.Load(flowPath, TerrainHydrologyMap::FlowMagic, signature);
+            depositionSamples.Load(depositionPath, TerrainHydrologyMap::DepositionMagic, signature);
+            int side = 0;
+            const auto colors = ComputeMacroColors(archive, signature, extent, cellsX, cellsY,
+                cellWidth, cellDepth, level, means, flowSamples, depositionSamples, rules, side);
+            const float spacing = cellWidth * 4.f;
+            const float origin = -float(extent) * cellsX * cellWidth;
+            return TerrainManager::EncodeMacroColorImage(side, side, origin, origin,
+                spacing, colors);
+        };
+    };
+    manager.SetMacroColorSource(std::move(source));
+}
+
+void LandscapeDriver::OnDestroy()
+{
+    if (auto* manager = Owner ? Owner->GetComponent<TerrainManager>() : nullptr)
+        manager->SetMacroColorSource({});
 }
 
 void LandscapeDriver::Start()

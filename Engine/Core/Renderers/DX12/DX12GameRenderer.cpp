@@ -1,3 +1,4 @@
+#include "Core/Graphics/DepthConvention.h"
 #include "DX12GameRenderer.h"
 #include "Core/Renderers/GraphicsDeviceName.h"
 #include "DX12QueueMutex.h"
@@ -250,7 +251,7 @@ void DX12GameRenderer::BeginFrame()
     m_postProcess.BindScene(m_commandList.Get(), dsv, m_clearColor);
     m_commandList->ClearDepthStencilView(
         dsv, D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL,
-        1.0f, 0, 0, nullptr);
+        Engine::Graphics::Depth::ClearValue, 0, 0, nullptr);
 }
 
 void DX12GameRenderer::Clear(float r, float g, float b, float a)

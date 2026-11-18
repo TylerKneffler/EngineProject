@@ -232,8 +232,9 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
     // burst; an in-place placement edit may therefore take a few extra frames
     // to detect while a source scan is in progress.
     const bool reuseBuildingSignature=!changed && m_prefabInstances &&
-        m_prefabInstances->provider==provider && m_prefabInstances->building &&
-        now<m_prefabInstances->nextPlacementSignatureCheck;
+        m_prefabInstances->provider==provider && (placementsChangeOnlyWhenMarked ||
+        (m_prefabInstances->building &&
+        now<m_prefabInstances->nextPlacementSignatureCheck));
     uint64_t signature=m_prefabInstances && (sourceProbeActive || reuseBuildingSignature)
         ? m_prefabInstances->signature : UINT64_MAX;
     if (!sourceProbeActive && !reuseBuildingSignature)

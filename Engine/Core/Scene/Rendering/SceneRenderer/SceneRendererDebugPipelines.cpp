@@ -1,4 +1,5 @@
 #include "Core/Scene/Rendering/SceneRenderer/SceneRendererDebugPipelines.h"
+#include "Core/Graphics/DepthConvention.h"
 #include "Core/Scene/Rendering/SceneRenderer/SceneRendererUtilities.h"
 #include <stdexcept>
 
@@ -38,7 +39,7 @@ void SceneRendererDebugPipelines::BuildObjectDebugPipelines(
             .SetBlendOpAlpha(0)
             .SetDepthEnable(false)
             .SetDepthWriteEnable(false)
-            .SetDepthFunc(7)
+            .SetDepthFunc(Engine::Graphics::Depth::CompareAlways)
             .SetInputLayout(layout, static_cast<uint32_t>(layoutCount))
             .SetPrimitiveTopology(
                 Engine::Graphics::IPipelineStateBuilder::PrimitiveTopology::TriangleList)
@@ -85,7 +86,7 @@ void SceneRendererDebugPipelines::BuildObjectDebugPipelines(
         .SetBlendEnable(false)
         .SetDepthEnable(true)
         .SetDepthWriteEnable(false)
-        .SetDepthFunc(3)
+        .SetDepthFunc(Engine::Graphics::Depth::CompareNearerOrEqual)
         .SetInputLayout(layout, static_cast<uint32_t>(layoutCount))
         .SetPrimitiveTopology(Engine::Graphics::IPipelineStateBuilder::PrimitiveTopology::TriangleList)
         .SetRenderTargetFormat(10, 20)
@@ -117,7 +118,7 @@ void SceneRendererDebugPipelines::BuildObjectDebugPipelines(
         .SetBlendOpAlpha(0)
         .SetDepthEnable(true)
         .SetDepthWriteEnable(false)
-        .SetDepthFunc(3)
+        .SetDepthFunc(Engine::Graphics::Depth::CompareNearerOrEqual)
         .SetInputLayout(layout, static_cast<uint32_t>(layoutCount))
         .SetPrimitiveTopology(
             Engine::Graphics::IPipelineStateBuilder::PrimitiveTopology::TriangleList)
@@ -139,7 +140,7 @@ void SceneRendererDebugPipelines::BuildObjectDebugPipelines(
         .SetBlendEnable(false)
         .SetDepthEnable(true)
         .SetDepthWriteEnable(false)
-        .SetDepthFunc(3)
+        .SetDepthFunc(Engine::Graphics::Depth::CompareNearerOrEqual)
         .SetInputLayout(terrainLayout, static_cast<uint32_t>(terrainLayoutCount))
         .SetPrimitiveTopology(Engine::Graphics::IPipelineStateBuilder::PrimitiveTopology::TriangleList)
         .SetRenderTargetFormat(10, 20)

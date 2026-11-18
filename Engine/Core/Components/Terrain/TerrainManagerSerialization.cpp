@@ -68,6 +68,9 @@ TerrainManager::JsonValue TerrainManager::Serialize() const
         .Set("longRangeShadowSoftness", JsonValue(longRangeShadowSoftness))
         .Set("stochasticTerrainVariation", JsonValue(stochasticTerrainVariation))
         .Set("terrainMacroColorEnabled", JsonValue(terrainMacroColorEnabled))
+        .Set("macroColorMap", JsonValue(macroColorMap))
+        .Set("macroColorNear", JsonValue(macroColorNear))
+        .Set("macroColorFar", JsonValue(macroColorFar))
         .Set("paintResolution", JsonValue(paintResolution))
         .Set("reliefMapping", JsonValue(reliefMapping))
         .Set("reliefShadows", JsonValue(reliefShadows))
@@ -262,6 +265,11 @@ void TerrainManager::Deserialize(const JsonValue& value)
         value["stochasticTerrainVariation"].AsBool();
     terrainMacroColorEnabled = value.Has("terrainMacroColorEnabled") &&
         value["terrainMacroColorEnabled"].AsBool();
+    macroColorMap = !value.Has("macroColorMap") || value["macroColorMap"].AsBool();
+    macroColorNear = value.Has("macroColorNear")
+        ? std::clamp(value["macroColorNear"].AsFloat(), 0.f, 100000.f) : 256.f;
+    macroColorFar = value.Has("macroColorFar")
+        ? std::clamp(value["macroColorFar"].AsFloat(), macroColorNear + 1.f, 100000.f) : 640.f;
     paintResolution = value.Has("paintResolution")
         ? std::clamp(value["paintResolution"].AsInt(), 0, 16) : 0;
     reliefMapping = !value.Has("reliefMapping") || value["reliefMapping"].AsBool();
@@ -476,6 +484,22 @@ bool TerrainManager::DrawProperties(Engine::Core::IInspectorUi& ui)
             &stochasticTerrainVariation);
         changed |= ui.Checkbox("Terrain macro color blend",
             &terrainMacroColorEnabled);
+        ui.Tooltip("Beyond 512 m, loaded cells fade from texture detail to each layer's measured mean color.");
+        changed |= ui.Checkbox("Macro color map", &macroColorMap);
+        ui.Tooltip("Distant terrain colored from a map composed by the scene's terrain script "
+            "(e.g. LandscapeDriver: paint, erosion flow, scree and forest cover at 16 m). "
+            "Distant tiles use it everywhere; loaded cells blend to it between the two distances below.");
+        if (macroColorMap)
+        {
+            changed |= ui.DragFloat("Macro color start (m)", &macroColorNear, 4.f, 0.f, 20000.f);
+            ui.Tooltip("Camera distance where loaded cells start blending from their painted layers "
+                "to the macro color map.");
+            changed |= ui.DragFloat("Macro color full (m)", &macroColorFar, 4.f, 1.f, 20000.f);
+            ui.Tooltip("Camera distance where loaded cells show only the macro color map. Keep it near "
+                "the edge of the loaded cells (full detail distance) so they meet the distant tiles "
+                "without a seam.");
+            macroColorFar = std::max(macroColorFar, macroColorNear + 1.f);
+        }
         changed |= ui.Checkbox("Measurement grid (metres and cell borders)",
             &measurementGrid);
         changed |= ui.Checkbox("Near-camera relief (parallax)", &reliefMapping);

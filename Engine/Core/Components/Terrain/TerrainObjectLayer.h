@@ -85,6 +85,12 @@ public:
     // (RealtimeShadowSettings::directionalFarDistance). It takes over where
     // the regular casters fade out. 0 (or <= shadowDistance) disables.
     float farShadowDistance = 0.f;
+    // Runtime-generated layers (TerrainManager far blocks) whose placements
+    // change only by replacement plus MarkConfigurationDirty. Their prefab
+    // runtime skips the periodic placement re-hash that catches in-place
+    // edits, which for thousands of far trees per block cost milliseconds
+    // per frame across all blocks. Not serialized.
+    bool placementsChangeOnlyWhenMarked = false;
     // Prefab shadows fade within the final metres of shadowDistance.
     // GrassField tiles retain their own distanceFadeWidth control.
     float shadowFadeWidth = 1.f;

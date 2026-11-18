@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "Core/Graphics/DepthConvention.h"
 #include "D3D11View.h"
 
 namespace Engine::Renderers
@@ -82,7 +83,7 @@ void D3D11View::Render(void* contextHandle, void* mainRtvHandle,
     context->RSSetScissorRects(1, &scissor);
     m_postProcess.BindScene(context, m_dsv.Get(), m_clearColor);
     context->ClearDepthStencilView(
-        m_dsv.Get(), D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
+        m_dsv.Get(), D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, Engine::Graphics::Depth::ClearValue, 0);
 
     if (drawFn) drawFn(context);
 

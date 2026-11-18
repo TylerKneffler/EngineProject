@@ -64,7 +64,8 @@ void SceneRendererDirectionalShadowSubmission::Submit(
             context->ClearDepthRectangle({
                 int32_t(tileX * tileResolution), int32_t(tileY * tileResolution),
                 int32_t((tileX + 1u) * tileResolution),
-                int32_t((tileY + 1u) * tileResolution) }, 1.f);
+                int32_t((tileY + 1u) * tileResolution) },
+                Engine::Graphics::Depth::ClearValue);
 
         std::vector<uint8_t> automaticSubmitted(input.automaticGroups.size(), 0);
         for (size_t drawIndex = 0; drawIndex < input.draws.size(); ++drawIndex)

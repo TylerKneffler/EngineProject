@@ -1,4 +1,5 @@
 #include "Core/Scene/Rendering/SceneRenderer/SceneRendererObjectPipelines.h"
+#include "Core/Graphics/DepthConvention.h"
 
 #include "Core/Graphics/IPipelineState.h"
 #include "Core/Scene/Rendering/SceneRenderer/SceneRendererDebugPipelines.h"
@@ -193,11 +194,13 @@ void SceneRendererObjectPipelines::BuildObjectPipeline(Scene& scene)
                 stencilMode == PortalStencilMode::Increment
                     ? false : (!overlay && !blend))
             .SetDepthFunc(
-                depthEqual ? 2 :
-                stencilMode == PortalStencilMode::ResetDepth ? 7 :
+                depthEqual ? Engine::Graphics::Depth::CompareEqual :
+                stencilMode == PortalStencilMode::ResetDepth
+                    ? Engine::Graphics::Depth::CompareAlways :
                 stencilMode == PortalStencilMode::Write ||
-                stencilMode == PortalStencilMode::Increment
-                ? 3 : ((blend || overlay) ? 3 : 1))
+                stencilMode == PortalStencilMode::Increment || blend || overlay
+                    ? Engine::Graphics::Depth::CompareNearerOrEqual
+                    : Engine::Graphics::Depth::CompareNearer)
             .SetInputLayout(terrainFormat ? terrainLayout : layout,
                 terrainFormat ? 4u : 18u)
             .SetPrimitiveTopology(

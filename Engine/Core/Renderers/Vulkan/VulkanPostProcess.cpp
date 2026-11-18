@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "Core/Graphics/DepthConvention.h"
 #if defined(ENGINE_VULKAN_ENABLED)
 #include "VulkanPostProcess.h"
 #include "VulkanRenderCore.h"
@@ -241,7 +242,7 @@ void VulkanPostProcess::Resize(uint32_t width, uint32_t height)
 
 void VulkanPostProcess::BeginScene(VkCommandBuffer command, const float clearColor[4])
 {
-    VkClearValue clears[2]{}; clears[0].color = { { clearColor[0], clearColor[1], clearColor[2], clearColor[3] } }; clears[1].depthStencil = { 1.f, 0 };
+    VkClearValue clears[2]{}; clears[0].color = { { clearColor[0], clearColor[1], clearColor[2], clearColor[3] } }; clears[1].depthStencil = { Engine::Graphics::Depth::ClearValue, 0 };
     VkRenderPassBeginInfo begin{ VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO }; begin.renderPass = m_sceneRenderPass; begin.framebuffer = m_sceneFramebuffer;
     begin.renderArea.extent = { m_width, m_height }; begin.clearValueCount = 2; begin.pClearValues = clears;
     vkCmdBeginRenderPass(command, &begin, VK_SUBPASS_CONTENTS_INLINE);
@@ -293,7 +294,7 @@ void VulkanPostProcess::BeginComposition(VkCommandBuffer command, VkFramebuffer 
         RenderBloom(command);
     else
         settings.bloomIntensity = 0.f;
-    VkClearValue clears[2]{}; clears[0].color = { { clearColor[0], clearColor[1], clearColor[2], clearColor[3] } }; clears[1].depthStencil = { 1.f, 0 };
+    VkClearValue clears[2]{}; clears[0].color = { { clearColor[0], clearColor[1], clearColor[2], clearColor[3] } }; clears[1].depthStencil = { Engine::Graphics::Depth::ClearValue, 0 };
     VkRenderPassBeginInfo begin{ VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO }; begin.renderPass = m_outputRenderPass; begin.framebuffer = output;
     begin.renderArea.extent = { width, height }; begin.clearValueCount = 2; begin.pClearValues = clears;
     vkCmdBeginRenderPass(command, &begin, VK_SUBPASS_CONTENTS_INLINE);

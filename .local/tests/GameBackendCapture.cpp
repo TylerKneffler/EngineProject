@@ -134,6 +134,9 @@ int main(int argc, char** argv)
         auto options = Parse(argc, argv);
         // Captures run while the user keeps working: never take focus.
         Engine::Core::SetBackgroundLaunch(!g_foreground);
+        // ...and keep full speed while unfocused, or Windows moves the
+        // process to efficiency cores and the timings measure that instead.
+        Engine::Core::DisablePowerThrottling();
         std::unique_ptr<CpuSampler> sampler;
         if (g_cpuSample)
         {

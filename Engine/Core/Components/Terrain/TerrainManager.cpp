@@ -62,6 +62,7 @@ TerrainManager::~TerrainManager()
 void TerrainManager::FenceBackgroundWork()
 {
     FenceFarObjectJobs();
+    if (m_macroJob.valid()) m_macroJob.wait();
     {
         std::lock_guard<std::mutex> lock(m_farPrepareMutex);
         m_stopFarWorker = true;

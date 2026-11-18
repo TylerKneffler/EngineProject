@@ -63,7 +63,7 @@ void VSMain(uint id      : SV_VertexID,
     // array indexing which FXC rejects in vertex shaders.
     oNDC.x = (id == 1) ? 3.0 : -1.0;
     oNDC.y = (id == 2) ? 3.0 : -1.0;
-    oPos = float4(oNDC, 1.0, 1.0);
+    oPos = float4(oNDC, 0.0, 1.0); // far plane (reverse-Z)
 }
 
 // ---------------------------------------------------------------------------
@@ -93,8 +93,9 @@ GridPixel PSMain(float4 svPos : SV_POSITION,
 {
     // Unproject to camera-relative space. The inverse matrix omits camera
     // translation so distant views retain precision near the horizon.
-    float4 wNear = mul(invVP, float4(ndc, 0.0, 1.0));
-    float4 wFar  = mul(invVP, float4(ndc, 1.0, 1.0));
+    // Reverse-Z: NDC depth 1 is the near plane, 0 the far plane.
+    float4 wNear = mul(invVP, float4(ndc, 1.0, 1.0));
+    float4 wFar  = mul(invVP, float4(ndc, 0.0, 1.0));
     wNear /= wNear.w;
     wFar  /= wFar.w;
 
@@ -182,11 +183,12 @@ GridPixel PSMain(float4 svPos : SV_POSITION,
     float viewDepth = nearPlane + t * depthRange;
     GridPixel output;
     output.color = float4(color, alpha);
-    float planeDepth = saturate(farPlane * (viewDepth - nearPlane) /
+    // Reverse-Z depth: n (f - v) / ((f - n) v).
+    float planeDepth = saturate(nearPlane * (farPlane - viewDepth) /
         max(depthRange * viewDepth, 1e-5));
     // Put the helper just behind coplanar scene geometry. Its depth otherwise
     // rounds to alternating sides of a floor's depth in distant views.
-    output.depth = mode2D > 0.5 ? 0.999 :
-        saturate(planeDepth + max(fwidth(planeDepth), 0.0000001));
+    output.depth = mode2D > 0.5 ? 0.001 :
+        saturate(planeDepth - max(fwidth(planeDepth), 0.0000001));
     return output;
 }

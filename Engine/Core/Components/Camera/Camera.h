@@ -48,10 +48,18 @@ public:
     glm::mat4 GetViewMatrix() const;
     glm::dmat4 GetViewMatrixD() const;
 
-    // Returns a left-handed perspective projection matrix.
+    // Returns a left-handed projection matrix with forward depth (near 0,
+    // far 1), for screen/picking math that never reaches a depth buffer.
     // aspect = viewport width / height.
     glm::mat4 GetProjectionMatrix(float aspect, bool forceOrthographic = false) const;
     glm::dmat4 GetProjectionMatrixD(double aspect,
+        bool forceOrthographic = false) const;
+    // The same projection with reverse-Z depth (near 1, far 0), which every
+    // rendered view uses (Graphics/DepthConvention.h). x, y and w match
+    // GetProjectionMatrix exactly.
+    glm::mat4 GetRenderProjectionMatrix(float aspect,
+        bool forceOrthographic = false) const;
+    glm::dmat4 GetRenderProjectionMatrixD(double aspect,
         bool forceOrthographic = false) const;
 
     // World-space eye and look target, whichever way the camera aims

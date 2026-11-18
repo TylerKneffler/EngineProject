@@ -58,6 +58,8 @@ struct ObjectData
     float4 grassCapsules[8];
     float4 atmosphereFog[4];
     float4 terrainSunShadow; // map corner x/z, 1 / extent x/z (texture slot 4)
+    float4 terrainMacroMap; // map corner x/z, 1 / extent x/z (texture slot 5)
+    float4 terrainMacroParams; // blend start, full distance, bound, reserved
 };
 
 struct InstanceTransform { float4 row0; float4 row1; float4 row2; };

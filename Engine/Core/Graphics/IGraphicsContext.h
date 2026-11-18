@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <array>
 #include <chrono>
+#include "DepthConvention.h"
 #include "IPipelineState.h"
 #include "IGraphicsBuffer.h"
 #include "IGraphicsTexture.h"
@@ -136,7 +137,7 @@ public:
     // EndDepthOnlyPass restores the framebuffer, viewport, and scissor that
     // were active when the pass began. False means the backend cannot render
     // this pass and callers must retain unshadowed lighting.
-    virtual bool BeginDepthOnlyPass(const IGraphicsTexture*, float = 1.f)
+    virtual bool BeginDepthOnlyPass(const IGraphicsTexture*, float = Depth::ClearValue)
     { return false; }
     virtual void EndDepthOnlyPass() {}
 
@@ -152,7 +153,7 @@ public:
     // Clear a region of the active depth-only target without touching retained
     // atlas tiles. Callers must use a full refresh when unsupported.
     virtual bool SupportsDepthRectangleClear() const { return false; }
-    virtual void ClearDepthRectangle(const ScissorRect&, float = 1.f) {}
+    virtual void ClearDepthRectangle(const ScissorRect&, float = Depth::ClearValue) {}
     virtual void SetViewport(const Viewport& vp) = 0;
     virtual void SetScissorRect(const ScissorRect& rect) = 0;
 

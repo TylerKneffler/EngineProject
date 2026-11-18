@@ -61,7 +61,7 @@ public:
     // Depth/stencil state
     virtual IPipelineStateBuilder& SetDepthEnable(bool enable) = 0;
     virtual IPipelineStateBuilder& SetDepthWriteEnable(bool enable) = 0;
-    virtual IPipelineStateBuilder& SetDepthFunc(int func) = 0;  // D3D12_COMPARISON_FUNC enum
+    virtual IPipelineStateBuilder& SetDepthFunc(int func) = 0;  // VkCompareOp order; reverse-Z, see Graphics/DepthConvention.h (default CompareNearer)
     virtual IPipelineStateBuilder& SetStencilEnable(bool) { return *this; }
     virtual IPipelineStateBuilder& SetStencilReadMask(uint8_t) { return *this; }
     virtual IPipelineStateBuilder& SetStencilWriteMask(uint8_t) { return *this; }
