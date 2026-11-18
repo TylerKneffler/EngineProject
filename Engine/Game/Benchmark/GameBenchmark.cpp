@@ -143,11 +143,7 @@ GameBenchmarkSceneSample GameBenchmark::CollectScene(Engine::Scene::Scene& scene
     result.updateObjectsMs = updateTimings.objectsMs;
     result.updatePhysicsMs = updateTimings.physicsMs;
     result.updatePostPhysicsMs = updateTimings.postPhysicsMs;
-    if (const auto* grass = Engine::Features::Grass::GrassStats::Find(scene))
-    {
-        result.grass = grass->Get();
-        result.grassMs = result.grass.totalMs;
-    }
+    result.counters = scene.GetCounters().Get();
     result.meshes = scene.GetComponents<Engine::Components::Mesh>().size();
     result.terrains = scene.GetComponents<Engine::Components::Terrain>().size();
     for (auto* layer : scene.GetComponents<Engine::Components::TerrainObjectLayer>())
@@ -324,19 +320,9 @@ void GameBenchmark::Record(uint64_t frame, const GameBenchmarkFrameSample& s)
         << ",\"authored_foliage_placements\":" << s.scene.placements
         << ",\"update_objects_ms\":" << s.scene.updateObjectsMs
         << ",\"update_physics_ms\":" << s.scene.updatePhysicsMs
-        << ",\"update_post_physics_ms\":" << s.scene.updatePostPhysicsMs
-        << ",\"grass_total_ms\":" << s.scene.grassMs
-        << ",\"grass_references_ms\":" << s.scene.grass.referencesMs
-        << ",\"grass_sources_ms\":" << s.scene.grass.sourcesMs
-        << ",\"grass_placement_ms\":" << s.scene.grass.placementMs
-        << ",\"grass_visibility_ms\":" << s.scene.grass.visibilityMs
-        << ",\"grass_retirement_ms\":" << s.scene.grass.retirementMs
-        << ",\"grass_scheduling_ms\":" << s.scene.grass.schedulingMs
-        << ",\"grass_build_ms\":" << s.scene.grass.buildMs
-        << ",\"grass_accounting_ms\":" << s.scene.grass.accountingMs
-        << ",\"grass_other_ms\":" << s.scene.grass.otherMs
-        << ",\"grass_active_tiles\":" << s.scene.grass.activeTiles
-        << ",\"stream_total_ms\":" << s.scene.streamTotalMs
+        << ",\"update_post_physics_ms\":" << s.scene.updatePostPhysicsMs;
+    Engine::Scene::WriteCountersJson(m_log, s.scene.counters);
+    m_log << ",\"stream_total_ms\":" << s.scene.streamTotalMs
         << ",\"stream_unload_ms\":" << s.scene.streamUnloadMs
         << ",\"stream_schedule_ms\":" << s.scene.streamScheduleMs
         << ",\"stream_lod_ms\":" << s.scene.streamLodMs

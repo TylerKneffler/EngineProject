@@ -84,6 +84,10 @@ public:
     virtual void PublishUpdateOnOwner() {}
     // Components with only authored/render data opt out of frame callbacks.
     virtual bool RequiresUpdate() const { return true; }
+    // Project detail-budget layer this component wants its owner placed in
+    // (e.g. "Grass" for ground cover), or null for no preference. Generated
+    // owners such as terrain object layers honour it.
+    virtual const char* PreferredDetailLayer() const { return nullptr; }
     virtual void Enabled() {}
     virtual void Disabled() {}
     virtual void OnDestroy() {}

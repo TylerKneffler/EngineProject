@@ -10,7 +10,6 @@
 #include "Game/Startup/GameProjectStartup.h"
 #include "Game/Startup/RendererStartup.h"
 #include "Game/Benchmark/GameBenchmark.h"
-#include "Core/Features/Grass/GrassStats.h"
 #include "Core/ProjectLoader.h"
 #include "Core/Window.h"
 #include "Core/Startup/StartupSplash.h"
@@ -256,9 +255,8 @@ private:
                 if (work == Work::Update)
                 {
                     const auto updateStart = std::chrono::steady_clock::now();
-                    // Feature counters are per frame (the editor resets its own).
-                    if (auto* grass = Engine::Features::Grass::GrassStats::Find(m_scene))
-                        grass->Reset();
+                    // Script counters are per frame (the editor resets its own).
+                    m_scene.GetCounters().Reset();
                     if (auto* game = m_scene.GetGame())
                         game->Update(m_deltaTime);
                     if (m_scene.GetGame() && m_scene.GetGame()->ProcessPendingSceneLoad() &&

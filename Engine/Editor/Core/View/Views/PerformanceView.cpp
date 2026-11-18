@@ -1,6 +1,6 @@
 #include "PerformanceView.h"
 #include "Core/Rendering/RenderSystem.h"
-#include "Core/Features/Grass/GrassStats.h"
+#include "Core/Scene/SceneCounters.h"
 #include "Core/Rendering/SceneRenderer.h"
 #include "Core/Runtime/Game.h"
 #include "PerformanceRecording.h"
@@ -728,32 +728,32 @@ void PerformanceView::DrawTimings(IEditorUi& ui)
             { "Compare",prepare.spatialCompareMs }, { "Refit and joins",prepare.spatialRefitMs },
             { "Rebuild",prepare.spatialBuildMs }
         });
-        const auto* grassStats = Engine::Features::Grass::GrassStats::Find(*m_scene);
-        const Engine::Features::Grass::GrassPerformance grass =
-            grassStats ? grassStats->Get() : Engine::Features::Grass::GrassPerformance{};
-        drawGroup("Grass total and nested work (CPU wall time)", {
-            { "Total", grass.totalMs }, { "Placement indexing", grass.scanMs },
-            { "Instance preparation", grass.generationMs }, { "GPU upload", grass.uploadMs }
-        });
-        drawGroup("Grass exclusive phases (CPU wall time)", {
-            { "References",grass.referencesMs }, { "Sources",grass.sourcesMs },
-            { "Placement configuration",grass.placementMs }, { "Visibility and tiles",grass.visibilityMs },
-            { "Retirement",grass.retirementMs }, { "Scheduling",grass.schedulingMs },
-            { "Build and activation",grass.buildMs }, { "Resource accounting",grass.accountingMs },
-            { "Other",grass.otherMs }
-        });
-        ui.ValueLabel("Grass pending tiles", std::to_string(grass.pending).c_str());
-        ui.ValueLabel("Grass LOD switches", std::to_string(grass.lodSwitches).c_str());
-        ui.ValueLabel("Grass instance tiles prepared", std::to_string(grass.tilesBuilt).c_str());
-        ui.ValueLabel("Grass placements scanned", std::to_string(grass.placementsScanned).c_str());
-        ui.ValueLabel("Grass resident LODs", std::to_string(grass.residentLods).c_str());
-        ui.ValueLabel("Grass GPU memory", FormatBytes(grass.gpuBytes).c_str());
-        ui.Separator();
-        ui.ValueLabel("Grass placement instances",std::to_string(grass.instances).c_str());
-        ui.ValueLabel("Grass placement uploads",FormatBytes(grass.instanceUploadBytes).c_str());
-        ui.ValueLabel("Grass active / LOD transition / fading tiles",
-            (std::to_string(grass.activeTiles)+" / "+std::to_string(grass.transitionTiles)+" / "+std::to_string(grass.fadingTiles)).c_str());
-        ui.Separator();
+        // Script and plugin counters, one section per group in declaration order.
+        const auto& counters = m_scene->GetCounters().Get();
+        for (size_t index = 0; index < counters.size();)
+        {
+            const std::string& group = counters[index].group;
+            ui.Label(group.c_str());
+            for (; index < counters.size() && counters[index].group == group; ++index)
+            {
+                const auto& counter = counters[index];
+                std::ostringstream formatted;
+                switch (counter.unit)
+                {
+                case Engine::Scene::CounterUnit::Milliseconds:
+                    formatted << std::fixed << std::setprecision(2) << counter.value << " ms";
+                    break;
+                case Engine::Scene::CounterUnit::Bytes:
+                    formatted << FormatBytes(static_cast<uint64_t>(counter.value));
+                    break;
+                case Engine::Scene::CounterUnit::Count:
+                    formatted << static_cast<uint64_t>(counter.value);
+                    break;
+                }
+                ui.ValueLabel(counter.label.c_str(), formatted.str().c_str());
+            }
+            ui.Separator();
+        }
         const auto& shadow = Engine::Rendering::RenderSystem::For(*m_scene).GetLastShadowCpuTiming();
         ui.ValueLabel("Shadow draws: explicit instances / automatic / ordinary",
             (std::to_string(shadow.explicitInstanceDraws)+" / "+std::to_string(shadow.automaticDraws)+" / "+std::to_string(shadow.ordinaryDraws)).c_str());

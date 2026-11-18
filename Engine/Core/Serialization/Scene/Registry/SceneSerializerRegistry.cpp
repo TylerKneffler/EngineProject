@@ -12,7 +12,6 @@
 #include "Core/Components/Terrain/Terrain.h"
 #include "Core/Components/Terrain/TerrainObjectLayer.h"
 #include "Core/Components/Terrain/TerrainManager.h"
-#include "Core/Features/Grass/GrassField.h"
 #include "Core/Components/Materials/Material.h"
 #include "Core/Components/Camera/Camera.h"
 #include "Core/Components/Lighting/Light.h"
@@ -195,9 +194,6 @@ void SceneSerializer::EnsureBuiltinsRegistered()
     RegisterComponentType<Engine::Components::Terrain>();
     RegisterComponentType<Engine::Components::TerrainObjectLayer>();
     RegisterComponentType<Engine::Components::TerrainManager>();
-    // Explicit name: GrassField predates the engine namespace (scenes and
-    // prefabs store it as "GrassField").
-    RegisterComponentType<GrassField>("GrassField");
     RegisterComponentType<Engine::Components::Material>();
     RegisterComponentType<Engine::Components::Camera>();
     RegisterComponentType<Engine::Components::Light>();

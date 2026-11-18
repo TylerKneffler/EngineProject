@@ -1,6 +1,5 @@
 #include "Engine/Editor/Diagnostics/EditorFrameProfiler.h"
 #include "Core/Rendering/RenderSystem.h"
-#include "Core/Features/Grass/GrassStats.h"
 #include "Core/Rendering/SceneRenderer.h"
 #include "Core/Runtime/Game.h"
 #include "Engine/Editor/Diagnostics/FrameActivity.h"
@@ -375,9 +374,6 @@ namespace Engine::Editor
             << ",\"constant_discard_maps\":" << factory->GetConstantBufferDiscardMaps();
         output << ",\"spatial_active_fields\":" << scene->GetSpatialUpdateScheduler().activeCount
             << ",\"spatial_dormant_fields\":" << scene->GetSpatialUpdateScheduler().dormantCount;
-        const auto* grassStats = Engine::Features::Grass::GrassStats::Find(*scene);
-        const Engine::Features::Grass::GrassPerformance grass =
-            grassStats ? grassStats->Get() : Engine::Features::Grass::GrassPerformance{};
         const auto& renderCpu=sample.renderCpu;
         const auto frameUploadStats = Engine::Rendering::RenderSystem::For(*scene).GetCurrentFrameUploadStats();
         renderCpu.instances.WriteJson(output);
@@ -509,27 +505,7 @@ namespace Engine::Editor
             << ",\"automatic_instances\":" << renderCpu.automaticInstances
             << ",\"gpu_instance_batches\":" << renderCpu.gpuBatches
             << ",\"render_changed_upload_bytes\":" << renderCpu.changedUploadBytes;
-        output << ",\"grass_total_ms\":" << grass.totalMs
-            << ",\"grass_references_ms\":" << grass.referencesMs
-            << ",\"grass_sources_ms\":" << grass.sourcesMs
-            << ",\"grass_placement_ms\":" << grass.placementMs
-            << ",\"grass_visibility_ms\":" << grass.visibilityMs
-            << ",\"grass_retirement_ms\":" << grass.retirementMs
-            << ",\"grass_scheduling_ms\":" << grass.schedulingMs
-            << ",\"grass_build_ms\":" << grass.buildMs
-            << ",\"grass_accounting_ms\":" << grass.accountingMs
-            << ",\"grass_other_ms\":" << grass.otherMs
-            << ",\"grass_scan_ms\":" << grass.scanMs
-            << ",\"grass_generation_ms\":" << grass.generationMs
-            << ",\"grass_upload_ms\":" << grass.uploadMs
-            << ",\"grass_placements_scanned\":" << grass.placementsScanned
-            << ",\"grass_tiles_built\":" << grass.tilesBuilt
-            << ",\"grass_lod_switches\":" << grass.lodSwitches
-            << ",\"grass_pending\":" << grass.pending
-            << ",\"grass_resident_lods\":" << grass.residentLods
-            << ",\"grass_gpu_bytes\":" << grass.gpuBytes
-            << ",\"grass_instances\":" << grass.instances
-            << ",\"grass_instance_upload_bytes\":" << grass.instanceUploadBytes;
+        Engine::Scene::WriteCountersJson(output, scene->GetCounters().Get());
         const auto writeViewIdentities = [&output](const char* field,
             const Engine::Rendering::RenderVisibilityMetrics& visibility)
         {
@@ -606,9 +582,6 @@ namespace Engine::Editor
             output << "]}";
         }
         output << ']';
-        output << ",\"grass_active_tiles\":" << grass.activeTiles
-            << ",\"grass_lod_transition_tiles\":" << grass.transitionTiles
-            << ",\"grass_fading_tiles\":" << grass.fadingTiles;
         output << ",\"measured\":" << (sample.measured ? "true":"false");
         output << ",\"recurring_frame\":" << ((!sample.startup && !sample.activity) ? "true":"false")
             << ",\"frame_activity\":[";

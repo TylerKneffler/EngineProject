@@ -1,6 +1,6 @@
 #include "Core/Rendering/DetailBudget.h"
 #include "Scripts/Landscape/LandscapeDriver.h"
-#include "Core/Features/Grass/GrassField.h"
+#include "Grass/GrassField.h"
 #include "Scripts/Grass/MeadowGrass.h"
 #include "Core/Components/Terrain/TerrainHeightArchive.h"
 #include "Core/Components/Terrain/TerrainHydrologyMap.h"

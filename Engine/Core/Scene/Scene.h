@@ -15,6 +15,7 @@
 #include "Core/Physics/Physics.h"
 #include "Core/Scene/Spatial/WarpVolume.h"
 #include "Core/Scene/SceneObserver.h"
+#include "Core/Scene/SceneCounters.h"
 #include <glm/glm.hpp>
 #include <array>
 #include <atomic>
@@ -225,6 +226,9 @@ public:
 
     bool UpdateSpatialScripts(bool editor=false) { return m_spatialUpdates.Tick(*this,editor); }
     const auto& GetSpatialUpdateScheduler() const { return m_spatialUpdates; }
+    // Per-frame diagnostic counters published by scripts and plugins.
+    SceneCounters& GetCounters() { return m_counters; }
+    const SceneCounters& GetCounters() const { return m_counters; }
     // Diagnostics flag shared by Game update timings and render timings.
     void SetUpdateProfilingEnabled(bool enabled) { m_updateProfilingEnabled = enabled; }
     bool IsUpdateProfilingEnabled() const { return m_updateProfilingEnabled; }
@@ -610,6 +614,7 @@ private:
     uint64_t m_updateRegistryRevision = 0;
     std::vector<Object*> m_updateObjects, m_poseObjects;
     Engine::Components::SpatialUpdateScheduler m_spatialUpdates;
+    SceneCounters m_counters;
     // Keeps immutable prefab prototypes alive while a trusted play restore
     // recreates its layers. Released once those layers finish preparing.
     std::vector<std::shared_ptr<void>> m_restorePrefabPrototypes;

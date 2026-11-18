@@ -1,7 +1,7 @@
 #pragma once
 #include <cstdint>
 
-namespace Engine::Features::Grass
+namespace Engine::Grass
 {
 // One frame's GrassField work, summed over every field in the scene
 // (GrassStats). Read by the editor profiler and the game benchmark.

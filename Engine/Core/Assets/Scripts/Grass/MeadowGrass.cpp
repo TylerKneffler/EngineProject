@@ -1,6 +1,6 @@
 #include "Scripts/Grass/MeadowGrass.h"
 
-#include "Core/Features/Grass/GrassField.h"
+#include "Grass/GrassField.h"
 #include "Core/Components/Terrain/TerrainObjectLayer.h"
 #include "Core/Rendering/DetailBudget.h"
 #include "Core/Scene/Object.h"

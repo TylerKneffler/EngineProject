@@ -1,6 +1,6 @@
 #include "Core/Rendering/DetailBudget.h"
-#include "Core/Features/Grass/GrassField.h"
-#include "Core/Features/Grass/GrassStats.h"
+#include "Grass/GrassField.h"
+#include "Grass/GrassStats.h"
 
 #include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
@@ -57,6 +57,18 @@ void HashFloat(uint64_t& hash, float value)
     std::memcpy(&bits, &value, sizeof(bits));
     HashBytes(hash, &bits, sizeof(bits));
 }
+
+// Grass is a script asset, not an engine built-in: it registers itself when
+// its project (or the engine sandbox) compiles Assets/Grass.
+struct GrassFieldRegistration
+{
+    GrassFieldRegistration()
+    {
+        Engine::Serialization::RegisterComponentType<GrassField>("GrassField");
+    }
+};
+
+GrassFieldRegistration g_registration;
 }
 
 GrassField::GrassField()
@@ -795,7 +807,7 @@ bool GrassField::Refresh()
     // Grass statistics and the shared tile-work budget (GrassStats) only
     // apply to drawn scenes; headless scenes never reset them.
     auto* stats = Engine::Rendering::RenderSystem::Find(scene)
-        ? &Engine::Features::Grass::GrassStats::For(scene) : nullptr;
+        ? &Engine::Grass::GrassStats::For(scene) : nullptr;
     auto phaseStarted = started;
     const auto checkpoint = [&](double& milliseconds) {
         const auto now = Clock::now();

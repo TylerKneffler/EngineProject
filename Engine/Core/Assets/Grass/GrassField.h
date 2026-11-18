@@ -6,7 +6,7 @@
 #include "Core/Components/Mesh/Mesh.h"
 #include "Core/Components/Mesh/MeshInstanceLayerData.h"
 #include "Core/Components/Terrain/TerrainObjectLayer.h"
-#include "Core/Features/Grass/GrassPerformance.h"
+#include "Grass/GrassPerformance.h"
 #include <chrono>
 #include <optional>
 #include <map>
@@ -119,13 +119,15 @@ public:
     void Start() override;
     void Update() override;
     bool RequiresUpdate() const override { return false; }
+    // Ground cover lives in the project's grass detail budget.
+    const char* PreferredDetailLayer() const override { return "Grass"; }
     uint64_t SpatialRegionRevision() const override;
     Engine::Components::SpatialUpdateRegion DescribeSpatialRegion() override;
     bool TickSpatialRegion(bool editor) override { return editor ? RefreshEditorPreview():Refresh(); }
     void LeaveSpatialRegion() override;
     void OnDestroy() override;
     bool RefreshEditorPreview();
-    const Engine::Features::Grass::GrassPerformance& GetLastPerformance() const
+    const Engine::Grass::GrassPerformance& GetLastPerformance() const
     { return m_performance; }
 
 private:
@@ -178,7 +180,7 @@ private:
     size_t m_placementCount = 0;
     float m_indexedTileSize = 0;
     uint64_t m_placementSignature = 0;
-    Engine::Features::Grass::GrassPerformance m_performance;
+    Engine::Grass::GrassPerformance m_performance;
     bool m_loaded = false;
     std::string m_loadedMaterialPath, m_resolvedMaterialPath;
     Clock::time_point m_lastRefresh{};

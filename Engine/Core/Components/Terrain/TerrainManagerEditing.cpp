@@ -84,16 +84,18 @@ void TerrainManager::RestoreObjectLayers(Cell cell,
                 if (layer->placements.size() != before) layer->MarkConfigurationDirty();
             }
         }
-        // Project layer for budgets and filtering: grass layers in "Grass",
-        // other placements in "Props". The setup hook (scene content such as
-        // grass presets, see SetObjectLayerSetup) may add a GrassField or
-        // override the layer.
-        const bool grassLayer = std::any_of(child->Components.begin(),
-            child->Components.end(), [](const auto* component) {
-                return component && component->GetTypeName() == "GrassField";
-            });
-        child->layer = Engine::Rendering::DetailBudget::Get().FindLayerOrDefault(
-            grassLayer ? "Grass" : "Props");
+        // Project layer for budgets and filtering: the first component that
+        // prefers one (e.g. ground cover in "Grass"), otherwise "Props". The
+        // setup hook (scene content such as grass presets, see
+        // SetObjectLayerSetup) may add components or override the layer.
+        const char* preferredLayer = "Props";
+        for (const auto* component : child->Components)
+            if (const char* preferred = component ? component->PreferredDetailLayer() : nullptr)
+            {
+                preferredLayer = preferred;
+                break;
+            }
+        child->layer = Engine::Rendering::DetailBudget::Get().FindLayerOrDefault(preferredLayer);
         if (m_objectLayerSetup) m_objectLayerSetup(cell, *layer);
     };
     if (const auto found = m_objectLayers.find(cell);

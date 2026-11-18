@@ -1,5 +1,4 @@
 #pragma once
-#include "Core/Features/Grass/GrassStats.h"
 
 #include "Game/Application/GameApplication.h"
 #include "Core/Rendering/RenderPerformance.h"
@@ -29,8 +28,9 @@ struct GameBenchmarkSceneSample
         streamCommitPhysicsMs = 0, streamColliderMs = 0, streamBatchMs = 0,
         streamTrimMs = 0, streamFarObjectsMs = 0;
     double streamCommitTerrainMs = 0, streamCommitLayersMs = 0, streamCommitRestoreMs = 0;
-    double updateObjectsMs = 0, updatePhysicsMs = 0, updatePostPhysicsMs = 0, grassMs = 0;
-    Engine::Features::Grass::GrassPerformance grass;
+    double updateObjectsMs = 0, updatePhysicsMs = 0, updatePostPhysicsMs = 0;
+    // Script and plugin counters (Scene::GetCounters).
+    std::vector<Engine::Scene::SceneCounter> counters;
     uint64_t loadedPrefabCells = 0, pooledPrefabCells = 0;
     // Far objects of all managers; settled when every one reports settled.
     uint64_t farObjectCells = 0, farObjectQueuedCells = 0, farObjectBlocks = 0,
