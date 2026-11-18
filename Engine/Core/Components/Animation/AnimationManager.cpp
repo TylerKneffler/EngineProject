@@ -1,4 +1,6 @@
 #include "AnimationManager.h"
+#include "Core/Rendering/RenderSystem.h"
+#include "Core/Rendering/SceneRenderer.h"
 #include "Model.h"
 #include "Skeleton.h"
 #include "Core/Components/Mesh/Mesh.h"
@@ -609,8 +611,10 @@ void AnimationManager::Update()
 
 void AnimationManager::Tick(float frameDelta)
 {
-    if (Owner && Owner->GetScene() &&
-        Owner->GetScene()->GetViewOverlays().meshEditPose) return;
+    // The editor's mesh-edit pose overlay freezes animation playback.
+    if (Owner && Owner->GetScene())
+        if (const auto* renderer = Engine::Rendering::RenderSystem::Find(*Owner->GetScene());
+            renderer && renderer->GetViewOverlays().meshEditPose) return;
     if (!playing && holdCurrentPoseWhenStopped)
         return;
     if (m_restPose.empty()) Start();

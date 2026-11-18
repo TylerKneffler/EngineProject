@@ -1,4 +1,6 @@
 #include "GameView.h"
+#include "Core/Rendering/RenderSystem.h"
+#include "Core/Rendering/SceneRenderer.h"
 #include "Core/Graphics/GraphicsCommandPacket.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 #include "Core/Components/Camera/Camera.h"
@@ -66,7 +68,7 @@ void GameView::DrawPanel(IEditorUi& ui)
                 m_scene->SetGameplayInputEnabled(true);
         }
         if (m_scene)
-            m_scene->SetUiPointerInput(input.mousePosInViewport.x,
+            Engine::Rendering::RenderSystem::For(*m_scene).SetUiPointerInput(input.mousePosInViewport.x,
                 input.mousePosInViewport.y, input.available.x, input.available.y,
                 input.hovered, input.leftDown);
         EditorUiVec2 available = input.available;
@@ -88,7 +90,7 @@ void GameView::DrawPanel(IEditorUi& ui)
     {
         // Suppress native editor-window coordinates while the embedded game
         // surface is hidden or collapsed.
-        m_scene->SetUiPointerInput(0.f, 0.f, 1.f, 1.f, false, false);
+        Engine::Rendering::RenderSystem::For(*m_scene).SetUiPointerInput(0.f, 0.f, 1.f, 1.f, false, false);
     }
     ui.EndWindow();
 }
@@ -118,13 +120,13 @@ void GameView::Render3D(void* cmd)
     factory->SetCommandBuffer(cmd);
     auto ctx = factory->CreateContext();
     if (ctx)
-        m_scene->Render(ctx.get(), m_aspect, gameCamera, false,
+        Engine::Rendering::RenderSystem::For(*m_scene).Render(ctx.get(), m_aspect, gameCamera, false,
             GetWidth(), GetHeight());
 }
 
 void GameView::RecordRenderCommands(Engine::Graphics::GraphicsCommandPacket& shadow,
     Engine::Graphics::GraphicsCommandPacket& color,
-    const Engine::Scene::Scene::NativeRenderPacket* packet, RecordingTimings* timings)
+    const Engine::Rendering::SceneRenderer::NativeRenderPacket* packet, RecordingTimings* timings)
 {
     using Clock=std::chrono::steady_clock;
     const auto started=Clock::now();
@@ -134,9 +136,9 @@ void GameView::RecordRenderCommands(Engine::Graphics::GraphicsCommandPacket& sha
     if (!camera) return;
     m_scene->PrepareNativeUiLayout(m_aspect);
     const auto setupEnd=Clock::now();
-    m_scene->Render(&shadow, m_aspect, camera, false, GetWidth(), GetHeight(), true, packet);
+    Engine::Rendering::RenderSystem::For(*m_scene).Render(&shadow, m_aspect, camera, false, GetWidth(), GetHeight(), true, packet);
     const auto shadowEnd=Clock::now();
-    m_scene->Render(&color, m_aspect, camera, false, GetWidth(), GetHeight(), false, packet);
+    Engine::Rendering::RenderSystem::For(*m_scene).Render(&color, m_aspect, camera, false, GetWidth(), GetHeight(), false, packet);
     if(timings) {
         timings->setupMs=std::chrono::duration<double,std::milli>(setupEnd-started).count();
         timings->shadowMs=std::chrono::duration<double,std::milli>(shadowEnd-setupEnd).count();
@@ -155,7 +157,7 @@ void GameView::RenderShadow3D(void* cmd)
     factory->SetCommandBuffer(cmd);
     auto ctx = factory->CreateContext();
     if (ctx)
-        m_scene->Render(ctx.get(), m_aspect, camera, false,
+        Engine::Rendering::RenderSystem::For(*m_scene).Render(ctx.get(), m_aspect, camera, false,
             GetWidth(), GetHeight(), true);
 }
 

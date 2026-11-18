@@ -1,4 +1,6 @@
 #include "Engine/Editor/EditorApplication.h"
+#include "Core/Rendering/RenderSystem.h"
+#include "Core/Rendering/SceneRenderer.h"
 #include "Engine/Editor/Runtime/EditorPreviews.h"
 #include "Core/Runtime/Game.h"
 #include "Engine/Editor/Runtime/EditorPlayPipeline.h"
@@ -655,7 +657,7 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
         };
         bool usePlayPipeline = playPipeline && playState == Engine::Editor::PlayState::Playing &&
             !waitingForPlayDebugger && !pendingPlayStart && pipelineViewsMatch();
-        scene->ResetGrassPerformance();
+        Engine::Rendering::RenderSystem::For(*scene).ResetGrassPerformance();
         // Tick game objects while playing
         if (playState == Engine::Editor::PlayState::Playing &&
             !waitingForPlayDebugger && !pendingPlayStart &&
@@ -832,7 +834,7 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
                             [renderer] { renderer->WaitIdle(); });
                         panelScene->SetDeferredGraphicsRetirement(true);
                         if (preparedScenes.insert(panelScene).second)
-                            panelScene->PrepareRenderFrame(!usePlayPipeline);
+                            Engine::Rendering::RenderSystem::For(*panelScene).PrepareRenderFrame(!usePlayPipeline);
                     }
                     continue;
                 }
@@ -845,7 +847,7 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
                             [renderer] { renderer->WaitIdle(); });
                         panelScene->SetDeferredGraphicsRetirement(true);
                         if (preparedScenes.insert(panelScene).second)
-                            panelScene->PrepareRenderFrame(!usePlayPipeline);
+                            Engine::Rendering::RenderSystem::For(*panelScene).PrepareRenderFrame(!usePlayPipeline);
                     }
                 }
             }
@@ -856,14 +858,14 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
                 pipelineFrameSubmitted = true;
                 const auto recordStart = Clock::now();
                 computeCommands = playPipeline->AcquireCommands();
-                scene->RecordGpuParticleSimulation(computeCommands.get());
+                Engine::Rendering::RenderSystem::For(*scene).RecordGpuParticleSimulation(computeCommands.get());
                 frameCommands.push_back(computeCommands);
                 const auto computeRecordEnd=Clock::now();
                 pipelineComputeRecordMs=std::chrono::duration<double,std::milli>(computeRecordEnd-recordStart).count();
                 if (preparedScenes.count(scene))
                 {
-                    auto drawPacket = scene->TakeNativeRenderPacket();
-                    scene->RetainNativePacketMeshBuffers(*drawPacket, *computeCommands);
+                    auto drawPacket = Engine::Rendering::RenderSystem::For(*scene).TakeNativeRenderPacket();
+                    Engine::Rendering::RenderSystem::For(*scene).RetainNativePacketMeshBuffers(*drawPacket, *computeCommands);
                     pipelineSnapshotMs=std::chrono::duration<double,std::milli>(Clock::now()-computeRecordEnd).count();
                     for (const auto& panel : editorState->GetPanels())
                     {
@@ -881,8 +883,8 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
                         else continue;
                         const double viewRecordMs=std::chrono::duration<double,std::milli>(Clock::now()-viewRecordStart).count();
                         pipelineViewRecordMs+=viewRecordMs;
-                        recorded.shadowDraws = scene->GetShadowDebugSnapshot().submittedCasterDrawCount;
-                        const auto viewCpu=scene->GetLastRenderCpuTimings();
+                        recorded.shadowDraws = Engine::Rendering::RenderSystem::For(*scene).GetShadowDebugSnapshot().submittedCasterDrawCount;
+                        const auto viewCpu=Engine::Rendering::RenderSystem::For(*scene).GetLastRenderCpuTimings();
                         renderCpu += viewCpu;
                         viewRenders.push_back({
                             dynamic_cast<Engine::Editor::GameView*>(view) ? "game" : "scene",
@@ -899,8 +901,8 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
                 // Embedded UI coordinates override window coordinates. If no
                 // Game surface has supplied input, suppress native-window UI.
                 input.clientWidth = input.clientHeight = 0;
-                scene->CaptureEmbeddedUiInput(input);
-                recordedGrass = scene->GetGrassPerformance();
+                Engine::Rendering::RenderSystem::For(*scene).CaptureEmbeddedUiInput(input);
+                recordedGrass = Engine::Rendering::RenderSystem::For(*scene).GetGrassPerformance();
                 playPipeline->Begin(*scene, std::max(dt, 0.f), std::move(input));
             }
             prepareMilliseconds = std::chrono::duration<double, std::milli>(
@@ -937,7 +939,7 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
                             if (computeContext) computeCommands->Replay(*computeContext);
                         }
                         else for (Engine::Scene::Scene* prepared : preparedScenes)
-                            prepared->RecordGpuParticleSimulation(computeContext.get());
+                            Engine::Rendering::RenderSystem::For(*prepared).RecordGpuParticleSimulation(computeContext.get());
                     }
             });
 
@@ -993,11 +995,11 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
                         if (recorded) replay(*recorded->color, cmd);
                         else
                         {
-                            if(renderedScene) renderedScene->ResetRenderCpuTimings();
+                            if(renderedScene) Engine::Rendering::RenderSystem::For(*renderedScene).ResetRenderCpuTimings();
                             view->Render3D(cmd);
                             if(renderedScene)
                             {
-                                const auto viewCpu=renderedScene->GetLastRenderCpuTimings();
+                                const auto viewCpu=Engine::Rendering::RenderSystem::For(*renderedScene).GetLastRenderCpuTimings();
                                 renderCpu+=viewCpu;
                                 viewRenders.push_back({
                                     dynamic_cast<Engine::Editor::GameView*>(view) ? "game" : "scene",
@@ -1034,7 +1036,7 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
                     ++renderedSceneViews;
                     if (recorded) submittedShadowDraws += recorded->shadowDraws;
                     else if (auto* panelScene = sceneView->GetScene())
-                        submittedShadowDraws += panelScene->GetShadowDebugSnapshot()
+                        submittedShadowDraws += Engine::Rendering::RenderSystem::For(*panelScene).GetShadowDebugSnapshot()
                             .submittedCasterDrawCount;
                 }
                 else if (auto* gameView = dynamic_cast<Engine::Editor::GameView*>(view))
@@ -1044,7 +1046,7 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
                     gameViewHeight = gameView->GetHeight();
                     if (recorded) submittedShadowDraws += recorded->shadowDraws;
                     else if (auto* panelScene = gameView->GetScene())
-                        submittedShadowDraws += panelScene->GetShadowDebugSnapshot()
+                        submittedShadowDraws += Engine::Rendering::RenderSystem::For(*panelScene).GetShadowDebugSnapshot()
                             .submittedCasterDrawCount;
                 }
                 }
@@ -1068,17 +1070,17 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
         {
             auto input = Engine::Core::CaptureNativeInput(window->GetHWND());
             input.clientWidth = input.clientHeight = 0;
-            scene->CaptureEmbeddedUiInput(input);
+            Engine::Rendering::RenderSystem::For(*scene).CaptureEmbeddedUiInput(input);
             playPipeline->Begin(*scene, std::max(dt, 0.f), std::move(input));
         }
         if (playPipeline && playPipeline->Busy())
         {
             pipelineTimings = playPipeline->Finish(std::move(frameCommands));
-            scene->AddGrassPerformance(recordedGrass);
+            Engine::Rendering::RenderSystem::For(*scene).AddGrassPerformance(recordedGrass);
             uint32_t occlusionCulled = 0;
             for (const auto& recorded : recordedViews)
                 occlusionCulled += recorded.color->GetReplayOcclusionCulledCount();
-            scene->SetLastNativeOcclusionCulledCount(occlusionCulled);
+            Engine::Rendering::RenderSystem::For(*scene).SetLastNativeOcclusionCulledCount(occlusionCulled);
             if (playGame) playGame->ProcessPendingSceneLoad();
         }
         if (deferredClearGameplayFocus)
@@ -1118,7 +1120,7 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
             for (auto* frameScene : frameScenes)
             {
                 if (!frameScene) continue;
-                auto resources = frameScene->TakeRetiredGraphicsResources();
+                auto resources = Engine::Rendering::RenderSystem::TakeRetiredGraphicsResources(*frameScene);
                 if (!resources.Empty())
                     retiredSceneFrames.push_back({token, std::move(resources)});
             }

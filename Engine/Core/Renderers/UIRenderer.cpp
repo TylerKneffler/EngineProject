@@ -1,4 +1,5 @@
 #include "Core/Renderers/UIRenderer.h"
+#include "Core/Rendering/SceneRenderer.h"
 #include "Core/Graphics/GraphicsCommandPacket.h"
 
 #include "Core/UI/UILayout.h"
@@ -454,16 +455,17 @@ bool UIRenderer::CaptureEmbeddedPointer(Engine::Core::NativeInputSnapshot& input
     return true;
 }
 
-void UIRenderer::Render(Engine::Scene::Scene& scene,
+void UIRenderer::Render(Engine::Rendering::SceneRenderer& renderer,
     Engine::Graphics::IGraphicsContext* context, float viewportAspect)
 {
+    Engine::Scene::Scene& scene = renderer.GetScene();
     if (!IsReady() || !context || !m_impl->provider) return;
     if(scene.GetComponents<Engine::Components::Canvas>().empty() &&
         scene.GetComponents<Engine::Components::UIText>().empty() &&
         scene.GetComponents<Engine::Components::UIImage>().empty() &&
         scene.GetComponents<Engine::Components::UIButton>().empty()) return;
     const std::vector<Engine::Model::UITextLayout> items =
-        scene.IsOwnerThread() && !scene.IsRecordingNativeCommands()
+        scene.IsOwnerThread() && !renderer.IsRecordingNativeCommands()
         ? Engine::UI::UILayout::Resolve(scene, viewportAspect)
         : scene.GetPreparedNativeUiLayout();
 
@@ -694,7 +696,7 @@ void UIRenderer::Render(Engine::Scene::Scene& scene,
                     mousePosition.x >= clip.x && mousePosition.x <= clip.x + clip.width &&
                     mousePosition.y >= clip.y && mousePosition.y <= clip.y + clip.height;
             }
-            if (scene.IsOwnerThread() && !scene.IsRecordingNativeCommands())
+            if (scene.IsOwnerThread() && !renderer.IsRecordingNativeCommands())
                 button->UpdateInteraction(hovered, mouseDown);
 
             const glm::vec3 rgb = !button->interactable

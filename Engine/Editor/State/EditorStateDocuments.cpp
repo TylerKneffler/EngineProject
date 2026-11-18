@@ -1,4 +1,6 @@
 #include "pch.h"
+#include "Core/Rendering/RenderSystem.h"
+#include "Core/Rendering/SceneRenderer.h"
 #include "Engine/Editor/State/EditorViewState.h"
 #include "Core/Inspection/ComponentInspector.h"
 #include "Engine/Editor/State/EditorState.h"
@@ -76,9 +78,9 @@ void EditorState::OpenPrefabStageWithDocument(const std::string& path,
     {
         prefabScene->SetMode2D(m_scene->IsMode2D());
         prefabScene->Init(m_renderer->GetGraphicsProvider());
-        prefabScene->SetRealtimeShadowSettings(
+        Engine::Rendering::RenderSystem::For(*prefabScene).SetRealtimeShadowSettings(
             m_projectSettings.realtimeShadows);
-        prefabScene->SetDistanceLightingSettings(
+        Engine::Rendering::RenderSystem::For(*prefabScene).SetDistanceLightingSettings(
             m_projectSettings.distanceLighting);
         root = Engine::Serialization::SceneSerializer::InstantiatePrefabFromValue(
             *prefabScene, normalized, document, prefabScene->GetGraphicsProvider());
@@ -422,8 +424,8 @@ void EditorState::ProcessPendingSceneAssetDocumentOpens()
         document->scene = std::make_unique<Engine::Scene::Scene>();
         document->scene->SetMode2D(m_scene && m_scene->IsMode2D());
         document->scene->Init(m_renderer->GetGraphicsProvider());
-        document->scene->SetRealtimeShadowSettings(m_projectSettings.realtimeShadows);
-        document->scene->SetDistanceLightingSettings(m_projectSettings.distanceLighting);
+        Engine::Rendering::RenderSystem::For(*document->scene).SetRealtimeShadowSettings(m_projectSettings.realtimeShadows);
+        Engine::Rendering::RenderSystem::For(*document->scene).SetDistanceLightingSettings(m_projectSettings.distanceLighting);
         bool loaded = false;
         if (document->meshStage)
         {

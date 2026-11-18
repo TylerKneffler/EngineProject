@@ -9,7 +9,7 @@ The editor renders on demand: changes mark the renderer dirty, and `RenderIfNeed
 3. **Render each view:** Visible Scene and Game panels render shadows and scene geometry into their own offscreen targets. Each view then composes its result into the main window target, where the UI is rendered over it.
 4. **Submit and present:** The renderer submits the recorded work and presents the window. DX12 uses a fence and swap-chain back-buffer index; DX11 uses an event query for completion; Vulkan acquires and submits a swap-chain image.
 
-The main editor loop and view dispatch are in `Engine/Editor/EditorApplication.cpp`. Scene preparation is in `Engine/Core/Scene/Rendering/SceneRenderer/SceneFramePreparation.cpp`.
+The main editor loop and view dispatch are in `Engine/Editor/EditorApplication.cpp`. Scene preparation is `SceneRenderer::PrepareRenderFrame` in `Engine/Core/Rendering/SceneRenderer/SceneFramePreparation.cpp`; each scene's renderer is owned by `Engine::Rendering::RenderSystem` (`RenderSystem::For(scene)`).
 
 ## Buffers and render targets
 

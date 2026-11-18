@@ -1,4 +1,6 @@
 #include "Engine/Editor/State/EditorViewState.h"
+#include "Core/Rendering/RenderSystem.h"
+#include "Core/Rendering/SceneRenderer.h"
 
 #include "Core/Inspection/ComponentInspector.h"
 #include "SceneView.h"
@@ -1722,7 +1724,7 @@ void SceneView::Render3D(void* cmd)
         auto* factory = m_scene->GetGraphicsProvider()->GetContextFactory();
         factory->SetCommandBuffer(cmd);
         auto ctx = factory->CreateContext();
-        m_scene->Render(ctx.get(), m_aspect, nullptr, true,
+        Engine::Rendering::RenderSystem::For(*m_scene).Render(ctx.get(), m_aspect, nullptr, true,
             GetWidth(), GetHeight(), false, nullptr,
             m_terrainObjectDisplayLod, m_sceneRenderMode);
     }
@@ -1730,7 +1732,7 @@ void SceneView::Render3D(void* cmd)
 
 void SceneView::RecordRenderCommands(Engine::Graphics::GraphicsCommandPacket& shadow,
     Engine::Graphics::GraphicsCommandPacket& color,
-    const Engine::Scene::Scene::NativeRenderPacket* packet, RecordingTimings* timings)
+    const Engine::Rendering::SceneRenderer::NativeRenderPacket* packet, RecordingTimings* timings)
 {
     using Clock=std::chrono::steady_clock;
     const auto started=Clock::now();
@@ -1738,9 +1740,9 @@ void SceneView::RecordRenderCommands(Engine::Graphics::GraphicsCommandPacket& sh
     Engine::Editor::EditorViewState::For(*m_scene).UpdateCameraFollow();
     m_scene->PrepareNativeUiLayout(m_aspect);
     const auto setupEnd=Clock::now();
-    m_scene->Render(&shadow, m_aspect, nullptr, false, GetWidth(), GetHeight(), true, packet);
+    Engine::Rendering::RenderSystem::For(*m_scene).Render(&shadow, m_aspect, nullptr, false, GetWidth(), GetHeight(), true, packet);
     const auto shadowEnd=Clock::now();
-    m_scene->Render(&color, m_aspect, nullptr, true, GetWidth(), GetHeight(), false,
+    Engine::Rendering::RenderSystem::For(*m_scene).Render(&color, m_aspect, nullptr, true, GetWidth(), GetHeight(), false,
         packet, m_terrainObjectDisplayLod, m_sceneRenderMode);
     if(timings) {
         timings->setupMs=std::chrono::duration<double,std::milli>(setupEnd-started).count();
@@ -1756,7 +1758,7 @@ void SceneView::RenderShadow3D(void* cmd)
     factory->SetCommandBuffer(cmd);
     auto ctx = factory->CreateContext();
     if (ctx)
-        m_scene->Render(ctx.get(), m_aspect, nullptr, false,
+        Engine::Rendering::RenderSystem::For(*m_scene).Render(ctx.get(), m_aspect, nullptr, false,
             GetWidth(), GetHeight(), true);
 }
 }

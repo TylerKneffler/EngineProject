@@ -1,4 +1,6 @@
 #include "pch.h"
+#include "Core/Rendering/RenderSystem.h"
+#include "Core/Rendering/SceneRenderer.h"
 #include "Core/Runtime/Game.h"
 #include "Core/Runtime/AsyncSceneReader.h"
 #include "Core/Scene/Scene.h"
@@ -176,7 +178,8 @@ void Game::Update(float deltaTime)
 {
     const bool profiling = m_scene.IsUpdateProfilingEnabled();
     m_scene.AssertOwnerThread();
-    m_scene.ResetGrassPerformance();
+    if (auto* renderer = Engine::Rendering::RenderSystem::Find(m_scene))
+        renderer->ResetGrassPerformance();
     using Clock = std::chrono::steady_clock;
     const auto updateBegin = profiling ? Clock::now() : Clock::time_point{};
     m_deltaTime = m_clock.Advance(deltaTime);

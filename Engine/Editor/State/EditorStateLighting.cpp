@@ -1,4 +1,6 @@
 #include "pch.h"
+#include "Core/Rendering/RenderSystem.h"
+#include "Core/Rendering/SceneRenderer.h"
 #include "Engine/Editor/State/EditorState.h"
 #include "Engine/Editor/Diagnostics/FrameActivity.h"
 #include "Core/Rendering/RenderJobs.h"
@@ -74,7 +76,7 @@ void EditorState::BakeLighting()
                     throw std::runtime_error("Could not prepare lighting bake scene");
                 control->Checkpoint();
                 control->SetProgress(0.1f);
-                output.status = snapshot.BakeLighting(assets, outputName,
+                output.status = Engine::Rendering::RenderSystem::For(snapshot).BakeLighting(assets, outputName,
                     settings,
                     [control](float progress) {
                         control->SetProgress(0.1f + 0.85f * progress);
@@ -146,7 +148,7 @@ void EditorState::CancelBakeJob()
         m_bakePublication.reset();
         if (m_scene)
         {
-            m_scene->ClearBakedLighting();
+            Engine::Rendering::RenderSystem::For(*m_scene).ClearBakedLighting();
             m_hasUnsavedChanges = true;
             MarkSceneEdited();
         }
@@ -180,7 +182,7 @@ bool EditorState::PollBakeJob()
                 m_primaryConsole->AddLog(ConsoleView::Level::Error,
                     result.status.message);
             if (!cancelled && !stale && m_scene)
-                m_scene->SetLightingBakeStatus(result.status.message);
+                Engine::Rendering::RenderSystem::For(*m_scene).SetLightingBakeStatus(result.status.message);
             m_bakeJobControl.reset();
             return true;
         }
@@ -197,7 +199,7 @@ bool EditorState::PollBakeJob()
         return true;
     }
     if (m_bakePublicationIndex == 0)
-        m_scene->ClearBakedLighting();
+        Engine::Rendering::RenderSystem::For(*m_scene).ClearBakedLighting();
     constexpr size_t publicationBudget = 2;
     const size_t end = std::min(m_bakePublicationIndex + publicationBudget,
         m_bakePublication->objects.size());
@@ -263,8 +265,8 @@ bool EditorState::PollBakeJob()
         if (m_bakePublicationFailed)
         {
             const auto root = m_bakePublication->outputRoot;
-            m_scene->ClearBakedLighting();
-            m_scene->SetLightingBakeStatus("Lighting bake publication failed.");
+            Engine::Rendering::RenderSystem::For(*m_scene).ClearBakedLighting();
+            Engine::Rendering::RenderSystem::For(*m_scene).SetLightingBakeStatus("Lighting bake publication failed.");
             Engine::Threading::JobScheduler::Get().Submit([root] {
                 std::error_code ignored;
                 std::filesystem::remove_all(root, ignored);
@@ -275,7 +277,7 @@ bool EditorState::PollBakeJob()
         }
         else
         {
-            m_scene->SetLightingBakeStatus(m_bakePublication->status.message);
+            Engine::Rendering::RenderSystem::For(*m_scene).SetLightingBakeStatus(m_bakePublication->status.message);
             if (m_primaryConsole)
                 m_primaryConsole->AddLog(ConsoleView::Level::Info,
                     m_bakePublication->status.message);
@@ -293,10 +295,10 @@ void EditorState::ClearBakedLighting()
     CancelBakeJob();
     if (!m_scene)
         return;
-    m_scene->ClearBakedLighting();
+    Engine::Rendering::RenderSystem::For(*m_scene).ClearBakedLighting();
     if (m_primaryConsole)
         m_primaryConsole->AddLog(ConsoleView::Level::Info,
-            m_scene->GetLightingBakeStatus());
+            Engine::Rendering::RenderSystem::For(*m_scene).GetLightingBakeStatus());
     m_hasUnsavedChanges = true;
     MarkSceneEdited();
 }

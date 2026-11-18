@@ -1,4 +1,6 @@
 #include "Engine/Editor/Diagnostics/EditorFrameProfiler.h"
+#include "Core/Rendering/RenderSystem.h"
+#include "Core/Rendering/SceneRenderer.h"
 #include "Core/Runtime/Game.h"
 #include "Engine/Editor/Diagnostics/FrameActivity.h"
 #include "Engine/Editor/Diagnostics/PerformanceProvenance.h"
@@ -100,7 +102,7 @@ namespace Engine::Editor
         const auto updateTimings = sample.playing && scene->GetGame()
             ? scene->GetGame()->GetLastUpdateTimings()
             : Engine::Runtime::Game::UpdateTimings{};
-        const auto& prepareTimings = scene->GetLastPrepareTimings();
+        const auto& prepareTimings = Engine::Rendering::RenderSystem::For(*scene).GetLastPrepareTimings();
         double uiRenderMilliseconds = 0.0;
         const double presentMilliseconds = renderer->GetLastPresentationMilliseconds();
         double prepareFrameMilliseconds = 0.0;
@@ -333,8 +335,8 @@ namespace Engine::Editor
         writeStepArray("physics_step_ms", bulletTimings.substepMs);
         writeStepArray("physics_bullet_world_ms", bulletTimings.bulletWorldMs);
         writeStepArray("physics_contacts_ms", bulletTimings.contactsMs);
-        const auto& shadow = scene->GetLastShadowCpuTiming();
-        const auto& shadowState = scene->GetShadowDebugSnapshot();
+        const auto& shadow = Engine::Rendering::RenderSystem::For(*scene).GetLastShadowCpuTiming();
+        const auto& shadowState = Engine::Rendering::RenderSystem::For(*scene).GetShadowDebugSnapshot();
         output << ",\"shadow_state_enabled\":" << (shadowState.enabled ? 1:0)
             << ",\"shadow_state_selected_light\":" << (shadowState.hasSelectedLight ? 1:0)
             << ",\"shadow_state_cascade_count\":" << shadowState.cascadeCount
@@ -372,9 +374,9 @@ namespace Engine::Editor
             << ",\"constant_discard_maps\":" << factory->GetConstantBufferDiscardMaps();
         output << ",\"spatial_active_fields\":" << scene->GetSpatialUpdateScheduler().activeCount
             << ",\"spatial_dormant_fields\":" << scene->GetSpatialUpdateScheduler().dormantCount;
-        const auto& grass = scene->GetGrassPerformance();
+        const auto& grass = Engine::Rendering::RenderSystem::For(*scene).GetGrassPerformance();
         const auto& renderCpu=sample.renderCpu;
-        const auto frameUploadStats = scene->GetCurrentFrameUploadStats();
+        const auto frameUploadStats = Engine::Rendering::RenderSystem::For(*scene).GetCurrentFrameUploadStats();
         renderCpu.instances.WriteJson(output);
         output << ",\"render_metrics_scope\":\"all_main_views\""
             << ",\"frame_upload_bytes\":" << frameUploadStats.bytes

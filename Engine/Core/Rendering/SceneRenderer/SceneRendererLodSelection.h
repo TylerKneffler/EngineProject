@@ -1,0 +1,60 @@
+#pragma once
+#include "Core/Rendering/SceneRenderer.h"
+
+#include "Core/Rendering/SceneRenderer/SceneRendererDrawPreparation.h"
+#include "Core/Rendering/MeshLodSelection.h"
+
+#include <array>
+#include <cstdint>
+#include <map>
+#include <vector>
+
+namespace Engine::Rendering
+{
+class SceneRendererLodSelection
+{
+public:
+    using Scene = Engine::Scene::Scene;
+    void Prepare(
+        SceneRenderer& renderer,
+        const std::vector<PreparedDraw>& draws,
+        const Engine::Components::Camera* camera,
+        const glm::vec3& cameraPosition,
+        const glm::mat4& viewProjection,
+        uint32_t viewportWidth,
+        uint32_t viewportHeight,
+        uint64_t instanceViewOrdinal,
+        bool shadowOnly,
+        bool hasPortalViews,
+        bool includeEditorVisuals,
+        int instanceLodDisplayOverride = -1);
+
+    bool IsSelected(const PreparedDraw& draw, bool shadow = false) const;
+    std::array<uint64_t, 3> SelectedGpuLodDraws(bool shadow) const;
+    // Pixel-threshold LOD by projected screen size. detailScale is the
+    // detail budget's layer scale (DetailBudget::LayerLodScale): a distance
+    // scale s is the same as seeing the object s times larger.
+    int ChooseScreen(
+        const Engine::Components::Mesh& policy,
+        glm::vec3 minimum,
+        glm::vec3 maximum,
+        const glm::mat4& world,
+        uint64_t identity,
+        uint64_t placement,
+        uint64_t domain,
+        int maximumLod,
+        float detailScale = 1.f);
+    std::map<uint64_t, std::vector<int>>& PlacementLevels();
+
+private:
+    SceneRenderer* m_renderer = nullptr;
+    const std::vector<PreparedDraw>* m_draws = nullptr;
+    std::vector<uint8_t> m_selectedLods;
+    std::vector<uint8_t> m_distanceSelectedLods;
+    std::map<uint64_t, std::vector<int>> m_screenPlacementLevels;
+    Engine::Rendering::MeshLodView m_screenView{};
+    uint64_t m_screenSerial = 0;
+    uint64_t m_instanceViewOrdinal = 0;
+    const Engine::Components::Camera* m_camera = nullptr;
+};
+}

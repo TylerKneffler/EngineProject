@@ -1,4 +1,6 @@
 #include "ExportFrameSequence.h"
+#include "Core/Rendering/RenderSystem.h"
+#include "Core/Rendering/SceneRenderer.h"
 #include "Core/Runtime/Game.h"
 
 #include "Core/Scene/Scene.h"
@@ -23,7 +25,7 @@ void ExportFrameSequence::PrepareCurrentFrame()
     if (!m_scene.GetClock().IsFixedStep())
         throw std::logic_error(
             "ExportFrameSequence requires a fixed scene time step");
-    m_scene.PrepareRenderFrame();
+    RenderSystem::For(m_scene).PrepareRenderFrame();
     ++m_preparedFrameCount;
 }
 

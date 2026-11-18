@@ -1,4 +1,6 @@
 #include "Core/Rendering/DetailBudget.h"
+#include "Core/Rendering/RenderSystem.h"
+#include "Core/Rendering/SceneRenderer.h"
 #include "Core/Runtime/Game.h"
 #include "Core/Rendering/AutoQuality.h"
 #include "Core/Rendering/HardwareSimulation.h"
@@ -269,15 +271,15 @@ private:
                     // Update already publishes the simulation snapshot. Native
                     // rendering consumes its own owned draw packet, so avoid
                     // two more full-scene snapshot scans during preparation.
-                    m_scene.PrepareRenderFrame(false);
+                    Engine::Rendering::RenderSystem::For(m_scene).PrepareRenderFrame(false);
                     m_timings.scenePreparationMs = std::chrono::duration<double,
                         std::milli>(std::chrono::steady_clock::now() - prepareStart).count();
                     const auto recordStart = std::chrono::steady_clock::now();
-                    auto drawPacket = m_scene.TakeNativeRenderPacket();
+                    auto drawPacket = Engine::Rendering::RenderSystem::For(m_scene).TakeNativeRenderPacket();
                     auto computeCommands = AcquireCommands(0);
                     auto shadowCommands = AcquireCommands(1);
                     auto sceneCommands = AcquireCommands(2);
-                    m_scene.RecordGpuParticleSimulation(computeCommands.get());
+                    Engine::Rendering::RenderSystem::For(m_scene).RecordGpuParticleSimulation(computeCommands.get());
                     const auto packetPrepared = std::chrono::steady_clock::now();
                     m_timings.packetPreparationMs = std::chrono::duration<double,
                         std::milli>(packetPrepared - recordStart).count();
@@ -286,13 +288,13 @@ private:
                         {
                             const float aspect = static_cast<float>(m_input.clientWidth) /
                                 static_cast<float>(m_input.clientHeight);
-                            m_scene.Render(shadowCommands.get(), aspect,
+                            Engine::Rendering::RenderSystem::For(m_scene).Render(shadowCommands.get(), aspect,
                                 gameCamera, false, m_input.clientWidth,
                                 m_input.clientHeight, true, drawPacket.get());
                             const auto shadowRecorded = std::chrono::steady_clock::now();
                             m_timings.shadowRecordingMs = std::chrono::duration<double,
                                 std::milli>(shadowRecorded - packetPrepared).count();
-                            m_scene.Render(sceneCommands.get(), aspect,
+                            Engine::Rendering::RenderSystem::For(m_scene).Render(sceneCommands.get(), aspect,
                                 gameCamera, false, m_input.clientWidth,
                                 m_input.clientHeight, false,
                                 drawPacket.get(), -1, g_benchmarkRenderMode);
@@ -301,9 +303,9 @@ private:
                                 std::milli>(std::chrono::steady_clock::now() - shadowRecorded).count();
                         }
                     const auto retainStart = std::chrono::steady_clock::now();
-                    m_scene.RetainNativePacketMeshBuffers(*drawPacket,
+                    Engine::Rendering::RenderSystem::For(m_scene).RetainNativePacketMeshBuffers(*drawPacket,
                         *shadowCommands);
-                    m_scene.SetLastNativeOcclusionCulledCount(
+                    Engine::Rendering::RenderSystem::For(m_scene).SetLastNativeOcclusionCulledCount(
                         m_previousOcclusionCulled);
                     m_timings.resourceRetentionMs = std::chrono::duration<double,
                         std::milli>(std::chrono::steady_clock::now() - retainStart).count();
@@ -317,7 +319,7 @@ private:
                             std::chrono::steady_clock::now() - collectionStart).count();
                     }
                     m_snapshot = m_scene.GetPublishedSceneSnapshot();
-                    m_retired = m_scene.TakeRetiredGraphicsResources();
+                    m_retired = Engine::Rendering::RenderSystem::TakeRetiredGraphicsResources(m_scene);
                     m_computeCommands = std::move(computeCommands);
                     m_shadowCommands = std::move(shadowCommands);
                     m_sceneCommands = std::move(sceneCommands);
@@ -923,8 +925,8 @@ int GameApplication::Run(HINSTANCE instance, const GameBenchmarkOptions* benchma
     scene.Init(renderer->GetGraphicsProvider());
     scene.GetPhysics().ConfigureStepBudget(settings.physicsTargetMilliseconds,
         settings.physicsMaximumSubsteps);
-    scene.SetRealtimeShadowSettings(settings.realtimeShadows);
-    scene.SetDistanceLightingSettings(settings.distanceLighting);
+    Engine::Rendering::RenderSystem::For(scene).SetRealtimeShadowSettings(settings.realtimeShadows);
+    Engine::Rendering::RenderSystem::For(scene).SetDistanceLightingSettings(settings.distanceLighting);
     Engine::Rendering::DetailBudget::Get().Configure(settings.layers,
         settings.detailBudget);
     // Diagnostics: ENGINE_DETAIL_SCALE pins the global detail scale (the
@@ -993,6 +995,16 @@ int GameApplication::Run(HINSTANCE instance, const GameBenchmarkOptions* benchma
     // or on (with the scene's or default parameters) for A/B captures.
     if (const char* fog = std::getenv("ENGINE_ATMOSPHERE_FOG"))
         scene.settings.atmosphereFog.enabled = std::atoi(fog) != 0;
+    // ENGINE_LIGHT_SHAFTS=0 turns the fog's shadowed in-scatter off; N > 0
+    // turns it on with N shadow samples per pixel.
+    if (const char* shafts = std::getenv("ENGINE_LIGHT_SHAFTS"))
+    {
+        const int samples = std::atoi(shafts);
+        scene.settings.atmosphereFog.lightShafts = samples > 0;
+        if (samples > 0)
+            scene.settings.atmosphereFog.lightShaftSamples = std::min(samples,
+                Engine::Model::AtmosphereFogSettings::MaximumLightShaftSamples);
+    }
     Engine::Runtime::Game game(scene);
     game.SetDefaultScenePath(defaultScene);
     game.Start();

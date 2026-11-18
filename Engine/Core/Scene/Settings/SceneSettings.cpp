@@ -106,6 +106,9 @@ Engine::Serialization::JsonValue SerializeSceneSettings(const Engine::Model::Sce
         fogValue.Set("sunGlowStrength", Engine::Serialization::JsonValue(fog.sunGlowStrength));
         fogValue.Set("sunGlowAnisotropy", Engine::Serialization::JsonValue(fog.sunGlowAnisotropy));
         fogValue.Set("skyDistance", Engine::Serialization::JsonValue(fog.skyDistance));
+        fogValue.Set("lightShafts", Engine::Serialization::JsonValue(fog.lightShafts));
+        fogValue.Set("lightShaftSamples", Engine::Serialization::JsonValue(fog.lightShaftSamples));
+        fogValue.Set("lightShaftStrength", Engine::Serialization::JsonValue(fog.lightShaftStrength));
         value.Set("atmosphereFog", fogValue);
     }
     value.Set("bloomEnabled", Engine::Serialization::JsonValue(settings.bloomEnabled));
@@ -249,6 +252,11 @@ void DeserializeSceneSettings(Engine::Model::SceneSettings& settings, const Engi
         readFloat("sunGlowStrength", fog.sunGlowStrength);
         readFloat("sunGlowAnisotropy", fog.sunGlowAnisotropy);
         readFloat("skyDistance", fog.skyDistance);
+        if (const auto* shafts = FindField(*fogValue, "lightShafts"))
+            fog.lightShafts = shafts->AsBool();
+        if (const auto* samples = FindField(*fogValue, "lightShaftSamples"))
+            fog.lightShaftSamples = samples->AsInt();
+        readFloat("lightShaftStrength", fog.lightShaftStrength);
         fog.Normalize();
     }
     {

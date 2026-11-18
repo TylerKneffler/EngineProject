@@ -1,4 +1,6 @@
 #include "Core/Inspection/ComponentInspector.h"
+#include "Core/Rendering/RenderSystem.h"
+#include "Core/Rendering/SceneRenderer.h"
 #include "Core/Rendering/DetailBudget.h"
 #include "PropertiesView.h"
 #include "Engine/Editor/UI/IEditorUi.h"
@@ -394,7 +396,7 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
             if (!m_editingSkyboxTexture)
             {
                 const Engine::Components::Texture* skybox =
-                    m_scene->GetSkyboxPreviewTexture();
+                    Engine::Rendering::RenderSystem::For(*m_scene).GetSkyboxPreviewTexture();
                 void* textureHandle = skybox && skybox->GetGraphicsTexture()
                     ? skybox->GetGraphicsTexture()->GetUiHandle()
                     : nullptr;
@@ -569,6 +571,23 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
                     &fog.skyDistance, 100.f, 0.f, 1000000.f);
                 ui.Tooltip("Ray length used to haze the skybox toward the "
                     "horizon. 0 leaves the sky untouched.");
+                fogChanged |= ui.Checkbox("Light Shafts", &fog.lightShafts);
+                ui.Tooltip("Shadowed haze: fog behind trees and ridges loses "
+                    "the sun glow, so shafts of light show between them. "
+                    "Needs a shadow-casting directional light.");
+                if (fog.lightShafts)
+                {
+                    fogChanged |= ui.SliderInt("Light Shaft Samples",
+                        &fog.lightShaftSamples, 1,
+                        Engine::Model::AtmosphereFogSettings::
+                            MaximumLightShaftSamples);
+                    ui.Tooltip("Shadow-map taps per pixel along the view ray. "
+                        "More samples resolve thinner shafts at higher GPU "
+                        "cost; few samples show as fine dither.");
+                    fogChanged |= ui.DragFloat("Light Shaft Strength",
+                        &fog.lightShaftStrength, 0.01f, 0.f, 1.f);
+                    ui.Tooltip("Share of the sun glow that shadow removes.");
+                }
                 if (ui.Button("Reset Atmosphere"))
                 {
                     fog = Engine::Model::AtmosphereFogSettings{};

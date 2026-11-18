@@ -1,10 +1,12 @@
 // Scene settings round trip for SceneSettings::atmosphereFog through the
 // on-disk XML transport (scenes store settings as XML attributes/elements).
+#include "Core/Rendering/Lighting/ViewLighting.h"
 #include "Core/Scene/Settings/SceneSettingsSerialization.h"
 #include "Core/Serialization/SceneSerializerInternal.h"
 
 #include <pugixml.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -54,6 +56,9 @@ int main()
     fog.sunGlowStrength = 0.6f;
     fog.sunGlowAnisotropy = 0.8f;
     fog.skyDistance = 24000.f;
+    fog.lightShafts = true; // default is off
+    fog.lightShaftSamples = 12;
+    fog.lightShaftStrength = 0.65f;
 
     const auto loaded = RoundTripXml(settings);
     const auto& read = loaded.atmosphereFog;
@@ -69,6 +74,9 @@ int main()
     Require(Near(read.sunGlowStrength, fog.sunGlowStrength), "sunGlowStrength");
     Require(Near(read.sunGlowAnisotropy, fog.sunGlowAnisotropy), "sunGlowAnisotropy");
     Require(Near(read.skyDistance, fog.skyDistance), "skyDistance");
+    Require(read.lightShafts, "lightShafts");
+    Require(read.lightShaftSamples == 12, "lightShaftSamples");
+    Require(Near(read.lightShaftStrength, 0.65f), "lightShaftStrength");
 
     // A scene saved before the fog existed loads with fog off.
     Engine::Model::SceneSettings legacySource;
@@ -90,6 +98,55 @@ int main()
     const auto clamped = RoundTripXml(settings).atmosphereFog;
     Require(clamped.sunGlowAnisotropy <= 0.95f, "anisotropy clamp");
     Require(clamped.maxOpacity == 0.f, "opacity clamp");
+    settings.atmosphereFog.lightShaftSamples = 500;
+    settings.atmosphereFog.lightShaftStrength = 4.f;
+    const auto clampedShafts = RoundTripXml(settings).atmosphereFog;
+    Require(clampedShafts.lightShaftSamples ==
+        Engine::Model::AtmosphereFogSettings::MaximumLightShaftSamples,
+        "shaft sample clamp");
+    Require(clampedShafts.lightShaftStrength == 1.f, "shaft strength clamp");
+
+    // fog0.w packing, decoded as AtmosphereFog.hlsli does.
+    {
+        using Engine::Rendering::ViewLighting;
+        const auto decodeSamples = [](float w)
+        { return w >= 1.5f ? static_cast<int>(std::floor(w)) - 1 : 0; };
+        const auto decodeStrength = [](float w)
+        {
+            return w >= 1.5f ? std::clamp((w - std::floor(w)) / 0.999f, 0.f, 1.f)
+                : 0.f;
+        };
+        Engine::Model::AtmosphereFogSettings shafts;
+        Require(!shafts.lightShafts, "light shafts are opt-in");
+        shafts.enabled = true;
+        shafts.lightShafts = true;
+        const glm::vec3 sun(0.3f, 0.8f, 0.2f);
+        const glm::vec3 radiance(3.f, 2.8f, 2.5f);
+        for (const int samples : { 1, 8, 32 })
+            for (const float strength : { 0.01f, 0.5f, 1.f })
+            {
+                shafts.lightShaftSamples = samples;
+                shafts.lightShaftStrength = strength;
+                const float w = ViewLighting::PackAtmosphereFog(
+                    shafts, sun, radiance, true)[0].w;
+                Require(decodeSamples(w) == samples, "packed shaft samples");
+                Require(std::abs(decodeStrength(w) - strength) < 1e-4f,
+                    "packed shaft strength");
+            }
+        // Without shafts the flag stays exactly 1 (plain fog).
+        shafts.lightShafts = false;
+        Require(ViewLighting::PackAtmosphereFog(
+            shafts, sun, radiance, true)[0].w == 1.f, "shafts off");
+        shafts.lightShafts = true;
+        Require(ViewLighting::PackAtmosphereFog(
+            shafts, sun, radiance, false)[0].w == 1.f, "no sun, no shafts");
+        shafts.lightShaftSamples = 0;
+        Require(ViewLighting::PackAtmosphereFog(
+            shafts, sun, radiance, true)[0].w == 1.f, "zero samples");
+        shafts.enabled = false;
+        Require(ViewLighting::PackAtmosphereFog(
+            shafts, sun, radiance, true)[0].w == 0.f, "fog off");
+    }
 
     std::printf("AtmosphereFogSettingsTests passed\n");
     return 0;

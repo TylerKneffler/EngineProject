@@ -62,6 +62,17 @@ struct AtmosphereFogSettings
     float sunGlowAnisotropy = 0.7f;
     // Length of the view ray used to haze the sky toward the horizon.
     float skyDistance = 30000.f;
+    // Shadowed in-scatter (light shafts): surfaces march the directional
+    // cascade shadow map along their view ray, and shadowed stretches of fog
+    // lose the sun glow. Costs lightShaftSamples shadow taps per fogged
+    // pixel within the shadow range (8 samples: ~2 ms on the landscape
+    // vista at 1080p); the sky is not shadowed. Opt-in for that reason.
+    bool lightShafts = false;
+    int lightShaftSamples = 8;
+    // Share of the sun glow that shadow removes (0 = shafts off).
+    float lightShaftStrength = 1.f;
+
+    static constexpr int MaximumLightShaftSamples = 32;
 
     void Normalize()
     {
@@ -74,6 +85,9 @@ struct AtmosphereFogSettings
         sunGlowStrength = std::max(0.f, sunGlowStrength);
         sunGlowAnisotropy = std::clamp(sunGlowAnisotropy, 0.f, 0.95f);
         skyDistance = std::clamp(skyDistance, 0.f, 1000000.f);
+        lightShaftSamples = std::clamp(lightShaftSamples, 0,
+            MaximumLightShaftSamples);
+        lightShaftStrength = std::clamp(lightShaftStrength, 0.f, 1.f);
     }
 };
 

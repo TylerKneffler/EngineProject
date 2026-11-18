@@ -3,6 +3,7 @@
 #include "Core/Graphics/IGraphicsProvider.h"
 
 namespace Engine::Scene { class Scene; }
+namespace Engine::Rendering { class SceneRenderer; }
 namespace Engine::Core { struct NativeInputSnapshot; }
 
 namespace Engine::Renderers
@@ -14,7 +15,8 @@ public:
     ~UIRenderer();
 
     void Initialize(Engine::Graphics::IGraphicsProvider* graphicsProvider);
-    void Render(Engine::Scene::Scene& scene, Engine::Graphics::IGraphicsContext* context, float viewportAspect);
+    // Draws the UI components of the renderer's scene.
+    void Render(Engine::Rendering::SceneRenderer& renderer, Engine::Graphics::IGraphicsContext* context, float viewportAspect);
     // Native game button callbacks execute during the simulation tick.
     static void UpdateNativeInteraction(Engine::Scene::Scene& scene,
         const Engine::Core::NativeInputSnapshot& input);

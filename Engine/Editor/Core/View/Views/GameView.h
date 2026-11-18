@@ -1,6 +1,7 @@
 #pragma once
 #include "View/View.h"
 #include "Core/Scene/Scene.h"
+#include "Core/Rendering/SceneRenderer.h"
 #include "Core/ProjectLoader.h"
 
 namespace Engine::Editor
@@ -45,7 +46,7 @@ public:
     void RenderShadow3D(void* cmd) override;
     void RecordRenderCommands(Engine::Graphics::GraphicsCommandPacket& shadow,
         Engine::Graphics::GraphicsCommandPacket& color,
-        const Engine::Scene::Scene::NativeRenderPacket* packet, RecordingTimings* timings = nullptr);
+        const Engine::Rendering::SceneRenderer::NativeRenderPacket* packet, RecordingTimings* timings = nullptr);
     void SetScene(Engine::Scene::Scene* scene) { m_scene = scene; }
 
     // Defines the Game panel showing the game-camera render output.

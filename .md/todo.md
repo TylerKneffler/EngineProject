@@ -203,7 +203,23 @@ record 5.9 (camera 4.5, shadow 1.1); GPU opaque 5.4.
 - [x] Henyey-Greenstein sun-glow term for in-scatter toward the sun, using the scene's main directional light
 - [x] Sky horizon haze from the same parameters (skybox shader)
 - [x] Scene settings + editor UI ("Atmosphere" in scene Properties), serialized with the scene
-- [ ] Shadowed in-scatter (light shafts): march the cascade shadow map along the view ray (few jittered steps, resolved by temporal pass) or via the froxel volume of step 2
+- [x] Shadowed in-scatter (light shafts): `ObjectFogSunVisibility` (Object.hlsl) marches the cascade shadow map
+  along the view ray in quadratically spaced segments (finer near the camera); each segment's analytic fog opacity
+  is weighted by one bilinear shadow tap, dithered per pixel with interleaved gradient noise (static: there is no
+  temporal pass yet). Only the sun-glow share of the in-scatter is shadowed (`ApplyAtmosphereFogShadowed`); fog past
+  the last cascade split is sunlit. The range uses the view-wide splits, so lighting bands do not cut shafts at
+  object edges. Settings: Light Shafts / Samples (1-32, default 8) / Strength, packed into `fog0.w` (no new
+  `ObjectGPUData` field). Opt-in: 8 samples cost ~2 ms GPU on the Vulkan vista (terrain 1.03 -> 1.97, leaves
+  4.26 -> 5.19 ms). `ENGINE_LIGHT_SHAFTS=0|N` overrides for A/B captures. `AtmosphereFogSettingsTests` covers
+  round trip, clamps and the `fog0.w` encoding. Checked: FXC ps_5_0 + DXC SPIR-V compile; on the vista the change
+  only darkens (forest within shadow range), no seams
+  - [ ] Sky pixels are not shadowed (the skybox has no shadow map), so shafts never cross open sky
+  - [ ] Animate the dither and resolve it once a temporal pass exists; 4-6 samples may then suffice
+  - [ ] Not yet seen as distinct shafts: needs a low sun behind trees/ridges with moderate fog. Judge with the step 0
+    shot when tuning defaults (below)
+- [ ] `GameBackendCapture` on the landscape with `--backend dx12` fails "renderer did not return the requested scene
+  capture" (fog on or off; Vulkan and the default scene work). Captures render at 1520x873 for a 1920x1080 window;
+  `DX12GameRenderer::ReadSceneCaptureRGBA` assumes the window size. Suspect render scale
 - [ ] Fog the remaining passes: particles (incl. fluid), MMD outlines, and the skybox seen through portals (portal object draws already fog)
 - [ ] Tune defaults against the step 0 test shot after step 2 sets world scale
 

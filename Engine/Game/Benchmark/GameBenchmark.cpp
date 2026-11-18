@@ -1,4 +1,6 @@
 #include "Core/Rendering/AutoQuality.h"
+#include "Core/Rendering/RenderSystem.h"
+#include "Core/Rendering/SceneRenderer.h"
 #include "Core/Runtime/Game.h"
 #include "Core/Rendering/HardwareSimulation.h"
 #include "Core/Threading/JobScheduler.h"
@@ -119,9 +121,9 @@ GameBenchmark::GameBenchmark(const GameBenchmarkOptions& options,
 GameBenchmarkSceneSample GameBenchmark::CollectScene(Engine::Scene::Scene& scene)
 {
     GameBenchmarkSceneSample result;
-    result.render = scene.GetLastRenderCpuTimings();
-    result.shadow = scene.GetLastShadowCpuTiming();
-    result.preparation = scene.GetLastPrepareTimings();
+    result.render = Engine::Rendering::RenderSystem::For(scene).GetLastRenderCpuTimings();
+    result.shadow = Engine::Rendering::RenderSystem::For(scene).GetLastShadowCpuTiming();
+    result.preparation = Engine::Rendering::RenderSystem::For(scene).GetLastPrepareTimings();
     result.sceneGeneration = scene.CaptureSceneGeneration();
     const auto* camera = scene.FindGameCamera();
     result.camera = camera && camera->Owner;
@@ -141,8 +143,8 @@ GameBenchmarkSceneSample GameBenchmark::CollectScene(Engine::Scene::Scene& scene
     result.updateObjectsMs = updateTimings.objectsMs;
     result.updatePhysicsMs = updateTimings.physicsMs;
     result.updatePostPhysicsMs = updateTimings.postPhysicsMs;
-    result.grassMs = scene.GetGrassPerformance().totalMs;
-    result.grass = scene.GetGrassPerformance();
+    result.grassMs = Engine::Rendering::RenderSystem::For(scene).GetGrassPerformance().totalMs;
+    result.grass = Engine::Rendering::RenderSystem::For(scene).GetGrassPerformance();
     result.meshes = scene.GetComponents<Engine::Components::Mesh>().size();
     result.terrains = scene.GetComponents<Engine::Components::Terrain>().size();
     for (auto* layer : scene.GetComponents<Engine::Components::TerrainObjectLayer>())

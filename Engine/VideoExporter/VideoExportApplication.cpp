@@ -1,4 +1,6 @@
 #include "VideoExporter/VideoExportApplication.h"
+#include "Core/Rendering/RenderSystem.h"
+#include "Core/Rendering/SceneRenderer.h"
 #include "Core/Runtime/Game.h"
 
 #include "Core/Components/Camera/Camera.h"
@@ -1043,8 +1045,8 @@ int VideoExportApplication::Run(HINSTANCE instance)
         return 6;
     }
     scene.Init(renderer.GetGraphicsProvider());
-    scene.SetRealtimeShadowSettings(shadowSettings);
-    scene.SetDistanceLightingSettings(lightingSettings);
+    Engine::Rendering::RenderSystem::For(scene).SetRealtimeShadowSettings(shadowSettings);
+    Engine::Rendering::RenderSystem::For(scene).SetDistanceLightingSettings(lightingSettings);
     Engine::Rendering::MaterialCachePolicy::Get().SetProjectSettings(
         settings.materialCache);
     if (!scene.Load(scenePath))
@@ -1366,13 +1368,13 @@ int VideoExportApplication::Run(HINSTANCE instance)
                     renderer.CreateFrameGraphicsContext();
                 camera = scene.FindGameCamera();
                 if (context && camera)
-                    scene.Render(context.get(), static_cast<float>(options.width) /
+                    Engine::Rendering::RenderSystem::For(scene).Render(context.get(), static_cast<float>(options.width) /
                         static_cast<float>(options.height), camera, false,
                         renderWidth, renderHeight, true);
                 renderer.Clear(settings.clearColor.r, settings.clearColor.g,
                     settings.clearColor.b, settings.clearColor.a);
                 if (context && camera)
-                    scene.Render(context.get(), static_cast<float>(options.width) /
+                    Engine::Rendering::RenderSystem::For(scene).Render(context.get(), static_cast<float>(options.width) /
                         static_cast<float>(options.height), camera, false);
                 renderer.EndFrame();
             }

@@ -32,5 +32,5 @@ float4 PSMain(
     const float4 color = PSFoliageMain(pos, worldPos, normal, uv, vertexColor,
         objectIndex, frontFace);
 #endif
-    return ApplyObjectAtmosphereFog(color, worldPos, objectIndex);
+    return ApplyObjectAtmosphereFog(color, worldPos, objectIndex, pos.xy);
 }

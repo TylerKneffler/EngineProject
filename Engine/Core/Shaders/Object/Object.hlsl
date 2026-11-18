@@ -211,19 +211,7 @@ bool ResolveOcclusionMark(uint instanceId)
 
 #include "../GrassWind.hlsli"
 #include "../AtmosphereFog.hlsli"
-
-// Applies the scene height fog to a final surface color. Entry points call
-// this once on their output; material shaders that wrap the surface function
-// (Water, Foliage) call it after their own shading.
-float4 ApplyObjectAtmosphereFog(float4 color, float3 worldPos, uint objectIndex)
-{
-    const ObjectData fogObject = objects[(draw.drawFlags & 0x13080000u) != 0u
-        ? objectIndex : draw.objectIndex];
-    return float4(ApplyAtmosphereFog(color.rgb, worldPos,
-        fogObject.viewPositionAlphaCutoff.xyz, fogObject.atmosphereFog0,
-        fogObject.atmosphereFog1, fogObject.atmosphereFog2,
-        fogObject.atmosphereFog3), color.a);
-}
+// ApplyObjectAtmosphereFog follows the directional shadow functions below.
 #ifdef GRASS_CAPSULE_INTERACTION
 #include "../GrassFootBend.hlsli"
 #endif
@@ -1304,6 +1292,109 @@ float EvaluateDirectionalShadow(ObjectData objectData, SceneLightData light,
     filtered = lerp(filtered, 1.0, farFade);
     return lerp(1.0, filtered,
         saturate(light.params.w * objectData.shadowParams.z));
+}
+
+// Sun visibility of a point in the air for light shafts: one bilinear tap
+// of the cascade covering `viewDistance`. Lit beyond the shadow range.
+float FogShaftSunVisibility(ObjectData objectData, float3 position,
+    float viewDistance, uint cascadeCount)
+{
+    if (viewDistance >= objectData.shadowCascadeSplits[cascadeCount - 1u])
+        return 1.0;
+    uint cascade = 0u;
+    if (cascadeCount > 1u && viewDistance > objectData.shadowCascadeSplits.x)
+        cascade = 1u;
+    if (cascadeCount > 2u && viewDistance > objectData.shadowCascadeSplits.y)
+        cascade = 2u;
+    if (cascadeCount > 3u && viewDistance > objectData.shadowCascadeSplits.z)
+        cascade = 3u;
+    return SampleDirectionalShadowCascade(objectData, cascade, position, 0);
+}
+
+// Opacity-weighted sun visibility along the fogged view ray, for
+// ApplyAtmosphereFogShadowed. The ray is cut into segments spaced
+// quadratically (finer near the camera, where shafts are resolved); each
+// segment's analytic fog opacity is weighted by the shadow at one point
+// inside it, offset by a per-pixel dither. The range uses the view-wide
+// cascade splits, not the per-object shadowCascadeData.w, so shafts do not
+// break at object edges. pixel.x < 0 samples segment centers.
+float ObjectFogSunVisibility(ObjectData objectData, float3 worldPos,
+    float2 pixel)
+{
+    const float4 fog0 = objectData.atmosphereFog0;
+    const float4 fog1 = objectData.atmosphereFog1;
+    const uint sampleCount = min(AtmosphereShaftSampleCount(fog0), 32u);
+    [branch] if (sampleCount == 0u || objectData.shadowCascadeData.x < 0.5 ||
+        all(objectData.atmosphereFog3.rgb <= 0.0))
+        return 1.0;
+    const float3 cameraPos = objectData.viewPositionAlphaCutoff.xyz;
+    const float3 toSurface = worldPos - cameraPos;
+    const float distanceToSurface = length(toSurface);
+    const float rayLength = max(distanceToSurface - fog1.w, 0.0);
+    const uint cascadeCount =
+        clamp((uint)objectData.shadowCascadeData.x, 1u, 4u);
+    const float marchLength = min(rayLength, objectData.shadowCascadeSplits[
+        cascadeCount - 1u] - fog1.w);
+    [branch] if (marchLength <= 0.0)
+        return 1.0;
+    const float3 viewDirection = toSurface / max(distanceToSurface, 1e-4);
+    const float densityAtStart = AtmosphereDensityAtStart(cameraPos,
+        viewDirection, fog0, fog1);
+    const float totalOpacity = 1.0 - exp(-AtmosphereOpticalDepth(
+        densityAtStart, fog0.y, viewDirection.y, rayLength));
+    [branch] if (totalOpacity < 1e-5)
+        return 1.0;
+    // Interleaved gradient noise: a stable screen-space dither. There is no
+    // temporal resolve, so it is not animated.
+    const float jitter = pixel.x < 0.0 ? 0.5 : frac(52.9829189 *
+        frac(dot(pixel, float2(0.06711056, 0.00583715))));
+    const float3 rayStart = cameraPos + viewDirection * fog1.w;
+    const float inverseCount = 1.0 / (float)sampleCount;
+    float previousTransmittance = 1.0;
+    float litOpacity = 0.0;
+    [loop] for (uint i = 0u; i < sampleCount; ++i)
+    {
+        const float segmentEnd = (float)(i + 1u) * inverseCount;
+        const float transmittance = exp(-AtmosphereOpticalDepth(
+            densityAtStart, fog0.y, viewDirection.y,
+            marchLength * segmentEnd * segmentEnd));
+        const float sampleFraction = ((float)i + jitter) * inverseCount;
+        const float sampleDistance = marchLength * sampleFraction *
+            sampleFraction;
+        const float visibility = FogShaftSunVisibility(objectData,
+            rayStart + viewDirection * sampleDistance,
+            fog1.w + sampleDistance, cascadeCount);
+        litOpacity += (previousTransmittance - transmittance) * visibility;
+        previousTransmittance = transmittance;
+    }
+    // Fog past the shadow range is sunlit.
+    litOpacity += previousTransmittance - (1.0 - totalOpacity);
+    return saturate(litOpacity / totalOpacity);
+}
+
+// Applies the scene height fog to a final surface color. Entry points call
+// this once on their output; material shaders that wrap the surface function
+// (Water, Foliage) call it after their own shading. `pixel` (SV_POSITION.xy)
+// dithers the light-shaft samples; the overload without it samples segment
+// centers, which bands slightly but stays correct.
+float4 ApplyObjectAtmosphereFog(float4 color, float3 worldPos,
+    uint objectIndex, float2 pixel)
+{
+    const ObjectData fogObject = objects[(draw.drawFlags & 0x13080000u) != 0u
+        ? objectIndex : draw.objectIndex];
+    [branch] if (fogObject.atmosphereFog0.w < 0.5)
+        return color;
+    return float4(ApplyAtmosphereFogShadowed(color.rgb, worldPos,
+        fogObject.viewPositionAlphaCutoff.xyz, fogObject.atmosphereFog0,
+        fogObject.atmosphereFog1, fogObject.atmosphereFog2,
+        fogObject.atmosphereFog3,
+        ObjectFogSunVisibility(fogObject, worldPos, pixel)), color.a);
+}
+
+float4 ApplyObjectAtmosphereFog(float4 color, float3 worldPos, uint objectIndex)
+{
+    return ApplyObjectAtmosphereFog(color, worldPos, objectIndex,
+        float2(-1.0, -1.0));
 }
 
 float EvaluateSubsurfaceShadowChannel(ObjectData objectData,
@@ -3014,7 +3105,7 @@ float4 PSMain(
     return ApplyObjectAtmosphereFog(ObjectSurfacePS(pos, worldPos, normal, uv,
         uv1, vertexColor, tangent, uvChannels0, uvChannels1, uvChannels2,
         uvChannels3, uvChannels4, objectIndex, frontFace), worldPos,
-        objectIndex);
+        objectIndex, pos.xy);
 }
 #endif
 
@@ -3040,7 +3131,7 @@ float4 PSDepthEqualMain(
     return ApplyObjectAtmosphereFog(ObjectSurfacePS(pos, worldPos, normal, uv,
         uv1, vertexColor, tangent, uvChannels0, uvChannels1, uvChannels2,
         uvChannels3, uvChannels4, objectIndex, frontFace), worldPos,
-        objectIndex);
+        objectIndex, pos.xy);
 }
 
 // Opaque parallax materials with parallaxDepthOffset. Depth only moves away
@@ -3066,7 +3157,7 @@ float4 PSParallaxDepthMain(
     float4 color = ObjectSurfacePS(pos, worldPos, normal, uv, uv1, vertexColor,
         tangent, uvChannels0, uvChannels1, uvChannels2, uvChannels3,
         uvChannels4, objectIndex, frontFace);
-    color = ApplyObjectAtmosphereFog(color, worldPos, objectIndex);
+    color = ApplyObjectAtmosphereFog(color, worldPos, objectIndex, pos.xy);
     depth = g_parallaxClipDepth >= 0.0
         ? clamp(g_parallaxClipDepth, 0.0, pos.z) : pos.z;
     return color;

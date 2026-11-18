@@ -1,4 +1,6 @@
 #include "Engine/Editor/State/EditorViewState.h"
+#include "Core/Rendering/RenderSystem.h"
+#include "Core/Rendering/SceneRenderer.h"
 #include "pch.h"
 #include "Engine/Editor/Core/View/Views/AssetDocumentView.h"
 #include "Engine/Editor/Core/Paint/BrushPreview.h"
@@ -1442,7 +1444,7 @@ void EditorState::DrawGlobalToolbar(IEditorUi& ui, ToolbarSection section,
             }
             if (ImGui::IsItemHovered())
             {
-                const auto snapshot = scene->GetPerformanceHeatSnapshot();
+                const auto snapshot = Engine::Rendering::RenderSystem::For(*scene).GetPerformanceHeatSnapshot();
                 ImGui::BeginTooltip();
                 ImGui::TextUnformatted("Performance view: blue = cheap, red = expensive");
                 ImGui::TextDisabled("Relative to this view, log scale. CPU is measured draw");

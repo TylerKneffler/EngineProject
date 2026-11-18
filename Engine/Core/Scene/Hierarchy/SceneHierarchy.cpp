@@ -96,7 +96,6 @@ Scene::~Scene()
     for (ISceneObserver* observer : observers)
         observer->OnSceneDestroying();
     m_observers.clear();
-    m_viewOverlays = nullptr;
     try
     {
         FenceBackgroundWork();
@@ -122,7 +121,11 @@ void Scene::FenceBackgroundWork()
     if (m_game)
         m_game->CancelPendingSceneLoad();
     FenceSceneGeneration();
-    JoinEarlyCameraOcclusion();
+    {
+        const auto observers = m_observers;
+        for (ISceneObserver* observer : observers)
+            observer->OnBackgroundWorkFence();
+    }
     // A worker can execute code from a reloadable script module. Join it
     // before replacing scene objects or unloading that module.
     for (const auto& object : m_objects)
@@ -803,8 +806,6 @@ void Scene::ClearObjects()
         m_beforeGpuResourceDestruction();
     m_restorePrefabPrototypes.clear();
     m_retiredRenderObjects.clear();
-    m_screenLodHistory.clear();
-    m_screenLodCounts={};
     m_hasStarted = false;
     m_graphicsPreparationPending = false;
     m_graphicsPreparationRestart = false;

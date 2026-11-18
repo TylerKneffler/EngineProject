@@ -5,6 +5,7 @@
 #include "View/View.h"
 #include "Engine/Editor/UI/IEditorUi.h"
 #include "Core/Scene/Scene.h"
+#include "Core/Rendering/SceneRenderer.h"
 #include "Core/Components/Terrain/Terrain.h"
 #include "Core/Components/Terrain/TerrainRegionEdit.h"
 #include "Core/ProjectLoader.h"
@@ -51,7 +52,7 @@ public:
     void RenderShadow3D(void* cmd) override;
     void RecordRenderCommands(Engine::Graphics::GraphicsCommandPacket& shadow,
         Engine::Graphics::GraphicsCommandPacket& color,
-        const Engine::Scene::Scene::NativeRenderPacket* packet, RecordingTimings* timings = nullptr);
+        const Engine::Rendering::SceneRenderer::NativeRenderPacket* packet, RecordingTimings* timings = nullptr);
 
     // Shows the offscreen texture with letterboxing/pillarboxing based on
     // aspect ratio settings, captures mouse input, and drives the

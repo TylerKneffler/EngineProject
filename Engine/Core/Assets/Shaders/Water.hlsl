@@ -136,5 +136,5 @@ float4 PSMain(
     const float alpha = lerp(surface.a, 1.0,
         saturate(max(fresnel * 3.0, distanceOpacity * 0.85)));
     return ApplyObjectAtmosphereFog(float4(color, alpha), worldPos,
-        objectIndex);
+        objectIndex, pos.xy);
 }

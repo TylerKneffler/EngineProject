@@ -1,4 +1,6 @@
 #include "PerformanceView.h"
+#include "Core/Rendering/RenderSystem.h"
+#include "Core/Rendering/SceneRenderer.h"
 #include "Core/Runtime/Game.h"
 #include "PerformanceRecording.h"
 #include "Core/Rendering/TextureResidency.h"
@@ -621,7 +623,7 @@ void PerformanceView::DrawTimings(IEditorUi& ui)
     constexpr uint64_t kBudgetShadowCasters = 256ull;
     constexpr uint64_t kBudgetMaterialComplexity = 2'000ull;
     const auto visibleTriangles = std::max<uint64_t>(m_renderCpu.candidateTriangles, 0ull);
-    const auto shadowCasters = m_scene ? std::max<uint64_t>(m_scene->GetShadowDebugSnapshot().casterCount, 0ull) : 0ull;
+    const auto shadowCasters = m_scene ? std::max<uint64_t>(Engine::Rendering::RenderSystem::For(*m_scene).GetShadowDebugSnapshot().casterCount, 0ull) : 0ull;
     const auto materialComplexity = std::max<uint64_t>(m_renderCpu.gpuBatches * 24ull + m_renderCpu.candidateDraws, 0ull);
     const bool sceneBudgetWarning = visibleTriangles > kBudgetTriangles ||
         shadowCasters > kBudgetShadowCasters ||
@@ -701,7 +703,7 @@ void PerformanceView::DrawTimings(IEditorUi& ui)
     }
     if (m_scene)
     {
-        const auto& prepare = m_scene->GetLastPrepareTimings();
+        const auto& prepare = Engine::Rendering::RenderSystem::For(*m_scene).GetLastPrepareTimings();
         drawGroup("Scene preparation (CPU)", {
             { "Transforms", prepare.transformsMs }, { "Lookup", prepare.lookupMs }, { "Items", prepare.itemsMs },
             { "Bone upload", prepare.boneUploadMs },
@@ -725,7 +727,7 @@ void PerformanceView::DrawTimings(IEditorUi& ui)
             { "Compare",prepare.spatialCompareMs }, { "Refit and joins",prepare.spatialRefitMs },
             { "Rebuild",prepare.spatialBuildMs }
         });
-        const auto& grass = m_scene->GetGrassPerformance();
+        const auto& grass = Engine::Rendering::RenderSystem::For(*m_scene).GetGrassPerformance();
         drawGroup("Grass total and nested work (CPU wall time)", {
             { "Total", grass.totalMs }, { "Placement indexing", grass.scanMs },
             { "Instance preparation", grass.generationMs }, { "GPU upload", grass.uploadMs }
@@ -749,7 +751,7 @@ void PerformanceView::DrawTimings(IEditorUi& ui)
         ui.ValueLabel("Grass active / LOD transition / fading tiles",
             (std::to_string(grass.activeTiles)+" / "+std::to_string(grass.transitionTiles)+" / "+std::to_string(grass.fadingTiles)).c_str());
         ui.Separator();
-        const auto& shadow = m_scene->GetLastShadowCpuTiming();
+        const auto& shadow = Engine::Rendering::RenderSystem::For(*m_scene).GetLastShadowCpuTiming();
         ui.ValueLabel("Shadow draws: explicit instances / automatic / ordinary",
             (std::to_string(shadow.explicitInstanceDraws)+" / "+std::to_string(shadow.automaticDraws)+" / "+std::to_string(shadow.ordinaryDraws)).c_str());
         ui.ValueLabel("Shadow submission thread cycles", std::to_string(shadow.submissionThreadCycles).c_str());
@@ -796,7 +798,7 @@ void PerformanceView::DrawTimings(IEditorUi& ui)
     ui.ValueLabel("Configured workers",std::to_string(m_renderCpu.configuredWorkers).c_str());
     if(m_scene)
     {
-        const auto& prepare=m_scene->GetLastPrepareTimings();
+        const auto& prepare=Engine::Rendering::RenderSystem::For(*m_scene).GetLastPrepareTimings();
         ui.ValueLabel("Transform world reused / updated",(std::to_string(prepare.transformWorldReused)+" / "+std::to_string(prepare.transformWorldUpdated)).c_str());
         ui.ValueLabel("Transform locals updated",std::to_string(prepare.transformLocalUpdated).c_str());
         ui.ValueLabel("Transform hierarchy levels",std::to_string(prepare.transformLevels).c_str());
@@ -914,7 +916,7 @@ void PerformanceView::DrawTimings(IEditorUi& ui)
     ui.ValueLabel("Changed rendering uploads",FormatBytes(m_renderCpu.changedUploadBytes).c_str());
     if (m_scene)
     {
-        const auto uploads = m_scene->GetCurrentFrameUploadStats();
+        const auto uploads = Engine::Rendering::RenderSystem::For(*m_scene).GetCurrentFrameUploadStats();
         ui.ValueLabel("Frame upload bytes / dynamic buffer allocations",
             (FormatBytes(uploads.bytes)+" / "+std::to_string(uploads.bufferAllocations)).c_str());
         ui.ValueLabel("Frame upload allocator growths",
@@ -1078,7 +1080,7 @@ void PerformanceView::RecordSnapshot(float frameRate)
     out << ']';
     if (m_scene)
     {
-        const auto& shadow = m_scene->GetShadowDebugSnapshot();
+        const auto& shadow = Engine::Rendering::RenderSystem::For(*m_scene).GetShadowDebugSnapshot();
         out << ",\"shadow_enabled\":" << (shadow.enabled ? "true" : "false")
             << ",\"shadow_cascades\":" << shadow.cascadeCount
             << ",\"shadow_atlas_resolution\":" << shadow.atlasResolution
@@ -1349,8 +1351,8 @@ void PerformanceView::DrawShadows(IEditorUi& ui)
         return;
     }
 
-    const Engine::Scene::Scene::ShadowDebugSnapshot& shadow =
-        m_scene->GetShadowDebugSnapshot();
+    const Engine::Rendering::SceneRenderer::ShadowDebugSnapshot& shadow =
+        Engine::Rendering::RenderSystem::For(*m_scene).GetShadowDebugSnapshot();
     ui.ValueLabel("Realtime shadows", shadow.enabled ? "Enabled" : "Disabled");
     if (!shadow.enabled)
     {

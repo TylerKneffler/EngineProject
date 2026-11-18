@@ -1,4 +1,5 @@
 #include "Engine/Editor/Runtime/EditorPlayPipeline.h"
+#include "Core/Rendering/RenderSystem.h"
 #include "Core/Runtime/Game.h"
 #include "Core/Renderers/IEditorRenderer.h"
 #include <algorithm>
@@ -115,7 +116,7 @@ EditorPlayPipeline::Timings EditorPlayPipeline::Finish(std::vector<Commands> com
     scene->SetBeforeGpuResourceDestruction([renderer = &m_renderer] { renderer->WaitIdle(); });
     Core::ApplyNativeCursorRequests(m_input);
     m_frames.push_back({m_renderer.GetSubmittedFrameToken(), std::move(commands),
-        scene->TakeRetiredGraphicsResources()});
+        Engine::Rendering::RenderSystem::TakeRetiredGraphicsResources(*scene)});
     const auto collection = CollectCompletedFrames();
     result.queueWaitMs = collection.waitMs;
     result.queueWaits = collection.waits;

@@ -1,4 +1,6 @@
 #include "Core/Rendering/DetailBudget.h"
+#include "Core/Rendering/RenderSystem.h"
+#include "Core/Rendering/SceneRenderer.h"
 #include "Core/Rendering/MaterialCachePolicy.h"
 #include "pch.h"
 #include "Engine/Editor/State/EditorViewState.h"
@@ -279,8 +281,8 @@ bool EditorState::Init()
         m_scene->GetPhysics().ConfigureStepBudget(
             m_projectSettings.physicsTargetMilliseconds,
             m_projectSettings.physicsMaximumSubsteps);
-        m_scene->SetRealtimeShadowSettings(m_projectSettings.realtimeShadows);
-        m_scene->SetDistanceLightingSettings(m_projectSettings.distanceLighting);
+        Engine::Rendering::RenderSystem::For(*m_scene).SetRealtimeShadowSettings(m_projectSettings.realtimeShadows);
+        Engine::Rendering::RenderSystem::For(*m_scene).SetDistanceLightingSettings(m_projectSettings.distanceLighting);
         Engine::Rendering::DetailBudget::Get().Configure(
             m_projectSettings.layers, m_projectSettings.detailBudget);
         Engine::Rendering::MaterialCachePolicy::Get().SetProjectSettings(

@@ -1,0 +1,341 @@
+#include "Core/Rendering/SceneRenderer.h"
+#include "Core/Rendering/SceneRenderer/SceneRendererShadows.h"
+
+#include "Core/Rendering/StableShadowCascade.h"
+#include "Core/Components/Camera/Camera.h"
+#include "Core/Components/Mesh/Mesh.h"
+#include "Core/Rendering/SceneRenderer/SceneRendererDrawPreparation.h"
+
+#include <algorithm>
+#include <array>
+#include <cmath>
+
+namespace Engine::Rendering
+{
+using Scene = Engine::Scene::Scene;
+SceneRendererShadows::ShadowCascadeSet SceneRendererShadows::BuildCascades(
+    SceneRenderer& renderer, const Engine::Model::RealtimeShadowSelection& shadowSelection,
+    const Engine::Model::GraphicsQualityValues& quality,
+    const Engine::Components::Camera* cam, const glm::mat4& cascadeView,
+    uint32_t atlasResolution, uint32_t requestedCascadeCount)
+{
+        ShadowCascadeSet out{};
+        const float shadowDistance = std::clamp(
+            renderer.m_realtimeShadowSettings.directionalDistance * quality.shadows,
+            1.f, 100000.f);
+        out.count = std::clamp(requestedCascadeCount, 1u, 4u);
+        const float cameraNear = std::max(0.001f, cam->nearPlane);
+        const float cameraFar = std::max(cameraNear + 0.001f, cam->farPlane);
+        const float cascadeFar = std::min(cameraFar,
+            std::max(cameraNear + 0.001f, shadowDistance));
+        // Far range: the last cascade alone covers shadowDistance .. far, so
+        // distant hills and forests keep their shadows (see
+        // RealtimeShadowSettings::directionalFarDistance).
+        const float farDistance = std::min(cameraFar,
+            renderer.m_realtimeShadowSettings.directionalFarDistance * quality.shadows);
+        out.hasFarCascade = out.count >= 2u && farDistance > cascadeFar * 1.5f;
+        const uint32_t nearCount = out.hasFarCascade ? out.count - 1u : out.count;
+        const float splitLambda = std::clamp(
+            renderer.m_realtimeShadowSettings.cascadeSplitLambda, 0.f, 1.f);
+        for (uint32_t cascade = 0; cascade < nearCount; ++cascade)
+        {
+            const float fraction = static_cast<float>(cascade + 1u) /
+                static_cast<float>(nearCount);
+            const float logarithmic = cameraNear * std::pow(
+                cascadeFar / cameraNear, fraction);
+            const float uniform = cameraNear +
+                (cascadeFar - cameraNear) * fraction;
+            out.splits[cascade] = glm::mix(uniform, logarithmic, splitLambda);
+        }
+        if (out.hasFarCascade) out.splits[nearCount] = farDistance;
+        const float lastSplit = out.splits[out.count - 1u];
+        for (uint32_t cascade = out.count; cascade < 4u; ++cascade)
+            out.splits[cascade] = lastSplit;
+
+        const auto cascadePosition = glm::vec3(glm::inverse(cascadeView)[3]);
+        const uint32_t tileResolution = out.count > 1u
+            ? std::max(1u, atlasResolution / 2u)
+            : atlasResolution;
+        for (uint32_t cascade = 0; cascade < out.count; ++cascade)
+        {
+            const bool farCascade = out.hasFarCascade && cascade == out.count - 1u;
+            // The far tile keeps its own depth range (its constant depth bias
+            // scales with it, matching its texels) and moves in steps of
+            // 1/8 of its range, so it is re-rendered only every ~250 m.
+            const auto stable = Engine::Rendering::BuildStableShadowCascade(
+                cascadePosition,
+                shadowSelection.directionToLight,
+                out.splits[cascade],
+                farCascade ? out.splits[cascade] : shadowDistance,
+                tileResolution,
+                farCascade ? out.splits[cascade] / 8.f : 0.f);
+            out.centers[cascade] = stable.center;
+            out.radii[cascade] = stable.radius;
+            out.viewProjections[cascade] = stable.viewProjection;
+        }
+        out.data = {
+            static_cast<float>(out.count),
+            out.count > 1u ? 0.5f : 1.f,
+            std::clamp(renderer.m_realtimeShadowSettings.cascadeTransitionFraction,
+                0.f, 0.3f),
+            out.splits[out.count - 1u] };
+        out.cameraData = glm::vec4(glm::normalize(glm::vec3(
+            glm::inverse(cascadeView)[2])), cameraNear);
+        return out;
+}
+
+SceneRendererShadows::PrepareResult SceneRendererShadows::PrepareDirectionalShadowCascades(
+    SceneRenderer& renderer,
+    Engine::Graphics::IGraphicsContext* context,
+    const Engine::Model::RealtimeShadowSelection& shadowSelection,
+    const glm::mat4& view,
+    const glm::vec3& cameraPosition,
+    const Engine::Model::GraphicsQualityValues& quality,
+    const Engine::Components::Camera* cam,
+    bool shadowOnly)
+{
+    Scene& scene = renderer.GetScene();
+    ShadowCascadeSet mainShadowCascades{};
+    bool renderMainDirectionalShadow = shadowSelection.valid;
+    std::array<uint8_t, 4> directionalShadowDirtyMask{};
+    bool preserveDirectionalShadowAtlas = false;
+    if (shadowSelection.valid)
+    {
+        ++renderer.m_directionalShadowFrameCounter;
+        const ShadowCascadeSet requestedShadowCascades = BuildCascades(
+            renderer, shadowSelection, quality, cam, view, renderer.m_directionalShadowResolution,
+            renderer.m_realtimeShadowSettings.directionalCascadeCount);
+        mainShadowCascades = requestedShadowCascades;
+        const bool cacheReusable = renderer.m_directionalShadowCacheValid &&
+            renderer.m_directionalShadowCachedQuality.geometry == quality.geometry &&
+            renderer.m_directionalShadowCachedQuality.shadows == quality.shadows &&
+            renderer.m_directionalShadowCachedQuality.texture == quality.texture &&
+            renderer.m_directionalShadowCachedQuality.material == quality.material &&
+            renderer.m_directionalShadowCachedResolution ==
+                renderer.m_directionalShadowResolution &&
+            renderer.m_directionalShadowCachedLightKey ==
+                shadowSelection.stableLightKey &&
+            renderer.m_directionalShadowCachedCascadeCount ==
+                requestedShadowCascades.count &&
+            // A shared light direction cannot describe tiles rendered with
+            // different orientations. Only tolerate normalization roundoff;
+            // sun motion must invalidate every cascade together.
+            glm::length(glm::normalize(shadowSelection.directionToLight) -
+                renderer.m_directionalShadowCachedDirection) <= 1.e-6f;
+        if (shadowOnly)
+        {
+            bool staggerMovingCascades = false;
+            auto copyCachedCascades = [&]()
+            {
+                mainShadowCascades.viewProjections =
+                    renderer.m_directionalShadowCachedViewProjections;
+                mainShadowCascades.splits =
+                    renderer.m_directionalShadowCachedCascadeSplits;
+                mainShadowCascades.data =
+                    renderer.m_directionalShadowCachedCascadeData;
+                mainShadowCascades.cameraData =
+                    renderer.m_directionalShadowCachedCameraData;
+                mainShadowCascades.centers =
+                    renderer.m_directionalShadowCachedCascadeCenters;
+                mainShadowCascades.radii =
+                    renderer.m_directionalShadowCachedCascadeRadii;
+                mainShadowCascades.count =
+                    renderer.m_directionalShadowCachedCascadeCount;
+            };
+            if (!cacheReusable)
+            {
+                for (uint32_t cascade = 0; cascade < requestedShadowCascades.count; ++cascade)
+                    directionalShadowDirtyMask[cascade] = 1u;
+            }
+            else
+            {
+                const bool globalCascadeDataChanged =
+                    glm::length(requestedShadowCascades.splits -
+                        renderer.m_directionalShadowCachedCascadeSplits) > 1e-4f ||
+                    glm::length(requestedShadowCascades.data -
+                        renderer.m_directionalShadowCachedCascadeData) > 1e-4f ||
+                    std::abs(requestedShadowCascades.cameraData.w -
+                        renderer.m_directionalShadowCachedCameraData.w) > 1e-4f;
+                // Rotation and lens changes do not alter radial coverage.
+                // Stagger walking updates only while every retained tile can
+                // still cover its entire current receiver sphere.
+                staggerMovingCascades = !globalCascadeDataChanged &&
+                    glm::length(cameraPosition-renderer.m_directionalShadowCachedCameraPosition)<=1.f;
+                for(uint32_t cascade=0;cascade<requestedShadowCascades.count;++cascade)
+                    if(glm::length(cameraPosition-renderer.m_directionalShadowCachedCascadeCenters[cascade])+
+                        requestedShadowCascades.splits[cascade]>
+                        renderer.m_directionalShadowCachedCascadeRadii[cascade]-.01f)
+                        staggerMovingCascades=false;
+                if (globalCascadeDataChanged)
+                {
+                    for (uint32_t cascade = 0; cascade < requestedShadowCascades.count; ++cascade)
+                        directionalShadowDirtyMask[cascade] = 1u;
+                }
+                else
+                {
+                    const auto matrixDelta = [](const glm::mat4& first,
+                        const glm::mat4& second)
+                    {
+                        float maxDelta = 0.f;
+                        for (uint32_t row = 0; row < 4u; ++row)
+                            for (uint32_t col = 0; col < 4u; ++col)
+                                maxDelta = std::max(maxDelta,
+                                    std::abs(first[row][col] - second[row][col]));
+                        return maxDelta;
+                    };
+                    for (uint32_t cascade = 0; cascade < requestedShadowCascades.count; ++cascade)
+                    {
+                        const float centerDelta = glm::length(
+                            requestedShadowCascades.centers[cascade] -
+                            renderer.m_directionalShadowCachedCascadeCenters[cascade]);
+                        const float radiusDelta = std::abs(
+                            requestedShadowCascades.radii[cascade] -
+                            renderer.m_directionalShadowCachedCascadeRadii[cascade]);
+                        // Range/split changes alter radial coverage; refresh
+                        // the layout together rather than staggering it.
+                        if(radiusDelta>0.05f) staggerMovingCascades=false;
+                        const float projectionDelta = matrixDelta(
+                            requestedShadowCascades.viewProjections[cascade],
+                            renderer.m_directionalShadowCachedViewProjections[cascade]);
+                        directionalShadowDirtyMask[cascade] =
+                            (centerDelta > 0.05f || radiusDelta > 0.05f ||
+                                projectionDelta > 1e-4f) ? 1u : 0u;
+                    }
+                    // The far tile is not in the fast rotation: it holds
+                    // terrain and distant trees, and costs several ms of
+                    // CPU to draw. Besides its stepped center or the sun
+                    // moving, it refreshes when objects have streamed in or
+                    // out (at most every 240 shadow frames: streaming changes
+                    // the scene almost every frame while flying), or every 600.
+                    const uint32_t refreshCount = requestedShadowCascades.hasFarCascade
+                        ? requestedShadowCascades.count - 1u
+                        : requestedShadowCascades.count;
+                    const uint32_t refreshCascade =
+                        renderer.m_directionalShadowRefreshCursor % refreshCount;
+                    const bool temporalRefreshDue =
+                        (renderer.m_directionalShadowFrameCounter -
+                            renderer.m_directionalShadowCascadeLastRenderedFrame[refreshCascade]) >= 2u;
+                    if (temporalRefreshDue)
+                    {
+                        directionalShadowDirtyMask[refreshCascade] = 1u;
+                        renderer.m_directionalShadowRefreshCursor =
+                            (refreshCascade + 1u) % refreshCount;
+                    }
+                    if (requestedShadowCascades.hasFarCascade)
+                    {
+                        const uint32_t farCascade = requestedShadowCascades.count - 1u;
+                        const uint64_t age = renderer.m_directionalShadowFrameCounter -
+                            renderer.m_directionalShadowCascadeLastRenderedFrame[farCascade];
+                        const bool contentChanged = scene.GetStructureRevision() !=
+                            renderer.m_directionalShadowFarStructureRevision;
+                        if ((contentChanged && age >= 240u) || age >= 600u)
+                            directionalShadowDirtyMask[farCascade] = 1u;
+                    }
+                }
+            }
+            if (staggerMovingCascades && requestedShadowCascades.count>2u)
+            {
+                // At most two tiles per frame: prioritize a dirty near tile,
+                // then visit far tiles in a rotating order without starvation.
+                uint32_t remaining=2u-(directionalShadowDirtyMask[0] ? 1u:0u);
+                const uint32_t farCount=requestedShadowCascades.count-1u;
+                const uint32_t first=uint32_t(renderer.m_directionalShadowFrameCounter%farCount);
+                for(uint32_t offset=0;offset<farCount;++offset)
+                {
+                    const uint32_t cascade=1u+(first+offset)%farCount;
+                    if(!directionalShadowDirtyMask[cascade]) continue;
+                    if(remaining) --remaining;
+                    else directionalShadowDirtyMask[cascade]=0u;
+                }
+            }
+            uint32_t dirtyCascadeCount = 0;
+            for (uint32_t cascade = 0; cascade < requestedShadowCascades.count; ++cascade)
+                dirtyCascadeCount += directionalShadowDirtyMask[cascade] ? 1u : 0u;
+            if(dirtyCascadeCount && !context->SupportsDepthRectangleClear())
+            {
+                // Older DX11 drivers cannot clear depth rectangles. Preserve
+                // correctness by refreshing the whole atlas on those devices.
+                directionalShadowDirtyMask.fill(1u);
+                dirtyCascadeCount=requestedShadowCascades.count;
+            }
+            renderMainDirectionalShadow = dirtyCascadeCount > 0u;
+            if (!renderMainDirectionalShadow && cacheReusable)
+                copyCachedCascades();
+            preserveDirectionalShadowAtlas = cacheReusable &&
+                renderMainDirectionalShadow &&
+                dirtyCascadeCount < requestedShadowCascades.count;
+            if (preserveDirectionalShadowAtlas)
+                for (uint32_t cascade = 0; cascade < requestedShadowCascades.count; ++cascade)
+                    if (!directionalShadowDirtyMask[cascade])
+                    {
+                        mainShadowCascades.viewProjections[cascade] =
+                            renderer.m_directionalShadowCachedViewProjections[cascade];
+                        mainShadowCascades.centers[cascade] =
+                            renderer.m_directionalShadowCachedCascadeCenters[cascade];
+                        mainShadowCascades.radii[cascade] =
+                            renderer.m_directionalShadowCachedCascadeRadii[cascade];
+                    }
+        }
+        else if (renderer.m_directionalShadowCacheValid)
+        {
+            mainShadowCascades.viewProjections =
+                renderer.m_directionalShadowCachedViewProjections;
+            mainShadowCascades.splits =
+                renderer.m_directionalShadowCachedCascadeSplits;
+            mainShadowCascades.data =
+                renderer.m_directionalShadowCachedCascadeData;
+            mainShadowCascades.cameraData =
+                renderer.m_directionalShadowCachedCameraData;
+            mainShadowCascades.centers =
+                renderer.m_directionalShadowCachedCascadeCenters;
+            mainShadowCascades.radii =
+                renderer.m_directionalShadowCachedCascadeRadii;
+            mainShadowCascades.count =
+                renderer.m_directionalShadowCachedCascadeCount;
+        }
+    }
+    PrepareResult result{};
+    result.cascades = mainShadowCascades;
+    result.dirtyMask = directionalShadowDirtyMask;
+    result.renderMainDirectionalShadow = renderMainDirectionalShadow;
+    result.preserveDirectionalShadowAtlas = preserveDirectionalShadowAtlas;
+    return result;
+}
+
+bool SceneRendererShadows::IsOutsideCascade(
+    const PreparedDraw& draw,
+    const ShadowCascadeSet& cascades,
+    uint32_t cascade)
+{
+    if (!draw.mesh || !draw.mesh->HasBounds() ||
+        (!draw.terrainCell && !draw.mesh->useBoundsForShadowCulling))
+        return false;
+    const glm::vec3 minimum = draw.mesh->GetBoundsMin();
+    const glm::vec3 maximum = draw.mesh->GetBoundsMax();
+    if (cascades.receivers[cascade].Outside(
+        minimum, maximum, draw.objectData.world))
+        return true;
+    const glm::vec3 center = (minimum + maximum) * 0.5f;
+    const glm::vec3 extent = (maximum - minimum) * 0.5f;
+    const glm::mat4 localToClip = cascades.viewProjections[cascade] *
+        draw.objectData.world;
+    const glm::vec4 xRow(localToClip[0][0], localToClip[1][0],
+        localToClip[2][0], localToClip[3][0]);
+    const glm::vec4 yRow(localToClip[0][1], localToClip[1][1],
+        localToClip[2][1], localToClip[3][1]);
+    const glm::vec4 zRow(localToClip[0][2], localToClip[1][2],
+        localToClip[2][2], localToClip[3][2]);
+    const glm::vec4 wRow(localToClip[0][3], localToClip[1][3],
+        localToClip[2][3], localToClip[3][3]);
+    const glm::vec4 homogeneousCenter(center, 1.f);
+    const auto allOutside = [&](const glm::vec4& plane)
+    {
+        const float centerValue = glm::dot(plane, homogeneousCenter);
+        const float radius = glm::dot(glm::abs(glm::vec3(plane)), extent);
+        return centerValue + radius < -1e-4f;
+    };
+    return allOutside(wRow + xRow) || allOutside(wRow - xRow) ||
+        allOutside(wRow + yRow) || allOutside(wRow - yRow) ||
+        allOutside(zRow) || allOutside(wRow - zRow);
+}
+}

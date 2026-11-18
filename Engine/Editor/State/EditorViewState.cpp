@@ -1,4 +1,6 @@
 #include "pch.h"
+#include "Core/Rendering/RenderSystem.h"
+#include "Core/Rendering/SceneRenderer.h"
 #include "Engine/Editor/State/EditorViewState.h"
 #include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
@@ -161,7 +163,7 @@ EditorViewState& EditorViewState::For(Scene& scene)
     if (it == states.end())
     {
         auto state = std::make_unique<EditorViewState>(scene);
-        scene.SetViewOverlays(state.get());
+        Engine::Rendering::RenderSystem::For(scene).SetViewOverlays(state.get());
         scene.AddObserver(state.get());
         it = states.emplace(&scene, std::move(state)).first;
     }
@@ -193,7 +195,7 @@ void EditorViewState::SetMeshEditPose(bool enabled)
 {
     if (meshEditPose == enabled) return;
     meshEditPose = enabled;
-    m_scene->InvalidatePreparedFrame();
+    Engine::Rendering::RenderSystem::For(*m_scene).InvalidatePreparedFrame();
 }
 
 void EditorViewState::SetWeightPaint(Mesh* mesh, int bone)
@@ -202,7 +204,7 @@ void EditorViewState::SetWeightPaint(Mesh* mesh, int bone)
         return;
     weightPaintMesh = mesh;
     weightPaintBone = bone;
-    m_scene->InvalidatePreparedFrame();
+    Engine::Rendering::RenderSystem::For(*m_scene).InvalidatePreparedFrame();
 }
 
 uint8_t EditorViewState::OverlaysOf(const Object* object)

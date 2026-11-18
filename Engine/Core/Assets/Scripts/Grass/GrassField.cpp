@@ -3,6 +3,8 @@
 
 #include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
+#include "Core/Rendering/RenderSystem.h"
+#include "Core/Rendering/SceneRenderer.h"
 #include "Core/Components/Terrain/Terrain.h"
 #include "Core/Components/Terrain/TerrainObjectLayer.h"
 #include "Core/Components/Terrain/TerrainSurfaceSample.h"
@@ -798,6 +800,9 @@ bool GrassField::Refresh()
     m_performance = {};
     if (!Owner || !Owner->GetScene()) return false;
     auto& scene = *Owner->GetScene();
+    // Grass statistics and the shared tile-work budget live on the scene's
+    // renderer; a scene that is not drawn has neither.
+    auto* renderer = Engine::Rendering::RenderSystem::Find(scene);
     auto phaseStarted = started;
     const auto checkpoint = [&](double& milliseconds) {
         const auto now = Clock::now();
@@ -807,7 +812,7 @@ bool GrassField::Refresh()
     const auto publish = [&] {
         checkpoint(m_performance.otherMs);
         m_performance.totalMs = std::chrono::duration<double, std::milli>(phaseStarted-started).count();
-        scene.AddGrassPerformance(m_performance);
+        if (renderer) renderer->AddGrassPerformance(m_performance);
     };
     const float delta = std::clamp(scene.HasStarted() ? scene.GetDeltaTime() : elapsed, 0.f, .1f);
     bool changed = EnsureAuthoredPreviewHidden();
@@ -1011,7 +1016,8 @@ bool GrassField::Refresh()
             m_build->lod != tile.desiredLod && tile.mesh->IsRuntimeLodResident(tile.desiredLod)))
             m_build.reset();
     }
-    const double spent = scene.GetGrassPerformance().generationMs + scene.GetGrassPerformance().uploadMs;
+    const double spent = renderer
+        ? renderer->GetGrassPerformance().generationMs + renderer->GetGrassPerformance().uploadMs : 0.;
     const double remaining = std::max(0., std::clamp(double(tileWorkBudgetMs), .1, 16.) - spent);
     if (!m_build && nearest && remaining > 0.) BeginBuild(selected, selectedLod, signature);
     checkpoint(m_performance.schedulingMs);
@@ -1044,12 +1050,12 @@ bool GrassField::Refresh()
                 m_performance.fadingTiles+=tile.mesh->GetRuntimeVisibility()<1.f;
             }
             for (const auto& slice : instances->slices)
-                if (scene.AccountGrassGpuResource(slice.buffer.get()))
+                if (renderer && renderer->AccountGrassGpuResource(slice.buffer.get()))
                     m_performance.gpuBytes += slice.buffer->GetSize();
         }
     }
     for (const auto& source : m_sourceMeshes)
-        if (source && scene.AccountGrassGpuResource(source->GetGraphicsBuffer()))
+        if (source && renderer && renderer->AccountGrassGpuResource(source->GetGraphicsBuffer()))
             m_performance.gpuBytes += source->GetGraphicsBuffer()->GetSize();
     checkpoint(m_performance.accountingMs);
     publish();

@@ -5,6 +5,7 @@
 #include "Core/Rendering/RenderPerformance.h"
 #include "Core/Graphics/IGraphicsContext.h"
 #include "Core/Scene/Scene.h"
+#include "Core/Rendering/SceneRenderer.h"
 #include <fstream>
 #include <vector>
 
@@ -16,8 +17,8 @@ namespace Engine::Game
 struct GameBenchmarkSceneSample
 {
     Engine::Rendering::RenderCpuTimings render;
-    Engine::Scene::Scene::ShadowCpuTiming shadow;
-    Engine::Scene::Scene::PrepareTimings preparation;
+    Engine::Rendering::SceneRenderer::ShadowCpuTiming shadow;
+    Engine::Rendering::SceneRenderer::PrepareTimings preparation;
     uint64_t pendingPrefabLayers = 0;
     uint64_t sharedPrefabVertices = 0, sharedPrefabIndices = 0, sharedPrefabGeometryBytes = 0;
     uint64_t objects = 0, meshes = 0, terrains = 0, placements = 0;

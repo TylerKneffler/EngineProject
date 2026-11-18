@@ -1,4 +1,6 @@
 #include "Core/Inspection/ComponentInspector.h"
+#include "Core/Rendering/RenderSystem.h"
+#include "Core/Rendering/SceneRenderer.h"
 #include "Core/Components/Terrain/TerrainPlacementHandle.h"
 #include "Core/Rendering/DetailBudget.h"
 #include "Core/Rendering/MaterialCachePolicy.h"
@@ -140,9 +142,9 @@ void EditorState::InitializePanels()
             m_scene->GetPhysics().ConfigureStepBudget(
                 m_projectSettings.physicsTargetMilliseconds,
                 m_projectSettings.physicsMaximumSubsteps);
-            m_scene->SetRealtimeShadowSettings(
+            Engine::Rendering::RenderSystem::For(*m_scene).SetRealtimeShadowSettings(
                 m_projectSettings.realtimeShadows);
-            m_scene->SetDistanceLightingSettings(
+            Engine::Rendering::RenderSystem::For(*m_scene).SetDistanceLightingSettings(
                 m_projectSettings.distanceLighting);
         }
         SetHistoryLimit(m_projectSettings.editorHistoryLimit);
