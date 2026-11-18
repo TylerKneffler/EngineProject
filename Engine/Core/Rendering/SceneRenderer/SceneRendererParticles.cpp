@@ -88,6 +88,7 @@ void SceneRendererParticles::Render(SceneRenderer& renderer, IGraphicsContext* c
     {
         slot.preparedSerial = serial;
         slot.constantCursor = 0;
+        slot.fogCursor = 0;
         slot.batches.clear();
         slot.fluidSurfaces.clear();
         std::vector<ParticleGPUData> records;
@@ -207,6 +208,28 @@ void SceneRendererParticles::Render(SceneRenderer& renderer, IGraphicsContext* c
             throw std::runtime_error("Could not map particle constant buffer");
     }
     const glm::mat4 cameraWorld = glm::inverse(view);
+    // Height fog (Particle.hlsl particleFog): this pass's camera position and
+    // the lit view's packed fog. Each pass in a frame gets its own buffer,
+    // since structured buffers bind without an offset.
+    if (slot.fogCursor >= slot.fogBuffers.size())
+    {
+        slot.fogBuffers.push_back(bufferFactory->CreateBuffer(
+            IGraphicsBuffer::Usage::ShaderResource,
+            IGraphicsBuffer::AccessMode::Upload,
+            sizeof(glm::vec4) * 5u, nullptr, sizeof(glm::vec4)));
+        if (!slot.fogBuffers.back())
+            throw std::runtime_error("Could not create particle fog buffer");
+    }
+    IGraphicsBuffer* fogBuffer = slot.fogBuffers[slot.fogCursor++].get();
+    {
+        glm::vec4 fog[5] = { glm::vec4(glm::vec3(cameraWorld[3]), 0.f),
+            renderer.m_viewAtmosphereFog[0], renderer.m_viewAtmosphereFog[1],
+            renderer.m_viewAtmosphereFog[2], renderer.m_viewAtmosphereFog[3] };
+        void* mapped = fogBuffer->Map();
+        if (!mapped) throw std::runtime_error("Could not map particle fog buffer");
+        std::memcpy(mapped, fog, sizeof(fog));
+        fogBuffer->FlushMappedWrites(0, sizeof(fog));
+    }
     ParticleCBData constants{};
     constants.viewProjection = viewProjection;
     constants.cameraRight = glm::vec4(glm::normalize(glm::vec3(cameraWorld[0])), 0.f);
@@ -221,6 +244,7 @@ void SceneRendererParticles::Render(SceneRenderer& renderer, IGraphicsContext* c
         const uint64_t offset = static_cast<uint64_t>(slot.constantCursor++) * 256u;
         constants.particleParams.x = batch.texture ? 1.f : 0.f;
         constants.particleParams.z = 0.f;
+        constants.particleParams.w = batch.alphaBlend ? 1.f : 0.f;
         std::memcpy(static_cast<uint8_t*>(slot.mappedConstants) + offset,
             &constants, sizeof(constants));
         slot.constants->FlushMappedWrites(offset, sizeof(constants));
@@ -230,6 +254,7 @@ void SceneRendererParticles::Render(SceneRenderer& renderer, IGraphicsContext* c
             : (batch.alphaBlend ? renderer.m_particleAlphaPipeline.get()
                 : renderer.m_particlePipeline.get()));
         context->SetConstantBuffer(0, slot.constants.get(), offset);
+        context->SetStructuredBuffer(7, fogBuffer);
         if(batch.texture) Engine::Components::Texture::RequestGraphicsFootprint(batch.texture->GetGraphicsTexture(),
             std::numeric_limits<float>::infinity()); // CPU/GPU particle size varies after preparation.
         context->SetTexture(0, batch.texture
@@ -246,7 +271,7 @@ void SceneRendererParticles::Render(SceneRenderer& renderer, IGraphicsContext* c
             contentScopeRoot)) continue;
         const uint64_t offset = static_cast<uint64_t>(slot.constantCursor++) * 256u;
         constants.particleParams = glm::vec4(0.f, surface.opacity,
-            static_cast<float>(scene.GetElapsedTime()), 0.f);
+            static_cast<float>(scene.GetElapsedTime()), 1.f);
         std::memcpy(static_cast<uint8_t*>(slot.mappedConstants) + offset,
             &constants, sizeof(constants));
         slot.constants->FlushMappedWrites(offset, sizeof(constants));
@@ -254,6 +279,7 @@ void SceneRendererParticles::Render(SceneRenderer& renderer, IGraphicsContext* c
             : renderer.m_fluidSurfacePipeline.get());
         context->SetConstantBuffer(0, slot.constants.get(), offset);
         context->SetStructuredBuffer(6, surface.particles.get());
+        context->SetStructuredBuffer(7, fogBuffer);
         context->DrawInstanced(6, 1);
         if (portalView) renderer.m_lastParticlePortalDrawCount += surface.count;
     }
@@ -269,11 +295,12 @@ void SceneRendererParticles::Render(SceneRenderer& renderer, IGraphicsContext* c
         constants.particleParams.x = texture ? 1.f : 0.f;
         constants.particleParams.y = std::clamp(emitter->opacity, 0.f, 1.f);
         constants.particleParams.z = 0.f;
+        const bool alpha = emitter->blendMode == static_cast<int>(
+            Engine::Components::ParticleEmitter::BlendMode::Alpha);
+        constants.particleParams.w = alpha ? 1.f : 0.f;
         std::memcpy(static_cast<uint8_t*>(slot.mappedConstants) + offset,
             &constants, sizeof(constants));
         slot.constants->FlushMappedWrites(offset, sizeof(constants));
-        const bool alpha = emitter->blendMode == static_cast<int>(
-            Engine::Components::ParticleEmitter::BlendMode::Alpha);
         context->SetPipeline(portalView
             ? (alpha ? renderer.m_particleGpuPortalAlphaPipeline.get()
                 : renderer.m_particleGpuPortalPipeline.get())
@@ -283,6 +310,7 @@ void SceneRendererParticles::Render(SceneRenderer& renderer, IGraphicsContext* c
         if(texture) Engine::Components::Texture::RequestGraphicsFootprint(texture->GetGraphicsTexture(),std::numeric_limits<float>::infinity());
         context->SetTexture(0, texture ? texture->GetGraphicsTexture() : nullptr);
         context->SetStructuredBuffer(6, emitter->GetGpuDrawBuffer());
+        context->SetStructuredBuffer(7, fogBuffer);
         context->DrawInstanced(6, emitter->GetGpuDrawCapacity());
         if (portalView)
             renderer.m_lastParticlePortalDrawCount += emitter->GetGpuDrawCapacity();

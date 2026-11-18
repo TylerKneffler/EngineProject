@@ -24,6 +24,7 @@ struct GpuParticle
     uint4 meta;
 };
 [[vk::binding(7, 0)]] StructuredBuffer<GpuParticle> gpuParticles;
+[[vk::binding(8, 0)]] StructuredBuffer<float4> particleFog;
 #else
 cbuffer ParticleConstants : register(b0)
 {
@@ -43,7 +44,28 @@ struct GpuParticle
     uint4 meta;
 };
 StructuredBuffer<GpuParticle> gpuParticles : register(t6);
+StructuredBuffer<float4> particleFog : register(t7);
 #endif
+
+#include "../AtmosphereFog.hlsli"
+
+// particleFog: [0] camera position xyz, [1..4] fog0..fog3
+// (AtmosphereFog.hlsli; all zero when the view has no fog).
+// particleParams.w: 1 alpha blend, 0 additive.
+float4 FogParticle(float4 color, float3 worldPosition)
+{
+    const float4 fog0 = particleFog[1];
+    [branch] if (fog0.w < 0.5)
+        return color;
+    const float3 cameraPosition = particleFog[0].xyz;
+    // Additive particles fade out with distance; the surface behind them
+    // already carries the fog's in-scatter.
+    [branch] if (particleParams.w < 0.5)
+        return float4(color.rgb * AtmosphereFogTransmittance(worldPosition,
+            cameraPosition, fog0, particleFog[2], particleFog[4]), color.a);
+    return float4(ApplyAtmosphereFog(color.rgb, worldPosition, cameraPosition,
+        fog0, particleFog[2], particleFog[3], particleFog[4]), color.a);
+}
 
 struct ParticleInput
 {
@@ -114,11 +136,13 @@ float4 PSMain(ParticleVertex input) : SV_TARGET
     if (particleParams.x > 0.5)
     {
         float4 sampled = particleTexture.Sample(particleSampler, input.uv);
-        return float4(input.color.rgb * sampled.rgb, input.color.a * sampled.a);
+        return FogParticle(float4(input.color.rgb * sampled.rgb,
+            input.color.a * sampled.a), input.worldPosition);
     }
     float2 centered = input.uv * 2.0 - 1.0;
     float radial = saturate(1.0 - dot(centered, centered));
-    return float4(input.color.rgb, input.color.a * radial * radial);
+    return FogParticle(float4(input.color.rgb, input.color.a * radial * radial),
+        input.worldPosition);
 }
 
 // One bounded screen-space density field is drawn for the entire fluid emitter.
@@ -214,6 +238,7 @@ FluidPixel PSMainFluid(FluidVertex input)
     float frontDepth = 0.0; // reverse-Z: nearest is the largest depth
     float3 colorSum = 0.0;
     float speedSum = 0.0;
+    float3 worldSum = 0.0;
     [loop] for (uint i = 0; i < min(gpuParticles[0].meta.x, 512u); ++i)
     {
         GpuParticle particle = gpuParticles[i + 1u];
@@ -232,6 +257,7 @@ FluidPixel PSMainFluid(FluidVertex input)
         density += weight;
         colorSum += particle.colorSize.xyz * weight;
         speedSum += length(particle.velocityLife.xyz) * weight;
+        worldSum += particle.positionAge.xyz * weight;
         if (weight > 0.015) frontDepth = max(frontDepth, depth);
     }
     clip(density - 0.12);
@@ -260,7 +286,10 @@ FluidPixel PSMainFluid(FluidVertex input)
     float opacity = particleParams.y * coverage *
         (0.12 + 0.60 * rim + 0.07 * fresnel + 0.04 * thickness);
     FluidPixel result;
-    result.color = float4(saturate(water), opacity);
+    // The surface has no single world position; the density-weighted center
+    // of the contributing particles is close enough for distance fog.
+    result.color = FogParticle(float4(saturate(water), opacity),
+        worldSum / max(density, 0.001));
     result.depth = frontDepth;
     return result;
 }

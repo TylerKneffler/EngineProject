@@ -1,5 +1,5 @@
 #include "Core/Rendering/DetailBudget.h"
-#include "Scripts/Grass/GrassField.h"
+#include "Core/Features/Grass/GrassField.h"
 
 #include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
@@ -27,15 +27,6 @@
 
 namespace
 {
-struct GrassFieldRegistration
-{
-    GrassFieldRegistration()
-    {
-        Engine::Serialization::RegisterComponentType<GrassField>("GrassField");
-    }
-};
-GrassFieldRegistration g_registration;
-
 uint32_t TileSeed(int seed, int x, int z)
 {
     uint32_t value = static_cast<uint32_t>(seed) ^ 0x9e3779b9u;

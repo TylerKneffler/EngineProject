@@ -839,6 +839,7 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
             m_scene.settings.atmosphereFog, terrainSunDirection, terrainSunRadiance,
             terrainSunIndex >= 0)
         : std::array<glm::vec4, 4>{};
+    if (!shadowOnly) m_viewAtmosphereFog = atmosphereFog;
     // Draws are prepared exactly as in Lit mode so the measured CPU cost and
     // the estimated GPU workload describe normal rendering; only the final
     // object records are recolored (see the Performance heat pass below).

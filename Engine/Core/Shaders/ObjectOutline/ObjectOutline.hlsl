@@ -80,6 +80,7 @@ StructuredBuffer<InstanceTransform> meshInstances : register(t45);
 #endif
 
 #include "../SkinDeformation.hlsli"
+#include "../AtmosphereFog.hlsli"
 
 void VSMain(
     float3 pos : POSITION,
@@ -178,7 +179,8 @@ void VSMmdMain(
     float4 sdefRadius0 : TEXCOORD9,
     float4 sdefRadius1 : TEXCOORD10,
     uint vertexId : SV_VertexID,
-    out float4 oPos : SV_POSITION)
+    out float4 oPos : SV_POSITION,
+    out float3 oWorld : TEXCOORD0)
 {
     ObjectData objectData = objects[draw.objectIndex];
     float4 localPosition = float4(pos, 1.0);
@@ -206,11 +208,19 @@ void VSMmdMain(
     }
     localPosition.xyz += normalize(outlineNormal) *
         max(objectData.pmxParams.x, 0.0) * 0.01;
-    oPos = mul(objectData.viewProjection,
-        mul(objectData.world, localPosition));
+    const float4 worldPosition = mul(objectData.world, localPosition);
+    oWorld = worldPosition.xyz;
+    oPos = mul(objectData.viewProjection, worldPosition);
 }
 
-float4 PSMmdMain(float4 pos : SV_POSITION) : SV_TARGET
+// Edges take the same height fog as the model they outline (unshadowed: the
+// edge is a few pixels wide and the model's fog already carries the shafts).
+float4 PSMmdMain(float4 pos : SV_POSITION, float3 world : TEXCOORD0) : SV_TARGET
 {
-    return objects[draw.objectIndex].pmxEdgeColor;
+    const ObjectData objectData = objects[draw.objectIndex];
+    const float4 edge = objectData.pmxEdgeColor;
+    return float4(ApplyAtmosphereFog(edge.rgb, world,
+        objectData.viewPositionAlphaCutoff.xyz, objectData.atmosphereFog[0],
+        objectData.atmosphereFog[1], objectData.atmosphereFog[2],
+        objectData.atmosphereFog[3]), edge.a);
 }

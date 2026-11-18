@@ -1,5 +1,5 @@
 #pragma once
-#include "Core/Rendering/GrassInteraction.h"
+#include "Core/Features/Grass/GrassInteraction.h"
 #include "Core/Rendering/OcclusionBuffer.h"
 #include "Core/Rendering/RenderBoundsCache.h"
 #include "Core/Rendering/DrawBatchPreparation.h"
@@ -12,7 +12,7 @@
 #include "Core/Graphics/IGraphicsBuffer.h"
 #include "Core/Rendering/Lighting/Pipelines/Realtime/RealtimeLightingPipeline.h"
 #include "Core/Rendering/Lighting/Pipelines/Baked/BakedLightingPipeline.h"
-#include "Core/Rendering/GrassPerformance.h"
+#include "Core/Features/Grass/GrassPerformance.h"
 #include "Core/Rendering/RenderPerformance.h"
 #include "Core/Rendering/RenderSpatialIndex.h"
 #include "Core/Rendering/AutomaticInstancing.h"
@@ -415,7 +415,14 @@ private:
         uint64_t preparedSerial = 0;
         std::vector<Batch> batches;
         std::vector<FluidSurfaceBatch> fluidSurfaces;
+        // One fog record (camera position + fog0..3) per particle pass this
+        // frame (main view and each portal view); reused across frames.
+        std::vector<std::unique_ptr<IGraphicsBuffer>> fogBuffers;
+        uint32_t fogCursor = 0;
     };
+    // Height fog of the current lit camera view, packed for
+    // AtmosphereFog.hlsli; zero when the view has no fog. Particles read it.
+    std::array<glm::vec4, 4> m_viewAtmosphereFog{};
     std::unique_ptr<IPipelineState> m_particlePipeline;
     std::unique_ptr<IPipelineState> m_particleAlphaPipeline;
     std::unique_ptr<IPipelineState> m_particlePortalPipeline;

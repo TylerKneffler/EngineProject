@@ -1,6 +1,7 @@
 #include "Core/Rendering/DetailBudget.h"
 #include "Scripts/Landscape/LandscapeDriver.h"
-#include "Scripts/Grass/GrassField.h"
+#include "Core/Features/Grass/GrassField.h"
+#include "Scripts/Grass/MeadowGrass.h"
 #include "Core/Components/Terrain/TerrainHeightArchive.h"
 #include "Core/Components/Terrain/TerrainHydrologyMap.h"
 #include "Core/Components/Terrain/TerrainManager.h"
@@ -678,11 +679,13 @@ bool LandscapeDriver::ConfigureTerrain()
         else if (!undergrowthName.empty() && layerName == undergrowthName)
             GenerateProps(context, layer, level, true, propDensity);
     });
-    // The manager attaches a GrassField to its procedural grass layer; keep
-    // the grass on the meadow layer and give it this map's density.
+    // The meadow preset attaches a GrassField to the procedural grass layer;
+    // keep the grass on the meadow paint and give it this map's density.
     const float radius = grassRadius;
-    manager->SetObjectLayerSetup([radius, forestName](TerrainManager::Cell, TerrainObjectLayer& layer)
+    const std::string viewer = manager->viewerObjectName;
+    manager->SetObjectLayerSetup([radius, forestName, viewer](TerrainManager::Cell, TerrainObjectLayer& layer)
     {
+        MeadowGrass::Apply(layer, viewer);
         // Forests budget their detail in the project's "Trees" layer.
         if (layer.Owner && layer.layerName == forestName)
             layer.Owner->layer = Engine::Rendering::DetailBudget::Get().FindLayerOrDefault("Trees");
@@ -694,7 +697,7 @@ bool LandscapeDriver::ConfigureTerrain()
         // ground like a pelt: crowns of blades over a low sward.
         grass->shortPatchesPerSquareMeter = 2.6f;
         grass->tallPatchesPerSquareMeter = .4f;
-        // Wildflower and weed drifts (meshes come from the manager's defaults).
+        // Wildflower and weed drifts (meshes come from the meadow preset).
         grass->accentPatchesPerSquareMeter = .18f;
         // Low shrub, bramble and fern thickets over about a fifth of the meadow.
         grass->shrubPatchesPerSquareMeter = .7f;

@@ -7,7 +7,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace Engine::Components { class Mesh; }
+namespace Engine::Components { class Mesh; class TerrainManager; }
 namespace Engine::Core { class Object; }
 
 // Streams a finite authored terrain world from its saved height archive.
@@ -43,6 +43,8 @@ public:
     void OnAfterDeserialize(IGraphicsProvider* provider) override;
     uint64_t SourceSignature() const;
     bool ConfigureTerrain();
+    // Meadow grass on the manager's meadow layers (Scripts/Grass/MeadowGrass).
+    void InstallMeadowGrass(Engine::Components::TerrainManager& manager);
     std::vector<Engine::Components::Mesh*> GetFarTileMeshes() const;
     uint64_t GetFarTileUploadCount() const;
     uint64_t GetFarTileUploadedBytes() const;
@@ -65,6 +67,7 @@ private:
     size_t m_peakLoaded = 0;
     uint64_t m_configuredSignature = 0;
     bool m_previewLoaded = false;
+    bool m_meadowGrassInstalled = false;
     bool m_farAttempted = false;
     bool m_farDataReady = false;
 };

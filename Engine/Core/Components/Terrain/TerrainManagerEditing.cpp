@@ -84,72 +84,10 @@ void TerrainManager::RestoreObjectLayers(Cell cell,
                 if (layer->placements.size() != before) layer->MarkConfigurationDirty();
             }
         }
-        if (name == "Meadow grass" || name == "Procedural meadow grass")
-            layer->snapToGround = true;
-        if ((name == "Meadow grass" || name == "Procedural meadow grass") && !viewerObjectName.empty())
-        {
-            if (name == "Procedural meadow grass")
-            {
-                layer->conformToGround = true;
-                layer->viewDistance = 35.f;
-                layer->lod1Distance = 12.f;
-                layer->lod2Distance = 25.f;
-            }
-            const bool hasGrassField = std::any_of(child->Components.begin(),
-                child->Components.end(), [](const auto* component) {
-                    return component && component->GetTypeName() == "GrassField";
-                });
-            if (!hasGrassField)
-            if (auto* grass = Engine::Serialization::SceneSerializer::
-                    CreateRegisteredComponent("GrassField"))
-            {
-                // JsonValue(bool) is explicit: a bare bool converts to a number,
-                // which bool fields do not read as true.
-                const bool procedural = name == "Procedural meadow grass";
-                const Engine::Serialization::JsonValue proceduralValue(procedural);
-                const Engine::Serialization::JsonValue falseValue(false);
-                // Procedural layers grow tussock patches (blades from shared
-                // crowns over a low sward, tools/generate_meadow_grass.py).
-                // Authored layers keep the scattered-blade patches their
-                // placements name.
-                const std::string shortPatch = procedural ? "meadow_tussock" : "meadow_short";
-                const std::string tallPatch = procedural ? "field_tussock" : "field_tall";
-                const auto grassMesh = [](const std::string& stem, const char* suffix) {
-                    return "Assets/Mesh/Grass/" + stem + suffix + ".obj";
-                };
-                auto settings = Engine::Serialization::JsonValue::MakeObject();
-                settings.Set("shortMesh", grassMesh(shortPatch, ""))
-                    .Set("tallMesh", grassMesh(tallPatch, ""))
-                    .Set("shortMeshLod1", grassMesh(shortPatch, "_lod1"))
-                    .Set("shortMeshLod2", grassMesh(shortPatch, "_lod2"))
-                    .Set("tallMeshLod1", grassMesh(tallPatch, "_lod1"))
-                    .Set("tallMeshLod2", grassMesh(tallPatch, "_lod2"))
-                    .Set("viewerObjectName", viewerObjectName)
-                    .Set("useEditorCamera", proceduralValue).Set("visibleRadius", 11.f)
-                    .Set("tileSize", 4.f).Set("shortPatchesPerSquareMeter", .5f)
-                    .Set("tallPatchesPerSquareMeter", .16f).Set("seed", 18731)
-                    .Set("maxTileBuildsPerUpdate", 8).Set("castShadows", falseValue)
-                    .Set("tileWorkBudgetMs", 2.f).Set("fadeDuration", .35f)
-                    .Set("distanceFadeWidth", 2.f).Set("retainDormantTiles", falseValue)
-                    .Set("allowProceduralGeneration", proceduralValue)
-                    // Wildflowers and weeds in drifts (procedural layers only;
-                    // authored layers draw accents placed with these assets).
-                    .Set("accentMeshes", "Assets/Mesh/Grass/meadow_daisy.obj;"
-                        "Assets/Mesh/Grass/meadow_buttercup.obj;Assets/Mesh/Grass/meadow_clover.obj;"
-                        "Assets/Mesh/Grass/meadow_plantain.obj;Assets/Mesh/Grass/meadow_knapweed.obj;"
-                        "Assets/Mesh/Grass/meadow_dandelion.obj")
-                    .Set("accentPatchesPerSquareMeter", .08f).Set("accentDriftSize", 7.f)
-                    // Low shrubs in thickets (procedural layers only, like accents).
-                    .Set("shrubMeshes", "Assets/Mesh/Grass/meadow_shrub.obj;"
-                        "Assets/Mesh/Grass/meadow_bramble.obj;Assets/Mesh/Grass/meadow_fern.obj")
-                    .Set("shrubPatchesPerSquareMeter", procedural ? .6f : 0.f)
-                    .Set("shrubThicketSize", 9.f).Set("shrubCoverage", .25f);
-                grass->Deserialize(settings);
-                child->AddComponent(grass);
-            }
-        }
         // Project layer for budgets and filtering: grass layers in "Grass",
-        // other placements in "Props". The setup hook may override it.
+        // other placements in "Props". The setup hook (scene content such as
+        // grass presets, see SetObjectLayerSetup) may add a GrassField or
+        // override the layer.
         const bool grassLayer = std::any_of(child->Components.begin(),
             child->Components.end(), [](const auto* component) {
                 return component && component->GetTypeName() == "GrassField";

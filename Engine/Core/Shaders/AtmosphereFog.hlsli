@@ -101,4 +101,24 @@ float3 ApplyAtmosphereFog(float3 color, float3 worldPos, float3 cameraPos,
         fog0, fog1, fog2, fog3, 1.0);
 }
 
+// Fraction of light from worldPos that reaches the camera (1 = no fog). For
+// additive blends, which must fade into the fog rather than take its color:
+// the fog's own in-scatter is already in the surface behind them.
+float AtmosphereFogTransmittance(float3 worldPos, float3 cameraPos,
+    float4 fog0, float4 fog1, float4 fog3)
+{
+    [branch] if (fog0.w < 0.5)
+        return 1.0;
+    const float3 toSurface = worldPos - cameraPos;
+    const float distanceToSurface = length(toSurface);
+    const float rayLength = max(distanceToSurface - fog1.w, 0.0);
+    [branch] if (rayLength <= 0.0)
+        return 1.0;
+    const float3 viewDirection = toSurface / max(distanceToSurface, 1e-4);
+    const float opticalDepth = AtmosphereOpticalDepth(
+        AtmosphereDensityAtStart(cameraPos, viewDirection, fog0, fog1),
+        fog0.y, viewDirection.y, rayLength);
+    return 1.0 - min(1.0 - exp(-opticalDepth), fog3.w);
+}
+
 #endif

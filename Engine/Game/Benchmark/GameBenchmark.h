@@ -1,5 +1,5 @@
 #pragma once
-#include "Core/Rendering/GrassPerformance.h"
+#include "Core/Features/Grass/GrassPerformance.h"
 
 #include "Game/Application/GameApplication.h"
 #include "Core/Rendering/RenderPerformance.h"
@@ -32,6 +32,10 @@ struct GameBenchmarkSceneSample
     double updateObjectsMs = 0, updatePhysicsMs = 0, updatePostPhysicsMs = 0, grassMs = 0;
     Engine::Rendering::GrassPerformance grass;
     uint64_t loadedPrefabCells = 0, pooledPrefabCells = 0;
+    // Far objects of all managers; settled when every one reports settled.
+    uint64_t farObjectCells = 0, farObjectQueuedCells = 0, farObjectBlocks = 0,
+        farObjectPreparingBlocks = 0;
+    bool farObjectsSettled = true;
     uint64_t sceneGeneration = 0;
     bool camera = false;
     double cameraPosition[3]{};

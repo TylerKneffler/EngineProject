@@ -2658,8 +2658,7 @@ if(NOT ENGINE_PROJECT_DIR AND WIN32 AND
    EXISTS "${ENGINE_LOCAL_TEST_ROOT}/GrassPerformanceTests.cpp")
     enable_testing()
     add_executable(GrassPerformanceTests EXCLUDE_FROM_ALL
-        "${ENGINE_LOCAL_TEST_ROOT}/GrassPerformanceTests.cpp"
-        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/Grass/GrassField.cpp")
+        "${ENGINE_LOCAL_TEST_ROOT}/GrassPerformanceTests.cpp")
     target_link_libraries(GrassPerformanceTests PRIVATE Engine d3d11)
     target_compile_options(GrassPerformanceTests PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/bigobj>)
     target_include_directories(GrassPerformanceTests PRIVATE
@@ -2870,8 +2869,7 @@ endif()
 if(NOT ENGINE_PROJECT_DIR AND WIN32 AND
    EXISTS "${ENGINE_LOCAL_TEST_ROOT}/OakBackendCapture.cpp")
     add_executable(OakBackendCapture EXCLUDE_FROM_ALL
-        "${ENGINE_LOCAL_TEST_ROOT}/OakBackendCapture.cpp"
-        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/Grass/GrassField.cpp")
+        "${ENGINE_LOCAL_TEST_ROOT}/OakBackendCapture.cpp")
     set_target_properties(OakBackendCapture PROPERTIES OUTPUT_NAME "TerrainPrefabAndOakTests")
     target_link_libraries(OakBackendCapture PRIVATE Engine d3d11 dxgi)
     target_compile_definitions(OakBackendCapture PRIVATE NOMINMAX)
@@ -3001,8 +2999,7 @@ endif()
 if(NOT ENGINE_PROJECT_DIR AND WIN32 AND
    EXISTS "${ENGINE_LOCAL_TEST_ROOT}/ForestPerformanceAudit.cpp")
     add_executable(ForestPerformanceAudit EXCLUDE_FROM_ALL
-        "${ENGINE_LOCAL_TEST_ROOT}/ForestPerformanceAudit.cpp"
-        "${ENGINE_ROOT}/Engine/Core/Assets/Scripts/Grass/GrassField.cpp")
+        "${ENGINE_LOCAL_TEST_ROOT}/ForestPerformanceAudit.cpp")
     target_link_libraries(ForestPerformanceAudit PRIVATE Engine d3d11 dxgi)
     target_compile_definitions(ForestPerformanceAudit PRIVATE NOMINMAX ENGINE_BUILD_CONFIGURATION="$<CONFIG>")
     target_compile_options(ForestPerformanceAudit PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/bigobj>)

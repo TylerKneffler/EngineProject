@@ -6,7 +6,7 @@
 #include "Core/Components/Mesh/Mesh.h"
 #include "Core/Components/Mesh/MeshInstanceLayerData.h"
 #include "Core/Components/Terrain/TerrainObjectLayer.h"
-#include "Core/Rendering/GrassPerformance.h"
+#include "Core/Features/Grass/GrassPerformance.h"
 #include <chrono>
 #include <optional>
 #include <map>

@@ -83,8 +83,11 @@ The summary is valid only when all requested sample frames have a camera,
 nonzero CPU-submitted draws and triangles, the requested resolution, and a
 successful image. `--require-terrain` and `--require-streamed-cells` add scene
 checks. `--wait-for-residency <seconds>` waits for those checks before starting
-the warm-up, returning an invalid result if the timeout expires. These checks do
-not prove that streaming has settled; choose a warm-up suited to the scene and
+the warm-up, returning an invalid result if the timeout expires. It also waits
+for terrain far objects (`TerrainManager::farObjectRadius`) to settle: every
+far cell around the start computed, every far block built and its instances
+prepared (frame log `far_object_*` fields). Near-cell streaming, textures and
+detail budget are not part of the wait; choose a warm-up suited to the scene and
 inspect residency throughout the recording. CPU-submitted triangle counts can
 include indirect candidates, so they are not GPU-rasterized triangle counts.
 GPU timing values are null when unavailable, and sample IDs identify repeated

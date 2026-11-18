@@ -1101,11 +1101,18 @@ int GameApplication::Run(HINSTANCE instance, const GameBenchmarkOptions* benchma
                 benchmarkReady = state.camera && state.render.physicalDraws &&
                     state.render.submittedTriangles &&
                     (!benchmark->requireTerrain || state.terrains) &&
-                    (!benchmark->requireStreamedCells || state.loadedCells);
+                    (!benchmark->requireStreamedCells || state.loadedCells) &&
+                    state.farObjectsSettled;
                 if (!benchmarkReady && residencyWaitMs >=
                     1000.0 * benchmark->residencyTimeoutSeconds)
                 {
-                    std::cerr << "Timed out waiting for benchmark scene residency\n";
+                    std::cerr << "Timed out waiting for benchmark scene residency (camera "
+                        << state.camera << ", draws " << state.render.physicalDraws
+                        << ", terrains " << state.terrains << ", loaded cells " << state.loadedCells
+                        << ", far objects settled " << state.farObjectsSettled
+                        << ": cells " << state.farObjectCells << ", queued " << state.farObjectQueuedCells
+                        << ", blocks " << state.farObjectBlocks << ", preparing "
+                        << state.farObjectPreparingBlocks << ")\n";
                     PostQuitMessage(2);
                 }
             }

@@ -15,7 +15,6 @@
 #include "Core/ProjectLoader.h"
 #include "Core/Components/Particles/ParticleEmitter.h"
 #include "Core/Components/Animation/AnimationManager.h"
-#include "Core/Assets/Scripts/Grass/GrassField.h"
 #include "Core/Physics/Adapters/BulletPhysicsAdapter.h"
 #include "Core/Time/FramePacer.h"
 #include "Core/Renderers/IEditorRenderer.h"

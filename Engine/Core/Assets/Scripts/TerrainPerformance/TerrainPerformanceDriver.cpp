@@ -1,6 +1,7 @@
 #include "Scripts/TerrainPerformance/TerrainPerformanceDriver.h"
 #include "Core/Components/Terrain/TerrainHeightArchive.h"
 #include "Core/Components/Terrain/TerrainManager.h"
+#include "Scripts/Grass/MeadowGrass.h"
 #include "Core/Components/Mesh/Mesh.h"
 #include "Core/Components/Materials/Material.h"
 #include "Core/Components/Camera/Camera.h"
@@ -328,6 +329,7 @@ void TerrainPerformanceDriver::OnAfterDeserialize(IGraphicsProvider*)
     // the Terrain Performance test map and must not replace an Oak manager's
     // own baked cells and forest generator during scene restoration.
     if (!manager->proceduralOakMeadow && !ConfigureTerrain()) return;
+    InstallMeadowGrass(*manager);
     // Scene editing does not run the play-mode streaming loop. Load only the
     // nearby saved cells so the map is visible as soon as the scene opens.
     const int previousFarRadius = manager->farRadius;
@@ -377,11 +379,24 @@ void TerrainPerformanceDriver::OnAfterDeserialize(IGraphicsProvider*)
     m_previewLoaded = true;
 }
 
+void TerrainPerformanceDriver::InstallMeadowGrass(Engine::Components::TerrainManager& manager)
+{
+    if (m_meadowGrassInstalled) return;
+    m_meadowGrassInstalled = true;
+    const std::string viewer = manager.viewerObjectName;
+    manager.SetObjectLayerSetup([viewer](Engine::Components::TerrainManager::Cell,
+        Engine::Components::TerrainObjectLayer& layer)
+    {
+        MeadowGrass::Apply(layer, viewer);
+    });
+}
+
 void TerrainPerformanceDriver::Update()
 {
     if (!Owner) return;
     auto* manager = Owner->GetComponent<Engine::Components::TerrainManager>();
     if (!manager) return;
+    InstallMeadowGrass(*manager);
     // A running scene uses its startup snapshot. Authored changes take effect
     // when the scene is restarted and the saved archive/cache is reopened.
     if (Owner->GetScene() && !Owner->GetScene()->HasStarted() &&

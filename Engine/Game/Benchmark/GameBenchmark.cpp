@@ -168,6 +168,12 @@ GameBenchmarkSceneSample GameBenchmark::CollectScene(Engine::Scene::Scene& scene
         result.loadedPrefabCells += manager->GetLoadedPrefabCellCount();
         result.pooledPrefabCells += manager->GetPooledPrefabCellCount();
         result.preparingCells += manager->GetPreparingCellCount();
+        const auto farObjects = manager->GetFarObjectStatus();
+        result.farObjectCells += farObjects.computedCells;
+        result.farObjectQueuedCells += farObjects.queuedCells + farObjects.pendingCells;
+        result.farObjectBlocks += farObjects.blocks;
+        result.farObjectPreparingBlocks += farObjects.preparingBlocks;
+        result.farObjectsSettled = result.farObjectsSettled && farObjects.settled;
         if (manager == scene.GetComponents<Engine::Components::TerrainManager>().front())
         {
             const auto& t = manager->GetLastStreamingTiming();
@@ -347,6 +353,11 @@ void GameBenchmark::Record(uint64_t frame, const GameBenchmarkFrameSample& s)
         << ",\"terrain_prefab_cells_loaded\":" << s.scene.loadedPrefabCells
         << ",\"terrain_prefab_cells_pooled\":" << s.scene.pooledPrefabCells
         << ",\"terrain_cells_preparing\":" << s.scene.preparingCells
+        << ",\"far_object_cells\":" << s.scene.farObjectCells
+        << ",\"far_object_cells_queued\":" << s.scene.farObjectQueuedCells
+        << ",\"far_object_blocks\":" << s.scene.farObjectBlocks
+        << ",\"far_object_blocks_preparing\":" << s.scene.farObjectPreparingBlocks
+        << ",\"far_objects_settled\":" << (s.scene.farObjectsSettled ? "true" : "false")
         << ",\"game_camera_present\":" << (s.scene.camera ? "true" : "false")
         << ",\"game_camera_position\":[" << s.scene.cameraPosition[0] << ','
         << s.scene.cameraPosition[1] << ',' << s.scene.cameraPosition[2] << ']'

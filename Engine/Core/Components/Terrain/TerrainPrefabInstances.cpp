@@ -355,9 +355,13 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
                     return readSource(path);
                 }).share();
             }
-            else if (entry.value && time-entry.checked>=std::chrono::seconds(1))
+            else if (entry.value && !entry.future.valid() &&
+                time-entry.checked>=std::chrono::seconds(1))
             {
-                entry.value.reset();
+                // Keep serving the previous result until the refresh lands.
+                // Dropping it made every layer visited less often than the
+                // refresh interval find its sources pending on each visit, so
+                // a layer whose sources no other layer kept fresh never built.
                 entry.future=Engine::Rendering::RenderJobs::Get().Submit([path,readSource] {
                     return readSource(path);
                 }).share();

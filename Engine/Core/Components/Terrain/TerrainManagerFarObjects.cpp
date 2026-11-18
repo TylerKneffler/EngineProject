@@ -136,6 +136,24 @@ void TerrainManager::ClearFarObjects()
     m_farUrgentBlocks.clear();
 }
 
+TerrainManager::FarObjectStatus TerrainManager::GetFarObjectStatus() const
+{
+    FarObjectStatus status;
+    status.computedCells = m_farObjectCells.size();
+    status.queuedCells = m_farObjectQueue.size() - std::min(m_farObjectQueueNext, m_farObjectQueue.size());
+    status.pendingCells = m_farObjectPending.size();
+    status.blocks = m_farObjectBlocks.size();
+    for (const auto& [key, block] : m_farObjectBlocks)
+        if (!block.prepared) ++status.preparingBlocks;
+    if (std::clamp(farObjectRadius, 0, 64) <= 0 || m_editorStreaming) return status;
+    // Not scanned yet (no update since enabling or a reset): nothing known.
+    const bool scanned = m_farScanRadius == std::clamp(farObjectRadius, 0, 64);
+    status.settled = scanned && !status.queuedCells && !status.pendingCells &&
+        m_farObjectJobs.empty() && m_farDirtyBlocks.empty() && m_farUrgentBlocks.empty() &&
+        !status.preparingBlocks;
+    return status;
+}
+
 void TerrainManager::UpdateFarObjects(int centerX, int centerY)
 {
     if (!Owner || !Owner->GetScene()) return;
@@ -401,6 +419,7 @@ void TerrainManager::UpdateFarObjects(int centerX, int centerY)
         block.layer->placements = std::move(placements);
         block.layer->MarkConfigurationDirty();
         block.membership = membership;
+        block.prepared = false;
         return true;
     };
     // A block that is still computing is not kept dirty: each finished job
@@ -414,5 +433,10 @@ void TerrainManager::UpdateFarObjects(int centerX, int centerY)
     for (const Cell key : m_farDirtyBlocks)
         evaluate(key, false);
     m_farDirtyBlocks.clear();
+
+    // Latch blocks whose instances finished preparing (see FarObjectBlock).
+    for (auto& [key, block] : m_farObjectBlocks)
+        if (!block.prepared && block.layer && block.layer->IsPrefabPreparationComplete(provider))
+            block.prepared = true;
 }
 }

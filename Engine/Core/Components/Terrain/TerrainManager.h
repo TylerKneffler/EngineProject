@@ -233,6 +233,16 @@ public:
     double GetRenderBatchBuildMilliseconds() const
     { return m_renderBatchBuildMilliseconds; }
     size_t GetPreparingCellCount() const { return m_preparingCells.size(); }
+    // Far object streaming progress (TerrainManagerFarObjects.cpp). Settled
+    // means the window around the current center is fully computed, every
+    // block is built and its instances are prepared, or far objects are off.
+    struct FarObjectStatus
+    {
+        size_t computedCells = 0, queuedCells = 0, pendingCells = 0;
+        size_t blocks = 0, preparingBlocks = 0;
+        bool settled = true;
+    };
+    FarObjectStatus GetFarObjectStatus() const;
     size_t GetCacheHitCount() const { return m_cacheHits; }
     Terrain* GetLoadedCell(int x, int y) const;
     const std::vector<std::string>& GetObjectLayerNames() const
@@ -417,6 +427,9 @@ private:
         Engine::Core::Object* object = nullptr;
         TerrainObjectLayer* layer = nullptr;
         uint64_t membership = 0;
+        // Instances finished preparing since the last placement rebuild.
+        // Latched: periodic source re-checks report "preparing" briefly.
+        bool prepared = false;
     };
     struct FarObjectJob
     {

@@ -65,8 +65,18 @@ Order is by dependency and visual payoff, not by section number in older notes.
 - [ ] With all far blocks loaded the vista is GPU-bound on far forest: foliage depth 6-11 ms + leaves 3.5-7 ms,
   at detail_scale 0.82-0.94 because far blocks are outside the detail budget. Belongs with section 6's far-forest
   clusters/impostors, or let the far blocks' density follow the budget
-- [ ] Benchmarks measure while far objects still stream (600 warmup frames is ~half of the 16k cells): add far
-  objects to `--wait-for-residency`, or warm up ~5000 frames
+- [x] Benchmarks measured while far objects still streamed (600 warmup frames was ~half of the 16k cells).
+  `--wait-for-residency` now also waits for `TerrainManager::GetFarObjectStatus().settled` (window computed, no
+  jobs or dirty blocks, every block's instances prepared, latched per block since its last rebuild); frame logs
+  carry `far_object_cells`, `far_object_cells_queued`, `far_object_blocks`, `far_object_blocks_preparing`,
+  `far_objects_settled`. The timeout message prints which condition is missing. Vista settles after ~109 s.
+  - [x] Found on the way: the prefab source stat cache (`PreparePrefabInstances`) dropped each entry when it went
+    1 s stale, so a layer visited less than once a second (round-robin under the 3 ms budget, ~300 layers) found its
+    sources pending on every visit; a far block whose prefabs no other layer kept fresh never built. Stale entries
+    now keep serving until the refresh lands
+  - [ ] Fully settled vista measures 40.1 ms median / 47.5 p95 (DX12, one run, not A/B'd), far above the
+    16.8-20.7 ms recorded with half the far cells streamed. Expected direction (see far-forest GPU item above) but
+    the size needs a stage breakdown before trusting older numbers
 - [ ] Cell-crossing spikes while moving (old and new far code alike): ~35 ms far-block membership rebuilds plus
   ~22 ms near-cell streaming on the same frames; spread block rebuilds over frames
 - [ ] Camera-relative precision check at 16 km from origin (transforms are double, check vertex/shader paths)
@@ -220,7 +230,13 @@ record 5.9 (camera 4.5, shadow 1.1); GPU opaque 5.4.
 - [ ] `GameBackendCapture` on the landscape with `--backend dx12` fails "renderer did not return the requested scene
   capture" (fog on or off; Vulkan and the default scene work). Captures render at 1520x873 for a 1920x1080 window;
   `DX12GameRenderer::ReadSceneCaptureRGBA` assumes the window size. Suspect render scale
-- [ ] Fog the remaining passes: particles (incl. fluid), MMD outlines, and the skybox seen through portals (portal object draws already fog)
+- [x] Fog particles (CPU, GPU, fluid surface) and MMD outlines. Particles read a per-pass `particleFog` buffer
+  (t7 / Vulkan binding 8: camera position + fog0..3, since particle constants already fill the 128-byte push
+  constant); alpha particles blend to the in-scatter, additive ones fade by transmittance
+  (`AtmosphereFogTransmittance`); the fluid surface fogs at its density-weighted particle center. Checked on DX12,
+  DX11, Vulkan with a dense-fog copy of particle_showcase; fluid river runs on DX12/Vulkan. MMD outline fog
+  compiles but was not seen in a capture
+- [ ] Fog the skybox seen through portals (portal object draws already fog)
 - [ ] Tune defaults against the step 0 test shot after step 2 sets world scale
 
 ### 2. Terrain scale + erosion (Tools/build_landscape_demo.py)
