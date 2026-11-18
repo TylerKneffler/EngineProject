@@ -2,6 +2,9 @@
 #include "Core/Components/Terrain/TerrainHeightArchive.h"
 #include "Core/Components/Terrain/TerrainManager.h"
 #include "Scripts/Grass/MeadowGrass.h"
+#include "Core/Components/Terrain/TerrainSurfaceSample.h"
+#include "Core/Serialization/PrefabLod.h"
+#include <array>
 #include "Core/Components/Mesh/Mesh.h"
 #include "Core/Components/Materials/Material.h"
 #include "Core/Components/Camera/Camera.h"
@@ -379,10 +382,70 @@ void TerrainPerformanceDriver::OnAfterDeserialize(IGraphicsProvider*)
     m_previewLoaded = true;
 }
 
+namespace
+{
+// Oak Meadow's forest: 48 oaks of three species per unsaved cell, on full
+// geometry levels only (LOD0-2 of each prefab, skipping its impostor),
+// grounded once. Saved placements keep the height they were authored at.
+void GenerateOakForest(const Engine::Components::TerrainManager::ObjectLayerContext& context,
+    Engine::Components::TerrainObjectLayer& layer)
+{
+    if (context.farObjects || !context.heights || context.cellsX <= 0 || context.cellsY <= 0 ||
+        context.heights->size() != static_cast<size_t>(context.cellsX + 1) * (context.cellsY + 1))
+        return;
+    layer.viewDistance = 220.f;
+    layer.lod1Distance = 28.f;
+    layer.lod2Distance = 90.f;
+    layer.shadowDistance = 90.f;
+    layer.shadowLod = 1;
+    const std::string prefix = "Assets/Prefabs/Woodland/Oaks/";
+    const std::array<std::string, 3> species = {
+        "Big_oak_tree_001", "Medium_oak_tree_001", "Small_oak_tree_001"};
+    for (const auto& speciesName : species)
+    {
+        const std::string asset = prefix + speciesName + ".prefab";
+        auto& lod = layer.objectLods[asset];
+        lod.meshes = {asset,
+            Engine::Serialization::PrefabLod::Path(asset, 1),
+            Engine::Serialization::PrefabLod::Path(asset, 2)};
+        lod.distances = {28.f, 90.f};
+    }
+    uint32_t state = static_cast<uint32_t>(context.cell.first) * 0x9e3779b9u ^
+        static_cast<uint32_t>(context.cell.second) * 0x85ebca6bu ^ 0x6d656164u;
+    const auto random = [&state]() {
+        state = state * 1664525u + 1013904223u;
+        return static_cast<float>(state >> 8) / 16777216.f;
+    };
+    for (uint64_t i = 0; i < 48; ++i)
+    {
+        Engine::Components::TerrainObjectLayer::Placement placement;
+        placement.id = i + 1;
+        placement.asset = prefix + species[i % species.size()] + ".prefab";
+        const float sx = random() * context.cellsX;
+        const float sz = random() * context.cellsY;
+        placement.position = {sx * context.cellWidth, 0.f, sz * context.cellDepth};
+        placement.yawDegrees = random() * 360.f;
+        placement.scale = .8f + random() * .4f;
+        Engine::Components::SampleTerrainSurface(*context.heights, context.cellsX,
+            context.cellsY, context.cellWidth, context.cellDepth,
+            placement.position.x, placement.position.z, placement.position.y);
+        layer.placements.push_back(std::move(placement));
+    }
+}
+}
+
 void TerrainPerformanceDriver::InstallMeadowGrass(Engine::Components::TerrainManager& manager)
 {
     if (m_meadowGrassInstalled) return;
     m_meadowGrassInstalled = true;
+    // Oak Meadow content the engine used to hard-code: its forest, generated
+    // into unsaved cells' "Oak forest" layers.
+    if (manager.proceduralOakMeadow)
+        manager.SetObjectLayerGenerator([](const Engine::Components::TerrainManager::ObjectLayerContext& context,
+            const std::string& layerName, Engine::Components::TerrainObjectLayer& layer)
+        {
+            if (layerName == "Oak forest") GenerateOakForest(context, layer);
+        });
     const std::string viewer = manager.viewerObjectName;
     manager.SetObjectLayerSetup([viewer](Engine::Components::TerrainManager::Cell,
         Engine::Components::TerrainObjectLayer& layer)

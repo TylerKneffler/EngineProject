@@ -50,7 +50,9 @@ public:
     int maxUnloadsPerUpdate = 4;
     bool asyncStreaming = false;
     bool prefetchAdjacentCells = true;
-    // Populate previously unauthored cells with a deterministic oak meadow.
+    // Oak Meadow maps: synchronous loads stream asynchronously too. The
+    // meadow's content (oak forest, meadow grass) comes from its scene
+    // script (TerrainPerformanceDriver) through the layer generator/setup hooks.
     bool proceduralOakMeadow = false;
     int maxPreparedCells = 4;
     int maxUploadsPerUpdate = 2;
@@ -612,7 +614,6 @@ private:
         int cellsX = 0, cellsY = 0, lodStride = 1;
         float cellWidth = 1.f, cellDepth = 1.f;
         bool hasSaved = false, edited = false;
-        bool proceduralOakMeadow = false;
         bool requireBake = false;
         JsonValue saved;
         std::string cachePath, editPath;

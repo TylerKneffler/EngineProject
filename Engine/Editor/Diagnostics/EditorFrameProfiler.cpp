@@ -1,5 +1,6 @@
 #include "Engine/Editor/Diagnostics/EditorFrameProfiler.h"
 #include "Core/Rendering/RenderSystem.h"
+#include "Core/Features/Grass/GrassStats.h"
 #include "Core/Rendering/SceneRenderer.h"
 #include "Core/Runtime/Game.h"
 #include "Engine/Editor/Diagnostics/FrameActivity.h"
@@ -374,7 +375,9 @@ namespace Engine::Editor
             << ",\"constant_discard_maps\":" << factory->GetConstantBufferDiscardMaps();
         output << ",\"spatial_active_fields\":" << scene->GetSpatialUpdateScheduler().activeCount
             << ",\"spatial_dormant_fields\":" << scene->GetSpatialUpdateScheduler().dormantCount;
-        const auto& grass = Engine::Rendering::RenderSystem::For(*scene).GetGrassPerformance();
+        const auto* grassStats = Engine::Features::Grass::GrassStats::Find(*scene);
+        const Engine::Features::Grass::GrassPerformance grass =
+            grassStats ? grassStats->Get() : Engine::Features::Grass::GrassPerformance{};
         const auto& renderCpu=sample.renderCpu;
         const auto frameUploadStats = Engine::Rendering::RenderSystem::For(*scene).GetCurrentFrameUploadStats();
         renderCpu.instances.WriteJson(output);

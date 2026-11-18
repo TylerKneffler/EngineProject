@@ -143,8 +143,11 @@ GameBenchmarkSceneSample GameBenchmark::CollectScene(Engine::Scene::Scene& scene
     result.updateObjectsMs = updateTimings.objectsMs;
     result.updatePhysicsMs = updateTimings.physicsMs;
     result.updatePostPhysicsMs = updateTimings.postPhysicsMs;
-    result.grassMs = Engine::Rendering::RenderSystem::For(scene).GetGrassPerformance().totalMs;
-    result.grass = Engine::Rendering::RenderSystem::For(scene).GetGrassPerformance();
+    if (const auto* grass = Engine::Features::Grass::GrassStats::Find(scene))
+    {
+        result.grass = grass->Get();
+        result.grassMs = result.grass.totalMs;
+    }
     result.meshes = scene.GetComponents<Engine::Components::Mesh>().size();
     result.terrains = scene.GetComponents<Engine::Components::Terrain>().size();
     for (auto* layer : scene.GetComponents<Engine::Components::TerrainObjectLayer>())

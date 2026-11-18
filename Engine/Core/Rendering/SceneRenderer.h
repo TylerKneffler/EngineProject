@@ -1,5 +1,5 @@
 #pragma once
-#include "Core/Features/Grass/GrassInteraction.h"
+#include "Core/Rendering/VegetationInteraction.h"
 #include "Core/Rendering/OcclusionBuffer.h"
 #include "Core/Rendering/RenderBoundsCache.h"
 #include "Core/Rendering/DrawBatchPreparation.h"
@@ -12,7 +12,6 @@
 #include "Core/Graphics/IGraphicsBuffer.h"
 #include "Core/Rendering/Lighting/Pipelines/Realtime/RealtimeLightingPipeline.h"
 #include "Core/Rendering/Lighting/Pipelines/Baked/BakedLightingPipeline.h"
-#include "Core/Features/Grass/GrassPerformance.h"
 #include "Core/Rendering/RenderPerformance.h"
 #include "Core/Rendering/RenderSpatialIndex.h"
 #include "Core/Rendering/AutomaticInstancing.h"
@@ -118,38 +117,6 @@ public:
     // Opt-in alpha-prepass experiment. Never serialized or enabled by policy.
     void SetDiagnosticOpaqueDepthEqual(bool enabled) { m_diagnosticOpaqueDepthEqual = enabled; }
     bool DiagnosticOpaqueDepthEqualReady() const { return m_diagnosticOpaqueDepthEqualReady; }
-    void ResetGrassPerformance() { m_grassPerformance = {}; m_grassGpuResources.clear(); }
-    bool AccountGrassGpuResource(const void* resource)
-    { return resource && m_grassGpuResources.insert(resource).second; }
-    const Engine::Rendering::GrassPerformance& GetGrassPerformance() const
-    { return m_grassPerformance; }
-    void AddGrassPerformance(const Engine::Rendering::GrassPerformance& value)
-    {
-        m_grassPerformance.totalMs += value.totalMs;
-        m_grassPerformance.referencesMs += value.referencesMs;
-        m_grassPerformance.sourcesMs += value.sourcesMs;
-        m_grassPerformance.placementMs += value.placementMs;
-        m_grassPerformance.visibilityMs += value.visibilityMs;
-        m_grassPerformance.retirementMs += value.retirementMs;
-        m_grassPerformance.schedulingMs += value.schedulingMs;
-        m_grassPerformance.buildMs += value.buildMs;
-        m_grassPerformance.accountingMs += value.accountingMs;
-        m_grassPerformance.otherMs += value.otherMs;
-        m_grassPerformance.scanMs += value.scanMs;
-        m_grassPerformance.generationMs += value.generationMs;
-        m_grassPerformance.uploadMs += value.uploadMs;
-        m_grassPerformance.placementsScanned += value.placementsScanned;
-        m_grassPerformance.tilesBuilt += value.tilesBuilt;
-        m_grassPerformance.lodSwitches += value.lodSwitches;
-        m_grassPerformance.pending += value.pending;
-        m_grassPerformance.residentLods += value.residentLods;
-        m_grassPerformance.gpuBytes += value.gpuBytes;
-        m_grassPerformance.instances += value.instances;
-        m_grassPerformance.instanceUploadBytes += value.instanceUploadBytes;
-        m_grassPerformance.activeTiles+=value.activeTiles;
-        m_grassPerformance.transitionTiles+=value.transitionTiles;
-        m_grassPerformance.fadingTiles+=value.fadingTiles;
-    }
     struct PrepareTimings
     {
         double assetPublicationMs=0,texturePublicationMs=0,shaderSourcePollMs=0,shaderPipelinePublicationMs=0;
@@ -931,13 +898,11 @@ private:
     ShadowDebugSnapshot m_shadowDebugSnapshot;
     ShadowCpuTiming m_lastShadowCpuTiming{};
     bool m_renderFramePrepared = false;
-    std::vector<Engine::Rendering::GrassInteractionCapsule> m_frameGrassCapsules;
+    std::vector<Engine::Rendering::VegetationBendCapsule> m_frameGrassCapsules;
     bool m_nativeRenderPacketTaken = false;
     bool m_recordingNativeCommands = false;
     bool m_diagnosticOpaqueDepthEqual = false;
     bool m_diagnosticOpaqueDepthEqualReady = true;
-    Engine::Rendering::GrassPerformance m_grassPerformance{};
-    std::unordered_set<const void*> m_grassGpuResources;
     PrepareTimings m_lastPrepareTimings{};
     size_t m_prefabPreparationCursor = 0;
     const Engine::Rendering::SceneViewOverlays* m_viewOverlays = nullptr;

@@ -15,6 +15,7 @@
 #include "Core/ProjectLoader.h"
 #include "Core/Components/Particles/ParticleEmitter.h"
 #include "Core/Components/Animation/AnimationManager.h"
+#include "Core/Features/Grass/GrassStats.h"
 #include "Core/Physics/Adapters/BulletPhysicsAdapter.h"
 #include "Core/Time/FramePacer.h"
 #include "Core/Renderers/IEditorRenderer.h"
@@ -656,7 +657,7 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
         };
         bool usePlayPipeline = playPipeline && playState == Engine::Editor::PlayState::Playing &&
             !waitingForPlayDebugger && !pendingPlayStart && pipelineViewsMatch();
-        Engine::Rendering::RenderSystem::For(*scene).ResetGrassPerformance();
+        if (auto* grass = Engine::Features::Grass::GrassStats::Find(*scene)) grass->Reset();
         // Tick game objects while playing
         if (playState == Engine::Editor::PlayState::Playing &&
             !waitingForPlayDebugger && !pendingPlayStart &&
@@ -754,7 +755,7 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
         double pipelineRecordMs = 0;
         double pipelineComputeRecordMs=0,pipelineSnapshotMs=0,pipelineViewRecordMs=0;
         Engine::Editor::EditorPlayPipeline::Timings pipelineTimings;
-        Engine::Rendering::GrassPerformance recordedGrass;
+        Engine::Features::Grass::GrassPerformance recordedGrass;
         bool uiDrawn = false;
         double uiCpuMilliseconds = 0;
         const auto drawEditorUi = [&]()
@@ -901,7 +902,8 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
                 // Game surface has supplied input, suppress native-window UI.
                 input.clientWidth = input.clientHeight = 0;
                 Engine::Rendering::RenderSystem::For(*scene).CaptureEmbeddedUiInput(input);
-                recordedGrass = Engine::Rendering::RenderSystem::For(*scene).GetGrassPerformance();
+                if (const auto* grass = Engine::Features::Grass::GrassStats::Find(*scene))
+                    recordedGrass = grass->Get();
                 playPipeline->Begin(*scene, std::max(dt, 0.f), std::move(input));
             }
             prepareMilliseconds = std::chrono::duration<double, std::milli>(
@@ -1075,7 +1077,7 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
         if (playPipeline && playPipeline->Busy())
         {
             pipelineTimings = playPipeline->Finish(std::move(frameCommands));
-            Engine::Rendering::RenderSystem::For(*scene).AddGrassPerformance(recordedGrass);
+            Engine::Features::Grass::GrassStats::For(*scene).Add(recordedGrass);
             uint32_t occlusionCulled = 0;
             for (const auto& recorded : recordedViews)
                 occlusionCulled += recorded.color->GetReplayOcclusionCulledCount();

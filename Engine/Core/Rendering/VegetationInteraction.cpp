@@ -1,4 +1,4 @@
-#include "GrassInteraction.h"
+#include "VegetationInteraction.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Scene/Object.h"
 #include "Core/Components/Physics/PrimitiveObjectCollider.h"
@@ -10,7 +10,7 @@
 #include <limits>
 namespace Engine::Rendering
 {
-GrassInteractionCapsule MakeGrassInteractionCapsule(const glm::mat4& world,
+VegetationBendCapsule MakeVegetationBendCapsule(const glm::mat4& world,
     const glm::vec3& center, float radius, float height, float reach)
 {
     const glm::vec3 axis(world[1]);
@@ -23,14 +23,14 @@ GrassInteractionCapsule MakeGrassInteractionCapsule(const glm::mat4& world,
     return {glm::vec4(midpoint - up * halfSegment, worldRadius),
         glm::vec4(midpoint + up * halfSegment, std::max(.01f, reach))};
 }
-std::vector<GrassInteractionCapsule> CaptureGrassInteractionCapsules(const Engine::Scene::Scene& scene)
+std::vector<VegetationBendCapsule> CaptureVegetationBendCapsules(const Engine::Scene::Scene& scene)
 {
     const auto lower = [](std::string text) {
         std::transform(text.begin(), text.end(), text.begin(),
             [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
         return text;
     };
-    std::vector<GrassInteractionCapsule> result;
+    std::vector<VegetationBendCapsule> result;
     for (const auto* collider : scene.GetComponents<Engine::Components::PrimitiveObjectCollider>())
     {
         const auto* owner = collider ? collider->Owner : nullptr;
@@ -46,15 +46,15 @@ std::vector<GrassInteractionCapsule> CaptureGrassInteractionCapsules(const Engin
         }
         if (boneCollider) continue;
         if (body && (lower(body->bodyType) == "static" || body->isTrigger)) continue;
-        result.push_back(MakeGrassInteractionCapsule(owner->transform.GetWorldMatrix(),
+        result.push_back(MakeVegetationBendCapsule(owner->transform.GetWorldMatrix(),
             collider->center, collider->radius, collider->height));
     }
     return result;
 }
-GrassInteractionSelection SelectGrassInteractionCapsules(
-    const std::vector<GrassInteractionCapsule>& capsules, const glm::vec3& camera)
+VegetationBendSelection SelectVegetationBendCapsules(
+    const std::vector<VegetationBendCapsule>& capsules, const glm::vec3& camera)
 {
-    GrassInteractionSelection result;
+    VegetationBendSelection result;
     std::array<float, 4> distances;
     distances.fill(std::numeric_limits<float>::max());
     for (const auto& capsule : capsules)

@@ -6,7 +6,7 @@ namespace Engine::Rendering
 {
 struct SceneRenderer::NativeRenderPacket
 {
-    std::vector<Engine::Rendering::GrassInteractionCapsule> grassCapsules;
+    std::vector<Engine::Rendering::VegetationBendCapsule> grassCapsules;
     std::vector<FrameRenderItem> items;
     std::vector<uint32_t> renderSlotItemOffsets;
     std::vector<uint32_t> renderSlotItems;

@@ -1,5 +1,6 @@
 #include "PerformanceView.h"
 #include "Core/Rendering/RenderSystem.h"
+#include "Core/Features/Grass/GrassStats.h"
 #include "Core/Rendering/SceneRenderer.h"
 #include "Core/Runtime/Game.h"
 #include "PerformanceRecording.h"
@@ -727,7 +728,9 @@ void PerformanceView::DrawTimings(IEditorUi& ui)
             { "Compare",prepare.spatialCompareMs }, { "Refit and joins",prepare.spatialRefitMs },
             { "Rebuild",prepare.spatialBuildMs }
         });
-        const auto& grass = Engine::Rendering::RenderSystem::For(*m_scene).GetGrassPerformance();
+        const auto* grassStats = Engine::Features::Grass::GrassStats::Find(*m_scene);
+        const Engine::Features::Grass::GrassPerformance grass =
+            grassStats ? grassStats->Get() : Engine::Features::Grass::GrassPerformance{};
         drawGroup("Grass total and nested work (CPU wall time)", {
             { "Total", grass.totalMs }, { "Placement indexing", grass.scanMs },
             { "Instance preparation", grass.generationMs }, { "GPU upload", grass.uploadMs }

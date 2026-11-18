@@ -17,7 +17,7 @@
 #include "Core/Rendering/Lighting/BakedLightingData.h"
 #include "Core/Rendering/RenderBoundsCache.h"
 #include "Core/Rendering/RenderSpatialIndex.h"
-#include "Core/Features/Grass/GrassInteraction.h"
+#include "Core/Rendering/VegetationInteraction.h"
 #include "Core/Rendering/TextureFootprint.h"
 
 #include <algorithm>

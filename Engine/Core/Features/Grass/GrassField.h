@@ -125,7 +125,7 @@ public:
     void LeaveSpatialRegion() override;
     void OnDestroy() override;
     bool RefreshEditorPreview();
-    const Engine::Rendering::GrassPerformance& GetLastPerformance() const
+    const Engine::Features::Grass::GrassPerformance& GetLastPerformance() const
     { return m_performance; }
 
 private:
@@ -178,7 +178,7 @@ private:
     size_t m_placementCount = 0;
     float m_indexedTileSize = 0;
     uint64_t m_placementSignature = 0;
-    Engine::Rendering::GrassPerformance m_performance;
+    Engine::Features::Grass::GrassPerformance m_performance;
     bool m_loaded = false;
     std::string m_loadedMaterialPath, m_resolvedMaterialPath;
     Clock::time_point m_lastRefresh{};

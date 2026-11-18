@@ -563,59 +563,6 @@ void TerrainManager::PrepareLoop()
                 auto layer = std::make_unique<TerrainObjectLayer>();
                 if (!saved.IsNull()) layer->Deserialize(saved);
                 layer->layerName = name;
-                if (saved.IsNull() && task.proceduralOakMeadow &&
-                    name == "Oak forest" && task.cellsX > 0 && task.cellsY > 0 &&
-                    result.terrain.heights.size() == static_cast<size_t>(task.cellsX + 1) * (task.cellsY + 1))
-                {
-                    layer->viewDistance = 220.f;
-                    layer->lod1Distance = 28.f;
-                    layer->lod2Distance = 90.f;
-                    layer->shadowDistance = 90.f;
-                    layer->shadowLod = 1;
-                    const std::string prefix = "Assets/Prefabs/Woodland/Oaks/";
-                    const std::array<std::string, 3> species = {
-                        "Big_oak_tree_001", "Medium_oak_tree_001", "Small_oak_tree_001"};
-                    for (const auto& speciesName : species)
-                    {
-                        // Full geometry levels only: LOD0-2 of the
-                        // prefab, skipping its impostor.
-                        const std::string asset = prefix + speciesName + ".prefab";
-                        auto& lod = layer->objectLods[asset];
-                        lod.meshes = {asset,
-                            Engine::Serialization::PrefabLod::Path(asset, 1),
-                            Engine::Serialization::PrefabLod::Path(asset, 2)};
-                        lod.distances = {28.f, 90.f};
-                    }
-                    uint32_t state = static_cast<uint32_t>(task.cell.first) * 0x9e3779b9u ^
-                        static_cast<uint32_t>(task.cell.second) * 0x85ebca6bu ^ 0x6d656164u;
-                    const auto random = [&state]() {
-                        state = state * 1664525u + 1013904223u;
-                        return static_cast<float>(state >> 8) / 16777216.f;
-                    };
-                    for (uint64_t i = 0; i < 48; ++i)
-                    {
-                        TerrainObjectLayer::Placement placement;
-                        placement.id = i + 1;
-                        placement.asset = prefix + species[i % species.size()] + ".prefab";
-                        const float sx = random() * task.cellsX;
-                        const float sz = random() * task.cellsY;
-                        placement.position = {sx * task.cellWidth, 0.f, sz * task.cellDepth};
-                        placement.yawDegrees = random() * 360.f;
-                        placement.scale = .8f + random() * .4f;
-                        layer->placements.push_back(std::move(placement));
-                    }
-                }
-                // Ground generated oaks once; saved placements keep the
-                // height they were authored at.
-                if (saved.IsNull() && task.proceduralOakMeadow && name == "Oak forest")
-                {
-                    for (auto& placement : layer->placements)
-                        SampleTerrainSurface(result.terrain.heights, task.cellsX,
-                            task.cellsY, task.cellWidth, task.cellDepth,
-                            placement.position.x, placement.position.z, placement.position.y);
-                    layer->MarkConfigurationDirty();
-                    layer->GetPreparedTiles(4.f);
-                }
                 if (saved.IsNull() && task.layerGenerator)
                 {
                     ObjectLayerContext context;
@@ -635,8 +582,6 @@ void TerrainManager::PrepareLoop()
                         layer->GetPreparedTiles(4.f);
                     }
                 }
-                if (name == "Procedural meadow grass")
-                    layer->conformToGround = layer->snapToGround = true;
                 if (!layer->HasLoadedPreparedData()) layer->GetPreparedTiles(4.f);
                 result.objectLayers.push_back(std::move(layer));
             }

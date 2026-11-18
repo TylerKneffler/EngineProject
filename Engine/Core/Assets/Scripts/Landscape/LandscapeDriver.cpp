@@ -690,7 +690,17 @@ bool LandscapeDriver::ConfigureTerrain()
         if (layer.Owner && layer.layerName == forestName)
             layer.Owner->layer = Engine::Rendering::DetailBudget::Get().FindLayerOrDefault("Trees");
         auto* grass = layer.Owner ? layer.Owner->GetComponent<GrassField>() : nullptr;
-        if (!grass || grass->proceduralLayerMask == (1 << Grass)) return;
+        if (!grass) return;
+        // Layer distances every restore (cheap; dirty only on change).
+        if (layer.viewDistance != radius + 10.f || layer.lod1Distance != 7.f ||
+            layer.lod2Distance != 13.f)
+        {
+            layer.viewDistance = radius + 10.f;
+            layer.lod1Distance = 7.f;
+            layer.lod2Distance = 13.f;
+            layer.MarkConfigurationDirty();
+        }
+        if (grass->proceduralLayerMask == (1 << Grass)) return;
         grass->proceduralLayerMask = 1 << Grass;
         grass->visibleRadius = radius;
         // Tussock patches (the manager's procedural default) close over the
@@ -704,10 +714,6 @@ bool LandscapeDriver::ConfigureTerrain()
         grass->shrubThicketSize = 11.f;
         grass->shrubCoverage = .22f;
         grass->MarkConfigurationDirty();
-        layer.viewDistance = radius + 10.f;
-        layer.lod1Distance = 7.f;
-        layer.lod2Distance = 13.f;
-        layer.MarkConfigurationDirty();
     });
     m_configuredSignature = signature;
     RegisterMacroColors(*manager);

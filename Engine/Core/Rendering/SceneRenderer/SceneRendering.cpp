@@ -679,7 +679,7 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
             { return BuildCameraOcclusionBuffer(frameRenderItems, viewProjection,
                 occlusionProjectionScale, occlusionAspect); });
     }
-    const auto grassInteraction = Engine::Rendering::SelectGrassInteractionCapsules(
+    const auto grassInteraction = Engine::Rendering::SelectVegetationBendCapsules(
         nativePacket ? nativePacket->grassCapsules : m_frameGrassCapsules, cameraPosition);
     bool cameraUsesSourceWarpChart = false;
     if (hasAuthoredCameraWorld)

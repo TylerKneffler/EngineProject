@@ -17,15 +17,17 @@ GrassField* Apply(Engine::Components::TerrainObjectLayer& layer,
     const std::string& viewerObjectName)
 {
     if (!IsMeadowLayer(layer.layerName) || !layer.Owner) return nullptr;
+    // Grass follows the ground through sculpting; procedural grass also
+    // conforms per placement. Set on every restore (saved layers included).
+    const bool procedural = layer.layerName == "Procedural meadow grass";
     layer.snapToGround = true;
+    if (procedural) layer.conformToGround = true;
     if (viewerObjectName.empty()) return nullptr;
     auto* owner = layer.Owner;
     if (auto* existing = owner->GetComponent<GrassField>()) return existing;
-
-    const bool procedural = layer.layerName == "Procedural meadow grass";
+    // Defaults for a new field only, so scene scripts can retune them.
     if (procedural)
     {
-        layer.conformToGround = true;
         layer.viewDistance = 35.f;
         layer.lod1Distance = 12.f;
         layer.lod2Distance = 25.f;

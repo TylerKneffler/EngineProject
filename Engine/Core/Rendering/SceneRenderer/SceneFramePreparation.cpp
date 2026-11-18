@@ -387,7 +387,7 @@ void SceneRenderer::PrepareRenderFrame(bool publishSnapshot)
     m_lastPrepareTimings.mainJobMs=double(completedJobs.callerNs-preparationJobs.callerNs)/1.e6;
     m_lastPrepareTimings.workerWaitMs=double(completedJobs.waitNs-preparationJobs.waitNs)/1.e6;
     m_lastPrepareTimings.workerQueueMs=double(completedJobs.queueNs-preparationJobs.queueNs)/1.e6;
-    m_frameGrassCapsules = Engine::Rendering::CaptureGrassInteractionCapsules(m_scene);
+    m_frameGrassCapsules = Engine::Rendering::CaptureVegetationBendCapsules(m_scene);
     m_renderFramePrepared = true;
 }
 

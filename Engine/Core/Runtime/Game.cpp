@@ -178,8 +178,6 @@ void Game::Update(float deltaTime)
 {
     const bool profiling = m_scene.IsUpdateProfilingEnabled();
     m_scene.AssertOwnerThread();
-    if (auto* renderer = Engine::Rendering::RenderSystem::Find(m_scene))
-        renderer->ResetGrassPerformance();
     using Clock = std::chrono::steady_clock;
     const auto updateBegin = profiling ? Clock::now() : Clock::time_point{};
     m_deltaTime = m_clock.Advance(deltaTime);

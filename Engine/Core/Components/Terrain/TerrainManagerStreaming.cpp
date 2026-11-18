@@ -337,7 +337,6 @@ void TerrainManager::StreamCells(int centerX, int centerY, int initialRadius)
             task.sceneGeneration = task.scene->CaptureSceneGeneration();
             task.cacheSignature = m_cacheSignature;
             task.cellsX = cellsX; task.cellsY = cellsY;
-            task.proceduralOakMeadow = proceduralOakMeadow;
             task.cellWidth = cellWidth; task.cellDepth = cellDepth;
             task.lodStride = DesiredPrepareLodStride(cell, centerX, centerY);
             const auto saved = m_cells.find(cell);
