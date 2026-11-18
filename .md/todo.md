@@ -15,9 +15,19 @@ Order is by dependency and visual payoff, not by section number in older notes.
 - [x] GPU `Sky` timing stage (`gpu_sky_ms` in captures and the editor frame profiler)
 - [x] `ENGINE_ATMOSPHERE_FOG=0|1` env override for fog A/B captures
 - [x] Rough vista pose (peak over a valley, see command below)
-- [ ] Make the vista pose part of the landscape scene (a second camera / viewpoint the editor can select), not only a CLI argument
-- [ ] Vertical dashed line artifact in the sky, left of center in the vista capture: identify (debug draw? far object LOD?)
-- [ ] Depth precision: forward Z with D32F and near 0.06 gives ~25 m depth steps at 5 km and ~100 m at 10 km. Switch to reverse-Z (compare GREATER, clear 0, near/far swapped in projection, depth reads in shaders/occlusion/Hi-Z) before step 2 grows the world; also raise Camera.far (9000 today)
+- [x] Vista pose is a scene viewpoint: inactive Camera object "Vista" in landscape_demo.scene (emitted by
+  `tools/build_landscape_demo.py`, `VISTA_EYE`/`VISTA_TARGET`). Scene View toolbar "Viewpoints" menu jumps the
+  editor camera to any scene camera and sets the selected camera from the current view
+  (`Camera::GetWorldPose/SetWorldPose`); captures take `--viewpoint Vista` (recorded as `viewpoint` in the header)
+- [x] Vertical dashed line in the sky: the equirect panorama's u wrap (atan2 jump at world -X) gave implicit
+  derivatives a full-texture step, so 2x2 quads straddling it sampled the smallest mip. Skybox.hlsl now uses
+  `SampleGrad` with wrap-aware u derivatives (checked on DX12, DX11, Vulkan)
+- [x] Black sky after the 2026-11-17 architecture merge: the D3D `SkyboxCB` kept `float4x4 invVP` ahead of the new
+  ray-basis fields while C++ `SkyboxConstants` dropped it, so every sky/fog/sun constant read 64 bytes off. Removed
+- [ ] DX11 vista differs from DX12/Vulkan: weaker sun glow, sparser far forest; not investigated
+- [ ] The vista pose predates the 24 km regeneration: eye at 123 m is now low in the valley rather than on a peak.
+  Re-pick it from the editor (Viewpoints > Set "Vista" from Scene View) and copy it into `VISTA_EYE`/`VISTA_TARGET`
+- [ ] Depth precision: forward Z with D32F and near 0.06 gives ~25 m depth steps at 5 km and ~100 m at 10 km. Switch to reverse-Z (compare GREATER, clear 0, near/far swapped in projection, depth reads in shaders/occlusion/Hi-Z); the world is now 24 km and Camera.far is 24192
 - [ ] Camera-relative precision check at 16 km from origin (transforms are double, check vertex/shader paths)
 
 Vista capture (RTX 4090, DX12, 1920x1080, RelWithDebInfo, uncapped):
@@ -26,8 +36,10 @@ Vista capture (RTX 4090, DX12, 1920x1080, RelWithDebInfo, uncapped):
 ENGINE_ATMOSPHERE_FOG=0|1 build/RelWithDebInfo/GameBackendCapture.exe --backend dx12 \
   --scene Engine/Core/Assets/Scenes/terrain/landscape_demo.scene --width 1920 --height 1080 \
   --warmup 600 --frames 300 --max-fps 0 --require-terrain --wait-for-residency 240 \
-  --camera-position 1272,123,-12 --camera-target -893,28,1238 --out .local/vista/<name>
+  --viewpoint Vista --out .local/vista/<name>
 ```
+
+(`--viewpoint Vista` is the same pose as the older `--camera-position 1272,123,-12 --camera-target -893,28,1238`.)
 
 Baseline 2026-11-16 (medians, ms):
 

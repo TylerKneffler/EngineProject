@@ -1,5 +1,7 @@
 #include "Window.h"
 #include <shellapi.h>
+#include "Core/Startup/LaunchActivation.h"
+#include "Core/Startup/WindowPlacementStore.h"
 
 namespace Engine::Core
 {
@@ -134,15 +136,17 @@ void Window::ReleaseGameplayInput()
     ReleaseInputFocus(false);
 }
 
-void Window::Show()
+void Window::Show(int showCommand)
 {
     if (!m_hwnd)
         return;
 
     // SW_SHOWDEFAULT honours any show-state flags passed on the command line
-    // (e.g. minimised or maximised start). UpdateWindow sends WM_PAINT
-    // immediately so the window appears painted before the first frame runs.
-    ShowWindow(m_hwnd, SW_SHOWDEFAULT);
+    // (e.g. minimised or maximised start). Background launches show the
+    // window without focus, behind the app the user is working in
+    // (LaunchActivation). UpdateWindow sends WM_PAINT immediately so the
+    // window appears painted before the first frame runs.
+    ShowStartupWindow(m_hwnd, showCommand);
     UpdateWindow(m_hwnd);
 }
 
@@ -393,6 +397,8 @@ LRESULT CALLBACK Window::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             // places WM_QUIT in the thread message queue with wParam = 0. Run()
             // detects that and returns, ending the application cleanly.
             ReleaseInputFocus(false);
+            if (self && !self->m_placementKey.empty())
+                SaveWindowPlacement(self->m_placementKey, hwnd);
             PostQuitMessage(0);
             return 0;
 

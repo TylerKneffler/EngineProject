@@ -54,5 +54,21 @@ public:
     glm::dmat4 GetProjectionMatrixD(double aspect,
         bool forceOrthographic = false) const;
 
+    // World-space eye and look target, whichever way the camera aims
+    // (target point or Transform rotation). Used to treat scene cameras as
+    // selectable viewpoints: the editor jumps its view to one, and captures
+    // place the game camera at one (`--viewpoint <object name>`).
+    struct Pose
+    {
+        glm::dvec3 eye { 0.0 };
+        glm::dvec3 target { 0.0, 0.0, 1.0 };
+        glm::vec3 up { 0.f, 1.f, 0.f };
+    };
+    Pose GetWorldPose() const;
+    // Moves the owner so the eye is at pose.eye and aims at pose.target.
+    // A camera that aims by Transform rotation keeps doing so when its owner
+    // has no parent (yaw/pitch, no roll); otherwise it switches to aiming at
+    // the target point.
+    void SetWorldPose(const Pose& pose);
 };
 }

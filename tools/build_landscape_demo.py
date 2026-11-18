@@ -179,6 +179,12 @@ LAKES = [(180.0, 560.0, 430.0), (-1500.0, -700.0, 560.0),
          (1350.0, -1300.0, 520.0), (1500.0, 900.0, 380.0),
          (-700.0, 1650.0, 300.0)]
 START = (0.0, 40.0)
+# Benchmark/demo vista (world eye, look target): above a peak east of the
+# start, looking northwest over the valley. Saved as the inactive "Vista"
+# camera; the editor's Viewpoints menu jumps to it and captures use
+# `--viewpoint Vista`. Absolute heights: re-check it after changing relief.
+VISTA_EYE = (1272.0, 123.0, -12.0)
+VISTA_TARGET = (-893.0, 28.0, 1238.0)
 
 
 def grid(extent_cells, step):
@@ -563,6 +569,25 @@ def write_scene(world):
     body = explorer.find("components").find(c + "RigidBody")
     body.set("RigidBody.useGravity", "false")
     objects.append(explorer)
+
+    # Saved viewpoint: an inactive camera holds the pose without driving the
+    # Game view.
+    vista = ET.SubElement(objects, "item", {"name": "Vista", "enabled": "true"})
+    vista_components = ET.SubElement(vista, "components")
+    vista_camera = ET.SubElement(vista_components, c + "Camera", {
+        "Camera.active": "false", "Camera.useTransformRotation": "false",
+        "Camera.fov": camera.get("Camera.fov", "67"), "Camera.near": camera.get("Camera.near", "0.06"),
+        "Camera.far": f"{map_size:.0f}", "Camera.orthographic": "false",
+        "Camera.orthographicSize": "5"})
+    ET.SubElement(vista_camera, "Camera.up", {"_arrayEncoding": "spaceSeparatedNumbers"}).text = "0 1 0"
+    ET.SubElement(vista_camera, "Camera.target",
+                  {"_arrayEncoding": "spaceSeparatedNumbers"}).text = numbers(VISTA_TARGET)
+    ET.SubElement(vista, "children")
+    vista_transform = ET.SubElement(vista, "transform")
+    for tag, values in (("Transform.position", VISTA_EYE), ("Transform.rotation", (0, 0, 0)),
+                        ("Transform.scale", (1, 1, 1))):
+        ET.SubElement(vista_transform, tag,
+                      {"_arrayEncoding": "spaceSeparatedNumbers"}).text = numbers(values)
 
     sun = find_item(source_objects, "Late afternoon sun")
     # The low sun grazes the meadows: the source scene's tiny normal bias

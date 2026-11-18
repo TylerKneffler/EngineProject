@@ -91,6 +91,7 @@ GameBenchmark::GameBenchmark(const GameBenchmarkOptions& options,
         << ",\"synthetic_look_yaw_pixels\":" << options.lookYawPixels
         << ",\"camera_position_override\":" << Vector3Json(options.cameraPosition)
         << ",\"camera_target_override\":" << Vector3Json(options.cameraTarget)
+        << ",\"viewpoint\":" << Json(options.viewpoint)
         << ",\"game_max_fps\":" << maxFps << ",\"startup_to_scene_start_ms\":" << startupMs
         << ",\"clustered_lighting_setting\":" << (clusteredLighting ? "true" : "false")
         << ",\"render_scale\":" << renderer.GetRenderScale()

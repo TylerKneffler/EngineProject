@@ -3,6 +3,7 @@
 #include "Core/Scene/Scene.h"
 #include <cassert>
 #include <algorithm>
+#include <cmath>
 #include <glm/ext/matrix_clip_space.hpp>
 #include <glm/ext/matrix_transform.hpp>
 
@@ -68,6 +69,60 @@ glm::dmat4 Camera::GetViewMatrixD() const
         return glm::lookAtLH(eye, glm::dvec3(target), glm::dvec3(up));
     return glm::lookAtLH(eye, eye + glm::normalize(glm::dvec3(world[2])),
         glm::normalize(glm::dvec3(world[1])));
+}
+
+Camera::Pose Camera::GetWorldPose() const
+{
+    assert(Owner && "Camera requires an owner Object with a Transform");
+    const glm::dmat4 world = Owner->transform.GetWorldMatrixD();
+    Pose pose;
+    pose.eye = glm::dvec3(world[3]);
+    if (!useTransformRotation)
+    {
+        pose.target = glm::dvec3(target);
+        pose.up = up;
+    }
+    else
+    {
+        const glm::dvec3 forward(world[2]);
+        const double length = glm::length(forward);
+        pose.target = pose.eye + (length > 1e-12 ? forward / length
+            : glm::dvec3(0.0, 0.0, 1.0));
+        const glm::dvec3 cameraUp(world[1]);
+        const double upLength = glm::length(cameraUp);
+        if (upLength > 1e-12) pose.up = glm::vec3(cameraUp / upLength);
+    }
+    return pose;
+}
+
+void Camera::SetWorldPose(const Pose& pose)
+{
+    assert(Owner && "Camera requires an owner Object with a Transform");
+    Transform& transform = Owner->transform;
+    glm::dvec3 localEye = pose.eye;
+    if (Owner->Parent)
+        localEye = glm::dvec3(glm::inverse(Owner->Parent->transform.GetWorldMatrixD()) *
+            glm::dvec4(pose.eye, 1.0));
+    transform.position = localEye;
+
+    const glm::dvec3 offset = pose.target - pose.eye;
+    const double distance = glm::length(offset);
+    if (useTransformRotation && !Owner->Parent && distance > 1e-9)
+    {
+        // World = T * Rz * Ry * Rx * S; with no roll the forward (+Z) axis is
+        // (cos x sin y, -sin x, cos x cos y).
+        const glm::dvec3 forward = offset / distance;
+        transform.rotation = glm::vec3(
+            static_cast<float>(std::asin(std::clamp(-forward.y, -1.0, 1.0))),
+            static_cast<float>(std::atan2(forward.x, forward.z)), 0.f);
+    }
+    else
+    {
+        useTransformRotation = false;
+        up = pose.up;
+    }
+    target = glm::vec3(pose.target);
+    transform.MarkDirty();
 }
 
 glm::mat4 Camera::GetProjectionMatrix(float aspect, bool forceOrthographic) const

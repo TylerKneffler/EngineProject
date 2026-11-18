@@ -138,7 +138,7 @@ bool TransformIconButton(const char* id, EditorTransformTool tool,
     return clicked;
 }
 
-enum class ViewIcon { Bones, Grid, Overlays, Ui };
+enum class ViewIcon { Bones, Grid, Overlays, Ui, Viewpoints };
 
 bool ViewIconButton(const char* id, ViewIcon icon, bool active,
     const char* tooltip)
@@ -184,10 +184,73 @@ bool ViewIconButton(const char* id, ViewIcon icon, bool active,
         draw->AddLine(point(-7.f, -2.f), point(7.f, -2.f), color);
         draw->AddRectFilled(point(-4.f, 0.f), point(-1.f, 3.f), color);
         break;
+    case ViewIcon::Viewpoints:
+        draw->AddRect(point(-8.f, -4.f), point(2.f, 4.f), color, 1.f, 0, 1.4f);
+        draw->AddTriangleFilled(point(2.f, 0.f), point(8.f, -4.f), point(8.f, 4.f), color);
+        break;
     }
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
         ImGui::SetTooltip("%s", tooltip);
     return clicked;
+}
+
+// Scene cameras double as saved viewpoints (e.g. the landscape demo's
+// "Vista"): an inactive Camera object holds a pose without driving the Game
+// view. The Scene View can jump to any of them, and the selected camera can
+// take the current Scene View pose to author one.
+void DrawViewpointMenu(Engine::Scene::Scene& scene, Engine::Core::Object* selected)
+{
+    auto* editorCamera = scene.editorCamera.GetComponent<Engine::Components::Camera>();
+    const Engine::Components::Camera* gameCamera = scene.FindGameCamera();
+    ImGui::TextDisabled("Move the Scene View to");
+    bool any = false;
+    for (const auto& object : scene.GetObjects())
+    {
+        const auto* camera = object ? object->GetComponent<Engine::Components::Camera>() : nullptr;
+        if (!camera || !editorCamera)
+            continue;
+        any = true;
+        ImGui::PushID(object.get());
+        const char* role = camera == gameCamera ? "game camera"
+            : camera->active ? "active" : "viewpoint";
+        if (ImGui::MenuItem(object->name.c_str(), role))
+        {
+            // Keep the Scene View's orbit distance so orbiting and zoom
+            // behave as before; only the eye and view direction change.
+            const Engine::Components::Camera::Pose current = editorCamera->GetWorldPose();
+            const double orbitDistance = std::clamp(
+                glm::length(current.target - current.eye), 1.0, 500.0);
+            Engine::Components::Camera::Pose pose = camera->GetWorldPose();
+            const glm::dvec3 offset = pose.target - pose.eye;
+            const double length = glm::length(offset);
+            if (length > 1e-9)
+                pose.target = pose.eye + offset * (orbitDistance / length);
+            // Keep the Scene View upright like ordinary navigation.
+            pose.up = glm::vec3(0.f, 1.f, 0.f);
+            Engine::Editor::EditorViewState::For(scene).StopCameraFollow();
+            editorCamera->SetWorldPose(pose);
+        }
+        if (ImGui::IsItemHovered())
+        {
+            const glm::dvec3 eye = camera->GetWorldPose().eye;
+            ImGui::SetTooltip("Eye %.1f, %.1f, %.1f\nInactive cameras are viewpoints: they keep a "
+                "pose without driving the Game view. Captures use one with --viewpoint \"%s\".",
+                eye.x, eye.y, eye.z, object->name.c_str());
+        }
+        ImGui::PopID();
+    }
+    if (!any)
+        ImGui::TextDisabled("No cameras in this scene");
+    ImGui::Separator();
+    auto* selectedCamera = selected ? selected->GetComponent<Engine::Components::Camera>() : nullptr;
+    const std::string setLabel = selectedCamera
+        ? "Set \"" + selected->name + "\" from Scene View" : std::string("Set selected camera from Scene View");
+    if (ImGui::MenuItem(setLabel.c_str(), nullptr, false, selectedCamera && editorCamera))
+        selectedCamera->SetWorldPose(editorCamera->GetWorldPose());
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        ImGui::SetTooltip("Moves the selected camera object to the Scene View's eye and aims it "
+            "the same way. Add an inactive Camera object to save a new viewpoint.");
+    ImGui::EndPopup();
 }
 
 struct ToolbarRow
@@ -1335,6 +1398,11 @@ void EditorState::DrawGlobalToolbar(IEditorUi& ui, ToolbarSection section,
             }
             ImGui::EndPopup();
         }
+        if (row.Next(28.f) && ViewIconButton("##ViewViewpoints", ViewIcon::Viewpoints, false,
+            "Viewpoints: jump the Scene View to a scene camera, or set the selected camera from this view"))
+            ImGui::OpenPopup("##ViewViewpointOptions");
+        if (ImGui::BeginPopup("##ViewViewpointOptions"))
+            DrawViewpointMenu(*scene, selected);
         int renderMode = view->GetSceneRenderMode();
         const char* renderNames[]{ "Lit", "Unlit", "Wireframe", "Performance", "Detail", "Triangles" };
         if (row.Next(108.f))

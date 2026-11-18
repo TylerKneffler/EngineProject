@@ -905,7 +905,7 @@ int GameApplication::Run(HINSTANCE instance, const GameBenchmarkOptions* benchma
         (std::filesystem::path(settings.assetsDirectory) / "Startup" / "Game.png").wstring();
     ::Engine::Core::StartupSplash splash(instance,
         settings.name.empty() ? L"Game" : std::filesystem::path(settings.name).wstring(),
-        startupBackground);
+        startupBackground, benchmark ? std::wstring() : std::wstring(L"Game"));
     splash.SetProgress(0.15f, L"Creating game window...");
 
     auto window = std::make_unique<::Engine::Core::Window>(instance, L"Game",
@@ -948,11 +948,24 @@ int GameApplication::Run(HINSTANCE instance, const GameBenchmarkOptions* benchma
 
     // Only the editor reads per-object scene snapshot contents.
     scene.SetSceneSnapshotObjectsEnabled(false);
-    if (benchmark && (benchmark->cameraPosition || benchmark->cameraTarget))
+    if (benchmark && (benchmark->cameraPosition || benchmark->cameraTarget ||
+        !benchmark->viewpoint.empty()))
     {
         auto* camera = scene.FindGameCamera();
         if (!camera || !camera->Owner)
             throw std::runtime_error("benchmark camera pose needs a scene game camera");
+        if (!benchmark->viewpoint.empty())
+        {
+            const auto* viewpointObject = scene.FindObjectByName(benchmark->viewpoint);
+            const auto* viewpoint = viewpointObject
+                ? viewpointObject->GetComponent<Engine::Components::Camera>() : nullptr;
+            if (!viewpoint)
+                throw std::runtime_error("viewpoint not found (needs an object with a Camera): " +
+                    benchmark->viewpoint);
+            // Aim by target point; FirstPersonController keeps aiming at it.
+            camera->useTransformRotation = false;
+            camera->SetWorldPose(viewpoint->GetWorldPose());
+        }
         auto& transform = camera->Owner->transform;
         if (benchmark->cameraPosition)
         {
@@ -1104,14 +1117,21 @@ int GameApplication::Run(HINSTANCE instance, const GameBenchmarkOptions* benchma
     // Keep the native window hidden until it has a rendered frame to show.
     splash.SetProgress(0.95f, L"Drawing game...");
     window->OnUpdate();
+    // Reopen where the game was last left (keeping the configured size), or
+    // where the splash was dragged to. Benchmarks keep no placement.
+    const int showCommand = splash.PlaceWindow(window->GetHWND(), false);
+    if (!benchmark) window->SetPlacementKey(L"Game");
     splash.HoldAboveMainWindow();
-    window->Show();
+    window->Show(showCommand);
     // Hidden swap chains may discard Present, so submit a visible frame too.
     window->OnUpdate();
     splash.Close();
     benchmarkWaitStart = std::chrono::steady_clock::now();
     benchmarkStarted = benchmark != nullptr;
     const int result = window->Run();
+    // Shutdown can take seconds without pumping messages; hide the window
+    // so Windows does not ghost it as "Not Responding" meanwhile.
+    ShowWindow(window->GetHWND(), SW_HIDE);
     simulation.Stop();
     if (auto* game = scene.GetGame()) game->CancelPendingSceneLoad();
     scene.FenceBackgroundWork();

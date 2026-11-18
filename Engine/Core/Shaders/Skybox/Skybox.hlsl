@@ -36,7 +36,6 @@ struct SkyboxConst
 #else
 cbuffer SkyboxCB : register(b0)
 {
-    float4x4 invVP;
     float4 rayX;
     float4 rayY;
     float4 rayOrigin;
@@ -120,7 +119,17 @@ float4 PSMain(float4 position : SV_POSITION,
         float2 uv;
         uv.x = 0.5 + atan2(direction.z, direction.x) * inverseTwoPi;
         uv.y = acos(clamp(direction.y, -1.0, 1.0)) * inversePi;
-        sampledColor = skyTexture.Sample(skySampler, uv).rgb * displayParams.y;
+        // u wraps from 1 to 0 where atan2 jumps (world -X before rotation).
+        // Implicit derivatives across that jump select the smallest mip and
+        // draw a dashed vertical line through the sky, so take each u
+        // derivative from whichever of u and frac(u + 0.5) is continuous here.
+        const float wrappedU = frac(uv.x + 0.5);
+        const float2 dx = float2(abs(ddx(uv.x)) <= abs(ddx(wrappedU))
+            ? ddx(uv.x) : ddx(wrappedU), ddx(uv.y));
+        const float2 dy = float2(abs(ddy(uv.x)) <= abs(ddy(wrappedU))
+            ? ddy(uv.x) : ddy(wrappedU), ddy(uv.y));
+        sampledColor = skyTexture.SampleGrad(skySampler, uv, dx, dy).rgb *
+            displayParams.y;
         // The sun belongs to the world, not the rotated panorama; the fog
         // then hazes sky and sun together.
         sampledColor += SunContribution(worldDirection);

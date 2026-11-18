@@ -5,6 +5,7 @@
 #include "imgui.h"
 #include "imgui_internal.h"
 #include "imgui_impl_win32.h"
+#include "Core/Startup/LaunchActivation.h"
 #include "imgui_impl_dx11.h"
 #include "imgui_impl_dx12.h"
 #if defined(ENGINE_VULKAN_ENABLED)
@@ -122,6 +123,32 @@ bool ImGuiUiBackend::Initialize(void* nativeWindow, ::Engine::Renderers::IEditor
     {
         Shutdown();
         return false;
+    }
+    // Background launches: floating panel windows (restored from the saved
+    // layout) appear without focus while another app is in the foreground.
+    if (::Engine::Core::IsBackgroundLaunch())
+    {
+        static void (*showWindow)(ImGuiViewport*) = nullptr;
+        static void (*setWindowFocus)(ImGuiViewport*) = nullptr;
+        ImGuiPlatformIO& platform = ImGui::GetPlatformIO();
+        showWindow = platform.Platform_ShowWindow;
+        setWindowFocus = platform.Platform_SetWindowFocus;
+        // ImGui focusing a window calls SetForegroundWindow on its viewport;
+        // skip that while the user is in another app.
+        platform.Platform_SetWindowFocus = [](ImGuiViewport* viewport)
+        {
+            if (!::Engine::Core::IsAnotherProcessInForeground() && setWindowFocus)
+                setWindowFocus(viewport);
+        };
+        platform.Platform_ShowWindow = [](ImGuiViewport* viewport)
+        {
+            if (::Engine::Core::IsAnotherProcessInForeground())
+                ::Engine::Core::ShowStartupWindow(
+                    static_cast<HWND>(viewport->PlatformHandleRaw
+                        ? viewport->PlatformHandleRaw : viewport->PlatformHandle));
+            else if (showWindow)
+                showWindow(viewport);
+        };
     }
 
     if (auto* dx11 = dynamic_cast<::Engine::Renderers::DX11EditorRenderer*>(&renderer))

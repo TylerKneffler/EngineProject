@@ -40,6 +40,10 @@ struct GameBenchmarkOptions
     // before the scene starts. Either may be given alone.
     std::optional<std::array<double, 3>> cameraPosition;
     std::optional<std::array<double, 3>> cameraTarget;
+    // Name of a scene object with a Camera (usually inactive, e.g. "Vista")
+    // whose pose the game camera takes before the scene starts; applied
+    // before cameraPosition/cameraTarget, which can still refine it.
+    std::string viewpoint;
     // Called on the render thread as measured frames begin and after the
     // last one (e.g. to bracket an external CPU profiler).
     std::function<void()> onMeasurementStart;

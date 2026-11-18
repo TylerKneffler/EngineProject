@@ -173,7 +173,8 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
 
     const auto startupBackground =
         (std::filesystem::path(projectSettings.assetsDirectory) / "Startup" / "Editor.png").wstring();
-    Engine::Core::StartupSplash splash(hInstance, L"Engine Editor", startupBackground);
+    Engine::Core::StartupSplash splash(hInstance, L"Engine Editor", startupBackground,
+        L"Editor");
     splash.SetProgress(0.10f, L"Creating editor window...");
 
     // Create editor state and UI
@@ -1317,8 +1318,12 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
     renderer->MarkDirty();
     window->OnUpdate();
     OutputDebugStringA("[Main] Showing window...\n");
+    // Reopen where the editor was last left, or where the splash was
+    // dragged to (e.g. another monitor).
+    const int showCommand = splash.PlaceWindow(window->GetHWND(), true);
+    window->SetPlacementKey(L"Editor");
     splash.HoldAboveMainWindow();
-    window->Show();
+    window->Show(showCommand);
     // A hidden swap chain can report occlusion and discard its first Present.
     // Present once more after showing before removing the splash.
     renderer->MarkDirty();
@@ -1328,6 +1333,9 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
     OutputDebugStringA("[Main] Window shown, entering message loop...\n");
 
     int result = window->Run();
+    // Shutdown can take seconds without pumping messages; hide the window
+    // so Windows does not ghost it as "Not Responding" meanwhile.
+    ShowWindow(window->GetHWND(), SW_HIDE);
 
     editorState->SaveAnimationEditorSession();
 

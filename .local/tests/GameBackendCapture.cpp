@@ -1,5 +1,6 @@
 #include "Game/Application/GameApplication.h"
 #include "CpuSampler.h"
+#include "Core/Startup/LaunchActivation.h"
 #include <memory>
 #pragma comment(lib, "winmm.lib")
 #include <array>
@@ -50,6 +51,7 @@ std::array<double, 3> Vector3(const char* text, const char* name)
 // --cpu-sample: in-process sampling profile of the measured frames, written
 // to <out>/cpu-profile.txt after the run.
 bool g_cpuSample = false;
+bool g_foreground = false;
 
 Engine::Game::GameBenchmarkOptions Parse(int argc, char** argv)
 {
@@ -89,7 +91,9 @@ Engine::Game::GameBenchmarkOptions Parse(int argc, char** argv)
         else if (key == "--disable-clustered-lighting") options.disableClusteredLighting = true;
         else if (key == "--camera-position") options.cameraPosition = Vector3(value(), "camera position");
         else if (key == "--camera-target") options.cameraTarget = Vector3(value(), "camera target");
+        else if (key == "--viewpoint") options.viewpoint = value();
         else if (key == "--cpu-sample") g_cpuSample = true;
+        else if (key == "--foreground") g_foreground = true;
         else if (key == "--help" || key == "-h")
         {
             std::cout << "GameBackendCapture [--scene <file.scene>] [--project <file.proj>] "
@@ -97,10 +101,11 @@ Engine::Game::GameBenchmarkOptions Parse(int argc, char** argv)
                 "[--warmup 120 --frames 300 --out .local/performance-logs] "
                 "[--require-terrain] [--require-streamed-cells] [--wait-for-residency <seconds>] "
                 "[--drive-forward <frames>] [--look-yaw <pixels/frame>] [--require-movement] [--max-fps <fps>] [--profile <video profile>] "
-                "[--disable-clustered-lighting] [--camera-position x,y,z] [--camera-target x,y,z] "
-                "[--cpu-sample]\n"
+                "[--disable-clustered-lighting] [--viewpoint <camera object>] [--camera-position x,y,z] [--camera-target x,y,z] "
+                "[--cpu-sample] [--foreground]\n"
                 "Defaults to oak_meadow.scene. Runs the standalone Game loop, writes frames.jsonl and capture.ppm, "
-                "and returns 2 if capture validity checks fail.\n";
+                "and returns 2 if capture validity checks fail. Windows open without focus, behind the active app, "
+                "unless --foreground is given.\n";
             std::exit(0);
         }
         else throw std::runtime_error("unknown option: " + key);
@@ -127,6 +132,8 @@ int main(int argc, char** argv)
     try
     {
         auto options = Parse(argc, argv);
+        // Captures run while the user keeps working: never take focus.
+        Engine::Core::SetBackgroundLaunch(!g_foreground);
         std::unique_ptr<CpuSampler> sampler;
         if (g_cpuSample)
         {

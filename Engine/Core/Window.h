@@ -61,7 +61,12 @@ public:
     ~Window();
 
     // Shows the window. Must be called after setting up OnUpdate, OnResize, and WndProcHook.
-    void Show();
+    // showCommand: SW_SHOWDEFAULT (honours the launcher's show state) or e.g.
+    // SW_SHOWMAXIMIZED; background launches always show without focus.
+    void Show(int showCommand = SW_SHOWDEFAULT);
+    // When set, the window's placement (screen rect, maximized) is saved under
+    // this key as it is destroyed; StartupSplash::PlaceWindow restores it.
+    void SetPlacementKey(std::wstring key) { m_placementKey = std::move(key); }
 
     // Release the pointer when the host pauses or stops gameplay.
     void ReleaseGameplayInput();
@@ -102,6 +107,7 @@ private:
     static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
     HWND     m_hwnd   = nullptr;
+    std::wstring m_placementKey;
     uint32_t m_width  = 0;   // current client-area width  (updated after deferred resize)
     uint32_t m_height = 0;   // current client-area height (updated after deferred resize)
 
