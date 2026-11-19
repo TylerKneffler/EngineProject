@@ -1,3 +1,4 @@
+#include "Core/Rendering/RenderingEffects.h"
 #include "Core/Rendering/DetailBudget.h"
 #include "Core/Rendering/ScreenCoverage.h"
 #include "Core/Rendering/OcclusionBuffer.h"
@@ -168,7 +169,8 @@ static_assert(offsetof(ObjectGPUData, grassCapsules) == 1552, "Grass capsule dat
 static_assert(offsetof(ObjectGPUData, atmosphereFog) == 1680, "Fog data must follow the grass capsules");
 static_assert(offsetof(ObjectGPUData, terrainSunShadow) == 1744, "Terrain sun shadow data must follow the fog");
 static_assert(offsetof(ObjectGPUData, terrainMacroMap) == 1760, "Terrain macro map data must follow the sun shadow");
-static_assert(sizeof(ObjectGPUData) == 1792, "Object buffer layout must match Object.hlsl");
+static_assert(offsetof(ObjectGPUData, placementFade) == 1792, "Placement fade data must follow the terrain macro data");
+static_assert(sizeof(ObjectGPUData) == 1856, "Object buffer layout must match Object.hlsl");
 static_assert(sizeof(Engine::Model::LightData) == 128,
     "Light buffer layout must match Object.hlsl");
 
@@ -420,25 +422,37 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
 
     if (!shadowOnly)
     {
+        // Project-wide effect switches and scales apply over the scene's look.
+        const auto effects = Engine::Rendering::RenderingEffects::Get().Settings();
+        const auto& projectPost = effects.postEffects;
         Engine::Graphics::PostProcessSettings postProcess{};
-        postProcess.exposure = std::exp2(std::clamp(m_scene.settings.outputExposure, -16.f, 16.f));
+        postProcess.exposure = std::exp2(std::clamp(
+            m_scene.settings.outputExposure + projectPost.exposureBias, -16.f, 16.f));
         postProcess.toneMapping = static_cast<uint32_t>(m_scene.settings.toneMapping);
         // Debug views (unlit, wireframe, heat maps) show raw values.
         const bool lookEffects = m_scene.settings.renderMode == Engine::Model::SceneRenderMode::Lit;
-        postProcess.bloomIntensity = lookEffects && m_scene.settings.bloomEnabled
-            ? m_scene.settings.bloomIntensity : 0.f;
-        postProcess.colorGrading = lookEffects && m_scene.settings.colorGradingEnabled;
+        postProcess.bloomIntensity = lookEffects && m_scene.settings.bloomEnabled &&
+            projectPost.bloom ? m_scene.settings.bloomIntensity * projectPost.bloomScale : 0.f;
+        postProcess.colorGrading = lookEffects && m_scene.settings.colorGradingEnabled &&
+            projectPost.colorGrading;
+        // Grading strength scales every grading control away from neutral.
+        const float grading = projectPost.gradingStrength;
         for (int channel = 0; channel < 3; ++channel)
         {
-            postProcess.shadowTint[channel] = m_scene.settings.gradingShadowTint[channel];
-            postProcess.highlightTint[channel] = m_scene.settings.gradingHighlightTint[channel];
+            postProcess.shadowTint[channel] =
+                1.f + (m_scene.settings.gradingShadowTint[channel] - 1.f) * grading;
+            postProcess.highlightTint[channel] =
+                1.f + (m_scene.settings.gradingHighlightTint[channel] - 1.f) * grading;
         }
-        postProcess.gradingBalance = m_scene.settings.gradingBalance;
-        postProcess.gradingContrast = m_scene.settings.gradingContrast;
-        postProcess.gradingSaturation = m_scene.settings.gradingSaturation;
+        postProcess.gradingBalance = m_scene.settings.gradingBalance * grading;
+        postProcess.gradingContrast = 1.f + (m_scene.settings.gradingContrast - 1.f) * grading;
+        postProcess.gradingSaturation = 1.f + (m_scene.settings.gradingSaturation - 1.f) * grading;
+        postProcess.fxaa = effects.antiAliasing.fxaa;
+        postProcess.fxaaSubpixel = effects.antiAliasing.fxaaSubpixel;
+        postProcess.fxaaEdgeThreshold = effects.antiAliasing.fxaaEdgeThreshold;
         // Debug views keep a fixed exposure, like the other look effects.
         const auto& exposure = m_scene.settings.autoExposure;
-        postProcess.autoExposure = lookEffects && exposure.enabled;
+        postProcess.autoExposure = lookEffects && exposure.enabled && projectPost.autoExposure;
         postProcess.autoExposureMinEv = exposure.minEv;
         postProcess.autoExposureMaxEv = exposure.maxEv;
         postProcess.autoExposureSpeedUp = exposure.speedUp;
@@ -566,7 +580,54 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
     const glm::mat4 inverseView = glm::inverse(view);
     const glm::vec3 cameraPosition = glm::vec3(inverseView[3]);
     const glm::vec3 cameraDirection = glm::normalize(glm::vec3(inverseView[2]));
-    const glm::mat4 viewProjection = proj * view;
+    // Temporal anti-aliasing (RenderingEffects): jitter the projection by a
+    // sub-pixel Halton(2,3) offset per frame, and hand the post-process the
+    // matrix taking this frame's clip space to the previous frame's (both
+    // unjittered) so it can find each pixel's history.
+    glm::mat4 jitteredProjection = proj;
+    {
+        const auto temporal = Engine::Rendering::RenderingEffects::Get().Settings().antiAliasing;
+        const auto* contextFactory = m_graphicsProvider ? m_graphicsProvider->GetContextFactory() : nullptr;
+        const bool temporalView = !shadowOnly && temporal.taa && temporal.msaaSamples <= 1u &&
+            contextFactory && contextFactory->SupportsTemporalAntiAliasing() &&
+            !cam->orthographic && !m_scene.m_mode2D && viewportWidth > 0u && viewportHeight > 0u &&
+            std::abs(proj[2][3]) > 1e-6f;
+        if (temporalView)
+        {
+            auto& state = m_temporalViews[cam];
+            const auto halton = [](uint32_t index, uint32_t base)
+            {
+                float fraction = 1.f, result = 0.f;
+                for (; index > 0u; index /= base)
+                {
+                    fraction /= static_cast<float>(base);
+                    result += fraction * static_cast<float>(index % base);
+                }
+                return result;
+            };
+            const uint32_t sample = state.frame % 8u + 1u;
+            jitteredProjection[2][0] += (halton(sample, 2u) - .5f) * 2.f / static_cast<float>(viewportWidth);
+            jitteredProjection[2][1] += (halton(sample, 3u) - .5f) * 2.f / static_cast<float>(viewportHeight);
+            const glm::dmat4 current = glm::dmat4(proj) * glm::dmat4(view);
+            const glm::dmat4 reprojection = state.previousViewProjection * glm::inverse(current);
+            auto post = Engine::Graphics::GetPostProcessSettings();
+            post.taa = true;
+            post.taaFeedback = temporal.taaFeedback;
+            post.taaSharpen = temporal.taaSharpen;
+            post.taaHistoryValid = state.valid &&
+                state.width == viewportWidth && state.height == viewportHeight;
+            for (int row = 0; row < 4; ++row)
+                for (int column = 0; column < 4; ++column)
+                    post.taaReprojection[row * 4 + column] = static_cast<float>(reprojection[column][row]);
+            Engine::Graphics::SetPostProcessSettings(post);
+            state.previousViewProjection = current;
+            state.width = viewportWidth;
+            state.height = viewportHeight;
+            state.valid = true;
+            ++state.frame;
+        }
+    }
+    const glm::mat4 viewProjection = jitteredProjection * view;
     // Detail follows screen coverage: LOD distances are authored for a
     // reference camera, so they scale by this view's focal length in pixels
     // (Core/Rendering/ScreenCoverage.h). Shadow views render with the main
@@ -798,6 +859,14 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
     const uint32_t clusterTilesX = clusterConfig.clusterTilesX;
     const uint32_t clusterTilesY = clusterConfig.clusterTilesY;
     const uint32_t clusterDepthSlices = clusterConfig.clusterDepthSlices;
+    // Grass minimum width (RenderingEffects): one pixel spans
+    // depth * grassPixelSize world units in a perspective view.
+    const auto antiAliasing = Engine::Rendering::RenderingEffects::Get().Settings().antiAliasing;
+    const bool perspectiveView = std::abs(proj[2][3]) > 1e-6f && std::abs(proj[1][1]) > 1e-6f;
+    const float grassMinimumPixels = antiAliasing.grassMinimumWidth && perspectiveView
+        ? antiAliasing.grassMinimumPixels : 0.f;
+    const float grassPixelSize = perspectiveView
+        ? 2.f / (std::abs(proj[1][1]) * static_cast<float>(std::max(1u, viewportHeight))) : 0.f;
 
     if (shadowSelection.valid)
     {
@@ -869,6 +938,8 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
         Engine::Model::SceneRenderMode::Detail;
     const bool triangleMode = !shadowOnly && renderMode ==
         Engine::Model::SceneRenderMode::Triangles;
+    const bool coverageMode = !shadowOnly && renderMode ==
+        Engine::Model::SceneRenderMode::Coverage;
     const auto cascadePreparation = Engine::Rendering::SceneRendererShadows::PrepareDirectionalShadowCascades(
         *this,
         context,
@@ -1624,6 +1695,9 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
             preparedDraw.objectData.shadowCasterFade={casterFade.x,std::min(casterFade.x,casterFade.y),1.f,
                 mesh->farShadowCaster ? mesh->farShadowMinDistance * quality.shadows : 0.f};
             preparedDraw.objectData.grassAnimation={0.f,0.f,0.f,0.f};
+            preparedDraw.objectData.placementFade=glm::vec4(mesh->placementFadeStart,mesh->placementFadeEnd,0.f,0.f);
+            preparedDraw.objectData.placementThin=glm::vec4(mesh->placementThinStart,mesh->placementThinEnd,
+                mesh->placementThinMinimum,mesh->placementThinKeepWidth ? 1.f : 0.f);
             preparedDraw.objectData.viewPositionAlphaCutoff=glm::vec4(cameraPosition,.001f);
             applyTextureLod(preparedDraw.objectData, mat);
             if(fixedShadowBand)
@@ -2016,6 +2090,12 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
             mesh && mesh->foliageWindStrength>0.f ? 1.f : 0.f,
             mesh && mesh->foliageWindStrength>0.f ? std::clamp(mesh->foliageWindStrength,0.f,1.f):1.f, 0.f};
         objectData.grassAnimation.w = static_cast<float>(grassInteraction.count);
+        // zw: grass minimum blade width in pixels, and the world size of one
+        // pixel per unit of view depth (perspective only), for Object.hlsl.
+        objectData.placementThin = mesh ? glm::vec4(mesh->placementThinStart, mesh->placementThinEnd,
+            mesh->placementThinMinimum, mesh->placementThinKeepWidth ? 1.f : 0.f) : glm::vec4(0.f, 0.f, 1.f, 0.f);
+        objectData.placementFade = mesh ? glm::vec4(mesh->placementFadeStart, mesh->placementFadeEnd,
+            grassMinimumPixels, grassPixelSize) : glm::vec4(0.f);
         std::copy(grassInteraction.data.begin(), grassInteraction.data.end(), objectData.grassCapsules);
         preparedDraw.objectData = objectData;
         preparedDraw.traversalChartPortal = renderItem->traversalChartPortal;
@@ -2184,6 +2264,19 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
         for (auto& draw : preparedDraws)
             if (draw.frameItemIndex < occlusionMarked.size() && occlusionMarked[draw.frameItemIndex])
                 draw.objectData.morphParams.z = -9000.f;
+    }
+    if (coverageMode)
+    {
+        // Reuses the Performance heat colours (Object.hlsl): heat 1 (red)
+        // for terrain, heat 0.5 (green, never confused with sky) for
+        // everything else.
+        for (auto& draw : preparedDraws)
+        {
+            if (draw.objectData.morphParams.z > 0.f) continue;
+            const bool terrain = draw.frameItemIndex < frameRenderItems.size() &&
+                frameRenderItems[draw.frameItemIndex].terrainSurface;
+            draw.objectData.morphParams.z = terrain ? -2.f : -1.5f;
+        }
     }
     if (triangleMode)
     {

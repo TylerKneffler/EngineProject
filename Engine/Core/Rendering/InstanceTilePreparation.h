@@ -17,12 +17,15 @@ public:
         glm::mat4 world{1};
         glm::vec3 minimum{0},maximum{0};
         glm::vec4 lod{0};
+        // Ground cover distance thinning (ObjectGPUData::placementThin):
+        // compute drops placements the vertex shader would shrink to nothing.
+        glm::vec4 thin{0,0,1,0};
         std::vector<std::pair<uint32_t,uint32_t>> ranges;
         bool operator==(const Input& other) const
         {
             return slot==other.slot && base==other.base && maximumLod==other.maximumLod &&
                 world==other.world && minimum==other.minimum && maximum==other.maximum &&
-                lod==other.lod && ranges==other.ranges;
+                lod==other.lod && thin==other.thin && ranges==other.ranges;
         }
     };
     using Records=std::vector<InstanceTileRecord>;
@@ -70,6 +73,7 @@ public:
                 tile.range={input.base+input.ranges[range].first,input.ranges[range].second,input.slot,input.maximumLod};
                 tile.origin=input.world[3];
                 tile.lod=input.lod;
+                tile.reserved=glm::floatBitsToUint(input.thin);
             }
             result.records[i]=std::move(records);
         });

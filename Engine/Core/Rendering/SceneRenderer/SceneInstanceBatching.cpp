@@ -154,6 +154,7 @@ SceneInstanceBatching::Result SceneInstanceBatching::Prepare(SceneRenderer& rend
         input.base=base->second;
         input.maximumLod=uint32_t(draw.gpuMaximumLod);
         input.world=draw.objectData.world;
+        input.thin=draw.objectData.placementThin;
         if (!draw.mesh->GetInstanceGeometryBounds(input.minimum, input.maximum))
             throw std::logic_error("Instanced geometry requires source bounds");
         if(draw.drawData.flags & 0x00100000u) for(int lod=1;lod<=draw.gpuMaximumLod;++lod)

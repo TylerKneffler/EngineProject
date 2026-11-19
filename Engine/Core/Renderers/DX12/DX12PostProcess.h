@@ -4,13 +4,25 @@
 #include <d3d12.h>
 #include <wrl/client.h>
 #include <cstdint>
+#include <mutex>
+#include <unordered_map>
 
 namespace Engine::Renderers
 {
 class DX12PostProcess
 {
 public:
-    void Create(ID3D12Device* device, uint32_t width, uint32_t height);
+    // samples > 1 renders the scene into a multisampled target (MSAA) that
+    // Compose resolves before post-processing; unsupported counts are
+    // lowered (SupportedSamples).
+    void Create(ID3D12Device* device, uint32_t width, uint32_t height, uint32_t samples = 1u);
+    uint32_t GetSampleCount() const { return m_samples; }
+    // The highest count up to `samples` that the device supports for the
+    // scene colour and depth formats.
+    static uint32_t SupportedSamples(ID3D12Device* device, uint32_t samples);
+    // Sample count of the scene target bound on a command list by BindScene
+    // or RebindScene (1 after Compose). Pipelines pick a matching variant.
+    static uint32_t BoundSceneSamples(const ID3D12GraphicsCommandList* commandList);
     void BindScene(ID3D12GraphicsCommandList* commandList,
         D3D12_CPU_DESCRIPTOR_HANDLE depth, const float clearColor[4]);
     void RebindScene(ID3D12GraphicsCommandList* commandList,
@@ -22,6 +34,9 @@ public:
     void Compose(ID3D12GraphicsCommandList* commandList,
         D3D12_CPU_DESCRIPTOR_HANDLE output);
     ID3D12Resource* GetSceneColor() const { return m_sceneColor.Get(); }
+    // Scene depth (typeless D32_FLOAT_S8X24, resting in DEPTH_WRITE) for
+    // temporal anti-aliasing; null leaves TAA off. Set before Compose.
+    void SetSceneDepth(ID3D12Resource* depth);
 
 private:
     void RenderBloom(ID3D12GraphicsCommandList* commandList);
@@ -31,8 +46,23 @@ private:
         const Engine::Graphics::PostProcessSettings& settings);
     D3D12_GPU_DESCRIPTOR_HANDLE SrvTable(uint32_t index) const;
     D3D12_CPU_DESCRIPTOR_HANDLE Rtv(uint32_t index) const;
+    D3D12_CPU_DESCRIPTOR_HANDLE SrvSlot(uint32_t index) const;
+    // TAA (TemporalResolvePS): blends the scene with its reprojected history
+    // into the next history target and copies that into the scene colour,
+    // so bloom, exposure and compose read it unchanged.
+    void RenderTemporal(ID3D12GraphicsCommandList* commandList,
+        const Engine::Graphics::PostProcessSettings& settings);
+    // Creates the history targets on first use; (re)writes the temporal
+    // tables' history and depth views.
+    void PrepareTemporalResources();
+    static void SetBoundSceneSamples(const ID3D12GraphicsCommandList* commandList, uint32_t samples);
 
+    // Single-sample scene colour that every post pass reads (SRV 0). With
+    // MSAA the scene renders into m_sceneColorMultisampled (RTV 0, resting in
+    // the resolve-source state) and Compose resolves it into m_sceneColor.
     Microsoft::WRL::ComPtr<ID3D12Resource> m_sceneColor;
+    Microsoft::WRL::ComPtr<ID3D12Resource> m_sceneColorMultisampled;
+    uint32_t m_samples = 1u;
     // Half-resolution bloom mip chain; every level rests in the pixel-shader
     // resource state between passes.
     Microsoft::WRL::ComPtr<ID3D12Resource> m_bloom;
@@ -58,6 +88,15 @@ private:
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_exposureLuminancePipeline;
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_exposureHistogramPipeline;
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_exposureAdaptPipeline;
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_temporalPipeline;
+    // TAA history, two targets alternating frames (pixel-shader resource
+    // state between passes); created on first use.
+    Microsoft::WRL::ComPtr<ID3D12Resource> m_history[2];
+    Microsoft::WRL::ComPtr<ID3D12Device> m_device;
+    ID3D12Resource* m_sceneDepth = nullptr;
+    ID3D12Resource* m_describedDepth = nullptr;
+    uint32_t m_historyIndex = 0;
+    bool m_historyValid = false;
     uint32_t m_rtvStride = 0;
     uint32_t m_srvStride = 0;
     uint32_t m_width = 0;

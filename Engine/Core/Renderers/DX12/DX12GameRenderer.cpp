@@ -1,5 +1,6 @@
 #include "Core/Graphics/DepthConvention.h"
 #include "DX12GameRenderer.h"
+#include "Core/Rendering/RenderingEffects.h"
 #include "Core/Renderers/GraphicsDeviceName.h"
 #include "DX12QueueMutex.h"
 #include "DX12DredDiagnostics.h"
@@ -62,8 +63,10 @@ bool DX12GameRenderer::Init(void* hwnd, uint32_t width, uint32_t height)
         CreateSwapChain(static_cast<HWND>(hwnd), width, height);
         CreateRTVHeap();
         CreateRenderTargets();
+        m_msaaSamples = DX12PostProcess::SupportedSamples(m_device.Get(),
+            Engine::Rendering::RenderingEffects::Get().Settings().antiAliasing.msaaSamples);
         CreateDepthStencilTarget();
-        m_postProcess.Create(m_device.Get(), width, height);
+        m_postProcess.Create(m_device.Get(), width, height, m_msaaSamples);
 
         m_rootSignature = CreateD3D12MaterialRootSignature(m_device.Get());
 
@@ -159,7 +162,7 @@ void DX12GameRenderer::Resize(uint32_t width, uint32_t height)
 
     CreateRenderTargets();
     CreateDepthStencilTarget();
-    m_postProcess.Create(m_device.Get(), width, height);
+    m_postProcess.Create(m_device.Get(), width, height, m_msaaSamples);
 
     m_viewport    = { 0.f, 0.f, static_cast<float>(width), static_cast<float>(height), 0.f, 1.f };
     m_scissorRect = { 0, 0, static_cast<LONG>(width), static_cast<LONG>(height) };
@@ -168,8 +171,23 @@ void DX12GameRenderer::Resize(uint32_t width, uint32_t height)
 // ---------------------------------------------------------------------------
 // Per-frame
 // ---------------------------------------------------------------------------
+void DX12GameRenderer::ApplySampleCount()
+{
+    if (!m_device) return;
+    const uint32_t samples = DX12PostProcess::SupportedSamples(m_device.Get(),
+        Engine::Rendering::RenderingEffects::Get().Settings().antiAliasing.msaaSamples);
+    if (samples == m_msaaSamples) return;
+    // Frames in flight still use the current targets.
+    FlushGPU();
+    m_msaaSamples = samples;
+    m_depthStencil.Reset();
+    CreateDepthStencilTarget();
+    m_postProcess.Create(m_device.Get(), m_width, m_height, m_msaaSamples);
+}
+
 void DX12GameRenderer::BeginFrame()
 {
+    ApplySampleCount();
     m_lastQueueSubmissionMilliseconds = 0.0;
     // ---- Per-frame fence wait ----
     // m_fenceValues[m_frameIndex] is the value we signalled at the end of the
@@ -276,6 +294,7 @@ void DX12GameRenderer::Clear(float r, float g, float b, float a)
 
 void DX12GameRenderer::EndFrame()
 {
+    m_postProcess.SetSceneDepth(m_depthStencil.Get());
     m_postProcess.Compose(m_commandList.Get(), GetCurrentRTV());
     if (m_captureRequested) RecordSceneCapture();
     // This renderer submits directly through DX12. No interop overlay remains
@@ -809,7 +828,7 @@ void DX12GameRenderer::CreateDepthStencilTarget()
     resourceDesc.DepthOrArraySize = 1;
     resourceDesc.MipLevels = 1;
     resourceDesc.Format = DXGI_FORMAT_R32G8X24_TYPELESS;
-    resourceDesc.SampleDesc = { 1, 0 };
+    resourceDesc.SampleDesc = { std::max(1u, m_msaaSamples), 0 };
     resourceDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
     resourceDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
 
@@ -826,7 +845,8 @@ void DX12GameRenderer::CreateDepthStencilTarget()
 
     D3D12_DEPTH_STENCIL_VIEW_DESC viewDesc{};
     viewDesc.Format = DXGI_FORMAT_D32_FLOAT_S8X24_UINT;
-    viewDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+    viewDesc.ViewDimension = m_msaaSamples > 1u
+        ? D3D12_DSV_DIMENSION_TEXTURE2DMS : D3D12_DSV_DIMENSION_TEXTURE2D;
     m_device->CreateDepthStencilView(
         m_depthStencil.Get(), &viewDesc,
         m_dsvHeap->GetCPUDescriptorHandleForHeapStart());

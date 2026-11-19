@@ -83,6 +83,21 @@ public:
     // Roughly the share of the ground that thickets cover (0..1).
     PROPERTY(Inspector, EditAnywhere, Category = "Grass | Shrubs", ClampMin = "0", ClampMax = "1")
     float shrubCoverage = .3f;
+    // Larger, solid bushes (about 1-2 m; semicolon-separated LOD0 meshes with
+    // optional _lod1/_lod2 siblings; tools/generate_meadow_grass.py). They
+    // grow in loose clusters with a few scattered singles, and grass thins
+    // beneath them.
+    PROPERTY(Inspector, EditAnywhere, Category = "Grass | Bushes")
+    std::string bushMeshes;
+    // Bushes per square metre at the heart of a cluster.
+    PROPERTY(Inspector, EditAnywhere, Category = "Grass | Bushes", ClampMin = "0")
+    float bushesPerSquareMeter = 0.f;
+    // Typical distance between bush clusters (metres).
+    PROPERTY(Inspector, EditAnywhere, Category = "Grass | Bushes", ClampMin = "1")
+    float bushClusterSize = 16.f;
+    // Roughly the share of the ground inside bush clusters (0..1).
+    PROPERTY(Inspector, EditAnywhere, Category = "Grass | Bushes", ClampMin = "0", ClampMax = "1")
+    float bushCoverage = .25f;
     PROPERTY(Inspector, EditAnywhere, Category = "Grass | Tiles")
     int seed = 18731;
     // Retained for scene compatibility; placement publication is capped at one
@@ -111,8 +126,37 @@ public:
     int proceduralLayerMask = 0;
     PROPERTY(Inspector, EditAnywhere, Category = "Grass | Tiles")
     bool retainDormantTiles = false;
+    // Legacy tile fade width (metres), used only when distanceFadeFraction is 0.
     PROPERTY(Inspector, EditAnywhere, Category = "Grass | LOD", ClampMin = "0")
     float distanceFadeWidth = 2.f;
+    // Share of the grass radius over which each plant shrinks into the ground
+    // at the range edge (per placement, on the GPU). 0 falls back to fading
+    // whole tiles over distanceFadeWidth.
+    PROPERTY(Inspector, EditAnywhere, Category = "Grass | LOD", ClampMin = "0", ClampMax = "0.9")
+    float distanceFadeFraction = .3f;
+    // Share of plants still drawn where the range fade begins: from a fifth
+    // of the radius the share falls to this, and the survivors widen so the
+    // cover looks as dense. Fewer plants at range lets LODs keep more detail
+    // and the radius reach further. 1 disables thinning.
+    PROPERTY(Inspector, EditAnywhere, Category = "Grass | LOD", ClampMin = "0.1", ClampMax = "1")
+    float distanceThinning = .45f;
+    // Far ring: when > 0 this field only grows beyond this distance (metres),
+    // fading in over innerFadeWidth where a detailed field fades out. Used
+    // for a cheap distant layer (large tiles, simple tufts) that carries the
+    // grass out past the detailed range. Its plants do not thin with
+    // distance, and it leaves the ground tint to the detailed field.
+    PROPERTY(Inspector, EditAnywhere, Category = "Grass | LOD", ClampMin = "0")
+    float innerRadius = 0.f;
+    PROPERTY(Inspector, EditAnywhere, Category = "Grass | LOD", ClampMin = "0.5")
+    float innerFadeWidth = 10.f;
+    // How strongly the terrain under and beyond procedural grass takes the
+    // grass colour (darker roots between plants, the blade colour past the
+    // grass range). 0 leaves the terrain layer untouched.
+    PROPERTY(Inspector, EditAnywhere, Category = "Grass | Ground", ClampMin = "0", ClampMax = "1")
+    float groundTintStrength = .5f;
+    // Root colour between plants as a share of the mean grass colour.
+    PROPERTY(Inspector, EditAnywhere, Category = "Grass | Ground", ClampMin = "0", ClampMax = "1")
+    float groundRootShade = .55f;
 
     std::map<std::string, Engine::Components::ObjectLodProfileData>
         GetObjectLodProfiles() const override;
@@ -190,7 +234,7 @@ private:
     bool m_hasGenerationSignature = false;
     // [species][lod]
     std::vector<std::vector<std::string>> m_loadedSpeciesPaths;
-    size_t m_accentSpecies = 0, m_shrubSpecies = 0;
+    size_t m_accentSpecies = 0, m_shrubSpecies = 0, m_bushSpecies = 0;
     // Accent and shrub LOD chains, re-resolved only when their lists change.
     struct LodChains
     {
@@ -198,15 +242,20 @@ private:
         bool resolved = false;
         std::vector<std::vector<std::string>> chains;
     };
-    mutable LodChains m_accentLods, m_shrubLods;
+    mutable LodChains m_accentLods, m_shrubLods, m_bushLods;
     const std::vector<std::vector<std::string>>& ResolveLodChains(
         const std::string& list, LodChains& cache) const;
     const std::vector<std::vector<std::string>>& AccentLods() const
     { return ResolveLodChains(accentMeshes, m_accentLods); }
     const std::vector<std::vector<std::string>>& ShrubLods() const
     { return ResolveLodChains(shrubMeshes, m_shrubLods); }
+    const std::vector<std::vector<std::string>>& BushLods() const
+    { return ResolveLodChains(bushMeshes, m_bushLods); }
     // 0 outside thickets, 1 at their heart (terrain-local metres).
     float ShrubThicket(float x, float z) const;
+    // The same thicket noise for bush clusters.
+    float BushCluster(float x, float z) const;
+    float ThicketNoise(float x, float z, float size, float coverage, uint32_t salt) const;
     size_t SpeciesOf(const std::string& asset) const;
     Engine::Core::Object* m_cachedViewer = nullptr;
     Engine::Components::Terrain* m_cachedTerrain = nullptr;
@@ -214,6 +263,12 @@ private:
     Engine::Scene::Scene* m_cachedScene = nullptr;
     std::string m_cachedViewerName;
     uint64_t m_cachedStructureRevision = 0;
+
+    // Ground tint (Terrain::GroundCover): mean grass colour per mesh pair.
+    std::string m_coverColorSource;
+    glm::vec3 m_coverColor{0.f};
+    float GrassRadius() const;
+    void PublishGroundCover();
 
     std::vector<float> m_lodDistances;
     bool m_useGpuLodSelection = false;

@@ -2,6 +2,7 @@
 #include "Core/Graphics/DepthConvention.h"
 #include "Core/Renderers/GraphicsDebugLayer.h"
 #include "DX11GameRenderer.h"
+#include "Core/Rendering/RenderingEffects.h"
 #include "Core/Renderers/GraphicsDeviceName.h"
 #include "Core/Graphics/PostProcess.h"
 #include "Core/Graphics/GraphicsCommandPacket.h"
@@ -175,9 +176,34 @@ void DX11GameRenderer::Resize(uint32_t width, uint32_t height)
     CreateTargets();
 }
 
+bool DX11GameRenderer::SupportsSampleCount(uint32_t samples) const
+{
+    if (samples <= 1u) return true;
+    UINT colorQuality = 0, depthQuality = 0;
+    return m_device &&
+        SUCCEEDED(m_device->CheckMultisampleQualityLevels(m_hdrBits == 32u
+            ? DXGI_FORMAT_R32G32B32A32_FLOAT : DXGI_FORMAT_R16G16B16A16_FLOAT,
+            samples, &colorQuality)) && colorQuality > 0u &&
+        SUCCEEDED(m_device->CheckMultisampleQualityLevels(
+            DXGI_FORMAT_D32_FLOAT_S8X24_UINT, samples, &depthQuality)) && depthQuality > 0u;
+}
+
+void DX11GameRenderer::ApplyLiveSampleCount()
+{
+    if (m_exportWidth || !m_swapChain || !m_device || !m_context) return;
+    uint32_t samples = Engine::Rendering::RenderingEffects::Get().Settings().antiAliasing.msaaSamples;
+    while (samples > 1u && !SupportsSampleCount(samples)) samples /= 2u;
+    if (samples == m_msaaSamples) return;
+    m_msaaSamples = samples;
+    m_context->OMSetRenderTargets(0, nullptr, nullptr);
+    m_dsv.Reset(); m_depthSrv.Reset(); m_depthTexture.Reset(); m_rtv.Reset();
+    CreateTargets();
+}
+
 void DX11GameRenderer::BeginFrame()
 {
     ++m_frameNumber;
+    ApplyLiveSampleCount();
     if (m_graphicsProvider)
     {
         m_graphicsProvider->GetContextFactory()->PrepareFrame(0);
@@ -239,6 +265,7 @@ void DX11GameRenderer::EndFrame()
         postProcess.toneMapping = m_exportLinear ? 5u : 3u;
         Engine::Graphics::SetPostProcessSettings(postProcess);
     }
+    m_postProcess.SetSceneDepth(m_depthSrv.Get());
     m_postProcess.Compose(m_context.Get(), output, temporalFrame);
     if(m_sceneCaptureRequested)
     {
@@ -632,27 +659,29 @@ bool DX11GameRenderer::ReadSceneCaptureRGBA(std::vector<uint8_t>& pixels,
 HRESULT DX11GameRenderer::CreateSceneDepth(D3D11_TEXTURE2D_DESC desc)
 {
     m_depthSrv.Reset();
-    // Single-sample depth is typeless so compute (screen-space ambient
-    // occlusion) can read it; multisampled depth stays plain.
-    const bool readable = desc.SampleDesc.Count == 1u;
-    if (readable)
-    {
-        desc.Format = DXGI_FORMAT_R32G8X24_TYPELESS;
-        desc.BindFlags |= D3D11_BIND_SHADER_RESOURCE;
-    }
+    // Depth is typeless so compute (screen-space ambient occlusion) can read
+    // it; with MSAA it reads sample 0 of the multisampled texture.
+    const bool multisampled = desc.SampleDesc.Count > 1u;
+    desc.Format = DXGI_FORMAT_R32G8X24_TYPELESS;
+    desc.BindFlags |= D3D11_BIND_SHADER_RESOURCE;
     HRESULT result = m_device->CreateTexture2D(&desc, nullptr, &m_depthTexture);
     if (FAILED(result)) return result;
     D3D11_DEPTH_STENCIL_VIEW_DESC view{};
     view.Format = DXGI_FORMAT_D32_FLOAT_S8X24_UINT;
-    view.ViewDimension = desc.SampleDesc.Count > 1u
+    view.ViewDimension = multisampled
         ? D3D11_DSV_DIMENSION_TEXTURE2DMS : D3D11_DSV_DIMENSION_TEXTURE2D;
     result = m_device->CreateDepthStencilView(m_depthTexture.Get(), &view, &m_dsv);
-    if (FAILED(result) || !readable) return result;
+    if (FAILED(result)) return result;
     D3D11_SHADER_RESOURCE_VIEW_DESC shaderView{};
     shaderView.Format = DXGI_FORMAT_R32_FLOAT_X8X24_TYPELESS;
-    shaderView.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+    shaderView.ViewDimension = multisampled
+        ? D3D11_SRV_DIMENSION_TEXTURE2DMS : D3D11_SRV_DIMENSION_TEXTURE2D;
     shaderView.Texture2D.MipLevels = 1;
-    return m_device->CreateShaderResourceView(m_depthTexture.Get(), &shaderView, &m_depthSrv);
+    // Readable depth is a convenience: without it the scene still renders,
+    // only depth-based effects turn off.
+    if (FAILED(m_device->CreateShaderResourceView(m_depthTexture.Get(), &shaderView, &m_depthSrv)))
+        m_depthSrv.Reset();
+    return S_OK;
 }
 
 std::unique_ptr<Engine::Graphics::IGraphicsContext> DX11GameRenderer::CreateFrameGraphicsContext()

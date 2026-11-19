@@ -5,7 +5,8 @@
 //
 // Constants (64 bytes, see Core/Graphics/PostProcess.h):
 //   params0       compose: exposure, operator (uint bits), bloom intensity,
-//                 accumulation sample weight; bloom passes: source texel size
+//                 accumulation sample weight (operator 4) or FXAA (w < 0,
+//                 see ApplyFxaa); bloom passes: source texel size
 //   shadowTint    rgb, w = grading enabled
 //   highlightTint rgb, w = shadow/highlight balance (-1..1)
 //   grade         contrast, saturation, 1 / bloom levels, auto exposure
@@ -29,12 +30,14 @@ struct PostProcessParameters
     float4 shadowTint;
     float4 highlightTint;
     float4 grade;
+    float4 temporal;
 };
 [[vk::push_constant]] PostProcessParameters parameters;
 #define params0 parameters.params0
 #define shadowTint parameters.shadowTint
 #define highlightTint parameters.highlightTint
 #define grade parameters.grade
+#define temporal parameters.temporal
 #else
 Texture2D<float4> sceneColor : register(t0);
 Texture2D<float4> bloomColor : register(t1);
@@ -46,6 +49,7 @@ cbuffer PostProcessCB : register(b0)
     float4 shadowTint;
     float4 highlightTint;
     float4 grade;
+    float4 temporal;
 };
 #endif
 
@@ -190,6 +194,83 @@ float4 ExposureAdaptPS(VertexOutput input) : SV_Target
     return float4(adapted, 1.0, target, 1.0);
 }
 
+// Temporal anti-aliasing resolve (before bloom, exposure and compose): this
+// frame's jittered scene (t0) blends with the previous result (t1) fetched
+// at the pixel's reprojected position, using scene depth (t2, device depth
+// in .r). Rows of the reprojection matrix (this clip -> previous clip) are
+// params0, shadowTint, highlightTint, grade; temporal = (history weight,
+// history valid). History is clipped to the 3x3 neighbourhood's colour
+// spread (YCoCg), which keeps moving and animated surfaces from ghosting
+// without per-object motion vectors. Blending happens on luminance-weighted
+// colour so bright specks do not dominate.
+float3 TemporalToYCoCg(float3 c)
+{
+    return float3(dot(c, float3(0.25, 0.5, 0.25)), dot(c, float3(0.5, 0.0, -0.5)),
+        dot(c, float3(-0.25, 0.5, -0.25)));
+}
+
+float3 TemporalFromYCoCg(float3 c)
+{
+    return float3(c.x + c.y - c.z, c.x + c.z, c.x - c.y - c.z);
+}
+
+float3 TemporalCompress(float3 c) { return c / (1.0 + dot(c, LuminanceWeights)); }
+float3 TemporalExpand(float3 c) { return c / max(1.0 - dot(c, LuminanceWeights), 1e-4); }
+
+float4 TemporalResolvePS(VertexOutput input) : SV_Target
+{
+    const int2 pixel = int2(input.position.xy);
+    int width, height;
+    sceneColor.GetDimensions(width, height);
+    const float4 centre = sceneColor.Load(int3(pixel, 0));
+    const float3 current = TemporalCompress(min(max(centre.rgb, 0.0), 32768.0));
+    float3 mean = 0.0, meanSquared = 0.0;
+    float closestDepth = 0.0; // reverse-Z: larger is nearer
+    int2 closestPixel = pixel;
+    [unroll] for (int y = -1; y <= 1; ++y)
+    [unroll] for (int x = -1; x <= 1; ++x)
+    {
+        const int2 at = clamp(pixel + int2(x, y), int2(0, 0), int2(width - 1, height - 1));
+        const float3 c = TemporalToYCoCg(TemporalCompress(
+            min(max(sceneColor.Load(int3(at, 0)).rgb, 0.0), 32768.0)));
+        mean += c;
+        meanSquared += c * c;
+        const float d = exposureColor.Load(int3(at, 0)).r;
+        if (d > closestDepth) { closestDepth = d; closestPixel = at; }
+    }
+    mean /= 9.0;
+    const float3 deviation = sqrt(max(meanSquared / 9.0 - mean * mean, 0.0));
+    if (temporal.y < 0.5)
+        return float4(TemporalExpand(current), centre.a);
+    // Reproject the nearest surface in the neighbourhood, so edges take the
+    // foreground's motion (the background's would smear them).
+    const float2 uv = (float2(closestPixel) + 0.5) / float2(width, height);
+    const float4 clip = float4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, closestDepth, 1.0);
+    const float4 previous = float4(dot(params0, clip), dot(shadowTint, clip),
+        dot(highlightTint, clip), dot(grade, clip));
+    if (abs(previous.w) < 1e-6)
+        return float4(TemporalExpand(current), centre.a);
+    const float2 previousNdc = previous.xy / previous.w;
+    const float2 historyUv = (input.position.xy / float2(width, height)) +
+        (float2(previousNdc.x * 0.5 + 0.5, 0.5 - previousNdc.y * 0.5) - uv);
+    if (any(historyUv < 0.0) || any(historyUv > 1.0))
+        return float4(TemporalExpand(current), centre.a);
+    float3 history = TemporalToYCoCg(TemporalCompress(
+        max(bloomColor.SampleLevel(sceneSampler, historyUv, 0.0).rgb, 0.0)));
+    // Clip the history toward the neighbourhood mean into its colour box.
+    const float3 extent = deviation * 1.25 + 1e-4;
+    const float3 offset = history - mean;
+    const float3 units = abs(offset / extent);
+    const float largest = max(units.x, max(units.y, units.z));
+    if (largest > 1.0) history = mean + offset / largest;
+    // Less history when the pixel moved a lot: resampling blurs it.
+    const float2 motionPixels = (historyUv - input.position.xy / float2(width, height)) *
+        float2(width, height);
+    const float feedback = temporal.x * lerp(1.0, 0.8, saturate(length(motionPixels) / 16.0));
+    const float3 resolved = lerp(TemporalToYCoCg(current), history, feedback);
+    return float4(TemporalExpand(max(TemporalFromYCoCg(resolved), 0.0)), centre.a);
+}
+
 float3 ToneMap(uint op, float3 color)
 {
     if (op == 1u)
@@ -232,6 +313,74 @@ float3 LinearToPq(float3 color)
     return pow((c1 + c2 * l) / (1.0 + c3 * l), m2);
 }
 
+// FXAA (after Lottes, FXAA 3.11 "console" edge blend plus a sub-pixel pass),
+// run on the HDR scene before bloom, exposure and tone mapping so compose
+// still happens once. Edges are found on exposed, compressed luma so the
+// threshold matches what reaches the screen; params0.w < 0 enables it and
+// carries -(edge threshold in thousandths + subpixel share * 0.999).
+float FxaaLuma(float3 hdr, float exposureScale)
+{
+    const float luma = dot(max(hdr, 0.0), LuminanceWeights) * exposureScale;
+    return luma / (1.0 + luma);
+}
+
+float3 FxaaSample(float2 uv)
+{
+    return SampleSource(uv);
+}
+
+float3 ApplyFxaa(float2 uv, float3 centre, float exposureScale, float encoded)
+{
+    const float threshold = floor(encoded) * 0.001;
+    const float subpixel = frac(encoded) / 0.999;
+    float width, height;
+    sceneColor.GetDimensions(width, height);
+    const float2 texel = 1.0 / float2(width, height);
+    const float3 n = FxaaSample(uv + float2(0.0, -texel.y));
+    const float3 s = FxaaSample(uv + float2(0.0, texel.y));
+    const float3 e = FxaaSample(uv + float2(texel.x, 0.0));
+    const float3 w = FxaaSample(uv + float2(-texel.x, 0.0));
+    const float lumaM = FxaaLuma(centre, exposureScale);
+    const float lumaN = FxaaLuma(n, exposureScale), lumaS = FxaaLuma(s, exposureScale);
+    const float lumaE = FxaaLuma(e, exposureScale), lumaW = FxaaLuma(w, exposureScale);
+    const float lumaMax = max(lumaM, max(max(lumaN, lumaS), max(lumaE, lumaW)));
+    const float lumaMin = min(lumaM, min(min(lumaN, lumaS), min(lumaE, lumaW)));
+    const float range = lumaMax - lumaMin;
+    // Flat areas (most of the image) leave after five taps.
+    [branch] if (range < max(threshold * lumaMax, 0.0312))
+        return centre;
+    const float3 nw = FxaaSample(uv + float2(-texel.x, -texel.y));
+    const float3 ne = FxaaSample(uv + float2(texel.x, -texel.y));
+    const float3 sw = FxaaSample(uv + float2(-texel.x, texel.y));
+    const float3 se = FxaaSample(uv + float2(texel.x, texel.y));
+    const float lumaNW = FxaaLuma(nw, exposureScale), lumaNE = FxaaLuma(ne, exposureScale);
+    const float lumaSW = FxaaLuma(sw, exposureScale), lumaSE = FxaaLuma(se, exposureScale);
+
+    // Edge direction from the diagonals; blend two and four taps along it
+    // and keep the wider blend unless it overshoots the local range.
+    float2 direction = float2(-((lumaNW + lumaNE) - (lumaSW + lumaSE)),
+        (lumaNW + lumaSW) - (lumaNE + lumaSE));
+    const float reduce = max((lumaNW + lumaNE + lumaSW + lumaSE) * 0.03125, 1.0 / 128.0);
+    const float scale = 1.0 / (min(abs(direction.x), abs(direction.y)) + reduce);
+    direction = clamp(direction * scale, -8.0, 8.0) * texel;
+    const float3 blendA = 0.5 * (FxaaSample(uv + direction * (1.0 / 3.0 - 0.5)) +
+        FxaaSample(uv + direction * (2.0 / 3.0 - 0.5)));
+    const float3 blendB = blendA * 0.5 + 0.25 * (FxaaSample(uv - direction * 0.5) +
+        FxaaSample(uv + direction * 0.5));
+    const float lumaB = FxaaLuma(blendB, exposureScale);
+    float3 result = (lumaB < lumaMin || lumaB > lumaMax) ? blendA : blendB;
+
+    // Sub-pixel: a lone pixel unlike its neighbourhood (a blade thinner than
+    // a pixel) moves toward the neighbourhood average.
+    const float lumaAverage = ((lumaN + lumaS + lumaE + lumaW) * 2.0 +
+        (lumaNW + lumaNE + lumaSW + lumaSE)) / 12.0;
+    float amount = saturate(abs(lumaAverage - lumaM) / range);
+    amount = amount * amount * (3.0 - 2.0 * amount);
+    amount = amount * amount * subpixel * 0.75;
+    const float3 average = ((n + s + e + w) * 2.0 + (nw + ne + sw + se)) / 12.0;
+    return lerp(result, average, amount);
+}
+
 float4 PSMain(VertexOutput input) : SV_Target
 {
     const float4 source = sceneColor.Sample(sceneSampler, input.uv);
@@ -239,6 +388,27 @@ float4 PSMain(VertexOutput input) : SV_Target
     if (op == 4u)
         return source * params0.w;
     float3 color = max(source.rgb, 0.0);
+    // Sharpening after TAA (temporal.z): unsharp mask against the four
+    // neighbours, on compressed colour so bright edges do not ring.
+    [branch] if (temporal.z > 0.0)
+    {
+        float width, height;
+        sceneColor.GetDimensions(width, height);
+        const float2 texel = 1.0 / float2(width, height);
+        const float3 neighbours = (TemporalCompress(SampleSource(input.uv + float2(texel.x, 0.0))) +
+            TemporalCompress(SampleSource(input.uv - float2(texel.x, 0.0))) +
+            TemporalCompress(SampleSource(input.uv + float2(0.0, texel.y))) +
+            TemporalCompress(SampleSource(input.uv - float2(0.0, texel.y)))) * 0.25;
+        const float3 centre = TemporalCompress(min(color, 32768.0));
+        color = TemporalExpand(max(centre + (centre - neighbours) * temporal.z, 0.0));
+    }
+    [branch] if (params0.w < 0.0)
+    {
+        const float autoScale = grade.w > 0.5
+            ? 0.18 * exp2(-exposureColor.Load(int3(0, 0, 0)).r) : 1.0;
+        color = ApplyFxaa(input.uv, min(color, 32768.0),
+            max(params0.x, 0.0) * autoScale, -params0.w);
+    }
     [branch] if (params0.z > 0.0)
     {
         const float3 bloom = bloomColor.SampleLevel(sceneSampler, input.uv, 0.0).rgb *

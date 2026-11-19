@@ -928,6 +928,17 @@ private:
     std::unordered_map<const Object*, WarpedRenderMesh> m_warpedRenderMeshes;
     uint32_t m_frameLightCount = 0;
     Engine::Model::RealtimeShadowSettings m_realtimeShadowSettings;
+    // Temporal anti-aliasing per camera: the previous frame's unjittered
+    // view-projection (for reprojection), the jitter sequence position and
+    // the viewport the history belongs to.
+    struct TemporalViewState
+    {
+        glm::dmat4 previousViewProjection{ 1.0 };
+        uint32_t frame = 0;
+        uint32_t width = 0, height = 0;
+        bool valid = false;
+    };
+    std::unordered_map<const void*, TemporalViewState> m_temporalViews;
     Engine::Model::DistanceLightingSettings m_distanceLightingSettings;
     uint64_t m_lastObjectDataUploadBytes = 0;
     uint32_t m_lastOcclusionCulledCount = 0;

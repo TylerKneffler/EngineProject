@@ -4,6 +4,7 @@
 #include <d3d12.h>
 #include <vector>
 #include <memory>
+#include <mutex>
 #include <string>
 
 namespace Engine::Renderers
@@ -27,8 +28,27 @@ public:
 
     ID3D12PipelineState* GetD3D12PipelineState() const { return m_pso.Get(); }
 
+    // A D3D12 pipeline state fixes its sample count. Builder pipelines keep
+    // their description so a multisampled scene target (MSAA) can use a
+    // variant with a matching count, created on first use.
+    void EnableSampleVariants(ID3D12Device* device, const D3D12_GRAPHICS_PIPELINE_STATE_DESC& desc,
+        Microsoft::WRL::ComPtr<ID3DBlob> vs, Microsoft::WRL::ComPtr<ID3DBlob> ps,
+        const std::vector<D3D12_INPUT_ELEMENT_DESC>& layout);
+    // The pipeline for render targets with this many samples (1, 2, 4, 8).
+    // Falls back to the single-sample pipeline if a variant cannot be built.
+    ID3D12PipelineState* ForSamples(uint32_t samples) const;
+
 private:
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_pso;
+    Microsoft::WRL::ComPtr<ID3D12Device> m_device;
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC m_desc{};
+    Microsoft::WRL::ComPtr<ID3DBlob> m_vs, m_ps;
+    std::vector<D3D12_INPUT_ELEMENT_DESC> m_layout;
+    std::vector<std::string> m_semanticNames;
+    mutable std::mutex m_variantMutex;
+    // [0] 2 samples, [1] 4, [2] 8.
+    mutable Microsoft::WRL::ComPtr<ID3D12PipelineState> m_variants[3];
+    mutable bool m_variantFailed[3] = {};
 };
 
 class D3D12ComputePipeline final : public Engine::Graphics::IPipelineState

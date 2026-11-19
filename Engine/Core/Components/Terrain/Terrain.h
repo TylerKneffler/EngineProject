@@ -91,6 +91,20 @@ public:
     // Relief self-shadowing from directional lights within 12 m. Costs about
     // as much again as the relief itself, so it is opt-in.
     bool reliefShadows = false;
+    // Transient: ground cover (e.g. grass) growing on some paint layers
+    // publishes its colours here, so the ground under and beyond it is tinted
+    // to match. Within fadeEnd of the camera gaps between plants take the
+    // darker root colour; beyond it the cover's own colour carries on.
+    struct GroundCover
+    {
+        glm::vec3 color{0.f};      // mean linear colour of the cover
+        float strength = 0.f;      // 0 disables the tint
+        float rootShade = .55f;    // root colour = color * rootShade
+        float fadeStart = 0.f;     // world distance where the cover fades out
+        float fadeEnd = 0.f;
+        uint32_t layerMask = 0;    // paint layers the cover grows on
+    };
+    GroundCover groundCover;
     static constexpr int MaxPaintSamples = 2049; // per side
     int PaintWidth() const { return paintResolution > 0 ? cellsX * paintResolution + 1 : 0; }
     int PaintHeight() const { return paintResolution > 0 ? cellsY * paintResolution + 1 : 0; }

@@ -33,7 +33,7 @@ public:
     uint64_t GetSubmittedFrameToken() const override { return m_submittedFrameToken; }
     bool IsFrameComplete(uint64_t token) override;
     std::unique_ptr<Engine::Graphics::IGraphicsContext> CreateFrameGraphicsContext() override;
-    // Creates m_depthTexture/m_dsv (and m_depthSrv when single-sample).
+    // Creates m_depthTexture/m_dsv and m_depthSrv (multisampled with MSAA).
     HRESULT CreateSceneDepth(D3D11_TEXTURE2D_DESC desc);
     bool RecordWorkerCommands(const Engine::Graphics::GraphicsCommandPacket&) override;
     bool SupportsWorkerCommands() const override
@@ -65,6 +65,10 @@ public:
 private:
     std::string m_graphicsDevice = "Auto";
     void CreateTargets();
+    // Live rendering follows the project's MSAA setting (RenderingEffects);
+    // video export sets its own count. Recreates targets when it changes.
+    void ApplyLiveSampleCount();
+    bool SupportsSampleCount(uint32_t samples) const;
     void SignalFrameCompletion();
     Microsoft::WRL::ComPtr<ID3D11Device> m_device;
     Microsoft::WRL::ComPtr<ID3D11DeviceContext> m_context;

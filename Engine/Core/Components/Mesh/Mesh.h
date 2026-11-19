@@ -55,6 +55,21 @@ public:
     // the GPU so distance changes do not toggle whole instance tiles.
     float runtimeShadowDistance = 0.f;
     float runtimeShadowFadeWidth = 1.f;
+    // Transient per-placement distance fade for instanced ground cover
+    // (GrassField): each placement shrinks toward its root between these
+    // world distances from the camera. End <= start disables it.
+    float placementFadeStart = 0.f;
+    float placementFadeEnd = 0.f;
+    // Transient distance thinning for instanced ground cover (GrassField):
+    // between these world distances the share of placements kept falls from
+    // 1 to placementThinMinimum (1 disables), and survivors widen by
+    // 1 / sqrt(share) so the cover stays as dense on screen.
+    float placementThinStart = 0.f;
+    float placementThinEnd = 0.f;
+    float placementThinMinimum = 1.f;
+    // Thinning used as a fade-in (start > end, minimum 0): survivors keep
+    // their width instead of widening.
+    bool placementThinKeepWidth = false;
     // Detail levels carried by the prefab that owns this part: entry i is the
     // mesh asset used at LOD i + 1. An empty entry, or a level past the end of
     // a non-empty list, hides the part at that level (e.g. bark under an

@@ -36,7 +36,7 @@ import random
 from pathlib import Path
 
 import generate_meadow_accents as accents
-from generate_meadow_accents import (UP, add, cross, horizontal, mix, mul, norm,
+from generate_meadow_accents import (UP, add, cross, dot, horizontal, mix, mul, norm,
                                      perpendicular, sub)
 
 OUT = accents.OUT
@@ -72,46 +72,97 @@ SWARD_MID = (0.11, 0.25, 0.05)
 SWARD_TIP = (0.20, 0.36, 0.08)
 
 
+def smoothstep(edge0, edge1, x):
+    t = min(1.0, max(0.0, (x - edge0) / (edge1 - edge0)))
+    return t * t * (3.0 - 2.0 * t)
+
+
+def blade_width(t):
+    """Grass leaf outline along its length (0 root, 1 tip): a narrow sheath,
+    widest about a fifth of the way up, long parallel margins, then a long
+    tapering tip. A straight root-to-tip taper reads as a flat triangle."""
+    sheath = 0.55 + 0.45 * smoothstep(0.0, 0.2, t)
+    taper = 1.0 if t < 0.55 else max(0.0, (1.0 - t) / 0.45) ** 0.75
+    return sheath * taper
+
+
 def blade(mesh, base, yaw, length_, rise, droop, width, segments,
-          root=BLADE_ROOT, mid=BLADE_MID, tip=BLADE_TIP, twist=0.0):
+          root=BLADE_ROOT, mid=BLADE_MID, tip=BLADE_TIP, twist=0.0,
+          columns=2, fold=0.0, shade=1.0):
     """A narrow blade rising at `rise` (radians from horizontal) and arching
-    over; the last row closes to a point, so it costs 2 * segments - 1
-    triangles."""
+    over; the last row closes to a point. columns=3 folds it along a sunken
+    midrib (a V channel, as real blades are) so it catches light unevenly
+    instead of shading as one flat strip. Costs (columns - 1) * (2 * segments
+    - 1) triangles. shade scales the blade's brightness."""
     direction = horizontal(yaw)
     start = add(mul(direction, math.cos(rise)), mul(UP, math.sin(rise)))
-    points, sides, widths, colors = [], [], [], []
+    points, sides, faces, widths, colors = [], [], [], [], []
     position = base
     heading = start
     step = length_ / segments
     for i in range(segments + 1):
         t = i / segments
         points.append(position)
-        side = horizontal(yaw + math.pi * 0.5 + twist * t)
-        sides.append(perpendicular(heading, side))
-        widths.append(width * (1.0 - t ** 1.6) if i < segments else 0.0)
-        colors.append(mix(root, mid, t / 0.5) if t < 0.5 else mix(mid, tip, (t - 0.5) / 0.5))
+        side = perpendicular(heading, horizontal(yaw + math.pi * 0.5 + twist * t))
+        sides.append(side)
+        faces.append(norm(cross(side, heading)))
+        widths.append(width * blade_width(t))
+        color = mix(root, mid, t / 0.5) if t < 0.5 else mix(mid, tip, (t - 0.5) / 0.5)
+        colors.append(mul(color, shade))
         # Bend the heading toward the ground a little more each step.
         heading = norm(add(heading, mul(add(direction, mul(UP, -1.0)), droop / segments)))
         position = add(position, mul(heading, step))
     rows = []
-    for i, (p, s, w, c) in enumerate(zip(points, sides, widths, colors)):
+    for i, (p, s, f, w, c) in enumerate(zip(points, sides, faces, widths, colors)):
         if i == segments:
             rows.append([mesh.vertex(p, c, 0.5)])
-        else:
-            rows.append([mesh.vertex(add(p, mul(s, -0.5 * w)), c, 0.0),
-                         mesh.vertex(add(p, mul(s, 0.5 * w)), c, 1.0)])
+            continue
+        row = []
+        for k in range(columns):
+            u = k / (columns - 1)
+            offset = mul(s, (u - 0.5) * w)
+            color = c
+            if columns == 3 and k == 1:
+                # Sunken, slightly paler midrib.
+                offset = add(offset, mul(f, -fold * w))
+                color = mul(c, 1.07)
+            row.append(mesh.vertex(add(p, offset), color, u))
+        rows.append(row)
     for a, b in zip(rows, rows[1:]):
-        if len(b) == 1:
-            mesh.triangle(a[0], b[0], a[1])
-        else:
-            mesh.quad(a[0], a[1], b[0], b[1])
+        for k in range(columns - 1):
+            if len(b) == 1:
+                mesh.triangle(a[k], b[0], a[k + 1])
+            else:
+                mesh.quad(a[k], a[k + 1], b[k], b[k + 1])
     return points[-1]
+
+
+def tube(mesh, points, tangents, radii, colors, sides=3):
+    """A thin round stem: a sides-gon prism along points. Vertex normals are
+    averaged around each ring, so even a triangular section shades round,
+    and unlike a flat ribbon it never vanishes edge-on."""
+    rings = []
+    for p, axis, r, c in zip(points, tangents, radii, colors):
+        a = perpendicular(axis, (1.0, 0.0, 0.0) if abs(axis[0]) < 0.9 else (0.0, 0.0, 1.0))
+        b = norm(cross(axis, a))
+        ring = []
+        for k in range(sides):
+            angle = 2.0 * math.pi * k / sides
+            offset = add(mul(a, r * math.cos(angle)), mul(b, r * math.sin(angle)))
+            ring.append(mesh.vertex(add(p, offset), c, k / sides))
+        rings.append(ring)
+    for low, high in zip(rings, rings[1:]):
+        for k in range(sides):
+            j = (k + 1) % sides
+            mesh.quad(low[k], low[j], high[k], high[j])
 
 
 # Detail levels keep these shares of the blades and widen the survivors.
 GRASS_KEEP = (1.0, 0.55, 0.32)
 GRASS_WIDEN = (1.0, 1.5, 2.3)
-GRASS_SEGMENTS = (4, 3, 2)
+GRASS_SEGMENTS = (5, 4, 3)
+GRASS_COLUMNS = (3, 3, 2)
+GRASS_FOLD = 0.22  # midrib depth as a share of the blade width
 
 
 def tussock(mesh, rng, center, blades, height, crown, detail, dry_share=0.1, width=0.017):
@@ -128,11 +179,15 @@ def tussock(mesh, rng, center, blades, height, crown, detail, dry_share=0.1, wid
         rise = math.radians(86.0 - 34.0 * radius ** 1.5 - 12.0 * rise_jitter)
         length_ = height * (0.6 + 0.45 * length_jitter) * (1.08 - 0.2 * radius)
         tip = DRY_TIP if dry < dry_share else BLADE_TIP
+        # Per-blade brightness from values already drawn, so the layout and
+        # every LOD stay identical.
+        shade = 0.88 + 0.24 * ((length_jitter * 7.31 + rise_jitter * 3.17) % 1.0)
         blade(mesh, base, yaw, length_, rise, droop, width * GRASS_WIDEN[detail],
-              GRASS_SEGMENTS[detail], tip=tip, twist=twist)
+              GRASS_SEGMENTS[detail], tip=tip, twist=twist,
+              columns=GRASS_COLUMNS[detail], fold=GRASS_FOLD, shade=shade)
 
 
-def sward(mesh, rng, count, radius, detail, height=0.22, width=0.02):
+def sward(mesh, rng, count, radius, detail, height=0.26, width=0.026):
     """Short, low-lying blades over the whole patch; they hide the soil."""
     keep_share = (1.0, 0.5, 0.35)[detail]
     widen = (1.0, 1.35, 1.9)[detail]
@@ -141,7 +196,8 @@ def sward(mesh, rng, count, radius, detail, height=0.22, width=0.02):
         if keep >= keep_share:
             continue
         blade(mesh, base, yaw, height * (0.45 + 0.55 * length_), math.radians(22.0 + 38.0 * rise),
-              0.45, width * widen, (2, 2, 1)[detail], root=SWARD_ROOT, mid=SWARD_MID, tip=SWARD_TIP)
+              0.45, width * widen, (3, 2, 1)[detail], root=SWARD_ROOT, mid=SWARD_MID, tip=SWARD_TIP,
+              shade=0.9 + 0.2 * ((length_ * 5.71 + rise * 2.39) % 1.0))
 
 
 def meadow_tussock(detail):
@@ -152,7 +208,8 @@ def meadow_tussock(detail):
         crown_rng = random.Random(5200 + index)
         tussock(mesh, crown_rng, (x, 0.0, z), 16 + int(7 * size), 0.3 + 0.14 * size,
                 0.06 + 0.04 * size, detail)
-    sward(mesh, random.Random(5300), 84, 0.6, detail)
+    # A dense low sward closes the ground between the tussocks.
+    sward(mesh, random.Random(5300), 150, 0.65, detail)
     return mesh
 
 
@@ -162,8 +219,17 @@ SEED_HEAD_TIP = (0.58, 0.50, 0.30)
 
 
 def seed_stalk(mesh, base, yaw, height, lean, detail):
-    top, axis = accents.stem(mesh, base, yaw, height, lean, 0.0028, (4, 3, 2)[detail],
-                             root=BLADE_ROOT, top=SEED_STEM)
+    if detail < 2:
+        # Round culm: a thin tube that tapers a little toward the head.
+        segments = (5, 3)[detail]
+        points, tangents = accents.stem_curve(base, yaw, height, lean, segments)
+        tube(mesh, points, tangents,
+             [0.0017 * (1.0 - 0.35 * i / segments) for i in range(segments + 1)],
+             [mix(BLADE_ROOT, SEED_STEM, i / segments) for i in range(segments + 1)])
+        top, axis = points[-1], tangents[-1]
+    else:
+        top, axis = accents.stem(mesh, base, yaw, height, lean, 0.0028, 2,
+                                 root=BLADE_ROOT, top=SEED_STEM)
     # Panicle: crossed tapering ribbons continuing the stem.
     spike = [add(top, mul(axis, 0.07 * i / 3)) for i in range(4)]
     for turn in ((0.0, 1.0) if detail < 2 else (0.0,)):
@@ -242,6 +308,241 @@ def lobed_dome(rng, lobes, radius, height):
     return result
 
 
+CORE_SHADE = (0.012, 0.03, 0.01)
+CORE_SUN = (0.025, 0.07, 0.018)
+CORE_SUBDIVIDE = (2, 1, 1)
+
+
+def crown_core(mesh, center, rx, ry, rz, detail, lump_seed):
+    """A closed, lumpy ellipsoid of dark foliage colour inside a crown lobe.
+
+    Leaf cards alone leave gaps that show the ground (and coarse LODs drop
+    most leaves); the core makes the bush read as one solid mass from every
+    angle. Vertices below the ground are lifted to it, flattening the base.
+    """
+    vertices = [(1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)]
+    faces = [(0, 4, 2), (4, 1, 2), (1, 5, 2), (5, 0, 2), (4, 0, 3), (1, 4, 3), (5, 1, 3), (0, 5, 3)]
+    for _ in range(CORE_SUBDIVIDE[detail]):
+        cache = {}
+
+        def midpoint(i, j):
+            key = (min(i, j), max(i, j))
+            if key not in cache:
+                vertices.append(norm(mul(add(vertices[i], vertices[j]), 0.5)))
+                cache[key] = len(vertices) - 1
+            return cache[key]
+        refined = []
+        for a, b, c in faces:
+            ab, bc, ca = midpoint(a, b), midpoint(b, c), midpoint(c, a)
+            refined += [(a, ab, ca), (ab, b, bc), (ca, bc, c), (ab, bc, ca)]
+        faces = refined
+    indices = []
+    for v in vertices:
+        # Smooth lumps from the direction, identical at every LOD.
+        lump = 1.0 + 0.12 * math.sin(v[0] * 5.3 + lump_seed) * math.sin(v[2] * 4.7 + lump_seed * 1.7) \
+            + 0.06 * math.sin(v[1] * 6.1 + lump_seed * 2.3)
+        p = (center[0] + v[0] * rx * lump, max(0.02, center[1] + v[1] * ry * lump),
+             center[2] + v[2] * rz * lump)
+        indices.append(mesh.vertex(p, mix(CORE_SHADE, CORE_SUN, 0.5 + 0.5 * v[1]), 0.5))
+    for a, b, c in faces:
+        mesh.triangle(indices[a], indices[c], indices[b])
+
+
+def bush_leaves(mesh, rng, count, lobes, detail, size, shade=SHRUB_LEAF_SHADE, sun=SHRUB_LEAF_SUN):
+    """Leaf cards on the surfaces of ellipsoidal crown lobes (center, rx, ry,
+    rz), facing outward and a little up. Draws the same random values at
+    every LOD so the silhouette holds while coarse LODs keep fewer, larger
+    leaves."""
+    for _ in range(count):
+        lobe = lobes[int(rng.random() * len(lobes))]
+        u, v, keep, scale, tint, spin = (rng.random() for _ in range(6))
+        if keep >= LEAF_KEEP[detail]:
+            continue
+        center, rx, ry, rz = lobe
+        azimuth = u * 2.0 * math.pi
+        elevation = math.asin(-0.35 + 1.35 * v)
+        normal = (math.cos(elevation) * math.cos(azimuth), math.sin(elevation),
+                  math.cos(elevation) * math.sin(azimuth))
+        shell = 0.92 + 0.16 * scale
+        base = (center[0] + normal[0] * rx * shell, max(0.03, center[1] + normal[1] * ry * shell),
+                center[2] + normal[2] * rz * shell)
+        outward = norm(add(normal, (math.cos(spin * 6.283) * 0.5, 0.3, math.sin(spin * 6.283) * 0.5)))
+        light = 0.3 + 0.7 * (0.5 + 0.5 * normal[1])
+        base_color = mix(shade, sun, light * 0.65)
+        tip_color = mix(shade, sun, min(1.0, light * (0.85 + 0.3 * tint)))
+        grow = LEAF_GROW[detail]
+        leaf_card(mesh, base, outward, UP, size * 1.4 * grow * (0.8 + 0.4 * scale),
+                  size * grow * (0.8 + 0.4 * scale), base_color, tip_color, fold=0.25 if detail == 0 else 0.0)
+
+
+BARK = (0.15, 0.115, 0.075)
+BARK_DARK = (0.07, 0.055, 0.04)
+# Branch levels drawn per LOD (0 main stems .. 3 twigs); leaves always sit at
+# the twig tips, so coarse LODs keep the silhouette while dropping fine wood.
+BRANCH_DRAWN = (3, 2, 1)
+BRANCH_SIDES = (5, 4, 3, 3)
+BRANCH_SEGMENTS = (3, 3, 2, 1)
+CORE_SCALE = (0.35, 0.6, 0.8)
+# Share of the way to the envelope each level's branch grows; twigs reach it.
+BRANCH_REACH = (0.55, 0.6, 0.75, 1.0)
+
+
+def grow_bush(mesh, rng, detail, envelope, stems, stem_width, leaf_size, leaves_per_twig,
+              shade, sun, upright=0.0):
+    """A bush grown as a branch hierarchy inside an ellipsoid envelope:
+    `stems` main stems from the root, each splitting into three branches,
+    then three twigs (four levels). Branches taper, curve outward and up and
+    are kept inside the envelope; each twig tip carries a cluster of small
+    leaves on short stalks. Every random value is drawn at every LOD, so all
+    LODs share one layout; coarse LODs skip fine wood and keep fewer, larger
+    leaves. A dark inner core (the shadowed mass of twigs) keeps the bush
+    opaque."""
+    center, rx, ry, rz = envelope
+
+    def inside(p):
+        return ((p[0] - center[0]) / rx) ** 2 + ((p[1] - center[1]) / ry) ** 2 + ((p[2] - center[2]) / rz) ** 2
+
+    def to_envelope(base, direction):
+        """Distance from base along direction to the envelope surface."""
+        o = ((base[0] - center[0]) / rx, (base[1] - center[1]) / ry, (base[2] - center[2]) / rz)
+        d = (direction[0] / rx, direction[1] / ry, direction[2] / rz)
+        a = dot(d, d); b = 2.0 * dot(o, d); c = dot(o, o) - 1.0
+        disc = b * b - 4.0 * a * c
+        if disc <= 0.0:
+            return 0.05
+        return max(0.05, (-b + math.sqrt(disc)) / (2.0 * a))
+
+    def outward(p):
+        return norm(((p[0] - center[0]) / rx + 1e-4, (p[1] - center[1]) / ry, (p[2] - center[2]) / rz + 1e-4))
+
+    tips = []
+
+    def grow(base, direction, length, width, level):
+        sway = (rng.random() - 0.5, rng.random() - 0.5)
+        children = [(0.45 + 0.5 * rng.random(), rng.random() * 6.283, rng.random(), 0.55 + 0.25 * rng.random())
+                    for _ in range(3 if level < 3 else 0)]
+        # Each level grows a share of the way to the envelope; twigs reach it.
+        length = min(length, to_envelope(base, direction) * BRANCH_REACH[level])
+        segments = BRANCH_SEGMENTS[level]
+        points, tangents = [], []
+        heading = direction
+        for i in range(segments + 1):
+            points.append(add(base, mul(heading, length * i / segments)) if i == 0 else
+                          add(points[-1], mul(heading, length / segments)))
+            tangents.append(heading)
+            # Curve gently upward and sideways.
+            heading = norm(add(heading, (sway[0] * 0.2, 0.05, sway[1] * 0.2)))
+        if level <= BRANCH_DRAWN[detail]:
+            tube(mesh, points, tangents,
+                 [width * (1.0 - 0.55 * i / segments) for i in range(segments + 1)],
+                 [mix(BARK_DARK, BARK, (level + i / segments) / 4.0) for i in range(segments + 1)],
+                 sides=BRANCH_SIDES[level])
+        if level == 3:
+            tips.append((points[-1], heading))
+            # A few leaves along the twig as well as at its tip.
+            tips.append((points[0], heading))
+            return
+        for along, azimuth, lift, scale in children:
+            index = min(segments, int(round(along * segments)))
+            at = points[index]
+            # Mostly the parent's way, pushed outward from the trunk axis
+            # (outward from the centre would point low branches downward),
+            # with a random spread and a slight upward lean.
+            axis_out = norm((at[0] - center[0] + 1e-3, 0.0, at[2] - center[2] + 1e-3))
+            spread = (math.cos(azimuth), lift - 0.2, math.sin(azimuth))
+            child = norm(add(add(mul(heading, 0.55), mul(axis_out, 0.45)),
+                             add(mul(norm(spread), 0.45), (0.0, 0.25 + upright * 0.4, 0.0))))
+            grow(at, child, 10.0, width * 0.6, level + 1)
+
+    height = center[1] + ry
+    for stem in range(stems):
+        angle = stem * 6.283 / stems + rng.random() * 0.8
+        tilt = 0.25 + 0.35 * rng.random()
+        direction = norm((math.cos(angle) * (tilt + 0.3), 1.0 + upright, math.sin(angle) * (tilt + 0.3)))
+        grow((0.03 * math.cos(angle), 0.0, 0.03 * math.sin(angle)), direction,
+             height * (0.5 + 0.2 * rng.random()), stem_width, 0)
+
+    # The core sits inside the foliage: centred on the twig tips and sized
+    # from their spread, so it never pokes out where branches did not reach.
+    count = float(len(tips))
+    mid = tuple(sum(tip[0][axis] for tip in tips) / count for axis in range(3))
+    spread = tuple(math.sqrt(sum((tip[0][axis] - mid[axis]) ** 2 for tip in tips) / count) for axis in range(3))
+    k = CORE_SCALE[detail]
+    crown_core(mesh, mid, spread[0] * 1.5 * k, spread[1] * 1.5 * k, spread[2] * 1.5 * k, detail, 1.7)
+
+    grow_size = LEAF_GROW[detail]
+    for tip, heading in tips:
+        cluster = [tuple(rng.random() for _ in range(5)) for _ in range(leaves_per_twig)]
+        normal = norm(((tip[0] - center[0]) / rx, (tip[1] - center[1]) / ry, (tip[2] - center[2]) / rz))
+        light = 0.3 + 0.7 * (0.5 + 0.5 * normal[1])
+        for keep, azimuth, rise, scale, tint in cluster:
+            if keep >= LEAF_KEEP[detail]:
+                continue
+            # Leaf on a short stalk around the twig tip, facing out and up.
+            stalk = norm(add(mul(heading, 0.6), (math.cos(azimuth * 6.283), 0.2 + 0.6 * rise,
+                                                 math.sin(azimuth * 6.283))))
+            base = add(tip, mul(stalk, leaf_size * 0.35))
+            outward = norm(add(stalk, mul(normal, 0.5)))
+            size = leaf_size * grow_size * (0.8 + 0.4 * scale)
+            leaf_card(mesh, base, outward, UP, size * 1.5, size,
+                      mix(shade, sun, light * 0.6), mix(shade, sun, min(1.0, light * (0.85 + 0.3 * tint))))
+
+
+def meadow_bush(detail):
+    """Rounded broadleaf bush (hazel / dogwood-like), ~1.2 m tall, ~1.5 m wide,
+    grown as stems, branches and twigs with leaf clusters."""
+    mesh = Mesh(wind_response=0.25)
+    grow_bush(mesh, random.Random(6401), detail, ((0.0, 0.62, 0.0), 0.78, 0.6, 0.72),
+              stems=7, stem_width=0.028, leaf_size=0.08, leaves_per_twig=8,
+              shade=SHRUB_LEAF_SHADE, sun=SHRUB_LEAF_SUN)
+    return mesh
+
+
+def meadow_bush_tall(detail):
+    """Upright oval bush (privet / young holly-like), ~1.7 m tall."""
+    mesh = Mesh(wind_response=0.2)
+    grow_bush(mesh, random.Random(6501), detail, ((0.0, 0.9, 0.0), 0.5, 0.85, 0.48),
+              stems=6, stem_width=0.032, leaf_size=0.065, leaves_per_twig=8,
+              shade=(0.02, 0.06, 0.02), sun=(0.07, 0.19, 0.045), upright=0.6)
+    return mesh
+
+
+def tall_grass_clump(detail):
+    """Dense tall grass clump (~1.1 m) with seed stalks: tall cover that hides
+    the ground at eye level."""
+    rng = random.Random(6601)
+    mesh = Mesh()
+    layout = [(rng.uniform(-0.2, 0.2), rng.uniform(-0.2, 0.2), rng.random()) for _ in range(3)]
+    for index, (x, z, size) in enumerate(layout):
+        tussock(mesh, random.Random(6700 + index), (x, 0.0, z), 34 + int(10 * size), 0.95 + 0.25 * size,
+                0.09 + 0.04 * size, detail, dry_share=0.25, width=0.016)
+    stalks = random.Random(6800)
+    for base in accents.scatter(stalks, 8, 0.25):
+        yaw, height, lean, keep = stalks.random() * 6.283, 1.05 + 0.25 * stalks.random(), \
+            0.06 + 0.1 * stalks.random(), stalks.random()
+        if keep < (1.0, 0.7, 0.45)[detail]:
+            seed_stalk(mesh, base, yaw, height, lean, detail)
+    sward(mesh, random.Random(6900), 30, 0.45, detail)
+    return mesh
+
+
+def far_grass_tuft(detail):
+    """Cheap tuft for the far grass ring (seen from ~25 m out): a dozen wide,
+    two-segment blades fanning from a broad crown, ~0.4 m tall. Every LOD is
+    the same mesh; at that range a blade covers a pixel or two."""
+    rng = random.Random(7101)
+    mesh = Mesh()
+    for _ in range(12):
+        radius, angle = math.sqrt(rng.random()), rng.random() * 2.0 * math.pi
+        length_jitter, rise_jitter, dry = rng.random(), rng.random(), rng.random()
+        base = (0.2 * radius * math.cos(angle), 0.0, 0.2 * radius * math.sin(angle))
+        rise = math.radians(78.0 - 30.0 * radius - 10.0 * rise_jitter)
+        shade = 0.88 + 0.24 * ((length_jitter * 7.31 + rise_jitter * 3.17) % 1.0)
+        blade(mesh, base, angle + (rng.random() - 0.5) * 0.8, 0.32 + 0.16 * length_jitter, rise,
+              0.25, 0.045, 2, tip=DRY_TIP if dry < 0.15 else BLADE_TIP, shade=shade)
+    return mesh
+
+
 def meadow_shrub(detail):
     """Small-leaved mound (bilberry / box-like) about 0.4 m tall."""
     rng = random.Random(6101)
@@ -253,6 +554,11 @@ def meadow_shrub(detail):
     for center, lobe_radius, lobe_height in lobes:
         top = add(center, (0.0, lobe_height * 0.6, 0.0))
         branch(mesh, (0.0, 0.0, 0.0), top, 0.012, (3, 2, 1)[detail])
+    # A solid core under the leaves so the mound hides the ground (drawn
+    # before the leaves; consumes no random values, so the layout is kept).
+    for index, (center, lobe_radius, lobe_height) in enumerate(lobes):
+        crown_core(mesh, add(center, (0.0, lobe_height * 0.35, 0.0)), lobe_radius * 0.8,
+                   lobe_height * 0.55, lobe_radius * 0.8, detail, 0.7 + index * 0.9)
     for _ in range(300):
         lobe = lobes[int(rng.random() * len(lobes))]
         u, v, keep, size, tint, spin = (rng.random() for _ in range(6))
@@ -388,6 +694,10 @@ PLANTS = {
     "meadow_shrub": (meadow_shrub, "low lumpy small-leaved shrub"),
     "meadow_bramble": (meadow_bramble, "arching bramble canes with leaves and flowers"),
     "meadow_fern": (meadow_fern, "bracken-like fern fronds"),
+    "meadow_bush": (meadow_bush, "rounded broadleaf bush ~1.2 m with a solid crown core"),
+    "meadow_bush_tall": (meadow_bush_tall, "upright oval bush ~1.7 m with a solid crown core"),
+    "tall_grass_clump": (tall_grass_clump, "dense tall grass clump ~1.1 m with seed stalks"),
+    "far_grass_tuft": (far_grass_tuft, "cheap wide-bladed tuft for the far grass ring"),
 }
 
 

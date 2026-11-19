@@ -126,6 +126,10 @@ private:
     void CreateRTVHeap();
     void CreateRenderTargets();
     void CreateDepthStencilTarget();
+    // Follows the project's MSAA setting (RenderingEffects): when it changes,
+    // waits for the GPU and recreates the depth and post-process targets.
+    void ApplySampleCount();
+    uint32_t m_msaaSamples = 1;
     void FlushGPU(); // wait for all GPU work to finish (used in Resize / dtor)
 
     // -- Core device objects --

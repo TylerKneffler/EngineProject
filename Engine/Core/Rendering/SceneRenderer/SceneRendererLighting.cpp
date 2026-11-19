@@ -1,3 +1,4 @@
+#include "Core/Rendering/RenderingEffects.h"
 #include "Core/Rendering/SceneRenderer/SceneRendererLighting.h"
 #include "Core/Rendering/RenderUtilities.h"
 
@@ -184,7 +185,10 @@ void SceneRendererLighting::ComputeAmbientOcclusion(
         ? glm::vec2(proj[2][2] / proj[2][3], proj[3][2]) : glm::vec2(0.f);
     const auto& settings = scene.settings.ambientOcclusion;
     const bool lit = scene.settings.renderMode == Engine::Model::SceneRenderMode::Lit;
-    if (!settings.enabled || !lit || scene.IsMode2D() || !renderer.m_ambientOcclusionPipeline ||
+    const bool projectAllows =
+        Engine::Rendering::RenderingEffects::Get().Settings().postEffects.ambientOcclusion;
+    if (!settings.enabled || !projectAllows || !lit || scene.IsMode2D() ||
+        !renderer.m_ambientOcclusionPipeline ||
         !context->SupportsSceneDepthCopy() || viewportWidth < 16u || viewportHeight < 16u ||
         viewportWidth > 8192u || viewportHeight > 8192u)
     {

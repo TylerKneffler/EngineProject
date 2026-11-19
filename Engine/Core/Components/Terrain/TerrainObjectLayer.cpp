@@ -481,7 +481,8 @@ void TerrainObjectLayer::Deserialize(const JsonValue& value)
     {
         const std::string name = value.Has("layerName") ? value["layerName"].AsString() : layerName;
         snapToGround = value.Has("snapToGround") ? value["snapToGround"].AsBool()
-            : (name == "Meadow grass" || name == "Procedural meadow grass");
+            : (name == "Meadow grass" || name == "Procedural meadow grass" ||
+                name == "Procedural far grass");
     }
     objectLods.clear();
     const auto& lodEntries = value["objectLods"];

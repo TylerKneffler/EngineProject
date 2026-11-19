@@ -20,6 +20,9 @@ public:
     void Compose(ID3D11DeviceContext* context,
         ID3D11RenderTargetView* output, bool useAccumulation = false);
     ID3D11Texture2D* GetSceneTexture() const { return m_sceneColor.Get(); }
+    // Scene depth for temporal anti-aliasing (single-sample, typeless SRV);
+    // null leaves TAA off. Set before Compose each frame.
+    void SetSceneDepth(ID3D11ShaderResourceView* depth) { m_sceneDepth = depth; }
 
 private:
     void UploadConstants(ID3D11DeviceContext* context, const void* data);
@@ -30,6 +33,11 @@ private:
         ID3D11ShaderResourceView* source,
         const Engine::Graphics::PostProcessSettings& settings);
     void CreateExposureTargets(ID3D11Device* device);
+    // Blends the scene with its reprojected history (TemporalResolvePS) into
+    // the next history target, then copies the result into the scene colour
+    // so bloom, exposure and compose read it unchanged.
+    void RenderTemporal(ID3D11DeviceContext* context,
+        const Engine::Graphics::PostProcessSettings& settings);
 
     Microsoft::WRL::ComPtr<ID3D11Texture2D> m_sceneColor;
     Microsoft::WRL::ComPtr<ID3D11Texture2D> m_resolvedColor;
@@ -63,6 +71,14 @@ private:
     Microsoft::WRL::ComPtr<ID3D11Buffer> m_constants;
     Microsoft::WRL::ComPtr<ID3D11DepthStencilState> m_depthDisabled;
     Microsoft::WRL::ComPtr<ID3D11BlendState> m_additiveBlend;
+    // TAA history: two targets alternating frames, created on first use.
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> m_history[2];
+    Microsoft::WRL::ComPtr<ID3D11RenderTargetView> m_historyRtv[2];
+    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_historySrv[2];
+    Microsoft::WRL::ComPtr<ID3D11PixelShader> m_temporalShader;
+    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_sceneDepth;
+    uint32_t m_historyIndex = 0;
+    bool m_historyValid = false;
     uint32_t m_sampleCount = 1u;
     DXGI_FORMAT m_sceneFormat = DXGI_FORMAT_R16G16B16A16_FLOAT;
     uint32_t m_width = 0;

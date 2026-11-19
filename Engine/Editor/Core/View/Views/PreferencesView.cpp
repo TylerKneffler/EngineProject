@@ -433,6 +433,12 @@ void PreferencesView::DrawWindow(IEditorUi& ui, bool& isOpen)
                 ui.EndTab();
             }
 
+            if (ui.BeginTab("Effects"))
+            {
+                DrawEffectsSection(ui);
+                ui.EndTab();
+            }
+
             if (ui.BeginTab("Layers"))
             {
                 DrawLayersSection(ui);
@@ -1387,6 +1393,133 @@ void PreferencesView::DrawRenderingSection(IEditorUi& ui)
 }
 
 // ---------------------------------------------------------------------------
+// DrawEffectsSection
+// ---------------------------------------------------------------------------
+void PreferencesView::DrawEffectsSection(IEditorUi& ui)
+{
+    auto& effects = m_settings.renderingEffects;
+    auto& aa = effects.antiAliasing;
+    auto& post = effects.postEffects;
+    const auto changed = [&] { effects.Clamp(); NotifyChanged(); };
+
+    ui.DisabledLabel("Applies to every scene, on top of each scene's own look settings.");
+    // Presets set every control below; editing any control afterwards keeps
+    // the rest as they are.
+    const char* presets[] = { "Choose a preset...", "Performance", "Balanced", "Quality" };
+    int preset = 0;
+    if (ui.Combo("Preset", &preset, presets, 4) && preset > 0)
+    {
+        aa.fxaa = true;
+        aa.grassMinimumWidth = true;
+        post.colorGrading = true;
+        post.autoExposure = true;
+        post.gradingStrength = 1.f;
+        post.exposureBias = 0.f;
+        if (preset == 1)
+        {
+            aa.taa = false;
+            aa.msaaSamples = 1u;
+            aa.fxaaSubpixel = .5f; aa.fxaaEdgeThreshold = .25f; aa.grassMinimumPixels = 1.25f;
+            post.bloom = false; post.bloomScale = 1.f; post.ambientOcclusion = false;
+        }
+        else if (preset == 2)
+        {
+            aa.taa = false;
+            aa.msaaSamples = 1u;
+            aa.fxaaSubpixel = .5f; aa.fxaaEdgeThreshold = .166f; aa.grassMinimumPixels = 1.f;
+            post.bloom = true; post.bloomScale = 1.f; post.ambientOcclusion = true;
+        }
+        else
+        {
+            aa.taa = false;
+            aa.msaaSamples = 4u;
+            aa.fxaaSubpixel = .5f; aa.fxaaEdgeThreshold = .125f; aa.grassMinimumPixels = .75f;
+            post.bloom = true; post.bloomScale = 1.f; post.ambientOcclusion = true;
+        }
+        changed();
+    }
+    ui.Tooltip("Performance drops bloom and ambient occlusion and uses a fast FXAA; Quality catches fainter edges.");
+
+    ui.Separator();
+    ui.Label("Anti-Aliasing");
+    if (ui.Checkbox("FXAA", &aa.fxaa)) changed();
+    ui.Tooltip("Smooths stair-stepped edges in the final image. Cheap on every backend.");
+    if (!aa.fxaa) ui.BeginDisabled();
+    const char* edgeQualities[] = { "Custom", "Fast", "Balanced", "Quality", "Ultra" };
+    const float edgeThresholds[] = { 0.f, .25f, .166f, .125f, .063f };
+    int edgeQuality = 0;
+    for (int i = 1; i < 5; ++i)
+        if (std::abs(aa.fxaaEdgeThreshold - edgeThresholds[i]) < .002f) edgeQuality = i;
+    if (ui.Combo("Edge Detection", &edgeQuality, edgeQualities, 5) && edgeQuality > 0)
+    {
+        aa.fxaaEdgeThreshold = edgeThresholds[edgeQuality];
+        changed();
+    }
+    if (ui.SliderFloat("Edge Threshold", &aa.fxaaEdgeThreshold, .03f, .35f)) changed();
+    ui.Tooltip("Smallest contrast treated as an edge. Lower smooths fainter edges but softens texture detail.");
+    if (ui.SliderFloat("Subpixel Smoothing", &aa.fxaaSubpixel, 0.f, 1.f)) changed();
+    ui.Tooltip("How much detail thinner than a pixel (distant grass, wires) is smoothed. 0 keeps it sharp.");
+    if (!aa.fxaa) ui.EndDisabled();
+
+    if (ui.Checkbox("TAA (Temporal)", &aa.taa))
+    {
+        // TAA and MSAA solve the same problem and TAA needs single-sample
+        // depth: turning TAA on turns MSAA off.
+        if (aa.taa) aa.msaaSamples = 1u;
+        changed();
+    }
+    ui.Tooltip("Jitters the camera by a fraction of a pixel each frame and blends with the previous frames. "
+        "Smooths edges and removes the shimmer of thin moving detail such as grass; can soften the image "
+        "slightly and trail behind fast motion. DirectX 11 and 12.");
+    if (!aa.taa) ui.BeginDisabled();
+    if (ui.SliderFloat("TAA History Weight", &aa.taaFeedback, .75f, .97f)) changed();
+    ui.Tooltip("Higher is smoother and steadier; lower reacts faster to motion with less trailing.");
+    if (ui.SliderFloat("TAA Sharpening", &aa.taaSharpen, 0.f, 1.f)) changed();
+    ui.Tooltip("Restores the detail TAA softens, most visible while the camera moves. 0 is off.");
+    if (!aa.taa) ui.EndDisabled();
+
+    const char* msaaModes[] = { "Off", "2x", "4x", "8x" };
+    int msaaMode = aa.msaaSamples >= 8u ? 3 : aa.msaaSamples >= 4u ? 2 : aa.msaaSamples >= 2u ? 1 : 0;
+    if (ui.Combo("MSAA", &msaaMode, msaaModes, 4))
+    {
+        aa.msaaSamples = 1u << msaaMode;
+        if (aa.msaaSamples > 1u) aa.taa = false;
+        changed();
+    }
+    ui.Tooltip("Hardware multisampling: smooths geometric edges such as grass blades at the source. "
+        "Costs memory bandwidth (noticeable on integrated GPUs). Combine with FXAA for remaining "
+        "shader and sub-pixel aliasing. Applied by the DirectX 11 and 12 renderers; Vulkan renders without it.");
+
+    if (ui.Checkbox("Grass Minimum Width", &aa.grassMinimumWidth)) changed();
+    ui.Tooltip("Keeps distant grass blades at least this wide on screen, so they do not break into sparkling dots.");
+    if (!aa.grassMinimumWidth) ui.BeginDisabled();
+    if (ui.SliderFloat("Minimum Blade Width (pixels)", &aa.grassMinimumPixels, .25f, 4.f)) changed();
+    if (!aa.grassMinimumWidth) ui.EndDisabled();
+
+    ui.Separator();
+    ui.Label("Post Effects");
+    if (ui.Checkbox("Bloom", &post.bloom)) changed();
+    ui.Tooltip("Off disables bloom in every scene. On uses each scene's bloom setting, scaled below.");
+    if (!post.bloom) ui.BeginDisabled();
+    if (ui.SliderFloat("Bloom Scale", &post.bloomScale, 0.f, 4.f)) changed();
+    if (!post.bloom) ui.EndDisabled();
+
+    if (ui.Checkbox("Auto Exposure", &post.autoExposure)) changed();
+    ui.Tooltip("Off fixes exposure at each scene's output exposure.");
+    if (ui.SliderFloat("Exposure Bias (EV)", &post.exposureBias, -6.f, 6.f)) changed();
+    ui.Tooltip("Added to every scene's exposure, in stops. With auto exposure on it shifts the adapted level.");
+
+    if (ui.Checkbox("Color Grading", &post.colorGrading)) changed();
+    if (!post.colorGrading) ui.BeginDisabled();
+    if (ui.SliderFloat("Grading Strength", &post.gradingStrength, 0.f, 2.f)) changed();
+    ui.Tooltip("Scales each scene's contrast and saturation away from neutral: 0 neutral, 1 as authored.");
+    if (!post.colorGrading) ui.EndDisabled();
+
+    if (ui.Checkbox("Ambient Occlusion", &post.ambientOcclusion)) changed();
+    ui.Tooltip("Off disables screen-space ambient occlusion in every scene.");
+}
+
+// ---------------------------------------------------------------------------
 // DrawVideoProfilesSection
 // ---------------------------------------------------------------------------
 void PreferencesView::DrawVideoProfilesSection(IEditorUi& ui)
@@ -1783,6 +1916,31 @@ bool PreferencesView::SaveSettings()
                     std::to_string(m_settings.bakedLighting.dilationPasses));
                 setBakeValue("BakedPreserveSourceEmission",
                     m_settings.bakedLighting.accumulate ? "true" : "false");
+
+                auto effectsNode = prop.child("RenderingEffects");
+                if (!effectsNode)
+                    effectsNode = prop.append_child("RenderingEffects");
+                effectsNode.remove_attributes();
+                {
+                    const auto& aa = m_settings.renderingEffects.antiAliasing;
+                    const auto& post = m_settings.renderingEffects.postEffects;
+                    effectsNode.append_attribute("Fxaa").set_value(aa.fxaa);
+                    effectsNode.append_attribute("FxaaSubpixel").set_value(aa.fxaaSubpixel);
+                    effectsNode.append_attribute("FxaaEdgeThreshold").set_value(aa.fxaaEdgeThreshold);
+                    effectsNode.append_attribute("MsaaSamples").set_value(aa.msaaSamples);
+                    effectsNode.append_attribute("Taa").set_value(aa.taa);
+                    effectsNode.append_attribute("TaaFeedback").set_value(aa.taaFeedback);
+                    effectsNode.append_attribute("TaaSharpen").set_value(aa.taaSharpen);
+                    effectsNode.append_attribute("GrassMinimumWidth").set_value(aa.grassMinimumWidth);
+                    effectsNode.append_attribute("GrassMinimumPixels").set_value(aa.grassMinimumPixels);
+                    effectsNode.append_attribute("Bloom").set_value(post.bloom);
+                    effectsNode.append_attribute("BloomScale").set_value(post.bloomScale);
+                    effectsNode.append_attribute("AutoExposure").set_value(post.autoExposure);
+                    effectsNode.append_attribute("ExposureBias").set_value(post.exposureBias);
+                    effectsNode.append_attribute("ColorGrading").set_value(post.colorGrading);
+                    effectsNode.append_attribute("GradingStrength").set_value(post.gradingStrength);
+                    effectsNode.append_attribute("AmbientOcclusion").set_value(post.ambientOcclusion);
+                }
 
                 auto shadowNode = prop.child("RealtimeShadows");
                 if (!shadowNode)

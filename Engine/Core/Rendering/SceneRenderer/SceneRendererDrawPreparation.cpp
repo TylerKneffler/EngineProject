@@ -433,6 +433,14 @@ void SceneRendererDrawPreparation::PrepareTerrainMaterial(
                 objectData.terrainMacroColors[layer].w = std::max(material->heightScale, 0.f);
     }
 
+    // Ground cover colours tint the ground under and beyond the cover.
+    if (terrain && terrain->groundCover.strength > 0.f && terrain->groundCover.layerMask)
+    {
+        const auto& cover = terrain->groundCover;
+        objectData.groundCoverColor = glm::vec4(cover.color, std::clamp(cover.strength, 0.f, 1.f));
+        objectData.groundCoverRange = glm::vec4(cover.fadeStart, cover.fadeEnd,
+            static_cast<float>(cover.layerMask & 63u), std::clamp(cover.rootShade, 0.f, 1.f));
+    }
     objectData.baseColor = glm::vec4(1.f);
     objectData.materialParams.w = textured ? 2048.f : 0.f;
     if (textured && arrays) objectData.materialParams.w += 262144.f;

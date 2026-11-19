@@ -97,5 +97,15 @@ struct ObjectGPUData
     // distance for loaded cells, z = 1 when bound.
     glm::vec4 terrainMacroMap{0.f};
     glm::vec4 terrainMacroParams{0.f};
+    // Instanced ground cover (Mesh::placementFadeStart/End): fade start and
+    // end distance; each placement shrinks toward its root across the band.
+    glm::vec4 placementFade{0.f};
+    // Terrain under ground cover (Terrain::GroundCover): cover colour and
+    // tint strength; fade start, fade end, layer mask, root shade.
+    glm::vec4 groundCoverColor{0.f};
+    glm::vec4 groundCoverRange{0.f};
+    // Instanced ground cover thinning (Mesh::placementThin*): start, end,
+    // minimum share kept, w = 1 keeps survivors' width (no widening).
+    glm::vec4 placementThin{0.f, 0.f, 1.f, 0.f};
 };
 }

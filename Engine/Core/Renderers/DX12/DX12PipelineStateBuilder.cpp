@@ -381,7 +381,48 @@ std::unique_ptr<Engine::Graphics::IPipelineState> D3D12PipelineStateBuilder::Bui
         return nullptr;
     }
 
-    return std::unique_ptr<Engine::Graphics::IPipelineState>(std::make_unique<D3D12PipelineState>(pso));
+    auto state = std::make_unique<D3D12PipelineState>(pso);
+    state->EnableSampleVariants(m_device, psoDesc, m_vsBytecode, m_psBytecode, m_inputLayout);
+    return std::unique_ptr<Engine::Graphics::IPipelineState>(std::move(state));
+}
+
+void D3D12PipelineState::EnableSampleVariants(ID3D12Device* device,
+    const D3D12_GRAPHICS_PIPELINE_STATE_DESC& desc, Microsoft::WRL::ComPtr<ID3DBlob> vs,
+    Microsoft::WRL::ComPtr<ID3DBlob> ps, const std::vector<D3D12_INPUT_ELEMENT_DESC>& layout)
+{
+    m_device = device;
+    m_desc = desc;
+    m_vs = std::move(vs);
+    m_ps = std::move(ps);
+    // Own everything the description points at: the builder may be gone
+    // by the time a variant is first needed.
+    m_layout = layout;
+    m_semanticNames.clear();
+    m_semanticNames.reserve(m_layout.size());
+    for (const auto& element : m_layout)
+        m_semanticNames.emplace_back(element.SemanticName ? element.SemanticName : "");
+    for (size_t i = 0; i < m_layout.size(); ++i)
+        m_layout[i].SemanticName = m_semanticNames[i].c_str();
+}
+
+ID3D12PipelineState* D3D12PipelineState::ForSamples(uint32_t samples) const
+{
+    if (samples <= 1u || !m_device || !m_vs || !m_ps) return m_pso.Get();
+    const size_t index = samples >= 8u ? 2u : samples >= 4u ? 1u : 0u;
+    std::lock_guard lock(m_variantMutex);
+    if (!m_variants[index] && !m_variantFailed[index])
+    {
+        D3D12_GRAPHICS_PIPELINE_STATE_DESC desc = m_desc;
+        desc.VS = { m_vs->GetBufferPointer(), m_vs->GetBufferSize() };
+        desc.PS = { m_ps->GetBufferPointer(), m_ps->GetBufferSize() };
+        desc.InputLayout.pInputElementDescs = m_layout.empty() ? nullptr : m_layout.data();
+        desc.InputLayout.NumElements = static_cast<UINT>(m_layout.size());
+        desc.SampleDesc.Count = 2u << index;
+        desc.SampleDesc.Quality = 0;
+        if (FAILED(m_device->CreateGraphicsPipelineState(&desc, IID_PPV_ARGS(&m_variants[index]))))
+            m_variantFailed[index] = true;
+    }
+    return m_variants[index] ? m_variants[index].Get() : m_pso.Get();
 }
 
 D3D12_BLEND D3D12PipelineStateBuilder::ConvertBlendMode(int mode) const

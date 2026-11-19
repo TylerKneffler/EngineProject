@@ -5,6 +5,7 @@
 #include "Core/Rendering/AutoQuality.h"
 #include "Core/Rendering/HardwareSimulation.h"
 #include "Core/Rendering/MaterialCachePolicy.h"
+#include "Core/Rendering/RenderingEffects.h"
 #include "Game/Application/GameApplication.h"
 
 #include "Game/Startup/GameProjectStartup.h"
@@ -931,6 +932,23 @@ int GameApplication::Run(HINSTANCE instance, const GameBenchmarkOptions* benchma
     Engine::Rendering::RenderSystem::For(scene).SetDistanceLightingSettings(settings.distanceLighting);
     Engine::Rendering::DetailBudget::Get().Configure(settings.layers,
         settings.detailBudget);
+    {
+        // Diagnostics: ENGINE_MSAA=1|2|4|8, ENGINE_FXAA, ENGINE_AUTO_EXPOSURE and
+        // ENGINE_GRASS_MIN_WIDTH=0|1 override the project's rendering effects,
+        // e.g. for anti-aliasing A/B captures.
+        auto effects = settings.renderingEffects;
+        if (const char* value = std::getenv("ENGINE_MSAA"))
+            effects.antiAliasing.msaaSamples = static_cast<unsigned>(std::max(1, std::atoi(value)));
+        if (const char* value = std::getenv("ENGINE_FXAA"))
+            effects.antiAliasing.fxaa = std::atoi(value) != 0;
+        if (const char* value = std::getenv("ENGINE_GRASS_MIN_WIDTH"))
+            effects.antiAliasing.grassMinimumWidth = std::atoi(value) != 0;
+        if (const char* value = std::getenv("ENGINE_TAA"))
+            effects.antiAliasing.taa = std::atoi(value) != 0;
+        if (const char* value = std::getenv("ENGINE_AUTO_EXPOSURE"))
+            effects.postEffects.autoExposure = std::atoi(value) != 0;
+        Engine::Rendering::RenderingEffects::Get().Configure(effects);
+    }
     // Diagnostics: ENGINE_DETAIL_SCALE pins the global detail scale (the
     // budget stops adapting), e.g. to compare LOD bands in the Detail view.
     if (const char* fixedScale = std::getenv("ENGINE_DETAIL_SCALE"))

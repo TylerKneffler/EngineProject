@@ -704,7 +704,8 @@ def write_scene(world):
             "asset": f"Assets/Prefabs/Woodland/Clusters/ForestCluster_{kind}.prefab",
             "match": "/Oaks/" if kind.startswith("Oak") else "/Conifers/", "trees": "14"})
     names = ET.SubElement(manager, "TerrainManager.objectLayerNames")
-    for name in ("Landscape forest", "Procedural meadow grass", "Landscape props"):
+    for name in ("Landscape forest", "Procedural meadow grass", "Procedural far grass",
+                 "Landscape props"):
         ET.SubElement(names, "item").text = name
     runs = ET.SubElement(manager, "TerrainManager.proceduralRuns")
     for y in range(-EXTENT, EXTENT + 1):

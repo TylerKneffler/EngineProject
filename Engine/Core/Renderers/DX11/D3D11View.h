@@ -28,13 +28,19 @@ public:
 
 private:
     void CreateResources(ID3D11Device* device, uint32_t width, uint32_t height);
+    // The project's MSAA count (RenderingEffects), lowered to one the device
+    // supports for the scene formats.
+    static uint32_t DesiredSamples(ID3D11Device* device);
 
     Microsoft::WRL::ComPtr<ID3D11Texture2D> m_texture;
     Microsoft::WRL::ComPtr<ID3D11RenderTargetView> m_rtv;
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_srv;
     Microsoft::WRL::ComPtr<ID3D11Texture2D> m_depthTexture;
     Microsoft::WRL::ComPtr<ID3D11DepthStencilView> m_dsv;
+    // Single-sample depth is readable, for temporal anti-aliasing.
+    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_depthSrv;
     DX11PostProcess m_postProcess;
+    uint32_t m_samples = 1;
     uint32_t m_srvSlotIndex = 0;
     uint32_t m_width = 0;
     uint32_t m_height = 0;

@@ -626,21 +626,35 @@ void D3D11GraphicsContext::DispatchCompute(uint32_t x, uint32_t y, uint32_t z)
 void D3D11GraphicsContextFactory::SetSceneDepth(ID3D11ShaderResourceView* depth)
 {
     m_sceneDepth->depth = depth;
-    if (!depth || m_sceneDepth->copyShader || !m_device) return;
-    static const char source[] =
-        "Texture2D<float> sceneDepth : register(t0);\n"
-        "RWStructuredBuffer<float> depthOutput : register(u0);\n"
-        "cbuffer CopyConstants : register(b0) { uint4 extent; };\n"
-        "[numthreads(8, 8, 1)] void main(uint3 id : SV_DispatchThreadID)\n"
-        "{\n"
-        "    if (id.x >= extent.x || id.y >= extent.y) return;\n"
-        "    depthOutput[id.y * extent.z + id.x] = sceneDepth.Load(int3(id.xy, 0));\n"
-        "}\n";
-    Microsoft::WRL::ComPtr<ID3DBlob> blob, errors;
-    if (SUCCEEDED(D3DCompile(source, sizeof(source) - 1, "SceneDepthCopy", nullptr, nullptr,
-            "main", "cs_5_0", D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &blob, &errors)))
-        m_device->CreateComputeShader(blob->GetBufferPointer(), blob->GetBufferSize(),
-            nullptr, &m_sceneDepth->copyShader);
+    m_sceneDepth->copyShader.Reset();
+    if (!depth || !m_device) return;
+    D3D11_SHADER_RESOURCE_VIEW_DESC view{};
+    depth->GetDesc(&view);
+    const bool multisampled = view.ViewDimension == D3D11_SRV_DIMENSION_TEXTURE2DMS;
+    auto& shader = multisampled ? m_sceneDepth->copyMulti : m_sceneDepth->copySingle;
+    if (!shader)
+    {
+        // MSAA depth: sample 0 stands in for the pixel, which is what
+        // screen-space effects reading this copy expect.
+        const std::string source = std::string(multisampled
+            ? "Texture2DMS<float> sceneDepth : register(t0);\n"
+              "#define LOAD_DEPTH(p) sceneDepth.Load(p, 0)\n"
+            : "Texture2D<float> sceneDepth : register(t0);\n"
+              "#define LOAD_DEPTH(p) sceneDepth.Load(int3(p, 0))\n") +
+            "RWStructuredBuffer<float> depthOutput : register(u0);\n"
+            "cbuffer CopyConstants : register(b0) { uint4 extent; };\n"
+            "[numthreads(8, 8, 1)] void main(uint3 id : SV_DispatchThreadID)\n"
+            "{\n"
+            "    if (id.x >= extent.x || id.y >= extent.y) return;\n"
+            "    depthOutput[id.y * extent.z + id.x] = LOAD_DEPTH(int2(id.xy));\n"
+            "}\n";
+        Microsoft::WRL::ComPtr<ID3DBlob> blob, errors;
+        if (SUCCEEDED(D3DCompile(source.data(), source.size(), "SceneDepthCopy", nullptr, nullptr,
+                "main", "cs_5_0", D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &blob, &errors)))
+            m_device->CreateComputeShader(blob->GetBufferPointer(), blob->GetBufferSize(),
+                nullptr, &shader);
+    }
+    m_sceneDepth->copyShader = shader;
 }
 
 void D3D11GraphicsContext::CopySceneDepth(Engine::Graphics::IGraphicsBuffer* destination,

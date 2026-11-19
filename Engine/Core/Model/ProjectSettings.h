@@ -3,6 +3,7 @@
 #include "Core/Model/LightingData.h"
 #include "Core/Model/MaterialCacheSettings.h"
 #include "Core/Model/ProjectLayers.h"
+#include "Core/Model/RenderingEffectsSettings.h"
 #include "Core/Model/VideoProfiles.h"
 #include <cstdint>
 #include <glm/glm.hpp>
@@ -55,6 +56,8 @@ struct ProjectSettings
     Engine::Model::BakedLightingSettings bakedLighting;
     Engine::Model::RealtimeShadowSettings realtimeShadows;
     Engine::Model::DistanceLightingSettings distanceLighting;
+    // Anti-aliasing and project-wide switches over scene look effects.
+    Engine::Model::RenderingEffectsSettings renderingEffects;
     // Project defaults for material caching; player settings may override
     // them at runtime (Engine::Rendering::MaterialCachePolicy).
     Engine::Model::MaterialCacheSettings materialCache;

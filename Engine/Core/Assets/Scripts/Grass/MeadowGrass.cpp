@@ -8,15 +8,52 @@
 
 namespace MeadowGrass
 {
+GrassField* ApplyFar(Engine::Components::TerrainObjectLayer& layer,
+    const std::string& viewerObjectName)
+{
+    // The far ring: simple tufts on 16 m tiles from where the detailed
+    // grass fades out to ~90 m, so the meadow does not end at its range.
+    layer.snapToGround = true;
+    layer.conformToGround = true;
+    if (viewerObjectName.empty()) return nullptr;
+    auto* owner = layer.Owner;
+    if (auto* existing = owner->GetComponent<GrassField>()) return existing;
+    layer.viewDistance = 90.f;
+    layer.lod1Distance = layer.lod2Distance = 90.f;
+    layer.MarkConfigurationDirty();
+    using Engine::Serialization::JsonValue;
+    const std::string tuft = "Assets/Mesh/Grass/far_grass_tuft.obj";
+    auto settings = JsonValue::MakeObject();
+    settings.Set("shortMesh", tuft).Set("tallMesh", tuft)
+        .Set("shortMeshLod1", tuft).Set("shortMeshLod2", tuft)
+        .Set("tallMeshLod1", tuft).Set("tallMeshLod2", tuft)
+        .Set("viewerObjectName", viewerObjectName)
+        .Set("useEditorCamera", JsonValue(true)).Set("visibleRadius", 90.f)
+        .Set("tileSize", 16.f).Set("shortPatchesPerSquareMeter", 1.2f)
+        .Set("tallPatchesPerSquareMeter", 0.f).Set("seed", 29311)
+        .Set("castShadows", JsonValue(false)).Set("tileWorkBudgetMs", 1.f)
+        .Set("fadeDuration", .35f).Set("distanceFadeFraction", .25f)
+        .Set("distanceThinning", 1.f).Set("innerRadius", 18.f).Set("innerFadeWidth", 7.f)
+        .Set("windStrength", .6f).Set("groundTintStrength", 0.f)
+        .Set("allowProceduralGeneration", JsonValue(true));
+    auto* grass = new GrassField();
+    grass->Deserialize(settings);
+    owner->AddComponent(grass);
+    owner->layer = Engine::Rendering::DetailBudget::Get().FindLayerOrDefault("Grass");
+    return grass;
+}
+
 bool IsMeadowLayer(const std::string& layerName)
 {
-    return layerName == "Meadow grass" || layerName == "Procedural meadow grass";
+    return layerName == "Meadow grass" || layerName == "Procedural meadow grass" ||
+        layerName == FarLayerName;
 }
 
 GrassField* Apply(Engine::Components::TerrainObjectLayer& layer,
     const std::string& viewerObjectName)
 {
     if (!IsMeadowLayer(layer.layerName) || !layer.Owner) return nullptr;
+    if (layer.layerName == FarLayerName) return ApplyFar(layer, viewerObjectName);
     // Grass follows the ground through sculpting; procedural grass also
     // conforms per placement. Set on every restore (saved layers included).
     const bool procedural = layer.layerName == "Procedural meadow grass";
@@ -70,9 +107,14 @@ GrassField* Apply(Engine::Components::TerrainObjectLayer& layer,
         .Set("accentPatchesPerSquareMeter", .08f).Set("accentDriftSize", 7.f)
         // Low shrubs in thickets (procedural layers only, like accents).
         .Set("shrubMeshes", "Assets/Mesh/Grass/meadow_shrub.obj;"
-            "Assets/Mesh/Grass/meadow_bramble.obj;Assets/Mesh/Grass/meadow_fern.obj")
+            "Assets/Mesh/Grass/meadow_bramble.obj;Assets/Mesh/Grass/meadow_fern.obj;"
+            "Assets/Mesh/Grass/tall_grass_clump.obj")
         .Set("shrubPatchesPerSquareMeter", procedural ? .6f : 0.f)
-        .Set("shrubThicketSize", 9.f).Set("shrubCoverage", .25f);
+        .Set("shrubThicketSize", 9.f).Set("shrubCoverage", .25f)
+        // Solid bushes in loose clusters (procedural layers only).
+        .Set("bushMeshes", "Assets/Mesh/Grass/meadow_bush.obj;Assets/Mesh/Grass/meadow_bush_tall.obj")
+        .Set("bushesPerSquareMeter", procedural ? .06f : 0.f)
+        .Set("bushClusterSize", 16.f).Set("bushCoverage", .25f);
     auto* grass = new GrassField();
     grass->Deserialize(settings);
     owner->AddComponent(grass);

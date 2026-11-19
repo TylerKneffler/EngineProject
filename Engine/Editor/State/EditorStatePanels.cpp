@@ -4,6 +4,7 @@
 #include "Core/Components/Terrain/TerrainPlacementHandle.h"
 #include "Core/Rendering/DetailBudget.h"
 #include "Core/Rendering/MaterialCachePolicy.h"
+#include "Core/Rendering/RenderingEffects.h"
 #include "pch.h"
 #include "Engine/Editor/State/EditorViewState.h"
 #include "Engine/Editor/State/EditorState.h"
@@ -135,6 +136,8 @@ void EditorState::InitializePanels()
             m_projectSettings.layers, m_projectSettings.detailBudget);
         Engine::Rendering::MaterialCachePolicy::Get().SetProjectSettings(
             m_projectSettings.materialCache);
+        Engine::Rendering::RenderingEffects::Get().Configure(
+            m_projectSettings.renderingEffects);
         if (m_primaryAssets)
             m_primaryAssets->SetCodeEditor(m_projectSettings.codeEditor);
         if (m_scene)

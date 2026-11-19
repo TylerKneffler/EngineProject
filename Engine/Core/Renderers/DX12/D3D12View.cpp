@@ -1,6 +1,8 @@
 #include "pch.h"
 #include "Core/Graphics/DepthConvention.h"
 #include "D3D12View.h"
+#include "Core/Rendering/RenderingEffects.h"
+#include <algorithm>
 
 namespace Engine::Renderers
 {
@@ -109,7 +111,28 @@ void D3D12View::CreateResources(void* device, uint32_t width, uint32_t height)
     srvDesc.Texture2D.MipLevels     = 1;
     d3dDevice->CreateShaderResourceView(m_texture.Get(), &srvDesc, m_srvCpu);
 
-    D3D12_RESOURCE_DESC depthDesc = texDesc;
+    CreateDepthAndPostProcess(d3dDevice, DesiredSamples(d3dDevice));
+}
+
+uint32_t D3D12View::DesiredSamples(ID3D12Device* device)
+{
+    return DX12PostProcess::SupportedSamples(device,
+        Engine::Rendering::RenderingEffects::Get().Settings().antiAliasing.msaaSamples);
+}
+
+void D3D12View::CreateDepthAndPostProcess(ID3D12Device* d3dDevice, uint32_t samples)
+{
+    m_samples = samples;
+    D3D12_HEAP_PROPERTIES heapProps{};
+    heapProps.Type = D3D12_HEAP_TYPE_DEFAULT;
+    D3D12_RESOURCE_DESC depthDesc{};
+    depthDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    depthDesc.Width = m_width;
+    depthDesc.Height = m_height;
+    depthDesc.DepthOrArraySize = 1;
+    depthDesc.MipLevels = 1;
+    depthDesc.SampleDesc = { samples, 0 };
+    depthDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
     depthDesc.Format = DXGI_FORMAT_R32G8X24_TYPELESS;
     depthDesc.Flags  = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
 
@@ -133,11 +156,12 @@ void D3D12View::CreateResources(void* device, uint32_t width, uint32_t height)
     }
     D3D12_DEPTH_STENCIL_VIEW_DESC dsvViewDesc{};
     dsvViewDesc.Format        = DXGI_FORMAT_D32_FLOAT_S8X24_UINT;
-    dsvViewDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+    dsvViewDesc.ViewDimension = samples > 1u
+        ? D3D12_DSV_DIMENSION_TEXTURE2DMS : D3D12_DSV_DIMENSION_TEXTURE2D;
     d3dDevice->CreateDepthStencilView(
         m_depthBuffer.Get(), &dsvViewDesc,
         m_dsvHeap->GetCPUDescriptorHandleForHeapStart());
-    m_postProcess.Create(d3dDevice, width, height);
+    m_postProcess.Create(d3dDevice, m_width, m_height, samples);
 }
 
 // ---------------------------------------------------------------------------
@@ -150,6 +174,23 @@ void D3D12View::Render(void* cmdList,
 {
     auto* d3dCmdList = static_cast<ID3D12GraphicsCommandList*>(cmdList);
     auto mainRtvHandle = *static_cast<D3D12_CPU_DESCRIPTOR_HANDLE*>(mainRtv);
+
+    // Release targets retired by an MSAA change once frames in flight are done.
+    for (auto& retired : m_retired) ++retired.age;
+    m_retired.erase(std::remove_if(m_retired.begin(), m_retired.end(),
+        [](const RetiredTargets& retired) { return retired.age > 4u; }), m_retired.end());
+    {
+        ComPtr<ID3D12Device> device;
+        if (SUCCEEDED(d3dCmdList->GetDevice(IID_PPV_ARGS(&device))) && m_depthBuffer)
+            if (const uint32_t samples = DesiredSamples(device.Get()); samples != m_samples)
+            {
+                m_retired.push_back({ m_depthBuffer,
+                    std::make_unique<DX12PostProcess>(std::move(m_postProcess)), 0u });
+                m_postProcess = DX12PostProcess{};
+                m_depthBuffer.Reset();
+                CreateDepthAndPostProcess(device.Get(), samples);
+            }
+    }
 
     if (preDrawFn) preDrawFn(cmdList);
     
@@ -179,6 +220,7 @@ void D3D12View::Render(void* cmdList,
     if (drawFn)
         drawFn(cmdList);
 
+    m_postProcess.SetSceneDepth(m_depthBuffer.Get());
     m_postProcess.Compose(d3dCmdList, sceneRtv);
 
     D3D12_RESOURCE_BARRIER toSrv{};

@@ -29,6 +29,28 @@ StructuredBuffer<float> occlusionPyramid : register(t2);
 // hidden only when its nearest point lies behind the farthest occluder depth
 // over its whole screen rectangle. Bounds crossing the near plane or wholly
 // off screen stay visible. selection.w bit 4 enables it (camera passes only).
+// Ground cover thinning, matching Object.hlsl VSMain (GrassWindHash and the
+// share formula must stay identical): true when the vertex shader would
+// shrink this placement to nothing, so it need not be drawn at all.
+// thin = (start, end, minimum share, keep width) from the tile record.
+uint ThinHash(int2 cell, uint seed)
+{
+    uint hash = asuint(cell.x) * 0x8da6b343u ^ asuint(cell.y) * 0xd8163841u ^ seed;
+    hash ^= hash >> 16;
+    hash *= 0x7feb352du;
+    hash ^= hash >> 15;
+    hash *= 0x846ca68bu;
+    return hash ^ (hash >> 16);
+}
+
+bool IsThinnedAway(float4 thin, float3 root, float3 camera)
+{
+    if (thin.z >= 1.0 || thin.x == thin.y) return false;
+    const float share = lerp(1.0, saturate(thin.z), smoothstep(thin.x, thin.y, length(root - camera)));
+    const float rank = (float)(ThinHash(int2(floor(root.xz * 16.0)), 0x1b873593u) & 4095u) / 4095.0;
+    return share <= rank;
+}
+
 bool IsBoxOccluded(float3 center, float3 extent)
 {
     const uint levels = (uint)occlusionPyramid[0];
@@ -121,6 +143,12 @@ void CSMain(uint3 id : SV_DispatchThreadID, uint3 group : SV_GroupID, uint3 thre
                 ? length(max(abs(worldCenter.xyz-constants.cameraPosition.xyz)-worldExtent,0.0))
                 : max(0.0,length(worldCenter.xyz-constants.cameraPosition.xyz)-radius);
             if(lodData.lod.w>0.0 && nearestDistance>=lodData.lod.w) continue;
+            {
+                // The placement's root (its translation) in world space.
+                const float4 rootLocal=float4(placement.row0.w,placement.row1.w,placement.row2.w,1);
+                const float3 root=float3(dot(world.sphere,rootLocal),dot(worldRow1,rootLocal),dot(world.lod,rootLocal));
+                if(IsThinnedAway(asfloat(lodData.meta),root,constants.cameraPosition.xyz)) continue;
+            }
             if(constants.selection.x>=0 && (constants.selection.w & 2)!=0)
             {
                 // Conservative per-placement bands. Shader dithering resolves the

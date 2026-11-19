@@ -261,6 +261,9 @@ public:
     virtual uint32_t GetConstantBufferDiscardMaps() const { return 0; }
     virtual std::unique_ptr<IGraphicsContext> CreateContext() = 0;
     virtual bool SupportsDepthRectangleClear() const { return false; }
+    // Whether the host's post-process resolves temporal anti-aliasing. The
+    // scene renderer only jitters the camera when it does.
+    virtual bool SupportsTemporalAntiAliasing() const { return false; }
     // Contexts this factory creates can copy the scene depth (see
     // IGraphicsContext::CopySceneDepth).
     virtual bool SupportsSceneDepthCopy() const { return false; }

@@ -58,6 +58,30 @@ void HashFloat(uint64_t& hash, float value)
     HashBytes(hash, &bits, sizeof(bits));
 }
 
+// Triangle-list vertices of one species mesh, shared process-wide.
+std::shared_ptr<const std::vector<Engine::Components::Mesh::Vertex>> LoadSpeciesSource(const std::string& path)
+{
+    using Source = std::vector<Engine::Components::Mesh::Vertex>;
+    const auto resolved = Engine::Components::Mesh::ResolveFilePath(path);
+    std::error_code error;
+    const auto modified = std::filesystem::last_write_time(resolved, error);
+    const std::string key = Engine::Memory::CacheStore::PathKey(resolved,
+        error ? "missing" : std::to_string(modified.time_since_epoch().count()));
+    return Engine::Memory::CacheStore::Get().GetOrCreate<Source>(
+        Engine::Memory::CacheLifetime::LongTerm, "GrassSpecies", key, [&]() {
+            Engine::Components::Mesh mesh;
+            mesh.LoadFromFile(path);
+            if (!mesh.GetIndices().empty())
+            {
+                auto triangles = std::make_shared<Source>();
+                triangles->reserve(mesh.GetIndices().size());
+                for (const auto index : mesh.GetIndices()) triangles->push_back(mesh.GetVertices().at(index));
+                return triangles;
+            }
+            return std::make_shared<Source>(mesh.TakeVertices());
+        });
+}
+
 // Grass is a script asset, not an engine built-in: it registers itself when
 // its project (or the engine sandbox) compiles Assets/Grass.
 struct GrassFieldRegistration
@@ -95,6 +119,12 @@ GrassField::GrassField()
     RegisterField("tileWorkBudgetMs", tileWorkBudgetMs, "Tiles");
     RegisterField("fadeDuration", fadeDuration, "LOD");
     RegisterField("distanceFadeWidth", distanceFadeWidth, "LOD");
+    RegisterField("distanceFadeFraction", distanceFadeFraction, "LOD");
+    RegisterField("distanceThinning", distanceThinning, "LOD");
+    RegisterField("innerRadius", innerRadius, "LOD");
+    RegisterField("innerFadeWidth", innerFadeWidth, "LOD");
+    RegisterField("groundTintStrength", groundTintStrength, "Ground");
+    RegisterField("groundRootShade", groundRootShade, "Ground");
     RegisterField("gpuLodSelection", gpuLodSelection, "LOD");
     RegisterField("allowProceduralGeneration", allowProceduralGeneration, "Tiles");
     RegisterField("proceduralLayerMask", proceduralLayerMask, "Tiles");
@@ -106,6 +136,10 @@ GrassField::GrassField()
     RegisterField("shrubPatchesPerSquareMeter", shrubPatchesPerSquareMeter, "Shrubs");
     RegisterField("shrubThicketSize", shrubThicketSize, "Shrubs");
     RegisterField("shrubCoverage", shrubCoverage, "Shrubs");
+    RegisterField("bushMeshes", bushMeshes, "Bushes");
+    RegisterField("bushesPerSquareMeter", bushesPerSquareMeter, "Bushes");
+    RegisterField("bushClusterSize", bushClusterSize, "Bushes");
+    RegisterField("bushCoverage", bushCoverage, "Bushes");
 }
 
 const std::vector<std::vector<std::string>>& GrassField::ResolveLodChains(
@@ -152,6 +186,16 @@ const std::vector<std::vector<std::string>>& GrassField::ResolveLodChains(
 
 float GrassField::ShrubThicket(float x, float z) const
 {
+    return ThicketNoise(x, z, shrubThicketSize, shrubCoverage, 0u);
+}
+
+float GrassField::BushCluster(float x, float z) const
+{
+    return ThicketNoise(x, z, bushClusterSize, bushCoverage, 0x7c3e9a15u);
+}
+
+float GrassField::ThicketNoise(float x, float z, float size, float coverage, uint32_t variant) const
+{
     // Two octaves of value noise; thickets are where it rises over a
     // threshold chosen from shrubCoverage (value noise clusters around .5).
     const auto noise = [&](float period, uint32_t salt) {
@@ -171,9 +215,9 @@ float GrassField::ShrubThicket(float x, float z) const
         return (corner(0, 0) * (1.f - tx) + corner(1, 0) * tx) * (1.f - tz) +
             (corner(0, 1) * (1.f - tx) + corner(1, 1) * tx) * tz;
     };
-    const float thicket = std::max(1.f, shrubThicketSize);
-    const float n = .68f * noise(thicket, 0x5b1d7a3u) + .32f * noise(thicket * .37f, 0x2f6e2b1u);
-    const float threshold = .5f + (.5f - std::clamp(shrubCoverage, 0.f, 1.f)) * .5f;
+    const float thicket = std::max(1.f, size);
+    const float n = .68f * noise(thicket, 0x5b1d7a3u ^ variant) + .32f * noise(thicket * .37f, 0x2f6e2b1u ^ variant);
+    const float threshold = .5f + (.5f - std::clamp(coverage, 0.f, 1.f)) * .5f;
     const float t = std::clamp((n - (threshold - .04f)) / .14f, 0.f, 1.f);
     return t * t * (3.f - 2.f * t);
 }
@@ -194,6 +238,8 @@ GrassField::GetObjectLodProfiles() const
     chains.insert(chains.end(), accents.begin(), accents.end());
     const auto& shrubs = ShrubLods();
     chains.insert(chains.end(), shrubs.begin(), shrubs.end());
+    const auto& bushes = BushLods();
+    chains.insert(chains.end(), bushes.begin(), bushes.end());
     for (const auto& paths : chains)
     {
         if (paths.front().empty()) continue;
@@ -211,11 +257,11 @@ bool GrassField::LoadSources()
     auto* factory = provider ? provider->GetBufferFactory() : nullptr;
     auto definitions = ObjectLodProvider::GetObjectLodMeshes();
     std::vector<std::string> assets{shortMesh, tallMesh};
-    // Kind per species: 0 grass, 1 accent, 2 shrub. A path listed twice
-    // keeps its first role.
+    // Kind per species: 0 grass, 1 accent, 2 shrub, 3 bush. A path listed
+    // twice keeps its first role.
     std::vector<int> kinds{0, 0};
-    for (int kind = 1; kind <= 2; ++kind)
-        for (const auto& chain : kind == 1 ? AccentLods() : ShrubLods())
+    for (int kind = 1; kind <= 3; ++kind)
+        for (const auto& chain : kind == 1 ? AccentLods() : kind == 2 ? ShrubLods() : BushLods())
             if (std::find(assets.begin(), assets.end(), chain.front()) == assets.end())
             {
                 assets.push_back(chain.front());
@@ -246,6 +292,7 @@ bool GrassField::LoadSources()
         }
     m_accentSpecies = static_cast<size_t>(std::count(kinds.begin(), kinds.end(), 1));
     m_shrubSpecies = static_cast<size_t>(std::count(kinds.begin(), kinds.end(), 2));
+    m_bushSpecies = static_cast<size_t>(std::count(kinds.begin(), kinds.end(), 3));
     const auto distances = [&](const std::string& asset, size_t count) {
         if (m_cachedLayer) return m_cachedLayer->GetObjectLodDistances(asset, count);
         std::vector<float> result;
@@ -295,29 +342,9 @@ bool GrassField::LoadSources()
     m_loadedSpeciesPaths = paths;
     try
     {
-        const auto load = [](const std::string& path) -> std::shared_ptr<const Source> {
-            const auto resolved = Engine::Components::Mesh::ResolveFilePath(path);
-            std::error_code error;
-            const auto modified = std::filesystem::last_write_time(resolved, error);
-            const std::string key = Engine::Memory::CacheStore::PathKey(resolved,
-                error ? "missing" : std::to_string(modified.time_since_epoch().count()));
-            return Engine::Memory::CacheStore::Get().GetOrCreate<Source>(
-                Engine::Memory::CacheLifetime::LongTerm, "GrassSpecies", key, [&]() {
-                    Engine::Components::Mesh mesh;
-                    mesh.LoadFromFile(path);
-                    if (!mesh.GetIndices().empty())
-                    {
-                        auto triangles=std::make_shared<Source>();
-                        triangles->reserve(mesh.GetIndices().size());
-                        for (const auto index:mesh.GetIndices()) triangles->push_back(mesh.GetVertices().at(index));
-                        return triangles;
-                    }
-                    return std::make_shared<Source>(mesh.TakeVertices());
-                });
-        };
         for (size_t species = 0; species < paths.size(); ++species)
             for (size_t lod = 0; lod < lodCount; ++lod)
-                m_speciesVertices[species][lod] = load(paths[species][lod]);
+                m_speciesVertices[species][lod] = LoadSpeciesSource(paths[species][lod]);
         // Weak ownership keeps GPU resources tied to their users/device instead
         // of retaining them forever in the process-wide CPU asset cache.
         using Mesh = Engine::Components::Mesh;
@@ -368,6 +395,68 @@ void GrassField::Start()
     m_cachedViewer = nullptr;
     m_cachedStructureRevision = 0;
     EnsureAuthoredPreviewHidden();
+    PublishGroundCover();
+}
+
+float GrassField::GrassRadius() const
+{
+    const auto* layer = Owner ? Owner->GetComponent<Engine::Components::TerrainObjectLayer>() : nullptr;
+    return (layer ? std::max(1.f, layer->viewDistance) : std::max(2.f, visibleRadius)) *
+        DetailRadiusScale();
+}
+
+void GrassField::PublishGroundCover()
+{
+    auto* terrain = Owner ? Owner->GetComponentInParent<Engine::Components::Terrain>() : nullptr;
+    if (!terrain) return;
+    auto& cover = terrain->groundCover;
+    // A far ring (innerRadius) leaves the tint to the detailed field.
+    if (innerRadius > 0.f) return;
+    // Only procedural grass knows which paint layers it grows on.
+    if (groundTintStrength <= 0.f || proceduralLayerMask == 0 || !allowProceduralGeneration)
+    {
+        cover = {};
+        return;
+    }
+    // Mean colour of the grass species (short and tall at full detail),
+    // measured once per mesh pair from the shared CPU sources.
+    const std::string source = shortMesh + ";" + tallMesh;
+    if (m_coverColorSource != source)
+    {
+        m_coverColorSource = source;
+        glm::vec3 sum{0.f};
+        size_t count = 0;
+        try
+        {
+            for (const auto* path : {&shortMesh, &tallMesh})
+                if (!path->empty())
+                    if (const auto vertices = LoadSpeciesSource(*path))
+                        for (const auto& vertex : *vertices)
+                        {
+                            sum += glm::vec3(vertex.color[0], vertex.color[1], vertex.color[2]);
+                            ++count;
+                        }
+        }
+        catch (const std::exception& error)
+        {
+            std::fprintf(stderr, "GrassField: unable to measure grass colour: %s\n", error.what());
+        }
+        m_coverColor = count ? sum / static_cast<float>(count) : glm::vec3(0.f);
+    }
+    if (glm::length(m_coverColor) <= 0.f) { cover = {}; return; }
+    const float radius = GrassRadius();
+    const float band = std::clamp(distanceFadeFraction, 0.f, .9f) * radius;
+    const float scale = glm::length(glm::vec3(terrain->Owner->transform.GetWorldMatrix()[0]));
+    // Upright blades shade each other and are seen edge-on, so a field looks
+    // darker and duller than its blades' albedo on flat, sunlit ground.
+    const float luminance = glm::dot(m_coverColor, glm::vec3(.2126f, .7152f, .0722f));
+    cover.color = glm::mix(m_coverColor, glm::vec3(luminance), .25f) * .8f;
+    cover.strength = std::clamp(groundTintStrength, 0.f, 1.f);
+    cover.rootShade = std::clamp(groundRootShade, 0.f, 1.f);
+    // The ground takes the cover's colour where the plants fade out.
+    cover.fadeStart = (radius - std::max(band, std::max(.5f, distanceFadeWidth))) * scale;
+    cover.fadeEnd = radius * scale;
+    cover.layerMask = static_cast<uint32_t>(proceduralLayerMask);
 }
 
 void GrassField::ClearTiles()
@@ -510,6 +599,10 @@ uint64_t GrassField::ComputeGenerationSignature() const
     HashFloat(hash, shrubPatchesPerSquareMeter);
     HashFloat(hash, shrubThicketSize);
     HashFloat(hash, shrubCoverage);
+    HashBytes(hash, bushMeshes.data(), bushMeshes.size());
+    HashFloat(hash, bushesPerSquareMeter);
+    HashFloat(hash, bushClusterSize);
+    HashFloat(hash, bushCoverage);
     HashFloat(hash, tileSize);
     HashFloat(hash, shortPatchesPerSquareMeter);
     HashFloat(hash, tallPatchesPerSquareMeter);
@@ -606,6 +699,8 @@ void GrassField::BeginBuild(Tile tile, int lod, uint64_t signature)
         const size_t accentCount = m_accentSpecies;
         const size_t shrubCount = m_shrubSpecies;
         const bool thickets = shrubCount && shrubPatchesPerSquareMeter > 0.f;
+        const size_t bushCount = m_bushSpecies;
+        const bool bushClusters = bushCount && bushesPerSquareMeter > 0.f;
         const auto append = [&](const std::string& asset, float density, int cap)
         {
             const int count = std::clamp(static_cast<int>(std::round(
@@ -620,6 +715,8 @@ void GrassField::BeginBuild(Tile tile, int lod, uint64_t signature)
                 // Grass thins under shrub thickets (the extra random is drawn
                 // only with thickets on, so other layouts stay unchanged).
                 if (thickets && unit(rng) < .4f * ShrubThicket(p.position.x, p.position.z)) continue;
+                // Bushes shade out more of the grass beneath them.
+                if (bushClusters && unit(rng) < .5f * BushCluster(p.position.x, p.position.z)) continue;
                 if (!grows(p.position.x, p.position.z)) continue;
                 p.asset = asset;
                 p.position.y = SampleHeight(p.position.x, p.position.z, &p.normal);
@@ -628,8 +725,10 @@ void GrassField::BeginBuild(Tile tile, int lod, uint64_t signature)
                 job.placements.push_back(std::move(p));
             }
         };
-        append(shortMesh, shortPatchesPerSquareMeter, 64);
-        append(tallMesh, tallPatchesPerSquareMeter, 32);
+        // Caps are per 4 m tile; larger tiles (far rings) scale them.
+        const float areaScale = std::max(1.f, span * span / 16.f);
+        append(shortMesh, shortPatchesPerSquareMeter, static_cast<int>(64 * areaScale));
+        append(tallMesh, tallPatchesPerSquareMeter, static_cast<int>(32 * areaScale));
         // Accents grow in drifts. Each world cell of accentDriftSize favours
         // one species and has its own richness (some cells stay bare), so
         // flowers gather in patches instead of an even sprinkle. Cells are
@@ -700,6 +799,41 @@ void GrassField::BeginBuild(Tile tile, int lod, uint64_t signature)
                 if (!m_cachedLayer || !m_cachedLayer->conformToGround)
                     p.normal = glm::normalize(glm::mix(p.normal, glm::vec3(0.f, 1.f, 0.f), .6f));
                 p.position.y -= .03f * p.scale;
+                job.placements.push_back(std::move(p));
+            }
+        }
+        // Bushes: loose clusters (cluster noise keyed in terrain space, so
+        // they continue across tiles) plus a few scattered singles. Each
+        // cluster cell favours one species.
+        if (bushClusters)
+        {
+            const int count = std::clamp(static_cast<int>(std::round(
+                bushesPerSquareMeter * span * span)), 0, 64);
+            const float cluster = std::max(1.f, bushClusterSize);
+            for (int i = 0; i < count; ++i)
+            {
+                Placement p;
+                p.position.x = tile.first * span + unit(rng) * span;
+                p.position.z = tile.second * span + unit(rng) * span;
+                const float accept = unit(rng), pick = unit(rng);
+                p.yawDegrees = unit(rng) * 360.f;
+                p.scale = .75f + .5f * unit(rng);
+                if (p.position.x < .8f || p.position.z < .8f ||
+                    p.position.x > width - .8f || p.position.z > depth - .8f) continue;
+                if (accept >= .08f + .92f * BushCluster(p.position.x, p.position.z)) continue;
+                if (!grows(p.position.x, p.position.z)) continue;
+                const uint32_t cell = TileSeed(seed ^ 0x3a8f05c5,
+                    static_cast<int>(std::floor(p.position.x / cluster)),
+                    static_cast<int>(std::floor(p.position.z / cluster)));
+                const size_t favoured = cell % bushCount;
+                const size_t species = pick < .7f ? favoured :
+                    std::min(bushCount - 1, static_cast<size_t>((pick - .7f) / .3f * bushCount));
+                p.asset = m_speciesAssets[2 + accentCount + shrubCount + species];
+                p.position.y = SampleHeight(p.position.x, p.position.z, &p.normal);
+                // Bushes stand upright and sit a little into the ground.
+                if (!m_cachedLayer || !m_cachedLayer->conformToGround)
+                    p.normal = glm::normalize(glm::mix(p.normal, glm::vec3(0.f, 1.f, 0.f), .8f));
+                p.position.y -= .05f * p.scale;
                 job.placements.push_back(std::move(p));
             }
         }
@@ -821,6 +955,7 @@ bool GrassField::Refresh()
     };
     const float delta = std::clamp(scene.HasStarted() ? scene.GetDeltaTime() : elapsed, 0.f, .1f);
     bool changed = EnsureAuthoredPreviewHidden();
+    PublishGroundCover();
     const bool referencesReady = ResolveCachedReferences();
     checkpoint(m_performance.referencesMs);
     if (!referencesReady) { publish(); return changed; }
@@ -869,6 +1004,11 @@ bool GrassField::Refresh()
     const float lod2 = m_lodDistances.size() < 2 ? radius : m_lodDistances[1];
     const float hysteresis = layer ? std::max(0.f, layer->lodHysteresis) : 0;
     const float shadowRadius = layer ? std::clamp(layer->shadowDistance, 0.f, radius) : radius;
+    // Per-placement shrink fade (Object.hlsl VSMain) in world distances; the
+    // terrain may be scaled.
+    const float fadeBand = std::clamp(distanceFadeFraction, 0.f, .9f) * radius;
+    const bool placementFade = fadeBand > 0.f;
+    const float worldScale = glm::length(glm::vec3(m_cachedTerrain->Owner->transform.GetWorldMatrix()[0]));
     const int reach = static_cast<int>(std::ceil(radius / span)) + 1;
     const int centerX = static_cast<int>(std::floor(local.x / span));
     const int centerZ = static_cast<int>(std::floor(local.z / span));
@@ -884,6 +1024,12 @@ bool GrassField::Refresh()
             const float edgeX = std::max(0.f, std::abs(dx) - span * .5f);
             const float edgeZ = std::max(0.f, std::abs(dz) - span * .5f);
             if (edgeX * edgeX + edgeZ * edgeZ > radius * radius) continue;
+            // Far ring: skip tiles wholly inside the inner radius.
+            if (innerRadius > 0.f)
+            {
+                const float farX = std::abs(dx) + span * .5f, farZ = std::abs(dz) + span * .5f;
+                if (farX * farX + farZ * farZ < innerRadius * innerRadius) continue;
+            }
             if (m_placementCount && !m_placementTiles->count({x,z})) continue;
             const Tile key{x,z};
             auto& tile = m_tiles[key];
@@ -915,8 +1061,28 @@ bool GrassField::Refresh()
             }
             changed = tile.mesh->AdvanceRuntimeLodTransition(delta) || changed;
             const float edgeDistance = std::sqrt(edgeX * edgeX + edgeZ * edgeZ);
-            const float targetVisibility = distanceFadeWidth > 0.f
+            // With the placement fade each plant fades itself; a tile-wide
+            // dither would show the 4 m tile squares at the edge.
+            const float targetVisibility = placementFade ? 1.f : distanceFadeWidth > 0.f
                 ? std::clamp((radius - edgeDistance) / distanceFadeWidth, 0.f, 1.f) : 1.f;
+            tile.mesh->placementFadeStart = placementFade ? (radius - fadeBand) * worldScale : 0.f;
+            tile.mesh->placementFadeEnd = placementFade ? radius * worldScale : 0.f;
+            if (innerRadius > 0.f)
+            {
+                // Fade in: none kept at the inner radius, all by
+                // innerFadeWidth beyond it, without widening.
+                tile.mesh->placementThinStart = (innerRadius + innerFadeWidth) * worldScale;
+                tile.mesh->placementThinEnd = innerRadius * worldScale;
+                tile.mesh->placementThinMinimum = 0.f;
+                tile.mesh->placementThinKeepWidth = true;
+            }
+            else
+            {
+                tile.mesh->placementThinStart = radius * .2f * worldScale;
+                tile.mesh->placementThinEnd = std::max(radius * .25f, radius - fadeBand) * worldScale;
+                tile.mesh->placementThinMinimum = std::clamp(distanceThinning, .1f, 1.f);
+                tile.mesh->placementThinKeepWidth = false;
+            }
             const float previousVisibility = tile.visibility;
             if (tile.mesh->GetActiveRuntimeLod() >= 0)
             {
@@ -1094,6 +1260,9 @@ uint64_t GrassField::SpatialRegionRevision() const
 }
 Engine::Components::SpatialUpdateRegion GrassField::DescribeSpatialRegion()
 {
+    // Cells outside the spatial region never refresh; their ground still
+    // takes the cover colour.
+    PublishGroundCover();
     if(!ResolveCachedReferences()) return {};
     const auto& terrain=*m_cachedTerrain;
     const auto world=terrain.Owner->transform.GetWorldMatrix();

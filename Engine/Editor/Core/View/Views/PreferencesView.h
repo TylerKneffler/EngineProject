@@ -59,6 +59,9 @@ private:
     void DrawMetadataSection(IEditorUi& ui);
     void DrawPathsSection(IEditorUi& ui);
     void DrawRenderingSection(IEditorUi& ui);
+    // Anti-aliasing and project-wide switches over scene look effects
+    // (ProjectSettings::renderingEffects).
+    void DrawEffectsSection(IEditorUi& ui);
     void DrawEditorSection(IEditorUi& ui);
     void DrawKeybindsSection(IEditorUi& ui);
     void DrawDiagnosticsSection(IEditorUi& ui);

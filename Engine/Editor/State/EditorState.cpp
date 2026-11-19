@@ -2,6 +2,7 @@
 #include "Core/Rendering/RenderSystem.h"
 #include "Core/Rendering/SceneRenderer.h"
 #include "Core/Rendering/MaterialCachePolicy.h"
+#include "Core/Rendering/RenderingEffects.h"
 #include "pch.h"
 #include "Engine/Editor/State/EditorViewState.h"
 #include "Engine/Editor/State/EditorState.h"
@@ -287,6 +288,8 @@ bool EditorState::Init()
             m_projectSettings.layers, m_projectSettings.detailBudget);
         Engine::Rendering::MaterialCachePolicy::Get().SetProjectSettings(
             m_projectSettings.materialCache);
+        Engine::Rendering::RenderingEffects::Get().Configure(
+            m_projectSettings.renderingEffects);
         OutputDebugStringA("[EditorState] Scene initialized\n");
     }
     catch (const std::exception& e)

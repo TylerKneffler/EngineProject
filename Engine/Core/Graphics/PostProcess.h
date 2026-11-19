@@ -32,6 +32,21 @@ struct PostProcessSettings
     float autoExposureSpeedDown = 1.f;
     float autoExposureLowPercent = 0.5f;
     float autoExposureHighPercent = 0.95f;
+    // FXAA in the compose pass (Model::AntiAliasingSettings). Off by default
+    // so offline paths (video export) keep their own settings.
+    bool fxaa = false;
+    float fxaaSubpixel = 0.75f;
+    float fxaaEdgeThreshold = 0.125f;
+    // Temporal anti-aliasing, filled per view by the scene renderer: the
+    // camera was jittered, and taaReprojection (row-major) maps this frame's
+    // clip position (NDC x, y, device depth, 1) to the previous frame's clip
+    // space (unjittered). History is unusable after a cut or resize.
+    bool taa = false;
+    bool taaHistoryValid = false;
+    float taaFeedback = 0.9f;
+    float taaSharpen = 0.f; // compose unsharp mask after TAA
+    float taaReprojection[16] = { 1.f, 0.f, 0.f, 0.f, 0.f, 1.f, 0.f, 0.f,
+        0.f, 0.f, 1.f, 0.f, 0.f, 0.f, 0.f, 1.f };
 };
 
 void SetPostProcessSettings(const PostProcessSettings& settings);
@@ -42,18 +57,27 @@ PostProcessSettings GetPostProcessSettings();
 // Shaders/PostProcess/PostProcess.hlsl.
 struct PostProcessConstants
 {
-    // Compose: exposure, operator (uint bits), bloom intensity, sample weight.
+    // Compose: exposure, operator (uint bits), bloom intensity, sample weight
+    // (operator 4) or FXAA (other operators; see MakeComposeConstants).
     // Bloom passes: source texel size xy.
     float params0[4] = {};
     float shadowTint[4] = {}; // rgb, w = grading enabled
     float highlightTint[4] = {}; // rgb, w = shadow/highlight balance
     float grade[4] = {}; // contrast, saturation, 1 / bloom levels, auto exposure (1/0)
+    // Temporal resolve: history weight, history valid (1/0). The temporal
+    // pass reads its reprojection matrix rows from the four vectors above.
+    // Compose: z = sharpening amount after TAA (0 off).
+    float temporal[4] = {};
 };
-static_assert(sizeof(PostProcessConstants) == 64);
+static_assert(sizeof(PostProcessConstants) == 80);
 
 PostProcessConstants MakeComposeConstants(const PostProcessSettings& settings,
     uint32_t bloomLevels, float sampleWeight = 1.f);
 PostProcessConstants MakeBloomPassConstants(uint32_t sourceWidth, uint32_t sourceHeight);
+// TemporalResolvePS: reprojection rows in params0/shadowTint/highlightTint/
+// grade, temporal = (history weight, history valid, 0, 0). historyValid is
+// false when the renderer's own history is new (first frame, resize).
+PostProcessConstants MakeTemporalConstants(const PostProcessSettings& settings, bool historyValid);
 
 // Auto exposure runs three small passes before compose, on every backend:
 //   luminance  scene -> LuminanceMap (log2 luminance, metering weight)

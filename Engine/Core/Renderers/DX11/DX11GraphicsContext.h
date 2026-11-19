@@ -37,7 +37,10 @@ struct D3D11OcclusionQueryState
 struct D3D11SceneDepthState
 {
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> depth;
+    // The variant matching depth: copySingle for a Texture2D, copyMulti
+    // (sample 0 of a Texture2DMS) when the scene renders with MSAA.
     Microsoft::WRL::ComPtr<ID3D11ComputeShader> copyShader;
+    Microsoft::WRL::ComPtr<ID3D11ComputeShader> copySingle, copyMulti;
 };
 
 struct D3D11FrameResourceState
@@ -284,6 +287,7 @@ public:
     void SetSceneDepth(ID3D11ShaderResourceView* depth);
     bool SupportsSceneDepthCopy() const override
     { return m_sceneDepth->depth && m_sceneDepth->copyShader; }
+    bool SupportsTemporalAntiAliasing() const override { return true; }
 
 private:
     uint64_t m_preparedFrameSerial=0;

@@ -21,7 +21,9 @@ constexpr uint32_t ExposureRtv(uint32_t index)
 {
     return 1u + Engine::Graphics::MaxBloomLevels + index;
 }
-constexpr uint32_t RtvCount = ExposureRtv(4);
+// TAA history targets follow the exposure targets.
+constexpr uint32_t HistoryRtv(uint32_t index) { return ExposureRtv(4) + index; }
+constexpr uint32_t RtvCount = HistoryRtv(2);
 // SRV heap: three-entry tables after the scene, bloom levels and two nulls.
 enum ExposureTableIndex : uint32_t
 {
@@ -30,6 +32,8 @@ enum ExposureTableIndex : uint32_t
     AdaptTable1,        // (histogram, exposure 0, null): writes exposure 1
     ComposeTable0,      // (scene, bloom 0, exposure 0)
     ComposeTable1,      // (scene, bloom 0, exposure 1)
+    TemporalTable0,     // (scene, history 0, depth): writes history 1
+    TemporalTable1,     // (scene, history 1, depth): writes history 0
     ExposureTableCount
 };
 constexpr uint32_t ExposureTable(uint32_t index)
@@ -78,10 +82,148 @@ D3D12_CPU_DESCRIPTOR_HANDLE DX12PostProcess::Rtv(uint32_t index) const
     return handle;
 }
 
-void DX12PostProcess::Create(ID3D12Device* device, uint32_t width, uint32_t height)
+namespace
+{
+std::mutex g_boundSamplesMutex;
+std::unordered_map<const ID3D12GraphicsCommandList*, uint32_t> g_boundSamples;
+}
+
+void DX12PostProcess::SetBoundSceneSamples(const ID3D12GraphicsCommandList* list, uint32_t samples)
+{
+    std::lock_guard lock(g_boundSamplesMutex);
+    if (samples <= 1u) g_boundSamples.erase(list);
+    else g_boundSamples[list] = samples;
+}
+
+uint32_t DX12PostProcess::BoundSceneSamples(const ID3D12GraphicsCommandList* list)
+{
+    std::lock_guard lock(g_boundSamplesMutex);
+    const auto found = g_boundSamples.find(list);
+    return found == g_boundSamples.end() ? 1u : found->second;
+}
+
+uint32_t DX12PostProcess::SupportedSamples(ID3D12Device* device, uint32_t samples)
+{
+    for (samples = samples >= 8u ? 8u : samples >= 4u ? 4u : samples >= 2u ? 2u : 1u;
+         device && samples > 1u; samples /= 2u)
+    {
+        bool supported = true;
+        for (const DXGI_FORMAT format : { HdrFormat, DXGI_FORMAT_D32_FLOAT_S8X24_UINT })
+        {
+            D3D12_FEATURE_DATA_MULTISAMPLE_QUALITY_LEVELS levels{};
+            levels.Format = format;
+            levels.SampleCount = samples;
+            supported = supported && SUCCEEDED(device->CheckFeatureSupport(
+                D3D12_FEATURE_MULTISAMPLE_QUALITY_LEVELS, &levels, sizeof(levels))) &&
+                levels.NumQualityLevels > 0u;
+        }
+        if (supported) break;
+    }
+    return std::max(1u, samples);
+}
+
+D3D12_CPU_DESCRIPTOR_HANDLE DX12PostProcess::SrvSlot(uint32_t index) const
+{
+    auto handle = m_srvHeap->GetCPUDescriptorHandleForHeapStart();
+    handle.ptr += static_cast<SIZE_T>(index) * m_srvStride;
+    return handle;
+}
+
+void DX12PostProcess::SetSceneDepth(ID3D12Resource* depth)
+{
+    m_sceneDepth = depth;
+}
+
+void DX12PostProcess::PrepareTemporalResources()
+{
+    if (!m_device) return;
+    if (!m_history[0])
+    {
+        D3D12_HEAP_PROPERTIES heap{}; heap.Type = D3D12_HEAP_TYPE_DEFAULT;
+        D3D12_RESOURCE_DESC texture{}; texture.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+        texture.Width = m_width; texture.Height = m_height; texture.DepthOrArraySize = 1;
+        texture.MipLevels = 1; texture.Format = HdrFormat; texture.SampleDesc.Count = 1;
+        texture.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+        D3D12_CLEAR_VALUE clear{}; clear.Format = HdrFormat;
+        for (uint32_t index = 0; index < 2; ++index)
+        {
+            ThrowIfFailed(m_device->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE,
+                &texture, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, &clear,
+                IID_PPV_ARGS(&m_history[index])));
+            m_device->CreateRenderTargetView(m_history[index].Get(), nullptr, Rtv(HistoryRtv(index)));
+        }
+        m_historyValid = false;
+        m_describedDepth = nullptr;
+    }
+    if (m_describedDepth == m_sceneDepth && m_describedDepth) return;
+    for (uint32_t table = 0; table < 2; ++table)
+    {
+        D3D12_SHADER_RESOURCE_VIEW_DESC view{};
+        view.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+        view.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        view.Texture2D.MipLevels = 1;
+        view.Format = HdrFormat;
+        const uint32_t base = ExposureTable(table ? TemporalTable1 : TemporalTable0);
+        m_device->CreateShaderResourceView(m_history[table].Get(), &view, SrvSlot(base + 1));
+        view.Format = DXGI_FORMAT_R32_FLOAT_X8X24_TYPELESS;
+        m_device->CreateShaderResourceView(m_sceneDepth, &view, SrvSlot(base + 2));
+    }
+    m_describedDepth = m_sceneDepth;
+}
+
+void DX12PostProcess::RenderTemporal(ID3D12GraphicsCommandList* list,
+    const Engine::Graphics::PostProcessSettings& settings)
+{
+    PrepareTemporalResources();
+    const uint32_t target = 1u - m_historyIndex;
+    D3D12_RESOURCE_BARRIER before[2] = {
+        Transition(m_sceneDepth, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+            D3D12_RESOURCE_STATE_DEPTH_WRITE, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE),
+        Transition(m_history[target].Get(), D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET) };
+    list->ResourceBarrier(2, before);
+    const auto rtv = Rtv(HistoryRtv(target));
+    list->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
+    const D3D12_VIEWPORT viewport{ 0.f, 0.f, static_cast<float>(m_width),
+        static_cast<float>(m_height), 0.f, 1.f };
+    const D3D12_RECT scissor{ 0, 0, static_cast<LONG>(m_width), static_cast<LONG>(m_height) };
+    list->RSSetViewports(1, &viewport);
+    list->RSSetScissorRects(1, &scissor);
+    list->SetPipelineState(m_temporalPipeline.Get());
+    const auto values = Engine::Graphics::MakeTemporalConstants(settings, m_historyValid);
+    list->SetGraphicsRoot32BitConstants(0, ConstantCount, &values, 0);
+    list->SetGraphicsRootDescriptorTable(1,
+        SrvTable(ExposureTable(m_historyIndex ? TemporalTable1 : TemporalTable0)));
+    list->DrawInstanced(3, 1, 0, 0);
+    D3D12_RESOURCE_BARRIER toCopy[2] = {
+        Transition(m_history[target].Get(), D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+            D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COPY_SOURCE),
+        Transition(m_sceneColor.Get(), D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST) };
+    list->ResourceBarrier(2, toCopy);
+    list->CopyResource(m_sceneColor.Get(), m_history[target].Get());
+    D3D12_RESOURCE_BARRIER after[3] = {
+        Transition(m_history[target].Get(), D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+            D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE),
+        Transition(m_sceneColor.Get(), D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+            D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE),
+        Transition(m_sceneDepth, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_DEPTH_WRITE) };
+    list->ResourceBarrier(3, after);
+    m_historyIndex = target;
+    m_historyValid = true;
+}
+
+void DX12PostProcess::Create(ID3D12Device* device, uint32_t width, uint32_t height, uint32_t samples)
 {
     using Engine::Graphics::MaxBloomLevels;
+    m_device = device;
+    for (auto& history : m_history) history.Reset();
+    m_historyValid = false;
+    m_describedDepth = nullptr;
     m_sceneColor.Reset();
+    m_sceneColorMultisampled.Reset();
+    m_samples = SupportedSamples(device, samples);
     m_bloom.Reset();
     m_width = width; m_height = height;
     D3D12_HEAP_PROPERTIES heap{}; heap.Type = D3D12_HEAP_TYPE_DEFAULT;
@@ -93,6 +235,15 @@ void DX12PostProcess::Create(ID3D12Device* device, uint32_t width, uint32_t heig
     ThrowIfFailed(device->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE,
         &texture, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, &clear,
         IID_PPV_ARGS(&m_sceneColor)));
+    if (m_samples > 1u)
+    {
+        D3D12_RESOURCE_DESC multisampled = texture;
+        multisampled.SampleDesc.Count = m_samples;
+        multisampled.SampleDesc.Quality = 0;
+        ThrowIfFailed(device->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE,
+            &multisampled, D3D12_RESOURCE_STATE_RESOLVE_SOURCE, &clear,
+            IID_PPV_ARGS(&m_sceneColorMultisampled)));
+    }
 
     m_bloomLevels = Engine::Graphics::BloomLevelCount(width, height);
     D3D12_RESOURCE_DESC bloom = texture;
@@ -122,7 +273,8 @@ void DX12PostProcess::Create(ID3D12Device* device, uint32_t width, uint32_t heig
         handle.ptr += static_cast<SIZE_T>(index) * m_srvStride;
         return handle;
     };
-    device->CreateRenderTargetView(m_sceneColor.Get(), nullptr, Rtv(0));
+    device->CreateRenderTargetView(m_samples > 1u ? m_sceneColorMultisampled.Get()
+        : m_sceneColor.Get(), nullptr, Rtv(0));
     D3D12_SHADER_RESOURCE_VIEW_DESC srv{}; srv.Format = HdrFormat;
     srv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D; srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
     srv.Texture2D.MipLevels = 1;
@@ -182,7 +334,10 @@ void DX12PostProcess::Create(ID3D12Device* device, uint32_t width, uint32_t heig
             { histogram, exposure1, none },
             { histogram, exposure0, none },
             { scene, bloom0, exposure0 },
-            { scene, bloom0, exposure1 } };
+            { scene, bloom0, exposure1 },
+            // History and depth views are written by PrepareTemporalResources.
+            { scene, none, none },
+            { scene, none, none } };
         for (uint32_t table = 0; table < ExposureTableCount; ++table)
             for (uint32_t entry = 0; entry < TableSize; ++entry)
             {
@@ -251,18 +406,26 @@ void DX12PostProcess::Create(ID3D12Device* device, uint32_t width, uint32_t heig
         pso.RTVFormats[0] = ExposureFormat;
         pso.PS = { adapt->GetBufferPointer(), adapt->GetBufferSize() };
         ThrowIfFailed(device->CreateGraphicsPipelineState(&pso, IID_PPV_ARGS(&m_exposureAdaptPipeline)));
+        const auto temporal = Compile(source, "TemporalResolvePS", "ps_5_0");
+        pso.RTVFormats[0] = HdrFormat;
+        pso.PS = { temporal->GetBufferPointer(), temporal->GetBufferSize() };
+        ThrowIfFailed(device->CreateGraphicsPipelineState(&pso, IID_PPV_ARGS(&m_temporalPipeline)));
     }
 }
 
 void DX12PostProcess::BindScene(ID3D12GraphicsCommandList* list,
     D3D12_CPU_DESCRIPTOR_HANDLE depth, const float clearColor[4])
 {
-    const auto barrier = Transition(m_sceneColor.Get(), D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
-        D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET);
+    const auto barrier = m_samples > 1u
+        ? Transition(m_sceneColorMultisampled.Get(), D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+            D3D12_RESOURCE_STATE_RESOLVE_SOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET)
+        : Transition(m_sceneColor.Get(), D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET);
     list->ResourceBarrier(1, &barrier);
     const auto target = Rtv(0);
     list->OMSetRenderTargets(1, &target, FALSE, depth.ptr ? &depth : nullptr);
     list->ClearRenderTargetView(target, clearColor, 0, nullptr);
+    SetBoundSceneSamples(list, m_samples);
 }
 
 void DX12PostProcess::RebindScene(ID3D12GraphicsCommandList* list,
@@ -270,6 +433,7 @@ void DX12PostProcess::RebindScene(ID3D12GraphicsCommandList* list,
 {
     const auto target = Rtv(0);
     list->OMSetRenderTargets(1, &target, FALSE, depth.ptr ? &depth : nullptr);
+    SetBoundSceneSamples(list, m_samples);
 }
 
 void DX12PostProcess::ClearScene(ID3D12GraphicsCommandList* list,
@@ -368,13 +532,37 @@ uint32_t DX12PostProcess::RenderExposure(ID3D12GraphicsCommandList* list,
 void DX12PostProcess::Compose(ID3D12GraphicsCommandList* list,
     D3D12_CPU_DESCRIPTOR_HANDLE output)
 {
-    const auto barrier = Transition(m_sceneColor.Get(), D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
-        D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-    list->ResourceBarrier(1, &barrier);
+    if (m_samples > 1u)
+    {
+        // Resolve the multisampled scene into the colour every pass reads.
+        D3D12_RESOURCE_BARRIER toResolve[2] = {
+            Transition(m_sceneColorMultisampled.Get(), D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+                D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_RESOLVE_SOURCE),
+            Transition(m_sceneColor.Get(), D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+                D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RESOLVE_DEST) };
+        list->ResourceBarrier(2, toResolve);
+        list->ResolveSubresource(m_sceneColor.Get(), 0, m_sceneColorMultisampled.Get(), 0, HdrFormat);
+        const auto toRead = Transition(m_sceneColor.Get(), D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+            D3D12_RESOURCE_STATE_RESOLVE_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+        list->ResourceBarrier(1, &toRead);
+    }
+    else
+    {
+        const auto barrier = Transition(m_sceneColor.Get(), D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+            D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+        list->ResourceBarrier(1, &barrier);
+    }
+    SetBoundSceneSamples(list, 1u);
     auto settings = Engine::Graphics::GetPostProcessSettings();
     ID3D12DescriptorHeap* heaps[] = { m_srvHeap.Get() }; list->SetDescriptorHeaps(1, heaps);
     list->SetGraphicsRootSignature(m_rootSignature.Get());
     list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    // TAA needs single-sample depth (MSAA takes precedence).
+    if (settings.taa && m_samples == 1u && m_sceneDepth && m_temporalPipeline &&
+        m_sceneDepth->GetDesc().SampleDesc.Count == 1u)
+        RenderTemporal(list, settings);
+    else
+        m_historyValid = false;
     if (settings.bloomIntensity > 0.f && m_bloom)
         RenderBloom(list);
     else

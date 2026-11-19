@@ -29,6 +29,11 @@ void DX11PostProcess::Create(ID3D11Device* device, uint32_t width, uint32_t heig
     m_resolvedColor.Reset(); m_resolvedRtv.Reset();
     m_accumulationColor.Reset(); m_accumulationRtv.Reset(); m_accumulationSrv.Reset();
     m_bloom.Reset(); m_bloomRtvs.clear(); m_bloomSrvs.clear();
+    for (uint32_t index = 0; index < 2; ++index)
+    {
+        m_history[index].Reset(); m_historyRtv[index].Reset(); m_historySrv[index].Reset();
+    }
+    m_historyValid = false;
     m_width = width; m_height = height;
     m_sampleCount = std::max(1u, sampleCount);
     m_sceneFormat = hdrBits >= 32u ? DXGI_FORMAT_R32G32B32A32_FLOAT
@@ -100,6 +105,8 @@ void DX11PostProcess::Create(ID3D11Device* device, uint32_t width, uint32_t heig
         ThrowIfFailed(device->CreatePixelShader(ps->GetBufferPointer(), ps->GetBufferSize(), nullptr, &m_pixelShader));
         ThrowIfFailed(device->CreatePixelShader(down->GetBufferPointer(), down->GetBufferSize(), nullptr, &m_bloomDownsampleShader));
         ThrowIfFailed(device->CreatePixelShader(up->GetBufferPointer(), up->GetBufferSize(), nullptr, &m_bloomUpsampleShader));
+        const auto temporal = Compile(source, "TemporalResolvePS", "ps_5_0");
+        ThrowIfFailed(device->CreatePixelShader(temporal->GetBufferPointer(), temporal->GetBufferSize(), nullptr, &m_temporalShader));
         const auto luminance = Compile(source, "ExposureLuminancePS", "ps_5_0");
         const auto histogram = Compile(source, "ExposureHistogramPS", "ps_5_0");
         const auto adapt = Compile(source, "ExposureAdaptPS", "ps_5_0");
@@ -323,6 +330,57 @@ void DX11PostProcess::RenderBloom(ID3D11DeviceContext* context,
         context->RSSetViewports(savedViewportCount, savedViewports);
 }
 
+void DX11PostProcess::RenderTemporal(ID3D11DeviceContext* context,
+    const Engine::Graphics::PostProcessSettings& settings)
+{
+    if (!m_history[0])
+    {
+        Microsoft::WRL::ComPtr<ID3D11Device> device;
+        context->GetDevice(&device);
+        D3D11_TEXTURE2D_DESC desc{};
+        desc.Width = m_width; desc.Height = m_height; desc.MipLevels = 1; desc.ArraySize = 1;
+        desc.Format = m_sceneFormat; desc.SampleDesc.Count = 1; desc.Usage = D3D11_USAGE_DEFAULT;
+        desc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+        for (uint32_t index = 0; index < 2; ++index)
+        {
+            ThrowIfFailed(device->CreateTexture2D(&desc, nullptr, &m_history[index]));
+            ThrowIfFailed(device->CreateRenderTargetView(m_history[index].Get(), nullptr, &m_historyRtv[index]));
+            ThrowIfFailed(device->CreateShaderResourceView(m_history[index].Get(), nullptr, &m_historySrv[index]));
+        }
+        m_historyValid = false;
+    }
+    UINT savedViewportCount = D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE;
+    D3D11_VIEWPORT savedViewports[D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE]{};
+    context->RSGetViewports(&savedViewportCount, savedViewports);
+    const uint32_t target = 1u - m_historyIndex;
+    ID3D11ShaderResourceView* nullViews[3] = {};
+    context->PSSetShaderResources(0, 3, nullViews);
+    // Depth is read below, so nothing may hold it as the depth target.
+    ID3D11RenderTargetView* rtv = m_historyRtv[target].Get();
+    context->OMSetRenderTargets(1, &rtv, nullptr);
+    const D3D11_VIEWPORT viewport{ 0.f, 0.f, float(m_width), float(m_height), 0.f, 1.f };
+    context->RSSetViewports(1, &viewport);
+    context->OMSetBlendState(nullptr, nullptr, 0xffffffffu);
+    context->PSSetShader(m_temporalShader.Get(), nullptr, 0);
+    const auto values = Engine::Graphics::MakeTemporalConstants(settings, m_historyValid);
+    UploadConstants(context, &values);
+    ID3D11Buffer* cb = m_constants.Get();
+    ID3D11SamplerState* sampler = m_sampler.Get();
+    ID3D11ShaderResourceView* views[3] = { m_sceneSrv.Get(),
+        m_historySrv[m_historyIndex].Get(), m_sceneDepth.Get() };
+    context->PSSetConstantBuffers(0, 1, &cb);
+    context->PSSetSamplers(0, 1, &sampler);
+    context->PSSetShaderResources(0, 3, views);
+    context->Draw(3, 0);
+    context->PSSetShaderResources(0, 3, nullViews);
+    context->OMSetRenderTargets(0, nullptr, nullptr);
+    context->CopyResource(m_sceneColor.Get(), m_history[target].Get());
+    m_historyIndex = target;
+    m_historyValid = true;
+    if (savedViewportCount > 0)
+        context->RSSetViewports(savedViewportCount, savedViewports);
+}
+
 void DX11PostProcess::Compose(ID3D11DeviceContext* context,
     ID3D11RenderTargetView* output, bool useAccumulation)
 {
@@ -339,6 +397,12 @@ void DX11PostProcess::Compose(ID3D11DeviceContext* context,
     context->IASetInputLayout(nullptr);
     context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     context->VSSetShader(m_vertexShader.Get(), nullptr, 0);
+    // TAA needs single-sample, readable depth; video accumulation keeps its
+    // own sub-frame blending.
+    if (settings.taa && m_sampleCount == 1u && m_sceneDepth && m_temporalShader && !useAccumulation)
+        RenderTemporal(context, settings);
+    else
+        m_historyValid = false;
     const bool bloom = settings.bloomIntensity > 0.f && !m_bloomRtvs.empty();
     if (bloom)
     {

@@ -808,6 +808,22 @@ bool LandscapeDriver::ConfigureTerrain()
             layer.Owner->layer = Engine::Rendering::DetailBudget::Get().FindLayerOrDefault("Trees");
         auto* grass = layer.Owner ? layer.Owner->GetComponent<GrassField>() : nullptr;
         if (!grass) return;
+        if (layer.layerName == MeadowGrass::FarLayerName)
+        {
+            // The far ring is fully in before the detailed grass (radius +
+            // 10, fading over its last 30%) starts to fade: their fades must
+            // overlap or a band of bare ground shows between them.
+            const float detailed = radius + 10.f;
+            if (grass->innerRadius != detailed * .5f ||
+                grass->proceduralLayerMask != (1 << Grass))
+            {
+                grass->innerRadius = detailed * .5f;
+                grass->innerFadeWidth = detailed * .2f;
+                grass->proceduralLayerMask = 1 << Grass;
+                grass->MarkConfigurationDirty();
+            }
+            return;
+        }
         // Layer distances every restore (cheap; dirty only on change).
         if (layer.viewDistance != radius + 10.f || layer.lod1Distance != 7.f ||
             layer.lod2Distance != 13.f)
@@ -822,7 +838,7 @@ bool LandscapeDriver::ConfigureTerrain()
         grass->visibleRadius = radius;
         // Tussock patches (the manager's procedural default) close over the
         // ground like a pelt: crowns of blades over a low sward.
-        grass->shortPatchesPerSquareMeter = 2.6f;
+        grass->shortPatchesPerSquareMeter = 3.5f;
         grass->tallPatchesPerSquareMeter = .4f;
         // Wildflower and weed drifts (meshes come from the meadow preset).
         grass->accentPatchesPerSquareMeter = .18f;
@@ -830,6 +846,10 @@ bool LandscapeDriver::ConfigureTerrain()
         grass->shrubPatchesPerSquareMeter = .7f;
         grass->shrubThicketSize = 11.f;
         grass->shrubCoverage = .22f;
+        // Bush clusters over about a quarter of the meadow.
+        grass->bushesPerSquareMeter = .12f;
+        grass->bushClusterSize = 16.f;
+        grass->bushCoverage = .35f;
         grass->MarkConfigurationDirty();
     });
     m_configuredSignature = signature;

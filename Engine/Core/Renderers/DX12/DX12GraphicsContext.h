@@ -183,6 +183,7 @@ public:
     // contexts created afterwards can copy it (CopySceneDepth).
     void SetSceneDepth(ID3D12Resource* depth) { m_sceneDepth = depth; }
     bool SupportsSceneDepthCopy() const override { return m_sceneDepth != nullptr; }
+    bool SupportsTemporalAntiAliasing() const override { return true; }
 
 private:
     uint32_t m_preparedFrameSlot = 0;

@@ -9,6 +9,8 @@ struct InstanceTileRecord
 {
     glm::vec4 world[3]{};
     glm::vec4 minimum{0}; glm::uvec4 range{0}; glm::vec4 maximum{0};
+    // reserved: ground cover thinning (start, end, minimum share, keep
+    // width) as float bits; InstanceCull.hlsl reads it as lodData.meta.
     glm::vec4 origin{0}; glm::uvec4 reserved{0}; glm::vec4 lod{0};
 };
 static_assert(sizeof(InstanceTileRecord)==144);

@@ -1406,17 +1406,20 @@ void EditorState::DrawGlobalToolbar(IEditorUi& ui, ToolbarSection section,
         if (ImGui::BeginPopup("##ViewViewpointOptions"))
             DrawViewpointMenu(*scene, selected);
         int renderMode = view->GetSceneRenderMode();
-        const char* renderNames[]{ "Lit", "Unlit", "Wireframe", "Performance", "Detail", "Triangles" };
+        const char* renderNames[]{ "Lit", "Unlit", "Wireframe", "Performance", "Detail", "Triangles", "Coverage" };
         if (row.Next(108.f))
         {
             ui.SetNextItemWidth(108.f);
-            if (ui.Combo("##GlobalRenderMode", &renderMode, renderNames, 6))
+            if (ui.Combo("##GlobalRenderMode", &renderMode, renderNames, 7))
                 view->SetSceneRenderMode(renderMode);
             ui.Tooltip("Scene render mode");
         }
         if (renderMode == static_cast<int>(Engine::Model::SceneRenderMode::Triangles))
             ui.Tooltip("Triangles view: every triangle gets its own colour, distinct from its neighbours. "
                 "Fine confetti = dense geometry; large patches = few, large triangles");
+        if (renderMode == static_cast<int>(Engine::Model::SceneRenderMode::Coverage))
+            ui.Tooltip("Coverage view: terrain is red, everything on it (grass, shrubs, trees) is green. "
+                "Red showing through dense foliage is bare ground");
         if (renderMode == static_cast<int>(Engine::Model::SceneRenderMode::Detail))
             ui.Tooltip("Detail view: red = full LOD and full texture resolution on screen; "
                 "blue = low LOD band or blurred texture (fewer than 1 texel per 8 pixels)");

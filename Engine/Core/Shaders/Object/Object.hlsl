@@ -67,6 +67,10 @@ struct ObjectData
     float4 terrainSunShadow; // map corner x/z, 1 / extent x/z (texture slot 4)
     float4 terrainMacroMap; // map corner x/z, 1 / extent x/z (texture slot 5)
     float4 terrainMacroParams; // blend start, full distance, bound, reserved
+    float4 placementFade; // start, end (instanced ground cover, see VSMain)
+    float4 groundCoverColor; // terrain: cover colour, tint strength
+    float4 groundCoverRange; // terrain: fade start, fade end, layer mask, root shade
+    float4 placementThin; // start, end, minimum share kept (instanced ground cover)
 };
 
 struct SceneLightData
@@ -263,7 +267,8 @@ bool ResolveOcclusionMark(uint instanceId)
 #include "../GrassFootBend.hlsli"
 #endif
 
-#ifdef GRASS_SURFACE_SHADING
+// Shared by the grass surface shader and the terrain under ground cover
+// (Terrain::GroundCover), so both carry the same dry/lush meadow pattern.
 // How green a colour is: 1 for blades and leaves, 0 for petals, seed heads
 // and straw tips, which keep their authored colour and flat shading.
 float GrassLeafiness(float3 color)
@@ -271,6 +276,18 @@ float GrassLeafiness(float3 color)
     return saturate((color.g - max(color.r, color.b)) * 8.0);
 }
 
+// Broad dry/lush meadow patches (11 m period), without per-clump jitter.
+float3 GrassPatchVariation(float3 color, float3 position)
+{
+    float leafy = GrassLeafiness(color);
+    if (leafy <= 0.0) return color;
+    float dry = saturate(GrassWindPerlin(position.xz / 11.0, 0x51ed270bu) * .9 + .05);
+    float luminance = dot(color, float3(.2126, .7152, .0722));
+    float3 straw = luminance * float3(1.3, 1.05, .4);
+    return lerp(color, lerp(color, straw, dry * .35), leafy);
+}
+
+#ifdef GRASS_SURFACE_SHADING
 // Meadow colour variation keyed to the placement root (stable under wind):
 // broad dry/lush patches plus a per-clump brightness and hue jitter.
 float3 GrassColorVariation(float3 color, float3 root)
@@ -420,6 +437,52 @@ void VSMain(
     // Detail view occlusion debug: -2 marks a placement the cull would hide.
     [branch] if (objectData.morphParams.z < -50.0 && ResolveOcclusionMark(instanceId))
         oInstanceLodDistance = -2.0;
+    // Instanced ground cover fades out per placement (Mesh::placementFadeStart
+    // /End): each plant shrinks toward its root along its own up axis (right
+    // on slopes) and narrows a little, so the range edge has no tile squares
+    // and no dither. A per-placement offset spreads the edge so it never
+    // forms a ring; it only brings the fade forward, so every placement is
+    // gone by the end distance.
+    //
+    // Distance thinning (Mesh::placementThin*): past placementThin.x the
+    // share of plants kept falls toward placementThin.z by placementThin.y.
+    // Each plant has a fixed random rank and shrinks away as the share drops
+    // past it (no popping); survivors widen by 1 / sqrt(share) so the cover
+    // stays as dense on screen while far fewer plants are drawn.
+    float placementScale = 1.0;
+    float placementWiden = 1.0;
+    const bool placementFadeOn = objectData.placementFade.y > objectData.placementFade.x;
+    // start > end runs the thinning backwards: a fade-in (far grass ring).
+    const bool placementThinOn = objectData.placementThin.z < 1.0 &&
+        objectData.placementThin.y != objectData.placementThin.x;
+    [branch] if ((draw.drawFlags & 0x20000000u) != 0u && (placementFadeOn || placementThinOn))
+    {
+        const float3 root = mul(objectData.world, float4(grassRoot, 1.0)).xyz;
+        const float cameraDistance = length(root - objectData.viewPositionAlphaCutoff.xyz);
+        if (placementFadeOn)
+        {
+            const float band = objectData.placementFade.y - objectData.placementFade.x;
+            const uint hash = GrassWindHash(int2(floor(root.xz * 16.0)), 0x68e31da4u);
+            const float advance = (float)(hash & 1023u) / 1023.0 * 0.35 * band;
+            placementScale = 1.0 - smoothstep(objectData.placementFade.x, objectData.placementFade.y,
+                cameraDistance + advance);
+        }
+        if (placementThinOn)
+        {
+            const float share = lerp(1.0, saturate(objectData.placementThin.z), smoothstep(
+                objectData.placementThin.x, objectData.placementThin.y, cameraDistance));
+            const uint rankHash = GrassWindHash(int2(floor(root.xz * 16.0)), 0x1b873593u);
+            const float rank = (float)(rankHash & 4095u) / 4095.0;
+            placementScale *= saturate((share - rank) / 0.06);
+            placementWiden = objectData.placementThin.w > 0.5 ? 1.0 : rsqrt(max(share, 0.05));
+        }
+        const float3 placementUp = normalize(mul((float3x3)objectData.world, grassUp));
+        const float3 offset = worldPosition.xyz - root;
+        const float rise = dot(offset, placementUp);
+        const float lateral = placementScale > 0.0 ? lerp(0.5, 1.0, placementScale) * placementWiden : 0.0;
+        worldPosition.xyz = root + placementUp * (rise * placementScale) +
+            (offset - placementUp * rise) * lateral;
+    }
     float3 worldNormal = normalize(mul((float3x3)objectData.world, localNormal));
     float3 worldTangent = mul((float3x3)objectData.world, localTangent);
     float3 worldUp = mul((float3x3)objectData.world, grassUp);
@@ -492,7 +555,7 @@ void VSMain(
     // light pass.
     const bool useGrassWind = objectData.grassAnimation.y > 0.5 &&
         objectData.shadowCasterFade.z <= 0.5;
-    float windHeight = max(0.0, pos.y) * upLength;
+    float windHeight = max(0.0, pos.y) * upLength * placementScale;
 #ifdef GRASS_SURFACE_SHADING
     // Instanced meadow meshes carry a wind response in vertex alpha: 1 for
     // grass blades (the default), lower for woody shrubs, which then sway
@@ -511,6 +574,28 @@ void VSMain(
             mul(objectData.world, float4(grassRoot, 1)).xyz, worldUp / upLength,
             windHeight, restWorldPosition, restWorldNormal, restWorldTangent,
             worldPosition.xyz, worldNormal, worldTangent);
+#endif
+#ifdef GRASS_SURFACE_SHADING
+    // Grass minimum width (RenderingEffects): a blade thinner than
+    // placementFade.z pixels widens across itself (its UV u axis, the vertex
+    // tangent) until it is that wide, so distant blades stay solid strokes
+    // instead of breaking into sparkling dots. Centre-line vertices (u = 0.5:
+    // midribs, tips) stay put. Blade widths are not stored per vertex; 1.2 cm
+    // (scaled with the placement) is the generators' typical blade width.
+    [branch] if ((draw.drawFlags & 0x20000000u) != 0u && objectData.placementFade.z > 0.0 &&
+        objectData.shadowCasterFade.z <= 0.5)
+    {
+        const float tangentLength = length(worldTangent);
+        if (tangentLength > 1e-5)
+        {
+            const float depth = distance(worldPosition.xyz, objectData.viewPositionAlphaCutoff.xyz);
+            const float minimumWidth = objectData.placementFade.z * objectData.placementFade.w * depth;
+            const float bladeWidth = 0.012 * clamp(length(grassScaleRow), 0.25, 4.0);
+            // Plants shrinking at the range edge (placementScale) thin out too.
+            const float extra = max(0.0, minimumWidth - bladeWidth) * placementScale;
+            worldPosition.xyz += worldTangent / tangentLength * ((saturate(uv.x) - 0.5) * extra);
+        }
+    }
 #endif
     oPos = mul(objectData.viewProjection, worldPosition);
     // Portal apertures are stencil masks rather than visible surfaces. Keep a
@@ -2823,6 +2908,56 @@ float4 ObjectSurfacePS(
         }
         if (!hexTiling)
             base.rgb *= 1.0 + (terrainVariation.x + terrainVariation.y) * 0.10;
+        // Ground under ground cover (Terrain::GroundCover). Inside the cover's
+        // range the gaps between plants show darker root-coloured
+        // undergrowth instead of the bare layer texture; across and past its
+        // fade the cover's own colour, with the same dry/lush pattern as the
+        // blades (GrassColorVariation), carries on so its edge does not show.
+        // The layer texture survives as brightness detail.
+        [branch] if (objectData.groundCoverColor.w > 0.0 && originalWeightSum > 0.00001)
+        {
+            const uint coverMask = (uint)objectData.groundCoverRange.z;
+            float cover = 0.0;
+            float3 layerMean = 0.0;
+            [unroll] for (uint layer = 0u; layer < 6u; ++layer)
+            {
+                if (coverMask & (1u << layer)) cover += weights[layer];
+                layerMean += objectData.terrainMacroColors[layer].rgb * weights[layer];
+            }
+            cover = saturate(cover / originalWeightSum);
+            [branch] if (cover > 0.0)
+            {
+                layerMean /= originalWeightSum;
+                const float3 luma = float3(0.2126, 0.7152, 0.0722);
+                const float detail = clamp(dot(base.rgb, luma) /
+                    max(dot(layerMean, luma) * originalWeightSum, 0.002), 0.6, 1.4);
+                const float fadeStart = objectData.groundCoverRange.x;
+                const float fadeEnd = objectData.groundCoverRange.y;
+                const float beyond = fadeEnd > fadeStart
+                    ? smoothstep(fadeStart, fadeEnd, nearDistance) : 1.0;
+                const float3 coverColor = objectData.groundCoverColor.rgb;
+                const float3 target = GrassPatchVariation(lerp(
+                    coverColor * objectData.groundCoverRange.w, coverColor, beyond), worldPos);
+                // Keep more texture detail up close, where it reads as soil.
+                float3 tinted = target * lerp(1.0, detail, lerp(0.8, 0.5, beyond));
+                // Where the blades end, open ground keeps a fine meadow grain
+                // and a soft sheen at grazing angles, as a field of short
+                // grass does, rather than reading as flat paint. The grain's
+                // octaves fade as they approach the pixel size (no flicker).
+                [branch] if (beyond > 0.0)
+                {
+                    const float footprint = length(fwidth(worldPos.xz));
+                    const float grain =
+                        GrassWindPerlin(worldPos.xz * 1.7, 0x2c9277b5u) * 0.5 * saturate(1.0 - footprint * 1.2) +
+                        GrassWindPerlin(worldPos.xz * 6.3, 0x6a09e667u) * 0.25 * saturate(1.0 - footprint * 4.5);
+                    const float3 toCamera = normalize(objectData.viewPositionAlphaCutoff.xyz - worldPos);
+                    const float grazing = pow(1.0 - saturate(dot(terrainNormalForLighting, toCamera)), 4.0);
+                    tinted *= (1.0 + grain * 0.22 * beyond) * (1.0 + 0.3 * grazing * beyond);
+                }
+                base.rgb = lerp(base.rgb, tinted * originalWeightSum,
+                    cover * objectData.groundCoverColor.w);
+            }
+        }
         // Toward the edge of the loaded cells, fade to the macro color map
         // the distant tiles beyond use, so both sides meet with one color.
         [branch] if (objectData.terrainMacroParams.z > 0.5)

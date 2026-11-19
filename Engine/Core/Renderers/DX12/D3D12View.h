@@ -3,6 +3,8 @@
 #include <wrl/client.h>
 #include <d3d12.h>
 #include <functional>
+#include <memory>
+#include <vector>
 #include "DX12PostProcess.h"
 
 using Microsoft::WRL::ComPtr;
@@ -57,6 +59,20 @@ private:
     ComPtr<ID3D12Resource>       m_depthBuffer; // depth buffer for 3-D rendering
     ComPtr<ID3D12DescriptorHeap> m_dsvHeap;     // 1-slot non-shader-visible DSV heap
     DX12PostProcess m_postProcess;
+    // MSAA: the project's sample count (RenderingEffects), lowered to one the
+    // device supports. A change recreates the depth buffer and post targets;
+    // the old ones may still be in use by frames in flight, so they are kept
+    // for a few renders before release.
+    uint32_t m_samples = 1;
+    struct RetiredTargets
+    {
+        ComPtr<ID3D12Resource> depth;
+        std::unique_ptr<DX12PostProcess> postProcess;
+        uint32_t age = 0;
+    };
+    std::vector<RetiredTargets> m_retired;
+    void CreateDepthAndPostProcess(ID3D12Device* device, uint32_t samples);
+    static uint32_t DesiredSamples(ID3D12Device* device);
 
     D3D12_CPU_DESCRIPTOR_HANDLE  m_srvCpu{};
     D3D12_GPU_DESCRIPTOR_HANDLE  m_srvGpu{};

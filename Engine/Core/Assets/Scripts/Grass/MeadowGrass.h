@@ -11,6 +11,8 @@ namespace Engine::Components { class TerrainObjectLayer; }
 // their TerrainManager::SetObjectLayerSetup hook.
 namespace MeadowGrass
 {
+// Layer name of the far grass ring (simple tufts beyond the detailed grass).
+inline constexpr const char* FarLayerName = "Procedural far grass";
 // "Meadow grass" (authored placements) or "Procedural meadow grass".
 bool IsMeadowLayer(const std::string& layerName);
 

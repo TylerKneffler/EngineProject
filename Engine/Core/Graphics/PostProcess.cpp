@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "PostProcess.h"
 
+#include <cmath>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -29,6 +30,13 @@ PostProcessConstants MakeComposeConstants(const PostProcessSettings& settings,
     std::memcpy(&constants.params0[1], &settings.toneMapping, sizeof(uint32_t));
     constants.params0[2] = std::clamp(settings.bloomIntensity, 0.f, 1.f);
     constants.params0[3] = sampleWeight;
+    // Outside accumulation (operator 4), w carries FXAA as a negative value:
+    // -(edge threshold in thousandths + subpixel share * 0.999). PSMain decodes it.
+    if (settings.fxaa && settings.toneMapping != 4u)
+    {
+        const float threshold = std::round(std::clamp(settings.fxaaEdgeThreshold, 0.03f, 0.35f) * 1000.f);
+        constants.params0[3] = -(threshold + std::clamp(settings.fxaaSubpixel, 0.f, 1.f) * 0.999f);
+    }
     for (int channel = 0; channel < 3; ++channel)
     {
         constants.shadowTint[channel] = settings.shadowTint[channel];
@@ -40,6 +48,20 @@ PostProcessConstants MakeComposeConstants(const PostProcessSettings& settings,
     constants.grade[1] = std::max(settings.gradingSaturation, 0.f);
     constants.grade[2] = 1.f / static_cast<float>(std::max(bloomLevels, 1u));
     constants.grade[3] = settings.autoExposure ? 1.f : 0.f;
+    constants.temporal[2] = settings.taa && settings.toneMapping != 4u
+        ? std::clamp(settings.taaSharpen, 0.f, 1.f) : 0.f;
+    return constants;
+}
+
+PostProcessConstants MakeTemporalConstants(const PostProcessSettings& settings, bool historyValid)
+{
+    PostProcessConstants constants{};
+    float* rows[4] = { constants.params0, constants.shadowTint, constants.highlightTint, constants.grade };
+    for (int row = 0; row < 4; ++row)
+        for (int column = 0; column < 4; ++column)
+            rows[row][column] = settings.taaReprojection[row * 4 + column];
+    constants.temporal[0] = std::clamp(settings.taaFeedback, 0.f, 0.98f);
+    constants.temporal[1] = historyValid && settings.taaHistoryValid ? 1.f : 0.f;
     return constants;
 }
 

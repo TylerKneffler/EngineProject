@@ -21,7 +21,11 @@ enum class SceneRenderMode
     Detail = 4,
     // Editor-only: every triangle in its own distinct colour. Many small
     // patches mean dense geometry; large flat patches mean little detail.
-    Triangles = 5
+    Triangles = 5,
+    // Ground cover check: terrain renders red, everything drawn on it
+    // (grass, shrubs, trees, props) green. Where foliage should hide the
+    // ground, red showing through is bare terrain.
+    Coverage = 6
 };
 
 enum class SceneDimension

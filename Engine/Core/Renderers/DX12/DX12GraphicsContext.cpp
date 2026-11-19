@@ -4,10 +4,14 @@
 #include "Core/Graphics/IPipelineState.h"
 #include "DX12GraphicsBuffer.h"
 #include "DX12PipelineStateBuilder.h"
+#include "DX12PostProcess.h"
 #include "DX12GraphicsTexture.h"
 #include <algorithm>
 #include <chrono>
+#include <d3dcompiler.h>
+#include <mutex>
 #include <stdexcept>
+#include <string>
 
 // ---------------------------------------------------------------------------
 // D3D12GraphicsContext
@@ -396,6 +400,11 @@ void D3D12GraphicsContext::SetPipeline(const Engine::Graphics::IPipelineState* p
     if (!pipeline || !m_cmdList) return;
 
     auto* nativeHandle = static_cast<ID3D12PipelineState*>(const_cast<void*>(pipeline->GetNativeHandle()));
+    // Match the bound target's sample count: the MSAA scene target outside
+    // depth-only passes (shadow maps are always single-sample).
+    if (auto* state = dynamic_cast<const D3D12PipelineState*>(pipeline))
+        nativeHandle = state->ForSamples(m_activeDepthTarget ? 1u
+            : DX12PostProcess::BoundSceneSamples(m_cmdList));
     if (nativeHandle)
     {
         m_cmdList->SetPipelineState(nativeHandle);
@@ -523,6 +532,81 @@ void D3D12GraphicsContext::DispatchCompute(uint32_t x, uint32_t y, uint32_t z)
     if (m_cmdList && x && y && z) m_cmdList->Dispatch(x, y, z);
 }
 
+namespace
+{
+// Copies sample 0 of a multisampled scene depth into a float buffer. MSAA
+// depth cannot be copied with CopyTextureRegion, and D3D12 does not resolve
+// depth formats. Its own root signature: (b0) extent, (t0) depth table,
+// (u0) output buffer; one shader-visible descriptor for the depth view.
+struct MultisampledDepthCopy
+{
+    Microsoft::WRL::ComPtr<ID3D12Device> device;
+    Microsoft::WRL::ComPtr<ID3D12RootSignature> rootSignature;
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> pipeline;
+    Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> heap;
+    ID3D12Resource* describedDepth = nullptr;
+    bool failed = false;
+};
+
+MultisampledDepthCopy* AcquireMultisampledDepthCopy(ID3D12Device* device)
+{
+    static std::mutex mutex;
+    static MultisampledDepthCopy copy;
+    std::lock_guard lock(mutex);
+    if (copy.device.Get() != device)
+        copy = MultisampledDepthCopy{ device };
+    if (copy.pipeline || copy.failed) return copy.pipeline ? &copy : nullptr;
+    copy.failed = true;
+    static const char source[] =
+        "Texture2DMS<float> sceneDepth : register(t0);\n"
+        "RWStructuredBuffer<float> depthOutput : register(u0);\n"
+        "cbuffer CopyConstants : register(b0) { uint4 extent; };\n"
+        "[numthreads(8, 8, 1)] void main(uint3 id : SV_DispatchThreadID)\n"
+        "{\n"
+        "    if (id.x >= extent.x || id.y >= extent.y) return;\n"
+        "    depthOutput[id.y * extent.z + id.x] = sceneDepth.Load(int2(id.xy), 0);\n"
+        "}\n";
+    Microsoft::WRL::ComPtr<ID3DBlob> shader, errors;
+    if (FAILED(D3DCompile(source, sizeof(source) - 1, "MultisampledDepthCopy", nullptr, nullptr,
+            "main", "cs_5_0", D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &shader, &errors)))
+        return nullptr;
+    D3D12_DESCRIPTOR_RANGE range{};
+    range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+    range.NumDescriptors = 1;
+    D3D12_ROOT_PARAMETER parameters[3]{};
+    parameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+    parameters[0].Constants.Num32BitValues = 4;
+    parameters[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    parameters[1].DescriptorTable.NumDescriptorRanges = 1;
+    parameters[1].DescriptorTable.pDescriptorRanges = &range;
+    parameters[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_UAV;
+    D3D12_ROOT_SIGNATURE_DESC signatureDesc{};
+    signatureDesc.NumParameters = 3;
+    signatureDesc.pParameters = parameters;
+    Microsoft::WRL::ComPtr<ID3DBlob> signature;
+    if (FAILED(D3D12SerializeRootSignature(&signatureDesc, D3D_ROOT_SIGNATURE_VERSION_1,
+            &signature, &errors)) ||
+        FAILED(device->CreateRootSignature(0, signature->GetBufferPointer(),
+            signature->GetBufferSize(), IID_PPV_ARGS(&copy.rootSignature))))
+        return nullptr;
+    D3D12_COMPUTE_PIPELINE_STATE_DESC pipelineDesc{};
+    pipelineDesc.pRootSignature = copy.rootSignature.Get();
+    pipelineDesc.CS = { shader->GetBufferPointer(), shader->GetBufferSize() };
+    D3D12_DESCRIPTOR_HEAP_DESC heapDesc{};
+    heapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+    heapDesc.NumDescriptors = 1;
+    heapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+    if (FAILED(device->CreateComputePipelineState(&pipelineDesc, IID_PPV_ARGS(&copy.pipeline))) ||
+        FAILED(device->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(&copy.heap))))
+    {
+        copy.pipeline.Reset();
+        return nullptr;
+    }
+    copy.failed = false;
+    return &copy;
+}
+}
+
 void D3D12GraphicsContext::CopySceneDepth(Engine::Graphics::IGraphicsBuffer* destination,
     uint32_t width, uint32_t height)
 {
@@ -534,6 +618,55 @@ void D3D12GraphicsContext::CopySceneDepth(Engine::Graphics::IGraphicsBuffer* des
     const uint32_t pitch = Engine::Graphics::SceneDepthRowPitch(width);
     if (destination->GetSize() < uint64_t(pitch) * height * 4u) return;
     RetainBuffer(native->GetResource());
+    if (depthDesc.SampleDesc.Count > 1u)
+    {
+        Microsoft::WRL::ComPtr<ID3D12Device> device;
+        if (FAILED(m_cmdList->GetDevice(IID_PPV_ARGS(&device)))) return;
+        auto* copy = AcquireMultisampledDepthCopy(device.Get());
+        if (!copy || native->GetUsage() !=
+            Engine::Graphics::IGraphicsBuffer::Usage::StorageBuffer) return;
+        if (copy->describedDepth != m_sceneDepth)
+        {
+            D3D12_SHADER_RESOURCE_VIEW_DESC view{};
+            view.Format = DXGI_FORMAT_R32_FLOAT_X8X24_TYPELESS;
+            view.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DMS;
+            view.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+            device->CreateShaderResourceView(m_sceneDepth, &view,
+                copy->heap->GetCPUDescriptorHandleForHeapStart());
+            copy->describedDepth = m_sceneDepth;
+        }
+        TransitionComputeBuffer(m_cmdList, native, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        D3D12_RESOURCE_BARRIER toRead{};
+        toRead.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+        toRead.Transition.pResource = m_sceneDepth;
+        toRead.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+        toRead.Transition.StateBefore = D3D12_RESOURCE_STATE_DEPTH_WRITE;
+        toRead.Transition.StateAfter = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+        m_cmdList->ResourceBarrier(1, &toRead);
+        m_cmdList->SetComputeRootSignature(copy->rootSignature.Get());
+        m_cmdList->SetPipelineState(copy->pipeline.Get());
+        ID3D12DescriptorHeap* heaps[] = { copy->heap.Get() };
+        m_cmdList->SetDescriptorHeaps(1, heaps);
+        const uint32_t extent[4] = { width, height, pitch, 0u };
+        m_cmdList->SetComputeRoot32BitConstants(0, 4, extent, 0);
+        m_cmdList->SetComputeRootDescriptorTable(1, copy->heap->GetGPUDescriptorHandleForHeapStart());
+        m_cmdList->SetComputeRootUnorderedAccessView(2, native->GetGPUVirtualAddress());
+        m_cmdList->Dispatch((width + 7u) / 8u, (height + 7u) / 8u, 1u);
+        D3D12_RESOURCE_BARRIER after[2]{};
+        after[0] = toRead;
+        std::swap(after[0].Transition.StateBefore, after[0].Transition.StateAfter);
+        after[1].Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+        after[1].UAV.pResource = native->GetResource();
+        m_cmdList->ResourceBarrier(2, after);
+        // Engine textures all live in one shared heap; put it back for the
+        // descriptor tables bound after this copy.
+        if (const auto* shared = dynamic_cast<const D3D12GraphicsTexture*>(m_nullTexture.get()))
+        {
+            ID3D12DescriptorHeap* restore[] = { shared->GetHeap() };
+            m_cmdList->SetDescriptorHeaps(1, restore);
+        }
+        return;
+    }
     TransitionComputeBuffer(m_cmdList, native, D3D12_RESOURCE_STATE_COPY_DEST);
     D3D12_RESOURCE_BARRIER barrier{};
     barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;

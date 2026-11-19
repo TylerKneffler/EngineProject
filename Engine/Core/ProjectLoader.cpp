@@ -317,6 +317,29 @@ void ProjectLoader::ParseRendering(const pugi::xml_node& projectNode, ProjectSet
                 64u);
         }
 
+        if (auto effects = prop.child("RenderingEffects"))
+        {
+            auto& aa = settings.renderingEffects.antiAliasing;
+            aa.fxaa = effects.attribute("Fxaa").as_bool(aa.fxaa);
+            aa.fxaaSubpixel = effects.attribute("FxaaSubpixel").as_float(aa.fxaaSubpixel);
+            aa.fxaaEdgeThreshold = effects.attribute("FxaaEdgeThreshold").as_float(aa.fxaaEdgeThreshold);
+            aa.msaaSamples = effects.attribute("MsaaSamples").as_uint(aa.msaaSamples);
+            aa.taa = effects.attribute("Taa").as_bool(aa.taa);
+            aa.taaFeedback = effects.attribute("TaaFeedback").as_float(aa.taaFeedback);
+            aa.taaSharpen = effects.attribute("TaaSharpen").as_float(aa.taaSharpen);
+            aa.grassMinimumWidth = effects.attribute("GrassMinimumWidth").as_bool(aa.grassMinimumWidth);
+            aa.grassMinimumPixels = effects.attribute("GrassMinimumPixels").as_float(aa.grassMinimumPixels);
+            auto& post = settings.renderingEffects.postEffects;
+            post.bloom = effects.attribute("Bloom").as_bool(post.bloom);
+            post.bloomScale = effects.attribute("BloomScale").as_float(post.bloomScale);
+            post.autoExposure = effects.attribute("AutoExposure").as_bool(post.autoExposure);
+            post.exposureBias = effects.attribute("ExposureBias").as_float(post.exposureBias);
+            post.colorGrading = effects.attribute("ColorGrading").as_bool(post.colorGrading);
+            post.gradingStrength = effects.attribute("GradingStrength").as_float(post.gradingStrength);
+            post.ambientOcclusion = effects.attribute("AmbientOcclusion").as_bool(post.ambientOcclusion);
+            settings.renderingEffects.Clamp();
+        }
+
         auto distanceLighting = prop.child("DistanceLighting");
         if (distanceLighting)
         {

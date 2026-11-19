@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "Core/Graphics/DepthConvention.h"
 #include "D3D11View.h"
+#include "Core/Rendering/RenderingEffects.h"
 
 namespace Engine::Renderers
 {
@@ -19,6 +20,7 @@ void D3D11View::Resize(void* device, uint32_t width, uint32_t height)
     ID3D11ShaderResourceView* nullSrv = nullptr;
     context->PSSetShaderResources(0, 1, &nullSrv);
     m_dsv.Reset();
+    m_depthSrv.Reset();
     m_depthTexture.Reset();
     m_srv.Reset();
     m_rtv.Reset();
@@ -47,23 +49,46 @@ void D3D11View::CreateResources(ID3D11Device* device, uint32_t width, uint32_t h
     ThrowIfFailed(device->CreateRenderTargetView(m_texture.Get(), nullptr, &m_rtv));
     ThrowIfFailed(device->CreateShaderResourceView(m_texture.Get(), nullptr, &m_srv));
 
-    // Smooth thin geometry in editor views while keeping the UI texture single-sampled.
-    UINT colorQuality = 0;
-    UINT depthQuality = 0;
-    const uint32_t samples =
-        SUCCEEDED(device->CheckMultisampleQualityLevels(
-            DXGI_FORMAT_R16G16B16A16_FLOAT, 4, &colorQuality)) && colorQuality > 0 &&
-        SUCCEEDED(device->CheckMultisampleQualityLevels(
-            DXGI_FORMAT_D32_FLOAT_S8X24_UINT, 4, &depthQuality)) && depthQuality > 0
-        ? 4u : 1u;
+    // The project's MSAA count smooths thin geometry in editor views; the UI
+    // texture stays single-sampled (the post-process resolves into it).
+    const uint32_t samples = DesiredSamples(device);
+    m_samples = samples;
 
     D3D11_TEXTURE2D_DESC depth = color;
-    depth.Format = DXGI_FORMAT_D32_FLOAT_S8X24_UINT;
+    depth.Format = DXGI_FORMAT_R32G8X24_TYPELESS;
     depth.SampleDesc.Count = samples;
-    depth.BindFlags = D3D11_BIND_DEPTH_STENCIL;
+    depth.BindFlags = D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE;
     ThrowIfFailed(device->CreateTexture2D(&depth, nullptr, &m_depthTexture));
-    ThrowIfFailed(device->CreateDepthStencilView(m_depthTexture.Get(), nullptr, &m_dsv));
+    D3D11_DEPTH_STENCIL_VIEW_DESC dsv{};
+    dsv.Format = DXGI_FORMAT_D32_FLOAT_S8X24_UINT;
+    dsv.ViewDimension = samples > 1u ? D3D11_DSV_DIMENSION_TEXTURE2DMS : D3D11_DSV_DIMENSION_TEXTURE2D;
+    ThrowIfFailed(device->CreateDepthStencilView(m_depthTexture.Get(), &dsv, &m_dsv));
+    m_depthSrv.Reset();
+    if (samples == 1u)
+    {
+        D3D11_SHADER_RESOURCE_VIEW_DESC srv{};
+        srv.Format = DXGI_FORMAT_R32_FLOAT_X8X24_TYPELESS;
+        srv.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+        srv.Texture2D.MipLevels = 1;
+        if (FAILED(device->CreateShaderResourceView(m_depthTexture.Get(), &srv, &m_depthSrv)))
+            m_depthSrv.Reset();
+    }
     m_postProcess.Create(device, width, height, samples);
+}
+
+uint32_t D3D11View::DesiredSamples(ID3D11Device* device)
+{
+    uint32_t samples = Engine::Rendering::RenderingEffects::Get().Settings().antiAliasing.msaaSamples;
+    for (; samples > 1u; samples /= 2u)
+    {
+        UINT colorQuality = 0, depthQuality = 0;
+        if (SUCCEEDED(device->CheckMultisampleQualityLevels(
+                DXGI_FORMAT_R16G16B16A16_FLOAT, samples, &colorQuality)) && colorQuality > 0 &&
+            SUCCEEDED(device->CheckMultisampleQualityLevels(
+                DXGI_FORMAT_D32_FLOAT_S8X24_UINT, samples, &depthQuality)) && depthQuality > 0)
+            break;
+    }
+    return std::max(1u, samples);
 }
 
 void D3D11View::Render(void* contextHandle, void* mainRtvHandle,
@@ -73,6 +98,18 @@ void D3D11View::Render(void* contextHandle, void* mainRtvHandle,
     auto* context = static_cast<ID3D11DeviceContext*>(contextHandle);
     auto* mainRtv = static_cast<ID3D11RenderTargetView*>(mainRtvHandle);
     if (!context || !mainRtv || !m_rtv) return;
+    {
+        // Follow MSAA changes made in Preferences without waiting for a resize.
+        Microsoft::WRL::ComPtr<ID3D11Device> device;
+        context->GetDevice(&device);
+        if (device && DesiredSamples(device.Get()) != m_samples)
+        {
+            const uint32_t width = m_width, height = m_height;
+            m_width = m_height = 0;
+            Resize(device.Get(), width, height);
+            if (!m_rtv) return;
+        }
+    }
 
     if (preDrawFn) preDrawFn(contextHandle);
 
@@ -87,6 +124,7 @@ void D3D11View::Render(void* contextHandle, void* mainRtvHandle,
 
     if (drawFn) drawFn(context);
 
+    m_postProcess.SetSceneDepth(m_depthSrv.Get());
     m_postProcess.Compose(context, target);
     context->OMSetRenderTargets(1, &mainRtv, nullptr);
 }
