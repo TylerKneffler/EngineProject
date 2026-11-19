@@ -26,8 +26,19 @@ enum class GpuTimingStage : uint32_t
     SyntheticLoad,
     // Skybox (with its horizon fog) drawn behind the scene.
     Sky,
+    // Volumetric cloud march (compute, half resolution); the composite is in Sky.
+    Clouds,
+    // Screen-space ambient occlusion (depth copy + GTAO compute).
+    AmbientOcclusion,
     Count
 };
+
+// Row pitch, in floats, of IGraphicsContext::CopySceneDepth's output: rows
+// start on 256-byte boundaries (D3D12's copy footprint alignment).
+inline constexpr uint32_t SceneDepthRowPitch(uint32_t width)
+{
+    return (width + 63u) & ~63u;
+}
 
 struct FrameTimingTelemetry
 {
@@ -116,6 +127,14 @@ public:
     virtual void StorageBarrier(const IGraphicsBuffer*) {}
     virtual bool BeginComputePass() { return true; }
     virtual void EndComputePass() {}
+    // Copies the top-left width x height of the scene's depth target (the
+    // main framebuffer's depth as drawn so far this frame; reverse-Z, 0 at
+    // the far plane) into a storage buffer as one float per pixel, rows
+    // SceneDepthRowPitch(width) floats apart, ready for compute reads. Call
+    // between BeginComputePass and EndComputePass, and only when
+    // SupportsSceneDepthCopy() (or the factory's) says so.
+    virtual bool SupportsSceneDepthCopy() const { return false; }
+    virtual void CopySceneDepth(IGraphicsBuffer*, uint32_t /*width*/, uint32_t /*height*/) {}
     virtual bool SupportsIndirectDraws() const { return false; }
     virtual bool DrawInstancesIndirect(const IGraphicsBuffer*, uint64_t, bool) { return false; }
     // Copies GPU data into a Readback buffer. The caller must wait for the
@@ -242,6 +261,9 @@ public:
     virtual uint32_t GetConstantBufferDiscardMaps() const { return 0; }
     virtual std::unique_ptr<IGraphicsContext> CreateContext() = 0;
     virtual bool SupportsDepthRectangleClear() const { return false; }
+    // Contexts this factory creates can copy the scene depth (see
+    // IGraphicsContext::CopySceneDepth).
+    virtual bool SupportsSceneDepthCopy() const { return false; }
     // Build a context around a worker-owned native command stream without
     // changing the factory's current frame stream.
     virtual std::unique_ptr<IGraphicsContext> CreateContextForCommandBuffer(void*)

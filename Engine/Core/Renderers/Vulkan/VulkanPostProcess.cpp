@@ -14,6 +14,9 @@ namespace Engine::Renderers
 namespace
 {
 constexpr VkFormat HdrFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
+// Exposure results: full float, per-frame adaptation steps are far below
+// half precision.
+constexpr VkFormat ExposureFormat = VK_FORMAT_R32G32B32A32_SFLOAT;
 
 std::vector<uint32_t> LoadShader(const char* name)
 {
@@ -53,6 +56,11 @@ VulkanPostProcess::~VulkanPostProcess()
 {
     if (!m_device) return;
     DestroyImages();
+    DestroyExposureImages();
+    if (m_exposurePass) vkDestroyRenderPass(m_device, m_exposurePass, nullptr);
+    for (VkPipeline pipeline : { m_exposureLuminancePipeline, m_exposureHistogramPipeline,
+        m_exposureAdaptPipeline })
+        if (pipeline) vkDestroyPipeline(m_device, pipeline, nullptr);
     if (m_sceneLoadPass) vkDestroyRenderPass(m_device,m_sceneLoadPass,nullptr);
     if (m_bloomClearPass) vkDestroyRenderPass(m_device, m_bloomClearPass, nullptr);
     if (m_bloomLoadPass) vkDestroyRenderPass(m_device, m_bloomLoadPass, nullptr);
@@ -111,20 +119,27 @@ void VulkanPostProcess::Init(VkPhysicalDevice physicalDevice, VkDevice device,
         HdrFormat, false, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, false);
     m_bloomLoadPass = VulkanRenderCore::CreateRenderPassForDevice(device,
         HdrFormat, false, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, true);
+    m_exposurePass = VulkanRenderCore::CreateRenderPassForDevice(device,
+        ExposureFormat, false, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, false);
     VkSamplerCreateInfo sampler{ VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
     sampler.magFilter = sampler.minFilter = VK_FILTER_LINEAR;
     sampler.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
     sampler.addressModeU = sampler.addressModeV = sampler.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
     sampler.maxLod = 1.f; VkCheck(vkCreateSampler(device, &sampler, nullptr, &m_sampler), "vkCreateSampler(post process)");
-    VkDescriptorSetLayoutBinding bindings[3]{};
-    bindings[0].binding = 0; bindings[0].descriptorCount = 1; bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE; bindings[0].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-    bindings[1].binding = 1; bindings[1].descriptorCount = 1; bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER; bindings[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-    bindings[2].binding = 2; bindings[2].descriptorCount = 1; bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE; bindings[2].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    VkDescriptorSetLayoutBinding bindings[4]{};
+    for (uint32_t binding = 0; binding < 4; ++binding)
+    {
+        bindings[binding].binding = binding; bindings[binding].descriptorCount = 1;
+        bindings[binding].descriptorType = binding == 1
+            ? VK_DESCRIPTOR_TYPE_SAMPLER : VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+        bindings[binding].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    }
     VkDescriptorSetLayoutCreateInfo layout{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
-    layout.bindingCount = 3; layout.pBindings = bindings;
+    layout.bindingCount = 4; layout.pBindings = bindings;
     VkCheck(vkCreateDescriptorSetLayout(device, &layout, nullptr, &m_descriptorLayout), "vkCreateDescriptorSetLayout(post process)");
-    constexpr uint32_t setCount = 1u + MaxBloomLevels;
-    VkDescriptorPoolSize sizes[2] = { { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 2u * setCount }, { VK_DESCRIPTOR_TYPE_SAMPLER, setCount } };
+    // Compose 0, bloom levels, compose 1, exposure map, adapt 0 and 1.
+    constexpr uint32_t setCount = 1u + MaxBloomLevels + 4u;
+    VkDescriptorPoolSize sizes[2] = { { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 3u * setCount }, { VK_DESCRIPTOR_TYPE_SAMPLER, setCount } };
     VkDescriptorPoolCreateInfo pool{ VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
     pool.maxSets = setCount; pool.poolSizeCount = 2; pool.pPoolSizes = sizes;
     VkCheck(vkCreateDescriptorPool(device, &pool, nullptr, &m_descriptorPool), "vkCreateDescriptorPool(post process)");
@@ -137,6 +152,10 @@ void VulkanPostProcess::Init(VkPhysicalDevice physicalDevice, VkDevice device,
     m_descriptorSet = sets[0];
     for (uint32_t level = 0; level < MaxBloomLevels; ++level)
         m_bloomSets[level] = sets[1 + level];
+    m_composeSet1 = sets[1 + MaxBloomLevels];
+    m_exposureMapSet = sets[2 + MaxBloomLevels];
+    m_adaptSets[0] = sets[3 + MaxBloomLevels];
+    m_adaptSets[1] = sets[4 + MaxBloomLevels];
     VkPushConstantRange push{}; push.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
     push.size = sizeof(Engine::Graphics::PostProcessConstants);
     VkPipelineLayoutCreateInfo pipelineLayout{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
@@ -150,9 +169,55 @@ void VulkanPostProcess::Init(VkPhysicalDevice physicalDevice, VkDevice device,
     m_pipeline = CreatePipeline(vs, ps, outputRenderPass, false);
     m_bloomDownsamplePipeline = CreatePipeline(vs, down, m_bloomClearPass, false);
     m_bloomUpsamplePipeline = CreatePipeline(vs, up, m_bloomLoadPass, true);
-    for (VkShaderModule module : { vs, ps, down, up })
+    VkShaderModule luminance = CreateModule(device, "PostProcess.ExposureLuminance.PS.spv");
+    VkShaderModule histogram = CreateModule(device, "PostProcess.ExposureHistogram.PS.spv");
+    VkShaderModule adapt = CreateModule(device, "PostProcess.ExposureAdapt.PS.spv");
+    m_exposureLuminancePipeline = CreatePipeline(vs, luminance, m_bloomClearPass, false);
+    m_exposureHistogramPipeline = CreatePipeline(vs, histogram, m_bloomClearPass, false);
+    m_exposureAdaptPipeline = CreatePipeline(vs, adapt, m_exposurePass, false);
+    for (VkShaderModule module : { vs, ps, down, up, luminance, histogram, adapt })
         vkDestroyShaderModule(device, module, nullptr);
+    CreateExposureImages();
     CreateImages(width, height);
+}
+
+void VulkanPostProcess::CreateExposureImages()
+{
+    using namespace Engine::Graphics;
+    const auto create = [&](uint32_t width, uint32_t height, VkFormat format,
+        VkRenderPass pass, VulkanImageResource& image, VkFramebuffer& framebuffer)
+    {
+        image = VulkanCreateImage(m_physicalDevice, m_device, width, height, format,
+            VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+            VK_IMAGE_ASPECT_COLOR_BIT);
+        VkFramebufferCreateInfo info{ VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
+        info.renderPass = pass; info.attachmentCount = 1; info.pAttachments = &image.view;
+        info.width = width; info.height = height; info.layers = 1;
+        VkCheck(vkCreateFramebuffer(m_device, &info, nullptr, &framebuffer), "vkCreateFramebuffer(exposure)");
+    };
+    create(ExposureMapWidth, ExposureMapHeight, HdrFormat, m_bloomClearPass,
+        m_exposureMap, m_exposureMapFramebuffer);
+    create(ExposureBins, 1, HdrFormat, m_bloomClearPass,
+        m_exposureHistogram, m_exposureHistogramFramebuffer);
+    for (uint32_t index = 0; index < 2; ++index)
+        create(1, 1, ExposureFormat, m_exposurePass, m_exposure[index],
+            m_exposureFramebuffers[index]);
+    m_exposureImagesReady = false;
+    m_exposureState.Reset();
+}
+
+void VulkanPostProcess::DestroyExposureImages()
+{
+    for (VkFramebuffer* framebuffer : { &m_exposureMapFramebuffer,
+        &m_exposureHistogramFramebuffer, &m_exposureFramebuffers[0], &m_exposureFramebuffers[1] })
+    {
+        if (*framebuffer) vkDestroyFramebuffer(m_device, *framebuffer, nullptr);
+        *framebuffer = VK_NULL_HANDLE;
+    }
+    VulkanDestroyImage(m_device, m_exposureMap);
+    VulkanDestroyImage(m_device, m_exposureHistogram);
+    VulkanDestroyImage(m_device, m_exposure[0]);
+    VulkanDestroyImage(m_device, m_exposure[1]);
 }
 
 void VulkanPostProcess::DestroyImages()
@@ -181,7 +246,8 @@ void VulkanPostProcess::CreateImages(uint32_t width, uint32_t height)
         VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
         VK_IMAGE_ASPECT_COLOR_BIT);
     m_depth = VulkanCreateImage(m_physicalDevice, m_device, width, height,
-        VK_FORMAT_D32_SFLOAT_S8_UINT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+        VK_FORMAT_D32_SFLOAT_S8_UINT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
+            VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
         VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT);
     VkImageView attachments[] = { m_sceneColor.view, m_depth.view };
     VkFramebufferCreateInfo framebuffer{ VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
@@ -210,15 +276,16 @@ void VulkanPostProcess::CreateImages(uint32_t width, uint32_t height)
         VkCheck(vkCreateFramebuffer(m_device, &levelFramebuffer, nullptr, &m_bloomFramebuffers[level]), "vkCreateFramebuffer(bloom)");
     }
 
-    // Each set's unused image binding points at the scene, which is always
-    // shader-readable while bloom renders.
+    // Each set's unused image bindings point at the scene, which is always
+    // shader-readable while post-processing renders.
     std::vector<VkDescriptorImageInfo> images;
     std::vector<VkWriteDescriptorSet> writes;
-    images.reserve(3u * (1u + m_bloomLevels));
-    const auto writeSet = [&](VkDescriptorSet set, VkImageView source, VkImageView secondary)
+    images.reserve(4u * (5u + m_bloomLevels));
+    const auto writeSet = [&](VkDescriptorSet set, VkImageView source, VkImageView secondary,
+        VkImageView tertiary)
     {
-        const VkImageView views[3] = { source, VK_NULL_HANDLE, secondary };
-        for (uint32_t binding = 0; binding < 3; ++binding)
+        const VkImageView views[4] = { source, VK_NULL_HANDLE, secondary, tertiary };
+        for (uint32_t binding = 0; binding < 4; ++binding)
         {
             VkDescriptorImageInfo info{};
             if (binding == 1) info.sampler = m_sampler;
@@ -231,9 +298,14 @@ void VulkanPostProcess::CreateImages(uint32_t width, uint32_t height)
             writes.push_back(write);
         }
     };
-    writeSet(m_descriptorSet, m_sceneColor.view, m_bloomViews[0]);
+    const VkImageView scene = m_sceneColor.view;
+    writeSet(m_descriptorSet, scene, m_bloomViews[0], m_exposure[0].view);
+    writeSet(m_composeSet1, scene, m_bloomViews[0], m_exposure[1].view);
     for (uint32_t level = 0; level < m_bloomLevels; ++level)
-        writeSet(m_bloomSets[level], m_bloomViews[level], m_sceneColor.view);
+        writeSet(m_bloomSets[level], m_bloomViews[level], scene, scene);
+    writeSet(m_exposureMapSet, m_exposureMap.view, scene, scene);
+    writeSet(m_adaptSets[0], m_exposureHistogram.view, m_exposure[1].view, scene);
+    writeSet(m_adaptSets[1], m_exposureHistogram.view, m_exposure[0].view, scene);
     vkUpdateDescriptorSets(m_device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
 }
 
@@ -246,7 +318,7 @@ void VulkanPostProcess::BeginScene(VkCommandBuffer command, const float clearCol
     VkRenderPassBeginInfo begin{ VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO }; begin.renderPass = m_sceneRenderPass; begin.framebuffer = m_sceneFramebuffer;
     begin.renderArea.extent = { m_width, m_height }; begin.clearValueCount = 2; begin.pClearValues = clears;
     vkCmdBeginRenderPass(command, &begin, VK_SUBPASS_CONTENTS_INLINE);
-    RegisterVulkanScenePass(command,m_sceneLoadPass,m_sceneFramebuffer,m_width,m_height);
+    RegisterVulkanScenePass(command,m_sceneLoadPass,m_sceneFramebuffer,m_width,m_height,m_depth.image);
     SetFlippedViewport(command, m_width, m_height);
 }
 void VulkanPostProcess::EndScene(VkCommandBuffer command)
@@ -286,21 +358,83 @@ void VulkanPostProcess::RenderBloom(VkCommandBuffer command)
             std::max(1u, bloomWidth >> level), std::max(1u, bloomHeight >> level));
 }
 
+VkDescriptorSet VulkanPostProcess::RenderExposure(VkCommandBuffer command,
+    const Engine::Graphics::PostProcessSettings& settings)
+{
+    using namespace Engine::Graphics;
+    const ExposureFrame frame = m_exposureState.Next();
+    const auto constants = MakeExposureConstants(settings, frame.deltaSeconds, frame.history);
+    const auto pass = [&](VkPipeline pipeline, VkRenderPass renderPass,
+        VkFramebuffer framebuffer, uint32_t width, uint32_t height, VkDescriptorSet source)
+    {
+        VkClearValue clear{};
+        VkRenderPassBeginInfo begin{ VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
+        begin.renderPass = renderPass; begin.framebuffer = framebuffer;
+        begin.renderArea.extent = { width, height };
+        begin.clearValueCount = 1; begin.pClearValues = &clear;
+        vkCmdBeginRenderPass(command, &begin, VK_SUBPASS_CONTENTS_INLINE);
+        SetFlippedViewport(command, width, height);
+        vkCmdBindPipeline(command, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+        vkCmdBindDescriptorSets(command, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout, 0, 1, &source, 0, nullptr);
+        vkCmdPushConstants(command, m_pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(constants), &constants);
+        vkCmdDraw(command, 3, 1, 0, 0);
+        vkCmdEndRenderPass(command);
+    };
+    pass(m_exposureLuminancePipeline, m_bloomClearPass, m_exposureMapFramebuffer,
+        ExposureMapWidth, ExposureMapHeight, m_descriptorSet);
+    pass(m_exposureHistogramPipeline, m_bloomClearPass, m_exposureHistogramFramebuffer,
+        ExposureBins, 1, m_exposureMapSet);
+    pass(m_exposureAdaptPipeline, m_exposurePass, m_exposureFramebuffers[frame.target],
+        1, 1, m_adaptSets[frame.target]);
+    return frame.target ? m_composeSet1 : m_descriptorSet;
+}
+
 void VulkanPostProcess::BeginComposition(VkCommandBuffer command, VkFramebuffer output,
     uint32_t width, uint32_t height, const float clearColor[4])
 {
     auto settings = Engine::Graphics::GetPostProcessSettings();
+    if (!m_exposureImagesReady)
+    {
+        // Clear passes move the exposure images into the shader-read layout
+        // every descriptor set referencing them expects.
+        VkClearValue clear{};
+        const auto clearImage = [&](VkRenderPass pass, VkFramebuffer framebuffer,
+            uint32_t imageWidth, uint32_t imageHeight)
+        {
+            VkRenderPassBeginInfo begin{ VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
+            begin.renderPass = pass; begin.framebuffer = framebuffer;
+            begin.renderArea.extent = { imageWidth, imageHeight };
+            begin.clearValueCount = 1; begin.pClearValues = &clear;
+            vkCmdBeginRenderPass(command, &begin, VK_SUBPASS_CONTENTS_INLINE);
+            vkCmdEndRenderPass(command);
+        };
+        clearImage(m_bloomClearPass, m_exposureMapFramebuffer,
+            Engine::Graphics::ExposureMapWidth, Engine::Graphics::ExposureMapHeight);
+        clearImage(m_bloomClearPass, m_exposureHistogramFramebuffer,
+            Engine::Graphics::ExposureBins, 1);
+        for (uint32_t index = 0; index < 2; ++index)
+            clearImage(m_exposurePass, m_exposureFramebuffers[index], 1, 1);
+        m_exposureImagesReady = true;
+    }
     if (settings.bloomIntensity > 0.f && m_bloom.image)
         RenderBloom(command);
     else
         settings.bloomIntensity = 0.f;
+    VkDescriptorSet composeSet = m_descriptorSet;
+    if (settings.autoExposure && m_exposureMap.image)
+        composeSet = RenderExposure(command, settings);
+    else
+    {
+        settings.autoExposure = false;
+        m_exposureState.Reset();
+    }
     VkClearValue clears[2]{}; clears[0].color = { { clearColor[0], clearColor[1], clearColor[2], clearColor[3] } }; clears[1].depthStencil = { Engine::Graphics::Depth::ClearValue, 0 };
     VkRenderPassBeginInfo begin{ VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO }; begin.renderPass = m_outputRenderPass; begin.framebuffer = output;
     begin.renderArea.extent = { width, height }; begin.clearValueCount = 2; begin.pClearValues = clears;
     vkCmdBeginRenderPass(command, &begin, VK_SUBPASS_CONTENTS_INLINE);
     SetFlippedViewport(command, width, height);
     vkCmdBindPipeline(command, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline);
-    vkCmdBindDescriptorSets(command, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout, 0, 1, &m_descriptorSet, 0, nullptr);
+    vkCmdBindDescriptorSets(command, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout, 0, 1, &composeSet, 0, nullptr);
     const auto constants = Engine::Graphics::MakeComposeConstants(settings, m_bloomLevels);
     vkCmdPushConstants(command, m_pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(constants), &constants);
     vkCmdDraw(command, 3, 1, 0, 0);

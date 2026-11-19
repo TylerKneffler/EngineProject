@@ -1,0 +1,19 @@
+<?xml version='1.0' encoding='utf-8'?>
+<Prefab xmlns:components="urn:engine-components" version="1" type="prefab">
+  <object name="Low clouds" enabled="true">
+    <components>
+        <components:ParticleEmitter ParticleEmitter.rate="0.25" ParticleEmitter.burstOnStart="28" ParticleEmitter.maxParticles="48" ParticleEmitter.lifetime="160" ParticleEmitter.speed="1.2" ParticleEmitter.spreadDegrees="20" ParticleEmitter.drag="0" ParticleEmitter.size="140" ParticleEmitter.shape="2" ParticleEmitter.worldSpace="true" ParticleEmitter.playOnStart="true" ParticleEmitter.duration="0" ParticleEmitter.loop="false" ParticleEmitter.seed="5521" ParticleEmitter.texturePath="Assets/Textures/Atmosphere/Cloud_Puff_A.ktx2" ParticleEmitter.opacity="0.85" ParticleEmitter.blendMode="1" ParticleEmitter.softness="40" ParticleEmitter.nearFadeDistance="90" ParticleEmitter.fadeInTime="20" ParticleEmitter.sizeVariation="0.35" ParticleEmitter.randomRotation="true" ParticleEmitter.collisionMode="0" ParticleEmitter.useGpuSimulation="false">
+          <ParticleEmitter.direction _arrayEncoding="spaceSeparatedNumbers">1 0 0.1</ParticleEmitter.direction>
+          <ParticleEmitter.gravity _arrayEncoding="spaceSeparatedNumbers">0 0 0</ParticleEmitter.gravity>
+          <ParticleEmitter.color _arrayEncoding="spaceSeparatedNumbers">0.7 0.71 0.74</ParticleEmitter.color>
+          <ParticleEmitter.boxExtents _arrayEncoding="spaceSeparatedNumbers">500 60 500</ParticleEmitter.boxExtents>
+        </components:ParticleEmitter>
+    </components>
+    <children />
+    <transform>
+      <Transform.position _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.position>
+      <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+      <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+    </transform>
+  </object>
+</Prefab>

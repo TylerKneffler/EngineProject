@@ -31,6 +31,13 @@ public:
     // Discard decoded/GPU data for a generated asset that was overwritten.
     // Existing shared references will lazily reload it on the next Prepare.
     static void Invalidate(const std::string& path);
+    // A texture whose pixels are generated in memory (e.g. the physical sky
+    // panorama). `pixels` holds the whole mip chain, mip 0 first; `key` names
+    // it for caches (EnvironmentMap) and diagnostics. Upload it with
+    // PrepareImmediate; the CPU pixels are kept for environment lighting.
+    static std::shared_ptr<Texture> CreateFromPixels(std::string key, uint32_t width,
+        uint32_t height, uint32_t mipLevels, GraphicsTextureFormat format,
+        std::vector<uint8_t> pixels, bool srgb);
 
     bool Load();
     // Discards CPU/GPU copies so a rewritten generated texture is visible on

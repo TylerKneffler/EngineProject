@@ -39,7 +39,7 @@ public:
         VkCommandBuffer commands,
         VkPipelineLayout pipelineLayout,
         const std::array<const VulkanGraphicsTexture*, 30>& textures,
-        const std::array<const VulkanGraphicsBuffer*, 9>& buffers);
+        const std::array<const VulkanGraphicsBuffer*, 10>& buffers);
     VkDescriptorSetLayout GetDescriptorSetLayout() const { return m_layout; }
     VkDevice GetDevice() const { return m_device; }
     VkPhysicalDevice GetPhysicalDevice() const { return m_physicalDevice; }
@@ -57,8 +57,8 @@ private:
     {
         std::array<VkImageView, 30> views{};
         std::array<uint64_t,30> identities{};
-        std::array<VkBuffer, 9> buffers{};
-        std::array<uint64_t, 9> bufferIdentities{};
+        std::array<VkBuffer, 10> buffers{};
+        std::array<uint64_t, 10> bufferIdentities{};
         bool operator==(const TextureKey& other) const
         {
             return views == other.views && identities == other.identities && buffers == other.buffers && bufferIdentities == other.bufferIdentities;

@@ -1,5 +1,9 @@
 #pragma once
+#include <deque>
+#include <memory>
 #include <string>
+
+#include "Engine/Editor/Tools/AssetGeneratorRunner.h"
 
 namespace Engine::Editor
 {
@@ -21,6 +25,11 @@ private:
     void DrawToolbarMenu(EditorState& state) const;
     void DrawRenderingMenu(EditorState& state, PlayState playState) const;
     void OpenPanel(EditorState& state, const char* type) const;
+    // Tools > Asset generators (tools/generate_*.py, tools/cook_*.py).
+    void DrawToolsMenu(EditorState& state) const;
+    void PollAssetGenerators(EditorState& state) const;
+    mutable std::unique_ptr<AssetGeneratorRunner> m_generators;
+    mutable std::deque<AssetGeneratorRunner::Generator> m_generatorQueue;
     mutable bool m_openNewAnimationPopup = false;
     mutable char m_newAnimationName[128]{};
     mutable std::string m_newAnimationError;

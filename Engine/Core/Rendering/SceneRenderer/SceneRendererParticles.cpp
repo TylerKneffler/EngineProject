@@ -1,6 +1,7 @@
 #include "Core/Rendering/SceneRenderer/SceneRendererParticles.h"
 
 #include "Core/Rendering/SceneRenderer.h"
+#include "Core/Rendering/SceneRenderer/SceneRendererLighting.h"
 #include "Core/Components/Particles/ParticleEmitter.h"
 #include "Core/Components/Materials/Texture.h"
 #include "Core/Graphics/IGraphicsBuffer.h"
@@ -143,8 +144,10 @@ void SceneRendererParticles::Render(SceneRenderer& renderer, IGraphicsContext* c
                 const glm::vec3 position = emitter->worldSpace
                     ? particle.position
                     : glm::vec3(world * glm::vec4(particle.position, 1.f));
-                const float fade = std::clamp(1.f - particle.age /
+                float fade = std::clamp(1.f - particle.age /
                     std::max(particle.lifetime, 0.001f), 0.f, 1.f);
+                if (emitter->fadeInTime > 0.f)
+                    fade = std::min(fade, std::clamp(particle.age / emitter->fadeInTime, 0.f, 1.f));
                 records[batchFirst + index] = { glm::vec4(position, particle.size),
                     glm::vec4(particle.color, fade *
                         std::clamp(emitter->opacity, 0.f, 1.f)),
@@ -156,7 +159,8 @@ void SceneRendererParticles::Render(SceneRenderer& renderer, IGraphicsContext* c
                     emitter->PrepareTexture(renderer.m_graphicsProvider),
                     emitter->blendMode == static_cast<int>(
                         Engine::Components::ParticleEmitter::BlendMode::Alpha),
-                    object });
+                    object, std::max(0.f, emitter->softness),
+                    std::max(0.f, emitter->nearFadeDistance) });
             if (records.size() >= RenderLimit) break;
         }
         slot.particleCount = static_cast<uint32_t>(records.size());
@@ -208,23 +212,36 @@ void SceneRendererParticles::Render(SceneRenderer& renderer, IGraphicsContext* c
             throw std::runtime_error("Could not map particle constant buffer");
     }
     const glm::mat4 cameraWorld = glm::inverse(view);
+    // Soft particles read the main view's depth (portal views draw hard).
+    const IGraphicsBuffer* sceneDepth = nullptr;
+    if (!portalView && std::any_of(slot.batches.begin(), slot.batches.end(),
+            [](const auto& batch) { return batch.softness > 0.f; }))
+        sceneDepth = Engine::Rendering::SceneRendererLighting::SceneDepthForPixelShaders(
+            renderer, context);
     // Height fog (Particle.hlsl particleFog): this pass's camera position and
-    // the lit view's packed fog. Each pass in a frame gets its own buffer,
-    // since structured buffers bind without an offset.
+    // the lit view's packed fog, then the soft-particle depth reconstruction.
+    // Each pass in a frame gets its own buffer, since structured buffers bind
+    // without an offset.
+    constexpr uint32_t FogEntries = 7u;
     if (slot.fogCursor >= slot.fogBuffers.size())
     {
         slot.fogBuffers.push_back(bufferFactory->CreateBuffer(
             IGraphicsBuffer::Usage::ShaderResource,
             IGraphicsBuffer::AccessMode::Upload,
-            sizeof(glm::vec4) * 5u, nullptr, sizeof(glm::vec4)));
+            sizeof(glm::vec4) * FogEntries, nullptr, sizeof(glm::vec4)));
         if (!slot.fogBuffers.back())
             throw std::runtime_error("Could not create particle fog buffer");
     }
     IGraphicsBuffer* fogBuffer = slot.fogBuffers[slot.fogCursor++].get();
     {
-        glm::vec4 fog[5] = { glm::vec4(glm::vec3(cameraWorld[3]), 0.f),
+        glm::vec4 fog[FogEntries] = { glm::vec4(glm::vec3(cameraWorld[3]), 0.f),
             renderer.m_viewAtmosphereFog[0], renderer.m_viewAtmosphereFog[1],
-            renderer.m_viewAtmosphereFog[2], renderer.m_viewAtmosphereFog[3] };
+            renderer.m_viewAtmosphereFog[2], renderer.m_viewAtmosphereFog[3],
+            // view depth = y / (depth - x); z: row pitch; w: depth bound.
+            glm::vec4(renderer.m_sceneDepthReconstruct,
+                float(Engine::Graphics::SceneDepthRowPitch(renderer.m_sceneDepthWidth)),
+                sceneDepth ? 1.f : 0.f),
+            glm::vec4(float(renderer.m_sceneDepthWidth), float(renderer.m_sceneDepthHeight), 0.f, 0.f) };
         void* mapped = fogBuffer->Map();
         if (!mapped) throw std::runtime_error("Could not map particle fog buffer");
         std::memcpy(mapped, fog, sizeof(fog));
@@ -245,6 +262,9 @@ void SceneRendererParticles::Render(SceneRenderer& renderer, IGraphicsContext* c
         constants.particleParams.x = batch.texture ? 1.f : 0.f;
         constants.particleParams.z = 0.f;
         constants.particleParams.w = batch.alphaBlend ? 1.f : 0.f;
+        // Particle.hlsl SoftParticleFade: w lanes of the camera axes.
+        constants.cameraRight.w = sceneDepth ? batch.softness : 0.f;
+        constants.cameraUp.w = portalView ? 0.f : batch.nearFadeDistance;
         std::memcpy(static_cast<uint8_t*>(slot.mappedConstants) + offset,
             &constants, sizeof(constants));
         slot.constants->FlushMappedWrites(offset, sizeof(constants));
@@ -255,6 +275,7 @@ void SceneRendererParticles::Render(SceneRenderer& renderer, IGraphicsContext* c
                 : renderer.m_particlePipeline.get()));
         context->SetConstantBuffer(0, slot.constants.get(), offset);
         context->SetStructuredBuffer(7, fogBuffer);
+        if (sceneDepth) context->SetStructuredBuffer(8, sceneDepth);
         if(batch.texture) Engine::Components::Texture::RequestGraphicsFootprint(batch.texture->GetGraphicsTexture(),
             std::numeric_limits<float>::infinity()); // CPU/GPU particle size varies after preparation.
         context->SetTexture(0, batch.texture
@@ -265,6 +286,9 @@ void SceneRendererParticles::Render(SceneRenderer& renderer, IGraphicsContext* c
         if (portalView)
             renderer.m_lastParticlePortalDrawCount += batch.count;
     }
+    // GPU-simulated and fluid draws are not soft.
+    constants.cameraRight.w = 0.f;
+    constants.cameraUp.w = 0.f;
     for (const auto& surface : slot.fluidSurfaces)
     {
         if (portalView && !scene.IsObjectInSpatialRegion(surface.owner,

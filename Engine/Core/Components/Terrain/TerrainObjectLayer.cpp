@@ -73,6 +73,11 @@ ObjectLodProfileData TerrainObjectLayer::GetObjectLodProfile(
         }
         if (authored.shadowDistance > 0.f)
             profile.shadowDistance = authored.shadowDistance;
+        if (authored.cullAfterLastLod)
+        {
+            profile.cullAfterLastLod = true;
+            profile.finalLodCullDistance = authored.finalLodCullDistance;
+        }
     }
     // Without an authored chain, a prefab supplies its own levels
     // (Mesh.lodMeshes / Material.lodMaterials, see PrefabLod.h).

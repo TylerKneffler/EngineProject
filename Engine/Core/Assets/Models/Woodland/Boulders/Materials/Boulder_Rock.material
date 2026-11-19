@@ -1,0 +1,21 @@
+{
+    "version": 1,
+    "baseColor": [
+        0.86,
+        0.84,
+        0.8
+    ],
+    "specularModel": "MetallicRoughness",
+    "metallic": 0,
+    "roughness": 1.0,
+    "castsShadows": true,
+    "doubleSided": false,
+    "normalScale": 1.0,
+    "baseColorTexture": "Assets/Textures/Terrain/PBR/Rock030/Rock030_Color.jpg",
+    "normalTexture": "Assets/Textures/Terrain/PBR/Rock030/Rock030_NormalGL.jpg",
+    "metallicRoughnessTexture": "Assets/Textures/Terrain/PBR/Rock030/Rock030_Roughness.jpg",
+    "occlusionTexture": "Assets/Textures/Terrain/PBR/Rock030/Rock030_AmbientOcclusion.jpg",
+    "occlusionStrength": 1.0,
+    "useVertexColors": true,
+    "triplanarScale": 2.4
+}

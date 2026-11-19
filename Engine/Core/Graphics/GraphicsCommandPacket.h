@@ -83,6 +83,11 @@ public:
             case Op::StorageBarrier: target.StorageBarrier(static_cast<const IGraphicsBuffer*>(command.pointer)); break;
             case Op::BeginCompute: target.BeginComputePass(); break;
             case Op::EndCompute: target.EndComputePass(); break;
+            case Op::CopySceneDepth:
+                if (target.SupportsSceneDepthCopy())
+                    target.CopySceneDepth(static_cast<IGraphicsBuffer*>(command.mutablePointer),
+                        static_cast<uint32_t>(command.n[0]), static_cast<uint32_t>(command.n[1]));
+                break;
             case Op::DrawIndirect: target.DrawInstancesIndirect(static_cast<const IGraphicsBuffer*>(command.pointer), command.n[0], command.n[1] != 0); break;
             case Op::CopyBuffer: target.CopyBuffer(static_cast<const IGraphicsBuffer*>(command.pointer), static_cast<IGraphicsBuffer*>(command.mutablePointer), command.n[0]); break;
             case Op::VertexBuffer: target.SetVertexBuffer(static_cast<uint32_t>(command.n[0]), static_cast<const IGraphicsBuffer*>(command.pointer), static_cast<uint32_t>(command.n[1]), command.n[2]); break;
@@ -148,6 +153,15 @@ public:
     { TrackBuffer(buffer); Add(Op::StorageBarrier).pointer = buffer; }
     bool BeginComputePass() override { Add(Op::BeginCompute); return true; }
     void EndComputePass() override { Add(Op::EndCompute); }
+    void SetSceneDepthCopySupported(bool supported) { m_sceneDepthCopySupported = supported; }
+    bool SupportsSceneDepthCopy() const override { return m_sceneDepthCopySupported; }
+    void CopySceneDepth(IGraphicsBuffer* destination, uint32_t width, uint32_t height) override
+    {
+        if (!destination) return;
+        TrackBuffer(destination);
+        auto& c = Add(Op::CopySceneDepth); c.mutablePointer = destination;
+        c.n[0] = width; c.n[1] = height;
+    }
     bool SupportsIndirectDraws() const override { return true; }
     bool DrawInstancesIndirect(const IGraphicsBuffer* buffer, uint64_t offset, bool indexed) override
     { if (!buffer) return false; TrackBuffer(buffer); auto& c = Add(Op::DrawIndirect); c.pointer = buffer; c.n[0] = offset; c.n[1] = indexed; return true; }
@@ -203,7 +217,7 @@ private:
     {
         NativePhase, Pipeline, Stencil, PrepareConstants, ConstantBuffer,
         StructuredBuffer, ComputePipeline, ComputeConstants, ComputeRead,
-        ComputeWrite, Dispatch, StorageBarrier, BeginCompute, EndCompute,
+        ComputeWrite, Dispatch, StorageBarrier, BeginCompute, EndCompute, CopySceneDepth,
         DrawIndirect, CopyBuffer, VertexBuffer, IndexBuffer, Texture,
         BeginDepthOnlyPass, EndDepthOnlyPass, ClearDepthRectangle, Viewport, Scissor, Clear,
         Draw, DrawIndexed, BeginOcclusionFrame, OcclusionDecision,
@@ -246,6 +260,7 @@ private:
     std::unordered_set<const IGraphicsTexture*> m_seenTextures;
     NativePhase m_phase = NativePhase::Other;
     bool m_depthRectangleClearSupported=false;
+    bool m_sceneDepthCopySupported = false;
     mutable std::atomic<uint32_t> m_replayOcclusionCulled{0};
 };
 

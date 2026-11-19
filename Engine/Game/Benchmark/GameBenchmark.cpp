@@ -312,6 +312,8 @@ void GameBenchmark::Record(uint64_t frame, const GameBenchmarkFrameSample& s)
     gpuStage("grass", Engine::Graphics::GpuTimingStage::Grass);
     gpuStage("transparent", Engine::Graphics::GpuTimingStage::Transparent);
     gpuStage("sky", Engine::Graphics::GpuTimingStage::Sky);
+    gpuStage("clouds", Engine::Graphics::GpuTimingStage::Clouds);
+    gpuStage("ambient_occlusion", Engine::Graphics::GpuTimingStage::AmbientOcclusion);
     s.gpu.WriteOpaqueJson(m_log);
     m_log << ",\"scene_objects_loaded\":" << s.scene.objects
         << ",\"scene_generation\":" << s.scene.sceneGeneration
@@ -419,9 +421,16 @@ void GameBenchmark::Capture(Engine::Renderers::IGameRenderer& renderer)
 {
     renderer.WaitIdle();
     std::vector<uint8_t> pixels;
-    const uint32_t width = renderer.GetWidth(), height = renderer.GetHeight();
-    if (!renderer.ReadSceneCaptureRGBA(pixels) || pixels.size() != size_t(width) * height * 4)
+    uint32_t width = 0, height = 0;
+    if (!renderer.ReadSceneCaptureRGBA(pixels, width, height) || !width || !height ||
+        pixels.size() != size_t(width) * height * 4)
         throw std::runtime_error("renderer did not return the requested scene capture");
+    // Frames at another size are already invalid (see the sample check); say
+    // why, since the image itself is still written at the size rendered.
+    if (m_options.width && m_options.height &&
+        (width != m_options.width || height != m_options.height))
+        std::cerr << "Scene capture is " << width << 'x' << height << ", requested "
+            << m_options.width << 'x' << m_options.height << '\n';
     std::ofstream image(m_directory / "capture.ppm", std::ios::binary);
     image << "P6\n" << width << ' ' << height << "\n255\n";
     for (size_t i = 0; i < pixels.size(); i += 4)

@@ -623,6 +623,69 @@ void D3D11GraphicsContext::DispatchCompute(uint32_t x, uint32_t y, uint32_t z)
     if (m_context && x && y && z) Engine::Graphics::MeasureNative(NativeProbe(),Engine::Graphics::NativeOperation::Dispatch,[&] { return m_context->Dispatch(x, y, z); });
 }
 
+void D3D11GraphicsContextFactory::SetSceneDepth(ID3D11ShaderResourceView* depth)
+{
+    m_sceneDepth->depth = depth;
+    if (!depth || m_sceneDepth->copyShader || !m_device) return;
+    static const char source[] =
+        "Texture2D<float> sceneDepth : register(t0);\n"
+        "RWStructuredBuffer<float> depthOutput : register(u0);\n"
+        "cbuffer CopyConstants : register(b0) { uint4 extent; };\n"
+        "[numthreads(8, 8, 1)] void main(uint3 id : SV_DispatchThreadID)\n"
+        "{\n"
+        "    if (id.x >= extent.x || id.y >= extent.y) return;\n"
+        "    depthOutput[id.y * extent.z + id.x] = sceneDepth.Load(int3(id.xy, 0));\n"
+        "}\n";
+    Microsoft::WRL::ComPtr<ID3DBlob> blob, errors;
+    if (SUCCEEDED(D3DCompile(source, sizeof(source) - 1, "SceneDepthCopy", nullptr, nullptr,
+            "main", "cs_5_0", D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &blob, &errors)))
+        m_device->CreateComputeShader(blob->GetBufferPointer(), blob->GetBufferSize(),
+            nullptr, &m_sceneDepth->copyShader);
+}
+
+void D3D11GraphicsContext::CopySceneDepth(Engine::Graphics::IGraphicsBuffer* destination,
+    uint32_t width, uint32_t height)
+{
+    const auto* native = dynamic_cast<const D3D11GraphicsBuffer*>(destination);
+    if (!m_context || !SupportsSceneDepthCopy() || !native || !native->GetUnorderedAccessView() ||
+        !width || !height)
+        return;
+    Microsoft::WRL::ComPtr<ID3D11Resource> resource;
+    m_sceneDepth->depth->GetResource(&resource);
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> texture;
+    if (FAILED(resource.As(&texture))) return;
+    D3D11_TEXTURE2D_DESC desc{};
+    texture->GetDesc(&desc);
+    width = std::min(width, desc.Width);
+    height = std::min(height, desc.Height);
+    const uint32_t pitch = Engine::Graphics::SceneDepthRowPitch(width);
+    if (destination->GetSize() < uint64_t(pitch) * height * 4u) return;
+    // The depth cannot be read while bound for output: detach it, keeping
+    // the color targets, and restore both afterwards.
+    ID3D11RenderTargetView* targets[D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT]{};
+    ID3D11DepthStencilView* depthTarget = nullptr;
+    m_context->OMGetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, targets, &depthTarget);
+    UINT targetCount = 0;
+    while (targetCount < D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT && targets[targetCount]) ++targetCount;
+    m_context->OMSetRenderTargets(targetCount, targets, nullptr);
+    const uint32_t extent[4] = { width, height, pitch, 0 };
+    SetComputeConstants(extent, sizeof(extent));
+    m_context->CSSetShader(m_sceneDepth->copyShader.Get(), nullptr, 0);
+    ID3D11ShaderResourceView* view = m_sceneDepth->depth.Get();
+    m_context->CSSetShaderResources(0, 1, &view);
+    ID3D11UnorderedAccessView* output = native->GetUnorderedAccessView();
+    m_context->CSSetUnorderedAccessViews(0, 1, &output, nullptr);
+    m_context->Dispatch((width + 7u) / 8u, (height + 7u) / 8u, 1);
+    ID3D11ShaderResourceView* nullView = nullptr;
+    ID3D11UnorderedAccessView* nullOutput = nullptr;
+    m_context->CSSetShaderResources(0, 1, &nullView);
+    m_context->CSSetUnorderedAccessViews(0, 1, &nullOutput, nullptr);
+    m_context->CSSetShader(nullptr, nullptr, 0);
+    m_context->OMSetRenderTargets(targetCount, targets, depthTarget);
+    for (UINT index = 0; index < targetCount; ++index) targets[index]->Release();
+    if (depthTarget) depthTarget->Release();
+}
+
 void D3D11GraphicsContext::StorageBarrier(const Engine::Graphics::IGraphicsBuffer*)
 {
     if (!m_context) return;

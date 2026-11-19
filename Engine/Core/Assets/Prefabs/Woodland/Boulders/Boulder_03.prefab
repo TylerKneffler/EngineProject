@@ -1,0 +1,20 @@
+<?xml version='1.0' encoding='utf-8'?>
+<Prefab xmlns:components="urn:engine-components" version="1" type="prefab">
+  <object name="Boulder_03" enabled="true">
+    <components>
+      <components:Mesh Mesh.file="Assets/Models/Woodland/Boulders/Meshes/Boulder_03_LOD0.mesh" Mesh.foliageWindStrength="0" Mesh.useLightProbes="false" Mesh.gpuLodSelection="true" Mesh.gpuLod1Distance="35" Mesh.gpuLod2Distance="100">
+        <Mesh.lodMeshes>
+          <item>Assets/Models/Woodland/Boulders/Meshes/Boulder_03_LOD1.mesh</item>
+          <item>Assets/Models/Woodland/Boulders/Meshes/Boulder_03_LOD2.mesh</item>
+        </Mesh.lodMeshes>
+      </components:Mesh>
+      <components:Material Material.materialAsset="Engine/Core/Assets/Models/Woodland/Boulders/Materials/Boulder_Rock.material" />
+    </components>
+    <children />
+    <transform>
+      <Transform.position _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.position>
+      <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+      <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+    </transform>
+  </object>
+</Prefab>

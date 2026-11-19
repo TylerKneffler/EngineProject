@@ -48,6 +48,9 @@ public:
 
     // Optional frame-accurate readback for standalone diagnostics.
     virtual void RequestSceneCapture() {}
-    virtual bool ReadSceneCaptureRGBA(std::vector<uint8_t>&) { return false; }
+    // Pixels are RGBA8, width x height of the scene image actually captured
+    // (the render size, which need not match the window).
+    virtual bool ReadSceneCaptureRGBA(std::vector<uint8_t>&, uint32_t& /*width*/,
+        uint32_t& /*height*/) { return false; }
 };
 }

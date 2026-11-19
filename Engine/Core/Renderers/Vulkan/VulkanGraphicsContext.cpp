@@ -495,7 +495,7 @@ void VulkanGraphicsContext::SetStructuredBuffer(uint32_t slot, const Engine::Gra
         index = slot - 7;
     else if (slot >= 14 && slot <= 15)
         index = slot - 9;
-    else if (slot == 45 || slot == 46)
+    else if (slot >= 45 && slot <= 47)
         index = slot-38;
     else
         return;
@@ -527,6 +527,66 @@ void VulkanGraphicsContext::EndComputePass()
     }
     else ResumeVulkanScenePass(m_commandBuffer);
 }
+bool VulkanGraphicsContext::SupportsSceneDepthCopy() const
+{
+    const auto* scope = FindVulkanScenePass(m_commandBuffer);
+    return scope && scope->depthImage;
+}
+
+void VulkanGraphicsContext::CopySceneDepth(Engine::Graphics::IGraphicsBuffer* destination,
+    uint32_t width, uint32_t height)
+{
+    // Only between BeginComputePass/EndComputePass: the scene pass must be
+    // paused (its depth then rests in DEPTH_STENCIL_ATTACHMENT_OPTIMAL).
+    const auto* scope = FindVulkanScenePass(m_commandBuffer);
+    const auto* native = dynamic_cast<const VulkanGraphicsBuffer*>(destination);
+    if (!m_commandBuffer || !scope || !scope->paused || !scope->depthImage || !native ||
+        !width || !height)
+        return;
+    width = std::min(width, scope->resume.renderArea.extent.width);
+    height = std::min(height, scope->resume.renderArea.extent.height);
+    const uint32_t pitch = Engine::Graphics::SceneDepthRowPitch(width);
+    if (destination->GetSize() < uint64_t(pitch) * height * 4u) return;
+    VkImageMemoryBarrier image{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+    image.srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    image.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    image.oldLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    image.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    image.srcQueueFamilyIndex = image.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    image.image = scope->depthImage;
+    image.subresourceRange = { VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, 0, 1, 0, 1 };
+    // Earlier compute reads of the destination finish before it is rewritten.
+    VkBufferMemoryBarrier buffer{ VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER };
+    buffer.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    buffer.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    buffer.srcQueueFamilyIndex = buffer.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    buffer.buffer = native->GetBuffer();
+    buffer.size = VK_WHOLE_SIZE;
+    vkCmdPipelineBarrier(m_commandBuffer,
+        VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT |
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+        VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 1, &buffer, 1, &image);
+    VkBufferImageCopy region{};
+    region.bufferRowLength = pitch;
+    region.bufferImageHeight = height;
+    region.imageSubresource = { VK_IMAGE_ASPECT_DEPTH_BIT, 0, 0, 1 };
+    region.imageExtent = { width, height, 1 };
+    vkCmdCopyImageToBuffer(m_commandBuffer, scope->depthImage,
+        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, native->GetBuffer(), 1, &region);
+    image.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    image.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+        VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    image.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    image.newLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    buffer.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    buffer.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    // Compute (AO) and fragment shaders (soft particles) read the copy.
+    vkCmdPipelineBarrier(m_commandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT |
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        0, 0, nullptr, 1, &buffer, 1, &image);
+}
+
 bool VulkanGraphicsContext::DrawInstancesIndirect(const Engine::Graphics::IGraphicsBuffer* buffer,
     uint64_t offset, bool indexed)
 {
@@ -621,7 +681,10 @@ void VulkanGraphicsContext::StorageBarrier(
     barrier.size = VK_WHOLE_SIZE;
     vkCmdPipelineBarrier(m_commandBuffer,
         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
+        // Fragment shaders read compute output too (the volumetric cloud
+        // composite reads its half-resolution march there).
+        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT |
+            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
         0, 0, nullptr, 1, &barrier, 0, nullptr);
 }
 

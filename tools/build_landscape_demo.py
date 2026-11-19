@@ -183,8 +183,13 @@ START = (0.0, 40.0)
 # start, looking northwest over the valley. Saved as the inactive "Vista"
 # camera; the editor's Viewpoints menu jumps to it and captures use
 # `--viewpoint Vista`. Absolute heights: re-check it after changing relief.
-VISTA_EYE = (1272.0, 123.0, -12.0)
-VISTA_TARGET = (-893.0, 28.0, 1238.0)
+# Test-shot pose (scene camera "Vista"): on a 410 m foothill at the valley's
+# south-east rim, looking north-west across the valley and a lake at the
+# backlit ranges (the late-afternoon sun sits behind them). Picked
+# 2026-11-18 from the 24 km map; 2026-11-16's (1272, 123, -12) is now low in
+# the valley.
+VISTA_EYE = (2304.0, 463.0, -3072.0)
+VISTA_TARGET = (283.0, 254.0, -865.0)
 
 
 def grid(extent_cells, step):
@@ -528,6 +533,60 @@ def fine_sample(world, x, z):
     return float(world["fine_q"][row, col]) / SCALE
 
 
+def macro_sample(world, x, z):
+    """Height (m) at world x, z from the 16 m macro grid (whole map)."""
+    col = int(round((x - world["origin"]) / MACRO))
+    row = int(round((z - world["origin"]) / MACRO))
+    q = world["macro_q"]
+    return float(q[min(max(row, 0), q.shape[0] - 1), min(max(col, 0), q.shape[1] - 1)]) / SCALE
+
+
+# Low clouds clinging to summits on the far side of the valley, in the vista's
+# view (Tools/generate_sky_sprites.py LowClouds, a 800 m box of 70 m puffs).
+CLOUD_PEAKS = [(-3072.0, 2944.0), (-4096.0, 2304.0), (-2944.0, 3968.0), (1792.0, 3456.0)]
+
+
+def atmosphere_items(height_at):
+    """The "Atmosphere" object: mist over every lake and at the start, mist
+    cards on the first lake, low clouds on the summits. Prefabs from
+    Tools/generate_sky_sprites.py; height_at(x, z) gives ground metres."""
+    prefabs = "Assets/Prefabs/Woodland/Atmosphere/"
+
+    def item(name, prefab, position, scale=(1, 1, 1)):
+        element = ET.Element("item", {"prefab": prefabs + prefab, "enabled": "true"})
+        transform = ET.SubElement(element, "transform")
+        for tag, values in (("Transform.position", position), ("Transform.rotation", (0, 0, 0)),
+                            ("Transform.scale", scale)):
+            ET.SubElement(transform, tag, {"_arrayEncoding": "spaceSeparatedNumbers"}).text = numbers(values)
+        return element
+
+    group = ET.Element("item", {"name": "Atmosphere", "enabled": "true"})
+    transform = ET.SubElement(group, "transform")
+    for tag, values in (("Transform.position", (0, 0, 0)), ("Transform.rotation", (0, 0, 0)),
+                        ("Transform.scale", (1, 1, 1))):
+        ET.SubElement(transform, tag, {"_arrayEncoding": "spaceSeparatedNumbers"}).text = numbers(values)
+    ET.SubElement(group, "components")
+    children = ET.SubElement(group, "children")
+    # Lake mist hugs the water (the lakes all sit at WATER_LEVEL); its 500 m
+    # box is scaled in x/z to each lake.
+    for x, z, radius in LAKES:
+        spread = radius / 250.0
+        children.append(item("Lake mist", "LakeMist.prefab", (x, WATER_LEVEL + 4.0, z), (spread, 1, spread)))
+    # Close-range mist and mist cards on the first lake, in front of the start.
+    lake_x, lake_z, lake_r = LAKES[0]
+    toward_start = np.array([START[0] - lake_x, START[1] - lake_z])
+    toward_start /= np.linalg.norm(toward_start)
+    near = np.array([lake_x, lake_z]) + toward_start * lake_r * 0.7
+    children.append(item("Valley mist", "ValleyMist.prefab", (near[0], WATER_LEVEL + 2.5, near[1])))
+    side = np.array([-toward_start[1], toward_start[0]])
+    for k in (-1, 0, 1):
+        p = np.array([lake_x, lake_z]) + toward_start * lake_r * (0.45 + 0.1 * abs(k)) + side * k * 70.0
+        children.append(item("Mist card", "MistCard.prefab", (p[0], WATER_LEVEL, p[1])))
+    for x, z in CLOUD_PEAKS:
+        children.append(item("Low clouds", "LowClouds.prefab", (x, height_at(x, z) - 90.0, z)))
+    return group
+
+
 def write_scene(world):
     ET.register_namespace("components", NAMESPACE)
     source = ET.parse(SOURCE_SCENE).getroot()
@@ -596,6 +655,8 @@ def write_scene(world):
         light.set("Light.shadowNormalBias", "0.06")
     objects.append(sun)
 
+    objects.append(atmosphere_items(lambda x, z: macro_sample(world, x, z)))
+
     terrain = ET.SubElement(objects, "item", {"name": "Landscape", "enabled": "true"})
     transform = ET.SubElement(terrain, "transform")
     for tag, values in (("Transform.position", (0, 0, 0)), ("Transform.rotation", (0, 0, 0)),
@@ -619,6 +680,11 @@ def write_scene(world):
             # Trees beyond the loaded cells, as impostor blocks, up to 8 km
             # (the engine's cap is 64 cells).
             "farObjectRadius": str(min(EXTENT, 64)),
+            # Beyond 2.2 km, squares of 40 m holding five or more trees of
+            # one kind draw as one baked forest-cluster impostor
+            # (Tools/generate_forest_clusters.py) instead of one per tree.
+            "farClusterDistance": "2200", "farClusterSize": "40",
+            "farClusterMinimumTrees": "5",
             "maxLodChangesPerUpdate": "4", "maxLoadsPerUpdate": "6",
             "maxUnloadsPerUpdate": "4", "asyncStreaming": "true",
             "maxPreparedCells": "4", "maxUploadsPerUpdate": "4",
@@ -632,6 +698,11 @@ def write_scene(world):
             "cellDataDirectory": "Engine/Core/Assets/TerrainData/Landscape",
             "runtimeBakeDirectory": "", "requireRuntimeBake": "false"}.items()})
     ET.SubElement(manager, "TerrainManager.cells")
+    far_clusters = ET.SubElement(manager, "TerrainManager.farClusters")
+    for kind in ("Oak_01", "Oak_02", "Conifer_01", "Conifer_02"):
+        ET.SubElement(far_clusters, "item", {
+            "asset": f"Assets/Prefabs/Woodland/Clusters/ForestCluster_{kind}.prefab",
+            "match": "/Oaks/" if kind.startswith("Oak") else "/Conifers/", "trees": "14"})
     names = ET.SubElement(manager, "TerrainManager.objectLayerNames")
     for name in ("Landscape forest", "Procedural meadow grass", "Landscape props"):
         ET.SubElement(names, "item").text = name

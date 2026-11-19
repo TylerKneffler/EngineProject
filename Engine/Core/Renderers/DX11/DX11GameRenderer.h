@@ -33,6 +33,8 @@ public:
     uint64_t GetSubmittedFrameToken() const override { return m_submittedFrameToken; }
     bool IsFrameComplete(uint64_t token) override;
     std::unique_ptr<Engine::Graphics::IGraphicsContext> CreateFrameGraphicsContext() override;
+    // Creates m_depthTexture/m_dsv (and m_depthSrv when single-sample).
+    HRESULT CreateSceneDepth(D3D11_TEXTURE2D_DESC desc);
     bool RecordWorkerCommands(const Engine::Graphics::GraphicsCommandPacket&) override;
     bool SupportsWorkerCommands() const override
     { return m_deferredCommandsEnabled &&
@@ -48,7 +50,8 @@ public:
     // Snapshot the next composed RGBA8 frame before Present. Readback is
     // synchronous and only ready after EndFrame; normal rendering does no copy.
     void RequestSceneCapture() override { m_sceneCaptureRequested=true; m_sceneCaptureReady=false; }
-    bool ReadSceneCaptureRGBA(std::vector<uint8_t>& pixels) override;
+    bool ReadSceneCaptureRGBA(std::vector<uint8_t>& pixels, uint32_t& width,
+        uint32_t& height) override;
     bool EnableOffscreenExport(uint32_t outputWidth, uint32_t outputHeight,
         uint32_t msaaSamples = 1u, uint32_t readbackQueueDepth = 3u,
         bool hdrOutput = false, uint32_t hdrBits = 16u,
@@ -74,6 +77,8 @@ private:
     Microsoft::WRL::ComPtr<ID3D11RenderTargetView> m_rtv;
     Microsoft::WRL::ComPtr<ID3D11Texture2D> m_depthTexture;
     Microsoft::WRL::ComPtr<ID3D11DepthStencilView> m_dsv;
+    // Single-sample scene depth for compute reads (scene depth copy).
+    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_depthSrv;
     Microsoft::WRL::ComPtr<ID3D11Texture2D> m_captureStaging;
     Microsoft::WRL::ComPtr<ID3D11Texture2D> m_sceneCaptureStaging;
     bool m_sceneCaptureRequested=false;

@@ -4,6 +4,8 @@
 #include "DX12QueueMutex.h"
 #include "DX12DredDiagnostics.h"
 #include <chrono>
+#include <cstdio>
+#include <d3d12sdklayers.h>
 #include <algorithm>
 #include <cmath>
 #include "DX12GraphicsContext.h"
@@ -190,7 +192,14 @@ void DX12GameRenderer::BeginFrame()
     }
 
     if (m_graphicsProvider)
-        m_graphicsProvider->GetContextFactory()->PrepareFrame(m_frameIndex);
+    {
+        auto* factory = m_graphicsProvider->GetContextFactory();
+        factory->PrepareFrame(m_frameIndex);
+        // Scene recording (possibly on another thread) asks the factory
+        // whether the scene depth can be copied.
+        if (auto* native = dynamic_cast<D3D12GraphicsContextFactory*>(factory))
+            native->SetSceneDepth(m_depthStencil.Get());
+    }
 
     // ---- Reset command allocator and list ----
     // Now that the GPU has finished with this slot’s allocator, Reset() reclaims
@@ -334,9 +343,13 @@ void DX12GameRenderer::EndFrame()
     m_frameIndex = m_swapChain->GetCurrentBackBufferIndex();
 }
 
+// Copies the composed frame (bloom, tone mapping, grading, output encoding:
+// what the window shows), as DX11 does. It used to copy the HDR scene color
+// before post-processing, so DX12/Vulkan captures lacked bloom and grading
+// and looked unlike DX11's.
 void DX12GameRenderer::RecordSceneCapture()
 {
-    auto* sceneColor = m_postProcess.GetSceneColor();
+    auto* sceneColor = m_renderTargets[m_frameIndex].Get();
     if (!sceneColor || !m_device) return;
     const auto desc = sceneColor->GetDesc();
     D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint{};
@@ -344,6 +357,9 @@ void DX12GameRenderer::RecordSceneCapture()
     m_device->GetCopyableFootprints(&desc, 0, 1, 0, &footprint,
         nullptr, nullptr, &bytes);
     m_captureRowPitch = footprint.Footprint.RowPitch;
+    m_captureBytes = bytes;
+    m_captureWidth = static_cast<uint32_t>(desc.Width);
+    m_captureHeight = desc.Height;
     if (!m_captureReadback || m_captureReadback->GetDesc().Width < bytes)
     {
         D3D12_HEAP_PROPERTIES heap{};
@@ -363,7 +379,7 @@ void DX12GameRenderer::RecordSceneCapture()
     D3D12_RESOURCE_BARRIER barrier{};
     barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
     barrier.Transition.pResource = sceneColor;
-    barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+    barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
     barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_SOURCE;
     barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
     m_commandList->ResourceBarrier(1, &barrier);
@@ -382,38 +398,28 @@ void DX12GameRenderer::RecordSceneCapture()
     m_captureRequested = false;
 }
 
-bool DX12GameRenderer::ReadSceneCaptureRGBA(std::vector<uint8_t>& pixels)
+bool DX12GameRenderer::ReadSceneCaptureRGBA(std::vector<uint8_t>& pixels,
+    uint32_t& width, uint32_t& height)
 {
-    if (!m_captureReadback || !m_captureRowPitch) return false;
-    const auto halfToByte = [](uint16_t bits)
-    {
-        const int exponent = (bits >> 10) & 31;
-        const float value = exponent == 0
-            ? std::ldexp(static_cast<float>(bits & 1023), -24)
-            : (exponent == 31 ? 1.f : std::ldexp(
-                1.f + static_cast<float>(bits & 1023) / 1024.f,
-                exponent - 15));
-        return static_cast<uint8_t>(std::round(std::pow(
-            std::clamp(value, 0.f, 1.f), 1.f / 2.2f) * 255.f));
-    };
+    if (!m_captureReadback || !m_captureRowPitch || !m_captureWidth || !m_captureHeight)
+        return false;
+    // The back buffer is R8G8B8A8_UNORM, already output-encoded.
     void* mapped = nullptr;
-    D3D12_RANGE readRange{0,
-        static_cast<SIZE_T>(m_captureRowPitch) * m_height};
+    // The copy's last row ends at its width, not at the row pitch: mapping
+    // pitch * height overran the buffer (and failed) for widths that are not
+    // a multiple of 64 pixels, e.g. a 1520x873 window.
+    D3D12_RANGE readRange{0, static_cast<SIZE_T>(m_captureBytes)};
     if (FAILED(m_captureReadback->Map(0, &readRange, &mapped)) || !mapped)
         return false;
-    pixels.resize(static_cast<size_t>(m_width) * m_height * 4);
-    for (uint32_t y = 0; y < m_height; ++y)
-    {
-        const auto* row = reinterpret_cast<const uint16_t*>(
-            static_cast<const uint8_t*>(mapped) +
-            static_cast<size_t>(y) * m_captureRowPitch);
-        for (uint32_t x = 0; x < m_width; ++x)
-            for (uint32_t channel = 0; channel < 4; ++channel)
-                pixels[(static_cast<size_t>(y) * m_width + x) * 4 + channel] =
-                    halfToByte(row[x * 4 + channel]);
-    }
+    const size_t rowBytes = static_cast<size_t>(m_captureWidth) * 4;
+    pixels.resize(rowBytes * m_captureHeight);
+    for (uint32_t y = 0; y < m_captureHeight; ++y)
+        std::memcpy(pixels.data() + y * rowBytes, static_cast<const uint8_t*>(mapped) +
+            static_cast<size_t>(y) * m_captureRowPitch, rowBytes);
     D3D12_RANGE writeRange{0, 0};
     m_captureReadback->Unmap(0, &writeRange);
+    width = m_captureWidth;
+    height = m_captureHeight;
     return true;
 }
 
@@ -430,6 +436,8 @@ std::unique_ptr<Engine::Graphics::IGraphicsContext> DX12GameRenderer::CreateFram
     if (!m_graphicsProvider) return nullptr;
     auto* factory = m_graphicsProvider->GetContextFactory();
     factory->SetCommandBuffer(m_commandList.Get());
+    if (auto* native = dynamic_cast<D3D12GraphicsContextFactory*>(factory))
+        native->SetSceneDepth(m_depthStencil.Get());
     auto context = factory->CreateContext();
     if (auto* native = dynamic_cast<D3D12GraphicsContext*>(context.get()))
         native->SetDepthOnlyPassRestore([this] {
@@ -543,6 +551,26 @@ void DX12GameRenderer::CreateDevice()
         throw std::runtime_error(selectedDeviceFound
             ? "No D3D12-capable hardware adapter found."
             : "Selected graphics device is no longer available: " + m_graphicsDevice);
+    // With the debug layer on, its errors and warnings also go to stderr
+    // (headless tools such as GameBackendCapture have no debugger output).
+    if (debugLayerActive)
+    {
+        ComPtr<ID3D12InfoQueue1> infoQueue;
+        if (SUCCEEDED(m_device.As(&infoQueue)))
+        {
+            DWORD cookie = 0;
+            infoQueue->RegisterMessageCallback(
+                [](D3D12_MESSAGE_CATEGORY, D3D12_MESSAGE_SEVERITY severity,
+                    D3D12_MESSAGE_ID id, LPCSTR description, void*)
+                {
+                    if (severity <= D3D12_MESSAGE_SEVERITY_WARNING)
+                        std::fprintf(stderr, "D3D12 %s #%d: %s\n",
+                            severity <= D3D12_MESSAGE_SEVERITY_ERROR ? "ERROR" : "WARNING",
+                            static_cast<int>(id), description ? description : "");
+                },
+                D3D12_MESSAGE_CALLBACK_FLAG_NONE, nullptr, &cookie);
+        }
+    }
 }
 
 void DX12GameRenderer::CreateCommandObjects()
@@ -600,6 +628,8 @@ void DX12GameRenderer::CreateCommandObjects()
 bool DX12GameRenderer::RecordWorkerCommands(const Engine::Graphics::GraphicsCommandPacket& packet)
 {
     auto* factory = m_graphicsProvider->GetContextFactory();
+    if (auto* native = dynamic_cast<D3D12GraphicsContextFactory*>(factory))
+        native->SetSceneDepth(m_depthStencil.Get());
     ThrowIfFailed(m_workerAllocators[m_frameIndex]->Reset());
     ThrowIfFailed(m_workerCommandList->Reset(m_workerAllocators[m_frameIndex].Get(), nullptr));
     auto context = factory->CreateContextForCommandBuffer(m_workerCommandList.Get());

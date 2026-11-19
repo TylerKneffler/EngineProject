@@ -108,6 +108,23 @@ public:
     PROPERTY(Inspector, EditAnywhere, Category = "Material | Alpha")
     bool impostorBillboard { false };
 
+    // World-space triplanar mapping for rock and cliff props: base color,
+    // metallic-roughness, occlusion and normal textures are projected along
+    // the three world axes and blended by the surface normal, so scaled or
+    // rotated placements never stretch the texture and props of any size share
+    // one texel density. Metres per texture repeat; 0 uses the mesh UVs.
+    // Opaque and masked surfaces; parallax is skipped while it is on.
+    PROPERTY(Inspector, EditAnywhere, Category = "Material | PBR", Range = "0.0, 64.0")
+    float triplanarScale { 0.f };
+
+    // Masked foliage: varies hue (yellow-green to blue-green) and value with
+    // world-space noise at crown (~9 m) and stand (~70 m) scales, so forests
+    // are not one flat green. Near leaf cards, impostors and forest clusters
+    // that share the amount vary identically. 0 disables; 1 is about
+    // +-20% value and a clear hue spread.
+    PROPERTY(Inspector, EditAnywhere, Category = "Material | Alpha", Range = "0.0, 1.0")
+    float foliageColorVariation { 0.f };
+
     PROPERTY(Inspector, EditAnywhere, Category = "Material | PBR", Range = "0.0, 4.0")
     float     environmentDiffuseStrength { 1.f };
 

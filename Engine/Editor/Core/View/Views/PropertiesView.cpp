@@ -528,8 +528,73 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
                     Engine::Model::ToneMappingOperator>(toneMapping);
             outputChanged |= ui.DragFloat("Output Exposure (EV)",
                 &m_scene->settings.outputExposure, 0.05f, -16.f, 16.f);
+            ui.Tooltip("Fixed exposure; with Auto Exposure on, compensation on "
+                "top of the metered exposure.");
+            auto& autoExposure = m_scene->settings.autoExposure;
+            outputChanged |= ui.Checkbox("Auto Exposure", &autoExposure.enabled);
+            ui.Tooltip("Eye adaptation: meters the scene's brightness each frame "
+                "(luminance histogram) and eases exposure toward mapping its "
+                "average to mid grey. Lit views only.");
+            if (autoExposure.enabled)
+            {
+                bool exposureChanged = ui.DragFloat("Min EV", &autoExposure.minEv,
+                    0.1f, -14.f, 10.f);
+                ui.Tooltip("Darkest average brightness (log2 luminance) adapted to; "
+                    "darker scenes stay darker instead of being brightened further.");
+                exposureChanged |= ui.DragFloat("Max EV", &autoExposure.maxEv,
+                    0.1f, -14.f, 10.f);
+                ui.Tooltip("Brightest average brightness (log2 luminance) adapted to; "
+                    "brighter scenes stay brighter instead of being darkened further.");
+                exposureChanged |= ui.DragFloat("Speed Up", &autoExposure.speedUp,
+                    0.05f, 0.f, 50.f);
+                ui.Tooltip("Adaptation rate (1/s) when the scene gets brighter.");
+                exposureChanged |= ui.DragFloat("Speed Down", &autoExposure.speedDown,
+                    0.05f, 0.f, 50.f);
+                ui.Tooltip("Adaptation rate (1/s) when the scene gets darker.");
+                exposureChanged |= ui.DragFloat("Low Percent", &autoExposure.lowPercent,
+                    0.01f, 0.f, 0.98f);
+                ui.Tooltip("Share of the darkest pixels ignored by metering.");
+                exposureChanged |= ui.DragFloat("High Percent", &autoExposure.highPercent,
+                    0.01f, 0.01f, 1.f);
+                ui.Tooltip("Pixels brighter than this share (sun, specular "
+                    "highlights) are ignored by metering.");
+                if (exposureChanged)
+                    autoExposure.Normalize();
+                outputChanged |= exposureChanged;
+            }
             if (outputChanged && OnComponentsChanged)
                 OnComponentsChanged();
+
+            ui.Separator();
+            ui.Label("Ambient Occlusion");
+            {
+                auto& occlusion = m_scene->settings.ambientOcclusion;
+                bool occlusionChanged = ui.Checkbox("Screen-Space AO", &occlusion.enabled);
+                ui.Tooltip("Ground-truth ambient occlusion (GTAO) from the view's depth at "
+                    "half resolution, accumulated over frames. Darkens ambient and sky "
+                    "lighting in creases, under trees and where objects meet; sunlight "
+                    "is unaffected. Lit views only.");
+                if (occlusion.enabled)
+                {
+                    occlusionChanged |= ui.DragFloat("AO Radius (m)", &occlusion.radius,
+                        0.05f, 0.1f, 20.f);
+                    ui.Tooltip("World-space reach of the occlusion search. Larger finds "
+                        "broader creases but loses contact detail.");
+                    occlusionChanged |= ui.DragFloat("AO Intensity", &occlusion.intensity,
+                        0.02f, 0.f, 4.f);
+                    ui.Tooltip("Exponent on the computed visibility: 1 is as computed, "
+                        "higher darkens occluded areas further.");
+                    occlusionChanged |= ui.DragFloat("AO Temporal Blend",
+                        &occlusion.temporalBlend, 0.01f, 0.02f, 1.f);
+                    ui.Tooltip("Weight of each new frame against the accumulated history. "
+                        "Lower is smoother but slower to follow moving objects.");
+                }
+                if (occlusionChanged)
+                {
+                    occlusion.Normalize();
+                    if (OnComponentsChanged) OnComponentsChanged();
+                }
+            }
 
             ui.Separator();
             ui.Label("Atmosphere");
@@ -598,6 +663,115 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
             if (fogChanged)
             {
                 fog.Normalize();
+                if (OnComponentsChanged)
+                    OnComponentsChanged();
+            }
+
+            auto& sky = m_scene->settings.physicalSky;
+            bool skyChanged = ui.Checkbox("Physical Sky", &sky.enabled);
+            ui.Tooltip("Sky computed from a physical atmosphere (Rayleigh, Mie, ozone) "
+                "and the brightest directional light, instead of the HDRI panorama. It "
+                "also lights the scene (ambient and reflections), reddens the sun "
+                "through the air, and can replace the height fog with the atmosphere's "
+                "aerial perspective. Rebuilt in the background when the sun moves.");
+            if (sky.enabled)
+            {
+                skyChanged |= ui.DragFloat("Atmosphere Ground Height", &sky.groundHeight,
+                    1.f, -100000.f, 100000.f);
+                ui.Tooltip("World height of the planet surface the air starts at; set it "
+                    "near the lowest terrain.");
+                skyChanged |= ui.DragFloat("Air Density (Rayleigh)", &sky.rayleighScale,
+                    0.01f, 0.f, 20.f);
+                ui.Tooltip("Scales the air molecules: the blue of the sky and of distant "
+                    "hills. 1 is Earth.");
+                skyChanged |= ui.DragFloat("Haze Density (Mie)", &sky.mieScale,
+                    0.05f, 0.f, 200.f);
+                ui.Tooltip("Scales aerosols: whitish haze, the glow around the sun and "
+                    "milky distance. 1 is a clear day; 5-20 is hazy.");
+                skyChanged |= ui.DragFloat("Haze Height (m)", &sky.mieScaleHeight,
+                    10.f, 10.f, 20000.f);
+                ui.Tooltip("Haze thins by e every this many metres of altitude; low values "
+                    "pool it in valleys.");
+                skyChanged |= ui.SliderFloat("Haze Anisotropy", &sky.mieAnisotropy, 0.f, 0.99f);
+                ui.Tooltip("How strongly haze scatters forward, toward the sun.");
+                skyChanged |= ui.DragFloat("Ozone", &sky.ozoneScale, 0.01f, 0.f, 20.f);
+                ui.Tooltip("Ozone absorption: deepens the blue of a low-sun sky.");
+                skyChanged |= ui.ColorEdit3("Planet Ground Albedo", &sky.groundAlbedo.x);
+                ui.Tooltip("Reflectance of the ground the atmosphere sees below the "
+                    "horizon; tints the light bounced back into the sky.");
+                skyChanged |= ui.DragFloat("Sky Intensity", &sky.skyIntensity, 0.01f, 0.f, 64.f);
+                ui.Tooltip("Scales the sky on screen only (not its lighting).");
+                skyChanged |= ui.Checkbox("Sun Through Atmosphere", &sky.attenuateSun);
+                ui.Tooltip("Multiplies the brightest directional light by the atmosphere's "
+                    "transmittance: dimmer and redder toward the horizon.");
+                skyChanged |= ui.Checkbox("Aerial Perspective", &sky.aerialPerspective);
+                ui.Tooltip("Distance colour from the same atmosphere (blue air, white "
+                    "haze, sun glow) instead of the height fog above. The height fog's "
+                    "light-shaft settings still apply.");
+            }
+            if (skyChanged)
+            {
+                sky.Normalize();
+                if (OnComponentsChanged)
+                    OnComponentsChanged();
+            }
+
+            auto& clouds = m_scene->settings.volumetricClouds;
+            bool cloudsChanged = ui.Checkbox("Volumetric Clouds", &clouds.enabled);
+            ui.Tooltip("Ray-marched cumulus layer drawn over the sky, lit by the "
+                "brightest directional light. Terrain and objects in front hide it.");
+            if (clouds.enabled)
+            {
+                cloudsChanged |= ui.SliderFloat("Cloud Coverage", &clouds.coverage, 0.f, 1.f);
+                ui.Tooltip("Share of the sky covered: 0 clear, 1 overcast.");
+                cloudsChanged |= ui.DragFloat("Cloud Density", &clouds.density,
+                    0.001f, 0.f, 1.f);
+                ui.Tooltip("Extinction per metre inside a dense cloud. Higher values "
+                    "give harder edges and darker bases.");
+                cloudsChanged |= ui.DragFloat("Cloud Base Height", &clouds.baseHeight,
+                    10.f, -100000.f, 100000.f);
+                ui.Tooltip("World height of the cloud bottoms. Keep it above the "
+                    "highest terrain the clouds should not intersect.");
+                cloudsChanged |= ui.DragFloat("Cloud Thickness", &clouds.thickness,
+                    10.f, 1.f, 20000.f);
+                ui.Tooltip("Height of the cloud layer above its base.");
+                cloudsChanged |= ui.DragFloat("Cloud Shape Scale", &clouds.shapeScale,
+                    10.f, 10.f, 100000.f);
+                ui.Tooltip("Size of the cloud shapes in metres; larger values make "
+                    "bigger, sparser clouds.");
+                cloudsChanged |= ui.SliderFloat("Cloud Edge Detail", &clouds.detail, 0.f, 1.f);
+                ui.Tooltip("How strongly fine noise erodes the cloud edges into wisps.");
+                cloudsChanged |= ui.DragFloat("Cloud Wind Speed", &clouds.windSpeed,
+                    0.1f, 0.f, 200.f);
+                ui.Tooltip("Drift in metres per second.");
+                cloudsChanged |= ui.DragFloat("Cloud Wind Direction", &clouds.windDirection,
+                    1.f, -360.f, 360.f);
+                ui.Tooltip("Degrees from +X toward +Z.");
+                cloudsChanged |= ui.ColorEdit3("Cloud Sky Light", &clouds.ambientColor.x);
+                cloudsChanged |= ui.DragFloat("Cloud Sky Light Intensity",
+                    &clouds.ambientIntensity, 0.01f, 0.f, 16.f);
+                ui.Tooltip("Ambient light from the sky on the clouds (linear HDR); "
+                    "it lifts the shaded undersides.");
+                cloudsChanged |= ui.DragFloat("Cloud Sun Intensity", &clouds.sunIntensity,
+                    0.01f, 0.f, 16.f);
+                ui.Tooltip("Scales the directional light's contribution to the clouds.");
+                cloudsChanged |= ui.SliderInt("Cloud March Steps", &clouds.steps, 8, 128);
+                ui.Tooltip("Samples per pixel through the layer. More steps resolve "
+                    "thin clouds and edges at higher GPU cost.");
+                cloudsChanged |= ui.DragFloat("Cloud Max Distance", &clouds.maxDistance,
+                    100.f, 100.f, 200000.f);
+                ui.Tooltip("Clouds fade out toward this distance so the horizon "
+                    "blends into the sky.");
+                if (ui.Button("Reset Clouds"))
+                {
+                    clouds = Engine::Model::VolumetricCloudSettings{};
+                    clouds.enabled = true;
+                    cloudsChanged = true;
+                }
+            }
+            if (cloudsChanged)
+            {
+                clouds.Normalize();
                 if (OnComponentsChanged)
                     OnComponentsChanged();
             }

@@ -321,17 +321,24 @@ void ScenePortalRendering::Render(ScenePortalRenderingContext& input)
                 &mappedData, sizeof(mappedData));
         }
 
-        // Portal skies are not fogged (the fog terms stay zero).
         ViewLighting::SkyboxConstants skyboxData{};
         ViewLighting::SetSkyboxRays(skyboxData, proj,
             glm::mat4(glm::mat3(portalJob.mappedView)));
+        const bool physicalSky = skybox && skybox == renderer.m_physicalSky.Panorama().get();
         skyboxData.displayParams = {
             scene.IsMode2D() ? 1.f : 0.f,
-            std::exp2(settings.hdriExposure),
-            glm::radians(settings.hdriRotation),
-            std::max(settings.sunGlowIntensity, 0.f) };
+            physicalSky ? settings.physicalSky.skyIntensity : std::exp2(settings.hdriExposure),
+            physicalSky ? 0.f : glm::radians(settings.hdriRotation),
+            // The physical panorama already holds the Mie aureole.
+            physicalSky ? 0.f : std::max(settings.sunGlowIntensity, 0.f) };
         skyboxData.sunDirection = renderer.m_skySunDirection;
         skyboxData.sunRadiance = renderer.m_skySunRadiance;
+        // Fogged like the main sky, from the connected view's eye: the
+        // portal's objects already fog with the same view terms.
+        if (!scene.IsMode2D())
+            ViewLighting::SetSkyboxFog(skyboxData, renderer.m_viewAtmosphereFog,
+                settings.atmosphereFog.skyDistance,
+                float(glm::inverse(portalJob.mappedView)[3].y));
         memcpy(static_cast<uint8_t*>(renderer.m_skyboxCBMapped) +
             portalJob.skyboxConstantBufferOffset,
             &skyboxData, sizeof(skyboxData));

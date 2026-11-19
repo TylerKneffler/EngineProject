@@ -1,0 +1,19 @@
+{
+    "version": 1,
+    "baseColor": [
+        0.5,
+        0.52,
+        0.55
+    ],
+    "specularModel": "MetallicRoughness",
+    "metallic": 0,
+    "roughness": 1.0,
+    "castsShadows": false,
+    "doubleSided": true,
+    "normalScale": 1,
+    "baseColorTexture": "Assets/Textures/Atmosphere/Mist_Sheet.ktx2",
+    "useVertexColors": true,
+    "alphaMode": "Blend",
+    "reflectionStrength": 0,
+    "environmentDiffuseStrength": 1.0
+}

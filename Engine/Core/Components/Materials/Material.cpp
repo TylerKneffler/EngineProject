@@ -35,6 +35,8 @@ Material::Material()
     RegisterField("alphaCoverageTransmission", alphaCoverageTransmission, "Alpha");
     RegisterField("alphaEdgeFade", alphaEdgeFade, "Alpha");
     RegisterField("impostorBillboard", impostorBillboard, "Alpha");
+    RegisterField("triplanarScale", triplanarScale, "PBR");
+    RegisterField("foliageColorVariation", foliageColorVariation, "Alpha");
     RegisterField("doubleSided", doubleSided, "Surface");
     RegisterField("shaderUsesTime", shaderUsesTime, "Surface");
     RegisterField("overrideTextureLod", overrideTextureLod, "Texture LOD");
@@ -256,6 +258,9 @@ bool Material::LoadFromFile(const std::string& path)
             ? root["alphaCoverageTransmission"].AsFloat() : 0.f;
         alphaEdgeFade = root.Has("alphaEdgeFade") ? root["alphaEdgeFade"].AsFloat() : 0.f;
         impostorBillboard = root.Has("impostorBillboard") && root["impostorBillboard"].AsBool();
+        triplanarScale = root.Has("triplanarScale") ? std::max(0.f, root["triplanarScale"].AsFloat()) : 0.f;
+        foliageColorVariation = root.Has("foliageColorVariation")
+            ? std::clamp(root["foliageColorVariation"].AsFloat(), 0.f, 1.f) : 0.f;
         if (root.Has("overrideTextureLod")) overrideTextureLod = root["overrideTextureLod"].AsBool();
         if (root.Has("textureLodEnabled")) textureLod.enabled = root["textureLodEnabled"].AsBool();
         if (root.Has("textureLodNearDistance")) textureLod.nearDistance = root["textureLodNearDistance"].AsFloat();
@@ -365,6 +370,9 @@ bool Material::SaveToFile(const std::string& path) const
         root.Set("alphaCoverageTransmission", JsonValue(alphaCoverageTransmission));
     if (alphaEdgeFade != 0.f) root.Set("alphaEdgeFade", JsonValue(alphaEdgeFade));
     if (impostorBillboard) root.Set("impostorBillboard", JsonValue(true));
+    if (triplanarScale > 0.f) root.Set("triplanarScale", JsonValue(triplanarScale));
+    if (foliageColorVariation > 0.f)
+        root.Set("foliageColorVariation", JsonValue(foliageColorVariation));
     root.Set("overrideTextureLod", JsonValue(overrideTextureLod));
     root.Set("textureLodEnabled", JsonValue(textureLod.enabled));
     root.Set("textureLodNearDistance", JsonValue(textureLod.nearDistance));

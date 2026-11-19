@@ -53,7 +53,7 @@ VkDescriptorPool VulkanTextureSystem::CreateDescriptorPool(uint32_t setsPerPool)
     VkDescriptorPoolSize sizes[3]{
         { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 38 * setsPerPool },
         { VK_DESCRIPTOR_TYPE_SAMPLER, setsPerPool },
-        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 9 * setsPerPool }
+        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 10 * setsPerPool }
     };
     VkDescriptorPoolCreateInfo poolInfo{
         VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
@@ -101,7 +101,7 @@ VulkanTextureSystem::VulkanTextureSystem(
       m_queue(queue),
       m_queueFamily(queueFamily)
 {
-    VkDescriptorSetLayoutBinding bindings[48]{};
+    VkDescriptorSetLayoutBinding bindings[49]{};
     for (uint32_t binding = 0; binding < 6; ++binding)
     {
         bindings[binding].binding = binding;
@@ -178,6 +178,9 @@ VulkanTextureSystem::VulkanTextureSystem(
     bindings[46].descriptorCount = 1;
     bindings[46].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
     bindings[47]=bindings[46]; bindings[47].binding=47;
+    // Screen-space ambient occlusion (structured slot 47, Object.hlsl).
+    bindings[48]=bindings[46]; bindings[48].binding=48;
+    bindings[48].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
     VkDescriptorSetLayoutCreateInfo layoutInfo{
         VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
     layoutInfo.bindingCount = ARRAYSIZE(bindings);
@@ -570,7 +573,7 @@ void VulkanTextureSystem::Bind(
     VkCommandBuffer commands,
     VkPipelineLayout pipelineLayout,
     const std::array<const VulkanGraphicsTexture*, 30>& textures,
-    const std::array<const VulkanGraphicsBuffer*, 9>& buffers)
+    const std::array<const VulkanGraphicsBuffer*, 10>& buffers)
 {
     auto& frame=m_descriptorFrames[m_descriptorFrame];
     TextureKey key{};
@@ -606,7 +609,7 @@ void VulkanTextureSystem::Bind(
         VkCheck(allocation,"vkAllocateDescriptorSets(material)");
 
         VkDescriptorImageInfo images[38]{};
-        VkWriteDescriptorSet writes[48]{};
+        VkWriteDescriptorSet writes[49]{};
         for (uint32_t index = 0; index < 6; ++index)
         {
             images[index].imageView =
@@ -703,8 +706,8 @@ void VulkanTextureSystem::Bind(
         writes[6].descriptorCount = 1;
         writes[6].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
         writes[6].pImageInfo = &samplerInfo;
-        VkDescriptorBufferInfo bufferInfos[9]{};
-        for (uint32_t index = 0; index < 9; ++index)
+        VkDescriptorBufferInfo bufferInfos[10]{};
+        for (uint32_t index = 0; index < 10; ++index)
         {
             const uint32_t binding = index < 3 ? index + 7 :
                 (index < 5 ? index + 8 : index < 7 ? index + 10 : index+39);

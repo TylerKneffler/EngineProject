@@ -1,6 +1,7 @@
 #include "Core/Scene/Settings/SceneSettingsSerialization.h"
 #include <algorithm>
 #include <cctype>
+#include <utility>
 
 namespace Engine::Scene
 {
@@ -110,6 +111,62 @@ Engine::Serialization::JsonValue SerializeSceneSettings(const Engine::Model::Sce
         fogValue.Set("lightShaftSamples", Engine::Serialization::JsonValue(fog.lightShaftSamples));
         fogValue.Set("lightShaftStrength", Engine::Serialization::JsonValue(fog.lightShaftStrength));
         value.Set("atmosphereFog", fogValue);
+    }
+    {
+        const auto& clouds = settings.volumetricClouds;
+        auto cloudValue = Engine::Serialization::JsonValue::MakeObject();
+        cloudValue.Set("enabled", Engine::Serialization::JsonValue(clouds.enabled));
+        cloudValue.Set("coverage", Engine::Serialization::JsonValue(clouds.coverage));
+        cloudValue.Set("density", Engine::Serialization::JsonValue(clouds.density));
+        cloudValue.Set("baseHeight", Engine::Serialization::JsonValue(clouds.baseHeight));
+        cloudValue.Set("thickness", Engine::Serialization::JsonValue(clouds.thickness));
+        cloudValue.Set("shapeScale", Engine::Serialization::JsonValue(clouds.shapeScale));
+        cloudValue.Set("detail", Engine::Serialization::JsonValue(clouds.detail));
+        cloudValue.Set("windSpeed", Engine::Serialization::JsonValue(clouds.windSpeed));
+        cloudValue.Set("windDirection", Engine::Serialization::JsonValue(clouds.windDirection));
+        cloudValue.Set("ambientColor", Vec3ToJson(clouds.ambientColor));
+        cloudValue.Set("ambientIntensity", Engine::Serialization::JsonValue(clouds.ambientIntensity));
+        cloudValue.Set("sunIntensity", Engine::Serialization::JsonValue(clouds.sunIntensity));
+        cloudValue.Set("steps", Engine::Serialization::JsonValue(clouds.steps));
+        cloudValue.Set("maxDistance", Engine::Serialization::JsonValue(clouds.maxDistance));
+        value.Set("volumetricClouds", cloudValue);
+    }
+    {
+        const auto& sky = settings.physicalSky;
+        auto skyValue = Engine::Serialization::JsonValue::MakeObject();
+        skyValue.Set("enabled", Engine::Serialization::JsonValue(sky.enabled));
+        skyValue.Set("groundHeight", Engine::Serialization::JsonValue(sky.groundHeight));
+        skyValue.Set("rayleighScale", Engine::Serialization::JsonValue(sky.rayleighScale));
+        skyValue.Set("mieScale", Engine::Serialization::JsonValue(sky.mieScale));
+        skyValue.Set("mieScaleHeight", Engine::Serialization::JsonValue(sky.mieScaleHeight));
+        skyValue.Set("mieAnisotropy", Engine::Serialization::JsonValue(sky.mieAnisotropy));
+        skyValue.Set("ozoneScale", Engine::Serialization::JsonValue(sky.ozoneScale));
+        skyValue.Set("groundAlbedo", Vec3ToJson(sky.groundAlbedo));
+        skyValue.Set("skyIntensity", Engine::Serialization::JsonValue(sky.skyIntensity));
+        skyValue.Set("attenuateSun", Engine::Serialization::JsonValue(sky.attenuateSun));
+        skyValue.Set("aerialPerspective", Engine::Serialization::JsonValue(sky.aerialPerspective));
+        value.Set("physicalSky", skyValue);
+    }
+    {
+        const auto& exposure = settings.autoExposure;
+        auto exposureValue = Engine::Serialization::JsonValue::MakeObject();
+        exposureValue.Set("enabled", Engine::Serialization::JsonValue(exposure.enabled));
+        exposureValue.Set("minEv", Engine::Serialization::JsonValue(exposure.minEv));
+        exposureValue.Set("maxEv", Engine::Serialization::JsonValue(exposure.maxEv));
+        exposureValue.Set("speedUp", Engine::Serialization::JsonValue(exposure.speedUp));
+        exposureValue.Set("speedDown", Engine::Serialization::JsonValue(exposure.speedDown));
+        exposureValue.Set("lowPercent", Engine::Serialization::JsonValue(exposure.lowPercent));
+        exposureValue.Set("highPercent", Engine::Serialization::JsonValue(exposure.highPercent));
+        value.Set("autoExposure", exposureValue);
+    }
+    {
+        const auto& occlusion = settings.ambientOcclusion;
+        auto occlusionValue = Engine::Serialization::JsonValue::MakeObject();
+        occlusionValue.Set("enabled", Engine::Serialization::JsonValue(occlusion.enabled));
+        occlusionValue.Set("radius", Engine::Serialization::JsonValue(occlusion.radius));
+        occlusionValue.Set("intensity", Engine::Serialization::JsonValue(occlusion.intensity));
+        occlusionValue.Set("temporalBlend", Engine::Serialization::JsonValue(occlusion.temporalBlend));
+        value.Set("ambientOcclusion", occlusionValue);
     }
     value.Set("bloomEnabled", Engine::Serialization::JsonValue(settings.bloomEnabled));
     value.Set("bloomIntensity", Engine::Serialization::JsonValue(settings.bloomIntensity));
@@ -258,6 +315,91 @@ void DeserializeSceneSettings(Engine::Model::SceneSettings& settings, const Engi
             fog.lightShaftSamples = samples->AsInt();
         readFloat("lightShaftStrength", fog.lightShaftStrength);
         fog.Normalize();
+    }
+    settings.volumetricClouds = {};
+    if (const auto* cloudValue = FindField(value, "volumetricClouds"))
+    {
+        auto& clouds = settings.volumetricClouds;
+        auto readFloat = [&](const char* key, float& target)
+        {
+            if (const auto* field = FindField(*cloudValue, key))
+                target = field->AsFloat();
+        };
+        if (const auto* enabled = FindField(*cloudValue, "enabled"))
+            clouds.enabled = enabled->AsBool();
+        readFloat("coverage", clouds.coverage);
+        readFloat("density", clouds.density);
+        readFloat("baseHeight", clouds.baseHeight);
+        readFloat("thickness", clouds.thickness);
+        readFloat("shapeScale", clouds.shapeScale);
+        readFloat("detail", clouds.detail);
+        readFloat("windSpeed", clouds.windSpeed);
+        readFloat("windDirection", clouds.windDirection);
+        if (const auto* color = FindField(*cloudValue, "ambientColor"))
+            clouds.ambientColor = Vec3FromJson(*color, clouds.ambientColor);
+        readFloat("ambientIntensity", clouds.ambientIntensity);
+        readFloat("sunIntensity", clouds.sunIntensity);
+        if (const auto* steps = FindField(*cloudValue, "steps"))
+            clouds.steps = steps->AsInt();
+        readFloat("maxDistance", clouds.maxDistance);
+        clouds.Normalize();
+    }
+    settings.autoExposure = {};
+    if (const auto* exposureValue = FindField(value, "autoExposure"))
+    {
+        auto& exposure = settings.autoExposure;
+        if (const auto* field = FindField(*exposureValue, "enabled"))
+            exposure.enabled = field->AsBool();
+        const std::pair<const char*, float*> floats[] = {
+            { "minEv", &exposure.minEv }, { "maxEv", &exposure.maxEv },
+            { "speedUp", &exposure.speedUp }, { "speedDown", &exposure.speedDown },
+            { "lowPercent", &exposure.lowPercent }, { "highPercent", &exposure.highPercent } };
+        for (const auto& [key, target] : floats)
+            if (const auto* field = FindField(*exposureValue, key))
+                *target = field->AsFloat();
+        exposure.Normalize();
+    }
+    settings.ambientOcclusion = {};
+    if (const auto* occlusionValue = FindField(value, "ambientOcclusion"))
+    {
+        auto& occlusion = settings.ambientOcclusion;
+        if (const auto* field = FindField(*occlusionValue, "enabled"))
+            occlusion.enabled = field->AsBool();
+        const std::pair<const char*, float*> floats[] = {
+            { "radius", &occlusion.radius }, { "intensity", &occlusion.intensity },
+            { "temporalBlend", &occlusion.temporalBlend } };
+        for (const auto& [key, target] : floats)
+            if (const auto* field = FindField(*occlusionValue, key))
+                *target = field->AsFloat();
+        occlusion.Normalize();
+    }
+    settings.physicalSky = {};
+    if (const auto* skyValue = FindField(value, "physicalSky"))
+    {
+        auto& sky = settings.physicalSky;
+        auto readFloat = [&](const char* key, float& target)
+        {
+            if (const auto* field = FindField(*skyValue, key))
+                target = field->AsFloat();
+        };
+        auto readBool = [&](const char* key, bool& target)
+        {
+            if (const auto* field = FindField(*skyValue, key))
+                target = field->AsBool();
+        };
+        readBool("enabled", sky.enabled);
+        readFloat("groundHeight", sky.groundHeight);
+        readFloat("rayleighScale", sky.rayleighScale);
+        readFloat("mieScale", sky.mieScale);
+        readFloat("mieScaleHeight", sky.mieScaleHeight);
+        readFloat("mieAnisotropy", sky.mieAnisotropy);
+        readFloat("ozoneScale", sky.ozoneScale);
+        if (const auto* albedo = FindField(*skyValue, "groundAlbedo"))
+            sky.groundAlbedo = Vec3FromJson(*albedo, sky.groundAlbedo);
+        readFloat("skyIntensity", sky.skyIntensity);
+        readBool("attenuateSun", sky.attenuateSun);
+        readBool("aerialPerspective", sky.aerialPerspective);
+        sky.Normalize();
     }
     {
         // Older scenes predate these fields and keep the struct defaults.

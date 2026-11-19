@@ -25,6 +25,7 @@ struct GpuParticle
 };
 [[vk::binding(7, 0)]] StructuredBuffer<GpuParticle> gpuParticles;
 [[vk::binding(8, 0)]] StructuredBuffer<float4> particleFog;
+[[vk::binding(9, 0)]] StructuredBuffer<float> sceneDepth;
 #else
 cbuffer ParticleConstants : register(b0)
 {
@@ -45,6 +46,7 @@ struct GpuParticle
 };
 StructuredBuffer<GpuParticle> gpuParticles : register(t6);
 StructuredBuffer<float4> particleFog : register(t7);
+StructuredBuffer<float> sceneDepth : register(t8);
 #endif
 
 #include "../AtmosphereFog.hlsli"
@@ -80,6 +82,9 @@ struct ParticleVertex
     float4 color : COLOR0;
     float2 uv : TEXCOORD0;
     float3 worldPosition : TEXCOORD1;
+    // Clip w (view depth), passed explicitly: SV_Position.w reads 1/w on
+    // Vulkan without -fvk-use-dx-position-w.
+    float viewDepth : TEXCOORD2;
 };
 
 ParticleVertex VSMain(ParticleInput input, uint vertexId : SV_VertexID)
@@ -98,6 +103,7 @@ ParticleVertex VSMain(ParticleInput input, uint vertexId : SV_VertexID)
     result.color = input.colorAlpha;
     result.uv = float2(corner.x * 0.5 + 0.5, 0.5 - corner.y * 0.5);
     result.worldPosition = world;
+    result.viewDepth = result.position.w;
     return result;
 }
 
@@ -111,6 +117,7 @@ ParticleVertex VSMainGpu(uint vertexId : SV_VertexID,
         result.color = 0.0;
         result.uv = 0.0;
         result.worldPosition = 0.0;
+        result.viewDepth = 1.0;
         return result;
     }
     GpuParticle particle = gpuParticles[instanceId + 1];
@@ -125,7 +132,35 @@ ParticleVertex VSMainGpu(uint vertexId : SV_VertexID,
             max(0.001, particle.velocityLife.w)) * particleParams.y);
     result.uv = float2(corner.x * 0.5 + 0.5, 0.5 - corner.y * 0.5);
     result.worldPosition = world;
+    result.viewDepth = result.position.w;
     return result;
+}
+
+// Soft particles (ParticleEmitter::softness / nearFadeDistance):
+// cameraRight.w is the depth-fade distance and cameraUp.w the near-camera
+// fade, both metres. particleFog[5] = (A, B, row pitch, depth bound) with
+// scene view depth = B / (depth - A) (reverse-Z; depth 0 is the sky), and
+// particleFog[6].xy the depth copy's extent (sceneDepth, t8).
+float SoftParticleFade(float4 svPosition, float viewDepth)
+{
+    float fade = 1.0;
+    [branch] if (cameraUp.w > 0.0)
+        fade = smoothstep(cameraUp.w * 0.35, cameraUp.w, viewDepth);
+    const float4 depthParams = particleFog[5];
+    [branch] if (cameraRight.w > 0.0 && depthParams.w > 0.5)
+    {
+        const uint2 pixel = (uint2)svPosition.xy;
+        if (pixel.x < (uint)particleFog[6].x && pixel.y < (uint)particleFog[6].y)
+        {
+            const float depth = sceneDepth[pixel.y * (uint)depthParams.z + pixel.x];
+            if (depth > 0.0)
+            {
+                const float surfaceDepth = depthParams.y / (depth - depthParams.x);
+                fade *= saturate((surfaceDepth - viewDepth) / cameraRight.w);
+            }
+        }
+    }
+    return fade;
 }
 
 float4 PSMain(ParticleVertex input) : SV_TARGET
@@ -133,15 +168,16 @@ float4 PSMain(ParticleVertex input) : SV_TARGET
     if (dot(portalClipPlane.xyz, portalClipPlane.xyz) > 0.0 &&
         dot(float4(input.worldPosition, 1.0), portalClipPlane) < 0.0)
         clip(-1.0);
+    const float soft = SoftParticleFade(input.position, input.viewDepth);
     if (particleParams.x > 0.5)
     {
         float4 sampled = particleTexture.Sample(particleSampler, input.uv);
         return FogParticle(float4(input.color.rgb * sampled.rgb,
-            input.color.a * sampled.a), input.worldPosition);
+            input.color.a * sampled.a * soft), input.worldPosition);
     }
     float2 centered = input.uv * 2.0 - 1.0;
     float radial = saturate(1.0 - dot(centered, centered));
-    return FogParticle(float4(input.color.rgb, input.color.a * radial * radial),
+    return FogParticle(float4(input.color.rgb, input.color.a * radial * radial * soft),
         input.worldPosition);
 }
 

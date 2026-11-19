@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Core/Graphics/PostProcess.h"
 #include <d3d11.h>
 #include <wrl/client.h>
 #include <cstdint>
@@ -24,6 +25,11 @@ private:
     void UploadConstants(ID3D11DeviceContext* context, const void* data);
     // Builds the bloom chain from source; leaves level 0 holding the sum.
     void RenderBloom(ID3D11DeviceContext* context, ID3D11ShaderResourceView* source);
+    // Meters source into the exposure target this frame writes; returns it.
+    ID3D11ShaderResourceView* RenderExposure(ID3D11DeviceContext* context,
+        ID3D11ShaderResourceView* source,
+        const Engine::Graphics::PostProcessSettings& settings);
+    void CreateExposureTargets(ID3D11Device* device);
 
     Microsoft::WRL::ComPtr<ID3D11Texture2D> m_sceneColor;
     Microsoft::WRL::ComPtr<ID3D11Texture2D> m_resolvedColor;
@@ -37,6 +43,18 @@ private:
     std::vector<Microsoft::WRL::ComPtr<ID3D11RenderTargetView>> m_bloomRtvs;
     std::vector<Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>> m_bloomSrvs;
     uint32_t m_bloomLevels = 0;
+    // Auto exposure: log-luminance map, histogram, two 1x1 exposure targets
+    // alternating frames (see Graphics/PostProcess.h).
+    Microsoft::WRL::ComPtr<ID3D11RenderTargetView> m_exposureMapRtv;
+    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_exposureMapSrv;
+    Microsoft::WRL::ComPtr<ID3D11RenderTargetView> m_exposureHistogramRtv;
+    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_exposureHistogramSrv;
+    Microsoft::WRL::ComPtr<ID3D11RenderTargetView> m_exposureRtvs[2];
+    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> m_exposureSrvs[2];
+    Microsoft::WRL::ComPtr<ID3D11PixelShader> m_exposureLuminanceShader;
+    Microsoft::WRL::ComPtr<ID3D11PixelShader> m_exposureHistogramShader;
+    Microsoft::WRL::ComPtr<ID3D11PixelShader> m_exposureAdaptShader;
+    Engine::Graphics::ExposureState m_exposure;
     Microsoft::WRL::ComPtr<ID3D11VertexShader> m_vertexShader;
     Microsoft::WRL::ComPtr<ID3D11PixelShader> m_pixelShader;
     Microsoft::WRL::ComPtr<ID3D11PixelShader> m_bloomDownsampleShader;

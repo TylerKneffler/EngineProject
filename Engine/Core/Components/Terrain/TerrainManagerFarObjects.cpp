@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <climits>
+#include <map>
 #include <cmath>
 #include <thread>
 
@@ -97,7 +98,11 @@ std::vector<TerrainObjectLayer::Placement> FarPlacements(
         if (layer->viewDistance <= inputs.nearReach) continue;
         for (const auto& placement : layer->placements)
         {
-            auto chain = layer->GetObjectLodProfile(placement.asset).meshes;
+            const auto profile = layer->GetObjectLodProfile(placement.asset);
+            // Assets authored to vanish after their last level (near-only
+            // props such as cliff blocks) have no far representation.
+            if (profile.cullAfterLastLod) continue;
+            auto chain = profile.meshes;
             chain.erase(std::remove(chain.begin(), chain.end(), std::string{}), chain.end());
             // Only assets with a cheaper last level (impostors) draw far away.
             if (chain.size() < 2) continue;
@@ -105,6 +110,74 @@ std::vector<TerrainObjectLayer::Placement> FarPlacements(
             distant.asset = chain.back();
             result.push_back(std::move(distant));
         }
+    }
+    return result;
+}
+
+// Far forest clusters (TerrainManager::farClusters). Block-local far
+// placements are grouped on a square grid; a square holding enough trees, most
+// of which match one cluster's text, becomes a single cluster impostor at the
+// trees' centroid, scaled by the square's tree count against the baked count
+// (so a stand keeps roughly its density). Trees of other kinds in that square,
+// and every tree of sparse or mixed squares, stay individual impostors.
+std::vector<TerrainObjectLayer::Placement> ClusterFarPlacements(
+    const std::vector<TerrainObjectLayer::Placement>& placements,
+    const std::vector<TerrainManager::FarCluster>& clusters, float size,
+    int minimum, Cell block)
+{
+    std::vector<std::string> matches;
+    for (const auto& cluster : clusters)
+        if (!cluster.match.empty() &&
+            std::find(matches.begin(), matches.end(), cluster.match) == matches.end())
+            matches.push_back(cluster.match);
+    std::map<std::pair<int64_t, int64_t>, std::vector<size_t>> squares;
+    for (size_t i = 0; i < placements.size(); ++i)
+        squares[{ static_cast<int64_t>(std::floor(placements[i].position.x / size)),
+            static_cast<int64_t>(std::floor(placements[i].position.z / size)) }].push_back(i);
+    std::vector<TerrainObjectLayer::Placement> result;
+    result.reserve(placements.size() / 4 + squares.size());
+    const auto matchOf = [&](const std::string& asset) -> int {
+        for (size_t m = 0; m < matches.size(); ++m)
+            if (asset.find(matches[m]) != std::string::npos) return static_cast<int>(m);
+        return -1;
+    };
+    for (const auto& [square, members] : squares)
+    {
+        std::vector<int> family(members.size());
+        std::vector<int> counts(matches.size(), 0);
+        for (size_t k = 0; k < members.size(); ++k)
+            if ((family[k] = matchOf(placements[members[k]].asset)) >= 0) ++counts[family[k]];
+        const auto best = std::max_element(counts.begin(), counts.end());
+        const int bestFamily = best == counts.end() ? -1 : static_cast<int>(best - counts.begin());
+        const int count = bestFamily < 0 ? 0 : *best;
+        // Mixed squares (no family above 70%) stay as individual trees.
+        if (count < minimum || count * 10 < static_cast<int>(members.size()) * 7)
+        {
+            for (size_t index : members) result.push_back(placements[index]);
+            continue;
+        }
+        std::vector<const TerrainManager::FarCluster*> candidates;
+        for (const auto& cluster : clusters)
+            if (cluster.match == matches[bestFamily]) candidates.push_back(&cluster);
+        uint64_t hash = (static_cast<uint64_t>(block.first) * 0x9e3779b97f4a7c15ull) ^
+            (static_cast<uint64_t>(block.second) * 0xc2b2ae3d27d4eb4full) ^
+            (static_cast<uint64_t>(square.first) * 0x165667b19e3779f9ull) ^
+            (static_cast<uint64_t>(square.second) * 0x27d4eb2f165667c5ull);
+        hash ^= hash >> 31; hash *= 0x94d049bb133111ebull; hash ^= hash >> 29;
+        const auto& cluster = *candidates[hash % candidates.size()];
+        glm::vec3 centroid(0.f);
+        for (size_t k = 0; k < members.size(); ++k)
+        {
+            if (family[k] == bestFamily) centroid += placements[members[k]].position;
+            else result.push_back(placements[members[k]]);
+        }
+        TerrainObjectLayer::Placement stand;
+        stand.asset = cluster.asset;
+        stand.position = centroid / static_cast<float>(count);
+        stand.normal = glm::vec3(0.f, 1.f, 0.f);
+        stand.yawDegrees = static_cast<float>((hash >> 16) % 3600u) * .1f;
+        stand.scale = std::clamp(std::sqrt(static_cast<float>(count) / cluster.trees), .85f, 1.2f);
+        result.push_back(std::move(stand));
     }
     return result;
 }
@@ -367,6 +440,13 @@ void TerrainManager::UpdateFarObjects(int centerX, int centerY)
         // New data waits for the rest of the block; coverage and radius
         // changes apply at once so near and far never overlap or leave holes.
         if (outstanding && !urgent) return false;
+        // Blocks wholly beyond the cluster distance draw forest clusters.
+        const int gapCells = std::max({0, key.first * blockCells - centerX,
+            centerX - ((key.first + 1) * blockCells - 1), key.second * blockCells - centerY,
+            centerY - ((key.second + 1) * blockCells - 1)});
+        const bool clustered = !farClusters.empty() && farClusterDistance > 0.f &&
+            static_cast<double>(gapCells) * std::min(spanX, spanZ) >= farClusterDistance;
+        if (clustered) membership = (membership ^ 0x636c7573ull) * 1099511628211ull;
         if (members.empty())
         {
             if (const auto found = m_farObjectBlocks.find(key); found != m_farObjectBlocks.end())
@@ -416,6 +496,9 @@ void TerrainManager::UpdateFarObjects(int centerX, int centerY)
                 placements.push_back(std::move(placement));
             }
         }
+        if (clustered)
+            placements = ClusterFarPlacements(placements, farClusters,
+                std::clamp(farClusterSize, 4.f, 1000.f), std::max(1, farClusterMinimumTrees), key);
         block.layer->placements = std::move(placements);
         block.layer->MarkConfigurationDirty();
         block.membership = membership;

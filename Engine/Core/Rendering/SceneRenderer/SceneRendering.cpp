@@ -415,6 +415,7 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
     {
         const auto* factory=m_graphicsProvider->GetContextFactory();
         packet->SetDepthRectangleClearSupported(factory && factory->SupportsDepthRectangleClear());
+        packet->SetSceneDepthCopySupported(factory && factory->SupportsSceneDepthCopy());
     }
 
     if (!shadowOnly)
@@ -435,6 +436,15 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
         postProcess.gradingBalance = m_scene.settings.gradingBalance;
         postProcess.gradingContrast = m_scene.settings.gradingContrast;
         postProcess.gradingSaturation = m_scene.settings.gradingSaturation;
+        // Debug views keep a fixed exposure, like the other look effects.
+        const auto& exposure = m_scene.settings.autoExposure;
+        postProcess.autoExposure = lookEffects && exposure.enabled;
+        postProcess.autoExposureMinEv = exposure.minEv;
+        postProcess.autoExposureMaxEv = exposure.maxEv;
+        postProcess.autoExposureSpeedUp = exposure.speedUp;
+        postProcess.autoExposureSpeedDown = exposure.speedDown;
+        postProcess.autoExposureLowPercent = exposure.lowPercent;
+        postProcess.autoExposureHighPercent = exposure.highPercent;
         Engine::Graphics::SetPostProcessSettings(postProcess);
     }
 
@@ -722,6 +732,11 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
             m_distanceLightingSettings.maximumRealtimeLights),
         !cameraUsesSourceWarpChart, &m_realtimeShadowSettings,
         &shadowSelection, &cameraPosition, &cookiePaths, &iesPaths);
+    // Physical sky: the sun light passes through the atmosphere before any
+    // view lighting, shadow or fog reads it.
+    Engine::Rendering::SceneRendererLighting::ApplyPhysicalAtmosphere(*this,
+        static_cast<Engine::Model::LightData*>(m_lightDataMapped), m_frameLightCount,
+        cameraPosition);
     if (shadowOnly && !shadowSelection.valid)
     {
         m_shadowDebugSnapshot.enabled = m_realtimeShadowSettings.enabled;
@@ -835,9 +850,14 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
     const std::array<glm::vec4, 4> atmosphereFog =
         (!shadowOnly && !m_scene.m_mode2D &&
             renderMode == Engine::Model::SceneRenderMode::Lit)
-        ? Engine::Rendering::ViewLighting::PackAtmosphereFog(
-            m_scene.settings.atmosphereFog, terrainSunDirection, terrainSunRadiance,
-            terrainSunIndex >= 0)
+        ? (m_physicalAtmosphereReady && m_scene.settings.physicalSky.aerialPerspective
+            // Physical sky: its aerial perspective replaces the height fog.
+            ? Engine::Rendering::ViewLighting::PackPhysicalAerialPerspective(
+                m_scene.settings.physicalSky, m_scene.settings.atmosphereFog,
+                m_physicalToSun, m_physicalSunIlluminance, m_physicalMultipleScattering)
+            : Engine::Rendering::ViewLighting::PackAtmosphereFog(
+                m_scene.settings.atmosphereFog, terrainSunDirection, terrainSunRadiance,
+                terrainSunIndex >= 0))
         : std::array<glm::vec4, 4>{};
     if (!shadowOnly) m_viewAtmosphereFog = atmosphereFog;
     // Draws are prepared exactly as in Lit mode so the measured CPU cost and
@@ -946,6 +966,12 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
                 }
             }
         }
+    // Clouds march in a compute pass before the sky pass composites them.
+    Engine::Rendering::SceneRendererLighting::MarchVolumetricClouds(
+        *this, context, view, proj, viewportWidth, viewportHeight, shadowOnly,
+        cameraPosition,
+        terrainSunIndex >= 0 ? terrainSunDirection : glm::vec3(0.f),
+        terrainSunIndex >= 0 ? terrainSunRadiance : glm::vec3(0.f));
     Engine::Rendering::SceneRendererLighting::PrepareSkyboxAndEnvironment(
         *this,
         context,
@@ -2230,6 +2256,9 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
             ? m_clusterHeaderBuffer.get() : m_emptyMorphDeltaBuffer.get());
         context->SetStructuredBuffer(15, clusteredLightingEnabled
             ? m_clusterLightIndexBuffer.get() : m_emptyMorphWeightBuffer.get());
+        // Last frame's screen-space AO (or an invalid placeholder).
+        context->SetStructuredBuffer(47,
+            Engine::Rendering::SceneRendererLighting::AmbientOcclusionBuffer(*this));
     }
 
     const auto isSpatialManipulatorCarrierDraw = [&](const PreparedDraw& draw)
@@ -3129,6 +3158,10 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
         context->EndGpuTiming(*activeGpuStage);
         activeGpuStage.reset();
     }
+    // The main view's depth is complete: ambient occlusion for next frame.
+    if (!shadowOnly)
+        Engine::Rendering::SceneRendererLighting::ComputeAmbientOcclusion(
+            *this, context, view, proj, viewportWidth, viewportHeight);
 
     ScenePortalRenderingContext portalRendering{
         *this, context, preparedDraws, automaticGroups, cam, view, proj,

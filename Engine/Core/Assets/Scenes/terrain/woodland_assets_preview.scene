@@ -1,0 +1,270 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Scene xmlns:components="urn:engine-components" version="1">
+  <settings textureLodEnabled="false" textureLodNearDistance="12" textureLodFarDistance="48" textureLodMipBias="4" textureLodSimplifyShading="false" dimension="0" showGrid="false" gridHalfSize="10" gridCellSize="1" gridOpacity="0.40000000596046448" gridFadeDistance="80" skyboxEnabled="true" skyboxTexture="Assets/Textures/Skyboxes/editor-default-sky.png" hdriLightingEnabled="true" hdriIntensity=".55" hdriExposure="0" hdriRotation="0" toneMapping="1" outputExposure="-.4" bloomEnabled="true" bloomIntensity=".04" colorGradingEnabled="true" sunDiscEnabled="true" sunDiscAngularDiameter=".8" sunDiscIntensity="40" sunGlowIntensity=".35" renderMode="0" sceneViewUiOverlay="false" portalDebugVisuals="false" sceneCameraWarpLookThrough="false" portalDebugWireframe="false" portalDebugTintRemoteView="true" portalDebugOverlayAlpha="0.44999998807907104" portalRecursionDepth="2" portalConnectionRepeatLimit="2" portalMaxViewsPerFrame="24">
+    <gridColor _arrayEncoding="spaceSeparatedNumbers">0.44999998807907104 0.44999998807907104 0.44999998807907104</gridColor>
+    <gridOriginColor _arrayEncoding="spaceSeparatedNumbers">0.30000001192092896 0.5 0.80000001192092896</gridOriginColor>
+    <ambientColor>
+      <item>0.1</item>
+      <item>0.13</item>
+      <item>0.15</item>
+    </ambientColor>
+    <atmosphereFog enabled="true" density="0.0002" heightFalloff="0.004" baseHeight="0" startDistance="0" maxOpacity="1" inscatterIntensity="1" sunGlowStrength="0.25" sunGlowAnisotropy="0.7" skyDistance="30000" />
+    <physicalSky enabled="true" groundHeight="-40" rayleighScale="1" mieScale="4" mieScaleHeight="1200" mieAnisotropy="0.8" ozoneScale="1" skyIntensity="1" attenuateSun="true" aerialPerspective="true" />
+    <autoExposure enabled="true" minEv="-8" maxEv="4" speedUp="3" speedDown="1" lowPercent="0.5" highPercent="0.95" />
+    <ambientOcclusion enabled="true" radius="1.5" intensity="1" temporalBlend="0.15" />
+    <volumetricClouds enabled="true" coverage="0.45" density="0.03" baseHeight="2600" thickness="1400" shapeScale="2400" detail="0.45" windSpeed="6" windDirection="30" ambientIntensity="0.8" sunIntensity="1" steps="48" maxDistance="30000" />
+  </settings>
+  <objects>
+    <item name="Camera" enabled="true">
+      <components>
+        <components:Camera Camera.active="true" Camera.useTransformRotation="false" Camera.fov="60" Camera.near="0.1" Camera.far="5000" Camera.orthographic="false" Camera.orthographicSize="5">
+          <Camera.up _arrayEncoding="spaceSeparatedNumbers">0 1 0</Camera.up>
+          <Camera.target _arrayEncoding="spaceSeparatedNumbers">0 9 30</Camera.target>
+        </components:Camera>
+      </components>
+      <children />
+      <transform>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">0 4 -32</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+      </transform>
+    </item>
+    <item name="Late afternoon sun" enabled="true">
+      <components>
+        <components:Light Light.lightType="1" Light.intensity="3.2" Light.range="8" Light.falloff="2" Light.intensityMode="0" Light.innerConeAngle="25" Light.outerConeAngle="35" Light.lightingChannels="-1" Light.cookieTexture="" Light.iesProfileTexture="" Light.cookieScale="1" Light.baked="false" Light.castsShadows="true" Light.shadowStrength="1" Light.shadowDepthBias="0.00050000002374872565" Light.shadowNormalBias="0.06" Light.shadowResolutionScale="1" Light.shadowFilterScale="1">
+          <Light.color>
+            <item>1</item>
+            <item>0.91</item>
+            <item>0.77</item>
+          </Light.color>
+        </components:Light>
+      </components>
+      <children />
+      <transform>
+        <Transform.position>
+          <item>0</item>
+          <item>20</item>
+          <item>-10</item>
+        </Transform.position>
+        <Transform.rotation>
+          <item>0.7</item>
+          <item>2.4</item>
+          <item>0</item>
+        </Transform.rotation>
+        <Transform.scale>
+          <item>1</item>
+          <item>1</item>
+          <item>1</item>
+        </Transform.scale>
+      </transform>
+    </item>
+    <item name="Ground" enabled="true">
+      <components>
+        <components:Mesh Mesh.file="Assets/Mesh/cube.obj" Mesh.useLightProbes="false" />
+        <components:Material Material.materialAsset="Engine/Core/Assets/Models/Woodland/Boulders/Materials/Boulder_Rock.material" />
+      </components>
+      <children />
+      <transform>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">0 -0.5 400</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">3000 1 2000</Transform.scale>
+      </transform>
+    </item>
+    <item prefab="Assets/Prefabs/Woodland/Conifers/Spruce_tall_01.prefab" enabled="true">
+      <transform>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">-21 0 26</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+      </transform>
+    </item>
+    <item prefab="Assets/Prefabs/Woodland/Conifers/Spruce_young_01.prefab" enabled="true">
+      <transform>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">-7 0 26</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 1.3 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+      </transform>
+    </item>
+    <item prefab="Assets/Prefabs/Woodland/Conifers/Pine_scots_01.prefab" enabled="true">
+      <transform>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">7 0 26</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 2.6 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+      </transform>
+    </item>
+    <item prefab="Assets/Prefabs/Woodland/Conifers/Fir_subalpine_01.prefab" enabled="true">
+      <transform>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">21 0 26</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 3.9 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+      </transform>
+    </item>
+    <item prefab="Assets/Prefabs/Woodland/Boulders/Boulder_01.prefab" enabled="true">
+      <transform>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">-15 0 4</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+      </transform>
+    </item>
+    <item prefab="Assets/Prefabs/Woodland/Boulders/Boulder_02.prefab" enabled="true">
+      <transform>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">-6 0 4</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0.8 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+      </transform>
+    </item>
+    <item prefab="Assets/Prefabs/Woodland/Boulders/Boulder_03.prefab" enabled="true">
+      <transform>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">3 0 4</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 1.6 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+      </transform>
+    </item>
+    <item prefab="Assets/Prefabs/Woodland/Boulders/Boulder_flat_01.prefab" enabled="true">
+      <transform>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">12 0 4</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 2.4 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+      </transform>
+    </item>
+    <item prefab="Assets/Prefabs/Woodland/Boulders/Cliff_block_01.prefab" enabled="true">
+      <transform>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">-34 0 40</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+      </transform>
+    </item>
+    <item prefab="Assets/Prefabs/Woodland/Boulders/Cliff_block_02.prefab" enabled="true">
+      <transform>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">34 0 50</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 1 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+      </transform>
+    </item>
+    <item prefab="Assets/Prefabs/Woodland/Conifers/Spruce_tall_01.prefab" enabled="true">
+      <transform>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">-120 0 420</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+      </transform>
+    </item>
+    <item prefab="Assets/Prefabs/Woodland/Conifers/Pine_scots_01.prefab" enabled="true">
+      <transform>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">-98 0 445</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 1 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+      </transform>
+    </item>
+    <item prefab="Assets/Prefabs/Woodland/Conifers/Fir_subalpine_01.prefab" enabled="true">
+      <transform>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">-76 0 470</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 2 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+      </transform>
+    </item>
+    <item prefab="Assets/Prefabs/Woodland/Conifers/Spruce_young_01.prefab" enabled="true">
+      <transform>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">-54 0 420</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 3 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+      </transform>
+    </item>
+    <item prefab="Assets/Prefabs/Woodland/Conifers/Spruce_tall_01.prefab" enabled="true">
+      <transform>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">-32 0 445</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 4 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+      </transform>
+    </item>
+    <item prefab="Assets/Prefabs/Woodland/Conifers/Pine_scots_01.prefab" enabled="true">
+      <transform>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">-10 0 470</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 5 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+      </transform>
+    </item>
+    <item prefab="Assets/Prefabs/Woodland/Conifers/Fir_subalpine_01.prefab" enabled="true">
+      <transform>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">12 0 420</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 6 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+      </transform>
+    </item>
+    <item prefab="Assets/Prefabs/Woodland/Conifers/Spruce_young_01.prefab" enabled="true">
+      <transform>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">34 0 445</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 7 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+      </transform>
+    </item>
+    <item prefab="Assets/Prefabs/Woodland/Conifers/Spruce_tall_01.prefab" enabled="true">
+      <transform>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">56 0 470</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 8 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+      </transform>
+    </item>
+    <item prefab="Assets/Prefabs/Woodland/Conifers/Pine_scots_01.prefab" enabled="true">
+      <transform>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">78 0 420</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 9 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+      </transform>
+    </item>
+    <item prefab="Assets/Prefabs/Woodland/Conifers/Fir_subalpine_01.prefab" enabled="true">
+      <transform>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">100 0 445</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 10 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+      </transform>
+    </item>
+    <item prefab="Assets/Prefabs/Woodland/Conifers/Spruce_young_01.prefab" enabled="true">
+      <transform>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">122 0 470</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 11 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+      </transform>
+    </item>
+    <item prefab="Assets/Prefabs/Woodland/Clusters/ForestCluster_Oak_01.prefab" enabled="true">
+      <transform>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">-150 0 900</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+      </transform>
+    </item>
+    <item prefab="Assets/Prefabs/Woodland/Clusters/ForestCluster_Conifer_01.prefab" enabled="true">
+      <transform>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">-50 0 900</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0.7 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+      </transform>
+    </item>
+    <item prefab="Assets/Prefabs/Woodland/Clusters/ForestCluster_Oak_02.prefab" enabled="true">
+      <transform>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">50 0 900</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 1.4 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+      </transform>
+    </item>
+    <item prefab="Assets/Prefabs/Woodland/Clusters/ForestCluster_Conifer_02.prefab" enabled="true">
+      <transform>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">150 0 900</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 2.1 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+      </transform>
+    </item>
+    <item prefab="Assets/Prefabs/Woodland/Atmosphere/MistCard.prefab" enabled="true">
+      <transform>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">10 0 70</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+      </transform>
+    </item>
+    <item prefab="Assets/Prefabs/Woodland/Atmosphere/ValleyMist.prefab" enabled="true">
+      <transform>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">0 2 120</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+      </transform>
+    </item>
+  </objects>
+</Scene>

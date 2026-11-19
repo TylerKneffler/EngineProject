@@ -159,8 +159,7 @@ void DX11GameRenderer::CreateTargets()
     depth.SampleDesc.Count = m_msaaSamples;
     depth.Usage = D3D11_USAGE_DEFAULT;
     depth.BindFlags = D3D11_BIND_DEPTH_STENCIL;
-    ThrowIfFailed(m_device->CreateTexture2D(&depth, nullptr, &m_depthTexture));
-    ThrowIfFailed(m_device->CreateDepthStencilView(m_depthTexture.Get(), nullptr, &m_dsv));
+    ThrowIfFailed(CreateSceneDepth(depth));
     m_postProcess.Create(m_device.Get(), m_width, m_height, m_msaaSamples,
         m_hdrBits);
 }
@@ -169,7 +168,7 @@ void DX11GameRenderer::Resize(uint32_t width, uint32_t height)
 {
     if (!m_swapChain || width == 0 || height == 0 || (width == m_width && height == m_height)) return;
     m_context->OMSetRenderTargets(0, nullptr, nullptr);
-    m_dsv.Reset(); m_depthTexture.Reset(); m_rtv.Reset();
+    m_dsv.Reset(); m_depthSrv.Reset(); m_depthTexture.Reset(); m_rtv.Reset();
     ThrowIfFailed(m_swapChain->ResizeBuffers(0, width, height,
         DXGI_FORMAT_UNKNOWN, m_swapChainFlags));
     m_width = width; m_height = height;
@@ -180,7 +179,12 @@ void DX11GameRenderer::BeginFrame()
 {
     ++m_frameNumber;
     if (m_graphicsProvider)
+    {
         m_graphicsProvider->GetContextFactory()->PrepareFrame(0);
+        if (auto* native = dynamic_cast<D3D11GraphicsContextFactory*>(
+                m_graphicsProvider->GetContextFactory()))
+            native->SetSceneDepth(m_depthSrv.Get());
+    }
     m_postProcess.BindScene(m_context.Get(), m_dsv.Get(), m_clearColor);
     D3D11_VIEWPORT viewport{ 0.0f, 0.0f, static_cast<float>(m_width), static_cast<float>(m_height), 0.0f, 1.0f };
     m_context->RSSetViewports(1, &viewport);
@@ -344,14 +348,13 @@ bool DX11GameRenderer::EnableOffscreenExport(uint32_t outputWidth,
             m_msaaSamples = 1u;
             return false;
         }
-        m_dsv.Reset(); m_depthTexture.Reset();
+        m_dsv.Reset(); m_depthSrv.Reset(); m_depthTexture.Reset();
         D3D11_TEXTURE2D_DESC depth{};
         depth.Width = m_width; depth.Height = m_height; depth.MipLevels = 1;
         depth.ArraySize = 1; depth.Format = DXGI_FORMAT_D32_FLOAT_S8X24_UINT;
         depth.SampleDesc.Count = m_msaaSamples; depth.Usage = D3D11_USAGE_DEFAULT;
         depth.BindFlags = D3D11_BIND_DEPTH_STENCIL;
-        if (FAILED(m_device->CreateTexture2D(&depth, nullptr, &m_depthTexture)) ||
-            FAILED(m_device->CreateDepthStencilView(m_depthTexture.Get(), nullptr, &m_dsv)))
+        if (FAILED(CreateSceneDepth(depth)))
             return false;
     }
     m_postProcess.Create(m_device.Get(), m_width, m_height, m_msaaSamples,
@@ -606,7 +609,8 @@ bool DX11GameRenderer::CaptureFrameRGBA(std::vector<uint8_t>& pixels)
     return true;
 }
 
-bool DX11GameRenderer::ReadSceneCaptureRGBA(std::vector<uint8_t>& pixels)
+bool DX11GameRenderer::ReadSceneCaptureRGBA(std::vector<uint8_t>& pixels,
+    uint32_t& width, uint32_t& height)
 {
     if(!m_sceneCaptureReady || !m_sceneCaptureStaging) return false;
     D3D11_MAPPED_SUBRESOURCE mapped{};
@@ -620,7 +624,35 @@ bool DX11GameRenderer::ReadSceneCaptureRGBA(std::vector<uint8_t>& pixels)
     for(unsigned row=0;row<description.Height;++row)
         std::memcpy(pixels.data()+row*rowBytes,source+row*mapped.RowPitch,rowBytes);
     m_context->Unmap(m_sceneCaptureStaging.Get(),0);
+    width=description.Width;
+    height=description.Height;
     return true;
+}
+
+HRESULT DX11GameRenderer::CreateSceneDepth(D3D11_TEXTURE2D_DESC desc)
+{
+    m_depthSrv.Reset();
+    // Single-sample depth is typeless so compute (screen-space ambient
+    // occlusion) can read it; multisampled depth stays plain.
+    const bool readable = desc.SampleDesc.Count == 1u;
+    if (readable)
+    {
+        desc.Format = DXGI_FORMAT_R32G8X24_TYPELESS;
+        desc.BindFlags |= D3D11_BIND_SHADER_RESOURCE;
+    }
+    HRESULT result = m_device->CreateTexture2D(&desc, nullptr, &m_depthTexture);
+    if (FAILED(result)) return result;
+    D3D11_DEPTH_STENCIL_VIEW_DESC view{};
+    view.Format = DXGI_FORMAT_D32_FLOAT_S8X24_UINT;
+    view.ViewDimension = desc.SampleDesc.Count > 1u
+        ? D3D11_DSV_DIMENSION_TEXTURE2DMS : D3D11_DSV_DIMENSION_TEXTURE2D;
+    result = m_device->CreateDepthStencilView(m_depthTexture.Get(), &view, &m_dsv);
+    if (FAILED(result) || !readable) return result;
+    D3D11_SHADER_RESOURCE_VIEW_DESC shaderView{};
+    shaderView.Format = DXGI_FORMAT_R32_FLOAT_X8X24_TYPELESS;
+    shaderView.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+    shaderView.Texture2D.MipLevels = 1;
+    return m_device->CreateShaderResourceView(m_depthTexture.Get(), &shaderView, &m_depthSrv);
 }
 
 std::unique_ptr<Engine::Graphics::IGraphicsContext> DX11GameRenderer::CreateFrameGraphicsContext()

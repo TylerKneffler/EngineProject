@@ -74,6 +74,17 @@ public:
         const glm::vec3& sunRadiance,
         bool hasSun);
 
+    // Physical aerial perspective for AtmosphereFog.hlsli (same fog0..fog3
+    // slots; fog0.w >= 100 selects it). sunIlluminance is the sun reaching
+    // the camera (after the atmosphere); multipleScattering is Psi_ms times
+    // the sun illuminance. Light shafts use the height-fog shaft settings.
+    static std::array<glm::vec4, 4> PackPhysicalAerialPerspective(
+        const Engine::Model::PhysicalSkySettings& sky,
+        const Engine::Model::AtmosphereFogSettings& shafts,
+        const glm::vec3& toSun,
+        const glm::vec3& sunIlluminance,
+        const glm::vec3& multipleScattering);
+
     // Skybox.hlsl constants. 128 bytes: the Vulkan push-constant limit.
     // The world view ray is affine in NDC, so rayX * ndc.x + rayY * ndc.y +
     // rayOrigin replaces the inverse view-projection; the w components carry
@@ -91,8 +102,29 @@ public:
     };
     static_assert(sizeof(SkyboxConstants) == 128);
 
+    // Clouds.hlsl constants (128 bytes). The ray basis is the same as the
+    // sky's; see the shader for the packing of the w components.
+    struct CloudConstants
+    {
+        glm::vec4 rayX{0.f};         // w: time (s)
+        glm::vec4 rayY{0.f};         // w: base height
+        glm::vec4 rayOrigin{0.f};    // w: top height
+        glm::vec4 camera{0.f};       // world position, w: coverage
+        glm::vec4 sunDirection{0.f}; // toward the sun, w: extinction per metre
+        glm::vec4 sunRadiance{0.f};  // rgb, w: max distance
+        glm::vec4 ambient{0.f};      // sky light rgb, w: shape scale (m)
+        glm::vec4 shape{0.f};        // x/z wind offset (m), y: detail, w: steps
+    };
+    static_assert(sizeof(CloudConstants) == 128);
+
     // Sets the ray basis (xyz only) for a direction-only view (no translation).
     static void SetSkyboxRays(SkyboxConstants& constants, const glm::mat4& proj,
         const glm::mat4& directionOnlyView);
+    // Sky fog terms (ray-basis w, fogInscatter, fogSunGlow) for a camera at
+    // cameraHeight, from PackAtmosphereFog's output. Leaves the constants
+    // unfogged when the packed fog is off or skyDistance <= 0.
+    static void SetSkyboxFog(SkyboxConstants& constants,
+        const std::array<glm::vec4, 4>& atmosphereFog, float skyDistance,
+        float cameraHeight);
 };
 }

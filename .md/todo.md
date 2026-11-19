@@ -24,9 +24,20 @@ Order is by dependency and visual payoff, not by section number in older notes.
   `SampleGrad` with wrap-aware u derivatives (checked on DX12, DX11, Vulkan)
 - [x] Black sky after the 2026-11-17 architecture merge: the D3D `SkyboxCB` kept `float4x4 invVP` ahead of the new
   ray-basis fields while C++ `SkyboxConstants` dropped it, so every sky/fog/sun constant read 64 bytes off. Removed
-- [ ] DX11 vista differs from DX12/Vulkan: weaker sun glow, sparser far forest; not investigated
-- [ ] The vista pose predates the 24 km regeneration: eye at 123 m is now low in the valley rather than on a peak.
-  Re-pick it from the editor (Viewpoints > Set "Vista" from Scene View) and copy it into `VISTA_EYE`/`VISTA_TARGET`
+- [x] DX11 vista differed from DX12/Vulkan (weaker sun glow, sparser far forest): not a rendering difference.
+  DX11 captured the composed back buffer, DX12/Vulkan the HDR scene color before post-processing with a plain
+  2.2 gamma, so their captures had no bloom, tone mapping or grading. DX12 now copies the back buffer after
+  compose, Vulkan the swap-chain image after composition (swap chain gets `TRANSFER_SRC` usage; BGRA swizzled).
+  Second cause: benchmark runs passed the host's real input to the game, so a capture window that ended up in
+  the foreground let the user's mouse turn the camera during warmup (runs of one viewpoint diverged; Vulkan was
+  off by ~40 degrees once). Benchmarks now get an unfocused, key-less snapshot; only synthetic input drives them.
+  Vista now: DX12 == DX11 pixel for pixel, Vulkan differs on 0.22% of pixels, all three at the exact viewpoint.
+  Captures taken before 2026-11-18 on DX12/Vulkan show pre-post-processing images
+- [x] Vista pose re-picked for the 24 km map: eye (2304, 463, -3072) on a 410 m foothill at the valley's south-east
+  rim, target (283, 254, -865): across the valley and a lake at the backlit north-west ranges, dark canopy in the
+  foreground. Chosen from candidates found by searching the far grid for rim peaks with a deep drop toward the
+  sun's azimuth and high ranges behind (A2 at (2688, 972, -4352) is a wider, flatter alternative). Set in
+  `VISTA_EYE`/`VISTA_TARGET` and the scene's "Vista" camera. Numbers above this line used the old pose
 - [x] Depth precision: forward Z with D32F and near 0.06 gave ~25 m depth steps at 5 km and ~100 m at 10 km. Every
   depth buffer (camera, portal views, shadow atlases) is now reverse-Z; `Graphics/DepthConvention.h` holds the
   convention (clear 0, `CompareNearer` = GREATER as the builder default, `CompareNearerOrEqual`). Projections are
@@ -90,7 +101,8 @@ ENGINE_ATMOSPHERE_FOG=0|1 build/RelWithDebInfo/GameBackendCapture.exe --backend 
   --viewpoint Vista --out .local/vista/<name>
 ```
 
-(`--viewpoint Vista` is the same pose as the older `--camera-position 1272,123,-12 --camera-target -893,28,1238`.)
+(`--viewpoint Vista` was `--camera-position 1272,123,-12 --camera-target -893,28,1238` until 2026-11-18; it is now
+`--camera-position 2304,463,-3072 --camera-target 283,254,-865`, so the tables below are from the old pose.)
 
 Baseline 2026-11-16 (medians, ms):
 
@@ -227,22 +239,41 @@ record 5.9 (camera 4.5, shadow 1.1); GPU opaque 5.4.
   - [ ] Animate the dither and resolve it once a temporal pass exists; 4-6 samples may then suffice
   - [ ] Not yet seen as distinct shafts: needs a low sun behind trees/ridges with moderate fog. Judge with the step 0
     shot when tuning defaults (below)
-- [ ] `GameBackendCapture` on the landscape with `--backend dx12` fails "renderer did not return the requested scene
-  capture" (fog on or off; Vulkan and the default scene work). Captures render at 1520x873 for a 1920x1080 window;
-  `DX12GameRenderer::ReadSceneCaptureRGBA` assumes the window size. Suspect render scale
+- [x] `GameBackendCapture` with `--backend dx12` failed "renderer did not return the requested scene capture" when
+  the window came out at 1520x873 instead of 1920x1080. Two bugs: (1) startup placement centred the benchmark
+  window on the splash's monitor and shrank it to that monitor's work area (smaller or DPI-scaled monitor);
+  benchmarks now skip `StartupSplash::PlaceWindow`. (2) DX12 mapped `rowPitch * height` of the readback, but the
+  copy's last row is not pitch-padded, so widths not a multiple of 32 px (64 px for the RGBA8 back buffer copied now) overran the buffer and `Map` failed; it
+  maps the footprint size now. `IGameRenderer::ReadSceneCaptureRGBA` returns the size actually captured (DX12 and
+  Vulkan read the window size; Vulkan also recreates its readback buffer after a resize), and the benchmark writes
+  the image at that size and says when it differs from the request. Checked DX12 at 1520x873 and 1920x1080, and an
+  oversized 3840x2400 request (Windows caps the window at 2564 px wide here) on DX12/Vulkan/DX11. The capture tool's
+  default scene (`oak_meadow.scene`, removed) is now `terrain/landscape_demo.scene`
 - [x] Fog particles (CPU, GPU, fluid surface) and MMD outlines. Particles read a per-pass `particleFog` buffer
   (t7 / Vulkan binding 8: camera position + fog0..3, since particle constants already fill the 128-byte push
   constant); alpha particles blend to the in-scatter, additive ones fade by transmittance
   (`AtmosphereFogTransmittance`); the fluid surface fogs at its density-weighted particle center. Checked on DX12,
   DX11, Vulkan with a dense-fog copy of particle_showcase; fluid river runs on DX12/Vulkan. MMD outline fog
   compiles but was not seen in a capture
-- [ ] Fog the skybox seen through portals (portal object draws already fog)
-- [ ] Tune defaults against the step 0 test shot after step 2 sets world scale
+- [x] Fog the skybox seen through portals: `ViewLighting::SetSkyboxFog` now sets the sky fog terms for the main sky
+  and portal skies alike (portal skies use the connected view's eye height). With fog forced on in
+  portal_traversal_demo the sky inside the aperture matches the main sky exactly (213, 219, 226)
+- [x] Tune defaults against the step 0 test shot: on the new vista the defaults (density 2e-4 at height 0, falloff
+  0.004 = 250 m scale height, sky distance 30 km) give the layered look: haze pools on the far valley floor and
+  around the ridge bases while the peaks and the foreground stay crisp. Thinner, deeper fog (8e-5..1.2e-4 with
+  830..500 m scale heights) washed the whole range to one flat tone. The landscape scene never enabled fog; it
+  does now, with those values written out (the generator carries `<settings>` over)
 
 ### 2. Terrain scale + erosion (Tools/build_landscape_demo.py)
 - [x] Grow world to 16–32 km with 800–2000 m relief (now 24.2 km, -56..1888 m; archive v3 stores its own scale, 1/16 m)
 - [x] Coarser spacing outside the play area (16 m samples, upsampled on read); 4 m within 3 km of the start
-- [ ] Verify far-terrain cache/LOD in-engine at 24 km: the far grid is one height per 128 m cell corner, which may facet the 2 km ridges on the horizon (a finer far grid would need engine work)
+- [x] Verify far-terrain cache/LOD in-engine at 24 km: confirmed faceted. Far tiles take vertices only at 128 m cell
+  corners (the archive is read just for seam cells), so distant peaks were a few flat-shaded triangles. The macro
+  color map now carries a 16 m world-space normal map (same grid and mapping, texture slot 2,
+  `terrainMacroParams.w`), and distant tiles are lit per pixel with it whenever a macro or long-range shadow map
+  is bound: the ranges shade with eroded ridges, gullies and spurs. Same on DX12/DX11/Vulkan
+- [ ] Far-terrain silhouettes are still the 128 m polygon outline (visible on peaks against the sky). A finer far
+  grid (e.g. 32 m from the archive's 16 m samples) needs sub-cell vertices in the far-tile mesher
 - [x] Hydraulic erosion pass (particle-based) before writing `world.heights`
 - [x] Export flow and deposition maps alongside heights (`world.flow`, `world.deposition`; format in the script docstring)
 - [ ] Editor tool: terrain generation window (size, relief, seed, erosion iterations) that regenerates and reloads the landscape
@@ -269,14 +300,47 @@ record 5.9 (camera 4.5, shadow 1.1); GPU opaque 5.4.
 - [ ] Macro colors use the materials' authored means while the near cells' distant blend uses measured layer-array
   means; at 0.85 brightness distant meadows read a little duller than textured near meadows. Tune, or feed the
   measured means into the composer
-- [ ] Forest-density map baked with the macro map (done: macro alpha = canopy cover, and the color already takes the
-  canopy tint); far terrain shades forested areas as canopy (canopy color/roughness + canopy normal/height noise so hills read as bumpy forest without instances)
-- [ ] Baked horizon / terrain-occlusion map for large-scale self-shadowing
-- [ ] Editor: paintable forest-density / macro-color overrides on the terrain component
+- [x] Forest-density map baked with the macro map (macro alpha = canopy cover; the color takes the canopy tint), and
+  distant tiles shade forest as a bumpy canopy: `ApplyDistantCanopy` (Object.hlsl) tilts the 16 m macro normal with
+  world-space crown/clump/stand noise (14/42/130 m) and darkens its hollows, each octave fading out once a pixel spans
+  half its period. TerrainManager "Distant canopy relief" (0..1, default 0.6, tooltip), packed as
+  `terrainMacroParams.w = 1 + relief`. Subtle in practice: the canopy albedo is very dark, and within
+  `farObjectRadius` (8 km) the far tree impostors cover it; with impostors off it changes 2.7% of the vista's
+  pixels, all on the far forest. No specular on distant tiles, so no canopy roughness
 
 ### 4. Lighting + post
-- [ ] GTAO (half-res, temporally filtered) for contact darkening under trees and in valleys
-- [ ] Auto exposure (luminance histogram, eye adaptation) with editor min/max EV and speed
+- [x] GTAO (half-res, temporally filtered) for contact darkening under trees and in valleys:
+  `Shaders/AmbientOcclusion/AmbientOcclusion.hlsl` (compute) after the main view's draws
+  (`SceneRendererLighting::ComputeAmbientOcclusion`). New context call `CopySceneDepth` copies the scene depth into
+  a buffer (DX12 `CopyTextureRegion` of the depth plane; Vulkan `vkCmdCopyImageToBuffer` while the scene pass is
+  paused; DX11 a small compute copy from a now-typeless depth; recorded in command packets, gated by
+  `SupportsSceneDepthCopy`). GTAO per half-res pixel: view-space position/normal from depth, 2 slices x 2 sides x
+  6 steps (rotated per pixel and frame), cosine-weighted arc integration, then blended with last frame's AO
+  reprojected through the camera stored in the output's header (depth-checked). Applied next frame through a new
+  structured slot 47 (DX12 root SRV t47, Vulkan binding 48) to ambient + environment (diffuse and specular) only,
+  never sunlight: object surfaces, foliage cards, grass, fast terrain and per-pixel distant tiles
+  (`ScreenAmbientOcclusion` in Object.hlsl: reprojects, 4-tap depth-matched filter, 1 off screen / disoccluded).
+  Scene `ambientOcclusion` (`enabled`, `radius` 1.5 m, `intensity`, `temporalBlend` 0.15); editor block. Landscape
+  demo: on. No measurable frame cost on DX12 or Vulkan (vista and near view, 4090). Notes:
+  - fxc compiled `continue`/`break` inside the unrolled GTAO loops into a GPU hang (TDR); the loops are now
+    branch-free. One later DX12 run still froze GPU timings once and has not reproduced in 12 runs since; the
+    debug layer is clean. `ENGINE_GPU_DEBUG=1` now prints DX12 debug-layer errors/warnings to stderr
+  - Editor viewports (D3D11View / D3D12View / VulkanView) don't register their depth yet, so AO is game-view only
+  - Dense foliage shows some half-res blotchiness; a depth-aware spatial filter pass would smooth it
+  - Vulkan's AO GPU timer includes the barrier wait for the opaque pass to drain (reads ~1.3 ms; frame time
+    shows no cost)
+- [x] Auto exposure (luminance histogram, eye adaptation) with editor min/max EV and speed: three small passes
+  in each backend's post-process before compose (`Shaders/PostProcess/PostProcess.hlsl`
+  `ExposureLuminancePS` / `ExposureHistogramPS` / `ExposureAdaptPS`, shared plumbing in `Graphics/PostProcess.*`).
+  64x32 log-luminance map (centre-weighted metering) -> 64-bin histogram over -14..+10 EV -> 1x1 adapt pass that
+  trims the histogram to [lowPercent, highPercent], clamps to [minEv, maxEv] and eases from the previous frame
+  (two ping-pong RGBA32F targets, separate up/down speeds, snaps after resize or re-enable). Compose maps the
+  adapted average to mid grey; `outputExposure` stays as compensation. GPU-only, no readback. Lit views only.
+  Scene `autoExposure` (`enabled`, `minEv`, `maxEv`, `speedUp`, `speedDown`, `lowPercent`, `highPercent`);
+  editor block under Output Tone Mapping. Landscape demo: on, compensation -0.4 (vista meters at -2.7 EV, about
+  where the fixed exposure was). DX11/DX12/Vulkan meter identically. Note: fxc mis-compiled a nested,
+  partially unrolled histogram loop (DX counted ~1/10 of the map); it's one flat `[loop]` now. Not separately
+  GPU-timed (64 + 1 pixels reading a 16 KB map)
 - [x] Long-range shadow: terrain sun-visibility map ray-marched over the far height grid on a worker thread when the sun moves (`TerrainManagerSunShadow.cpp`); near terrain multiplies it into the cascade shadow, distant tiles are lit per pixel with it. TerrainManager `longRangeShadows`, `longRangeShadowSoftness`
 - [ ] Long-range shadow for non-terrain objects (far trees/impostors stay sunlit inside a ridge shadow; needs a global texture slot on all three backends)
 - [x] Bloom: half-res 13-tap downsample / tent upsample mip chain in each backend's compose pass (`Shaders/PostProcess/PostProcess.hlsl`, shared by DX11/DX12/Vulkan). Scene `bloomEnabled`, `bloomIntensity`
@@ -285,19 +349,113 @@ record 5.9 (camera 4.5, shadow 1.1); GPU opaque 5.4.
 - [x] Sun disc / glare: limb-darkened disc + Henyey-Greenstein glow in `Skybox.hlsl` toward the brightest directional light; bloom provides the glare. Scene `sunDisc*`, `sunGlowIntensity`
 
 ### 5. Sky computed from the sun
-- [ ] Hillaire-2020-style sky (transmittance LUT, sky-view LUT, aerial-perspective froxel volume); keep the HDRI skybox path as a toggle
-- [ ] Derive sun light color and ambient SH from the same atmosphere model
-- [ ] Replace step 1's analytic fog with the aerial-perspective volume behind the same shader include
-- [ ] Cloud layer (panorama/cards to start) and valley mist sprites
+- [x] Hillaire-2020-style sky: `Rendering/Atmosphere/PhysicalAtmosphere.*` (Rayleigh/Mie/ozone media, Bruneton
+  transmittance LUT 256x64, Hillaire multiple-scattering LUT 32x32, planet geometry in double) and
+  `PhysicalSky.*`, which renders the sky on a worker into a 512x256 RGBA32F world-space panorama (with mips)
+  whenever the sun moves >0.2°, its illuminance >1%, the camera altitude >100 m or the parameters change.
+  The panorama replaces the sky-view LUT: it feeds the existing skybox draw and EnvironmentMap unchanged, so
+  sky, reflections and ambient all come from one image. CPU-side because the generic graphics context has no
+  offscreen color targets; the GPU only samples. Scene `physicalSky` (`enabled` is the HDRI toggle; HDRI is
+  used until the first panorama is ready), `groundHeight`, `rayleighScale`, `mieScale` (haze), `mieScaleHeight`,
+  `mieAnisotropy`, `ozoneScale`, `groundAlbedo`, `skyIntensity`; editor "Physical Sky" block. The skybox's
+  analytic sun glow is off over the physical panorama (the aureole is in it); the sun disc stays.
+  Landscape demo: enabled, `mieScale` 4. Tests: `.local/tests/PhysicalAtmosphereTests.cpp`
+- [x] Derive sun light color and ambient SH from the same atmosphere model: the strongest directional light is
+  multiplied by the transmittance toward the sun at the camera altitude (`attenuateSun`), and the environment
+  map / SH are prefiltered from the physical panorama on the same worker
+  (`SceneRendererLighting::ApplyPhysicalAtmosphere`)
+  - Found while doing this: the split-sum BRDF LUT had lost its `/ sampleCount` in the 11-09 refactor
+    (`RenderUtilities.h` `BrdfIntegration::Integrate`), making specular IBL ~256x too bright. It went unseen
+    because PNG HDRI skyboxes drop their CPU pixels after upload, so `EnvironmentMap::Acquire` returns null and
+    those scenes get no environment lighting at all (still true for the HDRI path; separate issue). Fixed, with
+    a LUT range check in PhysicalAtmosphereTests
+- [x] Replace step 1's analytic fog with the aerial-perspective volume behind the same shader include:
+  `AtmosphereFog.hlsli` has a physical mode (fog0.w >= 100, packed by `ViewLighting::PackPhysicalAerialPerspective`)
+  used by objects, particles and outlines with no call-site changes; light shafts keep working
+  (`aerialPerspective` toggle, height fog otherwise). Deviation: it's analytic, not a froxel volume:
+  per-channel Rayleigh + Mie extinction with their own exponential height profiles integrated along the
+  ray, sun single scattering (Rayleigh + HG phases, sun illuminance at the camera) and Hillaire's
+  multiple-scattering term, combined as color*T + S*(1-T)/tau. Exact for the lower atmosphere at
+  terrain distances. A froxel volume needs 3D textures and a global texture slot, which the generic graphics
+  context doesn't have yet
+  - [ ] Froxel aerial-perspective volume (32x32x32, compute) once 3D textures exist; would add cloud/terrain
+    shadowing of the in-scatter beyond the current shaft march
+- [x] Volumetric clouds: `Shaders/Clouds/Clouds.hlsl`, a fullscreen pass blended (premultiplied) over the sky right
+  after it, so terrain and objects drawn later occlude it. Flat layer (base 2600 m, 1400 m thick, above the
+  1.9 km peaks), ray-marched per pixel (48 steps, jittered): 3D value-noise FBM shaped by a 2D weather/coverage
+  noise, cumulus profile (flat bases, threshold rising with height for domed tops), Worley billows and value-noise
+  edge erosion; 5-step light march toward the sun (Beer-Lambert with a multiple-scattering floor), two-lobe
+  Henyey-Greenstein phase, sky light brighter toward the tops; fades out toward max distance into the hazed sky.
+  Wind drifts the field. `SceneSettings::volumetricClouds` (coverage, density, base, thickness, shape scale, edge
+  detail, wind speed/direction, sky light colour/intensity, sun intensity, steps, max distance), serialized, in
+  scene Properties > Atmosphere with tooltips, read every frame (live in the editor). Constants: 128 bytes in an
+  extra slot of the sky constant ring (`SceneRenderer::kCloudConstantSlot`), Vulkan SPIR-V built by CMake.
+  Enabled in landscape_demo. Sky pass (sky + clouds) 1.0-1.3 ms GPU on the vista, same on DX12/DX11/Vulkan
+  - [ ] Cloud shadows on terrain and objects (project the coverage/density toward the sun into the sun light)
+  - [x] Half-resolution march: `Clouds.hlsl` `CSMain` ray-marches one thread per half-res pixel into a structured
+    buffer (`SceneRenderer::m_cloudSamples`, retired on resize) in a compute pass before the sky
+    (`SceneRendererLighting::MarchVolumetricClouds`); `PSMain` upsamples it bilinearly (graphics slot 6, the lights
+    are rebound after). The grid size and step count are bit-packed into `shape.w` to stay within 128 bytes of
+    constants. New GPU stage `Clouds` (`gpu_clouds_ms`). Vista cost 1.33 ms -> 0.61 ms on DX12 (march 0.58 +
+    sky/composite 0.03), DX11 0.46, Vulkan 0.82; image nearly identical (edges marginally softer). Vulkan's
+    `StorageBarrier` now also covers fragment-shader reads (it only covered compute/vertex/indirect)
+  - [ ] Temporal reprojection (march a quarter of the pixels per frame) if the march needs to get cheaper still
+  - [ ] Clouds in portal views and fog/aerial perspective between camera and cloud
 
 ### 6. Generated landscape assets (Python, same conventions as Tools/generate_meadow_accents.py)
-- [ ] Conifer generator (`Tools/generate_conifers.py`): trunk + layered branch whorls with needle cards; ~4 species/size variants; LOD chain; mid/far quality
-- [ ] Boulder / cliff generator: noise-displaced, faceted meshes, ground pivot, LODs, triplanar rock material
-- [ ] Far-forest clusters / impostor cards baked from conifer + oak meshes; hook into TerrainManagerFarObjects
-- [ ] Check alpha-to-coverage / coverage-preserving alpha mips so distant canopies do not thin out or shimmer
-- [ ] Cloud and valley-mist sprite textures (noise-based) + soft particle/card prefabs
-- [ ] Prefabs for all of the above under `Assets/Prefabs/Woodland/`, placeable by TerrainObjectLayer
-- [ ] Editor: run generators from an editor tool and refresh the asset browser
+- [x] Conifer generator (`Tools/generate_conifers.py`): trunk + layered branch whorls with needle cards; ~4 species/size variants; LOD chain; mid/far quality
+  Spruce_tall_01 (24 m), Spruce_young_01, Pine_scots_01, Fir_subalpine_01 under `Prefabs/Woodland/Conifers`. LOD0 sprays
+  (3-14k tris) / LOD1 fewer larger sprays with card coverage matched to LOD0 (side coverage within ~5-20%) / LOD2
+  whorl stars / view-baked impostor (6 views + top, 38 tris, `impostorBillboard`, same card layout as the oak pack).
+  Shared procedural needle atlas (spruce, fir, pine, clump cells) and bark; species colour is muted linear vertex colour
+  (inner/outer/tip, per-branch jitter). Instanced chain resolves to LOD0 -> LOD1 -> impostor. Shared helpers:
+  `tools/woodland_assets.py` (native .mesh writer, numpy rasterizer/impostor baker, PNG I/O, prefab/material writers)
+- [x] Boulder / cliff generator: noise-displaced, faceted meshes, ground pivot, LODs, triplanar rock material
+  `tools/generate_boulders.py`: Boulder_01-03, Boulder_flat_01, Cliff_block_01/02 under `Prefabs/Woodland/Boulders`.
+  Superellipsoid cut by random planes (smooth-min) + FBM, cliffs with vertical cuts and stepped strata; one radius
+  function sampled on icospheres per LOD; normals split at 38 degree creases. New `Material::triplanarScale`
+  (world-space 3-projection base/ORM/occlusion/normal with UDN blend, projections < 4% skipped; packed in
+  `textureUvSets1.z`, a terrain-only lane) with the Rock030 set; meshes keep box UVs at the same scale
+- [x] Far-forest clusters / impostor cards baked from conifer + oak meshes; hook into TerrainManagerFarObjects
+  `tools/generate_forest_clusters.py` bakes 4 stands (2 oak from the pack's LOD2 meshes + material textures, 2 conifer)
+  of 14 trees on 36 m. `TerrainManager::farClusters` (asset, match text, baked tree count) + `farClusterDistance` /
+  `farClusterSize` / `farClusterMinimumTrees`: far blocks wholly beyond the distance bucket their trees on the grid and
+  replace squares where one family is >= 70% with one cluster (centroid, scale sqrt(count / baked)). Landscape demo:
+  2.2 km, 40 m, 5 (scene + `tools/build_landscape_demo.py`)
+- [x] Check alpha-to-coverage / coverage-preserving alpha mips so distant canopies do not thin out or shimmer
+  Real-time rendering is single-sample (MSAA only in DX11 video export), so A2C does not apply. Measured: PNG foliage
+  gets runtime box-filtered mips, which at the 0.32 cutoff grow oak canopy/impostor coverage 14-60% by mip 4-7 (crowns
+  bloat and pulse) and drop sapling impostors to 25-48%. `tools/cook_foliage_textures.py` cooks every Mask material's
+  PNG base colour with `TextureCook --alpha-cutoff` (push-pull fill + per-mip coverage rescale, BC7) and repoints the
+  19 materials; generated foliage is cooked the same way. `--check` prints the per-mip table
+- [x] Cloud and valley-mist sprite textures (noise-based) + soft particle/card prefabs
+  `tools/generate_sky_sprites.py`: Cloud_Puff_A/B, Mist_Wisp_A/B, Mist_Sheet (`Textures/Atmosphere`), prefabs
+  ValleyMist / LowClouds (ParticleEmitter) and MistCard (Blend mesh) under `Prefabs/Woodland/Atmosphere`. Soft
+  particles: `ParticleEmitter::softness` fades against the main view's depth copy (reused from AO, or copied when AO is
+  off; `SceneRendererLighting::SceneDepthForPixelShaders`, particle t8), plus `nearFadeDistance`, `fadeInTime`,
+  `sizeVariation`, `randomRotation`. Portal views draw hard. Verified on DX12/DX11/Vulkan
+- [x] Prefabs for all of the above under `Assets/Prefabs/Woodland/`, placeable by TerrainObjectLayer
+  Conifers/, Boulders/, Clusters/, Atmosphere/. Landscape demo uses them through its layers: `LandscapeDriver`
+  grows conifers by altitude (`ConiferShare`: oaks below 350 m, mixed foothills, conifers from 710 m to the tree
+  line; picked from existing draws so the lowland oak layout is unchanged) and puts the generated boulders in rock
+  fields; far impostors and clusters follow automatically. `Scenes/terrain/woodland_assets_preview.scene` shows every
+  asset at its LODs; captured on DX12, DX11 and Vulkan
+  Demo update: cliff blocks join the forest layer on steep rock below the snow (<= 2 per cell, upright, sunk by the
+  slope; 900 m reach). They are authored `cullAfterLastLod`, which `GetObjectLodProfile` now passes through and
+  `FarPlacements` skips, so near-only props never become far objects (~30% of cells are steep). The scene gets an
+  "Atmosphere" group (`build_landscape_demo.atmosphere_items`): LakeMist (new wide prefab) over all five lakes,
+  ValleyMist + three mist cards on the first lake by the start, LowClouds on four summits in the vista
+- [x] Editor: run generators from an editor tool and refresh the asset browser
+  Tools > Asset generators lists `tools/generate_*.py` / `cook_*.py` (docstring as tooltip), plus "Run all woodland
+  generators" (ordered queue). `AssetGeneratorRunner` runs one at a time without a console window, streams output to
+  the Console, then reloads rewritten textures (`Texture::Invalidate`) and refreshes open scenes
+  (`OnAssetContentsChanged`); the asset browser lists new files through its directory watch. Builds; not yet exercised
+  in a running editor
+- [x] Wider, less bright tree and foliage colours: `Material::foliageColorVariation` (masked foliage; world-space noise
+  at ~9 m crown and ~70 m stand scale trades yellow-green against blue-green and +-~20% value; `textureUvSets1.w`) on
+  oak leaves/impostors (0.7), conifers and clusters (0.55/0.7), identical across LODs. Oak leaf + impostor tint
+  [0.86, 0.84, 0.77] (darker, less saturated); terrain meadow layer `grass.material` [0.24, 0.32, 0.12] ->
+  [0.20, 0.26, 0.11]
 
 ### 7. Demo composition
 - [ ] Final landscape demo vantage point: elevated camera over a valley, backlit sun, dark foreground silhouette

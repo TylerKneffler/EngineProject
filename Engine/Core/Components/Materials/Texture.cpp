@@ -420,6 +420,24 @@ void Texture::InvalidateCache()
     m_preparedProvider = nullptr;
 }
 
+std::shared_ptr<Texture> Texture::CreateFromPixels(std::string key, uint32_t width,
+    uint32_t height, uint32_t mipLevels, GraphicsTextureFormat format,
+    std::vector<uint8_t> pixels, bool srgb)
+{
+    if (!width || !height || !mipLevels || pixels.size() <
+        Engine::Graphics::GraphicsTextureChainBytes(format, width, height, mipLevels))
+        return nullptr;
+    std::shared_ptr<Texture> texture(new Texture(std::move(key), srgb));
+    texture->m_width = width;
+    texture->m_height = height;
+    texture->m_mipLevels = mipLevels;
+    texture->m_format = format;
+    texture->m_pixels = std::move(pixels);
+    texture->m_generateMips = false;
+    texture->m_retainPixelsForCpu = true;
+    return texture;
+}
+
 bool Texture::Load()
 {
     if (!m_pixels.empty())

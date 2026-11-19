@@ -8,7 +8,7 @@ Microsoft::WRL::ComPtr<ID3D12RootSignature>
 CreateD3D12MaterialRootSignature(ID3D12Device* device)
 {
     D3D12_DESCRIPTOR_RANGE ranges[38]{};
-    D3D12_ROOT_PARAMETER parameters[48]{};
+    D3D12_ROOT_PARAMETER parameters[49]{};
     parameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
     parameters[0].Descriptor.ShaderRegister = 0;
     parameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
@@ -123,6 +123,11 @@ CreateD3D12MaterialRootSignature(ID3D12Device* device)
     parameters[47].ParameterType=D3D12_ROOT_PARAMETER_TYPE_SRV;
     parameters[47].Descriptor.ShaderRegister=46;
     parameters[47].ShaderVisibility=D3D12_SHADER_VISIBILITY_VERTEX;
+
+    // t47: screen-space ambient occlusion (structured slot 47).
+    parameters[48].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
+    parameters[48].Descriptor.ShaderRegister = 47;
+    parameters[48].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
 
     D3D12_STATIC_SAMPLER_DESC sampler{};
     // Anisotropic filtering keeps grazing-angle ground and wall materials sharp.

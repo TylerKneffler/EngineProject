@@ -447,7 +447,7 @@ void D3D12GraphicsContext::SetStructuredBuffer(uint32_t slot, const Engine::Grap
 {
     if (!buffer || !m_cmdList ||
         !((slot >= 6 && slot <= 8) || (slot >= 10 && slot <= 11) ||
-          (slot >= 14 && slot <= 15) || (slot == 45 || slot == 46))) return;
+          (slot >= 14 && slot <= 15) || (slot >= 45 && slot <= 47))) return;
     const auto* structured = dynamic_cast<const D3D12GraphicsBuffer*>(buffer);
     if (!structured) return;
     RetainBuffer(structured->GetResource());
@@ -521,6 +521,45 @@ void D3D12GraphicsContext::SetComputeWriteBuffer(
 void D3D12GraphicsContext::DispatchCompute(uint32_t x, uint32_t y, uint32_t z)
 {
     if (m_cmdList && x && y && z) m_cmdList->Dispatch(x, y, z);
+}
+
+void D3D12GraphicsContext::CopySceneDepth(Engine::Graphics::IGraphicsBuffer* destination,
+    uint32_t width, uint32_t height)
+{
+    auto* native = dynamic_cast<D3D12GraphicsBuffer*>(destination);
+    if (!m_cmdList || !m_sceneDepth || !native || !width || !height) return;
+    const D3D12_RESOURCE_DESC depthDesc = m_sceneDepth->GetDesc();
+    width = std::min<uint32_t>(width, static_cast<uint32_t>(depthDesc.Width));
+    height = std::min<uint32_t>(height, depthDesc.Height);
+    const uint32_t pitch = Engine::Graphics::SceneDepthRowPitch(width);
+    if (destination->GetSize() < uint64_t(pitch) * height * 4u) return;
+    RetainBuffer(native->GetResource());
+    TransitionComputeBuffer(m_cmdList, native, D3D12_RESOURCE_STATE_COPY_DEST);
+    D3D12_RESOURCE_BARRIER barrier{};
+    barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    barrier.Transition.pResource = m_sceneDepth;
+    // Plane 0 of D32_FLOAT_S8X24 holds the depth.
+    barrier.Transition.Subresource = 0;
+    barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_DEPTH_WRITE;
+    barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_SOURCE;
+    m_cmdList->ResourceBarrier(1, &barrier);
+    D3D12_TEXTURE_COPY_LOCATION source{};
+    source.pResource = m_sceneDepth;
+    source.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+    source.SubresourceIndex = 0;
+    D3D12_TEXTURE_COPY_LOCATION target{};
+    target.pResource = native->GetResource();
+    target.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+    target.PlacedFootprint.Offset = 0;
+    target.PlacedFootprint.Footprint.Format = DXGI_FORMAT_R32_TYPELESS;
+    target.PlacedFootprint.Footprint.Width = width;
+    target.PlacedFootprint.Footprint.Height = height;
+    target.PlacedFootprint.Footprint.Depth = 1;
+    target.PlacedFootprint.Footprint.RowPitch = pitch * 4u;
+    const D3D12_BOX box{ 0, 0, 0, width, height, 1 };
+    m_cmdList->CopyTextureRegion(&target, 0, 0, 0, &source, &box);
+    std::swap(barrier.Transition.StateBefore, barrier.Transition.StateAfter);
+    m_cmdList->ResourceBarrier(1, &barrier);
 }
 
 void D3D12GraphicsContext::StorageBarrier(
@@ -793,6 +832,7 @@ std::unique_ptr<Engine::Graphics::IGraphicsContext> D3D12GraphicsContextFactory:
         list, m_rootSignature, m_occlusionState, m_gpuTimings, m_indirectSignatures, m_nullTexture, m_nullArrayTexture);
     result->SetTextureOwners(m_textureOwners);
     result->SetBufferOwners(m_bufferOwners);
+    result->SetSceneDepth(m_sceneDepth);
     return result;
 }
 
@@ -804,6 +844,7 @@ std::unique_ptr<Engine::Graphics::IGraphicsContext> D3D12GraphicsContextFactory:
         m_occlusionState, m_gpuTimings, m_indirectSignatures, m_nullTexture, m_nullArrayTexture);
     result->SetTextureOwners(m_textureOwners);
     result->SetBufferOwners(m_bufferOwners);
+    result->SetSceneDepth(m_sceneDepth);
     return result;
 }
 

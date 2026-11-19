@@ -1,0 +1,8 @@
+Failed to create D3D12 buffer: HRESULT=0x887a0005, bytes=287496, usage=1, access=0, stride=0, deviceRemovedReason=0x887a0007
+Failed to create D3D12 buffer: HRESULT=0x887a0005, bytes=287496, usage=1, access=0, stride=0, deviceRemovedReason=0x887a0006
+DRED breadcrumb list 0: completed=1/1, commandList=000001D29CA09350, nearbyOps=0:2e
+DRED breadcrumb list 1: completed=4/4, nearbyOps=1:f,2:7,3:f
+DRED breadcrumb list 2: completed=4a/4a, nearbyOps=47:8,48:8,49:f
+DRED breadcrumb list 3: completed=3/3, nearbyOps=0:2e,1:8,2:f
+DRED breadcrumb list 4: completed=21/52, nearbyOps=1e:f,1f:f,20:f,21:6,22:f,23:f,24:f,25:f
+DRED breadcrumb list 5: completed=0/1, commandList=000001D29CA09350, nearbyOps=0:2e

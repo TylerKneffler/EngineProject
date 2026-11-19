@@ -37,6 +37,9 @@ public:
     void StorageBarrier(const Engine::Graphics::IGraphicsBuffer* buffer) override;
     bool BeginComputePass() override;
     void EndComputePass() override;
+    bool SupportsSceneDepthCopy() const override;
+    void CopySceneDepth(Engine::Graphics::IGraphicsBuffer* destination,
+        uint32_t width, uint32_t height) override;
     bool SupportsIndirectDraws() const override { return true; }
     bool DrawInstancesIndirect(const Engine::Graphics::IGraphicsBuffer*, uint64_t, bool) override;
     bool CopyBuffer(const Engine::Graphics::IGraphicsBuffer* source,
@@ -86,7 +89,8 @@ private:
     std::shared_ptr<VulkanComputeDescriptorArena> m_computeDescriptors;
     std::shared_ptr<VulkanTextureSystem> m_textureSystem;
     std::array<const VulkanGraphicsTexture*, 30> m_textures{};
-    std::array<const VulkanGraphicsBuffer*, 9> m_structuredBuffers{};
+    // Graphics structured slots 6-8, 10-11, 14-15, 45-47.
+    std::array<const VulkanGraphicsBuffer*, 10> m_structuredBuffers{};
     std::shared_ptr<VulkanOcclusionQueryState> m_occlusionState;
     std::shared_ptr<VulkanGpuTimingState> m_gpuTimings;
     uint64_t m_occlusionViewId = 0;
@@ -103,6 +107,9 @@ public:
     void SetCommandBuffer(void* commandBuffer) override
     { m_commandBuffer = reinterpret_cast<VkCommandBuffer>(commandBuffer); }
     bool SupportsDepthRectangleClear() const override { return true; }
+    // The host's scene pass registers its depth image (VulkanPostProcess).
+    void SetSceneDepthCopySupported(bool supported) { m_sceneDepthCopySupported = supported; }
+    bool SupportsSceneDepthCopy() const override { return m_sceneDepthCopySupported; }
     void PrepareFrame(uint32_t frameSlot) override;
     void PrepareFrameForCommandBuffer(uint32_t frameSlot, VkCommandBuffer commandBuffer);
     uint32_t GetPreparedFrameSlot() const override { return m_preparedFrameSlot; }
@@ -135,6 +142,7 @@ private:
     std::shared_ptr<VulkanOcclusionQueryState> m_occlusionState;
     std::shared_ptr<VulkanGpuTimingState> m_gpuTimings;
     std::shared_ptr<VulkanComputeDescriptorArena> m_computeDescriptors;
+    bool m_sceneDepthCopySupported = false;
 };
 }
 #endif

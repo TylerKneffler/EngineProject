@@ -91,6 +91,126 @@ struct AtmosphereFogSettings
     }
 };
 
+// Physically based sky and atmosphere (Rendering/Atmosphere/PhysicalAtmosphere,
+// Hillaire 2020). When enabled it replaces the HDRI panorama as the sky and
+// as the environment-lighting source, attenuates the main directional light
+// by the atmosphere's transmittance, and (aerialPerspective) replaces the
+// height fog with the atmosphere's aerial perspective.
+// Eye adaptation (Graphics::PostProcessSettings auto exposure). EVs are log2
+// of the metered average scene luminance, which maps to mid grey;
+// outputExposure stays as compensation on top.
+struct AutoExposureSettings
+{
+    bool enabled = false;
+    float minEv = -8.f;
+    float maxEv = 4.f;
+    float speedUp = 3.f;    // 1/s, toward a brighter scene
+    float speedDown = 1.f;  // 1/s, toward a darker scene
+    float lowPercent = 0.5f;  // histogram share ignored at the dark end
+    float highPercent = 0.95f; // ...and above this at the bright end
+
+    void Normalize()
+    {
+        minEv = std::clamp(minEv, -14.f, 10.f);
+        maxEv = std::clamp(maxEv, minEv, 10.f);
+        speedUp = std::clamp(speedUp, 0.f, 50.f);
+        speedDown = std::clamp(speedDown, 0.f, 50.f);
+        lowPercent = std::clamp(lowPercent, 0.f, 0.98f);
+        highPercent = std::clamp(highPercent, lowPercent + 0.01f, 1.f);
+    }
+};
+
+// Screen-space ambient occlusion (Shaders/AmbientOcclusion): GTAO at half
+// resolution from the main view's depth, accumulated over frames, darkening
+// the ambient and environment lighting of the next frame's surfaces.
+struct AmbientOcclusionSettings
+{
+    bool enabled = false;
+    float radius = 1.5f;       // metres
+    float intensity = 1.f;     // exponent on the visibility (1 = as computed)
+    float temporalBlend = 0.15f; // weight of each new frame against history
+
+    void Normalize()
+    {
+        radius = std::clamp(radius, 0.1f, 20.f);
+        intensity = std::clamp(intensity, 0.f, 4.f);
+        temporalBlend = std::clamp(temporalBlend, 0.02f, 1.f);
+    }
+};
+
+struct PhysicalSkySettings
+{
+    bool enabled = false;
+    // World height of the planet surface ("sea level") the atmosphere
+    // starts at; set near the lowest terrain.
+    float groundHeight = 0.f;
+    float rayleighScale = 1.f;   // air molecules: sky blue, distance blue
+    float mieScale = 1.f;        // aerosols: haze, sun aureole, distance white
+    float mieScaleHeight = 1200.f;
+    float mieAnisotropy = 0.8f;
+    float ozoneScale = 1.f;
+    glm::vec3 groundAlbedo = glm::vec3(0.3f);
+    // Multiplies the sky's radiance on screen (not its lighting).
+    float skyIntensity = 1.f;
+    bool attenuateSun = true;
+    bool aerialPerspective = true;
+
+    void Normalize()
+    {
+        rayleighScale = std::clamp(rayleighScale, 0.f, 20.f);
+        mieScale = std::clamp(mieScale, 0.f, 200.f);
+        mieScaleHeight = std::clamp(mieScaleHeight, 10.f, 20000.f);
+        mieAnisotropy = std::clamp(mieAnisotropy, 0.f, 0.99f);
+        ozoneScale = std::clamp(ozoneScale, 0.f, 20.f);
+        groundAlbedo = glm::clamp(groundAlbedo, glm::vec3(0.f), glm::vec3(1.f));
+        skyIntensity = std::clamp(skyIntensity, 0.f, 64.f);
+    }
+};
+
+// Volumetric cloud layer ray-marched over the sky (Shaders/Clouds/Clouds.hlsl).
+// Heights are world metres; the layer is flat (no planet curvature) and fades
+// out toward maxDistance so the horizon blends into the sky behind it.
+struct VolumetricCloudSettings
+{
+    bool enabled = false;
+    // Share of the sky covered (0 clear .. 1 overcast).
+    float coverage = 0.45f;
+    // Extinction per metre inside a fully dense cloud.
+    float density = 0.03f;
+    float baseHeight = 2600.f;
+    float thickness = 1400.f;
+    // Size of the cloud shapes (metres per base noise period).
+    float shapeScale = 2400.f;
+    // How strongly fine noise erodes the cloud edges (0..1).
+    float detail = 0.45f;
+    // Drift in metres per second toward windDirection (degrees, 0 = +X).
+    float windSpeed = 6.f;
+    float windDirection = 30.f;
+    // Sky light on the clouds (linear HDR), brighter toward their tops.
+    glm::vec3 ambientColor = glm::vec3(0.55f, 0.62f, 0.75f);
+    float ambientIntensity = 0.8f;
+    // Scales the sun's contribution.
+    float sunIntensity = 1.f;
+    // March steps per pixel (quality vs GPU cost) and the farthest cloud drawn.
+    int steps = 48;
+    float maxDistance = 30000.f;
+
+    void Normalize()
+    {
+        coverage = std::clamp(coverage, 0.f, 1.f);
+        density = std::clamp(density, 0.f, 1.f);
+        thickness = std::clamp(thickness, 1.f, 20000.f);
+        shapeScale = std::clamp(shapeScale, 10.f, 100000.f);
+        detail = std::clamp(detail, 0.f, 1.f);
+        windSpeed = std::clamp(windSpeed, 0.f, 200.f);
+        ambientColor = glm::max(ambientColor, glm::vec3(0.f));
+        ambientIntensity = std::max(0.f, ambientIntensity);
+        sunIntensity = std::max(0.f, sunIntensity);
+        steps = std::clamp(steps, 8, 128);
+        maxDistance = std::clamp(maxDistance, 100.f, 200000.f);
+    }
+};
+
 struct SceneSettings
 {
     // Dimensional editing and rendering behavior belongs to the scene so one
@@ -115,7 +235,11 @@ struct SceneSettings
     float hdriRotation = 0.f;
     ToneMappingOperator toneMapping = ToneMappingOperator::Aces;
     float outputExposure = 0.f;
+    AutoExposureSettings autoExposure;
+    AmbientOcclusionSettings ambientOcclusion;
     AtmosphereFogSettings atmosphereFog;
+    VolumetricCloudSettings volumetricClouds;
+    PhysicalSkySettings physicalSky;
     // Energy-conserving bloom: the compose pass mixes this fraction of a
     // wide, multi-scale blur of the HDR scene into the image before tone
     // mapping. Bright pixels (the sun disc, speculars) bleed the most.

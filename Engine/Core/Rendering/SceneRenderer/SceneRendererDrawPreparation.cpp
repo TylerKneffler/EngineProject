@@ -308,8 +308,12 @@ ResolvedMaterialRecord SceneRendererDrawPreparation::ResolveMaterialRecord(
         data.textureUvSets0 = { float(mat->baseColorUvSet),
             float(mat->metallicRoughnessUvSet), float(mat->normalUvSet),
             float(mat->occlusionUvSet) };
+        // z: triplanar metres per repeat, w: foliage colour variation
+        // (Object.hlsl); terrain draws reuse these lanes for their tiling
+        // and runtime lighting after the material record is applied.
         data.textureUvSets1 = { float(mat->emissiveUvSet),
-            float(mat->heightUvSet), 0.f, 0.f };
+            float(mat->heightUvSet), std::max(0.f, mat->triplanarScale),
+            std::clamp(mat->foliageColorVariation, 0.f, 1.f) };
         cached.data.resize(sizeof(data));
         std::memcpy(cached.data.data(), &data, sizeof(data));
         cached.textures = textures;
@@ -483,10 +487,14 @@ void SceneRendererDrawPreparation::PrepareTerrainMaterial(
         {
             draw.textures[5] = macro.texture;
             draw.textureSlotCount = std::max(draw.textureSlotCount, 6u);
+            // Its normals (slot 2, also unused by terrain) light distant tiles.
+            if (macro.normalTexture) draw.textures[2] = macro.normalTexture;
             objectData.terrainMacroMap = macro.mapping;
             objectData.terrainMacroParams = glm::vec4(terrainManager->macroColorNear,
                 std::max(terrainManager->macroColorFar, terrainManager->macroColorNear + 1.f),
-                1.f, 0.f);
+                // w: 0 without normals, else 1 + canopy relief.
+                1.f, macro.normalTexture
+                    ? 1.f + std::clamp(terrainManager->canopyRelief, 0.f, 1.f) : 0.f);
         }
     if (!terrainManager || !terrainManager->measurementGrid)
         return;

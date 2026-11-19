@@ -1,0 +1,19 @@
+<?xml version='1.0' encoding='utf-8'?>
+<Prefab xmlns:components="urn:engine-components" version="1" type="prefab">
+  <object name="Valley mist" enabled="true">
+    <components>
+        <components:ParticleEmitter ParticleEmitter.rate="1.2" ParticleEmitter.burstOnStart="36" ParticleEmitter.maxParticles="72" ParticleEmitter.lifetime="45" ParticleEmitter.speed="0.35" ParticleEmitter.spreadDegrees="35" ParticleEmitter.drag="0" ParticleEmitter.size="16" ParticleEmitter.shape="2" ParticleEmitter.worldSpace="true" ParticleEmitter.playOnStart="true" ParticleEmitter.duration="0" ParticleEmitter.loop="false" ParticleEmitter.seed="4417" ParticleEmitter.texturePath="Assets/Textures/Atmosphere/Mist_Wisp_A.ktx2" ParticleEmitter.opacity="0.1" ParticleEmitter.blendMode="1" ParticleEmitter.softness="6" ParticleEmitter.nearFadeDistance="20" ParticleEmitter.fadeInTime="8" ParticleEmitter.sizeVariation="0.4" ParticleEmitter.randomRotation="false" ParticleEmitter.collisionMode="0" ParticleEmitter.useGpuSimulation="false">
+          <ParticleEmitter.direction _arrayEncoding="spaceSeparatedNumbers">1 0 0.25</ParticleEmitter.direction>
+          <ParticleEmitter.gravity _arrayEncoding="spaceSeparatedNumbers">0 0 0</ParticleEmitter.gravity>
+          <ParticleEmitter.color _arrayEncoding="spaceSeparatedNumbers">0.3 0.32 0.35</ParticleEmitter.color>
+          <ParticleEmitter.boxExtents _arrayEncoding="spaceSeparatedNumbers">70 3 70</ParticleEmitter.boxExtents>
+        </components:ParticleEmitter>
+    </components>
+    <children />
+    <transform>
+      <Transform.position _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.position>
+      <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+      <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+    </transform>
+  </object>
+</Prefab>

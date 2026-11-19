@@ -56,6 +56,51 @@ public:
         const glm::vec3& sunDirection = glm::vec3(0.f),
         const glm::vec3& sunRadiance = glm::vec3(0.f));
 
+    // Physical sky: updates the atmosphere model/panorama for this camera,
+    // multiplies the main directional light (the strongest) by the
+    // atmosphere's transmittance toward the sun, and records the view's
+    // atmosphere terms on the renderer. Call right after collecting lights.
+    static void ApplyPhysicalAtmosphere(
+        SceneRenderer& renderer,
+        Engine::Model::LightData* frameLights,
+        uint32_t frameLightCount,
+        const glm::vec3& cameraPosition);
+
+    // Volumetric clouds: ray-marches this view's cloud layer at half
+    // resolution in a compute pass (call before PrepareSkyboxAndEnvironment,
+    // outside the sky draw), which then composites it over the sky.
+    // Screen-space ambient occlusion for the next frame, from this view's
+    // depth so far (call after the main draws, outside any depth-only pass).
+    // Rebinds structured slot 47 to the result for the rest of the frame.
+    static void ComputeAmbientOcclusion(
+        SceneRenderer& renderer,
+        Engine::Graphics::IGraphicsContext* context,
+        const glm::mat4& view,
+        const glm::mat4& proj,
+        uint32_t viewportWidth,
+        uint32_t viewportHeight);
+    // The buffer draws read at structured slot 47.
+    static const Engine::Graphics::IGraphicsBuffer* AmbientOcclusionBuffer(
+        SceneRenderer& renderer);
+    // The main view's depth as a structured float buffer that pixel shaders
+    // may read (soft particles), or null. Reuses the AO pass's copy when it
+    // ran for this view, otherwise copies now. Call outside depth-only passes,
+    // after ComputeAmbientOcclusion for the view.
+    static const Engine::Graphics::IGraphicsBuffer* SceneDepthForPixelShaders(
+        SceneRenderer& renderer, Engine::Graphics::IGraphicsContext* context);
+
+    static void MarchVolumetricClouds(
+        SceneRenderer& renderer,
+        Engine::Graphics::IGraphicsContext* context,
+        const glm::mat4& view,
+        const glm::mat4& proj,
+        uint32_t viewportWidth,
+        uint32_t viewportHeight,
+        bool shadowOnly,
+        const glm::vec3& cameraPosition,
+        const glm::vec3& sunDirection,
+        const glm::vec3& sunRadiance);
+
     // Sun disc constants shared by the main and portal skybox draws:
     // direction (xyz, w = cosine of the disc radius) and radiance (rgb,
     // w = disc intensity); zero radiance disables the disc.

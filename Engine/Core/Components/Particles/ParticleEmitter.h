@@ -82,6 +82,20 @@ public:
     int seed = 1;
     std::string texturePath;
     float opacity = 1.f;
+    // Soft particles: fade where the sprite comes within this many metres of
+    // the scene behind it (main view, from the frame's depth copy), so large
+    // mist and cloud sprites meet terrain without a hard line. 0 = hard.
+    float softness = 0.f;
+    // Fade sprites closer to the camera than this (metres), so the viewer
+    // can fly through mist without a sprite filling the screen. 0 = off.
+    float nearFadeDistance = 0.f;
+    // Seconds over which a new particle fades in (it otherwise starts at
+    // full opacity and fades out over its lifetime). CPU simulation only.
+    float fadeInTime = 0.f;
+    // Random spread of the start size (0..1 share of size) and random sprite
+    // rotation at spawn, for varied cloud and mist sprites.
+    float sizeVariation = 0.f;
+    bool randomRotation = false;
     int blendMode = static_cast<int>(BlendMode::Additive);
     int collisionMode = static_cast<int>(CollisionMode::None);
     float collisionBounce = 0.5f;

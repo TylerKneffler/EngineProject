@@ -1062,6 +1062,16 @@ int GameApplication::Run(HINSTANCE instance, const GameBenchmarkOptions* benchma
         const uint32_t width = window->GetWidth();
         const uint32_t height = window->GetHeight();
         auto input = ::Engine::Core::CaptureNativeInput(window->GetHWND());
+        // Benchmarks never see the host's mouse and keyboard: a capture window
+        // that ended up in the foreground let the user's mouse turn the
+        // camera during warmup, so runs of the same viewpoint diverged. Only
+        // the synthetic input below drives them.
+        if (benchmark)
+        {
+            input.focused = false;
+            input.keys.fill(0);
+            if (input.hasCenter) input.cursor = input.center;
+        }
         if (benchmark && benchmarkStarted && benchmarkReady &&
             (benchmark->driveForwardFrames || benchmark->lookYawPixels))
         {
@@ -1139,8 +1149,12 @@ int GameApplication::Run(HINSTANCE instance, const GameBenchmarkOptions* benchma
     splash.SetProgress(0.95f, L"Drawing game...");
     window->OnUpdate();
     // Reopen where the game was last left (keeping the configured size), or
-    // where the splash was dragged to. Benchmarks keep no placement.
-    const int showCommand = splash.PlaceWindow(window->GetHWND(), false);
+    // where the splash was dragged to. Benchmarks keep no placement and are
+    // never moved: placement clamps to the monitor's work area, which shrank
+    // a 1920x1080 capture to 1520x873 when the splash sat on a smaller
+    // (or DPI-scaled) monitor. Parts off screen still render.
+    const int showCommand = benchmark ? SW_SHOWDEFAULT
+        : splash.PlaceWindow(window->GetHWND(), false);
     if (!benchmark) window->SetPlacementKey(L"Game");
     splash.HoldAboveMainWindow();
     window->Show(showCommand);

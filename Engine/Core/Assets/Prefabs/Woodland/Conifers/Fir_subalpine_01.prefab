@@ -1,0 +1,55 @@
+<?xml version='1.0' encoding='utf-8'?>
+<Prefab xmlns:components="urn:engine-components" version="1" type="prefab">
+  <object name="Fir_subalpine_01" enabled="true">
+    <components>
+    </components>
+    <children>
+      <item name="Trunk" enabled="true">
+        <transform>
+          <Transform.position _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.position>
+          <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+          <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+        </transform>
+        <components>
+          <components:Mesh Mesh.file="Assets/Models/Woodland/Conifers/Meshes/Fir_subalpine_01_LOD0_Trunk.mesh" Mesh.foliageWindStrength="0" Mesh.useLightProbes="false" Mesh.gpuLodSelection="true" Mesh.gpuLod1Distance="37.5" Mesh.gpuLod2Distance="135">
+            <Mesh.lodMeshes>
+              <item>Assets/Models/Woodland/Conifers/Meshes/Fir_subalpine_01_LOD1_Trunk.mesh</item>
+              <item>Assets/Models/Woodland/Conifers/Meshes/Fir_subalpine_01_LOD2_Trunk.mesh</item>
+              <item>Assets/Models/Woodland/Conifers/Meshes/Fir_subalpine_01_Impostor.mesh</item>
+            </Mesh.lodMeshes>
+          </components:Mesh>
+          <components:Material Material.materialAsset="Engine/Core/Assets/Models/Woodland/Conifers/Materials/Conifer_Bark.material">
+            <Material.lodMaterials>
+              <item _valueType="string" />
+              <item _valueType="string" />
+              <item>Engine/Core/Assets/Models/Woodland/Conifers/Materials/Fir_subalpine_01_Impostor.material</item>
+            </Material.lodMaterials>
+          </components:Material>
+        </components>
+        <children />
+      </item>
+      <item name="Needles" enabled="true">
+        <transform>
+          <Transform.position _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.position>
+          <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+          <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+        </transform>
+        <components>
+          <components:Mesh Mesh.file="Assets/Models/Woodland/Conifers/Meshes/Fir_subalpine_01_LOD0_Needles.mesh" Mesh.foliageWindStrength="0" Mesh.useLightProbes="false" Mesh.gpuLodSelection="true" Mesh.gpuLod1Distance="37.5" Mesh.gpuLod2Distance="135">
+            <Mesh.lodMeshes>
+              <item>Assets/Models/Woodland/Conifers/Meshes/Fir_subalpine_01_LOD1_Needles.mesh</item>
+              <item>Assets/Models/Woodland/Conifers/Meshes/Fir_subalpine_01_LOD2_Needles.mesh</item>
+            </Mesh.lodMeshes>
+          </components:Mesh>
+          <components:Material Material.materialAsset="Engine/Core/Assets/Models/Woodland/Conifers/Materials/Conifer_Needles.material" />
+        </components>
+        <children />
+      </item>
+    </children>
+    <transform>
+      <Transform.position _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.position>
+      <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+      <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+    </transform>
+  </object>
+</Prefab>

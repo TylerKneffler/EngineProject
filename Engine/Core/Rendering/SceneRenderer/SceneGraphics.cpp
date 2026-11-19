@@ -127,6 +127,12 @@ const Engine::Components::Texture* SceneRenderer::ResolveSkyboxTexture()
         !m_scene.settings.skyboxEnabled)
         return nullptr;
 
+    // Physical sky: the atmosphere's panorama, once its first build is done.
+    if (m_scene.settings.physicalSky.enabled)
+        if (const auto& panorama = m_physicalSky.Panorama();
+            panorama && panorama->PrepareImmediate(m_graphicsProvider))
+            return panorama.get();
+
     if (m_scene.settings.skyboxTexture.empty())
         return m_defaultSkyboxTexture.get();
 

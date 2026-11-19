@@ -67,6 +67,58 @@ void SceneRendererPipelines::BuildSkyboxPipeline(SceneRenderer& renderer)
     renderer.m_skyboxPipeline = buildSkyboxPipeline(false, "skybox");
     renderer.m_portalSkyboxStencilReadPipeline = buildSkyboxPipeline(true, "portal skybox stencil read");
 
+    // Volumetric clouds: a fullscreen pass blended (premultiplied alpha)
+    // over the sky before the scene's surfaces, so they hide it.
+    {
+        const std::string cloudPath = EngineShaderPath("Clouds.hlsl");
+        auto cloudVertex = shaderCompiler->CompileFromFile(cloudPath.c_str(), "VSMain",
+            Engine::Graphics::IShaderCompiler::CompileProfile::VS_5_0);
+        auto cloudPixel = shaderCompiler->CompileFromFile(cloudPath.c_str(), "PSMain",
+            Engine::Graphics::IShaderCompiler::CompileProfile::PS_5_0);
+        if (!cloudVertex || !cloudPixel)
+            throw std::runtime_error("Failed to compile cloud shaders: " + shaderCompiler->GetLastError());
+        auto builder = pipelineFactory->CreateBuilder();
+        if (!builder)
+            throw std::runtime_error("Failed to create cloud pipeline builder");
+        renderer.m_cloudPipeline = builder->SetVertexShader(cloudVertex.get())
+            .SetPixelShader(cloudPixel.get())
+            .SetFillMode(false)
+            .SetCullMode(false)
+            .SetFrontCounterClockwise(false)
+            .SetDepthClipEnable(false)
+            .SetBlendEnable(true)
+            .SetSrcBlend(1)        // ONE: premultiplied
+            .SetDestBlend(5)       // INV_SRC_ALPHA
+            .SetBlendOp(0)
+            .SetSrcBlendAlpha(1)
+            .SetDestBlendAlpha(5)
+            .SetBlendOpAlpha(0)
+            .SetDepthEnable(false)
+            .SetDepthWriteEnable(false)
+            .SetDepthFunc(Engine::Graphics::Depth::CompareAlways)
+            .SetInputLayout(nullptr, 0)
+            .SetPrimitiveTopology(
+                Engine::Graphics::IPipelineStateBuilder::PrimitiveTopology::TriangleList)
+            .SetRenderTargetFormat(10, 20)
+            .Build();
+        if (!renderer.m_cloudPipeline)
+            throw std::runtime_error("Failed to build cloud pipeline: " + builder->GetLastError());
+        // The half-resolution march (CSMain). Optional: without compute the
+        // clouds are simply not drawn.
+        if (auto march = shaderCompiler->CompileFromFile(cloudPath.c_str(), "CSMain",
+                Engine::Graphics::IShaderCompiler::CompileProfile::CS_5_0))
+            renderer.m_cloudMarchPipeline = pipelineFactory->CreateComputePipeline(march.get());
+    }
+
+    // Screen-space ambient occlusion (compute). Optional: without it,
+    // surfaces are simply unoccluded.
+    {
+        const std::string occlusionPath = EngineShaderPath("AmbientOcclusion.hlsl");
+        if (auto occlusion = shaderCompiler->CompileFromFile(occlusionPath.c_str(), "CSMain",
+                Engine::Graphics::IShaderCompiler::CompileProfile::CS_5_0))
+            renderer.m_ambientOcclusionPipeline = pipelineFactory->CreateComputePipeline(occlusion.get());
+    }
+
     const std::string defaultPath =
         (std::filesystem::path(ENGINE_ASSETS_PATH) / "Textures" / "Skyboxes" /
             "editor-default-sky.png").string();

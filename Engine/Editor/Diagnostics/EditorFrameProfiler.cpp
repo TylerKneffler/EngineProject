@@ -289,6 +289,10 @@ namespace Engine::Editor
                 static_cast<size_t>(Engine::Graphics::GpuTimingStage::Transparent)]
             << ",\"gpu_sky_ms\":" << gpuTiming.gpuMilliseconds[
                 static_cast<size_t>(Engine::Graphics::GpuTimingStage::Sky)]
+            << ",\"gpu_clouds_ms\":" << gpuTiming.gpuMilliseconds[
+                static_cast<size_t>(Engine::Graphics::GpuTimingStage::Clouds)]
+            << ",\"gpu_ambient_occlusion_ms\":" << gpuTiming.gpuMilliseconds[
+                static_cast<size_t>(Engine::Graphics::GpuTimingStage::AmbientOcclusion)]
             << ",\"pending_load_ms\":" << ms(sample.afterRender, sample.afterPendingLoad)
             << ",\"views\":" << sample.renderedViews
             << ",\"scene_views\":" << sample.renderedSceneViews

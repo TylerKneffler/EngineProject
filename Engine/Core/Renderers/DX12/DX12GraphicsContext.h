@@ -89,6 +89,12 @@ public:
     // D3D12 command lists cannot query their previously bound framebuffer.
     // Hosts that run a depth pass inside a color frame supply its restoration.
     void SetDepthOnlyPassRestore(std::function<void()> restore) { m_restoreDepthOnlyPass=std::move(restore); }
+    // The host's scene depth target (D32_FLOAT_S8X24, resting in
+    // DEPTH_WRITE) for CopySceneDepth.
+    void SetSceneDepth(ID3D12Resource* depth) { m_sceneDepth = depth; }
+    bool SupportsSceneDepthCopy() const override { return m_sceneDepth != nullptr; }
+    void CopySceneDepth(Engine::Graphics::IGraphicsBuffer* destination,
+        uint32_t width, uint32_t height) override;
 
     void SetViewport(const Viewport& vp) override;
     void SetScissorRect(const ScissorRect& rect) override;
@@ -146,6 +152,7 @@ private:
     uint32_t m_activeOcclusionIndex = UINT32_MAX;
     D3D12GraphicsTexture* m_activeDepthTarget = nullptr;
     std::function<void()> m_restoreDepthOnlyPass;
+    ID3D12Resource* m_sceneDepth = nullptr;
 
     D3D12_RESOURCE_STATES ConvertResourceState(ResourceState state) const;
 };
@@ -172,6 +179,10 @@ public:
     std::unique_ptr<Engine::Graphics::IGraphicsContext> CreateContext() override;
     bool SupportsDepthRectangleClear() const override { return true; }
     std::unique_ptr<Engine::Graphics::IGraphicsContext> CreateContextForCommandBuffer(void*) override;
+    // Set by the host renderer whenever its scene depth target changes;
+    // contexts created afterwards can copy it (CopySceneDepth).
+    void SetSceneDepth(ID3D12Resource* depth) { m_sceneDepth = depth; }
+    bool SupportsSceneDepthCopy() const override { return m_sceneDepth != nullptr; }
 
 private:
     uint32_t m_preparedFrameSlot = 0;
@@ -191,5 +202,6 @@ private:
     std::shared_ptr<D3D12IndirectSignatures> m_indirectSignatures;
     std::shared_ptr<Engine::Graphics::IGraphicsTexture> m_nullTexture;
     std::shared_ptr<Engine::Graphics::IGraphicsTexture> m_nullArrayTexture;
+    ID3D12Resource* m_sceneDepth = nullptr;
 };
 }

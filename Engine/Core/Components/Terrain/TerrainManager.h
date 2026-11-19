@@ -70,6 +70,24 @@ public:
     int farObjectBlockCells = 8;
     // Project layer for far object blocks (see Rendering::DetailBudget).
     std::string farObjectProjectLayer = "Trees";
+    // Far forest clusters: far blocks beyond farClusterDistance (metres from
+    // the viewer) group their trees on a farClusterSize grid, and each square
+    // with at least farClusterMinimumTrees becomes one cluster impostor: a
+    // baked stand of trees (Tools/generate_forest_clusters.py) scaled to the
+    // square's tree count. A cluster stands in for placements whose far asset
+    // path contains its match text; a square is clustered when one match
+    // covers most of its trees, and the others stay individual impostors.
+    // Several clusters with the same match alternate. 0 distance disables.
+    struct FarCluster
+    {
+        std::string asset;
+        std::string match;
+        float trees = 12.f; // trees baked into the cluster
+    };
+    std::vector<FarCluster> farClusters;
+    float farClusterDistance = 0.f;
+    float farClusterSize = 40.f;
+    int farClusterMinimumTrees = 5;
     // Negative values inherit the legacy shared threshold.
     float farTileErrorPixelsLod2 = -1.f;
     float farTileErrorPixelsLod4 = -1.f;
@@ -113,6 +131,10 @@ public:
     bool macroColorMap = true;
     float macroColorNear = 256.f;
     float macroColorFar = 640.f;
+    // Distant forest (macro map alpha) shades as a bumpy canopy: crown- and
+    // clump-scale relief in its normals plus crown occlusion, so wooded hills
+    // read as forest beyond the far tree impostors. 0 disables.
+    float canopyRelief = .6f;
     struct MacroColorImage
     {
         int width = 0, height = 0;
@@ -121,10 +143,16 @@ public:
         // sRGB RGBA8 (alpha: forest cover), full mip chain, mip 0 first.
         std::vector<uint8_t> mips;
         uint32_t mipLevels = 0;
+        // Optional world-space surface normals at the same samples (linear
+        // RGBA8, xyz * 0.5 + 0.5), same mip chain. Distant tiles are lit per
+        // pixel with them, so their 128 m triangles shade like the 16 m terrain.
+        std::vector<uint8_t> normalMips;
     };
-    // Encodes linear RGB + alpha samples (rows along +Z) into a MacroColorImage.
+    // Encodes linear RGB + alpha samples (rows along +Z), and optional unit
+    // normals, into a MacroColorImage.
     static MacroColorImage EncodeMacroColorImage(int width, int height,
-        float originX, float originZ, float spacing, const std::vector<glm::vec4>& linear);
+        float originX, float originZ, float spacing, const std::vector<glm::vec4>& linear,
+        const std::vector<glm::vec3>* normals = nullptr);
     struct MacroColorSource
     {
         // Cheap fingerprint of the inputs, polled on the scene thread.
@@ -139,6 +167,8 @@ public:
     struct MacroColorBinding
     {
         const Engine::Graphics::IGraphicsTexture* texture = nullptr;
+        // Surface normals over the same mapping (texture slot 2), or null.
+        const Engine::Graphics::IGraphicsTexture* normalTexture = nullptr;
         // World X/Z of the texture corner, 1 / extent X, 1 / extent Z.
         glm::vec4 mapping{ 0.f };
     };
@@ -520,6 +550,7 @@ private:
     std::future<MacroColorImage> m_macroJob;
     MacroColorImage m_macroImage; // geometry of the uploaded texture
     std::shared_ptr<Engine::Graphics::IGraphicsTexture> m_macroTexture;
+    std::shared_ptr<Engine::Graphics::IGraphicsTexture> m_macroNormalTexture;
     IGraphicsProvider* m_macroProvider = nullptr;
     uint64_t m_macroRequested = 0;
     std::chrono::steady_clock::time_point m_macroChecked{};

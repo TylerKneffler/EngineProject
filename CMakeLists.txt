@@ -523,7 +523,7 @@ target_compile_definitions(Engine PUBLIC
 if(ENGINE_VULKAN_ENABLED)
     set(VULKAN_SHADER_DIR "${CMAKE_BINARY_DIR}/VulkanShaders")
     set(VULKAN_SHADER_OUTPUTS)
-    foreach(SHADER_NAME Grid Object ObjectOutline Particle Skybox UI UIFont PostProcess)
+    foreach(SHADER_NAME Grid Object ObjectOutline Particle Skybox Clouds UI UIFont PostProcess)
         foreach(STAGE VS PS)
             if(STAGE STREQUAL "VS")
                 set(SHADER_PROFILE vs_6_0)
@@ -549,8 +549,11 @@ if(ENGINE_VULKAN_ENABLED)
             list(APPEND VULKAN_SHADER_OUTPUTS "${SHADER_OUTPUT}")
         endforeach()
     endforeach()
-    # Bloom mip-chain passes share PostProcess.hlsl with the compose shader.
-    foreach(SHADER_SPEC "BloomDown:BloomDownsamplePS" "BloomUp:BloomUpsamplePS")
+    # Bloom mip-chain and auto exposure passes share PostProcess.hlsl with the
+    # compose shader.
+    foreach(SHADER_SPEC "BloomDown:BloomDownsamplePS" "BloomUp:BloomUpsamplePS"
+        "ExposureLuminance:ExposureLuminancePS" "ExposureHistogram:ExposureHistogramPS"
+        "ExposureAdapt:ExposureAdaptPS")
         string(REPLACE ":" ";" SHADER_PARTS "${SHADER_SPEC}")
         list(GET SHADER_PARTS 0 SHADER_PASS)
         list(GET SHADER_PARTS 1 SHADER_ENTRY)
@@ -567,6 +570,27 @@ if(ENGINE_VULKAN_ENABLED)
     endforeach()
     set(SHADER_SOURCE "${ENGINE_ROOT}/Engine/Core/Shaders/InstanceCull/InstanceCull.hlsl")
     set(SHADER_OUTPUT "${VULKAN_SHADER_DIR}/InstanceCull.CS.spv")
+    add_custom_command(OUTPUT "${SHADER_OUTPUT}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${VULKAN_SHADER_DIR}"
+        COMMAND "${DXC_SPIRV_EXECUTABLE}" -spirv -fspv-target-env=vulkan1.1
+            -fvk-use-dx-layout -fspv-entrypoint-name=main -D VULKAN=1 -T cs_6_0 -E CSMain
+            -Fo "${SHADER_OUTPUT}" "${SHADER_SOURCE}"
+        DEPENDS "${SHADER_SOURCE}" VERBATIM)
+    list(APPEND VULKAN_SHADER_OUTPUTS "${SHADER_OUTPUT}")
+    # Volumetric cloud march (Clouds.hlsl CSMain): CLOUD_MARCH selects the
+    # compute bindings; the VS/PS above use the graphics ones.
+    set(SHADER_SOURCE "${ENGINE_ROOT}/Engine/Core/Shaders/Clouds/Clouds.hlsl")
+    set(SHADER_OUTPUT "${VULKAN_SHADER_DIR}/Clouds.CS.spv")
+    add_custom_command(OUTPUT "${SHADER_OUTPUT}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${VULKAN_SHADER_DIR}"
+        COMMAND "${DXC_SPIRV_EXECUTABLE}" -spirv -fspv-target-env=vulkan1.1
+            -fvk-use-dx-layout -fspv-entrypoint-name=main -D VULKAN=1 -D CLOUD_MARCH=1
+            -T cs_6_0 -E CSMain -Fo "${SHADER_OUTPUT}" "${SHADER_SOURCE}"
+        DEPENDS "${SHADER_SOURCE}" VERBATIM)
+    list(APPEND VULKAN_SHADER_OUTPUTS "${SHADER_OUTPUT}")
+    # Screen-space ambient occlusion (GTAO compute).
+    set(SHADER_SOURCE "${ENGINE_ROOT}/Engine/Core/Shaders/AmbientOcclusion/AmbientOcclusion.hlsl")
+    set(SHADER_OUTPUT "${VULKAN_SHADER_DIR}/AmbientOcclusion.CS.spv")
     add_custom_command(OUTPUT "${SHADER_OUTPUT}"
         COMMAND ${CMAKE_COMMAND} -E make_directory "${VULKAN_SHADER_DIR}"
         COMMAND "${DXC_SPIRV_EXECUTABLE}" -spirv -fspv-target-env=vulkan1.1
@@ -2436,6 +2460,18 @@ if(NOT ENGINE_PROJECT_DIR AND
     add_test(NAME AtmosphereFogSettings COMMAND AtmosphereFogSettingsTests)
     set_tests_properties(AtmosphereFogSettings PROPERTIES
         WORKING_DIRECTORY "${ENGINE_ROOT}" TIMEOUT 60)
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/PhysicalAtmosphereTests.cpp")
+    enable_testing()
+    add_executable(PhysicalAtmosphereTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/PhysicalAtmosphereTests.cpp")
+    target_link_libraries(PhysicalAtmosphereTests PRIVATE Engine)
+    target_include_directories(PhysicalAtmosphereTests PRIVATE
+        "${ENGINE_ROOT}" "${ENGINE_ROOT}/Engine")
+    target_compile_definitions(PhysicalAtmosphereTests PRIVATE NOMINMAX)
+    add_test(NAME PhysicalAtmosphere COMMAND PhysicalAtmosphereTests)
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND

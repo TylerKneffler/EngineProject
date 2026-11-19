@@ -41,6 +41,7 @@ public:
     VkRenderPass GetOffscreenRenderPass() const { return m_offscreenRenderPass; }
     VkRenderPass GetCompositionRenderPass() const { return m_compositionRenderPass; }
     VkFramebuffer GetCurrentFramebuffer() const { return m_framebuffers[m_imageIndex]; }
+    VkImage GetCurrentImage() const { return m_images[m_imageIndex]; }
     VkCommandBuffer GetCurrentCommandBuffer() const { return m_currentCommandBuffer; }
     VkExtent2D GetExtent() const { return m_extent; }
     uint32_t GetImageCount() const { return static_cast<uint32_t>(m_images.size()); }

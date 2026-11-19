@@ -31,6 +31,15 @@ struct D3D11OcclusionQueryState
     uint64_t frameIndex = 0;
 };
 
+// The host's single-sample scene depth (R32G8X24 typeless) as a shader
+// resource, and the compute shader that copies it into a buffer
+// (D3D11GraphicsContext::CopySceneDepth). Shared by a factory's contexts.
+struct D3D11SceneDepthState
+{
+    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> depth;
+    Microsoft::WRL::ComPtr<ID3D11ComputeShader> copyShader;
+};
+
 struct D3D11FrameResourceState
 {
     static constexpr uint32_t ConstantSize = 256;
@@ -133,6 +142,11 @@ public:
     void SetComputeWriteBuffer(const Engine::Graphics::IGraphicsBuffer* buffer) override;
     void DispatchCompute(uint32_t x, uint32_t y = 1, uint32_t z = 1) override;
     void StorageBarrier(const Engine::Graphics::IGraphicsBuffer* buffer) override;
+    void SetSceneDepth(std::shared_ptr<D3D11SceneDepthState> state) { m_sceneDepth = std::move(state); }
+    bool SupportsSceneDepthCopy() const override
+    { return m_sceneDepth && m_sceneDepth->depth && m_sceneDepth->copyShader; }
+    void CopySceneDepth(Engine::Graphics::IGraphicsBuffer* destination,
+        uint32_t width, uint32_t height) override;
     bool SupportsIndirectDraws() const override { return true; }
     bool DrawInstancesIndirect(const Engine::Graphics::IGraphicsBuffer*, uint64_t, bool) override;
     bool CopyBuffer(const Engine::Graphics::IGraphicsBuffer* source,
@@ -196,6 +210,7 @@ private:
     D3D11OcclusionQueryState::Entry* m_activeOcclusionQuery = nullptr;
     uint64_t m_occlusionViewId = 0;
     uint64_t m_occlusionSceneSignature = 0;
+    std::shared_ptr<D3D11SceneDepthState> m_sceneDepth;
 };
 
 class D3D11GraphicsContextFactory : public Engine::Graphics::IGraphicsContextFactory
@@ -250,16 +265,25 @@ public:
     { return m_frameResources ? m_frameResources->discardMaps : 0; }
     std::unique_ptr<Engine::Graphics::IGraphicsContext> CreateContext() override
     {
-        return std::make_unique<D3D11GraphicsContext>(
+        auto context = std::make_unique<D3D11GraphicsContext>(
             m_device, m_externalContext ? m_externalContext : m_context,
             m_occlusionState, m_frameResources, m_gpuTimings);
+        context->SetSceneDepth(m_sceneDepth);
+        return context;
     }
     std::unique_ptr<Engine::Graphics::IGraphicsContext> CreateContextForCommandBuffer(void* commandBuffer) override
     {
-        return std::make_unique<D3D11GraphicsContext>(m_device,
+        auto context = std::make_unique<D3D11GraphicsContext>(m_device,
             static_cast<ID3D11DeviceContext*>(commandBuffer),
             nullptr, m_frameResources, nullptr);
+        context->SetSceneDepth(m_sceneDepth);
+        return context;
     }
+    // The host's single-sample scene depth as a shader resource view
+    // (R32_FLOAT_X8X24_TYPELESS), or null (multisampled or unavailable).
+    void SetSceneDepth(ID3D11ShaderResourceView* depth);
+    bool SupportsSceneDepthCopy() const override
+    { return m_sceneDepth->depth && m_sceneDepth->copyShader; }
 
 private:
     uint64_t m_preparedFrameSerial=0;
@@ -270,5 +294,6 @@ private:
     std::shared_ptr<D3D11OcclusionQueryState> m_occlusionState;
     std::shared_ptr<D3D11FrameResourceState> m_frameResources;
     std::shared_ptr<D3D11GpuTimingState> m_gpuTimings;
+    std::shared_ptr<D3D11SceneDepthState> m_sceneDepth = std::make_shared<D3D11SceneDepthState>();
 };
 }

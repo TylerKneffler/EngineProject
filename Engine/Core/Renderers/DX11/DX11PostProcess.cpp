@@ -100,6 +100,13 @@ void DX11PostProcess::Create(ID3D11Device* device, uint32_t width, uint32_t heig
         ThrowIfFailed(device->CreatePixelShader(ps->GetBufferPointer(), ps->GetBufferSize(), nullptr, &m_pixelShader));
         ThrowIfFailed(device->CreatePixelShader(down->GetBufferPointer(), down->GetBufferSize(), nullptr, &m_bloomDownsampleShader));
         ThrowIfFailed(device->CreatePixelShader(up->GetBufferPointer(), up->GetBufferSize(), nullptr, &m_bloomUpsampleShader));
+        const auto luminance = Compile(source, "ExposureLuminancePS", "ps_5_0");
+        const auto histogram = Compile(source, "ExposureHistogramPS", "ps_5_0");
+        const auto adapt = Compile(source, "ExposureAdaptPS", "ps_5_0");
+        ThrowIfFailed(device->CreatePixelShader(luminance->GetBufferPointer(), luminance->GetBufferSize(), nullptr, &m_exposureLuminanceShader));
+        ThrowIfFailed(device->CreatePixelShader(histogram->GetBufferPointer(), histogram->GetBufferSize(), nullptr, &m_exposureHistogramShader));
+        ThrowIfFailed(device->CreatePixelShader(adapt->GetBufferPointer(), adapt->GetBufferSize(), nullptr, &m_exposureAdaptShader));
+        CreateExposureTargets(device);
         D3D11_SAMPLER_DESC sampler{};
         sampler.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
         sampler.AddressU = sampler.AddressV = sampler.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
@@ -123,6 +130,81 @@ void DX11PostProcess::Create(ID3D11Device* device, uint32_t width, uint32_t heig
         blend.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
         ThrowIfFailed(device->CreateBlendState(&blend, &m_additiveBlend));
     }
+}
+
+void DX11PostProcess::CreateExposureTargets(ID3D11Device* device)
+{
+    using namespace Engine::Graphics;
+    const auto create = [&](uint32_t width, uint32_t height, DXGI_FORMAT format,
+        Microsoft::WRL::ComPtr<ID3D11RenderTargetView>& rtv,
+        Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>& srv)
+    {
+        D3D11_TEXTURE2D_DESC desc{};
+        desc.Width = width; desc.Height = height; desc.MipLevels = 1; desc.ArraySize = 1;
+        desc.Format = format; desc.SampleDesc.Count = 1; desc.Usage = D3D11_USAGE_DEFAULT;
+        desc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+        Microsoft::WRL::ComPtr<ID3D11Texture2D> texture;
+        ThrowIfFailed(device->CreateTexture2D(&desc, nullptr, &texture));
+        ThrowIfFailed(device->CreateRenderTargetView(texture.Get(), nullptr, &rtv));
+        ThrowIfFailed(device->CreateShaderResourceView(texture.Get(), nullptr, &srv));
+    };
+    create(ExposureMapWidth, ExposureMapHeight, DXGI_FORMAT_R16G16B16A16_FLOAT,
+        m_exposureMapRtv, m_exposureMapSrv);
+    create(ExposureBins, 1, DXGI_FORMAT_R16G16B16A16_FLOAT,
+        m_exposureHistogramRtv, m_exposureHistogramSrv);
+    // Full float: per-frame adaptation steps are far below half precision.
+    for (uint32_t index = 0; index < 2; ++index)
+        create(1, 1, DXGI_FORMAT_R32G32B32A32_FLOAT, m_exposureRtvs[index], m_exposureSrvs[index]);
+    m_exposure.Reset();
+}
+
+ID3D11ShaderResourceView* DX11PostProcess::RenderExposure(ID3D11DeviceContext* context,
+    ID3D11ShaderResourceView* source, const Engine::Graphics::PostProcessSettings& settings)
+{
+    using namespace Engine::Graphics;
+    UINT savedViewportCount = D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE;
+    D3D11_VIEWPORT savedViewports[D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE]{};
+    context->RSGetViewports(&savedViewportCount, savedViewports);
+    Microsoft::WRL::ComPtr<ID3D11RasterizerState> savedRasterizer;
+    context->RSGetState(&savedRasterizer);
+    context->RSSetState(nullptr);
+    context->OMSetBlendState(nullptr, nullptr, 0xffffffffu);
+
+    const ExposureFrame frame = m_exposure.Next();
+    const auto values = MakeExposureConstants(settings, frame.deltaSeconds, frame.history);
+    UploadConstants(context, &values);
+    ID3D11Buffer* cb = m_constants.Get();
+    ID3D11SamplerState* sampler = m_sampler.Get();
+    context->PSSetConstantBuffers(0, 1, &cb);
+    context->PSSetSamplers(0, 1, &sampler);
+    const auto pass = [&](ID3D11PixelShader* shader, ID3D11RenderTargetView* target,
+        uint32_t width, uint32_t height, ID3D11ShaderResourceView* input0,
+        ID3D11ShaderResourceView* input1)
+    {
+        ID3D11ShaderResourceView* nullViews[2] = {};
+        context->PSSetShaderResources(0, 2, nullViews);
+        context->OMSetRenderTargets(1, &target, nullptr);
+        const D3D11_VIEWPORT viewport{ 0.f, 0.f, float(width), float(height), 0.f, 1.f };
+        context->RSSetViewports(1, &viewport);
+        context->PSSetShader(shader, nullptr, 0);
+        ID3D11ShaderResourceView* inputs[2] = { input0, input1 };
+        context->PSSetShaderResources(0, 2, inputs);
+        context->Draw(3, 0);
+    };
+    pass(m_exposureLuminanceShader.Get(), m_exposureMapRtv.Get(),
+        ExposureMapWidth, ExposureMapHeight, source, nullptr);
+    pass(m_exposureHistogramShader.Get(), m_exposureHistogramRtv.Get(),
+        ExposureBins, 1, m_exposureMapSrv.Get(), nullptr);
+    pass(m_exposureAdaptShader.Get(), m_exposureRtvs[frame.target].Get(), 1, 1,
+        m_exposureHistogramSrv.Get(), m_exposureSrvs[1u - frame.target].Get());
+
+    ID3D11ShaderResourceView* nullViews[2] = {};
+    context->PSSetShaderResources(0, 2, nullViews);
+    context->OMSetRenderTargets(0, nullptr, nullptr);
+    context->RSSetState(savedRasterizer.Get());
+    if (savedViewportCount > 0)
+        context->RSSetViewports(savedViewportCount, savedViewports);
+    return m_exposureSrvs[frame.target].Get();
 }
 
 void DX11PostProcess::UploadConstants(ID3D11DeviceContext* context, const void* data)
@@ -263,19 +345,28 @@ void DX11PostProcess::Compose(ID3D11DeviceContext* context,
         context->OMSetRenderTargets(0, nullptr, nullptr);
         RenderBloom(context, srv);
     }
+    ID3D11ShaderResourceView* exposure = nullptr;
+    if (settings.autoExposure && m_exposureMapRtv)
+    {
+        context->OMSetRenderTargets(0, nullptr, nullptr);
+        exposure = RenderExposure(context, srv, settings);
+    }
+    else
+        m_exposure.Reset();
     context->OMSetRenderTargets(1, &output, nullptr);
     context->OMSetBlendState(nullptr, nullptr, 0xffffffffu);
     context->PSSetShader(m_pixelShader.Get(), nullptr, 0);
     auto composeSettings = settings;
     if (!bloom) composeSettings.bloomIntensity = 0.f;
+    composeSettings.autoExposure = exposure != nullptr;
     const auto values = Engine::Graphics::MakeComposeConstants(composeSettings, m_bloomLevels);
     UploadConstants(context, &values);
     ID3D11Buffer* cb = m_constants.Get();
-    ID3D11ShaderResourceView* views[2] = { srv, bloom ? m_bloomSrvs[0].Get() : nullptr };
+    ID3D11ShaderResourceView* views[3] = { srv, bloom ? m_bloomSrvs[0].Get() : nullptr, exposure };
     ID3D11SamplerState* sampler = m_sampler.Get();
-    context->PSSetConstantBuffers(0, 1, &cb); context->PSSetShaderResources(0, 2, views);
+    context->PSSetConstantBuffers(0, 1, &cb); context->PSSetShaderResources(0, 3, views);
     context->PSSetSamplers(0, 1, &sampler); context->Draw(3, 0);
-    ID3D11ShaderResourceView* nullViews[2] = {};
-    context->PSSetShaderResources(0, 2, nullViews);
+    ID3D11ShaderResourceView* nullViews[3] = {};
+    context->PSSetShaderResources(0, 3, nullViews);
 }
 }

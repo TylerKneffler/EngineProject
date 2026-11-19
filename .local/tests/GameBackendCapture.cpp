@@ -56,7 +56,7 @@ bool g_foreground = false;
 Engine::Game::GameBenchmarkOptions Parse(int argc, char** argv)
 {
     Engine::Game::GameBenchmarkOptions options;
-    options.scene = std::filesystem::path(ENGINE_ASSETS_PATH) / "Scenes/terrain/oak_meadow.scene";
+    options.scene = std::filesystem::path(ENGINE_ASSETS_PATH) / "Scenes/terrain/landscape_demo.scene";
     options.output = ".local/performance-logs";
     for (int i = 1; i < argc; ++i)
     {
@@ -103,7 +103,7 @@ Engine::Game::GameBenchmarkOptions Parse(int argc, char** argv)
                 "[--drive-forward <frames>] [--look-yaw <pixels/frame>] [--require-movement] [--max-fps <fps>] [--profile <video profile>] "
                 "[--disable-clustered-lighting] [--viewpoint <camera object>] [--camera-position x,y,z] [--camera-target x,y,z] "
                 "[--cpu-sample] [--foreground]\n"
-                "Defaults to oak_meadow.scene. Runs the standalone Game loop, writes frames.jsonl and capture.ppm, "
+                "Defaults to terrain/landscape_demo.scene. Runs the standalone Game loop, writes frames.jsonl and capture.ppm, "
                 "and returns 2 if capture validity checks fail. Windows open without focus, behind the active app, "
                 "unless --foreground is given.\n";
             std::exit(0);

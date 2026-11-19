@@ -92,6 +92,312 @@ void SceneRendererLighting::ResolveSkySun(const SceneRenderer& renderer,
     radiance = glm::vec4(sunRadiance, std::max(settings.sunDiscIntensity, 0.f));
 }
 
+void SceneRendererLighting::ApplyPhysicalAtmosphere(
+    SceneRenderer& renderer,
+    Engine::Model::LightData* frameLights,
+    uint32_t frameLightCount,
+    const glm::vec3& cameraPosition)
+{
+    renderer.m_physicalAtmosphereReady = false;
+    const Scene& scene = renderer.GetScene();
+    const auto& sky = scene.settings.physicalSky;
+    if (!sky.enabled || scene.IsMode2D())
+    {
+        renderer.m_physicalSky.Reset();
+        return;
+    }
+    // The sun: the strongest directional light (as ResolveViewLighting picks).
+    int sunIndex = -1;
+    float strongest = 0.f;
+    for (uint32_t index = 0; frameLights && index < frameLightCount; ++index)
+    {
+        const auto& light = frameLights[index];
+        if (std::abs(light.params.y - 1.f) >= 0.25f) continue;
+        const float strength = glm::length(glm::vec3(light.colorIntensity)) * light.colorIntensity.w;
+        if (sunIndex < 0 || strength > strongest) { sunIndex = static_cast<int>(index); strongest = strength; }
+    }
+    PhysicalSky::Inputs inputs;
+    inputs.parameters.rayleighScale = sky.rayleighScale;
+    inputs.parameters.mieScale = sky.mieScale;
+    inputs.parameters.mieScaleHeight = sky.mieScaleHeight;
+    inputs.parameters.mieAnisotropy = sky.mieAnisotropy;
+    inputs.parameters.ozoneScale = sky.ozoneScale;
+    inputs.parameters.groundAlbedo = sky.groundAlbedo;
+    inputs.altitude = std::max(cameraPosition.y - sky.groundHeight, 0.f);
+    if (sunIndex >= 0)
+    {
+        auto& sun = frameLights[sunIndex];
+        inputs.toSun = glm::normalize(glm::vec3(sun.positionRange));
+        inputs.sunIlluminance = glm::vec3(sun.colorIntensity) * sun.colorIntensity.w;
+    }
+    else
+        inputs.sunIlluminance = glm::vec3(0.f);
+    renderer.m_physicalSky.Update(inputs);
+    const auto& atmosphere = renderer.m_physicalSky.Atmosphere();
+    if (!atmosphere)
+        return;
+    const glm::vec3 transmittance = atmosphere->Transmittance(inputs.altitude, inputs.toSun.y);
+    if (sunIndex >= 0 && sky.attenuateSun)
+    {
+        auto& sun = frameLights[sunIndex];
+        sun.colorIntensity = glm::vec4(glm::vec3(sun.colorIntensity) * transmittance,
+            sun.colorIntensity.w);
+    }
+    renderer.m_physicalAtmosphereReady = true;
+    renderer.m_physicalToSun = inputs.toSun;
+    renderer.m_physicalSunIlluminance = inputs.sunIlluminance * transmittance;
+    renderer.m_physicalMultipleScattering = inputs.sunIlluminance *
+        atmosphere->MultipleScattering(inputs.altitude, inputs.toSun.y);
+}
+
+const Engine::Graphics::IGraphicsBuffer* SceneRendererLighting::AmbientOcclusionBuffer(
+    SceneRenderer& renderer)
+{
+    if (renderer.m_ambientOcclusionReady &&
+        renderer.m_ambientOcclusionBuffers[renderer.m_ambientOcclusionLatest])
+        return renderer.m_ambientOcclusionBuffers[renderer.m_ambientOcclusionLatest].get();
+    if (!renderer.m_ambientOcclusionOff && renderer.m_graphicsProvider &&
+        renderer.m_graphicsProvider->GetBufferFactory())
+    {
+        // Header only, all zero: "not valid", so shaders skip the lookup.
+        const std::array<uint32_t, 16> header{};
+        renderer.m_ambientOcclusionOff = renderer.m_graphicsProvider->GetBufferFactory()
+            ->CreateStaticShaderResource(sizeof(header), header.data(), sizeof(uint32_t));
+    }
+    return renderer.m_ambientOcclusionOff.get();
+}
+
+void SceneRendererLighting::ComputeAmbientOcclusion(
+    SceneRenderer& renderer,
+    Engine::Graphics::IGraphicsContext* context,
+    const glm::mat4& view,
+    const glm::mat4& proj,
+    uint32_t viewportWidth,
+    uint32_t viewportHeight)
+{
+    const Scene& scene = renderer.GetScene();
+    // Called once per main view: a previous view's depth copy is stale.
+    renderer.m_sceneDepthCopied = false;
+    renderer.m_sceneDepthWidth = viewportWidth;
+    renderer.m_sceneDepthHeight = viewportHeight;
+    renderer.m_sceneDepthReconstruct = std::abs(proj[2][3]) > 1e-6f
+        ? glm::vec2(proj[2][2] / proj[2][3], proj[3][2]) : glm::vec2(0.f);
+    const auto& settings = scene.settings.ambientOcclusion;
+    const bool lit = scene.settings.renderMode == Engine::Model::SceneRenderMode::Lit;
+    if (!settings.enabled || !lit || scene.IsMode2D() || !renderer.m_ambientOcclusionPipeline ||
+        !context->SupportsSceneDepthCopy() || viewportWidth < 16u || viewportHeight < 16u ||
+        viewportWidth > 8192u || viewportHeight > 8192u)
+    {
+        renderer.m_ambientOcclusionReady = false;
+        return;
+    }
+    auto* buffers = renderer.m_graphicsProvider
+        ? renderer.m_graphicsProvider->GetBufferFactory() : nullptr;
+    if (!buffers)
+        return;
+    using Engine::Graphics::IGraphicsBuffer;
+    const uint32_t halfWidth = (viewportWidth + 1u) / 2u;
+    const uint32_t halfHeight = (viewportHeight + 1u) / 2u;
+    const uint64_t depthBytes = uint64_t(Engine::Graphics::SceneDepthRowPitch(viewportWidth)) *
+        viewportHeight * sizeof(float);
+    const uint64_t occlusionBytes = (16u + uint64_t(halfWidth) * halfHeight) * sizeof(uint32_t);
+    // Zero-filled: an unwritten depth reads as sky (unoccluded) and an
+    // unwritten AO header as "not valid".
+    if (!renderer.m_ambientOcclusionDepth || renderer.m_ambientOcclusionDepthBytes < depthBytes)
+    {
+        const std::vector<uint8_t> zeros(size_t(depthBytes), 0u);
+        renderer.m_ambientOcclusionDepth = buffers->CreateBuffer(IGraphicsBuffer::Usage::StorageBuffer,
+            IGraphicsBuffer::AccessMode::Default, depthBytes, zeros.data(), sizeof(float));
+        renderer.m_ambientOcclusionDepthBytes = renderer.m_ambientOcclusionDepth ? depthBytes : 0;
+    }
+    if (!renderer.m_ambientOcclusionBuffers[0] || renderer.m_ambientOcclusionBufferBytes < occlusionBytes)
+    {
+        const std::vector<uint8_t> zeros(size_t(occlusionBytes), 0u);
+        for (auto& buffer : renderer.m_ambientOcclusionBuffers)
+            buffer = buffers->CreateBuffer(IGraphicsBuffer::Usage::StorageBuffer,
+                IGraphicsBuffer::AccessMode::Default, occlusionBytes, zeros.data(), sizeof(uint32_t));
+        renderer.m_ambientOcclusionBufferBytes = renderer.m_ambientOcclusionBuffers[0] &&
+            renderer.m_ambientOcclusionBuffers[1] ? occlusionBytes : 0;
+        renderer.m_ambientOcclusionReady = false;
+    }
+    if (!renderer.m_ambientOcclusionDepth || !renderer.m_ambientOcclusionBufferBytes)
+        return;
+
+    // Camera frame for reconstruction and reprojection: world axes of the
+    // view, the projection's x/y scales, and view depth w = B / (depth - A).
+    struct Constants
+    {
+        glm::vec4 cameraPositionScaleX;
+        glm::vec4 cameraRightScaleY;
+        glm::vec4 cameraUpDepthA;
+        glm::vec4 cameraForwardDepthB;
+        glm::uvec4 extent;
+        glm::vec4 params;
+    } constants{};
+    static_assert(sizeof(Constants) == 96, "AmbientOcclusion.hlsl constants");
+    const glm::mat4 inverseView = glm::inverse(view);
+    const glm::mat3 axes(inverseView);
+    // clip.w grows along proj's last row: the view-space forward direction.
+    const glm::vec3 forwardView(proj[0][3], proj[1][3], proj[2][3]);
+    const float forwardScale = proj[2][3];
+    if (std::abs(forwardScale) < 1e-6f)
+        return; // not a perspective projection
+    constants.cameraPositionScaleX = glm::vec4(glm::vec3(inverseView[3]), proj[0][0]);
+    constants.cameraRightScaleY = glm::vec4(glm::normalize(axes[0]), proj[1][1]);
+    constants.cameraUpDepthA = glm::vec4(glm::normalize(axes[1]), proj[2][2] / forwardScale);
+    constants.cameraForwardDepthB = glm::vec4(glm::normalize(axes * forwardView), proj[3][2]);
+    constants.extent = glm::uvec4(viewportWidth, viewportHeight, halfWidth | (halfHeight << 16),
+        Engine::Graphics::SceneDepthRowPitch(viewportWidth));
+    const bool history = renderer.m_ambientOcclusionReady;
+    constants.params = glm::vec4(settings.radius, settings.intensity,
+        float(renderer.m_ambientOcclusionFrame++ % 64u), history ? settings.temporalBlend : 1.f);
+
+    const uint32_t target = 1u - renderer.m_ambientOcclusionLatest;
+    const auto* previous = renderer.m_ambientOcclusionBuffers[renderer.m_ambientOcclusionLatest].get();
+    auto* output = renderer.m_ambientOcclusionBuffers[target].get();
+    if (!context->BeginComputePass())
+        return;
+    context->BeginGpuTiming(Engine::Graphics::GpuTimingStage::AmbientOcclusion);
+    context->CopySceneDepth(renderer.m_ambientOcclusionDepth.get(), viewportWidth, viewportHeight);
+    renderer.m_sceneDepthCopied = true;
+    if (context->SetComputePipeline(renderer.m_ambientOcclusionPipeline.get()))
+    {
+        context->SetComputeReadBuffer(renderer.m_ambientOcclusionDepth.get(), 0);
+        context->SetComputeReadBuffer(previous, 1);
+        context->SetComputeWriteBuffer(output);
+        context->SetComputeConstants(&constants, sizeof(constants));
+        context->DispatchCompute(static_cast<uint32_t>(
+            (uint64_t(halfWidth) * halfHeight + 63u) / 64u));
+        context->StorageBarrier(output);
+        renderer.m_ambientOcclusionLatest = target;
+        renderer.m_ambientOcclusionReady = true;
+    }
+    context->EndGpuTiming(Engine::Graphics::GpuTimingStage::AmbientOcclusion);
+    context->EndComputePass();
+    context->SetStructuredBuffer(47, AmbientOcclusionBuffer(renderer));
+}
+
+const Engine::Graphics::IGraphicsBuffer* SceneRendererLighting::SceneDepthForPixelShaders(
+    SceneRenderer& renderer, Engine::Graphics::IGraphicsContext* context)
+{
+    using Engine::Graphics::IGraphicsBuffer;
+    const uint32_t width = renderer.m_sceneDepthWidth, height = renderer.m_sceneDepthHeight;
+    if (!context || !context->SupportsSceneDepthCopy() || width < 1u || height < 1u ||
+        width > 8192u || height > 8192u || renderer.m_sceneDepthReconstruct.y == 0.f)
+        return nullptr;
+    auto* buffers = renderer.m_graphicsProvider
+        ? renderer.m_graphicsProvider->GetBufferFactory() : nullptr;
+    const uint64_t depthBytes = uint64_t(Engine::Graphics::SceneDepthRowPitch(width)) *
+        height * sizeof(float);
+    if (!renderer.m_sceneDepthCopied &&
+        (!renderer.m_ambientOcclusionDepth || renderer.m_ambientOcclusionDepthBytes < depthBytes))
+    {
+        if (!buffers) return nullptr;
+        const std::vector<uint8_t> zeros(size_t(depthBytes), 0u);
+        renderer.m_ambientOcclusionDepth = buffers->CreateBuffer(IGraphicsBuffer::Usage::StorageBuffer,
+            IGraphicsBuffer::AccessMode::Default, depthBytes, zeros.data(), sizeof(float));
+        renderer.m_ambientOcclusionDepthBytes = renderer.m_ambientOcclusionDepth ? depthBytes : 0;
+    }
+    if (!renderer.m_ambientOcclusionDepth || !context->BeginComputePass())
+        return nullptr;
+    if (!renderer.m_sceneDepthCopied)
+    {
+        context->CopySceneDepth(renderer.m_ambientOcclusionDepth.get(), width, height);
+        renderer.m_sceneDepthCopied = true;
+    }
+    // Into a state pixel shaders can read (DX12), visible to them (Vulkan).
+    context->StorageBarrier(renderer.m_ambientOcclusionDepth.get());
+    context->EndComputePass();
+    return renderer.m_ambientOcclusionDepth.get();
+}
+
+void SceneRendererLighting::MarchVolumetricClouds(
+    SceneRenderer& renderer,
+    Engine::Graphics::IGraphicsContext* context,
+    const glm::mat4& view,
+    const glm::mat4& proj,
+    uint32_t viewportWidth,
+    uint32_t viewportHeight,
+    bool shadowOnly,
+    const glm::vec3& cameraPosition,
+    const glm::vec3& sunDirection,
+    const glm::vec3& sunRadiance)
+{
+    renderer.m_cloudsMarched = false;
+    if (shadowOnly || !context || !viewportWidth || !viewportHeight)
+        return;
+    Scene& scene = renderer.GetScene();
+    const auto& clouds = scene.settings.volumetricClouds;
+    if (!clouds.enabled || scene.IsMode2D() || !renderer.m_cloudPipeline ||
+        !renderer.m_cloudMarchPipeline || !renderer.m_skyboxCBMapped)
+        return;
+
+    // Half resolution, rounded up; the grid size travels bit-packed in the
+    // constants (12 bits per axis).
+    const uint32_t width = std::min((viewportWidth + 1u) / 2u, 4095u);
+    const uint32_t height = std::min((viewportHeight + 1u) / 2u, 4095u);
+    const uint64_t count = static_cast<uint64_t>(width) * height;
+    if (!renderer.m_cloudSamples || renderer.m_cloudSampleCapacity < count)
+    {
+        auto* buffers = renderer.m_graphicsProvider
+            ? renderer.m_graphicsProvider->GetBufferFactory() : nullptr;
+        if (!buffers)
+            return;
+        // The previous buffer may still be read by frames in flight.
+        if (renderer.m_cloudSamples)
+            renderer.RetiredSceneBuffers().push_back(std::move(renderer.m_cloudSamples));
+        renderer.m_cloudSamples = buffers->CreateBuffer(
+            Engine::Graphics::IGraphicsBuffer::Usage::StorageBuffer,
+            Engine::Graphics::IGraphicsBuffer::AccessMode::Default,
+            count * sizeof(glm::vec4), nullptr, sizeof(glm::vec4));
+        renderer.m_cloudSampleCapacity = renderer.m_cloudSamples ? count : 0;
+        if (!renderer.m_cloudSamples)
+            return;
+    }
+
+    ViewLighting::SkyboxConstants rays{};
+    ViewLighting::SetSkyboxRays(rays, proj, glm::mat4(glm::mat3(view)));
+    const float time = static_cast<float>(scene.GetElapsedTime());
+    const float wind = glm::radians(clouds.windDirection);
+    const glm::vec3 toSun = glm::dot(sunDirection, sunDirection) > 1e-8f
+        ? glm::normalize(sunDirection) : glm::vec3(0.f, 1.f, 0.f);
+    ViewLighting::CloudConstants data{};
+    data.rayX = glm::vec4(glm::vec3(rays.rayX), time);
+    data.rayY = glm::vec4(glm::vec3(rays.rayY), clouds.baseHeight);
+    data.rayOrigin = glm::vec4(glm::vec3(rays.rayOrigin), clouds.baseHeight + clouds.thickness);
+    data.camera = glm::vec4(cameraPosition, clouds.coverage);
+    data.sunDirection = glm::vec4(toSun, clouds.density);
+    data.sunRadiance = glm::vec4(sunRadiance * clouds.sunIntensity, clouds.maxDistance);
+    data.ambient = glm::vec4(clouds.ambientColor * clouds.ambientIntensity, clouds.shapeScale);
+    // Wind moves the noise field; wrap the offset at a large multiple of the
+    // shape scale so float precision holds over long sessions.
+    const float travel = std::fmod(clouds.windSpeed * time, 4096.f * clouds.shapeScale);
+    const uint32_t packed = width | (height << 12u) |
+        (static_cast<uint32_t>(std::clamp(clouds.steps, 1, 255)) << 24u);
+    float packedBits = 0.f;
+    std::memcpy(&packedBits, &packed, sizeof(packedBits));
+    data.shape = glm::vec4(-std::cos(wind) * travel, clouds.detail,
+        -std::sin(wind) * travel, packedBits);
+    // The composite reads the same constants from the sky ring.
+    std::memcpy(static_cast<uint8_t*>(renderer.m_skyboxCBMapped) +
+        static_cast<uint64_t>(SceneRenderer::kCloudConstantSlot) * SceneRenderer::kCBStride,
+        &data, sizeof(data));
+
+    if (!context->BeginComputePass())
+        return;
+    if (context->SetComputePipeline(renderer.m_cloudMarchPipeline.get()))
+    {
+        context->BeginGpuTiming(Engine::Graphics::GpuTimingStage::Clouds);
+        context->SetComputeWriteBuffer(renderer.m_cloudSamples.get());
+        context->SetComputeConstants(&data, sizeof(data));
+        context->DispatchCompute(static_cast<uint32_t>((count + 63u) / 64u));
+        context->StorageBarrier(renderer.m_cloudSamples.get());
+        context->EndGpuTiming(Engine::Graphics::GpuTimingStage::Clouds);
+        renderer.m_cloudsMarched = true;
+    }
+    context->EndComputePass();
+}
+
 void SceneRendererLighting::PrepareSkyboxAndEnvironment(
     SceneRenderer& renderer,
     Engine::Graphics::IGraphicsContext* context,
@@ -129,27 +435,19 @@ void SceneRendererLighting::PrepareSkyboxAndEnvironment(
         // prevents cancellation in the far - near ray math when the editor
         // camera is far from the world origin.
         ViewLighting::SetSkyboxRays(skyboxData, proj, glm::mat4(glm::mat3(view)));
-        if (atmosphereFog[0].w > 0.5f &&
-            scene.settings.atmosphereFog.skyDistance > 0.f &&
-            !scene.IsMode2D())
-        {
-            skyboxData.rayX.w = atmosphereFog[0].x * std::exp(
-                std::clamp(-atmosphereFog[0].y *
-                    (cameraPosition.y - atmosphereFog[0].z), -60.f, 60.f));
-            skyboxData.rayY.w = atmosphereFog[0].y;
-            skyboxData.rayOrigin.w = scene.settings.atmosphereFog.skyDistance;
-            skyboxData.fogInscatter = { glm::vec3(atmosphereFog[1]), atmosphereFog[2].w };
-            skyboxData.fogSunGlow = { glm::vec3(atmosphereFog[3]), 0.f };
-            // The fog glow needs the sun even when its disc is not drawn
-            // (zero radiance keeps the disc and its halo off).
-            if (glm::dot(glm::vec3(skyboxData.sunDirection), glm::vec3(skyboxData.sunDirection)) < 1e-8f)
-                skyboxData.sunDirection = { glm::vec3(atmosphereFog[2]), skyboxData.sunDirection.w };
-        }
+        if (!scene.IsMode2D())
+            ViewLighting::SetSkyboxFog(skyboxData, atmosphereFog,
+                scene.settings.atmosphereFog.skyDistance, cameraPosition.y);
+        // The physical panorama is world-space radiance: no HDRI exposure
+        // or rotation, just its own intensity.
+        const bool physicalSky = skybox == renderer.m_physicalSky.Panorama().get();
         skyboxData.displayParams = {
             scene.IsMode2D() ? 1.f : 0.f,
-            std::exp2(scene.settings.hdriExposure),
-            glm::radians(scene.settings.hdriRotation),
-            std::max(scene.settings.sunGlowIntensity, 0.f)};
+            physicalSky ? scene.settings.physicalSky.skyIntensity
+                : std::exp2(scene.settings.hdriExposure),
+            physicalSky ? 0.f : glm::radians(scene.settings.hdriRotation),
+            // The physical panorama already holds the Mie aureole.
+            physicalSky ? 0.f : std::max(scene.settings.sunGlowIntensity, 0.f)};
 
         std::memcpy(renderer.m_skyboxCBMapped, &skyboxData, sizeof(skyboxData));
         context->SetPipeline(renderer.m_skyboxPipeline.get());
@@ -157,6 +455,20 @@ void SceneRendererLighting::PrepareSkyboxAndEnvironment(
         context->SetTexture(0, skybox->GetGraphicsTexture());
         context->BeginGpuTiming(Engine::Graphics::GpuTimingStage::Sky);
         context->DrawInstanced(3, 1, 0, 0);
+
+        // Volumetric clouds: composite this view's half-resolution march
+        // (MarchVolumetricClouds) over the sky. The samples borrow
+        // structured-buffer slot 6, which holds the scene lights; restore it.
+        if (renderer.m_cloudsMarched && renderer.m_cloudPipeline && renderer.m_cloudSamples)
+        {
+            const uint64_t offset = static_cast<uint64_t>(SceneRenderer::kCloudConstantSlot) *
+                SceneRenderer::kCBStride;
+            context->SetPipeline(renderer.m_cloudPipeline.get());
+            context->SetConstantBuffer(0, renderer.m_skyboxConstantBuffer.get(), offset);
+            context->SetStructuredBuffer(6, renderer.m_cloudSamples.get());
+            context->DrawInstanced(3, 1, 0, 0);
+            context->SetStructuredBuffer(6, renderer.m_lightDataBuffer.get());
+        }
         context->EndGpuTiming(Engine::Graphics::GpuTimingStage::Sky);
     }
 }

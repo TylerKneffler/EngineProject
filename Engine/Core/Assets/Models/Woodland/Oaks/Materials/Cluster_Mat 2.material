@@ -1,10 +1,6 @@
 {
   "version": 1,
-  "baseColor": [
-    1,
-    1,
-    1
-  ],
+  "baseColor": [0.86, 0.84, 0.77],
   "useVertexColors": false,
   "ambientColor": [
     0.2,
@@ -101,9 +97,10 @@
   "occlusionUvSet": 0,
   "emissiveUvSet": 0,
   "heightUvSet": 0,
-  "baseColorTexture": "Assets/Models/Woodland/Oaks/Textures/Texture 6 6.png",
+  "baseColorTexture": "Assets/Models/Woodland/Oaks/Textures/Texture 6 6.ktx2",
   "metallicRoughnessTexture": "Assets/Models/Woodland/Oaks/Textures/Texture 5 5.png",
   "normalTexture": "Assets/Models/Woodland/Oaks/Textures/Texture 4 4.png",
   "occlusionTexture": "Assets/Models/Woodland/Oaks/Textures/Texture 5 5.png",
-  "shader": ""
+  "shader": "",
+  "foliageColorVariation": 0.7
 }

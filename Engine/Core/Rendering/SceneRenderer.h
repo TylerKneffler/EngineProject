@@ -1,4 +1,5 @@
 #pragma once
+#include "Core/Rendering/Atmosphere/PhysicalSky.h"
 #include "Core/Rendering/VegetationInteraction.h"
 #include "Core/Rendering/OcclusionBuffer.h"
 #include "Core/Rendering/RenderBoundsCache.h"
@@ -363,6 +364,8 @@ private:
             std::shared_ptr<Engine::Components::Texture> texture;
             bool alphaBlend = false;
             const Object* owner = nullptr;
+            float softness = 0.f;         // ParticleEmitter::softness
+            float nearFadeDistance = 0.f; // ParticleEmitter::nearFadeDistance
         };
         struct FluidSurfaceBatch
         {
@@ -404,6 +407,44 @@ private:
 
     std::unique_ptr<IPipelineState> m_skyboxPipeline;
     std::unique_ptr<IPipelineState> m_portalSkyboxStencilReadPipeline;
+    // Volumetric clouds (Shaders/Clouds/Clouds.hlsl): a compute march at half
+    // resolution into m_cloudSamples, composited over the sky by m_cloudPipeline.
+    std::unique_ptr<IPipelineState> m_cloudPipeline;
+    std::unique_ptr<IPipelineState> m_cloudMarchPipeline;
+    std::unique_ptr<IGraphicsBuffer> m_cloudSamples;
+    uint64_t m_cloudSampleCapacity = 0;
+    bool m_cloudsMarched = false; // this view's march is ready to composite
+    // Screen-space ambient occlusion (SceneSettings::ambientOcclusion,
+    // Shaders/AmbientOcclusion): after the main view's draws, the scene depth
+    // is copied into m_ambientOcclusionDepth and GTAO writes one of two
+    // buffers (the other is its history). Draws bind the latest at
+    // structured slot 47; m_ambientOcclusionOff (an invalid header) when
+    // there is none.
+    std::unique_ptr<IPipelineState> m_ambientOcclusionPipeline;
+    std::unique_ptr<IGraphicsBuffer> m_ambientOcclusionDepth;
+    std::array<std::unique_ptr<IGraphicsBuffer>, 2> m_ambientOcclusionBuffers;
+    std::unique_ptr<IGraphicsBuffer> m_ambientOcclusionOff;
+    uint64_t m_ambientOcclusionDepthBytes = 0, m_ambientOcclusionBufferBytes = 0;
+    uint32_t m_ambientOcclusionLatest = 0;  // buffer written last
+    bool m_ambientOcclusionReady = false;   // latest holds this view's AO
+    // m_ambientOcclusionDepth holds the current main view's depth (copied
+    // by the AO pass, or by soft particles when AO is off). Reset per view.
+    bool m_sceneDepthCopied = false;
+    // Main view extent and reverse-Z reconstruction (view depth =
+    // y / (depth - x)), recorded by ComputeAmbientOcclusion; zero when the
+    // view is not a perspective one.
+    uint32_t m_sceneDepthWidth = 0, m_sceneDepthHeight = 0;
+    glm::vec2 m_sceneDepthReconstruct{ 0.f };
+    uint32_t m_ambientOcclusionFrame = 0;
+    // Physical sky (SceneSettings::physicalSky): model + panorama, rebuilt on
+    // a worker, and this view's atmosphere terms at the camera
+    // (SceneRendererLighting::ApplyPhysicalAtmosphere). Ready is false while
+    // the sky is off or still building; the HDRI sky and height fog apply then.
+    Engine::Rendering::PhysicalSky m_physicalSky;
+    bool m_physicalAtmosphereReady = false;
+    glm::vec3 m_physicalToSun{ 0.f, 1.f, 0.f };
+    glm::vec3 m_physicalSunIlluminance{ 0.f };    // after the atmosphere
+    glm::vec3 m_physicalMultipleScattering{ 0.f }; // Psi_ms x sun illuminance
     std::unique_ptr<IGraphicsBuffer> m_skyboxConstantBuffer;
     void* m_skyboxCBMapped = nullptr;
     // Sun disc constants of the current view (see SceneRendererLighting::ResolveSkySun).
@@ -923,6 +964,9 @@ private:
     // the command list executes. Every portal view therefore owns immutable
     // aperture, depth-reset, and connected-scene slots for the whole frame.
     static constexpr uint32_t kMaxPortalRenderViews = 64;
+    // Sky constant ring: slot 0 main sky, 1..kMaxPortalRenderViews portal
+    // skies, then the volumetric cloud pass.
+    static constexpr uint32_t kCloudConstantSlot = kMaxPortalRenderViews + 1u;
     static constexpr uint32_t kMaxSpatialDebugDraws =
         kMaxSpatialObjects * kMaxSpatialVerticesPerObject / 24;
     static constexpr uint32_t kInitialBoneMatrixCapacity = kInitialSkinnedObjectCapacity * 256;

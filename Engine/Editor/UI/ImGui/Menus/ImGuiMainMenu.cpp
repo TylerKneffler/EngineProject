@@ -4,6 +4,8 @@
 #include "Engine/Editor/GameBuildManager.h"
 #include "Engine/Editor/Input/EditorKeyBindings.h"
 #include "Engine/Editor/Core/View/ViewFactory.h"
+#include "Engine/Editor/Core/View/Views/ConsoleView.h"
+#include "Core/Components/Materials/Texture.h"
 #include "imgui.h"
 
 namespace Engine::Editor
@@ -21,6 +23,7 @@ bool IsBusy(PlayState state)
 void ImGuiMainMenu::Draw(EditorState& state, PlayState playState,
     GameBuildManager* buildManager) const
 {
+    PollAssetGenerators(state);
     if (!ImGui::BeginMainMenuBar()) return;
     DrawFileMenu(state, playState, buildManager);
     if (ImGui::BeginMenu("Import"))
@@ -38,6 +41,7 @@ void ImGuiMainMenu::Draw(EditorState& state, PlayState playState,
         state.OpenCodeEditor();
     DrawToolbarMenu(state);
     DrawRenderingMenu(state, playState);
+    DrawToolsMenu(state);
     ImGui::EndMainMenuBar();
     if (m_openNewAnimationPopup)
     {
@@ -67,6 +71,109 @@ void ImGuiMainMenu::Draw(EditorState& state, PlayState playState,
         if (!m_newAnimationError.empty())
             ImGui::TextDisabled("%s", m_newAnimationError.c_str());
         ImGui::EndPopup();
+    }
+}
+
+void ImGuiMainMenu::DrawToolsMenu(EditorState& state) const
+{
+    if (!ImGui::BeginMenu("Tools")) return;
+    if (!m_generators) m_generators = std::make_unique<AssetGeneratorRunner>();
+    auto* console = state.GetConsole();
+    const auto start = [&](const AssetGeneratorRunner::Generator& generator)
+    {
+        std::string error;
+        if (m_generators->IsRunning()) m_generatorQueue.push_back(generator);
+        else if (m_generators->Start(generator, &error))
+        {
+            if (console) console->AddLog(ConsoleView::Level::Build,
+                "[Generators] " + generator.label + " started");
+        }
+        else if (console) console->AddLog(ConsoleView::Level::Error, "[Generators] " + error);
+    };
+    if (ImGui::BeginMenu("Asset generators"))
+    {
+        const auto& generators = m_generators->Generators();
+        if (generators.empty())
+            ImGui::TextDisabled("No tools/generate_*.py scripts found");
+        for (const auto& generator : generators)
+        {
+            if (ImGui::MenuItem(generator.label.c_str())) start(generator);
+            if (!generator.summary.empty() && ImGui::IsItemHovered())
+                ImGui::SetTooltip("%s (%s)", generator.summary.c_str(),
+                    generator.script.filename().string().c_str());
+        }
+        ImGui::Separator();
+        // Order matters: clusters are baked from the conifers.
+        if (ImGui::MenuItem("Run all woodland generators"))
+            for (const char* name : { "generate_conifers", "generate_boulders",
+                     "generate_forest_clusters", "generate_sky_sprites" })
+                for (const auto& generator : generators)
+                    if (generator.script.stem() == name) start(generator);
+        if (ImGui::MenuItem("Rescan tools folder")) m_generators->Rescan();
+        ImGui::EndMenu();
+    }
+    if (m_generators->IsRunning())
+    {
+        ImGui::Separator();
+        ImGui::TextDisabled("Running: %s (%.0f s)%s", m_generators->RunningLabel().c_str(),
+            m_generators->RunningSeconds(), m_generatorQueue.empty() ? "" : ", more queued");
+    }
+    ImGui::EndMenu();
+}
+
+void ImGuiMainMenu::PollAssetGenerators(EditorState& state) const
+{
+    if (!m_generators) return;
+    auto* console = state.GetConsole();
+    for (const auto& line : m_generators->TakeNewOutput())
+        if (console && !line.empty()) console->AddLog(ConsoleView::Level::Build, "  " + line);
+    AssetGeneratorRunner::Result result;
+    if (!m_generators->Poll(result)) return;
+    for (const auto& line : m_generators->TakeNewOutput())
+        if (console && !line.empty()) console->AddLog(ConsoleView::Level::Build, "  " + line);
+    // Reload what the run rewrote: cached textures by path, then the open
+    // scenes (meshes, materials and prefabs re-resolve on refresh). The
+    // asset browser lists new files through its own directory watch.
+    size_t textures = 0;
+    std::error_code error;
+    for (const auto& path : result.changedFiles)
+    {
+        std::string extension = path.extension().string();
+        for (auto& c : extension) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        if (extension != ".ktx2" && extension != ".png" && extension != ".jpg" &&
+            extension != ".dds" && extension != ".tga") continue;
+        Engine::Components::Texture::Invalidate(path.string());
+        const auto relative = std::filesystem::relative(path, m_generators->AssetsRoot(), error);
+        if (!error) Engine::Components::Texture::Invalidate("Assets/" + relative.generic_string());
+        ++textures;
+    }
+    if (result.exitCode == 0 && !result.changedFiles.empty())
+        if (auto* views = state.GetViewFactory(); views && views->OnAssetContentsChanged)
+            views->OnAssetContentsChanged(m_generators->AssetsRoot().string());
+    if (console)
+    {
+        char summary[256];
+        std::snprintf(summary, sizeof(summary), "[Generators] %s %s in %.0f s: %zu asset files written (%zu textures reloaded)",
+            result.label.c_str(), result.exitCode == 0 ? "finished" : "FAILED", result.seconds,
+            result.changedFiles.size(), textures);
+        console->AddLog(result.exitCode == 0 ? ConsoleView::Level::Build : ConsoleView::Level::Error, summary);
+    }
+    if (!m_generatorQueue.empty())
+    {
+        auto next = m_generatorQueue.front();
+        m_generatorQueue.pop_front();
+        std::string startError;
+        if (result.exitCode != 0)
+        {
+            if (console) console->AddLog(ConsoleView::Level::Warning,
+                "[Generators] Queue stopped after a failure.");
+            m_generatorQueue.clear();
+        }
+        else if (m_generators->Start(next, &startError))
+        {
+            if (console) console->AddLog(ConsoleView::Level::Build, "[Generators] " + next.label + " started");
+        }
+        else if (console) console->AddLog(ConsoleView::Level::Error, "[Generators] " + startError);
     }
 }
 

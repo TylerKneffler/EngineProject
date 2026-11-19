@@ -29,7 +29,7 @@ constexpr auto PollInterval = std::chrono::milliseconds(100);
 
 TerrainManager::MacroColorImage TerrainManager::EncodeMacroColorImage(int width,
     int height, float originX, float originZ, float spacing,
-    const std::vector<glm::vec4>& linear)
+    const std::vector<glm::vec4>& linear, const std::vector<glm::vec3>* normals)
 {
     MacroColorImage image;
     if (width <= 0 || height <= 0 || linear.size() != size_t(width) * height)
@@ -39,6 +39,10 @@ TerrainManager::MacroColorImage TerrainManager::EncodeMacroColorImage(int width,
     // Box-filtered mips in linear space, so distant hills keep their mean
     // color instead of aliasing between forest and meadow texels.
     std::vector<glm::vec4> level = linear;
+    // Normals ride along in a second chain: averaged per mip, then
+    // renormalized when encoded, so distant mips shade with the mean slope.
+    const bool withNormals = normals && normals->size() == linear.size();
+    std::vector<glm::vec3> normalLevel = withNormals ? *normals : std::vector<glm::vec3>{};
     int levelWidth = width, levelHeight = height;
     while (true)
     {
@@ -50,15 +54,26 @@ TerrainManager::MacroColorImage TerrainManager::EncodeMacroColorImage(int width,
             image.mips.push_back(static_cast<uint8_t>(
                 std::lround(std::clamp(value.a, 0.f, 1.f) * 255.f)));
         }
+        for (const glm::vec3& value : normalLevel)
+        {
+            const float length = glm::length(value);
+            const glm::vec3 unit = length > 1e-6f ? value / length : glm::vec3(0.f, 1.f, 0.f);
+            for (int axis = 0; axis < 3; ++axis)
+                image.normalMips.push_back(static_cast<uint8_t>(
+                    std::lround(std::clamp(unit[axis] * .5f + .5f, 0.f, 1.f) * 255.f)));
+            image.normalMips.push_back(255);
+        }
         ++image.mipLevels;
         if (levelWidth == 1 && levelHeight == 1) break;
         const int nextWidth = std::max(1, levelWidth / 2);
         const int nextHeight = std::max(1, levelHeight / 2);
         std::vector<glm::vec4> next(size_t(nextWidth) * nextHeight);
+        std::vector<glm::vec3> nextNormals(withNormals ? next.size() : 0);
         for (int y = 0; y < nextHeight; ++y)
             for (int x = 0; x < nextWidth; ++x)
             {
                 glm::vec4 sum(0.f);
+                glm::vec3 normalSum(0.f);
                 int count = 0;
                 for (int dy = 0; dy < 2; ++dy)
                     for (int dx = 0; dx < 2; ++dx)
@@ -66,11 +81,14 @@ TerrainManager::MacroColorImage TerrainManager::EncodeMacroColorImage(int width,
                         const int sx = std::min(x * 2 + dx, levelWidth - 1);
                         const int sy = std::min(y * 2 + dy, levelHeight - 1);
                         sum += level[size_t(sy) * levelWidth + sx];
+                        if (withNormals) normalSum += normalLevel[size_t(sy) * levelWidth + sx];
                         ++count;
                     }
                 next[size_t(y) * nextWidth + x] = sum / float(count);
+                if (withNormals) nextNormals[size_t(y) * nextWidth + x] = normalSum / float(count);
             }
         level = std::move(next);
+        normalLevel = std::move(nextNormals);
         levelWidth = nextWidth;
         levelHeight = nextHeight;
     }
@@ -119,8 +137,16 @@ TerrainManager::MacroColorBinding TerrainManager::GetMacroColorMap(
                             Engine::Graphics::GraphicsTextureFormat::Rgba8, true))
                     {
                         m_macroTexture = std::move(texture);
+                        m_macroNormalTexture.reset();
+                        if (!image.normalMips.empty())
+                            m_macroNormalTexture = factory->CreateTexture2D(
+                                uint32_t(image.width), uint32_t(image.height),
+                                image.normalMips.data(), image.mipLevels,
+                                Engine::Graphics::GraphicsTextureFormat::Rgba8, false);
                         image.mips.clear();
                         image.mips.shrink_to_fit();
+                        image.normalMips.clear();
+                        image.normalMips.shrink_to_fit();
                         m_macroImage = std::move(image);
                     }
         }
@@ -141,6 +167,7 @@ TerrainManager::MacroColorBinding TerrainManager::GetMacroColorMap(
     const glm::dvec3 origin = Owner->transform.GetWorldPositionD();
     const float spacing = m_macroImage.spacing;
     result.texture = m_macroTexture.get();
+    result.normalTexture = m_macroNormalTexture.get();
     result.mapping = glm::vec4(
         float(origin.x) + m_macroImage.originX - .5f * spacing,
         float(origin.z) + m_macroImage.originZ - .5f * spacing,

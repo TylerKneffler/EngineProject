@@ -93,6 +93,7 @@ struct PersistentInstance { float4 row0; float4 row1; float4 row2; uint4 identit
 [[vk::binding(12, 0)]] StructuredBuffer<float4> morphWeights;
 [[vk::binding(46, 0)]] StructuredBuffer<InstanceTransform> meshInstances;
 [[vk::binding(47, 0)]] StructuredBuffer<PersistentInstance> persistentInstances;
+[[vk::binding(48, 0)]] StructuredBuffer<uint> screenOcclusion;
 [[vk::binding(0, 0)]] Texture2D baseColorMap;
 [[vk::binding(1, 0)]] Texture2D metallicRoughnessMap;
 [[vk::binding(2, 0)]] Texture2D normalMap;
@@ -157,10 +158,56 @@ StructuredBuffer<float4> morphDeltas : register(t10);
 StructuredBuffer<float4> morphWeights : register(t11);
 StructuredBuffer<InstanceTransform> meshInstances : register(t45);
 StructuredBuffer<PersistentInstance> persistentInstances : register(t46);
+StructuredBuffer<uint> screenOcclusion : register(t47);
 SamplerState materialSampler : register(s0);
 #endif
 
 #include "../SkinDeformation.hlsli"
+
+// Screen-space ambient occlusion (Shaders/AmbientOcclusion/AmbientOcclusion.hlsl,
+// structured slot 47). The buffer holds the main view's previous-frame AO
+// at half resolution behind a header with the camera it was computed from:
+// project the surface through that camera, filter the four nearest texels
+// whose stored view depth matches, and fall back to 1 (unoccluded) off
+// screen, on disocclusion, or when the header is not valid (AO off or a
+// one-element placeholder bound).
+float ScreenAmbientOcclusion(float3 worldPos)
+{
+    [branch] if (asfloat(screenOcclusion[11]) < 0.5)
+        return 1.0;
+    const float3 offset = worldPos - asfloat(uint3(screenOcclusion[0], screenOcclusion[1],
+        screenOcclusion[2]));
+    const float w = dot(offset, asfloat(uint3(screenOcclusion[12], screenOcclusion[13],
+        screenOcclusion[14])));
+    if (w <= 0.05)
+        return 1.0;
+    const float2 ndc = float2(
+        asfloat(screenOcclusion[3]) * dot(offset, asfloat(uint3(screenOcclusion[4],
+            screenOcclusion[5], screenOcclusion[6]))),
+        asfloat(screenOcclusion[7]) * dot(offset, asfloat(uint3(screenOcclusion[8],
+            screenOcclusion[9], screenOcclusion[10])))) / w;
+    const float2 uv = ndc * float2(0.5, -0.5) + 0.5;
+    if (any(uv < 0.0) || any(uv > 1.0))
+        return 1.0;
+    const uint packedExtent = screenOcclusion[15];
+    const int2 extent = int2(packedExtent & 0xFFFFu, packedExtent >> 16);
+    const float2 texel = uv * float2(extent) - 0.5;
+    const int2 base = int2(floor(texel));
+    const float2 f = texel - float2(base);
+    float occlusion = 0.0, weight = 0.0;
+    [unroll] for (uint tap = 0u; tap < 4u; ++tap)
+    {
+        const int2 corner = int2(tap & 1u, tap >> 1);
+        const int2 coordinate = clamp(base + corner, int2(0, 0), extent - 1);
+        const uint packed = screenOcclusion[16u + uint(coordinate.y * extent.x + coordinate.x)];
+        const float storedDepth = f16tof32(packed >> 16);
+        const float bilinear = (corner.x ? f.x : 1.0 - f.x) * (corner.y ? f.y : 1.0 - f.y);
+        const float match = abs(storedDepth - w) <= 0.04 * w + 0.1 ? bilinear : 0.0;
+        occlusion += match * f16tof32(packed & 0xFFFFu);
+        weight += match;
+    }
+    return weight > 0.05 ? saturate(occlusion / weight) : 1.0;
+}
 
 float SampleCookie(uint index, float2 uv)
 {
@@ -498,17 +545,17 @@ void VSMain(
         oColor.a = 1.0; // the wind response above, not coverage
     }
 #endif
+    // Distant tiles are lit here only when the pixel shader has neither the
+    // long-range shadow map nor the macro color map to light them with.
     if (((uint)objectData.materialParams.w & 16384u) != 0u &&
-        objectData.terrainSunShadow.z <= 0.0)
+        objectData.terrainSunShadow.z <= 0.0 && objectData.terrainMacroParams.z <= 0.5)
     {
         float sunFacing = saturate(dot(oNormal,
             objectData.bakedLightDirection.xyz));
         const float3 sunLight = objectData.bakedDirectional.rgb *
             (sunFacing * 0.31830988618);
         const float3 light = objectData.ambientUnlit.rgb + sunLight;
-        // With a macro color map the pixel shader supplies the albedo, so
-        // the vertex carries only the light.
-        oColor.rgb = objectData.terrainMacroParams.z > 0.5 ? light : oColor.rgb * light;
+        oColor.rgb *= light;
         // Alpha carries the sun's share of the light (distant tiles are
         // opaque), so the pixel shader can remove it where shadowed.
         const float3 luma = float3(0.2126, 0.7152, 0.0722);
@@ -943,6 +990,55 @@ float3 UnpackNormal(float3 encoded)
     return n;
 }
 
+// World-space triplanar sampling (Material::triplanarScale). p is the world
+// position in texture repeats; dx/dy its screen derivatives, taken in uniform
+// control flow by the caller so each projection can be fetched inside a
+// branch. Projections: X faces map (z, -y), Y faces (x, z), Z faces (x, -y),
+// so +v runs down the world on the side faces like the mesh importers' UVs.
+float4 SampleTriplanar(Texture2D map, float3 p, float3 dx, float3 dy, float3 w)
+{
+    float4 result = 0.0;
+    [branch] if (w.x > 0.0)
+        result += map.SampleGrad(materialSampler, float2(p.z, -p.y),
+            float2(dx.z, -dx.y), float2(dy.z, -dy.y)) * w.x;
+    [branch] if (w.y > 0.0)
+        result += map.SampleGrad(materialSampler, p.xz, dx.xz, dy.xz) * w.y;
+    [branch] if (w.z > 0.0)
+        result += map.SampleGrad(materialSampler, float2(p.x, -p.y),
+            float2(dx.x, -dx.y), float2(dy.x, -dy.y)) * w.z;
+    return result;
+}
+
+// Triplanar normal mapping: each projection's tangent-space normal is turned
+// into a world-space offset along that projection's u and v axes (UDN blend)
+// and added to the geometry normal.
+float3 SampleTriplanarNormal(float3 p, float3 dx, float3 dy, float3 w,
+    float3 geometryNormal, float strength)
+{
+    float3 offset = 0.0;
+    [branch] if (w.x > 0.0)
+    {
+        const float3 t = UnpackNormal(normalMap.SampleGrad(materialSampler,
+            float2(p.z, -p.y), float2(dx.z, -dx.y), float2(dy.z, -dy.y)).xyz);
+        offset += w.x * float3(0.0, -t.y, t.x);
+    }
+    [branch] if (w.y > 0.0)
+    {
+        const float3 t = UnpackNormal(normalMap.SampleGrad(materialSampler,
+            p.xz, dx.xz, dy.xz).xyz);
+        offset += w.y * float3(t.x, 0.0, t.y);
+    }
+    [branch] if (w.z > 0.0)
+    {
+        const float3 t = UnpackNormal(normalMap.SampleGrad(materialSampler,
+            float2(p.x, -p.y), float2(dx.x, -dx.y), float2(dy.x, -dy.y)).xyz);
+        offset += w.z * float3(t.x, -t.y, 0.0);
+    }
+    // Keep only the part across the surface so the offset cannot flip it.
+    offset -= geometryNormal * dot(offset, geometryNormal);
+    return normalize(geometryNormal + offset * strength);
+}
+
 float SampleParallaxDepth(float2 uv, float2 uvDx, float2 uvDy, bool heightIsDepth)
 {
     const float value = heightMap.SampleGrad(materialSampler, uv, uvDx, uvDy).r;
@@ -1209,6 +1305,80 @@ float4 SampleTerrainMacroColor(ObjectData objectData, float3 worldPosition,
         worldDx.xz * scale, worldDy.xz * scale);
 }
 
+// World-space terrain normal from the macro map's companion texture (normal
+// slot, logical 2; terrainMacroParams.w = 1 when bound), 16 m samples.
+float3 SampleTerrainMacroNormal(ObjectData objectData, float3 worldPosition,
+    float3 worldDx, float3 worldDy)
+{
+    const float2 scale = objectData.terrainMacroMap.zw;
+    const float3 encoded = normalMap.SampleGrad(materialSampler,
+        (worldPosition.xz - objectData.terrainMacroMap.xy) * scale,
+        worldDx.xz * scale, worldDy.xz * scale).xyz;
+    return normalize(encoded * 2.0 - 1.0);
+}
+
+// Smooth value noise in 0..1 on a unit lattice (world-space, so distant
+// canopy relief stays put as tiles change LOD).
+float CanopyValueNoise(float2 p)
+{
+    const float2 cell = floor(p);
+    float2 t = p - cell;
+    t = t * t * (3.0 - 2.0 * t);
+    const float4 corners = frac(sin(float4(
+        dot(cell, float2(127.1, 311.7)), dot(cell + float2(1, 0), float2(127.1, 311.7)),
+        dot(cell + float2(0, 1), float2(127.1, 311.7)), dot(cell + float2(1, 1), float2(127.1, 311.7))))
+        * 43758.5453);
+    return lerp(lerp(corners.x, corners.y, t.x), lerp(corners.z, corners.w, t.x), t.y);
+}
+
+// Foliage colour variation (Material::foliageColorVariation, carried in
+// textureUvSets1.w): world-space noise at crown (~9 m) and stand (~70 m)
+// scales trades red against blue around the green (yellow-green to
+// blue-green) and scales the value, so a forest is not one flat green.
+// World-anchored, so near leaf cards, impostors and forest clusters that
+// share the amount agree as LODs change.
+float3 ApplyFoliageVariation(float3 color, float3 worldPosition, float amount)
+{
+    const float crown = CanopyValueNoise(worldPosition.xz * (1.0 / 9.0)) - 0.5;
+    const float stand = CanopyValueNoise(worldPosition.xz * (1.0 / 70.0) + 31.7) - 0.5;
+    const float hue = clamp(stand * 1.3 + crown * 0.7, -0.75, 0.75);
+    const float value = 1.0 + amount * (crown * 0.32 + stand * 0.24);
+    const float3 tint = float3(1.0 + 0.28 * hue, 1.0 - 0.04 * abs(hue), 1.0 - 0.28 * hue);
+    return color * lerp(1.0, tint, amount) * value;
+}
+
+// Bumpy canopy over forested distant terrain (macro map alpha = cover):
+// tree-crown, clump and stand-scale height noise tilts the normal, and its
+// hollows darken (crown occlusion). Each octave fades out once a pixel spans
+// half its period, so far hills do not shimmer. Returns the occlusion; the
+// normal is updated in place.
+float ApplyDistantCanopy(inout float3 surfaceNormal, float3 worldPosition,
+    float footprint, float cover, float strength)
+{
+    if (cover <= 0.0 || strength <= 0.0) return 1.0;
+    const float periods[3] = { 14.0, 42.0, 130.0 };
+    const float amplitudes[3] = { 0.30, 0.22, 0.14 };
+    float2 slope = 0.0;
+    float occlusion = 0.0;
+    [unroll] for (uint octave = 0u; octave < 3u; ++octave)
+    {
+        const float period = periods[octave];
+        const float fade = 1.0 - smoothstep(0.25 * period, 0.5 * period, footprint);
+        if (fade <= 0.0) continue;
+        const float2 p = worldPosition.xz / period + float(octave) * 17.3;
+        const float step = 0.2;
+        const float h = CanopyValueNoise(p);
+        const float2 gradient = float2(CanopyValueNoise(p + float2(step, 0.0)),
+            CanopyValueNoise(p + float2(0.0, step))) - h;
+        // Relief height = amplitude * period, so its slope is amplitude-scaled.
+        slope += gradient / step * amplitudes[octave] * fade;
+        occlusion += (1.0 - h) * amplitudes[octave] * fade;
+    }
+    const float amount = cover * strength;
+    surfaceNormal = normalize(surfaceNormal - float3(slope.x, 0.0, slope.y) * amount);
+    return 1.0 - saturate(occlusion * 0.9 * amount);
+}
+
 // Terrain-scale sun visibility from the far height grid (see
 // TerrainManager::GetSunShadowMap), bound in the emissive slot, which terrain
 // does not use. Outside the map, and when disabled, the sun is unoccluded.
@@ -1327,43 +1497,42 @@ float ObjectFogSunVisibility(ObjectData objectData, float3 worldPos,
     [branch] if (sampleCount == 0u || objectData.shadowCascadeData.x < 0.5 ||
         all(objectData.atmosphereFog3.rgb <= 0.0))
         return 1.0;
+    const float4 fog3 = objectData.atmosphereFog3;
     const float3 cameraPos = objectData.viewPositionAlphaCutoff.xyz;
     const float3 toSurface = worldPos - cameraPos;
     const float distanceToSurface = length(toSurface);
-    const float rayLength = max(distanceToSurface - fog1.w, 0.0);
+    const float startDistance = AtmosphereStartDistance(fog0, fog1);
+    const float rayLength = max(distanceToSurface - startDistance, 0.0);
     const uint cascadeCount =
         clamp((uint)objectData.shadowCascadeData.x, 1u, 4u);
     const float marchLength = min(rayLength, objectData.shadowCascadeSplits[
-        cascadeCount - 1u] - fog1.w);
+        cascadeCount - 1u] - startDistance);
     [branch] if (marchLength <= 0.0)
         return 1.0;
     const float3 viewDirection = toSurface / max(distanceToSurface, 1e-4);
-    const float densityAtStart = AtmosphereDensityAtStart(cameraPos,
-        viewDirection, fog0, fog1);
-    const float totalOpacity = 1.0 - exp(-AtmosphereOpticalDepth(
-        densityAtStart, fog0.y, viewDirection.y, rayLength));
+    const float totalOpacity = 1.0 - exp(-AtmosphereScalarOpticalDepth(cameraPos,
+        viewDirection, rayLength, fog0, fog1, fog3));
     [branch] if (totalOpacity < 1e-5)
         return 1.0;
     // Interleaved gradient noise: a stable screen-space dither. There is no
     // temporal resolve, so it is not animated.
     const float jitter = pixel.x < 0.0 ? 0.5 : frac(52.9829189 *
         frac(dot(pixel, float2(0.06711056, 0.00583715))));
-    const float3 rayStart = cameraPos + viewDirection * fog1.w;
+    const float3 rayStart = cameraPos + viewDirection * startDistance;
     const float inverseCount = 1.0 / (float)sampleCount;
     float previousTransmittance = 1.0;
     float litOpacity = 0.0;
     [loop] for (uint i = 0u; i < sampleCount; ++i)
     {
         const float segmentEnd = (float)(i + 1u) * inverseCount;
-        const float transmittance = exp(-AtmosphereOpticalDepth(
-            densityAtStart, fog0.y, viewDirection.y,
-            marchLength * segmentEnd * segmentEnd));
+        const float transmittance = exp(-AtmosphereScalarOpticalDepth(cameraPos,
+            viewDirection, marchLength * segmentEnd * segmentEnd, fog0, fog1, fog3));
         const float sampleFraction = ((float)i + jitter) * inverseCount;
         const float sampleDistance = marchLength * sampleFraction *
             sampleFraction;
         const float visibility = FogShaftSunVisibility(objectData,
             rayStart + viewDirection * sampleDistance,
-            fog1.w + sampleDistance, cascadeCount);
+            startDistance + sampleDistance, cascadeCount);
         litOpacity += (previousTransmittance - transmittance) * visibility;
         previousTransmittance = transmittance;
     }
@@ -2092,7 +2261,7 @@ float4 PSFoliageMain(
     const float shadingBlend = objectData.textureLodParams.w > 1.5
         ? TextureLodBlend(objectData, worldPos) : 0.0;
     float3 n = normalize(frontFace ? normal : -normal);
-    float3 lit = objectData.ambientUnlit.rgb;
+    float3 lit = objectData.ambientUnlit.rgb * ScreenAmbientOcclusion(worldPos);
     [loop] for (uint i = 0u; i < draw.lightCount; ++i)
     {
         SceneLightData light = sceneLights[i];
@@ -2196,7 +2365,7 @@ float4 PSGrassMain(
         lerp(0.6, 1.0, smoothstep(0.0, 0.8, height)), leafy);
     float directOcclusion = lerp(1.0, lerp(0.82, 1.0, height), leafy);
     float3 lit = objectData.ambientUnlit.rgb * ambientOcclusion *
-        (0.9 + 0.1 * saturate(n.y));
+        ScreenAmbientOcclusion(worldPos) * (0.9 + 0.1 * saturate(n.y));
     float3 transmitted = 0.0;
     float3 sheen = 0.0;
     [loop] for (uint i = 0u; i < draw.lightCount; ++i)
@@ -2320,21 +2489,44 @@ float4 ObjectSurfacePS(
     // has no other texture or per-pixel lighting work.
     if (flags & 16384u)
     {
+        const bool macroMap = objectData.terrainMacroParams.z > 0.5;
+        const bool sunMap = objectData.terrainSunShadow.z > 0.0;
+        float3 surfaceNormal = normalize(normal);
         // Macro color map: its albedo replaces the far palette's vertex
-        // color (which is then the vertex light, see VSMain).
-        [branch] if (objectData.terrainMacroParams.z > 0.5)
+        // color, and its 16 m normals the tiles' 128 m triangle normals, so
+        // distant ranges shade with ridges and gullies instead of facets.
+        [branch] if (macroMap)
         {
-            const float3 macroColor = SampleTerrainMacroColor(objectData, worldPos,
-                ddx(worldPos), ddy(worldPos)).rgb;
-            base.rgb = objectData.baseColor.rgb * macroColor *
-                (objectData.terrainSunShadow.z > 0.0 ? 1.0 : vertexColor.rgb);
+            const float3 positionDx = ddx(worldPos), positionDy = ddy(worldPos);
+            const float4 macro = SampleTerrainMacroColor(objectData, worldPos,
+                positionDx, positionDy);
+            base.rgb = objectData.baseColor.rgb * macro.rgb;
+            // w: 0 = no normal map, else 1 + canopy relief strength.
+            [branch] if (objectData.terrainMacroParams.w > 0.5)
+            {
+                surfaceNormal = SampleTerrainMacroNormal(objectData, worldPos,
+                    positionDx, positionDy);
+                base.rgb *= ApplyDistantCanopy(surfaceNormal, worldPos,
+                    max(length(positionDx), length(positionDy)), macro.a,
+                    objectData.terrainMacroParams.w - 1.0);
+            }
         }
-        [branch] if (objectData.terrainSunShadow.z > 0.0)
+        // Lit per pixel whenever a map is bound (VSMain leaves the light out).
+        [branch] if (sunMap || macroMap)
         {
-            const float sunFacing = saturate(dot(normalize(normal),
+            const float sunFacing = saturate(dot(surfaceNormal,
                 objectData.bakedLightDirection.xyz));
-            base.rgb *= objectData.ambientUnlit.rgb + objectData.bakedDirectional.rgb *
-                (sunFacing * TerrainLongRangeShadow(objectData, worldPos) * 0.31830988618);
+            float shadow = sunMap ? TerrainLongRangeShadow(objectData, worldPos) : 1.0;
+            [branch] if (!sunMap && sunFacing > 0.0 && objectData.bakedDirectional.w > 0.5 &&
+                objectData.shadowParams.z > 0.5)
+            {
+                SceneLightData sun = sceneLights[
+                    (uint)objectData.bakedDirectional.w - 1u];
+                shadow = EvaluateDirectionalShadow(objectData, sun, worldPos,
+                    surfaceNormal, objectData.bakedLightDirection.xyz, 0);
+            }
+            base.rgb *= objectData.ambientUnlit.rgb * ScreenAmbientOcclusion(worldPos) +
+                objectData.bakedDirectional.rgb * (sunFacing * shadow * 0.31830988618);
             return float4(base.rgb + objectData.emissiveOcclusion.rgb, base.a);
         }
         float shadow = 1.0;
@@ -2649,7 +2841,8 @@ float4 ObjectSurfacePS(
     if ((flags & 8192u) && objectData.ambientUnlit.w < 0.5)
     {
         float3 terrainNormal = terrainNormalForLighting;
-        float3 diffuseLight = objectData.ambientUnlit.rgb * terrainOcclusion;
+        float3 diffuseLight = objectData.ambientUnlit.rgb * terrainOcclusion *
+            ScreenAmbientOcclusion(worldPos);
         float3 specularLight = 0.0;
         float3 sunDirection = objectData.bakedLightDirection.xyz;
         float sunFacing = saturate(dot(terrainNormal, sunDirection));
@@ -2718,6 +2911,29 @@ float4 ObjectSurfacePS(
     float3 viewDirection = normalize(
         objectData.viewPositionAlphaCutoff.xyz - worldPos);
 
+    // Triplanar props (Material::triplanarScale, metres per repeat). Terrain
+    // and the measurement grid use this lane for their own tiling.
+    const float triplanarScale = (flags & (2048u | 32768u)) == 0u
+        ? objectData.textureUvSets1.z : 0.0;
+    const bool triplanar = triplanarScale > 0.0;
+    const float3 worldPosDx = ddx(worldPos);
+    const float3 worldPosDy = ddy(worldPos);
+    float3 triplanarPos = 0.0, triplanarDx = 0.0, triplanarDy = 0.0, triplanarWeights = 0.0;
+    if (triplanar)
+    {
+        const float repeatsPerMetre = 1.0 / triplanarScale;
+        const float gradientScale = exp2(textureBias) * repeatsPerMetre;
+        triplanarPos = worldPos * repeatsPerMetre;
+        triplanarDx = worldPosDx * gradientScale;
+        triplanarDy = worldPosDy * gradientScale;
+        // Sharp blend: mostly one projection, short transitions, and
+        // projections under 4% skipped entirely.
+        float3 w = pow(abs(geometryNormal), 4.0);
+        w /= max(w.x + w.y + w.z, 1e-5);
+        w = saturate((w - 0.04) / 0.96);
+        triplanarWeights = w / max(w.x + w.y + w.z, 1e-5);
+    }
+
     // Derivatives must be taken in uniform control flow, before the branch.
     const float2 heightUvDx = ddx(heightUv);
     const float2 heightUvDy = ddy(heightUv);
@@ -2730,7 +2946,8 @@ float4 ObjectSurfacePS(
     ParallaxHit parallaxHit = (ParallaxHit)0;
     // Relief self-shadow weight: material strength, faded out by 15 m.
     float parallaxShadowWeight = 0.0;
-    if (materialDetail > 0.0 && (flags & 64u) && hasTangents && objectData.parallaxParams.x > 0.0)
+    if (materialDetail > 0.0 && (flags & 64u) && hasTangents && !triplanar &&
+        objectData.parallaxParams.x > 0.0)
     {
         float3 viewDirectionTangent = float3(
             dot(viewDirection, tangentDirection),
@@ -2765,7 +2982,10 @@ float4 ObjectSurfacePS(
         emissiveUv += parallaxOffset;
     }
 
-    if (flags & 1u)
+    [branch] if ((flags & 1u) && triplanar)
+        base *= SampleTriplanar(baseColorMap, triplanarPos, triplanarDx, triplanarDy,
+            triplanarWeights) * objectData.pmxTextureTint;
+    else if (flags & 1u)
         base *= SampleObjectBaseColor(objectData, baseUv, textureBias,
             base.a * objectData.pmxTextureTint.a,
             TextureLodBlend(objectData, worldPos) * objectData.alphaLodParams.x) *
@@ -2778,13 +2998,20 @@ float4 ObjectSurfacePS(
         if (IsPerformanceHeatDraw(objectData))
             return PerformanceHeatColor(objectData, worldPos, normal, frontFace, base.a);
     }
+    [branch] if ((flags & 32u) && (flags & 2048u) == 0u && objectData.textureUvSets1.w > 0.0)
+        base.rgb = ApplyFoliageVariation(base.rgb, worldPos, objectData.textureUvSets1.w);
     float subsurfaceThickness = objectData.subsurfaceRadiusThickness.w;
     if ((flags & 128u) && objectData.subsurfaceColorWeight.w > 0.0)
         subsurfaceThickness *= subsurfaceThicknessMap.SampleBias(
             materialSampler, baseUv, textureBias).r;
     [branch] if ((flags & 2u) && materialDetail > 0.0)
     {
-        float4 mr = metallicRoughnessMap.SampleBias(materialSampler, metallicRoughnessUv, textureBias);
+        float4 mr;
+        [branch] if (triplanar)
+            mr = SampleTriplanar(metallicRoughnessMap, triplanarPos, triplanarDx, triplanarDy,
+                triplanarWeights);
+        else
+            mr = metallicRoughnessMap.SampleBias(materialSampler, metallicRoughnessUv, textureBias);
         roughness *= lerp(1.0, mr.g, materialDetail);
         metallic *= lerp(1.0, mr.b, materialDetail);
     }
@@ -2795,12 +3022,22 @@ float4 ObjectSurfacePS(
         roughness = clamp(sqrt(2.0 /
             (objectData.blinnPhongSpecularShininess.w + 1.0)), 0.045, 1.0);
     [branch] if ((flags & 8u) && materialDetail > 0.0)
-        occlusion = lerp(1.0, occlusionMap.SampleBias(materialSampler, occlusionUv, textureBias).r,
-            objectData.emissiveOcclusion.w * materialDetail);
+    {
+        float sampledOcclusion;
+        [branch] if (triplanar)
+            sampledOcclusion = SampleTriplanar(occlusionMap, triplanarPos, triplanarDx,
+                triplanarDy, triplanarWeights).r;
+        else
+            sampledOcclusion = occlusionMap.SampleBias(materialSampler, occlusionUv, textureBias).r;
+        occlusion = lerp(1.0, sampledOcclusion, objectData.emissiveOcclusion.w * materialDetail);
+    }
     if (flags & 16u)
         emissive *= emissiveMap.SampleBias(materialSampler, emissiveUv, textureBias).rgb;
     normal = (flags & 2048u) ? terrainNormalForLighting : geometryNormal;
-    [branch] if ((flags & 4u) && hasTangents && materialDetail > 0.0)
+    [branch] if ((flags & 4u) && triplanar && materialDetail > 0.0)
+        normal = SampleTriplanarNormal(triplanarPos, triplanarDx, triplanarDy, triplanarWeights,
+            geometryNormal, objectData.materialParams.z * materialDetail);
+    else if ((flags & 4u) && hasTangents && materialDetail > 0.0)
     {
         float3 sampledNormal = UnpackNormal(normalMap.SampleBias(materialSampler, normalUv, textureBias).xyz);
         sampledNormal.xy *= objectData.materialParams.z * materialDetail;
@@ -2994,8 +3231,9 @@ float4 ObjectSurfacePS(
             base.rgb, metallic, roughness, f0, n, v, bakedDirection, materialDetail) *
             objectData.bakedDirectional.rgb * saturate(dot(n, bakedDirection));
     }
+    const float screenOcclusionFactor = ScreenAmbientOcclusion(worldPos);
     float3 ambient = objectData.ambientUnlit.rgb *
-        (base.rgb * (1.0 - metallic) + f0 * 0.25) * occlusion;
+        (base.rgb * (1.0 - metallic) + f0 * 0.25) * occlusion * screenOcclusionFactor;
     float3 environment = 0.0;
     bool useEnvironmentDiffuse = objectData.environmentParams.x > 0.0 &&
         objectData.environmentParams.z > 0.0;
@@ -3040,7 +3278,8 @@ float4 ObjectSurfacePS(
                 (f0 * integratedBrdf.x + integratedBrdf.y) *
                 objectData.environmentParams.w;
         }
-        environment = (diffuseEnvironment + specularEnvironment) * occlusion;
+        environment = (diffuseEnvironment + specularEnvironment) * occlusion *
+            screenOcclusionFactor;
     }
     float3 litColor = ambient + environment + directLight + bakedDirect;
     if ((flags & 512u) || objectData.pmxParams.z >= 0.0)

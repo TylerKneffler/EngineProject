@@ -195,7 +195,8 @@ public:
             scale += (1.f - fresnel) * visibility;
             bias += fresnel * visibility;
         }
-        return glm::vec2(scale, bias);
+        // Monte Carlo average over the importance samples.
+        return glm::vec2(scale, bias) / static_cast<float>(sampleCount);
     }
 };
 

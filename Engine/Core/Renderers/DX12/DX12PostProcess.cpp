@@ -9,7 +9,34 @@ namespace Engine::Renderers
 namespace
 {
 constexpr DXGI_FORMAT HdrFormat = DXGI_FORMAT_R16G16B16A16_FLOAT;
+// Exposure results: full float, per-frame adaptation steps are far below
+// half precision.
+constexpr DXGI_FORMAT ExposureFormat = DXGI_FORMAT_R32G32B32A32_FLOAT;
 constexpr uint32_t ConstantCount = sizeof(Engine::Graphics::PostProcessConstants) / 4u;
+constexpr uint32_t TableSize = 3;
+
+// RTV heap: exposure map, histogram, exposure 0, exposure 1 after the bloom
+// levels.
+constexpr uint32_t ExposureRtv(uint32_t index)
+{
+    return 1u + Engine::Graphics::MaxBloomLevels + index;
+}
+constexpr uint32_t RtvCount = ExposureRtv(4);
+// SRV heap: three-entry tables after the scene, bloom levels and two nulls.
+enum ExposureTableIndex : uint32_t
+{
+    LuminanceMapTable,  // (map, null, null): histogram input
+    AdaptTable0,        // (histogram, exposure 1, null): writes exposure 0
+    AdaptTable1,        // (histogram, exposure 0, null): writes exposure 1
+    ComposeTable0,      // (scene, bloom 0, exposure 0)
+    ComposeTable1,      // (scene, bloom 0, exposure 1)
+    ExposureTableCount
+};
+constexpr uint32_t ExposureTable(uint32_t index)
+{
+    return 3u + Engine::Graphics::MaxBloomLevels + index * TableSize;
+}
+constexpr uint32_t SrvCount = ExposureTable(ExposureTableCount);
 
 Microsoft::WRL::ComPtr<ID3DBlob> Compile(const std::string& source,
     const char* entry, const char* target)
@@ -79,10 +106,10 @@ void DX12PostProcess::Create(ID3D12Device* device, uint32_t width, uint32_t heig
 
     if (!m_rtvHeap)
     {
-        D3D12_DESCRIPTOR_HEAP_DESC rtv{}; rtv.NumDescriptors = 1 + MaxBloomLevels;
+        D3D12_DESCRIPTOR_HEAP_DESC rtv{}; rtv.NumDescriptors = RtvCount;
         rtv.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
         ThrowIfFailed(device->CreateDescriptorHeap(&rtv, IID_PPV_ARGS(&m_rtvHeap)));
-        D3D12_DESCRIPTOR_HEAP_DESC srv{}; srv.NumDescriptors = 2 + MaxBloomLevels;
+        D3D12_DESCRIPTOR_HEAP_DESC srv{}; srv.NumDescriptors = SrvCount;
         srv.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
         srv.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
         ThrowIfFailed(device->CreateDescriptorHeap(&srv, IID_PPV_ARGS(&m_srvHeap)));
@@ -100,10 +127,10 @@ void DX12PostProcess::Create(ID3D12Device* device, uint32_t width, uint32_t heig
     srv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D; srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
     srv.Texture2D.MipLevels = 1;
     device->CreateShaderResourceView(m_sceneColor.Get(), &srv, srvSlot(0));
-    for (uint32_t level = 0; level < MaxBloomLevels + 1u; ++level)
+    for (uint32_t level = 0; level < MaxBloomLevels + 2u; ++level)
     {
-        // Unused trailing entries hold null views so every two-entry table
-        // stays valid.
+        // Unused trailing entries hold null views so every three-entry
+        // table stays valid.
         const bool exists = level < m_bloomLevels;
         srv.Texture2D.MostDetailedMip = exists ? level : 0;
         device->CreateShaderResourceView(exists ? m_bloom.Get() : nullptr, &srv,
@@ -116,10 +143,61 @@ void DX12PostProcess::Create(ID3D12Device* device, uint32_t width, uint32_t heig
         }
     }
 
+    // Auto exposure targets do not depend on the frame size.
+    if (!m_exposureMap)
+    {
+        using namespace Engine::Graphics;
+        const auto create = [&](uint32_t width, uint32_t height, DXGI_FORMAT format,
+            Microsoft::WRL::ComPtr<ID3D12Resource>& resource)
+        {
+            D3D12_RESOURCE_DESC desc = texture;
+            desc.Width = width; desc.Height = height; desc.MipLevels = 1; desc.Format = format;
+            D3D12_CLEAR_VALUE value{}; value.Format = format;
+            ThrowIfFailed(device->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE,
+                &desc, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, &value,
+                IID_PPV_ARGS(&resource)));
+        };
+        create(ExposureMapWidth, ExposureMapHeight, HdrFormat, m_exposureMap);
+        create(ExposureBins, 1, HdrFormat, m_exposureHistogram);
+        create(1, 1, ExposureFormat, m_exposure[0]);
+        create(1, 1, ExposureFormat, m_exposure[1]);
+        m_exposureState.Reset();
+    }
+    {
+        ID3D12Resource* rtvTargets[4] = { m_exposureMap.Get(), m_exposureHistogram.Get(),
+            m_exposure[0].Get(), m_exposure[1].Get() };
+        for (uint32_t index = 0; index < 4; ++index)
+            device->CreateRenderTargetView(rtvTargets[index], nullptr, Rtv(ExposureRtv(index)));
+        // Table entries: resource and format, nullptr for a null view.
+        struct Entry { ID3D12Resource* resource; DXGI_FORMAT format; };
+        const Entry none{ nullptr, HdrFormat };
+        const Entry scene{ m_sceneColor.Get(), HdrFormat };
+        const Entry bloom0{ m_bloomLevels ? m_bloom.Get() : nullptr, HdrFormat };
+        const Entry map{ m_exposureMap.Get(), HdrFormat };
+        const Entry histogram{ m_exposureHistogram.Get(), HdrFormat };
+        const Entry exposure0{ m_exposure[0].Get(), ExposureFormat };
+        const Entry exposure1{ m_exposure[1].Get(), ExposureFormat };
+        const Entry tables[ExposureTableCount][TableSize] = {
+            { map, none, none },
+            { histogram, exposure1, none },
+            { histogram, exposure0, none },
+            { scene, bloom0, exposure0 },
+            { scene, bloom0, exposure1 } };
+        for (uint32_t table = 0; table < ExposureTableCount; ++table)
+            for (uint32_t entry = 0; entry < TableSize; ++entry)
+            {
+                D3D12_SHADER_RESOURCE_VIEW_DESC view = srv;
+                view.Format = tables[table][entry].format;
+                view.Texture2D.MostDetailedMip = 0;
+                device->CreateShaderResourceView(tables[table][entry].resource, &view,
+                    srvSlot(ExposureTable(table) + entry));
+            }
+    }
+
     if (!m_rootSignature)
     {
         D3D12_DESCRIPTOR_RANGE range{}; range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-        range.NumDescriptors = 2; range.BaseShaderRegister = 0;
+        range.NumDescriptors = TableSize; range.BaseShaderRegister = 0;
         D3D12_ROOT_PARAMETER parameters[2]{};
         parameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
         parameters[0].Constants.ShaderRegister = 0;
@@ -162,6 +240,17 @@ void DX12PostProcess::Create(ID3D12Device* device, uint32_t width, uint32_t heig
         blend.SrcBlendAlpha = blend.DestBlendAlpha = D3D12_BLEND_ONE; blend.BlendOpAlpha = D3D12_BLEND_OP_ADD;
         pso.PS = { up->GetBufferPointer(), up->GetBufferSize() };
         ThrowIfFailed(device->CreateGraphicsPipelineState(&pso, IID_PPV_ARGS(&m_bloomUpsamplePipeline)));
+        blend.BlendEnable = FALSE;
+        const auto luminance = Compile(source, "ExposureLuminancePS", "ps_5_0");
+        const auto histogram = Compile(source, "ExposureHistogramPS", "ps_5_0");
+        const auto adapt = Compile(source, "ExposureAdaptPS", "ps_5_0");
+        pso.PS = { luminance->GetBufferPointer(), luminance->GetBufferSize() };
+        ThrowIfFailed(device->CreateGraphicsPipelineState(&pso, IID_PPV_ARGS(&m_exposureLuminancePipeline)));
+        pso.PS = { histogram->GetBufferPointer(), histogram->GetBufferSize() };
+        ThrowIfFailed(device->CreateGraphicsPipelineState(&pso, IID_PPV_ARGS(&m_exposureHistogramPipeline)));
+        pso.RTVFormats[0] = ExposureFormat;
+        pso.PS = { adapt->GetBufferPointer(), adapt->GetBufferSize() };
+        ThrowIfFailed(device->CreateGraphicsPipelineState(&pso, IID_PPV_ARGS(&m_exposureAdaptPipeline)));
     }
 }
 
@@ -233,6 +322,49 @@ void DX12PostProcess::RenderBloom(ID3D12GraphicsCommandList* list)
     list->RSSetScissorRects(1, &scissor);
 }
 
+uint32_t DX12PostProcess::RenderExposure(ID3D12GraphicsCommandList* list,
+    const Engine::Graphics::PostProcessSettings& settings)
+{
+    using namespace Engine::Graphics;
+    const ExposureFrame frame = m_exposureState.Next();
+    const auto values = MakeExposureConstants(settings, frame.deltaSeconds, frame.history);
+    const auto pass = [&](ID3D12PipelineState* pipeline, ID3D12Resource* target,
+        uint32_t rtv, uint32_t width, uint32_t height, uint32_t table)
+    {
+        auto barrier = Transition(target, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET);
+        list->ResourceBarrier(1, &barrier);
+        const auto handle = Rtv(rtv);
+        list->OMSetRenderTargets(1, &handle, FALSE, nullptr);
+        const D3D12_VIEWPORT viewport{ 0.f, 0.f, float(width), float(height), 0.f, 1.f };
+        const D3D12_RECT scissor{ 0, 0, LONG(width), LONG(height) };
+        list->RSSetViewports(1, &viewport);
+        list->RSSetScissorRects(1, &scissor);
+        list->SetPipelineState(pipeline);
+        list->SetGraphicsRoot32BitConstants(0, ConstantCount, &values, 0);
+        list->SetGraphicsRootDescriptorTable(1, SrvTable(table));
+        list->DrawInstanced(3, 1, 0, 0);
+        barrier = Transition(target, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+            D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+        list->ResourceBarrier(1, &barrier);
+    };
+    // Table 0 starts at the scene.
+    pass(m_exposureLuminancePipeline.Get(), m_exposureMap.Get(), ExposureRtv(0),
+        ExposureMapWidth, ExposureMapHeight, 0);
+    pass(m_exposureHistogramPipeline.Get(), m_exposureHistogram.Get(), ExposureRtv(1),
+        ExposureBins, 1, ExposureTable(LuminanceMapTable));
+    pass(m_exposureAdaptPipeline.Get(), m_exposure[frame.target].Get(),
+        ExposureRtv(2 + frame.target), 1, 1,
+        ExposureTable(frame.target ? AdaptTable1 : AdaptTable0));
+
+    const D3D12_VIEWPORT viewport{ 0.f, 0.f, static_cast<float>(m_width),
+        static_cast<float>(m_height), 0.f, 1.f };
+    const D3D12_RECT scissor{ 0, 0, static_cast<LONG>(m_width), static_cast<LONG>(m_height) };
+    list->RSSetViewports(1, &viewport);
+    list->RSSetScissorRects(1, &scissor);
+    return ExposureTable(frame.target ? ComposeTable1 : ComposeTable0);
+}
+
 void DX12PostProcess::Compose(ID3D12GraphicsCommandList* list,
     D3D12_CPU_DESCRIPTOR_HANDLE output)
 {
@@ -247,11 +379,19 @@ void DX12PostProcess::Compose(ID3D12GraphicsCommandList* list,
         RenderBloom(list);
     else
         settings.bloomIntensity = 0.f;
+    uint32_t composeTable = 0;
+    if (settings.autoExposure && m_exposureMap)
+        composeTable = RenderExposure(list, settings);
+    else
+    {
+        settings.autoExposure = false;
+        m_exposureState.Reset();
+    }
     list->OMSetRenderTargets(1, &output, FALSE, nullptr);
     const auto values = Engine::Graphics::MakeComposeConstants(settings, m_bloomLevels);
     list->SetPipelineState(m_pipeline.Get());
     list->SetGraphicsRoot32BitConstants(0, ConstantCount, &values, 0);
-    list->SetGraphicsRootDescriptorTable(1, SrvTable(0));
+    list->SetGraphicsRootDescriptorTable(1, SrvTable(composeTable));
     list->DrawInstanced(3, 1, 0, 0);
 }
 }

@@ -93,7 +93,8 @@ public:
     Engine::Graphics::IGraphicsProvider* GetGraphicsProvider() override;
     void WaitIdle() override { FlushGPU(); }
     void RequestSceneCapture() override { m_captureRequested = true; }
-    bool ReadSceneCaptureRGBA(std::vector<uint8_t>& pixels) override;
+    bool ReadSceneCaptureRGBA(std::vector<uint8_t>& pixels, uint32_t& width,
+        uint32_t& height) override;
 
     // IGameRenderer interface
     void BeginFrame() override;   // reset allocator + list, transition backbuffer to RENDER_TARGET
@@ -139,6 +140,8 @@ private:
     ComPtr<ID3D12Device>              m_device;
     ComPtr<ID3D12Resource>            m_captureReadback;
     uint32_t m_captureRowPitch = 0;
+    uint32_t m_captureWidth = 0, m_captureHeight = 0; // scene color size copied
+    uint64_t m_captureBytes = 0; // footprint size: the last row is not pitch-padded
     bool m_captureRequested = false;
     std::string m_graphicsDevice = "Auto";
     std::string m_actualGraphicsDeviceName = "unknown";

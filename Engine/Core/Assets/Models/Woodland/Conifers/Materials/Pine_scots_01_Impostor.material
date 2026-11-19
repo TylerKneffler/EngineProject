@@ -1,0 +1,22 @@
+{
+    "version": 1,
+    "baseColor": [
+        1,
+        1,
+        1
+    ],
+    "specularModel": "MetallicRoughness",
+    "metallic": 0,
+    "roughness": 0.86,
+    "castsShadows": true,
+    "doubleSided": true,
+    "normalScale": 0.55,
+    "baseColorTexture": "Assets/Models/Woodland/Conifers/Textures/Pine_scots_01_Impostor_Color.ktx2",
+    "normalTexture": "Assets/Models/Woodland/Conifers/Textures/Pine_scots_01_Impostor_Normal.ktx2",
+    "useVertexColors": false,
+    "alphaMode": "Mask",
+    "alphaCutoff": 0.4,
+    "alphaEdgeFade": 1.0,
+    "impostorBillboard": true,
+    "foliageColorVariation": 0.55
+}

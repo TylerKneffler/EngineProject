@@ -32,3 +32,4 @@ build/
 
 # Python asset/validation caches.
 __pycache__/
+!.local/tests/PhysicalAtmosphereTests.cpp

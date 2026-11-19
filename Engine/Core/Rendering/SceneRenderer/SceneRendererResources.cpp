@@ -74,7 +74,7 @@ void SceneRendererResources::Initialize(SceneRenderer& renderer, Engine::Graphic
     renderer.m_skyboxConstantBuffer = bufferFactory->CreateBuffer(
         Engine::Graphics::IGraphicsBuffer::Usage::ConstantBuffer,
         Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
-        static_cast<uint64_t>(SceneRenderer::kMaxPortalRenderViews + 1u) * SceneRenderer::kCBStride);
+        static_cast<uint64_t>(SceneRenderer::kCloudConstantSlot + 1u) * SceneRenderer::kCBStride);
     if (!renderer.m_skyboxConstantBuffer)
         throw std::runtime_error("Failed to create skybox constant buffer");
     renderer.m_skyboxCBMapped = renderer.m_skyboxConstantBuffer->Map();

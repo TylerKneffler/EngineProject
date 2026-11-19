@@ -1,0 +1,15 @@
+<?xml version='1.0' encoding='utf-8'?>
+<Prefab xmlns:components="urn:engine-components" version="1" type="prefab">
+  <object name="ForestCluster_Conifer_01" enabled="true">
+    <components>
+      <components:Mesh Mesh.file="Assets/Models/Woodland/Clusters/Meshes/ForestCluster_Conifer_01.mesh" Mesh.foliageWindStrength="0" Mesh.useLightProbes="false" Mesh.gpuLodSelection="true" Mesh.gpuLod1Distance="100000" Mesh.gpuLod2Distance="100000" />
+      <components:Material Material.materialAsset="Engine/Core/Assets/Models/Woodland/Clusters/Materials/ForestCluster_Conifer_01.material" />
+    </components>
+    <children />
+    <transform>
+      <Transform.position _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.position>
+      <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+      <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+    </transform>
+  </object>
+</Prefab>

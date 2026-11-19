@@ -1,0 +1,22 @@
+{
+    "version": 1,
+    "baseColor": [
+        1,
+        1,
+        1
+    ],
+    "specularModel": "MetallicRoughness",
+    "metallic": 0,
+    "roughness": 0.78,
+    "castsShadows": true,
+    "doubleSided": true,
+    "normalScale": 1,
+    "baseColorTexture": "Assets/Models/Woodland/Conifers/Textures/Conifer_Needles_Color.ktx2",
+    "useVertexColors": true,
+    "alphaMode": "Mask",
+    "alphaCutoff": 0.42,
+    "alphaCoverageTransmission": 0.12,
+    "alphaEdgeFade": 0.75,
+    "reflectionStrength": 0.1,
+    "foliageColorVariation": 0.55
+}

@@ -1,0 +1,22 @@
+{
+    "version": 1,
+    "baseColor": [
+        0.86,
+        0.84,
+        0.77
+    ],
+    "specularModel": "MetallicRoughness",
+    "metallic": 0,
+    "roughness": 0.88,
+    "castsShadows": true,
+    "doubleSided": true,
+    "normalScale": 0.5,
+    "baseColorTexture": "Assets/Models/Woodland/Clusters/Textures/ForestCluster_Oak_01_Impostor_Color.ktx2",
+    "normalTexture": "Assets/Models/Woodland/Clusters/Textures/ForestCluster_Oak_01_Impostor_Normal.ktx2",
+    "useVertexColors": false,
+    "alphaMode": "Mask",
+    "alphaCutoff": 0.4,
+    "alphaEdgeFade": 1.0,
+    "impostorBillboard": true,
+    "foliageColorVariation": 0.7
+}

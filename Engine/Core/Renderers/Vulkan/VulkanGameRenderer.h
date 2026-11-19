@@ -24,7 +24,8 @@ public:
     Engine::Graphics::IGraphicsProvider* GetGraphicsProvider() override { return m_provider.get(); }
     void WaitIdle() override { m_core.WaitIdle(); }
     void RequestSceneCapture() override { m_captureRequested = true; }
-    bool ReadSceneCaptureRGBA(std::vector<uint8_t>& pixels) override;
+    bool ReadSceneCaptureRGBA(std::vector<uint8_t>& pixels, uint32_t& width,
+        uint32_t& height) override;
     void BeginFrame() override;
     void EndFrame() override;
     uint64_t GetSubmittedFrameToken() const override
@@ -60,6 +61,8 @@ private:
     VulkanPostProcess m_postProcess;
     VkBuffer m_captureBuffer = VK_NULL_HANDLE;
     VkDeviceMemory m_captureMemory = VK_NULL_HANDLE;
+    uint32_t m_captureWidth = 0, m_captureHeight = 0; // size of the last copy
+    VkFormat m_captureFormat = VK_FORMAT_UNDEFINED; // swap-chain format copied
     bool m_captureRequested = false;
     float m_clearColor[4] = { 0.1f, 0.1f, 0.1f, 1.0f };
     Engine::Graphics::FrameTimingTelemetry m_frameTelemetry{};

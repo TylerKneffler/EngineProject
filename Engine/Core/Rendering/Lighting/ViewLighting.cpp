@@ -1,3 +1,4 @@
+#include "Core/Rendering/Atmosphere/PhysicalAtmosphere.h"
 #include "Core/Rendering/Lighting/ViewLighting.h"
 
 #include "Core/Components/Materials/Texture.h"
@@ -273,6 +274,57 @@ std::array<glm::vec4, 4> ViewLighting::PackAtmosphereFog(
     packed[3] = { sunTint * fog.sunGlowStrength * fog.inscatterIntensity,
         fog.maxOpacity };
     return packed;
+}
+
+std::array<glm::vec4, 4> ViewLighting::PackPhysicalAerialPerspective(
+    const Engine::Model::PhysicalSkySettings& sky,
+    const Engine::Model::AtmosphereFogSettings& shafts,
+    const glm::vec3& toSun,
+    const glm::vec3& sunIlluminance,
+    const glm::vec3& multipleScattering)
+{
+    // Layout (AtmosphereFog.hlsli, physical mode):
+    // fog0: Mie extinction at the ground (per m), 1 / Mie scale height,
+    //       ground height, w = 100 + light-shaft encoding
+    // fog1: multiple-scattering source rgb, 1 / Rayleigh scale height
+    // fog2: direction toward the sun, Mie anisotropy g
+    // fog3: sun illuminance at the camera rgb, Rayleigh scale
+    float mode = 100.f;
+    const int shaftSamples = std::clamp(shafts.lightShaftSamples, 0,
+        Engine::Model::AtmosphereFogSettings::MaximumLightShaftSamples);
+    const float shaftStrength = std::clamp(shafts.lightShaftStrength, 0.f, 1.f);
+    if (shafts.lightShafts && shaftSamples > 0 && shaftStrength > 0.f)
+        mode += static_cast<float>(shaftSamples) + 0.999f * shaftStrength;
+    const glm::vec3 sun = glm::length(toSun) > 1e-4f ? glm::normalize(toSun)
+        : glm::vec3(0.f, 1.f, 0.f);
+    std::array<glm::vec4, 4> packed{};
+    packed[0] = { Engine::Rendering::PhysicalAtmosphere::MieExtinction * sky.mieScale,
+        1.f / std::max(sky.mieScaleHeight, 10.f), sky.groundHeight, mode };
+    packed[1] = { multipleScattering,
+        1.f / Engine::Rendering::PhysicalAtmosphere::RayleighScaleHeight };
+    packed[2] = { sun, std::clamp(sky.mieAnisotropy, 0.f, 0.99f) };
+    packed[3] = { sunIlluminance, sky.rayleighScale };
+    return packed;
+}
+
+void ViewLighting::SetSkyboxFog(SkyboxConstants& constants,
+    const std::array<glm::vec4, 4>& atmosphereFog, float skyDistance,
+    float cameraHeight)
+{
+    // Physical aerial perspective (w >= 100): the physical sky panorama
+    // already holds the atmosphere.
+    if (atmosphereFog[0].w <= 0.5f || atmosphereFog[0].w >= 99.5f || skyDistance <= 0.f)
+        return;
+    constants.rayX.w = atmosphereFog[0].x * std::exp(
+        std::clamp(-atmosphereFog[0].y * (cameraHeight - atmosphereFog[0].z), -60.f, 60.f));
+    constants.rayY.w = atmosphereFog[0].y;
+    constants.rayOrigin.w = skyDistance;
+    constants.fogInscatter = { glm::vec3(atmosphereFog[1]), atmosphereFog[2].w };
+    constants.fogSunGlow = { glm::vec3(atmosphereFog[3]), 0.f };
+    // The fog glow needs the sun even when its disc is not drawn (zero
+    // radiance keeps the disc and its halo off).
+    if (glm::dot(glm::vec3(constants.sunDirection), glm::vec3(constants.sunDirection)) < 1e-8f)
+        constants.sunDirection = { glm::vec3(atmosphereFog[2]), constants.sunDirection.w };
 }
 
 void ViewLighting::SetSkyboxRays(SkyboxConstants& constants,

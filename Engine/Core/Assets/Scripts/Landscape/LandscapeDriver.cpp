@@ -236,14 +236,17 @@ struct MacroColorRules
 std::vector<glm::vec4> ComputeMacroColors(const std::string& archivePath, uint64_t signature,
     int extent, int cellsX, int cellsY, float cellWidth, float cellDepth, const Altitudes& a,
     const std::array<glm::vec3, LayerCount>& means, const TerrainHydrologyMap& flow,
-    const TerrainHydrologyMap& deposition, const MacroColorRules& rules, int& side)
+    const TerrainHydrologyMap& deposition, const MacroColorRules& rules, int& side,
+    std::vector<glm::vec3>& normals)
 {
     side = 0;
+    normals.clear();
     if (cellsX != cellsY || cellsX % 4 != 0) return {};
     const int step = 4;
     const int perCell = cellsX / step;
     side = (extent * 2 + 1) * perCell + 1;
     std::vector<glm::vec4> colors(static_cast<size_t>(side) * side, glm::vec4(.1f, .1f, .1f, 0.f));
+    normals.assign(colors.size(), glm::vec3(0.f, 1.f, 0.f));
     const glm::vec3 canopy(.030f, .052f, .020f);
     const glm::vec3 lush = means[Grass] * glm::vec3(.72f, .92f, .55f);
     const glm::vec3 screeColor = glm::mix(means[Gravel], means[Rock], .4f) * 1.15f;
@@ -294,10 +297,12 @@ std::vector<glm::vec4> ComputeMacroColors(const std::string& archivePath, uint64
                 const size_t sample = static_cast<size_t>((cy + extent) * perCell + row / step) *
                     side + static_cast<size_t>((cx + extent) * perCell + col / step);
                 colors[sample] = glm::vec4(color * rules.brightness, cover);
+                // Same slopes: the surface normal at this sample's 16 m scale.
+                normals[sample] = glm::normalize(glm::vec3(-dx, 1.f, -dz));
             }
         return true;
     });
-    if (!read) { side = 0; return {}; }
+    if (!read) { side = 0; normals.clear(); return {}; }
     return colors;
 }
 
@@ -309,6 +314,87 @@ const std::array<const char*, 8> Species{
     "Big_oak_tree_001", "Big_oak_tree_002", "Large_oak_tree_001",
     "Large_oak_tree_002", "Medium_oak_tree_001", "Medium_oak_tree_002",
     "Small_oak_tree_001", "Sapling_oak_tree_001"};
+// Generated conifers (Tools/generate_conifers.py): large (spruce or pine),
+// medium (fir) and small (young spruce). They take over from the oaks over
+// the upper forest band below the tree line.
+const std::array<const char*, 4> ConiferSpecies{
+    "Spruce_tall_01", "Pine_scots_01", "Fir_subalpine_01", "Spruce_young_01"};
+
+// Share of conifers among the trees at a height: oak lowlands, mixed
+// foothills, conifers over the upper slopes (350-710 m on the demo map,
+// whose tree line is 950 m with an altitude blend of 6).
+float ConiferShare(float height, const Altitudes& a)
+{
+    return SmoothStep(a.tree - 100.f * a.blend, a.tree - 40.f * a.blend, height);
+}
+
+// Generated cliff blocks (Tools/generate_boulders.py): up to two per cell
+// on steep rock below the snow, upright and sunk into the slope. They live in
+// the forest layer for its 900 m reach, and are authored to cull after their
+// last level, so far blocks leave them out (thousands of steep cells would
+// otherwise add millions of far triangles). Their own random stream keeps
+// the tree layout unchanged.
+const std::array<const char*, 2> Cliffs{"Cliff_block_01", "Cliff_block_02"};
+
+void GenerateCliffs(const TerrainManager::ObjectLayerContext& context,
+    TerrainObjectLayer& layer, const Altitudes& a, uint64_t& id)
+{
+    if (context.farObjects) return;
+    const std::string prefix = "Assets/Prefabs/Woodland/Boulders/";
+    for (const char* cliff : Cliffs)
+    {
+        auto& lod = layer.objectLods[prefix + cliff + ".prefab"];
+        lod.distances = {90.f, 300.f};
+        lod.cullAfterLastLod = true;
+        lod.finalLodCullDistance = layer.viewDistance;
+    }
+    const size_t layerCount = context.terrainLayerCount;
+    const bool painted = context.weights && layerCount >= LayerCount &&
+        context.weights->size() == context.heights->size() * layerCount;
+    const float width = context.cellsX * context.cellWidth;
+    const float depth = context.cellsY * context.cellDepth;
+    uint32_t state = Hash(context.cell.first, context.cell.second, 0x636c6966u) | 1u;
+    const auto random = [&state]
+    {
+        state ^= state << 13; state ^= state >> 17; state ^= state << 5;
+        return (state & 0xffffffu) / float(0x1000000);
+    };
+    int placed = 0;
+    for (int attempt = 0; attempt < 40 && placed < 2; ++attempt)
+    {
+        const float x = (.06f + .88f * random()) * width;
+        const float z = (.06f + .88f * random()) * depth;
+        const float yaw = random(), size = random(), pick = random();
+        float height = 0.f;
+        glm::vec3 normal(0.f, 1.f, 0.f);
+        if (!Engine::Components::SampleTerrainSurface(*context.heights, context.cellsX,
+                context.cellsY, context.cellWidth, context.cellDepth, x, z, height, &normal))
+            continue;
+        // Steep (about 40-65 degrees), above the shores, below the snow.
+        if (normal.y > .76f || normal.y < .42f) continue;
+        if (height < a.water + 25.f || height > a.snow) continue;
+        if (painted)
+        {
+            const int col = std::clamp(static_cast<int>(std::lround(x / context.cellWidth)), 0, context.cellsX);
+            const int row = std::clamp(static_cast<int>(std::lround(z / context.cellDepth)), 0, context.cellsY);
+            const float rock = (*context.weights)[(static_cast<size_t>(row) * (context.cellsX + 1) + col) *
+                layerCount + Rock];
+            if (rock < .35f) continue;
+        }
+        const float scale = .7f + .6f * size;
+        // Sink the block so its downhill edge meets the slope: half a
+        // footprint (about 5 m at scale 1) times the slope's gradient.
+        const float gradient = std::sqrt(std::max(0.f, 1.f - normal.y * normal.y)) / normal.y;
+        TerrainObjectLayer::Placement placement;
+        placement.id = ++id;
+        placement.asset = prefix + Cliffs[pick < .55f ? 0 : 1] + ".prefab";
+        placement.position = {x, height - std::min(10.f, 5.f * scale * gradient), z};
+        placement.yawDegrees = yaw * 360.f;
+        placement.scale = scale;
+        layer.placements.push_back(std::move(placement));
+        ++placed;
+    }
+}
 
 // Forest for one cell: random candidates kept where the forest mask, the
 // height band and the slope allow, plus a few lone trees in the meadows.
@@ -332,11 +418,14 @@ void GenerateForest(const TerrainManager::ObjectLayerContext& context,
     // keep their shadows on the ground and on each other at any distance.
     layer.farShadowDistance = layer.viewDistance;
     const std::string prefix = "Assets/Prefabs/Woodland/Oaks/";
+    const std::string coniferPrefix = "Assets/Prefabs/Woodland/Conifers/";
     for (const char* species : Species)
     {
         auto& lod = layer.objectLods[prefix + species + ".prefab"];
         lod.distances = {60.f, 220.f};
     }
+    for (const char* species : ConiferSpecies)
+        layer.objectLods[coniferPrefix + species + ".prefab"].distances = {60.f, 220.f};
     const float width = context.cellsX * context.cellWidth;
     const float depth = context.cellsY * context.cellDepth;
     uint32_t state = Hash(context.cell.first, context.cell.second, 0x74726565u) | 1u;
@@ -352,6 +441,7 @@ void GenerateForest(const TerrainManager::ObjectLayerContext& context,
     const uint32_t stand = Hash(context.cell.first, context.cell.second, 0x7374616eu);
     const std::array<size_t, 3> standSpecies{stand % 4u, 4u + (stand >> 8) % 2u,
         6u + (stand >> 16) % 2u};
+    const std::array<size_t, 3> standConifers{(stand >> 20) % 2u, 2u, 3u};
     uint64_t id = 0;
     for (int attempt = 0; attempt < treesPerCell; ++attempt)
     {
@@ -376,13 +466,20 @@ void GenerateForest(const TerrainManager::ObjectLayerContext& context,
         // Forest interiors favour large trees, edges and meadows small ones.
         const float interior = ForestMask(worldX, worldZ);
         const float sizeClass = pick * .6f + (1.f - interior) * .4f;
-        const size_t index = standSpecies[sizeClass < .5f ? 0 : sizeClass < .75f ? 1 : 2];
-        placement.asset = prefix + Species[index] + ".prefab";
+        const int sizeBand = sizeClass < .5f ? 0 : sizeClass < .75f ? 1 : 2;
+        // Conifer or oak, from the draws above (no extra random, so the
+        // oak layout of lower forests is unchanged).
+        const float familyDraw = std::fmod(pick * 7.31f + yaw * 3.17f, 1.f);
+        if (familyDraw < ConiferShare(height, a))
+            placement.asset = coniferPrefix + ConiferSpecies[standConifers[sizeBand]] + ".prefab";
+        else
+            placement.asset = prefix + Species[standSpecies[sizeBand]] + ".prefab";
         placement.position = {x, height - .08f, z};
         placement.yawDegrees = yaw * 360.f;
         placement.scale = .8f + size * .45f;
         layer.placements.push_back(std::move(placement));
     }
+    GenerateCliffs(context, layer, a, id);
 }
 
 // Ground detail cooked by tools/PropCook: rocks from one scanned pack and a
@@ -406,6 +503,16 @@ std::string RockPrefab(int index)
 std::string LogPrefab()
 {
     return "Assets/Prefabs/Woodland/Logs/FallenLog.prefab";
+}
+
+// Generated faceted boulders (Tools/generate_boulders.py, triplanar rock),
+// already at their real size; one per cell's stand, in rock fields.
+const std::array<const char*, 4> Boulders{
+    "Boulder_01", "Boulder_02", "Boulder_03", "Boulder_flat_01"};
+
+std::string BoulderPrefab(size_t index)
+{
+    return std::string("Assets/Prefabs/Woodland/Boulders/") + Boulders[index % Boulders.size()] + ".prefab";
 }
 
 // Rocks and fallen logs, or bushes (undergrowth), for one cell, from the same
@@ -443,6 +550,8 @@ void GenerateProps(const TerrainManager::ObjectLayerContext& context,
         for (int rock : LandscapeRocks)
             layer.objectLods[RockPrefab(rock)].distances = {35.f, 100.f};
         layer.objectLods[LogPrefab()].distances = {35.f, 100.f};
+        for (size_t boulder = 0; boulder < Boulders.size(); ++boulder)
+            layer.objectLods[BoulderPrefab(boulder)].distances = {35.f, 100.f};
     }
     // Bushes have a single LOD; an explicit one-entry chain gives them a stable
     // profile like every other asset in the layer.
@@ -495,6 +604,7 @@ void GenerateProps(const TerrainManager::ObjectLayerContext& context,
     const uint32_t stand = Hash(context.cell.first, context.cell.second, 0x70726f70u);
     const std::array<int, 2> standRocks{LandscapeRocks[stand % 3u],
         LandscapeRocks[3u + (stand >> 8) % 3u]};
+    const size_t standBoulder = (stand >> 16) % Boulders.size();
     const std::array<size_t, 2> standBushes{(stand >> 4) % 4u, 4u + (stand >> 12) % 2u};
     const int attempts = static_cast<int>(std::lround((undergrowth ? 420.f : 300.f) *
         std::clamp(density, 0.f, 4.f)));
@@ -549,6 +659,13 @@ void GenerateProps(const TerrainManager::ObjectLayerContext& context,
         if (shore > .5f) scale = .25f + .45f * size;
         // Rocks lean partway with the slope, so they read as resting on it.
         const glm::vec3 lean = glm::normalize(glm::mix(normal, glm::vec3(0.f, 1.f, 0.f), .45f));
+        // Large rocks in fields and on rock paint: a generated boulder.
+        if (kind > .72f && scale > 1.2f && shore <= .5f)
+        {
+            place(BoulderPrefab(standBoulder), x, height - .05f, z, lean, yaw,
+                .55f + .5f * size);
+            continue;
+        }
         const int rock = standRocks[pick < .5f ? 0 : 1];
         place(RockPrefab(rock), x, height - .08f * scale, z, lean, yaw, scale);
     }
@@ -772,12 +889,14 @@ void LandscapeDriver::RegisterMacroColors(TerrainManager& manager)
             flowSamples.Load(flowPath, TerrainHydrologyMap::FlowMagic, signature);
             depositionSamples.Load(depositionPath, TerrainHydrologyMap::DepositionMagic, signature);
             int side = 0;
+            std::vector<glm::vec3> normals;
             const auto colors = ComputeMacroColors(archive, signature, extent, cellsX, cellsY,
-                cellWidth, cellDepth, level, means, flowSamples, depositionSamples, rules, side);
+                cellWidth, cellDepth, level, means, flowSamples, depositionSamples, rules, side,
+                normals);
             const float spacing = cellWidth * 4.f;
             const float origin = -float(extent) * cellsX * cellWidth;
             return TerrainManager::EncodeMacroColorImage(side, side, origin, origin,
-                spacing, colors);
+                spacing, colors, &normals);
         };
     };
     manager.SetMacroColorSource(std::move(source));

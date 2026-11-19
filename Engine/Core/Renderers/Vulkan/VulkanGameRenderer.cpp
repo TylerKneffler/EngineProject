@@ -62,6 +62,9 @@ void VulkanGameRenderer::BeginFrame()
     {
         auto* factory = m_provider->GetContextFactory();
         factory->SetCommandBuffer(reinterpret_cast<void*>(m_commandBuffer));
+        // The post-process scene pass registers its depth for copies.
+        if (auto* native = dynamic_cast<VulkanGraphicsContextFactory*>(factory))
+            native->SetSceneDepthCopySupported(true);
         if (!m_workerRecordingEnabled)
             factory->PrepareFrame(m_core.GetFrameIndex());
     }
@@ -89,11 +92,11 @@ void VulkanGameRenderer::EndFrame()
         m_frameTelemetry = factory->GetFrameTimingTelemetry();
     }
     m_postProcess.EndScene(m_commandBuffer);
-    if (m_captureRequested) RecordSceneCapture();
     const auto extent = m_core.GetExtent();
     m_postProcess.BeginComposition(m_commandBuffer,
         m_core.GetCurrentFramebuffer(), extent.width, extent.height, m_clearColor);
     m_postProcess.EndComposition(m_commandBuffer);
+    if (m_captureRequested) RecordSceneCapture();
     m_core.EndFrame();
     m_frameTelemetry.cpuPresentationMilliseconds =
         m_core.GetLastPresentationMilliseconds();
@@ -113,10 +116,28 @@ void VulkanGameRenderer::DestroySceneCapture()
     m_captureMemory = VK_NULL_HANDLE;
 }
 
+// Copies the composed swap-chain image (bloom, tone mapping, grading, output
+// encoding: what the window shows), as DX11 does. It used to copy the HDR
+// scene color before post-processing, so Vulkan/DX12 captures lacked bloom
+// and grading and looked unlike DX11's. Runs after the composition pass,
+// whose render pass leaves the image in PRESENT_SRC_KHR.
 void VulkanGameRenderer::RecordSceneCapture()
 {
     const VkDevice device = m_core.GetDevice();
-    const VkDeviceSize bytes = static_cast<VkDeviceSize>(m_width) * m_height * 8;
+    const VkExtent2D extent = m_core.GetExtent();
+    const VkDeviceSize bytes = static_cast<VkDeviceSize>(extent.width) * extent.height * 4;
+    // A resize since the last capture needs a buffer of the new size.
+    if (m_captureBuffer && (m_captureWidth != extent.width || m_captureHeight != extent.height))
+    {
+        vkDeviceWaitIdle(device);
+        vkDestroyBuffer(device, m_captureBuffer, nullptr);
+        vkFreeMemory(device, m_captureMemory, nullptr);
+        m_captureBuffer = VK_NULL_HANDLE;
+        m_captureMemory = VK_NULL_HANDLE;
+    }
+    m_captureWidth = extent.width;
+    m_captureHeight = extent.height;
+    m_captureFormat = m_core.GetSwapchainFormat();
     if (!m_captureBuffer)
     {
         VkBufferCreateInfo info{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
@@ -140,11 +161,11 @@ void VulkanGameRenderer::RecordSceneCapture()
     VkImageMemoryBarrier before{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
     before.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
     before.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-    before.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    before.oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
     before.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
     before.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     before.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    before.image = m_postProcess.GetSceneColor();
+    before.image = m_core.GetCurrentImage();
     before.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     before.subresourceRange.levelCount = 1;
     before.subresourceRange.layerCount = 1;
@@ -155,16 +176,16 @@ void VulkanGameRenderer::RecordSceneCapture()
     VkBufferImageCopy region{};
     region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     region.imageSubresource.layerCount = 1;
-    region.imageExtent = {m_width, m_height, 1};
+    region.imageExtent = {extent.width, extent.height, 1};
     vkCmdCopyImageToBuffer(m_commandBuffer, before.image,
         VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, m_captureBuffer, 1, &region);
     VkImageMemoryBarrier after = before;
     after.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-    after.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    after.dstAccessMask = 0;
     after.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-    after.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    after.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
     vkCmdPipelineBarrier(m_commandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
-        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr,
+        VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr,
         1, &after);
     VkBufferMemoryBarrier host{ VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER };
     host.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
@@ -178,28 +199,29 @@ void VulkanGameRenderer::RecordSceneCapture()
     m_captureRequested = false;
 }
 
-bool VulkanGameRenderer::ReadSceneCaptureRGBA(std::vector<uint8_t>& pixels)
+bool VulkanGameRenderer::ReadSceneCaptureRGBA(std::vector<uint8_t>& pixels,
+    uint32_t& width, uint32_t& height)
 {
-    if (!m_captureMemory) return false;
+    if (!m_captureMemory || !m_captureWidth || !m_captureHeight) return false;
+    // 8-bit swap-chain formats only (the core prefers B8G8R8A8_UNORM).
+    bool swapRedBlue = false;
+    switch (m_captureFormat)
+    {
+    case VK_FORMAT_B8G8R8A8_UNORM: case VK_FORMAT_B8G8R8A8_SRGB: swapRedBlue = true; break;
+    case VK_FORMAT_R8G8B8A8_UNORM: case VK_FORMAT_R8G8B8A8_SRGB: break;
+    default: return false;
+    }
     void* mapped = nullptr;
     if (vkMapMemory(m_core.GetDevice(), m_captureMemory, 0,
         VK_WHOLE_SIZE, 0, &mapped) != VK_SUCCESS || !mapped) return false;
-    const auto halfToByte = [](uint16_t bits)
-    {
-        const int exponent = (bits >> 10) & 31;
-        const float value = exponent == 0
-            ? std::ldexp(static_cast<float>(bits & 1023), -24)
-            : (exponent == 31 ? 1.f : std::ldexp(
-                1.f + static_cast<float>(bits & 1023) / 1024.f,
-                exponent - 15));
-        return static_cast<uint8_t>(std::round(std::pow(
-            std::clamp(value, 0.f, 1.f), 1.f / 2.2f) * 255.f));
-    };
-    const auto* values = static_cast<const uint16_t*>(mapped);
-    pixels.resize(static_cast<size_t>(m_width) * m_height * 4);
-    for (size_t index = 0; index < pixels.size(); ++index)
-        pixels[index] = halfToByte(values[index]);
+    const auto* source = static_cast<const uint8_t*>(mapped);
+    pixels.assign(source, source + static_cast<size_t>(m_captureWidth) * m_captureHeight * 4);
     vkUnmapMemory(m_core.GetDevice(), m_captureMemory);
+    if (swapRedBlue)
+        for (size_t index = 0; index < pixels.size(); index += 4)
+            std::swap(pixels[index], pixels[index + 2]);
+    width = m_captureWidth;
+    height = m_captureHeight;
     return true;
 }
 

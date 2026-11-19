@@ -39,6 +39,33 @@ PostProcessConstants MakeComposeConstants(const PostProcessSettings& settings,
     constants.grade[0] = std::max(settings.gradingContrast, 0.01f);
     constants.grade[1] = std::max(settings.gradingSaturation, 0.f);
     constants.grade[2] = 1.f / static_cast<float>(std::max(bloomLevels, 1u));
+    constants.grade[3] = settings.autoExposure ? 1.f : 0.f;
+    return constants;
+}
+
+PostProcessConstants MakeExposureConstants(const PostProcessSettings& settings,
+    float deltaSeconds, bool history)
+{
+    PostProcessConstants constants{};
+    constants.params0[0] = ExposureHistogramMinEv;
+    constants.params0[1] = ExposureHistogramMaxEv - ExposureHistogramMinEv;
+    constants.params0[2] = std::clamp(deltaSeconds, 0.f, 0.25f);
+    constants.params0[3] = history ? 1.f : 0.f;
+    const float low = std::clamp(settings.autoExposureLowPercent, 0.f, 0.99f);
+    constants.shadowTint[0] = low;
+    constants.shadowTint[1] = std::clamp(settings.autoExposureHighPercent, low + 0.01f, 1.f);
+    constants.shadowTint[2] = std::max(settings.autoExposureSpeedUp, 0.f);
+    constants.shadowTint[3] = std::max(settings.autoExposureSpeedDown, 0.f);
+    const float minEv = std::clamp(settings.autoExposureMinEv, ExposureHistogramMinEv,
+        ExposureHistogramMaxEv);
+    constants.highlightTint[0] = minEv;
+    constants.highlightTint[1] = std::clamp(settings.autoExposureMaxEv, minEv,
+        ExposureHistogramMaxEv);
+    constants.highlightTint[2] = 1.f / static_cast<float>(ExposureMapWidth);
+    constants.highlightTint[3] = 1.f / static_cast<float>(ExposureMapHeight);
+    constants.grade[0] = static_cast<float>(ExposureMapWidth);
+    constants.grade[1] = static_cast<float>(ExposureMapHeight);
+    constants.grade[2] = static_cast<float>(ExposureBins);
     return constants;
 }
 

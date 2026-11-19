@@ -51,6 +51,9 @@ TerrainManager::JsonValue TerrainManager::Serialize() const
         .Set("maxCommitMilliseconds", JsonValue(maxCommitMilliseconds))
         .Set("farObjectBlockCells", JsonValue(farObjectBlockCells))
         .Set("farObjectProjectLayer", JsonValue(farObjectProjectLayer))
+        .Set("farClusterDistance", JsonValue(farClusterDistance))
+        .Set("farClusterSize", JsonValue(farClusterSize))
+        .Set("farClusterMinimumTrees", JsonValue(farClusterMinimumTrees))
         .Set("farTileErrorPixelsLod2", JsonValue(farTileErrorPixelsLod2))
         .Set("farTileErrorPixelsLod4", JsonValue(farTileErrorPixelsLod4))
         .Set("farTileErrorPixelsLod8", JsonValue(farTileErrorPixelsLod8))
@@ -71,6 +74,7 @@ TerrainManager::JsonValue TerrainManager::Serialize() const
         .Set("macroColorMap", JsonValue(macroColorMap))
         .Set("macroColorNear", JsonValue(macroColorNear))
         .Set("macroColorFar", JsonValue(macroColorFar))
+        .Set("canopyRelief", JsonValue(canopyRelief))
         .Set("paintResolution", JsonValue(paintResolution))
         .Set("reliefMapping", JsonValue(reliefMapping))
         .Set("reliefShadows", JsonValue(reliefShadows))
@@ -170,6 +174,11 @@ TerrainManager::JsonValue TerrainManager::Serialize() const
         if (!inlineFallback.count(cell))
             edits.Push(JsonValue::MakeObject().Set("x", JsonValue(cell.first))
                 .Set("y", JsonValue(cell.second)));
+    JsonValue clusters = JsonValue::MakeArray();
+    for (const auto& cluster : farClusters)
+        clusters.Push(JsonValue::MakeObject().Set("asset", JsonValue(cluster.asset))
+            .Set("match", JsonValue(cluster.match)).Set("trees", JsonValue(cluster.trees)));
+    out.Set("farClusters", std::move(clusters));
     out.Set("cells", std::move(cells))
         .Set("proceduralRuns", std::move(runs))
         .Set("editedCells", std::move(edits));
@@ -231,6 +240,26 @@ void TerrainManager::Deserialize(const JsonValue& value)
         ? std::clamp(value["farObjectBlockCells"].AsInt(), 1, 32) : 8;
     farObjectProjectLayer = value.Has("farObjectProjectLayer")
         ? value["farObjectProjectLayer"].AsString() : std::string("Trees");
+    farClusterDistance = value.Has("farClusterDistance")
+        ? std::clamp(value["farClusterDistance"].AsFloat(), 0.f, 100000.f) : 0.f;
+    farClusterSize = value.Has("farClusterSize")
+        ? std::clamp(value["farClusterSize"].AsFloat(), 4.f, 1000.f) : 40.f;
+    farClusterMinimumTrees = value.Has("farClusterMinimumTrees")
+        ? std::clamp(value["farClusterMinimumTrees"].AsInt(), 1, 1000) : 5;
+    farClusters.clear();
+    {
+        const auto& clusters = value["farClusters"];
+        for (size_t i = 0; i < clusters.ArraySize(); ++i)
+        {
+            const auto& entry = clusters.ArrayAt(i);
+            FarCluster cluster;
+            cluster.asset = entry["asset"].AsString();
+            cluster.match = entry["match"].AsString();
+            cluster.trees = entry.Has("trees")
+                ? std::clamp(entry["trees"].AsFloat(), 1.f, 1000.f) : 12.f;
+            if (!cluster.asset.empty()) farClusters.push_back(std::move(cluster));
+        }
+    }
     const auto levelError = [&](const char* name) {
         return value.Has(name) ? std::clamp(value[name].AsFloat(), -1.f, 64.f)
             : -1.f;
@@ -270,6 +299,8 @@ void TerrainManager::Deserialize(const JsonValue& value)
         ? std::clamp(value["macroColorNear"].AsFloat(), 0.f, 100000.f) : 256.f;
     macroColorFar = value.Has("macroColorFar")
         ? std::clamp(value["macroColorFar"].AsFloat(), macroColorNear + 1.f, 100000.f) : 640.f;
+    canopyRelief = value.Has("canopyRelief")
+        ? std::clamp(value["canopyRelief"].AsFloat(), 0.f, 1.f) : .6f;
     paintResolution = value.Has("paintResolution")
         ? std::clamp(value["paintResolution"].AsInt(), 0, 16) : 0;
     reliefMapping = !value.Has("reliefMapping") || value["reliefMapping"].AsBool();
@@ -429,6 +460,10 @@ bool TerrainManager::DrawProperties(Engine::Core::IInspectorUi& ui)
         ui.Tooltip("Loaded cells beyond medium detail use quarter-resolution terrain (LOD 4) through this radius, then eighth-resolution terrain. Keep this at least as large as the medium detail radius.");
         changed |= ui.SliderInt("Far object distance (cells)", &farObjectRadius, 0, 64);
         ui.Tooltip("Beyond the full-detail cells, object layer placements with LOD chains (trees) draw as their last level (impostors) out to this radius, batched into large blocks. 0 disables.");
+        changed |= ui.DragFloat("Forest cluster distance (m)", &farClusterDistance, 10.f, 0.f, 100000.f);
+        ui.Tooltip("Far trees beyond this distance are grouped into squares and drawn as baked cluster impostors (Far clusters list, saved with the scene), about a tenth of the instances. 0 disables.");
+        changed |= ui.DragFloat("Forest cluster square (m)", &farClusterSize, 1.f, 4.f, 1000.f);
+        changed |= ui.SliderInt("Trees per cluster (minimum)", &farClusterMinimumTrees, 1, 64);
         changed |= ui.SliderInt("Editor detail distance (cells)", &editorRadius, 0, 32);
         ui.Tooltip("Editable full-resolution cell radius around the Scene view camera, separate from play mode.");
         ui.Label("Object view distance, LOD distances and shadow distance: Terrain Object Layer.");
@@ -499,6 +534,11 @@ bool TerrainManager::DrawProperties(Engine::Core::IInspectorUi& ui)
                 "the edge of the loaded cells (full detail distance) so they meet the distant tiles "
                 "without a seam.");
             macroColorFar = std::max(macroColorFar, macroColorNear + 1.f);
+            changed |= ui.SliderFloat("Distant canopy relief", &canopyRelief, 0.f, 1.f);
+            ui.Tooltip("Forested areas of the macro map shade as a bumpy canopy on distant tiles "
+                "(tree-crown and clump relief plus crown occlusion), so wooded hills read as forest "
+                "beyond the far tree impostors. Fades out where a pixel covers more than a crown. "
+                "0 turns it off.");
         }
         changed |= ui.Checkbox("Measurement grid (metres and cell borders)",
             &measurementGrid);

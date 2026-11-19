@@ -107,6 +107,11 @@ ParticleEmitter::ParticleEmitter()
     RegisterField("seed", seed);
     RegisterField("texturePath", texturePath);
     RegisterField("opacity", opacity);
+    RegisterField("softness", softness);
+    RegisterField("nearFadeDistance", nearFadeDistance);
+    RegisterField("fadeInTime", fadeInTime);
+    RegisterField("sizeVariation", sizeVariation);
+    RegisterField("randomRotation", randomRotation);
     RegisterField("blendMode", blendMode);
     RegisterField("collisionMode", collisionMode);
     RegisterField("collisionBounce", collisionBounce);
@@ -586,6 +591,12 @@ void ParticleEmitter::SpawnOne(const glm::mat4& emitterWorld)
     particle.lifetime = std::max(0.001f, lifetime);
     particle.color = color;
     particle.size = std::max(0.f, size);
+    // Draw the optional randoms only when used, so existing emitters keep
+    // their seeded sequences.
+    if (sizeVariation > 0.f)
+        particle.size *= 1.f + std::clamp(sizeVariation, 0.f, 1.f) * (2.f * RandomUnit() - 1.f);
+    if (randomRotation)
+        particle.rotation = 2.f * Pi * RandomUnit();
 
     glm::vec3 localPosition(0.f);
     if (shape == static_cast<int>(Shape::Box))
@@ -979,6 +990,12 @@ bool ParticleEmitter::DrawProperties(Engine::Core::IInspectorUi& ui)
     renderChanged = ui.DragFloat("Opacity", &opacity, 0.01f, 0.f, 1.f) || renderChanged;
     const char* blends[] = { "Additive", "Alpha" };
     renderChanged = ui.Combo("Blend", &blendMode, blends, 2) || renderChanged;
+    renderChanged = ui.DragFloat("Soft depth fade (m)", &softness, 0.05f, 0.f, 200.f) || renderChanged;
+    ui.Tooltip("Fades sprites where they approach the surface behind them, so mist and cloud sprites meet terrain softly. 0 draws hard intersections.");
+    renderChanged = ui.DragFloat("Near camera fade (m)", &nearFadeDistance, 0.1f, 0.f, 1000.f) || renderChanged;
+    changed = ui.DragFloat("Fade in (s)", &fadeInTime, 0.05f, 0.f, 600.f) || changed;
+    changed = ui.DragFloat("Size variation", &sizeVariation, 0.01f, 0.f, 1.f) || changed;
+    changed = ui.Checkbox("Random rotation", &randomRotation) || changed;
     const char* collisionModes[] = { "Off", "Kill on contact", "Bounce" };
     changed = ui.Combo("Collision", &collisionMode, collisionModes, 3) || changed;
     if (collisionMode == static_cast<int>(CollisionMode::Bounce))

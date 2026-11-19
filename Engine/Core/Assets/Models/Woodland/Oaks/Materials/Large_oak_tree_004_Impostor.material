@@ -1,10 +1,6 @@
 {
   "version": 1,
-  "baseColor": [
-    1,
-    1,
-    1
-  ],
+  "baseColor": [0.86, 0.84, 0.77],
   "useVertexColors": true,
   "ambientColor": [
     0.2,
@@ -99,12 +95,13 @@
   "occlusionUvSet": 0,
   "emissiveUvSet": 0,
   "heightUvSet": 0,
-  "baseColorTexture": "Assets/Other/oak_trees_pack_17var_lods_seasons_gameready/textures/Large_oak_tree_004_Billboard_Mat_baseColor.png",
+  "baseColorTexture": "Assets/Other/oak_trees_pack_17var_lods_seasons_gameready/textures/Large_oak_tree_004_Billboard_Mat_baseColor.ktx2",
   "metallicRoughnessTexture": "",
   "normalTexture": "Assets/Other/oak_trees_pack_17var_lods_seasons_gameready/textures/Large_oak_tree_004_Billboard_Mat_normal.png",
   "occlusionTexture": "",
   "shader": "",
   "alphaCoverageTransmission": 0,
   "alphaEdgeFade": 1.0,
-  "impostorBillboard": true
+  "impostorBillboard": true,
+  "foliageColorVariation": 0.7
 }
