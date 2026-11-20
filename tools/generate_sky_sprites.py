@@ -112,12 +112,13 @@ def mist_sheet(seed, size=1024):
 
 def cloud_shadow(seed=6613, size=1024):
     """Tiling cloud-shadow cookie for the sun (Light.cookieTexture, linear):
-    1 in clear sky, ~0.3 under cloud, ~40 % cover with soft edges. Scrolled
-    with the wind by Light.cookieScrollX/Y (.md/foliage.md Phase 3)."""
+    1 in clear sky, ~0.42 under cloud, ~40 % cover with soft edges (0.3 read
+    4.5x darker than sun on the meadow; the reference frames show 2.4-4x). Scrolled
+    with the wind by Light.cookieScrollX/Y (.md/todo.md Foliage Phase 3)."""
     noise = wa.fbm_2d((size, size), (6, 6), 5, seed, gain=0.55, tile=True)
     noise = (noise - noise.min()) / max(noise.max() - noise.min(), 1e-6)
     cloud = smoothstep(0.42, 0.6, noise)
-    return 1.0 - 0.7 * cloud
+    return 1.0 - 0.58 * cloud
 
 
 def write_cloud_shadow():

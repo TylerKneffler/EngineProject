@@ -73,12 +73,57 @@ struct DetailCostCollector
 {
     std::future<Engine::Rendering::DetailCostCurve> job;
     std::chrono::steady_clock::time_point lastLaunch{};
+    // Placement snapshots handed to the job, keyed by InstanceData::lodIdentity.
+    // Copying every visible tile's placements at each launch was ~5 % of the
+    // scene thread on the landscape forest; a snapshot is now copied once per
+    // tile revision and dropped after the tile has been out of view a while.
+    struct Snapshot
+    {
+        uint64_t revision = 0;
+        uint32_t launch = 0;
+        std::shared_ptr<const std::vector<Engine::Rendering::DetailCostInput::Rows>> transforms;
+    };
+    std::unordered_map<uint64_t, Snapshot> snapshots;
+    uint32_t launch = 0;
 };
 DetailCostCollector& GetDetailCostCollector()
 {
     static DetailCostCollector collector;
     return collector;
 }
+
+// Storage for a view's draw records, reused across Render calls. A record is
+// ~2 KB and a landscape view prepares a few thousand, so a fresh vector each
+// call meant several megabytes of newly committed pages per view per frame
+// (allocation, page faults and release were ~5 % of the scene thread).
+// Leases nest for views rendered inside another view.
+struct PreparedDrawLease
+{
+    std::vector<Engine::Rendering::PreparedDraw> draws;
+    PreparedDrawLease()
+    {
+        auto& pool = Pool();
+        if (!pool.empty())
+        {
+            draws = std::move(pool.back());
+            pool.pop_back();
+        }
+        draws.clear();
+    }
+    ~PreparedDrawLease()
+    {
+        auto& pool = Pool();
+        if (pool.size() < 4) pool.push_back(std::move(draws));
+    }
+    PreparedDrawLease(const PreparedDrawLease&) = delete;
+    PreparedDrawLease& operator=(const PreparedDrawLease&) = delete;
+private:
+    static std::vector<std::vector<Engine::Rendering::PreparedDraw>>& Pool()
+    {
+        thread_local std::vector<std::vector<Engine::Rendering::PreparedDraw>> pool;
+        return pool;
+    }
+};
 }
 
 namespace Engine::Rendering
@@ -1377,7 +1422,8 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
     // Draw preparation has been decomposed into the SceneRenderer subsystem.
     // Keep the alias here while the render loop is being gradually migrated.
     using PreparedDraw = Engine::Rendering::PreparedDraw;
-    std::vector<PreparedDraw> preparedDraws;
+    PreparedDrawLease preparedDrawLease;
+    std::vector<PreparedDraw>& preparedDraws = preparedDrawLease.draws;
     m_diagnosticOpaqueDepthEqualReady = true;
     preparedDraws.reserve(renderObjects.size());
     // All streamed grass tiles share the same foliage asset and a small set
@@ -1561,12 +1607,23 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
                     ? std::max(0.f, detailCostLayers[static_cast<size_t>(layer)].budgetWeight) : 1.f;
                 // Foliage lets about half the view through.
                 group.opacity = mesh->foliageWindStrength > 0.f ? .5f : 1.f;
-                group.transforms.resize(data->transforms.size());
                 static_assert(sizeof(Engine::Rendering::DetailCostInput::Rows) ==
                     sizeof(Engine::Components::Mesh::InstanceTransform));
-                if (!data->transforms.empty())
-                    std::memcpy(group.transforms.data(), data->transforms.data(),
-                        data->transforms.size() * sizeof(Engine::Components::Mesh::InstanceTransform));
+                auto& collector = GetDetailCostCollector();
+                auto& snapshot = collector.snapshots[data->lodIdentity];
+                if (!snapshot.transforms || snapshot.revision != data->revision ||
+                    snapshot.transforms->size() != data->transforms.size())
+                {
+                    auto copy = std::make_shared<std::vector<Engine::Rendering::DetailCostInput::Rows>>(
+                        data->transforms.size());
+                    if (!data->transforms.empty())
+                        std::memcpy(copy->data(), data->transforms.data(),
+                            data->transforms.size() * sizeof(Engine::Components::Mesh::InstanceTransform));
+                    snapshot.transforms = std::move(copy);
+                    snapshot.revision = data->revision;
+                }
+                snapshot.launch = collector.launch;
+                group.transforms = snapshot.transforms;
             }
             const glm::vec2 distances = mesh->instanceLodDistances * quality.geometry * viewCoverageScale;
             const int band = mesh->instanceLodBand;
@@ -1874,7 +1931,8 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
         }
         UINT64 offset = static_cast<UINT64>(slot) * kCBStride;
 
-        ObjectGPUData objectData{};
+        // Written straight into the draw record (zero-initialised by emplace_back).
+        ObjectGPUData& objectData = preparedDraw.objectData;
         // Resolve probe/environment inputs before applying per-object materials.
         objectData.lightingChannels.x = mat
             ? static_cast<uint32_t>(mat->lightingChannels) : 0xffffffffu;
@@ -2131,7 +2189,6 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
         objectData.placementFade = mesh ? glm::vec4(mesh->placementFadeStart, mesh->placementFadeEnd,
             grassMinimumPixels, grassPixelSize) : glm::vec4(0.f);
         std::copy(grassInteraction.data.begin(), grassInteraction.data.end(), objectData.grassCapsules);
-        preparedDraw.objectData = objectData;
         preparedDraw.traversalChartPortal = renderItem->traversalChartPortal;
 
         // Finish view constants, select raster state, then bind draw geometry.
@@ -2343,6 +2400,10 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
     {
         auto& collector = GetDetailCostCollector();
         collector.lastLaunch = std::chrono::steady_clock::now();
+        // Keep snapshots of tiles seen in the last ~3 s of launches.
+        const uint32_t launch = collector.launch++;
+        for (auto entry = collector.snapshots.begin(); entry != collector.snapshots.end();)
+            if (launch - entry->second.launch > 30u) entry = collector.snapshots.erase(entry); else ++entry;
         collector.job = Engine::Rendering::RenderJobs::Get().Submit(
             [input = std::move(detailCostInput)]() { return Engine::Rendering::BuildDetailCostCurve(input); });
     }

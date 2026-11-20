@@ -44,7 +44,9 @@ struct DetailCostInput
         // How much a placement hides what is behind it (foliage lets light through).
         float opacity = 1.f;
         std::vector<Band> bands;
-        std::vector<Rows> transforms;
+        // Shared snapshot of the tile's placements: the collector reuses it
+        // across launches while the tile's revision is unchanged.
+        std::shared_ptr<const std::vector<Rows>> transforms;
     };
     std::vector<Group> groups;
     glm::mat4 viewProjection{ 1.f };

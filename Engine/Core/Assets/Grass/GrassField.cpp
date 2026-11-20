@@ -402,7 +402,7 @@ float GrassField::GrassRadius() const
 {
     const auto* layer = Owner ? Owner->GetComponent<Engine::Components::TerrainObjectLayer>() : nullptr;
     return (layer ? std::max(1.f, layer->viewDistance) : std::max(2.f, visibleRadius)) *
-        DetailRadiusScale();
+        OuterRadiusScale();
 }
 
 void GrassField::PublishGroundCover()
@@ -413,11 +413,19 @@ void GrassField::PublishGroundCover()
     // A far ring (innerRadius) leaves the tint to the detailed field.
     if (innerRadius > 0.f) return;
     // Only procedural grass knows which paint layers it grows on.
+    // A field without a tint leaves another field's cover alone: the forest
+    // floor field (no tint) used to clear the meadow's cover on every refresh,
+    // which left the bare terrain texture showing pale between the blades.
     if (groundTintStrength <= 0.f || proceduralLayerMask == 0 || !allowProceduralGeneration)
     {
-        cover = {};
+        if (cover.owner == this) cover = {};
         return;
     }
+    // Another field's live cover stays; a claim not renewed for two seconds
+    // (its field was removed or disabled) can be taken over.
+    const double now = std::chrono::duration<double>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+    if (cover.owner && cover.owner != this && cover.strength > 0.f && now - cover.publishedAt < 2.0) return;
     // Mean colour of the grass species (short and tall at full detail),
     // measured once per mesh pair from the shared CPU sources.
     const std::string source = shortMesh + ";" + tallMesh;
@@ -443,20 +451,24 @@ void GrassField::PublishGroundCover()
         }
         m_coverColor = count ? sum / static_cast<float>(count) : glm::vec3(0.f);
     }
-    if (glm::length(m_coverColor) <= 0.f) { cover = {}; return; }
+    if (glm::length(m_coverColor) <= 0.f) { if (cover.owner == this) cover = {}; return; }
     const float radius = GrassRadius();
     const float band = std::clamp(distanceFadeFraction, 0.f, .9f) * radius;
     const float scale = glm::length(glm::vec3(terrain->Owner->transform.GetWorldMatrix()[0]));
     // Upright blades shade each other and are seen edge-on, so a field looks
-    // darker and duller than its blades' albedo on flat, sunlit ground.
+    // darker and duller than its blades' albedo on flat, sunlit ground. At
+    // .8 the open ground past the blades measured 1.6x the meadow's
+    // luminance in full sun (a bright band where the grass ends); .45 is level.
     const float luminance = glm::dot(m_coverColor, glm::vec3(.2126f, .7152f, .0722f));
-    cover.color = glm::mix(m_coverColor, glm::vec3(luminance), .25f) * .8f;
+    cover.color = glm::mix(m_coverColor, glm::vec3(luminance), .25f) * .45f;
     cover.strength = std::clamp(groundTintStrength, 0.f, 1.f);
     cover.rootShade = std::clamp(groundRootShade, 0.f, 1.f);
     // The ground takes the cover's colour where the plants fade out.
     cover.fadeStart = (radius - std::max(band, std::max(.5f, distanceFadeWidth))) * scale;
     cover.fadeEnd = radius * scale;
     cover.layerMask = static_cast<uint32_t>(proceduralLayerMask);
+    cover.owner = this;
+    cover.publishedAt = now;
 }
 
 void GrassField::ClearTiles()
@@ -978,7 +990,7 @@ bool GrassField::Refresh()
     const auto* layer = m_cachedLayer;
     const float span = std::max(1.f, tileSize);
     const float radius = (layer ? std::max(1.f, layer->viewDistance) : std::max(2.f, visibleRadius)) *
-        DetailRadiusScale();
+        OuterRadiusScale();
     const float terrainWidth = m_cachedTerrain->cellsX * m_cachedTerrain->cellWidth;
     const float terrainDepth = m_cachedTerrain->cellsY * m_cachedTerrain->cellDepth;
     const float cellEdgeX = local.x - std::clamp(local.x, 0.f, terrainWidth);
@@ -1040,8 +1052,11 @@ bool GrassField::Refresh()
             // Far ring: skip tiles wholly inside the inner radius.
             if (innerRadius > 0.f)
             {
+                // The inner edge follows the detailed field, whose radius the
+                // detail budget scales.
+                const float inner = innerRadius * DetailRadiusScale();
                 const float farX = std::abs(dx) + span * .5f, farZ = std::abs(dz) + span * .5f;
-                if (farX * farX + farZ * farZ < innerRadius * innerRadius) continue;
+                if (farX * farX + farZ * farZ < inner * inner) continue;
             }
             if (m_placementCount && !m_placementTiles->count({x,z})) continue;
             const Tile key{x,z};
@@ -1085,8 +1100,9 @@ bool GrassField::Refresh()
             {
                 // Fade in: none kept at the inner radius, all by
                 // innerFadeWidth beyond it, without widening.
-                tile.mesh->placementThinStart = (innerRadius + innerFadeWidth) * worldScale;
-                tile.mesh->placementThinEnd = innerRadius * worldScale;
+                const float innerScale = DetailRadiusScale();
+                tile.mesh->placementThinStart = (innerRadius + innerFadeWidth) * innerScale * worldScale;
+                tile.mesh->placementThinEnd = innerRadius * innerScale * worldScale;
                 tile.mesh->placementThinMinimum = 0.f;
                 tile.mesh->placementThinKeepWidth = true;
             }
@@ -1284,7 +1300,7 @@ Engine::Components::SpatialUpdateRegion GrassField::DescribeSpatialRegion()
     if(!terrain.heights.empty()) { const auto range=std::minmax_element(terrain.heights.begin(),terrain.heights.end()); low=*range.first; high=*range.second; }
     auto bounds=Engine::Rendering::TransformBounds({0,low,0},
         {terrain.cellsX*terrain.cellWidth,high,terrain.cellsY*terrain.cellDepth},world);
-    const float radius=(m_cachedLayer ? std::max(1.f,m_cachedLayer->viewDistance):std::max(2.f,visibleRadius))*DetailRadiusScale()+2.f*std::max(1.f,tileSize);
+    const float radius=(m_cachedLayer ? std::max(1.f,m_cachedLayer->viewDistance):std::max(2.f,visibleRadius))*OuterRadiusScale()+2.f*std::max(1.f,tileSize);
     const float scale=glm::length(glm::vec3(glm::length(glm::vec3(world[0])),glm::length(glm::vec3(world[1])),glm::length(glm::vec3(world[2]))));
     bounds.minimum-=glm::vec3(radius*scale); bounds.maximum+=glm::vec3(radius*scale);
     return {Owner,m_cachedViewer,bounds};

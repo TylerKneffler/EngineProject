@@ -1,4 +1,4 @@
-"""Bakes crown lighting data into tree and bush leaf meshes (.md/foliage.md Phase 1).
+"""Bakes crown lighting data into tree and bush leaf meshes (.md/todo.md Foliage Phase 1).
 
 Leaf cards lit by their own flat normals make a crown read as speckled flat
 green. This cook gives every leaf vertex the lighting of the crown it sits in:

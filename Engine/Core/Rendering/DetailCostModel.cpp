@@ -83,16 +83,16 @@ DetailCostCurve BuildDetailCostCurve(const DetailCostInput& input)
     std::vector<Placement> placements;
     uint32_t hiddenByOcclusion = 0;
     size_t total = 0;
-    for (const auto& group : input.groups) total += group.transforms.size();
+    for (const auto& group : input.groups) if (group.transforms) total += group.transforms->size();
     placements.reserve(total);
     for (uint32_t groupIndex = 0; groupIndex < input.groups.size(); ++groupIndex)
     {
         const auto& group = input.groups[groupIndex];
-        if (group.bands.empty()) continue;
+        if (group.bands.empty() || !group.transforms) continue;
         const float worldScale = std::max({ glm::length(glm::vec3(group.world[0])),
             glm::length(glm::vec3(group.world[1])), glm::length(glm::vec3(group.world[2])) });
         const glm::vec4 center(group.localCenter, 1.f);
-        for (const auto& transform : group.transforms)
+        for (const auto& transform : *group.transforms)
         {
             const auto& r = transform.rows;
             const glm::vec3 localOrigin(r[0].w, r[1].w, r[2].w);

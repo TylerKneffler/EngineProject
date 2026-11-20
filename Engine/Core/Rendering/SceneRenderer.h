@@ -114,6 +114,7 @@ public:
     void OnSceneDestroying() override;
 
     struct NativeRenderPacket;
+    struct NativePacketRecycler;
 
     // Opt-in alpha-prepass experiment. Never serialized or enabled by policy.
     void SetDiagnosticOpaqueDepthEqual(bool enabled) { m_diagnosticOpaqueDepthEqual = enabled; }
@@ -964,11 +965,16 @@ private:
     bool m_renderFramePrepared = false;
     std::vector<Engine::Rendering::VegetationBendCapsule> m_frameGrassCapsules;
     bool m_nativeRenderPacketTaken = false;
+    std::shared_ptr<NativePacketRecycler> m_nativePacketRecycler;
     bool m_recordingNativeCommands = false;
     bool m_diagnosticOpaqueDepthEqual = false;
     bool m_diagnosticOpaqueDepthEqualReady = true;
     PrepareTimings m_lastPrepareTimings{};
     size_t m_prefabPreparationCursor = 0;
+    // No object layer had prefab work left after the last frame's pass: the
+    // next pass only needs to cycle the layers' periodic re-checks, on a
+    // quarter of the budget.
+    bool m_prefabPreparationSettled = false;
     const Engine::Rendering::SceneViewOverlays* m_viewOverlays = nullptr;
     PerformanceHeatMap m_performanceHeat;
 

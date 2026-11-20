@@ -8,6 +8,7 @@
     "specularModel": "MetallicRoughness",
     "metallic": 0,
     "roughness": 0.86,
+    "foliageTranslucency": 0.7,
     "castsShadows": true,
     "doubleSided": true,
     "normalScale": 0.55,

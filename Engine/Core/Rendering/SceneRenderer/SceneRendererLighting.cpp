@@ -49,20 +49,39 @@ SceneRendererLighting::ViewLightingState SceneRendererLighting::ResolveViewLight
         state.terrainSunIndex = static_cast<int>(index);
     }
 
+    // Cookie and IES paths are portable asset paths ("Assets/Textures/..."),
+    // resolved like mesh and material paths. Unresolved, they loaded only when
+    // the working directory was the asset root; from anywhere else the decode
+    // failed, the null texture was bound and it multiplied the light by zero
+    // (the landscape's sun with its cloud-shadow cookie went dark).
+    thread_local std::unordered_map<std::string, std::string> resolvedPaths;
+    const auto acquire = [&](const std::string& path)
+    {
+        auto found = resolvedPaths.find(path);
+        if (found == resolvedPaths.end())
+            found = resolvedPaths.emplace(path, Engine::Components::Mesh::ResolveFilePath(path)).first;
+        auto texture = Engine::Components::Texture::Acquire(found->second, false);
+        texture->Prepare(renderer.m_graphicsProvider);
+        return texture;
+    };
+    // A cookie or profile that is missing or still loading must not black
+    // out its light: a white texel stands in until the real one is resident.
+    const auto usable = [&](std::shared_ptr<Engine::Components::Texture> texture)
+    {
+        if (texture->GetGraphicsTexture()) return texture;
+        thread_local std::shared_ptr<Engine::Components::Texture> white;
+        if (!white)
+            white = Engine::Components::Texture::CreateFromPixels("Lighting.WhitePhotometry", 1, 1, 1,
+                Engine::Graphics::GraphicsTextureFormat::Rgba8, { 255, 255, 255, 255 }, false);
+        if (white && !white->GetGraphicsTexture()) white->PrepareImmediate(renderer.m_graphicsProvider);
+        return white ? white : texture;
+    };
     for (size_t index = 0; index < cookiePaths.size(); ++index)
     {
         if (!cookiePaths[index].empty())
-        {
-            state.photometryTextures[index] = Engine::Components::Texture::Acquire(
-                cookiePaths[index], false);
-            state.photometryTextures[index]->Prepare(renderer.m_graphicsProvider);
-        }
+            state.photometryTextures[index] = usable(acquire(cookiePaths[index]));
         if (!iesPaths[index].empty())
-        {
-            state.photometryTextures[index + 4u] = Engine::Components::Texture::Acquire(
-                iesPaths[index], false);
-            state.photometryTextures[index + 4u]->Prepare(renderer.m_graphicsProvider);
-        }
+            state.photometryTextures[index + 4u] = usable(acquire(iesPaths[index]));
     }
 
     for (uint32_t index = 0; index < state.photometryTextures.size(); ++index)

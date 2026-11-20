@@ -76,7 +76,7 @@ public:
 
     // Directional cookie scroll, metres per second along the light's right
     // and up axes: a tiling cloud-shadow cookie drifting with the wind
-    // (.md/foliage.md Phase 3, Object.hlsl DirectionalCookie).
+    // (.md/todo.md Foliage Phase 3, Object.hlsl DirectionalCookie).
     PROPERTY(Inspector, EditAnywhere, Category = "Light | Projection")
     float cookieScrollX = 0.f;
     PROPERTY(Inspector, EditAnywhere, Category = "Light | Projection")

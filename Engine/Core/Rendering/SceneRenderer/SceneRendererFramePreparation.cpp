@@ -118,6 +118,47 @@ void SceneRendererFramePreparation::PrepareFrameItems(
     // under the current shader sources and bytecode cache.
     enum : uint8_t { NeedsTextures = 1, NeedsShaders = 2 };
     std::vector<uint8_t> materialWork(frameComponentLookupScratch.size(), 0);
+    // A static mesh whose inputs are unchanged reuses the item built for it
+    // on an earlier frame. The test reads the object, mesh, instance data,
+    // transform and cache entry: ~10 cache misses per object, 4 ms a frame
+    // over the 9.5k meshes of the landscape when run serially. For members of
+    // the prepared transform hierarchy the test is read-only
+    // (TransformHierarchy::Prepare settled their world revisions), so it runs
+    // on the workers below; everything else is tested in the serial loop.
+    const auto isStaticCandidate = [&](const SceneRenderer::FrameComponentLookup& lookup)
+    {
+        const auto* mesh = lookup.mesh;
+        return mesh && !lookup.sprite && !lookup.skinnedMesh &&
+            !hasActiveWarpVolume && !renderer.GetViewOverlays().previewObject &&
+            (!(mesh->gpuLodSelection || mesh->screenLodSelection) || mesh->IsInstanced()) &&
+            !mesh->HasMorphTargets() && !mesh->HasSurfaceOffsets() &&
+            !mesh->GetPreviousRuntimeLodMesh() &&
+            traversalRenderInstances.find(lookup.object) == traversalRenderInstances.end();
+    };
+    const auto staticItemUnchanged = [&](const SceneRenderer::FrameComponentLookup& lookup,
+        const SceneRenderer::StaticRenderItemCache& entry, uint64_t worldRevision)
+    {
+        const auto* mesh = lookup.mesh;
+        const auto& layer = lookup.object->transform.matrixLayer;
+        const bool terrainCell = lookup.terrain != nullptr;
+        const auto* terrainBatch = lookup.terrainBatch;
+        return entry.item.mesh == mesh && entry.item.material == lookup.material &&
+            entry.item.spatialManipulator == lookup.spatialManipulator &&
+            entry.item.bakedLighting == lookup.bakedLighting &&
+            entry.worldRevision == worldRevision &&
+            entry.meshRevision == mesh->GetConfigurationRevision() &&
+            entry.geometryRevision == mesh->GetAuthoredGeometryRevision() &&
+            entry.instanceData == mesh->GetInstanceData().get() &&
+            entry.instanceRevision == (mesh->GetInstanceData() ? mesh->GetInstanceData()->revision : 0) &&
+            entry.instanceSource == mesh->GetInstanceSource() &&
+            entry.sourceGeometryRevision == (mesh->GetInstanceSource() ? mesh->GetInstanceSource()->GetAuthoredGeometryRevision() : 0) &&
+            entry.item.terrainCell == terrainCell &&
+            entry.item.terrainSurface == (terrainCell || terrainBatch) &&
+            (!terrainBatch || entry.item.completeTerrainFootprint == (terrainBatch->completeFootprint && !terrainBatch->distantVisual)) &&
+            entry.matrixLayerEnabled == layer.enabled &&
+            (!layer.enabled || std::memcmp(&entry.matrixLayer, &layer.localToLayer, sizeof(layer.localToLayer)) == 0);
+    };
+    std::vector<const SceneRenderer::StaticRenderItemCache*> reusableItems(frameComponentLookupScratch.size(), nullptr);
     {
         PrepareItemTimer timer(renderer.m_lastPrepareTimings.itemValidationMs, scene.IsUpdateProfilingEnabled());
         const auto* provider = renderer.m_graphicsProvider;
@@ -133,6 +174,16 @@ void SceneRendererFramePreparation::PrepareFrameItems(
                     (material->NeedsTexturePreparation(provider) ? NeedsTextures : 0) |
                     (material->NeedsShaderPrewarm(epoch, terrain) ? NeedsShaders : 0));
             }
+            auto* candidate = lookup.object;
+            if (!preparedTransforms || !candidate ||
+                !renderer.SceneTransforms().IsPreparedMember(candidate->transform) ||
+                !isStaticCandidate(lookup) || !candidate->IsEnabledInHierarchy() ||
+                !lookup.mesh->IsReady() || !lookup.mesh->IsEditorVisible() || !lookup.mesh->IsAnimationVisible())
+                return;
+            const auto cached = renderer.m_staticRenderItemCache.find(candidate);
+            if (cached != renderer.m_staticRenderItemCache.end() && staticItemUnchanged(lookup, cached->second,
+                renderer.SceneTransforms().ReadPreparedWorldRevision(candidate->transform)))
+                reusableItems[index] = &cached->second;
         });
     }
     const auto lookupIndex = [&](const SceneRenderer::FrameComponentLookup& lookup)
@@ -151,67 +202,47 @@ void SceneRendererFramePreparation::PrepareFrameItems(
         {
             return preparedTransforms ? renderer.SceneTransforms().ReadPreparedWorldRevision(candidate->transform) : candidate->transform.GetWorldRevision();
         };
-        const bool staticCandidate = mesh && !sprite && !lookup.skinnedMesh &&
-            !hasActiveWarpVolume && !renderer.GetViewOverlays().previewObject &&
-            (!(mesh->gpuLodSelection || mesh->screenLodSelection) || mesh->IsInstanced()) &&
-            !mesh->HasMorphTargets() && !mesh->HasSurfaceOffsets() &&
-            !mesh->GetPreviousRuntimeLodMesh() &&
-            traversalRenderInstances.find(candidate) == traversalRenderInstances.end();
-        if (staticCandidate && candidate->IsEnabledInHierarchy() &&
+        const SceneRenderer::StaticRenderItemCache* entry = reusableItems[lookupIndex(lookup)];
+        const bool staticCandidate = entry || isStaticCandidate(lookup);
+        if (!entry && staticCandidate && candidate->IsEnabledInHierarchy() &&
             mesh->IsReady() && mesh->IsEditorVisible() &&
             mesh->IsAnimationVisible())
         {
-            auto cached = renderer.m_staticRenderItemCache.find(candidate);
-            if (cached != renderer.m_staticRenderItemCache.end())
+            const auto cached = renderer.m_staticRenderItemCache.find(candidate);
+            if (cached != renderer.m_staticRenderItemCache.end() &&
+                staticItemUnchanged(lookup, cached->second, worldRevision()))
+                entry = &cached->second;
+        }
+        if (entry)
+        {
+            // Built in place: the item is a large record and ~9,000 of
+            // them take this path every frame on the landscape.
+            SceneRenderer::FrameRenderItem& item =
+                renderer.m_frameRenderItems.emplace_back(entry->item);
+            PrepareItemMaterial(renderer, item, true,
+                (materialWork[lookupIndex(lookup)] & NeedsTextures) != 0,
+                (materialWork[lookupIndex(lookup)] & NeedsShaders) != 0);
+            item.geometryFade = mesh->GetRuntimeGeometryFade();
+            item.shadowCasterFade = { std::max(0.f, mesh->runtimeShadowDistance), std::max(0.f, mesh->runtimeShadowFadeWidth) };
+            if (mesh->IsInstanced())
             {
-                auto& entry = cached->second;
-                const auto& layer = candidate->transform.matrixLayer;
-                const bool terrainCell = lookup.terrain != nullptr;
-                const auto* terrainBatch = lookup.terrainBatch;
-                if (entry.item.mesh == mesh && entry.item.material == lookup.material &&
-                    entry.item.spatialManipulator == lookup.spatialManipulator &&
-                    entry.item.bakedLighting == lookup.bakedLighting &&
-                    entry.worldRevision == worldRevision() &&
-                    entry.meshRevision == mesh->GetConfigurationRevision() &&
-                    entry.geometryRevision == mesh->GetAuthoredGeometryRevision() &&
-                    entry.instanceData == mesh->GetInstanceData().get() &&
-                    entry.instanceRevision == (mesh->GetInstanceData() ? mesh->GetInstanceData()->revision : 0) &&
-                    entry.instanceSource == mesh->GetInstanceSource() &&
-                    entry.sourceGeometryRevision == (mesh->GetInstanceSource() ? mesh->GetInstanceSource()->GetAuthoredGeometryRevision() : 0) &&
-                    entry.item.terrainCell == terrainCell &&
-                    entry.item.terrainSurface == (terrainCell || terrainBatch) &&
-                    (!terrainBatch || entry.item.completeTerrainFootprint == (terrainBatch->completeFootprint && !terrainBatch->distantVisual)) &&
-                    entry.matrixLayerEnabled == layer.enabled &&
-                    (!layer.enabled || std::memcmp(&entry.matrixLayer, &layer.localToLayer, sizeof(layer.localToLayer)) == 0))
+                item.gpuMaximumLod = 0;
+                item.gpuLodDistances = { 0, 0 };
+                if ((mesh->gpuLodSelection || mesh->screenLodSelection) && candidate != renderer.GetViewOverlays().selectedObject &&
+                    mesh != renderer.GetViewOverlays().selectedMesh && mesh != renderer.GetViewOverlays().weightPaintMesh &&
+                    mesh->IsRuntimeLodResident(0) && mesh->IsRuntimeLodResident(1) &&
+                    (!item.material || Engine::Rendering::IsFastFoliageSurface(item.material) ||
+                        item.material->shader.empty()))
                 {
-                    SceneRenderer::FrameRenderItem item = entry.item;
-                    PrepareItemMaterial(renderer, item, true,
-                        (materialWork[lookupIndex(lookup)] & NeedsTextures) != 0,
-                        (materialWork[lookupIndex(lookup)] & NeedsShaders) != 0);
-                    item.geometryFade = mesh->GetRuntimeGeometryFade();
-                    item.shadowCasterFade = { std::max(0.f, mesh->runtimeShadowDistance), std::max(0.f, mesh->runtimeShadowFadeWidth) };
-                    if (mesh->IsInstanced())
-                    {
-                        item.gpuMaximumLod = 0;
-                        item.gpuLodDistances = { 0, 0 };
-                        if ((mesh->gpuLodSelection || mesh->screenLodSelection) && candidate != renderer.GetViewOverlays().selectedObject &&
-                            mesh != renderer.GetViewOverlays().selectedMesh && mesh != renderer.GetViewOverlays().weightPaintMesh &&
-                            mesh->IsRuntimeLodResident(0) && mesh->IsRuntimeLodResident(1) &&
-                            (!item.material || Engine::Rendering::IsFastFoliageSurface(item.material) ||
-                                item.material->shader.empty()))
-                        {
-                            item.gpuMaximumLod = mesh->IsRuntimeLodResident(2) ? 2 : 1;
-                            item.gpuLodDistances = { std::max(0.f, mesh->gpuLod1Distance), std::max(mesh->gpuLod1Distance, mesh->gpuLod2Distance) };
-                            if (item.gpuMaximumLod == 1) item.gpuLodDistances.y = 1.e20f;
-                            item.geometryFade = { mesh->lodTransitionWidth, item.gpuLodDistances.x, item.gpuLodDistances.y, 2.f + mesh->GetRuntimeVisibility() };
-                        }
-                        ++renderer.m_lastPrepareTimings.instancedRenderItemsReused;
-                    }
-                    else ++renderer.m_lastPrepareTimings.staticRenderItemsReused;
-                    renderer.m_frameRenderItems.push_back(item);
-                    continue;
+                    item.gpuMaximumLod = mesh->IsRuntimeLodResident(2) ? 2 : 1;
+                    item.gpuLodDistances = { std::max(0.f, mesh->gpuLod1Distance), std::max(mesh->gpuLod1Distance, mesh->gpuLod2Distance) };
+                    if (item.gpuMaximumLod == 1) item.gpuLodDistances.y = 1.e20f;
+                    item.geometryFade = { mesh->lodTransitionWidth, item.gpuLodDistances.x, item.gpuLodDistances.y, 2.f + mesh->GetRuntimeVisibility() };
                 }
+                ++renderer.m_lastPrepareTimings.instancedRenderItemsReused;
             }
+            else ++renderer.m_lastPrepareTimings.staticRenderItemsReused;
+            continue;
         }
         renderer.m_staticRenderItemCache.erase(candidate);
         Engine::Components::Sprite::RenderData spriteData;

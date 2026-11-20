@@ -602,16 +602,27 @@ def write_scene(world):
     # 48 m, which blurs every tree a little way off. Normal mip selection is
     # enough here.
     settings.set("textureLodEnabled", "false")
-    # AgX tone mapping (ToneMappingOperator::AgX): softer highlights and less
-    # saturated greens and sky than ACES, toward the reference shots.
-    settings.set("toneMapping", "3")
-    # Eye adaptation stops 4.8 EV down (.md/foliage.md Phase 3): sunny meadows
-    # meter above it and are unaffected, while forest interiors (canopy-shaded
-    # sky light) stay about a stop darker instead of being brightened to the
-    # meadow's level, which is most of the forest mood of the references.
+    # Look settings of the 2026-11-20 pass (.md/todo.md, Landscape demo
+    # expectations), measured against the reference frames. The sun's height
+    # and colour live on the scene's sun object, which is carried over as is.
+    # ACES tone mapping: AgX could not reach the reference sky (saturation
+    # 0.44 against 0.56) or its bright horizon.
+    settings.set("toneMapping", "1")
+    settings.set("outputExposure", "-.25")
+    settings.set("gradingSaturation", "1.1")
+    # Sky fill light matched to the displayed sky.
+    settings.set("hdriIntensity", "1")
+    sky = settings.find("physicalSky")
+    if sky is not None:
+        sky.set("skyIntensity", "2.4")
+        sky.set("mieScale", "3")
+    # Eye adaptation stops 4 EV down (.md/todo.md Foliage Phase 3): sunny meadows
+    # meter above it, while forest interiors stay darker than the meadow
+    # instead of being brightened to its level. Lower floors over-expose a
+    # meadow seen against a forest edge; higher ones turn interiors black.
     exposure = settings.find("autoExposure")
     if exposure is not None:
-        exposure.set("minEv", "-4.8")
+        exposure.set("minEv", "-4")
     scene.append(settings)
     objects = ET.SubElement(scene, "objects")
 

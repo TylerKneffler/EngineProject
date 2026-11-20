@@ -2,7 +2,7 @@
 
 The demo's start pose flies 25 m above the meadow, where grass and bushes
 (drawn within ~26 m of the viewer) are out of view. This adds saved viewpoint
-cameras near the start for checking foliage (.md/foliage.md), next to the
+cameras near the start for checking foliage (.md/todo.md, Foliage section), next to the
 existing "Vista":
 
   ForestEdge   standing in the meadow, looking at an oak forest edge
@@ -33,10 +33,12 @@ CELL = 128.0
 SPACING = 4.0
 EYE = 1.7
 WATER, TREE_LINE, BLEND = -40.0, 950.0, 6.0
-# Direction toward the "Late afternoon sun" (rotation 0.7, 2.4 rad: the light
-# travels along the rotated +z axis), flattened onto the ground.
-SUN_FLAT = (-0.517, 0.564)
-NAMES = ("ForestEdge", "ForestFloor", "Backlit", "Trail", "Cliffs")
+# Direction toward the sun (the scene's "Late afternoon sun" object, rotation
+# 1.0, 2.4 rad since the 2026-11-20 look pass: ~57 degrees up; the light travels
+# along the rotated +z axis), flattened onto the ground.
+SUN_PITCH, SUN_YAW = 1.0, 2.4
+SUN_FLAT = (-math.sin(SUN_YAW) * math.cos(SUN_PITCH), -math.cos(SUN_YAW) * math.cos(SUN_PITCH))
+NAMES = ("ForestEdge", "ForestFloor", "Backlit", "Trail", "Cliffs", "MeadowSlope")
 
 
 # --- LandscapeDriver.cpp ForestMask / ForestBand, bit for bit ---------------
@@ -213,6 +215,63 @@ def find_cliff():
     return best[1], best[2]
 
 
+def find_meadow_slope():
+    """Sunlit meadow on a slope with a forest edge 50-150 m ahead and to the
+    side and lower ground beyond: the main look-check pose (.md/todo.md,
+    Landscape demo expectations). The sun is behind or beside the camera."""
+    sun_length = math.hypot(*SUN_FLAT)
+    sun = (SUN_FLAT[0] / sun_length, SUN_FLAT[1] / sun_length)
+    headings = [(math.cos(a), math.sin(a)) for a in (k * math.pi / 8 for k in range(16))]
+    best = None
+    for x, z in candidates(radius=2600.0, step=16.0):
+        g = ground(x, z)
+        if g < WATER + 4.0 or forest_band(g) < 0.6 or forest_mask(x, z) > 0.02:
+            continue
+        gx = (ground(x + 12, z) - ground(x - 12, z)) / 24.0
+        gz = (ground(x, z + 12) - ground(x, z - 12)) / 24.0
+        slope = math.degrees(math.atan(math.hypot(gx, gz)))
+        if not 7.0 <= slope <= 22.0:
+            continue
+        down = (-gx / math.hypot(gx, gz), -gz / math.hypot(gx, gz))
+        for dx, dz in headings:
+            if dx * sun[0] + dz * sun[1] > 0.25:      # no looking into the sun
+                continue
+            along = dx * down[0] + dz * down[1]
+            if not -0.2 <= along <= 0.85:              # across or down the slope
+                continue
+            # Open grass in front of the camera.
+            if any(wooded(x + dx * d + sx * w, z + dz * d + sz * w) > 0.05
+                   for d in (0, 12, 24, 40) for w in (-10, 0, 10)
+                   for sx, sz in ((-dz, dx),)):
+                continue
+            # A forest edge 50-150 m away, within 55 degrees of the heading.
+            edge = False
+            for turn in (-0.95, -0.6, -0.3, 0.3, 0.6, 0.95):
+                ex, ez = (dx * math.cos(turn) - dz * math.sin(turn), dx * math.sin(turn) + dz * math.cos(turn))
+                if any(wooded(x + ex * d, z + ez * d) > 0.9 and wooded(x + ex * (d + 16), z + ez * (d + 16)) > 0.9
+                       for d in (50, 70, 90, 110, 130, 150)):
+                    edge = True
+                    break
+            if not edge:
+                continue
+            # Lower ground beyond: a valley behind the meadow.
+            beyond = [ground(x + dx * d, z + dz * d) for d in (60, 120, 180, 250, 400, 550, 700)]
+            if min(beyond) < WATER + 3.0:               # no lake in the view
+                continue
+            drop = g - min(beyond[3:])
+            if drop < 25.0:
+                continue
+            score = drop + 2.0 * slope - 0.02 * math.hypot(x - START[0], z - START[1])
+            if best is None or score > best[0]:
+                best = (score, (x, z), (dx, dz), slope, drop)
+        if best and math.hypot(x - START[0], z - START[1]) > 1500.0:
+            break
+    if not best:
+        raise SystemExit("no meadow slope found near the start")
+    print(f"MeadowSlope: slope {best[3]:.0f} deg, valley drop {best[4]:.0f} m")
+    return best[1], best[2]
+
+
 def viewpoint(name, eye, target):
     item = ET.Element("item", {"name": name, "enabled": "true"})
     components = ET.SubElement(item, "components")
@@ -243,6 +302,7 @@ def main():
     # within reach (light comes in from the edge), else along +x.
     trail, trail_along = find_trail()
     cliff, downhill = find_cliff()
+    slope, slope_view = find_meadow_slope()
     stand = (cliff[0] + downhill[0] * 45.0, cliff[1] + downhill[1] * 45.0)
     stand_ground = ground(*stand)
     poses = {
@@ -251,8 +311,11 @@ def main():
                    (cliff[0], ground(*cliff) + 4.0, cliff[1])),
         "ForestEdge": pose(edge, (ex, ez), 45.0, 3.0),
         "ForestFloor": pose(floor, (ex, ez), 30.0, 0.8, 1.6),
-        # Look up into the crowns toward the sun (~40 deg high).
+        # Look up into the crowns toward the sun.
         "Backlit": pose(back, (bx, bz), 40.0, 18.0),
+        # Level gaze across the slope: meadow below, forest edge and far hills above.
+        "MeadowSlope": ((slope[0], ground(*slope) + EYE, slope[1]),
+                        (slope[0] + slope_view[0] * 60.0, ground(*slope) + EYE - 2.0, slope[1] + slope_view[1] * 60.0)),
     }
 
     ET.register_namespace("components", NAMESPACE)

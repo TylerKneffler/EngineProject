@@ -1,4 +1,4 @@
-"""Converts non-indexed native woodland meshes to indexed ones (.md/foliage.md Phase 2).
+"""Converts non-indexed native woodland meshes to indexed ones (.md/todo.md Foliage Phase 2).
 
 The imported oak/bush pack meshes were written as plain triangle lists: every
 triangle carries its own three vertices, so each leaf card corner is shaded by

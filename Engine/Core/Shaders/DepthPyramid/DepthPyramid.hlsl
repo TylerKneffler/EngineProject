@@ -1,4 +1,4 @@
-// GPU occlusion pyramid from the scene depth (.md/foliage.md Phase 2).
+// GPU occlusion pyramid from the scene depth (.md/todo.md Foliage Phase 2).
 //
 // The CPU occlusion buffer (Core/Rendering/OcclusionBuffer.h) rasterizes only
 // terrain and a few mesh occluders, so at a forest edge the thousands of

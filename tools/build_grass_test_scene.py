@@ -83,8 +83,8 @@ GRASS_FIELD = {
     "distanceFadeWidth": 2,
     "distanceFadeFraction": .3,
     "distanceThinning": .45,
-    "groundTintStrength": .5,
-    "groundRootShade": .55,
+    "groundTintStrength": .8,
+    "groundRootShade": .7,
     "retainDormantTiles": "false",
     "allowProceduralGeneration": "true",
     "proceduralLayerMask": 1 << GRASS_LAYER,
@@ -105,8 +105,8 @@ TUFT = "Assets/Mesh/Grass/far_grass_tuft.obj"
 FAR_FIELD = {
     "shortMesh": TUFT, "tallMesh": TUFT, "shortMeshLod1": TUFT, "shortMeshLod2": TUFT,
     "tallMeshLod1": TUFT, "tallMeshLod2": TUFT, "viewerObjectName": VIEWER,
-    "useEditorCamera": "true", "visibleRadius": 90, "tileSize": 16,
-    "shortPatchesPerSquareMeter": 1.2, "tallPatchesPerSquareMeter": 0, "seed": 29311,
+    "useEditorCamera": "true", "visibleRadius": 200, "tileSize": 64,
+    "shortPatchesPerSquareMeter": .9, "tallPatchesPerSquareMeter": 0, "seed": 29311,
     "castShadows": "false", "tileWorkBudgetMs": 1, "fadeDuration": .35,
     "distanceFadeFraction": .25, "distanceThinning": 1, "innerRadius": DETAILED_RANGE * .5,
     "innerFadeWidth": DETAILED_RANGE * .2, "windStrength": .6, "groundTintStrength": 0,
@@ -258,8 +258,8 @@ def build(cell_x, cell_z, output=OUTPUT, thinning=None, far=True):
         ring.append(transform((0, 0, 0)))
         ring_components = ET.SubElement(ring, "components")
         ring_layer = component("TerrainObjectLayer", "TerrainObjectLayer", dict(
-            OBJECT_LAYER, layerName="Procedural far grass", viewDistance=90, lod1Distance=90,
-            lod2Distance=90))
+            OBJECT_LAYER, layerName="Procedural far grass", viewDistance=200, lod1Distance=200,
+            lod2Distance=200))
         ET.SubElement(ring_layer, "TerrainObjectLayer.placements")
         ring_components.append(ring_layer)
         ring_components.append(component("GrassField", "GrassField", FAR_FIELD))

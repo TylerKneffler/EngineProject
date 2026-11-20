@@ -1,11 +1,11 @@
 {
   "version": 1,
-  "baseColor": [0.86, 0.84, 0.77],
+  "baseColor": [0.69, 0.67, 0.62],
   "useVertexColors": true,
   "ambientColor": [
-    0.2,
-    0.23,
-    0.13
+    0.1,
+    0.115,
+    0.065
   ],
   "specularColor": [
     1,
@@ -21,6 +21,7 @@
   "specularModel": "MetallicRoughness",
   "metallic": 0,
   "roughness": 0.86,
+  "foliageTranslucency": 0.7,
   "subsurfaceEnabled": false,
   "subsurfaceWeight": 0,
   "subsurfaceRadius": [

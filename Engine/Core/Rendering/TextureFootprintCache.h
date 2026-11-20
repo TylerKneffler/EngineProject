@@ -13,8 +13,10 @@ namespace Engine::Rendering
 // re-submitted in between. Owned by the scene; used on the scene-owner thread.
 struct TextureFootprintCache
 {
-    // Frames between re-projections of one chunk.
-    static constexpr uint64_t RefreshFrames = 4;
+    // Frames between re-projections of one chunk. 8 (was 4): texture
+    // streaming reacts within ~130 ms at 60 fps, and the re-projection is a
+    // measurable share of camera recording on the landscape.
+    static constexpr uint64_t RefreshFrames = 8;
 
     struct ChunkKey
     {

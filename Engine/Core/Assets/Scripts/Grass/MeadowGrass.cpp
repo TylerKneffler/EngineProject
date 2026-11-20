@@ -11,15 +11,17 @@ namespace MeadowGrass
 GrassField* ApplyFar(Engine::Components::TerrainObjectLayer& layer,
     const std::string& viewerObjectName)
 {
-    // The far ring: simple tufts on 16 m tiles from where the detailed
-    // grass fades out to ~90 m, so the meadow does not end at its range.
+    // The far ring: simple tufts on 64 m tiles from where the detailed
+    // grass fades out to 200 m, so the meadow does not end at its range
+    // (the reference meadows are unbroken for 100 m and more). Its reach is
+    // not scaled by the detail budget (GrassField::OuterRadiusScale).
     layer.snapToGround = true;
     layer.conformToGround = true;
     if (viewerObjectName.empty()) return nullptr;
     auto* owner = layer.Owner;
     if (auto* existing = owner->GetComponent<GrassField>()) return existing;
-    layer.viewDistance = 90.f;
-    layer.lod1Distance = layer.lod2Distance = 90.f;
+    layer.viewDistance = 200.f;
+    layer.lod1Distance = layer.lod2Distance = 200.f;
     layer.MarkConfigurationDirty();
     using Engine::Serialization::JsonValue;
     const std::string tuft = "Assets/Mesh/Grass/far_grass_tuft.obj";
@@ -28,8 +30,8 @@ GrassField* ApplyFar(Engine::Components::TerrainObjectLayer& layer,
         .Set("shortMeshLod1", tuft).Set("shortMeshLod2", tuft)
         .Set("tallMeshLod1", tuft).Set("tallMeshLod2", tuft)
         .Set("viewerObjectName", viewerObjectName)
-        .Set("useEditorCamera", JsonValue(true)).Set("visibleRadius", 90.f)
-        .Set("tileSize", 16.f).Set("shortPatchesPerSquareMeter", 1.2f)
+        .Set("useEditorCamera", JsonValue(true)).Set("visibleRadius", 200.f)
+        .Set("tileSize", 64.f).Set("shortPatchesPerSquareMeter", .9f)
         .Set("tallPatchesPerSquareMeter", 0.f).Set("seed", 29311)
         .Set("castShadows", JsonValue(false)).Set("tileWorkBudgetMs", 1.f)
         .Set("fadeDuration", .35f).Set("distanceFadeFraction", .25f)
@@ -150,6 +152,10 @@ GrassField* Apply(Engine::Components::TerrainObjectLayer& layer,
         .Set("useEditorCamera", proceduralValue).Set("visibleRadius", 11.f)
         .Set("tileSize", 4.f).Set("shortPatchesPerSquareMeter", .5f)
         .Set("tallPatchesPerSquareMeter", .16f).Set("seed", 18731)
+        // The ground under the blades reads as shaded undergrowth: a strong tint
+        // toward the blade colour, darker at the roots (it had no effect while the
+        // forest floor field cleared it; tuned 2026-11-20 against the reference meadow).
+        .Set("groundTintStrength", .8f).Set("groundRootShade", .7f)
         .Set("maxTileBuildsPerUpdate", 8).Set("castShadows", falseValue)
         .Set("tileWorkBudgetMs", 2.f).Set("fadeDuration", .35f)
         .Set("distanceFadeWidth", 2.f).Set("retainDormantTiles", falseValue)

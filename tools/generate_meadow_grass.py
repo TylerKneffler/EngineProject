@@ -65,7 +65,7 @@ class Mesh(accents.Mesh):
 
 # Linear albedo near measured grass (~0.06/0.12/0.03 mid-blade): the earlier
 # palette was about twice as bright and far more saturated, which read as
-# cartoon lime (.md/foliage.md, "cartoonish" report).
+# cartoon lime (.md/todo.md Foliage Phase 1d, "cartoonish" report).
 BLADE_ROOT = (0.03, 0.065, 0.018)
 BLADE_MID = (0.065, 0.125, 0.032)
 BLADE_TIP = (0.115, 0.175, 0.055)
@@ -570,19 +570,21 @@ def tall_grass_clump(detail):
 
 
 def far_grass_tuft(detail):
-    """Cheap tuft for the far grass ring (seen from ~25 m out): a dozen wide,
-    two-segment blades fanning from a broad crown, ~0.4 m tall. Every LOD is
+    """Cheap clump for the far grass ring (seen from ~12 m to 200 m): fourteen
+    wide, two-segment blades fanning from a broad crown, ~0.5 m tall and
+    ~0.9 m across, so that under one clump per square metre the ring reads as
+    continuous grass rather than separate tufts on bare ground. Every LOD is
     the same mesh; at that range a blade covers a pixel or two."""
     rng = random.Random(7101)
     mesh = Mesh()
-    for _ in range(12):
+    for _ in range(14):
         radius, angle = math.sqrt(rng.random()), rng.random() * 2.0 * math.pi
         length_jitter, rise_jitter, dry = rng.random(), rng.random(), rng.random()
-        base = (0.2 * radius * math.cos(angle), 0.0, 0.2 * radius * math.sin(angle))
+        base = (0.38 * radius * math.cos(angle), 0.0, 0.38 * radius * math.sin(angle))
         rise = math.radians(78.0 - 30.0 * radius - 10.0 * rise_jitter)
         shade = 0.88 + 0.24 * ((length_jitter * 7.31 + rise_jitter * 3.17) % 1.0)
-        blade(mesh, base, angle + (rng.random() - 0.5) * 0.8, 0.32 + 0.16 * length_jitter, rise,
-              0.25, 0.045, 2, tip=DRY_TIP if dry < 0.15 else BLADE_TIP, shade=shade)
+        blade(mesh, base, angle + (rng.random() - 0.5) * 0.8, 0.38 + 0.22 * length_jitter, rise,
+              0.25, 0.075, 2, tip=DRY_TIP if dry < 0.15 else BLADE_TIP, shade=shade)
     return mesh
 
 
@@ -747,7 +749,7 @@ def fern(detail, seed=6301, fronds=7, yaw_step=0.9, scale=1.0,
     return mesh
 
 
-# --- forest floor (.md/foliage.md Phase 4) ----------------------------------
+# --- forest floor (.md/todo.md Foliage Phase 4) ----------------------------------
 # Plants for the forest-soil paint under trees: fallen-leaf litter, broadleaf
 # herbs, oak seedlings and dead grass. A GrassField on the forest floor layer
 # (Scripts/Grass/MeadowGrass ApplyForestFloor) scatters them.

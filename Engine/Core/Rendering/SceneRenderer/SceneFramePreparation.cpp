@@ -34,9 +34,31 @@ std::shared_ptr<const SceneRenderer::NativeRenderPacket> SceneRenderer::TakeNati
     if (!m_renderFramePrepared || m_nativeRenderPacketTaken)
         throw std::logic_error("Native render packet requires a prepared scene frame");
     m_nativeRenderPacketTaken = true;
-    auto packet = std::make_shared<NativeRenderPacket>();
+    if (!m_nativePacketRecycler) m_nativePacketRecycler = std::make_shared<NativePacketRecycler>();
+    std::unique_ptr<NativeRenderPacket> storage;
+    {
+        std::lock_guard lock(m_nativePacketRecycler->mutex);
+        if (!m_nativePacketRecycler->free.empty())
+        {
+            storage = std::move(m_nativePacketRecycler->free.back());
+            m_nativePacketRecycler->free.pop_back();
+        }
+    }
+    if (!storage) storage = std::make_unique<NativeRenderPacket>();
+    std::shared_ptr<NativeRenderPacket> packet(storage.release(),
+        [recycler = m_nativePacketRecycler](NativeRenderPacket* released)
+        {
+            std::unique_ptr<NativeRenderPacket> owned(released);
+            // Drop the buffer references now; keep the vectors' storage.
+            owned->meshBuffers.clear();
+            std::lock_guard lock(recycler->mutex);
+            if (recycler->free.size() < 4) recycler->free.push_back(std::move(owned));
+        });
     packet->grassCapsules = m_frameGrassCapsules;
-    packet->items = std::move(m_frameRenderItems);
+    // The frame's items move to the packet; the recycled list (stale items,
+    // trivially destructible) becomes the storage the next frame fills.
+    packet->items.swap(m_frameRenderItems);
+    m_frameRenderItems.clear();
     packet->renderSlotItemOffsets = m_frameItemsByRenderSlotOffsets;
     packet->renderSlotItems = m_frameItemsByRenderSlot;
     packet->meshBuffers.reserve(packet->items.size() * 2);
@@ -169,7 +191,12 @@ void SceneRenderer::PrepareRenderFrame(bool publishSnapshot)
     m_scene.CommitPendingObjectChanges();
     const auto afterInitialCommit=PrepareClock::now();
     const auto prefabBudgetStart = afterInitialCommit;
-    const auto prefabDeadline = prefabBudgetStart + std::chrono::milliseconds(3);
+    // 3 ms while any layer is still building (streaming, edits); once every
+    // layer is complete only the once-a-second re-checks remain, and those
+    // filled the whole budget every frame with several hundred layers
+    // (a constant 3 ms of the frame on the landscape). They get 0.75 ms.
+    const auto prefabDeadline = prefabBudgetStart + (m_prefabPreparationSettled
+        ? std::chrono::microseconds(750) : std::chrono::microseconds(3000));
     // Copy the registry view: deriving prefab batches adds scene components.
     const auto objectLayers=m_scene.GetComponents<Engine::Components::TerrainObjectLayer>();
     const auto afterPrefabRegistry=PrepareClock::now();
@@ -202,6 +229,8 @@ void SceneRenderer::PrepareRenderFrame(bool publishSnapshot)
         { ++prefabVisited; break; }
     }
     m_prefabPreparationCursor = prefabCount ? (prefabStart + prefabVisited) % prefabCount : 0;
+    m_prefabPreparationSettled = std::all_of(objectLayers.begin(), objectLayers.end(),
+        [&](const auto* layer) { return !layer || layer->IsPrefabPreparationComplete(m_graphicsProvider); });
     if (!m_scene.m_restorePrefabPrototypes.empty() &&
         std::all_of(objectLayers.begin(),objectLayers.end(),[&](const auto* layer) {
             return !layer || layer->IsPrefabPreparationComplete(m_graphicsProvider);

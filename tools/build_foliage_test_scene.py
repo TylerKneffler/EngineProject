@@ -5,7 +5,7 @@ Writes
 
 Starts from tools/build_grass_test_scene.py (one 128 m landscape cell, procedural
 meadow grass, the demo's sun and atmosphere), then adds a grove of oaks with a
-conifer edge and bushes, and saved viewpoint cameras for .md/foliage.md's
+conifer edge and bushes, and saved viewpoint cameras for .md/todo.md's foliage
 fixed capture poses:
 
   ForestFloor  under the oaks, looking across the floor (dappled light)

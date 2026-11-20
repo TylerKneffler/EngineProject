@@ -104,7 +104,7 @@ void ApplyGrassWind(float sceneTime, float strength,
     tangent = normalize(tangent + slope * dot(up, tangent));
 }
 
-// Tree wind (Mesh::foliageWindTree, .md/foliage.md Phase 5). Same direction,
+// Tree wind (Mesh::foliageWindTree, .md/todo.md Foliage Phase 5). Same direction,
 // speed and advected gust field as the grass, coarsened so a whole crown
 // moves together:
 //  * trunk: bends downwind by strength * 0.01 * h^2 (a cantilever, not a

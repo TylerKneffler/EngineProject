@@ -103,6 +103,12 @@ public:
         float fadeStart = 0.f;     // world distance where the cover fades out
         float fadeEnd = 0.f;
         uint32_t layerMask = 0;    // paint layers the cover grows on
+        // The field that published this cover, and when (steady clock,
+        // seconds). Several grass fields can sit on one terrain (meadow, far
+        // ring, forest floor); only the owner changes or clears it, and a
+        // claim that is no longer renewed expires. Never dereferenced.
+        const void* owner = nullptr;
+        double publishedAt = 0.0;
     };
     GroundCover groundCover;
     static constexpr int MaxPaintSamples = 2049; // per side

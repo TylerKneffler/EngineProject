@@ -52,6 +52,11 @@ public:
     float visibleRadius = 11.f;
     // Multiplier on the grass reach from the owner's project layer.
     float DetailRadiusScale() const;
+    // Scale of this field's outer radius. A far ring (innerRadius > 0) keeps
+    // its authored reach: it is the cheap layer that carries grass into the
+    // distance, and with the detail budget at its floor the scaled ring ended
+    // ~50 m out. Its inner edge still follows the detailed field's scale.
+    float OuterRadiusScale() const { return innerRadius > 0.f ? 1.f : DetailRadiusScale(); }
     PROPERTY(Inspector, EditAnywhere, Category = "Grass | Tiles", ClampMin = "1")
     float tileSize = 4.f;
     PROPERTY(Inspector, EditAnywhere, Category = "Grass | Tiles", ClampMin = "0")

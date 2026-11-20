@@ -14,7 +14,7 @@ namespace MeadowGrass
 // Layer name of the far grass ring (simple tufts beyond the detailed grass).
 inline constexpr const char* FarLayerName = "Procedural far grass";
 // Layer name of the forest floor: litter, broadleaf herbs, seedlings and ferns
-// under trees (.md/foliage.md Phase 4). The scene script points it at its
+// under trees (.md/todo.md Foliage Phase 4). The scene script points it at its
 // forest paint layer (GrassField::proceduralLayerMask).
 inline constexpr const char* ForestFloorLayerName = "Procedural forest floor";
 // "Meadow grass" (authored placements), "Procedural meadow grass", the far

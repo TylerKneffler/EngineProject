@@ -61,7 +61,7 @@ CLUSTERS = [
                                                    "Fir_subalpine_01": 2}),
     ("ForestCluster_Conifer_02", 8409, "conifer", {"Spruce_tall_01": 2, "Pine_scots_01": 3,
                                                    "Fir_subalpine_01": 1}),
-    # More stands so far forests do not repeat two oak tiles (.md/foliage.md
+    # More stands so far forests do not repeat two oak tiles (.md/todo.md Foliage
     # Phase 1c). They use the oak variants the near forest leaves out (the
     # landscape draws eight species to save CPU); at cluster distance (>2 km)
     # the swap is invisible.

@@ -29,12 +29,47 @@ uint64_t TransformHierarchy::ReadPreparedWorldRevision(const Transform& transfor
         ? transform.m_worldRevision:transform.GetWorldRevision();
 }
 
+bool TransformHierarchy::IsPreparedMember(const Transform& transform) const
+{
+    return m_topologyValid && transform.m_hierarchyStamp==m_membershipStamp;
+}
+
 TransformHierarchy::Statistics TransformHierarchy::Prepare(const std::vector<Transform*>& transforms)
 {
     using Clock=std::chrono::steady_clock;
     const auto start=Clock::now();
     const auto ms=[](auto first,auto last) { return std::chrono::duration<double,std::milli>(last-first).count(); };
     Statistics stats;
+    // Most frames change nothing. Settle those in one pass over the transforms
+    // instead of building the parent list and scanning a second time: the two
+    // calls a frame (update and render preparation) were ~6 % of the scene
+    // thread on the landscape. Any difference falls through to the full path.
+    if(m_topologyValid && transforms.size()==m_sources.size())
+    {
+        bool unchanged=true;
+        for(size_t i=0;i<transforms.size() && unchanged;++i)
+        {
+            const auto* transform=transforms[i];
+            if(!transform || transform!=m_sources[i]) { unchanged=false; break; }
+            const auto& source=*transform;
+            auto* parent=source.Owner ? source.Owner->Parent:nullptr;
+            if((parent ? &parent->transform:nullptr)!=m_parents[i] ||
+                !source.m_localCacheInitialized || !source.m_worldCacheInitialized ||
+                source.position!=source.m_cachedPosition || source.rotation!=source.m_cachedRotation ||
+                source.scale!=source.m_cachedScale || source.m_localRevision!=source.m_cachedLocalRevisionForWorld)
+            { unchanged=false; break; }
+            if(m_parents[i])
+            {
+                if(m_nodes[i].parent==NoParent) m_parents[i]->GetWorldMatrixD();
+                unchanged=m_parents[i]->m_worldRevision==source.m_cachedParentWorldRevision;
+            }
+        }
+        if(unchanged)
+        {
+            stats.levels=m_levels.size(); stats.worldReused=transforms.size();
+            stats.totalMs=ms(start,Clock::now()); stats.snapshotMs=stats.totalMs; return stats;
+        }
+    }
     bool rebuild=!m_topologyValid || transforms!=m_sources;
     auto& parents=m_parentScratch; parents.clear(); parents.reserve(transforms.size());
     for(auto* transform:transforms)

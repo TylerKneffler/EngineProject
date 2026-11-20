@@ -195,18 +195,22 @@ float ScreenAmbientOcclusion(float3 worldPos)
         return 1.0;
     const uint packedExtent = screenOcclusion[15];
     const int2 extent = int2(packedExtent & 0xFFFFu, packedExtent >> 16);
+    // A depth-matched 3x3 tent around the nearest half-resolution texel. The
+    // AO pass rotates its two slices per pixel with interleaved gradient
+    // noise, which is only uniform over 3x3 neighbourhoods; a bilinear 2x2
+    // lookup let its diagonal structure through as dark stripes wherever the
+    // temporal history is rejected (wind-moved leaves and fronds).
     const float2 texel = uv * float2(extent) - 0.5;
-    const int2 base = int2(floor(texel));
-    const float2 f = texel - float2(base);
+    const int2 base = int2(floor(texel + 0.5));
     float occlusion = 0.0, weight = 0.0;
-    [unroll] for (uint tap = 0u; tap < 4u; ++tap)
+    [unroll] for (int dy = -1; dy <= 1; ++dy)
+    [unroll] for (int dx = -1; dx <= 1; ++dx)
     {
-        const int2 corner = int2(tap & 1u, tap >> 1);
-        const int2 coordinate = clamp(base + corner, int2(0, 0), extent - 1);
+        const int2 coordinate = clamp(base + int2(dx, dy), int2(0, 0), extent - 1);
         const uint packed = screenOcclusion[16u + uint(coordinate.y * extent.x + coordinate.x)];
         const float storedDepth = f16tof32(packed >> 16);
-        const float bilinear = (corner.x ? f.x : 1.0 - f.x) * (corner.y ? f.y : 1.0 - f.y);
-        const float match = abs(storedDepth - w) <= 0.04 * w + 0.1 ? bilinear : 0.0;
+        const float tent = (dx == 0 ? 2.0 : 1.0) * (dy == 0 ? 2.0 : 1.0);
+        const float match = abs(storedDepth - w) <= 0.04 * w + 0.1 ? tent : 0.0;
         occlusion += match * f16tof32(packed & 0xFFFFu);
         weight += match;
     }
@@ -224,7 +228,7 @@ float SampleCookie(uint index, float2 uv)
 
 // Directional light cookie (Light::cookieTexture): projected along the light
 // over world space, scrolled by cookieRight.w / cookieUp.w (Light::
-// cookieScrollSpeed). Cloud shadows (.md/foliage.md Phase 3) are a tiling
+// cookieScrollSpeed). Cloud shadows (.md/todo.md Foliage Phase 3) are a tiling
 // cookie on the sun. Every lighting path that takes the sun calls this, so
 // terrain, grass, foliage and objects darken together.
 float DirectionalCookie(SceneLightData light, float3 worldPos)
@@ -311,6 +315,51 @@ float3 GrassPatchVariation(float3 color, float3 position)
     float luminance = dot(color, float3(.2126, .7152, .0722));
     float3 straw = luminance * float3(1.3, 1.05, .4);
     return lerp(color, lerp(color, straw, dry * .35), leafy);
+}
+
+// Grass drawn into the terrain itself, for where the blades thin out and
+// beyond them (.md/todo.md, Landscape demo expectations: grass cover). The
+// ground is shaded as a layer of tufts ~0.3 m deep instead of a flat tint:
+// four parallax shells through a procedural tuft height field. A view ray
+// that reaches a shell inside a tuft stops there, so tufts hide the ground
+// behind them at grazing angles and show dark gaps seen from above, the way
+// the blade field does. Returns a multiplier on the cover colour: dark at
+// the roots, lighter and a little yellower at the tips.
+float GrassTuftHeight(float2 position, float bladeDetail)
+{
+    const float clump = GrassWindPerlin(position * 1.9, 0x2c9277b5u);       // ~0.5 m tufts
+    const float blades = GrassWindPerlin(position * 9.0, 0x6a09e667u);      // blade-scale breakup
+    return saturate(0.7 + 0.9 * clump + 0.3 * blades * bladeDetail);
+}
+
+float3 GrassGroundShells(float3 worldPos, float3 toCamera, float3 normal, float footprint)
+{
+    const float depth = 0.3;
+    const float cosine = saturate(dot(toCamera, normal));
+    // How far the view ray travels over the ground per metre it climbs; capped
+    // so grazing pixels do not sample far outside their own patch.
+    const float2 slide = toCamera.xz / max(cosine, 0.12) * depth;
+    // Each octave fades out before it gets smaller than a pixel (no shimmer).
+    const float bladeDetail = saturate(1.0 - footprint * 6.0);
+    const float resolved = saturate(1.0 - footprint * 1.4);
+    float level = 0.0;
+    [unroll] for (int shell = 1; shell <= 4; ++shell)
+    {
+        const float height = shell * 0.25;
+        // Higher shells are nearer the camera along the ray, so the last hit wins.
+        if (GrassTuftHeight(worldPos.xz + slide * height, bladeDetail) >= height)
+            level = height;
+    }
+    const float3 traced = lerp(float3(0.42, 0.45, 0.42), float3(1.22, 1.16, 0.92), level);
+    // Unresolved, the shells average out: mostly tips at grazing angles,
+    // roots and gaps from above.
+    const float grazing = 1.0 - cosine;
+    const float3 mean = lerp(float3(0.84, 0.85, 0.8), float3(1.14, 1.1, 0.9), grazing * sqrt(grazing));
+    // A ray skimming the field always ends in the top of some tuft; four
+    // samples miss most of them, so toward the horizon the result goes to
+    // the tips (a meadow seen at eye level shows no ground at all).
+    const float skim = smoothstep(0.8, 0.98, grazing);
+    return lerp(lerp(mean, traced, resolved), float3(1.16, 1.12, 0.9) * (0.93 + 0.14 * level), skim);
 }
 
 #ifdef GRASS_SURFACE_SHADING
@@ -1481,7 +1530,7 @@ float3 ApplyFoliageVariation(float3 color, float3 worldPosition, float amount)
 }
 
 // Leaf lighting for masked foliage (Material::foliageTranslucency, carried in
-// subsurfaceTransmission.y; .md/foliage.md Phase 1). Meshes cooked by
+// subsurfaceTransmission.y; .md/todo.md Foliage Phase 1). Meshes cooked by
 // tools/cook_foliage_lighting.py carry crown data in uv1: x = canopy
 // occlusion (1 on the crown's outer shell, ~0.2 deep inside), y = 4 + depth
 // into the crown. Real UVs never reach 3.5, so that marks a cooked mesh.
@@ -1540,8 +1589,15 @@ float3 FoliageTransmission(float3 albedo, float3 radiance, float3 n, float3 v,
     const float forward = pow(saturate(dot(-v, l)), 4.0);
     const float shell = leaf.occlusion * leaf.occlusion;
     const float3 filtered = albedo * float3(1.05, 1.2, 0.5);
+    // Light that already passed through the leaves above: a shaded leaf under
+    // a sunlit canopy is lit from every side by green, scattered light, so
+    // crown undersides are dark but not black (they were ~5x darker than the
+    // reference frames' crowns once the sky fill was no longer over-bright).
+    // It follows the leaf's shadow, so a whole tree in terrain shade keeps a
+    // little of it too; small enough not to read as sunlight.
+    const float scattered = 0.3 * (1.0 - shadow) * lerp(0.5, 1.0, leaf.occlusion);
     return filtered * radiance * (leaf.translucency / PI) *
-        (0.35 * back + 0.9 * forward) * lerp(0.08, 1.0, shadow) * shell;
+        ((0.35 * back + 0.9 * forward) * lerp(0.08, 1.0, shadow) * shell + scattered);
 }
 
 // Bumpy canopy over forested distant terrain (macro map alpha = cover):
@@ -1678,7 +1734,7 @@ float FogShaftSunVisibility(ObjectData objectData, float3 position,
     return SampleDirectionalShadowCascade(objectData, cascade, position, 0);
 }
 
-// Sky visibility under a canopy (.md/foliage.md Phase 3). The sun's shadow
+// Sky visibility under a canopy (.md/todo.md Foliage Phase 3). The sun's shadow
 // map already records where tree crowns are: five taps on a 3 m disk, 2.5 m
 // above the surface (so the surface itself and low plants do not count),
 // average to how open the canopy is, and ambient (sky) light scales with it.
@@ -3127,19 +3183,18 @@ float4 ObjectSurfacePS(
                     coverColor * objectData.groundCoverRange.w, coverColor, beyond), worldPos);
                 // Keep more texture detail up close, where it reads as soil.
                 float3 tinted = target * lerp(1.0, detail, lerp(0.8, 0.5, beyond));
-                // Where the blades end, open ground keeps a fine meadow grain
-                // and a soft sheen at grazing angles, as a field of short
-                // grass does, rather than reading as flat paint. The grain's
-                // octaves fade as they approach the pixel size (no flicker).
+                // Where the blades thin out and beyond them the ground is
+                // shaded as grass tufts with depth (GrassGroundShells) rather
+                // than flat paint, so it carries on from the blade field.
                 [branch] if (beyond > 0.0)
                 {
-                    const float footprint = length(fwidth(worldPos.xz));
-                    const float grain =
-                        GrassWindPerlin(worldPos.xz * 1.7, 0x2c9277b5u) * 0.5 * saturate(1.0 - footprint * 1.2) +
-                        GrassWindPerlin(worldPos.xz * 6.3, 0x6a09e667u) * 0.25 * saturate(1.0 - footprint * 4.5);
+                    // The pixel's narrow axis: at a grazing angle a pixel covers a
+                    // long strip of ground along the view, but the tufts slide along
+                    // that same direction, so they stay readable across it.
+                    const float footprint = min(length(ddx(worldPos.xz)), length(ddy(worldPos.xz)));
                     const float3 toCamera = normalize(objectData.viewPositionAlphaCutoff.xyz - worldPos);
-                    const float grazing = pow(1.0 - saturate(dot(terrainNormalForLighting, toCamera)), 4.0);
-                    tinted *= (1.0 + grain * 0.22 * beyond) * (1.0 + 0.3 * grazing * beyond);
+                    tinted *= lerp(1.0, GrassGroundShells(worldPos, toCamera,
+                        terrainNormalForLighting, footprint), beyond);
                 }
                 base.rgb = lerp(base.rgb, tinted * originalWeightSum,
                     cover * objectData.groundCoverColor.w);

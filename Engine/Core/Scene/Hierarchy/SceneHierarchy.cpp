@@ -184,7 +184,9 @@ const std::vector<Engine::Core::Object*>& Scene::GetUpdateObjects()
 
 void Scene::PrepareTransformHierarchy()
 {
-    std::vector<Engine::Components::Transform*> values;
+    // Reuses the render preparation's list storage; both run on the owner thread.
+    auto& values = m_transformPreparationScratch;
+    values.clear();
     values.reserve(m_objects.size());
     for (const auto& object : m_objects)
         values.push_back(&object->transform);
@@ -602,7 +604,13 @@ bool Scene::MoveObject(
         ? std::atan2(rotation[0][1], rotation[0][0])
         : 0.f;
     object->transform.rotation = { x, y, z };
-    NotifyStructureChanged();
+    // Appending a child leaves the scene's object order alone, so only this
+    // object's entries change (as in SetParentLocal). A whole-scene
+    // notification here made every streamed terrain tile, far-object block
+    // and cell reconcile the component registry and rebuild all render
+    // items: ~40 ms hitches while turning or walking on the landscape.
+    if (placement == ObjectPlacement::AsChild && newParent) NotifyStructureChanged(object);
+    else NotifyStructureChanged();
     return true;
 }
 

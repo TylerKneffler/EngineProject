@@ -24,6 +24,10 @@ public:
     // or hierarchy writes. External/non-batched transforms keep lazy validation.
     glm::mat4 ReadPreparedWorldMatrix(const Transform& transform) const;
     uint64_t ReadPreparedWorldRevision(const Transform& transform) const;
+    // True when Prepare settled this transform in the current topology. Its
+    // prepared world revision is then a plain read, safe from worker threads
+    // while the owner makes no transform or hierarchy writes.
+    bool IsPreparedMember(const Transform& transform) const;
 private:
     static constexpr size_t NoParent=size_t(-1);
     struct Node
