@@ -1,0 +1,20 @@
+<?xml version='1.0' encoding='utf-8'?>
+<Prefab xmlns:components="urn:engine-components" version="1" type="prefab">
+  <object name="Cliff_Scan_02" enabled="true">
+    <components>
+      <components:Mesh Mesh.file="Assets/Models/Woodland/Scans/Meshes/Cliff_Scan_02_LOD0.mesh" Mesh.foliageWindStrength="0" Mesh.useLightProbes="false" Mesh.gpuLodSelection="false">
+        <Mesh.lodMeshes>
+          <item>Assets/Models/Woodland/Scans/Meshes/Cliff_Scan_02_LOD1.mesh</item>
+          <item>Assets/Models/Woodland/Scans/Meshes/Cliff_Scan_02_LOD2.mesh</item>
+        </Mesh.lodMeshes>
+      </components:Mesh>
+      <components:Material Material.materialAsset="Engine/Core/Assets/Models/Woodland/Scans/Materials/Cliff_Scan_02.material" />
+    </components>
+    <children />
+    <transform>
+      <Transform.position _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.position>
+      <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+      <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+    </transform>
+  </object>
+</Prefab>

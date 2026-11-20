@@ -43,10 +43,65 @@ GrassField* ApplyFar(Engine::Components::TerrainObjectLayer& layer,
     return grass;
 }
 
+GrassField* ApplyForestFloor(Engine::Components::TerrainObjectLayer& layer,
+    const std::string& viewerObjectName)
+{
+    // Under trees: fallen-leaf litter as the dense cover, broadleaf herbs as
+    // the tall plants, seedling and dry-grass drifts, fern thickets and a few
+    // bushes (tools/generate_meadow_grass.py, forest floor section).
+    layer.snapToGround = true;
+    layer.conformToGround = true;
+    if (viewerObjectName.empty()) return nullptr;
+    auto* owner = layer.Owner;
+    if (auto* existing = owner->GetComponent<GrassField>()) return existing;
+    layer.viewDistance = 35.f;
+    layer.lod1Distance = 7.f;
+    layer.lod2Distance = 13.f;
+    layer.MarkConfigurationDirty();
+    using Engine::Serialization::JsonValue;
+    const auto mesh = [](const std::string& stem, const char* suffix) {
+        return "Assets/Mesh/Grass/" + stem + suffix + ".obj";
+    };
+    auto settings = JsonValue::MakeObject();
+    settings.Set("shortMesh", mesh("forest_litter", ""))
+        .Set("shortMeshLod1", mesh("forest_litter", "_lod1"))
+        .Set("shortMeshLod2", mesh("forest_litter", "_lod2"))
+        .Set("tallMesh", mesh("forest_herb", ""))
+        .Set("tallMeshLod1", mesh("forest_herb", "_lod1"))
+        .Set("tallMeshLod2", mesh("forest_herb", "_lod2"))
+        .Set("viewerObjectName", viewerObjectName)
+        .Set("useEditorCamera", JsonValue(true)).Set("visibleRadius", 26.f)
+        .Set("tileSize", 4.f).Set("shortPatchesPerSquareMeter", 2.2f)
+        .Set("tallPatchesPerSquareMeter", 1.f).Set("seed", 40507)
+        .Set("maxTileBuildsPerUpdate", 8).Set("castShadows", JsonValue(false))
+        .Set("tileWorkBudgetMs", 2.f).Set("fadeDuration", .35f)
+        .Set("distanceFadeFraction", .3f).Set("distanceThinning", .5f)
+        .Set("retainDormantTiles", JsonValue(false))
+        .Set("allowProceduralGeneration", JsonValue(true))
+        // The soil keeps its own colour: no grass tint under the trees.
+        .Set("groundTintStrength", 0.f)
+        // Drifts of small things: seedlings, dry grass, fallen branches and
+        // ground ivy.
+        .Set("accentMeshes", mesh("forest_seedling", "") + ";" + mesh("dry_grass_clump", "") + ";" +
+            mesh("meadow_plantain", "") + ";" + mesh("forest_branch", "") + ";" + mesh("ground_ivy", ""))
+        .Set("accentPatchesPerSquareMeter", .2f).Set("accentDriftSize", 9.f)
+        .Set("shrubMeshes", mesh("forest_fern", "") + ";" + mesh("forest_herb", ""))
+        .Set("shrubPatchesPerSquareMeter", 1.f)
+        .Set("shrubThicketSize", 10.f).Set("shrubCoverage", .45f)
+        .Set("bushMeshes", mesh("meadow_bush", "") + ";" + mesh("meadow_bush_tall", ""))
+        .Set("bushesPerSquareMeter", .03f)
+        .Set("bushClusterSize", 20.f).Set("bushCoverage", .2f);
+    auto* grass = new GrassField();
+    grass->Deserialize(settings);
+    owner->AddComponent(grass);
+    owner->layer = Engine::Rendering::DetailBudget::Get().FindLayerOrDefault("Grass");
+    return grass;
+}
+
 bool IsMeadowLayer(const std::string& layerName)
 {
     return layerName == "Meadow grass" || layerName == "Procedural meadow grass" ||
-        layerName == FarLayerName;
+        layerName == FarLayerName || layerName == ForestFloorLayerName;
 }
 
 GrassField* Apply(Engine::Components::TerrainObjectLayer& layer,
@@ -54,6 +109,7 @@ GrassField* Apply(Engine::Components::TerrainObjectLayer& layer,
 {
     if (!IsMeadowLayer(layer.layerName) || !layer.Owner) return nullptr;
     if (layer.layerName == FarLayerName) return ApplyFar(layer, viewerObjectName);
+    if (layer.layerName == ForestFloorLayerName) return ApplyForestFloor(layer, viewerObjectName);
     // Grass follows the ground through sculpting; procedural grass also
     // conforms per placement. Set on every restore (saved layers included).
     const bool procedural = layer.layerName == "Procedural meadow grass";

@@ -44,11 +44,11 @@ const std::array<const char*, LayerCount> LayerMaterials{
     "Assets/Materials/Terrain/PBR/rock.material",
     "Assets/Materials/Terrain/PBR/snow.material"};
 const std::array<glm::vec3, LayerCount> LayerPreview{{
-    {.62f, .55f, .42f}, {.45f, .43f, .40f}, {.24f, .32f, .12f},
+    {.62f, .55f, .42f}, {.45f, .43f, .40f}, {.13f, .18f, .07f},
     {.22f, .15f, .10f}, {.40f, .38f, .34f}, {.85f, .88f, .92f}}};
 
 // Mesh caches store the painted weights: change this with the paint rules.
-constexpr uint64_t PaintRevision = 0x4c414e4453435036ull;
+constexpr uint64_t PaintRevision = 0x4c414e4453435037ull;
 
 // Heights the paint and forests follow (see LandscapeDriver's properties).
 // blend scales the height transitions above the shore, so taller maps get
@@ -102,6 +102,27 @@ float ForestBand(float height, const Altitudes& a)
         (1.f - SmoothStep(a.tree - 8.f * a.blend, a.tree, height));
 }
 
+// Trails: 1 on a track, 0 away from it. Tracks follow the 0.5 contour of a
+// broad noise, so they wind across the whole map, never end, and join in
+// loops; the distance to the contour (value / gradient) gives an even ~6 m
+// wide dirt track (terrain vertices are 4 m apart, so narrower paths cannot
+// be painted). Paint, trees, undergrowth and props all read this one mask.
+float TrailMask(float x, float z)
+{
+    const auto field = [](float px, float pz)
+    {
+        return .7f * ValueNoise(px, pz, 520.f, 71u) + .3f * ValueNoise(px, pz, 170.f, 73u);
+    };
+    const float e = 4.f;
+    const float centre = field(x, z);
+    const float gx = (field(x + e, z) - field(x - e, z)) / (2.f * e);
+    const float gz = (field(x, z + e) - field(x, z - e)) / (2.f * e);
+    // A floor on the gradient keeps flat spots of the noise from spreading
+    // the track into a clearing.
+    const float distance = std::abs(centre - .5f) / std::max(std::sqrt(gx * gx + gz * gz), .0006f);
+    return 1.f - SmoothStep(1.6f, 4.2f, distance);
+}
+
 // Six layer weights for one sample. rockClass is the archive's 0..3 code:
 // slope and ridge rockiness computed over the whole map by the generator.
 void PaintSample(float height, uint8_t rockClass, float worldX, float worldZ,
@@ -126,6 +147,15 @@ void PaintSample(float height, uint8_t rockClass, float worldX, float worldZ,
     weights[Rock] = rock * (1.f - snow);
     weights[ForestSoil] = soil * (1.f - snow);
     weights[Grass] = std::max(0.f, land * (1.f - rock) * (1.f - snow) - weights[ForestSoil]);
+    // Trails: packed gravel through meadow and forest, not over rock, snow,
+    // shores or steep ground (rockSlope).
+    const float trail = TrailMask(worldX, worldZ) * land * (1.f - rock) * (1.f - snow) *
+        ForestBand(height, a);
+    if (trail > 0.f)
+    {
+        for (int layer = 0; layer < LayerCount; ++layer) weights[layer] *= 1.f - .9f * trail;
+        weights[Gravel] += .9f * trail;
+    }
     float sum = 0.f;
     for (int layer = 0; layer < LayerCount; ++layer) sum += weights[layer];
     if (sum < 1e-5f) { weights[Grass] = 1.f; return; }
@@ -334,17 +364,29 @@ float ConiferShare(float height, const Altitudes& a)
 // last level, so far blocks leave them out (thousands of steep cells would
 // otherwise add millions of far triangles). Their own random stream keeps
 // the tree layout unchanged.
-const std::array<const char*, 2> Cliffs{"Cliff_block_01", "Cliff_block_02"};
+// Prefab (under Assets/Prefabs/Woodland/), half width along the contour and
+// half depth into the slope at scale 1 (m), and the scale that brings the
+// piece to crag size. The first five are photo-scanned rock faces (Poly
+// Haven, CC0; tools/fetch_polyhaven_props.py) a few metres across, scaled up;
+// the rest are the generated shapes, kept as filler.
+struct CliffShape { const char* name; float halfWidth, halfDepth, baseScale; };
+const std::array<CliffShape, 8> Cliffs{{
+    {"Scans/Cliff_Scan_02", 10.f, 3.3f, 2.2f}, {"Scans/Mountainside_01", 5.1f, 2.6f, 3.6f},
+    {"Scans/Cliff_Scan_01", 4.1f, 2.2f, 4.f}, {"Scans/RockFace_01", 3.6f, 2.8f, 4.f},
+    {"Scans/RockFace_02", 2.4f, 1.7f, 4.5f},
+    {"Boulders/Crag_spire_01", 6.5f, 5.5f, 1.f}, {"Boulders/Cliff_overhang_01", 4.5f, 3.f, 1.3f},
+    {"Boulders/Outcrop_ledge_01", 5.5f, 3.4f, 1.3f}}};
 
 void GenerateCliffs(const TerrainManager::ObjectLayerContext& context,
     TerrainObjectLayer& layer, const Altitudes& a, uint64_t& id)
 {
     if (context.farObjects) return;
-    const std::string prefix = "Assets/Prefabs/Woodland/Boulders/";
-    for (const char* cliff : Cliffs)
+    const std::string prefix = "Assets/Prefabs/Woodland/";
+    for (const auto& cliff : Cliffs)
     {
-        auto& lod = layer.objectLods[prefix + cliff + ".prefab"];
-        lod.distances = {90.f, 300.f};
+        auto& lod = layer.objectLods[prefix + cliff.name + ".prefab"];
+        // Crags hold their detail further out than the small blocks.
+        lod.distances = {140.f, 420.f};
         lod.cullAfterLastLod = true;
         lod.finalLodCullDistance = layer.viewDistance;
     }
@@ -359,40 +401,104 @@ void GenerateCliffs(const TerrainManager::ObjectLayerContext& context,
         state ^= state << 13; state ^= state >> 17; state ^= state << 5;
         return (state & 0xffffffu) / float(0x1000000);
     };
-    int placed = 0;
-    for (int attempt = 0; attempt < 40 && placed < 2; ++attempt)
+    // A cliff is a band, not a lone block: each seed found on steep rock
+    // grows along the contour (across the slope) while the ground stays
+    // steep, so blocks line up into faces and ledges. Every block faces
+    // downhill, which is what lets the overhang shape lean out over the drop.
+    const auto steepRock = [&](float x, float z, float& height, glm::vec3& normal)
     {
-        const float x = (.06f + .88f * random()) * width;
-        const float z = (.06f + .88f * random()) * depth;
-        const float yaw = random(), size = random(), pick = random();
-        float height = 0.f;
-        glm::vec3 normal(0.f, 1.f, 0.f);
+        if (x < 2.f || z < 2.f || x > width - 2.f || z > depth - 2.f) return false;
         if (!Engine::Components::SampleTerrainSurface(*context.heights, context.cellsX,
                 context.cellsY, context.cellWidth, context.cellDepth, x, z, height, &normal))
-            continue;
-        // Steep (about 40-65 degrees), above the shores, below the snow.
-        if (normal.y > .76f || normal.y < .42f) continue;
-        if (height < a.water + 25.f || height > a.snow) continue;
+            return false;
+        // Steep (from about 38 degrees), above the shores, below the snow.
+        if (normal.y > .79f || normal.y < .3f) return false;
+        if (height < a.water + 25.f || height > a.snow) return false;
+        // The slope must keep rising behind the piece: scanned rock faces are
+        // open shells, and one standing at a crest shows its hollow back
+        // against the sky as a thin sheet.
+        {
+            const glm::vec2 slope(normal.x, normal.z);
+            const glm::vec2 uphill = -slope / std::max(glm::length(slope), 1.e-4f);
+            for (float reach : {14.f, 28.f})
+            {
+                float behind = 0.f;
+                if (!Engine::Components::SampleTerrainSurface(*context.heights, context.cellsX,
+                        context.cellsY, context.cellWidth, context.cellDepth,
+                        x + uphill.x * reach, z + uphill.y * reach, behind, nullptr) ||
+                    behind < height + reach * .55f)
+                    return false;
+            }
+        }
         if (painted)
         {
             const int col = std::clamp(static_cast<int>(std::lround(x / context.cellWidth)), 0, context.cellsX);
             const int row = std::clamp(static_cast<int>(std::lround(z / context.cellDepth)), 0, context.cellsY);
-            const float rock = (*context.weights)[(static_cast<size_t>(row) * (context.cellsX + 1) + col) *
-                layerCount + Rock];
-            if (rock < .35f) continue;
+            if ((*context.weights)[(static_cast<size_t>(row) * (context.cellsX + 1) + col) *
+                    layerCount + Rock] < .35f) return false;
         }
-        const float scale = .7f + .6f * size;
-        // Sink the block so its downhill edge meets the slope: half a
-        // footprint (about 5 m at scale 1) times the slope's gradient.
+        return true;
+    };
+    // Returns the placed shape's half width (for the stride to the next one).
+    const auto placeBlock = [&](float x, float z, float height, const glm::vec3& normal,
+        float size, float pick, float turn)
+    {
+        // Mostly crags (rock-face pieces 25-40 m across) so neighbours overlap
+        // into a broken wall; spires, blocks, overhangs and ledges break it up.
+        const size_t shape = pick < .26f ? 0u : pick < .48f ? 1u : pick < .64f ? 2u :
+            pick < .78f ? 3u : pick < .88f ? 4u : pick < .93f ? 5u : pick < .97f ? 6u : 7u;
+        const float scale = Cliffs[shape].baseScale * (.75f + .6f * size);
+        // Sink the piece so its back is buried and its downhill edge meets
+        // the slope: its half depth times the slope's gradient.
         const float gradient = std::sqrt(std::max(0.f, 1.f - normal.y * normal.y)) / normal.y;
         TerrainObjectLayer::Placement placement;
         placement.id = ++id;
-        placement.asset = prefix + Cliffs[pick < .55f ? 0 : 1] + ".prefab";
-        placement.position = {x, height - std::min(10.f, 5.f * scale * gradient), z};
-        placement.yawDegrees = yaw * 360.f;
+        placement.asset = prefix + Cliffs[shape].name + ".prefab";
+        placement.position = {x, height - std::min(16.f,
+            Cliffs[shape].halfDepth * scale * std::min(gradient, 1.6f) * .8f), z};
+        // Lean a third of the way with the slope, so faces stand proud of it
+        // rather than upright like walls.
+        placement.normal = glm::normalize(glm::mix(glm::vec3(0.f, 1.f, 0.f), normal, .35f));
+        // The meshes face +z; turn that downhill, with some variation.
+        placement.yawDegrees = glm::degrees(std::atan2(normal.x, normal.z)) + (turn - .5f) * 50.f;
         placement.scale = scale;
         layer.placements.push_back(std::move(placement));
+        return Cliffs[shape].halfWidth * scale;
+    };
+    int placed = 0;
+    constexpr int MaximumBlocks = 40;
+    for (int attempt = 0; attempt < 140 && placed < MaximumBlocks; ++attempt)
+    {
+        const float x = (.04f + .92f * random()) * width;
+        const float z = (.04f + .92f * random()) * depth;
+        const float yaw = random(), size = random(), pick = random();
+        float height = 0.f;
+        glm::vec3 normal(0.f, 1.f, 0.f);
+        if (!steepRock(x, z, height, normal)) continue;
+        const float seedHalfWidth = placeBlock(x, z, height, normal, size, pick, yaw);
         ++placed;
+        // Along the contour, both ways, up to three more pieces each,
+        // stepping by the pieces' widths so they overlap by about a third.
+        const glm::vec2 slope(normal.x, normal.z);
+        const glm::vec2 contour = glm::normalize(glm::vec2(-slope.y, slope.x));
+        for (float direction : {1.f, -1.f})
+        {
+            float bx = x, bz = z, previousHalfWidth = seedHalfWidth;
+            for (int step = 0; step < 3 && placed < MaximumBlocks; ++step)
+            {
+                const float nextSize = random(), nextPick = random(), nextTurn = random(),
+                    drift = random();
+                const float stride = previousHalfWidth * 1.25f + 3.f;
+                bx += contour.x * stride * direction + slope.x * (drift - .5f) * 8.f;
+                bz += contour.y * stride * direction + slope.y * (drift - .5f) * 8.f;
+                float blockHeight = 0.f;
+                glm::vec3 blockNormal(0.f, 1.f, 0.f);
+                if (!steepRock(bx, bz, blockHeight, blockNormal)) break;
+                previousHalfWidth = placeBlock(bx, bz, blockHeight, blockNormal, nextSize,
+                    nextPick, nextTurn);
+                ++placed;
+            }
+        }
     }
 }
 
@@ -434,14 +540,17 @@ void GenerateForest(const TerrainManager::ObjectLayerContext& context,
         state ^= state << 13; state ^= state >> 17; state ^= state << 5;
         return (state & 0xffffffu) / float(0x1000000);
     };
-    // Each cell grows one stand: a large, a medium and a small species chosen
-    // per cell. Every species in a cell costs a set of instanced draws per
-    // LOD band, so stands keep distant forests cheap to submit while
-    // neighbouring cells still mix all eight species.
+    // Each cell grows a stand of two species per size band (large, medium,
+    // small), mixed tree by tree, from the map's eight oak species. One
+    // species per band made every large tree in a 128 m cell the same model.
+    // Batches merge across cells per asset, so the map-wide species count is
+    // what costs CPU (see Species); mixing within a cell adds no assets.
     const uint32_t stand = Hash(context.cell.first, context.cell.second, 0x7374616eu);
-    const std::array<size_t, 3> standSpecies{stand % 4u, 4u + (stand >> 8) % 2u,
-        6u + (stand >> 16) % 2u};
-    const std::array<size_t, 3> standConifers{(stand >> 20) % 2u, 2u, 3u};
+    const size_t largeA = stand % 4u;
+    const size_t largeB = (largeA + 1u + (stand >> 4) % 3u) % 4u;
+    const std::array<std::array<size_t, 2>, 3> standSpecies{{
+        {largeA, largeB}, {4u, 5u}, {6u, 7u}}};
+    const std::array<std::array<size_t, 2>, 3> standConifers{{{0u, 1u}, {2u, 2u}, {3u, 3u}}};
     uint64_t id = 0;
     for (int attempt = 0; attempt < treesPerCell; ++attempt)
     {
@@ -461,22 +570,34 @@ void GenerateForest(const TerrainManager::ObjectLayerContext& context,
         const float density = std::max(ForestMask(worldX, worldZ), .03f) *
             ForestBand(height, a);
         if (chance >= density) continue;
+        // Trails stay clear (the mask reaches ~4 m either side of the track).
+        if (TrailMask(worldX, worldZ) > .02f) continue;
         TerrainObjectLayer::Placement placement;
         placement.id = ++id;
         // Forest interiors favour large trees, edges and meadows small ones.
         const float interior = ForestMask(worldX, worldZ);
         const float sizeClass = pick * .6f + (1.f - interior) * .4f;
         const int sizeBand = sizeClass < .5f ? 0 : sizeClass < .75f ? 1 : 2;
-        // Conifer or oak, from the draws above (no extra random, so the
-        // oak layout of lower forests is unchanged).
+        // Conifer or oak, the stand's species, and the tree's lean come from
+        // the draws above (no extra random, so tree positions are unchanged).
         const float familyDraw = std::fmod(pick * 7.31f + yaw * 3.17f, 1.f);
-        if (familyDraw < ConiferShare(height, a))
-            placement.asset = coniferPrefix + ConiferSpecies[standConifers[sizeBand]] + ".prefab";
+        const size_t variant = std::fmod(size * 13.71f + yaw * 5.37f + pick * 2.11f, 1.f) < .5f ? 0u : 1u;
+        const bool conifer = familyDraw < ConiferShare(height, a);
+        if (conifer)
+            placement.asset = coniferPrefix + ConiferSpecies[standConifers[sizeBand][variant]] + ".prefab";
         else
-            placement.asset = prefix + Species[standSpecies[sizeBand]] + ".prefab";
+            placement.asset = prefix + Species[standSpecies[sizeBand][variant]] + ".prefab";
         placement.position = {x, height - .08f, z};
         placement.yawDegrees = yaw * 360.f;
-        placement.scale = .8f + size * .45f;
+        placement.scale = .75f + size * .55f;
+        // A slight lean (the layer does not conform to the ground, so the
+        // normal tilts the tree; far blocks copy it): most trees stand nearly
+        // straight, a few lean up to ~7 degrees; conifers grow straighter.
+        const float leanDraw = std::fmod(size * 7.13f + pick * 11.3f, 1.f);
+        const float lean = glm::radians((conifer ? 2.5f : 7.f) * leanDraw * leanDraw);
+        const float leanDirection = std::fmod(yaw * 9.7f + size * 3.1f, 1.f) * glm::two_pi<float>();
+        placement.normal = {std::sin(lean) * std::cos(leanDirection), std::cos(lean),
+            std::sin(lean) * std::sin(leanDirection)};
         layer.placements.push_back(std::move(placement));
     }
     GenerateCliffs(context, layer, a, id);
@@ -499,6 +620,17 @@ std::string RockPrefab(int index)
         index + 1);
     return name;
 }
+
+// Photo-scanned forest props (Poly Haven, CC0; tools/fetch_polyhaven_props.py),
+// each a prefab with three levels: stumps, mossy rocks, dry branches, ferns.
+std::string ScanPrefab(const char* stem, size_t index)
+{
+    char name[96];
+    std::snprintf(name, sizeof(name), "Assets/Prefabs/Woodland/Scans/%s_%02d.prefab", stem,
+        static_cast<int>(index) + 1);
+    return name;
+}
+constexpr size_t StumpCount = 2, MossRockCount = 6, DryBranchCount = 3, FernCount = 4;
 
 std::string LogPrefab()
 {
@@ -552,6 +684,12 @@ void GenerateProps(const TerrainManager::ObjectLayerContext& context,
         layer.objectLods[LogPrefab()].distances = {35.f, 100.f};
         for (size_t boulder = 0; boulder < Boulders.size(); ++boulder)
             layer.objectLods[BoulderPrefab(boulder)].distances = {35.f, 100.f};
+        for (size_t i = 0; i < StumpCount; ++i)
+            layer.objectLods[ScanPrefab("Stump", i)].distances = {35.f, 100.f};
+        for (size_t i = 0; i < MossRockCount; ++i)
+            layer.objectLods[ScanPrefab("MossRock", i)].distances = {35.f, 100.f};
+        for (size_t i = 0; i < DryBranchCount; ++i)
+            layer.objectLods[ScanPrefab("DryBranch", i)].distances = {25.f, 70.f};
     }
     // Bushes have a single LOD; an explicit one-entry chain gives them a stable
     // profile like every other asset in the layer.
@@ -563,6 +701,10 @@ void GenerateProps(const TerrainManager::ObjectLayerContext& context,
             lod.meshes = {path};
             lod.distances.clear();
         }
+    // Scanned ferns keep their own three levels.
+    if (undergrowth)
+        for (size_t i = 0; i < FernCount; ++i)
+            layer.objectLods[ScanPrefab("FernScan", i)].distances = {20.f, 50.f};
     const float width = context.cellsX * context.cellWidth;
     const float depth = context.cellsY * context.cellDepth;
     uint32_t state = Hash(context.cell.first, context.cell.second,
@@ -606,6 +748,11 @@ void GenerateProps(const TerrainManager::ObjectLayerContext& context,
         LandscapeRocks[3u + (stand >> 8) % 3u]};
     const size_t standBoulder = (stand >> 16) % Boulders.size();
     const std::array<size_t, 2> standBushes{(stand >> 4) % 4u, 4u + (stand >> 12) % 2u};
+    // One stump, one dry branch, two mossy rocks and two ferns per cell.
+    const size_t standStump = (stand >> 20) % StumpCount;
+    const size_t standBranch = (stand >> 21) % DryBranchCount;
+    const std::array<size_t, 2> standMossRocks{(stand >> 23) % 3u, 3u + (stand >> 25) % 3u};
+    const std::array<size_t, 2> standFerns{(stand >> 27) % 2u, 2u + (stand >> 28) % 2u};
     const int attempts = static_cast<int>(std::lround((undergrowth ? 420.f : 300.f) *
         std::clamp(density, 0.f, 4.f)));
     for (int attempt = 0; attempt < attempts; ++attempt)
@@ -624,6 +771,8 @@ void GenerateProps(const TerrainManager::ObjectLayerContext& context,
         const float worldX = context.cell.first * width + x;
         const float worldZ = context.cell.second * depth + z;
         const float forest = ForestMask(worldX, worldZ) * ForestBand(height, a);
+        // Nothing grows or lies on a trail.
+        if (TrailMask(worldX, worldZ) > .1f) continue;
         if (undergrowth)
         {
             if (height < waterLevel + 1.5f || normal.y < .82f) continue;
@@ -632,6 +781,16 @@ void GenerateProps(const TerrainManager::ObjectLayerContext& context,
             const float meadow = paint(x, z, Grass);
             const float odds = (.5f * edge + .08f * forest + .1f * meadow) * (.35f + 1.3f * clump) *
                 (1.f - paint(x, z, Snow)) * (1.f - paint(x, z, Rock));
+            // Under the trees, scanned ferns in drifts (their own noise, so
+            // they mass in some glades and leave others open).
+            if (forest > .45f && kind < .55f)
+            {
+                const float drift = SmoothStep(.4f, .7f, ValueNoise(worldX, worldZ, 21.f, 223u));
+                if (chance >= .85f * forest * (.15f + drift)) continue;
+                place(ScanPrefab("FernScan", standFerns[pick < .5f ? 0 : 1]), x, height - .03f, z,
+                    glm::vec3(0.f, 1.f, 0.f), yaw, 1.1f + .9f * size);
+                continue;
+            }
             if (chance >= odds) continue;
             // Small bushes in the open, tall ones under and beside trees.
             const float shade = std::clamp(forest + edge * .5f, 0.f, 1.f);
@@ -642,20 +801,54 @@ void GenerateProps(const TerrainManager::ObjectLayerContext& context,
             continue;
         }
         if (height < waterLevel - .8f) continue;
-        // Logs: gentle forest floor only.
+        // Logs and stumps: gentle forest floor only.
         if (kind < .16f)
         {
             if (normal.y < .93f || height < waterLevel + 2.f || chance >= .9f * forest) continue;
-            place(LogPrefab(), x, height - .04f, z, normal, yaw, .8f + .6f * size);
+            if (kind < .09f)
+                place(LogPrefab(), x, height - .04f, z, normal, yaw, .8f + .6f * size);
+            else
+                place(ScanPrefab("Stump", standStump), x, height - .03f, z,
+                    glm::vec3(0.f, 1.f, 0.f), yaw, .9f + .6f * size);
+            continue;
+        }
+        // Dry branches lying on the forest floor.
+        if (kind < .34f && forest > .3f)
+        {
+            if (normal.y < .9f || chance >= .7f * forest) continue;
+            place(ScanPrefab("DryBranch", standBranch), x, height + .01f, z, normal, yaw,
+                .9f + .8f * size);
             continue;
         }
         const float rocky = std::min(1.f, paint(x, z, Rock) + .5f * paint(x, z, Snow));
         const float shore = paint(x, z, Gravel);
         const float field = SmoothStep(.66f, .82f, ValueNoise(worldX, worldZ, 70.f, 101u));
-        const float odds = .025f + .45f * rocky + .3f * field + .25f * shore;
+        // Scree: ground with a steep slope a little way uphill collects what
+        // falls off it, so cliff feet get boulder aprons instead of rocks
+        // spread evenly over the hills.
+        float scree = 0.f;
+        {
+            const glm::vec2 slope(normal.x, normal.z);
+            const float steepness = glm::length(slope);
+            if (steepness > .05f)
+            {
+                const glm::vec2 uphill = -slope / steepness;
+                float upHeight = 0.f;
+                glm::vec3 upNormal(0.f, 1.f, 0.f);
+                for (float reach : {9.f, 18.f})
+                    if (Engine::Components::SampleTerrainSurface(*context.heights, context.cellsX,
+                            context.cellsY, context.cellWidth, context.cellDepth,
+                            x + uphill.x * reach, z + uphill.y * reach, upHeight, &upNormal))
+                        scree = std::max(scree, SmoothStep(.8f, .62f, upNormal.y));
+                // On the gentler ground below, not on the face itself.
+                scree *= SmoothStep(.6f, .8f, normal.y);
+            }
+        }
+        const float odds = .025f + .45f * rocky + .3f * field + .25f * shore + .55f * scree;
         if (chance >= odds) continue;
-        // Mostly small stones; boulders in rock fields and on rock paint.
-        float scale = .35f + 2.4f * std::pow(size, 2.4f) * (.45f + .55f * std::max(rocky, field));
+        // Mostly small stones; boulders in rock fields, on rock paint and in scree.
+        float scale = .35f + 2.4f * std::pow(size, 2.4f) *
+            (.45f + .55f * std::max({rocky, field, scree}));
         if (shore > .5f) scale = .25f + .45f * size;
         // Rocks lean partway with the slope, so they read as resting on it.
         const glm::vec3 lean = glm::normalize(glm::mix(normal, glm::vec3(0.f, 1.f, 0.f), .45f));
@@ -664,6 +857,14 @@ void GenerateProps(const TerrainManager::ObjectLayerContext& context,
         {
             place(BoulderPrefab(standBoulder), x, height - .05f, z, lean, yaw,
                 .55f + .5f * size);
+            continue;
+        }
+        // Inside forest the rocks are mossy.
+        if (forest > .5f && shore <= .5f)
+        {
+            const float mossScale = .18f + .4f * size * size;
+            place(ScanPrefab("MossRock", standMossRocks[pick < .5f ? 0 : 1]), x,
+                height - .12f * mossScale, z, lean, yaw, mossScale);
             continue;
         }
         const int rock = standRocks[pick < .5f ? 0 : 1];
@@ -820,6 +1021,23 @@ bool LandscapeDriver::ConfigureTerrain()
                 grass->innerRadius = detailed * .5f;
                 grass->innerFadeWidth = detailed * .2f;
                 grass->proceduralLayerMask = 1 << Grass;
+                grass->MarkConfigurationDirty();
+            }
+            return;
+        }
+        if (layer.layerName == MeadowGrass::ForestFloorLayerName)
+        {
+            // Litter, herbs and ferns grow on the forest soil (the paint the
+            // trees stand on), out to the meadow grass's radius.
+            if (layer.viewDistance != radius + 10.f)
+            {
+                layer.viewDistance = radius + 10.f;
+                layer.MarkConfigurationDirty();
+            }
+            if (grass->proceduralLayerMask != (1 << ForestSoil) || grass->visibleRadius != radius)
+            {
+                grass->proceduralLayerMask = 1 << ForestSoil;
+                grass->visibleRadius = radius;
                 grass->MarkConfigurationDirty();
             }
             return;

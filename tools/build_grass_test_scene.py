@@ -43,7 +43,7 @@ ARCHIVE_MAGIC = 0x31544748524E5254
 LAYERS = [
     ("Assets/Materials/Terrain/PBR/sand.material", (.62, .55, .42)),
     ("Assets/Materials/Terrain/PBR/gravel.material", (.45, .43, .40)),
-    ("Assets/Materials/Terrain/PBR/grass.material", (.24, .32, .12)),
+    ("Assets/Materials/Terrain/PBR/grass.material", (.13, .18, .07)),
     ("Assets/Materials/Terrain/PBR/forest_soil.material", (.22, .15, .10)),
     ("Assets/Materials/Terrain/PBR/rock.material", (.40, .38, .34)),
     ("Assets/Materials/Terrain/PBR/snow.material", (.85, .88, .92)),
@@ -189,7 +189,14 @@ def build(cell_x, cell_z, output=OUTPUT, thinning=None, far=True):
     for item in source.find("objects"):
         name = item.get("name")
         if name in ("Late afternoon sun", "Atmosphere"):
-            objects.append(copy.deepcopy(item))
+            copied = copy.deepcopy(item)
+            # Test scenes are for A/B captures at fixed poses: no drifting
+            # cloud shadows (the landscape sun's cookie) over them.
+            for light in copied.iter(f"{{{NAMESPACE}}}Light"):
+                for key in ("Light.cookieTexture", "Light.cookieScrollX", "Light.cookieScrollY"):
+                    if key in light.attrib:
+                        light.set(key, "" if key.endswith("Texture") else "0")
+            objects.append(copied)
         elif name == VIEWER:
             explorer = copy.deepcopy(item)
             # Low near the cell's -z edge, looking along +z across the cell.

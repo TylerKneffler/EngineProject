@@ -1,5 +1,9 @@
 ﻿# Engine TODO
 
+- [ ] Foliage / world realism at 60 fps: see [foliage.md](foliage.md), section 3b "Open list" for what did not work, what is not done and the next steps (scanned assets, CPU pipeline, streams).
+- [ ] Investigate diagonal stripes on plant materials (broad generated leaves; shadow acne suspected): see
+  foliage.md section 3b "To investigate".
+
 ## Landscape look (target: large-scale vista with layered haze)
 
 Every landscape feature below must be usable from the editor, not only from

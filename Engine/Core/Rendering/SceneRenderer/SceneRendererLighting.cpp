@@ -281,6 +281,127 @@ void SceneRendererLighting::ComputeAmbientOcclusion(
     context->SetStructuredBuffer(47, AmbientOcclusionBuffer(renderer));
 }
 
+namespace
+{
+// Level-0 width of the GPU pyramid (matches OcclusionBuffer::Width) and its
+// level count: 256 x 144 down to 32 x 18 at 16:9. Coarser levels would make
+// single cells read too many pixels (each cell reads its footprint directly).
+constexpr uint32_t DepthPyramidWidth = 256u;
+constexpr uint32_t DepthPyramidLevels = 4u;
+constexpr uint32_t DepthPyramidHeaderFloats = 80u;
+
+glm::vec3 ViewForward(const glm::mat4& view)
+{
+    // Row 2 of the view matrix is the camera's +z axis in world space; the
+    // camera looks down -z.
+    return -glm::normalize(glm::vec3(view[0][2], view[1][2], view[2][2]));
+}
+
+glm::vec3 ViewPosition(const glm::mat4& view)
+{
+    return glm::vec3(glm::inverse(view)[3]);
+}
+}
+
+void SceneRendererLighting::BuildDepthPyramid(
+    SceneRenderer& renderer,
+    Engine::Graphics::IGraphicsContext* context,
+    const void* camera,
+    const glm::mat4& view,
+    const glm::mat4& viewProjection,
+    const glm::mat4& proj,
+    uint32_t viewportWidth,
+    uint32_t viewportHeight)
+{
+    renderer.m_depthPyramidValid = false;
+    if (!context || !renderer.m_sceneDepthCopied || !renderer.m_depthPyramidPipeline ||
+        !renderer.m_ambientOcclusionDepth || std::abs(proj[2][3]) < 1e-6f ||
+        viewportWidth < 16u || viewportHeight < 16u)
+        return;
+    auto* buffers = renderer.m_graphicsProvider
+        ? renderer.m_graphicsProvider->GetBufferFactory() : nullptr;
+    auto* contexts = renderer.m_graphicsProvider
+        ? renderer.m_graphicsProvider->GetContextFactory() : nullptr;
+    if (!buffers || !contexts)
+        return;
+    const uint32_t height0 = std::max(1u, static_cast<uint32_t>(std::lround(
+        float(DepthPyramidWidth) * float(viewportHeight) / float(viewportWidth))));
+    uint32_t cells = 0;
+    for (uint32_t level = 0; level < DepthPyramidLevels; ++level)
+        cells += std::max(1u, (DepthPyramidWidth + (1u << level) - 1u) >> level) *
+            std::max(1u, (height0 + (1u << level) - 1u) >> level);
+    const uint64_t bytes = uint64_t(DepthPyramidHeaderFloats + cells) * sizeof(float);
+    if (!renderer.m_depthPyramid || renderer.m_depthPyramidBytes < bytes)
+    {
+        // Zero-filled: zero levels reads as "no pyramid" until written.
+        const std::vector<uint8_t> zeros(size_t(bytes), 0u);
+        renderer.m_depthPyramid = buffers->CreateBuffer(
+            Engine::Graphics::IGraphicsBuffer::Usage::StorageBuffer,
+            Engine::Graphics::IGraphicsBuffer::AccessMode::Default, bytes, zeros.data(), sizeof(float));
+        renderer.m_depthPyramidBytes = renderer.m_depthPyramid ? bytes : 0;
+    }
+    if (!renderer.m_depthPyramid)
+        return;
+    struct Constants
+    {
+        glm::mat4 viewProjection;
+        glm::vec4 depth;
+        glm::uvec4 extent;
+        glm::uvec4 pyramid;
+    } constants{};
+    static_assert(sizeof(Constants) == 112, "DepthPyramid.hlsl constants");
+    constants.viewProjection = viewProjection;
+    // View depth w = B / (depth - A), as for ambient occlusion.
+    constants.depth = glm::vec4(proj[2][2] / proj[2][3], proj[3][2], 0.f, 0.f);
+    constants.extent = glm::uvec4(viewportWidth, viewportHeight,
+        Engine::Graphics::SceneDepthRowPitch(viewportWidth), DepthPyramidLevels);
+    constants.pyramid = glm::uvec4(DepthPyramidWidth, height0, cells, 0u);
+    if (!context->BeginComputePass())
+        return;
+    if (context->SetComputePipeline(renderer.m_depthPyramidPipeline.get()))
+    {
+        context->SetComputeReadBuffer(renderer.m_ambientOcclusionDepth.get(), 0);
+        context->SetComputeWriteBuffer(renderer.m_depthPyramid.get());
+        context->SetComputeConstants(&constants, sizeof(constants));
+        context->DispatchCompute((cells + 63u) / 64u);
+        context->StorageBarrier(renderer.m_depthPyramid.get());
+        renderer.m_depthPyramidValid = true;
+        renderer.m_depthPyramidCamera = camera;
+        renderer.m_depthPyramidPosition = ViewPosition(view);
+        renderer.m_depthPyramidForward = ViewForward(view);
+        renderer.m_depthPyramidViewportWidth = viewportWidth;
+        renderer.m_depthPyramidViewportHeight = viewportHeight;
+        renderer.m_depthPyramidFrameSerial = contexts->GetPreparedFrameSerial();
+    }
+    context->EndComputePass();
+}
+
+const Engine::Graphics::IGraphicsBuffer* SceneRendererLighting::DepthPyramidForCulling(
+    SceneRenderer& renderer,
+    const void* camera,
+    const glm::mat4& view,
+    uint32_t viewportWidth,
+    uint32_t viewportHeight)
+{
+    static const bool enabled = ReadEnvFlag("ENGINE_GPU_OCCLUSION", true);
+    auto* contexts = renderer.m_graphicsProvider
+        ? renderer.m_graphicsProvider->GetContextFactory() : nullptr;
+    if (!enabled || !contexts || !renderer.m_depthPyramidValid || !renderer.m_depthPyramid ||
+        renderer.m_depthPyramidCamera != camera ||
+        renderer.m_depthPyramidViewportWidth != viewportWidth ||
+        renderer.m_depthPyramidViewportHeight != viewportHeight ||
+        renderer.m_depthPyramidFrameSerial + 1u != contexts->GetPreparedFrameSerial())
+        return nullptr;
+    // The pyramid is last frame's view: valid while the camera has moved and
+    // turned little (a cut, teleport or fast turn falls back to the CPU
+    // terrain pyramid for one frame instead of hiding newly visible things).
+    const glm::vec3 position = ViewPosition(view);
+    if (glm::length(position - renderer.m_depthPyramidPosition) > 1.5f ||
+        glm::dot(ViewForward(view), renderer.m_depthPyramidForward) < 0.99f)
+        return nullptr;
+    return renderer.m_depthPyramid.get();
+}
+
 const Engine::Graphics::IGraphicsBuffer* SceneRendererLighting::SceneDepthForPixelShaders(
     SceneRenderer& renderer, Engine::Graphics::IGraphicsContext* context)
 {

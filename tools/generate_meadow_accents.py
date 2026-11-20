@@ -132,8 +132,8 @@ class Mesh:
 
 # --- shared parts ---------------------------------------------------------
 
-STEM_ROOT = (0.055, 0.14, 0.03)
-STEM_TOP = (0.20, 0.34, 0.075)
+STEM_ROOT = (0.035, 0.08, 0.022)
+STEM_TOP = (0.11, 0.18, 0.05)
 
 
 def stem_curve(base, yaw, height, lean, segments):
@@ -264,8 +264,8 @@ def scatter(rng, count, radius):
 # Each takes detail 0 (LOD0), 1 or 2 and must consume the same random values
 # at every detail level.
 
-LEAF_DARK = (0.07, 0.17, 0.04)
-LEAF_MID = (0.16, 0.31, 0.07)
+LEAF_DARK = (0.045, 0.10, 0.028)
+LEAF_MID = (0.09, 0.165, 0.045)
 
 
 def oxeye_daisy(detail):

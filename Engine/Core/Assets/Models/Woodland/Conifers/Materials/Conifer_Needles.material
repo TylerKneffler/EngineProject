@@ -18,5 +18,6 @@
     "alphaCoverageTransmission": 0.12,
     "alphaEdgeFade": 0.75,
     "reflectionStrength": 0.1,
-    "foliageColorVariation": 0.55
+    "foliageColorVariation": 0.55,
+    "foliageTranslucency": 0.8
 }

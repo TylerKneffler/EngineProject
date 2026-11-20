@@ -11,7 +11,7 @@
           <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
         </transform>
         <components>
-          <components:Mesh Mesh.file="Assets/Models/Woodland/Conifers/Meshes/Spruce_tall_01_LOD0_Trunk.mesh" Mesh.foliageWindStrength="0" Mesh.useLightProbes="false" Mesh.gpuLodSelection="true" Mesh.gpuLod1Distance="60" Mesh.gpuLod2Distance="216">
+          <components:Mesh Mesh.file="Assets/Models/Woodland/Conifers/Meshes/Spruce_tall_01_LOD0_Trunk.mesh" Mesh.foliageWindStrength="0.1" Mesh.foliageWindTree="true" Mesh.useLightProbes="false" Mesh.gpuLodSelection="true" Mesh.gpuLod1Distance="60" Mesh.gpuLod2Distance="216">
             <Mesh.lodMeshes>
               <item>Assets/Models/Woodland/Conifers/Meshes/Spruce_tall_01_LOD1_Trunk.mesh</item>
               <item>Assets/Models/Woodland/Conifers/Meshes/Spruce_tall_01_LOD2_Trunk.mesh</item>
@@ -35,7 +35,7 @@
           <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
         </transform>
         <components>
-          <components:Mesh Mesh.file="Assets/Models/Woodland/Conifers/Meshes/Spruce_tall_01_LOD0_Needles.mesh" Mesh.foliageWindStrength="0" Mesh.useLightProbes="false" Mesh.gpuLodSelection="true" Mesh.gpuLod1Distance="60" Mesh.gpuLod2Distance="216">
+          <components:Mesh Mesh.file="Assets/Models/Woodland/Conifers/Meshes/Spruce_tall_01_LOD0_Needles.mesh" Mesh.foliageWindStrength="0.1" Mesh.foliageWindTree="true" Mesh.useLightProbes="false" Mesh.gpuLodSelection="true" Mesh.gpuLod1Distance="60" Mesh.gpuLod2Distance="216">
             <Mesh.lodMeshes>
               <item>Assets/Models/Woodland/Conifers/Meshes/Spruce_tall_01_LOD1_Needles.mesh</item>
               <item>Assets/Models/Woodland/Conifers/Meshes/Spruce_tall_01_LOD2_Needles.mesh</item>

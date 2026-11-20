@@ -519,10 +519,10 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
             }
             ui.Separator();
             ui.Label("Output Tone Mapping");
-            const char* toneMappingOperators[] = { "None", "ACES", "Reinhard" };
+            const char* toneMappingOperators[] = { "None", "ACES", "Reinhard", "AgX" };
             int toneMapping = static_cast<int>(m_scene->settings.toneMapping);
             bool outputChanged = ui.Combo("Operator", &toneMapping,
-                toneMappingOperators, 3);
+                toneMappingOperators, 4);
             if (outputChanged)
                 m_scene->settings.toneMapping = static_cast<
                     Engine::Model::ToneMappingOperator>(toneMapping);

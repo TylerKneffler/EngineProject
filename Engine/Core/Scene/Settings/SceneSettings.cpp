@@ -282,7 +282,7 @@ void DeserializeSceneSettings(Engine::Model::SceneSettings& settings, const Engi
     if (const auto* toneMapping = FindField(value, "toneMapping"))
     {
         settings.toneMapping = static_cast<Engine::Model::ToneMappingOperator>(
-            std::clamp(toneMapping->AsInt(), 0, 2));
+            std::clamp(toneMapping->AsInt(), 0, 3));
     }
     if (const auto* outputExposure = FindField(value, "outputExposure"))
         settings.outputExposure = std::clamp(

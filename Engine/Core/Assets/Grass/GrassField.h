@@ -201,6 +201,12 @@ private:
         float distanceSquared = 0;
         float visibility = 0;
         float appearance = 0;
+        // Ground height at the tile centre (terrain-local). The tile object
+        // sits there and its placements are stored relative to it, so the
+        // tile origin that LOD selection and fades measure from is on the
+        // ground among its plants, not at height 0 (tens to hundreds of
+        // metres away on high terrain, which put every plant in LOD2).
+        float originHeight = 0;
     };
     struct BuildJob
     {

@@ -110,6 +110,24 @@ def mist_sheet(seed, size=1024):
     return rgb, alpha
 
 
+def cloud_shadow(seed=6613, size=1024):
+    """Tiling cloud-shadow cookie for the sun (Light.cookieTexture, linear):
+    1 in clear sky, ~0.3 under cloud, ~40 % cover with soft edges. Scrolled
+    with the wind by Light.cookieScrollX/Y (.md/foliage.md Phase 3)."""
+    noise = wa.fbm_2d((size, size), (6, 6), 5, seed, gain=0.55, tile=True)
+    noise = (noise - noise.min()) / max(noise.max() - noise.min(), 1e-6)
+    cloud = smoothstep(0.42, 0.6, noise)
+    return 1.0 - 0.7 * cloud
+
+
+def write_cloud_shadow():
+    """Writes Textures/Atmosphere/Cloud_Shadow.png (linear data, read as .r)."""
+    path = TEXTURES / "Cloud_Shadow.png"
+    shadow = cloud_shadow()
+    wa.write_png(path, shadow)
+    return path, shadow
+
+
 def write_sprite(name, rgb, alpha):
     png = SOURCES / f"{name}.png"
     wa.write_png(png, np.concatenate([wa.linear_to_srgb(rgb), alpha[..., None]], axis=2))
@@ -175,6 +193,8 @@ def mist_card_mesh(path: Path, size=40.0, height=2.0, rings=6, sides=24):
 
 
 def main():
+    path, shadow = write_cloud_shadow()
+    print(f"Cloud_Shadow: mean light {shadow.mean():.2f}, cover {(shadow < 0.65).mean():.0%}")
     sprites = {}
     for name, (fn, seed) in {"Cloud_Puff_A": (cloud_puff, 6101), "Cloud_Puff_B": (cloud_puff, 6203),
                              "Mist_Wisp_A": (mist_wisp, 6307), "Mist_Wisp_B": (mist_wisp, 6409),

@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cstring>
 #include <functional>
 #include <vector>
 
@@ -16,10 +17,21 @@ namespace Engine::Rendering
 using Scene = Engine::Scene::Scene;
 namespace
 {
+// Change detection only, so it mixes eight bytes per step: the byte-wise
+// FNV loop (one serial multiply per byte, ~90 bytes per visible item) was
+// ~5% of the simulation thread on the landscape.
 void HashOcclusionBytes(uint64_t& signature, const void* source, size_t byteCount)
 {
     const auto* bytes = static_cast<const uint8_t*>(source);
-    for (size_t index = 0; index < byteCount; ++index)
+    size_t index = 0;
+    for (; index + 8 <= byteCount; index += 8)
+    {
+        uint64_t word;
+        std::memcpy(&word, bytes + index, 8);
+        signature = (signature ^ word) * 0x9e3779b97f4a7c15ull;
+        signature ^= signature >> 29;
+    }
+    for (; index < byteCount; ++index)
     {
         signature ^= bytes[index];
         signature *= 1099511628211ull;

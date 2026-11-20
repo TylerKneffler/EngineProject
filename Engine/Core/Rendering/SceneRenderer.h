@@ -422,6 +422,18 @@ private:
     // there is none.
     std::unique_ptr<IPipelineState> m_ambientOcclusionPipeline;
     std::unique_ptr<IGraphicsBuffer> m_ambientOcclusionDepth;
+    // GPU occlusion pyramid built from the main view's depth copy after the
+    // AO pass (Shaders/InstanceCull/DepthPyramid.hlsl); the next frame's
+    // camera culling tests against it when the camera has barely moved
+    // (SceneRendererLighting::DepthPyramidForCulling).
+    std::unique_ptr<IPipelineState> m_depthPyramidPipeline;
+    std::unique_ptr<IGraphicsBuffer> m_depthPyramid;
+    uint64_t m_depthPyramidBytes = 0;
+    bool m_depthPyramidValid = false;
+    const void* m_depthPyramidCamera = nullptr;
+    glm::vec3 m_depthPyramidPosition{0.f}, m_depthPyramidForward{0.f, 0.f, -1.f};
+    uint32_t m_depthPyramidViewportWidth = 0, m_depthPyramidViewportHeight = 0;
+    uint64_t m_depthPyramidFrameSerial = 0;
     std::array<std::unique_ptr<IGraphicsBuffer>, 2> m_ambientOcclusionBuffers;
     std::unique_ptr<IGraphicsBuffer> m_ambientOcclusionOff;
     uint64_t m_ambientOcclusionDepthBytes = 0, m_ambientOcclusionBufferBytes = 0;

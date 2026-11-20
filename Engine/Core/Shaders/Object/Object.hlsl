@@ -222,6 +222,29 @@ float SampleCookie(uint index, float2 uv)
     return 1.0;
 }
 
+// Directional light cookie (Light::cookieTexture): projected along the light
+// over world space, scrolled by cookieRight.w / cookieUp.w (Light::
+// cookieScrollSpeed). Cloud shadows (.md/foliage.md Phase 3) are a tiling
+// cookie on the sun. Every lighting path that takes the sun calls this, so
+// terrain, grass, foliage and objects darken together.
+float DirectionalCookie(SceneLightData light, float3 worldPos)
+{
+    const uint index = (uint)light.photometry.x;
+    if (index == 0u) return 1.0;
+    const float2 uv = float2(dot(worldPos, light.cookieRight.xyz),
+        dot(worldPos, light.cookieUp.xyz)) / max(light.photometry.z, 0.001) + 0.5 +
+        float2(light.cookieRight.w, light.cookieUp.w);
+    return SampleCookie(index, uv);
+}
+
+// The sun's cookie for draws that light by objectData.bakedDirectional (the
+// terrain paths): w is the sun's light index + 1.
+float SunCookie(ObjectData objectData, float3 worldPos)
+{
+    return objectData.bakedDirectional.w > 0.5
+        ? DirectionalCookie(sceneLights[(uint)objectData.bakedDirectional.w - 1u], worldPos) : 1.0;
+}
+
 float SampleIes(uint index, float cosine)
 {
     float2 uv = float2(acos(clamp(cosine, -1.0, 1.0)) / 3.14159265, 0.5);
@@ -273,7 +296,10 @@ bool ResolveOcclusionMark(uint instanceId)
 // and straw tips, which keep their authored colour and flat shading.
 float GrassLeafiness(float3 color)
 {
-    return saturate((color.g - max(color.r, color.b)) * 8.0);
+    // Relative to the colour's brightness, so dark, realistic greens count as
+    // leafy as much as bright ones (an absolute difference halved it when the
+    // plant palette was darkened).
+    return saturate((color.g - max(color.r, color.b)) / max(color.g, 1.0e-4) * 3.0);
 }
 
 // Broad dry/lush meadow patches (11 m period), without per-clump jitter.
@@ -553,7 +579,10 @@ void VSMain(
     // Wind must not deform shadow casters; otherwise shadow maps redraw for
     // every shader-driven vertex change while the mesh is still static in the
     // light pass.
-    const bool useGrassWind = objectData.grassAnimation.y > 0.5 &&
+    // grassAnimation.y: 1 grass bend, 2 tree wind (Mesh::foliageWindTree).
+    const bool useTreeWind = objectData.grassAnimation.y > 1.5 &&
+        objectData.shadowCasterFade.z <= 0.5;
+    const bool useGrassWind = objectData.grassAnimation.y > 0.5 && !useTreeWind &&
         objectData.shadowCasterFade.z <= 0.5;
     float windHeight = max(0.0, pos.y) * upLength * placementScale;
 #ifdef GRASS_SURFACE_SHADING
@@ -563,6 +592,25 @@ void VSMain(
     if ((draw.drawFlags & 0x20000000u) != 0u)
         windHeight *= saturate(color.a);
 #endif
+    // Tree wind moves what is rasterized, but shading keeps the rest position:
+    // shadow casters stay static, and a swaying leaf or trunk compared
+    // against its own unmoved caster shadows itself in diagonal acne bands.
+    float3 shadingPosition = 0.0;
+    bool shadeAtRest = false;
+    [branch] if (useTreeWind)
+    {
+        shadingPosition = worldPosition.xyz;
+        shadeAtRest = true;
+        // Fades out from 60 to 100 m: far crowns are too small to show it and
+        // skip the work. Cooked leaf meshes carry their canopy shell in uv1.
+        const float3 treeRoot = mul(objectData.world, float4(grassRoot, 1)).xyz;
+        const float fade = 1.0 - smoothstep(60.0, 100.0,
+            distance(treeRoot, objectData.viewPositionAlphaCutoff.xyz));
+        const float leafShell = uv1.y > 3.5 ? saturate(uv1.x) : 0.0;
+        if (fade > 0.0)
+            ApplyTreeWind(objectData.grassAnimation.x, objectData.grassAnimation.z * fade,
+                treeRoot, worldUp / upLength, leafShell, worldPosition.xyz, worldNormal);
+    }
     if (useGrassWind)
         ApplyGrassWind(objectData.grassAnimation.x, objectData.grassAnimation.z,
             mul(objectData.world, float4(grassRoot, 1)).xyz, worldUp / upLength,
@@ -608,7 +656,7 @@ void VSMain(
     // aperture's stencil mask before the connected view is rendered.
     if ((draw.drawFlags & 0x80000000u) != 0u)
         oPos.z = 0.0; // reverse-Z far plane
-    oWorldPos = worldPosition.xyz;
+    oWorldPos = shadeAtRest ? shadingPosition : worldPosition.xyz;
     oNormal = worldNormal;
     oUv = objectData.spriteUvRect.xy + localUv.xy * objectData.spriteUvRect.zw;
     oUv1 = localUv.zw;
@@ -1432,6 +1480,70 @@ float3 ApplyFoliageVariation(float3 color, float3 worldPosition, float amount)
     return color * lerp(1.0, tint, amount) * value;
 }
 
+// Leaf lighting for masked foliage (Material::foliageTranslucency, carried in
+// subsurfaceTransmission.y; .md/foliage.md Phase 1). Meshes cooked by
+// tools/cook_foliage_lighting.py carry crown data in uv1: x = canopy
+// occlusion (1 on the crown's outer shell, ~0.2 deep inside), y = 4 + depth
+// into the crown. Real UVs never reach 3.5, so that marks a cooked mesh.
+// Cooked vertex normals are bent toward the crown surface and point outward,
+// so they are kept on both card faces instead of flipping with the face.
+struct FoliageLeaf
+{
+    bool on;
+    bool cooked;
+    float translucency;
+    float occlusion;
+};
+
+FoliageLeaf GetFoliageLeaf(ObjectData data, uint flags, float2 uv1)
+{
+    FoliageLeaf leaf;
+    leaf.translucency = data.subsurfaceTransmission.y;
+    leaf.on = leaf.translucency > 0.0 && (flags & 32u) != 0u;
+    leaf.cooked = leaf.on && uv1.y > 3.5;
+    leaf.occlusion = leaf.cooked ? saturate(uv1.x) : 1.0;
+    return leaf;
+}
+
+// The normal a cooked leaf offsets its shadow lookup along: the real card
+// (triangle) normal turned toward the light. Its shading normal is bent toward
+// the crown, which no longer says how edge-on the card is to the sun, so the
+// normal-offset bias built from it left grazing cards self-shadowing in
+// diagonal bands.
+float3 FoliageShadowNormal(FoliageLeaf leaf, float3 facet, float3 shadingNormal,
+    float3 lightDirection)
+{
+    const float facetLength = length(facet);
+    if (!leaf.cooked || facetLength <= 1.0e-12)
+        return shadingNormal;
+    const float3 card = facet / facetLength;
+    return dot(card, lightDirection) < 0.0 ? -card : card;
+}
+
+// Extra diffuse that wraps a leaf's lighting past the terminator: light
+// scatters inside a crown, so its shadow side is not a hard Lambert edge.
+// Added on top of the regular n.l term, so it is zero where n.l = 1.
+float FoliageWrapExtra(float nDotLRaw)
+{
+    return saturate((nDotLRaw + 0.5) / 1.5) - saturate(nDotLRaw);
+}
+
+// Sunlight through a thin leaf: a diffuse back term on the side away from
+// the light plus forward scattering when looking toward it. The light is
+// filtered by the leaf (brighter, yellower green). A leaf inside the crown's
+// shadow transmits little, and the canopy shell scales it so outer leaves
+// glow while the crown interior stays dark. radiance excludes 1 / PI.
+float3 FoliageTransmission(float3 albedo, float3 radiance, float3 n, float3 v,
+    float3 l, float shadow, FoliageLeaf leaf)
+{
+    const float back = saturate(-dot(n, l));
+    const float forward = pow(saturate(dot(-v, l)), 4.0);
+    const float shell = leaf.occlusion * leaf.occlusion;
+    const float3 filtered = albedo * float3(1.05, 1.2, 0.5);
+    return filtered * radiance * (leaf.translucency / PI) *
+        (0.35 * back + 0.9 * forward) * lerp(0.08, 1.0, shadow) * shell;
+}
+
 // Bumpy canopy over forested distant terrain (macro map alpha = cover):
 // tree-crown, clump and stand-scale height noise tilts the normal, and its
 // hollows darken (crown occlusion). Each octave fades out once a pixel spans
@@ -1564,6 +1676,34 @@ float FogShaftSunVisibility(ObjectData objectData, float3 position,
     if (cascadeCount > 3u && viewDistance > objectData.shadowCascadeSplits.z)
         cascade = 3u;
     return SampleDirectionalShadowCascade(objectData, cascade, position, 0);
+}
+
+// Sky visibility under a canopy (.md/foliage.md Phase 3). The sun's shadow
+// map already records where tree crowns are: five taps on a 3 m disk, 2.5 m
+// above the surface (so the surface itself and low plants do not count),
+// average to how open the canopy is, and ambient (sky) light scales with it.
+// Under a dense forest that is ~35 % of the open-sky ambient, which is most
+// of why forest interiors read darker than meadows. No new textures: it
+// reuses the cascades. The estimate sits a little downwind of the crowns
+// (shadows fall away from the sun) and fades out toward the shadow range's
+// end, where the cascades stop.
+float CanopySkyVisibility(ObjectData objectData, float3 worldPos)
+{
+    [branch] if (objectData.shadowCascadeData.x < 0.5 || objectData.shadowParams.z <= 0.0)
+        return 1.0;
+    const uint cascadeCount = clamp((uint)objectData.shadowCascadeData.x, 1u, 4u);
+    const float range = objectData.shadowCascadeSplits[cascadeCount - 1u];
+    const float viewDistance = distance(worldPos, objectData.viewPositionAlphaCutoff.xyz);
+    [branch] if (viewDistance >= range)
+        return 1.0;
+    const float3 center = worldPos + float3(0.0, 2.5, 0.0);
+    float lit = FogShaftSunVisibility(objectData, center, viewDistance, cascadeCount);
+    lit += FogShaftSunVisibility(objectData, center + float3(3.0, 0.0, 0.0), viewDistance, cascadeCount);
+    lit += FogShaftSunVisibility(objectData, center - float3(3.0, 0.0, 0.0), viewDistance, cascadeCount);
+    lit += FogShaftSunVisibility(objectData, center + float3(0.0, 0.0, 3.0), viewDistance, cascadeCount);
+    lit += FogShaftSunVisibility(objectData, center - float3(0.0, 0.0, 3.0), viewDistance, cascadeCount);
+    const float visibility = lerp(0.35, 1.0, smoothstep(0.0, 0.65, lit * 0.2));
+    return lerp(visibility, 1.0, saturate((viewDistance - 0.7 * range) / (0.3 * range)));
 }
 
 // Opacity-weighted sun visibility along the fogged view ray, for
@@ -2068,10 +2208,24 @@ float InstanceLodFadeWidth(float switchDistance)
     return clamp(switchDistance * 0.04, 0.5, 6.0);
 }
 
-// Interleaved gradient noise: a well-spread threshold per screen pixel.
-float ScreenDitherThreshold(float2 screenPosition)
+// A fixed threshold per screen pixel for complementary dissolves (LOD bands,
+// impostor view hand-over): an 8x8 Bayer matrix. Interleaved gradient noise
+// was used before; without TAA its diagonal line structure showed through as
+// dark bottom-left-to-top-right stripes across dissolving crowns (the forest
+// behind showing between them). The ordered matrix has no line structure: at
+// 50 % it is a fine checkerboard that reads as an even tone.
+// frame (ObjectData skinParams.z): 0 without TAA (a fixed pattern), 1..8 while
+// TAA jitters the view; every pixel's threshold then rotates by the golden
+// ratio each frame (the pattern itself stays put: shifting it moved it along
+// a diagonal, which survived in the history as faint hatching), so the
+// history resolves the dissolve to a smooth blend.
+float ScreenDitherThreshold(float2 screenPosition, float frame)
 {
-    return frac(52.9829189 * frac(dot(floor(screenPosition), float2(0.06711056, 0.00583715))));
+    const uint2 p = uint2(floor(screenPosition)) & 7u;
+    const uint x = p.x ^ p.y;
+    const uint bayer = ((x & 1u) << 5) | ((p.y & 1u) << 4) | ((x & 2u) << 2) |
+        ((p.y & 2u) << 1) | ((x & 4u) >> 1) | ((p.y & 4u) >> 2);
+    return frac((float(bayer) + 0.5) / 64.0 + frame * 0.61803399);
 }
 
 void ApplyGeometryFade(ObjectData data, float3 worldPosition, float2 screenPosition)
@@ -2081,7 +2235,7 @@ void ApplyGeometryFade(ObjectData data, float3 worldPosition, float2 screenPosit
     [branch] if (((uint)data.materialParams.w & 1024u) != 0u &&
         abs(g_billboardFade) < 1.0)
     {
-        const float threshold = ScreenDitherThreshold(screenPosition);
+        const float threshold = ScreenDitherThreshold(screenPosition, data.skinParams.z);
         clip(g_billboardFade >= 0.0
             ? g_billboardFade - threshold
             : threshold - (1.0 + g_billboardFade));
@@ -2138,7 +2292,7 @@ void ApplyGeometryFade(ObjectData data, float3 worldPosition, float2 screenPosit
         [branch] if (data.geometryFade.x <= 0.0 && data.geometryFade.y >= 1.0)
             return;
         float3 cell = floor(worldPosition * 96.0);
-        float threshold = perPlacement ? ScreenDitherThreshold(screenPosition) :
+        float threshold = perPlacement ? ScreenDitherThreshold(screenPosition, data.skinParams.z) :
             frac(sin(dot(cell, float3(12.9898, 78.233, 37.719))) * 43758.5453);
         clip(threshold - data.geometryFade.x);
         clip(data.geometryFade.y - threshold);
@@ -2296,6 +2450,7 @@ float4 PSFoliageMain(
     float3 worldPos : TEXCOORD2,
     float3 normal : NORMAL,
     float2 uv : TEXCOORD,
+    float2 uv1 : TEXCOORD1,
     float4 vertexColor : COLOR,
     nointerpolation uint objectIndex : TEXCOORD11,
     bool frontFace : SV_IsFrontFace) : SV_TARGET
@@ -2345,8 +2500,13 @@ float4 PSFoliageMain(
     // end, approximate average canopy shadowing without per-pixel shadow taps.
     const float shadingBlend = objectData.textureLodParams.w > 1.5
         ? TextureLodBlend(objectData, worldPos) : 0.0;
-    float3 n = normalize(frontFace ? normal : -normal);
-    float3 lit = objectData.ambientUnlit.rgb * ScreenAmbientOcclusion(worldPos);
+    const FoliageLeaf leaf = GetFoliageLeaf(objectData, flags, uv1);
+    float3 n = normalize(frontFace || leaf.cooked ? normal : -normal);
+    const float3 v = normalize(objectData.viewPositionAlphaCutoff.xyz - worldPos);
+    const float leafDirect = lerp(0.45, 1.0, leaf.occlusion);
+    float3 lit = objectData.ambientUnlit.rgb * ScreenAmbientOcclusion(worldPos) *
+        leaf.occlusion * CanopySkyVisibility(objectData, worldPos);
+    float3 transmitted = 0.0;
     [loop] for (uint i = 0u; i < draw.lightCount; ++i)
     {
         SceneLightData light = sceneLights[i];
@@ -2354,8 +2514,11 @@ float4 PSFoliageMain(
             (objectData.lightingChannels.x & asuint(light.attenuation.z)) == 0u)
             continue;
         float3 direction = normalize(light.positionRange.xyz);
-        float diffuse = saturate(dot(n, direction));
-        if (diffuse <= 0.0) continue;
+        const float nDotLRaw = dot(n, direction);
+        float diffuse = saturate(nDotLRaw);
+        if (leaf.on)
+            diffuse = (diffuse + FoliageWrapExtra(nDotLRaw)) * leafDirect;
+        if (diffuse <= 0.0 && !leaf.on) continue;
         float shadow = 1.0;
         [branch] if (objectData.shadowParams.z > 0.0)
         {
@@ -2364,13 +2527,18 @@ float4 PSFoliageMain(
             // Branching lets fully distant foliage skip the shadow lookup.
             shadow = shadingBlend >= 1.0 ? 0.75 :
                 EvaluateDirectionalShadow(objectData, light,
-                    worldPos, n, direction, 0);
+                    worldPos, FoliageShadowNormal(leaf, facet, n, direction), direction, 0);
             shadow = lerp(shadow, 0.75, shadingBlend);
         }
+        shadow *= DirectionalCookie(light, worldPos);
         lit += light.colorIntensity.rgb *
             (light.colorIntensity.w * diffuse * shadow * 0.31830988618);
+        [branch] if (leaf.on)
+            transmitted += FoliageTransmission(base.rgb,
+                light.colorIntensity.rgb * light.colorIntensity.w, n, v, direction,
+                shadow, leaf);
     }
-    return float4(base.rgb * lit + objectData.emissiveOcclusion.rgb,
+    return float4(base.rgb * lit + transmitted + objectData.emissiveOcclusion.rgb,
         base.a);
 }
 
@@ -2433,6 +2601,21 @@ float4 PSGrassMain(
     // Textured grass cards carry atlas UVs, not a root-to-tip blade layout.
     const float height = textured ? 1.0 : saturate(uv.y);
     const float leafy = GrassLeafiness(base.rgb);
+    // Fine mottling so blades and leaves are not flat vertex colour: two
+    // octaves of world-space value noise (7 cm and 1.8 cm), +-14 % value with
+    // a slight yellow/blue shift, fading out by 25 m where it is sub-pixel.
+    {
+        const float mottleFade = 1.0 - smoothstep(12.0, 25.0,
+            distance(worldPos, objectData.viewPositionAlphaCutoff.xyz));
+        [branch] if (mottleFade > 0.0 && !textured)
+        {
+            const float2 q = worldPos.xz + worldPos.y * float2(0.61, 0.37);
+            const float mottle = (CanopyValueNoise(q * 14.0) - 0.5) * 0.6 +
+                (CanopyValueNoise(q * 55.0 + 9.3) - 0.5) * 0.4;
+            base.rgb *= 1.0 + mottle * 0.28 * mottleFade *
+                float3(1.0 + 0.5 * mottle, 1.0, 1.0 - 0.5 * mottle);
+        }
+    }
     const float3 up = float3(0.0, 1.0, 0.0);
     float3 geometric = normalize(frontFace ? normal : -normal);
     float3 across = tangent.xyz - geometric * dot(tangent.xyz, geometric);
@@ -2450,7 +2633,8 @@ float4 PSGrassMain(
         lerp(0.6, 1.0, smoothstep(0.0, 0.8, height)), leafy);
     float directOcclusion = lerp(1.0, lerp(0.82, 1.0, height), leafy);
     float3 lit = objectData.ambientUnlit.rgb * ambientOcclusion *
-        ScreenAmbientOcclusion(worldPos) * (0.9 + 0.1 * saturate(n.y));
+        ScreenAmbientOcclusion(worldPos) * CanopySkyVisibility(objectData, worldPos) *
+        (0.9 + 0.1 * saturate(n.y));
     float3 transmitted = 0.0;
     float3 sheen = 0.0;
     [loop] for (uint i = 0u; i < draw.lightCount; ++i)
@@ -2476,6 +2660,7 @@ float4 PSGrassMain(
                     worldPos, geometric, direction, 0);
             shadow = lerp(shadow, 0.75, shadingBlend);
         }
+        shadow *= DirectionalCookie(light, worldPos);
         float3 radiance = light.colorIntensity.rgb *
             (light.colorIntensity.w * shadow * 0.31830988618);
         lit += radiance * (wrapped * directOcclusion);
@@ -2610,6 +2795,7 @@ float4 ObjectSurfacePS(
                 shadow = EvaluateDirectionalShadow(objectData, sun, worldPos,
                     surfaceNormal, objectData.bakedLightDirection.xyz, 0);
             }
+            shadow *= SunCookie(objectData, worldPos);
             base.rgb *= objectData.ambientUnlit.rgb * ScreenAmbientOcclusion(worldPos) +
                 objectData.bakedDirectional.rgb * (sunFacing * shadow * 0.31830988618);
             return float4(base.rgb + objectData.emissiveOcclusion.rgb, base.a);
@@ -2623,6 +2809,7 @@ float4 ObjectSurfacePS(
             shadow = EvaluateDirectionalShadow(objectData, sun, worldPos,
                 normalize(normal), objectData.bakedLightDirection.xyz, 0);
         }
+        shadow *= SunCookie(objectData, worldPos);
         const float sunShare = saturate(vertexColor.a);
         return float4(base.rgb * (1.0 - sunShare * (1.0 - shadow)) +
             objectData.emissiveOcclusion.rgb, 1.0);
@@ -2976,8 +3163,12 @@ float4 ObjectSurfacePS(
     if ((flags & 8192u) && objectData.ambientUnlit.w < 0.5)
     {
         float3 terrainNormal = terrainNormalForLighting;
+        // Canopy shade only on ground trees can stand on: on steep slopes the
+        // estimate's taps land inside the hillside (and a mountain's own
+        // shadow is not a canopy), which turned rock faces nearly black.
         float3 diffuseLight = objectData.ambientUnlit.rgb * terrainOcclusion *
-            ScreenAmbientOcclusion(worldPos);
+            ScreenAmbientOcclusion(worldPos) * lerp(1.0, CanopySkyVisibility(objectData, worldPos),
+                smoothstep(0.72, 0.9, terrainNormal.y));
         float3 specularLight = 0.0;
         float3 sunDirection = objectData.bakedLightDirection.xyz;
         float sunFacing = saturate(dot(terrainNormal, sunDirection));
@@ -2993,7 +3184,7 @@ float4 ObjectSurfacePS(
                     worldPos, terrainNormal, sunDirection, 0);
             }
             shadow *= terrainReliefShadow *
-                TerrainLongRangeShadow(objectData, worldPos);
+                TerrainLongRangeShadow(objectData, worldPos) * SunCookie(objectData, worldPos);
             diffuseLight += objectData.bakedDirectional.rgb *
                 (sunFacing * shadow / PI);
             // Near ring: one GGX sun lobe on the blended normal and roughness
@@ -3035,7 +3226,8 @@ float4 ObjectSurfacePS(
     float2 heightUv = SelectMaterialUv(objectData.textureUvSets1.y, uv, uv1,
         uvChannels0, uvChannels1, uvChannels2, uvChannels3, uvChannels4);
 
-    float3 geometryNormal = normalize(normal) * (frontFace ? 1.0 : -1.0);
+    const FoliageLeaf leaf = GetFoliageLeaf(objectData, flags, uv1);
+    float3 geometryNormal = normalize(normal) * (frontFace || leaf.cooked ? 1.0 : -1.0);
     bool hasTangents = dot(tangent.xyz, tangent.xyz) > 0.0001;
     float3 tangentDirection = hasTangents
         ? normalize(tangent.xyz - geometryNormal *
@@ -3168,6 +3360,17 @@ float4 ObjectSurfacePS(
     }
     if (flags & 16u)
         emissive *= emissiveMap.SampleBias(materialSampler, emissiveUv, textureBias).rgb;
+    // Cooked leaves: sky and ambient light reach the crown interior far less
+    // than its shell. Direct light keeps more of it (the shadow map already
+    // darkens the interior, but too coarsely for single leaves).
+    occlusion *= leaf.occlusion;
+    // Sky light under a tree canopy (cooked leaves carry their own crown
+    // occlusion instead).
+    // Not on steep terrain (taps would land inside the hillside).
+    if (!leaf.cooked)
+        occlusion *= lerp(1.0, CanopySkyVisibility(objectData, worldPos),
+            (flags & 2048u) ? smoothstep(0.72, 0.9, terrainNormalForLighting.y) : 1.0);
+    const float leafDirect = lerp(0.45, 1.0, leaf.occlusion);
     normal = (flags & 2048u) ? terrainNormalForLighting : geometryNormal;
     [branch] if ((flags & 4u) && triplanar && materialDetail > 0.0)
         normal = SampleTriplanarNormal(triplanarPos, triplanarDx, triplanarDy, triplanarWeights,
@@ -3203,6 +3406,12 @@ float4 ObjectSurfacePS(
 
     float3 n = normalize(normal);
     float3 v = viewDirection;
+    // Cooked leaf normals point out of the crown on both card faces, so on
+    // the crown's far side they can face away from the viewer; the GGX term
+    // then divides by n.v ~ 0 and sparkles white. Bend them just into the
+    // view hemisphere.
+    [branch] if (leaf.cooked && dot(n, v) < 0.1)
+        n = normalize(n + v * (0.1 - dot(n, v)));
     float3 f0 = blinnPhongSpecular
         ? saturate(objectData.blinnPhongSpecularShininess.rgb)
         : lerp(float3(0.04, 0.04, 0.04), base.rgb, metallic);
@@ -3281,9 +3490,7 @@ float4 ObjectSurfacePS(
         {
             float2 cookieUv;
             if (directional)
-                cookieUv = float2(dot(worldPos, light.cookieRight.xyz),
-                    dot(worldPos, light.cookieUp.xyz)) /
-                    max(light.photometry.z, 0.001) + 0.5;
+                attenuation *= DirectionalCookie(light, worldPos);
             else
             {
                 float3 fromLight = worldPos - light.positionRange.xyz;
@@ -3295,23 +3502,26 @@ float4 ObjectSurfacePS(
                     dot(fromLight, light.cookieUp.xyz)) /
                     max(2.0 * coneRadius * light.photometry.z, 0.0001) + 0.5;
                 if (any(cookieUv < 0.0) || any(cookieUv > 1.0)) attenuation = 0.0;
+                attenuation *= SampleCookie(cookieIndex, cookieUv);
             }
-            attenuation *= SampleCookie(cookieIndex, cookieUv);
         }
         if (iesIndex != 0u && light.params.y > 1.5)
             attenuation *= SampleIes(iesIndex, dot(-lightDirection,
                 normalize(light.directionCone.xyz)));
-        float nDotL = saturate(dot(n, lightDirection));
+        const float nDotLRaw = dot(n, lightDirection);
+        float nDotL = saturate(nDotLRaw);
         toonLight = max(toonLight, nDotL);
         float3 radiance = light.colorIntensity.rgb *
             light.colorIntensity.w * attenuation;
         float scatteringWeight = objectData.subsurfaceColorWeight.w * materialDetail;
         float centerShadow = 1.0;
         // Unlit-facing surfaces have no direct contribution to shadow unless
-        // subsurface scattering is active. Avoid filtering an unused shadow.
-        [branch] if (nDotL > 0.0 || scatteringWeight > 0.0)
+        // subsurface scattering or leaf transmission is active. Avoid
+        // filtering an unused shadow.
+        [branch] if (nDotL > 0.0 || scatteringWeight > 0.0 || leaf.on)
             centerShadow = EvaluateDirectionalShadow(
-                objectData, light, worldPos, n, lightDirection,
+                objectData, light, worldPos,
+                FoliageShadowNormal(leaf, facet, n, lightDirection), lightDirection,
                 (int)objectData.shadowParams.w);
         // Relief self-shadow for directional lights, near the camera only.
         [branch] if (directional && nDotL > 0.0 && parallaxShadowWeight > 0.0)
@@ -3331,7 +3541,12 @@ float4 ObjectSurfacePS(
         [branch] if (nDotL > 0.0)
         directLight += EvaluatePbrBrdf(
             base.rgb, metallic, roughness, f0, n, v, lightDirection, materialDetail) *
-            radiance * centerShadow * nDotL;
+            radiance * centerShadow * nDotL * leafDirect;
+        [branch] if (leaf.on)
+            directLight += radiance * centerShadow * base.rgb *
+                ((1.0 - metallic) / PI * FoliageWrapExtra(nDotLRaw) * leafDirect) +
+                FoliageTransmission(base.rgb, radiance, n, v, lightDirection,
+                    centerShadow, leaf);
         if (scatteringWeight > 0.0)
         {
             float3 radius = max(objectData.subsurfaceRadiusThickness.rgb, 0.0);

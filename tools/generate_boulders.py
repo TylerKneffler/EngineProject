@@ -66,6 +66,10 @@ class Rock:
     edge: float = 0.035      # smooth-min width of the cuts (smaller = crisper)
     bottom: float = 0.55     # flat base plane offset
     lod_distances: tuple = (35.0, 100.0)
+    # Shear toward +z growing with height (share of the z radius at the top):
+    # the upper part leans out over the base, an overhang a height field
+    # cannot have. Placed facing downhill (LandscapeDriver GenerateCliffs).
+    overhang: float = 0.0
 
 
 ROCKS = [
@@ -80,6 +84,27 @@ ROCKS = [
     Rock("Cliff_block_02", 5609, (6.0, 9.0, 3.6), 6, (0.6, 0.9), 0.045, 0.8, 0.08, (4, 3, 2),
          vertical_cuts=8, strata=0.055, boxiness=4.5, edge=0.025, bottom=0.7,
          lod_distances=(70.0, 220.0)),
+    # A crag whose top leans ~3 m out over its foot.
+    Rock("Cliff_overhang_01", 5711, (4.5, 6.0, 3.0), 5, (0.62, 0.9), 0.05, 0.9, 0.08, (4, 3, 2),
+         vertical_cuts=6, strata=0.06, boxiness=3.6, edge=0.025, bottom=0.7,
+         lod_distances=(60.0, 180.0), overhang=1.1),
+    # Crags: rock-face pieces 25-40 m across, strongly bedded and fractured,
+    # packed and stacked on steep slopes (LandscapeDriver GenerateCliffs) so
+    # they overlap into a broken wall. A height field alone gives smooth
+    # steep ground; these are what make it read as a mountain's rocky edge.
+    Rock("Crag_face_01", 5917, (14.0, 11.0, 6.0), 7, (0.55, 0.88), 0.06, 0.8, 0.12, (5, 4, 2),
+         vertical_cuts=11, strata=0.11, boxiness=4.5, edge=0.02, bottom=0.75,
+         lod_distances=(140.0, 400.0), overhang=0.35),
+    Rock("Crag_face_02", 6029, (19.0, 15.0, 7.5), 8, (0.55, 0.88), 0.065, 0.7, 0.12, (5, 4, 2),
+         vertical_cuts=13, strata=0.12, boxiness=5.0, edge=0.02, bottom=0.75,
+         lod_distances=(160.0, 450.0), overhang=0.2),
+    Rock("Crag_spire_01", 6131, (6.5, 15.0, 5.5), 6, (0.6, 0.9), 0.07, 0.9, 0.1, (5, 4, 2),
+         vertical_cuts=8, strata=0.1, boxiness=3.6, edge=0.02, bottom=0.8,
+         lod_distances=(140.0, 400.0), overhang=0.25),
+    # A wide, low shelf with stepped strata that juts from the slope.
+    Rock("Outcrop_ledge_01", 5813, (5.5, 2.2, 3.4), 6, (0.6, 0.9), 0.045, 1.0, 0.1, (4, 3, 2),
+         vertical_cuts=5, strata=0.09, boxiness=3.4, edge=0.025, bottom=0.6,
+         lod_distances=(60.0, 180.0), overhang=0.55),
 ]
 
 
@@ -168,7 +193,11 @@ class Shape:
 
     def points(self, directions):
         r = self.radius(directions)
-        return directions * r[:, None] * self.size[None, :]
+        points = directions * r[:, None] * self.size[None, :]
+        if self.rock.overhang > 0:
+            rise = np.clip(points[:, 1] / self.size[1], 0.0, 1.5)
+            points[:, 2] += self.rock.overhang * self.size[2] * rise ** 1.5
+        return points
 
 
 # --- mesh -----------------------------------------------------------------------

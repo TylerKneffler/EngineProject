@@ -3,9 +3,9 @@
   "baseColor": [0.86, 0.84, 0.77],
   "useVertexColors": false,
   "ambientColor": [
-    0.2,
-    0.23,
-    0.13
+    0.1,
+    0.115,
+    0.065
   ],
   "specularColor": [
     1,
@@ -102,5 +102,6 @@
   "normalTexture": "Assets/Models/Woodland/Oaks/Textures/Texture 4 4.png",
   "occlusionTexture": "Assets/Models/Woodland/Oaks/Textures/Texture 5 5.png",
   "shader": "",
-  "foliageColorVariation": 0.7
+  "foliageColorVariation": 0.7,
+  "foliageTranslucency": 1
 }

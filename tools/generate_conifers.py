@@ -60,6 +60,12 @@ NEEDLE_CUTOFF = 0.42
 IMPOSTOR_CUTOFF = 0.4
 # Material.foliageColorVariation: crown/stand hue and value spread (Object.hlsl).
 FOLIAGE_VARIATION = 0.55
+# Material.foliageTranslucency: sunlight through backlit needles, plus crown
+# normals/occlusion baked by tools/cook_foliage_lighting.py (run from main()).
+NEEDLE_TRANSLUCENCY = 0.8
+# Mesh.foliageWindStrength with Mesh.foliageWindTree (trunk sway, branch sway,
+# needle flutter; Shaders/GrassWind.hlsli ApplyTreeWind).
+TREE_WIND = 0.1
 UP = np.array([0.0, 1.0, 0.0])
 
 # Needle atlas cells (2 x 2 of 512 px): spray kinds.
@@ -759,7 +765,7 @@ def write_materials():
         baseColorTexture=tex("Conifer_Needles_Color.ktx2"), useVertexColors=True,
         alphaMode="Mask", alphaCutoff=NEEDLE_CUTOFF, doubleSided=True, roughness=0.78,
         alphaCoverageTransmission=0.12, alphaEdgeFade=0.75, reflectionStrength=0.1,
-        foliageColorVariation=FOLIAGE_VARIATION)
+        foliageColorVariation=FOLIAGE_VARIATION, foliageTranslucency=NEEDLE_TRANSLUCENCY)
     bark = wa.write_material(
         MATERIALS / "Conifer_Bark.material",
         baseColorTexture=tex("Conifer_Bark_Color.ktx2"), normalTexture=tex("Conifer_Bark_Normal.ktx2"),
@@ -836,13 +842,19 @@ def main():
             dict(name="Trunk", mesh=lod_paths[0][0],
                  lods=[lod_paths[1][0], lod_paths[2][0], wa.asset_path(impostor_mesh)],
                  material=wa.engine_path(bark_material),
-                 lod_materials=["", "", wa.engine_path(impostor_material)], lod1=lod1, lod2=lod2),
+                 lod_materials=["", "", wa.engine_path(impostor_material)], lod1=lod1, lod2=lod2,
+                 wind=TREE_WIND, tree_wind=True),
             dict(name="Needles", mesh=lod_paths[0][1], lods=[lod_paths[1][1], lod_paths[2][1]],
-                 material=wa.engine_path(needles_material), lod1=lod1, lod2=lod2),
+                 material=wa.engine_path(needles_material), lod1=lod1, lod2=lod2,
+                 wind=TREE_WIND, tree_wind=True),
         ])
         print(f"{sp.name}: {sp.height:.0f} m, {len(tree.branches)} branches; "
               f"triangles LOD0/1/2/impostor = {'/'.join(str(c) for c in counts)}; "
               f"card area LOD1/LOD0 = {areas[1] / max(areas[0], 1e-6):.2f}")
+    # Crown normals and canopy occlusion for the freshly written needle meshes
+    # (cooked meshes are skipped, so species not regenerated keep theirs).
+    import cook_foliage_lighting
+    cook_foliage_lighting.cook_prefabs([PREFABS])
 
 
 if __name__ == "__main__":

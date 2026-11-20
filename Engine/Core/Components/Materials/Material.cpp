@@ -37,6 +37,7 @@ Material::Material()
     RegisterField("impostorBillboard", impostorBillboard, "Alpha");
     RegisterField("triplanarScale", triplanarScale, "PBR");
     RegisterField("foliageColorVariation", foliageColorVariation, "Alpha");
+    RegisterField("foliageTranslucency", foliageTranslucency, "Alpha");
     RegisterField("doubleSided", doubleSided, "Surface");
     RegisterField("shaderUsesTime", shaderUsesTime, "Surface");
     RegisterField("overrideTextureLod", overrideTextureLod, "Texture LOD");
@@ -261,6 +262,8 @@ bool Material::LoadFromFile(const std::string& path)
         triplanarScale = root.Has("triplanarScale") ? std::max(0.f, root["triplanarScale"].AsFloat()) : 0.f;
         foliageColorVariation = root.Has("foliageColorVariation")
             ? std::clamp(root["foliageColorVariation"].AsFloat(), 0.f, 1.f) : 0.f;
+        foliageTranslucency = root.Has("foliageTranslucency")
+            ? std::clamp(root["foliageTranslucency"].AsFloat(), 0.f, 2.f) : 0.f;
         if (root.Has("overrideTextureLod")) overrideTextureLod = root["overrideTextureLod"].AsBool();
         if (root.Has("textureLodEnabled")) textureLod.enabled = root["textureLodEnabled"].AsBool();
         if (root.Has("textureLodNearDistance")) textureLod.nearDistance = root["textureLodNearDistance"].AsFloat();
@@ -373,6 +376,8 @@ bool Material::SaveToFile(const std::string& path) const
     if (triplanarScale > 0.f) root.Set("triplanarScale", JsonValue(triplanarScale));
     if (foliageColorVariation > 0.f)
         root.Set("foliageColorVariation", JsonValue(foliageColorVariation));
+    if (foliageTranslucency > 0.f)
+        root.Set("foliageTranslucency", JsonValue(foliageTranslucency));
     root.Set("overrideTextureLod", JsonValue(overrideTextureLod));
     root.Set("textureLodEnabled", JsonValue(textureLod.enabled));
     root.Set("textureLodNearDistance", JsonValue(textureLod.nearDistance));

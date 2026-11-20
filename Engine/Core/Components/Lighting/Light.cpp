@@ -22,6 +22,8 @@ Light::Light()
     RegisterField("cookieTexture", cookieTexture);
     RegisterField("iesProfileTexture", iesProfileTexture);
     RegisterField("cookieScale", cookieScale);
+    RegisterField("cookieScrollX", cookieScrollX);
+    RegisterField("cookieScrollY", cookieScrollY);
     RegisterField("baked", baked);
     RegisterField("castsShadows", castsShadows, "Shadows");
     RegisterField("shadowStrength", shadowStrength, "Shadows");
@@ -95,8 +97,13 @@ bool Light::DrawProperties(Engine::Core::IInspectorUi& ui)
         std::snprintf(cookie, sizeof(cookie), "%s", cookieTexture.c_str());
         if (ui.InputText("Cookie texture", cookie, sizeof(cookie)))
         { cookieTexture = cookie; changed = true; }
-        changed = ui.DragFloat("Cookie scale", &cookieScale, 0.01f,
-            0.001f, 1000.f) || changed;
+        // World metres per cookie repeat (cloud shadows want kilometres).
+        changed = ui.DragFloat("Cookie scale", &cookieScale, 1.f,
+            0.001f, 20000.f) || changed;
+        changed = ui.DragFloat("Cookie scroll X (m/s)", &cookieScrollX, 0.1f,
+            -100.f, 100.f) || changed;
+        changed = ui.DragFloat("Cookie scroll Y (m/s)", &cookieScrollY, 0.1f,
+            -100.f, 100.f) || changed;
     }
 
     int selectedMode = baked ? 1 : 0;

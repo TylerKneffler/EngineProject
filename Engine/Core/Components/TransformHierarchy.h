@@ -45,6 +45,9 @@ private:
     std::vector<size_t> m_firstChild,m_nextSibling,m_order;
     std::vector<std::pair<size_t,size_t>> m_levels;
     uint64_t m_generation=0;
+    // Process-unique stamp of the current topology, written into every member
+    // Transform (Transform::m_hierarchyStamp).
+    uint64_t m_membershipStamp=0;
     bool m_topologyValid=false;
 };
 }

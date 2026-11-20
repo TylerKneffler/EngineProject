@@ -1,0 +1,18 @@
+{
+    "version": 1,
+    "baseColor": [
+        0.74,
+        0.84,
+        0.98
+    ],
+    "specularModel": "MetallicRoughness",
+    "metallic": 0,
+    "roughness": 1.0,
+    "castsShadows": true,
+    "doubleSided": true,
+    "normalScale": 1.0,
+    "baseColorTexture": "Assets/Models/Woodland/Scans/Textures/Cliff_Scan_01_diff.jpg",
+    "useVertexColors": false,
+    "normalTexture": "Assets/Models/Woodland/Scans/Textures/Cliff_Scan_01_nor_gl.jpg",
+    "metallicRoughnessTexture": "Assets/Models/Woodland/Scans/Textures/Cliff_Scan_01_rough.jpg"
+}

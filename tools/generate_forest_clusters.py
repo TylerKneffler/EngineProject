@@ -61,6 +61,17 @@ CLUSTERS = [
                                                    "Fir_subalpine_01": 2}),
     ("ForestCluster_Conifer_02", 8409, "conifer", {"Spruce_tall_01": 2, "Pine_scots_01": 3,
                                                    "Fir_subalpine_01": 1}),
+    # More stands so far forests do not repeat two oak tiles (.md/foliage.md
+    # Phase 1c). They use the oak variants the near forest leaves out (the
+    # landscape draws eight species to save CPU); at cluster distance (>2 km)
+    # the swap is invisible.
+    ("ForestCluster_Oak_03", 8521, "oak", {"Big_oak_tree_003": 2, "Large_oak_tree_003": 2,
+                                           "Medium_oak_tree_003": 2, "Small_oak_tree_002": 1}),
+    ("ForestCluster_Oak_04", 8633, "oak", {"Big_oak_tree_004": 2, "Large_oak_tree_004": 2,
+                                           "Medium_oak_tree_001": 1, "Small_oak_tree_003": 1,
+                                           "Sapling_oak_tree_002": 1}),
+    ("ForestCluster_Conifer_03", 8747, "conifer", {"Pine_scots_01": 2, "Spruce_young_01": 2,
+                                                   "Fir_subalpine_01": 2}),
 ]
 MATCH = {"oak": "/Oaks/", "conifer": "/Conifers/"}
 # Same as the source trees' leaf materials, so clusters match them.

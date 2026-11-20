@@ -146,6 +146,16 @@ namespace Engine::Rendering
             data.cookieRight = glm::vec4(glm::normalize(glm::vec3(world[0])), 0.f);
             data.cookieUp = glm::vec4(glm::normalize(glm::vec3(world[1])), 0.f);
             data.photometry.z = std::max(light->cookieScale, 0.001f);
+            // Directional cookie scroll as a texture-space offset (w lanes;
+            // Object.hlsl DirectionalCookie), wrapped to keep precision.
+            if (type == Engine::Components::Light::Type::Directional &&
+                (light->cookieScrollX != 0.f || light->cookieScrollY != 0.f))
+            {
+                const double time = scene.GetElapsedTime();
+                const double scale = std::max(light->cookieScale, 0.001f);
+                data.cookieRight.w = static_cast<float>(std::fmod(time * light->cookieScrollX / scale, 1.0));
+                data.cookieUp.w = static_cast<float>(std::fmod(time * light->cookieScrollY / scale, 1.0));
+            }
             const std::string stableKey = stableObjectPath(candidate);
             candidates.push_back({ data, light, stableKey,
                 importanceScore(data, *light) });

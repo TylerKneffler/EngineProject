@@ -280,6 +280,7 @@ void MeshLodProfile::PrepareGraphicsResources(IGraphicsProvider* provider)
             auto alternate = std::make_unique<Mesh>();
             alternate->LoadFromFile(path);
             alternate->foliageWindStrength = mesh->foliageWindStrength;
+            alternate->foliageWindTree = mesh->foliageWindTree;
             alternate->deformationBoundsPadding = mesh->deformationBoundsPadding;
             alternate->PrepareGraphicsResources(provider);
             if (!alternate->IsReady() ||

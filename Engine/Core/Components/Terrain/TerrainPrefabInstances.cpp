@@ -221,9 +221,14 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
         now<m_prefabInstances->nextCheck && !sourceProbeActive) return;
     // Grass and other mesh-only layers keep their existing renderer without
     // paying for a placement signature when they have no prefab runtime.
-    bool hasPrefabs=false;
-    for (const auto& placement:placements)
-        if (Engine::Serialization::PrefabLod::IsPrefab(placement.asset)) { hasPrefabs=true; break; }
+    // Only a placement change can change the answer.
+    bool hasPrefabs=m_hasPrefabPlacements;
+    if (changed)
+    {
+        hasPrefabs=false;
+        for (const auto& placement:placements)
+            if (Engine::Serialization::PrefabLod::IsPrefab(placement.asset)) { hasPrefabs=true; break; }
+    }
     m_prefabCheckedRevision=GetConfigurationRevision(); m_prefabCheckedData=placements.data();
     m_prefabCheckedCount=placements.size(); m_hasPrefabPlacements=hasPrefabs;
     if (!hasPrefabs && !m_prefabInstances) return;
@@ -269,7 +274,12 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
     const bool refreshProfiles=!m_prefabProfilesValid || m_prefabProfileCacheOwner!=Owner ||
         m_prefabProfilePlacementSignature!=signature ||
         m_prefabProfileComponents!=profileComponents ||
-        now-m_prefabProfilesChecked>=std::chrono::milliseconds(100);
+        // Component and placement changes refresh at once (above); the timer
+        // only catches prefab LOD chains edited on disk, whose file stamps are
+        // re-read once a second anyway (PrefabLod::LevelCount, source probe).
+        // At 100 ms this rebuilt every forest/props layer's LOD profiles
+        // (string-heavy) several times a second, ~10 % of the scene thread.
+        now-m_prefabProfilesChecked>=std::chrono::seconds(1);
     if (refreshProfiles)
     {
         std::map<std::string,ObjectLods> profiles;
@@ -917,6 +927,7 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
                         instances->maximumLod=std::max(instances->maximumLod,int(meshes.size())-1);
                         mesh->useBoundsForShadowCulling=true;
                         mesh->foliageWindStrength=original->foliageWindStrength;
+                        mesh->foliageWindTree=original->foliageWindTree;
                         const auto& sourcePath=original->GetFilePath();
                         mesh->treeTimingGeometry=sourcePath.find("/Woodland/Oaks/")!=std::string::npos ||
                             sourcePath.find("\\Woodland\\Oaks\\")!=std::string::npos;

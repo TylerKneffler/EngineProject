@@ -636,6 +636,12 @@ void GrassField::BeginBuild(Tile tile, int lod, uint64_t signature)
         if(found!=m_placementTiles->end())
         {
             const auto& prepared=found->second;
+            // Prepared transforms are tile-relative in x/z only; the tile
+            // object also sits at its ground height (TileState::originHeight).
+            const float span=std::max(1.f,tileSize);
+            const auto tileState=m_tiles.find(tile);
+            const float originHeight=tileState!=m_tiles.end() ? tileState->second.originHeight
+                : SampleHeight((tile.first+.5f)*span,(tile.second+.5f)*span);
             std::vector<glm::mat4> transforms;
             std::vector<uint64_t> placementIds;
             size_t placementCount=0;
@@ -656,6 +662,7 @@ void GrassField::BeginBuild(Tile tile, int lod, uint64_t signature)
                         transform[2][row] = record.transform.rows[row].z;
                         transform[3][row] = record.transform.rows[row].w;
                     }
+                    transform[3][1] -= originHeight;
                     transforms.push_back(transform);
                     placementIds.push_back(m_cachedLayer->placements[record.index].id);
                     ++job.speciesCounts[species];
@@ -663,7 +670,8 @@ void GrassField::BeginBuild(Tile tile, int lod, uint64_t signature)
             job.instanceLayer.SetPlacements(std::move(transforms),
                 std::move(placementIds));
             const float radius=glm::length(glm::max(glm::abs(m_sourceMinimum),glm::abs(m_sourceMaximum)))*prepared.maximumScale;
-            job.minimum=prepared.minimum-glm::vec3(radius); job.maximum=prepared.maximum+glm::vec3(radius);
+            const glm::vec3 origin(0.f,originHeight,0.f);
+            job.minimum=prepared.minimum-origin-glm::vec3(radius); job.maximum=prepared.maximum-origin+glm::vec3(radius);
         }
         job.totalCount=uint32_t(job.instanceLayer.Size()); job.placement=job.totalCount; job.prepared=true;
         uint64_t identity=HashOffset;
@@ -852,6 +860,11 @@ bool GrassField::AdvanceBuild(Clock::time_point deadline)
     auto& job = *m_build;
     const auto generated = Clock::now();
     const float span = std::max(1.f, tileSize);
+    // Placements are relative to the tile object, which sits at the tile's
+    // ground height (TileState::originHeight).
+    const auto tileState = m_tiles.find(job.tile);
+    const float originHeight = tileState != m_tiles.end() ? tileState->second.originHeight
+        : SampleHeight((job.tile.first + .5f) * span, (job.tile.second + .5f) * span);
     while (!job.prepared && job.placement < job.placements.size())
     {
         const size_t placementIndex = job.placement++;
@@ -861,7 +874,7 @@ bool GrassField::AdvanceBuild(Clock::time_point deadline)
             : glm::translate(glm::mat4(1.f), p.position) *
                 glm::mat4_cast(Engine::Components::TerrainObjectLayer::SurfaceRotation(p.normal, p.yawDegrees)) *
                 glm::scale(glm::mat4(1.f), glm::vec3(p.scale));
-        transform[3] -= glm::vec4(job.tile.first * span, 0.f, job.tile.second * span, 0.f);
+        transform[3] -= glm::vec4(job.tile.first * span, originHeight, job.tile.second * span, 0.f);
         uint64_t placementId = HashOffset;
         HashBytes(placementId, &seed, sizeof(seed));
         HashBytes(placementId, &job.tile.first, sizeof(job.tile.first));
@@ -1043,7 +1056,8 @@ bool GrassField::Refresh()
                 tile.object->runtimeOnly = true;
                 tile.object->enabled = false;
                 scene.SetParentLocal(tile.object, Owner);
-                tile.object->transform.position = {x * span, 0, z * span};
+                tile.originHeight = SampleHeight((x + .5f) * span, (z + .5f) * span);
+                tile.object->transform.position = {x * span, tile.originHeight, z * span};
                 tile.mesh = tile.object->AddComponent<Engine::Components::Mesh>();
                 tile.mesh->useBoundsForShadowCulling = true;
                 tile.mesh->usesGrassShadowBudget = true;

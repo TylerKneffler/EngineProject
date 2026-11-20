@@ -63,13 +63,16 @@ class Mesh(accents.Mesh):
 
 # --- grass ----------------------------------------------------------------
 
-BLADE_ROOT = (0.045, 0.12, 0.025)
-BLADE_MID = (0.13, 0.28, 0.055)
-BLADE_TIP = (0.25, 0.40, 0.10)
-DRY_TIP = (0.50, 0.44, 0.22)
-SWARD_ROOT = (0.05, 0.13, 0.03)
-SWARD_MID = (0.11, 0.25, 0.05)
-SWARD_TIP = (0.20, 0.36, 0.08)
+# Linear albedo near measured grass (~0.06/0.12/0.03 mid-blade): the earlier
+# palette was about twice as bright and far more saturated, which read as
+# cartoon lime (.md/foliage.md, "cartoonish" report).
+BLADE_ROOT = (0.03, 0.065, 0.018)
+BLADE_MID = (0.065, 0.125, 0.032)
+BLADE_TIP = (0.115, 0.175, 0.055)
+DRY_TIP = (0.30, 0.26, 0.13)
+SWARD_ROOT = (0.03, 0.07, 0.02)
+SWARD_MID = (0.058, 0.115, 0.03)
+SWARD_TIP = (0.10, 0.16, 0.048)
 
 
 def smoothstep(edge0, edge1, x):
@@ -165,7 +168,7 @@ GRASS_COLUMNS = (3, 3, 2)
 GRASS_FOLD = 0.22  # midrib depth as a share of the blade width
 
 
-def tussock(mesh, rng, center, blades, height, crown, detail, dry_share=0.1, width=0.017):
+def tussock(mesh, rng, center, blades, height, crown, detail, dry_share=0.22, width=0.017):
     """Blades from one crown: inner ones upright, outer ones leaning out."""
     for _ in range(blades):
         radius, angle = math.sqrt(rng.random()), rng.random() * 2.0 * math.pi
@@ -258,33 +261,61 @@ def field_tussock(detail):
 
 # --- shrubs ---------------------------------------------------------------
 
-def leaf_card(mesh, base, outward, up_hint, length_, width, color_base, color_tip, fold=0.0):
-    """An ovate leaf: base, two shoulders and a tip (two triangles, four with
-    a fold). outward points from base to tip."""
+# Leaf outlines per detail level. Read up close, a 4-vertex diamond is the
+# "square" look of a low-poly bush, so detail 0 is an ovate leaf with rounded
+# sides and a drawn-out tip (10 triangles), detail 1 a coarser one (6) and
+# detail 2 the diamond (2). Each entry: midrib points (t along the leaf,
+# base and tip implied), margin points (t, half width as a share of the leaf
+# width), and one half's triangles over s<i> (midrib incl. base s0 and tip)
+# and e<i> (margin), wound base -> margin -> forward for the left half.
+LEAF_SHAPES = (
+    ((0.3, 0.58), ((0.16, 0.34), (0.42, 0.5), (0.72, 0.34)),
+     (("s0", "e0", "s1"), ("e0", "e1", "s1"), ("s1", "e1", "s2"), ("e1", "e2", "s2"), ("s2", "e2", "s3"))),
+    ((0.45,), ((0.28, 0.44), (0.62, 0.38)),
+     (("s0", "e0", "s1"), ("e0", "e1", "s1"), ("s1", "e1", "s2"))),
+    ((), ((0.42, 0.5),),
+     (("s0", "e0", "s1"),)),
+)
+
+
+def leaf_card(mesh, base, outward, up_hint, length_, width, color_base, color_tip, fold=0.0,
+              detail=2, curl=0.0):
+    """An ovate leaf from base to tip along `outward`. The midrib is raised by
+    `fold` (a share of the width) so the halves form a shallow V, and the leaf
+    curls back along its normal by `curl` (a share of its length) toward the
+    tip. u runs across the leaf (0 left margin, 0.5 midrib, 1 right margin)."""
     side = perpendicular(outward, cross(up_hint, outward) if abs(
         sum(a * b for a, b in zip(up_hint, outward))) < 0.98 else (1.0, 0.0, 0.0))
     normal = norm(cross(side, outward))
-    shoulder = add(base, mul(outward, 0.42 * length_))
-    lift = mul(normal, fold * width)
-    a = mesh.vertex(base, color_base, 0.5)
-    b = mesh.vertex(add(shoulder, mul(side, -0.5 * width)), mix(color_base, color_tip, 0.45), 0.0)
-    c = mesh.vertex(add(shoulder, mul(side, 0.5 * width)), mix(color_base, color_tip, 0.45), 1.0)
-    d = mesh.vertex(add(base, mul(outward, length_)), color_tip, 0.5)
-    if fold > 0.0:
-        m = mesh.vertex(add(shoulder, lift), mix(color_base, color_tip, 0.5), 0.5)
-        for x, y in ((a, b), (b, d), (d, c), (c, a)):
-            mesh.triangle(x, y, m)
-    else:
-        mesh.triangle(a, b, d)
-        mesh.triangle(a, d, c)
+    midrib, margin, half_triangles = LEAF_SHAPES[detail]
+
+    def point(t, across, raise_):
+        return add(add(base, mul(outward, t * length_)),
+                   add(mul(side, across * width), mul(normal, raise_ * width - curl * length_ * t * t)))
+
+    spine_t = (0.0,) + tuple(midrib) + (1.0,)
+    spine = [mesh.vertex(point(t, 0.0, fold if 0.0 < t < 1.0 else 0.0),
+                         mix(color_base, color_tip, t), 0.5) for t in spine_t]
+    for sign, u in ((-1.0, 0.0), (1.0, 1.0)):
+        edge = [mesh.vertex(point(t, sign * half, 0.0), mix(color_base, color_tip, t), u)
+                for t, half in margin]
+        pick = lambda name: (spine if name[0] == "s" else edge)[int(name[1:])]
+        for x, y, z in half_triangles:
+            # The right half mirrors the left, so its winding flips.
+            mesh.triangle(pick(x), pick(y), pick(z)) if sign < 0 else                 mesh.triangle(pick(x), pick(z), pick(y))
 
 
 TWIG = (0.20, 0.15, 0.09)
 TWIG_DARK = (0.10, 0.08, 0.05)
 SHRUB_LEAF_SHADE = (0.025, 0.075, 0.02)
-SHRUB_LEAF_SUN = (0.09, 0.22, 0.05)
-LEAF_KEEP = (1.0, 0.46, 0.2)
-LEAF_GROW = (1.0, 1.45, 2.15)
+SHRUB_LEAF_SUN = (0.065, 0.14, 0.04)
+# Coarse LODs keep fewer, larger leaves; coverage (keep x grow^2) stays ~0.9.
+# Few, very large leaves (20 % at 2.15x) read as big squares from 13 m on.
+LEAF_KEEP = (1.0, 0.6, 0.35)
+LEAF_GROW = (1.0, 1.25, 1.6)
+# Midrib fold and back-curl of leaf cards (shares of width / length).
+LEAF_FOLD = 0.12
+LEAF_CURL = 0.18
 
 
 def branch(mesh, base, tip, width, segments, color_base=TWIG_DARK, color_tip=TWIG):
@@ -372,7 +403,8 @@ def bush_leaves(mesh, rng, count, lobes, detail, size, shade=SHRUB_LEAF_SHADE, s
         tip_color = mix(shade, sun, min(1.0, light * (0.85 + 0.3 * tint)))
         grow = LEAF_GROW[detail]
         leaf_card(mesh, base, outward, UP, size * 1.4 * grow * (0.8 + 0.4 * scale),
-                  size * grow * (0.8 + 0.4 * scale), base_color, tip_color, fold=0.25 if detail == 0 else 0.0)
+                  size * grow * (0.8 + 0.4 * scale), base_color, tip_color, fold=LEAF_FOLD,
+                  detail=detail, curl=LEAF_CURL)
 
 
 BARK = (0.15, 0.115, 0.075)
@@ -382,7 +414,9 @@ BARK_DARK = (0.07, 0.055, 0.04)
 BRANCH_DRAWN = (3, 2, 1)
 BRANCH_SIDES = (5, 4, 3, 3)
 BRANCH_SEGMENTS = (3, 3, 2, 1)
-CORE_SCALE = (0.35, 0.6, 0.8)
+# No core at LOD0: up close its smooth shell reads as an egg inside the bush,
+# and the full leaf count hides the interior anyway.
+CORE_SCALE = (0.0, 0.45, 0.65)
 # Share of the way to the envelope each level's branch grows; twigs reach it.
 BRANCH_REACH = (0.55, 0.6, 0.75, 1.0)
 
@@ -468,14 +502,15 @@ def grow_bush(mesh, rng, detail, envelope, stems, stem_width, leaf_size, leaves_
     mid = tuple(sum(tip[0][axis] for tip in tips) / count for axis in range(3))
     spread = tuple(math.sqrt(sum((tip[0][axis] - mid[axis]) ** 2 for tip in tips) / count) for axis in range(3))
     k = CORE_SCALE[detail]
-    crown_core(mesh, mid, spread[0] * 1.5 * k, spread[1] * 1.5 * k, spread[2] * 1.5 * k, detail, 1.7)
+    if k > 0.0:
+        crown_core(mesh, mid, spread[0] * 1.5 * k, spread[1] * 1.5 * k, spread[2] * 1.5 * k, detail, 1.7)
 
     grow_size = LEAF_GROW[detail]
     for tip, heading in tips:
-        cluster = [tuple(rng.random() for _ in range(5)) for _ in range(leaves_per_twig)]
+        cluster = [tuple(rng.random() for _ in range(7)) for _ in range(leaves_per_twig)]
         normal = norm(((tip[0] - center[0]) / rx, (tip[1] - center[1]) / ry, (tip[2] - center[2]) / rz))
         light = 0.3 + 0.7 * (0.5 + 0.5 * normal[1])
-        for keep, azimuth, rise, scale, tint in cluster:
+        for keep, azimuth, rise, scale, tint, roll, shade_jitter in cluster:
             if keep >= LEAF_KEEP[detail]:
                 continue
             # Leaf on a short stalk around the twig tip, facing out and up.
@@ -484,8 +519,16 @@ def grow_bush(mesh, rng, detail, envelope, stems, stem_width, leaf_size, leaves_
             base = add(tip, mul(stalk, leaf_size * 0.35))
             outward = norm(add(stalk, mul(normal, 0.5)))
             size = leaf_size * grow_size * (0.8 + 0.4 * scale)
-            leaf_card(mesh, base, outward, UP, size * 1.5, size,
-                      mix(shade, sun, light * 0.6), mix(shade, sun, min(1.0, light * (0.85 + 0.3 * tint))))
+            # Leaves turn about their own axis at random; with one up hint for
+            # all of them they lie in parallel tiers.
+            up_hint = norm(add(UP, (math.cos(roll * 6.283) * 1.2, 0.0, math.sin(roll * 6.283) * 1.2)))
+            # Per-leaf value jitter (+-25 %) and an occasional yellowing leaf.
+            value = 0.75 + 0.5 * shade_jitter
+            leaf_sun = mix(sun, (0.2, 0.22, 0.05), 0.5) if tint > 0.94 else sun
+            leaf_card(mesh, base, outward, up_hint, size * 1.5, size,
+                      mul(mix(shade, leaf_sun, light * 0.6), value),
+                      mul(mix(shade, leaf_sun, min(1.0, light * (0.85 + 0.3 * tint))), value),
+                      fold=LEAF_FOLD, detail=detail, curl=LEAF_CURL)
 
 
 def meadow_bush(detail):
@@ -579,14 +622,15 @@ def meadow_shrub(detail):
         tip_color = mix(SHRUB_LEAF_SHADE, SHRUB_LEAF_SUN, min(1.0, sun * (0.85 + 0.3 * tint)))
         grow = LEAF_GROW[detail]
         leaf_card(mesh, base, outward, UP, 0.11 * grow * (0.8 + 0.4 * size),
-                  0.078 * grow * (0.8 + 0.4 * size), base_color, tip_color)
+                  0.078 * grow * (0.8 + 0.4 * size), base_color, tip_color,
+                  fold=LEAF_FOLD, detail=detail, curl=LEAF_CURL)
     return mesh
 
 
 BRAMBLE_CANE = (0.26, 0.11, 0.08)
 BRAMBLE_CANE_TIP = (0.22, 0.20, 0.08)
 BRAMBLE_LEAF_BASE = (0.03, 0.085, 0.025)
-BRAMBLE_LEAF_TIP = (0.08, 0.19, 0.04)
+BRAMBLE_LEAF_TIP = (0.06, 0.13, 0.035)
 
 
 def meadow_bramble(detail):
@@ -623,7 +667,8 @@ def meadow_bramble(detail):
                     continue
                 leaflet = norm(add(outward, mul(horizontal(yaw + offset + turn * 3.0), 0.5)))
                 leaf_card(mesh, base, leaflet, UP, 0.095 * scale * grow * (0.8 + 0.4 * size),
-                          0.065 * scale * grow * (0.8 + 0.4 * size), BRAMBLE_LEAF_BASE, BRAMBLE_LEAF_TIP)
+                          0.065 * scale * grow * (0.8 + 0.4 * size), BRAMBLE_LEAF_BASE, BRAMBLE_LEAF_TIP,
+                          fold=LEAF_FOLD, detail=detail, curl=LEAF_CURL)
         if flower < 0.5 and detail < 2:
             top = points[segments // 2]
             accents.petal_ring(mesh, add(top, (0.0, 0.012, 0.0)), UP, 5, 0.003, 0.010, 0.009, 0.3,
@@ -633,19 +678,32 @@ def meadow_bramble(detail):
     return mesh
 
 
-FERN_RACHIS = (0.10, 0.20, 0.05)
-FERN_PINNA_BASE = (0.05, 0.14, 0.03)
-FERN_PINNA_TIP = (0.17, 0.35, 0.07)
+FERN_RACHIS = (0.07, 0.12, 0.04)
+FERN_PINNA_BASE = (0.035, 0.085, 0.025)
+FERN_PINNA_TIP = (0.09, 0.17, 0.045)
 
 
 def meadow_fern(detail):
     """Bracken: arching fronds with paired pinnae."""
-    rng = random.Random(6301)
+    return fern(detail)
+
+
+def forest_fern(detail):
+    """Woodland fern (~1 m): more, longer fronds in the darker green of
+    shaded ferns."""
+    return fern(detail, seed=6351, fronds=10, yaw_step=0.628 * 1.07, scale=1.45,
+                rachis=(0.07, 0.15, 0.04), base=(0.025, 0.085, 0.022), tip=(0.07, 0.19, 0.05))
+
+
+def fern(detail, seed=6301, fronds=7, yaw_step=0.9, scale=1.0,
+         rachis=FERN_RACHIS, base=FERN_PINNA_BASE, tip=FERN_PINNA_TIP):
+    """Arching fronds with paired pinnae. Defaults are meadow bracken."""
+    rng = random.Random(seed)
     mesh = Mesh(wind_response=0.85)
-    for k in range(7):
-        yaw = k * 0.9 + rng.random() * 0.6
-        length_, rise, droop = 0.62 + 0.25 * rng.random(), math.radians(52 + 22 * rng.random()), \
-            0.5 + 0.4 * rng.random()
+    for k in range(fronds):
+        yaw = k * yaw_step + rng.random() * 0.6
+        length_ = (0.62 + 0.25 * rng.random()) * scale
+        rise, droop = math.radians(52 + 22 * rng.random()), 0.5 + 0.4 * rng.random()
         segments = (8, 5, 3)[detail]
         direction = horizontal(yaw)
         side = horizontal(yaw + math.pi * 0.5)
@@ -658,13 +716,14 @@ def meadow_fern(detail):
             heading = norm(add(heading, mul(add(direction, mul(UP, -1.0)), droop / segments)))
             position = add(position, mul(heading, length_ / segments))
         mesh.ribbon(points, [side] * len(points), [0.006 * (1 - 0.6 * i / segments) for i in range(segments + 1)],
-                    [FERN_RACHIS] * len(points))
+                    [rachis] * len(points))
         if detail == 2:
             # One broad tapering blade stands in for the pinnae.
             normals = [norm(cross(side, t)) for t in tangents]
-            widths = [0.24 * math.sin(math.pi * min(1.0, (0.15 + i / segments) * 0.9)) for i in range(segments + 1)]
+            widths = [0.24 * scale * math.sin(math.pi * min(1.0, (0.15 + i / segments) * 0.9))
+                      for i in range(segments + 1)]
             mesh.ribbon([add(p, mul(n, 0.004)) for p, n in zip(points, normals)], [side] * len(points),
-                        widths, [mix(FERN_PINNA_BASE, FERN_PINNA_TIP, i / segments) for i in range(segments + 1)],
+                        widths, [mix(base, tip, i / segments) for i in range(segments + 1)],
                         columns=3, fold=-0.15, normals=normals)
             continue
         pairs = (12, 7)[detail]
@@ -676,15 +735,203 @@ def meadow_fern(detail):
             high = min(segments, low + 1)
             at = add(mul(points[low], 1 - frac), mul(points[high], frac))
             tangent = norm(add(mul(tangents[low], 1 - frac), mul(tangents[high], frac)))
-            span = 0.19 * math.sin(math.pi * min(1.0, 0.25 + 0.85 * (1.0 - t))) * (1.0 if detail == 0 else 1.15)
+            span = 0.19 * scale * math.sin(math.pi * min(1.0, 0.25 + 0.85 * (1.0 - t))) *                 (1.0 if detail == 0 else 1.15)
             for sign in (-1.0, 1.0):
                 out = norm(add(mul(side, sign), mul(tangent, 0.35)))
                 out = norm(add(out, (0.0, -0.18, 0.0)))
                 pinna = [add(at, mul(out, span * i / 2)) for i in range(3)]
                 across = perpendicular(out, tangent)
-                mesh.ribbon(pinna, [across] * 3, [0.055 * (1.0 if detail == 0 else 1.6),
-                                                  0.045 * (1.0 if detail == 0 else 1.6), 0.0],
-                            [FERN_PINNA_BASE, mix(FERN_PINNA_BASE, FERN_PINNA_TIP, 0.6), FERN_PINNA_TIP])
+                mesh.ribbon(pinna, [across] * 3, [scale * 0.055 * (1.0 if detail == 0 else 1.6),
+                                                  scale * 0.045 * (1.0 if detail == 0 else 1.6), 0.0],
+                            [base, mix(base, tip, 0.6), tip])
+    return mesh
+
+
+# --- forest floor (.md/foliage.md Phase 4) ----------------------------------
+# Plants for the forest-soil paint under trees: fallen-leaf litter, broadleaf
+# herbs, oak seedlings and dead grass. A GrassField on the forest floor layer
+# (Scripts/Grass/MeadowGrass ApplyForestFloor) scatters them.
+
+LITTER_COLORS = ((0.16, 0.08, 0.025), (0.26, 0.14, 0.04), (0.33, 0.24, 0.07),
+                 (0.08, 0.05, 0.02), (0.20, 0.17, 0.06), (0.12, 0.10, 0.04))
+HERB_SHADE = (0.022, 0.07, 0.02)
+HERB_SUN = (0.055, 0.125, 0.038)
+HERB_STALK = (0.06, 0.12, 0.03)
+LITTER_KEEP = (1.0, 0.55, 0.3)
+LITTER_GROW = (1.0, 1.35, 1.8)
+
+
+def forest_litter(detail):
+    """A patch of fallen leaves (~0.9 m) lying on the soil, with a twig or two.
+    Static: no wind response."""
+    rng = random.Random(7101)
+    mesh = Mesh(wind_response=0.0)
+    for _ in range(46):
+        radius, angle = math.sqrt(rng.random()) * 0.45, rng.random() * 2.0 * math.pi
+        keep, yaw, tilt, size, shade, kind = (rng.random() for _ in range(6))
+        if keep >= LITTER_KEEP[detail]:
+            continue
+        base = (radius * math.cos(angle), 0.004 + 0.012 * shade, radius * math.sin(angle))
+        # Lying flat, a few propped up on their neighbours.
+        outward = norm(add(horizontal(yaw * 6.283), (0.0, 0.25 * tilt * tilt, 0.0)))
+        color = LITTER_COLORS[int(kind * len(LITTER_COLORS)) % len(LITTER_COLORS)]
+        value = 0.8 + 0.4 * shade
+        length_ = (0.06 + 0.05 * size) * LITTER_GROW[detail]
+        leaf_card(mesh, base, outward, UP, length_, length_ * 0.62, mul(color, value * 0.85),
+                  mul(color, value), fold=0.06, detail=detail, curl=-0.12)
+    if detail < 2:
+        for k in range(2):
+            yaw = rng.random() * 6.283
+            start = (rng.uniform(-0.3, 0.3), 0.008, rng.uniform(-0.3, 0.3))
+            branch(mesh, start, add(start, mul(horizontal(yaw), 0.25 + 0.2 * rng.random())), 0.008, 2)
+    return mesh
+
+
+def forest_herb(detail):
+    """Broadleaf woodland herb (~0.45 m): a rosette of broad ovate leaves on
+    long stalks, the glossy undergrowth of the RDR2 forest floor."""
+    rng = random.Random(7201)
+    mesh = Mesh(wind_response=0.7)
+    count = 9
+    for k in range(count):
+        keep, reach, rise, size, tint, roll = (rng.random() for _ in range(6))
+        if keep >= (1.0, 0.75, 0.55)[detail]:
+            continue
+        yaw = k * 2.39996 + rng.random() * 0.4  # golden angle
+        direction = horizontal(yaw)
+        # Petiole: up and out, longer for the outer leaves.
+        stalk = (0.14 + 0.2 * reach)
+        lift = math.radians(48 + 28 * rise)
+        tip = add(mul(direction, stalk * math.cos(lift)), (0.0, stalk * math.sin(lift), 0.0))
+        if detail < 2:
+            branch(mesh, (0.0, 0.0, 0.0), tip, 0.006, 2, color_base=HERB_STALK, color_tip=HERB_STALK)
+        # Blade: outward and gently down, broad (heart-ish via the wide ovate).
+        outward = norm(add(direction, (0.0, 0.15 - 0.35 * rise, 0.0)))
+        grow = (1.0, 1.1, 1.25)[detail]
+        length_ = (0.17 + 0.1 * size) * grow
+        up_hint = norm(add(UP, (math.cos(roll * 6.283) * 0.3, 0.0, math.sin(roll * 6.283) * 0.3)))
+        light = 0.55 + 0.45 * rise
+        value = 0.85 + 0.3 * tint
+        leaf_card(mesh, tip, outward, up_hint, length_, length_ * 0.78,
+                  mul(mix(HERB_SHADE, HERB_SUN, light * 0.5), value),
+                  mul(mix(HERB_SHADE, HERB_SUN, light), value),
+                  fold=0.14, detail=detail, curl=0.22)
+    return mesh
+
+
+def forest_seedling(detail):
+    """Oak seedling (~0.45 m): a thin stem with alternate leaves."""
+    rng = random.Random(7301)
+    mesh = Mesh(wind_response=0.5)
+    height = 0.42
+    segments = (4, 3, 2)[detail]
+    points = [(0.012 * math.sin(i * 1.7), height * i / segments, 0.012 * math.cos(i * 1.3))
+              for i in range(segments + 1)]
+    tangents = [norm(sub(points[min(i + 1, segments)], points[max(i - 1, 0)])) for i in range(segments + 1)]
+    if detail < 2:
+        tube(mesh, points, tangents, [0.006 * (1 - 0.6 * i / segments) for i in range(segments + 1)],
+             [mix(BARK_DARK, BARK, i / segments) for i in range(segments + 1)], sides=3)
+    else:
+        branch(mesh, points[0], points[-1], 0.008, 2)
+    for k in range(8):
+        keep, size, tint = rng.random(), rng.random(), rng.random()
+        if keep >= (1.0, 0.7, 0.45)[detail]:
+            continue
+        t = 0.3 + 0.7 * k / 7
+        at = (points[0][0], height * t, points[0][2])
+        yaw = k * 2.6 + rng.random() * 0.5
+        outward = norm(add(horizontal(yaw), (0.0, 0.25, 0.0)))
+        length_ = (0.07 + 0.04 * size) * (1.0, 1.15, 1.35)[detail]
+        leaf_card(mesh, at, outward, UP, length_, length_ * 0.55, mul(SHRUB_LEAF_SHADE, 1.3),
+                  mul(mix(SHRUB_LEAF_SUN, (0.12, 0.2, 0.05), tint), 1.0),
+                  fold=LEAF_FOLD, detail=detail, curl=LEAF_CURL)
+    return mesh
+
+
+def dry_grass_clump(detail):
+    """Dead and dry grass tussocks (~0.6 m) for clearings and forest edges."""
+    mesh = Mesh()
+    rng = random.Random(7401)
+    for index in range(2):
+        center = (rng.uniform(-0.12, 0.12), 0.0, rng.uniform(-0.12, 0.12))
+        tussock(mesh, random.Random(7410 + index), center, 30, 0.5 + 0.15 * rng.random(), 0.08,
+                detail, dry_share=0.85, width=0.014)
+    return mesh
+
+
+IVY_SHADE = (0.018, 0.05, 0.02)
+IVY_SUN = (0.045, 0.105, 0.035)
+IVY_STEM = (0.07, 0.06, 0.035)
+
+
+def forest_branch(detail):
+    """A fallen branch (~1.6 m) with side twigs, lying on the forest floor.
+    Static: no wind response."""
+    rng = random.Random(7501)
+    mesh = Mesh(wind_response=0.0)
+    segments = (6, 4, 2)[detail]
+    length_ = 1.6
+    points, tangents = [], []
+    position, heading = (-0.8, 0.035, 0.0), norm((1.0, 0.02, 0.1))
+    bends = [(rng.uniform(-0.25, 0.25), rng.uniform(-0.04, 0.05)) for _ in range(6)]
+    for i in range(segments + 1):
+        points.append(position)
+        tangents.append(heading)
+        bend = bends[min(5, i * 6 // (segments + 1))]
+        heading = norm(add(heading, (0.0, bend[1], bend[0])))
+        position = add(position, mul(heading, length_ / segments))
+        position = (position[0], max(0.02, position[1]), position[2])
+    tube(mesh, points, tangents, [0.028 * (1 - 0.65 * i / segments) for i in range(segments + 1)],
+         [mix(BARK_DARK, BARK, 0.3 + 0.5 * i / segments) for i in range(segments + 1)],
+         sides=(5, 4, 3)[detail])
+    # Side twigs (fine ones only up close).
+    for k in range(7):
+        along, side_sign, rise, reach, keep = rng.random(), rng.random(), rng.random(), rng.random(), rng.random()
+        if keep >= (1.0, 0.6, 0.0)[detail]:
+            continue
+        index = min(segments, int(round((0.25 + 0.7 * along) * segments)))
+        at = points[index]
+        side = norm(cross(tangents[index], UP))
+        direction = norm(add(add(mul(tangents[index], 0.5), mul(side, 1.0 if side_sign < 0.5 else -1.0)),
+                             (0.0, 0.15 + 0.5 * rise, 0.0)))
+        branch(mesh, at, add(at, mul(direction, 0.22 + 0.3 * reach)), 0.012, 2)
+    return mesh
+
+
+def ground_ivy(detail):
+    """A patch of ivy creeping over the forest floor (~1.1 m): runners along
+    the ground with dark lobed leaves on short stalks."""
+    rng = random.Random(7601)
+    mesh = Mesh(wind_response=0.35)
+    for runner in range(6):
+        yaw = runner * 1.05 + rng.random() * 0.5
+        length_ = 0.4 + 0.3 * rng.random()
+        segments = (5, 3, 2)[detail]
+        points = []
+        position = (0.0, 0.012, 0.0)
+        for i in range(segments + 1):
+            points.append(position)
+            yaw += (rng.random() - 0.5) * 0.9
+            step = mul(horizontal(yaw), length_ / segments)
+            position = (position[0] + step[0], 0.012 + 0.02 * rng.random(), position[2] + step[2])
+        if detail < 2:
+            side = [horizontal(yaw + math.pi * 0.5)] * len(points)
+            mesh.ribbon(points, side, [0.006] * len(points), [IVY_STEM] * len(points))
+        leaves = 9
+        for k in range(leaves):
+            along, turn, size, tint, keep = (rng.random() for _ in range(5))
+            if keep >= (1.0, 0.6, 0.35)[detail]:
+                continue
+            t = along * segments
+            low = min(segments - 1, int(t))
+            at = add(mul(points[low], 1 - (t - low)), mul(points[low + 1], t - low))
+            outward = norm(add(horizontal(turn * 6.283), (0.0, 0.35, 0.0)))
+            base = add(at, (0.0, 0.02 + 0.03 * size, 0.0))
+            length_leaf = (0.05 + 0.035 * size) * (1.0, 1.25, 1.6)[detail]
+            value = 0.8 + 0.4 * tint
+            leaf_card(mesh, base, outward, UP, length_leaf, length_leaf * 0.95,
+                      mul(IVY_SHADE, value), mul(mix(IVY_SHADE, IVY_SUN, 0.4 + 0.6 * tint), value),
+                      fold=0.08, detail=detail, curl=0.1)
     return mesh
 
 
@@ -698,6 +945,13 @@ PLANTS = {
     "meadow_bush_tall": (meadow_bush_tall, "upright oval bush ~1.7 m with a solid crown core"),
     "tall_grass_clump": (tall_grass_clump, "dense tall grass clump ~1.1 m with seed stalks"),
     "far_grass_tuft": (far_grass_tuft, "cheap wide-bladed tuft for the far grass ring"),
+    "forest_litter": (forest_litter, "fallen-leaf litter patch for the forest floor"),
+    "forest_herb": (forest_herb, "broadleaf woodland herb rosette ~0.45 m"),
+    "forest_fern": (forest_fern, "woodland fern ~1 m, darker than bracken"),
+    "forest_seedling": (forest_seedling, "oak seedling ~0.45 m"),
+    "dry_grass_clump": (dry_grass_clump, "dead and dry grass tussocks ~0.6 m"),
+    "forest_branch": (forest_branch, "fallen branch ~1.6 m with side twigs"),
+    "ground_ivy": (ground_ivy, "ivy patch creeping over the forest floor ~1.1 m"),
 }
 
 

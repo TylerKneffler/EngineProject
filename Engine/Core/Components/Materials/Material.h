@@ -125,6 +125,14 @@ public:
     PROPERTY(Inspector, EditAnywhere, Category = "Material | Alpha", Range = "0.0, 1.0")
     float foliageColorVariation { 0.f };
 
+    // Masked leaves (.md/foliage.md Phase 1): sunlight passing through thin
+    // leaves when the sun is behind them, and a soft wrapped diffuse. On
+    // meshes cooked by tools/cook_foliage_lighting.py the baked crown normal
+    // is kept on both card faces and uv1 adds canopy occlusion, so a crown
+    // shades as one volume. 0 disables; 1 suits a typical broadleaf.
+    PROPERTY(Inspector, EditAnywhere, Category = "Material | Alpha", Range = "0.0, 2.0")
+    float foliageTranslucency { 0.f };
+
     PROPERTY(Inspector, EditAnywhere, Category = "Material | PBR", Range = "0.0, 4.0")
     float     environmentDiffuseStrength { 1.f };
 

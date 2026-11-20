@@ -51,6 +51,12 @@ public:
     // Authored foliage shares the grass wind field, with restrained tree motion.
     PROPERTY(Inspector,EditAnywhere,Category="Foliage",ClampMin="0",ClampMax="1")
     float foliageWindStrength = 0.f;
+    // Tree wind instead of the grass bend (.md/foliage.md Phase 5): a slow,
+    // gust-driven trunk bend growing with height squared, branch sway growing
+    // with distance from the trunk, and leaf flutter on cooked leaf meshes.
+    // Strength 0.1 bends a 20 m tree ~0.4 m at the crown in a gust.
+    PROPERTY(Inspector,EditAnywhere,Category="Foliage")
+    bool foliageWindTree = false;
     // Transient per-object caster range; zero means unrestricted. Evaluated on
     // the GPU so distance changes do not toggle whole instance tiles.
     float runtimeShadowDistance = 0.f;

@@ -79,6 +79,26 @@ public:
         const glm::mat4& proj,
         uint32_t viewportWidth,
         uint32_t viewportHeight);
+    // Builds the GPU occlusion pyramid from the depth the AO pass just copied
+    // (call right after it, for the main view). camera identifies the view.
+    static void BuildDepthPyramid(
+        SceneRenderer& renderer,
+        Engine::Graphics::IGraphicsContext* context,
+        const void* camera,
+        const glm::mat4& view,
+        const glm::mat4& viewProjection,
+        const glm::mat4& proj,
+        uint32_t viewportWidth,
+        uint32_t viewportHeight);
+    // The pyramid the previous frame built for this camera, when the camera
+    // has moved and turned little enough since for its occlusion to hold;
+    // else null. ENGINE_GPU_OCCLUSION=0 disables it.
+    static const Engine::Graphics::IGraphicsBuffer* DepthPyramidForCulling(
+        SceneRenderer& renderer,
+        const void* camera,
+        const glm::mat4& view,
+        uint32_t viewportWidth,
+        uint32_t viewportHeight);
     // The buffer draws read at structured slot 47.
     static const Engine::Graphics::IGraphicsBuffer* AmbientOcclusionBuffer(
         SceneRenderer& renderer);

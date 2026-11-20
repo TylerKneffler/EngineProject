@@ -1424,7 +1424,8 @@ void PreferencesView::DrawEffectsSection(IEditorUi& ui)
         }
         else if (preset == 2)
         {
-            aa.taa = false;
+            // Balanced matches the defaults: TAA blends the LOD dissolves.
+            aa.taa = true;
             aa.msaaSamples = 1u;
             aa.fxaaSubpixel = .5f; aa.fxaaEdgeThreshold = .166f; aa.grassMinimumPixels = 1.f;
             post.bloom = true; post.bloomScale = 1.f; post.ambientOcclusion = true;

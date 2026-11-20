@@ -169,6 +169,10 @@ private:
     mutable uint64_t m_cachedLocalRevisionForWorld = 0;
     mutable uint64_t m_localRevision = 1;
     mutable uint64_t m_worldRevision = 1;
+    // TransformHierarchy membership: the stamp of the last hierarchy rebuild
+    // that included this transform (process-unique), so "is it prepared?" is
+    // a compare instead of a hash lookup per object per frame.
+    mutable uint64_t m_hierarchyStamp = 0;
     mutable bool m_localCacheInitialized = false;
     mutable bool m_worldCacheInitialized = false;
     uint8_t m_editorOverrideChannels = 0;

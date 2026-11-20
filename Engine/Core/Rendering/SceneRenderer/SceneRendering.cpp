@@ -83,6 +83,15 @@ DetailCostCollector& GetDetailCostCollector()
 
 namespace Engine::Rendering
 {
+namespace
+{
+bool TreeWindEnabled()
+{
+    static const bool enabled = ReadEnvFlag("ENGINE_TREE_WIND", true);
+    return enabled;
+}
+}
+
 using Scene = Engine::Scene::Scene;
 void SceneRenderer::CaptureEmbeddedUiInput(Engine::Core::NativeInputSnapshot& input) const
 {
@@ -428,7 +437,10 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
         Engine::Graphics::PostProcessSettings postProcess{};
         postProcess.exposure = std::exp2(std::clamp(
             m_scene.settings.outputExposure + projectPost.exposureBias, -16.f, 16.f));
-        postProcess.toneMapping = static_cast<uint32_t>(m_scene.settings.toneMapping);
+        // Scene operators 0-2 are shader operators 0-2; 3-5 are export modes,
+        // so AgX (scene 3) is shader operator 6.
+        postProcess.toneMapping = m_scene.settings.toneMapping == Engine::Model::ToneMappingOperator::AgX
+            ? 6u : static_cast<uint32_t>(m_scene.settings.toneMapping);
         // Debug views (unlit, wireframe, heat maps) show raw values.
         const bool lookEffects = m_scene.settings.renderMode == Engine::Model::SceneRenderMode::Lit;
         postProcess.bloomIntensity = lookEffects && m_scene.settings.bloomEnabled &&
@@ -585,6 +597,10 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
     // matrix taking this frame's clip space to the previous frame's (both
     // unjittered) so it can find each pixel's history.
     glm::mat4 jitteredProjection = proj;
+    // 1..8 while TAA jitters this view, else 0: Object.hlsl shifts its
+    // dissolve dither by it each frame (skinParams.z) so the TAA history
+    // averages LOD cross-fades into a smooth blend. Static without TAA.
+    float temporalDitherFrame = 0.f;
     {
         const auto temporal = Engine::Rendering::RenderingEffects::Get().Settings().antiAliasing;
         const auto* contextFactory = m_graphicsProvider ? m_graphicsProvider->GetContextFactory() : nullptr;
@@ -606,6 +622,7 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
                 return result;
             };
             const uint32_t sample = state.frame % 8u + 1u;
+            temporalDitherFrame = static_cast<float>(sample);
             jitteredProjection[2][0] += (halton(sample, 2u) - .5f) * 2.f / static_cast<float>(viewportWidth);
             jitteredProjection[2][1] += (halton(sample, 3u) - .5f) * 2.f / static_cast<float>(viewportHeight);
             const glm::dmat4 current = glm::dmat4(proj) * glm::dmat4(view);
@@ -1147,6 +1164,13 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
             Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
             empty.size() * sizeof(float), empty.data(), sizeof(float));
     }
+    // Last frame's real depth (trees included) when the camera has barely
+    // moved: hides placements behind nearer trees, which the CPU pyramid
+    // (terrain and mesh occluders only) cannot. Else this frame's CPU one.
+    if (const auto* depthPyramid = shadowOnly ? nullptr :
+            Engine::Rendering::SceneRendererLighting::DepthPyramidForCulling(
+                *this, cam, view, viewportWidth, viewportHeight))
+        occlusionPyramid = depthPyramid;
     const Engine::Graphics::IGraphicsBuffer* cullOcclusion = !shadowOnly && occlusionPyramid
         ? occlusionPyramid : m_occlusionPyramidEmpty.get();
     const int cullOcclusionFlag = !shadowOnly && occlusionPyramid
@@ -1614,7 +1638,12 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
         if (bakedStaticReceiver)
             ++m_shadowDebugSnapshot.bakedReceiverCount;
         else
-            ++m_shadowDebugSnapshot.dynamicReceiverCount;        PreparedDraw preparedDraw{};
+            ++m_shadowDebugSnapshot.dynamicReceiverCount;
+        // Built in place: a PreparedDraw is ~2 KB, and zero-filling a local
+        // then copying it into the vector showed in frame profiles. The
+        // vector is reserved for one draw per render object, so the
+        // reference stays valid; every exit below either keeps or pops it.
+        PreparedDraw& preparedDraw = preparedDraws.emplace_back();
         // Carry frame-item and shadow policy into a backend-ready draw record.
         preparedDraw.morphDeltaBuffer = m_emptyMorphDeltaBuffer.get();
         preparedDraw.morphWeightBuffer = m_emptyMorphWeightBuffer.get();
@@ -1681,7 +1710,10 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
             // Shadow views need alpha, geometry, and caster state only. Finish
             // their compact record here instead of resolving camera materials.
             if (!preparedDraw.castsShadow)
+            {
+                preparedDraws.pop_back();
                 continue;
+            }
             const bool useSourceChart = useSourceChartMesh(*renderItem);
             const glm::mat4 world = useSourceChart
                 ? sourceChartWorld(*renderItem) : renderItem->world;
@@ -1797,7 +1829,6 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
                 preparedDraw.shadowIndexBuffer = preparedDraw.shadowMesh->GetIndexBuffer();
                 preparedDraw.shadowIndexCount = preparedDraw.shadowMesh->GetIndexCount();
             }
-            preparedDraws.push_back(std::move(preparedDraw));
             ++slot;
             continue;
         }
@@ -2087,7 +2118,10 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
         objectData.shadowCasterFade={casterFade.x,std::min(casterFade.x,casterFade.y),0.f,0.f};
         objectData.grassAnimation={(mesh && mesh->foliageWindStrength>0.f) || (mat && mat->shaderUsesTime)
                 ? static_cast<float>(m_scene.GetElapsedTime()):0.f,
-            mesh && mesh->foliageWindStrength>0.f ? 1.f : 0.f,
+            // y: 1 grass bend, 2 tree wind (Mesh::foliageWindTree; ENGINE_TREE_WIND=0
+            // turns tree wind off for A/B captures).
+            mesh && mesh->foliageWindStrength>0.f && !(mesh->foliageWindTree && !TreeWindEnabled())
+                ? (mesh->foliageWindTree ? 2.f : 1.f) : 0.f,
             mesh && mesh->foliageWindStrength>0.f ? std::clamp(mesh->foliageWindStrength,0.f,1.f):1.f, 0.f};
         objectData.grassAnimation.w = static_cast<float>(grassInteraction.count);
         // zw: grass minimum blade width in pixels, and the world size of one
@@ -2208,11 +2242,9 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
             heat.pixelShaderWeight = pixelWeight;
             heat.shadowElements = preparedDraw.castsShadow
                 ? heat.vertexElements * shadowCascadeCount : 0u;
-            performanceHeatDraws.push_back(preparedDraws.size());
+            performanceHeatDraws.push_back(preparedDraws.size() - 1);
             performanceHeatInputs.push_back(heat);
         }
-        preparedDraws.push_back(preparedDraw);
-
         ++slot;
     }
     const auto materialFootprintStart = RenderClock::now();
@@ -2298,6 +2330,8 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
             draw.objectData.geometryFade = Engine::Rendering::ResolveLodPreviewFade(
                 draw.objectData.geometryFade, includeEditorVisuals, shadowOnly,
                 instanceLodDisplayOverride);
+    if (temporalDitherFrame > 0.f)
+        for (auto& draw : preparedDraws) draw.objectData.skinParams.z = temporalDitherFrame;
     if(!shadowOnly && !(includeEditorVisuals && instanceLodDisplayOverride >= 0)) for(auto& draw:preparedDraws)
         if(SceneRendererDrawPreparation::ScreenLodPolicy(*this, draw, hasPortalViews, includeEditorVisuals)) draw.drawData.flags|=0x00800000u;
     SceneRendererObjectRecordUpload recordUpload(
@@ -3253,8 +3287,13 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
     }
     // The main view's depth is complete: ambient occlusion for next frame.
     if (!shadowOnly)
+    {
         Engine::Rendering::SceneRendererLighting::ComputeAmbientOcclusion(
             *this, context, view, proj, viewportWidth, viewportHeight);
+        // Occlusion pyramid from this view's depth for next frame's culling.
+        Engine::Rendering::SceneRendererLighting::BuildDepthPyramid(
+            *this, context, cam, view, viewProjection, proj, viewportWidth, viewportHeight);
+    }
 
     ScenePortalRenderingContext portalRendering{
         *this, context, preparedDraws, automaticGroups, cam, view, proj,

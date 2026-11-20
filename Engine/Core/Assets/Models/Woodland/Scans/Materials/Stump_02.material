@@ -1,0 +1,18 @@
+{
+    "version": 1,
+    "baseColor": [
+        1.0,
+        1.0,
+        1.0
+    ],
+    "specularModel": "MetallicRoughness",
+    "metallic": 0,
+    "roughness": 1.0,
+    "castsShadows": true,
+    "doubleSided": true,
+    "normalScale": 1.0,
+    "baseColorTexture": "Assets/Models/Woodland/Scans/Textures/Stump_02_diff.jpg",
+    "useVertexColors": false,
+    "normalTexture": "Assets/Models/Woodland/Scans/Textures/Stump_02_nor_gl.jpg",
+    "metallicRoughnessTexture": "Assets/Models/Woodland/Scans/Textures/Stump_02_rough.jpg"
+}

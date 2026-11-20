@@ -602,6 +602,16 @@ def write_scene(world):
     # 48 m, which blurs every tree a little way off. Normal mip selection is
     # enough here.
     settings.set("textureLodEnabled", "false")
+    # AgX tone mapping (ToneMappingOperator::AgX): softer highlights and less
+    # saturated greens and sky than ACES, toward the reference shots.
+    settings.set("toneMapping", "3")
+    # Eye adaptation stops 4.8 EV down (.md/foliage.md Phase 3): sunny meadows
+    # meter above it and are unaffected, while forest interiors (canopy-shaded
+    # sky light) stay about a stop darker instead of being brightened to the
+    # meadow's level, which is most of the forest mood of the references.
+    exposure = settings.find("autoExposure")
+    if exposure is not None:
+        exposure.set("minEv", "-4.8")
     scene.append(settings)
     objects = ET.SubElement(scene, "objects")
 
@@ -699,13 +709,13 @@ def write_scene(world):
             "runtimeBakeDirectory": "", "requireRuntimeBake": "false"}.items()})
     ET.SubElement(manager, "TerrainManager.cells")
     far_clusters = ET.SubElement(manager, "TerrainManager.farClusters")
-    for kind in ("Oak_01", "Oak_02", "Conifer_01", "Conifer_02"):
+    for kind in ("Oak_01", "Oak_02", "Oak_03", "Oak_04", "Conifer_01", "Conifer_02", "Conifer_03"):
         ET.SubElement(far_clusters, "item", {
             "asset": f"Assets/Prefabs/Woodland/Clusters/ForestCluster_{kind}.prefab",
             "match": "/Oaks/" if kind.startswith("Oak") else "/Conifers/", "trees": "14"})
     names = ET.SubElement(manager, "TerrainManager.objectLayerNames")
     for name in ("Landscape forest", "Procedural meadow grass", "Procedural far grass",
-                 "Landscape props"):
+                 "Procedural forest floor", "Landscape props"):
         ET.SubElement(names, "item").text = name
     runs = ET.SubElement(manager, "TerrainManager.proceduralRuns")
     for y in range(-EXTENT, EXTENT + 1):
@@ -796,6 +806,9 @@ def main():
         write_hydrology(world, signature)
         remove_stale_edits()
         write_scene(world)
+        # Eye-level foliage viewpoints next to "Vista" (reads the new archive).
+        import add_landscape_viewpoints
+        add_landscape_viewpoints.main()
     if arguments.preview:
         write_previews(arguments.preview, world)
     macro = world["macro_q"] / SCALE

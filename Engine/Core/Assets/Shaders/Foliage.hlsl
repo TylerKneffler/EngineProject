@@ -29,7 +29,7 @@ float4 PSMain(
     const float4 color = PSGrassMain(pos, worldPos, normal, uv, vertexColor,
         tangent, objectIndex, frontFace);
 #else
-    const float4 color = PSFoliageMain(pos, worldPos, normal, uv, vertexColor,
+    const float4 color = PSFoliageMain(pos, worldPos, normal, uv, uv1, vertexColor,
         objectIndex, frontFace);
 #endif
     return ApplyObjectAtmosphereFog(color, worldPos, objectIndex, pos.xy);

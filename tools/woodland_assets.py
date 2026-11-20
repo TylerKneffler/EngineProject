@@ -736,14 +736,16 @@ def write_prefab(path: Path, name: str, parts, extra_root_components=""):
     """parts: list of dicts with
          mesh (asset path), lods (list of asset paths, "" hides),
          material (repo path), lod_materials (list, "" keeps base),
-         lod1, lod2 (Mesh.gpuLod1Distance/gpuLod2Distance), wind (foliageWindStrength).
+         lod1, lod2 (Mesh.gpuLod1Distance/gpuLod2Distance), wind (foliageWindStrength),
+         tree_wind (Mesh.foliageWindTree: trunk/branch/leaf wind instead of the grass bend).
     One part goes on the root object; several become child primitives (as the
     oak pack's prefabs do)."""
     from xml.sax.saxutils import quoteattr, escape
 
     def components(part, indent):
         pad = " " * indent
-        attrs = (f'Mesh.file={quoteattr(part["mesh"])} Mesh.foliageWindStrength="{part.get("wind", 0):g}" '
+        tree_wind = 'Mesh.foliageWindTree="true" ' if part.get("tree_wind") else ''
+        attrs = (f'Mesh.file={quoteattr(part["mesh"])} Mesh.foliageWindStrength="{part.get("wind", 0):g}" {tree_wind}'
                  f'Mesh.useLightProbes="false" Mesh.gpuLodSelection="true" '
                  f'Mesh.gpuLod1Distance="{part.get("lod1", 60):g}" Mesh.gpuLod2Distance="{part.get("lod2", 220):g}"')
         lines = []

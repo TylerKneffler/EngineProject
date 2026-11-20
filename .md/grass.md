@@ -318,3 +318,21 @@ Record progress here (date, phase, what changed, capture used to check it).
     First capture: no tile squares at the range edge (Phase 1 OK); ground past the grass is olive with
     soft patches matching the blades (Phase 2 OK). The edge still reads as a band at ~25–35 m; try a
     wider `distanceFadeFraction`. Gaps between near tussocks still show ground (Phases 3 and 7).
+- 2026-11-19 (foliage work, see [foliage.md](foliage.md)): **LOD bug: grass tiles measured LOD distance
+  from height 0.** Each tile object sat at `{x * span, 0, z * span}` with its placements' absolute ground
+  height inside the instance transforms, so the tile origin that `InstanceCull.hlsl` (shared-LOD group
+  test, `lodData.sphere` = tile record origin) and `ApplyGeometryFade` (object origin for fade modes 2-3)
+  measure from was at y = 0. On the test cell (ground ~-30 m) every plant was >= 28 m away, i.e. LOD2
+  (coarse bushes = "lots of squares", thinned grass) even at the viewer's feet; on the landscape the
+  error is the terrain height (hundreds of metres). Raising the layer's LOD distances to 30/35 m changed
+  nothing, which is how it was found. Fix: `TileState::originHeight` (ground at the tile centre) is the
+  tile object's y, and both build paths (procedural `AdvanceBuild`, authored `BeginBuild`) subtract it
+  from placements and bounds. World positions are unchanged. Grass now draws the detail it was tuned
+  for: grass GPU on foliage_test 2.0 → 3.3 ms (ForestFloor), 1.3 → 2.3 ms (Meadow); the detail budget
+  balances it.
+- 2026-11-19: shrub/bush leaves (`generate_meadow_grass.py`): `leaf_card` is now an ovate leaf per detail
+  level (10 / 6 / 2 triangles; raised midrib, back-curl) instead of a 4-vertex diamond; `grow_bush`
+  leaves get a random roll (they lay in parallel tiers), ±25 % value jitter and occasional yellowing;
+  coarse LODs keep more, smaller leaves (`LEAF_KEEP` 1/.6/.35, `LEAF_GROW` 1/1.25/1.6, was 1/.46/.2 and
+  1/1.45/2.15: 26 cm diamonds at LOD2); no crown core at LOD0 (it read as an egg), smaller at LOD1/2.
+  meadow_bush 8780/4292/1898 → 32844/11954/2718 tris, meadow_bush_tall 7544/3730/1794 → 28152/10562/2438.

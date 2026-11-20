@@ -214,6 +214,7 @@ void Mesh::Deserialize(const JsonValue& v)
 {
     DeferGraphicsBuffers();
     if(v.Has("foliageWindStrength")) foliageWindStrength=std::clamp(v["foliageWindStrength"].AsFloat(),0.f,1.f);
+    if(v.Has("foliageWindTree")) foliageWindTree=v["foliageWindTree"].AsBool();
     if(v.Has("gpuLodSelection")) gpuLodSelection=v["gpuLodSelection"].AsBool();
     if(v.Has("screenLodSelection")) screenLodSelection=v["screenLodSelection"].AsBool();
     if(v.Has("distanceLodOverride")) distanceLodOverride=v["distanceLodOverride"].AsBool();
@@ -329,6 +330,7 @@ void Mesh::PrepareAuthoredLods(IGraphicsProvider* graphicsProvider)
             auto alternate = std::make_unique<Mesh>();
             alternate->LoadFromFile(lodMeshes[next - 1]);
             alternate->foliageWindStrength = foliageWindStrength;
+            alternate->foliageWindTree = foliageWindTree;
             alternate->deformationBoundsPadding = deformationBoundsPadding;
             alternate->PrepareGraphicsResources(graphicsProvider);
             if (!alternate->IsReady() || !StoreRuntimeLod(next, std::move(alternate)))

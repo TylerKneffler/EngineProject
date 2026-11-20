@@ -3,21 +3,29 @@
 #include "Transform.h"
 #include "Core/Scene/Object.h"
 #include "Core/Threading/JobScheduler.h"
+#include <atomic>
 
 namespace Engine::Components
 {
+namespace
+{
+std::atomic<uint64_t> s_membershipStamps{0};
+}
+
 glm::mat4 TransformHierarchy::ReadPreparedWorldMatrix(const Transform& transform) const
 {
     // Root validation is already constant-time and cheaper than a dictionary lookup.
     if(!transform.Owner || !transform.Owner->Parent) return transform.GetWorldMatrix();
-    return m_topologyValid && m_indices.find(&transform)!=m_indices.end()
+    // Membership by stamp: the hash lookup this replaces was ~3 % of the scene
+    // thread on the landscape (one per render candidate per frame).
+    return m_topologyValid && transform.m_hierarchyStamp==m_membershipStamp
         ? transform.m_cachedWorldMatrix:transform.GetWorldMatrix();
 }
 
 uint64_t TransformHierarchy::ReadPreparedWorldRevision(const Transform& transform) const
 {
     if(!transform.Owner || !transform.Owner->Parent) return transform.GetWorldRevision();
-    return m_topologyValid && m_indices.find(&transform)!=m_indices.end()
+    return m_topologyValid && transform.m_hierarchyStamp==m_membershipStamp
         ? transform.m_worldRevision:transform.GetWorldRevision();
 }
 
@@ -54,6 +62,9 @@ TransformHierarchy::Statistics TransformHierarchy::Prepare(const std::vector<Tra
         }
         for(auto it=m_indices.begin();it!=m_indices.end();)
             if(it->second.generation!=m_generation) it=m_indices.erase(it); else ++it;
+        // Members carry this topology's stamp; former members keep an older one.
+        m_membershipStamp=++s_membershipStamps;
+        for(auto* transform:transforms) transform->m_hierarchyStamp=m_membershipStamp;
         m_nodes.resize(transforms.size()); m_firstChild.assign(transforms.size(),NoParent);
         m_nextSibling.resize(transforms.size()); m_order.clear(); m_order.reserve(transforms.size());
         for(size_t i=0;i<transforms.size();++i)

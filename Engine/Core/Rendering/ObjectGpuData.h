@@ -70,7 +70,7 @@ struct ObjectGPUData
     glm::uvec4 lightingChannels{ 0xffffffffu, 0u, 0u, 0u };
     glm::vec4 subsurfaceColorWeight{ 0.f }; // RGB color, enabled weight
     glm::vec4 subsurfaceRadiusThickness{ 0.f }; // RGB scene units, thickness in scene units
-    glm::vec4 subsurfaceTransmission{ 0.f }; // x = transmitted-light weight
+    glm::vec4 subsurfaceTransmission{ 0.f }; // x = transmitted-light weight, y = foliage leaf translucency
     glm::vec4 blinnPhongSpecularShininess{ 0.f }; // RGB reflectance; w = shininess + 1 when enabled
     glm::vec4 pmxTextureTint { 1.f };
     glm::vec4 pmxSphereTint { 1.f };

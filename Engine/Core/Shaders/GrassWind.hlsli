@@ -103,3 +103,57 @@ void ApplyGrassWind(float sceneTime, float strength,
     normal = normalize(normal - up * (dot(slope, normal) / (1.0 + dot(slope, up))));
     tangent = normalize(tangent + slope * dot(up, tangent));
 }
+
+// Tree wind (Mesh::foliageWindTree, .md/foliage.md Phase 5). Same direction,
+// speed and advected gust field as the grass, coarsened so a whole crown
+// moves together:
+//  * trunk: bends downwind by strength * 0.01 * h^2 (a cantilever, not a
+//    rigid rotation about the root), a mean lean plus the slow broad gust and
+//    a ~0.26 Hz sway with a per-tree phase; points lower slightly so the
+//    trunk keeps its length;
+//  * branches: ~0.7 Hz sway growing with distance from the trunk axis (up to
+//    6 m), its phase varying across the crown;
+//  * leaves (cooked leaf meshes, leafShell = canopy occlusion > 0): a few
+//    centimetres of ~4 Hz flutter along the normal, strongest on the outer
+//    shell and in gusts.
+// Strength 0.1 bends a 20 m crown ~0.4 m, branches 4-7 cm, leaves <= 2.5 cm.
+// The caller fades strength out with distance; shadow casters stay static,
+// as for grass.
+void ApplyTreeWind(float sceneTime, float strength, float3 root, float3 up,
+    float leafShell, inout float3 position, float3 normal)
+{
+    const float s = saturate(strength) * GrassWindStrength;
+    const float3 offset = position - root;
+    const float h = dot(offset, up);
+    if (s <= 0.0 || h <= 0.0) return;
+    const float direction = radians(GrassWindDirectionDegrees);
+    const float2 wind = float2(cos(direction), sin(direction));
+    const float2 side = float2(-wind.y, wind.x);
+    const float t = sceneTime * max(0.0, GrassWindSpeed);
+    const float2 traveling = root.xz - wind * t * 2.0;
+    const float2 coordinate = float2(dot(traveling, wind), dot(traveling, side) * 0.25) /
+        max(GrassWindWaveSize * 2.5, 1.0);
+    const float gust = GrassWindPerlin(coordinate, GrassWindSeed);
+    const float treePhase = (float)(GrassWindHash(int2(floor(root.xz)), 0x51f15e3du) & 1023u) /
+        1023.0 * 6.2831853;
+    // Trunk.
+    float3 downwind = float3(wind.x, 0.0, wind.y);
+    downwind -= up * dot(downwind, up);
+    downwind *= rsqrt(max(dot(downwind, downwind), 1e-6));
+    const float sway = 0.55 + 0.45 * gust + 0.3 * sin(t * 1.2 + treePhase);
+    const float bend = s * 0.01 * h * h * sway;
+    position += downwind * bend - up * (bend * bend / (2.0 * max(h, 1.0)));
+    // Branches.
+    const float r = length(offset - up * h);
+    const float branchPhase = dot(position.xz, float2(0.37, 0.29)) + treePhase;
+    const float branch = s * 0.12 * min(r, 6.0) * (0.6 + 0.4 * abs(gust)) *
+        sin(t * 3.4 + branchPhase);
+    position += up * (branch * 0.6) + float3(side.x, 0.0, side.y) * (branch * 0.4);
+    // Leaves.
+    if (leafShell > 0.0)
+    {
+        const float flutterPhase = dot(position, float3(11.3, 7.7, 13.1));
+        position += normal * (s * 0.25 * leafShell * (0.4 + 0.6 * abs(gust)) *
+            sin(t * 18.0 + flutterPhase));
+    }
+}

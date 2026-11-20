@@ -9,17 +9,25 @@
 #include <filesystem>
 #include <map>
 #include <mutex>
+#include <string_view>
 
 namespace Engine::Serialization::PrefabLod
 {
 namespace
 {
-std::string LowerExtension(const std::string& path)
+// True when the path ends in ".prefab" (any case). Allocation free: it runs
+// for every placement of every object layer it is asked about, and
+// std::filesystem::path showed up in frame profiles (wide-string conversion).
+bool HasPrefabExtension(std::string_view path)
 {
-    std::string extension = std::filesystem::path(path).extension().string();
-    std::transform(extension.begin(), extension.end(), extension.begin(),
-        [](unsigned char value) { return static_cast<char>(std::tolower(value)); });
-    return extension;
+    constexpr std::string_view extension = ".prefab";
+    if (path.size() <= extension.size()) return false;
+    const auto tail = path.substr(path.size() - extension.size());
+    const char before = path[path.size() - extension.size() - 1];
+    if (before == '/' || before == '\\') return false; // a bare ".prefab" has no extension
+    for (size_t index = 0; index < extension.size(); ++index)
+        if (std::tolower(static_cast<unsigned char>(tail[index])) != extension[index]) return false;
+    return true;
 }
 
 std::string StringAt(const JsonValue& array, size_t index)
@@ -136,7 +144,23 @@ std::string Path(const std::string& base, size_t lod)
 
 bool IsPrefab(const std::string& path)
 {
-    return !path.empty() && LowerExtension(Split(path).base) == ".prefab";
+    if (path.empty()) return false;
+    // Same base as Split(path).base, without copying it.
+    std::string_view base(path);
+    if (const auto marker = base.rfind(Marker); marker != std::string_view::npos)
+    {
+        const auto digits = marker + std::char_traits<char>::length(Marker);
+        bool lodSuffix = digits < base.size();
+        size_t lod = 0;
+        for (size_t index = digits; lodSuffix && index < base.size(); ++index)
+        {
+            if (!std::isdigit(static_cast<unsigned char>(base[index]))) lodSuffix = false;
+            else if ((lod = lod * 10 + static_cast<size_t>(base[index] - '0')) >= MaximumLevels)
+                lodSuffix = false;
+        }
+        if (lodSuffix) base = base.substr(0, marker);
+    }
+    return HasPrefabExtension(base);
 }
 
 size_t CountLevels(const JsonValue& document)
@@ -170,7 +194,7 @@ std::vector<std::string> ReadPaths(const JsonValue& value)
 size_t LevelCount(const std::string& prefabPath)
 {
     const auto base = Split(prefabPath).base;
-    if (LowerExtension(base) != ".prefab") return 1;
+    if (!HasPrefabExtension(base)) return 1;
     struct Entry
     {
         std::filesystem::file_time_type modified{};

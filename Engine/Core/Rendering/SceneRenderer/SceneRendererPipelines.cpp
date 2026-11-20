@@ -117,6 +117,10 @@ void SceneRendererPipelines::BuildSkyboxPipeline(SceneRenderer& renderer)
         if (auto occlusion = shaderCompiler->CompileFromFile(occlusionPath.c_str(), "CSMain",
                 Engine::Graphics::IShaderCompiler::CompileProfile::CS_5_0))
             renderer.m_ambientOcclusionPipeline = pipelineFactory->CreateComputePipeline(occlusion.get());
+        const std::string pyramidPath = EngineShaderPath("DepthPyramid.hlsl");
+        if (auto pyramid = shaderCompiler->CompileFromFile(pyramidPath.c_str(), "CSMain",
+                Engine::Graphics::IShaderCompiler::CompileProfile::CS_5_0))
+            renderer.m_depthPyramidPipeline = pipelineFactory->CreateComputePipeline(pyramid.get());
     }
 
     const std::string defaultPath =

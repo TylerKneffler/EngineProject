@@ -598,6 +598,16 @@ if(ENGINE_VULKAN_ENABLED)
             -Fo "${SHADER_OUTPUT}" "${SHADER_SOURCE}"
         DEPENDS "${SHADER_SOURCE}" VERBATIM)
     list(APPEND VULKAN_SHADER_OUTPUTS "${SHADER_OUTPUT}")
+    # GPU occlusion pyramid from the scene depth (DepthPyramid.hlsl).
+    set(SHADER_SOURCE "${ENGINE_ROOT}/Engine/Core/Shaders/DepthPyramid/DepthPyramid.hlsl")
+    set(SHADER_OUTPUT "${VULKAN_SHADER_DIR}/DepthPyramid.CS.spv")
+    add_custom_command(OUTPUT "${SHADER_OUTPUT}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${VULKAN_SHADER_DIR}"
+        COMMAND "${DXC_SPIRV_EXECUTABLE}" -spirv -fspv-target-env=vulkan1.1
+            -fvk-use-dx-layout -fspv-entrypoint-name=main -D VULKAN=1 -T cs_6_0 -E CSMain
+            -Fo "${SHADER_OUTPUT}" "${SHADER_SOURCE}"
+        DEPENDS "${SHADER_SOURCE}" VERBATIM)
+    list(APPEND VULKAN_SHADER_OUTPUTS "${SHADER_OUTPUT}")
     set(SHADER_SOURCE "${ENGINE_ROOT}/Engine/Core/Shaders/GpuLoad/GpuLoad.hlsl")
     set(SHADER_OUTPUT "${VULKAN_SHADER_DIR}/GpuLoad.CS.spv")
     add_custom_command(OUTPUT "${SHADER_OUTPUT}"

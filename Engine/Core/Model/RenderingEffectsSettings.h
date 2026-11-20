@@ -30,7 +30,10 @@ struct AntiAliasingSettings
     // frame and each pixel blends with its reprojected history, which also
     // removes the shimmer of thin moving detail (grass). Needs single-sample
     // depth, so it is not combined with MSAA (MSAA wins when both are set).
-    bool taa = false;
+    // On by default: instanced LOD cross-fades and impostor view hand-overs
+    // dither per pixel and rely on the history to blend (Object.hlsl
+    // ScreenDitherThreshold); without it they show a fixed dot pattern.
+    bool taa = true;
     // Share of the history kept each frame (0.75 responsive .. 0.97 smooth).
     float taaFeedback = 0.9f;
     // Restores detail TAA softens (most visible while moving): a light

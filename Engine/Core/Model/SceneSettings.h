@@ -38,7 +38,10 @@ enum class ToneMappingOperator
 {
     None = 0,
     Aces = 1,
-    Reinhard = 2
+    Reinhard = 2,
+    // AgX (Troy Sobotka): gentler highlight roll-off and less saturated
+    // brights than ACES; PostProcess.hlsl operator 6.
+    AgX = 3
 };
 
 // Analytic exponential height fog applied per pixel by every forward shader
