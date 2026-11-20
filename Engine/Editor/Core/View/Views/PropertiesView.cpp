@@ -12,6 +12,7 @@
 #include "Core/Component.h"
 #include "Core/Graphics/IGraphicsTexture.h"
 #include "Core/Scene/Scene.h"
+#include "Core/Scene/StaticObjects.h"
 #include "Core/Serialization/SceneSerializer.h"
 #include "../Focus/WindowFocusHandler.h"
 #include "Engine/Editor/Core/View/Templates/Properties/PropertiesViewTemplateHelpers.h"
@@ -32,6 +33,13 @@ PropertiesView::PropertiesView()
 
 namespace
 {
+const char* const StaticTooltip =
+    "Nothing moves this object while the game runs.\n"
+    "Static prefab instances made only of meshes, materials and fixed colliders are\n"
+    "drawn as instanced placements during play (two or more of the same prefab),\n"
+    "which removes their per-object cost. Lights, cameras, terrain and emitters can\n"
+    "be static too; they stay scene objects. Problems are listed below and in the\n"
+    "Console when play starts.";
 // Project layer picker. Returns true and the new index when it changes.
 bool DrawLayerCombo(Engine::Editor::IEditorUi& ui, int current, bool mixed,
     int& selected)
@@ -200,6 +208,37 @@ void PropertiesView::DrawMultiSelection(IEditorUi& ui)
             object->InvalidatePrefabOverrideCache();
         }
         if (OnComponentsChanged) OnComponentsChanged();
+    }
+
+    bool sameStatic = true;
+    const bool firstStatic = m_selectedObjects.front()->isStatic;
+    for (Engine::Core::Object* object : m_selectedObjects)
+        sameStatic &= object->isStatic == firstStatic;
+    bool isStatic = firstStatic;
+    ui.SetNextItemMixedValue(!sameStatic);
+    if (ui.Checkbox("Static", &isStatic))
+    {
+        for (Engine::Core::Object* object : m_selectedObjects)
+        {
+            object->isStatic = isStatic;
+            object->InvalidatePrefabOverrideCache();
+        }
+        if (OnComponentsChanged) OnComponentsChanged();
+    }
+    if (ui.IsItemHovered()) ui.Tooltip(StaticTooltip);
+    {
+        // One line per distinct problem across the selection.
+        std::vector<std::string> shown;
+        for (Engine::Core::Object* object : m_selectedObjects)
+            for (const auto& note : Engine::Scene::StaticObjects::Describe(*object))
+                if (note.severity == Engine::Scene::StaticObjects::Severity::Warning &&
+                    std::find(shown.begin(), shown.end(), note.text) == shown.end() &&
+                    shown.size() < 6)
+                {
+                    shown.push_back(note.text);
+                    ui.ColoredLabel(("Static '" + object->name + "': " + note.text).c_str(),
+                        { 1.f, 0.65f, 0.15f, 1.f });
+                }
     }
 
     ui.Separator();
@@ -922,6 +961,22 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
         m_selectedObject->InvalidatePrefabOverrideCache();
         if (OnComponentsChanged)
             OnComponentsChanged();
+    }
+    bool isStatic = m_selectedObject->isStatic;
+    if (ui.Checkbox("Static", &isStatic))
+    {
+        m_selectedObject->isStatic = isStatic;
+        m_selectedObject->InvalidatePrefabOverrideCache();
+        if (OnComponentsChanged)
+            OnComponentsChanged();
+    }
+    if (ui.IsItemHovered()) ui.Tooltip(StaticTooltip);
+    for (const auto& note : Engine::Scene::StaticObjects::Describe(*m_selectedObject))
+    {
+        if (note.severity == Engine::Scene::StaticObjects::Severity::Warning)
+            ui.ColoredLabel(("Static: " + note.text).c_str(), { 1.f, 0.65f, 0.15f, 1.f });
+        else
+            ui.DisabledLabel(note.text.c_str());
     }
     if (!prefabRoot)
     {

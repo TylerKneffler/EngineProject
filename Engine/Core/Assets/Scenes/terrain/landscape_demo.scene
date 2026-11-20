@@ -53,7 +53,7 @@
         </Transform.scale>
       </transform>
     </item>
-    <item name="Vista" enabled="true">
+    <item name="Vista" enabled="true" static="true">
       <components>
         <components:Camera Camera.active="false" Camera.useTransformRotation="false" Camera.fov="67" Camera.near="0.059999998658895493" Camera.far="24192" Camera.orthographic="false" Camera.orthographicSize="5">
           <Camera.up _arrayEncoding="spaceSeparatedNumbers">0 1 0</Camera.up>
@@ -67,7 +67,7 @@
         <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
       </transform>
     </item>
-    <item name="ForestEdge" enabled="true">
+    <item name="ForestEdge" enabled="true" static="true">
       <components>
         <components:Camera Camera.active="false" Camera.useTransformRotation="false" Camera.fov="67" Camera.near="0.06" Camera.far="24000" Camera.orthographic="false" Camera.orthographicSize="5">
           <Camera.up _arrayEncoding="spaceSeparatedNumbers">0 1 0</Camera.up>
@@ -81,7 +81,7 @@
         <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
       </transform>
     </item>
-    <item name="ForestFloor" enabled="true">
+    <item name="ForestFloor" enabled="true" static="true">
       <components>
         <components:Camera Camera.active="false" Camera.useTransformRotation="false" Camera.fov="67" Camera.near="0.06" Camera.far="24000" Camera.orthographic="false" Camera.orthographicSize="5">
           <Camera.up _arrayEncoding="spaceSeparatedNumbers">0 1 0</Camera.up>
@@ -95,21 +95,21 @@
         <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
       </transform>
     </item>
-    <item name="Backlit" enabled="true">
+    <item name="Backlit" enabled="true" static="true">
       <components>
         <components:Camera Camera.active="false" Camera.useTransformRotation="false" Camera.fov="67" Camera.near="0.06" Camera.far="24000" Camera.orthographic="false" Camera.orthographicSize="5">
           <Camera.up _arrayEncoding="spaceSeparatedNumbers">0 1 0</Camera.up>
-          <Camera.target _arrayEncoding="spaceSeparatedNumbers">273.922 -11.830 -96.464</Camera.target>
+          <Camera.target _arrayEncoding="spaceSeparatedNumbers">273.922 -11.672 -96.464</Camera.target>
         </components:Camera>
       </components>
       <children />
       <transform>
-        <Transform.position _arrayEncoding="spaceSeparatedNumbers">280 -27.425 -136</Transform.position>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">280 -27.05 -136</Transform.position>
         <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
         <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
       </transform>
     </item>
-    <item name="Trail" enabled="true">
+    <item name="Trail" enabled="true" static="true">
       <components>
         <components:Camera Camera.active="false" Camera.useTransformRotation="false" Camera.fov="67" Camera.near="0.06" Camera.far="24000" Camera.orthographic="false" Camera.orthographicSize="5">
           <Camera.up _arrayEncoding="spaceSeparatedNumbers">0 1 0</Camera.up>
@@ -123,7 +123,7 @@
         <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
       </transform>
     </item>
-    <item name="Cliffs" enabled="true">
+    <item name="Cliffs" enabled="true" static="true">
       <components>
         <components:Camera Camera.active="false" Camera.useTransformRotation="false" Camera.fov="67" Camera.near="0.06" Camera.far="24000" Camera.orthographic="false" Camera.orthographicSize="5">
           <Camera.up _arrayEncoding="spaceSeparatedNumbers">0 1 0</Camera.up>
@@ -137,21 +137,35 @@
         <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
       </transform>
     </item>
-    <item name="MeadowSlope" enabled="true">
+    <item name="MeadowSlope" enabled="true" static="true">
       <components>
         <components:Camera Camera.active="false" Camera.useTransformRotation="false" Camera.fov="67" Camera.near="0.06" Camera.far="24000" Camera.orthographic="false" Camera.orthographicSize="5">
           <Camera.up _arrayEncoding="spaceSeparatedNumbers">0 1 0</Camera.up>
-          <Camera.target _arrayEncoding="spaceSeparatedNumbers">-217.039 10.012 1360.567</Camera.target>
+          <Camera.target _arrayEncoding="spaceSeparatedNumbers">-312.567 118.325 -977.039</Camera.target>
         </components:Camera>
       </components>
       <children />
       <transform>
-        <Transform.position _arrayEncoding="spaceSeparatedNumbers">-240 12.0125 1416</Transform.position>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">-368 120.325 -1000</Transform.position>
         <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
         <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
       </transform>
     </item>
-    <item name="Late afternoon sun" enabled="true">
+    <item name="Escarpment" enabled="true" static="true">
+      <components>
+        <components:Camera Camera.active="false" Camera.useTransformRotation="false" Camera.fov="67" Camera.near="0.06" Camera.far="24000" Camera.orthographic="false" Camera.orthographicSize="5">
+          <Camera.up _arrayEncoding="spaceSeparatedNumbers">0 1 0</Camera.up>
+          <Camera.target _arrayEncoding="spaceSeparatedNumbers">-150.000 15.906 -660.000</Camera.target>
+        </components:Camera>
+      </components>
+      <children />
+      <transform>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">-350 -10.6594 -370</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+      </transform>
+    </item>
+    <item name="Late afternoon sun" enabled="true" static="true">
       <components>
         <components:Light Light.lightType="1" Light.intensity="3.2" Light.range="8" Light.falloff="2" Light.intensityMode="0" Light.innerConeAngle="25" Light.outerConeAngle="35" Light.lightingChannels="-1" Light.cookieTexture="Assets/Textures/Atmosphere/Cloud_Shadow.png" Light.iesProfileTexture="" Light.cookieScale="2400" Light.cookieScrollX="6" Light.cookieScrollY="2" Light.baked="false" Light.castsShadows="true" Light.shadowStrength="1" Light.shadowDepthBias="0.00050000002374872565" Light.shadowNormalBias="0.06" Light.shadowResolutionScale="1" Light.shadowFilterScale="1">
           <Light.color>
@@ -180,7 +194,7 @@
         </Transform.scale>
       </transform>
     </item>
-    <item name="Atmosphere" enabled="true">
+    <item name="Atmosphere" enabled="true" static="true">
       <transform>
         <Transform.position _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.position>
         <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
@@ -281,7 +295,7 @@
         </item>
       </children>
     </item>
-    <item name="Landscape" enabled="true">
+    <item name="Landscape" enabled="true" static="true">
       <transform>
         <Transform.position _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.position>
         <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
@@ -292,6 +306,15 @@
         <components:Material Material.useVertexColors="true" Material.specularModel="MetallicRoughness" Material.alphaMode="Opaque" Material.doubleSided="false" />
         <components:TerrainManager TerrainManager.cellsX="32" TerrainManager.cellsY="32" TerrainManager.cellWidth="4" TerrainManager.cellDepth="4" TerrainManager.loadedRadius="5" TerrainManager.editorRadius="3" TerrainManager.farRadius="32" TerrainManager.lod2Radius="2" TerrainManager.lod4Radius="3" TerrainManager.farTileScreenErrorPixels="6" TerrainManager.farObjectRadius="64" TerrainManager.farClusterDistance="2200" TerrainManager.farClusterSize="40" TerrainManager.farClusterMinimumTrees="5" TerrainManager.maxLodChangesPerUpdate="4" TerrainManager.maxLoadsPerUpdate="6" TerrainManager.maxUnloadsPerUpdate="4" TerrainManager.asyncStreaming="true" TerrainManager.maxPreparedCells="4" TerrainManager.maxUploadsPerUpdate="4" TerrainManager.batchFarCells="true" TerrainManager.fastRuntimeLighting="true" TerrainManager.stochasticTerrainVariation="true" TerrainManager.terrainMacroColorEnabled="true" TerrainManager.reliefMapping="true" TerrainManager.reliefShadows="false" TerrainManager.measurementGrid="false" TerrainManager.generateColliders="true" TerrainManager.streamCollidersByDistance="true" TerrainManager.cpuBudgetMiB="512" TerrainManager.gpuBudgetMiB="256" TerrainManager.cacheBudgetMiB="1024" TerrainManager.viewerObjectName="Landscape Explorer" TerrainManager.cellDataDirectory="Engine/Core/Assets/TerrainData/Landscape" TerrainManager.runtimeBakeDirectory="" TerrainManager.requireRuntimeBake="false">
           <TerrainManager.cells />
+          <TerrainManager.farClusters>
+            <item asset="Assets/Prefabs/Woodland/Clusters/ForestCluster_Oak_01.prefab" match="/Oaks/" trees="14" />
+            <item asset="Assets/Prefabs/Woodland/Clusters/ForestCluster_Oak_02.prefab" match="/Oaks/" trees="14" />
+            <item asset="Assets/Prefabs/Woodland/Clusters/ForestCluster_Oak_03.prefab" match="/Oaks/" trees="14" />
+            <item asset="Assets/Prefabs/Woodland/Clusters/ForestCluster_Oak_04.prefab" match="/Oaks/" trees="14" />
+            <item asset="Assets/Prefabs/Woodland/Clusters/ForestCluster_Conifer_01.prefab" match="/Conifers/" trees="14" />
+            <item asset="Assets/Prefabs/Woodland/Clusters/ForestCluster_Conifer_02.prefab" match="/Conifers/" trees="14" />
+            <item asset="Assets/Prefabs/Woodland/Clusters/ForestCluster_Conifer_03.prefab" match="/Conifers/" trees="14" />
+          </TerrainManager.farClusters>
           <TerrainManager.objectLayerNames>
             <item>Landscape forest</item>
             <item>Procedural meadow grass</item>
@@ -491,15 +514,6 @@
             <item y="94" start="-94" end="94" />
           </TerrainManager.proceduralRuns>
           <TerrainManager.editedCells />
-          <TerrainManager.farClusters>
-            <item asset="Assets/Prefabs/Woodland/Clusters/ForestCluster_Oak_01.prefab" match="/Oaks/" trees="14" />
-            <item asset="Assets/Prefabs/Woodland/Clusters/ForestCluster_Oak_02.prefab" match="/Oaks/" trees="14" />
-            <item asset="Assets/Prefabs/Woodland/Clusters/ForestCluster_Conifer_01.prefab" match="/Conifers/" trees="14" />
-            <item asset="Assets/Prefabs/Woodland/Clusters/ForestCluster_Conifer_02.prefab" match="/Conifers/" trees="14" />
-            <item asset="Assets/Prefabs/Woodland/Clusters/ForestCluster_Oak_03.prefab" match="/Oaks/" trees="14" />
-            <item asset="Assets/Prefabs/Woodland/Clusters/ForestCluster_Oak_04.prefab" match="/Oaks/" trees="14" />
-            <item asset="Assets/Prefabs/Woodland/Clusters/ForestCluster_Conifer_03.prefab" match="/Conifers/" trees="14" />
-          </TerrainManager.farClusters>
         </components:TerrainManager>
         <components:LandscapeDriver LandscapeDriver.viewerObjectName="Landscape Explorer" LandscapeDriver.mapHalfExtentCells="94" LandscapeDriver.heightArchive="Assets/TerrainData/Landscape/world.heights" LandscapeDriver.farGrid="Assets/TerrainData/Landscape/world.fargrid" LandscapeDriver.cacheDirectory=".local/cache/landscape_demo" LandscapeDriver.enableFarTerrain="true" LandscapeDriver.waterLevel="-40" LandscapeDriver.rockLine="1150" LandscapeDriver.snowLine="1480" LandscapeDriver.treeLine="950" LandscapeDriver.altitudeBlend="6" LandscapeDriver.treesPerCell="220" LandscapeDriver.forestLayerName="Landscape forest" LandscapeDriver.grassRadius="26" />
       </components>

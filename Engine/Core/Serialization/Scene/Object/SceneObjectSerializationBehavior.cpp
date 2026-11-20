@@ -111,6 +111,7 @@ Engine::Core::Object* DeserializeObjectNodeInternal(
         SceneObjectBehavior::DeserializeTransform(object->transform, node["transform"]);
         if (node.Has("enabled")) object->enabled = node["enabled"].AsBool();
         if (node.Has("layer")) object->layer = std::max(0, node["layer"].AsInt());
+        object->isStatic = node.Has("static") && node["static"].AsBool();
         if (node.Has("prefabOverrides"))
             SceneObjectBehavior::ApplyPrefabPatches(
                 *object, node["prefabOverrides"], graphicsProvider);
@@ -152,6 +153,7 @@ Engine::Core::Object* DeserializeObjectTreeInternal(
             object->enabled = node["enabled"].AsBool();
         if (node.Has("layer"))
             object->layer = std::max(0, node["layer"].AsInt());
+        object->isStatic = node.Has("static") && node["static"].AsBool();
         if (node.Has("prefabOverrides"))
             SceneObjectBehavior::ApplyPrefabPatches(
                 *object, node["prefabOverrides"], graphicsProvider);
@@ -187,6 +189,7 @@ bool DeserializeExpandedObjectShallow(
         object.name = "Object";
     object.enabled = !node.Has("enabled") || node["enabled"].AsBool();
     object.layer = node.Has("layer") ? std::max(0, node["layer"].AsInt()) : 0;
+    object.isStatic = node.Has("static") && node["static"].AsBool();
 
     SceneObjectBehavior::DeserializeTransform(object.transform, node["transform"]);
 
@@ -440,6 +443,7 @@ JsonValue SceneObjectBehavior::SerializeObject(
         node.Set("prefab", JsonValue(obj.Prefab->GetPath()));
         node.Set("transform", SerializeTransform(obj.transform));
         if (obj.layer != 0) node.Set("layer", JsonValue(obj.layer));
+        if (obj.isStatic) node.Set("static", JsonValue(true));
         EnsurePrefabPatchCache(obj);
         JsonValue prefabOverrides = JsonValue::MakeArray();
         try
@@ -460,6 +464,8 @@ JsonValue SceneObjectBehavior::SerializeObject(
     node.Set("enabled", JsonValue(obj.enabled));
     // Written only off the Default layer so existing files stay unchanged.
     if (obj.layer != 0) node.Set("layer", JsonValue(obj.layer));
+    // Written only when set, so existing files stay unchanged.
+    if (obj.isStatic) node.Set("static", JsonValue(true));
 
     // Engine::Components::Transform
     node.Set("transform", SerializeTransform(obj.transform));
@@ -558,6 +564,9 @@ void SceneObjectBehavior::DiffJson(const JsonValue& baseline, const JsonValue& c
             const std::string& key = current.ObjectKey(i);
             if (skipRootTransform && path.ArraySize() == 0 && key == "transform")
                 continue;
+            // The root's static flag is stored on the instance's scene node,
+            // not as a prefab override.
+            if (path.ArraySize() == 0 && key == "static") continue;
             const JsonValue nextPath = PathWith(path, key);
             if (!baseline.Has(key)) AddPatch(patches, nextPath, &current.ObjectValue(i));
             else DiffJson(baseline[key], current.ObjectValue(i), nextPath,
@@ -567,6 +576,7 @@ void SceneObjectBehavior::DiffJson(const JsonValue& baseline, const JsonValue& c
         {
             const std::string& key = baseline.ObjectKey(i);
             if ((skipRootTransform && path.ArraySize() == 0 && key == "transform") ||
+                (path.ArraySize() == 0 && key == "static") ||
                 current.Has(key)) continue;
             const JsonValue nextPath = PathWith(path, key);
             AddPatch(patches, nextPath, nullptr);
@@ -658,6 +668,7 @@ bool SceneObjectBehavior::ApplyObjectState(Engine::Core::Object& object, const J
         if (node.Has("name")) object.name = node["name"].AsString();
         object.enabled = !node.Has("enabled") || node["enabled"].AsBool();
     object.layer = node.Has("layer") ? std::max(0, node["layer"].AsInt()) : 0;
+    object.isStatic = node.Has("static") && node["static"].AsBool();
         DeserializeTransform(object.transform, node["transform"]);
         return true;
     }
@@ -705,6 +716,7 @@ bool SceneObjectBehavior::ApplyObjectState(Engine::Core::Object& object, const J
     if (node.Has("name")) object.name = node["name"].AsString();
     object.enabled = !node.Has("enabled") || node["enabled"].AsBool();
     object.layer = node.Has("layer") ? std::max(0, node["layer"].AsInt()) : 0;
+    object.isStatic = node.Has("static") && node["static"].AsBool();
     DeserializeTransform(object.transform, node["transform"]);
     auto component = object.Components.begin();
     for (size_t i = 0; i < components.ArraySize(); ++i, ++component)

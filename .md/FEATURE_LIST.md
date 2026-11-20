@@ -9,6 +9,8 @@ This list describes the source tree as of October 22, 2026. **Current** means an
 - Windows x64 editor, standalone game, and headless scene runner.
 - Project Hub, project templates, project settings, and portable Windows game export.
 - Scene hierarchy, transforms, components, scene serialization, prefabs, and asset references.
+- Static objects: a per-object flag; static prefab instances are drawn as instanced placements during play, and
+  objects whose components contradict the flag are reported.
 - C++ gameplay scripts with editor hot reload and VS Code debugging integration.
 - Editor Play mode, undo and redo, console, problems view, and performance view.
 

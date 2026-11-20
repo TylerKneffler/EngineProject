@@ -48,7 +48,7 @@ const std::array<glm::vec3, LayerCount> LayerPreview{{
     {.22f, .15f, .10f}, {.40f, .38f, .34f}, {.85f, .88f, .92f}}};
 
 // Mesh caches store the painted weights: change this with the paint rules.
-constexpr uint64_t PaintRevision = 0x4c414e4453435037ull;
+constexpr uint64_t PaintRevision = 0x4c414e4453435038ull;
 
 // Heights the paint and forests follow (see LandscapeDriver's properties).
 // blend scales the height transitions above the shore, so taller maps get
@@ -87,12 +87,25 @@ float ValueNoise(float x, float z, float period, uint32_t seed)
         (corner(0, 1) * (1 - tx) + corner(1, 1) * tx) * tz;
 }
 
-// 0 in open meadow, 1 inside forest.
-float ForestMask(float x, float z)
+// 0 in open meadow, 1 inside forest. Ground well above the water is more
+// wooded (the noise is raised by .06 from 30 to 80 m above the water level,
+// about 44% forest on the valley floors and 60% above), so hills carry
+// forest with meadow clearings while the valley floors stay half open.
+// tools/add_landscape_viewpoints.py replicates this.
+float ForestMask(float x, float z, float height, const Altitudes& a)
 {
     const float n = .6f * ValueNoise(x, z, 260.f, 11u) +
-        .28f * ValueNoise(x, z, 95.f, 23u) + .12f * ValueNoise(x, z, 37.f, 37u);
+        .28f * ValueNoise(x, z, 95.f, 23u) + .12f * ValueNoise(x, z, 37.f, 37u) +
+        .06f * SmoothStep(a.water + 30.f, a.water + 80.f, height);
     return SmoothStep(.46f, .58f, n);
+}
+
+// Where the forest edge is planted up: 0 in open meadow and in closed
+// forest, 1 across the outer part of the mask's transition (about 15 m wide
+// on the ground). `inner` is the mask value where the belt has faded out.
+float ForestEdgeBelt(float forest, float inner)
+{
+    return SmoothStep(.02f, .15f, forest) * (1.f - SmoothStep(inner * .6f, inner, forest));
 }
 
 // Share of forest allowed at a height: none on shores or above the tree line.
@@ -139,7 +152,11 @@ void PaintSample(float height, uint8_t rockClass, float worldX, float worldZ,
     const float snow = SmoothStep(a.snow - 6.f * a.blend, a.snow + 6.f * a.blend,
         height + detail * 10.f * a.blend) *
         (1.f - .55f * rockSlope);
-    const float soil = land * (1.f - rock) * ForestMask(worldX, worldZ) *
+    // Forest soil only well inside the forest: the outer part of the edge
+    // keeps meadow grass under its trees and shrub belt, so no line of bare
+    // soil shows under the edge from the meadow.
+    const float soil = land * (1.f - rock) *
+        SmoothStep(.3f, .85f, ForestMask(worldX, worldZ, height, a)) *
         ForestBand(height, a) * .85f;
     weights[Sand] = 1.f - shore;
     weights[Gravel] = shore * (1.f - land);
@@ -567,15 +584,14 @@ void GenerateForest(const TerrainManager::ObjectLayerContext& context,
         const float worldX = context.cell.first * width + x;
         const float worldZ = context.cell.second * depth + z;
         // Lone meadow trees keep a 3% chance outside the forest mask.
-        const float density = std::max(ForestMask(worldX, worldZ), .03f) *
-            ForestBand(height, a);
+        const float interior = ForestMask(worldX, worldZ, height, a);
+        const float density = std::max(interior, .03f) * ForestBand(height, a);
         if (chance >= density) continue;
         // Trails stay clear (the mask reaches ~4 m either side of the track).
         if (TrailMask(worldX, worldZ) > .02f) continue;
         TerrainObjectLayer::Placement placement;
         placement.id = ++id;
         // Forest interiors favour large trees, edges and meadows small ones.
-        const float interior = ForestMask(worldX, worldZ);
         const float sizeClass = pick * .6f + (1.f - interior) * .4f;
         const int sizeBand = sizeClass < .5f ? 0 : sizeClass < .75f ? 1 : 2;
         // Conifer or oak, the stand's species, and the tree's lean come from
@@ -599,6 +615,63 @@ void GenerateForest(const TerrainManager::ObjectLayerContext& context,
         placement.normal = {std::sin(lean) * std::cos(leanDirection), std::cos(lean),
             std::sin(lean) * std::sin(leanDirection)};
         layer.placements.push_back(std::move(placement));
+    }
+    // Forest edge. The pass above thins out with the mask, which left the
+    // edge as scattered trunks over open ground with sky between the crowns.
+    // A second pass closes it: medium and small trees and saplings across the
+    // mask's transition, up to one per ~30 m2, smaller toward the meadow, so
+    // the crowns step down to the shrub belt (GenerateProps) and the ground.
+    // Its own random stream leaves the trees above where they were. Loaded
+    // cells only: these trees are too small to matter in the far blocks, and
+    // every far tree costs an impostor.
+    if (!context.farObjects)
+    {
+        uint32_t edgeState = Hash(context.cell.first, context.cell.second, 0x65646765u) | 1u;
+        const auto edgeRandom = [&edgeState]
+        {
+            edgeState ^= edgeState << 13; edgeState ^= edgeState >> 17; edgeState ^= edgeState << 5;
+            return (edgeState & 0xffffffu) / float(0x1000000);
+        };
+        for (int attempt = 0; attempt < treesPerCell * 3; ++attempt)
+        {
+            const float x = (.01f + .98f * edgeRandom()) * width;
+            const float z = (.01f + .98f * edgeRandom()) * depth;
+            const float chance = edgeRandom(), pick = edgeRandom(), yaw = edgeRandom(),
+                size = edgeRandom();
+            float height = 0.f;
+            glm::vec3 normal(0.f, 1.f, 0.f);
+            if (!Engine::Components::SampleTerrainSurface(*context.heights, context.cellsX,
+                    context.cellsY, context.cellWidth, context.cellDepth, x, z, height, &normal))
+                continue;
+            if (normal.y < .86f) continue;
+            const float worldX = context.cell.first * width + x;
+            const float worldZ = context.cell.second * depth + z;
+            const float forest = ForestMask(worldX, worldZ, height, a) * ForestBand(height, a);
+            if (chance >= .8f * ForestEdgeBelt(forest, .9f)) continue;
+            if (TrailMask(worldX, worldZ) > .02f) continue;
+            // 0 at the meadow side of the belt, 1 at the forest side.
+            const float inward = SmoothStep(.05f, .7f, forest);
+            const float sizeClass = pick * .65f + inward * .35f;
+            const int sizeBand = sizeClass > .62f ? 1 : 2;
+            const bool sapling = sizeBand == 2 && sizeClass < .34f;
+            const bool conifer = std::fmod(pick * 7.31f + yaw * 3.17f, 1.f) < ConiferShare(height, a);
+            TerrainObjectLayer::Placement placement;
+            placement.id = ++id;
+            if (conifer)
+                placement.asset = coniferPrefix + ConiferSpecies[sizeBand == 1 ? 2u : 3u] + ".prefab";
+            else
+                placement.asset = prefix + Species[sizeBand == 1 ? (size < .5f ? 4u : 5u) :
+                    sapling ? 7u : 6u] + ".prefab";
+            placement.position = {x, height - .08f, z};
+            placement.yawDegrees = yaw * 360.f;
+            placement.scale = .8f + size * .6f;
+            // Edge trees lean out toward the light, up to ~9 degrees.
+            const float lean = glm::radians(conifer ? 2.f : 9.f * size * size);
+            const float leanDirection = pick * glm::two_pi<float>();
+            placement.normal = {std::sin(lean) * std::cos(leanDirection), std::cos(lean),
+                std::sin(lean) * std::sin(leanDirection)};
+            layer.placements.push_back(std::move(placement));
+        }
     }
     GenerateCliffs(context, layer, a, id);
 }
@@ -770,7 +843,7 @@ void GenerateProps(const TerrainManager::ObjectLayerContext& context,
             continue;
         const float worldX = context.cell.first * width + x;
         const float worldZ = context.cell.second * depth + z;
-        const float forest = ForestMask(worldX, worldZ) * ForestBand(height, a);
+        const float forest = ForestMask(worldX, worldZ, height, a) * ForestBand(height, a);
         // Nothing grows or lies on a trail.
         if (TrailMask(worldX, worldZ) > .1f) continue;
         if (undergrowth)
@@ -869,6 +942,44 @@ void GenerateProps(const TerrainManager::ObjectLayerContext& context,
         }
         const int rock = standRocks[pick < .5f ? 0 : 1];
         place(RockPrefab(rock), x, height - .08f * scale, z, lean, yaw, scale);
+    }
+    if (!undergrowth) return;
+    // Shrub belt: tall bushes massed along the meadow side of every forest
+    // edge (up to one per ~12 m2, enlarged, ragged by the clump noise), so
+    // the edge trees' trunks and the ground under them are hidden from the
+    // meadow. Its own random stream, so the scatter above keeps its layout.
+    uint32_t beltState = Hash(context.cell.first, context.cell.second, 0x62656c74u) | 1u;
+    const auto beltRandom = [&beltState]
+    {
+        beltState ^= beltState << 13; beltState ^= beltState >> 17; beltState ^= beltState << 5;
+        return (beltState & 0xffffffu) / float(0x1000000);
+    };
+    const int beltAttempts = static_cast<int>(std::lround(1400.f * std::clamp(density, 0.f, 4.f)));
+    for (int attempt = 0; attempt < beltAttempts; ++attempt)
+    {
+        const float x = (.01f + .98f * beltRandom()) * width;
+        const float z = (.01f + .98f * beltRandom()) * depth;
+        const float chance = beltRandom(), pick = beltRandom(), yaw = beltRandom(),
+            size = beltRandom();
+        float height = 0.f;
+        glm::vec3 normal(0.f, 1.f, 0.f);
+        if (!Engine::Components::SampleTerrainSurface(*context.heights, context.cellsX,
+                context.cellsY, context.cellWidth, context.cellDepth, x, z, height, &normal))
+            continue;
+        if (height < waterLevel + 1.5f || normal.y < .82f) continue;
+        const float worldX = context.cell.first * width + x;
+        const float worldZ = context.cell.second * depth + z;
+        const float forest = ForestMask(worldX, worldZ, height, a) * ForestBand(height, a);
+        const float belt = ForestEdgeBelt(forest, .75f);
+        if (belt <= 0.f) continue;
+        const float clump = ValueNoise(worldX, worldZ, 16.f, 211u);
+        if (chance >= belt * (.4f + .6f * clump) * (1.f - paint(x, z, Snow)) *
+                (1.f - paint(x, z, Rock))) continue;
+        if (TrailMask(worldX, worldZ) > .1f) continue;
+        // Mostly the stand's tall bush; the low one fills in at the front.
+        const size_t bush = standBushes[pick < .3f ? 0 : 1];
+        place(std::string("Assets/Prefabs/Woodland/Bushes/") + Bushes[bush] + ".prefab",
+            x, height - .08f, z, glm::vec3(0.f, 1.f, 0.f), yaw, 1.f + .9f * size);
     }
 }
 }

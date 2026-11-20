@@ -159,6 +159,9 @@ void Game::Start()
     for (const auto& object : objects)
         if (object)
             object->transform.ClearEditorOverride();
+    // Static prefab instances become instanced placements before anything
+    // starts, so they never run as scene objects (Core/Scene/StaticObjects.h).
+    Engine::Scene::StaticObjects::BakeForPlay(m_scene);
     // Component Start() can remove preview objects (terrain does this when
     // switching to its runtime bake), invalidating a scene object iterator.
     std::vector<Engine::Core::Object*> startingObjects;
@@ -172,6 +175,8 @@ void Game::Start()
             object->Start();
     m_scene.MarkStarted();
     m_scene.CommitPendingObjectChanges();
+    // After Start, so placement done by a component's Start is not reported.
+    m_staticMotionWatch.Begin(m_scene);
 }
 
 void Game::Update(float deltaTime)
@@ -300,6 +305,7 @@ void Game::Update(float deltaTime)
     {
     m_scene.EndUpdatePass();
     m_scene.CommitPendingObjectChanges();
+    m_staticMotionWatch.Check(m_scene);
     if (const auto* input = Engine::Core::CurrentNativeInputSnapshot())
     {
         if (input->clientWidth && input->clientHeight)

@@ -22,8 +22,10 @@ Pipeline. A macro height field at 16 m covers the whole map: a lowland valley
 around the start, ringed by ridged ranges that reach ~1.9 km. A particle
 hydraulic erosion pass (droplets, after Beyer 2015) carves it and records how
 much water passed each texel (flow) and how much sediment settled
-(deposition). Lakes are carved after erosion. Inside the play area the eroded
-field is resampled to 4 m and gets fine detail.
+(deposition). Rolling hills and one rock escarpment are raised in the lowland
+after erosion, then the lakes are carved. Inside the play area the eroded
+field is resampled to 4 m and gets fine detail. The hills and the escarpment
+are not in the flow and deposition maps.
 
 Flow and deposition files share one header, little endian:
   u64 magic ("TRNRFLW1" / "TRNRDEP1"), u32 version 1, u64 archive signature,
@@ -41,9 +43,10 @@ rock class (0..3) from slope, computed over whole grids so the paint matches
 across cell borders. Forests and grass are placed at runtime by
 LandscapeDriver from the same heights.
 
-Re-running replaces the generated files, and deletes sculpt edits
-(*.terrainedit) in the data directory: they store absolute heights for the
-map they were made on. The explorer and sun objects are copied from
+Re-running replaces the generated files, and deletes the sculpt edits
+(*.terrainedit) of every cell whose heights changed: they store absolute
+heights for the map they were made on. Edits of cells that come out
+identical are kept. The explorer and sun objects are copied from
 the current landscape_demo.scene so their component settings stay current.
 Requires numpy and scipy.
 """
@@ -192,6 +195,69 @@ VISTA_EYE = (2304.0, 463.0, -3072.0)
 VISTA_TARGET = (283.0, 254.0, -865.0)
 
 
+# Rolling hills of the lowland: none within HILL_CLEAR of the start (the start
+# meadow stays a valley floor with the first lake in view) or on the lakes,
+# full height out to HILL_REACH[0], gone by HILL_REACH[1] where the foothills
+# take over.
+HILL_HEIGHT = 150.0
+HILL_CLEAR = (260.0, 620.0)
+HILL_REACH = (1900.0, 2900.0)
+# The escarpment: a cuesta whose rock face looks along `facing` (unit x, z)
+# from a line through `centre`; `height` metres of face at the middle,
+# tapering to nothing at +-`half_length` along the line, with the plateau
+# behind it dipping away over `back` metres. Placed 2026-11-20 by searching
+# 500-1400 m around the start for a spot clear of the lakes whose face is
+# sunlit (it looks toward the scene sun's azimuth, so a viewer in front has
+# the sun behind), with open meadow in front and forest mask behind.
+# tools/add_landscape_viewpoints.py derives the "Escarpment" viewpoint from it.
+ESCARPMENT = {"centre": (-150.0, -660.0), "facing": (0.0, 1.0), "height": 80.0,
+              "half_length": 430.0, "back": 650.0}
+
+
+def lowland_hills(x, z):
+    """Metres of rounded hill added to the lowland (exactly 0 outside it)."""
+    distance = np.sqrt((x - START[0]) ** 2 + (z - START[1]) ** 2)
+    region = ((1.0 - smoothstep(HILL_REACH[0], HILL_REACH[1], distance)) *
+              smoothstep(HILL_CLEAR[0], HILL_CLEAR[1], distance))
+    for cx, cz, radius in LAKES:
+        d = np.sqrt((x - cx) ** 2 + (z - cz) ** 2)
+        region = region * smoothstep(radius * 1.05, radius * 1.05 + 450.0, d)
+    # Broad swells with flat valley floors between them; a second, shorter
+    # wave varies the summits so they are not one height.
+    shape = smoothstep(0.40, 0.72, fbm(x, z, 1500.0, 601, 2))
+    relief = 0.75 + 0.5 * fbm(x, z, 420.0, 613, 3)
+    return HILL_HEIGHT * region * shape * relief
+
+
+def escarpment_frame(x, z):
+    """(u, v): metres along the face line and behind it (plateau side)."""
+    cx, cz = ESCARPMENT["centre"]
+    fx, fz = ESCARPMENT["facing"]
+    u = -(x - cx) * fz + (z - cz) * fx
+    v = -((x - cx) * fx + (z - cz) * fz)
+    return u, v
+
+
+def escarpment(x, z):
+    """Metres added by the escarpment (exactly 0 outside its footprint)."""
+    u, v = escarpment_frame(x, z)
+    length = ESCARPMENT["half_length"]
+    ends = 1.0 - smoothstep(0.55 * length, length, np.abs(u))
+    back = 1.0 - smoothstep(120.0, ESCARPMENT["back"], v)
+    # The face line swings in a slow S and is cut by gullies and buttresses;
+    # its steepness varies too, so some gullies are grass ramps (about 40
+    # degrees) between sheer buttresses (70 and more).
+    line = v + 45.0 * np.sin(u / 240.0) + (fbm(x, z, 150.0, 631, 3) - 0.5) * 2.0 * 24.0
+    half_width = 13.0 + 34.0 * smoothstep(0.5, 0.8, fbm(x, z, 210.0, 641, 2))
+    face = smoothstep(-half_width, half_width, line)
+    # The rim rises and dips along the face (66-95 m at the middle), and a
+    # talus apron climbs 12 m over the last 70 m to the foot of the rock.
+    rim = 0.82 + 0.36 * fbm(x, z, 380.0, 651, 2)
+    talus = 12.0 * (1.0 - smoothstep(0.0, 70.0, -line)) ** 2 * (1.0 - face)
+    footprint = (v > -160.0) & (v < ESCARPMENT["back"]) & (np.abs(u) < length)
+    return np.where(footprint, ends * (ESCARPMENT["height"] * rim * back * face + talus), 0.0)
+
+
 def grid(extent_cells, step):
     """World x, z of a sample grid spanning cells -extent..extent at step m."""
     count = int(round((2 * extent_cells + 1) * CELLS * SPACING / step)) + 1
@@ -322,13 +388,15 @@ def erode(height, spacing, seed=9, droplets_per_texel=0.2, batch=150000, max_ste
 
 
 def carve(height, x, z):
-    """Lowland around the start, lake basins and a dry start pad."""
+    """Lowland around the start with its hills and escarpment, lake basins
+    and a dry start pad."""
     rolling = (fbm(x, z, 900.0, 3) - 0.5) * 2.0 * 24.0
     hills = (fbm(x, z, 330.0, 53, 3) - 0.5) * 2.0 * 13.0
     detail = (fbm(x, z, 60.0, 307, 3) - 0.5) * 3.0
     lowland = bump(x, z, START[0], START[1], 900.0)
     valley = -27.0 + rolling * 0.4 + hills * 0.6 + detail
     height = height * (1.0 - lowland) + valley * lowland
+    height = height + lowland_hills(x, z) + escarpment(x, z)
     for index, (cx, cz, radius) in enumerate(LAKES):
         # Irregular shorelines: warp the coordinates before measuring distance.
         wx = x + (fbm(x, z, 420.0, 401 + index * 7, 3) - 0.5) * 2.0 * radius * 0.55
@@ -467,8 +535,11 @@ def archive_body(world):
 
 
 def write_archive(world):
+    """Returns the signature and the cells left unchanged by this rebuild."""
     DATA.mkdir(parents=True, exist_ok=True)
     body, corners, signature = archive_body(world)
+    path = DATA / "world.heights"
+    same = unchanged_cells(path.read_bytes() if path.exists() else None, body)
     with open(DATA / "world.heights", "wb") as file:
         file.write(struct.pack("<QIQiiifii", ARCHIVE_MAGIC, 3, signature, EXTENT,
                                CELLS, CELLS, SCALE, FINE_EXTENT, COARSE))
@@ -479,7 +550,7 @@ def write_archive(world):
                                side, CELLS, CELLS, SCALE))
         file.write(np.ascontiguousarray(corners.astype("<i2")).tobytes())
         file.write(struct.pack("<I", 0))
-    return signature
+    return signature, same
 
 
 def write_map(path, magic, signature, values, scale, origin):
@@ -500,12 +571,41 @@ def write_hydrology(world, signature):
               deposition_scale, world["origin"])
 
 
-def remove_stale_edits():
-    removed = sorted(DATA.glob("*.terrainedit"))
-    for path in removed:
-        path.unlink()
+def unchanged_cells(previous, body):
+    """Cells whose stored block in the previous archive (file bytes, or None)
+    equals the new one. Empty when the two do not share a layout."""
+    header = struct.Struct("<QIQiiifii")
+    if not previous or len(previous) != header.size + len(body):
+        return set()
+    if header.unpack_from(previous, 0)[3:] != (EXTENT, CELLS, CELLS, SCALE, FINE_EXTENT, COARSE):
+        return set()
+    same = set()
+    offset = 0
+    for cell_z in range(-EXTENT, EXTENT + 1):
+        for cell_x in range(-EXTENT, EXTENT + 1):
+            side = CELLS + 1 if max(abs(cell_x), abs(cell_z)) <= FINE_EXTENT else CELLS // COARSE + 1
+            size = side * side * 2 + (side * side + 3) // 4
+            start = header.size + offset
+            if previous[start:start + size] == body[offset:offset + size]:
+                same.add((cell_x, cell_z))
+            offset += size
+    return same
+
+
+def remove_stale_edits(keep):
+    """Deletes the sculpt edits (<x>_<z>.terrainedit) of cells not in keep."""
+    removed = []
+    for path in sorted(DATA.glob("*.terrainedit")):
+        try:
+            cell = tuple(int(part) for part in path.stem.split("_"))
+        except ValueError:
+            cell = None
+        if cell not in keep:
+            path.unlink()
+            removed.append(path.name)
     if removed:
-        print(f"removed {len(removed)} sculpt edits made on the previous map")
+        print(f"removed {len(removed)} sculpt edits of cells whose heights changed: "
+              + ", ".join(removed))
 
 
 def numbers(values):
@@ -813,9 +913,9 @@ def main():
     arguments = parser.parse_args()
     world = build()
     if not arguments.no_write:
-        signature = write_archive(world)
+        signature, same = write_archive(world)
         write_hydrology(world, signature)
-        remove_stale_edits()
+        remove_stale_edits(same)
         write_scene(world)
         # Eye-level foliage viewpoints next to "Vista" (reads the new archive).
         import add_landscape_viewpoints

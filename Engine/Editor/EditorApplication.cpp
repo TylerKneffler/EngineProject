@@ -359,6 +359,14 @@ int Engine::Editor::EditorApplication::Run(HINSTANCE hInstance)
         pendingPlayStart = false;
         playGame = std::make_unique<Engine::Runtime::Game>(*scene);
         playGame->SetDefaultScenePath(projectSettings.defaultScene);
+        // Static-object warnings (flag contradictions, instances that could
+        // not be batched) go to the Console. Play runs on this thread.
+        Engine::Scene::StaticObjects::SetWarningSink([&](const std::string& message)
+        {
+            if (auto* console = editorState->GetConsole())
+                console->AddLog(Engine::Editor::ConsoleView::Level::Warning,
+                    "[Static] " + message);
+        });
         playGame->Start();
         resetPlayDelta = true;
     };

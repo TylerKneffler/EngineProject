@@ -8,6 +8,11 @@ existing "Vista":
   ForestEdge   standing in the meadow, looking at an oak forest edge
   ForestFloor  inside a forest, looking across the forest floor
   Backlit      in the meadow with forest between the camera and the sun
+  Trail        on a forest trail
+  Cliffs       below the steepest slope within reach
+  MeadowSlope  a sunlit meadow slope with a forest edge and a valley beyond
+  Escarpment   in the meadow in front of the escarpment
+               (build_landscape_demo.py ESCARPMENT), looking at its face
 
 Forests are placed at runtime by LandscapeDriver from ForestMask (value noise
 over world metres); ForestMask/ForestBand below replicate it exactly, and
@@ -25,6 +30,8 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import build_grass_test_scene as grass
+import scene_static
+from build_landscape_demo import ESCARPMENT
 
 SCENE = grass.ASSETS / "Scenes" / "terrain" / "landscape_demo.scene"
 NAMESPACE = grass.NAMESPACE
@@ -38,7 +45,7 @@ WATER, TREE_LINE, BLEND = -40.0, 950.0, 6.0
 # along the rotated +z axis), flattened onto the ground.
 SUN_PITCH, SUN_YAW = 1.0, 2.4
 SUN_FLAT = (-math.sin(SUN_YAW) * math.cos(SUN_PITCH), -math.cos(SUN_YAW) * math.cos(SUN_PITCH))
-NAMES = ("ForestEdge", "ForestFloor", "Backlit", "Trail", "Cliffs", "MeadowSlope")
+NAMES = ("ForestEdge", "ForestFloor", "Backlit", "Trail", "Cliffs", "MeadowSlope", "Escarpment")
 
 
 # --- LandscapeDriver.cpp ForestMask / ForestBand, bit for bit ---------------
@@ -70,9 +77,13 @@ def smoothstep(a, b, x):
     return t * t * (3 - 2 * t)
 
 
-def forest_mask(x, z):
+def forest_mask(x, z, height=None):
+    """height: ground metres at x, z (read from the archive when omitted)."""
+    if height is None:
+        height = ground(x, z)
     n = (0.6 * value_noise(x, z, 260.0, 11) + 0.28 * value_noise(x, z, 95.0, 23) +
-         0.12 * value_noise(x, z, 37.0, 37))
+         0.12 * value_noise(x, z, 37.0, 37) +
+         0.06 * smoothstep(WATER + 30.0, WATER + 80.0, height))
     return smoothstep(0.46, 0.58, n)
 
 
@@ -115,7 +126,8 @@ def ground(x, z):
 def wooded(x, z):
     """Forest cover: the mask where the height band lets trees grow (the
     valley floor sits near the band's lower edge, so the band only gates)."""
-    return forest_mask(x, z) if forest_band(ground(x, z)) > 0.6 else 0.0
+    height = ground(x, z)
+    return forest_mask(x, z, height) if forest_band(height) > 0.6 else 0.0
 
 
 def flat(x, z, radius=3.0):
@@ -225,7 +237,7 @@ def find_meadow_slope():
     best = None
     for x, z in candidates(radius=2600.0, step=16.0):
         g = ground(x, z)
-        if g < WATER + 4.0 or forest_band(g) < 0.6 or forest_mask(x, z) > 0.02:
+        if g < WATER + 4.0 or forest_band(g) < 0.6 or forest_mask(x, z, g) > 0.02:
             continue
         gx = (ground(x + 12, z) - ground(x - 12, z)) / 24.0
         gz = (ground(x, z + 12) - ground(x, z - 12)) / 24.0
@@ -272,6 +284,35 @@ def find_meadow_slope():
     return best[1], best[2]
 
 
+def find_escarpment():
+    """Eye and target for the escarpment: standing on open ground in front
+    of the face, 150-320 m out, where the most of the face's length is in
+    view above the trees between (the highest clear spot wins), looking at
+    the middle of the face."""
+    cx, cz = ESCARPMENT["centre"]
+    fx, fz = ESCARPMENT["facing"]
+    best = None
+    for out in range(150, 321, 10):
+        for along in range(-200, 201, 20):
+            x, z = cx + fx * out - fz * along, cz + fz * out + fx * along
+            g = ground(x, z)
+            if g < WATER + 3.0 or not flat(x, z, 6.0):
+                continue
+            if any(wooded(x + dx, z + dz) > 0.05 for dx in (-12, 0, 12) for dz in (-12, 0, 12)):
+                continue
+            # Open ground for the first 60 m toward the face.
+            open_run = sum(1 for d in range(10, 61, 10) if wooded(x - fx * d, z - fz * d) < 0.3)
+            score = g + 4.0 * open_run - 0.03 * abs(along) - 0.02 * out
+            if best is None or score > best[0]:
+                best = (score, x, z, g)
+    if best is None:
+        raise SystemExit("no open ground in front of the escarpment")
+    _, x, z, g = best
+    # Aim at mid height of the face where it crosses the centre line.
+    foot = ground(cx + fx * 60.0, cz + fz * 60.0)
+    return (x, g + EYE, z), (cx, foot + 0.55 * ESCARPMENT["height"], cz)
+
+
 def viewpoint(name, eye, target):
     item = ET.Element("item", {"name": name, "enabled": "true"})
     components = ET.SubElement(item, "components")
@@ -316,6 +357,7 @@ def main():
         # Level gaze across the slope: meadow below, forest edge and far hills above.
         "MeadowSlope": ((slope[0], ground(*slope) + EYE, slope[1]),
                         (slope[0] + slope_view[0] * 60.0, ground(*slope) + EYE - 2.0, slope[1] + slope_view[1] * 60.0)),
+        "Escarpment": find_escarpment(),
     }
 
     ET.register_namespace("components", NAMESPACE)
@@ -333,6 +375,9 @@ def main():
         objects.insert(vista_index + 1 + offset, viewpoint(name, eye, target))
         print(f"{name}: eye ({eye[0]:.0f}, {eye[1]:.1f}, {eye[2]:.0f}) -> "
               f"target ({target[0]:.0f}, {target[1]:.1f}, {target[2]:.0f})")
+    # Everything but the explorer is static (tools/scene_static.py); this
+    # also covers the objects build_landscape_demo.py just wrote.
+    scene_static.mark_static(objects)
     ET.indent(root, "  ")
     SCENE.write_text(header + ET.tostring(root, encoding="unicode") + "\n", encoding="utf-8")
 

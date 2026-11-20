@@ -28,6 +28,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import build_grass_test_scene as grass
+import scene_static
 
 OUTPUT = grass.ASSETS / "Scenes" / "terrain" / "foliage_test.scene"
 CELL = (0, 0)
@@ -235,6 +236,8 @@ def main():
             name, (origin[0] + eye[0], ground + eye_h, origin[1] + eye[1]),
             (origin[0] + target[0], ground + target_h, origin[1] + target[1])))
 
+    # Everything but the explorer is static (tools/scene_static.py).
+    scene_static.mark_static(objects)
     ET.indent(scene, "  ")
     header = ("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<!--\n"
               f"  Foliage test: landscape cell {CELL} with meadow grass and a grove.\n"

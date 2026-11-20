@@ -65,6 +65,11 @@ public:
     // Project layer (index into ProjectSettings::layers, 0 = Default). Used
     // for reference and by the detail budget to scale this object's LODs.
     int layer = 0;
+    // Authored promise that nothing moves this object (or, through it, its
+    // children) while the game runs. Static prefab instances are drawn as
+    // instanced placements instead of scene objects once play starts; see
+    // Core/Scene/StaticObjects.h for what qualifies and what is reported.
+    bool isStatic = false;
     // Editor-only, never serialized: hides an object (and its children) from
     // rendering, picking and update without touching the authored state.
     bool editorHidden = false;
@@ -143,6 +148,15 @@ public:
             if (!current->enabled || current->editorHidden)
                 return false;
         return true;
+    }
+
+    // True when this object or any ancestor is marked static.
+    bool IsStaticInHierarchy() const
+    {
+        for (const Object* current = this; current; current = current->Parent)
+            if (current->isStatic)
+                return true;
+        return false;
     }
 
     // Lifecycle methods

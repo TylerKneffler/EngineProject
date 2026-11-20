@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Core/Scene/SceneObserver.h"
+#include "Core/Scene/StaticObjects.h"
 #include "Core/Time/SimulationClock.h"
 #include <cstdint>
 #include <functional>
@@ -106,6 +107,8 @@ private:
     Engine::Time::SimulationClock m_clock;
     float m_deltaTime = 0.f;
     UpdateTimings m_lastUpdateTimings{};
+    // Reports objects marked static that move anyway (a few checked per frame).
+    Engine::Scene::StaticObjects::MotionWatch m_staticMotionWatch;
     std::unique_ptr<Engine::Audio::Audio> m_audio;
     std::unique_ptr<AsyncSceneReader> m_sceneReader;
     std::string m_defaultScenePath;

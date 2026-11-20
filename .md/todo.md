@@ -102,7 +102,51 @@ to land near, not to match to the digit.
 - [ ] Not re-checked after this pass: the look in the editor, grass_test coverage numbers, the moving-camera runs
       other than one walk.
 
-- [ ] Second viewpoint **Escarpment** (as frame 04), once the terrain has one.
+**Terrain and forest edge pass (2026-11-20, second machine: RTX A2000 laptop).** Built (`devoptimized`,
+GameBackendCapture) and the map regenerated; **not yet seen in the engine**: no landscape capture was run on the
+laptop, so every look statement below is from the generator's top-down and elevation previews and from counts on
+the written archive, not from a rendered frame. The expectations table above is unchanged until it is captured.
+Smoke test of the new build only: lighting_showcase on DX11 at 640x360 renders correctly.
+- [x] **Rolling hills in the lowland** (`build_landscape_demo.py` `lowland_hills`, added in `carve` after erosion):
+      swells up to ~150 m on a 1.5 km wave with flat valley floors between, none within 260 m of the start (the
+      start meadow and its view of the first lake stay) or on the lakes, fading out 1.9-2.9 km from the start.
+      Within 2 km of the start the ground was -38..21 m (5th-95th percentile) and is now -38..116 m; 40 % of it
+      slopes 10-25 degrees, 2.8 % is steeper than 30 (no trees there).
+- [x] **Escarpment** (`ESCARPMENT`, `escarpment`): a cuesta 700 m south of the start, facing it (centre
+      (-150, -660), face toward +z, so it is sunlit and visible from the start meadow). Rock face 66-95 m high,
+      steeper than 50 degrees along 730 m, buttresses to 70-80 degrees with gentler gullies, a 12 m talus apron,
+      the plateau dipping away over 650 m behind. 15,600 m2 of it passes `GenerateCliffs`' steep-rock test along
+      the whole face, so the scanned rock pieces should stand on it; 93 % of the plateau and 96 % of the foot are
+      plantable (under 30 degrees).
+- [x] The rest of the map is bit-identical: the builder reproduced the stored archive before the change, and hills
+      and escarpment are exactly zero outside their footprints. The builder now keeps the sculpt edits of cells
+      that come out identical (`unchanged_cells`; all 20 `.terrainedit` files survived) instead of deleting all of
+      them. The archive signature changed, so terrain caches rebuild on first load. `world.flow` and
+      `world.deposition` are from the erosion and do not know the new hills.
+- [x] **Forest prefers higher ground** (`ForestMask(x, z, height, a)`, LandscapeDriver.cpp; replicated in
+      `add_landscape_viewpoints.py`): the mask noise is raised by 0.06 from 30 to 80 m above the water level, by
+      my estimate from the noise's spread about 44 % forest on valley floors and 60 % above. This applies to the
+      whole map, so the foothills carry roughly a third more trees, near and far. Cost not measured.
+- [x] **Closed forest edge** (`GenerateForest`, second pass with its own random stream; the first pass's trees
+      keep their places where the mask did not change): medium and small oaks and saplings (young spruce and fir
+      in the conifer band) across the mask's transition, up to one per ~30 m2, smaller toward the meadow, leaning
+      out up to 9 degrees. Loaded cells only, not in far blocks. No new assets.
+- [x] **Shrub belt** (`GenerateProps`, undergrowth, own random stream): the stand's tall bush (30 % the low one)
+      at 1-1.9x scale along the meadow side of every edge, up to one per ~12 m2, ragged by the 16 m clump noise.
+      Drawn to the props layer's 220 m.
+- [x] **No soil line under the edge** (`PaintSample`): forest soil is painted only from mask 0.3 up (full at
+      0.85), so the outer edge trees and the belt stand in meadow grass. `PaintRevision` bumped.
+- [x] Viewpoint **Escarpment** (`find_escarpment`): eye (-350, -10.7, -370) on open ground 350 m in front of the
+      face, looking at its middle. **MeadowSlope** moved to (-368, 120.3, -1000), a 20 degree slope on the hill
+      behind the escarpment with a 149 m drop to the valley (it was (-240, 12, 1416)); the numbers in the
+      expectations table are from the old pose.
+- [ ] **Capture and judge all of the above**: Escarpment, MeadowSlope, ForestEdge and the start pose; forest
+      edge rows of the table (sky through the silhouette, soil, trunk line); whether the belt bushes read as a
+      shrub layer or as a hedge; whether the scans cover the face or leave bare painted rock; the escarpment's
+      ends and rim. Then the moving-camera runs: more trees, edge trees and belt bushes all add draws.
+- [ ] Not done here: denser trees inside the forest, more broadleaf silhouettes, scanned shrubs, hills in the
+      flow map (lush valley floors in the macro colours ignore them), forest placed by slope or curvature
+      (height only so far).
 - [ ] The lower, warmer sun (40 degrees, 1 / 0.91 / 0.77) as a second lighting preset; the scene object is still
       named "Late afternoon sun".
 - [ ] Forest density: `treesPerCell` is 220 attempts per 128 m cell, at most ~13,400 trees per km² (one per 75 m²,
@@ -144,6 +188,82 @@ to land near, not to match to the digit.
   [Dropday.ai](https://dropday.ai/c/chlorophyll-engine) (search summary only),
   [the video](https://www.youtube.com/watch?v=VC_NUxbeA0E) (title and four frames only).
 
+## Static objects (2026-11-20)
+
+`Object::isStatic` ("Static" checkbox under Enabled/Layer in Properties; scene attribute `static="true"`, written
+only when set; children are static through their parent). Code: `Engine/Core/Scene/StaticObjects.{h,cpp}`, called
+from `Game::Start` and `Game::Update`.
+- [x] **Bake at play start**: static prefab instances that are plain geometry (Mesh, Material,
+      PrimitiveObjectCollider, Static RigidBody; no blended material; no prefab overrides; rotation + uniform
+      scale; two or more of the prefab; not named by another component's field) are removed from the scene and
+      become placements on one runtime-only `TerrainObjectLayer` ("Static objects (baked)"), the path forests use.
+      Editor edit mode is untouched; play mode restores the scene on stop. `ENGINE_STATIC_BAKE=0` keeps the objects.
+- [x] **Warnings** (stderr and debugger in the game, Console in the editor, and under the checkbox): non-static
+      parent, Dynamic/Kinematic rigid body, a component that moves its owner (controller, spline follower,
+      animation, IK, cloth; by type name), non-uniform, mirrored or sheared scale, prefab overrides, referenced by
+      name; and while playing, a static object whose transform changes (`MotionWatch`, 32 objects checked a frame).
+      Static lights, cameras, terrain and emitters stay scene objects without a warning.
+- [x] Terrain scenes: every top-level object except the explorer is static in landscape_demo, grass_test,
+      foliage_test and woodland_assets_preview (`tools/scene_static.py`; the three scene builders call it).
+- [x] Checked on woodland_assets_preview (DX11, 960x540, laptop): 16 conifers of 4 prefabs baked, no warnings;
+      a copy with a 1 2 1 scale and a Dynamic body on the ground printed both warnings and baked the other 15.
+- [x] **Baked trees follow the prefab's LOD distances** (checked 2026-11-20, DX12, young spruce alone, authored
+      23.75 / 85.5 m, 640x360 where the view scale is ~0.77): submitted triangles 50.8k at 18 m (LOD0), 13.2k at
+      30 and 38 m (LOD1), 316 at 66 and 96 m (impostor). The layer receives the distances from the instance's
+      mesh (printed: fir 37.5/135, pine 50/180, tall spruce 60/216, young spruce 23.75/85.5) and, like the
+      forests, keeps LOD0, LOD1 and the last level (the impostor) of a longer chain.
+- [ ] **The same trees as scene objects (unbaked) look different, and that path is the odd one.** Scene objects
+      keep LOD0-2 and never the impostor, so the far row (420-470 m) is whorl stars and nearly invisible; and
+      the young spruce turns sparse between 34 and 38 m, where the authored distances say LOD1 until 85 m (65 m
+      at that view scale). Not caused by the static work (`ENGINE_STATIC_BAKE=0` shows it); cause not found.
+      It means ticking Static changes how a tree looks at mid range: fuller at 38-65 m, an impostor beyond.
+- [x] **foliage_test with the grove as static objects** (2026-11-20, laptop, DX12 1280x720, `ENGINE_DETAIL_SCALE=1`,
+      `ENGINE_AUTO_EXPOSURE=0`; `build_foliage_test_scene.py --standalone` copied to
+      `.local/static-test/foliage_standalone.scene`, images in `.local/static-test/foliage/`): 77 of the 84 grove
+      objects of 19 prefabs baked, no warnings; the other 7 are single instances of their prefab. Baked and
+      unbaked (`ENGINE_STATIC_BAKE=0`) look alike at ForestFloor, Backlit and Meadow (3-5 % of pixels differ by
+      more than 0.16, the LOD differences above). Frame interval, 5 frames each, rough: scene's own grove layer
+      18-22 ms, baked 28-57 ms, unbaked 85-115 ms. The baked layer has no fixed shadow level and a 1000 m
+      shadow distance, which is most of its gap to the scene's layer (GPU shadow 2.2-3.1 ms against 0.8-1.0 ms).
+- [ ] **DX12: trees past the first detail distance draw as fragments when frames run back to back** (found with
+      the checked-in foliage_test, Meadow view, laptop RTX A2000, 1280x720). Trunk bases and scattered leaf
+      pieces with sky behind them, as if the foliage depth prepass had written depth there and the depth-equal
+      shading pass had not covered it (inferred, not shown). DX11 draws the grove. Repeated 600-frame runs, counted against a DX11
+      reference image: uncapped 13 of 22 broken (8 of the 9 good runs came in one seven-minute stretch); `--max-fps 30` 0 of 4; `ENGINE_FOLIAGE_DEPTH_PREPASS=0`
+      0 of 4; the layer's `shadowDistance` 0, 0 of 3; `ENGINE_GPU_DEBUG=1` 0 of 2 (and every earlier run with
+      it on). Still broken with `ENGINE_TREE_WIND=0` (2 of 2), `ENGINE_TAA=0` (3 of 3),
+      `ENGINE_GPU_OCCLUSION=0` (3 of 3), `ENGINE_SHADER_CACHE=0` (1 of 1), no `shadowLod` on the layer (1 of 1,
+      2500 frames), and with the static-object calls in `Game.cpp` commented out (3 of 3, committed scene).
+      A layer held at LOD0 was fine (1 run). So it needs the prepass, a shadow-casting layer and no idle time
+      between frames; which data the two passes read differently is not found. Checked and not it: two
+      groups sharing one persistent batch key in a frame (none), a compute pipeline left bound at an
+      indirect draw (none), different pipelines between working and broken runs (same set), draw records
+      starting unzeroed (`objectData{}`). Not tried: a build of HEAD without this session's other changes.
+      An earlier version of this entry blamed `shadowLod` and wind; those tests all ran with the debug
+      layer on, which hides the fault. The debug layer reports error #613 (render-target format mismatch,
+      pipeline with no colour target) on the prepass draws when the layer has `shadowLod`; not explained.
+      The landscape forest uses the same prepass and casts shadows, so it is probably affected on DX12 when
+      GPU-bound; not checked (no landscape load on the laptop).
+      It switches while running: in 120 consecutive uncapped frames (`ENGINE_GPU_WORKLOAD_COUNTERS=1`) the
+      scene was broken, turned correct for ~15 frames straight after a 25-39 ms frame, then broke again.
+      Same triangles submitted in both states (leaves 142k, prepass 146k). Pixel-shader invocations, good
+      against broken: depth prepass 3.0M / 2.0M, bark 38k / 18k, leaf shading 161k / 250k. So in the
+      broken state a third of the prepass fragments and half the bark are rejected before shading, as if
+      nearer depth were already there when the prepass starts. With GPU occlusion on, the broken state also
+      halves `foliage_gpu_selected_lod0` (5310 -> 2830): a consequence, since it stays broken with
+      occlusion off (240 of 240 frames). Harness: `.local/static-test/` images, and
+      the repeat/compare scripts in `.local/static-test/harness/`.
+- [ ] The scene's grove layer still reports `prefab_layers_pending` 1 after `--warmup 200
+      --wait-for-residency 120` on the laptop and 0 after `--warmup 2500` (not measured in between); the
+      foliage_test captures above used `--warmup 2500`. A later 600-frame run reported 0.
+- [ ] Not run: the editor checkbox and Console output (the editor builds), landscape_demo with the
+      flag (no landscape load on the laptop), a static object that actually moves (a Dynamic body with
+      gravity on the collider-less ground did not move it, so the watch has never fired), prefabs with colliders
+      through the bake, save/load round trip of `static` from the editor.
+- [ ] Not done: baking static objects that are not prefab instances; a single instance of a prefab; per-cell
+      layers (one layer holds all baked placements, in 256 m groups); skipping per-frame work for static objects
+      that stay scene objects; an override list so baked placements can be removed at runtime by id.
+
 ## Status (2026-11-19)
 
 Landscape demo, DX12, 1920x1080, RTX 4090, RelWithDebInfo, uncapped; moving runs are 400 frames.
@@ -178,11 +298,12 @@ Landscape demo, DX12, 1920x1080, RTX 4090, RelWithDebInfo, uncapped; moving runs
 3. **CPU pipeline to 16.7 ms**: shadow view recorded on a worker, a dirty list for frame items, one retain per
    distinct mesh buffer, shadow scene preparation skipped when nothing changed (Foliage Phase 2, "Next CPU steps").
    Measure with the walking and turning runs, not only standing poses.
-4. **Forest and meadow content**: a shrub and sapling belt and denser trees at forest edges, single trees in
-   meadows, more broadleaf silhouettes (scanned shrubs, Foliage Phase 7), grass reach and the fade band (Grass
-   Phases 1, 3, 6). Each adds draw cost, so it follows 2 and 3.
-5. **Terrain**: rolling forested hills around the start, one escarpment carved into the height archive with the
-   scanned rock faces on it (Foliage Phase 7 cliff follow-ups), then the Escarpment viewpoint.
+4. **Forest and meadow content**: the shrub and sapling belt and edge trees are in but uncaptured (2026-11-20,
+   "Terrain and forest edge pass"; done ahead of 2 and 3 on a machine where timings mean nothing, so their cost
+   is unmeasured). Left: more broadleaf silhouettes (scanned shrubs, Foliage Phase 7), grass reach and the fade
+   band (Grass Phases 1, 3, 6).
+5. **Terrain**: rolling hills around the start, the escarpment and its viewpoint are in the archive but
+   uncaptured (same pass). Left: judge them in the engine, the cliff follow-ups of Foliage Phase 7.
 6. **Variants from the earlier reference sets**: still water with reeds and lily pads, haze between trunks and
    layered ridge haze, streams (Landscape look 7; Foliage Phases 6 and 7).
 
@@ -202,8 +323,9 @@ Landscape demo, DX12, 1920x1080, RTX 4090, RelWithDebInfo, uncapped; moving runs
 
 ## Not done (index; details in the sections below)
 
-- **Look:** brightness, colour and sky rows pass at MeadowSlope; grass reach, forest edge, far-forest texture,
-  terrain and tree variety do not (expectations table).
+- **Look:** brightness, colour and sky rows pass at the old MeadowSlope pose; grass reach, far-forest texture
+  and tree variety do not; forest edge and terrain were reworked on 2026-11-20 and are not captured yet
+  (expectations table, "Terrain and forest edge pass").
 - **Frame rate:** 60 fps standing or moving (Status above).
 - **World:** streams and rivers; vines on trees; more than six terrain paint layers (mud, moss, litter, scree); a
   continuous cliff line; scanned shrubs; water with reeds and lily pads; far-terrain silhouettes (128 m polygons).

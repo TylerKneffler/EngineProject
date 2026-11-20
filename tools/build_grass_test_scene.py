@@ -30,6 +30,8 @@ import struct
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+import scene_static
+
 ROOT = Path(__file__).resolve().parents[1]
 ASSETS = ROOT / "Engine" / "Core" / "Assets"
 ARCHIVE = ASSETS / "TerrainData" / "Landscape" / "world.heights"
@@ -266,6 +268,8 @@ def build(cell_x, cell_z, output=OUTPUT, thinning=None, far=True):
         ET.SubElement(ring, "children")
     objects.append(cell)
 
+    # Everything but the explorer is static (tools/scene_static.py).
+    scene_static.mark_static(objects)
     ET.indent(scene, "  ")
     header = ("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<!--\n"
               f"  Grass test: landscape cell ({cell_x}, {cell_z}) with procedural meadow grass.\n"

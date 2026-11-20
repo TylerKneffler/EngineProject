@@ -44,7 +44,7 @@
       </components>
       <children />
     </item>
-    <item name="Late afternoon sun" enabled="true">
+    <item name="Late afternoon sun" enabled="true" static="true">
       <components>
         <components:Light Light.lightType="1" Light.intensity="3.2" Light.range="8" Light.falloff="2" Light.intensityMode="0" Light.innerConeAngle="25" Light.outerConeAngle="35" Light.lightingChannels="-1" Light.cookieTexture="" Light.iesProfileTexture="" Light.cookieScale="2400" Light.cookieScrollX="0" Light.cookieScrollY="0" Light.baked="false" Light.castsShadows="true" Light.shadowStrength="1" Light.shadowDepthBias="0.00050000002374872565" Light.shadowNormalBias="0.06" Light.shadowResolutionScale="1" Light.shadowFilterScale="1">
           <Light.color>
@@ -73,7 +73,7 @@
         </Transform.scale>
       </transform>
     </item>
-    <item name="Atmosphere" enabled="true">
+    <item name="Atmosphere" enabled="true" static="true">
       <transform>
         <Transform.position _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.position>
         <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
@@ -174,7 +174,7 @@
         </item>
       </children>
     </item>
-    <item name="Landscape Cell (0, 0)" enabled="true">
+    <item name="Landscape Cell (0, 0)" enabled="true" static="true">
       <transform>
         <Transform.position _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.position>
         <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
