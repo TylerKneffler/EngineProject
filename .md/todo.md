@@ -677,6 +677,16 @@ grass 9.9, opaque 4.8). Most sources are talk abstracts, slides or press summari
          for alpha-tested foliage (Forbidden West), or real leaf geometry with cluster LODs.
 3. **Cached far shadow cascades** (2.9 ms in the forest): scroll the far cascades and draw trees there in a
    still pose (Fortnite's base pose); keep the near cascade per frame. Our sun is fixed.
+   - [x] Done 2026-11-22 (`agents/perf`): stepped cascades, on by default (`ENGINE_SHADOW_STEPPED_CASCADES=0`
+         turns them off). The cache already existed (cascades re-rendered only when their centre moves, at
+         most two a frame while walking, the far one every 240-600 frames); the middle cascades followed the
+         camera texel by texel, so walking re-rendered ~2 cascades a frame. Now every cascade past the
+         nearest moves in 1/8-range steps like the far one, draws plants in their rest pose, and leaves the
+         rotating wind refresh to the nearest. Interleaved walks: cascades re-rendered per frame 1.96-2.22 →
+         1.13; shadow GPU 2.6-3.1 → 1.1-1.4 ms; forest walk 14.6-14.9 → 13.1-13.4 ms, walk + turning
+         15.4-15.5 → 13.9-14.0 ms (frames > 33 ms 17 → 3-13). Captures at ForestFloor, ForestEdge,
+         MeadowSlope, Vista, FieldWalk: same shadows, differences are wind. New frames.jsonl key
+         `shadow_cascades_refreshed` (bit mask).
 4. **Far forest as voxels or octahedral impostors** (Next 5; Chlorophyll, UE 5.7): mainly look and memory;
    per-instance data dropped for the farthest proxies.
 5. **Cluster LOD / mesh shaders for trees** (Chlorophyll, Nanite, Alan Wake 2): the reference engine's core,
