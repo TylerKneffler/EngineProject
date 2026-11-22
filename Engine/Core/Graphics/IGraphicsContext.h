@@ -67,12 +67,14 @@ struct FrameTimingTelemetry
     template<class Stream> void WriteOpaqueJson(Stream& output) const
     {
         output << ",\"gpu_workload_valid\":" << (gpuWorkloadValid ? "true" : "false");
-        const char* names[] = {"opaque_other", "tree_bark", "tree_leaves", "foliage_depth"};
-        const GpuTimingStage stages[] = {GpuTimingStage::Opaque, GpuTimingStage::TreeBark, GpuTimingStage::TreeLeaves, GpuTimingStage::FoliageDepth};
-        for (size_t i = 0; i < 4; ++i)
+        const char* names[] = {"opaque_other", "tree_bark", "tree_leaves", "foliage_depth", "grass"};
+        const GpuTimingStage stages[] = {GpuTimingStage::Opaque, GpuTimingStage::TreeBark, GpuTimingStage::TreeLeaves, GpuTimingStage::FoliageDepth, GpuTimingStage::Grass};
+        for (size_t i = 0; i < 5; ++i)
         {
             const auto index = static_cast<size_t>(stages[i]);
-            output << ",\"gpu_" << names[i] << "_ms\":" << gpuMilliseconds[index];
+            // gpu_grass_ms is written with the other stage timings.
+            if (stages[i] != GpuTimingStage::Grass)
+                output << ",\"gpu_" << names[i] << "_ms\":" << gpuMilliseconds[index];
             output << ",\"gpu_" << names[i] << "_vs_invocations\":" << gpuWorkload[index].vertices;
             output << ",\"gpu_" << names[i] << "_primitives\":" << gpuWorkload[index].primitives;
             output << ",\"gpu_" << names[i] << "_ps_invocations\":" << gpuWorkload[index].fragments;

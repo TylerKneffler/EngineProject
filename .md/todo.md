@@ -348,6 +348,24 @@ at mid distance.
      cover to 100 m and beyond ("Fields of tall grass" below; expectations table, "Grass cover").
    - Budget: grass is 6.6 ms of GPU on FieldWalk now. Target 4 ms or less at 1080p for denser and finer cover
      than today, measured on FieldWalk and at MeadowSlope.
+   - [x] Where grass time goes (2026-11-22, `agents/perf`, `ENGINE_GPU_WORKLOAD_COUNTERS=1`; the grass stage's
+         counters are now in frames.jsonl as `gpu_grass_vs_invocations` / `_primitives` / `_ps_invocations`):
+         grass is **vertex-bound**. FieldWalk 9.5 ms = 15.1 M vertex invocations, 5.0 M triangles, only 15.8 M
+         pixel invocations (~7.6 per pixel) for 221 k plants; MeadowSlope 8.1 ms = 9.1 M vertices, 21 M pixels.
+         The far ring alone (134 k tufts, 54 triangles each at every level) was 3.3 ms and half the vertices
+         at FieldWalk (ring off: 6.8 ms, 7.5 M vertices, pixels unchanged); tall fields are 2.2 ms.
+   - [x] Far ring with real levels (Tsushima's fewer, wider blades with distance): `far_grass_tuft` LOD1 keeps
+         45 % of its blades at 1.9x width, LOD2 22 % at 3.4x, one segment each (54 → 7 → 6 triangles;
+         `tools/generate_meadow_grass.py`, LOD0 unchanged), at 45 and 90 m, chosen per plant
+         (`MeadowGrass::ApplyFar`; `ENGINE_FAR_GRASS_LODS=0` keeps the full tuft). FieldWalk grass 9.5 → 8.0
+         ms (15.1 → 8.4 M vertices); field walk 16.6-16.8 → 15.1-15.2 ms (grass 9.4 → 8.1, interleaved);
+         MeadowSlope 8.1 → 7.9, ForestEdge and Vista unchanged. Look: the far meadow band past ~45 m reads a
+         little smoother (`.local/perfagent/s3a_crop_*.png` in the perf worktree).
+   - [ ] The GPU blade generator itself is not started. What it must take out, from the numbers above: the
+         detailed meadow's vertices (tussocks 2,154 / 802 / 145 triangles at 0 / 7 / 13 m; tall-field crowns
+         1,775 / 1,076 / 424) and the far ring's remaining ~1.7 ms; the pixel side (~7-10 fragments per
+         pixel) is not the limit. Needs terrain heights and paint on the GPU per tile (cells are CPU meshes
+         today), a blade pass in the instance path, and per-blade level and width in the cull.
 3. **Retained render scene for everything else.** `PrepareFrameItems` copies every item each frame (2.6 ms for
    9.1k items at the last count) and the render packet retains two buffers per item (18k shared-pointer copies
    and `RetainBuffer` calls on the render thread). Keep object data in a GPU buffer updated from a dirty list
