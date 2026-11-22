@@ -1450,6 +1450,27 @@ bool LandscapeDriver::ConfigureTerrain()
                 grass->proceduralLayerMask = 1 << Grass;
                 grass->MarkConfigurationDirty();
             }
+            // The tall fields carry on into the far ring: taller, denser tufts
+            // (far_tall_tuft, 0.75-1.05 m) where the detailed grass grows its
+            // tall fields, the short tufts thinning under them. The same seed
+            // and field noise as the meadow field (MeadowGrass, tall fields
+            // below), so the fields line up across the hand-off.
+            // ENGINE_LANDSCAPE_FAR_TALL=0 keeps the uniform ring (A/B).
+            static const bool farTall = []
+            { const char* v = std::getenv("ENGINE_LANDSCAPE_FAR_TALL"); return !(v && v[0] == '0'); }();
+            const bool tallFieldsOn = []
+            { const char* v = std::getenv("ENGINE_LANDSCAPE_TALL_FIELDS"); return !(v && v[0] == '0'); }();
+            if (farTall && tallFieldsOn && grass->tallFieldDensity == 0.f)
+            {
+                const std::string tuft = "Assets/Mesh/Grass/far_tall_tuft.obj";
+                grass->tallMesh = grass->tallMeshLod1 = grass->tallMeshLod2 = tuft;
+                grass->seed = 18731;
+                grass->tallFieldDensity = .9f;
+                grass->tallFieldSize = 28.f;
+                grass->tallFieldCoverage = .85f;
+                grass->shortUnderTallShare = .3f;
+                grass->MarkConfigurationDirty();
+            }
             return;
         }
         // Ground cover keeps its authored reach: with the detail budget at its

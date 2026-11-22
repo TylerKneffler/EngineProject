@@ -2708,9 +2708,17 @@ float4 PSGrassMain(
     n = normalize(lerp(n, up, (textured ? 0.15 : 0.55) * leafy));
     float3 v = normalize(objectData.viewPositionAlphaCutoff.xyz - worldPos);
 
-    float ambientOcclusion = lerp(1.0,
-        lerp(0.6, 1.0, smoothstep(0.0, 0.8, height)), leafy);
-    float directOcclusion = lerp(1.0, lerp(0.82, 1.0, height), leafy);
+    // Depth in the mass (uv.y runs root to tip): low on a blade it is shaded
+    // by the blades around it, from the sky and the sun alike. The reference
+    // meadows go from near-black between the stems to bright lit tips
+    // (luminance 10th-90th percentile 0.005-0.15 against our 0.05-0.14 with
+    // the earlier 0.6 / 0.82 floors). The upper quarter of a blade is in the
+    // open: floors of 0.3 / 0.35 over the whole length darkened the tips too
+    // (90th percentile 0.14 -> 0.10), and the meadow as a whole fell to a
+    // quarter of the sky's brightness against about a half in the references.
+    const float depthLight = smoothstep(0.0, 0.75, height);
+    float ambientOcclusion = lerp(1.0, lerp(0.4, 1.0, depthLight), leafy);
+    float directOcclusion = lerp(1.0, lerp(0.45, 1.0, depthLight), leafy);
     float3 lit = objectData.ambientUnlit.rgb * ambientOcclusion *
         ScreenAmbientOcclusion(worldPos) * CanopySkyVisibility(objectData, worldPos) *
         (0.9 + 0.1 * saturate(n.y));
@@ -2743,7 +2751,8 @@ float4 PSGrassMain(
         float3 radiance = light.colorIntensity.rgb *
             (light.colorIntensity.w * shadow * 0.31830988618);
         lit += radiance * (wrapped * directOcclusion);
-        transmitted += radiance * backlight;
+        // Light through the blades is shaded by the mass in front of it too.
+        transmitted += radiance * (backlight * directOcclusion);
         float3 halfVector = normalize(direction + v);
         float alongBlade = dot(blade, halfVector);
         float sinAngle = sqrt(saturate(1.0 - alongBlade * alongBlade));

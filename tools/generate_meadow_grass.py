@@ -661,6 +661,26 @@ def far_grass_tuft(detail):
     return mesh
 
 
+def far_tall_tuft(detail):
+    """The far ring's tuft inside tall grass fields (seen from ~30 m out):
+    twenty-four wide two-segment blades, ~0.75-1.05 m, mostly upright, in the
+    tall grass's colours, so the knee- to waist-high mass keeps its height and
+    its dark depth past the detailed grass instead of dropping to a lawn at the
+    hand-off. Every LOD is the same mesh."""
+    rng = random.Random(7301)
+    mesh = Mesh(wind_response=0.5)
+    for _ in range(24):
+        radius, angle = math.sqrt(rng.random()), rng.random() * 2.0 * math.pi
+        length_jitter, rise_jitter, dry = rng.random(), rng.random(), rng.random()
+        base = (0.5 * radius * math.cos(angle), 0.0, 0.5 * radius * math.sin(angle))
+        rise = math.radians(84.0 - 18.0 * radius - 10.0 * rise_jitter)
+        shade = 0.8 + 0.4 * ((length_jitter * 7.31 + rise_jitter * 3.17) % 1.0)
+        blade(mesh, base, angle + (rng.random() - 0.5) * 0.8, 0.75 + 0.3 * length_jitter, rise,
+              0.15, 0.09, 2, root=TALL_ROOT, mid=TALL_MID, tip=DRY_TIP if dry < 0.12 else TALL_TIP,
+              shade=shade)
+    return mesh
+
+
 def meadow_shrub(detail):
     """Small-leaved mound (bilberry / box-like) about 0.4 m tall."""
     rng = random.Random(6101)
@@ -1021,6 +1041,7 @@ PLANTS = {
     "tall_grass_clump": (tall_grass_clump, "dense tall grass clump ~1.1 m with seed stalks"),
     "meadow_tall_grass": (meadow_tall_grass, "1 m patch of tall fine meadow grass ~0.6-1.0 m with seed stems"),
     "far_grass_tuft": (far_grass_tuft, "cheap wide-bladed tuft for the far grass ring"),
+    "far_tall_tuft": (far_tall_tuft, "the far ring's tall tuft inside tall grass fields"),
     "forest_litter": (forest_litter, "fallen-leaf litter patch for the forest floor"),
     "forest_herb": (forest_herb, "broadleaf woodland herb rosette ~0.45 m"),
     "forest_fern": (forest_fern, "woodland fern ~1 m, darker than bracken"),
