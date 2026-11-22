@@ -13,7 +13,7 @@
 #include <initializer_list>
 #include <atomic>
 
-namespace Engine::Rendering { struct PreparedMeshBuffer; }
+namespace Engine::Rendering { struct PreparedMeshBuffer; struct GpuBladeField; }
 namespace Engine::Components
 {
 class Mesh : public Engine::Core::Component
@@ -237,6 +237,9 @@ public:
         std::vector<InstanceRange> ranges, int maximumLod);
     void SetInstanceBlocks(std::vector<InstanceBlock> blocks);
     bool UsesInstanceBlocks() const { return m_usesInstanceBlocks; }
+    // Transient: this instanced mesh is a GPU grass blade carrier (its visible
+    // list comes from the blade generation pass, Rendering/GpuGrassBlades.h).
+    std::shared_ptr<Engine::Rendering::GpuBladeField> gpuBladeField;
     const std::vector<InstanceBlock>& GetInstanceBlocks() const { return m_instanceBlocks; }
     
     uint32_t GetVertexCount() const

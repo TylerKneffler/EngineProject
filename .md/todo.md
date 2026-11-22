@@ -372,11 +372,37 @@ at mid distance.
          ms (15.1 → 8.4 M vertices); field walk 16.6-16.8 → 15.1-15.2 ms (grass 9.4 → 8.1, interleaved);
          MeadowSlope 8.1 → 7.9, ForestEdge and Vista unchanged. Look: the far meadow band past ~45 m reads a
          little smoother (`.local/perfagent/s3a_crop_*.png` in the perf worktree).
-   - [ ] The GPU blade generator itself is not started. What it must take out, from the numbers above: the
-         detailed meadow's vertices (tussocks 2,154 / 802 / 145 triangles at 0 / 7 / 13 m; tall-field crowns
-         1,775 / 1,076 / 424) and the far ring's remaining ~1.7 ms; the pixel side (~7-10 fragments per
-         pixel) is not the limit. Needs terrain heights and paint on the GPU per tile (cells are CPU meshes
-         today), a blade pass in the instance path, and per-blade level and width in the cull.
+   - [x] GPU grass blades, behind `ENGINE_GPU_GRASS=1` (2026-11-22, `agents/perf`). The meadow's fine grass
+         and tall fields are generated on the GPU every frame; shrubs, accents, bushes and the far ring stay
+         meshes. How: each meadow `GrassField` in blade mode (`gpuBlades`, set by LandscapeDriver) hands its
+         cell's height and grass paint grids to the scene's `GrassBlades` (Assets/Grass), which packs every
+         loaded cell into one buffer and owns one carrier object (a 4-segment blade template, one dummy
+         placement, `Mesh::gpuBladeField`). In the camera view the carrier's batch runs
+         `Shaders/GrassBlades/GrassBlades.hlsl` instead of the placement cull: one group per 2 m patch of a
+         camera-centred grid (frustum and occlusion-buffer culled), blades from a hash of patch and index,
+         grass paint, the same tall-field noise as `GrassField::TallField` in cell-local coordinates (the
+         fields line up with the far ring's tall tufts), Voronoi clumps (height, lean, hue; fountains: upright
+         at the heart, arching toward the rim), rank thinning past the keep distance ((7 / d)^2, survivors
+         widened by 1 / sqrt(share), the last kept blade grows in) and a shrink fade over the last 10 m of the
+         60 m reach. The material shader `Assets/Shaders/GrassBlades.hlsl` builds each blade (bent quadratic
+         curve, the generator's leaf outline and palettes, edge-on widening in view space, the grass minimum
+         pixel width, the shared grass wind) and shades it with the meadow's `PSGrassMain`. The far ring fades
+         in over the blades' last 10 m instead of from 30 m. No CPU tile builds for the fine grass.
+         Numbers (interleaved field walks, off / on): frame 16.3-16.7 / 12.2-12.7 ms, grass GPU 8.6-8.9 /
+         4.5-4.6 ms, frames > 50 ms 3-6 / 0-2. Stills: FieldWalk grass 9.0 → 4.8 ms (vertices 8.5 M → 2.7 M),
+         MeadowSlope 8.4 → 4.3, ForestEdge 6.1 → 4.3. Per-frame grass CPU at cell crossings: p99 6.6-7.2 →
+         3.2-3.3 ms (the 25-35 ms commit did not show in either build).
+         Look (1440p tiles `.local/foliage/blhi3_on_*` against `blhi_off_*` in the perf worktree): MeadowSlope
+         and ForestEdge close over the soil like the mesh grass; FieldWalk reads a little lighter and more even
+         (the mesh meadow has darker pockets between tussocks).
+         Found on the way: until a material shader has compiled, its draw falls back to the base pipeline; a
+         carrier drawn that way read blade records as pool indices and hung the GPU (root SRVs have no bounds
+         checks). Carriers now draw only once their shader is resolved.
+   - [ ] Blades: grass GPU is still 4.5 ms on the field walk (target 4): the blade count is no longer the
+         lever (keep distance 7 → 6 m changed nothing); next, split the remaining grass stage (accents,
+         shrubs, far ring, the compute pass, pixel shading). FieldWalk's darker tussock pockets (clump
+         contrast in colour and height). DX11 (no indirect draws) skips the carrier, so the switch shows no
+         fine grass there; Vulkan not run. Make it the default after these.
 3. **Retained render scene for everything else.** `PrepareFrameItems` copies every item each frame (2.6 ms for
    9.1k items at the last count) and the render packet retains two buffers per item (18k shared-pointer copies
    and `RetainBuffer` calls on the render thread). Keep object data in a GPU buffer updated from a dirty list

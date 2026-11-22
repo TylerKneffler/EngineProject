@@ -133,7 +133,8 @@ SceneInstanceBatching::Result SceneInstanceBatching::Prepare(SceneRenderer& rend
         // Shared parts (instance blocks) always draw through the batched
         // path: their stub instance data holds no placements of its own.
         if (automaticGroups[group].members.size()>1 || preparedDraws[automaticGroups[group].members.front()].gpuLod>=0 || (preparedDraws[automaticGroups[group].members.front()].drawData.flags & 0x00100000u) ||
-            preparedDraws[automaticGroups[group].members.front()].mesh->UsesInstanceBlocks())
+            preparedDraws[automaticGroups[group].members.front()].mesh->UsesInstanceBlocks() ||
+            preparedDraws[automaticGroups[group].members.front()].mesh->gpuBladeField)
             for(auto index:automaticGroups[group].members) preparedDraws[index].automaticGroup=group;
     renderer.m_lastRenderCpuTimings.batchingMs=std::chrono::duration<double,std::milli>(RenderClock::now()-batchingStart).count();
 

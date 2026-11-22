@@ -1,6 +1,7 @@
 #include "Core/Rendering/DetailBudget.h"
 #include "Scripts/Landscape/LandscapeDriver.h"
 #include "Grass/GrassField.h"
+#include "Grass/GrassBlades.h"
 #include "Scripts/Grass/MeadowGrass.h"
 #include "Core/Components/Terrain/TerrainHeightArchive.h"
 #include "Core/Components/Terrain/TerrainHydrologyMap.h"
@@ -1455,11 +1456,17 @@ bool LandscapeDriver::ConfigureTerrain()
             // 10, fading over its last 30%) starts to fade: their fades must
             // overlap or a band of bare ground shows between them.
             const float detailed = radius + 10.f;
-            if (grass->innerRadius != detailed * .5f ||
+            // GPU blades reach the full detailed radius and shrink away over
+            // its last 10 m (GrassBlades::Settings::fadeBand): the ring fades
+            // in over the same band instead of overlapping 30-60 m of blades.
+            const bool blades = GrassBlades::Enabled();
+            const float inner = blades ? detailed - 10.f : detailed * .5f;
+            const float innerFade = blades ? 10.f : detailed * .2f;
+            if (grass->innerRadius != inner || grass->innerFadeWidth != innerFade ||
                 grass->proceduralLayerMask != (1 << Grass))
             {
-                grass->innerRadius = detailed * .5f;
-                grass->innerFadeWidth = detailed * .2f;
+                grass->innerRadius = inner;
+                grass->innerFadeWidth = innerFade;
                 grass->proceduralLayerMask = 1 << Grass;
                 grass->MarkConfigurationDirty();
             }
@@ -1518,6 +1525,14 @@ bool LandscapeDriver::ConfigureTerrain()
         static const bool perPlant = []
         { const char* v = std::getenv("ENGINE_LANDSCAPE_GRASS_PER_PLANT"); return !(v && v[0] == '0'); }();
         if (grass->perPlantDetail != perPlant) { grass->perPlantDetail = perPlant; grass->MarkConfigurationDirty(); }
+        // GPU grass blades (ENGINE_GPU_GRASS=1, GrassBlades.h): the meadow's
+        // fine grass and tall fields are generated on the GPU; its tiles keep
+        // the accents and shrubs.
+        if (layer.layerName == "Procedural meadow grass" && grass->gpuBlades != GrassBlades::Enabled())
+        {
+            grass->gpuBlades = GrassBlades::Enabled();
+            grass->MarkConfigurationDirty();
+        }
         static const float lodBoost = []
         { const char* v = std::getenv("ENGINE_LANDSCAPE_GRASS_LODBOOST"); return v ? std::clamp(float(std::atof(v)), 0.f, 2.f) : perPlant ? 0.f : .35f; }();
         const float grassLod1 = 7.f + lodBoost * (grassTile - 4.f), grassLod2 = 13.f + lodBoost * (grassTile - 4.f);

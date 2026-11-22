@@ -56,6 +56,7 @@ public:
             return false;
         return material->shader == "Assets/Shaders/Foliage.hlsl" ||
             material->shader == "Assets/Shaders/GrassFootBend.hlsl" ||
+            material->shader == "Assets/Shaders/GrassBlades.hlsl" ||
             material->shader == "Assets/Shaders/Diagnostics/FoliageAlphaMask.hlsl";
     }
 
