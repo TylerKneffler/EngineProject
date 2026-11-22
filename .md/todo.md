@@ -49,8 +49,9 @@ to land near, not to match to the digit.
             as much, so the meadow meters alike whatever stands behind it; landscape: groundWeight 1,
             outputExposure -0.25 -> -1. 2560x1440, meadow near / mid: ForestEdge 0.216 / 0.249 -> 0.060 / 0.100,
             FieldWalk 0.101 / 0.104 -> 0.083 / 0.074, forest wall 0.065 -> ~0.04 (reference crowns 0.03-0.05).
-      - [ ] ForestEdge's near meadow is now a little under the target: try outputExposure -0.75. Forest interior
-            (ForestFloor whole frame ~0.01) not checked against the first reference set.
+      - [x] outputExposure -0.75 (2026-11-22): near / mid meadow ForestEdge 0.078 / 0.129, FieldWalk 0.095 / 0.087,
+            MeadowSlope mid 0.065 (cloud shadow). Forest interior darker than before (ForestFloor whole frame 0.015):
+            accepted by the user for now.
 - [x] **Understory foliage glowed in canopy shade** (user 2026-11-22: yellow-orange blades by a rock at
       ForestFloor): the woodland pack's tall bush cards got FoliageTransmission's crown-scatter term (0.3 of the
       sun when shaded, meant for a crown's own underside). `Material::foliageCrownScatter` (default 1); the pack
@@ -523,14 +524,27 @@ options and references: [far_detail_and_visibility_research.md](far_detail_and_v
             +0.1 ms, nothing on the meadow. Re-measure on a fresh machine. 32 m fern tiles (fewer draws)
             were tried: not all built 60 frames in, and they would arrive a whole tile at a time.
       - [ ] Still generated: herbs (`forest_herb`), flowers, litter, seedlings, ground ivy, tall grass clumps.
-            WIP (agents/look aa9a5cc4): scanned celandine, dandelion, weed rosettes (meadow accents) and
-            periwinkle (forest floor) as card plants in a third atlas band; built and captured, not yet judged
-            close up; accent cost not measured.
+            2026-11-22: scanned celandine, dandelion and weed rosettes and periwinkle (third atlas band,
+            `tools/scan_bush_cards.py`; periwinkle recoloured to lesser periwinkle's blue-violet). Kept on the
+            forest floor (fern layer accents). Not on the meadow: the 10-20 cm rosettes vanish under the
+            knee-high grass (FieldWalk), so the meadow keeps its generated flowers on stems. Cost: FieldWalk walk
+            16.2 / 16.1 ms against 16.2 / 16.2 on agents/perf (with the meadow accents still in).
       - [ ] grass_test and foliage_test have no bush layer and still draw the generated bushes.
       - [ ] Bushes cast no shadows (the field has `castShadows` off); try it now that they are cheap.
       - [ ] Not judged: the bushes from a raised view, against the light, and close up while walking.
 - [ ] Forest edge variety: at least three broadleaf silhouettes, height variety, scanned shrubs (expectations
       table, "Tree variety"; Foliage Phase 7).
+      - Looked at 2026-11-22 (agents/look), not built: Poly Haven's broadleaf trees (CC0) are `tree_small_02`
+        (small tree, slender curved trunk, airy canopy, 4.3 m; 2.06M triangles), `jacaranda_tree` (18 m, broad
+        canopy; 3.86M triangles; subtropical, but out of flower it reads as a broad deciduous crown) and the
+        `island_tree_01-03` coastal windswept shapes (skipped). Both candidates are millions of alpha leaf
+        cards with separate trunk / branch / leaf materials (per-material texture sets in files.json, which
+        `fetch_polyhaven_props.py` does not handle), so PropCook cannot simplify them to a game chain.
+        Plan: a tree bake like `scan_bush_cards.py`: (1) cook trunk and branches only to a 3-level chain;
+        (2) render the leaf geometry per branch cluster into crown cards (atlas, depth shade, graded); (3) build
+        the crown from those cards around the branch tips; (4) bake an octahedral or view impostor
+        (`woodland_assets.bake_impostor`) for the last level; (5) place them in the edge pass and as single
+        meadow trees (LandscapeDriver, `Species`), measured with shared prefab parts on.
 - [ ] **Cliffs as sculpted terrain** (asked 2026-11-21: cliffs that are the terrain itself, with the scans' shape
       and look, no scan objects, smooth from ground to rock). The stamp route before it (per-piece surface
       patches, stages 1-5, far stamps, macro colour and far-grid patches) is in todo_history.md (2026-11-22):
@@ -562,8 +576,11 @@ options and references: [far_detail_and_visibility_research.md](far_detail_and_v
       - [ ] Shape: from the side it is one even wall (`esc_side_v2.png`): the outermost surface fills the
             gaps between pieces that gave the stamps their blocky look. Next: keep the recess between pieces
             that only touch; march along the local rock direction instead of one slope-wide one.
-            WIP (agents/look 7e530247): a second march along the scans' smoothed normals (LOCAL_MARCH) is
-            written but not run (~16 min CPU per cell, three cells).
+            2026-11-22: a second march along the scans' smoothed normals (LOCAL_MARCH) re-sculpted cells
+            -1..1,-6 (518 s for all three in parallel). Close to the face the vertical smears and stretched
+            crevice are gone and the blocks vary more; from the ground (~110 m) more relief and fewer vertical
+            stripes (`.local/foliage/cliff_old_new.png` in agents/look: old | new). Quads left turned over:
+            2,420 / 6,903 / 5,606 per cell (946-2,387 before), not visible as holes in these views.
       - [ ] Rock tile: only ~64 % of the cut is clean, flat-on rock; faint hatching from above. Find a
             cleaner source.
       - [ ] Whole map: 300 cliff cells at ~16 min each (the pure-Python simplifier is most of it): speed it

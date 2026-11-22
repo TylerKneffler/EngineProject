@@ -1435,10 +1435,6 @@ bool LandscapeDriver::ConfigureTerrain()
             {
                 grass->shrubMeshes = "Assets/Mesh/Grass/tall_grass_clump.obj";
                 grass->shrubPatchesPerSquareMeter *= .25f;
-                // Yellow flowers and the plantain are scanned now (the bush
-                // field's accents); the white daisies, clover and knapweed stay.
-                grass->accentMeshes = "Assets/Mesh/Grass/meadow_daisy.obj;"
-                    "Assets/Mesh/Grass/meadow_clover.obj;Assets/Mesh/Grass/meadow_knapweed.obj";
             }
             else if (layer.layerName == MeadowGrass::ForestFloorLayerName)
             {
