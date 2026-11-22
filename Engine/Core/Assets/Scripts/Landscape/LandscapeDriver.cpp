@@ -1400,17 +1400,23 @@ bool LandscapeDriver::ConfigureTerrain()
             // does). 32 m fern tiles (fewer draws) were not all built 60
             // frames in, and would arrive a whole tile at a time.
             const float tile = 16.f;
+            // Flowers and herbs (the fields' accents, a "fine" class) end
+            // sooner than the plants: ~40 m on the meadow, 30 m in the forest.
+            const float flowerReach = ferns ? .6f : .5f;
             if (grass->proceduralLayerMask != mask || grass->minimumRadiusScale != 1.f ||
-                !grass->perPlantDetail || grass->tileSize != tile)
+                !grass->perPlantDetail || grass->tileSize != tile ||
+                grass->fineReachFraction != flowerReach)
             {
                 grass->minimumRadiusScale = 1.f;
                 grass->perPlantDetail = true;
                 grass->tileSize = tile;
+                grass->fineReachFraction = flowerReach;
                 grass->proceduralLayerMask = mask;
                 if (!scanBushes)
                 {
                     grass->bushesPerSquareMeter = 0.f;
                     grass->shrubPatchesPerSquareMeter = 0.f;
+                    grass->accentPatchesPerSquareMeter = 0.f;
                 }
                 grass->MarkConfigurationDirty();
             }
@@ -1428,11 +1434,18 @@ bool LandscapeDriver::ConfigureTerrain()
             {
                 grass->shrubMeshes = "Assets/Mesh/Grass/tall_grass_clump.obj";
                 grass->shrubPatchesPerSquareMeter *= .25f;
+                // Yellow flowers and the plantain are scanned now (the bush
+                // field's accents); the white daisies, clover and knapweed stay.
+                grass->accentMeshes = "Assets/Mesh/Grass/meadow_daisy.obj;"
+                    "Assets/Mesh/Grass/meadow_clover.obj;Assets/Mesh/Grass/meadow_knapweed.obj";
             }
             else if (layer.layerName == MeadowGrass::ForestFloorLayerName)
             {
                 grass->shrubMeshes.clear();
                 grass->shrubPatchesPerSquareMeter = 0.f;
+                // Half the generated herbs: scanned periwinkle and weeds grow
+                // between them (the fern layer's accents).
+                grass->tallPatchesPerSquareMeter *= .5f;
             }
             grass->MarkConfigurationDirty();
         }

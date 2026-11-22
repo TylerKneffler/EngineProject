@@ -53,7 +53,8 @@ TEXTURE = wa.ASSETS / "Models" / "Woodland" / "Scans" / "Textures" / "ScanBushCa
 MATERIAL = wa.ASSETS / "Materials" / "Grass" / "scan_bush.material"
 
 ATLAS = 2048          # width; the sprig cells fill the top ATLAS x ATLAS square
-ATLAS_HEIGHT = 4096   # the bottom half holds the fern fronds
+ATLAS_HEIGHT = 6144   # then the fern fronds (2048 tall), then the flower and herb cells
+FLOWER_BAND = 4096    # first row of the flower and herb cells
 GRID = 4
 CELL = ATLAS // GRID
 FRONDS = 5            # fern_02's texture is five flat fronds, cut out as they are
@@ -67,6 +68,18 @@ CELLS = [
     ("nettle_plant", 1, 0), ("nettle_plant", 1, 1), ("nettle_plant", 2, 0), ("nettle_plant", 2, 1),
     ("shrub_02", 1, 0), ("shrub_02", 2, 0), ("shrub_02", 3, 0), ("shrub_02", 4, 0),
 ]
+# Flowers and herbs (third band). view 2 looks straight down: low rosettes
+# (celandine, dandelion, the weed) read from above, as cards lying flat.
+# Nodes as PropCook --split numbers them (its --list order, from 1);
+# dandelion_01 lists its own LOD nodes too (b_LOD0 is the fourth).
+FLOWER_CELLS = [
+    ("celandine_01", 3, 0), ("celandine_01", 3, 2), ("celandine_01", 4, 0), ("celandine_01", 4, 2),
+    ("dandelion_01", 1, 0), ("dandelion_01", 1, 2), ("dandelion_01", 4, 0), ("dandelion_01", 4, 2),
+    ("periwinkle_plant", 1, 0), ("periwinkle_plant", 1, 1), ("periwinkle_plant", 2, 0), ("periwinkle_plant", 3, 0),
+    ("weed_plant_02", 1, 2), ("weed_plant_02", 2, 2), ("weed_plant_02", 1, 0), ("weed_plant_02", 3, 2),
+]
+# Scans whose petals keep their colour: only their green leaves are graded.
+FLOWERS = {"celandine_01", "dandelion_01", "periwinkle_plant"}
 
 
 def find_tool(name):
@@ -94,13 +107,16 @@ _textures = {}
 def scan_texture(scan):
     if scan not in _textures:
         color = np.asarray(Image.open(CACHE / scan / f"{scan}_diff.jpg").convert("RGB"), np.float64) / 255
-        alpha = np.asarray(Image.open(CACHE / scan / f"{scan}_alpha.jpg").convert("L"), np.float64) / 255
+        alpha_path = CACHE / scan / f"{scan}_alpha.jpg"
+        # Scans with real leaf geometry (periwinkle) ship no alpha map.
+        alpha = (np.asarray(Image.open(alpha_path).convert("L"), np.float64) / 255
+                 if alpha_path.exists() else np.ones(color.shape[:2]))
         rgba = np.concatenate([wa.srgb_to_linear(color), alpha[..., None]], axis=2)
         _textures[scan] = wa.Texture(rgba)
     return _textures[scan]
 
 
-def grade(albedo, amount=None):
+def grade(albedo, amount=None, keep_petals=False):
     """Moves leaf colour toward the meadow's: the scans are a dusty sage that
     reads as dry brush beside the grass (reference meadows: red about 0.7-0.8
     of green in sRGB; bush leaves a little deeper). Luminance is kept. The
@@ -113,7 +129,7 @@ def grade(albedo, amount=None):
     bark = np.array([0.55, 0.45, 0.32]) / (np.array([0.55, 0.45, 0.32]) @ weights)
     graded = lum[..., None] * (leaf * leafiness[..., None] + bark * (1 - leafiness[..., None]))
     amount = GRADE if amount is None else amount
-    strength = amount * leafiness + 0.5 * (1 - leafiness)
+    strength = amount * leafiness + (0.0 if keep_petals else 0.5) * (1 - leafiness)
     return albedo + (graded - albedo) * strength[..., None]
 
 
@@ -128,11 +144,12 @@ def bake_cell(scan, node, view):
     p, n, uv, c, idx = sprig_mesh(scan, node)
     surface = wa.Surface(p, n, uv, np.ones((len(p), 4)), idx, texture=scan_texture(scan),
                          alpha_cutoff=0.5, use_vertex_colors=False)
-    right = np.array([1.0, 0, 0]) if view == 0 else np.array([0, 0, -1.0])
-    forward = np.array([0, 0, 1.0]) if view == 0 else np.array([1.0, 0, 0])
-    up = np.array([0, 1.0, 0])
-    lo = np.array([(p @ right).min(), p[:, 1].min()])
-    hi = np.array([(p @ right).max(), p[:, 1].max()])
+    right = np.array([1.0, 0, 0]) if view != 1 else np.array([0, 0, -1.0])
+    forward = {0: np.array([0, 0, 1.0]), 1: np.array([1.0, 0, 0]), 2: np.array([0, 1.0, 0])}[view]
+    # Image up: world up for the side views; -Z for the top view.
+    up = np.array([0, 1.0, 0]) if view != 2 else np.array([0, 0, -1.0])
+    lo = np.array([(p @ right).min(), (p @ up).min()])
+    hi = np.array([(p @ right).max(), (p @ up).max()])
     size = hi - lo
     margin = 0.03 * size.max()
     lo -= margin; hi += margin
@@ -148,7 +165,7 @@ def bake_cell(scan, node, view):
         near, far = np.percentile(d, 95), np.percentile(d, 5)
         front = np.clip((depth - far) / max(near - far, 1e-6), 0, 1)
         albedo *= (0.72 + 0.28 * front)[..., None]
-    albedo = grade(albedo)
+    albedo = grade(albedo, 0.5 if scan in FLOWERS else None, keep_petals=scan in FLOWERS)
     rgb = wa.downsample(albedo * alpha[..., None], SUPERSAMPLE)
     a = wa.downsample(alpha, SUPERSAMPLE) if alpha.ndim == 2 else wa.downsample(alpha[..., None], SUPERSAMPLE)[..., 0]
     a = a.reshape(CELL, CELL)
@@ -156,8 +173,9 @@ def bake_cell(scan, node, view):
     tile_rgb, tile_a = np.flipud(rgb), np.flipud(a)  # row 0 = top
     # Card: the used part of the cell (the sprig's bounds).
     used = size * scale / CELL                       # fraction of the cell in u, v
-    root = (np.median(p[p[:, 1] < lo[1] + margin + 0.05 * size[1]] @ right) - lo[0]) / size[0] \
-        if (p[:, 1] < lo[1] + margin + 0.05 * size[1]).any() else 0.5
+    low = p[:, 1] < lo[1] + margin + 0.05 * size[1]
+    # A top view's card is centred on the plant.
+    root = 0.5 if view == 2 else (np.median(p[low] @ right) - lo[0]) / size[0] if low.any() else 0.5
     return tile_rgb, tile_a, dict(width=size[0], height=size[1], u=used[0], v=used[1], root=root)
 
 
@@ -187,10 +205,13 @@ def build_atlas():
     rgb = np.zeros((ATLAS_HEIGHT, ATLAS, 3))
     alpha = np.zeros((ATLAS_HEIGHT, ATLAS))
     cards = {}
-    for i, (scan, node, view) in enumerate(CELLS):
+    # Sprig cells in the top square, flower and herb cells in the third band.
+    placed = [(i, cell, 0) for i, cell in enumerate(CELLS)] + \
+             [(i, cell, FLOWER_BAND) for i, cell in enumerate(FLOWER_CELLS)]
+    for i, (scan, node, view), band in placed:
         col, row = i % GRID, i // GRID
         tile_rgb, tile_a, card = bake_cell(scan, node, view)
-        y0, x0 = row * CELL, col * CELL
+        y0, x0 = band + row * CELL, col * CELL
         rgb[y0:y0 + CELL, x0:x0 + CELL] = tile_rgb
         alpha[y0:y0 + CELL, x0:x0 + CELL] = tile_a
         # Atlas uv (v = 0 top): the card spans the cell's lower-left part.
@@ -199,7 +220,7 @@ def build_atlas():
         cards[(scan, node, view)] = card
         print(f"  {scan} {node} view {view}: {card['width']:.2f} x {card['height']:.2f} m")
     # Fern fronds: one slot each across the bottom half, scaled to fit.
-    slot_w, slot_h = ATLAS // FRONDS, ATLAS_HEIGHT - ATLAS
+    slot_w, slot_h = ATLAS // FRONDS, FLOWER_BAND - ATLAS
     for i, crop in enumerate(cut_fronds()):
         h, w = crop.shape[:2]
         scale = min(slot_w / w, slot_h / h)
@@ -372,6 +393,9 @@ SPECIES = {
                     0.22, 0.6, dict(seed=41, rise=0.85, inner=0.05, lowest=0.2, sphere=0.5)),
     "scan_sapling": (("shrub_02", (1, 2, 3, 4)), [(5, (0.8, 1.1)), (3, (0.9, 1.2)), (2, (1.0, 1.3))],
                      0.35, 1.3, dict(seed=53, rise=0.9, inner=0.0, lowest=0.6, sphere=0.4)),
+    # Lesser periwinkle: woodland ground cover with blue-violet flowers, ~0.3-0.4 m.
+    "scan_periwinkle": (("periwinkle_plant", (1, 2, 3)), [(7, (1.0, 1.3)), (4, (1.2, 1.5)), (2, (1.5, 1.8))],
+                        0.2, 0.35, dict(seed=59, rise=0.75, inner=0.05, lowest=0.1, sphere=0.5)),
 }
 
 
@@ -381,6 +405,55 @@ FERNS = {
     # they replace: 1.3 and 1.7 m).
     "scan_fern": ([(12, 6, 1.0), (8, 4, 1.2), (5, 2, 1.4)], (0.6, 0.9), 61),
     "scan_fern_large": ([(16, 6, 1.0), (10, 4, 1.2), (6, 2, 1.4)], (0.85, 1.2), 67),
+}
+
+
+def rosette(flat_cards, side_cards, flat_count, side_count, size_range, seed, spread=0.12,
+            tilt=12.0, tint_jitter=0.06):
+    """A low plant: cards lying nearly flat (top views: the rosette and its
+    flowers as seen from above, tilted up `tilt` degrees so they catch the
+    eye from a standing height) plus a few upright side views in the middle.
+    Flat cards keep an upward normal."""
+    rng = np.random.default_rng(seed)
+    mesh = wa.MeshBuilder()
+    up = np.array([0, 1.0, 0])
+    for i in range(flat_count):
+        card = flat_cards[(i + seed) % len(flat_cards)]
+        size = rng.uniform(*size_range)
+        theta = rng.uniform(0, 2 * math.pi)
+        lean = math.radians(rng.uniform(0.5, 1.0) * tilt)
+        axis = np.array([math.cos(theta) * math.cos(lean), math.sin(lean), math.sin(theta) * math.cos(lean)])
+        across = np.cross(up, axis)
+        across /= np.linalg.norm(across)
+        height = card["height"] * size
+        centre = np.array([rng.uniform(-spread, spread), 0.01 + 0.015 * i, rng.uniform(-spread, spread)])
+        tint = (1 + rng.uniform(-tint_jitter, tint_jitter, 3)) * rng.uniform(0.92, 1.06)
+        card_quad(mesh, card, centre - axis * height / 2, axis, across, height, lambda q: up, tint, (0.85, 1.0))
+    for i in range(side_count):
+        card = side_cards[(i + seed) % len(side_cards)]
+        size = rng.uniform(*size_range)
+        theta = rng.uniform(0, math.pi)
+        across = np.array([math.cos(theta), 0, math.sin(theta)])
+        height = card["height"] * size
+        base = np.array([rng.uniform(-spread, spread) * 0.5, -0.01, rng.uniform(-spread, spread) * 0.5])
+        tint = (1 + rng.uniform(-tint_jitter, tint_jitter, 3)) * rng.uniform(0.92, 1.06)
+        normal = lambda q, base=base: (lambda d: d / np.linalg.norm(d))(
+            np.array([q[0] - base[0], 0.0, q[2] - base[2]]) * 0.5 + up)
+        card_quad(mesh, card, base, up, across, height, normal, tint, (0.6, 1.0))
+    return mesh
+
+
+# Low flowering plants and herbs: (flat cards, side cards), [(flat, side, size range) per level], seed.
+ROSETTES = {
+    "scan_celandine": (([("celandine_01", 3, 2), ("celandine_01", 4, 2)],
+                        [("celandine_01", 3, 0), ("celandine_01", 4, 0)]),
+                       [(3, 2, (1.1, 1.5)), (2, 1, (1.3, 1.7)), (1, 0, (1.7, 2.1))], 71),
+    "scan_dandelion": (([("dandelion_01", 1, 2), ("dandelion_01", 4, 2)],
+                        [("dandelion_01", 1, 0), ("dandelion_01", 4, 0)]),
+                       [(3, 2, (1.1, 1.5)), (2, 1, (1.3, 1.7)), (1, 0, (1.7, 2.1))], 73),
+    "scan_weed": (([("weed_plant_02", 1, 2), ("weed_plant_02", 2, 2), ("weed_plant_02", 3, 2)],
+                   [("weed_plant_02", 1, 0)]),
+                  [(3, 1, (1.2, 1.6)), (2, 0, (1.4, 1.8)), (1, 0, (1.8, 2.2))], 79),
 }
 
 
@@ -405,6 +478,13 @@ def main():
             path = MESH_DIR / f"{name}{suffix}.mesh"
             triangles = mesh.write_native(path)
             print(f"  {path.name}: {triangles} triangles")
+    for name, ((flat, side), levels, seed) in ROSETTES.items():
+        for level, (flat_count, side_count, size) in enumerate(levels):
+            mesh = rosette([cards[c] for c in flat], [cards[c] for c in side], flat_count, side_count,
+                           size, seed)
+            suffix = "" if level == 0 else f"_lod{level}"
+            path = MESH_DIR / f"{name}{suffix}.mesh"
+            print(f"  {path.name}: {mesh.write_native(path)} triangles")
     fronds = [cards[("fern_02", i, 0)] for i in range(FRONDS)]
     for name, (levels, length, seed) in FERNS.items():
         for level, (count, segments, width) in enumerate(levels):
