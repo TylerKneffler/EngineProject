@@ -165,7 +165,20 @@ def bake_cell(scan, node, view):
         near, far = np.percentile(d, 95), np.percentile(d, 5)
         front = np.clip((depth - far) / max(near - far, 1e-6), 0, 1)
         albedo *= (0.72 + 0.28 * front)[..., None]
-    albedo = grade(albedo, 0.5 if scan in FLOWERS else None, keep_petals=scan in FLOWERS)
+    if scan == "periwinkle_plant":
+        # The scan is Madagascar periwinkle: pink petals and yellowed leaves.
+        # Lesser periwinkle, the woodland ground cover it stands in for, flowers
+        # blue-violet: magenta pixels turn blue-violet (luminance kept), and the
+        # rest is graded as leaves and stems (yellowed leaves no longer count as
+        # petals).
+        petal = (albedo[..., 0] > albedo[..., 1] * 1.3) & (albedo[..., 2] > albedo[..., 1] * 1.15)
+        weights = np.array([0.2126, 0.7152, 0.0722])
+        violet = np.array([0.30, 0.25, 0.85]) / (np.array([0.30, 0.25, 0.85]) @ weights)
+        recoloured = (albedo @ weights)[..., None] * violet
+        albedo = grade(albedo, 0.5)
+        albedo[petal] = recoloured[petal]
+    else:
+        albedo = grade(albedo, 0.5 if scan in FLOWERS else None, keep_petals=scan in FLOWERS)
     rgb = wa.downsample(albedo * alpha[..., None], SUPERSAMPLE)
     a = wa.downsample(alpha, SUPERSAMPLE) if alpha.ndim == 2 else wa.downsample(alpha[..., None], SUPERSAMPLE)[..., 0]
     a = a.reshape(CELL, CELL)

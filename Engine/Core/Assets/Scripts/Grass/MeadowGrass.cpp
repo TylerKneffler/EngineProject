@@ -169,13 +169,10 @@ GrassField* ApplyBushes(Engine::Components::TerrainObjectLayer& layer,
         .Set("shrubThicketSize", 9.f).Set("shrubCoverage", .25f)
         .Set("bushMeshes", ScanMesh("scan_bush") + ";" + ScanMesh("scan_bush_tall"))
         .Set("bushesPerSquareMeter", .08f)
-        .Set("bushClusterSize", 16.f).Set("bushCoverage", .25f)
-        // Scanned flowers and a plantain-like weed in drifts: celandine and
-        // dandelion give the yellow specks of the reference meadows (the
-        // meadow field keeps its generated white daisies, clover and knapweed).
-        .Set("accentMeshes", ScanMesh("scan_celandine") + ";" + ScanMesh("scan_dandelion") + ";" +
-            ScanMesh("scan_weed"))
-        .Set("accentPatchesPerSquareMeter", .12f).Set("accentDriftSize", 7.f);
+        .Set("bushClusterSize", 16.f).Set("bushCoverage", .25f);
+    // No scanned flowers on the meadow: the celandine and dandelion rosettes
+    // (10-20 cm) disappear under the knee-high grass (FieldWalk, 2026-11-22);
+    // the meadow keeps its generated flowers on stems.
     return ApplyScanned(layer, viewerObjectName, 80.f, 18731, settings);
 }
 
