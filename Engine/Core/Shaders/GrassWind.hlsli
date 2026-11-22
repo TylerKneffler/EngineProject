@@ -4,7 +4,9 @@
 static const float GrassWindStrength = 1.0;
 static const float GrassWindMaximumBendDegrees = 85.0;
 static const float GrassWindRootStiffnessHeight = 0.18; // metres
-static const float GrassWindSpeed = 1.35;
+// Time scale of the whole wind field (gust fronts, flutter, tree sway). 1.35
+// read as a gale through the tall meadow grass; halved 2026-11-22 (user).
+static const float GrassWindSpeed = 0.7;
 static const float GrassWindDirectionDegrees = 35.0;
 static const float GrassWindWaveSize = 18.0; // metres; smaller cells increase local variation
 static const uint GrassWindSeed = 18731u;

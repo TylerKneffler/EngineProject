@@ -62,6 +62,8 @@
 
 using Microsoft::WRL::ComPtr;
 
+#include "Core/Renderers/GpuFailureHook.h"
+
 // --------------------------------------------------------------------------
 // Helpers
 // --------------------------------------------------------------------------
@@ -70,6 +72,7 @@ inline void ThrowIfFailed(HRESULT hr)
 {
     if (FAILED(hr))
     {
+        Engine::Renderers::ReportGpuFailure("ThrowIfFailed");
         throw std::runtime_error("HRESULT failed: 0x" +
             std::to_string(static_cast<unsigned long>(hr)));
     }

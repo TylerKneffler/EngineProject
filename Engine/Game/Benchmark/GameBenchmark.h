@@ -64,7 +64,7 @@ public:
         uint32_t maxFps, bool clusteredLighting, double startupMs);
     static GameBenchmarkSceneSample CollectScene(Engine::Scene::Scene& scene);
     void Record(uint64_t frame, const GameBenchmarkFrameSample& sample);
-    void Capture(Engine::Renderers::IGameRenderer& renderer);
+    void Capture(Engine::Renderers::IGameRenderer& renderer, const char* fileName = "capture.ppm");
     bool Finish();
     const std::filesystem::path& Directory() const { return m_directory; }
 

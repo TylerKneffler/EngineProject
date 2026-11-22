@@ -91,9 +91,12 @@ struct TerrainObjectLayer::PrefabInstances
     float screenLod1Pixels=0, screenLod2Pixels=0, screenLodHysteresis=0;
     float shadowDistance=0, shadowFadeWidth=0, farShadowDistance=0;
     int shadowLod=0;
+    bool suppressRendering=false, suppressColliders=false;
     bool HasSameConfiguration(const TerrainObjectLayer& layer) const
     {
-        return viewDistance==layer.viewDistance && lod1Distance==layer.lod1Distance &&
+        return suppressRendering==layer.suppressPrefabRendering &&
+            suppressColliders==layer.suppressPrefabColliders &&
+            viewDistance==layer.viewDistance && lod1Distance==layer.lod1Distance &&
             lod2Distance==layer.lod2Distance && lodHysteresis==layer.lodHysteresis &&
             screenLodSelection==layer.screenLodSelection &&
             distanceLodOverride==layer.distanceLodOverride &&
@@ -122,6 +125,8 @@ struct TerrainObjectLayer::PrefabInstances
         shadowDistance=layer.shadowDistance;
         farShadowDistance=layer.farShadowDistance;
         shadowFadeWidth=layer.GetShadowFadeWidth(); shadowLod=layer.shadowLod;
+        suppressRendering=layer.suppressPrefabRendering;
+        suppressColliders=layer.suppressPrefabColliders;
     }
     bool HasSameLods(const std::map<std::string,ObjectLods>& current) const
     {
@@ -161,7 +166,9 @@ struct TerrainObjectLayer::PrefabInstances
     std::shared_ptr<std::atomic_bool> canceled = std::make_shared<std::atomic_bool>(false);
     std::map<PrototypeKey, std::future<std::unique_ptr<Engine::Serialization::PreparedPrefab>>> pending;
     std::map<PrototypeKey, std::unique_ptr<Engine::Serialization::PreparedPrefab>> prepared;
-    std::map<PrototypeKey, std::future<std::shared_ptr<SharedPrefabPrototype>>> pendingPrototypes;
+    // Shared with every layer that asked for the same prototype while it was
+    // being built (PrototypeBuildsInFlight).
+    std::map<PrototypeKey, std::shared_future<std::shared_ptr<SharedPrefabPrototype>>> pendingPrototypes;
     ~PrefabInstances() { canceled->store(true); }
 };
 
@@ -177,6 +184,20 @@ void TerrainObjectLayer::AppendPrefabPrototypeRetention(
     for (auto runtime=m_prefabInstances; runtime; runtime=runtime->previous)
         for (const auto& prototype:runtime->prototypes)
             if (prototype) output.push_back(prototype);
+}
+
+bool TerrainObjectLayer::HasPrefabPlacements() const
+{
+    if (m_hasPrefabRevision != GetConfigurationRevision() || m_hasPrefabData != placements.data() ||
+        m_hasPrefabCount != placements.size())
+    {
+        m_hasPrefabRevision = GetConfigurationRevision();
+        m_hasPrefabData = placements.data();
+        m_hasPrefabCount = placements.size();
+        m_hasPrefab = std::any_of(placements.begin(), placements.end(), [](const Placement& placement)
+            { return Engine::Serialization::PrefabLod::IsPrefab(placement.asset); });
+    }
+    return m_hasPrefab;
 }
 
 bool TerrainObjectLayer::IsPrefabPreparationComplete(IGraphicsProvider* provider) const
@@ -537,6 +558,22 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
     // provider-free prototype while at least one such cell remains loaded.
     using PrototypeKey = PrefabInstances::PrototypeKey;
     static std::map<PrototypeKey, std::weak_ptr<SharedPrefabPrototype>> prototypeCache;
+    // One build per prototype at a time. Cells that stream in together ask
+    // for the same prefabs before any of them is cached; each used to build
+    // its own copy (a scene with a physics world), use whichever finished
+    // first, and keep the others unconsumed until the layer was destroyed,
+    // where tearing them down cost 6-12 ms a props layer on the owner thread
+    // (the 60-90 ms frames at landscape cell crossings). Owner thread only.
+    // Never destroyed: a leftover result must not run a scene destructor
+    // during static teardown.
+    // ENGINE_PREFAB_PROTOTYPE_SHARE=0 builds per layer as before (A/B runs).
+    using PrototypeBuild = std::shared_future<std::shared_ptr<SharedPrefabPrototype>>;
+    static auto& buildsInFlight = *new std::map<PrototypeKey, PrototypeBuild>;
+    static const bool shareBuilds = []
+    {
+        const char* setting = std::getenv("ENGINE_PREFAB_PROTOTYPE_SHARE");
+        return !(setting && setting[0] == '0');
+    }();
     const auto create=[&](const std::string& name) {
         auto* object=scene->AddObject(name); object->runtimeOnly=true;
         // Instance parts render under the layer object's project layer.
@@ -563,9 +600,21 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
             const PrototypeKey cacheKey{resolved, sources.at(asset).stamp};
             if (const auto found = prototypeCache.find(cacheKey); found != prototypeCache.end())
                 prototype = found->second.lock();
+            if (prototype && shareBuilds)
+            {
+                // Published by another layer meanwhile: drop this layer's
+                // reference to the finished build.
+                runtime->pendingPrototypes.erase(cacheKey);
+                if (const auto build = buildsInFlight.find(cacheKey); build != buildsInFlight.end() &&
+                    build->second.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
+                    buildsInFlight.erase(build);
+            }
             if (!prototype)
             {
                 auto pendingPrototype=runtime->pendingPrototypes.find(cacheKey);
+                if (pendingPrototype==runtime->pendingPrototypes.end() && shareBuilds)
+                    if (const auto build = buildsInFlight.find(cacheKey); build != buildsInFlight.end())
+                        pendingPrototype = runtime->pendingPrototypes.emplace(cacheKey, build->second).first;
                 if (pendingPrototype!=runtime->pendingPrototypes.end())
                 {
                     if (pendingPrototype->second.wait_for(std::chrono::seconds(0))!=std::future_status::ready)
@@ -573,6 +622,7 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
                     try { prototype=pendingPrototype->second.get(); }
                     catch (...) { prototype.reset(); }
                     runtime->pendingPrototypes.erase(pendingPrototype);
+                    buildsInFlight.erase(cacheKey);
                 }
                 else
                 {
@@ -596,7 +646,9 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
                                     result->scene,resolved,nullptr);
                             return result;
                         });
-                    runtime->pendingPrototypes.emplace(cacheKey,std::move(future));
+                    PrototypeBuild build = future.share();
+                    if (shareBuilds) buildsInFlight.emplace(cacheKey, build);
+                    runtime->pendingPrototypes.emplace(cacheKey,std::move(build));
                     prototypeWorkStarted=true;
                     return static_cast<Engine::Core::Object*>(nullptr);
                 }
@@ -701,8 +753,11 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
         }
         bool geometryWaiting = false;
         bool uploadedGeometry = false;
+        // A layer whose batches a near block draws needs no geometry here.
+        const bool renderParts = !suppressPrefabRendering;
         for (const auto& path : required)
         {
+            if (!renderParts) break;
             if (path.empty()) continue;
             auto* prototypeRoot = definition(path);
             if (!prototypeRoot) continue;
@@ -809,7 +864,7 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
         // Resuming another mesh part already owns these placement transforms.
         // Rebuilding and discarding them on every budgeted call made dense
         // layers pay the full placement cost repeatedly during load/restore.
-        if (runtime->nextPart == 0)
+        if (renderParts && runtime->nextPart == 0)
         {
             const float prefabGroupSpan=std::clamp(prefabInstanceGroupSpanMeters,8.f,256.f);
             std::map<std::pair<int,int>,std::vector<const Placement*>> tiles;
@@ -996,8 +1051,8 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
                 }
             }
         };
-        buildChain(chain,distances,false);
-        if (dedicatedShadowProxy && !moreParts) buildChain(shadowChain,shadowDistances,true);
+        if (renderParts) buildChain(chain,distances,false);
+        if (renderParts && dedicatedShadowProxy && !moreParts) buildChain(shadowChain,shadowDistances,true);
         if (moreParts)
         {
             runtime->building = true;
@@ -1013,7 +1068,8 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
         // for every batch part, even when the prefab has no colliders.
         if (const auto found = lodProfiles.find(asset); found != lodProfiles.end())
             colliderRoot = definition(found->first);
-        if (colliderRoot) for (auto* collider:colliderRoot->GetComponentsInChildren<PrimitiveObjectCollider>())
+        if (colliderRoot && !suppressPrefabColliders)
+            for (auto* collider:colliderRoot->GetComponentsInChildren<PrimitiveObjectCollider>())
         {
             if (!collider->Owner->IsEnabledInHierarchy()) continue;
             for (const auto* placement:records)

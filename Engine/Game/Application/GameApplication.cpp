@@ -7,6 +7,7 @@
 #include "Core/Rendering/MaterialCachePolicy.h"
 #include "Core/Rendering/RenderingEffects.h"
 #include "Game/Application/GameApplication.h"
+#include "Core/Startup/WindowPlacementStore.h"
 
 #include "Game/Startup/GameProjectStartup.h"
 #include "Game/Startup/RendererStartup.h"
@@ -647,8 +648,9 @@ private:
             [&]
             {
                 const auto started = std::chrono::steady_clock::now();
-                if (m_gameBenchmark && packet.benchmarkFrame ==
-                    uint64_t(m_benchmarkOptions->warmup) + m_benchmarkOptions->frames)
+                if (m_gameBenchmark && (packet.benchmarkFrame ==
+                    uint64_t(m_benchmarkOptions->warmup) + m_benchmarkOptions->frames ||
+                    !MovingCaptureName(packet.benchmarkFrame).empty()))
                     m_renderer.RequestSceneCapture();
                 ::Engine::Graphics::SetPostProcessSettings(packet.postProcess);
                 m_renderer.EndFrame();
@@ -692,6 +694,8 @@ private:
                 if (packet.benchmarkFrame == warmup && m_benchmarkOptions->onMeasurementStart)
                     m_benchmarkOptions->onMeasurementStart();
                 m_gameBenchmark->Record(packet.benchmarkFrame - warmup, sample);
+                if (const auto name = MovingCaptureName(packet.benchmarkFrame); !name.empty())
+                    m_gameBenchmark->Capture(m_renderer, name.c_str());
             }
             else if (packet.benchmarkFrame == warmup + m_benchmarkOptions->frames)
             {
@@ -815,6 +819,30 @@ private:
     ::Engine::Renderers::IGameRenderer& m_renderer;
     std::string m_scenePath;
     GameBenchmark* m_gameBenchmark;
+    // capture_a.ppm / capture_b.ppm for the two moving snapshots (see
+    // GameBenchmarkOptions::movingCaptureGap), else null.
+    // seq_<n>.ppm every captureEvery frames of the drive.
+    std::string MovingCaptureName(uint64_t benchmarkFrame) const
+    {
+        const auto* options = m_benchmarkOptions;
+        if (!options) return {};
+        const uint64_t start = uint64_t(options->warmup);
+        if (options->captureEvery && benchmarkFrame >= start &&
+            benchmarkFrame < start + options->driveForwardFrames &&
+            (benchmarkFrame - start) % options->captureEvery == 0)
+        {
+            char name[32];
+            std::snprintf(name, sizeof(name), "seq_%04llu.ppm",
+                static_cast<unsigned long long>(benchmarkFrame - start));
+            return name;
+        }
+        if (!options->movingCaptureGap ||
+            options->driveForwardFrames < options->movingCaptureGap + 4u) return {};
+        const uint64_t second = start + options->driveForwardFrames - 2u;
+        if (benchmarkFrame == second) return "capture_b.ppm";
+        if (benchmarkFrame + options->movingCaptureGap == second) return "capture_a.ppm";
+        return {};
+    }
     const GameBenchmarkOptions* m_benchmarkOptions;
     bool m_workerRecordingEnabled = false;
     std::ofstream m_benchmark;
@@ -910,7 +938,7 @@ int GameApplication::Run(HINSTANCE instance, const GameBenchmarkOptions* benchma
         (std::filesystem::path(settings.assetsDirectory) / "Startup" / "Game.png").wstring();
     ::Engine::Core::StartupSplash splash(instance,
         settings.name.empty() ? L"Game" : std::filesystem::path(settings.name).wstring(),
-        startupBackground, benchmark ? std::wstring() : std::wstring(L"Game"));
+        startupBackground, std::wstring(benchmark ? L"GameCapture" : L"Game"));
     splash.SetProgress(0.15f, L"Creating game window...");
 
     auto window = std::make_unique<::Engine::Core::Window>(instance, L"Game",
@@ -1173,7 +1201,14 @@ int GameApplication::Run(HINSTANCE instance, const GameBenchmarkOptions* benchma
     // (or DPI-scaled) monitor. Parts off screen still render.
     const int showCommand = benchmark ? SW_SHOWDEFAULT
         : splash.PlaceWindow(window->GetHWND(), false);
-    if (!benchmark) window->SetPlacementKey(L"Game");
+    // Benchmark and capture windows remember only where they were left (their
+    // own key, so they do not disturb the game's): moved there by the top-left
+    // corner, never resized or clamped, for the reason above.
+    if (benchmark)
+        if (const auto saved = ::Engine::Core::LoadWindowPlacement(L"GameCapture"))
+            SetWindowPos(window->GetHWND(), nullptr, saved->bounds.left, saved->bounds.top, 0, 0,
+                SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+    window->SetPlacementKey(benchmark ? L"GameCapture" : L"Game");
     splash.HoldAboveMainWindow();
     window->Show(showCommand);
     // Hidden swap chains may discard Present, so submit a visible frame too.

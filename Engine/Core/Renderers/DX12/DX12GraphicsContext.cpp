@@ -3,6 +3,7 @@
 #include "Core/Graphics/IGraphicsBuffer.h"
 #include "Core/Graphics/IPipelineState.h"
 #include "DX12GraphicsBuffer.h"
+#include "DX12DredDiagnostics.h"
 #include "DX12PipelineStateBuilder.h"
 #include "DX12PostProcess.h"
 #include "DX12GraphicsTexture.h"
@@ -301,6 +302,17 @@ void D3D12GraphicsContext::BeginGpuTiming(Engine::Graphics::GpuTimingStage stage
 { if (m_gpuTimings) m_gpuTimings->Begin(m_cmdList, stage); }
 void D3D12GraphicsContext::EndGpuTiming(Engine::Graphics::GpuTimingStage stage)
 { if (m_gpuTimings) m_gpuTimings->End(m_cmdList, stage); }
+
+void D3D12GraphicsContext::SetDebugMarker(uint64_t tag)
+{
+    if (!m_cmdList || !Engine::Renderers::IsDredEnabled()) return;
+    // A wide string marker (metadata 0): DRED keeps it as the breadcrumb's
+    // context, which the device-removed report prints.
+    wchar_t text[32];
+    const int length = swprintf_s(text, L"tag %llu", static_cast<unsigned long long>(tag));
+    if (length > 0)
+        m_cmdList->SetMarker(0, text, static_cast<UINT>((length + 1) * sizeof(wchar_t)));
+}
 
 bool D3D12GraphicsContext::BeginOcclusionFrame(uint64_t viewId,
     uint64_t sceneSignature)

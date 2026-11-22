@@ -205,6 +205,10 @@ public:
     virtual void BeginGpuTiming(GpuTimingStage) {}
     virtual void EndGpuTiming(GpuTimingStage) {}
 
+    // A numbered marker in the command stream for GPU hang reports
+    // (Core/Rendering/DebugDrawTags.h). Backends without such reports ignore it.
+    virtual void SetDebugMarker(uint64_t) {}
+
     // Resource barriers / state transitions
     // These are needed for render-to-texture workflows
     enum class ResourceState

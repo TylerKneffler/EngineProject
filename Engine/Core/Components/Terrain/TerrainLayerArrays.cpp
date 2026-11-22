@@ -76,8 +76,8 @@ std::unordered_map<std::string, std::shared_ptr<Entry>>& Cache()
 struct IdentityKey
 {
     static constexpr size_t Maps = 5;
-    std::array<const Texture*, TerrainLayerArrays::MaxLayers * Maps> textures{};
-    std::array<glm::vec3, TerrainLayerArrays::MaxLayers> tints{};
+    std::array<const Texture*, TerrainLayerArrays::MaxSlices * Maps> textures{};
+    std::array<glm::vec3, TerrainLayerArrays::MaxSlices> tints{};
     size_t layers = 0;
     bool operator==(const IdentityKey& other) const
     { return layers == other.layers && textures == other.textures && tints == other.tints; }
@@ -376,7 +376,7 @@ void AppendLevel(const LevelImages& level, bool blockCompressed, CpuArrays& out)
 }
 
 // ---- Disk cache -----------------------------------------------------------
-constexpr uint64_t CacheMagic = 0x3159415252414c54ull; // TLARRAY1
+constexpr uint64_t CacheMagic = 0x3259415252414c54ull; // TLARRAY2 (16 mean colours)
 constexpr uint32_t CacheVersion = 2;
 
 uint64_t Fnv(uint64_t hash, const void* data, size_t size)
@@ -606,7 +606,7 @@ const TerrainLayerArrays::Arrays* TerrainLayerArrays::Acquire(
 {
     if (!provider || materials.empty()) return nullptr;
     IdentityKey identity;
-    identity.layers = std::min<size_t>(materials.size(), MaxLayers);
+    identity.layers = std::min<size_t>(materials.size(), MaxSlices);
     for (size_t layer = 0; layer < identity.layers; ++layer)
         if (const auto* material = materials[layer].get())
         {
@@ -627,7 +627,7 @@ const TerrainLayerArrays::Arrays* TerrainLayerArrays::Acquire(
     }
     std::vector<LayerSources> sources;
     std::string key;
-    for (size_t layer = 0; layer < std::min<size_t>(materials.size(), MaxLayers); ++layer)
+    for (size_t layer = 0; layer < std::min<size_t>(materials.size(), MaxSlices); ++layer)
     {
         LayerSources source;
         if (const auto* material = materials[layer].get())

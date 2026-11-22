@@ -297,6 +297,12 @@ public:
     // Native frame handoff serializes these calls with TakeRetiredGraphicsResources.
     void RetireGraphicsBuffer(std::unique_ptr<IGraphicsBuffer> buffer);
     void RetireGraphicsBuffer(std::shared_ptr<IGraphicsBuffer> buffer);
+    // An object that is not in the scene and only carries render resources a
+    // submitted frame may still draw (a recycled grass tile's old meshes). It
+    // is released with the retired render leaves, behind the frame fence;
+    // without deferred retirement the GPU is waited for first, as for a
+    // removed object.
+    void RetireRenderObject(std::unique_ptr<Object> detached);
     void SetDeferredGraphicsRetirement(bool enabled)
     { AssertOwnerThread(); m_deferGraphicsRetirement = enabled; }
     bool IsDeferredGraphicsRetirementEnabled() const

@@ -13,11 +13,18 @@
 #include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Serialization/SceneSerializer.h"
+#include <cstdlib>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
+#include <fstream>
+#include <map>
+#include <memory>
 #include <stdexcept>
 
 namespace
@@ -48,7 +55,7 @@ const std::array<glm::vec3, LayerCount> LayerPreview{{
     {.22f, .15f, .10f}, {.40f, .38f, .34f}, {.85f, .88f, .92f}}};
 
 // Mesh caches store the painted weights: change this with the paint rules.
-constexpr uint64_t PaintRevision = 0x4c414e4453435038ull;
+constexpr uint64_t PaintRevision = 0x4c414e445343503aull; // ...39: before stamp proxies (2026-11-21)
 
 // Heights the paint and forests follow (see LandscapeDriver's properties).
 // blend scales the height transitions above the shore, so taller maps get
@@ -275,6 +282,16 @@ struct MacroColorRules
     float gullyRock = .5f, brightness = .85f;
 };
 
+// A cliff piece as the macro maps see it (see ComputeMacroColors): where it
+// stands, how far its rock reaches across the ground, its stamp's mean colour
+// (terrainMacroColor) and the way its wall faces.
+struct CliffMark
+{
+    glm::vec2 position{0.f};
+    float radius = 0.f;
+    glm::vec3 color{0.f}, facing{0.f, 1.f, 0.f};
+};
+
 // The macro color map: the near paint every fourth sample (16 m on the demo
 // map, the generator's erosion grid), shaped by erosion. Valley floors and
 // streams that carried a lot of water turn lush, steep gullies scour to bare
@@ -283,8 +300,8 @@ struct MacroColorRules
 std::vector<glm::vec4> ComputeMacroColors(const std::string& archivePath, uint64_t signature,
     int extent, int cellsX, int cellsY, float cellWidth, float cellDepth, const Altitudes& a,
     const std::array<glm::vec3, LayerCount>& means, const TerrainHydrologyMap& flow,
-    const TerrainHydrologyMap& deposition, const MacroColorRules& rules, int& side,
-    std::vector<glm::vec3>& normals)
+    const TerrainHydrologyMap& deposition, const MacroColorRules& rules,
+    const std::vector<CliffMark>& cliffs, int& side, std::vector<glm::vec3>& normals)
 {
     side = 0;
     normals.clear();
@@ -350,6 +367,34 @@ std::vector<glm::vec4> ComputeMacroColors(const std::string& archivePath, uint64
         return true;
     });
     if (!read) { side = 0; normals.clear(); return {}; }
+    // Cliff pieces: loaded cells draw them as terrain stamps, far tiles only
+    // through these maps. Far tiles light by the 16 m normals, which smooth a
+    // wall into an upward slope facing the sun, so a dark rock face showed as
+    // a pale slope until its cells loaded. Where a piece stands the maps take
+    // its scan's colour and its wall's facing instead (no canopy there).
+    const float spacing = step * cellWidth;
+    const float origin = -float(extent) * cellsX * cellWidth;
+    for (const auto& cliff : cliffs)
+    {
+        const float reach = cliff.radius + .5f * spacing;
+        const int c0 = std::max(0, static_cast<int>(std::floor((cliff.position.x - reach - origin) / spacing)));
+        const int c1 = std::min(side - 1, static_cast<int>(std::ceil((cliff.position.x + reach - origin) / spacing)));
+        const int r0 = std::max(0, static_cast<int>(std::floor((cliff.position.y - reach - origin) / spacing)));
+        const int r1 = std::min(side - 1, static_cast<int>(std::ceil((cliff.position.y + reach - origin) / spacing)));
+        for (int row = r0; row <= r1; ++row)
+            for (int col = c0; col <= c1; ++col)
+            {
+                const float distance = glm::length(glm::vec2(origin + col * spacing,
+                    origin + row * spacing) - cliff.position);
+                const float cover = 1.f - SmoothStep(.5f * cliff.radius, reach, distance);
+                if (cover <= 0.f) continue;
+                const size_t sample = static_cast<size_t>(row) * side + col;
+                auto& color = colors[sample];
+                color = glm::vec4(glm::mix(glm::vec3(color), cliff.color * rules.brightness, cover),
+                    color.a * (1.f - cover));
+                normals[sample] = glm::normalize(glm::mix(normals[sample], cliff.facing, cover));
+            }
+    }
     return colors;
 }
 
@@ -394,19 +439,168 @@ const std::array<CliffShape, 8> Cliffs{{
     {"Boulders/Crag_spire_01", 6.5f, 5.5f, 1.f}, {"Boulders/Cliff_overhang_01", 4.5f, 3.f, 1.3f},
     {"Boulders/Outcrop_ledge_01", 5.5f, 3.4f, 1.3f}}};
 
-void GenerateCliffs(const TerrainManager::ObjectLayerContext& context,
-    TerrainObjectLayer& layer, const Altitudes& a, uint64_t& id)
+// Cliffs placed when the map is built (tools/landscape_cliffs.py, world.cliffs
+// next to the height archive): the builder stamps each piece into the heights
+// (the ground meets the scan instead of falling away under it), so for the
+// cells it covers the pieces must come from its list, not from the rules
+// below. Cells outside its extent keep runtime placement.
+struct CliffList
 {
-    if (context.farObjects) return;
-    const std::string prefix = "Assets/Prefabs/Woodland/";
-    for (const auto& cliff : Cliffs)
+    struct Piece
     {
-        auto& lod = layer.objectLods[prefix + cliff.name + ".prefab"];
+        uint8_t shape = 0;
+        glm::vec3 position{0.f}, normal{0.f, 1.f, 0.f};
+        float yawDegrees = 0.f, scale = 1.f;
+    };
+    int extent = -1;   // cells with |x| and |z| <= extent are covered
+    uint64_t contentHash = 0;
+    std::map<TerrainManager::Cell, std::vector<Piece>> cells;
+};
+
+// Null when the file is missing, malformed or from another archive.
+std::shared_ptr<const CliffList> LoadCliffList(const std::string& path, uint64_t archiveSignature)
+{
+    std::ifstream file(path, std::ios::binary);
+    if (!file) return nullptr;
+    const std::vector<char> bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    constexpr size_t HeaderSize = 8 + 4 + 8 + 4 + 4, RecordSize = 40;
+    if (bytes.size() < HeaderSize) return nullptr;
+    const auto read = [&](size_t offset, auto& value) { std::memcpy(&value, bytes.data() + offset, sizeof(value)); };
+    uint64_t magic = 0, signature = 0;
+    uint32_t version = 0, count = 0;
+    int32_t extent = -1;
+    read(0, magic); read(8, version); read(12, signature); read(20, extent); read(24, count);
+    constexpr uint64_t Magic = 0x31464c43524e5254ull; // "TRNRCLF1"
+    if (magic != Magic || version != 1 || signature != archiveSignature || extent < 0 ||
+        bytes.size() != HeaderSize + static_cast<size_t>(count) * RecordSize) return nullptr;
+    auto list = std::make_shared<CliffList>();
+    list->extent = extent;
+    uint64_t hash = 1469598103934665603ull;
+    for (char byte : bytes) hash = (hash ^ static_cast<uint8_t>(byte)) * 1099511628211ull;
+    list->contentHash = hash;
+    for (uint32_t i = 0; i < count; ++i)
+    {
+        const size_t at = HeaderSize + static_cast<size_t>(i) * RecordSize;
+        int16_t cellX = 0, cellZ = 0;
+        float values[8] = {};
+        CliffList::Piece piece;
+        read(at, cellX); read(at + 2, cellZ); read(at + 4, piece.shape);
+        std::memcpy(values, bytes.data() + at + 8, sizeof(values));
+        piece.position = {values[0], values[1], values[2]};
+        piece.normal = {values[3], values[4], values[5]};
+        piece.yawDegrees = values[6];
+        piece.scale = values[7];
+        list->cells[{cellX, cellZ}].push_back(piece);
+    }
+    return list;
+}
+
+// What draws a cliff piece as an object (only cells outside the stamp list,
+// whose pieces are placed at runtime): the stamp's proxy
+// (tools/bake_terrain_stamp.py write_proxy), the same shape and surface a
+// stamp has. The photo-scanned meshes are only the stamps' bake sources.
+// Shapes past the five stamps keep their own prefab.
+// The stamp a scanned shape (the first five) was baked into: its file name
+// under Assets/TerrainData/Stamps (and Prefabs/Woodland/Stamps for its proxy).
+std::string StampName(size_t shape)
+{
+    const std::string name = Cliffs[shape].name;
+    const auto slash = name.find('/');
+    return name.substr(slash == std::string::npos ? 0 : slash + 1);
+}
+
+std::string CliffPrefab(size_t shape)
+{
+    if (shape >= 5) return std::string("Assets/Prefabs/Woodland/") + Cliffs[shape].name + ".prefab";
+    return "Assets/Prefabs/Woodland/Stamps/" + StampName(shape) + ".prefab";
+}
+
+// The terrain stamps of a cell's cliff pieces (tools/bake_terrain_stamp.py
+// bakes one per scan into Assets/TerrainData/Stamps), in the cell's space.
+// Sculpted cells (tools/cliff_sculpt.py, Assets/TerrainData/Sculpts): the
+// sculpt and its material's index in the terrain's stamp materials.
+using SculptedCells = std::map<TerrainManager::Cell,
+    std::pair<std::shared_ptr<const Engine::Components::TerrainSculpt>, int>>;
+
+SculptedCells LoadSculptedCells(std::vector<std::string>& stampMaterials)
+{
+    SculptedCells cells;
+    // ENGINE_SCULPTS=0 keeps the stamps in sculpted cells (A/B runs).
+    if (const char* setting = std::getenv("ENGINE_SCULPTS"); setting && setting[0] == '0')
+        return cells;
+    std::error_code error;
+    const std::filesystem::path directory =
+        Engine::Components::Mesh::ResolveFilePath("Assets/TerrainData/Sculpts");
+    for (const auto& entry : std::filesystem::directory_iterator(directory, error))
+    {
+        if (entry.path().extension() != ".sculpt") continue;
+        auto sculpt = Engine::Components::TerrainSculpt::Load(entry.path().string());
+        if (!sculpt || sculpt->material.empty()) continue;
+        // Cells share their rock material (one layer-array slice).
+        auto found = std::find(stampMaterials.begin(), stampMaterials.end(), sculpt->material);
+        if (found == stampMaterials.end())
+            found = stampMaterials.insert(stampMaterials.end(), sculpt->material);
+        cells[{sculpt->cellX, sculpt->cellZ}] =
+            {sculpt, static_cast<int>(found - stampMaterials.begin())};
+    }
+    return cells;
+}
+
+std::vector<Engine::Components::TerrainStampInstance> StampsForCell(const CliffList& cliffs,
+    const SculptedCells& sculpted, TerrainManager::Cell cell)
+{
+    std::vector<Engine::Components::TerrainStampInstance> stamps;
+    // A sculpted cell's surface already has its pieces' shape.
+    if (const auto found = sculpted.find(cell); found != sculpted.end())
+    {
+        Engine::Components::TerrainStampInstance instance;
+        instance.sculpt = found->second.first;
+        instance.materialIndex = found->second.second;
+        stamps.push_back(std::move(instance));
+        return stamps;
+    }
+    if (std::abs(cell.first) > cliffs.extent || std::abs(cell.second) > cliffs.extent) return stamps;
+    const auto found = cliffs.cells.find(cell);
+    if (found == cliffs.cells.end()) return stamps;
+    for (const auto& piece : found->second)
+    {
+        if (piece.shape >= 5) continue;
+        auto stamp = Engine::Components::TerrainStamp::Load(Engine::Components::Mesh::ResolveFilePath(
+            "Assets/TerrainData/Stamps/" + StampName(piece.shape) + ".stamp"));
+        if (!stamp) continue;
+        Engine::Components::TerrainStampInstance instance;
+        instance.stamp = std::move(stamp);
+        instance.materialIndex = piece.shape;
+        instance.transform = glm::translate(glm::mat4(1.f), piece.position) *
+            glm::mat4_cast(TerrainObjectLayer::SurfaceRotation(piece.normal, piece.yawDegrees)) *
+            glm::scale(glm::mat4(1.f), glm::vec3(piece.scale));
+        stamps.push_back(std::move(instance));
+    }
+    return stamps;
+}
+
+void GenerateCliffs(const TerrainManager::ObjectLayerContext& context,
+    TerrainObjectLayer& layer, const Altitudes& a, uint64_t& id, const CliffList* cliffs)
+{
+    // Far cells get cliffs too: the far blocks draw their last level out to
+    // the cull distance below (TerrainManager far objects).
+    for (size_t shape = 0; shape < Cliffs.size(); ++shape)
+    {
+        auto& lod = layer.objectLods[CliffPrefab(shape)];
         // Crags hold their detail further out than the small blocks.
         lod.distances = {140.f, 420.f};
         lod.cullAfterLastLod = true;
         lod.finalLodCullDistance = layer.viewDistance;
     }
+    // Cells the build placed cliffs in draw them as terrain stamps
+    // (StampsForCell) at every terrain detail level, the far cells' stride-8
+    // meshes included, so no object stands in for them: far-block proxies
+    // there only fought the stamps' own surface for depth. Past the far cells
+    // (farRadius, 4 km) a rock face is a few pixels, carried by the macro
+    // colour and normal maps (ComputeMacroColors).
+    if (cliffs && std::abs(context.cell.first) <= cliffs->extent &&
+        std::abs(context.cell.second) <= cliffs->extent)
+        return;
     const size_t layerCount = context.terrainLayerCount;
     const bool painted = context.weights && layerCount >= LayerCount &&
         context.weights->size() == context.heights->size() * layerCount;
@@ -429,7 +623,10 @@ void GenerateCliffs(const TerrainManager::ObjectLayerContext& context,
                 context.cellsY, context.cellWidth, context.cellDepth, x, z, height, &normal))
             return false;
         // Steep (from about 38 degrees), above the shores, below the snow.
-        if (normal.y > .79f || normal.y < .3f) return false;
+        // Sheer faces count too: they take little room on the map but are
+        // most of what is seen of a cliff, and were left as bare painted
+        // terrain when this stopped at 72 degrees.
+        if (normal.y > .79f || normal.y < .08f) return false;
         if (height < a.water + 25.f || height > a.snow) return false;
         // The slope must keep rising behind the piece: scanned rock faces are
         // open shells, and one standing at a crest shows its hollow back
@@ -462,15 +659,19 @@ void GenerateCliffs(const TerrainManager::ObjectLayerContext& context,
     {
         // Mostly crags (rock-face pieces 25-40 m across) so neighbours overlap
         // into a broken wall; spires, blocks, overhangs and ledges break it up.
-        const size_t shape = pick < .26f ? 0u : pick < .48f ? 1u : pick < .64f ? 2u :
-            pick < .78f ? 3u : pick < .88f ? 4u : pick < .93f ? 5u : pick < .97f ? 6u : 7u;
+        // Scanned faces only. The generated spire, overhang and ledge were
+        // one piece in eight as filler, but the spire is 25 m tall and stood
+        // through the canopy as rows of dark columns along the escarpment
+        // (captured 2026-11-20); they stay in the table, unused.
+        const size_t shape = pick < .3f ? 0u : pick < .55f ? 1u : pick < .72f ? 2u :
+            pick < .88f ? 3u : 4u;
         const float scale = Cliffs[shape].baseScale * (.75f + .6f * size);
         // Sink the piece so its back is buried and its downhill edge meets
         // the slope: its half depth times the slope's gradient.
         const float gradient = std::sqrt(std::max(0.f, 1.f - normal.y * normal.y)) / normal.y;
         TerrainObjectLayer::Placement placement;
         placement.id = ++id;
-        placement.asset = prefix + Cliffs[shape].name + ".prefab";
+        placement.asset = CliffPrefab(shape);
         placement.position = {x, height - std::min(16.f,
             Cliffs[shape].halfDepth * scale * std::min(gradient, 1.6f) * .8f), z};
         // Lean a third of the way with the slope, so faces stand proud of it
@@ -483,8 +684,8 @@ void GenerateCliffs(const TerrainManager::ObjectLayerContext& context,
         return Cliffs[shape].halfWidth * scale;
     };
     int placed = 0;
-    constexpr int MaximumBlocks = 40;
-    for (int attempt = 0; attempt < 140 && placed < MaximumBlocks; ++attempt)
+    constexpr int MaximumBlocks = 64;
+    for (int attempt = 0; attempt < 220 && placed < MaximumBlocks; ++attempt)
     {
         const float x = (.04f + .92f * random()) * width;
         const float z = (.04f + .92f * random()) * depth;
@@ -519,10 +720,19 @@ void GenerateCliffs(const TerrainManager::ObjectLayerContext& context,
     }
 }
 
+// ENGINE_LANDSCAPE_SHADOW_SCALE=<factor> scales the shadow ranges of the
+// forest, prop and undergrowth layers (for A/B runs; 1 = as authored).
+float LandscapeShadowScale()
+{
+    static const float scale = []
+    { const char* v = std::getenv("ENGINE_LANDSCAPE_SHADOW_SCALE"); return v ? std::clamp(float(std::atof(v)), .1f, 2.f) : 1.f; }();
+    return scale;
+}
+
 // Forest for one cell: random candidates kept where the forest mask, the
 // height band and the slope allow, plus a few lone trees in the meadows.
 void GenerateForest(const TerrainManager::ObjectLayerContext& context,
-    TerrainObjectLayer& layer, const Altitudes& a, int treesPerCell)
+    TerrainObjectLayer& layer, const Altitudes& a, int treesPerCell, const CliffList* cliffs)
 {
     if (!context.heights || context.cellsX <= 0 || context.cellsY <= 0 ||
         context.heights->size() != static_cast<size_t>(context.cellsX + 1) *
@@ -535,7 +745,7 @@ void GenerateForest(const TerrainManager::ObjectLayerContext& context,
     layer.viewDistance = 900.f;
     layer.lod1Distance = 60.f;
     layer.lod2Distance = 220.f;
-    layer.shadowDistance = 90.f;
+    layer.shadowDistance = 90.f * LandscapeShadowScale();
     layer.shadowLod = 1;
     // Beyond 90 m the impostors cast into the far shadow cascade, so forests
     // keep their shadows on the ground and on each other at any distance.
@@ -618,12 +828,21 @@ void GenerateForest(const TerrainManager::ObjectLayerContext& context,
     }
     // Forest edge. The pass above thins out with the mask, which left the
     // edge as scattered trunks over open ground with sky between the crowns.
-    // A second pass closes it: medium and small trees and saplings across the
-    // mask's transition, up to one per ~30 m2, smaller toward the meadow, so
-    // the crowns step down to the shrub belt (GenerateProps) and the ground.
+    // A second pass closes it from the ground up, in three steps across the
+    // mask's transition (about 20 m on the ground), meadow side first:
+    //  * shrubs: small oaks sunk to the base of their crowns (the leaves
+    //    start 1.7 m up a bare stem), so each is a 2-4.5 m leafy mound
+    //    standing on the grass, up to one per ~8 m2;
+    //  * a skirt: medium oaks sunk the same way (crowns start at 3.6 m),
+    //    5-8 m mounds that carry the wall up to the crowns behind;
+    //  * standing medium and small trees through the rest of the transition.
+    // In the conifer band young spruces do all three; their branches reach
+    // the ground as they are. The pack bushes cannot do this: they are under
+    // 2 m at any sensible scale and single-LOD props end ~25 m from the
+    // camera (captured 2026-11-20), so the belt of them was removed.
     // Its own random stream leaves the trees above where they were. Loaded
-    // cells only: these trees are too small to matter in the far blocks, and
-    // every far tree costs an impostor.
+    // cells only: these are too small to matter in the far blocks, and every
+    // far tree costs an impostor.
     if (!context.farObjects)
     {
         uint32_t edgeState = Hash(context.cell.first, context.cell.second, 0x65646765u) | 1u;
@@ -632,7 +851,7 @@ void GenerateForest(const TerrainManager::ObjectLayerContext& context,
             edgeState ^= edgeState << 13; edgeState ^= edgeState >> 17; edgeState ^= edgeState << 5;
             return (edgeState & 0xffffffu) / float(0x1000000);
         };
-        for (int attempt = 0; attempt < treesPerCell * 3; ++attempt)
+        for (int attempt = 0; attempt < treesPerCell * 10; ++attempt)
         {
             const float x = (.01f + .98f * edgeRandom()) * width;
             const float z = (.01f + .98f * edgeRandom()) * depth;
@@ -647,33 +866,64 @@ void GenerateForest(const TerrainManager::ObjectLayerContext& context,
             const float worldX = context.cell.first * width + x;
             const float worldZ = context.cell.second * depth + z;
             const float forest = ForestMask(worldX, worldZ, height, a) * ForestBand(height, a);
-            if (chance >= .8f * ForestEdgeBelt(forest, .9f)) continue;
+            if (forest <= .02f || forest >= .9f) continue;
+            // Chances per attempt (one attempt per ~7.4 m2). The shrub line
+            // is ragged by a 14 m noise but never opens up.
+            const float ragged = .65f + .35f * ValueNoise(worldX, worldZ, 14.f, 227u);
+            const float shrubChance = .9f * ragged * SmoothStep(.02f, .1f, forest) *
+                (1.f - SmoothStep(.35f, .6f, forest));
+            const float skirtChance = .22f * SmoothStep(.08f, .25f, forest) *
+                (1.f - SmoothStep(.6f, .9f, forest));
+            const float standingChance = .24f * ForestEdgeBelt(forest, .9f);
+            const int role = chance < shrubChance ? 0 :
+                chance < shrubChance + skirtChance ? 1 :
+                chance < shrubChance + skirtChance + standingChance ? 2 : -1;
+            if (role < 0) continue;
             if (TrailMask(worldX, worldZ) > .02f) continue;
-            // 0 at the meadow side of the belt, 1 at the forest side.
-            const float inward = SmoothStep(.05f, .7f, forest);
-            const float sizeClass = pick * .65f + inward * .35f;
-            const int sizeBand = sizeClass > .62f ? 1 : 2;
-            const bool sapling = sizeBand == 2 && sizeClass < .34f;
             const bool conifer = std::fmod(pick * 7.31f + yaw * 3.17f, 1.f) < ConiferShare(height, a);
             TerrainObjectLayer::Placement placement;
             placement.id = ++id;
+            float sink = .08f, lean = 0.f;
             if (conifer)
-                placement.asset = coniferPrefix + ConiferSpecies[sizeBand == 1 ? 2u : 3u] + ".prefab";
+            {
+                placement.asset = coniferPrefix + ConiferSpecies[role == 2 && pick > .5f ? 2u : 3u] + ".prefab";
+                placement.scale = role == 0 ? .3f + .3f * size : role == 1 ? .55f + .35f * size :
+                    .8f + .6f * size;
+                lean = glm::radians(2.f);
+            }
+            else if (role == 0)
+            {
+                placement.asset = prefix + Species[6] + ".prefab";
+                placement.scale = .5f + .6f * size;
+                sink = 1.6f * placement.scale;
+                lean = glm::radians(4.f * size);
+            }
+            else if (role == 1)
+            {
+                placement.asset = prefix + Species[pick < .5f ? 4u : 5u] + ".prefab";
+                placement.scale = .7f + .4f * size;
+                sink = 3.f * placement.scale;
+                lean = glm::radians(3.f * size);
+            }
             else
-                placement.asset = prefix + Species[sizeBand == 1 ? (size < .5f ? 4u : 5u) :
-                    sapling ? 7u : 6u] + ".prefab";
-            placement.position = {x, height - .08f, z};
+            {
+                // 0 at the meadow side of the transition, 1 at the forest side.
+                const float inward = SmoothStep(.05f, .7f, forest);
+                const bool medium = pick * .65f + inward * .35f > .62f;
+                placement.asset = prefix + Species[medium ? (size < .5f ? 4u : 5u) : 6u] + ".prefab";
+                placement.scale = .8f + size * .6f;
+                // Edge trees lean out toward the light, up to ~9 degrees.
+                lean = glm::radians(9.f * size * size);
+            }
+            placement.position = {x, height - sink, z};
             placement.yawDegrees = yaw * 360.f;
-            placement.scale = .8f + size * .6f;
-            // Edge trees lean out toward the light, up to ~9 degrees.
-            const float lean = glm::radians(conifer ? 2.f : 9.f * size * size);
             const float leanDirection = pick * glm::two_pi<float>();
             placement.normal = {std::sin(lean) * std::cos(leanDirection), std::cos(lean),
                 std::sin(lean) * std::sin(leanDirection)};
             layer.placements.push_back(std::move(placement));
         }
     }
-    GenerateCliffs(context, layer, a, id);
+    GenerateCliffs(context, layer, a, id, cliffs);
 }
 
 // Ground detail cooked by tools/PropCook: rocks from one scanned pack and a
@@ -742,14 +992,14 @@ void GenerateProps(const TerrainManager::ObjectLayerContext& context,
         // A dedicated undergrowth layer (bushes have a single LOD).
         layer.viewDistance = 150.f;
         layer.lod1Distance = layer.lod2Distance = 150.f;
-        layer.shadowDistance = 45.f;
+        layer.shadowDistance = 45.f * LandscapeShadowScale();
     }
     else if (!undergrowth)
     {
         layer.viewDistance = 220.f;
         layer.lod1Distance = 35.f;
         layer.lod2Distance = 100.f;
-        layer.shadowDistance = 80.f;
+        layer.shadowDistance = 80.f * LandscapeShadowScale();
         layer.shadowLod = 1;
         // The prefabs carry their own LOD0-2 chains; only distances are set.
         for (int rock : LandscapeRocks)
@@ -917,7 +1167,7 @@ void GenerateProps(const TerrainManager::ObjectLayerContext& context,
                 scree *= SmoothStep(.6f, .8f, normal.y);
             }
         }
-        const float odds = .025f + .45f * rocky + .3f * field + .25f * shore + .55f * scree;
+        const float odds = .025f + .45f * rocky + .3f * field + .25f * shore + .4f * scree;
         if (chance >= odds) continue;
         // Mostly small stones; boulders in rock fields, on rock paint and in scree.
         float scale = .35f + 2.4f * std::pow(size, 2.4f) *
@@ -926,7 +1176,9 @@ void GenerateProps(const TerrainManager::ObjectLayerContext& context,
         // Rocks lean partway with the slope, so they read as resting on it.
         const glm::vec3 lean = glm::normalize(glm::mix(normal, glm::vec3(0.f, 1.f, 0.f), .45f));
         // Large rocks in fields and on rock paint: a generated boulder.
-        if (kind > .72f && scale > 1.2f && shore <= .5f)
+        // Not in scree: a cell has one boulder shape, and an apron of forty
+        // copies of it under a cliff read as a field of columns.
+        if (kind > .72f && scale > 1.2f && shore <= .5f && scree < .3f)
         {
             place(BoulderPrefab(standBoulder), x, height - .05f, z, lean, yaw,
                 .55f + .5f * size);
@@ -941,45 +1193,21 @@ void GenerateProps(const TerrainManager::ObjectLayerContext& context,
             continue;
         }
         const int rock = standRocks[pick < .5f ? 0 : 1];
-        place(RockPrefab(rock), x, height - .08f * scale, z, lean, yaw, scale);
-    }
-    if (!undergrowth) return;
-    // Shrub belt: tall bushes massed along the meadow side of every forest
-    // edge (up to one per ~12 m2, enlarged, ragged by the clump noise), so
-    // the edge trees' trunks and the ground under them are hidden from the
-    // meadow. Its own random stream, so the scatter above keeps its layout.
-    uint32_t beltState = Hash(context.cell.first, context.cell.second, 0x62656c74u) | 1u;
-    const auto beltRandom = [&beltState]
-    {
-        beltState ^= beltState << 13; beltState ^= beltState >> 17; beltState ^= beltState << 5;
-        return (beltState & 0xffffffu) / float(0x1000000);
-    };
-    const int beltAttempts = static_cast<int>(std::lround(1400.f * std::clamp(density, 0.f, 4.f)));
-    for (int attempt = 0; attempt < beltAttempts; ++attempt)
-    {
-        const float x = (.01f + .98f * beltRandom()) * width;
-        const float z = (.01f + .98f * beltRandom()) * depth;
-        const float chance = beltRandom(), pick = beltRandom(), yaw = beltRandom(),
-            size = beltRandom();
-        float height = 0.f;
-        glm::vec3 normal(0.f, 1.f, 0.f);
-        if (!Engine::Components::SampleTerrainSurface(*context.heights, context.cellsX,
-                context.cellsY, context.cellWidth, context.cellDepth, x, z, height, &normal))
+        // Scree is fallen rock: it lies on its side at any angle (tipped 45
+        // to 85 degrees), half buried, and stays under ~2 m. Standing
+        // upright, the pack's taller rocks made an apron of forty columns
+        // under the escarpment (captured 2026-11-20).
+        if (scree > .3f && shore <= .5f)
+        {
+            scale = std::min(scale, .5f + 1.4f * size);
+            const float tip = glm::radians(45.f + 40.f * kind);
+            const float tipDirection = pick * 2.f * glm::two_pi<float>();
+            const glm::vec3 tipped(std::sin(tip) * std::cos(tipDirection), std::cos(tip),
+                std::sin(tip) * std::sin(tipDirection));
+            place(RockPrefab(rock), x, height - .05f * scale, z, tipped, yaw, scale);
             continue;
-        if (height < waterLevel + 1.5f || normal.y < .82f) continue;
-        const float worldX = context.cell.first * width + x;
-        const float worldZ = context.cell.second * depth + z;
-        const float forest = ForestMask(worldX, worldZ, height, a) * ForestBand(height, a);
-        const float belt = ForestEdgeBelt(forest, .75f);
-        if (belt <= 0.f) continue;
-        const float clump = ValueNoise(worldX, worldZ, 16.f, 211u);
-        if (chance >= belt * (.4f + .6f * clump) * (1.f - paint(x, z, Snow)) *
-                (1.f - paint(x, z, Rock))) continue;
-        if (TrailMask(worldX, worldZ) > .1f) continue;
-        // Mostly the stand's tall bush; the low one fills in at the front.
-        const size_t bush = standBushes[pick < .3f ? 0 : 1];
-        place(std::string("Assets/Prefabs/Woodland/Bushes/") + Bushes[bush] + ".prefab",
-            x, height - .08f, z, glm::vec3(0.f, 1.f, 0.f), yaw, 1.f + .9f * size);
+        }
+        place(RockPrefab(rock), x, height - .08f * scale, z, lean, yaw, scale);
     }
 }
 }
@@ -1067,7 +1295,32 @@ bool LandscapeDriver::ConfigureTerrain()
     for (float value : {level.water, level.rock, level.snow, level.tree, level.blend})
         paintKey = paintKey * 0x100000001b3ull ^
             static_cast<uint64_t>(std::llround(value * 16.f));
-    manager->SetStaticCache(cacheDirectory, signature ^ PaintRevision ^ paintKey);
+    // Built-time cliffs (world.cliffs beside the archive); generated layers
+    // are cached, so the list is part of the cache key.
+    const std::shared_ptr<const CliffList> cliffs = LoadCliffList(
+        std::filesystem::path(archivePath).replace_extension(".cliffs").string(), signature);
+    manager->SetStaticCache(cacheDirectory,
+        signature ^ PaintRevision ^ paintKey ^ (cliffs ? cliffs->contentHash : 0ull));
+    // Cliff pieces in loaded cells are part of the terrain (stamps); the
+    // stamp files are read once and shared.
+    if (cliffs)
+    {
+        // Their surface images (tools/stamp_textures.py), in Cliffs order.
+        std::vector<std::string> stampMaterials;
+        for (size_t shape = 0; shape < 5; ++shape)
+            stampMaterials.push_back("Assets/TerrainData/Stamps/" + StampName(shape) + ".material");
+        // Then each sculpted cell's own rock images.
+        auto sculpted = std::make_shared<const SculptedCells>(LoadSculptedCells(stampMaterials));
+        manager->SetTerrainStampMaterials(std::move(stampMaterials));
+        manager->SetTerrainStamps([cliffs, sculpted](TerrainManager::Cell cell) {
+            return StampsForCell(*cliffs, *sculpted, cell);
+        });
+    }
+    else
+    {
+        manager->SetTerrainStampMaterials({});
+        manager->SetTerrainStamps({});
+    }
     // Everything captured by value: these run on streaming workers.
     manager->SetProceduralBuilder([=](TerrainManager::Cell cell, Terrain& terrain)
     {
@@ -1095,7 +1348,7 @@ bool LandscapeDriver::ConfigureTerrain()
     manager->SetObjectLayerGenerator([=](const TerrainManager::ObjectLayerContext& context,
         const std::string& layerName, TerrainObjectLayer& layer)
     {
-        if (layerName == forestName) GenerateForest(context, layer, level, trees);
+        if (layerName == forestName) GenerateForest(context, layer, level, trees, cliffs.get());
         // Props end inside the loaded cells; far cells never need them.
         else if (context.farObjects) return;
         else if (!propsName.empty() && layerName == propsName)
@@ -1136,13 +1389,63 @@ bool LandscapeDriver::ConfigureTerrain()
             }
             return;
         }
+        // Ground cover keeps its authored reach: with the detail budget at its
+        // floor (it always is here) the radius shrank to ~16 m and ferns,
+        // bushes and grass came into being a few metres ahead of the camera.
+        // Larger tiles than the preset's 4 m pay for it (fewer tile objects)
+        // (ENGINE_LANDSCAPE_GRASS_TILE=<m> and ENGINE_LANDSCAPE_GRASS_FLOOR=<scale> for A/B runs).
+        // Tiles grow with the reach so their count stays near 170-210.
+        static const float forcedTile = []
+        { const char* v = std::getenv("ENGINE_LANDSCAPE_GRASS_TILE"); return v ? std::clamp(float(std::atof(v)), 2.f, 32.f) : 0.f; }();
+        const float grassTile = forcedTile > 0.f ? forcedTile : radius >= 40.f ? 16.f : 8.f;
+        static const float grassFloor = []
+        { const char* v = std::getenv("ENGINE_LANDSCAPE_GRASS_FLOOR"); return v ? std::clamp(float(std::atof(v)), .25f, 2.f) : 1.f; }();
+        if (grass->tileSize != grassTile || grass->minimumRadiusScale != grassFloor)
+        {
+            grass->tileSize = grassTile;
+            grass->minimumRadiusScale = grassFloor;
+            grass->MarkConfigurationDirty();
+        }
+        // A tile takes its detail level from the distance to its own origin,
+        // so a 16 m tile underfoot drew the thinned level and the meadow
+        // showed soil (6.9 % of the lower frame against 4.5 % with 4 m tiles).
+        // The level distances move out by part of the extra tile size: 0.35
+        // of it brings the soil back to 4.9 % for 5.5 ms of grass GPU time at
+        // the forest edge (3.0 with 4 m tiles); 0.7 gives 4.7 % for 7.9 ms.
+        // The lasting fix is a detail level per placement, as trees have
+        // (ENGINE_LANDSCAPE_GRASS_LODBOOST=<factor> for A/B runs).
+        // With a detail level per plant (the default) no push is needed.
+        // ENGINE_LANDSCAPE_GRASS_PER_PLANT=0 goes back to a level per tile.
+        static const bool perPlant = []
+        { const char* v = std::getenv("ENGINE_LANDSCAPE_GRASS_PER_PLANT"); return !(v && v[0] == '0'); }();
+        if (grass->perPlantDetail != perPlant) { grass->perPlantDetail = perPlant; grass->MarkConfigurationDirty(); }
+        static const float lodBoost = []
+        { const char* v = std::getenv("ENGINE_LANDSCAPE_GRASS_LODBOOST"); return v ? std::clamp(float(std::atof(v)), 0.f, 2.f) : perPlant ? 0.f : .35f; }();
+        const float grassLod1 = 7.f + lodBoost * (grassTile - 4.f), grassLod2 = 13.f + lodBoost * (grassTile - 4.f);
+        if (layer.layerName != MeadowGrass::FarLayerName &&
+            (layer.lod1Distance != grassLod1 || layer.lod2Distance != grassLod2))
+        {
+            layer.lod1Distance = grassLod1;
+            layer.lod2Distance = grassLod2;
+            layer.MarkConfigurationDirty();
+        }
+        // Reach by plant size: ferns, shrubs and bushes are large enough to be
+        // seen arriving, so they reach further than the fine grass, which
+        // still ends at radius + 10 (ENGINE_LANDSCAPE_SHRUB_REACH=<m>, 0 = same
+        // reach as the grass). Walking, 80 m costs ~0.3 ms in the forest and
+        // ~1 ms on the meadow; 100 m costs ~0.7 ms in the forest.
+        static const float shrubReach = []
+        { const char* v = std::getenv("ENGINE_LANDSCAPE_SHRUB_REACH"); return v ? std::clamp(float(std::atof(v)), 0.f, 300.f) : 80.f; }();
+        const float coverReach = std::max(radius + 10.f, shrubReach);
+        const float fineReach = (radius + 10.f) / coverReach;
+        if (grass->fineReachFraction != fineReach) { grass->fineReachFraction = fineReach; grass->MarkConfigurationDirty(); }
         if (layer.layerName == MeadowGrass::ForestFloorLayerName)
         {
             // Litter, herbs and ferns grow on the forest soil (the paint the
-            // trees stand on), out to the meadow grass's radius.
-            if (layer.viewDistance != radius + 10.f)
+            // trees stand on).
+            if (layer.viewDistance != coverReach)
             {
-                layer.viewDistance = radius + 10.f;
+                layer.viewDistance = coverReach;
                 layer.MarkConfigurationDirty();
             }
             if (grass->proceduralLayerMask != (1 << ForestSoil) || grass->visibleRadius != radius)
@@ -1154,12 +1457,9 @@ bool LandscapeDriver::ConfigureTerrain()
             return;
         }
         // Layer distances every restore (cheap; dirty only on change).
-        if (layer.viewDistance != radius + 10.f || layer.lod1Distance != 7.f ||
-            layer.lod2Distance != 13.f)
+        if (layer.viewDistance != coverReach)
         {
-            layer.viewDistance = radius + 10.f;
-            layer.lod1Distance = 7.f;
-            layer.lod2Distance = 13.f;
+            layer.viewDistance = coverReach;
             layer.MarkConfigurationDirty();
         }
         if (grass->proceduralLayerMask == (1 << Grass)) return;
@@ -1169,6 +1469,28 @@ bool LandscapeDriver::ConfigureTerrain()
         // ground like a pelt: crowns of blades over a low sward.
         grass->shortPatchesPerSquareMeter = 3.5f;
         grass->tallPatchesPerSquareMeter = .4f;
+        // Tall grass fields (the reference meadows: knee- to waist-high fine
+        // grass as one mass, the ground hidden except from steeply above).
+        // Overlapping metre-wide patches (tools/generate_meadow_grass.py
+        // meadow_tall_grass) over most of the meadow (reference frame 03 shows
+        // no ground at all), densest in each field's heart; the short sward
+        // thins under them and stays in the openings between.
+        // ENGINE_LANDSCAPE_TALL_FIELDS=0 keeps the old meadow (A/B).
+        static const bool tallFields = []
+        { const char* v = std::getenv("ENGINE_LANDSCAPE_TALL_FIELDS"); return !(v && v[0] == '0'); }();
+        if (tallFields)
+        {
+            grass->tallMesh = "Assets/Mesh/Grass/meadow_tall_grass.obj";
+            grass->tallMeshLod1 = "Assets/Mesh/Grass/meadow_tall_grass_lod1.obj";
+            grass->tallMeshLod2 = "Assets/Mesh/Grass/meadow_tall_grass_lod2.obj";
+            grass->tallPatchesPerSquareMeter = .25f;
+            grass->tallFieldDensity = 2.2f;
+            grass->tallFieldSize = 28.f;
+            grass->tallFieldCoverage = .85f;
+            grass->shortUnderTallShare = .25f;
+            // What shows between blades reads as the mass's shaded depth.
+            grass->groundRootShade = .85f;
+        }
         // Wildflower and weed drifts (meshes come from the meadow preset).
         grass->accentPatchesPerSquareMeter = .18f;
         // Low shrub, bramble and fern thickets over about a fifth of the meadow.
@@ -1202,6 +1524,8 @@ uint64_t LandscapeDriver::MacroColorRevision() const
     mix(std::hash<std::string>{}(flowMap));
     mix(std::hash<std::string>{}(depositionMap));
     mix(static_cast<uint64_t>(mapHalfExtentCells));
+    // Cliff pieces paint their stamps' colour and facing (ComputeMacroColors).
+    mix(0x434c4946464d4b31ull);
     return revision ? revision : 1;
 }
 
@@ -1231,17 +1555,43 @@ void LandscapeDriver::RegisterMacroColors(TerrainManager& manager)
         rules.screeDepth = std::clamp(macroScreeDepth, .1f, 100.f);
         rules.gullyRock = std::clamp(macroGullyRock, 0.f, 1.f);
         rules.brightness = std::clamp(macroBrightness, .1f, 2.f);
+        // The stamps' colours, likewise from their material files.
+        std::array<glm::vec3, 5> stampColors;
+        for (size_t shape = 0; shape < stampColors.size(); ++shape)
+            stampColors[shape] = LayerMacroColor(
+                ("Assets/TerrainData/Stamps/" + StampName(shape) + ".material").c_str());
         return [=]
         {
             // Missing or mismatched erosion maps leave just the paint.
             TerrainHydrologyMap flowSamples, depositionSamples;
             flowSamples.Load(flowPath, TerrainHydrologyMap::FlowMagic, signature);
             depositionSamples.Load(depositionPath, TerrainHydrologyMap::DepositionMagic, signature);
+            // Built-time cliff pieces (world.cliffs), in world space.
+            std::vector<CliffMark> marks;
+            if (const auto cliffs = LoadCliffList(
+                    std::filesystem::path(archive).replace_extension(".cliffs").string(), signature))
+                for (const auto& [cell, pieces] : cliffs->cells)
+                    for (const auto& piece : pieces)
+                    {
+                        if (piece.shape >= stampColors.size()) continue;
+                        const auto stamp = Engine::Components::TerrainStamp::Load(
+                            Engine::Components::Mesh::ResolveFilePath(
+                                "Assets/TerrainData/Stamps/" + StampName(piece.shape) + ".stamp"));
+                        if (!stamp) continue;
+                        CliffMark mark;
+                        mark.position = glm::vec2(cell.first * cellsX * cellWidth + piece.position.x,
+                            cell.second * cellsY * cellDepth + piece.position.z);
+                        mark.radius = Cliffs[piece.shape].halfWidth * piece.scale;
+                        mark.color = stampColors[piece.shape];
+                        mark.facing = glm::normalize(TerrainObjectLayer::SurfaceRotation(
+                            piece.normal, piece.yawDegrees) * stamp->direction);
+                        marks.push_back(mark);
+                    }
             int side = 0;
             std::vector<glm::vec3> normals;
             const auto colors = ComputeMacroColors(archive, signature, extent, cellsX, cellsY,
-                cellWidth, cellDepth, level, means, flowSamples, depositionSamples, rules, side,
-                normals);
+                cellWidth, cellDepth, level, means, flowSamples, depositionSamples, rules, marks,
+                side, normals);
             const float spacing = cellWidth * 4.f;
             const float origin = -float(extent) * cellsX * cellWidth;
             return TerrainManager::EncodeMacroColorImage(side, side, origin, origin,

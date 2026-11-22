@@ -22,6 +22,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <numeric>
@@ -159,6 +160,19 @@ void SceneRendererFramePreparation::PrepareFrameItems(
             (!layer.enabled || std::memcmp(&entry.matrixLayer, &layer.localToLayer, sizeof(layer.localToLayer)) == 0);
     };
     std::vector<const SceneRenderer::StaticRenderItemCache*> reusableItems(frameComponentLookupScratch.size(), nullptr);
+    // Static objects (Object::isStatic, Core/Scene/StaticObjects.h) promise
+    // not to move, so their cached item is tested without reading the
+    // transform: on the workers even when the hierarchy was not prepared.
+    // That is every frame in which streaming added or removed an object
+    // (most frames while walking the landscape), where all ~9.7k items
+    // otherwise fall to the serial test below. A static object that moves
+    // anyway is reported by StaticObjects::MotionWatch and its item catches up
+    // on the next prepared frame. ENGINE_STATIC_ITEM_TRUST=0 disables this.
+    static const bool trustStaticObjects = []
+    {
+        const char* setting = std::getenv("ENGINE_STATIC_ITEM_TRUST");
+        return !(setting && setting[0] == '0');
+    }();
     {
         PrepareItemTimer timer(renderer.m_lastPrepareTimings.itemValidationMs, scene.IsUpdateProfilingEnabled());
         const auto* provider = renderer.m_graphicsProvider;
@@ -175,14 +189,17 @@ void SceneRendererFramePreparation::PrepareFrameItems(
                     (material->NeedsShaderPrewarm(epoch, terrain) ? NeedsShaders : 0));
             }
             auto* candidate = lookup.object;
-            if (!preparedTransforms || !candidate ||
-                !renderer.SceneTransforms().IsPreparedMember(candidate->transform) ||
+            if (!candidate) return;
+            const bool prepared = preparedTransforms &&
+                renderer.SceneTransforms().IsPreparedMember(candidate->transform);
+            if ((!prepared && !(trustStaticObjects && candidate->IsStaticInHierarchy())) ||
                 !isStaticCandidate(lookup) || !candidate->IsEnabledInHierarchy() ||
                 !lookup.mesh->IsReady() || !lookup.mesh->IsEditorVisible() || !lookup.mesh->IsAnimationVisible())
                 return;
             const auto cached = renderer.m_staticRenderItemCache.find(candidate);
             if (cached != renderer.m_staticRenderItemCache.end() && staticItemUnchanged(lookup, cached->second,
-                renderer.SceneTransforms().ReadPreparedWorldRevision(candidate->transform)))
+                prepared ? renderer.SceneTransforms().ReadPreparedWorldRevision(candidate->transform)
+                         : cached->second.worldRevision))
                 reusableItems[index] = &cached->second;
         });
     }

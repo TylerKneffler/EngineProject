@@ -5,6 +5,7 @@ Writes
   Engine/Core/Assets/TerrainData/Landscape/world.fargrid      far silhouette grid (v3)
   Engine/Core/Assets/TerrainData/Landscape/world.flow         erosion flow map
   Engine/Core/Assets/TerrainData/Landscape/world.deposition   erosion deposition map
+  Engine/Core/Assets/TerrainData/Landscape/world.cliffs       cliff pieces (tools/landscape_cliffs.py)
   Engine/Core/Assets/Scenes/terrain/landscape_demo.scene      the scene
 and, with --preview <png>, top-down previews: <png> colored like the terrain
 paint, plus <png stem>_flow.png and <png stem>_deposition.png.
@@ -25,7 +26,9 @@ much water passed each texel (flow) and how much sediment settled
 (deposition). Rolling hills and one rock escarpment are raised in the lowland
 after erosion, then the lakes are carved. Inside the play area the eroded
 field is resampled to 4 m and gets fine detail. The hills and the escarpment
-are not in the flow and deposition maps.
+are not in the flow and deposition maps. Cliffs are then placed on the play
+area (tools/landscape_cliffs.py) and written to world.cliffs; the heights
+conform to them (raised under the rock, a low apron at its foot).
 
 Flow and deposition files share one header, little endian:
   u64 magic ("TRNRFLW1" / "TRNRDEP1"), u32 version 1, u64 archive signature,
@@ -60,6 +63,8 @@ from pathlib import Path
 
 import numpy as np
 from scipy import ndimage
+
+import landscape_cliffs
 
 ROOT = Path(__file__).resolve().parents[1]
 ASSETS = ROOT / "Engine" / "Core" / "Assets"
@@ -489,8 +494,13 @@ def build():
     fine_q = recon + np.rint((fine * SCALE - recon) * mask).astype(np.int64)
     fine_q = np.clip(fine_q, -32768, 32767)
     print(f"fine grid {fine_q.shape[1]}^2 at {SPACING:g} m ({time.time() - t0:.0f} s)")
-    return {"macro": macro, "macro_q": macro_q, "fine_q": fine_q, "origin": origin,
-            "fine_origin": fine_origin, "flow": flow, "deposition": deposition}
+    world = {"macro": macro, "macro_q": macro_q, "fine_q": fine_q, "origin": origin,
+             "fine_origin": fine_origin, "flow": flow, "deposition": deposition}
+    world["cliffs"], world["cliff_extent"] = landscape_cliffs.place_cliffs(
+        fine_q, SCALE, FINE_EXTENT, CELLS, SPACING, rock_class)
+    world["fine_q"], world["cliff_rock"], world["cliff_apron"] = landscape_cliffs.conform_heights(
+        world["fine_q"], SCALE, FINE_EXTENT, CELLS, SPACING, world["cliffs"])
+    return world
 
 
 def pack_codes(codes):
@@ -507,6 +517,10 @@ def archive_body(world):
     macro_q, fine_q = world["macro_q"], world["fine_q"]
     macro_codes = rock_class(macro_q / SCALE, MACRO)
     fine_codes = rock_class(fine_q / SCALE, SPACING)
+    # Ground under stamped cliffs is rock, their aprons scree.
+    if "cliff_rock" in world:
+        fine_codes[world["cliff_apron"]] = np.maximum(fine_codes[world["cliff_apron"]], 2)
+        fine_codes[world["cliff_rock"]] = 3
     side = 2 * EXTENT + 1
     stride = CELLS // COARSE
     blocks = []
@@ -545,11 +559,23 @@ def write_archive(world):
                                CELLS, CELLS, SCALE, FINE_EXTENT, COARSE))
         file.write(body)
     side = 2 * EXTENT + 2
+    # Cells holding cliff pieces keep their full-resolution (conformed)
+    # heights in the far grid, as sculpted cells do (far patches). With far
+    # terrain on, only the cells within loadedRadius (384 m) are terrain
+    # cells; past them a far tile is one quad per 128 m cell, which flattened
+    # every escarpment into a smooth hillside until it came within 384 m.
+    patch_cells = sorted(world.get("cliffs", {}))
     with open(DATA / "world.fargrid", "wb") as file:
         file.write(struct.pack("<QIQiiiif", FARGRID_MAGIC, 3, signature, EXTENT,
                                side, CELLS, CELLS, SCALE))
         file.write(np.ascontiguousarray(corners.astype("<i2")).tobytes())
-        file.write(struct.pack("<I", 0))
+        file.write(struct.pack("<I", len(patch_cells)))
+        for cell_x, cell_z in patch_cells:
+            r0 = (cell_z + FINE_EXTENT) * CELLS
+            c0 = (cell_x + FINE_EXTENT) * CELLS
+            block = world["fine_q"][r0:r0 + CELLS + 1, c0:c0 + CELLS + 1]
+            file.write(struct.pack("<ii", cell_x, cell_z))
+            file.write(np.ascontiguousarray(block.astype("<i2")).tobytes())
     return signature, same
 
 
@@ -796,7 +822,7 @@ def write_scene(world):
             # viewer; mesh detail halves beyond two cells and again beyond three.
             # The far grid covers the rest of the map whatever farRadius is
             # (it only sizes the fallback ring, and is capped at 32).
-            "loadedRadius": "5", "editorRadius": "3", "farRadius": str(min(EXTENT, 32)),
+            "loadedRadius": "3", "nearObjectBlockCells": "2", "editorRadius": "3", "farRadius": str(min(EXTENT, 32)),
             "lod2Radius": "2", "lod4Radius": "3", "farTileScreenErrorPixels": "6",
             # Trees beyond the loaded cells, as impostor blocks, up to 8 km
             # (the engine's cap is 64 cells).
@@ -846,7 +872,7 @@ def write_scene(world):
         "LandscapeDriver.altitudeBlend": numbers([ALTITUDE_BLEND]),
         "LandscapeDriver.treesPerCell": "220",
         "LandscapeDriver.forestLayerName": "Landscape forest",
-        "LandscapeDriver.grassRadius": "26"})
+        "LandscapeDriver.grassRadius": "50"})
     ET.SubElement(terrain, "children")
 
     ET.indent(scene, space="  ")
@@ -915,6 +941,8 @@ def main():
     if not arguments.no_write:
         signature, same = write_archive(world)
         write_hydrology(world, signature)
+        landscape_cliffs.write_cliffs(DATA / "world.cliffs", signature, world["cliffs"],
+                                      world["cliff_extent"])
         remove_stale_edits(same)
         write_scene(world)
         # Eye-level foliage viewpoints next to "Vista" (reads the new archive).

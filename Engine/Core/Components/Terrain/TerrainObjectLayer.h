@@ -91,6 +91,14 @@ public:
     // edits, which for thousands of far trees per block cost milliseconds
     // per frame across all blocks. Not serialized.
     bool placementsChangeOnlyWhenMarked = false;
+    // Near object blocks (TerrainManager::nearObjectBlockCells): a streamed
+    // cell's layer keeps its placements and colliders but leaves the instanced
+    // batches to a block layer that holds the placements of several cells, and
+    // that block layer makes no colliders of its own. Not serialized.
+    bool suppressPrefabRendering = false;
+    bool suppressPrefabColliders = false;
+    // True when a placement names a prefab (cached per placement change).
+    bool HasPrefabPlacements() const;
     // Prefab shadows fade within the final metres of shadowDistance.
     // GrassField tiles retain their own distanceFadeWidth control.
     float shadowFadeWidth = 1.f;
@@ -176,6 +184,10 @@ private:
     mutable size_t m_preparedCount=0;
     mutable float m_preparedSpan=4;
     mutable bool m_loadedPrepared=false;
+    mutable uint64_t m_hasPrefabRevision=UINT64_MAX;
+    mutable const Placement* m_hasPrefabData=nullptr;
+    mutable size_t m_hasPrefabCount=0;
+    mutable bool m_hasPrefab=false;
     void AddPrepared(int x,int z,const PreparedPlacement& record) const;
     std::string SerializePrepared() const;
     void LoadPrepared(const std::string& bytes, uint64_t placementSignature);

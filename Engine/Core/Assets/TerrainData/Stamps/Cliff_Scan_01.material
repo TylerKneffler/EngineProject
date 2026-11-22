@@ -1,0 +1,20 @@
+{
+    "version": 1,
+    "baseColor": [
+        1.0,
+        1.0,
+        1.0
+    ],
+    "metallic": 0,
+    "roughness": 1.0,
+    "normalScale": 1.0,
+    "terrainUvScale": 1.0,
+    "terrainMacroColor": [
+        0.09929,
+        0.08344,
+        0.06502
+    ],
+    "baseColorTexture": "Assets/TerrainData/Stamps/Cliff_Scan_01_albedo.jpg",
+    "normalTexture": "Assets/TerrainData/Stamps/Cliff_Scan_01_normal.jpg",
+    "metallicRoughnessTexture": "Assets/TerrainData/Stamps/Cliff_Scan_01_rough.jpg"
+}

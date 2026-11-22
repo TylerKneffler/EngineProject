@@ -1,0 +1,20 @@
+{
+    "version": 1,
+    "baseColor": [
+        1.0,
+        1.0,
+        1.0
+    ],
+    "metallic": 0,
+    "roughness": 1.0,
+    "normalScale": 1.0,
+    "terrainUvScale": 1.0,
+    "terrainMacroColor": [
+        0.11557,
+        0.09584,
+        0.06733
+    ],
+    "baseColorTexture": "Assets/TerrainData/Stamps/Mountainside_01_albedo.jpg",
+    "normalTexture": "Assets/TerrainData/Stamps/Mountainside_01_normal.jpg",
+    "metallicRoughnessTexture": "Assets/TerrainData/Stamps/Mountainside_01_rough.jpg"
+}

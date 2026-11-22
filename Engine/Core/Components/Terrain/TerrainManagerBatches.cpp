@@ -236,7 +236,7 @@ void TerrainManager::RefreshRenderBatches(int uploadBudget, int centerX,
         }
         batchMesh->OnAfterDeserialize(m_provider);
         auto* appearance = object->AddComponent<TerrainBatchAppearance>();
-        appearance->materials = first->GetLayerMaterials();
+        appearance->materials = first->GetArrayMaterials();
         appearance->textureTiling = first->textureTiling;
         appearance->completeFootprint = members.size() == side * side;
         RenderBatch batch;

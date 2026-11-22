@@ -32,6 +32,14 @@ void Scene::RetireGraphicsBuffer(std::shared_ptr<IGraphicsBuffer> buffer)
         m_retiredSharedRenderBuffers.push_back(std::move(buffer));
 }
 
+void Scene::RetireRenderObject(std::unique_ptr<Object> detached)
+{
+    AssertOwnerThread();
+    if (!detached) return;
+    if (m_deferGraphicsRetirement) m_retiredRenderObjects.push_back(std::move(detached));
+    else if (m_beforeGpuResourceDestruction) m_beforeGpuResourceDestruction();
+}
+
 void Scene::ProcessGraphicsPreparation(IGraphicsProvider* graphicsProvider)
 {
     AssertOwnerThread();

@@ -376,14 +376,18 @@ void SceneRendererDrawPreparation::PrepareTerrainMaterial(
     auto* object = item.object;
     // Only terrain cells and batches carry layer materials; skip the
     // component scans for every other draw.
-    if (!mesh || mesh->UsesTerrainVertexFormat() || !item.terrainSurface)
+    if (!mesh || !item.terrainSurface)
         return;
     auto* terrain = object->GetComponent<Engine::Components::Terrain>();
     auto* batch = object->GetComponent<Engine::Components::TerrainBatchAppearance>();
     if (!terrain && !batch)
         return;
+    // Compact terrain vertices carry no layer weights: only a cell with a
+    // paint map (Terrain::compactMesh) can be shaded with its layers.
+    if (mesh->UsesTerrainVertexFormat() && (!terrain || !terrain->HasPaintMap()))
+        return;
 
-    const auto& materials = terrain ? terrain->GetLayerMaterials() : batch->materials;
+    const auto& materials = terrain ? terrain->GetArrayMaterials() : batch->materials;
     bool textured = false;
     for (uint32_t slot = 0; slot < 6; ++slot)
         draw.textures[slot] = nullptr;

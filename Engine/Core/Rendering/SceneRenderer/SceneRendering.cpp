@@ -8,10 +8,13 @@
 #include "Core/Rendering/StableShadowCascade.h"
 #include "Core/Rendering/RenderJobs.h"
 #include "Core/Rendering/PreparedInstanceDraw.h"
+#include "Core/Rendering/DebugDrawTags.h"
 #include "Core/Rendering/SceneRenderer.h"
 #include "Core/Rendering/SceneRenderer/SceneRendererVisibility.h"
 #include "Core/Rendering/SceneRenderer/SceneRendererLighting.h"
 #include "Core/Rendering/PerformanceHeat.h"
+#include <map>
+#include <cstdio>
 #include <bitset>
 #include "Core/Graphics/GraphicsCommandPacket.h"
 #include "Core/Components/Camera/Camera.h"
@@ -345,8 +348,9 @@ SceneRenderer::OcclusionBufferResult SceneRenderer::BuildCameraOcclusionBuffer(
             occluder.vertexCount = vertices.size();
         }
         else continue;
-        occluder.indices = indices.data();
-        occluder.indexCount = indices.size();
+        const auto& occluderIndices = item.mesh->occluderIndices;
+        occluder.indices = occluderIndices.empty() ? indices.data() : occluderIndices.data();
+        occluder.indexCount = occluderIndices.empty() ? indices.size() : occluderIndices.size();
         occluder.world = item.world;
         occluder.boundsMinimum = item.boundsMinimum;
         occluder.boundsMaximum = item.boundsMaximum;
@@ -576,6 +580,16 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
         (static_cast<uint64_t>(instanceViewOrdinal) << 48u) ^
         (shadowOnly ? (uint64_t(1) << 63u) : 0u);
     m_persistentInstances.BeginFrame(m_graphicsProvider);
+    // Draw names for GPU hang reports (ENGINE_GPU_DRED=1; DebugDrawTags.h).
+    const bool drawTags = Engine::Rendering::DebugDrawTags::Enabled();
+    if (drawTags) Engine::Rendering::DebugDrawTags::Get().BeginFrame(instanceSerial);
+    const auto tagDraw = [&](const char* kind, const Engine::Core::Object* object, const std::string& detail)
+    {
+        if (!drawTags) return;
+        context->SetDebugMarker(Engine::Rendering::DebugDrawTags::Get().Add(
+            std::string(shadowOnly ? "shadow " : "camera ") + kind + " '" +
+            (object ? object->name : std::string("?")) + "' " + detail));
+    };
     const auto poolBefore=m_persistentInstances.stats;
     m_lastRenderCpuTimings.instances.retirements=newInstanceFrame ? poolBefore.retirements:0;
     m_lastRenderCpuTimings.instances.residentBytes=m_persistentInstances.ResidentBytes();
@@ -812,6 +826,20 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
             { return BuildCameraOcclusionBuffer(frameRenderItems, viewProjection,
                 occlusionProjectionScale, occlusionAspect); });
     }
+    // Ground cover with a detail level per placement (Mesh::perPlacementLod):
+    // geometryFade.w 6 (7 with screen coverage) tells Object.hlsl to fade each
+    // placement by its own distance and take the level from the draw flags;
+    // the same draws set the per-placement bit for InstanceCull.hlsl below.
+    // Only for a fully visible tile (w == 3 is "tile LOD, visibility 1").
+    const auto perPlacementFade = [&](glm::vec4& fade, const Engine::Components::Mesh* mesh)
+    {
+        if (!shadowOnly && !hasPortalViews && mesh && mesh->perPlacementLod && mesh->IsInstanced() &&
+            fade.w >= 2.999f && fade.w < 3.5f)
+            // Plain distance (6), not screen coverage (7): ground cover
+            // distances are authored for the plants as placed, and scaling
+            // them by placement size tripled the full-detail plants.
+            fade.w = 6.f;
+    };
     const auto grassInteraction = Engine::Rendering::SelectVegetationBendCapsules(
         nativePacket ? nativePacket->grassCapsules : m_frameGrassCapsules, cameraPosition);
     bool cameraUsesSourceWarpChart = false;
@@ -1779,6 +1807,7 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
                 !mesh->IsPortalPoseSnapshot() &&
                 (useSourceChart || !renderItem->warpedVertexBuffer);
             preparedDraw.objectData.geometryFade=mesh->instanceLodBand>=0 ? glm::vec4(float(mesh->instanceLodBand),scaledShadowLodDistances(preparedDraw.gpuLodDistances),instanceBandFadeMode) : scaleGeometryFade(hasPortalViews && renderItem->geometryFade.w>=2.f ? mesh->GetRuntimeGeometryFade():renderItem->geometryFade, lodScale);
+            perPlacementFade(preparedDraw.objectData.geometryFade, mesh);
             // w: a far caster's minimum distance (Mesh::farShadowMinDistance);
             // Object.hlsl fades it in where the fixed band fades out.
             preparedDraw.objectData.shadowCasterFade={casterFade.x,std::min(casterFade.x,casterFade.y),1.f,
@@ -2173,6 +2202,7 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
             objectData.geometryFade.y *= quality.geometry;
             objectData.geometryFade.z *= quality.geometry;
         }
+        perPlacementFade(objectData.geometryFade, mesh);
         objectData.shadowCasterFade={casterFade.x,std::min(casterFade.x,casterFade.y),0.f,0.f};
         objectData.grassAnimation={(mesh && mesh->foliageWindStrength>0.f) || (mat && mat->shaderUsesTime)
                 ? static_cast<float>(m_scene.GetElapsedTime()):0.f,
@@ -2485,6 +2515,31 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
             SubmittedGeometry submitted{};
             const bool gpuLod=(representative.drawData.flags & 0x00100000u)!=0;
             const int lodCount=gpuLod ? representative.gpuMaximumLod+1:1;
+            // Ground cover tiles: nearest and farthest distance from the
+            // camera to each member's bounds (x < 0 until computed), so a
+            // level or a short-reach range whose distances miss the whole
+            // tile is left out of that batch. The GPU cull would reject
+            // every plant of it anyway; this saves recording it (a field
+            // has ~13 species ranges at 3 levels over every tile in reach).
+            // ENGINE_COVER_TILE_SKIP=0 turns it off, for A/B runs.
+            static const bool coverSkipEnabled=[]{ const char* v=std::getenv("ENGINE_COVER_TILE_SKIP"); return !(v && v[0]=='0'); }();
+            const bool coverSkip=coverSkipEnabled && !hasPortalViews && instanceLodDisplayOverride<0 && gpuLod &&
+                representative.mesh->instanceLodBand<0 && representative.objectData.placementFade.y>0.f;
+            std::vector<glm::vec2> memberDistances;
+            if(coverSkip) memberDistances.assign(preparedDraws.size(),glm::vec2(-1.f));
+            const auto memberDistance=[&](size_t index)->glm::vec2
+            {
+                auto& value=memberDistances[index];
+                if(value.x>=0.f) return value;
+                const auto& draw=preparedDraws[index];
+                if(!draw.mesh->HasBounds()) return value={0.f,1.e30f};
+                const auto bounds=Engine::Rendering::TransformBounds(
+                    draw.mesh->GetBoundsMin(),draw.mesh->GetBoundsMax(),draw.objectData.world);
+                value.x=glm::length(glm::clamp(cameraPosition,bounds.minimum,bounds.maximum)-cameraPosition);
+                value.y=glm::length(glm::max(glm::abs(bounds.minimum-cameraPosition),
+                    glm::abs(bounds.maximum-cameraPosition)));
+                return value;
+            };
             for(int residentLod=0;residentLod<lodCount;++residentLod)
             {
             auto* sourceMesh=gpuLod ? representative.mesh->GetRuntimeLodMesh(residentLod):representative.mesh;
@@ -2521,6 +2576,24 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
                     }
                     const auto& tile=(*instanceTiles[index])[rangeIndex];
                     if(!tile.range.y) continue;
+                    if(coverSkip && !screenColor)
+                    {
+                        const glm::vec2 distance=memberDistance(index);
+                        // Past this range's reach (InstanceCull.hlsl, reachBits).
+                        if(sourceRange.reachScale<.999f &&
+                            distance.x>draw.objectData.placementFade.y*sourceRange.reachScale) continue;
+                        // Per-plant levels (geometryFade.w 6): the same test as
+                        // the cull's root-distance bands, on the tile's bounds.
+                        if(!shadowOnly && draw.objectData.geometryFade.w>=5.5f)
+                        {
+                            const float first=tile.lod.x,second=tile.lod.y; // what the cull compares
+                            const float firstWidth=std::clamp(first*.04f,.5f,6.f)+.5f;
+                            const float secondWidth=std::clamp(second*.04f,.5f,6.f)+.5f;
+                            if((residentLod==0 && distance.x>first+firstWidth) ||
+                               (residentLod==1 && (distance.y<first-firstWidth || distance.x>second+secondWidth)) ||
+                               (residentLod==2 && distance.y<second-secondWidth)) continue;
+                        }
+                    }
                     if(screenColor)
                     {
                         const auto& data=*draw.mesh->GetInstanceData();
@@ -2619,6 +2692,10 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
                 if(gpu) gpu=context->BeginComputePass();
                 DrawCBData constants=representative.drawData;
                 constants.objectIndex=objectBase; constants.flags|=(uint32_t(residentLod)<<21)|0x00080000u;
+                // A range with a shorter reach than its mesh (fine grass among shrubs).
+                const uint32_t reachBits=sourceRange.reachScale<.999f
+                    ? std::clamp(uint32_t(std::max(0.f,sourceRange.reachScale)*1024.f+.5f),1u,1023u):0u;
+                constants.padding=reachBits;
                 if(shadowOnly) { constants.lightCount=0; constants.flags&=~kClusteredLightingFlag; }
                 Engine::Rendering::PersistentInstanceBatches::Key key{
                     uintptr_t(cam),uintptr_t(shadowOnly),instanceViewOrdinal,objectBase/m_objectCapacity,
@@ -2661,7 +2738,10 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
                     cull.viewProjection=cullViewProjection; cull.cameraPosition=glm::vec4(cameraPosition,1);
                     cull.counts={uint32_t(tiles.size()),sourceRange.vertexCount,sourceRange.firstVertex,1};
                     cull.selection={screenColor ? -1:gpuLod ? residentLod:representative.gpuLod,2,representative.gpuMaximumLod,
-                        (shadowOnly ? 1:0) | (representative.mesh->instanceLodBand>=0 ? (placementCoverageLod ? 2|32:2):0) | cullOcclusionFlag};
+                        (shadowOnly ? 1:0) | (representative.mesh->instanceLodBand>=0 ? (placementCoverageLod ? 2|32:2) : representative.objectData.geometryFade.w >= 5.5f ? 2|64:0) | cullOcclusionFlag | int(reachBits<<16)};
+                    // w: where this range's plants have faded out (0 = no shorter reach).
+                    if(reachBits) cull.cameraPosition.w=representative.objectData.placementFade.y*(float(reachBits)/1024.f);
+                    else cull.cameraPosition.w=0.f;
                     context->SetComputeReadBuffer(buffers.input.get()); context->SetComputeReadBuffer(pool,1); context->SetComputeWriteBuffer(buffers.output.get());
                     context->SetComputeReadBuffer(cullOcclusion,2);
                     context->SetComputeConstants(&cull,sizeof(cull)); context->DispatchCompute(1); context->StorageBarrier(buffers.output.get());
@@ -2680,6 +2760,14 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
                     sourceMesh->GetGraphicsBuffer(), sourceIndexBuffer,
                     sourceMesh->GetVertexStride(), sourceMesh->GetIndexCount(),
                     sourceRange.vertexCount, sourceRange.firstVertex, buffers.candidates, gpu};
+                if (drawTags)
+                    tagDraw(instanceDrawCapture ? "instances(captured)" : "instances", representative.object,
+                        "tiles " + std::to_string(tiles.size()) + " candidates " + std::to_string(buffers.candidates) +
+                        " elements " + std::to_string(sourceRange.vertexCount) + " first " + std::to_string(sourceRange.firstVertex) +
+                        (gpu ? " gpu" : " cpu") + " band " + std::to_string(representative.mesh->instanceLodBand) +
+                        " lod " + std::to_string(residentLod) + " outputBytes " + std::to_string(buffers.output ? buffers.output->GetSize() : 0) +
+                        (buffers.cold ? " cold" : "") + (buffers.membershipChanged ? " membership" : "") +
+                        (buffers.metadataChanged ? " metadata" : "") + " allocations " + std::to_string(buffers.allocations));
                 instanceDraw.Submit(*context, pipeline, m_emptyMorphDeltaBuffer.get(),
                     m_emptyMorphWeightBuffer.get());
                 if (instanceDrawCapture) instanceDrawCapture->push_back(instanceDraw);
@@ -2783,6 +2871,10 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
         context->SetStructuredBuffer(11,m_emptyMorphWeightBuffer.get());
         context->SetVertexBuffer(0,representative.vertexBuffer,representative.vertexStride,0);
         if(representative.indexBuffer) context->SetIndexBuffer(representative.indexBuffer,representative.indexCount,0);
+        if (drawTags)
+            tagDraw("automatic", representative.object, "instances " + std::to_string(instances.size()) +
+                " elements " + std::to_string(representative.indexBuffer ? representative.indexCount : representative.vertexCount) +
+                (gpu ? " gpu" : " cpu") + " outputBytes " + std::to_string(buffers.output ? buffers.output->GetSize() : 0));
         if(gpu) context->DrawInstancesIndirect(buffers.output.get(),0,representative.indexBuffer!=nullptr);
         else if(representative.indexBuffer) context->DrawIndexedInstanced(representative.indexCount,uint32_t(instances.size()));
         else context->DrawInstanced(representative.vertexCount,uint32_t(instances.size()));
@@ -3232,6 +3324,11 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
             {
                 for (const auto& instanceDraw : foliageDepthDraws[draw.automaticGroup])
                 {
+                    if (drawTags)
+                        tagDraw("replay", draw.object, "candidates " + std::to_string(instanceDraw.instanceCount) +
+                            " elements " + std::to_string(instanceDraw.elementCount) +
+                            (instanceDraw.indirect ? " gpu" : " cpu") + " outputBytes " +
+                            std::to_string(instanceDraw.visible ? instanceDraw.visible->GetSize() : 0));
                     instanceDraw.Submit(*context, m_foliageEqualPipelines[draw.doubleSided ? 1 : 0].get(),
                         m_emptyMorphDeltaBuffer.get(), m_emptyMorphWeightBuffer.get());
                     ++m_lastOrdinaryDrawCount;
@@ -3265,6 +3362,9 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
         }
         ensureRecordsUploaded();
         switchGpuStage(colorGpuStage(draw));
+        if (drawTags)
+            tagDraw("object", draw.object, "elements " + std::to_string(draw.indexBuffer ? draw.indexCount : draw.vertexCount) +
+                (draw.mesh && draw.mesh->IsInstanced() ? " instanced" : ""));
         if (draw.occlusionCandidate)
             context->BeginOcclusionQuery(draw.occlusionId);
         if (draw.pmxOutline && m_pmxOutlinePipeline)

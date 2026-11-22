@@ -59,10 +59,35 @@ public:
     float OuterRadiusScale() const { return innerRadius > 0.f ? 1.f : DetailRadiusScale(); }
     PROPERTY(Inspector, EditAnywhere, Category = "Grass | Tiles", ClampMin = "1")
     float tileSize = 4.f;
+    // Lower bound of the detail budget's effect on this field's radius
+    // (DetailRadiusScale). 0.5 lets a loaded budget halve the reach; 1 keeps
+    // the authored radius. Not serialized; set by the scene's driver.
+    float minimumRadiusScale = .5f;
+    // Each plant picks its detail level by its own distance (see
+    // Mesh::perPlacementLod), so large tiles do not thin the cover underfoot.
+    // Not serialized; set by the scene's driver.
+    bool perPlantDetail = false;
+    // Grass and accents fade out at this share of the field's reach; shrubs
+    // and bushes use all of it. Not serialized; set by the scene's driver.
+    float fineReachFraction = 1.f;
     PROPERTY(Inspector, EditAnywhere, Category = "Grass | Tiles", ClampMin = "0")
     float shortPatchesPerSquareMeter = .5f;
     PROPERTY(Inspector, EditAnywhere, Category = "Grass | Tiles", ClampMin = "0")
     float tallPatchesPerSquareMeter = .16f;
+    // Tall-grass fields: where a terrain-space noise (period tallFieldSize,
+    // over about tallFieldCoverage of the ground) is in, tall patches grow at
+    // up to tallFieldDensity per square metre, densest in a field's heart, and
+    // the short patches thin to shortUnderTallShare of their density there.
+    // Fields have edges, and the short meadow stays between them. 0 density:
+    // no fields.
+    PROPERTY(Inspector, EditAnywhere, Category = "Grass | Tall fields", ClampMin = "0")
+    float tallFieldDensity = 0.f;
+    PROPERTY(Inspector, EditAnywhere, Category = "Grass | Tall fields", ClampMin = "1")
+    float tallFieldSize = 24.f;
+    PROPERTY(Inspector, EditAnywhere, Category = "Grass | Tall fields", ClampMin = "0", ClampMax = "1")
+    float tallFieldCoverage = .5f;
+    PROPERTY(Inspector, EditAnywhere, Category = "Grass | Tall fields", ClampMin = "0", ClampMax = "1")
+    float shortUnderTallShare = .3f;
     // Wildflowers and weeds scattered through the grass: semicolon-separated
     // LOD0 meshes. "<name>_lod1.obj"/"<name>_lod2.obj" siblings are used when
     // present (tools/generate_meadow_accents.py writes all three).
@@ -227,6 +252,12 @@ private:
         glm::vec3 minimum{0}, maximum{0};
     };
     std::map<Tile, TileState> m_tiles;
+    // Retired tile objects, emptied and disabled, for the next tile that
+    // comes into range. Walking retires and creates a few tiles nearly every
+    // frame; adding and removing scene objects for them changed the scene
+    // structure on ~85 % of walking frames, and every such frame costs the
+    // renderer its prepared transforms and lookup tables (several ms).
+    std::vector<TileState> m_freeTiles;
     const Engine::Components::TerrainObjectLayer::PreparedTiles* m_placementTiles=nullptr;
     std::optional<BuildJob> m_build;
     const Engine::Components::TerrainObjectLayer* m_indexedLayer = nullptr;
@@ -266,6 +297,7 @@ private:
     float ShrubThicket(float x, float z) const;
     // The same thicket noise for bush clusters.
     float BushCluster(float x, float z) const;
+    float TallField(float x, float z) const;
     float ThicketNoise(float x, float z, float size, float coverage, uint32_t salt) const;
     size_t SpeciesOf(const std::string& asset) const;
     Engine::Core::Object* m_cachedViewer = nullptr;
@@ -284,6 +316,12 @@ private:
     std::vector<float> m_lodDistances;
     bool m_useGpuLodSelection = false;
     bool LoadSources();
+    bool ResolveSources();
+    // What the last successful LoadSources saw; unchanged means nothing to do.
+    const void* m_sourcesFactory = nullptr;
+    const void* m_sourcesLayer = nullptr;
+    uint64_t m_sourcesRevision = 0, m_sourcesLayerRevision = 0;
+    bool m_sourcesReady = false;
     bool Refresh();
     bool ResolveCachedReferences();
     bool EnsureAuthoredPreviewHidden();

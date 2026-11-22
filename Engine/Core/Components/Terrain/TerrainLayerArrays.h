@@ -33,6 +33,9 @@ class TerrainLayerArrays
 {
 public:
     static constexpr uint32_t MaxLayers = 6;
+    // Slices: the painted layers, then extra surfaces such as terrain stamps'
+    // own images (Terrain::stampMaterials), sampled by slice index.
+    static constexpr uint32_t MaxSlices = 16;
     // Six 2K BC slices take ~100 MiB for all three arrays; the RGBA8
     // fallback stops at 1K (~100 MiB as well).
     static constexpr uint32_t MaxSliceSizeCompressed = 2048;
@@ -44,7 +47,7 @@ public:
         std::shared_ptr<Engine::Graphics::IGraphicsTexture> normal;
         std::shared_ptr<Engine::Graphics::IGraphicsTexture> roughAo;
         // Linear mean albedo of each slice (its 1x1 mip), for macro color.
-        std::array<glm::vec3, MaxLayers> meanAlbedo{};
+        std::array<glm::vec3, MaxSlices> meanAlbedo{};
         // Bit per layer: slice holds albedo / normal / roughness or AO / height.
         uint32_t albedoMask = 0, normalMask = 0, roughnessMask = 0, heightMask = 0;
         uint32_t sliceSize = 0;

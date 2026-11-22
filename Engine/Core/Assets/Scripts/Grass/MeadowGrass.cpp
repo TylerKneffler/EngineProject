@@ -31,7 +31,7 @@ GrassField* ApplyFar(Engine::Components::TerrainObjectLayer& layer,
         .Set("tallMeshLod1", tuft).Set("tallMeshLod2", tuft)
         .Set("viewerObjectName", viewerObjectName)
         .Set("useEditorCamera", JsonValue(true)).Set("visibleRadius", 200.f)
-        .Set("tileSize", 64.f).Set("shortPatchesPerSquareMeter", .9f)
+        .Set("tileSize", 64.f).Set("shortPatchesPerSquareMeter", 1.1f)
         .Set("tallPatchesPerSquareMeter", 0.f).Set("seed", 29311)
         .Set("castShadows", JsonValue(false)).Set("tileWorkBudgetMs", 1.f)
         .Set("fadeDuration", .35f).Set("distanceFadeFraction", .25f)

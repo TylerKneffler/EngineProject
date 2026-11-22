@@ -562,7 +562,9 @@ bool Engine::Components::RigidBody::EnsureBody()
                             vertices[index].pos[1] * scale.y,
                             vertices[index].pos[2] * scale.z);
                     };
-                    for (std::size_t i = 0; i + 2 < indices.size(); i += 3)
+                    const std::size_t indexEnd = mesh->collisionIndexCount
+                        ? std::min(mesh->collisionIndexCount, indices.size()) : indices.size();
+                    for (std::size_t i = 0; i + 2 < indexEnd; i += 3)
                     {
                         if (indices[i] >= vertices.size() ||
                             indices[i + 1] >= vertices.size() ||
@@ -585,7 +587,9 @@ bool Engine::Components::RigidBody::EnsureBody()
                     bool addedFromIndices = false;
                     if (!indices.empty())
                     {
-                        for (std::size_t i = 0; i + 2 < indices.size();
+                        const std::size_t indexEnd = mesh->collisionIndexCount
+                            ? std::min(mesh->collisionIndexCount, indices.size()) : indices.size();
+                        for (std::size_t i = 0; i + 2 < indexEnd;
                             i += 3)
                         {
                             if (indices[i] >= vertices.size() ||

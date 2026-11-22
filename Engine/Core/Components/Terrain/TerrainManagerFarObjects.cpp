@@ -4,6 +4,8 @@
 #include "Core/Rendering/DetailBudget.h"
 #include "Core/Scene/Scene.h"
 
+#include <cstdlib>
+#include <set>
 #include <algorithm>
 #include <climits>
 #include <map>
@@ -45,7 +47,8 @@ struct FarCellInput
 };
 
 std::vector<TerrainObjectLayer::Placement> FarPlacements(
-    const FarObjectInputs& inputs, const FarCellInput& input)
+    const FarObjectInputs& inputs, const FarCellInput& input,
+    std::map<std::string, float>* cullDistances = nullptr)
 {
     std::vector<TerrainObjectLayer::Placement> result;
     Engine::Core::Object terrainObject;
@@ -99,15 +102,28 @@ std::vector<TerrainObjectLayer::Placement> FarPlacements(
         for (const auto& placement : layer->placements)
         {
             const auto profile = layer->GetObjectLodProfile(placement.asset);
-            // Assets authored to vanish after their last level (near-only
-            // props such as cliff blocks) have no far representation.
-            if (profile.cullAfterLastLod) continue;
+            // Assets authored to vanish after their last level keep that
+            // distance in the far block. Those that vanish inside the loaded
+            // cells (near-only props) have no far representation; those
+            // that reach further (cliff pieces, out to their layer's view
+            // distance) would otherwise end at the edge of the loaded cells:
+            // with 3 loaded rings an escarpment 560 m away was bare terrain.
+            const bool culled = profile.cullAfterLastLod &&
+                std::isfinite(profile.finalLodCullDistance) && profile.finalLodCullDistance > 0.f;
+            if (culled && profile.finalLodCullDistance <= inputs.nearReach) continue;
             auto chain = profile.meshes;
             chain.erase(std::remove(chain.begin(), chain.end(), std::string{}), chain.end());
-            // Only assets with a cheaper last level (impostors) draw far away.
-            if (chain.size() < 2) continue;
+            // Only assets with a cheaper last level (impostors) draw far away,
+            // or ones with their own reach (above): those draw as they are.
+            if (chain.size() < 2 && !culled) continue;
+            if (chain.empty()) chain.push_back(placement.asset);
             auto distant = placement;
             distant.asset = chain.back();
+            if (culled && cullDistances)
+            {
+                auto& distance = (*cullDistances)[distant.asset];
+                distance = std::max(distance, profile.finalLodCullDistance);
+            }
             result.push_back(std::move(distant));
         }
     }
@@ -189,6 +205,180 @@ void TerrainManager::FenceFarObjectJobs()
         if (job.result.valid()) job.result.wait();
     m_farObjectJobs.clear();
     m_farObjectPending.clear();
+}
+
+namespace
+{
+// ENGINE_NEAR_OBJECT_BLOCKS=<n> overrides nearObjectBlockCells (1 = per cell), for A/B runs.
+int ForcedNearObjectBlocks()
+{
+    static const int forced = []
+    {
+        const char* setting = std::getenv("ENGINE_NEAR_OBJECT_BLOCKS");
+        return setting ? std::clamp(std::atoi(setting), 1, 8) : 0;
+    }();
+    return forced;
+}
+}
+
+void TerrainManager::ClearNearObjects()
+{
+    if (Owner && Owner->GetScene())
+        for (auto& [key, block] : m_nearObjectBlocks)
+            if (block.object) Owner->GetScene()->RemoveObject(block.object);
+    m_nearObjectBlocks.clear();
+}
+
+bool TerrainManager::NearObjectsReady(Cell cell, const Terrain& terrain) const
+{
+    if (!terrain.Owner) return true;
+    const int blockCells = m_editorStreaming ? 1 : ForcedNearObjectBlocks()
+        ? ForcedNearObjectBlocks() : std::clamp(nearObjectBlockCells, 1, 8);
+    const auto floorDiv = [](int value, int divisor) {
+        return value >= 0 ? value / divisor : -((-value + divisor - 1) / divisor);
+    };
+    const Cell blockKey{floorDiv(cell.first, blockCells), floorDiv(cell.second, blockCells)};
+    for (const auto* child : terrain.Owner->Children)
+    {
+        const auto* layer = child ? child->GetComponent<TerrainObjectLayer>() : nullptr;
+        if (!layer || !layer->suppressPrefabRendering) continue;
+        const auto found = m_nearObjectBlocks.find({blockKey, layer->layerName});
+        if (found == m_nearObjectBlocks.end() || !found->second.prepared ||
+            std::find(found->second.members.begin(), found->second.members.end(), cell) ==
+                found->second.members.end()) return false;
+    }
+    return true;
+}
+
+// Near object blocks (TerrainManager::nearObjectBlockCells). Each loaded
+// cell's prefab layers stop making instanced batches; one runtime layer per
+// block and layer name holds their placements instead, with the member
+// layers' settings. A block rebuilds when a member cell loads, unloads or
+// changes its placements; the prefab instancer keeps the previous batches
+// on screen until the new ones are ready, as it does for far blocks.
+void TerrainManager::UpdateNearObjects()
+{
+    auto* scene = Owner ? Owner->GetScene() : nullptr;
+    if (!scene) return;
+    const int blockCells = m_editorStreaming ? 1 : ForcedNearObjectBlocks()
+        ? ForcedNearObjectBlocks() : std::clamp(nearObjectBlockCells, 1, 8);
+    const bool active = blockCells >= 2;
+    const auto floorDiv = [](int value, int divisor) {
+        return value >= 0 ? value / divisor : -((-value + divisor - 1) / divisor);
+    };
+    struct Member { Cell cell; TerrainObjectLayer* layer; Engine::Core::Object* object; };
+    std::map<std::pair<Cell, std::string>, std::vector<Member>> wanted;
+    for (const auto& [cell, terrain] : m_loaded)
+    {
+        if (!terrain || !terrain->Owner) continue;
+        for (auto* child : terrain->Owner->Children)
+        {
+            auto* layer = child ? child->GetComponent<TerrainObjectLayer>() : nullptr;
+            if (!layer) continue;
+            // Ground cover has its own renderer; only prefab placements batch.
+            const bool merge = active && !layer->conformToGround && !layer->snapToGround &&
+                layer->HasPrefabPlacements();
+            if (layer->suppressPrefabRendering != merge)
+            {
+                layer->suppressPrefabRendering = merge;
+                layer->MarkConfigurationDirty();
+            }
+            if (merge)
+                wanted[{Cell{floorDiv(cell.first, blockCells), floorDiv(cell.second, blockCells)},
+                    layer->layerName}].push_back({cell, layer, child});
+        }
+    }
+    for (auto it = m_nearObjectBlocks.begin(); it != m_nearObjectBlocks.end(); )
+    {
+        if (wanted.count(it->first)) { ++it; continue; }
+        if (it->second.object) scene->RemoveObject(it->second.object);
+        it = m_nearObjectBlocks.erase(it);
+    }
+    if (wanted.empty()) return;
+    const double spanX = static_cast<double>(cellsX) * cellWidth;
+    const double spanZ = static_cast<double>(cellsY) * cellDepth;
+    auto* provider = scene->GetGraphicsProvider();
+    for (auto& [key, members] : wanted)
+    {
+        uint64_t membership = 1469598103934665603ull;
+        const auto mix = [&](uint64_t value) { membership = (membership ^ value) * 1099511628211ull; };
+        for (const Member& member : members)
+        {
+            mix(static_cast<uint64_t>(static_cast<uint32_t>(member.cell.first)));
+            mix(static_cast<uint64_t>(static_cast<uint32_t>(member.cell.second)));
+            mix(reinterpret_cast<uintptr_t>(member.layer));
+            mix(member.layer->GetConfigurationRevision());
+            mix(member.layer->placements.size());
+        }
+        auto& block = m_nearObjectBlocks[key];
+        if (block.object && block.membership == membership)
+        {
+            if (!block.prepared && block.layer && block.layer->IsPrefabPreparationComplete(provider))
+                block.prepared = true;
+            continue;
+        }
+        const Cell blockCell = key.first;
+        if (!block.object)
+        {
+            block.object = scene->AddObject("Near objects " + std::to_string(blockCell.first) + "," +
+                std::to_string(blockCell.second) + ": " + key.second);
+            block.object->runtimeOnly = true;
+            scene->MoveObject(block.object, Owner, Engine::Scene::Scene::ObjectPlacement::AsChild);
+            block.object->transform.position = {
+                static_cast<double>(blockCell.first) * blockCells * spanX, 0.0,
+                static_cast<double>(blockCell.second) * blockCells * spanZ};
+            block.layer = block.object->AddComponent<TerrainObjectLayer>();
+            block.layer->layerName = key.second;
+            block.layer->placementsChangeOnlyWhenMarked = true;
+            block.layer->suppressPrefabColliders = true;
+        }
+        // Settings and project layer follow the member layers (all cells set
+        // a layer name up the same way).
+        const TerrainObjectLayer& source = *members.front().layer;
+        block.object->layer = members.front().object->layer;
+        auto& target = *block.layer;
+        target.viewDistance = source.viewDistance;
+        target.lod1Distance = source.lod1Distance;
+        target.lod2Distance = source.lod2Distance;
+        target.lodHysteresis = source.lodHysteresis;
+        target.screenLodSelection = source.screenLodSelection;
+        target.distanceLodOverride = source.distanceLodOverride;
+        target.screenLod1Pixels = source.screenLod1Pixels;
+        target.screenLod2Pixels = source.screenLod2Pixels;
+        target.screenLodHysteresis = source.screenLodHysteresis;
+        target.shadowDistance = source.shadowDistance;
+        target.farShadowDistance = source.farShadowDistance;
+        target.shadowFadeWidth = source.shadowFadeWidth;
+        target.shadowLod = source.shadowLod;
+        target.objectLods.clear();
+        std::vector<TerrainObjectLayer::Placement> placements;
+        size_t total = 0;
+        for (const Member& member : members) total += member.layer->placements.size();
+        placements.reserve(total);
+        block.members.clear();
+        uint64_t memberIndex = 0;
+        for (const Member& member : members)
+        {
+            block.members.push_back(member.cell);
+            for (const auto& [asset, lods] : member.layer->objectLods)
+                target.objectLods.emplace(asset, lods);
+            const glm::vec3 offset(
+                static_cast<float>((member.cell.first - blockCell.first * blockCells) * spanX), 0.f,
+                static_cast<float>((member.cell.second - blockCell.second * blockCells) * spanZ));
+            ++memberIndex;
+            for (auto placement : member.layer->placements)
+            {
+                placement.position += offset;
+                // Unique within the block; the cell's own id stays in the low bits.
+                placement.id = (memberIndex << 48u) | (placement.id & 0xffffffffffffull);
+                placements.push_back(std::move(placement));
+            }
+        }
+        target.placements = std::move(placements);
+        target.MarkConfigurationDirty();
+        block.membership = membership;
+        block.prepared = false;
+    }
 }
 
 void TerrainManager::ClearFarObjects()
@@ -332,8 +522,21 @@ void TerrainManager::UpdateFarObjects(int centerX, int centerY)
     // Schedule queued cells, a few small jobs at a time. Placement generation
     // builds each cell's terrain and object layers, so spread it over more
     // than two threads on wide CPUs: a 24 km world has ~16k far cells.
-    const size_t maximumJobs = std::clamp<size_t>(
-        std::thread::hardware_concurrency() / 8u, 2u, 6u);
+    // While a large backlog remains (the first fill of the far radius, or a
+    // teleport) half the cores work on it: with 4 jobs the landscape's
+    // 16,800 far cells took ~30 s of the load on a 32-thread CPU. In play,
+    // where a cell crossing queues a row of cells, the small count keeps
+    // the frame's own workers free.
+    // ENGINE_FAR_OBJECT_JOBS=<n> fixes the count (for A/B runs).
+    const size_t backlog = m_farObjectQueue.size() - std::min(m_farObjectQueueNext, m_farObjectQueue.size());
+    static const size_t fixedJobs = []
+    {
+        const char* setting = std::getenv("ENGINE_FAR_OBJECT_JOBS");
+        return setting ? size_t(std::clamp(std::atoi(setting), 0, 64)) : size_t(0);
+    }();
+    const size_t maximumJobs = fixedJobs ? fixedJobs : backlog > 512u
+        ? std::clamp<size_t>(std::thread::hardware_concurrency() / 2u, 2u, 16u)
+        : std::clamp<size_t>(std::thread::hardware_concurrency() / 8u, 2u, 6u);
     constexpr size_t cellsPerJob = 8;
     if (m_farObjectJobs.size() < maximumJobs && m_farObjectQueueNext < m_farObjectQueue.size())
     {
@@ -373,7 +576,7 @@ void TerrainManager::UpdateFarObjects(int centerX, int centerY)
                     for (const auto& input : batch)
                     {
                         FarObjectCell data;
-                        try { data.placements = FarPlacements(inputs, input); }
+                        try { data.placements = FarPlacements(inputs, input, &data.cullDistances); }
                         catch (...) {}
                         cells.emplace_back(input.cell, std::move(data));
                     }
@@ -404,6 +607,8 @@ void TerrainManager::UpdateFarObjects(int centerX, int centerY)
         for (const auto* child : terrain->Owner->Children)
             if (const auto* layer = child ? child->GetComponent<TerrainObjectLayer>() : nullptr)
                 if (!layer->IsPrefabPreparationComplete(provider)) { complete = false; break; }
+        // With near blocks the cell's trees are drawn by its blocks.
+        if (complete && !NearObjectsReady(cell, *terrain)) complete = false;
         if (!complete) continue;
         m_farNearCovered[cell] = terrain;
         m_farUrgentBlocks.insert(blockOf(cell));
@@ -447,6 +652,18 @@ void TerrainManager::UpdateFarObjects(int centerX, int centerY)
         const bool clustered = !farClusters.empty() && farClusterDistance > 0.f &&
             static_cast<double>(gapCells) * std::min(spanX, spanZ) >= farClusterDistance;
         if (clustered) membership = (membership ^ 0x636c7573ull) * 1099511628211ull;
+        // Assets with a cull distance (cliff pieces) leave blocks that lie
+        // wholly beyond it, so those blocks carry no batches for them.
+        std::map<std::string, float> cullDistances;
+        for (const Cell& cell : members)
+            for (const auto& [asset, distance] : m_farObjectCells[cell].cullDistances)
+                cullDistances[asset] = std::max(cullDistances[asset], distance);
+        const double blockDistance = static_cast<double>(std::max(0, gapCells - 1)) * std::min(spanX, spanZ);
+        std::set<std::string> beyondCull;
+        for (const auto& [asset, distance] : cullDistances)
+            if (blockDistance > distance) beyondCull.insert(asset);
+        if (!cullDistances.empty())
+            membership = (membership ^ (0x63756c6cull + beyondCull.size())) * 1099511628211ull;
         if (members.empty())
         {
             if (const auto found = m_farObjectBlocks.find(key); found != m_farObjectBlocks.end())
@@ -491,6 +708,7 @@ void TerrainManager::UpdateFarObjects(int centerX, int centerY)
                 static_cast<float>((cell.second - key.second * blockCells) * spanZ));
             for (auto placement : m_farObjectCells[cell].placements)
             {
+                if (!beyondCull.empty() && beyondCull.count(placement.asset)) continue;
                 placement.position += offset;
                 placement.id = ++id;
                 placements.push_back(std::move(placement));
@@ -499,6 +717,14 @@ void TerrainManager::UpdateFarObjects(int centerX, int centerY)
         if (clustered)
             placements = ClusterFarPlacements(placements, farClusters,
                 std::clamp(farClusterSize, 4.f, 1000.f), std::max(1, farClusterMinimumTrees), key);
+        block.layer->objectLods.clear();
+        for (const auto& [asset, distance] : cullDistances)
+        {
+            if (beyondCull.count(asset)) continue;
+            auto& lod = block.layer->objectLods[asset];
+            lod.cullAfterLastLod = true;
+            lod.finalLodCullDistance = distance;
+        }
         block.layer->placements = std::move(placements);
         block.layer->MarkConfigurationDirty();
         block.membership = membership;

@@ -64,6 +64,19 @@ public:
     // Transient per-placement distance fade for instanced ground cover
     // (GrassField): each placement shrinks toward its root between these
     // world distances from the camera. End <= start disables it.
+    // Instanced meshes with GPU LOD selection (ground cover tiles): each
+    // placement takes its detail level from its own distance to the camera
+    // instead of the whole tile switching together at the distance to the
+    // tile's origin. Camera views only; needs full runtime visibility.
+    bool perPlacementLod = false;
+    // Triangle-mesh colliders use only the first collisionIndexCount indices
+    // (0 = all). Terrain cells set it to their height grid's triangles, so the
+    // stamp patches that follow them are drawn but not collided with.
+    size_t collisionIndexCount = 0;
+    // CPU-only: the triangles the software occlusion buffer rasterizes in
+    // place of the drawn ones, when set (a sculpted terrain cell's coarsest
+    // level; occluders need its silhouette, not its detail).
+    std::vector<uint32_t> occluderIndices;
     float placementFadeStart = 0.f;
     float placementFadeEnd = 0.f;
     // Transient distance thinning for instanced ground cover (GrassField):
@@ -178,6 +191,10 @@ public:
         // for indexed sources. Names retain existing aggregate/source compatibility.
         uint32_t firstVertex = 0, vertexCount = 0;
         uint32_t firstInstance = 0, instanceCount = 0;
+        // Ground cover: the share of the mesh's placement fade and thinning
+        // distances this range's plants use (1 = all of it). Lets fine grass
+        // end sooner than the shrubs in the same tile.
+        float reachScale = 1.f;
     };
     void SetInstancedGeometry(std::shared_ptr<Mesh> source,
         std::shared_ptr<InstanceData> instances, std::vector<InstanceRange> ranges,
@@ -289,6 +306,14 @@ public:
     uint64_t GetRuntimeLodGpuMemoryBytes() const;
     // Releases cached alternatives, retaining the currently displayed geometry.
     void ClearRuntimeLods();
+    // Back to the state before any runtime LOD was stored: the active level's
+    // geometry leaves this mesh too (ClearRuntimeLods keeps it), so the
+    // component can be reused for other content. The levels move to
+    // `receiver` when given, so the caller decides when their buffers are
+    // released (a frame in flight may still draw them); otherwise they are
+    // destroyed here. False when the active geometry could not be exchanged
+    // out; nothing is changed then.
+    bool ResetRuntimeLods(Mesh* receiver = nullptr);
     // Updates authored vertex data without changing topology or reallocating
     // the index buffer. Used for interactive Mesh Edit transforms.
     bool UpdateAuthoredVertices(std::vector<Vertex> vertices);

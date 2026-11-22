@@ -70,7 +70,10 @@ void* D3D12GraphicsBuffer::Map()
         : D3D12_RANGE{ 0, 0 };
     HRESULT hr = m_resource->Map(0, &readRange, &m_mappedData);
     if (FAILED(hr))
+    {
+        Engine::Renderers::ReportGpuFailure("buffer Map");
         throw std::runtime_error("Failed to map D3D12 buffer");
+    }
 
     return m_mappedData;
 }
@@ -357,7 +360,10 @@ std::unique_ptr<Engine::Graphics::IGraphicsBuffer> D3D12BufferFactory::CreateSta
         if (WaitForSingleObject(bundle->event, INFINITE) != WAIT_OBJECT_0 ||
             bundle->fence->GetCompletedValue() == UINT64_MAX ||
             bundle->fence->GetCompletedValue() < completion)
+        {
+            Engine::Renderers::ReportGpuFailure("static geometry upload wait");
             throw std::runtime_error("Failed to wait for static geometry upload");
+        }
     }
     native->SetResourceState(D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
     {

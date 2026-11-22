@@ -23,6 +23,14 @@ struct GameBenchmarkOptions
     // Synthetic mouse-look: cursor pixels right of the look anchor per
     // measured frame (yaw while looking around); 0 disables.
     int lookYawPixels = 0;
+    // Two extra snapshots taken while the camera is still being driven
+    // (--drive-forward), this many frames apart, the second two frames before
+    // the drive ends: capture_a.ppm and capture_b.ppm. Things that come into
+    // being between them are pop-in. 0 takes none.
+    uint32_t movingCaptureGap = 0;
+    // With driveForwardFrames: also capture seq_<n>.ppm every captureEvery
+    // frames of the drive (0 = off), to see streaming hand-offs while moving.
+    uint32_t captureEvery = 0;
     // Also hold Ctrl (sprint / flight boost) while driving forward.
     bool driveBoost = false;
     // Scene view render mode for the game camera (-1 normal, 3 Performance

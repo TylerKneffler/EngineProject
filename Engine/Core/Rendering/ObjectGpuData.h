@@ -14,6 +14,8 @@ struct DrawCBData
     uint32_t objectIndex;
     uint32_t lightCount;
     uint32_t flags;
+    // Instanced ground cover: Mesh::InstanceRange::reachScale in 1/1024ths
+    // (0 = 1.0). Object.hlsl reads it as draw.placementReach.
     uint32_t padding;
 };
 

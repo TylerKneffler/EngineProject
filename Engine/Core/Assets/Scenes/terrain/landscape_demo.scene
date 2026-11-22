@@ -132,7 +132,7 @@
       </components>
       <children />
       <transform>
-        <Transform.position _arrayEncoding="spaceSeparatedNumbers">-800.515 48.9121 1928.89</Transform.position>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">-800.423 48.9318 1928.8</Transform.position>
         <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
         <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
       </transform>
@@ -141,12 +141,12 @@
       <components>
         <components:Camera Camera.active="false" Camera.useTransformRotation="false" Camera.fov="67" Camera.near="0.06" Camera.far="24000" Camera.orthographic="false" Camera.orthographicSize="5">
           <Camera.up _arrayEncoding="spaceSeparatedNumbers">0 1 0</Camera.up>
-          <Camera.target _arrayEncoding="spaceSeparatedNumbers">-312.567 118.325 -977.039</Camera.target>
+          <Camera.target _arrayEncoding="spaceSeparatedNumbers">-312.567 108.950 -1009.039</Camera.target>
         </components:Camera>
       </components>
       <children />
       <transform>
-        <Transform.position _arrayEncoding="spaceSeparatedNumbers">-368 120.325 -1000</Transform.position>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">-368 110.95 -1032</Transform.position>
         <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
         <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
       </transform>
@@ -155,12 +155,40 @@
       <components>
         <components:Camera Camera.active="false" Camera.useTransformRotation="false" Camera.fov="67" Camera.near="0.06" Camera.far="24000" Camera.orthographic="false" Camera.orthographicSize="5">
           <Camera.up _arrayEncoding="spaceSeparatedNumbers">0 1 0</Camera.up>
-          <Camera.target _arrayEncoding="spaceSeparatedNumbers">-150.000 15.906 -660.000</Camera.target>
+          <Camera.target _arrayEncoding="spaceSeparatedNumbers">-150.000 7.906 -660.000</Camera.target>
         </components:Camera>
       </components>
       <children />
       <transform>
-        <Transform.position _arrayEncoding="spaceSeparatedNumbers">-350 -10.6594 -370</Transform.position>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">-30 23.3875 -460</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+      </transform>
+    </item>
+    <item name="ForestWall" enabled="true" static="true">
+      <components>
+        <components:Camera Camera.active="false" Camera.useTransformRotation="false" Camera.fov="67" Camera.near="0.06" Camera.far="24000" Camera.orthographic="false" Camera.orthographicSize="5">
+          <Camera.up _arrayEncoding="spaceSeparatedNumbers">0 1 0</Camera.up>
+          <Camera.target _arrayEncoding="spaceSeparatedNumbers">389.291 -26.055 -187.299</Camera.target>
+        </components:Camera>
+      </components>
+      <children />
+      <transform>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">320 -27.8625 -216</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+      </transform>
+    </item>
+    <item name="FieldWalk" enabled="true" static="true">
+      <components>
+        <components:Camera Camera.active="false" Camera.useTransformRotation="false" Camera.fov="67" Camera.near="0.06" Camera.far="24000" Camera.orthographic="false" Camera.orthographicSize="5">
+          <Camera.up _arrayEncoding="spaceSeparatedNumbers">0 1 0</Camera.up>
+          <Camera.target _arrayEncoding="spaceSeparatedNumbers">202.426 -25.463 -226.426</Camera.target>
+        </components:Camera>
+      </components>
+      <children />
+      <transform>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">160 -25.2156 -184</Transform.position>
         <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
         <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
       </transform>
@@ -304,7 +332,7 @@
       <components>
         <components:Mesh Mesh.file="" Mesh.useLightProbes="false" />
         <components:Material Material.useVertexColors="true" Material.specularModel="MetallicRoughness" Material.alphaMode="Opaque" Material.doubleSided="false" />
-        <components:TerrainManager TerrainManager.cellsX="32" TerrainManager.cellsY="32" TerrainManager.cellWidth="4" TerrainManager.cellDepth="4" TerrainManager.loadedRadius="5" TerrainManager.editorRadius="3" TerrainManager.farRadius="32" TerrainManager.lod2Radius="2" TerrainManager.lod4Radius="3" TerrainManager.farTileScreenErrorPixels="6" TerrainManager.farObjectRadius="64" TerrainManager.farClusterDistance="2200" TerrainManager.farClusterSize="40" TerrainManager.farClusterMinimumTrees="5" TerrainManager.maxLodChangesPerUpdate="4" TerrainManager.maxLoadsPerUpdate="6" TerrainManager.maxUnloadsPerUpdate="4" TerrainManager.asyncStreaming="true" TerrainManager.maxPreparedCells="4" TerrainManager.maxUploadsPerUpdate="4" TerrainManager.batchFarCells="true" TerrainManager.fastRuntimeLighting="true" TerrainManager.stochasticTerrainVariation="true" TerrainManager.terrainMacroColorEnabled="true" TerrainManager.reliefMapping="true" TerrainManager.reliefShadows="false" TerrainManager.measurementGrid="false" TerrainManager.generateColliders="true" TerrainManager.streamCollidersByDistance="true" TerrainManager.cpuBudgetMiB="512" TerrainManager.gpuBudgetMiB="256" TerrainManager.cacheBudgetMiB="1024" TerrainManager.viewerObjectName="Landscape Explorer" TerrainManager.cellDataDirectory="Engine/Core/Assets/TerrainData/Landscape" TerrainManager.runtimeBakeDirectory="" TerrainManager.requireRuntimeBake="false">
+        <components:TerrainManager TerrainManager.cellsX="32" TerrainManager.cellsY="32" TerrainManager.cellWidth="4" TerrainManager.cellDepth="4" TerrainManager.loadedRadius="3" TerrainManager.nearObjectBlockCells="2" TerrainManager.editorRadius="3" TerrainManager.farRadius="32" TerrainManager.lod2Radius="2" TerrainManager.lod4Radius="3" TerrainManager.farTileScreenErrorPixels="6" TerrainManager.farObjectRadius="64" TerrainManager.farClusterDistance="2200" TerrainManager.farClusterSize="40" TerrainManager.farClusterMinimumTrees="5" TerrainManager.maxLodChangesPerUpdate="4" TerrainManager.maxLoadsPerUpdate="6" TerrainManager.maxUnloadsPerUpdate="4" TerrainManager.asyncStreaming="true" TerrainManager.maxPreparedCells="4" TerrainManager.maxUploadsPerUpdate="4" TerrainManager.batchFarCells="true" TerrainManager.fastRuntimeLighting="true" TerrainManager.stochasticTerrainVariation="true" TerrainManager.terrainMacroColorEnabled="true" TerrainManager.reliefMapping="true" TerrainManager.reliefShadows="false" TerrainManager.measurementGrid="false" TerrainManager.generateColliders="true" TerrainManager.streamCollidersByDistance="true" TerrainManager.cpuBudgetMiB="512" TerrainManager.gpuBudgetMiB="256" TerrainManager.cacheBudgetMiB="1024" TerrainManager.viewerObjectName="Landscape Explorer" TerrainManager.cellDataDirectory="Engine/Core/Assets/TerrainData/Landscape" TerrainManager.runtimeBakeDirectory="" TerrainManager.requireRuntimeBake="false">
           <TerrainManager.cells />
           <TerrainManager.farClusters>
             <item asset="Assets/Prefabs/Woodland/Clusters/ForestCluster_Oak_01.prefab" match="/Oaks/" trees="14" />
@@ -515,7 +543,7 @@
           </TerrainManager.proceduralRuns>
           <TerrainManager.editedCells />
         </components:TerrainManager>
-        <components:LandscapeDriver LandscapeDriver.viewerObjectName="Landscape Explorer" LandscapeDriver.mapHalfExtentCells="94" LandscapeDriver.heightArchive="Assets/TerrainData/Landscape/world.heights" LandscapeDriver.farGrid="Assets/TerrainData/Landscape/world.fargrid" LandscapeDriver.cacheDirectory=".local/cache/landscape_demo" LandscapeDriver.enableFarTerrain="true" LandscapeDriver.waterLevel="-40" LandscapeDriver.rockLine="1150" LandscapeDriver.snowLine="1480" LandscapeDriver.treeLine="950" LandscapeDriver.altitudeBlend="6" LandscapeDriver.treesPerCell="220" LandscapeDriver.forestLayerName="Landscape forest" LandscapeDriver.grassRadius="26" />
+        <components:LandscapeDriver LandscapeDriver.viewerObjectName="Landscape Explorer" LandscapeDriver.mapHalfExtentCells="94" LandscapeDriver.heightArchive="Assets/TerrainData/Landscape/world.heights" LandscapeDriver.farGrid="Assets/TerrainData/Landscape/world.fargrid" LandscapeDriver.cacheDirectory=".local/cache/landscape_demo" LandscapeDriver.enableFarTerrain="true" LandscapeDriver.waterLevel="-40" LandscapeDriver.rockLine="1150" LandscapeDriver.snowLine="1480" LandscapeDriver.treeLine="950" LandscapeDriver.altitudeBlend="6" LandscapeDriver.treesPerCell="220" LandscapeDriver.forestLayerName="Landscape forest" LandscapeDriver.grassRadius="50" />
       </components>
       <children />
     </item>

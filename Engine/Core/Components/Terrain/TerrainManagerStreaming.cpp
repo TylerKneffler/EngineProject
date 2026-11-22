@@ -77,7 +77,9 @@ void TerrainManager::UpdateStreamingAtPosition(
     m_editorStreaming = false;
     StreamCells(centerX, centerY);
     const auto farObjectsStart = std::chrono::steady_clock::now();
+    UpdateNearObjects();
     UpdateFarObjects(centerX, centerY);
+    UpdateFarStamps(centerX, centerY);
     m_lastStreamingTiming.farObjectsMs = std::chrono::duration<double, std::milli>(
         std::chrono::steady_clock::now() - farObjectsStart).count();
 }
@@ -94,6 +96,8 @@ void TerrainManager::UpdateEditorStreaming(const glm::dvec3& worldPosition,
     if (spanX <= 0.0 || spanZ <= 0.0) return;
     if (!m_editorStreaming) InvalidatePrepared();
     m_editorStreaming = true;
+    // The editor draws and selects placements per cell.
+    UpdateNearObjects();
     m_prefetchCenter.reset();
     const int centerX = static_cast<int>(std::floor(local.x / spanX));
     const int centerY = static_cast<int>(std::floor(local.z / spanZ));
@@ -343,6 +347,9 @@ void TerrainManager::StreamCells(int centerX, int centerY, int initialRadius)
             task.hasSaved = saved != m_cells.end();
             if (task.hasSaved) task.saved = saved->second;
             task.builder = m_proceduralBuilder;
+            task.stamps = m_stampProvider;
+            task.stampMaterials = m_stampMaterials;
+            task.compactMesh = UsesCompactCellVertices();
             task.layerGenerator = m_objectLayerGenerator;
             if (!task.hasSaved && !task.builder &&
                 !(Owner->GetScene()->HasStarted() && requireRuntimeBake)) continue;

@@ -856,3 +856,1584 @@ variance on this machine is large, so the figures are approximate.
       cannot be met on the RTX A2000 laptop: after 3 ms of terrain only 3 ms
       remain for ~8 ms of LOD-dependent work, so the cost budget collapses
       to 1. Fix: auto quality (below).
+
+## Moved from todo.md on 2026-11-20
+
+Completed items, in the order and under the headings they had in todo.md.
+
+### Landscape demo expectations (2026-11-19, from the Chlorophyll Engine video)
+
+- [x] **The landscape had no sunlight in captures.** The sun's cloud-shadow cookie path ("Assets/Textures/...") went to
+      the texture loader unresolved, so it loaded only when the working directory was the asset root. From the
+      capture tool (run from the repository root) the decode failed, the null (black) texture was bound, and the
+      cookie multiplied the sun by zero: every landscape capture since cloud shadows were added (Foliage Phase 3)
+      was lit by ambient light only, with auto exposure brightening the result. That is the "dark meadow, bright
+      far forest" this section first recorded as the demo's state (meadow 0.011-0.035), and the Foliage Phase 1d
+      colour pass on the landscape was judged under it. Whether the editor or the game showed the same depends on
+      their working directory; not checked. Fix (`SceneRendererLighting::ResolveViewLighting`): cookie and IES
+      paths go through `Mesh::ResolveFilePath`, and a missing or still-loading texture is replaced by a white
+      texel, so it can never black out its light. Measured at fixed exposure: a uniform 0.3 cookie now gives
+      exactly the image of a 30 % sun.
+- [x] **Ground tint was off.** The forest-floor grass field (no tint) cleared the meadow field's ground cover on
+      every refresh, so the bare terrain texture showed pale between the blades and "raising the tint did
+      nothing" (Foliage Phase 1d open item, now closed). `Terrain::GroundCover` records its owner and a time
+      stamp; only the owner changes it and an unrenewed claim expires after 2 s. Meadow preset: tint strength
+      0.5 → 0.8, root shade 0.7, cover colour factor 0.8 → 0.45 (the open ground past the blades was 1.6x the
+      meadow's luminance; now 1.13x).
+- [x] Scene settings (scene and `tools/build_landscape_demo.py`): tone mapping AgX → ACES (AgX could not reach the
+      reference sky: saturation 0.44 against 0.56), output exposure -0.4 → -0.25, grading saturation 1.1, displayed
+      sky intensity 1 → 2.4 with the sky fill light (`hdriIntensity`) 0.55 → 1, haze `mieScale` 4 → 3, exposure
+      floor `minEv` -4.8 → -4. Sun 40 → 57 degrees up, colour 1 / 0.91 / 0.77 → 1 / 0.96 / 0.9.
+- [x] Cloud shadows 0.3 → 0.42 under cloud (`generate_sky_sprites.py`, texture regenerated): at 0.3 the shaded
+      meadow was 4.5x darker than the sunlit one; the frames show 2.4-4x.
+- [x] Far trees: oak impostor materials had twice the near leaves' flat ambient and the same tint, and read 1.5x the
+      meadow front-lit. Ambient halved, tint x0.8, and `foliageTranslucency` 0.7 on all 28 impostor and cluster
+      materials so they do not go black against the light.
+- [x] Near crowns: shaded leaves under a sunlit canopy get scattered light (`FoliageTransmission`, Object.hlsl:
+      0.3 x (1 - shadow), more toward the shell). Crown undersides 0.015 → 0.024. It follows the leaf's shadow,
+      so a tree in terrain shade keeps a little of it.
+- [x] Viewpoint **MeadowSlope** added (`tools/add_landscape_viewpoints.py`: a meadow slope with forest 50-150 m
+      ahead, lower ground beyond, no lake in view, sun behind or beside the camera); eye (-240, 12, 1416).
+      The tool's sun direction now follows the scene's sun pitch.
+- [x] **Grass reach** (2026-11-20, user: "grass vision doesn't extend very far"). Cause: grass radius is multiplied
+      by the detail budget's scale, which sits at its 0.6 floor on the landscape (0.53 for the Grass layer), so the
+      detailed grass ended at ~20 m instead of 36 and the far ring at ~50 m instead of 90. Now the far ring keeps
+      its authored reach (`GrassField::OuterRadiusScale`; its inner edge follows the detailed field's scaled
+      radius, which also closes the gap between the two), reaches 200 m on 64 m tiles at 0.9 clumps per m²
+      (`MeadowGrass::ApplyFar`), and its clump is wider (`far_grass_tuft`: 14 blades 7.5 cm wide, ~0.9 m across,
+      42 triangles). MeadowSlope: the ground from ~60 m to the forest edge measured 0.074-0.091 against a 0.078
+      meadow, and reads as grass (`.local/foliage/j3_MeadowSlope.png`, `j3_crop.png`). Cost at MeadowSlope:
+      grass GPU 2.0 → 3.8 ms, 16.7k → 127k grass instances, tile count unchanged (268), camera record
+      11.1 → 12.3 ms (single runs).
+- [x] **Grass shells in the terrain** (user: "should the grass materials for terrain have some sort of 3D effect"):
+      `GrassGroundShells` (Object.hlsl) shades the ground under and past the blades as tufts ~0.3 m deep, four
+      parallax shells through a procedural tuft height field: tufts hide the ground behind them at low angles,
+      show dark gaps from above, and near the horizon the result goes to the tip colour. Replaces the grain and
+      sheen of Grass Phase 6a. Terrain GPU unchanged (0.86 ms). Runs on DX11, DX12, Vulkan (test meadow).
+      Limit: at eye level over flat ground a pixel row covers metres of depth, so the shells only show their
+      depth from a raised view or on a slope facing the camera; standing blades carry the look otherwise.
+- [x] **Rolling hills in the lowland** (`build_landscape_demo.py` `lowland_hills`, added in `carve` after erosion):
+      swells up to ~150 m on a 1.5 km wave with flat valley floors between, none within 260 m of the start (the
+      start meadow and its view of the first lake stay) or on the lakes, fading out 1.9-2.9 km from the start.
+      Within 2 km of the start the ground was -38..21 m (5th-95th percentile) and is now -38..116 m; 40 % of it
+      slopes 10-25 degrees, 2.8 % is steeper than 30 (no trees there).
+- [x] **Escarpment** (`ESCARPMENT`, `escarpment`): a cuesta 700 m south of the start, facing it (centre
+      (-150, -660), face toward +z, so it is sunlit and visible from the start meadow). Rock face 66-95 m high,
+      steeper than 50 degrees along 730 m, buttresses to 70-80 degrees with gentler gullies, a 12 m talus apron,
+      the plateau dipping away over 650 m behind. 15,600 m2 of it passes `GenerateCliffs`' steep-rock test along
+      the whole face, so the scanned rock pieces should stand on it; 93 % of the plateau and 96 % of the foot are
+      plantable (under 30 degrees).
+- [x] The rest of the map is bit-identical: the builder reproduced the stored archive before the change, and hills
+      and escarpment are exactly zero outside their footprints. The builder now keeps the sculpt edits of cells
+      that come out identical (`unchanged_cells`; all 20 `.terrainedit` files survived) instead of deleting all of
+      them. The archive signature changed, so terrain caches rebuild on first load. `world.flow` and
+      `world.deposition` are from the erosion and do not know the new hills.
+- [x] **Forest prefers higher ground** (`ForestMask(x, z, height, a)`, LandscapeDriver.cpp; replicated in
+      `add_landscape_viewpoints.py`): the mask noise is raised by 0.06 from 30 to 80 m above the water level, by
+      my estimate from the noise's spread about 44 % forest on valley floors and 60 % above. This applies to the
+      whole map, so the foothills carry roughly a third more trees, near and far. Cost not measured.
+- [x] **Closed forest edge** (`GenerateForest`, second pass with its own random stream; the first pass's trees
+      keep their places where the mask did not change): medium and small oaks and saplings (young spruce and fir
+      in the conifer band) across the mask's transition, up to one per ~30 m2, smaller toward the meadow, leaning
+      out up to 9 degrees. Loaded cells only, not in far blocks. No new assets.
+- [x] **Shrub belt** (`GenerateProps`, undergrowth, own random stream): the stand's tall bush (30 % the low one)
+      at 1-1.9x scale along the meadow side of every edge, up to one per ~12 m2, ragged by the 16 m clump noise.
+      **Removed after the capture (below)**: it did not show from the meadow.
+- [x] **No soil line under the edge** (`PaintSample`): forest soil is painted only from mask 0.3 up (full at
+      0.85), so the outer edge trees and the belt stand in meadow grass. `PaintRevision` bumped.
+- [x] Viewpoint **Escarpment** (`find_escarpment`): eye (-350, -10.7, -370) on open ground 350 m in front of the
+      face, looking at its middle. **MeadowSlope** moved to (-368, 120.3, -1000), a 20 degree slope on the hill
+      behind the escarpment with a 149 m drop to the valley (it was (-240, 12, 1416)); the numbers in the
+      expectations table are from the old pose.
+- [x] **Captured and judged** (2026-11-20 evening, RTX 4090, DX12, 1920x1080; `.local/foliage/k1_*.png` as
+      pushed, `k5_*.png` after the fixes below; poses other than the saved viewpoints via `--camera-position`).
+      The start pose was not captured.
+      - Hills: read well from MeadowSlope (`k1_MeadowSlope.png`): forested swells, meadow clearings, the lake
+        and the alpine range behind. Kept as built.
+      - Forest edge as pushed: **failed**. From 75 m (`k1_edge80.png`) a row of even 10 m oaks with a trunk
+        line and a strip of soil under it, and no shrub belt at all. The belt bushes exist but are 1.5-2 m of
+        the pack's broad lime leaves, and every bush stops being drawn ~25 m from the camera (also at
+        `ENGINE_DETAIL_SCALE=1`); why single-LOD props end there is not found (see To investigate).
+      - Escarpment as pushed: **failed**. The sheer parts of the face were bare terrain with a striped rock
+        texture (`k1_escair.png`): `GenerateCliffs` refused ground steeper than 72 degrees, which is most of
+        what is seen of the face. Rows of dark columns stood through the forest at its foot and on the rim:
+        the generated `Crag_spire_01` filler (25 m tall). The saved viewpoint looked at trees: the foot of
+        the face is forest.
+- [x] **Forest edge closed with sunk oaks** (`GenerateForest`, second pass rewritten; 10 attempts per tree
+      attempt, own random stream). Across the mask's transition, meadow side first: small oaks sunk 1.6 m x
+      scale, to the base of their crowns, as 2-4.5 m leafy mounds on the grass (up to one per ~8 m2, ragged by
+      a 14 m noise); medium oaks sunk 3 m x scale as 5-8 m mounds behind them; then standing small and medium
+      trees as before. Young spruces do all three in the conifer band. The pack-bush belt is gone. Result
+      (`k5_ForestWall.png`, `k5_ForestEdge.png`, `k2_edge35.png`): a closed wall from the grass up at 22, 35
+      and 75 m; soil-coloured pixels along its base 1.5 % → 0.2 %. Not done: height and species variety along
+      the wall; sky share through the silhouette (my first measure counted the sky between crown tips and is
+      not usable); the sunk trees' impostors past 130 m; colliders (the sunk trees still collide as trees);
+      the conifer band's edge (not captured).
+- [x] **Escarpment face covered** (`GenerateCliffs`): sheer ground counts (normal.y down to 0.08, was 0.3), up to
+      64 pieces a cell from 220 attempts (40 from 140), scanned faces only (the generated spire, overhang and
+      ledge are no longer placed). `k5_Escarpment.png`: a continuous band of scanned rock with forest above and
+      below, short stretches of bare striped terrain left between pieces. Applies to every cliff on the map,
+      so the alpine slopes carry more pieces too; cost there not measured. Scree rocks (`GenerateProps`) now
+      lie tipped 45-85 degrees, at most ~2 m, 0.4 odds (0.55), and generated boulders are not used in scree;
+      **not looked at up close**.
+- [x] Viewpoints (`add_landscape_viewpoints.py`): **ForestWall** added (open meadow, forest edge 75 m ahead,
+      sun behind; eye (320, -27.9, -216)), the pose for the forest edge row. **Escarpment** is now chosen by
+      line of sight to 32 points on the face over ground and canopy: from the ground no spot sees enough of
+      them, so the eye hovers 50 m up at (-110, 24.4, -410) and sees 19. **MeadowSlope**
+      requires no forest within 30 m toward the sun; now (-368, 111.0, -1032).
+- [x] Moving-camera runs after all of this (single runs, ForestFloor start, 400 frames): walking 29.5 ms
+      median, p95 53, 22 frames over 50 ms; again 29.0, p95 43, 11 over 50 ms; walking and turning 37.0,
+      p95 64, 50 over 50 ms. Against 28.5 (11 over 50 ms) and 35.2 (34) before the pass: 0.5-2 ms slower at
+      most, which single runs cannot separate from noise. Standing: Escarpment 20.5, ForestWall 20.3,
+      MeadowSlope 23.0, ForestEdge 23.0 ms (23.1 before the edge rewrite). The hitches at cell crossings are
+      unchanged and are still item 2 of "Next".
+- [x] **Full-resolution look pass** (2026-11-20 night; `.local/foliage/hires.sh <tag> <viewpoint>` captures at
+      2560x1440 and `tiles.py` cuts 2x2 unscaled 1280x720 tiles, `crop.py ... <zoom>` for details; `h1_*` before,
+      `h4_Escarpment_*` after the soil fix). Until now every look judgement was made on half-size 960x540
+      copies. A 3840x2160 request is clamped by the window to 2564x2160 and fails; 1440p is the largest that
+      works on this display. 1440p costs 0-1.5 ms over 1080p at the standing poses (21.3-23.6 ms): the frame is
+      CPU-bound. Look captures only; timings stay at 1080p. What the tiles showed:
+      - Forest floor in sun was rust red (sRGB 108,69,41; `h1_Escarpment_r1c0.png`, gaps in the canopy and a
+        red line under the rim forest): the Ground048 photo itself, textured layers ignore `baseColor`.
+        **Fixed**: `baseColorTextureTint` (0.85, 1.15, 1.3) on `PBR/forest_soil.material` (and in
+        `generate_terrain_pbr_content.py`); now 98,76,53. The material is shared with the other PBR terrain
+        scenes, which were not re-captured.
+      - Forest edge: holds at 20 m (`h1_wallnear_*.png`) and at the ForestEdge pose. From 75 m the base of
+        the wall shows a row of dark blue-grey posts and slabs (`h1_wall_pickets.png`, `h1_wall_slabs.png`):
+        trunks, stumps and logs inside the forest, lit only by sky ambient that the canopy does not occlude,
+        with no understory in front (bushes end at ~25 m). Not fixed.
+      - Escarpment: two scan sets of very different colour sit side by side (dark mossy brown crag, pale pink
+        boulders); the rim forest past the mesh LODs is a flat mid-green hedge on bare soil. Not fixed.
+      - Meadow: mid-distance grass is one broad-bladed clump repeated in visible rows with soil between; the
+        pack's low-poly bushes in the foreground clash with the scanned trees; flowers are loose white cards.
+        Not fixed (Grass phases).
+      - Far view from MeadowSlope: forest on the mountains is near-black navy blobs (sRGB 45,65,73) against
+        pale untextured rock (191,179,160), where drawn forest at mid distance is 72,87,68. Raising the far
+        canopy colour 1.5x moved it 2 levels, so the blobs are the far tree stand-ins, not the terrain tint;
+        reverted. Pale blurred ellipses (171,161,137) lie in a row along a meadow crest: probably rock paint
+        from the archive's ridge code seen through the macro colour; taking trails out of the macro colour
+        did not change them (reverted); the LowClouds prefabs are elsewhere. A snow summit behind ForestWall
+        shows as a flat white facet (`h1_wall_white.png`). None fixed.
+
+### Static objects (2026-11-20)
+
+- [x] **Bake at play start**: static prefab instances that are plain geometry (Mesh, Material,
+      PrimitiveObjectCollider, Static RigidBody; no blended material; no prefab overrides; rotation + uniform
+      scale; two or more of the prefab; not named by another component's field) are removed from the scene and
+      become placements on one runtime-only `TerrainObjectLayer` ("Static objects (baked)"), the path forests use.
+      Editor edit mode is untouched; play mode restores the scene on stop. `ENGINE_STATIC_BAKE=0` keeps the objects.
+- [x] **Warnings** (stderr and debugger in the game, Console in the editor, and under the checkbox): non-static
+      parent, Dynamic/Kinematic rigid body, a component that moves its owner (controller, spline follower,
+      animation, IK, cloth; by type name), non-uniform, mirrored or sheared scale, prefab overrides, referenced by
+      name; and while playing, a static object whose transform changes (`MotionWatch`, 32 objects checked a frame).
+      Static lights, cameras, terrain and emitters stay scene objects without a warning.
+- [x] Terrain scenes: every top-level object except the explorer is static in landscape_demo, grass_test,
+      foliage_test and woodland_assets_preview (`tools/scene_static.py`; the three scene builders call it).
+- [x] Checked on woodland_assets_preview (DX11, 960x540, laptop): 16 conifers of 4 prefabs baked, no warnings;
+      a copy with a 1 2 1 scale and a Dynamic body on the ground printed both warnings and baked the other 15.
+- [x] **Baked trees follow the prefab's LOD distances** (checked 2026-11-20, DX12, young spruce alone, authored
+      23.75 / 85.5 m, 640x360 where the view scale is ~0.77): submitted triangles 50.8k at 18 m (LOD0), 13.2k at
+      30 and 38 m (LOD1), 316 at 66 and 96 m (impostor). The layer receives the distances from the instance's
+      mesh (printed: fir 37.5/135, pine 50/180, tall spruce 60/216, young spruce 23.75/85.5) and, like the
+      forests, keeps LOD0, LOD1 and the last level (the impostor) of a longer chain.
+- [x] **foliage_test with the grove as static objects** (2026-11-20, laptop, DX12 1280x720, `ENGINE_DETAIL_SCALE=1`,
+      `ENGINE_AUTO_EXPOSURE=0`; `build_foliage_test_scene.py --standalone` copied to
+      `.local/static-test/foliage_standalone.scene`, images in `.local/static-test/foliage/`): 77 of the 84 grove
+      objects of 19 prefabs baked, no warnings; the other 7 are single instances of their prefab. Baked and
+      unbaked (`ENGINE_STATIC_BAKE=0`) look alike at ForestFloor, Backlit and Meadow (3-5 % of pixels differ by
+      more than 0.16, the LOD differences above). Frame interval, 5 frames each, rough: scene's own grove layer
+      18-22 ms, baked 28-57 ms, unbaked 85-115 ms. The baked layer has no fixed shadow level and a 1000 m
+      shadow distance, which is most of its gap to the scene's layer (GPU shadow 2.2-3.1 ms against 0.8-1.0 ms).
+- [x] **On the landscape the bake does nothing** (2026-11-20 night, RTX 4090): its 12 static objects are the
+      viewpoints, sun, atmosphere and the Landscape root; none is a bakeable prefab instance, and the forest
+      is placements already. What costs there is the ~9.7k runtime mesh objects under the static Landscape
+      root (terrain cells, far tiles, far-object blocks, layer groups, grass tiles).
+- [x] **Static objects skip the transform test for their cached render item**
+      (`SceneRendererFramePreparation::PrepareFrameItems`). When streaming adds or removes any object, the
+      renderer has no prepared transform hierarchy for that frame and tested every item serially
+      (`prepare_items` 5.5 ms against 2.6). That was 84 % of walking frames. An object that is static in its
+      hierarchy is now tested on the workers in those frames too, without reading its transform. If it moves
+      anyway its item is stale until the next frame without a structure change (and `MotionWatch` reports
+      it). `ENGINE_STATIC_ITEM_TRUST=0` turns it off. Walking, two interleaved pairs: `prepare_items`
+      5.4 → 3.65 ms, median 30.4 → 28.9 ms.
+- [x] **Grass tile objects are pooled** (`GrassField::m_freeTiles`, `Mesh::ResetRuntimeLods`): the cause of
+      those structure changes was grass, which added and removed ~6 tile objects on 3 of 4 walking frames.
+      A retired tile is emptied and reused for the next tile in range. `ENGINE_GRASS_TILE_POOL=0` removes
+      objects as before. Structure-change frames 336 → ~155 of 400 (the rest is cell, far-block and prefab
+      layer streaming in bursts around cell crossings).
+- [x] **Both together, interleaved A/B, 400 frames, 1080p DX12** (off = both switches 0; median / frames over
+      50 ms): walking 31.3/23, 31.7/19, 29.9/15 → 28.6/14, 25.9/9, 26.5/11 (mean 31.0 → 27.0 ms);
+      walking and turning 40.5/63, 38.1/39 → 35.8/39, 36.0/38, 34.4/34, 35.4/32. Stages while walking:
+      scene prepare 9.0 → 5.9 ms, simulation update 5.0 → 3.4, post-physics commit 1.4 → 0.02. Standing
+      ForestEdge 23.1 → 24.2 ms, one run each (no change expected; within run noise, not confirmed).
+      End frames differ between any two runs by ~16 % of pixels with or without the changes (the walk's end
+      point depends on frame times), so the look check is by eye: `s2_walk1.png`, ground cover present.
+- [x] **Cell-crossing hitches: cause found and fixed** (2026-11-20 night). Timing the commit after physics
+      showed removals of just 3-4 objects taking 45-95 ms: each unloaded cell's "Landscape props"
+      `TerrainObjectLayer` took 6-12 ms to destroy. Cells that stream in together ask for the same prefabs
+      before any is cached; each layer built its own prototype (a small scene with a physics world), used
+      whichever finished first and kept the others unconsumed until it was destroyed. Now one build per
+      prefab is shared by every layer waiting for it (`TerrainPrefabInstances.cpp`, `buildsInFlight`;
+      `ENGINE_PREFAB_PROTOTYPE_SHARE=0` for the old behaviour): props layer destruction 10 → 1.3 ms.
+      Also `Scene::FlushPendingObjectRemovals` looked each pending object up by walking the whole hierarchy
+      (33 ms for one commit of 584 removals among 10.6k objects); it now asks the id table.
+      Interleaved A/B on the sharing switch, 400 frames (p99 / max / frames over 80 ms / longest commit):
+      walking 120/139/6/77, 120/144/6/81, 123/144/6/78 → 74/83/1/34, 74/79/0/36, 79/82/2/33;
+      walking and turning 123/144/10/79, 124/139/10/76 → 79/84/3/36 (one run). Medians unchanged
+      (26-28 ms walking). Left: a ~33 ms commit once per crossing (an unloaded cell's grass field removes
+      its 300-600 tile objects one by one), and ~10 frames of `scene_prepare` +10 ms after a crossing.
+- [x] **Grass pool keeps a recycled tile's meshes until the frame fence.** `ResetRuntimeLods` first destroyed
+      a retired tile's meshes and placement buffers at once, where a removed tile object is kept until the
+      frame fence. They now leave on a carrier object released behind the fence
+      (`Mesh::ResetRuntimeLods(receiver)`, `Scene::RetireRenderObject`).
+- [x] Two wrong turns on the way, both reverted: keeping prototypes alive for the scene's lifetime (no
+      effect: the unused copies were the cost, not the shared one), and retiring render leaves inside a
+      removed subtree behind the frame fence (47 of 53 objects retired, same time: it was the layer).
+
+### To investigate
+
+- [x] **Diagonal stripes on plant materials** (user screenshot): reproduced on the landscape ForestFloor with
+      `ENGINE_TAA=0` (`.local/foliage/stripe_notaa.png`). Cause: screen-space ambient occlusion. The AO pass
+      rotates its two slices per pixel with interleaved gradient noise, and `ScreenAmbientOcclusion`
+      (Object.hlsl) read it back with a bilinear 2x2 lookup; on wind-moved leaves the AO history is
+      rejected, so the noise's diagonal structure showed as dark bands in occluded areas (TAA only smeared
+      them into blotches). Fix: a depth-matched 3x3 tent lookup (9 taps instead of 4), the footprint that
+      noise is uniform over. `.local/foliage/ao_taa0_crop.png`: gone with TAA off too. Not the shadow map
+      (ground plants cast no shadows) and not the canopy taps. Cost of the 5 extra taps not isolated.
+- [x] Mossy rock scans read as large orange sandstone: tinted [0.42, 0.5, 0.4] and shrunk
+      (`.local/foliage/ao_taa1.png`). The scan still shows little actual moss.
+- [x] Reference video "[Chlorophyll Engine] 10M Trees - 15km² Test" (user: "can we achieve this?"): four frames
+      saved, press coverage read, the frames and the demo measured. Result: the "Landscape demo expectations"
+      section above. The look needs no technique this renderer lacks; the tree count and frame rate claimed for
+      that engine are developer-reported and were not compared.
+
+### Foliage and world realism / Foliage Phase 0: Baseline and look targets
+
+- [x] **Test scene** `tools/build_foliage_test_scene.py` → `Scenes/terrain/foliage_test.scene`: the grass
+      test cell plus a grove (oaks, a conifer edge, saplings, pack bushes; 84 placements in an instanced
+      `TerrainObjectLayer`) and saved viewpoint cameras **ForestFloor**, **Backlit** (looking up through
+      the crowns into the sun) and **Meadow**. Loads in seconds. Capture with
+      `.local/foliage/capture.sh <tag>` (DX12, 1920x1080, 300 warm-up + 120 frames; `topng.py` makes
+      half-size PNGs).
+- [x] Baseline (`88efe11`, RTX 4090, DX12, median frame / GPU leaves / bark / grass, ms):
+      ForestFloor 6.7 / 0.76 / 0.92 / 2.5, Backlit 7.5 / 0.53 / 0.69 / 1.7, Meadow 4.3 / 0.33 / 0.32 / 1.9.
+      Captures `.local/foliage/base_*.png`: crowns evenly lit flat green with no glow or dark interior
+      even straight into the sun; the floor under the grove is as bright as the meadow; the generated
+      meadow bushes read as large flat polygons up close.
+- [x] **Found: standalone prefab trees hit a very slow CPU path.** The same 84 trees as scene prefab
+      objects (`--standalone`) take 55-70 ms a frame, almost all in `shadow_submission_ms` (64 ms CPU
+      while `gpu_shadow_ms` is 0.5). Instanced layer placements: 0.3 ms. Matters for hand-placed hero
+      trees; see Phase 2.
+- [x] Vista baseline (`--viewpoint Vista`, settled, 600 + 300 frames): **42.8 ms median**, p95 50.3.
+      **CPU-bound, not GPU-bound:** GPU stages sum to ~13.4 ms (opaque 9.9: foliage depth 4.75, leaves
+      2.0, other 2.7; clouds 0.8, shadow 0.95, terrain 0.7, grass 0.6), while update 5.1 + prepare 10.8 +
+      record 25.4 (camera 18.1, shadow 6.3) run back to back and add up to the frame. `detail_scale`
+      sits at its 0.6 floor. So the 60 fps floor on the vista is mostly a CPU draw-recording problem;
+      Phase 2 needs a CPU item, not just GPU overdraw work.
+- [x] Reference shots saved whole in `.local/reference-images/` (second set of eight; the first six in
+      `first-set/`). No per-pose crops were made.
+
+### Foliage and world realism / Foliage Phase 1: Leaves lit as volumes (biggest visual win, ~free)
+
+- [x] **Crown normals + canopy occlusion** (cook step `tools/cook_foliage_lighting.py`): finds every
+      alpha-masked, non-impostor leaf mesh through the woodland prefabs (30 chains, 76 meshes: oaks,
+      conifers, pack bushes). Per chain, LOD0's leaf vertices are fitted with Gaussian lobes (k-means, one per
+      ~4 m of crown, up to 8) whose sum is the crown field; every LOD gets the same crown. Each vertex:
+      normal bent 75 % toward the field's outward normal (card normal flipped to the outer side first,
+      tangent re-orthogonalised, handedness kept); `uv1.x` = canopy occlusion
+      (`(1 - 0.8 * depth^0.85) * (0.4 + 0.6 * up)`, floor ~0.16); `uv1.y` = 4 + depth into the crown. The 4.0
+      offset marks the mesh as cooked (leaf uv1 was 0 or a copy of uv). Cooking overwrites normals, so it skips
+      cooked meshes; restore from git before re-cooking. `generate_conifers.py` writes
+      `foliageTranslucency` and calls `cook_prefabs` after writing its meshes.
+- [x] **Leaf lighting** (`Material::foliageTranslucency` 0-2, carried in `subsurfaceTransmission.y`; no
+      object buffer growth). `Object.hlsl`: `GetFoliageLeaf`, `FoliageWrapExtra`, `FoliageTransmission`,
+      used by `ObjectSurfacePS` (oaks, conifers) and `PSFoliageMain` (pack bushes; it now takes `uv1`).
+      With it on: cooked normals are not flipped on back faces; ambient/environment × canopy occlusion;
+      direct × `lerp(0.45, 1, occlusion)`; wrapped diffuse past the terminator; transmission = back term
+      0.35 + forward scatter `pow(dot(-v, l), 4)` × 0.9, filtered yellow-green, × `lerp(0.08, 1, shadow)` ×
+      occlusion², so the shell glows and the interior stays dark. Set on `Cluster_Mat 2` (1.0),
+      `Conifer_Needles` (0.8), `phong3 1` bushes (1.0). Oak leaf `ambientColor` halved (it is a flat extra
+      ambient on top of the SH sky light and lit crowns evenly from every side).
+- [x] Cooked leaf normals that face away from the viewer (crown far side) are bent just into the view
+      hemisphere (`n.v >= 0.1`) in `ObjectSurfacePS`, so GGX cannot divide by n.v ~ 0.
+- [x] Check (foliage_test, `.local/foliage/{base,p1e}_*.png`): Backlit crowns have dark interiors and lit,
+      glowing shells toward the sun (before: evenly lit flat green with white glints); looking up from
+      ForestFloor the canopy has depth instead of uniform bright green; Meadow crowns read as rounded.
+      Backlit looks the same on DX11 and Vulkan (`.local/foliage/p1_Backlit_{dx11,vulkan}.png`).
+      Leaf GPU change +0.02-0.08 ms (ForestFloor 0.72 → 0.77, Backlit 0.56 → 0.64, Meadow 0.31 → 0.33);
+      other stage differences are run-to-run noise. Tuning runs: p1a = translucency only (uncooked: whole
+      crown glows evenly), p1b = cooked, p1c = + gloss, p1e = + darker undersides / halved ambient.
+- [x] Vista (`.local/foliage/p1g_Vista`): far forest unchanged (impostors/clusters dominate, no visible
+      near/far mismatch at this pose); GPU leaves 2.01 → 1.59 ms, GPU stage sum 13.4 → ~11 ms, i.e. no
+      regression. Frame time can't be compared today: four runs with no relevant change measured
+      42.8 / 30.7 / 27.7 / 21.9 ms, all stages moving together (CPU load on the machine).
+      Final test-pose numbers (p1): ForestFloor 7.5 ms / leaves 0.76, Backlit 7.7 / 0.59, Meadow 4.6 / 0.33.
+
+### Foliage and world realism / Foliage Phase 1b: Blocky bushes and the landscape demo (2026-11-19, user report: "bushes look blocky")
+
+- [x] **Cause: grass LOD measured from height 0.** GrassField tile objects sat at y = 0 with ground heights
+      inside the placements, so LOD selection and fades measured distance from a point tens (test cell) to
+      hundreds (landscape) of metres above or below the plants: nearly every grass plant and bush drew LOD2
+      at the viewer's feet. Fixed with `TileState::originHeight` (ground at the tile centre is the tile object's y; both build
+      paths, procedural `AdvanceBuild` and authored `BeginBuild`, subtract it from placements and bounds;
+      world positions unchanged). Grass now draws the detail it was tuned for: grass GPU on foliage_test
+      2.0 → 3.3 ms (ForestFloor), 1.3 → 2.3 ms (Meadow); the detail budget balances it.
+      Found by swapping LOD meshes (LOD2 := LOD0 fixed the near bush), then moving the layer's LOD
+      distances to 30/35 m (no change), then a capture near the cell origin.
+- [x] **Bush leaves** (`generate_meadow_grass.py`): ovate leaf outlines per LOD (10/6/2 tris) instead of
+      diamonds, random leaf roll (no tiers), value jitter, gentler coarse LODs, no core at LOD0. Shared by
+      meadow_bush(_tall), meadow_shrub and bramble.
+- [x] **Landscape demo viewpoints** `tools/add_landscape_viewpoints.py` (also run by
+      `build_landscape_demo.py`): **ForestEdge**, **ForestFloor**, **Backlit**, found near the start by
+      replicating LandscapeDriver's `ForestMask`/`ForestBand` and reading ground from the height archive.
+      The demo's start pose flies 25 m up, where grass and bushes (26 m radius) are out of view.
+- [x] Checked on the landscape (`.local/foliage/land_*.png`, DX12): ForestEdge shows dense full-detail
+      meadow grass and leafy bushes; Backlit crowns glow toward the sun; ForestFloor is bare forest soil
+      with rocks and pale, over-exposed trunks (no undergrowth: Phase 4, and Phase 3 sky visibility).
+      Timings (median frame / CPU record / GPU sum / foliage depth, ms): ForestEdge 27.1 / 16.2 / 14.7 / 5.1,
+      ForestFloor 24.9 / 14.8 / 13.3 / 5.1, Backlit 26.3 / 14.5 / 14.2 / 4.2. **37-40 fps at ground level**:
+      both CPU recording and GPU (alpha-tested foliage depth) are near 15 ms, so Phase 2 needs both.
+- [x] **Dark diagonal stripes on trees** (user report): the per-placement LOD dissolve and the impostor view
+      hand-over threshold each pixel with `ScreenDitherThreshold`, which was interleaved gradient noise. Its
+      diagonal line structure showed through as dark bottom-left-to-top-right stripes on crowns sitting in a
+      dissolve (the forest behind between them; ~1/3 of impostor angles are a hand-over). Now an 8x8 Bayer
+      matrix (still complementary per pixel; no line structure). `.local/foliage/dither_zoom.png` vs
+      `bayer_zoom.png`.
+- [x] Shadow acne guards found on the way: cooked leaves offset their shadow lookup along the real card
+      normal (`FoliageShadowNormal`, screen-space facet turned toward the light) instead of the crown-bent
+      shading normal; tree-wind vertices pass their rest position to the pixel shader (only the rasterized
+      position moves), so shading matches the static shadow casters.
+- [x] **TAA on by default with an animated dissolve dither**: while TAA jitters a view, SceneRendering stamps
+      the jitter index (1..8) into `ObjectGPUData::skinParams.z` (was unused) and `ScreenDitherThreshold`
+      rotates each pixel's Bayer threshold by the golden ratio per frame, so the history resolves LOD
+      cross-fades and impostor hand-overs to a smooth blend (`.local/foliage/taa2_zoom.png`; shifting the
+      matrix instead left faint diagonal hatching). `AntiAliasingSettings::taa` default false → true and the
+      editor's Balanced preset; Performance stays off, Quality stays MSAA 4x (static Bayer there, as on
+      Vulkan, which has no TAA yet). Projects with saved Effects settings keep theirs.
+
+### Foliage and world realism / Foliage Phase 1c: Tree variety (2026-11-19, user report: "a lot of the same trees")
+
+- [x] Two species per size band per cell, mixed tree by tree (all eight can appear in one cell); scale
+      0.75-1.3x; a lean via the placement normal (oaks up to ~7 degrees, squared so most stand straight;
+      conifers 2.5). Derived from the existing per-tree draws, so positions are unchanged; far blocks copy the
+      normal, so near and far trees agree.
+- [x] Cost (single runs): draws +6-9 % (vista 298 → 316), triangles +1-3 %, no measurable frame-time change
+      (vista 21.9 → 21.7 ms). Captures `.local/foliage/p3_*.png`.
+- [x] Far clusters: 4 → 7 stands (`generate_forest_clusters.py`: Oak_03/Oak_04 from the oak variants the
+      near forest leaves out, Conifer_03), all re-baked from the cooked meshes (crown normals in the normal
+      atlases); `TerrainManager.farClusters` lists them (scene + builder). Bake ~8 min.
+
+### Foliage and world realism / Foliage Phase 1d: Less cartoon (2026-11-19, user report: "style is very cartoonish")
+
+- [x] **Plant palette** near measured albedo: grass blades were ~2x too bright and far too saturated
+      (`BLADE_MID` 0.13/0.28/0.055 → 0.065/0.125/0.032, tips, sward, ferns, shrub/bramble/herb sun colours, accent
+      stems and leaves likewise); dry blade share 10 % → 22 %. All grass/accents meshes regenerated.
+- [x] `GrassLeafiness` is relative to brightness now (the absolute green difference would have halved for
+      the darker palette and changed pelt shading).
+- [x] Blade mottling in `PSGrassMain`: two octaves of world-space value noise (7 cm, 1.8 cm), ±14 % value with
+      a slight hue shift, faded out by 25 m.
+- [x] Terrain meadow to match: `grass.material` base colour 0.2/0.26/0.11 → 0.11/0.145/0.065, LandscapeDriver
+      layer preview colour likewise.
+- [x] Landscape tone mapping ACES → **AgX** (scene + builder).
+- [x] foliage_test Meadow: ground between blades read paler than the grass, and tint strength 0.5 → 0.8 changed
+      nothing. Cause found 2026-11-20: the forest-floor field cleared the meadow's ground cover every refresh, so
+      there was no tint at all (look pass 1 under "Landscape demo expectations").
+
+### Foliage and world realism / Foliage Phase 7: World detail (2026-11-19, user request: paths, streams, small things, cliffs/overhangs)
+
+- [x] **Trails** (`LandscapeDriver.cpp` `TrailMask`): tracks follow the 0.5 contour of a broad noise
+      (distance = value / gradient), so they wind across the whole map and join in loops; ~6 m wide (terrain
+      vertices are 4 m apart). Painted as gravel on gentle land inside the forest band; trees, undergrowth
+      and props stay off; grass and the forest floor follow the paint. `PaintRevision` bumped (terrain
+      caches rebuild). `.local/foliage/w_Trail.png`.
+- [x] **Cliff bands**: `GenerateCliffs` grows each steep-rock seed along the contour (up to 8 blocks a cell,
+      was 2 lone blocks), every block facing downhill. New shapes from `generate_boulders.py`
+      (`Rock.overhang` shear): `Cliff_overhang_01` (top leans ~3 m over its foot) and `Outcrop_ledge_01`.
+- [x] **Scree**: rocks and boulders gather where a steep slope lies 9-18 m uphill.
+- [x] **Forest debris**: `forest_branch` (fallen branch with twigs) and `ground_ivy` (creeping ivy patch) in
+      the forest-floor drifts.
+- [x] Steep rock rendered near black: the canopy-shade estimate's shadow taps landed inside the hillside.
+      Canopy shade now fades out on terrain steeper than ~35 degrees.
+- [x] Crags: `Crag_face_01/02` (28-38 m wide), `Crag_spire_01` (30 m tall), LODs 20480/5120/320 tris; up to 40
+      pieces a cell (was 8), strides sized per piece so neighbours overlap, leaned a third with the slope.
+      `.local/foliage/w_Cliffs3.png`: a rocky outcrop instead of scattered boulders.
+- [x] **Scanned rock faces** (downloads approved): `tools/fetch_polyhaven_props.py` fetches CC0 Poly Haven
+      models into `.local/polyhaven` (FBX + 2k diffuse/normal/roughness JPGs), cooks LOD chains with PropCook
+      and writes materials and prefabs under `Models|Prefabs/Woodland/Scans` (62 MB): `RockFace_01/02`,
+      `Mountainside_01`, `Cliff_Scan_01/02` (8-20k / 2.5-6k / 0.5-1.7k tris). `GenerateCliffs` now places
+      these as the main pieces (scaled 2.2-4.5x to 20-45 m), generated spire/overhang/ledge as filler, only
+      where the slope keeps rising behind them. Materials are two-sided with a cool tint (the scans are warm
+      sandstone, the terrain rock grey). `.local/foliage/w_Cliffs4.png`: reads as fractured, bedded rock.
+      Pitfalls: PropCook is `EXCLUDE_FROM_ALL` (a stale binary wrote one prefab per LOD; rebuild it by
+      name); the scans are open shells, so a camera behind one sees its back.
+- [x] **Scanned forest props** (Poly Haven, CC0, via `fetch_polyhaven_props.py`; sets cook one prop per
+      mesh node, leaf scans merge their Alpha map into the colour): `Stump_01/02`, `MossRock_01-06`,
+      `DryBranch_01-03`, `FernScan_01-04` (masked, `foliageTranslucency`). Placed by `GenerateProps`: stumps
+      with the logs, dry branches on the forest floor, mossy rocks instead of plain rocks inside forest,
+      ferns in drifts in the undergrowth layer; one stump, one branch, two rocks and two ferns per cell.
+      `Models/Woodland/Scans` is 107 MB. `.local/foliage/s_ForestFloor.png`, `s_Trail.png`.
+
+### Foliage and world realism / Foliage Phase 2: Pay for it (performance)
+
+- [x] **Indexed woodland meshes** (`tools/index_woodland_meshes.py`): the oak/bush pack meshes were plain
+      triangle lists; only 35 % of their vertices were unique (148 meshes, 1.06M → 377k vertices). Rewritten
+      indexed (byte-identical vertices merged, first-use order). foliage_test GPU: bark 1.39 → 0.79 ms,
+      foliage depth 1.40 → 1.12 ms (ForestFloor); identical image.
+- [x] `PrefabLod::IsPrefab` built a `std::filesystem::path` (with a wide-string conversion) per call, once per
+      placement of each object layer it was checked on; now an allocation-free suffix test (same `#lod`
+      rules). `PreparePrefabInstances` only rescans placements for prefabs when they change.
+      `prepare_prefabs_ms` 3.0 → 2.2.
+- [x] Occlusion signature hashed ~90 bytes per visible item one byte at a time (FNV); now 8 bytes per step.
+- [x] Camera draw records (`PreparedDraw`, ~2 KB) are built in place in the reserved vector instead of
+      zero-filling a local and copying it (`_NLG_Return2` under `push_back` was ~5 % of the thread).
+- [x] CPU, round 2 (from a `--cpu-sample` profile at ForestEdge): prefab LOD profiles refreshed every
+      100 ms per forest/props layer (~10 % of the scene thread in string work) → every 1 s, matching the
+      file-stamp checks underneath; `TransformHierarchy` membership by a process-unique stamp on each
+      Transform instead of an `unordered_map` lookup per render candidate per frame (~3 %). Machine-wide
+      CPU swings (±30 % between identical runs today) hide these in single-run frame times; confirm with the
+      profiler's shares or interleaved A/B.
+- [x] CPU, round 3 (profiles `.local/foliage/prof3` → `prof6`, landscape ForestFloor, profiler attached:
+      frame 34.0 → 27.1 ms, prepare 9.2 → 6.4, camera record 15.5 → 12.0; without the profiler 25.5 ms):
+  - Prefab preparation ran to its full 3 ms deadline every frame even with nothing to build. The
+    deadline is now 0.75 ms once every object layer reports its prefabs complete, 3 ms while any is
+    still building (`m_prefabPreparationSettled`). `prepare_prefabs_ms` 3.0 → 0.8.
+  - The detail-budget cost model copied the placements of every visible instanced tile on the scene
+    thread at each launch (every 100 ms; `memmove` ~5 % of the thread, and a spike on those frames).
+    Placements are now snapshotted once per tile revision and shared with the job
+    (`DetailCostCollector::snapshots`, dropped ~3 s after a tile leaves view).
+  - A view's draw records (~2 KB each, a few thousand per view) lived in a vector allocated and freed
+    per `Render` call: several MB of fresh pages per view per frame. Storage is now leased from a
+    per-thread pool (`PreparedDrawLease`); the camera path also fills the object record in place.
+    Camera material loop 4.8 → 3.3 ms.
+  - `TransformHierarchy::Prepare` (called twice a frame over 10.4k transforms) settles unchanged frames
+    in one pass instead of building the parent list and scanning again. Small: 6.2 → ~5 % of the
+    thread; the cost is touching every Transform, which needs dirty tracking to remove.
+  - Cached frame items are copy-constructed in place; texture footprints refresh every 8 frames (was 4):
+    footprint stage 2.8 → 2.0 ms.
+  - The "is this static item unchanged" test runs on the workers for members of the prepared transform
+    hierarchy (merged into the material validation pass; `TransformHierarchy::IsPreparedMember`);
+    the serial loop only copies the item. `prepare_items_ms` 4.1 → 3.0-3.7.
+  - The per-frame render packet is recycled (`NativePacketRecycler`): its ~3 MB item list was a fresh
+    allocation every frame. `prepare_items_ms` → 2.6, `scene_prepare_ms` 6.2 → 4.7.
+  - Checked on landscape ForestFloor, foliage_test ForestFloor and the animation showcase (animation
+    still advances), DX12 only. One of fourteen landscape runs ended during loading with zero frames
+    and no error text (the window-closed path); it did not recur in the seven runs after it.
+- [x] **Moving camera, first fix.** Still-camera numbers hid the real problem: turning in place had a
+      63 ms p95 and walking spiked to 150-230 ms. Cause: `Scene::MoveObject` ended with a whole-scene
+      `NotifyStructureChanged()`, so every far terrain tile, far-object block and streamed cell that was
+      parented under the terrain manager reconciled the component registry and cleared the static
+      render item cache (all 9,124 items rebuilt, ~40 ms a frame for 3-4 frames, about once a second
+      while turning). Appending a child now notifies only that object, as `SetParentLocal` does.
+      Landscape, 400 frames each (median / p95 / frames over 50 ms): turning 24.3 / 63 / 41 →
+      24.7 / 38 / 3; walking 35.0 / 84 / 49 → 31.3 / 51 / 20; walking and turning 39.5 / 90 / 91 →
+      35.2 / 59 / 34. World intact after the walk (`.local/foliage/mv2_walkturn.png`).
+- [x] **GPU occlusion pyramid from real depth** (`Shaders/DepthPyramid/DepthPyramid.hlsl`,
+      `SceneRendererLighting::BuildDepthPyramid` / `DepthPyramidForCulling`). After the AO pass copies the
+      main view's depth, one compute dispatch reduces it to the CPU occlusion buffer's GPU layout
+      (`OcclusionBuffer::SerializeForGpu`: 256-wide, 4 levels, farthest view depth per cell, 3e38 for sky, the
+      frame's view-projection in the header). Next frame, InstanceCull's existing per-placement
+      `IsBoxOccluded` reads it instead of the CPU pyramid (terrain + mesh occluders only) when the camera is
+      the same, the viewport unchanged, it is one frame old, and the camera moved < 1.5 m and turned < ~8
+      degrees; otherwise the CPU pyramid as before. No new binding slots; Vulkan SPIR-V prebuilt in CMake.
+      `ENGINE_GPU_OCCLUSION=0` disables it. Needs the AO depth copy (AO on). Landscape ForestEdge A/B (DX12):
+      GPU 15.75 → **11.45 ms**, foliage depth 5.13 → 3.38, leaves 2.26 → 1.18, GPU-selected LOD0 placements
+      59,623 → 360, LOD2 9,362 → 2,130; image diff at the noise floor (0.3 % px > 40, wind). Runs on DX11
+      and Vulkan. Single-phase (last frame's depth): a newly disoccluded object can lag a frame; a second
+      phase against this frame's depth would close that.
+
+### Foliage and world realism / Foliage Phase 3: Shadows and sky visibility (dappled light)
+
+- [x] **Canopy sky visibility** without a new texture (a global texture slot is still missing on the three
+      backends): `CanopySkyVisibility` (Object.hlsl) averages five sun-shadow taps on a 3 m disk, 2.5 m above
+      the surface (`FogShaftSunVisibility`, one bilinear tap each), and scales ambient/environment light to
+      35-100 % with it; fades out over the last 30 % of the shadow range. Applied to terrain (both paths),
+      objects (not cooked leaves, which have crown occlusion), pack bushes and grass. Cost on foliage_test
+      ForestFloor ~0.5 ms GPU (grass 1.31 → 1.61). The estimate sits a little downwind of the crowns.
+- [x] **Exposure floor**: auto exposure brightened forest interiors back to the meadow's level, undoing the
+      darkening. `autoExposure minEv` -8 → -4.8 on the landscape (builder sets it; test scenes copy it): sunny
+      meadows meter above it (Meadow pose unchanged), forest interiors stay ~1 stop darker
+      (`.local/foliage/ev4.5_ForestFloor.png` is the -4.5 look). A soft partial adaptation (only part of the
+      way below a reference EV) would be smoother than a hard floor; not needed yet.
+- [x] **Cloud shadows** as a scrolling sun cookie: `Light::cookieScrollX/Y` (m/s) fill the cookie axes'
+      spare `.w` lanes; `DirectionalCookie` / `SunCookie` (Object.hlsl) apply the directional cookie in every
+      sun path (objects, fast near terrain, distant terrain per pixel and per vertex, pack bushes, grass).
+      `generate_sky_sprites.py` `cloud_shadow` writes `Textures/Atmosphere/Cloud_Shadow.png` (tiling, linear:
+      1 clear, 0.3 under cloud, ~38 % cover). Landscape sun: 2.4 km tiles drifting 6/2 m/s. Statistically
+      like the volumetric clouds, not positionally matched to them. The test scenes strip the cookie (fixed
+      poses for A/B). `.local/foliage/p7_Vista.png`.
+      **2026-11-20: from the capture tool the cookie never loaded** (unresolved asset path), and the null
+      texture switched the sun off; fixed, and 0.3 → 0.42 under cloud (look pass 1 under "Landscape demo
+      expectations"). `p7_Vista.png` therefore did not show cloud shadows.
+
+### Foliage and world realism / Foliage Phase 4: Forest floor and undergrowth (RDR2 / GTA VI shots)
+
+- [x] Generators (`generate_meadow_grass.py`, forest floor section): `forest_litter` (fallen-leaf patch with
+      twigs, static), `forest_herb` (broadleaf rosette ~0.45 m), `forest_seedling` (oak seedling), `forest_fern`
+      (~1 m, darker than bracken; `meadow_fern` is now `fern()` with defaults, byte-identical output),
+      `dry_grass_clump`. LOD0 triangles: litter 468, herb 126, seedling 104, fern 1120, dry grass 1080.
+- [x] **Forest floor layer**: `MeadowGrass::ApplyForestFloor` for a "Procedural forest floor" object layer
+      (litter 2.2/m², herbs 1/m², seedling/dry-grass/plantain drifts, forest fern + herb thickets over 45 %,
+      sparse bushes; no ground tint). `LandscapeDriver` points it at the ForestSoil paint; the layer is in the
+      demo's `objectLayerNames` (scene + builder). foliage_test paints forest soil under the grove (soft 8 m
+      edge) and carries the same field. `.local/foliage/p4b_ForestFloor.png`: ferns, herbs and litter where
+      the floor was bare soil.
+- [x] Canopy-driven mix, by paint: the meadow field grows on grass paint and the forest floor field on the
+      forest-soil paint the trees stand on, so edges blend with the paint weights.
+- [x] Forest-floor terrain layer: the landscape already paints `forest_soil` under forests (LandscapeDriver
+      `PaintSample`); the litter field covers it.
+- [x] CC0 scanned plants for hero undergrowth: Poly Haven ferns, stumps, mossy rocks and dry branches are in
+      (Foliage Phase 7, scanned forest props). Scanned shrubs are the open part, listed there.
+
+### Foliage and world realism / Foliage Phase 5: Trees
+
+- [x] **Tree wind** without new vertex data (`GrassWind.hlsli` `ApplyTreeWind`, `Mesh::foliageWindTree`,
+      `grassAnimation.y` = 2): a cantilever trunk bend (strength x 0.01 x h², mean lean + broad gust + ~0.26 Hz
+      per-tree sway), ~0.7 Hz branch sway growing with distance from the trunk axis, ~4 Hz flutter on
+      cooked leaves weighted by the canopy shell (uv1). Same wind field as the grass, coarsened so crowns
+      move as one. Fades out 60-100 m; shadow casters static (as grass). On for all woodland prefabs (oaks,
+      conifers 0.1; pack bushes 0.15) and in `generate_conifers.py` / `woodland_assets.write_prefab`
+      (`tree_wind`). `ENGINE_TREE_WIND=0` disables it. foliage_test: crowns move between frames, ~+0.5 ms
+      GPU. Note: wind meshes are left out of the CPU mesh occluders (opaque coarsest bands only; trees
+      hardly qualified).
+
+### Foliage and world realism / Foliage Phase 6: Air and camera
+
+- [x] **AgX** tone mapping (`ToneMappingOperator::AgX` = scene 3 → PostProcess.hlsl operator 6; polynomial
+      fit of Troy Sobotka's AgX; editor Output Tone Mapping combo). Lifted shadows, softer highlights and less
+      saturated sky/greens than ACES (`.local/foliage/agx_*.png` vs `aces_*.png`). ACES stays the default;
+      a per-scene choice.
+
+### Grass / Grass Phase 1: Per-plant distance fade (pop-in)
+
+- [x] Vertex shader (Object.hlsl `VSMain`, after the world position): per placement,
+      `s = 1 - smoothstep(start, end, distance(root, camera) + advance)`. `advance` is a per-placement hash
+      (`GrassWindHash` of the root, 6 cm cells) × 0.35 × band. It only brings the fade forward, so every
+      plant is gone by `end` and the edge never forms a ring.
+- [x] The plant shrinks toward its root along its own up axis (correct on slopes): height × `s`, width ×
+      `lerp(0.5, 1, s)`, collapsed to the root at `s = 0`. Wind bend height is scaled by `s` too.
+- [x] New `ObjectGPUData::placementFade` (x start, y end), filled from new transient
+      `Mesh::placementFadeStart/End` for both color and shadow draws, so shadows/depth match.
+      Object buffer stride 1792 → 1808 (static_asserts and both shader structs updated).
+- [x] GrassField: new `distanceFadeFraction` (default 0.3 of the radius). When > 0 the tile `visibility`
+      range dither is off (the `appearance` fade for newly built tiles stays); 0 falls back to the old
+      `distanceFadeWidth` tile fade. Distances are converted to world units with the terrain's scale.
+- [x] Check: grass_test.scene capture shows no tile squares or ring at the edge.
+
+### Grass / Grass Phase 2: Terrain matches the grass (coverage + distance)
+
+- [x] `GrassLeafiness` moved out of the grass-only `#ifdef`; new `GrassPatchVariation` (the broad 11 m
+      dry/lush pattern only) is shared with the terrain. The per-clump jitter stays grass-only because its
+      25 cm cells would show as a checkerboard on the ground. Kept in Object.hlsl rather than a new include:
+      GrassWind.hlsli is already included there unconditionally.
+- [x] New transient `Terrain::GroundCover` (colour, strength, root shade, fade start/end, paint layer mask)
+      → `ObjectGPUData::groundCoverColor/groundCoverRange` in `PrepareTerrainMaterial`.
+      Object buffer stride 1808 → 1840.
+- [x] Terrain shader (after layer blending, before the macro-colour fade), weighted by the cover layers'
+      share of the paint weight:
+  - inside the grass range: root colour (`color × rootShade`) so gaps read as undergrowth;
+  - across and past the grass fade: the mean blade colour;
+  - both with `GrassPatchVariation`; the layer texture survives as brightness detail (60% near, 30% far).
+- [x] GrassField publishes the cover (`PublishGroundCover`, from `Start`, `Refresh` and
+      `DescribeSpatialRegion` so cells outside the spatial region are tinted too). Colour = mean vertex
+      colour of the short + tall grass meshes (LOD0), measured once per mesh pair from the shared CPU
+      source cache. Only procedural fields with a `proceduralLayerMask` publish. New properties
+      `groundTintStrength` (0.75 at first, 0.5 since the tint tuning) and `groundRootShade` (0.55), category
+      "Grass | Ground".
+- [x] Tint tuned on the landscape: the first pass made the meadow a flat saturated lime; now cover colour
+      × 0.8 with 25 % desaturation, strength 0.5 and more texture detail kept (80 % near / 50 % far).
+
+### Grass / Grass Phase 3: Density falloff with width compensation (coverage at mid range)
+
+- [x] Shader-side thinning (Object.hlsl VSMain, `ObjectGPUData::placementThin`, `Mesh::placementThin*`):
+      from a fifth of the radius to the fade start the share of plants kept falls to
+      `GrassField::distanceThinning` (default 0.45; 1 = off). Each plant has a fixed random rank and
+      shrinks away as the share passes it (no popping); survivors widen sideways by `1 / sqrt(share)`.
+      Object buffer stride 1840 → 1856. Grass GPU time on grass_test.scene (DX12, raised pose):
+      3.52 → 1.97 ms with the same plant count (collapsed plants skip rasterisation).
+- [x] Thinning also in InstanceCull.hlsl: the thin range rides in the tile record's spare
+      `reserved` uvec4 (`InstanceTileRecord`, filled from `placementThin` in SceneInstanceBatching);
+      compute drops placements the vertex shader would shrink to nothing (same hash and share formula),
+      so they cost no vertex work either.
+
+### Grass / Grass Phase 4: Lighting as one surface
+
+- [x] Pelt shading in `PSGrassMain` (Object.hlsl): normals lean toward the sky so a field lights as one soft
+      surface, wrapped diffuse, root occlusion along the blade (uv.y), transmission when the sun is behind
+      the blades, and a Kajiya-Kay sheen along each blade.
+
+### Grass / Grass Phase 6: Grass texture past the radius (flat distance)
+
+- [x] **6a:** terrain shader (ground-cover block, weighted by `beyond`): two octaves of fine
+      brightness grain (1.7 and 6.3 /m, each faded as it nears the pixel footprint so it cannot
+      flicker) and a grazing-angle sheen, so open ground past the blades reads as short grass.
+- [x] **6b → far grass ring** (geometry instead of cards; no alpha textures needed):
+      `Procedural far grass` layer per terrain cell (`MeadowGrass::ApplyFar`, LandscapeDriver,
+      landscape_demo layer list, test scene). A second GrassField with `innerRadius`: 16 m tiles of
+      `far_grass_tuft` (12 wide two-segment blades, 36 tris, same mesh for every LOD) at 1.2/m² out to
+      90 m. Tiles wholly inside `innerRadius` are skipped; it fades in by running the thinning backwards
+      (`placementThin` start > end, minimum 0, `w = 1` keeps width). Its fade-in must finish before the
+      detailed grass starts fading (inner = 0.5 R, width 0.2 R), or a band of bare ground shows between
+      the two. It does not publish the ground tint. Placement caps scale with tile area.
+      First test (fades not yet overlapped): far-band terrain 86 % → 59 %, eye-level overall 22 % →
+      17 %; grass GPU 2.77 → 3.27 ms, 5.9k → 13k plants, 100 → 106 tiles.
+
+### Grass / Grass Phase 6½: Antialiasing (grass edges stair-step and shimmer)
+
+- [x] **FXAA** inside the compose pass (`PostProcess.hlsl` `ApplyFxaa`): console-style edge blend plus
+      a sub-pixel pass, on HDR before bloom/exposure/tone mapping, with edges found on exposed,
+      compressed luma. No new targets or passes, so DX11, DX12 and Vulkan all get it; settings travel in
+      compose `params0.w` (negative = FXAA), which only video accumulation used before.
+- [x] **Grass minimum width** (`Object.hlsl` VSMain, grass shader only): blades narrower than N pixels
+      widen across their UV u axis; centre-line vertices (midribs, tips) stay. `placementFade.zw` carry
+      N and the world size of a pixel per unit depth (`2 / (proj[1][1] · viewport height)`).
+- [x] **Project settings** `ProjectSettings::renderingEffects` (`Model/RenderingEffectsSettings.h`),
+      saved as `<RenderingEffects .../>` in the .proj, edited in Preferences > **Effects** (presets
+      Performance / Balanced / Quality; dependent controls grey out). Applied through the process-wide
+      `Rendering::RenderingEffects` policy (editor load, Preferences changes, game start). Also project
+      switches/scales over scene look: bloom (+scale), auto exposure, exposure bias (EV), colour grading
+      (+strength toward neutral), ambient occlusion.
+- [x] Checked on grass_test.scene (DX11): stair steps and single-pixel sparkles gone; distant blades read
+      as solid strokes. Image slightly softer at the default 0.75 subpixel.
+
+### Grass / Coverage test (render mode)
+
+- [x] `SceneRenderMode::Coverage` (6): terrain red, everything drawn on it green (reuses the Performance
+      heat colours via `morphParams.z`). Editor: Scene view render-mode list > Coverage. Captures:
+      `GameBackendCapture --render-mode 6`. Measure with a red/green pixel count (terrain share of the
+      ground pixels, split into near/mid/far screen bands).
+
+### Grass / Grass Phase 8: Larger, thicker foliage
+
+- [x] `tools/generate_meadow_grass.py`: `meadow_bush` (~1.2 m rounded broadleaf), `meadow_bush_tall`
+      (~1.7 m upright), `tall_grass_clump` (~1.1 m dense grass with seed stalks). Bushes have a solid
+      **crown core** (closed lumpy ellipsoid per lobe, dark foliage colour) under the leaf cards, so they
+      block the view at every LOD; `meadow_shrub` gets the same core.
+- [x] `GrassField` **Bushes** category: `bushMeshes`, `bushesPerSquareMeter`, `bushClusterSize`,
+      `bushCoverage`; clusters from the generalised thicket noise plus a few singles; grass thins under
+      clusters. Meadow preset / LandscapeDriver / test scene: bushes 0.06/m², clusters 16 m, coverage
+      0.25; `tall_grass_clump` added to the shrub-thicket species.
+- [x] Thicker base cover: `meadow_tussock` sward 84 → 150 blades, 2.0 → 2.6 cm wide, 0.22 → 0.26 m;
+      LandscapeDriver/test scene: tussocks 2.6 → 3.5/m², bushes 0.12/m², bush coverage 0.35.
+- [x] Bushes rebuilt as **grown plants** (`grow_bush`): 6–7 main stems → branches → twigs (four
+      levels, tapered round tubes, curving outward from the trunk axis and up, each growing a share of
+      the way to an ellipsoid envelope so twigs reach it), clusters of 8 leaves (6.5–8 cm on short
+      stalks) at twig tips and along twigs, and a small dark core fitted to the foliage (35 % of its
+      spread at LOD0, 80 % at LOD2) as the shadowed interior. One layout for every LOD; coarse LODs
+      drop fine wood and keep fewer, larger leaves. meadow_bush 8780/4292/1898 tris,
+      meadow_bush_tall 7544/3730/1794. (A first version centred the core on the envelope and aimed
+      child branches outward from the centre, so low branches pointed down: the crown stayed empty
+      and the core read as a smooth egg.)
+- [x] Shrub/bush leaves (`generate_meadow_grass.py`): `leaf_card` is now an ovate leaf per detail
+      level (10 / 6 / 2 triangles; raised midrib, back-curl) instead of a 4-vertex diamond; `grow_bush`
+      leaves get a random roll (they lay in parallel tiers), ±25 % value jitter and occasional yellowing;
+      coarse LODs keep more, smaller leaves (`LEAF_KEEP` 1/.6/.35, `LEAF_GROW` 1/1.25/1.6, was 1/.46/.2 and
+      1/1.45/2.15: 26 cm diamonds at LOD2); no crown core at LOD0 (it read as an egg), smaller at LOD1/2.
+      meadow_bush 8780/4292/1898 → 32844/11954/2718 tris, meadow_bush_tall 7544/3730/1794 → 28152/10562/2438.
+
+### Grass / Grass Phase 7: Mesh/coverage tuning (optional)
+
+- [x] 2026-11-19: blade meshes reworked (`tools/generate_meadow_grass.py`): leaf outline (narrow sheath,
+      widest ~20% up, parallel margins, long tapered tip) instead of a root-to-tip triangle; V-folded
+      cross-section with a sunken, paler midrib (3 columns at LOD0/1); 5/4/3 segments (was 4/3/2);
+      ±12% brightness per blade; seed stalks are 3-sided tubes at LOD0/1. Triangles: meadow_tussock
+      798/340/88 → 1824/709/126, field_tussock 580/290/101 → 1390/671/149.
+
+### Landscape look (large-scale vista with layered haze) / 0. Baseline + test shot
+
+- [x] Fixed-pose capture: `GameBackendCapture --camera-position x,y,z --camera-target x,y,z` (recorded in the session header)
+- [x] GPU `Sky` timing stage (`gpu_sky_ms` in captures and the editor frame profiler)
+- [x] `ENGINE_ATMOSPHERE_FOG=0|1` env override for fog A/B captures
+- [x] Rough vista pose (peak over a valley, see command below)
+- [x] Vista pose is a scene viewpoint: inactive Camera object "Vista" in landscape_demo.scene (emitted by
+  `tools/build_landscape_demo.py`, `VISTA_EYE`/`VISTA_TARGET`). Scene View toolbar "Viewpoints" menu jumps the
+  editor camera to any scene camera and sets the selected camera from the current view
+  (`Camera::GetWorldPose/SetWorldPose`); captures take `--viewpoint Vista` (recorded as `viewpoint` in the header)
+- [x] Vertical dashed line in the sky: the equirect panorama's u wrap (atan2 jump at world -X) gave implicit
+  derivatives a full-texture step, so 2x2 quads straddling it sampled the smallest mip. Skybox.hlsl now uses
+  `SampleGrad` with wrap-aware u derivatives (checked on DX12, DX11, Vulkan)
+- [x] Black sky after the 2026-11-17 architecture merge: the D3D `SkyboxCB` kept `float4x4 invVP` ahead of the new
+  ray-basis fields while C++ `SkyboxConstants` dropped it, so every sky/fog/sun constant read 64 bytes off. Removed
+- [x] DX11 vista differed from DX12/Vulkan (weaker sun glow, sparser far forest): not a rendering difference.
+  DX11 captured the composed back buffer, DX12/Vulkan the HDR scene color before post-processing with a plain
+  2.2 gamma, so their captures had no bloom, tone mapping or grading. DX12 now copies the back buffer after
+  compose, Vulkan the swap-chain image after composition (swap chain gets `TRANSFER_SRC` usage; BGRA swizzled).
+  Second cause: benchmark runs passed the host's real input to the game, so a capture window that ended up in
+  the foreground let the user's mouse turn the camera during warmup (runs of one viewpoint diverged; Vulkan was
+  off by ~40 degrees once). Benchmarks now get an unfocused, key-less snapshot; only synthetic input drives them.
+  Vista now: DX12 == DX11 pixel for pixel, Vulkan differs on 0.22% of pixels, all three at the exact viewpoint.
+  Captures taken before 2026-11-18 on DX12/Vulkan show pre-post-processing images
+- [x] Vista pose re-picked for the 24 km map: eye (2304, 463, -3072) on a 410 m foothill at the valley's south-east
+  rim, target (283, 254, -865): across the valley and a lake at the backlit north-west ranges, dark canopy in the
+  foreground. Chosen from candidates found by searching the far grid for rim peaks with a deep drop toward the
+  sun's azimuth and high ranges behind (A2 at (2688, 972, -4352) is a wider, flatter alternative). Set in
+  `VISTA_EYE`/`VISTA_TARGET` and the scene's "Vista" camera. Numbers above this line used the old pose
+- [x] Depth precision: forward Z with D32F and near 0.06 gave ~25 m depth steps at 5 km and ~100 m at 10 km. Every
+  depth buffer (camera, portal views, shadow atlases) is now reverse-Z; `Graphics/DepthConvention.h` holds the
+  convention (clear 0, `CompareNearer` = GREATER as the builder default, `CompareNearerOrEqual`). Projections are
+  built with near/far swapped in double (`Camera::GetRenderProjectionMatrix`, `BuildStableShadowCascade`);
+  `Camera::GetProjectionMatrix` stays forward-Z for editor picking/overlay math. Shader sites: shadow compares
+  (`receiver + bias >= stored`), skybox/grid far-plane triangles and grid plane depth, fluid front depth, parallax
+  `SV_DepthLessEqual`, portal aperture near clamp (`z = min(z, w)`) and depth-reset far plane (`z = 0`),
+  sky ray unprojection, `ProjectedTextureFootprint` near test. The software occlusion buffer and GPU cull work in
+  clip w, and frustum tests are symmetric in z, so neither changed. Verified: DX12 vista vs HEAD 0.10% of pixels
+  differ (noise floor 0.01%, all in distant canopy), Vulkan matches, DX11 unchanged apart from its known sky
+  difference; portal_traversal_demo, room_larger_inside (DX12/DX11/Vulkan), particle_fluid_river and
+  surface_detail_materials match HEAD up to animation/streaming timing; `.local/tests` pass. Vista frame time
+  unchanged (A/B on the same machine: HEAD 26.3/27.0 ms, reverse-Z 25.9/26.5 ms). Not checked: editor grid
+  (editor-only pass, math changed in `Grid.hlsl`)
+- [x] Vista "regressed" from ~10 ms (2026-11-16) to ~26.5 ms at `ec249b3d`. Two causes, neither a code regression:
+  - Unfocused captures were throttled. Since background launches (`ec249b3d`), the capture window never has focus
+    and Windows 11 power throttling (EcoQoS) ran every CPU stage 2-3x slower on this hybrid CPU. The old 5.2 km
+    world at the old pose, current code: 25.2 ms throttled, 10.4 ms with `Engine::Core::DisablePowerThrottling()`
+    (`Startup/LaunchActivation`), i.e. the 11-16 number. GameBackendCapture always opts out; Game/Editor opt out
+    when launched in the background. Captures from before 11-17 18:00 ran focused; later ones before this fix were
+    throttled, so neither set compares with new numbers
+  - The 24 km world is heavier at the same pose: 16k far-object cells (radius 64 x 128 m) instead of ~1.6k
+  - [x] `TerrainManager::UpdateFarObjects` rescanned the whole far window each frame (map lookups per cell, a sort
+    of every uncomputed cell) and rebuilt a block after every 8-cell batch: 4.4 ms/frame plus constant prefab
+    re-preparation. Now incremental: the nearest-block-first queue is rebuilt only when the center cell changes,
+    only loaded/latched cells are checked for near coverage, and a block rebuilds once its data is complete
+    (coverage/radius changes still apply at once). 2-6 far jobs instead of 2. 4.4 -> 0.02 ms; drive-forward
+    A/B: median 29.0 -> 21.4 ms, far time over the drive 7.7 s -> 0.46 s
+  - [x] Far blocks re-hashed every placement once per second per block (`GetPlacementSignature`) to catch
+    in-place edits they never get: `TerrainObjectLayer::placementsChangeOnlyWhenMarked`. Prefabs 3.0 -> 1.4 ms
+  - [x] Texture footprints: shadow cascades are orthographic, so each instance chunk's world box with its
+    largest scale bounds all its shadow demand in one projection; chunks 4x their diagonal away also use the box
+    for the camera. Per-instance work is now camera-only for near chunks. 5.2 -> 2.5-2.9 ms, image identical
+  - Result (DX12, 1920x1080, settled after 5000 warmup frames): 24.8 -> 16.8-20.7 ms. CPU path now update 1.7 +
+    prepare 5.0 + record 10.5 ms; the GPU varies 11-20 ms between runs (other apps share the GPU)
+- [x] Benchmarks measured while far objects still streamed (600 warmup frames was ~half of the 16k cells).
+  `--wait-for-residency` now also waits for `TerrainManager::GetFarObjectStatus().settled` (window computed, no
+  jobs or dirty blocks, every block's instances prepared, latched per block since its last rebuild); frame logs
+  carry `far_object_cells`, `far_object_cells_queued`, `far_object_blocks`, `far_object_blocks_preparing`,
+  `far_objects_settled`. The timeout message prints which condition is missing. Vista settles after ~109 s.
+  - [x] Found on the way: the prefab source stat cache (`PreparePrefabInstances`) dropped each entry when it went
+    1 s stale, so a layer visited less than once a second (round-robin under the 3 ms budget, ~300 layers) found its
+    sources pending on every visit; a far block whose prefabs no other layer kept fresh never built. Stale entries
+    now keep serving until the refresh lands
+  - [x] Fully settled vista measured 40.1 ms median / 47.5 p95 (DX12, one run), far above the 16.8-20.7 ms
+    recorded with half the far cells streamed. Stage breakdown (Foliage Phase 0, 42.8 ms): CPU-bound, update 5.1 +
+    prepare 10.8 + record 25.4 back to back, GPU ~13.4. After the foliage CPU rounds and the GPU occlusion
+    pyramid: ~25.7 ms (2026-11-19)
+- [x] Turning stuttered: `PersistentInstanceBatches` keys include bound texture and mesh-buffer pointers, which
+  texture streaming replaces constantly while the view turns, so every new key created four D3D12 buffers (16% of
+  the simulation thread, upload p95 8.7 ms). Batches unused for 8 frames now park their buffers per frame slot and
+  new keys reuse them. Look (adaptive detail): median 15.2 -> 13.9 ms, p95 24.8 -> 19.2, max 38 -> 26
+- [x] Software occlusion buffer (rebuilt every frame while turning) now starts in the camera's shadow pass, which
+  runs first and computes the same view; the color pass adopts it when camera, frame serial, viewport and
+  view-projection match bit for bit (`EarlyCameraOcclusion`, joined by every color pass, frame preparation and
+  `FenceBackgroundWork`; `ENGINE_EARLY_CAMERA_OCCLUSION=0` disables). Interleaved A/B while turning: occlusion
+  wait 0.78 -> 0, command record 7.0 -> 6.5 ms, frame 13.1 -> 12.6 ms
+- [x] `Material::PrepareTextures` residency check moved into the parallel validation pre-pass
+  (`NeedsTexturePreparation`, read-only); serial texture preparation 0.37 -> 0 ms, items 2.33 -> 2.11 ms
+- [x] Shader prewarm skips materials whose shader, asset path and terrain use are unchanged since their last
+  prewarm under the same epoch (`ShaderSourceCache::Generation()` + `m_materialShaderBytecodeEpoch`); the check
+  runs in the parallel pre-pass. Prewarm 0.29 -> 0 ms, items 2.0 -> 1.5 ms, prepare 2.9 -> 2.46 ms
+- [x] Tried: texture pointers out of the instance batch key (per-frame occurrence ordinal instead). No
+  measurable change (upload 0.40 vs 0.38 ms while turning): the remaining upload is visible tile membership
+  changing with the view, not texture churn. Reverted
+- [x] Detail budget oscillated: the predictive mode grew its cost budget whenever the GPU was under budget, but the
+  GPU measures the *applied* scale, which glides far behind the target, so the budget wound up (0.49M -> 1.37M,
+  target at the 8x maximum) and geometry overshot to 10-14 ms. Now the budget comes straight from a calibration
+  (smoothed GPU ms / smoothed predicted cost of the applied scale), cuts in 0.2 s and grows over the response time;
+  the controller follows a lower target in 0.1 s; and when *measured* GPU time is >1.1x the budget, detail is shed
+  up to 5x faster than the anti-popping glide. `.local/tests/DetailBudgetTests.cpp` runs the closed loop in
+  simulated time (static, fast view changes, and a model whose predictions run opposite to real cost).
+  Captures (adaptive): static 12.0/14.8/19.1 -> 10.6/12.5/13.9 ms (median/p95/p99), geometry max 10.2 -> 7.0;
+  fast turn 13.9/19.2/23.0 -> 12.6/16.5/19.1, geometry max 14.2 -> 7.4
+
+### Landscape look (large-scale vista with layered haze) / 1. Aerial perspective + height fog
+
+- [x] Per-pixel analytic height fog in the forward shaders via one shared include (`Shaders/AtmosphereFog.hlsli`); no per-material fog code
+- [x] Extinction/inscatter blend: `color * T + inscatter * (1 - T)` (Beer–Lambert), exponential height falloff so haze pools in valleys
+- [x] Henyey-Greenstein sun-glow term for in-scatter toward the sun, using the scene's main directional light
+- [x] Sky horizon haze from the same parameters (skybox shader)
+- [x] Scene settings + editor UI ("Atmosphere" in scene Properties), serialized with the scene
+- [x] `GameBackendCapture` with `--backend dx12` failed "renderer did not return the requested scene capture" when
+  the window came out at 1520x873 instead of 1920x1080. Two bugs: (1) startup placement centred the benchmark
+  window on the splash's monitor and shrank it to that monitor's work area (smaller or DPI-scaled monitor);
+  benchmarks now skip `StartupSplash::PlaceWindow`. (2) DX12 mapped `rowPitch * height` of the readback, but the
+  copy's last row is not pitch-padded, so widths not a multiple of 32 px (64 px for the RGBA8 back buffer copied now) overran the buffer and `Map` failed; it
+  maps the footprint size now. `IGameRenderer::ReadSceneCaptureRGBA` returns the size actually captured (DX12 and
+  Vulkan read the window size; Vulkan also recreates its readback buffer after a resize), and the benchmark writes
+  the image at that size and says when it differs from the request. Checked DX12 at 1520x873 and 1920x1080, and an
+  oversized 3840x2400 request (Windows caps the window at 2564 px wide here) on DX12/Vulkan/DX11. The capture tool's
+  default scene (`oak_meadow.scene`, removed) is now `terrain/landscape_demo.scene`
+- [x] Fog particles (CPU, GPU, fluid surface) and MMD outlines. Particles read a per-pass `particleFog` buffer
+  (t7 / Vulkan binding 8: camera position + fog0..3, since particle constants already fill the 128-byte push
+  constant); alpha particles blend to the in-scatter, additive ones fade by transmittance
+  (`AtmosphereFogTransmittance`); the fluid surface fogs at its density-weighted particle center. Checked on DX12,
+  DX11, Vulkan with a dense-fog copy of particle_showcase; fluid river runs on DX12/Vulkan. MMD outline fog
+  compiles but was not seen in a capture
+- [x] Fog the skybox seen through portals: `ViewLighting::SetSkyboxFog` now sets the sky fog terms for the main sky
+  and portal skies alike (portal skies use the connected view's eye height). With fog forced on in
+  portal_traversal_demo the sky inside the aperture matches the main sky exactly (213, 219, 226)
+- [x] Tune defaults against the step 0 test shot: on the new vista the defaults (density 2e-4 at height 0, falloff
+  0.004 = 250 m scale height, sky distance 30 km) give the layered look: haze pools on the far valley floor and
+  around the ridge bases while the peaks and the foreground stay crisp. Thinner, deeper fog (8e-5..1.2e-4 with
+  830..500 m scale heights) washed the whole range to one flat tone. The landscape scene never enabled fog; it
+  does now, with those values written out (the generator carries `<settings>` over)
+
+### Landscape look (large-scale vista with layered haze) / 2. Terrain scale + erosion (Tools/build_landscape_demo.py)
+
+- [x] Grow world to 16–32 km with 800–2000 m relief (now 24.2 km, -56..1888 m; archive v3 stores its own scale, 1/16 m)
+- [x] Coarser spacing outside the play area (16 m samples, upsampled on read); 4 m within 3 km of the start
+- [x] Verify far-terrain cache/LOD in-engine at 24 km: confirmed faceted. Far tiles take vertices only at 128 m cell
+  corners (the archive is read just for seam cells), so distant peaks were a few flat-shaded triangles. The macro
+  color map now carries a 16 m world-space normal map (same grid and mapping, texture slot 2,
+  `terrainMacroParams.w`), and distant tiles are lit per pixel with it whenever a macro or long-range shadow map
+  is bound: the ranges shade with eroded ridges, gullies and spurs. Same on DX12/DX11/Vulkan
+- [x] Hydraulic erosion pass (particle-based) before writing `world.heights`
+- [x] Export flow and deposition maps alongside heights (`world.flow`, `world.deposition`; format in the script docstring)
+
+### Landscape look (large-scale vista with layered haze) / 2b. Terrain editor tools (done; needs an artist pass in the editor)
+
+- [x] Realtime brushes: Erode (hydraulic), Weather (thermal), Noise, Terrace
+- [x] Select tool: rectangle / ellipse / lasso / polygon with feather, draped highlight, Apply commits one undo step
+- [x] Region operations: hydraulic + thermal erosion, smooth, noise, terrace, flatten (Ctrl+click picks height), raise/lower, paint layer
+
+### Landscape look (large-scale vista with layered haze) / 3. Distant terrain color + forest coverage
+
+- [x] Macro color map at 16 m (1513^2, the erosion grid) instead of the far palette's one color per 128 m cell
+  corner. `LandscapeDriver` composes it on a worker from the near paint rules (`PaintSample`), slope, and the
+  generator's `world.flow`/`world.deposition` (`TerrainHydrologyMap.h`, validated against the archive signature);
+  `TerrainManager` uploads it as an sRGB mip chain and binds it in texture slot 5 (`ObjectGPUData::terrainMacroMap`,
+  `terrainMacroParams`). Distant tiles take their albedo from it; loaded cells blend to it between
+  `macroColorNear`/`macroColorFar` (256/640 m) so both sides of the loaded-cell border match. Alpha holds forest
+  cover. Editor: TerrainManager "Terrain appearance" (Macro color map, start/full distance, tooltips) and
+  LandscapeDriver "Macro color" group (map paths, lushness, flow threshold, scree, scree depth, gully rock,
+  brightness, with tooltips via the new `Component::RegisterFieldTooltip`). Draw preparation polls the composer's
+  settings every 100 ms, so edits rebuild it live in the editor and in play (0.8 s per build). Verified on DX12,
+  DX11 and Vulkan: slopes gain gully and scree detail, mid-distance ground fades into the far colors
+- [x] Use flow for lush valley floors / streams, deposition for scree, steep + high flow for bare rock (in the macro
+  map, i.e. at distance; the near paint does not read the erosion maps yet)
+- [x] Forest-density map baked with the macro map (macro alpha = canopy cover; the color takes the canopy tint), and
+  distant tiles shade forest as a bumpy canopy: `ApplyDistantCanopy` (Object.hlsl) tilts the 16 m macro normal with
+  world-space crown/clump/stand noise (14/42/130 m) and darkens its hollows, each octave fading out once a pixel spans
+  half its period. TerrainManager "Distant canopy relief" (0..1, default 0.6, tooltip), packed as
+  `terrainMacroParams.w = 1 + relief`. Subtle in practice: the canopy albedo is very dark, and within
+  `farObjectRadius` (8 km) the far tree impostors cover it; with impostors off it changes 2.7% of the vista's
+  pixels, all on the far forest. No specular on distant tiles, so no canopy roughness
+
+### Landscape look (large-scale vista with layered haze) / 4. Lighting + post
+
+- [x] GTAO (half-res, temporally filtered) for contact darkening under trees and in valleys:
+  `Shaders/AmbientOcclusion/AmbientOcclusion.hlsl` (compute) after the main view's draws
+  (`SceneRendererLighting::ComputeAmbientOcclusion`). New context call `CopySceneDepth` copies the scene depth into
+  a buffer (DX12 `CopyTextureRegion` of the depth plane; Vulkan `vkCmdCopyImageToBuffer` while the scene pass is
+  paused; DX11 a small compute copy from a now-typeless depth; recorded in command packets, gated by
+  `SupportsSceneDepthCopy`). GTAO per half-res pixel: view-space position/normal from depth, 2 slices x 2 sides x
+  6 steps (rotated per pixel and frame), cosine-weighted arc integration, then blended with last frame's AO
+  reprojected through the camera stored in the output's header (depth-checked). Applied next frame through a new
+  structured slot 47 (DX12 root SRV t47, Vulkan binding 48) to ambient + environment (diffuse and specular) only,
+  never sunlight: object surfaces, foliage cards, grass, fast terrain and per-pixel distant tiles
+  (`ScreenAmbientOcclusion` in Object.hlsl: reprojects, 4-tap depth-matched filter, 1 off screen / disoccluded).
+  Scene `ambientOcclusion` (`enabled`, `radius` 1.5 m, `intensity`, `temporalBlend` 0.15); editor block. Landscape
+  demo: on. No measurable frame cost on DX12 or Vulkan (vista and near view, 4090). Notes:
+  - fxc compiled `continue`/`break` inside the unrolled GTAO loops into a GPU hang (TDR); the loops are now
+    branch-free. One later DX12 run still froze GPU timings once and has not reproduced in 12 runs since; the
+    debug layer is clean. `ENGINE_GPU_DEBUG=1` now prints DX12 debug-layer errors/warnings to stderr
+  - Editor viewports (D3D11View / D3D12View / VulkanView) don't register their depth yet, so AO is game-view only
+  - Dense foliage shows some half-res blotchiness; a depth-aware spatial filter pass would smooth it. 2026-11-19:
+    the lookup in Object.hlsl is now a depth-matched 3x3 tent (was 4 taps), which removed the diagonal noise
+    stripes on plants; a filter pass in the AO shader itself is still open
+  - Vulkan's AO GPU timer includes the barrier wait for the opaque pass to drain (reads ~1.3 ms; frame time
+    shows no cost)
+- [x] Auto exposure (luminance histogram, eye adaptation) with editor min/max EV and speed: three small passes
+  in each backend's post-process before compose (`Shaders/PostProcess/PostProcess.hlsl`
+  `ExposureLuminancePS` / `ExposureHistogramPS` / `ExposureAdaptPS`, shared plumbing in `Graphics/PostProcess.*`).
+  64x32 log-luminance map (centre-weighted metering) -> 64-bin histogram over -14..+10 EV -> 1x1 adapt pass that
+  trims the histogram to [lowPercent, highPercent], clamps to [minEv, maxEv] and eases from the previous frame
+  (two ping-pong RGBA32F targets, separate up/down speeds, snaps after resize or re-enable). Compose maps the
+  adapted average to mid grey; `outputExposure` stays as compensation. GPU-only, no readback. Lit views only.
+  Scene `autoExposure` (`enabled`, `minEv`, `maxEv`, `speedUp`, `speedDown`, `lowPercent`, `highPercent`);
+  editor block under Output Tone Mapping. Landscape demo: on, compensation -0.4 (vista meters at -2.7 EV, about
+  where the fixed exposure was). DX11/DX12/Vulkan meter identically. Note: fxc mis-compiled a nested,
+  partially unrolled histogram loop (DX counted ~1/10 of the map); it's one flat `[loop]` now. Not separately
+  GPU-timed (64 + 1 pixels reading a 16 KB map)
+- [x] Long-range shadow: terrain sun-visibility map ray-marched over the far height grid on a worker thread when the sun moves (`TerrainManagerSunShadow.cpp`); near terrain multiplies it into the cascade shadow, distant tiles are lit per pixel with it. TerrainManager `longRangeShadows`, `longRangeShadowSoftness`
+- [x] Bloom: half-res 13-tap downsample / tent upsample mip chain in each backend's compose pass (`Shaders/PostProcess/PostProcess.hlsl`, shared by DX11/DX12/Vulkan). Scene `bloomEnabled`, `bloomIntensity`
+- [x] Color grading (warm highlights, cool shadows): analytic split-tone + contrast + saturation after tone mapping. Scene `colorGrading*`, `grading*`
+- [x] Sun disc / glare: limb-darkened disc + Henyey-Greenstein glow in `Skybox.hlsl` toward the brightest directional light; bloom provides the glare. Scene `sunDisc*`, `sunGlowIntensity`
+
+### Landscape look (large-scale vista with layered haze) / 5. Sky computed from the sun
+
+- [x] Hillaire-2020-style sky: `Rendering/Atmosphere/PhysicalAtmosphere.*` (Rayleigh/Mie/ozone media, Bruneton
+  transmittance LUT 256x64, Hillaire multiple-scattering LUT 32x32, planet geometry in double) and
+  `PhysicalSky.*`, which renders the sky on a worker into a 512x256 RGBA32F world-space panorama (with mips)
+  whenever the sun moves >0.2°, its illuminance >1%, the camera altitude >100 m or the parameters change.
+  The panorama replaces the sky-view LUT: it feeds the existing skybox draw and EnvironmentMap unchanged, so
+  sky, reflections and ambient all come from one image. CPU-side because the generic graphics context has no
+  offscreen color targets; the GPU only samples. Scene `physicalSky` (`enabled` is the HDRI toggle; HDRI is
+  used until the first panorama is ready), `groundHeight`, `rayleighScale`, `mieScale` (haze), `mieScaleHeight`,
+  `mieAnisotropy`, `ozoneScale`, `groundAlbedo`, `skyIntensity`; editor "Physical Sky" block. The skybox's
+  analytic sun glow is off over the physical panorama (the aureole is in it); the sun disc stays.
+  Landscape demo: enabled, `mieScale` 4. Tests: `.local/tests/PhysicalAtmosphereTests.cpp`
+- [x] Derive sun light color and ambient SH from the same atmosphere model: the strongest directional light is
+  multiplied by the transmittance toward the sun at the camera altitude (`attenuateSun`), and the environment
+  map / SH are prefiltered from the physical panorama on the same worker
+  (`SceneRendererLighting::ApplyPhysicalAtmosphere`)
+  - Found while doing this: the split-sum BRDF LUT had lost its `/ sampleCount` in the 11-09 refactor
+    (`RenderUtilities.h` `BrdfIntegration::Integrate`), making specular IBL ~256x too bright. It went unseen
+    because PNG HDRI skyboxes drop their CPU pixels after upload, so `EnvironmentMap::Acquire` returns null and
+    those scenes get no environment lighting at all (still true for the HDRI path; separate issue). Fixed, with
+    a LUT range check in PhysicalAtmosphereTests
+
+### Landscape look (large-scale vista with layered haze) / 6. Generated landscape assets (Python, same conventions as Tools/generate_meadow_accents.py)
+
+- [x] Conifer generator (`Tools/generate_conifers.py`): trunk + layered branch whorls with needle cards; ~4 species/size variants; LOD chain; mid/far quality
+  Spruce_tall_01 (24 m), Spruce_young_01, Pine_scots_01, Fir_subalpine_01 under `Prefabs/Woodland/Conifers`. LOD0 sprays
+  (3-14k tris) / LOD1 fewer larger sprays with card coverage matched to LOD0 (side coverage within ~5-20%) / LOD2
+  whorl stars / view-baked impostor (6 views + top, 38 tris, `impostorBillboard`, same card layout as the oak pack).
+  Shared procedural needle atlas (spruce, fir, pine, clump cells) and bark; species colour is muted linear vertex colour
+  (inner/outer/tip, per-branch jitter). Instanced chain resolves to LOD0 -> LOD1 -> impostor. Shared helpers:
+  `tools/woodland_assets.py` (native .mesh writer, numpy rasterizer/impostor baker, PNG I/O, prefab/material writers)
+- [x] Boulder / cliff generator: noise-displaced, faceted meshes, ground pivot, LODs, triplanar rock material
+  `tools/generate_boulders.py`: Boulder_01-03, Boulder_flat_01, Cliff_block_01/02 under `Prefabs/Woodland/Boulders`.
+  Superellipsoid cut by random planes (smooth-min) + FBM, cliffs with vertical cuts and stepped strata; one radius
+  function sampled on icospheres per LOD; normals split at 38 degree creases. New `Material::triplanarScale`
+  (world-space 3-projection base/ORM/occlusion/normal with UDN blend, projections < 4% skipped; packed in
+  `textureUvSets1.z`, a terrain-only lane) with the Rock030 set; meshes keep box UVs at the same scale
+- [x] Far-forest clusters / impostor cards baked from conifer + oak meshes; hook into TerrainManagerFarObjects
+  `tools/generate_forest_clusters.py` bakes 4 stands (2 oak from the pack's LOD2 meshes + material textures, 2 conifer)
+  of 14 trees on 36 m. `TerrainManager::farClusters` (asset, match text, baked tree count) + `farClusterDistance` /
+  `farClusterSize` / `farClusterMinimumTrees`: far blocks wholly beyond the distance bucket their trees on the grid and
+  replace squares where one family is >= 70% with one cluster (centroid, scale sqrt(count / baked)). Landscape demo:
+  2.2 km, 40 m, 5 (scene + `tools/build_landscape_demo.py`)
+- [x] Check alpha-to-coverage / coverage-preserving alpha mips so distant canopies do not thin out or shimmer
+  Real-time rendering is single-sample (MSAA only in DX11 video export), so A2C does not apply. Measured: PNG foliage
+  gets runtime box-filtered mips, which at the 0.32 cutoff grow oak canopy/impostor coverage 14-60% by mip 4-7 (crowns
+  bloat and pulse) and drop sapling impostors to 25-48%. `tools/cook_foliage_textures.py` cooks every Mask material's
+  PNG base colour with `TextureCook --alpha-cutoff` (push-pull fill + per-mip coverage rescale, BC7) and repoints the
+  19 materials; generated foliage is cooked the same way. `--check` prints the per-mip table
+- [x] Cloud and valley-mist sprite textures (noise-based) + soft particle/card prefabs
+  `tools/generate_sky_sprites.py`: Cloud_Puff_A/B, Mist_Wisp_A/B, Mist_Sheet (`Textures/Atmosphere`), prefabs
+  ValleyMist / LowClouds (ParticleEmitter) and MistCard (Blend mesh) under `Prefabs/Woodland/Atmosphere`. Soft
+  particles: `ParticleEmitter::softness` fades against the main view's depth copy (reused from AO, or copied when AO is
+  off; `SceneRendererLighting::SceneDepthForPixelShaders`, particle t8), plus `nearFadeDistance`, `fadeInTime`,
+  `sizeVariation`, `randomRotation`. Portal views draw hard. Verified on DX12/DX11/Vulkan
+- [x] Prefabs for all of the above under `Assets/Prefabs/Woodland/`, placeable by TerrainObjectLayer
+  Conifers/, Boulders/, Clusters/, Atmosphere/. Landscape demo uses them through its layers: `LandscapeDriver`
+  grows conifers by altitude (`ConiferShare`: oaks below 350 m, mixed foothills, conifers from 710 m to the tree
+  line; picked from existing draws so the lowland oak layout is unchanged) and puts the generated boulders in rock
+  fields; far impostors and clusters follow automatically. `Scenes/terrain/woodland_assets_preview.scene` shows every
+  asset at its LODs; captured on DX12, DX11 and Vulkan
+  Demo update: cliff blocks join the forest layer on steep rock below the snow (<= 2 per cell, upright, sunk by the
+  slope; 900 m reach). They are authored `cullAfterLastLod`, which `GetObjectLodProfile` now passes through and
+  `FarPlacements` skips, so near-only props never become far objects (~30% of cells are steep). The scene gets an
+  "Atmosphere" group (`build_landscape_demo.atmosphere_items`): LakeMist (new wide prefab) over all five lakes,
+  ValleyMist + three mist cards on the first lake by the start, LowClouds on four summits in the vista
+- [x] Editor: run generators from an editor tool and refresh the asset browser
+  Tools > Asset generators lists `tools/generate_*.py` / `cook_*.py` (docstring as tooltip), plus "Run all woodland
+  generators" (ordered queue). `AssetGeneratorRunner` runs one at a time without a console window, streams output to
+  the Console, then reloads rewritten textures (`Texture::Invalidate`) and refreshes open scenes
+  (`OnAssetContentsChanged`); the asset browser lists new files through its directory watch. Builds; not yet exercised
+  in a running editor
+- [x] Wider, less bright tree and foliage colours: `Material::foliageColorVariation` (masked foliage; world-space noise
+  at ~9 m crown and ~70 m stand scale trades yellow-green against blue-green and +-~20% value; `textureUvSets1.w`) on
+  oak leaves/impostors (0.7), conifers and clusters (0.55/0.7), identical across LODs. Oak leaf + impostor tint
+  [0.86, 0.84, 0.77] (darker, less saturated); terrain meadow layer `grass.material` [0.24, 0.32, 0.12] ->
+  [0.20, 0.26, 0.11]
+
+### Status and Next sections as they stood before the 2026-11-20 cleanup
+
+The measurements behind the plan's order (shadow view breakdown, item counts, the one-species run, the
+distance gate that did nothing, radius 3) are in the "Next" text below.
+
+#### Status (2026-11-19)
+
+Landscape demo, DX12, 1920x1080, RTX 4090, RelWithDebInfo, uncapped; moving runs are 400 frames.
+
+| Run | Median | p95 | Frames over 50 ms |
+|---|---|---|---|
+| Standing, forest floor (three runs) | 24.0-25.0 ms | 27-29 ms | 0 |
+| Standing, forest edge / trail / vista (before the last two CPU changes) | 26.9 / 28.5 / 25.7 ms | 31 / 33 / 29 ms | 0 |
+| Turning in place (`--look-yaw 6`, forest edge) | 24.7 ms | 38 ms | 3 |
+| Walking (`--drive-forward 380`, forest floor) | 31.3 ms (28.5 on 2026-11-20) | 51 ms, p99 115 (42, p99 103) | 20 (11) |
+| Walking and turning (`--drive-forward 380 --look-yaw 3`) | 35.2 ms | 59 ms (p99 115) | 34 |
+
+- Standing still the frame is CPU-bound: update ~1.8 + prepare ~4.7 + draw recording ~16 ms (camera view ~11.5, shadow
+  view ~3.9) run one after another on the scene thread while the render thread is idle ~89 % of the frame. GPU is
+  9-11 ms. Trimming hot spots gave ~2 ms a round; 16.7 ms needs the recording split across threads.
+- Moving adds hitches: walking spikes to 80-120 ms each time a terrain cell boundary is crossed, and raises the steady
+  cost (update 1.8 → 4.6 ms, prepare 4.7 → 8.9 ms).
+- Checked on DX12 only since the colour pass: trails, scans, TAA dither, the 3x3 AO lookup, CPU round 3 and the
+  moving-camera fix. Look pass 1 was checked on the test meadow on DX11, DX12 and Vulkan.
+- **Landscape captures taken between the cloud-shadow work (Foliage Phase 3) and 2026-11-20 had no direct
+  sunlight** (cookie texture not found from the capture tool's working directory). Frame times are unaffected;
+  every look judgement made from those landscape captures is suspect, including the Phase 1d colour pass.
+- Committed through `28210b49` (2026-11-19 22:34). Uncommitted: CPU round 3, the moving-camera fix, the 3x3 AO lookup
+  in Object.hlsl, the merge of the plan files and look pass 1.
+
+#### Next, in order
+
+Reference check at full resolution (2026-11-20 night, `.local/reference-images` against `h1_*` tiles), largest
+gaps first: (a) meadow, ref 04: fine thin blades as continuous cover to the horizon; ours is one broad-bladed
+clump in rows with soil between, ending at 26 m. (b) forest interior, ref 07: haze between trunks so they fade
+pale with depth; ours shows shaded trunks as dark blue-grey posts with no haze. (c) vista, ref 08: layered
+ridge haze and far forest that still reads as conifer silhouettes; ours is navy blobs on pale untextured
+mountains and a flat green hedge at mid distance. These are items 1 (haze, far forest), 4 (grass) and 6 below.
+
+1. Done 2026-11-20: viewpoint and the settings half of the look (look pass 1 under "Landscape demo expectations").
+   Left over from it: exposure at forest edges, far-forest texture and haze.
+2. **CPU pipeline to 16.7 ms while moving** (order changed 2026-11-20 night: this before the hitches, and both
+   before the grass work, which adds draws). A walking frame is now ~27 ms of CPU, mostly serial: camera view
+   record ~11, shadow view record ~4.7, scene prepare ~6, update ~3.4; GPU 9-11 ms fits already. Steps, in
+   order (Foliage Phase 2, "Next CPU steps" and "CPU draw recording on the vista"):
+   a. shadow view recorded on a worker while the camera view records (est. 4-5 ms);
+   b. a dirty list for frame items, one retain per distinct mesh buffer, shadow scene preparation skipped when
+      nothing changed (est. 3-5 ms together);
+   c. camera view record: split across threads, or far forest and terrain tiles on GPU-driven draws so the CPU
+      does not walk ~2,650 visible items for ~350 draws.
+   Estimate, not measured: a and b bring walking to 18-20 ms; under 16.7 needs part of c. Measure with the
+   walking and turning runs, interleaved, not only standing poses.
+   **Measured before starting the split (2026-11-20, late): the item count is the larger lever.**
+   - The shadow view's 4.7 ms has nothing to cache away: startup 0.3, culling 0.5, sorting 0.2, material loop
+     1.0, texture footprints 0.3, instance tiles 0.5, record upload 0.9, the rest in small pieces. Recording
+     it on a worker saves at most those 4.7 ms (less, since it would compete with the camera view for the
+     same workers): walking ~25 → ~21-22 ms at best.
+   - Shared between the two `Render` calls and needing a per-view split first: the mapped light buffer
+     (both calls rewrite it), cluster buffers, `SelectRenderPassBuffers`, the instance pool and persistent
+     batches, the material record cache, texture footprint requests, the camera occlusion job the shadow
+     call starts for the camera call, scratch vectors, ~75 writes to the timing structs, and scene calls
+     that assert the owner thread.
+   - Of 7,834 render items on a walk, ~7,300 are per-cell prefab batches ("Shared prefab part": one object
+     per prefab part per terrain cell): forest 2,920, props ~2,500, far objects ~1,800. Terrain cells 121,
+     grass tiles 224. The GPU already culls their placements one by one; the CPU still prepares, culls,
+     sorts, resolves materials and builds tiles per batch object, in both views.
+   - Frame time against item count, same walk with `loadedRadius` 3 instead of 5 (9,755 → 6,285 mesh
+     objects; far objects take over the outer ring): 25.2 → 18.1 and 19.7 ms. Update 3.3 → 2.1, scene
+     prepare 5.5 → 3.6, shadow record 4.5 → 3.7, camera record 10.6 → 8.2; GPU unchanged (opaque 8.2 → 8.6).
+     About 1.7 ms per 1,000 items. Extrapolated, not measured: one batch per prefab part per 2x2 cells
+     instead of per cell (~7,300 → ~1,800 items) would take ~9 ms off, to about 16 ms.
+   So the order: (c') fewer prefab batch objects first (chosen 2026-11-20); the per-view split after it, if
+   still needed.
+   **(c') measured further the same night; nothing merged yet.**
+   - One tree species instead of all (temporary switch, same tree count: 275k → 278k instances submitted):
+     mesh objects 9,361 → 5,119, the walk **22.8-25.1 → 15.5 ms**. Update 3.3 → 2.2, scene prepare 5.4 →
+     3.3, shadow record 4.0 → 2.2, camera record 10.3 → 7.1. GPU fell too (opaque 9.2 → 6.4, shadow 3.0 →
+     0.8), partly because the one species is a cheaper mesh, so the GPU part is not a clean comparison.
+     About 2 ms of CPU per 1,000 batch objects: the count of batch objects that exist is the cost.
+   - Switching off batch objects whose LOD band cannot draw at their distance (a gate on `Object::enabled`,
+     conservative margins): visible items 2,804 → 1,576 with draws and instances unchanged, and **no
+     change in frame time** (24.4 against 24.2 ms, three pairs). Removed. So disabled objects cost as much
+     as enabled ones, and the camera view already skipped those bands cheaply; only fewer objects helps.
+   - `loadedRadius` 3 instead of 5: every tree past ~310 m is an impostor already and far-object blocks
+     draw those, so the outer two rings of full cells may buy nothing. Standing: MeadowSlope 23.5 → 17.2
+     ms, Escarpment 22.8 → 21.4; walking 25.2 → 18.1 and 19.7 (above). Look: the one tile pair compared by
+     eye (`q5_`/`q3_Escarpment_r0c0.png`) is the same; 3-7 % of pixels differ over the whole frames, not
+     examined (wind and cloud shadow differ between runs too). **Not adopted yet**: Vista and ForestWall were not captured at radius 3 (failed runs), and props,
+     terrain detail and colliders in rings 4-5 are not checked.
+   Next for (c'): finish the radius-3 look check; then one batch per prefab part per 2x2 cells for what
+   stays loaded, and larger far-object blocks (1,800 of the batch objects are far blocks).
+   Looked at on 2026-11-20 night, not started: the shadow and camera views are two calls of one ~3,000-line
+   `SceneRenderer::Render` that share per-frame members (instance view counters, object record capacity,
+   visibility and timing state), so (a) needs that state split per view first. A walking profile after
+   tonight's fixes shows no single large piece in recording: material draw loop ~2.6 ms, startup ~1.9,
+   texture footprints ~1.5, occlusion build ~1.5, instance tiles ~1.3; the shadow view's 4.7 ms is mostly
+   its own scene preparation (3.7).
+3. **Moving-camera hitches** at cell crossings: mostly done 2026-11-20 night ("Static objects"): steady
+   walking 31.0 → 27.0 ms, worst walking frame ~140 → ~80 ms, frames over 80 ms 6 → 0-2 a run. Left: a
+   ~33 ms commit per crossing (a cell's grass field removing its tiles one by one) and ~10 frames of scene
+   prepare +10 ms after it.
+4. **Forest and meadow content**: the forest edge is closed from the ground up with sunk small and medium
+   oaks (2026-11-20, captured; "Terrain and forest edge pass"). Left: more broadleaf silhouettes and height
+   variety along the edge (scanned shrubs, Foliage Phase 7), grass reach and the fade band (Grass Phases 1,
+   3, 6).
+5. **Terrain**: rolling hills and the escarpment are in and captured; the face is covered by scanned rock.
+   Left: a clearing so the escarpment is seen from the ground, the striped rock texture on sheer terrain,
+   the cliff follow-ups of Foliage Phase 7.
+6. **Variants from the earlier reference sets**: still water with reeds and lily pads, haze between trunks and
+   layered ridge haze, streams (Landscape look 7; Foliage Phases 6 and 7).
+
+### "Next" section as it stood before the 2026-11-21 review
+
+Replaced by a plan led by structural changes (vegetation and ground cover on the GPU, a retained render
+scene). Open items were carried over; the completed ones below are the record of the 2026-11-20/21 work.
+
+#### Next, in order
+
+Reference check at full resolution (2026-11-20, `.local/reference-images` against `h1_*` tiles), largest gaps
+first: (a) meadow, ref 04: fine thin blades as continuous cover to the horizon; ours is one broad-bladed clump in
+rows with soil between, ending at 26 m. (b) forest interior, ref 07: haze between trunks so they fade pale with
+depth; ours shows shaded trunks as dark blue-grey posts. (c) vista, ref 08: layered ridge haze and far forest
+that still reads as conifer silhouettes; ours is navy blobs on pale untextured mountains and a flat green hedge
+at mid distance.
+
+1. **Fewer prefab batch objects** (the measured lever for frame time). Done: 3 loaded rings instead of 5
+   (`loadedRadius`, scene and `build_landscape_demo.py`), with cliff pieces carried by the far blocks out to
+   their 900 m reach (`TerrainManagerFarObjects.cpp`, `GenerateCliffs` no longer skips far cells).
+   - [x] **One batch set per 2x2 cells** (`TerrainManager::nearObjectBlockCells`, 2 in the scene and the
+         builder; `UpdateNearObjects` in `TerrainManagerFarObjects.cpp`). A loaded cell's prefab layers keep
+         their placements and colliders but make no batches (`TerrainObjectLayer::suppressPrefabRendering`);
+         one runtime layer per block and layer name holds the merged placements, with the member layers'
+         settings, and builds the batches. A far block gives a cell up only when its near blocks have
+         finished with it in. Editor streaming stays per cell. `ENGINE_NEAR_OBJECT_BLOCKS=1` turns it off.
+         Interleaved, 1080p: walking 18.2 and 18.7 → 16.8 and 16.7 ms, p99 57-66 → 43-46, frames over 50
+         ms 5-8 → 2; standing Escarpment 17.8 and 17.3 → 16.2 and 15.9 ms. Mesh objects 6,311 → 5,314.
+         Escarpment picture identical (0.01 % of pixels differ). Not checked: the editor, prefabs with
+         colliders, removing a placement at runtime, 3x3 or 4x4 blocks.
+   - [ ] Far blocks of 16x16 cells instead of 8x8 would quarter the ~1,800 far batch objects, but every run
+         with `farObjectBlockCells` 16 failed (12 of 12 attempts, device removed or a crash). Not usable as is.
+   - [ ] Radius 3 look, still open: the ground at the foot of a distant cliff is the blurrier far-terrain
+         colour (`qf5.png` against `qf3c.png`, 560 m from the escarpment); one tree on a rim 450 m away has
+         a different silhouette as a far placement than as a near one (`qc5.png`, `qc3.png`); props, terrain
+         detail and colliders in rings 4-5 are gone by design and were not looked at from the air.
+2. **CPU pipeline**, if 1 does not reach 16.7 ms: the shadow view recorded on a worker (at most ~4.7 ms, and
+   needs the per-view state in `SceneRenderer::Render` split first: light and cluster buffers, pass buffers,
+   instance pool and batches, material cache, footprints, timing structs); a dirty list for frame items; one
+   retain per distinct mesh buffer (Foliage Phase 2, "Next CPU steps").
+   - Measured 2026-11-21 (interleaved pairs, FieldWalk and forest walks): recording the shadow view takes
+     3.1-3.9 ms of CPU and does not follow the shadow ranges (trees 90 → 60 m, props 80 → 53 m,
+     undergrowth 45 → 30 m changed it by less than the run-to-run spread, GPU shadow 3.0 → 2.8-3.1 ms in
+     the forest). It follows the number of batch objects, like the camera view, so the worker is the lever,
+     not shorter ranges. `ENGINE_LANDSCAPE_SHADOW_SCALE=<factor>` stays for A/B runs.
+3. **Pop-in** (reported 2026-11-21: "lots of easily seen pop-in ... especially foliage-grass types",
+   "ferns appearing just meters ahead of the camera"). To see it: `--moving-captures 15` on a
+   `--drive-forward` run writes `capture_a.ppm` and `capture_b.ppm`, 15 frames apart while moving.
+   - [x] Ground cover built one tile per update per field (the setting says 8): ~50 tiles were always
+         waiting while moving (128 before 2026-11-20), so a quarter of the grass was missing and arrived
+         late. Now several per update within the work budget (`GrassField::Refresh`): waiting tiles median
+         50 → 0, active tiles 203 → 252, frame time unchanged.
+   - [x] Ground cover ended ~16 m out: its radius followed the detail budget, which is pinned at its 0.6
+         floor here (GPU geometry 12 ms against a 6 ms budget, CPU record 10.5 against 4). The landscape
+         now keeps the authored radius (`GrassField::minimumRadiusScale` 1) and the reach is 50 m
+         (`grassRadius`, +10 m fade), with 16 m tiles so the tile count falls (627 at 4 m and 26 m → 163).
+   - [x] **16 m tiles thinned the grass underfoot** (a tile took its detail level from the distance to its
+         own origin). Ground cover now picks the level per plant (`Mesh::perPlacementLod`, set by
+         `GrassField::perPlantDetail`; geometry-fade mode 6 in Object.hlsl; cull bits 2|64 in
+         InstanceCull.hlsl test the plant's root distance, the same value the pixel shader fades by). The
+         0.35 distance push is gone. ForestEdge standing: grass GPU 4.6-5.2 → 4.2 ms, soil share 4.7 → 4.9 %;
+         walks unchanged (CPU-bound). `ENGINE_LANDSCAPE_GRASS_PER_PLANT=0` goes back to per tile.
+         Dead end on the way: the trees' bounds-padded band test drew twice the full-detail plants (6.5 ms).
+   - [x] **Reach by plant size**: ferns, shrubs and bushes reach 80 m, fine grass and accents still end at
+         60 m, inside one field (`Mesh::InstanceRange::reachScale`, `GrassField::fineReachFraction`; carried
+         per draw in `DrawCBData::padding` and cull `selection.w` bits 16-25;
+         `ENGINE_LANDSCAPE_SHRUB_REACH=<m>`, 0 = off). Cost while walking, interleaved pairs: forest
+         16.6 → 16.8-17.0 ms, meadow 18.3-19.3 → 19.8-20.2 ms (tiles 165 → 245). 100 m: forest 17.2-17.4.
+   - [x] `GrassField::LoadSources` rebuilt its species lists every frame for every field in range
+         (1.2-1.6 ms of simulation time); now only when the field, its layer or the device changes.
+         Simulation update 2.5 → 1.15 ms on the forest walk; the frame median did not move (16.4-16.6).
+   - [x] The 80 m reach cost ~1 ms on the meadow walk: every tile was recorded in every species range at
+         every level. A tile is now left out of a batch when that level's distances or that range's reach
+         miss its bounds (`coverSkip` in `SceneRendering.cpp`, the same tests the GPU cull makes per plant;
+         `ENGINE_COVER_TILE_SKIP=0` turns it off). Placement candidates -30 %. Interleaved walks: forest
+         16.9-17.3 → 16.6-16.8 ms, meadow 19.5-19.6 → 18.2-18.7 ms.
+   - [x] Shrub and fern counts were capped at 128 per tile whatever its size, so 16 m tiles carried half
+         the forest-floor ferns. The cap now scales with tile area (bushes too). Costs ~0.4 ms on both
+         walks: forest 17.1-17.2 ms, meadow 18.6-19.1 ms (not interleaved; same build session).
+   - [ ] The detail budget never leaves its floor, so tree and prop detail distances are at 0.64 of
+         authored (LOD0 to ~38 m, impostors from ~140 m) and switch close to the camera. Pinned at 1.0
+         the forest walk costs 20.1 ms against 16.8. The budgets (6 ms GPU, 4 ms CPU) predate the current
+         frame split and need setting against a 16.7 ms frame.
+   - [ ] Not looked at yet: prop and tree level switches as such, cell hand-off between far and near blocks
+         while moving, the meadow's far grass ring against the new reach.
+4. **Load time** (reported 2026-11-20: "initial load times heavy"): ~29 s until the far forest had settled,
+   ~15 s now.
+   - [x] Half the cores work on the far backlog while it is large (was 4 jobs; `TerrainManagerFarObjects.cpp`,
+         `ENGINE_FAR_OBJECT_JOBS=<n>` fixes the count): ready after 28.1-29.0 s → 14.5-15.0 s, two pairs;
+         walking unchanged. Larger batches per job (32 cells instead of 8) gave 14.8 → 14.3 s, inside the
+         spread; not kept.
+   - [ ] Save far placements to the cache directory so later launches skip the generation.
+   - [ ] Measure when the near world is playable, separately from the far fill.
+5. **Remaining stutter at cell crossings**: a ~25-35 ms commit per crossing (a cell's grass field removing
+   its tiles one by one) and ~10 frames of scene prepare +10 ms after it.
+6. **Forest and meadow content**: more broadleaf silhouettes and height variety along the edge (scanned shrubs,
+   Foliage Phase 7), grass reach and the fade band (Grass Phases 1, 3, 6). Adds draws: measure with the walks.
+   - [ ] **Fields of tall grass** (asked 2026-11-21). References:
+         `.local/reference-images/chlorophyll-video` (`02_meadow_flowers_ridge_haze_0m12`,
+         `04_meadow_lone_tree_cliff_escarpment`, `01_forest_edge_meadow_slope_0m04`; full-size PNGs in
+         `png/`). What they show against ours: knee-to-waist-high grass as one continuous mass with no
+         soil between plants; fine thin blades that arch and lean with the wind, not broad-bladed
+         clumps; seed heads and stems standing above the mass and breaking the skyline at the slope's
+         crest; small white and yellow flowers scattered through it; darker in the depth of the mass and
+         lighter at the tips; the cover carries on to the far meadow as a smooth lighter green.
+         - [ ] Tall-grass species: thin-blade tussock and seed-stem meshes with three levels (the meadow
+               preset's short/tall slots, `MeadowGrass.cpp`), height ~0.6-1.1 m with variation per plant.
+         - [ ] Fields, not an even pelt: a field mask (noise in terrain space, as the shrub thickets use)
+               choosing tall grass or the short sward, so fields have edges and paths can cut them.
+         - [ ] Density that closes over the ground at 1080p from eye height, within the grass budget:
+               measure GPU grass time standing at MeadowSlope and the meadow walk (18.6-19.1 ms now).
+         - [ ] Root-to-tip shading and wind lean so the mass reads as depth (Grass Phases 3 and 6).
+         - [ ] The far grass ring matches the tall field's colour and silhouette at the 60 m hand-off.
+         - [ ] Compare unscaled 1440p tiles (`hires.sh`) against the references at MeadowSlope and
+               ForestEdge.
+7. **Terrain**: a clearing so the escarpment is seen from the ground, the striped rock texture on sheer
+   terrain, the cliff follow-ups of Foliage Phase 7.
+8. **Variants from the earlier reference sets**: still water with reeds and lily pads, haze between trunks and
+   layered ridge haze, streams (Landscape look 7; Foliage Phases 6 and 7).
+
+## Moved from todo.md on 2026-11-22
+
+### Next / Look and content / Cliffs as terrain stamps (as it stood on 2026-11-22; replaced by sculpted cells, see todo.md "Cliffs as sculpted terrain")
+
+- [ ] **Cliffs as terrain stamps** (asked 2026-11-21: "cliffs don't seamlessly connect with terrain and aren't
+      fully connected all the way around"; the user's earlier idea of cliff brushes and adjustable terrain
+      detail). Today `GenerateCliffs` (`LandscapeDriver.cpp`) stands photo-scanned rock faces, which are open
+      shells, upright on steep cells at runtime, sunk a little and facing downhill. The ground is not changed,
+      so it falls away under and beside the pieces (gaps, hollow edges) and keeps its own smooth slope behind
+      them (a rock lying on a hill).
+      Constraints found: terrain detail levels only coarsen the stored 4 m grid (every point near the camera,
+      every second from `lod2Radius` 2, every fourth from `lod4Radius` 3, then far tiles), so nothing near the
+      camera is finer than 4 m; the whole map at 1 m would be ~16x the height data (~2.3 GB) and triangles. The
+      engine compiles vertex, pixel and compute shaders only (`IShader.h`, no tessellation stages on any
+      backend), so finer terrain means mesh patches built on the CPU, which colliders need anyway. Stamps change
+      heights that feed colliders, far tiles and cell caches, so they are applied when the map is built, not at
+      runtime. Reusable: `TerrainRegionEdit` (cross-cell edits that cannot open a seam), `paintResolution`
+      (paint finer than the vertices), `TerrainFarLodEdges.h` (level edges keep the shared boundary vertices).
+      - [x] **Height-map stamps tried 2026-11-21, reverted.** Built: `tools/bake_terrain_stamp.py` (scan →
+            0.5 m height patches), `tools/landscape_cliffs.py` (the runtime placement rules ported to the
+            builder, 9,104 pieces in 219 cells, and the stamping), `world.cliffs` read by `LandscapeDriver`
+            (`LoadCliffList`; inert without the file). Raising 4 m samples to under each scan left single
+            samples tens of metres above their neighbours: pyramid spikes in front of the faces (captures
+            `.local/terrain-stamps/ab_*.png`). The map is restored and `STAMP_CLIFFS` is off in
+            `build_landscape_demo.py`. User feedback the same day: no cliff objects at all, terrain with
+            the scans' shape and materials; and cliffs overlap vertically (overhangs), so a height map cannot
+            hold them: "needing more than a height map but a 3d point map/mesh".
+      - Revised design: **terrain patches displaced in 3D** (a vector displacement map per stamp). Each
+        stamp is a regular grid of 3D points shrink-wrapped onto the scan, projected along the face's
+        outward direction instead of straight down, so overhangs fit. Under a stamp the terrain builds a
+        finer patch whose vertices move by those 3D offsets; its border vertices are the normal grid's, so
+        it is seamless by construction and keeps the grid's detail levels, paint and collider path. Limit:
+        one continuous sheet, so no caves or arches, and deep overhangs stretch triangles. Full 3D terrain
+        (a density volume meshed with marching cubes or dual contouring) has no such limit but is a second
+        terrain system; only if the sheet falls short.
+      - [x] Stage 1: bake (`tools/bake_terrain_stamp.py`, `Assets/TerrainData/Stamps/*.stamp`): per scan a
+            0.25 m grid of 3D points along the face's mean normal, with normals, the scan's UVs and a weight
+            that rises over 1 m from the outline. Surface lost behind the outer layer 0-5 % of points, folds
+            0-1.7 % of neighbour pairs (Cliff_Scan_01's stacked boulders are the worst: curtains between
+            blocks). Checks: `.local/terrain-stamps/*_check.png`.
+      - [x] Stage 2: placement at build time (`tools/landscape_cliffs.py`, the runtime rules ported; 12,975
+            pieces in 300 cells, `world.cliffs`; heights unchanged). Matches runtime placement (0.0-0.1 %
+            of pixels differ). No bulge in the heights: the patch's weight-0 border lies on the ground.
+      - [ ] Stage 3: patches as part of the cell's terrain mesh (2026-11-21, works, too costly yet).
+            `TerrainStamp` (loader), `Terrain::stamps` + `AppendStampGeometry` at every mesh install (rebuild,
+            baked levels, prepared hand-off, cache load; the cache holds the grid only),
+            `TerrainManager::SetTerrainStamps` (set before build or cache load), `LandscapeDriver` supplies
+            them and keeps scan pieces only in far blocks. Points ~1 m apart on the placed shape at full
+            detail. `OrientTerrainSurfaceUp` now keeps down-facing triangles whose winding matches their
+            normals (overhangs). Terrain collision covers the grid only (`Mesh::collisionIndexCount`;
+            colliding with patches cost 24 ms of physics a frame).
+            Result: rock closes onto the ground, no gaps, spikes or hollow edges (`st_*.png`). Cost, 2560x1440,
+            scans → stamps: pieceA 15.5 → 15.4 ms, pieceC 18.4 → 22.4, Escarpment 21.7 → 26.7, Cliffs 15.7 →
+            40.2, old Cliffs 12.6 → 44.0. Open:
+            - [x] Dense cliff areas overran the terrain memory budget (264-byte vertices, ~24,000 patch
+                  vertices per cliff cell): cells unloaded and reloaded every frame (20-30 of 49 loaded).
+                  Fixed by simplifying the patches at bake time (`tools/stamp_simplify.py`: quadric half-edge
+                  collapses, so kept points stay original stamp points; the outline only slides along
+                  itself; levels at 0.2 / 0.4 / 0.8 m stamp-space error for the cell's full, half and
+                  quarter detail; stamp file version 2). Largest stamp 2,347 → 463 / 369 / 331 points. All
+                  49 cells load; 2560x1440, scans / unsimplified / simplified: Cliffs 15.7 / 40.2 / 20.4 ms,
+                  old Cliffs 12.6 / 44.0 / 17.1, Escarpment 21.7 / 26.7 / 21.7, pieceC 18.4 / 22.4 / 18.8,
+                  pieceA 15.5 / 15.4 / 17.6. Camera recording fell with the vertex count (Cliffs 15.9 → 8.6
+                  ms). The rock is more angular; fine relief is for the normal map (stage 4).
+                  Not used: the compact 48-byte terrain vertex with a paint map for the weights
+                  (`TerrainManager::compactCellVertices`, `Terrain::compactMesh`, off): cells install and
+                  draw but produce no pixels; cause not found (checked vertex shader, buffers, bounds,
+                  occlusion, pipeline layout, clips). Worth finishing for all terrain (5.5x less vertex
+                  memory).
+            - [ ] Camera recording is still above the scans' in every stamp view (Cliffs 4.9 → 8.6 ms,
+                  Escarpment 7.7 → 11.5); not explained.
+            - [ ] GPU terrain 1 → 3-5 ms. Measured 2026-11-21: one side projection and one layer on steep
+                  faces saves only ~0.4 ms (pieceC 4.7 → 4.3, Cliffs 3.6 → 3.3), so sampling is not the main
+                  cost; the rest is pixels: rock covers more screen than the scans' cheap material did, and
+                  overlapping pieces (a third along each band) plus the grid behind them are shaded over and
+                  over with no depth pre-pass. The fix is depth before shading for terrain ("Next" 7).
+            - [x] Vertical texture streaks on stamped rock (user report 2026-11-21: "lot of vertical lines in the
+                  stamped cliffs"): the side projection was chosen by the smoothed normal and its raw y, so
+                  downward faces and facets leaning away from their normals smeared the texture. Object.hlsl
+                  now follows the facet where it departs more than ~20 degrees from the normal and uses |y|;
+                  height-field terrain keeps the smooth selection. Cost unchanged (terrain 3.6 → 3.3 ms at
+                  Cliffs).
+            - [x] Bright vertical slivers: fold faces where a stamp stepped from an outer layer of rock to an
+                  inner one (the single-sheet limit). The bake now eases steps (`ease_steps` in
+                  `tools/bake_terrain_stamp.py`): inside the shape, points behind a jump are pulled out to a
+                  slope of at most 1:1 across the grid; in the 1 m band along the outline, points in front of a
+                  jump are pulled back instead (pulling them out stood thin points above the crest as needles,
+                  since the stamp direction leans up). Neighbour jumps over 0.5 m: 0.5-6.5 % → 0-3 %. The
+                  smoother surface also simplifies further (Mountainside finest level 375 → 234 points).
+                  Trade-off: recesses between stacked boulders (Cliff_Scan_01) become ramps.
+            - [x] Patch borders blend into the terrain behind the stamp (a march along the stamp's inward
+                  direction, up to 40 m) instead of the ground straight below, which under a tall piece's top
+                  edge is far down.
+            - [x] The terrain conforms to its cliffs (user, 2026-11-21: "seeing it load in normally then cliff
+                  placed on top rather than smoothly transitioning from ground to cliff"). Most stamps are
+                  near-vertical walls, so there is no mass under them to fill; their top edge stood above the
+                  hill behind as a fin. `conform_heights` (`tools/landscape_cliffs.py`, run by the builder after
+                  placement) extrudes each wall's top edge back into the hill: the ground rises to the top less
+                  1.5 m, holds 6 m, then falls back at 45 degrees; a low apron (up to 3 m, 12 % of the wall)
+                  fades over 8 m at the foot; nothing is raised above a rock surface over it or lowered; ground
+                  under rock is painted rock, aprons scree. 58,663 samples raised (mean 4.4 m, max 40.6 m),
+                  sculpt edits untouched. 2560x1440: pieceA 15.3 ms, Cliffs 15.4, farA 19.4, farB 21.3, 450 m
+                  out 17.2. Not checked yet: a moving capture across the far/near hand-off (the drive went into
+                  a canopy). Far cells still draw scan pieces on the far tiles (which now carry the shoulder),
+                  so a shape change at ~400 m remains until far cells get stamps (stage 5).
+            - Status 2026-11-21 after easing (2560x1440, scans → stamps): Cliffs 15.7 → 15.0 ms, old Cliffs 12.6 →
+              13.8, pieceC 18.4 → 16.5, pieceA 15.5 → 16.6; from 120 m (new poses farA, farB in the scratch
+              pose list): farA 19.1 → 18.5, farB 26.9 → 20.8. From 120 m the stamps read as dark rounded rock
+              set into the hillside, without the scans' layered colour and relief: stage 4.
+            - [ ] Far cells still draw scan pieces; patches there need the cell's far levels.
+      - [x] Stage 4: the scans' own surfaces on the stamps (2026-11-21). The scans' textures are UV atlases
+            (many islands), so patch triangles cannot sample them through per-point UVs; instead
+            `tools/stamp_textures.py` (run by the bake; needs Pillow) renders each scan straight on along
+            its stamp direction into 1024 px images over the stamp grid: colour, roughness, and the scan's
+            normal (mesh normal bent by its normal map) in the stamp's own axes, plus a `.material`
+            (`Assets/TerrainData/Stamps/*`, ~4 MB). The terrain packs them as extra layer-array slices after
+            the six paint layers (`TerrainLayerArrays::MaxSlices` 16, `Terrain::stampMaterials`,
+            `TerrainManager::SetTerrainStampMaterials`, one shared set for all cells); patch vertices carry
+            their stamp texcoord, slice and weight (uvChannels4) and the stamp axes (tangent,
+            uvChannels0.zw/1.z); Object.hlsl blends colour, normal, roughness and occlusion over the terrain
+            by the weight, so the outline still meets the paint. Bug found on the way (user: "cliffs had grass
+            material"): on the cell-cache load path the patches were built before the cell's layers were
+            read, so they pointed at the paint layers' slices. 2560x1440: pieceA 14.5 ms (scans 15.5),
+            Cliffs 15.2, farA 18.4, farB 20.8, 450 m 17.2.
+            - [x] The stamps read 2-3x darker than the scans when lit from the front (rock-to-meadow
+                  luminance 0.22 against 0.58 at farB; back-lit they matched). Not the long-range height-grid
+                  shadow (skipped for stamp surfaces now anyway: the grid does not know them), not the normals
+                  (checked by drawing them), not occlusion. Two causes fixed: the bake multiplied the scan
+                  material's tint into sRGB values (the engine applies it in linear light, so red came out at
+                  0.52 instead of 0.74), and stamp surfaces went through the terrain's cheap lighting pass
+                  (flat ambient, Lambert sun); they now take the full lighting the scans had. Front-lit 0.22 →
+                  0.37 (scans 0.58), back-lit 1.75 → 1.91 (scans 1.64). The rest of the gap is not explained.
+      - [x] Stage 5: no scan pieces anywhere (2026-11-21). Far blocks (and cells outside the play area,
+            which keep runtime placement) place stamp proxies instead: `write_proxy` in
+            `tools/bake_terrain_stamp.py` writes each stamp's three simplified levels as an ordinary mesh
+            (`Assets/Models/Woodland/Stamps`, prefabs in `Assets/Prefabs/Woodland/Stamps`) with the stamp's
+            baked material; vertex normal = stamp direction and tangent = its u axis, so the normal image
+            (in stamp axes) shades it. Same placements and transforms as the terrain stamps, so a cell's
+            cliff keeps its shape and surface when it comes into range (`CliffPrefab` in
+            `LandscapeDriver.cpp`). The photo scans are bake sources only. Checked from 650 and 800 m up:
+            proxies stand where the scans stood; frame times within noise. Not checked: a moving run across
+            the hand-off at ~450 m.
+            - [ ] Moving check 2026-11-21 (`--capture-every 15` on a drive from 720 m, new capture option):
+                  the hand-off at ~450 m still jumps. Before it the escarpment face is the far tiles' pale
+                  macro colour with a few scattered proxies; after it a continuous dark rock band (stamps on
+                  rock-painted terrain). Two causes: the far blocks hold only some of the cliff pieces (as they
+                  did with the scans), and the macro colour map paints the face pale rock, not the stamps'
+                  colour.
+                  - Findings 2026-11-21: the far blocks did hold every piece. With far terrain on, streaming
+                    stops at `loadedRadius` (`TerrainManagerEditing.cpp`: 49 cells, all stride 1); everything
+                    past 384 m is far tiles, one quad per 128 m cell. That turned each escarpment into a smooth
+                    slope standing in front of its proxies, and it is why cliffs look flat at a distance.
+                    (Disabling a far tile's object does not stop it drawing, so a "hide far tiles" test
+                    proved nothing.)
+                  - [x] Macro maps carry the stamps: stamp materials have `terrainMacroColor` (linear mean
+                        albedo, `tools/stamp_textures.py`); `ComputeMacroColors` paints each listed piece's
+                        stamp colour and wall facing into the 16 m colour and normal maps (no more pale
+                        sun-facing slope).
+                  - [x] Far-grid patches: every cliff cell's full-resolution (conformed) heights go into
+                        `world.fargrid` (`write_archive`), so far tiles keep the escarpment's height and shape
+                        (`.local/terrain-stamps/far_patch2.png`). Up to 300 x 2,048 triangles; cost not timed
+                        (single static runs too noisy).
+                  - [x] No proxies in listed cells (`GenerateCliffs`); the edge fade to the macro colour skips
+                        stamp pixels (Object.hlsl).
+                  - [x] Far stamps (`TerrainManager::farStampRadius`, default 8 cells; `ENGINE_FAR_STAMPS=<n>`
+                        overrides for A/B, 0 = off; `TerrainManagerFarStamps.cpp`): each stamped cell the far
+                        terrain draws gets its stamps as one runtime mesh (`Terrain::BuildStampSurface`,
+                        coarsest stamp level, built on a worker from the procedural builder), shaded as terrain
+                        with the loaded cells' layer arrays (`TerrainBatchAppearance`), hidden while the cell is
+                        loaded. Static check either side of the 384 m border at 1440p: the same rock on both
+                        sides (`.local/terrain-stamps/handoff_static.png`); at 450 m the escarpment is rock, not a
+                        smooth brown wall (`far_stamps1.png`). Cost at the 450 m view, 1920x1080, interleaved
+                        A/B x2: frame 16.7 → 17.5 ms (terrain GPU 1.0 → 1.65 ms, shadows +0.1, other opaque
+                        +0.2); memory +150-250 MB. A coarser stamp level does not help (tolerance 0.8 → 3 m: 488
+                        → 463 triangles; the outline dominates).
+                  - [ ] Far stamp cost: they take the full lighting path (as near stamps do) and draw over
+                        the far tile; candidates are cheaper lighting past ~600 m, or cutting the far patch
+                        under the stamps.
+                  - [ ] A moving check of the hand-off once drives are okayed again.
+            - [ ] Sculpted cells, replacing stamps (user 2026-11-21: "it looks like you placed the old cliffs
+                  there instead of morphing the terrain"). Seen from above the stamps were overlapping shells
+                  (36 pieces within 40 m at the test escarpment), cutting through each other with gaps, their
+                  textures smeared wherever the rock turned away from each piece's bake direction
+                  (`.local/terrain-stamps/top_cliff.png`). Prototype on cell 0,-6 (`tools/cliff_sculpt.py`):
+                  a 0.5 m grid on 6 m-smoothed ground, each point marched along its normal to the outermost
+                  surface of ground and scans (KD-tree over points sampled on the scans), simplified to three
+                  levels with the 4 m border locked (`stamp_simplify.simplify_levels(locked=)`), rock images
+                  baked from the scans. Engine: `TerrainSculpt` (`.sculpt`), carried as a stamp instance; the
+                  cell's surface replaces its grid triangles (`Terrain::AppendStampGeometry`), shaded through
+                  the stamp path with world-space normals. First result: one connected surface, no shards or
+                  gaps, but texture streaks on walls from ground-plan texcoords; texcoords spread by surface
+                  distance only turned them into swirls (each texel took its nearest scan point, which jumps
+                  about on a surface that is not quite the scans'). Option 2 (user's choice): no per-cell bake;
+                  a seamless rock tile cut from the Mountainside_01 stamp's face-on images where it is flattest
+                  (`tools/cliff_rock_texture.py`, 13.8 m repeat; the scans' UV islands are at most ~420 px),
+                  projected from three sides in Object.hlsl (whiteout normal blend), tinted per vertex by the
+                  scans' blurred colour; grid 0.25 m. `.sculpt` v2: tint instead of texcoord, tiling in the
+                  header.
+                  - [x] Whole escarpment: cells -1..1,-6 (`python tools/cliff_sculpt.py -1,-6 0,-6 1,-6 --only X,Z`
+                        runs them in parallel, ~10 min each). Pieces sampled with a per-piece seed and every
+                        point locked on borders shared by sculpted cells: borders identical at all three
+                        levels (513 points, height difference 0). Top and side views against the stamps:
+                        `.local/terrain-stamps/esc_top_vs.png`, `esc_side_vs.png`; borders `seams.png`.
+                  - [x] Cost: the CPU occlusion buffer rasterized the sculpts' full meshes (+190k triangles,
+                        frame +1.2 ms); `Mesh::occluderIndices` now gives it the coarsest level. Interleaved
+                        A/B (`ENGINE_SCULPTS=0` keeps the stamps), escarpment side view 1920x1080: frame 18.1 /
+                        17.1 ms against 18.5 / 19.5 ms with stamps; terrain GPU 2.1 against 3.0-3.3 ms.
+                  - [ ] Shared borders still turn the march directions vertical (the 8 m `EDGE` band), which
+                        streaks the rock along them; only borders with grid cells need it.
+                  - [ ] From the side the sculpt is one even wall: the outermost surface hides the gaps and
+                        shadows between pieces that gave the stamps their blocky look.
+                  - [ ] Fine folds (marched rays crossing) show as small bright slivers.
+                  - [ ] Moving drives (`cl_drive_v2`) froze three times around frame 410 with process memory
+                        climbing past 18 GB (GPU hang suspected); static captures are fine. No drives until the
+                        user okays them.
+      - Order: after "Next" 1-2, as before; stage 1 can start any time.
+
+### To investigate
+
+- [x] Detail budget sits at its 0.6 floor on every landscape view. Answered 2026-11-21: it measures geometry
+      at 14-15 ms against a 6 ms budget and CPU recording at ~10.6 against 4, and its whole range (scale 0.6-1)
+      changes predicted cost by under 10 %, so nothing it controls can reach the budget. "Next" 6 replaces it
+      as the level policy.
+
+### Foliage and world realism / Foliage Phase 7 (superseded 2026-11-22 by "Cliffs as sculpted terrain")
+
+- [ ] Cliff follow-ups: a proper wide viewpoint (the capture pose ended up behind a piece; the existing
+      "Cliffs" viewpoint is too close under the slope); 2k textures stretched 4x are soft up close (use 4k
+      or add a triplanar detail layer); colour match to terrain rock is a tint only; bare steep slopes
+      where rock paint is under the threshold; pieces per cell (40) and their LOD0 cost not profiled.
+- [ ] **Not yet a continuous cliff line** (2026-11-21: the plan for this is "Cliffs as terrain stamps" under
+      "Next"; user: "repetitive flat/steep terrain, nothing like the rocky edge of a
+      mountain"): the generated pieces read as separate rounded lumps (one radial shape each), the strata
+      pattern looks like honeycomb, and slopes whose rock paint is below the threshold stay bare. Generated
+      shapes have hit their limit, and the scanned rock faces (above) read as real rock but still as an
+      outcrop. Next: ledges/terraces carved into the height archive (`build_landscape_demo.py`) so the
+      scans sit on a real break in the slope, and rock on the bare steep slopes.
+
+### Grass / Grass Phase 6½: Antialiasing
+
+- [x] **MSAA** (`AntiAliasingSettings::msaaSamples` 1/2/4/8, Preferences > Effects > MSAA; default off).
+      Renderers lower an unsupported count to the nearest supported one.
+  - **DX11:** game renderer follows the setting live (`ApplyLiveSampleCount`, video export keeps its
+    own count); editor views (`D3D11View`) follow it too (they were fixed at 4x before, so they now
+    default to 1x + FXAA). Multisampled depth is now readable: typeless + `Texture2DMS` SRV, and the
+    depth copy has a `Texture2DMS` variant, so AO and the depth-aware sky/haze keep working.
+  - **DX12:** `D3D12PipelineState` keeps its description and builds a variant per sample count on
+    first use (`ForSamples`); `D3D12GraphicsContext::SetPipeline` picks the bound scene target's count
+    (`DX12PostProcess::BoundSceneSamples`, set by BindScene/RebindScene, 1 after Compose; always 1 in
+    depth-only passes). `DX12PostProcess` renders into a multisampled target and resolves at compose.
+    Depth is multisampled; `CopySceneDepth` copies sample 0 with its own compute root signature/PSO
+    (`CopyTextureRegion` cannot read MSAA depth), then restores the shared texture descriptor heap.
+    Game renderer flushes and recreates on a change; editor views (`D3D12View`) retire old targets
+    for 4 renders instead (frames in flight).
+  - [ ] **Vulkan:** not yet (renders without MSAA).
+  - Checked on grass_test.scene: DX11 and DX12 4x give clean blade edges; AO runs under MSAA on both;
+    no DX12 device errors. With auto exposure on, DX12 MSAA captures at 120 warm-up frames looked
+    darker: a start-up adaptation transient (converges to the same level by 600 frames; identical
+    with `ENGINE_AUTO_EXPOSURE=0`).
+  - [ ] Not yet exercised: live MSAA switching in the editor's DX12/DX11 views (captures use the game
+    renderer).
+  - Diagnostics for captures: `ENGINE_MSAA`, `ENGINE_FXAA`, `ENGINE_GRASS_MIN_WIDTH`,
+    `ENGINE_AUTO_EXPOSURE` override the project settings in the game/capture tool.
+- [x] **TAA** (`AntiAliasingSettings::taa`, `taaFeedback` 0.75–0.97, `taaSharpen` 0–1; Preferences >
+      Effects; on by default since Foliage Phase 1b, with the Balanced preset (Performance: off, Quality:
+      MSAA 4x); mutually exclusive with MSAA in the UI, MSAA wins if both are set).
+  - **Jitter:** SceneRendering offsets the main view's projection by a Halton(2,3) 8-sample sub-pixel
+    sequence, per camera (`SceneRenderer::m_temporalViews`), only when the backend reports
+    `IGraphicsContextFactory::SupportsTemporalAntiAliasing()` (DX11, DX12), single-sample, perspective.
+  - **Reprojection:** one matrix, previous unjittered view-projection × inverse(current), in double,
+    carried in `PostProcessSettings` (so it also travels in the game's render packets). History is
+    invalid after a resize or on a camera's first frame.
+  - **Resolve** (`PostProcess.hlsl` `TemporalResolvePS`, before bloom/exposure): reprojects the
+    nearest depth in the 3×3 neighbourhood, clips history to the neighbourhood's YCoCg spread (no
+    per-object motion vectors, so this is what stops animated grass ghosting), blends on
+    luminance-compressed colour, and lowers the history weight with motion. Result goes to one of two
+    history targets and is copied into the scene colour, so bloom/exposure/compose are unchanged.
+  - **Sharpening:** compose applies a 4-tap unsharp mask after TAA (`temporal.z`).
+  - `PostProcessConstants` grew 64 → 80 bytes (`temporal` float4); all backends size it with
+    `sizeof` (Vulkan push constants stay well under the 128-byte minimum).
+  - DX11: history in `DX11PostProcess`; game renderer and editor views (`D3D11View`, depth now
+    typeless + SRV) hand it their depth. DX12: two history targets/RTVs and two descriptor tables
+    (scene, history, depth) in `DX12PostProcess`; depth goes DEPTH_WRITE → PIXEL_SHADER_RESOURCE
+    around the pass.
+  - Checked on grass_test.scene: static camera converges to clean edges on DX11 and DX12 (DX11
+    high-frequency energy 14.4 → 8.3); a turning camera (`--look-yaw 6`) shows no ghost copies or
+    trails, sky and clouds crisp, grass softer while moving (sharpening helps). Cost on the iGPU:
+    ~+1 ms DX11, ~+0.05 ms DX12 at 960×540. No DX12 device errors.
+  - [ ] Vulkan: not supported yet (no jitter is applied there).
+  - Override for captures: `ENGINE_TAA=0|1`.
+
+### Landscape look / 0. Baseline + test shot (CPU items)
+
+  - [x] `SceneTextureFootprints::Request` projected every instance into the camera and all shadow cascades on one
+    thread (3.8 ms). Now split into 512-instance chunks on RenderJobs: 1.0 ms. New capture fields
+    `render_material_draw_loop_ms`, `render_material_footprint_ms`, `render_material_record_upload_ms`.
+  - [x] Frame item preparation did two `dynamic_cast` component scans per object per frame (~3.8k objects); terrain
+    components now come from `FrameComponentLookup`: `prepare_items_ms` 4.3 -> 3.3.
+  - [x] Sampling profiler without admin rights: `GameBackendCapture --cpu-sample` samples every thread during the
+    measured frames and writes `<out>/cpu-profile.txt` (per-thread inclusive/exclusive + caller chains;
+    `.local/tests/CpuSampler.h`). Adds sampling overhead: use it to find hotspots, not for timings.
+  - [x] Biggest finding: no shader cache. Object.hlsl entry points take ~21–23 s each in fxc (Water.hlsl PSMain 25 s),
+    so every launch spent 60–100 s compiling and the compiles were still running on the job workers during
+    measurement, starving the frame's parallel work. Added a persistent DX11/DX12 bytecode cache
+    (`Renderers/D3DShaderCache`, key = preprocessed source incl. all includes + entry/target/flags/compiler version;
+    `%TEMP%/EngineShaderCache`, `ENGINE_SHADER_CACHE_DIR`, `ENGINE_SHADER_CACHE=0`). Warm startup 65.6 s -> 1.8 s.
+  - [x] Particle rendering scanned every object with `GetComponent<ParticleEmitter>` four times per frame (~15% of
+    the simulation thread) in a scene without emitters; now uses the component registry.
+  - [x] Remaining per-draw `GetComponent<Terrain/TerrainBatchAppearance>` in Render/PrepareTerrainMaterial use the
+    frame item's `terrainSurface` flag.
+  - [x] Standalone game publishes scene snapshots without per-object contents (only the editor reads them):
+    simulation update 3.6 -> 2.3 ms.
+  - [x] `Material::Validate` (0.75 ms, cache misses over ~40 fields of each large per-object Material) now runs as a
+    parallel pre-pass over the frame lookups before the serial item loop: 0.15 ms. Prefab LOD materials still
+    validate inline. Shader prewarm dedupe no longer builds a `tuple<string,string,bool>` per item (transparent set).
+  - [x] Texture footprints re-project each 512-instance chunk every 4 frames (staggered, per view; last result is
+    re-submitted in between) via `Rendering/TextureFootprintCache` owned by the Scene: 2.55 -> 1.5 ms, same
+    residency. Remaining: the parallel join (~60%), serial gather, `RequestGraphicsFootprint` mutex per texture slot
+  - [x] `TerrainLayerArrays::Acquire` built a string key (paths + formatted tints) per terrain draw per frame; now
+    an identity fast path (texture pointers + tints, weak refs guard address reuse). `PrepareTerrainMaterial`
+    looked up the parent TerrainManager twice. Material draw loop 1.3 -> 0.9 ms
+  - [x] GrassField visibility loop: per-frame `std::set` of desired tiles replaced by a refresh serial, tile Material
+    cached (was a component scan per tile): grass 0.94 -> 0.42 ms with ~1000 active tiles. Captures now carry
+    `grass_*_ms` phases
+  - [x] Hotspots listed here on 2026-11-16 (item preparation, TerrainObjectLayer::PreparePrefabInstances,
+    Material::PrepareTextures, BuildOcclusionSignature, TransformHierarchy::Prepare, TerrainManager::
+    UpdateFarObjects, heap allocation, `_NLG_Return2`) have each been cut: texture preparation and far objects
+    by the items in this section, the rest in the foliage CPU rounds (Foliage Phase 2). The current list is
+    "Next CPU steps" there
+
+### Landscape look / 1. Aerial perspective + height fog
+
+- [x] Shadowed in-scatter (light shafts): `ObjectFogSunVisibility` (Object.hlsl) marches the cascade shadow map
+  along the view ray in quadratically spaced segments (finer near the camera); each segment's analytic fog opacity
+  is weighted by one bilinear shadow tap, dithered per pixel with interleaved gradient noise (static: there is no
+  temporal pass yet). Only the sun-glow share of the in-scatter is shadowed (`ApplyAtmosphereFogShadowed`); fog past
+  the last cascade split is sunlit. The range uses the view-wide splits, so lighting bands do not cut shafts at
+  object edges. Settings: Light Shafts / Samples (1-32, default 8) / Strength, packed into `fog0.w` (no new
+  `ObjectGPUData` field). Opt-in: 8 samples cost ~2 ms GPU on the Vulkan vista (terrain 1.03 -> 1.97, leaves
+  4.26 -> 5.19 ms). `ENGINE_LIGHT_SHAFTS=0|N` overrides for A/B captures. `AtmosphereFogSettingsTests` covers
+  round trip, clamps and the `fog0.w` encoding. Checked: FXC ps_5_0 + DXC SPIR-V compile; on the vista the change
+  only darkens (forest within shadow range), no seams
+
+### Landscape look / 5. Sky computed from the sun
+
+- [x] Replace step 1's analytic fog with the aerial-perspective volume behind the same shader include:
+  `AtmosphereFog.hlsli` has a physical mode (fog0.w >= 100, packed by `ViewLighting::PackPhysicalAerialPerspective`)
+  used by objects, particles and outlines with no call-site changes; light shafts keep working
+  (`aerialPerspective` toggle, height fog otherwise). Deviation: it's analytic, not a froxel volume:
+  per-channel Rayleigh + Mie extinction with their own exponential height profiles integrated along the
+  ray, sun single scattering (Rayleigh + HG phases, sun illuminance at the camera) and Hillaire's
+  multiple-scattering term, combined as color*T + S*(1-T)/tau. Exact for the lower atmosphere at
+  terrain distances. A froxel volume needs 3D textures and a global texture slot, which the generic graphics
+  context doesn't have yet
+- [x] Volumetric clouds: `Shaders/Clouds/Clouds.hlsl`, a fullscreen pass blended (premultiplied) over the sky right
+  after it, so terrain and objects drawn later occlude it. Flat layer (base 2600 m, 1400 m thick, above the
+  1.9 km peaks), ray-marched per pixel (48 steps, jittered): 3D value-noise FBM shaped by a 2D weather/coverage
+  noise, cumulus profile (flat bases, threshold rising with height for domed tops), Worley billows and value-noise
+  edge erosion; 5-step light march toward the sun (Beer-Lambert with a multiple-scattering floor), two-lobe
+  Henyey-Greenstein phase, sky light brighter toward the tops; fades out toward max distance into the hazed sky.
+  Wind drifts the field. `SceneSettings::volumetricClouds` (coverage, density, base, thickness, shape scale, edge
+  detail, wind speed/direction, sky light colour/intensity, sun intensity, steps, max distance), serialized, in
+  scene Properties > Atmosphere with tooltips, read every frame (live in the editor). Constants: 128 bytes in an
+  extra slot of the sky constant ring (`SceneRenderer::kCloudConstantSlot`), Vulkan SPIR-V built by CMake.
+  Enabled in landscape_demo. Sky pass (sky + clouds) 1.0-1.3 ms GPU on the vista, same on DX12/DX11/Vulkan
+  - [x] Cloud shadows on terrain and objects: a scrolling cloud-shadow cookie on the sun (Foliage Phase 3),
+    statistically like the clouds
+  - [x] Half-resolution march: `Clouds.hlsl` `CSMain` ray-marches one thread per half-res pixel into a structured
+    buffer (`SceneRenderer::m_cloudSamples`, retired on resize) in a compute pass before the sky
+    (`SceneRendererLighting::MarchVolumetricClouds`); `PSMain` upsamples it bilinearly (graphics slot 6, the lights
+    are rebound after). The grid size and step count are bit-packed into `shape.w` to stay within 128 bytes of
+    constants. New GPU stage `Clouds` (`gpu_clouds_ms`). Vista cost 1.33 ms -> 0.61 ms on DX12 (march 0.58 +
+    sky/composite 0.03), DX11 0.46, Vulkan 0.82; image nearly identical (edges marginally softer). Vulkan's
+    `StorageBarrier` now also covers fragment-shader reads (it only covered compute/vertex/indirect)

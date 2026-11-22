@@ -1,0 +1,20 @@
+{
+    "version": 1,
+    "baseColor": [
+        1.0,
+        1.0,
+        1.0
+    ],
+    "metallic": 0,
+    "roughness": 1.0,
+    "normalScale": 1.0,
+    "terrainUvScale": 1.0,
+    "terrainMacroColor": [
+        0.1532,
+        0.13104,
+        0.08131
+    ],
+    "baseColorTexture": "Assets/TerrainData/Stamps/RockFace_02_albedo.jpg",
+    "normalTexture": "Assets/TerrainData/Stamps/RockFace_02_normal.jpg",
+    "metallicRoughnessTexture": "Assets/TerrainData/Stamps/RockFace_02_rough.jpg"
+}

@@ -9,6 +9,7 @@
 #include "Core/Components/Terrain/Terrain.h"
 #include "Core/Components/Terrain/TerrainObjectLayer.h"
 #include "Core/Components/Terrain/TerrainSurfaceSample.h"
+#include <cstdlib>
 #include <glm/gtc/matrix_transform.hpp>
 #include "Core/Components/Materials/Material.h"
 #include "Core/Serialization/SceneSerializer.h"
@@ -110,6 +111,10 @@ GrassField::GrassField()
     RegisterField("tileSize", tileSize, "Tiles");
     RegisterField("shortPatchesPerSquareMeter", shortPatchesPerSquareMeter, "Tiles");
     RegisterField("tallPatchesPerSquareMeter", tallPatchesPerSquareMeter, "Tiles");
+    RegisterField("tallFieldDensity", tallFieldDensity, "Tall fields");
+    RegisterField("tallFieldSize", tallFieldSize, "Tall fields");
+    RegisterField("tallFieldCoverage", tallFieldCoverage, "Tall fields");
+    RegisterField("shortUnderTallShare", shortUnderTallShare, "Tall fields");
     RegisterField("seed", seed, "Tiles");
     RegisterField("maxTileBuildsPerUpdate", maxTileBuildsPerUpdate, "Tiles");
     RegisterField("castShadows", castShadows, "Lighting");
@@ -194,6 +199,11 @@ float GrassField::BushCluster(float x, float z) const
     return ThicketNoise(x, z, bushClusterSize, bushCoverage, 0x7c3e9a15u);
 }
 
+float GrassField::TallField(float x, float z) const
+{
+    return ThicketNoise(x, z, tallFieldSize, tallFieldCoverage, 0x51e7a3c9u);
+}
+
 float GrassField::ThicketNoise(float x, float z, float size, float coverage, uint32_t variant) const
 {
     // Two octaves of value noise; thickets are where it rises over a
@@ -251,7 +261,28 @@ GrassField::GetObjectLodProfiles() const
     return definitions;
 }
 
+// Runs every refresh of every field in range. Resolving the species lists
+// builds maps and strings (1.2-1.6 ms a frame over the landscape's fields),
+// so it is redone only when this field, its layer or the device changed.
 bool GrassField::LoadSources()
+{
+    auto* provider = Owner->GetScene()->GetGraphicsProvider();
+    const void* factory = provider ? provider->GetBufferFactory() : nullptr;
+    const uint64_t layerRevision = m_cachedLayer ? m_cachedLayer->GetConfigurationRevision() : 0;
+    // (Not reset when the scene's structure changes: every new grass tile
+    // changes it, and a layer's species only change with its revision.)
+    if (m_sourcesReady && m_sourcesFactory == factory && m_sourcesLayer == m_cachedLayer &&
+        m_sourcesRevision == GetConfigurationRevision() && m_sourcesLayerRevision == layerRevision)
+        return true;
+    m_sourcesReady = ResolveSources();
+    m_sourcesFactory = factory;
+    m_sourcesLayer = m_cachedLayer;
+    m_sourcesRevision = GetConfigurationRevision();
+    m_sourcesLayerRevision = layerRevision;
+    return m_sourcesReady;
+}
+
+bool GrassField::ResolveSources()
 {
     auto* provider = Owner->GetScene()->GetGraphicsProvider();
     auto* factory = provider ? provider->GetBufferFactory() : nullptr;
@@ -480,6 +511,10 @@ void GrassField::ClearTiles()
                 entry.second.object->enabled = false;
                 Owner->GetScene()->RequestRemoveObject(entry.second.object);
             }
+    if (Owner && Owner->GetScene())
+        for (auto& tile : m_freeTiles)
+            if (tile.object) Owner->GetScene()->RequestRemoveObject(tile.object);
+    m_freeTiles.clear();
     m_tiles.clear();
     m_build.reset();
     m_hasGenerationSignature = false;
@@ -616,8 +651,13 @@ uint64_t GrassField::ComputeGenerationSignature() const
     HashFloat(hash, bushClusterSize);
     HashFloat(hash, bushCoverage);
     HashFloat(hash, tileSize);
+    HashFloat(hash, fineReachFraction);
     HashFloat(hash, shortPatchesPerSquareMeter);
     HashFloat(hash, tallPatchesPerSquareMeter);
+    HashFloat(hash, tallFieldDensity);
+    HashFloat(hash, tallFieldSize);
+    HashFloat(hash, tallFieldCoverage);
+    HashFloat(hash, shortUnderTallShare);
     HashBytes(hash, &seed, sizeof(seed));
     HashBytes(hash,&allowProceduralGeneration,sizeof(allowProceduralGeneration));
     HashBytes(hash,&proceduralLayerMask,sizeof(proceduralLayerMask));
@@ -721,7 +761,11 @@ void GrassField::BeginBuild(Tile tile, int lod, uint64_t signature)
         const bool thickets = shrubCount && shrubPatchesPerSquareMeter > 0.f;
         const size_t bushCount = m_bushSpecies;
         const bool bushClusters = bushCount && bushesPerSquareMeter > 0.f;
-        const auto append = [&](const std::string& asset, float density, int cap)
+        const bool tallFields = tallFieldDensity > 0.f;
+        // thinInFields: the short patches give way to tall fields; inField:
+        // the tall fields' own placements, kept where the field is in.
+        const auto append = [&](const std::string& asset, float density, int cap,
+            bool thinInFields = false, bool inField = false)
         {
             const int count = std::clamp(static_cast<int>(std::round(
                 density * span * span)), 0, cap);
@@ -737,6 +781,10 @@ void GrassField::BeginBuild(Tile tile, int lod, uint64_t signature)
                 if (thickets && unit(rng) < .4f * ShrubThicket(p.position.x, p.position.z)) continue;
                 // Bushes shade out more of the grass beneath them.
                 if (bushClusters && unit(rng) < .5f * BushCluster(p.position.x, p.position.z)) continue;
+                // Extra randoms only with fields on, so other layouts stay unchanged.
+                if (thinInFields && tallFields &&
+                    unit(rng) < (1.f - shortUnderTallShare) * TallField(p.position.x, p.position.z)) continue;
+                if (inField && unit(rng) >= TallField(p.position.x, p.position.z)) continue;
                 if (!grows(p.position.x, p.position.z)) continue;
                 p.asset = asset;
                 p.position.y = SampleHeight(p.position.x, p.position.z, &p.normal);
@@ -747,8 +795,10 @@ void GrassField::BeginBuild(Tile tile, int lod, uint64_t signature)
         };
         // Caps are per 4 m tile; larger tiles (far rings) scale them.
         const float areaScale = std::max(1.f, span * span / 16.f);
-        append(shortMesh, shortPatchesPerSquareMeter, static_cast<int>(64 * areaScale));
+        append(shortMesh, shortPatchesPerSquareMeter, static_cast<int>(64 * areaScale), true);
         append(tallMesh, tallPatchesPerSquareMeter, static_cast<int>(32 * areaScale));
+        if (tallFields)
+            append(tallMesh, tallFieldDensity, static_cast<int>(48 * areaScale), false, true);
         // Accents grow in drifts. Each world cell of accentDriftSize favours
         // one species and has its own richness (some cells stay bare), so
         // flowers gather in patches instead of an even sprinkle. Cells are
@@ -789,8 +839,11 @@ void GrassField::BeginBuild(Tile tile, int lod, uint64_t signature)
         // ground there and thin out into the meadow at the edges.
         if (thickets)
         {
+            // The cap is per 8 m square of tile: a fixed 128 halved the
+            // forest floor's ferns once tiles grew to 16 m.
+            const int cap = static_cast<int>(128.f * std::max(1.f, span * span / 64.f));
             const int count = std::clamp(static_cast<int>(std::round(
-                shrubPatchesPerSquareMeter * span * span)), 0, 128);
+                shrubPatchesPerSquareMeter * span * span)), 0, cap);
             const float thicket = std::max(1.f, shrubThicketSize);
             for (int i = 0; i < count; ++i)
             {
@@ -827,8 +880,9 @@ void GrassField::BeginBuild(Tile tile, int lod, uint64_t signature)
         // cluster cell favours one species.
         if (bushClusters)
         {
+            const int cap = static_cast<int>(64.f * std::max(1.f, span * span / 64.f));
             const int count = std::clamp(static_cast<int>(std::round(
-                bushesPerSquareMeter * span * span)), 0, 64);
+                bushesPerSquareMeter * span * span)), 0, cap);
             const float cluster = std::max(1.f, bushClusterSize);
             for (int i = 0; i < count; ++i)
             {
@@ -932,7 +986,9 @@ bool GrassField::AdvanceBuild(Clock::time_point deadline)
         {
             const auto vertexCount = static_cast<uint32_t>(m_speciesVertices[species][lod]->size());
             const uint32_t instanceCount = species < job.speciesCounts.size() ? job.speciesCounts[species] : 0;
-            ranges.push_back({firstVertex, vertexCount, firstInstance, instanceCount});
+            // Species order: short, tall, accents, then shrubs and bushes.
+            ranges.push_back({firstVertex, vertexCount, firstInstance, instanceCount,
+                species < 2 + m_accentSpecies ? std::clamp(fineReachFraction, .05f, 1.f) : 1.f});
             firstVertex += vertexCount;
             firstInstance += instanceCount;
         }
@@ -1062,6 +1118,19 @@ bool GrassField::Refresh()
             const Tile key{x,z};
             auto& tile = m_tiles[key];
             tile.desiredRefresh = refresh;
+            if (!tile.object && !m_freeTiles.empty())
+            {
+                // Reuse a retired tile object: no scene structure change.
+                tile = m_freeTiles.back();
+                m_freeTiles.pop_back();
+                tile.desiredRefresh = refresh;
+                tile.desiredLod = 0;
+                tile.castsShadows = false;
+                tile.distanceSquared = tile.visibility = tile.appearance = 0.f;
+                tile.originHeight = SampleHeight((x + .5f) * span, (z + .5f) * span);
+                tile.object->transform.position = {x * span, tile.originHeight, z * span};
+                changed = true;
+            }
             if (!tile.object)
             {
                 char name[64];
@@ -1136,6 +1205,7 @@ bool GrassField::Refresh()
                 tile.mesh->screenLodHysteresis=layer->screenLodHysteresis;
             }
             tile.mesh->gpuLod1Distance=lod1; tile.mesh->gpuLod2Distance=lod2;
+            tile.mesh->perPlacementLod=perPlantDetail && m_useGpuLodSelection;
             // Keep caster eligibility stable. The shadow shader fades each
             // surface at the range edge; compute culls distant placements.
             const bool shadows = castShadows && shadowRadius > 0;
@@ -1184,7 +1254,27 @@ bool GrassField::Refresh()
         }
         else
         {
-            scene.RequestRemoveObject(it->second.object);
+            // Emptied and kept for reuse; removed only if it cannot be emptied.
+            it->second.visibility = it->second.appearance = 0.f;
+            it->second.mesh->SetRuntimeVisibility(0.f);
+            // ENGINE_GRASS_TILE_POOL=0 removes the object instead (for A/B runs).
+            static const bool pooled = []
+            {
+                const char* setting = std::getenv("ENGINE_GRASS_TILE_POOL");
+                return !(setting && setting[0] == '0');
+            }();
+            // The tile's meshes and placement buffers may still be drawn by
+            // the frame in flight: they leave on a carrier object that the
+            // scene releases behind the frame fence, as it would the tile
+            // object itself had it been removed.
+            auto carrier = pooled ? std::make_unique<Engine::Core::Object>() : nullptr;
+            if (carrier && it->second.mesh->ResetRuntimeLods(
+                    carrier->AddComponent<Engine::Components::Mesh>()))
+            {
+                scene.RetireRenderObject(std::move(carrier));
+                m_freeTiles.push_back(it->second);
+            }
+            else scene.RequestRemoveObject(it->second.object);
             it = m_tiles.erase(it);
         }
         changed = true;
@@ -1192,49 +1282,61 @@ bool GrassField::Refresh()
     checkpoint(m_performance.retirementMs);
     // Prioritize nearby missing tiles. Preparing placements installs all three
     // shared-source LODs together, so resident tiles require no further builds.
-    TileState* nearest = nullptr;
-    Tile selected{};
-    int selectedLod = -1;
-    bool urgent = false;
-    for (auto& [key, tile] : m_tiles)
+    // Several tiles per refresh, nearest first, within maxTileBuildsPerUpdate
+    // and the shared work budget. One per refresh left ~50 tiles waiting
+    // while walking the landscape (128 before the far ring was trimmed):
+    // grass and ferns appeared late, inside the radius, after their fade
+    // distance had passed. A tile costs ~0.01-0.15 ms to build.
+    const auto selectNearest = [&](Tile& selected, int& selectedLod, bool& urgent, bool count)
     {
-        if (tile.desiredRefresh != refresh) continue;
-        int missing = !tile.mesh->IsRuntimeLodResident(tile.desiredLod) ? tile.desiredLod : -1;
-        const bool required = missing >= 0;
-        if (missing < 0)
-            for (int lod = 0; lod < static_cast<int>(m_sourceMeshes.size()); ++lod)
-                if (!tile.mesh->IsRuntimeLodResident(lod)) { missing = lod; break; }
-        if (missing < 0) continue;
-        ++m_performance.pending;
-        if (!nearest || (required && !urgent) || (required == urgent &&
-            tile.distanceSquared < nearest->distanceSquared))
-        { nearest = &tile; selected = key; selectedLod = missing; urgent = required; }
-    }
-    if (m_build)
+        TileState* nearest = nullptr;
+        selectedLod = -1; urgent = false;
+        for (auto& [key, tile] : m_tiles)
+        {
+            if (tile.desiredRefresh != refresh) continue;
+            int missing = !tile.mesh->IsRuntimeLodResident(tile.desiredLod) ? tile.desiredLod : -1;
+            const bool required = missing >= 0;
+            if (missing < 0)
+                for (int lod = 0; lod < static_cast<int>(m_sourceMeshes.size()); ++lod)
+                    if (!tile.mesh->IsRuntimeLodResident(lod)) { missing = lod; break; }
+            if (missing < 0) continue;
+            if (count) ++m_performance.pending;
+            if (!nearest || (required && !urgent) || (required == urgent &&
+                tile.distanceSquared < nearest->distanceSquared))
+            { nearest = &tile; selected = key; selectedLod = missing; urgent = required; }
+        }
+        return nearest;
+    };
+    const int maximumBuilds = std::clamp(maxTileBuildsPerUpdate, 1, 64);
+    for (int builds = 0; builds < maximumBuilds; ++builds)
     {
-        const auto& tile = m_tiles.at(m_build->tile);
-        if (m_build->signature != signature || (urgent &&
-            m_build->lod != tile.desiredLod && tile.mesh->IsRuntimeLodResident(tile.desiredLod)))
-            m_build.reset();
-    }
-    const double spent = stats ? stats->Get().generationMs + stats->Get().uploadMs : 0.;
-    const double remaining = std::max(0., std::clamp(double(tileWorkBudgetMs), .1, 16.) - spent);
-    if (!m_build && nearest && remaining > 0.) BeginBuild(selected, selectedLod, signature);
-    checkpoint(m_performance.schedulingMs);
-    if (m_build && remaining > 0.)
-    {
-        const auto deadline = started + std::chrono::duration_cast<Clock::duration>(
+        Tile selected{};
+        int selectedLod = -1;
+        bool urgent = false;
+        TileState* nearest = selectNearest(selected, selectedLod, urgent, builds == 0);
+        if (m_build)
+        {
+            const auto& tile = m_tiles.at(m_build->tile);
+            if (m_build->signature != signature || (urgent &&
+                m_build->lod != tile.desiredLod && tile.mesh->IsRuntimeLodResident(tile.desiredLod)))
+                m_build.reset();
+        }
+        const double spent = (stats ? stats->Get().generationMs + stats->Get().uploadMs : 0.) +
+            m_performance.generationMs + m_performance.uploadMs;
+        const double remaining = std::max(0., std::clamp(double(tileWorkBudgetMs), .1, 16.) - spent);
+        if (!m_build && nearest && remaining > 0.) BeginBuild(selected, selectedLod, signature);
+        if (builds == 0) checkpoint(m_performance.schedulingMs);
+        if (!m_build || remaining <= 0.) break;
+        const auto deadline = Clock::now() + std::chrono::duration_cast<Clock::duration>(
             std::chrono::duration<double, std::milli>(remaining));
         const Tile key = m_build->tile;
-        if (AdvanceBuild(deadline))
-        {
-            auto& tile = m_tiles.at(key);
-            // Keep current geometry until the desired replacement is resident.
-            changed = ActivateTileLod(tile, tile.desiredLod) || changed;
-            if (tile.mesh->GetActiveRuntimeLod() < 0)
-                for (int lod = 0; lod < static_cast<int>(m_sourceMeshes.size()); ++lod)
-                    if (tile.mesh->IsRuntimeLodResident(lod)) { changed = ActivateTileLod(tile, lod) || changed; break; }
-        }
+        if (!AdvanceBuild(deadline)) break;      // out of budget: continues next refresh
+        auto& tile = m_tiles.at(key);
+        // Keep current geometry until the desired replacement is resident.
+        changed = ActivateTileLod(tile, tile.desiredLod) || changed;
+        if (tile.mesh->GetActiveRuntimeLod() < 0)
+            for (int lod = 0; lod < static_cast<int>(m_sourceMeshes.size()); ++lod)
+                if (tile.mesh->IsRuntimeLodResident(lod)) { changed = ActivateTileLod(tile, lod) || changed; break; }
     }
     checkpoint(m_performance.buildMs);
     for (const auto& [key, tile] : m_tiles)
@@ -1320,5 +1422,6 @@ float GrassField::DetailRadiusScale() const
     // work the GPU budget cannot see, so grass reach stays within half to
     // twice its authored radius.
     const int layer = Owner ? Owner->layer : 0;
-    return std::clamp(Engine::Rendering::DetailBudget::Get().LayerLodScale(layer), .5f, 2.f);
+    return std::clamp(Engine::Rendering::DetailBudget::Get().LayerLodScale(layer),
+        std::clamp(minimumRadiusScale, .25f, 2.f), 2.f);
 }

@@ -113,6 +113,7 @@ public:
             case Op::OcclusionDecision: break;
             case Op::BeginGpuTiming: target.BeginGpuTiming(static_cast<GpuTimingStage>(command.n[0])); break;
             case Op::EndGpuTiming: target.EndGpuTiming(static_cast<GpuTimingStage>(command.n[0])); break;
+            case Op::DebugMarker: target.SetDebugMarker(command.n[0]); break;
             case Op::Transition: target.TransitionResource(command.mutablePointer, static_cast<ResourceState>(command.n[0]), static_cast<ResourceState>(command.n[1])); break;
             }
         }
@@ -208,6 +209,7 @@ public:
     void EndOcclusionQuery() override { Add(Op::EndOcclusionQuery); }
     void BeginGpuTiming(GpuTimingStage stage) override { Add(Op::BeginGpuTiming).n[0] = static_cast<uint64_t>(stage); }
     void EndGpuTiming(GpuTimingStage stage) override { Add(Op::EndGpuTiming).n[0] = static_cast<uint64_t>(stage); }
+    void SetDebugMarker(uint64_t tag) override { Add(Op::DebugMarker).n[0] = tag; }
     void TransitionResource(void* resource, ResourceState before, ResourceState after) override
     { auto& c = Add(Op::Transition); c.mutablePointer = resource; c.n[0] = static_cast<uint64_t>(before); c.n[1] = static_cast<uint64_t>(after); }
     void* GetNativeHandle() const override { return nullptr; }
@@ -222,7 +224,7 @@ private:
         BeginDepthOnlyPass, EndDepthOnlyPass, ClearDepthRectangle, Viewport, Scissor, Clear,
         Draw, DrawIndexed, BeginOcclusionFrame, OcclusionDecision,
         BeginOcclusionQuery, EndOcclusionQuery,
-        BeginGpuTiming, EndGpuTiming, Transition
+        BeginGpuTiming, EndGpuTiming, Transition, DebugMarker
     };
     struct Command
     {

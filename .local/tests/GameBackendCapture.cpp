@@ -79,6 +79,10 @@ Engine::Game::GameBenchmarkOptions Parse(int argc, char** argv)
         else if (key == "--drive-forward") options.driveForwardFrames =
             Number(value(), "forward input frames", 100000);
         else if (key == "--drive-boost") options.driveBoost = true;
+        else if (key == "--moving-captures") options.movingCaptureGap =
+            Number(value(), "frames between the two moving snapshots", 1000);
+        else if (key == "--capture-every") options.captureEvery =
+            Number(value(), "frames between drive snapshots", 10000);
         else if (key == "--render-mode") options.renderMode =
             static_cast<int>(Number(value(), "render mode", 6, true));
         else if (key == "--max-fps") options.maxFpsOverride = Number(value(), "max fps", 1000, true);

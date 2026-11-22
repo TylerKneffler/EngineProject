@@ -417,7 +417,7 @@ void GameBenchmark::Record(uint64_t frame, const GameBenchmarkFrameSample& s)
     }
 }
 
-void GameBenchmark::Capture(Engine::Renderers::IGameRenderer& renderer)
+void GameBenchmark::Capture(Engine::Renderers::IGameRenderer& renderer, const char* fileName)
 {
     renderer.WaitIdle();
     std::vector<uint8_t> pixels;
@@ -431,12 +431,12 @@ void GameBenchmark::Capture(Engine::Renderers::IGameRenderer& renderer)
         (width != m_options.width || height != m_options.height))
         std::cerr << "Scene capture is " << width << 'x' << height << ", requested "
             << m_options.width << 'x' << m_options.height << '\n';
-    std::ofstream image(m_directory / "capture.ppm", std::ios::binary);
+    std::ofstream image(m_directory / fileName, std::ios::binary);
     image << "P6\n" << width << ' ' << height << "\n255\n";
     for (size_t i = 0; i < pixels.size(); i += 4)
         image.write(reinterpret_cast<const char*>(pixels.data() + i), 3);
     if (!image) throw std::runtime_error("failed to write capture image");
-    m_captureWritten = true;
+    if (std::string(fileName) == "capture.ppm") m_captureWritten = true;
 }
 
 bool GameBenchmark::Finish()

@@ -118,6 +118,7 @@ public:
     void BeginOcclusionQuery(uint64_t objectId) override;
     void EndOcclusionQuery() override;
     void BeginGpuTiming(Engine::Graphics::GpuTimingStage stage) override;
+    void SetDebugMarker(uint64_t tag) override;
     void EndGpuTiming(Engine::Graphics::GpuTimingStage stage) override;
 
     void TransitionResource(void* resource, ResourceState stateBefore, ResourceState stateAfter) override;

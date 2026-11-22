@@ -31,6 +31,8 @@ namespace Engine::Renderers
 // ---------------------------------------------------------------------------
 DX12GameRenderer::~DX12GameRenderer()
 {
+    // The report holds this device.
+    Engine::Renderers::GpuFailureHook() = {};
     FlushGPU();
     if (m_fenceEvent)
         CloseHandle(m_fenceEvent);
@@ -570,6 +572,7 @@ void DX12GameRenderer::CreateDevice()
         throw std::runtime_error(selectedDeviceFound
             ? "No D3D12-capable hardware adapter found."
             : "Selected graphics device is no longer available: " + m_graphicsDevice);
+    RegisterDeviceRemovedReport(m_device.Get());
     // With the debug layer on, its errors and warnings also go to stderr
     // (headless tools such as GameBackendCapture have no debugger output).
     if (debugLayerActive)

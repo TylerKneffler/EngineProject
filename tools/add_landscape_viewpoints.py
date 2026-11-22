@@ -11,8 +11,13 @@ existing "Vista":
   Trail        on a forest trail
   Cliffs       below the steepest slope within reach
   MeadowSlope  a sunlit meadow slope with a forest edge and a valley beyond
-  Escarpment   in the meadow in front of the escarpment
-               (build_landscape_demo.py ESCARPMENT), looking at its face
+  Escarpment   in front of the escarpment (build_landscape_demo.py
+               ESCARPMENT), hovering where its face is in sight over the forest
+  ForestWall   in open meadow, a forest edge 60-90 m ahead, sun behind
+  FieldWalk    the start of a straight 240 m line over open meadow, for
+               judging grass while moving (--drive-forward 380 covers ~175 m
+               of it; the gaze follows the ground's mean slope, so the eye
+               stays 1-3 m above the grass the whole way)
 
 Forests are placed at runtime by LandscapeDriver from ForestMask (value noise
 over world metres); ForestMask/ForestBand below replicate it exactly, and
@@ -45,7 +50,7 @@ WATER, TREE_LINE, BLEND = -40.0, 950.0, 6.0
 # along the rotated +z axis), flattened onto the ground.
 SUN_PITCH, SUN_YAW = 1.0, 2.4
 SUN_FLAT = (-math.sin(SUN_YAW) * math.cos(SUN_PITCH), -math.cos(SUN_YAW) * math.cos(SUN_PITCH))
-NAMES = ("ForestEdge", "ForestFloor", "Backlit", "Trail", "Cliffs", "MeadowSlope", "Escarpment")
+NAMES = ("ForestEdge", "ForestFloor", "Backlit", "Trail", "Cliffs", "MeadowSlope", "Escarpment", "ForestWall", "FieldWalk")
 
 
 # --- LandscapeDriver.cpp ForestMask / ForestBand, bit for bit ---------------
@@ -256,6 +261,11 @@ def find_meadow_slope():
                    for d in (0, 12, 24, 40) for w in (-10, 0, 10)
                    for sx, sz in ((-dz, dx),)):
                 continue
+            # Sunlit: no forest within 30 m toward the sun of the camera or of
+            # the grass ahead (the first pose stood in an edge tree's shade).
+            if any(wooded(x + dx * d + sun[0] * s, z + dz * d + sun[1] * s) > 0.05
+                   for d in (0, 15, 30) for s in (10, 20, 30)):
+                continue
             # A forest edge 50-150 m away, within 55 degrees of the heading.
             edge = False
             for turn in (-0.95, -0.6, -0.3, 0.3, 0.6, 0.95):
@@ -284,33 +294,155 @@ def find_meadow_slope():
     return best[1], best[2]
 
 
+CANOPY = 22.0
+
+
+def sight_blocked(eye, target, step=8.0):
+    """True when ground or forest canopy stands between eye and target."""
+    ex, ey, ez = eye
+    tx, ty, tz = target
+    length = math.hypot(tx - ex, tz - ez)
+    count = max(2, int(length / step))
+    for i in range(1, count - 1):
+        t = i / count
+        x, z = ex + (tx - ex) * t, ez + (tz - ez) * t
+        top = ground(x, z) + (CANOPY if t * length > 4.0 and wooded(x, z) > 0.3 else 0.0)
+        if top > ey + (ty - ey) * t:
+            return True
+    return False
+
+
 def find_escarpment():
-    """Eye and target for the escarpment: standing on open ground in front
-    of the face, 150-320 m out, where the most of the face's length is in
-    view above the trees between (the highest clear spot wins), looking at
-    the middle of the face."""
+    """Eye and target for the escarpment: in front of the face, 150-500 m
+    out, where the most of the face is in sight over the ground and the
+    forest between (33 points on the face, ray-marched), looking at the
+    middle of the face. The foot of the face is forest, so the ground poses
+    see little of it; the eye is raised in 10 m steps, up to 50 m, until two
+    thirds of the points are in sight (a hovering viewpoint, like the start
+    pose). 2026-11-20: 19 of 32 at 50 m."""
     cx, cz = ESCARPMENT["centre"]
     fx, fz = ESCARPMENT["facing"]
-    best = None
-    for out in range(150, 321, 10):
-        for along in range(-200, 201, 20):
-            x, z = cx + fx * out - fz * along, cz + fz * out + fx * along
-            g = ground(x, z)
-            if g < WATER + 3.0 or not flat(x, z, 6.0):
-                continue
-            if any(wooded(x + dx, z + dz) > 0.05 for dx in (-12, 0, 12) for dz in (-12, 0, 12)):
-                continue
-            # Open ground for the first 60 m toward the face.
-            open_run = sum(1 for d in range(10, 61, 10) if wooded(x - fx * d, z - fz * d) < 0.3)
-            score = g + 4.0 * open_run - 0.03 * abs(along) - 0.02 * out
-            if best is None or score > best[0]:
-                best = (score, x, z, g)
-    if best is None:
-        raise SystemExit("no open ground in front of the escarpment")
-    _, x, z, g = best
-    # Aim at mid height of the face where it crosses the centre line.
+    height = ESCARPMENT["height"]
     foot = ground(cx + fx * 60.0, cz + fz * 60.0)
-    return (x, g + EYE, z), (cx, foot + 0.55 * ESCARPMENT["height"], cz)
+    # Points on the face itself: the face line swings and is cut by gullies,
+    # so each is found by walking in from the front until the ground reaches
+    # that height, then stepping 4 m back out.
+    samples = []
+    for along in range(-300, 301, 60):
+        for part in (0.15, 0.45, 0.8):
+            level = foot + part * height
+            for out in range(160, -200, -2):
+                x, z = cx + fx * out - fz * along, cz + fz * out + fx * along
+                if ground(x, z) >= level:
+                    samples.append((x + fx * 4.0, level, z + fz * 4.0))
+                    break
+    best = None
+    for lift in (0.0, 10.0, 20.0, 30.0, 40.0, 50.0):
+        for out in range(150, 501, 25):
+            for along in range(-200, 201, 40):
+                x, z = cx + fx * out - fz * along, cz + fz * out + fx * along
+                g = ground(x, z)
+                if g < WATER + 3.0 or (lift == 0.0 and wooded(x, z) > 0.05):
+                    continue
+                eye = (x, g + EYE + lift, z)
+                seen = sum(0 if sight_blocked(eye, sample) else 1 for sample in samples)
+                score = seen - 0.004 * out - 0.004 * abs(along)
+                if best is None or score > best[0]:
+                    best = (score, eye, seen, lift)
+        if best and best[2] >= len(samples) * 2 // 3:
+            break
+    if best is None:
+        raise SystemExit("no viewpoint in front of the escarpment")
+    _, eye, seen, lift = best
+    print(f"Escarpment: {seen} of {len(samples)} face points in sight, eye {lift:.0f} m above the ground")
+    return eye, (cx, foot + 0.45 * height, cz)
+
+
+def find_forest_wall():
+    """Open meadow with a forest edge 60-90 m ahead across the view and the
+    sun behind the camera: the pose for the forest edge row of the look
+    table (.md/todo.md), which is judged from 50-150 m."""
+    sun_length = math.hypot(*SUN_FLAT)
+    sun = (SUN_FLAT[0] / sun_length, SUN_FLAT[1] / sun_length)
+    best = None
+    for x, z in candidates(radius=1400.0, step=16.0):
+        g = ground(x, z)
+        if g < WATER + 4.0 or wooded(x, z) > 0.02:
+            continue
+        for k in range(16):
+            dx, dz = math.cos(k * math.pi / 8), math.sin(k * math.pi / 8)
+            if dx * sun[0] + dz * sun[1] > -0.3:
+                continue
+            if any(wooded(x + dx * d, z + dz * d) > 0.02 for d in range(0, 61, 10)):
+                continue
+            fan = total = 0
+            for turn in (-0.5, -0.25, 0.0, 0.25, 0.5):
+                ex, ez = dx * math.cos(turn) - dz * math.sin(turn), dx * math.sin(turn) + dz * math.cos(turn)
+                for d in (100, 120, 140):
+                    total += 1
+                    fan += wooded(x + ex * d, z + ez * d) > 0.9
+            first = next((d for d in range(60, 140, 5) if wooded(x + dx * d, z + dz * d) > 0.5), None)
+            if first is None or fan < total - 2:
+                continue
+            edge_ground = ground(x + dx * first, z + dz * first)
+            if abs(edge_ground - g) > 8.0:
+                continue
+            score = fan - 0.002 * math.hypot(x - START[0], z - START[1]) - 0.02 * abs(first - 80)
+            if best is None or score > best[0]:
+                best = (score, (x, g + EYE, z),
+                        (x + dx * first, edge_ground + 5.0, z + dz * first), first)
+    if best is None:
+        raise SystemExit("no forest wall found near the start")
+    print(f"ForestWall: forest starts {best[3]} m ahead")
+    return best[1], best[2]
+
+
+FIELD_WALK = 240.0
+
+
+def find_field_walk():
+    """Start and heading of a straight line over open meadow, FIELD_WALK
+    metres long: no forest within 14 m either side of it, no water, not into
+    the sun, and ground that stays close to the straight line between its
+    ends. The benchmark's explorer flies along its gaze, so the gaze is laid
+    along that line and the eye keeps 1-3 m above the ground."""
+    sun_length = math.hypot(*SUN_FLAT)
+    sun = (SUN_FLAT[0] / sun_length, SUN_FLAT[1] / sun_length)
+    headings = [(math.cos(a), math.sin(a)) for a in (k * math.pi / 8 for k in range(16))]
+    steps = [d * 10.0 for d in range(int(FIELD_WALK / 10) + 1)]
+    best = None
+    for x, z in candidates(radius=2600.0, step=16.0):
+        if wooded(x, z) > 0.02 or ground(x, z) < WATER + 4.0:
+            continue
+        for dx, dz in headings:
+            if dx * sun[0] + dz * sun[1] > 0.25:
+                continue
+            try:
+                if any(wooded(x + dx * d - dz * w, z + dz * d + dx * w) > 0.02
+                       for d in steps for w in (-14.0, 0.0, 14.0)):
+                    continue
+                heights = [ground(x + dx * d, z + dz * d) for d in steps]
+            except SystemExit:
+                continue
+            if min(heights) < WATER + 4.0:
+                continue
+            # The eye's line: 1.7 m above the ground at the start, parallel to
+            # the line between the ends, lifted so it clears every sample by 1 m.
+            fall = (heights[-1] - heights[0]) / FIELD_WALK
+            line = [heights[0] + fall * d for d in steps]
+            lift = max(1.0, max(h - l for h, l in zip(heights, line)) + 1.0)
+            clearance = [l + lift - h for h, l in zip(heights, line)]
+            if max(clearance) > 3.0 or abs(fall) > 0.2:
+                continue
+            score = -max(clearance) - 0.0006 * math.hypot(x - START[0], z - START[1])
+            if best is None or score > best[0]:
+                best = (score, (x, heights[0] + lift, z),
+                        (x + dx * 60.0, heights[0] + lift + fall * 60.0, z + dz * 60.0),
+                        max(clearance), fall)
+    if best is None:
+        raise SystemExit("no open field walk found near the start")
+    print(f"FieldWalk: eye at most {best[3]:.1f} m above the ground, slope {best[4] * 100:.0f} %")
+    return best[1], best[2]
 
 
 def viewpoint(name, eye, target):
@@ -358,6 +490,8 @@ def main():
         "MeadowSlope": ((slope[0], ground(*slope) + EYE, slope[1]),
                         (slope[0] + slope_view[0] * 60.0, ground(*slope) + EYE - 2.0, slope[1] + slope_view[1] * 60.0)),
         "Escarpment": find_escarpment(),
+        "ForestWall": find_forest_wall(),
+        "FieldWalk": find_field_walk(),
     }
 
     ET.register_namespace("components", NAMESPACE)
@@ -379,7 +513,8 @@ def main():
     # also covers the objects build_landscape_demo.py just wrote.
     scene_static.mark_static(objects)
     ET.indent(root, "  ")
-    SCENE.write_text(header + ET.tostring(root, encoding="unicode") + "\n", encoding="utf-8")
+    SCENE.write_text(header + ET.tostring(root, encoding="unicode") + "\n", encoding="utf-8",
+                     newline="\n")  # keep the scene's LF line endings
 
 
 if __name__ == "__main__":

@@ -62,6 +62,8 @@ TerrainManager::~TerrainManager()
 void TerrainManager::FenceBackgroundWork()
 {
     FenceFarObjectJobs();
+    for (auto& [cell, entry] : m_farStamps)
+        if (entry.job.valid()) entry.job.wait();
     if (m_macroJob.valid()) m_macroJob.wait();
     {
         std::lock_guard<std::mutex> lock(m_farPrepareMutex);
@@ -102,6 +104,31 @@ void TerrainManager::SetProceduralBuilder(std::function<void(Cell, Terrain&)> bu
 {
     InvalidatePrepared();
     m_proceduralBuilder = std::move(builder);
+}
+
+bool TerrainManager::UsesCompactCellVertices() const
+{
+    static const int forced = []
+    {
+        const char* setting = std::getenv("ENGINE_COMPACT_TERRAIN");
+        return setting ? (setting[0] == '0' ? 0 : 1) : -1;
+    }();
+    return !m_editorStreaming && (forced >= 0 ? forced == 1 : compactCellVertices);
+}
+
+void TerrainManager::SetTerrainStampMaterials(std::vector<std::string> materials)
+{
+    if (materials == m_stampMaterials) return;
+    InvalidatePrepared();
+    ClearFarStamps();
+    m_stampMaterials = std::move(materials);
+}
+
+void TerrainManager::SetTerrainStamps(TerrainStampProvider provider)
+{
+    InvalidatePrepared();
+    ClearFarStamps();
+    m_stampProvider = std::move(provider);
 }
 
 void TerrainManager::SetObjectLayerGenerator(ObjectLayerGenerator generator)
@@ -522,6 +549,9 @@ void TerrainManager::PrepareLoop()
             }
             else
             {
+                if (task.stamps) terrain->stamps = task.stamps(task.cell);
+                terrain->stampMaterials = task.stampMaterials;
+                terrain->compactMesh = task.compactMesh;
                 const bool baked = !task.bakePath.empty() && task.bakeSize &&
                     terrain->LoadCacheRange(task.bakePath,
                         task.cacheSignature, nullptr, task.bakeOffset,
@@ -552,10 +582,14 @@ void TerrainManager::PrepareLoop()
             if (cancelled()) continue;
             terrain->SetMeshLodStride(task.lodStride);
             result.terrain = terrain->TakePrepared();
-            result.terrain.bounds = Mesh::PrepareIndexedGeometry(
-                result.terrain.vertices, result.terrain.indices);
-            if (!result.terrain.bounds)
-                throw std::runtime_error("Invalid prepared terrain bounds");
+            // Compact meshes compute their bounds when installed.
+            if (result.terrain.compact.vertices.empty())
+            {
+                result.terrain.bounds = Mesh::PrepareIndexedGeometry(
+                    result.terrain.vertices, result.terrain.indices);
+                if (!result.terrain.bounds)
+                    throw std::runtime_error("Invalid prepared terrain bounds");
+            }
             result.objectLayers = std::move(task.preparedLayers);
             for (auto& [name, saved] : task.objectLayers)
             {
@@ -641,7 +675,7 @@ int TerrainManager::CommitPrepared(int centerX, int centerY, int radius,
             m_loaded.count(cell) ||
             std::abs(cell.first - centerX) > radius ||
             std::abs(cell.second - centerY) > radius ||
-            prepared.terrain.vertices.empty()) continue;
+            (prepared.terrain.vertices.empty() && prepared.terrain.compact.vertices.empty())) continue;
         int desiredStride = DesiredLodStride(cell, centerX, centerY);
         while (desiredStride > 1 &&
             (prepared.terrain.cellsX < desiredStride ||
@@ -920,6 +954,9 @@ void TerrainManager::LoadCell(Cell cell, int lodStride)
         static_cast<double>(cell.first) * cellsX * cellWidth, 0.0,
         static_cast<double>(cell.second) * cellsY * cellDepth};
     auto* terrain = object->AddComponent<Terrain>();
+    if (m_stampProvider) terrain->stamps = m_stampProvider(cell);
+    terrain->stampMaterials = m_stampMaterials;
+    terrain->compactMesh = UsesCompactCellVertices();
     const auto cachePath = GetCacheFilePath(cell.first, cell.second);
     const std::string bakePath = (m_runtimeBakeActive || requireRuntimeBake) &&
         Owner->GetScene()->HasStarted()
@@ -968,8 +1005,7 @@ int TerrainManager::DesiredLodStride(Cell cell, int centerX, int centerY) const
     const int distance = std::max(std::abs(cell.first - centerX),
         std::abs(cell.second - centerY));
     int stride = distance <= loadedRadius ? 1 :
-        distance <= lod2Radius ? 2 : distance <= lod4Radius ? 4 : 8;
-    // Match Terrain::SetMeshLodStride: unsupported strides otherwise consume
+        distance <= lod2Radius ? 2 : distance <= lod4Radius ? 4 : 8;    // Match Terrain::SetMeshLodStride: unsupported strides otherwise consume
     // the LOD/upload budget every frame without ever changing the mesh.
     while (stride > 1 && (cellsX < stride || cellsY < stride ||
         cellsX % stride || cellsY % stride)) stride /= 2;

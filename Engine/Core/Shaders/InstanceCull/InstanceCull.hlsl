@@ -143,12 +143,21 @@ void CSMain(uint3 id : SV_DispatchThreadID, uint3 group : SV_GroupID, uint3 thre
                 ? length(max(abs(worldCenter.xyz-constants.cameraPosition.xyz)-worldExtent,0.0))
                 : max(0.0,length(worldCenter.xyz-constants.cameraPosition.xyz)-radius);
             if(lodData.lod.w>0.0 && nearestDistance>=lodData.lod.w) continue;
+            // The placement's root (its translation) in world space.
+            const float4 rootLocal=float4(placement.row0.w,placement.row1.w,placement.row2.w,1);
+            const float3 root=float3(dot(world.sphere,rootLocal),dot(worldRow1,rootLocal),dot(world.lod,rootLocal));
+            // A range with a shorter reach (selection.w bits 16-25, in
+            // 1/1024ths; Object.hlsl draw.placementReach scales the same way)
+            // thins sooner and is gone by cameraPosition.w.
+            const uint reachBits=((uint)constants.selection.w>>16)&0x3ffu;
+            float4 thin=asfloat(lodData.meta);
+            if(reachBits!=0u)
             {
-                // The placement's root (its translation) in world space.
-                const float4 rootLocal=float4(placement.row0.w,placement.row1.w,placement.row2.w,1);
-                const float3 root=float3(dot(world.sphere,rootLocal),dot(worldRow1,rootLocal),dot(world.lod,rootLocal));
-                if(IsThinnedAway(asfloat(lodData.meta),root,constants.cameraPosition.xyz)) continue;
+                thin.xy*=(float)reachBits/1024.0;
+                if(constants.cameraPosition.w>0.0 &&
+                    length(root-constants.cameraPosition.xyz)>=constants.cameraPosition.w) continue;
             }
+            if(IsThinnedAway(thin,root,constants.cameraPosition.xyz)) continue;
             if(constants.selection.x>=0 && (constants.selection.w & 2)!=0)
             {
                 // Conservative per-placement bands. Shader dithering resolves the
@@ -162,9 +171,16 @@ void CSMain(uint3 id : SV_DispatchThreadID, uint3 group : SV_GroupID, uint3 thre
                     ? clamp(length(placement.row0.xyz),0.25,4.0) : 1.0;
                 // Shadow vertices are static. Color vertices can bend in wind,
                 // so retain their original conservative spherical envelope.
-                const float nearest=(shadowPass ? length(max(delta-worldExtent,0.0))
+                // Ground cover (bit 64, Mesh::perPlacementLod): Object.hlsl
+                // fades by the distance to the placement's root, so test
+                // exactly that. The bounds envelope is far wider than the
+                // few metres between ground cover levels and would draw
+                // plants only for the pixel shader to discard them.
+                const bool rootDistance=(constants.selection.w & 64)!=0;
+                const float rootRange=length(root-constants.cameraPosition.xyz);
+                const float nearest=rootDistance ? rootRange : (shadowPass ? length(max(delta-worldExtent,0.0))
                     : length(delta)-radius)/coverage;
-                const float farthest=(shadowPass ? length(delta+worldExtent)
+                const float farthest=rootDistance ? rootRange : (shadowPass ? length(delta+worldExtent)
                     : length(delta)+radius)/coverage;
                 // Object.hlsl picks each placement's band from the distance to
                 // its origin and dissolves the whole placement over

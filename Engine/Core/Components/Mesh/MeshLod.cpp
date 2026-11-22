@@ -215,5 +215,17 @@ void Mesh::ClearRuntimeLods()
     m_runtimeLodProgress = 1.f;
 }
 
+bool Mesh::ResetRuntimeLods(Mesh* receiver)
+{
+    // The holder in the active slot owns what this mesh held before the
+    // first selection (empty for meshes that only ever show runtime LODs).
+    if (m_activeRuntimeLod >= 0 && IsRuntimeLodResident(m_activeRuntimeLod) &&
+        !ExchangeStaticGeometry(*m_runtimeLods[m_activeRuntimeLod])) return false;
+    if (receiver && receiver != this) receiver->m_runtimeLods = std::move(m_runtimeLods);
+    ClearRuntimeLods();
+    MarkConfigurationDirty();
+    return true;
+}
+
 
 } // namespace Engine::Components

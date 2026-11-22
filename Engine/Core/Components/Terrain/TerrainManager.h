@@ -64,10 +64,34 @@ public:
     // farObjectBlockCells x farObjectBlockCells cells. Only placements whose
     // asset has a LOD chain take part. 0 disables.
     int farObjectRadius = 0;
+    // Far stamps: out to this radius (cells), cells with terrain stamps
+    // (cliffs) that the far terrain draws keep their stamps, at the coarsest
+    // stamp level and with the loaded cells' surface shading; far tiles have
+    // the heights but not the stamps. Needs the procedural builder. 0 (or
+    // not past loadedRadius) disables.
+    int farStampRadius = 8;
     // Main-thread time per update for installing streamed cells into the
     // scene. At least one cell commits each update; more only within this.
     float maxCommitMilliseconds = 2.f;
     int farObjectBlockCells = 8;
+    // Near object blocks: the prefab placements of the loaded cells are drawn
+    // by one layer per nearObjectBlockCells x nearObjectBlockCells cells (and
+    // layer name) instead of one per cell. A prefab batch is a scene object
+    // per mesh part and LOD level, and the frame's CPU cost follows how many
+    // exist (~2 ms per 1,000 on the landscape), while the GPU culls their
+    // placements one by one either way. The cells' own layers keep their
+    // placements and colliders. 1 (or less) keeps one batch set per cell.
+    // Game streaming only; the editor always draws per cell.
+    int nearObjectBlockCells = 1;
+    // Loaded cells keep their mesh in the compact terrain vertex format, with
+    // a paint map for the layer weights (Terrain::compactMesh). Cells with
+    // terrain stamps are many times the grid's vertices, and in the full
+    // format overran the memory budget (cells then unloaded and reloaded
+    // every frame). Game streaming; the editor keeps the full format.
+    bool compactCellVertices = false;
+    // compactCellVertices for game streaming; ENGINE_COMPACT_TERRAIN=0/1
+    // overrides it for A/B runs.
+    bool UsesCompactCellVertices() const;
     // Project layer for far object blocks (see Rendering::DetailBudget).
     std::string farObjectProjectLayer = "Trees";
     // Far forest clusters: far blocks beyond farClusterDistance (metres from
@@ -284,6 +308,14 @@ public:
     bool AddCell(int x, int y);
     bool AddProceduralCell(int x, int y);
     void SetProceduralBuilder(std::function<void(Cell, Terrain&)> builder);
+    // Terrain stamps for a cell (Terrain::stamps), set on every loaded cell
+    // before its mesh is built or read from a cache. Runs on streaming workers,
+    // so it may only read data that does not change while cells stream.
+    using TerrainStampProvider = std::function<std::vector<TerrainStampInstance>(Cell)>;
+    void SetTerrainStamps(TerrainStampProvider provider);
+    // The stamps' surface materials (Terrain::stampMaterials), the same list
+    // for every cell so they share one set of layer arrays.
+    void SetTerrainStampMaterials(std::vector<std::string> materials);
     // The surface a generated object layer may read.
     struct ObjectLayerContext
     {
@@ -445,7 +477,8 @@ private:
     std::set<Cell> m_editedProcedural;
     mutable std::set<Cell> m_dirtyProceduralEdits;
     std::function<void(Cell, Terrain&)> m_proceduralBuilder;
-    ObjectLayerGenerator m_objectLayerGenerator;
+    TerrainStampProvider m_stampProvider;
+    std::vector<std::string> m_stampMaterials;    ObjectLayerGenerator m_objectLayerGenerator;
     ObjectLayerSetup m_objectLayerSetup;
 
     // Far objects (TerrainManagerFarObjects.cpp).
@@ -453,6 +486,9 @@ private:
     {
         // Cell-local placements; asset is the far (last LOD) representation.
         std::vector<TerrainObjectLayer::Placement> placements;
+        // Far assets that stop drawing at a distance (cliff pieces: their
+        // layer's reach), by asset. Others draw as far as the far radius.
+        std::map<std::string, float> cullDistances;
     };
     struct FarObjectBlock
     {
@@ -470,6 +506,40 @@ private:
     };
     void UpdateFarObjects(int centerX, int centerY);
     void ClearFarObjects();
+    // Far stamps (farStampRadius): one runtime mesh per stamped cell, built
+    // on a worker, hidden while the cell itself is loaded.
+    struct FarStampGeometry
+    {
+        std::vector<Mesh::Vertex> vertices;
+        std::vector<uint32_t> indices;
+        float textureTiling = 16.f;
+    };
+    struct FarStampCell
+    {
+        Engine::Core::Object* object = nullptr;
+        std::future<FarStampGeometry> job;
+        bool empty = false;
+    };
+    std::map<Cell, FarStampCell> m_farStamps;
+    std::map<Cell, bool> m_stampCellKnown;
+    void UpdateFarStamps(int centerX, int centerY);
+    void ClearFarStamps();
+    struct NearObjectBlock
+    {
+        Engine::Core::Object* object = nullptr;
+        TerrainObjectLayer* layer = nullptr;
+        uint64_t membership = 0;
+        std::vector<Cell> members;
+        // Instances finished preparing since the last placement rebuild (latched).
+        bool prepared = false;
+    };
+    // Keyed by block (cell coordinates divided by the block size) and layer name.
+    std::map<std::pair<Cell, std::string>, NearObjectBlock> m_nearObjectBlocks;
+    void UpdateNearObjects();
+    void ClearNearObjects();
+    // True when every layer of the cell that a near block draws is drawn by a
+    // block that has finished building with that cell in it.
+    bool NearObjectsReady(Cell cell, const Terrain& terrain) const;
     void FenceFarObjectJobs();
     std::map<Cell, FarObjectCell> m_farObjectCells;
     // Loaded cells whose object layers finished preparing once, keyed to the
@@ -651,6 +721,9 @@ private:
         std::string bakePath;
         uint64_t bakeOffset = 0, bakeSize = 0;
         std::function<void(Cell, Terrain&)> builder;
+        TerrainStampProvider stamps;
+        std::vector<std::string> stampMaterials;
+        bool compactMesh = false;
         ObjectLayerGenerator layerGenerator;
         std::optional<Terrain::Prepared> prepared;
         bool preparedCacheHit = false;

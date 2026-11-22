@@ -54,6 +54,10 @@ def write_materials():
         # layer uses the constant roughness instead.
         if folder == "Grass004":
             del material["metallicRoughnessTexture"]
+        # Ground048 is rust red in sun (sRGB 108,69,41 on the landscape); the
+        # tint, baked into the layer's atlas slice, makes it leaf-litter brown.
+        if folder == "Ground048":
+            material["baseColorTextureTint"] = [0.85, 1.15, 1.3]
         (MATERIALS / f"{name}.material").write_text(
             json.dumps(material, indent=4) + "\n", encoding="utf-8")
 

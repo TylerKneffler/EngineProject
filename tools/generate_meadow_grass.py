@@ -569,22 +569,95 @@ def tall_grass_clump(detail):
     return mesh
 
 
+# Tall meadow grass (the reference meadows, `.local/reference-images/
+# chlorophyll-video/png`: knee- to waist-high fine blades as one mass that
+# hides the ground). The mass reads by its two tones: the depth between blades
+# is deep, shaded green and the sunlit tips are bright yellow-green, so roots
+# here are far darker than the short grass's. Blades are flat (two columns)
+# to keep the triangle count down at a density where patches overlap; coarser
+# levels keep fewer, wider blades.
+TALL_KEEP = (1.0, 0.6, 0.4)
+TALL_WIDEN = (1.0, 1.6, 3.0)
+TALL_SEGMENTS = (3, 3, 2)
+TALL_ROOT = (0.016, 0.036, 0.011)
+TALL_MID = (0.05, 0.10, 0.026)
+TALL_TIP = (0.16, 0.22, 0.07)
+TALL_SEED = (0.20, 0.22, 0.10)
+
+
+def fine_blades(mesh, rng, center, blades, height, crown, detail, lean_yaw, width=0.011,
+                dry_share=0.12):
+    """Long fine blades from one crown, mostly upright with arching tips,
+    leaning a little with the patch (lean_yaw) as wind-laid grass does."""
+    for _ in range(blades):
+        radius, angle = math.sqrt(rng.random()), rng.random() * 2.0 * math.pi
+        keep, length_jitter, rise_jitter = rng.random(), rng.random(), rng.random()
+        droop, dry, twist = 0.08 + 0.22 * rng.random(), rng.random(), (rng.random() - 0.5) * 1.4
+        yaw = angle + (rng.random() - 0.5) * 0.9
+        yaw = math.atan2(math.sin(yaw) + 0.6 * math.sin(lean_yaw), math.cos(yaw) + 0.6 * math.cos(lean_yaw))
+        if keep >= TALL_KEEP[detail]:
+            continue
+        base = add(center, (crown * radius * math.cos(angle), 0.0, crown * radius * math.sin(angle)))
+        rise = math.radians(86.0 - 24.0 * radius ** 1.5 - 10.0 * rise_jitter)
+        length_ = height * (0.6 + 0.45 * length_jitter) * (1.05 - 0.12 * radius)
+        tip = DRY_TIP if dry < dry_share else TALL_TIP
+        shade = 0.8 + 0.4 * ((length_jitter * 7.31 + rise_jitter * 3.17) % 1.0)
+        blade(mesh, base, yaw, length_, rise, droop, width * TALL_WIDEN[detail],
+              TALL_SEGMENTS[detail], root=TALL_ROOT, mid=TALL_MID, tip=tip, twist=twist,
+              columns=2, shade=shade)
+
+
+def wispy_seed_stem(mesh, base, yaw, height, lean, detail):
+    """A thin culm with a small, dull seed head: wisps above the mass, not
+    the pale panicles that read as leaves floating over the grass."""
+    top, axis = accents.stem(mesh, base, yaw, height, lean, 0.002, (3, 2, 2)[detail],
+                             root=TALL_MID, top=TALL_SEED)
+    spike = [add(top, mul(axis, 0.05 * i / 2)) for i in range(3)]
+    side = perpendicular(axis, horizontal(yaw + math.pi * 0.5))
+    mesh.ribbon(spike, [side] * 3, [0.004, 0.005, 0.002], [TALL_SEED, TALL_SEED, TALL_SEED])
+
+
+def meadow_tall_grass(detail):
+    """A metre-wide patch of tall meadow grass, ~0.7-1.05 m: seven crowns of
+    fine blades leaning one way, with a few wispy seed stems above them.
+    Placed at over one per square metre (GrassField tall fields), patches
+    overlap into a continuous mass that hides the ground except from steeply
+    above."""
+    rng = random.Random(8101)
+    # Half the wind response: the bend grows with blade length, and at full
+    # response the wind laid these blades flat, all one way.
+    mesh = Mesh(wind_response=0.5)
+    lean_yaw = rng.random() * 2.0 * math.pi
+    layout = [(rng.uniform(-0.45, 0.45), rng.uniform(-0.45, 0.45), rng.random()) for _ in range(7)]
+    for index, (x, z, size) in enumerate(layout):
+        fine_blades(mesh, random.Random(8200 + index), (x, 0.0, z), 44 + int(12 * size),
+                    0.7 + 0.35 * size, 0.08 + 0.05 * size, detail, lean_yaw)
+    stalks = random.Random(8300)
+    for base in accents.scatter(stalks, 4, 0.4):
+        yaw, height, lean, keep = (stalks.random() * 6.283, 0.95 + 0.25 * stalks.random(),
+                                   0.05 + 0.12 * stalks.random(), stalks.random())
+        if keep < (1.0, 0.6, 0.35)[detail]:
+            wispy_seed_stem(mesh, base, yaw, height, lean, detail)
+    return mesh
+
+
 def far_grass_tuft(detail):
-    """Cheap clump for the far grass ring (seen from ~12 m to 200 m): fourteen
-    wide, two-segment blades fanning from a broad crown, ~0.5 m tall and
-    ~0.9 m across, so that under one clump per square metre the ring reads as
-    continuous grass rather than separate tufts on bare ground. Every LOD is
-    the same mesh; at that range a blade covers a pixel or two."""
+    """Cheap clump for the far grass ring (seen from ~30 m to 200 m): eighteen
+    wide, two-segment blades fanning from a broad crown, ~0.55-0.8 m tall and
+    ~1 m across, in the tall grass's colours (dark roots, bright tips), so the
+    ring carries on the tall mass instead of flattening into a lawn. Every LOD
+    is the same mesh; at that range a blade covers a pixel or two."""
     rng = random.Random(7101)
-    mesh = Mesh()
-    for _ in range(14):
+    mesh = Mesh(wind_response=0.5)
+    for _ in range(18):
         radius, angle = math.sqrt(rng.random()), rng.random() * 2.0 * math.pi
         length_jitter, rise_jitter, dry = rng.random(), rng.random(), rng.random()
-        base = (0.38 * radius * math.cos(angle), 0.0, 0.38 * radius * math.sin(angle))
-        rise = math.radians(78.0 - 30.0 * radius - 10.0 * rise_jitter)
-        shade = 0.88 + 0.24 * ((length_jitter * 7.31 + rise_jitter * 3.17) % 1.0)
-        blade(mesh, base, angle + (rng.random() - 0.5) * 0.8, 0.38 + 0.22 * length_jitter, rise,
-              0.25, 0.075, 2, tip=DRY_TIP if dry < 0.15 else BLADE_TIP, shade=shade)
+        base = (0.42 * radius * math.cos(angle), 0.0, 0.42 * radius * math.sin(angle))
+        rise = math.radians(82.0 - 26.0 * radius - 10.0 * rise_jitter)
+        shade = 0.85 + 0.3 * ((length_jitter * 7.31 + rise_jitter * 3.17) % 1.0)
+        blade(mesh, base, angle + (rng.random() - 0.5) * 0.8, 0.55 + 0.25 * length_jitter, rise,
+              0.2, 0.08, 2, root=TALL_ROOT, mid=TALL_MID, tip=DRY_TIP if dry < 0.12 else TALL_TIP,
+              shade=shade)
     return mesh
 
 
@@ -946,6 +1019,7 @@ PLANTS = {
     "meadow_bush": (meadow_bush, "rounded broadleaf bush ~1.2 m with a solid crown core"),
     "meadow_bush_tall": (meadow_bush_tall, "upright oval bush ~1.7 m with a solid crown core"),
     "tall_grass_clump": (tall_grass_clump, "dense tall grass clump ~1.1 m with seed stalks"),
+    "meadow_tall_grass": (meadow_tall_grass, "1 m patch of tall fine meadow grass ~0.6-1.0 m with seed stems"),
     "far_grass_tuft": (far_grass_tuft, "cheap wide-bladed tuft for the far grass ring"),
     "forest_litter": (forest_litter, "fallen-leaf litter patch for the forest floor"),
     "forest_herb": (forest_herb, "broadleaf woodland herb rosette ~0.45 m"),
