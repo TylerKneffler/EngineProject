@@ -45,6 +45,17 @@ to land near, not to match to the digit.
       0.22 (ForestEdge), about a stop over the target. A higher floor (-3.5) brings it to 0.16 but turns the forest
       floor nearly black (whole frame 0.016); metering on the brighter 30 % makes MeadowSlope too dark (0.044).
       Needs metering that weights sunlit ground, or partial adaptation.
+      - [x] 2026-11-22 (agents/look): `autoExposure groundWeight` (0-1): the top third of the frame meters a fifth
+            as much, so the meadow meters alike whatever stands behind it; landscape: groundWeight 1,
+            outputExposure -0.25 -> -1. 2560x1440, meadow near / mid: ForestEdge 0.216 / 0.249 -> 0.060 / 0.100,
+            FieldWalk 0.101 / 0.104 -> 0.083 / 0.074, forest wall 0.065 -> ~0.04 (reference crowns 0.03-0.05).
+      - [ ] ForestEdge's near meadow is now a little under the target: try outputExposure -0.75. Forest interior
+            (ForestFloor whole frame ~0.01) not checked against the first reference set.
+- [x] **Understory foliage glowed in canopy shade** (user 2026-11-22: yellow-orange blades by a rock at
+      ForestFloor): the woodland pack's tall bush cards got FoliageTransmission's crown-scatter term (0.3 of the
+      sun when shaded, meant for a crown's own underside). `Material::foliageCrownScatter` (default 1); the pack
+      bush materials set 0. Blade area 99th percentile 0.204 -> 0.079 (`.local/foliage/ff_blades_fix3.png` in
+      agents/look); other foliage materials unchanged.
 - [ ] **Far forest texture and haze**: front-lit impostors are flat (no shadow between crowns) and there is no
       blue shift at 300-600 m. Needs occlusion baked into the impostor atlases (Foliage Phase 5) and a look at
       aerial perspective strength at short range.
@@ -417,8 +428,17 @@ at mid distance.
             bright yellow-green lit blades, with many 2-4 px white and yellow flower specks.
       - [ ] Density that closes over the ground at 1080p from eye height, within the grass budget:
             measure GPU grass time standing at MeadowSlope and the meadow walk (18.6-19.1 ms now).
-      - [ ] Root-to-tip shading and wind lean so the mass reads as depth (Grass Phases 3 and 6).
-      - [ ] The far grass ring matches the tall field's colour and silhouette at the 60 m hand-off.
+      - [x] Root-to-tip shading (2026-11-22, agents/look): PSGrassMain darkens the lower three quarters of
+            a blade (ambient floor 0.6 -> 0.4, sun 0.82 -> 0.45, backlight too); the mass has dark depths.
+            Wind lean not done.
+      - [x] Far ring in tall fields (2026-11-22): `far_tall_tuft` (0.75-1.05 m, 72 / 10 / 6 triangles with
+            the perf branch's far LOD scheme) at 0.9 per m² inside the meadow's tall fields, same field noise
+            (`ENGINE_LANDSCAPE_FAR_TALL=0` off). The far meadow keeps a tufted top instead of a lawn band.
+      - Cost of the agents/look changes on top of agents/perf (FieldWalk walk, interleaved): pair 1 18.1 vs
+        15.9 ms (camera and shadow record both up, a disturbed run), pair 2 15.8 vs 15.8 ms; grass GPU 8.63 /
+        8.33 vs 8.48 / 8.58 ms.
+      - [ ] Colour is closer (deeper green, darker depths) but still lighter and yellower than the
+            references at the tips; flower specks: scanned celandine/dandelion accents added (WIP, not judged).
       - [ ] Compare unscaled 1440p tiles (`hires.sh`) against the references at MeadowSlope and
             ForestEdge.
 - [x] **Bushes pop up from the ground while moving** (user 2026-11-22). Cause: the meadow's bushes were
@@ -458,6 +478,9 @@ at mid distance.
             +0.1 ms, nothing on the meadow. Re-measure on a fresh machine. 32 m fern tiles (fewer draws)
             were tried: not all built 60 frames in, and they would arrive a whole tile at a time.
       - [ ] Still generated: herbs (`forest_herb`), flowers, litter, seedlings, ground ivy, tall grass clumps.
+            WIP (agents/look aa9a5cc4): scanned celandine, dandelion, weed rosettes (meadow accents) and
+            periwinkle (forest floor) as card plants in a third atlas band; built and captured, not yet judged
+            close up; accent cost not measured.
       - [ ] grass_test and foliage_test have no bush layer and still draw the generated bushes.
       - [ ] Bushes cast no shadows (the field has `castShadows` off); try it now that they are cheap.
       - [ ] Not judged: the bushes from a raised view, against the light, and close up while walking.
@@ -494,6 +517,8 @@ at mid distance.
       - [ ] Shape: from the side it is one even wall (`esc_side_v2.png`): the outermost surface fills the
             gaps between pieces that gave the stamps their blocky look. Next: keep the recess between pieces
             that only touch; march along the local rock direction instead of one slope-wide one.
+            WIP (agents/look 7e530247): a second march along the scans' smoothed normals (LOCAL_MARCH) is
+            written but not run (~16 min CPU per cell, three cells).
       - [ ] Rock tile: only ~64 % of the cut is clean, flat-on rock; faint hatching from above. Find a
             cleaner source.
       - [ ] Whole map: 300 cliff cells at ~16 min each (the pure-Python simplifier is most of it): speed it
