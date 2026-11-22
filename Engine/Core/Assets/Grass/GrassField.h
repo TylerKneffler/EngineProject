@@ -70,6 +70,12 @@ public:
     // Grass and accents fade out at this share of the field's reach; shrubs
     // and bushes use all of it. Not serialized; set by the scene's driver.
     float fineReachFraction = 1.f;
+    // GPU blade mode (GrassBlades.h): the fine grass (short and tall patches
+    // and the tall fields) is generated on the GPU from this cell's height and
+    // grass paint, which the field hands to the scene's GrassBlades; the CPU
+    // tiles keep only accents, shrubs and bushes. Not serialized; set by the
+    // scene's driver.
+    bool gpuBlades = false;
     PROPERTY(Inspector, EditAnywhere, Category = "Grass | Tiles", ClampMin = "0")
     float shortPatchesPerSquareMeter = .5f;
     PROPERTY(Inspector, EditAnywhere, Category = "Grass | Tiles", ClampMin = "0")
@@ -323,6 +329,11 @@ private:
     uint64_t m_sourcesRevision = 0, m_sourcesLayerRevision = 0;
     bool m_sourcesReady = false;
     bool Refresh();
+    // Blade mode: hand this cell's grids to the scene's GrassBlades.
+    void SyncGpuBlades();
+    void ReleaseGpuBlades();
+    const void* m_bladeTerrain = nullptr;
+    uint64_t m_bladeTerrainRevision = 0;
     bool ResolveCachedReferences();
     bool EnsureAuthoredPreviewHidden();
     void ClearTiles();

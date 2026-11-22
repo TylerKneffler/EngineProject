@@ -1,5 +1,6 @@
 #include "Core/Rendering/DetailBudget.h"
 #include "Grass/GrassField.h"
+#include "Grass/GrassBlades.h"
 #include "Grass/GrassStats.h"
 
 #include "Core/Scene/Object.h"
@@ -652,6 +653,7 @@ uint64_t GrassField::ComputeGenerationSignature() const
     HashFloat(hash, bushCoverage);
     HashFloat(hash, tileSize);
     HashFloat(hash, fineReachFraction);
+    HashFloat(hash, gpuBlades ? 1.f : 0.f);
     HashFloat(hash, shortPatchesPerSquareMeter);
     HashFloat(hash, tallPatchesPerSquareMeter);
     HashFloat(hash, tallFieldDensity);
@@ -795,10 +797,14 @@ void GrassField::BeginBuild(Tile tile, int lod, uint64_t signature)
         };
         // Caps are per 4 m tile; larger tiles (far rings) scale them.
         const float areaScale = std::max(1.f, span * span / 16.f);
-        append(shortMesh, shortPatchesPerSquareMeter, static_cast<int>(64 * areaScale), true);
-        append(tallMesh, tallPatchesPerSquareMeter, static_cast<int>(32 * areaScale));
-        if (tallFields)
-            append(tallMesh, tallFieldDensity, static_cast<int>(48 * areaScale), false, true);
+        // Blade mode: the fine grass is generated on the GPU (GrassBlades).
+        if (!gpuBlades)
+        {
+            append(shortMesh, shortPatchesPerSquareMeter, static_cast<int>(64 * areaScale), true);
+            append(tallMesh, tallPatchesPerSquareMeter, static_cast<int>(32 * areaScale));
+            if (tallFields)
+                append(tallMesh, tallFieldDensity, static_cast<int>(48 * areaScale), false, true);
+        }
         // Accents grow in drifts. Each world cell of accentDriftSize favours
         // one species and has its own richness (some cells stay bare), so
         // flowers gather in patches instead of an even sprinkle. Cells are
@@ -1044,6 +1050,7 @@ bool GrassField::Refresh()
     const bool referencesReady = ResolveCachedReferences();
     checkpoint(m_performance.referencesMs);
     if (!referencesReady) { publish(); return changed; }
+    if (gpuBlades) SyncGpuBlades();
     const glm::vec3 local = glm::vec3(glm::inverse(
         m_cachedTerrain->Owner->transform.GetWorldMatrix()) *
         glm::vec4(m_cachedViewer->transform.GetWorldPosition(), 1.f));
@@ -1413,7 +1420,56 @@ Engine::Components::SpatialUpdateRegion GrassField::DescribeSpatialRegion()
 }
 
 void GrassField::Update() { Refresh(); }
-void GrassField::OnDestroy() { ClearTiles(); }
+void GrassField::OnDestroy() { ClearTiles(); ReleaseGpuBlades(); }
+
+void GrassField::SyncGpuBlades()
+{
+    auto* scene = Owner ? Owner->GetScene() : nullptr;
+    if (!scene || !m_cachedTerrain || !GrassBlades::Enabled()) return;
+    auto blades = GrassBlades::For(*scene);
+    const auto& terrain = *m_cachedTerrain;
+    const uint64_t revision = terrain.GetConfigurationRevision();
+    if (m_bladeTerrain != &terrain || m_bladeTerrainRevision != revision)
+    {
+        const int samplesX = terrain.cellsX + 1, samplesZ = terrain.cellsY + 1;
+        const size_t layerCount = terrain.layers.size();
+        if (samplesX == samplesZ && terrain.heights.size() == size_t(samplesX * samplesZ) &&
+            terrain.weights.size() == terrain.heights.size() * layerCount)
+        {
+            std::vector<float> paint(terrain.heights.size(), 1.f);
+            if (proceduralLayerMask != 0 && layerCount)
+                for (size_t sample = 0; sample < paint.size(); ++sample)
+                {
+                    float weight = 0.f;
+                    for (size_t layer = 0; layer < layerCount && layer < 31; ++layer)
+                        if (proceduralLayerMask & (1 << layer)) weight += terrain.weights[sample * layerCount + layer];
+                    paint[sample] = weight;
+                }
+            const glm::vec3 origin(terrain.Owner->transform.GetWorldMatrix()[3]);
+            blades->SetCell(this, origin, samplesX, terrain.cellWidth, terrain.heights, std::move(paint));
+            m_bladeTerrain = &terrain;
+            m_bladeTerrainRevision = revision;
+        }
+    }
+    GrassBlades::Settings settings;
+    settings.seed = seed;
+    settings.fieldSize = tallFieldSize;
+    settings.fieldCoverage = tallFieldCoverage;
+    settings.shortUnderTall = shortUnderTallShare;
+    settings.reach = GrassRadius() * std::clamp(fineReachFraction, .05f, 1.f);
+    settings.windStrength = windStrength;
+    settings.projectLayer = Owner->layer;
+    blades->SetSettings(settings);
+    blades->Update(*scene, scene->GetGraphicsProvider());
+}
+
+void GrassField::ReleaseGpuBlades()
+{
+    if (!m_bladeTerrain) return;
+    if (auto* scene = Owner ? Owner->GetScene() : nullptr)
+        if (scene->grassBlades) GrassBlades::For(*scene)->RemoveCell(this);
+    m_bladeTerrain = nullptr;
+}
 bool GrassField::RefreshEditorPreview()
 {
     if (!Owner || !Owner->GetScene() || Owner->GetScene()->HasStarted()) return false;

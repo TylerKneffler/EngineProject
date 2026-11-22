@@ -8,6 +8,7 @@
 #include "Core/Rendering/StableShadowCascade.h"
 #include "Core/Rendering/RenderJobs.h"
 #include "Core/Rendering/PreparedInstanceDraw.h"
+#include "Core/Rendering/GpuGrassBlades.h"
 #include "Core/Rendering/DebugDrawTags.h"
 #include "Core/Rendering/SceneRenderer.h"
 #include "Core/Rendering/SceneRenderer/SceneRendererVisibility.h"
@@ -2716,9 +2717,26 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
                 std::sort(tiles.begin(),tiles.end(),[](const auto& first,const auto& second) {
                     return std::tie(first.range.z,first.range.x)<std::tie(second.range.z,second.range.x);
                 });
+                // GPU grass blade carriers (Rendering/GpuGrassBlades.h): the
+                // blade generation pass writes their visible list. Camera only.
+                const auto bladeField=representative.mesh->gpuBladeField;
+                if(bladeField && (shadowOnly || !bladeField->data)) continue;
+                // Only with the blade shader itself: until the material shader
+                // has compiled the default pipeline would read blade records as
+                // pool indices (unbounded root SRV reads hang the GPU).
+                if(bladeField && !representative.surfaceShaderResolved) continue;
                 bool gpu=instanceLodDisplayOverride < 0 && gpuInstanceCulling &&
                     context->SupportsIndirectDraws() &&
-                    (count>=32 || gpuLod || representative.mesh->instanceLodBand>=0);
+                    (count>=32 || gpuLod || representative.mesh->instanceLodBand>=0 || bladeField);
+                if(gpu && bladeField && !m_grassBladeAttempted)
+                {
+                    m_grassBladeAttempted=true;
+                    auto shader=m_graphicsProvider->GetShaderCompiler()->CompileFromFile(
+                        EngineShaderPath("GrassBlades.hlsl"),"CSMain",Engine::Graphics::IShaderCompiler::CompileProfile::CS_5_0);
+                    if(shader) m_grassBladePipeline=m_graphicsProvider->GetPipelineStateFactory()->CreateComputePipeline(shader.get());
+                    else std::fprintf(stderr,"GrassBlades.hlsl: %s\n",m_graphicsProvider->GetShaderCompiler()->GetLastError().c_str());
+                }
+                if(bladeField && !(gpu && m_grassBladePipeline)) continue;
                 if(gpu && !m_instanceCullAttempted)
                 {
                     m_instanceCullAttempted=true;
@@ -2726,8 +2744,9 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
                         EngineShaderPath("InstanceCull.hlsl"),"CSMain",Engine::Graphics::IShaderCompiler::CompileProfile::CS_5_0);
                     if(shader) m_instanceCullPipeline=m_graphicsProvider->GetPipelineStateFactory()->CreateComputePipeline(shader.get());
                 }
-                gpu=gpu && m_instanceCullPipeline;
+                gpu=gpu && (m_instanceCullPipeline || bladeField);
                 if(gpu) gpu=context->BeginComputePass();
+                if(bladeField && !gpu) continue;
                 DrawCBData constants=representative.drawData;
                 constants.objectIndex=objectBase; constants.flags|=(uint32_t(residentLod)<<21)|0x00080000u;
                 // A range with a shorter reach than its mesh (fine grass among shrubs).
@@ -2744,7 +2763,8 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
                 if(!automaticInstancing) key.push_back(uintptr_t(representative.object));
                 const auto uploadStart=RenderClock::now();
                 auto* pool=residentPlacementPool;
-                auto& buffers=m_persistentBatches.Acquire(m_graphicsProvider,std::move(key),gpu,tiles,&constants,m_persistentInstances,m_lastRenderCpuTimings.changedUploadBytes);
+                auto& buffers=m_persistentBatches.Acquire(m_graphicsProvider,std::move(key),gpu,tiles,&constants,m_persistentInstances,m_lastRenderCpuTimings.changedUploadBytes,
+                    bladeField ? bladeField->capacity : 0u);
                 if (buffers.completedReadback)
                 {
                     auto& completed = buffers.readbackShadow
@@ -2766,7 +2786,35 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
                 else if(buffers.modeChanged) ++storage.cacheMode;
                 else if(buffers.membershipChanged) ++storage.cacheMembership;
                 else if(buffers.metadataChanged) ++storage.cacheMetadata;
-                if(gpu)
+                if(gpu && bladeField)
+                {
+                    // Reset the draw arguments, then one group per patch of the
+                    // camera-centred grid (GrassBlades.hlsl).
+                    context->SetStructuredBuffer(45,m_emptyMorphDeltaBuffer.get());
+                    Engine::Rendering::GpuBladeConstants blade{};
+                    std::memcpy(blade.viewProjection,&cullViewProjection[0][0],sizeof(blade.viewProjection));
+                    const float patch=std::max(.5f,bladeField->patchSize), reach=std::max(1.f,bladeField->reach);
+                    blade.camera[0]=cameraPosition.x; blade.camera[1]=cameraPosition.y; blade.camera[2]=cameraPosition.z; blade.camera[3]=reach;
+                    const int side=int(std::ceil(2.f*reach/patch))+1;
+                    blade.grid[0]=int(std::floor((cameraPosition.x-reach)/patch));
+                    blade.grid[1]=int(std::floor((cameraPosition.z-reach)/patch));
+                    blade.grid[2]=side; blade.grid[3]=1;
+                    blade.draw[0]=tiles.front().range.z; blade.draw[1]=sourceRange.vertexCount;
+                    blade.draw[2]=bladeField->capacity; blade.draw[3]=cullOcclusionFlag && cullOcclusion ? 1u:0u;
+                    auto* data=bladeField->data.get();
+                    const auto bind=[&]{
+                        context->SetComputePipeline(m_grassBladePipeline.get());
+                        context->SetComputeReadBuffer(data); context->SetComputeReadBuffer(data,1);
+                        context->SetComputeReadBuffer(cullOcclusion ? cullOcclusion : data,2);
+                        context->SetComputeWriteBuffer(buffers.output.get());
+                        context->SetComputeConstants(&blade,sizeof(blade));
+                    };
+                    bind(); context->DispatchCompute(1); context->StorageBarrier(buffers.output.get());
+                    blade.grid[3]=0;
+                    bind(); context->DispatchCompute(uint32_t(side*side));
+                    context->StorageBarrier(buffers.output.get()); context->EndComputePass(); ++m_lastRenderCpuTimings.gpuBatches;
+                }
+                else if(gpu)
                 {
                     ++m_lastRenderCpuTimings.gpuGrassBatches;
                     if(shadowOnly) ++m_lastShadowCpuTiming.gpuGrassBatches;

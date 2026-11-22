@@ -903,6 +903,9 @@ private:
     uint64_t m_materialPreparationSerial=0, m_materialCacheStructureRevision=0;
     std::unique_ptr<Engine::Graphics::IPipelineState> m_instanceCullPipeline;
     bool m_instanceCullAttempted = false;
+    // GPU grass blade generation (Shaders/GrassBlades/GrassBlades.hlsl).
+    std::unique_ptr<Engine::Graphics::IPipelineState> m_grassBladePipeline;
+    bool m_grassBladeAttempted = false;
     // Hardware simulation's synthetic GPU load (Shaders/GpuLoad).
     std::unique_ptr<Engine::Graphics::IPipelineState> m_gpuLoadPipeline;
     std::unique_ptr<IGraphicsBuffer> m_gpuLoadSeeds, m_gpuLoadSink;

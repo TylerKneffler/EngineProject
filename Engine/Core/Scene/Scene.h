@@ -547,6 +547,8 @@ public:
     // Runtime state a component system keeps per scene and owns itself
     // (Components::SharedPrefabParts). Never serialized.
     std::shared_ptr<void> sharedPrefabParts;
+    // Likewise for GPU grass blades (Assets/Grass/GrassBlades).
+    std::shared_ptr<void> grassBlades;
 
 private:
     // Reads object memory and the transform hierarchy while preparing frames.

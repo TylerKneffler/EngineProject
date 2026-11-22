@@ -61,9 +61,11 @@ private:
         Slot(Slot&&) noexcept=default; Slot& operator=(Slot&&) noexcept=default; };
     std::vector<Slot> m_slots;
 public:
+    // minimumCandidates: room in the visible list beyond the tiles' placements
+    // (GPU grass blade carriers write blades, not placements).
     Batch& Acquire(Graphics::IGraphicsProvider* provider,Key key,bool gpu,
         const std::vector<InstanceTileRecord>& tiles,const void* drawData,
-        const PersistentInstancePool& pool,uint64_t& uploadBytes)
+        const PersistentInstancePool& pool,uint64_t& uploadBytes,uint32_t minimumCandidates=0)
     {
         auto* contexts=provider->GetContextFactory(); const auto index=contexts->GetPreparedFrameSlot(); const auto serial=contexts->GetPreparedFrameSerial();
         if(m_slots.size()<=index) m_slots.resize(size_t(index)+1);
@@ -134,6 +136,7 @@ public:
                 Graphics::IGraphicsBuffer::Usage::StorageBuffer,
                 Graphics::IGraphicsBuffer::AccessMode::Readback,48,nullptr,48);
         batch.candidates=0; for(const auto& tile:tiles) batch.candidates+=tile.range.y;
+        batch.candidates=std::max(batch.candidates,minimumCandidates);
         if(gpu && (!batch.input || batch.metadataChanged))
         {
             const size_t capacity=std::max<size_t>(sizeof(InstanceTileRecord),bytes);
