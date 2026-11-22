@@ -115,9 +115,15 @@ struct AutoExposureSettings
     float speedDown = 1.f;  // 1/s, toward a darker scene
     float lowPercent = 0.5f;  // histogram share ignored at the dark end
     float highPercent = 0.95f; // ...and above this at the bright end
+    // 0-1: how much metering favours the lower part of the frame (where the
+    // ground is) over what fills the top (sky, a dark forest wall). At 1 the
+    // top third counts a fifth as much, so a sunlit meadow keeps its
+    // brightness whether a dark forest or open sky stands behind it.
+    float groundWeight = 0.f;
 
     void Normalize()
     {
+        groundWeight = std::clamp(groundWeight, 0.f, 1.f);
         minEv = std::clamp(minEv, -14.f, 10.f);
         maxEv = std::clamp(maxEv, minEv, 10.f);
         speedUp = std::clamp(speedUp, 0.f, 50.f);

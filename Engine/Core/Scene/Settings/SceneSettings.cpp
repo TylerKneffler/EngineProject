@@ -157,6 +157,7 @@ Engine::Serialization::JsonValue SerializeSceneSettings(const Engine::Model::Sce
         exposureValue.Set("speedDown", Engine::Serialization::JsonValue(exposure.speedDown));
         exposureValue.Set("lowPercent", Engine::Serialization::JsonValue(exposure.lowPercent));
         exposureValue.Set("highPercent", Engine::Serialization::JsonValue(exposure.highPercent));
+        exposureValue.Set("groundWeight", Engine::Serialization::JsonValue(exposure.groundWeight));
         value.Set("autoExposure", exposureValue);
     }
     {
@@ -353,7 +354,8 @@ void DeserializeSceneSettings(Engine::Model::SceneSettings& settings, const Engi
         const std::pair<const char*, float*> floats[] = {
             { "minEv", &exposure.minEv }, { "maxEv", &exposure.maxEv },
             { "speedUp", &exposure.speedUp }, { "speedDown", &exposure.speedDown },
-            { "lowPercent", &exposure.lowPercent }, { "highPercent", &exposure.highPercent } };
+            { "lowPercent", &exposure.lowPercent }, { "highPercent", &exposure.highPercent },
+            { "groundWeight", &exposure.groundWeight } };
         for (const auto& [key, target] : floats)
             if (const auto* field = FindField(*exposureValue, key))
                 *target = field->AsFloat();

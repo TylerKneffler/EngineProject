@@ -522,6 +522,7 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
         postProcess.autoExposureSpeedDown = exposure.speedDown;
         postProcess.autoExposureLowPercent = exposure.lowPercent;
         postProcess.autoExposureHighPercent = exposure.highPercent;
+        postProcess.autoExposureGroundWeight = exposure.groundWeight;
         Engine::Graphics::SetPostProcessSettings(postProcess);
     }
 

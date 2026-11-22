@@ -132,7 +132,11 @@ float4 ExposureLuminancePS(VertexOutput input) : SV_Target
         logSum += log2(max(luminance, 1e-6));
     }
     const float2 centre = (input.uv - 0.5) * 2.0;
-    const float weight = lerp(1.0, 0.25, saturate(dot(centre, centre) * 0.5));
+    float weight = lerp(1.0, 0.25, saturate(dot(centre, centre) * 0.5));
+    // Ground weighting (temporal.x, 0-1; AutoExposureSettings::groundWeight):
+    // the top of the frame (sky, a dark forest wall) counts down to a fifth as
+    // much as the lower half, where the ground is (uv.y = 0 at the top).
+    weight *= lerp(1.0, lerp(0.2, 1.0, smoothstep(0.3, 0.6, input.uv.y)), temporal.x);
     return float4(logSum / 16.0, weight, 0.0, 1.0);
 }
 

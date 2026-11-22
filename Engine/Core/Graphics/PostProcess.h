@@ -32,6 +32,9 @@ struct PostProcessSettings
     float autoExposureSpeedDown = 1.f;
     float autoExposureLowPercent = 0.5f;
     float autoExposureHighPercent = 0.95f;
+    // 0-1: metering weight toward the lower part of the frame (SceneSettings
+    // AutoExposureSettings::groundWeight).
+    float autoExposureGroundWeight = 0.f;
     // FXAA in the compose pass (Model::AntiAliasingSettings). Off by default
     // so offline paths (video export) keep their own settings.
     bool fxaa = false;

@@ -88,6 +88,8 @@ PostProcessConstants MakeExposureConstants(const PostProcessSettings& settings,
     constants.grade[0] = static_cast<float>(ExposureMapWidth);
     constants.grade[1] = static_cast<float>(ExposureMapHeight);
     constants.grade[2] = static_cast<float>(ExposureBins);
+    // ExposureLuminancePS: ground weighting of the metering.
+    constants.temporal[0] = std::clamp(settings.autoExposureGroundWeight, 0.f, 1.f);
     return constants;
 }
 
