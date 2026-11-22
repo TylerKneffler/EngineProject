@@ -8,21 +8,23 @@
 #include <chrono>
 #include <cstdlib>
 
-// Far stamps (TerrainManager::farStampRadius). With far terrain on, only the
-// cells within loadedRadius are terrain cells; past them the far tiles carry
-// the heights (cliff cells have full-resolution far patches) but not the
-// stamps, so an escarpment was a smooth wall in its mean colour until it came
-// within loadedRadius, then turned into rock. Each stamped cell in range gets
-// its stamps as one runtime mesh, built the way its own mesh builds them (the
-// coarsest stamp level), shaded as terrain with the loaded cells' layer
-// arrays, so the rock reads the same on either side of the hand-off. It is
-// hidden while the cell itself is loaded and draws its own stamps.
+// Far stamp cells (TerrainManager::farStampRadius). With far terrain on, only
+// the cells within loadedRadius are terrain cells; past them a far tile is one
+// quad per 128 m cell, so an escarpment was a smooth slope until it came within
+// loadedRadius, then turned into rock. Each stamped (cliff or sculpted) cell in
+// range is built as the terrain cell it is, at a coarse level (a 16 m grid and
+// its stamps' or sculpt's coarsest level, edges at full resolution like every
+// terrain level), and drawn as one runtime mesh with the loaded cells' layer
+// arrays; the far tiles leave a hole for it and stitch their edges to its
+// archive heights (FarStampShowing), as they do for loaded cells. It hides
+// while the cell itself is loaded. This replaced full-resolution far-grid
+// patches for cliff cells, which every far tile rebuild carried (2026-11-22).
 namespace Engine::Components
 {
 namespace
 {
-// Mesh stride the far stamps are built at: the coarsest stamp level.
-constexpr int FarStampStride = 8;
+// Mesh stride the far cells are built at: a 16 m grid, the coarsest stamp level.
+constexpr int FarStampStride = 4;
 // New builds started per update and running at once.
 constexpr size_t FarStampStartsPerUpdate = 2, FarStampJobsRunning = 4;
 }
@@ -142,10 +144,17 @@ void TerrainManager::UpdateFarStamps(int centerX, int centerY)
                 Engine::Core::Object object;
                 auto* terrain = object.AddComponent<Terrain>();
                 terrain->Resize(x, y, width, depth);
-                builder(cell, *terrain);
                 terrain->stamps = stamps(cell);
                 terrain->stampMaterials = materials;
-                terrain->BuildStampSurface(FarStampStride, geometry.vertices, geometry.indices);
+                // No mesh yet: this only sets the stride the builder's
+                // Rebuild() builds at.
+                terrain->SetMeshLodStride(FarStampStride);
+                builder(cell, *terrain);
+                if (const auto* mesh = object.GetComponent<Mesh>())
+                {
+                    geometry.vertices = mesh->GetVertices();
+                    geometry.indices = mesh->GetIndices();
+                }
                 geometry.textureTiling = terrain->textureTiling;
                 return geometry;
             });
@@ -153,8 +162,7 @@ void TerrainManager::UpdateFarStamps(int centerX, int centerY)
         ++running;
     }
 
-    // Shown only while the cell itself is not drawing (its stamps are part
-    // of its own mesh once it is loaded and ready).
+    // Shown only while the cell itself is not drawing (loaded and ready).
     for (auto& [cell, entry] : m_farStamps)
     {
         if (!entry.object) continue;
@@ -165,5 +173,13 @@ void TerrainManager::UpdateFarStamps(int centerX, int centerY)
         if (auto* mesh = entry.object->GetComponent<Mesh>())
             mesh->SetEditorVisible(!covered);
     }
+}
+
+bool TerrainManager::FarStampShowing(Cell cell) const
+{
+    const auto found = m_farStamps.find(cell);
+    if (found == m_farStamps.end() || !found->second.object) return false;
+    const auto* mesh = found->second.object->GetComponent<Mesh>();
+    return mesh && mesh->IsReady() && mesh->IsEditorVisible();
 }
 }

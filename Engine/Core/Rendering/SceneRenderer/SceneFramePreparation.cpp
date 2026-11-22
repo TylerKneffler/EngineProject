@@ -3,6 +3,7 @@
 #include "Core/Components/Animation/Skeleton.h"
 #include "Core/Components/Materials/Material.h"
 #include "Core/Components/Materials/Texture.h"
+#include "Core/Components/Terrain/SharedPrefabParts.h"
 #include "Core/Components/Mesh/Mesh.h"
 #include "Core/Components/Sprite/Sprite.h"
 #include "Core/Components/Terrain/TerrainObjectLayer.h"
@@ -229,6 +230,9 @@ void SceneRenderer::PrepareRenderFrame(bool publishSnapshot)
         { ++prefabVisited; break; }
     }
     m_prefabPreparationCursor = prefabCount ? (prefabStart + prefabVisited) % prefabCount : 0;
+    // Shared prefab parts: this frame's attached, activated and released
+    // blocks reach their objects' meshes.
+    Engine::Components::SharedPrefabParts::Flush(m_scene);
     m_prefabPreparationSettled = std::all_of(objectLayers.begin(), objectLayers.end(),
         [&](const auto* layer) { return !layer || layer->IsPrefabPreparationComplete(m_graphicsProvider); });
     if (!m_scene.m_restorePrefabPrototypes.empty() &&

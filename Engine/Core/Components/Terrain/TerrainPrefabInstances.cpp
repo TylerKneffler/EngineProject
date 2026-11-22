@@ -11,6 +11,7 @@
 #include "Core/Components/Materials/Material.h"
 #include "Core/Components/Mesh/MeshInstanceLayerData.h"
 #include "Core/Components/Mesh/MeshInstanceSourceSet.h"
+#include "Core/Components/Terrain/SharedPrefabParts.h"
 #include "Core/Components/Physics/PrimitiveObjectCollider.h"
 #include "Core/Components/Physics/RigidBody.h"
 #include <algorithm>
@@ -155,6 +156,12 @@ struct TerrainObjectLayer::PrefabInstances
         return true;
     }
     std::vector<uint64_t> generated;
+    // Shared prefab parts mode: this layer's blocks in the scene's shared
+    // part objects (released with the runtime), and world-space copies of the
+    // current asset's placement blocks, shared by its parts.
+    std::vector<SharedPrefabParts::Handle> sharedBlocks;
+    size_t sharedStart = 0;
+    std::map<std::pair<int,int>, std::shared_ptr<Mesh::InstanceData>> worldBlocks;
     std::vector<std::shared_ptr<SharedPrefabPrototype>> prototypes;
     std::shared_ptr<PrefabInstances> previous;
     bool building = false;
@@ -574,6 +581,11 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
         const char* setting = std::getenv("ENGINE_PREFAB_PROTOTYPE_SHARE");
         return !(setting && setting[0] == '0');
     }();
+    // Shared prefab parts (SharedPrefabParts): running scenes only; the editor
+    // keeps per-layer objects for picking and gizmos.
+    const bool sharedParts=SharedPrefabParts::Enabled() && scene->HasStarted();
+    const auto sharedRegistry=sharedParts ? SharedPrefabParts::For(*scene) : nullptr;
+    const glm::mat4 layerWorld=Owner->transform.GetWorldMatrix();
     const auto create=[&](const std::string& name) {
         auto* object=scene->AddObject(name); object->runtimeOnly=true;
         // Instance parts render under the layer object's project layer.
@@ -901,7 +913,9 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
                 tileLayers[tile].SetPlacements(std::move(transforms),std::move(ids));
             }
             tileInstances=std::move(tileLayers);
+            runtime->worldBlocks.clear();
             runtime->groupStart = runtime->generated.size();
+            runtime->sharedStart = runtime->sharedBlocks.size();
         }
         const auto profileEntry=lodProfiles.find(asset);
         const auto lodProfile=profileEntry==lodProfiles.end()
@@ -917,6 +931,8 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
         // The renderer's three resident bands support material changes per level.
         if (chain.size()>3) chain={chain.front(),chain[1],chain.back()};
         if (shadowChain.size()>3) shadowChain={shadowChain.front(),shadowChain[1],shadowChain.back()};
+        // What the per-layer instance data ends with once both chains ran.
+        const int sharedMaximumLod=int(std::max(chain.size(),shadowChain.size()))-1;
         const auto distances=GetObjectLodDistances(asset,chain.size());
         const auto shadowDistances=GetObjectLodDistances(asset,shadowChain.size());
         size_t partIndex = 0;
@@ -949,6 +965,7 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
                     auto source = sourcePart->representations.front();
                     if (!source) continue;
                     BuildProfile::Stage instanceStage("batch_instances");
+                    std::string sharedKey;
                     for (auto& [tile,layerData]:tileInstances)
                     {
                         const glm::vec3 windPadding(1.5f*std::max(0.f,source->GetBoundsMax().y)*
@@ -960,9 +977,10 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
                         }
                         const auto& instances=layerData.GetInstanceData();
                         BuildProfile::Stage objectStage("batch_instance_objects");
-                        auto* object=create("Shared prefab part: "+original->Owner->name+" ("+
-                            std::to_string(tile.first)+","+std::to_string(tile.second)+")");
-                        auto* mesh=object->AddComponent<Mesh>();
+                        instances->maximumLod=std::max(instances->maximumLod,int(meshes.size())-1);
+                        // The part's mesh settings, for a per-layer object or a
+                        // shared one (whose key is made from them).
+                        const auto configureMesh=[&](Mesh* mesh) {
                         mesh->screenLodSelection=lodProfile.screenSizeSelection || screenLodSelection;
                         mesh->distanceLodOverride=lodProfile.distanceOverride || distanceLodOverride;
                         mesh->screenLod1Pixels=lodProfile.screenThresholdsPixels.size()>0 &&
@@ -979,7 +997,6 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
                             ? std::clamp(std::isfinite(lodProfile.hysteresis)
                                 ? lodProfile.hysteresis : screenLodHysteresis,0.f,.5f)
                             : screenLodHysteresis;
-                        instances->maximumLod=std::max(instances->maximumLod,int(meshes.size())-1);
                         mesh->useBoundsForShadowCulling=true;
                         mesh->foliageWindStrength=original->foliageWindStrength;
                         mesh->foliageWindTree=original->foliageWindTree;
@@ -1022,10 +1039,8 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
                             mesh->instanceLodBand=int(lod);
                             mesh->instanceLodDistances={lodDistances[0],lodDistances.size()>1 ? lodDistances[1]:1.e20f};
                         }
-                        const auto elementCount = source->GetIndexCount()
-                            ? source->GetIndexCount() : source->GetVertexCount();
-                        mesh->SetInstancedGeometry(source,instances,{{0,elementCount,0,
-                            static_cast<uint32_t>(layerData.Size())}},batch.minimum,batch.maximum);
+                        };
+                        const auto addMaterial=[&](Engine::Core::Object* object, Mesh* mesh) {
                         if (const auto* material=original->Owner->GetComponent<Material>())
                         {
                             sourcePart = prototype->sources.FindPart(sourceKey);
@@ -1047,6 +1062,94 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
                             if (shadowDistance<=0 && !mesh->farShadowCaster)
                                 copy->castsShadows=false;
                         }
+                        };
+                        const auto elementCount = source->GetIndexCount()
+                            ? source->GetIndexCount() : source->GetVertexCount();
+                        if (sharedParts)
+                        {
+                            // The part's key: everything that makes its object
+                            // differ (geometry, material, level and role, every
+                            // mesh setting, project layer).
+                            if (sharedKey.empty())
+                            {
+                                Mesh probe;
+                                configureMesh(&probe);
+                                const auto* material=original->Owner->GetComponent<Material>();
+                                char buffer[640];
+                                std::snprintf(buffer,sizeof(buffer),
+                                    "%p|%p|%zu|%d|%d|%d|%d|%d|%.6g|%.6g|%.6g|%d|%.6g|%d|%d|%.6g|%d|%.6g|%.6g|%d|%d|%d|%d|%.6g|%d|%.6g|%.6g|%d",
+                                    static_cast<const void*>(source.get()),static_cast<const void*>(material),
+                                    lod,int(shadowProxyOnly),Owner->layer,int(probe.screenLodSelection),
+                                    int(probe.distanceLodOverride),int(probe.useBoundsForShadowCulling),
+                                    probe.screenLod1Pixels,probe.screenLod2Pixels,probe.screenLodHysteresis,
+                                    int(probe.foliageWindTree),probe.foliageWindStrength,int(probe.treeTimingGeometry),
+                                    int(probe.cullAfterLastLod),probe.finalLodCullDistance,
+                                    int(probe.dedicatedShadowProxy),probe.runtimeShadowDistance,probe.runtimeShadowFadeWidth,
+                                    probe.fixedShadowLodBand,int(probe.farShadowCaster),probe.instanceLodBand,
+                                    int(shadowDistance<=0 && !probe.farShadowCaster),probe.farShadowMinDistance,
+                                    int(meshes.size()),probe.instanceLodDistances.x,probe.instanceLodDistances.y,
+                                    sharedMaximumLod);
+                                sharedKey=buffer;
+                            }
+                            auto& world=runtime->worldBlocks[tile];
+                            if (!world)
+                            {
+                                // World-space copy of this block, shared by the
+                                // asset's parts (the per-layer objects sat under
+                                // the layer object at its transform).
+                                world=std::make_shared<Mesh::InstanceData>();
+                                world->transforms.reserve(instances->transforms.size());
+                                for (const auto& local:instances->transforms)
+                                {
+                                    glm::mat4 matrix(1.f);
+                                    for (int row=0;row<3;++row) for (int column=0;column<4;++column)
+                                        matrix[column][row]=local.rows[row][column];
+                                    matrix=layerWorld*matrix;
+                                    Mesh::InstanceTransform transform{};
+                                    for (int row=0;row<3;++row)
+                                        transform.rows[row]={matrix[0][row],matrix[1][row],matrix[2][row],matrix[3][row]};
+                                    world->transforms.push_back(transform);
+                                }
+                                world->placementIds=instances->placementIds;
+                                world->maximumLod=sharedMaximumLod;
+                            }
+                            // The block's world bounds: the layer-local batch
+                            // box through the layer's transform.
+                            Mesh::InstanceBlock block{world};
+                            block.minimum=glm::vec3(std::numeric_limits<float>::max());
+                            block.maximum=glm::vec3(-std::numeric_limits<float>::max());
+                            for (int corner=0;corner<8;++corner)
+                            {
+                                const glm::vec3 point(layerWorld*glm::vec4(
+                                    corner&1 ? batch.maximum.x:batch.minimum.x,
+                                    corner&2 ? batch.maximum.y:batch.minimum.y,
+                                    corner&4 ? batch.maximum.z:batch.minimum.z,1.f));
+                                block.minimum=glm::min(block.minimum,point);
+                                block.maximum=glm::max(block.maximum,point);
+                            }
+                            SharedPrefabParts::Part part;
+                            part.key=sharedKey;
+                            part.name=original->Owner->name+" (lod "+std::to_string(lod)+
+                                (shadowProxyOnly ? ", shadow)":")");
+                            part.projectLayer=Owner->layer;
+                            part.source=source;
+                            part.ranges={{0,elementCount,0,0}};
+                            part.maximumLod=sharedMaximumLod;
+                            part.configure=[&](Engine::Core::Object& object, Mesh& mesh) {
+                                configureMesh(&mesh);
+                                addMaterial(&object,&mesh);
+                            };
+                            runtime->sharedBlocks.push_back(
+                                sharedRegistry->Attach(*scene,part,std::move(block)));
+                            continue;
+                        }
+                        auto* object=create("Shared prefab part: "+original->Owner->name+" ("+
+                            std::to_string(tile.first)+","+std::to_string(tile.second)+")");
+                        auto* mesh=object->AddComponent<Mesh>();
+                        configureMesh(mesh);
+                        mesh->SetInstancedGeometry(source,instances,{{0,elementCount,0,
+                            static_cast<uint32_t>(layerData.Size())}},batch.minimum,batch.maximum);
+                        addMaterial(object,mesh);
                     }
                 }
             }
@@ -1086,8 +1189,12 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
             }
         }
         if (!runtime->previous)
+        {
             for (size_t i = runtime->groupStart; i < runtime->generated.size(); ++i)
                 if (auto* object = scene->FindObjectById(runtime->generated[i])) object->enabled = true;
+            for (size_t i = runtime->sharedStart; i < runtime->sharedBlocks.size(); ++i)
+                SharedPrefabParts::Activate(runtime->sharedBlocks[i]);
+        }
         runtime->nextPart = 0;
         tileInstances.clear();
     }
@@ -1098,6 +1205,8 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
         runtime->previous.reset();
         for (auto id : runtime->generated)
             if (auto* object = scene->FindObjectById(id)) object->enabled = true;
+        for (const auto& handle : runtime->sharedBlocks)
+            SharedPrefabParts::Activate(handle);
     }
     runtime->sources=std::move(sources);
     runtime->lods=lodProfiles;

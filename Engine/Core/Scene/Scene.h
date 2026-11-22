@@ -544,6 +544,10 @@ public:
 
     IGraphicsProvider* GetGraphicsProvider() const { return m_graphicsProvider; }
 
+    // Runtime state a component system keeps per scene and owns itself
+    // (Components::SharedPrefabParts). Never serialized.
+    std::shared_ptr<void> sharedPrefabParts;
+
 private:
     // Reads object memory and the transform hierarchy while preparing frames.
     friend class Engine::Rendering::SceneRenderer;

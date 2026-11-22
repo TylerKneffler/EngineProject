@@ -157,7 +157,8 @@ void CSMain(uint3 id : SV_DispatchThreadID, uint3 group : SV_GroupID, uint3 thre
                 if(constants.cameraPosition.w>0.0 &&
                     length(root-constants.cameraPosition.xyz)>=constants.cameraPosition.w) continue;
             }
-            if(IsThinnedAway(thin,root,constants.cameraPosition.xyz)) continue;
+            // Bit 26: the range is not thinned (shrubs, bushes; Mesh::InstanceRange::thinned).
+            if((constants.selection.w & (1<<26))==0 && IsThinnedAway(thin,root,constants.cameraPosition.xyz)) continue;
             if(constants.selection.x>=0 && (constants.selection.w & 2)!=0)
             {
                 // Conservative per-placement bands. Shader dithering resolves the

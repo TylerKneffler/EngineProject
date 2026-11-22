@@ -212,8 +212,22 @@ loads 3 rings of full cells around the player (was 5); far-forest blocks draw ev
   Today's additions (tall fields, sculpted cliffs, far stamps; `ENGINE_LANDSCAPE_TALL_FIELDS=0
   ENGINE_SCULPTS=0 ENGINE_FAR_STAMPS=0`): forest walk no change (21.0-21.7 on, 21.0-21.8 off); field walk
   +1.1 ms frame, grass GPU 8.0 → 10.25. The walks were 17.1-17.2 (forest) and 18.6-19.1 (meadow) on the
-  afternoon of 2026-11-21, so ~4 ms came in between and not from today's additions: bisect (the stamp
-  work and macro/far changes of 2026-11-21 evening are the candidates).
+  afternoon of 2026-11-21, so ~4 ms came in between and not from today's additions.
+  - [x] Bisected (2026-11-22, forest walk, interleaved pairs; `ENGINE_TERRAIN_STAMPS=0`,
+        `ENGINE_FAR_PATCHES=0` added for it): the far grid's full-resolution cliff-cell patches. Stamps cost
+        nothing measurable. Patches on / off: frame 20.8-21.0 / 17.2-17.3 ms, camera record 10.0 / 7.5,
+        occlusion build 2.7 / 0.9 (occluder triangles 357k / 73k), 7-9 / 2 frames over 50 ms. Fix: far tiles
+        give the CPU occlusion buffer their coarse grid only (`Mesh::occluderIndices` and the new
+        `Mesh::occluderVertexCount`, set in `TerrainManagerFarTerrainUpdate.cpp`): frame 17.3-17.4 with
+        patches against 17.2-17.5 without.
+  - [x] Patches still cost two ~150 ms hitches per forest walk (~65 ms without, at the same cell crossings)
+        and ~0.4 ms GPU. Replaced 2026-11-22: no far-grid patches at all (`world.fargrid`, `write_archive`).
+        Far stamp cells are now the cell's own terrain at stride 4 (16 m grid, edges at full resolution as
+        at every terrain level, coarsest stamp or sculpt level), built through the cell's `Rebuild()`; far
+        tiles leave them out (`TerrainManager::FarStampShowing`), keep cell detail in tiles that hold one,
+        and stitch their edges from archive heights, as for loaded cells. Forest walk 17.3-17.4 ms, 2-4
+        frames over 50 ms, worst 62-64 (patches: 5-6 and ~150 ms); terrain and shadow GPU as without
+        patches. The 450 m cliff view is unchanged (`.local/terrain-stamps/farcells_450.png`).
 - Uncommitted: everything since `4687647e`.
 
 ## Next, in order
@@ -255,7 +269,57 @@ at mid distance.
    - New: indirect draws whose count the GPU writes (DX12 `ExecuteIndirect` with a count buffer, Vulkan
      `vkCmdDrawIndexedIndirectCount`). DX11 has no count buffer: it keeps today's path, or draws a fixed
      maximum with zeroed arguments.
-   - [ ] Baseline: CPU stage split and object counts on the four walks (forest, meadow, FieldWalk, turning).
+   - [x] Baseline (2026-11-22, `n1_*` runs; the machine was in its slow state, so compare interleaved runs,
+         not these absolute frame times):
+
+         | Run | Frame, >50 ms | Camera record (material / of it draw loop, footprints / tile prep / startup) | Shadow record (its scene prepare) | Scene prepare | Mesh objects / camera-visible items / draws |
+         |---|---|---|---|---|---|
+         | FieldWalk standing | 23.9, 0 | 9.7 (4.2 / 2.2, 1.7 / 1.2 / 1.5) | 3.5 (2.9) | 3.5 | 5,449 / 1,531 / 320 |
+         | Forest walk | 22.4, 12 | 9.4 (3.8 / 2.0, 1.6 / 1.1 / 1.4) | 4.0 (2.8) | 4.1 | 5,576 / 1,428 / 327 |
+         | Meadow walk | 25.9, 16 | 11.1 (4.4 / 2.2, 1.9 / 1.3 / 2.4) | 4.6 (3.2) | 4.6 | 5,635 / 1,518 / 314 |
+         | Field walk | 26.0, 25 | 10.1 (3.9 / 2.0, 1.6 / 1.3 / 1.5) | 4.4 (3.0) | 4.8 | 5,780 / 1,406 / 316 |
+         | Walk + turning | 26.1, 27 | 11.0 (4.2 / 2.2, 1.7 / 1.4 / 1.3) | 4.7 (3.0) | 4.9 | 5,588 / 1,514 / 345 |
+
+         ~5,500 mesh objects and ~1,450 visible items become ~320 draws: the batching already merges parts
+         across cells, so recording pays per object, not per draw. Far object blocks: 289.
+   - Approach chosen (2026-11-22): shared part objects. Every prefab layer (cells, near and far blocks) goes
+     through `TerrainObjectLayer::PreparePrefabInstances`; instead of one object per prefab part, level and
+     block per layer, a registry keeps one object per distinct part configuration for the whole scene, and a
+     layer attaches its placement blocks (world-space copies) to it. `Mesh` gains instance blocks: each block
+     is its own pool range and tile, culled by its world bounds on the CPU and per placement on the GPU. One
+     prepared draw per part instead of one per part per cell; streaming edits block lists, creates no objects.
+   - [x] Shared prefab parts, behind `ENGINE_SHARED_PREFAB_PARTS=1` (2026-11-22; running scenes only, the
+         editor keeps per-layer objects). `Components/Terrain/SharedPrefabParts` (registry on the Scene: part
+         key = source geometry, material, level, shadow role, every mesh setting, project layer; blocks go live
+         when their layer finishes the asset, as the objects were enabled; releasing a layer only queues the
+         detach, applied once a frame in frame preparation), `Mesh::SetInstanceBlocks`, one tile per block in
+         `SceneInstanceBatching` (each source registered once per pass, a stamp on the instance data), blocks
+         culled against the view's side planes in the tile loop and in texture footprints (camera or any
+         cascade). Cell layers, near blocks and far blocks all go through it (one code path).
+         Mesh objects ~5,500 → ~790. Captures at ForestFloor, ForestEdge, MeadowSlope, Vista match the per-cell
+         objects (`sp_cmp_*.png`; differences are wind and cloud timing).
+   - [x] Found on the way: the shadow view requested texture footprints again although the camera's request
+         covers every cascade. Off by default now (`ENGINE_SHADOW_FOOTPRINTS=1` brings it back): shadow record
+         -0.5 ms with per-cell objects, -1.8 ms with shared parts; resident textures 770 / 773 MiB either way.
+   - Walks, interleaved pairs (2026-11-22, both with the footprint fix; off / on):
+
+     | Walk | Frame median | Frames > 50 ms | Update + prepare + camera + shadow record | GPU (largest) |
+     |---|---|---|---|---|
+     | Forest | 17.2-17.7 / 15.4-15.7 | 2-4 / 1 | 2.1+3.4+7.5+2.8 / 1.4+1.5+5.6+2.4 | opaque 8.0, shadow 2.9, grass 2.6 |
+     | Field | 20.1-20.4 / 18.5-18.6 | 9-10 / 4-5 | 2.9+4.4+8.0+3.0 / 1.7+1.6+5.7+2.7 | grass 9.9, opaque 4.8 |
+     | Turning | 21.2-22.1 / 16.3-17.4 | 9-10 / 6 | 2.9+4.5+8.9+3.4 / 1.7+1.7+6.1+2.8 | opaque 8.2, grass 3.3, shadow 2.9 |
+
+     The main thread is no longer the limit: ~10.5-12 ms serial against ~15 ms (forest) and ~17.5 ms (field)
+     of GPU. GPU time is next ("Next" 2: grass; the foliage depth pre-pass, leaves, shadows).
+   - The parked DX12 hang can now show as a run that records nothing (camera record 0 from the warmup on,
+     1.6 ms frames, a grey capture) instead of "device removed at buffer Map": 2 of ~16 runs either way,
+     shared parts on or off. The perf runner treats it as a failed run and retries.
+   - [ ] Make it the default for running scenes after: editor Play mode checked (placement picking is
+         per-layer only), the other viewpoints captured, DX11 and Vulkan checked (DX11 draws blocks through
+         the CPU instance path).
+   - [ ] Shared parts give no CPU mesh occluders (`ENGINE_VISIBILITY_OCCLUSION_MESHES`, off by default).
+   - [ ] Far blocks are still `TerrainObjectLayer` objects (289) built through the near/far hand-off; their
+         parts are shared now, so the remaining items below are about streaming, not draw cost.
    - [ ] Pool ranges per cell and layer; placement ids kept for editor picking and removal at runtime.
    - [ ] Per-view cull over all ranges plus GPU-counted indirect draws, near cells first, behind a switch.
    - [ ] Shadow cascades through the same path.
@@ -333,15 +397,46 @@ at mid distance.
       - [ ] The far grass ring matches the tall field's colour and silhouette at the 60 m hand-off.
       - [ ] Compare unscaled 1440p tiles (`hires.sh`) against the references at MeadowSlope and
             ForestEdge.
-- [ ] **Bushes pop up from the ground while moving** (user 2026-11-22). The meadow's bushes are grass-field
-      placements; at the end of their 80 m reach they fade in by shrinking toward the root (per-placement
-      fade), which reads as bushes growing out of the ground. Large plants need a longer reach with a
-      dissolve, or to move to the props layer with LOD chains.
+- [x] **Bushes pop up from the ground while moving** (user 2026-11-22). Cause: the meadow's bushes were
+      distance-thinned like the fine grass, so from ~16 m (0.2 of the 80 m reach) they shrank in and out by
+      rank and visibly grew out of the ground near the camera. Fixed 2026-11-22: `Mesh::InstanceRange::thinned`
+      (false for the grass field's non-fine species) sets padding bit 1024 / `selection.w` bit 26, and
+      InstanceCull.hlsl and Object.hlsl skip the thinning for those ranges. Bushes are now full size to 56 m.
+      Cost: none measurable (FieldWalk walk 19.3 ms median, grass 9.52 ms, against 19.5 / 9.57 before).
+      - [ ] Still open: the end-of-reach shrink over 56-80 m. Watch for it; if it shows, use a longer reach
+            with a dissolve, or move large plants to the props layer with LOD chains.
 - [ ] **Bush and small-plant materials look low quality next to the trees, leaves and grass** (user
-      2026-11-22): the meadow bushes, shrubs and ferns are generated (`tools/generate_meadow_grass.py`,
-      vertex-coloured leaf cards with no textures), against textured scanned or pack trees. Replace with
-      textured assets (Poly Haven shrubs, the woodland bush pack) or give the generated plants textured
-      leaves with translucency like the trees'.
+      2026-11-22): the meadow bushes, shrubs and ferns were generated (vertex-coloured cards, no textures).
+      - [x] Bushes, low shrubs, nettles and saplings are scanned now (2026-11-22). `tools/scan_bush_cards.py`
+            renders the Poly Haven scans (shrub_04, shrub_02, nettle_plant; CC0) into one alpha-masked card
+            atlas (`ScanBushCards_diff.ktx2`, leaves graded toward the meadow green, stems toward bark), then
+            builds plants from crossed card pairs with outward volume normals, both sides as separate
+            triangles: `scan_bush` 1.5 m (720 / 360 / 144 triangles), `scan_bush_tall` 2.3 m (960 / 480 /
+            192), `scan_shrub`, `scan_nettle`, `scan_sapling`; the old bush was ~33k triangles. A sprig scan
+            cannot be simplified below ~1,200-1,900 triangles (every leaf is its own UV island), so whole
+            scans were not an option. They draw from their own field, layer "Procedural meadow bushes"
+            (`MeadowGrass::ApplyBushes`, material `Materials/Grass/scan_bush.material`) on meadow and forest
+            soil, 80 m reach; LandscapeDriver drops the generated bushes, bramble and shrub from the meadow
+            and forest floor fields (`ENGINE_SCAN_BUSHES=0` restores them). PSGrassMain leans textured
+            plants' normals 0.15 toward the sky instead of 0.55, so they keep a shaded side.
+            Cost: FieldWalk walk, interleaved A/B, 19.8 / 20.1 ms median against 20.1 / 19.8 with the
+            generated bushes; grass GPU 9.43 / 9.22 against 9.81 / 9.70 ms.
+      - [x] Ferns are scanned now (2026-11-22). fern_02's texture is five flat fronds; they fill the bottom
+            half of the atlas (now 2048x4096), and each fern is a rosette of arching, drooping frond strips:
+            `scan_fern` ~1.2 m across (288 / 128 / 40 triangles) in the bush field's thickets, and
+            `scan_fern_large` ~1.8 m (384 / 160 / 48) with `scan_fern` in a new layer "Procedural forest
+            ferns" (`MeadowGrass::ApplyForestFerns`: forest soil, 0.8 per m² in 10 m thickets covering 45 %,
+            50 m reach). The meadow field keeps only its tall grass clumps as shrubs; the forest floor field
+            no longer draws `forest_fern`. Both scanned fields now pick detail per plant.
+            Cost: not resolved. The machine drifted slower through the session (the generated build alone
+            went from 17.4 to 23.2 ms on the same forest walk); the cleanest interleaved pairs give +0.6 to
+            +1.0 ms frame and +0.5 ms command record in the forest (one more field's tile draws), grass GPU
+            +0.1 ms, nothing on the meadow. Re-measure on a fresh machine. 32 m fern tiles (fewer draws)
+            were tried: not all built 60 frames in, and they would arrive a whole tile at a time.
+      - [ ] Still generated: herbs (`forest_herb`), flowers, litter, seedlings, ground ivy, tall grass clumps.
+      - [ ] grass_test and foliage_test have no bush layer and still draw the generated bushes.
+      - [ ] Bushes cast no shadows (the field has `castShadows` off); try it now that they are cheap.
+      - [ ] Not judged: the bushes from a raised view, against the light, and close up while walking.
 - [ ] Forest edge variety: at least three broadleaf silhouettes, height variety, scanned shrubs (expectations
       table, "Tree variety"; Foliage Phase 7).
 - [ ] **Cliffs as sculpted terrain** (asked 2026-11-21: cliffs that are the terrain itself, with the scans' shape
@@ -380,9 +475,10 @@ at mid distance.
       - [ ] Whole map: 300 cliff cells at ~16 min each (the pure-Python simplifier is most of it): speed it
             up or run overnight. Then retire the stamps, stamp proxies, stamp images and far stamps' stamp
             path.
-      - [ ] Far: a sculpted cell's coarsest level (rock only) is its far stamp, over the far-grid patches;
-            not checked from far yet. Far stamp cost (+0.8 ms at the 450 m view, full lighting over the far
-            tile): cheaper lighting past ~600 m, or no far tile under them.
+      - [x] Far: within `farStampRadius` (8 cells) a cliff or sculpted cell draws as its own terrain at
+            stride 4 (far stamp cells, see the performance section in Status); checked at 450 m.
+      - [ ] Far stamp cell cost not re-measured since they became whole cells (was +0.8 ms at the 450 m
+            view as rock over the far tile). Past 8 cells cliffs are only the macro colour and normals.
       - [ ] Moving check of the 384 m hand-off: drives froze three times around frame 410 with process
             memory past 18 GB (GPU hang suspected; static captures are fine). No drives until the user
             okays them.
@@ -527,6 +623,45 @@ From memory, not re-checked this session.
 | Emil Persson, *Particle trimming* (humus.name, 2012) | Fit card geometry tightly to alpha; cuts alpha-tested overdraw roughly in half. |
 | Haar & Aaltonen, *GPU-Driven Rendering Pipelines* (SIGGRAPH 2015) | Two-phase Hi-Z occlusion culling in compute; forests occlude heavily. |
 | Fabian Bauer, *Creating the Atmospheric World of RDR2* (SIGGRAPH 2019 Advances) | Froxel volumetrics and how much of RDR2's foliage look is light in the air. |
+
+### Research references (foliage performance, web search 2026-11-22)
+
+Details, per-technique breakdown and full reference list: [foliage_performance_research.md](foliage_performance_research.md).
+
+What other engines do, against where our GPU time goes now (after shared prefab parts: forest walk GPU
+~15 ms = opaque 8.0 of which foliage depth pre-pass 2.5-4.4, shadows 2.9, grass 2.6; field walk ~17.5 ms =
+grass 9.9, opaque 4.8). Most sources are talk abstracts, slides or press summaries; numbers are theirs, unverified.
+
+| Engine / game | What they do | Bears on |
+|---|---|---|
+| **Chlorophyll Engine** (Toni Macaroni; the reference video; wccftech 2026-11-04, hwupgrade.it) | Handwritten engine, ~7 months. Clustered LODs (Nanite-like virtual geometry); **voxels instead of impostors** for distant vegetation; per-instance data dropped for the farthest proxies; screen-space + voxel GI, no hardware RT. Developer's figures: ~130 fps average, ~80 in dense forest, ~200 aerial, RTX 3080 at 1440p. No culling details published. | Far forest (Next 5), tree LODs |
+| **UE 5.7 Nanite Foliage** (experimental; Witcher 4 demo, 60 fps on PS5) | Three parts: Nanite **voxels** (near-pixel aggregates past a distance, keep animation and material), **assemblies** (reusable parts, the memory/disk saving that makes a forest fit), GPU skinning for wind. Users report holes when meshes go voxel, and advise cached shadows with it. | Far forest, wind, shadows |
+| **Ghost of Tsushima** (GDC 2021, Wohllaib) | Grass as individual procedural blades generated on the GPU, Voronoi clumps, per-blade shape and wind, blades facing away from the camera widened in view space. ~83k blades on screen in ~2.5 ms (secondary source). | Grass 9.9 ms (Next 2) |
+| **Ghost of Yōtei** (PlayStation Blog tech deep dive, 2025) | Instance management moved to the GPU and aggressive culling before the G-buffer; reported to double the amount of grass and objects. | Next 1 and 2 |
+| **Horizon Zero Dawn** (GDC 2017, van Muijden) | All vegetation placed procedurally on the GPU from 2D world maps (~4 MB/km²): 500+ asset types, 100k+ objects, ~250 µs of GPU per frame; deterministic, locally stable. | Next 2 (placement), far cells (Next 5) |
+| **Horizon Forbidden West** (GDC 2022, McLaren) | **Deferred texturing / visibility buffer for foliage and alpha-tested geometry**: a cheap visibility pass, then material analysis and shading in compute, overlapped with G-buffer and shadow rendering. | Foliage depth pre-pass, leaf overdraw |
+| **Alan Wake 2** (Northlight; GDC/REAC 2024) | Mesh shaders with meshlet-level culling; vegetation bent by ~300k bones a frame skinned on the GPU. | Leaf/tree cost, wind |
+| **AMD work graphs + mesh nodes** (GPUOpen, GDC 2024) | Grass patches generated by one mesh-shader workgroup each (16x16 blocks); trees generated on the GPU instead of stored (tens of GiB → KiB). AMD reports ExecuteIndirect 1.64x slower than work graphs in their demo (RX 7900 XTX, pre-release driver). | Later; DX12-only, young |
+| **Haar & Aaltonen, AC Unity** (SIGGRAPH 2015) | Cluster culling, any number of meshes per draw, two-phase Hi-Z; ~100 + 50 µs for the depth pyramid on PS4. | GPU occlusion (have it) |
+| **Fortnite** (octahedral impostors; VSM tech blog) | Impostors at 2048 colour/alpha + 1024 normal/depth per tree. VSM caching breaks on swaying trees and a moving sun; they cache animated casters in a base pose. | Far forest, shadows |
+| **Insomniac / CRYENGINE / Cyberpunk 2077** (shadow caching) | Scrolling cached cascades: far cascades kept and scrolled, only newly exposed edges re-rendered; near cascades and moving things drawn each frame. | Shadows 2.9 ms |
+
+**Options, ordered by expected gain on our measured costs:**
+1. **Grass on the GPU as blades** (Next 2; Tsushima, AMD, Horizon placement): the field walk's 9.9 ms of
+   grass. Blades generated per tile from a hash (no meshes, no CPU tiles), fewer and wider blades with
+   distance, LOD chosen in the cull. Target 4 ms or less.
+2. **Foliage depth pre-pass and leaf overdraw** (2.5-4.4 ms in the forest): measure first (pre-pass on/off
+   per pose, overdraw view). Cheap steps: tighter leaf cards (Persson), front-to-back order within a batch.
+   The structural fix is Horizon Forbidden West's visibility buffer for alpha-tested foliage; Nanite
+   Foliage avoids alpha by using real leaf geometry.
+3. **Cached far shadow cascades** (2.9 ms in the forest): scroll the far cascades and draw trees there in a
+   still pose (Fortnite's base pose); keep the near cascade per frame. Our sun is fixed.
+4. **Far forest as voxels or octahedral impostors** (Next 5; Chlorophyll, UE 5.7): mainly look and memory;
+   per-instance data dropped for the farthest proxies.
+5. **Cluster LOD / mesh shaders for trees** (Chlorophyll, Nanite, Alan Wake 2): the reference engine's core,
+   and the largest change; the RTX 4090 supports mesh shaders (DX12 and Vulkan; DX11 would keep today's path).
+   Only after 1-3 show where the forest's GPU time sits.
+6. **Work graphs**: watch; too young (driver support, no amplification shaders with mesh nodes).
 
 Phases are ordered by payoff per cost. Phase 1 is shader and asset-cook work with almost no frame cost; Phase 2 buys
 the headroom for Phases 3-6. Phases 1b, 1c, 1d and 7 came from user reports during the work.

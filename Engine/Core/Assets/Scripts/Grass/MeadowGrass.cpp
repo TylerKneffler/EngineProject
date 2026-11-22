@@ -100,10 +100,83 @@ GrassField* ApplyForestFloor(Engine::Components::TerrainObjectLayer& layer,
     return grass;
 }
 
+namespace
+{
+std::string ScanMesh(const char* stem) { return std::string("Assets/Mesh/Grass/") + stem + ".mesh"; }
+
+// A field of scanned plants (card clusters baked from Poly Haven scans by
+// tools/scan_bush_cards.py) with their shared alpha-masked material. The
+// grass slots are required by the field but stay empty (zero density); the
+// caller sets the shrubs and bushes.
+GrassField* ApplyScanned(Engine::Components::TerrainObjectLayer& layer,
+    const std::string& viewerObjectName, float reach, int seed,
+    Engine::Serialization::JsonValue& settings)
+{
+    layer.snapToGround = true;
+    layer.conformToGround = true;
+    if (viewerObjectName.empty()) return nullptr;
+    auto* owner = layer.Owner;
+    if (auto* existing = owner->GetComponent<GrassField>()) return existing;
+    layer.viewDistance = reach;
+    layer.lod1Distance = 18.f;
+    layer.lod2Distance = 40.f;
+    layer.MarkConfigurationDirty();
+    using Engine::Serialization::JsonValue;
+    const std::string empty = "Assets/Mesh/Grass/far_grass_tuft.obj";
+    settings.Set("shortMesh", empty).Set("tallMesh", empty)
+        .Set("shortMeshLod1", empty).Set("shortMeshLod2", empty)
+        .Set("tallMeshLod1", empty).Set("tallMeshLod2", empty)
+        .Set("shortPatchesPerSquareMeter", 0.f).Set("tallPatchesPerSquareMeter", 0.f)
+        .Set("materialPath", "Assets/Materials/Grass/scan_bush.material")
+        .Set("viewerObjectName", viewerObjectName)
+        .Set("useEditorCamera", JsonValue(true)).Set("visibleRadius", reach)
+        .Set("tileSize", 16.f).Set("seed", seed)
+        .Set("maxTileBuildsPerUpdate", 8).Set("castShadows", JsonValue(false))
+        .Set("tileWorkBudgetMs", 1.f).Set("fadeDuration", .35f)
+        .Set("distanceFadeFraction", .3f).Set("retainDormantTiles", JsonValue(false))
+        .Set("windStrength", .6f).Set("groundTintStrength", 0.f)
+        .Set("allowProceduralGeneration", JsonValue(true));
+    auto* grass = new GrassField();
+    grass->Deserialize(settings);
+    owner->AddComponent(grass);
+    owner->layer = Engine::Rendering::DetailBudget::Get().FindLayerOrDefault("Grass");
+    return grass;
+}
+}
+
+GrassField* ApplyBushes(Engine::Components::TerrainObjectLayer& layer,
+    const std::string& viewerObjectName)
+{
+    // Bushes in loose clusters; shrub clumps, nettles, saplings and ferns in
+    // thickets.
+    auto settings = Engine::Serialization::JsonValue::MakeObject();
+    settings.Set("shrubMeshes", ScanMesh("scan_shrub") + ";" + ScanMesh("scan_nettle") + ";" +
+            ScanMesh("scan_sapling") + ";" + ScanMesh("scan_fern"))
+        .Set("shrubPatchesPerSquareMeter", .5f)
+        .Set("shrubThicketSize", 9.f).Set("shrubCoverage", .25f)
+        .Set("bushMeshes", ScanMesh("scan_bush") + ";" + ScanMesh("scan_bush_tall"))
+        .Set("bushesPerSquareMeter", .08f)
+        .Set("bushClusterSize", 16.f).Set("bushCoverage", .25f);
+    return ApplyScanned(layer, viewerObjectName, 80.f, 18731, settings);
+}
+
+GrassField* ApplyForestFerns(Engine::Components::TerrainObjectLayer& layer,
+    const std::string& viewerObjectName)
+{
+    // Fern thickets under the trees (the forest floor's generated ferns had
+    // 1 per m² in thickets of 10 m covering 45 %).
+    auto settings = Engine::Serialization::JsonValue::MakeObject();
+    settings.Set("shrubMeshes", ScanMesh("scan_fern_large") + ";" + ScanMesh("scan_fern"))
+        .Set("shrubPatchesPerSquareMeter", .8f)
+        .Set("shrubThicketSize", 10.f).Set("shrubCoverage", .45f);
+    return ApplyScanned(layer, viewerObjectName, 50.f, 40507, settings);
+}
+
 bool IsMeadowLayer(const std::string& layerName)
 {
     return layerName == "Meadow grass" || layerName == "Procedural meadow grass" ||
-        layerName == FarLayerName || layerName == ForestFloorLayerName;
+        layerName == FarLayerName || layerName == ForestFloorLayerName || layerName == BushLayerName ||
+        layerName == FernLayerName;
 }
 
 GrassField* Apply(Engine::Components::TerrainObjectLayer& layer,
@@ -112,6 +185,8 @@ GrassField* Apply(Engine::Components::TerrainObjectLayer& layer,
     if (!IsMeadowLayer(layer.layerName) || !layer.Owner) return nullptr;
     if (layer.layerName == FarLayerName) return ApplyFar(layer, viewerObjectName);
     if (layer.layerName == ForestFloorLayerName) return ApplyForestFloor(layer, viewerObjectName);
+    if (layer.layerName == BushLayerName) return ApplyBushes(layer, viewerObjectName);
+    if (layer.layerName == FernLayerName) return ApplyForestFerns(layer, viewerObjectName);
     // Grass follows the ground through sculpting; procedural grass also
     // conforms per placement. Set on every restore (saved layers included).
     const bool procedural = layer.layerName == "Procedural meadow grass";

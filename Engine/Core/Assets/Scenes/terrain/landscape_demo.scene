@@ -348,6 +348,8 @@
             <item>Procedural meadow grass</item>
             <item>Procedural far grass</item>
             <item>Procedural forest floor</item>
+            <item>Procedural meadow bushes</item>
+            <item>Procedural forest ferns</item>
             <item>Landscape props</item>
           </TerrainManager.objectLayerNames>
           <TerrainManager.proceduralRuns>

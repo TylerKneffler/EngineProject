@@ -542,7 +542,7 @@ void VSMain(
         // its distance longer by 1 / reach is the same as scaling every fade
         // and thinning distance by reach. InstanceCull.hlsl scales to match.
         const float cameraDistance = length(root - objectData.viewPositionAlphaCutoff.xyz) *
-            (draw.placementReach != 0u ? 1024.0 / (float)draw.placementReach : 1.0);
+            ((draw.placementReach & 1023u) != 0u ? 1024.0 / (float)(draw.placementReach & 1023u) : 1.0);
         if (placementFadeOn)
         {
             const float band = objectData.placementFade.y - objectData.placementFade.x;
@@ -551,7 +551,8 @@ void VSMain(
             placementScale = 1.0 - smoothstep(objectData.placementFade.x, objectData.placementFade.y,
                 cameraDistance + advance);
         }
-        if (placementThinOn)
+        // Bit 10: the range is not thinned (shrubs, bushes).
+        if (placementThinOn && (draw.placementReach & 1024u) == 0u)
         {
             const float share = lerp(1.0, saturate(objectData.placementThin.z), smoothstep(
                 objectData.placementThin.x, objectData.placementThin.y, cameraDistance));
@@ -2693,7 +2694,9 @@ float4 PSGrassMain(
     float3 n = geometric;
     if (!textured)
         n = normalize(n + across * ((uv.x - 0.5) * 1.3 * leafy));
-    n = normalize(lerp(n, up, 0.55 * leafy));
+    // Textured plants (scanned bush cards, tools/scan_bush_cards.py) carry
+    // volume normals of their own, so they keep most of their shaded side.
+    n = normalize(lerp(n, up, (textured ? 0.15 : 0.55) * leafy));
     float3 v = normalize(objectData.viewPositionAlphaCutoff.xyz - worldPos);
 
     float ambientOcclusion = lerp(1.0,

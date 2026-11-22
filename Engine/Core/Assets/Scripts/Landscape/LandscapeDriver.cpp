@@ -500,6 +500,16 @@ std::shared_ptr<const CliffList> LoadCliffList(const std::string& path, uint64_t
 // (tools/bake_terrain_stamp.py write_proxy), the same shape and surface a
 // stamp has. The photo-scanned meshes are only the stamps' bake sources.
 // Shapes past the five stamps keep their own prefab.
+// A/B switches for the cliff work (2026-11-22 bisect of a walk slowdown):
+// ENGINE_TERRAIN_STAMPS=0 leaves cells without stamps or sculpts (and so
+// without cliffs), ENGINE_FAR_PATCHES=0 drops the far grid's full-resolution
+// cliff-cell patches.
+bool EnvironmentSwitch(const char* name)
+{
+    const char* value = std::getenv(name);
+    return !(value && value[0] == '0');
+}
+
 // The stamp a scanned shape (the first five) was baked into: its file name
 // under Assets/TerrainData/Stamps (and Prefabs/Woodland/Stamps for its proxy).
 std::string StampName(size_t shape)
@@ -1303,7 +1313,8 @@ bool LandscapeDriver::ConfigureTerrain()
         signature ^ PaintRevision ^ paintKey ^ (cliffs ? cliffs->contentHash : 0ull));
     // Cliff pieces in loaded cells are part of the terrain (stamps); the
     // stamp files are read once and shared.
-    if (cliffs)
+    static const bool stampsEnabled = EnvironmentSwitch("ENGINE_TERRAIN_STAMPS");
+    if (cliffs && stampsEnabled)
     {
         // Their surface images (tools/stamp_textures.py), in Cliffs order.
         std::vector<std::string> stampMaterials;
@@ -1373,6 +1384,58 @@ bool LandscapeDriver::ConfigureTerrain()
             layer.Owner->layer = Engine::Rendering::DetailBudget::Get().FindLayerOrDefault("Trees");
         auto* grass = layer.Owner ? layer.Owner->GetComponent<GrassField>() : nullptr;
         if (!grass) return;
+        // Scanned bushes, shrubs and ferns (textured fields of their own) grow
+        // on the meadow and the forest soil, fern thickets on the forest soil;
+        // the grass fields below drop their generated bushes, shrubs and
+        // ferns (ENGINE_SCAN_BUSHES=0 keeps the generated ones for A/B runs).
+        static const bool scanBushes = []
+        { const char* v = std::getenv("ENGINE_SCAN_BUSHES"); return !(v && v[0] == '0'); }();
+        const bool ferns = layer.layerName == MeadowGrass::FernLayerName;
+        if (ferns || layer.layerName == MeadowGrass::BushLayerName)
+        {
+            const int mask = !scanBushes ? 0 : ferns ? 1 << ForestSoil : (1 << Grass) | (1 << ForestSoil);
+            // Full reach: the detail budget sits at its floor here, which
+            // would halve it (see the ground cover below).
+            // Each plant picks its own detail level (as the ground cover
+            // does). 32 m fern tiles (fewer draws) were not all built 60
+            // frames in, and would arrive a whole tile at a time.
+            const float tile = 16.f;
+            if (grass->proceduralLayerMask != mask || grass->minimumRadiusScale != 1.f ||
+                !grass->perPlantDetail || grass->tileSize != tile)
+            {
+                grass->minimumRadiusScale = 1.f;
+                grass->perPlantDetail = true;
+                grass->tileSize = tile;
+                grass->proceduralLayerMask = mask;
+                if (!scanBushes)
+                {
+                    grass->bushesPerSquareMeter = 0.f;
+                    grass->shrubPatchesPerSquareMeter = 0.f;
+                }
+                grass->MarkConfigurationDirty();
+            }
+            return;
+        }
+        if (scanBushes && !grass->bushMeshes.empty())
+        {
+            grass->bushMeshes.clear();
+            grass->bushesPerSquareMeter = 0.f;
+            // The meadow keeps its tall grass clumps (one of its four shrub
+            // species, at a quarter of the density). The forest floor's only
+            // shrub was its fern (its herb, also listed, is its tall plant and
+            // so skipped as a shrub); the fern layer replaces it.
+            if (layer.layerName == "Procedural meadow grass")
+            {
+                grass->shrubMeshes = "Assets/Mesh/Grass/tall_grass_clump.obj";
+                grass->shrubPatchesPerSquareMeter *= .25f;
+            }
+            else if (layer.layerName == MeadowGrass::ForestFloorLayerName)
+            {
+                grass->shrubMeshes.clear();
+                grass->shrubPatchesPerSquareMeter = 0.f;
+            }
+            grass->MarkConfigurationDirty();
+        }
         if (layer.layerName == MeadowGrass::FarLayerName)
         {
             // The far ring is fully in before the detailed grass (radius +
@@ -1637,6 +1700,7 @@ void LandscapeDriver::OnAfterDeserialize(IGraphicsProvider*)
         result.loaded = TerrainHeightArchive::ReadFarGrid(
             Engine::Components::Mesh::ResolveFilePath(farGrid), m_configuredSignature,
             mapHalfExtentCells, result.heights, &result.patches);
+        if (!EnvironmentSwitch("ENGINE_FAR_PATCHES")) result.patches.clear();
         if (result.loaded)
         {
             auto palette = MakePalette(AltitudesOf(*this));
@@ -1767,6 +1831,7 @@ void LandscapeDriver::Update()
             FarGridLoad result;
             result.loaded = TerrainHeightArchive::ReadFarGrid(path, signature, extent,
                 result.heights, &result.patches);
+            if (!EnvironmentSwitch("ENGINE_FAR_PATCHES")) result.patches.clear();
             if (result.loaded)
                 result.gridColors = ComputeFarColors(archive, signature, extent, cellsX,
                     cellsY, cellWidth, cellDepth, level, means);

@@ -197,12 +197,50 @@ void Mesh::SetInstancedGeometry(std::shared_ptr<Mesh> source,
     m_instanceSource = std::move(source);
     m_instances = std::move(instances);
     m_instanceRanges = std::move(ranges);
+    m_instanceBlocks.clear(); m_usesInstanceBlocks = false;
     m_boundsMin = minimum; m_boundsMax = maximum; m_hasBounds = true;
     m_ready = m_instanceSource->IsReady();
     // Instance records are resident in the renderer's persistent pool on first
     // submission. Legacy per-range buffers are optional shader fallbacks.
     ++m_authoredGeometryRevision;
     MarkConfigurationDirty();
+}
+
+void Mesh::SetInstanceBlocks(std::shared_ptr<Mesh> source, std::vector<InstanceBlock> blocks,
+    std::vector<InstanceRange> ranges, int maximumLod)
+{
+    // The stub holds no placements; every range covers none of them, and the
+    // renderer takes each block's placements instead.
+    auto stub = std::make_shared<InstanceData>();
+    stub->maximumLod = maximumLod;
+    for (auto& range : ranges) { range.firstInstance = 0; range.instanceCount = 0; }
+    SetInstancedGeometry(std::move(source), std::move(stub), std::move(ranges),
+        glm::vec3(0.f), glm::vec3(0.f));
+    m_usesInstanceBlocks = true;
+    SetInstanceBlocks(std::move(blocks));
+}
+
+void Mesh::SetInstanceBlocks(std::vector<InstanceBlock> blocks)
+{
+    if (!m_usesInstanceBlocks || !m_instances)
+        throw std::logic_error("Instance blocks need SetInstanceBlocks with a source first");
+    m_instanceBlocks = std::move(blocks);
+    // Bounds: every block's, for whole-object culling (which then rarely
+    // rejects; blocks are culled one by one when tiles are built).
+    m_hasBounds = !m_instanceBlocks.empty();
+    if (m_hasBounds)
+    {
+        m_boundsMin = m_instanceBlocks.front().minimum;
+        m_boundsMax = m_instanceBlocks.front().maximum;
+        for (const auto& block : m_instanceBlocks)
+        {
+            m_boundsMin = glm::min(m_boundsMin, block.minimum);
+            m_boundsMax = glm::max(m_boundsMax, block.maximum);
+        }
+    }
+    else m_hasBounds = true, m_boundsMin = m_boundsMax = glm::vec3(0.f);
+    // Prepared render items compare the instance data's revision.
+    m_instances->MarkDirty();
 }
 
 bool Mesh::GetInstanceGeometryBounds(glm::vec3& minimum, glm::vec3& maximum,

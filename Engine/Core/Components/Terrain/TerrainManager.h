@@ -506,8 +506,9 @@ private:
     };
     void UpdateFarObjects(int centerX, int centerY);
     void ClearFarObjects();
-    // Far stamps (farStampRadius): one runtime mesh per stamped cell, built
-    // on a worker, hidden while the cell itself is loaded.
+    // Far stamp cells (farStampRadius): one runtime mesh per stamped cell,
+    // the cell's own terrain at a coarse level, built on a worker, hidden
+    // while the cell itself is loaded.
     struct FarStampGeometry
     {
         std::vector<Mesh::Vertex> vertices;
@@ -524,6 +525,9 @@ private:
     std::map<Cell, bool> m_stampCellKnown;
     void UpdateFarStamps(int centerX, int centerY);
     void ClearFarStamps();
+    // A far stamp cell is drawn (built, ready, its cell not loaded): far tiles
+    // leave it out and stitch their edges to it.
+    bool FarStampShowing(Cell cell) const;
     struct NearObjectBlock
     {
         Engine::Core::Object* object = nullptr;

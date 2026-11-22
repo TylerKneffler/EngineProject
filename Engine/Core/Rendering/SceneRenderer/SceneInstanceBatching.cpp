@@ -8,6 +8,7 @@
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Core/Rendering/RenderJobs.h"
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <future>
 #include <unordered_map>
@@ -129,7 +130,10 @@ SceneInstanceBatching::Result SceneInstanceBatching::Prepare(SceneRenderer& rend
     auto& automaticGroups = result.automaticGroups;
     automaticGroups=std::move(batchResult.groups);
     for (uint32_t group=0;group<automaticGroups.size();++group)
-        if (automaticGroups[group].members.size()>1 || preparedDraws[automaticGroups[group].members.front()].gpuLod>=0 || (preparedDraws[automaticGroups[group].members.front()].drawData.flags & 0x00100000u))
+        // Shared parts (instance blocks) always draw through the batched
+        // path: their stub instance data holds no placements of its own.
+        if (automaticGroups[group].members.size()>1 || preparedDraws[automaticGroups[group].members.front()].gpuLod>=0 || (preparedDraws[automaticGroups[group].members.front()].drawData.flags & 0x00100000u) ||
+            preparedDraws[automaticGroups[group].members.front()].mesh->UsesInstanceBlocks())
             for(auto index:automaticGroups[group].members) preparedDraws[index].automaticGroup=group;
     renderer.m_lastRenderCpuTimings.batchingMs=std::chrono::duration<double,std::milli>(RenderClock::now()-batchingStart).count();
 
@@ -139,19 +143,39 @@ SceneInstanceBatching::Result SceneInstanceBatching::Prepare(SceneRenderer& rend
     using TilePreparation=Engine::Rendering::InstanceTilePreparation;
     std::vector<TilePreparation::Input> tileInputs;
     std::vector<size_t> tileDrawIndexes;
-    std::unordered_map<const void*,uint32_t> placementBases;
+    // Each placement source registers once per pass: a stamp on the data, as
+    // a shared part's blocks are visited by every part drawing them.
+    static std::atomic<uint64_t> registrationPasses{0};
+    const uint64_t pass=++registrationPasses;
     for(size_t index=0;index<preparedDraws.size();++index)
     {
         const auto& draw=preparedDraws[index];
         if(draw.automaticGroup==UINT32_MAX || !draw.mesh->IsInstanced()) continue;
-        const auto& data=draw.mesh->GetInstanceData();
-        auto [base,inserted]=placementBases.try_emplace(data.get(),0);
-        if(inserted)
-            base->second=renderer.m_persistentInstances.Register(data,data->revision,data->transforms.data(),
-                uint32_t(data->transforms.size()),data->stableId,data->placementIds);
+        const auto registerPlacements=[&](const std::shared_ptr<Engine::Components::Mesh::InstanceData>& data)
+        {
+            if(data->poolPass!=pass)
+            {
+                data->poolBase=renderer.m_persistentInstances.Register(data,data->revision,data->transforms.data(),
+                    uint32_t(data->transforms.size()),data->stableId,data->placementIds);
+                data->poolPass=pass;
+            }
+            return data->poolBase;
+        };
         TilePreparation::Input input;
         input.slot=draw.drawData.objectIndex;
-        input.base=base->second;
+        if(draw.mesh->UsesInstanceBlocks())
+        {
+            // Shared part: one tile per geometry range and block, range-major
+            // (SceneRendering reads tile rangeIndex*blocks+block). Records
+            // address the pool directly, so the base stays 0.
+            const auto& blocks=draw.mesh->GetInstanceBlocks();
+            std::vector<uint32_t> bases; bases.reserve(blocks.size());
+            for(const auto& block:blocks) bases.push_back(registerPlacements(block.data));
+            for(size_t range=0;range<draw.mesh->GetInstanceRanges().size();++range)
+                for(size_t block=0;block<blocks.size();++block)
+                    input.ranges.emplace_back(bases[block],uint32_t(blocks[block].data->transforms.size()));
+        }
+        else input.base=registerPlacements(draw.mesh->GetInstanceData());
         input.maximumLod=uint32_t(draw.gpuMaximumLod);
         input.world=draw.objectData.world;
         input.thin=draw.objectData.placementThin;
@@ -180,8 +204,9 @@ SceneInstanceBatching::Result SceneInstanceBatching::Prepare(SceneRenderer& rend
             ? std::max(0.f, lodPolicy->finalLodCullDistance) * draw.lodScale : 0.f;
         input.lod={ScaleShadowLodDistances(draw.gpuLodDistances, shadowOnly),
             shadowRange,finalCullDistance};
-        for(const auto& range:draw.mesh->GetInstanceRanges())
-            input.ranges.emplace_back(range.firstInstance,range.instanceCount);
+        if(!draw.mesh->UsesInstanceBlocks())
+            for(const auto& range:draw.mesh->GetInstanceRanges())
+                input.ranges.emplace_back(range.firstInstance,range.instanceCount);
         tileInputs.push_back(std::move(input));
         tileDrawIndexes.push_back(index);
     }

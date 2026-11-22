@@ -987,8 +987,12 @@ bool GrassField::AdvanceBuild(Clock::time_point deadline)
             const auto vertexCount = static_cast<uint32_t>(m_speciesVertices[species][lod]->size());
             const uint32_t instanceCount = species < job.speciesCounts.size() ? job.speciesCounts[species] : 0;
             // Species order: short, tall, accents, then shrubs and bushes.
+            // Shrubs and bushes keep their full reach and are not thinned:
+            // they are large enough that a plant growing back in at mid
+            // range reads as it rising out of the ground.
+            const bool fine = species < 2 + m_accentSpecies;
             ranges.push_back({firstVertex, vertexCount, firstInstance, instanceCount,
-                species < 2 + m_accentSpecies ? std::clamp(fineReachFraction, .05f, 1.f) : 1.f});
+                fine ? std::clamp(fineReachFraction, .05f, 1.f) : 1.f, fine});
             firstVertex += vertexCount;
             firstInstance += instanceCount;
         }

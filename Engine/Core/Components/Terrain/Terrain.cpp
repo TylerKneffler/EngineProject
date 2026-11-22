@@ -858,7 +858,7 @@ std::vector<Mesh::Vertex> Terrain::GridVertices(const Mesh& mesh) const
 
 void Terrain::AppendStampGeometry(std::vector<Mesh::Vertex>& vertices,
     std::vector<uint32_t>& indices, int stride, const std::vector<float>& heightsSource,
-    const std::function<void(size_t, Mesh::Vertex&)>& paint, bool sculptRockOnly) const
+    const std::function<void(size_t, Mesh::Vertex&)>& paint) const
 {
     if (stamps.empty() || heightsSource.size() != static_cast<size_t>(cellsX + 1) * (cellsY + 1))
         return;
@@ -879,10 +879,6 @@ void Terrain::AppendStampGeometry(std::vector<Mesh::Vertex>& vertices,
         const auto& source = sculpt->levels[level];
         for (size_t t = 0; t + 2 < source.size(); t += 3)
         {
-            if (sculptRockOnly && sculpt->vertices[source[t]].weight <= 0.01f &&
-                sculpt->vertices[source[t + 1]].weight <= 0.01f &&
-                sculpt->vertices[source[t + 2]].weight <= 0.01f)
-                continue;
             for (size_t k = 0; k < 3; ++k)
             {
                 uint32_t& slot = slots[source[t + k]];
@@ -1021,25 +1017,6 @@ void Terrain::AppendStampGeometry(std::vector<Mesh::Vertex>& vertices,
             indices.insert(indices.end(),
                 {vertexAt(triangles[t]), vertexAt(triangles[t + 1]), vertexAt(triangles[t + 2])});
     }
-}
-
-void Terrain::BuildStampSurface(int stride, std::vector<Mesh::Vertex>& vertices,
-    std::vector<uint32_t>& indices) const
-{
-    vertices.clear();
-    indices.clear();
-    if (weights.size() != heights.size() * layers.size()) return;
-    AppendStampGeometry(vertices, indices, stride, heights,
-        [&](size_t source, Mesh::Vertex& vertex)
-        {
-            Mesh::Vertex grid;
-            BuildVertex(static_cast<int>(source % (cellsX + 1)),
-                static_cast<int>(source / (cellsX + 1)), grid);
-            std::copy_n(grid.color, 4, vertex.color);
-            for (int set = 2; set < 4; ++set)
-                std::copy_n(grid.uvChannels[set], 4, vertex.uvChannels[set]);
-        }, true);
-    OrientTerrainSurfaceUp(vertices, indices);
 }
 
 void Terrain::BuildVertex(int col, int row, Mesh::Vertex& v) const

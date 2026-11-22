@@ -31,6 +31,8 @@ struct FootprintChunk
 {
     size_t draw = 0;
     size_t begin = 0, end = 0; // instance range; unused for single draws
+    // Whose placements: the mesh's instance data, or one block of a shared part.
+    const Engine::Components::Mesh::InstanceData* data = nullptr;
     float pixels = 0.f;
     float coverage = 0.f;
     Engine::Rendering::TextureFootprintCache::ChunkResult* cached = nullptr;
@@ -88,7 +90,6 @@ void SceneTextureFootprints::Request(const std::vector<PreparedDraw>& preparedDr
         footprintDraw.instanced=draw.mesh->IsInstanced() && draw.mesh->GetInstanceData();
         if(footprintDraw.instanced)
         {
-            const auto& instanceData=*draw.mesh->GetInstanceData();
             uint64_t hash=1469598103934665603ull;
             HashBytes(hash,mesh);
             HashBytes(hash,draw.objectData.world);
@@ -96,10 +97,41 @@ void SceneTextureFootprints::Request(const std::vector<PreparedDraw>& preparedDr
             HashBytes(hash,uvScale);
             HashBytes(hash,uint8_t((draw.castsShadow ? 1:0) | (draw.terrain ? 2:0) | (draw.terrainCell ? 4:0)));
             footprintDraw.stateHash=hash;
+            std::vector<const Engine::Components::Mesh::InstanceData*> sources;
+            if(draw.mesh->UsesInstanceBlocks())
+            {
+                // A shared part spans every loaded cell: only blocks the camera
+                // or a shadow cascade can see ask for texture detail (a
+                // per-cell object out of view was not prepared at all).
+                const auto outside=[](const glm::mat4& m,const glm::vec3& low,const glm::vec3& high)
+                {
+                    const auto row=[&](int r) { return glm::vec4(m[0][r],m[1][r],m[2][r],m[3][r]); };
+                    for(int plane=0;plane<4;++plane)
+                    {
+                        const glm::vec4 p=row(3)+(plane&1 ? -1.f:1.f)*row(plane>>1);
+                        const glm::vec3 corner(p.x>=0.f ? high.x:low.x,p.y>=0.f ? high.y:low.y,p.z>=0.f ? high.z:low.z);
+                        if(glm::dot(glm::vec3(p),corner)+p.w<0.f) return true;
+                    }
+                    return false;
+                };
+                for(const auto& block:draw.mesh->GetInstanceBlocks())
+                {
+                    bool seen=!outside(viewProjection,block.minimum,block.maximum);
+                    if(draw.castsShadow)
+                        for(uint32_t cascade=0;cascade<shadowCascadeCount && !seen;++cascade)
+                            seen=!outside(shadowViewProjections[cascade],block.minimum,block.maximum);
+                    if(seen) sources.push_back(block.data.get());
+                }
+            }
+            else sources.push_back(draw.mesh->GetInstanceData().get());
+            for(const auto* source:sources)
+            {
+            const auto& instanceData=*source;
             const size_t count=instanceData.transforms.size();
             for(size_t begin=0;begin<count;begin+=kInstancesPerChunk)
             {
                 FootprintChunk chunk{index,begin,std::min(count,begin+kInstancesPerChunk)};
+                chunk.data=source;
                 if(view)
                 {
                     const Cache::ChunkKey key{&instanceData,instanceData.revision,hash,begin};
@@ -118,6 +150,7 @@ void SceneTextureFootprints::Request(const std::vector<PreparedDraw>& preparedDr
                     }
                 }
                 chunks.push_back(chunk);
+            }
             }
         }
         else chunks.push_back({index,0,0});
@@ -154,7 +187,7 @@ void SceneTextureFootprints::Request(const std::vector<PreparedDraw>& preparedDr
         };
         if(footprintDraw.instanced)
         {
-            const auto& transforms=draw.mesh->GetInstanceData()->transforms;
+            const auto& transforms=chunk.data->transforms;
             const auto instanceWorld=[&](size_t instance) {
                 const auto& affine=transforms[instance];
                 glm::mat4 matrix(1.f);

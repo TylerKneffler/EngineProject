@@ -559,23 +559,15 @@ def write_archive(world):
                                CELLS, CELLS, SCALE, FINE_EXTENT, COARSE))
         file.write(body)
     side = 2 * EXTENT + 2
-    # Cells holding cliff pieces keep their full-resolution (conformed)
-    # heights in the far grid, as sculpted cells do (far patches). With far
-    # terrain on, only the cells within loadedRadius (384 m) are terrain
-    # cells; past them a far tile is one quad per 128 m cell, which flattened
-    # every escarpment into a smooth hillside until it came within 384 m.
-    patch_cells = sorted(world.get("cliffs", {}))
+    # No far patches for cliff cells: within the engine's farStampRadius they
+    # draw as terrain cells of their own (TerrainManager far stamp cells), and
+    # full-resolution patches made every far tile rebuild carry them (two
+    # ~150 ms hitches per walk, 2026-11-22).
     with open(DATA / "world.fargrid", "wb") as file:
         file.write(struct.pack("<QIQiiiif", FARGRID_MAGIC, 3, signature, EXTENT,
                                side, CELLS, CELLS, SCALE))
         file.write(np.ascontiguousarray(corners.astype("<i2")).tobytes())
-        file.write(struct.pack("<I", len(patch_cells)))
-        for cell_x, cell_z in patch_cells:
-            r0 = (cell_z + FINE_EXTENT) * CELLS
-            c0 = (cell_x + FINE_EXTENT) * CELLS
-            block = world["fine_q"][r0:r0 + CELLS + 1, c0:c0 + CELLS + 1]
-            file.write(struct.pack("<ii", cell_x, cell_z))
-            file.write(np.ascontiguousarray(block.astype("<i2")).tobytes())
+        file.write(struct.pack("<I", 0))
     return signature, same
 
 
@@ -852,7 +844,8 @@ def write_scene(world):
             "match": "/Oaks/" if kind.startswith("Oak") else "/Conifers/", "trees": "14"})
     names = ET.SubElement(manager, "TerrainManager.objectLayerNames")
     for name in ("Landscape forest", "Procedural meadow grass", "Procedural far grass",
-                 "Procedural forest floor", "Landscape props"):
+                 "Procedural forest floor", "Procedural meadow bushes", "Procedural forest ferns",
+                 "Landscape props"):
         ET.SubElement(names, "item").text = name
     runs = ET.SubElement(manager, "TerrainManager.proceduralRuns")
     for y in range(-EXTENT, EXTENT + 1):

@@ -17,8 +17,16 @@ inline constexpr const char* FarLayerName = "Procedural far grass";
 // under trees (.md/todo.md Foliage Phase 4). The scene script points it at its
 // forest paint layer (GrassField::proceduralLayerMask).
 inline constexpr const char* ForestFloorLayerName = "Procedural forest floor";
+// Layer name of the scanned bushes and shrubs: photo-textured card clusters
+// (tools/scan_bush_cards.py) with their own alpha-masked material, so they
+// draw from a field of their own. A scene with this layer drops the generated
+// bushes and shrubs from its grass fields.
+inline constexpr const char* BushLayerName = "Procedural meadow bushes";
+// Layer name of the scanned fern thickets under trees (same material as the
+// bushes; the scene script points it at its forest paint layer).
+inline constexpr const char* FernLayerName = "Procedural forest ferns";
 // "Meadow grass" (authored placements), "Procedural meadow grass", the far
-// ring or the forest floor.
+// ring, the forest floor, the bushes or the forest ferns.
 bool IsMeadowLayer(const std::string& layerName);
 
 // For a meadow layer: marks it as ground cover and, when a viewer is named,

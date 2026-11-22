@@ -77,6 +77,9 @@ public:
     // place of the drawn ones, when set (a sculpted terrain cell's coarsest
     // level; occluders need its silhouette, not its detail).
     std::vector<uint32_t> occluderIndices;
+    // With occluderIndices: they use only the first occluderVertexCount
+    // vertices (0 = all), so the buffer transforms no more than those.
+    size_t occluderVertexCount = 0;
     float placementFadeStart = 0.f;
     float placementFadeEnd = 0.f;
     // Transient distance thinning for instanced ground cover (GrassField):
@@ -184,6 +187,10 @@ public:
         uint64_t editorSelectionPlacementId = 0;
         uint64_t editorSelectionRevision = 0;
         std::unique_ptr<IGraphicsBuffer> editorSelectionBuffer;
+        // Renderer scratch: the placement pool base found in the current
+        // batching pass (shared part blocks are visited once per part).
+        mutable uint64_t poolPass = 0;
+        mutable uint32_t poolBase = 0;
     };
     struct InstanceRange
     {
@@ -195,6 +202,10 @@ public:
         // distances this range's plants use (1 = all of it). Lets fine grass
         // end sooner than the shrubs in the same tile.
         float reachScale = 1.f;
+        // Distance thinning (placementThin) applies to this range's plants.
+        // Off for shrubs and bushes: a bush thinned away at mid range grew
+        // out of the ground as the camera came toward it.
+        bool thinned = true;
     };
     void SetInstancedGeometry(std::shared_ptr<Mesh> source,
         std::shared_ptr<InstanceData> instances, std::vector<InstanceRange> ranges,
@@ -209,6 +220,24 @@ public:
     }
     const std::vector<InstanceRange>& GetInstanceRanges() const { return m_instanceRanges; }
     const std::shared_ptr<InstanceData>& GetInstanceData() const { return m_instances; }
+
+    // Shared instanced parts (one object for a prefab part across all
+    // streamed cells): placements come in blocks, each its own record range
+    // in the renderer's placement pool, in world space (the object keeps an
+    // identity transform). minimum/maximum: the block's world bounds with
+    // geometry, for culling whole blocks. GetInstanceData() is then a stub
+    // that holds no placements: its revision changes with the block list and
+    // maximumLod is the part's. The ranges select source geometry only.
+    struct InstanceBlock
+    {
+        std::shared_ptr<InstanceData> data;
+        glm::vec3 minimum{0.f}, maximum{0.f};
+    };
+    void SetInstanceBlocks(std::shared_ptr<Mesh> source, std::vector<InstanceBlock> blocks,
+        std::vector<InstanceRange> ranges, int maximumLod);
+    void SetInstanceBlocks(std::vector<InstanceBlock> blocks);
+    bool UsesInstanceBlocks() const { return m_usesInstanceBlocks; }
+    const std::vector<InstanceBlock>& GetInstanceBlocks() const { return m_instanceBlocks; }
     
     uint32_t GetVertexCount() const
     {
@@ -445,10 +474,15 @@ private:
     void ReplaceMorphDeltaBuffer(std::unique_ptr<IGraphicsBuffer> buffer);
     void ReplaceMorphWeightBuffer(std::unique_ptr<IGraphicsBuffer> buffer);
     void ClearInstancing()
-    { m_instanceSource.reset(); m_instances.reset(); m_instanceRanges.clear(); }
+    {
+        m_instanceSource.reset(); m_instances.reset(); m_instanceRanges.clear();
+        m_instanceBlocks.clear(); m_usesInstanceBlocks = false;
+    }
     std::shared_ptr<Mesh> m_instanceSource;
     std::shared_ptr<InstanceData> m_instances;
     std::vector<InstanceRange> m_instanceRanges;
+    std::vector<InstanceBlock> m_instanceBlocks;
+    bool m_usesInstanceBlocks = false;
     // Lazy storage keeps ordinary meshes free of per-LOD allocations. The
     // active level lives in this mesh; its cache entry is an empty holder.
     std::vector<std::unique_ptr<Mesh>> m_runtimeLods;

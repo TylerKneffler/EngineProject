@@ -349,6 +349,8 @@ SceneRenderer::OcclusionBufferResult SceneRenderer::BuildCameraOcclusionBuffer(
         }
         else continue;
         const auto& occluderIndices = item.mesh->occluderIndices;
+        if (!occluderIndices.empty() && item.mesh->occluderVertexCount > 0)
+            occluder.vertexCount = std::min(occluder.vertexCount, item.mesh->occluderVertexCount);
         occluder.indices = occluderIndices.empty() ? indices.data() : occluderIndices.data();
         occluder.indexCount = occluderIndices.empty() ? indices.size() : occluderIndices.size();
         occluder.world = item.world;
@@ -2337,6 +2339,13 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
     const auto materialFootprintStart = RenderClock::now();
     m_lastRenderCpuTimings.materialDrawLoopMs = std::chrono::duration<double,
         std::milli>(materialFootprintStart - materialDrawLoopStart).count();
+    // The camera's request already covers every shadow cascade (offscreen
+    // casters included), so the shadow view does not ask again: 0.5 ms of
+    // shadow recording with per-cell objects, 1.8 ms with shared prefab parts
+    // (ForestFloor, 2026-11-22), and resident texture memory unchanged
+    // (770 / 773 MiB). ENGINE_SHADOW_FOOTPRINTS=1 brings it back.
+    static const bool shadowFootprints=[]{ const char* v=std::getenv("ENGINE_SHADOW_FOOTPRINTS"); return v && v[0]=='1'; }();
+    if(!shadowOnly || shadowFootprints)
     SceneTextureFootprints::Request(preparedDraws, viewProjection,
         viewportWidth, viewportHeight, shadowViewProjections, shadowCascadeCount,
         m_directionalShadowResolution, &m_textureFootprintCache,
@@ -2574,8 +2583,33 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
                         else if (!gpuLod && !lodSelection.IsSelected(draw))
                             continue;
                     }
-                    const auto& tile=(*instanceTiles[index])[rangeIndex];
+                    // Shared parts hold one tile per placement block
+                    // (range-major, SceneInstanceBatching); others one per range.
+                    const bool blocked=draw.mesh->UsesInstanceBlocks();
+                    const size_t blockCount=blocked ? draw.mesh->GetInstanceBlocks().size() : 1;
+                    for(size_t block=0;block<blockCount;++block)
+                    {
+                    const auto& tile=(*instanceTiles[index])[rangeIndex*blockCount+block];
                     if(!tile.range.y) continue;
+                    // Whole blocks outside the view: the side planes only, so
+                    // depth conventions do not matter (the GPU culls each
+                    // placement against the full frustum anyway).
+                    if(blocked)
+                    {
+                        const auto& bounds=draw.mesh->GetInstanceBlocks()[block];
+                        bool outside=false;
+                        const auto row=[&](int r) { const auto& m=cullViewProjection;
+                            return glm::vec4(m[0][r],m[1][r],m[2][r],m[3][r]); };
+                        for(int plane=0;plane<4 && !outside;++plane)
+                        {
+                            const glm::vec4 p=row(3)+(plane&1 ? -1.f:1.f)*row(plane>>1);
+                            const glm::vec3 corner(p.x>=0.f ? bounds.maximum.x:bounds.minimum.x,
+                                p.y>=0.f ? bounds.maximum.y:bounds.minimum.y,
+                                p.z>=0.f ? bounds.maximum.z:bounds.minimum.z);
+                            outside=glm::dot(glm::vec3(p),corner)+p.w<0.f;
+                        }
+                        if(outside) continue;
+                    }
                     if(coverSkip && !screenColor)
                     {
                         const glm::vec2 distance=memberDistance(index);
@@ -2594,7 +2628,9 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
                                (residentLod==2 && distance.y<second-secondWidth)) continue;
                         }
                     }
-                    if(screenColor)
+                    // Screen-size levels choose per placement on the CPU from
+                    // the mesh's own placements; shared parts take the GPU's.
+                    if(screenColor && !blocked)
                     {
                         const auto& data=*draw.mesh->GetInstanceData();
                         auto [decisions,created]=screenPlacementLevels.try_emplace(data.lodIdentity);
@@ -2659,6 +2695,7 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
                         Engine::Rendering::AppendInstanceCullChunks(tiles, tile);
                         count += tile.range.y;
                     }
+                    }
                 }
                 if(!count) continue;
                 auto& viewStats = shadowOnly
@@ -2695,7 +2732,7 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
                 // A range with a shorter reach than its mesh (fine grass among shrubs).
                 const uint32_t reachBits=sourceRange.reachScale<.999f
                     ? std::clamp(uint32_t(std::max(0.f,sourceRange.reachScale)*1024.f+.5f),1u,1023u):0u;
-                constants.padding=reachBits;
+                constants.padding=reachBits|(sourceRange.thinned?0u:1024u);
                 if(shadowOnly) { constants.lightCount=0; constants.flags&=~kClusteredLightingFlag; }
                 Engine::Rendering::PersistentInstanceBatches::Key key{
                     uintptr_t(cam),uintptr_t(shadowOnly),instanceViewOrdinal,objectBase/m_objectCapacity,
@@ -2738,7 +2775,7 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
                     cull.viewProjection=cullViewProjection; cull.cameraPosition=glm::vec4(cameraPosition,1);
                     cull.counts={uint32_t(tiles.size()),sourceRange.vertexCount,sourceRange.firstVertex,1};
                     cull.selection={screenColor ? -1:gpuLod ? residentLod:representative.gpuLod,2,representative.gpuMaximumLod,
-                        (shadowOnly ? 1:0) | (representative.mesh->instanceLodBand>=0 ? (placementCoverageLod ? 2|32:2) : representative.objectData.geometryFade.w >= 5.5f ? 2|64:0) | cullOcclusionFlag | int(reachBits<<16)};
+                        (shadowOnly ? 1:0) | (representative.mesh->instanceLodBand>=0 ? (placementCoverageLod ? 2|32:2) : representative.objectData.geometryFade.w >= 5.5f ? 2|64:0) | cullOcclusionFlag | int(reachBits<<16) | (sourceRange.thinned?0:(1<<26))};
                     // w: where this range's plants have faded out (0 = no shorter reach).
                     if(reachBits) cull.cameraPosition.w=representative.objectData.placementFade.y*(float(reachBits)/1024.f);
                     else cull.cameraPosition.w=0.f;

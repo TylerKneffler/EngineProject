@@ -214,14 +214,6 @@ public:
     // then stampMaterials.
     const std::vector<std::shared_ptr<Material>>& GetArrayMaterials() const
     { return m_arrayMaterials.empty() ? m_materials : m_arrayMaterials; }
-    // The cell's stamps alone, as its mesh at `stride` would draw them (the
-    // stamp level, border blend, paint and stamp-surface attributes), in the
-    // cell's space and wound up: for cells drawn by the far terrain, which
-    // has the heights but no stamps (TerrainManager far stamps). Needs the
-    // heights, weights, layers and stamps; Rebuild() first sets the layers'
-    // textured state the paint colours read.
-    void BuildStampSurface(int stride, std::vector<Mesh::Vertex>& vertices,
-        std::vector<uint32_t>& indices) const;
     JsonValue Serialize() const override;
     void Deserialize(const JsonValue& value) override;
     void OnAfterDeserialize(IGraphicsProvider* provider) override;
@@ -257,12 +249,11 @@ private:
     // and layer weights from a grid sample index.
     // A sculpted cell (TerrainStampInstance::sculpt) instead drops the grid's
     // triangles (its vertices stay first, for GridVertices) and adds the
-    // sculpt's level for the stride; `sculptRockOnly` keeps only its rock.
+    // sculpt's level for the stride.
     void AppendStampGeometry(std::vector<Mesh::Vertex>& vertices,
         std::vector<uint32_t>& indices, int stride,
         const std::vector<float>& heightsSource,
-        const std::function<void(size_t, Mesh::Vertex&)>& paint,
-        bool sculptRockOnly = false) const;
+        const std::function<void(size_t, Mesh::Vertex&)>& paint) const;
     // The cell's sculpt, if its surface is one.
     const TerrainSculpt* Sculpt() const;
     // A sculpt's coarsest level over the vertices AppendStampGeometry last
