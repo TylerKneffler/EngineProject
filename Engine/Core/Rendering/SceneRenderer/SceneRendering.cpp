@@ -3321,8 +3321,6 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
             draw.vertexBuffer == draw.mesh->GetGraphicsBuffer() &&
             draw.pipeline == (draw.doubleSided ? m_objectDoubleSidedPipeline.get() : m_objectPipeline.get());
     };
-    // Groups the foliage pre-pass takes (masked instanced surfaces).
-    std::vector<uint8_t> foliageDepthGroup(automaticGroups.size(), 0);
     if (foliageDepthEnabled)
         for (size_t groupIndex = 0; groupIndex < automaticGroups.size(); ++groupIndex)
         {
@@ -3335,23 +3333,8 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
                         depthEligible(preparedDraws[index]);
                 })) continue;
             const auto& draw = preparedDraws[group.members.front()];
-            if (!m_foliageDepthPipelines[draw.doubleSided ? 1 : 0] ||
-                !m_foliageEqualPipelines[draw.doubleSided ? 1 : 0]) continue;
-            foliageDepthGroup[groupIndex] = 1;
-        }
-    // ENGINE_FOLIAGE_DEPTH_AFTER_OPAQUE=1: terrain, bark, rocks and grass are
-    // drawn before the foliage pre-pass, so leaves behind them fail the depth
-    // test there instead of being written first (draw order otherwise as below).
-    static const bool foliageAfterOpaque = ReadEnvFlag("ENGINE_FOLIAGE_DEPTH_AFTER_OPAQUE", false);
-    const bool opaqueFirst = foliageDepthEnabled && foliageAfterOpaque;
-    const auto runFoliageDepthPrepass = [&]()
-    {
-        for (size_t groupIndex = 0; groupIndex < automaticGroups.size(); ++groupIndex)
-        {
-            if (!foliageDepthGroup[groupIndex]) continue;
-            const auto& group = automaticGroups[groupIndex];
-            const auto& draw = preparedDraws[group.members.front()];
             auto* depthPipeline = m_foliageDepthPipelines[draw.doubleSided ? 1 : 0].get();
+            if (!depthPipeline || !m_foliageEqualPipelines[draw.doubleSided ? 1 : 0]) continue;
             switchGpuStage(Engine::Graphics::GpuTimingStage::FoliageDepth);
             for (uint32_t textureSlot = 0; textureSlot < std::max(draw.textureSlotCount, boundTextureSlotCount); ++textureSlot)
                 if (!texturesBound || boundTextures[textureSlot] != draw.textures[textureSlot])
@@ -3366,22 +3349,9 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
             m_lastRenderCpuTimings.submittedInstances += submitted.instances;
             m_lastRenderCpuTimings.submittedTriangles += submitted.triangles;
         }
-    };
-    if (!opaqueFirst) runFoliageDepthPrepass();
     std::vector<uint8_t> submittedAutomaticGroups(automaticGroups.size(),0);
-    for (int phase = opaqueFirst ? 0 : 1; phase < 2; ++phase)
-    {
-    if (phase == 1 && opaqueFirst) runFoliageDepthPrepass();
     for (const PreparedDraw& draw : preparedDraws)
     {
-        // Two phases only with opaqueFirst: everything but the pre-passed
-        // foliage and blended surfaces, then those.
-        if (opaqueFirst)
-        {
-            const bool late = draw.blended ||
-                (draw.automaticGroup != UINT32_MAX && foliageDepthGroup[draw.automaticGroup]);
-            if (late != (phase == 1)) continue;
-        }
         if(draw.automaticGroup!=UINT32_MAX)
         {
             if(submittedAutomaticGroups[draw.automaticGroup]) continue;
@@ -3509,7 +3479,6 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
             geometrySubmission.SubmitGeometry(draw, false,
                 selectedPlacement ? selectedPlacementId : 0);
         }
-    }
     }
     m_lastRenderCpuTimings.submissionMs=std::max(0.,std::chrono::duration<double,std::milli>(RenderClock::now()-submissionStart).count()-(m_lastRenderCpuTimings.uploadMs-uploadBeforeSubmission));
     if (activeGpuStage)

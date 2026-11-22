@@ -660,6 +660,21 @@ grass 9.9, opaque 4.8). Most sources are talk abstracts, slides or press summari
    per pose, overdraw view). Cheap steps: tighter leaf cards (Persson), front-to-back order within a batch.
    The structural fix is Horizon Forbidden West's visibility buffer for alpha-tested foliage; Nanite
    Foliage avoids alpha by using real leaf geometry.
+   - [x] Measured (2026-11-22, `agents/perf`, shared parts on). The pre-pass pays for itself many times:
+         without it (`ENGINE_FOLIAGE_DEPTH_PREPASS=0`) leaf shading is 12-15 ms (forest walk 15.0-15.1 →
+         23.5-23.9 ms). With it: depth 3.4-4.0 ms + leaves 1.3-2.0 ms. The pre-pass is fragment-bound:
+         `ENGINE_GPU_WORKLOAD_COUNTERS=1` shows 72 M pixel-shader invocations at ForestFloor (~35 per pixel at
+         1080p) and 29-30 M at Vista, against 3.3-3.7 M triangles.
+   - [x] Tried and removed (no gain): terrain, bark, rocks and grass before the pre-pass (pre-pass -0.3-0.4 ms
+         but bark +0.6 and Vista terrain +0.7, walk unchanged at 15.1-15.2 ms); camera-view tiles sorted
+         near to far (pixel-shader invocations unchanged: the pre-pass shader discards and writes depth, so
+         early depth rejection does not happen whatever the order).
+   - [ ] What would cut it: fewer rasterised leaf fragments. The big oak's LOD0 leaf cards (7,986
+         triangles, 1,586 m²) are only 25-34 % opaque at the 0.32 cutoff (Monte Carlo over the card UVs,
+         depending on the v convention), so cards trimmed to their alpha (Persson) could cut the pre-pass and
+         the leaf share of shadows by roughly a third, at about 3x the leaf triangles (vertex cost to be
+         measured: the vertex shader carries instancing and tree wind). Beyond that: a visibility buffer
+         for alpha-tested foliage (Forbidden West), or real leaf geometry with cluster LODs.
 3. **Cached far shadow cascades** (2.9 ms in the forest): scroll the far cascades and draw trees there in a
    still pose (Fortnite's base pose); keep the near cascade per frame. Our sun is fixed.
 4. **Far forest as voxels or octahedral impostors** (Next 5; Chlorophyll, UE 5.7): mainly look and memory;

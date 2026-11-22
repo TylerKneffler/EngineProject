@@ -15,16 +15,18 @@ struct StableShadowCascade
     float radius=0.f;
 };
 
-// Stepped cascades (ENGINE_SHADOW_STEPPED_CASCADES=1): every cascade but the
-// nearest moves in steps of 1/8 of its range, as the far cascade does, so it is
-// re-rendered only when the camera crosses a step; those cascades draw plants
-// in their rest pose (no wind), since they are not re-rendered for animation.
-// The nearest cascade follows the camera and its wind every frame.
+// Stepped cascades (on by default; ENGINE_SHADOW_STEPPED_CASCADES=0 turns them
+// off): every cascade but the nearest moves in steps of 1/8 of its range, as
+// the far cascade does, so it is re-rendered only when the camera crosses a
+// step; those cascades draw plants in their rest pose (no wind), since they
+// are not re-rendered for animation. The nearest cascade follows the camera
+// and its wind every frame. Forest walk 2026-11-22: ~2 cascades re-rendered
+// per frame → 1.13, shadow GPU 2.6-3.1 → 1.1-1.4 ms.
 inline bool SteppedShadowCascades()
 {
     static const bool enabled = [] {
         const char* value = std::getenv("ENGINE_SHADOW_STEPPED_CASCADES");
-        return value && value[0] == '1';
+        return !(value && value[0] == '0');
     }();
     return enabled;
 }
