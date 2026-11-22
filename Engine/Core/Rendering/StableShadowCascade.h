@@ -1,6 +1,7 @@
 #pragma once
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <glm/glm.hpp>
 #include <glm/ext/matrix_clip_space.hpp>
 #include <glm/ext/matrix_transform.hpp>
@@ -13,6 +14,20 @@ struct StableShadowCascade
     glm::vec3 center{};
     float radius=0.f;
 };
+
+// Stepped cascades (ENGINE_SHADOW_STEPPED_CASCADES=1): every cascade but the
+// nearest moves in steps of 1/8 of its range, as the far cascade does, so it is
+// re-rendered only when the camera crosses a step; those cascades draw plants
+// in their rest pose (no wind), since they are not re-rendered for animation.
+// The nearest cascade follows the camera and its wind every frame.
+inline bool SteppedShadowCascades()
+{
+    static const bool enabled = [] {
+        const char* value = std::getenv("ENGINE_SHADOW_STEPPED_CASCADES");
+        return value && value[0] == '1';
+    }();
+    return enabled;
+}
 
 // Cover a radial receiver band in every viewing direction. Neither camera
 // orientation nor lens/aspect participates in the light-space texel grid.

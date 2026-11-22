@@ -314,9 +314,15 @@ at mid distance.
    - The parked DX12 hang can now show as a run that records nothing (camera record 0 from the warmup on,
      1.6 ms frames, a grey capture) instead of "device removed at buffer Map": 2 of ~16 runs either way,
      shared parts on or off. The perf runner treats it as a failed run and retries.
-   - [ ] Make it the default for running scenes after: editor Play mode checked (placement picking is
-         per-layer only), the other viewpoints captured, DX11 and Vulkan checked (DX11 draws blocks through
-         the CPU instance path).
+   - [x] On by default for running scenes (2026-11-22, `agents/perf`; `ENGINE_SHARED_PREFAB_PARTS=0` turns
+         it off). Captured on/off at Backlit, Trail, Cliffs, Escarpment, ForestWall, FieldWalk (plus the four
+         earlier): same content, differences are wind and clouds (`.local/perfagent/s0_cmp_*.png` in the perf
+         worktree). DX11 and Vulkan render ForestFloor the same with it (DX11 frame 15.9 → 10.0 ms, Vulkan
+         16.6 → 16.2; single stills). Stills, DX12, frame off → on: Backlit 16.5 → 13.9, Trail 15.9 → 14.7,
+         Cliffs 14.7 → 14.4, Escarpment 17.1 → 12.8, ForestWall 17.4 → 16.8, FieldWalk 17.6 → 17.3.
+         One shared-parts run at Backlit was killed by the runner's 12 GB watchdog (13.3 GB); two reruns
+         peaked at 3.4 GB (shared parts runs peak 2.8-4.0 GB against 3.9-7.9 off). Not reproduced.
+   - [ ] Editor Play mode not checked (cannot run headless): placement picking is per-layer only.
    - [ ] Shared parts give no CPU mesh occluders (`ENGINE_VISIBILITY_OCCLUSION_MESHES`, off by default).
    - [ ] Far blocks are still `TerrainObjectLayer` objects (289) built through the near/far hand-off; their
          parts are shared now, so the remaining items below are about streaming, not draw cost.

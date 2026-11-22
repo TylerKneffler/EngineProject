@@ -10,8 +10,9 @@ namespace Engine::Components
 bool SharedPrefabParts::Enabled()
 {
     static const bool enabled = [] {
+        // On by default for running scenes (2026-11-22); =0 keeps per-layer objects.
         const char* value = std::getenv("ENGINE_SHARED_PREFAB_PARTS");
-        return value && value[0] == '1';
+        return !(value && value[0] == '0');
     }();
     return enabled;
 }

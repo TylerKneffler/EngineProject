@@ -389,6 +389,7 @@ void GameBenchmark::Record(uint64_t frame, const GameBenchmarkFrameSample& s)
         << ",\"shadow_culling_ms\":" << s.scene.shadow.cascadeCullingMs
         << ",\"shadow_upload_ms\":" << s.scene.shadow.recordUploadMs
         << ",\"shadow_submission_ms\":" << s.scene.shadow.drawSubmissionMs
+        << ",\"shadow_cascades_refreshed\":" << s.scene.shadow.refreshedCascadeMask
         << ",\"render_cluster_prepare_ms\":" << r.clusterPreparationMs
         << ",\"render_cluster_cache_hits\":" << r.clusterCacheHits
         << ",\"render_cluster_upload_bytes\":" << r.clusterUploadBytes

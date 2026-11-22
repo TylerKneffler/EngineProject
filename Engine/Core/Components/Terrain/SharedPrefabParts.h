@@ -27,8 +27,8 @@ namespace Engine::Components
 // has finished that asset, as the per-layer objects were enabled). Releasing
 // the handle only queues the detach; Flush, once per frame on the scene thread,
 // applies every change, so a handle may outlive the scene safely.
-// ENGINE_SHARED_PREFAB_PARTS=1 turns it on (game runs; the editor keeps
-// per-layer objects for picking and gizmos).
+// On by default in running scenes (the editor keeps per-layer objects for
+// picking and gizmos); ENGINE_SHARED_PREFAB_PARTS=0 turns it off.
 class SharedPrefabParts
 {
 public:

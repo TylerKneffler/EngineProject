@@ -68,7 +68,8 @@ SceneRendererShadows::ShadowCascadeSet SceneRendererShadows::BuildCascades(
                 out.splits[cascade],
                 farCascade ? out.splits[cascade] : shadowDistance,
                 tileResolution,
-                farCascade ? out.splits[cascade] / 8.f : 0.f);
+                farCascade || (cascade > 0u && Engine::Rendering::SteppedShadowCascades())
+                    ? out.splits[cascade] / 8.f : 0.f);
             out.centers[cascade] = stable.center;
             out.radii[cascade] = stable.radius;
             out.viewProjections[cascade] = stable.viewProjection;
@@ -207,7 +208,11 @@ SceneRendererShadows::PrepareResult SceneRendererShadows::PrepareDirectionalShad
                     // moving, it refreshes when objects have streamed in or
                     // out (at most every 240 shadow frames: streaming changes
                     // the scene almost every frame while flying), or every 600.
-                    const uint32_t refreshCount = requestedShadowCascades.hasFarCascade
+                    // Stepped cascades hold plants in their rest pose: only
+                    // the nearest is refreshed for wind.
+                    const uint32_t refreshCount = Engine::Rendering::SteppedShadowCascades()
+                        ? 1u
+                        : requestedShadowCascades.hasFarCascade
                         ? requestedShadowCascades.count - 1u
                         : requestedShadowCascades.count;
                     const uint32_t refreshCascade =
