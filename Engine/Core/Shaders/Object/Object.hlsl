@@ -1552,12 +1552,14 @@ struct FoliageLeaf
     bool cooked;
     float translucency;
     float occlusion;
+    float crownScatter; // Material::foliageCrownScatter
 };
 
 FoliageLeaf GetFoliageLeaf(ObjectData data, uint flags, float2 uv1)
 {
     FoliageLeaf leaf;
     leaf.translucency = data.subsurfaceTransmission.y;
+    leaf.crownScatter = saturate(data.subsurfaceTransmission.z);
     leaf.on = leaf.translucency > 0.0 && (flags & 32u) != 0u;
     leaf.cooked = leaf.on && uv1.y > 3.5;
     leaf.occlusion = leaf.cooked ? saturate(uv1.x) : 1.0;
@@ -1605,9 +1607,16 @@ float3 FoliageTransmission(float3 albedo, float3 radiance, float3 n, float3 v,
     // reference frames' crowns once the sky fill was no longer over-bright).
     // It follows the leaf's shadow, so a whole tree in terrain shade keeps a
     // little of it too; small enough not to read as sunlight.
-    const float scattered = 0.3 * (1.0 - shadow) * lerp(0.5, 1.0, leaf.occlusion);
+    // Scaled by the material's crown scatter, as is the 8 % of forward light
+    // kept in full shadow: plants standing in another tree's shade (the
+    // woodland pack's bushes and tall grass cards) were lit with 30 % of the
+    // sun through their own leaf colour under the canopy, while the rocks,
+    // ferns and ground beside them had sky light only (yellow-orange blades
+    // glowing at ForestFloor, 2026-11-22). Those materials set it to 0.
+    const float crown = leaf.crownScatter;
+    const float scattered = 0.3 * (1.0 - shadow) * lerp(0.5, 1.0, leaf.occlusion) * crown;
     return filtered * radiance * (leaf.translucency / PI) *
-        ((0.35 * back + 0.9 * forward) * lerp(0.08, 1.0, shadow) * shell + scattered);
+        ((0.35 * back + 0.9 * forward) * lerp(0.08 * crown, 1.0, shadow) * shell + scattered);
 }
 
 // Bumpy canopy over forested distant terrain (macro map alpha = cover):

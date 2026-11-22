@@ -132,6 +132,13 @@ public:
     // shades as one volume. 0 disables; 1 suits a typical broadleaf.
     PROPERTY(Inspector, EditAnywhere, Category = "Material | Alpha", Range = "0.0, 2.0")
     float foliageTranslucency { 0.f };
+    // Leaf lighting: share of the crown-scattered light (and the forward light
+    // kept in full shade) a shaded leaf receives. It models a crown's own
+    // underside lit through the leaves above it, right for trees (1); plants
+    // standing in another tree's shade (understory bushes, tall grass cards)
+    // take 0, or they glow under the canopy while the ground beside them is dark.
+    PROPERTY(Inspector, EditAnywhere, Category = "Material | Alpha", Range = "0.0, 1.0")
+    float foliageCrownScatter { 1.f };
 
     PROPERTY(Inspector, EditAnywhere, Category = "Material | PBR", Range = "0.0, 4.0")
     float     environmentDiffuseStrength { 1.f };

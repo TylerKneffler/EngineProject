@@ -100,5 +100,6 @@
   "occlusionUvSet": 0,
   "emissiveUvSet": 0,
   "heightUvSet": 0,
-  "shader": "Assets/Shaders/Foliage.hlsl"
+  "shader": "Assets/Shaders/Foliage.hlsl",
+  "foliageCrownScatter": 0
 }

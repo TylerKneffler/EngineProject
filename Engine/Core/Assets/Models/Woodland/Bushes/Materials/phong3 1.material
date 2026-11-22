@@ -105,5 +105,6 @@
   "normalTexture": "Assets/Models/Woodland/Bushes/Textures/Bush_Normal.ktx2",
   "occlusionTexture": "Assets/Models/Woodland/Bushes/Textures/Bush_MetalRough.ktx2",
   "shader": "Assets/Shaders/Foliage.hlsl",
-  "foliageTranslucency": 1
+  "foliageTranslucency": 1,
+  "foliageCrownScatter": 0
 }

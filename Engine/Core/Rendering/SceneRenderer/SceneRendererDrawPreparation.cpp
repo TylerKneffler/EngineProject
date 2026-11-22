@@ -280,7 +280,11 @@ ResolvedMaterialRecord SceneRendererDrawPreparation::ResolveMaterialRecord(
         // y: leaf lighting for masked foliage (Material::foliageTranslucency,
         // Object.hlsl FoliageLeafLight).
         if (alphaMode == Engine::Components::MaterialAlphaMode::Mask && !mat->unlit)
+        {
             data.subsurfaceTransmission.y = std::clamp(mat->foliageTranslucency, 0.f, 2.f);
+            // z: crown scatter (Material::foliageCrownScatter, FoliageTransmission).
+            data.subsurfaceTransmission.z = std::clamp(mat->foliageCrownScatter, 0.f, 1.f);
+        }
         data.viewPositionAlphaCutoff = glm::vec4(cameraPosition, mat->alphaCutoff);
         // w: parallax flags in the integer part (1 = height texture stores
         // depth, 2 = relief self-shadow, 4 = clip outside 0..1 UV, 8 = depth
