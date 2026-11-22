@@ -268,6 +268,25 @@ depth; ours shows shaded trunks as dark blue-grey posts. (c) vista, ref 08: laye
 that still reads as conifer silhouettes; ours is navy blobs on pale untextured mountains and a flat green hedge
 at mid distance.
 
+**Far detail and gameplay visibility (user, 2026-11-22).** Paths read as spots, far objects and far terrain disagree,
+and actors (players, NPCs, enemies) must render correctly at any distance: not hidden or revealed by grass that is
+drawn for one viewer and not another, not floating on coarse far terrain, never culled like scenery. Research,
+options and references: [far_detail_and_visibility_research.md](far_detail_and_visibility_research.md). Order:
+- [ ] Paths as polylines shaded per pixel at every terrain level (trace `TrailMask` contours per cell), heights
+      carved along them, far macro colour includes them. Today they are Gravel paint at the vertex grid: 4 m in
+      loaded cells, one quad per 128 m cell in far tiles, hence the spots.
+- [ ] Objects drawn at the rendered terrain height: per-instance vertical offset from the drawn terrain level, so
+      far trees, rocks and far blocks sit on far terrain (physics stays on full detail).
+- [ ] Gameplay-relevant vegetation (bushes, tall fields, shrubs, rocks, logs, trees) with fixed reach (engagement
+      range) and presence on every setting and detail budget; only cosmetic grass/flowers thin out. Solid far
+      levels (no see-through). Includes the props-layer bushes that stop at ~25 m.
+- [ ] Important-actor render class: never culled by distance, budget or settings; occluded only by solid
+      conservative occluders; LOD floor; always casts shadows. A test pawn standing/prone at 50-800 m for captures.
+- [ ] Terrain refined around important actors (detail islands in far tiles).
+- [ ] Grass islands around actors at any distance (with the GPU blade generator) and one coverage function shared by
+      AI perception, hit tests and rendering.
+- [ ] Later: terrain virtual texture for far detail (paths, decals, macro colour per level).
+
 1. **GPU-driven vegetation renderer.** One renderer owns every streamed prefab placement (near cells and far
    blocks) in a GPU placement pool. Streaming a cell uploads or frees its range; no scene objects are created
    for batches. Each view (camera and each shadow cascade) runs one cull pass over the resident ranges: frustum,
