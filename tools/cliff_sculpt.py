@@ -67,6 +67,9 @@ CAVITY_RADIUS = 2.5     # surroundings a point is compared with (m, sigma)
 CAVITY_STRENGTH = 0.9   # darkening per metre a point sits below them
 CAVITY_FLOOR = 0.45     # darkest a cavity gets
 LEVELS = (0.08, 0.2, 0.5)  # detail levels: largest surface error (m)
+LOCAL_MARCH = True      # second march along the rock's own (smoothed) direction
+LOCAL_SMOOTH = 2.0      # smoothing of the scans' normals for it (m, sigma)
+LOCAL_WEIGHT = 0.7      # how far toward the rock's direction a point on rock turns
 MAGIC = int.from_bytes(b"TRNRSCL1", "little")
 ROCK_MATERIAL = OUTPUT / "cliff_rock.material"  # tools/cliff_rock_texture.py
 
@@ -278,25 +281,52 @@ def sculpt(cell_x, cell_z, sculpted=()):
     start = np.stack([wx, ground + (soft - ground) * blend, wz], 1)
 
     # March in from REACH: the first step under the ground or on the rock.
-    steps = np.arange(REACH, -REACH - STEP, -STEP)
-    hit_t = np.full(len(start), -REACH)
-    on_rock = np.zeros(len(start), bool)
     near_rock = tree.query(start, distance_upper_bound=REACH + 2.0, workers=-1)[0] < np.inf
-    pending = np.ones(len(start), bool)
-    for t in steps:
-        index = np.nonzero(pending)[0]
-        if not len(index):
-            break
-        p = start[index] + direction[index] * t
-        under = p[:, 1] < bilinear_grid(heights, origin, p[:, 0], p[:, 2])
-        rock = np.zeros(len(index), bool)
-        check = near_rock[index] & ~under
-        if check.any():
-            rock[check] = tree.query(p[check], distance_upper_bound=NEAR, workers=-1)[0] < np.inf
-        done = under | rock
-        hit_t[index[done]] = t
-        on_rock[index[rock]] = True
-        pending[index[done]] = False
+
+    def march(direction):
+        steps = np.arange(REACH, -REACH - STEP, -STEP)
+        hit_t = np.full(len(start), -REACH)
+        on_rock = np.zeros(len(start), bool)
+        pending = np.ones(len(start), bool)
+        for t in steps:
+            index = np.nonzero(pending)[0]
+            if not len(index):
+                break
+            p = start[index] + direction[index] * t
+            under = p[:, 1] < bilinear_grid(heights, origin, p[:, 0], p[:, 2])
+            rock = np.zeros(len(index), bool)
+            check = near_rock[index] & ~under
+            if check.any():
+                rock[check] = tree.query(p[check], distance_upper_bound=NEAR, workers=-1)[0] < np.inf
+            done = under | rock
+            hit_t[index[done]] = t
+            on_rock[index[rock]] = True
+            pending[index[done]] = False
+        return hit_t, on_rock
+
+    hit_t, on_rock = march(direction)
+    if LOCAL_MARCH:
+        # Second march along the rock's own direction: one slope-wide
+        # direction fills the recesses between blocks (from the side the
+        # sculpt was one even wall), because rays only reach into a gap that
+        # lines up with them. Each point takes the scans' normal where its
+        # first ray hit, smoothed over LOCAL_SMOOTH, blended in by how much rock
+        # is around it; the region edge keeps its vertical rays (same blend).
+        hit = start + direction * hit_t[:, None]
+        scan_normal = normals[tree.query(hit, workers=-1)[1]].astype(np.float64)
+        rock_share = ndimage.gaussian_filter(on_rock.reshape(full, full).astype(np.float64),
+                                             LOCAL_SMOOTH / DENSE).ravel()
+        scan_normal *= on_rock[:, None]
+        smooth = np.stack([ndimage.gaussian_filter(scan_normal[:, k].reshape(full, full), LOCAL_SMOOTH / DENSE)
+                           for k in range(3)], -1).reshape(-1, 3)
+        length = np.linalg.norm(smooth, axis=1, keepdims=True)
+        local = np.where(length > 1e-6, smooth / np.maximum(length, 1e-9), direction)
+        weight = (LOCAL_WEIGHT * np.clip(rock_share * 2.0, 0.0, 1.0) * blend)[:, None]
+        local = direction * (1.0 - weight) + local * weight
+        # Never past horizontal-down: the ray must still meet the ground.
+        local[:, 1] = np.maximum(local[:, 1], 0.05)
+        direction = local / np.linalg.norm(local, axis=1, keepdims=True)
+        hit_t, on_rock = march(direction)
 
     # Folds: where neighbouring rays cross, a quad turns over (a bright
     # sliver). Their points take the median distance of their neighbours
