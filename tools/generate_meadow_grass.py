@@ -645,20 +645,32 @@ def far_grass_tuft(detail):
     """Cheap clump for the far grass ring (seen from ~30 m to 200 m): eighteen
     wide, two-segment blades fanning from a broad crown, ~0.55-0.8 m tall and
     ~1 m across, in the tall grass's colours (dark roots, bright tips), so the
-    ring carries on the tall mass instead of flattening into a lawn. Every LOD
-    is the same mesh; at that range a blade covers a pixel or two."""
+    ring carries on the tall mass instead of flattening into a lawn. Lower
+    levels keep fewer, wider, single-segment blades (Ghost of Tsushima's rule:
+    fewer and wider blades with distance), so a tuft 100 m away is a few
+    triangles instead of 54: the ring was half of all grass vertex work
+    (FieldWalk, 2026-11-22)."""
     rng = random.Random(7101)
     mesh = Mesh(wind_response=0.5)
+    keep_share = FAR_TUFT_KEEP[detail]
     for _ in range(18):
         radius, angle = math.sqrt(rng.random()), rng.random() * 2.0 * math.pi
         length_jitter, rise_jitter, dry = rng.random(), rng.random(), rng.random()
+        yaw_jitter, keep = rng.random(), (length_jitter * 13.7 + rise_jitter * 5.3) % 1.0
+        if keep >= keep_share:
+            continue
         base = (0.42 * radius * math.cos(angle), 0.0, 0.42 * radius * math.sin(angle))
         rise = math.radians(82.0 - 26.0 * radius - 10.0 * rise_jitter)
         shade = 0.85 + 0.3 * ((length_jitter * 7.31 + rise_jitter * 3.17) % 1.0)
-        blade(mesh, base, angle + (rng.random() - 0.5) * 0.8, 0.55 + 0.25 * length_jitter, rise,
-              0.2, 0.08, 2, root=TALL_ROOT, mid=TALL_MID, tip=DRY_TIP if dry < 0.12 else TALL_TIP,
-              shade=shade)
+        blade(mesh, base, angle + (yaw_jitter - 0.5) * 0.8, 0.55 + 0.25 * length_jitter, rise,
+              0.2, 0.08 * FAR_TUFT_WIDEN[detail], FAR_TUFT_SEGMENTS[detail], root=TALL_ROOT,
+              mid=TALL_MID, tip=DRY_TIP if dry < 0.12 else TALL_TIP, shade=shade)
     return mesh
+
+
+FAR_TUFT_KEEP = (1.0, 0.45, 0.22)
+FAR_TUFT_WIDEN = (1.0, 1.9, 3.4)
+FAR_TUFT_SEGMENTS = (2, 1, 1)
 
 
 def far_tall_tuft(detail):
@@ -666,18 +678,22 @@ def far_tall_tuft(detail):
     twenty-four wide two-segment blades, ~0.75-1.05 m, mostly upright, in the
     tall grass's colours, so the knee- to waist-high mass keeps its height and
     its dark depth past the detailed grass instead of dropping to a lawn at the
-    hand-off. Every LOD is the same mesh."""
+    hand-off. Lower levels keep fewer, wider, single-segment blades, as
+    far_grass_tuft does (FAR_TUFT_KEEP / WIDEN / SEGMENTS)."""
     rng = random.Random(7301)
     mesh = Mesh(wind_response=0.5)
     for _ in range(24):
         radius, angle = math.sqrt(rng.random()), rng.random() * 2.0 * math.pi
         length_jitter, rise_jitter, dry = rng.random(), rng.random(), rng.random()
+        yaw_jitter = rng.random()
+        if (length_jitter * 13.7 + rise_jitter * 5.3) % 1.0 >= FAR_TUFT_KEEP[detail]:
+            continue
         base = (0.5 * radius * math.cos(angle), 0.0, 0.5 * radius * math.sin(angle))
         rise = math.radians(84.0 - 18.0 * radius - 10.0 * rise_jitter)
         shade = 0.8 + 0.4 * ((length_jitter * 7.31 + rise_jitter * 3.17) % 1.0)
-        blade(mesh, base, angle + (rng.random() - 0.5) * 0.8, 0.75 + 0.3 * length_jitter, rise,
-              0.15, 0.09, 2, root=TALL_ROOT, mid=TALL_MID, tip=DRY_TIP if dry < 0.12 else TALL_TIP,
-              shade=shade)
+        blade(mesh, base, angle + (yaw_jitter - 0.5) * 0.8, 0.75 + 0.3 * length_jitter, rise,
+              0.15, 0.09 * FAR_TUFT_WIDEN[detail], FAR_TUFT_SEGMENTS[detail], root=TALL_ROOT,
+              mid=TALL_MID, tip=DRY_TIP if dry < 0.12 else TALL_TIP, shade=shade)
     return mesh
 
 

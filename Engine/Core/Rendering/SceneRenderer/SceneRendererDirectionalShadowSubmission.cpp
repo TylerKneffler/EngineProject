@@ -50,6 +50,7 @@ void SceneRendererDirectionalShadowSubmission::Submit(
         if (!input.dirtyMask[cascade])
             continue;
         renderer.m_shadowDebugSnapshot.refreshedCascadeMask |= 1u << cascade;
+        renderer.m_lastShadowCpuTiming.refreshedCascadeMask |= 1u << cascade;
         const uint32_t tileX = input.cascadeCount > 1u ? cascade & 1u : 0u;
         const uint32_t tileY = input.cascadeCount > 1u ? cascade >> 1u : 0u;
         context->SetViewport({

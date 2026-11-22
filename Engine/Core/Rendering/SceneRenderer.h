@@ -270,6 +270,9 @@ public:
         double passRestoreMs = 0;
         double portalMs = 0;
         double totalMs = 0;
+        // Directional cascades (atlas tiles) re-rendered this frame, as a bit
+        // mask; the others were kept from earlier frames.
+        uint32_t refreshedCascadeMask = 0;
     };
     const ShadowCpuTiming& GetLastShadowCpuTiming() const
     {

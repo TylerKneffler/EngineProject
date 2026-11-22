@@ -1475,8 +1475,10 @@ bool LandscapeDriver::ConfigureTerrain()
             { const char* v = std::getenv("ENGINE_LANDSCAPE_TALL_FIELDS"); return !(v && v[0] == '0'); }();
             if (farTall && tallFieldsOn && grass->tallFieldDensity == 0.f)
             {
-                const std::string tuft = "Assets/Mesh/Grass/far_tall_tuft.obj";
-                grass->tallMesh = grass->tallMeshLod1 = grass->tallMeshLod2 = tuft;
+                // Its levels thin like the far tufts' (45 / 90 m, MeadowGrass::ApplyFar).
+                grass->tallMesh = "Assets/Mesh/Grass/far_tall_tuft.obj";
+                grass->tallMeshLod1 = "Assets/Mesh/Grass/far_tall_tuft_lod1.obj";
+                grass->tallMeshLod2 = "Assets/Mesh/Grass/far_tall_tuft_lod2.obj";
                 grass->seed = 18731;
                 grass->tallFieldDensity = .9f;
                 grass->tallFieldSize = 28.f;

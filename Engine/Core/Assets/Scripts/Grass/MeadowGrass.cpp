@@ -6,6 +6,8 @@
 #include "Core/Scene/Object.h"
 #include "Core/Serialization/Json.h"
 
+#include <cstdlib>
+
 namespace MeadowGrass
 {
 GrassField* ApplyFar(Engine::Components::TerrainObjectLayer& layer,
@@ -20,15 +22,24 @@ GrassField* ApplyFar(Engine::Components::TerrainObjectLayer& layer,
     if (viewerObjectName.empty()) return nullptr;
     auto* owner = layer.Owner;
     if (auto* existing = owner->GetComponent<GrassField>()) return existing;
+    // Tufts thin to fewer, wider blades with distance (54 → 7 → 6 triangles
+    // at 45 and 90 m, chosen per plant): at a pixel or two per blade the full
+    // tuft was half of all grass vertex work (FieldWalk 2026-11-22: far ring
+    // 3.3 of 10 ms). ENGINE_FAR_GRASS_LODS=0 keeps the full tuft everywhere.
+    static const bool farLods = [] {
+        const char* v = std::getenv("ENGINE_FAR_GRASS_LODS"); return !(v && v[0] == '0'); }();
     layer.viewDistance = 200.f;
-    layer.lod1Distance = layer.lod2Distance = 200.f;
+    layer.lod1Distance = farLods ? 45.f : 200.f;
+    layer.lod2Distance = farLods ? 90.f : 200.f;
     layer.MarkConfigurationDirty();
     using Engine::Serialization::JsonValue;
     const std::string tuft = "Assets/Mesh/Grass/far_grass_tuft.obj";
+    const std::string tuft1 = farLods ? "Assets/Mesh/Grass/far_grass_tuft_lod1.obj" : tuft;
+    const std::string tuft2 = farLods ? "Assets/Mesh/Grass/far_grass_tuft_lod2.obj" : tuft;
     auto settings = JsonValue::MakeObject();
     settings.Set("shortMesh", tuft).Set("tallMesh", tuft)
-        .Set("shortMeshLod1", tuft).Set("shortMeshLod2", tuft)
-        .Set("tallMeshLod1", tuft).Set("tallMeshLod2", tuft)
+        .Set("shortMeshLod1", tuft1).Set("shortMeshLod2", tuft2)
+        .Set("tallMeshLod1", tuft1).Set("tallMeshLod2", tuft2)
         .Set("viewerObjectName", viewerObjectName)
         .Set("useEditorCamera", JsonValue(true)).Set("visibleRadius", 200.f)
         .Set("tileSize", 64.f).Set("shortPatchesPerSquareMeter", 1.1f)
@@ -40,6 +51,8 @@ GrassField* ApplyFar(Engine::Components::TerrainObjectLayer& layer,
         .Set("allowProceduralGeneration", JsonValue(true));
     auto* grass = new GrassField();
     grass->Deserialize(settings);
+    // Levels per plant, not per 64 m tile (whole tiles switching would show).
+    grass->perPlantDetail = farLods;
     owner->AddComponent(grass);
     owner->layer = Engine::Rendering::DetailBudget::Get().FindLayerOrDefault("Grass");
     return grass;

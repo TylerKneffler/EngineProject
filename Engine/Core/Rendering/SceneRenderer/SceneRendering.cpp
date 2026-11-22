@@ -3029,6 +3029,9 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
                     (1u | 32u));
                 shadowData.ambientUnlit.w = 1.f;
                 shadowData.environmentParams = glm::vec4(0.f);
+                // Stepped (cached) cascades: plants in their rest pose.
+                if (cascade > 0 && Engine::Rendering::SteppedShadowCascades())
+                    shadowData.grassAnimation.y = 0.f;
                 if(m_shadowUploadCache.Write(recordIndex,&shadowData,m_shadowObjectDataMapped))
                 {
                     firstDirtyByCascade[cascade]=std::min(firstDirtyByCascade[cascade],recordIndex);

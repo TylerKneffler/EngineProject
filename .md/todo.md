@@ -314,9 +314,15 @@ at mid distance.
    - The parked DX12 hang can now show as a run that records nothing (camera record 0 from the warmup on,
      1.6 ms frames, a grey capture) instead of "device removed at buffer Map": 2 of ~16 runs either way,
      shared parts on or off. The perf runner treats it as a failed run and retries.
-   - [ ] Make it the default for running scenes after: editor Play mode checked (placement picking is
-         per-layer only), the other viewpoints captured, DX11 and Vulkan checked (DX11 draws blocks through
-         the CPU instance path).
+   - [x] On by default for running scenes (2026-11-22, `agents/perf`; `ENGINE_SHARED_PREFAB_PARTS=0` turns
+         it off). Captured on/off at Backlit, Trail, Cliffs, Escarpment, ForestWall, FieldWalk (plus the four
+         earlier): same content, differences are wind and clouds (`.local/perfagent/s0_cmp_*.png` in the perf
+         worktree). DX11 and Vulkan render ForestFloor the same with it (DX11 frame 15.9 → 10.0 ms, Vulkan
+         16.6 → 16.2; single stills). Stills, DX12, frame off → on: Backlit 16.5 → 13.9, Trail 15.9 → 14.7,
+         Cliffs 14.7 → 14.4, Escarpment 17.1 → 12.8, ForestWall 17.4 → 16.8, FieldWalk 17.6 → 17.3.
+         One shared-parts run at Backlit was killed by the runner's 12 GB watchdog (13.3 GB); two reruns
+         peaked at 3.4 GB (shared parts runs peak 2.8-4.0 GB against 3.9-7.9 off). Not reproduced.
+   - [ ] Editor Play mode not checked (cannot run headless): placement picking is per-layer only.
    - [ ] Shared parts give no CPU mesh occluders (`ENGINE_VISIBILITY_OCCLUSION_MESHES`, off by default).
    - [ ] Far blocks are still `TerrainObjectLayer` objects (289) built through the near/far hand-off; their
          parts are shared now, so the remaining items below are about streaming, not draw cost.
@@ -342,6 +348,24 @@ at mid distance.
      cover to 100 m and beyond ("Fields of tall grass" below; expectations table, "Grass cover").
    - Budget: grass is 6.6 ms of GPU on FieldWalk now. Target 4 ms or less at 1080p for denser and finer cover
      than today, measured on FieldWalk and at MeadowSlope.
+   - [x] Where grass time goes (2026-11-22, `agents/perf`, `ENGINE_GPU_WORKLOAD_COUNTERS=1`; the grass stage's
+         counters are now in frames.jsonl as `gpu_grass_vs_invocations` / `_primitives` / `_ps_invocations`):
+         grass is **vertex-bound**. FieldWalk 9.5 ms = 15.1 M vertex invocations, 5.0 M triangles, only 15.8 M
+         pixel invocations (~7.6 per pixel) for 221 k plants; MeadowSlope 8.1 ms = 9.1 M vertices, 21 M pixels.
+         The far ring alone (134 k tufts, 54 triangles each at every level) was 3.3 ms and half the vertices
+         at FieldWalk (ring off: 6.8 ms, 7.5 M vertices, pixels unchanged); tall fields are 2.2 ms.
+   - [x] Far ring with real levels (Tsushima's fewer, wider blades with distance): `far_grass_tuft` LOD1 keeps
+         45 % of its blades at 1.9x width, LOD2 22 % at 3.4x, one segment each (54 → 7 → 6 triangles;
+         `tools/generate_meadow_grass.py`, LOD0 unchanged), at 45 and 90 m, chosen per plant
+         (`MeadowGrass::ApplyFar`; `ENGINE_FAR_GRASS_LODS=0` keeps the full tuft). FieldWalk grass 9.5 → 8.0
+         ms (15.1 → 8.4 M vertices); field walk 16.6-16.8 → 15.1-15.2 ms (grass 9.4 → 8.1, interleaved);
+         MeadowSlope 8.1 → 7.9, ForestEdge and Vista unchanged. Look: the far meadow band past ~45 m reads a
+         little smoother (`.local/perfagent/s3a_crop_*.png` in the perf worktree).
+   - [ ] The GPU blade generator itself is not started. What it must take out, from the numbers above: the
+         detailed meadow's vertices (tussocks 2,154 / 802 / 145 triangles at 0 / 7 / 13 m; tall-field crowns
+         1,775 / 1,076 / 424) and the far ring's remaining ~1.7 ms; the pixel side (~7-10 fragments per
+         pixel) is not the limit. Needs terrain heights and paint on the GPU per tile (cells are CPU meshes
+         today), a blade pass in the instance path, and per-blade level and width in the cull.
 3. **Retained render scene for everything else.** `PrepareFrameItems` copies every item each frame (2.6 ms for
    9.1k items at the last count) and the render packet retains two buffers per item (18k shared-pointer copies
    and `RetainBuffer` calls on the render thread). Keep object data in a GPU buffer updated from a dirty list
@@ -654,8 +678,33 @@ grass 9.9, opaque 4.8). Most sources are talk abstracts, slides or press summari
    per pose, overdraw view). Cheap steps: tighter leaf cards (Persson), front-to-back order within a batch.
    The structural fix is Horizon Forbidden West's visibility buffer for alpha-tested foliage; Nanite
    Foliage avoids alpha by using real leaf geometry.
+   - [x] Measured (2026-11-22, `agents/perf`, shared parts on). The pre-pass pays for itself many times:
+         without it (`ENGINE_FOLIAGE_DEPTH_PREPASS=0`) leaf shading is 12-15 ms (forest walk 15.0-15.1 →
+         23.5-23.9 ms). With it: depth 3.4-4.0 ms + leaves 1.3-2.0 ms. The pre-pass is fragment-bound:
+         `ENGINE_GPU_WORKLOAD_COUNTERS=1` shows 72 M pixel-shader invocations at ForestFloor (~35 per pixel at
+         1080p) and 29-30 M at Vista, against 3.3-3.7 M triangles.
+   - [x] Tried and removed (no gain): terrain, bark, rocks and grass before the pre-pass (pre-pass -0.3-0.4 ms
+         but bark +0.6 and Vista terrain +0.7, walk unchanged at 15.1-15.2 ms); camera-view tiles sorted
+         near to far (pixel-shader invocations unchanged: the pre-pass shader discards and writes depth, so
+         early depth rejection does not happen whatever the order).
+   - [ ] What would cut it: fewer rasterised leaf fragments. The big oak's LOD0 leaf cards (7,986
+         triangles, 1,586 m²) are only 25-34 % opaque at the 0.32 cutoff (Monte Carlo over the card UVs,
+         depending on the v convention), so cards trimmed to their alpha (Persson) could cut the pre-pass and
+         the leaf share of shadows by roughly a third, at about 3x the leaf triangles (vertex cost to be
+         measured: the vertex shader carries instancing and tree wind). Beyond that: a visibility buffer
+         for alpha-tested foliage (Forbidden West), or real leaf geometry with cluster LODs.
 3. **Cached far shadow cascades** (2.9 ms in the forest): scroll the far cascades and draw trees there in a
    still pose (Fortnite's base pose); keep the near cascade per frame. Our sun is fixed.
+   - [x] Done 2026-11-22 (`agents/perf`): stepped cascades, on by default (`ENGINE_SHADOW_STEPPED_CASCADES=0`
+         turns them off). The cache already existed (cascades re-rendered only when their centre moves, at
+         most two a frame while walking, the far one every 240-600 frames); the middle cascades followed the
+         camera texel by texel, so walking re-rendered ~2 cascades a frame. Now every cascade past the
+         nearest moves in 1/8-range steps like the far one, draws plants in their rest pose, and leaves the
+         rotating wind refresh to the nearest. Interleaved walks: cascades re-rendered per frame 1.96-2.22 →
+         1.13; shadow GPU 2.6-3.1 → 1.1-1.4 ms; forest walk 14.6-14.9 → 13.1-13.4 ms, walk + turning
+         15.4-15.5 → 13.9-14.0 ms (frames > 33 ms 17 → 3-13). Captures at ForestFloor, ForestEdge,
+         MeadowSlope, Vista, FieldWalk: same shadows, differences are wind. New frames.jsonl key
+         `shadow_cascades_refreshed` (bit mask).
 4. **Far forest as voxels or octahedral impostors** (Next 5; Chlorophyll, UE 5.7): mainly look and memory;
    per-instance data dropped for the farthest proxies.
 5. **Cluster LOD / mesh shaders for trees** (Chlorophyll, Nanite, Alan Wake 2): the reference engine's core,
