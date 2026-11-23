@@ -86,6 +86,19 @@ public:
     float cellWidth = 1.f, cellDepth = 1.f;
     float textureTiling = 4.f;
     std::vector<float> heights;
+    // Vector displacement (optional): each grid vertex moved sideways by
+    // (x, z) metres, two floats per vertex in the heights' order, so the
+    // surface can lean past its own base: undercut cliff faces and short
+    // overhangs, about a cell deep. Empty for a plain height field. Normals
+    // follow the displaced neighbours, so a face that overhangs faces down.
+    // Border vertices are shared with neighbouring cells, which must hold the
+    // same offsets there. Height queries (SampleTerrainSurface, placement,
+    // brushes) keep reading the undisplaced height field.
+    std::vector<float> lateralOffsets;
+    bool HasLateralOffsets() const
+    { return lateralOffsets.size() == heights.size() * 2 && !heights.empty(); }
+    // A grid vertex's position in cell space, displacement included.
+    glm::vec3 GridPosition(int col, int row) const;
     std::vector<Layer> layers;
     std::vector<float> weights; // one weight per vertex and layer
     // Placed terrain stamps (TerrainStamp): drawn as part of this cell's mesh,

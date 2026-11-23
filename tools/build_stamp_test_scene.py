@@ -124,6 +124,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--no-morph", action="store_true", help="keep the heights as built")
     parser.add_argument("--output", type=Path, default=OUTPUT)
+    parser.add_argument("--undercut", type=float, default=0.0, metavar="METRES",
+                        help="vector displacement test: push the east wall's top edge this far "
+                             "out past its foot (Terrain.lateralOffsets) and leave that wall bare")
     args = parser.parse_args()
     output = args.output.resolve()
     grass.build(*CELL, output=output, far=False, trees=False)
@@ -131,6 +134,18 @@ def main():
     rng = random.Random(SEED)
     heights = base_heights()
     placed = wall_stamps(heights, rng)
+    lateral = None
+    if args.undercut > 0.0:
+        # East wall (facing +x): drop its stamps, move its top-edge vertices
+        # out along +x, full along the wall and easing to nothing at the
+        # corners, so the face overhangs its foot.
+        placed = [(n, m) for n, m in placed if not (m[0, 3] > (BLOCK[1] - 2) * SPACING)]
+        lateral = np.zeros(heights.shape + (2,))
+        lo, hi = BLOCK
+        for row in range(lo, hi + 1):
+            t = min(row - lo, hi - row) / 2.0
+            t = min(max(t, 0.0), 1.0)
+            lateral[row, hi, 0] = args.undercut * t * t * (3 - 2 * t)
     lift = np.zeros_like(heights)
     if not args.no_morph:
         heights, lift = morph.morph(heights, SPACING, (0.0, 0.0),
@@ -151,6 +166,8 @@ def main():
     index = list(terrain).index(layers)
     terrain.insert(index, grass.numbers("Terrain.heights", heights.ravel()))
     terrain.insert(index + 1, grass.numbers("Terrain.weights", weights.reshape(-1)))
+    if lateral is not None:
+        terrain.insert(index + 2, grass.numbers("Terrain.lateralOffsets", lateral.reshape(-1)))
     for item in layers:
         item.set("minHeight", f"{heights.min():.3f}")
         item.set("maxHeight", f"{heights.max():.3f}")

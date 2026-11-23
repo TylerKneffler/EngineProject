@@ -640,9 +640,22 @@ merged into main, worktrees removed; their comparison images are in `.local/agen
       the grass), faces sink into a slope at the foot, corners clean; lifts at most 3.9 m.
       - [ ] Rebuild the landscape archive (`tools/build_landscape_demo.py`) and check the cliffs and
             mountains in the demo (first launch rebuilds every cell cache; ask before running).
-      - [ ] Overhangs: a height grid holds one height per x,z. Next: vector-displacement terrain (each grid
-            vertex offset in x, y and z), which keeps the grid's streaming, LOD and seams and allows undercuts
-            to about one cell deep; deeper arches and caves stay stamps or sculpts.
+      - [ ] Overhangs: a height grid holds one height per x,z. Vector-displacement terrain (each grid vertex
+            also offset in x and z) keeps the grid's streaming, LOD and seams and allows undercuts to about
+            one cell deep; deeper arches and caves stay stamps or sculpts.
+            - [x] Phase 1, engine (2026-11-23): `Terrain::lateralOffsets` (x, z per vertex; `Terrain.
+                  lateralOffsets` in scenes), `GridPosition`, normals from the displaced neighbours, baked LOD
+                  levels; collision uses the mesh triangles. Overhang faces keep their winding
+                  (OrientTerrainSurfaceUp trusts vertex normals) and the slope-gated biplanar mapping already
+                  textures them. Checked with `build_stamp_test_scene.py --undercut 6` (east wall's top edge
+                  6 m out, 2 m past its foot, stamps dropped there): looking up from the foot, the face hangs
+                  over the camera, underside shaded (`.local/stamps/u4/up.png`: plain | undercut).
+            - [ ] Phase 2: stamps as displacement brushes (grid vertices near a stamp move onto its surface,
+                  undercuts included), in `terrain_stamp_morph.py`.
+            - [ ] Phase 3: the height archive and cell caches carry offsets (`SaveCache`/`LoadCacheRange` build
+                  positions from heights only; caches must key on offsets); far tiles; matching offsets on
+                  shared cell borders.
+            - [ ] Height queries (placement, grass, brushes, `RaycastLocal`) still read the plain height field.
 - [ ] **Cliffs as sculpted terrain** (asked 2026-11-21: cliffs that are the terrain itself, with the scans' shape
       and look, no scan objects, smooth from ground to rock). The stamp route before it (per-piece surface
       patches, stages 1-5, far stamps, macro colour and far-grid patches) is in todo_history.md (2026-11-22):

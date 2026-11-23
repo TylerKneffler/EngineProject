@@ -456,8 +456,24 @@ void Terrain::Resize(int x, int y, float width, float depth)
     cellsX = x; cellsY = y; cellWidth = width; cellDepth = depth;
     heights = std::move(next);
     weights = std::move(nextWeights);
+    // Offsets are metres on the old grid's vertices; a new grid starts plain.
+    lateralOffsets.clear();
     NormalizeWeights();
     Rebuild();
+}
+
+glm::vec3 Terrain::GridPosition(int col, int row) const
+{
+    col = std::clamp(col, 0, cellsX);
+    row = std::clamp(row, 0, cellsY);
+    const size_t i = static_cast<size_t>(row) * (cellsX + 1) + col;
+    glm::vec3 position(col * cellWidth, i < heights.size() ? heights[i] : 0.f, row * cellDepth);
+    if (HasLateralOffsets())
+    {
+        position.x += lateralOffsets[i * 2];
+        position.z += lateralOffsets[i * 2 + 1];
+    }
+    return position;
 }
 
 void Terrain::NormalizeWeights()
@@ -1026,11 +1042,21 @@ void Terrain::BuildVertex(int col, int row, Mesh::Vertex& v) const
         return heights[static_cast<size_t>(std::clamp(sy, 0, cellsY) *
             (cellsX + 1) + std::clamp(sx, 0, cellsX))];
     };
-    const glm::vec3 normal = glm::normalize(glm::vec3(
+    glm::vec3 normal = glm::normalize(glm::vec3(
         (sample(col - 1, row) - sample(col + 1, row)) / (2.f * cellWidth),
         1.f, (sample(col, row - 1) - sample(col, row + 1)) / (2.f * cellDepth)));
+    const glm::vec3 position = GridPosition(col, row);
+    if (HasLateralOffsets())
+    {
+        // From the displaced neighbours (central differences; one-sided at
+        // the border): an undercut face's normal leans out and down.
+        const glm::vec3 alongX = GridPosition(col + 1, row) - GridPosition(col - 1, row);
+        const glm::vec3 alongZ = GridPosition(col, row + 1) - GridPosition(col, row - 1);
+        const glm::vec3 cross = glm::cross(alongZ, alongX);
+        if (glm::dot(cross, cross) > 1.e-12f) normal = glm::normalize(cross);
+    }
     v = {};
-    v.pos[0] = col * cellWidth; v.pos[1] = heights[i]; v.pos[2] = row * cellDepth;
+    v.pos[0] = position.x; v.pos[1] = position.y; v.pos[2] = position.z;
     v.normal[0] = normal.x; v.normal[1] = normal.y; v.normal[2] = normal.z;
     v.uv[0] = static_cast<float>(col) / cellsX;
     v.uv[1] = static_cast<float>(row) / cellsY;
@@ -1106,9 +1132,10 @@ bool Terrain::InstallBakedLod(int stride)
         const int col = source % (cellsX + 1);
         const int row = source / (cellsX + 1);
         Mesh::Vertex vertex{};
-        vertex.pos[0] = col * cellWidth;
-        vertex.pos[1] = heights[source];
-        vertex.pos[2] = row * cellDepth;
+        const glm::vec3 position = GridPosition(col, row);
+        vertex.pos[0] = position.x;
+        vertex.pos[1] = position.y;
+        vertex.pos[2] = position.z;
         const glm::vec3 filtered = FilterLodNormal(col, row, stride,
             cellsX, cellsY, [&](int sampleX, int sampleY) {
                 const auto& sample = m_bakedAppearance[
@@ -1661,6 +1688,12 @@ Terrain::JsonValue Terrain::Serialize() const
                 .Push(JsonValue(layer.previewColor.y)).Push(JsonValue(layer.previewColor.z))));
     out.Set("heights", std::move(h)).Set("weights", std::move(w))
         .Set("layers", std::move(ls));
+    if (HasLateralOffsets())
+    {
+        JsonValue offsets = JsonValue::MakeArray();
+        for (float value : lateralOffsets) offsets.Push(JsonValue(value));
+        out.Set("lateralOffsets", std::move(offsets));
+    }
     if (!stampPlacements.empty())
     {
         JsonValue placed = JsonValue::MakeArray();
@@ -1698,6 +1731,14 @@ void Terrain::Deserialize(const JsonValue& value)
     heights.assign(static_cast<size_t>(cellsX + 1) * (cellsY + 1), 0.f);
     for (size_t i = 0; i < std::min(heights.size(), value["heights"].ArraySize()); ++i)
         heights[i] = value["heights"].ArrayAt(i).AsFloat();
+    // Vector displacement: two floats (x, z) per vertex, or none.
+    lateralOffsets.clear();
+    if (value.Has("lateralOffsets") && value["lateralOffsets"].ArraySize() == heights.size() * 2)
+    {
+        lateralOffsets.resize(heights.size() * 2);
+        for (size_t i = 0; i < lateralOffsets.size(); ++i)
+            lateralOffsets[i] = value["lateralOffsets"].ArrayAt(i).AsFloat();
+    }
     layers.clear();
     const auto& entries = value["layers"];
     for (size_t i = 0; i < entries.ArraySize(); ++i)
