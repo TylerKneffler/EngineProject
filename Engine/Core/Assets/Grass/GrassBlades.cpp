@@ -8,6 +8,7 @@
 #include "Core/Scene/Scene.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -53,13 +54,15 @@ std::shared_ptr<Engine::Components::Mesh> BladeTemplate(Engine::Graphics::IGraph
 }
 }
 
+namespace { std::atomic<bool> s_unavailable{false}; }
+
 bool GrassBlades::Enabled()
 {
     static const bool enabled = [] {
         const char* value = std::getenv("ENGINE_GPU_GRASS");
         return value && value[0] == '1';
     }();
-    return enabled;
+    return enabled && !s_unavailable.load(std::memory_order_relaxed);
 }
 
 std::shared_ptr<GrassBlades> GrassBlades::For(Engine::Scene::Scene& scene)
@@ -99,6 +102,10 @@ void GrassBlades::Update(Engine::Scene::Scene& scene, Engine::Graphics::IGraphic
 {
     if (!provider) return;
     if (!m_field) m_field = std::make_shared<Engine::Rendering::GpuBladeField>();
+    // The renderer cannot draw blades here: every meadow field goes back to
+    // its mesh grass (GrassField::Refresh), so no backend is left bare.
+    if (m_field->unavailable && !s_unavailable.exchange(true))
+        std::fprintf(stderr, "GPU grass blades unavailable on this renderer; using mesh grass\n");
     if (m_dirty)
     {
         m_dirty = false;

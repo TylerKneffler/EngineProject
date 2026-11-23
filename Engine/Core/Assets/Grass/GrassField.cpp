@@ -1051,6 +1051,13 @@ bool GrassField::Refresh()
     checkpoint(m_performance.referencesMs);
     if (!referencesReady) { publish(); return changed; }
     if (gpuBlades) SyncGpuBlades();
+    // The renderer cannot draw blades (GrassBlades::Update): mesh grass again.
+    if (gpuBlades && !GrassBlades::Enabled())
+    {
+        gpuBlades = false;
+        ReleaseGpuBlades();
+        MarkConfigurationDirty();
+    }
     const glm::vec3 local = glm::vec3(glm::inverse(
         m_cachedTerrain->Owner->transform.GetWorldMatrix()) *
         glm::vec4(m_cachedViewer->transform.GetWorldPosition(), 1.f));

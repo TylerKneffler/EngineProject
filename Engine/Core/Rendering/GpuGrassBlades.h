@@ -25,6 +25,10 @@ struct GpuBladeField
     // Patches dispatched around the camera: side length (m) and reach (m).
     float patchSize = 2.f;
     float reach = 60.f;
+    // Set by the renderer when it cannot draw blades (no indirect draws or
+    // instance culling, or the generation shader failed to build); the owner
+    // then falls back to mesh grass.
+    bool unavailable = false;
 };
 
 // Compute constants (128-byte root constants; GrassBlades.hlsl BladeConstants).

@@ -2748,12 +2748,14 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
                 // pool indices (unbounded root SRV reads hang the GPU).
                 if(bladeField && !representative.surfaceShaderResolved) continue;
                 // Measurement only: ENGINE_GPU_GRASS_DEBUG=1 generates blades
-                // without drawing them, 2 skips the carrier altogether.
+                // without drawing them, 2 skips the carrier altogether, 3 draws
+                // zero-height blades, 4 acts as a renderer without blades.
                 static const int bladeDebug=[]{ const char* v=std::getenv("ENGINE_GPU_GRASS_DEBUG"); return v ? std::atoi(v) : 0; }();
                 if(bladeField && bladeDebug==2) continue;
                 bool gpu=instanceLodDisplayOverride < 0 && gpuInstanceCulling &&
                     context->SupportsIndirectDraws() &&
                     (count>=32 || gpuLod || representative.mesh->instanceLodBand>=0 || bladeField);
+                if(bladeField && bladeDebug==4) gpu=false; // tests the mesh grass fallback
                 if(gpu && bladeField && !m_grassBladeAttempted)
                 {
                     m_grassBladeAttempted=true;
@@ -2762,7 +2764,15 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
                     if(shader) m_grassBladePipeline=m_graphicsProvider->GetPipelineStateFactory()->CreateComputePipeline(shader.get());
                     else std::fprintf(stderr,"GrassBlades.hlsl: %s\n",m_graphicsProvider->GetShaderCompiler()->GetLastError().c_str());
                 }
-                if(bladeField && !(gpu && m_grassBladePipeline)) continue;
+                if(bladeField && !(gpu && m_grassBladePipeline))
+                {
+                    // Not drawable here (the editor's fixed-LOD view aside):
+                    // the meadow falls back to mesh grass (GrassBlades::Update).
+                    if(instanceLodDisplayOverride < 0 && (bladeDebug==4 ||
+                        !gpuInstanceCulling || !context->SupportsIndirectDraws() || m_grassBladeAttempted))
+                        bladeField->unavailable=true;
+                    continue;
+                }
                 if(gpu && !m_instanceCullAttempted)
                 {
                     m_instanceCullAttempted=true;
