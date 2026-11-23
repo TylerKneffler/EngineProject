@@ -554,6 +554,11 @@ options and references: [far_detail_and_visibility_research.md](far_detail_and_v
         Placement (LandscapeDriver, `BroadleafSpecies`, `ENGINE_BROADLEAF=0` for A/B): half of the lone
         meadow trees in the open (interior < 0.02 at the tree and 15 m around it), 7-11 m, both variants.
         Silhouettes in edge views: oak domes behind, the slender leaning tree and the upright one in front.
+        Cost (FieldWalk, 400 frames, interleaved with `ENGINE_BROADLEAF=0`, same binary): lone-only median
+        22.5/22.9 ms vs 23.6/21.6 off (no measurable change; this round ran ~6 ms slower overall than the
+        first), command recording +1.2 ms; with the edge placement on too (first round) 16.8/16.5 vs
+        16.0/16.4 ms, command recording +0.9 ms. Triangles: LOD0 4000 trunk + 6200 branches + 640 cards;
+        LOD1 1200 + 1800 + 640; LOD2 460 + 300 + 640; impostor 38.
       - Edge-belt placement is written but off by default (`ENGINE_BROADLEAF=all` or `=edge`): with any share
         of broadleaves in the belt (tried nearer the meadow, forest > 0.22, > 0.45, > 0.65; 30-45%; scale
         1.2-2.5) one stood over the ForestEdge camera, whose whole view looked into its crown (captures
