@@ -1022,8 +1022,9 @@ void GenerateProps(const TerrainManager::ObjectLayerContext& context,
         layer.viewDistance = 220.f;
         layer.lod1Distance = 35.f;
         layer.lod2Distance = 100.f;
-        // Rocks, boulders, logs and stumps (ENGINE_PROP_SHADOW_DISTANCE).
-        layer.shadowDistance = LandscapeShadowRange("ENGINE_PROP_SHADOW_DISTANCE", 80.f);
+        // Rocks, boulders, logs and stumps cast to 150 m (80 m before
+        // 2026-11-22; no measurable cost); ENGINE_PROP_SHADOW_DISTANCE for A/B.
+        layer.shadowDistance = LandscapeShadowRange("ENGINE_PROP_SHADOW_DISTANCE", 150.f);
         layer.shadowLod = 1;
         // The prefabs carry their own LOD0-2 chains; only distances are set.
         for (int rock : LandscapeRocks)

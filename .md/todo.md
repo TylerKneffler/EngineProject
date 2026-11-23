@@ -807,6 +807,32 @@ grass 9.9, opaque 4.8). Most sources are talk abstracts, slides or press summari
          15.4-15.5 → 13.9-14.0 ms (frames > 33 ms 17 → 3-13). Captures at ForestFloor, ForestEdge,
          MeadowSlope, Vista, FieldWalk: same shadows, differences are wind. New frames.jsonl key
          `shadow_cascades_refreshed` (bit mask).
+   - [x] Longer shadow ranges (2026-11-22, `agents/perf`). Interleaved walks (forest, field, turning) and
+         stills at ForestEdge, ForestWall, MeadowSlope, Vista, FieldWalk and a mid-range view with trees at
+         ~100-250 m (`--camera-position 40,-8,-80 --camera-target 140,-27,90`, "MidB"); looks from stills
+         with `ENGINE_WIND_TIME=100` (freezes wind; cloud shadows still move).
+         1. Trees cast with their LOD1 mesh to 220 m (was 90), `ENGINE_TREE_SHADOW_DISTANCE`. Alone it changed
+            nothing: the near cascades ended at 150 m, and `foliageCasterDistance` (150 m) caps every
+            wind-animated caster, the oaks among them (it would have left trees at 150-220 m with no shadow,
+            since the impostors only cast past 220 m).
+         3. Near cascades to 250 m (was 150) with the split blend 0.65 → 0.79, so the first cascade keeps its
+            ~18 m (second 43 → 49 m, third 49-250 m), and the foliage caster budget 250 m: the
+            `RealtimeShadowSettings` defaults, project loader fallbacks and template. A/B switches
+            `ENGINE_SHADOW_NEAR_DISTANCE` (keeps the authored first split), `ENGINE_FOLIAGE_CASTER_DISTANCE`;
+            the old behaviour is tree 90 / near 150 / foliage 150. Projects that write 150 m keep it.
+            Cost 1+3 (new / old): shadow GPU forest walk 1.33 / 1.18 and 1.54 / 1.48 ms, turning 1.35 / 1.30
+            and 1.36 / 1.52; shadow recording +0.1-0.36 ms CPU in most stills; frames within drift. On by
+            default. Look: near shadows unchanged (ForestFloor 0.02 % pixels), ForestWall's canopy at
+            90-220 m self-shadows more deeply, elsewhere ≤ 0.2 % (the meadow ridge at ~150 m in MidB).
+         2. Rocks, boulders, logs and stumps cast to 150 m (was 80), `ENGINE_PROP_SHADOW_DISTANCE`: forest walk
+            shadow GPU 1.23 / 1.46 ms against 1.36 / 1.56 off, frames 15.2 / 15.7 against 15.2 / 16.2: no
+            measurable cost, on by default. Scanned bushes, shrubs and ferns (`ENGINE_SCAN_BUSH_SHADOWS=1`,
+            out to their 80 m reach): shadow GPU +0.7 ms (2.01 / 2.25), shadow recording +0.8-1.1 ms CPU,
+            forest walk frames +1.3-2.5 ms with more spikes, for a subtle look (bushes self-shadow and read
+            more solid at MeadowSlope). Off by default.
+   - [ ] Scanned plant shadows cheaper: the 30 m variant (`ENGINE_SCAN_BUSH_SHADOW_DISTANCE=30`) cost as much
+         as 80 m (2.33 / 2.38 ms), so the range is not what limits it; check the grass caster budget and
+         per-tile caster culling of the scan fields, or a shadow-only card LOD.
 4. **Far forest as voxels or octahedral impostors** (Next 5; Chlorophyll, UE 5.7): mainly look and memory;
    per-instance data dropped for the farthest proxies.
 5. **Cluster LOD / mesh shaders for trees** (Chlorophyll, Nanite, Alan Wake 2): the reference engine's core,
