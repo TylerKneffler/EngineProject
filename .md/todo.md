@@ -754,8 +754,9 @@ merged into main, worktrees removed; their comparison images are in `.local/agen
                         `TerrainManager::FeedVolumeNeighbours`; cells built before the archive is known are
                         rebuilt when it arrives) and the neighbours' sculpts (`sculpts`, used inside each
                         sculpted cell's footprint instead of clamping queries to the cell). The grid's bottom
-                        sits on a multiple of 8 samples, so every cell samples one world lattice: before, each
-                        cell's own lowest point set it and neighbours' coarse vertices missed each other.
+                        sits on a multiple of 32 samples (a chunk), so every cell samples one world lattice and
+                        cuts it into chunks in the same places: before, each cell's own lowest point set it and
+                        neighbours' coarse vertices missed each other.
                         `.local/tests/TerrainVolumeTests.cpp` (target TerrainVolumeTests) checks that two
                         neighbours mesh identical vertices along their edge at strides 1, 4 and 8. Against
                         the far tiles: the thin dark slits along the escarpment's top edge (row -6 against
@@ -779,18 +780,57 @@ merged into main, worktrees removed; their comparison images are in `.local/agen
                         trees, brushes) keep the height field, so trees and grass stand over a carved hole;
                         no editor tool yet calls AddVolumeEdit.
                   - [ ] One continuous layer (asked 2026-11-23: no two surfaces on top of each other, only
-                        the one sheet changing shape). Checked by TerrainVolumeTests (ContinuousLayer: vertical
-                        lines through two neighbouring cells must cross the surface an odd number of times;
-                        edges shared by exactly two triangles). Exact tiling at one level passes everywhere,
-                        across the cell border and through an arch and an overhanging shelf. The shipped
-                        meshing does not: chunks overlap by one coarse cell to hide the cracks between levels,
-                        so the overlap bands hold two layers (4676 of 7812 test columns at 8-cell chunks, 2047
-                        edges in 3+ triangles); exact tiling at mixed levels leaves holes (934) instead.
-                        Fix: stitch levels as octree dual contouring does: tile chunks exactly, and give each
-                        edge between chunks of different levels to the finest chunk around it, which joins
-                        its own vertices to the coarser neighbours' (their cells' vertices, computed at their
-                        level). Needs each chunk's neighbours' levels (across cells too, via TerrainManager),
-                        and remeshing a chunk's neighbours when its level changes.
+                        the one sheet changing shape; cliffs merged into the slopes they stand on, worst on
+                        mountainsides). Mostly done, not yet confirmed in game after the last fixes.
+                        Found: chunks overlapped by one coarse cell to hide the cracks between levels, so the
+                        overlap bands held two layers (4676 of 7812 test columns); exact tiling at mixed levels
+                        left holes (934) instead.
+                        Done (uncommitted):
+                        * Stitched meshing (`MeshSurfaceNets` with `SurfaceNetsSeams`, TerrainVolume.cpp):
+                          chunks tile exactly; an edge between chunks of different levels belongs to the finest
+                          chunk around it, which joins its vertices to the coarser chunks' own vertices.
+                          Samples on a coarser chunk's faces read its lattice (trilinear), so both sides see one
+                          surface there (fins thinner than a coarse cell had left holes). Samples in a
+                          neighbouring cell are read from that cell's volume (`cellVolumes`): each cell's margin
+                          was built from archive heights that differ by centimetres from a loaded neighbour
+                          with carved trails, and the two sides missed. Toward a missing chunk or cell the
+                          sheet ends on the face (the last cells' vertices moved onto it, where the surface
+                          crosses it); an inside corner of a missing block is closed by one triangle. Chunks
+                          must be two cells across or more (32 samples, stride 8 at most).
+                        * VolumeTerrain chooses levels for every volume of a scene together (`LevelSteps`,
+                          VolumeTerrain.cpp): one camera position, moved on in `lodStepMetres` (16 m) steps once
+                          the last is shown, and the step's set of volumes; a chunk's key is its level, its 26
+                          neighbours' strides and the neighbouring cells' volumes. Changed chunks mesh on
+                          workers and all swap in on one frame (cross-fade between two runtime-LOD slots); new
+                          cells join at the next step. TerrainManager tags cells (`group`, `cellX`, `cellZ`).
+                          Volume y range starts on a multiple of 32 samples (chunk boundaries shared by cells).
+                        * Checks: TerrainVolumeTests ContinuousLayer (vertical lines must cross an odd number of
+                          times; edges in exactly two triangles) over two cells with an arch, a shelf across
+                          the border, thin fins and a ridge, at one level, falling-off levels, random levels and
+                          random levels with missing chunk columns (two touching at a corner): all pass with no
+                          holes. Random levels keep one 2 cm sliver (6 open edges) where a three-level jump at
+                          a cell border meets the thin shelf at a chunk-height boundary: reported, not failed.
+                          In game: `ENGINE_VOLUME_TERRAIN_CHECK=1` runs the same check over all shown chunks
+                          after each swap and prints holes, doubled layers and open edges with world positions;
+                          `ENGINE_VOLUME_TERRAIN_DUMP=<folder>` (and `_DUMP_HOLES=<n>`) writes the cells around
+                          the first hole, and `VOLUME_DUMP=<folder> TerrainVolumeTests` meshes them again.
+                        Results: Cliffs wide view, all 25 cells: 0 holes, 0 doubled, 0 open edges on cell borders,
+                        2 inside (`.local/landscape/trim24`). Escarpment: the corner hole replayed from its dump is
+                        gone (0 even columns); its remaining "holes" were the sculpted cell (0,-6) still building
+                        (4-6 s), drawn meanwhile by its terrain mesh, which the check does not see.
+                        Height path vs volume over the Cliffs from above: the stamps' stacked shards become rock
+                        merged into the slope (`.local/landscape/trim19/wide_cmp.png`, `high_cmp.png`).
+                        Next:
+                        * Rerun the in-game check on Escarpment, CliffsWide, Cliffs and SeamLow after the last
+                          two fixes (the run was interrupted), and view the pictures.
+                        * The check should skip cells whose volume is still building (not members yet).
+                        * Dark pits across the volume cliffs (`trim19/wide_zoom.png`): pockets between stamp slabs
+                          (6 m rock behind each face) or remaining holes; check with the in-game check, then
+                          consider filling the rock behind stamp faces deeper.
+                        * Edges in 3+ triangles (surface nets pinching rock thinner than a cell: 1607 at Cliffs)
+                          are not holes but can shade badly.
+                        * The 2 cm sliver at random levels; the black prefab shards at Cliffs (also on the
+                          height path).
                   - [ ] 3d, cleanup once the landscape runs on volumes: keep the stamp shapes and
                         placements (`.stamp`, `world.cliffs`; the volume's rock), delete the patch drawing
                         (`AppendStampGeometry`, `DisplacedStampInset`), far stamp cells, stamp proxy prefabs,
