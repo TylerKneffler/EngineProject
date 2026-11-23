@@ -854,7 +854,9 @@ grass 9.9, opaque 4.8). Most sources are talk abstracts, slides or press summari
          early depth rejection does not happen whatever the order).
    - [ ] What would cut it: fewer rasterised leaf fragments. The big oak's LOD0 leaf cards (7,986
          triangles, 1,586 m²) are only 25-34 % opaque at the 0.32 cutoff (Monte Carlo over the card UVs,
-         depending on the v convention), so cards trimmed to their alpha (Persson) could cut the pre-pass and
+         depending on the v convention). [2026-11-23: trimming cannot keep the look; coarse coverage-
+         preserving mips need nearly the whole card, see "Trimmed cards" under Foliage Phase 2.] So cards
+         trimmed to their alpha (Persson) could cut the pre-pass and
          the leaf share of shadows by roughly a third, at about 3x the leaf triangles (vertex cost to be
          measured: the vertex shader carries instancing and tree wind). Beyond that: a visibility buffer
          for alpha-tested foliage (Forbidden West), or real leaf geometry with cluster LODs.
@@ -965,8 +967,17 @@ Progress 2026-11-19 (landscape ForestEdge, DX12 1080p, single runs; frame / upda
 - [ ] **CPU draw recording on the vista** (Phase 0: camera record 18 ms, shadow record 6 ms, scene prepare
       11 ms, run serially; now 11 / 3.9 / 6.6). Candidates beyond the steps above: moving more far forest
       onto GPU-driven instance draws (InstanceCull) and overlapping prepare with recording.
-- [ ] **Trimmed cards** (cook step): clip each leaf triangle to the opaque part of its texture (oak cards are
-      curved 7-11 triangle clusters, 36-39 % opaque by area). Lower priority: ground views are geometry-bound.
+- [ ] ~~**Trimmed cards**~~ (cook step): not worth it without a visible change; checked 2026-11-23. Leaf
+      pixels pass only where sampled alpha x fade >= cutoff (hashed coverage and edge fade only remove), so
+      a trim is invisible if it keeps every texel that can pass at any mip the LOD uses. The oak leaf atlas
+      (`Texture 6 6`, 4096², 22 % opaque at 0.32) maps at ~1,270 texels/m, so cards sample mip ~4 at 16 m
+      and mip 7 at the end of LOD0; TextureCook's coverage-preserving mips grow the passing area with
+      level. Share of the texture that can pass when sampling up to mip k (grown 3 texels per level for
+      bilinear and anisotropic footprints): k=0 30 %, 2 42 %, 3 52 %, 4 64 %, 5 78 %, 6 91 %, 7 100 %. A
+      look-preserving trim of LOD0 (mip 7) keeps everything; one exact to ~16 m would keep ~64 % of the
+      area for 4-9x the leaf triangles and thin crowns past that. A stats tool was written and removed
+      (the session's `tools/trim_leaf_cards.py`, never committed). Options that do change the look:
+      trim per LOD at a chosen mip, or a lower-resolution, tighter-packed leaf atlas.
 - [ ] **Standalone prefab trees**: find why `shadow_submission_ms` is ~64 ms for 84 non-instanced prefab
       trees (Phase 0 finding; `build_foliage_test_scene.py --standalone` reproduces it). The fine shadow
       timers (`geometryDrawMs`, `maxBatchMs`) only record with `Scene::SetUpdateProfilingEnabled`, which
