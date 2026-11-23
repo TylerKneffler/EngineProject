@@ -110,5 +110,15 @@ struct ObjectGPUData
     // Instanced ground cover thinning (Mesh::placementThin*): start, end,
     // minimum share kept, w = 1 keeps survivors' width (no widening).
     glm::vec4 placementThin{0.f, 0.f, 1.f, 0.f};
+    // Terrain contour paths (TerrainManager::ContourPaths), shaded per pixel
+    // at every terrain level: noise periods and weights (A, B); seeds A and B,
+    // path layer + 1 (0 = off), mask of layers it may cross; core and edge
+    // half-width (m), contour value, gradient floor; height band (rise start,
+    // rise end, fall start, fall end); far colour and strength.
+    glm::vec4 terrainPathNoise{0.f};
+    glm::uvec4 terrainPathKeys{0u};
+    glm::vec4 terrainPathShape{0.f};
+    glm::vec4 terrainPathBand{0.f};
+    glm::vec4 terrainPathFar{0.f};
 };
 }

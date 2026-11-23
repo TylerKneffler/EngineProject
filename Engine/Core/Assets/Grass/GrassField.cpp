@@ -8,6 +8,7 @@
 #include "Core/Rendering/RenderSystem.h"
 #include "Core/Rendering/SceneRenderer.h"
 #include "Core/Components/Terrain/Terrain.h"
+#include "Core/Components/Terrain/TerrainManager.h"
 #include "Core/Components/Terrain/TerrainObjectLayer.h"
 #include "Core/Components/Terrain/TerrainSurfaceSample.h"
 #include <cstdlib>
@@ -746,8 +747,24 @@ void GrassField::BeginBuild(Tile tile, int lod, uint64_t signature)
         const size_t layerCount = terrain.layers.size();
         const bool masked = proceduralLayerMask != 0 && layerCount > 0 &&
             terrain.weights.size() == terrain.heights.size() * layerCount;
+        // Paths shaded per pixel (TerrainManager::ContourPaths) are not in the
+        // paint: keep off their track as the painted path did (it took the
+        // grass weight under .5 from a path share of about .45).
+        const auto* paths = terrain.Owner
+            ? terrain.Owner->GetComponentInParent<Engine::Components::TerrainManager>() : nullptr;
+        if (paths && !paths->contourPaths.enabled) paths = nullptr;
+        const glm::vec3 pathOrigin = paths
+            ? glm::vec3(terrain.Owner->transform.GetWorldMatrix()[3]) : glm::vec3(0.f);
         const auto grows = [&](float x, float z)
         {
+            if (paths)
+            {
+                float height = 0.f;
+                if (Engine::Components::SampleTerrainSurface(terrain.heights, terrain.cellsX,
+                        terrain.cellsY, terrain.cellWidth, terrain.cellDepth, x, z, height, nullptr) &&
+                    paths->ContourPathShare(pathOrigin.x + x, pathOrigin.z + z,
+                        pathOrigin.y + height) > .45f) return false;
+            }
             if (!masked) return true;
             const int col = std::clamp(static_cast<int>(std::lround(x / terrain.cellWidth)), 0, terrain.cellsX);
             const int row = std::clamp(static_cast<int>(std::lround(z / terrain.cellDepth)), 0, terrain.cellsY);
@@ -1446,6 +1463,17 @@ void GrassField::SyncGpuBlades()
                     paint[sample] = weight;
                 }
             const glm::vec3 origin(terrain.Owner->transform.GetWorldMatrix()[3]);
+            // Paths shaded per pixel are not in the paint (see grows above):
+            // the blades thin out along them as they did on the painted path.
+            if (const auto* paths = terrain.Owner->GetComponentInParent<Engine::Components::TerrainManager>();
+                paths && paths->contourPaths.enabled)
+                for (size_t sample = 0; sample < paint.size(); ++sample)
+                {
+                    const float x = origin.x + float(sample % size_t(samplesX)) * terrain.cellWidth;
+                    const float z = origin.z + float(sample / size_t(samplesX)) * terrain.cellDepth;
+                    paint[sample] *= 1.f - std::min(1.f, paths->ContourPathShare(x, z,
+                        origin.y + terrain.heights[sample]) / .9f);
+                }
             blades->SetCell(this, origin, samplesX, terrain.cellWidth, terrain.heights, std::move(paint));
             m_bladeTerrain = &terrain;
             m_bladeTerrainRevision = revision;

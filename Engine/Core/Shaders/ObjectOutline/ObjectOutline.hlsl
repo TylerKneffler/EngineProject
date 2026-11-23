@@ -64,6 +64,11 @@ struct ObjectData
     float4 groundCoverColor;
     float4 groundCoverRange;
     float4 placementThin; // start, end, minimum share kept (instanced ground cover)
+    float4 terrainPathNoise; // terrain contour paths (Object.hlsl)
+    uint4 terrainPathKeys;
+    float4 terrainPathShape;
+    float4 terrainPathBand;
+    float4 terrainPathFar;
 };
 
 struct InstanceTransform { float4 row0; float4 row1; float4 row2; };

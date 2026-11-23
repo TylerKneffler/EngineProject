@@ -144,6 +144,19 @@ float TrailMask(float x, float z)
     return 1.f - SmoothStep(1.6f, 4.2f, distance);
 }
 
+// Trails are shaded per pixel on every terrain level from the same noise
+// (TerrainManager::ContourPaths, Object.hlsl TerrainPathWeight); the paint
+// then leaves them out. ENGINE_TERRAIN_PATHS=0 paints them at the vertices
+// again (4 m in loaded cells, 16 m in the far macro map: the old spots).
+bool ShaderTrails()
+{
+    static const bool enabled = [] {
+        const char* value = std::getenv("ENGINE_TERRAIN_PATHS");
+        return !(value && value[0] == '0');
+    }();
+    return enabled;
+}
+
 // Six layer weights for one sample. rockClass is the archive's 0..3 code:
 // slope and ridge rockiness computed over the whole map by the generator.
 void PaintSample(float height, uint8_t rockClass, float worldX, float worldZ,
@@ -173,9 +186,10 @@ void PaintSample(float height, uint8_t rockClass, float worldX, float worldZ,
     weights[ForestSoil] = soil * (1.f - snow);
     weights[Grass] = std::max(0.f, land * (1.f - rock) * (1.f - snow) - weights[ForestSoil]);
     // Trails: packed gravel through meadow and forest, not over rock, snow,
-    // shores or steep ground (rockSlope).
-    const float trail = TrailMask(worldX, worldZ) * land * (1.f - rock) * (1.f - snow) *
-        ForestBand(height, a);
+    // shores or steep ground (rockSlope). Shaded per pixel instead unless
+    // ENGINE_TERRAIN_PATHS=0 (ShaderTrails).
+    const float trail = ShaderTrails() ? 0.f : TrailMask(worldX, worldZ) * land *
+        (1.f - rock) * (1.f - snow) * ForestBand(height, a);
     if (trail > 0.f)
     {
         for (int layer = 0; layer < LayerCount; ++layer) weights[layer] *= 1.f - .9f * trail;
@@ -1310,8 +1324,26 @@ bool LandscapeDriver::ConfigureTerrain()
     // are cached, so the list is part of the cache key.
     const std::shared_ptr<const CliffList> cliffs = LoadCliffList(
         std::filesystem::path(archivePath).replace_extension(".cliffs").string(), signature);
+    // Trails leave the paint and carve the heights when shaded per pixel.
     manager->SetStaticCache(cacheDirectory,
-        signature ^ PaintRevision ^ paintKey ^ (cliffs ? cliffs->contentHash : 0ull));
+        signature ^ PaintRevision ^ paintKey ^ (cliffs ? cliffs->contentHash : 0ull) ^
+        (ShaderTrails() ? 0x5452414953484144ull : 0ull));
+    // Trails as contour paths (ShaderTrails): the TrailMask noise, its track
+    // widths, the gravel layer, over meadow, forest soil and gravel only, in
+    // the forest's height band (ForestBand: off shores and above the tree line).
+    {
+        auto& paths = manager->contourPaths;
+        paths.enabled = ShaderTrails();
+        paths.periodA = 520.f; paths.weightA = .7f; paths.seedA = 71u;
+        paths.periodB = 170.f; paths.weightB = .3f; paths.seedB = 73u;
+        paths.contour = .5f; paths.core = 1.6f; paths.edge = 4.2f; paths.gradientFloor = .0006f;
+        paths.layer = Gravel;
+        paths.crossableLayers = (1u << Gravel) | (1u << Grass) | (1u << ForestSoil);
+        paths.strength = .9f;
+        paths.riseStart = level.water + 4.f; paths.riseEnd = level.water + 9.f;
+        paths.fallStart = level.tree - 8.f * level.blend; paths.fallEnd = level.tree;
+        paths.farColor = MakePalette(level).farColors[Gravel];
+    }
     // Cliff pieces in loaded cells are part of the terrain (stamps); the
     // stamp files are read once and shared.
     static const bool stampsEnabled = EnvironmentSwitch("ENGINE_TERRAIN_STAMPS");
@@ -1355,6 +1387,20 @@ bool LandscapeDriver::ConfigureTerrain()
                 PaintSample(terrain.heights[i], codes[i], originX + col * terrain.cellWidth,
                     originZ + row * terrain.cellDepth, level, &terrain.weights[i * LayerCount]);
             }
+        // A worn track: trails sink a little into the ground (collision
+        // and grass follow the cell heights). Only where the shaded path
+        // runs: off rock, snow and shores and inside the forest band.
+        if (ShaderTrails())
+            for (int row = 0; row <= countY; ++row)
+                for (int col = 0; col <= countX; ++col)
+                {
+                    const size_t i = static_cast<size_t>(row) * (countX + 1) + col;
+                    const float* w = &terrain.weights[i * LayerCount];
+                    const float crossable = w[Gravel] + w[Grass] + w[ForestSoil];
+                    const float track = TrailMask(originX + col * terrain.cellWidth,
+                        originZ + row * terrain.cellDepth) * crossable * ForestBand(terrain.heights[i], level);
+                    terrain.heights[i] -= .12f * track;
+                }
         terrain.Rebuild();
     });
     manager->SetObjectLayerGenerator([=](const TerrainManager::ObjectLayerContext& context,

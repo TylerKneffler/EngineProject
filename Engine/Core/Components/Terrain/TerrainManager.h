@@ -350,6 +350,37 @@ public:
     bool BakeProceduralCell(int x, int y, bool force = false);
     bool BakeRuntimeTerrain(bool reuseExistingCells = false);
     bool HasCompleteRuntimeBake() const;
+    // Paths along a contour of smooth value noise (two octaves), shaded per
+    // pixel on every terrain level (Object.hlsl TerrainPathWeight), so a
+    // track narrower than the vertex spacing stays sharp near and a faint
+    // continuous line far, instead of paint at the vertices that breaks into
+    // spots. Set by the scene script, which also keeps the track out of its
+    // paint and placements with the same noise (hash and lattice as
+    // Object.hlsl TerrainPathHash). Not serialized.
+    struct ContourPaths
+    {
+        bool enabled = false;
+        float periodA = 520.f, weightA = .7f, periodB = 170.f, weightB = .3f;
+        uint32_t seedA = 71u, seedB = 73u;
+        float contour = .5f;
+        // Half-widths from the contour, metres: full path inside core, none
+        // past edge. Gradient floor (per metre) keeps flat noise from
+        // spreading a track into a clearing.
+        float core = 1.6f, edge = 4.2f, gradientFloor = .0006f;
+        int layer = 1;                // paint layer the track uses
+        uint32_t crossableLayers = 0; // layers it may run over (bit mask)
+        float strength = .9f;
+        // Height band (world Y): rises over riseStart..riseEnd, falls over
+        // fallStart..fallEnd.
+        float riseStart = -1.e9f, riseEnd = -1.e9f, fallStart = 1.e9f, fallEnd = 1.e9f;
+        glm::vec3 farColor{.4f};      // far tiles (no paint there)
+    };
+    ContourPaths contourPaths;
+    // The path's share (0..1, times strength) at a world position and height,
+    // as Object.hlsl shades it at full resolution (no surface rules, no pixel
+    // footprint). Ground cover keeps off the track with it, now that the paint
+    // no longer carries the path. 0 when contourPaths is off.
+    float ContourPathShare(float worldX, float worldZ, float height) const;
     struct FarTerrainPalette
     {
         std::array<glm::vec3, 6> farColors{};
