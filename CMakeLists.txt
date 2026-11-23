@@ -2413,6 +2413,20 @@ if(NOT ENGINE_PROJECT_DIR AND
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/TerrainVolumeTests.cpp")
+    enable_testing()
+    add_executable(TerrainVolumeTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/TerrainVolumeTests.cpp")
+    target_link_libraries(TerrainVolumeTests PRIVATE Engine)
+    target_include_directories(TerrainVolumeTests PRIVATE
+        "${ENGINE_ROOT}" "${ENGINE_ROOT}/Engine")
+    target_compile_definitions(TerrainVolumeTests PRIVATE NOMINMAX)
+    add_test(NAME TerrainVolume COMMAND TerrainVolumeTests)
+    set_tests_properties(TerrainVolume PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}" TIMEOUT 120)
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
    EXISTS "${ENGINE_LOCAL_TEST_ROOT}/OcclusionBufferTests.cpp")
     enable_testing()
     add_executable(OcclusionBufferTests EXCLUDE_FROM_ALL

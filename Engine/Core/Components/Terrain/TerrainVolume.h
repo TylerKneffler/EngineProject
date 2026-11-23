@@ -2,6 +2,7 @@
 
 #include "Core/Components/Mesh/Mesh.h"
 #include <glm/glm.hpp>
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -44,6 +45,16 @@ struct TerrainVolume
         std::vector<int16_t> samples; // empty: every sample is `uniform`
     };
     std::vector<Chunk> chunks;        // x fastest, then z, then y
+    // The part that is meshed: first sample and cells per axis. Built from a
+    // terrain cell, the rest is a margin coarse levels read at the cell's
+    // edge (a coarse cell straddling the edge needs samples on both sides).
+    // Negative cells: the whole grid.
+    glm::ivec3 interiorFirst{0};
+    glm::ivec3 interiorCells{-1};
+    glm::ivec3 InteriorCells() const
+    {
+        return interiorCells.x < 0 ? glm::ivec3(sizeX - 1, sizeY - 1, sizeZ - 1) : interiorCells;
+    }
 
     // Density in metres at a sample (clamped to the grid).
     float At(int x, int y, int z) const;
@@ -70,6 +81,34 @@ struct TerrainVolume
 // blocks at different strides leave no gap where their edges disagree.
 void MeshSurfaceNets(const TerrainVolume& volume, const glm::ivec3& first,
     const glm::ivec3& cells, int stride, float skirt,
+    std::vector<Mesh::Vertex>& vertices, std::vector<uint32_t>& indices);
+// Blocks at different levels joined into one sheet (no overlap, no skirt):
+// the block is meshed with the levels of the 26 blocks around it, and every
+// edge between blocks is meshed once, by the finest block around it, which
+// joins its own vertices to the coarser blocks' vertices (computed as they
+// compute them). Blocks tile exactly; where a block is missing the sheet
+// ends on this block's face.
+struct SurfaceNetsSeams
+{
+    // Stride of the block at offset (dx, dy, dz) in -1..1, index
+    // (dy + 1) * 9 + (dz + 1) * 3 + dx + 1; 0: no block there. The centre is
+    // ignored (the block's own stride).
+    std::array<int, 27> strides{};
+    // A global sample every level's lattice passes through (blocks start on
+    // multiples of every stride from it).
+    glm::ivec3 alignment{0};
+    // Cells of `cellSamples` (x, z) samples from `alignment`: a sample in a
+    // neighbouring cell is read from that cell's volume (index
+    // (dz + 1) * 3 + dx + 1; null: this volume's margin), so both cells mesh
+    // their shared edge from the same numbers. Each cell builds its margin
+    // from its neighbours' inputs, which can differ a little from what the
+    // neighbour itself was built from (archive heights against a loaded cell
+    // with carved trails): the two sides missed by centimetres and left holes.
+    std::array<const TerrainVolume*, 9> cellVolumes{};
+    glm::ivec2 cellSamples{0};
+};
+void MeshSurfaceNets(const TerrainVolume& volume, const glm::ivec3& first,
+    const glm::ivec3& cells, int stride, const SurfaceNetsSeams& seams,
     std::vector<Mesh::Vertex>& vertices, std::vector<uint32_t>& indices);
 // The whole volume at full detail, no skirts.
 void MeshSurfaceNets(const TerrainVolume& volume,

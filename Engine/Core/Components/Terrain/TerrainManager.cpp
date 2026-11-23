@@ -116,6 +116,16 @@ bool TerrainManager::UsesCompactCellVertices() const
     return !m_editorStreaming && (forced >= 0 ? forced == 1 : compactCellVertices);
 }
 
+bool TerrainManager::UsesVolumeCells() const
+{
+    static const int forced = []
+    {
+        const char* setting = std::getenv("ENGINE_VOLUME_TERRAIN");
+        return setting ? (setting[0] == '0' ? 0 : 1) : -1;
+    }();
+    return !m_editorStreaming && (forced >= 0 ? forced == 1 : volumeCells);
+}
+
 void TerrainManager::SetTerrainStampMaterials(std::vector<std::string> materials)
 {
     if (materials == m_stampMaterials) return;

@@ -3,6 +3,8 @@
 #include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Components/Terrain/TerrainBatchAppearance.h"
+#include "Core/Components/Terrain/Terrain.h"
+#include "Core/Components/Terrain/VolumeTerrain.h"
 #include "Core/Components/Camera/Camera.h"
 #include "Core/Components/Mesh/Mesh.h"
 #include "Core/Components/Materials/Material.h"
@@ -17,8 +19,10 @@
 #include <filesystem>
 #include <fstream>
 #include <type_traits>
+#include <glm/gtc/matrix_transform.hpp>
 #include <chrono>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <limits>
 #include <optional>
@@ -27,8 +31,140 @@
 
 namespace Engine::Components
 {
+bool TerrainManager::NeighbourHeights(Cell cell, std::vector<float>& heights) const
+{
+    const size_t expected = static_cast<size_t>(cellsX + 1) * (cellsY + 1);
+    if (const auto* loaded = GetLoadedCell(cell.first, cell.second);
+        loaded && loaded->heights.size() == expected)
+    {
+        heights = loaded->heights;
+        return true;
+    }
+    heights.clear();
+    const auto* scene = Owner ? Owner->GetScene() : nullptr;
+    bool read = false;
+    if (scene && scene->HasStarted() && requireRuntimeBake)
+        read = ReadBakedCellHeights(cell, heights);
+    else if (!m_farHeightArchivePath.empty())
+        read = TerrainHeightArchive::ReadCell(m_farHeightArchivePath, m_farSourceSignature,
+            m_farHalfExtentCells, cellsX, cellsY, cell.first, cell.second, heights);
+    return read && heights.size() == expected;
+}
+
+std::string TerrainManager::GetVolumeEditFilePath(Cell cell) const
+{
+    return cellDataDirectory.empty() ? std::string{} :
+        (std::filesystem::path(cellDataDirectory) /
+            (std::to_string(cell.first) + "_" + std::to_string(cell.second) + ".volumeedit")).string();
+}
+
+const std::vector<TerrainVolumeEdit>& TerrainManager::GetVolumeEdits(Cell cell) const
+{
+    auto [it, inserted] = m_volumeEdits.try_emplace(cell);
+    if (inserted)
+        if (const auto path = GetVolumeEditFilePath(cell); !path.empty() &&
+            !LoadTerrainVolumeEdits(path, it->second))
+            std::fprintf(stderr, "[TerrainManager] malformed volume edits: %s\n", path.c_str());
+    return it->second;
+}
+
+void TerrainManager::FeedVolumeNeighbours(Cell cell, VolumeTerrain& volume) const
+{
+    const double spanX = static_cast<double>(cellsX) * cellWidth;
+    const double spanZ = static_cast<double>(cellsY) * cellDepth;
+    volume.neighbourStamps.clear();
+    volume.edits = GetVolumeEdits(cell);
+    for (int dz = -1; dz <= 1; ++dz)
+        for (int dx = -1; dx <= 1; ++dx)
+        {
+            auto& heights = volume.neighbourHeights[size_t((dz + 1) * 3 + dx + 1)];
+            heights.clear();
+            if (!dx && !dz) continue;
+            const Cell neighbour{cell.first + dx, cell.second + dz};
+            NeighbourHeights(neighbour, heights);
+            const glm::vec3 offset(float(dx * spanX), 0.f, float(dz * spanZ));
+            for (const auto& edit : GetVolumeEdits(neighbour))
+                volume.edits.push_back(edit.Shifted(offset));
+            // Their stamps' rock and their sculpts can reach across the
+            // shared edge.
+            if (!m_stampProvider) continue;
+            const glm::mat4 shift = glm::translate(glm::mat4(1.f), offset);
+            for (auto instance : m_stampProvider(neighbour))
+            {
+                if (!instance.stamp && !instance.sculpt) continue;
+                instance.transform = shift * instance.transform;
+                volume.neighbourStamps.push_back(std::move(instance));
+            }
+        }
+}
+
+bool TerrainManager::AddVolumeEdit(const TerrainVolumeEdit& edit)
+{
+    const double spanX = static_cast<double>(cellsX) * cellWidth;
+    const double spanZ = static_cast<double>(cellsY) * cellDepth;
+    if (spanX <= 0 || spanZ <= 0) return false;
+    const glm::vec3 low = edit.Minimum(), high = edit.Maximum();
+    // Only the owner's neighbours read it, so it must not reach past them.
+    if (high.x - low.x >= spanX || high.z - low.z >= spanZ) return false;
+    const glm::vec3 centre = (low + high) * .5f;
+    const Cell owner{static_cast<int>(std::floor(centre.x / spanX)),
+        static_cast<int>(std::floor(centre.z / spanZ))};
+    const glm::vec3 origin(float(owner.first * spanX), 0.f, float(owner.second * spanZ));
+    auto edits = GetVolumeEdits(owner);
+    edits.push_back(edit.Shifted(-origin));
+    const auto path = GetVolumeEditFilePath(owner);
+    if (path.empty()) return false;
+    std::error_code error;
+    std::filesystem::create_directories(std::filesystem::path(path).parent_path(), error);
+    if (!SaveTerrainVolumeEdits(path, edits)) return false;
+    m_volumeEdits[owner] = std::move(edits);
+    // Rebuild the loaded volume cells it reaches (their margins included).
+    const float margin = 9.f * std::max(volumeSampleSpacing, .25f);
+    for (int dz = -1; dz <= 1; ++dz)
+        for (int dx = -1; dx <= 1; ++dx)
+        {
+            const Cell cell{owner.first + dx, owner.second + dz};
+            const float x0 = float(cell.first * spanX) - margin, x1 = float((cell.first + 1) * spanX) + margin;
+            const float z0 = float(cell.second * spanZ) - margin, z1 = float((cell.second + 1) * spanZ) + margin;
+            if (high.x < x0 || low.x > x1 || high.z < z0 || low.z > z1) continue;
+            const auto* terrain = GetLoadedCell(cell.first, cell.second);
+            auto* volume = terrain && terrain->Owner ? terrain->Owner->GetComponent<VolumeTerrain>() : nullptr;
+            if (!volume || !volume->fromTerrain) continue;
+            FeedVolumeNeighbours(cell, *volume);
+            volume->Refresh();
+        }
+    return true;
+}
+
 void TerrainManager::ConfigureCellPhysics(Engine::Core::Object& object) const
 {
+    // Volume cells: a finished cell (heights, stamps, stitched borders) is
+    // drawn and collided by a volume built from it; no grid collider.
+    const auto* cellTerrain = object.GetComponent<Terrain>();
+    if (UsesVolumeCells() && cellTerrain)
+    {
+        auto* volume = object.GetComponent<VolumeTerrain>();
+        if (!volume)
+        {
+            volume = object.AddComponent<VolumeTerrain>();
+            volume->fromTerrain = true;
+            volume->steepLayer = volumeSteepLayer;
+            volume->sampleSpacing = volumeSampleSpacing;
+            const double spanX = static_cast<double>(cellsX) * cellWidth;
+            const double spanZ = static_cast<double>(cellsY) * cellDepth;
+            const glm::dvec3 origin = object.transform.position;
+            const Cell cell{static_cast<int>(std::lround(origin.x / spanX)),
+                static_cast<int>(std::lround(origin.z / spanZ))};
+            // Cells of this grid join into one sheet (VolumeTerrain seams).
+            volume->group = this;
+            volume->cellX = cell.first;
+            volume->cellZ = cell.second;
+            FeedVolumeNeighbours(cell, *volume);
+            if (!generateColliders) volume->collisionDistance = 0.f;
+            volume->Rebuild();
+        }
+        return;
+    }
     if (!generateColliders) return;
     auto* mesh = object.GetComponent<Mesh>();
     if (!mesh || mesh->GetVertexCount() == 0u) return;

@@ -701,7 +701,101 @@ merged into main, worktrees removed; their comparison images are in `.local/agen
                   tall terrain. The density is still loaded whole; streaming it from disk is stage 3.
             - [ ] Chunks draw one by one (256 draws for the 512 m world); batch them for the landscape.
             - [ ] Editor: chunks appear only once `Update` runs (game mode); no editing tools yet.
-            - [ ] Stage 3: the landscape on volumes (archive -> density, far terrain, placement, grass).
+            - [ ] Stage 3: the landscape on volumes. A cell keeps its `Terrain` as data (heights, paint,
+                  stamps, queries: placement, grass and paths keep working); a `VolumeTerrain` beside it
+                  draws and collides. Far tiles stay height meshes (an LOD stand-in).
+                  - [x] 3a (2026-11-23): `BuildTerrainVolume` (TerrainVolumeBuild.cpp), the C++ twin of
+                        tools/terrain_volume.py: ground (height - y) x normal.y smooth-unioned with the stamps
+                        as rock (hash-grid nearest point, 2 m reach; skipped where the ground is deeper than
+                        the rock can reach); only chunks near the surface or rock are computed.
+                        `VolumeTerrain.fromTerrain`: builds on a worker from a copy of the terrain's data,
+                        shades with the terrain's own layers (painted weights on gentle ground, `steepLayer`
+                        on steep faces) and hides the terrain's mesh, stamp patches included.
+                        `build_stamp_test_scene.py --volume`. Matches the offline volume (33.5 k vs 32.8 k
+                        triangles at Corner; `.local/stamps/t3a/cmp.png`); the block's top is solid and runs
+                        into the rim (`.local/stamps/t3b/rim.png`). The first build sampled heights with the
+                        cell's span instead of the grid spacing (SampleTerrainSurface takes the spacing):
+                        flat ground, only the stamps' rock, a hollow ring. Startup 6.4 s with a 6 m rock
+                        search on the main thread -> 1.9 s (as a prebuilt volume).
+                  - [x] 3b (2026-11-23): `TerrainManager.volumeCells` / `ENGINE_VOLUME_TERRAIN=1`:
+                        `ConfigureCellPhysics` gives each finished loaded cell a fromTerrain `VolumeTerrain`
+                        (`volumeSteepLayer` 4 = rock, `volumeSampleSpacing` 2 m: the heights are a 4 m grid)
+                        instead of its grid collider, sculpted cells included (below). Density builds (2 at once) and chunk meshing (half the cores, up to
+                        6) are capped across all volumes. The cell's mesh hands over only once every chunk
+                        the camera wants is shown (hiding it at build start left cells invisible for 4-7 s).
+                        `ENGINE_VOLUME_TERRAIN_LOG=1` prints each cell's handover time, chunks, triangles.
+                        Fixed on the way: chunks parented with MoveObject kept their world origin (the test
+                        cell sat at the origin, the landscape's do not); SetParentLocal. Cells' volumes now
+                        run one sample past their edges (surface nets stops half a sample short: blue slots
+                        between cells and against far tiles, `.local/landscape/trim6/gaps.png`).
+                        Trimmed landscape (`.local/landscape/landscape_trim.scene`: loaded radius 1, far and
+                        far-object radius 4; first run rebuilt the cell cache past 8 GB, later runs 3.4-4.2
+                        GB). Cliffs (cell -7,15): height terrain 43.7 ms frame, terrain GPU 14.2 ms; volume
+                        cells 20.9 ms, 5.1 ms; nine cells ready in 1.0-1.8 s each, 0.9-1.6 MB density.
+                        Escarpment view: 28.5 ms. A height-terrain Escarpment baseline hung (the known DX12
+                        hang) and outlived the watchdog for an hour; the runner now force-kills the tree.
+                  - [x] Rock look (2026-11-23): steep faces take the sculpts' scanned rock
+                        (`rockMaterial`, cliff_rock.material) as a layer-array slice after the painted
+                        layers, projected from three sides (the sculpt shader path, `uvChannels[4]`), not the
+                        dark rock paint layer (`.local/landscape/trim4/cliffs.png` -> `trim13/cmp.png`).
+                  - [x] Escarpment conversion (2026-11-23): sculpted cells (-1..1, -6) build their volume
+                        from the sculpt's finest triangles (distance to the nearest triangle, sign by vertical
+                        ray parity), queries clamped inside the cell. Holes along the cell borders came from
+                        coarse levels reading past the cell's edge: the volume now carries a 9-sample margin
+                        and chunks mesh only the interior (`TerrainVolume.interiorFirst/Cells`); neighbours'
+                        stamps are passed in (`neighbourStamps`); skirts are off. No gaps left
+                        (`.local/landscape/trim13/cmp.png`, top: height path / volume). Escarpment 26.2 ms,
+                        sculpt cells ready in 4-6 s; Cliffs 24.6 ms. The black shards at Cliffs are in the
+                        height-path baseline too (crag/ledge prefab objects), not the volume.
+                  - [ ] Full landscape (loaded radius 3) not run yet; walks not run.
+                  - [x] 3c (2026-11-23): seams and edit storage.
+                        Seams: the volume's margin now holds the real ground past the cell's edge
+                        (`TerrainVolumeInput.neighbourHeights`, loaded cells' or the height archive's, via
+                        `TerrainManager::FeedVolumeNeighbours`; cells built before the archive is known are
+                        rebuilt when it arrives) and the neighbours' sculpts (`sculpts`, used inside each
+                        sculpted cell's footprint instead of clamping queries to the cell). The grid's bottom
+                        sits on a multiple of 8 samples, so every cell samples one world lattice: before, each
+                        cell's own lowest point set it and neighbours' coarse vertices missed each other.
+                        `.local/tests/TerrainVolumeTests.cpp` (target TerrainVolumeTests) checks that two
+                        neighbours mesh identical vertices along their edge at strides 1, 4 and 8. Against
+                        the far tiles: the thin dark slits along the escarpment's top edge (row -6 against
+                        far row -7) are shorter than before and on a par with the height path, which has them
+                        too (`.local/landscape/trim17/low_cmp.png`: height, volume before, volume now).
+                        Volume chunks also take their cell's ground-cover tint now (draw preparation read it
+                        from a Terrain on the drawn object only): the meadow under the escarpment was lime
+                        instead of grass-shaded (`trim17/aerial_cmp.png`).
+                        Edits: `TerrainVolumeEdit` (sphere, capsule, box with yaw and rounding; add or
+                        subtract, smooth blend), per cell in `<cellDataDirectory>/<x>_<z>.volumeedit` (text, cell
+                        space, applied in order after ground and stamps). An edit belongs to the cell holding
+                        its centre and must be under a cell across; the eight neighbours read it, so it can
+                        cross a border. `TerrainManager::AddVolumeEdit` saves and rebuilds the cells it reaches
+                        (`VolumeTerrain::Refresh`: the old chunks draw until the new ones are ready).
+                        `VolumeTerrain.editFile` for standalone cells; `tools/build_stamp_test_scene.py
+                        --volume --edits FILE`. Seen: a tunnel through the test block, a crater, an arch
+                        (`.local/stamps/edits/`), and a shaft and a tunnel across the -1/0 border of the
+                        escarpment with no step at the border (`.local/landscape/trim18/zoom.png`; test data
+                        in `.local/landscape/data`, the real landscape has no edits).
+                        Not covered: far tiles, the height archive and height queries (placement, grass,
+                        trees, brushes) keep the height field, so trees and grass stand over a carved hole;
+                        no editor tool yet calls AddVolumeEdit.
+                  - [ ] One continuous layer (asked 2026-11-23: no two surfaces on top of each other, only
+                        the one sheet changing shape). Checked by TerrainVolumeTests (ContinuousLayer: vertical
+                        lines through two neighbouring cells must cross the surface an odd number of times;
+                        edges shared by exactly two triangles). Exact tiling at one level passes everywhere,
+                        across the cell border and through an arch and an overhanging shelf. The shipped
+                        meshing does not: chunks overlap by one coarse cell to hide the cracks between levels,
+                        so the overlap bands hold two layers (4676 of 7812 test columns at 8-cell chunks, 2047
+                        edges in 3+ triangles); exact tiling at mixed levels leaves holes (934) instead.
+                        Fix: stitch levels as octree dual contouring does: tile chunks exactly, and give each
+                        edge between chunks of different levels to the finest chunk around it, which joins
+                        its own vertices to the coarser neighbours' (their cells' vertices, computed at their
+                        level). Needs each chunk's neighbours' levels (across cells too, via TerrainManager),
+                        and remeshing a chunk's neighbours when its level changes.
+                  - [ ] 3d, cleanup once the landscape runs on volumes: keep the stamp shapes and
+                        placements (`.stamp`, `world.cliffs`; the volume's rock), delete the patch drawing
+                        (`AppendStampGeometry`, `DisplacedStampInset`), far stamp cells, stamp proxy prefabs,
+                        the sculpts (`cliff_sculpt.py`, `.sculpt`), the ground-conform lifts and the
+                        displacement experiment.
             - [ ] Phase 3: the height archive and cell caches carry offsets (`SaveCache`/`LoadCacheRange` build
                   positions from heights only; caches must key on offsets); far tiles; matching offsets on
                   shared cell borders.

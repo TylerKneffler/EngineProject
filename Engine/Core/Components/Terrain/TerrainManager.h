@@ -3,6 +3,7 @@
 #include "Core/Components/Terrain/Terrain.h"
 #include "Core/Components/Terrain/TerrainObjectLayer.h"
 #include "Core/Components/Terrain/TerrainHeightArchive.h"
+#include "Core/Components/Terrain/TerrainVolumeBuild.h"
 #include "Core/Components/Physics/MeshObjectCollider.h"
 #include <climits>
 #include <map>
@@ -29,6 +30,7 @@ namespace Engine::Components
 {
 class Camera;
 class TerrainObjectLayer;
+class VolumeTerrain;
 class TerrainManager final : public Engine::Core::Component
 {
 public:
@@ -92,6 +94,32 @@ public:
     // compactCellVertices for game streaming; ENGINE_COMPACT_TERRAIN=0/1
     // overrides it for A/B runs.
     bool UsesCompactCellVertices() const;
+    // Volume terrain (stage 3, .md/todo.md): loaded cells are drawn and
+    // collided as density volumes built from them (VolumeTerrain fromTerrain:
+    // their heights and stamps), shaded with their paint and
+    // `volumeSteepLayer` on steep faces. The cell's Terrain stays for heights,
+    // paint and placement; its own mesh, stamp patches and grid collider go.
+    // Far tiles keep the height field. ENGINE_VOLUME_TERRAIN=0/1 overrides.
+    bool volumeCells = false;
+    int volumeSteepLayer = 4;
+    // Metres between volume samples. The heights are a 4 m grid, so 2 m
+    // keeps the stamps' rock and costs an eighth of 1 m (and ~a quarter of
+    // the triangles).
+    float volumeSampleSpacing = 2.f;
+    bool UsesVolumeCells() const;
+    // Volume edits (caves, arches; TerrainVolumeEdit), kept per cell in
+    // <cellDataDirectory>/<x>_<z>.volumeedit in the cell's space, read when
+    // the cell's volume is built (with its neighbours', which may reach
+    // across). They show on volume cells only: far tiles and height queries
+    // (placement, grass) keep the height field.
+    const std::vector<TerrainVolumeEdit>& GetVolumeEdits(Cell cell) const;
+    // Adds an edit given in the grid's space to the cell holding its centre,
+    // saves that cell's file, and rebuilds the loaded volume cells it
+    // reaches (their current chunks draw until the new ones are ready).
+    // False when the file cannot be written; an edit a cell or more across
+    // is refused.
+    bool AddVolumeEdit(const TerrainVolumeEdit& edit);
+    std::string GetVolumeEditFilePath(Cell cell) const;
     // Project layer for far object blocks (see Rendering::DetailBudget).
     std::string farObjectProjectLayer = "Trees";
     // Far forest clusters: far blocks beyond farClusterDistance (metres from
@@ -509,6 +537,13 @@ private:
     mutable std::set<Cell> m_dirtyProceduralEdits;
     std::function<void(Cell, Terrain&)> m_proceduralBuilder;
     TerrainStampProvider m_stampProvider;
+    // Volume edits read so far, per cell (GetVolumeEdits).
+    mutable std::map<Cell, std::vector<TerrainVolumeEdit>> m_volumeEdits;
+    // A cell's heights for a neighbouring volume: loaded, else baked or the
+    // height archive (as far seams read them). False when unknown.
+    bool NeighbourHeights(Cell cell, std::vector<float>& heights) const;
+    // Hands a volume cell its neighbours' heights, stamps, sculpts and edits.
+    void FeedVolumeNeighbours(Cell cell, VolumeTerrain& volume) const;
     std::vector<std::string> m_stampMaterials;    ObjectLayerGenerator m_objectLayerGenerator;
     ObjectLayerSetup m_objectLayerSetup;
 

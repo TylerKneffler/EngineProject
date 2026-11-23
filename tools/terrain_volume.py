@@ -284,11 +284,15 @@ def main():
     density, origin, heights = build_density(args.spacing, edits=not args.no_edits, size=args.size)
     name = args.name or ("volume_test" + ("_plain" if args.no_edits else "") +
                          (f"_{int(args.size)}" if args.size > 128 else ""))
-    path = VOLUMES / f"{name}.volume"
-    uniform, chunks = write_volume(path, density, args.spacing, origin)
     output = args.output.resolve()
+    # A scene outside the assets (a test variant under .local) keeps its
+    # volume beside it, referenced by absolute path; asset scenes use Assets/.
+    in_assets = ASSETS in output.parents
+    path = (VOLUMES if in_assets else output.parent) / f"{name}.volume"
+    reference = f"Assets/TerrainData/Volumes/{name}.volume" if in_assets else path.as_posix()
+    uniform, chunks = write_volume(path, density, args.spacing, origin)
     extent = (heights.shape[0] - 1) * stamp_test.SPACING
-    build_scene(f"Assets/TerrainData/Volumes/{name}.volume", heights, output, extent)
+    build_scene(reference, heights, output, extent)
     ny, nz, nx = density.shape
     print(f"{path.relative_to(ROOT)}: {nx}x{ny}x{nz} samples at {args.spacing:g} m, "
           f"{uniform}/{chunks} chunks uniform, {path.stat().st_size / 1e6:.1f} MB "

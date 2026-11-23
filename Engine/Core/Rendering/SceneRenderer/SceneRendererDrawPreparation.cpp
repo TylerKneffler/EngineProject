@@ -445,10 +445,13 @@ void SceneRendererDrawPreparation::PrepareTerrainMaterial(
                 objectData.terrainMacroColors[layer].w = std::max(material->heightScale, 0.f);
     }
 
-    // Ground cover colours tint the ground under and beyond the cover.
-    if (terrain && terrain->groundCover.strength > 0.f && terrain->groundCover.layerMask)
+    // Ground cover colours tint the ground under and beyond the cover. A
+    // volume chunk (a batch under its cell) takes its cell's cover.
+    const auto* coverTerrain = terrain ? terrain
+        : object->Parent ? object->Parent->GetComponent<Engine::Components::Terrain>() : nullptr;
+    if (coverTerrain && coverTerrain->groundCover.strength > 0.f && coverTerrain->groundCover.layerMask)
     {
-        const auto& cover = terrain->groundCover;
+        const auto& cover = coverTerrain->groundCover;
         objectData.groundCoverColor = glm::vec4(cover.color, std::clamp(cover.strength, 0.f, 1.f));
         objectData.groundCoverRange = glm::vec4(cover.fadeStart, cover.fadeEnd,
             static_cast<float>(cover.layerMask & 63u), std::clamp(cover.rootShade, 0.f, 1.f));

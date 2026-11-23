@@ -126,6 +126,10 @@ def main():
     parser.add_argument("--output", type=Path, default=OUTPUT)
     parser.add_argument("--displace", action="store_true",
                         help="drape the grid over the stamps (terrain_stamp_morph.displace)")
+    parser.add_argument("--volume", action="store_true",
+                        help="draw the cell as a density volume built from it (VolumeTerrain fromTerrain)")
+    parser.add_argument("--edits", type=Path, metavar="VOLUMEEDIT",
+                        help="with --volume: shapes added and carved (a .volumeedit file, VolumeTerrain.editFile)")
     parser.add_argument("--no-stamps", action="store_true",
                         help="leave the stamps' patches out (shows the terrain alone)")
     parser.add_argument("--undercut", type=float, default=0.0, metavar="METRES",
@@ -190,6 +194,14 @@ def main():
             "material": f"Assets/TerrainData/Stamps/{name}.material"})
         # Column-major, as glm stores it.
         item.append(grass.numbers("transform", matrix.T.ravel()))
+    if args.volume:
+        # Volume terrain stage 3: the cell (heights and stamps) drawn as a
+        # density volume built at load; the terrain's own mesh is hidden.
+        cell.find("components").append(grass.component("VolumeTerrain", "VolumeTerrain", {
+            "fromTerrain": "true", "steepLayer": ROCK_LAYER, "chunkCells": 32,
+            "lod1Distance": 64, "lod2Distance": 128, "lod3Distance": 256,
+            "drawDistance": 700, "collisionDistance": 96,
+            **({"editFile": args.edits.resolve().as_posix()} if args.edits else {})}))
 
     def at(x, z):
         return float(morph.sample(heights, SPACING, (0.0, 0.0), x, z))

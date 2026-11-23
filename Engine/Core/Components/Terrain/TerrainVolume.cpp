@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <array>
+#include <climits>
+#include <tuple>
 #include <cmath>
 #include <cstring>
 #include <fstream>
@@ -285,6 +287,325 @@ void MeshSurfaceNets(const TerrainVolume& volume, const glm::ivec3& first,
             // b -> a, so it is wound the same way round.
             indices.insert(indices.end(), {b, a, la, b, la, lb});
         }
+}
+
+namespace
+{
+int FloorDiv(int a, int b) { return a >= 0 ? a / b : -((-a + b - 1) / b); }
+
+// A surface nets cell's vertex: the mean of its edge crossings. `g` is the
+// cell's low corner (global sample), `stride` its size in samples. False
+// when the surface does not pass through it or it leaves the grid.
+template <class Density>
+bool NetsVertex(const TerrainVolume& volume, const Density& density, const glm::ivec3& g, int stride,
+    glm::vec3& position)
+{
+    const glm::ivec3 size(volume.sizeX, volume.sizeY, volume.sizeZ);
+    if (glm::any(glm::lessThan(g, glm::ivec3(0))) ||
+        glm::any(glm::greaterThanEqual(g + stride, size))) return false;
+    constexpr std::array<std::array<int, 3>, 8> Corners{{
+        {0, 0, 0}, {1, 0, 0}, {0, 1, 0}, {1, 1, 0}, {0, 0, 1}, {1, 0, 1}, {0, 1, 1}, {1, 1, 1}}};
+    constexpr std::array<std::array<int, 2>, 12> Edges{{
+        {0, 1}, {2, 3}, {4, 5}, {6, 7}, {0, 2}, {1, 3}, {4, 6}, {5, 7}, {0, 4}, {1, 5}, {2, 6}, {3, 7}}};
+    std::array<float, 8> d;
+    int solid = 0;
+    for (int c = 0; c < 8; ++c)
+    {
+        d[c] = density(g + glm::ivec3(Corners[c][0], Corners[c][1], Corners[c][2]) * stride);
+        solid += d[c] > 0.f;
+    }
+    if (solid == 0 || solid == 8) return false;
+    glm::vec3 sum(0.f);
+    int crossings = 0;
+    for (const auto& edge : Edges)
+    {
+        const float a = d[edge[0]], b = d[edge[1]];
+        if ((a > 0.f) == (b > 0.f)) continue;
+        const float t = a / (a - b);
+        const glm::vec3 pa(Corners[edge[0]][0], Corners[edge[0]][1], Corners[edge[0]][2]);
+        const glm::vec3 pb(Corners[edge[1]][0], Corners[edge[1]][1], Corners[edge[1]][2]);
+        sum += pa + (pb - pa) * t;
+        ++crossings;
+    }
+    position = volume.origin + (glm::vec3(g) + sum / static_cast<float>(crossings) * static_cast<float>(stride)) *
+        volume.spacing;
+    return true;
+}
+}
+
+void MeshSurfaceNets(const TerrainVolume& volume, const glm::ivec3& first, const glm::ivec3& cells, int stride,
+    const SurfaceNetsSeams& seams, std::vector<Mesh::Vertex>& vertices, std::vector<uint32_t>& indices)
+{
+    vertices.clear();
+    indices.clear();
+    stride = std::max(stride, 1);
+    // Blocks must be two cells across or more: a block one cell thick puts
+    // cells beside this block on its far face, whose neighbours this block
+    // cannot see (they decide whether the sheet ends there).
+    if (cells.x < 2 || cells.y < 2 || cells.z < 2) return;
+    const glm::ivec3 size(volume.sizeX, volume.sizeY, volume.sizeZ);
+    const auto inside = [&](const glm::ivec3& g) { return glm::all(glm::greaterThanEqual(g, glm::ivec3(0))) &&
+        glm::all(glm::lessThan(g, size)); };
+    const auto global = [&](int i, int j, int k) { return first + glm::ivec3(i, j, k) * stride; };
+    // Which block a cell lies in (-1, 0, 1 per axis) and that block's level.
+    const auto offsetOf = [&](int i, int j, int k)
+    {
+        return glm::ivec3(i < 0 ? -1 : i >= cells.x ? 1 : 0, j < 0 ? -1 : j >= cells.y ? 1 : 0,
+            k < 0 ? -1 : k >= cells.z ? 1 : 0);
+    };
+    const auto neighbour = [&](const glm::ivec3& o)
+    {
+        if (o == glm::ivec3(0)) return stride;
+        return seams.strides[size_t((o.y + 1) * 9 + (o.z + 1) * 3 + (o.x + 1))];
+    };
+    // Samples on the faces of a coarser block read that block's lattice
+    // (trilinear between its samples), so both sides of a face see the same
+    // surface: where a finer level saw rock the coarser one cannot (a fin
+    // thinner than a coarse cell), its seam had nothing to join to and left a
+    // hole. Away from coarser blocks samples are the volume's own.
+    const glm::ivec3 blockSize = cells * stride;
+    const auto raw = [&](const glm::ivec3& g)
+    {
+        if (seams.cellSamples.x > 0 && seams.cellSamples.y > 0)
+        {
+            const int cx = FloorDiv(g.x - seams.alignment.x, seams.cellSamples.x);
+            const int cz = FloorDiv(g.z - seams.alignment.z, seams.cellSamples.y);
+            if ((cx || cz) && std::abs(cx) <= 1 && std::abs(cz) <= 1)
+                if (const TerrainVolume* other = seams.cellVolumes[size_t((cz + 1) * 3 + cx + 1)])
+                {
+                    const int dy = static_cast<int>(std::lround((volume.origin.y - other->origin.y) / volume.spacing));
+                    return other->At(g.x - cx * seams.cellSamples.x, g.y + dy, g.z - cz * seams.cellSamples.y);
+                }
+        }
+        return volume.At(g.x, g.y, g.z);
+    };
+    const auto density = [&](const glm::ivec3& g) -> float
+    {
+        // The blocks touching g, per axis (two on a face between blocks).
+        int range[3][2];
+        for (int axis = 0; axis < 3; ++axis)
+        {
+            const int rel = g[axis] - first[axis];
+            const int b = FloorDiv(rel, blockSize[axis]);
+            range[axis][0] = rel == b * blockSize[axis] ? b - 1 : b;
+            range[axis][1] = b;
+        }
+        int coarsest = 0;
+        for (int y = range[1][0]; y <= range[1][1]; ++y)
+            for (int z = range[2][0]; z <= range[2][1]; ++z)
+                for (int x = range[0][0]; x <= range[0][1]; ++x)
+                {
+                    if (std::abs(x) > 1 || std::abs(y) > 1 || std::abs(z) > 1) continue;
+                    coarsest = std::max(coarsest, neighbour(glm::ivec3(x, y, z)));
+                }
+        if (coarsest <= 1) return raw(g);
+        const glm::ivec3 a = g - seams.alignment;
+        const glm::ivec3 base = glm::ivec3(FloorDiv(a.x, coarsest), FloorDiv(a.y, coarsest), FloorDiv(a.z, coarsest)) *
+            coarsest;
+        if (base == a) return raw(g);
+        const glm::vec3 t = glm::vec3(a - base) / static_cast<float>(coarsest);
+        const glm::ivec3 b = seams.alignment + base;
+        float result = 0.f;
+        for (int corner = 0; corner < 8; ++corner)
+        {
+            const int dx = corner & 1, dy = (corner >> 1) & 1, dz = (corner >> 2) & 1;
+            const float w = (dx ? t.x : 1.f - t.x) * (dy ? t.y : 1.f - t.y) * (dz ? t.z : 1.f - t.z);
+            if (w > 0.f) result += w * raw(b + glm::ivec3(dx, dy, dz) * coarsest);
+        }
+        return result;
+    };
+    // The block's faces (object space), for clipping toward missing blocks.
+    const glm::vec3 low = volume.origin + glm::vec3(first) * volume.spacing;
+    const glm::vec3 high = volume.origin + glm::vec3(first + cells * stride) * volume.spacing;
+
+    const auto addVertex = [&](const glm::vec3& position, float cellSize)
+    {
+        const float h = cellSize * .5f;
+        const glm::vec3 gradient(
+            volume.Sample(position + glm::vec3(h, 0.f, 0.f)) - volume.Sample(position - glm::vec3(h, 0.f, 0.f)),
+            volume.Sample(position + glm::vec3(0.f, h, 0.f)) - volume.Sample(position - glm::vec3(0.f, h, 0.f)),
+            volume.Sample(position + glm::vec3(0.f, 0.f, h)) - volume.Sample(position - glm::vec3(0.f, 0.f, h)));
+        const glm::vec3 normal = glm::dot(gradient, gradient) > 1.e-12f
+            ? -glm::normalize(gradient) : glm::vec3(0.f, 1.f, 0.f);
+        Mesh::Vertex vertex{};
+        vertex.pos[0] = position.x; vertex.pos[1] = position.y; vertex.pos[2] = position.z;
+        vertex.normal[0] = normal.x; vertex.normal[1] = normal.y; vertex.normal[2] = normal.z;
+        vertex.uv[0] = position.x; vertex.uv[1] = position.z;
+        vertex.color[0] = vertex.color[1] = vertex.color[2] = vertex.color[3] = 1.f;
+        vertices.push_back(vertex);
+        return static_cast<uint32_t>(vertices.size() - 1);
+    };
+
+    // Cells -1 .. cells on every axis: the block's own, and the layer around
+    // it that seams join to.
+    const glm::ivec3 span = cells + 2;
+    const auto slot = [&](int i, int j, int k)
+    { return (static_cast<size_t>(j + 1) * span.z + (k + 1)) * span.x + (i + 1); };
+    std::vector<uint32_t> cellVertex(static_cast<size_t>(span.x) * span.y * span.z, UINT32_MAX);
+    // A coarser neighbour's cells, by their low corner (and the faces they
+    // were clipped to), shared by every one of this block's cells inside them.
+    std::map<std::tuple<int, int, int>, uint32_t> coarse;
+    // A cell (low corner g, `size` samples) of block `o` that is the last
+    // before a missing block along an axis has its vertex moved onto that
+    // face: the sheet ends exactly on the border, and every block that uses
+    // the cell moves it the same way.
+    const auto snapped = [&](const glm::ivec3& o, const glm::ivec3& g, int size, glm::vec3 position)
+    {
+        for (int axis = 0; axis < 3; ++axis)
+        {
+            const int blockLow = first[axis] + o[axis] * blockSize[axis];
+            const int blockHigh = blockLow + blockSize[axis];
+            for (int side : {-1, 1})
+            {
+                const bool atFace = side > 0 ? g[axis] + size >= blockHigh : g[axis] <= blockLow;
+                if (!atFace) continue;
+                glm::ivec3 beyond = o;
+                beyond[axis] += side;
+                if (std::abs(beyond.x) > 1 || std::abs(beyond.y) > 1 || std::abs(beyond.z) > 1) continue;
+                if (neighbour(beyond) > 0) continue;
+                // Only where the surface goes on through that face (not the
+                // air above the top block, say).
+                const int u = (axis + 1) % 3, v = (axis + 2) % 3;
+                glm::ivec3 corner = g;
+                corner[axis] = side > 0 ? g[axis] + size : g[axis];
+                int solid = 0;
+                for (int c = 0; c < 4; ++c)
+                {
+                    glm::ivec3 at = corner;
+                    at[u] += (c & 1) * size;
+                    at[v] += (c >> 1) * size;
+                    solid += density(at) > 0.f;
+                }
+                if (solid == 0 || solid == 4) continue;
+                position[axis] = volume.origin[axis] + static_cast<float>(side > 0 ? blockHigh : blockLow) * volume.spacing;
+            }
+        }
+        return position;
+    };
+    for (int j = -1; j <= cells.y; ++j)
+        for (int k = -1; k <= cells.z; ++k)
+            for (int i = -1; i <= cells.x; ++i)
+            {
+                const glm::ivec3 o = offsetOf(i, j, k);
+                const glm::ivec3 g = global(i, j, k);
+                // A cell in a missing block (past the draw distance, or a cell
+                // that is not a volume) has no vertex: the sheet ends on the
+                // face toward it (snapped, below).
+                const int n = neighbour(o);
+                if (o != glm::ivec3(0) && n <= 0) continue;
+                glm::vec3 position;
+                if (n > stride)
+                {
+                    // The coarser block's own vertex for the cell holding this one.
+                    const glm::ivec3 a = g - seams.alignment;
+                    const glm::ivec3 gc = seams.alignment +
+                        glm::ivec3(FloorDiv(a.x, n), FloorDiv(a.y, n), FloorDiv(a.z, n)) * n;
+                    const auto key = std::make_tuple(gc.x, gc.y, gc.z);
+                    if (const auto found = coarse.find(key); found != coarse.end())
+                    {
+                        cellVertex[slot(i, j, k)] = found->second;
+                        continue;
+                    }
+                    if (NetsVertex(volume, density, gc, n, position))
+                    {
+                        const uint32_t index = addVertex(snapped(o, gc, n, position), volume.spacing * n);
+                        coarse.emplace(key, index);
+                        cellVertex[slot(i, j, k)] = index;
+                        continue;
+                    }
+                    // The coarse cell misses the surface this level finds:
+                    // fall back to this level's vertex.
+                }
+                if (!NetsVertex(volume, density, g, stride, position)) continue;
+                cellVertex[slot(i, j, k)] = addVertex(snapped(o, g, stride, position), volume.spacing * stride);
+            }
+
+    // Faces: a quad across every sign-changing edge this block owns. An edge
+    // belongs to the finest block among the four cells around it (a missing
+    // block never), ties to the block with the highest coordinates (so blocks
+    // of one level each take the edges whose base sample they hold, as
+    // before); the owner joins its cells' vertices, which for coarser
+    // neighbours are their own.
+    const auto owns = [&](const std::array<glm::ivec3, 4>& around)
+    {
+        int bestStride = INT_MAX;
+        glm::ivec3 best(-2);
+        for (const auto& cell : around)
+        {
+            const glm::ivec3 o = offsetOf(cell.x, cell.y, cell.z);
+            const int n = neighbour(o);
+            const int w = n > 0 ? n : INT_MAX;
+            if (w == INT_MAX) continue;
+            const auto rank = std::make_tuple(o.y, o.z, o.x);
+            if (w < bestStride || (w == bestStride && rank > std::make_tuple(best.y, best.z, best.x)))
+            {
+                bestStride = w;
+                best = o;
+            }
+        }
+        return best == glm::ivec3(0);
+    };
+    const auto position = [&](uint32_t index)
+    { return glm::vec3(vertices[index].pos[0], vertices[index].pos[1], vertices[index].pos[2]); };
+    const auto triangle = [&](uint32_t a, uint32_t b, uint32_t c)
+    {
+        if (a == b || b == c || a == c) return;   // collapsed onto a coarse vertex
+        // Flattened onto a face by clipping.
+        const glm::vec3 n = glm::cross(position(b) - position(a), position(c) - position(a));
+        if (glm::dot(n, n) < 1.e-10f) return;
+        indices.insert(indices.end(), {a, b, c});
+    };
+    const auto quad = [&](const std::array<glm::ivec3, 4>& around, const glm::vec3& outward)
+    {
+        if (!owns(around)) return;
+        uint32_t v[4];
+        int missing = -1;
+        for (int c = 0; c < 4; ++c)
+        {
+            v[c] = cellVertex[slot(around[c].x, around[c].y, around[c].z)];
+            if (v[c] != UINT32_MAX) continue;
+            const glm::ivec3 o = offsetOf(around[c].x, around[c].y, around[c].z);
+            // Only a missing block's cell may be left out, and only one: the
+            // corner where the sheet turns along two faces of a missing block.
+            if (missing >= 0 || o == glm::ivec3(0) || neighbour(o) > 0) return;
+            missing = c;
+        }
+        if (missing >= 0)
+        {
+            const uint32_t a = v[(missing + 1) % 4], b = v[(missing + 2) % 4], c = v[(missing + 3) % 4];
+            const glm::vec3 n = glm::cross(position(b) - position(a), position(c) - position(a));
+            if (glm::dot(n, outward) >= 0.f) triangle(a, b, c);
+            else triangle(a, c, b);
+            return;
+        }
+        const glm::vec3 n = glm::cross(position(v[1]) - position(v[0]), position(v[2]) - position(v[0])) +
+            glm::cross(position(v[2]) - position(v[0]), position(v[3]) - position(v[0]));
+        if (glm::dot(n, outward) >= 0.f) { triangle(v[0], v[1], v[2]); triangle(v[0], v[2], v[3]); }
+        else { triangle(v[0], v[2], v[1]); triangle(v[0], v[3], v[2]); }
+    };
+    for (int j = 0; j <= cells.y; ++j)
+        for (int k = 0; k <= cells.z; ++k)
+            for (int i = 0; i <= cells.x; ++i)
+            {
+                const glm::ivec3 g = global(i, j, k);
+                if (!inside(g)) continue;
+                const bool here = density(g) > 0.f;
+                const auto crosses = [&](const glm::ivec3& step)
+                {
+                    const glm::ivec3 next = g + step * stride;
+                    return inside(next) && here != (density(next) > 0.f);
+                };
+                const float sign = here ? 1.f : -1.f;
+                if (crosses({1, 0, 0}))
+                    quad({glm::ivec3(i, j - 1, k - 1), glm::ivec3(i, j, k - 1), glm::ivec3(i, j, k),
+                          glm::ivec3(i, j - 1, k)}, glm::vec3(sign, 0.f, 0.f));
+                if (crosses({0, 1, 0}))
+                    quad({glm::ivec3(i - 1, j, k - 1), glm::ivec3(i, j, k - 1), glm::ivec3(i, j, k),
+                          glm::ivec3(i - 1, j, k)}, glm::vec3(0.f, sign, 0.f));
+                if (crosses({0, 0, 1}))
+                    quad({glm::ivec3(i - 1, j - 1, k), glm::ivec3(i, j - 1, k), glm::ivec3(i, j, k),
+                          glm::ivec3(i - 1, j, k)}, glm::vec3(0.f, 0.f, sign));
+            }
 }
 
 void MeshSurfaceNets(const TerrainVolume& volume,

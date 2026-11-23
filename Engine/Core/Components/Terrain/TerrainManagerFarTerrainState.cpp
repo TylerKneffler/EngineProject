@@ -2,6 +2,7 @@
 #include "TerrainObjectLayer.h"
 #include "Core/Components/Camera/Camera.h"
 #include "Core/Components/Mesh/Mesh.h"
+#include "Core/Components/Terrain/VolumeTerrain.h"
 #include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
 #include <algorithm>
@@ -26,6 +27,19 @@ void TerrainManager::ConfigureFarTerrain(int halfExtentCells,
     m_farSourceSignature = sourceSignature;
     m_farPalette = std::move(palette);
     m_farEnabled = true;
+    // Volume cells built before the archive was known repeated their border
+    // where an unloaded neighbour's heights were missing: build them again.
+    for (const auto& [cell, terrain] : m_loaded)
+    {
+        auto* volume = terrain && terrain->Owner ? terrain->Owner->GetComponent<VolumeTerrain>() : nullptr;
+        if (!volume || !volume->fromTerrain) continue;
+        bool missing = false;
+        for (size_t i = 0; i < volume->neighbourHeights.size(); ++i)
+            missing = missing || (i != 4 && volume->neighbourHeights[i].empty());
+        if (!missing) continue;
+        FeedVolumeNeighbours(cell, *volume);
+        volume->Refresh();
+    }
 }
 
 void TerrainManager::RefreshFarTerrainEditedCells(
