@@ -1,0 +1,72 @@
+<?xml version='1.0' encoding='utf-8'?>
+<Prefab xmlns:components="urn:engine-components" version="1" type="prefab">
+  <object name="Broadleaf_upright_01" enabled="true">
+    <components>
+    </components>
+    <children>
+      <item name="Trunk" enabled="true">
+        <transform>
+          <Transform.position _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.position>
+          <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+          <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+        </transform>
+        <components>
+          <components:Mesh Mesh.file="Assets/Models/Woodland/Broadleaf/Meshes/Broadleaf_upright_01_Trunk_LOD0.mesh" Mesh.foliageWindStrength="0.1" Mesh.foliageWindTree="true" Mesh.useLightProbes="false" Mesh.gpuLodSelection="true" Mesh.gpuLod1Distance="60" Mesh.gpuLod2Distance="220">
+            <Mesh.lodMeshes>
+              <item>Assets/Models/Woodland/Broadleaf/Meshes/Broadleaf_upright_01_Trunk_LOD1.mesh</item>
+              <item>Assets/Models/Woodland/Broadleaf/Meshes/Broadleaf_upright_01_Trunk_LOD2.mesh</item>
+              <item>Assets/Models/Woodland/Broadleaf/Meshes/Broadleaf_upright_01_Impostor.mesh</item>
+            </Mesh.lodMeshes>
+          </components:Mesh>
+          <components:Material Material.materialAsset="Engine/Core/Assets/Models/Woodland/Broadleaf/Materials/Broadleaf_Trunk.material">
+            <Material.lodMaterials>
+              <item _valueType="string" />
+              <item _valueType="string" />
+              <item>Engine/Core/Assets/Models/Woodland/Broadleaf/Materials/Broadleaf_upright_01_Impostor.material</item>
+            </Material.lodMaterials>
+          </components:Material>
+        </components>
+        <children />
+      </item>
+      <item name="Branches" enabled="true">
+        <transform>
+          <Transform.position _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.position>
+          <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+          <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+        </transform>
+        <components>
+          <components:Mesh Mesh.file="Assets/Models/Woodland/Broadleaf/Meshes/Broadleaf_upright_01_Branches_LOD0.mesh" Mesh.foliageWindStrength="0.1" Mesh.foliageWindTree="true" Mesh.useLightProbes="false" Mesh.gpuLodSelection="true" Mesh.gpuLod1Distance="60" Mesh.gpuLod2Distance="220">
+            <Mesh.lodMeshes>
+              <item>Assets/Models/Woodland/Broadleaf/Meshes/Broadleaf_upright_01_Branches_LOD1.mesh</item>
+              <item>Assets/Models/Woodland/Broadleaf/Meshes/Broadleaf_upright_01_Branches_LOD2.mesh</item>
+            </Mesh.lodMeshes>
+          </components:Mesh>
+          <components:Material Material.materialAsset="Engine/Core/Assets/Models/Woodland/Broadleaf/Materials/Broadleaf_Branches.material" />
+        </components>
+        <children />
+      </item>
+      <item name="Leaves" enabled="true">
+        <transform>
+          <Transform.position _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.position>
+          <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+          <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+        </transform>
+        <components>
+          <components:Mesh Mesh.file="Assets/Models/Woodland/Broadleaf/Meshes/Broadleaf_upright_01_Leaves.mesh" Mesh.foliageWindStrength="0.1" Mesh.foliageWindTree="true" Mesh.useLightProbes="false" Mesh.gpuLodSelection="true" Mesh.gpuLod1Distance="60" Mesh.gpuLod2Distance="220">
+            <Mesh.lodMeshes>
+              <item>Assets/Models/Woodland/Broadleaf/Meshes/Broadleaf_upright_01_Leaves.mesh</item>
+              <item>Assets/Models/Woodland/Broadleaf/Meshes/Broadleaf_upright_01_Leaves.mesh</item>
+            </Mesh.lodMeshes>
+          </components:Mesh>
+          <components:Material Material.materialAsset="Engine/Core/Assets/Models/Woodland/Broadleaf/Materials/Broadleaf_Leaves.material" />
+        </components>
+        <children />
+      </item>
+    </children>
+    <transform>
+      <Transform.position _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.position>
+      <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+      <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+    </transform>
+  </object>
+</Prefab>

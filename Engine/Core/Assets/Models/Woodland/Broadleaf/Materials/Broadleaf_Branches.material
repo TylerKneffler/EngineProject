@@ -1,0 +1,17 @@
+{
+    "version": 1,
+    "baseColor": [
+        1,
+        1,
+        1
+    ],
+    "specularModel": "MetallicRoughness",
+    "metallic": 0,
+    "roughness": 0.9,
+    "castsShadows": true,
+    "doubleSided": false,
+    "normalScale": 1.0,
+    "baseColorTexture": "Assets/Models/Woodland/Broadleaf/Textures/Broadleaf_Branches_Color.ktx2",
+    "normalTexture": "Assets/Models/Woodland/Broadleaf/Textures/Broadleaf_Branches_Normal.ktx2",
+    "useVertexColors": false
+}
