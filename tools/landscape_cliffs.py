@@ -9,8 +9,10 @@ the runtime rules here, ported (steep rock below the snow, slope rising behind,
 rock paint, seeds growing along the contour, the same random stream per cell
 and the same shape table), on the play area's 4 m heights, and writes them to
 world.cliffs next to the archive. LandscapeDriver reads them for the cells they
-cover instead of placing cliffs itself. The heights are not changed (stamping
-them into the 4 m height map was tried 2026-11-21: spikes, and no overhangs).
+cover instead of placing cliffs itself. The heights then conform to the
+pieces (conform_heights, tools/terrain_stamp_morph.py): the ground rises to
+each stamp's top edge and into an apron at its foot. Stamping the rock shape
+itself into the 4 m height map was tried 2026-11-21: spikes, and no overhangs.
 
 Cells outside the play area (16 m heights, 2.9 km and more from the start)
 keep runtime placement.
@@ -28,9 +30,9 @@ import math
 import struct
 
 import numpy as np
-from scipy import ndimage
 
 import bake_terrain_stamp
+import terrain_stamp_morph
 
 CLIFFS_MAGIC = int.from_bytes(b"TRNRCLF1", "little")
 # Keep in sync with the scene's LandscapeDriver (waterLevel, rockLine,
@@ -232,15 +234,6 @@ def place_cliffs(fine_q, scale_units, fine_extent, cells, spacing, rock_class):
 
 # --- conforming the heights ----------------------------------------------------
 
-MARGIN = 1.5          # metres the raised ground stays below the rock's surface
-LIFT_LIMIT = 60.0     # most a height sample is raised
-PLATEAU = 6.0         # metres the ground holds the wall's height behind it
-FALLOFF = 1.0         # then falls back to the natural slope (rise per metre)
-APRON_HEIGHT = 3.0    # most the ground is raised at a cliff's foot
-APRON_SHARE = 0.12    # of the rock's height above the ground there
-APRON_REACH = 8.0     # metres the apron fades over
-
-
 def rotation(normal, yaw_degrees):
     """TerrainObjectLayer::SurfaceRotation: up turned onto normal (shortest
     arc), after a yaw about +y."""
@@ -261,89 +254,45 @@ def rotation(normal, yaw_degrees):
 
 
 def conform_heights(fine_q, scale_units, fine_extent, cells, spacing, by_cell):
-    """The terrain conforms to its cliffs (2026-11-21: the ground streamed in
-    flat and the rock appeared on top of it). Most stamps are near-vertical
-    walls set into a slope; seen from above they cover a thin strip with
-    nothing under it to fill, and their top edge stood above the hill behind
-    as a fin. So each wall's top edge is extruded back into the hill: behind
-    the face the ground rises to the wall's top less MARGIN, holds for
-    PLATEAU metres and falls back to the natural slope at FALLOFF. The wall
-    then reads as the front of a terrain shoulder (the far tiles carry it),
-    and its top edge tucks into the raised ground. In front of a face only a
-    low apron rises to its foot. Heights are never raised above any rock
-    surface over them (MARGIN below it) and never lowered; the play area's
-    outer two cells are left alone. Returns the new quantized heights and the
-    samples under rock and apron."""
-    stamps = bake_terrain_stamp.bake_all()
+    """The terrain conforms to its cliffs: tools/terrain_stamp_morph.py lifts
+    the ground behind each stamp's top edge to meet it (no rock fins above the
+    hill) and raises a low apron at its foot, both faded out like a brush, so
+    the ground runs into the rock instead of meeting it at a seam. Heights are
+    never lowered, and the play area's outer two cells are left alone (they
+    blend into the coarse cells). Returns the new quantized heights and the
+    samples under rock and apron (painted rock and scree)."""
     heights = fine_q / scale_units
     rows, cols = heights.shape
     origin = -fine_extent * cells * spacing
-    under = np.full(heights.shape, np.inf)       # lowest rock surface over a sample
-    target = np.full(heights.shape, -np.inf)     # raised ground behind the walls
-    foot = np.zeros(heights.shape)               # wall height above the ground at its foot
-    steps = np.arange(spacing, 120.0, spacing * 0.5)
-
-    def to_grid(x, z):
-        c = np.rint((x - origin) / spacing).astype(np.int64)
-        r = np.rint((z - origin) / spacing).astype(np.int64)
-        ok = (r >= 0) & (c >= 0) & (r < rows) & (c < cols)
-        return r, c, ok
-
+    placements = []
+    under = np.zeros(heights.shape, bool)
     for (cell_x, cell_z), pieces in by_cell.items():
         for shape, (x, y, z), normal, yaw, scale in pieces:
-            stamp = stamps[shape]
-            m = rotation(normal, yaw)
-            offset = np.array([cell_x * cells * spacing + x, y, cell_z * cells * spacing + z])
-            inside = stamp.weight > 0.5
-            world = stamp.position * scale @ m.T + offset
-            r, c, ok = to_grid(world[inside][:, 0], world[inside][:, 2])
-            np.minimum.at(under, (r[ok], c[ok]), world[inside][ok, 1])
-            # The top edge: the highest inside point of each stamp column.
-            heights_up = np.where(inside, world[..., 1], -np.inf)
-            column_top = np.argmax(heights_up, axis=0)
-            has = np.isfinite(heights_up.max(axis=0))
-            tops = world[column_top[has], np.nonzero(has)[0]]
-            if not len(tops):
-                continue
-            outward = m @ stamp.direction
-            flat = np.array([outward[0], outward[2]])
-            if np.linalg.norm(flat) < 1e-3:
-                continue
-            inward = -flat / np.linalg.norm(flat)
-            # Extrude back into the hill: plateau, then the falloff slope.
-            px = tops[:, 0][:, None] + inward[0] * steps[None, :]
-            pz = tops[:, 2][:, None] + inward[1] * steps[None, :]
-            ph = tops[:, 1][:, None] - MARGIN - np.clip(steps[None, :] - PLATEAU, 0.0, None) * FALLOFF
-            r, c, ok = to_grid(px.ravel(), pz.ravel())
-            np.maximum.at(target, (r[ok], c[ok]), ph.ravel()[ok])
-            # Foot height for the apron: wall top above the ground at its base.
-            base_r, base_c, base_ok = to_grid(tops[:, 0], tops[:, 2])
-            rise = tops[:, 1] - heights[np.clip(base_r, 0, rows - 1), np.clip(base_c, 0, cols - 1)]
-            np.maximum.at(foot, (base_r[base_ok], base_c[base_ok]), np.clip(rise[base_ok], 0.0, None))
-    rock = np.isfinite(under)
+            stamp = terrain_stamp_morph.load_stamp(bake_terrain_stamp.SHAPES[shape][0])
+            position = (cell_x * cells * spacing + x, y, cell_z * cells * spacing + z)
+            matrix = terrain_stamp_morph.placement_matrix(position, normal, yaw, scale)
+            placements.append((stamp, matrix))
+            inside = stamp.weight > terrain_stamp_morph.BORDER_WEIGHT
+            world = stamp.position[inside] @ matrix[:3, :3].T + matrix[:3, 3]
+            r = np.rint((world[:, 2] - origin) / spacing).astype(np.int64)
+            c = np.rint((world[:, 0] - origin) / spacing).astype(np.int64)
+            ok = (r >= 0) & (c >= 0) & (r < rows) & (c < cols)
+            under[r[ok], c[ok]] = True
     span = rows - 1
     edge = np.minimum(np.arange(span + 1), span - np.arange(span + 1))
     inner = edge >= 2 * cells
     editable = inner[:, None] & inner[None, :]
-    lift = np.clip(target - heights, 0.0, LIFT_LIMIT)
-    lift = ndimage.gaussian_filter(lift, 0.75)
-    # Never above any rock surface over the sample.
-    lift = np.where(rock, np.minimum(lift, under - MARGIN - heights), lift)
-    lift = np.where(editable, np.clip(lift, 0.0, None), 0.0)
-    # Apron in front: a share of the wall's height, fading from the rock.
-    nearby = ndimage.maximum_filter(foot, size=5)
-    distance = ndimage.distance_transform_edt(~rock) * spacing
-    fade = np.clip(1.0 - distance / APRON_REACH, 0.0, 1.0)
-    apron = np.where(~rock & editable & (lift < 0.05),
-                     np.minimum(APRON_HEIGHT, APRON_SHARE * nearby) * fade * fade * (3 - 2 * fade), 0.0)
-    raised = heights + lift + apron
-    changed = (lift + apron) > 0.5 / scale_units
+    raised, lift = terrain_stamp_morph.morph(heights, spacing, (origin, origin), placements,
+                                             editable=editable)
+    changed = lift > 0.5 / scale_units
     out = np.where(changed, np.clip(np.rint(raised * scale_units), -32768, 32767), fine_q)
+    rock = under & editable
+    apron = (lift > 0.2) & ~rock & editable
     lifted = lift > 0.03
-    print(f"cliffs conform: {int(lifted.sum())} samples raised behind walls "
-          f"(mean {lift[lifted].mean() if lifted.any() else 0:.1f} m, max {lift.max():.1f} m); "
-          f"apron {int((apron > 0.03).sum())} samples (max {apron.max():.1f} m)")
-    return out.astype(fine_q.dtype), rock & editable, (apron > 0.2) & editable
+    print(f"cliffs conform: {int(lifted.sum())} samples raised "
+          f"(mean {lift[lifted].mean() if lifted.any() else 0:.1f} m, max {lift.max():.1f} m), "
+          f"{len(placements)} stamps")
+    return out.astype(fine_q.dtype), rock, apron
 
 
 def write_cliffs(path, signature, by_cell, extent):

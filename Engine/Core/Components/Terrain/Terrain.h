@@ -97,6 +97,17 @@ public:
     // layer arrays after the painted layers; TerrainStampInstance::materialIndex
     // picks one. Not serialized.
     std::vector<std::string> stampMaterials;
+    // Stamps saved with a standalone terrain (test scenes such as
+    // tools/build_stamp_test_scene.py): loading fills `stamps` and
+    // `stampMaterials` from them. Streamed cells leave this empty; their
+    // owner sets `stamps` directly.
+    struct StampPlacement
+    {
+        std::string stamp;     // .stamp asset path
+        std::string material;  // its surface material, or empty for the paint layers
+        glm::mat4 transform{1.f}; // cell space
+    };
+    std::vector<StampPlacement> stampPlacements;
     // Keep this cell's mesh in the compact terrain vertex format (48 bytes a
     // vertex instead of 264, on the CPU and the GPU). Those vertices carry no
     // layer weights, so the cell then always has a paint map (at least two

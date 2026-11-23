@@ -623,6 +623,26 @@ merged into main, worktrees removed; their comparison images are in `.local/agen
       - [ ] Only one scanned broadleaf species exists (CC0, temperate): a second scan (lime, hornbeam, birch)
         would give a real third silhouette instead of the stretched variant.
       - [ ] Close-up look not judged (leaf cards at 523 px/m are soft under a crown at 2 m).
+- [ ] **Ground conforms to stamps** (user 2026-11-23: stamps did not morph the terrain, so the ground around
+      a stamp never ran into it; mountains looked worst). The old `landscape_cliffs.conform_heights` raised a
+      blurred plateau behind each wall and an apron, never to the stamp's own heights, and the engine pulled
+      every stamp border down onto that ground (stretched skirts, fins over the hill).
+      `tools/terrain_stamp_morph.py` (shared): the ground rises to a stamp's *top edge* where that edge
+      stands above the ground behind it and against higher ground (a fin over a hill or block; free ends
+      past a corner and side edges are left alone: a height grid cannot follow an edge running down a
+      wall, and raising to them built buttress mounds and corner peaks), faded over 14 m; plus an apron at
+      the foot (12 % of the rock height, at most 2.5 m, over 8 m). Never lowers. `conform_heights` now
+      wraps it (same outputs: rock and apron masks for the paint).
+      Test scene `terrain/stamp_test.scene` (`tools/build_stamp_test_scene.py`, `--no-morph` for A/B): a 48 m
+      block 16 m tall, nine stamps on its walls, viewpoints Corner, Wall, Along, Rim, Above. Stamps are now
+      saved with a standalone terrain (`Terrain::stampPlacements`, `Terrain.stampPlacements` in scenes).
+      Result (`.local/stamps/c4/all.png`, unmorphed | morphed): rims read as one edge (no rock fins above
+      the grass), faces sink into a slope at the foot, corners clean; lifts at most 3.9 m.
+      - [ ] Rebuild the landscape archive (`tools/build_landscape_demo.py`) and check the cliffs and
+            mountains in the demo (first launch rebuilds every cell cache; ask before running).
+      - [ ] Overhangs: a height grid holds one height per x,z. Next: vector-displacement terrain (each grid
+            vertex offset in x, y and z), which keeps the grid's streaming, LOD and seams and allows undercuts
+            to about one cell deep; deeper arches and caves stay stamps or sculpts.
 - [ ] **Cliffs as sculpted terrain** (asked 2026-11-21: cliffs that are the terrain itself, with the scans' shape
       and look, no scan objects, smooth from ground to rock). The stamp route before it (per-piece surface
       patches, stages 1-5, far stamps, macro colour and far-grid patches) is in todo_history.md (2026-11-22):

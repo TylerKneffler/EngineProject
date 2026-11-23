@@ -1661,6 +1661,21 @@ Terrain::JsonValue Terrain::Serialize() const
                 .Push(JsonValue(layer.previewColor.y)).Push(JsonValue(layer.previewColor.z))));
     out.Set("heights", std::move(h)).Set("weights", std::move(w))
         .Set("layers", std::move(ls));
+    if (!stampPlacements.empty())
+    {
+        JsonValue placed = JsonValue::MakeArray();
+        for (const auto& placement : stampPlacements)
+        {
+            JsonValue matrix = JsonValue::MakeArray();
+            for (int column = 0; column < 4; ++column)
+                for (int row = 0; row < 4; ++row)
+                    matrix.Push(JsonValue(placement.transform[column][row]));
+            placed.Push(JsonValue::MakeObject().Set("stamp", JsonValue(placement.stamp))
+                .Set("material", JsonValue(placement.material))
+                .Set("transform", std::move(matrix)));
+        }
+        out.Set("stampPlacements", std::move(placed));
+    }
     if (HasPaintMap())
         out.Set("paintResolution", JsonValue(paintResolution))
             .Set("paintMap", JsonValue(EncodePaintMap(paintWeights)));
@@ -1716,6 +1731,40 @@ void Terrain::Deserialize(const JsonValue& value)
                 NormalizeSample(&paintWeights[i], layers.size());
         else
             paintWeights.clear();
+    }
+    // Saved stamps (column-major transforms, cell space). Without any, the
+    // owner's stamps stay: TerrainManager sets a streamed cell's before
+    // deserializing its saved state.
+    stampPlacements.clear();
+    if (value.Has("stampPlacements") && value["stampPlacements"].ArraySize() > 0)
+    {
+        stamps.clear();
+        stampMaterials.clear();
+        const auto& placed = value["stampPlacements"];
+        for (size_t i = 0; i < placed.ArraySize(); ++i)
+        {
+            const auto& entry = placed.ArrayAt(i);
+            StampPlacement placement;
+            placement.stamp = entry["stamp"].AsString();
+            placement.material = entry.Has("material") ? entry["material"].AsString() : std::string{};
+            const auto& matrix = entry["transform"];
+            if (matrix.ArraySize() == 16)
+                for (int column = 0; column < 4; ++column)
+                    for (int row = 0; row < 4; ++row)
+                        placement.transform[column][row] = matrix.ArrayAt(column * 4 + row).AsFloat();
+            TerrainStampInstance instance;
+            instance.stamp = TerrainStamp::Load(Mesh::ResolveFilePath(placement.stamp));
+            instance.transform = placement.transform;
+            if (!placement.material.empty())
+            {
+                auto found = std::find(stampMaterials.begin(), stampMaterials.end(), placement.material);
+                if (found == stampMaterials.end())
+                    found = stampMaterials.insert(stampMaterials.end(), placement.material);
+                instance.materialIndex = static_cast<int>(found - stampMaterials.begin());
+            }
+            if (instance.stamp) stamps.push_back(std::move(instance));
+            stampPlacements.push_back(std::move(placement));
+        }
     }
     Rebuild();
 }
