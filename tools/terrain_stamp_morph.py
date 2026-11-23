@@ -240,6 +240,103 @@ def morph(heights, spacing, origin, placements, falloff=FALLOFF, editable=None):
     return heights + lift, lift
 
 
+# --- vector displacement: the grid drapes over the stamps ---------------------
+
+DISPLACE_REACH = 2.0     # grid spacings from a stamp's rock over which vertices take part
+DISPLACE_INSET = 0.35    # metres the draped grid stays inside the rock (the patch draws on top)
+DISPLACE_STEPS = 40      # relaxation iterations
+DISPLACE_LIMIT = 0.95    # most a vertex moves sideways, in grid spacings (no folding)
+
+
+def displace(heights, spacing, origin, placements, editable=None):
+    """Grid vertices near the stamps' rock relax over it (Terrain.lateralOffsets).
+
+    A 16 m wall on a 4 m grid is one grid step: vertices only at its top and
+    foot, so no height edit can give the face a shape. Here each vertex near
+    rock repeatedly moves to the mean of its four neighbours (in 3D) and is
+    then put back on the surface: onto the nearest stamp point's tangent
+    plane (DISPLACE_INSET inside it, so the stamp's own patch still draws on
+    top), or onto the height field away from rock, blended by distance. The
+    mean pulls rim and foot vertices onto the face, so the face gains
+    vertices and the ground under every patch has the rock's shape, overhangs
+    included. Sideways motion is capped at DISPLACE_LIMIT spacings and the
+    grid's border never moves (neighbouring cells share it).
+
+    heights: (rows along +z, cols along +x) metres, already morphed. Returns
+    (heights, lateral) with lateral[..., 0:2] the x and z offsets."""
+    from scipy.spatial import cKDTree
+    heights = np.asarray(heights, float)
+    rows, cols = heights.shape
+    zz, xx = np.mgrid[0:rows, 0:cols].astype(float)
+    base = np.stack([origin[0] + xx * spacing, heights, origin[1] + zz * spacing], -1)
+    # The rock: every placed stamp's inside points and normals.
+    points, normals = [], []
+    for stamp, matrix in placements:
+        linear, offset = matrix[:3, :3], matrix[:3, 3]
+        inside = stamp.weight > BORDER_WEIGHT
+        world = stamp.position[inside] @ linear.T + offset
+        n = stamp.normal[inside] @ np.linalg.inv(linear)   # normals transform by the inverse transpose
+        n /= np.maximum(np.linalg.norm(n, axis=-1, keepdims=True), 1e-9)
+        points.append(world)
+        normals.append(n)
+    if not points:
+        return heights, np.zeros(heights.shape + (2,))
+    points, normals = np.concatenate(points), np.concatenate(normals)
+    tree = cKDTree(points)
+    reach = DISPLACE_REACH * spacing
+    distance, _ = tree.query(base.reshape(-1, 3), distance_upper_bound=reach * 2)
+    distance = distance.reshape(rows, cols)
+    t = np.clip(1.0 - distance / reach, 0.0, 1.0)
+    weight = t * t * (3 - 2 * t)                       # 1 at the rock, 0 at `reach`
+    active = weight > 0.0
+    active[0, :] = active[-1, :] = active[:, 0] = active[:, -1] = False
+    if editable is not None:
+        active &= editable
+    if not active.any():
+        return heights, np.zeros(heights.shape + (2,))
+    position = base.copy()
+    limit = DISPLACE_LIMIT * spacing
+    index = np.nonzero(active)
+    for _ in range(DISPLACE_STEPS):
+        mean = 0.25 * (np.roll(position, 1, 0) + np.roll(position, -1, 0) +
+                       np.roll(position, 1, 1) + np.roll(position, -1, 1))
+        q = mean[index]
+        # Onto the rock: the nearest stamp point's tangent plane, inset.
+        _, nearest = tree.query(q)
+        s, n = points[nearest], normals[nearest]
+        on_rock = q - np.sum((q - s) * n, axis=1, keepdims=True) * n - DISPLACE_INSET * n
+        # Onto the ground: the height field under the moved point.
+        on_ground = q.copy()
+        on_ground[:, 1] = sample(heights, spacing, origin, q[:, 0], q[:, 2])
+        w = weight[index][:, None]
+        moved = on_ground * (1 - w) + on_rock * w
+        # No folding: sideways motion stays within DISPLACE_LIMIT of the grid point.
+        home = base[index]
+        moved[:, 0] = np.clip(moved[:, 0], home[:, 0] - limit, home[:, 0] + limit)
+        moved[:, 2] = np.clip(moved[:, 2], home[:, 2] - limit, home[:, 2] + limit)
+        position[index] = moved
+    lateral = np.stack([position[..., 0] - base[..., 0], position[..., 2] - base[..., 2]], -1)
+    return position[..., 1], lateral
+
+
+def folded_triangles(heights, lateral, spacing):
+    """Grid triangles (two per quad, as Terrain::Rebuild splits them) whose xz
+    winding flipped against the plain grid's while facing up: folds rather
+    than overhangs. Returns their count."""
+    rows, cols = heights.shape
+    zz, xx = np.mgrid[0:rows, 0:cols].astype(float) * spacing
+    x, z = xx + lateral[..., 0], zz + lateral[..., 1]
+    p = np.stack([x, heights, z], -1)
+    a, b, c, d = p[:-1, :-1], p[1:, :-1], p[:-1, 1:], p[1:, 1:]
+    count = 0
+    for u, v, w in ((a, b, c), (c, b, d)):
+        normal = np.cross(v - u, w - u)
+        # The plain grid's triangles face up (+y after its winding); a triangle
+        # whose normal now points down while its xz order flipped is a fold.
+        count += int(np.sum(normal[..., 1] < -1e-6))
+    return count
+
+
 if __name__ == "__main__":
     for path in sorted(STAMPS.glob("*.stamp")):
         s = read_stamp(path)

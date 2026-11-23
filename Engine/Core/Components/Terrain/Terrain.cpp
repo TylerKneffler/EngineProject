@@ -26,6 +26,10 @@
 
 namespace
 {
+// Metres a displaced grid stays inside the stamps' rock; keep equal to
+// DISPLACE_INSET in tools/terrain_stamp_morph.py.
+constexpr float DisplacedStampInset = 0.35f;
+
 template<class T> bool WriteValue(std::ofstream& stream, const T& value)
 {
     static_assert(std::is_trivially_copyable_v<T>);
@@ -980,8 +984,18 @@ void Terrain::AppendStampGeometry(std::vector<Mesh::Vertex>& vertices,
             SampleTerrainSurface(heightsSource, cellsX, cellsY, cellWidth, cellDepth,
                 placed.x, placed.z, ground, &groundNormal);
             glm::vec3 anchor(placed.x, ground, placed.z);
+            // A displaced grid already drapes over the stamp, DisplacedStampInset
+            // inside its rock (tools/terrain_stamp_morph.py displace): the
+            // border only steps in to meet it. Pulling it onto the height
+            // field would sample the undisplaced grid and stretch it into a
+            // shard.
+            if (HasLateralOffsets())
+            {
+                anchor = placed - placedNormal * DisplacedStampInset;
+                groundNormal = placedNormal;
+            }
             // Points that blend: march inward until the terrain is reached.
-            if (weight < 1.f && placed.y > ground)
+            else if (weight < 1.f && placed.y > ground)
             {
                 constexpr float Step = 1.f, Reach = 40.f;
                 for (float travelled = Step; travelled <= Reach; travelled += Step)

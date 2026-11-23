@@ -124,6 +124,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--no-morph", action="store_true", help="keep the heights as built")
     parser.add_argument("--output", type=Path, default=OUTPUT)
+    parser.add_argument("--displace", action="store_true",
+                        help="drape the grid over the stamps (terrain_stamp_morph.displace)")
+    parser.add_argument("--no-stamps", action="store_true",
+                        help="leave the stamps' patches out (shows the terrain alone)")
     parser.add_argument("--undercut", type=float, default=0.0, metavar="METRES",
                         help="vector displacement test: push the east wall's top edge this far "
                              "out past its foot (Terrain.lateralOffsets) and leave that wall bare")
@@ -150,7 +154,15 @@ def main():
     if not args.no_morph:
         heights, lift = morph.morph(heights, SPACING, (0.0, 0.0),
                                     [(morph.load_stamp(n), m) for n, m in placed])
+    if args.displace:
+        heights, lateral = morph.displace(heights, SPACING, (0.0, 0.0),
+                                          [(morph.load_stamp(n), m) for n, m in placed])
+        moved = np.hypot(lateral[..., 0], lateral[..., 1])
+        print(f"displace: {int((moved > 0.05).sum())} vertices moved sideways "
+              f"(max {moved.max():.1f} m), {morph.folded_triangles(heights, lateral, SPACING)} folded")
     weights = paint(heights)
+    if args.no_stamps:
+        placed = []
 
     ET.register_namespace("components", grass.NAMESPACE)
     scene = ET.parse(output).getroot()

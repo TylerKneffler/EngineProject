@@ -650,8 +650,17 @@ merged into main, worktrees removed; their comparison images are in `.local/agen
                   textures them. Checked with `build_stamp_test_scene.py --undercut 6` (east wall's top edge
                   6 m out, 2 m past its foot, stamps dropped there): looking up from the foot, the face hangs
                   over the camera, underside shaded (`.local/stamps/u4/up.png`: plain | undercut).
-            - [ ] Phase 2: stamps as displacement brushes (grid vertices near a stamp move onto its surface,
-                  undercuts included), in `terrain_stamp_morph.py`.
+            - [x] Phase 2, experiment (2026-11-23): `terrain_stamp_morph.displace` relaxes vertices near rock
+                  toward their neighbours' mean and projects them onto the nearest stamp point's tangent plane
+                  (0.35 m inside; `DisplacedStampInset` in Terrain.cpp), ground elsewhere, capped at 0.95 cell
+                  sideways; `build_stamp_test_scene.py --displace [--no-stamps]`. The bare terrain takes the
+                  rock's shape (`.local/stamps/d1/grid.png`), but with the stamps' patches on top, borders the
+                  grid could not reach hang as shards (`.local/stamps/d2/cmp.png`); morph-only looks cleaner.
+            - Decision (user, 2026-11-23): a displaced sheet folds instead of merging when edits overlap, and
+              the hybrid (volumes only at cliffs) was rejected. Next: terrain as a sparse **density volume**
+              (signed distance, chunked; edits as unions/subtractions; meshed per chunk). Stage 1: prototype
+              in the stamp test scene (heights + stamp unions -> density, surface nets, mesh collision);
+              stage 2: LOD and streaming; stage 3: the landscape, placement and far terrain on it.
             - [ ] Phase 3: the height archive and cell caches carry offsets (`SaveCache`/`LoadCacheRange` build
                   positions from heights only; caches must key on offsets); far tiles; matching offsets on
                   shared cell borders.
