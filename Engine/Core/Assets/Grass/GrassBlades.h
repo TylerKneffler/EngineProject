@@ -31,6 +31,11 @@ public:
         float keepDistance = 7.f;    // full density inside, (d0 / d)^2 beyond
         float reach = 60.f, fadeBand = 10.f;
         float clumpSize = .8f;
+        // Pockets between tussocks (GrassBlades.hlsl header 23-27): tussock
+        // spacing, pocket width in tussock sizes from the border, short
+        // blades thinned there, colour darkening and short height lost at
+        // the border itself.
+        float tussockSize = 2.4f, pocketWidth = .3f, pocketThinning = .9f, pocketShade = .7f, pocketLowering = .7f;
         float shortHeight[2] = {.15f, .45f}, tallHeight[2] = {.7f, 1.05f};
         float shortWidth = .010f, tallWidth = .009f;
         float dryShare = .12f;

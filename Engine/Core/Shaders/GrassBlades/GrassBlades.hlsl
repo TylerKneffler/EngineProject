@@ -29,13 +29,16 @@
 // 7 field coverage, 8 short share under tall, 9 seed, 10 keep distance, 11 fade
 // start, 12 clump size, 13 max blades per patch, 14-15 short height range,
 // 16-17 tall height range, 18 short width, 19 tall width, 20 dry share,
-// 21-22 paint weight range (none .. all).
+// 21-22 paint weight range (none .. all), 23 tussock size (m), 24 pocket width
+// (tussock sizes from the border of two tussocks), 25 short blades thinned at
+// a border, 26 darkening there, 27 short height lost there.
 //
 // Record (48 bytes, read by Assets/Shaders/GrassBlades.hlsl):
 //  row0: object slot, root x, y, z (float bits)
 //  row1: height | width (half), yaw | bend (half), bytes tall, shade, dry, hue,
 //        lean x | z (half)
-//  row2: phase (float bits), terrain normal x | z (half), 0, 0
+//  row2: phase (float bits), terrain normal x | z (half), pocket shade (float
+//        bits, 1 = none), 0
 struct OutputRecord { uint4 row0; uint4 row1; uint4 row2; };
 struct BladeConstants
 {
@@ -275,6 +278,27 @@ void CSMain(uint3 group : SV_GroupID, uint3 thread : SV_GroupThreadID)
                 const float d2 = dot(site - position, site - position);
                 if (d2 < nearestClump) { nearestClump = d2; clumpHash = ch; clumpPoint = site; }
             }
+        // Pockets between tussocks (a coarser Voronoi than the clumps): toward
+        // the border of two tussocks short blades thin out, stay low and
+        // darken, so the ground between them reads as shadowed hollows, as
+        // between the mesh grass's tussocks.
+        const float tussockSize = max(0.1, fieldData[23]);
+        const int2 tussockCell = int2(floor(position / tussockSize));
+        float firstTussock = 3.0e38, secondTussock = 3.0e38;
+        [unroll] for (int tz = -1; tz <= 1; ++tz)
+            [unroll] for (int tx = -1; tx <= 1; ++tx)
+            {
+                const int2 c = tussockCell + int2(tx, tz);
+                const uint th = Hash3(c.x, c.y, seed ^ 0x7f4a7c15u);
+                const float2 site = ((float2)c + 0.15 + 0.7 * float2(Unit(th), Unit(Avalanche(th)))) * tussockSize;
+                const float d2 = dot(site - position, site - position);
+                secondTussock = min(secondTussock, max(firstTussock, d2));
+                firstTussock = min(firstTussock, d2);
+            }
+        const float border = sqrt(secondTussock) - sqrt(firstTussock);
+        const float pocket = 1.0 - smoothstep(0.0, tussockSize * fieldData[24], border);
+        if (!tall && Unit(Avalanche(h ^ 0xeu)) < pocket * fieldData[25]) continue;
+        const float pocketShade = 1.0 - pocket * fieldData[26];
         const uint c1 = Avalanche(clumpHash ^ 0x5u), c2 = Avalanche(clumpHash ^ 0x6u), c3 = Avalanche(clumpHash ^ 0x7u);
         const float clumpScale = 0.78 + 0.44 * Unit(c1);
         const float leanAngle = Unit(c2) * 6.2831853;
@@ -285,7 +309,10 @@ void CSMain(uint3 group : SV_GroupID, uint3 thread : SV_GroupThreadID)
         const float heightRandom = Unit(Avalanche(h ^ 0x5u));
         const float heightRange = tall ? heightRandom : pow(heightRandom, 1.6);
         float height = (tall ? lerp(fieldData[16], fieldData[17], heightRange)
-                             : lerp(fieldData[14], fieldData[15], heightRange)) * clumpScale * shrink;
+                             : lerp(fieldData[14], fieldData[15], heightRange)) * clumpScale * shrink *
+            (tall ? 1.0 : 1.0 - fieldData[27] * pocket);
+        // Measurement (draw flag 2): zero-height blades cost vertices but no pixels.
+        if ((constants.draw.w & 2u) != 0u) height = 0.0;
         float width = (tall ? fieldData[19] : fieldData[18]) * (0.8 + 0.4 * Unit(Avalanche(h ^ 0x6u))) *
             rsqrt(max(share, 0.01)) * lerp(0.6, 1.0, shrink);
         // Blades fan out from their clump's centre.
@@ -321,7 +348,7 @@ void CSMain(uint3 group : SV_GroupID, uint3 thread : SV_GroupThreadID)
             (tall ? 255u : 0u) | ((uint)(shade * 255.0) << 8) | ((dry ? 255u : 0u) << 16) | ((uint)(hue * 255.0) << 24),
             PackHalf2(cos(leanAngle) * leanAmount, sin(leanAngle) * leanAmount));
         record.row2 = uint4(asuint(dot(position, float2(8.3, 6.1)) + Unit(Avalanche(h ^ 0xdu)) * 6.2831853),
-            PackHalf2(normal.x, normal.z), 0u, 0u);
+            PackHalf2(normal.x, normal.z), asuint(pocketShade), 0u);
         outputInstances[destination + 1u] = record;
     }
 }

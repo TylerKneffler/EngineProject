@@ -8,6 +8,7 @@
 #include "Core/Scene/Scene.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
@@ -112,8 +113,12 @@ void GrassBlades::Update(Engine::Scene::Scene& scene, Engine::Graphics::IGraphic
             s.keepDistance, s.reach - s.fadeBand, s.clumpSize,
             std::ceil((s.shortDensity + s.tallDensity) * patch * patch),
             s.shortHeight[0], s.shortHeight[1], s.tallHeight[0], s.tallHeight[1],
-            s.shortWidth, s.tallWidth, s.dryShare, s.paint[0], s.paint[1]};
+            s.shortWidth, s.tallWidth, s.dryShare, s.paint[0], s.paint[1],
+            s.tussockSize, s.pocketWidth, s.pocketThinning, s.pocketShade, s.pocketLowering};
         std::copy(std::begin(header), std::end(header), data.begin());
+        // Tuning only: ENGINE_GPU_GRASS_POCKET=size,width,thinning,shade,lowering.
+        if (const char* pocket = std::getenv("ENGINE_GPU_GRASS_POCKET"))
+            std::sscanf(pocket, "%f,%f,%f,%f,%f", &data[23], &data[24], &data[25], &data[26], &data[27]);
         size_t index = 0;
         for (const auto& [key, cell] : m_cells)
         {
