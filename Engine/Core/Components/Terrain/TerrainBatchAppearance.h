@@ -18,6 +18,9 @@ public:
     }
     std::vector<std::shared_ptr<Material>> materials;
     float textureTiling = 16.f;
+    // Metres the layers' tiling spans when no TerrainManager owns the object
+    // (a VolumeTerrain): enables the world-mapped top and side projections.
+    float worldExtent = 0.f;
     bool distantVisual = false;
     // True only when every cell of a resident 4x4 batch is present.
     bool completeFootprint = false;

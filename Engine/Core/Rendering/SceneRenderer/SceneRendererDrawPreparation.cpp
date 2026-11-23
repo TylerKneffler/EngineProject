@@ -493,6 +493,9 @@ void SceneRendererDrawPreparation::PrepareTerrainMaterial(
     if (!terrainManager && terrain)
         objectData.textureUvSets1.x = std::max(terrain->cellsX * terrain->cellWidth,
             terrain->cellsY * terrain->cellDepth);
+    // A standalone batch surface (VolumeTerrain) states its own extent.
+    else if (!terrainManager && batch && batch->worldExtent > 0.f)
+        objectData.textureUvSets1.x = batch->worldExtent;
     // Hex-tiling: the manager's stochastic variation switch; always on for
     // standalone terrain.
     if (!terrainManager || terrainManager->stochasticTerrainVariation)

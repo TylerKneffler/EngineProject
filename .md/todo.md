@@ -661,6 +661,47 @@ merged into main, worktrees removed; their comparison images are in `.local/agen
               (signed distance, chunked; edits as unions/subtractions; meshed per chunk). Stage 1: prototype
               in the stamp test scene (heights + stamp unions -> density, surface nets, mesh collision);
               stage 2: LOD and streaming; stage 3: the landscape, placement and far terrain on it.
+            - [x] Stage 1 (2026-11-23): `TerrainVolume` (.volume: i16 signed density, positive inside,
+                  x fastest then z then y; cached loader) and `MeshSurfaceNets` (one vertex per crossed cell
+                  at the mean edge crossing, a quad per sign-changing edge wound to face the air, normals
+                  from the density gradient); `VolumeTerrain` component (Mesh from the volume; collides
+                  through a `MeshObjectCollider` + static `RigidBody`, as terrain cells do).
+                  `tools/terrain_volume.py`: ground from heights (slope-scaled distance) smooth-unioned
+                  (1.5 m fillet) with the stamps as solid rock behind their faces (6 m deep) and edit
+                  brushes (rounded boxes, sphere subtraction); writes `TerrainData/Volumes/volume_test.volume`
+                  (129x41x129 at 1 m, 1.4 MB, ~3 s) and `terrain/volume_test.scene` (stamp test viewpoints,
+                  material `Materials/Terrain/volume_rock.material`, triplanar).
+                  Result (`.local/stamps/v1/all.png`, plain | edits): block and stamps are one rock surface,
+                  no patches or seams; a mass raised against the east wall, out sideways and down into the
+                  floor, fuses with the wall into an arch; a cave cut under the north rim opens into the
+                  block. Two dropped cubes rest on the arch top and the ground (`.local/stamps/v4/drop.png`).
+              Perf against the height grid + stamps (same content, 1920x1080, GPU stage medians, two
+              interleaved runs; whole-frame times were too noisy): Wall 7.3 ms terrain vs 4.1-4.4 ms
+              volume; Above 2.6 vs 2.2 ms; 5,500 vs 45,500 triangles. The volume's single rock material
+              was much cheaper per pixel than the layered terrain shader (`.local/stamps/perf/`).
+            - [x] Texturing (2026-11-23): `VolumeTerrain` shades through the terrain's layered path (a
+                  `TerrainBatchAppearance` per chunk, `worldExtent` for the world-mapped top and side
+                  projections): `flatMaterial` (grass) facing up, `steepMaterial` (rock) on steep faces,
+                  overhangs and ceilings, blended per vertex by slope (`steepStart` .. `steepEnd`). Vertex
+                  colour must be black there: the shader adds textured layers onto it (white washed it out).
+            - [x] Stage 2 (2026-11-23): `.volume` v2 is sparse (32^3-sample chunks; uniform chunks are one
+                  value; v1 still loads). `MeshSurfaceNets` meshes a block at a stride (levels 0-3 = every
+                  1st/2nd/4th/8th sample) with skirts along open edges (1.5 cells into the ground) so chunks
+                  at different levels leave no gaps. `VolumeTerrain` keeps 32-cell chunks as runtime child
+                  objects: level by camera distance (64/128/256 m, draw distance), 10 % hysteresis, Mesh
+                  runtime-LOD cross-fade; meshing on worker threads (nearest first, up to 4); chunks past
+                  the draw distance are dropped; chunks within `collisionDistance` get a hidden level-0
+                  mesh with a MeshObjectCollider on a static RigidBody.
+                  Test world: `tools/terrain_volume.py --size 512` (hills around the block, 513x52x513,
+                  23.6 MB sparse, ~15 M samples built a slab at a time). Far view of the whole world:
+                  47 k triangles in 256 chunk draws (~560 k at level 0 everywhere); draw distance 250 m:
+                  77 draws, 34.6 k triangles. Drop test passes with chunk colliders
+                  (`.local/stamps/s3/all.png`, `.local/stamps/s4/drop.png`).
+            - [ ] Sparse storage saves little on these thin test worlds (41-52 samples tall); it pays on
+                  tall terrain. The density is still loaded whole; streaming it from disk is stage 3.
+            - [ ] Chunks draw one by one (256 draws for the 512 m world); batch them for the landscape.
+            - [ ] Editor: chunks appear only once `Update` runs (game mode); no editing tools yet.
+            - [ ] Stage 3: the landscape on volumes (archive -> density, far terrain, placement, grass).
             - [ ] Phase 3: the height archive and cell caches carry offsets (`SaveCache`/`LoadCacheRange` build
                   positions from heights only; caches must key on offsets); far tiles; matching offsets on
                   shared cell borders.

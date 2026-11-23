@@ -1,0 +1,15 @@
+{
+    "version": 1,
+    "baseColor": [
+        1.0,
+        1.0,
+        1.0
+    ],
+    "metallic": 0,
+    "roughness": 1.0,
+    "normalScale": 1.0,
+    "triplanarScale": 8.0,
+    "baseColorTexture": "Assets/TerrainData/Sculpts/cliff_rock_albedo.jpg",
+    "normalTexture": "Assets/TerrainData/Sculpts/cliff_rock_normal.jpg",
+    "metallicRoughnessTexture": "Assets/TerrainData/Sculpts/cliff_rock_rough.jpg"
+}
