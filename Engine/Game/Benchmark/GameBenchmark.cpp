@@ -97,6 +97,8 @@ GameBenchmark::GameBenchmark(const GameBenchmarkOptions& options,
         << ",\"game_max_fps\":" << maxFps << ",\"startup_to_scene_start_ms\":" << startupMs
         << ",\"clustered_lighting_setting\":" << (clusteredLighting ? "true" : "false")
         << ",\"render_scale\":" << renderer.GetRenderScale()
+        << ",\"render_width\":" << renderer.GetRenderWidth()
+        << ",\"render_height\":" << renderer.GetRenderHeight()
         << ",\"dynamic_render_scale\":" << (renderer.IsDynamicRenderScaleEnabled() ? "true" : "false")
         << ",\"temporal_upscaling\":" << (renderer.IsTemporalUpscalingEnabled() ? "true" : "false")
 #ifdef ENGINE_BUILD_CONFIGURATION

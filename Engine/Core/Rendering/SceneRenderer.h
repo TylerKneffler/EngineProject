@@ -296,6 +296,16 @@ public:
     {
         m_distanceLightingSettings = distanceSettings;
     }
+    // Output pixels per rendered pixel (>= 1) when views render below their
+    // output size and are upscaled. Detail choices (LOD coverage, the detail
+    // budget, texture footprints) use output pixels so a lower render scale
+    // does not also coarsen meshes and textures; rasterisation, jitter,
+    // occlusion and screen-space passes keep the render size. Set before
+    // Render, on the thread that calls it.
+    void SetDetailResolutionScale(float scale)
+    {
+        m_detailResolutionScale = std::isfinite(scale) ? std::max(1.f, scale) : 1.f;
+    }
     void SetRealtimeShadowSettings(
         const Engine::Model::RealtimeShadowSettings& shadowSettings)
     {
@@ -959,6 +969,8 @@ private:
     };
     std::unordered_map<const void*, TemporalViewState> m_temporalViews;
     Engine::Model::DistanceLightingSettings m_distanceLightingSettings;
+    // SetDetailResolutionScale.
+    float m_detailResolutionScale = 1.f;
     uint64_t m_lastObjectDataUploadBytes = 0;
     uint32_t m_lastOcclusionCulledCount = 0;
     uint32_t m_lastTerrainOcclusionCulledCount = 0;

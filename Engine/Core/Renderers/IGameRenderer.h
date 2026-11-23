@@ -31,6 +31,16 @@ public:
     // corresponding BeginFrame().
     virtual void EndFrame() = 0;
 
+    // Size the scene renders at, which a renderer with an internal render
+    // scale keeps below the output (GetWidth/GetHeight) and upscales in
+    // post-processing. Scene views record with this viewport size.
+    virtual uint32_t GetRenderWidth() const { return GetWidth(); }
+    virtual uint32_t GetRenderHeight() const { return GetHeight(); }
+    // Applies an internal render scale (0.5-1) between frames, recreating
+    // size-dependent targets as needed; renderers without one ignore it.
+    // Call with no frame in flight, as for Resize.
+    virtual void ApplyRenderScale(float) {}
+
     // Create a graphics context bound to the renderer's current frame command
     // stream. Call after BeginFrame() and before EndFrame().
     virtual std::unique_ptr<Engine::Graphics::IGraphicsContext> CreateFrameGraphicsContext() = 0;

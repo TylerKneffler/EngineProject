@@ -221,11 +221,96 @@ float3 TemporalFromYCoCg(float3 c)
 float3 TemporalCompress(float3 c) { return c / (1.0 + dot(c, LuminanceWeights)); }
 float3 TemporalExpand(float3 c) { return c / max(1.0 - dot(c, LuminanceWeights), 1e-4); }
 
+// Temporal upscaling: the scene (t0, depth t2) is smaller than the history
+// and output (t1). Each output pixel rebuilds this frame's colour from the
+// 3x3 scene samples around it, placed where the jitter (temporal.zw, render
+// pixels) put them, with a Gaussian of about half a render pixel (an
+// approximation of the Blackman-Harris filter). A sample landing close to
+// the output pixel centre gets more weight against the history, so the
+// jitter sequence fills in detail finer than the render grid over frames.
+// History clipping and reprojection work as in TemporalResolvePS.
+float4 TemporalUpscale(VertexOutput input, int2 renderSize, int2 outputSize)
+{
+    const float2 outputPosition = input.position.xy; // pixel centre, output pixels
+    const float2 toRender = float2(renderSize) / float2(outputSize);
+    const float2 renderPosition = outputPosition * toRender;
+    const float2 jitter = temporal.zw;
+    // The sample at render pixel i shows the image at i + 0.5 - jitter.
+    const int2 nearest = int2(floor(renderPosition + jitter));
+    float3 weighted = 0.0, mean = 0.0, meanSquared = 0.0;
+    float weightSum = 0.0, nearestDistance = 1e9, alpha = 1.0;
+    float closestDepth = 0.0; // reverse-Z: larger is nearer
+    int2 closestPixel = clamp(nearest, int2(0, 0), renderSize - 1);
+    [unroll] for (int y = -1; y <= 1; ++y)
+    [unroll] for (int x = -1; x <= 1; ++x)
+    {
+        const int2 at = clamp(nearest + int2(x, y), int2(0, 0), renderSize - 1);
+        const float4 raw = sceneColor.Load(int3(at, 0));
+        const float3 c = TemporalToYCoCg(TemporalCompress(min(max(raw.rgb, 0.0), 32768.0)));
+        const float2 offset = renderPosition - (float2(at) + 0.5 - jitter);
+        const float distanceSquared = dot(offset, offset);
+        const float weight = exp(-2.29 * distanceSquared);
+        weighted += c * weight;
+        weightSum += weight;
+        mean += c;
+        meanSquared += c * c;
+        if (distanceSquared < nearestDistance) { nearestDistance = distanceSquared; alpha = raw.a; }
+        const float d = exposureColor.Load(int3(at, 0)).r;
+        if (d > closestDepth) { closestDepth = d; closestPixel = at; }
+    }
+    const float3 current = weighted / max(weightSum, 1e-4);
+    mean /= 9.0;
+    const float3 deviation = sqrt(max(meanSquared / 9.0 - mean * mean, 0.0));
+    const float3 currentRgb = TemporalExpand(max(TemporalFromYCoCg(current), 0.0));
+    if (temporal.y < 0.5)
+        return float4(currentRgb, alpha);
+    const float2 uv = (float2(closestPixel) + 0.5 - jitter) / float2(renderSize);
+    const float4 clip = float4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, closestDepth, 1.0);
+    const float4 previous = float4(dot(params0, clip), dot(shadowTint, clip),
+        dot(highlightTint, clip), dot(grade, clip));
+    if (abs(previous.w) < 1e-6)
+        return float4(currentRgb, alpha);
+    const float2 previousNdc = previous.xy / previous.w;
+    const float2 outputUv = outputPosition / float2(outputSize);
+    const float2 historyUv = outputUv +
+        (float2(previousNdc.x * 0.5 + 0.5, 0.5 - previousNdc.y * 0.5) - uv);
+    if (any(historyUv < 0.0) || any(historyUv > 1.0))
+        return float4(currentRgb, alpha);
+    float3 history = TemporalToYCoCg(TemporalCompress(
+        max(bloomColor.SampleLevel(sceneSampler, historyUv, 0.0).rgb, 0.0)));
+    const float3 extent = deviation * 1.25 + 1e-4;
+    const float3 offset = history - mean;
+    const float3 units = abs(offset / extent);
+    const float largest = max(units.x, max(units.y, units.z));
+    if (largest > 1.0) history = mean + offset / largest;
+    const float2 motionPixels = (historyUv - outputUv) * float2(outputSize);
+    const float feedback = temporal.x * lerp(1.0, 0.8, saturate(length(motionPixels) / 16.0));
+    // Confidence: how close the nearest sample fell to this output pixel's
+    // centre, in output pixels (1 on it, ~0.6 half a pixel away).
+    const float scale = 0.5 * (toRender.x + toRender.y);
+    const float confidence = exp(-2.0 * nearestDistance / (scale * scale));
+    const float currentWeight = saturate((1.0 - feedback) * (0.3 + 1.7 * confidence));
+    const float3 resolved = lerp(history, current, currentWeight);
+    return float4(TemporalExpand(max(TemporalFromYCoCg(resolved), 0.0)), alpha);
+}
+
+// Render size below the output without TAA: a bilinear stretch of the scene.
+float4 UpscalePS(VertexOutput input) : SV_Target
+{
+    return sceneColor.SampleLevel(sceneSampler, input.uv, 0.0);
+}
+
 float4 TemporalResolvePS(VertexOutput input) : SV_Target
 {
     const int2 pixel = int2(input.position.xy);
     int width, height;
     sceneColor.GetDimensions(width, height);
+    {
+        int outputWidth, outputHeight;
+        bloomColor.GetDimensions(outputWidth, outputHeight);
+        if (outputWidth != width || outputHeight != height)
+            return TemporalUpscale(input, int2(width, height), int2(outputWidth, outputHeight));
+    }
     const float4 centre = sceneColor.Load(int3(pixel, 0));
     const float3 current = TemporalCompress(min(max(centre.rgb, 0.0), 32768.0));
     float3 mean = 0.0, meanSquared = 0.0;

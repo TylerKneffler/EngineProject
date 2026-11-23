@@ -50,6 +50,11 @@ struct PostProcessSettings
     float taaSharpen = 0.f; // compose unsharp mask after TAA
     float taaReprojection[16] = { 1.f, 0.f, 0.f, 0.f, 0.f, 1.f, 0.f, 0.f,
         0.f, 0.f, 1.f, 0.f, 0.f, 0.f, 0.f, 1.f };
+    // This frame's sub-pixel jitter in render pixels (x right, y down): the
+    // scene pixel centred at p shows the unjittered image at p - jitter.
+    // Temporal upscaling (render size below the output) places each sample
+    // by it.
+    float taaJitter[2] = {};
 };
 
 void SetPostProcessSettings(const PostProcessSettings& settings);
@@ -67,8 +72,9 @@ struct PostProcessConstants
     float shadowTint[4] = {}; // rgb, w = grading enabled
     float highlightTint[4] = {}; // rgb, w = shadow/highlight balance
     float grade[4] = {}; // contrast, saturation, 1 / bloom levels, auto exposure (1/0)
-    // Temporal resolve: history weight, history valid (1/0). The temporal
-    // pass reads its reprojection matrix rows from the four vectors above.
+    // Temporal resolve: history weight, history valid (1/0), jitter x, y in
+    // render pixels. The temporal pass reads its reprojection matrix rows
+    // from the four vectors above.
     // Compose: z = sharpening amount after TAA (0 off).
     float temporal[4] = {};
 };
@@ -78,8 +84,9 @@ PostProcessConstants MakeComposeConstants(const PostProcessSettings& settings,
     uint32_t bloomLevels, float sampleWeight = 1.f);
 PostProcessConstants MakeBloomPassConstants(uint32_t sourceWidth, uint32_t sourceHeight);
 // TemporalResolvePS: reprojection rows in params0/shadowTint/highlightTint/
-// grade, temporal = (history weight, history valid, 0, 0). historyValid is
-// false when the renderer's own history is new (first frame, resize).
+// grade, temporal = (history weight, history valid, jitter x, jitter y).
+// historyValid is false when the renderer's own history is new (first frame,
+// resize).
 PostProcessConstants MakeTemporalConstants(const PostProcessSettings& settings, bool historyValid);
 
 // Auto exposure runs three small passes before compose, on every backend:

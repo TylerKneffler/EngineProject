@@ -687,14 +687,19 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
             };
             const uint32_t sample = state.frame % 8u + 1u;
             temporalDitherFrame = static_cast<float>(sample);
-            jitteredProjection[2][0] += (halton(sample, 2u) - .5f) * 2.f / static_cast<float>(viewportWidth);
-            jitteredProjection[2][1] += (halton(sample, 3u) - .5f) * 2.f / static_cast<float>(viewportHeight);
+            const float jitterX = halton(sample, 2u) - .5f;
+            const float jitterY = halton(sample, 3u) - .5f;
+            jitteredProjection[2][0] += jitterX * 2.f / static_cast<float>(viewportWidth);
+            jitteredProjection[2][1] += jitterY * 2.f / static_cast<float>(viewportHeight);
             const glm::dmat4 current = glm::dmat4(proj) * glm::dmat4(view);
             const glm::dmat4 reprojection = state.previousViewProjection * glm::inverse(current);
             auto post = Engine::Graphics::GetPostProcessSettings();
             post.taa = true;
             post.taaFeedback = temporal.taaFeedback;
             post.taaSharpen = temporal.taaSharpen;
+            // Pixels run downward while NDC y runs up.
+            post.taaJitter[0] = jitterX;
+            post.taaJitter[1] = -jitterY;
             post.taaHistoryValid = state.valid &&
                 state.width == viewportWidth && state.height == viewportHeight;
             for (int row = 0; row < 4; ++row)
@@ -709,12 +714,21 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
         }
     }
     const glm::mat4 viewProjection = jitteredProjection * view;
+    // Detail choices measure the output, which is larger than the viewport
+    // when the view is upscaled (SetDetailResolutionScale).
+    const auto detailExtent = [&](uint32_t extent)
+    {
+        return std::max(1u, static_cast<uint32_t>(std::lround(
+            static_cast<double>(extent) * m_detailResolutionScale)));
+    };
+    const uint32_t detailWidth = detailExtent(viewportWidth);
+    const uint32_t detailHeight = detailExtent(viewportHeight);
     // Detail follows screen coverage: LOD distances are authored for a
     // reference camera, so they scale by this view's focal length in pixels
     // (Core/Rendering/ScreenCoverage.h). Shadow views render with the main
     // camera and viewport, so their bands match the color pass.
     const float viewCoverageScale = Engine::Rendering::ViewLodCoverageScale(
-        proj[1][1], static_cast<float>(viewportHeight),
+        proj[1][1], static_cast<float>(detailHeight),
         cam->orthographic || m_scene.m_mode2D);
     // Instanced LOD bands also scale per placement by its size. Object.hlsl
     // reads geometryFade.w 5 (rather than 4) as "divide each placement's
@@ -1509,8 +1523,8 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
             detailCostLayers = Engine::Rendering::DetailBudget::Get().GetLayers();
             detailCostInput.viewProjection = viewProjection;
             detailCostInput.cameraPosition = cameraPosition;
-            detailCostInput.viewportWidth = static_cast<float>(std::max(1u, viewportWidth));
-            detailCostInput.viewportHeight = static_cast<float>(std::max(1u, viewportHeight));
+            detailCostInput.viewportWidth = static_cast<float>(detailWidth);
+            detailCostInput.viewportHeight = static_cast<float>(detailHeight);
             detailCostInput.occlusion = occlusionBuffer;
             detailCostInput.placementScaleLod = placementCoverageLod;
         }
@@ -2355,7 +2369,7 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
     static const bool shadowFootprints=[]{ const char* v=std::getenv("ENGINE_SHADOW_FOOTPRINTS"); return v && v[0]=='1'; }();
     if(!shadowOnly || shadowFootprints)
     SceneTextureFootprints::Request(preparedDraws, viewProjection,
-        viewportWidth, viewportHeight, shadowViewProjections, shadowCascadeCount,
+        detailWidth, detailHeight, shadowViewProjections, shadowCascadeCount,
         m_directionalShadowResolution, &m_textureFootprintCache,
         reinterpret_cast<uintptr_t>(cam) ^ (uintptr_t(viewportWidth) << 1) ^
             (uintptr_t(viewportHeight) << 17));
@@ -2505,7 +2519,7 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
 
     SceneRendererLodSelection lodSelection;
     lodSelection.Prepare(*this, preparedDraws, cam, cameraPosition,
-        viewProjection, viewportWidth, viewportHeight, instanceViewOrdinal,
+        viewProjection, detailWidth, detailHeight, instanceViewOrdinal,
         shadowOnly, hasPortalViews, includeEditorVisuals,
         instanceLodDisplayOverride);
     const auto selectedLodDraws = lodSelection.SelectedGpuLodDraws(shadowOnly);

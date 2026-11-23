@@ -62,6 +62,8 @@ PostProcessConstants MakeTemporalConstants(const PostProcessSettings& settings, 
             rows[row][column] = settings.taaReprojection[row * 4 + column];
     constants.temporal[0] = std::clamp(settings.taaFeedback, 0.f, 0.98f);
     constants.temporal[1] = historyValid && settings.taaHistoryValid ? 1.f : 0.f;
+    constants.temporal[2] = settings.taaJitter[0];
+    constants.temporal[3] = settings.taaJitter[1];
     return constants;
 }
 

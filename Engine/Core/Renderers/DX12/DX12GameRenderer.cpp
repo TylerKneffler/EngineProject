@@ -67,8 +67,7 @@ bool DX12GameRenderer::Init(void* hwnd, uint32_t width, uint32_t height)
         CreateRenderTargets();
         m_msaaSamples = DX12PostProcess::SupportedSamples(m_device.Get(),
             Engine::Rendering::RenderingEffects::Get().Settings().antiAliasing.msaaSamples);
-        CreateDepthStencilTarget();
-        m_postProcess.Create(m_device.Get(), width, height, m_msaaSamples);
+        CreateSizeDependentTargets();
 
         m_rootSignature = CreateD3D12MaterialRootSignature(m_device.Get());
 
@@ -105,8 +104,6 @@ bool DX12GameRenderer::Init(void* hwnd, uint32_t width, uint32_t height)
     // the rasteriser produces outside this rect is discarded. We set it to the
     // full window here (effectively “no clip”), but D3D12 requires one to be
     // bound or the validation layer will warn. Both are re-set on every Resize().
-    m_viewport   = { 0.f, 0.f, static_cast<float>(width), static_cast<float>(height), 0.f, 1.f };
-    m_scissorRect = { 0, 0, static_cast<LONG>(width), static_cast<LONG>(height) };
     return true;
     }
     catch (const std::exception& e)
@@ -163,11 +160,42 @@ void DX12GameRenderer::Resize(uint32_t width, uint32_t height)
     m_height = height;
 
     CreateRenderTargets();
-    CreateDepthStencilTarget();
-    m_postProcess.Create(m_device.Get(), width, height, m_msaaSamples);
+    CreateSizeDependentTargets();
+}
 
-    m_viewport    = { 0.f, 0.f, static_cast<float>(width), static_cast<float>(height), 0.f, 1.f };
-    m_scissorRect = { 0, 0, static_cast<LONG>(width), static_cast<LONG>(height) };
+void DX12GameRenderer::UpdateRenderExtent()
+{
+    const auto scaled = [scale = m_renderScale](uint32_t extent)
+    {
+        return std::clamp(static_cast<uint32_t>(std::lround(static_cast<double>(extent) * scale)),
+            1u, std::max(1u, extent));
+    };
+    m_renderWidth = scaled(m_width);
+    m_renderHeight = scaled(m_height);
+    m_viewport = { 0.f, 0.f, static_cast<float>(m_renderWidth),
+        static_cast<float>(m_renderHeight), 0.f, 1.f };
+    m_scissorRect = { 0, 0, static_cast<LONG>(m_renderWidth), static_cast<LONG>(m_renderHeight) };
+}
+
+void DX12GameRenderer::CreateSizeDependentTargets()
+{
+    UpdateRenderExtent();
+    m_depthStencil.Reset();
+    CreateDepthStencilTarget();
+    m_postProcess.Create(m_device.Get(), m_width, m_height, m_msaaSamples,
+        m_renderWidth, m_renderHeight);
+    m_temporalUpscaling = m_postProcess.IsUpscaling() &&
+        Engine::Rendering::RenderingEffects::Get().Settings().antiAliasing.taa;
+}
+
+void DX12GameRenderer::ApplyRenderScale(float scale)
+{
+    const float previous = m_renderScale;
+    SetRenderScale(scale);
+    if (!m_device || m_renderScale == previous) return;
+    // Frames in flight still use the current targets.
+    FlushGPU();
+    CreateSizeDependentTargets();
 }
 
 // ---------------------------------------------------------------------------
@@ -182,9 +210,7 @@ void DX12GameRenderer::ApplySampleCount()
     // Frames in flight still use the current targets.
     FlushGPU();
     m_msaaSamples = samples;
-    m_depthStencil.Reset();
-    CreateDepthStencilTarget();
-    m_postProcess.Create(m_device.Get(), m_width, m_height, m_msaaSamples);
+    CreateSizeDependentTargets();
 }
 
 void DX12GameRenderer::BeginFrame()
@@ -826,8 +852,8 @@ void DX12GameRenderer::CreateDepthStencilTarget()
 
     D3D12_RESOURCE_DESC resourceDesc{};
     resourceDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-    resourceDesc.Width = m_width;
-    resourceDesc.Height = m_height;
+    resourceDesc.Width = m_renderWidth;
+    resourceDesc.Height = m_renderHeight;
     resourceDesc.DepthOrArraySize = 1;
     resourceDesc.MipLevels = 1;
     resourceDesc.Format = DXGI_FORMAT_R32G8X24_TYPELESS;

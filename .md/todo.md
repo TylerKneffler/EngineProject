@@ -724,7 +724,7 @@ merged into main, worktrees removed; their comparison images are in `.local/agen
 - **Grass:** fade band still visible at ~25-35 m; far palette not matched to the cover colour; LOD distances not
   re-evaluated after thinning; clumping; tiles built ahead of the camera; bushes limited to the grass radius; pale
   ground between blades in the test meadow; blade-mottling cost not measured.
-- **Antialiasing:** Vulkan has no MSAA and no TAA; temporal upscaling is serialized but unimplemented.
+- **Antialiasing:** Vulkan has no MSAA and no TAA; temporal upscaling is DX12 only (game renderer).
 - **Editor:** terrain generation window; asset-generator tool not exercised in a running editor; AO in editor
   viewports; optional 3D LUT for grading.
 - **Not measured:** cost of the 9-tap AO lookup; cliff pieces per cell; the detail model against measured GPU cost
@@ -973,9 +973,34 @@ Progress 2026-11-19 (landscape ForestEdge, DX12 1080p, single runs; frame / upda
       only the editor profiler sets; expose it to GameBackendCapture first.
 - [ ] **Far blocks follow the detail budget** (also listed under Landscape look, section 0): far forest is outside it and is what
       makes the vista GPU-bound.
-- [ ] Optional headroom only, not the route to the budget: **temporal upscaling**
-      (`SceneSettings::temporalUpscaling` is serialized but unimplemented). Render at ~0.67-0.77 scale with
-      the existing TAA jitter/history and upscale in the resolve; pixel-bound foliage cost drops ~1.7x.
+- [x] **Temporal upscaling** (2026-11-23, DX12 game renderer). The game now applies an internal render scale:
+      the scene's `renderScale` times the quality preset's (as the editor's game view did), or
+      `ENGINE_RENDER_SCALE=0.5..1` for A/B runs. `DX12GameRenderer` keeps the swap chain at window size and
+      sizes the depth target, viewport and scene colour by the scale (`GetRenderWidth/Height`,
+      `ApplyRenderScale`, applied between frames like a resize); scene views record at the render size.
+      With TAA, `TemporalResolvePS` upscales when the scene is smaller than the history (`TemporalUpscale`:
+      3x3 samples placed by the jitter, Gaussian weights, more weight for a sample landing near the output
+      pixel, same history clipping and reprojection). Without TAA, `UpscalePS` stretches bilinearly.
+      Benchmark header: `render_width`, `render_height`, `temporal_upscaling`. Checked on
+      lighting_showcase, 960x540, RTX A2000 Laptop: opaque GPU 0.357 → 0.194 ms at 0.67; edges close to
+      native, slightly softer (`.local/taau/edges.png`: native | upscaled | bilinear).
+      Detail follows the output: `SceneRenderer::SetDetailResolutionScale` (output / render pixels, set
+      by the game before recording) makes LOD coverage, the detail budget, texture footprints and the
+      LOD selection's screen view use output pixels. Without it a near scanned bush in grass_test dropped
+      to a coarse level with eroded leaves and a dark card at 0.67, with TAA or bilinear alike.
+      grass_test turning at 1920x1080 (`--look-yaw 3`, no drive so poses match; two interleaved pairs,
+      RTX A2000 Laptop): frame 25.5 / 25.5 → 16.5 / 16.4 ms; GPU grass 15.7 → 10.7, terrain 3.6 → 2.0,
+      clouds 2.8 → 1.4, AO 0.6 → 0.2 ms. Look (`.local/taau/turn2/full3.png`, native | 0.67 TAA |
+      0.67 bilinear): same LOD everywhere, upscaled slightly softer, no ghost trails while turning;
+      bilinear has stair-stepped edges. Not checked: walking (drives move by time, so runs at different
+      frame rates end at different places).
+      - [ ] Landscape demo walk at 0.67 (the 1080p FieldWalk load did not finish in 10 minutes on this
+            machine at native scale on 2026-11-23; stopped).
+      - [ ] Texture mip bias: textures pick mips for the render size and look softer. The material sampler
+            is static in the root signature, so a bias needs it rebuilt with the scale.
+      - [ ] UI draws into the scene pass, so it renders at the render size and goes through TAA.
+      - [ ] DX11 and Vulkan ignore the scale (render at full size).
+      - [ ] Grass minimum pixel width and other in-shader pixel-size rules still follow the render size.
 - [ ] Check: vista ≤ 16.7 ms with Phase 1 on; record the stage split against the budget table.
       Latest (2026-11-19, during CPU round 3, single runs, DX12): vista 25.7 ms (CPU record 15.7, GPU
       opaque 7.7); ForestEdge 26.9 (record 16.8, GPU opaque 8.8). Before that: vista 28.4, ForestEdge 27.8. **The GPU is now within budget at ground level; the CPU (update + prepare + record ~27 ms,
@@ -1118,8 +1143,8 @@ Phases in the order they were planned. Keep wind, foot bend and placement determ
 ### Grass Phase 6½: Antialiasing (grass edges stair-step and shimmer)
 At the review the live renderer had no antialiasing (MSAA only in the DX11 video-export renderer), and grass
 blades are 1–2 px wide at a few metres, so their edges aliased and shimmered under wind. Now: FXAA, MSAA
-(DX11, DX12) and TAA (DX11, DX12; on by default). `SceneSettings::temporalUpscaling` is still serialized but
-unimplemented (Foliage Phase 2, optional headroom).
+(DX11, DX12) and TAA (DX11, DX12; on by default). Temporal upscaling from a render scale exists on DX12 (Foliage
+Phase 2).
 - [ ] MSAA and TAA are done on DX11 and DX12 (todo_history.md); Vulkan has neither (renders without MSAA, no
       jitter applied). Not exercised: live MSAA switching in the editor's DX12/DX11 views. Capture overrides:
       `ENGINE_MSAA`, `ENGINE_FXAA`, `ENGINE_TAA`, `ENGINE_GRASS_MIN_WIDTH`, `ENGINE_AUTO_EXPOSURE`.

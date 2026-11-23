@@ -157,8 +157,10 @@ public:
     SimulationLoop(const SimulationLoop&) = delete;
     SimulationLoop& operator=(const SimulationLoop&) = delete;
 
+    // renderWidth x renderHeight: the renderer's scene size (below the
+    // client size with an internal render scale); views record with it.
     void BeginUpdate(float deltaTime,
-        ::Engine::Core::NativeInputSnapshot input)
+        ::Engine::Core::NativeInputSnapshot input, uint32_t renderWidth, uint32_t renderHeight)
     {
         std::unique_lock lock(m_mutex);
         if (m_stopping || m_busy)
@@ -167,6 +169,8 @@ public:
         m_frameStartedAt = std::chrono::steady_clock::now();
         m_timings = {};
         m_input = std::move(input);
+        m_renderWidth = renderWidth ? renderWidth : m_input.clientWidth;
+        m_renderHeight = renderHeight ? renderHeight : m_input.clientHeight;
         m_busy = true;
         m_work = Work::Update;
         m_wake.notify_one();
@@ -292,15 +296,20 @@ private:
                         {
                             const float aspect = static_cast<float>(m_input.clientWidth) /
                                 static_cast<float>(m_input.clientHeight);
+                            // LOD and texture detail follow the output size
+                            // when the renderer upscales.
+                            Engine::Rendering::RenderSystem::For(m_scene).SetDetailResolutionScale(
+                                m_renderHeight ? static_cast<float>(m_input.clientHeight) /
+                                    static_cast<float>(m_renderHeight) : 1.f);
                             Engine::Rendering::RenderSystem::For(m_scene).Render(shadowCommands.get(), aspect,
-                                gameCamera, false, m_input.clientWidth,
-                                m_input.clientHeight, true, drawPacket.get());
+                                gameCamera, false, m_renderWidth,
+                                m_renderHeight, true, drawPacket.get());
                             const auto shadowRecorded = std::chrono::steady_clock::now();
                             m_timings.shadowRecordingMs = std::chrono::duration<double,
                                 std::milli>(shadowRecorded - packetPrepared).count();
                             Engine::Rendering::RenderSystem::For(m_scene).Render(sceneCommands.get(), aspect,
-                                gameCamera, false, m_input.clientWidth,
-                                m_input.clientHeight, false,
+                                gameCamera, false, m_renderWidth,
+                                m_renderHeight, false,
                                 drawPacket.get(), -1, g_benchmarkRenderMode);
                             m_postProcess = ::Engine::Graphics::GetPostProcessSettings();
                             m_timings.cameraRecordingMs = std::chrono::duration<double,
@@ -350,6 +359,7 @@ private:
     std::mutex m_mutex;
     std::condition_variable m_wake;
     ::Engine::Core::NativeInputSnapshot m_input;
+    uint32_t m_renderWidth = 0, m_renderHeight = 0;
     std::shared_ptr<const ::Engine::Scene::Scene::SceneSnapshot> m_snapshot;
     ::Engine::Scene::Scene::RetiredGraphicsResources m_retired;
     // RenderLoop retains submitted packets through GPU completion. An idle
@@ -462,6 +472,16 @@ public:
         Submit(Work::Resize, std::move(packet));
     }
 
+    // Synchronous like Resize: no frame is in flight when the renderer
+    // recreates its size-dependent targets.
+    void ApplyRenderScale(float scale)
+    {
+        std::lock_guard submitLock(m_submitMutex);
+        Packet packet;
+        packet.renderScale = scale;
+        Submit(Work::RenderScale, std::move(packet));
+    }
+
     void WaitIdle()
     {
         std::lock_guard submitLock(m_submitMutex);
@@ -488,7 +508,7 @@ public:
     }
 
 private:
-    enum class Work { None, BeginFrame, Frame, Resize, Idle };
+    enum class Work { None, BeginFrame, Frame, Resize, RenderScale, Idle };
     struct Packet
     {
         std::chrono::steady_clock::time_point startedAt;
@@ -503,6 +523,7 @@ private:
         double benchmarkCollectionMs = 0, intervalMs = 0, residencyWaitMs = 0;
         uint64_t benchmarkFrame = UINT64_MAX;
         uint32_t width = 0, height = 0;
+        float renderScale = 1.f; // Work::RenderScale
     };
 
     void Submit(Work work, Packet packet)
@@ -791,6 +812,13 @@ private:
                     m_retiredFrames.clear();
                     m_renderer.Resize(packet.width, packet.height);
                 }
+                else if (work == Work::RenderScale)
+                {
+                    m_renderer.WaitIdle();
+                    m_inFlightFrames.clear();
+                    m_retiredFrames.clear();
+                    m_renderer.ApplyRenderScale(packet.renderScale);
+                }
                 else if (work == Work::Idle)
                 {
                     m_renderer.WaitIdle();
@@ -1056,6 +1084,26 @@ int GameApplication::Run(HINSTANCE instance, const GameBenchmarkOptions* benchma
     Engine::Runtime::Game game(scene);
     game.SetDefaultScenePath(defaultScene);
     game.Start();
+    // Internal render scale: the scene's render scale times the quality
+    // preset's (as the editor's game view applies them), or
+    // ENGINE_RENDER_SCALE (0.5-1) for A/B runs. With TAA the post-process
+    // upscales temporally, otherwise bilinearly. Steps of 1/100 keep small
+    // drifts from recreating targets. Applied here before the first frame
+    // (and before the benchmark records the renderer's settings), then
+    // between frames whenever it changes.
+    float renderScaleOverride = 0.f;
+    if (const char* value = std::getenv("ENGINE_RENDER_SCALE"))
+        if (const float scale = static_cast<float>(std::atof(value)); scale > 0.f)
+            renderScaleOverride = std::clamp(scale, .5f, 1.f);
+    const auto desiredRenderScale = [&]
+    {
+        const float scale = renderScaleOverride > 0.f ? renderScaleOverride
+            : std::clamp(scene.settings.renderScale *
+                scene.settings.graphicsQuality.Resolve().renderScale, .5f, 1.f);
+        return std::round(scale * 100.f) / 100.f;
+    };
+    float appliedRenderScale = desiredRenderScale();
+    renderer->ApplyRenderScale(appliedRenderScale);
     std::unique_ptr<GameBenchmark> gameBenchmark;
     if (benchmark)
         gameBenchmark = std::make_unique<GameBenchmark>(*benchmark, *renderer,
@@ -1143,7 +1191,13 @@ int GameApplication::Run(HINSTANCE instance, const GameBenchmarkOptions* benchma
                 }
             }
         }
-        simulation.BeginUpdate(deltaTime, std::move(input));
+        if (const float scale = desiredRenderScale(); scale != appliedRenderScale)
+        {
+            renderLoop.ApplyRenderScale(scale);
+            appliedRenderScale = scale;
+        }
+        simulation.BeginUpdate(deltaTime, std::move(input),
+            renderer->GetRenderWidth(), renderer->GetRenderHeight());
         uint32_t previousOcclusionCulled = 0;
         if (width && height)
             previousOcclusionCulled = renderLoop.BeginFrame();

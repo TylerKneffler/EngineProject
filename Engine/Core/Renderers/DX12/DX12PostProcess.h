@@ -14,9 +14,14 @@ class DX12PostProcess
 public:
     // samples > 1 renders the scene into a multisampled target (MSAA) that
     // Compose resolves before post-processing; unsupported counts are
-    // lowered (SupportedSamples).
-    void Create(ID3D12Device* device, uint32_t width, uint32_t height, uint32_t samples = 1u);
+    // lowered (SupportedSamples). width x height is the output; a smaller
+    // render size (0 = the output) renders the scene into its own target,
+    // which TAA upscales (temporal upscaling) or, without TAA, a bilinear
+    // pass stretches to the output before bloom, exposure and compose.
+    void Create(ID3D12Device* device, uint32_t width, uint32_t height, uint32_t samples = 1u,
+        uint32_t renderWidth = 0u, uint32_t renderHeight = 0u);
     uint32_t GetSampleCount() const { return m_samples; }
+    bool IsUpscaling() const { return m_sceneColorRender != nullptr; }
     // The highest count up to `samples` that the device supports for the
     // scene colour and depth formats.
     static uint32_t SupportedSamples(ID3D12Device* device, uint32_t samples);
@@ -55,6 +60,12 @@ private:
     // Creates the history targets on first use; (re)writes the temporal
     // tables' history and depth views.
     void PrepareTemporalResources();
+    // Stretches the render-size scene into m_sceneColor (UpscalePS).
+    void RenderUpscale(ID3D12GraphicsCommandList* commandList);
+    // The single-sample target the scene renders into (or MSAA resolves
+    // into): m_sceneColorRender when upscaling, else m_sceneColor.
+    ID3D12Resource* SceneTarget() const
+    { return m_sceneColorRender ? m_sceneColorRender.Get() : m_sceneColor.Get(); }
     static void SetBoundSceneSamples(const ID3D12GraphicsCommandList* commandList, uint32_t samples);
 
     // Single-sample scene colour that every post pass reads (SRV 0). With
@@ -62,6 +73,9 @@ private:
     // the resolve-source state) and Compose resolves it into m_sceneColor.
     Microsoft::WRL::ComPtr<ID3D12Resource> m_sceneColor;
     Microsoft::WRL::ComPtr<ID3D12Resource> m_sceneColorMultisampled;
+    // Render-size scene colour when the render size is below the output
+    // (pixel-shader resource state between frames); null otherwise.
+    Microsoft::WRL::ComPtr<ID3D12Resource> m_sceneColorRender;
     uint32_t m_samples = 1u;
     // Half-resolution bloom mip chain; every level rests in the pixel-shader
     // resource state between passes.
@@ -89,6 +103,7 @@ private:
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_exposureHistogramPipeline;
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_exposureAdaptPipeline;
     Microsoft::WRL::ComPtr<ID3D12PipelineState> m_temporalPipeline;
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> m_upscalePipeline;
     // TAA history, two targets alternating frames (pixel-shader resource
     // state between passes); created on first use.
     Microsoft::WRL::ComPtr<ID3D12Resource> m_history[2];
@@ -101,6 +116,8 @@ private:
     uint32_t m_srvStride = 0;
     uint32_t m_width = 0;
     uint32_t m_height = 0;
+    uint32_t m_renderWidth = 0;
+    uint32_t m_renderHeight = 0;
     uint32_t m_bloomLevels = 0;
 };
 }

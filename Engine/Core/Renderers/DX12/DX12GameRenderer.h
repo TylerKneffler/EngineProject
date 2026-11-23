@@ -97,6 +97,9 @@ public:
         uint32_t& height) override;
 
     // IGameRenderer interface
+    uint32_t GetRenderWidth() const override { return m_renderWidth; }
+    uint32_t GetRenderHeight() const override { return m_renderHeight; }
+    void ApplyRenderScale(float scale) override;
     void BeginFrame() override;   // reset allocator + list, transition backbuffer to RENDER_TARGET
     void EndFrame() override;     // execute list, present, signal fence
     uint64_t GetSubmittedFrameToken() const override { return m_fenceValue; }
@@ -129,6 +132,12 @@ private:
     // Follows the project's MSAA setting (RenderingEffects): when it changes,
     // waits for the GPU and recreates the depth and post-process targets.
     void ApplySampleCount();
+    // Sets the render size from the output size and m_renderScale, and the
+    // viewport and scissor to it.
+    void UpdateRenderExtent();
+    // (Re)creates the depth target and post-process targets for the current
+    // output and render sizes.
+    void CreateSizeDependentTargets();
     uint32_t m_msaaSamples = 1;
     void FlushGPU(); // wait for all GPU work to finish (used in Resize / dtor)
 
@@ -221,6 +230,10 @@ private:
     uint32_t m_frameIndex = 0;
     uint32_t m_width  = 0;
     uint32_t m_height = 0;
+    // Scene render size (depth target, viewport): the output scaled by
+    // m_renderScale; post-processing upscales it to m_width x m_height.
+    uint32_t m_renderWidth  = 0;
+    uint32_t m_renderHeight = 0;
 
     // True when the DXGI adapter supports tearing (queried once during Init).
     // Required for Present(0, DXGI_PRESENT_ALLOW_TEARING) to actually uncap
