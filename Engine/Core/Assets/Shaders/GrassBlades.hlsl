@@ -134,6 +134,9 @@ void VSMain(
         : (t < 0.5 ? lerp(BladeRoot, BladeMid, t * 2.0) : lerp(BladeMid, dry ? DryTip : BladeTip, t * 2.0 - 1.0));
     colour *= 0.88 + 0.24 * shade;
     colour *= float3(1.0 + (hue - 0.5) * 0.16, 1.0, 1.0 - (hue - 0.5) * 0.2);
+    // Pockets between clumps (GrassBlades.hlsl), darkest at the roots.
+    const float pocketShade = asfloat(r2.z);
+    colour *= lerp(pocketShade, 1.0, 0.5 * t);
     oColor = float4(GrassColorVariation(colour, root), 1.0);
     oTangent = float4(worldTangent, 1.0);
     oUvChannels0 = float4(oUv, 0.0, 0.0);

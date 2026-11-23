@@ -40,7 +40,10 @@ namespace Engine::Model
         uint32_t directionalResolution = 2048;
         uint32_t directionalCascadeCount = 4;
         uint32_t directionalCascadeCasterBudget = 0;
-        float directionalDistance = 150.f;
+        // Near cascades to 250 m (trees cast with their LOD1 mesh to 220 m),
+        // split so the first cascade keeps the extent it had at 150 m and
+        // lambda 0.65 (~18 m); stepped outer cascades keep this cheap.
+        float directionalDistance = 250.f;
         // Far shadow range. When greater than directionalDistance (and two or
         // more cascades are enabled), the earlier cascades share the near
         // range and the last cascade alone covers directionalDistance ..
@@ -49,9 +52,10 @@ namespace Engine::Model
         // grid step. 0 disables.
         float directionalFarDistance = 2000.f;
         float grassCasterDistance = 150.f;
-        float foliageCasterDistance = 150.f;
+        // Wind-animated casters (trees among them) end here.
+        float foliageCasterDistance = 250.f;
         uint32_t pcfRadius = 1;
-        float cascadeSplitLambda = 0.65f;
+        float cascadeSplitLambda = 0.79f;
         float cascadeTransitionFraction = 0.1f;
         PortalShadowPolicy portalPolicy = PortalShadowPolicy::ReuseMain;
         uint32_t portalAtlasResolution = 1024;

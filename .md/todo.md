@@ -410,8 +410,8 @@ options and references: [far_detail_and_visibility_research.md](far_detail_and_v
          ms (15.1 → 8.4 M vertices); field walk 16.6-16.8 → 15.1-15.2 ms (grass 9.4 → 8.1, interleaved);
          MeadowSlope 8.1 → 7.9, ForestEdge and Vista unchanged. Look: the far meadow band past ~45 m reads a
          little smoother (`.local/perfagent/s3a_crop_*.png` in the perf worktree).
-   - [x] GPU grass blades, behind `ENGINE_GPU_GRASS=1` (2026-11-22, `agents/perf`). The meadow's fine grass
-         and tall fields are generated on the GPU every frame; shrubs, accents, bushes and the far ring stay
+   - [x] GPU grass blades, on by default since 2026-11-22 (`ENGINE_GPU_GRASS=0` keeps the mesh grass;
+         `agents/perf`). The meadow's fine grass and tall fields are generated on the GPU every frame; shrubs, accents, bushes and the far ring stay
          meshes. How: each meadow `GrassField` in blade mode (`gpuBlades`, set by LandscapeDriver) hands its
          cell's height and grass paint grids to the scene's `GrassBlades` (Assets/Grass), which packs every
          loaded cell into one buffer and owns one carrier object (a 4-segment blade template, one dummy
@@ -436,11 +436,26 @@ options and references: [far_detail_and_visibility_research.md](far_detail_and_v
          Found on the way: until a material shader has compiled, its draw falls back to the base pipeline; a
          carrier drawn that way read blade records as pool indices and hung the GPU (root SRVs have no bounds
          checks). Carriers now draw only once their shader is resolved.
-   - [ ] Blades: grass GPU is still 4.5 ms on the field walk (target 4): the blade count is no longer the
-         lever (keep distance 7 → 6 m changed nothing); next, split the remaining grass stage (accents,
-         shrubs, far ring, the compute pass, pixel shading). FieldWalk's darker tussock pockets (clump
-         contrast in colour and height). DX11 (no indirect draws) skips the carrier, so the switch shows no
-         fine grass there; Vulkan not run. Make it the default after these.
+   - [x] Blades finished and made the default (2026-11-22, `agents/perf`).
+         Grass stage at FieldWalk split (debug switch `ENGINE_GPU_GRASS_DEBUG`): leftover meshes 2.9 ms, blade
+         pixels ~1.6, blade vertices ~0.15, the generation pass ~0.05. Most of the rest was not grass at all:
+         every instanced batch ran reset, barrier, cull, barrier right before its draw (two GPU drains per
+         batch, ~190 per frame). The camera view now records all its culls first and runs them in one
+         compute pass with two barriers, then replays the draws (`ENGINE_HOIST_CULLS=0` restores the old
+         order): FieldWalk 11.9 → 10.9 ms, grass 4.2 → 2.6, foliage depth 2.2 → 0.25 (cull work shows as
+         ~1.9 ms opaque other); ForestFloor 13.9 → 11.4; Vulkan FieldWalk 12.4 → 9.7; DX11 10.1-10.3 →
+         9.9-10.0. Blade mode also drops the meadow's remaining tall_grass_clump shrub.
+         Pockets: a 2.4 m tussock Voronoi; toward the border of two tussocks short blades thin (90 %), lose
+         up to 70 % of height and darken toward the roots, so FieldWalk reads as tussocks with shadowed
+         hollows like the mesh grass (1440p `.local/foliage/pk2_*`, `pk3_*`); no measurable cost.
+         Backends: Vulkan had no SPIR-V for the generation shader (no grass in blade mode); now built.
+         DX11 draws blades through its indirect path. A renderer that cannot draw blades marks the field
+         unavailable and the meadow rebuilds its mesh grass (`ENGINE_GPU_GRASS_DEBUG=4` simulates it).
+         Default on, interleaved (blades / mesh): stills FieldWalk 10.7-10.9 / 14.0-15.0 ms, MeadowSlope
+         12.0-12.5 / 15.4-15.5, ForestEdge 11.9-12.1 / 13.7-13.8; walks field 11.4-11.7 / 14.6-14.7 (p99 39 /
+         48-53, grass 2.4 / 6.6-6.9), meadow 13.2-13.3 / 13.7-13.8, forest edge turning 13.2 / 13.5-14.1.
+   - [ ] Blades lean further over in gusts than the mesh grass (ForestEdge, FieldWalk crops): the wind's
+         height weighting differs between the blade shader and the mesh grass.
 3. **Retained render scene for everything else.** `PrepareFrameItems` copies every item each frame (2.6 ms for
    9.1k items at the last count) and the render packet retains two buffers per item (18k shared-pointer copies
    and `RetainBuffer` calls on the render thread). Keep object data in a GPU buffer updated from a dirty list
@@ -838,6 +853,32 @@ grass 9.9, opaque 4.8). Most sources are talk abstracts, slides or press summari
          15.4-15.5 → 13.9-14.0 ms (frames > 33 ms 17 → 3-13). Captures at ForestFloor, ForestEdge,
          MeadowSlope, Vista, FieldWalk: same shadows, differences are wind. New frames.jsonl key
          `shadow_cascades_refreshed` (bit mask).
+   - [x] Longer shadow ranges (2026-11-22, `agents/perf`). Interleaved walks (forest, field, turning) and
+         stills at ForestEdge, ForestWall, MeadowSlope, Vista, FieldWalk and a mid-range view with trees at
+         ~100-250 m (`--camera-position 40,-8,-80 --camera-target 140,-27,90`, "MidB"); looks from stills
+         with `ENGINE_WIND_TIME=100` (freezes wind; cloud shadows still move).
+         1. Trees cast with their LOD1 mesh to 220 m (was 90), `ENGINE_TREE_SHADOW_DISTANCE`. Alone it changed
+            nothing: the near cascades ended at 150 m, and `foliageCasterDistance` (150 m) caps every
+            wind-animated caster, the oaks among them (it would have left trees at 150-220 m with no shadow,
+            since the impostors only cast past 220 m).
+         3. Near cascades to 250 m (was 150) with the split blend 0.65 → 0.79, so the first cascade keeps its
+            ~18 m (second 43 → 49 m, third 49-250 m), and the foliage caster budget 250 m: the
+            `RealtimeShadowSettings` defaults, project loader fallbacks and template. A/B switches
+            `ENGINE_SHADOW_NEAR_DISTANCE` (keeps the authored first split), `ENGINE_FOLIAGE_CASTER_DISTANCE`;
+            the old behaviour is tree 90 / near 150 / foliage 150. Projects that write 150 m keep it.
+            Cost 1+3 (new / old): shadow GPU forest walk 1.33 / 1.18 and 1.54 / 1.48 ms, turning 1.35 / 1.30
+            and 1.36 / 1.52; shadow recording +0.1-0.36 ms CPU in most stills; frames within drift. On by
+            default. Look: near shadows unchanged (ForestFloor 0.02 % pixels), ForestWall's canopy at
+            90-220 m self-shadows more deeply, elsewhere ≤ 0.2 % (the meadow ridge at ~150 m in MidB).
+         2. Rocks, boulders, logs and stumps cast to 150 m (was 80), `ENGINE_PROP_SHADOW_DISTANCE`: forest walk
+            shadow GPU 1.23 / 1.46 ms against 1.36 / 1.56 off, frames 15.2 / 15.7 against 15.2 / 16.2: no
+            measurable cost, on by default. Scanned bushes, shrubs and ferns (`ENGINE_SCAN_BUSH_SHADOWS=1`,
+            out to their 80 m reach): shadow GPU +0.7 ms (2.01 / 2.25), shadow recording +0.8-1.1 ms CPU,
+            forest walk frames +1.3-2.5 ms with more spikes, for a subtle look (bushes self-shadow and read
+            more solid at MeadowSlope). Off by default.
+   - [ ] Scanned plant shadows cheaper: the 30 m variant (`ENGINE_SCAN_BUSH_SHADOW_DISTANCE=30`) cost as much
+         as 80 m (2.33 / 2.38 ms), so the range is not what limits it; check the grass caster budget and
+         per-tile caster culling of the scan fields, or a shadow-only card LOD.
 4. **Far forest as voxels or octahedral impostors** (Next 5; Chlorophyll, UE 5.7): mainly look and memory;
    per-instance data dropped for the farthest proxies.
 5. **Cluster LOD / mesh shaders for trees** (Chlorophyll, Nanite, Alan Wake 2): the reference engine's core,

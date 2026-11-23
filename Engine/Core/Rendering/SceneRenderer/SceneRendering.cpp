@@ -1785,7 +1785,9 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
         }
         else if(mesh && mesh->foliageWindStrength>0.f)
         {
-            const float budget=std::max(0.f,m_realtimeShadowSettings.foliageCasterDistance);
+            // ENGINE_FOLIAGE_CASTER_DISTANCE=<m> overrides it for A/B runs.
+            static const float foliageOverride=[]{ const char* v=std::getenv("ENGINE_FOLIAGE_CASTER_DISTANCE"); return v ? float(std::atof(v)) : -1.f; }();
+            const float budget=std::max(0.f,foliageOverride>=0.f ? foliageOverride : m_realtimeShadowSettings.foliageCasterDistance);
             if(budget<=0.f) preparedDraw.castsShadow=false;
             else if(casterFade.x<=0.f || budget<casterFade.x) casterFade.x=budget;
         }
@@ -2209,8 +2211,11 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
         }
         perPlacementFade(objectData.geometryFade, mesh);
         objectData.shadowCasterFade={casterFade.x,std::min(casterFade.x,casterFade.y),0.f,0.f};
+        // ENGINE_WIND_TIME=<seconds> freezes wind at that time, so look
+        // captures of different builds or switches compare pixel for pixel.
+        static const float fixedWindTime=[]{ const char* v=std::getenv("ENGINE_WIND_TIME"); return v ? float(std::atof(v)) : -1.f; }();
         objectData.grassAnimation={(mesh && mesh->foliageWindStrength>0.f) || (mat && mat->shaderUsesTime)
-                ? static_cast<float>(m_scene.GetElapsedTime()):0.f,
+                ? (fixedWindTime>=0.f ? fixedWindTime : static_cast<float>(m_scene.GetElapsedTime())):0.f,
             // y: 1 grass bend, 2 tree wind (Mesh::foliageWindTree; ENGINE_TREE_WIND=0
             // turns tree wind off for A/B captures).
             mesh && mesh->foliageWindStrength>0.f && !(mesh->foliageWindTree && !TreeWindEnabled())
@@ -2511,6 +2516,28 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
         lodDrawMetrics[lod] += selectedLodDraws[lod];
     auto& screenPlacementLevels = lodSelection.PlacementLevels();
     std::vector<Engine::Rendering::PreparedInstanceDraw>* instanceDrawCapture = nullptr;
+    // Hoisted culls (camera view): while deferCulls is set, instanced batches
+    // record their cull dispatches here and only capture their draws; the
+    // flush then runs every reset, one set of barriers, every cull and one
+    // more set, instead of two GPU drains per batch between the draws.
+    struct DeferredCull
+    {
+        const Engine::Graphics::IPipelineState* pipeline = nullptr;
+        const Engine::Graphics::IGraphicsBuffer* input = nullptr;
+        const Engine::Graphics::IGraphicsBuffer* pool = nullptr;
+        const Engine::Graphics::IGraphicsBuffer* occlusion = nullptr;
+        const Engine::Graphics::IGraphicsBuffer* output = nullptr;
+        std::array<uint8_t, 128> reset{}, cull{};
+        uint32_t size = 0, groups = 0;
+        // Instance batches schedule their visibility readback after the flush.
+        Engine::Rendering::PersistentInstanceBatches::Batch* batch = nullptr;
+        uint32_t lod = 0;
+        uint64_t view = 0;
+    };
+    static_assert(sizeof(Engine::Rendering::InstanceCullConstants) <= 128 &&
+        sizeof(Engine::Rendering::GpuBladeConstants) <= 128);
+    std::vector<DeferredCull> deferredCulls;
+    bool deferCulls = false;
     const auto submitAutomaticGroup = [&](const AutomaticGroup& group,
         const glm::mat4& cullViewProjection, uint32_t objectBase,
         Engine::Graphics::IPipelineState* pipeline,
@@ -2726,9 +2753,15 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
                 // has compiled the default pipeline would read blade records as
                 // pool indices (unbounded root SRV reads hang the GPU).
                 if(bladeField && !representative.surfaceShaderResolved) continue;
+                // Measurement only: ENGINE_GPU_GRASS_DEBUG=1 generates blades
+                // without drawing them, 2 skips the carrier altogether, 3 draws
+                // zero-height blades, 4 acts as a renderer without blades.
+                static const int bladeDebug=[]{ const char* v=std::getenv("ENGINE_GPU_GRASS_DEBUG"); return v ? std::atoi(v) : 0; }();
+                if(bladeField && bladeDebug==2) continue;
                 bool gpu=instanceLodDisplayOverride < 0 && gpuInstanceCulling &&
                     context->SupportsIndirectDraws() &&
                     (count>=32 || gpuLod || representative.mesh->instanceLodBand>=0 || bladeField);
+                if(bladeField && bladeDebug==4) gpu=false; // tests the mesh grass fallback
                 if(gpu && bladeField && !m_grassBladeAttempted)
                 {
                     m_grassBladeAttempted=true;
@@ -2737,7 +2770,15 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
                     if(shader) m_grassBladePipeline=m_graphicsProvider->GetPipelineStateFactory()->CreateComputePipeline(shader.get());
                     else std::fprintf(stderr,"GrassBlades.hlsl: %s\n",m_graphicsProvider->GetShaderCompiler()->GetLastError().c_str());
                 }
-                if(bladeField && !(gpu && m_grassBladePipeline)) continue;
+                if(bladeField && !(gpu && m_grassBladePipeline))
+                {
+                    // Not drawable here (the editor's fixed-LOD view aside):
+                    // the meadow falls back to mesh grass (GrassBlades::Update).
+                    if(instanceLodDisplayOverride < 0 && (bladeDebug==4 ||
+                        !gpuInstanceCulling || !context->SupportsIndirectDraws() || m_grassBladeAttempted))
+                        bladeField->unavailable=true;
+                    continue;
+                }
                 if(gpu && !m_instanceCullAttempted)
                 {
                     m_instanceCullAttempted=true;
@@ -2746,7 +2787,7 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
                     if(shader) m_instanceCullPipeline=m_graphicsProvider->GetPipelineStateFactory()->CreateComputePipeline(shader.get());
                 }
                 gpu=gpu && (m_instanceCullPipeline || bladeField);
-                if(gpu) gpu=context->BeginComputePass();
+                if(gpu && !deferCulls) gpu=context->BeginComputePass();
                 if(bladeField && !gpu) continue;
                 DrawCBData constants=representative.drawData;
                 constants.objectIndex=objectBase; constants.flags|=(uint32_t(residentLod)<<21)|0x00080000u;
@@ -2801,8 +2842,18 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
                     blade.grid[1]=int(std::floor((cameraPosition.z-reach)/patch));
                     blade.grid[2]=side; blade.grid[3]=1;
                     blade.draw[0]=tiles.front().range.z; blade.draw[1]=sourceRange.vertexCount;
-                    blade.draw[2]=bladeField->capacity; blade.draw[3]=cullOcclusionFlag && cullOcclusion ? 1u:0u;
+                    blade.draw[2]=bladeField->capacity; blade.draw[3]=(cullOcclusionFlag && cullOcclusion ? 1u:0u) | (bladeDebug==3 ? 2u:0u);
                     auto* data=bladeField->data.get();
+                    if(deferCulls)
+                    {
+                        DeferredCull deferred{m_grassBladePipeline.get(),data,data,cullOcclusion ? cullOcclusion : data,buffers.output.get()};
+                        deferred.size=sizeof(blade); deferred.groups=uint32_t(side*side);
+                        std::memcpy(deferred.reset.data(),&blade,sizeof(blade));
+                        blade.grid[3]=0; std::memcpy(deferred.cull.data(),&blade,sizeof(blade));
+                        deferredCulls.push_back(deferred); ++m_lastRenderCpuTimings.gpuBatches;
+                    }
+                    else
+                    {
                     const auto bind=[&]{
                         context->SetComputePipeline(m_grassBladePipeline.get());
                         context->SetComputeReadBuffer(data); context->SetComputeReadBuffer(data,1);
@@ -2814,13 +2865,12 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
                     blade.grid[3]=0;
                     bind(); context->DispatchCompute(uint32_t(side*side));
                     context->StorageBarrier(buffers.output.get()); context->EndComputePass(); ++m_lastRenderCpuTimings.gpuBatches;
+                    }
                 }
                 else if(gpu)
                 {
                     ++m_lastRenderCpuTimings.gpuGrassBatches;
                     if(shadowOnly) ++m_lastShadowCpuTiming.gpuGrassBatches;
-                    context->SetStructuredBuffer(45,m_emptyMorphDeltaBuffer.get());
-                    context->SetComputePipeline(m_instanceCullPipeline.get());
                     Engine::Rendering::InstanceCullConstants cull;
                     cull.viewProjection=cullViewProjection; cull.cameraPosition=glm::vec4(cameraPosition,1);
                     cull.counts={uint32_t(tiles.size()),sourceRange.vertexCount,sourceRange.firstVertex,1};
@@ -2829,6 +2879,19 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
                     // w: where this range's plants have faded out (0 = no shorter reach).
                     if(reachBits) cull.cameraPosition.w=representative.objectData.placementFade.y*(float(reachBits)/1024.f);
                     else cull.cameraPosition.w=0.f;
+                    if(deferCulls)
+                    {
+                        DeferredCull deferred{m_instanceCullPipeline.get(),buffers.input.get(),pool,cullOcclusion,buffers.output.get()};
+                        deferred.size=sizeof(cull); deferred.groups=uint32_t(tiles.size());
+                        std::memcpy(deferred.reset.data(),&cull,sizeof(cull));
+                        cull.counts.w=0; std::memcpy(deferred.cull.data(),&cull,sizeof(cull));
+                        deferred.batch=&buffers; deferred.lod=static_cast<uint32_t>(lodMetric); deferred.view=diagnosticViewIdentity;
+                        deferredCulls.push_back(deferred); ++m_lastRenderCpuTimings.gpuBatches;
+                    }
+                    else
+                    {
+                    context->SetStructuredBuffer(45,m_emptyMorphDeltaBuffer.get());
+                    context->SetComputePipeline(m_instanceCullPipeline.get());
                     context->SetComputeReadBuffer(buffers.input.get()); context->SetComputeReadBuffer(pool,1); context->SetComputeWriteBuffer(buffers.output.get());
                     context->SetComputeReadBuffer(cullOcclusion,2);
                     context->SetComputeConstants(&cull,sizeof(cull)); context->DispatchCompute(1); context->StorageBarrier(buffers.output.get());
@@ -2840,6 +2903,7 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
                     context->StorageBarrier(buffers.output.get()); context->EndComputePass(); ++m_lastRenderCpuTimings.gpuBatches;
                     Engine::Rendering::PersistentInstanceBatches::ScheduleVisibilityReadback(
                         context,buffers,static_cast<uint32_t>(lodMetric),shadowOnly,diagnosticViewIdentity);
+                    }
                 }
                 ensureRecordsUploaded();
                 const Engine::Rendering::PreparedInstanceDraw instanceDraw{
@@ -2855,9 +2919,10 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
                         " lod " + std::to_string(residentLod) + " outputBytes " + std::to_string(buffers.output ? buffers.output->GetSize() : 0) +
                         (buffers.cold ? " cold" : "") + (buffers.membershipChanged ? " membership" : "") +
                         (buffers.metadataChanged ? " metadata" : "") + " allocations " + std::to_string(buffers.allocations));
+                if(!(bladeField && bladeDebug==1) && !deferCulls)
                 instanceDraw.Submit(*context, pipeline, m_emptyMorphDeltaBuffer.get(),
                     m_emptyMorphWeightBuffer.get());
-                if (instanceDrawCapture) instanceDrawCapture->push_back(instanceDraw);
+                if (instanceDrawCapture && !(bladeField && bladeDebug==1)) instanceDrawCapture->push_back(instanceDraw);
                 ++submitted.draws;
                 submitted.instances += buffers.candidates;
                 submitted.triangles += static_cast<uint64_t>(
@@ -3371,28 +3436,120 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
             draw.vertexBuffer == draw.mesh->GetGraphicsBuffer() &&
             draw.pipeline == (draw.doubleSided ? m_objectDoubleSidedPipeline.get() : m_objectPipeline.get());
     };
+    // The foliage depth pipeline of a group drawn depth first, else null.
+    const auto foliageDepthPipeline = [&](size_t groupIndex) -> Engine::Graphics::IPipelineState*
+    {
+        if (!foliageDepthEnabled) return nullptr;
+        const auto& group = automaticGroups[groupIndex];
+        if (group.members.empty() || !std::all_of(group.members.begin(), group.members.end(),
+            [&](auto index) {
+                // Singleton candidates can remain on the ordinary draw
+                // path and have no prepared instance tiles to replay.
+                return preparedDraws[index].automaticGroup == groupIndex &&
+                    depthEligible(preparedDraws[index]);
+            })) return nullptr;
+        const auto& draw = preparedDraws[group.members.front()];
+        auto* depthPipeline = m_foliageDepthPipelines[draw.doubleSided ? 1 : 0].get();
+        return depthPipeline && m_foliageEqualPipelines[draw.doubleSided ? 1 : 0] ? depthPipeline : nullptr;
+    };
+    // Hoisted culls: prepare every instanced group of the camera view first,
+    // recording its cull dispatches, then run them all with two barriers in
+    // total. The passes below replay the captured draws. ENGINE_HOIST_CULLS=0
+    // culls each batch right before its draw (two GPU drains per batch).
+    std::vector<std::vector<Engine::Rendering::PreparedInstanceDraw>> hoistedDraws(automaticGroups.size());
+    std::vector<SubmittedGeometry> hoistedSubmitted(automaticGroups.size());
+    std::vector<uint8_t> hoisted(automaticGroups.size(), 0);
+    if (ReadEnvFlag("ENGINE_HOIST_CULLS", true) && !automaticGroups.empty())
+    {
+        deferCulls = true;
+        for (const PreparedDraw& draw : preparedDraws)
+        {
+            const auto groupIndex = draw.automaticGroup;
+            if (groupIndex == UINT32_MAX || hoisted[groupIndex]) continue;
+            const auto& group = automaticGroups[groupIndex];
+            hoisted[groupIndex] = 1;
+            if (!preparedDraws[group.members.front()].mesh->IsInstanced()) { hoisted[groupIndex] = 3; continue; }
+            auto* depthPipeline = foliageDepthPipeline(groupIndex);
+            if (depthPipeline) hoisted[groupIndex] = 2;
+            instanceDrawCapture = &hoistedDraws[groupIndex];
+            hoistedSubmitted[groupIndex] = submitAutomaticGroup(group, viewProjection, 0,
+                depthPipeline ? depthPipeline : geometrySubmission.GeometryPipeline(draw, draw.pipeline), nullptr);
+            instanceDrawCapture = nullptr;
+        }
+        deferCulls = false;
+        for (auto& state : hoisted) if (state == 3) state = 0;
+        if (!deferredCulls.empty())
+        {
+            // Two batches sharing an output would keep only the last cull.
+            static bool sharedOutputReported = false;
+            if (!sharedOutputReported)
+            {
+                std::vector<const Engine::Graphics::IGraphicsBuffer*> outputs;
+                for (const auto& cull : deferredCulls) outputs.push_back(cull.output);
+                std::sort(outputs.begin(), outputs.end());
+                if (std::adjacent_find(outputs.begin(), outputs.end()) != outputs.end())
+                { std::fprintf(stderr, "Hoisted culls: two batches share an output buffer\n"); sharedOutputReported = true; }
+            }
+            switchGpuStage(Engine::Graphics::GpuTimingStage::Opaque);
+            if (context->BeginComputePass())
+            {
+                context->SetStructuredBuffer(45, m_emptyMorphDeltaBuffer.get());
+                const auto dispatch = [&](const DeferredCull& cull, bool reset)
+                {
+                    context->SetComputePipeline(cull.pipeline);
+                    context->SetComputeReadBuffer(cull.input); context->SetComputeReadBuffer(cull.pool, 1);
+                    context->SetComputeReadBuffer(cull.occlusion, 2);
+                    context->SetComputeWriteBuffer(cull.output);
+                    context->SetComputeConstants(reset ? cull.reset.data() : cull.cull.data(), cull.size);
+                    context->DispatchCompute(reset ? 1u : cull.groups);
+                };
+                for (const auto& cull : deferredCulls) dispatch(cull, true);
+                for (const auto& cull : deferredCulls) context->StorageBarrier(cull.output);
+                for (const auto& cull : deferredCulls) dispatch(cull, false);
+                for (const auto& cull : deferredCulls) context->StorageBarrier(cull.output);
+                context->EndComputePass();
+                for (const auto& cull : deferredCulls)
+                    if (cull.batch)
+                        Engine::Rendering::PersistentInstanceBatches::ScheduleVisibilityReadback(
+                            context, *cull.batch, cull.lod, false, cull.view);
+            }
+            else
+            {
+                // No compute here (cannot happen on the current backends):
+                // drop the indirect draws rather than read stale arguments.
+                for (auto& draws : hoistedDraws)
+                    draws.erase(std::remove_if(draws.begin(), draws.end(),
+                        [](const auto& draw) { return draw.indirect; }), draws.end());
+            }
+            deferredCulls.clear();
+        }
+    }
     if (foliageDepthEnabled)
         for (size_t groupIndex = 0; groupIndex < automaticGroups.size(); ++groupIndex)
         {
+            auto* depthPipeline = foliageDepthPipeline(groupIndex);
+            if (!depthPipeline) continue;
             const auto& group = automaticGroups[groupIndex];
-            if (group.members.empty() || !std::all_of(group.members.begin(), group.members.end(),
-                [&](auto index) {
-                    // Singleton candidates can remain on the ordinary draw
-                    // path and have no prepared instance tiles to replay.
-                    return preparedDraws[index].automaticGroup == groupIndex &&
-                        depthEligible(preparedDraws[index]);
-                })) continue;
             const auto& draw = preparedDraws[group.members.front()];
-            auto* depthPipeline = m_foliageDepthPipelines[draw.doubleSided ? 1 : 0].get();
-            if (!depthPipeline || !m_foliageEqualPipelines[draw.doubleSided ? 1 : 0]) continue;
             switchGpuStage(Engine::Graphics::GpuTimingStage::FoliageDepth);
             for (uint32_t textureSlot = 0; textureSlot < std::max(draw.textureSlotCount, boundTextureSlotCount); ++textureSlot)
                 if (!texturesBound || boundTextures[textureSlot] != draw.textures[textureSlot])
                     context->SetTexture(textureSlot, draw.textures[textureSlot]);
             boundTextures = draw.textures; boundTextureSlotCount = draw.textureSlotCount; texturesBound = true;
-            instanceDrawCapture = &foliageDepthDraws[groupIndex];
-            const auto submitted = submitAutomaticGroup(group, viewProjection, 0, depthPipeline, nullptr);
-            instanceDrawCapture = nullptr;
+            SubmittedGeometry submitted{};
+            if (hoisted[groupIndex] == 2)
+            {
+                submitted = hoistedSubmitted[groupIndex];
+                foliageDepthDraws[groupIndex] = std::move(hoistedDraws[groupIndex]);
+                for (const auto& instanceDraw : foliageDepthDraws[groupIndex])
+                    instanceDraw.Submit(*context, depthPipeline, m_emptyMorphDeltaBuffer.get(), m_emptyMorphWeightBuffer.get());
+            }
+            else
+            {
+                instanceDrawCapture = &foliageDepthDraws[groupIndex];
+                submitted = submitAutomaticGroup(group, viewProjection, 0, depthPipeline, nullptr);
+                instanceDrawCapture = nullptr;
+            }
             foliageDepthPrepared[groupIndex] = 1;
             m_lastOrdinaryDrawCount += static_cast<uint32_t>(submitted.draws);
             m_lastRenderCpuTimings.foliageDepthDraws += submitted.draws;
@@ -3428,6 +3585,17 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
                     m_lastRenderCpuTimings.submittedTriangles +=
                         uint64_t(instanceDraw.elementCount / 3u) * instanceDraw.instanceCount;
                 }
+                continue;
+            }
+            if (hoisted[draw.automaticGroup] == 1)
+            {
+                auto* pipeline = geometrySubmission.GeometryPipeline(draw, draw.pipeline);
+                for (const auto& instanceDraw : hoistedDraws[draw.automaticGroup])
+                    instanceDraw.Submit(*context, pipeline, m_emptyMorphDeltaBuffer.get(), m_emptyMorphWeightBuffer.get());
+                const auto& submitted = hoistedSubmitted[draw.automaticGroup];
+                m_lastOrdinaryDrawCount += static_cast<uint32_t>(submitted.draws);
+                m_lastRenderCpuTimings.submittedInstances += submitted.instances;
+                m_lastRenderCpuTimings.submittedTriangles += submitted.triangles;
                 continue;
             }
             const auto submitted = submitAutomaticGroup(automaticGroups[draw.automaticGroup],viewProjection,0,geometrySubmission.GeometryPipeline(draw,draw.pipeline),nullptr);

@@ -384,6 +384,7 @@ void GameBenchmark::Record(uint64_t frame, const GameBenchmarkFrameSample& s)
         << ",\"render_record_packing_ms\":" << r.recordPackingMs
         << ",\"render_record_wait_ms\":" << r.recordWaitMs
         << ",\"render_instance_tile_prepare_ms\":" << r.instanceTilePrepareMs
+        << ",\"render_gpu_cull_batches\":" << r.gpuBatches
         << ",\"shadow_cpu_ms\":" << s.scene.shadow.totalMs
         << ",\"shadow_scene_prepare_ms\":" << s.scene.shadow.scenePreparationMs
         << ",\"shadow_culling_ms\":" << s.scene.shadow.cascadeCullingMs

@@ -8,6 +8,8 @@
 #include "Core/Scene/Scene.h"
 
 #include <algorithm>
+#include <atomic>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
@@ -52,13 +54,16 @@ std::shared_ptr<Engine::Components::Mesh> BladeTemplate(Engine::Graphics::IGraph
 }
 }
 
+namespace { std::atomic<bool> s_unavailable{false}; }
+
 bool GrassBlades::Enabled()
 {
+    // On by default; ENGINE_GPU_GRASS=0 keeps the mesh grass.
     static const bool enabled = [] {
         const char* value = std::getenv("ENGINE_GPU_GRASS");
-        return value && value[0] == '1';
+        return !(value && value[0] == '0');
     }();
-    return enabled;
+    return enabled && !s_unavailable.load(std::memory_order_relaxed);
 }
 
 std::shared_ptr<GrassBlades> GrassBlades::For(Engine::Scene::Scene& scene)
@@ -98,6 +103,10 @@ void GrassBlades::Update(Engine::Scene::Scene& scene, Engine::Graphics::IGraphic
 {
     if (!provider) return;
     if (!m_field) m_field = std::make_shared<Engine::Rendering::GpuBladeField>();
+    // The renderer cannot draw blades here: every meadow field goes back to
+    // its mesh grass (GrassField::Refresh), so no backend is left bare.
+    if (m_field->unavailable && !s_unavailable.exchange(true))
+        std::fprintf(stderr, "GPU grass blades unavailable on this renderer; using mesh grass\n");
     if (m_dirty)
     {
         m_dirty = false;
@@ -112,8 +121,12 @@ void GrassBlades::Update(Engine::Scene::Scene& scene, Engine::Graphics::IGraphic
             s.keepDistance, s.reach - s.fadeBand, s.clumpSize,
             std::ceil((s.shortDensity + s.tallDensity) * patch * patch),
             s.shortHeight[0], s.shortHeight[1], s.tallHeight[0], s.tallHeight[1],
-            s.shortWidth, s.tallWidth, s.dryShare, s.paint[0], s.paint[1]};
+            s.shortWidth, s.tallWidth, s.dryShare, s.paint[0], s.paint[1],
+            s.tussockSize, s.pocketWidth, s.pocketThinning, s.pocketShade, s.pocketLowering};
         std::copy(std::begin(header), std::end(header), data.begin());
+        // Tuning only: ENGINE_GPU_GRASS_POCKET=size,width,thinning,shade,lowering.
+        if (const char* pocket = std::getenv("ENGINE_GPU_GRASS_POCKET"))
+            std::sscanf(pocket, "%f,%f,%f,%f,%f", &data[23], &data[24], &data[25], &data[26], &data[27]);
         size_t index = 0;
         for (const auto& [key, cell] : m_cells)
         {

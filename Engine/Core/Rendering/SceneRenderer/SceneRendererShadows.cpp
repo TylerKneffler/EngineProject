@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdlib>
 
 namespace Engine::Rendering
 {
@@ -20,9 +21,16 @@ SceneRendererShadows::ShadowCascadeSet SceneRendererShadows::BuildCascades(
     uint32_t atlasResolution, uint32_t requestedCascadeCount)
 {
         ShadowCascadeSet out{};
-        const float shadowDistance = std::clamp(
+        const float authoredDistance = std::clamp(
             renderer.m_realtimeShadowSettings.directionalDistance * quality.shadows,
             1.f, 100000.f);
+        // ENGINE_SHADOW_NEAR_DISTANCE=<m>: a longer near range for A/B runs,
+        // with the split blend chosen so the first cascade keeps its authored
+        // extent (and texel density); the later near cascades stretch.
+        static const float nearOverride = []
+        { const char* v = std::getenv("ENGINE_SHADOW_NEAR_DISTANCE"); return v ? float(std::atof(v)) : 0.f; }();
+        const float shadowDistance = nearOverride > 1.f
+            ? std::clamp(nearOverride * quality.shadows, 1.f, 100000.f) : authoredDistance;
         out.count = std::clamp(requestedCascadeCount, 1u, 4u);
         const float cameraNear = std::max(0.001f, cam->nearPlane);
         const float cameraFar = std::max(cameraNear + 0.001f, cam->farPlane);
@@ -35,8 +43,20 @@ SceneRendererShadows::ShadowCascadeSet SceneRendererShadows::BuildCascades(
             renderer.m_realtimeShadowSettings.directionalFarDistance * quality.shadows);
         out.hasFarCascade = out.count >= 2u && farDistance > cascadeFar * 1.5f;
         const uint32_t nearCount = out.hasFarCascade ? out.count - 1u : out.count;
-        const float splitLambda = std::clamp(
+        float splitLambda = std::clamp(
             renderer.m_realtimeShadowSettings.cascadeSplitLambda, 0.f, 1.f);
+        if (shadowDistance != authoredDistance && nearCount > 1u)
+        {
+            const float fraction = 1.f / static_cast<float>(nearCount);
+            const auto split = [&](float rangeEnd, float lambda) {
+                return glm::mix(cameraNear + (rangeEnd - cameraNear) * fraction,
+                    cameraNear * std::pow(rangeEnd / cameraNear, fraction), lambda); };
+            const float authoredFar = std::min(cameraFar, std::max(cameraNear + 0.001f, authoredDistance));
+            const float first = split(authoredFar, splitLambda);
+            const float uniform = split(cascadeFar, 0.f), logarithmic = split(cascadeFar, 1.f);
+            if (std::abs(uniform - logarithmic) > 1.e-3f)
+                splitLambda = std::clamp((uniform - first) / (uniform - logarithmic), 0.f, 1.f);
+        }
         for (uint32_t cascade = 0; cascade < nearCount; ++cascade)
         {
             const float fraction = static_cast<float>(cascade + 1u) /

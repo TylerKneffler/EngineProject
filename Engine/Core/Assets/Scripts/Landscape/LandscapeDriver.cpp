@@ -772,6 +772,15 @@ float LandscapeShadowScale()
     return scale;
 }
 
+// A layer's shadow range: <name> from the environment when set (A/B runs of
+// longer ranges), else the authored one, times LandscapeShadowScale.
+float LandscapeShadowRange(const char* name, float authored)
+{
+    const char* v = std::getenv(name);
+    const float range = v ? std::clamp(float(std::atof(v)), 0.f, 900.f) : authored;
+    return range * LandscapeShadowScale();
+}
+
 // Forest for one cell: random candidates kept where the forest mask, the
 // height band and the slope allow, plus a few lone trees in the meadows.
 void GenerateForest(const TerrainManager::ObjectLayerContext& context,
@@ -788,9 +797,12 @@ void GenerateForest(const TerrainManager::ObjectLayerContext& context,
     layer.viewDistance = 900.f;
     layer.lod1Distance = 60.f;
     layer.lod2Distance = 220.f;
-    layer.shadowDistance = 90.f * LandscapeShadowScale();
+    // Trees cast with their LOD1 mesh to 220 m, inside the 250 m near
+    // cascades and the foliage caster budget (RealtimeShadowSettings);
+    // ENGINE_TREE_SHADOW_DISTANCE for A/B runs (90 m before 2026-11-22).
+    layer.shadowDistance = LandscapeShadowRange("ENGINE_TREE_SHADOW_DISTANCE", 220.f);
     layer.shadowLod = 1;
-    // Beyond 90 m the impostors cast into the far shadow cascade, so forests
+    // Beyond that the impostors cast into the far shadow cascade, so forests
     // keep their shadows on the ground and on each other at any distance.
     layer.farShadowDistance = layer.viewDistance;
     const std::string prefix = "Assets/Prefabs/Woodland/Oaks/";
@@ -1075,7 +1087,9 @@ void GenerateProps(const TerrainManager::ObjectLayerContext& context,
         layer.viewDistance = 220.f;
         layer.lod1Distance = 35.f;
         layer.lod2Distance = 100.f;
-        layer.shadowDistance = 80.f * LandscapeShadowScale();
+        // Rocks, boulders, logs and stumps cast to 150 m (80 m before
+        // 2026-11-22; no measurable cost); ENGINE_PROP_SHADOW_DISTANCE for A/B.
+        layer.shadowDistance = LandscapeShadowRange("ENGINE_PROP_SHADOW_DISTANCE", 150.f);
         layer.shadowLod = 1;
         // The prefabs carry their own LOD0-2 chains; only distances are set.
         for (int rock : LandscapeRocks)
@@ -1518,6 +1532,15 @@ bool LandscapeDriver::ConfigureTerrain()
                 }
                 grass->MarkConfigurationDirty();
             }
+            // Shadows of the scanned plants (alpha-tested cards) out to their
+            // reach (ENGINE_SCAN_BUSH_SHADOWS=1).
+            static const bool scanShadows = []
+            { const char* v = std::getenv("ENGINE_SCAN_BUSH_SHADOWS"); return v && v[0] == '1'; }();
+            if (scanShadows && !grass->castShadows)
+            {
+                grass->castShadows = true;
+                layer.shadowDistance = LandscapeShadowRange("ENGINE_SCAN_BUSH_SHADOW_DISTANCE", 150.f);
+            }
             return;
         }
         if (scanBushes && !grass->bushMeshes.empty())
@@ -1618,12 +1641,19 @@ bool LandscapeDriver::ConfigureTerrain()
         static const bool perPlant = []
         { const char* v = std::getenv("ENGINE_LANDSCAPE_GRASS_PER_PLANT"); return !(v && v[0] == '0'); }();
         if (grass->perPlantDetail != perPlant) { grass->perPlantDetail = perPlant; grass->MarkConfigurationDirty(); }
-        // GPU grass blades (ENGINE_GPU_GRASS=1, GrassBlades.h): the meadow's
+        // GPU grass blades (default; ENGINE_GPU_GRASS=0 off, GrassBlades.h): the meadow's
         // fine grass and tall fields are generated on the GPU; its tiles keep
         // the accents and shrubs.
         if (layer.layerName == "Procedural meadow grass" && grass->gpuBlades != GrassBlades::Enabled())
         {
             grass->gpuBlades = GrassBlades::Enabled();
+            // Its remaining shrub, tall_grass_clump (2,448 / 1,015 / 241
+            // triangles), is grass the blades already draw.
+            if (grass->gpuBlades && grass->shrubMeshes.find("tall_grass_clump") != std::string::npos)
+            {
+                grass->shrubMeshes.clear();
+                grass->shrubPatchesPerSquareMeter = 0.f;
+            }
             grass->MarkConfigurationDirty();
         }
         static const float lodBoost = []
