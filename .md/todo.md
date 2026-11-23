@@ -996,8 +996,22 @@ Progress 2026-11-19 (landscape ForestEdge, DX12 1080p, single runs; frame / upda
       frame rates end at different places).
       - [ ] Landscape demo walk at 0.67 (the 1080p FieldWalk load did not finish in 10 minutes on this
             machine at native scale on 2026-11-23; stopped).
-      - [ ] Texture mip bias: textures pick mips for the render size and look softer. The material sampler
-            is static in the root signature, so a bias needs it rebuilt with the scale.
+      - [x] Texture mip bias (2026-11-23): `ObjectData.viewTextureParams.x` = -log2(output / render
+            pixels) while TAA upscales (0 for shadows and the bilinear stretch), added in
+            `TextureLodBias` and the new `AlphaLodBias`, so every material, grass and terrain
+            (`SampleGrad` gradient scale) sample is biased; ObjectGPUData 1936 → 1952 bytes. Alone it
+            moved sharpness ~2 % (Laplacian variance, grass_test ground): the softness was the
+            reconstruction. `TemporalUpscale` now sizes its kernel in output pixels and fetches history
+            with a 5-tap Catmull-Rom: sharpness 55 → 156 against native 167 (`.local/taau/sharp4.png`).
+      - grass_test now has a tree belt (`tools/build_grass_test_scene.py`: 3 jittered rows, 4/11/18 m in
+        from each edge, oaks and conifers, 129 trees, gap for the explorer; `--no-trees`; foliage_test
+        keeps its grove without it). Regenerating also took the demo's current exposure (-0.75) and
+        ground-weighted metering. Use a 600-frame warmup: far trees are untextured impostors until
+        streamed. Turning, 1920x1080, two interleaved pairs: native 37.7 / 36.7 ms → 0.67 24.7 / 24.3 ms;
+        grass 16.2 → 10.7, terrain 6.0 → 3.3, leaves 3.0 → 1.8, foliage depth 2.4 → 1.5, clouds 2.7 →
+        1.3 ms; shadows unchanged 1.6 ms (`.local/taau/timing_trees/pair.png`: native | 0.67).
+      - [ ] Scanned bushes' coarse level looks broken (eroded leaves, a dark card) wherever it shows,
+            e.g. near the camera at 1280x720 native: an asset LOD problem, not upscaling.
       - [ ] UI draws into the scene pass, so it renders at the render size and goes through TAA.
       - [ ] DX11 and Vulkan ignore the scale (render at full size).
       - [ ] Grass minimum pixel width and other in-shader pixel-size rules still follow the render size.

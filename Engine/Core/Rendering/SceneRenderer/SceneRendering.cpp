@@ -229,7 +229,7 @@ static_assert(offsetof(ObjectGPUData, terrainSunShadow) == 1744, "Terrain sun sh
 static_assert(offsetof(ObjectGPUData, terrainMacroMap) == 1760, "Terrain macro map data must follow the sun shadow");
 static_assert(offsetof(ObjectGPUData, placementFade) == 1792, "Placement fade data must follow the terrain macro data");
 static_assert(offsetof(ObjectGPUData, terrainPathNoise) == 1856, "Terrain path data must follow the placement thinning");
-static_assert(sizeof(ObjectGPUData) == 1936, "Object buffer layout must match Object.hlsl");
+static_assert(sizeof(ObjectGPUData) == 1952, "Object buffer layout must match Object.hlsl");
 static_assert(sizeof(Engine::Model::LightData) == 128,
     "Light buffer layout must match Object.hlsl");
 
@@ -723,6 +723,11 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
     };
     const uint32_t detailWidth = detailExtent(viewportWidth);
     const uint32_t detailHeight = detailExtent(viewportHeight);
+    // Textures sample as if at the output resolution while TAA upscales
+    // this view (it jitters only then); a bilinear stretch keeps the plain
+    // bias, as a negative one would only add shimmer there.
+    const float viewMipBias = temporalDitherFrame > 0.f && m_detailResolutionScale > 1.f
+        ? -std::log2(m_detailResolutionScale) : 0.f;
     // Detail follows screen coverage: LOD distances are authored for a
     // reference camera, so they scale by this view's focal length in pixels
     // (Core/Rendering/ScreenCoverage.h). Shadow views render with the main
@@ -1499,6 +1504,7 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
             data.alphaLodParams = sceneAlphaLodParameters;
             data.textureLodParams = sceneTextureLodParameters;
         }
+        data.viewTextureParams = glm::vec4(viewMipBias, 0.f, 0.f, 0.f);
     };
     double materialPipelineMs = 0.0;
     double materialGeometryBindingMs = 0.0;

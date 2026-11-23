@@ -204,7 +204,7 @@ def main():
                         help="place the grove as standalone prefab objects instead of an "
                              "instanced TerrainObjectLayer (slow shadow-submission path)")
     args = parser.parse_args()
-    grass.build(*CELL, output=OUTPUT)
+    grass.build(*CELL, output=OUTPUT, trees=False)  # the grove replaces the edge belt
     heights, cells_x, _ = grass.read_cell(*CELL)
     side, width = cells_x + 1, cells_x * SPACING
     origin = (CELL[0] * width, CELL[1] * width)

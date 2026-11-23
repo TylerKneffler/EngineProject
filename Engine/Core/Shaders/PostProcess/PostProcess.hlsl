@@ -221,10 +221,39 @@ float3 TemporalFromYCoCg(float3 c)
 float3 TemporalCompress(float3 c) { return c / (1.0 + dot(c, LuminanceWeights)); }
 float3 TemporalExpand(float3 c) { return c / max(1.0 - dot(c, LuminanceWeights), 1e-4); }
 
+// History fetch with a Catmull-Rom filter in five bilinear taps (Jimenez,
+// "Filmic SMAA", 2016): a bilinear fetch every frame blurs the history as
+// the camera moves.
+float3 SampleHistoryCatmullRom(float2 uv, float2 size)
+{
+    const float2 position = uv * size;
+    const float2 centre = floor(position - 0.5) + 0.5;
+    const float2 f = position - centre;
+    const float2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f));
+    const float2 w1 = 1.0 + f * f * (-2.5 + 1.5 * f);
+    const float2 w2 = f * (0.5 + f * (2.0 - 1.5 * f));
+    const float2 w3 = f * f * (-0.5 + 0.5 * f);
+    const float2 w12 = w1 + w2;
+    const float2 uv0 = (centre - 1.0) / size;
+    const float2 uv3 = (centre + 2.0) / size;
+    const float2 uv12 = (centre + w2 / w12) / size;
+    const float weights[5] = { w12.x * w0.y, w0.x * w12.y, w12.x * w12.y, w3.x * w12.y, w12.x * w3.y };
+    const float2 uvs[5] = { float2(uv12.x, uv0.y), float2(uv0.x, uv12.y), uv12,
+        float2(uv3.x, uv12.y), float2(uv12.x, uv3.y) };
+    float3 sum = 0.0;
+    float weightSum = 0.0;
+    [unroll] for (int i = 0; i < 5; ++i)
+    {
+        sum += bloomColor.SampleLevel(sceneSampler, uvs[i], 0.0).rgb * weights[i];
+        weightSum += weights[i];
+    }
+    return max(sum / max(weightSum, 1e-4), 0.0);
+}
+
 // Temporal upscaling: the scene (t0, depth t2) is smaller than the history
 // and output (t1). Each output pixel rebuilds this frame's colour from the
 // 3x3 scene samples around it, placed where the jitter (temporal.zw, render
-// pixels) put them, with a Gaussian of about half a render pixel (an
+// pixels) put them, with a Gaussian of about half an output pixel (an
 // approximation of the Blackman-Harris filter). A sample landing close to
 // the output pixel centre gets more weight against the history, so the
 // jitter sequence fills in detail finer than the render grid over frames.
@@ -249,7 +278,10 @@ float4 TemporalUpscale(VertexOutput input, int2 renderSize, int2 outputSize)
         const float3 c = TemporalToYCoCg(TemporalCompress(min(max(raw.rgb, 0.0), 32768.0)));
         const float2 offset = renderPosition - (float2(at) + 0.5 - jitter);
         const float distanceSquared = dot(offset, offset);
-        const float weight = exp(-2.29 * distanceSquared);
+        // Kernel width in output pixels: measured in render pixels it would
+        // be 1 / scale wider on screen and blur the result.
+        const float2 outputOffset = offset / toRender;
+        const float weight = exp(-2.29 * dot(outputOffset, outputOffset)) + 1e-5;
         weighted += c * weight;
         weightSum += weight;
         mean += c;
@@ -277,7 +309,7 @@ float4 TemporalUpscale(VertexOutput input, int2 renderSize, int2 outputSize)
     if (any(historyUv < 0.0) || any(historyUv > 1.0))
         return float4(currentRgb, alpha);
     float3 history = TemporalToYCoCg(TemporalCompress(
-        max(bloomColor.SampleLevel(sceneSampler, historyUv, 0.0).rgb, 0.0)));
+        SampleHistoryCatmullRom(historyUv, float2(outputSize))));
     const float3 extent = deviation * 1.25 + 1e-4;
     const float3 offset = history - mean;
     const float3 units = abs(offset / extent);

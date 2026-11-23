@@ -69,6 +69,7 @@ struct ObjectData
     float4 terrainPathShape;
     float4 terrainPathBand;
     float4 terrainPathFar;
+    float4 viewTextureParams;
 };
 
 struct InstanceTransform { float4 row0; float4 row1; float4 row2; };

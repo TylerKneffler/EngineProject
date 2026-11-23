@@ -79,6 +79,9 @@ struct ObjectData
     float4 terrainPathShape; // core and edge half-width (m), contour value, gradient floor
     float4 terrainPathBand;  // height band: rise start, rise end, fall start, fall end
     float4 terrainPathFar;   // far tile colour, strength
+    // x = the view's mip bias (<= 0) while TAA upscales it from a lower
+    // render size, so textures keep the output's sharpness; yzw reserved.
+    float4 viewTextureParams;
 };
 
 struct SceneLightData
@@ -1034,7 +1037,16 @@ float TextureLodBlend(ObjectData data, float3 worldPosition)
 }
 float TextureLodBias(ObjectData data, float3 worldPosition)
 {
-    return TextureLodBlend(data, worldPosition) * data.textureLodParams.z;
+    return TextureLodBlend(data, worldPosition) * data.textureLodParams.z +
+        data.viewTextureParams.x;
+}
+
+// Mip bias of alpha-tested coverage: the texture LOD's alpha bias plus the
+// view's upscaling bias.
+float AlphaLodBias(ObjectData data, float3 worldPosition)
+{
+    return TextureLodBlend(data, worldPosition) * data.alphaLodParams.x +
+        data.viewTextureParams.x;
 }
 
 float AlphaCoverageHash(int2 cell, int level)
@@ -2485,7 +2497,7 @@ float4 PSShadowMain(
         float alpha = objectData.baseColor.a *
             ((flags & 4096u) ? 1.0 : vertexColor.a) * edgeFade;
         if (flags & 1u)
-            alpha *= baseColorMap.SampleBias(materialSampler, baseUv, TextureLodBlend(objectData, worldPos) * objectData.alphaLodParams.x).a *
+            alpha *= baseColorMap.SampleBias(materialSampler, baseUv, AlphaLodBias(objectData, worldPos)).a *
                 objectData.pmxTextureTint.a;
         clip(alpha - objectData.viewPositionAlphaCutoff.w);
         ApplyMaskedAlphaTransmission(objectData, baseUv, baseUvDx, baseUvDy, edgeFade);
@@ -2624,7 +2636,7 @@ float4 PSFoliageMain(
     if (flags & 1u)
         base *= SampleObjectBaseColor(objectData, uv, textureBias,
             base.a * objectData.pmxTextureTint.a,
-            TextureLodBlend(objectData, worldPos) * objectData.alphaLodParams.x) *
+            AlphaLodBias(objectData, worldPos)) *
             objectData.pmxTextureTint;
     if (flags & 32u)
     {
@@ -2726,7 +2738,7 @@ float4 PSGrassMain(
     if (textured)
         base *= SampleObjectBaseColor(objectData, uv, textureBias,
             base.a * objectData.pmxTextureTint.a,
-            TextureLodBlend(objectData, worldPos) * objectData.alphaLodParams.x) *
+            AlphaLodBias(objectData, worldPos)) *
             objectData.pmxTextureTint;
     if (flags & 32u)
     {
@@ -3614,7 +3626,7 @@ float4 ObjectSurfacePS(
     else if (flags & 1u)
         base *= SampleObjectBaseColor(objectData, baseUv, textureBias,
             base.a * objectData.pmxTextureTint.a,
-            TextureLodBlend(objectData, worldPos) * objectData.alphaLodParams.x) *
+            AlphaLodBias(objectData, worldPos)) *
             objectData.pmxTextureTint;
     // Reject empty leaf-card pixels before fetching normal, roughness or occlusion.
     if (flags & 32u)

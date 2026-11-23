@@ -26,6 +26,7 @@ Re-running replaces the scene. No third-party modules are needed.
 import argparse
 import copy
 import math
+import random
 import struct
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -126,6 +127,64 @@ OBJECT_LAYER = {
 }
 
 
+# Tree belt along the cell edges (on by default; foliage_test turns it off for
+# its own grove): an instanced layer like the landscape's forest layers.
+EDGE_TREE_LAYER = {"layerName": "Edge trees", "viewDistance": 400, "lod1Distance": 28,
+                   "lod2Distance": 90, "shadowDistance": 90, "shadowLod": 1}
+EDGE_TREE_ROWS = (4.0, 11.0, 18.0)  # metres in from each edge
+EDGE_TREE_STEP = 8.0                # along the edge
+EDGE_TREE_SEED = 6151
+EDGE_OAKS = [f"Assets/Prefabs/Woodland/Oaks/{name}.prefab" for name in (
+    "Big_oak_tree_001", "Big_oak_tree_002", "Large_oak_tree_001", "Large_oak_tree_003",
+    "Medium_oak_tree_001", "Medium_oak_tree_002", "Medium_oak_tree_003")]
+EDGE_CONIFERS = [f"Assets/Prefabs/Woodland/Conifers/{name}.prefab" for name in (
+    "Spruce_tall_01", "Spruce_young_01", "Pine_scots_01", "Fir_subalpine_01")]
+
+
+def height_at(heights, side, spacing, x, z):
+    """Bilinear terrain height at cell-local (x, z)."""
+    fx, fz = x / spacing, z / spacing
+    ix, iz = min(max(int(fx), 0), side - 2), min(max(int(fz), 0), side - 2)
+    tx, tz = fx - ix, fz - iz
+    h = lambda i, j: heights[j * side + i]
+    return ((h(ix, iz) * (1 - tx) + h(ix + 1, iz) * tx) * (1 - tz) +
+            (h(ix, iz + 1) * (1 - tx) + h(ix + 1, iz + 1) * tx) * tz)
+
+
+def edge_trees(heights, side, spacing, width, clear):
+    """Placements of 2-3 jittered tree rows along every cell edge (cell-local),
+    a mix of oaks and conifers. `clear` is (x0, z0, x1, z1) left open, the
+    gap the explorer starts in."""
+    rng = random.Random(EDGE_TREE_SEED)
+    spots = []
+    for inset in EDGE_TREE_ROWS:
+        count = int((width - 2 * inset) // EDGE_TREE_STEP) + 1
+        for i in range(count):
+            t = inset + i * EDGE_TREE_STEP
+            # -z, +z, -x, +x edges; corners come from the -z/+z rows.
+            spots += [(t, inset), (t, width - inset)]
+            if inset + EDGE_TREE_STEP <= t <= width - inset - EDGE_TREE_STEP:
+                spots += [(inset, t), (width - inset, t)]
+    items = []
+    for x, z in spots:
+        if rng.random() > 0.85:
+            continue
+        x = min(max(x + rng.uniform(-2.5, 2.5), 1.0), width - 1.0)
+        z = min(max(z + rng.uniform(-2.5, 2.5), 1.0), width - 1.0)
+        if clear[0] <= x <= clear[2] and clear[1] <= z <= clear[3]:
+            continue
+        path = rng.choice(EDGE_CONIFERS if rng.random() < 0.4 else EDGE_OAKS)
+        scale = rng.uniform(0.85, 1.15)
+        y = height_at(heights, side, spacing, x, z) - 0.15  # sink roots on slopes
+        item = ET.Element("item", {"asset": path, "id": str(len(items) + 1),
+                                   "yawDegrees": f"{rng.uniform(0, 360):.3f}",
+                                   "scale": f"{scale:.4f}"})
+        item.append(numbers("position", (x, y, z)))
+        item.append(numbers("normal", (0, 1, 0)))
+        items.append(item)
+    return items
+
+
 def read_cell(cell_x, cell_z):
     """Heights (metres) of one archive cell, rows along +z, (cells+1)^2."""
     data = ARCHIVE.read_bytes()
@@ -177,7 +236,7 @@ def as_item(element):
     return item
 
 
-def build(cell_x, cell_z, output=OUTPUT, thinning=None, far=True):
+def build(cell_x, cell_z, output=OUTPUT, thinning=None, far=True, trees=True):
     ET.register_namespace("components", NAMESPACE)
     heights, cells_x, cells_y = read_cell(cell_x, cell_z)
     spacing = 4.0
@@ -266,6 +325,21 @@ def build(cell_x, cell_z, output=OUTPUT, thinning=None, far=True):
         ring_components.append(ring_layer)
         ring_components.append(component("GrassField", "GrassField", FAR_FIELD))
         ET.SubElement(ring, "children")
+    tree_count = 0
+    if trees:
+        # The explorer starts at (width / 2, 6) inside the -z belt: leave it
+        # a gap to stand in and look out across the meadow.
+        sx = width * .5
+        placements = edge_trees(heights, side, spacing, width,
+                                (sx - 10.0, 0.0, sx + 10.0, 26.0))
+        tree_count = len(placements)
+        belt = ET.SubElement(children, "item", {"name": "Edge trees", "enabled": "true"})
+        belt.append(transform((0, 0, 0)))
+        belt_components = ET.SubElement(belt, "components")
+        belt_layer = component("TerrainObjectLayer", "TerrainObjectLayer", EDGE_TREE_LAYER)
+        ET.SubElement(belt_layer, "TerrainObjectLayer.placements").extend(placements)
+        belt_components.append(belt_layer)
+        ET.SubElement(belt, "children")
     objects.append(cell)
 
     # Everything but the explorer is static (tools/scene_static.py).
@@ -277,7 +351,7 @@ def build(cell_x, cell_z, output=OUTPUT, thinning=None, far=True):
               "-->\n")
     output.write_text(header + ET.tostring(scene, encoding="unicode") + "\n", encoding="utf-8")
     print(f"{output.relative_to(ROOT)}: cell ({cell_x}, {cell_z}), heights "
-          f"{low:.1f}..{high:.1f} m, {len(heights)} samples")
+          f"{low:.1f}..{high:.1f} m, {len(heights)} samples, {tree_count} edge trees")
 
 
 def main():
@@ -287,8 +361,10 @@ def main():
                         help="GrassField.distanceThinning override (1 disables thinning)")
     parser.add_argument("--output", type=Path, default=OUTPUT)
     parser.add_argument("--no-far", action="store_true", help="omit the far grass ring")
+    parser.add_argument("--no-trees", action="store_true", help="omit the tree belt along the edges")
     args = parser.parse_args()
-    build(*args.cell, output=args.output.resolve(), thinning=args.thinning, far=not args.no_far)
+    build(*args.cell, output=args.output.resolve(), thinning=args.thinning, far=not args.no_far,
+          trees=not args.no_trees)
 
 
 if __name__ == "__main__":

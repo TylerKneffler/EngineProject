@@ -120,5 +120,9 @@ struct ObjectGPUData
     glm::vec4 terrainPathShape{0.f};
     glm::vec4 terrainPathBand{0.f};
     glm::vec4 terrainPathFar{0.f};
+    // x = mip bias of the view (<= 0): -log2(output / render pixels) while
+    // TAA upscales it, so textures keep the output's sharpness (Object.hlsl
+    // TextureLodBias, AlphaLodBias). yzw reserved.
+    glm::vec4 viewTextureParams{0.f};
 };
 }
