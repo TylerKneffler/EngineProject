@@ -1527,6 +1527,13 @@ bool LandscapeDriver::ConfigureTerrain()
         if (layer.layerName == "Procedural meadow grass" && grass->gpuBlades != GrassBlades::Enabled())
         {
             grass->gpuBlades = GrassBlades::Enabled();
+            // Its remaining shrub, tall_grass_clump (2,448 / 1,015 / 241
+            // triangles), is grass the blades already draw.
+            if (grass->gpuBlades && grass->shrubMeshes.find("tall_grass_clump") != std::string::npos)
+            {
+                grass->shrubMeshes.clear();
+                grass->shrubPatchesPerSquareMeter = 0.f;
+            }
             grass->MarkConfigurationDirty();
         }
         static const float lodBoost = []
