@@ -306,6 +306,23 @@ options and references: [far_detail_and_visibility_research.md](far_detail_and_v
       AI perception, hit tests and rendering.
 - [ ] Later: terrain virtual texture for far detail (paths, decals, macro colour per level).
 
+**Open decisions after the parallel-agent session (2026-11-22; agents/perf, agents/look and agents/terrain
+merged into main, worktrees removed; their comparison images are in `.local/agents/<name>/`):**
+- Broadleaves at forest edges: placement is in the code but off (`ENGINE_BROADLEAF=all` or `=edge`); every
+  variant roofed the ForestEdge camera, and that frame stayed identical across four rule changes, so first check
+  the edge rule reaches that tree. Ideas: keep them to the belt's far side from paths and viewpoints, a
+  crown-clearance test against trails and viewpoints, or a high-crowned second scanned species.
+- Broadleaf LOD0 is ~10.8k triangles (twice a medium oak); only lone meadow trees use it.
+- Next for terrain/visibility: cover vegetation with fixed reach and presence, the important-actor render class,
+  a test pawn standing and prone in grass at 50-800 m (items 3-6 above).
+- Scanned-plant shadows stay off (+0.7 ms shadow GPU, +1.3-2.5 ms forest walk, range-independent); needs a
+  cheaper path (caster budget, per-tile caster culling or a shadow-only card level).
+- GPU grass: blades lean further in gusts than the mesh grass; the runtime mesh-grass fallback keeps the far
+  ring's blade-mode inner radius and does not restore tall_grass_clump.
+- First run after a terrain cache-key change rebuilds every cell cache and peaked at 12-13.7 GB (normal runs
+  ~3.5 GB); worth bounding.
+- More cliff cells with the local-direction sculpt (~3 min each in parallel).
+
 1. **GPU-driven vegetation renderer.** One renderer owns every streamed prefab placement (near cells and far
    blocks) in a GPU placement pool. Streaming a cell uploads or frees its range; no scene objects are created
    for batches. Each view (camera and each shadow cascade) runs one cull pass over the resident ranges: frustum,
