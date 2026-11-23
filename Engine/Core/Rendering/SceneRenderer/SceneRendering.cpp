@@ -1784,7 +1784,9 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
         }
         else if(mesh && mesh->foliageWindStrength>0.f)
         {
-            const float budget=std::max(0.f,m_realtimeShadowSettings.foliageCasterDistance);
+            // ENGINE_FOLIAGE_CASTER_DISTANCE=<m> overrides it for A/B runs.
+            static const float foliageOverride=[]{ const char* v=std::getenv("ENGINE_FOLIAGE_CASTER_DISTANCE"); return v ? float(std::atof(v)) : -1.f; }();
+            const float budget=std::max(0.f,foliageOverride>=0.f ? foliageOverride : m_realtimeShadowSettings.foliageCasterDistance);
             if(budget<=0.f) preparedDraw.castsShadow=false;
             else if(casterFade.x<=0.f || budget<casterFade.x) casterFade.x=budget;
         }
@@ -2208,8 +2210,11 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
         }
         perPlacementFade(objectData.geometryFade, mesh);
         objectData.shadowCasterFade={casterFade.x,std::min(casterFade.x,casterFade.y),0.f,0.f};
+        // ENGINE_WIND_TIME=<seconds> freezes wind at that time, so look
+        // captures of different builds or switches compare pixel for pixel.
+        static const float fixedWindTime=[]{ const char* v=std::getenv("ENGINE_WIND_TIME"); return v ? float(std::atof(v)) : -1.f; }();
         objectData.grassAnimation={(mesh && mesh->foliageWindStrength>0.f) || (mat && mat->shaderUsesTime)
-                ? static_cast<float>(m_scene.GetElapsedTime()):0.f,
+                ? (fixedWindTime>=0.f ? fixedWindTime : static_cast<float>(m_scene.GetElapsedTime())):0.f,
             // y: 1 grass bend, 2 tree wind (Mesh::foliageWindTree; ENGINE_TREE_WIND=0
             // turns tree wind off for A/B captures).
             mesh && mesh->foliageWindStrength>0.f && !(mesh->foliageWindTree && !TreeWindEnabled())

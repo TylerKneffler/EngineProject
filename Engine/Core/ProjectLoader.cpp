@@ -286,7 +286,7 @@ void ProjectLoader::ParseRendering(const pugi::xml_node& projectNode, ProjectSet
                 realtimeShadows.attribute("DirectionalCascadeCasterBudget")
                     .as_uint(0u);
             settings.realtimeShadows.directionalDistance = std::clamp(
-                realtimeShadows.attribute("DirectionalDistance").as_float(150.f),
+                realtimeShadows.attribute("DirectionalDistance").as_float(250.f),
                 1.f, 100000.f);
             // Projects written before the far range existed keep it off.
             settings.realtimeShadows.directionalFarDistance = std::clamp(
@@ -295,11 +295,11 @@ void ProjectLoader::ParseRendering(const pugi::xml_node& projectNode, ProjectSet
             settings.realtimeShadows.grassCasterDistance = std::clamp(
                 realtimeShadows.attribute("GrassCasterDistance").as_float(150.f),0.f,100000.f);
             settings.realtimeShadows.foliageCasterDistance = std::clamp(
-                realtimeShadows.attribute("FoliageCasterDistance").as_float(150.f),0.f,100000.f);
+                realtimeShadows.attribute("FoliageCasterDistance").as_float(250.f),0.f,100000.f);
             settings.realtimeShadows.pcfRadius = std::min<uint32_t>(
                 realtimeShadows.attribute("PcfRadius").as_uint(1u), 4u);
             settings.realtimeShadows.cascadeSplitLambda = std::clamp(
-                realtimeShadows.attribute("CascadeSplitLambda").as_float(0.65f),
+                realtimeShadows.attribute("CascadeSplitLambda").as_float(0.79f),
                 0.f, 1.f);
             settings.realtimeShadows.cascadeTransitionFraction = std::clamp(
                 realtimeShadows.attribute("CascadeTransitionFraction").as_float(0.1f),
