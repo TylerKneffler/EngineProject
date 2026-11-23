@@ -426,6 +426,24 @@ const std::array<const char*, 8> Species{
 // the upper forest band below the tree line.
 const std::array<const char*, 4> ConiferSpecies{
     "Spruce_tall_01", "Pine_scots_01", "Fir_subalpine_01", "Spruce_young_01"};
+// Card-crown broadleaf trees baked from Poly Haven's tree_small_02 scan
+// (Tools/scan_tree_cards.py): an airy, slender tree with a curved trunk and an
+// upright, narrow-crowned variant. They stand alone in the meadows, in front
+// of the oak edges. ENGINE_BROADLEAF=0 plants oaks in their place (A/B).
+// The edge-belt placement is off by default (ENGINE_BROADLEAF=all or =edge
+// turns it on): the belt is dense, and with any share of broadleaves in it
+// one stood over the ForestEdge camera, whose view looked into its crown
+// (captures bl2-bla, 2026-11-22; .md/todo.md "Forest edge variety").
+const std::array<const char*, 2> BroadleafSpecies{"Broadleaf_slender_01", "Broadleaf_upright_01"};
+const char* const BroadleafPrefix = "Assets/Prefabs/Woodland/Broadleaf/";
+bool BroadleafOn(bool edge)
+{
+    static const std::string mode = [] { const char* v = std::getenv("ENGINE_BROADLEAF"); return std::string(v ? v : "lone"); }();
+    if (mode == "0") return false;
+    if (mode == "edge") return edge;
+    if (mode == "lone") return !edge;
+    return true;
+}
 
 // Share of conifers among the trees at a height: oak lowlands, mixed
 // foothills, conifers over the upper slopes (350-710 m on the demo map,
@@ -784,6 +802,8 @@ void GenerateForest(const TerrainManager::ObjectLayerContext& context,
     }
     for (const char* species : ConiferSpecies)
         layer.objectLods[coniferPrefix + species + ".prefab"].distances = {60.f, 220.f};
+    for (const char* species : BroadleafSpecies)
+        layer.objectLods[std::string(BroadleafPrefix) + species + ".prefab"].distances = {60.f, 220.f};
     const float width = context.cellsX * context.cellWidth;
     const float depth = context.cellsY * context.cellDepth;
     uint32_t state = Hash(context.cell.first, context.cell.second, 0x74726565u) | 1u;
@@ -841,6 +861,29 @@ void GenerateForest(const TerrainManager::ObjectLayerContext& context,
         placement.position = {x, height - .08f, z};
         placement.yawDegrees = yaw * 360.f;
         placement.scale = .75f + size * .55f;
+        // Lone meadow trees out in the open: half are the card-crown
+        // broadleaves (4.5 m as baked, so scaled to 7-11 m). Their crowns
+        // start low and spread to one side, so trees within ~15 m of the
+        // forest (where paths and viewpoints run along the edge) stay oaks:
+        // one there roofed over the ForestEdge view.
+        const float broadleafDraw = std::fmod(yaw * 17.3f + size * 5.9f, 1.f);
+        const auto openMeadow = [&]
+        {
+            if (interior >= .02f) return false;
+            for (int k = 0; k < 6; ++k)
+            {
+                const float angle = k * glm::two_pi<float>() / 6.f;
+                if (ForestMask(worldX + 15.f * std::cos(angle), worldZ + 15.f * std::sin(angle), height, a) >= .02f)
+                    return false;
+            }
+            return true;
+        };
+        if (BroadleafOn(false) && !conifer && broadleafDraw < .5f && openMeadow())
+        {
+            placement.asset = std::string(BroadleafPrefix) + BroadleafSpecies[broadleafDraw < .25f ? 0u : 1u] +
+                ".prefab";
+            placement.scale = 1.6f + size * .8f;
+        }
         // A slight lean (the layer does not conform to the ground, so the
         // normal tilts the tree; far blocks copy it): most trees stand nearly
         // straight, a few lean up to ~7 degrees; conifers grow straighter.
@@ -937,6 +980,14 @@ void GenerateForest(const TerrainManager::ObjectLayerContext& context,
                 const bool medium = pick * .65f + inward * .35f > .62f;
                 placement.asset = prefix + Species[medium ? (size < .5f ? 4u : 5u) : 6u] + ".prefab";
                 placement.scale = .8f + size * .6f;
+                // Off by default (BroadleafOn): deep in the belt, three in ten
+                // upright broadleaves, 12-15 m, rising over the oaks in front.
+                const float broadleafDraw = std::fmod(pick * 3.1f + size * 11.9f, 1.f);
+                if (BroadleafOn(true) && forest > .65f && broadleafDraw < .3f)
+                {
+                    placement.asset = std::string(BroadleafPrefix) + BroadleafSpecies[1] + ".prefab";
+                    placement.scale = 2.f + size * .5f;
+                }
                 // Edge trees lean out toward the light, up to ~9 degrees.
                 lean = glm::radians(9.f * size * size);
             }

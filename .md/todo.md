@@ -558,11 +558,39 @@ options and references: [far_detail_and_visibility_research.md](far_detail_and_v
         `island_tree_01-03` coastal windswept shapes (skipped). Both candidates are millions of alpha leaf
         cards with separate trunk / branch / leaf materials (per-material texture sets in files.json, which
         `fetch_polyhaven_props.py` does not handle), so PropCook cannot simplify them to a game chain.
-        Plan: a tree bake like `scan_bush_cards.py`: (1) cook trunk and branches only to a 3-level chain;
-        (2) render the leaf geometry per branch cluster into crown cards (atlas, depth shade, graded); (3) build
-        the crown from those cards around the branch tips; (4) bake an octahedral or view impostor
-        (`woodland_assets.bake_impostor`) for the last level; (5) place them in the edge pass and as single
-        meadow trees (LandscapeDriver, `Species`), measured with shared prefab parts on.
+      - Built 2026-11-22 (agents/look): `tools/scan_tree_cards.py` bakes `tree_small_02` into two prefabs
+        (`Prefabs/Woodland/Broadleaf/Broadleaf_slender_01`, `_upright_01`; the upright one is the same tree
+        stretched 0.72 x 1.35 about the trunk, leaf clusters moved rigidly, so both share one card atlas and the
+        bark/leaf materials). Trunk and branches are PropCook chains (trunk 4000/1200/460; branches
+        6200/1800/300, twig pieces under 0.25/0.4/0.8 m dropped per level, since PropCook keeps the open ends
+        of every twig tube and cannot simplify them away). The crown is a billboard cloud: 160 k-means
+        clusters of the 30k leaves, two crossed cards each (each leaf goes to the card it faces most, so
+        crossing does not double the density), 320 cards / 640 triangles in one 4096 atlas (523 px/m, graded
+        toward the meadow greens, depth-shaded), used by every level; cook_foliage_lighting bends their
+        normals. The impostor (6 views + top) is baked from the full 1.94M-triangle crown with a vectorised
+        point-splat rasterizer (the per-triangle one would take hours), tinted 0.58 to match the cooked cards.
+        Placement (LandscapeDriver, `BroadleafSpecies`, `ENGINE_BROADLEAF=0` for A/B): half of the lone
+        meadow trees in the open (interior < 0.02 at the tree and 15 m around it), 7-11 m, both variants.
+        Silhouettes in edge views: oak domes behind, the slender leaning tree and the upright one in front.
+        Cost (FieldWalk, 400 frames, interleaved with `ENGINE_BROADLEAF=0`, same binary): lone-only median
+        22.5/22.9 ms vs 23.6/21.6 off (no measurable change; this round ran ~6 ms slower overall than the
+        first), command recording +1.2 ms; with the edge placement on too (first round) 16.8/16.5 vs
+        16.0/16.4 ms, command recording +0.9 ms. Triangles: LOD0 4000 trunk + 6200 branches + 640 cards;
+        LOD1 1200 + 1800 + 640; LOD2 460 + 300 + 640; impostor 38.
+      - Edge-belt placement is written but off by default (`ENGINE_BROADLEAF=all` or `=edge`): with any share
+        of broadleaves in the belt (tried nearer the meadow, forest > 0.22, > 0.45, > 0.65; 30-45%; scale
+        1.2-2.5) one stood over the ForestEdge camera, whose whole view looked into its crown (captures
+        `.local/foliage/bl2..bla_ForestEdge_full.png` on agents/look). The belt is dense and these crowns
+        start low and spread to one side; the small oaks there are narrow. Oddly the frame stayed
+        pixel-identical across the last four rule changes (scale 1.5 -> 2.0 included), while
+        `ENGINE_BROADLEAF=lone` cleared it, so check first that the edge rule reaches that tree at all.
+        Ideas: only on the far side of the belt from viewpoints/paths; a crown-clearance test against the
+        trail and viewpoint positions; a third, high-crowned scan instead of the stretched variant.
+      - Lessons: the slender tree's crown starts a third of the way up and leans to one side, so near a
+        walker it roofs over the view; the first impostor was 1.7x too bright beside the cooked cards.
+      - [ ] Only one scanned broadleaf species exists (CC0, temperate): a second scan (lime, hornbeam, birch)
+        would give a real third silhouette instead of the stretched variant.
+      - [ ] Close-up look not judged (leaf cards at 523 px/m are soft under a crown at 2 m).
 - [ ] **Cliffs as sculpted terrain** (asked 2026-11-21: cliffs that are the terrain itself, with the scans' shape
       and look, no scan objects, smooth from ground to rock). The stamp route before it (per-piece surface
       patches, stages 1-5, far stamps, macro colour and far-grid patches) is in todo_history.md (2026-11-22):
