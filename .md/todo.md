@@ -273,11 +273,29 @@ at mid distance.
 and actors (players, NPCs, enemies) must render correctly at any distance: not hidden or revealed by grass that is
 drawn for one viewer and not another, not floating on coarse far terrain, never culled like scenery. Research,
 options and references: [far_detail_and_visibility_research.md](far_detail_and_visibility_research.md). Order:
-- [ ] Paths as polylines shaded per pixel at every terrain level (trace `TrailMask` contours per cell), heights
-      carved along them, far macro colour includes them. Today they are Gravel paint at the vertex grid: 4 m in
-      loaded cells, one quad per 128 m cell in far tiles, hence the spots.
-- [ ] Objects drawn at the rendered terrain height: per-instance vertical offset from the drawn terrain level, so
-      far trees, rocks and far blocks sit on far terrain (physics stays on full detail).
+- [x] Paths shaded per pixel at every terrain level (2026-11-22, agents/terrain). The trails are a contour of
+      two-octave value noise, so instead of tracing polylines the terrain shader evaluates the same noise with an
+      analytic gradient (`TerrainPathWeight` in Object.hlsl; generic `TerrainManager::ContourPaths`, set by
+      LandscapeDriver from the `TrailMask` constants): near cells blend the gravel layer per pixel (only over
+      grass, forest soil and gravel, inside the forest height band), far tiles blend the far gravel colour (off
+      steep ground), the near cells' fade to the macro map keeps it. Past the pixel footprint the soft edge
+      widens and the strength falls by the same share, so far trails stay one faint line. The paint, macro and
+      far colours leave trails out; the cell heights sink 12 cm along the track; ground cover (mesh fields and
+      the GPU blades' paint) keeps off it via `TerrainManager::ContourPathShare`, the CPU twin of the shader
+      function. `ENGINE_TERRAIN_PATHS=0` paints them at the vertices again.
+      Captures (`C:/repos/EngineProject-terrain/.local/terrain/c1`, `c2`, before | after): Raised view over a
+      forest trail (blotchy blocks → one clean track, near and at ~300 m), MeadowSlope (the meadow trail at
+      600-800 m was a row of pale dashes, now a continuous thin path), Trail (ground view, ferns keep to the edge).
+      Cost: none measurable (interleaved field and trail walks: terrain GPU 0.52-0.54 / 0.86 ms either way,
+      frame 16.3-16.5 / 16.0-16.3 ms).
+- [x] Far objects at the far terrain height (2026-11-22, agents/terrain). Far tiles draw each cell as two
+      triangles between its corner heights; far placements were on full-detail heights, |far - full| mean 2.9 m,
+      median 1.6, p90 6.6, p99 19 m over the 2,209 fine cells (4-13 px at 500 m-1 km). `SnapToFarSurface`
+      (TerrainManagerFarObjects.cpp) moves each far placement by the difference when its block is built; cells
+      that draw their own terrain (far stamp cells) keep full detail. `ENGINE_FAR_OBJECT_SURFACE=0` turns it off.
+      In the dense far forest the change barely shows in stills (Vista, MeadowSlope crops); cost none.
+      Not done: loaded cells drawn at stride 2/4 (8-16 m grid, 256-384 m) keep their objects on full detail,
+      and coarser far tile levels leave a residue within their screen error.
 - [ ] Gameplay-relevant vegetation (bushes, tall fields, shrubs, rocks, logs, trees) with fixed reach (engagement
       range) and presence on every setting and detail budget; only cosmetic grass/flowers thin out. Solid far
       levels (no see-through). Includes the props-layer bushes that stop at ~25 m.

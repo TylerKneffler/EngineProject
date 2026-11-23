@@ -1,5 +1,6 @@
 #include "Core/Components/Terrain/TerrainManager.h"
 #include "Core/Components/Terrain/TerrainObjectLayer.h"
+#include "Core/Components/Terrain/TerrainSurfaceSample.h"
 #include "Core/Scene/Object.h"
 #include "Core/Rendering/DetailBudget.h"
 #include "Core/Scene/Scene.h"
@@ -36,7 +37,53 @@ struct FarObjectInputs
     std::vector<std::string> layerNames;
     // Distance the loaded cells reach; far cells all lie beyond it.
     float nearReach = 0.f;
+    // Cells that draw their own terrain beyond the loaded window (far stamp
+    // cells): their placements keep full-detail heights.
+    std::function<bool(Cell)> drawsOwnTerrain;
 };
+
+// ENGINE_FAR_OBJECT_SURFACE=0 keeps far placements on full-detail heights.
+bool FarObjectSurfaceSnap()
+{
+    static const bool enabled = [] {
+        const char* value = std::getenv("ENGINE_FAR_OBJECT_SURFACE");
+        return !(value && value[0] == '0');
+    }();
+    return enabled;
+}
+
+// Far blocks draw where far tiles do. At their finest level a far tile is two
+// triangles per cell between the cell's corner heights (the far grid holds
+// each cell's full-detail corners; TerrainFarLodEdges splits each quad along
+// (x+1, y)-(x, y+1)). Placements are generated on the full-detail surface, so
+// a tree in a valley floated over the far terrain's chord and one on a ridge
+// sank into it. Moves each placement by (far surface - full surface) at its
+// root. Coarser far levels further out leave a residue within their screen
+// error.
+void SnapToFarSurface(const Terrain& terrain, std::vector<TerrainObjectLayer::Placement>& placements)
+{
+    const int columns = terrain.cellsX, rows = terrain.cellsY;
+    if (columns <= 0 || rows <= 0 ||
+        terrain.heights.size() != static_cast<size_t>(columns + 1) * (rows + 1)) return;
+    const float width = columns * terrain.cellWidth, depth = rows * terrain.cellDepth;
+    const float h00 = terrain.heights.front();
+    const float h10 = terrain.heights[static_cast<size_t>(columns)];
+    const float h01 = terrain.heights[static_cast<size_t>(rows) * (columns + 1)];
+    const float h11 = terrain.heights.back();
+    for (auto& placement : placements)
+    {
+        const float x = std::clamp(placement.position.x, 0.f, width);
+        const float z = std::clamp(placement.position.z, 0.f, depth);
+        float full = 0.f;
+        if (!SampleTerrainSurface(terrain.heights, columns, rows, terrain.cellWidth,
+                terrain.cellDepth, x, z, full, nullptr)) continue;
+        const float u = x / width, v = z / depth;
+        const float farHeight = u + v <= 1.f
+            ? h00 + u * (h10 - h00) + v * (h01 - h00)
+            : h11 + (1.f - u) * (h01 - h11) + (1.f - v) * (h10 - h11);
+        placement.position.y += farHeight - full;
+    }
+}
 
 struct FarCellInput
 {
@@ -127,6 +174,8 @@ std::vector<TerrainObjectLayer::Placement> FarPlacements(
             result.push_back(std::move(distant));
         }
     }
+    if (FarObjectSurfaceSnap() && !(inputs.drawsOwnTerrain && inputs.drawsOwnTerrain(input.cell)))
+        SnapToFarSurface(*terrain, result);
     return result;
 }
 
@@ -547,6 +596,12 @@ void TerrainManager::UpdateFarObjects(int centerX, int centerY)
         inputs.generator = m_objectLayerGenerator;
         inputs.layerNames = m_objectLayerNames;
         inputs.nearReach = std::max(0, loadedRadius) * std::min(cellsX * cellWidth, cellsY * cellDepth);
+        // Stamped cells are far stamp cells (their own terrain, not a far tile)
+        // within farStampRadius; keep their placements on full detail.
+        if (m_stampProvider)
+            inputs.drawsOwnTerrain = [provider = m_stampProvider](Cell cell) {
+                return !provider(cell).empty();
+            };
         while (m_farObjectJobs.size() < maximumJobs && m_farObjectQueueNext < m_farObjectQueue.size())
         {
             std::vector<FarCellInput> batch;
