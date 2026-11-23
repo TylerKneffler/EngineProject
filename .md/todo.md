@@ -392,8 +392,8 @@ options and references: [far_detail_and_visibility_research.md](far_detail_and_v
          ms (15.1 → 8.4 M vertices); field walk 16.6-16.8 → 15.1-15.2 ms (grass 9.4 → 8.1, interleaved);
          MeadowSlope 8.1 → 7.9, ForestEdge and Vista unchanged. Look: the far meadow band past ~45 m reads a
          little smoother (`.local/perfagent/s3a_crop_*.png` in the perf worktree).
-   - [x] GPU grass blades, behind `ENGINE_GPU_GRASS=1` (2026-11-22, `agents/perf`). The meadow's fine grass
-         and tall fields are generated on the GPU every frame; shrubs, accents, bushes and the far ring stay
+   - [x] GPU grass blades, on by default since 2026-11-22 (`ENGINE_GPU_GRASS=0` keeps the mesh grass;
+         `agents/perf`). The meadow's fine grass and tall fields are generated on the GPU every frame; shrubs, accents, bushes and the far ring stay
          meshes. How: each meadow `GrassField` in blade mode (`gpuBlades`, set by LandscapeDriver) hands its
          cell's height and grass paint grids to the scene's `GrassBlades` (Assets/Grass), which packs every
          loaded cell into one buffer and owns one carrier object (a 4-segment blade template, one dummy
@@ -418,11 +418,26 @@ options and references: [far_detail_and_visibility_research.md](far_detail_and_v
          Found on the way: until a material shader has compiled, its draw falls back to the base pipeline; a
          carrier drawn that way read blade records as pool indices and hung the GPU (root SRVs have no bounds
          checks). Carriers now draw only once their shader is resolved.
-   - [ ] Blades: grass GPU is still 4.5 ms on the field walk (target 4): the blade count is no longer the
-         lever (keep distance 7 → 6 m changed nothing); next, split the remaining grass stage (accents,
-         shrubs, far ring, the compute pass, pixel shading). FieldWalk's darker tussock pockets (clump
-         contrast in colour and height). DX11 (no indirect draws) skips the carrier, so the switch shows no
-         fine grass there; Vulkan not run. Make it the default after these.
+   - [x] Blades finished and made the default (2026-11-22, `agents/perf`).
+         Grass stage at FieldWalk split (debug switch `ENGINE_GPU_GRASS_DEBUG`): leftover meshes 2.9 ms, blade
+         pixels ~1.6, blade vertices ~0.15, the generation pass ~0.05. Most of the rest was not grass at all:
+         every instanced batch ran reset, barrier, cull, barrier right before its draw (two GPU drains per
+         batch, ~190 per frame). The camera view now records all its culls first and runs them in one
+         compute pass with two barriers, then replays the draws (`ENGINE_HOIST_CULLS=0` restores the old
+         order): FieldWalk 11.9 → 10.9 ms, grass 4.2 → 2.6, foliage depth 2.2 → 0.25 (cull work shows as
+         ~1.9 ms opaque other); ForestFloor 13.9 → 11.4; Vulkan FieldWalk 12.4 → 9.7; DX11 10.1-10.3 →
+         9.9-10.0. Blade mode also drops the meadow's remaining tall_grass_clump shrub.
+         Pockets: a 2.4 m tussock Voronoi; toward the border of two tussocks short blades thin (90 %), lose
+         up to 70 % of height and darken toward the roots, so FieldWalk reads as tussocks with shadowed
+         hollows like the mesh grass (1440p `.local/foliage/pk2_*`, `pk3_*`); no measurable cost.
+         Backends: Vulkan had no SPIR-V for the generation shader (no grass in blade mode); now built.
+         DX11 draws blades through its indirect path. A renderer that cannot draw blades marks the field
+         unavailable and the meadow rebuilds its mesh grass (`ENGINE_GPU_GRASS_DEBUG=4` simulates it).
+         Default on, interleaved (blades / mesh): stills FieldWalk 10.7-10.9 / 14.0-15.0 ms, MeadowSlope
+         12.0-12.5 / 15.4-15.5, ForestEdge 11.9-12.1 / 13.7-13.8; walks field 11.4-11.7 / 14.6-14.7 (p99 39 /
+         48-53, grass 2.4 / 6.6-6.9), meadow 13.2-13.3 / 13.7-13.8, forest edge turning 13.2 / 13.5-14.1.
+   - [ ] Blades lean further over in gusts than the mesh grass (ForestEdge, FieldWalk crops): the wind's
+         height weighting differs between the blade shader and the mesh grass.
 3. **Retained render scene for everything else.** `PrepareFrameItems` copies every item each frame (2.6 ms for
    9.1k items at the last count) and the render packet retains two buffers per item (18k shared-pointer copies
    and `RetainBuffer` calls on the render thread). Keep object data in a GPU buffer updated from a dirty list

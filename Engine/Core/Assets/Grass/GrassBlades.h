@@ -18,7 +18,8 @@ namespace Engine::Rendering { struct GpuBladeField; }
 // grass fields in blade mode (GrassField::gpuBlades) register their cell's
 // height and grass paint grids here and stop building their fine grass on the
 // CPU; shrubs, accents and bushes stay mesh placements.
-// ENGINE_GPU_GRASS=1 turns it on (the scene script sets gpuBlades).
+// On by default (the scene script sets gpuBlades); ENGINE_GPU_GRASS=0 keeps
+// the mesh grass, as does a renderer that cannot draw blades.
 class GrassBlades
 {
 public:

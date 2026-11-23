@@ -58,9 +58,10 @@ namespace { std::atomic<bool> s_unavailable{false}; }
 
 bool GrassBlades::Enabled()
 {
+    // On by default; ENGINE_GPU_GRASS=0 keeps the mesh grass.
     static const bool enabled = [] {
         const char* value = std::getenv("ENGINE_GPU_GRASS");
-        return value && value[0] == '1';
+        return !(value && value[0] == '0');
     }();
     return enabled && !s_unavailable.load(std::memory_order_relaxed);
 }
