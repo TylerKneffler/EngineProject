@@ -11,7 +11,8 @@
 // tests against it (SceneRenderer binds it in place of the CPU pyramid when
 // the camera has barely moved), so trees hidden by nearer trees are dropped.
 //
-// Layout (floats): [0] levels, [1] width, [2] height, [4 + 3 l] offset,
+// Layout (floats): [0] levels, [1] width, [2] height, [3] 1 (built from an
+// earlier frame's view: InstanceCull keeps what reaches outside it), [4 + 3 l] offset,
 // [5 + 3 l] width, [6 + 3 l] height of level l, [64..79] view-projection
 // (row-major), level data from 80. Every cell reads its whole pixel footprint
 // directly from depth (no level-to-level dependency, so one dispatch writes all
@@ -57,6 +58,7 @@ void CSMain(uint3 id : SV_DispatchThreadID)
         pyramidOutput[0] = (float)levels;
         pyramidOutput[1] = (float)cb.pyramid.x;
         pyramidOutput[2] = (float)cb.pyramid.y;
+        pyramidOutput[3] = 1.0;
         uint offset = HeaderFloats;
         for (uint l = 0u; l < levels; ++l)
         {

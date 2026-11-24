@@ -103,6 +103,19 @@ than 0.05 world units. `--max-fps <fps>` overrides the project cap (zero disable
 it), and `--disable-clustered-lighting` selects the non-clustered path for a
 comparison; both effective settings are recorded.
 
+`--route <object>` walks the game camera along a scene `SplinePath` instead
+of holding W: the warm-up runs at the route's first point, then the camera
+moves `--route-speed` / 60 metres per frame (default 6 m/s, a run) and looks
+at the route `--route-look-ahead` metres on (default 12, about 3 degrees
+down), for `--drive-forward` frames (default: all measured frames but
+eight), and stays at the end if it gets there. Steps are per frame, not per
+second, so every run renders the same poses whatever the frame rate. The
+camera object's rigid body is moved with it. `--capture-every` and
+`--moving-captures` work as with W. The landscape demo has two routes along
+its trails (`tools/add_landscape_viewpoints.py`): `ForestTrailWalk` (forest,
+forest edge, meadow, forest) and `MeadowTrailWalk` (open meadow, sun behind),
+400 m each; `--route-speed 23` matches the W drive's pace.
+
 DX12 and Vulkan Debug captures have been exercised with rendered geometry and
 synthetic first-person input on the NVIDIA RTX A2000 Laptop GPU. Physical input
 and focus handling still require an interactive desktop check.

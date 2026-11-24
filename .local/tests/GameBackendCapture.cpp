@@ -48,6 +48,15 @@ std::array<double, 3> Vector3(const char* text, const char* name)
     return result;
 }
 
+float Metres(const char* text, const char* name)
+{
+    char* end = nullptr;
+    const double value = std::strtod(text, &end);
+    if (end == text || *end || !std::isfinite(value) || value <= 0.0 || value > 1000.0)
+        throw std::runtime_error(std::string("invalid ") + name);
+    return static_cast<float>(value);
+}
+
 // --cpu-sample: in-process sampling profile of the measured frames, written
 // to <out>/cpu-profile.txt after the run.
 bool g_cpuSample = false;
@@ -96,6 +105,13 @@ Engine::Game::GameBenchmarkOptions Parse(int argc, char** argv)
         else if (key == "--camera-position") options.cameraPosition = Vector3(value(), "camera position");
         else if (key == "--camera-target") options.cameraTarget = Vector3(value(), "camera target");
         else if (key == "--viewpoint") options.viewpoint = value();
+        else if (key == "--route") options.route = value();
+        else if (key == "--route-speed") options.routeSpeed = Metres(value(), "route speed");
+        else if (key == "--route-look-ahead") options.routeLookAhead = Metres(value(), "route look-ahead");
+        else if (key == "--capture-async") options.captureAsync = true;
+        else if (key == "--flag-button") options.flagButton = true;
+        else if (key == "--route-look-sway") options.routeLookSway = Metres(value(), "route look sway");
+        else if (key == "--route-look-period") options.routeLookPeriod = Number(value(), "route look period frames", 100000);
         else if (key == "--cpu-sample") g_cpuSample = true;
         else if (key == "--foreground") g_foreground = true;
         else if (key == "--help" || key == "-h")
@@ -106,7 +122,10 @@ Engine::Game::GameBenchmarkOptions Parse(int argc, char** argv)
                 "[--require-terrain] [--require-streamed-cells] [--wait-for-residency <seconds>] "
                 "[--drive-forward <frames>] [--look-yaw <pixels/frame>] [--require-movement] [--max-fps <fps>] [--profile <video profile>] "
                 "[--disable-clustered-lighting] [--viewpoint <camera object>] [--camera-position x,y,z] [--camera-target x,y,z] "
+                "[--route <SplinePath object> [--route-speed <m/s, default 6>] [--route-look-ahead <m, default 12>]] "
                 "[--cpu-sample] [--foreground]\n"
+                "--route walks the game camera along a scene path (landscape demo: ForestTrailWalk, MeadowTrailWalk) "
+                "at a fixed routeSpeed/60 m per frame for --drive-forward frames (default: all measured frames but eight).\n"
                 "Defaults to terrain/landscape_demo.scene. Runs the standalone Game loop, writes frames.jsonl and capture.ppm, "
                 "and returns 2 if capture validity checks fail. Windows open without focus, behind the active app, "
                 "unless --foreground is given.\n";
@@ -125,6 +144,20 @@ Engine::Game::GameBenchmarkOptions Parse(int argc, char** argv)
     }
     if (options.backend != "dx11" && options.backend != "dx12" && options.backend != "vulkan")
         throw std::runtime_error("backend must be dx11, dx12, or vulkan");
+    if (!options.route.empty())
+    {
+        if (options.lookYawPixels || options.driveBoost || options.cameraPosition ||
+            options.cameraTarget || !options.viewpoint.empty())
+            throw std::runtime_error("--route sets the camera itself: no --look-yaw, --drive-boost, "
+                "--viewpoint, --camera-position or --camera-target with it");
+        // Walk for the whole measured run unless told how long.
+        if (!options.driveForwardFrames)
+        {
+            if (options.frames <= 8u)
+                throw std::runtime_error("--route needs more than eight measured frames");
+            options.driveForwardFrames = options.frames - 8u;
+        }
+    }
     if (options.driveForwardFrames && options.frames < options.driveForwardFrames + 8u)
         throw std::runtime_error("--frames must include the forward input and eight setup frames");
     return options;

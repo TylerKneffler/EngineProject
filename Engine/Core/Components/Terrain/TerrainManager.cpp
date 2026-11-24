@@ -62,8 +62,6 @@ TerrainManager::~TerrainManager()
 void TerrainManager::FenceBackgroundWork()
 {
     FenceFarObjectJobs();
-    for (auto& [cell, entry] : m_farStamps)
-        if (entry.job.valid()) entry.job.wait();
     if (m_macroJob.valid()) m_macroJob.wait();
     {
         std::lock_guard<std::mutex> lock(m_farPrepareMutex);
@@ -124,21 +122,6 @@ bool TerrainManager::UsesVolumeCells() const
         return setting ? (setting[0] == '0' ? 0 : 1) : -1;
     }();
     return !m_editorStreaming && (forced >= 0 ? forced == 1 : volumeCells);
-}
-
-void TerrainManager::SetTerrainStampMaterials(std::vector<std::string> materials)
-{
-    if (materials == m_stampMaterials) return;
-    InvalidatePrepared();
-    ClearFarStamps();
-    m_stampMaterials = std::move(materials);
-}
-
-void TerrainManager::SetTerrainStamps(TerrainStampProvider provider)
-{
-    InvalidatePrepared();
-    ClearFarStamps();
-    m_stampProvider = std::move(provider);
 }
 
 void TerrainManager::SetObjectLayerGenerator(ObjectLayerGenerator generator)
@@ -559,8 +542,6 @@ void TerrainManager::PrepareLoop()
             }
             else
             {
-                if (task.stamps) terrain->stamps = task.stamps(task.cell);
-                terrain->stampMaterials = task.stampMaterials;
                 terrain->compactMesh = task.compactMesh;
                 const bool baked = !task.bakePath.empty() && task.bakeSize &&
                     terrain->LoadCacheRange(task.bakePath,
@@ -964,8 +945,6 @@ void TerrainManager::LoadCell(Cell cell, int lodStride)
         static_cast<double>(cell.first) * cellsX * cellWidth, 0.0,
         static_cast<double>(cell.second) * cellsY * cellDepth};
     auto* terrain = object->AddComponent<Terrain>();
-    if (m_stampProvider) terrain->stamps = m_stampProvider(cell);
-    terrain->stampMaterials = m_stampMaterials;
     terrain->compactMesh = UsesCompactCellVertices();
     const auto cachePath = GetCacheFilePath(cell.first, cell.second);
     const std::string bakePath = (m_runtimeBakeActive || requireRuntimeBake) &&

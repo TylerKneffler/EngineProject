@@ -1,6 +1,5 @@
 #pragma once
 #include "Core/Component.h"
-#include "Core/Components/Terrain/TerrainStamp.h"
 #include <functional>
 #include "Core/Components/Mesh/Mesh.h"
 #include <glm/glm.hpp>
@@ -18,6 +17,7 @@ namespace Engine::Graphics { class IGraphicsTexture; }
 namespace Engine::Components
 {
 class Material;
+struct TerrainBrushShape;
 struct TerrainRegionMask;
 struct TerrainRegionOperation;
 struct TerrainHeightGrid;
@@ -43,9 +43,42 @@ public:
         float flattenHeight = 0.f;
         // Paint only: remove the layer, handing its weight to the others.
         bool erase = false;
+        // A shaped brush (a stamp, TerrainBrushShape): its mask replaces the
+        // round falloff for every brush, and Raise and Lower also scale by its
+        // height map, so a stroke raises the stamp's high places fastest and
+        // builds up its shape. The shape's square spans 2 x radius, turned by
+        // shapeYaw (radians about +Y). Null keeps the round brush.
+        std::shared_ptr<const TerrainBrushShape> shape;
+        float shapeYaw = 0.f;
+        // Shaped Raise only: the stamp builds only against terrain behind it
+        // (back from each point, opposite the shape's facing, across its
+        // footprint): a point rises at most to the highest ground found
+        // there. Where the stamp hangs past a wall's top or end, or lies on
+        // open ground, nothing changes.
+        bool backed = false;
+        // The ground heights `backed` reads, in the terrain's local X/Z;
+        // false where unknown. Unset: this cell's heights before the dab.
+        // TerrainManager sets one over every loaded cell, so strokes across
+        // cell borders see the same ground.
+        std::function<bool(float x, float z, float& height)> backingHeight;
+        // Shaped Raise only: stop at the stamp's surface, stampBase plus the
+        // shape's height there (scaled with the radius, so the stamp keeps its
+        // proportions, times stampHeightScale). Strength is then only how fast
+        // a stroke grows into the stamp; holding or overlapping strokes cannot
+        // pile up past it.
+        bool stopAtStamp = false;
+        float stampBase = 0.f;   // terrain-local Y the stamp stands on
+        float stampHeightScale = 1.f;
     };
     // Brush weight at a distance from the brush center (0 outside).
     static float BrushFalloff(float distance, float radius, float hardness);
+    // Brush weight at an offset from the brush centre, round or shaped. For a
+    // shaped brush, `relief` (when given) receives the shape's height there as
+    // a share of its tallest point (0..1); 1 for a round brush. How far a
+    // brush reaches from its centre: the radius, or the shape square's corner.
+    static float BrushWeight(float dx, float dz, float radius, const BrushOptions& options,
+        float* relief = nullptr);
+    static float BrushReach(float radius, const BrushOptions& options);
     struct BakedAppearance
     {
         float normal[3];
@@ -72,8 +105,6 @@ public:
         std::vector<BakedAppearance> bakedAppearance;
         std::array<BakedLod, 4> bakedLods;
         uint8_t bakedTextureMask = 0;
-        std::vector<TerrainStampInstance> stamps;
-        std::vector<std::string> stampMaterials;
         size_t collisionIndexCount = 0;
         std::vector<uint32_t> occluderIndices;
         bool compactMesh = false;
@@ -101,26 +132,6 @@ public:
     glm::vec3 GridPosition(int col, int row) const;
     std::vector<Layer> layers;
     std::vector<float> weights; // one weight per vertex and layer
-    // Placed terrain stamps (TerrainStamp): drawn as part of this cell's mesh,
-    // after the height grid's vertices and triangles, at the mesh's level
-    // stride. Not serialized: the terrain's owner sets them before the mesh is
-    // built or loaded (TerrainManager::SetTerrainStamps).
-    std::vector<TerrainStampInstance> stamps;
-    // Stamps' own surface materials (tools/stamp_textures.py), packed into the
-    // layer arrays after the painted layers; TerrainStampInstance::materialIndex
-    // picks one. Not serialized.
-    std::vector<std::string> stampMaterials;
-    // Stamps saved with a standalone terrain (test scenes such as
-    // tools/build_stamp_test_scene.py): loading fills `stamps` and
-    // `stampMaterials` from them. Streamed cells leave this empty; their
-    // owner sets `stamps` directly.
-    struct StampPlacement
-    {
-        std::string stamp;     // .stamp asset path
-        std::string material;  // its surface material, or empty for the paint layers
-        glm::mat4 transform{1.f}; // cell space
-    };
-    std::vector<StampPlacement> stampPlacements;
     // Keep this cell's mesh in the compact terrain vertex format (48 bytes a
     // vertex instead of 264, on the CPU and the GPU). Those vertices carry no
     // layer weights, so the cell then always has a paint map (at least two
@@ -234,10 +245,8 @@ public:
         uint64_t offset, uint64_t size,
         std::map<std::string, int64_t>& materialStamps);
     const std::vector<std::shared_ptr<Material>>& GetLayerMaterials() const { return m_materials; }
-    // The materials the layer arrays hold: the painted layers (at most six),
-    // then stampMaterials.
-    const std::vector<std::shared_ptr<Material>>& GetArrayMaterials() const
-    { return m_arrayMaterials.empty() ? m_materials : m_arrayMaterials; }
+    // The materials the layer arrays hold: the painted layers (at most six).
+    const std::vector<std::shared_ptr<Material>>& GetArrayMaterials() const { return m_materials; }
     JsonValue Serialize() const override;
     void Deserialize(const JsonValue& value) override;
     void OnAfterDeserialize(IGraphicsProvider* provider) override;
@@ -257,38 +266,19 @@ private:
     // is not a full-resolution copy of the grid (LOD stride, new materials).
     void RebuildRegion(int minCol, int minRow, int maxCol, int maxRow);
     void BuildVertex(int col, int row, Mesh::Vertex& vertex) const;
-    // Installs a built cell mesh (grid, then stamp patches from gridIndices
-    // on) in the compact format when compactMesh, else as is; triangle-mesh
-    // collision covers the grid only.
+    // Installs a built cell mesh in the compact format when compactMesh,
+    // else as is.
     bool InstallCellMesh(Mesh& mesh, std::vector<Mesh::Vertex>&& vertices,
-        std::vector<uint32_t>&& indices, size_t gridIndices);
+        std::vector<uint32_t>&& indices);
     // compactMesh: a paint map from the vertex weights where there is none.
     void PrepareCompactPaint();
     // The full-resolution grid's vertices (the first heights.size() of the
     // mesh), from either vertex format. Empty when the mesh is not one.
     std::vector<Mesh::Vertex> GridVertices(const Mesh& mesh) const;
-    // Appends the stamps' patches at `stride` (1 = every stamp point). Each
-    // point blends from the ground under it (heightsSource, this cell's grid)
-    // to its place on the stamp by its weight; `paint` fills a vertex's colour
-    // and layer weights from a grid sample index.
-    // A sculpted cell (TerrainStampInstance::sculpt) instead drops the grid's
-    // triangles (its vertices stay first, for GridVertices) and adds the
-    // sculpt's level for the stride.
-    void AppendStampGeometry(std::vector<Mesh::Vertex>& vertices,
-        std::vector<uint32_t>& indices, int stride,
-        const std::vector<float>& heightsSource,
-        const std::function<void(size_t, Mesh::Vertex&)>& paint) const;
-    // The cell's sculpt, if its surface is one.
-    const TerrainSculpt* Sculpt() const;
-    // A sculpt's coarsest level over the vertices AppendStampGeometry last
-    // built, for the mesh's occluder (InstallCellMesh takes it).
-    mutable std::vector<uint32_t> m_sculptOccluder;
     // Base color map present per layer, refreshed by Rebuild.
     std::array<bool, 6> m_layerTextured{};
     int m_meshLodStride = 1;
     std::vector<std::shared_ptr<Material>> m_materials;
-    std::vector<std::shared_ptr<Material>> m_arrayMaterials;
-    std::vector<std::string> m_arrayMaterialPaths;
     std::vector<std::string> m_materialPaths;
     std::vector<BakedAppearance> m_bakedAppearance;
     std::array<BakedLod, 4> m_bakedLods;

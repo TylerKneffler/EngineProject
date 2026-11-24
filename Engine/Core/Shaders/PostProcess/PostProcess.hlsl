@@ -221,6 +221,60 @@ float3 TemporalFromYCoCg(float3 c)
 float3 TemporalCompress(float3 c) { return c / (1.0 + dot(c, LuminanceWeights)); }
 float3 TemporalExpand(float3 c) { return c / max(1.0 - dot(c, LuminanceWeights), 1e-4); }
 
+// temporal.y: below 0.5 no usable history (mode * 0.125), else 1 + mode.
+// Mode bit 1: ENGINE_TAA_HISTORY_DEBUG; bit 2: fast settle off.
+uint TemporalMode()
+{
+    return temporal.y < 0.5 ? uint(temporal.y * 8.0 + 0.5) : uint(temporal.y - 1.0 + 0.5);
+}
+
+// ENGINE_TAA_HISTORY_DEBUG=1: red where a pixel has no history (it was off
+// screen last frame). The tinted output is next frame's history; the colour
+// clamp removes most of it there.
+float3 HistoryDebugNone(float3 rgb)
+{
+    return (TemporalMode() & 1u) != 0u
+        ? lerp(rgb, float3(1.0, 0.05, 0.05) * max(0.25, dot(rgb, 0.33)) * 2.0, 0.6) : rgb;
+}
+
+// History age (fast settle): the TAA history's alpha also holds how many
+// frames each pixel has accumulated, as 2 * age + alpha (alpha in 0..1, age
+// 0..TemporalAgeLimit; RGBA16F keeps both exact enough). Plain scene alpha
+// (no TAA, or a fresh scene) reads as age 0 and itself. Every reader of the
+// resolved scene's alpha decodes it (PSMain).
+static const float TemporalAgeLimit = 15.0;
+float TemporalAge(float packed) { return floor(max(packed, 0.0) * 0.5); }
+float TemporalAlpha(float packed) { return saturate(packed - 2.0 * TemporalAge(packed)); }
+float PackTemporalAlpha(float alpha, float age)
+{
+    return 2.0 * clamp(age, 0.0, TemporalAgeLimit) + saturate(alpha);
+}
+// The age of the history texel the reprojection lands in (nearest texel: a
+// filtered fetch would mix ages and alphas).
+float HistoryAge(float2 historyUv, float2 size)
+{
+    const int2 texel = clamp(int2(historyUv * size), int2(0, 0), int2(size) - 1);
+    return TemporalAge(bloomColor.Load(int3(texel, 0)).a);
+}
+// Fast settle: a pixel with `age` frames of history weights this frame by at
+// least 1 / (age + 1), a running average over its first frames, until the
+// usual blend (taaFeedback) takes over at about 1 / (1 - feedback) frames.
+// Without it a pixel new to the history keeps its raw first frame for ~10
+// frames at feedback 0.9: the strip a turn reveals shows jitter and dither.
+bool FastSettle() { return (TemporalMode() & 2u) == 0u; }
+float SettleWeight(float currentWeight, float age)
+{
+    return FastSettle() ? max(currentWeight, 1.0 / (age + 1.0)) : currentWeight;
+}
+// A pixel's first frames are softened toward the 3x3 neighbourhood mean
+// (YCoCg, compressed), so dithered fades and aliased edges do not show raw:
+// strongly on the first frame, lightly on the second, not after.
+float3 SettleBlur(float3 currentYCoCg, float3 meanYCoCg, float age)
+{
+    if (!FastSettle()) return currentYCoCg;
+    return lerp(currentYCoCg, meanYCoCg, age < 0.5 ? 0.75 : age < 1.5 ? 0.35 : 0.0);
+}
+
 // History fetch with a Catmull-Rom filter in five bilinear taps (Jimenez,
 // "Filmic SMAA", 2016): a bilinear fetch every frame blurs the history as
 // the camera moves.
@@ -293,21 +347,26 @@ float4 TemporalUpscale(VertexOutput input, int2 renderSize, int2 outputSize)
     const float3 current = weighted / max(weightSum, 1e-4);
     mean /= 9.0;
     const float3 deviation = sqrt(max(meanSquared / 9.0 - mean * mean, 0.0));
-    const float3 currentRgb = TemporalExpand(max(TemporalFromYCoCg(current), 0.0));
+    alpha = TemporalAlpha(alpha);
+    // No history (first frame, cut, or reprojected off screen): this frame
+    // alone, softened (SettleBlur), is the pixel's first history frame.
+    const float4 fresh = float4(TemporalExpand(max(TemporalFromYCoCg(SettleBlur(current, mean, 0.0)), 0.0)),
+        PackTemporalAlpha(alpha, 1.0));
     if (temporal.y < 0.5)
-        return float4(currentRgb, alpha);
+        return fresh;
     const float2 uv = (float2(closestPixel) + 0.5 - jitter) / float2(renderSize);
     const float4 clip = float4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, closestDepth, 1.0);
     const float4 previous = float4(dot(params0, clip), dot(shadowTint, clip),
         dot(highlightTint, clip), dot(grade, clip));
     if (abs(previous.w) < 1e-6)
-        return float4(currentRgb, alpha);
+        return fresh;
     const float2 previousNdc = previous.xy / previous.w;
     const float2 outputUv = outputPosition / float2(outputSize);
     const float2 historyUv = outputUv +
         (float2(previousNdc.x * 0.5 + 0.5, 0.5 - previousNdc.y * 0.5) - uv);
     if (any(historyUv < 0.0) || any(historyUv > 1.0))
-        return float4(currentRgb, alpha);
+        return float4(HistoryDebugNone(fresh.rgb), fresh.a);
+    const float age = HistoryAge(historyUv, float2(outputSize));
     float3 history = TemporalToYCoCg(TemporalCompress(
         SampleHistoryCatmullRom(historyUv, float2(outputSize))));
     const float3 extent = deviation * 1.25 + 1e-4;
@@ -321,9 +380,10 @@ float4 TemporalUpscale(VertexOutput input, int2 renderSize, int2 outputSize)
     // centre, in output pixels (1 on it, ~0.6 half a pixel away).
     const float scale = 0.5 * (toRender.x + toRender.y);
     const float confidence = exp(-2.0 * nearestDistance / (scale * scale));
-    const float currentWeight = saturate((1.0 - feedback) * (0.3 + 1.7 * confidence));
-    const float3 resolved = lerp(history, current, currentWeight);
-    return float4(TemporalExpand(max(TemporalFromYCoCg(resolved), 0.0)), alpha);
+    const float currentWeight = SettleWeight(
+        saturate((1.0 - feedback) * (0.3 + 1.7 * confidence)), age);
+    const float3 resolved = lerp(history, SettleBlur(current, mean, age), currentWeight);
+    return float4(TemporalExpand(max(TemporalFromYCoCg(resolved), 0.0)), PackTemporalAlpha(alpha, age + 1.0));
 }
 
 // Render size below the output without TAA: a bilinear stretch of the scene.
@@ -361,8 +421,13 @@ float4 TemporalResolvePS(VertexOutput input) : SV_Target
     }
     mean /= 9.0;
     const float3 deviation = sqrt(max(meanSquared / 9.0 - mean * mean, 0.0));
+    const float alpha = TemporalAlpha(centre.a);
+    // No history (first frame, cut, or reprojected off screen): this frame
+    // alone, softened (SettleBlur), is the pixel's first history frame.
+    const float4 fresh = float4(TemporalExpand(max(TemporalFromYCoCg(
+        SettleBlur(TemporalToYCoCg(current), mean, 0.0)), 0.0)), PackTemporalAlpha(alpha, 1.0));
     if (temporal.y < 0.5)
-        return float4(TemporalExpand(current), centre.a);
+        return fresh;
     // Reproject the nearest surface in the neighbourhood, so edges take the
     // foreground's motion (the background's would smear them).
     const float2 uv = (float2(closestPixel) + 0.5) / float2(width, height);
@@ -370,12 +435,13 @@ float4 TemporalResolvePS(VertexOutput input) : SV_Target
     const float4 previous = float4(dot(params0, clip), dot(shadowTint, clip),
         dot(highlightTint, clip), dot(grade, clip));
     if (abs(previous.w) < 1e-6)
-        return float4(TemporalExpand(current), centre.a);
+        return fresh;
     const float2 previousNdc = previous.xy / previous.w;
     const float2 historyUv = (input.position.xy / float2(width, height)) +
         (float2(previousNdc.x * 0.5 + 0.5, 0.5 - previousNdc.y * 0.5) - uv);
     if (any(historyUv < 0.0) || any(historyUv > 1.0))
-        return float4(TemporalExpand(current), centre.a);
+        return float4(HistoryDebugNone(fresh.rgb), fresh.a);
+    const float age = HistoryAge(historyUv, float2(width, height));
     float3 history = TemporalToYCoCg(TemporalCompress(
         max(bloomColor.SampleLevel(sceneSampler, historyUv, 0.0).rgb, 0.0)));
     // Clip the history toward the neighbourhood mean into its colour box.
@@ -388,8 +454,9 @@ float4 TemporalResolvePS(VertexOutput input) : SV_Target
     const float2 motionPixels = (historyUv - input.position.xy / float2(width, height)) *
         float2(width, height);
     const float feedback = temporal.x * lerp(1.0, 0.8, saturate(length(motionPixels) / 16.0));
-    const float3 resolved = lerp(TemporalToYCoCg(current), history, feedback);
-    return float4(TemporalExpand(max(TemporalFromYCoCg(resolved), 0.0)), centre.a);
+    const float currentWeight = SettleWeight(1.0 - feedback, age);
+    const float3 resolved = lerp(history, SettleBlur(TemporalToYCoCg(current), mean, age), currentWeight);
+    return float4(TemporalExpand(max(TemporalFromYCoCg(resolved), 0.0)), PackTemporalAlpha(alpha, age + 1.0));
 }
 
 // AgX (Troy Sobotka), in the common polynomial fit: a log2 encoding of an
@@ -536,7 +603,9 @@ float3 ApplyFxaa(float2 uv, float3 centre, float exposureScale, float encoded)
 
 float4 PSMain(VertexOutput input) : SV_Target
 {
-    const float4 source = sceneColor.Sample(sceneSampler, input.uv);
+    float4 source = sceneColor.Sample(sceneSampler, input.uv);
+    // After TAA the scene's alpha also holds the history age (PackTemporalAlpha).
+    source.a = TemporalAlpha(source.a);
     const uint op = asuint(params0.y);
     if (op == 4u)
         return source * params0.w;

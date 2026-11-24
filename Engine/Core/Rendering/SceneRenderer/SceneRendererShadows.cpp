@@ -2,6 +2,7 @@
 #include "Core/Rendering/SceneRenderer/SceneRendererShadows.h"
 
 #include "Core/Rendering/StableShadowCascade.h"
+#include "Core/Rendering/RenderSpatialIndex.h"
 #include "Core/Components/Camera/Camera.h"
 #include "Core/Components/Mesh/Mesh.h"
 #include "Core/Rendering/SceneRenderer/SceneRendererDrawPreparation.h"
@@ -13,6 +14,58 @@
 
 namespace Engine::Rendering
 {
+namespace
+{
+uint64_t MixShadowContent(uint64_t value)
+{
+    value ^= value >> 33; value *= 0xff51afd7ed558ccdull;
+    value ^= value >> 33; value *= 0xc4ceb9fe1a85ec53ull;
+    return value ^ (value >> 33);
+}
+
+// Signature of the shadow casters inside a cascade's light-space square: an
+// order-independent sum over casting items (shared prefab parts: over their
+// instance blocks, which carry world bounds) whose world box overlaps it, of
+// their identity and instance/geometry revision. It changes when casters
+// there stream in or out, are swapped (near/far blocks) or change placements.
+template<class Items>
+uint64_t ShadowCascadeContent(const Items& items, const glm::mat4& viewProjection)
+{
+    const glm::mat4& m = viewProjection;
+    // Orthographic: w = 1; a box's projected half extent is |M| * extent.
+    const auto overlaps = [&](const glm::vec3& minimum, const glm::vec3& maximum)
+    {
+        const glm::vec3 centre = (minimum + maximum) * .5f, extent = (maximum - minimum) * .5f;
+        const glm::vec4 p = m * glm::vec4(centre, 1.f);
+        const float ex = std::abs(m[0][0]) * extent.x + std::abs(m[1][0]) * extent.y + std::abs(m[2][0]) * extent.z;
+        const float ey = std::abs(m[0][1]) * extent.x + std::abs(m[1][1]) * extent.y + std::abs(m[2][1]) * extent.z;
+        return std::abs(p.x) <= 1.f + ex && std::abs(p.y) <= 1.f + ey;
+    };
+    uint64_t signature = 0;
+    for (const auto& item : items)
+    {
+        const auto* mesh = item.mesh;
+        if (!item.castsShadows || !mesh) continue;
+        if (mesh->UsesInstanceBlocks())
+        {
+            for (const auto& block : mesh->GetInstanceBlocks())
+                if (block.data && overlaps(block.minimum, block.maximum))
+                    signature += MixShadowContent(uint64_t(reinterpret_cast<uintptr_t>(block.data.get())) ^
+                        (block.data->revision * 0x9e3779b97f4a7c15ull) ^
+                        uint64_t(reinterpret_cast<uintptr_t>(mesh)) * 31u);
+            continue;
+        }
+        if (!item.hasBounds) continue;
+        const auto bounds = TransformBounds(item.boundsMinimum, item.boundsMaximum, item.world);
+        if (!overlaps(bounds.minimum, bounds.maximum)) continue;
+        const auto& instances = mesh->GetInstanceData();
+        const uint64_t revision = instances ? instances->revision : mesh->GetAuthoredGeometryRevision();
+        signature += MixShadowContent(uint64_t(reinterpret_cast<uintptr_t>(mesh)) ^
+            (revision * 0x9e3779b97f4a7c15ull));
+    }
+    return signature ? signature : 1u;
+}
+}
 using Scene = Engine::Scene::Scene;
 SceneRendererShadows::ShadowCascadeSet SceneRendererShadows::BuildCascades(
     SceneRenderer& renderer, const Engine::Model::RealtimeShadowSelection& shadowSelection,
@@ -256,6 +309,40 @@ SceneRendererShadows::PrepareResult SceneRendererShadows::PrepareDirectionalShad
                         if ((contentChanged && age >= 240u) || age >= 600u)
                             directionalShadowDirtyMask[farCascade] = 1u;
                     }
+                    // Stepped middle cascades refresh only when the camera
+                    // crosses a step, so casters that streamed in or out (or a
+                    // near/far block hand-off) since kept their old shadows,
+                    // and the shadows then changed at once at the next step
+                    // (a lit bush and rock went dark in one frame). One
+                    // cascade's content is checked per frame, in turn, and a
+                    // changed one refreshes (at most every 8 frames each, at
+                    // least every 120).
+                    // ENGINE_SHADOW_CONTENT_REFRESH=0 turns the check off (A/B runs).
+                    static const bool contentRefresh = [] {
+                        const char* value = std::getenv("ENGINE_SHADOW_CONTENT_REFRESH");
+                        return !(value && value[0] == '0');
+                    }();
+                    if (Engine::Rendering::SteppedShadowCascades() && contentRefresh)
+                    {
+                        const uint32_t middle = requestedShadowCascades.count -
+                            (requestedShadowCascades.hasFarCascade ? 1u : 0u);
+                        if (middle > 1u)
+                        {
+                            const uint32_t cascade = 1u + renderer.m_directionalShadowContentCursor++ % (middle - 1u);
+                            const uint64_t age = renderer.m_directionalShadowFrameCounter -
+                                renderer.m_directionalShadowCascadeLastRenderedFrame[cascade];
+                            // Also every 120 frames: a cached image can go stale
+                            // without its casters changing (drawn while tree
+                            // levels and leaf textures were still streaming in,
+                            // which nothing announces; a still camera never
+                            // crosses a step), and stayed so until the next step.
+                            if (!directionalShadowDirtyMask[cascade] && age >= 8u &&
+                                (age >= 120u || ShadowCascadeContent(renderer.m_frameRenderItems,
+                                    renderer.m_directionalShadowCachedViewProjections[cascade]) !=
+                                    renderer.m_directionalShadowCascadeContent[cascade]))
+                                directionalShadowDirtyMask[cascade] = 1u;
+                        }
+                    }
                 }
             }
             if (staggerMovingCascades && requestedShadowCascades.count>2u)
@@ -284,6 +371,14 @@ SceneRendererShadows::PrepareResult SceneRendererShadows::PrepareDirectionalShad
                 dirtyCascadeCount=requestedShadowCascades.count;
             }
             renderMainDirectionalShadow = dirtyCascadeCount > 0u;
+            // The content each re-rendered middle cascade is drawn with
+            // (in its new light-space square), for the check above.
+            if (Engine::Rendering::SteppedShadowCascades())
+                for (uint32_t cascade = 1u; cascade < requestedShadowCascades.count -
+                        (requestedShadowCascades.hasFarCascade ? 1u : 0u); ++cascade)
+                    if (directionalShadowDirtyMask[cascade])
+                        renderer.m_directionalShadowCascadeContent[cascade] = ShadowCascadeContent(
+                            renderer.m_frameRenderItems, requestedShadowCascades.viewProjections[cascade]);
             if (!renderMainDirectionalShadow && cacheReusable)
                 copyCachedCascades();
             preserveDirectionalShadowAtlas = cacheReusable &&

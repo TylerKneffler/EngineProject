@@ -306,6 +306,8 @@ bool TerrainManager::ApplyBrush(double x, double z, float radius, float strength
     if (!std::isfinite(x) || !std::isfinite(z) || !std::isfinite(radius) ||
         !std::isfinite(strength) || radius <= 0.f || strength <= 0.f ||
         (brush == Terrain::Brush::Paint && layer < 0)) return false;
+    // A shaped brush's turned square reaches past the radius.
+    const double reach = Terrain::BrushReach(radius, options);
     const double spanX = static_cast<double>(cellsX) * cellWidth;
     const double spanZ = static_cast<double>(cellsY) * cellDepth;
     const auto cellFloor = [](double coordinate) {
@@ -313,10 +315,10 @@ bool TerrainManager::ApplyBrush(double x, double z, float radius, float strength
             static_cast<double>(std::numeric_limits<int>::min()),
             static_cast<double>(std::numeric_limits<int>::max()))));
     };
-    const int64_t minX = cellFloor((static_cast<double>(x) - radius) / spanX);
-    const int64_t maxX = cellFloor((static_cast<double>(x) + radius) / spanX);
-    const int64_t minZ = cellFloor((static_cast<double>(z) - radius) / spanZ);
-    const int64_t maxZ = cellFloor((static_cast<double>(z) + radius) / spanZ);
+    const int64_t minX = cellFloor((static_cast<double>(x) - reach) / spanX);
+    const int64_t maxX = cellFloor((static_cast<double>(x) + reach) / spanX);
+    const int64_t minZ = cellFloor((static_cast<double>(z) - reach) / spanZ);
+    const int64_t maxZ = cellFloor((static_cast<double>(z) + reach) / spanZ);
     std::set<Cell> targets;
     const uint64_t candidateWidth = static_cast<uint64_t>(maxX - minX + 1);
     const uint64_t candidateHeight = static_cast<uint64_t>(maxZ - minZ + 1);
@@ -345,14 +347,43 @@ bool TerrainManager::ApplyBrush(double x, double z, float radius, float strength
                 terrain && !m_proceduralCells.count(cell) &&
                 terrain->paintResolution != paintResolution)
                 terrain->SetPaintResolution(paintResolution);
+    // A backed stamp looks behind each point, up to the shape's far side
+    // (another 2 x reach), possibly into cells the brush does not touch: it
+    // reads the loaded cells' heights as they were before this dab, so cells
+    // changed earlier in the loop do not move the ground the later ones see.
+    std::shared_ptr<std::map<Cell, std::vector<float>>> backingCells;
+    if (options.backed && options.shape && brush == Terrain::Brush::Raise && !options.backingHeight)
+    {
+        backingCells = std::make_shared<std::map<Cell, std::vector<float>>>();
+        const double look = 3.0 * reach;
+        for (int64_t row = cellFloor((z - look) / spanZ); row <= cellFloor((z + look) / spanZ); ++row)
+            for (int64_t col = cellFloor((x - look) / spanX); col <= cellFloor((x + look) / spanX); ++col)
+                if (const auto* terrain = GetLoadedCell(int(col), int(row));
+                    terrain && terrain->heights.size() == size_t(cellsX + 1) * (cellsY + 1))
+                    (*backingCells)[{int(col), int(row)}] = terrain->heights;
+    }
     std::set<Cell> changedCells;
     for (Cell cell : targets)
         if (auto* terrain = GetLoadedCell(cell.first, cell.second))
+        {
+            Terrain::BrushOptions cellOptions = options;
+            if (backingCells)
+                cellOptions.backingHeight = [this, backingCells, cell, spanX, spanZ](
+                    float localX, float localZ, float& height)
+                {
+                    const double worldX = cell.first * spanX + localX, worldZ = cell.second * spanZ + localZ;
+                    const Cell at{int(std::floor(worldX / spanX)), int(std::floor(worldZ / spanZ))};
+                    const auto found = backingCells->find(at);
+                    return found != backingCells->end() && SampleTerrainSurface(found->second, cellsX, cellsY,
+                        cellWidth, cellDepth, float(worldX - at.first * spanX), float(worldZ - at.second * spanZ),
+                        height);
+                };
             if (terrain->ApplyBrush(
                 static_cast<float>(static_cast<double>(x) - cell.first * spanX),
                 static_cast<float>(static_cast<double>(z) - cell.second * spanZ),
-                radius, strength, brush, layer, realignObjects, options))
+                radius, strength, brush, layer, realignObjects, cellOptions))
                 changedCells.insert(cell);
+        }
     if (changedCells.empty()) return false;
 
     // Paint maps: border samples are shared like vertices. Average the copies
@@ -377,7 +408,7 @@ bool TerrainManager::ApplyBrush(double x, double z, float radius, float strength
                     const int64_t sx = int64_t(cell.first) * (width - 1) + col;
                     const int64_t sz = int64_t(cell.second) * (height - 1) + row;
                     const double dx = sx * stepX - x, dz = sz * stepZ - z;
-                    if (dx * dx + dz * dz >= double(radius) * radius) continue;
+                    if (dx * dx + dz * dz >= reach * reach) continue;
                     // Resolution is part of the key: only equal grids share samples.
                     paintShared[{sx * 32 + resolution, sz}].emplace_back(terrain,
                         size_t(row) * width + col);
@@ -433,7 +464,7 @@ bool TerrainManager::ApplyBrush(double x, double z, float radius, float strength
                 const int64_t sz = static_cast<int64_t>(cell.second) * cellsY + row;
                 const double dx = sx * static_cast<double>(cellWidth) - x;
                 const double dz = sz * static_cast<double>(cellDepth) - z;
-                if (dx * dx + dz * dz >= static_cast<double>(radius) * radius)
+                if (dx * dx + dz * dz >= reach * reach)
                     continue;
                 shared[{sx, sz}].emplace_back(cell,
                     static_cast<size_t>(row * (cellsX + 1) + col));

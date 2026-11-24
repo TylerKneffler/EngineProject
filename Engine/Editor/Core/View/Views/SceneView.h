@@ -173,6 +173,21 @@ private:
     static constexpr int kNoiseBrush = 8;
     static constexpr int kTerraceBrush = 9;
     static constexpr int kSelectTool = 10;
+    // Stamp: Raise with a stamp's shape (required): held, it raises the
+    // ground under the stamp's outline, its high places fastest; Shift lowers.
+    static constexpr int kStampTool = 11;
+    // Brush shape for Raise, Lower, Smooth, Flatten, Paint and Stamp: a .stamp
+    // asset path (TerrainBrushShape), or empty for the round brush.
+    std::string m_terrainShapePath;
+    float m_terrainShapeYawDegrees = 0.f;
+    // Stamp: build only against terrain behind the stamp (BrushOptions::backed).
+    bool m_terrainStampBacked = true;
+    // Stamp: grows to its own surface (BrushOptions::stopAtStamp), heights times this.
+    float m_terrainStampHeightScale = 1.f;
+    std::vector<std::string> m_terrainStampAssets;
+    bool ShapedTerrainTool() const
+    { return m_terrainBrush <= kPaintBrush || m_terrainBrush == kStampTool; }
+    void DrawTerrainShapeToolbar(const std::function<bool(float)>& next);
     // Settings of the region-operation brushes (one set, read per tool).
     Engine::Components::TerrainRegionOperation m_brushOperation;
     uint32_t m_brushSeed = 1;

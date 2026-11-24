@@ -1,6 +1,5 @@
 #pragma once
 
-#include "Core/Components/Terrain/TerrainStamp.h"
 #include "Core/Components/Terrain/TerrainVolume.h"
 #include <array>
 #include <memory>
@@ -14,7 +13,7 @@ class Terrain;
 // A shape added to or carved out of a volume terrain cell (a cave, an arch,
 // an overhang): the edits the height field could not hold. Stored per cell,
 // in the cell's space (TerrainManager: <cellDataDirectory>/<x>_<z>.volumeedit),
-// and applied in order after the ground and the stamps, each blended in over
+// and applied in order after the ground, each blended in over
 // `blend` metres. An edit belongs to the cell holding its centre; the cells
 // around it read it too, so it may cross into them but not past them (less
 // than a cell across).
@@ -58,13 +57,6 @@ struct TerrainVolumeInput
     // past the cell's edge (its margin), so coarse levels follow the real
     // ground across the border and neighbouring cells agree there.
     std::array<std::vector<float>, 9> neighbourHeights;
-    std::vector<TerrainStampInstance> stamps;
-    // Sculpted surfaces (tools/cliff_sculpt.py), each placed in this cell's
-    // space by its transform: the cell's own and its neighbours'. Inside a
-    // sculpt's cell the ground is the sculpt (the distance to its nearest
-    // triangle within SculptReach, signed by ray parity), elsewhere the
-    // heights.
-    std::vector<TerrainStampInstance> sculpts;
     std::vector<TerrainVolumeEdit> edits;
     static TerrainVolumeInput From(const Terrain& terrain);
 };
@@ -75,14 +67,11 @@ std::shared_ptr<TerrainVolume> BuildTerrainVolume(const TerrainVolumeInput& inpu
 // .md/todo.md), the runtime twin of tools/terrain_volume.py:
 //   * ground: (height - y) times the surface normal's y, so the density is
 //     close to the distance to the ground on slopes too;
-//   * stamps (Terrain::stamps): solid rock behind each stamp's face, up to
-//     StampDepth metres, where a sample lies over the patch;
-//   * the two joined by a smooth union (a SmoothUnion-metre fillet), so the
-//     ground runs into the rock without a crease;
-//   * then the edits.
+//   * then the edits (caves, arches; rock shapes are in the heights, written
+//     there by the stamp brushes).
 // The grid covers the cell at `spacing` metres, plus a margin past each edge
 // that is read but not meshed (TerrainVolume::interiorFirst), from the
-// lowest height less `band` to the highest height or stamp top plus `band`.
+// lowest height less `band` to the highest height plus `band`.
 // Only chunks near the surface are computed; chunks wholly above or below it
 // are uniform (TerrainVolume's sparse storage). Densities are clamped to
 // +-band.

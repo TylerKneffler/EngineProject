@@ -2437,3 +2437,39 @@ at mid distance.
     constants. New GPU stage `Clouds` (`gpu_clouds_ms`). Vista cost 1.33 ms -> 0.61 ms on DX12 (march 0.58 +
     sky/composite 0.03), DX11 0.46, Vulkan 0.82; image nearly identical (edges marginally softer). Vulkan's
     `StorageBarrier` now also covers fragment-shader reads (it only covered compute/vertex/indirect)
+
+## Moved from todo.md on 2026-11-24
+
+- [x] **Real-speed capture and flag button** (2026-11-23/24). `--capture-async` saves every frame without
+      draining the GPU (DX12 readback ring, half resolution). `--flag-button` (or `ENGINE_FLICKER_BUTTON=1` in
+      normal play) shows "Flag flicker (F8)"; F8 or a click writes `{"type":"flag","frame":N}` to frames.jsonl.
+      `.local/transitions/flag_pops.py` finds the pops before each flag, `flag_review.py` compares with a
+      reference run, `pairdiff.py` diffs two runs on the same route frame by frame.
+- [x] **TAA edge strip on fast turns** (2026-11-24): the strip a turn reveals had no history and showed the
+      raw jittered, dithered frame for ~10 frames. History age now rides in the history alpha (2 * age +
+      alpha, decoded in the compose); new pixels average their first frames evenly and the first one is
+      softened toward its 3x3 neighbourhood (`taaFastSettle`, Preferences "TAA Fast Settle",
+      `ENGINE_TAA_FAST_SETTLE=0`). Strip/interior sharpness on fast turns 1.11 -> 1.03 (TAA off 1.01).
+      `ENGINE_TAA_HISTORY_DEBUG=1` tints no-history pixels red. Ambient occlusion has the same restart: not done.
+- [x] **Bushes vanished for ~20 frames and popped back while walking** (meadow, real speed; user flags 2026-11-24
+      at frames 486, 2314-2333 and 3800-3820; the first real-speed capture's 1971-1986 was the same). Cause: a
+      ground cover tile still fading in (GrassField tile appearance, `fadeDuration` 0.35 s) kept
+      `geometryFade.w` = 2 + visibility ("tile level"), while settled per-plant tiles get 6 ("per placement",
+      `perPlacementFade` in SceneRendering.cpp only switched fully visible tiles). The GPU cull takes the
+      per-placement mode for a whole batch from its first tile (`representative`), so whenever a far tile
+      fading in at the 80 m range edge led a batch, every tile in it was culled by tile-level bands for the
+      fade, while the pixel shader still dissolved settled tiles per plant: plants whose own band differed
+      from their tile's were drawn in no band, invisible until the far tile finished, then back at once.
+      Timing-dependent (which tile leads the batch, wall-clock fade), only while moving (no tile builds when
+      spinning in place). Fix: fading per-plant tiles stay per placement, their visibility carried as
+      w = 6 + 0.4 (1 - visibility) (`GroundCoverVisibility` in Object.hlsl). Validated on a default
+      real-speed meadow walk with every frame captured: the bush pops at 485, 1986 and 2306 that appeared in
+      nearly every run are gone (largest step left 2.8 k pixels, the canopy passing at 3946-3954); the user
+      watched a run with no bush flicker.
+      How it was found: `ENGINE_TRACE_LAYER` stage counters and a checksum of the cull inputs were identical
+      between runs with and without the vanish; uploads matched the CPU; occlusion, texture streaming, shader
+      misses, frames in flight (`ENGINE_GPU_SYNC_EACH_FRAME=1`), the LOD cross-fade, pool identity steal and
+      tile pooling were ruled out; the visibility monitor (`ENGINE_VISIBILITY_MONITOR`, CPU reference cull vs
+      the GPU visible list) showed zero missing in a run that did vanish, so the loss was after the cull;
+      `ENGINE_GRASS_APPEAR_SECONDS=0` removed it, which led to the batch-wide mode. The flag button tied the
+      user's sightings to frames; the spin test scene and spinning in the landscape showed it needs movement.

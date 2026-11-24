@@ -4,6 +4,7 @@
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Core/Graphics/IGraphicsTexture.h"
 #include "Terrain.h"
+#include "Core/Components/Terrain/TerrainBrushShape.h"
 #include "Core/Components/Terrain/TerrainObjectLayer.h"
 #include "Core/Components/Terrain/TerrainRegionEdit.h"
 #include "Core/Components/Terrain/TerrainSurfaceSample.h"
@@ -26,10 +27,6 @@
 
 namespace
 {
-// Metres a displaced grid stays inside the stamps' rock; keep equal to
-// DISPLACE_INSET in tools/terrain_stamp_morph.py.
-constexpr float DisplacedStampInset = 0.35f;
-
 template<class T> bool WriteValue(std::ofstream& stream, const T& value)
 {
     static_assert(std::is_trivially_copyable_v<T>);
@@ -526,6 +523,25 @@ float Terrain::BrushFalloff(float distance, float radius, float hardness)
     return t * t * (3.f - 2.f * t);
 }
 
+float Terrain::BrushWeight(float dx, float dz, float radius, const BrushOptions& options,
+    float* relief)
+{
+    if (relief) *relief = 1.f;
+    if (!options.shape)
+        return BrushFalloff(std::sqrt(dx * dx + dz * dz), radius, options.hardness);
+    const TerrainBrushShape& shape = *options.shape;
+    const glm::vec2 uv = TerrainBrushShape::ToShape(dx, dz, radius, options.shapeYaw);
+    const float weight = shape.SampleMask(uv);
+    if (relief) *relief = shape.maxHeight > 0.f
+        ? std::clamp(shape.SampleHeight(uv) / shape.maxHeight, 0.f, 1.f) : 0.f;
+    return std::max(weight, 0.f);
+}
+
+float Terrain::BrushReach(float radius, const BrushOptions& options)
+{
+    return options.shape ? radius * 1.4143f : radius;
+}
+
 bool Terrain::ApplyBrush(float x, float z, float radius, float strength,
     Brush brush, int layer, bool realignObjects, const BrushOptions& options)
 {
@@ -533,6 +549,9 @@ bool Terrain::ApplyBrush(float x, float z, float radius, float strength,
     if (radius <= 0.f || strength <= 0.f || heights.empty()) return false;
     if (brush == Brush::Paint && (layer < 0 || layer >= static_cast<int>(layers.size())))
         return false;
+    // The reach covers a shaped brush's turned square; outside its outline
+    // the weight is 0.
+    const float reach = BrushReach(radius, options);
     const std::vector<float> before = heights;
     bool changed = false;
     EnsurePaintMap();
@@ -542,16 +561,16 @@ bool Terrain::ApplyBrush(float x, float z, float radius, float strength,
         const size_t layerCount = layers.size();
         const int width = PaintWidth(), height = PaintHeight();
         const float stepX = cellWidth / paintResolution, stepZ = cellDepth / paintResolution;
-        const int minCol = std::max(0, int(std::floor((x - radius) / stepX)));
-        const int maxCol = std::min(width - 1, int(std::ceil((x + radius) / stepX)));
-        const int minRow = std::max(0, int(std::floor((z - radius) / stepZ)));
-        const int maxRow = std::min(height - 1, int(std::ceil((z + radius) / stepZ)));
+        const int minCol = std::max(0, int(std::floor((x - reach) / stepX)));
+        const int maxCol = std::min(width - 1, int(std::ceil((x + reach) / stepX)));
+        const int minRow = std::max(0, int(std::floor((z - reach) / stepZ)));
+        const int maxRow = std::min(height - 1, int(std::ceil((z + reach) / stepZ)));
         for (int row = minRow; row <= maxRow; ++row)
             for (int col = minCol; col <= maxCol; ++col)
             {
                 const float dx = col * stepX - x, dz = row * stepZ - z;
-                const float amount = std::clamp(strength * BrushFalloff(
-                    std::sqrt(dx * dx + dz * dz), radius, options.hardness), 0.f, 1.f);
+                const float amount = std::clamp(strength *
+                    BrushWeight(dx, dz, radius, options), 0.f, 1.f);
                 float* sample = &paintWeights[(size_t(row) * width + col) * layerCount];
                 if (PaintSample(sample, layerCount, layer, amount, options.erase))
                 {
@@ -570,18 +589,46 @@ bool Terrain::ApplyBrush(float x, float z, float radius, float strength,
         }
         return changed;
     }
-    const int firstCol = std::max(0, int(std::floor((x - radius) / cellWidth)));
-    const int lastCol = std::min(cellsX, int(std::ceil((x + radius) / cellWidth)));
-    const int firstRow = std::max(0, int(std::floor((z - radius) / cellDepth)));
-    const int lastRow = std::min(cellsY, int(std::ceil((z + radius) / cellDepth)));
+    const int firstCol = std::max(0, int(std::floor((x - reach) / cellWidth)));
+    const int lastCol = std::min(cellsX, int(std::ceil((x + reach) / cellWidth)));
+    const int firstRow = std::max(0, int(std::floor((z - reach) / cellDepth)));
+    const int lastRow = std::min(cellsY, int(std::ceil((z + reach) / cellDepth)));
+    // Backed stamp: the highest ground behind a point (back from it, against
+    // the shape's facing, while still over the shape's square), from the
+    // heights as they were before this dab.
+    const bool backed = options.backed && options.shape && brush == Brush::Raise;
+    const bool stopAtStamp = options.stopAtStamp && options.shape && brush == Brush::Raise;
+    const float stampScale = options.shape
+        ? radius / options.shape->halfExtent * options.stampHeightScale : 0.f;
+    const glm::vec2 back = backed
+        ? -glm::normalize(TerrainBrushShape::FromShape(options.shape->facing, 1.f, options.shapeYaw))
+        : glm::vec2(0.f);
+    const auto backingAt = [&](float px, float pz)
+    {
+        float highest = -std::numeric_limits<float>::infinity();
+        const float step = .5f * std::min(cellWidth, cellDepth);
+        for (float travelled = step;; travelled += step)
+        {
+            const float sx = px + back.x * travelled, sz = pz + back.y * travelled;
+            const glm::vec2 uv = TerrainBrushShape::ToShape(sx - x, sz - z, radius, options.shapeYaw);
+            if (std::abs(uv.x) > 1.f || std::abs(uv.y) > 1.f) break;
+            float ground = 0.f;
+            const bool known = options.backingHeight ? options.backingHeight(sx, sz, ground)
+                : SampleTerrainSurface(before, cellsX, cellsY, cellWidth, cellDepth, sx, sz, ground);
+            if (known) highest = std::max(highest, ground);
+        }
+        return highest;
+    };
     for (int row = firstRow; row <= lastRow; ++row)
         for (int col = firstCol; col <= lastCol; ++col)
         {
             const float dx = col * cellWidth - x, dz = row * cellDepth - z;
-            const float distance = std::sqrt(dx * dx + dz * dz);
-            if (distance >= radius) continue;
-            const float amount = std::clamp(strength *
-                BrushFalloff(distance, radius, options.hardness), 0.f, 1.f);
+            float relief = 1.f;
+            const float weight = BrushWeight(dx, dz, radius, options, &relief);
+            // Shaped Raise and Lower follow the shape's height map as well as
+            // its outline: its high places move fastest.
+            const bool followRelief = brush == Brush::Raise || brush == Brush::Lower;
+            const float amount = std::clamp(strength * weight * (followRelief ? relief : 1.f), 0.f, 1.f);
             if (amount <= 0.f) continue;
             const size_t i = static_cast<size_t>(row * (cellsX + 1) + col);
             if (brush == Brush::Paint)
@@ -597,6 +644,19 @@ bool Terrain::ApplyBrush(float x, float z, float radius, float strength,
             {
                 float target = before[i];
                 if (brush == Brush::Raise) target += amount;
+                // Raise never lowers: a cap below the point leaves it as is.
+                // At the stamp's surface the point is done.
+                if (stopAtStamp)
+                {
+                    const glm::vec2 uv = TerrainBrushShape::ToShape(dx, dz, radius, options.shapeYaw);
+                    const float surface = options.stampBase + options.shape->SampleHeight(uv) * stampScale;
+                    target = std::min(target, std::max(before[i], surface));
+                }
+                // Nothing behind it higher than the point: the stamp has
+                // nothing to build against here.
+                if (backed)
+                    target = std::min(target, std::max(before[i],
+                        backingAt(col * cellWidth, row * cellDepth)));
                 if (brush == Brush::Lower) target -= amount;
                 if (brush == Brush::Flatten)
                     target = before[i] + (options.flattenHeight - before[i]) * amount;
@@ -622,7 +682,7 @@ bool Terrain::ApplyBrush(float x, float z, float radius, float strength,
         RebuildRegion(firstCol, firstRow, lastCol, lastRow);
         MarkConfigurationDirty();
         if (brush != Brush::Paint)
-            FollowSurfaceEdit(before, x - radius, z - radius, x + radius, z + radius,
+            FollowSurfaceEdit(before, x - reach, z - reach, x + reach, z + reach,
                 realignObjects);
     }
     return changed;
@@ -791,19 +851,8 @@ void Terrain::Rebuild()
             indices.insert(indices.end(), {a, b, a + 1, a + 1, b, b + 1});
         }
     ReduceMeshForLod(vertices, indices, cellsX, cellsY, m_meshLodStride);
-    const size_t gridIndices = indices.size();
-    AppendStampGeometry(vertices, indices, m_meshLodStride, heights,
-        [&](size_t source, Mesh::Vertex& vertex)
-        {
-            Mesh::Vertex grid;
-            BuildVertex(static_cast<int>(source % (cellsX + 1)),
-                static_cast<int>(source / (cellsX + 1)), grid);
-            std::copy_n(grid.color, 4, vertex.color);
-            for (int set = 2; set < 4; ++set)
-                std::copy_n(grid.uvChannels[set], 4, vertex.uvChannels[set]);
-        });
     OrientTerrainSurfaceUp(vertices, indices);
-    InstallCellMesh(*mesh, std::move(vertices), std::move(indices), gridIndices);
+    InstallCellMesh(*mesh, std::move(vertices), std::move(indices));
     if (m_provider && !mesh->IsReady()) mesh->OnAfterDeserialize(m_provider);
 }
 
@@ -815,7 +864,7 @@ void Terrain::PrepareCompactPaint()
 }
 
 bool Terrain::InstallCellMesh(Mesh& mesh, std::vector<Mesh::Vertex>&& vertices,
-    std::vector<uint32_t>&& indices, size_t gridIndices)
+    std::vector<uint32_t>&& indices)
 {
     bool installed = false;
     if (compactMesh && HasPaintMap())
@@ -837,18 +886,10 @@ bool Terrain::InstallCellMesh(Mesh& mesh, std::vector<Mesh::Vertex>&& vertices,
     }
     else
         installed = mesh.SetIndexedGeometry(std::move(vertices), std::move(indices));
-    // Stamps are not collided with; a sculpt is the cell's ground.
-    mesh.collisionIndexCount = stamps.empty() || Sculpt() ? 0 : gridIndices;
-    mesh.occluderIndices = std::move(m_sculptOccluder);
-    m_sculptOccluder.clear();
+    // Every triangle is the grid: all of them collide and occlude.
+    mesh.collisionIndexCount = 0;
+    mesh.occluderIndices.clear();
     return installed;
-}
-
-const TerrainSculpt* Terrain::Sculpt() const
-{
-    for (const auto& instance : stamps)
-        if (instance.sculpt) return instance.sculpt.get();
-    return nullptr;
 }
 
 std::vector<Mesh::Vertex> Terrain::GridVertices(const Mesh& mesh) const
@@ -874,179 +915,6 @@ std::vector<Mesh::Vertex> Terrain::GridVertices(const Mesh& mesh) const
     if (mesh.GetVertices().size() < heights.size()) return grid;
     grid.assign(mesh.GetVertices().begin(), mesh.GetVertices().begin() + heights.size());
     return grid;
-}
-
-void Terrain::AppendStampGeometry(std::vector<Mesh::Vertex>& vertices,
-    std::vector<uint32_t>& indices, int stride, const std::vector<float>& heightsSource,
-    const std::function<void(size_t, Mesh::Vertex&)>& paint) const
-{
-    if (stamps.empty() || heightsSource.size() != static_cast<size_t>(cellsX + 1) * (cellsY + 1))
-        return;
-    const float width = cellsX * cellWidth, depth = cellsY * cellDepth;
-    for (const auto& instance : stamps)
-    {
-        const TerrainSculpt* sculpt = instance.sculpt.get();
-        if (!sculpt || sculpt->levels.empty()) continue;
-        // The sculpt is the cell's surface: the grid's triangles go (its
-        // vertices stay, unused, first in the list).
-        indices.clear();
-        const size_t level = std::min<size_t>(stride <= 1 ? 0 : stride <= 2 ? 1 : 2,
-            sculpt->levels.size() - 1);
-        const bool surfaced = instance.materialIndex >= 0 &&
-            static_cast<size_t>(instance.materialIndex) < stampMaterials.size() && layers.size() <= 6;
-        const float slice = static_cast<float>(layers.size() + std::max(instance.materialIndex, 0));
-        std::vector<uint32_t> slots(sculpt->vertices.size(), UINT32_MAX);
-        const auto& source = sculpt->levels[level];
-        for (size_t t = 0; t + 2 < source.size(); t += 3)
-        {
-            for (size_t k = 0; k < 3; ++k)
-            {
-                uint32_t& slot = slots[source[t + k]];
-                if (slot == UINT32_MAX)
-                {
-                    const auto& point = sculpt->vertices[source[t + k]];
-                    Mesh::Vertex vertex{};
-                    vertex.pos[0] = point.position.x; vertex.pos[1] = point.position.y;
-                    vertex.pos[2] = point.position.z;
-                    vertex.normal[0] = point.normal.x; vertex.normal[1] = point.normal.y;
-                    vertex.normal[2] = point.normal.z;
-                    vertex.uv[0] = std::clamp(point.position.x / width, 0.f, 1.f);
-                    vertex.uv[1] = std::clamp(point.position.z / depth, 0.f, 1.f);
-                    const int col = std::clamp(static_cast<int>(std::lround(point.position.x / cellWidth)), 0, cellsX);
-                    const int row = std::clamp(static_cast<int>(std::lround(point.position.z / cellDepth)), 0, cellsY);
-                    vertex.color[3] = 1.f;
-                    paint(static_cast<size_t>(row) * (cellsX + 1) + col, vertex);
-                    if (surfaced)
-                    {
-                        // Rock projected from three sides (Object.hlsl): the
-                        // slice as -(slice + 1), the tiling, the scans' tint.
-                        vertex.uvChannels[4][0] = sculpt->repeatsPerMetre;
-                        vertex.uvChannels[4][1] = 0.f;
-                        vertex.uvChannels[4][2] = -(slice + 1.f);
-                        vertex.uvChannels[4][3] = std::clamp(point.weight, 0.f, 1.f);
-                        vertex.uvChannels[0][2] = point.tint.x; vertex.uvChannels[0][3] = point.tint.y;
-                        vertex.uvChannels[1][2] = point.tint.z;
-                    }
-                    slot = static_cast<uint32_t>(vertices.size());
-                    vertices.push_back(vertex);
-                }
-                indices.push_back(slot);
-            }
-        }
-        // The occlusion buffer's copy: the coarsest level, over the same
-        // vertices (simplified levels keep a subset of the finer ones' points).
-        m_sculptOccluder.clear();
-        const auto& coarse = sculpt->levels.back();
-        if (&coarse != &source)
-            for (size_t t = 0; t + 2 < coarse.size(); t += 3)
-            {
-                const uint32_t a = slots[coarse[t]], b = slots[coarse[t + 1]], c = slots[coarse[t + 2]];
-                if (a == UINT32_MAX || b == UINT32_MAX || c == UINT32_MAX) continue;
-                m_sculptOccluder.insert(m_sculptOccluder.end(), {a, b, c});
-            }
-        return;
-    }
-    // The stamp's simplified level for this mesh level: full detail, half,
-    // and quarter grid detail and coarser (tools/stamp_simplify.py). At every
-    // stamp point a cliff cell held ~85,000 vertices against the grid's 1,089,
-    // and the terrain's memory budget then unloaded and reloaded cells.
-    const size_t wantedLevel = stride <= 1 ? 0 : stride <= 2 ? 1 : 2;
-    for (const auto& instance : stamps)
-    {
-        const TerrainStamp* stamp = instance.stamp.get();
-        if (!stamp || stamp->levels.empty()) continue;
-        const auto& triangles = stamp->levels[std::min(wantedLevel, stamp->levels.size() - 1)];
-        const glm::mat3 rotation = glm::mat3(instance.transform);
-        // Into the rock: the patch's border tucks into the terrain behind the
-        // stamp (the hillside it is set into), not onto the ground straight
-        // below, which under a tall piece's top edge is tens of metres down
-        // and pulled the edge into needles.
-        const glm::vec3 inward = -glm::normalize(rotation * stamp->direction);
-        // Stamp surface: an array slice after the painted layers, sampled at
-        // the point's place on the stamp grid (Object.hlsl, uvChannels4); the
-        // grid's axes carry its normals (tangent, uvChannels0.zw/1.z).
-        const bool surfaced = instance.materialIndex >= 0 &&
-            static_cast<size_t>(instance.materialIndex) < stampMaterials.size() && layers.size() <= 6;
-        const float slice = static_cast<float>(layers.size() + std::max(instance.materialIndex, 0));
-        const glm::vec3 axisU = glm::normalize(rotation * stamp->axisU);
-        const glm::vec3 axisV = glm::normalize(rotation * stamp->axisV);
-        std::vector<uint32_t> slots(stamp->points.size(), UINT32_MAX);
-        const auto vertexAt = [&](uint32_t index)
-        {
-            uint32_t& slot = slots[index];
-            if (slot != UINT32_MAX) return slot;
-            const auto& point = stamp->points[index];
-            const glm::vec3 placed = glm::vec3(instance.transform * glm::vec4(point.position, 1.f));
-            const glm::vec3 placedNormal = glm::normalize(rotation * point.normal);
-            const float weight = std::clamp(point.weight, 0.f, 1.f);
-            float ground = 0.f;
-            glm::vec3 groundNormal(0.f, 1.f, 0.f);
-            SampleTerrainSurface(heightsSource, cellsX, cellsY, cellWidth, cellDepth,
-                placed.x, placed.z, ground, &groundNormal);
-            glm::vec3 anchor(placed.x, ground, placed.z);
-            // A displaced grid already drapes over the stamp, DisplacedStampInset
-            // inside its rock (tools/terrain_stamp_morph.py displace): the
-            // border only steps in to meet it. Pulling it onto the height
-            // field would sample the undisplaced grid and stretch it into a
-            // shard.
-            if (HasLateralOffsets())
-            {
-                anchor = placed - placedNormal * DisplacedStampInset;
-                groundNormal = placedNormal;
-            }
-            // Points that blend: march inward until the terrain is reached.
-            else if (weight < 1.f && placed.y > ground)
-            {
-                constexpr float Step = 1.f, Reach = 40.f;
-                for (float travelled = Step; travelled <= Reach; travelled += Step)
-                {
-                    const glm::vec3 probe = placed + inward * travelled;
-                    float height = 0.f;
-                    glm::vec3 probeNormal(0.f, 1.f, 0.f);
-                    SampleTerrainSurface(heightsSource, cellsX, cellsY, cellWidth, cellDepth,
-                        probe.x, probe.z, height, &probeNormal);
-                    if (probe.y <= height)
-                    {
-                        anchor = glm::vec3(probe.x, height, probe.z);
-                        groundNormal = probeNormal;
-                        break;
-                    }
-                }
-            }
-            // On and outside the outline the patch lies on the terrain; it
-            // reaches the stamp's shape over the weight's ramp.
-            const glm::vec3 position = glm::mix(anchor, placed, weight);
-            glm::vec3 normal = glm::mix(groundNormal, placedNormal, weight);
-            normal = glm::dot(normal, normal) > 1.e-8f ? glm::normalize(normal) : groundNormal;
-            Mesh::Vertex vertex{};
-            vertex.pos[0] = position.x; vertex.pos[1] = position.y; vertex.pos[2] = position.z;
-            vertex.normal[0] = normal.x; vertex.normal[1] = normal.y; vertex.normal[2] = normal.z;
-            // The paint map is sampled at the ground position under the point.
-            vertex.uv[0] = std::clamp(position.x / width, 0.f, 1.f);
-            vertex.uv[1] = std::clamp(position.z / depth, 0.f, 1.f);
-            const int col = std::clamp(static_cast<int>(std::lround(position.x / cellWidth)), 0, cellsX);
-            const int row = std::clamp(static_cast<int>(std::lround(position.z / cellDepth)), 0, cellsY);
-            vertex.color[3] = 1.f;
-            paint(static_cast<size_t>(row) * (cellsX + 1) + col, vertex);
-            if (surfaced)
-            {
-                vertex.uvChannels[4][0] = static_cast<float>(index % stamp->width) / (stamp->width - 1);
-                vertex.uvChannels[4][1] = static_cast<float>(index / stamp->width) / (stamp->height - 1);
-                vertex.uvChannels[4][2] = slice;
-                vertex.uvChannels[4][3] = weight;
-                vertex.tangent[0] = axisU.x; vertex.tangent[1] = axisU.y;
-                vertex.tangent[2] = axisU.z; vertex.tangent[3] = 1.f;
-                vertex.uvChannels[0][2] = axisV.x; vertex.uvChannels[0][3] = axisV.y;
-                vertex.uvChannels[1][2] = axisV.z;
-            }
-            slot = static_cast<uint32_t>(vertices.size());
-            vertices.push_back(vertex);
-            return slot;
-        };
-        for (size_t t = 0; t + 2 < triangles.size(); t += 3)
-            indices.insert(indices.end(),
-                {vertexAt(triangles[t]), vertexAt(triangles[t + 1]), vertexAt(triangles[t + 2])});
-    }
 }
 
 void Terrain::BuildVertex(int col, int row, Mesh::Vertex& v) const
@@ -1094,7 +962,7 @@ void Terrain::RebuildRegion(int minCol, int minRow, int maxCol, int maxRow)
     bool materialsCurrent = m_materialPaths.size() == layers.size();
     for (size_t i = 0; materialsCurrent && i < layers.size(); ++i)
         materialsCurrent = m_materialPaths[i] == layers[i].material;
-    if (!mesh || m_meshLodStride != 1 || mesh->UsesTerrainVertexFormat() || !stamps.empty() ||
+    if (!mesh || m_meshLodStride != 1 || mesh->UsesTerrainVertexFormat() ||
         mesh->GetVertices().size() != heights.size() || !materialsCurrent ||
         weights.size() != heights.size() * layers.size())
     {
@@ -1172,17 +1040,9 @@ bool Terrain::InstallBakedLod(int stride)
     Mesh* mesh = Owner->GetComponent<Mesh>();
     if (!mesh) mesh = Owner->AddComponent<Mesh>();
     auto indices = lod.indices;
-    const size_t gridIndices = indices.size();
-    AppendStampGeometry(vertices, indices, stride, heights,
-        [&](size_t source, Mesh::Vertex& vertex)
-        {
-            std::copy_n(m_bakedAppearance[source].color, 3, vertex.color);
-            for (size_t layer = 0; layer < std::min<size_t>(layers.size(), 6); ++layer)
-                vertex.uvChannels[2 + layer / 4][layer % 4] = weights[source * layers.size() + layer];
-        });
     OrientTerrainSurfaceUp(vertices, indices);
     PrepareCompactPaint();
-    return InstallCellMesh(*mesh, std::move(vertices), std::move(indices), gridIndices);
+    return InstallCellMesh(*mesh, std::move(vertices), std::move(indices));
 }
 
 uint64_t Terrain::GetBakedCpuMemoryBytes() const
@@ -1210,8 +1070,6 @@ Terrain::Prepared Terrain::TakePrepared()
     result.bakedAppearance = std::move(m_bakedAppearance);
     result.bakedLods = std::move(m_bakedLods);
     result.bakedTextureMask = m_bakedTextureMask;
-    result.stamps = std::move(stamps);
-    result.stampMaterials = std::move(stampMaterials);
     result.compactMesh = compactMesh;
     if (auto* mesh = Owner ? Owner->GetComponent<Mesh>() : nullptr)
     {
@@ -1248,9 +1106,6 @@ bool Terrain::InstallPrepared(Prepared prepared, IGraphicsProvider* provider)
     m_bakedAppearance = std::move(prepared.bakedAppearance);
     m_bakedLods = std::move(prepared.bakedLods);
     m_bakedTextureMask = prepared.bakedTextureMask;
-    stamps = std::move(prepared.stamps);
-    stampMaterials = std::move(prepared.stampMaterials);
-    // The array list (layers, then stamp surfaces) follows the materials.
     RefreshMaterials();
     compactMesh = prepared.compactMesh;
     m_provider = nullptr;
@@ -1283,16 +1138,12 @@ bool Terrain::SaveCache(const std::string& path, uint64_t signature,
     bool includeBakedLods) const
 {
     const auto* mesh = Owner ? Owner->GetComponent<Mesh>() : nullptr;
-    // Stamp patches follow the full-resolution grid in the mesh; only the
-    // grid is cached (the patches are rebuilt from the stamps).
     const size_t gridIndices = static_cast<size_t>(cellsX) * cellsY * 6;
     const std::vector<Mesh::Vertex> grid = mesh ? GridVertices(*mesh) : std::vector<Mesh::Vertex>{};
     const size_t meshVertices = mesh ? (mesh->UsesTerrainVertexFormat()
         ? mesh->GetTerrainVertices().size() : mesh->GetVertices().size()) : 0;
     if (!mesh || m_meshLodStride != 1 || grid.size() != heights.size() ||
-        mesh->GetIndices().size() < gridIndices ||
-        (stamps.empty() && (meshVertices != heights.size() ||
-            mesh->GetIndices().size() != gridIndices)) ||
+        meshVertices != heights.size() || mesh->GetIndices().size() != gridIndices ||
         weights.size() != heights.size() * layers.size() || layers.size() > 6)
         return false;
     std::error_code error;
@@ -1598,19 +1449,6 @@ bool Terrain::LoadCacheRange(const std::string& path, uint64_t signature,
             indices.insert(indices.end(), {a, b, a + 1, a + 1, b, b + 1});
         }
     ReduceMeshForLod(vertices, indices, x, y, m_meshLodStride);
-    // The patches need the cell's size and layers (their surfaces' array
-    // slices follow the layers) before the fields below are set.
-    cellsX = x; cellsY = y; cellWidth = width; cellDepth = depth;
-    layers = cachedLayers;
-    const size_t gridIndices = indices.size();
-    if (!stamps.empty())
-        AppendStampGeometry(vertices, indices, m_meshLodStride, cachedHeights,
-            [&](size_t source, Mesh::Vertex& vertex)
-            {
-                std::copy_n(appearance[source].color, 3, vertex.color);
-                for (uint32_t layer = 0; layer < layerCount && layer < 6; ++layer)
-                    vertex.uvChannels[2 + layer / 4][layer % 4] = cachedWeights[source * layerCount + layer];
-            });
     Mesh* mesh = Owner->GetComponent<Mesh>();
     if (!mesh) mesh = Owner->AddComponent<Mesh>();
     OrientTerrainSurfaceUp(vertices, indices);
@@ -1620,7 +1458,7 @@ bool Terrain::LoadCacheRange(const std::string& path, uint64_t signature,
     weights = std::move(cachedWeights);
     layers = std::move(cachedLayers);
     PrepareCompactPaint();
-    if (!InstallCellMesh(*mesh, std::move(vertices), std::move(indices), gridIndices))
+    if (!InstallCellMesh(*mesh, std::move(vertices), std::move(indices)))
         return false;
     m_provider = provider;
     m_materialPaths.clear(); m_materials.clear();
@@ -1647,38 +1485,6 @@ void Terrain::RefreshMaterials()
         // them into TerrainLayerArrays.
         if (material->LoadFromFile(Mesh::ResolveFilePath(layers[i].material)))
             m_materials[i] = std::move(material);
-    }
-    // Layer arrays: the painted layers, then the stamps' surfaces.
-    std::vector<std::string> wanted;
-    if (!stampMaterials.empty() && layers.size() <= 6)
-    {
-        for (const auto& layer : layers) wanted.push_back(layer.material);
-        wanted.insert(wanted.end(), stampMaterials.begin(), stampMaterials.end());
-    }
-    if (wanted != m_arrayMaterialPaths)
-    {
-        m_arrayMaterialPaths = wanted;
-        m_arrayMaterials.clear();
-        if (!wanted.empty())
-        {
-            m_arrayMaterials = m_materials;
-            m_arrayMaterials.resize(layers.size());
-            // Shared by every cell (one load, and one set of layer arrays:
-            // they are keyed by the materials' texture objects).
-            static std::mutex mutex;
-            static std::map<std::string, std::shared_ptr<Material>> shared;
-            std::lock_guard lock(mutex);
-            for (const auto& path : stampMaterials)
-            {
-                auto& material = shared[path];
-                if (!material)
-                {
-                    material = std::make_shared<Material>();
-                    if (!material->LoadFromFile(Mesh::ResolveFilePath(path))) material.reset();
-                }
-                m_arrayMaterials.push_back(material);
-            }
-        }
     }
 }
 
@@ -1707,21 +1513,6 @@ Terrain::JsonValue Terrain::Serialize() const
         JsonValue offsets = JsonValue::MakeArray();
         for (float value : lateralOffsets) offsets.Push(JsonValue(value));
         out.Set("lateralOffsets", std::move(offsets));
-    }
-    if (!stampPlacements.empty())
-    {
-        JsonValue placed = JsonValue::MakeArray();
-        for (const auto& placement : stampPlacements)
-        {
-            JsonValue matrix = JsonValue::MakeArray();
-            for (int column = 0; column < 4; ++column)
-                for (int row = 0; row < 4; ++row)
-                    matrix.Push(JsonValue(placement.transform[column][row]));
-            placed.Push(JsonValue::MakeObject().Set("stamp", JsonValue(placement.stamp))
-                .Set("material", JsonValue(placement.material))
-                .Set("transform", std::move(matrix)));
-        }
-        out.Set("stampPlacements", std::move(placed));
     }
     if (HasPaintMap())
         out.Set("paintResolution", JsonValue(paintResolution))
@@ -1786,40 +1577,6 @@ void Terrain::Deserialize(const JsonValue& value)
                 NormalizeSample(&paintWeights[i], layers.size());
         else
             paintWeights.clear();
-    }
-    // Saved stamps (column-major transforms, cell space). Without any, the
-    // owner's stamps stay: TerrainManager sets a streamed cell's before
-    // deserializing its saved state.
-    stampPlacements.clear();
-    if (value.Has("stampPlacements") && value["stampPlacements"].ArraySize() > 0)
-    {
-        stamps.clear();
-        stampMaterials.clear();
-        const auto& placed = value["stampPlacements"];
-        for (size_t i = 0; i < placed.ArraySize(); ++i)
-        {
-            const auto& entry = placed.ArrayAt(i);
-            StampPlacement placement;
-            placement.stamp = entry["stamp"].AsString();
-            placement.material = entry.Has("material") ? entry["material"].AsString() : std::string{};
-            const auto& matrix = entry["transform"];
-            if (matrix.ArraySize() == 16)
-                for (int column = 0; column < 4; ++column)
-                    for (int row = 0; row < 4; ++row)
-                        placement.transform[column][row] = matrix.ArrayAt(column * 4 + row).AsFloat();
-            TerrainStampInstance instance;
-            instance.stamp = TerrainStamp::Load(Mesh::ResolveFilePath(placement.stamp));
-            instance.transform = placement.transform;
-            if (!placement.material.empty())
-            {
-                auto found = std::find(stampMaterials.begin(), stampMaterials.end(), placement.material);
-                if (found == stampMaterials.end())
-                    found = stampMaterials.insert(stampMaterials.end(), placement.material);
-                instance.materialIndex = static_cast<int>(found - stampMaterials.begin());
-            }
-            if (instance.stamp) stamps.push_back(std::move(instance));
-            stampPlacements.push_back(std::move(placement));
-        }
     }
     Rebuild();
 }

@@ -14,6 +14,7 @@
 #include "Core/Rendering/SceneRenderer/SceneRendererVisibility.h"
 #include "Core/Rendering/SceneRenderer/SceneRendererLighting.h"
 #include "Core/Rendering/PerformanceHeat.h"
+#include "Core/Rendering/VisibilityMonitor.h"
 #include <map>
 #include <cstdio>
 #include <bitset>
@@ -70,6 +71,20 @@
 
 namespace
 {
+// ENGINE_TRACE_LAYER=<name part>: counts one layer through the camera pass
+// (RenderCpuTimings::trace*), to find the stage that drops it.
+bool TracedObject(const Engine::Core::Object* object)
+{
+    static const char* name = []() -> const char* {
+        const char* value = std::getenv("ENGINE_TRACE_LAYER");
+        return value && *value ? value : nullptr; }();
+    if (!name) return false;
+    for (int depth = 0; object && depth < 2; ++depth, object = object->Parent)
+        if (object->name.find(name) != std::string::npos) return true;
+    return false;
+}
+bool TraceEnabled() { return std::getenv("ENGINE_TRACE_LAYER") != nullptr; }
+
 // Detail budget cost model (DetailCostModel.h). The game view hands its
 // LOD'd instances to a background job about ten times a second; the curve it
 // returns tells the budget what every detail scale would cost in this view.
@@ -697,6 +712,7 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
             post.taa = true;
             post.taaFeedback = temporal.taaFeedback;
             post.taaSharpen = temporal.taaSharpen;
+            post.taaFastSettle = temporal.taaFastSettle;
             // Pixels run downward while NDC y runs up.
             post.taaJitter[0] = jitterX;
             post.taaJitter[1] = -jitterY;
@@ -854,15 +870,21 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
     // geometryFade.w 6 (7 with screen coverage) tells Object.hlsl to fade each
     // placement by its own distance and take the level from the draw flags;
     // the same draws set the per-placement bit for InstanceCull.hlsl below.
-    // Only for a fully visible tile (w == 3 is "tile LOD, visibility 1").
+    // A tile still fading in (w = 2 + visibility below 3) stays per placement
+    // too, with its visibility in w = 6 + 0.4 * (1 - visibility) (6 fully
+    // visible; Object.hlsl GroundCoverVisibility): the cull takes the
+    // per-placement mode for a whole batch from its first tile, so a far tile
+    // fading in at the range edge used to switch every tile of its batch to
+    // tile-level bands for the fade (0.35 s), and plants whose own band
+    // differed from their tile's vanished and popped back (2026-11-24).
     const auto perPlacementFade = [&](glm::vec4& fade, const Engine::Components::Mesh* mesh)
     {
         if (!shadowOnly && !hasPortalViews && mesh && mesh->perPlacementLod && mesh->IsInstanced() &&
-            fade.w >= 2.999f && fade.w < 3.5f)
+            fade.w >= 2.f && fade.w < 3.5f)
             // Plain distance (6), not screen coverage (7): ground cover
             // distances are authored for the plants as placed, and scaling
             // them by placement size tripled the full-detail plants.
-            fade.w = 6.f;
+            fade.w = 6.f + .4f * (1.f - std::clamp(fade.w - 2.f, 0.f, 1.f));
     };
     const auto grassInteraction = Engine::Rendering::SelectVegetationBendCapsules(
         nativePacket ? nativePacket->grassCapsules : m_frameGrassCapsules, cameraPosition);
@@ -1397,6 +1419,18 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
     renderObjects = std::move(visibilityState.renderObjects);
     m_lastRenderCpuTimings.visibilityAccepted += renderObjects.size();
     viewVisibility.acceptedItems += renderObjects.size();
+    static const bool traceLayer = TraceEnabled();
+    if (traceLayer && !shadowOnly)
+    {
+        const uint64_t serial = m_graphicsProvider->GetContextFactory()->GetPreparedFrameSerial();
+        m_lastRenderCpuTimings.traceSerial = serial;
+        // Readbacks land when their slot comes round (two frames later).
+        if (serial > 3) Engine::Rendering::VisibilityMonitor::Get().Flush(serial - 3);
+        for (const auto& item : frameRenderItems)
+            m_lastRenderCpuTimings.traceItems += TracedObject(item.object);
+        for (const auto& item : renderObjects)
+            m_lastRenderCpuTimings.traceVisible += TracedObject(item.source->object);
+    }
     m_lastTerrainOcclusionCulledCount += visibilityState.terrainOcclusionCulled;
     m_lastRenderCpuTimings.terrainOcclusionRejected +=
         visibilityState.terrainOcclusionCulled;
@@ -2482,6 +2516,9 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
     using AutomaticGroup = Engine::Rendering::DrawBatchPreparation::Group;
     auto instanceBatching = SceneInstanceBatching::Prepare(*this,
         preparedDraws, shadowOnly, automaticInstancing, hasPortalViews, includeEditorVisuals);
+    if (traceLayer && !shadowOnly)
+        for (const auto& draw : preparedDraws)
+            m_lastRenderCpuTimings.traceDraws += TracedObject(draw.object);
     auto& automaticGroups = instanceBatching.automaticGroups;
     auto& instanceTiles = instanceBatching.instanceTiles;
     auto* residentPlacementPool = instanceBatching.residentPlacementPool;
@@ -2678,6 +2715,23 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
                                (residentLod==2 && distance.y<second-secondWidth)) continue;
                         }
                     }
+                    if(traceLayer && !shadowOnly && blocked)
+                        m_lastRenderCpuTimings.traceSources[std::min<size_t>(draw.mesh->GetInstanceBlocks()[block].data->traceSource,3)*3+
+                            std::min(draw.mesh->instanceLodBand>=0 ? draw.mesh->instanceLodBand:residentLod,2)]+=tile.range.y;
+                    if(traceLayer && !shadowOnly && TracedObject(draw.object))
+                    {
+                        ++m_lastRenderCpuTimings.traceTiles; m_lastRenderCpuTimings.tracePlacements+=tile.range.y;
+                        double sum=double(tile.lod.x)*3.1+double(tile.lod.y)*5.3+double(tile.lod.z)*7.7+double(tile.lod.w)*11.3+
+                            double(glm::uintBitsToFloat(tile.reserved.x))*13.1+double(glm::uintBitsToFloat(tile.reserved.y))*17.3+double(glm::uintBitsToFloat(tile.reserved.z))*19.7;
+                        for(int row=0;row<3;++row) for(int column=0;column<4;++column) sum+=double(tile.world[row][column])*(row*4+column+1);
+                        for(uint32_t i=0;i<tile.range.y;++i)
+                        {
+                            const auto& record=m_persistentInstances.Get(tile.range.x+i);
+                            for(int row=0;row<3;++row) sum+=double(record.rows[row].w)*(row+2)+double(record.rows[row].x)*(row+5);
+                        }
+                        m_lastRenderCpuTimings.traceDataSum+=sum;
+                        m_lastRenderCpuTimings.traceStaleRecords+=m_persistentInstances.CountStaleRecords(tile.range.x,tile.range.y);
+                    }
                     // Screen-size levels choose per placement on the CPU from
                     // the mesh's own placements; shared parts take the GPU's.
                     if(screenColor && !blocked)
@@ -2827,6 +2881,19 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
                 auto* pool=residentPlacementPool;
                 auto& buffers=m_persistentBatches.Acquire(m_graphicsProvider,std::move(key),gpu,tiles,&constants,m_persistentInstances,m_lastRenderCpuTimings.changedUploadBytes,
                     bladeField ? bladeField->capacity : 0u);
+                if(traceLayer && !shadowOnly && gpu && TracedObject(representative.object) && buffers.input)
+                    if(const auto* mapped=static_cast<const uint8_t*>(buffers.input->Map()))
+                    {
+                        m_lastRenderCpuTimings.traceStaleInputs+=buffers.input->GetSize()<tiles.size()*sizeof(tiles[0]) ||
+                            std::memcmp(mapped,tiles.data(),tiles.size()*sizeof(tiles[0]))!=0;
+                    }
+                if(traceLayer && !shadowOnly && gpu && representative.mesh->UsesInstanceBlocks() &&
+                    !representative.mesh->GetInstanceBlocks().empty())
+                    m_lastRenderCpuTimings.traceGpuSources[std::min<size_t>(
+                        representative.mesh->GetInstanceBlocks().front().data->traceSource,3)*3+std::min(
+                        representative.mesh->instanceLodBand>=0 ? representative.mesh->instanceLodBand:residentLod,2)]+=buffers.completedGpuCandidates;
+                if(traceLayer && !shadowOnly && gpu && TracedObject(representative.object))
+                    m_lastRenderCpuTimings.traceGpuVisible+=buffers.completedGpuCandidates;
                 if (buffers.completedReadback)
                 {
                     auto& completed = buffers.readbackShadow
@@ -2899,6 +2966,31 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
                     // w: where this range's plants have faded out (0 = no shorter reach).
                     if(reachBits) cull.cameraPosition.w=representative.objectData.placementFade.y*(float(reachBits)/1024.f);
                     else cull.cameraPosition.w=0.f;
+                    // Visibility monitor: what this cull should keep, for the
+                    // traced layer's camera batches (VisibilityMonitor.h).
+                    if(traceLayer && !shadowOnly && Engine::Rendering::VisibilityMonitor::Get().Enabled() &&
+                        TracedObject(representative.object) && !buffers.monitor.pending)
+                    {
+                        auto reference=Engine::Rendering::ReferenceCull(cull,tiles,m_persistentInstances);
+                        std::unordered_map<uint32_t,std::string> slotNames;
+                        for(auto memberIndex:group.members)
+                            if(preparedDraws[memberIndex].object)
+                                slotNames[preparedDraws[memberIndex].drawData.objectIndex]=preparedDraws[memberIndex].object->name;
+                        auto& monitor=buffers.monitor;
+                        monitor.armed=true;
+                        monitor.serial=m_graphicsProvider->GetContextFactory()->GetPreparedFrameSerial();
+                        const auto& path=sourceMesh->GetFilePath();
+                        monitor.label="lod "+std::to_string(representative.mesh->instanceLodBand>=0 ? representative.mesh->instanceLodBand:residentLod)+
+                            " range "+std::to_string(rangeIndex)+" "+std::filesystem::path(path).stem().string();
+                        monitor.tileNames.clear();
+                        for(const auto tileIndex:reference.tileOf)
+                        {
+                            const auto found=slotNames.find(tiles[tileIndex].range.z);
+                            monitor.tileNames.push_back(found!=slotNames.end() ? found->second:std::string());
+                        }
+                        monitor.expected=std::move(reference.indices);
+                        monitor.info=std::move(reference.info);
+                    }
                     if(deferCulls)
                     {
                         DeferredCull deferred{m_instanceCullPipeline.get(),buffers.input.get(),pool,cullOcclusion,buffers.output.get()};
@@ -2923,6 +3015,7 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
                     context->StorageBarrier(buffers.output.get()); context->EndComputePass(); ++m_lastRenderCpuTimings.gpuBatches;
                     Engine::Rendering::PersistentInstanceBatches::ScheduleVisibilityReadback(
                         context,buffers,static_cast<uint32_t>(lodMetric),shadowOnly,diagnosticViewIdentity);
+                    Engine::Rendering::PersistentInstanceBatches::ScheduleMonitorReadback(m_graphicsProvider,context,buffers);
                     }
                 }
                 ensureRecordsUploaded();
@@ -3530,8 +3623,12 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
                 context->EndComputePass();
                 for (const auto& cull : deferredCulls)
                     if (cull.batch)
+                    {
                         Engine::Rendering::PersistentInstanceBatches::ScheduleVisibilityReadback(
                             context, *cull.batch, cull.lod, false, cull.view);
+                        Engine::Rendering::PersistentInstanceBatches::ScheduleMonitorReadback(
+                            m_graphicsProvider, context, *cull.batch);
+                    }
             }
             else
             {

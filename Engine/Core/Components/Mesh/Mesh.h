@@ -172,6 +172,9 @@ public:
         uint64_t revision=1;
         uint64_t slicesRevision=1;
         uint64_t stableId=0;
+        // Diagnostics (ENGINE_TRACE_LAYER): which terrain source made a shared
+        // prefab block: 1 cell layer, 2 near block, 3 far block, 0 other.
+        uint8_t traceSource=0;
         bool hasLodBounds=false;
         glm::vec3 lodMinimum{0},lodMaximum{0};
         int maximumLod=0;

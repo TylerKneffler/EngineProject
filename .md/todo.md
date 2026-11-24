@@ -182,6 +182,58 @@ loads 3 rings of full cells around the player (was 5); far-forest blocks draw ev
 | Walking and turning (`--look-yaw 3`) | 35.2 ms, p99 115 | 21.0 and 21.7 ms, p99 64-65, max 71-74 | 8-10 |
 | Standing, 2560x1440: Vista / Escarpment / MeadowSlope | 29.1 / 22.8 / 23.5 ms (5 rings) | 19.3 / 21.5 / 17.7 ms (before the block merge) | 0 |
 
+- [x] Ground walks follow the trails (2026-11-23, user: "follow nearby paths drawn in the terrain for a more
+      typical path players would take"). The W drive flies a straight line at ~23 m/s, through forest and
+      across open ground. `GameBackendCapture --route <SplinePath object>` walks the camera along a scene path
+      instead: eye on the route, gaze 12 m ahead on it, a fixed `--route-speed`/60 m per frame (default 6 m/s,
+      a run), so every run renders the same poses (Engine/Game/Benchmark/README.md).
+      `tools/add_landscape_viewpoints.py` traces the trail contour into two 400 m routes near the start:
+      `ForestTrailWalk` (from the Trail viewpoint: forest, edge, meadow, forest; 42 % in forest) and
+      `MeadowTrailWalk` (open meadow trail, sun behind). Both stay on the track the whole way
+      (`.local/routes/check_*`, a snapshot every 46 m).
+      DX12, 1920x1080, 1000 frames at 6 m/s (~100 m), two runs each: forest trail 14.4 / 14.7 ms median,
+      p99 29-30, 3-4 frames over 50 ms; meadow trail 12.9 / 13.1 ms, p99 26-28, none over 50 ms. Whole route at
+      23 m/s (1060 frames): forest 16.3 ms, p99 66, 21 over 50 ms; meadow 15.8 ms, p99 70, 16 over 50 ms. Same
+      day, old FieldWalk W drive (380 frames): 12.2 ms, p99 43, none over 50 ms.
+      Found: ~90 m into the forest trail a tree's low crown hangs over the track at eye height and the camera
+      walks through its leaves (the crown-clearance item under Foliage).
+      Use these for walking costs from now on: `--route ForestTrailWalk --frames 1000` and
+      `--route MeadowTrailWalk --frames 1000` (add `--route-speed 23` for streaming stress).
+- [x] **Baseline + temporal upscaling on the trail routes** (2026-11-23 evening, after the stamp/cliff removal and a
+      cache rebuild; `.local/routes/perf_runner.py base1123`: interleaved native / `ENGINE_RENDER_SCALE=0.67`, two
+      repetitions, 12 GB watchdog (16 GB for the uncounted cache-rebuild run, which peaked 5.1 GB after a
+      12.1 GB transient killed the first try), retries; all 16 runs passed first time, peaks 3.0-4.3 GB).
+      Medians, rep 1 / rep 2:
+
+      | Route | Speed | Scale | Frame | p99 | > 50 ms | GPU | CPU serial | camera / shadow record |
+      |---|---|---|---|---|---|---|---|---|
+      | Forest | 6 | 1 | 13.0 / 12.5 | 25 | 0 / 0 | 11.8 / 10.7 | 11.1 / 10.7 | 6.0 / 2.5 |
+      | Forest | 6 | 0.67 | 12.8 / 13.1 | 23 | 0 / 0 | 9.8 / 9.8 | 11.0 / 11.3 | 6.0 / 2.5 |
+      | Forest | 23 | 1 | 14.0 / 13.6 | 44 / 37 | 8 / 4 | 10.6 | 12.2 / 11.9 | 6.1 / 2.8 |
+      | Forest | 23 | 0.67 | 13.4 / 13.2 | 36 / 37 | 3 / 5 | 8.7 / 8.8 | 11.8 / 11.7 | 6.0 / 2.7 |
+      | Meadow | 6 | 1 | 11.8 / 12.1 | 26 / 25 | 0 / 0 | 8.7 / 8.9 | 10.4 / 10.6 | 5.6 / 2.4 |
+      | Meadow | 6 | 0.67 | 11.7 / 11.7 | 26 / 25 | 0 / 0 | 7.5 | 10.2 | 5.4 / 2.3 |
+      | Meadow | 23 | 1 | 14.2 / 14.3 | 39 / 44 | 4 / 8 | 8.7 / 9.0 | 12.5 | 6.4 / 2.9 |
+      | Meadow | 23 | 0.67 | 13.4 / 13.8 | 37 / 39 | 3 / 4 | 8.0 | 11.8 / 12.2 | 6.1 / 2.8 |
+
+      GPU = opaque (which holds foliage depth, leaves, bark and "opaque other") + terrain + grass + shadow +
+      sky + clouds + AO + transparent. CPU serial = update + prepare + camera record + shadow record.
+      * The main thread is the limit everywhere: CPU serial 10.2-12.5 ms against GPU 7.5-11.8. Upscaling cuts
+        the GPU 1-2 ms (forest 6 m/s: foliage depth 1.31 -> 0.91, leaves 1.42 -> 1.05, terrain 0.78 -> 0.59,
+        clouds 0.60 -> 0.33) but the frame only 0-0.8 ms, within run-to-run noise at 6 m/s. Not worth turning
+        on until the CPU side drops; then it is ~2 ms of GPU in hand.
+      * "Opaque other" is 4.0-4.2 ms of GPU at either scale: not pixel work (the hoisted cull pass and the
+        rest of the opaque pass outside the named stages). The largest single GPU item; break it down.
+      * Camera record 5.4-6.4 ms (forest 6 m/s medians): texture footprints 1.62 (every draw's mip needs for
+        the camera and the cascades, each frame), instance tile preparation 1.07 (220 GPU cull batches),
+        startup 0.97 (0.82 waiting for the CPU occlusion buffer, built 0.84 on a worker), submission 0.70,
+        draw loop 0.59, unattributed 1.19; 352 visible items, 320 draws (~17 us a draw: overhead, not draw
+        count). Off the critical path cheaply: footprints on a worker or every few frames, the occlusion buffer
+        started earlier or last frame's (~2.4 ms together).
+      * Against this morning's runs (not interleaved, so indicative only): forest 6 m/s 14.4-14.7 -> 12.5-13.0,
+        meadow 12.9-13.1 -> 11.8-12.1; at 23 m/s forest p99 66 -> 37-44 and 21 -> 4-8 frames over 50 ms,
+        meadow p99 70 -> 39-44, 16 -> 4-8.
+
 - 2026-11-21 afternoon, after per-plant detail, the 80 m shrub reach, the tile skip and the area-scaled
   shrub cap: forest walk 17.1-17.2 ms, meadow walk 18.6-19.1 ms (the table's numbers are from the night before).
 - Capture and benchmark windows reopen where they were last left (`window-GameCapture.txt` in
@@ -243,6 +295,145 @@ loads 3 rings of full cells around the player (was 5); far-forest blocks draw ev
 - Uncommitted: everything since `4687647e`.
 
 ## Next, in order
+
+**Top focus (user, 2026-11-23): seamless transitions.** Seen while walking: trees flicker as they change level
+right in front of the camera, and their shadows with them; nearby grass disappears and reappears; bushes appear
+in front of the camera; shadows switch at once from far to near quality. Wanted: foliage, terrain and objects
+should seem to move closer or come into view, never just appear, flicker or vanish. Suspects, to confirm by
+measurement first: the detail budget at its floor (0.64 of authored distances) pulling every switch close and
+moving it frame to frame (`DetailRadiusScale`, grass radius); occlusion from last frame's depth (a revealed
+object or grass patch missing for a frame); near-block hand-offs at cell crossings; stepped shadow cascades
+(1/8-range jumps, plants in a rest pose past the nearest cascade, no blend between cascades); the forest trail's
+low crown at eye height. Plan: (1) evidence: still-camera captures with wind frozen (any change between frames
+is flicker) and per-frame sequences of slow walks, with per-frame counts of level switches, appearances and
+cascade refreshes; (2) fix per system (distances that do not move, fades over distance and over a few frames
+for new objects, cascade blending); (3) the same captures after each fix, frame time measured with them.
+- [ ] Evidence captures and counters. Tools so far: `GameBackendCapture --capture-every 1` now also works with a
+      still camera (seq_NNNN.ppm over the measured frames; GameApplication.cpp `MovingCaptureName`); per-frame
+      pixel-change counts and the correlation of every frames.jsonl counter with the image events
+      (`.local/transitions/`). Still Trail, wind frozen: ~2,700 pixels a frame change (0.13 %, an 8-frame
+      cycle: TAA jitter on thin leaves; not yet judged as visible shimmer).
+- [x] **Undergrowth vanishing for frames: shader reloads from unrelated file writes** (2026-11-23). Still camera
+      at Trail: ferns, bushes and undergrowth vanished for 1-5 frames and came back, 2-5 times per 30 frames
+      (104 k pixels), whenever frames were slow. Not occlusion (both paths off: same), not GPU blades, not the
+      detail budget (0.6 throughout); CPU draws unchanged. It matched one counter exactly: 5 material shader
+      pipeline cache misses on every vanishing frame. Cause: `ShaderSourceCache` watched the nearest existing
+      ancestor of each shader search path, and material shaders try `Assets/Shaders/...` relative to the working
+      directory, so it watched the project root, recursively; any directory entry created there (capture
+      frames, terrain/object caches, logs) counted as a shader change, and a flood of writes overflowed the
+      watch (read as lost notifications). Both forced a new revision on every source, every custom-shader
+      material (ferns, scanned bushes, grass blades) missed its pipeline, the old one was retired and the draws
+      were skipped until the recompile finished. Applies in play too (streaming cache writes, logs).
+      Fixed: (1) a source that resolves watches only candidates whose directory exists (the ancestor climb stays
+      for sources that do not exist yet); (2) only changed shader text (.hlsl/.hlsli/.h/.inc/.fx/.fxh) or lost
+      notifications force a new revision, anything else rechecks the file's own time and size; (3) while a
+      changed shader recompiles, its old pipeline keeps drawing (`MaterialShaderPipeline::previous`, retired
+      when the new one builds; kept on a compile error). Still Trail, 120 slow frames: 0 pipeline misses (205
+      before), largest frame-to-frame change 3,084 pixels (104,584 before).
+- [x] Slow walk, every frame (2026-11-23): forest trail, 6 m/s (0.1 m a frame), 1000 frames, wind frozen
+      (`.local/transitions/walk_forest`, `pops.py`: per-pixel steps a frame's neighbours do not share, then the
+      largest compact step region per frame, crops in `walk_blobs.png`, `walk_top_*.png`). Found:
+      1. **Camera inside trees** (frames 690-775, 869-906, 979; the largest and most frequent events): the trail
+         runs under crowns at eye height and once through a trunk; leaf cards fill the view and come and go
+         frame to frame, the view jumps leaving the trunk. Nothing fades foliage near the camera.
+      2. **Ground-cover tiles switch whole** (frames 18, 782, 790, 876, each with `grass_tiles_built` /
+         `grass_lod_switches` 3): a bright bush turns dark in one frame (the scanned bushes' coarse level, the
+         "dark card" noted under Temporal upscaling), a bush appears whole beside the trail.
+      3. Shadows: the 42 refreshes of cascades 1-3 on this walk show no step beyond the frames around them
+         (0.87-1.14 of the local median); frames 8 and 18 jump the dapples on the path right after the measured
+         frames began (and the frame time with them), not yet explained. Needs a targeted test (standing in
+         dapple, turning) for the reported far-to-near quality switch.
+      4. Frames 250-300: elevated steps all over (11.5 k against 5 k), no single event: shimmer, not yet
+         looked at.
+- [x] (1) Near-camera foliage fade and limb clearance on trails (2026-11-23).
+      * `ApplyNearFoliageFade` (Object.hlsl, first in `ApplyGeometryFade`): cutout materials (flag 32: leaves,
+        ferns, bushes, grass) dissolve per pixel from 1.25 m to 0.35 m from the camera, with the rotating
+        screen dither of the LOD dissolves (TAA resolves it to a blend). Camera records only
+        (`shadowCasterFade.z < 0.5`): shadows keep the plant; the foliage depth pre-pass (PSShadowMain on
+        camera records) clips the same pixels as the lighting pass.
+      * Trees keep their limbs off trails: `tools/measure_tree_reach.py` measures each species' reach from
+        the trunk per 0.25 m of height (the big and large oaks: a bare trunk to 2 m, then limbs 5-8 m out;
+        conifers ~2.5 m from the ground); LandscapeDriver `TreeReach` / `LimbsClearOfTrail`: in the band
+        0.8-2.6 m above the ground (sunk edge shrubs lower it), reach x scale + 1.5 m must stay short of the
+        track's centre line (`TrailDistance`, the metres TrailMask already computed). A tree that fails
+        gives way to its stand's smaller species, else is left out; edge-pass trees are left out.
+        `PaintRevision` bumped (generated layers share the cache key).
+      Re-walked (`walk_forest_after`, `walk_before_after.png`): the stretch through crown and trunk (frames
+      680-775) max step 98,483 -> 7,296 pixels, mean 10,919 -> 3,660; the trail runs clear under the canopy.
+      Left: leaves 1-1.3 m over the eye (the clearance band stops at 2.6 m, the fade starts at eye + 1.25 m)
+      dither away visibly against the sky while walking (frames 960-982): raise the band's top to ~3 m, or
+      narrow the fade.
+- [x] (2) Ground cover checked (2026-11-23): no ground-cover pops left in steady walking. `ENGINE_GRASS_LOG=1`
+      prints where each tile starts to fade in: after start-up every new tile appears exactly at the range
+      edge (80/80 m bushes, meadow, forest floor; 50/50 ferns; 200/200 far grass), where the per-plant shrink
+      fade keeps it invisible. The two "bush" events of the first walk were other things: frame 18 a shadow
+      jump (below), frame 791 the camera leaving an oak crown (fixed by the clearance). The scanned bushes'
+      levels match in colour (0.70-0.73) and normals; level 1 has 76 %, level 2 51 % of the card area (thinner,
+      not darker); not seen as a pop on this walk.
+- [x] **Stale shadow cascade** (walk frame 18 -> 19, the largest event left; 2026-11-23): a bush, rock and trunk
+      went from lit to shadowed in one frame as cascade 1 refreshed (mask 3). Confirmed as the cached image:
+      with `ENGINE_SHADOW_STEPPED_CASCADES=0` the same spot is shadowed from the first frame
+      (`.local/transitions/shadow_step_test.png`). Stepped middle cascades refreshed only when the camera
+      crossed a step, so whatever changed after one was drawn stayed out of it.
+      Fixed in `SceneRendererShadows.cpp`: one middle cascade a frame, in turn, is checked against a signature
+      of the shadow casters inside its light-space square (`ShadowCascadeContent`: casting items, and the
+      instance blocks of shared prefab parts, by identity and instance/geometry revision; boxes projected
+      with |M| x extent), recorded whenever the cascade is drawn (`m_directionalShadowCascadeContent`); a
+      changed one refreshes (at most every 8 frames). The far cascade keeps its own rule (kilometres, several
+      ms). The frame-18 jump was not a caster change (the signature matched): the image was drawn early in the
+      still warm-up, likely while tree levels and leaf textures were still streaming, which nothing
+      announces; so a middle cascade also refreshes once 120 frames old (~2 s). Result: the warm-up redraws it,
+      the bush region changes 1.3-2.0 k pixels a frame (as without stepped cascades) instead of 26 k at frame
+      18 (`walk_periodic`). Cost (signature check alone, interleaved forest/meadow trail runs, on / off):
+      frame 12.37-12.72 / 12.92-13.09 (forest), 11.23-11.69 / 12.03-12.84 (meadow), shadow GPU and record
+      unchanged: within noise. `ENGINE_SHADOW_CONTENT_REFRESH=0` turns the content check off.
+      Not done: blending old and new cascade images, so a refresh that does change a stale image still changes
+      it at once (now within ~2 s of it going stale, not at the next step).
+- [x] **Forest-edge trees a level down: the detail budget's floor** (user 2026-11-23: "trees on the edge of
+      forest have low lod's/quality ... texture budget too low?"). Not textures: texture budget 10,688 MiB,
+      ~1.7 GB used. The detail budget sat at its 0.6 floor on every frame of every walk (its geometry estimate
+      is always over its 6 ms allowance), pulling tree levels in to 0.6x: forest-edge trees at 20-40 m drew a
+      level down (Detail view green against red; `.local/edge/cmp_ForestTrailWalk_a.png`, floor | scale 1).
+      Full 400 m trail walks (4000 frames, `.local/edge/long_*`, `compare_walks.py`), floor / `ENGINE_DETAIL_SCALE=1`:
+      frame median 12.77 / 13.05 ms forest, 12.98 / 12.71 meadow (no measurable cost: the frame is CPU-bound);
+      forest tree placements LOD0/1/2 8/10/82 % -> 9/21/70 %, upper view not at full detail 45 -> 33 %
+      (meadow 83 -> 79 %, mostly grass and far forest). Fixed: `DetailBudgetSettings::minimumScale` default
+      0.6 -> 1 (ProjectLayers.h, ProjectLoader fallback); the budget can still raise detail, a lower floor is a
+      project setting. The larger fix stays "Next" 6 (levels by size on screen, the budget as overload guard).
+- [x] **Bushes rise out of the ground** (user 2026-11-23: "should just fade in using alpha"). Shrubs and bushes
+      (placementReach bit 10) now dissolve in at full size at their range edge: VSMain passes the range fade
+      as `placementOpacity` in TEXCOORD7.w (`placementDissolve`), the pixel entry points read it
+      (`ReadPlacementOpacity`) and `ApplyGeometryFade` clips it with the rotating screen dither. Grass keeps
+      the shrink. Shaders compile (fxc: Object.hlsl VSMain/PSMain/PSShadowMain, GrassFootBend, GrassBlades);
+      not yet judged in a capture.
+- [x] **Flicker walk after the fixes** (2026-11-23, `.local/transitions/walk_flicker`, `flicker.py`): largest
+      flicker region per frame max 876 pixels at half resolution (0.17 % of the image; the first walk had
+      regions to ~105 k), largest step region max 1,865; the 63 cascade refreshes (more with the 120-frame
+      rule) show no step beyond their neighbours (0.00-1.12 of the local median). What is left is oak leaves
+      passing at the screen edges right by the camera (frames 716-738): fast parallax and the near-fade
+      dither, not things switching.
+- [ ] Old plan item (2) ground-cover
+      tile levels cross-faded per plant, fade-in for new tiles, the scanned bushes' coarse level fixed;
+      (3) the shadow test above.
+- [x] **Bushes vanished for ~20 frames and popped back; real-speed capture, flag button, TAA edge strip**
+      (2026-11-23/24): done, see todo_history.md "Moved from todo.md on 2026-11-24". Diagnostics left in place
+      (all off unless set): `--capture-async`, `--flag-button` / `ENGINE_FLICKER_BUTTON=1`,
+      `ENGINE_TRACE_LAYER=<name>` (per-stage counters in frames.jsonl), `ENGINE_VISIBILITY_MONITOR=<file>`
+      (CPU reference cull vs the GPU's visible list per batch), `ENGINE_TAA_HISTORY_DEBUG=1`, and A/B switches
+      `ENGINE_GPU_SYNC_EACH_FRAME`, `ENGINE_STATIC_ITEM_CACHE`, `ENGINE_INSTANCE_POOL_STEAL`,
+      `ENGINE_GRASS_LOD_FADE_SECONDS`, `ENGINE_GRASS_APPEAR_SECONDS`. Scripts in `.local/transitions/`
+      (`flag_pops.py`, `flag_review.py`, `pairdiff.py`, `flicker.py`, `gpu_mismatch.py`). Test scene
+      `Scenes/terrain/spin_test.scene` (`tools/build_spin_test_scene.py`): one flat cell, ~960 trees, scanned
+      bushes everywhere, spin in place with `--look-yaw 12`.
+- [ ] Ambient occlusion restarts its accumulation in the strip a turn reveals, as TAA did (no history there).
+- [ ] Edge pops in the spin test: none found at 1.7 deg/frame in spin_test (963 trees) or spinning in place
+      in the landscape meadow (0 grass tile builds, no events over 1.9 k pixels). Re-check at faster turns.
+- [ ] The walk's remaining steps: canopy passing the top right at frames 3946-3954 (every run, ~2.8 k
+      pixels; check whether it is a leaf card or a level switch) and frame 448 (left edge, 1.5 k).
+- [ ] **Ridge-top trees thin and fill** (fast turns, frames ~825-840 of the glance route, about half the
+      runs): the same trees are sent and kept on the GPU, drawn shorter / sparser; not occlusion, TAA or
+      texture streaming. Next: a debug colour per far-tree representation.
+- [ ] **Hillside shadow switch at walk frame 3307** (cascade refresh, also in the first real-speed run).
 
 **Direction (review of 2026-11-21).** Asked: less settings tuning and squeezing, more fundamental changes that
 give larger overall gains while keeping the look of the reference frames. What the measurements say:
@@ -623,6 +814,63 @@ merged into main, worktrees removed; their comparison images are in `.local/agen
       - [ ] Only one scanned broadleaf species exists (CC0, temperate): a second scan (lime, hornbeam, birch)
         would give a real third silhouette instead of the stretched variant.
       - [ ] Close-up look not judged (leaf cards at 523 px/m are soft under a crown at 2 m).
+- [x] **Stamps are terrain brushes, not separate data** (user 2026-11-23: "stamps are terrain paint brush tools,
+      should convert the brush shape to the stamp mesh and raise/lower/sculpt terrain data using the brush shape
+      / stamp heights"). `TerrainBrushShape` (Components/Terrain) rasterizes a .stamp's finest level from above
+      (stamp-space Y up, 128x128): the highest surface per sample above its outline's base, and a feathered
+      coverage mask. `Terrain::BrushOptions::shape` (with `shapeYaw`) replaces the round falloff for Raise,
+      Lower, Smooth, Flatten and Paint, and Raise and Lower also scale by its height map (user: "should act
+      similar to a normal raise brush tool, but using a mesh with height map that raises certain places
+      higher"): each frame held, a point rises by strength x mask x (height / tallest), so the stamp's peaks
+      climb fastest and holding builds its shape. Editor: tool "Stamp" (that raise brush with a stamp shape
+      required; Shift lowers; Strength as for Raise) and a Shape picker (Circle or any stamp under
+      TerrainData/Stamps, or drop a .stamp) for the sculpt brushes, with a Turn setting and the turned outline
+      drawn draped over the ground. The edits are height data like any brush stroke (undo, .terrainedit).
+      Removed with it: world.cliffs (the builder's placement list and `--cliffs`/`--conform`), LandscapeDriver's
+      cliff list, runtime cliff pieces, cliff macro marks and `cliffStamps`; the three landscape .sculpt cells
+      and tools/cliff_sculpt.py; runtime stamp drawing (`Terrain::stamps`/`stampMaterials`/`stampPlacements`,
+      `TerrainStampInstance`, `TerrainSculpt`, `TerrainManager::SetTerrainStamps`, far stamp cells and
+      `farStampRadius`), the shader's stamp-grid surface, and stamp rock and sculpts in the volume build (volume
+      cells are heights plus volume edits). The triplanar rock shader path stays (VolumeTerrain's steep faces,
+      Sculpts/cliff_rock.material). The landscape cache key changed (first launch rebuilds cell caches).
+      Tests: `TestStampBrush` in TerrainEditingToolsTests (raster, dabs building the shape, Lower taking it
+      back out, turned stamp across a cell seam).
+      - [ ] Try the Stamp tool in the editor on the landscape (not run here).
+      - [x] Stamped the test block's walls (2026-11-23). `terrain/stamp_test.scene` is reset to flat ground and
+            a 48 m block 16 m tall, on a 1 m grid (at the landscape's 4 m a 4-19 m stamp is 1-5 vertices
+            across). `.local/tests/StampWallsTool.cpp` (target StampWallsTool) runs the real brushes on it: 3
+            stamps per wall, 1.5x scan size, face out and long side along the wall, Raise held 1.9 s at the
+            editor's default strength, then one rock Paint dab in the same shape; writes
+            `.local/stamps/stamp_test_stamped.scene`. Renders `.local/stamps/cmp_{Corner,Wall,Along,Above}.png`
+            (plain | stamped): rock buttresses and scree along every wall foot, the scans' relief reads.
+            Problems: every stamp rises at the same speed whatever its size, so small stamps become needles,
+            and overlapping strokes add up: spires to 25.9 m stand ~10 m over the 16 m top.
+            Options: rise in proportion to the stamp's own height at the brush's scale (a stamp keeps its
+            proportions), and/or stop at the stamp's surface (cap per stroke) so holding cannot overshoot.
+      - [x] Stamps build only against terrain behind them (user 2026-11-23: "should only influence areas it
+            can draw upon where there is terrain volume behind it"). `BrushOptions::backed` (on for the
+            editor's Stamp tool, checkbox "Against terrain"): for shaped Raise, each point rises at most to the
+            highest ground behind it (back from it against `TerrainBrushShape::facing`, the scan's direction
+            seen from above, while over the shape's square), read from the heights before the dab
+            (`backingHeight`; TerrainManager snapshots every loaded cell so strokes across borders agree).
+            Hanging past a wall's top or end, or on open ground, the stamp changes nothing. Walls re-stamped
+            (`.local/stamps/stamp_test_backed.scene`, `cmp3_*.png`: plain | unlimited | backed): no spikes, top
+            16.00 m exactly, block top untouched, 8 of 894 raised samples past the wall ends (stamps turned a
+            few degrees see the wall diagonally). Held long, a stamp's top flattens into a ledge at the wall
+            top (the cap clips it). Test: the backed case in `TestStampBrush`.
+      - [x] Stop at the stamp (user 2026-11-23). `BrushOptions::stopAtStamp` (on for the Stamp tool): a
+            shaped Raise point rises at most to `stampBase` (the height where the stroke began) plus the
+            shape's height there, scaled with the radius (the stamp keeps its proportions) times
+            `stampHeightScale` (the tool's "Height x"). The rise per dab is strength x mask x relief, so every
+            point reaches its own surface after the same hold: the stamp grows in whole and stops; repeat or
+            overlapping strokes take the higher surface, not the sum. Walls re-stamped held 3 s
+            (`.local/stamps/stamp_test_shaped.scene`, `cmp4_*.png`: plain | against terrain only | + stop at
+            stamp): no ledges (0 samples outside the block at the 16 m cap, 63 before), the scans' rounded
+            tops and relief show, buttresses 7-14 m on the 16 m wall (the scans' own heights at 1.5x).
+            Test: stop-at-stamp cases in `TestStampBrush` (held 2 strokes x 40 dabs ends at the apex;
+            twice the radius, twice as tall).
+      - [ ] tools/landscape_cliffs.py is orphaned (kept: it had uncommitted edits); stamp surface textures
+            (TerrainData/Stamps/*.material, tools/stamp_textures.py) are no longer drawn.
 - [ ] **Ground conforms to stamps** (user 2026-11-23: stamps did not morph the terrain, so the ground around
       a stamp never ran into it; mountains looked worst). The old `landscape_cliffs.conform_heights` raised a
       blurred plateau behind each wall and an apron, never to the stamp's own heights, and the engine pulled
@@ -820,9 +1068,32 @@ merged into main, worktrees removed; their comparison images are in `.local/agen
                         (4-6 s), drawn meanwhile by its terrain mesh, which the check does not see.
                         Height path vs volume over the Cliffs from above: the stamps' stacked shards become rock
                         merged into the slope (`.local/landscape/trim19/wide_cmp.png`, `high_cmp.png`).
+                        Review on the full demo (2026-11-23, loaded radius 3, `.local/volreview`; poses CliffsBack
+                        eye -948,93,1786 -> -768,125,1960, CliffsHigh eye -948,330,1786 -> -790,120,1945, Escarpment):
+                        * Windows, rings and pits through the cliff rock (user: "bunch of holes?"): stamps were a
+                          2 m shell, not 6 m of rock. `Rock::Density` (TerrainVolumeBuild.cpp) searched faces only `StampReach` (2 m) away, so
+                          samples deeper read air; 2 m samples broke the shell up wherever a piece stood proud of the
+                          slope. Fixed: search `RockSearch` = `StampDepth` (hash cells 3 m). Cell builds 5-6 -> 11-12 s
+                          median (max ~17 s).
+                        * Reset to pre-cliff ground and restamped (user): `build_landscape_demo.py` no longer lifts
+                          the heights to the cliffs (`--conform` restores it; rock paint kept, no apron); 289 cliff
+                          cells changed, every other cell and the terrain edits identical. Volume cells skip the
+                          sculpts (`LoadSculptedCells`): the Escarpment is heights + stamps too. Result: the see-through
+                          rings along the Cliffs skyline are gone and the rock reads as solid blocks; the Escarpment is
+                          one wall with the scans' relief (sharper than the sculpt volume). Left: a few dark pockets
+                          low on the faces, and one large pit at CliffsHigh where rock rings ground that the lift used
+                          to fill (`CliffsHigh_restamp`).
+                        * Real gaps at the loaded ring's edge: chunks past `drawDistance` (600 m, 3D, to the chunk's
+                          nearest point) are dropped, but a handed-over cell hides its terrain mesh and far tiles do not
+                          cover loaded cells; with radius 3 the outer ring's far chunks are 540-720 m out (more from
+                          high up). The check counts them as holes (20 k columns at CliffsHigh, 109 k at Escarpment);
+                          none were in these views. Fix next: draw distance to cover the ring, or keep level 3.
+                        * The height path (the demo's default, volume off) now has unlifted ground under its stamps
+                          and sculpts made on the old heights: not checked. Switch the demo to volume cells once the
+                          ring gap is fixed.
+                        * Volume rock is smoother than the scans at 2 m samples (Escarpment old sculpt volume vs height
+                          path); detail has to come from texture and normals.
                         Next:
-                        * Rerun the in-game check on Escarpment, CliffsWide, Cliffs and SeamLow after the last
-                          two fixes (the run was interrupted), and view the pictures.
                         * The check should skip cells whose volume is still building (not members yet).
                         * Dark pits across the volume cliffs (`trim19/wide_zoom.png`): pockets between stamp slabs
                           (6 m rock behind each face) or remaining holes; check with the in-game check, then
@@ -831,11 +1102,6 @@ merged into main, worktrees removed; their comparison images are in `.local/agen
                           are not holes but can shade badly.
                         * The 2 cm sliver at random levels; the black prefab shards at Cliffs (also on the
                           height path).
-                  - [ ] 3d, cleanup once the landscape runs on volumes: keep the stamp shapes and
-                        placements (`.stamp`, `world.cliffs`; the volume's rock), delete the patch drawing
-                        (`AppendStampGeometry`, `DisplacedStampInset`), far stamp cells, stamp proxy prefabs,
-                        the sculpts (`cliff_sculpt.py`, `.sculpt`), the ground-conform lifts and the
-                        displacement experiment.
             - [ ] Phase 3: the height archive and cell caches carry offsets (`SaveCache`/`LoadCacheRange` build
                   positions from heights only; caches must key on offsets); far tiles; matching offsets on
                   shared cell borders.

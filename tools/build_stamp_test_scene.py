@@ -1,16 +1,15 @@
-"""Builds a small terrain stamp test scene: a raised block with stamped walls.
+"""Builds the terrain stamp test scene: flat ground with a raised block, for trying stamp brushes.
 
 Writes
   Engine/Core/Assets/Scenes/terrain/stamp_test.scene
 
-One 128 m terrain cell (4 m grid, as the landscape) with flat ground and a
-48 m square block 16 m tall in the middle, its walls one grid step wide. Rock
-stamps (tools/bake_terrain_stamp.py) stand along all four walls, sunk 1 m and
-scaled to the wall's height, with their faces over the grid's steep step. The
-heights are morphed to the stamps (tools/terrain_stamp_morph.py) unless
---no-morph is given, so the two can be compared at the same poses. Lighting,
-sky and settings come from tools/build_grass_test_scene.py; the block carries
-no grass. The stamps are saved on the terrain (Terrain.stampPlacements).
+One 128 m terrain cell on a 1 m grid (finer than the landscape's 4 m, so a
+stamp a few metres across keeps its shape), dead flat, with a 48 m square
+block 16 m tall in the middle: its walls are one grid step wide, painted rock,
+the ground and the block's top grass. Nothing else is placed: stamps are
+terrain brushes (the editor's Stamp tool, or a stamp shape on Raise/Lower),
+so stamp the walls in the editor and the strokes become the cell's heights.
+Lighting, sky and settings come from tools/build_grass_test_scene.py.
 
 Viewpoints (GameBackendCapture --viewpoint NAME):
   Corner   ground level at the north-east corner
@@ -19,17 +18,19 @@ Viewpoints (GameBackendCapture --viewpoint NAME):
   Rim      on top of the block, looking over the east rim
   Above    high, looking down at the whole block
 
-  build/Debug/RelWithDebInfo/GameBackendCapture.exe --backend dx12 \
-    --scene Engine/Core/Assets/Scenes/terrain/stamp_test.scene \
-    --width 1280 --height 720 --warmup 300 --frames 10 --viewpoint Corner --out .local/stamps/corner
+  build/RelWithDebInfo/GameBackendCapture.exe --backend dx12
+    --scene Engine/Core/Assets/Scenes/terrain/stamp_test.scene
+    --width 1920 --height 1080 --warmup 300 --frames 10 --viewpoint Corner --out .local/stamps/corner
 
-Usage: python tools/build_stamp_test_scene.py [--no-morph] [--output PATH]
-Placement is deterministic. Re-running replaces the scene.
+Usage: python tools/build_stamp_test_scene.py [--volume [--edits FILE]] [--output PATH]
+Re-running replaces the scene (and any stamping done on it).
+
+base_heights, wall_stamps and the 4 m constants are kept for
+tools/terrain_volume.py (its offline volume test world).
 """
 
 import argparse
 import math
-import random
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -68,6 +69,11 @@ VIEWPOINTS = [
     ("Above", (150.0, 70.0, 150.0), (64.0, 6.0, 64.0)),
 ]
 
+
+# The test scene's own grid (the constants above are the 4 m library ones).
+TEST_SPACING = 1.0
+TEST_CELLS = 128
+BLOCK_METRES = (BLOCK[0] * SPACING, BLOCK[1] * SPACING)   # 40..88 m
 
 def base_heights():
     """Flat ground with a gentle swell, and the block."""
@@ -110,9 +116,17 @@ def wall_stamps(heights, rng):
     return out
 
 
-def paint(heights):
+def test_heights():
+    """The test scene: dead flat ground and the block, on the 1 m grid."""
+    heights = np.zeros((TEST_CELLS + 1, TEST_CELLS + 1))
+    lo, hi = (int(round(m / TEST_SPACING)) for m in BLOCK_METRES)
+    heights[lo:hi + 1, lo:hi + 1] = BLOCK_HEIGHT
+    return heights
+
+
+def paint(heights, spacing=SPACING):
     """Grass, with rock on the steep steps."""
-    gz, gx = np.gradient(heights, SPACING)
+    gz, gx = np.gradient(heights, spacing)
     steep = np.hypot(gx, gz) > 0.8
     weights = np.zeros(heights.shape + (len(grass.LAYERS),))
     weights[..., grass.GRASS_LAYER] = np.where(steep, 0.0, 1.0)
@@ -122,51 +136,17 @@ def paint(heights):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--no-morph", action="store_true", help="keep the heights as built")
     parser.add_argument("--output", type=Path, default=OUTPUT)
-    parser.add_argument("--displace", action="store_true",
-                        help="drape the grid over the stamps (terrain_stamp_morph.displace)")
     parser.add_argument("--volume", action="store_true",
                         help="draw the cell as a density volume built from it (VolumeTerrain fromTerrain)")
     parser.add_argument("--edits", type=Path, metavar="VOLUMEEDIT",
                         help="with --volume: shapes added and carved (a .volumeedit file, VolumeTerrain.editFile)")
-    parser.add_argument("--no-stamps", action="store_true",
-                        help="leave the stamps' patches out (shows the terrain alone)")
-    parser.add_argument("--undercut", type=float, default=0.0, metavar="METRES",
-                        help="vector displacement test: push the east wall's top edge this far "
-                             "out past its foot (Terrain.lateralOffsets) and leave that wall bare")
     args = parser.parse_args()
     output = args.output.resolve()
     grass.build(*CELL, output=output, far=False, trees=False)
 
-    rng = random.Random(SEED)
-    heights = base_heights()
-    placed = wall_stamps(heights, rng)
-    lateral = None
-    if args.undercut > 0.0:
-        # East wall (facing +x): drop its stamps, move its top-edge vertices
-        # out along +x, full along the wall and easing to nothing at the
-        # corners, so the face overhangs its foot.
-        placed = [(n, m) for n, m in placed if not (m[0, 3] > (BLOCK[1] - 2) * SPACING)]
-        lateral = np.zeros(heights.shape + (2,))
-        lo, hi = BLOCK
-        for row in range(lo, hi + 1):
-            t = min(row - lo, hi - row) / 2.0
-            t = min(max(t, 0.0), 1.0)
-            lateral[row, hi, 0] = args.undercut * t * t * (3 - 2 * t)
-    lift = np.zeros_like(heights)
-    if not args.no_morph:
-        heights, lift = morph.morph(heights, SPACING, (0.0, 0.0),
-                                    [(morph.load_stamp(n), m) for n, m in placed])
-    if args.displace:
-        heights, lateral = morph.displace(heights, SPACING, (0.0, 0.0),
-                                          [(morph.load_stamp(n), m) for n, m in placed])
-        moved = np.hypot(lateral[..., 0], lateral[..., 1])
-        print(f"displace: {int((moved > 0.05).sum())} vertices moved sideways "
-              f"(max {moved.max():.1f} m), {morph.folded_triangles(heights, lateral, SPACING)} folded")
-    weights = paint(heights)
-    if args.no_stamps:
-        placed = []
+    heights = test_heights()
+    weights = paint(heights, TEST_SPACING)
 
     ET.register_namespace("components", grass.NAMESPACE)
     scene = ET.parse(output).getroot()
@@ -176,26 +156,22 @@ def main():
     for child in list(cell.find("children")):
         cell.find("children").remove(child)
     terrain = cell.find("components").find(f"{{{grass.NAMESPACE}}}Terrain")
-    for tag in ("Terrain.heights", "Terrain.weights"):
-        terrain.remove(terrain.find(tag))
+    terrain.set("Terrain.cellsX", str(TEST_CELLS))
+    terrain.set("Terrain.cellsY", str(TEST_CELLS))
+    terrain.set("Terrain.cellWidth", f"{TEST_SPACING:.1f}")
+    terrain.set("Terrain.cellDepth", f"{TEST_SPACING:.1f}")
+    for tag in ("Terrain.heights", "Terrain.weights", "Terrain.lateralOffsets"):
+        for old in terrain.findall(tag):
+            terrain.remove(old)
     layers = terrain.find("Terrain.layers")
     index = list(terrain).index(layers)
     terrain.insert(index, grass.numbers("Terrain.heights", heights.ravel()))
     terrain.insert(index + 1, grass.numbers("Terrain.weights", weights.reshape(-1)))
-    if lateral is not None:
-        terrain.insert(index + 2, grass.numbers("Terrain.lateralOffsets", lateral.reshape(-1)))
     for item in layers:
         item.set("minHeight", f"{heights.min():.3f}")
         item.set("maxHeight", f"{heights.max():.3f}")
-    stamps = ET.SubElement(terrain, "Terrain.stampPlacements")
-    for name, matrix in placed:
-        item = ET.SubElement(stamps, "item", {
-            "stamp": f"Assets/TerrainData/Stamps/{name}.stamp",
-            "material": f"Assets/TerrainData/Stamps/{name}.material"})
-        # Column-major, as glm stores it.
-        item.append(grass.numbers("transform", matrix.T.ravel()))
     if args.volume:
-        # Volume terrain stage 3: the cell (heights and stamps) drawn as a
+        # Volume terrain stage 3: the cell (its heights) drawn as a
         # density volume built at load; the terrain's own mesh is hidden.
         cell.find("components").append(grass.component("VolumeTerrain", "VolumeTerrain", {
             "fromTerrain": "true", "steepLayer": ROCK_LAYER, "chunkCells": 32,
@@ -204,7 +180,7 @@ def main():
             **({"editFile": args.edits.resolve().as_posix()} if args.edits else {})}))
 
     def at(x, z):
-        return float(morph.sample(heights, SPACING, (0.0, 0.0), x, z))
+        return float(morph.sample(heights, TEST_SPACING, (0.0, 0.0), x, z))
 
     def viewpoint(name, eye, target):
         item = ET.Element("item", {"name": name, "enabled": "true"})
@@ -233,14 +209,12 @@ def main():
     scene_static.mark_static(objects)
     ET.indent(scene, "  ")
     header = ("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<!--\n"
-              "  Stamp test: a raised block with stamped walls"
-              f"{' (heights not morphed)' if args.no_morph else ''}.\n"
+              "  Stamp test: flat ground and a raised block, for stamp brushes.\n"
               "  Generated by tools/build_stamp_test_scene.py; re-running replaces this file.\n"
               "-->\n")
     output.write_text(header + ET.tostring(scene, encoding="unicode") + "\n", encoding="utf-8")
-    raised = lift > 0.05
-    print(f"{output}: {len(placed)} stamps; morph raised {int(raised.sum())} samples "
-          f"(max {lift.max():.1f} m)")
+    print(f"{output}: {TEST_CELLS}x{TEST_CELLS} cells at {TEST_SPACING:g} m, block "
+          f"{BLOCK_METRES[0]:g}..{BLOCK_METRES[1]:g} m, {BLOCK_HEIGHT:g} m tall")
 
 
 if __name__ == "__main__":

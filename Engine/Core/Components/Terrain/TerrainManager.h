@@ -66,12 +66,6 @@ public:
     // farObjectBlockCells x farObjectBlockCells cells. Only placements whose
     // asset has a LOD chain take part. 0 disables.
     int farObjectRadius = 0;
-    // Far stamps: out to this radius (cells), cells with terrain stamps
-    // (cliffs) that the far terrain draws keep their stamps, at the coarsest
-    // stamp level and with the loaded cells' surface shading; far tiles have
-    // the heights but not the stamps. Needs the procedural builder. 0 (or
-    // not past loadedRadius) disables.
-    int farStampRadius = 8;
     // Main-thread time per update for installing streamed cells into the
     // scene. At least one cell commits each update; more only within this.
     float maxCommitMilliseconds = 2.f;
@@ -86,24 +80,22 @@ public:
     // Game streaming only; the editor always draws per cell.
     int nearObjectBlockCells = 1;
     // Loaded cells keep their mesh in the compact terrain vertex format, with
-    // a paint map for the layer weights (Terrain::compactMesh). Cells with
-    // terrain stamps are many times the grid's vertices, and in the full
-    // format overran the memory budget (cells then unloaded and reloaded
-    // every frame). Game streaming; the editor keeps the full format.
+    // a paint map for the layer weights (Terrain::compactMesh): 48 bytes a
+    // vertex instead of 264. Game streaming; the editor keeps the full format.
     bool compactCellVertices = false;
     // compactCellVertices for game streaming; ENGINE_COMPACT_TERRAIN=0/1
     // overrides it for A/B runs.
     bool UsesCompactCellVertices() const;
     // Volume terrain (stage 3, .md/todo.md): loaded cells are drawn and
     // collided as density volumes built from them (VolumeTerrain fromTerrain:
-    // their heights and stamps), shaded with their paint and
+    // their heights and volume edits), shaded with their paint and
     // `volumeSteepLayer` on steep faces. The cell's Terrain stays for heights,
-    // paint and placement; its own mesh, stamp patches and grid collider go.
+    // paint and placement; its own mesh and grid collider go.
     // Far tiles keep the height field. ENGINE_VOLUME_TERRAIN=0/1 overrides.
     bool volumeCells = false;
     int volumeSteepLayer = 4;
     // Metres between volume samples. The heights are a 4 m grid, so 2 m
-    // keeps the stamps' rock and costs an eighth of 1 m (and ~a quarter of
+    // keeps their detail and costs an eighth of 1 m (and ~a quarter of
     // the triangles).
     float volumeSampleSpacing = 2.f;
     bool UsesVolumeCells() const;
@@ -336,14 +328,6 @@ public:
     bool AddCell(int x, int y);
     bool AddProceduralCell(int x, int y);
     void SetProceduralBuilder(std::function<void(Cell, Terrain&)> builder);
-    // Terrain stamps for a cell (Terrain::stamps), set on every loaded cell
-    // before its mesh is built or read from a cache. Runs on streaming workers,
-    // so it may only read data that does not change while cells stream.
-    using TerrainStampProvider = std::function<std::vector<TerrainStampInstance>(Cell)>;
-    void SetTerrainStamps(TerrainStampProvider provider);
-    // The stamps' surface materials (Terrain::stampMaterials), the same list
-    // for every cell so they share one set of layer arrays.
-    void SetTerrainStampMaterials(std::vector<std::string> materials);
     // The surface a generated object layer may read.
     struct ObjectLayerContext
     {
@@ -536,15 +520,14 @@ private:
     std::set<Cell> m_editedProcedural;
     mutable std::set<Cell> m_dirtyProceduralEdits;
     std::function<void(Cell, Terrain&)> m_proceduralBuilder;
-    TerrainStampProvider m_stampProvider;
     // Volume edits read so far, per cell (GetVolumeEdits).
     mutable std::map<Cell, std::vector<TerrainVolumeEdit>> m_volumeEdits;
     // A cell's heights for a neighbouring volume: loaded, else baked or the
     // height archive (as far seams read them). False when unknown.
     bool NeighbourHeights(Cell cell, std::vector<float>& heights) const;
-    // Hands a volume cell its neighbours' heights, stamps, sculpts and edits.
+    // Hands a volume cell its neighbours' heights and edits.
     void FeedVolumeNeighbours(Cell cell, VolumeTerrain& volume) const;
-    std::vector<std::string> m_stampMaterials;    ObjectLayerGenerator m_objectLayerGenerator;
+    ObjectLayerGenerator m_objectLayerGenerator;
     ObjectLayerSetup m_objectLayerSetup;
 
     // Far objects (TerrainManagerFarObjects.cpp).
@@ -572,28 +555,6 @@ private:
     };
     void UpdateFarObjects(int centerX, int centerY);
     void ClearFarObjects();
-    // Far stamp cells (farStampRadius): one runtime mesh per stamped cell,
-    // the cell's own terrain at a coarse level, built on a worker, hidden
-    // while the cell itself is loaded.
-    struct FarStampGeometry
-    {
-        std::vector<Mesh::Vertex> vertices;
-        std::vector<uint32_t> indices;
-        float textureTiling = 16.f;
-    };
-    struct FarStampCell
-    {
-        Engine::Core::Object* object = nullptr;
-        std::future<FarStampGeometry> job;
-        bool empty = false;
-    };
-    std::map<Cell, FarStampCell> m_farStamps;
-    std::map<Cell, bool> m_stampCellKnown;
-    void UpdateFarStamps(int centerX, int centerY);
-    void ClearFarStamps();
-    // A far stamp cell is drawn (built, ready, its cell not loaded): far tiles
-    // leave it out and stitch their edges to it.
-    bool FarStampShowing(Cell cell) const;
     struct NearObjectBlock
     {
         Engine::Core::Object* object = nullptr;
@@ -791,8 +752,6 @@ private:
         std::string bakePath;
         uint64_t bakeOffset = 0, bakeSize = 0;
         std::function<void(Cell, Terrain&)> builder;
-        TerrainStampProvider stamps;
-        std::vector<std::string> stampMaterials;
         bool compactMesh = false;
         ObjectLayerGenerator layerGenerator;
         std::optional<Terrain::Prepared> prepared;

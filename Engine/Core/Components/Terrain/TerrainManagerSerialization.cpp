@@ -47,7 +47,6 @@ TerrainManager::JsonValue TerrainManager::Serialize() const
         .Set("maxFarRebuildMilliseconds", JsonValue(maxFarRebuildMilliseconds))
         .Set("farTileScreenErrorPixels", JsonValue(farTileScreenErrorPixels))
         .Set("farObjectRadius", JsonValue(farObjectRadius))
-        .Set("farStampRadius", JsonValue(farStampRadius))
         .Set("maxCommitMilliseconds", JsonValue(maxCommitMilliseconds))
         .Set("farObjectBlockCells", JsonValue(farObjectBlockCells))
         .Set("nearObjectBlockCells", JsonValue(nearObjectBlockCells))
@@ -237,8 +236,6 @@ void TerrainManager::Deserialize(const JsonValue& value)
         ? std::clamp(value["maxCommitMilliseconds"].AsFloat(), .1f, 100.f) : 2.f;
     farObjectRadius = value.Has("farObjectRadius")
         ? std::clamp(value["farObjectRadius"].AsInt(), 0, 64) : 0;
-    farStampRadius = value.Has("farStampRadius")
-        ? std::clamp(value["farStampRadius"].AsInt(), 0, 64) : 8;
     farObjectBlockCells = value.Has("farObjectBlockCells")
         ? std::clamp(value["farObjectBlockCells"].AsInt(), 1, 32) : 8;
     nearObjectBlockCells = value.Has("nearObjectBlockCells")
@@ -466,8 +463,6 @@ bool TerrainManager::DrawProperties(Engine::Core::IInspectorUi& ui)
         ui.Tooltip("Loaded cells beyond medium detail use quarter-resolution terrain (LOD 4) through this radius, then eighth-resolution terrain. Keep this at least as large as the medium detail radius.");
         changed |= ui.SliderInt("Far object distance (cells)", &farObjectRadius, 0, 64);
         ui.Tooltip("Beyond the full-detail cells, object layer placements with LOD chains (trees) draw as their last level (impostors) out to this radius, batched into large blocks. 0 disables.");
-        changed |= ui.SliderInt("Far stamp distance (cells)", &farStampRadius, 0, 64);
-        ui.Tooltip("Cells with terrain stamps (cliffs) that the far terrain draws keep their stamps out to this radius, at the coarsest stamp level. 0 disables.");
         changed |= ui.DragFloat("Forest cluster distance (m)", &farClusterDistance, 10.f, 0.f, 100000.f);
         ui.Tooltip("Far trees beyond this distance are grouped into squares and drawn as baked cluster impostors (Far clusters list, saved with the scene), about a tenth of the instances. 0 disables.");
         changed |= ui.DragFloat("Forest cluster square (m)", &farClusterSize, 1.f, 4.f, 1000.f);

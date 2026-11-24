@@ -4,6 +4,7 @@
 #include <glm/glm.hpp>
 #include <algorithm>
 #include <cstring>
+#include <cstdlib>
 #include <map>
 #include <stdexcept>
 #include <vector>
@@ -101,7 +102,10 @@ public:
         auto& frame=m_slots[m_currentSlot];
         if(frame.liveKeys.insert(lifetime.get()).second) frame.liveSources.push_back(lifetime);
         auto found=m_sources.find(lifetime.get());
-        if(found==m_sources.end() && identity)
+        // ENGINE_INSTANCE_POOL_STEAL=0: a replacement never takes over the
+        // allocation of a source with the same stable identity (A/B runs).
+        static const bool steal=[]{ const char* v=std::getenv("ENGINE_INSTANCE_POOL_STEAL"); return !(v && v[0]=='0'); }();
+        if(found==m_sources.end() && identity && steal)
         {
             // Replacing a saved tile after an edit keeps its allocation. Compare
             // the new records instead of treating the replacement as a full upload.
@@ -172,6 +176,18 @@ public:
         return source.first;
     }
     const PersistentInstance& Get(uint32_t index) const { return m_records.at(index); }
+    // Diagnostics (ENGINE_TRACE_LAYER): records in [first, first + count)
+    // whose copy in the current slot's GPU buffer differs from the CPU copy.
+    uint32_t CountStaleRecords(uint32_t first,uint32_t count) const
+    {
+        if(m_currentSlot>=m_slots.size() || !m_slots[m_currentSlot].mapped) return 0;
+        const auto& slot=m_slots[m_currentSlot];
+        const size_t capacity=slot.buffer ? size_t(slot.buffer->GetSize()/sizeof(PersistentInstance)) : 0;
+        uint32_t stale=0;
+        for(uint32_t i=first;i<first+count && i<m_records.size();++i)
+            if(i>=capacity || std::memcmp(static_cast<const PersistentInstance*>(slot.mapped)+i,&m_records[i],sizeof(PersistentInstance))!=0) ++stale;
+        return stale;
+    }
     uint64_t ResidentBytes() const
     { uint64_t bytes=0; for(const auto& slot:m_slots) { if(slot.buffer) bytes+=slot.buffer->GetSize(); for(const auto& retired:slot.retired) bytes+=retired->GetSize(); } return bytes; }
     void Retire(std::unique_ptr<Graphics::IGraphicsBuffer> buffer)

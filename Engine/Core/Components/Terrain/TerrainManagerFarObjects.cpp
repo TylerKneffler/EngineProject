@@ -37,9 +37,6 @@ struct FarObjectInputs
     std::vector<std::string> layerNames;
     // Distance the loaded cells reach; far cells all lie beyond it.
     float nearReach = 0.f;
-    // Cells that draw their own terrain beyond the loaded window (far stamp
-    // cells): their placements keep full-detail heights.
-    std::function<bool(Cell)> drawsOwnTerrain;
 };
 
 // ENGINE_FAR_OBJECT_SURFACE=0 keeps far placements on full-detail heights.
@@ -174,7 +171,7 @@ std::vector<TerrainObjectLayer::Placement> FarPlacements(
             result.push_back(std::move(distant));
         }
     }
-    if (FarObjectSurfaceSnap() && !(inputs.drawsOwnTerrain && inputs.drawsOwnTerrain(input.cell)))
+    if (FarObjectSurfaceSnap())
         SnapToFarSurface(*terrain, result);
     return result;
 }
@@ -596,12 +593,6 @@ void TerrainManager::UpdateFarObjects(int centerX, int centerY)
         inputs.generator = m_objectLayerGenerator;
         inputs.layerNames = m_objectLayerNames;
         inputs.nearReach = std::max(0, loadedRadius) * std::min(cellsX * cellWidth, cellsY * cellDepth);
-        // Stamped cells are far stamp cells (their own terrain, not a far tile)
-        // within farStampRadius; keep their placements on full detail.
-        if (m_stampProvider)
-            inputs.drawsOwnTerrain = [provider = m_stampProvider](Cell cell) {
-                return !provider(cell).empty();
-            };
         while (m_farObjectJobs.size() < maximumJobs && m_farObjectQueueNext < m_farObjectQueue.size())
         {
             std::vector<FarCellInput> batch;

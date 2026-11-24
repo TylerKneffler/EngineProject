@@ -1,4 +1,6 @@
 #pragma once
+#include <algorithm>
+#include <string>
 #include "PersistentInstancePool.h"
 #include "Core/Graphics/IGraphicsContext.h"
 #include <array>
@@ -49,7 +51,23 @@ public:
         uint32_t completedGpuCandidates=0,completedTransitionCandidates=0,readbackLod=0;
         bool completedReadback=false,readbackShadow=false;
         uint64_t readbackViewIdentity=0;
+        // Visibility monitor (VisibilityMonitor.h): the placements the CPU
+        // expects this batch's cull to keep, and its whole visible list
+        // copied back after the cull, compared once the slot comes round.
+        struct Monitor
+        {
+            bool armed=false,pending=false;
+            uint64_t serial=0;
+            std::string label;
+            std::vector<uint32_t> expected;     // pool indices
+            std::vector<glm::vec4> info;        // world centre, distance
+            std::vector<std::string> tileNames; // per expected
+            std::unique_ptr<Graphics::IGraphicsBuffer> readback;
+            uint32_t bytes=0;
+        } monitor;
     };
+    // Defined in VisibilityMonitor.cpp: compares a landed monitor readback.
+    static void CompleteMonitorReadback(Batch& batch,const uint8_t* mapped);
 private:
     // A batch unused this many frames gives its buffers to the spare list.
     static constexpr uint64_t SpareAfterFrames=8;
@@ -90,6 +108,17 @@ public:
                     previous.visibilityReadbackPending = false;
                 }
             }
+            for (auto& entry : slot.batches)
+            {
+                auto& monitor = entry.second.monitor;
+                if (!monitor.pending || !monitor.readback || !monitor.readback->IsReadbackReady()) continue;
+                if (const auto* mapped = static_cast<const uint8_t*>(monitor.readback->Map()))
+                {
+                    CompleteMonitorReadback(entry.second, mapped);
+                    monitor.readback->Unmap();
+                }
+                monitor.pending = false;
+            }
             slot.serial=serial;
             slot.retired.clear();
             // This slot's fence has passed, so buffers of batches it no longer
@@ -100,6 +129,7 @@ public:
                     if(it->second.output && slot.spare.size()<MaxSpareBatches)
                     {
                         it->second.visibilityReadbackPending=false;
+                        it->second.monitor=Batch::Monitor{};
                         slot.spare.push_back(std::move(it->second));
                     }
                     it=slot.batches.erase(it);
@@ -180,6 +210,23 @@ public:
             batch.constants=constants; uploadBytes+=256;
         }
         return batch;
+    }
+    // Copies the whole visible list of an armed batch for the monitor.
+    static void ScheduleMonitorReadback(Graphics::IGraphicsProvider* provider,
+        Graphics::IGraphicsContext* context, Batch& batch)
+    {
+        auto& monitor = batch.monitor;
+        if (!monitor.armed || monitor.pending || !batch.output || !context) return;
+        monitor.armed = false;
+        const uint32_t bytes = uint32_t(std::min<uint64_t>(batch.output->GetSize(),
+            uint64_t(batch.candidates + 1) * sizeof(VisibleInstanceRecord)));
+        if (!monitor.readback || monitor.readback->GetSize() < bytes)
+            monitor.readback = provider->GetBufferFactory()->CreateBuffer(
+                Graphics::IGraphicsBuffer::Usage::StorageBuffer,
+                Graphics::IGraphicsBuffer::AccessMode::Readback, bytes, nullptr, sizeof(VisibleInstanceRecord));
+        if (!monitor.readback || !context->CopyBuffer(batch.output.get(), monitor.readback.get(), bytes)) return;
+        monitor.bytes = bytes;
+        monitor.pending = true;
     }
     static bool ScheduleVisibilityReadback(Graphics::IGraphicsContext* context,
         Batch& batch, uint32_t lod, bool shadow, uint64_t viewIdentity)

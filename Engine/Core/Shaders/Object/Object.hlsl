@@ -540,6 +540,12 @@ void VSMain(
     // stays as dense on screen while far fewer plants are drawn.
     float placementScale = 1.0;
     float placementWiden = 1.0;
+    // Shrubs and bushes (placementReach bit 10) dissolve in at the range edge
+    // at their full size instead of rising out of the ground: their range fade
+    // goes to the pixel shader (uvChannels4.w, g_placementOpacity), which
+    // clips it with the screen dither. Grass keeps the shrink.
+    float placementOpacity = 1.0;
+    const bool placementDissolve = (draw.drawFlags & 0x20000000u) != 0u && (draw.placementReach & 1024u) != 0u;
     const bool placementFadeOn = objectData.placementFade.y > objectData.placementFade.x;
     // start > end runs the thinning backwards: a fade-in (far grass ring).
     const bool placementThinOn = objectData.placementThin.z < 1.0 &&
@@ -559,6 +565,7 @@ void VSMain(
             const float advance = (float)(hash & 1023u) / 1023.0 * 0.35 * band;
             placementScale = 1.0 - smoothstep(objectData.placementFade.x, objectData.placementFade.y,
                 cameraDistance + advance);
+            if (placementDissolve) { placementOpacity = placementScale; placementScale = 1.0; }
         }
         // Bit 10: the range is not thinned (shrubs, bushes).
         if (placementThinOn && (draw.placementReach & 1024u) == 0u)
@@ -738,6 +745,10 @@ void VSMain(
     // w of UV set 4 (their materials never sample that set).
     if (((uint)objectData.materialParams.w & 1024u) != 0u)
         oUvChannels4.w = billboardFade;
+    // Shrubs and bushes: their range-edge opacity (see placementDissolve).
+    // Ground-cover materials never sample UV set 4.
+    else if (placementDissolve)
+        oUvChannels4.w = placementOpacity;
 #ifdef GRASS_SURFACE_SHADING
     if ((draw.drawFlags & 0x20000000u) != 0u)
     {
@@ -2352,6 +2363,24 @@ static float g_instanceLodDistance = -1.0;
 // keeps screen hash < w, w < 0 keeps hash >= 1 - |w|. Set by the same entry
 // points from TEXCOORD7.w; only read for impostorBillboard materials.
 static float g_billboardFade = 1.0;
+// Shrub and bush range-edge opacity (VSMain placementDissolve), read from
+// TEXCOORD7.w by the pixel entry points; 1 for everything else.
+static float g_placementOpacity = 1.0;
+void ReadPlacementOpacity(float4 uvChannels4)
+{
+    g_placementOpacity = (draw.drawFlags & 0x20000000u) != 0u && (draw.placementReach & 1024u) != 0u
+        ? saturate(uvChannels4.w) : 1.0;
+}
+
+// Visibility (tile fade-in) carried in geometryFade.w: 2 + visibility for tile
+// levels, 6 + 0.4 * (1 - visibility) for per-placement ground cover
+// (SceneRendering.cpp perPlacementFade), 1 for the other modes (bands 4-5,
+// screen coverage 7).
+float GroundCoverVisibility(float w)
+{
+    if (w >= 5.5 && w < 6.45) return saturate(1.0 - (w - 6.0) / 0.4);
+    return w >= 4.0 ? 1.0 : saturate(w - 2.0);
+}
 
 // Half-width of the dissolve at an instanced LOD switch distance. Must match
 // the per-placement band test in InstanceCull.hlsl.
@@ -2380,8 +2409,34 @@ float ScreenDitherThreshold(float2 screenPosition, float frame)
     return frac((float(bayer) + 0.5) / 64.0 + frame * 0.61803399);
 }
 
+// Cutout foliage (leaves, ferns, bushes, grass: material flag 32) dissolves
+// as it nears the camera, so walking through or past a plant never fills the
+// view with a leaf card that pops between frames. Per pixel, from
+// NearFoliageFadeEnd (fully drawn) to NearFoliageFadeStart (gone), with the
+// rotating screen dither the LOD dissolves use (TAA resolves it to a blend).
+// Camera records only: shadow records (shadowCasterFade.z) keep the plant.
+// The foliage depth pre-pass runs PSShadowMain on camera records, so it clips
+// the same pixels as the lighting pass.
+static const float NearFoliageFadeStart = 0.35;
+static const float NearFoliageFadeEnd = 1.25;
+void ApplyNearFoliageFade(ObjectData data, float3 worldPosition, float2 screenPosition)
+{
+    [branch] if ((((uint)data.materialParams.w) & 32u) != 0u && data.shadowCasterFade.z < 0.5)
+    {
+        const float distance = length(worldPosition - data.viewPositionAlphaCutoff.xyz);
+        [branch] if (distance < NearFoliageFadeEnd)
+            clip(smoothstep(NearFoliageFadeStart, NearFoliageFadeEnd, distance) -
+                ScreenDitherThreshold(screenPosition, data.skinParams.z) - 1.0e-4);
+    }
+}
+
 void ApplyGeometryFade(ObjectData data, float3 worldPosition, float2 screenPosition)
 {
+    ApplyNearFoliageFade(data, worldPosition, screenPosition);
+    // Shrubs and bushes dissolving in at their range edge (whole plant, one
+    // opacity, rotating screen dither: TAA resolves it to a blend).
+    [branch] if (g_placementOpacity < 1.0)
+        clip(g_placementOpacity - ScreenDitherThreshold(screenPosition, data.skinParams.z) - 1.0e-4);
     // Billboard impostors hand one view to the next with complementary
     // screen dither (weights w and 1 - w), so coplanar cards never overlap.
     [branch] if (((uint)data.materialParams.w & 1024u) != 0u &&
@@ -2396,8 +2451,8 @@ void ApplyGeometryFade(ObjectData data, float3 worldPosition, float2 screenPosit
     // appearance/range fade, but do not apply the authored distance LOD again.
     // Shadow records retain their independent distance/fixed-proxy policy.
     if ((draw.drawFlags & 0x00800000u) != 0u && data.shadowCasterFade.z < 0.5)
-        data.geometryFade = float4(0, data.geometryFade.w >= 4.0 ? 1.0 :
-            data.geometryFade.w >= 2.0 ? saturate(data.geometryFade.w-2.0) : data.geometryFade.y, 0, 1);
+        data.geometryFade = float4(0, data.geometryFade.w >= 2.0 ? GroundCoverVisibility(data.geometryFade.w) :
+            data.geometryFade.y, 0, 1);
     // Instanced LOD bands with a known placement distance: the whole
     // placement (a tree) takes one band and dissolves as a unit, with
     // screen-space thresholds so the outgoing and incoming LODs cover exactly
@@ -2417,7 +2472,7 @@ void ApplyGeometryFade(ObjectData data, float3 worldPosition, float2 screenPosit
         // Bands (4, 5) carry their level in x; ground cover tiles (2-3 per
         // tile, 6-7 per placement) draw each level with the level in the flags.
         const uint lod=(data.geometryFade.w>=4.0 && data.geometryFade.w<5.5) ? (uint)data.geometryFade.x:(draw.drawFlags >> 21u) & 3u;
-        const float visibility=saturate(data.geometryFade.w-2.0);
+        const float visibility=GroundCoverVisibility(data.geometryFade.w);
         if(lod==0) data.geometryFade=float4(0,(1-first)*visibility,0,1);
         else if(lod==1) data.geometryFade=distance<data.geometryFade.z-widthSecond ? float4((1-first)*visibility,visibility,0,1):float4(0,(1-second)*visibility,0,1);
         else data.geometryFade=float4((1-second)*visibility,visibility,0,1);
@@ -2471,6 +2526,7 @@ float4 PSShadowMain(
 {
     g_instanceLodDistance = instanceLodDistance;
     g_billboardFade = uvChannels4.w;
+    ReadPlacementOpacity(uvChannels4);
     g_triangleObject = (draw.drawFlags & 0x13080000u) != 0u ? objectIndex : draw.objectIndex;
     ObjectData objectData = objects[g_triangleObject];
     // Derivatives before any clip() below.
@@ -2866,8 +2922,6 @@ float4 ObjectSurfacePS(
     // Derivatives before any clip() below (the coverage hash ignores parallax
     // offsets: it needs a stable surface anchor, not the exact texel).
     const float3 facet = SurfaceFacet(worldPos);
-    // Terrain stamp texcoords (uvChannels4.xy), for its surface below.
-    const float2 stampDx = ddx(uvChannels4.xy), stampDy = ddy(uvChannels4.xy);
     const float2 maskUv = SelectMaterialUv(objectData.textureUvSets0.x,
         uv, uv1, uvChannels0, uvChannels1, uvChannels2,
         uvChannels3, uvChannels4);
@@ -3001,8 +3055,8 @@ float4 ObjectSurfacePS(
     // sun), resolved here so the lighting loops carry one float.
     float terrainReliefShadow = 1.0;
     uint terrainReliefLight = 0xffffffffu;
-    // How much of the pixel is a terrain stamp's own surface (below).
-    float terrainStampShare = 0.0;
+    // How much of the pixel is triplanar rock (below).
+    float terrainRockShare = 0.0;
     // Authored terrain stores six painted weights in the spare UV channels.
     // Vertex color carries the contribution of layers without a texture.
     if (flags & 2048u)
@@ -3135,7 +3189,7 @@ float4 ObjectSurfacePS(
             // Slope-gated biplanar mapping: faces steeper than ~37 degrees
             // fade to world-aligned side projections, which do not stretch.
             // The projection follows the triangle where it leans far from
-            // its smoothed normal (terrain stamps: sharp facets, overhangs)
+            // its smoothed normal (sharp facets, overhangs)
             // and faces pointing down take the top projection; a side
             // projection chosen by the smoothed normal smeared their texture
             // into vertical streaks. Height-field triangles stay close to
@@ -3363,20 +3417,16 @@ float4 ObjectSurfacePS(
                     cover * objectData.groundCoverColor.w);
             }
         }
-        // Terrain stamps (TerrainStamp): the stamp's own surface images, a
-        // layer-array slice after the painted layers, at its place on the
-        // stamp grid (uvChannels4: s, t, slice, blend). The blend falls to
-        // the paint over the stamp's outline. Its normals are in the stamp's
-        // axes: u (tangent), v (uvChannels0.zw, uvChannels1.z), outward u x v.
-        const float stampBlend = (flags & 262144u) && macroBlend < 0.999
+        // Triplanar rock (VolumeTerrain's steep faces) marks its vertices
+        // with a negative slice (uvChannels4: repeats per metre, -,
+        // -(slice + 1), blend): a seamless rock tile (tools/cliff_rock_texture.py),
+        // a layer-array slice after the painted layers, projected from three
+        // sides, its normals combined with the surface's on each side, tinted
+        // at the vertex (uvChannels0.zw, uvChannels1.z).
+        const float rockBlend = (flags & 262144u) && macroBlend < 0.999 && uvChannels4.z < -0.5
             ? saturate(uvChannels4.w) : 0.0;
-        terrainStampShare = stampBlend;
-        // Sculpted cells (tools/cliff_sculpt.py) mark their rock with a
-        // negative slice: a seamless rock tile (tools/cliff_rock_texture.py)
-        // projected from three sides at uvChannels4.x repeats per metre,
-        // its normals combined with the surface's on each side, tinted by
-        // the scans' colour at the vertex (uvChannels0.zw, uvChannels1.z).
-        [branch] if (stampBlend > 0.001 && uvChannels4.z < -0.5)
+        terrainRockShare = rockBlend;
+        [branch] if (rockBlend > 0.001)
         {
             const float slice = -uvChannels4.z - 1.0;
             const float scale = uvChannels4.x;
@@ -3418,39 +3468,20 @@ float4 ObjectSurfacePS(
                 normalSum += t.xyz * sideWeights.z;
             }
             const float3 tint = float3(uvChannels0.zw, uvChannels1.z);
-            base.rgb = lerp(base.rgb, albedoSum.rgb * tint, stampBlend);
+            base.rgb = lerp(base.rgb, albedoSum.rgb * tint, rockBlend);
             terrainNormalForLighting = normalize(lerp(terrainNormalForLighting,
-                normalize(normalSum), stampBlend));
-            terrainRoughness = lerp(terrainRoughness, clamp(roughAoSum.x, 0.045, 1.0), stampBlend);
-            terrainOcclusion = lerp(terrainOcclusion, roughAoSum.y, stampBlend);
-        }
-        else [branch] if (stampBlend > 0.001)
-        {
-            const float3 coords = float3(uvChannels4.xy, uvChannels4.z);
-            const float4 stampAlbedo = terrainAlbedoHeight.SampleGrad(materialSampler,
-                coords, stampDx, stampDy);
-            const float2 stampNormal = terrainNormal.SampleGrad(materialSampler,
-                coords, stampDx, stampDy).rg;
-            const float2 stampRoughAo = terrainRoughAo.SampleGrad(materialSampler,
-                coords, stampDx, stampDy).rg;
-            const float3 axisU = normalize(tangent.xyz);
-            const float3 axisV = normalize(float3(uvChannels0.zw, uvChannels1.z));
-            const float3 n = UnpackTerrainNormal(stampNormal);
-            const float3 surface = normalize(axisU * n.x + axisV * n.y + cross(axisU, axisV) * n.z);
-            base.rgb = lerp(base.rgb, stampAlbedo.rgb, stampBlend);
-            terrainNormalForLighting = normalize(lerp(terrainNormalForLighting, surface, stampBlend));
-            terrainRoughness = lerp(terrainRoughness, clamp(stampRoughAo.x, 0.045, 1.0), stampBlend);
-            terrainOcclusion = lerp(terrainOcclusion, stampRoughAo.y, stampBlend);
+                normalize(normalSum), rockBlend));
+            terrainRoughness = lerp(terrainRoughness, clamp(roughAoSum.x, 0.045, 1.0), rockBlend);
+            terrainOcclusion = lerp(terrainOcclusion, roughAoSum.y, rockBlend);
         }
         // Toward the edge of the loaded cells, fade to the macro color map
         // the distant tiles beyond use, so both sides meet with one color.
-        // Stamps keep their own surface: the far cells (stride 8) draw them
-        // too, and a flat macro texel over a rock face was what changed when
-        // its cell came within the stride-1 rings.
+        // Rock keeps its own surface: a flat macro texel over a rock face
+        // changed it as its cell came within the stride-1 rings.
         [branch] if (objectData.terrainMacroParams.z > 0.5)
         {
             const float macroAmount = smoothstep(objectData.terrainMacroParams.x,
-                objectData.terrainMacroParams.y, nearDistance) * (1.0 - terrainStampShare);
+                objectData.terrainMacroParams.y, nearDistance) * (1.0 - terrainRockShare);
             // The macro map carries no paths (they are shaded per pixel).
             [branch] if (macroAmount > 0.0)
                 base.rgb = lerp(base.rgb, lerp(SampleTerrainMacroColor(objectData,
@@ -3462,10 +3493,10 @@ float4 ObjectSurfacePS(
     // It takes a single-tap realtime shadow across the whole shadow range,
     // including the far cascade: hills and forests shade the ground at any
     // distance, and the cascades fade out on their own at the range's end.
-    // Terrain stamps' own surfaces (rock faces) take the full lighting below,
-    // as the scans they replace did; this pass's flat ambient and Lambert sun
-    // left them far darker than the scans in the same light.
-    if ((flags & 8192u) && objectData.ambientUnlit.w < 0.5 && terrainStampShare < 0.5)
+    // Triplanar rock faces take the full lighting below; this pass's flat
+    // ambient and Lambert sun left them far darker than scanned rock in the
+    // same light.
+    if ((flags & 8192u) && objectData.ambientUnlit.w < 0.5 && terrainRockShare < 0.5)
     {
         float3 terrainNormal = terrainNormalForLighting;
         // Canopy shade only on ground trees can stand on: on steep slopes the
@@ -3488,13 +3519,11 @@ float4 ObjectSurfacePS(
                 shadow = EvaluateDirectionalShadow(objectData, sun,
                     worldPos, terrainNormal, sunDirection, 0);
             }
-            // The long-range shadow is traced against the height grid, which
-            // knows nothing of stamps: their faces stand in front of the hill
-            // (and the ground behind them is raised to their top), so the grid
-            // put them in shadow and they read 2-3x darker than the scans.
-            // Stamps are real geometry in the cascades above.
+            // The long-range shadow is traced against the height grid; rock
+            // faces (volume overhangs) stand off it, so the grid shadowed
+            // them wrongly. They are real geometry in the cascades above.
             shadow *= terrainReliefShadow *
-                lerp(TerrainLongRangeShadow(objectData, worldPos), 1.0, terrainStampShare) *
+                lerp(TerrainLongRangeShadow(objectData, worldPos), 1.0, terrainRockShare) *
                 SunCookie(objectData, worldPos);
             diffuseLight += objectData.bakedDirectional.rgb *
                 (sunFacing * shadow / PI);
@@ -4002,6 +4031,7 @@ float4 PSMain(
     g_primitiveId = primitiveId;
     g_instanceLodDistance = instanceLodDistance;
     g_billboardFade = uvChannels4.w;
+    ReadPlacementOpacity(uvChannels4);
     return ApplyObjectAtmosphereFog(ObjectSurfacePS(pos, worldPos, normal, uv,
         uv1, vertexColor, tangent, uvChannels0, uvChannels1, uvChannels2,
         uvChannels3, uvChannels4, objectIndex, frontFace), worldPos,
@@ -4028,6 +4058,7 @@ float4 PSDepthEqualMain(
     g_primitiveId = primitiveId;
     g_instanceLodDistance = instanceLodDistance;
     g_billboardFade = uvChannels4.w;
+    ReadPlacementOpacity(uvChannels4);
     return ApplyObjectAtmosphereFog(ObjectSurfacePS(pos, worldPos, normal, uv,
         uv1, vertexColor, tangent, uvChannels0, uvChannels1, uvChannels2,
         uvChannels3, uvChannels4, objectIndex, frontFace), worldPos,
@@ -4054,6 +4085,7 @@ float4 PSParallaxDepthMain(
     g_primitiveId = primitiveId;
     g_instanceLodDistance = instanceLodDistance;
     g_billboardFade = uvChannels4.w;
+    ReadPlacementOpacity(uvChannels4);
     float4 color = ObjectSurfacePS(pos, worldPos, normal, uv, uv1, vertexColor,
         tangent, uvChannels0, uvChannels1, uvChannels2, uvChannels3,
         uvChannels4, objectIndex, frontFace);

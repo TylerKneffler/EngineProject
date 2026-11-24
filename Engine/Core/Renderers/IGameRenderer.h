@@ -62,5 +62,15 @@ public:
     // (the render size, which need not match the window).
     virtual bool ReadSceneCaptureRGBA(std::vector<uint8_t>&, uint32_t& /*width*/,
         uint32_t& /*height*/) { return false; }
+    // Non-stalling captures for real-speed diagnostics: the next EndFrame
+    // copies the composed frame into one of a ring of readback buffers,
+    // tagged; TakeAsyncSceneCapture returns the oldest copy whose GPU work has
+    // finished, without waiting, so frames stay in flight as in play.
+    // Request returns false when the renderer has no async path.
+    virtual bool RequestAsyncSceneCapture(uint64_t /*tag*/) { return false; }
+    virtual bool TakeAsyncSceneCapture(std::vector<uint8_t>& /*rgba*/, uint32_t& /*width*/,
+        uint32_t& /*height*/, uint64_t& /*tag*/) { return false; }
+    // Captures requested but not yet taken.
+    virtual uint32_t PendingAsyncSceneCaptures() const { return 0; }
 };
 }

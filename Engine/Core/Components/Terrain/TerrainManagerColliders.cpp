@@ -72,7 +72,6 @@ void TerrainManager::FeedVolumeNeighbours(Cell cell, VolumeTerrain& volume) cons
 {
     const double spanX = static_cast<double>(cellsX) * cellWidth;
     const double spanZ = static_cast<double>(cellsY) * cellDepth;
-    volume.neighbourStamps.clear();
     volume.edits = GetVolumeEdits(cell);
     for (int dz = -1; dz <= 1; ++dz)
         for (int dx = -1; dx <= 1; ++dx)
@@ -85,16 +84,6 @@ void TerrainManager::FeedVolumeNeighbours(Cell cell, VolumeTerrain& volume) cons
             const glm::vec3 offset(float(dx * spanX), 0.f, float(dz * spanZ));
             for (const auto& edit : GetVolumeEdits(neighbour))
                 volume.edits.push_back(edit.Shifted(offset));
-            // Their stamps' rock and their sculpts can reach across the
-            // shared edge.
-            if (!m_stampProvider) continue;
-            const glm::mat4 shift = glm::translate(glm::mat4(1.f), offset);
-            for (auto instance : m_stampProvider(neighbour))
-            {
-                if (!instance.stamp && !instance.sculpt) continue;
-                instance.transform = shift * instance.transform;
-                volume.neighbourStamps.push_back(std::move(instance));
-            }
         }
 }
 
@@ -138,7 +127,7 @@ bool TerrainManager::AddVolumeEdit(const TerrainVolumeEdit& edit)
 
 void TerrainManager::ConfigureCellPhysics(Engine::Core::Object& object) const
 {
-    // Volume cells: a finished cell (heights, stamps, stitched borders) is
+    // Volume cells: a finished cell (heights, stitched borders) is
     // drawn and collided by a volume built from it; no grid collider.
     const auto* cellTerrain = object.GetComponent<Terrain>();
     if (UsesVolumeCells() && cellTerrain)

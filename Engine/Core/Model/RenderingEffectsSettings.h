@@ -39,6 +39,12 @@ struct AntiAliasingSettings
     // Restores detail TAA softens (most visible while moving): a light
     // unsharp mask in the final compose. 0 is off.
     float taaSharpen = 0.25f;
+    // Pixels new to the history (just turned into view, or after a cut)
+    // average their first frames evenly instead of at taaFeedback, and the
+    // very first one is softened with its neighbours, so a strip at the
+    // leading edge of a turn does not show the raw jittered, dithered frame
+    // for the ~10 frames the plain blend takes to settle.
+    bool taaFastSettle = true;
     bool grassMinimumWidth = true;
     // Grass blades never draw narrower than this many pixels.
     float grassMinimumPixels = 1.f;

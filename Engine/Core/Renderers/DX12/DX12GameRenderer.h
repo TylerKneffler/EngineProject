@@ -3,6 +3,7 @@
 #include "../IGameRenderer.h"
 #include "DX12GraphicsProvider.h"
 #include "DX12PostProcess.h"
+#include <array>
 #include <memory>
 #include <vector>
 
@@ -93,6 +94,11 @@ public:
     Engine::Graphics::IGraphicsProvider* GetGraphicsProvider() override;
     void WaitIdle() override { FlushGPU(); }
     void RequestSceneCapture() override { m_captureRequested = true; }
+    bool RequestAsyncSceneCapture(uint64_t tag) override
+    { m_asyncCaptureRequested = true; m_asyncCaptureTag = tag; return true; }
+    bool TakeAsyncSceneCapture(std::vector<uint8_t>& rgba, uint32_t& width, uint32_t& height,
+        uint64_t& tag) override;
+    uint32_t PendingAsyncSceneCaptures() const override;
     bool ReadSceneCaptureRGBA(std::vector<uint8_t>& pixels, uint32_t& width,
         uint32_t& height) override;
 
@@ -156,6 +162,20 @@ private:
     uint32_t m_captureWidth = 0, m_captureHeight = 0; // scene color size copied
     uint64_t m_captureBytes = 0; // footprint size: the last row is not pitch-padded
     bool m_captureRequested = false;
+    // Async captures (RequestAsyncSceneCapture): a ring of readback buffers,
+    // each holding one frame's copy until taken; fence = the frame's fence value.
+    struct AsyncCapture
+    {
+        ComPtr<ID3D12Resource> buffer;
+        uint64_t fence = 0, tag = 0, bytes = 0;
+        uint32_t rowPitch = 0, width = 0, height = 0;
+        bool pending = false;
+    };
+    std::array<AsyncCapture, 8> m_asyncCaptures;
+    bool m_asyncCaptureRequested = false;
+    uint64_t m_asyncCaptureTag = 0;
+    int m_asyncCaptureRecorded = -1; // entry copied this frame, fenced at Signal
+    void RecordAsyncSceneCapture();
     std::string m_graphicsDevice = "Auto";
     std::string m_actualGraphicsDeviceName = "unknown";
     ComPtr<IDXGIFactory6>             m_factory;

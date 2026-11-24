@@ -50,8 +50,14 @@ struct DetailBudgetSettings
     float geometryBudgetMs = 6.f;
     // CPU milliseconds per frame for recording the scene's render passes.
     float cpuRenderBudgetMs = 4.f;
-    // Range of the global detail scale (1 = authored distances).
-    float minimumScale = .6f;
+    // Range of the global detail scale (1 = authored distances). The floor is
+    // 1 (2026-11-23): at .6 the budget sat there on every landscape walk (its
+    // geometry estimate is always over 6 ms) and pulled tree levels in to
+    // 0.6x, so forest-edge trees at 20-40 m drew a level down, for no
+    // measurable frame time (full 400 m trail walks, scale 1 against .6:
+    // 13.05 / 12.77 ms forest, 12.71 / 12.98 ms meadow; the frame is CPU-bound).
+    // The budget can still raise detail; a lower floor is a project setting.
+    float minimumScale = 1.f;
     float maximumScale = 8.f;
     // Seconds for the scale to settle after a change in load.
     float responseSeconds = 1.5f;

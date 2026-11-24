@@ -1,7 +1,6 @@
 #pragma once
 
 #include "Core/Components/Component.h"
-#include "Core/Components/Terrain/TerrainStamp.h"
 #include "Core/Components/Terrain/TerrainVolume.h"
 #include "Core/Components/Terrain/TerrainVolumeBuild.h"
 #include <array>
@@ -67,19 +66,14 @@ public:
     const Stats& GetStats() const { return m_stats; }
 
     std::string volumeFile;
-    // Stage 3: build the volume from this object's Terrain (heights and
-    // stamps, BuildTerrainVolume) instead of `volumeFile`, shade it with the
+    // Stage 3: build the volume from this object's Terrain (its heights,
+    // BuildTerrainVolume) instead of `volumeFile`, shade it with the
     // terrain's layers (painted weights on gentle ground, `steepLayer` on
-    // steep faces) and hide the terrain's own mesh (its stamp patches with
-    // it). The Terrain keeps serving heights and paint to everything else.
+    // steep faces) and hide the terrain's own mesh. The Terrain keeps serving
+    // heights and paint to everything else.
     bool fromTerrain = false;
     int steepLayer = 4;
     float sampleSpacing = 1.f;
-    // fromTerrain: stamps and sculpts placed in neighbouring cells, in this
-    // cell's space (TerrainManager sets them). A stamp's rock can reach
-    // across the cell's edge; without its owner's neighbours knowing it, the
-    // cliff face had a hole along the border. Not serialized.
-    std::vector<TerrainStampInstance> neighbourStamps;
     // fromTerrain: the neighbours' heights (TerrainVolumeInput); the volume
     // reads past the cell's edge. Not serialized.
     std::array<std::vector<float>, 9> neighbourHeights;
@@ -93,8 +87,8 @@ public:
     // group stands alone.
     const void* group = nullptr;
     int cellX = 0, cellZ = 0;
-    // fromTerrain: scanned rock over steep faces (the sculpts' seamless rock
-    // tile, projected from three sides at its terrainUvScale), tinted.
+    // fromTerrain: scanned rock over steep faces (a seamless rock tile,
+    // projected from three sides at its terrainUvScale), tinted.
     std::string rockMaterial = "Assets/TerrainData/Sculpts/cliff_rock.material";
     glm::vec3 rockTint{1.f};
     std::string flatMaterial;
@@ -188,7 +182,7 @@ public:
         size_t layers = 0;
         std::vector<float> weights;   // per grid vertex and layer
     };
-    // Scanned rock over steep faces (the sculpts' shader path, Object.hlsl):
+    // Scanned rock over steep faces (the triplanar rock path, Object.hlsl):
     // a layer-array slice after the painted layers, projected from three sides.
     struct RockSlice
     {

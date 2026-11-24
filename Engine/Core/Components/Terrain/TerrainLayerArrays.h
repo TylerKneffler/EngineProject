@@ -33,8 +33,8 @@ class TerrainLayerArrays
 {
 public:
     static constexpr uint32_t MaxLayers = 6;
-    // Slices: the painted layers, then extra surfaces such as terrain stamps'
-    // own images (Terrain::stampMaterials), sampled by slice index.
+    // Slices: the painted layers (and room for extra surfaces), sampled by
+    // slice index.
     static constexpr uint32_t MaxSlices = 16;
     // Six 2K BC slices take ~100 MiB for all three arrays; the RGBA8
     // fallback stops at 1K (~100 MiB as well).

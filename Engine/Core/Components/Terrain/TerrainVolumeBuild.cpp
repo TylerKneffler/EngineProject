@@ -1,7 +1,6 @@
 #include "Core/Components/Terrain/TerrainVolumeBuild.h"
 
 #include "Core/Components/Terrain/Terrain.h"
-#include "Core/Components/Terrain/TerrainStamp.h"
 #include "Core/Components/Terrain/TerrainSurfaceSample.h"
 #include <algorithm>
 #include <cmath>
@@ -13,234 +12,6 @@ namespace Engine::Components
 {
 namespace
 {
-constexpr float StampDepth = 6.f;    // metres of rock behind a stamp's face
-constexpr float SmoothUnion = 1.5f;  // fillet where ground and rock meet
-constexpr float HashCell = 2.f;      // metres per stamp-point hash cell
-// Nearest-rock search radius: past the union's fillet the rock cannot change
-// the result, so -StampReach stands for "farther".
-constexpr float StampReach = 2.f;
-
-float Smooth(float a, float b)
-{
-    const float h = std::clamp(.5f + .5f * (a - b) / SmoothUnion, 0.f, 1.f);
-    return b + (a - b) * h + SmoothUnion * h * (1.f - h);
-}
-
-struct RockPoint
-{
-    glm::vec3 position, normal;
-    float size;
-};
-
-struct Rock
-{
-    std::vector<RockPoint> points;
-    std::unordered_map<int64_t, std::vector<uint32_t>> cells;
-    glm::vec3 minimum{1e30f}, maximum{-1e30f};
-
-    static int64_t Key(int x, int y, int z)
-    {
-        return (int64_t(x) & 0x1fffff) | ((int64_t(y) & 0x1fffff) << 21) | ((int64_t(z) & 0x1fffff) << 42);
-    }
-    void Add(const RockPoint& point)
-    {
-        const glm::ivec3 cell = glm::ivec3(glm::floor(point.position / HashCell));
-        cells[Key(cell.x, cell.y, cell.z)].push_back(static_cast<uint32_t>(points.size()));
-        points.push_back(point);
-        minimum = glm::min(minimum, point.position);
-        maximum = glm::max(maximum, point.position);
-    }
-    bool Near(const glm::vec3& low, const glm::vec3& high) const
-    {
-        const float pad = StampDepth + StampReach;
-        return !points.empty() && glm::all(glm::lessThanEqual(low, maximum + pad)) &&
-            glm::all(glm::greaterThanEqual(high, minimum - pad));
-    }
-    // Density of the rock at p: depth behind the nearest face point where p
-    // lies over the patch (positive inside), else minus the distance to it.
-    float Density(const glm::vec3& p) const
-    {
-        const glm::ivec3 centre = glm::ivec3(glm::floor(p / HashCell));
-        const int rings = static_cast<int>(std::ceil(StampReach / HashCell));
-        float best = StampReach * StampReach;
-        const RockPoint* nearest = nullptr;
-        for (int dz = -rings; dz <= rings; ++dz)
-            for (int dy = -rings; dy <= rings; ++dy)
-                for (int dx = -rings; dx <= rings; ++dx)
-                {
-                    const auto found = cells.find(Key(centre.x + dx, centre.y + dy, centre.z + dz));
-                    if (found == cells.end()) continue;
-                    for (uint32_t index : found->second)
-                    {
-                        const glm::vec3 d = p - points[index].position;
-                        const float distanceSquared = glm::dot(d, d);
-                        if (distanceSquared < best) { best = distanceSquared; nearest = &points[index]; }
-                    }
-                }
-        if (!nearest) return -StampReach;
-        const glm::vec3 offset = p - nearest->position;
-        const float along = glm::dot(offset, nearest->normal);
-        const float lateral = glm::length(offset - along * nearest->normal);
-        const float depth = -along;
-        if (lateral <= 1.5f * nearest->size && depth > 0.f && depth < StampDepth)
-            return std::min(depth, StampDepth - depth);
-        return -std::sqrt(best);
-    }
-};
-
-// A sculpted cell's surface as a density: the distance to the nearest point
-// on the sculpt's finest triangles, positive below the surface (inside the
-// ground) by the vertex normals interpolated there. Triangles cover the
-// surface however far apart a simplified mesh's vertices are (the nearest
-// vertex's plane left holes in the escarpment where vertices were sparse).
-// Triangles are hashed by their bounds in SculptCell cells; past SculptReach
-// the caller falls back to the heights.
-constexpr float SculptCell = 4.f;
-constexpr float SculptReach = 8.f;
-
-glm::vec3 ClosestOnTriangle(const glm::vec3& p, const glm::vec3& a, const glm::vec3& b,
-    const glm::vec3& c, glm::vec3& weights)
-{
-    // Ericson, Real-Time Collision Detection, 5.1.5.
-    const glm::vec3 ab = b - a, ac = c - a, ap = p - a;
-    const float d1 = glm::dot(ab, ap), d2 = glm::dot(ac, ap);
-    if (d1 <= 0.f && d2 <= 0.f) { weights = {1, 0, 0}; return a; }
-    const glm::vec3 bp = p - b;
-    const float d3 = glm::dot(ab, bp), d4 = glm::dot(ac, bp);
-    if (d3 >= 0.f && d4 <= d3) { weights = {0, 1, 0}; return b; }
-    const float vc = d1 * d4 - d3 * d2;
-    if (vc <= 0.f && d1 >= 0.f && d3 <= 0.f)
-    { const float v = d1 / (d1 - d3); weights = {1 - v, v, 0}; return a + v * ab; }
-    const glm::vec3 cp = p - c;
-    const float d5 = glm::dot(ab, cp), d6 = glm::dot(ac, cp);
-    if (d6 >= 0.f && d5 <= d6) { weights = {0, 0, 1}; return c; }
-    const float vb = d5 * d2 - d1 * d6;
-    if (vb <= 0.f && d2 >= 0.f && d6 <= 0.f)
-    { const float w = d2 / (d2 - d6); weights = {1 - w, 0, w}; return a + w * ac; }
-    const float va = d3 * d6 - d5 * d4;
-    if (va <= 0.f && (d4 - d3) >= 0.f && (d5 - d6) >= 0.f)
-    {
-        const float w = (d4 - d3) / ((d4 - d3) + (d5 - d6));
-        weights = {0, 1 - w, w};
-        return b + w * (c - b);
-    }
-    const float denominator = 1.f / (va + vb + vc);
-    const float v = vb * denominator, w = vc * denominator;
-    weights = {1 - v - w, v, w};
-    return a + ab * v + ac * w;
-}
-
-// The sculpted cells reaching this one, as one triangle soup in its space.
-struct SculptSurface
-{
-    std::vector<glm::vec3> corners;   // three per triangle
-    std::vector<glm::vec4> footprints;   // each sculpted cell: x0, z0, x1, z1
-    std::unordered_map<int64_t, std::vector<uint32_t>> cells;   // first corners
-    std::unordered_map<int64_t, std::vector<uint32_t>> columns; // by x, z bounds only
-    float lowest = 1e30f, highest = -1e30f;
-
-    // Adds a sculpt of a width x depth cell, placed by `transform`, keeping
-    // the triangles that reach into `keep` (x0, z0, x1, z1).
-    void Add(const TerrainSculpt& sculpt, const glm::mat4& transform, float width, float depth,
-        const glm::vec4& keep)
-    {
-        if (sculpt.vertices.empty() || sculpt.levels.empty()) return;
-        const glm::vec3 origin(transform[3]);
-        footprints.emplace_back(origin.x, origin.z, origin.x + width, origin.z + depth);
-        const auto& triangles = sculpt.levels.front();
-        for (size_t t = 0; t + 2 < triangles.size(); t += 3)
-        {
-            glm::vec3 p[3];
-            for (int k = 0; k < 3; ++k)
-                p[k] = glm::vec3(transform * glm::vec4(sculpt.vertices[triangles[t + k]].position, 1.f));
-            const glm::vec3 low = glm::min(p[0], glm::min(p[1], p[2]));
-            const glm::vec3 high = glm::max(p[0], glm::max(p[1], p[2]));
-            if (high.x < keep.x || low.x > keep.z || high.z < keep.y || low.z > keep.w) continue;
-            const auto first = static_cast<uint32_t>(corners.size());
-            for (int k = 0; k < 3; ++k) corners.push_back(p[k]);
-            lowest = std::min(lowest, low.y);
-            highest = std::max(highest, high.y);
-            const glm::ivec3 a = glm::ivec3(glm::floor(low / SculptCell));
-            const glm::ivec3 b = glm::ivec3(glm::floor(high / SculptCell));
-            for (int z = a.z; z <= b.z; ++z)
-                for (int x = a.x; x <= b.x; ++x)
-                {
-                    columns[Rock::Key(x, 0, z)].push_back(first);
-                    for (int y = a.y; y <= b.y; ++y) cells[Rock::Key(x, y, z)].push_back(first);
-                }
-        }
-    }
-    bool Empty() const { return corners.empty(); }
-    // Inside a sculpted cell's footprint: there the sculpt is the ground.
-    bool Covers(float x, float z) const
-    {
-        for (const auto& f : footprints)
-            if (x >= f.x - 1e-3f && x <= f.z + 1e-3f && z >= f.y - 1e-3f && z <= f.w + 1e-3f) return true;
-        return false;
-    }
-    // Inside (under the sheet): an odd number of triangles cross the
-    // vertical line above p. Folds (turned-over quads) add crossings in
-    // pairs, so they cannot flip it; the nearest triangle's normal could, and
-    // coarse levels turned one wrong sample into a 16 m hole in the
-    // escarpment. A point past the sheet's edge counts as under it when the
-    // heights say so.
-    bool Inside(const glm::vec3& p, bool fallback) const
-    {
-        // Nudged off grid-aligned edges and vertices.
-        const float x = p.x + 1.37e-3f, z = p.z + 2.11e-3f;
-        const auto column = columns.find(Rock::Key(int(std::floor(x / SculptCell)), 0,
-            int(std::floor(z / SculptCell))));
-        if (column == columns.end()) return fallback;
-        int crossings = 0;
-        bool covered = false;
-        for (uint32_t t : column->second)
-        {
-            const glm::vec3& a = corners[t];
-            const glm::vec3& b = corners[t + 1];
-            const glm::vec3& c = corners[t + 2];
-            const float area = (b.x - a.x) * (c.z - a.z) - (c.x - a.x) * (b.z - a.z);
-            if (std::abs(area) < 1e-9f) continue;   // edge-on: its neighbours carry the crossing
-            const float u = ((b.x - x) * (c.z - z) - (c.x - x) * (b.z - z)) / area;
-            const float v = ((c.x - x) * (a.z - z) - (a.x - x) * (c.z - z)) / area;
-            const float w = 1.f - u - v;
-            if (u < 0.f || v < 0.f || w < 0.f) continue;
-            covered = true;
-            if (a.y * u + b.y * v + c.y * w > p.y) ++crossings;
-        }
-        return covered ? (crossings & 1) != 0 : fallback;
-    }
-    // The signed distance to the nearest triangle (SculptReach at most);
-    // `density` comes in as the heights' estimate, for the sign past the
-    // sheet's edge.
-    void Density(const glm::vec3& p, float& density) const
-    {
-        const glm::ivec3 centre = glm::ivec3(glm::floor(p / SculptCell));
-        float best = SculptReach * SculptReach;
-        bool found = false;
-        for (int rings = 1; rings <= 2 && !found; ++rings)
-            for (int dz = -rings; dz <= rings; ++dz)
-                for (int dy = -rings; dy <= rings; ++dy)
-                    for (int dx = -rings; dx <= rings; ++dx)
-                    {
-                        if (rings == 2 && std::max({std::abs(dx), std::abs(dy), std::abs(dz)}) < 2) continue;
-                        const auto cell = cells.find(Rock::Key(centre.x + dx, centre.y + dy, centre.z + dz));
-                        if (cell == cells.end()) continue;
-                        for (uint32_t t : cell->second)
-                        {
-                            glm::vec3 weights;
-                            const glm::vec3 q = ClosestOnTriangle(p, corners[t], corners[t + 1], corners[t + 2], weights);
-                            const float distanceSquared = glm::dot(p - q, p - q);
-                            if (distanceSquared >= best) continue;
-                            best = distanceSquared;
-                            found = true;
-                        }
-                    }
-        const bool inside = Inside(p, density > 0.f);
-        const float distance = found ? std::sqrt(best) : SculptReach;
-        density = inside ? distance : -distance;
-    }
-};
-
 float SmoothMax(float a, float b, float k)
 {
     if (k <= 0.f) return std::max(a, b);
@@ -392,11 +163,6 @@ TerrainVolumeInput TerrainVolumeInput::From(const Terrain& terrain)
     input.cellsX = terrain.cellsX; input.cellsY = terrain.cellsY;
     input.cellWidth = terrain.cellWidth; input.cellDepth = terrain.cellDepth;
     input.heights = terrain.heights;
-    for (const auto& instance : terrain.stamps)
-    {
-        if (instance.stamp) input.stamps.push_back(instance);
-        if (instance.sculpt) input.sculpts.push_back(instance);
-    }
     return input;
 }
 
@@ -419,7 +185,7 @@ std::shared_ptr<TerrainVolume> BuildTerrainVolume(const TerrainVolumeInput& terr
     // of the edge and neighbouring cells left gaps (the escarpment at 250 m;
     // one sample only closed the gap at full detail). The margin is read,
     // not meshed: chunks cover the interior, the cell itself. Past the edge
-    // the ground is the neighbours' (their heights, sculpts and stamps), so a
+    // the ground is the neighbours' (their heights), so a
     // coarse level bends there as theirs does and both meet.
     constexpr int Margin = 9;
     const float reach = Margin * spacing;
@@ -453,36 +219,6 @@ std::shared_ptr<TerrainVolume> BuildTerrainVolume(const TerrainVolumeInput& terr
         return h;
     };
 
-    // The rock: every placed stamp's inside points, in cell space.
-    Rock rock;
-    for (const auto& instance : terrain.stamps)
-    {
-        const TerrainStamp* stamp = instance.stamp.get();
-        if (!stamp) continue;
-        const glm::mat3 linear(instance.transform);
-        const glm::mat3 normalMatrix = glm::transpose(glm::inverse(linear));
-        const float size = stamp->spacing * std::cbrt(std::abs(glm::determinant(linear)));
-        for (const auto& point : stamp->points)
-        {
-            if (point.weight <= .5f) continue;
-            RockPoint rockPoint;
-            rockPoint.position = glm::vec3(instance.transform * glm::vec4(point.position, 1.f));
-            rockPoint.normal = glm::normalize(normalMatrix * point.normal);
-            rockPoint.size = size;
-            rock.Add(rockPoint);
-        }
-    }
-    // The sculpts reaching the cell or its margin.
-    SculptSurface sculpt;
-    {
-        const float keep = reach + SculptReach + SculptCell;
-        for (const auto& instance : terrain.sculpts)
-            if (instance.sculpt)
-                sculpt.Add(*instance.sculpt, instance.transform, width, depth,
-                    glm::vec4(-keep, -keep, width + keep, depth + keep));
-    }
-    const bool sculpted = !sculpt.Empty();
-
     // The height range of everything in the grid's footprint.
     float lowest = 1e30f, highest = -1e30f;
     {
@@ -494,16 +230,6 @@ std::shared_ptr<TerrainVolume> BuildTerrainVolume(const TerrainVolumeInput& terr
                 lowest = std::min(lowest, h);
                 highest = std::max(highest, h);
             }
-    }
-    if (sculpted)
-    {
-        lowest = std::min(lowest, sculpt.lowest);
-        highest = std::max(highest, sculpt.highest);
-    }
-    if (!rock.points.empty())
-    {
-        lowest = std::min(lowest, rock.minimum.y);
-        highest = std::max(highest, rock.maximum.y);
     }
     // Edits that reach the grid's footprint.
     std::vector<TerrainVolumeEdit> edits;
@@ -564,13 +290,6 @@ std::shared_ptr<TerrainVolume> BuildTerrainVolume(const TerrainVolumeInput& terr
                         groundLow = std::min(groundLow, h);
                         groundHigh = std::max(groundHigh, h);
                     }
-                // A sculpt can stand far from the heights: no shortcut but
-                // its overall height range.
-                if (sculpted)
-                {
-                    groundLow = std::min(groundLow, sculpt.lowest);
-                    groundHigh = std::max(groundHigh, sculpt.highest);
-                }
                 chunkEdits.clear();
                 for (const auto& edit : edits)
                 {
@@ -578,8 +297,7 @@ std::shared_ptr<TerrainVolume> BuildTerrainVolume(const TerrainVolumeInput& terr
                     if (glm::all(glm::lessThanEqual(a, high)) && glm::all(glm::greaterThanEqual(b, low)))
                         chunkEdits.push_back(&edit);
                 }
-                const bool nearRock = rock.Near(low, high);
-                const bool plain = !nearRock && chunkEdits.empty();
+                const bool plain = chunkEdits.empty();
                 if (plain && low.y > groundHigh + band) { chunk.uniform = quantize(-limit); continue; }
                 if (plain && high.y < groundLow - band) { chunk.uniform = quantize(limit); continue; }
                 chunk.samples.resize(size_t(c) * c * c);
@@ -592,13 +310,6 @@ std::shared_ptr<TerrainVolume> BuildTerrainVolume(const TerrainVolumeInput& terr
                             glm::vec3 normal(0.f, 1.f, 0.f);
                             const float h = heightAt(p.x, p.z, &normal);
                             float d = (h - p.y) * std::max(normal.y, .05f);
-                            // In a sculpted cell (this one or a neighbour)
-                            // the sculpt is the ground.
-                            if (sculpted && sculpt.Covers(p.x, p.z)) sculpt.Density(p, d);
-                            // Rock reaches at most StampDepth / 2 inside; deeper
-                            // ground is unchanged by the union.
-                            if (nearRock && d < StampDepth * .5f + SmoothUnion)
-                                d = Smooth(d, rock.Density(p));
                             for (const auto* edit : chunkEdits)
                             {
                                 const float shape = edit->Distance(p);

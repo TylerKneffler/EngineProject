@@ -253,14 +253,17 @@ def rotation(normal, yaw_degrees):
     return align @ yaw
 
 
-def conform_heights(fine_q, scale_units, fine_extent, cells, spacing, by_cell):
+def conform_heights(fine_q, scale_units, fine_extent, cells, spacing, by_cell, lift=True):
     """The terrain conforms to its cliffs: tools/terrain_stamp_morph.py lifts
     the ground behind each stamp's top edge to meet it (no rock fins above the
     hill) and raises a low apron at its foot, both faded out like a brush, so
     the ground runs into the rock instead of meeting it at a seam. Heights are
     never lowered, and the play area's outer two cells are left alone (they
     blend into the coarse cells). Returns the new quantized heights and the
-    samples under rock and apron (painted rock and scree)."""
+    samples under rock and apron (painted rock and scree).
+
+    lift=False leaves the heights as they are (the volume terrain unions the
+    pieces with the plain ground itself) and only marks the rock; no apron."""
     heights = fine_q / scale_units
     rows, cols = heights.shape
     origin = -fine_extent * cells * spacing
@@ -282,6 +285,10 @@ def conform_heights(fine_q, scale_units, fine_extent, cells, spacing, by_cell):
     edge = np.minimum(np.arange(span + 1), span - np.arange(span + 1))
     inner = edge >= 2 * cells
     editable = inner[:, None] & inner[None, :]
+    if not lift:
+        rock = under & editable
+        print(f"cliffs: heights left plain, {int(rock.sum())} samples painted rock, {len(placements)} stamps")
+        return fine_q, rock, np.zeros(heights.shape, bool)
     raised, lift = terrain_stamp_morph.morph(heights, spacing, (origin, origin), placements,
                                              editable=editable)
     changed = lift > 0.5 / scale_units

@@ -19,6 +19,14 @@ existing "Vista":
                of it; the gaze follows the ground's mean slope, so the eye
                stays 1-3 m above the grass the whole way)
 
+and two walking routes along the trails, the way a player would go
+(SplinePath objects at eye height; GameBackendCapture --route <name>):
+
+  ForestTrailWalk  400 m on from the Trail viewpoint: forest, the forest
+                   edge, meadow, and back into forest
+  MeadowTrailWalk  400 m of the open-meadow trail nearest the start, walked
+                   with the sun behind
+
 Forests are placed at runtime by LandscapeDriver from ForestMask (value noise
 over world metres); ForestMask/ForestBand below replicate it exactly, and
 ground heights come from the landscape height archive. Editor: Viewpoints
@@ -445,6 +453,160 @@ def find_field_walk():
     return best[1], best[2]
 
 
+# --- trail walks -------------------------------------------------------------
+#
+# Routes a player would take: along the trails (the 0.5 contour of
+# trail_field, shaded per pixel by TerrainManager::ContourPaths), at eye
+# height. Saved as SplinePath objects; GameBackendCapture --route <name>
+# walks the game camera along one.
+
+ROUTE_LENGTH = 400.0
+ROUTE_SPACING = 6.0
+ROUTES = ("ForestTrailWalk", "MeadowTrailWalk")
+
+
+def trail_gradient(x, z, e=1.0):
+    return ((trail_field(x + e, z) - trail_field(x - e, z)) / (2 * e),
+            (trail_field(x, z + e) - trail_field(x, z - e)) / (2 * e))
+
+
+def onto_trail(x, z):
+    """The nearest point on the track's centre line (Newton steps onto the
+    contour), or None where the field is flat."""
+    for _ in range(6):
+        gx, gz = trail_gradient(x, z)
+        g2 = gx * gx + gz * gz
+        if g2 < 1e-12:
+            return None
+        f = trail_field(x, z) - 0.5
+        x, z = x - f * gx / g2, z - f * gz / g2
+    return x, z
+
+
+def trail_heading(x, z, sign):
+    """Unit direction along the track; sign picks which way."""
+    gx, gz = trail_gradient(x, z)
+    n = math.hypot(gx, gz)
+    return -gz / n * sign, gx / n * sign
+
+
+def follow_trail(x, z, sign, length=ROUTE_LENGTH, step=2.0):
+    """Points every `step` metres along the track's centre line."""
+    points, walked = [(x, z)], 0.0
+    while walked < length:
+        hx, hz = trail_heading(x, z, sign)
+        point = onto_trail(x + hx * step, z + hz * step)
+        if point is None:
+            break
+        x, z = point
+        points.append(point)
+        walked += step
+    return points
+
+
+def slope_degrees(x, z, e=3.0):
+    return math.degrees(math.atan(math.hypot((ground(x + e, z) - ground(x - e, z)) / (2 * e),
+                                             (ground(x, z + e) - ground(x, z - e)) / (2 * e))))
+
+
+def walkable(points):
+    """Dry ground in the trail's height band (where it is drawn), no slope a
+    walker would leave the track for."""
+    return all(ground(x, z) > WATER + 6.0 and forest_band(ground(x, z)) > 0.9 and
+               slope_degrees(x, z) < 16.0 for x, z in points[::3])
+
+
+def route_points(points):
+    """Every ROUTE_SPACING metres, at eye height (the track sinks 12 cm into
+    the archive heights, which the eye ignores)."""
+    every = max(1, int(round(ROUTE_SPACING / 2.0)))
+    picked = points[::every]
+    if picked[-1] != points[-1]:
+        picked.append(points[-1])
+    return [(x, ground(x, z) + EYE, z) for x, z in picked]
+
+
+def find_forest_trail_walk(trail, along):
+    """From the Trail viewpoint on along the track: forest, the forest edge,
+    meadow, and forest again (2026-11-23)."""
+    start = onto_trail(*trail)
+    hx, hz = trail_heading(*start, 1)
+    sign = 1 if hx * along[0] + hz * along[1] > 0 else -1
+    points = follow_trail(*start, sign)
+    if not walkable(points):
+        raise SystemExit("the forest trail from the Trail viewpoint is not walkable")
+    cover = sum(wooded(x, z) > 0.5 for x, z in points) / len(points)
+    print(f"ForestTrailWalk: {len(points) * 2 - 2} m, {cover * 100:.0f} % in forest")
+    return route_points(points)
+
+
+def find_meadow_trail_walk():
+    """The open-meadow trail nearest the start, walked with the sun behind
+    (sunlit grass ahead, as FieldWalk): open meadow 10 m either side of the
+    track along at least 90 % of it."""
+    sun_length = math.hypot(*SUN_FLAT)
+    sun = (SUN_FLAT[0] / sun_length, SUN_FLAT[1] / sun_length)
+    tried, best = [], None
+    for x, z in candidates(radius=900.0, step=8.0):
+        if trail_mask(x, z)[0] < 0.9:
+            continue
+        start = onto_trail(x, z)
+        if start is None or any(math.hypot(start[0] - p[0], start[1] - p[1]) < 60.0 for p in tried):
+            continue
+        tried.append(start)
+        for sign in (1, -1):
+            try:
+                points = follow_trail(*start, sign)
+                if not walkable(points):
+                    continue
+                open_share = 0.0
+                for i, (px, pz) in enumerate(points):
+                    nx, nz = points[min(i + 1, len(points) - 1)]
+                    if (nx, nz) == (px, pz):
+                        nx, nz = points[i - 1]
+                        nx, nz = 2 * px - nx, 2 * pz - nz
+                    dx, dz = nx - px, nz - pz
+                    n = math.hypot(dx, dz)
+                    side = (-dz / n, dx / n)
+                    open_share += all(wooded(px + side[0] * w, pz + side[1] * w) < 0.05 for w in (-10, 0, 10))
+                open_share /= len(points)
+            except SystemExit:
+                continue
+            if open_share < 0.9:
+                continue
+            # Either way along it: the one with the sun more behind.
+            for route in (points, points[::-1]):
+                facing = sum((route[i + 5][0] - route[i][0]) * sun[0] + (route[i + 5][1] - route[i][1]) * sun[1]
+                             for i in range(0, len(route) - 5, 5)) / (ROUTE_LENGTH or 1.0)
+                score = open_share - 0.5 * facing - 0.0005 * math.hypot(start[0] - START[0], start[1] - START[1])
+                if best is None or score > best[0]:
+                    best = (score, route, open_share, facing)
+        if len(tried) >= 12:
+            break
+    if best is None:
+        raise SystemExit("no open meadow trail near the start")
+    print(f"MeadowTrailWalk: {best[2] * 100:.0f} % open meadow, sun {'behind' if best[3] < 0 else 'ahead'} "
+          f"({best[3]:+.2f})")
+    return route_points(best[1])
+
+
+def route_object(name, points):
+    """A SplinePath whose children are the control points."""
+    item = ET.Element("item", {"name": name, "enabled": "true"})
+    components = ET.SubElement(item, "components")
+    ET.SubElement(components, f"{{{NAMESPACE}}}SplinePath", {
+        "SplinePath.interpolation": "1", "SplinePath.closed": "false", "SplinePath.tension": "0",
+        "SplinePath.arcLengthSamplesPerSegment": "16", "SplinePath.includeDisabledPoints": "false"})
+    children = ET.SubElement(item, "children")
+    for index, point in enumerate(points):
+        child = ET.SubElement(children, "item", {"name": f"Point {index + 1}", "enabled": "true"})
+        child.append(grass.transform(tuple(round(v, 3) for v in point)))
+        ET.SubElement(child, "components")
+        ET.SubElement(child, "children")
+    item.append(grass.transform((0.0, 0.0, 0.0)))
+    return item
+
+
 def viewpoint(name, eye, target):
     item = ET.Element("item", {"name": name, "enabled": "true"})
     components = ET.SubElement(item, "components")
@@ -493,6 +655,10 @@ def main():
         "ForestWall": find_forest_wall(),
         "FieldWalk": find_field_walk(),
     }
+    routes = {
+        "ForestTrailWalk": find_forest_trail_walk(trail, trail_along),
+        "MeadowTrailWalk": find_meadow_trail_walk(),
+    }
 
     ET.register_namespace("components", NAMESPACE)
     text = SCENE.read_text(encoding="utf-8")
@@ -501,7 +667,7 @@ def main():
     root = ET.fromstring(text[header_end:])
     objects = root.find("objects")
     for item in list(objects):
-        if item.get("name") in NAMES:
+        if item.get("name") in NAMES or item.get("name") in ROUTES:
             objects.remove(item)
     vista_index = next((i for i, item in enumerate(objects) if item.get("name") == "Vista"), len(objects) - 1)
     for offset, name in enumerate(NAMES):
@@ -509,6 +675,11 @@ def main():
         objects.insert(vista_index + 1 + offset, viewpoint(name, eye, target))
         print(f"{name}: eye ({eye[0]:.0f}, {eye[1]:.1f}, {eye[2]:.0f}) -> "
               f"target ({target[0]:.0f}, {target[1]:.1f}, {target[2]:.0f})")
+    for offset, name in enumerate(ROUTES):
+        points = routes[name]
+        objects.insert(vista_index + 1 + len(NAMES) + offset, route_object(name, points))
+        print(f"{name}: {len(points)} points from ({points[0][0]:.0f}, {points[0][2]:.0f}) "
+              f"to ({points[-1][0]:.0f}, {points[-1][2]:.0f})")
     # Everything but the explorer is static (tools/scene_static.py); this
     # also covers the objects build_landscape_demo.py just wrote.
     scene_static.mark_static(objects)

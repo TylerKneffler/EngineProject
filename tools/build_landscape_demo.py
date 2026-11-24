@@ -5,7 +5,6 @@ Writes
   Engine/Core/Assets/TerrainData/Landscape/world.fargrid      far silhouette grid (v3)
   Engine/Core/Assets/TerrainData/Landscape/world.flow         erosion flow map
   Engine/Core/Assets/TerrainData/Landscape/world.deposition   erosion deposition map
-  Engine/Core/Assets/TerrainData/Landscape/world.cliffs       cliff pieces (tools/landscape_cliffs.py)
   Engine/Core/Assets/Scenes/terrain/landscape_demo.scene      the scene
 and, with --preview <png>, top-down previews: <png> colored like the terrain
 paint, plus <png stem>_flow.png and <png stem>_deposition.png.
@@ -26,9 +25,9 @@ much water passed each texel (flow) and how much sediment settled
 (deposition). Rolling hills and one rock escarpment are raised in the lowland
 after erosion, then the lakes are carved. Inside the play area the eroded
 field is resampled to 4 m and gets fine detail. The hills and the escarpment
-are not in the flow and deposition maps. Cliffs are then placed on the play
-area (tools/landscape_cliffs.py) and written to world.cliffs; the heights
-conform to them (raised under the rock, a low apron at its foot).
+are not in the flow and deposition maps. Rock shapes are not placed here:
+terrain stamps are brushes (the editor's Stamp tool and shaped brushes) that
+edit the height data itself, saved as sculpt edits (*.terrainedit).
 
 Flow and deposition files share one header, little endian:
   u64 magic ("TRNRFLW1" / "TRNRDEP1"), u32 version 1, u64 archive signature,
@@ -64,7 +63,6 @@ from pathlib import Path
 import numpy as np
 from scipy import ndimage
 
-import landscape_cliffs
 
 ROOT = Path(__file__).resolve().parents[1]
 ASSETS = ROOT / "Engine" / "Core" / "Assets"
@@ -496,10 +494,6 @@ def build():
     print(f"fine grid {fine_q.shape[1]}^2 at {SPACING:g} m ({time.time() - t0:.0f} s)")
     world = {"macro": macro, "macro_q": macro_q, "fine_q": fine_q, "origin": origin,
              "fine_origin": fine_origin, "flow": flow, "deposition": deposition}
-    world["cliffs"], world["cliff_extent"] = landscape_cliffs.place_cliffs(
-        fine_q, SCALE, FINE_EXTENT, CELLS, SPACING, rock_class)
-    world["fine_q"], world["cliff_rock"], world["cliff_apron"] = landscape_cliffs.conform_heights(
-        world["fine_q"], SCALE, FINE_EXTENT, CELLS, SPACING, world["cliffs"])
     return world
 
 
@@ -517,10 +511,6 @@ def archive_body(world):
     macro_q, fine_q = world["macro_q"], world["fine_q"]
     macro_codes = rock_class(macro_q / SCALE, MACRO)
     fine_codes = rock_class(fine_q / SCALE, SPACING)
-    # Ground under stamped cliffs is rock, their aprons scree.
-    if "cliff_rock" in world:
-        fine_codes[world["cliff_apron"]] = np.maximum(fine_codes[world["cliff_apron"]], 2)
-        fine_codes[world["cliff_rock"]] = 3
     side = 2 * EXTENT + 1
     stride = CELLS // COARSE
     blocks = []
@@ -559,10 +549,8 @@ def write_archive(world):
                                CELLS, CELLS, SCALE, FINE_EXTENT, COARSE))
         file.write(body)
     side = 2 * EXTENT + 2
-    # No far patches for cliff cells: within the engine's farStampRadius they
-    # draw as terrain cells of their own (TerrainManager far stamp cells), and
-    # full-resolution patches made every far tile rebuild carry them (two
-    # ~150 ms hitches per walk, 2026-11-22).
+    # No far patches: full-resolution patches made every far tile rebuild
+    # carry them (two ~150 ms hitches per walk, 2026-11-22).
     with open(DATA / "world.fargrid", "wb") as file:
         file.write(struct.pack("<QIQiiiif", FARGRID_MAGIC, 3, signature, EXTENT,
                                side, CELLS, CELLS, SCALE))
@@ -726,7 +714,7 @@ def write_scene(world):
     # ACES tone mapping: AgX could not reach the reference sky (saturation
     # 0.44 against 0.56) or its bright horizon.
     settings.set("toneMapping", "1")
-    settings.set("outputExposure", "-.25")
+    settings.set("outputExposure", "-0.75")  # ef197255
     settings.set("gradingSaturation", "1.1")
     # Sky fill light matched to the displayed sky.
     settings.set("hdriIntensity", "1")
@@ -934,8 +922,9 @@ def main():
     if not arguments.no_write:
         signature, same = write_archive(world)
         write_hydrology(world, signature)
-        landscape_cliffs.write_cliffs(DATA / "world.cliffs", signature, world["cliffs"],
-                                      world["cliff_extent"])
+        stale = DATA / "world.cliffs"
+        if stale.exists():
+            stale.unlink()
         remove_stale_edits(same)
         write_scene(world)
         # Eye-level foliage viewpoints next to "Vista" (reads the new archive).

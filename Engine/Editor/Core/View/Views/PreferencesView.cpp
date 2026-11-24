@@ -1477,6 +1477,9 @@ void PreferencesView::DrawEffectsSection(IEditorUi& ui)
     ui.Tooltip("Higher is smoother and steadier; lower reacts faster to motion with less trailing.");
     if (ui.SliderFloat("TAA Sharpening", &aa.taaSharpen, 0.f, 1.f)) changed();
     ui.Tooltip("Restores the detail TAA softens, most visible while the camera moves. 0 is off.");
+    if (ui.Checkbox("TAA Fast Settle", &aa.taaFastSettle)) changed();
+    ui.Tooltip("Pixels that just came into view (the leading edge of a turn) settle in a few frames "
+        "instead of about ten, and their first frame is softened so dithered fades and jagged edges do not show.");
     if (!aa.taa) ui.EndDisabled();
 
     const char* msaaModes[] = { "Off", "2x", "4x", "8x" };
@@ -1932,6 +1935,7 @@ bool PreferencesView::SaveSettings()
                     effectsNode.append_attribute("Taa").set_value(aa.taa);
                     effectsNode.append_attribute("TaaFeedback").set_value(aa.taaFeedback);
                     effectsNode.append_attribute("TaaSharpen").set_value(aa.taaSharpen);
+                    effectsNode.append_attribute("TaaFastSettle").set_value(aa.taaFastSettle);
                     effectsNode.append_attribute("GrassMinimumWidth").set_value(aa.grassMinimumWidth);
                     effectsNode.append_attribute("GrassMinimumPixels").set_value(aa.grassMinimumPixels);
                     effectsNode.append_attribute("Bloom").set_value(post.bloom);

@@ -26,6 +26,7 @@
 #include "Core/Components/Animation/AnimationManager.h"
 #include "Core/Components/Mesh/Mesh.h"
 #include "Core/Components/Terrain/Terrain.h"
+#include "Core/Components/Terrain/TerrainBrushShape.h"
 #include "Core/Components/Terrain/TerrainObjectLayer.h"
 #include "Core/Components/Terrain/TerrainManager.h"
 #include "Core/Components/Terrain/TerrainPlacementHandle.h"
@@ -531,6 +532,87 @@ void SceneView::DrawTerrainRegionToolbar(const std::function<bool(float)>& next)
     if (!m_regionStatus.empty() && next(170.f)) ImGui::TextDisabled("%s", m_regionStatus.c_str());
 }
 
+void SceneView::DrawTerrainShapeToolbar(const std::function<bool(float)>& next)
+{
+    // Stamps live with the terrain data; any other .stamp can be dropped on
+    // the combo.
+    const auto scanStamps = [this]
+    {
+        m_terrainStampAssets.clear();
+        std::error_code error;
+        const std::filesystem::path folder =
+            Engine::Components::Mesh::ResolveFilePath("Assets/TerrainData/Stamps");
+        for (const auto& entry : std::filesystem::directory_iterator(folder, error))
+            if (entry.path().extension() == ".stamp")
+                m_terrainStampAssets.push_back("Assets/TerrainData/Stamps/" +
+                    entry.path().filename().string());
+        std::sort(m_terrainStampAssets.begin(), m_terrainStampAssets.end());
+    };
+    const bool stampTool = m_terrainBrush == kStampTool;
+    if (stampTool && m_terrainShapePath.empty())
+    {
+        if (m_terrainStampAssets.empty()) scanStamps();
+        if (!m_terrainStampAssets.empty()) m_terrainShapePath = m_terrainStampAssets.front();
+    }
+    const auto shapeName = [](const std::string& path)
+    { return path.empty() ? std::string("Circle") : std::filesystem::path(path).stem().string(); };
+    if (next(150.f))
+    {
+        ImGui::SetNextItemWidth(150.f);
+        if (ImGui::BeginCombo("##TerrainShape", ("Shape " + shapeName(m_terrainShapePath)).c_str()))
+        {
+            if (ImGui::IsWindowAppearing()) scanStamps();
+            if (!stampTool && ImGui::Selectable("Circle", m_terrainShapePath.empty()))
+                m_terrainShapePath.clear();
+            for (const auto& path : m_terrainStampAssets)
+                if (ImGui::Selectable(shapeName(path).c_str(), path == m_terrainShapePath))
+                    m_terrainShapePath = path;
+            ImGui::EndCombo();
+        }
+        if (ImGui::BeginDragDropTarget())
+        {
+            if (const auto* payload = ImGui::AcceptDragDropPayload("ENGINE_ASSET_PATH"))
+            {
+                const auto* data = static_cast<const char*>(payload->Data);
+                size_t length = 0;
+                while (length < static_cast<size_t>(payload->DataSize) && data[length]) ++length;
+                const std::string path(data, length);
+                if (LowerAssetExtension(path) == ".stamp") m_terrainShapePath = path;
+            }
+            ImGui::EndDragDropTarget();
+        }
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Brush shape: a terrain stamp seen from above. Its outline is the\n"
+                "brush; Raise, Lower and Stamp also scale by its height map.\n"
+                "Drop a .stamp asset here to use it.");
+    }
+    if (m_terrainShapePath.empty()) return;
+    if (next(110.f))
+    {
+        ImGui::SetNextItemWidth(110.f);
+        ImGui::DragFloat("##TerrainShapeYaw", &m_terrainShapeYawDegrees, 1.f, -360.f, 360.f,
+            "Turn %.0f deg");
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Turns the brush shape about the vertical.");
+    }
+    if (stampTool && next(120.f))
+    {
+        ImGui::SetNextItemWidth(120.f);
+        ImGui::DragFloat("##StampHeight", &m_terrainStampHeightScale, .01f, .05f, 10.f, "Height x%.2f");
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("A stroke grows the stamp up to its own surface, standing on the ground\n"
+                "where the stroke began, and stops there. Its heights scale with the radius\n"
+                "(the stamp keeps its proportions); this multiplies them.");
+    }
+    if (stampTool && next(140.f))
+    {
+        ImGui::Checkbox("Against terrain", &m_terrainStampBacked);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("The stamp builds only against terrain behind it (back from its face):\n"
+                "each point rises at most to the ground behind it, so the part hanging past\n"
+                "a wall's top or end, or lying on open ground, changes nothing.");
+    }
+}
+
 void SceneView::DrawTerrainToolbar(const std::function<bool(float)>& next)
 {
     if (m_editMode != SceneEditMode::Terrain || !m_scene) return;
@@ -555,7 +637,7 @@ void SceneView::DrawTerrainToolbar(const std::function<bool(float)>& next)
         return;
     }
     const char* modes[] = {"Raise", "Lower", "Smooth", "Flatten", "Paint", "Objects",
-        "Erode", "Weather", "Noise", "Terrace", "Select"};
+        "Erode", "Weather", "Noise", "Terrace", "Select", "Stamp"};
     if (next(112.f))
     {
         ImGui::SetNextItemWidth(112.f);
@@ -569,9 +651,12 @@ void SceneView::DrawTerrainToolbar(const std::function<bool(float)>& next)
                 "Erode: hydraulic erosion under the brush (droplets carve and settle).\n"
                 "Weather: thermal erosion, steep slopes slump to the talus angle.\n"
                 "Select: draw a rectangle, ellipse, lasso or polygon, then Apply an\n"
-                "operation (erosion, smoothing, paint...) to the whole region at once.");
+                "operation (erosion, smoothing, paint...) to the whole region at once.\n"
+                "Stamp: a raise brush shaped like a terrain stamp; holding it grows the\n"
+                "stamp's shape out of the ground and stops at it (Shift lowers).");
     }
     const bool selectTool = m_terrainBrush == kSelectTool;
+    if (ShapedTerrainTool()) DrawTerrainShapeToolbar(next);
     if (selectTool) DrawTerrainRegionToolbar(next);
     if (!selectTool && next(120.f))
     {
@@ -585,7 +670,7 @@ void SceneView::DrawTerrainToolbar(const std::function<bool(float)>& next)
         ImGui::DragFloat("##TerrainStrength", &m_terrainStrength,
             .01f, .001f, 2.f, "Strength %.2f");
     }
-    if (m_terrainBrush != kObjectBrush && !selectTool && next(130.f))
+    if (m_terrainBrush != kObjectBrush && !selectTool && m_terrainShapePath.empty() && next(130.f))
     {
         ImGui::SetNextItemWidth(130.f);
         ImGui::SliderFloat("##TerrainHardness", &m_terrainHardness, 0.f, 1.f, "Hardness %.2f");
@@ -948,7 +1033,11 @@ void SceneView::DrawPanel(IEditorUi& ui)
             hardness, terrainViewProjection, {input.screenMin.x, input.screenMin.y},
             {input.available.x, input.available.y}, color);
     };
-    if (!input.leftDown) { m_terrainFlattenSampled = false; m_terrainObjectStrokeReported = false; }
+    if (!input.leftDown)
+    {
+        m_terrainFlattenSampled = false;
+        m_terrainObjectStrokeReported = false;
+    }
     if (m_terrainSettingChanged) { m_terrainEditActive = true; m_terrainSettingChanged = false; }
     if (!objectBrush || !input.leftDown || !input.hovered ||
         input.rightDown || input.middleDown)
@@ -997,8 +1086,13 @@ void SceneView::DrawPanel(IEditorUi& ui)
         }
     }
     if ((terrain || manager) && m_editMode == SceneEditMode::Terrain && !objectBrush &&
-        m_terrainBrush <= kPaintBrush && !(manager && m_editTerrainCells))
+        ShapedTerrainTool() && !(manager && m_editTerrainCells))
     {
+        using TerrainBrush = Engine::Components::Terrain::Brush;
+        const bool stampTool = m_terrainBrush == kStampTool;
+        const auto shape = m_terrainShapePath.empty() ? nullptr :
+            Engine::Components::TerrainBrushShape::Load(
+                Engine::Components::Mesh::ResolveFilePath(m_terrainShapePath));
         glm::dvec3 hit{};
         if (input.hovered && !input.rightDown && !input.middleDown &&
             ScenePlacementAndPicking::FindTerrainSurfaceHit(*m_scene, terrainTarget.root,
@@ -1011,7 +1105,9 @@ void SceneView::DrawPanel(IEditorUi& ui)
                 Engine::Components::Terrain::Brush::Blend,
                 Engine::Components::Terrain::Brush::Flatten,
                 Engine::Components::Terrain::Brush::Paint};
-            auto brush = toolBrush[std::clamp(m_terrainBrush, 0, kPaintBrush)];
+            // Stamp: Raise with the stamp's shape and height map.
+            auto brush = stampTool ? TerrainBrush::Raise
+                : toolBrush[std::clamp(m_terrainBrush, 0, kPaintBrush)];
             if (invert && brush == Engine::Components::Terrain::Brush::Raise)
                 brush = Engine::Components::Terrain::Brush::Lower;
             else if (invert && brush == Engine::Components::Terrain::Brush::Lower)
@@ -1022,8 +1118,24 @@ void SceneView::DrawPanel(IEditorUi& ui)
             if (brush == Engine::Components::Terrain::Brush::Blend) color = IM_COL32(110, 210, 255, 230);
             if (brush == Engine::Components::Terrain::Brush::Flatten) color = IM_COL32(150, 150, 255, 230);
             if (erase) color = IM_COL32(255, 80, 60, 230);
-            drawRing(local, m_terrainHardness, color);
-            if (input.leftDown)
+            const float shapeYaw = glm::radians(m_terrainShapeYawDegrees);
+            if (shape && terrainRingVisible)
+            {
+                // The shape's outline, turned and sized as the brush applies it.
+                std::vector<glm::dvec2> outline;
+                for (const auto& point : shape->outline)
+                {
+                    const glm::vec2 offset = Engine::Components::TerrainBrushShape::FromShape(
+                        point, m_terrainRadius, shapeYaw);
+                    outline.push_back({local.x + offset.x, local.z + offset.y});
+                }
+                SceneTerrainTools::DrawDrapedPolyline(terrainTarget, outline, true,
+                    terrainViewProjection, {input.screenMin.x, input.screenMin.y},
+                    {input.available.x, input.available.y}, color);
+            }
+            else if (!stampTool)
+                drawRing(local, m_terrainHardness, color);
+            if (input.leftDown && !(stampTool && !shape))
             {
                 // A press on the terrain belongs to the stroke even where the
                 // brush changes nothing, so it cannot select objects underneath.
@@ -1037,6 +1149,14 @@ void SceneView::DrawPanel(IEditorUi& ui)
                 options.hardness = m_terrainHardness;
                 options.flattenHeight = m_terrainFlattenHeight;
                 options.erase = erase;
+                options.shape = shape;
+                options.shapeYaw = shapeYaw;
+                options.backed = stampTool && m_terrainStampBacked;
+                // The stamp stands on the ground where the stroke began and
+                // grows into its own shape, no further.
+                options.stopAtStamp = stampTool;
+                options.stampBase = m_terrainFlattenHeight;
+                options.stampHeightScale = m_terrainStampHeightScale;
                 const float strength = m_terrainStrength * ImGui::GetIO().DeltaTime * 30.f;
                 const bool changed = manager
                     ? manager->ApplyBrush(local.x, local.z, m_terrainRadius, strength,

@@ -74,6 +74,14 @@ bool IsBoxOccluded(float3 center, float3 extent)
         nearest = min(nearest, clip.w);
     }
     if (high.x < 0.0 || high.y < 0.0 || low.x >= width || low.y >= height) return false;
+    // The GPU pyramid ([3] = 1) is the previous frame's view. A box reaching
+    // outside it lies partly where that frame saw nothing: an object coming
+    // back into view at the screen edge was judged only by its on-screen
+    // sliver of last frame's depth, culled for a frame and popped back the
+    // next. Unknown ground counts as visible. The CPU buffer ([3] = 0) is this
+    // frame's own view, where the off-screen part cannot be seen: it clamps.
+    if (occlusionPyramid[3] > 0.5 && (low.x < 0.0 || low.y < 0.0 || high.x > width || high.y > height))
+        return false;
     const int2 first = clamp(int2(floor(low)), int2(0, 0), int2(width - 1.0, height - 1.0));
     const int2 last = clamp(int2(floor(high)), int2(0, 0), int2(width - 1.0, height - 1.0));
     uint level = 0u;

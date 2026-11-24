@@ -122,14 +122,9 @@ void ApplyPaintWeights(std::vector<Mesh::Vertex>& vertices, const VolumeTerrain:
     }
 }
 
-TerrainVolumeInput WithNeighbours(TerrainVolumeInput input, const std::vector<TerrainStampInstance>& stamps,
+TerrainVolumeInput WithNeighbours(TerrainVolumeInput input,
     const std::array<std::vector<float>, 9>& heights, std::vector<TerrainVolumeEdit> edits)
 {
-    for (const auto& instance : stamps)
-    {
-        if (instance.stamp) input.stamps.push_back(instance);
-        if (instance.sculpt) input.sculpts.push_back(instance);
-    }
     input.neighbourHeights = heights;
     input.edits = std::move(edits);
     return input;
@@ -293,7 +288,7 @@ void VolumeTerrain::Rebuild()
         // (component load order) or a build slot is free, Update retries.
         m_volume.reset();
         m_rebuildPending = !StartBuild();
-        // The volume draws the cell, stamps included; the terrain's own mesh
+        // The volume draws the cell; the terrain's own mesh
         // keeps drawing until the volume covers the view (Update), then stays
         // for its data and queries only.
         m_terrainHidden = false;
@@ -338,13 +333,13 @@ bool VolumeTerrain::StartBuild()
     {
         int neighbours = 0;
         for (const auto& heights : neighbourHeights) neighbours += !heights.empty();
-        std::printf("[VolumeTerrain] %s build: %zu edits, %d neighbour grids, %zu neighbour stamps\n",
-            Owner->name.c_str(), allEdits.size(), neighbours, neighbourStamps.size());
+        std::printf("[VolumeTerrain] %s build: %zu edits, %d neighbour grids\n",
+            Owner->name.c_str(), allEdits.size(), neighbours);
     }
     // The density is built on a worker from a copy of the terrain's data;
     // Update installs it (InstallVolume) when it is ready.
     m_volumeJob = std::async(std::launch::async,
-        [input = WithNeighbours(TerrainVolumeInput::From(*terrain), neighbourStamps, neighbourHeights,
+        [input = WithNeighbours(TerrainVolumeInput::From(*terrain), neighbourHeights,
              std::move(allEdits)),
          spacing = std::max(sampleSpacing, .25f)]
         { JobSlot slot{&g_builds}; return BuildTerrainVolume(input, spacing); });

@@ -327,6 +327,7 @@ void ProjectLoader::ParseRendering(const pugi::xml_node& projectNode, ProjectSet
             aa.taa = effects.attribute("Taa").as_bool(aa.taa);
             aa.taaFeedback = effects.attribute("TaaFeedback").as_float(aa.taaFeedback);
             aa.taaSharpen = effects.attribute("TaaSharpen").as_float(aa.taaSharpen);
+            aa.taaFastSettle = effects.attribute("TaaFastSettle").as_bool(aa.taaFastSettle);
             aa.grassMinimumWidth = effects.attribute("GrassMinimumWidth").as_bool(aa.grassMinimumWidth);
             aa.grassMinimumPixels = effects.attribute("GrassMinimumPixels").as_float(aa.grassMinimumPixels);
             auto& post = settings.renderingEffects.postEffects;
@@ -435,7 +436,7 @@ void ProjectLoader::ParseRendering(const pugi::xml_node& projectNode, ProjectSet
             budget.cpuRenderBudgetMs = std::clamp(
                 budgetNode.attribute("CpuRenderBudgetMs").as_float(4.f), .1f, 1000.f);
             budget.minimumScale = std::clamp(
-                budgetNode.attribute("MinimumScale").as_float(.6f), .05f, 1.f);
+                budgetNode.attribute("MinimumScale").as_float(1.f), .05f, 1.f);
             budget.maximumScale = std::clamp(
                 budgetNode.attribute("MaximumScale").as_float(8.f), 1.f, 20.f);
             budget.responseSeconds = std::clamp(

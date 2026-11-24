@@ -132,7 +132,7 @@
       </components>
       <children />
       <transform>
-        <Transform.position _arrayEncoding="spaceSeparatedNumbers">-800.423 48.9318 1928.8</Transform.position>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">-800.515 48.9121 1928.89</Transform.position>
         <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
         <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
       </transform>
@@ -160,7 +160,7 @@
       </components>
       <children />
       <transform>
-        <Transform.position _arrayEncoding="spaceSeparatedNumbers">-30 23.3875 -460</Transform.position>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">-110 24.3719 -410</Transform.position>
         <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
         <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
       </transform>
@@ -189,6 +189,1254 @@
       <children />
       <transform>
         <Transform.position _arrayEncoding="spaceSeparatedNumbers">160 -25.2156 -184</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+      </transform>
+    </item>
+    <item name="ForestTrailWalk" enabled="true" static="true">
+      <components>
+        <components:SplinePath SplinePath.interpolation="1" SplinePath.closed="false" SplinePath.tension="0" SplinePath.arcLengthSamplesPerSegment="16" SplinePath.includeDisabledPoints="false" />
+      </components>
+      <children>
+        <item name="Point 1" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-24.707 -26.59 -175.67</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 2" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-27.006 -26.371 -181.21</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 3" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-28.959 -26.002 -186.882</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 4" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-30.634 -25.687 -192.642</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 5" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-32.087 -25.748 -198.463</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 6" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-33.362 -25.878 -204.326</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 7" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-34.496 -26.134 -210.217</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 8" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-35.519 -26.414 -216.129</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 9" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-36.46 -26.604 -222.055</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 10" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-37.344 -26.821 -227.99</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 11" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-38.194 -26.967 -233.929</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 12" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-39.035 -27.127 -239.87</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 13" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-39.893 -27.234 -245.808</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 14" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-40.793 -27.205 -251.74</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 15" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-41.765 -27.103 -257.661</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 16" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-42.839 -26.994 -263.564</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 17" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-44.046 -26.988 -269.441</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 18" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-45.419 -26.918 -275.281</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 19" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-46.988 -26.675 -281.072</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 20" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-48.777 -26.313 -286.798</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 21" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-50.804 -25.972 -292.444</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 22" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-53.074 -25.856 -297.997</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 23" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-55.58 -25.918 -303.448</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 24" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-58.3 -25.773 -308.796</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 25" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-61.201 -25.561 -314.047</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 26" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-64.241 -25.368 -319.219</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 27" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-67.372 -25.31 -324.338</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 28" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-70.536 -25.286 -329.435</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 29" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-73.675 -25.181 -334.549</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 30" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-76.721 -25.043 -339.718</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 31" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-79.689 -24.979 -344.933</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 32" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-82.71 -24.945 -350.116</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 33" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-85.865 -24.896 -355.219</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 34" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-89.217 -24.972 -360.194</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 35" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-92.815 -25.081 -364.994</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 36" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-96.692 -25.22 -369.571</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 37" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-100.857 -25.267 -373.887</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 38" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-105.301 -25.289 -377.915</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 39" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-109.996 -25.225 -381.647</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 40" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-114.906 -25.13 -385.094</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 41" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-119.988 -25.055 -388.28</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 42" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-125.205 -25.031 -391.243</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 43" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-130.521 -25.054 -394.025</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 44" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-135.906 -25.022 -396.67</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 45" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-141.336 -25.005 -399.223</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 46" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-146.787 -24.954 -401.728</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 47" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-152.241 -24.862 -404.23</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 48" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-157.676 -24.684 -406.773</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 49" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-163.069 -24.406 -409.402</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 50" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-168.394 -24.228 -412.165</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 51" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-173.67 -24.06 -415.022</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 52" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-179.006 -23.921 -417.765</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 53" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-184.375 -23.845 -420.444</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 54" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-189.74 -23.599 -423.13</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 55" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-195.064 -23.392 -425.897</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 56" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-200.301 -23.287 -428.823</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 57" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-205.395 -23.131 -431.991</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 58" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-210.272 -22.944 -435.481</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 59" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-214.845 -22.617 -439.36</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 60" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-219.022 -22.452 -443.66</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 61" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-222.728 -22.4 -448.372</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 62" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-225.925 -22.294 -453.443</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 63" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-228.619 -22.365 -458.8</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 64" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-230.85 -22.561 -464.367</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 65" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-232.672 -22.735 -470.081</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 66" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-234.142 -22.795 -475.897</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 67" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-235.307 -22.757 -481.781</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 68" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-235.935 -22.798 -485.732</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+      </children>
+      <transform>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+      </transform>
+    </item>
+    <item name="MeadowTrailWalk" enabled="true" static="true">
+      <components>
+        <components:SplinePath SplinePath.interpolation="1" SplinePath.closed="false" SplinePath.tension="0" SplinePath.arcLengthSamplesPerSegment="16" SplinePath.includeDisabledPoints="false" />
+      </components>
+      <children>
+        <item name="Point 1" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-184.481 -26.116 69.936</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 2" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-178.665 -26.344 68.466</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 3" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-172.944 -26.894 66.666</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 4" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-167.347 -27.348 64.508</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 5" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-161.899 -27.491 61.999</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 6" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-156.645 -27.619 59.107</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 7" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-151.646 -27.752 55.796</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 8" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-146.972 -27.805 52.041</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 9" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-142.696 -27.851 47.839</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 10" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-138.881 -27.901 43.215</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 11" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-135.567 -27.76 38.219</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 12" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-132.768 -27.364 32.917</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 13" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-130.474 -26.731 27.377</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 14" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-128.661 -26.175 21.661</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 15" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-127.304 -25.914 15.819</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 16" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-126.381 -25.875 9.893</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 17" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-125.882 -25.898 3.916</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 18" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-125.833 -26.069 -2.08</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 19" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-126.441 -26.074 -8.043</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 20" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-127.74 -25.993 -13.894</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 21" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-129.714 -26.213 -19.553</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 22" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-132.354 -26.64 -24.933</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 23" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-135.637 -27.048 -29.946</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 24" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-139.52 -27.339 -34.511</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 25" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-143.928 -27.36 -38.571</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 26" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-148.771 -27.524 -42.104</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 27" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-153.953 -27.656 -45.119</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 28" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-159.391 -27.722 -47.646</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 29" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-165.016 -27.76 -49.725</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 30" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-170.778 -27.691 -51.392</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 31" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-176.617 -27.517 -52.768</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 32" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-182.498 -27.266 -53.957</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 33" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-188.406 -27.158 -55.003</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 34" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-194.332 -27.173 -55.944</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 35" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-200.269 -27.183 -56.81</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 36" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-206.212 -27.103 -57.631</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 37" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-212.158 -26.93 -58.435</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 38" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-218.102 -26.66 -59.253</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 39" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-224.039 -26.365 -60.122</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 40" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-229.96 -25.987 -61.09</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 41" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-235.851 -25.697 -62.223</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 42" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-241.686 -25.463 -63.618</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 43" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-247.407 -24.975 -65.415</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 44" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-252.899 -24.523 -67.811</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 45" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-257.951 -24.289 -71.02</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 46" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-262.282 -24.223 -75.143</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 47" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-265.724 -24.193 -80.038</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 48" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-268.345 -24.045 -85.426</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 49" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-270.339 -23.998 -91.08</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 50" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-271.894 -23.92 -96.873</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 51" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-273.147 -23.7 -102.74</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 52" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-274.192 -23.381 -108.648</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 53" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-275.093 -23.109 -114.58</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 54" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-275.895 -22.999 -120.526</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 55" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-276.631 -22.899 -126.48</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 56" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-277.327 -22.833 -132.44</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 57" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-278.004 -23.012 -138.402</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 58" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-278.68 -23.352 -144.363</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 59" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-279.375 -23.448 -150.323</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 60" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-280.108 -23.356 -156.278</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 61" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-280.899 -23.224 -162.225</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 62" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-281.777 -22.927 -168.161</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 63" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-282.701 -22.691 -174.089</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 64" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-283.475 -22.377 -180.039</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 65" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-284.09 -22.014 -186.007</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 66" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-284.553 -21.712 -191.988</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 67" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-284.869 -21.441 -197.98</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+        <item name="Point 68" enabled="true">
+          <transform>
+            <Transform.position _arrayEncoding="spaceSeparatedNumbers">-285.001 -21.215 -201.978</Transform.position>
+            <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+            <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+          </transform>
+          <components />
+          <children />
+        </item>
+      </children>
+      <transform>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.position>
         <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
         <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
       </transform>

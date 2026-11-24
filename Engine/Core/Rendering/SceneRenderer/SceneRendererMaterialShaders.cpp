@@ -90,6 +90,10 @@ void SceneRendererMaterialShaders::PublishMaterialShaderPipelines(SceneRenderer&
                 cached.pipeline = builder->second(bytecode.vertex.get(),
                     bytecode.pixel.get(), cached.overlay, cached.blendMode);
             else cached.error = "Material shader is unsupported for this render pass";
+            // The new pipeline replaces the one drawn meanwhile (queued frames
+            // may still reference it). On an error the old one keeps drawing.
+            if (cached.previous && cached.pipeline)
+                renderer.m_retiredMaterialShaderPipelines.push_back(std::move(cached.previous));
         }
         catch (const std::exception& exception) { cached.error = exception.what(); }
         ++published;
@@ -122,12 +126,20 @@ Scene::IPipelineState* SceneRendererMaterialShaders::ResolveMaterialShaderPipeli
     {
         ++renderer.m_lastRenderCpuTimings.materialShaderPipelineCacheHits;
         error = found->second.error;
-        return found->second.pipeline.get();
+        // While a changed source recompiles, keep drawing the old pipeline.
+        return found->second.pipeline ? found->second.pipeline.get() : found->second.previous.get();
     }
     ++renderer.m_lastRenderCpuTimings.materialShaderPipelineCacheMisses;
     auto& cached = renderer.m_materialShaderPipelines[key];
+    // The old pipeline keeps drawing until the new one is built (Publish
+    // retires it then): a shader edit swaps in place instead of the draws
+    // disappearing for the compile.
     if (cached.pipeline)
-        renderer.m_retiredMaterialShaderPipelines.push_back(std::move(cached.pipeline));
+    {
+        if (cached.previous)
+            renderer.m_retiredMaterialShaderPipelines.push_back(std::move(cached.previous));
+        cached.previous = std::move(cached.pipeline);
+    }
     cached.sourceStamp = stamp;
     cached.error.clear();
     cached.base = base;
@@ -150,7 +162,7 @@ Scene::IPipelineState* SceneRendererMaterialShaders::ResolveMaterialShaderPipeli
         cached.error = exception.what();
     }
     error = cached.error;
-    return cached.pipeline.get();
+    return cached.pipeline ? cached.pipeline.get() : cached.previous.get();
 }
 
 Scene::IPipelineState* SceneRendererMaterialShaders::ResolveObjectPipeline(

@@ -2,6 +2,8 @@
 #include "PostProcess.h"
 
 #include <cmath>
+#include <cstdlib>
+#include <algorithm>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -61,7 +63,20 @@ PostProcessConstants MakeTemporalConstants(const PostProcessSettings& settings, 
         for (int column = 0; column < 4; ++column)
             rows[row][column] = settings.taaReprojection[row * 4 + column];
     constants.temporal[0] = std::clamp(settings.taaFeedback, 0.f, 0.98f);
-    constants.temporal[1] = historyValid && settings.taaHistoryValid ? 1.f : 0.f;
+    // temporal.y: 0 no usable history, else 1 + mode bits (the shader tests
+    // < 0.5 for "no history"): 1 = ENGINE_TAA_HISTORY_DEBUG=1 (red where a
+    // pixel has no history), 2 = fast settle off (taaFastSettle false, or
+    // ENGINE_TAA_FAST_SETTLE=0 for A/B runs).
+    static const bool historyDebug = [] {
+        const char* value = std::getenv("ENGINE_TAA_HISTORY_DEBUG");
+        return value && value[0] == '1'; }();
+    static const bool settleOff = [] {
+        const char* value = std::getenv("ENGINE_TAA_FAST_SETTLE");
+        return value && value[0] == '0'; }();
+    const float mode = (historyDebug ? 1.f : 0.f) + (settleOff || !settings.taaFastSettle ? 2.f : 0.f);
+    // The fast-settle mode bits also apply when the history is unusable
+    // (first frame, cut): mode / 8 stays below 0.5.
+    constants.temporal[1] = historyValid && settings.taaHistoryValid ? 1.f + mode : 0.125f * mode;
     constants.temporal[2] = settings.taaJitter[0];
     constants.temporal[3] = settings.taaJitter[1];
     return constants;

@@ -2412,6 +2412,15 @@ if(NOT ENGINE_PROJECT_DIR AND
         WORKING_DIRECTORY "${ENGINE_ROOT}" TIMEOUT 120)
 endif()
 
+# Stamps the stamp test block's walls with the terrain brushes (a tool, not a test).
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/StampWallsTool.cpp")
+    add_executable(StampWallsTool EXCLUDE_FROM_ALL "${ENGINE_LOCAL_TEST_ROOT}/StampWallsTool.cpp")
+    target_link_libraries(StampWallsTool PRIVATE Engine)
+    target_include_directories(StampWallsTool PRIVATE "${ENGINE_ROOT}" "${ENGINE_ROOT}/Engine")
+    target_compile_definitions(StampWallsTool PRIVATE NOMINMAX)
+endif()
+
 if(NOT ENGINE_PROJECT_DIR AND
    EXISTS "${ENGINE_LOCAL_TEST_ROOT}/TerrainVolumeTests.cpp")
     enable_testing()

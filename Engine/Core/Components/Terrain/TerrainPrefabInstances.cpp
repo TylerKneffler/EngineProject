@@ -1111,6 +1111,8 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
                                     world->transforms.push_back(transform);
                                 }
                                 world->placementIds=instances->placementIds;
+                                world->traceSource=layerName=="Far objects" ? 3 :
+                                    Owner->name.rfind("Near objects",0)==0 ? 2 : 1;
                                 world->maximumLod=sharedMaximumLod;
                             }
                             // The block's world bounds: the layer-local batch

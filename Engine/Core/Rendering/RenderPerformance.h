@@ -110,6 +110,26 @@ struct RenderCpuTimings
     uint64_t visibilityFrameItems=0,visibilityCandidates=0,visibilityAccepted=0;
     std::array<uint64_t,3> colorSelectedLodDraws{},shadowSelectedLodDraws{};
     uint64_t submittedInstances=0, submittedTriangles=0;
+    // ENGINE_TRACE_LAYER=<name part>: camera-pass counts for objects whose own
+    // or parent name contains it, stage by stage (frame items, visible set,
+    // prepared draws, instance tiles and placements kept for the cull).
+    uint64_t traceItems=0,traceVisible=0,traceDraws=0,traceTiles=0,tracePlacements=0;
+    // Checksum of what the cull receives for the traced tiles: tile LOD and
+    // transform, and each placement's pool record (CPU copy).
+    double traceDataSum=0;
+    // GPU-side copies that disagree with the CPU: placement pool records of
+    // the traced tiles, and traced cull batches whose tile list differs.
+    uint64_t traceStaleRecords=0,traceStaleInputs=0;
+    // The renderer's prepared frame serial (VisibilityMonitor lines carry it).
+    uint64_t traceSerial=0;
+    // ...and what the GPU cull last kept of them (each batch's latest
+    // visibility readback, a few frames old).
+    uint64_t traceGpuVisible=0;
+    // Shared prefab placements in view (camera pass, per tile kept), by
+    // source (Mesh::InstanceData::traceSource) * 3 + LOD band.
+    std::array<uint64_t,12> traceSources{};
+    // What the GPU cull last kept of those batches, by source * 3 + LOD band.
+    std::array<uint64_t,12> traceGpuSources{};
     uint64_t terrainOcclusionRejected=0, solidOcclusionRejected=0;
     RenderCpuTimings& operator+=(const RenderCpuTimings& value)
     {
@@ -142,6 +162,9 @@ struct RenderCpuTimings
             shadowSelectedLodDraws[lod] += value.shadowSelectedLodDraws[lod];
         }
         ADD(submittedInstances); ADD(submittedTriangles);
+        ADD(traceItems); ADD(traceVisible); ADD(traceDraws); ADD(traceTiles); ADD(tracePlacements); ADD(traceDataSum); ADD(traceStaleRecords); ADD(traceStaleInputs); traceSerial=std::max(traceSerial,value.traceSerial); ADD(traceGpuVisible);
+        for(size_t i=0;i<traceSources.size();++i) traceSources[i]+=value.traceSources[i];
+        for(size_t i=0;i<traceGpuSources.size();++i) traceGpuSources[i]+=value.traceGpuSources[i];
         ADD(terrainOcclusionRejected); ADD(solidOcclusionRejected);
 #undef ADD
         return *this;

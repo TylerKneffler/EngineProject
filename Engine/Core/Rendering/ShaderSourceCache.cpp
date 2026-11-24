@@ -79,7 +79,16 @@ struct ShaderSourceCache::State
             event=CreateEventW(nullptr,TRUE,FALSE,nullptr);
             return event && Arm();
         }
-        bool Changed()
+        // True when a watched source may have moved (recheck its file); sets
+        // `content` when shader text itself changed (a source or an include,
+        // which no entry's own time or size shows) or notifications were lost.
+        // A watch can cover a large tree (the nearest existing ancestor of a
+        // missing search path, up to the project root): files written there
+        // (captures, caches, logs) and the directories holding them only
+        // trigger the recheck, which keeps a source's revision unless its own
+        // file changed. Bumping every revision on them recompiled every
+        // material shader and dropped those draws (foliage) until it was done.
+        bool Changed(bool& content)
         {
             if(!reading || WaitForSingleObject(event,0)!=WAIT_OBJECT_0) return false;
             DWORD bytes=0;
@@ -87,6 +96,7 @@ struct ShaderSourceCache::State
             reading=false;
             // Lost notifications conservatively invalidate every source.
             bool changed=!complete || !bytes;
+            content |= changed;
             for(DWORD offset=0;complete && offset<bytes;)
             {
                 const auto* info=reinterpret_cast<const FILE_NOTIFY_INFORMATION*>(buffer.data()+offset);
@@ -95,13 +105,16 @@ struct ShaderSourceCache::State
                 std::transform(name.begin(),name.end(),name.begin(),[](wchar_t c){return wchar_t(std::towlower(c));});
                 auto ext=path.extension().wstring();
                 std::transform(ext.begin(),ext.end(),ext.begin(),[](wchar_t c){return wchar_t(std::towlower(c));});
-                // No extension includes directory creation/rename. Shader includes
-                // share the notification generation with their entry-point files.
-                changed |= candidates.count(name)!=0 || ext.empty() || ext==L".hlsl" || ext==L".hlsli" || ext==L".h" || ext==L".inc" || ext==L".fx" || ext==L".fxh";
+                // Shader includes share the notification generation with their
+                // entry-point files. No extension: a directory created or
+                // renamed, which can make a missing candidate appear.
+                const bool shaderText=ext==L".hlsl" || ext==L".hlsli" || ext==L".h" || ext==L".inc" || ext==L".fx" || ext==L".fxh";
+                changed |= candidates.count(name)!=0 || ext.empty() || shaderText;
+                content |= shaderText;
                 if(!info->NextEntryOffset) break;
                 offset+=info->NextEntryOffset;
             }
-            if(!Arm()) changed=true;
+            if(!Arm()) { changed=true; content=true; }
             return changed;
         }
     };
@@ -110,14 +123,26 @@ struct ShaderSourceCache::State
     void WatchCandidates(const SearchPaths& candidates)
     {
 #if defined(_WIN32)
+        // A source that resolves watches only real directories: the missing
+        // fallback locations of a found shader (a path relative to the
+        // working directory, say) would otherwise watch the nearest existing
+        // ancestor, often the project root, and every file written anywhere
+        // in it (captures, caches, logs) would wake the watch; their floods
+        // overflow it and read as lost notifications, which force every
+        // material shader to recompile.
+        bool anyExists=false;
+        for(const auto& candidate:candidates)
+        { std::error_code error; anyExists=anyExists || std::filesystem::is_regular_file(candidate,error); }
         for(const auto& candidate:candidates)
         {
             std::error_code error;
             const auto absolute=std::filesystem::absolute(candidate,error).lexically_normal();
             auto directory=absolute.parent_path();
             if(error) { incompleteWatches=true; continue; }
-            // Watch the nearest existing ancestor, including when every shader
-            // subdirectory is missing. Creating the directories then wakes us.
+            if(anyExists && !std::filesystem::is_directory(directory,error)) continue;
+            // No candidate exists yet: watch the nearest existing ancestor,
+            // including when every shader subdirectory is missing. Creating
+            // the directories then wakes us.
             while(!directory.empty() && !std::filesystem::is_directory(directory,error))
             { error.clear(); const auto parent=directory.parent_path(); if(parent==directory) break; directory=parent; }
             if(directory.empty()) { incompleteWatches=true; continue; }
@@ -164,11 +189,11 @@ ShaderSourceCache::ShaderSourceCache():m_state(std::make_unique<State>()) {}
 ShaderSourceCache::~ShaderSourceCache()=default;
 void ShaderSourceCache::Poll()
 {
-    bool changed=false, fallback=m_state->incompleteWatches;
+    bool changed=false, content=false, fallback=m_state->incompleteWatches;
 #if defined(_WIN32)
     for(auto it=m_state->watches.begin();it!=m_state->watches.end();)
     {
-        changed=it->second->Changed() || changed;
+        changed=it->second->Changed(content) || changed;
         if(!it->second->reading)
         { fallback=m_state->incompleteWatches=true; it=m_state->watches.erase(it); }
         else ++it;
@@ -186,7 +211,9 @@ void ShaderSourceCache::Poll()
     if(changed || retry)
         for(auto& pair:m_state->entries)
         {
-            pair.second.dirty=true; pair.second.force |= changed;
+            // Only changed shader text forces a new revision; anything else is
+            // a recheck of the entry's own file (time, size, existence).
+            pair.second.dirty=true; pair.second.force |= content;
             if(retry) m_state->WatchCandidates(pair.second.candidates);
         }
 }

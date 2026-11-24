@@ -48,6 +48,7 @@ struct PostProcessSettings
     bool taaHistoryValid = false;
     float taaFeedback = 0.9f;
     float taaSharpen = 0.f; // compose unsharp mask after TAA
+    bool taaFastSettle = true; // RenderingEffectsSettings::taaFastSettle
     float taaReprojection[16] = { 1.f, 0.f, 0.f, 0.f, 0.f, 1.f, 0.f, 0.f,
         0.f, 0.f, 1.f, 0.f, 0.f, 0.f, 0.f, 1.f };
     // This frame's sub-pixel jitter in render pixels (x right, y down): the

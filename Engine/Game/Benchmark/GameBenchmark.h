@@ -5,7 +5,13 @@
 #include "Core/Graphics/IGraphicsContext.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Rendering/SceneRenderer.h"
+#include <condition_variable>
+#include <deque>
 #include <fstream>
+#include <map>
+#include <mutex>
+#include <string>
+#include <thread>
 #include <vector>
 
 namespace Engine::Scene { class Scene; }
@@ -64,9 +70,18 @@ public:
         uint32_t maxFps, bool clusteredLighting, double startupMs);
     static GameBenchmarkSceneSample CollectScene(Engine::Scene::Scene& scene);
     void Record(uint64_t frame, const GameBenchmarkFrameSample& sample);
+    // The user flagged a flicker on this measured frame (flag button, F8).
+    void Flag(uint64_t frame);
     void Capture(Engine::Renderers::IGameRenderer& renderer, const char* fileName = "capture.ppm");
     bool Finish();
     const std::filesystem::path& Directory() const { return m_directory; }
+    // Real-speed captures (GameBenchmarkOptions::captureAsync): the frame
+    // asked the renderer for an async copy under this tag; Poll takes the
+    // finished copies (drain: waits for all, at the end) and a writer thread
+    // stores them at half resolution, so the frame loop never waits.
+    void QueueAsyncCapture(uint64_t tag, std::string fileName);
+    void PollAsyncCaptures(Engine::Renderers::IGameRenderer& renderer, bool drain);
+    ~GameBenchmark();
 
 private:
     GameBenchmarkOptions m_options;
@@ -79,5 +94,15 @@ private:
     double m_cameraOrigin[3]{}, m_maxCameraDisplacement = 0.0;
     bool m_cameraOriginSet = false;
     bool m_cameraSeen = false, m_validFrameSeen = false, m_captureWritten = false;
+    struct PendingImage { std::filesystem::path path; uint32_t width = 0, height = 0; std::vector<uint8_t> rgba; };
+    std::map<uint64_t, std::string> m_asyncNames;
+    std::deque<PendingImage> m_writeQueue;
+    std::mutex m_writeMutex;
+    std::condition_variable m_writeWake, m_writeRoom;
+    std::thread m_writer;
+    bool m_writerStop = false;
+    int m_writing = 0;
+    uint64_t m_asyncWritten = 0, m_asyncDropped = 0;
+    void WriterLoop();
 };
 }

@@ -10,6 +10,8 @@
 #include "Core/Components/Terrain/TerrainSurfaceSample.h"
 #include "Core/Components/Terrain/TerrainHeightArchive.h"
 #include "Core/Components/Terrain/TerrainRegionEdit.h"
+#include "Core/Components/Terrain/TerrainBrushShape.h"
+#include "Core/Components/Terrain/TerrainStamp.h"
 #include "Editor/Core/View/Views/Scene/SceneTerrainTools.h"
 
 #include <chrono>
@@ -128,6 +130,134 @@ void TestManagerFlattenSeam()
     auto* right = manager->GetLoadedCell(1, 0);
     Require(left && right);
     if (!left || !right) return;
+    for (int row = 0; row <= 8; ++row)
+        Require(Near(left->heights[row * 9 + 8], right->heights[row * 9 + 0]));
+}
+
+// A stamp as a brush: a square pyramid 4 m wide and 2 m tall (stamp space,
+// Y up), seen from above, imprints its heights into the height data.
+std::shared_ptr<const Engine::Components::TerrainBrushShape> PyramidShape()
+{
+    Engine::Components::TerrainStamp stamp;
+    stamp.width = stamp.height = 2;
+    stamp.spacing = 1.f;
+    const glm::vec3 corners[4] = {{-2.f, 0.f, -2.f}, {2.f, 0.f, -2.f}, {2.f, 0.f, 2.f}, {-2.f, 0.f, 2.f}};
+    for (const auto& corner : corners)
+    {
+        Engine::Components::TerrainStamp::Point point;
+        point.position = corner;
+        stamp.points.push_back(point);
+    }
+    Engine::Components::TerrainStamp::Point apex;
+    apex.position = {0.f, 2.f, 0.f};
+    apex.weight = 1.f;
+    stamp.points.push_back(apex);
+    stamp.levels.push_back({0, 1, 4, 1, 2, 4, 2, 3, 4, 3, 0, 4});
+    return Engine::Components::TerrainBrushShape::FromStamp(stamp, 64);
+}
+
+void TestStampBrush()
+{
+    const auto shape = PyramidShape();
+    Require(shape != nullptr);
+    if (!shape) return;
+    Require(Near(shape->maxHeight, 2.f, .1f));
+    Require(shape->SampleMask({0.f, 0.f}) > .99f);
+    Require(shape->SampleMask({.999f, .999f}) < .5f);
+    // Shape space and back.
+    const glm::vec2 offset = Engine::Components::TerrainBrushShape::FromShape({.5f, -.25f}, 3.f, .7f);
+    const glm::vec2 back = Engine::Components::TerrainBrushShape::ToShape(offset.x, offset.y, 3.f, .7f);
+    Require(Near(back.x, .5f) && Near(back.y, -.25f));
+
+    // A stamp is a raise brush scaled by its height map: each dab raises the
+    // apex by the strength, a point half way down a face by half of it, and
+    // nothing outside the outline. Dabs add up, building the shape.
+    Engine::Scene::Scene scene;
+    auto* terrain = MakeTerrain(scene, 1);
+    Terrain::BrushOptions options;
+    options.shape = shape;
+    const float radius = shape->halfExtent;
+    for (int dab = 0; dab < 4; ++dab)
+        Require(terrain->ApplyBrush(8.f, 8.f, radius, .5f, Terrain::Brush::Raise, 0, false, options));
+    Require(Near(terrain->heights[8 * 17 + 8], 2.f, .05f));
+    Require(Near(terrain->heights[8 * 17 + 9], 1.f, .15f));
+    Require(Near(terrain->heights[8 * 17 + 11], 0.f));   // outside the pyramid's 2 m footprint
+    Require(Near(terrain->heights[0], 0.f));
+    // Lower takes the same shape back out.
+    for (int dab = 0; dab < 4; ++dab)
+        terrain->ApplyBrush(8.f, 8.f, radius, .5f, Terrain::Brush::Lower, 0, false, options);
+    Require(Near(terrain->heights[8 * 17 + 8], 0.f, .05f));
+    Require(Near(terrain->heights[8 * 17 + 9], 0.f, .05f));
+
+    // Stop at the stamp: held far past it, a stroke ends at the stamp's own
+    // surface (base + its heights at this radius), and a second stroke over
+    // the first adds nothing.
+    {
+        auto* grown = MakeTerrain(scene, 1);
+        Terrain::BrushOptions stop;
+        stop.shape = shape;
+        stop.stopAtStamp = true;
+        stop.stampBase = 0.f;
+        for (int stroke = 0; stroke < 2; ++stroke)
+            for (int dab = 0; dab < 40; ++dab)
+                grown->ApplyBrush(8.f, 8.f, radius, .5f, Terrain::Brush::Raise, 0, false, stop);
+        Require(Near(grown->heights[8 * 17 + 8], 2.f, .1f));   // the apex, not 40 x .5
+        Require(Near(grown->heights[8 * 17 + 9], 1.f, .15f));  // half way down a face
+        Require(Near(grown->heights[0], 0.f));
+        // Twice the radius, twice as tall: the stamp keeps its proportions.
+        auto* big = MakeTerrain(scene, 1);
+        for (int dab = 0; dab < 40; ++dab)
+            big->ApplyBrush(8.f, 8.f, radius * 2.f, .5f, Terrain::Brush::Raise, 0, false, stop);
+        Require(Near(big->heights[8 * 17 + 8], 4.f, .2f));
+    }
+
+    // Backed: the stamp builds only against terrain behind it. A 5 m wall
+    // from x = 10 on; the stamp faces -x (its back toward the wall), its
+    // square reaching over the wall's top. Held long enough to overshoot.
+    {
+        auto* walled = MakeTerrain(scene, 1);
+        for (int row = 0; row <= 16; ++row)
+            for (int col = 10; col <= 16; ++col) walled->heights[row * 17 + col] = 5.f;
+        walled->Rebuild();
+        Terrain::BrushOptions backed;
+        backed.shape = shape;
+        backed.backed = true;
+        backed.shapeYaw = -1.5707963f;   // FromShape(facing (0, 1)) = (-1, 0)
+        const glm::vec2 face = Engine::Components::TerrainBrushShape::FromShape(shape->facing, 1.f, backed.shapeYaw);
+        Require(Near(face.x, -1.f) && Near(face.y, 0.f));
+        bool changed = false;
+        for (int dab = 0; dab < 40; ++dab)
+            changed |= walled->ApplyBrush(8.5f, 8.f, 3.f, .5f, Terrain::Brush::Raise, 0, false, backed);
+        Require(changed);
+        float highest = 0.f;
+        for (float h : walled->heights) highest = std::max(highest, h);
+        Require(highest <= 5.f + 1e-4f);                         // never above the wall
+        for (int row = 0; row <= 16; ++row)
+            for (int col = 10; col <= 16; ++col)
+                Require(Near(walled->heights[row * 17 + col], 5.f)); // its top untouched
+        Require(walled->heights[8 * 17 + 9] > 4.f);              // rock built at the foot
+        // The same stamp on open flat ground has nothing to build against.
+        auto* open = MakeTerrain(scene, 1);
+        Require(!open->ApplyBrush(8.5f, 8.f, 3.f, .5f, Terrain::Brush::Raise, 0, false, backed));
+    }
+
+    // Across a cell border, turned, the shared samples agree.
+    auto* object = scene.AddObject("Manager");
+    auto* manager = object->AddComponent<TerrainManager>();
+    manager->cellsX = manager->cellsY = 8;
+    manager->cellWidth = manager->cellDepth = 1.f;
+    manager->loadedRadius = 1;
+    manager->farRadius = 0;
+    manager->generateColliders = false;
+    Require(manager->AddCell(0, 0));
+    Require(manager->AddCell(1, 0));
+    options.shapeYaw = .6f;
+    Require(manager->ApplyBrush(8.0, 4.0, radius * 1.5f, 1.f, Terrain::Brush::Raise, 0, false, options));
+    auto* left = manager->GetLoadedCell(0, 0);
+    auto* right = manager->GetLoadedCell(1, 0);
+    Require(left && right);
+    if (!left || !right) return;
+    Require(left->heights[4 * 9 + 8] > .9f);
     for (int row = 0; row <= 8; ++row)
         Require(Near(left->heights[row * 9 + 8], right->heights[row * 9 + 0]));
 }
@@ -529,6 +659,7 @@ int main()
         TestFlatten();
         TestPaintErase();
         TestManagerFlattenSeam();
+        TestStampBrush();
         TestScatterAndErase();
         TestPaintMap();
         TestManagerPaintSeam();

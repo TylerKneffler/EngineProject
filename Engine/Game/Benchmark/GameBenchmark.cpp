@@ -94,6 +94,9 @@ GameBenchmark::GameBenchmark(const GameBenchmarkOptions& options,
         << ",\"camera_position_override\":" << Vector3Json(options.cameraPosition)
         << ",\"camera_target_override\":" << Vector3Json(options.cameraTarget)
         << ",\"viewpoint\":" << Json(options.viewpoint)
+        << ",\"route\":" << Json(options.route)
+        << ",\"route_speed\":" << options.routeSpeed
+        << ",\"route_look_ahead\":" << options.routeLookAhead
         << ",\"game_max_fps\":" << maxFps << ",\"startup_to_scene_start_ms\":" << startupMs
         << ",\"clustered_lighting_setting\":" << (clusteredLighting ? "true" : "false")
         << ",\"render_scale\":" << renderer.GetRenderScale()
@@ -192,6 +195,16 @@ GameBenchmarkSceneSample GameBenchmark::CollectScene(Engine::Scene::Scene& scene
         }
     }
     return result;
+}
+
+// A flicker the user flagged (flag button or F8) on this measured frame.
+// Analysis scripts read frame records only ("type":"frame"); this marks
+// where to look: the flicker came shortly before the press.
+void GameBenchmark::Flag(uint64_t frame)
+{
+    m_log << "{\"type\":\"flag\",\"frame\":" << frame << "}\n";
+    m_log.flush();
+    std::cout << "[flag] flicker flagged at measured frame " << frame << std::endl;
 }
 
 void GameBenchmark::Record(uint64_t frame, const GameBenchmarkFrameSample& s)
@@ -362,6 +375,19 @@ void GameBenchmark::Record(uint64_t frame, const GameBenchmarkFrameSample& s)
         << ",\"triangles_candidate\":" << r.candidateTriangles
         << ",\"triangles_submitted\":" << r.submittedTriangles
         << ",\"instances_submitted\":" << r.submittedInstances
+        << ",\"trace_items\":" << r.traceItems << ",\"trace_visible\":" << r.traceVisible
+        << ",\"trace_draws\":" << r.traceDraws << ",\"trace_tiles\":" << r.traceTiles
+        << ",\"trace_placements\":" << r.tracePlacements << ",\"trace_gpu_visible\":" << r.traceGpuVisible
+        << ",\"trace_data_sum\":" << std::setprecision(17) << r.traceDataSum << std::setprecision(6)
+        << ",\"trace_stale_records\":" << r.traceStaleRecords << ",\"trace_stale_inputs\":" << r.traceStaleInputs
+        << ",\"render_serial\":" << r.traceSerial
+        << ",\"trace_sources\":[" << r.traceSources[0] << "," << r.traceSources[1] << "," << r.traceSources[2] << ","
+        << r.traceSources[3] << "," << r.traceSources[4] << "," << r.traceSources[5] << "," << r.traceSources[6] << ","
+        << r.traceSources[7] << "," << r.traceSources[8] << "," << r.traceSources[9] << "," << r.traceSources[10] << ","
+        << r.traceSources[11] << "]"
+        << ",\"trace_gpu_sources\":[";
+    for (size_t i = 0; i < r.traceGpuSources.size(); ++i) m_log << (i ? "," : "") << r.traceGpuSources[i];
+    m_log << "]"
         << ",\"camera_visible_items\":" << r.cameraVisibility.acceptedItems
         << ",\"foliage_placement_candidates\":" << r.cameraVisibility.placementCandidates
         << ",\"foliage_screen_selected_lod0\":" << r.cameraVisibility.screenSelectedInstancesByLod[0]
@@ -443,6 +469,89 @@ void GameBenchmark::Capture(Engine::Renderers::IGameRenderer& renderer, const ch
     if (std::string(fileName) == "capture.ppm") m_captureWritten = true;
 }
 
+void GameBenchmark::QueueAsyncCapture(uint64_t tag, std::string fileName)
+{
+    m_asyncNames[tag] = std::move(fileName);
+    if (!m_writer.joinable()) m_writer = std::thread([this] { WriterLoop(); });
+}
+
+void GameBenchmark::PollAsyncCaptures(Engine::Renderers::IGameRenderer& renderer, bool drain)
+{
+    if (m_asyncNames.empty() && !drain) return;
+    if (drain) renderer.WaitIdle();
+    std::vector<uint8_t> rgba;
+    uint32_t width = 0, height = 0;
+    uint64_t tag = 0;
+    while (renderer.TakeAsyncSceneCapture(rgba, width, height, tag))
+    {
+        const auto name = m_asyncNames.find(tag);
+        if (name == m_asyncNames.end()) continue;
+        PendingImage image{m_directory / name->second, width, height, std::move(rgba)};
+        m_asyncNames.erase(name);
+        std::unique_lock lock(m_writeMutex);
+        // Bounded: ~120 full frames queued at most; the writer keeps up at
+        // half resolution, so this only waits if the disk stalls.
+        m_writeRoom.wait(lock, [&] { return m_writeQueue.size() < 120; });
+        m_writeQueue.push_back(std::move(image));
+        m_writeWake.notify_one();
+    }
+    if (drain)
+    {
+        // Requests the renderer had no free ring entry for.
+        m_asyncDropped += m_asyncNames.size();
+        m_asyncNames.clear();
+        std::unique_lock lock(m_writeMutex);
+        m_writeRoom.wait(lock, [&] { return m_writeQueue.empty() && m_writing == 0; });
+    }
+}
+
+void GameBenchmark::WriterLoop()
+{
+    for (;;)
+    {
+        PendingImage image;
+        {
+            std::unique_lock lock(m_writeMutex);
+            m_writeWake.wait(lock, [&] { return m_writerStop || !m_writeQueue.empty(); });
+            if (m_writeQueue.empty()) return;
+            image = std::move(m_writeQueue.front());
+            m_writeQueue.pop_front();
+            ++m_writing;
+        }
+        // Half resolution (2x2 box), RGB: what the flicker analysis reads.
+        const uint32_t w = image.width / 2, h = image.height / 2;
+        std::vector<uint8_t> rgb(size_t(w) * h * 3);
+        for (uint32_t y = 0; y < h; ++y)
+            for (uint32_t x = 0; x < w; ++x)
+                for (int c = 0; c < 3; ++c)
+                {
+                    const auto at = [&](uint32_t px, uint32_t py)
+                    { return uint32_t(image.rgba[(size_t(py) * image.width + px) * 4 + c]); };
+                    rgb[(size_t(y) * w + x) * 3 + c] = uint8_t((at(2 * x, 2 * y) + at(2 * x + 1, 2 * y) +
+                        at(2 * x, 2 * y + 1) + at(2 * x + 1, 2 * y + 1) + 2) / 4);
+                }
+        std::ofstream file(image.path, std::ios::binary);
+        file << "P6\n" << w << ' ' << h << "\n255\n";
+        file.write(reinterpret_cast<const char*>(rgb.data()), std::streamsize(rgb.size()));
+        {
+            std::lock_guard lock(m_writeMutex);
+            ++m_asyncWritten;
+            --m_writing;
+        }
+        m_writeRoom.notify_all();
+    }
+}
+
+GameBenchmark::~GameBenchmark()
+{
+    {
+        std::lock_guard lock(m_writeMutex);
+        m_writerStop = true;
+    }
+    m_writeWake.notify_all();
+    if (m_writer.joinable()) m_writer.join();
+}
+
 bool GameBenchmark::Finish()
 {
     std::sort(m_intervals.begin(), m_intervals.end());
@@ -453,6 +562,9 @@ bool GameBenchmark::Finish()
     const bool valid = m_intervals.size() == m_options.frames && m_captureWritten &&
         m_validFrameCount == m_options.frames &&
         (!m_options.requireMovement || m_maxCameraDisplacement >= 0.05);
+    if (m_asyncWritten || m_asyncDropped)
+        std::cout << "Async captures: " << m_asyncWritten << " written, " << m_asyncDropped
+            << " dropped (renderer ring full)\n";
     m_log << "{\"type\":\"summary\",\"valid\":" << (valid ? "true" : "false")
         << ",\"measured_frames\":" << m_intervals.size()
         << ",\"frame_interval_median_ms\":" << median

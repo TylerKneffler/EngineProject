@@ -24,6 +24,12 @@
 #include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Components/Camera/Camera.h"
+#include "Core/Components/UI/Canvas.h"
+#include "Core/Components/UI/UIButton.h"
+#include "Core/Components/UI/UIObject.h"
+#include "Core/Components/UI/UIText.h"
+#include "Core/Components/Path/SplinePath.h"
+#include "Core/Components/Physics/RigidBody.h"
 #include "Core/Physics/Physics.h"
 #include "Core/Time/FramePacer.h"
 #include "Core/Input/NativeInputSnapshot.h"
@@ -38,8 +44,10 @@
 #include <iomanip>
 #include <iostream>
 #include <mutex>
+#include <optional>
 #include <thread>
 #include <utility>
+#include <vector>
 #ifdef ENGINE_BUILTIN_ASSET_SCRIPTS
 #include "Core/Assets/Scripts/Utilities/Rotate.h"
 #include "Core/Assets/Scripts/Controllers/FirstPersonController.h"
@@ -66,6 +74,60 @@ std::string CsvField(const std::string& value)
     }
     escaped += '"';
     return escaped;
+}
+
+// GameBenchmarkOptions::route: the SplinePath sampled every Step metres at
+// constant speed, so a pose is a lookup (the scene belongs to the simulation
+// worker once frames run).
+struct BenchmarkRoute
+{
+    static constexpr float Step = .5f;
+    std::vector<glm::dvec3> points;
+    float lookAhead = 12.f;
+
+    float Length() const { return points.size() > 1 ? Step * float(points.size() - 1) : 0.f; }
+    // Past the end the last segment carries on, so the gaze never collapses
+    // onto the eye there.
+    glm::dvec3 At(float distance) const
+    {
+        if (points.size() < 2) return points.empty() ? glm::dvec3(0.0) : points.front();
+        const float clamped = std::max(distance, 0.f);
+        const size_t last = points.size() - 1;
+        const size_t index = std::min(static_cast<size_t>(clamped / Step), last - 1);
+        const double t = (double(clamped) - double(index) * Step) / Step;
+        return points[index] + (points[index + 1] - points[index]) * t;
+    }
+    // Eye on the route; looking at the route lookAhead metres on, a little
+    // below its eye height (about 3 degrees down at 12 m), so the gaze
+    // follows the path's turns and slope as a walker's does.
+    ::Engine::Components::Camera::Pose PoseAt(float distance) const
+    {
+        ::Engine::Components::Camera::Pose pose;
+        distance = std::min(distance, Length());
+        pose.eye = At(distance);
+        pose.target = At(distance + lookAhead) - glm::dvec3(0.0, .05 * lookAhead, 0.0);
+        return pose;
+    }
+};
+
+std::optional<BenchmarkRoute> LoadBenchmarkRoute(const ::Engine::Scene::Scene& scene,
+    const GameBenchmarkOptions& options)
+{
+    if (options.route.empty()) return std::nullopt;
+    const auto* object = scene.FindObjectByName(options.route);
+    const auto* path = object ? object->GetComponent<SplinePath>() : nullptr;
+    if (!path || path->GetControlPointCount() < 2)
+        throw std::runtime_error("route not found (needs an object with a SplinePath of two or more points): " +
+            options.route);
+    BenchmarkRoute route;
+    route.lookAhead = std::max(options.routeLookAhead, 1.f);
+    const float length = path->GetLength();
+    const size_t count = std::max<size_t>(2, static_cast<size_t>(std::ceil(length / BenchmarkRoute::Step)) + 1);
+    route.points.reserve(count);
+    for (size_t i = 0; i < count; ++i)
+        route.points.emplace_back(path->EvaluatePosition(
+            std::min(1.f, float(i) * BenchmarkRoute::Step / std::max(length, 1.e-3f))));
+    return route;
 }
 
 void RegisterGameComponents()
@@ -108,6 +170,22 @@ std::unique_ptr<::Engine::Renderers::IGameRenderer> CreateRenderer(
     }
 }
 
+// Flicker flag button (GameBenchmarkOptions::flagButton, or
+// ENGINE_FLICKER_BUTTON=1 in normal play): bottom right, in logical units of
+// a canvas matched to a 1920 wide reference, so one unit is clientWidth /
+// 1920 pixels both ways. The window thread hit-tests the same rectangle.
+constexpr float FlagCanvasWidth = 1920.f;
+constexpr float FlagButtonWidth = 360.f, FlagButtonHeight = 56.f, FlagButtonMargin = 24.f;
+inline bool FlagButtonHit(int x, int y, uint32_t clientWidth, uint32_t clientHeight)
+{
+    if (!clientWidth || !clientHeight) return false;
+    const float scale = static_cast<float>(clientWidth) / FlagCanvasWidth;
+    const float right = static_cast<float>(clientWidth) - FlagButtonMargin * scale;
+    const float bottom = static_cast<float>(clientHeight) - FlagButtonMargin * scale;
+    return x >= right - FlagButtonWidth * scale && x <= right &&
+        y >= bottom - FlagButtonHeight * scale && y <= bottom;
+}
+
 // The scene owner records draw commands after the update. The graphics owner
 // replays those value arguments without reading objects or components.
 class SimulationLoop
@@ -138,6 +216,7 @@ public:
         GameBenchmarkSceneSample benchmarkScene;
         double benchmarkCollectionMs = 0, intervalMs = 0, residencyWaitMs = 0;
         uint64_t benchmarkFrame = UINT64_MAX;
+        bool flagged = false; // the flicker flag was pressed this frame
     };
     explicit SimulationLoop(::Engine::Scene::Scene& scene, bool collectBenchmark)
         : m_scene(scene), m_windowThread(std::this_thread::get_id()),
@@ -159,13 +238,17 @@ public:
 
     // renderWidth x renderHeight: the renderer's scene size (below the
     // client size with an internal render scale); views record with it.
+    // cameraPose: placed on the game camera before the update (benchmark
+    // routes); the scene belongs to the worker, so it is applied there.
     void BeginUpdate(float deltaTime,
-        ::Engine::Core::NativeInputSnapshot input, uint32_t renderWidth, uint32_t renderHeight)
+        ::Engine::Core::NativeInputSnapshot input, uint32_t renderWidth, uint32_t renderHeight,
+        std::optional<::Engine::Components::Camera::Pose> cameraPose = std::nullopt)
     {
         std::unique_lock lock(m_mutex);
         if (m_stopping || m_busy)
             throw std::logic_error("Simulation handoff already has a frame");
         m_deltaTime = deltaTime;
+        m_cameraPose = cameraPose;
         m_frameStartedAt = std::chrono::steady_clock::now();
         m_timings = {};
         m_input = std::move(input);
@@ -174,6 +257,15 @@ public:
         m_busy = true;
         m_work = Work::Update;
         m_wake.notify_one();
+    }
+
+    // Flicker flag overlay: shown when enabled, with this label. Window
+    // thread, between frames (the worker is idle until BeginUpdate).
+    void SetFlagOverlay(bool enabled, std::string label)
+    {
+        std::lock_guard lock(m_mutex);
+        m_flagOverlay = enabled;
+        m_flagLabel = std::move(label);
     }
 
     TickResult FinishFrame(bool renderFrame, uint32_t previousOcclusionCulled)
@@ -263,8 +355,21 @@ private:
                     const auto updateStart = std::chrono::steady_clock::now();
                     // Script counters are per frame (the editor resets its own).
                     m_scene.GetCounters().Reset();
+                    if (m_cameraPose)
+                        if (auto* camera = m_scene.FindGameCamera())
+                        {
+                            camera->SetWorldPose(*m_cameraPose);
+                            // A body (the explorer's) would write its own
+                            // position back over the transform.
+                            if (auto* body = camera->Owner->GetComponent<::Engine::Components::RigidBody>())
+                            {
+                                body->SetWorldPosition(glm::vec3(m_cameraPose->eye));
+                                body->StopMotion();
+                            }
+                        }
                     if (auto* game = m_scene.GetGame())
                         game->Update(m_deltaTime);
+                    if (m_flagOverlay) UpdateFlagOverlay();
                     if (m_scene.GetGame() && m_scene.GetGame()->ProcessPendingSceneLoad() &&
                         m_input.clientWidth && m_input.clientHeight)
                         m_scene.PrepareNativeUiLayout(
@@ -359,6 +464,55 @@ private:
     std::mutex m_mutex;
     std::condition_variable m_wake;
     ::Engine::Core::NativeInputSnapshot m_input;
+    std::optional<::Engine::Components::Camera::Pose> m_cameraPose;
+    bool m_flagOverlay = false;
+    std::string m_flagLabel;
+    ::Engine::Scene::Scene::ObjectId m_flagButtonId{};
+    // The flag button: created in the running scene the first time (and again
+    // after a scene load removed it), its label refreshed each frame.
+    void UpdateFlagOverlay()
+    {
+        using namespace ::Engine::Components;
+        auto* button = m_flagButtonId ? m_scene.FindObjectById(m_flagButtonId) : nullptr;
+        if (!button)
+        {
+            auto* root = m_scene.AddObject("Flicker flag overlay");
+            root->runtimeOnly = true;
+            auto* canvas = root->AddComponent<Canvas>();
+            canvas->referenceResolution = { FlagCanvasWidth, 1080.f, 0.f };
+            canvas->scaleMode = "ScaleWithScreen";
+            canvas->matchWidthOrHeight = 1.f;
+            canvas->sortingOrder = 1000;
+            auto* rootRect = root->AddComponent<UIObject>();
+            rootRect->anchorMin = { 0.f, 0.f, 0.f };
+            rootRect->anchorMax = { 1.f, 1.f, 0.f };
+            rootRect->pivot = { 0.f, 0.f, 0.f };
+            rootRect->sizeDelta = { 0.f, 0.f, 0.f };
+            button = m_scene.AddObject("Flag flicker button");
+            button->runtimeOnly = true;
+            m_scene.SetParentLocal(button, root);
+            auto* rect = button->AddComponent<UIObject>();
+            rect->anchorMin = rect->anchorMax = { 1.f, 1.f, 0.f };
+            rect->pivot = { 1.f, 1.f, 0.f };
+            rect->anchoredPosition = { -FlagButtonMargin, -FlagButtonMargin, 0.f };
+            rect->sizeDelta = { FlagButtonWidth, FlagButtonHeight, 0.f };
+            rect->zOrder = 10;
+            auto* look = button->AddComponent<UIButton>();
+            look->normalColor = { 0.45f, 0.12f, 0.12f };
+            look->hoverColor = { 0.60f, 0.18f, 0.18f };
+            look->pressedColor = { 0.30f, 0.08f, 0.08f };
+            look->alpha = 0.85f;
+            auto* text = button->AddComponent<UIText>();
+            text->fontSize = 26.f;
+            text->horizontalAlignment = "Center";
+            text->verticalAlignment = "Center";
+            text->overflow = "Visible";
+            text->color = { 1.f, 0.95f, 0.9f };
+            m_flagButtonId = m_scene.GetObjectId(button);
+        }
+        if (auto* text = button->GetComponent<UIText>(); text && text->text != m_flagLabel)
+            text->text = m_flagLabel;
+    }
     uint32_t m_renderWidth = 0, m_renderHeight = 0;
     std::shared_ptr<const ::Engine::Scene::Scene::SceneSnapshot> m_snapshot;
     ::Engine::Scene::Scene::RetiredGraphicsResources m_retired;
@@ -458,6 +612,7 @@ public:
         packet.intervalMs = tick.intervalMs;
         packet.residencyWaitMs = tick.residencyWaitMs;
         packet.benchmarkFrame = tick.benchmarkFrame;
+        packet.flagged = tick.flagged;
         packet.width = width;
         packet.height = height;
         SubmitAsync(Work::Frame, std::move(packet));
@@ -522,6 +677,7 @@ private:
         GameBenchmarkSceneSample benchmarkScene;
         double benchmarkCollectionMs = 0, intervalMs = 0, residencyWaitMs = 0;
         uint64_t benchmarkFrame = UINT64_MAX;
+        bool flagged = false;
         uint32_t width = 0, height = 0;
         float renderScale = 1.f; // Work::RenderScale
     };
@@ -669,12 +825,24 @@ private:
             [&]
             {
                 const auto started = std::chrono::steady_clock::now();
-                if (m_gameBenchmark && (packet.benchmarkFrame ==
-                    uint64_t(m_benchmarkOptions->warmup) + m_benchmarkOptions->frames ||
-                    !MovingCaptureName(packet.benchmarkFrame).empty()))
+                // Sequence frames go through the async ring with captureAsync
+                // (no wait for the GPU); the final capture stays synchronous.
+                const bool sequenceFrame = m_gameBenchmark && !MovingCaptureName(packet.benchmarkFrame).empty();
+                if (sequenceFrame && m_benchmarkOptions->captureAsync &&
+                    m_renderer.RequestAsyncSceneCapture(packet.benchmarkFrame))
+                    m_asyncCaptureFrame = packet.benchmarkFrame;
+                else if (m_gameBenchmark && (packet.benchmarkFrame ==
+                    uint64_t(m_benchmarkOptions->warmup) + m_benchmarkOptions->frames || sequenceFrame))
                     m_renderer.RequestSceneCapture();
                 ::Engine::Graphics::SetPostProcessSettings(packet.postProcess);
                 m_renderer.EndFrame();
+                // ENGINE_GPU_SYNC_EACH_FRAME=1: wait for the GPU after every
+                // frame (one frame in flight), to test for races between the
+                // CPU preparing a frame and the GPU still running the last.
+                static const bool syncEachFrame = [] {
+                    const char* value = std::getenv("ENGINE_GPU_SYNC_EACH_FRAME");
+                    return value && value[0] == '1'; }();
+                if (syncEachFrame) m_renderer.WaitIdle();
                 endFrameMs = std::chrono::duration<double, std::milli>(
                     std::chrono::steady_clock::now() - started).count();
             });
@@ -715,13 +883,23 @@ private:
                 if (packet.benchmarkFrame == warmup && m_benchmarkOptions->onMeasurementStart)
                     m_benchmarkOptions->onMeasurementStart();
                 m_gameBenchmark->Record(packet.benchmarkFrame - warmup, sample);
+                if (packet.flagged) m_gameBenchmark->Flag(packet.benchmarkFrame - warmup);
                 if (const auto name = MovingCaptureName(packet.benchmarkFrame); !name.empty())
-                    m_gameBenchmark->Capture(m_renderer, name.c_str());
+                {
+                    if (m_asyncCaptureFrame == packet.benchmarkFrame)
+                        m_gameBenchmark->QueueAsyncCapture(packet.benchmarkFrame, name);
+                    else
+                        m_gameBenchmark->Capture(m_renderer, name.c_str());
+                }
+                if (m_benchmarkOptions->captureAsync)
+                    m_gameBenchmark->PollAsyncCaptures(m_renderer, false);
             }
             else if (packet.benchmarkFrame == warmup + m_benchmarkOptions->frames)
             {
                 if (m_benchmarkOptions->onMeasurementEnd)
                     m_benchmarkOptions->onMeasurementEnd();
+                if (m_benchmarkOptions->captureAsync)
+                    m_gameBenchmark->PollAsyncCaptures(m_renderer, true);
                 m_gameBenchmark->Capture(m_renderer);
             }
         }
@@ -847,6 +1025,8 @@ private:
     ::Engine::Renderers::IGameRenderer& m_renderer;
     std::string m_scenePath;
     GameBenchmark* m_gameBenchmark;
+    // The sequence frame whose async capture was requested (captureAsync).
+    uint64_t m_asyncCaptureFrame = UINT64_MAX;
     // capture_a.ppm / capture_b.ppm for the two moving snapshots (see
     // GameBenchmarkOptions::movingCaptureGap), else null.
     // seq_<n>.ppm every captureEvery frames of the drive.
@@ -855,8 +1035,10 @@ private:
         const auto* options = m_benchmarkOptions;
         if (!options) return {};
         const uint64_t start = uint64_t(options->warmup);
+        // Without a drive, over the measured frames (a still camera: flicker).
+        const uint64_t span = options->driveForwardFrames ? options->driveForwardFrames : options->frames;
         if (options->captureEvery && benchmarkFrame >= start &&
-            benchmarkFrame < start + options->driveForwardFrames &&
+            benchmarkFrame < start + span &&
             (benchmarkFrame - start) % options->captureEvery == 0)
         {
             char name[32];
@@ -1059,6 +1241,17 @@ int GameApplication::Run(HINSTANCE instance, const GameBenchmarkOptions* benchma
             camera->useTransformRotation = false;
         }
     }
+    // --route: warm up at the route's start; the frame loop walks it.
+    const std::optional<BenchmarkRoute> benchmarkRoute = benchmark
+        ? LoadBenchmarkRoute(scene, *benchmark) : std::nullopt;
+    if (benchmarkRoute)
+    {
+        auto* camera = scene.FindGameCamera();
+        if (!camera || !camera->Owner)
+            throw std::runtime_error("benchmark route needs a scene game camera");
+        camera->useTransformRotation = false;
+        camera->SetWorldPose(benchmarkRoute->PoseAt(0.f));
+    }
     if (videoProfile && videoProfile->qualityPreset >= 0)
         scene.settings.graphicsQuality.preset = videoProfile->qualityPreset;
     // Diagnostics: ENGINE_QUALITY_PRESET selects the graphics quality preset
@@ -1125,6 +1318,15 @@ int GameApplication::Run(HINSTANCE instance, const GameBenchmarkOptions* benchma
     auto benchmarkWaitStart = std::chrono::steady_clock::now();
     double residencyWaitMs = 0;
     uint64_t benchmarkFrame = 0;
+    // Flicker flag button state (window thread).
+    const bool flagButton = benchmark ? benchmark->flagButton : [] {
+        const char* value = std::getenv("ENGINE_FLICKER_BUTTON");
+        return value && value[0] == '1'; }();
+    bool flagKeyWasDown = false, flagClickWasDown = false;
+    uint32_t flagCount = 0;
+    uint64_t gameFrameCounter = 0;
+    std::string flagLabel = "Flag flicker (F8)";
+    auto flagLabelUntil = std::chrono::steady_clock::now();
 
     window->OnResize = [&renderLoop](uint32_t width, uint32_t height)
     {
@@ -1155,6 +1357,50 @@ int GameApplication::Run(HINSTANCE instance, const GameBenchmarkOptions* benchma
 
         const uint32_t width = window->GetWidth();
         const uint32_t height = window->GetHeight();
+        // Flicker flag (F8 or the button): read straight from the window, as
+        // benchmark routes replace the input snapshot with scripted input.
+        bool flagPressed = false;
+        if (flagButton)
+        {
+            const HWND hwnd = window->GetHWND();
+            const bool focused = GetForegroundWindow() == hwnd;
+            const bool f8 = focused && (GetAsyncKeyState(VK_F8) & 0x8000) != 0;
+            bool click = false;
+            if (focused && (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0)
+            {
+                POINT cursor{};
+                if (GetCursorPos(&cursor) && ScreenToClient(hwnd, &cursor))
+                    click = FlagButtonHit(cursor.x, cursor.y, width, height);
+            }
+            flagPressed = (f8 && !flagKeyWasDown) || (click && !flagClickWasDown);
+            flagKeyWasDown = f8;
+            flagClickWasDown = click;
+            if (flagPressed)
+            {
+                ++flagCount;
+                const auto now = std::chrono::system_clock::now();
+                const auto stamp = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    now.time_since_epoch()).count();
+                if (gameBenchmark && benchmarkReady)
+                    std::cout << "[flag] #" << flagCount << " at measured frame "
+                        << (benchmarkFrame >= benchmark->warmup ? benchmarkFrame - benchmark->warmup : 0)
+                        << std::endl;
+                else
+                {
+                    std::filesystem::create_directories(".local");
+                    std::ofstream(".local/flicker-flags.txt", std::ios::app)
+                        << "flag " << flagCount << " frame " << gameFrameCounter
+                        << " unix_ms " << stamp << '\n';
+                }
+                flagLabel = "Flagged #" + std::to_string(flagCount) + "  (F8 again)";
+                flagLabelUntil = std::chrono::steady_clock::now() + std::chrono::milliseconds(1500);
+            }
+            else if (std::chrono::steady_clock::now() > flagLabelUntil)
+                flagLabel = flagCount ? "Flag flicker (F8)  -  " + std::to_string(flagCount) + " so far"
+                    : "Flag flicker (F8)";
+            simulation.SetFlagOverlay(true, flagLabel);
+        }
+        ++gameFrameCounter;
         auto input = ::Engine::Core::CaptureNativeInput(window->GetHWND());
         // Benchmarks never see the host's mouse and keyboard: a capture window
         // that ended up in the foreground let the user's mouse turn the
@@ -1166,7 +1412,28 @@ int GameApplication::Run(HINSTANCE instance, const GameBenchmarkOptions* benchma
             input.keys.fill(0);
             if (input.hasCenter) input.cursor = input.center;
         }
-        if (benchmark && benchmarkStarted && benchmarkReady &&
+        // A route walk moves the camera itself, from the frame W would go
+        // down, routeSpeed / 60 metres per frame (see GameBenchmarkOptions).
+        std::optional<::Engine::Components::Camera::Pose> routePose;
+        if (benchmarkRoute)
+        {
+            const uint64_t moveStart = uint64_t(benchmark->warmup) + 8u;
+            const uint64_t walked = benchmarkStarted && benchmarkReady && benchmarkFrame > moveStart
+                ? std::min<uint64_t>(benchmarkFrame - moveStart,
+                    benchmark->driveForwardFrames ? benchmark->driveForwardFrames : UINT64_MAX) : 0u;
+            routePose = benchmarkRoute->PoseAt(float(walked) * benchmark->routeSpeed / 60.f);
+            if (benchmark->routeLookSway != 0.f)
+            {
+                const double angle = glm::radians(double(benchmark->routeLookSway)) *
+                    std::sin(double(walked) * 2.0 * 3.14159265358979 /
+                        double(std::max(8u, benchmark->routeLookPeriod)));
+                const glm::dvec3 gaze = routePose->target - routePose->eye;
+                const double c = std::cos(angle), s = std::sin(angle);
+                routePose->target = routePose->eye +
+                    glm::dvec3(c * gaze.x + s * gaze.z, gaze.y, -s * gaze.x + c * gaze.z);
+            }
+        }
+        if (benchmark && !benchmarkRoute && benchmarkStarted && benchmarkReady &&
             (benchmark->driveForwardFrames || benchmark->lookYawPixels))
         {
             // Feed a reproducible click and W hold through the normal input
@@ -1197,7 +1464,7 @@ int GameApplication::Run(HINSTANCE instance, const GameBenchmarkOptions* benchma
             appliedRenderScale = scale;
         }
         simulation.BeginUpdate(deltaTime, std::move(input),
-            renderer->GetRenderWidth(), renderer->GetRenderHeight());
+            renderer->GetRenderWidth(), renderer->GetRenderHeight(), routePose);
         uint32_t previousOcclusionCulled = 0;
         if (width && height)
             previousOcclusionCulled = renderLoop.BeginFrame();
@@ -1230,6 +1497,7 @@ int GameApplication::Run(HINSTANCE instance, const GameBenchmarkOptions* benchma
             }
             if (benchmarkReady)
             {
+                tick.flagged = flagPressed;
                 tick.benchmarkFrame = benchmarkFrame++;
                 tick.intervalMs = double(deltaTime) * 1000.0;
                 tick.residencyWaitMs = residencyWaitMs;

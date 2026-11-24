@@ -110,6 +110,11 @@ GrassField::GrassField()
     RegisterField("viewerObjectName", viewerObjectName, "Viewer");
     RegisterField("useEditorCamera", useEditorCamera, "Viewer");
     RegisterField("visibleRadius", visibleRadius, "Viewer");
+    // Set by scene scripts (LandscapeDriver); serialized so test scenes can
+    // match the landscape's fields.
+    RegisterField("minimumRadiusScale", minimumRadiusScale, "Viewer");
+    RegisterField("perPlantDetail", perPlantDetail, "LOD");
+    RegisterField("fineReachFraction", fineReachFraction, "LOD");
     RegisterField("tileSize", tileSize, "Tiles");
     RegisterField("shortPatchesPerSquareMeter", shortPatchesPerSquareMeter, "Tiles");
     RegisterField("tallPatchesPerSquareMeter", tallPatchesPerSquareMeter, "Tiles");
@@ -1031,7 +1036,12 @@ bool GrassField::AdvanceBuild(Clock::time_point deadline)
 
 bool GrassField::ActivateTileLod(TileState& tile, int lod)
 {
-    if (!tile.mesh->BeginRuntimeLodTransition(lod, std::max(0.f, fadeDuration))) return false;
+    // ENGINE_GRASS_LOD_FADE_SECONDS overrides the tile LOD cross-fade (A/B runs).
+    static const float fadeOverride = [] {
+        const char* value = std::getenv("ENGINE_GRASS_LOD_FADE_SECONDS");
+        return value ? static_cast<float>(std::atof(value)) : -1.f; }();
+    if (!tile.mesh->BeginRuntimeLodTransition(lod, std::max(0.f, fadeOverride >= 0.f ? fadeOverride : fadeDuration)))
+        return false;
     tile.object->enabled = tile.mesh->GetVertexCount() > 0;
     ++m_performance.lodSwitches;
     return true;
@@ -1111,6 +1121,12 @@ bool GrassField::Refresh()
     const uint64_t signature = ComputeGenerationSignature();
     if (!m_hasGenerationSignature || signature != m_lastGenerationSignature)
     {
+        // ENGINE_GRASS_LOG=1: every regeneration (all tiles cleared and faded in again).
+        static const bool log = std::getenv("ENGINE_GRASS_LOG") != nullptr;
+        if (log && m_hasGenerationSignature)
+            std::printf("[GrassField] %s regenerates: %zu tiles, terrain revision %llu\n",
+                Owner ? Owner->name.c_str() : "?", m_tiles.size(),
+                m_cachedTerrain ? static_cast<unsigned long long>(m_cachedTerrain->GetConfigurationRevision()) : 0ull);
         ClearTiles();
         m_lastGenerationSignature = signature;
         m_hasGenerationSignature = true;
@@ -1220,7 +1236,19 @@ bool GrassField::Refresh()
             const float previousVisibility = tile.visibility;
             if (tile.mesh->GetActiveRuntimeLod() >= 0)
             {
-                const float step = fadeDuration > 0.f ? delta / fadeDuration : 1.f;
+                // ENGINE_GRASS_LOG=1: where each tile starts to fade in, against the range.
+                static const bool log = std::getenv("ENGINE_GRASS_LOG") != nullptr;
+                if (log && tile.appearance <= 0.f)
+                    std::printf("[GrassField] f%llu %s tile (%d,%d) appears: nearest edge %.1f m, radius %.1f m, "
+                        "centre %.1f m\n", static_cast<unsigned long long>(scene.GetFrameIndex()),
+                        Owner ? Owner->name.c_str() : "?", x, z, edgeDistance, radius,
+                        std::sqrt(dx * dx + dz * dz));
+                // ENGINE_GRASS_APPEAR_SECONDS overrides the tile fade-in (A/B runs).
+                static const float appearOverride = [] {
+                    const char* value = std::getenv("ENGINE_GRASS_APPEAR_SECONDS");
+                    return value ? static_cast<float>(std::atof(value)) : -1.f; }();
+                const float appear = appearOverride >= 0.f ? appearOverride : fadeDuration;
+                const float step = appear > 0.f ? delta / appear : 1.f;
                 tile.appearance = std::min(1.f, tile.appearance + step);
                 tile.visibility = tile.appearance * targetVisibility;
                 tile.mesh->SetRuntimeVisibility(tile.visibility);
@@ -1273,6 +1301,12 @@ bool GrassField::Refresh()
         const float edgeZ = std::max(0.f, std::abs((it->first.second + .5f) * span - local.z) - span * .5f);
         if (edgeX * edgeX + edgeZ * edgeZ <= retentionRadius * retentionRadius)
         {
+            // ENGINE_GRASS_LOG=1: a tile in reach goes dormant (its fade restarts if wanted again).
+            static const bool logDormant = std::getenv("ENGINE_GRASS_LOG") != nullptr;
+            if (logDormant && it->second.appearance > 0.f)
+                std::printf("[GrassField] f%llu %s tile (%d,%d) dormant: nearest edge %.1f m, radius %.1f m\n",
+                    static_cast<unsigned long long>(scene.GetFrameIndex()), Owner ? Owner->name.c_str() : "?",
+                    it->first.first, it->first.second, std::sqrt(edgeX * edgeX + edgeZ * edgeZ), radius);
             it->second.object->enabled = false;
             it->second.visibility = it->second.appearance = 0.f;
             it->second.mesh->SetRuntimeVisibility(0.f);

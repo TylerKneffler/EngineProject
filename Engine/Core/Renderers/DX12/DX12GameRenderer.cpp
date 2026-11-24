@@ -325,6 +325,7 @@ void DX12GameRenderer::EndFrame()
     m_postProcess.SetSceneDepth(m_depthStencil.Get());
     m_postProcess.Compose(m_commandList.Get(), GetCurrentRTV());
     if (m_captureRequested) RecordSceneCapture();
+    if (m_asyncCaptureRequested) RecordAsyncSceneCapture();
     // This renderer submits directly through DX12. No interop overlay remains
     // to transition the swap-chain buffer on our behalf.
     D3D12_RESOURCE_BARRIER presentBarrier{};
@@ -382,6 +383,12 @@ void DX12GameRenderer::EndFrame()
     // the slot that was just rendered, not the next one.
     m_fenceValues[m_frameIndex] = ++m_fenceValue;
     ThrowIfFailed(m_commandQueue->Signal(m_fence.Get(), m_fenceValues[m_frameIndex]));
+    // An async capture recorded this frame is readable once this value lands.
+    if (m_asyncCaptureRecorded >= 0)
+    {
+        m_asyncCaptures[size_t(m_asyncCaptureRecorded)].fence = m_fenceValues[m_frameIndex];
+        m_asyncCaptureRecorded = -1;
+    }
 
     // ---- Advance to the next back-buffer slot ----
     // For FLIP_DISCARD swap chains, GetCurrentBackBufferIndex() cycles
@@ -443,6 +450,100 @@ void DX12GameRenderer::RecordSceneCapture()
         barrier.Transition.StateAfter);
     m_commandList->ResourceBarrier(1, &barrier);
     m_captureRequested = false;
+}
+
+// Async capture: the composed frame into a free ring entry. When every entry
+// is still waiting to be taken the frame is skipped rather than stalled.
+void DX12GameRenderer::RecordAsyncSceneCapture()
+{
+    m_asyncCaptureRequested = false;
+    auto* sceneColor = m_renderTargets[m_frameIndex].Get();
+    if (!sceneColor || !m_device) return;
+    size_t index = m_asyncCaptures.size();
+    for (size_t i = 0; i < m_asyncCaptures.size() && index == m_asyncCaptures.size(); ++i)
+        if (!m_asyncCaptures[i].pending) index = i;
+    if (index == m_asyncCaptures.size()) return;
+    auto& entry = m_asyncCaptures[index];
+    const auto desc = sceneColor->GetDesc();
+    D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint{};
+    UINT64 bytes = 0;
+    m_device->GetCopyableFootprints(&desc, 0, 1, 0, &footprint, nullptr, nullptr, &bytes);
+    if (!entry.buffer || entry.buffer->GetDesc().Width < bytes)
+    {
+        D3D12_HEAP_PROPERTIES heap{};
+        heap.Type = D3D12_HEAP_TYPE_READBACK;
+        D3D12_RESOURCE_DESC buffer{};
+        buffer.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+        buffer.Width = bytes;
+        buffer.Height = 1;
+        buffer.DepthOrArraySize = 1;
+        buffer.MipLevels = 1;
+        buffer.SampleDesc.Count = 1;
+        buffer.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+        entry.buffer.Reset();
+        ThrowIfFailed(m_device->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &buffer,
+            D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&entry.buffer)));
+    }
+    entry.rowPitch = footprint.Footprint.RowPitch;
+    entry.bytes = bytes;
+    entry.width = static_cast<uint32_t>(desc.Width);
+    entry.height = desc.Height;
+    entry.tag = m_asyncCaptureTag;
+    entry.fence = 0;
+    entry.pending = true;
+    D3D12_RESOURCE_BARRIER barrier{};
+    barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    barrier.Transition.pResource = sceneColor;
+    barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
+    barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_SOURCE;
+    barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    m_commandList->ResourceBarrier(1, &barrier);
+    D3D12_TEXTURE_COPY_LOCATION source{};
+    source.pResource = sceneColor;
+    source.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+    D3D12_TEXTURE_COPY_LOCATION destination{};
+    destination.pResource = entry.buffer.Get();
+    destination.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+    destination.PlacedFootprint = footprint;
+    m_commandList->CopyTextureRegion(&destination, 0, 0, 0, &source, nullptr);
+    std::swap(barrier.Transition.StateBefore, barrier.Transition.StateAfter);
+    m_commandList->ResourceBarrier(1, &barrier);
+    m_asyncCaptureRecorded = static_cast<int>(index);
+}
+
+bool DX12GameRenderer::TakeAsyncSceneCapture(std::vector<uint8_t>& rgba, uint32_t& width,
+    uint32_t& height, uint64_t& tag)
+{
+    if (!m_fence) return false;
+    const uint64_t completed = m_fence->GetCompletedValue();
+    AsyncCapture* oldest = nullptr;
+    for (auto& entry : m_asyncCaptures)
+        if (entry.pending && entry.fence && entry.fence <= completed && (!oldest || entry.tag < oldest->tag))
+            oldest = &entry;
+    if (!oldest) return false;
+    void* mapped = nullptr;
+    D3D12_RANGE readRange{0, static_cast<SIZE_T>(oldest->bytes)};
+    if (FAILED(oldest->buffer->Map(0, &readRange, &mapped)) || !mapped)
+    { oldest->pending = false; return false; }
+    const size_t rowBytes = static_cast<size_t>(oldest->width) * 4;
+    rgba.resize(rowBytes * oldest->height);
+    for (uint32_t y = 0; y < oldest->height; ++y)
+        std::memcpy(rgba.data() + y * rowBytes, static_cast<const uint8_t*>(mapped) +
+            static_cast<size_t>(y) * oldest->rowPitch, rowBytes);
+    D3D12_RANGE writeRange{0, 0};
+    oldest->buffer->Unmap(0, &writeRange);
+    width = oldest->width;
+    height = oldest->height;
+    tag = oldest->tag;
+    oldest->pending = false;
+    return true;
+}
+
+uint32_t DX12GameRenderer::PendingAsyncSceneCaptures() const
+{
+    uint32_t pending = 0;
+    for (const auto& entry : m_asyncCaptures) pending += entry.pending ? 1u : 0u;
+    return pending;
 }
 
 bool DX12GameRenderer::ReadSceneCaptureRGBA(std::vector<uint8_t>& pixels,

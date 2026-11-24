@@ -79,7 +79,6 @@ void TerrainManager::UpdateStreamingAtPosition(
     const auto farObjectsStart = std::chrono::steady_clock::now();
     UpdateNearObjects();
     UpdateFarObjects(centerX, centerY);
-    UpdateFarStamps(centerX, centerY);
     m_lastStreamingTiming.farObjectsMs = std::chrono::duration<double, std::milli>(
         std::chrono::steady_clock::now() - farObjectsStart).count();
 }
@@ -347,8 +346,6 @@ void TerrainManager::StreamCells(int centerX, int centerY, int initialRadius)
             task.hasSaved = saved != m_cells.end();
             if (task.hasSaved) task.saved = saved->second;
             task.builder = m_proceduralBuilder;
-            task.stamps = m_stampProvider;
-            task.stampMaterials = m_stampMaterials;
             task.compactMesh = UsesCompactCellVertices();
             task.layerGenerator = m_objectLayerGenerator;
             if (!task.hasSaved && !task.builder &&

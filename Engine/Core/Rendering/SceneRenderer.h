@@ -574,6 +574,10 @@ private:
     struct MaterialShaderPipeline
     {
         std::unique_ptr<IPipelineState> pipeline;
+        // The pipeline from before a source change, still drawn with while
+        // the new one compiles (draws would otherwise vanish meanwhile);
+        // retired once `pipeline` is built.
+        std::unique_ptr<IPipelineState> previous;
         int64_t sourceStamp = 0;
         std::string error;
         MaterialShaderFuture bytecode;
@@ -616,6 +620,13 @@ private:
     // Structure revision the far shadow tile was last rendered with
     // (SceneRendererShadows): it refreshes when objects stream in or out.
     uint64_t m_directionalShadowFarStructureRevision = 0;
+    // Shadow content each cached cascade was last rendered with: a signature
+    // of the casters (and their instance blocks) inside its light-space
+    // square (SceneRendererShadows). A stepped cascade whose casters changed
+    // since (trees streamed in or out, a near/far block hand-off) refreshes,
+    // instead of keeping their old shadows until the camera crosses a step.
+    std::array<uint64_t, 4> m_directionalShadowCascadeContent{ 0u, 0u, 0u, 0u };
+    uint32_t m_directionalShadowContentCursor = 0;
     struct PortalShadowCacheEntry
     {
         uint64_t key = 0;

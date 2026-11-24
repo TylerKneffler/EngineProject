@@ -50,8 +50,6 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
         ? std::clamp(editorRadius, 0, 32)
         : std::clamp(loadedRadius, 0, 32);
     const auto visible = [this, nearRadius](int x, int y, int cx, int cy) {
-        // Cliff cells past the loaded rings draw as far stamp cells.
-        if (FarStampShowing({x, y})) return false;
         if (std::max(std::abs(x - cx), std::abs(y - cy)) > nearRadius)
             return true;
         const Terrain* nearTerrain = GetLoadedCell(x, y);
@@ -611,13 +609,7 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
             centerX - (parent.endX - 1)});
         const int dy = std::max({parent.startY - centerY, 0,
             centerY - (parent.endY - 1)});
-        // Tiles holding a far stamp cell keep cell detail too, as edited
-        // patches do: only that level can leave a cell out.
-        bool hasPatch = parent.containsEditedPatch;
-        for (const auto& [cell, entry] : m_farStamps)
-            if (!hasPatch && cell.first >= parent.startX && cell.first < parent.endX &&
-                cell.second >= parent.startY && cell.second < parent.endY && FarStampShowing(cell))
-                hasPatch = true;
+        const bool hasPatch = parent.containsEditedPatch;
         const bool outsideNear = std::max(dx, dy) > nearRadius + 1;
         if (!outsideNear || hasPatch)
             parent.coarseSelected = false;
@@ -1116,13 +1108,6 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
                                                 nearTerrain->weights,
                                                 static_cast<uint32_t>(
                                                     nearTerrain->layers.size())};
-                                        // A far stamp cell: its archive heights,
-                                        // which its edges are built from.
-                                        else if (FarStampShowing(neighbor))
-                                            if (const auto* surface = seamSurface(
-                                                    neighbor.first, neighbor.second))
-                                                task.seams[neighbor] = {*surface->heights,
-                                                    *surface->weights, surface->layerCount};
                                     }
                                 }
                             for (size_t patchIndex : tile.patchIndices)
@@ -1602,8 +1587,7 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
         recordVisibility();
         tile.patchVertexOffsets = std::move(patchOffsets);
         // The CPU occlusion buffer gets the coarse grid only: full-resolution
-        // patches (sculpted and cliff cells, which follow the grid in the
-        // vertex list) added ~285k occluder triangles and ~3.5 ms to the
+        // patches (which follow the grid in the vertex list) added ~285k occluder triangles and ~3.5 ms to the
         // forest walk (2026-11-22). Their cells are holes in this occluder,
         // which only culls a little less.
         tile.mesh->occluderIndices.clear();

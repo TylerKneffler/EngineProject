@@ -126,10 +126,16 @@ void SceneRendererFramePreparation::PrepareFrameItems(
     // the prepared transform hierarchy the test is read-only
     // (TransformHierarchy::Prepare settled their world revisions), so it runs
     // on the workers below; everything else is tested in the serial loop.
+    // ENGINE_STATIC_ITEM_CACHE=0 rebuilds every item every frame (A/B runs).
+    static const bool staticItemCache = []
+    {
+        const char* setting = std::getenv("ENGINE_STATIC_ITEM_CACHE");
+        return !(setting && setting[0] == '0');
+    }();
     const auto isStaticCandidate = [&](const SceneRenderer::FrameComponentLookup& lookup)
     {
         const auto* mesh = lookup.mesh;
-        return mesh && !lookup.sprite && !lookup.skinnedMesh &&
+        return staticItemCache && mesh && !lookup.sprite && !lookup.skinnedMesh &&
             !hasActiveWarpVolume && !renderer.GetViewOverlays().previewObject &&
             (!(mesh->gpuLodSelection || mesh->screenLodSelection) || mesh->IsInstanced()) &&
             !mesh->HasMorphTargets() && !mesh->HasSurfaceOffsets() &&
