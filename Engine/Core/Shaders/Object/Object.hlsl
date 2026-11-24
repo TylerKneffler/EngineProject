@@ -82,6 +82,11 @@ struct ObjectData
     // x = the view's mip bias (<= 0) while TAA upscales it from a lower
     // render size, so textures keep the output's sharpness; yzw reserved.
     float4 viewTextureParams;
+    // Shadow atlas tiles: x = each cascade's tile (3 bits per cascade); y, z
+    // = refresh blend slots (cascade + 8 * previous tile, -1 idle); w = rows.
+    float4 shadowAtlasTiles;
+    // Per blend slot: clip offset to the previous image (xyz), new weight (w).
+    float4 shadowRefreshBlend[2];
 };
 
 struct SceneLightData
@@ -437,6 +442,11 @@ void VSMain(
     float3 grassRoot = float3(0, 0, 0);
     float3 grassUp = float3(0, 1, 0);
     float3 grassScaleRow = float3(1, 0, 0);
+    // Octahedral impostors (below): the crown centre (uvChannels2.xyz) and the
+    // placement's own X and Z axes, through the instance transform.
+    float3 octahedralCenter = uvChannels2.xyz;
+    float3 instanceAxisX = float3(1, 0, 0);
+    float3 instanceAxisZ = float3(0, 0, 1);
     [branch] if ((draw.drawFlags & 0x20000000u) != 0u)
     {
         InstanceTransform instance = meshInstances[(draw.drawFlags & 0x01000000u) != 0u ? instanceId * 2 + 1 :
@@ -449,6 +459,11 @@ void VSMain(
         grassRoot = float3(instance.row0.w, instance.row1.w, instance.row2.w);
         grassUp = float3(instance.row0.y, instance.row1.y, instance.row2.y);
         grassScaleRow = instance.row0.xyz;
+        instanceAxisX = float3(instance.row0.x, instance.row1.x, instance.row2.x);
+        instanceAxisZ = float3(instance.row0.z, instance.row1.z, instance.row2.z);
+        octahedralCenter = float3(dot(instance.row0, float4(octahedralCenter, 1.0)),
+            dot(instance.row1, float4(octahedralCenter, 1.0)),
+            dot(instance.row2, float4(octahedralCenter, 1.0)));
         localPosition = float4(dot(instance.row0, localPosition),
             dot(instance.row1, localPosition), dot(instance.row2, localPosition), 1.0);
         localNormal = float3(dot(instance.row0.xyz, localNormal),
@@ -602,6 +617,7 @@ void VSMain(
     // horizontal top-down card only shows when looking steeply down.
     float billboardAlpha = 1.0;
     float billboardFade = 1.0;
+    float billboardStart = 0.0;
     [branch] if (((uint)objectData.materialParams.w & 1024u) != 0u)
     {
         const float3 axis = worldUp / upLength;
@@ -618,7 +634,73 @@ void VSMain(
         float3 cameraFlat = toCamera - axis * dot(toCamera, axis);
         const float flatLength = length(cameraFlat);
         const float axisFacing = dot(worldNormal, axis);
-        if (abs(axisFacing) > 0.7)
+        [branch] if (fullUv3.x > 0.5)
+        {
+            // Hemi-octahedral impostor (tools/bake_octahedral_impostors.py):
+            // N x N views of the tree over the upper hemisphere, view (i, j)
+            // from the direction that decodes from (i, j) / (N - 1). The
+            // mesh is three quads; each takes one of the three views around
+            // the direction to the camera (or the light, for shadows), lies
+            // in that view's image plane through the crown centre, and draws
+            // the screen pixels of its barycentric weight's dither interval,
+            // so the three views blend without overlapping. The view's
+            // camera basis becomes the quad's tangent frame, so the baked
+            // normals light as the tree's own.
+            const float gridSize = fullUv3.x;
+            const uint quad = (uint)(fullUv3.y + 0.5);
+            const float3 center = mul(objectData.world, float4(octahedralCenter, 1.0)).xyz;
+            const float3 worldAxisX = mul((float3x3)objectData.world, instanceAxisX);
+            const float radius = uvChannels2.w * length(worldAxisX);
+            const float3 objectX = normalize(worldAxisX);
+            const float3 objectZ = normalize(cross(objectX, axis));
+            float3 toView = objectData.shadowCasterFade.z > 0.5 ? toCamera
+                : objectData.viewPositionAlphaCutoff.xyz - center;
+            // The light axis: either sign is the same line; take the upper one.
+            if (objectData.shadowCasterFade.z > 0.5 && dot(toView, axis) < 0.0)
+                toView = -toView;
+            float3 local = float3(dot(toView, objectX), max(dot(toView, axis), 0.0),
+                dot(toView, objectZ));
+            local /= max(abs(local.x) + abs(local.y) + abs(local.z), 1.0e-6);
+            const float2 encoded = float2(local.x + local.z, local.x - local.z) * 0.5 + 0.5;
+            const float2 grid = saturate(encoded) * (gridSize - 1.0);
+            const float2 base = clamp(floor(grid), 0.0, gridSize - 2.0);
+            const float2 f = saturate(grid - base);
+            float2 cells[3];
+            float weights[3];
+            if (f.x + f.y < 1.0)
+            {
+                cells[0] = base; cells[1] = base + float2(1, 0); cells[2] = base + float2(0, 1);
+                weights[0] = 1.0 - f.x - f.y; weights[1] = f.x; weights[2] = f.y;
+            }
+            else
+            {
+                cells[0] = base + float2(1, 1); cells[1] = base + float2(1, 0); cells[2] = base + float2(0, 1);
+                weights[0] = f.x + f.y - 1.0; weights[1] = 1.0 - f.y; weights[2] = 1.0 - f.x;
+            }
+            const float2 cell = quad == 0u ? cells[0] : (quad == 1u ? cells[1] : cells[2]);
+            const float weight = quad == 0u ? weights[0] : (quad == 1u ? weights[1] : weights[2]);
+            const float start = quad == 0u ? 0.0 : (quad == 1u ? weights[0] : weights[0] + weights[1]);
+            // The view's direction and camera basis (as the baker's).
+            const float2 centered = cell / (gridSize - 1.0) - 0.5;
+            const float px = centered.x + centered.y, pz = centered.x - centered.y;
+            const float3 viewLocal = normalize(float3(px, max(1.0 - abs(px) - abs(pz), 0.0), pz));
+            const float3 forward = normalize(objectX * viewLocal.x + axis * viewLocal.y +
+                objectZ * viewLocal.z);
+            const float3 referenceUp = viewLocal.y > 0.999 ? -objectZ : axis;
+            const float3 right = normalize(cross(referenceUp, forward));
+            const float3 up = cross(forward, right);
+            const float2 corner = localUv.xy; // 0..1, v down
+            worldPosition.xyz = weight > 0.0 ? center + (right * (corner.x * 2.0 - 1.0) +
+                up * (1.0 - corner.y * 2.0)) * radius : center;
+            localUv.xy = (cell + corner) / gridSize;
+            worldNormal = forward;
+            worldTangent = right;
+            billboardAlpha = weight;
+            // Interval mode for ApplyGeometryFade: w = 3 + end, z = start.
+            billboardFade = 3.0 + start + weight;
+            billboardStart = start;
+        }
+        else if (abs(axisFacing) > 0.7)
         {
             // sin(50) .. sin(70): top card fades in as the view steepens.
             billboardAlpha = smoothstep(0.77, 0.94, dot(toCamera, axis) / cameraDistance);
@@ -744,7 +826,10 @@ void VSMain(
     // Billboard impostor cards carry their signed dither weight in the spare
     // w of UV set 4 (their materials never sample that set).
     if (((uint)objectData.materialParams.w & 1024u) != 0u)
+    {
+        oUvChannels4.z = billboardStart;
         oUvChannels4.w = billboardFade;
+    }
     // Shrubs and bushes: their range-edge opacity (see placementDissolve).
     // Ground-cover materials never sample UV set 4.
     else if (placementDissolve)
@@ -1415,14 +1500,12 @@ float4 GatherShadowDepths(int2 origin, int2 tileMinimum, int2 tileMaximum,
     return depths;
 }
 
-float SampleDirectionalShadowCascade(ObjectData objectData,
-    uint cascade, float3 biasedPosition, int pcfRadius)
+// One atlas tile's filtered shadow at a light clip-space position. Tiles are
+// square: 2 x 2 of them, or 2 x 3 with the refresh blend's spares
+// (ObjectData::shadowAtlasTiles); a single cascade uses the whole map.
+float SampleDirectionalShadowTile(ObjectData objectData,
+    uint tile, float3 projected, int pcfRadius)
 {
-    float4 lightClip = mul(objectData.shadowViewProjections[cascade],
-        float4(biasedPosition, 1.0));
-    if (lightClip.w <= 0.0)
-        return 1.0;
-    float3 projected = lightClip.xyz / lightClip.w;
     float2 shadowUv = float2(projected.x * 0.5 + 0.5,
         0.5 - projected.y * 0.5);
     if (projected.z <= 0.0 || projected.z >= 1.0 ||
@@ -1433,9 +1516,9 @@ float SampleDirectionalShadowCascade(ObjectData objectData,
     shadowMap.GetDimensions(width, height);
     uint cascadeCount = clamp((uint)objectData.shadowCascadeData.x, 1u, 4u);
     uint tileWidth = cascadeCount > 1u ? width / 2u : width;
-    uint tileHeight = cascadeCount > 1u ? height / 2u : height;
+    uint tileHeight = cascadeCount > 1u ? tileWidth : height;
     int2 tileOrigin = cascadeCount > 1u
-        ? int2((cascade & 1u) * tileWidth, (cascade >> 1u) * tileHeight)
+        ? int2((tile & 1u) * tileWidth, (tile >> 1u) * tileHeight)
         : int2(0, 0);
     int radius = clamp(pcfRadius, 0, 4);
     // Interpolate the comparison result between neighboring texels. Snapping
@@ -1511,6 +1594,79 @@ float SampleDirectionalShadowCascade(ObjectData objectData,
     }
     float diameter = 2.0 * radius + 1.0;
     return litSamples / (diameter * diameter);
+}
+
+// The previous image during a refresh blend: one bilinear comparison (four
+// depths), not the full PCF kernel. Every shadow call site is inlined, so a
+// second full kernel per site made Object.hlsl take many minutes to compile;
+// the image being faded out needs no more than this for ~20 frames.
+float SampleDirectionalShadowTileBilinear(ObjectData objectData,
+    uint tile, float3 projected)
+{
+    float2 shadowUv = float2(projected.x * 0.5 + 0.5,
+        0.5 - projected.y * 0.5);
+    if (projected.z <= 0.0 || projected.z >= 1.0 ||
+        any(shadowUv <= 0.0) || any(shadowUv >= 1.0))
+        return 1.0;
+    uint width = 0, height = 0;
+    shadowMap.GetDimensions(width, height);
+    uint tileSize = width / 2u;
+    int2 tileOrigin = int2((tile & 1u) * tileSize, (tile >> 1u) * tileSize);
+    int2 tileMaximum = tileOrigin + int2((int)tileSize - 1, (int)tileSize - 1);
+    float2 texelPosition = shadowUv * float(tileSize) - 0.5;
+    float2 texelFraction = frac(texelPosition);
+    float receiverDepth = projected.z + objectData.shadowParams.x;
+    float4 comparisons = float4(receiverDepth.xxxx >= GatherShadowDepths(
+        tileOrigin + int2(floor(texelPosition)), tileOrigin, tileMaximum,
+        float2(width, height)));
+    return lerp(lerp(comparisons.x, comparisons.y, texelFraction.x),
+        lerp(comparisons.z, comparisons.w, texelFraction.x), texelFraction.y);
+}
+
+// A cascade's filtered shadow, from the tile that holds its image
+// (ObjectData::shadowAtlasTiles).
+float SampleDirectionalShadowCascade(ObjectData objectData,
+    uint cascade, float3 biasedPosition, int pcfRadius)
+{
+    float4 lightClip = mul(objectData.shadowViewProjections[cascade],
+        float4(biasedPosition, 1.0));
+    if (lightClip.w <= 0.0)
+        return 1.0;
+    const uint tiles = (uint)objectData.shadowAtlasTiles.x;
+    return SampleDirectionalShadowTile(objectData,
+        (tiles >> (3u * cascade)) & 7u, lightClip.xyz / lightClip.w, pcfRadius);
+}
+
+// The same, for the sun's lighting: while the cascade fades in after a
+// refresh (SceneRendererShadows refresh blend), its previous image, kept in
+// another tile and reached through the new projection plus a clip offset,
+// is blended out by the new image's weight. Only the lighting lookup blends
+// (fog shafts and canopy taps do not): every call site is inlined, and
+// blending them all more than doubled Object.hlsl's compile time.
+float SampleDirectionalShadowCascadeBlended(ObjectData objectData,
+    uint cascade, float3 biasedPosition, int pcfRadius)
+{
+    float4 lightClip = mul(objectData.shadowViewProjections[cascade],
+        float4(biasedPosition, 1.0));
+    if (lightClip.w <= 0.0)
+        return 1.0;
+    const float3 projected = lightClip.xyz / lightClip.w;
+    const uint tiles = (uint)objectData.shadowAtlasTiles.x;
+    float shadow = SampleDirectionalShadowTile(objectData,
+        (tiles >> (3u * cascade)) & 7u, projected, pcfRadius);
+    // The blend slot of this cascade, if one is active.
+    const float2 info = objectData.shadowAtlasTiles.yz;
+    const bool first = info.x >= 0.0 && ((uint)info.x & 7u) == cascade;
+    const bool second = info.y >= 0.0 && ((uint)info.y & 7u) == cascade;
+    [branch] if (first || second)
+    {
+        const float4 blend = first ? objectData.shadowRefreshBlend[0]
+            : objectData.shadowRefreshBlend[1];
+        const float previous = SampleDirectionalShadowTileBilinear(objectData,
+            (uint)(first ? info.x : info.y) >> 3u, projected + blend.xyz);
+        shadow = lerp(previous, shadow, saturate(blend.w));
+    }
+    return shadow;
 }
 
 // Terrain macro color map (TerrainManager::GetMacroColorMap), bound in the
@@ -1794,7 +1950,7 @@ float EvaluateDirectionalShadow(ObjectData objectData, SceneLightData light,
         max(objectData.shadowCascadeSplits[cascade], firstExtent);
     float3 biasedPosition = worldPosition + surfaceNormal *
         normalOffset * (cascadeExtent / firstExtent);
-    float filtered = SampleDirectionalShadowCascade(
+    float filtered = SampleDirectionalShadowCascadeBlended(
         objectData, cascade, biasedPosition, pcfRadius);
     if (cascade + 1u < cascadeCount)
     {
@@ -1809,7 +1965,7 @@ float EvaluateDirectionalShadow(ObjectData objectData, SceneLightData light,
         {
             const float nextExtent = max(cascade + 1u < 4u ?
                 objectData.shadowCascadeSplits[cascade + 1u] : cascadeExtent, cascadeExtent);
-            float nextFiltered = SampleDirectionalShadowCascade(
+            float nextFiltered = SampleDirectionalShadowCascadeBlended(
                 objectData, cascade + 1u, worldPosition + surfaceNormal *
                     normalOffset * (nextExtent / firstExtent), pcfRadius);
             filtered = lerp(filtered, nextFiltered, cascadeBlend);
@@ -2363,6 +2519,9 @@ static float g_instanceLodDistance = -1.0;
 // keeps screen hash < w, w < 0 keeps hash >= 1 - |w|. Set by the same entry
 // points from TEXCOORD7.w; only read for impostorBillboard materials.
 static float g_billboardFade = 1.0;
+// Octahedral impostor views (g_billboardFade >= 2): the start of this view's
+// dither interval, from TEXCOORD7.z; its end is g_billboardFade - 3.
+static float g_billboardStart = 0.0;
 // Shrub and bush range-edge opacity (VSMain placementDissolve), read from
 // TEXCOORD7.w by the pixel entry points; 1 for everything else.
 static float g_placementOpacity = 1.0;
@@ -2447,6 +2606,14 @@ void ApplyGeometryFade(ObjectData data, float3 worldPosition, float2 screenPosit
             ? g_billboardFade - threshold
             : threshold - (1.0 + g_billboardFade));
     }
+    // Octahedral impostor views keep the pixels whose threshold falls in
+    // their interval [start, end) of the three views' weights.
+    [branch] if (((uint)data.materialParams.w & 1024u) != 0u && g_billboardFade >= 2.0)
+    {
+        const float threshold = ScreenDitherThreshold(screenPosition, data.skinParams.z);
+        clip(min(threshold - g_billboardStart + 1.0e-4,
+            (g_billboardFade - 3.0) - threshold - 1.0e-4));
+    }
     // Screen LOD candidates were selected with per-view hysteresis. Preserve
     // appearance/range fade, but do not apply the authored distance LOD again.
     // Shadow records retain their independent distance/fixed-proxy policy.
@@ -2526,6 +2693,7 @@ float4 PSShadowMain(
 {
     g_instanceLodDistance = instanceLodDistance;
     g_billboardFade = uvChannels4.w;
+    g_billboardStart = uvChannels4.z;
     ReadPlacementOpacity(uvChannels4);
     g_triangleObject = (draw.drawFlags & 0x13080000u) != 0u ? objectIndex : draw.objectIndex;
     ObjectData objectData = objects[g_triangleObject];
@@ -4031,6 +4199,7 @@ float4 PSMain(
     g_primitiveId = primitiveId;
     g_instanceLodDistance = instanceLodDistance;
     g_billboardFade = uvChannels4.w;
+    g_billboardStart = uvChannels4.z;
     ReadPlacementOpacity(uvChannels4);
     return ApplyObjectAtmosphereFog(ObjectSurfacePS(pos, worldPos, normal, uv,
         uv1, vertexColor, tangent, uvChannels0, uvChannels1, uvChannels2,
@@ -4058,6 +4227,7 @@ float4 PSDepthEqualMain(
     g_primitiveId = primitiveId;
     g_instanceLodDistance = instanceLodDistance;
     g_billboardFade = uvChannels4.w;
+    g_billboardStart = uvChannels4.z;
     ReadPlacementOpacity(uvChannels4);
     return ApplyObjectAtmosphereFog(ObjectSurfacePS(pos, worldPos, normal, uv,
         uv1, vertexColor, tangent, uvChannels0, uvChannels1, uvChannels2,
@@ -4085,6 +4255,7 @@ float4 PSParallaxDepthMain(
     g_primitiveId = primitiveId;
     g_instanceLodDistance = instanceLodDistance;
     g_billboardFade = uvChannels4.w;
+    g_billboardStart = uvChannels4.z;
     ReadPlacementOpacity(uvChannels4);
     float4 color = ObjectSurfacePS(pos, worldPos, normal, uv, uv1, vertexColor,
         tangent, uvChannels0, uvChannels1, uvChannels2, uvChannels3,

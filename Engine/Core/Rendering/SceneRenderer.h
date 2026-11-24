@@ -273,6 +273,9 @@ public:
         // Directional cascades (atlas tiles) re-rendered this frame, as a bit
         // mask; the others were kept from earlier frames.
         uint32_t refreshedCascadeMask = 0;
+        // Grid cells of the far cascade redrawn by a region refresh this
+        // frame (0: none, or the whole tile when its bit is in the mask).
+        uint32_t farRegionCells = 0;
     };
     const ShadowCpuTiming& GetLastShadowCpuTiming() const
     {
@@ -594,6 +597,21 @@ private:
     void PublishMaterialShaderPipelines(size_t maxPipelines = 2);
     std::shared_ptr<Engine::Graphics::IGraphicsTexture> m_directionalShadowMap;
     uint32_t m_directionalShadowResolution = 0;
+    // Rows of cascade tiles in the atlas: 2 (2x2), or 3 with the refresh
+    // blend, whose two spare tiles take a refreshed cascade's new image while
+    // its previous one fades out (SceneRendererShadows).
+    uint32_t m_directionalShadowAtlasRows = 2;
+    std::array<uint32_t, 4> m_directionalShadowCascadeTile{ 0u, 1u, 2u, 3u };
+    struct DirectionalShadowRefreshBlend
+    {
+        bool active = false;
+        uint32_t cascade = 0, previousTile = 0;
+        uint64_t startFrame = 0;
+        glm::vec3 clipOffset{ 0.f };
+        float weight = 1.f;
+    };
+    std::array<DirectionalShadowRefreshBlend, 2> m_directionalShadowBlends{};
+    uint64_t m_directionalShadowBlendFrame = 0;
     Engine::Rendering::TextureFootprintCache m_textureFootprintCache;
     uint64_t m_directionalShadowAllocationGeneration = 0;
     bool m_directionalShadowCacheValid = false;
@@ -627,6 +645,16 @@ private:
     // instead of keeping their old shadows until the camera crosses a step.
     std::array<uint64_t, 4> m_directionalShadowCascadeContent{ 0u, 0u, 0u, 0u };
     uint32_t m_directionalShadowContentCursor = 0;
+public:
+    // The far cascade's caster signatures per region of a grid over its tile
+    // (SceneRendererShadows): the regions whose casters changed since they
+    // were drawn are redrawn alone, within a few frames.
+    static constexpr uint32_t kFarShadowRegionGrid = 8u;
+    using FarShadowRegionContent = std::array<uint64_t, kFarShadowRegionGrid * kFarShadowRegionGrid>;
+private:
+    FarShadowRegionContent m_directionalShadowFarRegionContent{};
+    bool m_directionalShadowFarRegionContentValid = false;
+    uint64_t m_directionalShadowFarRegionCheckFrame = 0;
     struct PortalShadowCacheEntry
     {
         uint64_t key = 0;

@@ -28,6 +28,7 @@
 #include "Core/Components/UI/UIButton.h"
 #include "Core/Components/UI/UIObject.h"
 #include "Core/Components/UI/UIText.h"
+#include "Core/Components/Path/SplineFollower.h"
 #include "Core/Components/Path/SplinePath.h"
 #include "Core/Components/Physics/RigidBody.h"
 #include "Core/Physics/Physics.h"
@@ -1208,6 +1209,15 @@ int GameApplication::Run(HINSTANCE instance, const GameBenchmarkOptions* benchma
 
     // Only the editor reads per-object scene snapshot contents.
     scene.SetSceneSnapshotObjectsEnabled(false);
+    // Captures pose and drive the player's camera (--camera-position,
+    // --viewpoint, --route, --drive-forward). A scene may start the game on a
+    // camera that follows a path (landscape demo: MeadowWalkCamera); switch
+    // those off so the game camera is the player's again.
+    if (benchmark)
+        for (const auto& object : scene.GetObjects())
+            if (object && object->GetComponent<SplineFollower>())
+                if (auto* camera = object->GetComponent<Engine::Components::Camera>())
+                    camera->active = false;
     if (benchmark && (benchmark->cameraPosition || benchmark->cameraTarget ||
         !benchmark->viewpoint.empty()))
     {

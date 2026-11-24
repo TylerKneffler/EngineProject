@@ -1,7 +1,11 @@
 {
   "version": 1,
-  "baseColor": [0.69, 0.67, 0.62],
-  "useVertexColors": true,
+  "baseColor": [
+    1,
+    1,
+    1
+  ],
+  "useVertexColors": false,
   "ambientColor": [
     0.1,
     0.115,
@@ -74,8 +78,8 @@
   "sphereTexture": "",
   "toonTexture": "",
   "alphaMode": "Mask",
-  "alphaCutoff": 0.32,
-  "normalScale": 0.55,
+  "alphaCutoff": 0.4,
+  "normalScale": 1.0,
   "heightScale": 0.05000000074505806,
   "terrainHeightBlendStrength": 0,
   "terrainMacroColor": [
@@ -96,9 +100,9 @@
   "occlusionUvSet": 0,
   "emissiveUvSet": 0,
   "heightUvSet": 0,
-  "baseColorTexture": "Assets/Other/oak_trees_pack_17var_lods_seasons_gameready/textures/Sapling_oak_tree_003_Billboard_Mat_baseColor.ktx2",
+  "baseColorTexture": "Assets/Models/Woodland/Oaks/Textures/Sapling_oak_tree_003_Octa_Color.ktx2",
   "metallicRoughnessTexture": "",
-  "normalTexture": "Assets/Other/oak_trees_pack_17var_lods_seasons_gameready/textures/Sapling_oak_tree_003_Billboard_Mat_normal.png",
+  "normalTexture": "Assets/Models/Woodland/Oaks/Textures/Sapling_oak_tree_003_Octa_Normal.ktx2",
   "occlusionTexture": "",
   "shader": "",
   "alphaCoverageTransmission": 0,

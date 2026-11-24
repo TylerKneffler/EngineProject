@@ -31,6 +31,31 @@ inline bool SteppedShadowCascades()
     return enabled;
 }
 
+// Refresh blend (on by default; ENGINE_SHADOW_REFRESH_BLEND=0 turns it off):
+// a cached cascade past the nearest that is redrawn (stepped centre moved,
+// casters changed, periodic refresh) is drawn into a spare atlas tile, and
+// receivers fade from its previous image to the new one over
+// ShadowRefreshBlendFrames() shadow frames instead of changing at once.
+inline bool ShadowRefreshBlend()
+{
+    static const bool enabled = [] {
+        const char* value = std::getenv("ENGINE_SHADOW_REFRESH_BLEND");
+        return !(value && value[0] == '0');
+    }();
+    return enabled;
+}
+
+// ENGINE_SHADOW_BLEND_FRAMES=<n> (default 20, ~1/3 s).
+inline unsigned ShadowRefreshBlendFrames()
+{
+    static const unsigned frames = [] {
+        const char* value = std::getenv("ENGINE_SHADOW_BLEND_FRAMES");
+        const int parsed = value ? std::atoi(value) : 20;
+        return unsigned(std::clamp(parsed, 1, 600));
+    }();
+    return frames;
+}
+
 // Cover a radial receiver band in every viewing direction. Neither camera
 // orientation nor lens/aspect participates in the light-space texel grid.
 // centerStep > 0 (the far cascade): the light-space center moves in steps of

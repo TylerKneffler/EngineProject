@@ -51,23 +51,31 @@ void SceneRendererDirectionalShadowSubmission::Submit(
             continue;
         renderer.m_shadowDebugSnapshot.refreshedCascadeMask |= 1u << cascade;
         renderer.m_lastShadowCpuTiming.refreshedCascadeMask |= 1u << cascade;
-        const uint32_t tileX = input.cascadeCount > 1u ? cascade & 1u : 0u;
-        const uint32_t tileY = input.cascadeCount > 1u ? cascade >> 1u : 0u;
+        // The cascade's atlas tile (2 x 2, or 2 x 3 with the refresh blend's
+        // spares; SceneRendererShadows assigns them).
+        const uint32_t tile = renderer.m_directionalShadowCascadeTile[cascade];
+        const uint32_t tileX = input.cascadeCount > 1u ? tile & 1u : 0u;
+        const uint32_t tileY = input.cascadeCount > 1u ? tile >> 1u : 0u;
+        // The rectangle redrawn: the whole tile, or a far region refresh's
+        // texels (drawn through the matching cropped projection).
+        const bool region = input.farRegionRefresh && input.cascades.hasFarCascade &&
+            cascade + 1u == input.cascadeCount;
+        const glm::uvec4 rect = region
+            ? input.farRegionPixels
+            : glm::uvec4(0u, 0u, tileResolution, tileResolution);
+        const uint32_t left = tileX * tileResolution + rect.x;
+        const uint32_t top = tileY * tileResolution + rect.y;
+        const uint32_t right = tileX * tileResolution + rect.z;
+        const uint32_t bottom = tileY * tileResolution + rect.w;
         context->SetViewport({
-            static_cast<float>(tileX * tileResolution),
-            static_cast<float>(tileY * tileResolution),
-            static_cast<float>(tileResolution),
-            static_cast<float>(tileResolution), 0.f, 1.f });
+            static_cast<float>(left), static_cast<float>(top),
+            static_cast<float>(right - left), static_cast<float>(bottom - top), 0.f, 1.f });
         context->SetScissorRect({
-            static_cast<int32_t>(tileX * tileResolution),
-            static_cast<int32_t>(tileY * tileResolution),
-            static_cast<int32_t>((tileX + 1u) * tileResolution),
-            static_cast<int32_t>((tileY + 1u) * tileResolution) });
+            static_cast<int32_t>(left), static_cast<int32_t>(top),
+            static_cast<int32_t>(right), static_cast<int32_t>(bottom) });
         if (input.preserveAtlas)
             context->ClearDepthRectangle({
-                int32_t(tileX * tileResolution), int32_t(tileY * tileResolution),
-                int32_t((tileX + 1u) * tileResolution),
-                int32_t((tileY + 1u) * tileResolution) },
+                int32_t(left), int32_t(top), int32_t(right), int32_t(bottom) },
                 Engine::Graphics::Depth::ClearValue);
 
         std::vector<uint8_t> automaticSubmitted(input.automaticGroups.size(), 0);
@@ -112,7 +120,7 @@ void SceneRendererDirectionalShadowSubmission::Submit(
                 automaticSubmitted[draw.automaticGroup] = 1;
                 const auto submitted = input.submitAutomaticGroup(
                     input.automaticGroups[draw.automaticGroup],
-                    input.cascades.viewProjections[cascade],
+                    input.drawViewProjections[cascade],
                     cascade * renderer.m_objectCapacity, resolvedPipeline,
                     &input.cascadeVisible[cascade]);
                 renderer.m_shadowDebugSnapshot.submittedCasterDrawCount +=
@@ -191,6 +199,11 @@ void SceneRendererDirectionalShadowSubmission::Submit(
     for (uint32_t cascade = 0; cascade < input.cascadeCount; ++cascade)
     {
         if (!input.dirtyMask[cascade])
+            continue;
+        // A region refresh keeps the tile's square, age and revision: the
+        // rest of the tile is still the earlier drawing.
+        if (input.farRegionRefresh && input.cascades.hasFarCascade &&
+            cascade + 1u == input.cascadeCount)
             continue;
         renderer.m_directionalShadowCachedViewProjections[cascade] =
             input.cascades.viewProjections[cascade];

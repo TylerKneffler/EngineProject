@@ -124,5 +124,14 @@ struct ObjectGPUData
     // TAA upscales it, so textures keep the output's sharpness (Object.hlsl
     // TextureLodBias, AlphaLodBias). yzw reserved.
     glm::vec4 viewTextureParams{0.f};
+    // Directional shadow atlas tiles (SceneRendererShadows, refresh blend):
+    // x = each cascade's tile, 3 bits per cascade (cascade 0 lowest); y, z =
+    // blend slots: cascade + 8 * the tile of its previous image, or -1 when
+    // idle; w = atlas rows of tiles. A refreshed cascade fades in from its
+    // previous image over a few frames instead of changing at once.
+    glm::vec4 shadowAtlasTiles{0.f + 8.f * 1.f + 64.f * 2.f + 512.f * 3.f, -1.f, -1.f, 2.f};
+    // Per blend slot: clip-space offset from the new image's projection to
+    // the previous one's (xyz), and the new image's weight (w).
+    glm::vec4 shadowRefreshBlend[2]{};
 };
 }

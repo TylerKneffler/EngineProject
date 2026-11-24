@@ -38,6 +38,12 @@ struct DirectionalShadowSubmissionContext
     SceneRendererGeometrySubmission& geometry;
     SubmitAutomaticGroup submitAutomaticGroup;
     std::chrono::steady_clock::time_point recordsUploadedAt;
+    // Projections the casters are drawn with: cascades.viewProjections,
+    // except a far region refresh's cropped one (SceneRendererShadows).
+    std::array<glm::mat4, 4> drawViewProjections{
+        glm::mat4(1.f), glm::mat4(1.f), glm::mat4(1.f), glm::mat4(1.f) };
+    bool farRegionRefresh = false;
+    glm::uvec4 farRegionPixels{ 0u };
 };
 
 class SceneRendererDirectionalShadowSubmission

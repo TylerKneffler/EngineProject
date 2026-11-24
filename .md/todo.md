@@ -59,7 +59,8 @@ to land near, not to match to the digit.
       agents/look); other foliage materials unchanged.
 - [ ] **Far forest texture and haze**: front-lit impostors are flat (no shadow between crowns) and there is no
       blue shift at 300-600 m. Needs occlusion baked into the impostor atlases (Foliage Phase 5) and a look at
-      aerial perspective strength at short range.
+      aerial perspective strength at short range. [2026-11-24: per-tree impostors are octahedral with
+      normals and occlusion (Foliage Phase 5); the cluster impostors and the haze are open.]
 - [ ] Forest interior is dark after this pass (ForestFloor whole frame 0.027, floor 0.012): check it against the
       first reference set before changing it.
 - [ ] Not re-checked after this pass: the look in the editor, grass_test coverage numbers, the moving-camera runs
@@ -388,7 +389,32 @@ for new objects, cascade blending); (3) the same captures after each fix, frame 
       frame 12.37-12.72 / 12.92-13.09 (forest), 11.23-11.69 / 12.03-12.84 (meadow), shadow GPU and record
       unchanged: within noise. `ENGINE_SHADOW_CONTENT_REFRESH=0` turns the content check off.
       Not done: blending old and new cascade images, so a refresh that does change a stale image still changes
-      it at once (now within ~2 s of it going stale, not at the next step).
+      it at once (now within ~2 s of it going stale, not at the next step). [Done 2026-11-24, below.]
+- [x] **Far tree shadows appearing late, cascade refreshes changing shadows at once** (user 2026-11-24:
+      "shadows just appearing under far trees"). Three parts, all in `SceneRendererShadows.cpp`:
+      1. Far cascade region refresh: the far tile keeps a caster signature per cell of an 8 x 8 grid
+         (`ShadowCascadeRegionContent`, same identity/revision hash as `ShadowCascadeContent`); every 4 shadow
+         frames the changed cells are found and only they are cleared and redrawn (scissor + the cached
+         projection cropped onto them, so the texels are the same), at most a quarter of the tile per refresh,
+         nearest the camera first. Before, the far tile waited for structure changes to be 240 frames old
+         (4-10 s), so streamed-in far trees had no shadow and theirs then appeared at once.
+         `ENGINE_SHADOW_FAR_REGIONS=0` restores that; frames.jsonl `shadow_far_region_cells`.
+      2. Refresh blend: the atlas has a third row of tiles (2 x 3; 24 MB at 2048 instead of 16). A cached
+         cascade past the nearest that is redrawn (stepped centre moved, casters changed, the 120/600-frame
+         refreshes) goes to a spare tile, and the lighting lookup fades from the previous image (reached
+         through the new projection plus a clip offset: stepped cascades only translate) to the new one over
+         20 frames (`ENGINE_SHADOW_BLEND_FRAMES`, `ENGINE_SHADOW_REFRESH_BLEND=0` off). ObjectGPUData +48 bytes
+         (`shadowAtlasTiles`, `shadowRefreshBlend[2]`). Only the sun-lighting lookup blends, and the old image
+         gets one bilinear tap: every call site is inlined, and blending all of them (fog shafts, canopy taps)
+         with full PCF took Object.hlsl PSMain from 156 to 343 s in fxc (now 186 s). Region refreshes are
+         not blended (they draw into the tile in place).
+      3. Tree shadow hand-off: LandscapeDriver's forest layer `shadowFadeWidth` 1 -> 30 m
+         (`ENGINE_TREE_SHADOW_FADE`): the LOD1 casters and the impostor casters cross-fade (dither) over
+         190-220 m instead of swapping at 220 m.
+      Checked on grass_test (Vulkan, wind frozen): blend/regions on vs off at a still pose 463 of 518 k
+      pixels differ, same frame time; a walk with 600-frame blends kept shadows under their trees. Not
+      checked in the landscape (too heavy for the dev PC): (1) needs far trees streaming in, (3) only exists
+      there.
 - [x] **Forest-edge trees a level down: the detail budget's floor** (user 2026-11-23: "trees on the edge of
       forest have low lod's/quality ... texture budget too low?"). Not textures: texture budget 10,688 MiB,
       ~1.7 GB used. The detail budget sat at its 0.6 floor on every frame of every walk (its geometry estimate
@@ -1532,8 +1558,21 @@ Progress 2026-11-19 (landscape ForestEdge, DX12 1080p, single runs; frame / upda
       and `dry_grass_clump` grows on the forest floor; a dry species mixed by the dry/lush noise is open.
 
 ### Foliage Phase 5: Trees
-- [ ] **Octahedral impostors** (normals + depth + occlusion atlases) replacing the 6-view + top bake, lit
-      with the Phase 1 leaf model so far trees keep translucency and dark interiors.
+- [x] **Octahedral impostors** (2026-11-24): `tools/bake_octahedral_impostors.py` rebakes every tree's far
+      level (Oaks, Conifers, Broadleaf: 23) as a hemi-octahedral impostor, 8 x 8 views of 128 px (1024 colour
+      and normal atlases, `<Tree>_Octa_{Color,Normal}.ktx2`), from the prefab's LOD1 parts with their own
+      textures (cooked textures read with the new `TextureCook --decode`, since the generators' PNG sources
+      are not kept). Views carry real normals (rounded toward the crown) and an occlusion term (dark deep in
+      the crown and low down). The impostor mesh and material are overwritten in place (prefabs unchanged).
+      Object.hlsl VSMain: three quads, each takes one of the three views around the direction to the camera
+      (or the light, in shadow passes), lies in that view's plane through the crown centre, and draws the
+      pixels of its barycentric weight's dither interval (ApplyGeometryFade interval mode); the view's camera
+      basis is the tangent frame, so the baked normals light with the leaf model. Detected per mesh
+      (uvChannels[3].x = grid size); cluster impostors keep the 6-view path. spin_test from 100+ m, sun
+      behind: forest mean colour (17, 24, 15) against (17, 23, 18) with full meshes, same silhouettes,
+      6.7 ms against 18 ms. Left: depth atlas (no per-pixel depth or parallax; impostors intersect as flat
+      quads), soft at the 33-60 m forced test distance (128 px views; meant for 220 m+), the cluster
+      impostors.
 - [ ] Tropical set if the game needs it (palms, mangroves, broadleaf shrubs): palm generator with frond
       cards; mangrove prop roots. Decide with the biome plan.
 

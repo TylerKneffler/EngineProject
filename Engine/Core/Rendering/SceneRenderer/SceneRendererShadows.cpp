@@ -11,6 +11,8 @@
 #include <array>
 #include <cmath>
 #include <cstdlib>
+#include <utility>
+#include <vector>
 
 namespace Engine::Rendering
 {
@@ -28,20 +30,21 @@ uint64_t MixShadowContent(uint64_t value)
 // instance blocks, which carry world bounds) whose world box overlaps it, of
 // their identity and instance/geometry revision. It changes when casters
 // there stream in or out, are swapped (near/far blocks) or change placements.
-template<class Items>
-uint64_t ShadowCascadeContent(const Items& items, const glm::mat4& viewProjection)
+// Visits every shadow-casting item (instance blocks of shared prefab parts
+// separately) with its world box projected into light clip space:
+// visit(minX, maxX, minY, maxY, hash). Orthographic: w = 1; a box's projected
+// half extent is |M| * extent.
+template<class Items, class Visit>
+void ForEachShadowCaster(const Items& items, const glm::mat4& m, Visit&& visit)
 {
-    const glm::mat4& m = viewProjection;
-    // Orthographic: w = 1; a box's projected half extent is |M| * extent.
-    const auto overlaps = [&](const glm::vec3& minimum, const glm::vec3& maximum)
+    const auto project = [&](const glm::vec3& minimum, const glm::vec3& maximum, uint64_t hash)
     {
         const glm::vec3 centre = (minimum + maximum) * .5f, extent = (maximum - minimum) * .5f;
         const glm::vec4 p = m * glm::vec4(centre, 1.f);
         const float ex = std::abs(m[0][0]) * extent.x + std::abs(m[1][0]) * extent.y + std::abs(m[2][0]) * extent.z;
         const float ey = std::abs(m[0][1]) * extent.x + std::abs(m[1][1]) * extent.y + std::abs(m[2][1]) * extent.z;
-        return std::abs(p.x) <= 1.f + ex && std::abs(p.y) <= 1.f + ey;
+        visit(p.x - ex, p.x + ex, p.y - ey, p.y + ey, hash);
     };
-    uint64_t signature = 0;
     for (const auto& item : items)
     {
         const auto* mesh = item.mesh;
@@ -49,21 +52,101 @@ uint64_t ShadowCascadeContent(const Items& items, const glm::mat4& viewProjectio
         if (mesh->UsesInstanceBlocks())
         {
             for (const auto& block : mesh->GetInstanceBlocks())
-                if (block.data && overlaps(block.minimum, block.maximum))
-                    signature += MixShadowContent(uint64_t(reinterpret_cast<uintptr_t>(block.data.get())) ^
+                if (block.data)
+                    project(block.minimum, block.maximum,
+                        MixShadowContent(uint64_t(reinterpret_cast<uintptr_t>(block.data.get())) ^
                         (block.data->revision * 0x9e3779b97f4a7c15ull) ^
-                        uint64_t(reinterpret_cast<uintptr_t>(mesh)) * 31u);
+                        uint64_t(reinterpret_cast<uintptr_t>(mesh)) * 31u));
             continue;
         }
         if (!item.hasBounds) continue;
         const auto bounds = TransformBounds(item.boundsMinimum, item.boundsMaximum, item.world);
-        if (!overlaps(bounds.minimum, bounds.maximum)) continue;
         const auto& instances = mesh->GetInstanceData();
         const uint64_t revision = instances ? instances->revision : mesh->GetAuthoredGeometryRevision();
-        signature += MixShadowContent(uint64_t(reinterpret_cast<uintptr_t>(mesh)) ^
-            (revision * 0x9e3779b97f4a7c15ull));
+        project(bounds.minimum, bounds.maximum,
+            MixShadowContent(uint64_t(reinterpret_cast<uintptr_t>(mesh)) ^
+            (revision * 0x9e3779b97f4a7c15ull)));
     }
+}
+
+template<class Items>
+uint64_t ShadowCascadeContent(const Items& items, const glm::mat4& viewProjection)
+{
+    uint64_t signature = 0;
+    ForEachShadowCaster(items, viewProjection,
+        [&](float x0, float x1, float y0, float y1, uint64_t hash)
+        {
+            if (x1 >= -1.f && x0 <= 1.f && y1 >= -1.f && y0 <= 1.f)
+                signature += hash;
+        });
     return signature ? signature : 1u;
+}
+
+// The same signature per region of a kFarShadowRegionGrid x kFarShadowRegionGrid
+// grid over the cascade's tile (row 0 at the top, as the atlas is addressed).
+// A caster adds to every region its light-space box touches.
+template<class Items>
+SceneRenderer::FarShadowRegionContent ShadowCascadeRegionContent(
+    const Items& items, const glm::mat4& viewProjection)
+{
+    constexpr int grid = int(SceneRenderer::kFarShadowRegionGrid);
+    SceneRenderer::FarShadowRegionContent regions{};
+    ForEachShadowCaster(items, viewProjection,
+        [&](float x0, float x1, float y0, float y1, uint64_t hash)
+        {
+            if (x1 < -1.f || x0 > 1.f || y1 < -1.f || y0 > 1.f) return;
+            const auto cell = [&](float uv)
+            { return std::clamp(int(std::floor(uv * grid)), 0, grid - 1); };
+            const int c0 = cell(x0 * .5f + .5f), c1 = cell(x1 * .5f + .5f);
+            const int r0 = cell(.5f - y1 * .5f), r1 = cell(.5f - y0 * .5f);
+            for (int r = r0; r <= r1; ++r)
+                for (int c = c0; c <= c1; ++c)
+                    regions[size_t(r * grid + c)] += hash;
+        });
+    return regions;
+}
+
+// Far cascade regions to redraw, as an inclusive rectangle of grid cells
+// {c0, r0, c1, r1}: the changed region nearest the camera, grown over the
+// other changed regions while the rectangle stays within maxCells cells. The
+// regions left out stay changed and are picked up on a later frame.
+bool ChooseFarShadowRegions(const SceneRenderer::FarShadowRegionContent& current,
+    const SceneRenderer::FarShadowRegionContent& cached, glm::vec2 cameraCell,
+    uint32_t maxCells, glm::ivec4& rectangle)
+{
+    constexpr int grid = int(SceneRenderer::kFarShadowRegionGrid);
+    std::vector<std::pair<float, int>> changed;
+    for (int index = 0; index < grid * grid; ++index)
+        if (current[size_t(index)] != cached[size_t(index)])
+        {
+            const glm::vec2 centre(float(index % grid) + .5f, float(index / grid) + .5f);
+            changed.emplace_back(glm::length(centre - cameraCell), index);
+        }
+    if (changed.empty()) return false;
+    std::sort(changed.begin(), changed.end());
+    const int first = changed.front().second;
+    rectangle = { first % grid, first / grid, first % grid, first / grid };
+    for (size_t i = 1; i < changed.size(); ++i)
+    {
+        const int c = changed[i].second % grid, r = changed[i].second / grid;
+        const glm::ivec4 grown{ std::min(rectangle.x, c), std::min(rectangle.y, r),
+            std::max(rectangle.z, c), std::max(rectangle.w, r) };
+        if (uint32_t((grown.z - grown.x + 1) * (grown.w - grown.y + 1)) <= maxCells)
+            rectangle = grown;
+    }
+    return true;
+}
+
+// ENGINE_SHADOW_FAR_REGIONS=0 turns region refresh of the far cascade off
+// (A/B runs): it then refreshes whole when casters changed, at most every 240
+// shadow frames, as before 2026-11-24.
+bool FarShadowRegionRefresh()
+{
+    static const bool enabled = [] {
+        const char* value = std::getenv("ENGINE_SHADOW_FAR_REGIONS");
+        return !(value && value[0] == '0');
+    }();
+    return enabled;
 }
 }
 using Scene = Engine::Scene::Scene;
@@ -173,6 +256,9 @@ SceneRendererShadows::PrepareResult SceneRendererShadows::PrepareDirectionalShad
     bool renderMainDirectionalShadow = shadowSelection.valid;
     std::array<uint8_t, 4> directionalShadowDirtyMask{};
     bool preserveDirectionalShadowAtlas = false;
+    bool farRegionResult = false;
+    glm::uvec4 farRegionPixels{};
+    glm::mat4 farRegionViewProjection(1.f);
     if (shadowSelection.valid)
     {
         ++renderer.m_directionalShadowFrameCounter;
@@ -199,6 +285,9 @@ SceneRendererShadows::PrepareResult SceneRendererShadows::PrepareDirectionalShad
         if (shadowOnly)
         {
             bool staggerMovingCascades = false;
+            bool farRegionRefresh = false;
+            glm::ivec4 farRegionCells{};
+            SceneRenderer::FarShadowRegionContent pendingFarRegionContent{};
             auto copyCachedCascades = [&]()
             {
                 mainShadowCascades.viewProjections =
@@ -306,8 +395,44 @@ SceneRendererShadows::PrepareResult SceneRendererShadows::PrepareDirectionalShad
                             renderer.m_directionalShadowCascadeLastRenderedFrame[farCascade];
                         const bool contentChanged = scene.GetStructureRevision() !=
                             renderer.m_directionalShadowFarStructureRevision;
-                        if ((contentChanged && age >= 240u) || age >= 600u)
+                        if (directionalShadowDirtyMask[farCascade]) {}
+                        else if (age >= 600u ||
+                            (contentChanged && age >= 240u && !FarShadowRegionRefresh()))
                             directionalShadowDirtyMask[farCascade] = 1u;
+                        // Casters that streamed in or out (a far tree block, a
+                        // near/far hand-off) are drawn within a few frames by
+                        // redrawing only the regions of the tile whose casters
+                        // changed, instead of the whole tile 4-10 s later (far
+                        // trees showed up without shadows, which then appeared
+                        // at once). Checked every 4 shadow frames; at most a
+                        // quarter of the tile per refresh, nearest first.
+                        else if (FarShadowRegionRefresh() &&
+                            renderer.m_directionalShadowFarRegionContentValid &&
+                            context->SupportsDepthRectangleClear() &&
+                            renderer.m_directionalShadowFrameCounter -
+                                renderer.m_directionalShadowFarRegionCheckFrame >= 4u)
+                        {
+                            renderer.m_directionalShadowFarRegionCheckFrame =
+                                renderer.m_directionalShadowFrameCounter;
+                            const glm::mat4& farViewProjection =
+                                renderer.m_directionalShadowCachedViewProjections[farCascade];
+                            pendingFarRegionContent = ShadowCascadeRegionContent(
+                                renderer.m_frameRenderItems, farViewProjection);
+                            const glm::vec4 cameraClip = farViewProjection *
+                                glm::vec4(cameraPosition, 1.f);
+                            constexpr float grid = float(SceneRenderer::kFarShadowRegionGrid);
+                            const glm::vec2 cameraCell((cameraClip.x * .5f + .5f) * grid,
+                                (.5f - cameraClip.y * .5f) * grid);
+                            constexpr uint32_t maxCells = SceneRenderer::kFarShadowRegionGrid *
+                                SceneRenderer::kFarShadowRegionGrid / 4u;
+                            if (ChooseFarShadowRegions(pendingFarRegionContent,
+                                    renderer.m_directionalShadowFarRegionContent,
+                                    cameraCell, maxCells, farRegionCells))
+                            {
+                                farRegionRefresh = true;
+                                directionalShadowDirtyMask[farCascade] = 1u;
+                            }
+                        }
                     }
                     // Stepped middle cascades refresh only when the camera
                     // crosses a step, so casters that streamed in or out (or a
@@ -379,11 +504,140 @@ SceneRendererShadows::PrepareResult SceneRendererShadows::PrepareDirectionalShad
                     if (directionalShadowDirtyMask[cascade])
                         renderer.m_directionalShadowCascadeContent[cascade] = ShadowCascadeContent(
                             renderer.m_frameRenderItems, requestedShadowCascades.viewProjections[cascade]);
+            // The far cascade's region signatures: all of them after a whole
+            // refresh (in its new light-space square), those inside the
+            // rectangle after a region refresh (the others wait their turn).
+            if (requestedShadowCascades.hasFarCascade)
+            {
+                const uint32_t farCascade = requestedShadowCascades.count - 1u;
+                if (!directionalShadowDirtyMask[farCascade])
+                    farRegionRefresh = false;
+                else if (farRegionRefresh)
+                {
+                    constexpr int grid = int(SceneRenderer::kFarShadowRegionGrid);
+                    for (int r = farRegionCells.y; r <= farRegionCells.w; ++r)
+                        for (int c = farRegionCells.x; c <= farRegionCells.z; ++c)
+                            renderer.m_directionalShadowFarRegionContent[size_t(r * grid + c)] =
+                                pendingFarRegionContent[size_t(r * grid + c)];
+                    const uint32_t tileResolution = requestedShadowCascades.count > 1u
+                        ? std::max(1u, renderer.m_directionalShadowResolution / 2u)
+                        : renderer.m_directionalShadowResolution;
+                    const auto pixel = [&](int cell)
+                    { return uint32_t(uint64_t(cell) * tileResolution / uint32_t(grid)); };
+                    farRegionPixels = { pixel(farRegionCells.x), pixel(farRegionCells.y),
+                        pixel(farRegionCells.z + 1), pixel(farRegionCells.w + 1) };
+                    // Same texels as the whole tile: the cached projection
+                    // followed by a clip-space crop onto the rectangle, which
+                    // the viewport then maps back onto the same atlas texels
+                    // (row 0 at the top: v = 0.5 - 0.5 y on every backend).
+                    const float size = float(tileResolution);
+                    const float x0 = farRegionPixels.x / size * 2.f - 1.f;
+                    const float x1 = farRegionPixels.z / size * 2.f - 1.f;
+                    const float yTop = 1.f - farRegionPixels.y / size * 2.f;
+                    const float yBottom = 1.f - farRegionPixels.w / size * 2.f;
+                    glm::mat4 crop(1.f);
+                    crop[0][0] = 2.f / (x1 - x0);
+                    crop[1][1] = 2.f / (yTop - yBottom);
+                    crop[3][0] = -(x0 + x1) / (x1 - x0);
+                    crop[3][1] = -(yTop + yBottom) / (yTop - yBottom);
+                    farRegionViewProjection = crop *
+                        renderer.m_directionalShadowCachedViewProjections[farCascade];
+                    renderer.m_lastShadowCpuTiming.farRegionCells = uint32_t(
+                        (farRegionCells.z - farRegionCells.x + 1) * (farRegionCells.w - farRegionCells.y + 1));
+                }
+                else
+                {
+                    renderer.m_directionalShadowFarRegionContent = ShadowCascadeRegionContent(
+                        renderer.m_frameRenderItems, requestedShadowCascades.viewProjections[farCascade]);
+                    renderer.m_directionalShadowFarRegionContentValid = true;
+                }
+            }
+            // Refresh blend: advance the fades in progress, then send each
+            // redrawn cached cascade (past the nearest) to a spare tile and
+            // fade its receivers over from the image it replaces.
+            const bool blendAtlas = Engine::Rendering::ShadowRefreshBlend() &&
+                renderer.m_directionalShadowAtlasRows == 3u &&
+                requestedShadowCascades.count > 1u &&
+                context->SupportsDepthRectangleClear();
+            auto& tiles = renderer.m_directionalShadowCascadeTile;
+            auto& blends = renderer.m_directionalShadowBlends;
+            ++renderer.m_directionalShadowBlendFrame;
+            if (!blendAtlas || !cacheReusable)
+            {
+                tiles = { 0u, 1u, 2u, 3u };
+                for (auto& blend : blends) blend = {};
+            }
+            else
+            {
+                const float blendFrames = float(Engine::Rendering::ShadowRefreshBlendFrames());
+                for (auto& blend : blends)
+                    if (blend.active)
+                    {
+                        blend.weight = float(renderer.m_directionalShadowBlendFrame -
+                            blend.startFrame + 1u) / blendFrames;
+                        if (blend.weight >= 1.f) blend = {};
+                    }
+                for (uint32_t cascade = 1u; cascade < requestedShadowCascades.count; ++cascade)
+                {
+                    if (!directionalShadowDirtyMask[cascade]) continue;
+                    const bool farTile = requestedShadowCascades.hasFarCascade &&
+                        cascade + 1u == requestedShadowCascades.count;
+                    // A region refresh draws into the tile it keeps.
+                    if (farTile && farRegionRefresh) continue;
+                    // Unstepped middle cascades follow the camera texel by
+                    // texel; there is no step to hide.
+                    if (!farTile && !Engine::Rendering::SteppedShadowCascades()) continue;
+                    // A fade of this cascade still in progress ends now: its
+                    // current image becomes the one faded from.
+                    for (auto& blend : blends)
+                        if (blend.active && blend.cascade == cascade) blend = {};
+                    const glm::mat4& previous =
+                        renderer.m_directionalShadowCachedViewProjections[cascade];
+                    const glm::mat4& next = requestedShadowCascades.viewProjections[cascade];
+                    // The previous image is reached through the new
+                    // projection plus a clip-space offset: only while the
+                    // square moved without turning or scaling (stepped).
+                    bool translated = true;
+                    for (int column = 0; column < 3; ++column)
+                        for (int row = 0; row < 4; ++row)
+                            if (std::abs(previous[column][row] - next[column][row]) >
+                                1.e-5f * std::max(1.f, std::abs(next[column][row])))
+                                translated = false;
+                    if (!translated) continue;
+                    auto* slot = &blends[0];
+                    for (auto& blend : blends)
+                        if (!blend.active) { slot = &blend; break; }
+                    if (slot->active)
+                    {
+                        // Both slots busy: end the fade nearest its end.
+                        slot = blends[0].weight >= blends[1].weight ? &blends[0] : &blends[1];
+                        *slot = {};
+                    }
+                    std::array<bool, 6> used{};
+                    for (uint32_t other = 0; other < requestedShadowCascades.count; ++other)
+                        used[tiles[other]] = true;
+                    for (const auto& blend : blends)
+                        if (blend.active) used[blend.previousTile] = true;
+                    uint32_t spare = 0;
+                    while (spare < 6u && used[spare]) ++spare;
+                    if (spare >= 6u) continue;
+                    slot->active = true;
+                    slot->cascade = cascade;
+                    slot->previousTile = tiles[cascade];
+                    slot->startFrame = renderer.m_directionalShadowBlendFrame;
+                    slot->clipOffset = glm::vec3(previous[3] - next[3]);
+                    slot->weight = 1.f / blendFrames;
+                    tiles[cascade] = spare;
+                }
+            }
             if (!renderMainDirectionalShadow && cacheReusable)
                 copyCachedCascades();
+            // With the blend, the tiles not redrawn (and the images being
+            // faded from) must survive: clear only the tiles drawn.
             preserveDirectionalShadowAtlas = cacheReusable &&
                 renderMainDirectionalShadow &&
-                dirtyCascadeCount < requestedShadowCascades.count;
+                (dirtyCascadeCount < requestedShadowCascades.count || farRegionRefresh ||
+                    blendAtlas);
             if (preserveDirectionalShadowAtlas)
                 for (uint32_t cascade = 0; cascade < requestedShadowCascades.count; ++cascade)
                     if (!directionalShadowDirtyMask[cascade])
@@ -395,6 +649,19 @@ SceneRendererShadows::PrepareResult SceneRendererShadows::PrepareDirectionalShad
                         mainShadowCascades.radii[cascade] =
                             renderer.m_directionalShadowCachedCascadeRadii[cascade];
                     }
+            if (farRegionRefresh)
+            {
+                // The tile itself keeps its cached square; only the drawing
+                // uses the cropped projection (PrepareResult).
+                const uint32_t farCascade = requestedShadowCascades.count - 1u;
+                mainShadowCascades.viewProjections[farCascade] =
+                    renderer.m_directionalShadowCachedViewProjections[farCascade];
+                mainShadowCascades.centers[farCascade] =
+                    renderer.m_directionalShadowCachedCascadeCenters[farCascade];
+                mainShadowCascades.radii[farCascade] =
+                    renderer.m_directionalShadowCachedCascadeRadii[farCascade];
+            }
+            farRegionResult = farRegionRefresh;
         }
         else if (renderer.m_directionalShadowCacheValid)
         {
@@ -414,11 +681,28 @@ SceneRendererShadows::PrepareResult SceneRendererShadows::PrepareDirectionalShad
                 renderer.m_directionalShadowCachedCascadeCount;
         }
     }
+    {
+        const auto& tiles = renderer.m_directionalShadowCascadeTile;
+        mainShadowCascades.atlasTiles = glm::vec4(
+            float(tiles[0] | tiles[1] << 3u | tiles[2] << 6u | tiles[3] << 9u), -1.f, -1.f,
+            float(renderer.m_directionalShadowAtlasRows));
+        for (uint32_t slot = 0; slot < 2u; ++slot)
+        {
+            const auto& blend = renderer.m_directionalShadowBlends[slot];
+            if (!blend.active) continue;
+            mainShadowCascades.atlasTiles[int(slot) + 1] =
+                float(blend.cascade + 8u * blend.previousTile);
+            mainShadowCascades.refreshBlends[slot] = glm::vec4(blend.clipOffset, blend.weight);
+        }
+    }
     PrepareResult result{};
     result.cascades = mainShadowCascades;
     result.dirtyMask = directionalShadowDirtyMask;
     result.renderMainDirectionalShadow = renderMainDirectionalShadow;
     result.preserveDirectionalShadowAtlas = preserveDirectionalShadowAtlas;
+    result.farRegionRefresh = farRegionResult;
+    result.farRegionPixels = farRegionPixels;
+    result.farRegionViewProjection = farRegionViewProjection;
     return result;
 }
 

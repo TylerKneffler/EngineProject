@@ -29,6 +29,10 @@ public:
         uint32_t count = 1u;
         // The last cascade is the far range (BuildCascades).
         bool hasFarCascade = false;
+        // Atlas tiles and refresh blends, as ObjectGPUData::shadowAtlasTiles
+        // and shadowRefreshBlend carry them to the shaders.
+        glm::vec4 atlasTiles{ 0.f + 8.f * 1.f + 64.f * 2.f + 512.f * 3.f, -1.f, -1.f, 2.f };
+        std::array<glm::vec4, 2> refreshBlends{};
     };
 
     struct PrepareResult
@@ -37,6 +41,13 @@ public:
         std::array<uint8_t, 4> dirtyMask{};
         bool renderMainDirectionalShadow = false;
         bool preserveDirectionalShadowAtlas = false;
+        // The far cascade is dirty for a region refresh: only the texels in
+        // farRegionPixels (x0, y0, x1, y1 within its tile) are cleared and
+        // redrawn, through farRegionViewProjection (the cached projection
+        // cropped onto them); cascades.viewProjections keeps the whole tile.
+        bool farRegionRefresh = false;
+        glm::uvec4 farRegionPixels{ 0u };
+        glm::mat4 farRegionViewProjection{ 1.f };
     };
 
     static ShadowCascadeSet BuildCascades(SceneRenderer& renderer,

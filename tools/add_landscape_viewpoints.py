@@ -27,6 +27,10 @@ and two walking routes along the trails, the way a player would go
   MeadowTrailWalk  400 m of the open-meadow trail nearest the start, walked
                    with the sun behind
 
+and MeadowWalkCamera, the camera the game starts on: it walks MeadowTrailWalk
+at 1.4 m/s, there and back (SplineFollower). Captures switch it off and use
+the explorer (GameApplication).
+
 Forests are placed at runtime by LandscapeDriver from ForestMask (value noise
 over world metres); ForestMask/ForestBand below replicate it exactly, and
 ground heights come from the landscape height archive. Editor: Viewpoints
@@ -607,6 +611,47 @@ def route_object(name, points):
     return item
 
 
+# The camera the game starts with: walks MeadowTrailWalk at a walking pace,
+# there and back (SplineFollower). It comes first in the scene, so the game
+# picks it over the explorer (Scene::FindGameCamera takes the first active
+# camera); GameBackendCapture runs switch path-following cameras off and use
+# the explorer (GameApplication).
+WALK_CAMERA = "MeadowWalkCamera"
+WALK_ROUTE = "MeadowTrailWalk"
+WALK_SPEED = 1.4  # m/s
+
+
+def walk_camera(route_points_):
+    length = sum(math.dist(a, b) for a, b in zip(route_points_[:-1], route_points_[1:]))
+    item = ET.Element("item", {"name": WALK_CAMERA, "enabled": "true"})
+    components = ET.SubElement(item, "components")
+    camera = ET.SubElement(components, f"{{{NAMESPACE}}}Camera", {
+        "Camera.active": "true", "Camera.useTransformRotation": "true", "Camera.fov": "67",
+        "Camera.near": "0.06", "Camera.far": "24000", "Camera.orthographic": "false",
+        "Camera.orthographicSize": "5"})
+    ET.SubElement(camera, "Camera.up", {"_arrayEncoding": "spaceSeparatedNumbers"}).text = "0 1 0"
+    ET.SubElement(components, f"{{{NAMESPACE}}}SplineFollower", {
+        "SplineFollower.pathObjectName": WALK_ROUTE,
+        "SplineFollower.durationSeconds": f"{length / WALK_SPEED:.1f}",
+        "SplineFollower.startOffset": "0", "SplineFollower.playOnStart": "true",
+        "SplineFollower.constantSpeed": "true", "SplineFollower.loop": "true",
+        "SplineFollower.continuousLoop": "false", "SplineFollower.pingPong": "true",
+        "SplineFollower.reverse": "false", "SplineFollower.easing": "0",
+        "SplineFollower.orientation": "1"})
+    ET.SubElement(item, "children")
+    item.append(grass.transform(tuple(round(v, 3) for v in route_points_[0])))
+    return item, length
+
+
+def insert_walk_camera(objects, route_points_):
+    for item in list(objects):
+        if item.get("name") == WALK_CAMERA:
+            objects.remove(item)
+    item, length = walk_camera(route_points_)
+    objects.insert(0, item)
+    print(f"{WALK_CAMERA}: walks {WALK_ROUTE} ({length:.0f} m) at {WALK_SPEED} m/s, there and back")
+
+
 def viewpoint(name, eye, target):
     item = ET.Element("item", {"name": name, "enabled": "true"})
     components = ET.SubElement(item, "components")
@@ -680,6 +725,7 @@ def main():
         objects.insert(vista_index + 1 + len(NAMES) + offset, route_object(name, points))
         print(f"{name}: {len(points)} points from ({points[0][0]:.0f}, {points[0][2]:.0f}) "
               f"to ({points[-1][0]:.0f}, {points[-1][2]:.0f})")
+    insert_walk_camera(objects, routes[WALK_ROUTE])
     # Everything but the explorer is static (tools/scene_static.py); this
     # also covers the objects build_landscape_demo.py just wrote.
     scene_static.mark_static(objects)

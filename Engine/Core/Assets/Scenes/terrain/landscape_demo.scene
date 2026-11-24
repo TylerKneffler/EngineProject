@@ -20,6 +20,20 @@
     <volumetricClouds enabled="true" coverage="0.45" density="0.03" baseHeight="2600" thickness="1400" shapeScale="2400" detail="0.45" windSpeed="6" windDirection="30" ambientIntensity="0.8" sunIntensity="1" steps="48" maxDistance="30000" />
   </settings>
   <objects>
+    <item name="MeadowWalkCamera" enabled="true">
+      <components>
+        <components:Camera Camera.active="true" Camera.useTransformRotation="true" Camera.fov="67" Camera.near="0.06" Camera.far="24000" Camera.orthographic="false" Camera.orthographicSize="5">
+          <Camera.up _arrayEncoding="spaceSeparatedNumbers">0 1 0</Camera.up>
+        </components:Camera>
+        <components:SplineFollower SplineFollower.pathObjectName="MeadowTrailWalk" SplineFollower.durationSeconds="285.8" SplineFollower.startOffset="0" SplineFollower.playOnStart="true" SplineFollower.constantSpeed="true" SplineFollower.loop="true" SplineFollower.continuousLoop="false" SplineFollower.pingPong="true" SplineFollower.reverse="false" SplineFollower.easing="0" SplineFollower.orientation="1" />
+      </components>
+      <children />
+      <transform>
+        <Transform.position _arrayEncoding="spaceSeparatedNumbers">-184.481 -26.116 69.936</Transform.position>
+        <Transform.rotation _arrayEncoding="spaceSeparatedNumbers">0 0 0</Transform.rotation>
+        <Transform.scale _arrayEncoding="spaceSeparatedNumbers">1 1 1</Transform.scale>
+      </transform>
+    </item>
     <item name="Landscape Explorer" enabled="true">
       <components>
         <components:Camera Camera.active="true" Camera.useTransformRotation="false" Camera.fov="67" Camera.near="0.059999998658895493" Camera.far="24192" Camera.orthographic="false" Camera.orthographicSize="5">

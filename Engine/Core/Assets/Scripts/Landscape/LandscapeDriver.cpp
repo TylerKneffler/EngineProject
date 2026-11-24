@@ -519,6 +519,12 @@ void GenerateForest(const TerrainManager::ObjectLayerContext& context,
     // Beyond that the impostors cast into the far shadow cascade, so forests
     // keep their shadows on the ground and on each other at any distance.
     layer.farShadowDistance = layer.viewDistance;
+    // The two casters cross-fade (dithered) over the last metres before
+    // shadowDistance. 1 m (the layer default) swapped the crown shadow's
+    // shape and density at once at 220 m; 30 m spreads the change over a
+    // walk of ~20 s. ENGINE_TREE_SHADOW_FADE=<m> for A/B runs.
+    layer.shadowFadeWidth = std::min(layer.shadowDistance,
+        LandscapeShadowRange("ENGINE_TREE_SHADOW_FADE", 30.f));
     const std::string prefix = "Assets/Prefabs/Woodland/Oaks/";
     const std::string coniferPrefix = "Assets/Prefabs/Woodland/Conifers/";
     for (const char* species : Species)

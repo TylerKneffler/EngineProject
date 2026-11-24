@@ -20,7 +20,8 @@ from pathlib import Path
 
 NAMESPACE = "urn:engine-components"
 # Components that move their owner under player control.
-CONTROLLERS = ("FirstPersonController", "CharacterController", "ThirdPersonController")
+# Components that move their object at runtime: such objects stay dynamic.
+CONTROLLERS = ("FirstPersonController", "CharacterController", "ThirdPersonController", "SplineFollower")
 
 
 def is_player(item):

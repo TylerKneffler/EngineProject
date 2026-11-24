@@ -43,6 +43,7 @@
 #include <ktx.h>
 #include <bc7enc.h>
 #include <rgbcx.h>
+#include <bc7decomp.h>
 
 #include <algorithm>
 #include <cmath>
@@ -485,8 +486,75 @@ int Fail(const std::string& message)
 }
 }
 
+// TextureCook --decode <in.ktx2> <out.rgba> [max size]: the first mip level
+// no larger than max size (default: the base level), decoded to raw RGBA8
+// ("RGBA", uint32 width, uint32 height, then rows top first, values as
+// stored: sRGB textures stay sRGB). Offline tools (impostor baking) read
+// cooked textures whose PNG sources are not kept.
+int Decode(const fs::path& source, const fs::path& output, uint32_t maxSize)
+{
+    ktxTexture2* texture = nullptr;
+    if (ktxTexture2_CreateFromNamedFile(source.string().c_str(),
+            KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT, &texture) != KTX_SUCCESS)
+        return Fail("cannot read " + source.string());
+    uint32_t level = 0;
+    while (maxSize && level + 1 < texture->numLevels &&
+        std::max(texture->baseWidth >> level, texture->baseHeight >> level) > maxSize)
+        ++level;
+    const uint32_t width = std::max(1u, texture->baseWidth >> level);
+    const uint32_t height = std::max(1u, texture->baseHeight >> level);
+    ktx_size_t offset = 0;
+    ktxTexture_GetImageOffset(ktxTexture(texture), level, 0, 0, &offset);
+    const uint8_t* data = ktxTexture_GetData(ktxTexture(texture)) + offset;
+    const uint32_t format = texture->vkFormat;
+    std::vector<uint8_t> pixels(size_t(width) * height * 4, 255);
+    const bool bc7 = format == 145 || format == 146;
+    const bool bc5 = format == 141 || format == 142;
+    const bool bc4 = format == 139 || format == 140;
+    const bool bc1 = format >= 131 && format <= 134;
+    if (bc7 || bc5 || bc4 || bc1)
+    {
+        const uint32_t blockBytes = bc4 || bc1 ? 8u : 16u;
+        const uint32_t blocksX = (width + 3u) / 4u, blocksY = (height + 3u) / 4u;
+        for (uint32_t by = 0; by < blocksY; ++by)
+            for (uint32_t bx = 0; bx < blocksX; ++bx)
+            {
+                const uint8_t* block = data + (size_t(by) * blocksX + bx) * blockBytes;
+                uint8_t texels[16 * 4];
+                std::fill(std::begin(texels), std::end(texels), uint8_t(255));
+                if (bc7) bc7decomp::unpack_bc7(block, reinterpret_cast<bc7decomp::color_rgba*>(texels));
+                else if (bc5) rgbcx::unpack_bc5(block, texels, 0, 1, 4);
+                else if (bc4) { rgbcx::unpack_bc4(block, texels, 4); for (int t = 0; t < 16; ++t) texels[t * 4 + 1] = texels[t * 4 + 2] = texels[t * 4]; }
+                else rgbcx::unpack_bc1(block, texels, true);
+                for (uint32_t y = 0; y < 4u; ++y)
+                    for (uint32_t x = 0; x < 4u; ++x)
+                    {
+                        const uint32_t px = bx * 4u + x, py = by * 4u + y;
+                        if (px < width && py < height)
+                            std::memcpy(&pixels[(size_t(py) * width + px) * 4], &texels[(y * 4 + x) * 4], 4);
+                    }
+            }
+    }
+    else if (format == 37 || format == 43)
+        std::memcpy(pixels.data(), data, pixels.size());
+    else
+    {
+        ktxTexture_Destroy(ktxTexture(texture));
+        return Fail("--decode: unsupported vkFormat " + std::to_string(format));
+    }
+    ktxTexture_Destroy(ktxTexture(texture));
+    std::ofstream stream(output, std::ios::binary);
+    stream.write("RGBA", 4);
+    stream.write(reinterpret_cast<const char*>(&width), 4);
+    stream.write(reinterpret_cast<const char*>(&height), 4);
+    stream.write(reinterpret_cast<const char*>(pixels.data()), std::streamsize(pixels.size()));
+    return stream ? 0 : Fail("cannot write " + output.string());
+}
+
 int main(int argc, char** argv)
 {
+    if (argc >= 4 && std::string(argv[1]) == "--decode")
+        return Decode(argv[2], argv[3], argc >= 5 ? uint32_t(std::atoi(argv[4])) : 0u);
     Usage usage = Usage::Auto;
     bool usageGiven = false, keepSize = false, zstd = true, heightMax = false;
     int roughnessChannel = 1;

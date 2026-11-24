@@ -244,7 +244,7 @@ static_assert(offsetof(ObjectGPUData, terrainSunShadow) == 1744, "Terrain sun sh
 static_assert(offsetof(ObjectGPUData, terrainMacroMap) == 1760, "Terrain macro map data must follow the sun shadow");
 static_assert(offsetof(ObjectGPUData, placementFade) == 1792, "Placement fade data must follow the terrain macro data");
 static_assert(offsetof(ObjectGPUData, terrainPathNoise) == 1856, "Terrain path data must follow the placement thinning");
-static_assert(sizeof(ObjectGPUData) == 1952, "Object buffer layout must match Object.hlsl");
+static_assert(sizeof(ObjectGPUData) == 2000, "Object buffer layout must match Object.hlsl");
 static_assert(sizeof(Engine::Model::LightData) == 128,
     "Light buffer layout must match Object.hlsl");
 
@@ -1009,17 +1009,25 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
         const uint32_t resolution = std::clamp(static_cast<uint32_t>(
             static_cast<float>(m_realtimeShadowSettings.directionalResolution) *
             shadowSelection.resolutionScale), 256u, 8192u);
+        // A third row of tiles holds the refresh blend's spare tiles.
+        const uint32_t atlasRows = m_realtimeShadowSettings.directionalCascadeCount > 1u &&
+            Engine::Rendering::ShadowRefreshBlend() ? 3u : 2u;
         if (!m_directionalShadowMap ||
-            m_directionalShadowResolution != resolution)
+            m_directionalShadowResolution != resolution ||
+            m_directionalShadowAtlasRows != atlasRows)
         {
             auto* textureFactory = m_graphicsProvider->GetTextureFactory();
+            m_directionalShadowAtlasRows = atlasRows;
             m_directionalShadowMap = textureFactory
-                ? textureFactory->CreateDepthTexture2D(resolution, resolution)
+                ? textureFactory->CreateDepthTexture2D(resolution,
+                    atlasRows == 3u ? resolution / 2u * 3u : resolution)
                 : nullptr;
             m_directionalShadowResolution = m_directionalShadowMap
                 ? resolution : 0u;
             if (m_directionalShadowMap)
                 ++m_directionalShadowAllocationGeneration;
+            // A new atlas holds nothing: every cascade is drawn again.
+            m_directionalShadowCacheValid = false;
         }
         if (!m_directionalShadowMap)
         {
@@ -2196,6 +2204,9 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
                     ? std::clamp(lightingBand->shadowDistanceScale, 0.f, 1.f)
                     : 1.f);
             objectData.shadowCameraData = mainShadowCascades.cameraData;
+            objectData.shadowAtlasTiles = mainShadowCascades.atlasTiles;
+            objectData.shadowRefreshBlend[0] = mainShadowCascades.refreshBlends[0];
+            objectData.shadowRefreshBlend[1] = mainShadowCascades.refreshBlends[1];
             preparedDraw.textures[7] = m_directionalShadowMap.get();
         }
         if (usesLegacyProbeBake)
@@ -3165,6 +3176,14 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
     {
         m_shadowUploadCache.Prepare(size_t(m_shadowObjectDataBuffer->GetSize()/sizeof(ObjectGPUData)),sizeof(ObjectGPUData));
         context->BeginGpuTiming(Engine::Graphics::GpuTimingStage::Shadow);
+        // The cascades as drawn: a far region refresh draws through the
+        // cropped projection, so culling, records and batches see only the
+        // casters over its rectangle.
+        auto drawShadowCascades = mainShadowCascades;
+        if (cascadePreparation.farRegionRefresh)
+            drawShadowCascades.viewProjections[shadowCascadeCount - 1u] =
+                cascadePreparation.farRegionViewProjection;
+        const auto& drawShadowViewProjections = drawShadowCascades.viewProjections;
         std::array<std::vector<uint8_t>,4> cascadeVisible;
         // Each cascade owns its visibility and receiver results. The spatial
         // tree is immutable for this render, and uncached queries leave the
@@ -3172,7 +3191,7 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
         Engine::Rendering::RenderJobs::Get().For(shadowCascadeCount,1,[&](size_t cascade)
         {
             const auto frameVisible=hasPortalViews ? std::vector<uint8_t>{} :
-                m_renderSpatialIndex.QueryUncached(shadowViewProjections[cascade]);
+                m_renderSpatialIndex.QueryUncached(drawShadowViewProjections[cascade]);
             auto& visible=cascadeVisible[cascade];
             visible.resize(preparedDraws.size(),0);
             for(size_t drawIndex=0;drawIndex<preparedDraws.size();++drawIndex)
@@ -3182,7 +3201,7 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
                     isSpatialManipulatorCarrierDraw(draw)) continue;
                 if(!frameVisible.empty() &&
                     !frameVisible[frameRenderItems[draw.frameItemIndex].objectSlot]) continue;
-                visible[drawIndex]=!SceneRendererShadows::IsOutsideCascade(draw, mainShadowCascades, static_cast<uint32_t>(cascade));
+                visible[drawIndex]=!SceneRendererShadows::IsOutsideCascade(draw, drawShadowCascades, static_cast<uint32_t>(cascade));
             }
             const uint32_t cascadeCasterBudget =
                 m_realtimeShadowSettings.directionalCascadeCasterBudget;
@@ -3249,7 +3268,7 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
                 const uint32_t recordIndex = static_cast<uint32_t>(cascade) * m_objectCapacity +
                     draw.drawData.objectIndex;
                 ObjectGPUData shadowData = draw.objectData;
-                shadowData.viewProjection = shadowViewProjections[cascade];
+                shadowData.viewProjection = drawShadowViewProjections[cascade];
                 shadowData.shadowCasterFade.z=1.f;
                 shadowData.materialParams.w = static_cast<float>(
                     static_cast<uint32_t>(shadowData.materialParams.w) &
@@ -3305,6 +3324,9 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
             mainShadowCascades, quality, shadowSelection, cameraPosition,
             automaticGroups, lodSelection, geometrySubmission,
             submitAutomaticGroup, shadowRecordsEnd };
+        shadowSubmission.drawViewProjections = drawShadowViewProjections;
+        shadowSubmission.farRegionRefresh = cascadePreparation.farRegionRefresh;
+        shadowSubmission.farRegionPixels = cascadePreparation.farRegionPixels;
         SceneRendererDirectionalShadowSubmission::Submit(
             shadowSubmission);
     }

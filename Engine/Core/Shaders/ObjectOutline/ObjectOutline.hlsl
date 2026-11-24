@@ -70,6 +70,8 @@ struct ObjectData
     float4 terrainPathBand;
     float4 terrainPathFar;
     float4 viewTextureParams;
+    float4 shadowAtlasTiles;
+    float4 shadowRefreshBlend[2];
 };
 
 struct InstanceTransform { float4 row0; float4 row1; float4 row2; };
