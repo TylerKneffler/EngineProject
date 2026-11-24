@@ -83,6 +83,7 @@ public:
     {
         float normal[3];
         float color[3];
+        float lushness = 0.f; // see Terrain::lushness
     };
     struct BakedLod
     {
@@ -132,6 +133,12 @@ public:
     glm::vec3 GridPosition(int col, int row) const;
     std::vector<Layer> layers;
     std::vector<float> weights; // one weight per vertex and layer
+    // Optional, one per vertex: how lush (darker, greener) the ground grows
+    // there (LandscapeDriver: wet valley floors under grass and forest, the
+    // same erosion tint the macro color map carries for distant ground).
+    // Vertex uvChannels1.w; Object.hlsl tints the terrain by it. Kept in the
+    // static cell cache; not serialized with the scene.
+    std::vector<float> lushness;
     // Keep this cell's mesh in the compact terrain vertex format (48 bytes a
     // vertex instead of 264, on the CPU and the GPU). Those vertices carry no
     // layer weights, so the cell then always has a paint map (at least two

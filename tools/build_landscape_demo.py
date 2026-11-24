@@ -807,10 +807,12 @@ def write_scene(world):
             # Trees beyond the loaded cells, as impostor blocks, up to 8 km
             # (the engine's cap is 64 cells).
             "farObjectRadius": str(min(EXTENT, 64)),
-            # Beyond 2.2 km, squares of 40 m holding five or more trees of
-            # one kind draw as one baked forest-cluster impostor
-            # (Tools/generate_forest_clusters.py) instead of one per tree.
-            "farClusterDistance": "2200", "farClusterSize": "40",
+            # Real trees draw as impostors out to 2.2 km; past that the
+            # terrain shows the canopy splatted from the same placements
+            # (fair visibility, 2026-11-24). The generic forest-cluster
+            # impostors (Tools/generate_forest_clusters.py), stands at
+            # made-up positions, are off.
+            "farClusterDistance": "0", "farCanopyDistance": "2200", "farClusterSize": "40",
             "farClusterMinimumTrees": "5",
             "maxLodChangesPerUpdate": "4", "maxLoadsPerUpdate": "6",
             "maxUnloadsPerUpdate": "4", "asyncStreaming": "true",

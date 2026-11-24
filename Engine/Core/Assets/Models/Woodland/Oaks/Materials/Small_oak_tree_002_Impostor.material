@@ -78,7 +78,7 @@
   "sphereTexture": "",
   "toonTexture": "",
   "alphaMode": "Mask",
-  "alphaCutoff": 0.4,
+  "alphaCutoff": 0.5,
   "normalScale": 1.0,
   "heightScale": 0.05000000074505806,
   "terrainHeightBlendStrength": 0,

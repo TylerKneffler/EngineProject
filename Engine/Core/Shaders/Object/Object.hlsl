@@ -677,6 +677,16 @@ void VSMain(
                 cells[0] = base + float2(1, 1); cells[1] = base + float2(1, 0); cells[2] = base + float2(0, 1);
                 weights[0] = f.x + f.y - 1.0; weights[1] = 1.0 - f.y; weights[2] = 1.0 - f.x;
             }
+            // Sharpen the blend (weights^4, renormalized): the nearest view
+            // draws the whole tree most of the time and the dither only runs
+            // near the boundaries between views. Plain barycentric weights
+            // kept nearly every far tree split three ways, a constant
+            // dither that read as grain wherever TAA history was rejected.
+            [unroll] for (uint k = 0u; k < 3u; ++k)
+                weights[k] = pow(saturate(weights[k]), 4.0);
+            const float weightSum = max(weights[0] + weights[1] + weights[2], 1.0e-6);
+            [unroll] for (uint m = 0u; m < 3u; ++m)
+                weights[m] /= weightSum;
             const float2 cell = quad == 0u ? cells[0] : (quad == 1u ? cells[1] : cells[2]);
             const float weight = quad == 0u ? weights[0] : (quad == 1u ? weights[1] : weights[2]);
             const float start = quad == 0u ? 0.0 : (quad == 1u ? weights[0] : weights[0] + weights[1]);
@@ -769,10 +779,14 @@ void VSMain(
                 treeRoot, worldUp / upLength, leafShell, worldPosition.xyz, worldNormal);
     }
     if (useGrassWind)
+    {
+        const float3 windRoot = mul(objectData.world, float4(grassRoot, 1)).xyz;
         ApplyGrassWind(objectData.grassAnimation.x, objectData.grassAnimation.z,
-            mul(objectData.world, float4(grassRoot, 1)).xyz, worldUp / upLength,
+            windRoot, worldUp / upLength,
             windHeight, GrassBladePhase(pos),
-            worldPosition.xyz, worldNormal, worldTangent);
+            worldPosition.xyz, worldNormal, worldTangent,
+            GrassWindBladeDetail(distance(windRoot, objectData.viewPositionAlphaCutoff.xyz)));
+    }
 #ifdef GRASS_CAPSULE_INTERACTION
     if (objectData.shadowCasterFade.z <= 0.5)
         ApplyGrassFootBend(objectData.grassCapsules, (uint)objectData.grassAnimation.w,
@@ -1863,6 +1877,11 @@ float3 FoliageTransmission(float3 albedo, float3 radiance, float3 n, float3 v,
         ((0.35 * back + 0.9 * forward) * lerp(0.08 * crown, 1.0, shadow) * shell + scattered);
 }
 
+// Forest canopy painted on distant terrain past the real trees' draw
+// distance (TerrainManager::farCanopyDistance, in terrainMacroParams.z): the
+// canopy colour (.030, .052, .020 at the macro map's .85 brightness).
+static const float3 TerrainCanopyColor = float3(0.0255, 0.0442, 0.017);
+
 // Bumpy canopy over forested distant terrain (macro map alpha = cover):
 // tree-crown, clump and stand-scale height noise tilts the normal, and its
 // hollows darken (crown occlusion). Each octave fades out once a pixel spans
@@ -2448,6 +2467,9 @@ struct TerrainProjection
     float2 sideZUv, sideZDx, sideZDy;
     float3 weights; // top, x-facing, z-facing
     float hexAmount;
+    // Past the hex-tiled range: share of a second, larger and rotated sample
+    // of the top projection's albedo (SampleTerrainLayer).
+    float dualScale;
 };
 
 TerrainLayerSample SampleTerrainLayer(TerrainProjection projection, uint layer,
@@ -2462,6 +2484,20 @@ TerrainLayerSample SampleTerrainLayer(TerrainProjection projection, uint layer,
         SampleTerrainProjection(projection.topUv * uvScale, projection.topDx * uvScale,
             projection.topDy * uvScale, slice, sampleNormal, projection.hexAmount,
             albedoHeight, normalRough);
+        // Beyond the hex-tiled range one plain sample repeats every few
+        // metres, and from 40-500 m away the repeats read as a grid. Blend
+        // in the same texture at 0.37 of the scale, turned 37 degrees: two
+        // tilings that never line up hide each other's period (albedo only;
+        // the normal and roughness keep the first sample).
+        [branch] if (projection.dualScale > 0.0)
+        {
+            const float2x2 turn = float2x2(0.7986, -0.6018, 0.6018, 0.7986);
+            const float scale = 0.37 * uvScale;
+            const float3 second = terrainAlbedoHeight.SampleGrad(materialSampler,
+                float3(mul(turn, projection.topUv) * scale + float2(0.31, 0.67), slice),
+                mul(turn, projection.topDx) * scale, mul(turn, projection.topDy) * scale).rgb;
+            albedoHeight.rgb = lerp(albedoHeight.rgb, second, 0.5 * projection.dualScale);
+        }
         float3 tn = UnpackTerrainNormal(normalRough.rg);
         tn.xy *= normalStrength;
         const float w = projection.weights.x;
@@ -3159,14 +3195,23 @@ float4 ObjectSurfacePS(
             const float3 positionDx = ddx(worldPos), positionDy = ddy(worldPos);
             const float4 macro = SampleTerrainMacroColor(objectData, worldPos,
                 positionDx, positionDy);
-            base.rgb = objectData.baseColor.rgb * macro.rgb;
+            // The macro color is the ground; its alpha the forest cover,
+            // splatted from the real tree placements (LandscapeDriver). The
+            // painted canopy (colour and relief) shows only where the real
+            // trees stop drawing (TerrainManager::farCanopyDistance, z),
+            // fading in over its last 10 %. Nearer, the real trees are the
+            // only cover (fair visibility, 2026-11-24).
+            const float canopyEnd = objectData.terrainMacroParams.z;
+            const float canopyCover = macro.a * smoothstep(canopyEnd * 0.9, canopyEnd,
+                distance(worldPos, objectData.viewPositionAlphaCutoff.xyz));
+            base.rgb = objectData.baseColor.rgb * lerp(macro.rgb, TerrainCanopyColor, canopyCover);
             // w: 0 = no normal map, else 1 + canopy relief strength.
             [branch] if (objectData.terrainMacroParams.w > 0.5)
             {
                 surfaceNormal = SampleTerrainMacroNormal(objectData, worldPos,
                     positionDx, positionDy);
                 base.rgb *= ApplyDistantCanopy(surfaceNormal, worldPos,
-                    max(length(positionDx), length(positionDy)), macro.a,
+                    max(length(positionDx), length(positionDy)), canopyCover,
                     objectData.terrainMacroParams.w - 1.0);
             }
         }
@@ -3251,8 +3296,10 @@ float4 ObjectSurfacePS(
         const bool hexTiling = (flags & 65536u) != 0u;
         if (!hexTiling) terrainUv += terrainVariation * 0.9;
         // Measured lowest-mip colors supply inexpensive macro appearance.
+        // From 300 m (512 before 2026-11-24: 40-500 m of plain tiling
+        // showed its repeats), fully at 1.5 km.
         const float macroBlend = (flags & 131072u)
-            ? smoothstep(512.0, 2048.0, nearDistance) : 0.0;
+            ? smoothstep(300.0, 1500.0, nearDistance) : 0.0;
         float weights[6] = {uvChannels2.x, uvChannels2.y,
             uvChannels2.z, uvChannels2.w, uvChannels3.x, uvChannels3.y};
         // Paint map: weights at finer than vertex spacing. Its samples sit on
@@ -3386,6 +3433,9 @@ float4 ObjectSurfacePS(
             // Hex-tiling near; one sample per map beyond 40 m.
             projection.hexAmount = hexTiling
                 ? 1.0 - smoothstep(24.0, 40.0, nearDistance) : 0.0;
+            // Dual-scale albedo where the hex tiling ends, until the macro
+            // color takes over.
+            projection.dualScale = smoothstep(28.0, 60.0, nearDistance) * (1.0 - macroBlend);
 
             // Relief near the camera: march the dominant layer's height and
             // shift the top projection of every layer to the hit. Height
@@ -3536,6 +3586,11 @@ float4 ObjectSurfacePS(
         }
         if (!hexTiling)
             base.rgb *= 1.0 + (terrainVariation.x + terrainVariation.y) * 0.10;
+        // Lush valley floors (Terrain::lushness, uvChannels1.w): the darker,
+        // greener tint the macro color map gives the same ground far away
+        // (LandscapeDriver ApplyErosionPaint, LushTint).
+        base.rgb *= lerp(float3(1.0, 1.0, 1.0), float3(0.72, 0.92, 0.55),
+            saturate(uvChannels1.w));
         // Ground under ground cover (Terrain::GroundCover). Inside the cover's
         // range the gaps between plants show darker root-coloured
         // undergrowth instead of the bare layer texture; across and past its

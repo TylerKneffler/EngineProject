@@ -51,9 +51,21 @@ float GrassBladePhase(float3 meshPosition)
     return dot(meshPosition.xz, float2(8.3, 6.1));
 }
 
+// Per-blade motion with distance from the camera: blades narrower than a
+// pixel (1 cm blades, beyond ~8 m at 1080p) that quiver out of step with
+// their neighbours turn each pixel over every frame, which reads as noise
+// (TAA reprojects by depth only and cannot follow them). 1 near, falling to
+// none at 24 m; the broad gust fronts, which move whole patches together,
+// stay (a little calmer far off).
+float GrassWindBladeDetail(float cameraDistance)
+{
+    return 1.0 - smoothstep(6.0, 24.0, cameraDistance);
+}
+
 void ApplyGrassWind(float sceneTime, float strength,
     float3 root, float3 up, float height, float bladePhase,
-    inout float3 position, inout float3 normal, inout float3 tangent)
+    inout float3 position, inout float3 normal, inout float3 tangent,
+    float bladeDetail = 1.0)
 {
     float direction = radians(GrassWindDirectionDegrees);
     float4 wind = float4(cos(direction), sin(direction),
@@ -75,16 +87,17 @@ void ApplyGrassWind(float sceneTime, float strength,
         seed ^ 0x9e3779b9u);
     // Signed, zero-centered gusts let each passing wave lean the grass both
     // ways and return through upright, instead of imposing a permanent lean.
-    float gust = clamp(2.1 * (broad * .68 + detail * .32), -1.0, 1.0);
-    float crossSway = .5 * detail;
+    float gust = clamp(2.1 * (broad * lerp(.85, .68, bladeDetail) +
+        detail * .32 * bladeDetail), -1.0, 1.0) * lerp(.7, 1.0, bladeDetail);
+    float crossSway = .5 * detail * bladeDetail;
     // Per-blade flutter rides on the shared gust field and grows with it:
     // calm air leaves a faint shimmer, a passing front sets blades and
     // flower stems quivering out of step with their neighbours.
     float gustEnergy = .3 + .7 * abs(broad);
     float flutter = sin(wind.w * 5.3 + bladePhase) * .6 +
         sin(wind.w * 8.9 + bladePhase * 1.73) * .4;
-    gust = clamp(gust + .24 * flutter * gustEnergy, -1.0, 1.0);
-    crossSway += .45 * sin(wind.w * 3.7 + bladePhase * 2.31) * gustEnergy;
+    gust = clamp(gust + .24 * flutter * gustEnergy * bladeDetail, -1.0, 1.0);
+    crossSway += .45 * sin(wind.w * 3.7 + bladePhase * 2.31) * gustEnergy * bladeDetail;
     float2 heading = wind.xy + side * crossSway;
     float3 bendDirection = float3(heading.x, 0.0, heading.y);
     bendDirection -= up * dot(bendDirection, up);

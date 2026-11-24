@@ -29,6 +29,33 @@ constexpr float ReferenceLodViewportPixels = 1080.f;
 constexpr float MinimumLodCoverageScale = .25f;
 constexpr float MaximumLodCoverageScale = 4.f;
 
+// Fair visibility (on by default; ENGINE_FAIR_LOD=0 turns it off for A/B
+// runs): the level every object draws at depends only on its world distance
+// from the viewer (and its own placement scale), never on the view's zoom,
+// resolution, graphics quality or the detail budget. Levels differ in how
+// much they let through (a far tree's crown, a hill's silhouette), so two
+// players looking at each other through the same tree, zoomed in or not, on
+// any machine, see the same levels (.md/todo.md, fair visibility).
+inline bool FairVisibilityLod()
+{
+    static const bool enabled = []
+    {
+        const char* value = std::getenv("ENGINE_FAIR_LOD");
+        return !(value && std::strcmp(value, "0") == 0);
+    }();
+    return enabled;
+}
+
+// Projected size in pixels of a sphere of this diameter at this distance,
+// seen by the reference camera (fair visibility's stand-in for a view's own
+// projected size).
+inline float ReferenceLodPixels(float diameter, float distance)
+{
+    const float focal = ReferenceLodViewportPixels * .5f /
+        std::tan(ReferenceLodFovDegrees * .5f * 3.14159265f / 180.f);
+    return diameter * focal / std::max(distance, .01f);
+}
+
 inline bool ScreenCoverageLodEnabled()
 {
     static const bool enabled = []
@@ -46,7 +73,7 @@ inline bool ScreenCoverageLodEnabled()
 inline float ViewLodCoverageScale(float projectionYScale, float viewportHeight,
     bool orthographic)
 {
-    if (!ScreenCoverageLodEnabled() || orthographic ||
+    if (FairVisibilityLod() || !ScreenCoverageLodEnabled() || orthographic ||
         !(viewportHeight > 0.f) || !(projectionYScale > 0.f) ||
         !std::isfinite(projectionYScale))
         return 1.f;

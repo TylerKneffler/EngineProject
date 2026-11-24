@@ -1085,6 +1085,11 @@ private:
 int GameApplication::Run(HINSTANCE instance, const GameBenchmarkOptions* benchmark)
 {
     const auto startupStart = std::chrono::steady_clock::now();
+    // Render at the display's real pixel size. A DPI-unaware process on a
+    // scaled display (125 % here) gets a virtualized, smaller screen: the
+    // game drew 1536 x 960 and Windows stretched it to 1920 x 1200, blurring
+    // every frame, and captures asking for 1920 x 1080 were clamped.
+    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     RegisterGameComponents();
     Engine::Model::ProjectSettings settings = benchmark && !benchmark->project.empty()
         ? Engine::Core::ProjectLoader{}.LoadProject(benchmark->project.string())

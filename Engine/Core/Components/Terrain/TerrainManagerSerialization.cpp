@@ -53,6 +53,7 @@ TerrainManager::JsonValue TerrainManager::Serialize() const
         .Set("compactCellVertices", JsonValue(compactCellVertices))
         .Set("farObjectProjectLayer", JsonValue(farObjectProjectLayer))
         .Set("farClusterDistance", JsonValue(farClusterDistance))
+        .Set("farCanopyDistance", JsonValue(farCanopyDistance))
         .Set("farClusterSize", JsonValue(farClusterSize))
         .Set("farClusterMinimumTrees", JsonValue(farClusterMinimumTrees))
         .Set("farTileErrorPixelsLod2", JsonValue(farTileErrorPixelsLod2))
@@ -245,6 +246,8 @@ void TerrainManager::Deserialize(const JsonValue& value)
         ? value["farObjectProjectLayer"].AsString() : std::string("Trees");
     farClusterDistance = value.Has("farClusterDistance")
         ? std::clamp(value["farClusterDistance"].AsFloat(), 0.f, 100000.f) : 0.f;
+    farCanopyDistance = value.Has("farCanopyDistance")
+        ? std::clamp(value["farCanopyDistance"].AsFloat(), 0.f, 100000.f) : 0.f;
     farClusterSize = value.Has("farClusterSize")
         ? std::clamp(value["farClusterSize"].AsFloat(), 4.f, 1000.f) : 40.f;
     farClusterMinimumTrees = value.Has("farClusterMinimumTrees")
@@ -464,6 +467,9 @@ bool TerrainManager::DrawProperties(Engine::Core::IInspectorUi& ui)
         changed |= ui.SliderInt("Far object distance (cells)", &farObjectRadius, 0, 64);
         ui.Tooltip("Beyond the full-detail cells, object layer placements with LOD chains (trees) draw as their last level (impostors) out to this radius, batched into large blocks. 0 disables.");
         changed |= ui.DragFloat("Forest cluster distance (m)", &farClusterDistance, 10.f, 0.f, 100000.f);
+        changed |= ui.DragFloat("Far canopy distance (m)", &farCanopyDistance, 10.f, 0.f, 100000.f);
+        ui.Tooltip("Real trees draw as impostors out to this distance; past it the terrain shows the "
+            "canopy splatted from the same placements. 0: trees to the far-object radius.");
         ui.Tooltip("Far trees beyond this distance are grouped into squares and drawn as baked cluster impostors (Far clusters list, saved with the scene), about a tenth of the instances. 0 disables.");
         changed |= ui.DragFloat("Forest cluster square (m)", &farClusterSize, 1.f, 4.f, 1000.f);
         changed |= ui.SliderInt("Trees per cluster (minimum)", &farClusterMinimumTrees, 1, 64);

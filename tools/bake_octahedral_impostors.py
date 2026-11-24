@@ -4,8 +4,10 @@
 Replaces each tree's far level (the 6-view + top card impostor) with an
 octahedral one: GRID x GRID orthographic views over the upper hemisphere,
 each FRAME pixels square, in one colour/alpha atlas and one normal atlas.
-The views are the tree as its source levels draw it (the prefab's LOD1
-parts, or LOD0 where a part has no LOD1, with their own textures), with:
+The views are the tree as LOD0 draws it (the prefab's base parts with
+their own textures; LOD1 before 2026-11-24), and the impostor's alpha cutoff
+is chosen so the baked views cover what LOD0 covers (fair visibility: a far
+tree lets through what a near one does), with:
   * normals: the surfaces' normals, rounded toward the crown (as baked
     normals usually are, which foliage wants), in each view's tangent frame;
   * occlusion: darker deep inside the crown and low down, so a far tree has
@@ -107,7 +109,7 @@ def prefab_parts(prefab: Path):
             yield mesh, material
 
 
-def tree_surfaces(prefab: Path, level: int = 1):
+def tree_surfaces(prefab: Path, level: int = 0):
     """The tree at a level (per part: that level, else the base) and the
     prefab's impostor mesh and material paths."""
     surfaces, impostor_mesh, impostor_material = [], None, None
@@ -118,7 +120,7 @@ def tree_surfaces(prefab: Path, level: int = 1):
             if "Impostor" in entry:
                 impostor_mesh = entry
                 impostor_material = lod_materials[index] if index < len(lod_materials) else ""
-        if len(lods) >= level:
+        if level > 0 and len(lods) >= level:
             mesh_asset = lods[level - 1]
             material_asset = (lod_materials[level - 1] if level - 1 < len(lod_materials) else "") or \
                 material_el.get("Material.materialAsset")
@@ -169,6 +171,7 @@ def bake(prefab: Path, grid: int, frame: int):
     color = np.zeros((atlas, atlas, 3))
     alpha = np.zeros((atlas, atlas))
     normals = np.zeros((atlas, atlas, 3))
+    full_coverage = 0.0  # LOD0's covered share of the full-resolution views
     for j in range(grid):
         for i in range(grid):
             forward, right, up = view_basis(i, j, grid)
@@ -189,6 +192,7 @@ def bake(prefab: Path, grid: int, frame: int):
                 (0.72 + 0.28 * height)
             rounded = relative / np.maximum(depth_in_crown[..., None], 1e-6)
             n = wa.normalize(n * 0.55 + rounded * 0.45)
+            full_coverage += float(a.mean()) / (grid * grid)
             # Downsample (alpha-weighted colour and normals).
             a_small = wa.downsample(a, SUPERSAMPLE)
             weight = np.maximum(a_small, 1e-6)[..., None]
@@ -204,6 +208,17 @@ def bake(prefab: Path, grid: int, frame: int):
             alpha[y0:y0 + frame, x0:x0 + frame] = a_small
             normals[y0:y0 + frame, x0:x0 + frame] = ts
         print(f"  {name}: row {j + 1}/{grid}", flush=True)
+    # The cutoff at which the atlas covers what the full-resolution views
+    # did (each atlas texel holds the covered share of its footprint).
+    cutoff = CUTOFF
+    lo_c, hi_c = 0.05, 0.95
+    for _ in range(20):
+        cutoff = 0.5 * (lo_c + hi_c)
+        if float((alpha >= cutoff).mean()) > full_coverage:
+            lo_c = cutoff
+        else:
+            hi_c = cutoff
+    cutoff = round(cutoff, 3)
     filled = wa.push_pull_fill(color, alpha)
     nfill = wa.normalize(wa.push_pull_fill(normals, alpha) + np.array([0, 0, 1e-6]))
     WORK.mkdir(parents=True, exist_ok=True)
@@ -213,16 +228,17 @@ def bake(prefab: Path, grid: int, frame: int):
     wa.write_png(normal_png, nfill * 0.5 + 0.5)
     family = prefab.parent.name
     textures = wa.ASSETS / "Models" / "Woodland" / family / "Textures"
-    color_asset = wa.cook(color_png, textures / f"{name}_Octa_Color.ktx2", "color", alpha_cutoff=CUTOFF)
+    color_asset = wa.cook(color_png, textures / f"{name}_Octa_Color.ktx2", "color", alpha_cutoff=cutoff)
     normal_asset = wa.cook(normal_png, textures / f"{name}_Octa_Normal.ktx2", "normal")
     write_mesh(wa.ASSETS / impostor_mesh.removeprefix("Assets/"), center, radius, grid)
     material_path = wa.ROOT / impostor_material
     material = json.loads(material_path.read_text(encoding="utf-8"))
     material.update(baseColorTexture=wa.asset_path(color_asset), normalTexture=wa.asset_path(normal_asset),
-                    baseColor=[1, 1, 1], useVertexColors=False, alphaMode="Mask", alphaCutoff=CUTOFF,
+                    baseColor=[1, 1, 1], useVertexColors=False, alphaMode="Mask", alphaCutoff=cutoff,
                     normalScale=1.0, doubleSided=True, impostorBillboard=True)
     material_path.write_text(json.dumps(material, indent=2) + "\n", encoding="utf-8", newline="\n")
-    print(f"{name}: {grid}x{grid} views of {frame} px, radius {radius:.2f} m")
+    print(f"{name}: {grid}x{grid} views of {frame} px, radius {radius:.2f} m, cutoff {cutoff} "
+          f"(LOD0 covers {full_coverage * 100:.1f} % of the views)")
 
 
 def write_mesh(path: Path, center, radius: float, grid: int):

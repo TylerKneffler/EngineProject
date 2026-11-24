@@ -735,7 +735,9 @@ void TerrainManager::UpdateFarObjects(int centerX, int centerY)
             block.layer = block.object->AddComponent<TerrainObjectLayer>();
             block.layer->layerName = "Far objects";
             // Single-level chains: the far assets are already the last LOD.
-            block.layer->viewDistance = 100000.f;
+            // Out to the far canopy distance when there is one: past it
+            // the terrain's canopy (from these same placements) takes over.
+            block.layer->viewDistance = farCanopyDistance > 0.f ? farCanopyDistance : 100000.f;
             block.layer->lod1Distance = 100000.f;
             block.layer->lod2Distance = 100000.f;
             block.layer->shadowDistance = 0.f;

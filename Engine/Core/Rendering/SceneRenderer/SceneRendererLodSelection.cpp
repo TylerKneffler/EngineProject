@@ -1,7 +1,10 @@
 #include "Core/Rendering/SceneRenderer.h"
 #include "Core/Rendering/SceneRenderer/SceneRendererLodSelection.h"
 
+#include "Core/Components/Camera/Camera.h"
 #include "Core/Components/Mesh/Mesh.h"
+#include "Core/Rendering/RenderSpatialIndex.h"
+#include "Core/Rendering/ScreenCoverage.h"
 #include "Core/Rendering/DetailBudget.h"
 #include "Core/Rendering/RenderJobs.h"
 #include "Core/Rendering/SceneRenderer/SceneInstanceBatching.h"
@@ -203,9 +206,22 @@ int SceneRendererLodSelection::ChooseScreen(
     if (maximumLod > 1)
         thresholds.push_back(policy.screenLod2Pixels);
     const auto quality = m_renderer->GetScene().settings.graphicsQuality.Resolve();
-    const float pixels = Engine::Rendering::ProjectedLodPixels(
-        minimum, maximum, world, m_screenView) * quality.geometry *
-        (std::isfinite(detailScale) && detailScale > 0.f ? detailScale : 1.f);
+    float pixels = 0.f;
+    if (Engine::Rendering::FairVisibilityLod() && m_camera)
+    {
+        // Fair visibility: the size the reference camera would see at this
+        // world distance, the same for any zoom, resolution, view angle,
+        // quality setting or detail budget (ScreenCoverage.h).
+        const auto bounds = Engine::Rendering::TransformBounds(minimum, maximum, world);
+        const glm::vec3 centre = (bounds.minimum + bounds.maximum) * .5f;
+        const float diameter = glm::length(bounds.maximum - bounds.minimum);
+        const glm::vec3 eye(m_camera->GetWorldPose().eye);
+        pixels = Engine::Rendering::ReferenceLodPixels(diameter, glm::length(centre - eye));
+    }
+    else
+        pixels = Engine::Rendering::ProjectedLodPixels(
+            minimum, maximum, world, m_screenView) * quality.geometry *
+            (std::isfinite(detailScale) && detailScale > 0.f ? detailScale : 1.f);
     const int selected = Engine::Rendering::SelectScreenMeshLod(pixels,
         thresholds, entry->second.first, policy.screenLodHysteresis);
     entry->second = { std::min(selected, maximumLod), m_screenSerial };

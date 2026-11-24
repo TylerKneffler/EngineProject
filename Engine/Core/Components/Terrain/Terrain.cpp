@@ -70,7 +70,7 @@ template<class T> bool ReadBoundedVector(std::ifstream& stream,
     return static_cast<bool>(stream);
 }
 using CachedAppearance = Engine::Components::Terrain::BakedAppearance;
-static_assert(sizeof(CachedAppearance) == 24);
+static_assert(sizeof(CachedAppearance) == 28);
 int64_t MaterialStamp(const std::string& material)
 {
     if (material.empty()) return 0;
@@ -954,6 +954,7 @@ void Terrain::BuildVertex(int col, int row, Mesh::Vertex& v) const
     }
     v.color[0] = color.x; v.color[1] = color.y; v.color[2] = color.z;
     v.color[3] = 1.f;
+    v.uvChannels[1][3] = i < lushness.size() ? lushness[i] : 0.f;
 }
 
 void Terrain::RebuildRegion(int minCol, int minRow, int maxCol, int maxRow)
@@ -1032,6 +1033,7 @@ bool Terrain::InstallBakedLod(int stride)
         vertex.uv[1] = static_cast<float>(row) / cellsY;
         std::copy_n(m_bakedAppearance[source].color, 3, vertex.color);
         vertex.color[3] = 1.f;
+        vertex.uvChannels[1][3] = m_bakedAppearance[source].lushness;
         for (size_t layer = 0; layer < std::min<size_t>(layers.size(), 6); ++layer)
             vertex.uvChannels[2 + layer / 4][layer % 4] =
                 weights[static_cast<size_t>(source) * layers.size() + layer];
@@ -1154,7 +1156,8 @@ bool Terrain::SaveCache(const std::string& path, uint64_t signature,
     std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
     if (!stream) return false;
     const uint64_t magic = 0x31484341434e5254ull; // TRNCACH1
-    const uint32_t version = includeBakedLods ? 5 : 4;
+    // 6 and 7 (4 and 5 before 2026-11-24): appearance carries lushness.
+    const uint32_t version = includeBakedLods ? 7 : 6;
     const uint32_t layerCount = static_cast<uint32_t>(layers.size());
     uint8_t texturedMask = 0;
     for (size_t layer = 0; layer < layers.size(); ++layer)
@@ -1185,6 +1188,7 @@ bool Terrain::SaveCache(const std::string& path, uint64_t signature,
         const auto& vertex = grid[i];
         std::copy_n(vertex.normal, 3, appearance[i].normal);
         std::copy_n(vertex.color, 3, appearance[i].color);
+        appearance[i].lushness = i < lushness.size() ? lushness[i] : 0.f;
     }
     valid &= WriteVector(stream, heights) && WriteVector(stream, weights) &&
         WriteVector(stream, appearance);
@@ -1247,7 +1251,7 @@ bool Terrain::ReadCacheHeightsRange(const std::string& path,
     float width = 0.f, depth = 0.f, tiling = 0.f;
     if (!stream || !ReadValue(stream, magic) ||
         magic != 0x31484341434e5254ull ||
-        !ReadValue(stream, version) || version != 5 ||
+        !ReadValue(stream, version) || version != 7 ||
         !ReadValue(stream, storedSignature) || storedSignature != signature ||
         !ReadValue(stream, x) || x != expectedX ||
         !ReadValue(stream, y) || y != expectedY ||
@@ -1297,7 +1301,7 @@ bool Terrain::CacheMaterialsMatchRange(std::istream& stream,
     float width = 0.f, depth = 0.f, tiling = 0.f;
     if (!stream || !ReadValue(stream, magic) ||
         magic != 0x31484341434e5254ull ||
-        !ReadValue(stream, version) || version != 5 ||
+        !ReadValue(stream, version) || version != 7 ||
         !ReadValue(stream, storedSignature) || storedSignature != signature ||
         !ReadValue(stream, x) || x != expectedX ||
         !ReadValue(stream, y) || y != expectedY ||
@@ -1347,7 +1351,7 @@ bool Terrain::LoadCacheRange(const std::string& path, uint64_t signature,
     int x = 0, y = 0;
     float width = 0.f, depth = 0.f, tiling = 0.f;
     if (!ReadValue(stream, magic) || magic != 0x31484341434e5254ull ||
-        !ReadValue(stream, version) || (version != 4 && version != 5) ||
+        !ReadValue(stream, version) || (version != 6 && version != 7) ||
         !ReadValue(stream, storedSignature) || storedSignature != signature ||
         !ReadValue(stream, x) || !ReadValue(stream, y) ||
         !ReadValue(stream, width) || !ReadValue(stream, depth) ||
@@ -1379,8 +1383,11 @@ bool Terrain::LoadCacheRange(const std::string& path, uint64_t signature,
         !ReadVector(stream, cachedWeights, vertexCount * layerCount) ||
         !ReadVector(stream, appearance, vertexCount))
         return false;
+    std::vector<float> cachedLushness(appearance.size());
+    for (size_t i = 0; i < appearance.size(); ++i)
+        cachedLushness[i] = appearance[i].lushness;
     std::array<BakedLod, 4> bakedLods;
-    if (version == 5)
+    if (version == 7)
         for (auto& lod : bakedLods)
         {
             if (!ReadBoundedVector(stream, lod.sourceVertices, vertexCount) ||
@@ -1401,11 +1408,12 @@ bool Terrain::LoadCacheRange(const std::string& path, uint64_t signature,
         char trailing = 0;
         if (stream.read(&trailing, 1) || !stream.eof()) return false;
     }
-    if (version == 5)
+    if (version == 7)
     {
         cellsX = x; cellsY = y; cellWidth = width; cellDepth = depth;
         textureTiling = tiling;
         heights = std::move(cachedHeights);
+        lushness = cachedLushness;
         weights = std::move(cachedWeights);
         layers = std::move(cachedLayers);
         m_bakedAppearance = std::move(appearance);
@@ -1436,6 +1444,7 @@ bool Terrain::LoadCacheRange(const std::string& path, uint64_t signature,
             vertex.uv[1] = static_cast<float>(row) / y;
             std::copy_n(appearance[i].color, 3, vertex.color);
             vertex.color[3] = 1.f;
+            vertex.uvChannels[1][3] = appearance[i].lushness;
             for (uint32_t layer = 0; layer < layerCount; ++layer)
                 vertex.uvChannels[2 + layer / 4][layer % 4] =
                     cachedWeights[i * layerCount + layer];
@@ -1455,6 +1464,7 @@ bool Terrain::LoadCacheRange(const std::string& path, uint64_t signature,
     cellsX = x; cellsY = y; cellWidth = width; cellDepth = depth;
     textureTiling = tiling;
     heights = std::move(cachedHeights);
+    lushness = cachedLushness;
     weights = std::move(cachedWeights);
     layers = std::move(cachedLayers);
     PrepareCompactPaint();

@@ -130,6 +130,13 @@ public:
     };
     std::vector<FarCluster> farClusters;
     float farClusterDistance = 0.f;
+    // Far canopy (fair visibility, 2026-11-24): far blocks draw every real
+    // tree as its impostor out to this distance from the camera; past it the
+    // terrain shows the canopy the macro color map splats from the same
+    // placements (LandscapeDriver), fading in over its last 10 %. Nothing
+    // stands in for trees that are not there. 0: trees to the far-object
+    // radius and the canopy everywhere (as before).
+    float farCanopyDistance = 0.f;
     float farClusterSize = 40.f;
     int farClusterMinimumTrees = 5;
     // Negative values inherit the legacy shared threshold.

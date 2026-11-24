@@ -1672,14 +1672,18 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
             const auto bounds = Engine::Rendering::TransformBounds(mesh->GetBoundsMin(), mesh->GetBoundsMax(), renderItem->world);
             const auto delta = glm::clamp(cameraPosition, bounds.minimum, bounds.maximum) - cameraPosition;
             const bool deforming = mesh->GetDeformationBoundsPadding() > 0.f;
-            const float range = cam->farPlane * quality.viewDistance * (deforming ? quality.vegetation : 1.f);
+            // Fair visibility: vegetation reaches as far on every quality setting.
+            const float range = cam->farPlane * quality.viewDistance *
+                (deforming && !Engine::Rendering::FairVisibilityLod() ? quality.vegetation : 1.f);
             if (glm::dot(delta, delta) > range * range) continue;
         }
         // Every LOD distance of this draw (GPU cull, per-pixel bands, CPU
         // selection) scales by the quality setting, the object's project
         // layer (which the detail budget adjusts to hold its GPU budget) and
         // the view's screen coverage, so detail goes where it shows.
-        const float lodScale = quality.geometry * viewCoverageScale *
+        // Fair visibility drops the quality setting too (ScreenCoverage.h).
+        const float lodQuality = Engine::Rendering::FairVisibilityLod() ? 1.f : quality.geometry;
+        const float lodScale = lodQuality * viewCoverageScale *
             Engine::Rendering::DetailBudget::Get().LayerLodScale(obj ? obj->layer : 0);
         // Every visible LOD band of an instanced tile feeds the cost model
         // with its unscaled distance range and triangle count. Bands of one
@@ -2270,7 +2274,7 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
                 (mesh && mesh->IsInstanced() ? (0x20000000u | (renderItem->geometryFade.w>=2.f && !hasPortalViews ? 0x00100000u:0u)):0u), 0u };
         preparedDraw.drawData = drawData;
         objectData.geometryFade = mesh && mesh->instanceLodBand>=0 ? glm::vec4(float(mesh->instanceLodBand),preparedDraw.gpuLodDistances.x,preparedDraw.gpuLodDistances.y,instanceBandFadeMode) : scaleGeometryFade(hasPortalViews && renderItem->geometryFade.w>=2.f ? mesh->GetRuntimeGeometryFade():renderItem->geometryFade, lodScale);
-        if (objectData.geometryFade.w >= 2.f) {
+        if (objectData.geometryFade.w >= 2.f && !Engine::Rendering::FairVisibilityLod()) {
             objectData.geometryFade.y *= quality.geometry;
             objectData.geometryFade.z *= quality.geometry;
         }
@@ -2279,8 +2283,15 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
         // ENGINE_WIND_TIME=<seconds> freezes wind at that time, so look
         // captures of different builds or switches compare pixel for pixel.
         static const float fixedWindTime=[]{ const char* v=std::getenv("ENGINE_WIND_TIME"); return v ? float(std::atof(v)) : -1.f; }();
+        // ENGINE_WIND_FRAME_STEP=<seconds> advances wind by that much per
+        // frame instead of with the clock, so slow captures (saving every
+        // frame) see the motion per frame of a real frame rate.
+        static const float windFrameStep=[]{ const char* v=std::getenv("ENGINE_WIND_FRAME_STEP"); return v ? float(std::atof(v)) : 0.f; }();
+        const float windTime = fixedWindTime>=0.f ? fixedWindTime : windFrameStep>0.f
+            ? static_cast<float>(double(m_scene.GetFrameIndex()) * windFrameStep)
+            : static_cast<float>(m_scene.GetElapsedTime());
         objectData.grassAnimation={(mesh && mesh->foliageWindStrength>0.f) || (mat && mat->shaderUsesTime)
-                ? (fixedWindTime>=0.f ? fixedWindTime : static_cast<float>(m_scene.GetElapsedTime())):0.f,
+                ? windTime:0.f,
             // y: 1 grass bend, 2 tree wind (Mesh::foliageWindTree; ENGINE_TREE_WIND=0
             // turns tree wind off for A/B captures).
             mesh && mesh->foliageWindStrength>0.f && !(mesh->foliageWindTree && !TreeWindEnabled())

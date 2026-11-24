@@ -16,7 +16,7 @@
   "normalTexture": "Assets/Models/Woodland/Conifers/Textures/Pine_scots_01_Octa_Normal.ktx2",
   "useVertexColors": false,
   "alphaMode": "Mask",
-  "alphaCutoff": 0.4,
+  "alphaCutoff": 0.5,
   "alphaEdgeFade": 1.0,
   "impostorBillboard": true,
   "foliageColorVariation": 0.55

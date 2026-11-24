@@ -2,6 +2,7 @@
 
 #include "Core/Model/ProjectLayers.h"
 #include "Core/Rendering/DetailCostModel.h"
+#include "Core/Rendering/ScreenCoverage.h"
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -40,6 +41,8 @@ public:
 
     float LayerLodScale(int layer) const
     {
+        // Fair visibility: levels by world distance only (ScreenCoverage.h).
+        if (Engine::Rendering::FairVisibilityLod()) return 1.f;
         const size_t index = layer >= 0 &&
             static_cast<size_t>(layer) < m_layerScales.size()
             ? static_cast<size_t>(layer) : 0;

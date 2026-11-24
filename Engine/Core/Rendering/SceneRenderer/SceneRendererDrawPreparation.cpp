@@ -518,8 +518,10 @@ void SceneRendererDrawPreparation::PrepareTerrainMaterial(
             objectData.terrainMacroMap = macro.mapping;
             objectData.terrainMacroParams = glm::vec4(terrainManager->macroColorNear,
                 std::max(terrainManager->macroColorFar, terrainManager->macroColorNear + 1.f),
+                // z: bound (> 0.5) and the far canopy distance (Object.hlsl
+                // paints canopy over its last 10 %; 1 = everywhere).
                 // w: 0 without normals, else 1 + canopy relief.
-                1.f, macro.normalTexture
+                std::max(1.f, terrainManager->farCanopyDistance), macro.normalTexture
                     ? 1.f + std::clamp(terrainManager->canopyRelief, 0.f, 1.f) : 0.f);
         }
     // Contour paths (TerrainManager::ContourPaths; Object.hlsl TerrainPathWeight).
