@@ -651,6 +651,86 @@ void TestLandscapeArchiveSeams()
     Require(farGrid.size() == 190u * 190u && farGrid[size_t(94) * 190 + 94] == inner[0]);
 }
 
+// Volume sculpting (todo.md "Terrain: volume-first conversion" step 6): a
+// carve saves the cell's edit file, drops or removes the objects it opens
+// up under, shows in the field, and the scene copy (Serialize volumeEdits)
+// restores the file both ways, as undo does by reloading a snapshot.
+void TestVolumeSculpt()
+{
+    using Engine::Components::TerrainVolumeEdit;
+    const auto folder = std::filesystem::temp_directory_path() / "engine_volume_sculpt_test";
+    std::error_code error;
+    std::filesystem::remove_all(folder, error);
+    std::filesystem::create_directories(folder, error);
+    Engine::Scene::Scene scene;
+    auto* manager = MakeHillManager(scene);
+    manager->cellDataDirectory = folder.string();
+    auto* cell = manager->GetLoadedCell(0, 0);
+    Require(cell != nullptr);
+    if (!cell) return;
+    // Objects resting on the ground: one over the carve, one well away.
+    float groundAt = 0.f, groundAway = 0.f;
+    Require(Engine::Components::SampleTerrainSurface(cell->heights, 32, 32, 1.f, 1.f, 10.f, 16.f, groundAt));
+    Require(Engine::Components::SampleTerrainSurface(cell->heights, 32, 32, 1.f, 1.f, 3.f, 3.f, groundAway));
+    auto* layerObject = scene.AddObject("Objects");
+    scene.MoveObject(layerObject, cell->Owner, Engine::Scene::Scene::ObjectPlacement::AsChild);
+    auto* layer = layerObject->AddComponent<TerrainObjectLayer>();
+    layer->placements.push_back({0, "Assets/rock.prefab", {10.f, groundAt, 16.f}});
+    layer->placements.push_back({0, "Assets/rock.prefab", {3.f, groundAway, 3.f}});
+    const auto field = manager->GetTerrainField();
+    Require(field != nullptr);
+    const auto top = field ? field->SurfaceAt(10.f, 16.f) : std::nullopt;
+    Require(top && std::abs(top->height - groundAt) < .05f);
+    const auto before = manager->Serialize();
+
+    // A vertical shaft 3 m across, 6 m deep, at (10, 16).
+    TerrainVolumeEdit shaft;
+    shaft.shape = TerrainVolumeEdit::Shape::Capsule;
+    shaft.subtract = true;
+    shaft.a = {10.f, groundAt - 6.f, 16.f};
+    shaft.b = {10.f, groundAt + 20.f, 16.f};
+    shaft.radius = 3.f;
+    shaft.blend = .5f;
+    Require(manager->AddVolumeEdit(shaft, true));
+    const auto file = folder / "0_0.volumeedit";
+    Require(std::filesystem::exists(file, error));
+    Require(manager->GetVolumeEdits({0, 0}).size() == 1);
+    const auto carved = manager->GetTerrainField()->SurfaceAt(10.f, 16.f);
+    Require(carved && carved->height < groundAt - 5.f);
+    // The object over the shaft fell to its floor (or went, on a wall); the
+    // other stayed.
+    bool sawAway = false;
+    for (const auto& placement : layer->placements)
+    {
+        if (placement.position.x == 3.f) { sawAway = true; Require(placement.position.y == groundAway); }
+        else Require(placement.position.y < groundAt - 5.f);
+    }
+    Require(sawAway);
+    const auto after = manager->Serialize();
+    Require(after.Has("volumeEdits") && after["volumeEdits"].ArraySize() == 1);
+
+    // Undo: a fresh manager loading the snapshot from before removes the
+    // file; redo puts it back, the same edit.
+    {
+        Engine::Scene::Scene undoScene;
+        auto* undo = undoScene.AddObject("Manager")->AddComponent<TerrainManager>();
+        undo->Deserialize(before);
+        undo->cellDataDirectory = folder.string();
+        undo->Deserialize(before);
+        Require(!std::filesystem::exists(file, error));
+        undo->Deserialize(after);
+        Require(std::filesystem::exists(file, error));
+        const auto& restored = undo->GetVolumeEdits({0, 0});
+        Require(restored.size() == 1 && restored[0].subtract &&
+            std::abs(restored[0].radius - 3.f) < 1e-4f && std::abs(restored[0].a.y - shaft.a.y) < 1e-3f);
+        // Loading the same scene again leaves the file as it is.
+        const auto written = std::filesystem::last_write_time(file, error);
+        undo->Deserialize(after);
+        Require(std::filesystem::last_write_time(file, error) == written);
+    }
+    std::filesystem::remove_all(folder, error);
+}
+
 int main()
 {
     try
@@ -666,6 +746,7 @@ int main()
         TestRegionMasks();
         TestRegionErosionSeam();
         TestRegionPaint();
+        TestVolumeSculpt();
         TestArchiveV3();
         TestLandscapeArchiveSeams();
         TimeLargeCellStroke();

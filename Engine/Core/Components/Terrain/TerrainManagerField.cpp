@@ -121,7 +121,11 @@ std::shared_ptr<const TerrainField> TerrainManager::GetTerrainField()
     mix(cellDataDirectory.data(), cellDataDirectory.size());
     const bool hasBuilder = static_cast<bool>(m_proceduralBuilder);
     mix(&hasBuilder, sizeof(hasBuilder));
-    if (m_terrainField && key == m_terrainFieldKey) return m_terrainField;
+    if (m_terrainField && key == m_terrainFieldKey)
+    {
+        SeedAuthoredCells();
+        return m_terrainField;
+    }
 
     auto source = std::make_shared<FieldSource>();
     source->archivePath = m_farHeightArchivePath;
@@ -148,7 +152,27 @@ std::shared_ptr<const TerrainField> TerrainManager::GetTerrainField()
             return LoadTerrainVolumeEdits(path, edits);
         });
     m_terrainFieldKey = key;
+    SeedAuthoredCells();
     return m_terrainField;
+}
+
+void TerrainManager::SeedAuthoredCells()
+{
+    // Authored cells (saved with the scene: no builder or archive gives
+    // them) seed the field from their loaded heights.
+    if (!m_fieldSource || !m_terrainField) return;
+    const size_t expected = static_cast<size_t>(cellsX + 1) * (cellsY + 1);
+    for (const auto& [cell, terrain] : m_loaded)
+    {
+        if (!terrain || !m_cells.count(cell) || terrain->heights.size() != expected) continue;
+        {
+            std::lock_guard<std::mutex> lock(m_fieldSource->overrideMutex);
+            if (m_fieldSource->overrides.count(cell)) continue;
+            m_fieldSource->overrides[cell] = std::make_shared<const std::vector<float>>(terrain->heights);
+        }
+        m_terrainField->Invalidate(cell);
+        ++m_terrainFieldRevision;
+    }
 }
 
 void TerrainManager::InvalidateTerrainField(Cell cell, const std::vector<float>* heights)

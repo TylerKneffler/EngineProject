@@ -123,8 +123,20 @@ public:
     // saves that cell's file, and rebuilds the loaded volume cells it
     // reaches (their current chunks draw until the new ones are ready).
     // False when the file cannot be written; an edit a cell or more across
-    // is refused.
-    bool AddVolumeEdit(const TerrainVolumeEdit& edit);
+    // is refused. followObjects: placements of the loaded cells under the
+    // edit move onto the new surface (FollowVolumeEdit).
+    bool AddVolumeEdit(const TerrainVolumeEdit& edit, bool followObjects = false);
+    // Placements of loaded cells within [low, high] (grid space) after the
+    // ground there changed: buried ones rise to the top surface, ones left in
+    // the air drop to the first ground below; ones then standing on ground
+    // steeper than about 60 degrees (a carved wall) or on none are removed.
+    // Returns how many moved or went.
+    size_t FollowVolumeEdit(const glm::vec3& low, const glm::vec3& high);
+    // Replaces a cell's whole edit list (saving or deleting its file), and
+    // rebuilds what it reaches, as AddVolumeEdit does. The scene's copy of
+    // the edits (Serialize "volumeEdits") comes back through this on load
+    // and on undo.
+    bool SetVolumeEdits(Cell cell, std::vector<TerrainVolumeEdit> edits);
     std::string GetVolumeEditFilePath(Cell cell) const;
     // The terrain as one field (TerrainField.h; todo.md "Terrain: volume-first
     // conversion"): ground queries (SurfaceAt, Raycast, Density) over the
@@ -596,6 +608,9 @@ private:
     // Volume edits read so far, per cell (GetVolumeEdits).
     mutable std::map<Cell, std::vector<TerrainVolumeEdit>> m_volumeEdits;
     mutable std::optional<std::set<Cell>> m_volumeEditOwners;
+    // Rebuilds the loaded volume cells within reach of [low, high] (grid
+    // space) after an owner's edit list changed.
+    void RefreshVolumeCells(Cell owner, const glm::vec3& low, const glm::vec3& high);
     // A cell's heights for a neighbouring volume: loaded, else baked or the
     // height archive (as far seams read them). False when unknown.
     bool NeighbourHeights(Cell cell, std::vector<float>& heights) const;
@@ -770,6 +785,7 @@ private:
     uint64_t m_terrainFieldKey = 0;
     uint64_t m_terrainFieldRevision = 1;
     void InvalidateTerrainField(Cell cell, const std::vector<float>* heights = nullptr);
+    void SeedAuthoredCells();
     // ENGINE_TERRAIN_FIELD_CHECK=1: once the loaded area is full, compare the
     // field's surface with every loaded cell's heights and print the result.
     void CheckTerrainField();

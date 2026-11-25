@@ -185,6 +185,34 @@ TerrainManager::JsonValue TerrainManager::Serialize() const
         clusters.Push(JsonValue::MakeObject().Set("asset", JsonValue(cluster.asset))
             .Set("match", JsonValue(cluster.match)).Set("trees", JsonValue(cluster.trees)));
     out.Set("farClusters", std::move(clusters));
+    // Volume edits (sculpted rock, carved holes): every cell's list, so a
+    // scene snapshot (save, undo history) holds them. The cells' .volumeedit
+    // files are their copy for the readers (volume cells, the field, far
+    // tiles); Deserialize writes back any that differ.
+    {
+        std::set<Cell> owners = VolumeEditOwners();
+        for (const auto& [cell, list] : m_volumeEdits)
+            if (!list.empty()) owners.insert(cell);
+        JsonValue volumeEdits = JsonValue::MakeArray();
+        for (const Cell cell : owners)
+        {
+            const auto& list = GetVolumeEdits(cell);
+            if (list.empty()) continue;
+            JsonValue items = JsonValue::MakeArray();
+            for (const auto& edit : list)
+            {
+                JsonValue numbers = JsonValue::MakeArray();
+                for (float value : {float(static_cast<int>(edit.shape)), edit.subtract ? 1.f : 0.f,
+                        edit.a.x, edit.a.y, edit.a.z, edit.b.x, edit.b.y, edit.b.z,
+                        edit.radius, edit.yaw, edit.blend})
+                    numbers.Push(JsonValue(value));
+                items.Push(std::move(numbers));
+            }
+            volumeEdits.Push(JsonValue::MakeObject().Set("x", JsonValue(cell.first))
+                .Set("y", JsonValue(cell.second)).Set("edits", std::move(items)));
+        }
+        out.Set("volumeEdits", std::move(volumeEdits));
+    }
     out.Set("cells", std::move(cells))
         .Set("proceduralRuns", std::move(runs))
         .Set("editedCells", std::move(edits));
@@ -421,6 +449,57 @@ void TerrainManager::Deserialize(const JsonValue& value)
         const auto& entry = edits.ArrayAt(i);
         const Cell cell{entry["x"].AsInt(), entry["y"].AsInt()};
         if (m_proceduralCells.count(cell)) m_editedProcedural.insert(cell);
+    }
+    // The scene's volume edits (Serialize): cells whose file differs are
+    // written back, and files of cells the scene has none for are removed.
+    // Scenes saved before edits were kept here leave the files alone.
+    if (value.Has("volumeEdits"))
+    {
+        m_volumeEdits.clear();
+        std::map<Cell, std::vector<TerrainVolumeEdit>> scene;
+        const auto& cells = value["volumeEdits"];
+        for (size_t i = 0; i < cells.ArraySize(); ++i)
+        {
+            const auto& entry = cells.ArrayAt(i);
+            auto& list = scene[{entry["x"].AsInt(), entry["y"].AsInt()}];
+            const auto& items = entry["edits"];
+            for (size_t j = 0; j < items.ArraySize(); ++j)
+            {
+                const auto& n = items.ArrayAt(j);
+                if (n.ArraySize() < 11) continue;
+                const auto at = [&](size_t k) { return n.ArrayAt(k).AsFloat(); };
+                TerrainVolumeEdit edit;
+                edit.shape = static_cast<TerrainVolumeEdit::Shape>(std::clamp(int(std::lround(at(0))), 0, 2));
+                edit.subtract = at(1) > .5f;
+                edit.a = {at(2), at(3), at(4)};
+                edit.b = {at(5), at(6), at(7)};
+                edit.radius = at(8); edit.yaw = at(9); edit.blend = at(10);
+                list.push_back(edit);
+            }
+        }
+        // Files keep six significant digits: equal within that.
+        const auto close = [](float a, float b) { return std::abs(a - b) <= 1e-4f * std::max(1.f, std::abs(a)); };
+        const auto closeVec = [&](const glm::vec3& a, const glm::vec3& b) {
+            return close(a.x, b.x) && close(a.y, b.y) && close(a.z, b.z); };
+        const auto same = [&](const std::vector<TerrainVolumeEdit>& a, const std::vector<TerrainVolumeEdit>& b) {
+            if (a.size() != b.size()) return false;
+            for (size_t i = 0; i < a.size(); ++i)
+                if (a[i].shape != b[i].shape || a[i].subtract != b[i].subtract || !closeVec(a[i].a, b[i].a) ||
+                    !closeVec(a[i].b, b[i].b) || !close(a[i].radius, b[i].radius) ||
+                    !close(a[i].yaw, b[i].yaw) || !close(a[i].blend, b[i].blend)) return false;
+            return true;
+        };
+        std::set<Cell> cellsToSet;
+        for (const Cell cell : VolumeEditOwners()) cellsToSet.insert(cell);
+        for (const auto& [cell, list] : scene) cellsToSet.insert(cell);
+        for (const Cell cell : cellsToSet)
+        {
+            const auto found = scene.find(cell);
+            std::vector<TerrainVolumeEdit> wanted = found == scene.end()
+                ? std::vector<TerrainVolumeEdit>{} : found->second;
+            if (same(GetVolumeEdits(cell), wanted)) continue;
+            SetVolumeEdits(cell, std::move(wanted));
+        }
     }
 }
 

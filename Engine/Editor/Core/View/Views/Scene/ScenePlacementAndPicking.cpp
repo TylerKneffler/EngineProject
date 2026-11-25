@@ -1,6 +1,8 @@
 #include "ScenePlacementAndPicking.h"
 #include "SurfacePlacement.h"
 #include "Core/Components/Terrain/Terrain.h"
+#include "Core/Components/Terrain/TerrainField.h"
+#include "Core/Components/Terrain/TerrainManager.h"
 
 #include "Core/Components/Camera/Camera.h"
 #include "Core/Components/Animation/SkinnedMesh.h"
@@ -654,6 +656,26 @@ bool ScenePlacementAndPicking::FindTerrainSurfaceHit(
     }
     if (nearest == FLT_MAX) return false;
     hit = glm::dvec3(origin) + glm::dvec3(direction) * static_cast<double>(nearest);
+    return true;
+}
+
+bool ScenePlacementAndPicking::FindFieldSurfaceHit(const Engine::Scene::Scene& scene,
+    Engine::Components::TerrainManager& manager, const EditorUiVec2& mousePos,
+    const EditorUiVec2& viewportSize, glm::dvec3& hit, glm::vec3& normal)
+{
+    glm::vec3 origin{}, direction{};
+    if (!manager.Owner || !BuildViewportRay(scene, mousePos, viewportSize, origin, direction))
+        return false;
+    const auto field = manager.GetTerrainField();
+    if (!field) return false;
+    const glm::dmat4 toWorld = manager.Owner->transform.GetWorldMatrixD();
+    const glm::dmat4 toLocal = glm::inverse(toWorld);
+    const glm::vec3 localOrigin(toLocal * glm::dvec4(glm::dvec3(origin), 1.0));
+    const glm::vec3 localDirection(toLocal * glm::dvec4(glm::dvec3(direction), 0.0));
+    const auto found = field->Raycast(localOrigin, localDirection, 20000.f);
+    if (!found) return false;
+    hit = glm::dvec3(toWorld * glm::dvec4(glm::dvec3(found->position), 1.0));
+    normal = glm::normalize(glm::vec3(glm::dmat3(toWorld) * glm::dvec3(found->normal)));
     return true;
 }
 

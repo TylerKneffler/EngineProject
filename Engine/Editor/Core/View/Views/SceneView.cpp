@@ -637,7 +637,7 @@ void SceneView::DrawTerrainToolbar(const std::function<bool(float)>& next)
         return;
     }
     const char* modes[] = {"Raise", "Lower", "Smooth", "Flatten", "Paint", "Objects",
-        "Erode", "Weather", "Noise", "Terrace", "Select", "Stamp"};
+        "Erode", "Weather", "Noise", "Terrace", "Select", "Stamp", "Rock", "Carve", "Ledge"};
     if (next(112.f))
     {
         ImGui::SetNextItemWidth(112.f);
@@ -653,7 +653,11 @@ void SceneView::DrawTerrainToolbar(const std::function<bool(float)>& next)
                 "Select: draw a rectangle, ellipse, lasso or polygon, then Apply an\n"
                 "operation (erosion, smoothing, paint...) to the whole region at once.\n"
                 "Stamp: a raise brush shaped like a terrain stamp; holding it grows the\n"
-                "stamp's shape out of the ground and stops at it (Shift lowers).");
+                "stamp's shape out of the ground and stops at it (Shift lowers).\n"
+                "Rock / Carve: sculpt the volume along the stroke (overhangs, arches,\n"
+                "caves); Shift swaps them. Ledge: level to the height where the stroke\n"
+                "began, cutting above and filling below. These need a Terrain Manager\n"
+                "and are kept as volume edits (undo restores them).");
     }
     const bool selectTool = m_terrainBrush == kSelectTool;
     if (ShapedTerrainTool()) DrawTerrainShapeToolbar(next);
@@ -664,7 +668,7 @@ void SceneView::DrawTerrainToolbar(const std::function<bool(float)>& next)
         ImGui::DragFloat("##TerrainRadius", &m_terrainRadius,
             .05f, .05f, 100.f, "Radius %.1f");
     }
-    if (m_terrainBrush != kObjectBrush && !selectTool && next(135.f))
+    if (m_terrainBrush != kObjectBrush && !selectTool && !VolumeTerrainTool() && next(135.f))
     {
         ImGui::SetNextItemWidth(135.f);
         ImGui::DragFloat("##TerrainStrength", &m_terrainStrength,
@@ -1165,6 +1169,74 @@ void SceneView::DrawPanel(IEditorUi& ui)
                         static_cast<float>(local.z), m_terrainRadius, strength,
                         brush, m_terrainLayer, m_terrainRealignObjects, options);
                 m_terrainEditActive = m_terrainEditActive || changed;
+            }
+        }
+    }
+    // Volume sculpting: a stroke lays volume edits along its path, one each
+    // time the brush has moved a third of its radius across the ground
+    // (holding still adds nothing more), as capsules from the last dab so a
+    // stroke is a few smooth edits rather than a string of spheres.
+    if (!input.leftDown) m_volumeStroke = false;
+    if (terrainTools && manager && VolumeTerrainTool())
+    {
+        glm::dvec3 hit{};
+        glm::vec3 normal(0.f, 1.f, 0.f);
+        if (input.hovered && !input.rightDown && !input.middleDown &&
+            ScenePlacementAndPicking::FindFieldSurfaceHit(*m_scene, *manager,
+                input.mousePosInViewport, input.available, hit, normal))
+        {
+            const glm::dvec3 local = SceneTerrainTools::ToLocal(terrainTarget, hit);
+            const bool ledge = m_terrainBrush == kLedgeTool;
+            const bool carve = !ledge && ((m_terrainBrush == kCarveTool) != invert);
+            drawRing(local, m_terrainHardness, ledge ? IM_COL32(150, 150, 255, 230)
+                : carve ? IM_COL32(255, 120, 70, 230) : IM_COL32(200, 160, 110, 230));
+            if (input.leftDown)
+            {
+                terrainConsumedClick = true;
+                const float radius = std::clamp(m_terrainRadius, .25f, 60.f);
+                const bool first = !m_volumeStroke;
+                if (first)
+                {
+                    m_volumeStroke = true;
+                    m_volumeLast = local;
+                    m_volumeLedgeHeight = static_cast<float>(local.y);
+                }
+                const double across = glm::length(glm::dvec2(local.x - m_volumeLast.x, local.z - m_volumeLast.z));
+                if (first || across >= std::max(.33 * radius, .25))
+                {
+                    using Edit = Engine::Components::TerrainVolumeEdit;
+                    const float blend = .5f + radius * .6f * (1.f - std::clamp(m_terrainHardness, 0.f, 1.f));
+                    bool changed = false;
+                    if (ledge)
+                    {
+                        Edit cut;
+                        cut.shape = Edit::Shape::Box;
+                        cut.subtract = true;
+                        cut.a = {float(local.x), m_volumeLedgeHeight + radius, float(local.z)};
+                        cut.b = {radius, radius, radius};
+                        cut.radius = radius * .25f;
+                        cut.blend = blend;
+                        Edit fill = cut;
+                        fill.subtract = false;
+                        fill.a.y = m_volumeLedgeHeight - radius * .5f;
+                        fill.b.y = radius * .5f;
+                        changed = manager->AddVolumeEdit(cut, true);
+                        changed = manager->AddVolumeEdit(fill, true) || changed;
+                    }
+                    else
+                    {
+                        Edit edit;
+                        edit.shape = Edit::Shape::Capsule;
+                        edit.subtract = carve;
+                        edit.a = glm::vec3(first ? local : m_volumeLast);
+                        edit.b = glm::vec3(local);
+                        edit.radius = radius;
+                        edit.blend = blend;
+                        changed = manager->AddVolumeEdit(edit, true);
+                    }
+                    m_volumeLast = local;
+                    m_terrainEditActive = m_terrainEditActive || changed;
+                }
             }
         }
     }

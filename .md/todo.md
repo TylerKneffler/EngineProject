@@ -129,6 +129,31 @@ first-person controller, caches).
 - [ ] **6. Sculpting.** Editor brushes on the volume (raise, lower, smooth, flatten, add rock, carve) with
       undo, writing per-cell edits; `TerrainRegionEdit`/`TerrainManagerEditing`/`TerrainBrushShape` move
       to it. Escarpment and cliffs re-made as volume edits (rock faces, overhangs).
+      - [x] (2026-11-24) Terrain tools Rock, Carve (Shift swaps) and Ledge (level to the stroke's start
+            height: cut a box above, fill a slab below). They aim with `ScenePlacementAndPicking::
+            FindFieldSurfaceHit` (TerrainField::Raycast: overhangs, holes) and lay capsules from the last
+            dab each third of a radius across the ground (holding still adds nothing). Hardness sets the
+            blend. Need a Terrain Manager.
+      - [x] Undo: the manager's scene state holds every cell's edit list (Serialize `volumeEdits`);
+            Deserialize (load, undo, redo) writes back the `.volumeedit` files that differ (within the
+            files' six digits) and removes those the scene has none for, then refreshes the field and the
+            loaded volumes (`SetVolumeEdits`, `RefreshVolumeCells`). Scenes without the key (generated
+            landscape) leave the files alone. Once a scene is saved with it, the scene is the source: a
+            `.volumeedit` added by hand after that is removed on the next load.
+      - [x] Objects: `AddVolumeEdit(edit, followObjects)` / `FollowVolumeEdit`: placements under an edit
+            that end up buried rise to the top surface, ones left in the air drop to the ground below,
+            ones then on ground steeper than ~60 degrees (or none) are removed.
+      - [x] The field seeds authored cells (scene-saved, no builder or archive) from their loaded heights
+            (`SeedAuthoredCells`), so picking, placement and follow work on authored terrain too.
+      - Test: `TerrainEditingToolsTests` TestVolumeSculpt (carve saves the file, field sees the shaft,
+        object drops to its floor, the other stays; snapshot before/after removes and restores the file;
+        reloading the same scene does not rewrite it). Vista unchanged (clouds and wind only).
+      - Kept as seed edits, by the volume-first decision (heights as seed): Raise, Lower, Smooth, Flatten,
+        Paint, Stamp and the region operations (erosion, terrace, noise) still edit the seed heights, which
+        the volume meshes; no need to move `TerrainRegionEdit`/`TerrainBrushShape`.
+      - [ ] Escarpment and cliffs as volume edits: content work, not done. The tools are there to do it
+            by hand, or a script could add overhang edits along the steepest faces.
+      - Not checked by hand: the tools in the running editor (UI paths built, not clicked through).
 - [ ] **7. Remove the height dependency.** Delete the height-grid cell mesh path, far tiles, far grid and
       direct `Terrain::heights` readers; the archive is only the seed generator's input; caches and
       scene format migrated; meadow walk, forest walk, Vista and Escarpment at or above today's frame

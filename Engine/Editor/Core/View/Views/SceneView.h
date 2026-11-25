@@ -176,6 +176,18 @@ private:
     // Stamp: Raise with a stamp's shape (required): held, it raises the
     // ground under the stamp's outline, its high places fastest; Shift lowers.
     static constexpr int kStampTool = 11;
+    // Volume sculpting (volume edits, TerrainManager::AddVolumeEdit): Rock
+    // adds rock along the stroke, Carve cuts it away (Shift swaps them),
+    // Ledge levels to the height where the stroke began, cutting above and
+    // filling below. They aim at the terrain field (overhangs, holes) and
+    // need a Terrain Manager.
+    static constexpr int kRockTool = 12;
+    static constexpr int kCarveTool = 13;
+    static constexpr int kLedgeTool = 14;
+    bool VolumeTerrainTool() const { return m_terrainBrush >= kRockTool && m_terrainBrush <= kLedgeTool; }
+    bool m_volumeStroke = false;
+    glm::dvec3 m_volumeLast{0.0};
+    float m_volumeLedgeHeight = 0.f;
     // Brush shape for Raise, Lower, Smooth, Flatten, Paint and Stamp: a .stamp
     // asset path (TerrainBrushShape), or empty for the round brush.
     std::string m_terrainShapePath;

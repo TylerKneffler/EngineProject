@@ -5,6 +5,7 @@
 #include <cstdint>
 
 namespace Engine::Core { class Object; }
+namespace Engine::Components { class TerrainManager; }
 namespace Engine::Scene { class Scene; }
 
 namespace Engine::Editor
@@ -26,6 +27,13 @@ public:
         const Engine::Core::Object* terrainRoot,
         const EditorUiVec2& mousePos, const EditorUiVec2& viewportSize,
         glm::dvec3& hit);
+    // Volume sculpting target: the first crossing of the manager's terrain
+    // field (TerrainField::Raycast: seed ground and volume edits, so carved
+    // holes and overhangs), in world space, with the surface normal (world).
+    static bool FindFieldSurfaceHit(const Engine::Scene::Scene& scene,
+        Engine::Components::TerrainManager& manager,
+        const EditorUiVec2& mousePos, const EditorUiVec2& viewportSize,
+        glm::dvec3& hit, glm::vec3& normal);
     // Returns the last completed hover only while its camera, pose, and scene
     // snapshot still match. A new query is queued when any input changes.
     static Engine::Core::Object* PickObjectHoverAsync(
