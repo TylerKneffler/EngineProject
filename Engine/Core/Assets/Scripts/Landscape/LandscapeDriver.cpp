@@ -554,6 +554,13 @@ bool EnvironmentSwitch(const char* name)
     return !(value && value[0] == '0');
 }
 
+// A/B override: the variable's number, else the fallback.
+float EnvironmentNumber(const char* name, float fallback)
+{
+    const char* value = std::getenv(name);
+    return value && value[0] ? static_cast<float>(std::atof(value)) : fallback;
+}
+
 // ENGINE_LANDSCAPE_SHADOW_SCALE=<factor> scales the shadow ranges of the
 // forest, prop and undergrowth layers (for A/B runs; 1 = as authored).
 float LandscapeShadowScale()
@@ -1383,6 +1390,9 @@ bool LandscapeDriver::ConfigureTerrain()
 {
     auto* manager = Owner ? Owner->GetComponent<TerrainManager>() : nullptr;
     if (!manager) return false;
+    // ENGINE_TERRAIN_LOADED_RADIUS=<cells> overrides the full-detail radius (A/B runs).
+    static const int forcedLoaded = static_cast<int>(EnvironmentNumber("ENGINE_TERRAIN_LOADED_RADIUS", -1.f));
+    if (forcedLoaded >= 0) manager->loadedRadius = std::clamp(forcedLoaded, 0, 32);
     const uint64_t signature = SourceSignature();
     if (!signature) return false;
     const std::string archivePath = Engine::Components::Mesh::ResolveFilePath(heightArchive);
@@ -1480,7 +1490,8 @@ bool LandscapeDriver::ConfigureTerrain()
     });
     // The meadow preset attaches a GrassField to the procedural grass layer;
     // keep the grass on the meadow paint and give it this map's density.
-    const float radius = grassRadius;
+    // ENGINE_LANDSCAPE_GRASS_RADIUS=<m> overrides grassRadius (A/B runs).
+    const float radius = EnvironmentNumber("ENGINE_LANDSCAPE_GRASS_RADIUS", grassRadius);
     const std::string viewer = manager->viewerObjectName;
     manager->SetObjectLayerSetup([radius, forestName, viewer](TerrainManager::Cell, TerrainObjectLayer& layer)
     {

@@ -2290,7 +2290,10 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
         const float windTime = fixedWindTime>=0.f ? fixedWindTime : windFrameStep>0.f
             ? static_cast<float>(double(m_scene.GetFrameIndex()) * windFrameStep)
             : static_cast<float>(m_scene.GetElapsedTime());
-        objectData.grassAnimation={(mesh && mesh->foliageWindStrength>0.f) || (mat && mat->shaderUsesTime)
+        // Terrain with ground cover shades the wind's gust fronts over the
+        // grass past the blades (Object.hlsl GrassGroundWind).
+        objectData.grassAnimation={(mesh && mesh->foliageWindStrength>0.f) || (mat && mat->shaderUsesTime) ||
+                objectData.groundCoverColor.w>0.f
                 ? windTime:0.f,
             // y: 1 grass bend, 2 tree wind (Mesh::foliageWindTree; ENGINE_TREE_WIND=0
             // turns tree wind off for A/B captures).

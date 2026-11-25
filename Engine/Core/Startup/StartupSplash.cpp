@@ -1,7 +1,10 @@
 #include "Core/Startup/StartupSplash.h"
 #include "Core/Startup/LaunchActivation.h"
+#include "Core/Graphics/ShaderCompileProgress.h"
 
 #include <algorithm>
+#include <cmath>
+#include <cstdio>
 #include <gdiplus.h>
 
 namespace Engine::Core
@@ -11,6 +14,18 @@ namespace
 constexpr int kWidth = 640;
 constexpr int kHeight = 360;
 constexpr wchar_t kClassName[] = L"EngineStartupSplash";
+constexpr UINT_PTR kCompileTimer = 1;
+constexpr UINT kCloseWhenIdle = WM_APP + 1;
+// Quiet time after the last compile before a closing splash goes.
+constexpr double kCloseIdleSeconds = 0.75;
+
+std::wstring Clock(double seconds)
+{
+    const int total = static_cast<int>(std::max(0.0, seconds));
+    wchar_t text[16];
+    std::swprintf(text, 16, L"%d:%02d", total / 60, total % 60);
+    return text;
+}
 }
 
 StartupSplash::StartupSplash(HINSTANCE instance, std::wstring title,
@@ -21,11 +36,6 @@ StartupSplash::StartupSplash(HINSTANCE instance, std::wstring title,
     m_thread = std::thread([this, instance] { ThreadMain(instance); });
     std::unique_lock lock(m_mutex);
     m_created.wait(lock, [this] { return m_ready; });
-}
-
-StartupSplash::~StartupSplash()
-{
-    Close();
 }
 
 void StartupSplash::ThreadMain(HINSTANCE instance)
@@ -86,6 +96,7 @@ void StartupSplash::ThreadMain(HINSTANCE instance)
         MoveWindowCentered(window, center, { kWidth, kHeight });
         ShowStartupWindow(window, SW_SHOWNORMAL);
         UpdateWindow(window);
+        SetTimer(window, kCompileTimer, 250, nullptr);
     }
     {
         std::lock_guard lock(m_mutex);
@@ -172,11 +183,40 @@ void StartupSplash::HoldAboveMainWindow()
 
 void StartupSplash::Close()
 {
-    if (m_window)
-        PostMessageW(m_window, WM_CLOSE, 0, 0);
+    // The splash thread closes it once no shader is compiling (OnTimer).
+    HWND window = nullptr;
+    {
+        std::lock_guard lock(m_mutex);
+        window = m_window;
+    }
+    if (window)
+        PostMessageW(window, kCloseWhenIdle, 0, 0);
+}
+
+StartupSplash::~StartupSplash()
+{
+    HWND window = nullptr;
+    {
+        std::lock_guard lock(m_mutex);
+        window = m_window;
+    }
+    if (window)
+        PostMessageW(window, WM_CLOSE, 0, 0);
     if (m_thread.joinable())
         m_thread.join();
-    m_window = nullptr;
+}
+
+void StartupSplash::OnTimer(HWND window)
+{
+    const auto compile = Engine::Graphics::ShaderCompileProgress::Get();
+    if (m_closeWhenIdle && compile.active == 0 && compile.idleSeconds >= kCloseIdleSeconds)
+    {
+        DestroyWindow(window);
+        return;
+    }
+    // Repaint while a compile shows (its clock ticks), and once more after.
+    if (compile.active > 0 || m_showedCompile)
+        InvalidateRect(window, nullptr, FALSE);
 }
 
 LRESULT CALLBACK StartupSplash::WindowProc(HWND window, UINT message,
@@ -212,10 +252,30 @@ LRESULT CALLBACK StartupSplash::WindowProc(HWND window, UINT message,
             return 0;
         }
         break;
+    case WM_TIMER:
+        if (self && wParam == kCompileTimer)
+        {
+            self->OnTimer(window);
+            return 0;
+        }
+        break;
+    case kCloseWhenIdle:
+        if (self)
+        {
+            self->m_closeWhenIdle = true;
+            self->OnTimer(window);
+        }
+        return 0;
     case WM_CLOSE:
         DestroyWindow(window);
         return 0;
     case WM_DESTROY:
+        KillTimer(window, kCompileTimer);
+        if (self)
+        {
+            std::lock_guard lock(self->m_mutex);
+            self->m_window = nullptr;
+        }
         PostQuitMessage(0);
         return 0;
     default:
@@ -269,6 +329,43 @@ void StartupSplash::Paint(HDC dc)
     graphics.FillRectangle(&track, 30, 328, kWidth - 60, 7);
     graphics.FillRectangle(&fill, 30, 328,
         static_cast<int>((kWidth - 60) * progress), 7);
+
+    // Shader compiles (ShaderCompileProgress): the one running longest, its
+    // time against how long it took last time, and a thin bar for that.
+    const auto compile = Engine::Graphics::ShaderCompileProgress::Get();
+    m_showedCompile = compile.active > 0;
+    if (compile.active > 0)
+    {
+        std::wstring line = L"Compiling shader " +
+            std::wstring(compile.label.begin(), compile.label.end()) + L"  " + Clock(compile.elapsedSeconds);
+        if (compile.expectedSeconds > 0.0)
+            line += L" of ~" + Clock(compile.expectedSeconds);
+        if (compile.active > 1)
+            line += L"  (+" + std::to_wstring(compile.active - 1) + L" more)";
+        if (compile.finished > 0)
+            line += L"  |  " + std::to_wstring(compile.finished) + L" compiled";
+        Gdiplus::Font compileFont(&family, 12, Gdiplus::FontStyleRegular, Gdiplus::UnitPixel);
+        graphics.DrawString(line.c_str(), -1, &compileFont, Gdiplus::PointF(30.0f, 306.0f), &muted);
+        const int barWidth = kWidth - 60;
+        Gdiplus::SolidBrush compileFill(Gdiplus::Color(255, 237, 188, 95));
+        graphics.FillRectangle(&track, 30, 340, barWidth, 3);
+        if (compile.expectedSeconds > 0.0)
+        {
+            // Past the expected time it holds near the end rather than overflowing.
+            const double share = std::min(compile.elapsedSeconds / compile.expectedSeconds, 0.97);
+            graphics.FillRectangle(&compileFill, 30, 340, static_cast<int>(barWidth * share), 3);
+        }
+        else
+        {
+            // Unknown length: a segment sweeping across, so it reads as alive.
+            const int segment = barWidth / 5;
+            const double phase = std::fmod(compile.elapsedSeconds / 2.0, 1.0);
+            const int x = static_cast<int>((barWidth + segment) * phase) - segment;
+            const int left = std::max(x, 0), right = std::min(x + segment, barWidth);
+            if (right > left)
+                graphics.FillRectangle(&compileFill, 30 + left, 340, right - left, 3);
+        }
+    }
     Gdiplus::Graphics(dc).DrawImage(&buffer, 0, 0, kWidth, kHeight);
 }
 }

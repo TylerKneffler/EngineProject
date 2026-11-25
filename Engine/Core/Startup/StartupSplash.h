@@ -36,6 +36,9 @@ public:
     // then it is centred on the splash, on the splash's monitor.
     int PlaceWindow(HWND window, bool restoreSize) const;
     void HoldAboveMainWindow();
+    // Closes the splash, or, while shaders are compiling (ShaderCompileProgress),
+    // leaves it up showing them until they have been quiet for a moment; the
+    // main window behind it would only show a frozen frame meanwhile.
     void Close();
 
 private:
@@ -43,6 +46,7 @@ private:
         WPARAM wParam, LPARAM lParam);
     void ThreadMain(HINSTANCE instance);
     void Paint(HDC dc);
+    void OnTimer(HWND window);
 
     std::thread m_thread;
     std::mutex m_mutex;
@@ -54,6 +58,8 @@ private:
     std::wstring m_backgroundPath;
     std::optional<SavedWindowPlacement> m_saved;
     std::atomic<bool> m_userMoved{ false };
+    bool m_closeWhenIdle = false;   // splash thread only
+    bool m_showedCompile = false;   // splash thread only
     float m_progress = 0.0f;
     ULONG_PTR m_gdiplusToken = 0;
     void* m_background = nullptr;

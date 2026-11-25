@@ -6,6 +6,7 @@
 #include "Core/Scene/Object.h"
 #include "Core/Serialization/Json.h"
 
+#include <algorithm>
 #include <cstdlib>
 
 namespace MeadowGrass
@@ -28,9 +29,13 @@ GrassField* ApplyFar(Engine::Components::TerrainObjectLayer& layer,
     // 3.3 of 10 ms). ENGINE_FAR_GRASS_LODS=0 keeps the full tuft everywhere.
     static const bool farLods = [] {
         const char* v = std::getenv("ENGINE_FAR_GRASS_LODS"); return !(v && v[0] == '0'); }();
-    layer.viewDistance = 200.f;
-    layer.lod1Distance = farLods ? 45.f : 200.f;
-    layer.lod2Distance = farLods ? 90.f : 200.f;
+    // ENGINE_FAR_GRASS_RADIUS=<m> overrides the ring's 200 m reach (A/B runs).
+    static const float reach = [] {
+        const char* v = std::getenv("ENGINE_FAR_GRASS_RADIUS");
+        return v && v[0] ? std::clamp(static_cast<float>(std::atof(v)), 50.f, 1000.f) : 200.f; }();
+    layer.viewDistance = reach;
+    layer.lod1Distance = farLods ? 45.f : reach;
+    layer.lod2Distance = farLods ? 90.f : reach;
     layer.MarkConfigurationDirty();
     using Engine::Serialization::JsonValue;
     const std::string tuft = "Assets/Mesh/Grass/far_grass_tuft.obj";
@@ -41,7 +46,7 @@ GrassField* ApplyFar(Engine::Components::TerrainObjectLayer& layer,
         .Set("shortMeshLod1", tuft1).Set("shortMeshLod2", tuft2)
         .Set("tallMeshLod1", tuft1).Set("tallMeshLod2", tuft2)
         .Set("viewerObjectName", viewerObjectName)
-        .Set("useEditorCamera", JsonValue(true)).Set("visibleRadius", 200.f)
+        .Set("useEditorCamera", JsonValue(true)).Set("visibleRadius", reach)
         .Set("tileSize", 64.f).Set("shortPatchesPerSquareMeter", 1.1f)
         .Set("tallPatchesPerSquareMeter", 0.f).Set("seed", 29311)
         .Set("castShadows", JsonValue(false)).Set("tileWorkBudgetMs", 1.f)

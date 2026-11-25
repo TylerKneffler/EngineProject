@@ -378,6 +378,31 @@ float3 GrassGroundShells(float3 worldPos, float3 toCamera, float3 normal, float 
     return lerp(lerp(mean, traced, resolved), float3(1.16, 1.12, 0.9) * (0.93 + 0.14 * level), skim);
 }
 
+// The wind over grass too far off for its blades to be seen: the broad gust
+// fronts of ApplyGrassWind (same field, direction and speed) shaded as the
+// light changing on a leaning field. Blades leaning toward the camera show
+// their lit sides and tips (lighter, yellower), leaning away their roots
+// (darker); any strong lean adds a little sheen. The fronts are 18 m along
+// the wind and ~70 m across, so they stay several pixels wide hundreds of
+// metres away. Returns a multiplier on the cover colour.
+float3 GrassGroundWind(float3 worldPos, float sceneTime, float3 toCamera)
+{
+    const float direction = radians(GrassWindDirectionDegrees);
+    const float2 wind = float2(cos(direction), sin(direction));
+    const float2 side = float2(-wind.y, wind.x);
+    const float2 traveling = worldPos.xz - wind * (sceneTime * max(0.0, GrassWindSpeed) * 2.0);
+    const float2 coordinate = float2(dot(traveling, wind), dot(traveling, side) * .25) /
+        max(1.0, GrassWindWaveSize);
+    // ApplyGrassWind's gust without per-blade detail (bladeDetail 0).
+    const float gust = clamp(2.1 * .85 * GrassWindPerlin(coordinate, GrassWindSeed), -1.0, 1.0) * .7;
+    const float2 view = toCamera.xz;
+    const float viewLength = length(view);
+    const float facing = viewLength > 1e-4 ? dot(wind, view / viewLength) : 0.0;
+    const float lean = gust * facing * GrassWindStrength;
+    const float light = .34 * lean + .12 * abs(gust) - .06;
+    return float3(1.0 + light, 1.0 + light, 1.0 + light - .5 * max(light, 0.0));
+}
+
 #ifdef GRASS_SURFACE_SHADING
 // Meadow colour variation keyed to the placement root (stable under wind):
 // broad dry/lush patches plus a per-clump brightness and hue jitter.
@@ -3635,6 +3660,10 @@ float4 ObjectSurfacePS(
                     const float3 toCamera = normalize(objectData.viewPositionAlphaCutoff.xyz - worldPos);
                     tinted *= lerp(1.0, GrassGroundShells(worldPos, toCamera,
                         terrainNormalForLighting, footprint), beyond);
+                    // Scene time is 0 for draws without wind (SceneRendering.cpp).
+                    [branch] if (objectData.grassAnimation.x > 0.0)
+                        tinted *= lerp(1.0, GrassGroundWind(worldPos, objectData.grassAnimation.x,
+                            toCamera), beyond);
                 }
                 base.rgb = lerp(base.rgb, tinted * originalWeightSum,
                     cover * objectData.groundCoverColor.w);

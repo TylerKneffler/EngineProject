@@ -2,6 +2,7 @@
 #include "pch.h"
 #include "Core/Renderers/D3DShaderCache.h"
 #include "Core/Renderers/HlslFileInclude.h"
+#include "Core/Graphics/ShaderCompileProgress.h"
 
 #include <atomic>
 #include <cstdio>
@@ -166,11 +167,20 @@ Microsoft::WRL::ComPtr<ID3DBlob> D3DShaderCache::CompileFromFile(
         return value && value[0] == '1';
     }();
     const auto compileStart = std::chrono::steady_clock::now();
+    // Loading screens show the compile (StartupSplash).
+    static const bool progressStore = [] {
+        Engine::Graphics::ShaderCompileProgress::SetStoreDirectory(
+            CacheEnabled() ? CacheDirectory().string() : std::string());
+        return true;
+    }();
+    (void)progressStore;
+    const int progressTicket = Engine::Graphics::ShaderCompileProgress::Begin(filePath, entryPoint, target);
     if (logCompiles)
         std::fprintf(stderr, "[ShaderCompile] start %s %s %s flags 0x%x cached-as %s\n", filePath.c_str(),
             entryPoint ? entryPoint : "", target ? target : "", flags, cached.string().c_str());
     const HRESULT hr = D3DCompileFromFile(widePath.c_str(), nullptr, &includes,
         entryPoint, target, flags, 0, &bytecode, &errors);
+    Engine::Graphics::ShaderCompileProgress::End(progressTicket, SUCCEEDED(hr));
     if (logCompiles)
         std::fprintf(stderr, "[ShaderCompile] %s %s %s after %.1f s\n", FAILED(hr) ? "FAILED" : "done",
             filePath.c_str(), entryPoint ? entryPoint : "",
