@@ -26,6 +26,7 @@
 #include <fstream>
 #include <map>
 #include <functional>
+#include <mutex>
 #include <memory>
 #include <stdexcept>
 
@@ -236,14 +237,22 @@ bool ShaderTrails()
 
 // Six layer weights for one sample. rockClass is the archive's 0..3 code:
 // slope and ridge rockiness computed over the whole map by the generator.
+void PaintSample(float height, float rockSlope, float worldX, float worldZ,
+    const Altitudes& a, float* weights);
 void PaintSample(float height, uint8_t rockClass, float worldX, float worldZ,
+    const Altitudes& a, float* weights)
+{
+    PaintSample(height, rockClass / 3.f, worldX, worldZ, a, weights);
+}
+
+// rockSlope: 0..1, the archive's rock code over 3.
+void PaintSample(float height, float rockSlope, float worldX, float worldZ,
     const Altitudes& a, float* weights)
 {
     const float waterLevel = a.water;
     const float detail = ValueNoise(worldX, worldZ, 22.f, 51u) - .5f;
     const float land = SmoothStep(waterLevel + 1.5f, waterLevel + 4.f, height);
     const float shore = SmoothStep(waterLevel - 3.5f, waterLevel - 1.f, height);
-    const float rockSlope = rockClass / 3.f;
     const float rockHigh = SmoothStep(a.rock - 8.f * a.blend, a.rock + 8.f * a.blend,
         height + detail * 14.f * a.blend);
     const float rock = land * std::max(rockSlope, rockHigh);
@@ -1160,6 +1169,28 @@ const TreeCrownEntry* FindTreeCrown(const std::string& asset)
 // One cell's paint as the near cells have it: the paint, the erosion paint
 // (lushness) and the worn trail heights. Shared by the cell builder and the
 // far canopy (so its forest generator sees the heights the cells' does).
+// Ground slope (rise over run) at each sample over the 16 m erosion grid:
+// four samples each way, one-sided at the cell edge.
+std::vector<float> ErosionSlopes(const std::vector<float>& heights, int countX, int countY,
+    float cellWidth, float cellDepth)
+{
+    std::vector<float> slopes(heights.size(), 0.f);
+    const auto heightAt = [&](int row, int col) {
+        row = std::clamp(row, 0, countY); col = std::clamp(col, 0, countX);
+        return heights[static_cast<size_t>(row) * (countX + 1) + col];
+    };
+    for (int row = 0; row <= countY; ++row)
+        for (int col = 0; col <= countX; ++col)
+        {
+            const int c0 = std::max(col - 4, 0), c1 = std::min(col + 4, countX);
+            const int r0 = std::max(row - 4, 0), r1 = std::min(row + 4, countY);
+            const float dx = (heightAt(row, c1) - heightAt(row, c0)) / (std::max(c1 - c0, 1) * cellWidth);
+            const float dz = (heightAt(r1, col) - heightAt(r0, col)) / (std::max(r1 - r0, 1) * cellDepth);
+            slopes[static_cast<size_t>(row) * (countX + 1) + col] = std::sqrt(dx * dx + dz * dz);
+        }
+    return slopes;
+}
+
 void PaintCell(TerrainManager::Cell cell, int countX, int countY, float cellWidth, float cellDepth,
     const std::vector<uint8_t>& codes, const Altitudes& level, const MacroColorRules& rules,
     const TerrainHydrologyMap& flow, const TerrainHydrologyMap& deposition,
@@ -1176,32 +1207,23 @@ void PaintCell(TerrainManager::Cell cell, int countX, int countY, float cellWidt
                 originZ + row * cellDepth, level, &weights[i * LayerCount]);
         }
     // Erosion paint, as the macro map has it: slope at the 16 m erosion grid
-    // (four samples each way, one-sided at the cell edge).
+    // (ErosionSlopes).
     lushness.clear();
     if (!flow.Empty())
     {
         lushness.assign(heights.size(), 0.f);
-        const auto heightAt = [&](int row, int col) {
-            row = std::clamp(row, 0, countY); col = std::clamp(col, 0, countX);
-            return heights[static_cast<size_t>(row) * (countX + 1) + col];
-        };
+        const auto slopes = ErosionSlopes(heights, countX, countY, cellWidth, cellDepth);
         for (int row = 0; row <= countY; ++row)
             for (int col = 0; col <= countX; ++col)
             {
                 const size_t i = static_cast<size_t>(row) * (countX + 1) + col;
-                const int c0 = std::max(col - 4, 0), c1 = std::min(col + 4, countX);
-                const int r0 = std::max(row - 4, 0), r1 = std::min(row + 4, countY);
-                const float dx = (heightAt(row, c1) - heightAt(row, c0)) /
-                    (std::max(c1 - c0, 1) * cellWidth);
-                const float dz = (heightAt(r1, col) - heightAt(r0, col)) /
-                    (std::max(r1 - r0, 1) * cellDepth);
                 const float worldX = originX + col * cellWidth;
                 const float worldZ = originZ + row * cellDepth;
                 const float wet = SmoothStep(rules.flowThreshold, 1.f, flow.Normalized(worldX, worldZ));
                 const float sediment = deposition.Empty() ? 0.f :
                     deposition.Normalized(worldX, worldZ) * deposition.scale;
                 lushness[i] = ApplyErosionPaint(&weights[i * LayerCount], heights[i],
-                    std::sqrt(dx * dx + dz * dz), wet, sediment, rules, level);
+                    slopes[i], wet, sediment, rules, level);
             }
     }
     // A worn track: trails sink a little into the ground (collision and
@@ -1218,6 +1240,86 @@ void PaintCell(TerrainManager::Cell cell, int countX, int countY, float cellWidt
                     originZ + row * cellDepth) * crossable * ForestBand(heights[i], level);
                 heights[i] -= .12f * track;
             }
+}
+
+// The paint at points of a cell's surface (volume cells; todo.md "Terrain:
+// volume-first conversion", step 4): PaintSample and the erosion paint at
+// each vertex's own position and height instead of the 4 m grid's. On the
+// seed ground the map-wide inputs come from the seed grid as before: the
+// archive's rock codes and the erosion slope over 32 m. Off it (rock carved
+// out or added by volume edits) both come from the vertex's own normal.
+// The cell's codes and slopes load on first use, on a meshing worker.
+std::shared_ptr<const TerrainManager::SurfacePainterFactory::result_type::element_type>
+MakeSurfacePainter(TerrainManager::Cell cell, const std::string& archivePath, uint64_t signature,
+    int extent, int countX, int countY, float cellWidth, float cellDepth, const Altitudes& level,
+    const MacroColorRules& rules,
+    std::shared_ptr<const std::pair<TerrainHydrologyMap, TerrainHydrologyMap>> hydrology)
+{
+    struct Seed
+    {
+        std::once_flag once;
+        bool valid = false;
+        std::vector<float> heights, rock, slopes;
+    };
+    auto seed = std::make_shared<Seed>();
+    using Painter = TerrainManager::SurfacePainterFactory::result_type::element_type;
+    return std::make_shared<const Painter>([=](size_t count, const glm::vec3* positions,
+        const glm::vec3* normals, size_t layers, float* weights, float* lushness)
+    {
+        std::call_once(seed->once, [&] {
+            std::vector<uint8_t> codes;
+            if (!TerrainHeightArchive::ReadCellCodes(archivePath, signature, extent,
+                    countX, countY, cell.first, cell.second, seed->heights, codes) ||
+                codes.size() != seed->heights.size()) return;
+            seed->rock.resize(codes.size());
+            for (size_t i = 0; i < codes.size(); ++i) seed->rock[i] = codes[i] / 3.f;
+            seed->slopes = ErosionSlopes(seed->heights, countX, countY, cellWidth, cellDepth);
+            seed->valid = true;
+        });
+        const float originX = cell.first * countX * cellWidth;
+        const float originZ = cell.second * countY * cellDepth;
+        const auto& flow = hydrology->first;
+        const auto& deposition = hydrology->second;
+        for (size_t p = 0; p < count; ++p)
+        {
+            const glm::vec3 position = positions[p];
+            const float normalY = std::clamp(normals[p].y, -1.f, 1.f);
+            const float normalSlope = std::sqrt(std::max(0.f, 1.f - normalY * normalY)) /
+                std::max(normalY, .05f);
+            float rock = SmoothStep(.6f, 1.2f, normalSlope), slope = normalSlope, off = 1.f;
+            if (seed->valid)
+            {
+                const float fx = std::clamp(position.x / cellWidth, 0.f, float(countX));
+                const float fz = std::clamp(position.z / cellDepth, 0.f, float(countY));
+                const int col = std::min(int(fx), countX - 1), row = std::min(int(fz), countY - 1);
+                const float tx = fx - col, tz = fz - row;
+                const auto at = [&](const std::vector<float>& values) {
+                    const auto v = [&](int c, int r) { return values[size_t(r) * (countX + 1) + c]; };
+                    return (v(col, row) * (1 - tx) + v(col + 1, row) * tx) * (1 - tz) +
+                        (v(col, row + 1) * (1 - tx) + v(col + 1, row + 1) * tx) * tz;
+                };
+                // How far the surface is from the seed ground (or faces down).
+                off = std::max(SmoothStep(.5f, 2.f, std::abs(position.y - at(seed->heights))),
+                    normalY < .2f ? 1.f : 0.f);
+                rock += (at(seed->rock) - rock) * (1.f - off);
+                slope += (at(seed->slopes) - slope) * (1.f - off);
+            }
+            float sample[LayerCount];
+            const float worldX = originX + position.x, worldZ = originZ + position.z;
+            PaintSample(position.y, rock, worldX, worldZ, level, sample);
+            float lush = 0.f;
+            if (!flow.Empty())
+            {
+                const float wet = SmoothStep(rules.flowThreshold, 1.f, flow.Normalized(worldX, worldZ));
+                const float sediment = deposition.Empty() ? 0.f :
+                    deposition.Normalized(worldX, worldZ) * deposition.scale;
+                lush = ApplyErosionPaint(sample, position.y, slope, wet, sediment, rules, level);
+            }
+            for (size_t layer = 0; layer < layers; ++layer)
+                weights[p * layers + layer] = layer < size_t(LayerCount) ? sample[layer] : 0.f;
+            lushness[p] = lush;
+        }
+    });
 }
 
 LandscapeDriver::LandscapeDriver()
@@ -1347,6 +1449,19 @@ bool LandscapeDriver::ConfigureTerrain()
             terrain.heights, terrain.weights, terrain.lushness);
         terrain.Rebuild();
     });
+    // Volume cells paint each vertex by these rules (ENGINE_VOLUME_PAINT=0:
+    // the painted 4 m grid, interpolated).
+    static const bool vertexPaint = [] {
+        const char* value = std::getenv("ENGINE_VOLUME_PAINT");
+        return !(value && value[0] == '0');
+    }();
+    if (vertexPaint)
+        manager->SetSurfacePainter([=](TerrainManager::Cell cell) {
+            return MakeSurfacePainter(cell, archivePath, signature, extent, countX, countY,
+                manager->cellWidth, manager->cellDepth, level, erosionRules, hydrology);
+        });
+    else
+        manager->SetSurfacePainter({});
     manager->SetObjectLayerGenerator([=](const TerrainManager::ObjectLayerContext& context,
         const std::string& layerName, TerrainObjectLayer& layer)
     {

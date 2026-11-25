@@ -6,6 +6,7 @@
 #include <array>
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <future>
 #include <memory>
 #include <optional>
@@ -82,6 +83,14 @@ public:
     // the neighbours' included; not serialized).
     std::string editFile;
     std::vector<TerrainVolumeEdit> edits;
+    // fromTerrain: paints points of the cell's surface (cell space) with
+    // `layers` weights each and a lushness (Terrain::lushness), from the
+    // paint rules at the point itself (todo.md "Terrain: volume-first
+    // conversion", step 4). Runs on meshing workers, so it must be
+    // thread-safe. Null: the terrain's painted grid, interpolated.
+    using SurfacePainter = std::function<void(size_t count, const glm::vec3* positions,
+        const glm::vec3* normals, size_t layers, float* weights, float* lushness)>;
+    std::shared_ptr<const SurfacePainter> surfacePainter;
     // Cells of one grid (TerrainManager sets them; not serialized): volumes
     // of one group at neighbouring cells join into one sheet. A volume of no
     // group stands alone.
@@ -190,6 +199,8 @@ public:
         float cellWidth = 1.f, cellDepth = 1.f;
         size_t layers = 0;
         std::vector<float> weights;   // per grid vertex and layer
+        std::vector<float> lushness;  // per grid vertex (may be empty)
+        std::shared_ptr<const SurfacePainter> painter;
     };
     // Scanned rock over steep faces (the triplanar rock path, Object.hlsl):
     // a layer-array slice after the painted layers, projected from three sides.

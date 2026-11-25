@@ -75,8 +75,20 @@ first-person controller, caches).
         hole; without edits the landscape takes the unchanged height path.
       - Not moved: `LandscapeDriver` far splat trees (archive heights, far cells, no field yet), grass
         path-share test (paths only).
-- [ ] **4. Paint on the volume.** Layer weights, hydrology tint, lushness and trail contour paths
+- [x] **4. Paint on the volume** (2026-11-24). Layer weights, hydrology tint, lushness and trail contour paths
       evaluated on the field per vertex (slope from the density gradient), not per height sample.
+      - `VolumeTerrain::surfacePainter`, made per cell by `TerrainManager::SetSurfacePainter` (fed in
+        `FeedVolumeNeighbours`, so cached cells get it too); `LandscapeDriver::MakeSurfacePainter` runs
+        `PaintSample` + `ApplyErosionPaint` at each vertex's own position and height. On the seed ground
+        the rock codes and the 32 m erosion slope come from the seed grid (`ErosionSlopes`, shared with
+        `PaintCell`); 0.5-2 m off it, or facing down, from the vertex normal. Steep blend and scanned
+        rock unchanged. `ENGINE_VOLUME_PAINT=0`: the painted grid, interpolated.
+      - Fixed on the way: volume vertices had no lushness (uvChannels1.w); now the painter's, or the
+        grid's interpolated.
+      - Trail contour paths were already per pixel (world position and height), nothing to move.
+      - Checked: Vista and MeadowSlope near ground vs the height grid |diff| 1.55 / 2.51 (grid paint
+        1.68 / 2.68); test shaft walls rock as before. Cost 0.43 us a vertex on meshing workers
+        (grid 0.14), 26 ms over all loaded cells (`ENGINE_VOLUME_TERRAIN_LOG` "paint so far").
 - [ ] **5. Far terrain from the field.** Far chunks meshed from the field at coarse strides (surface nets
       levels with skirts, screen-error selection, the far-cell detail lessons: no pops at the loaded
       border, compact static buffers, no crossing hitches); replaces far tiles, `world.fargrid` and

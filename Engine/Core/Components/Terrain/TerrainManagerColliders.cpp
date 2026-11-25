@@ -74,6 +74,7 @@ void TerrainManager::FeedVolumeNeighbours(Cell cell, VolumeTerrain& volume) cons
     const double spanX = static_cast<double>(cellsX) * cellWidth;
     const double spanZ = static_cast<double>(cellsY) * cellDepth;
     volume.edits = GetVolumeEdits(cell);
+    volume.surfacePainter = m_surfacePainter ? m_surfacePainter(cell) : nullptr;
     for (int dz = -1; dz <= 1; ++dz)
         for (int dx = -1; dx <= 1; ++dx)
         {

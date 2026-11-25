@@ -110,24 +110,49 @@ void ApplySlopeWeights(std::vector<Mesh::Vertex>& vertices, float start, float e
 }
 
 using RockSurface = VolumeTerrain::RockSlice;
+// ENGINE_VOLUME_TERRAIN_LOG: paint time on meshing workers (microseconds)
+// and vertices painted, over the run.
+std::atomic<uint64_t> g_paintMicroseconds{0}, g_paintVertices{0};
 
-// A terrain's painted weights at each vertex's ground position on gentle
-// ground, the steep layer on steep faces, overhangs and ceilings, and the
-// scanned rock blended over those (when there is one) by the same slope.
+// The paint at each vertex: the painter's (the paint rules at the vertex's
+// own position, height and normal) or else the terrain's painted grid at its
+// ground position; then the steep layer on steep faces, overhangs and
+// ceilings, and the scanned rock blended over those (when there is one) by
+// the same slope. Lushness (uvChannels1.w) as Terrain::BuildVertex has it.
 void ApplyPaintWeights(std::vector<Mesh::Vertex>& vertices, const VolumeTerrain::Paint& paint,
     int steepLayer, float start, float end, const RockSurface& rock)
 {
     start = std::min(start, end - 1.e-3f);
     const size_t layers = std::min<size_t>(paint.layers, 6);
-    const auto weight = [&](int col, int row, size_t layer)
+    const auto grid = [&](const std::vector<float>& values, size_t stride, size_t layer,
+        int col, int row, float tx, float tz)
     {
-        col = std::clamp(col, 0, paint.cellsX);
-        row = std::clamp(row, 0, paint.cellsY);
-        const size_t i = (size_t(row) * (paint.cellsX + 1) + col) * paint.layers + layer;
-        return i < paint.weights.size() ? paint.weights[i] : 0.f;
+        const auto at = [&](int c, int r) {
+            c = std::clamp(c, 0, paint.cellsX);
+            r = std::clamp(r, 0, paint.cellsY);
+            const size_t i = (size_t(r) * (paint.cellsX + 1) + c) * stride + layer;
+            return i < values.size() ? values[i] : 0.f;
+        };
+        return (at(col, row) * (1 - tx) + at(col + 1, row) * tx) * (1 - tz) +
+            (at(col, row + 1) * (1 - tx) + at(col + 1, row + 1) * tx) * tz;
     };
-    for (auto& vertex : vertices)
+    std::vector<float> painted, paintedLush;
+    if (paint.painter && *paint.painter && layers && !vertices.empty())
     {
+        std::vector<glm::vec3> positions(vertices.size()), normals(vertices.size());
+        for (size_t i = 0; i < vertices.size(); ++i)
+        {
+            positions[i] = {vertices[i].pos[0], vertices[i].pos[1], vertices[i].pos[2]};
+            normals[i] = {vertices[i].normal[0], vertices[i].normal[1], vertices[i].normal[2]};
+        }
+        painted.assign(vertices.size() * paint.layers, 0.f);
+        paintedLush.assign(vertices.size(), 0.f);
+        (*paint.painter)(vertices.size(), positions.data(), normals.data(), paint.layers,
+            painted.data(), paintedLush.data());
+    }
+    for (size_t index = 0; index < vertices.size(); ++index)
+    {
+        auto& vertex = vertices[index];
         const float fx = std::clamp(vertex.pos[0] / paint.cellWidth, 0.f, float(paint.cellsX));
         const float fz = std::clamp(vertex.pos[2] / paint.cellDepth, 0.f, float(paint.cellsY));
         const int col = std::min(int(fx), paint.cellsX - 1), row = std::min(int(fz), paint.cellsY - 1);
@@ -138,11 +163,13 @@ void ApplyPaintWeights(std::vector<Mesh::Vertex>& vertices, const VolumeTerrain:
         {
             float w = 0.f;
             if (layer < layers)
-                w = (weight(col, row, layer) * (1 - tx) + weight(col + 1, row, layer) * tx) * (1 - tz) +
-                    (weight(col, row + 1, layer) * (1 - tx) + weight(col + 1, row + 1, layer) * tx) * tz;
+                w = !painted.empty() ? painted[index * paint.layers + layer]
+                    : grid(paint.weights, paint.layers, layer, col, row, tx, tz);
             w = w * (1.f - steep) + (int(layer) == steepLayer ? steep : 0.f);
             vertex.uvChannels[2 + layer / 4][layer % 4] = w;
         }
+        vertex.uvChannels[1][3] = !paintedLush.empty() ? paintedLush[index]
+            : paint.lushness.empty() ? 0.f : grid(paint.lushness, 1, 0, col, row, tx, tz);
         vertex.uv[0] = std::clamp(vertex.pos[0] / (paint.cellsX * paint.cellWidth), 0.f, 1.f);
         vertex.uv[1] = std::clamp(vertex.pos[2] / (paint.cellsY * paint.cellDepth), 0.f, 1.f);
         vertex.color[0] = vertex.color[1] = vertex.color[2] = 0.f;
@@ -388,6 +415,8 @@ bool VolumeTerrain::StartBuild()
     paint->cellWidth = terrain->cellWidth; paint->cellDepth = terrain->cellDepth;
     paint->layers = terrain->layers.size();
     paint->weights = terrain->weights;
+    paint->lushness = terrain->lushness;
+    paint->painter = surfacePainter;
     m_paint = std::move(paint);
     m_layerMaterials = terrain->GetLayerMaterials();
     m_layerMaterials.resize(std::min<size_t>(m_layerMaterials.size(), 6));
@@ -664,10 +693,12 @@ void VolumeTerrain::SwapIn(const glm::vec3& eye)
                 size_t triangles = 0;
                 for (const auto& chunk : m_chunks)
                     if (chunk.shown.level >= 0) triangles += chunk.triangles;
-                std::printf("[VolumeTerrain] %s ready after %.1f s: %zu chunks, %zu triangles, %.1f MB density\n",
+                std::printf("[VolumeTerrain] %s ready after %.1f s: %zu chunks, %zu triangles, %.1f MB density; "
+                    "paint so far %.1f ms over %llu vertices\n",
                     Owner->name.c_str(), std::chrono::duration<double>(
                         std::chrono::steady_clock::now() - m_buildStarted).count(),
-                    m_chunks.size(), triangles, m_volume->MemoryBytes() / 1.e6);
+                    m_chunks.size(), triangles, m_volume->MemoryBytes() / 1.e6,
+                    g_paintMicroseconds.load() / 1000.0, static_cast<unsigned long long>(g_paintVertices.load()));
             }
         }
 }
@@ -847,7 +878,14 @@ void VolumeTerrain::Update()
                 std::vector<Mesh::Vertex> vertices;
                 std::vector<uint32_t> indices;
                 MeshSurfaceNets(*volume, first, span, stride, seams, vertices, indices);
-                if (paint) ApplyPaintWeights(vertices, *paint, steep, start, end, rock);
+                if (paint)
+                {
+                    const auto paintStart = std::chrono::steady_clock::now();
+                    ApplyPaintWeights(vertices, *paint, steep, start, end, rock);
+                    g_paintMicroseconds += uint64_t(std::chrono::duration_cast<std::chrono::microseconds>(
+                        std::chrono::steady_clock::now() - paintStart).count());
+                    g_paintVertices += vertices.size();
+                }
                 else if (weights) ApplySlopeWeights(vertices, start, end, extent);
                 if (indices.empty()) return built;
                 const auto bounds = Mesh::PrepareIndexedGeometry(vertices, indices);

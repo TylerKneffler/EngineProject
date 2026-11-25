@@ -388,6 +388,12 @@ public:
     using ObjectLayerGenerator = std::function<void(const ObjectLayerContext&,
         const std::string& layerName, TerrainObjectLayer&)>;
     void SetObjectLayerGenerator(ObjectLayerGenerator generator);
+    // Volume cells: the painter of a cell's surface (VolumeTerrain::
+    // surfacePainter), made on the main thread whenever a cell's volume is
+    // configured; the painter itself runs on meshing workers.
+    using SurfacePainterFactory = std::function<std::shared_ptr<const std::function<void(size_t,
+        const glm::vec3*, const glm::vec3*, size_t, float*, float*)>>(Cell)>;
+    void SetSurfacePainter(SurfacePainterFactory factory) { m_surfacePainter = std::move(factory); }
     // Main thread, whenever a cell's named layer is restored: the place for
     // a scene script to attach or configure components on the layer object.
     using ObjectLayerSetup = std::function<void(Cell, TerrainObjectLayer&)>;
@@ -746,6 +752,7 @@ private:
     // seed, which runs on any thread.
     struct FieldSource;
     std::shared_ptr<FieldSource> m_fieldSource;
+    SurfacePainterFactory m_surfacePainter;
     std::shared_ptr<TerrainField> m_terrainField;
     uint64_t m_terrainFieldKey = 0;
     uint64_t m_terrainFieldRevision = 1;
