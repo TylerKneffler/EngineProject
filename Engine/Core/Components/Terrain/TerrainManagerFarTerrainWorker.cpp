@@ -177,6 +177,23 @@ void TerrainManager::FarPrepareLoop()
                     vertex.color[1] = color.g;
                     vertex.color[2] = color.b;
                 };
+                // Far-cell detail (TerrainFarCellDetail.h): drawn after the
+                // patches, whose vertex offsets in-place updates rely on.
+                struct DetailedCell
+                {
+                    int x = 0, y = 0;
+                    uint8_t level = 1;
+                    std::vector<float> heights;
+                };
+                std::vector<DetailedCell> detailedCells;
+                const int tileWidth = task.endX - task.startX;
+                const auto levelOf = [&](int x, int y) -> int {
+                    if (x < task.startX || x >= task.endX || y < task.startY || y >= task.endY)
+                        return 1;
+                    const size_t index = static_cast<size_t>(
+                        (y - task.startY) * tileWidth + x - task.startX);
+                    return index < task.levels.size() ? task.levels[index] : 1;
+                };
                 result.vertices.resize(static_cast<size_t>(width) * depth);
                 for (int row = 0; row < depth; ++row)
                     for (int col = 0; col < width; ++col)
@@ -234,6 +251,16 @@ void TerrainManager::FarPrepareLoop()
                                 return item.second.x == x && item.second.y == y;
                             });
                         if (!visibleCell(x, y) || patched) continue;
+                        if (task.detailArchive && levelOf(x, y) > 1)
+                        {
+                            DetailedCell detailed{x, y,
+                                static_cast<uint8_t>(levelOf(x, y)), {}};
+                            if (task.detailArchive->ReadCell(x, y, detailed.heights))
+                            {
+                                detailedCells.push_back(std::move(detailed));
+                                continue;
+                            }
+                        }
                         const int seam = seamSide(x, y);
                         const auto* surface = seam >= 0
                             ? seamSurface(x, y, seam) : nullptr;
@@ -416,6 +443,60 @@ void TerrainManager::FarPrepareLoop()
                                 {a, b, a + 1, a + 1, b, b + 1});
                         }
                 }
+                for (const auto& detailed : detailedCells)
+                {
+                    const int x = detailed.x, y = detailed.y;
+                    FarCellDetail::CellGrid grid;
+                    grid.cellX = x; grid.cellY = y;
+                    grid.level = detailed.level; grid.cells = task.cellsX;
+                    grid.cellWidth = task.cellWidth; grid.cellDepth = task.cellDepth;
+                    grid.heights = &detailed.heights;
+                    grid.corners = {sample(x, y), sample(x + 1, y),
+                        sample(x, y + 1), sample(x + 1, y + 1)};
+                    const std::array<Cell, 4> neighbours{Cell{x - 1, y}, Cell{x, y + 1},
+                        Cell{x + 1, y}, Cell{x, y - 1}};
+                    std::array<const FarPrepareTask::SeamSurface*, 4> nearSurfaces{};
+                    const size_t expected = static_cast<size_t>(task.cellsX + 1) *
+                        (task.cellsY + 1);
+                    for (size_t sideIndex = 0; sideIndex < 4; ++sideIndex)
+                    {
+                        const Cell neighbour = neighbours[sideIndex];
+                        if (!visibleCell(neighbour.first, neighbour.second))
+                        {
+                            const auto found = task.seams.find(neighbour);
+                            if (found != task.seams.end() &&
+                                found->second.heights.size() == expected)
+                            {
+                                nearSurfaces[sideIndex] = &found->second;
+                                grid.nearEdges[sideIndex] = &found->second.heights;
+                            }
+                        }
+                        grid.edgeLevels[sideIndex] = std::min(grid.level,
+                            levelOf(neighbour.first, neighbour.second));
+                    }
+                    FarCellDetail::AppendCellGrid(grid, result.vertices, result.indices,
+                        [&](Mesh::Vertex& vertex, float u, float v, float height,
+                            const glm::vec3& normal) {
+                            vertex.pos[0] = (x - task.startX + u) * task.spanX;
+                            vertex.pos[1] = height;
+                            vertex.pos[2] = (y - task.startY + v) * task.spanZ;
+                            vertex.normal[0] = normal.x;
+                            vertex.normal[1] = normal.y;
+                            vertex.normal[2] = normal.z;
+                            vertex.uv[0] = static_cast<float>(x + u + task.halfExtent) /
+                                (task.side - 1);
+                            vertex.uv[1] = static_cast<float>(y + v + task.halfExtent) /
+                                (task.side - 1);
+                        },
+                        [&](Mesh::Vertex& vertex, float height, int col, int row,
+                            float u, float v) {
+                            setColor(vertex, height);
+                            for (int seam = 0; seam < 4; ++seam)
+                                if (nearSurfaces[static_cast<size_t>(seam)])
+                                    blendSeamColor(vertex, nearSurfaces[static_cast<size_t>(seam)],
+                                        seam, col, row, u, v);
+                        });
+                }
                 if (!task.cachePath.empty())
                     WriteFarTileCache(task.cachePath, task.fingerprint,
                         result.vertices, result.indices);
@@ -434,6 +515,7 @@ void TerrainManager::FarPrepareLoop()
             result.vertices.clear();
             result.indices.clear();
         }
+        if (task.lodStride == 1) result.builtLevels = task.levels;
         if (task.lodStride == 1)
             for (int y = task.startY; y < task.endY; ++y)
                 for (int x = task.startX; x < task.endX; ++x)

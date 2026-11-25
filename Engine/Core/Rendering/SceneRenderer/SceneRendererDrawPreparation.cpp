@@ -388,7 +388,10 @@ void SceneRendererDrawPreparation::PrepareTerrainMaterial(
         return;
     // Compact terrain vertices carry no layer weights: only a cell with a
     // paint map (Terrain::compactMesh) can be shaded with its layers.
-    if (mesh->UsesTerrainVertexFormat() && (!terrain || !terrain->HasPaintMap()))
+    // Distant terrain tiles carry no layers at all (vertex colour only), so
+    // their compact vertices still take the distant-terrain path below.
+    if (mesh->UsesTerrainVertexFormat() && (!terrain || !terrain->HasPaintMap()) &&
+        !(batch && batch->distantVisual))
         return;
 
     const auto& materials = terrain ? terrain->GetArrayMaterials() : batch->materials;

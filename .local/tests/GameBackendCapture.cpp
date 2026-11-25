@@ -61,6 +61,9 @@ float Metres(const char* text, const char* name)
 // to <out>/cpu-profile.txt after the run.
 bool g_cpuSample = false;
 bool g_foreground = false;
+// --hang-report <s>: sample from startup; if measurement has not started after
+// <s> seconds, write <out>/hang-profile.txt and exit (diagnoses load stalls).
+int g_hangReport = 0;
 
 Engine::Game::GameBenchmarkOptions Parse(int argc, char** argv)
 {
@@ -92,6 +95,8 @@ Engine::Game::GameBenchmarkOptions Parse(int argc, char** argv)
             Number(value(), "frames between the two moving snapshots", 1000);
         else if (key == "--capture-every") options.captureEvery =
             Number(value(), "frames between drive snapshots", 10000);
+        else if (key == "--capture-burst") options.captureBurst =
+            Number(value(), "consecutive frames per drive snapshot", 10000);
         else if (key == "--render-mode") options.renderMode =
             static_cast<int>(Number(value(), "render mode", 6, true));
         else if (key == "--max-fps") options.maxFpsOverride = Number(value(), "max fps", 1000, true);
@@ -114,6 +119,7 @@ Engine::Game::GameBenchmarkOptions Parse(int argc, char** argv)
         else if (key == "--route-look-period") options.routeLookPeriod = Number(value(), "route look period frames", 100000);
         else if (key == "--cpu-sample") g_cpuSample = true;
         else if (key == "--foreground") g_foreground = true;
+        else if (key == "--hang-report") g_hangReport = static_cast<int>(Number(value(), "hang report seconds", 3600));
         else if (key == "--help" || key == "-h")
         {
             std::cout << "GameBackendCapture [--scene <file.scene>] [--project <file.proj>] "
@@ -175,7 +181,24 @@ int main(int argc, char** argv)
         // process to efficiency cores and the timings measure that instead.
         Engine::Core::DisablePowerThrottling();
         std::unique_ptr<CpuSampler> sampler;
-        if (g_cpuSample)
+        if (g_hangReport)
+        {
+            static auto* hangSampler = new CpuSampler();
+            static std::atomic<bool> started{false};
+            hangSampler->Begin();
+            options.onMeasurementStart = [] { started = true; };
+            const auto out = options.output;
+            std::thread([out] {
+                std::this_thread::sleep_for(std::chrono::seconds(g_hangReport));
+                if (started) return;
+                hangSampler->Stop();
+                std::filesystem::create_directories(out);
+                hangSampler->Report(out / "hang-profile.txt", 4, 60);
+                std::cout << "Hang profile: " << std::filesystem::absolute(out / "hang-profile.txt").string() << std::endl;
+                TerminateProcess(GetCurrentProcess(), 3);
+            }).detach();
+        }
+        else if (g_cpuSample)
         {
             sampler = std::make_unique<CpuSampler>();
             options.onMeasurementStart = [&sampler] { sampler->Begin(); };

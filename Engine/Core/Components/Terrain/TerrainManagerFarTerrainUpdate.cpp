@@ -1,5 +1,6 @@
 #include "Core/Rendering/DetailBudget.h"
 #include "TerrainFarLodEdges.h"
+#include "Core/Graphics/IGraphicsProvider.h"
 #include "TerrainManager.h"
 #include "TerrainManagerFarTerrainCache.h"
 #include "TerrainObjectLayer.h"
@@ -557,6 +558,30 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
                 m_farTiles[ancestor].containsEditedPatch = true;
         }
     }
+    // Far-cell detail: take the archive and per-cell errors once measured.
+    if (m_farDetailJob.valid() &&
+        m_farDetailJob.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
+    {
+        m_farDetail = m_farDetailJob.get();
+        m_farDetailParentsApplied = false;
+    }
+    // A coarse tile hides the relief inside its cells as well as between its
+    // corners (the error above only compares corner heights), so it is not
+    // chosen while that relief would show.
+    if (m_farDetail.errors && !m_farDetailParentsApplied)
+    {
+        for (auto& tile : m_farTiles)
+        {
+            if (tile.lodStride <= 1) continue;
+            float inside = 0.f;
+            for (int y = tile.startY; y < tile.endY; ++y)
+                for (int x = tile.startX; x < tile.endX; ++x)
+                    if (const auto* error = m_farDetail.errors->At(x, y))
+                        inside = std::max(inside, (*error)[0]);
+            tile.maxHeightError = std::max(tile.maxHeightError, inside);
+        }
+        m_farDetailParentsApplied = true;
+    }
     for (auto& tile : m_farTiles) tile.desired = false;
     const glm::dmat4 terrainWorld = Owner->transform.GetWorldMatrixD();
     const glm::dmat4 cameraView = camera ? camera->GetViewMatrixD() :
@@ -672,6 +697,7 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
         if (!tile.built) return true;
         if (tile.lodStride > 1) return false;
         if (tile.builtNearRadius != nearRadius) return true;
+        if (tile.builtLevels != tile.desiredLevels) return true;
         if (tile.builtVisibility.size() != static_cast<size_t>(
             (tile.endX - tile.startX) * (tile.endY - tile.startY))) return true;
         for (int y = tile.startY; y < tile.endY; ++y)
@@ -683,6 +709,76 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
                     return true;
         return false;
     };
+    // Far-cell detail levels (TerrainFarCellDetail.h) of the finest tiles:
+    // the coarsest grid whose height error is under the allowed pixels at the
+    // cell's distance from the centre cell, full resolution beside loaded
+    // cells, 0 for cells the loaded terrain covers. They change only when the
+    // centre cell or the settings do, except next to the loaded area.
+    const float detailPixels = FarCellDetailPixels();
+    const bool detailOn = m_farDetail.archive && m_farDetail.errors && camera &&
+        !camera->orthographic && detailPixels > 0.f && cellsX == cellsY && tanY > 0.0;
+    const double detailBudgetScale = std::max(.05f,
+        Engine::Rendering::DetailBudget::Get().LayerLodScale(
+            Engine::Rendering::DetailBudget::Get().FindLayerOrDefault("Terrain")));
+    // Allowed height error per metre of distance for detailPixels on screen.
+    const float allowedPerMeter = detailOn ? static_cast<float>(
+        detailPixels * 2.0 * tanY / viewHeight / detailBudgetScale) : 0.f;
+    uint64_t levelsKey = 14695981039346656037ull;
+    HashValue(levelsKey, detailOn);
+    HashValue(levelsKey, allowedPerMeter); HashValue(levelsKey, nearRadius);
+    HashValue(levelsKey, reinterpret_cast<uintptr_t>(m_farDetail.errors.get()));
+    // Distance is measured from a tile's reference centre cell (see below);
+    // visibility and the loaded border from the current one.
+    const auto detailLevel = [&](int x, int y, int referenceX, int referenceY,
+        uint8_t previous) -> uint8_t {
+        if (!visible(x, y, centerX, centerY)) return 0;
+        if (!detailOn || m_farPatchCells.count({x, y})) return 1;
+        if (!visible(x - 1, y, centerX, centerY) || !visible(x + 1, y, centerX, centerY) ||
+            !visible(x, y - 1, centerX, centerY) || !visible(x, y + 1, centerX, centerY))
+            return static_cast<uint8_t>(cellsX);
+        const auto* error = m_farDetail.errors->At(x, y);
+        if (!error) return 1;
+        const float centreX = (referenceX + .5f) * spanX, centreZ = (referenceY + .5f) * spanZ;
+        const float dx = std::max({x * spanX - centreX, 0.f, centreX - (x + 1) * spanX});
+        const float dz = std::max({y * spanZ - centreZ, 0.f, centreZ - (y + 1) * spanZ});
+        const float allowed = std::max(std::sqrt(dx * dx + dz * dz), spanX) * allowedPerMeter;
+        // Refine as soon as the error shows; coarsen only once it is well
+        // under the limit, so cells near a threshold do not flip (and their
+        // tile re-upload) at every crossing.
+        const int refine = FarCellDetail::ChooseLevel(*error, allowed, cellsX);
+        const int keep = FarCellDetail::ChooseLevel(*error, allowed * .6f, cellsX);
+        return static_cast<uint8_t>(std::clamp<int>(previous, refine, keep));
+    };
+    for (auto& tile : m_farTiles)
+    {
+        if (tile.lodStride != 1 || !tile.desired) continue;
+        const int nearestX = std::max({tile.startX - centerX, 0, centerX - (tile.endX - 1)});
+        const int nearestY = std::max({tile.startY - centerY, 0, centerY - (tile.endY - 1)});
+        const int tileDistance = std::max(nearestX, nearestY);
+        const bool touchesNear = tileDistance <= nearRadius + 2;
+        // A tile re-measures once the camera has moved about a sixth of its
+        // distance (the allowed error then changes by under ~15 %), so a
+        // crossing re-uploads the near tiles, not every tile on the map.
+        const int tolerance = std::max(1, tileDistance / 6);
+        const bool moved = std::abs(centerX - tile.levelsCenterX) >= tolerance ||
+            std::abs(centerY - tile.levelsCenterY) >= tolerance;
+        const size_t cellCount = static_cast<size_t>(
+            (tile.endX - tile.startX) * (tile.endY - tile.startY));
+        const bool fresh = tile.levelsKey != levelsKey || tile.desiredLevels.size() != cellCount;
+        if (!fresh && !moved && !touchesNear) continue;
+        if (fresh || moved)
+        {
+            tile.levelsCenterX = centerX;
+            tile.levelsCenterY = centerY;
+        }
+        if (fresh) tile.desiredLevels.assign(cellCount, 0);
+        tile.levelsKey = levelsKey;
+        size_t index = 0;
+        for (int y = tile.startY; y < tile.endY; ++y)
+            for (int x = tile.startX; x < tile.endX; ++x, ++index)
+                tile.desiredLevels[index] = detailLevel(x, y, tile.levelsCenterX,
+                    tile.levelsCenterY, tile.desiredLevels[index]);
+    }
     std::vector<size_t> pending;
     pending.reserve(m_farTiles.size());
     for (size_t index = 0; index < m_farTiles.size(); ++index)
@@ -996,8 +1092,10 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
                 for (float color : patch.colors)
                     HashValue(fingerprint, color);
             }
+            for (uint8_t level : tile.desiredLevels)
+                HashValue(fingerprint, level);
             cachePath = std::filesystem::path(m_cacheDirectory) / "far_tiles" /
-                "v4" / std::to_string(m_farSourceSignature) /
+                "v5" / std::to_string(m_farSourceSignature) /
                 (std::to_string(tile.startX) + "_" +
                     std::to_string(tile.startY) + "_" +
                     std::to_string(tile.lodStride) + ".fartile");
@@ -1005,7 +1103,7 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
         std::vector<Mesh::Vertex> vertices;
         std::vector<uint32_t> indices;
         std::map<size_t, size_t> patchOffsets;
-        std::vector<uint8_t> preparedVisibility;
+        std::vector<uint8_t> preparedVisibility, preparedLevels;
         std::optional<Mesh::IndexedGeometryBounds> preparedBounds;
         const bool asyncEligible = m_farHeightsSnapshot &&
             !exposesGap(pending[order]);
@@ -1026,6 +1124,7 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
                     indices = std::move(ready->indices);
                     patchOffsets = std::move(ready->patchVertexOffsets);
                     preparedVisibility = std::move(ready->builtVisibility);
+                    preparedLevels = std::move(ready->builtLevels);
                     preparedBounds = ready->bounds;
                     cacheHit = ready->cacheHit;
                     m_farTileRebuildMilliseconds += ready->buildMilliseconds;
@@ -1035,6 +1134,9 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
                     tile.preparing = false;
                 }
             }
+            if (asyncPrepared && tile.lodStride == 1 &&
+                preparedLevels != tile.desiredLevels)
+                asyncPrepared = false;
             if (asyncPrepared && tile.lodStride == 1)
             {
                 size_t cellIndex = 0;
@@ -1113,6 +1215,8 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
                             for (size_t patchIndex : tile.patchIndices)
                                 task.patches.emplace_back(patchIndex,
                                     m_farPatches[patchIndex]);
+                            if (detailOn) task.detailArchive = m_farDetail.archive;
+                            task.levels = tile.desiredLevels;
                         }
                         uint64_t taskBytes = 0;
                         for (const auto& [cell, surface] : task.seams)
@@ -1145,6 +1249,13 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
         }
         if (!cacheHit && !asyncPrepared)
         {
+        struct DetailedCell
+        {
+            int x = 0, y = 0;
+            uint8_t level = 1;
+            std::vector<float> heights;
+        };
+        std::vector<DetailedCell> detailedCells;
         vertices.resize(static_cast<size_t>(width) * depth);
         for (int row = 0; row < depth; ++row)
             for (int col = 0; col < width; ++col)
@@ -1197,6 +1308,20 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
             {
                 if (!visible(x, y, centerX, centerY) ||
                     m_farPatchCells.count({x, y})) continue;
+                // Far-cell detail: drawn after the patches (their vertex
+                // offsets stay where in-place patch updates expect them).
+                if (const size_t levelIndex = static_cast<size_t>(
+                        (y - tile.startY) * (tile.endX - tile.startX) + x - tile.startX);
+                    detailOn && levelIndex < tile.desiredLevels.size() &&
+                    tile.desiredLevels[levelIndex] > 1)
+                {
+                    DetailedCell detailed{x, y, tile.desiredLevels[levelIndex], {}};
+                    if (m_farDetail.archive->ReadCell(x, y, detailed.heights))
+                    {
+                        detailedCells.push_back(std::move(detailed));
+                        continue;
+                    }
+                }
                 const int seam = seamSide(x, y, centerX, centerY);
                 const SeamSurface* nearSurface = seam == 0
                     ? seamSurface(x - 1, y) : seam == 1
@@ -1374,11 +1499,64 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
                         {a, b, a + 1, a + 1, b, b + 1});
                 }
         }
+        for (const auto& detailed : detailedCells)
+        {
+            const int x = detailed.x, y = detailed.y;
+            const auto levelOf = [&](int nx, int ny) -> int {
+                if (nx < tile.startX || nx >= tile.endX || ny < tile.startY || ny >= tile.endY)
+                    return 1;
+                const size_t index = static_cast<size_t>(
+                    (ny - tile.startY) * (tile.endX - tile.startX) + nx - tile.startX);
+                return index < tile.desiredLevels.size()
+                    ? std::max<int>(1, tile.desiredLevels[index]) : 1;
+            };
+            FarCellDetail::CellGrid grid;
+            grid.cellX = x; grid.cellY = y;
+            grid.level = detailed.level; grid.cells = cellsX;
+            grid.cellWidth = cellWidth; grid.cellDepth = cellDepth;
+            grid.heights = &detailed.heights;
+            grid.corners = {gridHeight(x, y), gridHeight(x + 1, y),
+                gridHeight(x, y + 1), gridHeight(x + 1, y + 1)};
+            const std::array<Cell, 4> neighbours{Cell{x - 1, y}, Cell{x, y + 1},
+                Cell{x + 1, y}, Cell{x, y - 1}};
+            std::array<const SeamSurface*, 4> nearSurfaces{};
+            for (size_t sideIndex = 0; sideIndex < 4; ++sideIndex)
+            {
+                const Cell neighbour = neighbours[sideIndex];
+                if (!visible(neighbour.first, neighbour.second, centerX, centerY))
+                {
+                    nearSurfaces[sideIndex] = seamSurface(neighbour.first, neighbour.second);
+                    grid.nearEdges[sideIndex] = nearSurfaces[sideIndex]
+                        ? nearSurfaces[sideIndex]->heights : nullptr;
+                }
+                grid.edgeLevels[sideIndex] = std::min(grid.level,
+                    levelOf(neighbour.first, neighbour.second));
+            }
+            FarCellDetail::AppendCellGrid(grid, vertices, indices,
+                [&](Mesh::Vertex& vertex, float u, float v, float height, const glm::vec3& normal) {
+                    vertex.pos[0] = (x - tile.startX + u) * spanX;
+                    vertex.pos[1] = height;
+                    vertex.pos[2] = (y - tile.startY + v) * spanZ;
+                    vertex.normal[0] = normal.x;
+                    vertex.normal[1] = normal.y;
+                    vertex.normal[2] = normal.z;
+                    vertex.uv[0] = static_cast<float>(x + u + m_farHalfExtentCells) / (side - 1);
+                    vertex.uv[1] = static_cast<float>(y + v + m_farHalfExtentCells) / (side - 1);
+                },
+                [&](Mesh::Vertex& vertex, float height, int col, int row, float u, float v) {
+                    setColor(vertex, height);
+                    for (int seam = 0; seam < 4; ++seam)
+                        if (nearSurfaces[static_cast<size_t>(seam)])
+                            blendSeamColor(vertex, nearSurfaces[static_cast<size_t>(seam)],
+                                seam, col, row, u, v);
+                });
+        }
         if (cacheable && !asyncPrepared && !indices.empty())
             WriteFarTileCache(cachePath, fingerprint, vertices, indices);
         }
         const auto recordVisibility = [&] {
             if (tile.lodStride > 1) return;
+            tile.builtLevels = tile.desiredLevels;
             tile.builtVisibility.clear();
             tile.builtVisibility.reserve(static_cast<size_t>(
                 (tile.endX - tile.startX) * (tile.endY - tile.startY)));
@@ -1499,8 +1677,16 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
                     addImpostorCross(cluster);
             }
         }
+        // Far tiles upload the 48-byte terrain vertex (position, normal, uv,
+        // colour: all they use) instead of the 264-byte mesh vertex. With
+        // far-cell detail a tile rebuilt at a cell crossing was up to 25 MB
+        // and held the main thread ~60 ms. ENGINE_FAR_TILE_COMPACT=0 for A/B.
+        static const bool compactTiles = [] {
+            const char* value = std::getenv("ENGINE_FAR_TILE_COMPACT");
+            return !(value && value[0] == '0');
+        }();
         const uint64_t uploadBytes=
-            vertices.size() * sizeof(Mesh::Vertex) +
+            vertices.size() * (compactTiles ? sizeof(Mesh::TerrainVertex) : sizeof(Mesh::Vertex)) +
             indices.size() * sizeof(uint32_t);
         const auto memory = GetMemoryUsage();
         const uint64_t previousGpuBytes = tile.mesh
@@ -1522,6 +1708,7 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
                 deferred.indices = std::move(indices);
                 deferred.patchVertexOffsets = std::move(patchOffsets);
                 deferred.builtVisibility = std::move(preparedVisibility);
+                deferred.builtLevels = std::move(preparedLevels);
                 deferred.bounds = preparedBounds;
                 std::lock_guard<std::mutex> lock(m_farPrepareMutex);
                 m_preparedFarTiles.push_back(std::move(deferred));
@@ -1554,11 +1741,30 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
                 TerrainBatchAppearance>()->distantVisual = true;
         }
         const auto objectReady = FarClock::now();
-        const bool installed = asyncPrepared && preparedBounds
-            ? tile.mesh->SetPreparedIndexedGeometry(
-                std::move(vertices), std::move(indices), *preparedBounds)
-            : tile.mesh->SetIndexedGeometry(
-                std::move(vertices), std::move(indices));
+        bool installed = false;
+        if (compactTiles)
+        {
+            Mesh::TerrainMeshData geometry;
+            geometry.vertices.resize(vertices.size());
+            for (size_t i = 0; i < vertices.size(); ++i)
+            {
+                auto& target = geometry.vertices[i];
+                std::copy_n(vertices[i].pos, 3, target.pos);
+                std::copy_n(vertices[i].normal, 3, target.normal);
+                std::copy_n(vertices[i].uv, 2, target.uv);
+                std::copy_n(vertices[i].color, 4, target.color);
+            }
+            vertices.clear();
+            vertices.shrink_to_fit();
+            geometry.indices = std::move(indices);
+            installed = tile.mesh->SetTerrainGeometry(std::move(geometry), false, true);
+        }
+        else
+            installed = asyncPrepared && preparedBounds
+                ? tile.mesh->SetPreparedIndexedGeometry(
+                    std::move(vertices), std::move(indices), *preparedBounds)
+                : tile.mesh->SetIndexedGeometry(
+                    std::move(vertices), std::move(indices));
         if (!installed)
             throw std::runtime_error("Could not build distant terrain tile");
         const auto& meshTiming = tile.mesh->GetLastIndexedGeometryTiming();
@@ -1567,7 +1773,13 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
         m_lastFarUpdateTiming.meshBufferMs += meshTiming.bufferMs;
         const auto meshReady = FarClock::now();
         if (auto* provider = scene->GetGraphicsProvider())
+        {
+            // SetTerrainGeometry reports ready without buffers on a mesh that
+            // has no buffer factory yet (a new tile): create them here.
+            if (compactTiles && tile.mesh->GetGpuBufferMemoryBytes() == 0)
+                tile.mesh->CreateBuffer(provider->GetBufferFactory());
             if (!tile.mesh->IsReady()) tile.mesh->OnAfterDeserialize(provider);
+        }
         const auto graphicsReady = FarClock::now();
         m_lastFarUpdateTiming.objectSetupMs +=
             std::chrono::duration<double, std::milli>(
@@ -1592,9 +1804,15 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
         // which only culls a little less.
         tile.mesh->occluderIndices.clear();
         tile.mesh->occluderVertexCount = 0;
-        if (!tile.patchVertexOffsets.empty())
+        // Far-cell detail grids follow the patches; like them they stay out of
+        // the occluder (up to ~2k triangles a cell), leaving the coarse grid.
+        const bool detailedCells = tile.lodStride == 1 && std::any_of(
+            tile.builtLevels.begin(), tile.builtLevels.end(),
+            [](uint8_t level) { return level > 1; });
+        if (!tile.patchVertexOffsets.empty() || detailedCells)
         {
-            size_t firstPatchVertex = SIZE_MAX;
+            size_t firstPatchVertex = detailedCells
+                ? static_cast<size_t>(width) * depth : SIZE_MAX;
             for (const auto& [patchIndex, offset] : tile.patchVertexOffsets)
                 firstPatchVertex = std::min(firstPatchVertex, offset);
             const auto& all = tile.mesh->GetIndices();

@@ -292,8 +292,11 @@ public:
     const std::vector<glm::vec3>& GetSurfaceOffsets() const { return m_surfaceOffsets; }
     bool UsesTerrainVertexFormat() const { return !m_terrainVertices.empty(); }
     static TerrainMeshData BuildIndexedTerrain(const std::vector<Vertex>& vertices);
+    // staticBuffers: device-local buffers (built once, drawn for a long
+    // time: distant terrain tiles) instead of CPU-visible upload buffers
+    // that suit cells rewritten often.
     bool SetTerrainGeometry(TerrainMeshData&& geometry,
-        bool retainExpandedVertices = false);
+        bool retainExpandedVertices = false, bool staticBuffers = false);
     TerrainMeshData TakeTerrainGeometry();
     // Returns true only when CPU vertices, bounds, and the GPU buffer changed.
     bool SetDeformedVertices(const std::vector<Vertex>& vertices);

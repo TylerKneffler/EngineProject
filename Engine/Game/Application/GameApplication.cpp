@@ -1030,7 +1030,8 @@ private:
     uint64_t m_asyncCaptureFrame = UINT64_MAX;
     // capture_a.ppm / capture_b.ppm for the two moving snapshots (see
     // GameBenchmarkOptions::movingCaptureGap), else null.
-    // seq_<n>.ppm every captureEvery frames of the drive.
+    // seq_<n>.ppm for captureBurst consecutive frames from every
+    // captureEvery-th frame of the drive.
     std::string MovingCaptureName(uint64_t benchmarkFrame) const
     {
         const auto* options = m_benchmarkOptions;
@@ -1040,7 +1041,8 @@ private:
         const uint64_t span = options->driveForwardFrames ? options->driveForwardFrames : options->frames;
         if (options->captureEvery && benchmarkFrame >= start &&
             benchmarkFrame < start + span &&
-            (benchmarkFrame - start) % options->captureEvery == 0)
+            (benchmarkFrame - start) % options->captureEvery <
+                std::max<uint64_t>(1u, options->captureBurst))
         {
             char name[32];
             std::snprintf(name, sizeof(name), "seq_%04llu.ppm",

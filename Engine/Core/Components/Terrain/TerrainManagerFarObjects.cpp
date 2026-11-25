@@ -37,6 +37,9 @@ struct FarObjectInputs
     std::vector<std::string> layerNames;
     // Distance the loaded cells reach; far cells all lie beyond it.
     float nearReach = 0.f;
+    // Move placements onto the far tiles' two-triangle cells. Off when far
+    // cells draw their own heights (TerrainManager::farCellDetailPixels).
+    bool snapToFarSurface = true;
 };
 
 // ENGINE_FAR_OBJECT_SURFACE=0 keeps far placements on full-detail heights.
@@ -171,7 +174,7 @@ std::vector<TerrainObjectLayer::Placement> FarPlacements(
             result.push_back(std::move(distant));
         }
     }
-    if (FarObjectSurfaceSnap())
+    if (inputs.snapToFarSurface)
         SnapToFarSurface(*terrain, result);
     return result;
 }
@@ -590,6 +593,8 @@ void TerrainManager::UpdateFarObjects(int centerX, int centerY)
         inputs.cellsX = cellsX; inputs.cellsY = cellsY;
         inputs.cellWidth = cellWidth; inputs.cellDepth = cellDepth;
         inputs.builder = m_proceduralBuilder;
+        inputs.snapToFarSurface = FarObjectSurfaceSnap() &&
+            (m_farHeightArchivePath.empty() || FarCellDetailPixels() <= 0.f);
         inputs.generator = m_objectLayerGenerator;
         inputs.layerNames = m_objectLayerNames;
         inputs.nearReach = std::max(0, loadedRadius) * std::min(cellsX * cellWidth, cellsY * cellDepth);

@@ -32,6 +32,10 @@ struct GameBenchmarkOptions
     // off), to see streaming hand-offs while moving; without a drive, of the
     // measured frames (a still camera, for flicker).
     uint32_t captureEvery = 0;
+    // Consecutive frames captured from each captureEvery-th frame (1 = just
+    // that frame). Bursts keep neighbouring frames for pop/flicker checks
+    // without writing the whole walk.
+    uint32_t captureBurst = 1;
     // Sequence captures without waiting for the GPU (async readback ring,
     // half resolution, written on a thread), so frames stay in flight and
     // the run keeps its real speed. DX12 only; others fall back to waiting.

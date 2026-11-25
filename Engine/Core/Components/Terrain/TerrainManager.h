@@ -3,6 +3,7 @@
 #include "Core/Components/Terrain/Terrain.h"
 #include "Core/Components/Terrain/TerrainObjectLayer.h"
 #include "Core/Components/Terrain/TerrainHeightArchive.h"
+#include "Core/Components/Terrain/TerrainFarCellDetail.h"
 #include "Core/Components/Terrain/TerrainVolumeBuild.h"
 #include "Core/Components/Physics/MeshObjectCollider.h"
 #include <climits>
@@ -144,6 +145,13 @@ public:
     float farTileErrorPixelsLod4 = -1.f;
     float farTileErrorPixelsLod8 = -1.f;
     float farTileErrorPixelsLod16 = -1.f;
+    // Far-cell detail (TerrainFarCellDetail.h): far cells draw the height
+    // archive's own samples on a 1, 4, 8 or full-resolution grid, the
+    // coarsest whose height error is under this many pixels at the cell's
+    // distance; cells bordering the loaded area always draw at full
+    // resolution. 0 keeps two triangles per far cell (as before 2026-11-24).
+    // ENGINE_FAR_CELL_DETAIL_PIXELS overrides it for A/B runs.
+    float farCellDetailPixels = 1.5f;
     // Zero follows the camera clip distance.
     float maxFarViewDistanceMeters = 0.f;
     float farTileLodHysteresis = .2f;
@@ -636,6 +644,12 @@ private:
         Mesh* mesh = nullptr;
         int builtCenterX = 0, builtCenterY = 0, builtNearRadius = 0;
         std::vector<uint8_t> builtVisibility;
+        // Far-cell detail levels per cell (finest tiles): built, and wanted
+        // for the current centre cell (recomputed when levelsKey changes).
+        std::vector<uint8_t> builtLevels, desiredLevels;
+        uint64_t levelsKey = 0;
+        // Centre cell the levels were last measured from.
+        int levelsCenterX = INT_MIN, levelsCenterY = INT_MIN;
         bool built = false, hasGeometry = false;
         bool preparing = false;
         std::optional<std::chrono::steady_clock::time_point> requestedAt;
@@ -680,6 +694,17 @@ private:
     // and refreshes the far terrain over them.
     void RecordEditedCells(const std::set<Cell>& changedCells);
     std::string m_farHeightArchivePath;
+    // Far-cell detail: the archive in memory and its per-cell errors, loaded
+    // and measured on a worker (m_farDetailJob); none until both are ready.
+    struct FarDetailSource
+    {
+        std::shared_ptr<const FarCellDetail::Archive> archive;
+        std::shared_ptr<const FarCellDetail::Errors> errors;
+    };
+    std::future<FarDetailSource> m_farDetailJob;
+    FarDetailSource m_farDetail;
+    bool m_farDetailParentsApplied = false;
+    float FarCellDetailPixels() const;
     FarTerrainPalette m_farPalette;
     uint64_t m_farSourceSignature = 0;
     uint64_t m_farTileUploadCount = 0;
@@ -711,6 +736,9 @@ private:
         std::map<Cell, SeamSurface> seams;
         std::vector<std::pair<size_t, TerrainHeightArchive::FarPatch>> patches;
         std::filesystem::path cachePath;
+        // Far-cell detail: the archive and one level per tile cell (0 hidden).
+        std::shared_ptr<const FarCellDetail::Archive> detailArchive;
+        std::vector<uint8_t> levels;
     };
     struct PreparedFarTile
     {
@@ -724,6 +752,7 @@ private:
         std::vector<uint32_t> indices;
         std::map<size_t, size_t> patchVertexOffsets;
         std::vector<uint8_t> builtVisibility;
+        std::vector<uint8_t> builtLevels;
     };
     std::thread m_farWorker;
     mutable std::mutex m_farPrepareMutex;

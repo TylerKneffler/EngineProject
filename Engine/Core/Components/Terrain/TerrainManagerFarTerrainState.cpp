@@ -7,6 +7,7 @@
 #include "Core/Scene/Scene.h"
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <map>
 
 namespace Engine::Components
@@ -27,6 +28,19 @@ void TerrainManager::ConfigureFarTerrain(int halfExtentCells,
     m_farSourceSignature = sourceSignature;
     m_farPalette = std::move(palette);
     m_farEnabled = true;
+    // Far-cell detail: load the archive and measure every cell's error off
+    // the main thread (about a second for the 189 x 189 cell demo map).
+    if (!m_farHeightArchivePath.empty() && FarCellDetailPixels() > 0.f)
+        m_farDetailJob = std::async(std::launch::async,
+            [path = m_farHeightArchivePath, signature = m_farSourceSignature,
+                extent = m_farHalfExtentCells, x = cellsX, y = cellsY]() {
+                FarDetailSource source;
+                auto archive = std::make_shared<FarCellDetail::Archive>();
+                if (!archive->Load(path, signature, extent, x, y)) return source;
+                source.errors = FarCellDetail::MeasureArchive(*archive);
+                if (source.errors) source.archive = std::move(archive);
+                return source;
+            });
     // Volume cells built before the archive was known repeated their border
     // where an unloaded neighbour's heights were missing: build them again.
     for (const auto& [cell, terrain] : m_loaded)
@@ -130,6 +144,10 @@ void TerrainManager::ClearFarTerrain()
     m_farPatches.clear();
     m_farPatchCells.clear();
     m_farHeightArchivePath.clear();
+    if (m_farDetailJob.valid()) m_farDetailJob.wait();
+    m_farDetailJob = {};
+    m_farDetail = {};
+    m_farDetailParentsApplied = false;
     m_farHalfExtentCells = 0;
     m_farSourceSignature = 0;
     m_farTileUploadCount = 0;
@@ -283,4 +301,13 @@ std::vector<TerrainManager::FarLevelUsage> TerrainManager::GetFarLevelUsage() co
     return result;
 }
 
+
+float TerrainManager::FarCellDetailPixels() const
+{
+    static const float forced = [] {
+        const char* value = std::getenv("ENGINE_FAR_CELL_DETAIL_PIXELS");
+        return value && *value ? static_cast<float>(std::atof(value)) : -1.f;
+    }();
+    return std::max(0.f, forced >= 0.f ? forced : farCellDetailPixels);
+}
 }

@@ -1,5 +1,7 @@
 #include "Core/Startup/LaunchActivation.h"
 
+#include <TlHelp32.h>
+
 #include <atomic>
 #include <cstdlib>
 #include <cstring>
@@ -10,6 +12,46 @@ namespace
 {
 // -1 = not decided yet, 0 = normal, 1 = background.
 std::atomic<int> g_background{ -1 };
+
+DWORD ParentProcessId(DWORD process)
+{
+    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snapshot == INVALID_HANDLE_VALUE)
+        return 0;
+    PROCESSENTRY32W entry{};
+    entry.dwSize = sizeof(entry);
+    DWORD parent = 0;
+    for (BOOL more = Process32FirstW(snapshot, &entry); more; more = Process32NextW(snapshot, &entry))
+        if (entry.th32ProcessID == process)
+        {
+            parent = entry.th32ParentProcessID;
+            break;
+        }
+    CloseHandle(snapshot);
+    return parent;
+}
+
+// True when the parent or grandparent process owns the foreground window.
+bool LaunchedFromForegroundApp()
+{
+    HWND foreground = GetForegroundWindow();
+    if (!foreground)
+        return false;
+    DWORD foregroundProcess = 0;
+    GetWindowThreadProcessId(foreground, &foregroundProcess);
+    if (!foregroundProcess)
+        return false;
+    DWORD ancestor = GetCurrentProcessId();
+    for (int level = 0; level < 2; ++level)
+    {
+        ancestor = ParentProcessId(ancestor);
+        if (!ancestor)
+            return false;
+        if (ancestor == foregroundProcess)
+            return true;
+    }
+    return false;
+}
 
 bool DetectBackgroundLaunch()
 {
@@ -33,12 +75,17 @@ bool DetectBackgroundLaunch()
         case SW_SHOWNA:
         case SW_SHOWMINNOACTIVE:
         case SW_MINIMIZE:
+        case SW_HIDE:
             return true;
         default:
-            break;
+            // Explorer, shortcuts and `start` ask for an activating show.
+            return false;
         }
     }
-    return false;
+    // Launched from the window the user is in (Explorer, an IDE's F5, the
+    // Editor starting the Game): a focused launch. Shells and scripts behind
+    // another app, test runners and agents start in the background.
+    return !LaunchedFromForegroundApp();
 }
 }
 
@@ -97,10 +144,13 @@ void ShowStartupWindow(HWND window, int showCommand)
         ShowWindow(window, showCommand);
         return;
     }
+    // Show it already in place behind the app in use: ShowWindow would put
+    // the new window on top first, and even one frame over a fullscreen game
+    // takes that game out of fullscreen.
     HWND foreground = GetForegroundWindow();
-    ShowWindow(window, SW_SHOWNOACTIVATE);
-    if (foreground && IsAnotherProcessInForeground())
-        SetWindowPos(window, foreground, 0, 0, 0, 0,
-            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+    const bool behind = foreground && foreground != window && IsAnotherProcessInForeground();
+    SetWindowPos(window, behind ? foreground : HWND_TOP, 0, 0, 0, 0,
+        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_SHOWWINDOW |
+        (behind ? 0u : static_cast<UINT>(SWP_NOZORDER)));
 }
 }

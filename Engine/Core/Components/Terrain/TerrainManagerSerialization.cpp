@@ -46,6 +46,7 @@ TerrainManager::JsonValue TerrainManager::Serialize() const
         .Set("maxUploadsPerUpdate", JsonValue(maxUploadsPerUpdate))
         .Set("maxFarRebuildMilliseconds", JsonValue(maxFarRebuildMilliseconds))
         .Set("farTileScreenErrorPixels", JsonValue(farTileScreenErrorPixels))
+        .Set("farCellDetailPixels", JsonValue(farCellDetailPixels))
         .Set("farObjectRadius", JsonValue(farObjectRadius))
         .Set("maxCommitMilliseconds", JsonValue(maxCommitMilliseconds))
         .Set("farObjectBlockCells", JsonValue(farObjectBlockCells))
@@ -231,6 +232,8 @@ void TerrainManager::Deserialize(const JsonValue& value)
     maxFarRebuildMilliseconds = value.Has("maxFarRebuildMilliseconds")
         ? std::clamp(value["maxFarRebuildMilliseconds"].AsFloat(), .001f, 100.f)
         : 4.f;
+    farCellDetailPixels = value.Has("farCellDetailPixels")
+        ? std::clamp(value["farCellDetailPixels"].AsFloat(), 0.f, 64.f) : 1.5f;
     farTileScreenErrorPixels = value.Has("farTileScreenErrorPixels")
         ? std::clamp(value["farTileScreenErrorPixels"].AsFloat(), .1f, 64.f) : 3.f;
     maxCommitMilliseconds = value.Has("maxCommitMilliseconds")
@@ -456,6 +459,9 @@ bool TerrainManager::DrawProperties(Engine::Core::IInspectorUi& ui)
         changed |= ui.SliderFloat("Terrain quality (pixel error)",
             &farTileScreenErrorPixels, .1f, 64.f);
         ui.Tooltip("Lower values preserve more distant terrain detail and cost more to render. Higher values switch to simpler terrain sooner. Per-LOD overrides are under Advanced terrain LOD.");
+        changed |= ui.SliderFloat("Far cell detail (pixel error)",
+            &farCellDetailPixels, 0.f, 16.f);
+        ui.Tooltip("Distant cells draw the height map's own samples (32, 16 or 4 m apart) wherever two triangles per cell would be off by more than this many pixels, so ridgelines keep their shape and cells do not jump when they load at full detail. 0 draws two triangles per cell.");
         changed |= ui.SliderInt("Full detail distance (cells)", &loadedRadius, 0, 32);
         ui.Tooltip("Full-resolution terrain and interactive cells around the viewer. Distances are square grid radii: one cell spans Cells X * Cell width by Cells Y * Cell depth.");
         changed |= ui.SliderInt("Terrain loading distance (cells)", &farRadius, -1, 32);

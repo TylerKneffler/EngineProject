@@ -74,12 +74,27 @@ float SmoothStep(float a, float b, float x)
     return t * t * (3.f - 2.f * t);
 }
 
-// Steepest ground trees are placed on (normal.y; 0.74 is about 42 degrees),
-// where the paint turns to rock (rock class 3); ~31 degrees before
-// 2026-11-24, which left forest-painted slopes bare. A placement rule only:
-// what draws far away comes from these placements (the far blocks and the
-// macro map's canopy), never from the slope.
-constexpr float TreeMinNormalY = .74f;
+// Steepest ground trees are placed on (normal.y). Full density up to ~42
+// degrees (0.74, where the paint turns to rock, rock class 3), thinning to a
+// quarter at ~58 degrees (0.53), none beyond: forested hills with rock
+// showing through on their steepest faces, bare cliffs past that. 42 degrees
+// was the hard limit until 2026-11-24, which left the steep sides of wooded
+// hills bare (seen from the meadow trail once far cells drew their real
+// heights). A placement rule only: what draws far away comes from these
+// placements (the far blocks and the macro map's canopy), never from the slope.
+constexpr float TreeMinNormalY = .53f;
+constexpr float TreeFullNormalY = .74f;
+float SlopeTreeShare(float normalY)
+{
+    return .25f + .75f * SmoothStep(TreeMinNormalY, TreeFullNormalY, normalY);
+}
+// Extra depth (m) a trunk is sunk on a slope so its downhill side does not
+// stand on air: about a trunk radius times the slope's tangent.
+float SlopeTrunkSink(float normalY)
+{
+    const float y = std::clamp(normalY, .2f, 1.f);
+    return std::min(1.2f, .35f * std::sqrt(1.f - y * y) / y);
+}
 
 uint32_t Hash(int32_t x, int32_t z, uint32_t seed)
 {
@@ -606,12 +621,13 @@ void GenerateForest(const TerrainManager::ObjectLayerContext& context,
         if (!Engine::Components::SampleTerrainSurface(*context.heights, context.cellsX,
                 context.cellsY, context.cellWidth, context.cellDepth, x, z, height, &normal))
             continue;
-        if (normal.y < TreeMinNormalY) continue; // steeper than about 42 degrees
+        if (normal.y < TreeMinNormalY) continue; // steeper than about 58 degrees
         const float worldX = context.cell.first * width + x;
         const float worldZ = context.cell.second * depth + z;
         // Lone meadow trees keep a 3% chance outside the forest mask.
         const float interior = ForestMask(worldX, worldZ, height, a);
-        const float density = std::max(interior, .03f) * ForestBand(height, a);
+        const float density = std::max(interior, .03f) * ForestBand(height, a) *
+            SlopeTreeShare(normal.y);
         if (chance >= density) continue;
         // Trails stay clear (the mask reaches ~4 m either side of the track).
         if (TrailMask(worldX, worldZ) > .02f) continue;
@@ -629,7 +645,7 @@ void GenerateForest(const TerrainManager::ObjectLayerContext& context,
             placement.asset = coniferPrefix + ConiferSpecies[standConifers[sizeBand][variant]] + ".prefab";
         else
             placement.asset = prefix + Species[standSpecies[sizeBand][variant]] + ".prefab";
-        placement.position = {x, height - .08f, z};
+        placement.position = {x, height - .08f - SlopeTrunkSink(normal.y), z};
         placement.yawDegrees = yaw * 360.f;
         placement.scale = .75f + size * .55f;
         // Lone meadow trees out in the open: half are the card-crown
@@ -717,7 +733,8 @@ void GenerateForest(const TerrainManager::ObjectLayerContext& context,
             if (!Engine::Components::SampleTerrainSurface(*context.heights, context.cellsX,
                     context.cellsY, context.cellWidth, context.cellDepth, x, z, height, &normal))
                 continue;
-            if (normal.y < TreeMinNormalY) continue;
+            // The edge belt (shrubs and skirts sunk to their crowns) stays off steep ground.
+            if (normal.y < TreeFullNormalY) continue;
             const float worldX = context.cell.first * width + x;
             const float worldZ = context.cell.second * depth + z;
             const float forest = ForestMask(worldX, worldZ, height, a) * ForestBand(height, a);

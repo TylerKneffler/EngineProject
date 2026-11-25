@@ -93,7 +93,7 @@ uint64_t Mesh::NextCpuGeometryRevision()
 }
 
 bool Mesh::SetTerrainGeometry(TerrainMeshData&& geometry,
-    bool retainExpandedVertices)
+    bool retainExpandedVertices, bool staticBuffers)
 {
     ClearRuntimeLods();
     ClearSurfaceOffsets();
@@ -128,6 +128,13 @@ bool Mesh::SetTerrainGeometry(TerrainMeshData&& geometry,
         sizeof(TerrainVertex);
     const uint64_t indexBytes = static_cast<uint64_t>(m_indices.size()) *
         sizeof(uint32_t);
+    if (m_bufferFactory && staticBuffers)
+    {
+        m_ready = false;
+        CreateBuffer(m_bufferFactory);
+        MarkConfigurationDirty();
+        return m_ready;
+    }
     if (m_bufferFactory)
     {
         MakeGeometryWritable();
