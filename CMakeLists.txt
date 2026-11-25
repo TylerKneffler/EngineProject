@@ -1083,6 +1083,7 @@ if(NOT ENGINE_PROJECT_DIR)
     target_link_libraries(PropCook PRIVATE Engine ufbx comctl32.lib)
     target_include_directories(PropCook PRIVATE "${ENGINE_ROOT}/Engine")
     target_compile_features(PropCook PRIVATE cxx_std_20)
+
 endif()
 
 # ---------------------------------------------------------------------------
@@ -1959,7 +1960,7 @@ if(NOT ENGINE_PROJECT_DIR AND
     enable_testing()
     add_executable(BrushPresetTests EXCLUDE_FROM_ALL
         "${ENGINE_LOCAL_TEST_ROOT}/BrushPresetTests.cpp"
-        "${ENGINE_ROOT}/Engine/Editor/Core/Paint/BrushPreset.cpp")
+        "${ENGINE_ROOT}/Engine/Core/Brushes/BrushPreset.cpp")
     target_link_libraries(BrushPresetTests PRIVATE pugixml)
     target_include_directories(BrushPresetTests PRIVATE "${ENGINE_ROOT}/Engine")
     add_test(NAME BrushPresetRegression COMMAND BrushPresetTests)
@@ -2806,8 +2807,7 @@ if(NOT ENGINE_PROJECT_DIR AND
     enable_testing()
     add_executable(AssetPreviewAsyncTests EXCLUDE_FROM_ALL
         "${ENGINE_LOCAL_TEST_ROOT}/AssetPreviewAsyncTests.cpp"
-        "${ENGINE_ROOT}/Engine/Editor/Core/View/Templates/Assets/AssetPreviewCache.cpp"
-        "${ENGINE_ROOT}/Engine/Editor/Core/Paint/BrushPreset.cpp")
+        "${ENGINE_ROOT}/Engine/Editor/Core/View/Templates/Assets/AssetPreviewCache.cpp")
     target_link_libraries(AssetPreviewAsyncTests PRIVATE Engine assimp::assimp)
     target_compile_definitions(AssetPreviewAsyncTests PRIVATE NOMINMAX)
     target_include_directories(AssetPreviewAsyncTests PRIVATE "${ENGINE_ROOT}" "${ENGINE_ROOT}/Engine")

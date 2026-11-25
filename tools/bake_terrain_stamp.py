@@ -71,9 +71,8 @@ PROXY_MESHES = ASSETS / "Models" / "Woodland" / "Stamps"
 PROXY_PREFABS = ASSETS / "Prefabs" / "Woodland" / "Stamps"
 MESHES = ASSETS / "Models" / "Woodland" / "Scans" / "Meshes"
 PREFABS = ASSETS / "Prefabs" / "Woodland" / "Scans"
-# The five photo-scanned faces the landscape places, in the order of
-# LandscapeDriver.cpp `Cliffs` (half width along the face, half depth out of it,
-# base scale; the C++ table and tools/landscape_cliffs.py share these values).
+# The five photo-scanned faces (half width along the face, half depth out of
+# it, base scale).
 SHAPES = (
     ("Cliff_Scan_02", 10.0, 3.3, 2.2),
     ("Mountainside_01", 5.1, 2.6, 3.6),
@@ -405,6 +404,11 @@ def main():
         print(f"  {stamp.name}: textures {stamp_textures.SIZE} px, {coverage * 100:.0f}% of pixels on the scan")
         write_stamp(stamp)
         write_proxy(stamp, stamp.material)
+        # The terrain tools use stamps as relief brushes (tools/stamp_brush.py).
+        import stamp_brush
+        brush, ratio = stamp_brush.write_brush(stamp.name, *stamp_brush.rasterize(
+            *stamp_brush.read_stamp(OUTPUT / f"{stamp.name}.stamp")))
+        print(f"  {stamp.name}: brush {brush.name}, height ratio {ratio:.3f}")
         height, width = stamp.weight.shape
         counts = ", ".join(f"{len(np.unique(level))}" for level in stamp.levels)
         print(f"{stamp.name:16s} {width}x{height} points at {stamp.spacing:g} m (levels use {counts}), "

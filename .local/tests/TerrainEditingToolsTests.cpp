@@ -11,7 +11,10 @@
 #include "Core/Components/Terrain/TerrainHeightArchive.h"
 #include "Core/Components/Terrain/TerrainRegionEdit.h"
 #include "Core/Components/Terrain/TerrainBrushShape.h"
-#include "Core/Components/Terrain/TerrainStamp.h"
+#include "Core/Brushes/BrushPreset.h"
+#include "Core/Brushes/BrushRules.h"
+#include "Core/Components/Terrain/TerrainPlacementBrush.h"
+#include "Core/Components/Terrain/TerrainObjectArchive.h"
 #include "Editor/Core/View/Views/Scene/SceneTerrainTools.h"
 
 #include <chrono>
@@ -21,6 +24,9 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
+#include <set>
+#include <tuple>
 #include <stdexcept>
 
 namespace
@@ -134,26 +140,28 @@ void TestManagerFlattenSeam()
         Require(Near(left->heights[row * 9 + 8], right->heights[row * 9 + 0]));
 }
 
-// A stamp as a brush: a square pyramid 4 m wide and 2 m tall (stamp space,
-// Y up), seen from above, imprints its heights into the height data.
+// A relief brush: a square pyramid 4 m wide and 2 m tall at radius 2 (the
+// shape's half width), seen from above, imprints its heights into the height
+// data. (Built directly; brush assets load the same grids from images.)
 std::shared_ptr<const Engine::Components::TerrainBrushShape> PyramidShape()
 {
-    Engine::Components::TerrainStamp stamp;
-    stamp.width = stamp.height = 2;
-    stamp.spacing = 1.f;
-    const glm::vec3 corners[4] = {{-2.f, 0.f, -2.f}, {2.f, 0.f, -2.f}, {2.f, 0.f, 2.f}, {-2.f, 0.f, 2.f}};
-    for (const auto& corner : corners)
-    {
-        Engine::Components::TerrainStamp::Point point;
-        point.position = corner;
-        stamp.points.push_back(point);
-    }
-    Engine::Components::TerrainStamp::Point apex;
-    apex.position = {0.f, 2.f, 0.f};
-    apex.weight = 1.f;
-    stamp.points.push_back(apex);
-    stamp.levels.push_back({0, 1, 4, 1, 2, 4, 2, 3, 4, 3, 0, 4});
-    return Engine::Components::TerrainBrushShape::FromStamp(stamp, 64);
+    auto shape = std::make_shared<Engine::Components::TerrainBrushShape>();
+    const int n = 65;
+    shape->resolution = n;
+    shape->halfExtent = 2.f;
+    shape->heights.resize(size_t(n) * n);
+    shape->mask.resize(size_t(n) * n);
+    for (int row = 0; row < n; ++row)
+        for (int col = 0; col < n; ++col)
+        {
+            const float u = col * 2.f / (n - 1) - 1.f, v = row * 2.f / (n - 1) - 1.f;
+            const float edge = std::max(std::abs(u), std::abs(v));
+            shape->heights[size_t(row) * n + col] = 2.f * (1.f - edge);
+            shape->mask[size_t(row) * n + col] = std::clamp((1.f - edge) / .05f, 0.f, 1.f);
+        }
+    shape->maxHeight = 2.f;
+    shape->BuildOutline();
+    return shape;
 }
 
 void TestStampBrush()
@@ -548,6 +556,599 @@ void TestRegionPaint()
     Require(Near(terrain->weights[(6 * 17 + 6) * 2 + 1], 0.f));
 }
 
+// ---- Brushes (.brush) on terrain ----
+
+// The format: version 2 carries relief, rules and placement and reads back
+// the same; version 1 files with sections are refused.
+void TestBrushPresetTerrain()
+{
+    namespace B = Engine::Brushes;
+    const auto path = std::filesystem::temp_directory_path() / "terrain_brush_test.brush";
+    B::BrushPreset preset;
+    preset.name = "Meadow grass";
+    preset.relief.mapPath = "Assets/relief.png";
+    preset.relief.heightRatio = .8f;
+    preset.relief.backed = true;
+    preset.terrain.tool = B::BrushTool::Place;
+    preset.terrain.rules.maxHeight = 120.f;
+    preset.terrain.rules.maxSlope = 30.f;
+    preset.terrain.rules.onLayers = {"Assets/Materials/Terrain/PBR/grass.material", "forest soil"};
+    preset.terrain.rules.avoidLayers = {"rock"};
+    preset.terrain.placement.density = .4f;
+    preset.terrain.placement.minSpacing = 1.5f;
+    preset.terrain.placement.assets.push_back({"Assets/a.prefab", 2.f, .8f, 1.2f});
+    preset.terrain.placement.assets.push_back({"Assets/b.prefab", 1.f, 1.f, 1.f});
+    std::string error;
+    Require(B::SaveBrushPreset(path, preset, error));
+    B::BrushPreset loaded;
+    Require(B::LoadBrushPreset(path, loaded, error));
+    Require(loaded.relief.mapPath == "Assets/relief.png" && Near(loaded.relief.heightRatio, .8f) && loaded.relief.backed);
+    Require(loaded.terrain.tool == B::BrushTool::Place);
+    Require(Near(loaded.terrain.rules.maxHeight, 120.f) && Near(loaded.terrain.rules.maxSlope, 30.f));
+    Require(loaded.terrain.rules.minHeight < -1e30f);
+    Require(loaded.terrain.rules.onLayers == std::vector<std::string>(
+            {"Assets/Materials/Terrain/PBR/grass.material", "forest soil"}) &&
+        loaded.terrain.rules.avoidLayers == std::vector<std::string>({"rock"}));
+    Require(loaded.terrain.placement.assets.size() == 2 && loaded.terrain.placement.assets[0].asset == "Assets/a.prefab" &&
+        Near(loaded.terrain.placement.assets[0].weight, 2.f) && Near(loaded.terrain.placement.assets[0].maxScale, 1.2f));
+    Require(Near(loaded.terrain.placement.minSpacing, 1.5f));
+    // A plain brush stays version 1, as the painting tools wrote it.
+    B::BrushPreset plain;
+    Require(B::SaveBrushPreset(path, plain, error));
+    {
+        std::ifstream file(path);
+        const std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        Require(text.find(R"(version="1")") != std::string::npos && text.find("<Terrain") == std::string::npos);
+    }
+    // Version 1 with a section is refused.
+    {
+        std::ofstream file(path, std::ios::trunc);
+        file << R"(<BrushPreset version="1" name="x" tip="" shape="0" falloff="2" size="40" hardness="0.5" )"
+                R"(strength="0.35" opacity="1" flow="1" spacing="0.08" rotation="0" scatter="0" )"
+                R"(pressureSize="0" pressureStrength="0"><Terrain tool="place"/></BrushPreset>)";
+    }
+    Require(!B::LoadBrushPreset(path, loaded, error));
+    std::filesystem::remove(path);
+    // Rules: bands fade, layers gate.
+    B::BrushRules rules;
+    rules.maxHeight = 10.f; rules.heightFade = 2.f;
+    rules.maxSlope = 30.f; rules.slopeFade = 10.f;
+    rules.onLayers = {"grass"};
+    // Layers named by material, whatever their order on the terrain.
+    const auto set = B::ResolveBrushLayers(rules, {"Assets/M/soil.material", "Assets/M/Grass.material"});
+    Require(set.on == std::vector<int>({1}) && set.needsOn);
+    const float grass[2] = {0.f, 1.f}, soil[2] = {1.f, 0.f};
+    Require(Near(B::BrushRulesWeight(rules, 5.f, 10.f, &set, grass, 2), 1.f));
+    Require(Near(B::BrushRulesWeight(rules, 11.f, 10.f, &set, grass, 2), .5f));
+    Require(Near(B::BrushRulesWeight(rules, 5.f, 35.f, &set, grass, 2), .5f));
+    Require(Near(B::BrushRulesWeight(rules, 5.f, 10.f, &set, soil, 2), 0.f));
+    // A terrain without the named layer: the brush acts nowhere on it.
+    const auto none = B::ResolveBrushLayers(rules, {"Assets/M/sand.material"});
+    const float sand[1] = {1.f};
+    Require(Near(B::BrushRulesWeight(rules, 5.f, 10.f, &none, sand, 1), 0.f));
+    Require(B::RuleNamesMaterial("grass.material", "Assets\\M\\GRASS.material") &&
+        !B::RuleNamesMaterial("Assets/Other/grass.material", "Assets/M/grass.material"));
+}
+
+// The stamps, converted to brushes (tools/stamp_brush.py): their tip and
+// relief load into a shape that raises the terrain like the stamps did.
+void TestReliefBrushAsset()
+{
+    const auto shape = Engine::Components::TerrainBrushShape::Load("Assets/TerrainData/Brushes/RockFace_01.brush");
+    Require(shape != nullptr);
+    if (!shape) return;
+    Require(shape->resolution == 128 && Near(shape->halfExtent, 1.f));
+    Require(Near(shape->maxHeight, 1.385f, .01f));   // the brush's height ratio
+    Require(shape->SampleMask({0.f, 0.f}) > .5f && shape->SampleMask({.999f, -.999f}) < .5f);
+    Require(shape->facing.y > .9f && shape->outline.size() == 64);
+    // The same shape again from the cache.
+    Require(Engine::Components::TerrainBrushShape::Load("Assets/TerrainData/Brushes/RockFace_01.brush") == shape);
+    // A square analytic tip with a hard falloff: full to the corners.
+    Engine::Brushes::BrushPreset square;
+    square.shape = 1; square.falloff = 0; square.hardness = .9f;
+    const auto box = Engine::Components::TerrainBrushShape::FromPreset(square, 32);
+    Require(box && box->SampleMask({.8f, .8f}) > .99f && box->SampleMask({.98f, 0.f}) < .01f);
+    Engine::Brushes::BrushPreset round;
+    Require(!Engine::Components::TerrainBrushShape::FromPreset(round));   // the terrain's own round brush
+    // The bundled example brushes load, each for its tool.
+    for (const auto& [file, tool] : {std::pair{"Meadow grass (paint).brush", Engine::Brushes::BrushTool::Paint},
+             std::pair{"Meadow bushes (place).brush", Engine::Brushes::BrushTool::Place},
+             std::pair{"Oak stand (place).brush", Engine::Brushes::BrushTool::Place}})
+    {
+        Engine::Brushes::BrushPreset example;
+        std::string error;
+        Require(Engine::Brushes::LoadBrushPreset(
+            std::filesystem::path("Engine/Core/Assets/TerrainData/Brushes") / file, example, error));
+        Require(example.terrain.tool == tool && example.terrain.rules.Any());
+        if (tool == Engine::Brushes::BrushTool::Place)
+            for (const auto& asset : example.terrain.placement.assets)
+                Require(std::filesystem::exists("Engine/Core/" + asset.asset));
+    }
+}
+
+// Rules on sculpt and paint strokes: a Raise brush limited to flat ground
+// leaves a slope alone; a Paint brush limited to a layer paints only there.
+void TestBrushRulesOnStrokes()
+{
+    Engine::Scene::Scene scene;
+    auto* terrain = MakeTerrain(scene, 2);
+    terrain->layers[0].material = "Assets/Materials/Terrain/PBR/forest_soil.material";
+    terrain->layers[1].material = "Assets/Materials/Terrain/PBR/grass.material";
+    // A 45 degree ramp from x = 8 on, flat before it.
+    for (int row = 0; row <= 16; ++row)
+        for (int col = 0; col <= 16; ++col)
+            terrain->heights[size_t(row) * 17 + col] = col > 8 ? float(col - 8) : 0.f;
+    terrain->Rebuild();
+    Engine::Brushes::BrushRules flat;
+    flat.maxSlope = 20.f; flat.slopeFade = 0.f;
+    Terrain::BrushOptions options;
+    options.rules = &flat;
+    options.hardness = 1.f;
+    Require(terrain->ApplyBrush(8.f, 8.f, 6.f, 1.f, Terrain::Brush::Raise, 0, false, options));
+    Require(Near(terrain->heights[8 * 17 + 4], 1.f, .05f));     // flat: raised
+    Require(Near(terrain->heights[8 * 17 + 12], 4.f));          // on the ramp: untouched
+    // Paint grass (layer 1) only where there is grass already: a strip at
+    // col 2, 60 % grass.
+    for (int row = 0; row <= 16; ++row)
+    {
+        terrain->weights[(size_t(row) * 17 + 2) * 2] = .4f;
+        terrain->weights[(size_t(row) * 17 + 2) * 2 + 1] = .6f;
+    }
+    Engine::Brushes::BrushRules onGrass;
+    onGrass.onLayers = {"grass"};
+    Terrain::BrushOptions paint;
+    paint.rules = &onGrass;
+    paint.hardness = 1.f;
+    terrain->ApplyBrush(3.f, 8.f, 3.f, .5f, Terrain::Brush::Paint, 1, false, paint);
+    Require(Near(terrain->weights[(size_t(8) * 17 + 4) * 2 + 1], 0.f));   // soil beside the strip: unpainted
+    Require(terrain->weights[(size_t(8) * 17 + 2) * 2 + 1] > .7f);         // the strip: painted
+}
+
+// A Place brush: assets by weight at a density, kept apart, on the ground
+// its rules allow, into its own layer; erasing thins them.
+void TestPlacementBrush()
+{
+    namespace B = Engine::Brushes;
+    Engine::Scene::Scene scene;
+    auto* terrain = MakeTerrain(scene, 1);
+    B::BrushPreset brush;
+    brush.terrain.tool = B::BrushTool::Place;
+    auto& place = brush.terrain.placement;
+    place.assets = {{"Assets/tuft_a.prefab", 3.f, 1.f, 1.f}, {"Assets/tuft_b.prefab", 1.f, .5f, .5f}};
+    place.density = 1.f;
+    place.minSpacing = 1.f;
+    Engine::Components::TerrainPlacementDab dab;
+    dab.center = {8.0, 0.0, 8.0};
+    dab.radius = 5.f;
+    dab.hardness = 1.f;
+    dab.layer = "Painted tufts";   // the tool's choice, not the brush's
+    uint32_t random = 12345u;
+    int placed = 0;
+    for (int n = 0; n < 6; ++n)
+        placed += Engine::Components::ApplyPlacementBrush(scene, nullptr, terrain, brush, dab, random);
+    Engine::Components::TerrainObjectLayer* layer = nullptr;
+    for (auto* child : terrain->Owner->Children)
+        if (auto* found = child->GetComponent<Engine::Components::TerrainObjectLayer>())
+            if (found->layerName == "Painted tufts") layer = found;
+    Require(layer && placed > 20 && layer->placements.size() == size_t(placed));
+    if (!layer) return;
+    int heavy = 0;
+    for (size_t i = 0; i < layer->placements.size(); ++i)
+    {
+        const auto& a = layer->placements[i];
+        Require(glm::length(glm::vec2(a.position.x - 8.f, a.position.z - 8.f)) <= 5.01f);
+        heavy += a.asset == "Assets/tuft_a.prefab";
+        if (a.asset == "Assets/tuft_b.prefab") Require(Near(a.scale, .5f));
+        for (size_t j = i + 1; j < layer->placements.size(); ++j)
+        {
+            const auto& b = layer->placements[j];
+            Require(glm::length(glm::vec2(a.position.x - b.position.x, a.position.z - b.position.z)) >= 1.f - 1e-4f);
+        }
+    }
+    Require(heavy > placed / 2);   // 3:1 by weight
+    // Rules that rule the ground out place nothing.
+    brush.terrain.rules.minHeight = 10.f;
+    brush.terrain.rules.heightFade = 0.f;
+    Require(Engine::Components::ApplyPlacementBrush(scene, nullptr, terrain, brush, dab, random) == 0);
+    brush.terrain.rules = {};
+    // Erasing at full strength over the whole patch removes them all.
+    dab.erase = true;
+    dab.radius = 8.f;
+    int removed = 0;
+    for (int n = 0; n < 3; ++n)
+        removed += Engine::Components::ApplyPlacementBrush(scene, nullptr, terrain, brush, dab, random);
+    Require(removed == placed && layer->placements.empty());
+}
+
+// Painted objects of procedural cells live in per-cell files: none for an
+// untouched (generated) cell, one once painted, read back on load, and undo
+// (a scene snapshot from before) takes the file back to what it was.
+// Painting into a new layer takes the layer name's settings.
+void TestObjectFilesAndLayerSettings()
+{
+    namespace B = Engine::Brushes;
+    const auto folder = std::filesystem::temp_directory_path() / "engine_object_files_test";
+    std::error_code error;
+    std::filesystem::remove_all(folder, error);
+    std::filesystem::create_directories(folder, error);
+    const auto builder = [](TerrainManager::Cell, Terrain& terrain)
+    {
+        terrain.layers.assign(1, Terrain::Layer{});
+        terrain.weights.assign(terrain.heights.size(), 1.f);
+        std::fill(terrain.heights.begin(), terrain.heights.end(), 2.f);
+    };
+    // A generated layer: three trees per cell.
+    const auto generator = [](const TerrainManager::ObjectLayerContext&, const std::string& name,
+        Engine::Components::TerrainObjectLayer& layer)
+    {
+        if (name != "Forest") return;
+        for (int i = 0; i < 3; ++i)
+            layer.placements.push_back({0, "Assets/tree.prefab", {4.f + 8.f * i, 2.f, 4.f}});
+    };
+    const auto makeManager = [&](Engine::Scene::Scene& scene) {
+        auto* manager = scene.AddObject("Manager")->AddComponent<TerrainManager>();
+        manager->cellsX = manager->cellsY = 32;
+        manager->cellWidth = manager->cellDepth = 1.f;
+        manager->loadedRadius = 0;
+        manager->farRadius = 0;
+        manager->generateColliders = false;
+        manager->cellDataDirectory = folder.string();
+        manager->SetProceduralBuilder(builder);
+        manager->SetObjectLayerGenerator(generator);
+        return manager;
+    };
+    const auto layerOf = [](Terrain* cell, const std::string& name) -> Engine::Components::TerrainObjectLayer* {
+        if (!cell || !cell->Owner) return nullptr;
+        for (auto* child : cell->Owner->Children)
+            if (auto* layer = child ? child->GetComponent<Engine::Components::TerrainObjectLayer>() : nullptr)
+                if (layer->layerName == name) return layer;
+        return nullptr;
+    };
+    Engine::Scene::Scene scene;
+    auto* manager = makeManager(scene);
+    Require(manager->AddProceduralCell(0, 0));
+    Require(manager->AddObjectLayer("Forest"));
+    manager->SyncLoadedCells(0, 0);
+    auto* cell = manager->GetLoadedCell(0, 0);
+    Require(cell && layerOf(cell, "Forest") && layerOf(cell, "Forest")->placements.size() == 3);
+    if (!cell) return;
+    const auto file = folder / "0_0.objects";
+    // Untouched: no file, and the scene holds no placements.
+    const auto untouched = manager->Serialize();
+    Require(!std::filesystem::exists(file, error));
+    Require(untouched["objectLayerCells"].ArraySize() == 0);
+    // The layer name's settings, then paint into it.
+    Engine::Components::TerrainObjectLayer::Settings settings;
+    settings.viewDistance = 400.f; settings.lod1Distance = 60.f; settings.lod2Distance = 150.f;
+    settings.shadowDistance = 120.f; settings.farShadowDistance = 300.f;
+    manager->SetObjectLayerSettings("Painted", settings);
+    B::BrushPreset brush;
+    brush.terrain.placement.assets = {{"Assets/bush.prefab", 1.f, 1.f, 1.f}};
+    brush.terrain.placement.density = .5f;
+    brush.terrain.placement.minSpacing = 1.f;
+    Engine::Components::TerrainPlacementDab dab;
+    dab.center = {16.0, 0.0, 16.0};
+    dab.radius = 6.f;
+    dab.hardness = 1.f;
+    dab.layer = "Painted";
+    uint32_t random = 99u;
+    const int placed = Engine::Components::ApplyPlacementBrush(scene, manager, nullptr, brush, dab, random);
+    auto* painted = layerOf(cell, "Painted");
+    Require(placed > 5 && painted && painted->placements.size() == size_t(placed));
+    if (painted)
+        Require(Near(painted->viewDistance, 400.f) && Near(painted->lod1Distance, 60.f) &&
+            Near(painted->shadowDistance, 120.f) && Near(painted->farShadowDistance, 300.f));
+    // Settings changed later reach the loaded layer too.
+    settings.viewDistance = 500.f;
+    manager->SetObjectLayerSettings("Painted", settings);
+    if (painted) Require(Near(painted->viewDistance, 500.f));
+    // Saved: the cell's file, listed by revision; the scene holds no placements.
+    const auto edited = manager->Serialize();
+    Require(std::filesystem::exists(file, error));
+    Require(edited["objectLayerCells"].ArraySize() == 0);
+    Require(edited["objectFiles"].ArraySize() == 1 && edited["objectLayerSettings"].ArraySize() == 1);
+    // Loaded fresh: the painted layer comes back from the file, with its settings.
+    {
+        Engine::Scene::Scene loadScene;
+        auto* loaded = makeManager(loadScene);
+        loaded->Deserialize(edited);
+        loaded->SetProceduralBuilder(builder);
+        loaded->SetObjectLayerGenerator(generator);
+        loaded->SyncLoadedCells(0, 0);
+        auto* again = loaded->GetLoadedCell(0, 0);
+        auto* layer = layerOf(again, "Painted");
+        Require(layer && layer->placements.size() == size_t(placed) && Near(layer->viewDistance, 500.f));
+        Require(layerOf(again, "Forest") && layerOf(again, "Forest")->placements.size() == 3);
+    }
+    // Undo to before the painting: the file goes; redo brings it back.
+    {
+        Engine::Scene::Scene undoScene;
+        auto* undo = makeManager(undoScene);
+        undo->Deserialize(untouched);
+        Require(!std::filesystem::exists(file, error));
+        undo->Deserialize(edited);
+        Require(std::filesystem::exists(file, error));
+        undo->SetProceduralBuilder(builder);
+        undo->SetObjectLayerGenerator(generator);
+        undo->SyncLoadedCells(0, 0);
+        auto* layer = layerOf(undo->GetLoadedCell(0, 0), "Painted");
+        Require(layer && layer->placements.size() == size_t(placed));
+    }
+    std::filesystem::remove_all(folder, error);
+}
+
+// The edge band, trail clearance and per-asset height bands.
+void TestBrushEdgeTrailAndAltitudeRules()
+{
+    namespace B = Engine::Brushes;
+    B::BrushRules edge;
+    edge.onLayers = {"forest_soil"};
+    edge.layerThreshold = .1f;
+    edge.maxLayerShare = .6f;
+    const auto set = B::ResolveBrushLayers(edge, {"Assets/M/grass.material", "Assets/M/forest_soil.material"});
+    const float meadow[2] = {1.f, 0.f}, border[2] = {.6f, .4f}, forest[2] = {0.f, 1.f};
+    Require(Near(B::BrushRulesWeight(edge, 0.f, 0.f, &set, meadow, 2), 0.f));
+    Require(Near(B::BrushRulesWeight(edge, 0.f, 0.f, &set, border, 2), 1.f));
+    Require(Near(B::BrushRulesWeight(edge, 0.f, 0.f, &set, forest, 2), 0.f));
+    // Trails: none within clearance, full past clearance + fade.
+    B::BrushRules trail;
+    trail.trailClearance = 4.f;
+    trail.trailFade = 2.f;
+    Require(Near(B::BrushRulesWeight(trail, 0.f, 0.f, nullptr, nullptr, 0, 2.f), 0.f));
+    Require(Near(B::BrushRulesWeight(trail, 0.f, 0.f, nullptr, nullptr, 0, 5.f), .5f));
+    Require(Near(B::BrushRulesWeight(trail, 0.f, 0.f, nullptr, nullptr, 0, 10.f), 1.f));
+    Require(Near(B::BrushRulesWeight(trail, 0.f, 0.f), 1.f));   // no trails
+    // The manager's trail distance: 0 on the contour, growing off it.
+    Engine::Scene::Scene scene;
+    auto* manager = scene.AddObject("Manager")->AddComponent<TerrainManager>();
+    Require(std::isinf(manager->ContourPathDistance(10.f, 10.f, 0.f)));
+    manager->contourPaths.enabled = true;
+    float nearest = 1e9f, farthest = 0.f;
+    for (int i = 0; i < 400; ++i)
+    {
+        const float d = manager->ContourPathDistance(i * 3.f, 50.f, 0.f);
+        nearest = std::min(nearest, d); farthest = std::max(farthest, d);
+    }
+    Require(nearest < 3.f && farthest > 10.f);
+    // Species by altitude: an asset's weight fades past its height band.
+    B::BrushPlacementAsset spruce{"Assets/spruce.prefab", 2.f, 1.f, 1.f};
+    spruce.minHeight = 300.f; spruce.heightFade = 50.f;
+    Require(Near(spruce.WeightAt(400.f), 2.f) && Near(spruce.WeightAt(275.f), 1.f) && Near(spruce.WeightAt(200.f), 0.f));
+}
+
+// Region placement: the brush over a Select-tool region, inside it only.
+void TestPlacementRegion()
+{
+    namespace B = Engine::Brushes;
+    Engine::Scene::Scene scene;
+    auto* terrain = MakeTerrain(scene, 1);
+    B::BrushPreset brush;
+    brush.terrain.placement.assets = {{"Assets/tuft.prefab", 1.f, 1.f, 1.f}};
+    brush.terrain.placement.density = 1.f;
+    brush.terrain.placement.minSpacing = .8f;
+    const auto box = Engine::Components::TerrainRegionMask::Box({2.0, 2.0}, {8.0, 12.0}, false, 0.f);
+    uint32_t random = 7u;
+    const int placed = Engine::Components::ApplyPlacementRegion(scene, nullptr, terrain, brush, box, 1.f,
+        "Region tufts", false, random);
+    Require(placed > 20);
+    Engine::Components::TerrainObjectLayer* layer = nullptr;
+    for (auto* child : terrain->Owner->Children)
+        if (auto* found = child->GetComponent<Engine::Components::TerrainObjectLayer>())
+            if (found->layerName == "Region tufts") layer = found;
+    Require(layer && layer->placements.size() == size_t(placed));
+    if (layer)
+        for (const auto& p : layer->placements)
+            Require(p.position.x >= 2.f && p.position.x <= 8.f && p.position.z >= 2.f && p.position.z <= 12.f);
+    // Thinning the whole region at full strength removes them.
+    Require(Engine::Components::ApplyPlacementRegion(scene, nullptr, terrain, brush, box, 1.f,
+        "Region tufts", true, random) == placed);
+}
+
+// Stitching matches loaded neighbours' borders without turning that into an
+// edit: an untouched neighbour of an edited cell gets no .terrainedit, and
+// the edited cell's file stays as the user saved it.
+void TestStitchWritesNoEdits()
+{
+    const auto folder = std::filesystem::temp_directory_path() / "engine_stitch_edit_test";
+    std::error_code error;
+    std::filesystem::remove_all(folder, error);
+    std::filesystem::create_directories(folder, error);
+    const auto builder = [](TerrainManager::Cell, Terrain& terrain)
+    {
+        terrain.layers.assign(1, Terrain::Layer{});
+        terrain.weights.assign(terrain.heights.size(), 1.f);
+        std::fill(terrain.heights.begin(), terrain.heights.end(), 0.f);
+    };
+    const auto makeManager = [&](Engine::Scene::Scene& scene, int radius) {
+        auto* manager = scene.AddObject("Manager")->AddComponent<TerrainManager>();
+        manager->cellsX = manager->cellsY = 32;
+        manager->cellWidth = manager->cellDepth = 1.f;
+        manager->loadedRadius = radius;
+        manager->farRadius = 0;
+        manager->generateColliders = false;
+        manager->cellDataDirectory = folder.string();
+        manager->SetProceduralBuilder(builder);
+        return manager;
+    };
+    // A saved edit of (0, 0) that raises its east border by 1 m (as made
+    // while (1, 0) was not loaded), and a scene that lists it as edited.
+    const auto edited = folder / "0_0.terrainedit", neighbour = folder / "1_0.terrainedit";
+    {
+        std::ofstream file(edited, std::ios::binary);
+        const auto put = [&](auto value) { file.write(reinterpret_cast<const char*>(&value), sizeof(value)); };
+        put(uint64_t(0x31544944454e5254ull)); put(uint32_t(1)); put(uint32_t(32)); put(uint32_t(32));
+        put(uint32_t(1)); put(uint32_t(33)); put(uint32_t(0));
+        for (uint32_t row = 0; row <= 32; ++row) { put(row * 33 + 32); put(1.f); }
+    }
+    Engine::Scene::Scene editScene;
+    auto* editor = makeManager(editScene, 0);
+    Require(editor->AddProceduralCell(0, 0) && editor->AddProceduralCell(1, 0));
+    auto json = editor->Serialize();
+    auto editedCells = Engine::Serialization::JsonValue::MakeArray();
+    editedCells.Push(Engine::Serialization::JsonValue::MakeObject()
+        .Set("x", Engine::Serialization::JsonValue(0)).Set("y", Engine::Serialization::JsonValue(0)));
+    json.Set("editedCells", std::move(editedCells));
+    Require(!std::filesystem::exists(neighbour, error));
+    const auto bytes = [](const std::filesystem::path& path) {
+        std::ifstream file(path, std::ios::binary);
+        return std::string((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    };
+    const std::string saved = bytes(edited);
+    // Both loaded: the seam matches, and saving writes no edit for (1, 0).
+    Engine::Scene::Scene loadScene;
+    auto* loaded = makeManager(loadScene, 1);
+    loaded->Deserialize(json);
+    loaded->loadedRadius = 1;
+    loaded->SetProceduralBuilder(builder);
+    loaded->SyncLoadedCells(0, 0);
+    auto* left = loaded->GetLoadedCell(0, 0);
+    auto* right = loaded->GetLoadedCell(1, 0);
+    Require(left && right);
+    if (left && right)
+    {
+        Require(left->heights[16 * 33 + 32] > .5f);
+        for (int row = 0; row <= 32; ++row)
+            Require(left->heights[size_t(row) * 33 + 32] == right->heights[size_t(row) * 33]);
+    }
+    loaded->Serialize();
+    Require(!std::filesystem::exists(neighbour, error));
+    Require(bytes(edited) == saved);
+    std::filesystem::remove_all(folder, error);
+}
+
+// The object archive: cells' layers written and read back (positions to a few
+// millimetres, yaw to under 1.5 degrees, scale to 1/40), templates kept, empty
+// cells empty; a manager loads a cell's placements from it, and a cell's own
+// .objects file wins over its block.
+void TestObjectArchive()
+{
+    using Engine::Components::TerrainObjectArchive;
+    const auto folder = std::filesystem::temp_directory_path() / "engine_object_archive_test";
+    std::error_code error;
+    std::filesystem::remove_all(folder, error);
+    std::filesystem::create_directories(folder, error);
+    const auto path = (folder / "world.objects").string();
+    TerrainObjectArchive::Header header;
+    header.extent = 1; header.cellsX = header.cellsY = 32; header.cellWidth = header.cellDepth = 1.f;
+    Engine::Scene::Scene templateScene;
+    auto* forestTemplate = templateScene.AddObject("t")->AddComponent<Engine::Components::TerrainObjectLayer>();
+    forestTemplate->layerName = "Forest";
+    forestTemplate->viewDistance = 900.f;
+    forestTemplate->objectLods["Assets/oak.prefab"].distances = {60.f, 220.f};
+    std::vector<std::pair<std::string, Engine::Serialization::JsonValue>> templates{
+        {"Forest", forestTemplate->Serialize()}};
+    const auto source = [](TerrainObjectArchive::Cell cell) {
+        std::vector<TerrainObjectArchive::Layer> layers;
+        if (cell != TerrainObjectArchive::Cell{0, 0}) return layers;
+        TerrainObjectArchive::Layer forest{"Forest", {}};
+        for (int i = 0; i < 50; ++i)
+        {
+            Engine::Components::TerrainObjectLayer::Placement p;
+            p.asset = i % 2 ? "Assets/oak.prefab" : "Assets/pine.prefab";
+            p.position = {i * .61f, 3.25f + i, 31.f - i * .5f};
+            p.normal = glm::normalize(glm::vec3(.2f, 1.f, -.1f));
+            p.yawDegrees = -170.f + i * 7.f;
+            p.scale = .8f + i * .01f;
+            forest.placements.push_back(p);
+        }
+        layers.push_back(forest);
+        return layers;
+    };
+    Require(TerrainObjectArchive::Write(path, header, templates, source));
+    const auto archive = TerrainObjectArchive::Open(path);
+    Require(archive != nullptr);
+    if (!archive) return;
+    std::vector<TerrainObjectArchive::Layer> layers;
+    Require(archive->ReadCell({0, 0}, layers) && layers.size() == 1 && layers[0].placements.size() == 50);
+    // Stored sorted by asset, then x; heights to 1/16 m.
+    auto expected = source({0, 0})[0].placements;
+    const auto order = [](const auto& a, const auto& b) {
+        return a.asset != b.asset ? a.asset < b.asset : a.position.x < b.position.x; };
+    std::stable_sort(expected.begin(), expected.end(), order);
+    if (layers.size() == 1) std::stable_sort(layers[0].placements.begin(), layers[0].placements.end(), order);
+    for (size_t i = 0; i < 50 && layers.size() == 1; ++i)
+    {
+        const auto& a = layers[0].placements[i];
+        const auto& b = expected[i];
+        Require(a.asset == b.asset && std::abs(a.position.x - b.position.x) < .005f &&
+            std::abs(a.position.z - b.position.z) < .005f && std::abs(a.position.y - b.position.y) <= .032f);
+        Require(glm::length(a.normal - b.normal) < .02f && std::abs(a.scale - b.scale) <= .0125f);
+        float yaw = std::fmod(std::abs(a.yawDegrees - b.yawDegrees), 360.f);
+        Require(std::min(yaw, 360.f - yaw) < 1.5f);
+    }
+    Require(archive->ReadCell({1, -1}, layers) && layers.empty());
+    Require(!archive->ReadCell({2, 0}, layers));
+    Engine::Serialization::JsonValue saved;
+    Require(archive->ReadCellLayers({0, 0}, saved) && saved.ArraySize() == 1 &&
+        Near(saved.ArrayAt(0)["viewDistance"].AsFloat(), 900.f));
+    // A manager loads (0, 0)'s placements; an edit file then wins.
+    const auto builder = [](TerrainManager::Cell, Terrain& terrain) {
+        terrain.layers.assign(1, Terrain::Layer{});
+        terrain.weights.assign(terrain.heights.size(), 1.f);
+    };
+    const auto load = [&](Engine::Scene::Scene& scene) {
+        auto* manager = scene.AddObject("Manager")->AddComponent<TerrainManager>();
+        manager->cellsX = manager->cellsY = 32;
+        manager->cellWidth = manager->cellDepth = 1.f;
+        manager->loadedRadius = 0;
+        manager->farRadius = 0;
+        manager->generateColliders = false;
+        manager->cellDataDirectory = folder.string();
+        manager->objectArchive = path;
+        manager->SetProceduralBuilder(builder);
+        manager->AddProceduralCell(0, 0);
+        manager->SyncLoadedCells(0, 0);
+        return manager;
+    };
+    const auto forestOf = [](TerrainManager* manager) -> Engine::Components::TerrainObjectLayer* {
+        auto* cell = manager->GetLoadedCell(0, 0);
+        if (!cell || !cell->Owner) return nullptr;
+        for (auto* child : cell->Owner->Children)
+            if (auto* layer = child ? child->GetComponent<Engine::Components::TerrainObjectLayer>() : nullptr)
+                if (layer->layerName == "Forest") return layer;
+        return nullptr;
+    };
+    {
+        Engine::Scene::Scene scene;
+        auto* manager = load(scene);
+        auto* forest = forestOf(manager);
+        Require(forest && forest->placements.size() == 50 && Near(forest->viewDistance, 900.f));
+        // Each placement keeps its asset through the load (the layer's packed
+        // placements once wrote their asset table in name order: pine, met
+        // first here, came back as oak and oak as pine).
+        if (forest)
+        {
+            auto unmatched = expected;
+            for (const auto& p : forest->placements)
+            {
+                const auto found = std::find_if(unmatched.begin(), unmatched.end(), [&](const auto& w) {
+                    return w.asset == p.asset && std::abs(w.position.x - p.position.x) < .01f &&
+                        std::abs(w.position.z - p.position.z) < .01f;
+                });
+                Require(found != unmatched.end());
+                if (found != unmatched.end()) unmatched.erase(found);
+            }
+            Require(unmatched.empty());
+            // And through a layer's own save and load.
+            Engine::Core::Object copyObject;
+            auto* copy = copyObject.AddComponent<Engine::Components::TerrainObjectLayer>();
+            copy->Deserialize(forest->Serialize());
+            Require(copy->placements.size() == forest->placements.size());
+            for (size_t i = 0; i < copy->placements.size() && i < forest->placements.size(); ++i)
+                Require(copy->placements[i].asset == forest->placements[i].asset);
+        }
+        if (forest) forest->placements.resize(10);   // an edit: thinned
+        manager->Serialize();                         // writes 0_0.objects
+        Require(std::filesystem::exists(folder / "0_0.objects", error));
+    }
+    {
+        Engine::Scene::Scene scene;
+        auto* forest = forestOf(load(scene));
+        Require(forest && forest->placements.size() == 10);
+    }
+    std::filesystem::remove_all(folder, error);
+}
+
 // ---- Height archive v3: per-file scale and coarse cells ----
 
 void TestArchiveV3()
@@ -592,6 +1193,184 @@ void TestArchiveV3()
         { visited += h.size() == 81; return true; }));
     Require(visited == 9);
     std::filesystem::remove(path);
+}
+
+// A procedural cell's edit file keeps its sculpting and hand paint (only
+// the samples that differ from the builder's), and a version 2 file (with
+// the erosion entries edits once kept) still reads.
+void TestEditRoundTrip()
+{
+    using Engine::Components::TerrainRegionMask;
+    using Engine::Components::TerrainRegionOperation;
+    const auto folder = std::filesystem::temp_directory_path() / "engine_edit_round_trip_test";
+    std::error_code error;
+    std::filesystem::remove_all(folder, error);
+    std::filesystem::create_directories(folder, error);
+    const auto builder = [](TerrainManager::Cell, Terrain& terrain)
+    {
+        terrain.layers.assign(2, Terrain::Layer{});
+        terrain.weights.assign(terrain.heights.size() * 2, 0.f);
+        for (size_t i = 0; i < terrain.heights.size(); ++i) terrain.weights[i * 2] = 1.f;
+        for (int row = 0; row <= 32; ++row)
+            for (int col = 0; col <= 32; ++col)
+            {
+                const double d = std::hypot(col - 16.0, row - 16.0);
+                terrain.heights[size_t(row) * 33 + col] = float(10.0 * std::exp(-d * d / 80.0) +
+                    std::sin(col * .7) * std::cos(row * .5));
+            }
+    };
+    const auto makeManager = [&](Engine::Scene::Scene& scene) {
+        auto* manager = scene.AddObject("Manager")->AddComponent<TerrainManager>();
+        manager->cellsX = manager->cellsY = 32;
+        manager->cellWidth = manager->cellDepth = 1.f;
+        manager->loadedRadius = 0;
+        manager->farRadius = 0;
+        manager->generateColliders = false;
+        manager->cellDataDirectory = folder.string();
+        manager->SetProceduralBuilder(builder);
+        return manager;
+    };
+    Engine::Scene::Scene scene;
+    auto* manager = makeManager(scene);
+    Require(manager->AddProceduralCell(0, 0));
+    manager->SyncLoadedCells(0, 0);
+    auto* cell = manager->GetLoadedCell(0, 0);
+    Require(cell != nullptr);
+    if (!cell) return;
+    TerrainRegionOperation op;
+    op.kind = TerrainRegionOperation::Kind::Hydraulic;
+    op.dropletDensity = 4.f;
+    op.erosionUnit = 4.f;
+    Require(manager->EditRegion(TerrainRegionMask::Circle({16.0, 16.0}, 10.f, .5f), op));
+    Require(cell->ApplyBrush(4.f, 4.f, 2.f, 1.5f, Terrain::Brush::Raise, 0));
+    Require(cell->ApplyBrush(28.f, 28.f, 1.5f, 1.f, Terrain::Brush::Paint, 1));
+    const auto json = manager->Serialize();
+    const auto file = folder / "0_0.terrainedit";
+    Require(std::filesystem::exists(file, error));
+    std::vector<float> heights(33 * 33, 0.f);
+    Require(TerrainHeightArchive::ApplyEditHeights(file.string(), 32, 32, heights));
+    // Reloaded from the builder plus the edit: the same heights and paint.
+    Engine::Scene::Scene reloadScene;
+    auto* reload = makeManager(reloadScene);
+    reload->Deserialize(json);
+    reload->SetProceduralBuilder(builder);
+    reload->SyncLoadedCells(0, 0);
+    auto* restored = reload->GetLoadedCell(0, 0);
+    Require(restored != nullptr);
+    if (restored)
+    {
+        Require(restored->heights == cell->heights);
+        Require(restored->weights == cell->weights);
+        Require(restored->weights[(28 * 33 + 28) * 2 + 1] > .5f && restored->weights[(4 * 33 + 4) * 2] == 1.f);
+    }
+    // Version 2: a height entry, no weights, two erosion entries (skipped).
+    const auto legacy = folder / "legacy.terrainedit";
+    {
+        std::ofstream out(legacy, std::ios::binary);
+        const auto put = [&](const auto& value) { out.write(reinterpret_cast<const char*>(&value), sizeof(value)); };
+        put(uint64_t(0x31544944454e5254ull)); put(uint32_t(2)); put(uint32_t(32)); put(uint32_t(32));
+        put(uint32_t(2)); put(uint32_t(1)); put(uint32_t(0));
+        put(uint32_t(5)); put(7.5f);
+        put(uint32_t(2));
+        put(uint32_t(1)); put(.5f); put(1.f);
+        put(uint32_t(9)); put(.25f); put(2.f);
+    }
+    std::vector<float> legacyHeights(33 * 33, 0.f);
+    Require(TerrainHeightArchive::ApplyEditHeights(legacy.string(), 32, 32, legacyHeights) &&
+        legacyHeights[5] == 7.5f);
+    TerrainHeightArchive::EditEntries entries;
+    Require(TerrainHeightArchive::ReadEditEntries(legacy.string(), 32, 32, entries) &&
+        entries.heights.size() == 1 && entries.weights.empty());
+    std::filesystem::remove_all(folder, error);
+}
+
+// The macro color map follows edits: an edit marks its cell and those around
+// it for recomposing (when the source can), and a patch writes new samples
+// over the map, clipped to it.
+void TestMacroColorPatches()
+{
+    using Engine::Components::TerrainRegionMask;
+    using Engine::Components::TerrainRegionOperation;
+    std::vector<glm::vec4> linear(16, glm::vec4(.5f, .5f, .5f, 0.f));
+    auto image = TerrainManager::EncodeMacroColorImage(4, 4, 0.f, 0.f, 16.f, linear);
+    Require(image.linear && image.linear->size() == 16 && image.mipLevels == 3);
+    TerrainManager::MacroColorPatch patch;
+    patch.x0 = 3; patch.y0 = 1; patch.width = 2; patch.height = 1;
+    patch.colors = {glm::vec4(1.f, 0.f, 0.f, 1.f), glm::vec4(0.f, 1.f, 0.f, 1.f)};
+    const auto patched = TerrainManager::PatchMacroColorImage(image, {patch});
+    Require(patched.linear && patched.width == 4);
+    if (patched.linear)
+    {
+        Require((*patched.linear)[1 * 4 + 3] == glm::vec4(1.f, 0.f, 0.f, 1.f));
+        Require((*patched.linear)[1 * 4 + 2] == glm::vec4(.5f, .5f, .5f, 0.f));
+        // sRGB red, full alpha, at mip 0 sample (3, 1).
+        const size_t byte = size_t(1 * 4 + 3) * 4;
+        Require(patched.mips[byte] == 255 && patched.mips[byte + 1] == 0 && patched.mips[byte + 3] == 255);
+    }
+    Require(!TerrainManager::PatchMacroColorImage(TerrainManager::MacroColorImage{}, {patch}).linear);
+
+    Engine::Scene::Scene scene;
+    auto* manager = MakeHillManager(scene);
+    TerrainManager::MacroColorSource source;
+    source.revision = [] { return uint64_t(0); };
+    source.makeBuild = [] { return std::function<TerrainManager::MacroColorImage()>{}; };
+    manager->SetMacroColorSource(source);
+    TerrainRegionOperation flatten;
+    flatten.kind = TerrainRegionOperation::Kind::Flatten;
+    flatten.height = 2.f;
+    Require(manager->EditRegion(TerrainRegionMask::Circle({8.0, 8.0}, 3.f, 1.f), flatten));
+    Require(manager->GetMacroDirtyCells().empty()); // the source cannot patch
+    source.makeCellUpdate = [](const std::vector<TerrainManager::Cell>&, const TerrainManager::MacroColorImage&)
+    { return std::function<std::vector<TerrainManager::MacroColorPatch>()>{}; };
+    manager->SetMacroColorSource(source);
+    Require(manager->EditRegion(TerrainRegionMask::Circle({8.0, 8.0}, 3.f, 1.f), flatten) ||
+        manager->ApplyBrush(8.0, 8.0, 3.f, 1.f, Terrain::Brush::Raise, 0));
+    const auto dirty = manager->GetMacroDirtyCells();
+    Require(dirty.size() == 9 && std::count(dirty.begin(), dirty.end(), TerrainManager::Cell{-1, -1}) == 1 &&
+        std::count(dirty.begin(), dirty.end(), TerrainManager::Cell{1, 1}) == 1);
+}
+
+// Far terrain configured after the scene loads takes the saved height
+// edits of edited cells, not the source's heights.
+void TestFarGridTakesEdits()
+{
+    const auto folder = std::filesystem::temp_directory_path() / "engine_far_edit_test";
+    std::error_code error;
+    std::filesystem::remove_all(folder, error);
+    std::filesystem::create_directories(folder, error);
+    const auto builder = [](TerrainManager::Cell, Terrain& terrain)
+    {
+        terrain.layers.assign(1, Terrain::Layer{});
+        terrain.weights.assign(terrain.heights.size(), 1.f);
+        std::fill(terrain.heights.begin(), terrain.heights.end(), 1.f);
+    };
+    Engine::Scene::Scene scene;
+    auto* manager = scene.AddObject("Manager")->AddComponent<TerrainManager>();
+    manager->cellsX = manager->cellsY = 32;
+    manager->cellWidth = manager->cellDepth = 1.f;
+    manager->loadedRadius = 0;
+    manager->farRadius = 0;
+    manager->generateColliders = false;
+    manager->cellDataDirectory = folder.string();
+    manager->SetProceduralBuilder(builder);
+    Require(manager->AddProceduralCell(0, 0));
+    manager->SyncLoadedCells(0, 0);
+    auto* cell = manager->GetLoadedCell(0, 0);
+    Require(cell != nullptr);
+    if (!cell) return;
+    // Raise the cell's first corner by 1 m and save the edit.
+    Require(manager->ApplyBrush(0.0, 0.0, 1.5f, 1.f, Terrain::Brush::Raise, 0));
+    const auto json = manager->Serialize();
+    Require(std::filesystem::exists(folder / "0_0.terrainedit", error));
+    Engine::Scene::Scene loadScene;
+    auto* loaded = loadScene.AddObject("Manager")->AddComponent<TerrainManager>();
+    loaded->SetProceduralBuilder(builder);
+    loaded->Deserialize(json);
+    // A far grid of the source's heights (1 m everywhere), extent 1.
+    loaded->ConfigureFarTerrain(1, std::vector<float>(16, 1.f), {}, "", 0, {});
+    Require(loaded->HasFarPatch({0, 0}) && !loaded->HasFarPatch({1, 0}));
+    Require(Near(loaded->GetFarCornerHeight(0, 0), 2.f) && Near(loaded->GetFarCornerHeight(1, 1), 1.f));
+    std::filesystem::remove_all(folder, error);
 }
 
 // The generated landscape: fine play-area cells must share their border
@@ -720,6 +1499,15 @@ int main()
         TestPaintErase();
         TestManagerFlattenSeam();
         TestStampBrush();
+        TestBrushPresetTerrain();
+        TestReliefBrushAsset();
+        TestBrushRulesOnStrokes();
+        TestPlacementBrush();
+        TestObjectFilesAndLayerSettings();
+        TestBrushEdgeTrailAndAltitudeRules();
+        TestPlacementRegion();
+        TestStitchWritesNoEdits();
+        TestObjectArchive();
         TestScatterAndErase();
         TestPaintMap();
         TestManagerPaintSeam();
@@ -728,8 +1516,11 @@ int main()
         TestRegionPaint();
         TestVolumeSculpt();
         TestArchiveV3();
+                TestEditRoundTrip();
+        TestMacroColorPatches();
+        TestFarGridTakesEdits();
         TestLandscapeArchiveSeams();
-        TimeLargeCellStroke();
+            TimeLargeCellStroke();
     }
     catch (const std::exception& error)
     {

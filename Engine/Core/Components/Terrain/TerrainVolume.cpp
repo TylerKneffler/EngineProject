@@ -10,6 +10,7 @@
 #include <iterator>
 #include <map>
 #include <mutex>
+#include <functional>
 #include <unordered_map>
 
 namespace Engine::Components
@@ -153,6 +154,48 @@ std::shared_ptr<const TerrainVolume> TerrainVolume::Load(const std::string& path
     return volume;
 }
 
+namespace
+{
+// Skirts: every edge used by one triangle (an open edge), where `open` says
+// so (unset: all), extruded `skirt` metres into the ground along its
+// vertices' normals, so a sheet that ends meets whatever continues it
+// (a coarser block, a distant terrain node) without a gap.
+void AddSkirts(std::vector<Mesh::Vertex>& vertices, std::vector<uint32_t>& indices, float skirt,
+    const std::function<bool(const Mesh::Vertex&)>& open)
+{
+    if (skirt <= 0.f || indices.empty()) return;
+    std::unordered_map<uint64_t, int> uses;
+    const auto key = [](uint32_t a, uint32_t b)
+    { return a < b ? (uint64_t(a) << 32) | b : (uint64_t(b) << 32) | a; };
+    for (size_t t = 0; t + 2 < indices.size(); t += 3)
+        for (int e = 0; e < 3; ++e)
+            ++uses[key(indices[t + e], indices[t + (e + 1) % 3])];
+    std::unordered_map<uint32_t, uint32_t> lowered;
+    const auto lower = [&](uint32_t index)
+    {
+        if (const auto found = lowered.find(index); found != lowered.end()) return found->second;
+        Mesh::Vertex vertex = vertices[index];
+        for (int axis = 0; axis < 3; ++axis) vertex.pos[axis] -= vertex.normal[axis] * skirt;
+        const uint32_t added = static_cast<uint32_t>(vertices.size());
+        vertices.push_back(vertex);
+        lowered.emplace(index, added);
+        return added;
+    };
+    const size_t faces = indices.size();
+    for (size_t t = 0; t + 2 < faces; t += 3)
+        for (int e = 0; e < 3; ++e)
+        {
+            const uint32_t a = indices[t + e], b = indices[t + (e + 1) % 3];
+            if (uses[key(a, b)] != 1) continue;
+            if (open && (!open(vertices[a]) || !open(vertices[b]))) continue;
+            const uint32_t la = lower(a), lb = lower(b);
+            // The open edge runs a -> b in its triangle; the skirt runs it
+            // b -> a, so it is wound the same way round.
+            indices.insert(indices.end(), {b, a, la, b, la, lb});
+        }
+}
+}
+
 void MeshSurfaceNets(const TerrainVolume& volume, const glm::ivec3& first,
     const glm::ivec3& cells, int stride, float skirt,
     std::vector<Mesh::Vertex>& vertices, std::vector<uint32_t>& indices)
@@ -256,37 +299,7 @@ void MeshSurfaceNets(const TerrainVolume& volume, const glm::ivec3& first,
                     quad(slot(i - 1, j - 1, k), slot(i, j - 1, k), slot(i, j, k), slot(i - 1, j, k),
                          glm::vec3(0.f, 0.f, here ? 1.f : -1.f));
             }
-    if (skirt <= 0.f || indices.empty()) return;
-    // Skirts: every edge used by one triangle is open (the block's border),
-    // extruded into the ground along its vertices' normals.
-    std::unordered_map<uint64_t, int> uses;
-    const auto key = [](uint32_t a, uint32_t b)
-    { return a < b ? (uint64_t(a) << 32) | b : (uint64_t(b) << 32) | a; };
-    for (size_t t = 0; t + 2 < indices.size(); t += 3)
-        for (int e = 0; e < 3; ++e)
-            ++uses[key(indices[t + e], indices[t + (e + 1) % 3])];
-    std::unordered_map<uint32_t, uint32_t> lowered;
-    const auto lower = [&](uint32_t index)
-    {
-        if (const auto found = lowered.find(index); found != lowered.end()) return found->second;
-        Mesh::Vertex vertex = vertices[index];
-        for (int axis = 0; axis < 3; ++axis) vertex.pos[axis] -= vertex.normal[axis] * skirt;
-        const uint32_t added = static_cast<uint32_t>(vertices.size());
-        vertices.push_back(vertex);
-        lowered.emplace(index, added);
-        return added;
-    };
-    const size_t faces = indices.size();
-    for (size_t t = 0; t + 2 < faces; t += 3)
-        for (int e = 0; e < 3; ++e)
-        {
-            const uint32_t a = indices[t + e], b = indices[t + (e + 1) % 3];
-            if (uses[key(a, b)] != 1) continue;
-            const uint32_t la = lower(a), lb = lower(b);
-            // The open edge runs a -> b in its triangle; the skirt runs it
-            // b -> a, so it is wound the same way round.
-            indices.insert(indices.end(), {b, a, la, b, la, lb});
-        }
+    AddSkirts(vertices, indices, skirt, {});
 }
 
 namespace
@@ -451,6 +464,8 @@ void MeshSurfaceNets(const TerrainVolume& volume, const glm::ivec3& first, const
     // the cell moves it the same way.
     const auto snapped = [&](const glm::ivec3& o, const glm::ivec3& g, int size, glm::vec3 position)
     {
+        // The faces snapped to (sample coordinate per axis, INT_MIN: none).
+        int face[3] = {INT_MIN, INT_MIN, INT_MIN};
         for (int axis = 0; axis < 3; ++axis)
         {
             const int blockLow = first[axis] + o[axis] * blockSize[axis];
@@ -477,8 +492,39 @@ void MeshSurfaceNets(const TerrainVolume& volume, const glm::ivec3& first, const
                     solid += density(at) > 0.f;
                 }
                 if (solid == 0 || solid == 4) continue;
-                position[axis] = volume.origin[axis] + static_cast<float>(side > 0 ? blockHigh : blockLow) * volume.spacing;
+                face[axis] = side > 0 ? blockHigh : blockLow;
+                position[axis] = volume.origin[axis] + static_cast<float>(face[axis]) * volume.spacing;
             }
+        }
+        // On the face, the vertex is placed from the crossings on the face
+        // itself (the cell's edges lying in every face it snapped to), not
+        // the whole cell's: whatever meshes the other side of the face (a
+        // distant terrain node) sees the same face samples and so puts its
+        // vertex at the same point, and the two sheets meet edge to edge.
+        if (face[0] != INT_MIN || face[1] != INT_MIN || face[2] != INT_MIN)
+        {
+            glm::vec3 sum(0.f);
+            int crossings = 0;
+            for (int along = 0; along < 3; ++along)
+                for (int c = 0; c < 4; ++c)
+                {
+                    const int u = (along + 1) % 3, v = (along + 2) % 3;
+                    glm::ivec3 a = g;
+                    a[u] += (c & 1) * size;
+                    a[v] += (c >> 1) * size;
+                    bool onFaces = face[along] == INT_MIN;
+                    for (int axis = 0; onFaces && axis < 3; ++axis)
+                        if (face[axis] != INT_MIN && a[axis] != face[axis]) onFaces = false;
+                    if (!onFaces) continue;
+                    glm::ivec3 b = a;
+                    b[along] += size;
+                    const float da = density(a), db = density(b);
+                    if ((da > 0.f) == (db > 0.f)) continue;
+                    const float t = da / (da - db);
+                    sum += glm::vec3(a) + glm::vec3(b - a) * t;
+                    ++crossings;
+                }
+            if (crossings) position = volume.origin + sum / static_cast<float>(crossings) * volume.spacing;
         }
         return position;
     };
@@ -606,6 +652,23 @@ void MeshSurfaceNets(const TerrainVolume& volume, const glm::ivec3& first, const
                     quad({glm::ivec3(i - 1, j - 1, k), glm::ivec3(i, j - 1, k), glm::ivec3(i, j, k),
                           glm::ivec3(i - 1, j, k)}, glm::vec3(0.f, 0.f, sign));
             }
+    // Faces toward a missing block on the same level (a cell that is not
+    // loaded: distant terrain meshes it): the sheet ends there, so a skirt
+    // closes it onto whatever draws beyond.
+    if (seams.skirt > 0.f)
+    {
+        const auto missing = [&](int dx, int dz) {
+            return seams.strides[size_t(1 * 9 + (dz + 1) * 3 + dx + 1)] == 0; };
+        const bool lowX = missing(-1, 0), highX = missing(1, 0), lowZ = missing(0, -1), highZ = missing(0, 1);
+        if (lowX || highX || lowZ || highZ)
+        {
+            const float metres = volume.spacing * float(stride);
+            AddSkirts(vertices, indices, seams.skirt, [&](const Mesh::Vertex& v) {
+                return (lowX && v.pos[0] < low.x + metres) || (highX && v.pos[0] > high.x - metres) ||
+                    (lowZ && v.pos[2] < low.z + metres) || (highZ && v.pos[2] > high.z - metres);
+            });
+        }
+    }
 }
 
 void MeshSurfaceNets(const TerrainVolume& volume,

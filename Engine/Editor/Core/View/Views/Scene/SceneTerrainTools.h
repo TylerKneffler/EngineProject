@@ -66,6 +66,9 @@ public:
         bool alignToSurface = true;
         bool randomYaw = true;
         float minScale = 1.f, maxScale = 1.f;
+        // The object layer placed into (created when missing); empty: the
+        // layer already holding the prefab, else "Objects".
+        std::string layer;
     };
     // Places up to settings.count objects at random points inside the brush
     // (the first dab of a single-object brush lands at the center). Returns

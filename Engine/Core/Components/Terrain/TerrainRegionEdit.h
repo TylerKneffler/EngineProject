@@ -112,4 +112,5 @@ bool ApplyRegionOperation(TerrainHeightGrid& grid, const TerrainRegionMask& mask
 // Fills invalid samples from their nearest valid neighbours along rows and
 // columns (called by EditRegion before the operation).
 void FillMissingSamples(TerrainHeightGrid& grid);
+
 }

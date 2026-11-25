@@ -59,6 +59,32 @@ public:
     };
 
     TerrainObjectLayer();
+    // How a layer draws (distances, LOD bands, shadows), apart from what it
+    // holds: TerrainManager keeps one per layer name, so every cell's layer
+    // of that name draws the same, layers made by painting included.
+    struct Settings
+    {
+        float viewDistance = 18.f, lod1Distance = 8.f, lod2Distance = 13.f, lodHysteresis = .75f;
+        bool screenLodSelection = false;
+        float screenLod1Pixels = 300.f, screenLod2Pixels = 80.f;
+        float shadowDistance = 8.f, farShadowDistance = 0.f, shadowFadeWidth = 1.f;
+        int shadowLod = -1;
+        bool farObjects = true;
+        static Settings From(const TerrainObjectLayer& layer);
+        // Applies them (and marks the layer dirty) when they differ.
+        void ApplyTo(TerrainObjectLayer& layer) const;
+        JsonValue Serialize() const;
+        static Settings Deserialize(const JsonValue& value);
+        bool operator==(const Settings& o) const
+        {
+            return viewDistance == o.viewDistance && lod1Distance == o.lod1Distance &&
+                lod2Distance == o.lod2Distance && lodHysteresis == o.lodHysteresis &&
+                screenLodSelection == o.screenLodSelection && screenLod1Pixels == o.screenLod1Pixels &&
+                screenLod2Pixels == o.screenLod2Pixels && shadowDistance == o.shadowDistance &&
+                farShadowDistance == o.farShadowDistance && shadowFadeWidth == o.shadowFadeWidth &&
+                shadowLod == o.shadowLod && farObjects == o.farObjects;
+        }
+    };
     std::string layerName = "Objects";
     // Distances are measured from the viewer to each object tile's center.
     // LOD 0 ends at lod1Distance; LOD 1 ends at lod2Distance; LOD 2
@@ -77,6 +103,10 @@ public:
     // object eraser leaves the layer alone unless a prefab is chosen.
     // Layers saved before the flag existed get it from their name.
     bool snapToGround = false;
+    // Whether TerrainManager's far blocks draw this layer's placements (as
+    // their last detail level) beyond the loaded cells. Off for small things
+    // that only matter near (a forest edge's shrubs, under the far trees).
+    bool farObjects = true;
     float screenLod1Pixels = 300.f, screenLod2Pixels = 80.f;
     float screenLodHysteresis = .1f;
     float shadowDistance = 8.f;

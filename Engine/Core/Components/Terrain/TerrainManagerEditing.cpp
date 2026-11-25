@@ -1,5 +1,6 @@
 #include "Core/Rendering/DetailBudget.h"
 #include "TerrainManager.h"
+#include "Core/Brushes/BrushPreset.h"
 #include "TerrainObjectLayer.h"
 #include "TerrainSurfaceSample.h"
 #include "Core/Scene/Object.h"
@@ -99,11 +100,12 @@ void TerrainManager::RestoreObjectLayers(Cell cell,
             }
         child->layer = Engine::Rendering::DetailBudget::Get().FindLayerOrDefault(preferredLayer);
         if (m_objectLayerSetup) m_objectLayerSetup(cell, *layer);
+        // The layer name's settings (the editor's) win over the setup's.
+        ApplyObjectLayerSettings(*layer);
     };
-    if (const auto found = m_objectLayers.find(cell);
-        found != m_objectLayers.end())
+    if (JsonValue savedLayers; GetSavedObjectLayers(cell, savedLayers))
     {
-        const JsonValue& layers = found->second;
+        const JsonValue& layers = savedLayers;
         for (size_t i = 0; i < layers.ArraySize(); ++i)
         {
             const JsonValue& saved = layers.ArrayAt(i);
@@ -220,21 +222,17 @@ void TerrainManager::Stitch(Cell cell)
                 else changed = true;
             }
         }
+        // Stitching matches the loaded copies' borders, again on every
+        // load: a procedural cell is not edited by it (its saved edits stay
+        // as the user made them, and play never writes them). Authored cells
+        // keep the scene's copy in step.
         if (neighborChanged)
         {
             anyChanged = true;
             neighbor->Rebuild();
             neighbor->MarkConfigurationDirty();
-            if (m_proceduralCells.count(neighborCell) && !cellDataDirectory.empty())
-            {
-                m_editedProcedural.insert(neighborCell);
-                m_dirtyProceduralEdits.insert(neighborCell);
-            }
-            else
-            {
-                m_proceduralCells.erase(neighborCell);
+            if (!m_proceduralCells.count(neighborCell))
                 m_cells[neighborCell] = neighbor->Serialize();
-            }
         }
     }
     if (changed)
@@ -242,16 +240,8 @@ void TerrainManager::Stitch(Cell cell)
         anyChanged = true;
         terrain->Rebuild();
         terrain->MarkConfigurationDirty();
-        if (m_proceduralCells.count(cell) && !cellDataDirectory.empty())
-        {
-            m_editedProcedural.insert(cell);
-            m_dirtyProceduralEdits.insert(cell);
-        }
-        else
-        {
-            m_proceduralCells.erase(cell);
+        if (!m_proceduralCells.count(cell))
             m_cells[cell] = terrain->Serialize();
-        }
     }
     if (anyChanged) MarkConfigurationDirty();
 }
@@ -369,6 +359,14 @@ bool TerrainManager::ApplyBrush(double x, double z, float radius, float strength
         if (auto* terrain = GetLoadedCell(cell.first, cell.second))
         {
             Terrain::BrushOptions cellOptions = options;
+            if (options.rules && options.rules->trailClearance > 0.f && !cellOptions.trailDistance)
+            {
+                const float originX = float(cell.first * double(cellsX) * cellWidth);
+                const float originZ = float(cell.second * double(cellsY) * cellDepth);
+                cellOptions.trailDistance = [this, originX, originZ](float x, float z, float height) {
+                    return ContourPathDistance(originX + x, originZ + z, height);
+                };
+            }
             if (backingCells)
                 cellOptions.backingHeight = [this, backingCells, cell, spanX, spanZ](
                     float localX, float localZ, float& height)

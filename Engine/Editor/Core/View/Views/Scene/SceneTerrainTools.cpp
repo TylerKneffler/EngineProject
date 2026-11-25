@@ -56,8 +56,24 @@ std::vector<Terrain*> CellsUnder(const SceneTerrainTools::Target& target,
 // ground-conforming layer such as grass, whose LOD and conforming settings
 // would apply to the painted objects.
 TerrainObjectLayer* LayerFor(Engine::Scene::Scene& scene, Terrain& cell,
-    const std::string& prefab)
+    const std::string& prefab, const std::string& named = {},
+    const Engine::Components::TerrainManager* manager = nullptr)
 {
+    if (!named.empty())
+    {
+        for (auto* child : cell.Owner->Children)
+            if (auto* layer = child ? child->GetComponent<TerrainObjectLayer>() : nullptr)
+                if (layer->layerName == named) return layer;
+        auto* child = scene.AddObject(named);
+        scene.MoveObject(child, cell.Owner, Engine::Scene::Scene::ObjectPlacement::AsChild);
+        child->transform.position = {0, 0, 0};
+        child->transform.rotation = {0, 0, 0};
+        child->transform.scale = {1, 1, 1};
+        auto* layer = child->AddComponent<TerrainObjectLayer>();
+        layer->layerName = named;
+        if (manager) manager->ApplyObjectLayerSettings(*layer);
+        return layer;
+    }
     TerrainObjectLayer* objectsLayer = nullptr;
     for (auto* child : cell.Owner->Children)
         if (auto* layer = child ? child->GetComponent<TerrainObjectLayer>() : nullptr)
@@ -75,7 +91,9 @@ TerrainObjectLayer* LayerFor(Engine::Scene::Scene& scene, Terrain& cell,
     child->transform.position = {0, 0, 0};
     child->transform.rotation = {0, 0, 0};
     child->transform.scale = {1, 1, 1};
-    return child->AddComponent<TerrainObjectLayer>();
+    auto* layer = child->AddComponent<TerrainObjectLayer>();
+    if (manager) manager->ApplyObjectLayerSettings(*layer);
+    return layer;
 }
 }
 
@@ -259,7 +277,7 @@ int SceneTerrainTools::Scatter(Engine::Scene::Scene& scene, const Target& target
         glm::vec3 normal;
         Terrain* cell = nullptr;
         if (!SampleSurface(target, x, z, world, normal, &cell) || !cell) continue;
-        auto* layer = LayerFor(scene, *cell, settings.prefab);
+        auto* layer = LayerFor(scene, *cell, settings.prefab, settings.layer, target.manager);
         if (!layer || !layer->Owner) continue;
         const glm::dmat4 inverse = glm::inverse(layer->Owner->transform.GetWorldMatrixD());
         TerrainObjectLayer::Placement placement;

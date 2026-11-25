@@ -20,13 +20,39 @@ void TerrainManager::ConfigureFarTerrain(int halfExtentCells,
     ClearFarTerrain();
     m_farHalfExtentCells = halfExtentCells;
     m_farHeights = std::move(heights);
-    m_farHeightsSnapshot = std::make_shared<const std::vector<float>>(m_farHeights);
-    // Edited cells' heights (the archive does not have them).
-    auto patchHeights = std::make_shared<std::map<Cell, std::vector<float>>>();
-    for (auto& patch : patches) (*patchHeights)[{patch.x, patch.y}] = std::move(patch.heights);
-    m_farPatchHeights = std::move(patchHeights);
     m_farHeightArchivePath = std::move(heightArchivePath);
     m_farSourceSignature = sourceSignature;
+    // Edited cells' heights (the archive does not have them): the far grid's
+    // own patches, then every cell with saved height edits, as the near
+    // cells have it (the field's seed: the source's heights plus the edits),
+    // so far tiles and the corner grid (long range shadows) show the edits.
+    auto patchHeights = std::make_shared<std::map<Cell, std::vector<float>>>();
+    for (auto& patch : patches) (*patchHeights)[{patch.x, patch.y}] = std::move(patch.heights);
+    if (const auto field = GetTerrainField())
+    {
+        const int side = m_farHalfExtentCells * 2 + 2;
+        const size_t expected = static_cast<size_t>(cellsX + 1) * (cellsY + 1);
+        const auto setCorner = [&](int x, int y, float height) {
+            const int gx = x + m_farHalfExtentCells, gy = y + m_farHalfExtentCells;
+            if (gx >= 0 && gy >= 0 && gx < side && gy < side &&
+                m_farHeights.size() == static_cast<size_t>(side) * side)
+                m_farHeights[static_cast<size_t>(gy) * side + gx] = height;
+        };
+        for (const Cell cell : m_editedProcedural)
+        {
+            if (std::abs(cell.first) > m_farHalfExtentCells ||
+                std::abs(cell.second) > m_farHalfExtentCells || patchHeights->count(cell)) continue;
+            const auto seed = field->SeedHeights(cell);
+            if (!seed || seed->size() != expected) continue;
+            (*patchHeights)[cell] = *seed;
+            setCorner(cell.first, cell.second, seed->front());
+            setCorner(cell.first + 1, cell.second, (*seed)[static_cast<size_t>(cellsX)]);
+            setCorner(cell.first, cell.second + 1, (*seed)[static_cast<size_t>(cellsY) * (cellsX + 1)]);
+            setCorner(cell.first + 1, cell.second + 1, seed->back());
+        }
+    }
+    m_farHeightsSnapshot = std::make_shared<const std::vector<float>>(m_farHeights);
+    m_farPatchHeights = std::move(patchHeights);
     m_farPalette = std::move(palette);
     m_farPaletteShared = std::make_shared<const FarTerrainPalette>(m_farPalette);
     m_farEnabled = true;

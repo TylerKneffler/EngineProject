@@ -115,6 +115,8 @@ GrassField::GrassField()
     RegisterField("minimumRadiusScale", minimumRadiusScale, "Viewer");
     RegisterField("perPlantDetail", perPlantDetail, "LOD");
     RegisterField("fineReachFraction", fineReachFraction, "LOD");
+    // GPU blades (GrassBlades.h): falls back to mesh grass where they are off.
+    RegisterField("gpuBlades", gpuBlades, "LOD");
     RegisterField("tileSize", tileSize, "Tiles");
     RegisterField("shortPatchesPerSquareMeter", shortPatchesPerSquareMeter, "Tiles");
     RegisterField("tallPatchesPerSquareMeter", tallPatchesPerSquareMeter, "Tiles");

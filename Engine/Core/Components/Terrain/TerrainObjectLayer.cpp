@@ -25,6 +25,7 @@ TerrainObjectLayer::TerrainObjectLayer()
     RegisterField("distanceLodOverride", distanceLodOverride, "Object LOD");
     RegisterField("conformToGround", conformToGround, "Placement");
     RegisterField("snapToGround", snapToGround, "Placement");
+    RegisterField("farObjects", farObjects, "Placement");
     RegisterField("screenLod1Pixels", screenLod1Pixels, "Object LOD");
     RegisterField("screenLod2Pixels", screenLod2Pixels, "Object LOD");
     RegisterField("screenLodHysteresis", screenLodHysteresis, "Object LOD");
@@ -244,20 +245,23 @@ template<class T> void AppendBytes(std::vector<uint8_t>& out,const T& value)
 std::string EncodePackedPlacements(
     const std::vector<TerrainObjectLayer::Placement>& placements)
 {
+    // The table lists the assets in index order (first appearance), which is
+    // how the reader numbers them. Before 2026-11-25 it was written in name
+    // order, so any layer with assets first met out of name order read back
+    // with its species swapped (baked forests drew rocks for bushes).
     std::map<std::string, uint32_t> assetIds;
+    std::vector<const std::string*> assetOrder;
     for (const auto& placement : placements)
-        if (!assetIds.count(placement.asset))
-            assetIds.emplace(placement.asset,
-                static_cast<uint32_t>(assetIds.size()));
+        if (assetIds.emplace(placement.asset, static_cast<uint32_t>(assetIds.size())).second)
+            assetOrder.push_back(&placement.asset);
     std::vector<uint8_t> bytes;
     AppendBytes(bytes, uint32_t(0x31504c54));
     AppendBytes(bytes, static_cast<uint32_t>(placements.size()));
-    AppendBytes(bytes, static_cast<uint32_t>(assetIds.size()));
-    for (const auto& [asset, index] : assetIds)
+    AppendBytes(bytes, static_cast<uint32_t>(assetOrder.size()));
+    for (const std::string* asset : assetOrder)
     {
-        (void)index;
-        AppendBytes(bytes, static_cast<uint32_t>(asset.size()));
-        bytes.insert(bytes.end(), asset.begin(), asset.end());
+        AppendBytes(bytes, static_cast<uint32_t>(asset->size()));
+        bytes.insert(bytes.end(), asset->begin(), asset->end());
     }
     for (const auto& placement : placements)
     {
@@ -414,6 +418,7 @@ TerrainObjectLayer::JsonValue TerrainObjectLayer::Serialize() const
     out.Set("bakedInstances",JsonValue(std::move(baked)));
     out.Set("layerName", JsonValue(layerName));
     out.Set("conformToGround", JsonValue(conformToGround));
+    out.Set("farObjects", JsonValue(farObjects));
     out.Set("snapToGround", JsonValue(snapToGround));
     JsonValue lodEntries = JsonValue::MakeArray(objectLods.size());
     for (const auto& [asset, settings] : objectLods)
@@ -478,6 +483,7 @@ void TerrainObjectLayer::Deserialize(const JsonValue& value)
     layerName = value.Has("layerName") ? value["layerName"].AsString() : "Objects";
     conformToGround = value.Has("conformToGround") &&
         value["conformToGround"].AsBool();
+    farObjects = !value.Has("farObjects") || value["farObjects"].AsBool();
     {
         const std::string name = value.Has("layerName") ? value["layerName"].AsString() : layerName;
         snapToGround = value.Has("snapToGround") ? value["snapToGround"].AsBool()
@@ -557,6 +563,7 @@ void TerrainObjectLayer::InstallPrepared(TerrainObjectLayer&& source)
     screenLodSelection = source.screenLodSelection;
     distanceLodOverride = source.distanceLodOverride;
     conformToGround = source.conformToGround;
+    farObjects = source.farObjects;
     snapToGround = source.snapToGround;
     screenLod1Pixels = source.screenLod1Pixels;
     screenLod2Pixels = source.screenLod2Pixels;

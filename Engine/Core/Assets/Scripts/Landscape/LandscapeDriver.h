@@ -1,14 +1,16 @@
 #pragma once
+#include "Core/Components/Terrain/TerrainPaintArchive.h"
 #include "Core/Components/Script.h"
 #include "Core/Components/PropertyMacros.h"
 #include "Core/Components/Terrain/TerrainHeightArchive.h"
+#include "Core/Components/Terrain/TerrainManager.h"
 #include <cstdint>
 #include <glm/glm.hpp>
+#include <functional>
 #include <future>
 #include <string>
 #include <vector>
 
-namespace Engine::Components { class TerrainManager; }
 
 // Drives the landscape demo map (mountains, forests, lake basins) on a
 // TerrainManager. The map is a height archive written by
@@ -29,6 +31,10 @@ public:
     int mapHalfExtentCells = 20;
     PROPERTY(Inspector, EditAnywhere, Category = "Landscape")
     std::string heightArchive = "Assets/TerrainData/Landscape/world.heights";
+    // The map's baked material paint (TerrainPaintArchive, BakePaint): the
+    // ground's paint as loaded; hand paint goes on top.
+    PROPERTY(Inspector, EditAnywhere, Category = "Landscape")
+    std::string paintArchive = "Assets/TerrainData/Landscape/world.paint";
     PROPERTY(Inspector, EditAnywhere, Category = "Landscape")
     std::string farGrid = "Assets/TerrainData/Landscape/world.fargrid";
     PROPERTY(Inspector, EditAnywhere, Category = "Landscape")
@@ -50,51 +56,20 @@ public:
     // scale it with the map's relief.
     PROPERTY(Inspector, EditAnywhere, Category = "Landscape", ClampMin = "0.1", ClampMax = "50")
     float altitudeBlend = 1.f;
-    // Trees tried per fully forested 128 m cell.
-    PROPERTY(Inspector, EditAnywhere, Category = "Landscape", ClampMin = "0", ClampMax = "600")
-    int treesPerCell = 220;
     PROPERTY(Inspector, EditAnywhere, Category = "Landscape")
     std::string forestLayerName = "Landscape forest";
     PROPERTY(Inspector, EditAnywhere, Category = "Landscape", ClampMin = "4", ClampMax = "80")
     float grassRadius = 26.f;
-    // Terrain object layer (listed in the TerrainManager) that receives
-    // rocks, fallen logs and bushes; empty disables props. A non-empty
-    // undergrowthLayerName moves the bushes to a layer of their own, at the
-    // cost of one more layer per cell.
-    PROPERTY(Inspector, EditAnywhere, Category = "Landscape")
-    std::string propsLayerName = "Landscape props";
-    PROPERTY(Inspector, EditAnywhere, Category = "Landscape")
-    std::string undergrowthLayerName;
-    // Multiplier on rock, log and bush attempts per cell.
-    PROPERTY(Inspector, EditAnywhere, Category = "Landscape", ClampMin = "0", ClampMax = "4")
-    float propsDensity = 1.f;
     // A flat water plane at waterLevel over the whole map fills the lakes.
     PROPERTY(Inspector, EditAnywhere, Category = "Water")
     bool enableWater = true;
     PROPERTY(Inspector, EditAnywhere, Category = "Water")
     std::string waterMaterial = "Engine/Core/Assets/Materials/Water/LakeWater.material";
     // Macro color map for distant terrain (TerrainManager::macroColorMap):
-    // the near paint at 16 m, shaped by the generator's erosion maps.
+    // the cells' paint (baked, then hand paint) at 16 m, with the canopy of
+    // the saved trees.
     PROPERTY(Inspector, EditAnywhere, Category = "Macro color")
     bool enableMacroColors = true;
-    PROPERTY(Inspector, EditAnywhere, Category = "Macro color")
-    std::string flowMap = "Assets/TerrainData/Landscape/world.flow";
-    PROPERTY(Inspector, EditAnywhere, Category = "Macro color")
-    std::string depositionMap = "Assets/TerrainData/Landscape/world.deposition";
-    // Valley floors and streams (high erosion flow) turn a deeper green.
-    PROPERTY(Inspector, EditAnywhere, Category = "Macro color", ClampMin = "0", ClampMax = "1")
-    float macroLushness = .6f;
-    // Normalized (log) flow where the lush tint begins; streams reach 1.
-    PROPERTY(Inspector, EditAnywhere, Category = "Macro color", ClampMin = "0", ClampMax = "1")
-    float macroFlowThreshold = .55f;
-    // Sediment fans below rock (deposition) show as pale scree.
-    PROPERTY(Inspector, EditAnywhere, Category = "Macro color", ClampMin = "0", ClampMax = "1")
-    float macroScree = .6f;
-    PROPERTY(Inspector, EditAnywhere, Category = "Macro color", ClampMin = "0.1", ClampMax = "100")
-    float macroScreeDepth = 6.f;
-    // Steep slopes that carry a lot of water are scoured to bare rock.
-    PROPERTY(Inspector, EditAnywhere, Category = "Macro color", ClampMin = "0", ClampMax = "1")
-    float macroGullyRock = .5f;
     PROPERTY(Inspector, EditAnywhere, Category = "Macro color", ClampMin = "0.1", ClampMax = "2")
     float macroBrightness = .85f;
 
@@ -117,6 +92,15 @@ private:
     uint64_t SourceSignature() const;
     // Registers the macro color composer with the TerrainManager.
     void RegisterMacroColors(Engine::Components::TerrainManager& manager);
+    // Recomposes edited cells of the macro map from the terrain as it is
+    // (TerrainManager::MacroColorSource::makeCellUpdate): heights from the
+    // field (sculpts and volume edits), rock class from the surface where it
+    // left the archive, the cells' erosion and hand paint, and the trees
+    // around them for the canopy.
+    std::function<std::vector<Engine::Components::TerrainManager::MacroColorPatch>()>
+    MakeMacroCellUpdate(Engine::Components::TerrainManager& manager,
+        const std::vector<std::pair<int, int>>& cells,
+        const Engine::Components::TerrainManager::MacroColorImage& map);
     uint64_t MacroColorRevision() const;
     // Creates, updates or removes the lake water plane.
     void UpdateWater();
@@ -124,6 +108,8 @@ private:
     uint64_t m_waterSignature = 0;
     std::future<FarGridLoad> m_farLoad;
     uint64_t m_configuredSignature = 0;
+    // The baked paint (paintArchive), opened by ConfigureTerrain.
+    std::shared_ptr<const Engine::Components::TerrainPaintArchive> m_paint;
     bool m_previewLoaded = false;
     bool m_farAttempted = false;
     bool m_farDataReady = false;

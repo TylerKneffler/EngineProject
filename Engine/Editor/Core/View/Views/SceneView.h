@@ -8,6 +8,7 @@
 #include "Core/Rendering/SceneRenderer.h"
 #include "Core/Components/Terrain/Terrain.h"
 #include "Core/Components/Terrain/TerrainRegionEdit.h"
+#include "Core/Brushes/BrushPreset.h"
 #include "Core/ProjectLoader.h"
 #include "Engine/Editor/Core/Gizmos/EditorGizmoSystem.h"
 #include "Scene/SceneViewportToolbar.h"
@@ -188,18 +189,44 @@ private:
     bool m_volumeStroke = false;
     glm::dvec3 m_volumeLast{0.0};
     float m_volumeLedgeHeight = 0.f;
-    // Brush shape for Raise, Lower, Smooth, Flatten, Paint and Stamp: a .stamp
-    // asset path (TerrainBrushShape), or empty for the round brush.
-    std::string m_terrainShapePath;
+    // The terrain brush (a .brush asset) for Raise, Lower, Smooth, Flatten,
+    // Paint, Objects and Stamp, or empty for the round brush: its tip shapes
+    // the stroke (TerrainBrushShape), its relief is what Stamp builds, its
+    // rules limit where strokes act, its pressure and scatter settings vary
+    // each dab, and a Place brush's placement drives the Objects tool.
+    std::string m_terrainBrushPath;
+    Engine::Brushes::BrushPreset m_terrainBrushPreset;
+    bool m_terrainBrushLoaded = false;
+    std::string m_terrainBrushError;
+    long long m_terrainBrushStamp = 0;
+    // The round brush's falloff past the hardness (0 hard, 1 linear, 2 smooth).
+    int m_terrainFalloff = 2;
     float m_terrainShapeYawDegrees = 0.f;
-    // Stamp: build only against terrain behind the stamp (BrushOptions::backed).
+    // Stamp: build only against terrain behind the shape (BrushOptions::backed).
     bool m_terrainStampBacked = true;
     // Stamp: grows to its own surface (BrushOptions::stopAtStamp), heights times this.
     float m_terrainStampHeightScale = 1.f;
-    std::vector<std::string> m_terrainStampAssets;
+    std::vector<std::string> m_terrainBrushAssets;
     bool ShapedTerrainTool() const
-    { return m_terrainBrush <= kPaintBrush || m_terrainBrush == kStampTool; }
+    { return m_terrainBrush <= kObjectBrush || m_terrainBrush == kStampTool; }
     void DrawTerrainShapeToolbar(const std::function<bool(float)>& next);
+    // Loads the brush (empty path: the round brush). applySettings: also take
+    // its hardness, falloff, rotation, relief's backing, and its tool and
+    // paint layer (a Paint brush switches to Paint on its layer, a Place
+    // brush to Objects, a relief brush to Stamp).
+    void SelectTerrainBrush(const std::string& path, bool applySettings);
+    const Engine::Brushes::BrushRules* TerrainBrushRules() const
+    {
+        return m_terrainBrushLoaded && m_terrainBrushPreset.terrain.rules.Any()
+            ? &m_terrainBrushPreset.terrain.rules : nullptr;
+    }
+    bool TerrainBrushPlaces() const
+    { return m_terrainBrushLoaded && m_terrainBrushPreset.terrain.placement.Any(); }
+    // A dab's pen pressure (radius and strength factors, from the brush's
+    // pressure settings) and its centre moved by the brush's scatter.
+    float TerrainBrushPressureSize() const;
+    float TerrainBrushPressureStrength() const;
+    glm::dvec3 ScatterTerrainDab(const glm::dvec3& local, float radius);
     // Settings of the region-operation brushes (one set, read per tool).
     Engine::Components::TerrainRegionOperation m_brushOperation;
     uint32_t m_brushSeed = 1;
@@ -215,6 +242,7 @@ private:
     // Operations: see kRegionOperations in SceneView.cpp.
     int m_regionOperation = 0;
     static constexpr int kRegionPaint = 7;
+    static constexpr int kRegionPlace = 8;
     static Engine::Components::TerrainRegionOperation::Kind RegionOperationKind(int operation);
     // Settings widgets for one operation (index into kRegionOperations);
     // brush mode hides settings that only make sense for a committed region.
@@ -250,6 +278,9 @@ private:
     float m_terrainStrength = .25f;
     bool m_editTerrainCells = false;
     std::string m_terrainObjectPrefab;
+    // Objects tool: the object layer painted into (and thinned); empty: the
+    // layer already holding the prefab, else "Objects".
+    std::string m_terrainObjectLayer;
     bool m_terrainAlignObjects = true;
     // Sculpt brushes: tilt surface-aligned placements to the reshaped ground.
     bool m_terrainRealignObjects = false;

@@ -102,7 +102,9 @@ std::vector<TerrainObjectLayer::Placement> FarPlacements(
     std::vector<TerrainObjectLayer::Placement> result;
     Engine::Core::Object terrainObject;
     auto* terrain = terrainObject.AddComponent<Terrain>();
-    if (input.hasSavedTerrain) terrain->Deserialize(input.savedTerrain);
+    const bool needsCell = inputs.generator || inputs.snapToFarSurface;
+    if (!needsCell) {}
+    else if (input.hasSavedTerrain) terrain->Deserialize(input.savedTerrain);
     else if (inputs.builder)
     {
         terrain->Resize(inputs.cellsX, inputs.cellsY, inputs.cellWidth, inputs.cellDepth);
@@ -144,8 +146,9 @@ std::vector<TerrainObjectLayer::Placement> FarPlacements(
             if (inputs.field && inputs.field->HasEdits(input.cell)) context.field = inputs.field;
             inputs.generator(context, name, *layer);
         }
-        // Ground cover (grass) has its own reach and no far representation.
-        if (layer->conformToGround || layer->snapToGround) continue;
+        // Ground cover (grass) has its own reach and no far representation;
+        // layers kept near (farObjects off) neither.
+        if (layer->conformToGround || layer->snapToGround || !layer->farObjects) continue;
         // Layers that fade out inside the loaded cells (rocks, logs, bushes)
         // can never show in a far cell.
         if (layer->viewDistance <= inputs.nearReach) continue;
@@ -618,9 +621,7 @@ void TerrainManager::UpdateFarObjects(int centerX, int centerY)
                     input.hasSavedTerrain = true;
                     input.savedTerrain = saved->second;
                 }
-                if (const auto layers = m_objectLayers.find(input.cell);
-                    layers != m_objectLayers.end())
-                    input.savedLayers = layers->second;
+                GetSavedObjectLayers(input.cell, input.savedLayers);
                 job.cells.push_back(input.cell);
                 m_farObjectPending.insert(input.cell);
                 batch.push_back(std::move(input));

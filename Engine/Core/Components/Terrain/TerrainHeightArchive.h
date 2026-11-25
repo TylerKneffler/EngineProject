@@ -35,8 +35,9 @@ struct FarPatch
     std::vector<float> colors;
 };
 
-// Read only the sculpt portion of a sparse terrain edit. Paint weights do not
-// affect the distant silhouette.
+// Read only the sculpt portion of a sparse terrain edit (.terrainedit, see
+// TerrainManager::SaveEdit). Paint weights do not affect the distant
+// silhouette; version 2's erosion entries are skipped.
 inline bool ApplyEditSurface(const std::string& path, int cellsX, int cellsY,
     std::vector<float>& heights, std::vector<float>* weights = nullptr,
     uint32_t expectedLayers = 0)
@@ -48,7 +49,7 @@ inline bool ApplyEditSurface(const std::string& path, int cellsX, int cellsY,
     const size_t sampleCount = static_cast<size_t>(cellsX + 1) * (cellsY + 1);
     if (!file || heights.size() != sampleCount ||
         !Read(file, magic) || magic != 0x31544944454e5254ull ||
-        !Read(file, version) || version != 1 ||
+        !Read(file, version) || version < 1 || version > 3 ||
         !Read(file, x) || x != static_cast<uint32_t>(cellsX) ||
         !Read(file, y) || y != static_cast<uint32_t>(cellsY) ||
         !Read(file, layers) || layers > 6 ||
@@ -76,6 +77,14 @@ inline bool ApplyEditSurface(const std::string& path, int cellsX, int cellsY,
                     weight;
         }
     }
+    if (version == 2)
+    {
+        uint32_t erosionCount = 0;
+        if (!Read(file, erosionCount) || erosionCount > sampleCount) return false;
+        // index, flow, deposition
+        file.seekg(static_cast<std::streamoff>(erosionCount) * 12, std::ios::cur);
+        if (!file) return false;
+    }
     char trailing = 0;
     return !file.read(&trailing, 1) && file.eof();
 }
@@ -84,6 +93,55 @@ inline bool ApplyEditHeights(const std::string& path, int cellsX, int cellsY,
     std::vector<float>& heights)
 {
     return ApplyEditSurface(path, cellsX, cellsY, heights);
+}
+
+// Everything a sparse terrain edit holds, as stored: for tools that need a
+// cell's edits without loading the cell (a macro color patch).
+struct EditEntries
+{
+    uint32_t layers = 0;
+    std::vector<std::pair<uint32_t, float>> heights;
+    std::vector<std::pair<uint32_t, std::vector<float>>> weights;   // `layers` each
+};
+inline bool ReadEditEntries(const std::string& path, int cellsX, int cellsY, EditEntries& entries)
+{
+    entries = {};
+    std::ifstream file(path, std::ios::binary);
+    uint64_t magic = 0;
+    uint32_t version = 0, x = 0, y = 0, heightCount = 0, weightCount = 0;
+    const size_t sampleCount = static_cast<size_t>(cellsX + 1) * (cellsY + 1);
+    if (!file || !Read(file, magic) || magic != 0x31544944454e5254ull ||
+        !Read(file, version) || version < 1 || version > 3 ||
+        !Read(file, x) || x != static_cast<uint32_t>(cellsX) ||
+        !Read(file, y) || y != static_cast<uint32_t>(cellsY) ||
+        !Read(file, entries.layers) || entries.layers > 6 ||
+        !Read(file, heightCount) || heightCount > sampleCount ||
+        !Read(file, weightCount) || weightCount > sampleCount) return false;
+    for (uint32_t n = 0; n < heightCount; ++n)
+    {
+        std::pair<uint32_t, float> entry;
+        if (!Read(file, entry.first) || entry.first >= sampleCount ||
+            !Read(file, entry.second) || !std::isfinite(entry.second)) return false;
+        entries.heights.push_back(entry);
+    }
+    for (uint32_t n = 0; n < weightCount; ++n)
+    {
+        std::pair<uint32_t, std::vector<float>> entry;
+        entry.second.resize(entries.layers);
+        if (!Read(file, entry.first) || entry.first >= sampleCount) return false;
+        for (float& weight : entry.second) if (!Read(file, weight)) return false;
+        entries.weights.push_back(std::move(entry));
+    }
+    // Version 2's erosion entries (index, flow, deposition): skipped.
+    if (version == 2)
+    {
+        uint32_t erosionCount = 0;
+        if (!Read(file, erosionCount) || erosionCount > sampleCount) return false;
+        file.seekg(static_cast<std::streamoff>(erosionCount) * 12, std::ios::cur);
+        if (!file) return false;
+    }
+    char trailing = 0;
+    return !file.read(&trailing, 1) && file.eof();
 }
 
 inline uint64_t ExpectedBytes(int extent, int cellsX, int cellsY)
@@ -272,12 +330,12 @@ inline bool ReadSignature(const std::string& path, int expectedExtent,
 {
     std::ifstream file(path, std::ios::binary);
     Layout layout;
-    if (!ReadLayout(file, layout, 0, expectedExtent, expectedX, expectedY) ||
-        !layout.signature) return false;
-    file.close();
-    std::error_code error;
-    if (std::filesystem::file_size(path, error) != layout.TotalBytes() || error)
+    if (!ReadLayout(file, layout, 0, expectedExtent, expectedX, expectedY) || !layout.signature)
         return false;
+    // The size check: the file ends after the last cell.
+    file.clear();
+    file.seekg(0, std::ios::end);
+    if (static_cast<uint64_t>(file.tellg()) != layout.TotalBytes()) return false;
     signature = layout.signature;
     return true;
 }

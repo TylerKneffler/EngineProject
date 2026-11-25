@@ -152,8 +152,16 @@ std::shared_ptr<TerrainManager::FarVolumeMesh> TerrainManager::BuildFarVolumeNod
     if (!volume) return result;
     std::vector<Mesh::Vertex> surface;
     std::vector<uint32_t> indices;
-    MeshSurfaceNets(*volume, volume->interiorFirst, volume->InteriorCells(), 1,
-        2.f * spacing, surface, indices);
+    // Every side ends on the node's face (no neighbouring block), its border
+    // vertices placed from the face's own crossings: a loaded cell beside it
+    // meshes its border at this spacing and puts its vertices at the same
+    // points. Skirts under the edges cover joins to nodes of other sizes.
+    SurfaceNetsSeams seams;
+    seams.strides.fill(0);
+    seams.strides[13] = 1;
+    seams.alignment = volume->interiorFirst;
+    seams.skirt = 2.f * spacing;
+    MeshSurfaceNets(*volume, volume->interiorFirst, volume->InteriorCells(), 1, seams, surface, indices);
 
     // Occluder first: the node's 128 m corner grid (two triangles a cell).
     auto& mesh = result->geometry;

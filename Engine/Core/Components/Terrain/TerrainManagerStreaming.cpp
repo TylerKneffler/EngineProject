@@ -381,11 +381,10 @@ void TerrainManager::StreamCells(int centerX, int centerY, int initialRadius)
             task.edited = m_editedProcedural.count(cell) != 0;
             task.editPath = GetEditFilePath(cell);
             std::set<std::string> layerNames;
-            if (const auto found = m_objectLayers.find(cell);
-                found != m_objectLayers.end())
-                for (size_t i = 0; i < found->second.ArraySize(); ++i)
+            if (JsonValue saved; GetSavedObjectLayers(cell, saved))
+                for (size_t i = 0; i < saved.ArraySize(); ++i)
                 {
-                    const auto& savedLayer = found->second.ArrayAt(i);
+                    const auto& savedLayer = saved.ArrayAt(i);
                     const auto name = savedLayer["layerName"].AsString();
                     if (!name.empty() && layerNames.insert(name).second)
                         task.objectLayers.emplace_back(name, savedLayer);

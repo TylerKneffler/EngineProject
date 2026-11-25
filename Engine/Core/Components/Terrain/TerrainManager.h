@@ -10,6 +10,7 @@
 #include <climits>
 #include <map>
 #include <array>
+#include <limits>
 #include <set>
 #include <functional>
 #include <utility>
@@ -223,12 +224,29 @@ public:
         // RGBA8, xyz * 0.5 + 0.5), same mip chain. Distant tiles are lit per
         // pixel with them, so their 128 m triangles shade like the 16 m terrain.
         std::vector<uint8_t> normalMips;
+        // The samples it was encoded from (normals may be empty), kept so
+        // edited cells can be recomposed without a whole build.
+        std::shared_ptr<const std::vector<glm::vec4>> linear;
+        std::shared_ptr<const std::vector<glm::vec3>> normals;
     };
     // Encodes linear RGB + alpha samples (rows along +Z), and optional unit
     // normals, into a MacroColorImage.
     static MacroColorImage EncodeMacroColorImage(int width, int height,
         float originX, float originZ, float spacing, const std::vector<glm::vec4>& linear,
         const std::vector<glm::vec3>* normals = nullptr);
+    // New samples for a rectangle of a map (a cell's, after an edit): x0, y0
+    // the first sample, colors and normals (optional) width * height each,
+    // rows along +Z.
+    struct MacroColorPatch
+    {
+        int x0 = 0, y0 = 0, width = 0, height = 0;
+        std::vector<glm::vec4> colors;
+        std::vector<glm::vec3> normals;
+    };
+    // The image with the patches written over its samples, encoded again.
+    // Patches outside the map are clipped. Empty when `image` keeps no samples.
+    static MacroColorImage PatchMacroColorImage(const MacroColorImage& image,
+        const std::vector<MacroColorPatch>& patches);
     struct MacroColorSource
     {
         // Cheap fingerprint of the inputs, polled on the scene thread.
@@ -236,7 +254,21 @@ public:
         // Snapshots the inputs (scene thread) and returns the build, which
         // runs on a worker.
         std::function<std::function<MacroColorImage()>()> makeBuild;
+        // Optional: recomposes the samples of edited cells from the terrain
+        // as it is now (sculpts, volume edits, paint, erosion). Called on the
+        // scene thread with the cells and the current map; returns the job
+        // (run on a worker) that gives their patches. Without it, edits show
+        // at the next whole build.
+        std::function<std::function<std::vector<MacroColorPatch>()>(
+            const std::vector<Cell>& cells, const MacroColorImage& map)> makeCellUpdate;
     };
+    // Cells whose macro colors wait for recomposing (MacroColorSource::
+    // makeCellUpdate): every edit marks its cell and the eight around it
+    // (slopes and tree crowns reach across), and a whole build marks the
+    // edited cells, which it reads from the source as generated.
+    std::vector<Cell> GetMacroDirtyCells() const
+    { return {m_macroDirtyCells.begin(), m_macroDirtyCells.end()}; }
+    void MarkMacroCellsDirty(Cell cell);
     // Registers (or with an empty source, removes) the composer. Rebuilds
     // whenever its revision changes, also in the editor.
     void SetMacroColorSource(MacroColorSource source);
@@ -356,6 +388,37 @@ public:
     const std::vector<std::string>& GetObjectLayerNames() const
     { return m_objectLayerNames; }
     bool AddObjectLayer(const std::string& name);
+    // Object layer settings by layer name (view, LOD and shadow distances),
+    // saved with the scene. A layer made in a cell (painting, a new name)
+    // takes them; setting them applies to every loaded cell's layer of that
+    // name. Null when the name has none (the layer keeps its own).
+    const TerrainObjectLayer::Settings* GetObjectLayerSettings(const std::string& name) const;
+    void SetObjectLayerSettings(const std::string& name, const TerrainObjectLayer::Settings& settings);
+    void ApplyObjectLayerSettings(TerrainObjectLayer& layer) const;
+    // Object placements of procedural cells (TerrainManager::cellDataDirectory
+    // set) live in one file per cell, <dir>/<x>_<z>.objects, written only
+    // when a cell's layers differ from what it loaded with (painted,
+    // erased, moved by sculpting); untouched cells generate theirs again, so
+    // the scene holds none of them. Undo restores earlier revisions of the
+    // files written this session (Serialize lists each file's revision).
+    // A cell's saved layers: the scene's (authored cells), its .objects file
+    // (an edit), else its block of the object archive. False: none (layers
+    // then start empty, or a generator fills them).
+    bool GetSavedObjectLayers(Cell cell, JsonValue& layers) const;
+    // Baked object placements of procedural cells (TerrainObjectArchive, an
+    // Assets path): what a map's trees, rocks and bushes start as. A cell's
+    // .objects file wins over its block.
+    std::string objectArchive;
+    std::shared_ptr<const class TerrainObjectArchive> GetObjectArchive() const;
+    std::string GetObjectFilePath(Cell cell) const;
+    // Cells that have an .objects file.
+    const std::set<Cell>& ObjectFileCells() const;
+    // Writes the files of loaded cells whose objects changed (also done by
+    // Serialize and when a cell unloads). Returns how many were written.
+    size_t SaveObjectFiles() const;
+    // A cell's far-object placements are computed again (its saved objects
+    // changed).
+    void InvalidateFarObjectCell(Cell cell);
     bool RemoveObjectLayer(const std::string& name);
     bool AddCell(int x, int y);
     bool AddProceduralCell(int x, int y);
@@ -390,12 +453,6 @@ public:
     using ObjectLayerGenerator = std::function<void(const ObjectLayerContext&,
         const std::string& layerName, TerrainObjectLayer&)>;
     void SetObjectLayerGenerator(ObjectLayerGenerator generator);
-    // Volume cells: the painter of a cell's surface (VolumeTerrain::
-    // surfacePainter), made on the main thread whenever a cell's volume is
-    // configured; the painter itself runs on meshing workers.
-    using SurfacePainterFactory = std::function<std::shared_ptr<const std::function<void(size_t,
-        const glm::vec3*, const glm::vec3*, size_t, float*, float*)>>(Cell)>;
-    void SetSurfacePainter(SurfacePainterFactory factory) { m_surfacePainter = std::move(factory); }
     // Main thread, whenever a cell's named layer is restored: the place for
     // a scene script to attach or configure components on the layer object.
     using ObjectLayerSetup = std::function<void(Cell, TerrainObjectLayer&)>;
@@ -440,6 +497,9 @@ public:
     // footprint). Ground cover keeps off the track with it, now that the paint
     // no longer carries the path. 0 when contourPaths is off.
     float ContourPathShare(float worldX, float worldZ, float height) const;
+    // Metres from the nearest path's centre line at a position (manager
+    // space) and height; infinite where paths are off or out of their band.
+    float ContourPathDistance(float worldX, float worldZ, float height) const;
     struct FarTerrainPalette
     {
         std::array<glm::vec3, 6> farColors{};
@@ -515,6 +575,17 @@ public:
     };
     std::vector<FarLevelUsage> GetFarLevelUsage() const;
     size_t GetFarTileNodeCount() const { return m_farNodes.size(); }
+    // The far grid's height at a cell corner (NaN outside it), and whether
+    // far tiles draw a cell from its own full heights (an edited cell).
+    float GetFarCornerHeight(int x, int z) const
+    {
+        const int side = m_farHalfExtentCells * 2 + 2, gx = x + m_farHalfExtentCells,
+            gz = z + m_farHalfExtentCells;
+        return gx < 0 || gz < 0 || gx >= side || gz >= side ||
+            m_farHeights.size() != static_cast<size_t>(side) * side
+            ? std::numeric_limits<float>::quiet_NaN() : m_farHeights[static_cast<size_t>(gz) * side + gx];
+    }
+    bool HasFarPatch(Cell cell) const { return m_farPatchHeights && m_farPatchHeights->count(cell); }
     uint64_t GetFarTileUploadCount() const { return m_farTileUploadCount; }
     struct FarUpdateTiming
     {
@@ -552,7 +623,8 @@ public:
     // cell borders and shared samples stay identical.
     bool EditRegion(const TerrainRegionMask& mask, const TerrainRegionOperation& operation,
         bool realignObjects = false);
-    bool PaintRegion(const TerrainRegionMask& mask, float strength, int layer, bool erase);
+    bool PaintRegion(const TerrainRegionMask& mask, float strength, int layer, bool erase,
+        const Engine::Brushes::BrushRules* rules = nullptr);
     void SyncLoadedCells(int centerX, int centerY);
     void UpdateStreaming(int centerX, int centerY);
     void UpdateStreamingAtPosition(const glm::dvec3& worldPosition);
@@ -570,11 +642,34 @@ public:
     bool DrawProperties(Engine::Core::IInspectorUi& ui) override;
 private:
     std::map<Cell, JsonValue> m_cells;
-    std::map<Cell, JsonValue> m_objectLayers;
+    mutable std::map<Cell, JsonValue> m_objectLayers;
     std::vector<std::string> m_objectLayerNames;
     std::string m_newObjectLayerName = "Objects";
     void RestoreObjectLayers(Cell cell, Engine::Core::Object& cellObject);
     void CaptureObjectLayers(Cell cell, const Engine::Core::Object& cellObject);
+    std::map<std::string, TerrainObjectLayer::Settings> m_objectLayerSettings;
+    bool UsesObjectFiles(Cell cell) const;
+    static JsonValue CollectObjectLayers(const Engine::Core::Object& cellObject);
+    // What an edit changes in a cell's layers: names, settings and
+    // placements (asset, position, normal, yaw, scale). Not ids or prepared
+    // instance data, which the runtime fills in after a cell loads.
+    static uint64_t HashCellObjects(const Engine::Core::Object& cellObject);
+    // Remembers a freshly loaded cell's layers as its baseline (unchanged
+    // cells write no file).
+    void SetObjectBaseline(Cell cell, const Engine::Core::Object& cellObject);
+    // Writes (or with null removes) a cell's file as a new revision.
+    bool WriteObjectFile(Cell cell, const JsonValue* layers) const;
+    uint64_t ObjectFileRevision(Cell cell) const;   // 0: no file
+    // Restores files to the revisions a scene lists (undo, redo, load).
+    void RestoreObjectFiles(const JsonValue& listed);
+    mutable std::map<Cell, uint64_t> m_objectBaseline;
+    mutable std::shared_ptr<const class TerrainObjectArchive> m_objectArchive;
+    mutable std::string m_objectArchiveOpened;
+    mutable std::optional<std::set<Cell>> m_objectFileCells;
+    mutable std::map<Cell, uint64_t> m_objectFileRevisions;
+    // Scene-saved layers of file-backed cells (older scenes): written to
+    // files at the next save.
+    mutable std::set<Cell> m_objectFilesPending;
     std::set<Cell> m_proceduralCells;
     std::set<Cell> m_editedProcedural;
     mutable std::set<Cell> m_dirtyProceduralEdits;
@@ -734,6 +829,13 @@ private:
     IGraphicsProvider* m_macroProvider = nullptr;
     uint64_t m_macroRequested = 0;
     std::chrono::steady_clock::time_point m_macroChecked{};
+    std::set<Cell> m_macroDirtyCells;
+    // What the running job is: a whole build, or a patch of these cells.
+    bool m_macroJobWhole = false;
+    std::vector<Cell> m_macroJobCells;
+    // After a patch: far tiles' corner colors (FarTerrainPalette::gridColors)
+    // follow the patched cells' corner samples.
+    void UpdateFarGridColors(const std::vector<Cell>& cells);
     IGraphicsProvider* m_sunShadowProvider = nullptr;
     // Heights of the uploaded texture, and inputs of the newest request.
     std::shared_ptr<const std::vector<float>> m_sunShadowHeights;
@@ -753,7 +855,6 @@ private:
     // seed, which runs on any thread.
     struct FieldSource;
     std::shared_ptr<FieldSource> m_fieldSource;
-    SurfacePainterFactory m_surfacePainter;
     std::shared_ptr<TerrainField> m_terrainField;
     uint64_t m_terrainFieldKey = 0;
     uint64_t m_terrainFieldRevision = 1;

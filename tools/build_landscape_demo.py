@@ -3,8 +3,6 @@
 Writes
   Engine/Core/Assets/TerrainData/Landscape/world.heights      height archive (v3)
   Engine/Core/Assets/TerrainData/Landscape/world.fargrid      far silhouette grid (v3)
-  Engine/Core/Assets/TerrainData/Landscape/world.flow         erosion flow map
-  Engine/Core/Assets/TerrainData/Landscape/world.deposition   erosion deposition map
   Engine/Core/Assets/Scenes/terrain/landscape_demo.scene      the scene
 and, with --preview <png>, top-down previews: <png> colored like the terrain
 paint, plus <png stem>_flow.png and <png stem>_deposition.png.
@@ -25,18 +23,14 @@ much water passed each texel (flow) and how much sediment settled
 (deposition). Rolling hills and one rock escarpment are raised in the lowland
 after erosion, then the lakes are carved. Inside the play area the eroded
 field is resampled to 4 m and gets fine detail. The hills and the escarpment
-are not in the flow and deposition maps. Rock shapes are not placed here:
+get no erosion of their own. Rock shapes are not placed here:
 terrain stamps are brushes (the editor's Stamp tool and shaped brushes) that
 edit the height data itself, saved as sculpt edits (*.terrainedit).
 
-Flow and deposition files share one header, little endian:
-  u64 magic ("TRNRFLW1" / "TRNRDEP1"), u32 version 1, u64 archive signature,
-  i32 width, i32 height, f32 spacing (m), f32 origin x, f32 origin z (m, the
-  world position of sample 0), f32 value scale,
-followed by width*height u16 samples, rows along +z. A sample s decodes to
-  flow:       expm1(s / 65535 * scale)  droplet-steps of water through the texel
-  deposition: s / 65535 * scale         metres of net sediment laid down
-Both are on the 16 m macro grid, which spans the same area as the archive.
+The terrain's paint and its trees and props are not built here: they are
+the scene's own data (world.paint, world.objects, and the cells' edits),
+painted and placed in the editor. A rebuild of the heights leaves them as
+they were.
 
 Lakes have no water mesh of their own: basins are carved below WATER_LEVEL and
 the scene's LandscapeDriver paints them as sand beds with gravel shores and
@@ -85,8 +79,6 @@ SCALE = 16.0           # stored units per metre
 MAX_HEIGHT = 2040.0
 ARCHIVE_MAGIC = 0x31544748524E5254
 FARGRID_MAGIC = 0x314452474E525254
-FLOW_MAGIC = int.from_bytes(b"TRNRFLW1", "little")
-DEPOSITION_MAGIC = int.from_bytes(b"TRNRDEP1", "little")
 NAMESPACE = "urn:engine-components"
 
 
@@ -559,29 +551,11 @@ def write_archive(world):
     return signature, same
 
 
-def write_map(path, magic, signature, values, scale, origin):
-    encoded = np.clip(np.rint(values / scale * 65535.0), 0, 65535).astype("<u2")
-    with open(path, "wb") as file:
-        file.write(struct.pack("<QIQiiffff", magic, 1, signature, values.shape[1],
-                               values.shape[0], MACRO, origin, origin, scale))
-        file.write(encoded.tobytes())
-
-
-def write_hydrology(world, signature):
-    flow = np.log1p(world["flow"])
-    flow_scale = float(max(flow.max(), 1e-6))
-    write_map(DATA / "world.flow", FLOW_MAGIC, signature, flow, flow_scale, world["origin"])
-    deposition = world["deposition"]
-    deposition_scale = float(max(deposition.max(), 1e-6))
-    write_map(DATA / "world.deposition", DEPOSITION_MAGIC, signature, deposition,
-              deposition_scale, world["origin"])
-
-
 def unchanged_cells(previous, body):
     """Cells whose stored block in the previous archive (file bytes, or None)
     equals the new one. Empty when the two do not share a layout."""
     header = struct.Struct("<QIQiiifii")
-    if not previous or len(previous) != header.size + len(body):
+    if not previous or len(previous) < header.size + len(body):
         return set()
     if header.unpack_from(previous, 0)[3:] != (EXTENT, CELLS, CELLS, SCALE, FINE_EXTENT, COARSE):
         return set()
@@ -825,6 +799,9 @@ def write_scene(world):
             "gpuBudgetMiB": "256", "cacheBudgetMiB": "1024",
             "viewerObjectName": "Landscape Explorer",
             "cellDataDirectory": "Engine/Core/Assets/TerrainData/Landscape",
+            # Trees, rocks and bushes: baked by tools/LandscapeBake after this
+            # writes the map (the scene loads them; nothing generates them).
+            "objectArchive": "Assets/TerrainData/Landscape/world.objects",
             "runtimeBakeDirectory": "", "requireRuntimeBake": "false"}.items()})
     ET.SubElement(manager, "TerrainManager.cells")
     far_clusters = ET.SubElement(manager, "TerrainManager.farClusters")
@@ -833,7 +810,7 @@ def write_scene(world):
             "asset": f"Assets/Prefabs/Woodland/Clusters/ForestCluster_{kind}.prefab",
             "match": "/Oaks/" if kind.startswith("Oak") else "/Conifers/", "trees": "14"})
     names = ET.SubElement(manager, "TerrainManager.objectLayerNames")
-    for name in ("Landscape forest", "Procedural meadow grass", "Procedural far grass",
+    for name in ("Landscape forest", "Landscape forest edge", "Procedural meadow grass", "Procedural far grass",
                  "Procedural forest floor", "Procedural meadow bushes", "Procedural forest ferns",
                  "Landscape props"):
         ET.SubElement(names, "item").text = name
@@ -853,7 +830,6 @@ def write_scene(world):
         "LandscapeDriver.snowLine": numbers([SNOW_LINE]),
         "LandscapeDriver.treeLine": numbers([TREE_LINE]),
         "LandscapeDriver.altitudeBlend": numbers([ALTITUDE_BLEND]),
-        "LandscapeDriver.treesPerCell": "220",
         "LandscapeDriver.forestLayerName": "Landscape forest",
         "LandscapeDriver.grassRadius": "50"})
     ET.SubElement(terrain, "children")
@@ -923,10 +899,6 @@ def main():
     world = build()
     if not arguments.no_write:
         signature, same = write_archive(world)
-        write_hydrology(world, signature)
-        stale = DATA / "world.cliffs"
-        if stale.exists():
-            stale.unlink()
         remove_stale_edits(same)
         write_scene(world)
         # Eye-level foliage viewpoints next to "Vista" (reads the new archive).

@@ -86,15 +86,36 @@ TerrainManager::JsonValue TerrainManager::Serialize() const
         .Set("cacheBudgetMiB", JsonValue(cacheBudgetMiB))
         .Set("viewerObjectName", JsonValue(viewerObjectName))
         .Set("cellDataDirectory", JsonValue(cellDataDirectory))
+        .Set("objectArchive", JsonValue(objectArchive))
         .Set("runtimeBakeDirectory", JsonValue(runtimeBakeDirectory));
     out.Set("requireRuntimeBake", JsonValue(requireRuntimeBake));
     JsonValue objectLayerNames = JsonValue::MakeArray();
     for (const auto& name : m_objectLayerNames)
         objectLayerNames.Push(JsonValue(name));
     out.Set("objectLayerNames", std::move(objectLayerNames));
+    if (!m_objectLayerSettings.empty())
+    {
+        JsonValue settings = JsonValue::MakeArray();
+        for (const auto& [name, layer] : m_objectLayerSettings)
+            settings.Push(JsonValue::MakeObject().Set("name", JsonValue(name)).Set("settings", layer.Serialize()));
+        out.Set("objectLayerSettings", std::move(settings));
+    }
+    // Procedural cells' objects: their files (written now when changed),
+    // listed by revision so a snapshot can be restored (undo).
+    SaveObjectFiles();
+    if (!cellDataDirectory.empty())
+    {
+        JsonValue files = JsonValue::MakeArray();
+        for (const Cell cell : ObjectFileCells())
+            files.Push(JsonValue::MakeObject().Set("x", JsonValue(cell.first))
+                .Set("y", JsonValue(cell.second))
+                .Set("revision", JsonValue(std::to_string(ObjectFileRevision(cell)))));
+        out.Set("objectFiles", std::move(files));
+    }
     JsonValue objectLayerCells = JsonValue::MakeArray();
     for (const auto& [cell, stored] : m_objectLayers)
     {
+        if (UsesObjectFiles(cell)) continue;
         JsonValue layers = stored;
         if (const auto loaded = m_loaded.find(cell); loaded != m_loaded.end())
         {
@@ -112,7 +133,7 @@ TerrainManager::JsonValue TerrainManager::Serialize() const
                 .Set("layers", std::move(layers)));
     }
     for (const auto& [cell, loaded] : m_loaded)
-        if (!m_objectLayers.count(cell) && loaded && loaded->Owner)
+        if (!m_objectLayers.count(cell) && !UsesObjectFiles(cell) && loaded && loaded->Owner)
         {
             JsonValue layers = JsonValue::MakeArray();
             for (const auto* child : loaded->Owner->Children)
@@ -340,6 +361,7 @@ void TerrainManager::Deserialize(const JsonValue& value)
     viewerObjectName = value["viewerObjectName"].AsString();
     cellDataDirectory = value.Has("cellDataDirectory")
         ? value["cellDataDirectory"].AsString() : std::string{};
+    objectArchive = value.Has("objectArchive") ? value["objectArchive"].AsString() : std::string{};
     runtimeBakeDirectory = value.Has("runtimeBakeDirectory")
         ? value["runtimeBakeDirectory"].AsString() : std::string{};
     requireRuntimeBake = value.Has("requireRuntimeBake") &&
@@ -355,6 +377,15 @@ void TerrainManager::Deserialize(const JsonValue& value)
             m_objectLayerNames.push_back(name);
     }
     m_objectLayers.clear();
+    m_objectLayerSettings.clear();
+    const auto& layerSettings = value["objectLayerSettings"];
+    for (size_t i = 0; i < layerSettings.ArraySize(); ++i)
+    {
+        const auto& entry = layerSettings.ArrayAt(i);
+        if (!entry["name"].AsString().empty())
+            m_objectLayerSettings[entry["name"].AsString()] =
+                TerrainObjectLayer::Settings::Deserialize(entry["settings"]);
+    }
     const auto& objectLayerCells = value["objectLayerCells"];
     for (size_t i = 0; i < objectLayerCells.ArraySize(); ++i)
     {
@@ -401,6 +432,16 @@ void TerrainManager::Deserialize(const JsonValue& value)
         const Cell cell{entry["x"].AsInt(), entry["y"].AsInt()};
         if (!m_cells.count(cell)) m_proceduralCells.insert(cell);
     }
+    // Object files: the scene's revisions (undo and redo bring them back);
+    // older scenes' saved layers of file-backed cells move to files at the
+    // next save.
+    m_objectFileCells.reset();
+    m_objectFileRevisions.clear();
+    m_objectBaseline.clear();
+    m_objectFilesPending.clear();
+    for (const auto& [cell, layers] : m_objectLayers)
+        if (UsesObjectFiles(cell)) m_objectFilesPending.insert(cell);
+    if (value.Has("objectFiles")) RestoreObjectFiles(value["objectFiles"]);
     const auto& edits = value["editedCells"];
     for (size_t i = 0; i < edits.ArraySize(); ++i)
     {
@@ -555,7 +596,7 @@ bool TerrainManager::DrawProperties(Engine::Core::IInspectorUi& ui)
         ui.Tooltip("Beyond 512 m, loaded cells fade from texture detail to each layer's measured mean color.");
         changed |= ui.Checkbox("Macro color map", &macroColorMap);
         ui.Tooltip("Distant terrain colored from a map composed by the scene's terrain script "
-            "(e.g. LandscapeDriver: paint, erosion flow, scree and forest cover at 16 m). "
+            "(e.g. LandscapeDriver: the baked paint and the forest canopy at 16 m). "
             "Distant tiles use it everywhere; loaded cells blend to it between the two distances below.");
         if (macroColorMap)
         {
@@ -613,6 +654,16 @@ bool TerrainManager::DrawProperties(Engine::Core::IInspectorUi& ui)
         changed |= ui.SliderInt("Cells Y", &cellsY, 1, 512);
         changed |= ui.DragFloat("Cell width (m)", &cellWidth, .1f, .001f, 1000.f);
         changed |= ui.DragFloat("Cell depth (m)", &cellDepth, .1f, .001f, 1000.f);
+        char archive[512]{};
+        std::memcpy(archive, objectArchive.data(), std::min(objectArchive.size(), sizeof(archive) - 1));
+        if (ui.InputText("Object archive", archive, sizeof(archive)))
+        {
+            objectArchive = archive;
+            InvalidatePrepared();
+            changed = true;
+        }
+        ui.Tooltip("Baked object placements (trees, rocks, bushes) of the procedural cells "
+            "(world.objects). A cell's own .objects file (painted or edited) wins.");
         char bakeDirectory[512]{};
         std::memcpy(bakeDirectory, runtimeBakeDirectory.data(),
             std::min(runtimeBakeDirectory.size(), sizeof(bakeDirectory) - 1));

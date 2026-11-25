@@ -129,7 +129,6 @@ void TerrainManager::FeedVolumeNeighbours(Cell cell, VolumeTerrain& volume) cons
     const double spanX = static_cast<double>(cellsX) * cellWidth;
     const double spanZ = static_cast<double>(cellsY) * cellDepth;
     volume.edits = GetVolumeEdits(cell);
-    volume.surfacePainter = m_surfacePainter ? m_surfacePainter(cell) : nullptr;
     for (int dz = -1; dz <= 1; ++dz)
         for (int dx = -1; dx <= 1; ++dx)
         {
@@ -149,6 +148,8 @@ void TerrainManager::RefreshVolumeCells(Cell owner, const glm::vec3& low, const 
     const double spanX = static_cast<double>(cellsX) * cellWidth;
     const double spanZ = static_cast<double>(cellsY) * cellDepth;
     InvalidateTerrainField(owner);
+    // The macro color map recomposes the cell and those around it.
+    MarkMacroCellsDirty(owner);
     // The loaded volume cells it reaches (their margins included).
     const float margin = 9.f * std::max(volumeSampleSpacing, .25f);
     for (int dz = -1; dz <= 1; ++dz)

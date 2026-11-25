@@ -383,16 +383,14 @@ float3 GrassGroundShells(float3 worldPos, float3 toCamera, float3 normal, float 
 // light changing on a leaning field. Blades leaning toward the camera show
 // their lit sides and tips (lighter, yellower), leaning away their roots
 // (darker); any strong lean adds a little sheen. The fronts are 18 m along
-// the wind and ~70 m across, so they stay several pixels wide hundreds of
-// metres away. Returns a multiplier on the cover colour.
+// the wind and GrassWindFrontStretch times that across (~144 m), so they stay
+// several pixels wide hundreds of metres away. Returns a multiplier on the cover colour.
 float3 GrassGroundWind(float3 worldPos, float sceneTime, float3 toCamera)
 {
     const float direction = radians(GrassWindDirectionDegrees);
     const float2 wind = float2(cos(direction), sin(direction));
-    const float2 side = float2(-wind.y, wind.x);
     const float2 traveling = worldPos.xz - wind * (sceneTime * max(0.0, GrassWindSpeed) * 2.0);
-    const float2 coordinate = float2(dot(traveling, wind), dot(traveling, side) * .25) /
-        max(1.0, GrassWindWaveSize);
+    const float2 coordinate = GrassWindFrontCoordinate(traveling, wind, GrassWindWaveSize);
     // ApplyGrassWind's gust without per-blade detail (bladeDetail 0).
     const float gust = clamp(2.1 * .85 * GrassWindPerlin(coordinate, GrassWindSeed), -1.0, 1.0) * .7;
     const float2 view = toCamera.xz;

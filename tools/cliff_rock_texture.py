@@ -23,7 +23,7 @@ from woodland_assets import ASSETS, read_native_mesh
 
 SCAN = "Mountainside_01"
 TILE = 512             # texels per side (of the 1024 px stamp images)
-PLACED_SCALE = 2.5     # the pieces' typical scale (tools/landscape_cliffs.py: base 2.2 x 0.75-1.35)
+PLACED_SCALE = 2.5     # the pieces' typical scale (base 2.2 x 0.75-1.35)
 OUTPUT = ASSETS / "TerrainData" / "Sculpts"
 QUALITY = 92
 

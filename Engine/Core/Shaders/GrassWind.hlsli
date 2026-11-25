@@ -9,6 +9,10 @@ static const float GrassWindRootStiffnessHeight = 0.18; // metres
 static const float GrassWindSpeed = 0.7;
 static const float GrassWindDirectionDegrees = 35.0;
 static const float GrassWindWaveSize = 18.0; // metres; smaller cells increase local variation
+// Gust fronts are this many times longer across the wind than along it, so
+// the noise reads as distinct waves rolling downwind rather than round
+// blotches (was 4: 72 m fronts, now 144 m at a wave size of 18 m).
+static const float GrassWindFrontStretch = 8.0;
 static const uint GrassWindSeed = 18731u;
 uint GrassWindHash(int2 cell, uint seed)
 {
@@ -43,6 +47,16 @@ float GrassWindPerlin(float2 position, uint seed)
     return clamp(1.41421356 * lerp(bottom, top, fade.y), -1.0, 1.0);
 }
 
+// Noise coordinate of the shared gust field: `traveling` (world xz already
+// advected downwind) in wind space, scaled by `waveSize` along the wind and
+// GrassWindFrontStretch times that across it.
+float2 GrassWindFrontCoordinate(float2 traveling, float2 wind, float waveSize)
+{
+    const float2 side = float2(-wind.y, wind.x);
+    return float2(dot(traveling, wind), dot(traveling, side) / max(1.0, GrassWindFrontStretch)) /
+        max(1.0, waveSize);
+}
+
 // A smooth phase per blade from its mesh-space position. Every blade in a
 // clump shares the instance root, so without it a clump bends as one card.
 // Continuous in position, so a curved blade or a flower head never tears.
@@ -70,15 +84,13 @@ void ApplyGrassWind(float sceneTime, float strength,
     float direction = radians(GrassWindDirectionDegrees);
     float4 wind = float4(cos(direction), sin(direction),
         saturate(GrassWindStrength * strength), sceneTime * max(0.0, GrassWindSpeed));
-    float noiseScale = 1.0 / max(1.0, GrassWindWaveSize);
     uint seed = GrassWindSeed;
     if (wind.z <= 0.0 || height <= 0.0) return;
     float2 side = float2(-wind.y, wind.x);
     // Advect a shared world-space field downwind. Stretch across the wind
     // to form broad fronts rather than independently shaking each patch.
     float2 traveling = root.xz - wind.xy * wind.w * 2.0;
-    float2 coordinate = float2(dot(traveling, wind.xy), dot(traveling, side) * .25)
-        * max(noiseScale, .0001);
+    float2 coordinate = GrassWindFrontCoordinate(traveling, wind.xy, GrassWindWaveSize);
     float broad = GrassWindPerlin(coordinate, seed);
     int2 variationCell = int2(floor(root.xz * .45));
     float variation = (float)(GrassWindHash(variationCell, seed ^ 0x3c6ef372u) & 1023u) / 1023.0;
@@ -146,8 +158,7 @@ void ApplyTreeWind(float sceneTime, float strength, float3 root, float3 up,
     const float2 side = float2(-wind.y, wind.x);
     const float t = sceneTime * max(0.0, GrassWindSpeed);
     const float2 traveling = root.xz - wind * t * 2.0;
-    const float2 coordinate = float2(dot(traveling, wind), dot(traveling, side) * 0.25) /
-        max(GrassWindWaveSize * 2.5, 1.0);
+    const float2 coordinate = GrassWindFrontCoordinate(traveling, wind, GrassWindWaveSize * 2.5);
     const float gust = GrassWindPerlin(coordinate, GrassWindSeed);
     const float treePhase = (float)(GrassWindHash(int2(floor(root.xz)), 0x51f15e3du) & 1023u) /
         1023.0 * 6.2831853;

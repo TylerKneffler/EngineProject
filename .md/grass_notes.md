@@ -120,8 +120,14 @@ Phase 2).
   where DX11 needs ~5 min to start landscape_demo. Not seen in the 2026-11-19 DX12 landscape runs on the
   RTX 4090.
 - The `debug` preset fails on `bc7enc` (`/O2` with `/RTC1`); use `devoptimized`.
-- **Test scene:** `tools/build_grass_test_scene.py [--cell X Z]` writes
-  `Engine/Core/Assets/Scenes/terrain/grass_test.scene`: one landscape cell (heights from
+- **Test scene:** `tools/build_grass_test_scene.py [--cell X Z] [--block W S E N] [--eye M]` writes
+  `Engine/Core/Assets/Scenes/terrain/grass_test.scene`. Since 2026-11-25 it is a 7 x 7 cell block
+  (896 x 896 m, merged into one Terrain because separate Terrain objects are not seam-stitched and
+  show sky through the cracks) so the far ring's reach and beyond is on screen, with the explorer 8 m
+  up at (64, -21.8, 6) looking at the ground 200 m ahead; loads in ~20 s. Its meadow matches the
+  landscape's (GPU blades, tall grass fields, far tall tufts, scanned bushes, 50 m grass radius;
+  `GrassField.gpuBlades` is serialized for it, and blades need a square terrain).
+  Originally one landscape cell (heights from
   world.heights, painted with the meadow layer) with the demo's procedural GrassField settings, plus
   the demo's sun, atmosphere and explorer. Loads in ~2 s on the iGPU. Capture:
   `GameBackendCapture --backend dx11 --scene Engine/Core/Assets/Scenes/terrain/grass_test.scene

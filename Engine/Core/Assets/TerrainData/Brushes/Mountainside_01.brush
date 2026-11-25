@@ -1,0 +1,5 @@
+<?xml version='1.0' encoding='utf-8'?>
+<BrushPreset version="2" name="Mountainside_01" tip="Assets/TerrainData/Brushes/Mountainside_01_tip.png" shape="0" falloff="2" size="128" hardness="1" strength="1" opacity="1" flow="1" spacing="0.08" rotation="0" scatter="0" pressureSize="0" pressureStrength="0">
+  <Relief map="Assets/TerrainData/Brushes/Mountainside_01_relief.png" heightRatio="1.68155" facingX="0.0757637" facingY="0.997126" backed="true" />
+  <Terrain tool="sculpt" />
+</BrushPreset>

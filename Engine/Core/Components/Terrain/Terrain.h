@@ -13,6 +13,7 @@
 #include <optional>
 
 namespace Engine::Graphics { class IGraphicsTexture; }
+namespace Engine::Brushes { struct BrushRules; struct BrushLayerSet; }
 
 namespace Engine::Components
 {
@@ -37,9 +38,20 @@ public:
     enum class Brush { Raise, Lower, Blend, Paint, Flatten };
     struct BrushOptions
     {
-        // Fraction of the radius at full strength before a smoothstep
-        // falloff to the edge. Negative keeps the legacy linear cone.
+        // Fraction of the radius at full strength before the falloff to the
+        // edge. Negative keeps the legacy linear cone.
         float hardness = -1.f;
+        // The round brush's falloff past `hardness` (a brush's: 0 hard,
+        // 1 linear, 2 smooth; TerrainBrushShape::Falloff).
+        int falloff = 2;
+        // Where the stroke acts (a brush's terrain rules: height and slope
+        // bands, paint layers it needs or avoids), judged at each point
+        // before the dab; null acts everywhere. Not owned.
+        const Engine::Brushes::BrushRules* rules = nullptr;
+        // Metres to the nearest trail's centre line at a point of this
+        // terrain (its local X, Z and height), for rules with a trail
+        // clearance; unset: no trails. TerrainManager sets it per cell.
+        std::function<float(float x, float z, float height)> trailDistance;
         float flattenHeight = 0.f;
         // Paint only: remove the layer, handing its weight to the others.
         bool erase = false;
@@ -71,7 +83,14 @@ public:
         float stampHeightScale = 1.f;
     };
     // Brush weight at a distance from the brush center (0 outside).
-    static float BrushFalloff(float distance, float radius, float hardness);
+    static float BrushFalloff(float distance, float radius, float hardness, int falloff = 2);
+    // How much `options.rules` let a stroke act at a vertex (1 without
+    // rules): its height, slope from its neighbours, and paint, with the
+    // rules' layer materials resolved for this terrain (ResolveRuleLayers).
+    float RulesWeightAt(int col, int row, const std::vector<float>& heightGrid,
+        const BrushOptions& options, const Engine::Brushes::BrushLayerSet& layerSet) const;
+    // A brush's rule layers (material names) as this terrain's layer indices.
+    Engine::Brushes::BrushLayerSet ResolveRuleLayers(const Engine::Brushes::BrushRules& rules) const;
     // Brush weight at an offset from the brush centre, round or shaped. For a
     // shaped brush, `relief` (when given) receives the shape's height there as
     // a share of its tallest point (0..1); 1 for a round brush. How far a
@@ -93,7 +112,8 @@ public:
         std::vector<std::string> materialPaths;
     };
     // The static cell cache's format (SaveCache).
-    static constexpr uint32_t CacheVersion = 8;
+    // 9 (2026-11-25): adds the erosion (flow, deposition).
+    static constexpr uint32_t CacheVersion = 10;   // 10: no erosion arrays (2026-11-25)
     Terrain();
     int cellsX = 32, cellsY = 32;
     float cellWidth = 1.f, cellDepth = 1.f;
@@ -167,8 +187,11 @@ public:
     // the mask's space (a manager passes the cell's origin).
     bool EditRegion(const TerrainRegionMask& mask, const TerrainRegionOperation& operation,
         bool realignObjects = false);
+    // rules (optional): a brush's terrain rules, judged at each point.
     bool PaintRegion(const TerrainRegionMask& mask, float strength, int layer, bool erase,
-        double offsetX = 0.0, double offsetZ = 0.0);
+        double offsetX = 0.0, double offsetZ = 0.0,
+        const Engine::Brushes::BrushRules* rules = nullptr,
+        std::function<float(float x, float z, float height)> trailDistance = {});
     // Copies the grid's valid samples that land on this cell's vertices (the
     // grid's frame places this cell's origin at offset), rebuilds, and moves
     // resting placements with the surface. False when nothing changed.

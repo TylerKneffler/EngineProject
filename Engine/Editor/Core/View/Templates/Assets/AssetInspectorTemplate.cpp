@@ -3,6 +3,8 @@
 #include "Engine/Editor/UI/IEditorUi.h"
 #include "Engine/Editor/Core/Paint/BrushPreset.h"
 #include "Engine/Editor/Core/Paint/BrushPreview.h"
+#include <limits>
+#include <sstream>
 #include "Core/AssetRecord.h"
 #include "Core/Components/Materials/Texture.h"
 #include "Core/Components/Materials/Material.h"
@@ -333,6 +335,152 @@ void AssetInspectorTemplate::Draw(IEditorUi& ui, Engine::Scene::Scene* scene)
             if (void* handle = m_previewCache.Get(preset.tipPath, graphics))
                 ui.DrawImage(handle, 112.f, 112.f);
             else ui.DisabledLabel("Image tip preview unavailable.");
+        }
+        // Terrain: what the terrain tools take from this brush.
+        if (ui.CollapsingHeader("Terrain", preset.relief.Present() || preset.terrain.Any()))
+        {
+            auto& terrain = preset.terrain;
+            const char* tools[]{ "Any tool", "Sculpt", "Paint", "Place" };
+            int tool = int(terrain.tool);
+            if (ui.Combo("Tool", &tool, tools, 4))
+            { terrain.tool = Engine::Brushes::BrushTool(tool); changed = true; }
+            if (ui.IsItemHovered())
+                ui.Tooltip("Choosing the brush in the terrain toolbar switches to this tool:\n"
+                    "Paint, Place (the Objects tool), or Sculpt (Stamp when it has a relief).\n"
+                    "The layer it paints or places into is chosen in the toolbar.");
+            // Relief: the heights Raise, Lower and Stamp build up.
+            char relief[512]{};
+            std::copy_n(preset.relief.mapPath.data(),
+                std::min(preset.relief.mapPath.size(), sizeof(relief) - 1), relief);
+            if (ui.InputText("Relief height map", relief, sizeof(relief)))
+            { preset.relief.mapPath = relief; changed = true; }
+            if (ui.IsItemHovered())
+                ui.Tooltip("Grayscale image (16-bit PNG best): black the base, white the top.\n"
+                    "Tip-space rows run along +Z. Empty: no relief.");
+            if (!preset.relief.mapPath.empty())
+            {
+                changed = ui.DragFloat("Height / half width", &preset.relief.heightRatio, .01f, 0.f, 100.f) || changed;
+                changed = ui.Checkbox("Build against terrain", &preset.relief.backed) || changed;
+                float facing[3]{ preset.relief.facingX, 0.f, preset.relief.facingY };
+                if (ui.DragFloat3("Facing (x, -, z)", facing, .01f, -1.f, 1.f))
+                { preset.relief.facingX = facing[0]; preset.relief.facingY = facing[2]; changed = true; }
+            }
+            // Rules: where the brush acts.
+            if (ui.PropertyGroupHeader("Rules", terrain.rules.Any()))
+            {
+                auto& rules = terrain.rules;
+                bool low = rules.minHeight > -1e30f, high = rules.maxHeight < 1e30f;
+                if (ui.Checkbox("Min height", &low))
+                { rules.minHeight = low ? 0.f : -std::numeric_limits<float>::infinity(); changed = true; }
+                if (low) { ui.SameLine(); changed = ui.DragFloat("##MinHeight", &rules.minHeight, .5f, -10000.f, rules.maxHeight) || changed; }
+                if (ui.Checkbox("Max height", &high))
+                { rules.maxHeight = high ? std::max(100.f, low ? rules.minHeight : 100.f) : std::numeric_limits<float>::infinity(); changed = true; }
+                if (high) { ui.SameLine(); changed = ui.DragFloat("##MaxHeight", &rules.maxHeight, .5f, low ? rules.minHeight : -10000.f, 10000.f) || changed; }
+                if (low || high)
+                    changed = ui.DragFloat("Height fade (m)", &rules.heightFade, .1f, 0.f, 500.f) || changed;
+                changed = ui.SliderFloat("Min slope", &rules.minSlope, 0.f, rules.maxSlope) || changed;
+                changed = ui.SliderFloat("Max slope", &rules.maxSlope, rules.minSlope, 90.f) || changed;
+                changed = ui.DragFloat("Slope fade (deg)", &rules.slopeFade, .1f, 0.f, 45.f) || changed;
+                const auto layerList = [&](const char* label, std::vector<std::string>& layers, const char* tip) {
+                    std::string text;
+                    for (const auto& layer : layers) text += (text.empty() ? "" : ";") + layer;
+                    char buffer[1024]{};
+                    std::copy_n(text.data(), std::min(text.size(), sizeof(buffer) - 1), buffer);
+                    if (ui.InputText(label, buffer, sizeof(buffer)))
+                    {
+                        layers.clear();
+                        std::istringstream stream(buffer);
+                        for (std::string item; std::getline(stream, item, ';');)
+                        {
+                            const auto first = item.find_first_not_of(' '), last = item.find_last_not_of(' ');
+                            if (first != std::string::npos) layers.push_back(item.substr(first, last - first + 1));
+                        }
+                        changed = true;
+                    }
+                    if (ui.IsItemHovered()) ui.Tooltip(tip);
+                    // Drop a terrain layer's .material on the field to add it.
+                    if (ui.BeginDragDropTarget())
+                    {
+                        size_t size = 0;
+                        if (const auto* data = static_cast<const char*>(ui.AcceptDragDropPayload("ENGINE_ASSET_PATH", &size)))
+                        {
+                            size_t length = 0;
+                            while (length < size && data[length]) ++length;
+                            layers.emplace_back(data, length);
+                            changed = true;
+                        }
+                        ui.EndDragDropTarget();
+                    }
+                };
+                layerList("On paint layers", rules.onLayers,
+                    "Materials of the paint layers the ground must have (';' separated; asset\n"
+                    "paths, or names like grass). Drop a .material here to add it. Empty: any.");
+                layerList("Avoid paint layers", rules.avoidLayers,
+                    "Materials of the paint layers the brush stays off (';' separated).\n"
+                    "Drop a .material here to add it.");
+                if (!rules.onLayers.empty())
+                {
+                    changed = ui.SliderFloat("Layer threshold", &rules.layerThreshold, .01f, 1.f) || changed;
+                    changed = ui.SliderFloat("Max layer share", &rules.maxLayerShare, 0.f, 1.f) || changed;
+                    if (ui.IsItemHovered())
+                        ui.Tooltip("Past this share of the \"on\" layers the brush fades out: with a low\n"
+                            "threshold it acts only along their edge (a shrub belt where forest soil\n"
+                            "meets meadow). 1: no limit.");
+                }
+                changed = ui.DragFloat("Trail clearance (m)", &rules.trailClearance, .1f, 0.f, 100.f) || changed;
+                if (ui.IsItemHovered())
+                    ui.Tooltip("Metres to keep from a trail's centre line (the terrain's paths). 0: ignore trails.");
+                if (rules.trailClearance > 0.f)
+                    changed = ui.DragFloat("Trail fade (m)", &rules.trailFade, .1f, 0.f, 100.f) || changed;
+            }
+            // Placement: what a Place brush puts down.
+            if (ui.PropertyGroupHeader("Placement", terrain.placement.Any()))
+            {
+                auto& place = terrain.placement;
+                changed = ui.DragFloat("Density (per m2)", &place.density, .005f, 0.f, 100.f) || changed;
+                changed = ui.DragFloat("Min spacing (m)", &place.minSpacing, .05f, 0.f, 1000.f) || changed;
+                changed = ui.Checkbox("Align to surface", &place.alignToSurface) || changed;
+                changed = ui.Checkbox("Random yaw", &place.randomYaw) || changed;
+                changed = ui.DragFloat("Sink (m)", &place.sink, .01f, -100.f, 100.f) || changed;
+                for (size_t i = 0; i < place.assets.size(); ++i)
+                {
+                    auto& asset = place.assets[i];
+                    ui.PushId(&asset);
+                    ui.Separator();
+                    char assetPath[512]{};
+                    std::copy_n(asset.asset.data(), std::min(asset.asset.size(), sizeof(assetPath) - 1), assetPath);
+                    if (ui.InputText("Asset", assetPath, sizeof(assetPath)) && assetPath[0])
+                    { asset.asset = assetPath; changed = true; }
+                    changed = ui.DragFloat("Weight", &asset.weight, .05f, 0.f, 1000.f) || changed;
+                    changed = ui.DragFloat("Min scale", &asset.minScale, .01f, .01f, asset.maxScale) || changed;
+                    changed = ui.DragFloat("Max scale", &asset.maxScale, .01f, asset.minScale, 100.f) || changed;
+                    bool low = asset.minHeight > -1e30f, high = asset.maxHeight < 1e30f;
+                    if (ui.Checkbox("From height", &low))
+                    { asset.minHeight = low ? 0.f : -std::numeric_limits<float>::infinity(); changed = true; }
+                    if (low) { ui.SameLine(); changed = ui.DragFloat("##AssetMinHeight", &asset.minHeight, 1.f, -10000.f, asset.maxHeight) || changed; }
+                    if (ui.Checkbox("Up to height", &high))
+                    { asset.maxHeight = high ? std::max(500.f, low ? asset.minHeight : 500.f) : std::numeric_limits<float>::infinity(); changed = true; }
+                    if (high) { ui.SameLine(); changed = ui.DragFloat("##AssetMaxHeight", &asset.maxHeight, 1.f, low ? asset.minHeight : -10000.f, 10000.f) || changed; }
+                    if (low || high)
+                        changed = ui.DragFloat("Height fade (m)##Asset", &asset.heightFade, .5f, 0.f, 1000.f) || changed;
+                    const bool remove = ui.Button("Remove asset");
+                    ui.PopId();
+                    if (remove) { place.assets.erase(place.assets.begin() + std::ptrdiff_t(i)); changed = true; break; }
+                }
+                ui.Button("Drop a prefab here to add it");
+                if (ui.BeginDragDropTarget())
+                {
+                    size_t size = 0;
+                    if (const auto* data = static_cast<const char*>(ui.AcceptDragDropPayload("ENGINE_ASSET_PATH", &size)))
+                    {
+                        size_t length = 0;
+                        while (length < size && data[length]) ++length;
+                        place.assets.push_back({ std::string(data, length), 1.f, 1.f, 1.f });
+                        changed = true;
+                    }
+                    ui.EndDragDropTarget();
+                }
+            }
         }
         if (changed)
         {

@@ -628,6 +628,7 @@ int TerrainManager::CommitPrepared(int centerX, int centerY, int radius,
         }
         const auto layersInstalled = std::chrono::steady_clock::now();
         RestoreObjectLayers(cell, *object);
+        SetObjectBaseline(cell, *object);
         const auto sceneInstalled = std::chrono::steady_clock::now();
         m_lastStreamingTiming.commitTerrainMs += std::chrono::duration<double, std::milli>(
             terrainInstalled - commitStart).count();
@@ -723,7 +724,9 @@ bool TerrainManager::SaveEdit(Cell cell, const Terrain& terrain) const
     std::ofstream file(temporary, std::ios::binary | std::ios::trunc);
     if (!file) return false;
     const uint64_t magic = 0x31544944454e5254ull; // TRNEDIT1
-    const uint32_t version = 1;
+    // 2 (2026-11-25): erosion entries (index, flow, deposition) after the
+    // weights; 3 (same day): none again, erosion no longer kept per vertex.
+    const uint32_t version = 3;
     const uint32_t x = static_cast<uint32_t>(terrain.cellsX);
     const uint32_t y = static_cast<uint32_t>(terrain.cellsY);
     const uint32_t layerCount = static_cast<uint32_t>(terrain.layers.size());
@@ -783,7 +786,7 @@ static bool LoadEditFile(const std::string& path, Terrain& terrain)
     uint32_t version = 0, x = 0, y = 0, layerCount = 0;
     uint32_t heightCount = 0, weightCount = 0;
     if (!ReadBinary(file, magic) || magic != 0x31544944454e5254ull ||
-        !ReadBinary(file, version) || version != 1 ||
+        !ReadBinary(file, version) || version < 1 || version > 3 ||
         !ReadBinary(file, x) || x != static_cast<uint32_t>(terrain.cellsX) ||
         !ReadBinary(file, y) || y != static_cast<uint32_t>(terrain.cellsY) ||
         !ReadBinary(file, layerCount) || layerCount == 0 ||
@@ -811,6 +814,14 @@ static bool LoadEditFile(const std::string& path, Terrain& terrain)
             terrain.layers.size(), 0.f);
         for (uint32_t layer = 0; layer < layerCount; ++layer)
             if (!ReadBinary(file, weights[destination + layer])) return false;
+    }
+    // Version 2's erosion entries (index, flow, deposition): skipped.
+    if (version == 2)
+    {
+        uint32_t erosionCount = 0;
+        if (!ReadBinary(file, erosionCount) || erosionCount > heights.size()) return false;
+        file.seekg(static_cast<std::streamoff>(erosionCount) * 12, std::ios::cur);
+        if (!file) return false;
     }
     char trailing = 0;
     if (file.read(&trailing, 1) || !file.eof()) return false;
@@ -887,6 +898,7 @@ void TerrainManager::LoadCell(Cell cell, int lodStride)
     if (!baked && m_editedProcedural.count(cell)) LoadEdit(cell, *terrain);
     m_loaded[cell] = terrain;
     RestoreObjectLayers(cell, *object);
+    SetObjectBaseline(cell, *object);
     Stitch(cell);
     ConfigureCellPhysics(*object);
 }
@@ -920,7 +932,11 @@ void TerrainManager::UnloadCell(Cell cell)
     const auto found = m_loaded.find(cell);
     if (found == m_loaded.end()) return;
     Terrain* terrain = found->second;
-    if (m_editedProcedural.count(cell) && m_dirtyProceduralEdits.count(cell) &&
+    // Cell data files (edits, objects) are the editor's: play (a game, a
+    // capture) never writes them.
+    const bool playing = Owner && Owner->GetScene() && Owner->GetScene()->HasStarted();
+    if (playing) m_dirtyProceduralEdits.erase(cell);
+    if (!playing && m_editedProcedural.count(cell) && m_dirtyProceduralEdits.count(cell) &&
         !SaveEdit(cell, *terrain))
     {
         m_cells[cell] = terrain->Serialize();
@@ -930,7 +946,28 @@ void TerrainManager::UnloadCell(Cell cell)
     }
     if (!m_proceduralCells.count(cell)) m_cells[cell] = terrain->Serialize();
     auto* object = terrain->Owner;
-    if (object) CaptureObjectLayers(cell, *object);
+    if (object && UsesObjectFiles(cell))
+    {
+        if (playing)
+        {
+            m_objectBaseline.erase(cell);
+            if (!ObjectFileCells().count(cell)) m_objectLayers.erase(cell);
+        }
+        else
+        {
+            // Its objects go to its file if they changed; unchanged ones are
+            // generated again (or read from its file) next time.
+            const auto baseline = m_objectBaseline.find(cell);
+            if (baseline != m_objectBaseline.end() && baseline->second != HashCellObjects(*object))
+            {
+                const JsonValue layers = CollectObjectLayers(*object);
+                if (WriteObjectFile(cell, &layers)) InvalidateFarObjectCell(cell);
+            }
+            m_objectBaseline.erase(cell);
+            if (!ObjectFileCells().count(cell)) m_objectLayers.erase(cell);
+        }
+    }
+    else if (object) CaptureObjectLayers(cell, *object);
     m_loaded.erase(found);
     if (object && object->GetScene()) object->GetScene()->RemoveObject(object);
 }

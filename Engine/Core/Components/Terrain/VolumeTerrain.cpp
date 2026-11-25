@@ -136,20 +136,6 @@ void ApplyPaintWeights(std::vector<Mesh::Vertex>& vertices, const VolumeTerrain:
         return (at(col, row) * (1 - tx) + at(col + 1, row) * tx) * (1 - tz) +
             (at(col, row + 1) * (1 - tx) + at(col + 1, row + 1) * tx) * tz;
     };
-    std::vector<float> painted, paintedLush;
-    if (paint.painter && *paint.painter && layers && !vertices.empty())
-    {
-        std::vector<glm::vec3> positions(vertices.size()), normals(vertices.size());
-        for (size_t i = 0; i < vertices.size(); ++i)
-        {
-            positions[i] = {vertices[i].pos[0], vertices[i].pos[1], vertices[i].pos[2]};
-            normals[i] = {vertices[i].normal[0], vertices[i].normal[1], vertices[i].normal[2]};
-        }
-        painted.assign(vertices.size() * paint.layers, 0.f);
-        paintedLush.assign(vertices.size(), 0.f);
-        (*paint.painter)(vertices.size(), positions.data(), normals.data(), paint.layers,
-            painted.data(), paintedLush.data());
-    }
     for (size_t index = 0; index < vertices.size(); ++index)
     {
         auto& vertex = vertices[index];
@@ -162,14 +148,11 @@ void ApplyPaintWeights(std::vector<Mesh::Vertex>& vertices, const VolumeTerrain:
         for (size_t layer = 0; layer < 6; ++layer)
         {
             float w = 0.f;
-            if (layer < layers)
-                w = !painted.empty() ? painted[index * paint.layers + layer]
-                    : grid(paint.weights, paint.layers, layer, col, row, tx, tz);
+            if (layer < layers) w = grid(paint.weights, paint.layers, layer, col, row, tx, tz);
             w = w * (1.f - steep) + (int(layer) == steepLayer ? steep : 0.f);
             vertex.uvChannels[2 + layer / 4][layer % 4] = w;
         }
-        vertex.uvChannels[1][3] = !paintedLush.empty() ? paintedLush[index]
-            : paint.lushness.empty() ? 0.f : grid(paint.lushness, 1, 0, col, row, tx, tz);
+        vertex.uvChannels[1][3] = paint.lushness.empty() ? 0.f : grid(paint.lushness, 1, 0, col, row, tx, tz);
         vertex.uv[0] = std::clamp(vertex.pos[0] / (paint.cellsX * paint.cellWidth), 0.f, 1.f);
         vertex.uv[1] = std::clamp(vertex.pos[2] / (paint.cellsY * paint.cellDepth), 0.f, 1.f);
         vertex.color[0] = vertex.color[1] = vertex.color[2] = 0.f;
@@ -417,7 +400,6 @@ bool VolumeTerrain::StartBuild()
     paint->layers = terrain->layers.size();
     paint->weights = terrain->weights;
     paint->lushness = terrain->lushness;
-    paint->painter = surfacePainter;
     m_paint = std::move(paint);
     m_layerMaterials = terrain->GetLayerMaterials();
     m_layerMaterials.resize(std::min<size_t>(m_layerMaterials.size(), 6));
@@ -512,8 +494,43 @@ int VolumeTerrain::LevelAt(const glm::ivec3& world, const glm::dvec3& camera) co
     const double distance = glm::length(outside);
     const float bounds[LevelCount] = {lod1Distance, lod2Distance, lod3Distance, drawDistance};
     for (int level = 0; level < LevelCount; ++level)
-        if (distance <= bounds[level]) return level;
+        if (distance <= bounds[level])
+        {
+            // A chunk on the border with distant terrain (a neighbouring
+            // cell that is not loaded) meshes at the distant nodes' spacing
+            // (a one-cell node: NodeGrid = 32 cells across the cell), so its
+            // border samples are the node's and both put their border
+            // vertices at the same points (MeshSurfaceNets snaps them onto
+            // the face from the face's own crossings).
+            const int border = BorderLevel();
+            return border >= 0 && BordersDistant(world) ? border : level;
+        }
     return -1;
+}
+
+int VolumeTerrain::BorderLevel() const
+{
+    const int across = m_volume ? m_volume->InteriorCells().x : 0;
+    for (int level = 0; level < LevelCount; ++level)
+        if ((32 << level) == across) return level;
+    return -1;
+}
+
+bool VolumeTerrain::BordersDistant(const glm::ivec3& world) const
+{
+    const glm::ivec3 grid = ChunkGrid();
+    if (grid.x <= 0 || grid.z <= 0) return false;
+    const int lx = world.x - cellX * grid.x, lz = world.z - cellZ * grid.z;
+    const int sx = lx == 0 ? -1 : lx == grid.x - 1 ? 1 : 0;
+    const int sz = lz == 0 ? -1 : lz == grid.z - 1 ? 1 : 0;
+    if (!sx && !sz) return false;
+    auto* scene = Owner ? Owner->GetScene() : nullptr;
+    const auto steps = g_steps.find(scene);
+    if (steps == g_steps.end()) return false;
+    const auto missing = [&](int dx, int dz) {
+        return !steps->second.members.count({group ? group : Owner, cellX + dx, cellZ + dz});
+    };
+    return (sx && missing(sx, 0)) || (sz && missing(0, sz)) || (sx && sz && missing(sx, sz));
 }
 
 bool VolumeTerrain::HasChunk(const glm::ivec3& world) const
@@ -867,6 +884,9 @@ void VolumeTerrain::Update()
         seams.strides = key.strides;
         seams.alignment = m_volume->interiorFirst;
         seams.cellSamples = glm::ivec2(m_volume->InteriorCells().x, m_volume->InteriorCells().z);
+        // Edges toward cells that are not loaded end on distant terrain:
+        // skirted, as the distant nodes' own edges are (TerrainManagerFarVolume).
+        seams.skirt = 2.f * m_volume->spacing * float(stride) + 2.f;
         auto cellVolumes = m_cellVolumes;   // held by the job
         const float start = steepStart, end = steepEnd, extent = m_extent;
         const bool weights = !m_layerMaterials.empty();

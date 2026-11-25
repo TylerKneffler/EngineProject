@@ -1,0 +1,5 @@
+<?xml version='1.0' encoding='utf-8'?>
+<BrushPreset version="2" name="RockFace_02" tip="Assets/TerrainData/Brushes/RockFace_02_tip.png" shape="0" falloff="2" size="128" hardness="1" strength="1" opacity="1" flow="1" spacing="0.08" rotation="0" scatter="0" pressureSize="0" pressureStrength="0">
+  <Relief map="Assets/TerrainData/Brushes/RockFace_02_relief.png" heightRatio="1.83594" facingX="-0.125477" facingY="0.992097" backed="true" />
+  <Terrain tool="sculpt" />
+</BrushPreset>

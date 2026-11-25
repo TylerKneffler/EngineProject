@@ -83,14 +83,6 @@ public:
     // the neighbours' included; not serialized).
     std::string editFile;
     std::vector<TerrainVolumeEdit> edits;
-    // fromTerrain: paints points of the cell's surface (cell space) with
-    // `layers` weights each and a lushness (Terrain::lushness), from the
-    // paint rules at the point itself (todo.md "Terrain: volume-first
-    // conversion", step 4). Runs on meshing workers, so it must be
-    // thread-safe. Null: the terrain's painted grid, interpolated.
-    using SurfacePainter = std::function<void(size_t count, const glm::vec3* positions,
-        const glm::vec3* normals, size_t layers, float* weights, float* lushness)>;
-    std::shared_ptr<const SurfacePainter> surfacePainter;
     // Cells of one grid (TerrainManager sets them; not serialized): volumes
     // of one group at neighbouring cells join into one sheet. A volume of no
     // group stands alone.
@@ -179,6 +171,10 @@ private:
     void Unregister();
     int LevelAt(const glm::ivec3& world, const glm::dvec3& camera) const;
     int StrideAt(const glm::ivec3& world, const glm::dvec3& camera) const;
+    // The level whose spacing is a one-cell distant node's (-1: none), and
+    // whether a chunk lies on the border with a cell that is not loaded.
+    int BorderLevel() const;
+    bool BordersDistant(const glm::ivec3& world) const;
     bool HasChunk(const glm::ivec3& world) const;
     void ChooseKeys(const glm::dvec3& camera);
     // The volumes of the cells around (index (dz + 1) * 3 + dx + 1) in the
@@ -200,7 +196,6 @@ public:
         size_t layers = 0;
         std::vector<float> weights;   // per grid vertex and layer
         std::vector<float> lushness;  // per grid vertex (may be empty)
-        std::shared_ptr<const SurfacePainter> painter;
     };
     // Scanned rock over steep faces (the triplanar rock path, Object.hlsl):
     // a layer-array slice after the painted layers, projected from three sides.

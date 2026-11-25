@@ -8,7 +8,7 @@ namespace Engine::Components
 // Terrain is mostly a height field. Normalize legacy/cached triangles as well
 // as new geometry; vertical skirt triangles retain their authored orientation,
 // and so do triangles whose winding agrees with their vertex normals: the
-// undersides of overhangs in terrain stamps (TerrainStamp) face down on
+// undersides of overhangs in scanned rock shapes face down on
 // purpose. Height-field vertices always have upward normals, so a grid
 // triangle wound downward is still turned up.
 template<class Vertex>

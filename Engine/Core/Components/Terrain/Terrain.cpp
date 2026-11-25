@@ -4,6 +4,7 @@
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Core/Graphics/IGraphicsTexture.h"
 #include "Terrain.h"
+#include "Core/Brushes/BrushRules.h"
 #include "Core/Components/Terrain/TerrainBrushShape.h"
 #include "Core/Components/Terrain/TerrainObjectLayer.h"
 #include "Core/Components/Terrain/TerrainRegionEdit.h"
@@ -411,14 +412,41 @@ void Terrain::AssignLayersByHeight()
     Rebuild(); MarkConfigurationDirty();
 }
 
-float Terrain::BrushFalloff(float distance, float radius, float hardness)
+float Terrain::BrushFalloff(float distance, float radius, float hardness, int falloff)
 {
     if (radius <= 0.f || distance >= radius) return 0.f;
     if (hardness < 0.f) return 1.f - distance / radius;
-    const float inner = radius * std::min(hardness, .999f);
-    if (distance <= inner) return 1.f;
-    const float t = 1.f - (distance - inner) / (radius - inner);
-    return t * t * (3.f - 2.f * t);
+    return TerrainBrushShape::Falloff(distance / radius, std::min(hardness, .999f), falloff);
+}
+
+Engine::Brushes::BrushLayerSet Terrain::ResolveRuleLayers(const Engine::Brushes::BrushRules& rules) const
+{
+    std::vector<std::string> materials;
+    for (const Layer& layer : layers) materials.push_back(layer.material);
+    return Engine::Brushes::ResolveBrushLayers(rules, materials);
+}
+
+float Terrain::RulesWeightAt(int col, int row, const std::vector<float>& heightGrid,
+    const BrushOptions& options, const Engine::Brushes::BrushLayerSet& layerSet) const
+{
+    if (!options.rules) return 1.f;
+    const auto at = [&](int c, int r) {
+        c = std::clamp(c, 0, cellsX); r = std::clamp(r, 0, cellsY);
+        return heightGrid[size_t(r) * (cellsX + 1) + c];
+    };
+    const float dx = (at(col + 1, row) - at(col - 1, row)) /
+        (cellWidth * float(std::min(col + 1, cellsX) - std::max(col - 1, 0)));
+    const float dz = (at(col, row + 1) - at(col, row - 1)) /
+        (cellDepth * float(std::min(row + 1, cellsY) - std::max(row - 1, 0)));
+    const float slope = std::atan(std::sqrt(dx * dx + dz * dz)) * 57.2957795f;
+    const size_t i = size_t(row) * (cellsX + 1) + col;
+    const size_t layerCount = layers.size();
+    const bool painted = weights.size() == heightGrid.size() * layerCount;
+    const float trail = options.trailDistance && options.rules->trailClearance > 0.f
+        ? options.trailDistance(col * cellWidth, row * cellDepth, at(col, row))
+        : std::numeric_limits<float>::infinity();
+    return Engine::Brushes::BrushRulesWeight(*options.rules, at(col, row), slope, &layerSet,
+        painted ? &weights[i * layerCount] : nullptr, painted ? layerCount : 0, trail);
 }
 
 float Terrain::BrushWeight(float dx, float dz, float radius, const BrushOptions& options,
@@ -426,7 +454,7 @@ float Terrain::BrushWeight(float dx, float dz, float radius, const BrushOptions&
 {
     if (relief) *relief = 1.f;
     if (!options.shape)
-        return BrushFalloff(std::sqrt(dx * dx + dz * dz), radius, options.hardness);
+        return BrushFalloff(std::sqrt(dx * dx + dz * dz), radius, options.hardness, options.falloff);
     const TerrainBrushShape& shape = *options.shape;
     const glm::vec2 uv = TerrainBrushShape::ToShape(dx, dz, radius, options.shapeYaw);
     const float weight = shape.SampleMask(uv);
@@ -451,6 +479,7 @@ bool Terrain::ApplyBrush(float x, float z, float radius, float strength,
     // the weight is 0.
     const float reach = BrushReach(radius, options);
     const std::vector<float> before = heights;
+    const auto ruleLayers = options.rules ? ResolveRuleLayers(*options.rules) : Engine::Brushes::BrushLayerSet{};
     bool changed = false;
     EnsurePaintMap();
     if (brush == Brush::Paint && HasPaintMap())
@@ -467,8 +496,12 @@ bool Terrain::ApplyBrush(float x, float z, float radius, float strength,
             for (int col = minCol; col <= maxCol; ++col)
             {
                 const float dx = col * stepX - x, dz = row * stepZ - z;
-                const float amount = std::clamp(strength *
+                float amount = std::clamp(strength *
                     BrushWeight(dx, dz, radius, options), 0.f, 1.f);
+                if (amount > 0.f && options.rules)
+                    amount *= RulesWeightAt(std::clamp(int(std::lround(col * stepX / cellWidth)), 0, cellsX),
+                        std::clamp(int(std::lround(row * stepZ / cellDepth)), 0, cellsY), before, options,
+                        ruleLayers);
                 float* sample = &paintWeights[(size_t(row) * width + col) * layerCount];
                 if (PaintSample(sample, layerCount, layer, amount, options.erase))
                 {
@@ -523,7 +556,8 @@ bool Terrain::ApplyBrush(float x, float z, float radius, float strength,
             // Shaped Raise and Lower follow the shape's height map as well as
             // its outline: its high places move fastest.
             const bool followRelief = brush == Brush::Raise || brush == Brush::Lower;
-            const float amount = std::clamp(strength * weight * (followRelief ? relief : 1.f), 0.f, 1.f);
+            float amount = std::clamp(strength * weight * (followRelief ? relief : 1.f), 0.f, 1.f);
+            if (amount > 0.f && options.rules) amount *= RulesWeightAt(col, row, before, options, ruleLayers);
             if (amount <= 0.f) continue;
             const size_t i = static_cast<size_t>(row * (cellsX + 1) + col);
             if (brush == Brush::Paint)
@@ -1263,9 +1297,15 @@ bool Terrain::WriteHeightGrid(const TerrainHeightGrid& grid, double offsetX, dou
             if (gridCol < 0 || gridCol >= grid.width || std::abs(gx - gridCol) > 1e-3) continue;
             const size_t source = size_t(gridRow) * grid.width + gridCol;
             if (!grid.valid.empty() && !grid.valid[source]) continue;
-            float& target = heights[size_t(row) * (cellsX + 1) + col];
-            if (target == grid.heights[source]) continue;
-            target = grid.heights[source];
+            const size_t index = size_t(row) * (cellsX + 1) + col;
+            bool changed = false;
+            float& target = heights[index];
+            if (target != grid.heights[source])
+            {
+                target = grid.heights[source];
+                changed = true;
+            }
+            if (!changed) continue;
             minCol = std::min(minCol, col); maxCol = std::max(maxCol, col);
             minRow = std::min(minRow, row); maxRow = std::max(maxRow, row);
         }
@@ -1297,7 +1337,8 @@ bool Terrain::EditRegion(const TerrainRegionMask& mask, const TerrainRegionOpera
 }
 
 bool Terrain::PaintRegion(const TerrainRegionMask& mask, float strength, int layer, bool erase,
-    double offsetX, double offsetZ)
+    double offsetX, double offsetZ, const Engine::Brushes::BrushRules* rules,
+    std::function<float(float x, float z, float height)> trailDistance)
 {
     if (Owner && Owner->GetScene() && Owner->GetScene()->HasStarted()) return false;
     if (mask.Empty() || strength <= 0.f || layer < 0 ||
@@ -1321,12 +1362,22 @@ bool Terrain::PaintRegion(const TerrainRegionMask& mask, float strength, int lay
     const int maxCol = std::min(width - 1, int(std::ceil(maximum.x / stepX)));
     const int minRow = std::max(0, int(std::floor(minimum.y / stepZ)));
     const int maxRow = std::min(height - 1, int(std::ceil(maximum.y / stepZ)));
+    const auto ruleLayers = rules ? ResolveRuleLayers(*rules) : Engine::Brushes::BrushLayerSet{};
     bool changed = false;
     for (int row = minRow; row <= maxRow; ++row)
         for (int col = minCol; col <= maxCol; ++col)
         {
-            const float amount = std::clamp(strength * mask.Weight(offsetX + col * stepX,
+            float amount = std::clamp(strength * mask.Weight(offsetX + col * stepX,
                 offsetZ + row * stepZ), 0.f, 1.f);
+            if (amount > 0.f && rules)
+            {
+                BrushOptions ruled;
+                ruled.rules = rules;
+                ruled.trailDistance = trailDistance;
+                amount *= RulesWeightAt(std::clamp(int(std::lround(col * stepX / cellWidth)), 0, cellsX),
+                    std::clamp(int(std::lround(row * stepZ / cellDepth)), 0, cellsY), heights, ruled,
+                    ruleLayers);
+            }
             float* sample = &target[(size_t(row) * width + col) * layerCount];
             if (PaintSample(sample, layerCount, layer, amount, erase))
             {

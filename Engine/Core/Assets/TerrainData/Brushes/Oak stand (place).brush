@@ -1,0 +1,13 @@
+<?xml version='1.0' encoding='utf-8'?>
+<BrushPreset version="2" name="Oak stand (place)" tip="" shape="0" falloff="2" size="40" hardness="0.6" strength="0.5" opacity="1" flow="1" spacing="0.15" rotation="0" scatter="0" pressureSize="0.5" pressureStrength="0.5">
+  <Terrain tool="place">
+    <Rules heightFade="2" minSlope="0" maxSlope="40" slopeFade="6" onLayers="" avoidLayers="Assets/Materials/Terrain/PBR/sand.material;Assets/Materials/Terrain/PBR/gravel.material;Assets/Materials/Terrain/PBR/rock.material;Assets/Materials/Terrain/PBR/snow.material" layerThreshold="0.5" />
+    <Placement density="0.004" minSpacing="7" alignToSurface="false" randomYaw="true" sink="0.3">
+      <Asset path="Assets/Prefabs/Woodland/Oaks/Large_oak_tree_001.prefab" weight="1" minScale="0.8" maxScale="1.1" />
+      <Asset path="Assets/Prefabs/Woodland/Oaks/Large_oak_tree_002.prefab" weight="1" minScale="0.8" maxScale="1.1" />
+      <Asset path="Assets/Prefabs/Woodland/Oaks/Medium_oak_tree_001.prefab" weight="2" minScale="0.8" maxScale="1.1" />
+      <Asset path="Assets/Prefabs/Woodland/Oaks/Medium_oak_tree_002.prefab" weight="2" minScale="0.8" maxScale="1.1" />
+      <Asset path="Assets/Prefabs/Woodland/Oaks/Small_oak_tree_001.prefab" weight="2" minScale="0.8" maxScale="1.2" />
+    </Placement>
+  </Terrain>
+</BrushPreset>

@@ -1,0 +1,13 @@
+<?xml version='1.0' encoding='utf-8'?>
+<BrushPreset version="2" name="Meadow bushes (place)" tip="" shape="0" falloff="2" size="40" hardness="0.3" strength="0.5" opacity="1" flow="1" spacing="0.15" rotation="0" scatter="0.2" pressureSize="0.5" pressureStrength="0.5">
+  <Terrain tool="place">
+    <Rules heightFade="2" minSlope="0" maxSlope="30" slopeFade="5" onLayers="Assets/Materials/Terrain/PBR/grass.material" avoidLayers="" layerThreshold="0.5" />
+    <Placement density="0.02" minSpacing="3" alignToSurface="false" randomYaw="true" sink="0.05">
+      <Asset path="Assets/Prefabs/Woodland/Bushes/Small_bush_1.prefab" weight="2" minScale="0.8" maxScale="1.2" />
+      <Asset path="Assets/Prefabs/Woodland/Bushes/Small_bush_2.prefab" weight="2" minScale="0.8" maxScale="1.2" />
+      <Asset path="Assets/Prefabs/Woodland/Bushes/Medium_bush_1.prefab" weight="1" minScale="0.8" maxScale="1.2" />
+      <Asset path="Assets/Prefabs/Woodland/Bushes/Medium_bush_2.prefab" weight="1" minScale="0.8" maxScale="1.2" />
+      <Asset path="Assets/Prefabs/Woodland/Bushes/Medium_bush_3.prefab" weight="1" minScale="0.8" maxScale="1.2" />
+    </Placement>
+  </Terrain>
+</BrushPreset>

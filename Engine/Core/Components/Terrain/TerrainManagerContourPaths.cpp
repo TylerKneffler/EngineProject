@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 // CPU twin of Object.hlsl TerrainPathHash / TerrainPathNoise / TerrainPathWeight
 // (without the pixel footprint): keep the two in step.
@@ -40,6 +41,22 @@ float SmoothStep(float a, float b, float x)
     const float t = std::clamp((x - a) / (b - a), 0.f, 1.f);
     return t * t * (3.f - 2.f * t);
 }
+}
+
+float TerrainManager::ContourPathDistance(float worldX, float worldZ, float height) const
+{
+    const auto& p = contourPaths;
+    const float inf = std::numeric_limits<float>::infinity();
+    if (!p.enabled) return inf;
+    const float band = SmoothStep(p.riseStart, std::max(p.riseEnd, p.riseStart + .01f), height) *
+        (1.f - SmoothStep(p.fallStart, std::max(p.fallEnd, p.fallStart + .01f), height));
+    if (band <= 0.f) return inf;
+    float ax = 0.f, az = 0.f, bx = 0.f, bz = 0.f;
+    const float value = p.weightA * PathNoise(worldX, worldZ, p.periodA, p.seedA, ax, az) +
+        p.weightB * PathNoise(worldX, worldZ, p.periodB, p.seedB, bx, bz);
+    const float gx = p.weightA * ax + p.weightB * bx, gz = p.weightA * az + p.weightB * bz;
+    return std::abs(value - p.contour) /
+        std::max(std::sqrt(gx * gx + gz * gz), std::max(p.gradientFloor, 1.e-6f));
 }
 
 float TerrainManager::ContourPathShare(float worldX, float worldZ, float height) const

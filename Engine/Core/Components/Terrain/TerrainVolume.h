@@ -106,6 +106,10 @@ struct SurfaceNetsSeams
     // with carved trails): the two sides missed by centimetres and left holes.
     std::array<const TerrainVolume*, 9> cellVolumes{};
     glm::ivec2 cellSamples{0};
+    // Metres of skirt on the faces toward a missing block on the same level
+    // (a neighbouring cell that is not loaded, drawn by distant terrain), so
+    // the sheet's end meets the distant mesh without a hole. 0: none.
+    float skirt = 0.f;
 };
 void MeshSurfaceNets(const TerrainVolume& volume, const glm::ivec3& first,
     const glm::ivec3& cells, int stride, const SurfaceNetsSeams& seams,

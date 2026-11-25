@@ -8,3 +8,4 @@ Engine/Core/Assets/mmd/Mococo[[:space:]]Dance/Meshes/*.morph filter=lfs diff=lfs
 Engine/Core/Assets/Models/mmd/Mococo[[:space:]]Dance/Meshes/*.morph filter=lfs diff=lfs merge=lfs -text
 *.morph filter=lfs diff=lfs merge=lfs -text
 Engine/Core/Assets/Prefabs/Woodland/OakMeadowGrass.prefab filter=lfs diff=lfs merge=lfs -text
+Engine/Core/Assets/TerrainData/Landscape/world.objects filter=lfs diff=lfs merge=lfs -text

@@ -561,7 +561,8 @@ bool TerrainManager::EditRegion(const TerrainRegionMask& mask,
                 const int64_t gx = int64_t(cell.first) * cellsX + col - col0;
                 if (gx < 0 || gx >= width) continue;
                 const size_t i = size_t(gy * width + gx);
-                grid.heights[i] = terrain->heights[size_t(row) * (cellsX + 1) + col];
+                const size_t source = size_t(row) * (cellsX + 1) + col;
+                grid.heights[i] = terrain->heights[source];
                 grid.valid[i] = 1;
             }
         }
@@ -581,7 +582,7 @@ bool TerrainManager::EditRegion(const TerrainRegionMask& mask,
 }
 
 bool TerrainManager::PaintRegion(const TerrainRegionMask& mask, float strength, int layer,
-    bool erase)
+    bool erase, const Engine::Brushes::BrushRules* rules)
 {
     if (Owner && Owner->GetScene() && Owner->GetScene()->HasStarted()) return false;
     glm::dvec2 minimum, maximum;
@@ -597,8 +598,10 @@ bool TerrainManager::PaintRegion(const TerrainRegionMask& mask, float strength, 
         if (paintResolution > 0 && !m_proceduralCells.count(cell) &&
             terrain->paintResolution != paintResolution)
             terrain->SetPaintResolution(paintResolution);
+        const float originX = float(cell.first * spanX), originZ = float(cell.second * spanZ);
         if (terrain->PaintRegion(mask, strength, layer, erase, cell.first * spanX,
-                cell.second * spanZ))
+                cell.second * spanZ, rules, [this, originX, originZ](float x, float z, float height) {
+                    return ContourPathDistance(originX + x, originZ + z, height); }))
             changed.insert(cell);
     }
     RecordEditedCells(changed);
