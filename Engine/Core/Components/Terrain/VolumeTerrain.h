@@ -120,11 +120,19 @@ public:
     };
 
 private:
+    // A meshed chunk. The meshing job also builds the CPU mesh (bounds
+    // included) and its buffers' bytes, and the GPU vertex buffer where the
+    // backend can create one off the main thread; Update installs the rest
+    // as each chunk arrives. The swap, which every cell of a group takes on
+    // the same frame, then only switches meshes: installing ~100 chunks at
+    // the swap held the main thread up to 96 ms (meadow walk, 2026-11-24).
     struct Built
     {
         Key key;
-        std::vector<Mesh::Vertex> vertices;
-        std::vector<uint32_t> indices;
+        size_t triangles = 0;
+        std::unique_ptr<Mesh> mesh;
+        std::shared_ptr<Engine::Graphics::IGraphicsBuffer> vertexBuffer;
+        bool installed = false;
     };
     struct Chunk
     {
@@ -144,6 +152,7 @@ private:
         std::optional<Built> ready; // meshed for `wanted`, waiting for the swap
     };
     void ReleaseChunks();
+    void InstallBuilt(Built& built, Engine::Graphics::IGraphicsProvider* provider);
     // Sets up the chunk table for m_volume.
     void InstallVolume();
     // fromTerrain: the density being built on a worker thread.

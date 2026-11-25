@@ -1,3 +1,4 @@
+#include <cstdlib>
 #include "TerrainManager.h"
 #include "TerrainObjectLayer.h"
 #include "Core/Scene/Object.h"
@@ -140,6 +141,13 @@ void TerrainManager::ConfigureCellPhysics(Engine::Core::Object& object) const
             volume->fromTerrain = true;
             volume->steepLayer = volumeSteepLayer;
             volume->sampleSpacing = volumeSampleSpacing;
+            // Nothing else draws a loaded cell (far tiles leave it out), so
+            // its volume draws at any distance, coarsest level past lod3: at
+            // 600 m the loaded area's far corners (up to ~720 m from a
+            // viewer at its cell's edge) were holes.
+            volume->drawDistance = std::numeric_limits<float>::max();
+            if (const char* forced = std::getenv("ENGINE_VOLUME_DRAW_DISTANCE"))
+                volume->drawDistance = static_cast<float>(std::atof(forced));
             const double spanX = static_cast<double>(cellsX) * cellWidth;
             const double spanZ = static_cast<double>(cellsY) * cellDepth;
             const glm::dvec3 origin = object.transform.position;

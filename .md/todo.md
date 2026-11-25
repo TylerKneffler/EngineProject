@@ -38,9 +38,27 @@ first-person controller, caches).
       Cost: 0.044 us a warm query; 5 ms a cold cell (the builder paints as it seeds).
       - [ ] Before 5 (far cells, ~16k): seed without painting. Split the trail carve out of `PaintCell`
             (it reads the paint's `crossable` layers) so a seed costs the archive read, not 5 ms.
-- [ ] **2. Near terrain is volume.** Loaded cells always build `VolumeTerrain` (no height-grid mesh or
-      grid collider); `landscape_demo.scene` on it; steep faces in the scanned rock (`rockMaterial`); fix
-      the handover so no cell is ever missing; cell crossings no worse than today.
+- [x] **2. Near terrain is volume** (2026-11-24). `TerrainManager.volumeCells` (+ sample spacing, steep
+      layer) is saved with scenes and in the inspector; `landscape_demo.scene` and build_landscape_demo.py
+      turn it on. Main-thread spikes fixed (meadow walk, update p99 21 -> 9 ms, = height grid):
+      chunk meshes built with bounds on the meshing worker and their vertex buffers made there; GPU
+      buffers installed as chunks arrive under a shared 2 ms/frame budget, not at the group swap (up to
+      96 ms); chunks make their own buffers instead of `AcquireMeshBuffer`, whose one lock is held while a
+      worker creates a large buffer (tiny installs waited 25 ms; `Mesh::InstallOwnBuffers`); replaced chunk
+      meshes released 1 ms/frame (`Mesh::TakeRuntimeLod`; swaps released ~100 at once, 7 ms a cell); level-0
+      colliders kept across seam-only swaps (post-physics p99 7.2 -> 1.05 ms). Holes: loaded volume cells
+      draw at any distance (600 m left the loaded area's far corners empty); far seam cells hang an 8 m
+      skirt under edges bordering loaded cells (volume edges are not the far edge: a slit showed the lake
+      plane at MeadowSlope; same slit with the old 600 m limit, so it predated this). Cell crossings
+      unchanged (88-116 ms both). Logs: `ENGINE_VOLUME_TERRAIN_LOG=1` (slow updates, installs, swaps),
+      `ENGINE_SHADER_COMPILE_LOG=1` (FXC compiles; an uncached volume shader variant compiled through
+      every earlier volume measurement).
+      Distant steep faces as cliff rock (user, 2026-11-24): the macro colour map and far tiles blend to the
+      scanned cliff rock's colour on the volume's steep band (1 - normal.y .25 .. .45); far tiles use their
+      vertex normals (`FarTerrainPalette::steepColor`). The alpine range's faces went from pale to dark rock.
+      - [ ] Still behind the height grid: frame p99 +7 ms (38.8 vs 31.9, mostly update hand-off waits),
+            terrain GPU +0.55 ms and VRAM +110 MB (chunks use the 264-byte mesh vertex and ~6x the draws).
+            Next: a compact volume vertex (position, normal, packed layer weights, rock tint).
 - [ ] **3. Queries move to the field.** Forest, props, undergrowth, `GrassField`/`GrassBlades`, far
       objects, first-person controller, streaming camera, `LandscapeDriver` placement: ground from
       `SurfaceAt` (upward faces only, so nothing grows on overhang ceilings or inside carved holes).

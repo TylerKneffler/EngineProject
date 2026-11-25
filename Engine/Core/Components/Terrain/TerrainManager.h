@@ -430,6 +430,22 @@ public:
         // what the near paint shows (forests, rock, lake beds).
         std::vector<glm::vec3> gridColors;
         int gridHalfExtent = 0;
+        // Steep faces shade toward this colour (negative: off), by the far
+        // vertex's own normal: the grid's 128 m colours averaged a cliff into
+        // its surroundings and the bands know only height, so distant cliffs
+        // were pale meadow tan where near volume cells show scanned rock.
+        // Same measure and band as VolumeTerrain (1 - normal.y, steepStart
+        // .. steepEnd), so near and far turn to rock on the same slopes.
+        glm::vec3 steepColor{-1.f};
+        float steepStart = .25f, steepEnd = .45f;
+        void ApplySteep(float* color, float normalY) const
+        {
+            if (steepColor.x < 0.f) return;
+            float t = std::clamp((1.f - normalY - steepStart) / std::max(steepEnd - steepStart, 1e-3f), 0.f, 1.f);
+            t = t * t * (3.f - 2.f * t);
+            for (int channel = 0; channel < 3; ++channel)
+                color[channel] += (steepColor[channel] - color[channel]) * t;
+        }
         // Bilinear grid color at fractional cell coordinates.
         bool SampleGridColor(float cellX, float cellY, glm::vec3& color) const
         {

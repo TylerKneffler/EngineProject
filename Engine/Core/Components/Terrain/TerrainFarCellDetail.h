@@ -249,5 +249,32 @@ void AppendCellGrid(const CellGrid& cell, std::vector<Mesh::Vertex>& vertices,
             const uint32_t b = a + static_cast<uint32_t>(level + 1);
             indices.insert(indices.end(), {a, b, a + 1, a + 1, b, b + 1});
         }
+    // A skirt under every side that borders a loaded cell: a strip hanging
+    // SkirtDepth straight down, both faces. A loaded cell drawn as a volume
+    // does not follow this edge exactly (surface nets places its vertices
+    // inside the cells, coarse levels 16 m apart), and the gap between them
+    // showed the lake plane below as a bright slit (MeadowSlope, 2026-11-24).
+    constexpr float SkirtDepth = 8.f;
+    const auto gridIndex = [&](int i, int j) { return base + static_cast<uint32_t>(j * (level + 1) + i); };
+    for (int side = 0; side < 4; ++side)
+    {
+        if (!cell.nearEdges[static_cast<size_t>(side)]) continue;
+        std::vector<uint32_t> top, bottom;
+        for (int k = 0; k <= level; ++k)
+        {
+            const int i = side == 0 ? 0 : side == 2 ? level : k;
+            const int j = side == 3 ? 0 : side == 1 ? level : k;
+            const uint32_t upper = gridIndex(i, j);
+            Mesh::Vertex lowered = vertices[upper];
+            lowered.pos[1] -= SkirtDepth;
+            top.push_back(upper);
+            bottom.push_back(static_cast<uint32_t>(vertices.size()));
+            vertices.push_back(lowered);
+        }
+        for (int k = 0; k < level; ++k)
+            indices.insert(indices.end(), {
+                top[k], bottom[k], top[k + 1], top[k + 1], bottom[k], bottom[k + 1],
+                top[k], top[k + 1], bottom[k], top[k + 1], bottom[k + 1], bottom[k]});
+    }
 }
 }

@@ -1,3 +1,4 @@
+#include <chrono>
 #include "pch.h"
 #include "Core/Renderers/D3DShaderCache.h"
 #include "Core/Renderers/HlslFileInclude.h"
@@ -158,8 +159,22 @@ Microsoft::WRL::ComPtr<ID3DBlob> D3DShaderCache::CompileFromFile(
 
     Microsoft::WRL::ComPtr<ID3DBlob> bytecode, errors;
     HlslFileInclude includes(filePath);
+    // ENGINE_SHADER_COMPILE_LOG=1: every compile that missed the cache, how
+    // long it took and how it ended (stderr: unbuffered, survives a kill).
+    static const bool logCompiles = [] {
+        const char* value = std::getenv("ENGINE_SHADER_COMPILE_LOG");
+        return value && value[0] == '1';
+    }();
+    const auto compileStart = std::chrono::steady_clock::now();
+    if (logCompiles)
+        std::fprintf(stderr, "[ShaderCompile] start %s %s %s flags 0x%x cached-as %s\n", filePath.c_str(),
+            entryPoint ? entryPoint : "", target ? target : "", flags, cached.string().c_str());
     const HRESULT hr = D3DCompileFromFile(widePath.c_str(), nullptr, &includes,
         entryPoint, target, flags, 0, &bytecode, &errors);
+    if (logCompiles)
+        std::fprintf(stderr, "[ShaderCompile] %s %s %s after %.1f s\n", FAILED(hr) ? "FAILED" : "done",
+            filePath.c_str(), entryPoint ? entryPoint : "",
+            std::chrono::duration<double>(std::chrono::steady_clock::now() - compileStart).count());
     if (FAILED(hr))
     {
         if (errors)

@@ -297,6 +297,9 @@ TerrainManager::FarTerrainPalette MakePalette(const Altitudes& a)
     TerrainManager::FarTerrainPalette palette;
     for (int layer = 0; layer < LayerCount; ++layer)
         palette.nearColors[layer] = LayerMacroColor(LayerMaterials[layer]);
+    // Steep far faces: the scanned cliff rock volume cells show on steep
+    // faces (VolumeTerrain::rockMaterial), as dark as the far bands.
+    palette.steepColor = LayerMacroColor("Assets/TerrainData/Sculpts/cliff_rock.material") * .85f;
     const auto& mean = palette.nearColors;
     const glm::vec3 wooded = glm::mix(mean[Grass], mean[ForestSoil] * .6f, .35f);
     const glm::vec3 summit = glm::mix(mean[Rock], mean[Snow], .55f);
@@ -464,6 +467,17 @@ std::vector<glm::vec4> ComputeMacroColors(const std::string& archivePath, uint64
                 for (int layer = 0; layer < LayerCount; ++layer)
                     color += means[layer] * weights[layer];
                 color *= glm::mix(glm::vec3(1.f), LushTint, lushShare);
+                // Steep faces: the scanned cliff rock near volume cells show
+                // there (VolumeTerrain's steep band, 1 - normal.y .25 .. .45),
+                // not the paint's pale rock layer: distant cliffs and the
+                // escarpment read as bright tan faces (2026-11-24).
+                {
+                    static const glm::vec3 cliff = LayerMacroColor("Assets/TerrainData/Sculpts/cliff_rock.material");
+                    const float normalY = 1.f / std::sqrt(1.f + slope * slope);
+                    float t = std::clamp((1.f - normalY - .25f) / .2f, 0.f, 1.f);
+                    t = t * t * (3.f - 2.f * t);
+                    color = glm::mix(color, cliff, t);
+                }
                 // The color is the ground only; alpha (canopy cover) is
                 // filled by the caller from the real tree placements, and
                 // Object.hlsl paints that canopy only past the real trees'

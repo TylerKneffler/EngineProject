@@ -150,6 +150,12 @@ public:
     void CreateBuffer(IGraphicsBufferFactory* bufferFactory,
         Engine::Rendering::PreparedMeshBuffer* prepared = nullptr,
         Engine::Rendering::PreparedMeshBuffer* preparedIndices = nullptr);
+    // Unique geometry (terrain chunks): buffers made by the caller, not
+    // shared through AcquireMeshBuffer, whose one lock is held while each
+    // buffer is created (a worker making a large one stalled the main
+    // thread's small one by up to 25 ms).
+    void InstallOwnBuffers(std::shared_ptr<IGraphicsBuffer> vertexBuffer,
+        std::shared_ptr<IGraphicsBuffer> indexBuffer, IGraphicsBufferFactory* bufferFactory);
     void InstallPreparedStaticVertexBuffer(
         std::shared_ptr<IGraphicsBuffer> buffer, IGraphicsBufferFactory* bufferFactory,
         Engine::Rendering::PreparedMeshBuffer* preparedIndices = nullptr);
@@ -318,6 +324,10 @@ public:
     // These caches are transient and do not change the mesh asset's file path.
     static constexpr int MaximumRuntimeLods = 32;
     bool StoreRuntimeLod(int lod, std::unique_ptr<Mesh> geometry);
+    // Takes a stored level that is neither drawn nor fading out, so its owner
+    // can release its buffers later (StoreRuntimeLod releases the level it
+    // replaces at once). Null when there is none or it is in use.
+    std::unique_ptr<Mesh> TakeRuntimeLod(int lod);
     bool IsRuntimeLodResident(int lod) const;
     Mesh* GetRuntimeLodMesh(int lod) const
     { return !IsRuntimeLodResident(lod) ? nullptr : lod == m_activeRuntimeLod ? const_cast<Mesh*>(this) : m_runtimeLods[lod].get(); }

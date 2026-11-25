@@ -163,6 +163,7 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
             vertex.color[1] = gridColor.g;
             vertex.color[2] = gridColor.b;
             vertex.color[3] = 1.f;
+            m_farPalette.ApplySteep(vertex.color, vertex.normal[1]);
             return;
         }
         float weights[6];
@@ -176,6 +177,7 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
         vertex.color[1] = color.g;
         vertex.color[2] = color.b;
         vertex.color[3] = 1.f;
+        m_farPalette.ApplySteep(vertex.color, vertex.normal[1]);
     };
     const auto blendSeamColor = [&](Mesh::Vertex& vertex,
         const SeamSurface* surface, int seam, int col, int row,
@@ -1077,6 +1079,10 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
             for (float boundary : m_farPalette.heightBoundaries)
                 HashValue(fingerprint, boundary);
             HashValue(fingerprint, m_farPalette.heightBlendHalfWidth);
+            for (int channel = 0; channel < 3; ++channel)
+                HashValue(fingerprint, m_farPalette.steepColor[channel]);
+            HashValue(fingerprint, m_farPalette.steepStart);
+            HashValue(fingerprint, m_farPalette.steepEnd);
             for (int y = tile.startY - 1; y <= tile.endY + 1; ++y)
                 for (int x = tile.startX - 1; x <= tile.endX + 1; ++x)
                 {
@@ -1095,7 +1101,7 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
             for (uint8_t level : tile.desiredLevels)
                 HashValue(fingerprint, level);
             cachePath = std::filesystem::path(m_cacheDirectory) / "far_tiles" /
-                "v5" / std::to_string(m_farSourceSignature) /
+                "v6" / std::to_string(m_farSourceSignature) /
                 (std::to_string(tile.startX) + "_" +
                     std::to_string(tile.startY) + "_" +
                     std::to_string(tile.lodStride) + ".fartile");

@@ -813,6 +813,8 @@ def write_scene(world):
             # impostors (Tools/generate_forest_clusters.py), stands at
             # made-up positions, are off.
             "farClusterDistance": "0", "farCanopyDistance": "2200", "farClusterSize": "40",
+            # Loaded cells as density volumes (todo.md "Terrain: volume-first conversion", step 2).
+            "volumeCells": "true",
             "farClusterMinimumTrees": "5",
             "maxLodChangesPerUpdate": "4", "maxLoadsPerUpdate": "6",
             "maxUnloadsPerUpdate": "4", "asyncStreaming": "true",

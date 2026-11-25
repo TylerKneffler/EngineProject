@@ -128,6 +128,7 @@ void TerrainManager::FarPrepareLoop()
                         vertex.color[1] = gridColor.g;
                         vertex.color[2] = gridColor.b;
                         vertex.color[3] = 1.f;
+                        task.palette.ApplySteep(vertex.color, vertex.normal[1]);
                         return;
                     }
                     float weights[6];
@@ -141,6 +142,7 @@ void TerrainManager::FarPrepareLoop()
                     vertex.color[1] = color.g;
                     vertex.color[2] = color.b;
                     vertex.color[3] = 1.f;
+                    task.palette.ApplySteep(vertex.color, vertex.normal[1]);
                 };
                 const auto blendSeamColor = [&](Mesh::Vertex& vertex,
                     const FarPrepareTask::SeamSurface* surface,

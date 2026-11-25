@@ -31,6 +31,13 @@ bool Mesh::StoreRuntimeLod(int lod, std::unique_ptr<Mesh> geometry)
     return true;
 }
 
+std::unique_ptr<Mesh> Mesh::TakeRuntimeLod(int lod)
+{
+    if (lod < 0 || static_cast<size_t>(lod) >= m_runtimeLods.size() ||
+        lod == m_activeRuntimeLod || lod == m_previousRuntimeLod) return nullptr;
+    return std::move(m_runtimeLods[lod]);
+}
+
 bool Mesh::IsRuntimeLodResident(int lod) const
 {
     return lod >= 0 && static_cast<size_t>(lod) < m_runtimeLods.size() &&

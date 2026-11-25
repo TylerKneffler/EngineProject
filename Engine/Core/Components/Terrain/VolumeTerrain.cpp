@@ -9,11 +9,14 @@
 #include "Core/Components/Terrain/TerrainBatchAppearance.h"
 #include "Core/Components/Terrain/TerrainVolumeBuild.h"
 #include "Core/Scene/Object.h"
+#include "Core/Rendering/SharedMeshBuffers.h"
+#include "Core/Graphics/IGraphicsProvider.h"
 #include "Core/Scene/Scene.h"
 #include <algorithm>
 #include <chrono>
 #include <atomic>
 #include <map>
+#include <deque>
 #include <fstream>
 #include <filesystem>
 #include <unordered_map>
@@ -33,6 +36,43 @@ constexpr int LevelCount = 4;
 // builds and chunk meshing jobs in flight, each capped.
 std::atomic<int> g_builds{0};
 std::atomic<int> g_meshJobs{0};
+// GPU buffers of finished chunks are installed under one budget per frame
+// for all volumes of a scene (main thread only): jobs finish in bursts.
+// ENGINE_VOLUME_INSTALL_MS overrides the 2 ms.
+struct InstallBudget
+{
+    uint64_t frame = UINT64_MAX;
+    double usedMs = 0.0;
+    int installs = 0;
+};
+std::map<const void*, InstallBudget> g_installBudgets;
+// Replaced chunk meshes, released a few a frame (main thread only): a
+// group's swap replaced ~100 at once and released their GPU buffers on the
+// spot, up to 7 ms a cell (meadow walk, 2026-11-24).
+struct RetiredMeshes
+{
+    uint64_t frame = UINT64_MAX;
+    std::deque<std::unique_ptr<Engine::Components::Mesh>> meshes;
+};
+std::map<const void*, RetiredMeshes> g_retiredMeshes;
+void ReleaseRetiredMeshes(const void* scene, uint64_t frame)
+{
+    auto& retired = g_retiredMeshes[scene];
+    if (retired.frame == frame) return;
+    retired.frame = frame;
+    const auto start = std::chrono::steady_clock::now();
+    while (!retired.meshes.empty() &&
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count() < 1.0)
+        retired.meshes.pop_front();
+}
+double InstallBudgetMs()
+{
+    static const double budget = [] {
+        const char* value = std::getenv("ENGINE_VOLUME_INSTALL_MS");
+        return value && *value ? std::max(.1, std::atof(value)) : 2.0;
+    }();
+    return budget;
+}
 constexpr int MaxBuilds = 2;
 int MaxMeshJobs()
 {
@@ -354,7 +394,12 @@ bool VolumeTerrain::StartBuild()
     // Scanned rock: the slice after the painted layers. One material object
     // for every cell, so they share one set of layer arrays.
     m_rock = {};
-    if (!rockMaterial.empty())
+    // ENGINE_VOLUME_ROCK=0: no scanned rock slice (A/B its shading cost).
+    static const bool rockOff = [] {
+        const char* value = std::getenv("ENGINE_VOLUME_ROCK");
+        return value && value[0] == '0';
+    }();
+    if (!rockMaterial.empty() && !rockOff)
     {
         static std::mutex mutex;
         static std::map<std::string, std::shared_ptr<Material>> shared;
@@ -532,22 +577,27 @@ void VolumeTerrain::ChooseKeys(const glm::dvec3& camera)
 
 void VolumeTerrain::SwapIn(const glm::vec3& eye)
 {
+    using SwapClock = std::chrono::steady_clock;
+    double dropMs = 0.0, createMs = 0.0, storeMs = 0.0, retireMs = 0.0;
     auto* scene = Owner->GetScene();
     auto* provider = scene ? scene->GetGraphicsProvider() : nullptr;
     for (auto& chunk : m_chunks)
     {
         if (chunk.wanted == chunk.shown) continue;
-        if (chunk.wanted.level < 0 || !chunk.ready || chunk.ready->indices.empty())
+        if (chunk.wanted.level < 0 || !chunk.ready || !chunk.ready->mesh)
         {
+            const auto dropStart = SwapClock::now();
             DropChunk(chunk);   // streamed out, or nothing to draw
+            dropMs += std::chrono::duration<double, std::milli>(SwapClock::now() - dropStart).count();
             chunk.shown = chunk.wanted;
             chunk.ready.reset();
             continue;
         }
         Built built = std::move(*chunk.ready);
         chunk.ready.reset();
-        chunk.triangles = built.indices.size() / 3;
+        chunk.triangles = built.triangles;
         const bool fade = chunk.object && chunk.mesh;
+        const auto createStart = SwapClock::now();
         if (!chunk.object)
         {
             const auto& i = chunk.index;
@@ -565,20 +615,29 @@ void VolumeTerrain::SwapIn(const glm::vec3& eye)
             chunk.mesh = chunk.object->AddComponent<Mesh>();
             if (provider) chunk.mesh->PrepareGraphicsResources(provider);
         }
-        auto geometry = std::make_unique<Mesh>();
-        geometry->SetIndexedGeometry(std::move(built.vertices), std::move(built.indices));
-        if (provider) geometry->PrepareGraphicsResources(provider);
+        createMs += std::chrono::duration<double, std::milli>(SwapClock::now() - createStart).count();
+        const auto storeStart = SwapClock::now();
+        // Normally installed when it arrived (Update); a late one here.
+        if (!built.installed && provider) InstallBuilt(built, provider);
+        auto geometry = std::move(built.mesh);
         // Two slots in turn: the new mesh fades in over the old one.
         if (fade) chunk.mesh->AdvanceRuntimeLodTransition(1.e3f);   // finish the last fade first
         const int slot = fade ? 1 - chunk.slot : 0;
+        // The level this replaces goes to the retired queue, released later.
+        if (auto replaced = chunk.mesh->TakeRuntimeLod(slot))
+            g_retiredMeshes[scene].meshes.push_back(std::move(replaced));
         chunk.mesh->StoreRuntimeLod(slot, std::move(geometry));
         if (!fade || !chunk.mesh->BeginRuntimeLodTransition(slot, lodFadeSeconds))
             chunk.mesh->SelectRuntimeLod(slot);
         chunk.slot = slot;
+        storeMs += std::chrono::duration<double, std::milli>(SwapClock::now() - storeStart).count();
         chunk.object->enabled = true;
         chunk.shown = chunk.wanted;
-        // The collision copy follows the new mesh (Update rebuilds it).
-        if (chunk.collision)
+        // The collision copy follows the new mesh (Update rebuilds it) when
+        // the chunk leaves level 0. At level 0 a new mesh differs only along
+        // its seams (a neighbour's level changed): keep the cooked collider,
+        // which was re-cooked on every such swap (post-physics p99 0.3 -> 7 ms).
+        if (chunk.collision && chunk.shown.level != 0)
         {
             scene->RequestRemoveObject(chunk.collision);
             chunk.collision = nullptr;
@@ -586,8 +645,13 @@ void VolumeTerrain::SwapIn(const glm::vec3& eye)
     }
     (void)eye;
     // A replaced volume's chunks go; (fromTerrain) the terrain's mesh hands over.
+    const auto retireStart = SwapClock::now();
     for (auto& chunk : m_retiring) DropChunk(chunk);
     m_retiring.clear();
+    retireMs = std::chrono::duration<double, std::milli>(SwapClock::now() - retireStart).count();
+    static const bool logSwap = std::getenv("ENGINE_VOLUME_TERRAIN_LOG") != nullptr;
+    if (logSwap && dropMs + createMs + storeMs + retireMs > 1.0)
+        std::fprintf(stderr, "[VolumeSwap] drop %.1f create %.1f store %.1f retire %.1f ms\n", dropMs, createMs, storeMs, retireMs);
     if (fromTerrain && !m_terrainHidden)
         if (auto* mesh = Owner->GetComponent<Mesh>())
         {
@@ -608,8 +672,38 @@ void VolumeTerrain::SwapIn(const glm::vec3& eye)
         }
 }
 
+void VolumeTerrain::InstallBuilt(Built& built, Engine::Graphics::IGraphicsProvider* provider)
+{
+    if (built.installed || !built.mesh || !provider) return;
+    static const bool logInstalls = std::getenv("ENGINE_VOLUME_TERRAIN_LOG") != nullptr;
+    const auto installStart = std::chrono::steady_clock::now();
+    const size_t vertexCount = built.mesh->GetVertices().size(), indexCount = built.mesh->GetIndices().size();
+    const bool onWorker = static_cast<bool>(built.vertexBuffer);
+    auto* factory = provider->GetBufferFactory();
+    const auto& vertices = built.mesh->GetVertices();
+    const auto& indices = built.mesh->GetIndices();
+    std::shared_ptr<Engine::Graphics::IGraphicsBuffer> vertexBuffer = std::move(built.vertexBuffer);
+    if (!vertexBuffer)
+        vertexBuffer = factory->CreateStaticVertexBufferDeferred(vertices.size() * sizeof(Mesh::Vertex), vertices.data());
+    std::shared_ptr<Engine::Graphics::IGraphicsBuffer> indexBuffer = factory->CreateBuffer(
+        Engine::Graphics::IGraphicsBuffer::Usage::IndexBuffer, Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
+        indices.size() * sizeof(uint32_t), indices.data(), sizeof(uint32_t));
+    built.mesh->InstallOwnBuffers(std::move(vertexBuffer), std::move(indexBuffer), factory);
+    built.installed = true;
+    const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - installStart).count();
+    if (logInstalls && ms > .5)
+        std::fprintf(stderr, "[VolumeInstall] %.2f ms, %zu vertices, %zu indices, vertex buffer from worker %d\n",
+            ms, vertexCount, indexCount, onWorker ? 1 : 0);
+}
+
 void VolumeTerrain::Update()
 {
+    using UpdateClock = std::chrono::steady_clock;
+    const auto updateStart = UpdateClock::now();
+    double installMs = 0.0, swapMs = 0.0, collisionMs = 0.0;
+    double arrivalMs = 0.0, uploadMs = 0.0, keysMs = 0.0, launchMs = 0.0;
+    int launched = 0;
+    int collisionsBuilt = 0;
     auto* scene = Owner ? Owner->GetScene() : nullptr;
     if (scene && fromTerrain)
     {
@@ -628,7 +722,9 @@ void VolumeTerrain::Update()
                 }
                 m_chunks.clear();
                 m_volume = std::move(built);
+                const auto installStart = UpdateClock::now();
                 InstallVolume();
+                installMs = std::chrono::duration<double, std::milli>(UpdateClock::now() - installStart).count();
             }
         }
         if (!m_volumeJob.valid() && m_rebuildPending) m_rebuildPending = !StartBuild();
@@ -644,10 +740,12 @@ void VolumeTerrain::Update()
 
     auto& steps = g_steps[scene];
     Advance(steps, scene->GetFrameIndex(), eyeWorld, lodStepMetres);
+    ReleaseRetiredMeshes(scene, scene->GetFrameIndex());
     const auto self = steps.members.find({group ? group : Owner, cellX, cellZ});
     const bool member = self != steps.members.end() && self->second == this;
 
     // Finished meshing jobs: kept if still wanted.
+    const auto arrivalStart = UpdateClock::now();
     for (auto& chunk : m_chunks)
         if (chunk.meshing && chunk.job.valid() &&
             chunk.job.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
@@ -656,12 +754,44 @@ void VolumeTerrain::Update()
             Built built = chunk.job.get();
             if (built.key == chunk.wanted && chunk.wanted != chunk.shown) chunk.ready = std::move(built);
         }
+    arrivalMs = std::chrono::duration<double, std::milli>(UpdateClock::now() - arrivalStart).count();
     if (member && m_keysStep != steps.step)
     {
+        const auto keysStart = UpdateClock::now();
         ChooseKeys(steps.camera);
         m_keysStep = steps.step;
+        keysMs = std::chrono::duration<double, std::milli>(UpdateClock::now() - keysStart).count();
     }
-    if (member && steps.swap && m_keysStep == steps.shown) SwapIn(eye);
+    if (member && steps.swap && m_keysStep == steps.shown)
+    {
+        const auto swapStart = UpdateClock::now();
+        SwapIn(eye);
+        swapMs = std::chrono::duration<double, std::milli>(UpdateClock::now() - swapStart).count();
+    }
+
+    // Finished chunks' GPU buffers, nearest first, under the shared budget,
+    // so the swap never installs them.
+    if (auto* provider = scene->GetGraphicsProvider())
+    {
+        auto& budget = g_installBudgets[scene];
+        if (budget.frame != scene->GetFrameIndex())
+            budget = {scene->GetFrameIndex(), 0.0, 0};
+        std::vector<std::pair<float, size_t>> arrived;
+        for (size_t i = 0; i < m_chunks.size(); ++i)
+            if (m_chunks[i].ready && !m_chunks[i].ready->installed && m_chunks[i].ready->mesh)
+                arrived.emplace_back(DistanceToBox(eye, m_chunks[i].minimum, m_chunks[i].maximum), i);
+        std::sort(arrived.begin(), arrived.end());
+        for (const auto& [distance, i] : arrived)
+        {
+            if (budget.installs > 0 && budget.usedMs >= InstallBudgetMs()) break;
+            const auto installStart = UpdateClock::now();
+            InstallBuilt(*m_chunks[i].ready, provider);
+            const double spent = std::chrono::duration<double, std::milli>(UpdateClock::now() - installStart).count();
+            budget.usedMs += spent;
+            uploadMs += spent;
+            ++budget.installs;
+        }
+    }
 
     // Mesh what the step being prepared needs, nearest first.
     bool prepared = member && m_keysStep == steps.step;
@@ -669,13 +799,19 @@ void VolumeTerrain::Update()
     for (size_t i = 0; i < m_chunks.size(); ++i)
     {
         const auto& chunk = m_chunks[i];
-        if (chunk.wanted == chunk.shown || chunk.wanted.level < 0 || (chunk.ready && chunk.ready->key == chunk.wanted))
+        if (chunk.wanted == chunk.shown || chunk.wanted.level < 0) continue;
+        if (chunk.ready && chunk.ready->key == chunk.wanted)
+        {
+            // Meshed; prepared once its buffers are in.
+            if (!chunk.ready->installed && chunk.ready->mesh) prepared = false;
             continue;
+        }
         prepared = false;
         if (!chunk.meshing) wanting.emplace_back(DistanceToBox(eye, chunk.minimum, chunk.maximum), i);
     }
     m_preparedStep = prepared ? steps.step : 0;
     std::sort(wanting.begin(), wanting.end());
+    const auto launchStart = UpdateClock::now();
     const int cells = std::clamp(chunkCells, 4, 256);
     for (const auto& [distance, i] : wanting)
     {
@@ -695,23 +831,45 @@ void VolumeTerrain::Update()
         const bool weights = !m_layerMaterials.empty();
         const int steep = steepLayer;
         const RockSurface rock = m_rock;
+        auto* provider = scene->GetGraphicsProvider();
+        auto* bufferFactory = provider ? provider->GetBufferFactory() : nullptr;
+        const bool workerBuffer = bufferFactory &&
+            bufferFactory->SupportsWorkerThreadStaticVertexBufferCreation();
         chunk.job = std::async(std::launch::async,
             [volume = m_volume, paint = m_paint, first, span, stride, seams, key, start, end, extent,
-             weights, steep, rock, cellVolumes]() mutable
+             weights, steep, rock, cellVolumes, bufferFactory, workerBuffer]() mutable
             {
                 JobSlot slot{&g_meshJobs};
                 for (size_t i = 0; i < cellVolumes.size(); ++i)
                     seams.cellVolumes[i] = i == 4 ? nullptr : cellVolumes[i].get();
                 Built built;
                 built.key = key;
-                MeshSurfaceNets(*volume, first, span, stride, seams, built.vertices, built.indices);
-                if (paint) ApplyPaintWeights(built.vertices, *paint, steep, start, end, rock);
-                else if (weights) ApplySlopeWeights(built.vertices, start, end, extent);
+                std::vector<Mesh::Vertex> vertices;
+                std::vector<uint32_t> indices;
+                MeshSurfaceNets(*volume, first, span, stride, seams, vertices, indices);
+                if (paint) ApplyPaintWeights(vertices, *paint, steep, start, end, rock);
+                else if (weights) ApplySlopeWeights(vertices, start, end, extent);
+                if (indices.empty()) return built;
+                const auto bounds = Mesh::PrepareIndexedGeometry(vertices, indices);
+                if (!bounds) return built;
+                built.triangles = indices.size() / 3;
+                auto mesh = std::make_unique<Mesh>();
+                if (!mesh->SetPreparedIndexedGeometry(std::move(vertices), std::move(indices), *bounds))
+                    return built;
+                // Each chunk is unique: its own buffers, not the shared
+                // content cache (see Mesh::InstallOwnBuffers).
+                const auto& meshVertices = mesh->GetVertices();
+                if (workerBuffer)
+                    built.vertexBuffer = bufferFactory->CreateStaticVertexBuffer(
+                        meshVertices.size() * sizeof(Mesh::Vertex), meshVertices.data());
+                built.mesh = std::move(mesh);
                 return built;
             });
         chunk.jobKey = key;
         chunk.meshing = true;
+        ++launched;
     }
+    launchMs = std::chrono::duration<double, std::milli>(UpdateClock::now() - launchStart).count();
 
     // Fades, collision near the camera, stats.
     m_stats = {};
@@ -728,6 +886,8 @@ void VolumeTerrain::Update()
             distance <= collisionDistance)
             if (const Mesh* shown = chunk.mesh->GetRuntimeLodMesh(chunk.slot))
             {
+                const auto collisionStart = UpdateClock::now();
+                ++collisionsBuilt;
                 const auto& i = chunk.index;
                 chunk.collision = scene->AddObject("Volume collision " + std::to_string(i.x) + "," +
                     std::to_string(i.y) + "," + std::to_string(i.z));
@@ -743,6 +903,7 @@ void VolumeTerrain::Update()
                 body->useGravity = false;
                 body->friction = .9f;
                 body->restitution = 0.f;
+                collisionMs += std::chrono::duration<double, std::milli>(UpdateClock::now() - collisionStart).count();
             }
         if (chunk.object && chunk.shown.level >= 0)
         {
@@ -753,6 +914,27 @@ void VolumeTerrain::Update()
         m_stats.colliders += chunk.collision != nullptr;
         m_stats.chunksMeshing += chunk.meshing;
     }
+    // ENGINE_VOLUME_TERRAIN_LOG=1: updates that took a while, and on what.
+    static const bool logSlow = std::getenv("ENGINE_VOLUME_TERRAIN_LOG") != nullptr;
+    const double totalMs = std::chrono::duration<double, std::milli>(UpdateClock::now() - updateStart).count();
+    if (logSlow && scene)
+    {
+        // All volumes of a frame together.
+        static std::map<const void*, std::tuple<uint64_t, double, int>> frames;
+        auto& [frame, sum, count] = frames[scene];
+        if (frame != scene->GetFrameIndex())
+        {
+            if (sum > 3.0)
+                std::printf("[VolumeTerrain] frame %llu all volumes %.1f ms over %d updates\n",
+                    static_cast<unsigned long long>(frame), sum, count);
+            frame = scene->GetFrameIndex(); sum = 0.0; count = 0;
+        }
+        sum += totalMs; ++count;
+    }
+    if (logSlow && totalMs > 1.0 && Owner)
+        std::printf("[VolumeTerrain] %s frame %llu update %.1f ms: install %.1f, swap %.1f, collision %.1f (%d built), arrivals %.1f, uploads %.1f, keys %.1f, launch %.1f (%d jobs)\n",
+            Owner->name.c_str(), static_cast<unsigned long long>(scene ? scene->GetFrameIndex() : 0),
+            totalMs, installMs, swapMs, collisionMs, collisionsBuilt, arrivalMs, uploadMs, keysMs, launchMs, launched);
 }
 
 

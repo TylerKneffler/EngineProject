@@ -169,6 +169,19 @@ void Mesh::CreateBuffer(IGraphicsBufferFactory* bufferFactory,
     m_ready = true;
 }
 
+void Mesh::InstallOwnBuffers(std::shared_ptr<IGraphicsBuffer> vertexBuffer,
+    std::shared_ptr<IGraphicsBuffer> indexBuffer, IGraphicsBufferFactory* bufferFactory)
+{
+    if (!vertexBuffer || !bufferFactory || m_vertices.empty() ||
+        (!m_indices.empty() && !indexBuffer)) return;
+    m_bufferFactory = bufferFactory;
+    ReplaceVertexBuffer(std::move(vertexBuffer));
+    ReplaceIndexBuffer(std::move(indexBuffer));
+    m_sharedVertexBuffer = false;
+    m_sharedIndexBuffer = false;
+    m_ready = true;
+}
+
 void Mesh::InstallPreparedStaticVertexBuffer(
     std::shared_ptr<IGraphicsBuffer> buffer, IGraphicsBufferFactory* bufferFactory,
     Engine::Rendering::PreparedMeshBuffer* preparedIndices)
