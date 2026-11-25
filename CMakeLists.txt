@@ -2436,6 +2436,20 @@ if(NOT ENGINE_PROJECT_DIR AND
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/TerrainFieldTests.cpp")
+    enable_testing()
+    add_executable(TerrainFieldTests EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/TerrainFieldTests.cpp")
+    target_link_libraries(TerrainFieldTests PRIVATE Engine)
+    target_include_directories(TerrainFieldTests PRIVATE
+        "${ENGINE_ROOT}" "${ENGINE_ROOT}/Engine")
+    target_compile_definitions(TerrainFieldTests PRIVATE NOMINMAX)
+    add_test(NAME TerrainField COMMAND TerrainFieldTests)
+    set_tests_properties(TerrainField PROPERTIES
+        WORKING_DIRECTORY "${ENGINE_ROOT}" TIMEOUT 120)
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
    EXISTS "${ENGINE_LOCAL_TEST_ROOT}/OcclusionBufferTests.cpp")
     enable_testing()
     add_executable(OcclusionBufferTests EXCLUDE_FROM_ALL

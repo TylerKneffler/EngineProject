@@ -76,6 +76,7 @@ void TerrainManager::UpdateStreamingAtPosition(
     if (m_editorStreaming) InvalidatePrepared();
     m_editorStreaming = false;
     StreamCells(centerX, centerY);
+    CheckTerrainField();
     const auto farObjectsStart = std::chrono::steady_clock::now();
     UpdateNearObjects();
     UpdateFarObjects(centerX, centerY);

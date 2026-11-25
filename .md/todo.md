@@ -5,6 +5,60 @@ Open work only, as checkboxes. Finished items go to todo_history.md; notes, rese
 ## To investigate
 
 
+## Terrain: volume-first conversion (2026-11-24, user request: "convert fully to sculpt and remove height map dependency")
+
+Decision (user, 2026-11-24): **volume-first, heights as seed.** Every runtime consumer (near and far
+rendering, collision, tree/grass/prop placement, paint, brushes, ground queries) reads one terrain field;
+its base comes from a generator (today the baked `world.heights`), with sculpt edits stored sparsely per
+cell. Not a fully stored world volume (~0.8 GB at 4 m, tens of GB finer), not "volume near, heights far".
+Starting point: branch `terrain-far-cell-detail` (87d04fa9). Sculpts/stamps were removed in 9f84ec99 in
+favour of `VolumeTerrain` (heights + `.volumeedit`); `volumeCells` is off in `landscape_demo.scene`.
+Height reads today: 31 files (far tiles and far-cell detail, streaming, colliders, paint, hydrology, sun
+shadow, trail paths, forest/prop/grass placement, far objects, macro colour, region edits and brushes,
+first-person controller, caches).
+
+- [x] **0. Baseline** (2026-11-24, branch `terrain-far-cell-detail`). Meadow walk 1080p, two interleaved
+      pairs, height grid / `ENGINE_VOLUME_TERRAIN=1`: median 18.2-19.6 / 19.7-20.0 ms, p99 39-40 / 59-66 ms,
+      terrain GPU 1.15 / 1.84 ms, VRAM 1.69-1.72 / 1.83-1.98 GB, crossing frames 91-124 / 98-119 ms.
+      Look (`.local/transitions/volume_baseline.png`): Escarpment close up, plaster face with a grid
+      pattern / scanned rock (better; tile repeat visible). From the meadow trail (t903) no difference:
+      the escarpment's bare faces there are far tiles either way (flat tan), so they only change with 4-5.
+- [x] **1. Terrain field API** (2026-11-24). `Components/Terrain/TerrainField`: `Density`, `Normal`,
+      `SurfaceAt(x, z, from)` (first air-to-ground crossing going down: open sky by default, under an arch
+      from below it), `Raycast`, `HasEdits`, `SeedHeights`, `Invalidate`. Evaluated exactly (the density
+      VolumeTerrain meshes: seed ground, then own and neighbours' volume edits in FeedVolumeNeighbours
+      order), never from built volumes; cells cached (LRU 2048), thread-safe. `TerrainManager::
+      GetTerrainField()` (shared_ptr, safe on workers): seed = procedural builder (it sinks trail tracks
+      0.12 m, so the raw archive was off by that) else archive, plus `.terrainedit` heights for cells the
+      manager treats as edited (a stale `-1_0.terrainedit` that loaded cells ignore was 7.9 m off), plus
+      live editor edits (RecordEditedCells); AddVolumeEdit invalidates. Checks: `TerrainFieldTests`
+      (plain grid exact, crater matches the meshed volume to 2 mm near the surface, edits across a cell
+      border, arch top vs ground under it, invalidation, 8 threads with an evicting cache) and
+      `ENGINE_TERRAIN_FIELD_CHECK=1` on the landscape: 49 loaded cells, 100,352 samples, 0.0000 m worst.
+      Cost: 0.044 us a warm query; 5 ms a cold cell (the builder paints as it seeds).
+      - [ ] Before 5 (far cells, ~16k): seed without painting. Split the trail carve out of `PaintCell`
+            (it reads the paint's `crossable` layers) so a seed costs the archive read, not 5 ms.
+- [ ] **2. Near terrain is volume.** Loaded cells always build `VolumeTerrain` (no height-grid mesh or
+      grid collider); `landscape_demo.scene` on it; steep faces in the scanned rock (`rockMaterial`); fix
+      the handover so no cell is ever missing; cell crossings no worse than today.
+- [ ] **3. Queries move to the field.** Forest, props, undergrowth, `GrassField`/`GrassBlades`, far
+      objects, first-person controller, streaming camera, `LandscapeDriver` placement: ground from
+      `SurfaceAt` (upward faces only, so nothing grows on overhang ceilings or inside carved holes).
+- [ ] **4. Paint on the volume.** Layer weights, hydrology tint, lushness and trail contour paths
+      evaluated on the field per vertex (slope from the density gradient), not per height sample.
+- [ ] **5. Far terrain from the field.** Far chunks meshed from the field at coarse strides (surface nets
+      levels with skirts, screen-error selection, the far-cell detail lessons: no pops at the loaded
+      border, compact static buffers, no crossing hitches); replaces far tiles, `world.fargrid` and
+      far-cell detail. Sun shadow height map, macro colour and far objects read the field.
+- [ ] **6. Sculpting.** Editor brushes on the volume (raise, lower, smooth, flatten, add rock, carve) with
+      undo, writing per-cell edits; `TerrainRegionEdit`/`TerrainManagerEditing`/`TerrainBrushShape` move
+      to it. Escarpment and cliffs re-made as volume edits (rock faces, overhangs).
+- [ ] **7. Remove the height dependency.** Delete the height-grid cell mesh path, far tiles, far grid and
+      direct `Terrain::heights` readers; the archive is only the seed generator's input; caches and
+      scene format migrated; meadow walk, forest walk, Vista and Escarpment at or above today's frame
+      rate (RTX 4090 target: 100+ fps on large landscapes, 60 floor with rich foliage).
+- [ ] Open from the far-cell detail work: cell-crossing frames 105-139 ms vs 52-69 ms before (fold into 5).
+
 ### Foliage Phase 7: World detail (2026-11-19, user request: paths, streams, small things, cliffs/overhangs)
 - [ ] **Streams**: not done. The erosion flow map is too coarse (macro grid) to place a stream bed, and
       running water needs a carved channel in the height archive plus water surfaces that follow the

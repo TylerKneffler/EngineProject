@@ -523,6 +523,8 @@ void TerrainManager::RecordEditedCells(const std::set<Cell>& changedCells)
     {
         auto* terrain = GetLoadedCell(cell.first, cell.second);
         if (!terrain) continue;
+        // Ground queries see the edit at once, before it is saved.
+        InvalidateTerrainField(cell, &terrain->heights);
         if (m_proceduralCells.count(cell) && !cellDataDirectory.empty())
         {
             m_editedProcedural.insert(cell);

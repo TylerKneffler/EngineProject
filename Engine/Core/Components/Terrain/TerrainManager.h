@@ -4,6 +4,7 @@
 #include "Core/Components/Terrain/TerrainObjectLayer.h"
 #include "Core/Components/Terrain/TerrainHeightArchive.h"
 #include "Core/Components/Terrain/TerrainFarCellDetail.h"
+#include "Core/Components/Terrain/TerrainField.h"
 #include "Core/Components/Terrain/TerrainVolumeBuild.h"
 #include "Core/Components/Physics/MeshObjectCollider.h"
 #include <climits>
@@ -113,6 +114,13 @@ public:
     // is refused.
     bool AddVolumeEdit(const TerrainVolumeEdit& edit);
     std::string GetVolumeEditFilePath(Cell cell) const;
+    // The terrain as one field (TerrainField.h; todo.md "Terrain: volume-first
+    // conversion"): ground queries (SurfaceAt, Raycast, Density) over the
+    // seed heights (height archive plus height edits, or the procedural
+    // builder) and every cell's volume edits. Safe to keep and query on any
+    // thread; a new one is made when the grid, archive or data directory
+    // changes. Edits through RecordEditedCells and AddVolumeEdit update it.
+    std::shared_ptr<const TerrainField> GetTerrainField();
     // Project layer for far object blocks (see Rendering::DetailBudget).
     std::string farObjectProjectLayer = "Trees";
     // Far forest clusters: far blocks beyond farClusterDistance (metres from
@@ -702,6 +710,17 @@ private:
         std::shared_ptr<const FarCellDetail::Errors> errors;
     };
     std::future<FarDetailSource> m_farDetailJob;
+    // TerrainField source (TerrainManagerField.cpp): shared with the field's
+    // seed, which runs on any thread.
+    struct FieldSource;
+    std::shared_ptr<FieldSource> m_fieldSource;
+    std::shared_ptr<TerrainField> m_terrainField;
+    uint64_t m_terrainFieldKey = 0;
+    void InvalidateTerrainField(Cell cell, const std::vector<float>* heights = nullptr);
+    // ENGINE_TERRAIN_FIELD_CHECK=1: once the loaded area is full, compare the
+    // field's surface with every loaded cell's heights and print the result.
+    void CheckTerrainField();
+    bool m_terrainFieldChecked = false;
     FarDetailSource m_farDetail;
     bool m_farDetailParentsApplied = false;
     float FarCellDetailPixels() const;

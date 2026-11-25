@@ -11,6 +11,7 @@ build/
 !.local/tests/StreamedPrefabBenchmark.cpp
 !.local/tests/DX12DeferredUploadTests.cpp
 !.local/tests/GameBackendCapture.cpp
+!.local/tests/TerrainFieldTests.cpp
 !.local/tests/DrawBatchPreparationTests.cpp
 !.local/tests/InstanceTilePreparationTests.cpp
 !.local/tests/IndexedInstanceGeometryTests.cpp

@@ -107,6 +107,7 @@ bool TerrainManager::AddVolumeEdit(const TerrainVolumeEdit& edit)
     std::filesystem::create_directories(std::filesystem::path(path).parent_path(), error);
     if (!SaveTerrainVolumeEdits(path, edits)) return false;
     m_volumeEdits[owner] = std::move(edits);
+    InvalidateTerrainField(owner);
     // Rebuild the loaded volume cells it reaches (their margins included).
     const float margin = 9.f * std::max(volumeSampleSpacing, .25f);
     for (int dz = -1; dz <= 1; ++dz)
