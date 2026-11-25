@@ -40,6 +40,8 @@ struct FarObjectInputs
     // Move placements onto the far tiles' two-triangle cells. Off when far
     // cells draw their own heights (TerrainManager::farCellDetailPixels).
     bool snapToFarSurface = true;
+    // Ground queries of cells volume edits reach (ObjectLayerContext::field).
+    std::shared_ptr<const TerrainField> field;
 };
 
 // ENGINE_FAR_OBJECT_SURFACE=0 keeps far placements on full-detail heights.
@@ -139,6 +141,7 @@ std::vector<TerrainObjectLayer::Placement> FarPlacements(
             context.weights = &terrain->weights;
             context.terrainLayerCount = terrain->layers.size();
             context.farObjects = true;
+            if (inputs.field && inputs.field->HasEdits(input.cell)) context.field = inputs.field;
             inputs.generator(context, name, *layer);
         }
         // Ground cover (grass) has its own reach and no far representation.
@@ -596,6 +599,7 @@ void TerrainManager::UpdateFarObjects(int centerX, int centerY)
         inputs.snapToFarSurface = FarObjectSurfaceSnap() &&
             (m_farHeightArchivePath.empty() || FarCellDetailPixels() <= 0.f);
         inputs.generator = m_objectLayerGenerator;
+        inputs.field = GetTerrainField();
         inputs.layerNames = m_objectLayerNames;
         inputs.nearReach = std::max(0, loadedRadius) * std::min(cellsX * cellWidth, cellsY * cellDepth);
         while (m_farObjectJobs.size() < maximumJobs && m_farObjectQueueNext < m_farObjectQueue.size())

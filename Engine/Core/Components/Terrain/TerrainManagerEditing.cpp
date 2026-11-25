@@ -79,6 +79,8 @@ void TerrainManager::RestoreObjectLayers(Cell cell,
                 context.heights = &terrain->heights;
                 context.weights = &terrain->weights;
                 context.terrainLayerCount = terrain->layers.size();
+                if (auto field = GetTerrainField(); field && field->HasEdits(cell))
+                    context.field = std::move(field);
                 const size_t before = layer->placements.size();
                 m_objectLayerGenerator(context, name, *layer);
                 if (layer->placements.size() != before) layer->MarkConfigurationDirty();

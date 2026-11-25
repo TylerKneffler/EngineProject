@@ -59,9 +59,22 @@ first-person controller, caches).
       - [ ] Still behind the height grid: frame p99 +7 ms (38.8 vs 31.9, mostly update hand-off waits),
             terrain GPU +0.55 ms and VRAM +110 MB (chunks use the 264-byte mesh vertex and ~6x the draws).
             Next: a compact volume vertex (position, normal, packed layer weights, rock tint).
-- [ ] **3. Queries move to the field.** Forest, props, undergrowth, `GrassField`/`GrassBlades`, far
+- [x] **3. Queries move to the field** (2026-11-24). Forest, props, undergrowth, `GrassField`/`GrassBlades`, far
       objects, first-person controller, streaming camera, `LandscapeDriver` placement: ground from
       `SurfaceAt` (upward faces only, so nothing grows on overhang ceilings or inside carved holes).
+      - Placement: `ObjectLayerContext::field` (set only where `HasEdits`) and
+        `ObjectLayerContext::SampleSurface`; forest, edge belt, props and scree go through it, for
+        streamed, synchronous and far-object cells. No edits: the same code as before (heights).
+      - Grass: `GrassField` keeps the field for its cell (`TerrainManager::EditedFieldFor`, refreshed
+        on `GetTerrainFieldRevision`); CPU tiles sample `SurfaceAt`, GPU blade heights come from it,
+        and blade paint is 0 where the surface normal.y < .7 (crater walls, faces).
+      - `TryGetHeightAtWorldPosition` (first-person controller, streaming camera, perf driver): the
+        first ground below 2 m above the query where edits reach the cell, else the top surface.
+      - Checked: a test shaft (`subtract capsule 79 40 19 79 400 19 15 2` in `-3_-8.volumeedit`, seen
+        from above MeadowSlope) cuts rock walls, grass stops at the rim, nothing floats over the
+        hole; without edits the landscape takes the unchanged height path.
+      - Not moved: `LandscapeDriver` far splat trees (archive heights, far cells, no field yet), grass
+        path-share test (paths only).
 - [ ] **4. Paint on the volume.** Layer weights, hydrology tint, lushness and trail contour paths
       evaluated on the field per vertex (slope from the density gradient), not per height sample.
 - [ ] **5. Far terrain from the field.** Far chunks meshed from the field at coarse strides (surface nets
@@ -189,7 +202,7 @@ first-person controller, caches).
 ### 4. Lighting + post
 - [ ] Long-range shadow for non-terrain objects (far trees/impostors stay sunlit inside a ridge shadow; needs a global texture slot on all three backends)
 - [ ] Optional authored 3D LUT input for grading (the split tone is analytic today)
-
+ph
 ### 5. Sky computed from the sun
 
 #### Physical aerial perspective, volumetric clouds, the cloud-shadow cookie and the half-resolution clou

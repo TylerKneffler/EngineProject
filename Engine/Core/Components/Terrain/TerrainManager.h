@@ -121,6 +121,13 @@ public:
     // thread; a new one is made when the grid, archive or data directory
     // changes. Edits through RecordEditedCells and AddVolumeEdit update it.
     std::shared_ptr<const TerrainField> GetTerrainField();
+    // Changes whenever the field (or any of its cells) changes.
+    uint64_t GetTerrainFieldRevision() const { return m_terrainFieldRevision; }
+    // The field when volume edits reach the cell a loaded Terrain draws,
+    // with that cell's origin in the field's space; null where the cell is
+    // exactly its heights (no edits), so callers keep the height grid.
+    std::shared_ptr<const TerrainField> EditedFieldFor(const Terrain& terrain,
+        float& originX, float& originZ);
     // Project layer for far object blocks (see Rendering::DetailBudget).
     std::string farObjectProjectLayer = "Trees";
     // Far forest clusters: far blocks beyond farClusterDistance (metres from
@@ -364,6 +371,15 @@ public:
         // placements (impostors beyond the loaded cells). Generators can skip
         // layers that never draw that far.
         bool farObjects = false;
+        // The terrain field, set when volume edits reach this cell (a crater,
+        // an arch, an overhang): ground queries then follow the sculpted
+        // surface instead of the seed heights. Null elsewhere, where the
+        // field is exactly the heights.
+        std::shared_ptr<const TerrainField> field;
+        // The ground under (x, z) in the cell's own space (may reach past
+        // its edges into neighbours when the field is set): the top surface
+        // under open sky, as the heights' two triangles where no edit is.
+        bool SampleSurface(float x, float z, float& height, glm::vec3* normal = nullptr) const;
     };
     // Fills a named object layer that has no saved placements, such as the
     // forests of a procedural map. Runs on streaming workers (and on the main
@@ -732,6 +748,7 @@ private:
     std::shared_ptr<FieldSource> m_fieldSource;
     std::shared_ptr<TerrainField> m_terrainField;
     uint64_t m_terrainFieldKey = 0;
+    uint64_t m_terrainFieldRevision = 1;
     void InvalidateTerrainField(Cell cell, const std::vector<float>* heights = nullptr);
     // ENGINE_TERRAIN_FIELD_CHECK=1: once the loaded area is full, compare the
     // field's surface with every loaded cell's heights and print the result.
@@ -825,6 +842,7 @@ private:
         std::function<void(Cell, Terrain&)> builder;
         bool compactMesh = false;
         ObjectLayerGenerator layerGenerator;
+        std::shared_ptr<const TerrainField> layerField; // when volume edits reach the cell
         std::optional<Terrain::Prepared> prepared;
         bool preparedCacheHit = false;
         std::vector<std::pair<std::string, JsonValue>> objectLayers;

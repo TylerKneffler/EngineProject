@@ -604,8 +604,35 @@ bool GrassField::ResolveCachedReferences()
     return m_cachedViewer && m_cachedTerrain;
 }
 
+void GrassField::RefreshField()
+{
+    auto* manager = m_cachedTerrain && m_cachedTerrain->Owner
+        ? m_cachedTerrain->Owner->GetComponentInParent<Engine::Components::TerrainManager>() : nullptr;
+    if (!manager)
+    {
+        m_field.reset();
+        m_fieldTerrain = m_cachedTerrain;
+        return;
+    }
+    const uint64_t revision = manager->GetTerrainFieldRevision();
+    if (revision == m_fieldRevision && m_fieldTerrain == m_cachedTerrain) return;
+    m_fieldRevision = revision;
+    m_fieldTerrain = m_cachedTerrain;
+    m_field = manager->EditedFieldFor(*m_cachedTerrain, m_fieldOriginX, m_fieldOriginZ);
+}
+
 float GrassField::SampleHeight(float x, float z, glm::vec3* normal) const
 {
+    if (const auto field = m_field)
+    {
+        // Volume edits reach this cell: the sculpted top surface (blades
+        // stay off its steep faces, see SyncGpuBlades).
+        if (const auto surface = field->SurfaceAt(m_fieldOriginX + x, m_fieldOriginZ + z))
+        {
+            if (normal) *normal = surface->normal;
+            return surface->height;
+        }
+    }
     const auto* terrain = Owner
         ? Owner->GetComponentInParent<Engine::Components::Terrain>() : nullptr;
     if (!terrain || terrain->cellsX <= 0 || terrain->cellsY <= 0 ||
@@ -1077,6 +1104,7 @@ bool GrassField::Refresh()
     const bool referencesReady = ResolveCachedReferences();
     checkpoint(m_performance.referencesMs);
     if (!referencesReady) { publish(); return changed; }
+    RefreshField();
     if (gpuBlades) SyncGpuBlades();
     // The renderer cannot draw blades (GrassBlades::Update): mesh grass again.
     if (gpuBlades && !GrassBlades::Enabled())
@@ -1486,7 +1514,8 @@ void GrassField::SyncGpuBlades()
     if (!scene || !m_cachedTerrain || !GrassBlades::Enabled()) return;
     auto blades = GrassBlades::For(*scene);
     const auto& terrain = *m_cachedTerrain;
-    const uint64_t revision = terrain.GetConfigurationRevision();
+    RefreshField();
+    const uint64_t revision = terrain.GetConfigurationRevision() ^ (m_field ? m_fieldRevision << 40 : 0);
     if (m_bladeTerrain != &terrain || m_bladeTerrainRevision != revision)
     {
         const int samplesX = terrain.cellsX + 1, samplesZ = terrain.cellsY + 1;
@@ -1515,7 +1544,20 @@ void GrassField::SyncGpuBlades()
                     paint[sample] *= 1.f - std::min(1.f, paths->ContourPathShare(x, z,
                         origin.y + terrain.heights[sample]) / .9f);
                 }
-            blades->SetCell(this, origin, samplesX, terrain.cellWidth, terrain.heights, std::move(paint));
+            std::vector<float> heights = terrain.heights;
+            if (m_field)
+                // Volume edits reach the cell: blades stand on the sculpted
+                // top surface, and none on faces (crater walls, overhangs).
+                for (size_t sample = 0; sample < heights.size(); ++sample)
+                {
+                    const float x = float(sample % size_t(samplesX)) * terrain.cellWidth;
+                    const float z = float(sample / size_t(samplesX)) * terrain.cellDepth;
+                    const auto surface = m_field->SurfaceAt(m_fieldOriginX + x, m_fieldOriginZ + z);
+                    if (!surface) { paint[sample] = 0.f; continue; }
+                    heights[sample] = surface->height;
+                    if (surface->normal.y < .7f) paint[sample] = 0.f;
+                }
+            blades->SetCell(this, origin, samplesX, terrain.cellWidth, std::move(heights), std::move(paint));
             m_bladeTerrain = &terrain;
             m_bladeTerrainRevision = revision;
         }

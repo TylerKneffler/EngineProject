@@ -20,6 +20,7 @@ namespace Engine::Components
 {
 class Material;
 class Terrain;
+class TerrainField;
 class TerrainObjectLayer;
 }
 
@@ -308,6 +309,13 @@ private:
     size_t SpeciesOf(const std::string& asset) const;
     Engine::Core::Object* m_cachedViewer = nullptr;
     Engine::Components::Terrain* m_cachedTerrain = nullptr;
+    // The terrain field where volume edits reach this cell (null: the cell
+    // is its heights), its cell origin, and the field revision it is from.
+    std::shared_ptr<const Engine::Components::TerrainField> m_field;
+    float m_fieldOriginX = 0.f, m_fieldOriginZ = 0.f;
+    uint64_t m_fieldRevision = 0;
+    const void* m_fieldTerrain = nullptr;
+    void RefreshField();
     Engine::Components::TerrainObjectLayer* m_cachedLayer = nullptr;
     Engine::Scene::Scene* m_cachedScene = nullptr;
     std::string m_cachedViewerName;

@@ -599,6 +599,7 @@ void TerrainManager::PrepareLoop()
                     context.heights = &result.terrain.heights;
                     context.weights = &result.terrain.weights;
                     context.terrainLayerCount = result.terrain.layers.size();
+                    context.field = task.layerField;
                     const size_t before = layer->placements.size();
                     task.layerGenerator(context, name, *layer);
                     if (layer->placements.size() != before)

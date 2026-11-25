@@ -632,8 +632,7 @@ void GenerateForest(const TerrainManager::ObjectLayerContext& context,
         const float pick = random(), yaw = random(), size = random();
         float height = 0.f;
         glm::vec3 normal(0.f, 1.f, 0.f);
-        if (!Engine::Components::SampleTerrainSurface(*context.heights, context.cellsX,
-                context.cellsY, context.cellWidth, context.cellDepth, x, z, height, &normal))
+        if (!context.SampleSurface(x, z, height, &normal))
             continue;
         if (normal.y < TreeMinNormalY) continue; // steeper than about 58 degrees
         const float worldX = context.cell.first * width + x;
@@ -744,8 +743,7 @@ void GenerateForest(const TerrainManager::ObjectLayerContext& context,
                 size = edgeRandom();
             float height = 0.f;
             glm::vec3 normal(0.f, 1.f, 0.f);
-            if (!Engine::Components::SampleTerrainSurface(*context.heights, context.cellsX,
-                    context.cellsY, context.cellWidth, context.cellDepth, x, z, height, &normal))
+            if (!context.SampleSurface(x, z, height, &normal))
                 continue;
             // The edge belt (shrubs and skirts sunk to their crowns) stays off steep ground.
             if (normal.y < TreeFullNormalY) continue;
@@ -986,8 +984,7 @@ void GenerateProps(const TerrainManager::ObjectLayerContext& context,
             kind = random();
         float height = 0.f;
         glm::vec3 normal(0.f, 1.f, 0.f);
-        if (!Engine::Components::SampleTerrainSurface(*context.heights, context.cellsX,
-                context.cellsY, context.cellWidth, context.cellDepth, x, z, height, &normal))
+        if (!context.SampleSurface(x, z, height, &normal))
             continue;
         const float worldX = context.cell.first * width + x;
         const float worldZ = context.cell.second * depth + z;
@@ -1057,9 +1054,7 @@ void GenerateProps(const TerrainManager::ObjectLayerContext& context,
                 float upHeight = 0.f;
                 glm::vec3 upNormal(0.f, 1.f, 0.f);
                 for (float reach : {9.f, 18.f})
-                    if (Engine::Components::SampleTerrainSurface(*context.heights, context.cellsX,
-                            context.cellsY, context.cellWidth, context.cellDepth,
-                            x + uphill.x * reach, z + uphill.y * reach, upHeight, &upNormal))
+                    if (context.SampleSurface(x + uphill.x * reach, z + uphill.y * reach, upHeight, &upNormal))
                         scree = std::max(scree, SmoothStep(.8f, .62f, upNormal.y));
                 // On the gentler ground below, not on the face itself.
                 scree *= SmoothStep(.6f, .8f, normal.y);

@@ -133,6 +133,21 @@ bool TerrainManager::TryGetHeightAtWorldPosition(
     if (!terrain || terrain->heights.size() !=
         static_cast<size_t>(cellsX + 1) * (cellsY + 1))
         return false;
+    // Where volume edits reach the cell (a crater, an arch), the field's
+    // surface: the first ground below a point a step above the query (under
+    // an arch, the ground there, not the arch top), else the top surface.
+    if (const auto& field = m_terrainField; field && field->HasEdits({cellX, cellY}))
+    {
+        auto surface = field->SurfaceAt(static_cast<float>(local.x),
+            static_cast<float>(local.z), static_cast<float>(local.y) + 2.f);
+        if (!surface) surface = field->SurfaceAt(static_cast<float>(local.x), static_cast<float>(local.z));
+        if (surface)
+        {
+            height = (Owner->transform.GetWorldMatrixD() *
+                glm::dvec4(local.x, surface->height, local.z, 1.0)).y;
+            return std::isfinite(height);
+        }
+    }
     const double cellLocalX = local.x - static_cast<double>(cellX) * spanX;
     const double cellLocalZ = local.z - static_cast<double>(cellY) * spanZ;
     const double sampleX = std::clamp(cellLocalX /
@@ -349,6 +364,9 @@ void TerrainManager::StreamCells(int centerX, int centerY, int initialRadius)
             task.builder = m_proceduralBuilder;
             task.compactMesh = UsesCompactCellVertices();
             task.layerGenerator = m_objectLayerGenerator;
+            if (task.layerGenerator && !task.hasSaved)
+                if (auto field = GetTerrainField(); field && field->HasEdits(cell))
+                    task.layerField = std::move(field);
             if (!task.hasSaved && !task.builder &&
                 !(Owner->GetScene()->HasStarted() && requireRuntimeBake)) continue;
             task.cachePath = GetCacheFilePath(cell.first, cell.second);

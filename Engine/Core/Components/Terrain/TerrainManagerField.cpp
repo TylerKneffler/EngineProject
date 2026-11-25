@@ -89,6 +89,23 @@ struct TerrainManager::FieldSource
     }
 };
 
+bool TerrainManager::ObjectLayerContext::SampleSurface(float x, float z,
+    float& height, glm::vec3* normal) const
+{
+    if (field)
+    {
+        const auto& layout = field->Layout();
+        const auto surface = field->SurfaceAt(cell.first * layout.SpanX() + x,
+            cell.second * layout.SpanZ() + z);
+        if (!surface) return false;
+        height = surface->height;
+        if (normal) *normal = surface->normal;
+        return true;
+    }
+    return heights && SampleTerrainSurface(*heights, cellsX, cellsY,
+        cellWidth, cellDepth, x, z, height, normal);
+}
+
 std::shared_ptr<const TerrainField> TerrainManager::GetTerrainField()
 {
     uint64_t key = 1469598103934665603ull;
@@ -121,6 +138,7 @@ std::shared_ptr<const TerrainField> TerrainManager::GetTerrainField()
     }
     source->editedCells = m_editedProcedural;
     m_fieldSource = source;
+    ++m_terrainFieldRevision;
     m_terrainField = std::make_shared<TerrainField>(source->layout,
         [source](Cell cell, std::vector<float>& heights) { return source->Heights(cell, heights); },
         [source](Cell cell, std::vector<TerrainVolumeEdit>& edits) {
@@ -143,6 +161,24 @@ void TerrainManager::InvalidateTerrainField(Cell cell, const std::vector<float>*
         m_fieldSource->editedCells.insert(cell);
     }
     m_terrainField->Invalidate(cell);
+    ++m_terrainFieldRevision;
+}
+
+std::shared_ptr<const TerrainField> TerrainManager::EditedFieldFor(const Terrain& terrain,
+    float& originX, float& originZ)
+{
+    if (!Owner || !terrain.Owner || cellsX <= 0 || cellsY <= 0) return nullptr;
+    const glm::dvec3 local = glm::dvec3(glm::inverse(Owner->transform.GetWorldMatrixD()) *
+        terrain.Owner->transform.GetWorldMatrixD()[3]);
+    const double spanX = static_cast<double>(cellsX) * cellWidth;
+    const double spanZ = static_cast<double>(cellsY) * cellDepth;
+    const Cell cell{static_cast<int>(std::lround(local.x / spanX)),
+        static_cast<int>(std::lround(local.z / spanZ))};
+    auto field = GetTerrainField();
+    if (!field || !field->HasEdits(cell)) return nullptr;
+    originX = static_cast<float>(cell.first * spanX);
+    originZ = static_cast<float>(cell.second * spanZ);
+    return field;
 }
 }
 
