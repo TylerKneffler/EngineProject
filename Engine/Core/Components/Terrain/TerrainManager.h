@@ -60,8 +60,6 @@ public:
     bool proceduralOakMeadow = false;
     int maxPreparedCells = 4;
     int maxUploadsPerUpdate = 2;
-    float maxFarRebuildMilliseconds = 4.f;
-    float farTileScreenErrorPixels = 3.f;
     // Far objects: beyond the loaded cells, out to this radius (cells), the
     // object layers' placements are drawn with only the last level of their
     // LOD chains (tree impostors), batched into blocks of
@@ -170,23 +168,13 @@ public:
     float farClusterSize = 40.f;
     int farClusterMinimumTrees = 5;
     // Negative values inherit the legacy shared threshold.
-    float farTileErrorPixelsLod2 = -1.f;
-    float farTileErrorPixelsLod4 = -1.f;
-    float farTileErrorPixelsLod8 = -1.f;
-    float farTileErrorPixelsLod16 = -1.f;
-    // Far-cell detail (TerrainFarCellDetail.h): far cells draw the height
-    // archive's own samples on a 1, 4, 8 or full-resolution grid, the
-    // coarsest whose height error is under this many pixels at the cell's
-    // distance; cells bordering the loaded area always draw at full
-    // resolution. 0 keeps two triangles per far cell (as before 2026-11-24).
-    // ENGINE_FAR_CELL_DETAIL_PIXELS overrides it for A/B runs.
-    float farCellDetailPixels = 1.5f;
+    // Distant terrain (TerrainManagerFarVolume.cpp): volume nodes 1 to 64
+    // cells across split while the viewer is within farVolumeDetail of their
+    // own size (larger: finer, more triangles). The node set is chosen again
+    // after the viewer moves farVolumeStepMetres.
+    float farVolumeDetail = 2.f;
+    float farVolumeStepMetres = 32.f;
     // Zero follows the camera clip distance.
-    float maxFarViewDistanceMeters = 0.f;
-    float farTileLodHysteresis = .2f;
-    bool farVegetationImpostors = true;
-    float farVegetationClusterSpanMeters = 24.f;
-    int farVegetationImpostorBudgetPerTile = 96;
     bool batchFarCells = true;
     // Optional fast directional diffuse shading for static play-mode terrain.
     bool fastRuntimeLighting = false;
@@ -526,12 +514,8 @@ public:
         uint64_t cpuBytes = 0, gpuBytes = 0;
     };
     std::vector<FarLevelUsage> GetFarLevelUsage() const;
-    size_t GetFarTileNodeCount() const { return m_farTiles.size(); }
+    size_t GetFarTileNodeCount() const { return m_farNodes.size(); }
     uint64_t GetFarTileUploadCount() const { return m_farTileUploadCount; }
-    uint64_t GetFarTileCacheHits() const { return m_farTileCacheHits; }
-    uint64_t GetFarTileUploadedBytes() const { return m_farTileUploadedBytes; }
-    double GetFarTileRebuildMilliseconds() const
-    { return m_farTileRebuildMilliseconds; }
     struct FarUpdateTiming
     {
         double totalMs = 0.0;
@@ -689,35 +673,45 @@ private:
         std::map<Cell, uint64_t> transformRevisions;
     };
     std::map<Cell, RenderBatch> m_renderBatches;
-    struct FarTile
+    // Distant terrain nodes (TerrainManagerFarVolume.cpp).
+    struct FarVolumeKey
     {
-        int startX = 0, startY = 0, endX = 0, endY = 0;
-        std::vector<size_t> patchIndices;
-        std::map<size_t, size_t> patchVertexOffsets;
-        std::set<size_t> dirtyPatchIndices;
-        std::vector<size_t> children;
-        size_t parentIndex = static_cast<size_t>(-1);
-        int lodStride = 1;
-        bool desired = false;
-        bool outOfRange = false;
-        bool coarseSelected = false;
-        bool containsEditedPatch = false;
-        float maxHeightError = 0.f;
-        float minHeight = 0.f, maxHeight = 0.f;
+        int x = 0, z = 0, size = 1;   // first cell and cells across
+        bool operator<(const FarVolumeKey& other) const
+        { return x != other.x ? x < other.x : z != other.z ? z < other.z : size < other.size; }
+        bool operator==(const FarVolumeKey& other) const
+        { return x == other.x && z == other.z && size == other.size; }
+        bool operator!=(const FarVolumeKey& other) const { return !(*this == other); }
+    };
+    struct FarVolumeMesh
+    {
+        Mesh::TerrainMeshData geometry;
+        std::vector<uint32_t> occluderIndices;
+        size_t occluderVertexCount = 0;
+        double buildMilliseconds = 0.0;
+    };
+    struct FarVolumeNode
+    {
+        std::future<std::shared_ptr<FarVolumeMesh>> job;
         Engine::Core::Object* object = nullptr;
         Mesh* mesh = nullptr;
-        int builtCenterX = 0, builtCenterY = 0, builtNearRadius = 0;
-        std::vector<uint8_t> builtVisibility;
-        // Far-cell detail levels per cell (finest tiles): built, and wanted
-        // for the current centre cell (recomputed when levelsKey changes).
-        std::vector<uint8_t> builtLevels, desiredLevels;
-        uint64_t levelsKey = 0;
-        // Centre cell the levels were last measured from.
-        int levelsCenterX = INT_MIN, levelsCenterY = INT_MIN;
-        bool built = false, hasGeometry = false;
-        bool preparing = false;
-        std::optional<std::chrono::steady_clock::time_point> requestedAt;
+        size_t vertexCount = 0;
+        bool built = false, stale = false, hasGeometry = false;
     };
+    struct FarVolumeJobInput;
+    static std::shared_ptr<FarVolumeMesh> BuildFarVolumeNode(const FarVolumeJobInput& input);
+    std::map<FarVolumeKey, FarVolumeNode> m_farNodes;
+    std::vector<FarVolumeKey> m_farWanted, m_farShown, m_farBuildOrder;
+    std::set<Cell> m_farShownCells;
+    glm::dvec3 m_farStep{0.0};
+    bool m_farStepValid = false, m_farDirty = false;
+    std::shared_ptr<const FarCellDetail::Archive> m_farArchive;
+    std::future<std::shared_ptr<const FarCellDetail::Archive>> m_farArchiveJob;
+    std::shared_ptr<const std::map<Cell, std::vector<float>>> m_farPatchHeights;
+    std::shared_ptr<const FarTerrainPalette> m_farPaletteShared;
+    void FenceFarVolumeJobs();
+    // Far nodes reaching a cell build again (its heights or edits changed).
+    void MarkFarVolumeDirty(Cell cell);
     struct SunShadowBuild
     {
         glm::vec3 direction{ 0.f };
@@ -748,9 +742,6 @@ private:
     int m_farHalfExtentCells = 0;
     std::vector<float> m_farHeights;
     std::shared_ptr<const std::vector<float>> m_farHeightsSnapshot;
-    std::vector<TerrainHeightArchive::FarPatch> m_farPatches;
-    std::set<Cell> m_farPatchCells;
-    std::vector<FarTile> m_farTiles;
     void RefreshFarTerrainEditedCells(const std::set<Cell>& changedCells);
     // Loads the existing cells overlapping a local X/Z box (for editing).
     std::set<Cell> LoadCellsForEdit(double minX, double minZ, double maxX, double maxZ);
@@ -758,14 +749,6 @@ private:
     // and refreshes the far terrain over them.
     void RecordEditedCells(const std::set<Cell>& changedCells);
     std::string m_farHeightArchivePath;
-    // Far-cell detail: the archive in memory and its per-cell errors, loaded
-    // and measured on a worker (m_farDetailJob); none until both are ready.
-    struct FarDetailSource
-    {
-        std::shared_ptr<const FarCellDetail::Archive> archive;
-        std::shared_ptr<const FarCellDetail::Errors> errors;
-    };
-    std::future<FarDetailSource> m_farDetailJob;
     // TerrainField source (TerrainManagerField.cpp): shared with the field's
     // seed, which runs on any thread.
     struct FieldSource;
@@ -780,71 +763,14 @@ private:
     // field's surface with every loaded cell's heights and print the result.
     void CheckTerrainField();
     bool m_terrainFieldChecked = false;
-    FarDetailSource m_farDetail;
-    bool m_farDetailParentsApplied = false;
-    float FarCellDetailPixels() const;
     FarTerrainPalette m_farPalette;
     uint64_t m_farSourceSignature = 0;
     uint64_t m_farTileUploadCount = 0;
-    uint64_t m_farTileCacheHits = 0;
-    uint64_t m_farTileUploadedBytes = 0;
-    double m_farTileRebuildMilliseconds = 0.0;
     FarUpdateTiming m_lastFarUpdateTiming;
     bool m_farEnabled = false;
     uint64_t m_uploadBudgetFrame = UINT64_MAX;
     size_t m_nearFrameUploads = 0;
     size_t m_farFrameUploads = 0;
-    struct FarPrepareTask
-    {
-        size_t tileIndex = 0;
-        uint64_t revision = 0, fingerprint = 0;
-        int startX = 0, startY = 0, endX = 0, endY = 0;
-        int lodStride = 1, side = 0, halfExtent = 0;
-        float spanX = 1.f, spanZ = 1.f;
-        FarTerrainPalette palette;
-        std::shared_ptr<const std::vector<float>> heights;
-        int cellsX = 1, cellsY = 1;
-        float cellWidth = 1.f, cellDepth = 1.f;
-        std::set<Cell> hiddenCells;
-        struct SeamSurface
-        {
-            std::vector<float> heights, weights;
-            uint32_t layerCount = 0;
-        };
-        std::map<Cell, SeamSurface> seams;
-        std::vector<std::pair<size_t, TerrainHeightArchive::FarPatch>> patches;
-        std::filesystem::path cachePath;
-        // Far-cell detail: the archive and one level per tile cell (0 hidden).
-        std::shared_ptr<const FarCellDetail::Archive> detailArchive;
-        std::vector<uint8_t> levels;
-        // Cells volume edits reach: meshed from the field (seed heights and
-        // edits) instead of their height grid.
-        std::vector<FarVolumeCell> volumeCells;
-        std::shared_ptr<const TerrainField> field;
-    };
-    struct PreparedFarTile
-    {
-        size_t tileIndex = 0;
-        uint64_t revision = 0;
-        bool cacheHit = false;
-        bool success = false;
-        double buildMilliseconds = 0.0;
-        std::optional<Mesh::IndexedGeometryBounds> bounds;
-        std::vector<Mesh::Vertex> vertices;
-        std::vector<uint32_t> indices;
-        std::map<size_t, size_t> patchVertexOffsets;
-        std::vector<uint8_t> builtVisibility;
-        std::vector<uint8_t> builtLevels;
-    };
-    std::thread m_farWorker;
-    mutable std::mutex m_farPrepareMutex;
-    std::condition_variable m_farPrepareWake;
-    std::deque<FarPrepareTask> m_farPrepareQueue;
-    std::deque<PreparedFarTile> m_preparedFarTiles;
-    uint64_t m_farPrepareRevision = 1;
-    bool m_stopFarWorker = false;
-    void StartFarPrepareWorker();
-    void FarPrepareLoop();
     uint64_t m_renderBatchUploadCount = 0;
     double m_renderBatchRefreshMilliseconds = 0.0;
     double m_renderBatchBuildMilliseconds = 0.0;

@@ -63,19 +63,7 @@ void TerrainManager::FenceBackgroundWork()
 {
     FenceFarObjectJobs();
     if (m_macroJob.valid()) m_macroJob.wait();
-    {
-        std::lock_guard<std::mutex> lock(m_farPrepareMutex);
-        m_stopFarWorker = true;
-        m_farPrepareQueue.clear();
-    }
-    m_farPrepareWake.notify_one();
-    if (m_farWorker.joinable()) m_farWorker.join();
-    {
-        std::lock_guard<std::mutex> lock(m_farPrepareMutex);
-        m_preparedFarTiles.clear();
-        m_stopFarWorker = false;
-        ++m_farPrepareRevision;
-    }
+    FenceFarVolumeJobs();
     {
         std::lock_guard<std::mutex> lock(m_prepareMutex);
         m_stopPrepareWorker = true;
@@ -375,31 +363,13 @@ TerrainManager::MemoryUsage TerrainManager::GetMemoryUsage() const
     usage.cpuBytes += m_farHeights.capacity() * sizeof(float);
     if (m_farHeightsSnapshot)
         usage.cpuBytes += m_farHeightsSnapshot->capacity() * sizeof(float);
-    for (const auto& tile : m_farTiles)
-        if (tile.mesh)
+    for (const auto& [key, node] : m_farNodes)
+        if (node.mesh)
         {
-            usage.cpuBytes += tile.mesh->GetCpuMeshMemoryBytes() +
-                tile.mesh->GetUploadShadowMemoryBytes();
-            usage.gpuBytes += tile.mesh->GetGpuBufferMemoryBytes();
+            usage.cpuBytes += node.mesh->GetCpuMeshMemoryBytes() +
+                node.mesh->GetUploadShadowMemoryBytes();
+            usage.gpuBytes += node.mesh->GetGpuBufferMemoryBytes();
         }
-    {
-        std::lock_guard<std::mutex> lock(m_farPrepareMutex);
-        for (const auto& prepared : m_preparedFarTiles)
-            usage.preparedBytes +=
-                prepared.vertices.capacity() * sizeof(Mesh::Vertex) +
-                prepared.indices.capacity() * sizeof(uint32_t);
-        for (const auto& task : m_farPrepareQueue)
-        {
-            for (const auto& [cell, surface] : task.seams)
-                usage.preparedBytes +=
-                    (surface.heights.capacity() +
-                        surface.weights.capacity()) * sizeof(float);
-            for (const auto& [index, patch] : task.patches)
-                usage.preparedBytes +=
-                    (patch.heights.capacity() + patch.colors.capacity()) *
-                        sizeof(float);
-        }
-    }
     std::lock_guard<std::mutex> lock(m_prepareMutex);
     for (const auto& prepared : m_preparedCells)
     {

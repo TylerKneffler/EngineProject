@@ -172,7 +172,27 @@ first-person controller, caches).
         Brush dab on a 256x256 cell 1.6 -> 0.87 ms (no mesh). TerrainEditingTools and TerrainField pass.
         `TerrainCapsuleTraversalTests` does not build (Scene::Start/Update gone; predates this).
       - [ ] Landscape median 15.8 -> 17.0 ms in one Vista-style run: measure with the walk runner.
-      - [ ] Far tiles, far grid and far-cell detail: still meshed from the seed heights (phase 5).
+      - [x] (2026-11-25, user: "delete the far tiles too") Far tiles, far-cell detail, the far tile
+            worker, cache and LOD edges are deleted. Distant terrain is volume
+            (`TerrainManagerFarVolume.cpp`): a quadtree of nodes 1-64 cells across, each surface nets of
+            the field's density on 32 x 32 (4-256 m); a node splits within `farVolumeDetail` (2) node
+            sizes of the viewer, nodes over loaded showing cells split to single cells and leave those
+            out, so near and far tile exactly. Density from edited cells' heights, else the archive in
+            memory (finer than a cell), else the 128 m corner grid; volume edits included. Skirts,
+            far palette colours, corner grid as occluder, compact static buffers, 4 workers. The set
+            is chosen per `farVolumeStepMetres` (32) and swaps in whole when built. Cells unload once a
+            shown node covers them (nodes only leave out showing cells inside the loaded radius).
+            `ENGINE_FAR_VOLUME_LOG`, `ENGINE_FAR_VOLUME_DETAIL` (A/B).
+            Fixed on the way: volumes stored density in int16 at 256 units/m (+-128 m), so coarse
+            volumes (band 2x spacing, up to 512 m) clamped into terraces, spikes and skirt walls;
+            units now scale with the band.
+            Checked (2560x1440): Vista/MeadowSlope look like the far tiles; detail 1.5/2/3 = ~200/300/
+            550 nodes, 0.4/0.56/1.0 M vertices; MeadowSlope terrain GPU 1.81 (tiles) -> 2.85 ms at 2,
+            frame 23.3 -> 22.4 ms. Meadow walk median 19.4, p99 43-45, 0-2 frames > 50 ms (phase 5:
+            6-8). Burst capture of the walk: no step over 203 px (no pops or holes). The edited
+            escarpment cells now show at every distance (far tiles only drew edits up close).
+            `world.fargrid` stays as the corner grid (sun shadows, occluders, coarse nodes).
+      - [ ] Far volume: terrain GPU still ~1 ms over the far tiles; peaks a little rounder.
       - [ ] Unused now: lod2Radius/lod4Radius/maxLodChangesPerUpdate (cell mesh LODs), batchFarCells.
       Original plan: Delete the height-grid cell mesh path, far tiles, far grid and
       direct `Terrain::heights` readers; the archive is only the seed generator's input; caches and

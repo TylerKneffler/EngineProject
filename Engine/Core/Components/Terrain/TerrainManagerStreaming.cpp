@@ -220,18 +220,13 @@ void TerrainManager::StreamCells(int centerX, int centerY, int initialRadius)
         std::clamp(m_farEnabled && !m_farHeights.empty() ? loadedRadius :
             std::max(loadedRadius, farRadius), 0, 32);
     const auto farCovers = [&](Cell cell) {
-        for (const auto& tile : m_farTiles)
-        {
-            if (!tile.object || !tile.object->enabled || !tile.hasGeometry ||
-                cell.first < tile.startX || cell.first >= tile.endX ||
-                cell.second < tile.startY || cell.second >= tile.endY)
-                continue;
-            if (tile.lodStride > 1) return true;
-            const size_t index = static_cast<size_t>(cell.second - tile.startY) *
-                (tile.endX - tile.startX) + cell.first - tile.startX;
-            if (index < tile.builtVisibility.size() &&
-                tile.builtVisibility[index]) return true;
-        }
+        // A shown distant volume node over the cell (TerrainManagerFarVolume).
+        for (const auto& key : m_farShown)
+            if (cell.first >= key.x && cell.first < key.x + key.size &&
+                cell.second >= key.z && cell.second < key.z + key.size)
+                if (const auto found = m_farNodes.find(key); found != m_farNodes.end() &&
+                    found->second.object && found->second.object->enabled)
+                    return true;
         return false;
     };
     const auto wanted = [&](Cell cell) {

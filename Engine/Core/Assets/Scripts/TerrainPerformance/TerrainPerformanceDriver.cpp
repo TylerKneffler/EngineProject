@@ -310,16 +310,16 @@ uint64_t TerrainPerformanceDriver::GetFarTileUploadCount() const
 
 uint64_t TerrainPerformanceDriver::GetFarTileUploadedBytes() const
 {
-    const auto* manager = Owner
-        ? Owner->GetComponent<Engine::Components::TerrainManager>() : nullptr;
-    return manager ? manager->GetFarTileUploadedBytes() : 0;
+    // Distant terrain is volume nodes now (TerrainManagerFarVolume), which
+    // keep no such count.
+    return 0;
 }
 
 double TerrainPerformanceDriver::GetFarTileRebuildMilliseconds() const
 {
-    const auto* manager = Owner
-        ? Owner->GetComponent<Engine::Components::TerrainManager>() : nullptr;
-    return manager ? manager->GetFarTileRebuildMilliseconds() : 0.0;
+    // Distant terrain is volume nodes now (TerrainManagerFarVolume), which
+    // keep no such count.
+    return 0.0;
 }
 
 void TerrainPerformanceDriver::OnAfterDeserialize(IGraphicsProvider*)

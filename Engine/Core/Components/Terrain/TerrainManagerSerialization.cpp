@@ -44,9 +44,8 @@ TerrainManager::JsonValue TerrainManager::Serialize() const
         .Set("proceduralOakMeadow", JsonValue(proceduralOakMeadow))
         .Set("maxPreparedCells", JsonValue(maxPreparedCells))
         .Set("maxUploadsPerUpdate", JsonValue(maxUploadsPerUpdate))
-        .Set("maxFarRebuildMilliseconds", JsonValue(maxFarRebuildMilliseconds))
-        .Set("farTileScreenErrorPixels", JsonValue(farTileScreenErrorPixels))
-        .Set("farCellDetailPixels", JsonValue(farCellDetailPixels))
+        .Set("farVolumeDetail", JsonValue(farVolumeDetail))
+        .Set("farVolumeStepMetres", JsonValue(farVolumeStepMetres))
         .Set("farObjectRadius", JsonValue(farObjectRadius))
         .Set("maxCommitMilliseconds", JsonValue(maxCommitMilliseconds))
         .Set("farObjectBlockCells", JsonValue(farObjectBlockCells))
@@ -58,17 +57,6 @@ TerrainManager::JsonValue TerrainManager::Serialize() const
         .Set("farCanopyDistance", JsonValue(farCanopyDistance))
         .Set("farClusterSize", JsonValue(farClusterSize))
         .Set("farClusterMinimumTrees", JsonValue(farClusterMinimumTrees))
-        .Set("farTileErrorPixelsLod2", JsonValue(farTileErrorPixelsLod2))
-        .Set("farTileErrorPixelsLod4", JsonValue(farTileErrorPixelsLod4))
-        .Set("farTileErrorPixelsLod8", JsonValue(farTileErrorPixelsLod8))
-        .Set("farTileErrorPixelsLod16", JsonValue(farTileErrorPixelsLod16))
-        .Set("maxFarViewDistanceMeters", JsonValue(maxFarViewDistanceMeters))
-        .Set("farTileLodHysteresis", JsonValue(farTileLodHysteresis))
-        .Set("farVegetationImpostors", JsonValue(farVegetationImpostors))
-        .Set("farVegetationClusterSpanMeters",
-            JsonValue(farVegetationClusterSpanMeters))
-        .Set("farVegetationImpostorBudgetPerTile",
-            JsonValue(farVegetationImpostorBudgetPerTile))
         .Set("batchFarCells", JsonValue(batchFarCells))
         .Set("fastRuntimeLighting", JsonValue(fastRuntimeLighting))
         .Set("longRangeShadows", JsonValue(longRangeShadows))
@@ -258,13 +246,10 @@ void TerrainManager::Deserialize(const JsonValue& value)
         ? std::clamp(value["maxPreparedCells"].AsInt(), 1, 64) : 4;
     maxUploadsPerUpdate = value.Has("maxUploadsPerUpdate")
         ? std::clamp(value["maxUploadsPerUpdate"].AsInt(), 1, 64) : 2;
-    maxFarRebuildMilliseconds = value.Has("maxFarRebuildMilliseconds")
-        ? std::clamp(value["maxFarRebuildMilliseconds"].AsFloat(), .001f, 100.f)
-        : 4.f;
-    farCellDetailPixels = value.Has("farCellDetailPixels")
-        ? std::clamp(value["farCellDetailPixels"].AsFloat(), 0.f, 64.f) : 1.5f;
-    farTileScreenErrorPixels = value.Has("farTileScreenErrorPixels")
-        ? std::clamp(value["farTileScreenErrorPixels"].AsFloat(), .1f, 64.f) : 3.f;
+    farVolumeDetail = value.Has("farVolumeDetail")
+        ? std::clamp(value["farVolumeDetail"].AsFloat(), 1.f, 16.f) : 2.f;
+    farVolumeStepMetres = value.Has("farVolumeStepMetres")
+        ? std::clamp(value["farVolumeStepMetres"].AsFloat(), 1.f, 1000.f) : 32.f;
     maxCommitMilliseconds = value.Has("maxCommitMilliseconds")
         ? std::clamp(value["maxCommitMilliseconds"].AsFloat(), .1f, 100.f) : 2.f;
     farObjectRadius = value.Has("farObjectRadius")
@@ -301,29 +286,6 @@ void TerrainManager::Deserialize(const JsonValue& value)
             if (!cluster.asset.empty()) farClusters.push_back(std::move(cluster));
         }
     }
-    const auto levelError = [&](const char* name) {
-        return value.Has(name) ? std::clamp(value[name].AsFloat(), -1.f, 64.f)
-            : -1.f;
-    };
-    farTileErrorPixelsLod2 = levelError("farTileErrorPixelsLod2");
-    farTileErrorPixelsLod4 = levelError("farTileErrorPixelsLod4");
-    farTileErrorPixelsLod8 = levelError("farTileErrorPixelsLod8");
-    farTileErrorPixelsLod16 = levelError("farTileErrorPixelsLod16");
-    maxFarViewDistanceMeters = value.Has("maxFarViewDistanceMeters")
-        ? std::clamp(value["maxFarViewDistanceMeters"].AsFloat(), 0.f,
-            1000000.f) : 0.f;
-    farTileLodHysteresis = value.Has("farTileLodHysteresis")
-        ? std::clamp(value["farTileLodHysteresis"].AsFloat(), 0.f, .9f) : .2f;
-    farVegetationImpostors = !value.Has("farVegetationImpostors") ||
-        value["farVegetationImpostors"].AsBool();
-    farVegetationClusterSpanMeters = value.Has("farVegetationClusterSpanMeters")
-        ? std::clamp(value["farVegetationClusterSpanMeters"].AsFloat(), 2.f, 256.f)
-        : 24.f;
-    farVegetationImpostorBudgetPerTile =
-        value.Has("farVegetationImpostorBudgetPerTile")
-            ? std::clamp(value["farVegetationImpostorBudgetPerTile"].AsInt(),
-                0, 2048)
-            : 96;
     batchFarCells = !value.Has("batchFarCells") || value["batchFarCells"].AsBool();
     fastRuntimeLighting = value.Has("fastRuntimeLighting") &&
         value["fastRuntimeLighting"].AsBool();
@@ -536,15 +498,10 @@ bool TerrainManager::DrawProperties(Engine::Core::IInspectorUi& ui)
     const bool priorAsync = asyncStreaming;
     if (ui.CollapsingHeader("View distance and quality"))
     {
-        changed |= ui.DragFloat("View distance (m)",
-            &maxFarViewDistanceMeters, 10.f, 0.f, 1000000.f);
-        ui.Tooltip("Maximum distant terrain draw distance, capped by the camera far clip. Zero uses the camera far clip. Applies to distant terrain tiles; cell loading is controlled below.");
-        changed |= ui.SliderFloat("Terrain quality (pixel error)",
-            &farTileScreenErrorPixels, .1f, 64.f);
-        ui.Tooltip("Lower values preserve more distant terrain detail and cost more to render. Higher values switch to simpler terrain sooner. Per-LOD overrides are under Advanced terrain LOD.");
-        changed |= ui.SliderFloat("Far cell detail (pixel error)",
-            &farCellDetailPixels, 0.f, 16.f);
-        ui.Tooltip("Distant cells draw the height map's own samples (32, 16 or 4 m apart) wherever two triangles per cell would be off by more than this many pixels, so ridgelines keep their shape and cells do not jump when they load at full detail. 0 draws two triangles per cell.");
+        changed |= ui.SliderFloat("Distant terrain detail", &farVolumeDetail, 1.f, 16.f);
+        ui.Tooltip("Distant terrain is meshed from the volume in square nodes (1 to 64 cells across, 32 x 32 samples each). A node splits while the viewer is within this many node sizes of it: higher keeps more detail further out and costs more triangles.");
+        changed |= ui.DragFloat("Distant terrain step (m)", &farVolumeStepMetres, 1.f, 1.f, 1000.f);
+        ui.Tooltip("The distant nodes are chosen again after the viewer moves this far.");
         changed |= ui.SliderInt("Full detail distance (cells)", &loadedRadius, 0, 32);
         ui.Tooltip("Full-resolution terrain and interactive cells around the viewer. Distances are square grid radii: one cell spans Cells X * Cell width by Cells Y * Cell depth.");
         changed |= ui.SliderInt("Terrain loading distance (cells)", &farRadius, -1, 32);
@@ -575,36 +532,12 @@ bool TerrainManager::DrawProperties(Engine::Core::IInspectorUi& ui)
         changed |= ui.Checkbox("Async streaming", &asyncStreaming);
         changed |= ui.SliderInt("Prepared cell limit", &maxPreparedCells, 1, 64);
         changed |= ui.SliderInt("Uploads per update", &maxUploadsPerUpdate, 1, 64);
-        changed |= ui.SliderFloat("Far rebuild budget (ms)",
-            &maxFarRebuildMilliseconds, .001f, 100.f);
         changed |= ui.SliderInt("CPU terrain budget MiB", &cpuBudgetMiB, 1, 16384);
         changed |= ui.SliderInt("GPU terrain budget MiB", &gpuBudgetMiB, 1, 16384);
         changed |= ui.SliderInt("Mesh cache budget MiB", &cacheBudgetMiB, 1, 16384);
         changed |= ui.Checkbox("Batch far terrain cells", &batchFarCells);
         changed |= ui.SliderFloat("Volume sample spacing (m)", &volumeSampleSpacing, .25f, 8.f);
         changed |= ui.SliderInt("Volume steep layer", &volumeSteepLayer, 0, 5);
-    }
-    if (ui.CollapsingHeader("Advanced terrain LOD", false))
-    {
-        ui.Label("Pixel error overrides: -1 uses Terrain quality; lower values retain more detail.");
-        changed |= ui.SliderFloat("LOD 2 error (pixels, -1 inherits)",
-            &farTileErrorPixelsLod2, -1.f, 64.f);
-        changed |= ui.SliderFloat("LOD 4 error (pixels, -1 inherits)",
-            &farTileErrorPixelsLod4, -1.f, 64.f);
-        changed |= ui.SliderFloat("LOD 8 error (pixels, -1 inherits)",
-            &farTileErrorPixelsLod8, -1.f, 64.f);
-        changed |= ui.SliderFloat("LOD 16+ error (pixels, -1 inherits)",
-            &farTileErrorPixelsLod16, -1.f, 64.f);
-        changed |= ui.SliderFloat("Far tile LOD hysteresis",
-            &farTileLodHysteresis, 0.f, .9f);
-        ui.Tooltip("Stabilizes detail changes as the camera moves. Larger values reduce switching near LOD boundaries.");
-        changed |= ui.Checkbox("Far vegetation impostors",
-            &farVegetationImpostors);
-        changed |= ui.SliderFloat("Far vegetation cluster span (m)",
-            &farVegetationClusterSpanMeters, 2.f, 256.f);
-        changed |= ui.SliderInt("Far vegetation impostor budget per tile",
-            &farVegetationImpostorBudgetPerTile, 0, 2048);
-        ui.Tooltip("Clusters distant terrain-object vegetation into low-cost impostor billboards per far tile.");
     }
     if (ui.CollapsingHeader("Terrain appearance", false))
     {

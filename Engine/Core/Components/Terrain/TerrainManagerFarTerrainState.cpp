@@ -21,25 +21,26 @@ void TerrainManager::ConfigureFarTerrain(int halfExtentCells,
     m_farHalfExtentCells = halfExtentCells;
     m_farHeights = std::move(heights);
     m_farHeightsSnapshot = std::make_shared<const std::vector<float>>(m_farHeights);
-    m_farPatches = std::move(patches);
-    for (const auto& patch : m_farPatches)
-        m_farPatchCells.emplace(patch.x, patch.y);
+    // Edited cells' heights (the archive does not have them).
+    auto patchHeights = std::make_shared<std::map<Cell, std::vector<float>>>();
+    for (auto& patch : patches) (*patchHeights)[{patch.x, patch.y}] = std::move(patch.heights);
+    m_farPatchHeights = std::move(patchHeights);
     m_farHeightArchivePath = std::move(heightArchivePath);
     m_farSourceSignature = sourceSignature;
     m_farPalette = std::move(palette);
+    m_farPaletteShared = std::make_shared<const FarTerrainPalette>(m_farPalette);
     m_farEnabled = true;
-    // Far-cell detail: load the archive and measure every cell's error off
-    // the main thread (about a second for the 189 x 189 cell demo map).
-    if (!m_farHeightArchivePath.empty() && FarCellDetailPixels() > 0.f)
-        m_farDetailJob = std::async(std::launch::async,
+    m_farDirty = true;
+    // Far nodes finer than a cell read the archive's full detail: load it
+    // into memory off the main thread.
+    if (!m_farHeightArchivePath.empty())
+        m_farArchiveJob = std::async(std::launch::async,
             [path = m_farHeightArchivePath, signature = m_farSourceSignature,
-                extent = m_farHalfExtentCells, x = cellsX, y = cellsY]() {
-                FarDetailSource source;
+                extent = m_farHalfExtentCells, x = cellsX, y = cellsY]()
+                -> std::shared_ptr<const FarCellDetail::Archive> {
                 auto archive = std::make_shared<FarCellDetail::Archive>();
-                if (!archive->Load(path, signature, extent, x, y)) return source;
-                source.errors = FarCellDetail::MeasureArchive(*archive);
-                if (source.errors) source.archive = std::move(archive);
-                return source;
+                if (!archive->Load(path, signature, extent, x, y)) return nullptr;
+                return archive;
             });
     // Volume cells built before the archive was known repeated their border
     // where an unloaded neighbour's heights were missing: build them again.
@@ -56,104 +57,62 @@ void TerrainManager::ConfigureFarTerrain(int halfExtentCells,
     }
 }
 
-void TerrainManager::RefreshFarTerrainEditedCells(
-    const std::set<Cell>& changedCells)
+void TerrainManager::RefreshFarTerrainEditedCells(const std::set<Cell>& changedCells)
 {
-    if (m_farHeights.empty()) return;
-    if (!changedCells.empty())
-    {
-        std::lock_guard<std::mutex> lock(m_farPrepareMutex);
-        ++m_farPrepareRevision;
-        m_farPrepareQueue.clear();
-        m_preparedFarTiles.clear();
-        for (auto& tile : m_farTiles) tile.preparing = false;
-    }
+    if (m_farHeights.empty() || changedCells.empty()) return;
     const size_t expected = static_cast<size_t>(cellsX + 1) * (cellsY + 1);
+    auto patches = m_farPatchHeights
+        ? std::make_shared<std::map<Cell, std::vector<float>>>(*m_farPatchHeights)
+        : std::make_shared<std::map<Cell, std::vector<float>>>();
+    const int side = m_farHalfExtentCells * 2 + 2;
     for (Cell cell : changedCells)
     {
         if (std::abs(cell.first) > m_farHalfExtentCells ||
             std::abs(cell.second) > m_farHalfExtentCells) continue;
         const Terrain* terrain = GetLoadedCell(cell.first, cell.second);
         if (!terrain || terrain->heights.size() != expected) continue;
-        std::vector<float> colors;
-        if (terrain->weights.size() == expected * 6)
-        {
-            colors.assign(expected * 3, 0.f);
-            for (size_t i = 0; i < expected; ++i)
-                for (int layer = 0; layer < 6; ++layer)
-                    for (int channel = 0; channel < 3; ++channel)
-                        colors[i * 3 + channel] +=
-                            terrain->weights[i * 6 + layer] *
-                            m_farPalette.nearColors[layer][channel];
-        }
-        auto patch = std::find_if(m_farPatches.begin(), m_farPatches.end(),
-            [&](const auto& item) {
-                return item.x == cell.first && item.y == cell.second;
-            });
-        const bool newPatch = patch == m_farPatches.end();
-        size_t patchIndex = newPatch ? m_farPatches.size() :
-            static_cast<size_t>(patch - m_farPatches.begin());
-        if (patch == m_farPatches.end())
-        {
-            m_farPatches.push_back({cell.first, cell.second,
-                terrain->heights, std::move(colors)});
-            m_farPatchCells.insert(cell);
-            for (auto& tile : m_farTiles)
-                if (tile.lodStride == 1 && cell.first >= tile.startX &&
-                    cell.first < tile.endX && cell.second >= tile.startY &&
-                    cell.second < tile.endY)
-                {
-                    tile.patchIndices.push_back(patchIndex);
-                    break;
-                }
-        }
-        else
-        {
-            patch->heights = terrain->heights;
-            patch->colors = std::move(colors);
-        }
-        for (auto& tile : m_farTiles)
-            if (cell.first >= tile.startX && cell.first < tile.endX &&
-                cell.second >= tile.startY && cell.second < tile.endY)
-            {
-                tile.containsEditedPatch = true;
-                if (!newPatch && tile.lodStride == 1 && tile.built &&
-                    tile.patchVertexOffsets.count(patchIndex))
-                    tile.dirtyPatchIndices.insert(patchIndex);
-                else tile.built = false;
-            }
+        (*patches)[cell] = terrain->heights;
+        // The corner grid follows the cell's corners.
+        const auto setCorner = [&](int x, int y, float height) {
+            const int gx = x + m_farHalfExtentCells, gy = y + m_farHalfExtentCells;
+            if (gx >= 0 && gy >= 0 && gx < side && gy < side)
+                m_farHeights[static_cast<size_t>(gy) * side + gx] = height;
+        };
+        setCorner(cell.first, cell.second, terrain->heights.front());
+        setCorner(cell.first + 1, cell.second, terrain->heights[static_cast<size_t>(cellsX)]);
+        setCorner(cell.first, cell.second + 1, terrain->heights[static_cast<size_t>(cellsY) * (cellsX + 1)]);
+        setCorner(cell.first + 1, cell.second + 1, terrain->heights.back());
+        MarkFarVolumeDirty(cell);
     }
+    m_farPatchHeights = std::move(patches);
+    m_farHeightsSnapshot = std::make_shared<const std::vector<float>>(m_farHeights);
 }
 
 void TerrainManager::ClearFarTerrain()
 {
     ClearFarObjects();
-    {
-        std::lock_guard<std::mutex> lock(m_farPrepareMutex);
-        ++m_farPrepareRevision;
-        m_farPrepareQueue.clear();
-        m_preparedFarTiles.clear();
-    }
+    FenceFarVolumeJobs();
     if (Owner && Owner->GetScene())
-        for (const auto& tile : m_farTiles)
-            if (tile.object) Owner->GetScene()->RemoveObject(tile.object);
-    m_farTiles.clear();
+        for (const auto& [key, node] : m_farNodes)
+            if (node.object) Owner->GetScene()->RemoveObject(node.object);
+    m_farNodes.clear();
+    m_farWanted.clear();
+    m_farShown.clear();
+    m_farBuildOrder.clear();
+    m_farShownCells.clear();
+    m_farStepValid = false;
+    m_farDirty = false;
     m_farHeights.clear();
     m_farHeightsSnapshot.reset();
     ResetSunShadow();
-    m_farPatches.clear();
-    m_farPatchCells.clear();
+    m_farPatchHeights.reset();
     m_farHeightArchivePath.clear();
-    if (m_farDetailJob.valid()) m_farDetailJob.wait();
-    m_farDetailJob = {};
-    m_farDetail = {};
-    m_farDetailParentsApplied = false;
+    if (m_farArchiveJob.valid()) m_farArchiveJob.wait();
+    m_farArchiveJob = {};
+    m_farArchive.reset();
     m_farHalfExtentCells = 0;
     m_farSourceSignature = 0;
     m_farTileUploadCount = 0;
-    m_farTileCacheHits = 0;
-    m_farTileUploadedBytes = 0;
-    m_farTileRebuildMilliseconds = 0.0;
     m_farEnabled = false;
 }
 
@@ -162,152 +121,24 @@ void TerrainManager::SetFarTerrainEnabled(bool enabled)
     if (m_farEnabled == enabled) return;
     m_farEnabled = enabled;
     if (!enabled)
+        for (const auto& [key, node] : m_farNodes)
+            if (node.object) node.object->enabled = false;
+    if (enabled)
     {
-        {
-            std::lock_guard<std::mutex> lock(m_farPrepareMutex);
-            ++m_farPrepareRevision;
-            m_farPrepareQueue.clear();
-            m_preparedFarTiles.clear();
-        }
-        for (auto& tile : m_farTiles) tile.preparing = false;
-        for (const auto& tile : m_farTiles)
-            if (tile.object) tile.object->enabled = false;
+        // Show the last set again.
+        for (const auto& key : m_farShown)
+            if (const auto found = m_farNodes.find(key); found != m_farNodes.end() && found->second.object)
+                found->second.object->enabled = found->second.hasGeometry;
+        m_farDirty = true;
     }
-}
-
-std::vector<Mesh*>
-TerrainManager::GetFarTileMeshes() const
-{
-    std::vector<Mesh*> meshes;
-    for (const auto& tile : m_farTiles)
-        if (tile.object && tile.object->enabled && tile.mesh &&
-            tile.mesh->IsReady())
-            meshes.push_back(tile.mesh);
-    return meshes;
-}
-
-size_t TerrainManager::GetVisibleFarTileCount() const
-{
-    size_t count = 0;
-    for (const auto& tile : m_farTiles)
-        if (tile.object && tile.object->enabled && tile.hasGeometry) ++count;
-    return count;
 }
 
 size_t TerrainManager::GetVisibleFarTileCountForStride(int stride) const
 {
-    return std::count_if(m_farTiles.begin(), m_farTiles.end(),
-        [stride](const FarTile& tile) {
-            return tile.lodStride == stride && tile.object &&
-                tile.object->enabled && tile.hasGeometry;
-        });
-}
-
-size_t TerrainManager::GetDesiredFarTileCount() const
-{
-    return std::count_if(m_farTiles.begin(), m_farTiles.end(),
-        [](const FarTile& tile) { return tile.desired; });
-}
-
-size_t TerrainManager::GetBuiltFarTileCount() const
-{
-    return std::count_if(m_farTiles.begin(), m_farTiles.end(),
-        [](const FarTile& tile) { return tile.built; });
-}
-
-bool TerrainManager::AreDesiredFarTilesBuilt() const
-{
-    return std::all_of(m_farTiles.begin(), m_farTiles.end(),
-        [](const FarTile& tile) { return !tile.desired || tile.built; });
-}
-
-size_t TerrainManager::CountVisibleCoverageGaps(int centerX, int centerY,
-    int radius) const
-{
-    size_t gaps = 0;
-    radius = std::clamp(radius, 0, 32);
-    for (int y = centerY - radius; y <= centerY + radius; ++y)
-        for (int x = centerX - radius; x <= centerX + radius; ++x)
-        {
-            if (!HasCell(x, y)) continue;
-            const Terrain* nearTerrain = GetLoadedCell(x, y);
-            if (nearTerrain && nearTerrain->Owner &&
-                nearTerrain->Owner->enabled)
-                if (const auto* volume = nearTerrain->Owner->GetComponent<VolumeTerrain>();
-                    volume && volume->IsShowing()) continue;
-            bool covered = false;
-            for (const FarTile& tile : m_farTiles)
-            {
-                if (!tile.object || !tile.object->enabled || !tile.mesh ||
-                    !tile.mesh->IsReady() || !tile.hasGeometry ||
-                    x < tile.startX || x >= tile.endX ||
-                    y < tile.startY || y >= tile.endY) continue;
-                if (tile.lodStride > 1)
-                { covered = true; break; }
-                const size_t index = static_cast<size_t>(y - tile.startY) *
-                    (tile.endX - tile.startX) + x - tile.startX;
-                if (index < tile.builtVisibility.size() &&
-                    tile.builtVisibility[index])
-                { covered = true; break; }
-            }
-            if (!covered) ++gaps;
-        }
-    return gaps;
-}
-
-size_t TerrainManager::GetPreparingFarTileCount() const
-{
-    return std::count_if(m_farTiles.begin(), m_farTiles.end(),
-        [](const FarTile& tile) { return tile.preparing; });
-}
-
-size_t TerrainManager::GetQueuedFarTileCount() const
-{
-    std::lock_guard<std::mutex> lock(m_farPrepareMutex);
-    return m_farPrepareQueue.size();
-}
-
-size_t TerrainManager::GetPreparedFarTileCount() const
-{
-    std::lock_guard<std::mutex> lock(m_farPrepareMutex);
-    return m_preparedFarTiles.size();
-}
-
-size_t TerrainManager::GetVisibleFarTileVertexCount() const
-{
     size_t count = 0;
-    for (const auto& tile : m_farTiles)
-        if (tile.object && tile.object->enabled && tile.hasGeometry &&
-            tile.mesh) count += tile.mesh->GetVertexCount();
+    for (const auto& key : m_farShown) count += key.size == stride;
     return count;
 }
-
-std::vector<TerrainManager::FarLevelUsage> TerrainManager::GetFarLevelUsage() const
-{
-    std::map<int, FarLevelUsage> levels;
-    for (const auto& tile : m_farTiles)
-    {
-        auto& level = levels[tile.lodStride];
-        level.stride = tile.lodStride;
-        if (!tile.mesh || !tile.hasGeometry) continue;
-        ++level.residentTiles;
-        if (tile.object && tile.object->enabled) ++level.visibleTiles;
-        level.cpuBytes += tile.mesh->GetCpuMeshMemoryBytes() +
-            tile.mesh->GetUploadShadowMemoryBytes();
-        level.gpuBytes += tile.mesh->GetGpuBufferMemoryBytes();
-    }
-    std::vector<FarLevelUsage> result;
-    for (const auto& [stride, level] : levels) result.push_back(level);
-    return result;
-}
-
-
-float TerrainManager::FarCellDetailPixels() const
-{
-    static const float forced = [] {
-        const char* value = std::getenv("ENGINE_FAR_CELL_DETAIL_PIXELS");
-        return value && *value ? static_cast<float>(std::atof(value)) : -1.f;
-    }();
-    return std::max(0.f, forced >= 0.f ? forced : farCellDetailPixels);
-}
+size_t TerrainManager::GetQueuedFarTileCount() const { return 0; }
+size_t TerrainManager::GetPreparedFarTileCount() const { return 0; }
 }

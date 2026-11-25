@@ -266,7 +266,11 @@ std::shared_ptr<TerrainVolume> BuildTerrainVolume(const TerrainVolumeInput& terr
     volume->origin = {-Margin * spacing, bottom, -Margin * spacing};
     volume->interiorFirst = {Margin, 0, Margin};
     volume->interiorCells = {cellsAcross, volume->sizeY - 1, cellsDeep};
-    volume->unitsPerMetre = 256.f;
+    // Densities are 16-bit: 256 units a metre holds +-128 m, enough for the
+    // loaded cells' 8 m band. Coarse volumes (distant nodes, band twice
+    // their spacing, up to 512 m) clamped there and their surfaces broke into
+    // terraces and spikes: fewer units a metre for a wider band.
+    volume->unitsPerMetre = std::min(256.f, 32000.f / std::max(band, 1.f));
     const int c = volume->chunkSamples = 32;
     volume->chunksX = (volume->sizeX + c - 1) / c;
     volume->chunksY = (volume->sizeY + c - 1) / c;

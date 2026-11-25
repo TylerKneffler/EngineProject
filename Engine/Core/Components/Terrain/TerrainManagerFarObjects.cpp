@@ -596,8 +596,9 @@ void TerrainManager::UpdateFarObjects(int centerX, int centerY)
         inputs.cellsX = cellsX; inputs.cellsY = cellsY;
         inputs.cellWidth = cellWidth; inputs.cellDepth = cellDepth;
         inputs.builder = m_proceduralBuilder;
-        inputs.snapToFarSurface = FarObjectSurfaceSnap() &&
-            (m_farHeightArchivePath.empty() || FarCellDetailPixels() <= 0.f);
+        // Far terrain is meshed from the volume (no two-triangle far cells
+        // to move placements onto).
+        inputs.snapToFarSurface = false;
         inputs.generator = m_objectLayerGenerator;
         inputs.field = GetTerrainField();
         inputs.layerNames = m_objectLayerNames;
