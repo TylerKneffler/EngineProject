@@ -2450,6 +2450,16 @@ if(NOT ENGINE_PROJECT_DIR AND
 endif()
 
 if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/VolumeHoleRepro.cpp")
+    add_executable(VolumeHoleRepro EXCLUDE_FROM_ALL
+        "${ENGINE_LOCAL_TEST_ROOT}/VolumeHoleRepro.cpp")
+    target_link_libraries(VolumeHoleRepro PRIVATE Engine)
+    target_include_directories(VolumeHoleRepro PRIVATE
+        "${ENGINE_ROOT}" "${ENGINE_ROOT}/Engine")
+    target_compile_definitions(VolumeHoleRepro PRIVATE NOMINMAX)
+endif()
+
+if(NOT ENGINE_PROJECT_DIR AND
    EXISTS "${ENGINE_LOCAL_TEST_ROOT}/OcclusionBufferTests.cpp")
     enable_testing()
     add_executable(OcclusionBufferTests EXCLUDE_FROM_ALL

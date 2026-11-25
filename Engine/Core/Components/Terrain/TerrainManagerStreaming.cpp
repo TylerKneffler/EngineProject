@@ -3,6 +3,7 @@
 #include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Components/Terrain/TerrainBatchAppearance.h"
+#include "Core/Components/Terrain/VolumeTerrain.h"
 #include "Core/Components/Camera/Camera.h"
 #include "Core/Components/Mesh/Mesh.h"
 #include "Core/Components/Materials/Material.h"
@@ -415,8 +416,17 @@ void TerrainManager::StreamCells(int centerX, int centerY, int initialRadius)
     m_lastStreamingTiming.scheduledCells = loaded;
     record(m_lastStreamingTiming.loadOrScheduleMs);
     std::vector<Cell> lodPending;
+    // Volume cells draw their volume (its own levels); the cell's height
+    // mesh is hidden, so re-striding it is wasted: ~5 ms a cell, up to four
+    // a crossing (stream_lod_ms 18-21 ms on the meadow walk).
+    static const bool keepVolumeLods = [] {
+        const char* value = std::getenv("ENGINE_VOLUME_SKIP_LOD");
+        return value && value[0] == '0';
+    }();
+    const bool volumeCells = UsesVolumeCells() && !keepVolumeLods;
     for (const auto& [cell, terrain] : m_loaded)
         if (terrain && terrain->Owner &&
+            !(volumeCells && terrain->Owner->GetComponent<VolumeTerrain>()) &&
             terrain->GetMeshLodStride() != DesiredLodStride(cell, centerX, centerY))
             lodPending.push_back(cell);
     std::sort(lodPending.begin(), lodPending.end(), [&](Cell a, Cell b) {

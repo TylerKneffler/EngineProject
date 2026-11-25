@@ -69,6 +69,61 @@ const std::vector<TerrainVolumeEdit>& TerrainManager::GetVolumeEdits(Cell cell) 
     return it->second;
 }
 
+const std::set<TerrainManager::Cell>& TerrainManager::VolumeEditOwners() const
+{
+    if (m_volumeEditOwners) return *m_volumeEditOwners;
+    m_volumeEditOwners.emplace();
+    std::error_code error;
+    if (cellDataDirectory.empty() || !std::filesystem::is_directory(cellDataDirectory, error))
+        return *m_volumeEditOwners;
+    for (const auto& entry : std::filesystem::directory_iterator(cellDataDirectory, error))
+    {
+        if (entry.path().extension() != ".volumeedit") continue;
+        int x = 0, z = 0;
+        if (std::sscanf(entry.path().stem().string().c_str(), "%d_%d", &x, &z) == 2)
+            m_volumeEditOwners->insert({x, z});
+    }
+    return *m_volumeEditOwners;
+}
+
+std::vector<TerrainManager::FarVolumeCell> TerrainManager::FarVolumeCells(
+    int startX, int startY, int endX, int endY) const
+{
+    std::vector<FarVolumeCell> cells;
+    const auto& owners = VolumeEditOwners();
+    if (owners.empty()) return cells;
+    const float spanX = cellsX * cellWidth, spanZ = cellsY * cellDepth;
+    std::set<Cell> candidates;
+    for (const Cell owner : owners)
+        for (int dz = -1; dz <= 1; ++dz)
+            for (int dx = -1; dx <= 1; ++dx)
+            {
+                const Cell cell{owner.first + dx, owner.second + dz};
+                if (cell.first >= startX && cell.first < endX &&
+                    cell.second >= startY && cell.second < endY) candidates.insert(cell);
+            }
+    for (const Cell cell : candidates)
+    {
+        FarVolumeCell reached{cell, {}};
+        const auto append = [&](int dx, int dz) {
+            const glm::vec3 offset(dx * spanX, 0.f, dz * spanZ);
+            for (const auto& edit : GetVolumeEdits({cell.first + dx, cell.second + dz}))
+            {
+                const auto shifted = (dx || dz) ? edit.Shifted(offset) : edit;
+                const glm::vec3 low = shifted.Minimum(), high = shifted.Maximum();
+                if (high.x < 0.f || high.z < 0.f || low.x > spanX || low.z > spanZ) continue;
+                reached.edits.push_back(shifted);
+            }
+        };
+        append(0, 0);
+        for (int dz = -1; dz <= 1; ++dz)
+            for (int dx = -1; dx <= 1; ++dx)
+                if (dx || dz) append(dx, dz);
+        if (!reached.edits.empty()) cells.push_back(std::move(reached));
+    }
+    return cells;
+}
+
 void TerrainManager::FeedVolumeNeighbours(Cell cell, VolumeTerrain& volume) const
 {
     const double spanX = static_cast<double>(cellsX) * cellWidth;
@@ -109,6 +164,7 @@ bool TerrainManager::AddVolumeEdit(const TerrainVolumeEdit& edit)
     std::filesystem::create_directories(std::filesystem::path(path).parent_path(), error);
     if (!SaveTerrainVolumeEdits(path, edits)) return false;
     m_volumeEdits[owner] = std::move(edits);
+    if (m_volumeEditOwners) m_volumeEditOwners->insert(owner);
     InvalidateTerrainField(owner);
     // Rebuild the loaded volume cells it reaches (their margins included).
     const float margin = 9.f * std::max(volumeSampleSpacing, .25f);

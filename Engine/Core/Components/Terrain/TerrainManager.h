@@ -104,9 +104,21 @@ public:
     // Volume edits (caves, arches; TerrainVolumeEdit), kept per cell in
     // <cellDataDirectory>/<x>_<z>.volumeedit in the cell's space, read when
     // the cell's volume is built (with its neighbours', which may reach
-    // across). They show on volume cells only: far tiles and height queries
-    // (placement, grass) keep the height field.
+    // across). Loaded volume cells mesh them; far tiles mesh the far cells
+    // they reach from the field (FarVolumeCells); ground queries read the
+    // field (GetTerrainField).
     const std::vector<TerrainVolumeEdit>& GetVolumeEdits(Cell cell) const;
+    // Cells that own a .volumeedit file (cellDataDirectory, scanned once;
+    // AddVolumeEdit adds to it).
+    const std::set<Cell>& VolumeEditOwners() const;
+    // A far cell volume edits reach, with those edits in its own space
+    // (own first, then the neighbours', FeedVolumeNeighbours order).
+    struct FarVolumeCell
+    {
+        Cell cell;
+        std::vector<TerrainVolumeEdit> edits;
+    };
+    std::vector<FarVolumeCell> FarVolumeCells(int startX, int startY, int endX, int endY) const;
     // Adds an edit given in the grid's space to the cell holding its centre,
     // saves that cell's file, and rebuilds the loaded volume cells it
     // reaches (their current chunks draw until the new ones are ready).
@@ -583,6 +595,7 @@ private:
     std::function<void(Cell, Terrain&)> m_proceduralBuilder;
     // Volume edits read so far, per cell (GetVolumeEdits).
     mutable std::map<Cell, std::vector<TerrainVolumeEdit>> m_volumeEdits;
+    mutable std::optional<std::set<Cell>> m_volumeEditOwners;
     // A cell's heights for a neighbouring volume: loaded, else baked or the
     // height archive (as far seams read them). False when unknown.
     bool NeighbourHeights(Cell cell, std::vector<float>& heights) const;
@@ -798,6 +811,10 @@ private:
         // Far-cell detail: the archive and one level per tile cell (0 hidden).
         std::shared_ptr<const FarCellDetail::Archive> detailArchive;
         std::vector<uint8_t> levels;
+        // Cells volume edits reach: meshed from the field (seed heights and
+        // edits) instead of their height grid.
+        std::vector<FarVolumeCell> volumeCells;
+        std::shared_ptr<const TerrainField> field;
     };
     struct PreparedFarTile
     {

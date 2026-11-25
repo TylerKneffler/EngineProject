@@ -2,6 +2,8 @@
 #include "TerrainManager.h"
 #include "TerrainManagerFarTerrainCache.h"
 #include "Core/Components/Mesh/Mesh.h"
+#include "Core/Components/Terrain/TerrainVolume.h"
+#include "Core/Components/Terrain/TerrainVolumeBuild.h"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -188,6 +190,20 @@ void TerrainManager::FarPrepareLoop()
                     std::vector<float> heights;
                 };
                 std::vector<DetailedCell> detailedCells;
+                // Cells volume edits reach: meshed from the field after the
+                // detail grids (TerrainManager::FarVolumeCells).
+                struct FieldCell
+                {
+                    int x = 0, y = 0, level = 1;
+                    const FarVolumeCell* source = nullptr;
+                    std::shared_ptr<const std::vector<float>> heights;
+                };
+                std::vector<FieldCell> fieldCells;
+                const auto volumeCellOf = [&](int x, int y) -> const FarVolumeCell* {
+                    for (const auto& cell : task.volumeCells)
+                        if (cell.cell.first == x && cell.cell.second == y) return &cell;
+                    return nullptr;
+                };
                 const int tileWidth = task.endX - task.startX;
                 const auto levelOf = [&](int x, int y) -> int {
                     if (x < task.startX || x >= task.endX || y < task.startY || y >= task.endY)
@@ -253,6 +269,12 @@ void TerrainManager::FarPrepareLoop()
                                 return item.second.x == x && item.second.y == y;
                             });
                         if (!visibleCell(x, y) || patched) continue;
+                        if (const auto* volumeCell = task.field ? volumeCellOf(x, y) : nullptr)
+                            if (auto seed = task.field->SeedHeights({x, y}))
+                            {
+                                fieldCells.push_back({x, y, levelOf(x, y), volumeCell, std::move(seed)});
+                                continue;
+                            }
                         if (task.detailArchive && levelOf(x, y) > 1)
                         {
                             DetailedCell detailed{x, y,
@@ -498,6 +520,50 @@ void TerrainManager::FarPrepareLoop()
                                     blendSeamColor(vertex, nearSurfaces[static_cast<size_t>(seam)],
                                         seam, col, row, u, v);
                         });
+                }
+                for (const auto& fieldCell : fieldCells)
+                {
+                    // The cell's density (seed heights, neighbours' for its
+                    // margin, the edits) at the spacing of its detail level
+                    // (4 m at full detail, 16 m at most), surface nets with a
+                    // skirt where it meets the height grids around it.
+                    const int x = fieldCell.x, y = fieldCell.y;
+                    TerrainVolumeInput input;
+                    input.cellsX = task.cellsX; input.cellsY = task.cellsY;
+                    input.cellWidth = task.cellWidth; input.cellDepth = task.cellDepth;
+                    input.heights = *fieldCell.heights;
+                    for (int dz = -1; dz <= 1; ++dz)
+                        for (int dx = -1; dx <= 1; ++dx)
+                            if (dx || dz)
+                                if (const auto heights = task.field->SeedHeights({x + dx, y + dz}))
+                                    input.neighbourHeights[size_t((dz + 1) * 3 + dx + 1)] = *heights;
+                    input.edits = fieldCell.source->edits;
+                    const float extent = std::max(task.cellsX * task.cellWidth, task.cellsY * task.cellDepth);
+                    const float spacing = std::clamp(extent / std::max(fieldCell.level, 1), 4.f, 16.f);
+                    const auto volume = BuildTerrainVolume(input, spacing);
+                    if (!volume) continue;
+                    std::vector<Mesh::Vertex> cellVertices;
+                    std::vector<uint32_t> cellIndices;
+                    MeshSurfaceNets(*volume, volume->interiorFirst, volume->InteriorCells(), 1,
+                        2.f * spacing, cellVertices, cellIndices);
+                    const uint32_t base = static_cast<uint32_t>(result.vertices.size());
+                    for (const auto& source : cellVertices)
+                    {
+                        Mesh::Vertex vertex{};
+                        const float u = source.pos[0] / (task.cellsX * task.cellWidth);
+                        const float v = source.pos[2] / (task.cellsY * task.cellDepth);
+                        vertex.pos[0] = (x - task.startX + u) * task.spanX;
+                        vertex.pos[1] = source.pos[1];
+                        vertex.pos[2] = (y - task.startY + v) * task.spanZ;
+                        vertex.normal[0] = source.normal[0];
+                        vertex.normal[1] = source.normal[1];
+                        vertex.normal[2] = source.normal[2];
+                        vertex.uv[0] = static_cast<float>(x + u + task.halfExtent) / (task.side - 1);
+                        vertex.uv[1] = static_cast<float>(y + v + task.halfExtent) / (task.side - 1);
+                        setColor(vertex, source.pos[1]);
+                        result.vertices.push_back(vertex);
+                    }
+                    for (const uint32_t index : cellIndices) result.indices.push_back(base + index);
                 }
                 if (!task.cachePath.empty())
                     WriteFarTileCache(task.cachePath, task.fingerprint,

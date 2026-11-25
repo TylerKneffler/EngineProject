@@ -1100,6 +1100,21 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
             }
             for (uint8_t level : tile.desiredLevels)
                 HashValue(fingerprint, level);
+            // Cells meshed from the field: their edits.
+            if (tile.lodStride == 1)
+                for (const auto& volumeCell : FarVolumeCells(tile.startX, tile.startY, tile.endX, tile.endY))
+                {
+                    HashValue(fingerprint, volumeCell.cell.first);
+                    HashValue(fingerprint, volumeCell.cell.second);
+                    for (const auto& edit : volumeCell.edits)
+                    {
+                        HashValue(fingerprint, static_cast<int>(edit.shape));
+                        HashValue(fingerprint, edit.subtract);
+                        for (float value : {edit.a.x, edit.a.y, edit.a.z, edit.b.x, edit.b.y,
+                                edit.b.z, edit.radius, edit.yaw, edit.blend})
+                            HashValue(fingerprint, value);
+                    }
+                }
             cachePath = std::filesystem::path(m_cacheDirectory) / "far_tiles" /
                 "v6" / std::to_string(m_farSourceSignature) /
                 (std::to_string(tile.startX) + "_" +
@@ -1223,6 +1238,9 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
                                     m_farPatches[patchIndex]);
                             if (detailOn) task.detailArchive = m_farDetail.archive;
                             task.levels = tile.desiredLevels;
+                            task.volumeCells = FarVolumeCells(tile.startX, tile.startY,
+                                tile.endX, tile.endY);
+                            if (!task.volumeCells.empty()) task.field = GetTerrainField();
                         }
                         uint64_t taskBytes = 0;
                         for (const auto& [cell, surface] : task.seams)

@@ -285,8 +285,25 @@ std::optional<TerrainField::Hit> TerrainField::Raycast(const glm::vec3& origin,
 
 bool TerrainField::HasEdits(Cell cell) const
 {
-    const auto data = Get(cell);
-    return data && !data->edits.empty();
+    // From the edit lists alone (cached per cell), never seeding the cell:
+    // callers ask this of thousands of cells (streaming, far objects, far
+    // tiles), and a seed costs the source's read (5 ms through the
+    // landscape's builder).
+    const float spanX = m_layout.SpanX(), spanZ = m_layout.SpanZ();
+    for (int dz = -1; dz <= 1; ++dz)
+        for (int dx = -1; dx <= 1; ++dx)
+        {
+            const auto edits = OwnEdits({cell.first + dx, cell.second + dz});
+            if (!edits) continue;
+            const glm::vec3 offset(dx * spanX, 0.f, dz * spanZ);
+            for (const auto& edit : *edits)
+            {
+                const glm::vec3 low = edit.Minimum() + offset, high = edit.Maximum() + offset;
+                if (high.x < 0.f || high.z < 0.f || low.x > spanX || low.z > spanZ) continue;
+                return true;
+            }
+        }
+    return false;
 }
 
 std::shared_ptr<const std::vector<float>> TerrainField::SeedHeights(Cell cell) const

@@ -93,6 +93,39 @@ first-person controller, caches).
       levels with skirts, screen-error selection, the far-cell detail lessons: no pops at the loaded
       border, compact static buffers, no crossing hitches); replaces far tiles, `world.fargrid` and
       far-cell detail. Sun shadow height map, macro colour and far objects read the field.
+      - [x] (2026-11-24) Done as field-first far tiles, not a second far renderer: where no volume edit
+            reaches a cell the field *is* its seed heights, so far tiles keep meshing those (quadtree,
+            screen error, far-cell detail levels, compact static buffers, disk cache: all the lessons
+            kept, nothing to re-tune). Cells edits reach (`TerrainManager::FarVolumeCells`, from
+            `VolumeEditOwners`, a one-time scan of `*.volumeedit`) are meshed from the field instead:
+            seed heights + neighbours' (`TerrainField::SeedHeights`) and the edits, `BuildTerrainVolume`
+            at 128 m / level (4-16 m), surface nets with a 2x spacing skirt, coloured by the far palette
+            (steep faces rock). Edits are in the tile cache fingerprint. Stride-1 tiles only (coarser
+            parents: an edit is under a cell, a few pixels there). Checked: a 200 m pillar and a 56 m
+            shaft in far cell (1,-7) from ~650 m (`.local/transitions/Far_cmp.png`).
+      - [x] `TerrainField::HasEdits` no longer seeds the cell (it did: 5 ms through the landscape
+            builder, on the main thread for every streamed cell since phase 3, and on workers for every
+            far object cell); it reads only the 3x3 edit lists.
+      - [x] Cell crossings: volume cells no longer re-stride their hidden height mesh (stream_lod_ms
+            18-21 ms, up to 30). Meadow walk (2 runs each) crossing frames 95-122 -> 74-98 ms, p99
+            47-50 -> 43-49 ms, median 19.4-20.8. What is left there is `update_post_physics_ms` 17-22 ms,
+            which is the scene commit at the end of the update (`CommitPendingObjectChanges`: the new
+            cells' objects), not terrain.
+      - [x] Holes in loaded volume cells at coarse levels (found from 500 m: a dark patch showing the
+            water plane in cell 4,-9; `ENGINE_VOLUME_TERRAIN_CHECK` counted 4,393 empty columns over 49
+            cells). `BuildTerrainVolume` put the bottom on the 32-sample lattice but not the top: a
+            volume 31 cells tall left level 3's last cell (samples 24..32) reading past it, so ground
+            near 48 m had no vertex. The top now rounds up to the lattice too; the check reads 0 holes,
+            0 open edges inside or on cell borders. Reproduced offline with `.local/tests/
+            VolumeHoleRepro.cpp` (re-meshes an `ENGINE_VOLUME_TERRAIN_DUMP` cell as the jobs do).
+            Predates this phase (phase 2), seen less from the ground: distant loaded cells at level 3.
+      - `ENGINE_VOLUME_SKIP_LOD=0` re-strides volume cells' hidden height meshes again (A/B).
+      - Not moved (reasons): sun shadow height map (128 m samples, below an edit's size); macro colour
+            (16 m texels, paint rules unchanged); `world.fargrid` stays the horizon beyond the archive
+            (no field there); synchronous far-tile path (async off) keeps the height grid for edited
+            cells; runtime `AddVolumeEdit` in a far cell is not pushed to built far tiles until they
+            rebuild. Far objects read the field since phase 3. Field seeds for far cells still go
+            through the painting builder (5 ms; only edited cells and their neighbours now).
 - [ ] **6. Sculpting.** Editor brushes on the volume (raise, lower, smooth, flatten, add rock, carve) with
       undo, writing per-cell edits; `TerrainRegionEdit`/`TerrainManagerEditing`/`TerrainBrushShape` move
       to it. Escarpment and cliffs re-made as volume edits (rock faces, overhangs).

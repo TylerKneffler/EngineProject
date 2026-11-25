@@ -256,7 +256,13 @@ std::shared_ptr<TerrainVolume> BuildTerrainVolume(const TerrainVolumeInput& terr
     // missed each other along the shared edge.
     const float step = 32.f * spacing;
     const float bottom = std::floor((lowest - band) / step) * step;
-    volume->sizeY = static_cast<int>(std::ceil((highest + band - bottom) / spacing)) + 1;
+    // The top on that lattice too: VolumeTerrain's chunks are 32 cells tall
+    // and a coarse level's cells span up to 32 samples, so a top part-way
+    // through one left its last coarse cell reading past the volume. Where
+    // the ground crossed that cell it had no vertex: holes in the coarsest
+    // levels (meadow cell 4,-9 from 500 m, 1,507 of 16,384 columns).
+    const int cellsTall = std::max(1, static_cast<int>(std::ceil((highest + band - bottom) / step))) * 32;
+    volume->sizeY = cellsTall + 1;
     volume->origin = {-Margin * spacing, bottom, -Margin * spacing};
     volume->interiorFirst = {Margin, 0, Margin};
     volume->interiorCells = {cellsAcross, volume->sizeY - 1, cellsDeep};
