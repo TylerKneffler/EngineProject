@@ -104,26 +104,6 @@ void TerrainManager::SetProceduralBuilder(std::function<void(Cell, Terrain&)> bu
     m_proceduralBuilder = std::move(builder);
 }
 
-bool TerrainManager::UsesCompactCellVertices() const
-{
-    static const int forced = []
-    {
-        const char* setting = std::getenv("ENGINE_COMPACT_TERRAIN");
-        return setting ? (setting[0] == '0' ? 0 : 1) : -1;
-    }();
-    return !m_editorStreaming && (forced >= 0 ? forced == 1 : compactCellVertices);
-}
-
-bool TerrainManager::UsesVolumeCells() const
-{
-    static const int forced = []
-    {
-        const char* setting = std::getenv("ENGINE_VOLUME_TERRAIN");
-        return setting ? (setting[0] == '0' ? 0 : 1) : -1;
-    }();
-    return !m_editorStreaming && (forced >= 0 ? forced == 1 : volumeCells);
-}
-
 void TerrainManager::SetObjectLayerGenerator(ObjectLayerGenerator generator)
 {
     InvalidatePrepared();
@@ -290,8 +270,7 @@ bool TerrainManager::BakeRuntimeTerrain(bool reuseExistingCells)
                 }
                 else if (!LoadEdit(cell, *terrain)) return false;
             }
-            if (!terrain->SaveCache(cellTemporary.string(),
-                m_cacheSignature, true))
+            if (!terrain->SaveCache(cellTemporary.string(), m_cacheSignature))
             {
                 m_bakeStatus = "Bake failed at cell " +
                     std::to_string(cell.first) + "," + std::to_string(cell.second);
@@ -375,8 +354,7 @@ TerrainManager::MemoryUsage TerrainManager::GetMemoryUsage() const
         if (!terrain || !terrain->Owner) continue;
         usage.cpuBytes += terrain->heights.capacity() * sizeof(float) +
             terrain->weights.capacity() * sizeof(float) +
-            terrain->layers.capacity() * sizeof(Terrain::Layer) +
-            terrain->GetBakedCpuMemoryBytes();
+            terrain->layers.capacity() * sizeof(Terrain::Layer);
         for (const auto& layer : terrain->layers)
             usage.cpuBytes += layer.material.capacity();
         if (const auto* mesh = terrain->Owner->GetComponent<Mesh>())
@@ -426,17 +404,9 @@ TerrainManager::MemoryUsage TerrainManager::GetMemoryUsage() const
     for (const auto& prepared : m_preparedCells)
     {
         const auto& data = prepared.terrain;
-        usage.preparedBytes += data.heights.capacity() * sizeof(float) +
-            data.weights.capacity() * sizeof(float) +
-            data.vertices.capacity() * sizeof(Mesh::Vertex) +
-            data.indices.capacity() * sizeof(uint32_t) +
+        usage.preparedBytes += (data.heights.capacity() + data.weights.capacity() +
+            data.lushness.capacity() + data.paintWeights.capacity()) * sizeof(float) +
             data.layers.capacity() * sizeof(Terrain::Layer);
-        usage.preparedBytes +=
-            data.bakedAppearance.capacity() * sizeof(Terrain::BakedAppearance);
-        for (const auto& lod : data.bakedLods)
-            usage.preparedBytes +=
-                (lod.sourceVertices.capacity() + lod.indices.capacity()) *
-                sizeof(uint32_t);
     }
     usage.cpuBytes += usage.preparedBytes;
     return usage;
@@ -542,7 +512,6 @@ void TerrainManager::PrepareLoop()
             }
             else
             {
-                terrain->compactMesh = task.compactMesh;
                 const bool baked = !task.bakePath.empty() && task.bakeSize &&
                     terrain->LoadCacheRange(task.bakePath,
                         task.cacheSignature, nullptr, task.bakeOffset,
@@ -571,16 +540,7 @@ void TerrainManager::PrepareLoop()
                     LoadEditFile(task.editPath, *terrain);
             }
             if (cancelled()) continue;
-            terrain->SetMeshLodStride(task.lodStride);
             result.terrain = terrain->TakePrepared();
-            // Compact meshes compute their bounds when installed.
-            if (result.terrain.compact.vertices.empty())
-            {
-                result.terrain.bounds = Mesh::PrepareIndexedGeometry(
-                    result.terrain.vertices, result.terrain.indices);
-                if (!result.terrain.bounds)
-                    throw std::runtime_error("Invalid prepared terrain bounds");
-            }
             result.objectLayers = std::move(task.preparedLayers);
             for (auto& [name, saved] : task.objectLayers)
             {
@@ -612,7 +572,7 @@ void TerrainManager::PrepareLoop()
                 result.objectLayers.push_back(std::move(layer));
             }
         }
-        catch (...) { result.terrain.vertices.clear(); }
+        catch (...) { result.terrain.heights.clear(); }
         {
             std::lock_guard<std::mutex> lock(m_prepareMutex);
             if (!cancelled() && task.revision == m_prepareRevision)
@@ -667,33 +627,7 @@ int TerrainManager::CommitPrepared(int centerX, int centerY, int radius,
             m_loaded.count(cell) ||
             std::abs(cell.first - centerX) > radius ||
             std::abs(cell.second - centerY) > radius ||
-            (prepared.terrain.vertices.empty() && prepared.terrain.compact.vertices.empty())) continue;
-        int desiredStride = DesiredLodStride(cell, centerX, centerY);
-        while (desiredStride > 1 &&
-            (prepared.terrain.cellsX < desiredStride ||
-                prepared.terrain.cellsY < desiredStride ||
-                prepared.terrain.cellsX % desiredStride ||
-                prepared.terrain.cellsY % desiredStride))
-            desiredStride /= 2;
-        if (prepared.terrain.lodStride != desiredStride)
-        {
-            PrepareTask task;
-            task.cell = cell;
-            task.revision = m_prepareRevision;
-            task.scene = Owner->GetScene();
-            task.sceneGeneration = prepared.sceneGeneration;
-            task.lodStride = desiredStride;
-            task.prepared = std::move(prepared.terrain);
-            task.preparedCacheHit = prepared.cacheHit;
-            task.preparedLayers = std::move(prepared.objectLayers);
-            {
-                std::lock_guard<std::mutex> lock(m_prepareMutex);
-                m_prepareQueue.push_front(std::move(task));
-            }
-            m_preparingCells[cell] = m_prepareRevision;
-            m_prepareWake.notify_one();
-            continue;
-        }
+            prepared.terrain.heights.empty()) continue;
         const auto commitStart = std::chrono::steady_clock::now();
         auto* object = Owner->GetScene()->AddObject("Terrain cell " +
             std::to_string(cell.first) + "," + std::to_string(cell.second));
@@ -946,7 +880,6 @@ void TerrainManager::LoadCell(Cell cell, int lodStride)
         static_cast<double>(cell.first) * cellsX * cellWidth, 0.0,
         static_cast<double>(cell.second) * cellsY * cellDepth};
     auto* terrain = object->AddComponent<Terrain>();
-    terrain->compactMesh = UsesCompactCellVertices();
     const auto cachePath = GetCacheFilePath(cell.first, cell.second);
     const std::string bakePath = (m_runtimeBakeActive || requireRuntimeBake) &&
         Owner->GetScene()->HasStarted()
@@ -985,7 +918,6 @@ void TerrainManager::LoadCell(Cell cell, int lodStride)
     m_loaded[cell] = terrain;
     RestoreObjectLayers(cell, *object);
     Stitch(cell);
-    terrain->SetMeshLodStride(lodStride);
     ConfigureCellPhysics(*object);
 }
 

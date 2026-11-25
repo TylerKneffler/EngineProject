@@ -363,7 +363,6 @@ void TerrainManager::StreamCells(int centerX, int centerY, int initialRadius)
             task.hasSaved = saved != m_cells.end();
             if (task.hasSaved) task.saved = saved->second;
             task.builder = m_proceduralBuilder;
-            task.compactMesh = UsesCompactCellVertices();
             task.layerGenerator = m_objectLayerGenerator;
             if (task.layerGenerator && !task.hasSaved)
                 if (auto field = GetTerrainField(); field && field->HasEdits(cell))
@@ -415,57 +414,12 @@ void TerrainManager::StreamCells(int centerX, int centerY, int initialRadius)
     }
     m_lastStreamingTiming.scheduledCells = loaded;
     record(m_lastStreamingTiming.loadOrScheduleMs);
-    std::vector<Cell> lodPending;
-    // Volume cells draw their volume (its own levels); the cell's height
-    // mesh is hidden, so re-striding it is wasted: ~5 ms a cell, up to four
-    // a crossing (stream_lod_ms 18-21 ms on the meadow walk).
-    static const bool keepVolumeLods = [] {
-        const char* value = std::getenv("ENGINE_VOLUME_SKIP_LOD");
-        return value && value[0] == '0';
-    }();
-    const bool volumeCells = UsesVolumeCells() && !keepVolumeLods;
-    for (const auto& [cell, terrain] : m_loaded)
-        if (terrain && terrain->Owner &&
-            !(volumeCells && terrain->Owner->GetComponent<VolumeTerrain>()) &&
-            terrain->GetMeshLodStride() != DesiredLodStride(cell, centerX, centerY))
-            lodPending.push_back(cell);
-    std::sort(lodPending.begin(), lodPending.end(), [&](Cell a, Cell b) {
-        const auto foundA = m_loaded.find(a);
-        const auto foundB = m_loaded.find(b);
-        if (foundA == m_loaded.end() || !foundA->second ||
-            !foundA->second->Owner) return false;
-        if (foundB == m_loaded.end() || !foundB->second ||
-            !foundB->second->Owner) return true;
-        const int strideA = DesiredLodStride(a, centerX, centerY);
-        const int strideB = DesiredLodStride(b, centerX, centerY);
-        const bool upgradeA = strideA < foundA->second->GetMeshLodStride();
-        const bool upgradeB = strideB < foundB->second->GetMeshLodStride();
-        if (upgradeA != upgradeB) return upgradeA;
-        const int distanceA = std::max(std::abs(a.first - centerX), std::abs(a.second - centerY));
-        const int distanceB = std::max(std::abs(b.first - centerX), std::abs(b.second - centerY));
-        return distanceA == distanceB ? a < b : distanceA < distanceB;
-    });
-    int changed = 0;
+    // Cells draw as volumes with their own levels (VolumeTerrain): there is
+    // no height-grid mesh to re-stride.
+    const int changed = 0;
     const int uploadCapacity = runtimeBudget
         ? std::max(0, frameRemaining - (asyncStreaming ? 0 : loaded))
         : std::clamp(maxUploadsPerUpdate, 1, 64);
-    const int reservedBatchUploads =
-        asyncStreaming && batchFarCells && m_renderBatchRefreshPending ? 1 : 0;
-    for (Cell cell : lodPending)
-    {
-        const int lodLimit = runtimeBudget || asyncStreaming
-            ? std::min(std::clamp(maxLodChangesPerUpdate, 1, 64),
-                std::max(0, uploadCapacity - reservedBatchUploads))
-            : std::clamp(maxLodChangesPerUpdate, 1, 64);
-        if (changed >= lodLimit) break;
-        if (auto found = m_loaded.find(cell);
-            found != m_loaded.end() && found->second && found->second->Owner)
-        {
-            found->second->SetMeshLodStride(
-                DesiredLodStride(cell, centerX, centerY));
-            ++changed;
-        }
-    }
     m_lastStreamingTiming.changedLods = changed;
     record(m_lastStreamingTiming.lodMs);
     int batchUploads = runtimeBudget
@@ -477,7 +431,7 @@ void TerrainManager::StreamCells(int centerX, int centerY, int initialRadius)
             batchUploads = std::max(0, uploadCapacity - changed);
         const int preparedBudget = batchUploads > 0
             ? std::min(batchUploads, std::max(1,
-                batchUploads - reservedBatchUploads))
+                batchUploads))
             : 0;
         preparedUploads = CommitPrepared(centerX, centerY, radius,
             preparedBudget);

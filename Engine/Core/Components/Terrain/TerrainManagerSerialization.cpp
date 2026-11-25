@@ -51,8 +51,6 @@ TerrainManager::JsonValue TerrainManager::Serialize() const
         .Set("maxCommitMilliseconds", JsonValue(maxCommitMilliseconds))
         .Set("farObjectBlockCells", JsonValue(farObjectBlockCells))
         .Set("nearObjectBlockCells", JsonValue(nearObjectBlockCells))
-        .Set("compactCellVertices", JsonValue(compactCellVertices))
-        .Set("volumeCells", JsonValue(volumeCells))
         .Set("volumeSampleSpacing", JsonValue(volumeSampleSpacing))
         .Set("volumeSteepLayer", JsonValue(volumeSteepLayer))
         .Set("farObjectProjectLayer", JsonValue(farObjectProjectLayer))
@@ -275,8 +273,6 @@ void TerrainManager::Deserialize(const JsonValue& value)
         ? std::clamp(value["farObjectBlockCells"].AsInt(), 1, 32) : 8;
     nearObjectBlockCells = value.Has("nearObjectBlockCells")
         ? std::clamp(value["nearObjectBlockCells"].AsInt(), 1, 8) : 1;
-    compactCellVertices = value.Has("compactCellVertices") && value["compactCellVertices"].AsBool();
-    volumeCells = value.Has("volumeCells") && value["volumeCells"].AsBool();
     volumeSampleSpacing = value.Has("volumeSampleSpacing")
         ? std::clamp(value["volumeSampleSpacing"].AsFloat(), .25f, 8.f) : 2.f;
     volumeSteepLayer = value.Has("volumeSteepLayer")
@@ -585,10 +581,6 @@ bool TerrainManager::DrawProperties(Engine::Core::IInspectorUi& ui)
         changed |= ui.SliderInt("GPU terrain budget MiB", &gpuBudgetMiB, 1, 16384);
         changed |= ui.SliderInt("Mesh cache budget MiB", &cacheBudgetMiB, 1, 16384);
         changed |= ui.Checkbox("Batch far terrain cells", &batchFarCells);
-        changed |= ui.Checkbox("Volume cells", &volumeCells);
-        ui.Tooltip("Loaded cells draw and collide as a density volume (overhangs, arches, carved "
-            "volume edits, scanned rock on steep faces) instead of the height grid. "
-            "ENGINE_VOLUME_TERRAIN=0/1 overrides it.");
         changed |= ui.SliderFloat("Volume sample spacing (m)", &volumeSampleSpacing, .25f, 8.f);
         changed |= ui.SliderInt("Volume steep layer", &volumeSteepLayer, 0, 5);
     }

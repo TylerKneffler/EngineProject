@@ -81,26 +81,16 @@ public:
     // placements and colliders. 1 (or less) keeps one batch set per cell.
     // Game streaming only; the editor always draws per cell.
     int nearObjectBlockCells = 1;
-    // Loaded cells keep their mesh in the compact terrain vertex format, with
-    // a paint map for the layer weights (Terrain::compactMesh): 48 bytes a
-    // vertex instead of 264. Game streaming; the editor keeps the full format.
-    bool compactCellVertices = false;
-    // compactCellVertices for game streaming; ENGINE_COMPACT_TERRAIN=0/1
-    // overrides it for A/B runs.
-    bool UsesCompactCellVertices() const;
-    // Volume terrain (stage 3, .md/todo.md): loaded cells are drawn and
-    // collided as density volumes built from them (VolumeTerrain fromTerrain:
-    // their heights and volume edits), shaded with their paint and
-    // `volumeSteepLayer` on steep faces. The cell's Terrain stays for heights,
-    // paint and placement; its own mesh and grid collider go.
-    // Far tiles keep the height field. ENGINE_VOLUME_TERRAIN=0/1 overrides.
-    bool volumeCells = false;
+    // Loaded cells are drawn and collided as density volumes built from them
+    // (VolumeTerrain fromTerrain: their heights and volume edits), shaded
+    // with their paint and `volumeSteepLayer` on steep faces. The cell's
+    // Terrain holds the seed: heights, paint and placement (there is no
+    // height-grid mesh; todo.md "Terrain: volume-first conversion", step 7).
     int volumeSteepLayer = 4;
     // Metres between volume samples. The heights are a 4 m grid, so 2 m
     // keeps their detail and costs an eighth of 1 m (and ~a quarter of
     // the triangles).
     float volumeSampleSpacing = 2.f;
-    bool UsesVolumeCells() const;
     // Volume edits (caves, arches; TerrainVolumeEdit), kept per cell in
     // <cellDataDirectory>/<x>_<z>.volumeedit in the cell's space, read when
     // the cell's volume is built (with its neighbours', which may reach
@@ -880,7 +870,6 @@ private:
         std::string bakePath;
         uint64_t bakeOffset = 0, bakeSize = 0;
         std::function<void(Cell, Terrain&)> builder;
-        bool compactMesh = false;
         ObjectLayerGenerator layerGenerator;
         std::shared_ptr<const TerrainField> layerField; // when volume edits reach the cell
         std::optional<Terrain::Prepared> prepared;

@@ -79,58 +79,26 @@ public:
     static float BrushWeight(float dx, float dz, float radius, const BrushOptions& options,
         float* relief = nullptr);
     static float BrushReach(float radius, const BrushOptions& options);
-    struct BakedAppearance
-    {
-        float normal[3];
-        float color[3];
-        float lushness = 0.f; // see Terrain::lushness
-    };
-    struct BakedLod
-    {
-        std::vector<uint32_t> sourceVertices;
-        std::vector<uint32_t> indices;
-    };
+    // A cell built off the main thread (TerrainManager streaming), handed
+    // to the cell's component.
     struct Prepared
     {
-        int cellsX = 0, cellsY = 0, lodStride = 1;
+        int cellsX = 0, cellsY = 0;
         float cellWidth = 1.f, cellDepth = 1.f, textureTiling = 4.f;
-        std::vector<float> heights, weights;
+        std::vector<float> heights, weights, lushness;
         int paintResolution = 0;
         std::vector<float> paintWeights;
         std::vector<Layer> layers;
-        std::vector<Mesh::Vertex> vertices;
-        std::vector<uint32_t> indices;
-        std::optional<Mesh::IndexedGeometryBounds> bounds;
         std::vector<std::shared_ptr<Material>> materials;
         std::vector<std::string> materialPaths;
-        std::vector<BakedAppearance> bakedAppearance;
-        std::array<BakedLod, 4> bakedLods;
-        uint8_t bakedTextureMask = 0;
-        size_t collisionIndexCount = 0;
-        std::vector<uint32_t> occluderIndices;
-        bool compactMesh = false;
-        // The mesh in the compact terrain format (compactMesh), instead of
-        // vertices/indices.
-        Mesh::TerrainMeshData compact;
     };
+    // The static cell cache's format (SaveCache).
+    static constexpr uint32_t CacheVersion = 8;
     Terrain();
     int cellsX = 32, cellsY = 32;
     float cellWidth = 1.f, cellDepth = 1.f;
     float textureTiling = 4.f;
     std::vector<float> heights;
-    // Vector displacement (optional): each grid vertex moved sideways by
-    // (x, z) metres, two floats per vertex in the heights' order, so the
-    // surface can lean past its own base: undercut cliff faces and short
-    // overhangs, about a cell deep. Empty for a plain height field. Normals
-    // follow the displaced neighbours, so a face that overhangs faces down.
-    // Border vertices are shared with neighbouring cells, which must hold the
-    // same offsets there. Height queries (SampleTerrainSurface, placement,
-    // brushes) keep reading the undisplaced height field.
-    std::vector<float> lateralOffsets;
-    bool HasLateralOffsets() const
-    { return lateralOffsets.size() == heights.size() * 2 && !heights.empty(); }
-    // A grid vertex's position in cell space, displacement included.
-    glm::vec3 GridPosition(int col, int row) const;
     std::vector<Layer> layers;
     std::vector<float> weights; // one weight per vertex and layer
     // Optional, one per vertex: how lush (darker, greener) the ground grows
@@ -139,13 +107,6 @@ public:
     // Vertex uvChannels1.w; Object.hlsl tints the terrain by it. Kept in the
     // static cell cache; not serialized with the scene.
     std::vector<float> lushness;
-    // Keep this cell's mesh in the compact terrain vertex format (48 bytes a
-    // vertex instead of 264, on the CPU and the GPU). Those vertices carry no
-    // layer weights, so the cell then always has a paint map (at least two
-    // samples per quad, seeded from the vertex weights). Not serialized: the
-    // owner sets it before the mesh is built or loaded
-    // (TerrainManager::compactCellVertices).
-    bool compactMesh = false;
     // Paint detail, in weight samples per cell edge. 0 keeps paint on the
     // vertices. Otherwise paintWeights holds one weight per layer per sample
     // on a grid aligned with the vertices, PaintWidth() x PaintHeight(), and
@@ -225,17 +186,20 @@ public:
     // direction, so an affine-transformed world ray keeps its parameter.
     bool RaycastLocal(const glm::vec3& origin, const glm::vec3& direction,
         float& distance) const;
+    // After changing heights, weights or layers: settles weights, paint and
+    // materials and bumps the surface revision, which the terrain's volume
+    // (VolumeTerrain) follows. There is no height-grid mesh.
     void Rebuild();
-    void SetMeshLodStride(int stride);
-    int GetMeshLodStride() const { return m_meshLodStride; }
-    uint64_t GetBakedCpuMemoryBytes() const;
+    uint64_t GetSurfaceRevision() const { return m_surfaceRevision; }
+    // A terrain that is not a Terrain Manager's cell gets a VolumeTerrain
+    // (drawn and collided from its heights) if it has none.
+    void EnsureVolume();
     Prepared TakePrepared();
     bool InstallPrepared(Prepared prepared, IGraphicsProvider* provider);
     void FinalizePreparedGraphics(IGraphicsProvider* provider);
-    // Static generated cells can restore their CPU mesh without sampling noise
-    // or rebuilding vertices. The graphics buffers are uploaded on load.
-    bool SaveCache(const std::string& path, uint64_t signature,
-        bool includeBakedLods = false) const;
+    // Static generated cells restore their heights, paint and lushness
+    // without sampling noise (CacheVersion).
+    bool SaveCache(const std::string& path, uint64_t signature) const;
     bool LoadCache(const std::string& path, uint64_t signature,
         IGraphicsProvider* provider);
     bool LoadCacheRange(const std::string& path, uint64_t signature,
@@ -268,32 +232,12 @@ private:
     // Rebuilds the map from vertex weights when its size no longer matches.
     void EnsurePaintMap();
     void SyncVertexWeightsFromPaint();
-    // Brush strokes: rebuild only vertex rows minRow..maxRow (plus one row
-    // of normals either side) in place. Falls back to Rebuild when the mesh
-    // is not a full-resolution copy of the grid (LOD stride, new materials).
-    void RebuildRegion(int minCol, int minRow, int maxCol, int maxRow);
-    void BuildVertex(int col, int row, Mesh::Vertex& vertex) const;
-    // Installs a built cell mesh in the compact format when compactMesh,
-    // else as is.
-    bool InstallCellMesh(Mesh& mesh, std::vector<Mesh::Vertex>&& vertices,
-        std::vector<uint32_t>&& indices);
-    // compactMesh: a paint map from the vertex weights where there is none.
-    void PrepareCompactPaint();
-    // The full-resolution grid's vertices (the first heights.size() of the
-    // mesh), from either vertex format. Empty when the mesh is not one.
-    std::vector<Mesh::Vertex> GridVertices(const Mesh& mesh) const;
-    // Base color map present per layer, refreshed by Rebuild.
-    std::array<bool, 6> m_layerTextured{};
-    int m_meshLodStride = 1;
+    uint64_t m_surfaceRevision = 1;
     std::vector<std::shared_ptr<Material>> m_materials;
     std::vector<std::string> m_materialPaths;
-    std::vector<BakedAppearance> m_bakedAppearance;
-    std::array<BakedLod, 4> m_bakedLods;
-    uint8_t m_bakedTextureMask = 0;
     std::string m_bakeStatus;
     void RefreshMaterials();
     void NormalizeWeights();
-    bool InstallBakedLod(int stride);
 };
 }
 

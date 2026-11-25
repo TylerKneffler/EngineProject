@@ -8,7 +8,8 @@
 #include "Core/Components/Terrain/TerrainObjectLayer.h"
 #include "Core/Components/Terrain/TerrainRegionEdit.h"
 #include "Core/Components/Terrain/TerrainSurfaceSample.h"
-#include "Core/Components/Terrain/TerrainSurfaceWinding.h"
+#include "Core/Components/Terrain/VolumeTerrain.h"
+#include "Core/Components/Terrain/TerrainManager.h"
 #include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Components/Mesh/Mesh.h"
@@ -59,18 +60,6 @@ template<class T> bool ReadVector(std::ifstream& stream, std::vector<T>& values,
         static_cast<std::streamsize>(count * sizeof(T)));
     return static_cast<bool>(stream);
 }
-template<class T> bool ReadBoundedVector(std::ifstream& stream,
-    std::vector<T>& values, uint64_t maximum)
-{
-    uint64_t count = 0;
-    if (!ReadValue(stream, count) || count == 0 || count > maximum) return false;
-    values.resize(static_cast<size_t>(count));
-    stream.read(reinterpret_cast<char*>(values.data()),
-        static_cast<std::streamsize>(count * sizeof(T)));
-    return static_cast<bool>(stream);
-}
-using CachedAppearance = Engine::Components::Terrain::BakedAppearance;
-static_assert(sizeof(CachedAppearance) == 28);
 int64_t MaterialStamp(const std::string& material)
 {
     if (material.empty()) return 0;
@@ -78,81 +67,6 @@ int64_t MaterialStamp(const std::string& material)
     const auto time = std::filesystem::last_write_time(
         Engine::Components::Mesh::ResolveFilePath(material), error);
     return error ? 0 : static_cast<int64_t>(time.time_since_epoch().count());
-}
-template<class NormalAt>
-glm::vec3 FilterLodNormal(int x, int y, int stride,
-    int cellsX, int cellsY, NormalAt&& normalAt)
-{
-    const glm::vec3 original = normalAt(x, y);
-    // Shared edges retain the exact detailed normal across unequal LODs.
-    if (stride <= 1 || x == 0 || y == 0 ||
-        x == cellsX || y == cellsY) return original;
-    const int radius = stride / 2;
-    glm::vec3 sum(0.f);
-    for (int row = std::max(0, y - radius);
-        row <= std::min(cellsY, y + radius); ++row)
-        for (int col = std::max(0, x - radius);
-            col <= std::min(cellsX, x + radius); ++col)
-            sum += normalAt(col, row);
-    return glm::dot(sum, sum) > 0.000001f
-        ? glm::normalize(sum) : original;
-}
-void ReduceMeshForLod(std::vector<Engine::Components::Mesh::Vertex>& vertices,
-    std::vector<uint32_t>& indices, int cellsX, int cellsY, int stride)
-{
-    if (stride <= 1 || cellsX < stride || cellsY < stride ||
-        cellsX % stride || cellsY % stride) return;
-    const auto full = std::move(vertices);
-    vertices.clear();
-    indices.clear();
-    std::vector<uint32_t> remap(full.size(), UINT32_MAX);
-    auto vertex = [&](int x, int y) {
-        const size_t source = static_cast<size_t>(y) * (cellsX + 1) + x;
-        if (remap[source] == UINT32_MAX)
-        {
-            remap[source] = static_cast<uint32_t>(vertices.size());
-            vertices.push_back(full[source]);
-            const glm::vec3 filtered = FilterLodNormal(x, y, stride,
-                cellsX, cellsY, [&](int col, int row) {
-                    const auto& sample = full[
-                        static_cast<size_t>(row) * (cellsX + 1) + col];
-                    return glm::vec3(sample.normal[0], sample.normal[1],
-                        sample.normal[2]);
-                });
-            vertices.back().normal[0] = filtered.x;
-            vertices.back().normal[1] = filtered.y;
-            vertices.back().normal[2] = filtered.z;
-        }
-        return remap[source];
-    };
-    // A fan in each coarse patch retains every outer edge sample. Adjacent
-    // patches share their corner vertices, and every neighboring LOD has the
-    // same edge segments and height samples.
-    for (int y = 0; y < cellsY; y += stride)
-        for (int x = 0; x < cellsX; x += stride)
-        {
-            const int endX = std::min(x + stride, cellsX);
-            const int endY = std::min(y + stride, cellsY);
-            const int midX = x + (endX - x) / 2;
-            const int midY = y + (endY - y) / 2;
-            const uint32_t center = vertex(midX, midY);
-            std::vector<uint32_t> boundary;
-            const int leftStep = x == 0 ? 1 : endY - y;
-            const int bottomStep = endY == cellsY ? 1 : endX - x;
-            const int rightStep = endX == cellsX ? 1 : endY - y;
-            const int topStep = y == 0 ? 1 : endX - x;
-            for (int row = y; row < endY; row += leftStep)
-                boundary.push_back(vertex(x, row));
-            for (int col = x; col < endX; col += bottomStep)
-                boundary.push_back(vertex(col, endY));
-            for (int row = endY; row > y; row -= rightStep)
-                boundary.push_back(vertex(endX, row));
-            for (int col = endX; col > x; col -= topStep)
-                boundary.push_back(vertex(col, y));
-            for (size_t i = 0; i < boundary.size(); ++i)
-                indices.insert(indices.end(), {center, boundary[i],
-                    boundary[(i + 1) % boundary.size()]});
-        }
 }
 }
 
@@ -457,24 +371,8 @@ void Terrain::Resize(int x, int y, float width, float depth)
     cellsX = x; cellsY = y; cellWidth = width; cellDepth = depth;
     heights = std::move(next);
     weights = std::move(nextWeights);
-    // Offsets are metres on the old grid's vertices; a new grid starts plain.
-    lateralOffsets.clear();
     NormalizeWeights();
     Rebuild();
-}
-
-glm::vec3 Terrain::GridPosition(int col, int row) const
-{
-    col = std::clamp(col, 0, cellsX);
-    row = std::clamp(row, 0, cellsY);
-    const size_t i = static_cast<size_t>(row) * (cellsX + 1) + col;
-    glm::vec3 position(col * cellWidth, i < heights.size() ? heights[i] : 0.f, row * cellDepth);
-    if (HasLateralOffsets())
-    {
-        position.x += lateralOffsets[i * 2];
-        position.z += lateralOffsets[i * 2 + 1];
-    }
-    return position;
 }
 
 void Terrain::NormalizeWeights()
@@ -581,10 +479,7 @@ bool Terrain::ApplyBrush(float x, float z, float radius, float strength,
         if (changed)
         {
             m_paintTextureDirty = true;
-            RebuildRegion(int(std::floor(float(minCol) / paintResolution)),
-                int(std::floor(float(minRow) / paintResolution)),
-                int(std::ceil(float(maxCol) / paintResolution)),
-                int(std::ceil(float(maxRow) / paintResolution)));
+            Rebuild();
             MarkConfigurationDirty();
         }
         return changed;
@@ -679,7 +574,7 @@ bool Terrain::ApplyBrush(float x, float z, float radius, float strength,
     if (changed)
     {
         // Paint keeps each touched sample normalized itself.
-        RebuildRegion(firstCol, firstRow, lastCol, lastRow);
+        Rebuild();
         MarkConfigurationDirty();
         if (brush != Brush::Paint)
             FollowSurfaceEdit(before, x - reach, z - reach, x + reach, z + reach,
@@ -823,237 +718,31 @@ bool Terrain::ApplyBrushFromLocalRay(const glm::vec3& nearPoint,
 
 void Terrain::Rebuild()
 {
-    if (!Owner || heights.size() != static_cast<size_t>(cellsX + 1) * (cellsY + 1)) return;
-    m_bakedAppearance.clear();
-    for (auto& lod : m_bakedLods) lod = {};
+    // The terrain draws and collides as a volume built from these heights
+    // (VolumeTerrain; todo.md "Terrain: volume-first conversion", step 7):
+    // there is no height-grid mesh. A rebuild settles the weights, the paint
+    // and the materials and tells the volume the surface changed.
+    if (heights.size() != static_cast<size_t>(cellsX + 1) * (cellsY + 1)) return;
     NormalizeWeights();
-    if (compactMesh && paintResolution <= 0) paintResolution = 2;
     EnsurePaintMap();
     SyncVertexWeightsFromPaint();
     RefreshMaterials();
-    m_layerTextured.fill(false);
-    for (size_t layer = 0; layer < std::min<size_t>(layers.size(), 6); ++layer)
-        m_layerTextured[layer] = layer < m_materials.size() && m_materials[layer] &&
-            m_materials[layer]->baseColorTexture &&
-            std::filesystem::exists(m_materials[layer]->baseColorTexture->GetFilePath());
-    Mesh* mesh = Owner->GetComponent<Mesh>();
-    if (!mesh) mesh = Owner->AddComponent<Mesh>();
-    std::vector<Mesh::Vertex> vertices(heights.size());
-    std::vector<uint32_t> indices;
-    indices.reserve(static_cast<size_t>(cellsX) * cellsY * 6);
-    for (int row = 0; row <= cellsY; ++row)
-        for (int col = 0; col <= cellsX; ++col)
-            BuildVertex(col, row, vertices[static_cast<size_t>(row * (cellsX + 1) + col)]);
-    for (int row = 0; row < cellsY; ++row)
-        for (int col = 0; col < cellsX; ++col)
-        {
-            const uint32_t a = row * (cellsX + 1) + col, b = a + cellsX + 1;
-            indices.insert(indices.end(), {a, b, a + 1, a + 1, b, b + 1});
-        }
-    ReduceMeshForLod(vertices, indices, cellsX, cellsY, m_meshLodStride);
-    OrientTerrainSurfaceUp(vertices, indices);
-    InstallCellMesh(*mesh, std::move(vertices), std::move(indices));
-    if (m_provider && !mesh->IsReady()) mesh->OnAfterDeserialize(m_provider);
+    ++m_surfaceRevision;
 }
 
-void Terrain::PrepareCompactPaint()
+void Terrain::EnsureVolume()
 {
-    if (!compactMesh) return;
-    if (paintResolution <= 0) paintResolution = 2;
-    EnsurePaintMap();
-}
-
-bool Terrain::InstallCellMesh(Mesh& mesh, std::vector<Mesh::Vertex>&& vertices,
-    std::vector<uint32_t>&& indices)
-{
-    bool installed = false;
-    if (compactMesh && HasPaintMap())
-    {
-        Mesh::TerrainMeshData geometry;
-        geometry.vertices.resize(vertices.size());
-        for (size_t i = 0; i < vertices.size(); ++i)
-        {
-            auto& target = geometry.vertices[i];
-            std::copy_n(vertices[i].pos, 3, target.pos);
-            std::copy_n(vertices[i].normal, 3, target.normal);
-            std::copy_n(vertices[i].uv, 2, target.uv);
-            std::copy_n(vertices[i].color, 4, target.color);
-        }
-        vertices.clear();
-        vertices.shrink_to_fit();
-        geometry.indices = std::move(indices);
-        installed = mesh.SetTerrainGeometry(std::move(geometry));
-    }
-    else
-        installed = mesh.SetIndexedGeometry(std::move(vertices), std::move(indices));
-    // Every triangle is the grid: all of them collide and occlude.
-    mesh.collisionIndexCount = 0;
-    mesh.occluderIndices.clear();
-    return installed;
-}
-
-std::vector<Mesh::Vertex> Terrain::GridVertices(const Mesh& mesh) const
-{
-    std::vector<Mesh::Vertex> grid;
-    if (mesh.UsesTerrainVertexFormat())
-    {
-        const auto& compact = mesh.GetTerrainVertices();
-        if (compact.size() < heights.size()) return grid;
-        grid.resize(heights.size());
-        for (size_t i = 0; i < grid.size(); ++i)
-        {
-            std::copy_n(compact[i].pos, 3, grid[i].pos);
-            std::copy_n(compact[i].normal, 3, grid[i].normal);
-            std::copy_n(compact[i].uv, 2, grid[i].uv);
-            std::copy_n(compact[i].color, 4, grid[i].color);
-            for (size_t layer = 0; layer < std::min<size_t>(layers.size(), 6); ++layer)
-                if (i * layers.size() + layer < weights.size())
-                    grid[i].uvChannels[2 + layer / 4][layer % 4] = weights[i * layers.size() + layer];
-        }
-        return grid;
-    }
-    if (mesh.GetVertices().size() < heights.size()) return grid;
-    grid.assign(mesh.GetVertices().begin(), mesh.GetVertices().begin() + heights.size());
-    return grid;
-}
-
-void Terrain::BuildVertex(int col, int row, Mesh::Vertex& v) const
-{
-    const size_t i = static_cast<size_t>(row * (cellsX + 1) + col);
-    const auto sample = [&](int sx, int sy) {
-        return heights[static_cast<size_t>(std::clamp(sy, 0, cellsY) *
-            (cellsX + 1) + std::clamp(sx, 0, cellsX))];
-    };
-    glm::vec3 normal = glm::normalize(glm::vec3(
-        (sample(col - 1, row) - sample(col + 1, row)) / (2.f * cellWidth),
-        1.f, (sample(col, row - 1) - sample(col, row + 1)) / (2.f * cellDepth)));
-    const glm::vec3 position = GridPosition(col, row);
-    if (HasLateralOffsets())
-    {
-        // From the displaced neighbours (central differences; one-sided at
-        // the border): an undercut face's normal leans out and down.
-        const glm::vec3 alongX = GridPosition(col + 1, row) - GridPosition(col - 1, row);
-        const glm::vec3 alongZ = GridPosition(col, row + 1) - GridPosition(col, row - 1);
-        const glm::vec3 cross = glm::cross(alongZ, alongX);
-        if (glm::dot(cross, cross) > 1.e-12f) normal = glm::normalize(cross);
-    }
-    v = {};
-    v.pos[0] = position.x; v.pos[1] = position.y; v.pos[2] = position.z;
-    v.normal[0] = normal.x; v.normal[1] = normal.y; v.normal[2] = normal.z;
-    v.uv[0] = static_cast<float>(col) / cellsX;
-    v.uv[1] = static_cast<float>(row) / cellsY;
-    glm::vec3 color(0.f);
-    for (size_t l = 0; l < layers.size(); ++l)
-    {
-        const float weight = weights[i * layers.size() + l];
-        if (l < 6)
-            v.uvChannels[2 + l / 4][l % 4] = weight;
-        if (l >= 6 || !m_layerTextured[l])
-            color += (l < m_materials.size() && m_materials[l]
-            ? m_materials[l]->diffuseColor : layers[l].previewColor) * weight;
-    }
-    v.color[0] = color.x; v.color[1] = color.y; v.color[2] = color.z;
-    v.color[3] = 1.f;
-    v.uvChannels[1][3] = i < lushness.size() ? lushness[i] : 0.f;
-}
-
-void Terrain::RebuildRegion(int minCol, int minRow, int maxCol, int maxRow)
-{
-    Mesh* mesh = Owner ? Owner->GetComponent<Mesh>() : nullptr;
-    bool materialsCurrent = m_materialPaths.size() == layers.size();
-    for (size_t i = 0; materialsCurrent && i < layers.size(); ++i)
-        materialsCurrent = m_materialPaths[i] == layers[i].material;
-    if (!mesh || m_meshLodStride != 1 || mesh->UsesTerrainVertexFormat() ||
-        mesh->GetVertices().size() != heights.size() || !materialsCurrent ||
-        weights.size() != heights.size() * layers.size())
-    {
-        Rebuild();
-        return;
-    }
-    m_bakedAppearance.clear();
-    for (auto& lod : m_bakedLods) lod = {};
-    // Normals read one sample either side.
-    minRow = std::clamp(minRow - 1, 0, cellsY);
-    maxRow = std::clamp(maxRow + 1, 0, cellsY);
-    minCol = std::clamp(minCol - 1, 0, cellsX);
-    maxCol = std::clamp(maxCol + 1, 0, cellsX);
-    if (minRow > maxRow || minCol > maxCol) return;
-    SyncVertexWeightsFromPaint();
-    // Whole rows form one contiguous vertex range.
-    std::vector<Mesh::Vertex> vertices(mesh->GetVertices().begin() + size_t(minRow) * (cellsX + 1),
-        mesh->GetVertices().begin() + size_t(maxRow + 1) * (cellsX + 1));
-    for (int row = minRow; row <= maxRow; ++row)
-        for (int col = minCol; col <= maxCol; ++col)
-            BuildVertex(col, row, vertices[size_t(row - minRow) * (cellsX + 1) + col]);
-    if (!mesh->UpdateIndexedVertexRange(size_t(minRow) * (cellsX + 1), vertices))
-        Rebuild();
-}
-
-void Terrain::SetMeshLodStride(int stride)
-{
-    stride = stride <= 1 ? 1 : stride <= 2 ? 2 : stride <= 4 ? 4 : 8;
-    while (stride > 1 && (cellsX < stride || cellsY < stride ||
-        cellsX % stride || cellsY % stride)) stride /= 2;
-    if (m_meshLodStride == stride) return;
-    m_meshLodStride = stride;
-    if (Owner && Owner->GetComponent<Mesh>() && !InstallBakedLod(stride))
-        Rebuild();
-}
-
-bool Terrain::InstallBakedLod(int stride)
-{
-    const size_t lodIndex = stride <= 1 ? 0 : stride <= 2 ? 1 :
-        stride <= 4 ? 2 : 3;
-    const auto& lod = m_bakedLods[lodIndex];
-    if (!Owner || m_bakedAppearance.size() != heights.size() ||
-        lod.sourceVertices.empty() || lod.indices.empty()) return false;
-    std::vector<Mesh::Vertex> vertices;
-    vertices.reserve(lod.sourceVertices.size());
-    for (uint32_t source : lod.sourceVertices)
-    {
-        if (source >= heights.size()) return false;
-        const int col = source % (cellsX + 1);
-        const int row = source / (cellsX + 1);
-        Mesh::Vertex vertex{};
-        const glm::vec3 position = GridPosition(col, row);
-        vertex.pos[0] = position.x;
-        vertex.pos[1] = position.y;
-        vertex.pos[2] = position.z;
-        const glm::vec3 filtered = FilterLodNormal(col, row, stride,
-            cellsX, cellsY, [&](int sampleX, int sampleY) {
-                const auto& sample = m_bakedAppearance[
-                    static_cast<size_t>(sampleY) * (cellsX + 1) + sampleX];
-                return glm::vec3(sample.normal[0], sample.normal[1],
-                    sample.normal[2]);
-            });
-        vertex.normal[0] = filtered.x;
-        vertex.normal[1] = filtered.y;
-        vertex.normal[2] = filtered.z;
-        vertex.uv[0] = static_cast<float>(col) / cellsX;
-        vertex.uv[1] = static_cast<float>(row) / cellsY;
-        std::copy_n(m_bakedAppearance[source].color, 3, vertex.color);
-        vertex.color[3] = 1.f;
-        vertex.uvChannels[1][3] = m_bakedAppearance[source].lushness;
-        for (size_t layer = 0; layer < std::min<size_t>(layers.size(), 6); ++layer)
-            vertex.uvChannels[2 + layer / 4][layer % 4] =
-                weights[static_cast<size_t>(source) * layers.size() + layer];
-        vertices.push_back(vertex);
-    }
-    Mesh* mesh = Owner->GetComponent<Mesh>();
-    if (!mesh) mesh = Owner->AddComponent<Mesh>();
-    auto indices = lod.indices;
-    OrientTerrainSurfaceUp(vertices, indices);
-    PrepareCompactPaint();
-    return InstallCellMesh(*mesh, std::move(vertices), std::move(indices));
-}
-
-uint64_t Terrain::GetBakedCpuMemoryBytes() const
-{
-    uint64_t bytes = m_bakedAppearance.capacity() * sizeof(BakedAppearance);
-    for (const auto& lod : m_bakedLods)
-        bytes += (lod.sourceVertices.capacity() + lod.indices.capacity()) *
-            sizeof(uint32_t);
-    return bytes;
+    // A terrain of its own (not a Terrain Manager's cell: the manager gives
+    // its cells volumes joined into one sheet) draws and collides as a volume.
+    if (!Owner || Owner->GetComponent<VolumeTerrain>()) return;
+    for (auto* parent = Owner->Parent; parent; parent = parent->Parent)
+        if (parent->GetComponent<TerrainManager>()) return;
+    auto* volume = Owner->AddComponent<VolumeTerrain>();
+    volume->fromTerrain = true;
+    volume->sampleSpacing = std::clamp(std::min(cellWidth, cellDepth), .25f, 4.f);
+    volume->drawDistance = std::numeric_limits<float>::max();
+    volume->collisionDistance = std::numeric_limits<float>::max();
+    volume->Rebuild();
 }
 
 Terrain::Prepared Terrain::TakePrepared()
@@ -1061,70 +750,37 @@ Terrain::Prepared Terrain::TakePrepared()
     Prepared result;
     result.cellsX = cellsX; result.cellsY = cellsY;
     result.cellWidth = cellWidth; result.cellDepth = cellDepth;
-    result.textureTiling = textureTiling; result.lodStride = m_meshLodStride;
+    result.textureTiling = textureTiling;
     result.heights = std::move(heights);
     result.weights = std::move(weights);
+    result.lushness = std::move(lushness);
     result.paintResolution = paintResolution;
     result.paintWeights = std::move(paintWeights);
     result.layers = std::move(layers);
     result.materials = std::move(m_materials);
     result.materialPaths = std::move(m_materialPaths);
-    result.bakedAppearance = std::move(m_bakedAppearance);
-    result.bakedLods = std::move(m_bakedLods);
-    result.bakedTextureMask = m_bakedTextureMask;
-    result.compactMesh = compactMesh;
-    if (auto* mesh = Owner ? Owner->GetComponent<Mesh>() : nullptr)
-    {
-        result.collisionIndexCount = mesh->collisionIndexCount;
-        result.occluderIndices = mesh->occluderIndices;
-        if (mesh->UsesTerrainVertexFormat())
-            result.compact = mesh->TakeTerrainGeometry();
-        else
-        {
-            result.vertices = mesh->GetVertices();
-            result.indices = mesh->GetIndices();
-        }
-    }
     return result;
 }
 
 bool Terrain::InstallPrepared(Prepared prepared, IGraphicsProvider* provider)
 {
-    const bool compactPrepared = !prepared.compact.vertices.empty() && !prepared.compact.indices.empty();
-    if (!Owner || (!compactPrepared && (prepared.vertices.empty() || prepared.indices.empty())))
-        return false;
+    if (!Owner || prepared.heights.size() !=
+        static_cast<size_t>(prepared.cellsX + 1) * (prepared.cellsY + 1)) return false;
     cellsX = prepared.cellsX; cellsY = prepared.cellsY;
     cellWidth = prepared.cellWidth; cellDepth = prepared.cellDepth;
     textureTiling = prepared.textureTiling;
-    m_meshLodStride = prepared.lodStride;
     heights = std::move(prepared.heights);
     weights = std::move(prepared.weights);
+    lushness = std::move(prepared.lushness);
     paintResolution = prepared.paintResolution;
     paintWeights = std::move(prepared.paintWeights);
     m_paintTextureDirty = true;
     layers = std::move(prepared.layers);
     m_materials = std::move(prepared.materials);
     m_materialPaths = std::move(prepared.materialPaths);
-    m_bakedAppearance = std::move(prepared.bakedAppearance);
-    m_bakedLods = std::move(prepared.bakedLods);
-    m_bakedTextureMask = prepared.bakedTextureMask;
     RefreshMaterials();
-    compactMesh = prepared.compactMesh;
+    ++m_surfaceRevision;
     m_provider = nullptr;
-    Mesh* mesh = Owner->GetComponent<Mesh>();
-    if (!mesh) mesh = Owner->AddComponent<Mesh>();
-    mesh->DeferGraphicsBuffers();
-    OrientTerrainSurfaceUp(prepared.vertices, prepared.indices);
-    const bool installed = compactPrepared
-        ? mesh->SetTerrainGeometry(std::move(prepared.compact))
-        : prepared.bounds
-        ? mesh->SetPreparedIndexedGeometry(std::move(prepared.vertices),
-            std::move(prepared.indices), *prepared.bounds)
-        : mesh->SetIndexedGeometry(std::move(prepared.vertices),
-            std::move(prepared.indices));
-    if (!installed) return false;
-    mesh->collisionIndexCount = prepared.collisionIndexCount;
-    mesh->occluderIndices = std::move(prepared.occluderIndices);
     if (provider && !DeferGraphicsPreparation(provider))
         PrepareGraphicsResources(provider);
     return true;
@@ -1136,17 +792,10 @@ void Terrain::FinalizePreparedGraphics(IGraphicsProvider* provider)
         PrepareGraphicsResources(provider);
 }
 
-bool Terrain::SaveCache(const std::string& path, uint64_t signature,
-    bool includeBakedLods) const
+bool Terrain::SaveCache(const std::string& path, uint64_t signature) const
 {
-    const auto* mesh = Owner ? Owner->GetComponent<Mesh>() : nullptr;
-    const size_t gridIndices = static_cast<size_t>(cellsX) * cellsY * 6;
-    const std::vector<Mesh::Vertex> grid = mesh ? GridVertices(*mesh) : std::vector<Mesh::Vertex>{};
-    const size_t meshVertices = mesh ? (mesh->UsesTerrainVertexFormat()
-        ? mesh->GetTerrainVertices().size() : mesh->GetVertices().size()) : 0;
-    if (!mesh || m_meshLodStride != 1 || grid.size() != heights.size() ||
-        meshVertices != heights.size() || mesh->GetIndices().size() != gridIndices ||
-        weights.size() != heights.size() * layers.size() || layers.size() > 6)
+    if (heights.empty() || heights.size() != static_cast<size_t>(cellsX + 1) * (cellsY + 1) ||
+        weights.size() != heights.size() * layers.size() || layers.empty() || layers.size() > 6)
         return false;
     std::error_code error;
     const std::filesystem::path target(path);
@@ -1156,15 +805,11 @@ bool Terrain::SaveCache(const std::string& path, uint64_t signature,
     std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
     if (!stream) return false;
     const uint64_t magic = 0x31484341434e5254ull; // TRNCACH1
-    // 6 and 7 (4 and 5 before 2026-11-24): appearance carries lushness.
-    const uint32_t version = includeBakedLods ? 7 : 6;
+    // 8 (2026-11-24): heights, weights and lushness only; the volume meshes
+    // the cell (6 and 7 also held the height-grid mesh's appearance and LODs).
+    const uint32_t version = CacheVersion;
     const uint32_t layerCount = static_cast<uint32_t>(layers.size());
-    uint8_t texturedMask = 0;
-    for (size_t layer = 0; layer < layers.size(); ++layer)
-        if (layer < m_materials.size() && m_materials[layer] &&
-            m_materials[layer]->baseColorTexture &&
-            std::filesystem::exists(m_materials[layer]->baseColorTexture->GetFilePath()))
-            texturedMask |= static_cast<uint8_t>(1u << layer);
+    const uint8_t texturedMask = 0;
     bool valid = WriteValue(stream, magic) && WriteValue(stream, version) &&
         WriteValue(stream, signature) && WriteValue(stream, cellsX) &&
         WriteValue(stream, cellsY) && WriteValue(stream, cellWidth) &&
@@ -1182,35 +827,9 @@ bool Terrain::SaveCache(const std::string& path, uint64_t signature,
             WriteValue(stream, layer.previewColor.y) && WriteValue(stream, layer.previewColor.z) &&
             WriteValue(stream, materialStamp);
     }
-    std::vector<CachedAppearance> appearance(heights.size());
-    for (size_t i = 0; i < appearance.size(); ++i)
-    {
-        const auto& vertex = grid[i];
-        std::copy_n(vertex.normal, 3, appearance[i].normal);
-        std::copy_n(vertex.color, 3, appearance[i].color);
-        appearance[i].lushness = i < lushness.size() ? lushness[i] : 0.f;
-    }
-    valid &= WriteVector(stream, heights) && WriteVector(stream, weights) &&
-        WriteVector(stream, appearance);
-    if (includeBakedLods)
-        for (int stride : {1, 2, 4, 8})
-        {
-            auto vertices = grid;
-            std::vector<uint32_t> indices(mesh->GetIndices().begin(),
-                mesh->GetIndices().begin() + gridIndices);
-            ReduceMeshForLod(vertices, indices, cellsX, cellsY, stride);
-            std::vector<uint32_t> sources;
-            sources.reserve(vertices.size());
-            for (const auto& vertex : vertices)
-            {
-                const int col = static_cast<int>(std::lround(
-                    vertex.pos[0] / cellWidth));
-                const int row = static_cast<int>(std::lround(
-                    vertex.pos[2] / cellDepth));
-                sources.push_back(static_cast<uint32_t>(row * (cellsX + 1) + col));
-            }
-            valid &= WriteVector(stream, sources) && WriteVector(stream, indices);
-        }
+    std::vector<float> lush(heights.size(), 0.f);
+    for (size_t i = 0; i < lush.size() && i < lushness.size(); ++i) lush[i] = lushness[i];
+    valid &= WriteVector(stream, heights) && WriteVector(stream, weights) && WriteVector(stream, lush);
     stream.close();
     valid &= static_cast<bool>(stream);
     bool committed = false;
@@ -1251,7 +870,7 @@ bool Terrain::ReadCacheHeightsRange(const std::string& path,
     float width = 0.f, depth = 0.f, tiling = 0.f;
     if (!stream || !ReadValue(stream, magic) ||
         magic != 0x31484341434e5254ull ||
-        !ReadValue(stream, version) || version != 7 ||
+        !ReadValue(stream, version) || version != CacheVersion ||
         !ReadValue(stream, storedSignature) || storedSignature != signature ||
         !ReadValue(stream, x) || x != expectedX ||
         !ReadValue(stream, y) || y != expectedY ||
@@ -1301,7 +920,7 @@ bool Terrain::CacheMaterialsMatchRange(std::istream& stream,
     float width = 0.f, depth = 0.f, tiling = 0.f;
     if (!stream || !ReadValue(stream, magic) ||
         magic != 0x31484341434e5254ull ||
-        !ReadValue(stream, version) || version != 7 ||
+        !ReadValue(stream, version) || version != CacheVersion ||
         !ReadValue(stream, storedSignature) || storedSignature != signature ||
         !ReadValue(stream, x) || x != expectedX ||
         !ReadValue(stream, y) || y != expectedY ||
@@ -1351,7 +970,7 @@ bool Terrain::LoadCacheRange(const std::string& path, uint64_t signature,
     int x = 0, y = 0;
     float width = 0.f, depth = 0.f, tiling = 0.f;
     if (!ReadValue(stream, magic) || magic != 0x31484341434e5254ull ||
-        !ReadValue(stream, version) || (version != 6 && version != 7) ||
+        !ReadValue(stream, version) || version != CacheVersion ||
         !ReadValue(stream, storedSignature) || storedSignature != signature ||
         !ReadValue(stream, x) || !ReadValue(stream, y) ||
         !ReadValue(stream, width) || !ReadValue(stream, depth) ||
@@ -1377,27 +996,11 @@ bool Terrain::LoadCacheRange(const std::string& path, uint64_t signature,
             materialStamp != MaterialStamp(layer.material)) return false;
     }
     const uint64_t vertexCount = static_cast<uint64_t>(x + 1) * (y + 1);
-    std::vector<float> cachedHeights, cachedWeights;
-    std::vector<CachedAppearance> appearance;
+    std::vector<float> cachedHeights, cachedWeights, cachedLushness;
     if (!ReadVector(stream, cachedHeights, vertexCount) ||
         !ReadVector(stream, cachedWeights, vertexCount * layerCount) ||
-        !ReadVector(stream, appearance, vertexCount))
+        !ReadVector(stream, cachedLushness, vertexCount))
         return false;
-    std::vector<float> cachedLushness(appearance.size());
-    for (size_t i = 0; i < appearance.size(); ++i)
-        cachedLushness[i] = appearance[i].lushness;
-    std::array<BakedLod, 4> bakedLods;
-    if (version == 7)
-        for (auto& lod : bakedLods)
-        {
-            if (!ReadBoundedVector(stream, lod.sourceVertices, vertexCount) ||
-                !ReadBoundedVector(stream, lod.indices,
-                    static_cast<uint64_t>(x) * y * 6)) return false;
-            for (uint32_t source : lod.sourceVertices)
-                if (source >= vertexCount) return false;
-            for (uint32_t index : lod.indices)
-                if (index >= lod.sourceVertices.size()) return false;
-        }
     if (size)
     {
         if (static_cast<uint64_t>(stream.tellg()) != offset + size)
@@ -1408,72 +1011,15 @@ bool Terrain::LoadCacheRange(const std::string& path, uint64_t signature,
         char trailing = 0;
         if (stream.read(&trailing, 1) || !stream.eof()) return false;
     }
-    if (version == 7)
-    {
-        cellsX = x; cellsY = y; cellWidth = width; cellDepth = depth;
-        textureTiling = tiling;
-        heights = std::move(cachedHeights);
-        lushness = cachedLushness;
-        weights = std::move(cachedWeights);
-        layers = std::move(cachedLayers);
-        m_bakedAppearance = std::move(appearance);
-        m_bakedLods = std::move(bakedLods);
-        m_bakedTextureMask = texturedMask;
-        m_provider = provider;
-        m_materialPaths.clear(); m_materials.clear();
-        RefreshMaterials();
-        if (!InstallBakedLod(m_meshLodStride)) return false;
-        if (provider)
-            if (auto* mesh = Owner->GetComponent<Mesh>())
-                if (!mesh->IsReady()) mesh->OnAfterDeserialize(provider);
-        return true;
-    }
-    std::vector<Mesh::Vertex> vertices(static_cast<size_t>(vertexCount));
-    m_bakedAppearance.clear();
-    for (auto& lod : m_bakedLods) lod = {};
-    for (int row = 0; row <= y; ++row)
-        for (int col = 0; col <= x; ++col)
-        {
-            const size_t i = static_cast<size_t>(row * (x + 1) + col);
-            auto& vertex = vertices[i];
-            vertex.pos[0] = col * width;
-            vertex.pos[1] = cachedHeights[i];
-            vertex.pos[2] = row * depth;
-            std::copy_n(appearance[i].normal, 3, vertex.normal);
-            vertex.uv[0] = static_cast<float>(col) / x;
-            vertex.uv[1] = static_cast<float>(row) / y;
-            std::copy_n(appearance[i].color, 3, vertex.color);
-            vertex.color[3] = 1.f;
-            vertex.uvChannels[1][3] = appearance[i].lushness;
-            for (uint32_t layer = 0; layer < layerCount; ++layer)
-                vertex.uvChannels[2 + layer / 4][layer % 4] =
-                    cachedWeights[i * layerCount + layer];
-        }
-    std::vector<uint32_t> indices;
-    indices.reserve(static_cast<size_t>(x) * y * 6);
-    for (int row = 0; row < y; ++row)
-        for (int col = 0; col < x; ++col)
-        {
-            const uint32_t a = row * (x + 1) + col, b = a + x + 1;
-            indices.insert(indices.end(), {a, b, a + 1, a + 1, b, b + 1});
-        }
-    ReduceMeshForLod(vertices, indices, x, y, m_meshLodStride);
-    Mesh* mesh = Owner->GetComponent<Mesh>();
-    if (!mesh) mesh = Owner->AddComponent<Mesh>();
-    OrientTerrainSurfaceUp(vertices, indices);
     cellsX = x; cellsY = y; cellWidth = width; cellDepth = depth;
     textureTiling = tiling;
     heights = std::move(cachedHeights);
-    lushness = cachedLushness;
     weights = std::move(cachedWeights);
+    lushness = std::move(cachedLushness);
     layers = std::move(cachedLayers);
-    PrepareCompactPaint();
-    if (!InstallCellMesh(*mesh, std::move(vertices), std::move(indices)))
-        return false;
     m_provider = provider;
     m_materialPaths.clear(); m_materials.clear();
-    RefreshMaterials();
-    if (provider && !mesh->IsReady()) mesh->OnAfterDeserialize(provider);
+    Rebuild();
     return true;
 }
 
@@ -1518,12 +1064,6 @@ Terrain::JsonValue Terrain::Serialize() const
                 .Push(JsonValue(layer.previewColor.y)).Push(JsonValue(layer.previewColor.z))));
     out.Set("heights", std::move(h)).Set("weights", std::move(w))
         .Set("layers", std::move(ls));
-    if (HasLateralOffsets())
-    {
-        JsonValue offsets = JsonValue::MakeArray();
-        for (float value : lateralOffsets) offsets.Push(JsonValue(value));
-        out.Set("lateralOffsets", std::move(offsets));
-    }
     if (HasPaintMap())
         out.Set("paintResolution", JsonValue(paintResolution))
             .Set("paintMap", JsonValue(EncodePaintMap(paintWeights)));
@@ -1547,13 +1087,6 @@ void Terrain::Deserialize(const JsonValue& value)
     for (size_t i = 0; i < std::min(heights.size(), value["heights"].ArraySize()); ++i)
         heights[i] = value["heights"].ArrayAt(i).AsFloat();
     // Vector displacement: two floats (x, z) per vertex, or none.
-    lateralOffsets.clear();
-    if (value.Has("lateralOffsets") && value["lateralOffsets"].ArraySize() == heights.size() * 2)
-    {
-        lateralOffsets.resize(heights.size() * 2);
-        for (size_t i = 0; i < lateralOffsets.size(); ++i)
-            lateralOffsets[i] = value["lateralOffsets"].ArrayAt(i).AsFloat();
-    }
     layers.clear();
     const auto& entries = value["layers"];
     for (size_t i = 0; i < entries.ArraySize(); ++i)
@@ -1594,9 +1127,8 @@ void Terrain::Deserialize(const JsonValue& value)
 void Terrain::OnAfterDeserialize(IGraphicsProvider* provider)
 {
     m_provider = nullptr;
-    if (Owner)
-        if (auto* mesh = Owner->GetComponent<Mesh>()) mesh->DeferGraphicsBuffers();
     Rebuild();
+    EnsureVolume();
     if (provider && !DeferGraphicsPreparation(provider))
         PrepareGraphicsResources(provider);
 }
@@ -1604,9 +1136,7 @@ void Terrain::OnAfterDeserialize(IGraphicsProvider* provider)
 void Terrain::PrepareGraphicsResources(IGraphicsProvider* provider)
 {
     m_provider = provider;
-    if (Owner)
-        if (auto* mesh = Owner->GetComponent<Mesh>())
-            mesh->PrepareGraphicsResources(provider);
+    EnsureVolume();
 }
 
 void Terrain::Start()
@@ -1703,7 +1233,7 @@ bool Terrain::DrawProperties(Engine::Core::IInspectorUi& ui)
             MarkConfigurationDirty();
             changed = true;
         }
-        m_bakeStatus = SaveCache(Mesh::ResolveFilePath(bakedAssetPath), 0, true)
+        m_bakeStatus = SaveCache(Mesh::ResolveFilePath(bakedAssetPath), 0)
             ? "Runtime terrain bake saved" : "Runtime terrain bake failed";
     }
     if (!m_bakeStatus.empty()) ui.Label(m_bakeStatus.c_str());
@@ -1741,7 +1271,7 @@ bool Terrain::WriteHeightGrid(const TerrainHeightGrid& grid, double offsetX, dou
         }
     }
     if (maxCol < 0) return false;
-    RebuildRegion(minCol, minRow, maxCol, maxRow);
+    Rebuild();
     MarkConfigurationDirty();
     FollowSurfaceEdit(before, minCol * cellWidth - cellWidth, minRow * cellDepth - cellDepth,
         maxCol * cellWidth + cellWidth, maxRow * cellDepth + cellDepth, realignObjects);
@@ -1808,13 +1338,10 @@ bool Terrain::PaintRegion(const TerrainRegionMask& mask, float strength, int lay
     if (map)
     {
         m_paintTextureDirty = true;
-        RebuildRegion(int(std::floor(float(minCol) / paintResolution)),
-            int(std::floor(float(minRow) / paintResolution)),
-            int(std::ceil(float(maxCol) / paintResolution)),
-            int(std::ceil(float(maxRow) / paintResolution)));
+        Rebuild();
     }
     else
-        RebuildRegion(minCol, minRow, maxCol, maxRow);
+        Rebuild();
     MarkConfigurationDirty();
     return true;
 }

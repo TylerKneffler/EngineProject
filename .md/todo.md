@@ -154,7 +154,27 @@ first-person controller, caches).
       - [ ] Escarpment and cliffs as volume edits: content work, not done. The tools are there to do it
             by hand, or a script could add overhang edits along the steepest faces.
       - Not checked by hand: the tools in the running editor (UI paths built, not clicked through).
-- [ ] **7. Remove the height dependency.** Delete the height-grid cell mesh path, far tiles, far grid and
+- [ ] **7. Remove the height dependency.** Progress (2026-11-24, user: "convert all scenes then delete"):
+      - [x] Every terrain is a volume. Terrain Managers always give cells volumes (`volumeCells`,
+            `compactCellVertices`, `ENGINE_VOLUME_TERRAIN`/`ENGINE_COMPACT_TERRAIN` removed); a Terrain of
+            its own gets one (`Terrain::EnsureVolume`: fromTerrain, spacing = its grid, drawn and collided
+            at any distance). Scenes need no edit: foliage_test, grass_test, spin_test, stamp_test and the
+            .local stamp/forest scenes convert on load. Volumes follow their Terrain
+            (`GetSurfaceRevision`); height brushes also refresh the neighbours' volumes.
+      - [x] Deleted the height-grid cell mesh: `Terrain::Rebuild` builds no mesh (vertices, baked LODs,
+            compact cells, row rebuilds, LOD striding, lateral offsets all gone), streaming hands over
+            heights/weights/lushness only, the cell cache is version 8 (heights, weights, lushness),
+            render batches and grid colliders are gone. Far tiles leave a loaded cell out once its volume
+            shows (`VolumeTerrain::IsShowing`; they checked the deleted mesh and drew flat green over the
+            meadow, hiding grass and trails, until fixed).
+      - Checked: before/after captures of all five tracked terrain scenes: landscape |diff| 1.8, grass 2.4,
+        spin 2.5, foliage 4.5 (wind), stamp 11.7 (texture tiling phase: the volume's triplanar layers).
+        Brush dab on a 256x256 cell 1.6 -> 0.87 ms (no mesh). TerrainEditingTools and TerrainField pass.
+        `TerrainCapsuleTraversalTests` does not build (Scene::Start/Update gone; predates this).
+      - [ ] Landscape median 15.8 -> 17.0 ms in one Vista-style run: measure with the walk runner.
+      - [ ] Far tiles, far grid and far-cell detail: still meshed from the seed heights (phase 5).
+      - [ ] Unused now: lod2Radius/lod4Radius/maxLodChangesPerUpdate (cell mesh LODs), batchFarCells.
+      Original plan: Delete the height-grid cell mesh path, far tiles, far grid and
       direct `Terrain::heights` readers; the archive is only the seed generator's input; caches and
       scene format migrated; meadow walk, forest walk, Vista and Escarpment at or above today's frame
       rate (RTX 4090 target: 100+ fps on large landscapes, 60 floor with rich foliage).

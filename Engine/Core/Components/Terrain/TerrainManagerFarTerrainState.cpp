@@ -233,8 +233,8 @@ size_t TerrainManager::CountVisibleCoverageGaps(int centerX, int centerY,
             const Terrain* nearTerrain = GetLoadedCell(x, y);
             if (nearTerrain && nearTerrain->Owner &&
                 nearTerrain->Owner->enabled)
-                if (const Mesh* mesh = nearTerrain->Owner->GetComponent<Mesh>();
-                    mesh && mesh->IsReady()) continue;
+                if (const auto* volume = nearTerrain->Owner->GetComponent<VolumeTerrain>();
+                    volume && volume->IsShowing()) continue;
             bool covered = false;
             for (const FarTile& tile : m_farTiles)
             {

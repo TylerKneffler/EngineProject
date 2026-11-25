@@ -281,52 +281,37 @@ bool TerrainManager::AddVolumeEdit(const TerrainVolumeEdit& edit, bool followObj
 
 void TerrainManager::ConfigureCellPhysics(Engine::Core::Object& object) const
 {
-    // Volume cells: a finished cell (heights, stitched borders) is
-    // drawn and collided by a volume built from it; no grid collider.
+    // A finished cell (heights, stitched borders) is drawn and collided by a
+    // volume built from it, joined to its neighbours' into one sheet. A
+    // volume the Terrain gave itself before it was parented here is taken
+    // over (Terrain::EnsureVolume).
     const auto* cellTerrain = object.GetComponent<Terrain>();
-    if (UsesVolumeCells() && cellTerrain)
-    {
-        auto* volume = object.GetComponent<VolumeTerrain>();
-        if (!volume)
-        {
-            volume = object.AddComponent<VolumeTerrain>();
-            volume->fromTerrain = true;
-            volume->steepLayer = volumeSteepLayer;
-            volume->sampleSpacing = volumeSampleSpacing;
-            // Nothing else draws a loaded cell (far tiles leave it out), so
-            // its volume draws at any distance, coarsest level past lod3: at
-            // 600 m the loaded area's far corners (up to ~720 m from a
-            // viewer at its cell's edge) were holes.
-            volume->drawDistance = std::numeric_limits<float>::max();
-            if (const char* forced = std::getenv("ENGINE_VOLUME_DRAW_DISTANCE"))
-                volume->drawDistance = static_cast<float>(std::atof(forced));
-            const double spanX = static_cast<double>(cellsX) * cellWidth;
-            const double spanZ = static_cast<double>(cellsY) * cellDepth;
-            const glm::dvec3 origin = object.transform.position;
-            const Cell cell{static_cast<int>(std::lround(origin.x / spanX)),
-                static_cast<int>(std::lround(origin.z / spanZ))};
-            // Cells of this grid join into one sheet (VolumeTerrain seams).
-            volume->group = this;
-            volume->cellX = cell.first;
-            volume->cellZ = cell.second;
-            FeedVolumeNeighbours(cell, *volume);
-            if (!generateColliders) volume->collisionDistance = 0.f;
-            volume->Rebuild();
-        }
-        return;
-    }
-    if (!generateColliders) return;
-    auto* mesh = object.GetComponent<Mesh>();
-    if (!mesh || mesh->GetVertexCount() == 0u) return;
-    auto* collider = object.GetComponent<MeshObjectCollider>();
-    if (!collider) collider = object.AddComponent<MeshObjectCollider>();
-    collider->convex = false;
-    auto* body = object.GetComponent<RigidBody>();
-    if (!body) body = object.AddComponent<RigidBody>();
-    body->bodyType = "Static";
-    body->useGravity = false;
-    body->friction = 0.9f;
-    body->restitution = 0.f;
+    if (!cellTerrain) return;
+    auto* volume = object.GetComponent<VolumeTerrain>();
+    if (volume && volume->group == this) return;
+    if (!volume) volume = object.AddComponent<VolumeTerrain>();
+    volume->fromTerrain = true;
+    volume->steepLayer = volumeSteepLayer;
+    volume->sampleSpacing = volumeSampleSpacing;
+    // Nothing else draws a loaded cell (far tiles leave it out), so its
+    // volume draws at any distance, coarsest level past lod3: at 600 m the
+    // loaded area's far corners (up to ~720 m from a viewer at its cell's
+    // edge) were holes.
+    volume->drawDistance = std::numeric_limits<float>::max();
+    if (const char* forced = std::getenv("ENGINE_VOLUME_DRAW_DISTANCE"))
+        volume->drawDistance = static_cast<float>(std::atof(forced));
+    const double spanX = static_cast<double>(cellsX) * cellWidth;
+    const double spanZ = static_cast<double>(cellsY) * cellDepth;
+    const glm::dvec3 origin = object.transform.position;
+    const Cell cell{static_cast<int>(std::lround(origin.x / spanX)),
+        static_cast<int>(std::lround(origin.z / spanZ))};
+    // Cells of this grid join into one sheet (VolumeTerrain seams).
+    volume->group = this;
+    volume->cellX = cell.first;
+    volume->cellZ = cell.second;
+    FeedVolumeNeighbours(cell, *volume);
+    volume->collisionDistance = generateColliders ? VolumeTerrain{}.collisionDistance : 0.f;
+    volume->Rebuild();
 }
 
 void TerrainManager::RefreshAuthoredCollisionCells()

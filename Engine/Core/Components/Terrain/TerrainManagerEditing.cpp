@@ -527,6 +527,12 @@ void TerrainManager::RecordEditedCells(const std::set<Cell>& changedCells)
         if (!terrain) continue;
         // Ground queries see the edit at once, before it is saved.
         InvalidateTerrainField(cell, &terrain->heights);
+        // The cell's volume follows its Terrain (VolumeTerrain watches the
+        // surface revision); its neighbours' volumes read its heights in
+        // their margins.
+        const float spanX = cellsX * cellWidth, spanZ = cellsY * cellDepth;
+        RefreshVolumeCells(cell, {cell.first * spanX, -1e6f, cell.second * spanZ},
+            {(cell.first + 1) * spanX, 1e6f, (cell.second + 1) * spanZ});
         if (m_proceduralCells.count(cell) && !cellDataDirectory.empty())
         {
             m_editedProcedural.insert(cell);
@@ -560,8 +566,6 @@ void TerrainManager::SyncLoadedCells(int centerX, int centerY)
             {
                 const Cell cell{x, y};
                 LoadCell(cell, DesiredLodStride(cell, centerX, centerY));
-                if (auto* terrain = GetLoadedCell(x, y))
-                    terrain->SetMeshLodStride(DesiredLodStride(cell, centerX, centerY));
             }
     for (auto it = m_loaded.begin(); it != m_loaded.end(); )
     {

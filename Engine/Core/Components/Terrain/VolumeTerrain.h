@@ -212,6 +212,8 @@ public:
     };
     // Read by the shared level choice.
     bool PreparedFor(uint64_t step) const { return m_preparedStep == step; }
+    // fromTerrain: its chunks draw the cell (the first ones have swapped in).
+    bool IsShowing() const { return m_terrainHidden; }
     // ENGINE_VOLUME_TERRAIN_CHECK=1, after each swap: the shown chunks of
     // these volumes must be one closed sheet. Vertical lines every metre must
     // cross it an odd number of times (an even count is a hole or a doubled
@@ -227,6 +229,9 @@ private:
     float m_tiling = 16.f, m_extent = 128.f;
     // fromTerrain: the terrain's own mesh has been handed over (hidden).
     bool m_terrainHidden = false;
+    // fromTerrain: the Terrain surface revision the volume was built from;
+    // a newer one (height or paint edits) builds again.
+    uint64_t m_terrainSurfaceRevision = 0;
     std::chrono::steady_clock::time_point m_buildStarted{};
     std::vector<Chunk> m_chunks;
     Stats m_stats;

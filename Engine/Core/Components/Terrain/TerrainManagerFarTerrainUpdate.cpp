@@ -2,6 +2,7 @@
 #include "TerrainFarLodEdges.h"
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "TerrainManager.h"
+#include "Core/Components/Terrain/VolumeTerrain.h"
 #include "TerrainManagerFarTerrainCache.h"
 #include "TerrainObjectLayer.h"
 #include "Core/Components/Terrain/TerrainBatchAppearance.h"
@@ -56,8 +57,10 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
         const Terrain* nearTerrain = GetLoadedCell(x, y);
         if (!nearTerrain || !nearTerrain->Owner ||
             !nearTerrain->Owner->enabled) return true;
-        const Mesh* nearMesh = nearTerrain->Owner->GetComponent<Mesh>();
-        return !nearMesh || !nearMesh->IsReady();
+        // Loaded cells draw as volumes: the far tile leaves the cell out
+        // once its volume shows.
+        const auto* volume = nearTerrain->Owner->GetComponent<VolumeTerrain>();
+        return !volume || !volume->IsShowing();
     };
     const auto gridHeight = [&](int x, int y) {
         return m_farHeights[static_cast<size_t>(

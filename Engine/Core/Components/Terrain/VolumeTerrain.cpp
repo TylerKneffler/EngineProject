@@ -391,6 +391,7 @@ bool VolumeTerrain::StartBuild()
     auto* terrain = Owner ? Owner->GetComponent<Terrain>() : nullptr;
     if (!terrain || terrain->heights.empty() || m_volumeJob.valid()) return false;
     if (g_builds.fetch_add(1) >= MaxBuilds) { g_builds.fetch_sub(1); return false; }
+    m_terrainSurfaceRevision = terrain->GetSurfaceRevision();
     std::vector<TerrainVolumeEdit> allEdits;
     if (!editFile.empty() && !LoadTerrainVolumeEdits(Mesh::ResolveFilePath(editFile), allEdits))
         std::fprintf(stderr, "[VolumeTerrain] %s: malformed edit file %s\n", Owner->name.c_str(), editFile.c_str());
@@ -682,9 +683,10 @@ void VolumeTerrain::SwapIn(const glm::vec3& eye)
     if (logSwap && dropMs + createMs + storeMs + retireMs > 1.0)
         std::fprintf(stderr, "[VolumeSwap] drop %.1f create %.1f store %.1f retire %.1f ms\n", dropMs, createMs, storeMs, retireMs);
     if (fromTerrain && !m_terrainHidden)
-        if (auto* mesh = Owner->GetComponent<Mesh>())
         {
-            mesh->SetAnimationVisible(false);
+            // The cell is drawn by its chunks from now on (a Terrain has no
+            // height mesh; hide any other mesh on the object).
+            if (auto* mesh = Owner->GetComponent<Mesh>()) mesh->SetAnimationVisible(false);
             m_terrainHidden = true;
             // ENGINE_VOLUME_TERRAIN_LOG=1: when each cell handed over.
             static const bool log = std::getenv("ENGINE_VOLUME_TERRAIN_LOG") != nullptr;
@@ -736,6 +738,14 @@ void VolumeTerrain::Update()
     int launched = 0;
     int collisionsBuilt = 0;
     auto* scene = Owner ? Owner->GetScene() : nullptr;
+    if (scene && fromTerrain && m_terrainSurfaceRevision)
+        if (const auto* terrain = Owner->GetComponent<Terrain>();
+            terrain && terrain->GetSurfaceRevision() != m_terrainSurfaceRevision)
+        {
+            // The heights or paint changed (brushes, seam stitching).
+            m_terrainSurfaceRevision = terrain->GetSurfaceRevision();
+            Refresh();
+        }
     if (scene && fromTerrain)
     {
         if (m_volumeJob.valid() && m_volumeJob.wait_for(std::chrono::seconds(0)) == std::future_status::ready)

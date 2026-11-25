@@ -425,26 +425,6 @@ void TimeLargeCellStroke()
     const double raise = time(Terrain::Brush::Raise);
     const double paint = time(Terrain::Brush::Paint);
     Require(raise < 10.0 && paint < 10.0);
-    // Strokes rebuild only the rows they touch; the result must equal a
-    // full rebuild of the same data.
-    terrain->ApplyBrush(40.f, 200.f, 6.f, .3f, Terrain::Brush::Blend, 0, false, options);
-    terrain->ApplyBrush(60.f, 30.f, 3.f, .5f, Terrain::Brush::Paint, 2, false, options);
-    auto* mesh = object->GetComponent<Engine::Components::Mesh>();
-    const auto incremental = mesh->GetVertices();
-    terrain->Rebuild();
-    const auto& full = mesh->GetVertices();
-    Require(incremental.size() == full.size());
-    // Equal up to float rounding: a full rebuild renormalizes every sample
-    // again, which may move already-normalized weights by an ulp.
-    bool identical = incremental.size() == full.size();
-    for (size_t i = 0; identical && i < full.size(); ++i)
-    {
-        const auto* a = reinterpret_cast<const float*>(&incremental[i]);
-        const auto* b = reinterpret_cast<const float*>(&full[i]);
-        for (size_t f = 0; identical && f < sizeof(full[i]) / sizeof(float); ++f)
-            identical = std::abs(a[f] - b[f]) <= 1e-5f;
-    }
-    Require(identical);
     std::cout << "256x256 cell, radius 4 m dab: raise " << raise << " ms, paint " << paint << " ms\n";
 }
 
