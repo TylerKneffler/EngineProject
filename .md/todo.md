@@ -214,7 +214,7 @@ runtime.
     cells. Undo/redo: the scene lists each file's revision and a session history restores them. Older
     scenes' saved layers of procedural cells move to files at the next save
   - [x] Rules (2026-11-25): edge band (`maxLayerShare` on the "on" layers: a shrub belt where forest
-    soil meets meadow), trail clearance (`TerrainManager::ContourPathDistance`), per-asset height bands
+    soil meets meadow), trail clearance (`TerrainManager::TrailDistance`, trail objects since stage 3), per-asset height bands
     (species by altitude). The generator's own belt/trail/species logic stays until forests are painted
   - [x] Region placement (2026-11-25): Select tool "Place objects" runs the Place brush over the
     selection (`ApplyPlacementRegion`, Shift thins); the brush and object layer controls show there
@@ -241,12 +241,64 @@ runtime.
   paint. Checked at the hill pose against the rule paint: mean pixel difference 1.25/255, same grass share,
   and per layer against the per-vertex rules over 16 cells (grass 0.871 vs 0.870). The rules (`PaintSample`,
   `PaintCell`, erosion paint), `SetSurfacePainter`, `VolumeTerrain::surfacePainter` and the bake were then
-  removed (in git history). Open: the trail carve (`CarveTrails`, 0.12 m) still runs at load until stage 3;
+  removed (in git history). The trail carve (`CarveTrails`) moved to the trail objects (stage 3, below);
   `paintArchive` lives on the script, not the TerrainManager (as `objectArchive` does)
-- [ ] Trails as spline objects in the scene, with spline rendering and carving, replacing
-  `TerrainManager::contourPaths` set in code (stage 3)
-- [ ] Decide the same for ground cover (grass, ferns, bushes: currently runtime by paint layer); at minimum its
-  settings become saved layer/GrassField data instead of script overrides
+- [x] Trails as spline objects in the scene, with spline rendering and carving, replacing
+  `TerrainManager::contourPaths` set in code (stage 3, 2026-11-25). A trail is an object with a `SplinePath`
+  (children are control points) and the `TerrainTrail` script (Scripts/Landscape): at startup, and whenever its
+  points or settings change, it samples the spline (1 m, Douglas-Peucker to 5 cm) into a polyline in the
+  manager's space and publishes it (`TerrainManager::SetTrail`; settings: half-width 1.6, edge 4.2, strength,
+  carve depth 0.12, paint layer, crossable layer mask, far colour). The manager's `TerrainTrailNetwork`
+  (TerrainTrails.h) bins the segments (16 m bins); the terrain shades it per pixel on every level from an
+  RGBA32F texture in slot 3 (`Object.hlsl TerrainTrailSample`, nearest segment, per-trail layer/crossable/far
+  colour), grass and placement rules read `TrailShare`/`TrailDistance`, and every procedural cell is carved by
+  the builder wrapper (`SetProceduralBuilder`) over crossable paint; the carved network's signature joins the
+  cell cache key, and an edit reloads the cells it touches once it has settled (0.4 s). The noise contour paths
+  (`ContourPaths`, `TerrainPathWeight`, LandscapeDriver `TrailDistance`/`CarveTrails`, `ENGINE_TERRAIN_PATHS`)
+  are removed. `tools/landscape_trails.py` traced the old contour over the 4 m play area, cut it where the old
+  height band hid it, and wrote 60 trail objects (82 km, 4,320 control points) under a "Trails" object placed
+  before the terrain in landscape_demo.scene (`build_landscape_demo.py` carries it over). Open: trails beyond the
+  play area (the old noise ran map-wide) are not traced. Follow-ups (2026-11-25): grass tiles and GPU blades
+  key on the trail signature, so they rebuild when a trail changes; in edit mode (scripts get no Update) each
+  trail registers a watcher the manager calls every editor frame (`SetTrailWatcher`, from
+  `UpdateEditorStreaming`), so dragged points redraw the trail (tested by call, not yet by hand in the editor). Cost (DX12, 1080p, interleaved A/B with and without the
+  Trails group, 300 frames): MeadowSlope 18.9 vs 19.0 ms and 18.7 ms (one 23.0 ms outlier run), Trail 19.6/19.5
+  vs 20.0/19.8 ms: within run-to-run noise
+- [x] Decide the same for ground cover (grass, ferns, bushes: currently runtime by paint layer); at minimum its
+  settings become saved layer/GrassField data instead of script overrides. Decided and done 2026-11-25 (user):
+  sparse, large plants are baked like painted placements; dense ground cover (more than ~3 GB as placements:
+  grass ~21 GB map-wide, shrubs/ferns/flowers ~5 GB) stays generated, where a 3D foliage density says
+  - [x] Bushes baked: `.local/tests/LandscapeBushBake.cpp` (target `LandscapeBushBake`) wrote a "Landscape
+    bushes" layer into `world.objects` by the meadow bush rule (clusters on meadow and forest soil, off the
+    trails): 8.33 M bushes, archive 144.6 to 208.8 MB. Edited with the placement brushes like the forests;
+    drawn by the layer's GrassField from its saved placements. Heights from the archive (hand sculpts not
+    followed at bake time)
+  - [x] Foliage density (`TerrainFoliage.h`): per foliage layer (named like its ground-cover object layer), 3D
+    voxels of 1 m in 8^3 chunks, stored as offsets from the layer's baseline (its GrassField's paint rule,
+    facing up), only where painted: `<x>_<z>.foliage` per cell, written when the manager serializes and listed
+    by signature so undo restores it. `TerrainManager::PaintFoliage` (Add, Erase, Set; a shell of 1.5 m
+    around any surface)
+  - [x] GrassField grows by it, repeatably: candidates per world 1 m column, layer seed and group (integer
+    hashes, no std distributions), so the same plants grow for any tile size, on any compiler; thickets, drifts
+    and fields keyed in manager space (they repeated every cell before). Where a cell's field has volume edits
+    it scatters on every surface (vertical columns plus x and z columns, each surface point owned by the axis
+    its normal faces most): faces and ceilings grow what is painted there. Blades read the density too. Tested
+    in TerrainEditingToolsTests (`TestFoliage`: tile sizes 4/16 m give identical plants, erasing changes only
+    the plants it reaches, save and undo, plants under a rock slab once its ceiling is painted, a Foliage brush)
+  - [x] Settings out of the script: `TerrainObjectLayer::Settings` carry snap/conform, the detail layer and the
+    layer object's components ({type, value}: each ground-cover layer's GrassField), saved in the scene's
+    `objectLayerSettings`; LandscapeDriver's `SetObjectLayerSetup`, `grassRadius`, `forestLayerName` and its
+    ground-cover `ENGINE_*` switches are gone (the scene's values are what the defaults gave, checked by
+    dumping both). "Procedural meadow bushes" is now "Procedural meadow shrubs" (bushes are baked); the far
+    ring reads the meadow's density (`GrassField::foliageLayer`)
+  - [x] Foliage brushes: a `.brush` Foliage section (layers with amounts, mode, shell; tool "foliage"),
+    edited in the brush inspector; choosing one puts the Paint tool on foliage, painting whatever surface the
+    cursor meets, with the brush's rules per voxel. Brushes: Meadow, Forest floor, Cliff ferns (slopes
+    40-90 degrees), Clear foliage (TerrainData/Brushes)
+  - Open: painting in the editor not yet tried by hand; frame times after the change 0.7-1 ms above earlier
+    runs the same day (FieldWalk 18.5, ForestEdge 21.9, ForestFloor 21.0, MeadowSlope 19.5 ms), within this
+    machine's run-to-run noise but not ruled out; tall-grass fields still come from the field noise (paint
+    could take them over as their own foliage layer)
 
 Not achievable in the editor or by a script component (offline tools, code constants, env vars):
 - [ ] The map's base heights only come from `tools/build_landscape_demo.py` (macro ranges, whole-map droplet
@@ -260,11 +312,13 @@ Not achievable in the editor or by a script component (offline tools, code const
 - [ ] The scene file is generated (`write_scene`): 189 `proceduralRuns` rows, mist/cloud heights. Re-running the
   tool deletes `.terrainedit` sculpts of cells whose heights changed. Check whether the editor can add procedural
   cell runs
-- [ ] Trail network (`TerrainManager::contourPaths`: periods, seeds, widths, layer) is set in LandscapeDriver code
-  and not serialized; expose it as scene data (planned: spline objects, see Direction stage 3)
-- [ ] ~20 `ENGINE_*` env switches in LandscapeDriver change the default look (e.g. `ENGINE_BROADLEAF=lone`,
+- [x] Trail network (`TerrainManager::contourPaths`: periods, seeds, widths, layer) is set in LandscapeDriver code
+  and not serialized; expose it as scene data. Done 2026-11-25: trail objects (SplinePath + TerrainTrail), see
+  Direction stage 3
+- [x] ~20 `ENGINE_*` env switches in LandscapeDriver change the default look (e.g. `ENGINE_BROADLEAF=lone`,
   `ENGINE_LANDSCAPE_TALL_FIELDS`, `ENGINE_SCAN_BUSHES`, `ENGINE_TREE_SHADOW_DISTANCE`, `ENGINE_LANDSCAPE_GRASS_*`);
-  defaults that matter should become driver properties
+  defaults that matter should become driver properties. 2026-11-25: the look is scene data now (layer settings);
+  only `ENGINE_FAR_PATCHES` and `ENGINE_TERRAIN_LOADED_RADIUS` (A/B switches) remain
 - [ ] The crown footprint table is pasted into LandscapeDriver.cpp from `measure_tree_crowns.py` (the canopy
   splat reads it); derive from the assets at load instead. (The reach table went with the generators.)
 - [ ] `add_landscape_viewpoints.py` replicates ForestMask/ForestBand to place viewpoints; the driver's
@@ -275,13 +329,15 @@ Requires the custom script `LandscapeDriver` (scene-specific):
 - [ ] Cell heights: reads the archive through `SetProceduralBuilder`; without the script the procedural cells are
   empty
 - [ ] Six terrain layer materials (the rule-based paint is baked and its rules removed, 2026-11-25)
-- [ ] Trails carved into the cell heights
+- [x] Trails carved into the cell heights (2026-11-25: the TerrainManager carves trail objects into every
+  procedural cell; see Direction stage 3)
 - [x] Forests (`GenerateForest`), baked and the generator removed (see Direction, 2026-11-25). Was: species mix, conifer share by altitude, slope limits, edge shrub belt/skirt,
   lone meadow broadleaves, limbs clear of trails, shadow ranges, "Trees" detail layer. The Objects brush can't do
   rule-based or map-wide (far block) placement. To be replaced by saved placements (see Direction)
 - [x] Props (`GenerateProps`): rocks, boulders, logs, stumps, branches, ferns, bushes. Baked with the forests
-- [ ] Ground cover (`SetObjectLayerSetup`): `MeadowGrass::Apply` (script-side) plus ~30 GrassField overrides
-  (tall fields, far-ring radii, tile size, shrub reach, GPU blades, per-plant detail, paint layer masks)
+- [x] Ground cover (`SetObjectLayerSetup`): `MeadowGrass::Apply` (script-side) plus ~30 GrassField overrides
+  (tall fields, far-ring radii, tile size, shrub reach, GPU blades, per-plant detail, paint layer masks).
+  2026-11-25: saved layer settings with their GrassField; where it grows is the foliage density
 - [ ] Macro color map (`SetMacroColorSource`) incl. the canopy splatted from forest placements. Follows
   sculpting and paint through patches (see Direction), and the canopy reads saved placements; still set up by
   the script

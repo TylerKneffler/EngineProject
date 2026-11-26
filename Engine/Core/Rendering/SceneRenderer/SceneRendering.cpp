@@ -243,7 +243,7 @@ static_assert(offsetof(ObjectGPUData, atmosphereFog) == 1680, "Fog data must fol
 static_assert(offsetof(ObjectGPUData, terrainSunShadow) == 1744, "Terrain sun shadow data must follow the fog");
 static_assert(offsetof(ObjectGPUData, terrainMacroMap) == 1760, "Terrain macro map data must follow the sun shadow");
 static_assert(offsetof(ObjectGPUData, placementFade) == 1792, "Placement fade data must follow the terrain macro data");
-static_assert(offsetof(ObjectGPUData, terrainPathNoise) == 1856, "Terrain path data must follow the placement thinning");
+static_assert(offsetof(ObjectGPUData, terrainTrailGrid) == 1856, "Terrain trail data must follow the placement thinning");
 static_assert(sizeof(ObjectGPUData) == 2000, "Object buffer layout must match Object.hlsl");
 static_assert(sizeof(Engine::Model::LightData) == 128,
     "Light buffer layout must match Object.hlsl");

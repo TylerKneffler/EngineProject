@@ -600,8 +600,8 @@ bool TerrainManager::PaintRegion(const TerrainRegionMask& mask, float strength, 
             terrain->SetPaintResolution(paintResolution);
         const float originX = float(cell.first * spanX), originZ = float(cell.second * spanZ);
         if (terrain->PaintRegion(mask, strength, layer, erase, cell.first * spanX,
-                cell.second * spanZ, rules, [this, originX, originZ](float x, float z, float height) {
-                    return ContourPathDistance(originX + x, originZ + z, height); }))
+                cell.second * spanZ, rules, [trails = GetTrails(), originX, originZ](float x, float z, float) {
+                    return trails->Distance(originX + x, originZ + z); }))
             changed.insert(cell);
     }
     RecordEditedCells(changed);

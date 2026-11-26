@@ -72,7 +72,7 @@ LOOK_AHEAD = 200.0  # metres along +z to the ground point the camera faces
 # The meadow as the landscape demo grows it: MeadowGrass::Apply / ApplyFar /
 # ApplyBushes with LandscapeDriver::ConfigureTerrain's overrides (defaults:
 # GPU blades, tall grass fields, scanned bushes). Keep in sync with both.
-GRASS_RADIUS = 50.0  # landscape_demo.scene LandscapeDriver.grassRadius
+GRASS_RADIUS = 50.0  # landscape_demo.scene: the meadow GrassField's visibleRadius
 DETAILED_RANGE = GRASS_RADIUS + 10
 COVER_REACH = max(DETAILED_RANGE, 80.0)  # shrubs and flowers (ENGINE_LANDSCAPE_SHRUB_REACH)
 ACCENTS = ";".join(f"Assets/Mesh/Grass/{name}.obj" for name in (

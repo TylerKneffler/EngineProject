@@ -1,78 +1,132 @@
 #include "Core/Components/Terrain/TerrainManager.h"
+#include "Core/Graphics/IGraphicsProvider.h"
+#include "Core/Graphics/IGraphicsTexture.h"
+#include "Core/Scene/Object.h"
+#include "Core/Scene/Scene.h"
 
 #include <algorithm>
-#include <cmath>
-#include <limits>
+#include <vector>
 
-// CPU twin of Object.hlsl TerrainPathHash / TerrainPathNoise / TerrainPathWeight
-// (without the pixel footprint): keep the two in step.
+// Trails as scene data (TerrainTrails.h): publishers, the shaded and carved
+// networks, and the renderer's texture.
 namespace Engine::Components
 {
 namespace
 {
-uint32_t PathHash(int32_t x, int32_t z, uint32_t seed)
-{
-    uint32_t h = static_cast<uint32_t>(x) * 0x9e3779b1u ^ static_cast<uint32_t>(z) * 0x85ebca77u ^
-        seed * 0xc2b2ae3du;
-    h ^= h >> 15; h *= 0x2c1b3c6du; h ^= h >> 12; h *= 0x297a2d39u; h ^= h >> 15;
-    return h;
-}
+// Pause after the last trail edit before carved cells reload: dragging a
+// control point publishes every frame.
+constexpr auto CarveSettle = std::chrono::milliseconds(400);
 
-float PathNoise(float x, float z, float period, uint32_t seed, float& gradientX, float& gradientZ)
+uint64_t CarveKey(const std::shared_ptr<const TerrainTrailNetwork>& network)
 {
-    const float px = x / period, pz = z / period;
-    const float fx = std::floor(px), fz = std::floor(pz);
-    const int32_t ix = static_cast<int32_t>(fx), iz = static_cast<int32_t>(fz);
-    const float tx = px - fx, tz = pz - fz;
-    const float sx = tx * tx * (3.f - 2.f * tx), sz = tz * tz * (3.f - 2.f * tz);
-    const float dx = 6.f * tx * (1.f - tx), dz = 6.f * tz * (1.f - tz);
-    const auto corner = [&](int ox, int oz) {
-        return (PathHash(ix + ox, iz + oz, seed) & 0xffffffu) / 16777215.f;
-    };
-    const float c00 = corner(0, 0), c10 = corner(1, 0), c01 = corner(0, 1), c11 = corner(1, 1);
-    const float bottom = c00 + (c10 - c00) * sx, top = c01 + (c11 - c01) * sx;
-    gradientX = ((c10 - c00) * (1.f - sz) + (c11 - c01) * sz) * dx / period;
-    gradientZ = (top - bottom) * dz / period;
-    return bottom + (top - bottom) * sz;
-}
-
-float SmoothStep(float a, float b, float x)
-{
-    const float t = std::clamp((x - a) / (b - a), 0.f, 1.f);
-    return t * t * (3.f - 2.f * t);
+    return network && !network->Empty() ? network->Signature() : 0ull;
 }
 }
 
-float TerrainManager::ContourPathDistance(float worldX, float worldZ, float height) const
+std::shared_ptr<const TerrainTrailNetwork> TerrainManager::GetTrails() const
 {
-    const auto& p = contourPaths;
-    const float inf = std::numeric_limits<float>::infinity();
-    if (!p.enabled) return inf;
-    const float band = SmoothStep(p.riseStart, std::max(p.riseEnd, p.riseStart + .01f), height) *
-        (1.f - SmoothStep(p.fallStart, std::max(p.fallEnd, p.fallStart + .01f), height));
-    if (band <= 0.f) return inf;
-    float ax = 0.f, az = 0.f, bx = 0.f, bz = 0.f;
-    const float value = p.weightA * PathNoise(worldX, worldZ, p.periodA, p.seedA, ax, az) +
-        p.weightB * PathNoise(worldX, worldZ, p.periodB, p.seedB, bx, bz);
-    const float gx = p.weightA * ax + p.weightB * bx, gz = p.weightA * az + p.weightB * bz;
-    return std::abs(value - p.contour) /
-        std::max(std::sqrt(gx * gx + gz * gz), std::max(p.gradientFloor, 1.e-6f));
+    std::lock_guard lock(m_trailState->mutex);
+    if (m_trailState->live) return m_trailState->live;
+    static const auto empty = TerrainTrailNetwork::Build({});
+    return empty;
 }
 
-float TerrainManager::ContourPathShare(float worldX, float worldZ, float height) const
+void TerrainManager::SetTrail(uint64_t key, TerrainTrail trail)
 {
-    const auto& p = contourPaths;
-    if (!p.enabled) return 0.f;
-    const float band = SmoothStep(p.riseStart, std::max(p.riseEnd, p.riseStart + .01f), height) *
-        (1.f - SmoothStep(p.fallStart, std::max(p.fallEnd, p.fallStart + .01f), height));
-    if (band <= 0.f) return 0.f;
-    float ax = 0.f, az = 0.f, bx = 0.f, bz = 0.f;
-    const float value = p.weightA * PathNoise(worldX, worldZ, p.periodA, p.seedA, ax, az) +
-        p.weightB * PathNoise(worldX, worldZ, p.periodB, p.seedB, bx, bz);
-    const float gx = p.weightA * ax + p.weightB * bx, gz = p.weightA * az + p.weightB * bz;
-    const float metres = std::abs(value - p.contour) /
-        std::max(std::sqrt(gx * gx + gz * gz), std::max(p.gradientFloor, 1.e-6f));
-    const float track = 1.f - SmoothStep(p.core, std::max(p.edge, p.core + .01f), metres);
-    return track * band * std::clamp(p.strength, 0.f, 1.f);
+    m_trailSources[key] = std::move(trail);
+    RebuildTrailNetwork();
+}
+
+void TerrainManager::SetTrailWatcher(uint64_t key, std::function<void()> watcher)
+{
+    if (watcher) m_trailWatchers[key] = std::move(watcher);
+    else m_trailWatchers.erase(key);
+}
+
+void TerrainManager::RemoveTrail(uint64_t key)
+{
+    if (m_trailSources.erase(key)) RebuildTrailNetwork();
+}
+
+void TerrainManager::RebuildTrailNetwork()
+{
+    std::vector<TerrainTrail> trails;
+    trails.reserve(m_trailSources.size());
+    for (const auto& [key, source] : m_trailSources) trails.push_back(source);
+    auto network = TerrainTrailNetwork::Build(std::move(trails));
+    {
+        std::lock_guard lock(m_trailState->mutex);
+        m_trailState->live = std::move(network);
+    }
+    // Nothing built yet: carve from the start, no reload needed.
+    if (m_loaded.empty()) ApplyTrailCarving();
+    else
+    {
+        m_trailCarvePending = true;
+        m_trailChangedAt = std::chrono::steady_clock::now();
+    }
+}
+
+void TerrainManager::ApplyTrailCarving()
+{
+    m_trailCarvePending = false;
+    std::shared_ptr<const TerrainTrailNetwork> previous, next;
+    {
+        std::lock_guard lock(m_trailState->mutex);
+        previous = m_trailState->carved;
+        next = m_trailState->live;
+    }
+    if (CarveKey(previous) == CarveKey(next)) return;
+    // Cells the old or new carve reaches reload. Unloaded before the switch,
+    // so a cell's sculpt edit is saved against the carve it was made on.
+    InvalidatePrepared();
+    const double spanX = double(cellsX) * cellWidth, spanZ = double(cellsY) * cellDepth;
+    std::vector<Cell> reload;
+    for (const auto& [cell, terrain] : m_loaded)
+    {
+        if (!m_proceduralCells.count(cell)) continue;
+        const glm::vec2 low(float(cell.first * spanX), float(cell.second * spanZ));
+        const glm::vec2 high(float((cell.first + 1) * spanX), float((cell.second + 1) * spanZ));
+        if ((previous && previous->CarvesArea(low, high)) || (next && next->CarvesArea(low, high)))
+            reload.push_back(cell);
+    }
+    for (const Cell cell : reload) UnloadCell(cell);
+    {
+        std::lock_guard lock(m_trailState->mutex);
+        m_trailState->carved = next;
+    }
+    // Cached cells were built with the old carve.
+    m_cacheSignature = m_baseCacheSignature ^ CarveKey(next);
+}
+
+void TerrainManager::UpdateTrailCarving()
+{
+    if (m_trailCarvePending && std::chrono::steady_clock::now() - m_trailChangedAt >= CarveSettle)
+        ApplyTrailCarving();
+}
+
+TerrainManager::TrailGpuData TerrainManager::GetTrailGpuData(IGraphicsProvider* provider)
+{
+    const auto network = GetTrails();
+    if (network == m_trailTextureNetwork && provider == m_trailTextureProvider &&
+        m_farPalette.farColors == m_trailTexturePalette)
+        return m_trailGpu;
+    m_trailTextureNetwork = network;
+    m_trailTexturePalette = m_farPalette.farColors;
+    m_trailTextureProvider = provider;
+    m_trailTexture.reset();
+    m_trailGpu = {};
+    if (network->Empty() || !provider) return m_trailGpu;
+    auto* factory = provider->GetTextureFactory();
+    if (!factory) return m_trailGpu;
+    const auto layout = network->PackGpu(m_farPalette.farColors.data(), m_farPalette.farColors.size());
+    m_trailTexture = factory->CreateTexture2D(layout.width, layout.height,
+        reinterpret_cast<const uint8_t*>(layout.texels.data()), 1,
+        Engine::Graphics::GraphicsTextureFormat::Rgba32Float, false);
+    if (!m_trailTexture) return m_trailGpu;
+    m_trailGpu.texture = m_trailTexture.get();
+    m_trailGpu.grid = layout.grid;
+    m_trailGpu.keys = layout.keys;
+    return m_trailGpu;
 }
 }

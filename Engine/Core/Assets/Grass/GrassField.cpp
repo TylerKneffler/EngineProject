@@ -142,6 +142,7 @@ GrassField::GrassField()
     RegisterField("gpuLodSelection", gpuLodSelection, "LOD");
     RegisterField("allowProceduralGeneration", allowProceduralGeneration, "Tiles");
     RegisterField("proceduralLayerMask", proceduralLayerMask, "Tiles");
+    RegisterField("foliageLayer", foliageLayer, "Tiles");
     RegisterField("retainDormantTiles", retainDormantTiles, "Tiles");
     RegisterField("accentMeshes", accentMeshes, "Accents");
     RegisterField("accentPatchesPerSquareMeter", accentPatchesPerSquareMeter, "Accents");
@@ -706,8 +707,438 @@ uint64_t GrassField::ComputeGenerationSignature() const
         HashBytes(hash, &m_cachedTerrain->cellsY, sizeof(m_cachedTerrain->cellsY));
         HashFloat(hash, m_cachedTerrain->cellWidth);
         HashFloat(hash, m_cachedTerrain->cellDepth);
+        // Tiles keep off the trails and follow the painted foliage: rebuild
+        // when either changes.
+        const uint64_t trails = TrailSignature();
+        HashBytes(hash, &trails, sizeof(trails));
+        const uint64_t foliage = FoliageRevision();
+        HashBytes(hash, &foliage, sizeof(foliage));
+        HashBytes(hash, foliageLayer.data(), foliageLayer.size());
     }
     return hash;
+}
+
+uint64_t GrassField::FoliageRevision() const
+{
+    const auto* manager = m_cachedTerrain && m_cachedTerrain->Owner
+        ? m_cachedTerrain->Owner->GetComponentInParent<Engine::Components::TerrainManager>() : nullptr;
+    if (!manager) return 0;
+    const auto cell = manager->CellOf(*m_cachedTerrain);
+    return cell ? manager->GetFoliageRevision(*cell) : 0;
+}
+
+uint64_t GrassField::TrailSignature() const
+{
+    const auto* manager = m_cachedTerrain && m_cachedTerrain->Owner
+        ? m_cachedTerrain->Owner->GetComponentInParent<Engine::Components::TerrainManager>() : nullptr;
+    if (!manager) return 0;
+    const auto trails = manager->GetTrails();
+    return trails->Empty() ? 0 : trails->Signature();
+}
+
+namespace
+{
+// Placement randomness: integer hashes only, so a candidate's numbers depend
+// on nothing but its world column, the layer's seed and its index, on any
+// compiler and any tile size (std distributions differ between libraries).
+uint32_t Mix32(uint32_t h)
+{
+    h ^= h >> 16; h *= 0x7feb352du; h ^= h >> 15; h *= 0x846ca68bu; h ^= h >> 16;
+    return h;
+}
+
+uint32_t HashKey(uint32_t seed, int a, int b, int c, uint32_t d)
+{
+    uint32_t h = Mix32(seed ^ 0x9e3779b9u);
+    h = Mix32(h ^ static_cast<uint32_t>(a) * 0x85ebca6bu);
+    h = Mix32(h ^ static_cast<uint32_t>(b) * 0xc2b2ae35u);
+    h = Mix32(h ^ static_cast<uint32_t>(c) * 0x27d4eb2fu);
+    return Mix32(h ^ d * 0x165667b1u);
+}
+
+struct HashRandom
+{
+    uint32_t state;
+    float Next()
+    {
+        state = Mix32(state + 0x9e3779b9u);
+        return static_cast<float>(state >> 8) * (1.f / 16777216.f);
+    }
+};
+
+// A surface normal counts as facing up (open ground) from here.
+constexpr float UpFacing = .55f;
+}
+
+float GrassField::FoliageBaseline(const Engine::Components::Terrain& cell, const glm::vec3& local,
+    const glm::vec3& normal) const
+{
+    // Ground cover grows on the ground its paint layers mark (at least half
+    // their weight at the nearest vertex), on open ground facing up. Faces,
+    // ceilings and overhangs grow only what is painted there.
+    if (normal.y < UpFacing) return 0.f;
+    const size_t layerCount = cell.layers.size();
+    if (proceduralLayerMask == 0 || layerCount == 0 ||
+        cell.weights.size() != cell.heights.size() * layerCount)
+        return 1.f;
+    const int col = std::clamp(static_cast<int>(std::lround(local.x / cell.cellWidth)), 0, cell.cellsX);
+    const int row = std::clamp(static_cast<int>(std::lround(local.z / cell.cellDepth)), 0, cell.cellsY);
+    const float* sample = &cell.weights[(static_cast<size_t>(row) * (cell.cellsX + 1) + col) * layerCount];
+    float weight = 0.f;
+    for (size_t layer = 0; layer < layerCount && layer < 31; ++layer)
+        if (proceduralLayerMask & (1 << layer)) weight += sample[layer];
+    return weight >= .5f ? 1.f : 0.f;
+}
+
+std::string GrassField::FoliageLayerName() const
+{
+    if (!foliageLayer.empty()) return foliageLayer;
+    const auto* layer = Owner ? Owner->GetComponent<Engine::Components::TerrainObjectLayer>() : nullptr;
+    return layer ? layer->layerName : std::string{};
+}
+
+std::vector<Engine::Components::TerrainObjectLayer::Placement> GrassField::GenerateTileForTesting(int x, int z)
+{
+    std::vector<Placement> placements;
+    m_cachedTerrain = Owner ? Owner->GetComponentInParent<Engine::Components::Terrain>() : nullptr;
+    m_cachedLayer = Owner ? Owner->GetComponent<Engine::Components::TerrainObjectLayer>() : nullptr;
+    if (!m_cachedTerrain) return placements;
+    RefreshField();
+    GenerateTile({x, z}, placements);
+    return placements;
+}
+
+void GrassField::GenerateTile(Tile tile, std::vector<Placement>& out)
+{
+    using Engine::Components::TerrainFoliageCell;
+    const auto& terrain = *m_cachedTerrain;
+    const float span = std::max(1.f, tileSize);
+    const float width = terrain.cellsX * terrain.cellWidth;
+    const float depth = terrain.cellsY * terrain.cellDepth;
+    const float x0 = tile.first * span, z0 = tile.second * span;
+    const float x1 = std::min(x0 + span, width), z1 = std::min(z0 + span, depth);
+    if (x1 <= x0 || z1 <= z0) return;
+
+    // The cell's corner in the manager's space: world columns, the layer's
+    // noise (thickets, drifts, fields) and trails are all keyed there, so
+    // every cell grows its own pattern and it continues across cells.
+    const auto* manager = terrain.Owner
+        ? terrain.Owner->GetComponentInParent<Engine::Components::TerrainManager>() : nullptr;
+    const glm::vec3 origin = manager && manager->Owner
+        ? glm::vec3(glm::inverse(manager->Owner->transform.GetWorldMatrix()) *
+            terrain.Owner->transform.GetWorldMatrix()[3])
+        : glm::vec3(terrain.Owner->transform.GetWorldMatrix()[3]);
+    const glm::ivec3 column0(static_cast<int>(std::lround(origin.x)), static_cast<int>(std::lround(origin.y)),
+        static_cast<int>(std::lround(origin.z)));
+    auto paths = manager ? manager->GetTrails() : nullptr;
+    if (paths && paths->Empty()) paths = nullptr;
+
+    // Painted density (3D) over the baseline.
+    std::shared_ptr<const TerrainFoliageCell> foliage;
+    if (manager)
+        if (const auto cell = manager->CellOf(terrain)) foliage = manager->GetFoliage(*cell);
+    const TerrainFoliageCell::Layer* painted = foliage ? foliage->Find(FoliageLayerName()) : nullptr;
+    const auto density = [&](const glm::vec3& p, const glm::vec3& n) {
+        return TerrainFoliageCell::Sample(painted, p,
+            [&](const glm::vec3& q) { return FoliageBaseline(terrain, q, n); });
+    };
+
+    // The cell's height range: where surfaces are searched, the same for
+    // every tile (so the search, and the plants it finds, do not depend on
+    // the tile size), on a whole-metre lattice.
+    float low = std::numeric_limits<float>::max(), high = std::numeric_limits<float>::lowest();
+    for (const float h : terrain.heights) { low = std::min(low, h); high = std::max(high, h); }
+    if (low > high) return;
+    low = std::floor(low); high = std::ceil(high);
+    // Volume edits (arches, overhangs, caves) reach past the heights.
+    constexpr float Reach = 24.f;
+    // Surfaces in 3D where the cell's field has edits (overhangs, arches,
+    // caves: faces and ceilings). Elsewhere the ground is the height field,
+    // one surface over each point, steep or not, which the vertical columns
+    // cover. Painting never switches a tile between the two, so it changes
+    // only the plants it reaches.
+    const bool volume = static_cast<bool>(m_field);
+    const glm::vec3 fieldOrigin(m_fieldOriginX, 0.f, m_fieldOriginZ);
+    const auto groundDensity = [&](const glm::vec3& p) {
+        if (m_field) return m_field->Density(p + fieldOrigin);
+        return SampleHeight(p.x, p.z) - p.y;
+    };
+    const auto groundNormal = [&](const glm::vec3& p) {
+        if (m_field) return m_field->Normal(p + fieldOrigin);
+        glm::vec3 n(0.f, 1.f, 0.f);
+        SampleHeight(p.x, p.z, &n);
+        return n;
+    };
+    struct Hit
+    {
+        glm::vec3 position, normal;
+        int key;
+    };
+    // A point from a ray's axis coordinate t and its two other coordinates.
+    const auto pointOn = [](int axis, float a, float b, float t) {
+        return axis == 0 ? glm::vec3(t, a, b) : axis == 1 ? glm::vec3(a, t, b) : glm::vec3(a, b, t);
+    };
+    // Crossings along a column's centre line, marched once per column and
+    // shared by all of its candidates and groups.
+    std::map<std::tuple<int, int, int, int>, std::vector<float>> crossings;
+    const auto columnCrossings = [&](int axis, int ca, int cb, float from, float to) -> const std::vector<float>& {
+        auto [entry, added] = crossings.try_emplace({axis, ca, cb, static_cast<int>(std::floor(from))});
+        if (!added) return entry->second;
+        // Through air or rock the density is about the distance to the
+        // surface, so the march strides half of it (at least half a metre);
+        // each crossing it brackets is found by bisection, so where the
+        // march started does not change where crossings are.
+        const auto at = [&](float t) { return groundDensity(pointOn(axis, ca + .5f, cb + .5f, t)); };
+        float t = from, previous = at(t);
+        while (t < to)
+        {
+            const float next = std::min(to, t + std::max(.5f, .5f * std::abs(previous)));
+            const float value = at(next);
+            if ((previous > 0.f) != (value > 0.f))
+            {
+                float lo = t, hi = next;
+                const bool loInside = previous > 0.f;
+                for (int i = 0; i < 12; ++i)
+                {
+                    const float mid = .5f * (lo + hi);
+                    if ((at(mid) > 0.f) == loInside) lo = mid; else hi = mid;
+                }
+                entry->second.push_back(.5f * (lo + hi));
+            }
+            t = next;
+            previous = value;
+        }
+        return entry->second;
+    };
+    // The surfaces a candidate's ray meets near its column's crossings, each
+    // facing mostly along the ray's axis (every surface point belongs to one
+    // axis, so none is counted twice) and inside [from, to).
+    std::vector<Hit> hits;
+    const auto findHits = [&](int axis, float a, float b, int ca, int cb, float from, float to) {
+        hits.clear();
+        // The column is marched a little past [from, to): a candidate's own
+        // crossing may lie inside while its column's lies just outside.
+        for (const float centre : columnCrossings(axis, ca, cb, from - 2.f, to + 2.f))
+        {
+            // The sign change nearest this crossing (thin rock has two close
+            // together: each column crossing finds its own).
+            constexpr float Bracket = 1.f, Fine = .125f;
+            float best = std::numeric_limits<float>::max(), bestLow = 0.f;
+            bool bestInside = false;
+            float previous = groundDensity(pointOn(axis, a, b, centre - Bracket));
+            for (float t = centre - Bracket + Fine; t <= centre + Bracket + 1e-3f; t += Fine)
+            {
+                const float value = groundDensity(pointOn(axis, a, b, t));
+                if ((previous > 0.f) != (value > 0.f) && std::abs(t - Fine * .5f - centre) < best)
+                {
+                    best = std::abs(t - Fine * .5f - centre);
+                    bestLow = t - Fine;
+                    bestInside = previous > 0.f;
+                }
+                previous = value;
+            }
+            if (best == std::numeric_limits<float>::max()) continue;
+            float lo = bestLow, hi = bestLow + Fine;
+            for (int i = 0; i < 16; ++i)
+            {
+                const float mid = .5f * (lo + hi);
+                if ((groundDensity(pointOn(axis, a, b, mid)) > 0.f) == bestInside) lo = mid; else hi = mid;
+            }
+            const float at = .5f * (lo + hi);
+            if (at < from || at >= to) continue;
+            const glm::vec3 position = pointOn(axis, a, b, at);
+            const glm::vec3 normal = groundNormal(position);
+            const glm::vec3 magnitude = glm::abs(normal);
+            const float own = magnitude[axis];
+            // Each surface point belongs to the axis its normal faces most.
+            if (own < magnitude[(axis + 1) % 3] || own < magnitude[(axis + 2) % 3]) continue;
+            // Two column crossings may still meet one surface: keep it once.
+            bool seen = false;
+            for (const auto& hit : hits) seen = seen || glm::distance(hit.position, position) < 1e-3f;
+            if (!seen) hits.push_back({position, normal, static_cast<int>(std::floor(at * 4.f))});
+        }
+    };
+    // Height range the side (x and z) columns search: the cell's.
+    const float surfaceLow = low - Reach, surfaceHigh = high + Reach;
+
+    const float worldX = origin.x, worldZ = origin.z;
+    const size_t accentCount = m_accentSpecies, shrubCount = m_shrubSpecies, bushCount = m_bushSpecies;
+    const bool thickets = shrubCount && shrubPatchesPerSquareMeter > 0.f;
+    const bool bushClusters = bushCount && bushesPerSquareMeter > 0.f;
+    const bool tallFields = tallFieldDensity > 0.f;
+    // Candidates per world column of 1 m (projected along the ray's axis),
+    // `rate` per square metre on average; each is kept where the density
+    // allows and its group's own pattern says so (make returns false).
+    const auto scatter = [&](int group, float rate, float margin, auto&& make)
+    {
+        if (rate <= 0.f) return;
+        const int axes[3] = {1, 0, 2};
+        for (int pass = 0; pass < (volume ? 3 : 1); ++pass)
+        {
+            const int axis = axes[pass];
+            // Column ranges in the two other axes (cell space) and the ray's.
+            int a0, a1, b0, b1, worldA, worldB;
+            float from, to;
+            if (axis == 1)
+            {
+                a0 = static_cast<int>(std::floor(x0)); a1 = static_cast<int>(std::ceil(x1));
+                b0 = static_cast<int>(std::floor(z0)); b1 = static_cast<int>(std::ceil(z1));
+                from = low - Reach; to = high + Reach; worldA = column0.x; worldB = column0.z;
+            }
+            else if (axis == 0)
+            {
+                a0 = static_cast<int>(surfaceLow); a1 = static_cast<int>(surfaceHigh);
+                b0 = static_cast<int>(std::floor(z0)); b1 = static_cast<int>(std::ceil(z1));
+                from = x0; to = x1; worldA = column0.y; worldB = column0.z;
+            }
+            else
+            {
+                a0 = static_cast<int>(std::floor(x0)); a1 = static_cast<int>(std::ceil(x1));
+                b0 = static_cast<int>(surfaceLow); b1 = static_cast<int>(surfaceHigh);
+                from = z0; to = z1; worldA = column0.x; worldB = column0.y;
+            }
+            for (int cb = b0; cb < b1; ++cb)
+                for (int ca = a0; ca < a1; ++ca)
+                {
+                    const int wa = worldA + ca, wb = worldB + cb;
+                    HashRandom count{HashKey(static_cast<uint32_t>(seed), group * 4 + axis, wa, wb, 0u)};
+                    const int candidates = static_cast<int>(rate + count.Next());
+                    for (int j = 0; j < candidates; ++j)
+                    {
+                        const uint32_t key = HashKey(static_cast<uint32_t>(seed) ^ 0x51ed27u, group * 4 + axis,
+                            wa, wb, static_cast<uint32_t>(j) + 1u);
+                        HashRandom candidate{key};
+                        const float a = ca + candidate.Next(), b = cb + candidate.Next();
+                        if (!volume)
+                        {
+                            // Height field: the one surface over (a, b).
+                            glm::vec3 normal(0.f, 1.f, 0.f);
+                            const float y = SampleHeight(a, b, &normal);
+                            hits.assign(1, Hit{{a, y, b}, normal, static_cast<int>(std::floor(y))});
+                        }
+                        else
+                            findHits(axis, a, b, ca, cb, from, to);
+                        for (const auto& hit : hits)
+                        {
+                            const glm::vec3& p = hit.position;
+                            if (p.x < x0 || p.x >= x1 || p.z < z0 || p.z >= z1) continue;
+                            if (p.x < margin || p.z < margin || p.x > width - margin || p.z > depth - margin) continue;
+                            HashRandom random{HashKey(key, hit.key, axis, group, 7u)};
+                            if (random.Next() >= density(p, hit.normal)) continue;
+                            if (paths && paths->Share(worldX + p.x, worldZ + p.z) > .45f) continue;
+                            Placement placement;
+                            placement.position = p;
+                            placement.normal = hit.normal;
+                            if (!make(placement, random, hit.normal.y >= UpFacing)) continue;
+                            placement.id = (static_cast<uint64_t>(key) << 32 | random.state) | 1ull;
+                            out.push_back(std::move(placement));
+                        }
+                    }
+                }
+        }
+    };
+    // Grass thins under shrub thickets and bush clusters (keyed in the
+    // manager's space, so they continue across tiles and cells).
+    const auto thinned = [&](const Placement& p, HashRandom& random) {
+        const float x = worldX + p.position.x, z = worldZ + p.position.z;
+        if (thickets && random.Next() < .4f * ShrubThicket(x, z)) return true;
+        if (bushClusters && random.Next() < .5f * BushCluster(x, z)) return true;
+        return false;
+    };
+    const auto grass = [&](const std::string& asset, bool thinInFields, bool inField) {
+        return [&, thinInFields, inField](Placement& p, HashRandom& random, bool) {
+            if (thinned(p, random)) return false;
+            const float x = worldX + p.position.x, z = worldZ + p.position.z;
+            if (thinInFields && tallFields && random.Next() < (1.f - shortUnderTallShare) * TallField(x, z))
+                return false;
+            if (inField && random.Next() >= TallField(x, z)) return false;
+            p.asset = asset;
+            p.yawDegrees = random.Next() * 360.f;
+            p.scale = .8f + .4f * random.Next();
+            return true;
+        };
+    };
+    // Blade mode: the fine grass is generated on the GPU (GrassBlades).
+    if (!gpuBlades)
+    {
+        scatter(0, shortPatchesPerSquareMeter, .3f, grass(shortMesh, true, false));
+        scatter(1, tallPatchesPerSquareMeter, .3f, grass(tallMesh, false, false));
+        if (tallFields) scatter(2, tallFieldDensity, .3f, grass(tallMesh, false, true));
+    }
+    // Accents grow in drifts: each world square of accentDriftSize favours
+    // one species and has its own richness (some stay bare), so flowers
+    // gather in patches. Richness is uniform in [-.3, 1.5]: the candidate
+    // rate is 1.8 times the density to make up for it.
+    if (accentCount && accentPatchesPerSquareMeter > 0.f)
+    {
+        const float drift = std::max(1.f, accentDriftSize);
+        scatter(3, accentPatchesPerSquareMeter * 1.8f, .3f, [&](Placement& p, HashRandom& random, bool) {
+            const float x = worldX + p.position.x, z = worldZ + p.position.z;
+            const uint32_t cell = TileSeed(seed ^ 0x2c1b3c6d, static_cast<int>(std::floor(x / drift)),
+                static_cast<int>(std::floor(z / drift)));
+            const float richness = static_cast<float>(cell & 1023u) / 1023.f * 1.8f - .3f;
+            if (random.Next() >= richness) return false;
+            const float pick = random.Next();
+            const size_t favoured = (cell >> 10u) % accentCount;
+            const size_t species = pick < .7f ? favoured :
+                std::min(accentCount - 1, static_cast<size_t>((pick - .7f) / .3f * accentCount));
+            p.asset = m_speciesAssets[2 + species];
+            p.yawDegrees = random.Next() * 360.f;
+            p.scale = .85f + .3f * random.Next();
+            return true;
+        });
+    }
+    // Woody plants on open ground grow mostly upright (a conforming layer
+    // already keeps them upright and shears only the base) and sit a little
+    // into the surface so no gap shows under their lowest leaves.
+    const auto settle = [&](Placement& p, bool up, float upright, float sink) {
+        const glm::vec3 surface = p.normal;
+        if (up && (!m_cachedLayer || !m_cachedLayer->conformToGround))
+            p.normal = glm::normalize(glm::mix(p.normal, glm::vec3(0.f, 1.f, 0.f), upright));
+        p.position -= surface * (sink * p.scale);
+    };
+    // Shrubs gather in thickets; each thicket square favours one species and
+    // density rises from its rim to its heart.
+    if (thickets)
+    {
+        const float thicket = std::max(1.f, shrubThicketSize);
+        scatter(4, shrubPatchesPerSquareMeter, .5f, [&](Placement& p, HashRandom& random, bool up) {
+            const float x = worldX + p.position.x, z = worldZ + p.position.z;
+            if (random.Next() >= ShrubThicket(x, z)) return false;
+            const float pick = random.Next();
+            const uint32_t cell = TileSeed(seed ^ 0x6b43a9b5, static_cast<int>(std::floor(x / thicket)),
+                static_cast<int>(std::floor(z / thicket)));
+            const size_t favoured = cell % shrubCount;
+            const size_t species = pick < .75f ? favoured :
+                std::min(shrubCount - 1, static_cast<size_t>((pick - .75f) / .25f * shrubCount));
+            p.asset = m_speciesAssets[2 + accentCount + species];
+            p.yawDegrees = random.Next() * 360.f;
+            p.scale = .7f + .6f * random.Next();
+            settle(p, up, .6f, .03f);
+            return true;
+        });
+    }
+    // Bushes: loose clusters plus a few scattered singles; each cluster
+    // square favours one species.
+    if (bushClusters)
+    {
+        const float cluster = std::max(1.f, bushClusterSize);
+        scatter(5, bushesPerSquareMeter, .8f, [&](Placement& p, HashRandom& random, bool up) {
+            const float x = worldX + p.position.x, z = worldZ + p.position.z;
+            if (random.Next() >= .08f + .92f * BushCluster(x, z)) return false;
+            const float pick = random.Next();
+            const uint32_t cell = TileSeed(seed ^ 0x3a8f05c5, static_cast<int>(std::floor(x / cluster)),
+                static_cast<int>(std::floor(z / cluster)));
+            const size_t favoured = cell % bushCount;
+            const size_t species = pick < .7f ? favoured :
+                std::min(bushCount - 1, static_cast<size_t>((pick - .7f) / .3f * bushCount));
+            p.asset = m_speciesAssets[2 + accentCount + shrubCount + species];
+            p.yawDegrees = random.Next() * 360.f;
+            p.scale = .75f + .5f * random.Next();
+            settle(p, up, .8f, .05f);
+            return true;
+        });
+    }
 }
 
 void GrassField::BeginBuild(Tile tile, int lod, uint64_t signature)
@@ -770,205 +1201,7 @@ void GrassField::BeginBuild(Tile tile, int lod, uint64_t signature)
         return;
     }
     else
-    {
-        const float span = std::max(1.f, tileSize);
-        const float width = m_cachedTerrain->cellsX * m_cachedTerrain->cellWidth;
-        const float depth = m_cachedTerrain->cellsY * m_cachedTerrain->cellDepth;
-        std::mt19937 rng(TileSeed(seed, tile.first, tile.second));
-        std::uniform_real_distribution<float> unit(0.f, 1.f);
-        // Paint weight of the masked layers at the nearest terrain vertex.
-        const auto& terrain = *m_cachedTerrain;
-        const size_t layerCount = terrain.layers.size();
-        const bool masked = proceduralLayerMask != 0 && layerCount > 0 &&
-            terrain.weights.size() == terrain.heights.size() * layerCount;
-        // Paths shaded per pixel (TerrainManager::ContourPaths) are not in the
-        // paint: keep off their track as the painted path did (it took the
-        // grass weight under .5 from a path share of about .45).
-        const auto* paths = terrain.Owner
-            ? terrain.Owner->GetComponentInParent<Engine::Components::TerrainManager>() : nullptr;
-        if (paths && !paths->contourPaths.enabled) paths = nullptr;
-        const glm::vec3 pathOrigin = paths
-            ? glm::vec3(terrain.Owner->transform.GetWorldMatrix()[3]) : glm::vec3(0.f);
-        const auto grows = [&](float x, float z)
-        {
-            if (paths)
-            {
-                float height = 0.f;
-                if (Engine::Components::SampleTerrainSurface(terrain.heights, terrain.cellsX,
-                        terrain.cellsY, terrain.cellWidth, terrain.cellDepth, x, z, height, nullptr) &&
-                    paths->ContourPathShare(pathOrigin.x + x, pathOrigin.z + z,
-                        pathOrigin.y + height) > .45f) return false;
-            }
-            if (!masked) return true;
-            const int col = std::clamp(static_cast<int>(std::lround(x / terrain.cellWidth)), 0, terrain.cellsX);
-            const int row = std::clamp(static_cast<int>(std::lround(z / terrain.cellDepth)), 0, terrain.cellsY);
-            const float* sample = &terrain.weights[(static_cast<size_t>(row) *
-                (terrain.cellsX + 1) + col) * layerCount];
-            float weight = 0.f;
-            for (size_t layer = 0; layer < layerCount && layer < 31; ++layer)
-                if (proceduralLayerMask & (1 << layer)) weight += sample[layer];
-            return weight >= .5f;
-        };
-        const size_t accentCount = m_accentSpecies;
-        const size_t shrubCount = m_shrubSpecies;
-        const bool thickets = shrubCount && shrubPatchesPerSquareMeter > 0.f;
-        const size_t bushCount = m_bushSpecies;
-        const bool bushClusters = bushCount && bushesPerSquareMeter > 0.f;
-        const bool tallFields = tallFieldDensity > 0.f;
-        // thinInFields: the short patches give way to tall fields; inField:
-        // the tall fields' own placements, kept where the field is in.
-        const auto append = [&](const std::string& asset, float density, int cap,
-            bool thinInFields = false, bool inField = false)
-        {
-            const int count = std::clamp(static_cast<int>(std::round(
-                density * span * span)), 0, cap);
-            for (int i = 0; i < count; ++i)
-            {
-                Placement p;
-                p.position.x = tile.first * span + unit(rng) * span;
-                p.position.z = tile.second * span + unit(rng) * span;
-                if (p.position.x < .3f || p.position.z < .3f ||
-                    p.position.x > width - .3f || p.position.z > depth - .3f) continue;
-                // Grass thins under shrub thickets (the extra random is drawn
-                // only with thickets on, so other layouts stay unchanged).
-                if (thickets && unit(rng) < .4f * ShrubThicket(p.position.x, p.position.z)) continue;
-                // Bushes shade out more of the grass beneath them.
-                if (bushClusters && unit(rng) < .5f * BushCluster(p.position.x, p.position.z)) continue;
-                // Extra randoms only with fields on, so other layouts stay unchanged.
-                if (thinInFields && tallFields &&
-                    unit(rng) < (1.f - shortUnderTallShare) * TallField(p.position.x, p.position.z)) continue;
-                if (inField && unit(rng) >= TallField(p.position.x, p.position.z)) continue;
-                if (!grows(p.position.x, p.position.z)) continue;
-                p.asset = asset;
-                p.position.y = SampleHeight(p.position.x, p.position.z, &p.normal);
-                p.yawDegrees = unit(rng) * 360.f;
-                p.scale = .8f + .4f * unit(rng);
-                job.placements.push_back(std::move(p));
-            }
-        };
-        // Caps are per 4 m tile; larger tiles (far rings) scale them.
-        const float areaScale = std::max(1.f, span * span / 16.f);
-        // Blade mode: the fine grass is generated on the GPU (GrassBlades).
-        if (!gpuBlades)
-        {
-            append(shortMesh, shortPatchesPerSquareMeter, static_cast<int>(64 * areaScale), true);
-            append(tallMesh, tallPatchesPerSquareMeter, static_cast<int>(32 * areaScale));
-            if (tallFields)
-                append(tallMesh, tallFieldDensity, static_cast<int>(48 * areaScale), false, true);
-        }
-        // Accents grow in drifts. Each world cell of accentDriftSize favours
-        // one species and has its own richness (some cells stay bare), so
-        // flowers gather in patches instead of an even sprinkle. Cells are
-        // keyed in terrain space, so drifts continue across tile borders.
-        if (accentCount && accentPatchesPerSquareMeter > 0.f)
-        {
-            // Richness is uniform in [-.3, 1.5]: mean acceptance 1/1.8.
-            const int count = std::clamp(static_cast<int>(std::round(
-                accentPatchesPerSquareMeter * span * span * 1.8f)), 0, 96);
-            const float drift = std::max(1.f, accentDriftSize);
-            for (int i = 0; i < count; ++i)
-            {
-                Placement p;
-                p.position.x = tile.first * span + unit(rng) * span;
-                p.position.z = tile.second * span + unit(rng) * span;
-                const float accept = unit(rng), pick = unit(rng);
-                p.yawDegrees = unit(rng) * 360.f;
-                p.scale = .85f + .3f * unit(rng);
-                if (p.position.x < .3f || p.position.z < .3f ||
-                    p.position.x > width - .3f || p.position.z > depth - .3f) continue;
-                const uint32_t cell = TileSeed(seed ^ 0x2c1b3c6d,
-                    static_cast<int>(std::floor(p.position.x / drift)),
-                    static_cast<int>(std::floor(p.position.z / drift)));
-                const float richness = static_cast<float>(cell & 1023u) / 1023.f * 1.8f - .3f;
-                if (accept >= richness) continue;
-                if (!grows(p.position.x, p.position.z)) continue;
-                const size_t favoured = (cell >> 10u) % accentCount;
-                const size_t species = pick < .7f ? favoured :
-                    std::min(accentCount - 1, static_cast<size_t>((pick - .7f) / .3f * accentCount));
-                p.asset = m_speciesAssets[2 + species];
-                p.position.y = SampleHeight(p.position.x, p.position.z, &p.normal);
-                job.placements.push_back(std::move(p));
-            }
-        }
-        // Shrubs gather in thickets keyed in terrain space (so they continue
-        // across tiles). Each thicket cell favours one species; density
-        // rises from the thicket rim to its heart, so they close over the
-        // ground there and thin out into the meadow at the edges.
-        if (thickets)
-        {
-            // The cap is per 8 m square of tile: a fixed 128 halved the
-            // forest floor's ferns once tiles grew to 16 m.
-            const int cap = static_cast<int>(128.f * std::max(1.f, span * span / 64.f));
-            const int count = std::clamp(static_cast<int>(std::round(
-                shrubPatchesPerSquareMeter * span * span)), 0, cap);
-            const float thicket = std::max(1.f, shrubThicketSize);
-            for (int i = 0; i < count; ++i)
-            {
-                Placement p;
-                p.position.x = tile.first * span + unit(rng) * span;
-                p.position.z = tile.second * span + unit(rng) * span;
-                const float accept = unit(rng), pick = unit(rng);
-                p.yawDegrees = unit(rng) * 360.f;
-                p.scale = .7f + .6f * unit(rng);
-                if (p.position.x < .5f || p.position.z < .5f ||
-                    p.position.x > width - .5f || p.position.z > depth - .5f) continue;
-                if (accept >= ShrubThicket(p.position.x, p.position.z)) continue;
-                if (!grows(p.position.x, p.position.z)) continue;
-                const uint32_t cell = TileSeed(seed ^ 0x6b43a9b5,
-                    static_cast<int>(std::floor(p.position.x / thicket)),
-                    static_cast<int>(std::floor(p.position.z / thicket)));
-                const size_t favoured = cell % shrubCount;
-                const size_t species = pick < .75f ? favoured :
-                    std::min(shrubCount - 1, static_cast<size_t>((pick - .75f) / .25f * shrubCount));
-                p.asset = m_speciesAssets[2 + accentCount + species];
-                p.position.y = SampleHeight(p.position.x, p.position.z, &p.normal);
-                // Woody plants grow mostly upright on slopes (a conforming
-                // layer already keeps them upright and shears only the base)
-                // and sit a little into the ground so no gap shows under
-                // their lowest leaves.
-                if (!m_cachedLayer || !m_cachedLayer->conformToGround)
-                    p.normal = glm::normalize(glm::mix(p.normal, glm::vec3(0.f, 1.f, 0.f), .6f));
-                p.position.y -= .03f * p.scale;
-                job.placements.push_back(std::move(p));
-            }
-        }
-        // Bushes: loose clusters (cluster noise keyed in terrain space, so
-        // they continue across tiles) plus a few scattered singles. Each
-        // cluster cell favours one species.
-        if (bushClusters)
-        {
-            const int cap = static_cast<int>(64.f * std::max(1.f, span * span / 64.f));
-            const int count = std::clamp(static_cast<int>(std::round(
-                bushesPerSquareMeter * span * span)), 0, cap);
-            const float cluster = std::max(1.f, bushClusterSize);
-            for (int i = 0; i < count; ++i)
-            {
-                Placement p;
-                p.position.x = tile.first * span + unit(rng) * span;
-                p.position.z = tile.second * span + unit(rng) * span;
-                const float accept = unit(rng), pick = unit(rng);
-                p.yawDegrees = unit(rng) * 360.f;
-                p.scale = .75f + .5f * unit(rng);
-                if (p.position.x < .8f || p.position.z < .8f ||
-                    p.position.x > width - .8f || p.position.z > depth - .8f) continue;
-                if (accept >= .08f + .92f * BushCluster(p.position.x, p.position.z)) continue;
-                if (!grows(p.position.x, p.position.z)) continue;
-                const uint32_t cell = TileSeed(seed ^ 0x3a8f05c5,
-                    static_cast<int>(std::floor(p.position.x / cluster)),
-                    static_cast<int>(std::floor(p.position.z / cluster)));
-                const size_t favoured = cell % bushCount;
-                const size_t species = pick < .7f ? favoured :
-                    std::min(bushCount - 1, static_cast<size_t>((pick - .7f) / .3f * bushCount));
-                p.asset = m_speciesAssets[2 + accentCount + shrubCount + species];
-                p.position.y = SampleHeight(p.position.x, p.position.z, &p.normal);
-                // Bushes stand upright and sit a little into the ground.
-                if (!m_cachedLayer || !m_cachedLayer->conformToGround)
-                    p.normal = glm::normalize(glm::mix(p.normal, glm::vec3(0.f, 1.f, 0.f), .8f));
-                p.position.y -= .05f * p.scale;
-                job.placements.push_back(std::move(p));
-            }
-        }
-    }
+        GenerateTile(tile, job.placements);
     job.totalCount=uint32_t(job.placements.size());
     // Procedural opt-in data still needs preparation; saved layers use baked records.
     // Group instances by species so each source vertex range is drawn once.
@@ -992,17 +1225,25 @@ bool GrassField::AdvanceBuild(Clock::time_point deadline)
     {
         const size_t placementIndex = job.placement++;
         const auto& p = job.placements[placementIndex];
-        glm::mat4 transform = m_cachedLayer
+        // Plants off open ground (faces, ceilings) stand out of their surface;
+        // a conforming layer would turn them upright.
+        glm::mat4 transform = m_cachedLayer && p.normal.y >= .55f
             ? m_cachedLayer->PlacementTransform(p)
             : glm::translate(glm::mat4(1.f), p.position) *
                 glm::mat4_cast(Engine::Components::TerrainObjectLayer::SurfaceRotation(p.normal, p.yawDegrees)) *
                 glm::scale(glm::mat4(1.f), glm::vec3(p.scale));
         transform[3] -= glm::vec4(job.tile.first * span, originHeight, job.tile.second * span, 0.f);
-        uint64_t placementId = HashOffset;
-        HashBytes(placementId, &seed, sizeof(seed));
-        HashBytes(placementId, &job.tile.first, sizeof(job.tile.first));
-        HashBytes(placementId, &job.tile.second, sizeof(job.tile.second));
-        HashBytes(placementId, &placementIndex, sizeof(placementIndex));
+        // Generated plants carry an id from their world column (the same in
+        // any tile); others are numbered in the tile.
+        uint64_t placementId = p.id;
+        if (!placementId)
+        {
+            placementId = HashOffset;
+            HashBytes(placementId, &seed, sizeof(seed));
+            HashBytes(placementId, &job.tile.first, sizeof(job.tile.first));
+            HashBytes(placementId, &job.tile.second, sizeof(job.tile.second));
+            HashBytes(placementId, &placementIndex, sizeof(placementIndex));
+        }
         if (!placementId) placementId = 1;
         p.id = placementId;
         job.instanceLayer.AddPlacement(transform, placementId);
@@ -1517,7 +1758,9 @@ void GrassField::SyncGpuBlades()
     auto blades = GrassBlades::For(*scene);
     const auto& terrain = *m_cachedTerrain;
     RefreshField();
-    const uint64_t revision = terrain.GetConfigurationRevision() ^ (m_field ? m_fieldRevision << 40 : 0);
+    // Blades thin along the trails (below): a trail change repaints them.
+    const uint64_t revision = terrain.GetConfigurationRevision() ^ (m_field ? m_fieldRevision << 40 : 0) ^
+        TrailSignature() ^ (FoliageRevision() * 0x9e3779b97f4a7c15ull);
     if (m_bladeTerrain != &terrain || m_bladeTerrainRevision != revision)
     {
         const int samplesX = terrain.cellsX + 1, samplesZ = terrain.cellsY + 1;
@@ -1534,17 +1777,37 @@ void GrassField::SyncGpuBlades()
                         if (proceduralLayerMask & (1 << layer)) weight += terrain.weights[sample * layerCount + layer];
                     paint[sample] = weight;
                 }
+            // Painted foliage density (3D) over that baseline, on the top
+            // surface the blades stand on.
+            if (const auto* manager = terrain.Owner->GetComponentInParent<Engine::Components::TerrainManager>())
+                if (const auto cell = manager->CellOf(terrain))
+                    if (const auto foliage = manager->GetFoliage(*cell);
+                        const auto* painted = foliage->Find(FoliageLayerName()))
+                        for (size_t sample = 0; sample < paint.size(); ++sample)
+                        {
+                            const glm::vec3 local(float(sample % size_t(samplesX)) * terrain.cellWidth,
+                                terrain.heights[sample], float(sample / size_t(samplesX)) * terrain.cellDepth);
+                            const float baseline = paint[sample];
+                            paint[sample] = Engine::Components::TerrainFoliageCell::Sample(painted, local,
+                                [baseline](const glm::vec3&) { return baseline; });
+                        }
             const glm::vec3 origin(terrain.Owner->transform.GetWorldMatrix()[3]);
-            // Paths shaded per pixel are not in the paint (see grows above):
-            // the blades thin out along them as they did on the painted path.
-            if (const auto* paths = terrain.Owner->GetComponentInParent<Engine::Components::TerrainManager>();
-                paths && paths->contourPaths.enabled)
-                for (size_t sample = 0; sample < paint.size(); ++sample)
+            // Trails are not in the paint (see grows above): the blades thin
+            // out along them as they did on the painted path.
+            if (const auto* manager = terrain.Owner->GetComponentInParent<Engine::Components::TerrainManager>())
+                if (const auto paths = manager->GetTrails(); !paths->Empty())
                 {
-                    const float x = origin.x + float(sample % size_t(samplesX)) * terrain.cellWidth;
-                    const float z = origin.z + float(sample / size_t(samplesX)) * terrain.cellDepth;
-                    paint[sample] *= 1.f - std::min(1.f, paths->ContourPathShare(x, z,
-                        origin.y + terrain.heights[sample]) / .9f);
+                    // The cell's corner in the manager's space (trails are in it).
+                    const glm::vec3 corner = manager->Owner
+                        ? glm::vec3(glm::inverse(manager->Owner->transform.GetWorldMatrix()) *
+                            terrain.Owner->transform.GetWorldMatrix()[3])
+                        : origin;
+                    for (size_t sample = 0; sample < paint.size(); ++sample)
+                    {
+                        const float x = corner.x + float(sample % size_t(samplesX)) * terrain.cellWidth;
+                        const float z = corner.z + float(sample / size_t(samplesX)) * terrain.cellDepth;
+                        paint[sample] *= 1.f - std::min(1.f, paths->Share(x, z) / .9f);
+                    }
                 }
             std::vector<float> heights = terrain.heights;
             if (m_field)

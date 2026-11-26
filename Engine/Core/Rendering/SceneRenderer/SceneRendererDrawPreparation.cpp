@@ -527,19 +527,22 @@ void SceneRendererDrawPreparation::PrepareTerrainMaterial(
                 std::max(1.f, terrainManager->farCanopyDistance), macro.normalTexture
                     ? 1.f + std::clamp(terrainManager->canopyRelief, 0.f, 1.f) : 0.f);
         }
-    // Contour paths (TerrainManager::ContourPaths; Object.hlsl TerrainPathWeight).
-    if (terrainManager && terrainManager->contourPaths.enabled)
-    {
-        const auto& paths = terrainManager->contourPaths;
-        objectData.terrainPathNoise = {paths.periodA, paths.weightA, paths.periodB, paths.weightB};
-        objectData.terrainPathKeys = {paths.seedA, paths.seedB,
-            static_cast<uint32_t>(std::clamp(paths.layer, 0, 5) + 1), paths.crossableLayers & 63u};
-        objectData.terrainPathShape = {paths.core, std::max(paths.edge, paths.core + .01f),
-            paths.contour, std::max(paths.gradientFloor, 1.e-6f)};
-        objectData.terrainPathBand = {paths.riseStart, std::max(paths.riseEnd, paths.riseStart + .01f),
-            paths.fallStart, std::max(paths.fallEnd, paths.fallStart + .01f)};
-        objectData.terrainPathFar = glm::vec4(paths.farColor, std::clamp(paths.strength, 0.f, 1.f));
-    }
+    // Trails (TerrainManager trails; Object.hlsl TerrainTrailSample): their
+    // segments and bin grid in slot 3, which terrain leaves empty.
+    if (terrainManager)
+        if (const auto trails = const_cast<Engine::Components::TerrainManager*>(
+                terrainManager)->GetTrailGpuData(renderer.m_graphicsProvider); trails.texture)
+        {
+            draw.textures[3] = trails.texture;
+            draw.textureSlotCount = std::max(draw.textureSlotCount, 4u);
+            objectData.terrainTrailGrid = trails.grid;
+            objectData.terrainTrailKeys = trails.keys;
+            if (terrainManager->Owner)
+            {
+                const glm::dvec3 origin = terrainManager->Owner->transform.GetWorldPositionD();
+                objectData.terrainTrailOffset = glm::vec4(float(origin.x), float(origin.z), 0.f, 0.f);
+            }
+        }
     if (!terrainManager || !terrainManager->measurementGrid)
         return;
 

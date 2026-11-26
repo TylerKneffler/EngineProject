@@ -28,6 +28,7 @@
 #include "Core/Components/Terrain/Terrain.h"
 #include "Core/Components/Terrain/TerrainBrushShape.h"
 #include "Core/Components/Terrain/TerrainPlacementBrush.h"
+#include "Core/Components/Terrain/TerrainFoliageBrush.h"
 #include "Engine/Editor/Core/Paint/PaintInput.h"
 #include "Core/Components/Terrain/TerrainObjectLayer.h"
 #include "Core/Components/Terrain/TerrainManager.h"
@@ -578,6 +579,9 @@ void SceneView::SelectTerrainBrush(const std::string& path, bool applySettings)
     case BrushTool::Place:
         m_terrainBrush = kObjectBrush;
         break;
+    case BrushTool::Foliage:
+        m_terrainBrush = kPaintBrush;
+        break;
     case BrushTool::Sculpt:
         if (brush.relief.Present()) m_terrainBrush = kStampTool;
         else if (m_terrainBrush > kFlattenBrush && m_terrainBrush != kStampTool) m_terrainBrush = 0;
@@ -842,7 +846,22 @@ void SceneView::DrawTerrainToolbar(const std::function<bool(float)>& next)
                 if ((layerSource = manager->GetLoadedCell(cell.first, cell.second))) break;
         const int layerCount = layerSource ? static_cast<int>(layerSource->layers.size()) : 0;
         m_terrainLayer = std::clamp(m_terrainLayer, 0, std::max(0, layerCount - 1));
-        if (next(170.f))
+        if (m_terrainBrush == kPaintBrush && TerrainBrushFoliage())
+        {
+            // A Foliage brush paints its own foliage layers.
+            std::string layers;
+            for (const auto& layer : m_terrainBrushPreset.terrain.foliage.layers)
+                layers += (layers.empty() ? "" : ", ") + layer.layer;
+            if (next(220.f))
+            {
+                ImGui::TextUnformatted(("Foliage: " + layers).c_str());
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("This brush paints where ground cover grows (any surface: ground, "
+                        "cliff faces, ceilings). Shift erases. Edit its layers and amounts in "
+                        "the brush's Foliage section.");
+            }
+        }
+        else if (next(170.f))
         {
             const auto layerName = [&](int index) {
                 if (!layerSource || index >= layerCount) return std::to_string(index);
@@ -1389,7 +1408,36 @@ void SceneView::DrawPanel(IEditorUi& ui)
             }
         }
     }
-    if ((terrain || manager) && m_editMode == SceneEditMode::Terrain && !objectBrush &&
+    // A Foliage brush on the Paint tool: foliage density on whatever surface
+    // the cursor meets (the terrain field: open ground, faces, ceilings).
+    const bool foliageBrush = m_terrainBrush == kPaintBrush && TerrainBrushFoliage();
+    if (manager && foliageBrush && m_editMode == SceneEditMode::Terrain && !(m_editTerrainCells))
+    {
+        glm::dvec3 hit{};
+        glm::vec3 normal(0.f, 1.f, 0.f);
+        if (input.hovered && !input.rightDown && !input.middleDown &&
+            ScenePlacementAndPicking::FindFieldSurfaceHit(*m_scene, *manager,
+                input.mousePosInViewport, input.available, hit, normal))
+        {
+            const glm::dvec3 local = SceneTerrainTools::ToLocal(terrainTarget, hit);
+            drawRing(local, m_terrainHardness, invert ? IM_COL32(255, 80, 60, 230) : IM_COL32(90, 220, 90, 230));
+            if (input.leftDown)
+            {
+                terrainConsumedClick = true;
+                Engine::Components::TerrainFoliageDab dab;
+                dab.radius = m_terrainRadius * TerrainBrushPressureSize();
+                dab.centre = glm::vec3(ScatterTerrainDab(local, dab.radius));
+                dab.centre.y = static_cast<float>(local.y);
+                dab.strength = std::clamp(m_terrainStrength * TerrainBrushPressureStrength() *
+                    ImGui::GetIO().DeltaTime * 30.f, 0.f, 1.f);
+                dab.erase = invert;
+                dab.hardness = m_terrainHardness;
+                const bool changed = Engine::Components::ApplyFoliageBrush(*manager, m_terrainBrushPreset, dab);
+                m_terrainEditActive = m_terrainEditActive || changed;
+            }
+        }
+    }
+    if ((terrain || manager) && m_editMode == SceneEditMode::Terrain && !objectBrush && !foliageBrush &&
         ShapedTerrainTool() && !(manager && m_editTerrainCells))
     {
         using TerrainBrush = Engine::Components::Terrain::Brush;

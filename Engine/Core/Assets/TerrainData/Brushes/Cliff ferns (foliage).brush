@@ -1,0 +1,9 @@
+<?xml version='1.0' encoding='utf-8'?>
+<BrushPreset version="2" name="Cliff ferns (foliage)" tip="" shape="0" falloff="2" size="40" hardness="0.4" strength="0.5" opacity="1" flow="1" spacing="0.15" rotation="0" scatter="0" pressureSize="0.5" pressureStrength="0.5">
+  <Terrain tool="foliage">
+    <Rules heightFade="2" minSlope="40" maxSlope="90" slopeFade="8" onLayers="" avoidLayers="" layerThreshold="0.5" />
+    <Foliage mode="add" shell="1.5">
+      <Layer name="Procedural forest ferns" amount="1" />
+    </Foliage>
+  </Terrain>
+</BrushPreset>

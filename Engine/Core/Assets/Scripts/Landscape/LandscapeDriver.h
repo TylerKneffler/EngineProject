@@ -56,10 +56,6 @@ public:
     // scale it with the map's relief.
     PROPERTY(Inspector, EditAnywhere, Category = "Landscape", ClampMin = "0.1", ClampMax = "50")
     float altitudeBlend = 1.f;
-    PROPERTY(Inspector, EditAnywhere, Category = "Landscape")
-    std::string forestLayerName = "Landscape forest";
-    PROPERTY(Inspector, EditAnywhere, Category = "Landscape", ClampMin = "4", ClampMax = "80")
-    float grassRadius = 26.f;
     // A flat water plane at waterLevel over the whole map fills the lakes.
     PROPERTY(Inspector, EditAnywhere, Category = "Water")
     bool enableWater = true;

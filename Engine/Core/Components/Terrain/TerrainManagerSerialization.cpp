@@ -103,6 +103,30 @@ TerrainManager::JsonValue TerrainManager::Serialize() const
     // Procedural cells' objects: their files (written now when changed),
     // listed by revision so a snapshot can be restored (undo).
     SaveObjectFiles();
+    // Painted foliage (TerrainFoliage.h): its files, listed by content.
+    SaveFoliageFiles();
+    if (!cellDataDirectory.empty())
+    {
+        std::set<Cell> foliageCells;
+        for (const auto& [cell, foliage] : m_foliage)
+            if (foliage && !foliage->Empty()) foliageCells.insert(cell);
+        std::error_code error;
+        if (std::filesystem::is_directory(cellDataDirectory, error))
+            for (const auto& entry : std::filesystem::directory_iterator(cellDataDirectory, error))
+            {
+                int x = 0, z = 0;
+                if (entry.path().extension() == ".foliage" &&
+                    std::sscanf(entry.path().stem().string().c_str(), "%d_%d", &x, &z) == 2)
+                    foliageCells.insert({x, z});
+            }
+        JsonValue foliage = JsonValue::MakeArray();
+        for (const Cell cell : foliageCells)
+            if (const auto painted = GetFoliage(cell); !painted->Empty())
+                foliage.Push(JsonValue::MakeObject().Set("x", JsonValue(cell.first))
+                    .Set("y", JsonValue(cell.second))
+                    .Set("signature", JsonValue(std::to_string(painted->Signature()))));
+        out.Set("foliageFiles", std::move(foliage));
+    }
     if (!cellDataDirectory.empty())
     {
         JsonValue files = JsonValue::MakeArray();
@@ -442,6 +466,7 @@ void TerrainManager::Deserialize(const JsonValue& value)
     for (const auto& [cell, layers] : m_objectLayers)
         if (UsesObjectFiles(cell)) m_objectFilesPending.insert(cell);
     if (value.Has("objectFiles")) RestoreObjectFiles(value["objectFiles"]);
+    if (value.Has("foliageFiles")) RestoreFoliageFiles(value["foliageFiles"]);
     const auto& edits = value["editedCells"];
     for (size_t i = 0; i < edits.ArraySize(); ++i)
     {

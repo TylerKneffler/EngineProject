@@ -73,12 +73,11 @@ struct ObjectData
     float4 groundCoverColor; // terrain: cover colour, tint strength
     float4 groundCoverRange; // terrain: fade start, fade end, layer mask, root shade
     float4 placementThin; // start, end, minimum share kept (instanced ground cover)
-    // Terrain contour paths (TerrainManager::ContourPaths; TerrainPathWeight).
-    float4 terrainPathNoise; // period A, weight A, period B, weight B
-    uint4 terrainPathKeys;   // seed A, seed B, path layer + 1 (0 = off), crossable layer mask
-    float4 terrainPathShape; // core and edge half-width (m), contour value, gradient floor
-    float4 terrainPathBand;  // height band: rise start, rise end, fall start, fall end
-    float4 terrainPathFar;   // far tile colour, strength
+    // Terrain trails (TerrainManager trails; TerrainTrailSample), texture slot 3.
+    float4 terrainTrailGrid;   // bin grid origin x, z (manager space), 1 / bin size, bins x
+    uint4 terrainTrailKeys;    // bins z, list offset, segment offset, texture width (0 = off)
+    float4 terrainTrailOffset; // xy: the manager's world position x, z
+    float4 terrainTrailReserved[2];
     // x = the view's mip bias (<= 0) while TAA upscales it from a lower
     // render size, so textures keep the output's sharpness; yzw reserved.
     float4 viewTextureParams;
@@ -1731,63 +1730,73 @@ float3 SampleTerrainMacroNormal(ObjectData objectData, float3 worldPosition,
     return normalize(encoded * 2.0 - 1.0);
 }
 
-// Terrain contour paths (TerrainManager::ContourPaths). A path runs along a
-// contour of smooth value noise (two octaves); its half-width is the distance
-// to the contour, |value - contour| / |gradient|. Evaluated per pixel with an
-// analytic gradient, so it is the same sharp track on every terrain level,
-// near cell or far tile, with no data to stream. The hash and noise match the
-// CPU's (LandscapeDriver ValueNoise) so vegetation keeps clear of the same
-// track. Past the pixel footprint the soft edge widens and the strength falls
-// by the same share, so a track narrower than a pixel stays a faint
-// continuous line instead of breaking into spots.
-uint TerrainPathHash(int x, int z, uint seed)
+// Terrain trails (TerrainManager trails, TerrainTrails.h): polylines the
+// scene's trail objects publish, packed by TerrainTrailNetwork::PackGpu into
+// an RGBA32F texture in slot 3 (occlusionMap, unused by terrain): a bin grid
+// of list starts, the list of segments within reach of each bin, and three
+// texels per segment. The track is the distance to the nearest segment, so
+// it is the same sharp line on every terrain level, near cell or far tile.
+// Past the pixel footprint the soft edge widens and the strength falls by the
+// same share, so a track narrower than a pixel stays a faint continuous line
+// instead of breaking into spots. CPU twin: TerrainTrailNetwork::Evaluate.
+struct TerrainTrailHit
 {
-    uint h = asuint(x) * 0x9e3779b1u ^ asuint(z) * 0x85ebca77u ^ seed * 0xc2b2ae3du;
-    h ^= h >> 15; h *= 0x2c1b3c6du; h ^= h >> 12; h *= 0x297a2d39u; h ^= h >> 15;
-    return h;
+    float share;     // 0..1, strength included
+    uint layer;      // paint layer the track shows
+    uint crossable;  // layers it may run over (bit mask)
+    float3 farColor; // its colour on far tiles
+};
+
+float4 TerrainTrailTexel(uint index, uint width)
+{
+    return occlusionMap.Load(int3(int(index % width), int(index / width), 0));
 }
 
-// Value noise in 0..1 and its gradient (per metre).
-float TerrainPathNoise(float2 position, float period, uint seed, out float2 gradient)
-{
-    const float2 p = position / period;
-    const float2 cellOrigin = floor(p);
-    const int2 cell = int2(cellOrigin);
-    const float2 t = p - cellOrigin;
-    const float2 s = t * t * (3.0 - 2.0 * t);
-    const float2 ds = 6.0 * t * (1.0 - t);
-    const float scale = 1.0 / 16777215.0;
-    const float c00 = (TerrainPathHash(cell.x, cell.y, seed) & 0xffffffu) * scale;
-    const float c10 = (TerrainPathHash(cell.x + 1, cell.y, seed) & 0xffffffu) * scale;
-    const float c01 = (TerrainPathHash(cell.x, cell.y + 1, seed) & 0xffffffu) * scale;
-    const float c11 = (TerrainPathHash(cell.x + 1, cell.y + 1, seed) & 0xffffffu) * scale;
-    const float bottom = lerp(c00, c10, s.x), top = lerp(c01, c11, s.x);
-    gradient = float2(lerp(c10 - c00, c11 - c01, s.y) * ds.x, (top - bottom) * ds.y) / period;
-    return lerp(bottom, top, s.y);
-}
-
-// Path share (0..1) at worldPos, before the caller's surface rules.
 // footprint: ground metres per pixel.
-float TerrainPathWeight(ObjectData objectData, float3 worldPos, float footprint)
+TerrainTrailHit TerrainTrailSample(ObjectData objectData, float3 worldPos, float footprint)
 {
-    if (objectData.terrainPathKeys.z == 0u) return 0.0;
-    const float4 band = objectData.terrainPathBand;
-    const float bandShare = smoothstep(band.x, band.y, worldPos.y) *
-        (1.0 - smoothstep(band.z, band.w, worldPos.y));
-    [branch] if (bandShare <= 0.0) return 0.0;
-    const float4 noise = objectData.terrainPathNoise;
-    float2 gradientA, gradientB;
-    const float value = noise.y * TerrainPathNoise(worldPos.xz, noise.x,
-        objectData.terrainPathKeys.x, gradientA) +
-        noise.w * TerrainPathNoise(worldPos.xz, noise.z,
-        objectData.terrainPathKeys.y, gradientB);
-    const float2 gradient = noise.y * gradientA + noise.w * gradientB;
-    const float4 shape = objectData.terrainPathShape;
-    const float metres = abs(value - shape.z) / max(length(gradient), shape.w);
-    const float spread = max(footprint, 0.0);
-    const float core = shape.x, edge = shape.y;
-    const float track = 1.0 - smoothstep(core - 0.5 * spread, edge + 0.5 * spread, metres);
-    return track * (core + edge) / (core + edge + spread) * bandShare;
+    TerrainTrailHit hit;
+    hit.share = 0.0; hit.layer = 0u; hit.crossable = 0u; hit.farColor = 0.0;
+    const uint4 keys = objectData.terrainTrailKeys;
+    [branch] if (keys.w == 0u) return hit;
+    const float4 grid = objectData.terrainTrailGrid;
+    const float2 position = worldPos.xz - objectData.terrainTrailOffset.xy;
+    const int2 bin = int2(floor((position - grid.xy) * grid.z));
+    const uint binsX = uint(grid.w);
+    [branch] if (any(bin < 0) || uint(bin.x) >= binsX || uint(bin.y) >= keys.x) return hit;
+    const uint binIndex = uint(bin.y) * binsX + uint(bin.x);
+    const float4 starts = TerrainTrailTexel(binIndex >> 2u, keys.w);
+    const uint lane = binIndex & 3u;
+    const uint first = uint(starts[lane]);
+    const uint last = lane < 3u ? uint(starts[lane + 1u])
+        : uint(TerrainTrailTexel((binIndex >> 2u) + 1u, keys.w).x);
+    const float spread = clamp(footprint, 0.0, 16.0);
+    float bestTrack = 0.0;
+    [loop] for (uint entry = first; entry < min(last, first + 48u); ++entry)
+    {
+        const uint segment = uint(TerrainTrailTexel(keys.y + (entry >> 2u), keys.w)[entry & 3u]);
+        const uint texel = keys.z + segment * 3u;
+        const float4 ends = TerrainTrailTexel(texel, keys.w);
+        const float2 ab = ends.zw - ends.xy;
+        const float t = saturate(dot(position - ends.xy, ab) / max(dot(ab, ab), 1e-8));
+        const float metres = length(position - (ends.xy + ab * t));
+        const float4 shape = TerrainTrailTexel(texel + 1u, keys.w);
+        const float core = shape.x, edge = shape.y;
+        [branch] if (metres >= edge + 0.5 * spread) continue;
+        const float track = (1.0 - smoothstep(core - 0.5 * spread, edge + 0.5 * spread, metres)) *
+            (core + edge) / (core + edge + spread);
+        const float share = track * shape.z;
+        [branch] if (share > hit.share || (share == hit.share && track > bestTrack))
+        {
+            bestTrack = track;
+            hit.share = share;
+            const uint packed = uint(shape.w);
+            hit.layer = packed >> 6u;
+            hit.crossable = packed & 63u;
+            hit.farColor = TerrainTrailTexel(texel + 2u, keys.w).rgb;
+        }
+    }
+    return hit;
 }
 
 // Smooth value noise in 0..1 on a unit lattice (world-space, so distant
@@ -3238,17 +3247,17 @@ float4 ObjectSurfacePS(
                     objectData.terrainMacroParams.w - 1.0);
             }
         }
-        // Contour paths (TerrainPathWeight) at the far tiles' own resolution.
-        // Far tiles carry no paint: steep ground (where the near paint turns
-        // to rock) keeps the track off. Only where the tile is lit per pixel
+        // Trails (TerrainTrailSample) at the far tiles' own resolution. Far
+        // tiles carry no paint: steep ground (where the near paint turns to
+        // rock) keeps the track off. Only where the tile is lit per pixel
         // (base is albedo there; otherwise VSMain baked the light in).
-        [branch] if (objectData.terrainPathKeys.z != 0u && (sunMap || macroMap))
+        [branch] if (objectData.terrainTrailKeys.w != 0u && (sunMap || macroMap))
         {
-            const float3 pathDx = ddx(worldPos), pathDy = ddy(worldPos);
-            const float footprint = max(length(pathDx.xz), length(pathDy.xz));
-            const float share = TerrainPathWeight(objectData, worldPos, footprint) *
-                smoothstep(0.62, 0.78, surfaceNormal.y) * objectData.terrainPathFar.w;
-            base.rgb = lerp(base.rgb, objectData.terrainPathFar.rgb * objectData.baseColor.rgb, share);
+            const float3 trailDx = ddx(worldPos), trailDy = ddy(worldPos);
+            const float footprint = max(length(trailDx.xz), length(trailDy.xz));
+            const TerrainTrailHit trail = TerrainTrailSample(objectData, worldPos, footprint);
+            const float share = trail.share * smoothstep(0.62, 0.78, surfaceNormal.y);
+            base.rgb = lerp(base.rgb, trail.farColor * objectData.baseColor.rgb, share);
         }
         // Lit per pixel whenever a map is bound (VSMain leaves the light out).
         [branch] if (sunMap || macroMap)
@@ -3339,29 +3348,28 @@ float4 ObjectSurfacePS(
             weights[2] = paintA.z; weights[3] = paintA.w;
             weights[4] = paintB.x; weights[5] = paintB.y;
         }
-        // Contour paths (TerrainPathWeight): the path layer takes over where
-        // the track runs, on the layers it may cross (not rock, snow or
-        // shore), as the CPU paint did at the vertices.
+        // Trails (TerrainTrailSample): the trail's layer takes over where the
+        // track runs, on the layers it may cross (not rock, snow or shore),
+        // as the CPU paint did at the vertices.
         float pathShare = 0.0;
-        [branch] if (objectData.terrainPathKeys.z != 0u)
+        float3 pathFarColor = 0.0;
+        [branch] if (objectData.terrainTrailKeys.w != 0u)
         {
+            const float footprint = max(length(worldDx.xz), length(worldDy.xz)) / gradientScale;
+            const TerrainTrailHit trail = TerrainTrailSample(objectData, worldPos, footprint);
             float crossable = 0.0, total = 0.0;
             [unroll] for (uint layer = 0u; layer < 6u; ++layer)
             {
                 total += weights[layer];
-                if (objectData.terrainPathKeys.w & (1u << layer)) crossable += weights[layer];
+                if (trail.crossable & (1u << layer)) crossable += weights[layer];
             }
-            const float footprint = max(length(worldDx.xz), length(worldDy.xz)) / gradientScale;
-            pathShare = total > 0.00001
-                ? TerrainPathWeight(objectData, worldPos, footprint) * (crossable / total) *
-                    objectData.terrainPathFar.w
-                : 0.0;
+            pathShare = total > 0.00001 ? trail.share * (crossable / total) : 0.0;
+            pathFarColor = trail.farColor;
             [branch] if (pathShare > 0.0)
             {
-                const uint pathLayer = objectData.terrainPathKeys.z - 1u;
                 [unroll] for (uint layer = 0u; layer < 6u; ++layer)
                     weights[layer] = weights[layer] * (1.0 - pathShare) +
-                        (layer == pathLayer ? pathShare * total : 0.0);
+                        (layer == trail.layer ? pathShare * total : 0.0);
             }
         }
         float originalWeightSum = 0.0;
@@ -3732,10 +3740,10 @@ float4 ObjectSurfacePS(
         {
             const float macroAmount = smoothstep(objectData.terrainMacroParams.x,
                 objectData.terrainMacroParams.y, nearDistance) * (1.0 - terrainRockShare);
-            // The macro map carries no paths (they are shaded per pixel).
+            // The macro map carries no trails (they are shaded per pixel).
             [branch] if (macroAmount > 0.0)
                 base.rgb = lerp(base.rgb, lerp(SampleTerrainMacroColor(objectData,
-                    worldPos, worldDx, worldDy).rgb, objectData.terrainPathFar.rgb, pathShare),
+                    worldPos, worldDx, worldDy).rgb, pathFarColor, pathShare),
                     macroAmount);
         }
     }

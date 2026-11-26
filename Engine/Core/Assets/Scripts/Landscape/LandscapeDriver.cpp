@@ -1,8 +1,5 @@
 #include "Core/Rendering/DetailBudget.h"
 #include "Scripts/Landscape/LandscapeDriver.h"
-#include "Grass/GrassField.h"
-#include "Grass/GrassBlades.h"
-#include "Scripts/Grass/MeadowGrass.h"
 #include "Core/Components/Terrain/TerrainHeightArchive.h"
 #include "Core/Components/Terrain/TerrainManager.h"
 #include "Core/Components/Terrain/TerrainObjectLayer.h"
@@ -89,81 +86,6 @@ struct Altitudes
 {
     float water = -40.f, rock = 58.f, snow = 102.f, tree = 46.f, blend = 1.f;
 };
-
-float SmoothStep(float a, float b, float x)
-{
-    const float t = std::clamp((x - a) / (b - a), 0.f, 1.f);
-    return t * t * (3.f - 2.f * t);
-}
-
-uint32_t Hash(int32_t x, int32_t z, uint32_t seed)
-{
-    uint32_t h = static_cast<uint32_t>(x) * 0x9e3779b1u ^
-        static_cast<uint32_t>(z) * 0x85ebca77u ^ seed * 0xc2b2ae3du;
-    h ^= h >> 15; h *= 0x2c1b3c6du; h ^= h >> 12; h *= 0x297a2d39u; h ^= h >> 15;
-    return h;
-}
-
-// Smooth value noise in 0..1 over world metres. Position-only, so paint and
-// trees agree across cell borders and between worker threads.
-float ValueNoise(float x, float z, float period, uint32_t seed)
-{
-    x /= period; z /= period;
-    const float fx = std::floor(x), fz = std::floor(z);
-    const int32_t ix = static_cast<int32_t>(fx), iz = static_cast<int32_t>(fz);
-    float tx = x - fx, tz = z - fz;
-    tx = tx * tx * (3.f - 2.f * tx); tz = tz * tz * (3.f - 2.f * tz);
-    const auto corner = [&](int dx, int dz)
-    { return (Hash(ix + dx, iz + dz, seed) & 0xffffffu) / float(0xffffff); };
-    return (corner(0, 0) * (1 - tx) + corner(1, 0) * tx) * (1 - tz) +
-        (corner(0, 1) * (1 - tx) + corner(1, 1) * tx) * tz;
-}
-
-// Share of forest allowed at a height: none on shores or above the tree line.
-float ForestBand(float height, const Altitudes& a)
-{
-    return SmoothStep(a.water + 4.f, a.water + 9.f, height) *
-        (1.f - SmoothStep(a.tree - 8.f * a.blend, a.tree, height));
-}
-
-// Trails: 1 on a track, 0 away from it. Tracks follow the 0.5 contour of a
-// broad noise, so they wind across the whole map, never end, and join in
-// loops; the distance to the contour (value / gradient) gives an even ~6 m
-// wide dirt track (terrain vertices are 4 m apart, so narrower paths cannot
-// be painted). Paint, trees, undergrowth and props all read this one mask.
-// Metres from a trail's centre line (the 0.5 contour), approximately.
-float TrailDistance(float x, float z)
-{
-    const auto field = [](float px, float pz)
-    {
-        return .7f * ValueNoise(px, pz, 520.f, 71u) + .3f * ValueNoise(px, pz, 170.f, 73u);
-    };
-    const float e = 4.f;
-    const float centre = field(x, z);
-    const float gx = (field(x + e, z) - field(x - e, z)) / (2.f * e);
-    const float gz = (field(x, z + e) - field(x, z - e)) / (2.f * e);
-    // A floor on the gradient keeps flat spots of the noise from spreading
-    // the track into a clearing.
-    return std::abs(centre - .5f) / std::max(std::sqrt(gx * gx + gz * gz), .0006f);
-}
-
-float TrailMask(float x, float z)
-{
-    return 1.f - SmoothStep(1.6f, 4.2f, TrailDistance(x, z));
-}
-
-// Trails are shaded per pixel on every terrain level from the same noise
-// (TerrainManager::ContourPaths, Object.hlsl TerrainPathWeight); the paint
-// then leaves them out. ENGINE_TERRAIN_PATHS=0 paints them at the vertices
-// again (4 m in loaded cells, 16 m in the far macro map: the old spots).
-bool ShaderTrails()
-{
-    static const bool enabled = [] {
-        const char* value = std::getenv("ENGINE_TERRAIN_PATHS");
-        return !(value && value[0] == '0');
-    }();
-    return enabled;
-}
 
 glm::vec3 LayerMacroColor(const char* path)
 {
@@ -361,17 +283,6 @@ float EnvironmentNumber(const char* name, float fallback)
     return value && value[0] ? static_cast<float>(std::atof(value)) : fallback;
 }
 
-// A layer's shadow range: <name> from the environment when set (A/B runs of
-// longer ranges), else the authored one, times ENGINE_LANDSCAPE_SHADOW_SCALE
-// (1 = as authored).
-float LandscapeShadowRange(const char* name, float authored)
-{
-    static const float scale = []
-    { const char* v = std::getenv("ENGINE_LANDSCAPE_SHADOW_SCALE"); return v ? std::clamp(float(std::atof(v)), .1f, 2.f) : 1.f; }();
-    const char* v = std::getenv(name);
-    const float range = v ? std::clamp(float(std::atof(v)), 0.f, 900.f) : authored;
-    return range * scale;
-}
 
 
 }
@@ -452,28 +363,6 @@ void SplatCrown(const std::string& asset, float scale, float wx, float wz, float
         }
 }
 
-// A worn track: trails sink a little into the ground (collision and grass
-// follow the cell heights). Only where the shaded path runs: off rock, snow
-// and shores and inside the forest band. (Runs at load until trails are
-// scene splines: .md/todo.md, "bake everything", stage 3.)
-void CarveTrails(TerrainManager::Cell cell, int countX, int countY, float cellWidth, float cellDepth,
-    const std::vector<float>& weights, const Altitudes& level, std::vector<float>& heights)
-{
-    const float originX = cell.first * countX * cellWidth;
-    const float originZ = cell.second * countY * cellDepth;
-    if (ShaderTrails() && weights.size() == heights.size() * LayerCount)
-        for (int row = 0; row <= countY; ++row)
-            for (int col = 0; col <= countX; ++col)
-            {
-                const size_t i = static_cast<size_t>(row) * (countX + 1) + col;
-                const float* w = &weights[i * LayerCount];
-                const float crossable = w[Gravel] + w[Grass] + w[ForestSoil];
-                const float track = TrailMask(originX + col * cellWidth,
-                    originZ + row * cellDepth) * crossable * ForestBand(heights[i], level);
-                heights[i] -= .12f * track;
-            }
-}
-
 LandscapeDriver::LandscapeDriver()
 {
     SetTypeName(COMPONENT_TYPE_NAME(LandscapeDriver));
@@ -489,8 +378,6 @@ LandscapeDriver::LandscapeDriver()
     RegisterField("snowLine", snowLine);
     RegisterField("treeLine", treeLine);
     RegisterField("altitudeBlend", altitudeBlend);
-    RegisterField("forestLayerName", forestLayerName);
-    RegisterField("grassRadius", grassRadius);
     RegisterField("enableWater", enableWater);
     RegisterField("waterMaterial", waterMaterial);
     RegisterField("enableMacroColors", enableMacroColors, "Macro color");
@@ -526,8 +413,6 @@ bool LandscapeDriver::ConfigureTerrain()
     const std::string archivePath = Engine::Components::Mesh::ResolveFilePath(heightArchive);
     const int countX = manager->cellsX, countY = manager->cellsY;
     const int extent = mapHalfExtentCells;
-    const Altitudes level = AltitudesOf(*this);
-    const std::string forestName = forestLayerName;
     const float tiling = manager->cellsX * manager->cellWidth / 2.f; // 2 m repeats
     // The map's paint, baked: loaded as it is, never repainted by rules.
     // Without it the ground is plain grass.
@@ -538,27 +423,10 @@ bool LandscapeDriver::ConfigureTerrain()
             paintArchive.c_str());
     const auto paint = m_paint;
     const uint64_t paintKey = paint ? paint->Signature() : 0ull;
-    // Trails carve the heights when shaded per pixel. Rock shapes are part
-    // of the heights themselves, so nothing else goes into the key.
-    manager->SetStaticCache(cacheDirectory,
-        signature ^ PaintRevision ^ paintKey ^
-        (ShaderTrails() ? 0x5452414953484144ull : 0ull));
-    // Trails as contour paths (ShaderTrails): the TrailMask noise, its track
-    // widths, the gravel layer, over meadow, forest soil and gravel only, in
-    // the forest's height band (ForestBand: off shores and above the tree line).
-    {
-        auto& paths = manager->contourPaths;
-        paths.enabled = ShaderTrails();
-        paths.periodA = 520.f; paths.weightA = .7f; paths.seedA = 71u;
-        paths.periodB = 170.f; paths.weightB = .3f; paths.seedB = 73u;
-        paths.contour = .5f; paths.core = 1.6f; paths.edge = 4.2f; paths.gradientFloor = .0006f;
-        paths.layer = Gravel;
-        paths.crossableLayers = (1u << Gravel) | (1u << Grass) | (1u << ForestSoil);
-        paths.strength = .9f;
-        paths.riseStart = level.water + 4.f; paths.riseEnd = level.water + 9.f;
-        paths.fallStart = level.tree - 8.f * level.blend; paths.fallEnd = level.tree;
-        paths.farColor = MakePalette(level).farColors[Gravel];
-    }
+    // Rock shapes are part of the heights themselves, so nothing else goes
+    // into the key. Trails are scene objects (TerrainTrail scripts): the
+    // manager carves them and adds them to the key itself.
+    manager->SetStaticCache(cacheDirectory, signature ^ PaintRevision ^ paintKey);
     // Everything captured by value: these run on streaming workers.
     manager->SetProceduralBuilder([=](TerrainManager::Cell cell, Terrain& terrain)
     {
@@ -572,271 +440,17 @@ bool LandscapeDriver::ConfigureTerrain()
                 countX, countY, cell.first, cell.second, terrain.heights, codes))
             throw std::runtime_error("Could not read landscape height cell");
         ReadBakedPaint(paint.get(), cell, terrain.heights.size(), terrain.weights, terrain.lushness);
-        CarveTrails(cell, countX, countY, terrain.cellWidth, terrain.cellDepth, terrain.weights, level,
-            terrain.heights);
         terrain.Rebuild();
     });
     // Trees, rocks and bushes are not generated here: they load from the
     // object archive (TerrainManager::objectArchive)
     // and the cells' own .objects files.
     manager->SetObjectLayerGenerator({});
-    // The meadow preset attaches a GrassField to the procedural grass layer;
-    // keep the grass on the meadow paint and give it this map's density.
-    // ENGINE_LANDSCAPE_GRASS_RADIUS=<m> overrides grassRadius (A/B runs).
-    const float radius = EnvironmentNumber("ENGINE_LANDSCAPE_GRASS_RADIUS", grassRadius);
-    const std::string viewer = manager->viewerObjectName;
-    manager->SetObjectLayerSetup([radius, forestName, viewer](TerrainManager::Cell, TerrainObjectLayer& layer)
-    {
-        MeadowGrass::Apply(layer, viewer);
-        // Forests budget their detail in the project's "Trees" layer.
-        if (layer.Owner && (layer.layerName == forestName || layer.layerName == forestName + " edge"))
-            layer.Owner->layer = Engine::Rendering::DetailBudget::Get().FindLayerOrDefault("Trees");
-        auto* grass = layer.Owner ? layer.Owner->GetComponent<GrassField>() : nullptr;
-        if (!grass) return;
-        // Scanned bushes, shrubs and ferns (textured fields of their own) grow
-        // on the meadow and the forest soil, fern thickets on the forest soil;
-        // the grass fields below drop their generated bushes, shrubs and
-        // ferns (ENGINE_SCAN_BUSHES=0 keeps the generated ones for A/B runs).
-        static const bool scanBushes = []
-        { const char* v = std::getenv("ENGINE_SCAN_BUSHES"); return !(v && v[0] == '0'); }();
-        const bool ferns = layer.layerName == MeadowGrass::FernLayerName;
-        if (ferns || layer.layerName == MeadowGrass::BushLayerName)
-        {
-            const int mask = !scanBushes ? 0 : ferns ? 1 << ForestSoil : (1 << Grass) | (1 << ForestSoil);
-            // Full reach: the detail budget sits at its floor here, which
-            // would halve it (see the ground cover below).
-            // Each plant picks its own detail level (as the ground cover
-            // does). 32 m fern tiles (fewer draws) were not all built 60
-            // frames in, and would arrive a whole tile at a time.
-            const float tile = 16.f;
-            // Flowers and herbs (the fields' accents, a "fine" class) end
-            // sooner than the plants: ~40 m on the meadow, 30 m in the forest.
-            const float flowerReach = ferns ? .6f : .5f;
-            if (grass->proceduralLayerMask != mask || grass->minimumRadiusScale != 1.f ||
-                !grass->perPlantDetail || grass->tileSize != tile ||
-                grass->fineReachFraction != flowerReach)
-            {
-                grass->minimumRadiusScale = 1.f;
-                grass->perPlantDetail = true;
-                grass->tileSize = tile;
-                grass->fineReachFraction = flowerReach;
-                grass->proceduralLayerMask = mask;
-                if (!scanBushes)
-                {
-                    grass->bushesPerSquareMeter = 0.f;
-                    grass->shrubPatchesPerSquareMeter = 0.f;
-                    grass->accentPatchesPerSquareMeter = 0.f;
-                }
-                grass->MarkConfigurationDirty();
-            }
-            // Shadows of the scanned plants (alpha-tested cards) out to their
-            // reach (ENGINE_SCAN_BUSH_SHADOWS=1).
-            static const bool scanShadows = []
-            { const char* v = std::getenv("ENGINE_SCAN_BUSH_SHADOWS"); return v && v[0] == '1'; }();
-            if (scanShadows && !grass->castShadows)
-            {
-                grass->castShadows = true;
-                layer.shadowDistance = LandscapeShadowRange("ENGINE_SCAN_BUSH_SHADOW_DISTANCE", 150.f);
-            }
-            return;
-        }
-        if (scanBushes && !grass->bushMeshes.empty())
-        {
-            grass->bushMeshes.clear();
-            grass->bushesPerSquareMeter = 0.f;
-            // The meadow keeps its tall grass clumps (one of its four shrub
-            // species, at a quarter of the density). The forest floor's only
-            // shrub was its fern (its herb, also listed, is its tall plant and
-            // so skipped as a shrub); the fern layer replaces it.
-            if (layer.layerName == "Procedural meadow grass")
-            {
-                grass->shrubMeshes = "Assets/Mesh/Grass/tall_grass_clump.obj";
-                grass->shrubPatchesPerSquareMeter *= .25f;
-            }
-            else if (layer.layerName == MeadowGrass::ForestFloorLayerName)
-            {
-                grass->shrubMeshes.clear();
-                grass->shrubPatchesPerSquareMeter = 0.f;
-                // Half the generated herbs: scanned periwinkle and weeds grow
-                // between them (the fern layer's accents).
-                grass->tallPatchesPerSquareMeter *= .5f;
-            }
-            grass->MarkConfigurationDirty();
-        }
-        if (layer.layerName == MeadowGrass::FarLayerName)
-        {
-            // The far ring is fully in before the detailed grass (radius +
-            // 10, fading over its last 30%) starts to fade: their fades must
-            // overlap or a band of bare ground shows between them.
-            const float detailed = radius + 10.f;
-            // GPU blades reach the full detailed radius and shrink away over
-            // its last 10 m (GrassBlades::Settings::fadeBand): the ring fades
-            // in over the same band instead of overlapping 30-60 m of blades.
-            const bool blades = GrassBlades::Enabled();
-            const float inner = blades ? detailed - 10.f : detailed * .5f;
-            const float innerFade = blades ? 10.f : detailed * .2f;
-            if (grass->innerRadius != inner || grass->innerFadeWidth != innerFade ||
-                grass->proceduralLayerMask != (1 << Grass))
-            {
-                grass->innerRadius = inner;
-                grass->innerFadeWidth = innerFade;
-                grass->proceduralLayerMask = 1 << Grass;
-                grass->MarkConfigurationDirty();
-            }
-            // The tall fields carry on into the far ring: taller, denser tufts
-            // (far_tall_tuft, 0.75-1.05 m) where the detailed grass grows its
-            // tall fields, the short tufts thinning under them. The same seed
-            // and field noise as the meadow field (MeadowGrass, tall fields
-            // below), so the fields line up across the hand-off.
-            // ENGINE_LANDSCAPE_FAR_TALL=0 keeps the uniform ring (A/B).
-            static const bool farTall = []
-            { const char* v = std::getenv("ENGINE_LANDSCAPE_FAR_TALL"); return !(v && v[0] == '0'); }();
-            const bool tallFieldsOn = []
-            { const char* v = std::getenv("ENGINE_LANDSCAPE_TALL_FIELDS"); return !(v && v[0] == '0'); }();
-            if (farTall && tallFieldsOn && grass->tallFieldDensity == 0.f)
-            {
-                // Its levels thin like the far tufts' (45 / 90 m, MeadowGrass::ApplyFar).
-                grass->tallMesh = "Assets/Mesh/Grass/far_tall_tuft.obj";
-                grass->tallMeshLod1 = "Assets/Mesh/Grass/far_tall_tuft_lod1.obj";
-                grass->tallMeshLod2 = "Assets/Mesh/Grass/far_tall_tuft_lod2.obj";
-                grass->seed = 18731;
-                grass->tallFieldDensity = .9f;
-                grass->tallFieldSize = 28.f;
-                grass->tallFieldCoverage = .85f;
-                grass->shortUnderTallShare = .3f;
-                grass->MarkConfigurationDirty();
-            }
-            return;
-        }
-        // Ground cover keeps its authored reach: with the detail budget at its
-        // floor (it always is here) the radius shrank to ~16 m and ferns,
-        // bushes and grass came into being a few metres ahead of the camera.
-        // Larger tiles than the preset's 4 m pay for it (fewer tile objects)
-        // (ENGINE_LANDSCAPE_GRASS_TILE=<m> and ENGINE_LANDSCAPE_GRASS_FLOOR=<scale> for A/B runs).
-        // Tiles grow with the reach so their count stays near 170-210.
-        static const float forcedTile = []
-        { const char* v = std::getenv("ENGINE_LANDSCAPE_GRASS_TILE"); return v ? std::clamp(float(std::atof(v)), 2.f, 32.f) : 0.f; }();
-        const float grassTile = forcedTile > 0.f ? forcedTile : radius >= 40.f ? 16.f : 8.f;
-        static const float grassFloor = []
-        { const char* v = std::getenv("ENGINE_LANDSCAPE_GRASS_FLOOR"); return v ? std::clamp(float(std::atof(v)), .25f, 2.f) : 1.f; }();
-        if (grass->tileSize != grassTile || grass->minimumRadiusScale != grassFloor)
-        {
-            grass->tileSize = grassTile;
-            grass->minimumRadiusScale = grassFloor;
-            grass->MarkConfigurationDirty();
-        }
-        // A tile takes its detail level from the distance to its own origin,
-        // so a 16 m tile underfoot drew the thinned level and the meadow
-        // showed soil (6.9 % of the lower frame against 4.5 % with 4 m tiles).
-        // The level distances move out by part of the extra tile size: 0.35
-        // of it brings the soil back to 4.9 % for 5.5 ms of grass GPU time at
-        // the forest edge (3.0 with 4 m tiles); 0.7 gives 4.7 % for 7.9 ms.
-        // The lasting fix is a detail level per placement, as trees have
-        // (ENGINE_LANDSCAPE_GRASS_LODBOOST=<factor> for A/B runs).
-        // With a detail level per plant (the default) no push is needed.
-        // ENGINE_LANDSCAPE_GRASS_PER_PLANT=0 goes back to a level per tile.
-        static const bool perPlant = []
-        { const char* v = std::getenv("ENGINE_LANDSCAPE_GRASS_PER_PLANT"); return !(v && v[0] == '0'); }();
-        if (grass->perPlantDetail != perPlant) { grass->perPlantDetail = perPlant; grass->MarkConfigurationDirty(); }
-        // GPU grass blades (default; ENGINE_GPU_GRASS=0 off, GrassBlades.h): the meadow's
-        // fine grass and tall fields are generated on the GPU; its tiles keep
-        // the accents and shrubs.
-        if (layer.layerName == "Procedural meadow grass" && grass->gpuBlades != GrassBlades::Enabled())
-        {
-            grass->gpuBlades = GrassBlades::Enabled();
-            // Its remaining shrub, tall_grass_clump (2,448 / 1,015 / 241
-            // triangles), is grass the blades already draw.
-            if (grass->gpuBlades && grass->shrubMeshes.find("tall_grass_clump") != std::string::npos)
-            {
-                grass->shrubMeshes.clear();
-                grass->shrubPatchesPerSquareMeter = 0.f;
-            }
-            grass->MarkConfigurationDirty();
-        }
-        static const float lodBoost = []
-        { const char* v = std::getenv("ENGINE_LANDSCAPE_GRASS_LODBOOST"); return v ? std::clamp(float(std::atof(v)), 0.f, 2.f) : perPlant ? 0.f : .35f; }();
-        const float grassLod1 = 7.f + lodBoost * (grassTile - 4.f), grassLod2 = 13.f + lodBoost * (grassTile - 4.f);
-        if (layer.layerName != MeadowGrass::FarLayerName &&
-            (layer.lod1Distance != grassLod1 || layer.lod2Distance != grassLod2))
-        {
-            layer.lod1Distance = grassLod1;
-            layer.lod2Distance = grassLod2;
-            layer.MarkConfigurationDirty();
-        }
-        // Reach by plant size: ferns, shrubs and bushes are large enough to be
-        // seen arriving, so they reach further than the fine grass, which
-        // still ends at radius + 10 (ENGINE_LANDSCAPE_SHRUB_REACH=<m>, 0 = same
-        // reach as the grass). Walking, 80 m costs ~0.3 ms in the forest and
-        // ~1 ms on the meadow; 100 m costs ~0.7 ms in the forest.
-        static const float shrubReach = []
-        { const char* v = std::getenv("ENGINE_LANDSCAPE_SHRUB_REACH"); return v ? std::clamp(float(std::atof(v)), 0.f, 300.f) : 80.f; }();
-        const float coverReach = std::max(radius + 10.f, shrubReach);
-        const float fineReach = (radius + 10.f) / coverReach;
-        if (grass->fineReachFraction != fineReach) { grass->fineReachFraction = fineReach; grass->MarkConfigurationDirty(); }
-        if (layer.layerName == MeadowGrass::ForestFloorLayerName)
-        {
-            // Litter, herbs and ferns grow on the forest soil (the paint the
-            // trees stand on).
-            if (layer.viewDistance != coverReach)
-            {
-                layer.viewDistance = coverReach;
-                layer.MarkConfigurationDirty();
-            }
-            if (grass->proceduralLayerMask != (1 << ForestSoil) || grass->visibleRadius != radius)
-            {
-                grass->proceduralLayerMask = 1 << ForestSoil;
-                grass->visibleRadius = radius;
-                grass->MarkConfigurationDirty();
-            }
-            return;
-        }
-        // Layer distances every restore (cheap; dirty only on change).
-        if (layer.viewDistance != coverReach)
-        {
-            layer.viewDistance = coverReach;
-            layer.MarkConfigurationDirty();
-        }
-        if (grass->proceduralLayerMask == (1 << Grass)) return;
-        grass->proceduralLayerMask = 1 << Grass;
-        grass->visibleRadius = radius;
-        // Tussock patches (the manager's procedural default) close over the
-        // ground like a pelt: crowns of blades over a low sward.
-        grass->shortPatchesPerSquareMeter = 3.5f;
-        grass->tallPatchesPerSquareMeter = .4f;
-        // Tall grass fields (the reference meadows: knee- to waist-high fine
-        // grass as one mass, the ground hidden except from steeply above).
-        // Overlapping metre-wide patches (tools/generate_meadow_grass.py
-        // meadow_tall_grass) over most of the meadow (reference frame 03 shows
-        // no ground at all), densest in each field's heart; the short sward
-        // thins under them and stays in the openings between.
-        // ENGINE_LANDSCAPE_TALL_FIELDS=0 keeps the old meadow (A/B).
-        static const bool tallFields = []
-        { const char* v = std::getenv("ENGINE_LANDSCAPE_TALL_FIELDS"); return !(v && v[0] == '0'); }();
-        if (tallFields)
-        {
-            grass->tallMesh = "Assets/Mesh/Grass/meadow_tall_grass.obj";
-            grass->tallMeshLod1 = "Assets/Mesh/Grass/meadow_tall_grass_lod1.obj";
-            grass->tallMeshLod2 = "Assets/Mesh/Grass/meadow_tall_grass_lod2.obj";
-            grass->tallPatchesPerSquareMeter = .25f;
-            grass->tallFieldDensity = 2.2f;
-            grass->tallFieldSize = 28.f;
-            grass->tallFieldCoverage = .85f;
-            grass->shortUnderTallShare = .25f;
-            // What shows between blades reads as the mass's shaded depth.
-            grass->groundRootShade = .85f;
-        }
-        // Wildflower and weed drifts (meshes come from the meadow preset).
-        grass->accentPatchesPerSquareMeter = .18f;
-        // Low shrub, bramble and fern thickets over about a fifth of the meadow.
-        grass->shrubPatchesPerSquareMeter = .7f;
-        grass->shrubThicketSize = 11.f;
-        grass->shrubCoverage = .22f;
-        // Bush clusters over about a quarter of the meadow.
-        grass->bushesPerSquareMeter = .12f;
-        grass->bushClusterSize = 16.f;
-        grass->bushCoverage = .35f;
-        grass->MarkConfigurationDirty();
-    });
+    // Ground cover (grass, forest floor, shrubs, ferns, the far ring) and
+    // the layers' draw settings are scene data: the TerrainManager's layer
+    // settings carry each layer's GrassField, and where it grows is the
+    // foliage density (TerrainFoliage.h: the paint, then painted edits).
+    manager->SetObjectLayerSetup({});
     m_configuredSignature = signature;
     RegisterMacroColors(*manager);
     manager->ClearFarTerrain();

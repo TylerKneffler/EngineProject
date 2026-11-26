@@ -758,6 +758,12 @@ def write_scene(world):
 
     objects.append(atmosphere_items(lambda x, z: macro_sample(world, x, z)))
 
+    # Trails are authored scene objects (SplinePath + TerrainTrail, first
+    # traced by tools/landscape_trails.py): carried over as they are, before
+    # the terrain so they publish before its cells build.
+    for item in source_objects.findall("item"):
+        if item.get("name") == "Trails":
+            objects.append(item)
     terrain = ET.SubElement(objects, "item", {"name": "Landscape", "enabled": "true"})
     transform = ET.SubElement(terrain, "transform")
     for tag, values in (("Transform.position", (0, 0, 0)), ("Transform.rotation", (0, 0, 0)),
@@ -799,8 +805,8 @@ def write_scene(world):
             "gpuBudgetMiB": "256", "cacheBudgetMiB": "1024",
             "viewerObjectName": "Landscape Explorer",
             "cellDataDirectory": "Engine/Core/Assets/TerrainData/Landscape",
-            # Trees, rocks and bushes: baked by tools/LandscapeBake after this
-            # writes the map (the scene loads them; nothing generates them).
+            # Trees, rocks and bushes: baked placements (bushes by
+            # .local/tests/LandscapeBushBake.cpp); nothing generates them.
             "objectArchive": "Assets/TerrainData/Landscape/world.objects",
             "runtimeBakeDirectory": "", "requireRuntimeBake": "false"}.items()})
     ET.SubElement(manager, "TerrainManager.cells")
@@ -809,10 +815,17 @@ def write_scene(world):
         ET.SubElement(far_clusters, "item", {
             "asset": f"Assets/Prefabs/Woodland/Clusters/ForestCluster_{kind}.prefab",
             "match": "/Oaks/" if kind.startswith("Oak") else "/Conifers/", "trees": "14"})
+    # Each layer's draw settings and ground-cover field (GrassField) are
+    # authored scene data: carried over from the source scene as they are.
+    source_terrain = find_item(source_objects, "Landscape")
+    for source_manager in source_terrain.iter(c + "TerrainManager"):
+        settings = source_manager.find("TerrainManager.objectLayerSettings")
+        if settings is not None:
+            manager.append(settings)
     names = ET.SubElement(manager, "TerrainManager.objectLayerNames")
     for name in ("Landscape forest", "Landscape forest edge", "Procedural meadow grass", "Procedural far grass",
-                 "Procedural forest floor", "Procedural meadow bushes", "Procedural forest ferns",
-                 "Landscape props"):
+                 "Procedural forest floor", "Procedural meadow shrubs", "Landscape bushes",
+                 "Procedural forest ferns", "Landscape props"):
         ET.SubElement(names, "item").text = name
     runs = ET.SubElement(manager, "TerrainManager.proceduralRuns")
     for y in range(-EXTENT, EXTENT + 1):
@@ -829,9 +842,7 @@ def write_scene(world):
         "LandscapeDriver.rockLine": numbers([ROCK_LINE]),
         "LandscapeDriver.snowLine": numbers([SNOW_LINE]),
         "LandscapeDriver.treeLine": numbers([TREE_LINE]),
-        "LandscapeDriver.altitudeBlend": numbers([ALTITUDE_BLEND]),
-        "LandscapeDriver.forestLayerName": "Landscape forest",
-        "LandscapeDriver.grassRadius": "50"})
+        "LandscapeDriver.altitudeBlend": numbers([ALTITUDE_BLEND])})
     ET.SubElement(terrain, "children")
 
     ET.indent(scene, space="  ")

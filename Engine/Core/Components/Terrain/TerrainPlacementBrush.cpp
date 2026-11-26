@@ -141,7 +141,7 @@ int PlaceOverArea(Engine::Scene::Scene& scene, TerrainManager* manager, Terrain*
         if (resolved == layerSets.end())
             resolved = layerSets.emplace(spot.cell, spot.cell->ResolveRuleLayers(brush.terrain.rules)).first;
         const float trail = manager && brush.terrain.rules.trailClearance > 0.f
-            ? manager->ContourPathDistance(float(x), float(z), height)
+            ? manager->TrailDistance(float(x), float(z))
             : std::numeric_limits<float>::infinity();
         return shaped * Engine::Brushes::BrushRulesWeight(brush.terrain.rules, height, slope,
             &resolved->second, paint.empty() ? nullptr : paint.data(), paint.size(), trail);

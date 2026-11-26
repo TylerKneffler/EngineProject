@@ -6,6 +6,8 @@
 #include "Core/Components/Terrain/TerrainFarCellDetail.h"
 #include "Core/Components/Terrain/TerrainField.h"
 #include "Core/Components/Terrain/TerrainVolumeBuild.h"
+#include "Core/Components/Terrain/TerrainTrails.h"
+#include "Core/Components/Terrain/TerrainFoliage.h"
 #include "Core/Components/Physics/MeshObjectCollider.h"
 #include <climits>
 #include <map>
@@ -466,40 +468,57 @@ public:
     bool BakeProceduralCell(int x, int y, bool force = false);
     bool BakeRuntimeTerrain(bool reuseExistingCells = false);
     bool HasCompleteRuntimeBake() const;
-    // Paths along a contour of smooth value noise (two octaves), shaded per
-    // pixel on every terrain level (Object.hlsl TerrainPathWeight), so a
-    // track narrower than the vertex spacing stays sharp near and a faint
-    // continuous line far, instead of paint at the vertices that breaks into
-    // spots. Set by the scene script, which also keeps the track out of its
-    // paint and placements with the same noise (hash and lattice as
-    // Object.hlsl TerrainPathHash). Not serialized.
-    struct ContourPaths
+    // Trails (TerrainTrails.h): polylines that scene objects publish, keyed
+    // by the publisher (TerrainTrail scripts: a SplinePath per trail object,
+    // drawn at startup and whenever its points move). The network is shaded
+    // per pixel on every terrain level (Object.hlsl TerrainTrailSample),
+    // carved into procedural cells as they build, and ground cover and
+    // placement rules keep off it. Not serialized: the trail objects are.
+    // Foliage density (TerrainFoliage.h): where dense ground cover grows,
+    // per foliage layer, in 3D. Only painted chunks are stored, one
+    // <x>_<z>.foliage file per cell in cellDataDirectory, written when the
+    // manager is serialized (scene save, undo snapshots) and listed there by
+    // signature so a snapshot brings the painted state back.
+    // The cell's painted chunks (never null; empty where none).
+    std::shared_ptr<const TerrainFoliageCell> GetFoliage(Cell cell) const;
+    // Changes whenever that cell's foliage does.
+    uint64_t GetFoliageRevision(Cell cell) const;
+    // The cell a loaded cell's terrain is.
+    std::optional<Cell> CellOf(const Terrain& terrain) const;
+    // A brush dab on a foliage layer, over the loaded cells it reaches. The
+    // layer's baseline comes from the component growing it in each cell (a
+    // TerrainFoliageSource whose FoliageLayerName matches). True when a
+    // density changed.
+    bool PaintFoliage(const std::string& layerName, const TerrainFoliageStroke& stroke);
+    // Replaces a cell's foliage (tools, restores).
+    void SetFoliage(Cell cell, std::shared_ptr<const TerrainFoliageCell> foliage);
+    std::string GetFoliageFilePath(Cell cell) const;
+    size_t SaveFoliageFiles() const;
+    void SetTrail(uint64_t key, TerrainTrail trail);
+    void RemoveTrail(uint64_t key);
+    // Called every editor frame (UpdateEditorStreaming), where scripts get no
+    // Update: a publisher checks its points there and republishes on change.
+    void SetTrailWatcher(uint64_t key, std::function<void()> watcher);
+    void RemoveTrailWatcher(uint64_t key) { m_trailWatchers.erase(key); }
+    // The current network (never null); safe to call and keep on any thread.
+    // Loops should take it once rather than call TrailShare per sample.
+    std::shared_ptr<const TerrainTrailNetwork> GetTrails() const;
+    // The track's share (0..1, times strength) at a position (manager
+    // space), as the terrain shades it at full resolution (no paint rules,
+    // no pixel footprint). 0 without trails.
+    float TrailShare(float x, float z) const { return GetTrails()->Share(x, z); }
+    // Metres from the nearest trail's centre line (manager space); infinite
+    // away from every trail.
+    float TrailDistance(float x, float z) const { return GetTrails()->Distance(x, z); }
+    // The network for the renderer: an RGBA32F texture (TerrainTrailNetwork::
+    // PackGpu; null without trails) and its grid constants.
+    struct TrailGpuData
     {
-        bool enabled = false;
-        float periodA = 520.f, weightA = .7f, periodB = 170.f, weightB = .3f;
-        uint32_t seedA = 71u, seedB = 73u;
-        float contour = .5f;
-        // Half-widths from the contour, metres: full path inside core, none
-        // past edge. Gradient floor (per metre) keeps flat noise from
-        // spreading a track into a clearing.
-        float core = 1.6f, edge = 4.2f, gradientFloor = .0006f;
-        int layer = 1;                // paint layer the track uses
-        uint32_t crossableLayers = 0; // layers it may run over (bit mask)
-        float strength = .9f;
-        // Height band (world Y): rises over riseStart..riseEnd, falls over
-        // fallStart..fallEnd.
-        float riseStart = -1.e9f, riseEnd = -1.e9f, fallStart = 1.e9f, fallEnd = 1.e9f;
-        glm::vec3 farColor{.4f};      // far tiles (no paint there)
+        const Engine::Graphics::IGraphicsTexture* texture = nullptr;
+        glm::vec4 grid{0.f};
+        glm::uvec4 keys{0u};
     };
-    ContourPaths contourPaths;
-    // The path's share (0..1, times strength) at a world position and height,
-    // as Object.hlsl shades it at full resolution (no surface rules, no pixel
-    // footprint). Ground cover keeps off the track with it, now that the paint
-    // no longer carries the path. 0 when contourPaths is off.
-    float ContourPathShare(float worldX, float worldZ, float height) const;
-    // Metres from the nearest path's centre line at a position (manager
-    // space) and height; infinite where paths are off or out of their band.
-    float ContourPathDistance(float worldX, float worldZ, float height) const;
+    TrailGpuData GetTrailGpuData(IGraphicsProvider* provider);
     struct FarTerrainPalette
     {
         std::array<glm::vec3, 6> farColors{};
@@ -674,6 +693,40 @@ private:
     std::set<Cell> m_editedProcedural;
     mutable std::set<Cell> m_dirtyProceduralEdits;
     std::function<void(Cell, Terrain&)> m_proceduralBuilder;
+    // Trails (SetTrail): the live network, shaded and read by rules at once,
+    // and the one carved into procedural cells, which follows it after a
+    // short pause (edits come in bursts while points are dragged). The
+    // carved network's signature is part of the cell cache signature.
+    struct TrailState
+    {
+        mutable std::mutex mutex;
+        std::shared_ptr<const TerrainTrailNetwork> live, carved;
+    };
+    std::shared_ptr<TrailState> m_trailState = std::make_shared<TrailState>();
+    std::map<uint64_t, TerrainTrail> m_trailSources;
+    // Foliage: cells read or painted so far, those painted since the last
+    // save, and a revision per cell.
+    mutable std::map<Cell, std::shared_ptr<const TerrainFoliageCell>> m_foliage;
+    mutable std::set<Cell> m_foliageDirty;
+    std::map<Cell, uint64_t> m_foliageRevisions;
+    uint64_t m_foliageRevisionCounter = 0;
+    void RestoreFoliageFiles(const JsonValue& listed);
+    std::map<uint64_t, std::function<void()>> m_trailWatchers;
+    bool m_trailCarvePending = false;
+    std::chrono::steady_clock::time_point m_trailChangedAt{};
+    uint64_t m_baseCacheSignature = 0;
+    std::shared_ptr<Engine::Graphics::IGraphicsTexture> m_trailTexture;
+    IGraphicsProvider* m_trailTextureProvider = nullptr;
+    std::shared_ptr<const TerrainTrailNetwork> m_trailTextureNetwork;
+    std::array<glm::vec3, 6> m_trailTexturePalette{};
+    TrailGpuData m_trailGpu;
+    // Rebuilds the live network from m_trailSources.
+    void RebuildTrailNetwork();
+    // Applies the live network to carving (see TrailState) and reloads the
+    // loaded procedural cells it changes.
+    void ApplyTrailCarving();
+    // Streaming: applies a pending carve once trail edits have settled.
+    void UpdateTrailCarving();
     // Volume edits read so far, per cell (GetVolumeEdits).
     mutable std::map<Cell, std::vector<TerrainVolumeEdit>> m_volumeEdits;
     mutable std::optional<std::set<Cell>> m_volumeEditOwners;

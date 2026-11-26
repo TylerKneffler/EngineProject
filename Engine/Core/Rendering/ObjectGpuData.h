@@ -110,16 +110,15 @@ struct ObjectGPUData
     // Instanced ground cover thinning (Mesh::placementThin*): start, end,
     // minimum share kept, w = 1 keeps survivors' width (no widening).
     glm::vec4 placementThin{0.f, 0.f, 1.f, 0.f};
-    // Terrain contour paths (TerrainManager::ContourPaths), shaded per pixel
-    // at every terrain level: noise periods and weights (A, B); seeds A and B,
-    // path layer + 1 (0 = off), mask of layers it may cross; core and edge
-    // half-width (m), contour value, gradient floor; height band (rise start,
-    // rise end, fall start, fall end); far colour and strength.
-    glm::vec4 terrainPathNoise{0.f};
-    glm::uvec4 terrainPathKeys{0u};
-    glm::vec4 terrainPathShape{0.f};
-    glm::vec4 terrainPathBand{0.f};
-    glm::vec4 terrainPathFar{0.f};
+    // Terrain trails (TerrainManager::GetTrailGpuData, Object.hlsl
+    // TerrainTrailSample), read from texture slot 3: bin grid origin x, z,
+    // 1 / bin size, bins x; bins z, list offset, segment offset, texture
+    // width (0 = no trails); the manager's world position x, z (the grid is
+    // in manager space); two reserved vectors.
+    glm::vec4 terrainTrailGrid{0.f};
+    glm::uvec4 terrainTrailKeys{0u};
+    glm::vec4 terrainTrailOffset{0.f};
+    glm::vec4 terrainTrailReserved[2]{};
     // x = mip bias of the view (<= 0): -log2(output / render pixels) while
     // TAA upscales it, so textures keep the output's sharpness (Object.hlsl
     // TextureLodBias, AlphaLodBias). yzw reserved.

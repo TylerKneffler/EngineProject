@@ -5,6 +5,8 @@
 #include "Core/Scene/Object.h"
 #include "Core/Scene/Scene.h"
 #include "Core/Serialization/Json.h"
+#include "Core/Serialization/SceneSerializer.h"
+#include "Core/Rendering/DetailBudget.h"
 
 #include <chrono>
 #include <cstdio>
@@ -31,12 +33,60 @@ TerrainObjectLayer::Settings TerrainObjectLayer::Settings::From(const TerrainObj
     s.shadowDistance = layer.shadowDistance; s.farShadowDistance = layer.farShadowDistance;
     s.shadowFadeWidth = layer.shadowFadeWidth; s.shadowLod = layer.shadowLod;
     s.farObjects = layer.farObjects;
+    s.snapToGround = layer.snapToGround ? 1 : 0;
+    s.conformToGround = layer.conformToGround ? 1 : 0;
+    if (layer.Owner)
+        for (const auto* component : layer.Owner->Components)
+            if (component && component != &layer)
+                s.components.Push(JsonValue::MakeObject().Set("type", JsonValue(component->GetTypeName()))
+                    .Set("value", component->Serialize()));
     return s;
+}
+
+std::string TerrainObjectLayer::Settings::ComponentsKey() const
+{
+    return components.ArraySize() ? Engine::Serialization::JsonWriteCompact(components) : std::string{};
 }
 
 void TerrainObjectLayer::Settings::ApplyTo(TerrainObjectLayer& layer) const
 {
-    if (From(layer) == *this) return;
+    // Components first: each is configured only when its value changed
+    // since it was last applied (a GrassField rebuilds its tiles on change).
+    if (layer.Owner)
+    {
+        for (size_t i = 0; i < components.ArraySize(); ++i)
+        {
+            const auto& entry = components.ArrayAt(i);
+            const std::string type = entry["type"].AsString();
+            if (type.empty() || type == "TerrainObjectLayer") continue;
+            Engine::Core::Component* component = nullptr;
+            for (auto* existing : layer.Owner->Components)
+                if (existing && existing->GetTypeName() == type) { component = existing; break; }
+            const std::string key = Engine::Serialization::JsonWriteCompact(entry["value"]);
+            auto& applied = layer.m_appliedComponents[type];
+            if (component && applied == key) continue;
+            if (!component)
+            {
+                component = Engine::Serialization::SceneSerializer::CreateRegisteredComponent(type);
+                if (!component) continue;
+                component->Deserialize(entry["value"]);
+                layer.Owner->AddComponent(component);
+            }
+            else
+                component->Deserialize(entry["value"]);
+            applied = key;
+        }
+        if (!detailLayer.empty())
+            layer.Owner->layer = Engine::Rendering::DetailBudget::Get().FindLayerOrDefault(detailLayer.c_str());
+    }
+    if (snapToGround >= 0) layer.snapToGround = snapToGround != 0;
+    if (conformToGround >= 0) layer.conformToGround = conformToGround != 0;
+    Settings current = From(layer);
+    current.components = components;
+    current.detailLayer = detailLayer;
+    if (snapToGround < 0) current.snapToGround = -1;
+    if (conformToGround < 0) current.conformToGround = -1;
+    if (current == *this) return;
     layer.viewDistance = std::max(1.f, viewDistance);
     layer.lod1Distance = std::clamp(lod1Distance, 0.f, layer.viewDistance);
     layer.lod2Distance = std::clamp(lod2Distance, layer.lod1Distance, layer.viewDistance);
@@ -60,7 +110,9 @@ JsonValue TerrainObjectLayer::Settings::Serialize() const
         .Set("screenLod1Pixels", JsonValue(screenLod1Pixels)).Set("screenLod2Pixels", JsonValue(screenLod2Pixels))
         .Set("shadowDistance", JsonValue(shadowDistance)).Set("farShadowDistance", JsonValue(farShadowDistance))
         .Set("shadowFadeWidth", JsonValue(shadowFadeWidth)).Set("shadowLod", JsonValue(shadowLod))
-        .Set("farObjects", JsonValue(farObjects));
+        .Set("farObjects", JsonValue(farObjects))
+        .Set("snapToGround", JsonValue(snapToGround)).Set("conformToGround", JsonValue(conformToGround))
+        .Set("detailLayer", JsonValue(detailLayer)).Set("components", components);
 }
 
 TerrainObjectLayer::Settings TerrainObjectLayer::Settings::Deserialize(const JsonValue& value)
@@ -81,6 +133,10 @@ TerrainObjectLayer::Settings TerrainObjectLayer::Settings::Deserialize(const Jso
     s.shadowFadeWidth = number("shadowFadeWidth", s.shadowFadeWidth);
     s.shadowLod = value.Has("shadowLod") ? value["shadowLod"].AsInt() : s.shadowLod;
     s.farObjects = !value.Has("farObjects") || value["farObjects"].AsBool();
+    s.snapToGround = value.Has("snapToGround") ? value["snapToGround"].AsInt() : -1;
+    s.conformToGround = value.Has("conformToGround") ? value["conformToGround"].AsInt() : -1;
+    s.detailLayer = value.Has("detailLayer") ? value["detailLayer"].AsString() : std::string{};
+    if (value["components"].IsArray()) s.components = value["components"];
     return s;
 }
 

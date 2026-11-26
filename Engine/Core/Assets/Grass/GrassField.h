@@ -6,6 +6,7 @@
 #include "Core/Components/Mesh/Mesh.h"
 #include "Core/Components/Mesh/MeshInstanceLayerData.h"
 #include "Core/Components/Terrain/TerrainObjectLayer.h"
+#include "Core/Components/Terrain/TerrainFoliage.h"
 #include "Grass/GrassPerformance.h"
 #include <chrono>
 #include <optional>
@@ -28,7 +29,8 @@ namespace Engine::Scene { class Scene; }
 
 // Deterministic tiles sharing species geometry. Only compact placement records
 // are prepared on the CPU; all blade vertex transforms run on the GPU.
-class GrassField final : public Engine::Core::Script, public Engine::Components::SpatialUpdate, public Engine::Components::ObjectLodProvider
+class GrassField final : public Engine::Core::Script, public Engine::Components::SpatialUpdate,
+    public Engine::Components::ObjectLodProvider, public Engine::Components::TerrainFoliageSource
 {
 public:
     GrassField();
@@ -161,6 +163,16 @@ public:
     // layer index) together hold at least half the weight. 0 grows anywhere.
     PROPERTY(Inspector, EditAnywhere, Category = "Grass | Tiles")
     int proceduralLayerMask = 0;
+    // Foliage layer (TerrainFoliage.h) whose painted density this field
+    // grows by: empty reads its own object layer's (a far ring names the
+    // meadow's, so painting the meadow paints both).
+    PROPERTY(Inspector, EditAnywhere, Category = "Grass | Tiles")
+    std::string foliageLayer;
+    // TerrainFoliageSource: the density before painting (the paint layers
+    // of proceduralLayerMask, on open ground facing up) and the layer read.
+    float FoliageBaseline(const Engine::Components::Terrain& cell, const glm::vec3& local,
+        const glm::vec3& normal) const override;
+    std::string FoliageLayerName() const override;
     PROPERTY(Inspector, EditAnywhere, Category = "Grass | Tiles")
     bool retainDormantTiles = false;
     // Legacy tile fade width (metres), used only when distanceFadeFraction is 0.
@@ -210,6 +222,9 @@ public:
     bool RefreshEditorPreview();
     const Engine::Grass::GrassPerformance& GetLastPerformance() const
     { return m_performance; }
+    // Tests and tools: the procedural placements of one tile (cell space),
+    // as a build makes them, without loading meshes.
+    std::vector<Engine::Components::TerrainObjectLayer::Placement> GenerateTileForTesting(int x, int z);
 
 private:
     using Tile = std::pair<int, int>;
@@ -342,12 +357,22 @@ private:
     void ReleaseGpuBlades();
     const void* m_bladeTerrain = nullptr;
     uint64_t m_bladeTerrainRevision = 0;
+    // The terrain manager's trail network signature (0 without trails):
+    // tiles and blades keep off the trails and rebuild when it changes.
+    uint64_t TrailSignature() const;
+    // This cell's painted foliage revision (TerrainManager::GetFoliageRevision).
+    uint64_t FoliageRevision() const;
     bool ResolveCachedReferences();
     bool EnsureAuthoredPreviewHidden();
     void ClearTiles();
     void SuspendTiles();
     void RefreshPlacementIndex();
     void BeginBuild(Tile tile, int lod, uint64_t signature);
+    // A tile's procedural placements: candidates per world column (so the
+    // same plants grow for any tile size), on every surface the terrain
+    // field has there (open ground, faces, ceilings), kept where the foliage
+    // density allows.
+    void GenerateTile(Tile tile, std::vector<Placement>& out);
     bool AdvanceBuild(Clock::time_point deadline);
     bool ActivateTileLod(TileState& tile, int lod);
     uint64_t ComputeGenerationSignature() const;

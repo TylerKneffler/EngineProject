@@ -70,9 +70,20 @@ public:
         float shadowDistance = 8.f, farShadowDistance = 0.f, shadowFadeWidth = 1.f;
         int shadowLod = -1;
         bool farObjects = true;
+        // Follow the ground (-1: leave the layer's own, 0 off, 1 on).
+        int snapToGround = -1, conformToGround = -1;
+        // Project detail-budget layer of the layer's object (empty: the one
+        // its components prefer, e.g. "Grass" for ground cover).
+        std::string detailLayer;
+        // Components the layer's object carries, each {"type", "value"} (its
+        // serialized fields), e.g. the GrassField that grows a ground-cover
+        // layer: added when missing and configured whenever this changes.
+        JsonValue components = JsonValue::MakeArray();
         static Settings From(const TerrainObjectLayer& layer);
         // Applies them (and marks the layer dirty) when they differ.
         void ApplyTo(TerrainObjectLayer& layer) const;
+        // Text of components, for comparisons.
+        std::string ComponentsKey() const;
         JsonValue Serialize() const;
         static Settings Deserialize(const JsonValue& value);
         bool operator==(const Settings& o) const
@@ -82,7 +93,9 @@ public:
                 screenLodSelection == o.screenLodSelection && screenLod1Pixels == o.screenLod1Pixels &&
                 screenLod2Pixels == o.screenLod2Pixels && shadowDistance == o.shadowDistance &&
                 farShadowDistance == o.farShadowDistance && shadowFadeWidth == o.shadowFadeWidth &&
-                shadowLod == o.shadowLod && farObjects == o.farObjects;
+                shadowLod == o.shadowLod && farObjects == o.farObjects &&
+                snapToGround == o.snapToGround && conformToGround == o.conformToGround &&
+                detailLayer == o.detailLayer && ComponentsKey() == o.ComponentsKey();
         }
     };
     std::string layerName = "Objects";
@@ -188,6 +201,8 @@ public:
     { return m_lastPrefabPrepareTimings; }
     bool DrawProperties(Engine::Core::IInspectorUi& ui) override;
 private:
+    // Settings::ApplyTo: each attached component type's value as last applied.
+    std::map<std::string, std::string> m_appliedComponents;
     struct PrefabInstances;
     std::shared_ptr<PrefabInstances> m_prefabInstances;
     uint64_t m_prefabCheckedRevision=UINT64_MAX;

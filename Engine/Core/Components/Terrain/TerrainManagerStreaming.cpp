@@ -97,6 +97,10 @@ void TerrainManager::UpdateEditorStreaming(const glm::dvec3& worldPosition,
     if (spanX <= 0.0 || spanZ <= 0.0) return;
     if (!m_editorStreaming) InvalidatePrepared();
     m_editorStreaming = true;
+    // Trail objects follow their moved points (a copy: a watcher may change
+    // the trails, never the watchers).
+    const auto watchers = m_trailWatchers;
+    for (const auto& [key, watcher] : watchers) watcher();
     // The editor draws and selects placements per cell.
     UpdateNearObjects();
     m_prefetchCenter.reset();
@@ -191,6 +195,7 @@ void TerrainManager::StreamCells(int centerX, int centerY, int initialRadius)
         phaseStart = now;
     };
     m_lastStreamingTiming = {};
+    UpdateTrailCarving();
     const auto* scene = Owner ? Owner->GetScene() : nullptr;
     const bool runtimeBudget = scene && scene->HasStarted();
     if (runtimeBudget && m_uploadBudgetFrame != scene->GetFrameIndex())

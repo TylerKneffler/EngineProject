@@ -14,7 +14,11 @@
 //    rules that limit where it acts (height and slope bands, paint layers
 //    the ground has or lacks);
 //  * placement: what a Place brush puts down (weighted assets), how densely,
-//    how far apart, and how it stands them.
+//    how far apart, and how it stands them;
+//  * foliage: the dense ground cover a Foliage brush paints (grass, ferns,
+//    undergrowth): which foliage layers, how much of each, and how. The
+//    plants themselves are generated where the density allows
+//    (TerrainFoliage.h); sparse, large plants (bushes) are placed instead.
 // Which paint layer a stroke paints and which object layer it places into
 // are the tool's choice (the editor's toolbar, a script's call), not the
 // brush's.
@@ -103,16 +107,37 @@ struct BrushPlacement
     bool Any() const { return !assets.empty(); }
 };
 
-enum class BrushTool { Any = 0, Sculpt, Paint, Place };
+// A foliage layer a Foliage brush paints (named like the cells' ground-cover
+// object layer, e.g. "Procedural meadow grass") and its amount: the density
+// Set paints toward, or the share of the stroke's strength for Add and Erase.
+struct BrushFoliageLayer
+{
+    std::string layer;
+    float amount = 1.f;
+};
+
+struct BrushFoliage
+{
+    enum class Mode { Add = 0, Erase, Set };
+    std::vector<BrushFoliageLayer> layers;
+    Mode mode = Mode::Add;
+    // Metres from the surface a dab reaches (any surface: open ground, a
+    // cliff face, a cave ceiling).
+    float shell = 1.5f;
+    bool Any() const { return !layers.empty(); }
+};
+
+enum class BrushTool { Any = 0, Sculpt, Paint, Place, Foliage };
 
 struct BrushTerrain
 {
     BrushTool tool = BrushTool::Any;
     BrushRules rules;
     BrushPlacement placement;
+    BrushFoliage foliage;
     bool Any() const
     {
-        return tool != BrushTool::Any || rules.Any() || placement.Any();
+        return tool != BrushTool::Any || rules.Any() || placement.Any() || foliage.Any();
     }
 };
 
@@ -136,7 +161,7 @@ struct BrushPreset
     BrushTerrain terrain;
 };
 // Version 1 holds the tip only; version 2 adds the optional <Relief>,
-// <Terrain> (with <Rules>) and <Placement> elements. Both load.
+// <Terrain> (with <Rules>, <Placement> and <Foliage>) elements. Both load.
 bool SaveBrushPreset(const std::filesystem::path& path,
     const BrushPreset& preset, std::string& error);
 bool LoadBrushPreset(const std::filesystem::path& path,

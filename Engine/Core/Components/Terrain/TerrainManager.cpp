@@ -89,7 +89,27 @@ bool TerrainManager::HasCell(int x, int y) const
 void TerrainManager::SetProceduralBuilder(std::function<void(Cell, Terrain&)> builder)
 {
     InvalidatePrepared();
-    m_proceduralBuilder = std::move(builder);
+    m_proceduralBuilder = {};
+    if (!builder) return;
+    // Every procedural cell (streamed, baked, an edit's baseline, the field
+    // and far objects' sources) is carved by the trails the same way. The
+    // carved network, not the live one, so a cell matches the cache
+    // signature it is saved under (ApplyTrailCarving).
+    m_proceduralBuilder = [builder = std::move(builder), state = m_trailState](Cell cell, Terrain& terrain)
+    {
+        builder(cell, terrain);
+        std::shared_ptr<const TerrainTrailNetwork> trails;
+        {
+            std::lock_guard lock(state->mutex);
+            trails = state->carved;
+        }
+        if (!trails || trails->Empty()) return;
+        const float originX = cell.first * terrain.cellsX * terrain.cellWidth;
+        const float originZ = cell.second * terrain.cellsY * terrain.cellDepth;
+        if (trails->Carve(originX, originZ, terrain.cellsX, terrain.cellsY, terrain.cellWidth,
+                terrain.cellDepth, terrain.weights, terrain.layers.size(), terrain.heights))
+            terrain.Rebuild();
+    };
 }
 
 void TerrainManager::SetObjectLayerGenerator(ObjectLayerGenerator generator)
@@ -100,6 +120,13 @@ void TerrainManager::SetObjectLayerGenerator(ObjectLayerGenerator generator)
 
 void TerrainManager::SetStaticCache(std::string directory, uint64_t signature)
 {
+    // The carved trails are part of what a cached cell holds.
+    m_baseCacheSignature = signature;
+    {
+        std::lock_guard lock(m_trailState->mutex);
+        if (m_trailState->carved && !m_trailState->carved->Empty())
+            signature ^= m_trailState->carved->Signature();
+    }
     if (m_cacheSignature != signature || m_cacheDirectory != directory)
     {
         InvalidatePrepared();

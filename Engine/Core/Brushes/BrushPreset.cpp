@@ -42,12 +42,16 @@ bool ValidTerrain(const BrushPreset& p)
     if (!finite(place.density) || place.density < 0.f || place.density > 100.f ||
         !finite(place.minSpacing) || place.minSpacing < 0.f || place.minSpacing > 1000.f ||
         !finite(place.sink) || std::abs(place.sink) > 100.f) return false;
+    const auto& foliage = p.terrain.foliage;
+    if (!finite(foliage.shell) || foliage.shell <= 0.f || foliage.shell > 50.f) return false;
+    for (const auto& layer : foliage.layers)
+        if (layer.layer.empty() || !finite(layer.amount) || layer.amount < 0.f || layer.amount > 1.f) return false;
     for (const auto& asset : place.assets)
         if (asset.asset.empty() || !finite(asset.weight) || asset.weight < 0.f ||
             !finite(asset.minScale) || !finite(asset.maxScale) || asset.minScale <= 0.f ||
             asset.maxScale < asset.minScale || !(asset.minHeight <= asset.maxHeight) ||
             !finite(asset.heightFade) || asset.heightFade < 0.f) return false;
-    return int(p.terrain.tool) >= 0 && int(p.terrain.tool) <= 3;
+    return int(p.terrain.tool) >= 0 && int(p.terrain.tool) <= int(BrushTool::Foliage);
 }
 
 // Layer materials, ';' separated (paths may hold spaces).
@@ -77,6 +81,7 @@ const char* ToolName(BrushTool tool)
     case BrushTool::Sculpt: return "sculpt";
     case BrushTool::Paint: return "paint";
     case BrushTool::Place: return "place";
+    case BrushTool::Foliage: return "foliage";
     default: return "any";
     }
 }
@@ -87,6 +92,7 @@ BrushTool ToolFromName(const std::string& name, bool& known)
     if (name == "sculpt") return BrushTool::Sculpt;
     if (name == "paint") return BrushTool::Paint;
     if (name == "place") return BrushTool::Place;
+    if (name == "foliage") return BrushTool::Foliage;
     known = name == "any" || name.empty();
     return BrushTool::Any;
 }
@@ -168,6 +174,19 @@ bool SaveBrushPreset(const std::filesystem::path& path,
                 if (asset.maxHeight < std::numeric_limits<float>::max())
                     item.append_attribute("maxHeight") = asset.maxHeight;
                 item.append_attribute("heightFade") = asset.heightFade;
+            }
+        }
+        if (t.foliage.Any())
+        {
+            auto foliage = terrain.append_child("Foliage");
+            static const char* modes[] = {"add", "erase", "set"};
+            foliage.append_attribute("mode") = modes[static_cast<int>(t.foliage.mode)];
+            foliage.append_attribute("shell") = t.foliage.shell;
+            for (const auto& layer : t.foliage.layers)
+            {
+                auto item = foliage.append_child("Layer");
+                item.append_attribute("name") = layer.layer.c_str();
+                item.append_attribute("amount") = layer.amount;
             }
         }
     }
@@ -280,6 +299,18 @@ bool LoadBrushPreset(const std::filesystem::path& path,
                     asset.heightFade = item.attribute("heightFade").as_float(asset.heightFade);
                     p.assets.push_back(std::move(asset));
                 }
+            }
+            if (const auto foliage = child.child("Foliage"))
+            {
+                auto& f = t.foliage;
+                const std::string mode = foliage.attribute("mode").as_string("add");
+                if (mode == "add") f.mode = BrushFoliage::Mode::Add;
+                else if (mode == "erase") f.mode = BrushFoliage::Mode::Erase;
+                else if (mode == "set") f.mode = BrushFoliage::Mode::Set;
+                else { error = "Unknown foliage brush mode."; return false; }
+                f.shell = foliage.attribute("shell").as_float(f.shell);
+                for (const auto item : foliage.children("Layer"))
+                    f.layers.push_back({item.attribute("name").as_string(), item.attribute("amount").as_float(1.f)});
             }
         }
         else if (child.type() == pugi::node_element)

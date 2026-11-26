@@ -15,9 +15,13 @@
 #include "Core/Brushes/BrushRules.h"
 #include "Core/Components/Terrain/TerrainPlacementBrush.h"
 #include "Core/Components/Terrain/TerrainObjectArchive.h"
+#include "Core/Components/Terrain/TerrainFoliage.h"
+#include "Core/Components/Terrain/TerrainFoliageBrush.h"
+#include "Grass/GrassField.h"
 #include "Editor/Core/View/Views/Scene/SceneTerrainTools.h"
 
 #include <chrono>
+#include <thread>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -898,18 +902,89 @@ void TestBrushEdgeTrailAndAltitudeRules()
     Require(Near(B::BrushRulesWeight(trail, 0.f, 0.f, nullptr, nullptr, 0, 5.f), .5f));
     Require(Near(B::BrushRulesWeight(trail, 0.f, 0.f, nullptr, nullptr, 0, 10.f), 1.f));
     Require(Near(B::BrushRulesWeight(trail, 0.f, 0.f), 1.f));   // no trails
-    // The manager's trail distance: 0 on the contour, growing off it.
+    // The manager's trails: distance and share off a published polyline,
+    // infinite and zero without one.
     Engine::Scene::Scene scene;
     auto* manager = scene.AddObject("Manager")->AddComponent<TerrainManager>();
-    Require(std::isinf(manager->ContourPathDistance(10.f, 10.f, 0.f)));
-    manager->contourPaths.enabled = true;
-    float nearest = 1e9f, farthest = 0.f;
-    for (int i = 0; i < 400; ++i)
+    Require(std::isinf(manager->TrailDistance(10.f, 10.f)));
+    Require(manager->TrailShare(10.f, 10.f) == 0.f);
+    Engine::Components::TerrainTrail path;
+    path.points = {{0.f, 50.f}, {600.f, 50.f}, {600.f, 300.f}};
+    manager->SetTrail(7u, path);
+    Require(Near(manager->TrailDistance(100.f, 50.f), 0.f));
+    Require(Near(manager->TrailDistance(100.f, 53.f), 3.f));
+    Require(Near(manager->TrailDistance(610.f, 200.f), 10.f));
+    Require(Near(manager->TrailShare(100.f, 51.f), .9f));          // inside core: full strength
+    Require(manager->TrailShare(100.f, 54.5f) == 0.f);              // past the edge
+    Require(std::isinf(manager->TrailDistance(100.f, 400.f)));      // beyond every bin's reach
+    // Carving: a flat cell under the trail sinks by depth on the centre line,
+    // only over crossable paint.
     {
-        const float d = manager->ContourPathDistance(i * 3.f, 50.f, 0.f);
-        nearest = std::min(nearest, d); farthest = std::max(farthest, d);
+        const auto network = manager->GetTrails();
+        std::vector<float> heights(9 * 9, 0.f), weights(9 * 9 * 2, 0.f);
+        for (size_t i = 0; i < heights.size(); ++i) weights[i * 2 + 1] = 1.f;  // all layer 1
+        Require(network->Carve(96.f, 34.f, 8, 8, 4.f, 4.f, weights, 2, heights));
+        Require(Near(heights[4 * 9 + 2], -.12f));                  // (104, 50): on the line
+        Require(heights[0] == 0.f);                                  // (96, 34): 16 m off
+        std::vector<float> rock(9 * 9, 0.f), rockWeights(9 * 9 * 2, 0.f);
+        for (size_t i = 0; i < rock.size(); ++i) rockWeights[i * 2] = 1.f;  // all layer 0
+        path.crossableLayers = 1u << 1;
+        manager->SetTrail(7u, path);
+        Require(!manager->GetTrails()->Carve(96.f, 34.f, 8, 8, 4.f, 4.f, rockWeights, 2, rock));
     }
-    Require(nearest < 3.f && farthest > 10.f);
+    // The GPU layout lists the segments near a bin and packs their shape.
+    {
+        const auto layout = manager->GetTrails()->PackGpu(nullptr, 0);
+        Require(layout.width == 2048 && layout.height >= 1 && layout.keys.w == 2048);
+        Require(layout.keys.z > layout.keys.y);
+        const float* segment = &layout.texels[size_t(layout.keys.z) * 4];
+        Require(segment[0] == 0.f && segment[1] == 50.f && segment[2] == 600.f && segment[3] == 50.f);
+        Require(segment[7] == float(1 * 64 + 2));                   // layer 1, crossable layer 1
+    }
+    manager->RemoveTrail(7u);
+    Require(std::isinf(manager->TrailDistance(100.f, 50.f)));
+    // Procedural cells carve the trails as they build: at once when the trail
+    // comes first, and by reloading the cell once a later change settles.
+    {
+        Engine::Scene::Scene carveScene;
+        auto* carving = carveScene.AddObject("Carving")->AddComponent<TerrainManager>();
+        carving->cellsX = carving->cellsY = 32;
+        carving->cellWidth = carving->cellDepth = 1.f;
+        carving->loadedRadius = carving->farRadius = 0;
+        carving->generateColliders = false;
+        carving->SetProceduralBuilder([](TerrainManager::Cell, Terrain& terrain) {
+            terrain.layers.assign(1, Terrain::Layer{});
+            terrain.weights.assign(terrain.heights.size(), 1.f);
+            std::fill(terrain.heights.begin(), terrain.heights.end(), 2.f);
+            terrain.Rebuild();
+        });
+        Require(carving->AddProceduralCell(0, 0));
+        Engine::Components::TerrainTrail across;
+        across.points = {{-10.f, 16.f}, {50.f, 16.f}};
+        carving->SetTrail(1u, across);
+        carving->SyncLoadedCells(0, 0);
+        auto* cell = carving->GetLoadedCell(0, 0);
+        Require(cell && Near(cell->heights[16 * 33 + 16], 2.f - .12f));
+        Require(cell && cell->heights[0] == 2.f);
+        carving->RemoveTrail(1u);
+        carving->SyncLoadedCells(0, 0);   // not settled yet: still carved
+        cell = carving->GetLoadedCell(0, 0);
+        Require(cell && Near(cell->heights[16 * 33 + 16], 2.f - .12f));
+        std::this_thread::sleep_for(std::chrono::milliseconds(450));
+        carving->SyncLoadedCells(0, 0);
+        cell = carving->GetLoadedCell(0, 0);
+        Require(cell && cell->heights[16 * 33 + 16] == 2.f);
+    }
+    // Editor frames call the trail watchers (scripts get no Update there).
+    {
+        int calls = 0;
+        manager->SetTrailWatcher(3u, [&calls] { ++calls; });
+        manager->UpdateEditorStreaming(glm::dvec3(0.0), nullptr, 720, 1.f);
+        Require(calls == 1);
+        manager->RemoveTrailWatcher(3u);
+        manager->UpdateEditorStreaming(glm::dvec3(0.0), nullptr, 720, 1.f);
+        Require(calls == 1);
+    }
     // Species by altitude: an asset's weight fades past its height band.
     B::BrushPlacementAsset spruce{"Assets/spruce.prefab", 2.f, 1.f, 1.f};
     spruce.minHeight = 300.f; spruce.heightFade = 50.f;
@@ -1490,6 +1565,175 @@ void TestVolumeSculpt()
     std::filesystem::remove_all(folder, error);
 }
 
+// Foliage density (TerrainFoliage.h) and the ground cover grown from it
+// (GrassField): the same plants for any tile size, painting changes only
+// where it reaches, it is saved and restored, and it holds on any surface.
+void TestFoliage()
+{
+    using Engine::Components::TerrainFoliageCell;
+    using Engine::Components::TerrainFoliageStroke;
+    using Engine::Components::TerrainVolumeEdit;
+    const auto folder = std::filesystem::temp_directory_path() / "engine_foliage_test";
+    std::error_code error;
+    std::filesystem::remove_all(folder, error);
+    std::filesystem::create_directories(folder, error);
+    Engine::Scene::Scene scene;
+    auto* manager = MakeHillManager(scene);
+    manager->cellDataDirectory = folder.string();
+    auto* cell = manager->GetLoadedCell(0, 0);
+    Require(cell != nullptr);
+    if (!cell) return;
+    auto* layerObject = scene.AddObject("Meadow");
+    scene.MoveObject(layerObject, cell->Owner, Engine::Scene::Scene::ObjectPlacement::AsChild);
+    auto* layer = layerObject->AddComponent<TerrainObjectLayer>();
+    layer->layerName = "Meadow";
+    auto* grass = new GrassField();
+    grass->shortMesh = "Assets/a.obj";
+    grass->tallMesh = "Assets/b.obj";
+    grass->shortPatchesPerSquareMeter = 2.f;
+    grass->tallPatchesPerSquareMeter = .5f;
+    grass->proceduralLayerMask = 0;
+    grass->seed = 5;
+    grass->allowProceduralGeneration = true;
+    layerObject->AddComponent(grass);
+    Require(grass->FoliageLayerName() == "Meadow");
+    using Plants = std::map<uint64_t, std::pair<glm::vec3, glm::vec3>>;
+    const auto collect = [&](float tile) {
+        grass->tileSize = tile;
+        Plants plants;
+        const int tiles = static_cast<int>(32.f / tile);
+        for (int z = 0; z < tiles; ++z)
+            for (int x = 0; x < tiles; ++x)
+                for (const auto& p : grass->GenerateTileForTesting(x, z))
+                {
+                    Require(!plants.count(p.id));
+                    plants[p.id] = {p.position, p.normal};
+                }
+        return plants;
+    };
+    const auto same = [](const Plants& a, const Plants& b) {
+        if (a.size() != b.size()) return false;
+        for (const auto& [id, plant] : a)
+        {
+            const auto found = b.find(id);
+            if (found == b.end() || glm::distance(found->second.first, plant.first) > 1e-4f) return false;
+        }
+        return true;
+    };
+    const Plants open = collect(4.f);
+    // About 2.5 per square metre over the cell's 32 x 32 m (less its edges).
+    Require(open.size() > 2000 && open.size() < 2800);
+    Require(same(open, collect(16.f)));   // tile size does not move a plant
+    Require(same(open, collect(4.f)));    // nor does running again
+
+    // Erasing a ball of 5 m around (16, 16): none left near its centre, and
+    // every plant past its reach is the same plant as before.
+    float height = 0.f;
+    Require(Engine::Components::SampleTerrainSurface(cell->heights, 32, 32, 1.f, 1.f, 16.f, 16.f, height));
+    TerrainFoliageStroke erase;
+    erase.mode = TerrainFoliageStroke::Mode::Erase;
+    erase.centre = {16.f, height, 16.f};
+    erase.radius = 5.f;
+    erase.strength = 1.f;
+    erase.falloff = 0.f;
+    const uint64_t revision = manager->GetFoliageRevision({0, 0});
+    Require(manager->PaintFoliage("Meadow", erase));
+    Require(manager->GetFoliageRevision({0, 0}) != revision);
+    Require(!manager->GetFoliage({0, 0})->Empty());
+    const Plants erased = collect(4.f);
+    const auto within = [](const Plants& plants, float low, float high) {
+        Plants result;
+        for (const auto& [id, plant] : plants)
+        {
+            const float d = std::hypot(plant.first.x - 16.f, plant.first.z - 16.f);
+            if (d >= low && d < high) result[id] = plant;
+        }
+        return result;
+    };
+    Require(!within(open, 0.f, 3.f).empty() && within(erased, 0.f, 3.f).empty());
+    Require(same(within(open, 7.f, 100.f), within(erased, 7.f, 100.f)));
+
+    // Saved with the manager, and a snapshot brings it back (undo).
+    const auto snapshot = manager->Serialize();
+    const auto file = folder / "0_0.foliage";
+    Require(std::filesystem::exists(file, error));
+    TerrainFoliageCell loaded;
+    Require(TerrainFoliageCell::Load(file.string(), loaded));
+    Require(loaded.Signature() == manager->GetFoliage({0, 0})->Signature());
+    manager->SetFoliage({0, 0}, nullptr);
+    Require(same(open, collect(4.f)));
+    manager->Serialize();                      // the file goes with the paint
+    Require(!std::filesystem::exists(file, error));
+    {
+        Engine::Scene::Scene undoScene;
+        auto* undo = undoScene.AddObject("Manager")->AddComponent<TerrainManager>();
+        undo->cellDataDirectory = folder.string();
+        undo->Deserialize(snapshot);
+        undo->cellDataDirectory = folder.string();
+        Require(undo->GetFoliage({0, 0})->Signature() == loaded.Signature());
+        undo->Serialize();                     // and its file comes back
+        Require(std::filesystem::exists(file, error));
+    }
+
+    // Any orientation: a slab of rock over the ground at (24, 8). Its
+    // underside grows nothing until density is painted there; then plants
+    // hang from it, facing down.
+    float ground = 0.f;
+    Require(Engine::Components::SampleTerrainSurface(cell->heights, 32, 32, 1.f, 1.f, 24.f, 8.f, ground));
+    TerrainVolumeEdit slab;
+    slab.shape = TerrainVolumeEdit::Shape::Box;
+    slab.subtract = false;
+    slab.a = {24.f, ground + 4.f, 8.f};
+    slab.b = {3.5f, .6f, 3.5f};
+    slab.radius = .2f;
+    slab.blend = .3f;
+    Require(manager->AddVolumeEdit(slab, true));
+    const auto facingDown = [](const Plants& plants) {
+        size_t count = 0;
+        for (const auto& [id, plant] : plants) count += plant.second.y < -.5f ? 1 : 0;
+        return count;
+    };
+    Require(facingDown(collect(4.f)) == 0);
+    TerrainFoliageStroke ceiling;
+    ceiling.mode = TerrainFoliageStroke::Mode::Add;
+    ceiling.centre = {24.f, ground + 3.4f, 8.f};
+    ceiling.radius = 3.f;
+    ceiling.strength = 1.f;
+    ceiling.falloff = 0.f;
+    Require(manager->PaintFoliage("Meadow", ceiling));
+    const Plants hanging = collect(4.f);
+    Require(facingDown(hanging) > 5);
+    Require(same(hanging, collect(16.f)));   // in 3D too, tile size does not matter
+
+    // A Foliage brush (its section saved and read back) paints the same way.
+    Engine::Brushes::BrushPreset brush;
+    brush.terrain.tool = Engine::Brushes::BrushTool::Foliage;
+    brush.terrain.foliage.mode = Engine::Brushes::BrushFoliage::Mode::Erase;
+    brush.terrain.foliage.layers = {{"Meadow", 1.f}};
+    const auto brushPath = folder / "Clear.brush";
+    std::string brushError;
+    Require(Engine::Brushes::SaveBrushPreset(brushPath, brush, brushError));
+    Engine::Brushes::BrushPreset read;
+    Require(Engine::Brushes::LoadBrushPreset(brushPath, read, brushError));
+    Require(read.terrain.tool == Engine::Brushes::BrushTool::Foliage && read.terrain.foliage.layers.size() == 1 &&
+        read.terrain.foliage.layers[0].layer == "Meadow" &&
+        read.terrain.foliage.mode == Engine::Brushes::BrushFoliage::Mode::Erase);
+    Engine::Components::TerrainFoliageDab dab;
+    float corner = 0.f;
+    Require(Engine::Components::SampleTerrainSurface(cell->heights, 32, 32, 1.f, 1.f, 6.f, 26.f, corner));
+    dab.centre = {6.f, corner, 26.f};
+    dab.radius = 4.f;   // a ball: plants up the slope are farther in 3D
+    dab.strength = 1.f;
+    dab.hardness = 1.f;
+    Require(Engine::Components::ApplyFoliageBrush(*manager, read, dab));
+    const Plants brushed = collect(4.f);
+    size_t nearCount = 0;
+    for (const auto& [id, plant] : brushed)
+        nearCount += std::hypot(plant.first.x - 6.f, plant.first.z - 26.f) < 2.f ? 1 : 0;
+    Require(nearCount == 0);
+    std::filesystem::remove_all(folder, error);
+}
+
 int main()
 {
     try
@@ -1515,6 +1759,7 @@ int main()
         TestRegionErosionSeam();
         TestRegionPaint();
         TestVolumeSculpt();
+        TestFoliage();
         TestArchiveV3();
                 TestEditRoundTrip();
         TestMacroColorPatches();

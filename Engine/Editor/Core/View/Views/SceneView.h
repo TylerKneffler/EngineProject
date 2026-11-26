@@ -220,6 +220,10 @@ private:
         return m_terrainBrushLoaded && m_terrainBrushPreset.terrain.rules.Any()
             ? &m_terrainBrushPreset.terrain.rules : nullptr;
     }
+    // A Foliage brush (a foliage section): the Paint tool paints foliage
+    // density (TerrainFoliage.h) instead of a paint layer.
+    bool TerrainBrushFoliage() const
+    { return m_terrainBrushLoaded && m_terrainBrushPreset.terrain.foliage.Any(); }
     bool TerrainBrushPlaces() const
     { return m_terrainBrushLoaded && m_terrainBrushPreset.terrain.placement.Any(); }
     // A dab's pen pressure (radius and strength factors, from the brush's

@@ -460,8 +460,8 @@ def find_field_walk():
 # --- trail walks -------------------------------------------------------------
 #
 # Routes a player would take: along the trails (the 0.5 contour of
-# trail_field, shaded per pixel by TerrainManager::ContourPaths), at eye
-# height. Saved as SplinePath objects; GameBackendCapture --route <name>
+# trail_field, which tools/landscape_trails.py traced into the scene's trail
+# objects; edited trails no longer follow it), at eye height. Saved as SplinePath objects; GameBackendCapture --route <name>
 # walks the game camera along one.
 
 ROUTE_LENGTH = 400.0

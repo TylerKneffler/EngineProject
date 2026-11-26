@@ -2403,14 +2403,27 @@ if(NOT ENGINE_PROJECT_DIR AND
     enable_testing()
     add_executable(TerrainEditingToolsTests EXCLUDE_FROM_ALL
         "${ENGINE_LOCAL_TEST_ROOT}/TerrainEditingToolsTests.cpp"
-        "${ENGINE_ROOT}/Engine/Editor/Core/View/Views/Scene/SceneTerrainTools.cpp")
+        "${ENGINE_ROOT}/Engine/Editor/Core/View/Views/Scene/SceneTerrainTools.cpp"
+        # Ground cover generation (foliage density, repeatable placement).
+        "${ENGINE_ROOT}/Engine/Core/Assets/Grass/GrassField.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Grass/GrassBlades.cpp"
+        "${ENGINE_ROOT}/Engine/Core/Assets/Grass/GrassStats.cpp")
     target_link_libraries(TerrainEditingToolsTests PRIVATE Engine ImGui)
     target_include_directories(TerrainEditingToolsTests PRIVATE
-        "${ENGINE_ROOT}" "${ENGINE_ROOT}/Engine")
+        "${ENGINE_ROOT}" "${ENGINE_ROOT}/Engine" "${ENGINE_ROOT}/Engine/Core/Assets")
     target_compile_definitions(TerrainEditingToolsTests PRIVATE NOMINMAX)
     add_test(NAME TerrainEditingTools COMMAND TerrainEditingToolsTests)
     set_tests_properties(TerrainEditingTools PROPERTIES
         WORKING_DIRECTORY "${ENGINE_ROOT}" TIMEOUT 120)
+endif()
+
+# Bakes the landscape's bushes into its object archive (a tool, not a test).
+if(NOT ENGINE_PROJECT_DIR AND
+   EXISTS "${ENGINE_LOCAL_TEST_ROOT}/LandscapeBushBake.cpp")
+    add_executable(LandscapeBushBake EXCLUDE_FROM_ALL "${ENGINE_LOCAL_TEST_ROOT}/LandscapeBushBake.cpp")
+    target_link_libraries(LandscapeBushBake PRIVATE Engine)
+    target_include_directories(LandscapeBushBake PRIVATE "${ENGINE_ROOT}" "${ENGINE_ROOT}/Engine")
+    target_compile_definitions(LandscapeBushBake PRIVATE NOMINMAX)
 endif()
 
 # Stamps the stamp test block's walls with the terrain brushes (a tool, not a test).

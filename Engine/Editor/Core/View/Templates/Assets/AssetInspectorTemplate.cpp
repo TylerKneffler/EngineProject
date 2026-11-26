@@ -340,13 +340,14 @@ void AssetInspectorTemplate::Draw(IEditorUi& ui, Engine::Scene::Scene* scene)
         if (ui.CollapsingHeader("Terrain", preset.relief.Present() || preset.terrain.Any()))
         {
             auto& terrain = preset.terrain;
-            const char* tools[]{ "Any tool", "Sculpt", "Paint", "Place" };
+            const char* tools[]{ "Any tool", "Sculpt", "Paint", "Place", "Foliage" };
             int tool = int(terrain.tool);
-            if (ui.Combo("Tool", &tool, tools, 4))
+            if (ui.Combo("Tool", &tool, tools, 5))
             { terrain.tool = Engine::Brushes::BrushTool(tool); changed = true; }
             if (ui.IsItemHovered())
                 ui.Tooltip("Choosing the brush in the terrain toolbar switches to this tool:\n"
-                    "Paint, Place (the Objects tool), or Sculpt (Stamp when it has a relief).\n"
+                    "Paint, Place (the Objects tool), Foliage (the Paint tool painting foliage),\n"
+                    "or Sculpt (Stamp when it has a relief).\n"
                     "The layer it paints or places into is chosen in the toolbar.");
             // Relief: the heights Raise, Lower and Stamp build up.
             char relief[512]{};
@@ -479,6 +480,43 @@ void AssetInspectorTemplate::Draw(IEditorUi& ui, Engine::Scene::Scene* scene)
                         changed = true;
                     }
                     ui.EndDragDropTarget();
+                }
+            }
+            // Foliage: where dense ground cover grows (TerrainFoliage.h).
+            if (ui.PropertyGroupHeader("Foliage", terrain.foliage.Any()))
+            {
+                auto& foliage = terrain.foliage;
+                const char* modes[]{ "Add", "Erase", "Set" };
+                int mode = int(foliage.mode);
+                if (ui.Combo("Mode", &mode, modes, 3))
+                { foliage.mode = Engine::Brushes::BrushFoliage::Mode(mode); changed = true; }
+                if (ui.IsItemHovered())
+                    ui.Tooltip("Add grows each layer by its amount's share of the stroke, Erase thins it,\n"
+                        "Set paints toward the amount. Shift always erases.");
+                changed = ui.DragFloat("Surface shell (m)", &foliage.shell, .05f, .1f, 50.f) || changed;
+                if (ui.IsItemHovered())
+                    ui.Tooltip("How far from the surface a dab reaches (ground, cliff faces, ceilings alike).");
+                for (size_t i = 0; i < foliage.layers.size(); ++i)
+                {
+                    auto& layer = foliage.layers[i];
+                    ui.PushId(&layer);
+                    ui.Separator();
+                    char name[256]{};
+                    std::copy_n(layer.layer.data(), std::min(layer.layer.size(), sizeof(name) - 1), name);
+                    if (ui.InputText("Foliage layer", name, sizeof(name)) && name[0])
+                    { layer.layer = name; changed = true; }
+                    if (ui.IsItemHovered())
+                        ui.Tooltip("The ground-cover object layer it grows, e.g. \"Procedural meadow grass\".");
+                    changed = ui.SliderFloat("Amount", &layer.amount, 0.f, 1.f) || changed;
+                    const bool remove = ui.Button("Remove layer");
+                    ui.PopId();
+                    if (remove) { foliage.layers.erase(foliage.layers.begin() + std::ptrdiff_t(i)); changed = true; break; }
+                }
+                if (ui.Button("Add foliage layer"))
+                {
+                    foliage.layers.push_back({ "Procedural meadow grass", 1.f });
+                    if (terrain.tool == Engine::Brushes::BrushTool::Any) terrain.tool = Engine::Brushes::BrushTool::Foliage;
+                    changed = true;
                 }
             }
         }

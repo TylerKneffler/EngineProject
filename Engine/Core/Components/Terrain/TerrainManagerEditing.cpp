@@ -87,6 +87,9 @@ void TerrainManager::RestoreObjectLayers(Cell cell,
                 if (layer->placements.size() != before) layer->MarkConfigurationDirty();
             }
         }
+        // The layer name's saved settings first: they may add components
+        // (a ground-cover layer's GrassField) that prefer a project layer.
+        ApplyObjectLayerSettings(*layer);
         // Project layer for budgets and filtering: the first component that
         // prefers one (e.g. ground cover in "Grass"), otherwise "Props". The
         // setup hook (scene content such as grass presets, see
@@ -363,8 +366,8 @@ bool TerrainManager::ApplyBrush(double x, double z, float radius, float strength
             {
                 const float originX = float(cell.first * double(cellsX) * cellWidth);
                 const float originZ = float(cell.second * double(cellsY) * cellDepth);
-                cellOptions.trailDistance = [this, originX, originZ](float x, float z, float height) {
-                    return ContourPathDistance(originX + x, originZ + z, height);
+                cellOptions.trailDistance = [trails = GetTrails(), originX, originZ](float x, float z, float) {
+                    return trails->Distance(originX + x, originZ + z);
                 };
             }
             if (backingCells)
@@ -548,6 +551,7 @@ void TerrainManager::RecordEditedCells(const std::set<Cell>& changedCells)
 
 void TerrainManager::SyncLoadedCells(int centerX, int centerY)
 {
+    UpdateTrailCarving();
     if (manageAuthoredCellColliders)
     { StreamPrefabCells(centerX, centerY); RefreshAuthoredCollisionCells(); RefreshColliderActivation(centerX, centerY); return; }
     if (proceduralOakMeadow && asyncStreaming)

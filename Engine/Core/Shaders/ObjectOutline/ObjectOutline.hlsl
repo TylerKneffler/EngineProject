@@ -64,11 +64,10 @@ struct ObjectData
     float4 groundCoverColor;
     float4 groundCoverRange;
     float4 placementThin; // start, end, minimum share kept (instanced ground cover)
-    float4 terrainPathNoise; // terrain contour paths (Object.hlsl)
-    uint4 terrainPathKeys;
-    float4 terrainPathShape;
-    float4 terrainPathBand;
-    float4 terrainPathFar;
+    float4 terrainTrailGrid; // terrain trails (Object.hlsl)
+    uint4 terrainTrailKeys;
+    float4 terrainTrailOffset;
+    float4 terrainTrailReserved[2];
     float4 viewTextureParams;
     float4 shadowAtlasTiles;
     float4 shadowRefreshBlend[2];
