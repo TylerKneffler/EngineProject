@@ -24,6 +24,7 @@ void ImGuiMainMenu::Draw(EditorState& state, PlayState playState,
     GameBuildManager* buildManager) const
 {
     PollAssetGenerators(state);
+    if (m_terrainGenerator) m_terrainGenerator->Draw(state);
     if (!ImGui::BeginMainMenuBar()) return;
     DrawFileMenu(state, playState, buildManager);
     if (ImGui::BeginMenu("Import"))
@@ -77,6 +78,14 @@ void ImGuiMainMenu::Draw(EditorState& state, PlayState playState,
 void ImGuiMainMenu::DrawToolsMenu(EditorState& state) const
 {
     if (!ImGui::BeginMenu("Tools")) return;
+    if (ImGui::MenuItem("Terrain generator..."))
+    {
+        if (!m_terrainGenerator) m_terrainGenerator = std::make_unique<TerrainGeneratorWindow>();
+        m_terrainGenerator->Open(state);
+    }
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Regenerate the open terrain's map-scale base heights (size, relief, seed, erosion)");
+    ImGui::Separator();
     if (!m_generators) m_generators = std::make_unique<AssetGeneratorRunner>();
     auto* console = state.GetConsole();
     const auto start = [&](const AssetGeneratorRunner::Generator& generator)

@@ -55,6 +55,16 @@ struct RetiredMeshes
     std::deque<std::unique_ptr<Engine::Components::Mesh>> meshes;
 };
 std::map<const void*, RetiredMeshes> g_retiredMeshes;
+// The frame volumes step by: the scene clock while playing; in edit mode
+// that clock stands still (every update read the same frame, so no level
+// step was ever shown and the upload budget never renewed), so the editor
+// advances a count of its own (VolumeTerrain::AdvanceEditorFrame).
+std::atomic<uint64_t> g_editorFrame{0};
+uint64_t FrameOf(const Engine::Scene::Scene& scene)
+{
+    return scene.HasStarted() ? scene.GetFrameIndex() : (uint64_t(1) << 63) | g_editorFrame.load();
+}
+
 void ReleaseRetiredMeshes(const void* scene, uint64_t frame)
 {
     auto& retired = g_retiredMeshes[scene];
@@ -746,6 +756,8 @@ void VolumeTerrain::InstallBuilt(Built& built, Engine::Graphics::IGraphicsProvid
             ms, vertexCount, indexCount, onWorker ? 1 : 0);
 }
 
+void VolumeTerrain::AdvanceEditorFrame() { ++g_editorFrame; }
+
 void VolumeTerrain::Update()
 {
     using UpdateClock = std::chrono::steady_clock;
@@ -794,11 +806,20 @@ void VolumeTerrain::Update()
         if (auto* camera = scene->FindGameCamera(); camera && camera->Owner)
             eyeWorld = camera->Owner->transform.GetWorldPositionD();
     const glm::vec3 eye = glm::vec3(glm::inverse(Owner->transform.GetWorldMatrixD()) * glm::dvec4(eyeWorld, 1.0));
-    const float delta = std::clamp(scene->GetDeltaTime(), 0.f, .1f);
+    // Edit mode has no game clock (its delta is 0, so fades never ended):
+    // the time since this volume's last update instead.
+    float delta = std::clamp(scene->GetDeltaTime(), 0.f, .1f);
+    if (!scene->HasStarted())
+    {
+        const auto now = UpdateClock::now();
+        delta = m_editorTick.time_since_epoch().count() == 0 ? 0.f
+            : std::clamp(std::chrono::duration<float>(now - m_editorTick).count(), 0.f, .1f);
+        m_editorTick = now;
+    }
 
     auto& steps = g_steps[scene];
-    Advance(steps, scene->GetFrameIndex(), eyeWorld, lodStepMetres);
-    ReleaseRetiredMeshes(scene, scene->GetFrameIndex());
+    Advance(steps, FrameOf(*scene), eyeWorld, lodStepMetres);
+    ReleaseRetiredMeshes(scene, FrameOf(*scene));
     const auto self = steps.members.find({group ? group : Owner, cellX, cellZ});
     const bool member = self != steps.members.end() && self->second == this;
 
@@ -832,8 +853,8 @@ void VolumeTerrain::Update()
     if (auto* provider = scene->GetGraphicsProvider())
     {
         auto& budget = g_installBudgets[scene];
-        if (budget.frame != scene->GetFrameIndex())
-            budget = {scene->GetFrameIndex(), 0.0, 0};
+        if (budget.frame != FrameOf(*scene))
+            budget = {FrameOf(*scene), 0.0, 0};
         std::vector<std::pair<float, size_t>> arrived;
         for (size_t i = 0; i < m_chunks.size(); ++i)
             if (m_chunks[i].ready && !m_chunks[i].ready->installed && m_chunks[i].ready->mesh)

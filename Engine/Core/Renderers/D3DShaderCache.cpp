@@ -11,6 +11,8 @@
 #include <fstream>
 #include <sstream>
 #include <thread>
+#include <set>
+#include <mutex>
 #include <vector>
 
 namespace Engine::Renderers
@@ -40,6 +42,42 @@ const fs::path& CacheDirectory()
         return error ? fs::path() : temp / "EngineShaderCache";
     }();
     return directory;
+}
+
+// requests.txt: one request per line, tab separated (flags as hex, target,
+// entry point, working directory, path), each listed once.
+std::string RequestLine(const std::string& directory, const std::string& filePath,
+    const char* entryPoint, const char* target, UINT flags)
+{
+    char hex[16];
+    std::snprintf(hex, sizeof(hex), "%x", flags);
+    return std::string(hex) + '\t' + (target ? target : "") + '\t' + (entryPoint ? entryPoint : "") +
+        '\t' + directory + '\t' + filePath;
+}
+
+std::atomic<bool> g_recordRequests{true};
+
+void RecordRequest(const std::string& filePath, const char* entryPoint, const char* target, UINT flags)
+{
+    if (!g_recordRequests) return;
+    static std::mutex mutex;
+    static std::set<std::string> listed;
+    static bool loaded = false;
+    std::error_code error;
+    const std::string directory = fs::current_path(error).string();
+    const std::string line = RequestLine(directory, filePath, entryPoint, target, flags);
+    std::lock_guard lock(mutex);
+    const fs::path manifest = CacheDirectory() / "requests.txt";
+    if (!loaded)
+    {
+        loaded = true;
+        std::ifstream in(manifest);
+        for (std::string existing; std::getline(in, existing);)
+            if (!existing.empty()) listed.insert(existing);
+    }
+    if (!listed.insert(line).second) return;
+    fs::create_directories(CacheDirectory(), error);
+    std::ofstream(manifest, std::ios::app) << line << '\n';
 }
 
 // Two independent 64-bit FNV-1a streams form a 128-bit key.
@@ -139,6 +177,8 @@ Microsoft::WRL::ComPtr<ID3DBlob> D3DShaderCache::CompileFromFile(
     UINT flags, std::string& error)
 {
     error.clear();
+    if (CacheEnabled() && !CacheDirectory().empty())
+        RecordRequest(filePath, entryPoint, target, flags);
     const std::wstring widePath = Wide(filePath);
     if (widePath.empty())
     {
@@ -202,4 +242,35 @@ Microsoft::WRL::ComPtr<ID3DBlob> D3DShaderCache::CompileFromFile(
         Store(cached, bytecode.Get());
     return bytecode;
 }
+
+void D3DShaderCache::SetRecordRequests(bool record) { g_recordRequests = record; }
+
+std::vector<D3DShaderCache::Request> D3DShaderCache::RecordedRequests()
+{
+    std::vector<Request> requests;
+    std::set<std::string> seen;
+    std::ifstream in(CacheDirectory() / "requests.txt");
+    for (std::string line; std::getline(in, line);)
+    {
+        std::vector<std::string> fields;
+        size_t start = 0;
+        for (size_t tab; (tab = line.find('\t', start)) != std::string::npos; start = tab + 1)
+            fields.push_back(line.substr(start, tab - start));
+        fields.push_back(line.substr(start));
+        if (fields.size() != 5) continue;
+        Request request;
+        request.flags = static_cast<UINT>(std::strtoul(fields[0].c_str(), nullptr, 16));
+        request.target = fields[1];
+        request.entryPoint = fields[2];
+        request.directory = fields[3];
+        request.filePath = fields[4];
+        // One per file, entry point, target and flags (the first working
+        // directory listed: the same folder can be listed in other case).
+        if (!seen.insert(fields[0] + '\t' + fields[1] + '\t' + fields[2] + '\t' + fields[4]).second) continue;
+        requests.push_back(std::move(request));
+    }
+    return requests;
+}
+
+std::string D3DShaderCache::CacheDirectoryPath() { return CacheDirectory().string(); }
 }

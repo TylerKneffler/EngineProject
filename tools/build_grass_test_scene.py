@@ -7,7 +7,7 @@ The scene holds one standalone terrain made of a block of 128 m landscape
 cells (7 x 7 by default, --block; 896 x 896 m) whose heights are read from the
 landscape height archive (world.heights), painted with the landscape's meadow
 layer, with a procedural meadow GrassField configured like the one
-LandscapeDriver attaches to the demo's grass layer, the far grass ring, and a
+the demo's grass layer carries (its TerrainManager layer settings), the far grass ring, and a
 tree belt round the outside. Lighting, atmosphere and
 the flying explorer are copied from landscape_demo.scene so the look matches.
 It loads in seconds, so grass changes (range fade, ground tint, LODs) can be
@@ -47,7 +47,7 @@ OUTPUT = ASSETS / "Scenes" / "terrain" / "grass_test.scene"
 NAMESPACE = "urn:engine-components"
 ARCHIVE_MAGIC = 0x31544748524E5254
 
-# Keep in sync with LandscapeDriver.cpp (layer order and materials).
+# Keep in sync with landscape_demo.scene's TerrainManager terrainLayers.
 LAYERS = [
     ("Assets/Materials/Terrain/PBR/sand.material", (.62, .55, .42)),
     ("Assets/Materials/Terrain/PBR/gravel.material", (.45, .43, .40)),

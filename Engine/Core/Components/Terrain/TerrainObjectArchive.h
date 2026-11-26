@@ -66,6 +66,8 @@ public:
     // placements), as TerrainObjectLayer::Serialize writes them.
     bool ReadCellLayers(Cell cell, JsonValue& layers) const;
     const JsonValue* Template(const std::string& layerName) const;
+    // Every layer's template, in file order (to write an archive like it).
+    const std::vector<std::pair<std::string, JsonValue>>& Templates() const { return m_templates; }
     // Changes whenever the file does (size and write time).
     uint64_t Signature() const { return m_signature; }
 

@@ -116,6 +116,9 @@ public:
     void SetHasUnsavedChanges(bool dirty) { m_hasUnsavedChanges = dirty; }
 
     void SaveScene();
+    // Saves the main scene itself, whatever document has focus (tools that
+    // rewrite its data on disk, e.g. the terrain generator). False if not saved.
+    bool SaveMainSceneNow() { return SaveMainScene(); }
     void SaveAll();
     uint32_t GetEditorMaxFps() const { return m_projectSettings.editorMaxFps; }
     void LoadScene(const std::string& path);

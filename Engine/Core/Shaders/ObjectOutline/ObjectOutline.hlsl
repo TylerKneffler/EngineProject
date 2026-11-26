@@ -67,7 +67,8 @@ struct ObjectData
     float4 terrainTrailGrid; // terrain trails (Object.hlsl)
     uint4 terrainTrailKeys;
     float4 terrainTrailOffset;
-    float4 terrainTrailReserved[2];
+    float4 terrainSteep;
+    float4 terrainTrailReserved;
     float4 viewTextureParams;
     float4 shadowAtlasTiles;
     float4 shadowRefreshBlend[2];

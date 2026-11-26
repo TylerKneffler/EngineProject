@@ -63,6 +63,7 @@ void TerrainManager::FenceBackgroundWork()
 {
     FenceFarObjectJobs();
     if (m_macroJob.valid()) m_macroJob.wait();
+    if (m_archiveFarJob.valid()) m_archiveFarJob.wait();
     FenceFarVolumeJobs();
     {
         std::lock_guard<std::mutex> lock(m_prepareMutex);
@@ -87,6 +88,13 @@ bool TerrainManager::HasCell(int x, int y) const
 }
 
 void TerrainManager::SetProceduralBuilder(std::function<void(Cell, Terrain&)> builder)
+{
+    m_archiveBuilder = false;
+    m_archiveKey = 0;
+    InstallBuilder(std::move(builder));
+}
+
+void TerrainManager::InstallBuilder(std::function<void(Cell, Terrain&)> builder)
 {
     InvalidatePrepared();
     m_proceduralBuilder = {};

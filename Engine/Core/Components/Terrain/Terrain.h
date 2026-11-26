@@ -122,8 +122,8 @@ public:
     std::vector<Layer> layers;
     std::vector<float> weights; // one weight per vertex and layer
     // Optional, one per vertex: how lush (darker, greener) the ground grows
-    // there (LandscapeDriver: wet valley floors under grass and forest, the
-    // same erosion tint the macro color map carries for distant ground).
+    // there (the paint archive: wet valley floors under grass and forest, the
+    // same tint the macro color map carries for distant ground).
     // Vertex uvChannels1.w; Object.hlsl tints the terrain by it. Kept in the
     // static cell cache; not serialized with the scene.
     std::vector<float> lushness;

@@ -8,6 +8,7 @@
 #include "Core/Components/Terrain/TerrainManager.h"
 #include "Core/Components/Terrain/TerrainBatchAppearance.h"
 #include "Core/Components/Terrain/TerrainLayerArrays.h"
+#include "Core/Components/Terrain/VolumeTerrain.h"
 #include "Core/Components/Camera/Camera.h"
 #include "Core/Components/Materials/Texture.h"
 #include "Core/Rendering/Lighting/EnvironmentMap.h"
@@ -478,6 +479,22 @@ void SceneRendererDrawPreparation::PrepareTerrainMaterial(
             draw.textureSlotCount = std::max(draw.textureSlotCount, 16u);
             objectData.materialParams.w += 524288.f;
         }
+    // A volume chunk of a cell takes the cell's paint map too: its vertex
+    // weights are sampled at the chunk's spacing, which coarsens with its
+    // level, so materials followed the mesh LOD. Per pixel they do not.
+    // Its UV is the cell's 0..1 (VolumeTerrain ApplyPaintWeights); the
+    // steep layer, baked into the vertex weights, is blended in per pixel.
+    if (!terrain && batch && !batch->distantVisual && textured && object->Parent)
+        if (auto* cell = object->Parent->GetComponent<Engine::Components::Terrain>())
+            if (const auto* paint = cell->GetPaintTexture(renderer.m_graphicsProvider))
+            {
+                draw.textures[15] = paint;
+                draw.textureSlotCount = std::max(draw.textureSlotCount, 16u);
+                objectData.materialParams.w += 524288.f;
+                if (const auto* volume = object->Parent->GetComponent<Engine::Components::VolumeTerrain>())
+                    objectData.terrainSteep = glm::vec4(volume->steepStart, volume->steepEnd,
+                        static_cast<float>(std::clamp(volume->steepLayer, 0, 5)), 1.f);
+            }
     auto* terrainManager = reliefManager;
     if (!includeEditorVisuals && !forceUnlitMode && terrainManager &&
         terrainManager->fastRuntimeLighting)
@@ -490,7 +507,10 @@ void SceneRendererDrawPreparation::PrepareTerrainMaterial(
                 terrainManager->cellsY * terrainManager->cellDepth);
     }
     objectData.textureUvSets1.z = terrain ? terrain->textureTiling : batch->textureTiling;
-    if (terrainManager && !includeEditorVisuals)
+    // Layer textures map world X/Z, in the editor too: volume chunks (all
+    // terrain since the volume-first conversion) carry no per-cell UV, so
+    // the editor's view showed each layer as one flat texel.
+    if (terrainManager)
         objectData.textureUvSets1.x = std::max(
             terrainManager->cellsX * terrainManager->cellWidth,
             terrainManager->cellsY * terrainManager->cellDepth);

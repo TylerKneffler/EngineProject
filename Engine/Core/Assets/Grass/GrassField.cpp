@@ -110,8 +110,7 @@ GrassField::GrassField()
     RegisterField("viewerObjectName", viewerObjectName, "Viewer");
     RegisterField("useEditorCamera", useEditorCamera, "Viewer");
     RegisterField("visibleRadius", visibleRadius, "Viewer");
-    // Set by scene scripts (LandscapeDriver); serialized so test scenes can
-    // match the landscape's fields.
+    // Serialized so test scenes can match the landscape's fields.
     RegisterField("minimumRadiusScale", minimumRadiusScale, "Viewer");
     RegisterField("perPlantDetail", perPlantDetail, "LOD");
     RegisterField("fineReachFraction", fineReachFraction, "LOD");
@@ -1768,46 +1767,16 @@ void GrassField::SyncGpuBlades()
         if (samplesX == samplesZ && terrain.heights.size() == size_t(samplesX * samplesZ) &&
             terrain.weights.size() == terrain.heights.size() * layerCount)
         {
-            std::vector<float> paint(terrain.heights.size(), 1.f);
+            // Grass at the vertices: the paint layers, and none on volume
+            // faces (crater walls, overhangs), where blades cannot stand.
+            std::vector<float> vertexPaint(terrain.heights.size(), 1.f);
             if (proceduralLayerMask != 0 && layerCount)
-                for (size_t sample = 0; sample < paint.size(); ++sample)
+                for (size_t sample = 0; sample < vertexPaint.size(); ++sample)
                 {
                     float weight = 0.f;
                     for (size_t layer = 0; layer < layerCount && layer < 31; ++layer)
                         if (proceduralLayerMask & (1 << layer)) weight += terrain.weights[sample * layerCount + layer];
-                    paint[sample] = weight;
-                }
-            // Painted foliage density (3D) over that baseline, on the top
-            // surface the blades stand on.
-            if (const auto* manager = terrain.Owner->GetComponentInParent<Engine::Components::TerrainManager>())
-                if (const auto cell = manager->CellOf(terrain))
-                    if (const auto foliage = manager->GetFoliage(*cell);
-                        const auto* painted = foliage->Find(FoliageLayerName()))
-                        for (size_t sample = 0; sample < paint.size(); ++sample)
-                        {
-                            const glm::vec3 local(float(sample % size_t(samplesX)) * terrain.cellWidth,
-                                terrain.heights[sample], float(sample / size_t(samplesX)) * terrain.cellDepth);
-                            const float baseline = paint[sample];
-                            paint[sample] = Engine::Components::TerrainFoliageCell::Sample(painted, local,
-                                [baseline](const glm::vec3&) { return baseline; });
-                        }
-            const glm::vec3 origin(terrain.Owner->transform.GetWorldMatrix()[3]);
-            // Trails are not in the paint (see grows above): the blades thin
-            // out along them as they did on the painted path.
-            if (const auto* manager = terrain.Owner->GetComponentInParent<Engine::Components::TerrainManager>())
-                if (const auto paths = manager->GetTrails(); !paths->Empty())
-                {
-                    // The cell's corner in the manager's space (trails are in it).
-                    const glm::vec3 corner = manager->Owner
-                        ? glm::vec3(glm::inverse(manager->Owner->transform.GetWorldMatrix()) *
-                            terrain.Owner->transform.GetWorldMatrix()[3])
-                        : origin;
-                    for (size_t sample = 0; sample < paint.size(); ++sample)
-                    {
-                        const float x = corner.x + float(sample % size_t(samplesX)) * terrain.cellWidth;
-                        const float z = corner.z + float(sample / size_t(samplesX)) * terrain.cellDepth;
-                        paint[sample] *= 1.f - std::min(1.f, paths->Share(x, z) / .9f);
-                    }
+                    vertexPaint[sample] = weight;
                 }
             std::vector<float> heights = terrain.heights;
             if (m_field)
@@ -1818,11 +1787,57 @@ void GrassField::SyncGpuBlades()
                     const float x = float(sample % size_t(samplesX)) * terrain.cellWidth;
                     const float z = float(sample / size_t(samplesX)) * terrain.cellDepth;
                     const auto surface = m_field->SurfaceAt(m_fieldOriginX + x, m_fieldOriginZ + z);
-                    if (!surface) { paint[sample] = 0.f; continue; }
+                    if (!surface) { vertexPaint[sample] = 0.f; continue; }
                     heights[sample] = surface->height;
-                    if (surface->normal.y < .7f) paint[sample] = 0.f;
+                    if (surface->normal.y < .7f) vertexPaint[sample] = 0.f;
                 }
-            blades->SetCell(this, origin, samplesX, terrain.cellWidth, std::move(heights), std::move(paint));
+            // The blades get a grid of their own, 1 m apart: trails (about
+            // 3 m wide) and painted foliage are far narrower than the 4 m
+            // vertex grid, and sampled there blades grew over the paths.
+            constexpr float PaintSpacing = 1.f;
+            const float spanX = terrain.cellsX * terrain.cellWidth;
+            const int paintSamples = static_cast<int>(std::lround(spanX / PaintSpacing)) + 1;
+            std::vector<float> paint(static_cast<size_t>(paintSamples) * paintSamples, 1.f);
+            const auto* manager = terrain.Owner->GetComponentInParent<Engine::Components::TerrainManager>();
+            const auto cell = manager ? manager->CellOf(terrain) : std::nullopt;
+            const auto foliage = cell ? manager->GetFoliage(*cell) : nullptr;
+            const auto* painted = foliage ? foliage->Find(FoliageLayerName()) : nullptr;
+            auto paths = manager ? manager->GetTrails() : nullptr;
+            if (paths && paths->Empty()) paths = nullptr;
+            const glm::vec3 origin(terrain.Owner->transform.GetWorldMatrix()[3]);
+            // The cell corner in the manager space (trails are in it).
+            const glm::vec3 corner = manager && manager->Owner
+                ? glm::vec3(glm::inverse(manager->Owner->transform.GetWorldMatrix()) *
+                    terrain.Owner->transform.GetWorldMatrix()[3])
+                : origin;
+            const auto bilinear = [&](const std::vector<float>& grid, float x, float z) {
+                const float gx = std::clamp(x / terrain.cellWidth, 0.f, float(terrain.cellsX) - 1e-3f);
+                const float gz = std::clamp(z / terrain.cellDepth, 0.f, float(terrain.cellsY) - 1e-3f);
+                const int col = static_cast<int>(gx), row = static_cast<int>(gz);
+                const float tx = gx - col, tz = gz - row;
+                const auto at = [&](int c, int r) { return grid[static_cast<size_t>(r) * samplesX + c]; };
+                return (at(col, row) * (1.f - tx) + at(col + 1, row) * tx) * (1.f - tz) +
+                    (at(col, row + 1) * (1.f - tx) + at(col + 1, row + 1) * tx) * tz;
+            };
+            for (int row = 0; row < paintSamples; ++row)
+                for (int col = 0; col < paintSamples; ++col)
+                {
+                    const float x = col * PaintSpacing, z = row * PaintSpacing;
+                    float value = bilinear(vertexPaint, x, z);
+                    // Painted foliage density (3D) over that baseline, on the
+                    // top surface the blades stand on.
+                    if (painted)
+                    {
+                        const float baseline = value;
+                        value = Engine::Components::TerrainFoliageCell::Sample(painted,
+                            {x, bilinear(heights, x, z), z}, [baseline](const glm::vec3&) { return baseline; });
+                    }
+                    // Trails are not in the paint: the blades keep off them.
+                    if (paths) value *= 1.f - std::min(1.f, paths->Share(corner.x + x, corner.z + z) / .9f);
+                    paint[static_cast<size_t>(row) * paintSamples + col] = value;
+                }
+            blades->SetCell(this, origin, samplesX, terrain.cellWidth, std::move(heights),
+                paintSamples, PaintSpacing, std::move(paint));
             m_bladeTerrain = &terrain;
             m_bladeTerrainRevision = revision;
         }

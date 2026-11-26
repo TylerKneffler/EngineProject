@@ -115,8 +115,16 @@ void TerrainManager::UpdateEditorStreaming(const glm::dvec3& worldPosition,
         return;
     }
     StreamCells(centerX, centerY);
+    UpdateArchiveMap(nullptr);
     if (m_farEnabled) UpdateFarTerrain(centerX, centerY, camera,
         viewportHeight, aspect);
+    // Edit mode runs no component Update, so the cells' volumes never chose
+    // finer levels as the scene view's camera came near: they choose here,
+    // from the editor camera (VolumeTerrain::Update reads it when the scene
+    // is not playing).
+    VolumeTerrain::AdvanceEditorFrame();
+    for (auto* volume : Owner->GetComponentsInChildren<VolumeTerrain>(false))
+        if (volume && volume->Owner && volume->Owner->IsEnabledInHierarchy()) volume->Update();
 }
 
 bool TerrainManager::TryGetHeightAtWorldPosition(
@@ -461,6 +469,7 @@ void TerrainManager::Update()
     if (manageAuthoredCellColliders)
         UpdateColliderStreamingAtPosition(viewer->transform.GetWorldPositionD());
     else UpdateStreamingAtPosition(viewer->transform.GetWorldPositionD());
+    UpdateArchiveMap(viewer);
 }
 
 void TerrainManager::Start()

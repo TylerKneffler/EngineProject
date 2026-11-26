@@ -215,6 +215,9 @@ public:
     // layer) and every edge must be shared by two triangles; prints counts and
     // the first places that fail.
     static void CheckLayer(const std::vector<VolumeTerrain*>& volumes);
+    // Edit mode: the scene clock stands still, so the editor starts each
+    // frame of volume updates with this (TerrainManager::UpdateEditorStreaming).
+    static void AdvanceEditorFrame();
 private:
     uint64_t m_preparedStep = 0;
     std::shared_ptr<const TerrainVolume> m_volume;
@@ -230,5 +233,7 @@ private:
     std::chrono::steady_clock::time_point m_buildStarted{};
     std::vector<Chunk> m_chunks;
     Stats m_stats;
+    // Edit mode: when Update last ran (fades take wall time there).
+    std::chrono::steady_clock::time_point m_editorTick{};
 };
 }

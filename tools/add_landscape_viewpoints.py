@@ -27,14 +27,16 @@ and two walking routes along the trails, the way a player would go
   MeadowTrailWalk  400 m of the open-meadow trail nearest the start, walked
                    with the sun behind
 
-and MeadowWalkCamera, the camera the game starts on: it walks MeadowTrailWalk
-at 1.4 m/s, there and back (SplineFollower). Captures switch it off and use
-the explorer (GameApplication).
+The game starts on the flying Landscape Explorer. (A walk camera that
+followed MeadowTrailWalk, insert_walk_camera, is no longer added: the user
+wants the explorer's flight control.)
 
-Forests are placed at runtime by LandscapeDriver from ForestMask (value noise
-over world metres); ForestMask/ForestBand below replicate it exactly, and
-ground heights come from the landscape height archive. Editor: Viewpoints
-menu. Captures: GameBackendCapture --viewpoint ForestEdge.
+Where the forest is comes from the saved forest (the "Landscape forest"
+layer of world.objects: crowns from Prefabs/Woodland/tree_crowns.json), and
+trails are the scene's trail objects (the Trails group: SplinePath control
+points), so viewpoints follow the map as edited. Ground heights come from the
+landscape height archive. Editor: Viewpoints menu. Captures:
+GameBackendCapture --viewpoint ForestEdge.
 
 Re-running replaces the viewpoints. build_landscape_demo.py calls this after
 writing the scene.
@@ -42,9 +44,14 @@ writing the scene.
 Usage: python tools/add_landscape_viewpoints.py
 """
 
+import json
 import math
+import struct
 import xml.etree.ElementTree as ET
+import zlib
 from pathlib import Path
+
+import numpy as np
 
 import build_grass_test_scene as grass
 import scene_static
@@ -65,60 +72,215 @@ SUN_FLAT = (-math.sin(SUN_YAW) * math.cos(SUN_PITCH), -math.cos(SUN_YAW) * math.
 NAMES = ("ForestEdge", "ForestFloor", "Backlit", "Trail", "Cliffs", "MeadowSlope", "Escarpment", "ForestWall", "FieldWalk")
 
 
-# --- LandscapeDriver.cpp ForestMask / ForestBand, bit for bit ---------------
-
-def _hash(x, z, seed):
-    m = 0xFFFFFFFF
-    h = ((x & m) * 0x9E3779B1 & m) ^ ((z & m) * 0x85EBCA77 & m) ^ (seed * 0xC2B2AE3D & m)
-    h ^= h >> 15
-    h = h * 0x2C1B3C6D & m
-    h ^= h >> 12
-    h = h * 0x297A2D39 & m
-    h ^= h >> 15
-    return h
-
-
-def value_noise(x, z, period, seed):
-    x, z = x / period, z / period
-    fx, fz = math.floor(x), math.floor(z)
-    ix, iz = int(fx), int(fz)
-    tx, tz = x - fx, z - fz
-    tx, tz = tx * tx * (3 - 2 * tx), tz * tz * (3 - 2 * tz)
-    corner = lambda dx, dz: (_hash(ix + dx, iz + dz, seed) & 0xFFFFFF) / float(0xFFFFFF)
-    return ((corner(0, 0) * (1 - tx) + corner(1, 0) * tx) * (1 - tz) +
-            (corner(0, 1) * (1 - tx) + corner(1, 1) * tx) * tz)
-
-
 def smoothstep(a, b, x):
     t = min(max((x - a) / (b - a), 0.0), 1.0)
     return t * t * (3 - 2 * t)
 
 
-def forest_mask(x, z, height=None):
-    """height: ground metres at x, z (read from the archive when omitted)."""
-    if height is None:
-        height = ground(x, z)
-    n = (0.6 * value_noise(x, z, 260.0, 11) + 0.28 * value_noise(x, z, 95.0, 23) +
-         0.12 * value_noise(x, z, 37.0, 37) +
-         0.06 * smoothstep(WATER + 30.0, WATER + 80.0, height))
-    return smoothstep(0.46, 0.58, n)
-
-
 def forest_band(height):
+    """Heights forests grow at: off shores and below the tree line."""
     return smoothstep(WATER + 4, WATER + 9, height) * (1 - smoothstep(TREE_LINE - 8 * BLEND, TREE_LINE, height))
 
 
-def trail_field(x, z):
-    return 0.7 * value_noise(x, z, 520.0, 71) + 0.3 * value_noise(x, z, 170.0, 73)
+# --- the saved forest (world.objects) ----------------------------------------
+
+OBJECTS = grass.ASSETS / "TerrainData" / "Landscape" / "world.objects"
+CROWNS = grass.ASSETS / "Prefabs" / "Woodland" / "tree_crowns.json"
+FOREST_LAYER = "Landscape forest"
+COVER_STEP = 2.0      # crown cover grid, metres
+COVER_REACH = 8.0     # cover is the crowned share within this radius
+# Open meadow: under a quarter crowned (the saved forest has lone meadow
+# trees, which the old noise mask never saw).
+OPEN_COVER = 0.25
+_archive = None
+_trees = {}
+_cover = {}
+
+
+def _archive_index():
+    """(header, layer names, asset paths, cell entries) of world.objects
+    (TerrainObjectArchive.h, TRNROBJA v2)."""
+    global _archive
+    if _archive is None:
+        data = OBJECTS.read_bytes()
+        magic, version, extent, cells_x, cells_y, width, depth, layers = struct.unpack_from("<QIiiiffI", data, 0)
+        if version != 2:
+            raise SystemExit(f"unexpected object archive version {version}")
+        at = struct.calcsize("<QIiiiffI")
+        names = []
+        for _ in range(layers):
+            (n,) = struct.unpack_from("<I", data, at); at += 4
+            names.append(data[at:at + n].decode()); at += n
+            (n,) = struct.unpack_from("<I", data, at); at += 4 + n
+        (count,) = struct.unpack_from("<I", data, at); at += 4
+        assets = []
+        for _ in range(count):
+            (n,) = struct.unpack_from("<I", data, at); at += 4
+            assets.append(data[at:at + n].decode()); at += n
+        side = 2 * extent + 1
+        entries = [struct.unpack_from("<QII", data, at + i * 16) for i in range(side * side)]
+        crowns = json.loads(CROWNS.read_text(encoding="utf-8"))["crowns"] if CROWNS.exists() else {}
+        radius = []
+        for asset in assets:
+            key = next((k for k in crowns if asset.endswith(k + ".prefab")), None)
+            radius.append(crowns[key]["radius"] if key else 3.0)
+        _archive = (data, extent, cells_x * width, cells_y * depth, names, np.array(radius), entries)
+    return _archive
+
+
+def forest_trees(cx, cz):
+    """The forest layer's trees in a cell: world x, z and crown radius."""
+    if (cx, cz) not in _trees:
+        data, extent, span_x, span_z, names, radius, entries = _archive_index()
+        trees = np.zeros((0, 3))
+        if abs(cx) <= extent and abs(cz) <= extent:
+            offset, stored, raw = entries[(cz + extent) * (2 * extent + 1) + cx + extent]
+            if stored:
+                block = zlib.decompress(data[offset:offset + stored])
+                (count,) = struct.unpack_from("<H", block, 0)
+                at = 2
+                for _ in range(count):
+                    index, n = struct.unpack_from("<HI", block, at)
+                    at += 6
+                    if names[index] == FOREST_LAYER:
+                        asset = np.frombuffer(block, "<u2", n, at)
+                        x = np.cumsum(np.frombuffer(block, "<u2", n, at + 2 * n).astype(np.int64)) % 65536
+                        z = np.frombuffer(block, "<u2", n, at + 4 * n)
+                        scale = np.frombuffer(block, "u1", n, at + 11 * n) / 40.0
+                        trees = np.stack([cx * span_x + x / 65535.0 * span_x, cz * span_z + z / 65535.0 * span_z,
+                                          radius[asset] * scale], axis=1)
+                    at += n * 12   # columns: asset, x, z, y (u16 each), nx, nz, yaw, scale (u8)
+        _trees[(cx, cz)] = trees
+    return _trees[(cx, cz)]
+
+
+def _cell_cover(cx, cz):
+    """The crowned share within COVER_REACH of each 2 m sample of a cell."""
+    if (cx, cz) not in _cover:
+        margin = int(COVER_REACH / COVER_STEP)
+        n = int(CELL / COVER_STEP) + 1 + 2 * margin
+        x0, z0 = cx * CELL - margin * COVER_STEP, cz * CELL - margin * COVER_STEP
+        crowned = np.zeros((n, n), bool)
+        xs = x0 + np.arange(n) * COVER_STEP
+        for dz in (-1, 0, 1):
+            for dx in (-1, 0, 1):
+                for tx, tz, r in forest_trees(cx + dx, cz + dz):
+                    i0, i1 = np.searchsorted(xs, [tx - r, tx + r])
+                    j0, j1 = np.searchsorted(xs - x0 + z0, [tz - r, tz + r])
+                    if i0 >= i1 or j0 >= j1:
+                        continue
+                    gx, gz = np.meshgrid(xs[i0:i1], z0 + np.arange(j0, j1) * COVER_STEP)
+                    crowned[j0:j1, i0:i1] |= (gx - tx) ** 2 + (gz - tz) ** 2 <= r * r
+        # Mean over a square of COVER_REACH around each sample (summed area).
+        k = margin
+        total = np.pad(crowned.astype(np.float64), ((1, 0), (1, 0))).cumsum(0).cumsum(1)
+        size = 2 * k + 1
+        box = (total[size:, size:] - total[:-size, size:] - total[size:, :-size] + total[:-size, :-size]) / size ** 2
+        _cover[(cx, cz)] = box
+    return _cover[(cx, cz)]
+
+
+def forest_mask(x, z, height=None):
+    """Forest cover 0..1 at a point: the crowned share around it."""
+    cx, cz = math.floor(x / CELL), math.floor(z / CELL)
+    cover = _cell_cover(cx, cz)
+    fx, fz = (x - cx * CELL) / COVER_STEP, (z - cz * CELL) / COVER_STEP
+    ix, iz = min(int(fx), cover.shape[1] - 2), min(int(fz), cover.shape[0] - 2)
+    tx, tz = fx - ix, fz - iz
+    return float((cover[iz, ix] * (1 - tx) + cover[iz, ix + 1] * tx) * (1 - tz) +
+                 (cover[iz + 1, ix] * (1 - tx) + cover[iz + 1, ix + 1] * tx) * tz)
+
+
+# --- the scene's trails (Trails group) ---------------------------------------
+
+TRAIL_STEP = 1.0      # metres between samples of a trail
+_trails = None
+
+
+def _catmull_rom(points, closed):
+    """The spline through the control points (uniform Catmull-Rom, as
+    SplinePath), sampled every TRAIL_STEP metres."""
+    p = np.array(points, float)
+    if closed:
+        ext = np.vstack([p[-1:], p, p[:2]])
+    else:
+        ext = np.vstack([p[:1], p, p[-1:]])
+    dense = []
+    for i in range(len(ext) - 3):
+        p0, p1, p2, p3 = ext[i:i + 4]
+        t = np.linspace(0.0, 1.0, 9, endpoint=False)[:, None]
+        dense.append(0.5 * ((2 * p1) + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t ** 2 +
+                            (-p0 + 3 * p1 - 3 * p2 + p3) * t ** 3))
+    dense.append(ext[-2][None, :])
+    dense = np.vstack(dense)
+    length = np.concatenate([[0.0], np.cumsum(np.hypot(*np.diff(dense, axis=0).T))])
+    at = np.arange(0.0, length[-1], TRAIL_STEP)
+    return np.stack([np.interp(at, length, dense[:, 0]), np.interp(at, length, dense[:, 1])], axis=1)
+
+
+def trails():
+    """[(samples (n x 2), closed)] and a grid of (trail, sample) by 8 m square."""
+    global _trails
+    if _trails is None:
+        root = ET.parse(SCENE).getroot()
+        lines = []
+        for item in root.find("objects").findall("item"):
+            if item.get("name") != "Trails":
+                continue
+            for trail in item.find("children").findall("item"):
+                spline = trail.find("components").find(f"{{{NAMESPACE}}}SplinePath")
+                if spline is None or trail.get("enabled") == "false":
+                    continue
+                points = []
+                for point in trail.find("children").findall("item"):
+                    x, _, z = map(float, point.find("transform").find("Transform.position").text.split())
+                    points.append((x, z))
+                if len(points) >= 2:
+                    lines.append((_catmull_rom(points, spline.get("SplinePath.closed") == "true"),
+                                  spline.get("SplinePath.closed") == "true"))
+        grid = {}
+        for t, (samples, _) in enumerate(lines):
+            for i, (x, z) in enumerate(samples):
+                grid.setdefault((math.floor(x / 8.0), math.floor(z / 8.0)), []).append((t, i))
+        if not lines:
+            raise SystemExit(f"{SCENE.name} has no trail objects (a Trails group)")
+        _trails = (lines, grid)
+    return _trails
+
+
+def nearest_trail(x, z, reach=12.0):
+    """(distance, trail, sample) of the nearest trail sample within reach."""
+    lines, grid = trails()
+    best = None
+    r = int(math.ceil(reach / 8.0))
+    gx, gz = math.floor(x / 8.0), math.floor(z / 8.0)
+    for i in range(gx - r, gx + r + 1):
+        for j in range(gz - r, gz + r + 1):
+            for t, k in grid.get((i, j), ()):
+                px, pz = lines[t][0][k]
+                d = math.hypot(px - x, pz - z)
+                if d <= reach and (best is None or d < best[0]):
+                    best = (d, t, k)
+    return best
+
+
+def trail_tangent(t, k):
+    samples, closed = trails()[0][t]
+    n = len(samples)
+    a = samples[(k - 1) % n if closed else max(k - 1, 0)]
+    b = samples[(k + 1) % n if closed else min(k + 1, n - 1)]
+    d = math.hypot(*(b - a))
+    return ((b[0] - a[0]) / d, (b[1] - a[1]) / d) if d > 1e-9 else (1.0, 0.0)
 
 
 def trail_mask(x, z):
-    """LandscapeDriver.cpp TrailMask: 1 on a track, 0 away from it."""
-    e = 4.0
-    gx = (trail_field(x + e, z) - trail_field(x - e, z)) / (2 * e)
-    gz = (trail_field(x, z + e) - trail_field(x, z - e)) / (2 * e)
-    distance = abs(trail_field(x, z) - 0.5) / max(math.hypot(gx, gz), 0.0006)
-    return 1.0 - smoothstep(1.6, 4.2, distance), (gx, gz)
+    """1 on a track, 0 away from it (its 1.6 m core, 4.2 m edge), and the
+    track's direction there."""
+    hit = nearest_trail(x, z, reach=6.0)
+    if hit is None:
+        return 0.0, (1.0, 0.0)
+    d, t, k = hit
+    return 1.0 - smoothstep(1.6, 4.2, d), trail_tangent(t, k)
 
 
 # --- ground heights ----------------------------------------------------------
@@ -202,13 +364,9 @@ def find_interior():
 def find_trail():
     """A point on a trail inside forest, and the trail's direction there."""
     for x, z in candidates(radius=700.0, step=4.0):
-        mask, (gx, gz) = trail_mask(x, z)
+        mask, along = trail_mask(x, z)
         if mask < 0.98 or wooded(x, z) < 0.9 or not flat(x, z):
             continue
-        length = math.hypot(gx, gz)
-        if length < 1e-6:
-            continue
-        along = (-gz / length, gx / length)
         # The track should carry on ahead through forest.
         if all(trail_mask(x + along[0] * d, z + along[1] * d)[0] > 0.3 and
                wooded(x + along[0] * d, z + along[1] * d) > 0.5 for d in (10, 20)):
@@ -459,9 +617,8 @@ def find_field_walk():
 
 # --- trail walks -------------------------------------------------------------
 #
-# Routes a player would take: along the trails (the 0.5 contour of
-# trail_field, which tools/landscape_trails.py traced into the scene's trail
-# objects; edited trails no longer follow it), at eye height. Saved as SplinePath objects; GameBackendCapture --route <name>
+# Routes a player would take: along the scene's trail objects, at eye
+# height. Saved as SplinePath objects; GameBackendCapture --route <name>
 # walks the game camera along one.
 
 ROUTE_LENGTH = 400.0
@@ -469,42 +626,35 @@ ROUTE_SPACING = 6.0
 ROUTES = ("ForestTrailWalk", "MeadowTrailWalk")
 
 
-def trail_gradient(x, z, e=1.0):
-    return ((trail_field(x + e, z) - trail_field(x - e, z)) / (2 * e),
-            (trail_field(x, z + e) - trail_field(x, z - e)) / (2 * e))
-
-
 def onto_trail(x, z):
-    """The nearest point on the track's centre line (Newton steps onto the
-    contour), or None where the field is flat."""
-    for _ in range(6):
-        gx, gz = trail_gradient(x, z)
-        g2 = gx * gx + gz * gz
-        if g2 < 1e-12:
-            return None
-        f = trail_field(x, z) - 0.5
-        x, z = x - f * gx / g2, z - f * gz / g2
-    return x, z
+    """The nearest point on a trail's centre line: (x, z, trail, sample), or
+    None away from every trail."""
+    hit = nearest_trail(x, z)
+    if hit is None:
+        return None
+    _, t, k = hit
+    px, pz = trails()[0][t][0][k]
+    return float(px), float(pz), t, k
 
 
-def trail_heading(x, z, sign):
-    """Unit direction along the track; sign picks which way."""
-    gx, gz = trail_gradient(x, z)
-    n = math.hypot(gx, gz)
-    return -gz / n * sign, gx / n * sign
+def trail_heading(spot, sign):
+    """Unit direction along the track at a spot; sign picks which way."""
+    tx, tz = trail_tangent(spot[2], spot[3])
+    return tx * sign, tz * sign
 
 
-def follow_trail(x, z, sign, length=ROUTE_LENGTH, step=2.0):
-    """Points every `step` metres along the track's centre line."""
-    points, walked = [(x, z)], 0.0
-    while walked < length:
-        hx, hz = trail_heading(x, z, sign)
-        point = onto_trail(x + hx * step, z + hz * step)
-        if point is None:
+def follow_trail(spot, sign, length=ROUTE_LENGTH, step=2.0):
+    """Points every `step` metres along the trail from a spot (to its end)."""
+    samples, closed = trails()[0][spot[2]]
+    k, stride = spot[3], max(1, int(round(step / TRAIL_STEP)))
+    points = [(float(samples[k][0]), float(samples[k][1]))]
+    while (len(points) - 1) * step < length:
+        k += stride * sign
+        if closed:
+            k %= len(samples)
+        elif not 0 <= k < len(samples):
             break
-        x, z = point
-        points.append(point)
-        walked += step
+        points.append((float(samples[k][0]), float(samples[k][1])))
     return points
 
 
@@ -534,9 +684,11 @@ def find_forest_trail_walk(trail, along):
     """From the Trail viewpoint on along the track: forest, the forest edge,
     meadow, and forest again (2026-11-23)."""
     start = onto_trail(*trail)
-    hx, hz = trail_heading(*start, 1)
+    if start is None:
+        raise SystemExit("the Trail viewpoint is not on a trail")
+    hx, hz = trail_heading(start, 1)
     sign = 1 if hx * along[0] + hz * along[1] > 0 else -1
-    points = follow_trail(*start, sign)
+    points = follow_trail(start, sign)
     if not walkable(points):
         raise SystemExit("the forest trail from the Trail viewpoint is not walkable")
     cover = sum(wooded(x, z) > 0.5 for x, z in points) / len(points)
@@ -560,7 +712,9 @@ def find_meadow_trail_walk():
         tried.append(start)
         for sign in (1, -1):
             try:
-                points = follow_trail(*start, sign)
+                points = follow_trail(start, sign)
+                if len(points) < 20:
+                    continue
                 if not walkable(points):
                     continue
                 open_share = 0.0
@@ -572,7 +726,7 @@ def find_meadow_trail_walk():
                     dx, dz = nx - px, nz - pz
                     n = math.hypot(dx, dz)
                     side = (-dz / n, dx / n)
-                    open_share += all(wooded(px + side[0] * w, pz + side[1] * w) < 0.05 for w in (-10, 0, 10))
+                    open_share += all(wooded(px + side[0] * w, pz + side[1] * w) < OPEN_COVER for w in (-10, 0, 10))
                 open_share /= len(points)
             except SystemExit:
                 continue
@@ -725,7 +879,11 @@ def main():
         objects.insert(vista_index + 1 + len(NAMES) + offset, route_object(name, points))
         print(f"{name}: {len(points)} points from ({points[0][0]:.0f}, {points[0][2]:.0f}) "
               f"to ({points[-1][0]:.0f}, {points[-1][2]:.0f})")
-    insert_walk_camera(objects, routes[WALK_ROUTE])
+    # The game starts on the flying explorer (user, 2026-11-25): no walk
+    # camera. insert_walk_camera(objects, routes[WALK_ROUTE]) brings it back.
+    for item in list(objects):
+        if item.get("name") == WALK_CAMERA:
+            objects.remove(item)
     # Everything but the explorer is static (tools/scene_static.py); this
     # also covers the objects build_landscape_demo.py just wrote.
     scene_static.mark_static(objects)

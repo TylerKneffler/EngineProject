@@ -49,10 +49,12 @@ public:
     static bool Enabled();
     static std::shared_ptr<GrassBlades> For(Engine::Scene::Scene& scene);
 
-    // A meadow cell: world origin of its grid, samples per side, spacing (m),
-    // heights relative to origin.y and grass paint weight, row-major (z, x).
+    // A meadow cell: world origin of its grids; its heights (samples per
+    // side, spacing in m, relative to origin.y) and its grass weight on a
+    // finer grid of its own (trails and painted foliage are narrower than
+    // the height grid), both row-major (z, x).
     void SetCell(const void* key, glm::vec3 origin, int samples, float spacing,
-        std::vector<float> heights, std::vector<float> paint);
+        std::vector<float> heights, int paintSamples, float paintSpacing, std::vector<float> paint);
     void RemoveCell(const void* key);
     void SetSettings(const Settings& settings);
     // Rebuilds the GPU data when cells changed and creates the carrier once.
@@ -64,6 +66,8 @@ private:
         glm::vec3 origin{0.f};
         int samples = 0;
         float spacing = 4.f;
+        int paintSamples = 0;
+        float paintSpacing = 1.f;
         std::vector<float> heights, paint;
     };
     std::map<const void*, Cell> m_cells;

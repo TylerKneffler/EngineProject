@@ -4,6 +4,7 @@
 #include <string>
 
 #include "Engine/Editor/Tools/AssetGeneratorRunner.h"
+#include "Engine/Editor/Tools/TerrainGeneratorWindow.h"
 
 namespace Engine::Editor
 {
@@ -29,6 +30,8 @@ private:
     void DrawToolsMenu(EditorState& state) const;
     void PollAssetGenerators(EditorState& state) const;
     mutable std::unique_ptr<AssetGeneratorRunner> m_generators;
+    // Tools > Terrain generator (map-scale base heights).
+    mutable std::unique_ptr<TerrainGeneratorWindow> m_terrainGenerator;
     mutable std::deque<AssetGeneratorRunner::Generator> m_generatorQueue;
     mutable bool m_openNewAnimationPopup = false;
     mutable char m_newAnimationName[128]{};

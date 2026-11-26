@@ -164,7 +164,7 @@ public:
     // Far canopy (fair visibility, 2026-11-24): far blocks draw every real
     // tree as its impostor out to this distance from the camera; past it the
     // terrain shows the canopy the macro color map splats from the same
-    // placements (LandscapeDriver), fading in over its last 10 %. Nothing
+    // placements (canopyCrownTable), fading in over its last 10 %. Nothing
     // stands in for trees that are not there. 0: trees to the far-object
     // radius and the canopy everywhere (as before).
     float farCanopyDistance = 0.f;
@@ -412,6 +412,48 @@ public:
     // .objects file wins over its block.
     std::string objectArchive;
     std::shared_ptr<const class TerrainObjectArchive> GetObjectArchive() const;
+    // A map stored as archives (no script needed): procedural cells read
+    // their heights from heightArchive (TerrainHeightArchive, Assets path)
+    // and their paint from paintArchive (TerrainPaintArchive: per vertex
+    // weights of terrainLayers, plus lushness; cells it lacks are all
+    // defaultPaintLayer), with terrainLayers' materials repeating every
+    // layerRepeatMetres. Built cells are cached in cacheDirectory, keyed by
+    // the archives and layers. A script's SetProceduralBuilder replaces it.
+    struct TerrainLayerSource
+    {
+        std::string material;
+        glm::vec3 preview{.5f};   // editor and distant colour before textures load
+    };
+    std::string heightArchive, paintArchive, cacheDirectory;
+    std::vector<TerrainLayerSource> terrainLayers;
+    int defaultPaintLayer = 0;
+    float layerRepeatMetres = 2.f;
+    // The height archive's half extent in cells and signature (0 and 0
+    // without one); the paint archive (null without one).
+    int ArchiveHalfExtent() const;
+    uint64_t ArchiveSignature() const;
+    std::shared_ptr<const class TerrainPaintArchive> GetPaintArchive() const;
+    // Installs the archive builder and its cache for heightArchive (nothing
+    // without one, or when a script set its own builder). Runs on load; call
+    // again after changing the archives. True when the archive terrain is set.
+    bool ConfigureArchiveTerrain();
+    // What the archive map shows beyond its loaded cells (TerrainManager
+    // ArchiveMap.cpp), from the same archives: the far terrain (corner
+    // heights, colours from the paint) when archiveFarTerrain, and the macro
+    // colour map (macroColorMap: paint, lushness, steep faces, tree canopy).
+    // Colours are the terrain layers' macro colours times
+    // archiveColorBrightness (below 1 makes up for the occlusion and texture
+    // contrast near shading adds); lush ground takes the tint near cells
+    // show (Object.hlsl), steep faces steepMaterial's colour (none when
+    // empty), and trees with
+    // a crown in canopyCrownTable (JSON from tools/measure_tree_crowns.py)
+    // cover the macro map as canopy.
+    bool archiveFarTerrain = true;
+    float archiveColorBrightness = .85f;
+    std::string steepMaterial, canopyCrownTable;
+    // Fingerprint of everything the far terrain and macro map read (0
+    // without an archive).
+    uint64_t ArchiveMapKey() const;
     std::string GetObjectFilePath(Cell cell) const;
     // Cells that have an .objects file.
     const std::set<Cell>& ObjectFileCells() const;
@@ -424,7 +466,19 @@ public:
     bool RemoveObjectLayer(const std::string& name);
     bool AddCell(int x, int y);
     bool AddProceduralCell(int x, int y);
+    // Procedural cells: every cell within halfExtent of the origin (a square
+    // of 2 * halfExtent + 1 a side; authored cells stay as they are). The
+    // map-size control of the terrain generator. Loaded procedural cells
+    // outside it unload.
+    void SetProceduralSquare(int halfExtent);
+    // The cell data's generation (cell_data.generation in cellDataDirectory,
+    // renewed by the landscape generator when it re-seats the files). A scene
+    // saved under another generation lists files (object files, volume edits,
+    // foliage) that no longer apply: loading it leaves the files as they are.
+    std::string CellDataGeneration() const;
     void SetProceduralBuilder(std::function<void(Cell, Terrain&)> builder);
+    // The builder set without changing whether it is the archive's.
+    void InstallBuilder(std::function<void(Cell, Terrain&)> builder);
     // The surface a generated object layer may read.
     struct ObjectLayerContext
     {
@@ -693,6 +747,37 @@ private:
     std::set<Cell> m_editedProcedural;
     mutable std::set<Cell> m_dirtyProceduralEdits;
     std::function<void(Cell, Terrain&)> m_proceduralBuilder;
+    // ConfigureArchiveTerrain: whether the builder is the archive's, and the
+    // key it was installed for.
+    bool m_archiveBuilder = false;
+    uint64_t m_archiveKey = 0;
+    // The archive map (TerrainManagerArchiveMap.cpp).
+    struct ArchiveFarGrid
+    {
+        bool loaded = false;
+        std::vector<float> heights;
+        std::vector<glm::vec3> colors;
+    };
+    std::future<ArchiveFarGrid> m_archiveFarJob;
+    uint64_t m_archiveFarJobKey = 0, m_archiveFarKey = 0;
+    bool m_archiveFarActive = false, m_archiveMacroInstalled = false;
+    mutable std::shared_ptr<const void> m_canopyCrowns;
+    mutable std::string m_canopyCrownsLoaded;
+    std::shared_ptr<const void> ArchiveCanopyCrowns() const;
+    FarTerrainPalette ArchiveFarPalette() const;
+    void InstallArchiveMacroColors();
+    std::function<std::vector<MacroColorPatch>()> MakeArchiveMacroCellUpdate(
+        const std::vector<Cell>& cells, const MacroColorImage& map);
+    // Configures the far terrain for the current key: waits for it, or
+    // starts / polls a worker. True once it is configured.
+    bool LoadArchiveFarTerrain(bool wait);
+    // Polls the far terrain and moves it with the viewer (play mode).
+    void UpdateArchiveMap(const Engine::Core::Object* viewer);
+    // On load: the cells around the viewer, the far terrain and the editor
+    // camera, so the map shows at once.
+    void PreviewArchiveMap();
+    mutable std::shared_ptr<const class TerrainPaintArchive> m_paintArchive;
+    mutable std::string m_paintArchiveOpened;
     // Trails (SetTrail): the live network, shaded and read by rules at once,
     // and the one carved into procedural cells, which follows it after a
     // short pause (edits come in bursts while points are dragged). The

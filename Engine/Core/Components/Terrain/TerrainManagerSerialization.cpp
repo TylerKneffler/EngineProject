@@ -87,6 +87,15 @@ TerrainManager::JsonValue TerrainManager::Serialize() const
         .Set("viewerObjectName", JsonValue(viewerObjectName))
         .Set("cellDataDirectory", JsonValue(cellDataDirectory))
         .Set("objectArchive", JsonValue(objectArchive))
+        .Set("heightArchive", JsonValue(heightArchive))
+        .Set("paintArchive", JsonValue(paintArchive))
+        .Set("cacheDirectory", JsonValue(cacheDirectory))
+        .Set("defaultPaintLayer", JsonValue(defaultPaintLayer))
+        .Set("layerRepeatMetres", JsonValue(layerRepeatMetres))
+        .Set("archiveFarTerrain", JsonValue(archiveFarTerrain))
+        .Set("archiveColorBrightness", JsonValue(archiveColorBrightness))
+        .Set("steepMaterial", JsonValue(steepMaterial))
+        .Set("canopyCrownTable", JsonValue(canopyCrownTable))
         .Set("runtimeBakeDirectory", JsonValue(runtimeBakeDirectory));
     out.Set("requireRuntimeBake", JsonValue(requireRuntimeBake));
     JsonValue objectLayerNames = JsonValue::MakeArray();
@@ -244,6 +253,15 @@ TerrainManager::JsonValue TerrainManager::Serialize() const
         }
         out.Set("volumeEdits", std::move(volumeEdits));
     }
+    {
+        JsonValue layers = JsonValue::MakeArray();
+        for (const auto& layer : terrainLayers)
+            layers.Push(JsonValue::MakeObject().Set("material", JsonValue(layer.material))
+                .Set("preview", JsonValue::MakeArray().Push(JsonValue(layer.preview.x))
+                    .Push(JsonValue(layer.preview.y)).Push(JsonValue(layer.preview.z))));
+        out.Set("terrainLayers", std::move(layers));
+    }
+    out.Set("cellDataGeneration", JsonValue(CellDataGeneration()));
     out.Set("cells", std::move(cells))
         .Set("proceduralRuns", std::move(runs))
         .Set("editedCells", std::move(edits));
@@ -386,6 +404,28 @@ void TerrainManager::Deserialize(const JsonValue& value)
     cellDataDirectory = value.Has("cellDataDirectory")
         ? value["cellDataDirectory"].AsString() : std::string{};
     objectArchive = value.Has("objectArchive") ? value["objectArchive"].AsString() : std::string{};
+    heightArchive = value.Has("heightArchive") ? value["heightArchive"].AsString() : std::string{};
+    paintArchive = value.Has("paintArchive") ? value["paintArchive"].AsString() : std::string{};
+    cacheDirectory = value.Has("cacheDirectory") ? value["cacheDirectory"].AsString() : std::string{};
+    defaultPaintLayer = value.Has("defaultPaintLayer") ? value["defaultPaintLayer"].AsInt() : 0;
+    layerRepeatMetres = value.Has("layerRepeatMetres") ? value["layerRepeatMetres"].AsFloat() : 2.f;
+    archiveFarTerrain = !value.Has("archiveFarTerrain") || value["archiveFarTerrain"].AsBool();
+    archiveColorBrightness = value.Has("archiveColorBrightness") ? value["archiveColorBrightness"].AsFloat() : .85f;
+    steepMaterial = value.Has("steepMaterial") ? value["steepMaterial"].AsString() : std::string{};
+    canopyCrownTable = value.Has("canopyCrownTable") ? value["canopyCrownTable"].AsString() : std::string{};
+    terrainLayers.clear();
+    if (value["terrainLayers"].IsArray())
+        for (size_t i = 0; i < value["terrainLayers"].ArraySize(); ++i)
+        {
+            const auto& entry = value["terrainLayers"].ArrayAt(i);
+            TerrainLayerSource layer;
+            layer.material = entry["material"].AsString();
+            if (entry["preview"].ArraySize() >= 3)
+                layer.preview = {entry["preview"].ArrayAt(0).AsFloat(), entry["preview"].ArrayAt(1).AsFloat(),
+                    entry["preview"].ArrayAt(2).AsFloat()};
+            terrainLayers.push_back(std::move(layer));
+        }
+    m_archiveKey = 0;
     runtimeBakeDirectory = value.Has("runtimeBakeDirectory")
         ? value["runtimeBakeDirectory"].AsString() : std::string{};
     requireRuntimeBake = value.Has("requireRuntimeBake") &&
@@ -465,8 +505,13 @@ void TerrainManager::Deserialize(const JsonValue& value)
     m_objectFilesPending.clear();
     for (const auto& [cell, layers] : m_objectLayers)
         if (UsesObjectFiles(cell)) m_objectFilesPending.insert(cell);
-    if (value.Has("objectFiles")) RestoreObjectFiles(value["objectFiles"]);
-    if (value.Has("foliageFiles")) RestoreFoliageFiles(value["foliageFiles"]);
+    // Listed files restore only within one cell data generation (undo); a
+    // scene from before a regeneration leaves the re-seated files alone.
+    const std::string listedGeneration = value.Has("cellDataGeneration")
+        ? value["cellDataGeneration"].AsString() : std::string("0");
+    const bool sameGeneration = listedGeneration == CellDataGeneration();
+    if (sameGeneration && value.Has("objectFiles")) RestoreObjectFiles(value["objectFiles"]);
+    if (sameGeneration && value.Has("foliageFiles")) RestoreFoliageFiles(value["foliageFiles"]);
     const auto& edits = value["editedCells"];
     for (size_t i = 0; i < edits.ArraySize(); ++i)
     {
@@ -477,7 +522,7 @@ void TerrainManager::Deserialize(const JsonValue& value)
     // The scene's volume edits (Serialize): cells whose file differs are
     // written back, and files of cells the scene has none for are removed.
     // Scenes saved before edits were kept here leave the files alone.
-    if (value.Has("volumeEdits"))
+    if (sameGeneration && value.Has("volumeEdits"))
     {
         m_volumeEdits.clear();
         std::map<Cell, std::vector<TerrainVolumeEdit>> scene;
@@ -530,9 +575,17 @@ void TerrainManager::Deserialize(const JsonValue& value)
 void TerrainManager::OnAfterDeserialize(IGraphicsProvider* provider)
 {
     m_provider = nullptr;
+    // A map stored as archives builds its cells without a script, and shows
+    // around the viewer (and far away) at once.
+    const bool archive = ConfigureArchiveTerrain();
     if (provider && !DeferGraphicsPreparation(provider))
         PrepareGraphicsResources(provider);
     if (manageAuthoredCellColliders) return;
+    if (archive)
+    {
+        PreviewArchiveMap();
+        return;
+    }
     if (asyncStreaming)
     {
         // The far-height grid may not be configured until after this component
@@ -620,8 +673,8 @@ bool TerrainManager::DrawProperties(Engine::Core::IInspectorUi& ui)
             &terrainMacroColorEnabled);
         ui.Tooltip("Beyond 512 m, loaded cells fade from texture detail to each layer's measured mean color.");
         changed |= ui.Checkbox("Macro color map", &macroColorMap);
-        ui.Tooltip("Distant terrain colored from a map composed by the scene's terrain script "
-            "(e.g. LandscapeDriver: the baked paint and the forest canopy at 16 m). "
+        ui.Tooltip("Distant terrain colored from a map of the whole terrain: composed from the archives "
+            "(the baked paint, steep faces and the tree canopy at 16 m), or by a scene script. "
             "Distant tiles use it everywhere; loaded cells blend to it between the two distances below.");
         if (macroColorMap)
         {
@@ -689,6 +742,42 @@ bool TerrainManager::DrawProperties(Engine::Core::IInspectorUi& ui)
         }
         ui.Tooltip("Baked object placements (trees, rocks, bushes) of the procedural cells "
             "(world.objects). A cell's own .objects file (painted or edited) wins.");
+        const auto pathField = [&](const char* label, std::string& value, const char* tip) {
+            char text[512]{};
+            std::memcpy(text, value.data(), std::min(value.size(), sizeof(text) - 1));
+            if (ui.InputText(label, text, sizeof(text)))
+            {
+                value = text;
+                m_archiveKey = 0;
+                ConfigureArchiveTerrain();
+                changed = true;
+            }
+            ui.Tooltip(tip);
+        };
+        pathField("Height archive", heightArchive, "The map's heights (world.heights): procedural cells read them "
+            "here, no script needed. Tools > Terrain generator writes it.");
+        pathField("Paint archive", paintArchive, "The map's baked paint (world.paint), per vertex weights of the "
+            "terrain layers; cells it lacks are all the default layer.");
+        pathField("Cell cache", cacheDirectory, "Where built cells are cached (keyed by the archives and layers).");
+        for (size_t i = 0; i < terrainLayers.size(); ++i)
+            ui.ValueLabel(("Layer " + std::to_string(i)).c_str(), terrainLayers[i].material.c_str());
+        // Beyond the loaded cells (TerrainManagerArchiveMap.cpp); the macro
+        // map rebuilds when these change (its key covers them).
+        changed |= ui.Checkbox("Far terrain from archive", &archiveFarTerrain);
+        ui.Tooltip("Distant terrain over the whole map from the height archive, coloured from the paint.");
+        changed |= ui.DragFloat("Distant colour brightness", &archiveColorBrightness, .01f, .1f, 2.f);
+        ui.Tooltip("Multiplier on the layers' colours far away: below 1 makes up for the occlusion and "
+            "texture contrast near shading adds.");
+        const auto textField = [&](const char* label, std::string& value, const char* tip) {
+            char text[512]{};
+            std::memcpy(text, value.data(), std::min(value.size(), sizeof(text) - 1));
+            if (ui.InputText(label, text, sizeof(text))) { value = text; changed = true; }
+            ui.Tooltip(tip);
+        };
+        textField("Steep material", steepMaterial, "Steep faces far away take this material's macro colour "
+            "(the rock volume cells show there). Empty: the paint's colour.");
+        textField("Canopy crowns", canopyCrownTable, "Tree crown table (tools/measure_tree_crowns.py): trees "
+            "with a crown here cover the macro map as forest canopy.");
         char bakeDirectory[512]{};
         std::memcpy(bakeDirectory, runtimeBakeDirectory.data(),
             std::min(runtimeBakeDirectory.size(), sizeof(bakeDirectory) - 1));
@@ -770,4 +859,31 @@ bool TerrainManager::DrawProperties(Engine::Core::IInspectorUi& ui)
         return changed;
     }
 
+
+std::string TerrainManager::CellDataGeneration() const
+{
+    if (cellDataDirectory.empty()) return "0";
+    std::ifstream file(std::filesystem::path(cellDataDirectory) / "cell_data.generation");
+    std::string generation;
+    if (!(file >> generation) || generation.empty()) return "0";
+    return generation;
+}
+
+void TerrainManager::SetProceduralSquare(int halfExtent)
+{
+    halfExtent = std::clamp(halfExtent, 0, 4096);
+    std::set<Cell> wanted;
+    for (int y = -halfExtent; y <= halfExtent; ++y)
+        for (int x = -halfExtent; x <= halfExtent; ++x)
+            if (!m_cells.count({x, y})) wanted.insert({x, y});
+    for (auto it = m_loaded.begin(); it != m_loaded.end(); )
+    {
+        const Cell cell = it->first;
+        ++it;
+        if (m_proceduralCells.count(cell) && !wanted.count(cell)) UnloadCell(cell);
+    }
+    m_proceduralCells = std::move(wanted);
+    InvalidatePrepared();
+    MarkConfigurationDirty();
+}
 }

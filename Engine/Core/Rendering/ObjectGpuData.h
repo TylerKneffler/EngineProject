@@ -114,11 +114,15 @@ struct ObjectGPUData
     // TerrainTrailSample), read from texture slot 3: bin grid origin x, z,
     // 1 / bin size, bins x; bins z, list offset, segment offset, texture
     // width (0 = no trails); the manager's world position x, z (the grid is
-    // in manager space); two reserved vectors.
+    // in manager space).
     glm::vec4 terrainTrailGrid{0.f};
     glm::uvec4 terrainTrailKeys{0u};
     glm::vec4 terrainTrailOffset{0.f};
-    glm::vec4 terrainTrailReserved[2]{};
+    // Volume chunks shaded from their cell's paint map (slot 15): the
+    // volume's steep blend, re-applied per pixel from the surface normal
+    // (VolumeTerrain steepStart, steepEnd, steepLayer, w = 1 when on).
+    glm::vec4 terrainSteep{0.f};
+    glm::vec4 terrainTrailReserved{0.f};
     // x = mip bias of the view (<= 0): -log2(output / render pixels) while
     // TAA upscales it, so textures keep the output's sharpness (Object.hlsl
     // TextureLodBias, AlphaLodBias). yzw reserved.

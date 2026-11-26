@@ -31,7 +31,8 @@
 // 16-17 tall height range, 18 short width, 19 tall width, 20 dry share,
 // 21-22 paint weight range (none .. all), 23 tussock size (m), 24 pocket width
 // (tussock sizes from the border of two tussocks), 25 short blades thinned at
-// a border, 26 darkening there, 27 short height lost there.
+// a border, 26 darkening there, 27 short height lost there, 28 paint samples
+// per side, 29 paint spacing (m): the paint grid is finer than the heights.
 //
 // Record (48 bytes, read by Assets/Shaders/GrassBlades.hlsl):
 //  row0: object slot, root x, y, z (float bits)
@@ -132,6 +133,20 @@ float SampleGrid(Cell cell, uint grid, float2 local)
     const float2 f = g - (float2)i;
     const uint base = cell.offset + grid * cell.samples * cell.samples;
     const uint row0 = base + i.y * cell.samples + i.x, row1 = row0 + cell.samples;
+    return lerp(lerp(fieldData[row0], fieldData[row0 + 1u], f.x),
+        lerp(fieldData[row1], fieldData[row1 + 1u], f.x), f.y);
+}
+
+// Grass weight: its own grid after the heights (header 28-29).
+float SamplePaint(Cell cell, float2 local)
+{
+    const uint samples = (uint)fieldData[28];
+    const float spacing = fieldData[29];
+    const float2 g = clamp(local / spacing, 0.0, (float)(samples - 1u) - 0.001);
+    const uint2 i = (uint2)floor(g);
+    const float2 f = g - (float2)i;
+    const uint base = cell.offset + cell.samples * cell.samples;
+    const uint row0 = base + i.y * samples + i.x, row1 = row0 + samples;
     return lerp(lerp(fieldData[row0], fieldData[row0 + 1u], f.x),
         lerp(fieldData[row1], fieldData[row1 + 1u], f.x), f.y);
 }
@@ -254,7 +269,7 @@ void CSMain(uint3 group : SV_GroupID, uint3 thread : SV_GroupThreadID)
         if (rank > share) continue;
         const float growIn = saturate((share - rank) * (float)maxPerPatch);
         // Grass paint.
-        const float paint = smoothstep(fieldData[21], fieldData[22], SampleGrid(cell, 1u, local));
+        const float paint = smoothstep(fieldData[21], fieldData[22], SamplePaint(cell, local));
         if (Unit(Avalanche(h ^ 0x2u)) >= paint) continue;
         // Short and tall blades by the tall-field noise.
         const float field = ThicketNoise(local.x, local.y, fieldData[6], fieldData[7], 0x51e7a3c9u, seed);

@@ -77,7 +77,8 @@ struct ObjectData
     float4 terrainTrailGrid;   // bin grid origin x, z (manager space), 1 / bin size, bins x
     uint4 terrainTrailKeys;    // bins z, list offset, segment offset, texture width (0 = off)
     float4 terrainTrailOffset; // xy: the manager's world position x, z
-    float4 terrainTrailReserved[2];
+    float4 terrainSteep;       // volume chunks on a paint map: steep start, end, layer, on
+    float4 terrainTrailReserved;
     // x = the view's mip bias (<= 0) while TAA upscales it from a lower
     // render size, so textures keep the output's sharpness; yzw reserved.
     float4 viewTextureParams;
@@ -3228,7 +3229,7 @@ float4 ObjectSurfacePS(
             const float4 macro = SampleTerrainMacroColor(objectData, worldPos,
                 positionDx, positionDy);
             // The macro color is the ground; its alpha the forest cover,
-            // splatted from the real tree placements (LandscapeDriver). The
+            // splatted from the real tree placements (TerrainManagerArchiveMap). The
             // painted canopy (colour and relief) shows only where the real
             // trees stop drawing (TerrainManager::farCanopyDistance, z),
             // fading in over its last 10 %. Nearer, the real trees are the
@@ -3347,6 +3348,19 @@ float4 ObjectSurfacePS(
             weights[0] = paintA.x; weights[1] = paintA.y;
             weights[2] = paintA.z; weights[3] = paintA.w;
             weights[4] = paintB.x; weights[5] = paintB.y;
+            // A volume chunk: its vertices carried the steep layer blended
+            // in (VolumeTerrain ApplyPaintWeights); the paint map does not,
+            // so it is blended in here from the surface normal, as there.
+            [branch] if (objectData.terrainSteep.w > 0.5)
+            {
+                const float4 steepParams = objectData.terrainSteep;
+                const float t = saturate((1.0 - terrainNormalForLighting.y - steepParams.x) /
+                    max(steepParams.y - steepParams.x, 0.001));
+                const float steep = t * t * (3.0 - 2.0 * t);
+                const uint steepLayer = (uint)steepParams.z;
+                [unroll] for (uint layer = 0u; layer < 6u; ++layer)
+                    weights[layer] = weights[layer] * (1.0 - steep) + (layer == steepLayer ? steep : 0.0);
+            }
         }
         // Trails (TerrainTrailSample): the trail's layer takes over where the
         // track runs, on the layers it may cross (not rock, snow or shore),
@@ -3619,7 +3633,7 @@ float4 ObjectSurfacePS(
             base.rgb *= 1.0 + (terrainVariation.x + terrainVariation.y) * 0.10;
         // Lush valley floors (Terrain::lushness, uvChannels1.w): the darker,
         // greener tint the macro color map gives the same ground far away
-        // (LandscapeDriver ApplyErosionPaint, LushTint).
+        // (TerrainManagerArchiveMap.cpp LushTint: keep them the same).
         base.rgb *= lerp(float3(1.0, 1.0, 1.0), float3(0.72, 0.92, 0.55),
             saturate(uvChannels1.w));
         // Ground under ground cover (Terrain::GroundCover). Inside the cover's

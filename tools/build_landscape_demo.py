@@ -2,7 +2,6 @@
 
 Writes
   Engine/Core/Assets/TerrainData/Landscape/world.heights      height archive (v3)
-  Engine/Core/Assets/TerrainData/Landscape/world.fargrid      far silhouette grid (v3)
   Engine/Core/Assets/Scenes/terrain/landscape_demo.scene      the scene
 and, with --preview <png>, top-down previews: <png> colored like the terrain
 paint, plus <png stem>_flow.png and <png stem>_deposition.png.
@@ -32,12 +31,12 @@ the scene's own data (world.paint, world.objects, and the cells' edits),
 painted and placed in the editor. A rebuild of the heights leaves them as
 they were.
 
-Lakes have no water mesh of their own: basins are carved below WATER_LEVEL and
-the scene's LandscapeDriver paints them as sand beds with gravel shores and
-fills them with its water plane. The archive's two-bit code per sample is a
-rock class (0..3) from slope, computed over whole grids so the paint matches
-across cell borders. Forests and grass are placed at runtime by
-LandscapeDriver from the same heights.
+Lakes have no water mesh of their own: basins are carved below WATER_LEVEL,
+painted as sand beds with gravel shores, and filled by the scene's "Lake
+water" object (one plane at WATER_LEVEL over the map). The archive's two-bit
+code per sample is a rock class (0..3) from slope, computed over whole grids
+so the paint matches across cell borders. The TerrainManager reads the
+archives itself (cells, far terrain, macro colours); no script drives it.
 
 Re-running replaces the generated files, and deletes the sculpt edits
 (*.terrainedit) of every cell whose heights changed: they store absolute
@@ -72,14 +71,24 @@ CELLS = 32             # quads per cell edge
 SPACING = 4.0          # metres per quad
 COARSE = 4             # stride of stored samples outside the play area
 MACRO = SPACING * COARSE  # 16 m macro grid
-WATER_LEVEL = -40.0    # keep in sync with LandscapeDriver.waterLevel
-# Paint altitudes written to LandscapeDriver (see its properties).
+WATER_LEVEL = -40.0    # the "Lake water" object's height
+# Paint altitudes (bake_paint).
 ROCK_LINE, SNOW_LINE, TREE_LINE, ALTITUDE_BLEND = 1150.0, 1480.0, 950.0, 6.0
 SCALE = 16.0           # stored units per metre
 MAX_HEIGHT = 2040.0
 ARCHIVE_MAGIC = 0x31544748524E5254
 FARGRID_MAGIC = 0x314452474E525254
 NAMESPACE = "urn:engine-components"
+# Terrain layers in paint order (the TerrainManager's terrainLayers): material
+# and preview colour.
+LAYERS = [
+    ("Assets/Materials/Terrain/PBR/sand.material", (.62, .55, .42)),
+    ("Assets/Materials/Terrain/PBR/gravel.material", (.45, .43, .40)),
+    ("Assets/Materials/Terrain/PBR/grass.material", (.13, .18, .07)),
+    ("Assets/Materials/Terrain/PBR/forest_soil.material", (.22, .15, .10)),
+    ("Assets/Materials/Terrain/PBR/rock.material", (.40, .38, .34)),
+    ("Assets/Materials/Terrain/PBR/snow.material", (.85, .88, .92)),
+]
 
 
 def smoothstep(a, b, x):
@@ -540,14 +549,8 @@ def write_archive(world):
         file.write(struct.pack("<QIQiiifii", ARCHIVE_MAGIC, 3, signature, EXTENT,
                                CELLS, CELLS, SCALE, FINE_EXTENT, COARSE))
         file.write(body)
-    side = 2 * EXTENT + 2
-    # No far patches: full-resolution patches made every far tile rebuild
-    # carry them (two ~150 ms hitches per walk, 2026-11-22).
-    with open(DATA / "world.fargrid", "wb") as file:
-        file.write(struct.pack("<QIQiiiif", FARGRID_MAGIC, 3, signature, EXTENT,
-                               side, CELLS, CELLS, SCALE))
-        file.write(np.ascontiguousarray(corners.astype("<i2")).tobytes())
-        file.write(struct.pack("<I", 0))
+    # No far grid file: far terrain reads the archive's cell corners
+    # (TerrainHeightArchive::ReadCornerGrid).
     return signature, same
 
 
@@ -770,10 +773,6 @@ def write_scene(world):
                         ("Transform.scale", (1, 1, 1))):
         ET.SubElement(transform, tag, {"_arrayEncoding": "spaceSeparatedNumbers"}).text = numbers(values)
     components = ET.SubElement(terrain, "components")
-    ET.SubElement(components, c + "Mesh", {"Mesh.file": "", "Mesh.useLightProbes": "false"})
-    ET.SubElement(components, c + "Material", {
-        "Material.useVertexColors": "true", "Material.specularModel": "MetallicRoughness",
-        "Material.alphaMode": "Opaque", "Material.doubleSided": "false"})
     manager = ET.SubElement(components, c + "TerrainManager", {
         "TerrainManager." + key: value for key, value in {
             "cellsX": str(CELLS), "cellsY": str(CELLS),
@@ -808,6 +807,15 @@ def write_scene(world):
             # Trees, rocks and bushes: baked placements (bushes by
             # .local/tests/LandscapeBushBake.cpp); nothing generates them.
             "objectArchive": "Assets/TerrainData/Landscape/world.objects",
+            # The map itself: the manager reads it (no script needed).
+            "heightArchive": "Assets/TerrainData/Landscape/world.heights",
+            "paintArchive": "Assets/TerrainData/Landscape/world.paint",
+            "cacheDirectory": ".local/cache/landscape_demo",
+            "defaultPaintLayer": "2", "layerRepeatMetres": "2",
+            # Beyond the loaded cells, from the same archives.
+            "archiveFarTerrain": "true", "archiveColorBrightness": "0.85",
+            "steepMaterial": "Assets/TerrainData/Sculpts/cliff_rock.material",
+            "canopyCrownTable": "Assets/Prefabs/Woodland/tree_crowns.json",
             "runtimeBakeDirectory": "", "requireRuntimeBake": "false"}.items()})
     ET.SubElement(manager, "TerrainManager.cells")
     far_clusters = ET.SubElement(manager, "TerrainManager.farClusters")
@@ -822,6 +830,10 @@ def write_scene(world):
         settings = source_manager.find("TerrainManager.objectLayerSettings")
         if settings is not None:
             manager.append(settings)
+    layers = ET.SubElement(manager, "TerrainManager.terrainLayers")
+    for material, color in LAYERS:
+        item = ET.SubElement(layers, "item", {"material": material})
+        ET.SubElement(item, "preview", {"_arrayEncoding": "spaceSeparatedNumbers"}).text = numbers(color)
     names = ET.SubElement(manager, "TerrainManager.objectLayerNames")
     for name in ("Landscape forest", "Landscape forest edge", "Procedural meadow grass", "Procedural far grass",
                  "Procedural forest floor", "Procedural meadow shrubs", "Landscape bushes",
@@ -831,19 +843,25 @@ def write_scene(world):
     for y in range(-EXTENT, EXTENT + 1):
         ET.SubElement(runs, "item", {"y": str(y), "start": str(-EXTENT), "end": str(EXTENT)})
     ET.SubElement(manager, "TerrainManager.editedCells")
-    ET.SubElement(components, c + "LandscapeDriver", {
-        "LandscapeDriver.viewerObjectName": "Landscape Explorer",
-        "LandscapeDriver.mapHalfExtentCells": str(EXTENT),
-        "LandscapeDriver.heightArchive": "Assets/TerrainData/Landscape/world.heights",
-        "LandscapeDriver.farGrid": "Assets/TerrainData/Landscape/world.fargrid",
-        "LandscapeDriver.cacheDirectory": ".local/cache/landscape_demo",
-        "LandscapeDriver.enableFarTerrain": "true",
-        "LandscapeDriver.waterLevel": numbers([WATER_LEVEL]),
-        "LandscapeDriver.rockLine": numbers([ROCK_LINE]),
-        "LandscapeDriver.snowLine": numbers([SNOW_LINE]),
-        "LandscapeDriver.treeLine": numbers([TREE_LINE]),
-        "LandscapeDriver.altitudeBlend": numbers([ALTITUDE_BLEND])})
     ET.SubElement(terrain, "children")
+
+    # The lakes' water: a unit plane scaled over the whole map at WATER_LEVEL
+    # (Water layer, 6); terrain above it hides it. Its shader's waves are in
+    # world space, so the scale does not stretch them.
+    span = CELLS * SPACING
+    size = (2 * EXTENT + 1) * span
+    water = ET.Element("item", {"name": "Lake water", "enabled": "true", "layer": "6"})
+    transform = ET.SubElement(water, "transform")
+    for tag, values in (("Transform.position", (span / 2, WATER_LEVEL, span / 2)),
+                        ("Transform.rotation", (0, 0, 0)), ("Transform.scale", (size, 1, size))):
+        ET.SubElement(transform, tag, {"_arrayEncoding": "spaceSeparatedNumbers"}).text = numbers(values)
+    water_components = ET.SubElement(water, "components")
+    ET.SubElement(water_components, c + "Mesh", {"Mesh.file": "Assets/Mesh/plane.obj",
+                                                 "Mesh.useLightProbes": "false"})
+    ET.SubElement(water_components, c + "Material", {
+        "Material.materialAsset": "Engine/Core/Assets/Materials/Water/LakeWater.material"})
+    ET.SubElement(water, "children")
+    objects.insert(list(objects).index(terrain), water)
 
     ET.indent(scene, space="  ")
     header = ("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<!--\n"

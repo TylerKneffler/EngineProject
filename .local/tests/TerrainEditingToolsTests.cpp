@@ -16,6 +16,8 @@
 #include "Core/Components/Terrain/TerrainPlacementBrush.h"
 #include "Core/Components/Terrain/TerrainObjectArchive.h"
 #include "Core/Components/Terrain/TerrainFoliage.h"
+#include "Core/Components/Terrain/LandscapeGenerator.h"
+#include "Core/Components/Terrain/TerrainVolumeBuild.h"
 #include "Core/Components/Terrain/TerrainFoliageBrush.h"
 #include "Grass/GrassField.h"
 #include "Editor/Core/View/Views/Scene/SceneTerrainTools.h"
@@ -1479,8 +1481,9 @@ void TestLandscapeArchiveSeams()
         for (int col = 0; col <= 32; ++col)
             Require(inner[col] == outer[size_t(32) * 33 + col]);
     }
+    // The far terrain's corner grid, read from the archive itself.
     std::vector<float> farGrid;
-    Require(A::ReadFarGrid("Engine/Core/Assets/TerrainData/Landscape/world.fargrid", signature, 94, farGrid));
+    Require(A::ReadCornerGrid(path, signature, 94, 32, 32, farGrid));
     Require(A::ReadCell(path, signature, 94, 32, 32, 0, 0, inner));
     Require(farGrid.size() == 190u * 190u && farGrid[size_t(94) * 190 + 94] == inner[0]);
 }
@@ -1734,6 +1737,158 @@ void TestFoliage()
     std::filesystem::remove_all(folder, error);
 }
 
+// The landscape generator (LandscapeGenerator.h): a small map written,
+// read back by the engine's readers, generated again the same, and
+// re-generated with another seed: what stood on the old ground moves with it.
+void TestLandscapeGenerator()
+{
+    using namespace Engine::Components;
+    const auto folder = std::filesystem::temp_directory_path() / "engine_landscape_generator_test";
+    std::error_code error;
+    std::filesystem::remove_all(folder, error);
+    std::filesystem::create_directories(folder / "cells", error);
+    LandscapeGeneratorPaths paths;
+    paths.heights = (folder / "world.heights").string();
+    paths.cellData = (folder / "cells").string();
+    LandscapeGeneratorSettings settings;
+    settings.halfExtentCells = 3;
+    settings.fineHalfExtentCells = 1;
+    settings.erosion = .05f;
+    std::string message;
+    LandscapeGeneratorReport first;
+    Require(GenerateLandscape(settings, paths, message, {}, nullptr, &first));
+    Require(first.signature != 0 && first.changedCells == 49);
+    uint64_t signature = 0;
+    Require(TerrainHeightArchive::ReadSignature(paths.heights, 3, 32, 32, signature) && signature == first.signature);
+    std::vector<float> heights, corners;
+    std::vector<uint8_t> codes;
+    Require(TerrainHeightArchive::ReadCellCodes(paths.heights, signature, 3, 32, 32, 0, 0, heights, codes) &&
+        heights.size() == 33 * 33);
+    Require(TerrainHeightArchive::ReadCellCodes(paths.heights, signature, 3, 32, 32, 3, -3, heights, codes));
+    // Far terrain's corner grid comes straight from the archive (no far grid
+    // file): each cell's corner samples.
+    Require(TerrainHeightArchive::ReadCornerGrid(paths.heights, signature, 3, 32, 32, corners) &&
+        corners.size() == 8 * 8);
+    Require(TerrainHeightArchive::ReadCellCodes(paths.heights, signature, 3, 32, 32, 1, -1, heights, codes));
+    Require(corners[size_t(-1 + 3) * 8 + size_t(1 + 3)] == heights[0] &&
+        corners[size_t(-1 + 3 + 1) * 8 + size_t(1 + 3 + 1)] == heights.back());
+    // The same settings make the same map: nothing changes, nothing moves.
+    LandscapeGeneratorReport again;
+    Require(GenerateLandscape(settings, paths, message, {}, nullptr, &again));
+    Require(again.signature == first.signature && again.changedCells == 0);
+
+    // Things standing on cell (1, 0): a sculpt, a volume edit and a placed
+    // object, all on the old ground at (40, 60).
+    std::vector<float> before;
+    Require(TerrainHeightArchive::ReadCellCodes(paths.heights, signature, 3, 32, 32, 1, 0, before, codes));
+    float ground = 0.f;
+    Require(SampleTerrainSurface(before, 32, 32, 4.f, 4.f, 40.f, 60.f, ground));
+    // A sculpt raising the vertex at (40, 60) 3 m above the ground there.
+    const uint32_t sculptIndex = 15 * 33 + 10;
+    const float sculpted = before[sculptIndex] + 3.f;
+    {
+        std::ofstream file(folder / "cells" / "1_0.terrainedit", std::ios::binary);
+        const uint64_t magic = 0x31544944454e5254ull;
+        const uint32_t header[] = {3u, 32u, 32u, 0u, 1u, 0u};
+        file.write(reinterpret_cast<const char*>(&magic), 8);
+        file.write(reinterpret_cast<const char*>(header), sizeof(header));
+        file.write(reinterpret_cast<const char*>(&sculptIndex), 4);
+        file.write(reinterpret_cast<const char*>(&sculpted), 4);
+    }
+    TerrainVolumeEdit edit;
+    edit.shape = TerrainVolumeEdit::Shape::Sphere;
+    edit.a = {40.f, ground + 2.f, 60.f};
+    edit.radius = 3.f;
+    Require(SaveTerrainVolumeEdits((folder / "cells" / "1_0.volumeedit").string(), {edit}));
+    {
+        Engine::Core::Object holder;
+        auto* layer = holder.AddComponent<TerrainObjectLayer>();
+        layer->layerName = "Objects";
+        layer->placements.push_back({0, "Assets/rock.prefab", {40.f, ground, 60.f}});
+        auto document = Engine::Serialization::JsonValue::MakeObject();
+        document.Set("magic", Engine::Serialization::JsonValue(std::string("1")))
+            .Set("revision", Engine::Serialization::JsonValue(std::string("42")))
+            .Set("layers", Engine::Serialization::JsonValue::MakeArray().Push(layer->Serialize()));
+        const auto bytes = Engine::Serialization::AssetWriteBinary(document);
+        std::ofstream file(folder / "cells" / "1_0.objects", std::ios::binary);
+        file.write(bytes.data(), std::streamsize(bytes.size()));
+    }
+    const auto stamp = [&] {
+        std::ifstream file(folder / "cells" / "cell_data.generation");
+        std::string value;
+        file >> value;
+        return value;
+    };
+    const std::string generationBefore = stamp();
+
+    settings.seed = 5;
+    LandscapeGeneratorReport changed;
+    Require(GenerateLandscape(settings, paths, message, {}, nullptr, &changed));
+    Require(changed.signature != first.signature && changed.changedCells > 0);
+    Require(TerrainHeightArchive::ReadSignature(paths.heights, 3, 32, 32, signature) && signature == changed.signature);
+    std::vector<float> after;
+    Require(TerrainHeightArchive::ReadCellCodes(paths.heights, signature, 3, 32, 32, 1, 0, after, codes));
+    float newGround = 0.f;
+    Require(SampleTerrainSurface(after, 32, 32, 4.f, 4.f, 40.f, 60.f, newGround));
+    Require(std::abs(newGround - ground) > .01f);   // the ground did move there
+    {
+        TerrainHeightArchive::EditEntries sculpt;
+        Require(TerrainHeightArchive::ReadEditEntries((folder / "cells" / "1_0.terrainedit").string(), 32, 32, sculpt));
+        Require(sculpt.heights.size() == 1 && sculpt.heights[0].first == sculptIndex &&
+            std::abs(sculpt.heights[0].second - (after[sculptIndex] + 3.f)) < 1e-3f);
+    }
+    std::vector<TerrainVolumeEdit> edits;
+    Require(LoadTerrainVolumeEdits((folder / "cells" / "1_0.volumeedit").string(), edits) && edits.size() == 1);
+    Require(edits.size() == 1 && std::abs(edits[0].a.y - (newGround + 2.f)) < .02f);
+    const auto document = Engine::Serialization::AssetParseFile((folder / "cells" / "1_0.objects").string());
+    Require(document["revision"].AsString() == "42");
+    {
+        Engine::Core::Object holder;
+        auto* layer = holder.AddComponent<TerrainObjectLayer>();
+        layer->Deserialize(document["layers"].ArrayAt(0));
+        Require(layer->placements.size() == 1 && std::abs(layer->placements[0].position.y - newGround) < .02f);
+    }
+    Require(!stamp().empty() && stamp() != generationBefore);
+    Require(changed.volumeEditsMoved == 1 && changed.objectFilesMoved == 1 && changed.sculptsMoved == 1);
+
+    // A map stored as archives needs no script: a bare manager pointed at the
+    // height archive builds its procedural cells from it.
+    {
+        Engine::Scene::Scene scene;
+        auto* manager = scene.AddObject("Manager")->AddComponent<TerrainManager>();
+        manager->cellsX = manager->cellsY = 32;
+        manager->cellWidth = manager->cellDepth = 4.f;
+        manager->loadedRadius = 0;
+        manager->farRadius = 0;
+        manager->generateColliders = false;
+        manager->heightArchive = paths.heights;
+        manager->terrainLayers = {{"Assets/a.material", glm::vec3(.5f)}, {"Assets/b.material", glm::vec3(.2f)}};
+        manager->defaultPaintLayer = 1;
+        Require(manager->ArchiveHalfExtent() == 3 && manager->ArchiveSignature() == signature);
+        manager->SetProceduralSquare(manager->ArchiveHalfExtent());
+        Require(manager->ConfigureArchiveTerrain());
+        manager->SyncLoadedCells(1, 0);
+        auto* cell = manager->GetLoadedCell(1, 0);
+        Require(cell && cell->heights == after && cell->layers.size() == 2 &&
+            cell->weights.size() == after.size() * 2 && cell->weights[1] == 1.f);
+    }
+    // A scene saved before the regeneration does not restore the old edits.
+    {
+        Engine::Scene::Scene scene;
+        auto* manager = scene.AddObject("Manager")->AddComponent<TerrainManager>();
+        manager->cellDataDirectory = paths.cellData;
+        auto listed = manager->Serialize();
+        listed.Set("cellDataGeneration", Engine::Serialization::JsonValue(generationBefore));
+        auto oldEdits = Engine::Serialization::JsonValue::MakeArray();
+        oldEdits.Push(Engine::Serialization::JsonValue::MakeObject().Set("x", Engine::Serialization::JsonValue(1))
+            .Set("y", Engine::Serialization::JsonValue(0)).Set("edits", Engine::Serialization::JsonValue::MakeArray()));
+        listed.Set("volumeEdits", std::move(oldEdits));
+        manager->Deserialize(listed);
+        Require(LoadTerrainVolumeEdits((folder / "cells" / "1_0.volumeedit").string(), edits) && edits.size() == 1);
+    }
+    std::filesystem::remove_all(folder, error);
+}
+
 int main()
 {
     try
@@ -1760,6 +1915,7 @@ int main()
         TestRegionPaint();
         TestVolumeSculpt();
         TestFoliage();
+        TestLandscapeGenerator();
         TestArchiveV3();
                 TestEditRoundTrip();
         TestMacroColorPatches();

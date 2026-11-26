@@ -450,6 +450,65 @@ inline bool ReadCellCodes(const std::string& path, uint64_t expectedSignature,
     return true;
 }
 
+// An archive's extent and signature from its header alone (any extent; the
+// cell size must match). False when the file is missing or not an archive.
+inline bool ReadHeader(const std::string& path, int expectedX, int expectedY, int& extent, uint64_t& signature)
+{
+    std::ifstream file(path, std::ios::binary);
+    uint64_t magic = 0;
+    uint32_t version = 0;
+    int cellsX = 0, cellsY = 0;
+    if (!file || !Read(file, magic) || magic != Magic || !Read(file, version) ||
+        (version != 2 && version != 3) || !Read(file, signature) || !Read(file, extent) ||
+        !Read(file, cellsX) || !Read(file, cellsY) || cellsX != expectedX || cellsY != expectedY ||
+        extent < 0 || !signature) return false;
+    return true;
+}
+
+// The far terrain's grid straight from the archive: the height at every cell
+// corner, (2 extent + 2)^2 values row-major from cell (-extent, -extent) (as
+// a far grid file holds them, without patches). One pass over the file,
+// reading each cell's stored corner samples; a full-resolution cell's corners
+// win where it meets a coarse one (they are equal, by the generator's blend).
+inline bool ReadCornerGrid(const std::string& path, uint64_t expectedSignature,
+    int expectedExtent, int expectedX, int expectedY, std::vector<float>& heights)
+{
+    std::ifstream file(path, std::ios::binary);
+    Layout layout;
+    if (!ReadLayout(file, layout, expectedSignature, expectedExtent, expectedX, expectedY))
+        return false;
+    file.seekg(layout.headerBytes);
+    const int side = layout.extent * 2 + 2;
+    std::vector<int16_t> corners(static_cast<size_t>(side) * side, 0);
+    std::vector<uint8_t> fine(corners.size(), 0);
+    std::vector<int16_t> stored;
+    for (int cellY = -layout.extent; cellY <= layout.extent; ++cellY)
+        for (int cellX = -layout.extent; cellX <= layout.extent; ++cellX)
+        {
+            const int stride = layout.Stride(cellX, cellY);
+            const int width = layout.cellsX / stride + 1, depth = layout.cellsY / stride + 1;
+            stored.resize(static_cast<size_t>(width) * depth);
+            file.read(reinterpret_cast<char*>(stored.data()),
+                static_cast<std::streamsize>(stored.size() * sizeof(int16_t)));
+            file.seekg(static_cast<std::streamoff>((stored.size() + 3) / 4), std::ios::cur);
+            if (!file) return false;
+            const int row = cellY + layout.extent, col = cellX + layout.extent;
+            const auto set = [&](int r, int c, int16_t value) {
+                const size_t index = static_cast<size_t>(r) * side + c;
+                if (fine[index] && stride != 1) return;
+                corners[index] = value;
+                fine[index] = stride == 1 ? 1 : fine[index];
+            };
+            set(row, col, stored[0]);
+            set(row, col + 1, stored[static_cast<size_t>(width) - 1]);
+            set(row + 1, col, stored[static_cast<size_t>(depth - 1) * width]);
+            set(row + 1, col + 1, stored.back());
+        }
+    heights.resize(corners.size());
+    for (size_t i = 0; i < corners.size(); ++i) heights[i] = static_cast<float>(corners[i]) / layout.scale;
+    return true;
+}
+
 // Visits every cell in file order with one open file: fn(cellX, cellY,
 // heights, codes), both at full resolution. Stops (returns false) when fn
 // returns false or the file is short.

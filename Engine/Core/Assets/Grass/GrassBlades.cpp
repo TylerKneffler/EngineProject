@@ -78,10 +78,11 @@ std::shared_ptr<GrassBlades> GrassBlades::For(Engine::Scene::Scene& scene)
 }
 
 void GrassBlades::SetCell(const void* key, glm::vec3 origin, int samples, float spacing,
-    std::vector<float> heights, std::vector<float> paint)
+    std::vector<float> heights, int paintSamples, float paintSpacing, std::vector<float> paint)
 {
     auto& cell = m_cells[key];
     cell.origin = origin; cell.samples = samples; cell.spacing = spacing;
+    cell.paintSamples = paintSamples; cell.paintSpacing = paintSpacing;
     cell.heights = std::move(heights); cell.paint = std::move(paint);
     m_dirty = true;
 }
@@ -115,6 +116,8 @@ void GrassBlades::Update(Engine::Scene::Scene& scene, Engine::Graphics::IGraphic
         const size_t cellCount = std::min(m_cells.size(), MaximumCells);
         const int samples = m_cells.empty() ? 33 : m_cells.begin()->second.samples;
         const float spacing = m_cells.empty() ? 4.f : m_cells.begin()->second.spacing;
+        const int paintSamples = m_cells.empty() ? samples : m_cells.begin()->second.paintSamples;
+        const float paintSpacing = m_cells.empty() ? spacing : m_cells.begin()->second.paintSpacing;
         const float patch = 2.f;
         const float header[] = {float(cellCount), float(samples), spacing, patch,
             s.shortDensity, s.tallDensity, s.fieldSize, s.fieldCoverage, s.shortUnderTall, float(s.seed),
@@ -124,6 +127,8 @@ void GrassBlades::Update(Engine::Scene::Scene& scene, Engine::Graphics::IGraphic
             s.shortWidth, s.tallWidth, s.dryShare, s.paint[0], s.paint[1],
             s.tussockSize, s.pocketWidth, s.pocketThinning, s.pocketShade, s.pocketLowering};
         std::copy(std::begin(header), std::end(header), data.begin());
+        data[28] = float(paintSamples);
+        data[29] = paintSpacing;
         // Tuning only: ENGINE_GPU_GRASS_POCKET=size,width,thinning,shade,lowering.
         if (const char* pocket = std::getenv("ENGINE_GPU_GRASS_POCKET"))
             std::sscanf(pocket, "%f,%f,%f,%f,%f", &data[23], &data[24], &data[25], &data[26], &data[27]);
@@ -132,7 +137,7 @@ void GrassBlades::Update(Engine::Scene::Scene& scene, Engine::Graphics::IGraphic
         {
             if (index >= cellCount) break;
             if (cell.samples != samples || cell.heights.size() != size_t(samples * samples) ||
-                cell.paint.size() != cell.heights.size()) continue;
+                cell.paintSamples != paintSamples || cell.paint.size() != size_t(paintSamples * paintSamples)) continue;
             const size_t entry = HeaderFloats + index * 4;
             data[entry] = cell.origin.x; data[entry + 1] = cell.origin.z;
             data[entry + 2] = cell.origin.y; data[entry + 3] = float(data.size());

@@ -1036,6 +1036,30 @@ set_target_properties(Game PROPERTIES
 # VideoExporter — deterministic offline scene renderer. It is deliberately a
 # separate executable so a video export cannot alter normal Game.exe behavior.
 # ---------------------------------------------------------------------------
+# The landscape generator from the command line (Engine/Tools/LandscapeGenerate.cpp).
+add_executable(LandscapeGenerate EXCLUDE_FROM_ALL "${ENGINE_ROOT}/Engine/Tools/LandscapeGenerate.cpp")
+target_link_libraries(LandscapeGenerate PRIVATE Engine)
+target_include_directories(LandscapeGenerate PRIVATE "${ENGINE_ROOT}" "${ENGINE_ROOT}/Engine")
+target_compile_definitions(LandscapeGenerate PRIVATE NOMINMAX)
+
+# Compiles the shaders the engine has requested into its shader cache after
+# Editor or Game builds, so a shader edit costs build time instead of a stall
+# at the next launch (Engine/Tools/ShaderPrecompile.cpp; requests.txt in the
+# cache lists them). ENGINE_SHADER_PRECOMPILE=0 skips it.
+if(WIN32)
+    add_executable(ShaderPrecompile "${ENGINE_ROOT}/Engine/Tools/ShaderPrecompile.cpp")
+    target_link_libraries(ShaderPrecompile PRIVATE Engine)
+    target_include_directories(ShaderPrecompile PRIVATE "${ENGINE_ROOT}" "${ENGINE_ROOT}/Engine")
+    target_compile_definitions(ShaderPrecompile PRIVATE NOMINMAX)
+    foreach(shader_precompile_target Editor Game)
+        add_dependencies(${shader_precompile_target} ShaderPrecompile)
+        add_custom_command(TARGET ${shader_precompile_target} POST_BUILD
+            COMMAND $<TARGET_FILE:ShaderPrecompile>
+            COMMENT "Precompiling shaders into the shader cache"
+            VERBATIM)
+    endforeach()
+endif()
+
 add_executable(VideoExporter
     ${VIDEO_EXPORTER_SOURCES}
     ${VIDEO_EXPORTER_HEADERS}

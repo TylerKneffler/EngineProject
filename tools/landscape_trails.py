@@ -32,7 +32,7 @@ SPACING = 4.0          # archive metres per sample in the play area
 # The old trail network (LandscapeDriver TrailDistance / ConfigureTerrain).
 NOISE = ((520.0, 0.7, 71), (170.0, 0.3, 73))
 CONTOUR = 0.5
-WATER, TREE_LINE, BLEND = -40.0, 950.0, 6.0   # landscape_demo.scene LandscapeDriver
+WATER, TREE_LINE, BLEND = -40.0, 950.0, 6.0   # tools/build_landscape_demo.py paint altitudes
 BAND_LOW = WATER + 6.5                         # middle of the old rise (water + 4 .. + 9)
 BAND_HIGH = TREE_LINE - 4.0 * BLEND            # middle of the old fall (tree - 8 blend .. tree)
 
