@@ -97,8 +97,10 @@ std::vector<PortalViewJob> ScenePortalViewScheduling::Build(SceneRenderer& rende
     std::vector<PortalViewJob> portalViewJobs;
     const uint32_t portalDepthLimit = static_cast<uint32_t>(
         Engine::Rendering::Portal::ClampRecursionDepth(settings.portalRecursionDepth));
-    const size_t portalViewBudget = static_cast<size_t>(
-        Engine::Rendering::Portal::ClampViewBudget(settings.portalMaxViewsPerFrame));
+    // Never more views than the object buffers hold (m_objectPortalViews).
+    const size_t portalViewBudget = std::min<size_t>(static_cast<size_t>(
+        Engine::Rendering::Portal::ClampViewBudget(settings.portalMaxViewsPerFrame)),
+        renderer.m_objectPortalViews);
     const auto apertureRegionInView = [&](const PortalStencilPass& pass,
         const glm::mat4& candidateView)
     {

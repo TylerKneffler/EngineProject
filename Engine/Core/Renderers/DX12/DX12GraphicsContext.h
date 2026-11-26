@@ -1,4 +1,5 @@
 #pragma once
+#include <array>
 #include <functional>
 #include "Core/Graphics/IGraphicsContext.h"
 #include "Core/Graphics/IGraphicsTexture.h"
@@ -86,6 +87,10 @@ public:
     bool BeginDepthOnlyPass(const Engine::Graphics::IGraphicsTexture* texture,
         float clearDepth = Engine::Graphics::Depth::ClearValue) override;
     void EndDepthOnlyPass() override;
+    bool BeginColorPass(const Engine::Graphics::IGraphicsTexture* const* targets, uint32_t count,
+        uint32_t slice, const Engine::Graphics::IGraphicsTexture* depth) override;
+    void EndColorPass() override;
+    void ClearColorPassRectangle(const ScissorRect& rect, const float* color, float depth) override;
     bool SupportsDepthRectangleClear() const override { return true; }
     void ClearDepthRectangle(const ScissorRect&, float = Engine::Graphics::Depth::ClearValue) override;
     // D3D12 command lists cannot query their previously bound framebuffer.
@@ -154,6 +159,10 @@ private:
     uint64_t m_activeOcclusionKey = 0;
     uint32_t m_activeOcclusionIndex = UINT32_MAX;
     D3D12GraphicsTexture* m_activeDepthTarget = nullptr;
+    // BeginColorPass: its colour targets, slice and optional depth target.
+    std::array<D3D12GraphicsTexture*, 4> m_activeColorTargets{};
+    uint32_t m_activeColorCount = 0, m_activeColorSlice = 0;
+    D3D12GraphicsTexture* m_activeColorDepth = nullptr;
     std::function<void()> m_restoreDepthOnlyPass;
     ID3D12Resource* m_sceneDepth = nullptr;
 

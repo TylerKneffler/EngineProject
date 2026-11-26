@@ -58,7 +58,7 @@ template<class T> void HashBytes(uint64_t& hash, const T& value)
 }
 }
 
-void SceneTextureFootprints::Request(const std::vector<PreparedDraw>& preparedDraws,
+void SceneTextureFootprints::Request(const std::vector<FootprintSource>& preparedDraws,
     const glm::mat4& viewProjection, uint32_t viewportWidth, uint32_t viewportHeight,
     const std::array<glm::mat4, 4>& shadowViewProjections,
     uint32_t shadowCascadeCount, uint32_t shadowResolution,

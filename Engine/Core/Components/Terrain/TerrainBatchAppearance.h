@@ -16,6 +16,8 @@ public:
         SetTypeName(COMPONENT_TYPE_NAME(TerrainBatchAppearance));
         singlecomponent = true;
     }
+    // Render data only (no frame update).
+    bool RequiresUpdate() const override { return false; }
     std::vector<std::shared_ptr<Material>> materials;
     float textureTiling = 16.f;
     // Metres the layers' tiling spans when no TerrainManager owns the object

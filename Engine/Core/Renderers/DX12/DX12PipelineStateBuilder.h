@@ -1,5 +1,6 @@
 #pragma once
 #include "Core/Graphics/IPipelineState.h"
+#include <array>
 #include <wrl/client.h>
 #include <d3d12.h>
 #include <vector>
@@ -104,6 +105,7 @@ public:
     Engine::Graphics::IPipelineStateBuilder& SetInputLayout(const VertexElement* elements, uint32_t elementCount) override;
     Engine::Graphics::IPipelineStateBuilder& SetPrimitiveTopology(PrimitiveTopology topology) override;
     Engine::Graphics::IPipelineStateBuilder& SetRenderTargetFormat(int format, int depthFormat = -1) override;
+    Engine::Graphics::IPipelineStateBuilder& SetRenderTargetFormats(const int* formats, uint32_t count, int depthFormat = -1) override;
 
     std::unique_ptr<Engine::Graphics::IPipelineState> Build() override;
     std::string GetLastError() const override { return m_lastError; }
@@ -147,6 +149,9 @@ private:
 
     D3D12_PRIMITIVE_TOPOLOGY_TYPE m_primitiveTopology = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
     DXGI_FORMAT m_rtFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+    // SetRenderTargetFormats: 2-4 colour targets (0 = the single m_rtFormat).
+    std::array<DXGI_FORMAT, 4> m_rtFormats{};
+    uint32_t m_rtCount = 0;
     DXGI_FORMAT m_dsFormat = DXGI_FORMAT_D32_FLOAT_S8X24_UINT;
 
     D3D12_BLEND ConvertBlendMode(int mode) const;

@@ -22,6 +22,7 @@
 #include "Core/Scene/SceneObserver.h"
 
 #include <array>
+#include "Core/Rendering/SceneRenderer/SceneTerrainVirtualTexture.h"
 #include <future>
 #include <map>
 #include <memory>
@@ -127,6 +128,7 @@ public:
         double prefabRegistryMs=0,prefabValidationMs=0,prefabSourceLookupMs=0;
         double prefabBuildMs=0,prefabMainBufferCreateMs=0;
         double prefabBudgetOverrunMs=0,prefabMaxLayerMs=0;
+        double prefabLayers=0,prefabLayersVisited=0;
         double graphicsPreparationMs=0,nativeBuffersMs=0;
         double lookupMs = 0.0;
         double itemsMs = 0.0;
@@ -337,6 +339,7 @@ public:
 
 private:
     friend class SceneInstanceBatching;
+    friend class TerrainVirtualTexture;
     friend class ScenePortalRendering;
     friend class ScenePortalViewScheduling;
     friend class SceneRendererDebugPipelines;
@@ -490,6 +493,11 @@ private:
     std::unique_ptr<IPipelineState> m_objectDoubleSidedPipeline;
     // [doubleSided]: opaque materials with parallaxDepthOffset.
     std::array<std::unique_ptr<IPipelineState>, 2> m_objectParallaxDepthPipelines;
+    // Terrain virtual texture fill (Object.hlsl VS/PSTerrainVirtualTexture);
+    // null where the backend cannot build it (one colour target only).
+    std::unique_ptr<IPipelineState> m_terrainVirtualTexturePipeline;
+    std::unique_ptr<Engine::Rendering::TerrainVirtualTexture> m_terrainVirtualTexture;
+    uint64_t m_terrainVirtualTextureSerial = UINT64_MAX;
     std::array<std::unique_ptr<IPipelineState>, 2> m_foliageDepthPipelines;
     std::array<std::unique_ptr<IPipelineState>, 2> m_foliageEqualPipelines;
     std::unique_ptr<IPipelineState> m_objectBlendPipeline;
@@ -912,7 +920,7 @@ private:
         Engine::Rendering::UploadRecordCache objectCache,shadowCache;
         void* constantsMapped=nullptr; void* objectsMapped=nullptr;
         void* shadowConstantsMapped=nullptr; void* shadowObjectsMapped=nullptr;
-        uint32_t capacity=0;
+        uint32_t capacity=0, portalViews=0;
     };
     struct RenderPassBufferSlot
     {
@@ -947,6 +955,18 @@ private:
         uint64_t frame=0;
         uint32_t alphaMode=0;
         bool doubleSided=false;
+        // Kept across frames (SceneRendererDrawPreparation::MaterialRecordValid)
+        // while these inputs, which change without a material revision, hold:
+        // each texture field used (index into the material's texture fields)
+        // with the Texture it held and the GPU texture that resolved to, the
+        // scene ambient colour and the draw's environment seeds. A record
+        // that read a reflection environment stays valid for its frame only.
+        struct TextureSource { uint8_t field=0; const void* texture=nullptr; const void* graphics=nullptr; };
+        std::array<TextureSource,9> sources{};
+        uint8_t sourceCount=0;
+        bool frameScoped=true;
+        glm::vec3 ambient{0.f};
+        glm::vec4 environmentSeed{0.f}, reflectionSeed{0.f};
     };
     std::unordered_map<const Engine::Components::Material*,std::unordered_map<uint32_t,CachedRenderMaterial>> m_renderMaterialCache;
     uint64_t m_materialPreparationSerial=0, m_materialCacheStructureRevision=0;
@@ -1060,6 +1080,13 @@ private:
         Engine::Model::MaxRealtimeLights;
     static constexpr uint32_t kCBStride = 256;
     uint32_t m_objectCapacity = kInitialObjectCapacity;
+    // Portal views the object constant buffers hold room for (each one a full
+    // copy of the object slots) and how many the scene needs: all of
+    // kMaxPortalRenderViews with portals, none without. Reserving 64 views
+    // always made each buffer set ~68 MB at 4096 slots, and every growth
+    // while walking the landscape cost 10-146 ms of upload-heap allocation.
+    uint32_t m_objectPortalViews = kMaxPortalRenderViews;
+    uint32_t m_wantedPortalViews = kMaxPortalRenderViews;
     uint32_t m_boneMatrixCapacity = kInitialBoneMatrixCapacity;
 };
 }

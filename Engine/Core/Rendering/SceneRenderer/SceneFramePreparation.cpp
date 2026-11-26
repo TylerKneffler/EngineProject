@@ -196,8 +196,13 @@ void SceneRenderer::PrepareRenderFrame(bool publishSnapshot)
     // layer is complete only the once-a-second re-checks remain, and those
     // filled the whole budget every frame with several hundred layers
     // (a constant 3 ms of the frame on the landscape). They get 0.75 ms.
+    // While building: the scene's budget (Properties > Visibility).
     const auto prefabDeadline = prefabBudgetStart + (m_prefabPreparationSettled
-        ? std::chrono::microseconds(750) : std::chrono::microseconds(3000));
+        ? std::chrono::microseconds(750)
+        : std::chrono::microseconds(static_cast<int64_t>(1000.0 * std::clamp(m_scene.settings.prefabBuildBudgetMs, .25f, 50.f))));
+    // One background re-stat of every prefab source a second (settled
+    // layers skip their own re-checks while nothing moved).
+    Engine::Components::TerrainObjectLayer::PollPrefabSources();
     // Copy the registry view: deriving prefab batches adds scene components.
     const auto objectLayers=m_scene.GetComponents<Engine::Components::TerrainObjectLayer>();
     const auto afterPrefabRegistry=PrepareClock::now();
@@ -209,9 +214,11 @@ void SceneRenderer::PrepareRenderFrame(bool publishSnapshot)
     // Share the upload allowance across cells. The elapsed-time budget below
     // cannot preempt a buffer creation once it has started.
     bool prefabUploadAvailable = true;
+    const auto prefabNow = std::chrono::steady_clock::now();
     for (; prefabVisited < prefabCount; ++prefabVisited)
     {
         auto* layer = objectLayers[(prefabStart + prefabVisited) % prefabCount];
+        if (!layer || !layer->IsPrefabPreparationDue(prefabNow)) continue;
         const auto layerStarted = PrepareClock::now();
         layer->PreparePrefabInstances(m_graphicsProvider, &prefabUploadAvailable, prefabDeadline);
         m_lastPrepareTimings.prefabMaxLayerMs = std::max(m_lastPrepareTimings.prefabMaxLayerMs,
@@ -230,6 +237,8 @@ void SceneRenderer::PrepareRenderFrame(bool publishSnapshot)
         { ++prefabVisited; break; }
     }
     m_prefabPreparationCursor = prefabCount ? (prefabStart + prefabVisited) % prefabCount : 0;
+    m_lastPrepareTimings.prefabLayers = static_cast<double>(prefabCount);
+    m_lastPrepareTimings.prefabLayersVisited = static_cast<double>(prefabVisited);
     // Shared prefab parts: this frame's attached, activated and released
     // blocks reach their objects' meshes.
     Engine::Components::SharedPrefabParts::Flush(m_scene);

@@ -98,6 +98,10 @@ public:
 
     // Render target formats
     virtual IPipelineStateBuilder& SetRenderTargetFormat(int format, int depthFormat = -1) = 0;
+    // Several colour targets (BeginColorPass), DXGI format values. Backends
+    // without multiple render targets keep the first.
+    virtual IPipelineStateBuilder& SetRenderTargetFormats(const int* formats, uint32_t count, int depthFormat = -1)
+    { return SetRenderTargetFormat(count ? formats[0] : 28, depthFormat); }
 
     // Build the final pipeline state
     // Returns nullptr on error (call GetLastError)

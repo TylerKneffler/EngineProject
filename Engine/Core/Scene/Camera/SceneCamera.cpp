@@ -48,11 +48,26 @@ void Scene::SetMode2D(bool enabled)
 
 Scene::Camera* Scene::FindGameCamera()
 {
+    // The first active camera in object order. Cached: reused while the
+    // structure is unchanged, it is still active and enabled, and no other
+    // camera component (a short registry list) is active too; else rescan.
+    if (m_gameCameraCache && m_gameCameraCacheRevision == GetStructureRevision() &&
+        m_gameCameraCache->active && m_gameCameraCache->Owner &&
+        m_gameCameraCache->Owner->IsEnabledInHierarchy())
+    {
+        bool another = false;
+        for (Camera* camera : GetComponents<Camera>())
+            if (camera && camera != m_gameCameraCache && camera->active && camera->Owner &&
+                camera->Owner->IsEnabledInHierarchy()) { another = true; break; }
+        if (!another) return m_gameCameraCache;
+    }
+    m_gameCameraCache = nullptr;
     for (const auto& obj : m_objects)
         if (Camera* cam = obj->GetComponent<Camera>())
             if (obj->IsEnabledInHierarchy() && cam->active)
-                return cam;
-    return nullptr;
+            { m_gameCameraCache = cam; break; }
+    m_gameCameraCacheRevision = GetStructureRevision();
+    return m_gameCameraCache;
 }
 
 }

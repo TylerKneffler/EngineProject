@@ -294,6 +294,9 @@ void TerrainManager::ConfigureCellPhysics(Engine::Core::Object& object) const
     volume->fromTerrain = true;
     volume->steepLayer = volumeSteepLayer;
     volume->sampleSpacing = volumeSampleSpacing;
+    volume->lod1Distance = volumeLod1Distance;
+    volume->lod2Distance = volumeLod2Distance;
+    volume->lod3Distance = volumeLod3Distance;
     // Nothing else draws a loaded cell (far tiles leave it out), so its
     // volume draws at any distance, coarsest level past lod3: at 600 m the
     // loaded area's far corners (up to ~720 m from a viewer at its cell's
@@ -490,4 +493,19 @@ void TerrainManager::RefreshColliderActivation(int centerX, int centerY)
     }
 }
 
+}
+
+namespace Engine::Components
+{
+void TerrainManager::ApplyVolumeLevelDistances()
+{
+    for (const auto& [cell, terrain] : m_loaded)
+        if (terrain && terrain->Owner)
+            if (auto* volume = terrain->Owner->GetComponent<VolumeTerrain>())
+            {
+                volume->lod1Distance = volumeLod1Distance;
+                volume->lod2Distance = volumeLod2Distance;
+                volume->lod3Distance = volumeLod3Distance;
+            }
+}
 }

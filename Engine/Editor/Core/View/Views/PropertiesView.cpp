@@ -544,6 +544,9 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
             if (ui.Checkbox("CPU Occlusion Culling", &m_scene->settings.cpuOcclusionCulling) && OnComponentsChanged)
                 OnComponentsChanged();
             ui.Tooltip("Rasterizes the drawn terrain on the CPU each frame and skips objects wholly behind it. Saves GPU work behind hills; costs ~1 ms of main-thread time before the camera records. Instanced vegetation uses GPU occlusion either way.");
+            if (ui.DragFloat("Prefab Build Budget (ms)", &m_scene->settings.prefabBuildBudgetMs, .1f, .25f, 50.f) && OnComponentsChanged)
+                OnComponentsChanged();
+            ui.Tooltip("Main-thread time per frame for building streamed object layers (trees, props) while cells stream in. Lower spreads the work over more frames; far blocks keep drawing until a cell is ready.");
             ui.Separator();
             ui.Label("Texture LOD");
             auto& textureLod = m_scene->settings.textureLod;

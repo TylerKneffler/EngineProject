@@ -1,12 +1,15 @@
-#include <chrono>
 #include "pch.h"
 #include "Core/Renderers/D3DShaderCache.h"
 #include "Core/Renderers/HlslFileInclude.h"
 #include "Core/Graphics/ShaderCompileProgress.h"
 
+#include <dxcapi.h>
+
 #include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -113,6 +116,85 @@ std::wstring Wide(const std::string& text)
     return wide;
 }
 
+// DXC (Shader Model 6, DXIL), loaded at run time: dxcompiler.dll next to the
+// executable, else the newest Windows SDK's (its dxil.dll, which signs the
+// output, is then found through SetDllDirectory). Null when unavailable.
+DxcCreateInstanceProc DxcFactory()
+{
+    static const DxcCreateInstanceProc proc = []() -> DxcCreateInstanceProc {
+        HMODULE module = LoadLibraryW(L"dxcompiler.dll");
+        if (!module)
+        {
+            std::error_code error;
+            fs::path best;
+            const fs::path kits = L"C:\\Program Files (x86)\\Windows Kits\\10\\bin";
+            for (const auto& entry : fs::directory_iterator(kits, error))
+            {
+                const fs::path candidate = entry.path() / L"x64" / L"dxcompiler.dll";
+                if (fs::exists(candidate, error) && fs::exists(entry.path() / L"x64" / L"dxil.dll", error) &&
+                    (best.empty() || entry.path().filename() > best.parent_path().parent_path().filename()))
+                    best = candidate;
+            }
+            if (!best.empty())
+            {
+                SetDllDirectoryW(best.parent_path().c_str());
+                module = LoadLibraryW(best.c_str());
+            }
+        }
+        return module ? reinterpret_cast<DxcCreateInstanceProc>(GetProcAddress(module, "DxcCreateInstance")) : nullptr;
+    }();
+    return proc;
+}
+
+bool IsDxcTarget(const char* target)
+{
+    return target && std::strlen(target) >= 4 && target[3] == '6';
+}
+
+// One DXC compile (instances per call: DXC objects are not thread-safe).
+HRESULT CompileWithDxc(const std::wstring& widePath, const char* entryPoint, const char* target,
+    UINT flags, Microsoft::WRL::ComPtr<ID3DBlob>& bytecode, std::string& error)
+{
+    const auto factory = DxcFactory();
+    if (!factory) { error = "dxcompiler.dll not found"; return E_FAIL; }
+    Microsoft::WRL::ComPtr<IDxcUtils> utils;
+    Microsoft::WRL::ComPtr<IDxcCompiler3> compiler;
+    if (FAILED(factory(CLSID_DxcUtils, IID_PPV_ARGS(&utils))) ||
+        FAILED(factory(CLSID_DxcCompiler, IID_PPV_ARGS(&compiler))))
+    { error = "DXC could not be created"; return E_FAIL; }
+    Microsoft::WRL::ComPtr<IDxcIncludeHandler> includes;
+    utils->CreateDefaultIncludeHandler(&includes);
+    Microsoft::WRL::ComPtr<IDxcBlobEncoding> source;
+    if (FAILED(utils->LoadFile(widePath.c_str(), nullptr, &source)))
+    { error = "Shader source not readable"; return E_FAIL; }
+    const std::wstring entry = Wide(entryPoint ? entryPoint : "main");
+    const std::wstring profile = Wide(target);
+    const std::wstring directory = fs::path(widePath).parent_path().wstring();
+    std::vector<LPCWSTR> arguments = {widePath.c_str(), L"-E", entry.c_str(), L"-T", profile.c_str(),
+        L"-I", directory.c_str(), L"-Qstrip_debug", L"-Qstrip_reflect"};
+    arguments.push_back((flags & D3DCOMPILE_SKIP_OPTIMIZATION) ? L"-Od" : L"-O3");
+    DxcBuffer buffer{source->GetBufferPointer(), source->GetBufferSize(), DXC_CP_ACP};
+    Microsoft::WRL::ComPtr<IDxcResult> result;
+    if (FAILED(compiler->Compile(&buffer, arguments.data(), static_cast<UINT32>(arguments.size()),
+        includes.Get(), IID_PPV_ARGS(&result))) || !result)
+    { error = "DXC compile call failed"; return E_FAIL; }
+    HRESULT status = E_FAIL;
+    result->GetStatus(&status);
+    Microsoft::WRL::ComPtr<IDxcBlobUtf8> messages;
+    result->GetOutput(DXC_OUT_ERRORS, IID_PPV_ARGS(&messages), nullptr);
+    if (FAILED(status))
+    {
+        error = messages && messages->GetStringLength() ? messages->GetStringPointer() : "DXC compile failed";
+        return status;
+    }
+    Microsoft::WRL::ComPtr<IDxcBlob> object;
+    result->GetOutput(DXC_OUT_OBJECT, IID_PPV_ARGS(&object), nullptr);
+    if (!object || FAILED(D3DCreateBlob(object->GetBufferSize(), &bytecode)))
+    { error = "DXC produced no object"; return E_FAIL; }
+    std::memcpy(bytecode->GetBufferPointer(), object->GetBufferPointer(), object->GetBufferSize());
+    return S_OK;
+}
+
 // Key from the preprocessed source; empty when preprocessing fails (the
 // compile then runs uncached and reports the real error).
 std::string CacheKey(const std::string& filePath, const char* entryPoint,
@@ -127,7 +209,7 @@ std::string CacheKey(const std::string& filePath, const char* entryPoint,
         nullptr, &includes, &preprocessed, &errors)) || !preprocessed)
         return {};
     Hasher hasher;
-    hasher.Add("d3d-bytecode-v1");
+    hasher.Add(IsDxcTarget(target) ? "dxil-v1" : "d3d-bytecode-v1");
     hasher.Add(std::to_string(D3D_COMPILER_VERSION));
     hasher.Add(entryPoint ? entryPoint : "");
     hasher.Add(target ? target : "");
@@ -176,6 +258,12 @@ Microsoft::WRL::ComPtr<ID3DBlob> D3DShaderCache::CompileFromFile(
     const std::string& filePath, const char* entryPoint, const char* target,
     UINT flags, std::string& error)
 {
+    // The first request warms every recorded one in parallel (see header).
+    // An atomic, not call_once: the warm's own workers come back through
+    // here and must pass straight on.
+    static std::atomic<bool> warmStarted{false};
+    if (g_recordRequests && !warmStarted.exchange(true))
+        WarmRecordedRequests();
     error.clear();
     if (CacheEnabled() && !CacheDirectory().empty())
         RecordRequest(filePath, entryPoint, target, flags);
@@ -218,8 +306,11 @@ Microsoft::WRL::ComPtr<ID3DBlob> D3DShaderCache::CompileFromFile(
     if (logCompiles)
         std::fprintf(stderr, "[ShaderCompile] start %s %s %s flags 0x%x cached-as %s\n", filePath.c_str(),
             entryPoint ? entryPoint : "", target ? target : "", flags, cached.string().c_str());
-    const HRESULT hr = D3DCompileFromFile(widePath.c_str(), nullptr, &includes,
-        entryPoint, target, flags, 0, &bytecode, &errors);
+    std::string dxcError;
+    const HRESULT hr = IsDxcTarget(target)
+        ? CompileWithDxc(widePath, entryPoint, target, flags, bytecode, dxcError)
+        : D3DCompileFromFile(widePath.c_str(), nullptr, &includes,
+            entryPoint, target, flags, 0, &bytecode, &errors);
     Engine::Graphics::ShaderCompileProgress::End(progressTicket, SUCCEEDED(hr));
     if (logCompiles)
         std::fprintf(stderr, "[ShaderCompile] %s %s %s after %.1f s\n", FAILED(hr) ? "FAILED" : "done",
@@ -227,7 +318,9 @@ Microsoft::WRL::ComPtr<ID3DBlob> D3DShaderCache::CompileFromFile(
             std::chrono::duration<double>(std::chrono::steady_clock::now() - compileStart).count());
     if (FAILED(hr))
     {
-        if (errors)
+        if (!dxcError.empty())
+            error = dxcError;
+        else if (errors)
             error.assign(static_cast<const char*>(errors->GetBufferPointer()),
                 errors->GetBufferSize());
         else
@@ -273,4 +366,59 @@ std::vector<D3DShaderCache::Request> D3DShaderCache::RecordedRequests()
 }
 
 std::string D3DShaderCache::CacheDirectoryPath() { return CacheDirectory().string(); }
+
+bool D3DShaderCache::DxcAvailable() { return DxcFactory() != nullptr; }
+
+namespace { std::atomic<bool> g_preferModel6{false}; }
+void D3DShaderCache::PreferShaderModel6() { g_preferModel6 = true; }
+
+void D3DShaderCache::WarmRecordedRequests()
+{
+    static const bool enabled = [] {
+        const char* value = std::getenv("ENGINE_SHADER_WARM");
+        return !(value && value[0] == '0');
+    }();
+    if (!enabled || !CacheEnabled() || CacheDirectory().empty()) return;
+    std::error_code pathError;
+    const std::string directory = fs::current_path(pathError).string();
+    if (pathError) return;
+    std::vector<Request> requests;
+    std::set<std::string> listed;
+    for (auto& request : RecordedRequests())
+    {
+        std::error_code error;
+        if (!fs::equivalent(request.directory, directory, error) || error ||
+            !fs::exists(request.filePath, error))
+            continue;
+        if (g_preferModel6 && request.target.size() == 6 && request.target.compare(2, 4, "_5_0") == 0)
+            request.target = request.target.substr(0, 2) + "_6_0";
+        if (listed.insert(request.filePath + '	' + request.entryPoint + '	' + request.target).second)
+            requests.push_back(std::move(request));
+    }
+    if (requests.empty()) return;
+    const auto start = std::chrono::steady_clock::now();
+    std::atomic<size_t> next{0};
+    std::atomic<int> compiled{0};
+    const unsigned workers = std::max(1u, std::min<unsigned>(std::thread::hardware_concurrency(),
+        static_cast<unsigned>(requests.size())));
+    std::vector<std::thread> threads;
+    for (unsigned t = 0; t < workers; ++t)
+        threads.emplace_back([&] {
+            for (size_t i; (i = next++) < requests.size();)
+            {
+                const auto& request = requests[i];
+                const auto begin = std::chrono::steady_clock::now();
+                std::string message;
+                // Recorded already; a failure is reported by the real request.
+                CompileFromFile(request.filePath, request.entryPoint.c_str(),
+                    request.target.c_str(), request.flags, message);
+                if (std::chrono::steady_clock::now() - begin > std::chrono::seconds(1)) ++compiled;
+            }
+        });
+    for (auto& thread : threads) thread.join();
+    if (compiled)
+        std::fprintf(stderr, "[ShaderCache] warmed %zu recorded shaders (%d compiled) in %.1f s on %u threads\n",
+            requests.size(), compiled.load(),
+            std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count(), workers);
+}
 }

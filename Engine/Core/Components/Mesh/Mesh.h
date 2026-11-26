@@ -210,6 +210,8 @@ public:
         // batching pass (shared part blocks are visited once per part).
         mutable uint64_t poolPass = 0;
         mutable uint32_t poolBase = 0;
+        // Rendering::PersistentInstancePool's registration handle (opaque).
+        mutable std::shared_ptr<void> poolHandle;
     };
     struct InstanceRange
     {

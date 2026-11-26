@@ -9,6 +9,11 @@ struct DrawConstants
     // Instanced ground cover: this range's share of the placement fade and
     // thinning distances in 1/1024ths (0 = all of it).
     uint placementReach;
+    // Terrain virtual texture fill (PSTerrainVirtualTexture, VSTerrainVirtualTexture):
+    // the level region drawn, as world X/Z of texel (0,0) and 1 / extent
+    // (TerrainVirtualTexture.cpp), and the height range mapped to depth.
+    float4 virtualTextureRect;
+    float4 virtualTextureDepth;
 };
 
 struct ObjectData
@@ -78,7 +83,7 @@ struct ObjectData
     uint4 terrainTrailKeys;    // bins z, list offset, segment offset, texture width (0 = off)
     float4 terrainTrailOffset; // xy: the manager's world position x, z
     float4 terrainSteep;       // volume chunks on a paint map: steep start, end, layer, on
-    float4 terrainTrailReserved;
+    float4 terrainTrailReserved; // terrain virtual texture: level-0 texel (m), levels, texels per side, on
     // x = the view's mip bias (<= 0) while TAA upscales it from a lower
     // render size, so textures keep the output's sharpness; yzw reserved.
     float4 viewTextureParams;
@@ -171,6 +176,12 @@ Texture2DArray terrainAlbedoHeight : register(t27);
 Texture2DArray terrainNormal : register(t28);
 Texture2DArray terrainRoughAo : register(t29);
 Texture2DArray terrainPaint : register(t30);
+// Terrain virtual texture (logical slots 24-26, t31-t33; DX12): the blended
+// layer material on a clipmap around the camera, slice = level.
+Texture2DArray terrainVtAlbedo : register(t31);
+Texture2DArray terrainVtNormal : register(t32);
+Texture2DArray terrainVtMean : register(t33);
+#define TERRAIN_VIRTUAL_TEXTURE 1
 StructuredBuffer<SceneLightData> sceneLights : register(t6);
 StructuredBuffer<ObjectData> objects : register(t7);
 StructuredBuffer<float4x4> boneMatrices : register(t8);
@@ -707,6 +718,16 @@ void VSMain(
             // dither that read as grain wherever TAA history was rejected.
             [unroll] for (uint k = 0u; k < 3u; ++k)
                 weights[k] = pow(saturate(weights[k]), 4.0);
+            // Views under 5 % are dropped, and past 600 m only the nearest
+            // view draws: a zero-weight quad collapses to the centre and is
+            // not rasterized. All three quads cover the whole tree, so the
+            // depth pre-pass rasterized and alpha-tested each far tree three
+            // times (Vista: ~390k impostors, 9 ms of GPU; todo.md Step 0).
+            const bool singleView = length(objectData.viewPositionAlphaCutoff.xyz - center) > 600.0;
+            const uint nearest = weights[0] >= weights[1] && weights[0] >= weights[2] ? 0u
+                : (weights[1] >= weights[2] ? 1u : 2u);
+            [unroll] for (uint d = 0u; d < 3u; ++d)
+                weights[d] = singleView ? (d == nearest ? 1.0 : 0.0) : (weights[d] < 0.05 ? 0.0 : weights[d]);
             const float weightSum = max(weights[0] + weights[1] + weights[2], 1.0e-6);
             [unroll] for (uint m = 0u; m < 3u; ++m)
                 weights[m] /= weightSum;
@@ -1285,6 +1306,14 @@ static float g_detailTexture = 1.0;
 // own colour, so triangle size and count read directly as geometric detail.
 // The entry points record SV_PrimitiveID and the resolved object record.
 static uint g_primitiveId = 0u;
+// Terrain virtual texture fill: ObjectSurfacePS stops after the layered
+// terrain material and leaves it here (set only by PSTerrainVirtualTexture,
+// so every other entry point compiles the branch away).
+static bool g_terrainVirtualTextureFill = false;
+static float4 g_terrainVtAlbedo = 0.0;
+static float4 g_terrainVtNormal = 0.0;
+static float4 g_terrainVtMean = 0.0;
+static bool g_terrainVtDebugMiss = false;
 static uint g_triangleObject = 0u;
 bool IsTriangleDraw(ObjectData data) { return data.morphParams.z < -15000.0; }
 bool IsDetailHeatDraw(ObjectData data)
@@ -2287,6 +2316,91 @@ float3 UnpackTerrainNormal(float2 encoded)
     return n;
 }
 
+// Distant terrain layer detail (flag 4194304). Distant nodes carry no paint,
+// so the layers are inferred per pixel: the macro colour's chroma and
+// brightness against each layer's mean (terrainMacroColors) and the slope
+// (terrainSteep: start, end, layer, on). The two strongest layers give the
+// fine grain and the strongest also macro variation at 4x and 16x its scale
+// (steep faces from the side), applied as albedo ratio and normal detail on
+// the macro colour, so far ground reads as the near cells' materials instead
+// of a flat 16 m colour. Fades out between 1.2 and 2.5 km.
+void ApplyDistantLayerDetail(ObjectData objectData, float3 worldPos, float3 positionDx,
+    float3 positionDy, inout float3 ground, inout float3 surfaceNormal)
+{
+    const float viewDistance = distance(worldPos, objectData.viewPositionAlphaCutoff.xyz);
+    // The fine grain resolves to ~2.5 km; the macro variation (4x and 16x
+    // scales) and its normals carry on to ~8 km.
+    const float amount = 1.0 - smoothstep(1200.0, 2500.0, viewDistance);
+    const float macroAmount = 1.0 - smoothstep(4000.0, 8000.0, viewDistance);
+    [branch] if (macroAmount <= 0.0) return;
+    const uint mask = objectData.terrainMapMasks.w;
+    const float3 luma = float3(0.2126, 0.7152, 0.0722);
+    const float groundLuma = max(dot(ground, luma), 1e-3);
+    const float3 groundChroma = ground / groundLuma;
+    const uint steepLayer = (uint)objectData.terrainSteep.z;
+    const float steep = objectData.terrainSteep.w > 0.5
+        ? smoothstep(objectData.terrainSteep.x, objectData.terrainSteep.y, 1.0 - surfaceNormal.y) : 0.0;
+    uint first = 0u, second = 0u;
+    float w1 = 0.0, w2 = 0.0;
+    [unroll] for (uint layer = 0u; layer < 6u; ++layer)
+    {
+        if ((mask & (1u << layer)) == 0u) continue;
+        const float3 mean = objectData.terrainMacroColors[layer].rgb;
+        const float meanLuma = max(dot(mean, luma), 1e-3);
+        const float3 chroma = groundChroma - mean / meanLuma;
+        const float brightness = log2(groundLuma / meanLuma);
+        float weight = exp(-(dot(chroma, chroma) * 6.0 + brightness * brightness * 0.5));
+        weight = layer == steepLayer ? max(weight, steep) : weight * (1.0 - steep);
+        if (weight > w1) { w2 = w1; second = first; w1 = weight; first = layer; }
+        else if (weight > w2) { w2 = weight; second = layer; }
+    }
+    [branch] if (w1 <= 1e-4) return;
+    const float total = w1 + w2;
+    const float repeats = objectData.textureUvSets1.x > 0.0
+        ? objectData.textureUvSets1.z / objectData.textureUvSets1.x : 0.5;
+    // Steep faces from the side (the top projection streaks there).
+    const bool side = steep > 0.5;
+    const bool alongX = abs(surfaceNormal.x) > abs(surfaceNormal.z);
+    const float2 position = side ? (alongX ? worldPos.zy : worldPos.xy) : worldPos.xz;
+    const float2 positionX = side ? (alongX ? positionDx.zy : positionDx.xy) : positionDx.xz;
+    const float2 positionY = side ? (alongX ? positionDy.zy : positionDy.xy) : positionDy.xz;
+    // Three scales: a quarter of the near repeat (the material's grain where
+    // the mips still resolve it), then 4x and 16x larger (macro variation:
+    // the same textures as large patches, which survive the distance's
+    // mips; a single small-scale sample averages to the layer mean far out
+    // and showed nothing). Each is a ratio to the layer mean, around 1.
+    const float3 meanFirst = max(objectData.terrainMacroColors[first].rgb, 0.02);
+    const float3 meanSecond = max(objectData.terrainMacroColors[second].rgb, 0.02);
+    const float scale0 = repeats * 0.25;
+    float3 ratio = terrainAlbedoHeight.SampleGrad(materialSampler, float3(position * scale0, (float)first),
+        positionX * scale0, positionY * scale0).rgb / meanFirst * (w1 / total);
+    [branch] if (w2 > 1e-4)
+        ratio += terrainAlbedoHeight.SampleGrad(materialSampler, float3(position * scale0, (float)second),
+            positionX * scale0, positionY * scale0).rgb / meanSecond * (w2 / total);
+    else ratio += w2 / total;
+    const float lumaFirst = max(dot(meanFirst, luma), 0.02);
+    // Rotated against each other so the larger patterns do not line up.
+    const float scale1 = repeats / 16.0, scale2 = repeats / 64.0;
+    const float2 uv1 = float2(position.y, -position.x) * scale1;
+    const float2 uv2 = float2(-position.x, -position.y) * scale2 + 0.37;
+    const float macro1 = dot(terrainAlbedoHeight.SampleGrad(materialSampler, float3(uv1, (float)first),
+        float2(positionX.y, -positionX.x) * scale1, float2(positionY.y, -positionY.x) * scale1).rgb, luma) / lumaFirst;
+    const float macro2 = dot(terrainAlbedoHeight.SampleGrad(materialSampler, float3(uv2, (float)first),
+        -positionX * scale2, -positionY * scale2).rgb, luma) / lumaFirst;
+    ground *= lerp(1.0, clamp(ratio, 0.45, 1.9), amount);
+    ground *= lerp(1.0, clamp(lerp(1.0, macro1, 0.6) * lerp(1.0, macro2, 0.5), 0.5, 1.8), macroAmount);
+    // Normal detail from the 32 m scale (resolves where the fine one is flat).
+    const float3 detail = UnpackTerrainNormal(terrainNormal.SampleGrad(materialSampler,
+        float3(uv1, (float)first), float2(positionX.y, -positionX.x) * scale1,
+        float2(positionY.y, -positionY.x) * scale1).rg);
+    // Tangent frame from the projection axes (rotated as uv1), on the surface.
+    const float3 axisU = side ? float3(0.0, 1.0, 0.0) : float3(0.0, 0.0, 1.0);
+    const float3 axisV = side ? (alongX ? float3(0.0, 0.0, -1.0) : float3(-1.0, 0.0, 0.0)) : float3(-1.0, 0.0, 0.0);
+    const float3 tangentU = normalize(axisU - surfaceNormal * dot(axisU, surfaceNormal) + 1e-5);
+    const float3 tangentV = normalize(axisV - surfaceNormal * dot(axisV, surfaceNormal) + 1e-5);
+    surfaceNormal = normalize(surfaceNormal + (detail.x * tangentU + detail.y * tangentV) * 0.8 * macroAmount);
+}
+
 // Mikkelsen, "Practical Real-Time Hex-Tiling" (JCGT 2022): three randomly
 // offset and rotated copies on a triangle grid, blended with a contrast ramp.
 // Returns the blend of the copies; tangent normals are rotated back into the
@@ -3136,6 +3250,69 @@ float4 PSGrassMain(
 }
 #endif
 
+// Share of a terrain pixel under ground cover, and the weighted mean colour of
+// its layers (the ground-cover tint keeps the layer texture as brightness
+// detail against this mean).
+void TerrainCoverShare(ObjectData objectData, float weights[6], float weightSum,
+    out float cover, out float3 layerMean)
+{
+    const uint coverMask = (uint)objectData.groundCoverRange.z;
+    cover = 0.0;
+    layerMean = 0.0;
+    [unroll] for (uint layer = 0u; layer < 6u; ++layer)
+    {
+        if (coverMask & (1u << layer)) cover += weights[layer];
+        layerMean += objectData.terrainMacroColors[layer].rgb * weights[layer];
+    }
+    cover = saturate(cover / max(weightSum, 1e-5));
+    layerMean /= max(weightSum, 1e-5);
+}
+
+#ifdef TERRAIN_VIRTUAL_TEXTURE
+// The terrain virtual texture at a ground point (TerrainVirtualTexture.cpp):
+// level by the pixel's footprint, never finer than the level whose window
+// (centred on the camera, kept within 1/8 of its extent of it) holds the
+// point; the two nearest levels blended. False where no level holds it or a
+// texel was never filled.
+bool SampleTerrainVirtualTexture(ObjectData objectData, float3 worldPos,
+    out float4 albedo, out float4 normalRough, out float4 mean)
+{
+    albedo = 0.0; normalRough = 0.0; mean = 0.0;
+    const float texel0 = objectData.terrainTrailReserved.x;
+    const float levels = objectData.terrainTrailReserved.y;
+    const float texels = objectData.terrainTrailReserved.z;
+    const float2 dx = ddx(worldPos.xz), dy = ddy(worldPos.xz);
+    // Geometric mean of the footprint's axes: the long axis alone blurs
+    // ground seen at a grazing angle, the short one aliases.
+    const float footprint = sqrt(max(length(dx) * length(dy), 1e-12));
+    float level = max(log2(max(footprint / texel0, 1e-6)), 0.0);
+    const float2 offset = abs(worldPos.xz - objectData.viewPositionAlphaCutoff.xz);
+    const float reach = max(offset.x, offset.y) / (texel0 * texels * 0.375);
+    level = max(level, ceil(log2(max(reach, 1.0))));
+    [branch] if (level > levels - 1.0) return false;
+    const float level0 = floor(level);
+    const float level1 = min(level0 + 1.0, levels - 1.0);
+    const float blend = level - level0;
+    const float extent0 = texel0 * texels * exp2(level0);
+    const float extent1 = texel0 * texels * exp2(level1);
+    const float3 c0 = float3(worldPos.xz / extent0, level0);
+    const float3 c1 = float3(worldPos.xz / extent1, level1);
+    float4 a = terrainVtAlbedo.SampleLevel(materialSampler, c0, 0.0);
+    float4 n = terrainVtNormal.SampleLevel(materialSampler, c0, 0.0);
+    float4 m = terrainVtMean.SampleLevel(materialSampler, c0, 0.0);
+    [branch] if (blend > 0.001)
+    {
+        a = lerp(a, terrainVtAlbedo.SampleLevel(materialSampler, c1, 0.0), blend);
+        n = lerp(n, terrainVtNormal.SampleLevel(materialSampler, c1, 0.0), blend);
+        m = lerp(m, terrainVtMean.SampleLevel(materialSampler, c1, 0.0), blend);
+    }
+    // Unfilled texels (cleared to 0) or a bilinear tap across a hole.
+    [branch] if (m.a < 0.999) return false;
+    albedo = a; normalRough = n; mean = m;
+    return true;
+}
+#endif
+
 // The object surface shader. PSMain below is its entry point; material
 // shaders that wrap this file call it through their renamed PSMain.
 float4 ObjectSurfacePS(
@@ -3163,7 +3340,7 @@ float4 ObjectSurfacePS(
         uv, uv1, uvChannels0, uvChannels1, uvChannels2,
         uvChannels3, uvChannels4);
     const float2 maskUvDx = ddx(maskUv), maskUvDy = ddy(maskUv);
-    ApplyGeometryFade(objectData, worldPos, pos.xy);
+    if (!g_terrainVirtualTextureFill) ApplyGeometryFade(objectData, worldPos, pos.xy);
     ApplyAlphaLod(objectData, worldPos);
     float textureBias = TextureLodBias(objectData, worldPos);
     uint flags = (uint)objectData.materialParams.w;
@@ -3237,16 +3414,21 @@ float4 ObjectSurfacePS(
             const float canopyEnd = objectData.terrainMacroParams.z;
             const float canopyCover = macro.a * smoothstep(canopyEnd * 0.9, canopyEnd,
                 distance(worldPos, objectData.viewPositionAlphaCutoff.xyz));
-            base.rgb = objectData.baseColor.rgb * lerp(macro.rgb, TerrainCanopyColor, canopyCover);
             // w: 0 = no normal map, else 1 + canopy relief strength.
-            [branch] if (objectData.terrainMacroParams.w > 0.5)
-            {
+            if (objectData.terrainMacroParams.w > 0.5)
                 surfaceNormal = SampleTerrainMacroNormal(objectData, worldPos,
                     positionDx, positionDy);
+            // The near cells' materials as detail on the ground (not the
+            // painted canopy): albedo and normal from the inferred layers.
+            float3 ground = macro.rgb;
+            [branch] if ((flags & 4194304u) != 0u)
+                ApplyDistantLayerDetail(objectData, worldPos, positionDx, positionDy,
+                    ground, surfaceNormal);
+            base.rgb = objectData.baseColor.rgb * lerp(ground, TerrainCanopyColor, canopyCover);
+            [branch] if (objectData.terrainMacroParams.w > 0.5)
                 base.rgb *= ApplyDistantCanopy(surfaceNormal, worldPos,
                     max(length(positionDx), length(positionDy)), canopyCover,
                     objectData.terrainMacroParams.w - 1.0);
-            }
         }
         // Trails (TerrainTrailSample) at the far tiles' own resolution. Far
         // tiles carry no paint: steep ground (where the near paint turns to
@@ -3333,11 +3515,50 @@ float4 ObjectSurfacePS(
         // showed its repeats), fully at 1.5 km.
         const float macroBlend = (flags & 131072u)
             ? smoothstep(300.0, 1500.0, nearDistance) : 0.0;
+        // Terrain virtual texture: flat-enough ground (not the biplanar side
+        // projections, not triplanar rock) takes the material blended once
+        // into the clipmap instead of blending the layers here.
+        bool terrainVtUsed = false;
+        float terrainVtCover = 0.0;
+        float3 terrainVtMean = 0.0;
+#ifdef TERRAIN_VIRTUAL_TEXTURE
+        [branch] if (!g_terrainVirtualTextureFill && objectData.terrainTrailReserved.w > 0.5 &&
+            worldMapped && (uvChannels4.z > -0.5 || uvChannels4.w < 0.002) && macroBlend < 0.999 && abs(normalize(normal).y) >= 0.80)
+        {
+            float4 vtAlbedo, vtNormal, vtMean;
+            [branch] if (SampleTerrainVirtualTexture(objectData, worldPos, vtAlbedo, vtNormal, vtMean))
+            {
+                terrainVtUsed = true;
+                base.rgb = vtAlbedo.rgb;
+                terrainVtCover = vtAlbedo.a;
+                terrainVtMean = vtMean.rgb;
+                const float2 nxz = vtNormal.xy * 2.0 - 1.0;
+                terrainNormalForLighting = normalize(float3(nxz.x,
+                    sqrt(saturate(1.0 - dot(nxz, nxz))), nxz.y));
+                terrainRoughness = clamp(vtNormal.z, 0.045, 1.0);
+                terrainOcclusion = vtNormal.w;
+                // Debug (ENGINE_TERRAIN_VT_DEBUG=1): tint the pixels it served.
+                // Debug 2: the cached normal X/Z (red/green, 0.5 = flat) and occlusion (blue).
+                if (objectData.terrainTrailReserved.w > 2.5)
+                {
+                    const float2 tilt = vtNormal.xy * 2.0 - 1.0;
+                    return dot(tilt, tilt) > 0.5 ? float4(0.2, 0.0, 0.0, 1.0) : float4(0.0, 0.2, 0.0, 1.0);
+                }
+                if (objectData.terrainTrailReserved.w > 1.5) base.rgb = lerp(base.rgb, float3(1.0, 0.0, 1.0), 0.5);
+            }
+            else if (objectData.terrainTrailReserved.w > 1.5)
+                g_terrainVtDebugMiss = true;
+        }
+        const bool terrainVtDebugIneligible = !g_terrainVirtualTextureFill &&
+            objectData.terrainTrailReserved.w > 1.5 && !terrainVtUsed && !g_terrainVtDebugMiss;
+#else
+        const bool terrainVtDebugIneligible = false;
+#endif
         float weights[6] = {uvChannels2.x, uvChannels2.y,
             uvChannels2.z, uvChannels2.w, uvChannels3.x, uvChannels3.y};
         // Paint map: weights at finer than vertex spacing. Its samples sit on
         // the vertex grid, so texel centres map to uv 0 and 1 exactly.
-        [branch] if (flags & 524288u)
+        [branch] if (!terrainVtUsed && (flags & 524288u))
         {
             uint paintWidth, paintHeight, paintSlices;
             terrainPaint.GetDimensions(paintWidth, paintHeight, paintSlices);
@@ -3367,7 +3588,7 @@ float4 ObjectSurfacePS(
         // as the CPU paint did at the vertices.
         float pathShare = 0.0;
         float3 pathFarColor = 0.0;
-        [branch] if (objectData.terrainTrailKeys.w != 0u)
+        [branch] if (!terrainVtUsed && objectData.terrainTrailKeys.w != 0u)
         {
             const float footprint = max(length(worldDx.xz), length(worldDy.xz)) / gradientScale;
             const TerrainTrailHit trail = TerrainTrailSample(objectData, worldPos, footprint);
@@ -3391,7 +3612,11 @@ float4 ObjectSurfacePS(
             originalWeightSum += weights[layer];
         const uint4 masks = objectData.terrainMapMasks;
 
-        [branch] if ((flags & 262144u) == 0u || macroBlend >= 0.999)
+        [branch] if (terrainVtUsed)
+        {
+            // Blended in the virtual texture (above).
+        }
+        else if ((flags & 262144u) == 0u || macroBlend >= 0.999)
         {
             // Layer arrays not resident yet, or beyond detail range: the
             // measured mean color of each layer.
@@ -3629,13 +3854,57 @@ float4 ObjectSurfacePS(
                     terrainNormalForLighting = normalize(blendedNormal);
             }
         }
-        if (!hexTiling)
+        if (!hexTiling && !terrainVtUsed)
             base.rgb *= 1.0 + (terrainVariation.x + terrainVariation.y) * 0.10;
+        // Macro variation past the close range: the strongest layer's own
+        // texture at 4x and 16x its scale, as a brightness ratio around 1,
+        // so the mid-range ground (single samples of a 2 m repeat, mostly
+        // its mean colour there) is not a flat colour. The distant nodes do
+        // the same (ApplyDistantLayerDetail), so both sides match.
+        [branch] if (!terrainVtUsed && (flags & 262144u) != 0u && worldMapped)
+        {
+            const float macroFade = smoothstep(20.0, 60.0, nearDistance);
+            uint strongest = 0u;
+            float strongestWeight = -1.0;
+            [unroll] for (uint layer = 0u; layer < 6u; ++layer)
+                if ((objectData.terrainMapMasks.w & (1u << layer)) != 0u && weights[layer] > strongestWeight)
+                { strongestWeight = weights[layer]; strongest = layer; }
+            [branch] if (macroFade > 0.0 && strongestWeight > 0.0)
+            {
+                const float3 luma = float3(0.2126, 0.7152, 0.0722);
+                const float meanLuma = max(dot(objectData.terrainMacroColors[strongest].rgb, luma), 0.02);
+                const float2 position = worldPos.xz, positionX = worldDx.xz, positionY = worldDy.xz;
+                const float scale1 = repeatsPerMetre / 16.0, scale2 = repeatsPerMetre / 64.0;
+                const float macro1 = dot(terrainAlbedoHeight.SampleGrad(materialSampler,
+                    float3(float2(position.y, -position.x) * scale1, (float)strongest),
+                    float2(positionX.y, -positionX.x) * scale1, float2(positionY.y, -positionY.x) * scale1).rgb, luma) / meanLuma;
+                const float macro2 = dot(terrainAlbedoHeight.SampleGrad(materialSampler,
+                    float3(-position * scale2 + 0.37, (float)strongest),
+                    -positionX * scale2, -positionY * scale2).rgb, luma) / meanLuma;
+                base.rgb *= lerp(1.0, clamp(lerp(1.0, macro1, 0.6) * lerp(1.0, macro2, 0.5), 0.5, 1.8), macroFade);
+            }
+        }
         // Lush valley floors (Terrain::lushness, uvChannels1.w): the darker,
         // greener tint the macro color map gives the same ground far away
         // (TerrainManagerArchiveMap.cpp LushTint: keep them the same).
-        base.rgb *= lerp(float3(1.0, 1.0, 1.0), float3(0.72, 0.92, 0.55),
-            saturate(uvChannels1.w));
+        if (!terrainVtUsed)
+            base.rgb *= lerp(float3(1.0, 1.0, 1.0), float3(0.72, 0.92, 0.55),
+                saturate(uvChannels1.w));
+        if (g_terrainVtDebugMiss) base.rgb = lerp(base.rgb, float3(0.0, 0.3, 1.0), 0.6);
+        if (terrainVtDebugIneligible) base.rgb = lerp(base.rgb, float3(1.0, 1.0, 0.0), 0.6);
+        // Virtual texture fill: the blended material ends here; ground cover
+        // (view-dependent shells, wind), rock and lighting stay per pixel.
+        [branch] if (g_terrainVirtualTextureFill)
+        {
+            float cover;
+            float3 layerMean;
+            TerrainCoverShare(objectData, weights, originalWeightSum, cover, layerMean);
+            g_terrainVtAlbedo = float4(saturate(base.rgb), cover);
+            g_terrainVtNormal = float4(terrainNormalForLighting.xz * 0.5 + 0.5,
+                terrainRoughness, terrainOcclusion);
+            g_terrainVtMean = float4(saturate(layerMean), 1.0);
+            return 0.0;
+        }
         // Ground under ground cover (Terrain::GroundCover). Inside the cover's
         // range the gaps between plants show darker root-coloured
         // undergrowth instead of the bare layer texture; across and past its
@@ -3644,18 +3913,12 @@ float4 ObjectSurfacePS(
         // The layer texture survives as brightness detail.
         [branch] if (objectData.groundCoverColor.w > 0.0 && originalWeightSum > 0.00001)
         {
-            const uint coverMask = (uint)objectData.groundCoverRange.z;
-            float cover = 0.0;
-            float3 layerMean = 0.0;
-            [unroll] for (uint layer = 0u; layer < 6u; ++layer)
-            {
-                if (coverMask & (1u << layer)) cover += weights[layer];
-                layerMean += objectData.terrainMacroColors[layer].rgb * weights[layer];
-            }
-            cover = saturate(cover / originalWeightSum);
+            float cover = terrainVtCover;
+            float3 layerMean = terrainVtMean;
+            if (!terrainVtUsed)
+                TerrainCoverShare(objectData, weights, originalWeightSum, cover, layerMean);
             [branch] if (cover > 0.0)
             {
-                layerMean /= originalWeightSum;
                 const float3 luma = float3(0.2126, 0.7152, 0.0722);
                 const float detail = clamp(dot(base.rgb, luma) /
                     max(dot(layerMean, luma) * originalWeightSum, 0.002), 0.6, 1.4);
@@ -4311,6 +4574,76 @@ float4 PSMain(
         objectIndex, pos.xy);
 }
 #endif
+
+// Terrain virtual texture fill (TerrainVirtualTexture.cpp): the terrain draw
+// seen from above, its clip position mapped from world X/Z onto the level
+// region in draw.virtualTextureRect and its height onto depth (higher is
+// nearer under reverse-Z, so overhangs keep their top surface).
+void VSTerrainVirtualTexture(
+    float3 pos : POSITION, float3 normal : NORMAL, float2 uv : TEXCOORD,
+    float4 tangent : TANGENT, float2 uv1 : TEXCOORD1, float4 color : COLOR,
+    float4 joints0 : JOINTS0, float4 weights0 : WEIGHTS0,
+    float4 joints1 : JOINTS1, float4 weights1 : WEIGHTS1,
+    float4 uvChannels0 : TEXCOORD3, float4 uvChannels1 : TEXCOORD4,
+    float4 uvChannels2 : TEXCOORD5, float4 uvChannels3 : TEXCOORD6,
+    float4 uvChannels4 : TEXCOORD7, float4 sdefCenterAndMode : TEXCOORD8,
+    float4 sdefRadius0 : TEXCOORD9, float4 sdefRadius1 : TEXCOORD10,
+    uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID,
+    out float4 oPos : SV_POSITION, out float3 oWorldPos : TEXCOORD2,
+    out float3 oNormal : NORMAL, out float2 oUv : TEXCOORD, out float2 oUv1 : TEXCOORD1,
+    out float4 oColor : COLOR, out float4 oTangent : TANGENT,
+    out float4 oUvChannels0 : TEXCOORD3, out float4 oUvChannels1 : TEXCOORD4,
+    out float4 oUvChannels2 : TEXCOORD5, out float4 oUvChannels3 : TEXCOORD6,
+    out float4 oUvChannels4 : TEXCOORD7,
+    out nointerpolation uint oObjectIndex : TEXCOORD11,
+    out float oInstanceLodDistance : TEXCOORD12)
+{
+    VSMain(pos, normal, uv, tangent, uv1, color, joints0, weights0, joints1, weights1,
+        uvChannels0, uvChannels1, uvChannels2, uvChannels3, uvChannels4,
+        sdefCenterAndMode, sdefRadius0, sdefRadius1, vertexId, instanceId,
+        oPos, oWorldPos, oNormal, oUv, oUv1, oColor, oTangent,
+        oUvChannels0, oUvChannels1, oUvChannels2, oUvChannels3, oUvChannels4,
+        oObjectIndex, oInstanceLodDistance);
+    const float4 rect = draw.virtualTextureRect;
+    const float2 v = (oWorldPos.xz - rect.xy) * rect.zw;
+    oPos = float4(v.x * 2.0 - 1.0, 1.0 - v.y * 2.0,
+        saturate((oWorldPos.y - draw.virtualTextureDepth.x) * draw.virtualTextureDepth.y), 1.0);
+}
+
+struct TerrainVirtualTextureOutput
+{
+    float4 albedo : SV_Target0;
+    float4 normal : SV_Target1;
+    float4 mean : SV_Target2;
+};
+
+TerrainVirtualTextureOutput PSTerrainVirtualTexture(
+    float4 pos : SV_POSITION, float3 worldPos : TEXCOORD2,
+    float3 normal : NORMAL, float2 uv : TEXCOORD, float2 uv1 : TEXCOORD1,
+    float4 vertexColor : COLOR, float4 tangent : TANGENT,
+    float4 uvChannels0 : TEXCOORD3, float4 uvChannels1 : TEXCOORD4,
+    float4 uvChannels2 : TEXCOORD5, float4 uvChannels3 : TEXCOORD6,
+    float4 uvChannels4 : TEXCOORD7,
+    nointerpolation uint objectIndex : TEXCOORD11,
+    float instanceLodDistance : TEXCOORD12,
+    bool frontFace : SV_IsFrontFace,
+    uint primitiveId : SV_PrimitiveID)
+{
+    g_terrainVirtualTextureFill = true;
+    g_primitiveId = primitiveId;
+    g_instanceLodDistance = instanceLodDistance;
+    g_terrainVtAlbedo = 0.0;
+    g_terrainVtNormal = 0.0;
+    g_terrainVtMean = 0.0;
+    ObjectSurfacePS(pos, worldPos, normal, uv, uv1, vertexColor, tangent,
+        uvChannels0, uvChannels1, uvChannels2, uvChannels3, uvChannels4,
+        objectIndex, frontFace);
+    TerrainVirtualTextureOutput output;
+    output.albedo = g_terrainVtAlbedo;
+    output.normal = g_terrainVtNormal;
+    output.mean = g_terrainVtMean;
+    return output;
+}
 
 // Only used with depth-equal testing and depth writes disabled, after the
 // matching alpha/LOD coverage pass. Early rejection avoids lighting hidden

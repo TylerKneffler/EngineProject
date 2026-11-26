@@ -209,7 +209,12 @@ merged into main, worktrees removed; their comparison images are in `.local/agen
 - **Grass:** fade band still visible at ~25-35 m; far palette not matched to the cover colour; LOD distances not
   re-evaluated after thinning; clumping; tiles built ahead of the camera; bushes limited to the grass radius; pale
   ground between blades in the test meadow; blade-mottling cost not measured.
-- **Antialiasing:** Vulkan has no MSAA and no TAA; temporal upscaling is DX12 only (game renderer).
+- **Shaders (DX12):** compiled with DXC to shader model 6.0 (DXIL) since 2026-11-26; fxc 5.0 only with
+  `ENGINE_SHADER_DXC=0`, for DX11, or without dxcompiler.dll. Shader edits recompile in seconds; the
+  cache key is the preprocessed text (comment-only edits never miss).
+- **Antialiasing:** Vulkan has no MSAA and no TAA; temporal upscaling is DX12 only (game renderer). TAA and the
+  upscaler reproject with depth and the camera only: no per-pixel motion vectors, which FSR, DLSS and frame
+  generation all need (frame_pipeline_research.md; todo.md Step 5 P4-P5).
 - **Editor:** terrain generation window; asset-generator tool not exercised in a running editor; AO in editor
   viewports; optional 3D LUT for grading.
 - **Not measured:** cost of the 9-tap AO lookup; cliff pieces per cell; the detail model against measured GPU cost

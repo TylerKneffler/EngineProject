@@ -288,6 +288,17 @@ void GameBenchmark::Record(uint64_t frame, const GameBenchmarkFrameSample& s)
         << ",\"prepare_assets_ms\":" << p.assetPublicationMs
         << ",\"prepare_commit_ms\":" << p.objectCommitMs
         << ",\"prepare_prefabs_ms\":" << p.prefabInstancesMs
+        << ",\"prepare_prefab_signature_ms\":" << p.prefabSignatureMs
+        << ",\"prepare_prefab_source_probe_ms\":" << p.prefabSourceProbeMs
+        << ",\"prepare_prefab_placement_assets_ms\":" << p.prefabPlacementAssetsMs
+        << ",\"prepare_prefab_lod_profiles_ms\":" << p.prefabLodProfilesMs
+        << ",\"prepare_prefab_source_set_ms\":" << p.prefabSourceSetMs
+        << ",\"prepare_prefab_validation_ms\":" << p.prefabValidationMs
+        << ",\"prepare_prefab_source_lookup_ms\":" << p.prefabSourceLookupMs
+        << ",\"prepare_prefab_build_ms\":" << p.prefabBuildMs
+        << ",\"prepare_prefab_max_layer_ms\":" << p.prefabMaxLayerMs
+        << ",\"prepare_prefab_layers\":" << p.prefabLayers
+        << ",\"prepare_prefab_layers_visited\":" << p.prefabLayersVisited
         << ",\"prepare_graphics_ms\":" << p.graphicsPreparationMs
         << ",\"prepare_transforms_ms\":" << p.transformsMs
         << ",\"prepare_items_ms\":" << p.itemsMs

@@ -341,6 +341,13 @@ public:
     // The editor camera is deliberately excluded so GameView cannot silently
     // render from the Scene view's navigation camera.
     Camera* FindGameCamera();
+private:
+    // FindGameCamera's last answer, valid while the structure is unchanged
+    // and no other camera became active (it scanned every object: 49 terrain
+    // cells call it each frame on a 6.6k-object scene).
+    Camera* m_gameCameraCache = nullptr;
+    uint64_t m_gameCameraCacheRevision = UINT64_MAX;
+public:
 
     // Maps the ordinary Euclidean scene chart through active spatial volumes.
     // The sample Jacobian carries nonlinear orientation/scale to consumers.

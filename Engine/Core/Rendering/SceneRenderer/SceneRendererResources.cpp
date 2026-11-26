@@ -2,11 +2,15 @@
 #include "Core/Rendering/SceneRenderer/SceneRendererResources.h"
 
 #include "Core/Graphics/IGraphicsBuffer.h"
+#include "Core/Components/Physics/SpatialManipulator.h"
+#include "Core/Scene/Scene.h"
 #include "Core/Graphics/IGraphicsProvider.h"
 #include "Core/Rendering/RenderUtilities.h"
 #include "Core/Rendering/SceneRenderer/SceneRendererDrawPreparation.h"
 
+#include <algorithm>
 #include <array>
+#include <cstdlib>
 #include <limits>
 #include <stdexcept>
 #include <vector>
@@ -84,7 +88,7 @@ void SceneRendererResources::Initialize(SceneRenderer& renderer, Engine::Graphic
     const uint64_t portalSlotsPerView =
         static_cast<uint64_t>(renderer.m_objectCapacity) + 2u;
     const uint64_t portalObjectSlots =
-        static_cast<uint64_t>(SceneRenderer::kMaxPortalRenderViews) * portalSlotsPerView;
+        static_cast<uint64_t>(renderer.m_objectPortalViews) * portalSlotsPerView;
     const uint64_t objectCBSize = (static_cast<uint64_t>(renderer.m_objectCapacity) +
         portalObjectSlots + SceneRenderer::kMaxSpatialDebugDraws) * SceneRenderer::kCBStride;
     renderer.m_objectConstantBuffer = bufferFactory->CreateBuffer(
@@ -193,12 +197,15 @@ void SceneRendererResources::Initialize(SceneRenderer& renderer, Engine::Graphic
 void SceneRendererResources::EnsureObjectRenderCapacity(SceneRenderer& renderer, uint32_t requiredObjects)
 {
     Scene& scene = renderer.GetScene();
-    if (requiredObjects <= renderer.m_objectCapacity)
+    if (requiredObjects <= renderer.m_objectCapacity &&
+        renderer.m_wantedPortalViews == renderer.m_objectPortalViews)
         return;
     if (!renderer.m_graphicsProvider || !renderer.m_graphicsProvider->GetBufferFactory())
         throw std::runtime_error("Cannot grow scene object buffers before graphics initialization");
 
-    const uint32_t capacity = ExpandedCapacity(renderer.m_objectCapacity, requiredObjects);
+    const uint32_t capacity = requiredObjects <= renderer.m_objectCapacity
+        ? renderer.m_objectCapacity : ExpandedCapacity(renderer.m_objectCapacity, requiredObjects);
+    const uint32_t portalViews = renderer.m_wantedPortalViews;
     constexpr uint32_t kMaximumAddressableCapacity =
         (std::numeric_limits<uint32_t>::max() - SceneRenderer::kMaxSpatialDebugDraws) /
         (SceneRenderer::kMaxPortalRenderViews + 1u);
@@ -206,7 +213,7 @@ void SceneRendererResources::EnsureObjectRenderCapacity(SceneRenderer& renderer,
         throw std::runtime_error("Scene draw count exceeds portal buffer index range");
     const uint64_t portalSlotsPerView = static_cast<uint64_t>(capacity) + 2u;
     const uint64_t portalSlots =
-        static_cast<uint64_t>(SceneRenderer::kMaxPortalRenderViews) * portalSlotsPerView;
+        static_cast<uint64_t>(portalViews) * portalSlotsPerView;
     const uint64_t constantSlots = static_cast<uint64_t>(capacity) +
         portalSlots + SceneRenderer::kMaxSpatialDebugDraws;
     auto* factory = renderer.m_graphicsProvider->GetBufferFactory();
@@ -222,7 +229,7 @@ void SceneRendererResources::EnsureObjectRenderCapacity(SceneRenderer& renderer,
     auto portalBuffer = factory->CreateBuffer(
         Engine::Graphics::IGraphicsBuffer::Usage::ShaderResource,
         Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
-        portalSlots * kObjectGPUDataSize, nullptr, kObjectGPUDataSize);
+        std::max<uint64_t>(portalSlots, 1) * kObjectGPUDataSize, nullptr, kObjectGPUDataSize);
     auto shadowConstantBuffer = factory->CreateBuffer(
         Engine::Graphics::IGraphicsBuffer::Usage::ConstantBuffer,
         Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
@@ -284,6 +291,7 @@ void SceneRendererResources::EnsureObjectRenderCapacity(SceneRenderer& renderer,
     renderer.m_shadowCBMapped = shadowConstantMapped;
     renderer.m_shadowObjectDataMapped = shadowObjectMapped;
     renderer.m_objectCapacity = capacity;
+    renderer.m_objectPortalViews = portalViews;
     if (renderer.m_activeFrameUploadContext)
     {
         renderer.m_activeFrameUploadContext->bufferAllocations += 5;
@@ -314,6 +322,12 @@ void SceneRendererResources::SelectRenderPassBuffers(SceneRenderer& renderer, ui
     if (slot.serial != serial) { slot.serial = serial; slot.cursor = 0; }
     if (slot.passes.size() <= slot.cursor) slot.passes.push_back(std::make_unique<SceneRenderer::RenderPassBuffers>());
     auto* selected = slot.passes[slot.cursor++].get();
+    // Portal views exist only with portals (SpatialManipulator); see
+    // SceneRenderer::m_objectPortalViews.
+    // ENGINE_PORTAL_SLOTS_ALWAYS=1 reserves them in every scene (A/B runs).
+    static const bool always = [] { const char* v = std::getenv("ENGINE_PORTAL_SLOTS_ALWAYS"); return v && v[0] == '1'; }();
+    renderer.m_wantedPortalViews = !always && scene.GetComponents<Engine::Components::SpatialManipulator>().empty()
+        ? 0u : SceneRenderer::kMaxPortalRenderViews;
     const auto exchange = [&](SceneRenderer::RenderPassBuffers& buffers)
     {
         using std::swap;
@@ -322,6 +336,7 @@ void SceneRendererResources::SelectRenderPassBuffers(SceneRenderer& renderer, ui
         swap(buffers.constantsMapped, renderer.m_objectCBMapped); swap(buffers.objectsMapped, renderer.m_objectDataMapped);
         swap(buffers.shadowConstantsMapped, renderer.m_shadowCBMapped); swap(buffers.shadowObjectsMapped, renderer.m_shadowObjectDataMapped);
         swap(buffers.capacity, renderer.m_objectCapacity);
+        swap(buffers.portalViews, renderer.m_objectPortalViews);
         swap(buffers.objectCache, renderer.m_objectUploadCache); swap(buffers.shadowCache, renderer.m_shadowUploadCache);
     };
     if (!renderer.m_activeRenderPassBuffers)
@@ -331,12 +346,14 @@ void SceneRendererResources::SelectRenderPassBuffers(SceneRenderer& renderer, ui
         return;
     }
     const uint32_t requiredCapacity = renderer.m_objectCapacity;
+    const uint32_t requiredPortalViews = renderer.m_wantedPortalViews;
     exchange(*renderer.m_activeRenderPassBuffers);
     if (!selected->objects)
     {
         selected->capacity = requiredCapacity;
+        selected->portalViews = requiredPortalViews;
         const uint64_t capacity = requiredCapacity;
-        const uint64_t constants = capacity + SceneRenderer::kMaxPortalRenderViews * (capacity + 2) + SceneRenderer::kMaxSpatialDebugDraws;
+        const uint64_t constants = capacity + uint64_t(requiredPortalViews) * (capacity + 2) + SceneRenderer::kMaxSpatialDebugDraws;
         auto* factory = renderer.m_graphicsProvider->GetBufferFactory();
         using Buffer = Engine::Graphics::IGraphicsBuffer;
         selected->constants = factory->CreateBuffer(Buffer::Usage::ConstantBuffer, Buffer::AccessMode::Upload, constants * SceneRenderer::kCBStride, nullptr, sizeof(uint32_t) * 4u);

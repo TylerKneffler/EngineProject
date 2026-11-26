@@ -74,13 +74,17 @@ struct FrameTimingTelemetry
     template<class Stream> void WriteOpaqueJson(Stream& output) const
     {
         output << ",\"gpu_workload_valid\":" << (gpuWorkloadValid ? "true" : "false");
-        const char* names[] = {"opaque_other", "tree_bark", "tree_leaves", "foliage_depth", "grass"};
-        const GpuTimingStage stages[] = {GpuTimingStage::Opaque, GpuTimingStage::TreeBark, GpuTimingStage::TreeLeaves, GpuTimingStage::FoliageDepth, GpuTimingStage::Grass};
-        for (size_t i = 0; i < 5; ++i)
+        const char* names[] = {"opaque_other", "tree_bark", "tree_leaves", "foliage_depth", "grass",
+            "terrain", "shadow", "impostor"};
+        const GpuTimingStage stages[] = {GpuTimingStage::Opaque, GpuTimingStage::TreeBark, GpuTimingStage::TreeLeaves,
+            GpuTimingStage::FoliageDepth, GpuTimingStage::Grass, GpuTimingStage::Terrain, GpuTimingStage::Shadow,
+            GpuTimingStage::Impostor};
+        for (size_t i = 0; i < std::size(stages); ++i)
         {
             const auto index = static_cast<size_t>(stages[i]);
-            // gpu_grass_ms is written with the other stage timings.
-            if (stages[i] != GpuTimingStage::Grass)
+            // gpu_grass/terrain/shadow/impostor_ms are written with the other stage timings.
+            if (stages[i] != GpuTimingStage::Grass && stages[i] != GpuTimingStage::Terrain &&
+                stages[i] != GpuTimingStage::Shadow && stages[i] != GpuTimingStage::Impostor)
                 output << ",\"gpu_" << names[i] << "_ms\":" << gpuMilliseconds[index];
             output << ",\"gpu_" << names[i] << "_vs_invocations\":" << gpuWorkload[index].vertices;
             output << ",\"gpu_" << names[i] << "_primitives\":" << gpuWorkload[index].primitives;
@@ -189,6 +193,17 @@ public:
     virtual void ClearDepthRectangle(const ScissorRect&, float = Depth::ClearValue) {}
     virtual void SetViewport(const Viewport& vp) = 0;
     virtual void SetScissorRect(const ScissorRect& rect) = 0;
+    // Renders into slice `slice` of 1-4 render-target arrays
+    // (IGraphicsTextureFactory::CreateRenderTargetArray) with an optional
+    // depth texture (CreateDepthTexture2D), not cleared. EndColorPass leaves
+    // the targets readable by pixel shaders and restores the framebuffer,
+    // viewport and scissor, as EndDepthOnlyPass does. False: unsupported.
+    virtual bool BeginColorPass(const IGraphicsTexture* const* /*targets*/, uint32_t /*count*/,
+        uint32_t /*slice*/, const IGraphicsTexture* /*depth*/) { return false; }
+    virtual void EndColorPass() {}
+    // Inside a colour pass: clears a rectangle of every colour target to
+    // `color` (none when null) and of the depth target to `depth`.
+    virtual void ClearColorPassRectangle(const ScissorRect&, const float* /*color*/, float /*depth*/) {}
 
     // Rendering commands
     virtual void Clear(float r, float g, float b, float a, float depth = 1.0f) = 0;

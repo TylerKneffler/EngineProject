@@ -545,8 +545,10 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
 
     if (m_nativeRenderPacketTaken && !nativePacket)
         throw std::logic_error("Native frame draw list was transferred to a render packet");
+    const auto setupMark_a = std::chrono::steady_clock::now();
     if (!m_renderFramePrepared)
         PrepareRenderFrame();
+    const auto setupMark_b = std::chrono::steady_clock::now();
     const auto& frameRenderItems = nativePacket ? nativePacket->items : m_frameRenderItems;
     m_lastRenderCpuTimings.visibilityFrameItems += frameRenderItems.size();
     const auto& frameItemSlotOffsets = nativePacket
@@ -563,6 +565,7 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
     // Persistent slots can be sparse after LOD/visibility changes. Size the
     // selected frame/view buffers by their highest addressed slot, not draw count.
     SelectRenderPassBuffers(requiredObjectSlots);
+    const auto setupMark_c = std::chrono::steady_clock::now();
     // Validate on the owner before record-packing/cascade jobs can touch maps.
     const uint64_t shadowRecords=uint64_t(m_objectCapacity)*4u;
     if(requiredObjectSlots>m_objectCapacity || !m_objectDataMapped || !m_objectCBMapped ||
@@ -576,7 +579,7 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
     m_lastOrdinaryTriangleCount = 0;
     const uint32_t portalRenderSlotsPerView = m_objectCapacity + 2u;
     const uint32_t portalObjectSlotCount =
-        kMaxPortalRenderViews * portalRenderSlotsPerView;
+        m_objectPortalViews * portalRenderSlotsPerView;
 
     // Scene View always uses its navigation camera. Game View supplies its
     // active scene camera explicitly, so hierarchy selection cannot hijack
@@ -600,6 +603,7 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
         (static_cast<uint64_t>(instanceViewOrdinal) << 48u) ^
         (shadowOnly ? (uint64_t(1) << 63u) : 0u);
     m_persistentInstances.BeginFrame(m_graphicsProvider);
+    const auto setupMark_d = std::chrono::steady_clock::now();
     // Draw names for GPU hang reports (ENGINE_GPU_DRED=1; DebugDrawTags.h).
     const bool drawTags = Engine::Rendering::DebugDrawTags::Enabled();
     if (drawTags) Engine::Rendering::DebugDrawTags::Get().BeginFrame(instanceSerial);
@@ -918,6 +922,15 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
         return cameraUsesSourceWarpChart && item.mesh && !item.sprite &&
             glm::all(glm::equal(item.traversalClipPlane, glm::vec4(0.f)));
     };
+    const auto phaseMark_p3 = std::chrono::steady_clock::now();
+    {
+        const auto ms = [](auto a, auto b) { return std::chrono::duration<double, std::milli>(b - a).count(); };
+        static const bool setupLog = std::getenv("ENGINE_RENDER_PHASE_LOG") != nullptr;
+        if (setupLog && ms(shadowCpuStart, phaseMark_p3) > 3.0)
+            std::printf("[RenderSetup] %s: start %.2f, prepare frame %.2f, slots+buffers %.2f, pool begin %.2f, rest %.2f ms (slots %u)\n",
+                shadowOnly ? "shadow" : "camera", ms(shadowCpuStart, setupMark_a), ms(setupMark_a, setupMark_b),
+                ms(setupMark_b, setupMark_c), ms(setupMark_c, setupMark_d), ms(setupMark_d, phaseMark_p3), requiredObjectSlots);
+    }
     // Render phase 3: prepare view lighting, clustered lights, and shadows.
     // Light data is view-chart-specific. Rebuild it for every view so an
     // inside-volume game camera cannot leave source-chart lights bound when
@@ -1202,6 +1215,7 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
         terrainSunIndex >= 0 ? terrainSunDirection : glm::vec3(0.f),
         terrainSunIndex >= 0 ? terrainSunRadiance : glm::vec3(0.f));
 
+    const auto phaseMark_p4 = std::chrono::steady_clock::now();
     // Render phase 4: build the visible, sorted draw candidates.
     // Opaque and masked materials render first. Blended materials render
     // back-to-front with depth writes disabled. Build the complete view sort
@@ -1486,6 +1500,7 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
 
     m_lastRenderCpuTimings.sortingMs = std::chrono::duration<double,std::milli>(RenderClock::now()-sortingStart).count();
     const auto occlusionStart=RenderClock::now();
+    const auto phaseMark_p5 = std::chrono::steady_clock::now();
     // Render phase 5: prepare per-object draws and their material records.
     // Occlusion results are deliberately tied to the exact camera and scene
     // transforms that produced them. Any movement restores all objects to the
@@ -1621,8 +1636,23 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
         !directionalShadowDirtyMask[shadowCascadeCount - 1u];
     const float nearCasterRange = skipFarOnlyCasters
         ? shadowCascadeSplits[shadowCascadeCount - 2u] + 64.f : 0.f;
+    // ENGINE_RENDER_PHASE_LOG: where the per-draw loop spends its time
+    // (filter, setup to material, material and lights, pipeline and rest).
+    static const bool loopProfile = std::getenv("ENGINE_RENDER_PHASE_LOG") != nullptr;
+    std::array<double, 8> loopSections{};
+    std::array<size_t, 8> loopSectionCounts{};
+    RenderClock::time_point loopMark{};
+    const auto loopSection = [&](size_t section)
+    {
+        if (!loopProfile) return;
+        const auto now = RenderClock::now();
+        loopSections[section] += std::chrono::duration<double, std::milli>(now - loopMark).count();
+        ++loopSectionCounts[section];
+        loopMark = now;
+    };
     for (const ViewRenderItem& sortedItem : renderObjects)
     {
+        if (loopProfile) loopMark = RenderClock::now();
         const auto drawPreparationStart = performanceHeatMode
             ? RenderClock::now() : RenderClock::time_point{};
         // Reject candidates that cannot contribute to this camera or shadow view.
@@ -1801,6 +1831,7 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
         // then copying it into the vector showed in frame profiles. The
         // vector is reserved for one draw per render object, so the
         // reference stays valid; every exit below either keeps or pops it.
+        loopSection(0);
         PreparedDraw& preparedDraw = preparedDraws.emplace_back();
         // Carry frame-item and shadow policy into a backend-ready draw record.
         preparedDraw.morphDeltaBuffer = m_emptyMorphDeltaBuffer.get();
@@ -2091,6 +2122,7 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
                 static_cast<float>(mesh->GetVertexCount()), 0.f,
                 static_cast<float>(mesh->GetMorphDeltaStrideFloat4()) };
         }
+        loopSection(1);
         Engine::Components::MaterialAlphaMode alphaMode = Engine::Components::MaterialAlphaMode::Opaque;
         bool doubleSided = false;
 
@@ -2124,17 +2156,11 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
         {
             // Material values and texture bindings are cached by revision and
             // lighting feature variant in SceneRendererDrawPreparation.
-            const auto resolvedMaterial =
-                SceneRendererDrawPreparation::ResolveMaterialRecord(
-                    *this, *mat, objectData, preparedDraw.textures,
-                    cameraPosition, allowNormalMapping, allowParallaxMapping,
-                    allowSubsurfaceScattering, allowEnvironmentDiffuse,
-                    allowReflections);
-            SceneRendererDrawPreparation::ApplyMaterialRecord(
-                resolvedMaterial, cameraPosition, bakedIrradiance, objectData);
-            preparedDraw.textures = resolvedMaterial.textures;
-            doubleSided = resolvedMaterial.doubleSided;
-            alphaMode = resolvedMaterial.alphaMode;
+            SceneRendererDrawPreparation::ResolveAndApplyMaterialRecord(
+                *this, *mat, objectData, preparedDraw.textures,
+                cameraPosition, bakedIrradiance, allowNormalMapping, allowParallaxMapping,
+                allowSubsurfaceScattering, allowEnvironmentDiffuse,
+                allowReflections, doubleSided, alphaMode);
         }
         else
         {
@@ -2146,6 +2172,7 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
             objectData.viewPositionAlphaCutoff = glm::vec4(
                 cameraPosition, 0.5f);
         }
+        loopSection(4);
         SceneRendererDrawPreparation::PrepareTerrainMaterial(
             *this, *renderItem, preparedDraw, objectData, includeEditorVisuals,
             forceUnlitMode, terrainMaterialState);
@@ -2182,6 +2209,7 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
             doubleSided = terrainShadowDoubleSided = false;
         preparedDraw.doubleSided = doubleSided;
         preparedDraw.shadowDoubleSided = terrainShadowDoubleSided;
+        loopSection(5);
         if (shadowSelection.valid)
         {
             std::copy(shadowViewProjections.begin(),
@@ -2215,6 +2243,7 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
             objectData.shadowRefreshBlend[1] = mainShadowCascades.refreshBlends[1];
             preparedDraw.textures[7] = m_directionalShadowMap.get();
         }
+        loopSection(6);
         if (usesLegacyProbeBake)
         {
             objectData.bakedDirectional = glm::vec4(
@@ -2270,6 +2299,7 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
             (lightingBand
                 ? std::min(m_frameLightCount, lightingBand->maxRealtimeLights)
                 : m_frameLightCount);
+        loopSection(7);
         const DrawCBData drawData{ slot,
             forceUnlitMode ? 0u : qualityLightCount,
             (clusteredLightingEnabled ? kClusteredLightingFlag : 0u) |
@@ -2312,6 +2342,7 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
         std::copy(grassInteraction.data.begin(), grassInteraction.data.end(), objectData.grassCapsules);
         preparedDraw.traversalChartPortal = renderItem->traversalChartPortal;
 
+        loopSection(2);
         // Finish view constants, select raster state, then bind draw geometry.
         Engine::Graphics::IPipelineState* materialPipeline = nullptr;
         if (isPreview)
@@ -2423,7 +2454,20 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
             performanceHeatDraws.push_back(preparedDraws.size() - 1);
             performanceHeatInputs.push_back(heat);
         }
+        loopSection(3);
         ++slot;
+    }
+    if (loopProfile)
+    {
+        static int loopLogCount = 0;
+        const size_t misses = std::exchange(Engine::Rendering::g_materialRecordMisses, size_t(0));
+        static const int loopLogEvery = std::max(1, std::atoi(std::getenv("ENGINE_RENDER_PHASE_LOG")));
+        if ((++loopLogCount % loopLogEvery) < 2)
+            std::printf("[RenderLoop] %s: filter %.3f (%zu), setup %.3f (%zu), material+lights %.3f (%zu), pipeline+rest %.3f (%zu) ms | material %.3f, terrain+texture %.3f, shadow params %.3f, probes+lights %.3f, fades+wind %.3f\n",
+                shadowOnly ? "shadow" : "camera", loopSections[0], loopSectionCounts[0], loopSections[1], loopSectionCounts[1],
+                loopSections[2], loopSectionCounts[2], loopSections[3], loopSectionCounts[3],
+                loopSections[4], loopSections[5], loopSections[6], loopSections[7], loopSections[2]);
+        if ((loopLogCount % loopLogEvery) < 2) std::printf("[RenderLoop] material record misses %zu\n", misses);
     }
     const auto materialFootprintStart = RenderClock::now();
     m_lastRenderCpuTimings.materialDrawLoopMs = std::chrono::duration<double,
@@ -2434,12 +2478,27 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
     // (ForestFloor, 2026-11-22), and resident texture memory unchanged
     // (770 / 773 MiB). ENGINE_SHADOW_FOOTPRINTS=1 brings it back.
     static const bool shadowFootprints=[]{ const char* v=std::getenv("ENGINE_SHADOW_FOOTPRINTS"); return v && v[0]=='1'; }();
+    // Texture footprints only feed texture residency requests, which nothing
+    // later in recording reads: they run on their own thread from a copy of
+    // the draws' inputs, overlapping the rest of recording (~1.1 ms of the
+    // camera's main thread), and join when this view returns.
+    // ENGINE_ASYNC_FOOTPRINTS=0 runs them inline (A/B).
+    struct FootprintJoin { std::future<void> job; ~FootprintJoin() { if (job.valid()) job.get(); } } footprintJoin;
     if(!shadowOnly || shadowFootprints)
-    SceneTextureFootprints::Request(preparedDraws, viewProjection,
-        detailWidth, detailHeight, shadowViewProjections, shadowCascadeCount,
-        m_directionalShadowResolution, &m_textureFootprintCache,
-        reinterpret_cast<uintptr_t>(cam) ^ (uintptr_t(viewportWidth) << 1) ^
-            (uintptr_t(viewportHeight) << 17));
+    {
+        static const bool asyncFootprints = ReadEnvFlag("ENGINE_ASYNC_FOOTPRINTS", true);
+        auto request = [this, sources = SceneTextureFootprints::Snapshot(preparedDraws), viewProjection,
+            detailWidth, detailHeight, shadowViewProjections, shadowCascadeCount,
+            resolution = m_directionalShadowResolution,
+            view = reinterpret_cast<uintptr_t>(cam) ^ (uintptr_t(viewportWidth) << 1) ^
+                (uintptr_t(viewportHeight) << 17)]()
+        {
+            SceneTextureFootprints::Request(sources, viewProjection, detailWidth, detailHeight,
+                shadowViewProjections, shadowCascadeCount, resolution, &m_textureFootprintCache, view);
+        };
+        if (asyncFootprints) footprintJoin.job = std::async(std::launch::async, std::move(request));
+        else request();
+    }
     if (performanceHeatMode)
     {
         // Object.hlsl reads a negative editor-bone slot as "Performance view":
@@ -2506,6 +2565,57 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
     const auto materialRecordStart = RenderClock::now();
     m_lastRenderCpuTimings.materialFootprintMs = std::chrono::duration<double,
         std::milli>(materialRecordStart - materialFootprintStart).count();
+    const auto phaseMark_p6 = std::chrono::steady_clock::now();
+    // Terrain virtual texture (camera views): configured from the scene's
+    // terrain manager; the terrain draws it covers read it (Object.hlsl) and
+    // are drawn into it at the start of submission (phase 9).
+    bool terrainVirtualTextureActive = false;
+    if (!shadowOnly && !hasPortalViews && m_terrainVirtualTexturePipeline)
+    {
+        Engine::Rendering::TerrainVirtualTexture::Settings settings;
+        if (const auto& managers = m_scene.GetComponents<Engine::Components::TerrainManager>(); !managers.empty())
+        {
+            const auto* manager = managers.front();
+            // ENGINE_TERRAIN_VIRTUAL_TEXTURE=0/1 overrides the property (A/B runs).
+            static const int overrideValue = [] {
+                const char* v = std::getenv("ENGINE_TERRAIN_VIRTUAL_TEXTURE");
+                return v ? (v[0] == '1' ? 1 : 0) : -1;
+            }();
+            settings.enabled = overrideValue >= 0 ? overrideValue == 1 : manager->virtualTexture;
+            settings.levels = uint32_t(std::max(manager->virtualTextureLevels, 1));
+            settings.resolution = uint32_t(std::max(manager->virtualTextureResolution, 64));
+            settings.texelSize = manager->virtualTextureTexelMillimetres * .001f;
+        }
+        if (!m_terrainVirtualTexture) m_terrainVirtualTexture = std::make_unique<Engine::Rendering::TerrainVirtualTexture>();
+        terrainVirtualTextureActive = m_terrainVirtualTexture->Configure(m_graphicsProvider, settings);
+        if (terrainVirtualTextureActive)
+        {
+            glm::vec4 constants = m_terrainVirtualTexture->ShaderConstants();
+            static const bool vtDebug = std::getenv("ENGINE_TERRAIN_VT_DEBUG") != nullptr;
+            static const int vtDebugLevel = vtDebug ? std::max(1, std::atoi(std::getenv("ENGINE_TERRAIN_VT_DEBUG"))) : 0;
+            if (vtDebug) constants.w = 1.f + float(vtDebugLevel);
+            const auto arrays = m_terrainVirtualTexture->Textures();
+            // Terrain draws bind through slot 26, and the submission loop then
+            // rebinds every slot up to the highest count bound so far from the
+            // next draw's own array: slots 16-23 hold the view's cookies and
+            // IES profiles (BindPhotometryTextures), so every draw carries them
+            // there, or the sun's cookie turns black for later draws (grass
+            // after terrain went dark).
+            std::array<const Engine::Graphics::IGraphicsTexture*, 8> photometry{};
+            for (size_t i = 0; i < photometryTextures.size() && i < photometry.size(); ++i)
+                photometry[i] = photometryTextures[i] ? photometryTextures[i]->GetGraphicsTexture() : nullptr;
+            for (auto& draw : preparedDraws)
+            {
+                for (size_t i = 0; i < photometry.size(); ++i) draw.textures[16 + i] = photometry[i];
+                if (Engine::Rendering::TerrainVirtualTexture::Fills(draw))
+                {
+                    draw.objectData.terrainTrailReserved = constants;
+                    for (uint32_t i = 0; i < 3; ++i) draw.textures[24 + i] = arrays[i];
+                    draw.textureSlotCount = std::max(draw.textureSlotCount, 27u);
+                }
+            }
+        }
+    }
     // Render phase 6: apply screen LOD, upload object records, and build instance batches.
     // Fixed editor LOD selection suppresses the other bands. Remove their
     // distance crossfade before publishing records or the selected band fades
@@ -2541,6 +2651,7 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
         m_lastRenderCpuTimings.materialMs-materialPipelineMs-materialGeometryBindingMs);
     m_lastRenderCpuTimings.candidateDraws=preparedDraws.size();
     using AutomaticGroup = Engine::Rendering::DrawBatchPreparation::Group;
+    const auto phaseMark_p6Batching = std::chrono::steady_clock::now();
     auto instanceBatching = SceneInstanceBatching::Prepare(*this,
         preparedDraws, shadowOnly, automaticInstancing, hasPortalViews, includeEditorVisuals);
     if (traceLayer && !shadowOnly)
@@ -2551,7 +2662,9 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
     auto* residentPlacementPool = instanceBatching.residentPlacementPool;
     // GPU-resident placement pool: copy this frame's changed ranges in before
     // the culls and draws below read it (PersistentInstancePool::FlushUploads).
+    const auto phaseMark_p6Flush = std::chrono::steady_clock::now();
     if (residentPlacementPool) m_persistentInstances.FlushUploads(context, m_graphicsProvider);
+    const auto phaseMark_p6Lod = std::chrono::steady_clock::now();
     auto& drawViewStats = shadowOnly
         ? m_lastRenderCpuTimings.shadowVisibility
         : m_lastRenderCpuTimings.cameraVisibility;
@@ -2602,6 +2715,7 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
     for (size_t lod = 0; lod < selectedLodDraws.size(); ++lod)
         lodDrawMetrics[lod] += selectedLodDraws[lod];
     auto& screenPlacementLevels = lodSelection.PlacementLevels();
+    const auto phaseMark_p6End = std::chrono::steady_clock::now();
     std::vector<Engine::Rendering::PreparedInstanceDraw>* instanceDrawCapture = nullptr;
     // Hoisted culls (camera view): while deferCulls is set, instanced batches
     // record their cull dispatches here and only capture their draws; the
@@ -2678,6 +2792,12 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
                 auto* sourceIndexBuffer=sourceMesh->GetIndexBuffer();
                 const bool indexed=sourceIndexBuffer!=nullptr;
                 std::vector<Engine::Rendering::InstanceTileRecord> tiles;
+                // Nearest distance from the camera to each tile's block (0 for
+                // others): tiles are culled and drawn nearest first, so the
+                // depth pre-pass sees near forest before far and early depth
+                // rejects the far impostors' alpha-tested pixels (48 M
+                // pre-pass pixel invocations at Vista, ~24 per screen pixel).
+                std::vector<float> tileKeys;
                 uint32_t count=0;
                 for(auto index:group.members)
                 {
@@ -2710,6 +2830,13 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
                     {
                     const auto& tile=(*instanceTiles[index])[rangeIndex*blockCount+block];
                     if(!tile.range.y) continue;
+                    float tileKey=0.f;
+                    if(blocked)
+                    {
+                        const auto& keyBounds=draw.mesh->GetInstanceBlocks()[block];
+                        tileKey=glm::length(glm::max(glm::max(keyBounds.minimum-cameraPosition,
+                            cameraPosition-keyBounds.maximum),glm::vec3(0.f)));
+                    }
                     // Whole blocks outside the view: the side planes only, so
                     // depth conventions do not matter (the GPU culls each
                     // placement against the full frustum anyway).
@@ -2855,6 +2982,7 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
                                 selectedTile.range.x+=offset-run;
                                 selectedTile.range.y=run;
                                 tiles.push_back(selectedTile); count+=run; run=0;
+                                tileKeys.resize(tiles.size(),tileKey);
                             }
                         }
                     }
@@ -2864,11 +2992,27 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
                         // Keep compute work bounded per group without creating
                         // more CPU objects, materials, draws or placement copies.
                         Engine::Rendering::AppendInstanceCullChunks(tiles, tile);
+                        tileKeys.resize(tiles.size(),tileKey);
                         count += tile.range.y;
                     }
                     }
                 }
                 if(!count) continue;
+                // Off by default: measured no change at Vista (pre-pass pixels
+                // 48.3 M either way; each species is its own draw over the whole
+                // landscape, so ordering within a draw cannot stop the overlap).
+                static const bool sortBlockTiles=ReadEnvFlag("ENGINE_SORT_BLOCK_TILES",false);
+                if(sortBlockTiles && tileKeys.size()==tiles.size() && tiles.size()>1 &&
+                    std::any_of(tileKeys.begin(),tileKeys.end(),[](float key){ return key>0.f; }))
+                {
+                    std::vector<uint32_t> order(tiles.size());
+                    for(uint32_t i=0;i<order.size();++i) order[i]=i;
+                    std::stable_sort(order.begin(),order.end(),[&](uint32_t a,uint32_t b){ return tileKeys[a]<tileKeys[b]; });
+                    std::vector<Engine::Rendering::InstanceTileRecord> sorted;
+                    sorted.reserve(tiles.size());
+                    for(uint32_t i:order) sorted.push_back(tiles[i]);
+                    tiles.swap(sorted);
+                }
                 auto& viewStats = shadowOnly
                     ? m_lastRenderCpuTimings.shadowVisibility
                     : m_lastRenderCpuTimings.cameraVisibility;
@@ -3220,8 +3364,31 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
     // Render the selected realtime directional light into its depth map during
     // the explicit pre-view phase. This keeps Vulkan render passes unnested and
     // lets DX12 bind a depth-only target without reconstructing prior OM state.
+    const auto phaseMark_p7 = std::chrono::steady_clock::now();
     // Render phase 7: submit directional and portal shadow passes.
     const auto shadowPreparationEnd = std::chrono::steady_clock::now();
+    {
+        // ENGINE_RENDER_PHASE_LOG=<n>: every n-th frame, this view's phase times.
+        static const int phaseLogEvery = [] { const char* v = std::getenv("ENGINE_RENDER_PHASE_LOG"); return v ? std::max(1, std::atoi(v)) : 0; }();
+        static int phaseLogCount = 0;
+        if (phaseLogEvery && (++phaseLogCount % phaseLogEvery) < 2)
+        {
+            const auto ms = [](auto a, auto b) { return std::chrono::duration<double, std::milli>(b - a).count(); };
+            std::printf("[RenderPhases] %s: 1-2 %.2f, 3 lighting %.2f, 4 candidates %.2f, 5 draws %.2f, 6 lod+batching %.2f ms, %zu draws\n",
+                shadowOnly ? "shadow" : "camera", ms(shadowCpuStart, phaseMark_p3), ms(phaseMark_p3, phaseMark_p4),
+                ms(phaseMark_p4, phaseMark_p5), ms(phaseMark_p5, phaseMark_p6), ms(phaseMark_p6, phaseMark_p7), preparedDraws.size());
+            std::printf("[RenderPhases] %s 6: records %.2f, batching %.2f, flush %.2f, lod+stats %.2f, rest %.2f ms\n",
+                shadowOnly ? "shadow" : "camera", ms(phaseMark_p6, phaseMark_p6Batching), ms(phaseMark_p6Batching, phaseMark_p6Flush),
+                ms(phaseMark_p6Flush, phaseMark_p6Lod), ms(phaseMark_p6Lod, phaseMark_p6End), ms(phaseMark_p6End, phaseMark_p7));
+            std::printf("[RenderPhases] %s batching: snapshot %.2f, build %.2f, wait %.2f, batching %.2f, tiles %.2f (reused %zu built %zu), upload %.2f ms, eligible %zu, tile inputs %.2f ms, registrations %zu, ranges %zu\n",
+                shadowOnly ? "shadow" : "camera", m_lastRenderCpuTimings.batchSnapshotMs, m_lastRenderCpuTimings.batchBuildMs,
+                m_lastRenderCpuTimings.batchWaitMs, m_lastRenderCpuTimings.batchingMs, m_lastRenderCpuTimings.instanceTilePrepareMs,
+                size_t(m_lastRenderCpuTimings.instanceTileReused), size_t(m_lastRenderCpuTimings.instanceTileBuilt),
+                m_lastRenderCpuTimings.uploadMs, size_t(m_lastRenderCpuTimings.batchEligibleDraws),
+                m_lastRenderCpuTimings.instanceTileInputMs, m_lastRenderCpuTimings.instanceTileRegistrations,
+                m_lastRenderCpuTimings.instanceTileRanges);
+        }
+    }
     if (shadowOnly)
         m_lastShadowCpuTiming.scenePreparationMs = shadowElapsedMs(
             shadowCpuStart, shadowPreparationEnd);
@@ -3607,6 +3774,34 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
     m_lastOrdinaryDrawCount=0;
     // Render phase 9: submit camera geometry, portal views, and debug overlays.
     const auto submissionStart=RenderClock::now();
+    // Terrain virtual texture fill: once per prepared frame, before any
+    // terrain draw samples it.
+    if (terrainVirtualTextureActive)
+    {
+        const auto serial = m_graphicsProvider->GetContextFactory()->GetPreparedFrameSerial();
+        static const bool skipFill = std::getenv("ENGINE_TERRAIN_VT_NOFILL") != nullptr; // diagnostics
+        static const bool uploadOnly = std::getenv("ENGINE_TERRAIN_VT_UPLOADONLY") != nullptr; // diagnostics
+        if (uploadOnly) ensureRecordsUploaded();
+        if (serial != m_terrainVirtualTextureSerial && !skipFill && !uploadOnly)
+        {
+            m_terrainVirtualTextureSerial = serial;
+            ensureRecordsUploaded();
+            const auto fillStart = RenderClock::now();
+            m_terrainVirtualTexture->Record(context, m_graphicsProvider, preparedDraws, cameraPosition,
+                m_terrainVirtualTexturePipeline.get(),
+                m_graphicsProvider->GetContextFactory()->GetPreparedFrameSlot(),
+                [&](const PreparedDraw& draw) { geometrySubmission.SubmitGeometry(draw); });
+            static const bool vtLog = std::getenv("ENGINE_TERRAIN_VT_LOG") != nullptr;
+            if (vtLog)
+            {
+                const auto& vt = m_terrainVirtualTexture->LastStatistics();
+                if (vt.rectangles)
+                    std::printf("[TerrainVT] %u rects, %u draws, %llu texels, %u full levels, %.2f ms record\n",
+                        vt.rectangles, vt.draws, static_cast<unsigned long long>(vt.texels), vt.fullLevels,
+                        std::chrono::duration<double, std::milli>(RenderClock::now() - fillStart).count());
+            }
+        }
+    }
     const double uploadBeforeSubmission=m_lastRenderCpuTimings.uploadMs;
     // Resolve coverage before expensive masked-surface lighting. Both passes
     // consume the SAME visibility/LOD output and constants, including editor
@@ -3615,9 +3810,13 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
     std::vector<uint8_t> foliageDepthPrepared(automaticGroups.size(), 0);
     const bool foliageDepthEnabled = !wireframeMode && !hasPortalViews &&
         !m_diagnosticOpaqueDepthEqual && ReadEnvFlag("ENGINE_FOLIAGE_DEPTH_PREPASS", true);
+    // ENGINE_IMPOSTOR_DEPTH_PREPASS=0: impostors (a few pixels each, far)
+    // draw once with alpha test instead of depth first (A/B).
+    static const bool impostorPrepass = ReadEnvFlag("ENGINE_IMPOSTOR_DEPTH_PREPASS", true);
     const auto depthEligible = [&](const PreparedDraw& draw)
     {
         const auto flags = static_cast<uint32_t>(draw.objectData.materialParams.w);
+        if (!impostorPrepass && draw.material && draw.material->impostorBillboard) return false;
         return draw.mesh && draw.mesh->IsInstanced() && draw.material &&
             draw.material->shader.empty() && !draw.blended && !draw.preview &&
             !draw.terrain && !draw.terrainCell && !draw.pmxOutline &&

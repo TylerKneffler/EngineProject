@@ -37,6 +37,7 @@ public:
     void Replay(IGraphicsContext& target) const
     {
         unsigned skippedDepthPasses = 0;
+        unsigned skippedColorPasses = 0;
         bool skipOccludedDraw = false;
         uint32_t occlusionCulled = 0;
         for (size_t index = 0; index < m_commandCount; ++index)
@@ -46,6 +47,12 @@ public:
             {
                 if (command.op == Op::BeginDepthOnlyPass) ++skippedDepthPasses;
                 else if (command.op == Op::EndDepthOnlyPass) --skippedDepthPasses;
+                continue;
+            }
+            if (skippedColorPasses)
+            {
+                if (command.op == Op::BeginColorPass) ++skippedColorPasses;
+                else if (command.op == Op::EndColorPass) --skippedColorPasses;
                 continue;
             }
             if (command.op == Op::OcclusionDecision)
@@ -99,6 +106,17 @@ public:
                     skippedDepthPasses = 1;
                 break;
             case Op::EndDepthOnlyPass: target.EndDepthOnlyPass(); break;
+            case Op::BeginColorPass:
+            {
+                const IGraphicsTexture* targets[4]{};
+                std::memcpy(targets, command.bytes.data(), sizeof(targets));
+                if (!target.BeginColorPass(targets, static_cast<uint32_t>(command.n[0]),
+                    static_cast<uint32_t>(command.n[1]), static_cast<const IGraphicsTexture*>(command.pointer)))
+                    skippedColorPasses = 1;
+                break;
+            }
+            case Op::EndColorPass: target.EndColorPass(); break;
+            case Op::ClearColorPassRectangle: target.ClearColorPassRectangle(command.scissor, command.n[0] ? command.f : nullptr, command.f[4]); break;
             case Op::ClearDepthRectangle:
                 if(!target.SupportsDepthRectangleClear())
                     throw std::logic_error("Recorded depth rectangle clear unsupported by replay target");
@@ -193,6 +211,35 @@ public:
         c.f[0] = depth; return true;
     }
     void EndDepthOnlyPass() override { Add(Op::EndDepthOnlyPass); }
+    bool BeginColorPass(const IGraphicsTexture* const* targets, uint32_t count, uint32_t slice,
+        const IGraphicsTexture* depth) override
+    {
+        if (!targets || !count || count > 4) return false;
+        const IGraphicsTexture* stored[4]{};
+        for (uint32_t i = 0; i < count; ++i)
+        {
+            stored[i] = targets[i];
+            if (targets[i] && m_seenTextures.insert(targets[i]).second)
+                if (auto owner = targets[i]->weak_from_this().lock())
+                    m_ownedTextures.push_back(std::move(owner));
+        }
+        if (depth && m_seenTextures.insert(depth).second)
+            if (auto owner = depth->weak_from_this().lock())
+                m_ownedTextures.push_back(std::move(owner));
+        auto& c = Add(Op::BeginColorPass);
+        c.bytes.resize(sizeof(stored));
+        std::memcpy(c.bytes.data(), stored, sizeof(stored));
+        c.pointer = depth; c.n[0] = count; c.n[1] = slice;
+        return true;
+    }
+    void EndColorPass() override { Add(Op::EndColorPass); }
+    void ClearColorPassRectangle(const ScissorRect& rect, const float* color, float depth) override
+    {
+        auto& c = Add(Op::ClearColorPassRectangle); c.scissor = rect;
+        c.n[0] = color ? 1u : 0u;
+        for (int i = 0; i < 4; ++i) c.f[i] = color ? color[i] : 0.f;
+        c.f[4] = depth;
+    }
     void SetDepthRectangleClearSupported(bool supported) { m_depthRectangleClearSupported=supported; }
     bool SupportsDepthRectangleClear() const override { return m_depthRectangleClearSupported; }
     void ClearDepthRectangle(const ScissorRect& rect,float depth=Depth::ClearValue) override
@@ -226,6 +273,7 @@ private:
         ComputeWrite, Dispatch, StorageBarrier, BeginCompute, EndCompute, CopySceneDepth,
         DrawIndirect, CopyBuffer, CopyBufferRegion, VertexBuffer, IndexBuffer, Texture,
         BeginDepthOnlyPass, EndDepthOnlyPass, ClearDepthRectangle, Viewport, Scissor, Clear,
+        BeginColorPass, EndColorPass, ClearColorPassRectangle,
         Draw, DrawIndexed, BeginOcclusionFrame, OcclusionDecision,
         BeginOcclusionQuery, EndOcclusionQuery,
         BeginGpuTiming, EndGpuTiming, Transition, DebugMarker

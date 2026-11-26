@@ -163,5 +163,12 @@ public:
     // implemented offscreen depth rendering return nullptr.
     virtual std::shared_ptr<IGraphicsTexture> CreateDepthTexture2D(
         uint32_t, uint32_t) { return nullptr; }
+
+    // Colour render target: a Texture2DArray of `layers` RGBA8 slices (sRGB
+    // or linear), one mip, each slice a render target for
+    // IGraphicsContext::BeginColorPass and the whole array sampled in pixel
+    // shaders. Null where the backend has no offscreen colour rendering.
+    virtual std::shared_ptr<IGraphicsTexture> CreateRenderTargetArray(
+        uint32_t /*width*/, uint32_t /*height*/, uint32_t /*layers*/, bool /*srgb*/) { return nullptr; }
 };
 }

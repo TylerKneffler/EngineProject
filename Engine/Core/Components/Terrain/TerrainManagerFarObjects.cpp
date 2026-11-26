@@ -852,6 +852,14 @@ void TerrainManager::UpdateFarObjects(int centerX, int centerY)
             // Placements are only ever replaced below, then marked dirty.
             block.layer->placementsChangeOnlyWhenMarked = true;
         }
+        // A clustered block lies wholly beyond farClusterDistance: when the
+        // far casters stop before that (farShadowDistance follows the view
+        // distance), it can never cast, so it leaves the shadow view instead
+        // of being prepared and culled there every frame (+0.3 ms at 23 m/s).
+        {
+            const float casterReach = block.layer->viewDistance;
+            block.layer->farShadowDistance = clustered && casterReach <= farClusterDistance ? 0.f : casterReach;
+        }
         std::vector<TerrainObjectLayer::Placement> placements;
         uint64_t id = 0;
         for (const Cell& cell : members)

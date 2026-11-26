@@ -788,16 +788,20 @@ void D3D12GraphicsContext::SetTexture(uint32_t slot, const Engine::Graphics::IGr
 {
     // Logical slots 12-15 are the terrain layer arrays and paint map (t27-t30).
     const bool terrainArray = slot >= 12 && slot <= 15;
-    if (!m_cmdList || (slot >= 12 && !terrainArray && (slot < 16 || slot >= 24)))
+    // Logical slots 24-26: the terrain virtual texture arrays (t31-t33).
+    const bool virtualTextureArray = slot >= 24 && slot <= 26;
+    if (!m_cmdList || (slot >= 12 && !terrainArray && !virtualTextureArray && (slot < 16 || slot >= 24)))
         return;
-    const auto* nullTexture = terrainArray ? m_nullArrayTexture.get() : m_nullTexture.get();
+    const auto* nullTexture = terrainArray || virtualTextureArray
+        ? m_nullArrayTexture.get() : m_nullTexture.get();
     const auto* nativeTexture = dynamic_cast<const D3D12GraphicsTexture*>(texture ? texture : nullTexture);
     if (!nativeTexture)
         return;
     RetainTexture(nativeTexture);
     ID3D12DescriptorHeap* heaps[] = { nativeTexture->GetHeap() };
     m_cmdList->SetDescriptorHeaps(1, heaps);
-    const uint32_t rootParameter = terrainArray ? slot + 16 : slot == 10 ? 26 : slot == 11 ? 27 :
+    const uint32_t rootParameter = terrainArray ? slot + 16 : virtualTextureArray ? slot + 8 :
+        slot == 10 ? 26 : slot == 11 ? 27 :
         slot >= 16 ? slot + 2 : slot == 6 ? 10 :
         (slot == 7 ? 13 : (slot == 8 ? 14 : (slot == 9 ? 17 : slot + 1)));
     m_cmdList->SetGraphicsRootDescriptorTable(
@@ -849,6 +853,98 @@ void D3D12GraphicsContext::EndDepthOnlyPass()
     m_cmdList->ResourceBarrier(1, &barrier);
     m_activeDepthTarget = nullptr;
     if(m_restoreDepthOnlyPass) m_restoreDepthOnlyPass();
+}
+
+bool D3D12GraphicsContext::BeginColorPass(const Engine::Graphics::IGraphicsTexture* const* targets,
+    uint32_t count, uint32_t slice, const Engine::Graphics::IGraphicsTexture* depthTexture)
+{
+    if (!m_cmdList || m_activeDepthTarget || m_activeColorCount || !targets || !count || count > 4)
+        return false;
+    std::array<D3D12GraphicsTexture*, 4> colors{};
+    for (uint32_t i = 0; i < count; ++i)
+    {
+        colors[i] = dynamic_cast<D3D12GraphicsTexture*>(const_cast<Engine::Graphics::IGraphicsTexture*>(targets[i]));
+        if (!colors[i] || !colors[i]->IsColorTarget() || slice >= colors[i]->GetRenderTargetSlices())
+            return false;
+    }
+    auto* depth = depthTexture ? dynamic_cast<D3D12GraphicsTexture*>(
+        const_cast<Engine::Graphics::IGraphicsTexture*>(depthTexture)) : nullptr;
+    if (depthTexture && (!depth || !depth->IsDepthTarget())) return false;
+    std::array<D3D12_RESOURCE_BARRIER, 5> barriers{};
+    std::array<D3D12_CPU_DESCRIPTOR_HANDLE, 4> rtvs{};
+    uint32_t barrierCount = 0;
+    for (uint32_t i = 0; i < count; ++i)
+    {
+        RetainTexture(colors[i]);
+        auto& barrier = barriers[barrierCount++];
+        barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+        barrier.Transition.pResource = static_cast<ID3D12Resource*>(colors[i]->GetNativeHandle());
+        barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+        barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
+        barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+        rtvs[i] = colors[i]->GetRtvHandle(slice);
+    }
+    if (depth)
+    {
+        RetainTexture(depth);
+        auto& barrier = barriers[barrierCount++];
+        barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+        barrier.Transition.pResource = static_cast<ID3D12Resource*>(depth->GetNativeHandle());
+        barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+        barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_DEPTH_WRITE;
+        barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    }
+    m_cmdList->ResourceBarrier(barrierCount, barriers.data());
+    const auto dsv = depth ? depth->GetDsvHandle() : D3D12_CPU_DESCRIPTOR_HANDLE{};
+    m_cmdList->OMSetRenderTargets(count, rtvs.data(), FALSE, depth ? &dsv : nullptr);
+    m_activeColorTargets = colors;
+    m_activeColorCount = count;
+    m_activeColorSlice = slice;
+    m_activeColorDepth = depth;
+    return true;
+}
+
+void D3D12GraphicsContext::ClearColorPassRectangle(const ScissorRect& rect, const float* color, float depth)
+{
+    if (!m_cmdList || !m_activeColorCount || rect.left >= rect.right || rect.top >= rect.bottom) return;
+    const D3D12_RECT area{rect.left, rect.top, rect.right, rect.bottom};
+    if (color)
+        for (uint32_t i = 0; i < m_activeColorCount; ++i)
+            m_cmdList->ClearRenderTargetView(m_activeColorTargets[i]->GetRtvHandle(m_activeColorSlice),
+                color, 1, &area);
+    if (m_activeColorDepth)
+        m_cmdList->ClearDepthStencilView(m_activeColorDepth->GetDsvHandle(), D3D12_CLEAR_FLAG_DEPTH,
+            depth, 0, 1, &area);
+}
+
+void D3D12GraphicsContext::EndColorPass()
+{
+    if (!m_cmdList || !m_activeColorCount) return;
+    std::array<D3D12_RESOURCE_BARRIER, 5> barriers{};
+    uint32_t barrierCount = 0;
+    for (uint32_t i = 0; i < m_activeColorCount; ++i)
+    {
+        auto& barrier = barriers[barrierCount++];
+        barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+        barrier.Transition.pResource = static_cast<ID3D12Resource*>(m_activeColorTargets[i]->GetNativeHandle());
+        barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
+        barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+        barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    }
+    if (m_activeColorDepth)
+    {
+        auto& barrier = barriers[barrierCount++];
+        barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+        barrier.Transition.pResource = static_cast<ID3D12Resource*>(m_activeColorDepth->GetNativeHandle());
+        barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_DEPTH_WRITE;
+        barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+        barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    }
+    m_cmdList->ResourceBarrier(barrierCount, barriers.data());
+    m_activeColorTargets = {};
+    m_activeColorCount = 0;
+    m_activeColorDepth = nullptr;
+    if (m_restoreDepthOnlyPass) m_restoreDepthOnlyPass();
 }
 
 void D3D12GraphicsContext::SetStencilReference(uint32_t reference)

@@ -18,6 +18,7 @@
 #include <map>
 #include <deque>
 #include <fstream>
+#include <future>
 #include <filesystem>
 #include <unordered_map>
 #include <tuple>
@@ -71,9 +72,34 @@ void ReleaseRetiredMeshes(const void* scene, uint64_t frame)
     if (retired.frame == frame) return;
     retired.frame = frame;
     const auto start = std::chrono::steady_clock::now();
-    while (!retired.meshes.empty() &&
+    const size_t queued = retired.meshes.size();
+    // Destroyed on a worker: each chunk mesh's committed D3D12 buffers took
+    // ~1 ms to release on the main thread (23 m/s walk: 2058 meshes, a 1 ms
+    // budget spent every frame, a backlog of up to 360). The meshes have no
+    // owner object (no scene hooks), are no longer drawn, and command packets
+    // that still bind their buffers hold references of their own.
+    // ENGINE_VOLUME_ASYNC_RELEASE=0 releases on the main thread (A/B).
+    static const bool async = [] {
+        const char* value = std::getenv("ENGINE_VOLUME_ASYNC_RELEASE");
+        return !(value && value[0] == '0');
+    }();
+    static std::future<void> releasing;
+    if (async && !retired.meshes.empty() &&
+        (!releasing.valid() || releasing.wait_for(std::chrono::seconds(0)) == std::future_status::ready))
+    {
+        if (releasing.valid()) releasing.get();
+        releasing = std::async(std::launch::async,
+            [meshes = std::move(retired.meshes)]() mutable { meshes.clear(); });
+        retired.meshes.clear();
+    }
+    while (!retired.meshes.empty() && !async &&
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count() < 1.0)
         retired.meshes.pop_front();
+    static const bool log = std::getenv("ENGINE_VOLUME_TERRAIN_LOG") != nullptr;
+    if (log && queued)
+        std::printf("[VolumeRetire] frame %llu released %zu of %zu in %.2f ms\n",
+            static_cast<unsigned long long>(frame), queued - retired.meshes.size(), queued,
+            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count());
 }
 double InstallBudgetMs()
 {

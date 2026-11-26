@@ -294,6 +294,11 @@ struct SceneSettings
     // thread before camera recording; instanced vegetation has GPU Hi-Z
     // occlusion either way. ENGINE_VISIBILITY_OCCLUSION_BUFFER=0/1 overrides.
     bool cpuOcclusionCulling = true;
+    // Main-thread time per frame for building streamed object layers' prefab
+    // instances while any is still building (cell crossings). Lower spreads
+    // the work over more frames; the far blocks keep drawing until a cell's
+    // own layers are ready, so nothing disappears meanwhile.
+    float prefabBuildBudgetMs = 3.f;
 
     // Editor-only debug overlays for portals, matrix links, and warp volumes.
     bool portalDebugVisuals = false;

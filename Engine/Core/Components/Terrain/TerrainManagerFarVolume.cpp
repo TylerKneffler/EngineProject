@@ -260,6 +260,26 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
                 shownCells.insert(cell);
     const bool loadedChanged = shownCells != m_farShownCells;
 
+    // The loaded cells' layer materials and tiling: the distant path samples
+    // them as detail on the macro colour (Object.hlsl, flag 4194304), so
+    // distant ground is textured like the near cells. Nodes installed before
+    // any cell loaded get them once a cell has.
+    if (m_farLayerMaterials.empty())
+        for (const auto& [cell, terrain] : m_loaded)
+            if (terrain && !terrain->GetLayerMaterials().empty())
+            {
+                m_farLayerMaterials = terrain->GetLayerMaterials();
+                m_farLayerTiling = terrain->textureTiling;
+                for (auto& [nodeKey, existing] : m_farNodes)
+                    if (existing.object)
+                        if (auto* appearance = existing.object->GetComponent<TerrainBatchAppearance>();
+                            appearance && appearance->materials.empty())
+                        {
+                            appearance->materials = m_farLayerMaterials;
+                            appearance->textureTiling = m_farLayerTiling;
+                        }
+                break;
+            }
     // Install finished builds (a few a frame).
     const auto installStart = FarClock::now();
     int installs = 0;
@@ -267,7 +287,10 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
     {
         if (!node.job.valid() || node.job.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
             continue;
-        if (installs >= 6) break;
+        // A time budget, not a count: 1-4 installs took 3-14 ms on one frame
+        // at cell crossings (todo.md Step 0).
+        if (installs >= 1 && std::chrono::duration<double, std::milli>(FarClock::now() - installStart).count() >=
+            std::max(farVolumeInstallMilliseconds, .1f)) break;
         auto built = node.job.get();
         ++installs;
         if (!built) continue;
@@ -289,6 +312,12 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
             material->castsShadows = true;
             node.object->AddComponent<TerrainBatchAppearance>()->distantVisual = true;
             node.object->enabled = false;
+        }
+        if (auto* appearance = node.object->GetComponent<TerrainBatchAppearance>();
+            appearance && appearance->materials.empty() && !m_farLayerMaterials.empty())
+        {
+            appearance->materials = m_farLayerMaterials;
+            appearance->textureTiling = m_farLayerTiling;
         }
         node.vertexCount = built->geometry.vertices.size();
         const bool hasGeometry = !built->geometry.indices.empty();

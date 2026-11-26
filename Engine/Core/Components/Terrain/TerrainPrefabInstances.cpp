@@ -15,6 +15,7 @@
 #include "Core/Components/Physics/PrimitiveObjectCollider.h"
 #include "Core/Components/Physics/RigidBody.h"
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
@@ -77,10 +78,31 @@ struct TerrainObjectLayer::PrefabInstances
         bool available=false;
         bool operator==(const Source& other) const
         { return resolved==other.resolved && stamp==other.stamp && available==other.available; }
+        bool operator!=(const Source& other) const { return !(*this==other); }
+        static Source Read(const std::string& asset)
+        {
+            Engine::Serialization::PrefabLoadProfile::Stage stage("prefab_source_resolution");
+            Source source;
+            // A level path ("Oak.prefab#lod2") shares its prefab file's stamp but
+            // keeps its suffix, so each level is a distinct prototype.
+            const auto variant=Engine::Serialization::PrefabLod::Split(asset);
+            const auto file=std::filesystem::absolute(Mesh::ResolveFilePath(variant.base)).lexically_normal().generic_string();
+            source.resolved=Engine::Serialization::PrefabLod::Path(file,variant.lod);
+            std::error_code error;
+            source.stamp=std::filesystem::last_write_time(file,error);
+            source.available=!error;
+            return source;
+        }
     };
     IGraphicsProvider* provider=nullptr;
     uint64_t signature=UINT64_MAX;
     std::chrono::steady_clock::time_point nextCheck{};
+    // Settled fast path (PreparePrefabInstances): the shared source epoch
+    // this runtime last verified all its sources against, and when it next
+    // runs the full check anyway (LOD chains, generated objects, direct
+    // field edits that bypass revisions).
+    uint64_t verifiedSourceEpoch=UINT64_MAX;
+    std::chrono::steady_clock::time_point fullCheckDue{};
     std::chrono::steady_clock::time_point nextPlacementSignatureCheck{};
     std::map<std::string,Source> sources;
     bool sourceProbeActive=false;
@@ -207,6 +229,72 @@ bool TerrainObjectLayer::HasPrefabPlacements() const
     return m_hasPrefab;
 }
 
+// Every prefab source any layer asked for, resolved off the scene thread.
+// One sweep a second re-stats all of them; a changed result advances the
+// epoch, which sends settled layers back through their full source check.
+struct TerrainObjectLayer::PrefabSourceWatch
+{
+    using Source=PrefabInstances::Source;
+    struct Entry
+    {
+        std::shared_future<Source> future;
+        std::optional<Source> value;
+        std::chrono::steady_clock::time_point checked{};
+    };
+    std::mutex mutex;
+    std::map<std::string,Entry> entries;
+    std::atomic<uint64_t> epoch{0};
+    std::future<std::vector<std::pair<std::string,Source>>> sweep;
+    std::chrono::steady_clock::time_point lastSweep{};
+};
+
+TerrainObjectLayer::PrefabSourceWatch& TerrainObjectLayer::GetPrefabSourceWatch()
+{
+    static PrefabSourceWatch watch;
+    return watch;
+}
+
+void TerrainObjectLayer::PollPrefabSources()
+{
+    auto& watch=GetPrefabSourceWatch();
+    const auto now=std::chrono::steady_clock::now();
+    if (watch.sweep.valid())
+    {
+        if (watch.sweep.wait_for(std::chrono::seconds(0))!=std::future_status::ready) return;
+        auto results=watch.sweep.get();
+        std::lock_guard lock(watch.mutex);
+        bool moved=false;
+        for (auto& [path,source]:results)
+        {
+            auto& entry=watch.entries[path];
+            if (entry.value && *entry.value!=source) moved=true;
+            if (!entry.future.valid())
+            {
+                entry.value=std::move(source);
+                entry.checked=now;
+            }
+        }
+        if (moved) watch.epoch.fetch_add(1);
+        return;
+    }
+    if (now-watch.lastSweep<std::chrono::seconds(1)) return;
+    watch.lastSweep=now;
+    std::vector<std::string> paths;
+    {
+        std::lock_guard lock(watch.mutex);
+        paths.reserve(watch.entries.size());
+        for (const auto& [path,entry]:watch.entries)
+            if (entry.value) paths.push_back(path);
+    }
+    if (paths.empty()) return;
+    watch.sweep=Engine::Rendering::RenderJobs::Get().Submit([paths=std::move(paths)] {
+        std::vector<std::pair<std::string,PrefabSourceWatch::Source>> results;
+        results.reserve(paths.size());
+        for (const auto& path:paths) results.emplace_back(path,PrefabSourceWatch::Source::Read(path));
+        return results;
+    });
+}
+
 bool TerrainObjectLayer::IsPrefabPreparationComplete(IGraphicsProvider* provider) const
 {
     if (m_prefabCheckedRevision!=GetConfigurationRevision() ||
@@ -222,6 +310,7 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
 {
     using BuildProfile=Engine::Serialization::PrefabLoadProfile;
     m_lastPrefabPrepareTimings={};
+    m_prefabIdleUntil={};
     struct ScopedMilliseconds
     {
         double& output;
@@ -242,11 +331,57 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
         deadline=now+std::chrono::milliseconds(3);
     const bool changed=m_prefabCheckedRevision!=GetConfigurationRevision() ||
         m_prefabCheckedData!=placements.data() || m_prefabCheckedCount!=placements.size();
-    if (!changed && !m_prefabInstances && !m_prefabSourcePreparationPending) return;
+    if (!changed && !m_prefabInstances && !m_prefabSourcePreparationPending)
+    { m_prefabIdleUntil=std::chrono::steady_clock::time_point::max(); return; }
     const bool sourceProbeActive=!changed && m_prefabInstances &&
         m_prefabInstances->provider==provider && m_prefabInstances->sourceProbeActive;
     if (!changed && m_prefabInstances->provider==provider && !m_prefabInstances->building &&
-        now<m_prefabInstances->nextCheck && !sourceProbeActive) return;
+        now<m_prefabInstances->nextCheck && !sourceProbeActive)
+    { m_prefabIdleUntil=m_prefabInstances->nextCheck; return; }
+    // Settled and verified: nothing a full check reads has moved. Sources
+    // are watched by one shared sweep (PollPrefabSources); placements by
+    // revision/data/count (marked layers) or the signature; configuration by
+    // a field compare; component revisions by the profile key. The full
+    // check (LOD profiles, generated objects, per-source probe) still runs
+    // every 10-15 s. ENGINE_PREFAB_SETTLED_FAST_PATH=0 restores the 1 s full
+    // check for A/B.
+    static const bool settledFastPath=[] {
+        const char* value=std::getenv("ENGINE_PREFAB_SETTLED_FAST_PATH");
+        return !value || std::string(value)!="0";
+    }();
+    if (settledFastPath && !changed && m_prefabInstances->provider==provider &&
+        !m_prefabInstances->building && !sourceProbeActive && !m_prefabSourcePreparationPending &&
+        m_prefabInstances->verifiedSourceEpoch==GetPrefabSourceWatch().epoch.load() &&
+        now<m_prefabInstances->fullCheckDue && m_prefabProfilesValid &&
+        m_prefabProfileCacheOwner==Owner && m_prefabInstances->HasSameConfiguration(*this))
+    {
+        bool same=true;
+        size_t index=0;
+        for (const auto* component : Owner->Components)
+        {
+            if (!component) continue;
+            if (index>=m_prefabProfileComponents.size() ||
+                m_prefabProfileComponents[index].first!=component ||
+                m_prefabProfileComponents[index].second!=component->GetConfigurationRevision())
+            { same=false; break; }
+            ++index;
+        }
+        same=same && index==m_prefabProfileComponents.size();
+        if (same && !placementsChangeOnlyWhenMarked)
+        {
+            const auto signatureStarted=std::chrono::steady_clock::now();
+            same=GetPlacementSignature()==m_prefabInstances->signature;
+            m_lastPrefabPrepareTimings.placementSignatureMs=
+                std::chrono::duration<double,std::milli>(
+                    std::chrono::steady_clock::now()-signatureStarted).count();
+        }
+        if (same)
+        {
+            m_prefabInstances->nextCheck=now+std::chrono::seconds(1);
+            m_prefabIdleUntil=m_prefabInstances->nextCheck;
+            return;
+        }
+    }
     // Grass and other mesh-only layers keep their existing renderer without
     // paying for a placement signature when they have no prefab runtime.
     // Only a placement change can change the answer.
@@ -259,7 +394,8 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
     }
     m_prefabCheckedRevision=GetConfigurationRevision(); m_prefabCheckedData=placements.data();
     m_prefabCheckedCount=placements.size(); m_hasPrefabPlacements=hasPrefabs;
-    if (!hasPrefabs && !m_prefabInstances) return;
+    if (!hasPrefabs && !m_prefabInstances)
+    { m_prefabIdleUntil=std::chrono::steady_clock::time_point::max(); return; }
     // Check the placement signature on its normal interval. Source file probes
     // are spread over subsequent frames to avoid one synchronous filesystem
     // burst; an in-place placement edit may therefore take a few extra frames
@@ -353,33 +489,18 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
         m_lastPrefabPrepareTimings.lodProfilesMs=std::chrono::duration<double,std::milli>(
             std::chrono::steady_clock::now()-lodProfilesStarted).count();
     const auto& lodProfiles=m_prefabLodProfiles;
-    const auto readSource=[](const std::string& asset) {
-        BuildProfile::Stage stage("prefab_source_resolution");
-        PrefabInstances::Source source;
-        // A level path ("Oak.prefab#lod2") shares its prefab file's stamp but
-        // keeps its suffix, so each level is a distinct prototype.
-        const auto variant=Engine::Serialization::PrefabLod::Split(asset);
-        const auto file=std::filesystem::absolute(Mesh::ResolveFilePath(variant.base)).lexically_normal().generic_string();
-        source.resolved=Engine::Serialization::PrefabLod::Path(file,variant.lod);
-        std::error_code error;
-        source.stamp=std::filesystem::last_write_time(file,error);
-        source.available=!error;
-        return source;
-    };
+    const auto readSource=[](const std::string& asset) { return PrefabInstances::Source::Read(asset); };
+    // Read before any lookup: a sweep landing after this still counts as new.
+    const uint64_t sourceEpoch=GetPrefabSourceWatch().epoch.load();
     std::map<std::string,PrefabInstances::Source> sources;
     // Resolve and stat the full set of prefab sources off the scene thread.
     // Reuse recent results across neighboring cells, while retaining the
     // existing per-source periodic probe for edits and asset relocation.
     {
         ScopedMilliseconds sourceLookupTimer{m_lastPrefabPrepareTimings.sourceLookupMs};
-        struct AsyncSource
-        {
-            std::shared_future<PrefabInstances::Source> future;
-            std::optional<PrefabInstances::Source> value;
-            std::chrono::steady_clock::time_point checked{};
-        };
-        static std::mutex sourceCacheMutex;
-        static std::map<std::string,AsyncSource> sourceCache;
+        auto& watch=GetPrefabSourceWatch();
+        auto& sourceCacheMutex=watch.mutex;
+        auto& sourceCache=watch.entries;
         bool allReady=true;
         for (const auto& path:m_prefabRequiredSources)
         {
@@ -475,6 +596,12 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
             // data. Avoid tearing down/rebuilding hundreds of generated batch
             // objects when the actual content and render policy are unchanged.
             m_prefabInstances->nextCheck=now+std::chrono::seconds(1);
+            m_prefabInstances->verifiedSourceEpoch=sourceEpoch;
+            // Spread the full checks: a fixed 10 s would line every layer
+            // that settled together up on the same frame.
+            m_prefabInstances->fullCheckDue=now+std::chrono::milliseconds(
+                10000+static_cast<int64_t>((reinterpret_cast<uintptr_t>(this)>>4)%5000));
+            m_prefabIdleUntil=m_prefabInstances->nextCheck;
             return;
         }
         // A changed or newly resolved source falls through to a rebuild. The

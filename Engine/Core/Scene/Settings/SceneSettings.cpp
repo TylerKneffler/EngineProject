@@ -201,6 +201,8 @@ Engine::Serialization::JsonValue SerializeSceneSettings(const Engine::Model::Sce
         Engine::Serialization::JsonValue(settings.sceneViewUiOverlay));
     value.Set("cpuOcclusionCulling",
         Engine::Serialization::JsonValue(settings.cpuOcclusionCulling));
+    value.Set("prefabBuildBudgetMs",
+        Engine::Serialization::JsonValue(settings.prefabBuildBudgetMs));
     value.Set("portalDebugVisuals",
         Engine::Serialization::JsonValue(settings.portalDebugVisuals));
     value.Set("sceneCameraWarpLookThrough",
@@ -487,6 +489,8 @@ void DeserializeSceneSettings(Engine::Model::SceneSettings& settings, const Engi
         settings.sceneViewUiOverlay = sceneViewUiOverlay->AsBool();
     if (const auto* cpuOcclusion = FindField(value, "cpuOcclusionCulling"))
         settings.cpuOcclusionCulling = cpuOcclusion->AsBool();
+    if (const auto* prefabBudget = FindField(value, "prefabBuildBudgetMs"))
+        settings.prefabBuildBudgetMs = std::clamp(prefabBudget->AsFloat(), 0.25f, 50.f);
     if (const auto* portalDebugVisuals = FindField(value, "portalDebugVisuals"))
         settings.portalDebugVisuals = portalDebugVisuals->AsBool();
     if (const auto* sceneCameraWarpLookThrough = FindField(value,

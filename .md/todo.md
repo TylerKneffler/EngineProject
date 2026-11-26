@@ -134,13 +134,108 @@ terrain. Caveat: `e80eaec1` changed the meadow walk camera, so the routes may di
             - [ ] Shadow record 2.5 ms, of it 1.7 "scene preparation": the shadow view repeats the
                   camera's per-view draw preparation over the same items (share it: "Retained render
                   scene", engine_notes.md Next 3).
-            - [ ] Instance tile prepare ~1.0, submission ~0.9, draw loop ~0.9, other ~1.1 ms.
+            - [x] Placement registration once per frame (2026-11-26): the pool registration stamp was per
+                  view, so the camera repeated every registration the shadow pass had made
+                  (SceneInstanceBatching; `ENGINE_REGISTER_PER_VIEW=1` restores it). Interleaved: camera
+                  tile preparation 0.92 -> 0.48 ms, camera record 5.7-5.8 -> 5.2-5.3, frame 12.95-13.08 ->
+                  12.54-12.62 ms.
+            - Per-view phases (`ENGINE_RENDER_PHASE_LOG=<n>`, 2026-11-26): shadow view 1-2 setup 0.29,
+                  candidates 0.09, draws 0.11, LOD + batching + tiles 0.94 ms; camera 0.01 / 0.19 / 1.82
+                  (footprints in it) / 1.17. The shadow pass does not repeat the material work; its cost is
+                  batching and tile preparation.
+            - [ ] Submission ~0.8, draw loop ~0.85, other ~1.1 ms, footprints ~1.1 (near chunks).
+            - [x] `Scene::FindGameCamera` scanned every object (49 terrain cells call it each frame);
+                  cached now (structure revision + a check over the camera registry). No measurable
+                  frame change on the walks (the explorer is early in the object list).
+      - GPU at Vista (2026-11-26, GPU-bound, 17.0-17.3 ms): foliage depth pre-pass 5.2 + impostor colour
+        4.0 + terrain 2.5 + shadow 1.65 + leaves 1.1 + cull 1.1 ms; ~390k far-tree impostors drawn
+        (single-level far blocks to ~8 km). Leaving impostors out of the depth pre-pass
+        (`ENGINE_IMPOSTOR_DEPTH_PREPASS=0`) is far worse: impostor colour 4 -> 20 ms, frame 29-30 ms (heavy
+        impostor shader, deep overlap); the pre-pass stays.
+      - [x] Impostor views (2026-11-26): views under 5 % dropped, one view past 600 m (zero-weight quads
+            collapse and are not rasterized): Vista depth pre-pass 5.1 -> 4.7, impostor colour 4.0 -> 3.8 ms.
+      - Measured with `ENGINE_GPU_WORKLOAD_COUNTERS=1` at Vista: the depth pre-pass runs 48 M pixel
+        invocations (~24 per screen pixel) for the far forest. Early depth works (PSShadowMain only clips),
+        but each species is one instanced draw over the whole landscape, so species overlap each other;
+        nearest-first tile order inside a draw (`ENGINE_SORT_BLOCK_TILES=1`, off) changed nothing.
+      - [x] Far forest representation (user chose the recommendation, 2026-11-26): (b) cluster impostors
+            past 3 km. `TerrainManager.farClusterDistance` 0 -> 3000 in the landscape scene and in
+            `tools/build_landscape_demo.py` (inspector: Terrain Manager > "Forest cluster distance (m)").
+            Vista (interleaved, `.local/routes/vista_ab.py`): frame 16.45 / 16.42 -> 12.82 / 12.05 ms,
+            foliage depth 4.65 -> 2.2, impostor colour 3.93 -> 1.58 ms; walks use ~0.5 GB less. Look
+            (`.local/routes/vclus_cmp.png`): the far band reads slightly darker and more even, still forest,
+            no seam at 3 km. Costs found and fixed on the way:
+            - Clustered blocks lie wholly past the far casters' reach (2.2 km), yet were prepared for the
+              shadow view every frame (+0.33 ms at 23 m/s): their layers now get `farShadowDistance` 0.
+            - Registration: each placement source keeps a handle into `PersistentInstancePool` (no lookup
+              when unchanged), and the pool no longer keeps a reference per source per frame (an expired
+              source's range is retired to the frame slot instead). Shadow record 2.15-2.23 -> 1.97-2.04 ms.
+            - A deterministic 105-165 ms hitch at frame 4817 of the full walk: the object slot count passed
+              2048 and the per-view object buffers grew, each set sized for 64 portal views (~68 MB of upload
+              heap at 4096 slots) though the landscape has no portals. Buffers now hold portal views only
+              when the scene has a SpatialManipulator (`SceneRenderer::m_objectPortalViews`; the portal view
+              budget is capped to it; `ENGINE_PORTAL_SLOTS_ALWAYS=1` restores, A/B; portal demo scenes
+              unchanged). Growth 30-146 ms -> ~3 ms; full walk peak memory 4.4 -> 3.6 GB.
+            Full 534 m walk (5300 frames): median 13.10 -> 11.22 ms, p99 22.1 -> 19.0, > 50 ms 0.
+            Remaining: at 23 m/s clusters still cost ~0.25 ms CPU (meadow 12.45 -> 12.7 ms: the cluster
+            prefabs' extra parts in camera tile preparation, 0.42 -> 0.60 ms).
+            Option (a), a cheaper single-view impostor between the near trees and the clusters, is left
+            for if the switch shows while moving.
       - Main thread 2026-11-26 (meadow 1000 frames, overlay on): update 2.1 + prepare 1.7 + camera 6.8 +
         shadow 2.5 = ~13 ms; GPU ~9 ms; frame 14.05-14.2 ms (~71 fps). 12.5 ms needs ~1.6 ms more.
       - **Scorecard 2026-11-26 (1000 frames, 6 m/s, overlay on, two runs): meadow 12.33 / 12.78 ms,
         forest 12.94 / 12.67 ms (~77-81 fps): at the 80 fps target on these walks.** Not yet: walk +
         turning, 23 m/s, the full 534 m traversal (p99 24.5 ms, crossings 35-37 ms), and headroom (the
         GPU is ~9-11 ms on these walks, ~17 ms at Vista).
+        - Turning (`--capture-args "--route-look-sway 60 --route-look-period 240"`, 6 m/s): meadow 13.01 /
+          12.94, forest 13.05 / 13.05 ms (~77 fps), p99 24.5-28.6.
+        - 23 m/s: meadow 14.93 / 15.15, forest 15.18 / 15.18 ms (~66 fps), p99 31-35, 2-3 frames > 50 ms
+          per 1060. Against 6 m/s (meadow): update +1.2 (continuous streaming), camera + shadow record
+          +0.9 (the run reaches 400 m in, busier scenery), GPU +1.
+        - Steady update (~1.5-2 ms): VolumeTerrain x49 0.6-1.2, TerrainManager ~0.5, layers 0.3.
+        - Camera record now ~5.2 ms: footprints 1.1, tile preparation 0.9 (per-part block range lists and
+          per-source pool registration each frame), draw loop 0.85, submission 0.83, other 1.1.
+        - Biggest structural lever left: the shadow view repeats the camera's per-view preparation
+          (shadow record 2.3-2.7 ms, 1.7 of it preparation) -> share it ("Retained render scene").
+        - [x] Texture footprints on a worker (2026-11-26, `ENGINE_ASYNC_FOOTPRINTS=0` off): the per-draw
+              mip-demand pass takes a snapshot of the prepared draws and runs beside the rest of the
+              camera view, joined before the view returns. Meadow (interleaved): camera record 5.1 -> 4.0,
+              frame 12.27 / 12.30 -> 11.23 / 11.24 ms; resident textures unchanged.
+        - [x] Settled prefab re-checks event-driven (2026-11-26, `ENGINE_PREFAB_SETTLED_FAST_PATH=0` off):
+              once every layer had built, the round-robin re-check still spent its whole 0.75 ms budget
+              every frame (775 layers, ~170 visited a frame, each re-probing its prefab sources one per
+              visit). Now one background sweep re-stats every prefab source a second and advances a shared
+              epoch on any change (`TerrainObjectLayer::PollPrefabSources`); a verified layer whose epoch,
+              configuration, component revisions and placements are unchanged only reschedules, with the
+              full check (LOD chains, generated objects) every 10-15 s; and the frame loop skips idle layers
+              without calling them (`IsPrefabPreparationDue`). Interleaved, two runs each: prefab stage
+              0.80 -> 0.11-0.14 ms, scene prepare 1.65-1.70 -> 0.97-1.09; frame meadow 11.14 / 11.15 ->
+              10.83 / 10.70, forest 12.09 / 12.11 -> 11.96 / 11.91 ms.
+        - [x] Placement pool registration (2026-11-26): the shadow view (first of the frame) re-registers
+              every resident source, ~3,550 with the far forest, though none changed: each paid a node
+              allocation in a per-frame `unordered_set` of live keys plus a `std::map` lookup. Now a per-source
+              live-frame stamp and a hashed source table (`PersistentInstancePool`). Shadow tile inputs
+              0.66-0.76 -> 0.34-0.35 ms (`ENGINE_RENDER_PHASE_LOG` now splits phase 6: records, batching,
+              tile inputs with registration and range counts).
+        - [x] Retired volume chunk meshes released on a worker (2026-11-26, `ENGINE_VOLUME_ASYNC_RELEASE=0`
+              off): each replaced chunk mesh took ~1 ms to destroy on the main thread (committed D3D12
+              buffers); at 23 m/s the 1 ms-a-frame release budget ran every frame with a backlog up to 360
+              (`ENGINE_VOLUME_TERRAIN_LOG=1` prints `[VolumeRetire]`). 23 m/s, interleaved, two runs: update
+              3.49-3.53 -> 3.08-3.12 ms median; frame mean meadow 13.62 / 13.90 -> 13.22 / 13.40, forest
+              14.17 / 14.35 -> 14.07 / 13.94 ms.
+        - [x] Layers and batch appearances opted out of frame updates (2026-11-26): neither has an
+              `Update`, but `RequiresUpdate()` defaults to true, so 776 TerrainObjectLayer and 525
+              TerrainBatchAppearance objects ran empty updates every frame. Update objects 1482 -> 181,
+              update loop 1.2 -> 0.7 ms.
+        - **Scorecard 2026-11-26 evening (1000 frames, overlay on, two runs): 6 m/s meadow 10.59 / 10.32,
+          forest 11.90 / 11.91 ms (84-97 fps); 23 m/s meadow 12.50 / 12.54, forest 13.21 / 13.18 ms
+          (76-80 fps).** Main thread at 6 m/s: update 1.8, prepare 1.0-1.1, camera 3.9-4.1, shadow
+          1.8-1.9, UI 0.4. The forest walk is now near GPU-bound (opaque 5.3 incl. terrain 2.4 + leaves
+          1.5, instance cull 1.55, foliage depth 1.3, shadow 1.0, clouds 0.6 ms).
+        - 23 m/s before the last three items: meadow 12.6-12.7, forest 13.1-13.5 ms median (was 14.9-15.2). Update
+              ~3.1 (loop 1.2: TerrainManager 0.5, 776 layers + 525 appearances ~0.27 of near no-op calls,
+              ~0.3 loop overhead; grass spatial scripts ~0.6, mean 1.0), prepare 1.5-1.7, camera 4.3,
+              shadow 2.15. `ENGINE_UPDATE_TYPE_LOG=<ms>` now also prints loop, parallel and script times.
 - [ ] Frames over 50 ms: 9-10 per walk (11-23: 0). Find them (cell crossings, far-volume swaps, chunk
       installs) with per-frame stage logs.
       - [x] Route for it (2026-11-26, user: "extend meadow walk path to capture cell traversal"):
@@ -173,8 +268,13 @@ terrain. Caveat: `e80eaec1` changed the meadow walk camera, so the routes may di
             `SetTerrainGeometry(..., deferBuffers)`; DX12; others unchanged): 3-4.5 ms. Walk (534 m):
             p99 29.9 -> 24.5 ms, frames > 33 ms 35 -> 10, > 50 ms 3 -> 2, crossing peaks 40-45 -> 35-37
             (first crossing 50). Vista unchanged (clouds and dither only).
-      - [ ] Crossings still peak at 35-37 ms: `TerrainManager` update ~12-16 ms left (stream cells 2-5,
-            far objects 1-5, far node installs 3-4.5) + VolumeTerrain chunk work 1-2.
+      - [x] Crossing work spread over frames (2026-11-26): distant node installs by a time budget
+            (`TerrainManager.farVolumeInstallMilliseconds`, 1.5 ms, inspector; was a count of 6), and the
+            prefab build budget while layers build is a scene setting (`prefabBuildBudgetMs`, Properties >
+            Visibility, default 3, landscape 1.5). Walk (534 m): median 13.47 -> 13.10, p99 24.5 -> 22.1,
+            > 33 ms 10 -> 5, > 50 ms 2 -> 0. Remaining slow frames: crossings 30-45 ms (cell commit and
+            restore 2-3.4 within its 2 ms budget + one item, far blocks ~2.5) and two 44 ms frames whose
+            stages add up to only ~5 ms over normal (outside the engine's stages: present or OS).
       - Frames 1963-64 of that walk (81, 136 ms): every GPU stage inflated together, an outside stall.
 - [ ] Check why far blocks draw past `farCanopyDistance` (`block.layer->viewDistance` is set to it) and decide
       which one is meant to hold: either the canopy paint takes over there (and needs to read as forest), or
@@ -199,7 +299,41 @@ terrain. Caveat: `e80eaec1` changed the meadow walk camera, so the routes may di
       they meet.
 - [ ] Recheck after each fix with the same still and burst captures; record pops per 100 m walked.
 
+### Approach (user, 2026-11-26: "low quality terrain close to the camera"; "distance alone is one-dimensional")
+How large engines do it (general practice, not researched here): (1) mesh detail by **projected screen-space
+error** per patch (CDLOD-style quadtrees, Unreal landscape LOD, Unity terrain pixel error), with
+**geomorphing**, instead of fixed distances: flat ground stays coarse near, ridges and silhouettes stay fine
+far, and field of view and resolution count; (2) **materials independent of the mesh**: paint weights and
+normals per pixel from textures, so a level change moves only the silhouette; (3) material quality in
+**bands** (near full layers + anti-tiling + detail normals; mid the same layers at 2-3 scales + macro
+variation; far a colour/normal map), or a **virtual texture** that renders the blended material at the
+texel density each patch needs (Frostbite, Far Cry 4/5, Unreal RVT). Order here: textured distant terrain
+(below, Step 2), mid-range tier (Step 3), screen-space-error levels + geomorphing (Step 1), per-pixel paint
+(Step 1); a terrain virtual texture later replaces most of these.
+- [x] Near volume level distances are `TerrainManager` properties now (2026-11-26; inspector "Volume full /
+      half / quarter detail to", saved; `ApplyVolumeLevelDistances` updates loaded cells); were hard-coded
+      64 / 128 / 256 m. Landscape 160 / 320 / 640 m: the coarse band of 4-8 m triangles on the near slope
+      at MeadowSlope is gone (`.local/terrainq/ms_levels_cmp.png`); walks unchanged (meadow 12.1 / 12.9,
+      forest 12.6 / 12.8 ms; terrain GPU +-0.1). The lit view barely changed: the flat look is material.
+- [ ] Screen-space-error volume levels: each chunk's geometric error (max vertical deviation between its
+      level and level 0, measured while meshing) projected to pixels picks the level, with hysteresis;
+      replaces the distances above. Then geomorph between levels (Step 1).
+
 ### Step 2: near → far material continuity ("in-between quality")
+- [x] Textured distant terrain without new data (2026-11-26). Distant nodes get the loaded cells' layer
+      materials and tiling (TerrainBatchAppearance; `m_farLayerMaterials`, handed to nodes installed before a
+      cell loaded) and their own flag (4194304, not the near 2048 path: compact vertices have no weights).
+      Object.hlsl `ApplyDistantLayerDetail` infers the layers per pixel from the macro colour against each
+      layer's mean and the slope (steep layer, `terrainSteep` from `volumeSteepLayer`), and applies (a) the
+      two strongest layers' grain at a quarter of the near repeat (to ~2.5 km; steep faces from the side)
+      and (b) macro variation, the strongest layer's own texture at 4x and 16x that scale, as brightness
+      ratio and normal detail (to ~8 km). Lesson: a single small-scale sample averages to the layer mean in
+      the distance's mips and showed nothing (checked with a magenta debug of the path). Result
+      (`.local/terrainq/far4_ms.png`, `far4_vista.png`): the distant meadow plain below MeadowSlope has
+      grass grain and patches instead of flat green, mountain faces show broken rock. Cost: walks within
+      noise (terrain GPU +0.1 ms on the meadow), Vista 17.0 vs 17.3 ms. User's case: a bare dirt hill past
+      the loaded cells read as a smooth tan blob. Not done: the lighting of distant nodes is still the
+      simpler ambient + sun model (no roughness or AO), and Vulkan's prebuilt SPIR-V needs a rebuild.
 - [ ] Measure first: luminance, hue and contrast against distance along the meadow walk view and from
       MeadowSlope (1440p tiles), and a debug view showing which material band each pixel is in; mark every
       visible step.
@@ -216,6 +350,12 @@ terrain. Caveat: `e80eaec1` changed the meadow walk camera, so the routes may di
       nodes): each blend over a wider range, staggered.
 
 ### Step 3: medium-range repetition
+- [x] Macro variation in the near layered path past 20-60 m (2026-11-26): the strongest layer's texture
+      at 4x and 16x its scale as a brightness ratio, matching the distant nodes. Subtle on the near slope;
+      the flat look there is mostly the ground-cover colour past the grass reach (below).
+- [ ] Past the grass reach (~60 m) the ground takes the cover colour with the layer texture only as
+      brightness detail: give the cover colour the same macro variation and grain, or let the layer show
+      more there.
 - [ ] Anti-tiling past 40 m: keep a cheap stochastic sample there (two hashed-offset/rotated samples per 4-8 m
       cell blended, or hex-tiling at a lower tier to ~150 m); turn `terrainVariation` back on where hex-tiling
       has ended. Measure the cost per tier.
@@ -225,6 +365,116 @@ terrain. Caveat: `e80eaec1` changed the meadow walk camera, so the routes may di
       map's 16 m texels as a multiplier), like the references' meadows, instead of only from 256 m.
 - [ ] Check: 1440p tiles at MeadowSlope, FieldWalk and the meadow walk before/after; repeat visible = peaks in
       the image autocorrelation across the 40-300 m band.
+
+### Step 5: past the target - the serial main thread, then motion vectors (2026-11-26)
+Research and numbers: [frame_pipeline_research.md](frame_pipeline_research.md). The walks are main-thread bound
+(update 1.8 + prepare 1.0 + camera 4.0 + shadow 1.9 + UI 0.4 ms); render scale 0.67 saves only ~0.5-1.5 ms even at
+Vista (GPU bound by vertices and overlap, not pixels), so a vendor upscaler is not a speed lever here.
+- [ ] P1 Parallel per-draw preparation inside a view (camera phase 5: 0.8-1.0 ms, one loop over render
+      objects). Split it into a serial resolve pass (pipelines, material records, terrain material state,
+      detail-cost groups) and a parallel fill of the prepared draws, in render-object order. Then tile inputs
+      and material records. Target: camera record -1 ms.
+      - Profile (2026-11-26, `ENGINE_RENDER_PHASE_LOG` now prints `[RenderLoop]` sections): camera loop
+        ~0.75 ms for ~570 draws: filter 0.08-0.10, setup 0.17-0.19, material records 0.35-0.41, terrain
+        material + texture LOD 0.17-0.18, shadow params 0.02, probes + lights 0.02, pipeline + rest 0.08. The
+        shadow view's loop is 0.02 ms (most of its candidates leave at the filter). Memory-bound per draw
+        (each writes a 2,000-byte ObjectGPUData), so threads, not micro-cuts, are the lever.
+      - [x] Material records kept across frames (`ENGINE_MATERIAL_RECORDS_ACROSS_FRAMES=0` off): ~500 of ~640
+        camera draws missed the per-frame record cache every frame (generated batches each own a Material
+        copy). Records now stay valid while revision, texture fields and their GPU textures, the scene ambient
+        and the draw's environment seeds hold (records that read a reflection environment stay per frame);
+        the cached record is applied straight into the draw (no 2 KB copies). Misses 500 -> 0; material
+        0.38 -> 0.30 ms; camera record -0.1 ms (interleaved, two runs each: meadow 4.13-4.20 -> 4.03-4.06,
+        forest 4.01-4.03 -> 3.95-3.99); frame within noise.
+      - Re-check before the parallel fill (2026-11-26): the main thread is ~9.0 of the meadow's 10.5 ms
+        (update 1.8, prepare 1.1, record 6.1) and ~8.8 of the forest's 11.9 ms: the forest walk is now GPU
+        bound, so CPU cuts help the meadow and 23 m/s only (the material change above moved camera record,
+        not the frame). Forest GPU (`ENGINE_GPU_WORKLOAD_COUNTERS=1`): leaves 1.66 ms for 3.3 M triangles and
+        4.1 M vertex invocations but only 0.78 M pixels shaded (vertex bound: ~4 triangles per shaded pixel);
+        foliage depth pre-pass 1.29 ms with 38 M pixel invocations (~18 per screen pixel); instance cull
+        1.72; terrain 2.38; grass 1.57; bark 0.75 for 1.1 M triangles.
+      - Hazards found for the parallel fill (besides the list below): `ResolveMaterialRecord` and the probe
+        sampling assert the owner thread; `PrepareTerrainMaterial` lazily creates GPU resources (layer
+        arrays, paint textures, macro colour map, trail data); `ResolveObjectPipeline` may create pipelines.
+        Plan: workers fill draws into per-item slots; terrain-surface draws and material-record misses run on
+        the owner; views with probes, detail-cost collection or heat modes stay serial.
+      - [ ] Next: the parallel fill. Shared side effects to resolve first: `slot` (outer counter),
+        `preparedDraws.emplace_back` order, `ResolveObjectPipeline` and `m_objectParallaxDepthPipelines`,
+        the material record cache, `PrepareTerrainMaterial`'s `TerrainMaterialState`, `detailCostGroups`,
+        the performance/detail heat vectors, `materialPipelineMs` and other timing sums.
+- [ ] Forest GPU first (user, 2026-11-26; the forest walk is GPU bound). Measured on the walk
+      (`ENGINE_GPU_WORKLOAD_COUNTERS=1`, now also terrain, shadow and impostor stages):
+      - GPU occlusion (depth pyramid in the instance cull) is already worth 4 ms (`ENGINE_GPU_OCCLUSION=0`:
+        frame 13.1 -> 17.1 with counters on); the leaf triangles left belong to visible trees.
+      - Near layers cap LOD chains at three bands (LOD0 < 60 m, LOD1 to 220 m, then the impostor); fewer
+        leaf triangles means moving those distances or screen-size selection (settings).
+      - Terrain 2.3-2.6 ms for only ~380 k vertices but 1.0-1.26 M pixels: pixel-shader bound (~2.3 ns a
+        pixel). Not the vertex format. Hex tiling off -0.14 ms, relief off ~-0.1 ms, PCF already 3x3: the
+        cost is the layered material itself (up to 6 layers from texture arrays, biplanar on slopes, macro and
+        distant detail, ground cover, trails) plus lighting.
+      - [ ] Terrain runtime virtual texture (user: "continue with runtime virtual texture", 2026-11-26).
+            Design:
+            - Fill: the terrain draws themselves, rendered top-down (orthographic) into the levels with a
+              pixel-shader entry that outputs the blended material instead of lit colour (as UE's RVT
+              output). This reuses every per-draw input (paint maps, layer arrays, steep layer, trails,
+              ground cover) instead of re-implementing them in a compute pass; depth keeps the topmost
+              surface where volume terrain overhangs.
+            - Layout: a clipmap of L levels, 1024^2 each, three RGBA8 arrays (albedo sRGB + height or AO;
+              normal XY + roughness + occlusion), slice = level. Sizing: from eye height ~85 % of ground
+              pixels lie within 20 m (a pixel there is ~1-20 mm), so level 0 must be ~4 mm/texel (4 m) and
+              levels double out to ~256 m: L = 7-8, ~100 MB. A coarser level 0 only helps the distant ~15 %.
+            - Update: each level's window snaps to its texel grid around the camera and redraws only the
+              strips that scrolled in (toroidal addressing); full refill when layer arrays, paint or trails
+              change. Budget the texels per frame.
+            - Use: top-projection pixels (not steep/biplanar, not within the relief range) read two levels
+              by footprint and blend; ground-cover gusts and lighting stay per pixel. DX12 only (other
+              backends keep the layered path; Vulkan bindings 28-31 are the layer arrays).
+            Stages:
+            - [x] 1 Offscreen colour rendering (2026-11-26): `IGraphicsTextureFactory::CreateRenderTargetArray`
+                  (RGBA8 Texture2DArray, one RTV per slice), `IGraphicsContext::BeginColorPass` /
+                  `EndColorPass` / `ClearColorPassRectangle` (1-4 targets on one slice + optional depth,
+                  restores the framebuffer like the depth-only pass; recorded in command packets, skipped
+                  on replay where unsupported), `IPipelineStateBuilder::SetRenderTargetFormats`. DX12 only.
+                  Root signature t31-t33 are free for the three arrays (logical texture slots 24-26).
+            - [x] 2 `TerrainVirtualTexture` (Rendering/SceneRenderer/SceneTerrainVirtualTexture.*, 2026-11-26):
+                  levels, camera windows snapped to 1/16 of the extent, strip scheduling with toroidal
+                  split, the fill (terrain draws with VS/PSTerrainVirtualTexture into three RGBA8 arrays),
+                  TerrainManager properties (`virtualTexture`, levels, resolution, texel mm; inspector,
+                  off by default), `ENGINE_TERRAIN_VIRTUAL_TEXTURE=0/1`, `ENGINE_TERRAIN_VT_LOG=1`,
+                  `ENGINE_TERRAIN_VT_DEBUG=1` (magenta = served, blue = eligible but missed, yellow =
+                  ineligible). Incremental fill on the forest walk: 2-4 strips, 65-130 k texels, 0.01-0.02 ms
+                  CPU a frame. Eligibility fixed twice: biplanar starts at |n.y| 0.80, and rock chunks mark
+                  every vertex with the rock slice (test the rock blend, uvChannels4.w, not the slice).
+            - Fixed (2026-11-26): (1) dark ground = stale levels filled before their terrain streamed in or
+                  came into view; terrain draws not drawn last frame now redraw their footprint in every
+                  level (refills clear depth only, keeping neighbours drawn earlier). (2) Flicker and dark
+                  grass = texture slots 16-23 (the view's light cookies and IES profiles, bound once per
+                  view): terrain draws bound through slot 26, and the submission loop rebinds every slot up
+                  to the highest count so far from the next draw's array, clearing the sun's cookie. The fill
+                  now binds slots 0-15 only and every prepared draw carries the view's photometry textures
+                  in 16-23. Flicker measured on 40-frame turning sequences (pixels that flip and flip back):
+                  max 2.8 % vs 2.9 % off (18 % with the bug).
+            - Result (2026-11-26, interleaved, two runs each; 2048 x 6 at 4 mm vs 2048 x 7 at 2 mm vs off):
+                  terrain GPU forest 2.26-2.31 -> 2.10-2.21 (4 mm) / 2.10-2.15 (2 mm), meadow 2.64-2.74 ->
+                  2.23-2.29 / 2.30-2.35 ms; frame within noise (forest 11.89-12.01 -> 11.64-11.75 / 11.72-
+                  11.95, meadow 10.60-10.73 -> 10.42-10.65 / 10.53-10.93). The near path is visibly softer
+                  at 4 mm. Smaller than hoped: what remains of the terrain pixel cost is lighting and the
+                  ground-cover shading (shells, wind), which stay per pixel. Off by default.
+            - [ ] Next: sharpness near the feet (2 mm level 0, or the layered path within a few metres),
+                  then decide whether the ~0.1-0.45 ms is worth the memory (~300-350 MB) and the softer look.
+            - [ ] 3 Object.hlsl: sample the clipmap for top-projection pixels; A/B and look captures.
+            - [ ] 4 Invalidation (paint, trails, array residency), budget, editor preview.
+      - [ ] Foliage depth pre-pass: 38 M pixel invocations (~18 per pixel) for 1.29 ms; leaves 1.66 ms.
+- [ ] P2 Shadow and camera views recorded on separate threads: hoist the cascade selection the camera reads,
+      move per-view mutable renderer state into a view state, make the shared caches (pipelines, material
+      records, placement pool registration, upload caches, timings) safe or per view. Target: -2 ms.
+- [ ] P3 Retained render scene (render items own what they draw), then the update of frame N+1 overlapping the
+      recording of frame N. Target: -1.5-3 ms (more at 23 m/s).
+- [ ] P4 Motion vectors: a velocity target from object, terrain, grass and foliage shaders, with previous-frame
+      transforms and wind time; our TAA uses them. UI drawn after the upscale (Foliage Phase 2 follow-up).
+- [ ] P5 Upscaler setting (built-in / FSR 3.1 / DLSS via Streamline) and optional frame generation (DLSS FG on
+      RTX 40+, FSR FG), as project graphics settings. Frame generation is the one option that raises displayed
+      fps while the CPU is the limit (~95 -> ~170 on the walks), at about a frame of latency.
 
 ### Step 4: performance to 12.5 ms (after Step 0's fix; each measured interleaved)
 - [ ] Camera record (7.2-7.7 ms, the largest serial item): texture footprints (~1.6 ms) on a worker or every
@@ -398,6 +648,38 @@ Recommendations:
     per-stage cuts below.
   - [ ] Shader compile time itself: Object.hlsl ~21 s per entry in fxc (the fog include added ~2 s). Look at what
     fxc unrolls/flattens (lighting loops, terrain layers); cold-cache startup is still ~65 s
+    - Any Object.hlsl edit misses the cache for every entry that includes it (D3DShaderCache keys the
+      preprocessed source), and the entries compile one after another (DX12ShaderCompiler, flags
+      ENABLE_STRICTNESS | DEBUG | OPTIMIZATION_LEVEL3). Options, in order (user asked for todos, 2026-11-26):
+    - [x] Compile in parallel (2026-11-26): `D3DShaderCache::WarmRecordedRequests` compiles every
+          request recorded in requests.txt for this working directory on all cores at the first
+          CompileFromFile, so the one-at-a-time requests that follow load from the cache
+          (`ENGINE_SHADER_WARM=0` off). The build already had this as a post-build step
+          (Engine/Tools/ShaderPrecompile.cpp, after Editor and Game), which builds of only
+          GameBackendCapture skip; that is why every shader edit cost minutes in the capture loop.
+          Measured: cold launch after a real Object.hlsl change 539 s one at a time -> 256 s (2.1x).
+          The floor is the slowest variant: Water.hlsl PSMain (a material wrapping Object.hlsl's
+          surface shader) takes 134 s alone, 237 s while 32 threads compile. Only DXC or a smaller
+          surface shader goes below it. (Comment-only edits never miss: the key is the preprocessed
+          text.)
+    - [x] Development optimisation level: already measured (D3DShaderCache.h, 2026-11-25): compiling
+          every recorded variant in parallel took 261 s at level 3, 307 s at level 1 and 191 s
+          unoptimized. Not worth a setting.
+    - [ ] (Low value since DXC: all shaders compile in ~7 s.) Compile only what is used: the terrain virtual-texture entries only when a TerrainManager has
+          `virtualTexture` on; likewise other optional pipelines (debug, parallax depth) on first use.
+    - [x] DXC (Shader Model 6) for DX12 (2026-11-26): `D3DShaderCache` compiles 6.x targets with
+          dxcompiler.dll (loaded at run time: next to the executable, else the newest Windows SDK's,
+          whose dxil.dll signs the output); `D3D12ShaderCompiler` asks for vs/ps/cs_6_0
+          (`ENGINE_SHADER_DXC=0` keeps fxc 5.0). DX11 stays on fxc; Vulkan has its own SPIR-V path.
+          The warm-up compiles recorded 5.0 requests as their 6.0 twins in a DX12 process. All 40
+          recorded shaders compile under DXC unchanged. Cold launch after an Object.hlsl change: 539 s
+          (fxc, one at a time) / 256 s (fxc, parallel) -> 39 s total with the shaders done in 7 s.
+          Same image (mean difference 0.97/255 at MeadowSlope, clouds aside) and faster on the GPU:
+          interleaved, two runs each, forest 12.55-12.66 -> 11.81-11.90 ms, meadow 11.15-11.31 ->
+          10.85-10.90 ms; grass 1.70-1.74 -> 1.18-1.19 (forest) and 2.48-2.56 -> 1.78-1.84 (meadow),
+          instance cull 1.72 -> 1.57, meadow terrain 2.75 -> 2.50 ms.
+    - [ ] (Low value since DXC.) Split Object.hlsl so entries include only what they use (shadow, foliage depth and grass
+          entries do not need the terrain material or lighting), so an edit recompiles fewer entries.
   - [ ] GrassField::LoadSources (0.18 ms) re-derives species LOD paths from string maps every frame, including a
     by-value copy of `ObjectLodProvider::GetObjectLodMeshes()`; needs revisions on its inputs to memoize
 

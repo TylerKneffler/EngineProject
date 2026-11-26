@@ -272,6 +272,15 @@ Engine::Graphics::IPipelineStateBuilder& D3D12PipelineStateBuilder::SetRenderTar
     return *this;
 }
 
+Engine::Graphics::IPipelineStateBuilder& D3D12PipelineStateBuilder::SetRenderTargetFormats(
+    const int* formats, uint32_t count, int depthFormat)
+{
+    SetRenderTargetFormat(count ? formats[0] : DXGI_FORMAT_R8G8B8A8_UNORM, depthFormat);
+    m_rtCount = std::min<uint32_t>(count, 4u);
+    for (uint32_t i = 0; i < m_rtCount; ++i) m_rtFormats[i] = static_cast<DXGI_FORMAT>(formats[i]);
+    return *this;
+}
+
 std::unique_ptr<Engine::Graphics::IPipelineState> D3D12PipelineStateBuilder::Build()
 {
     if (!m_device || !m_rootSig)
@@ -345,9 +354,15 @@ std::unique_ptr<Engine::Graphics::IPipelineState> D3D12PipelineStateBuilder::Bui
     psoDesc.PrimitiveTopologyType = m_primitiveTopology;
 
     // Render targets
-    psoDesc.NumRenderTargets = m_colorWriteMask == 0 ? 0 : 1;
-    if (psoDesc.NumRenderTargets)
+    psoDesc.NumRenderTargets = m_colorWriteMask == 0 ? 0 : (m_rtCount > 1 ? m_rtCount : 1);
+    if (psoDesc.NumRenderTargets == 1)
         psoDesc.RTVFormats[0] = m_rtFormat;
+    else
+        for (uint32_t i = 0; i < psoDesc.NumRenderTargets; ++i)
+        {
+            psoDesc.RTVFormats[i] = m_rtFormats[i];
+            psoDesc.BlendState.RenderTarget[i] = psoDesc.BlendState.RenderTarget[0];
+        }
     psoDesc.DSVFormat = m_dsFormat;
 
     psoDesc.SampleDesc.Count = 1;

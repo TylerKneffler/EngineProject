@@ -791,7 +791,7 @@ def write_scene(world):
             # (fair visibility, 2026-11-24). The generic forest-cluster
             # impostors (Tools/generate_forest_clusters.py), stands at
             # made-up positions, are off.
-            "farClusterDistance": "0", "farCanopyDistance": "2200", "farClusterSize": "40",
+            "farClusterDistance": "3000", "farCanopyDistance": "2200", "farClusterSize": "40",
             "farClusterMinimumTrees": "5",
             "maxLodChangesPerUpdate": "4", "maxLoadsPerUpdate": "6",
             "maxUnloadsPerUpdate": "4", "asyncStreaming": "true",

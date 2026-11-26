@@ -270,6 +270,39 @@ void SceneRendererObjectPipelines::BuildObjectPipeline(SceneRenderer& renderer)
     renderer.m_objectBlendPipeline =
         buildMaterialPipeline(false, true, false, PortalStencilMode::None,
             true, "blended material");
+    // Terrain virtual texture fill: three colour targets (albedo sRGB, normal
+    // and roughness, layer mean sRGB), the topmost surface by depth, no
+    // culling (the terrain is seen from above). Null where unsupported.
+    renderer.m_terrainVirtualTexturePipeline.reset();
+    try
+    {
+        auto vtVertex = shaderCompiler->CompileFromFile(shaderPath.c_str(),
+            "VSTerrainVirtualTexture", Engine::Graphics::IShaderCompiler::CompileProfile::VS_5_0);
+        auto vtPixel = shaderCompiler->CompileFromFile(shaderPath.c_str(),
+            "PSTerrainVirtualTexture", Engine::Graphics::IShaderCompiler::CompileProfile::PS_5_0);
+        if (vtVertex && vtPixel)
+            if (auto vtBuilder = pipelineFactory->CreateBuilder())
+            {
+                const int formats[3] = {29, 28, 29}; // R8G8B8A8_UNORM_SRGB, _UNORM, _UNORM_SRGB
+                renderer.m_terrainVirtualTexturePipeline = vtBuilder->SetVertexShader(vtVertex.get())
+                    .SetPixelShader(vtPixel.get())
+                    .SetFillMode(false)
+                    .SetCullMode(false)
+                    .SetFrontCounterClockwise(false)
+                    .SetDepthClipEnable(true)
+                    .SetBlendEnable(false)
+                    .SetColorWriteMask(0x0F)
+                    .SetStencilEnable(false)
+                    .SetDepthEnable(true)
+                    .SetDepthWriteEnable(true)
+                    .SetDepthFunc(Engine::Graphics::Depth::CompareNearer)
+                    .SetInputLayout(layout, 18u)
+                    .SetPrimitiveTopology(Engine::Graphics::IPipelineStateBuilder::PrimitiveTopology::TriangleList)
+                    .SetRenderTargetFormats(formats, 3u, 20)
+                    .Build();
+            }
+    }
+    catch (const std::exception&) { renderer.m_terrainVirtualTexturePipeline.reset(); }
     for (size_t sided = 0; sided < 2; ++sided)
     {
         renderer.m_objectParallaxDepthPipelines[sided] = buildConfiguredMaterialPipeline(

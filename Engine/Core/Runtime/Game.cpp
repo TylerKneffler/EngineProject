@@ -204,14 +204,23 @@ void Game::Update(float deltaTime)
     {
     // ENGINE_UPDATE_TYPE_LOG=1: serial component update time by type when a
     // frame's updates pass 10 ms.
-    static const bool typeLog = std::getenv("ENGINE_UPDATE_TYPE_LOG") != nullptr;
+    static const double typeLogThreshold = [] {
+        const char* value = std::getenv("ENGINE_UPDATE_TYPE_LOG");
+        return value ? (std::atof(value) > 0.0 ? std::atof(value) : 10.0) : -1.0; }();
+    static const bool typeLog = typeLogThreshold > 0.0;
     std::map<std::string, std::pair<double, size_t>> typeTimes;
     const auto updateObjects = m_scene.GetUpdateObjects(); // callbacks may change the registry
     std::vector<Engine::Threading::ComponentUpdateScheduler::Node> parallelUpdates;
+    double parallelMs = 0; size_t parallelNodes = 0, parallelSegments = 0;
+    const auto loopStart = typeLog ? Clock::now() : Clock::time_point{};
     const auto finishParallelUpdates = [&]
     {
+        if (parallelUpdates.empty()) return;
+        const auto started = typeLog ? Clock::now() : Clock::time_point{};
+        if (typeLog) { parallelNodes += parallelUpdates.size(); ++parallelSegments; }
         Engine::Threading::ComponentUpdateScheduler::Run(parallelUpdates);
         parallelUpdates.clear();
+        if (typeLog) parallelMs += std::chrono::duration<double, std::milli>(Clock::now() - started).count();
     };
     for (auto* object : updateObjects)
     {
@@ -246,9 +255,10 @@ void Game::Update(float deltaTime)
     finishParallelUpdates();
     if (typeLog)
     {
+        const double loopMs = std::chrono::duration<double, std::milli>(Clock::now() - loopStart).count();
         double total = 0;
         for (const auto& [kind, entry] : typeTimes) total += entry.first;
-        if (total > 10.0)
+        if (total > typeLogThreshold)
         {
             std::vector<std::pair<double, std::string>> ranked;
             for (const auto& [kind, entry] : typeTimes) ranked.push_back({entry.first, kind + " x" + std::to_string(entry.second)});
@@ -257,17 +267,24 @@ void Game::Update(float deltaTime)
             for (size_t i = 0; i < ranked.size() && i < 5; ++i)
             {
                 char part[128];
-                std::snprintf(part, sizeof(part), "%s %.1f; ", ranked[i].second.c_str(), ranked[i].first);
+                std::snprintf(part, sizeof(part), "%s %.2f; ", ranked[i].second.c_str(), ranked[i].first);
                 line += part;
             }
-            std::printf("[UpdateTypes] %.1f ms: %s\n", total, line.c_str());
+            std::printf("[UpdateTypes] %.2f ms: %s| loop %.2f ms, %zu objects, parallel %.2f ms (%zu nodes, %zu segments)\n",
+                total, line.c_str(), loopMs, updateObjects.size(), parallelMs, parallelNodes, parallelSegments);
         }
     }
     };
     const auto spatialScripts = [&]
     {
+        const auto scriptsStart = Clock::now();
         m_scene.UpdateSpatialScripts();
         afterObjects = profiling ? Clock::now() : Clock::time_point{};
+        static const bool scriptLog = std::getenv("ENGINE_UPDATE_TYPE_LOG") != nullptr;
+        if (scriptLog && profiling)
+            std::printf("[UpdateStages] begin->scripts %.2f ms, scripts %.2f ms\n",
+                std::chrono::duration<double, std::milli>(scriptsStart - updateBegin).count(),
+                std::chrono::duration<double, std::milli>(afterObjects - scriptsStart).count());
     };
     const auto transforms = [&]
     {

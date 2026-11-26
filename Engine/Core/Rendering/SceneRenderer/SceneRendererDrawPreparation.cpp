@@ -178,6 +178,50 @@ void SceneRendererDrawPreparation::BindObjectGeometry(
     }
 }
 
+namespace
+{
+using TextureField = std::shared_ptr<Engine::Components::Texture> Engine::Components::Material::*;
+// The texture fields a material record reads, by CachedRenderMaterial::TextureSource::field.
+constexpr std::array<TextureField, 9> kMaterialTextureFields{
+    &Engine::Components::Material::baseColorTexture, &Engine::Components::Material::sphereTexture,
+    &Engine::Components::Material::toonTexture, &Engine::Components::Material::metallicRoughnessTexture,
+    &Engine::Components::Material::normalTexture, &Engine::Components::Material::occlusionTexture,
+    &Engine::Components::Material::emissiveTexture, &Engine::Components::Material::subsurfaceThicknessTexture,
+    &Engine::Components::Material::heightTexture};
+
+// Almost every landscape draw has its own Material copy (generated batches),
+// so a record kept for one frame was rebuilt for ~500 of ~640 camera draws
+// every frame. ENGINE_MATERIAL_RECORDS_ACROSS_FRAMES=0 keeps them per frame (A/B).
+template<class Cached>
+bool MaterialRecordValid(uint64_t serial, const glm::vec3& ambient, const Engine::Components::Material& material,
+    const Cached& cached, const ObjectGPUData& seed)
+{
+    if (cached.data.size() != sizeof(ObjectGPUData) || cached.revision != material.GetConfigurationRevision())
+        return false;
+    if (cached.frame == serial) return true;
+    static const bool acrossFrames = [] {
+        const char* value = std::getenv("ENGINE_MATERIAL_RECORDS_ACROSS_FRAMES");
+        return !(value && value[0] == '0');
+    }();
+    if (!acrossFrames || cached.frameScoped) return false;
+    if (cached.ambient != ambient ||
+        cached.environmentSeed != seed.environmentParams ||
+        cached.reflectionSeed != seed.reflectionEnvironmentParams)
+        return false;
+    for (uint8_t i = 0; i < cached.sourceCount; ++i)
+    {
+        const auto& source = cached.sources[i];
+        // The field still holds that Texture (so it is alive), and it still
+        // resolves to the same GPU texture (streaming swaps it).
+        const auto& texture = material.*kMaterialTextureFields[source.field];
+        if (texture.get() != source.texture) return false;
+        if ((texture ? static_cast<const void*>(texture->GetGraphicsTexture()) : nullptr) != source.graphics)
+            return false;
+    }
+    return true;
+}
+}
+
 ResolvedMaterialRecord SceneRendererDrawPreparation::ResolveMaterialRecord(
     SceneRenderer& renderer,
     Engine::Components::Material& material,
@@ -210,9 +254,7 @@ ResolvedMaterialRecord SceneRendererDrawPreparation::ResolveMaterialRecord(
         Engine::Rendering::MaterialCachePolicy::Get().RenderMaterialCacheEnabled();
     auto& cached = useCache
         ? renderer.m_renderMaterialCache[&material][variant] : uncached;
-    if (useCache && cached.frame == renderer.m_materialPreparationSerial &&
-        cached.revision == material.GetConfigurationRevision() &&
-        cached.data.size() == sizeof(ObjectGPUData))
+    if (useCache && MaterialRecordValid(renderer.m_materialPreparationSerial, scene.settings.ambientColor, material, cached, environmentSeed))
     {
         std::memcpy(&data, cached.data.data(), sizeof(data));
         textures = cached.textures;
@@ -227,6 +269,8 @@ ResolvedMaterialRecord SceneRendererDrawPreparation::ResolveMaterialRecord(
         alphaMode = material.GetAlphaMode();
         doubleSided = material.doubleSided;
         uint32_t textureFlags = material.useVertexColors ? 0u : 4096u;
+        cached.sourceCount = 0;
+        cached.frameScoped = false;
         auto prepareTexture = [&](uint32_t slot,
             const std::shared_ptr<Engine::Components::Texture>& texture,
             uint32_t flag)
@@ -235,6 +279,14 @@ ResolvedMaterialRecord SceneRendererDrawPreparation::ResolveMaterialRecord(
                 ? texture->GetGraphicsTexture() : nullptr;
             textures[slot] = graphicsTexture;
             if (graphicsTexture) textureFlags |= flag;
+            for (uint8_t field = 0; field < kMaterialTextureFields.size(); ++field)
+                if (&(material.*kMaterialTextureFields[field]) == &texture)
+                {
+                    if (cached.sourceCount < cached.sources.size())
+                        cached.sources[cached.sourceCount++] = {field, texture.get(), graphicsTexture};
+                    else cached.frameScoped = true;
+                    break;
+                }
         };
         prepareTexture(0, mat->baseColorTexture, 1u);
         prepareTexture(10, mat->sphereTexture, 256u);
@@ -303,6 +355,7 @@ ResolvedMaterialRecord SceneRendererDrawPreparation::ResolveMaterialRecord(
         if (allowReflections)
         if (const auto environment = renderer.ResolveReflectionEnvironment(*mat))
         {
+            cached.frameScoped = true;
             data.reflectionEnvironmentParams = {
                 std::exp2(std::clamp(mat->reflectionEnvironmentExposure, -16.f, 16.f)),
                 glm::radians(mat->reflectionEnvironmentRotation), 1.f, 0.f };
@@ -330,8 +383,72 @@ ResolvedMaterialRecord SceneRendererDrawPreparation::ResolveMaterialRecord(
         cached.alphaMode = uint32_t(alphaMode);
         cached.revision = material.GetConfigurationRevision();
         cached.frame = renderer.m_materialPreparationSerial;
+        cached.ambient = scene.settings.ambientColor;
+        cached.environmentSeed = environmentSeed.environmentParams;
+        cached.reflectionSeed = environmentSeed.reflectionEnvironmentParams;
     }
     return { data, textures, doubleSided, alphaMode };
+}
+
+namespace
+{
+void ApplyMaterialData(const ObjectGPUData& data, const glm::vec3& cameraPosition,
+    const glm::vec3& irradiance, ObjectGPUData& objectData);
+}
+
+size_t g_materialRecordMisses = 0;
+
+
+void SceneRendererDrawPreparation::ResolveAndApplyMaterialRecord(
+    SceneRenderer& renderer,
+    Engine::Components::Material& material,
+    ObjectGPUData& objectData,
+    std::array<const Engine::Graphics::IGraphicsTexture*, 30>& textures,
+    const glm::vec3& cameraPosition,
+    const glm::vec3& irradiance,
+    bool allowNormalMapping,
+    bool allowParallaxMapping,
+    bool allowSubsurfaceScattering,
+    bool allowEnvironmentDiffuse,
+    bool allowReflections,
+    bool& doubleSided,
+    Engine::Components::MaterialAlphaMode& alphaMode)
+{
+    const uint32_t variant = (allowNormalMapping ? 1u : 0u) |
+        (allowParallaxMapping ? 2u : 0u) |
+        (allowEnvironmentDiffuse ? 4u : 0u) |
+        (allowReflections ? 8u : 0u) |
+        (allowSubsurfaceScattering ? 16u : 0u);
+    if (Engine::Rendering::MaterialCachePolicy::Get().RenderMaterialCacheEnabled())
+    {
+        const auto byMaterial = renderer.m_renderMaterialCache.find(&material);
+        if (byMaterial != renderer.m_renderMaterialCache.end())
+        {
+            const auto found = byMaterial->second.find(variant);
+            if (found != byMaterial->second.end())
+            {
+                const auto& cached = found->second;
+                if (MaterialRecordValid(renderer.m_materialPreparationSerial, renderer.GetScene().settings.ambientColor, material, cached, objectData))
+                {
+                    // operator new storage: aligned for ObjectGPUData.
+                    ApplyMaterialData(*reinterpret_cast<const ObjectGPUData*>(cached.data.data()),
+                        cameraPosition, irradiance, objectData);
+                    textures = cached.textures;
+                    doubleSided = cached.doubleSided;
+                    alphaMode = static_cast<Engine::Components::MaterialAlphaMode>(cached.alphaMode);
+                    return;
+                }
+            }
+        }
+    }
+    ++g_materialRecordMisses;
+    const auto resolved = ResolveMaterialRecord(renderer, material, objectData, textures,
+        cameraPosition, allowNormalMapping, allowParallaxMapping, allowSubsurfaceScattering,
+        allowEnvironmentDiffuse, allowReflections);
+    ApplyMaterialRecord(resolved, cameraPosition, irradiance, objectData);
+    textures = resolved.textures;
+    doubleSided = resolved.doubleSided;
+    alphaMode = resolved.alphaMode;
 }
 
 void SceneRendererDrawPreparation::ApplyMaterialRecord(
@@ -340,7 +457,14 @@ void SceneRendererDrawPreparation::ApplyMaterialRecord(
     const glm::vec3& irradiance,
     ObjectGPUData& objectData)
 {
-    const auto& data = material.data;
+    ApplyMaterialData(material.data, cameraPosition, irradiance, objectData);
+}
+
+namespace
+{
+void ApplyMaterialData(const ObjectGPUData& data, const glm::vec3& cameraPosition,
+    const glm::vec3& irradiance, ObjectGPUData& objectData)
+{
     objectData.ambientUnlit = data.ambientUnlit;
     objectData.baseColor = data.baseColor;
     objectData.blinnPhongSpecularShininess = data.blinnPhongSpecularShininess;
@@ -366,6 +490,7 @@ void SceneRendererDrawPreparation::ApplyMaterialRecord(
     objectData.ambientUnlit += glm::vec4(irradiance, 0.f);
     objectData.viewPositionAlphaCutoff = glm::vec4(cameraPosition,
         data.viewPositionAlphaCutoff.w);
+}
 }
 
 void SceneRendererDrawPreparation::PrepareTerrainMaterial(
@@ -464,7 +589,19 @@ void SceneRendererDrawPreparation::PrepareTerrainMaterial(
     objectData.materialParams.w = textured ? 2048.f : 0.f;
     if (textured && arrays) objectData.materialParams.w += 262144.f;
     const auto* reliefManager = object->GetComponentInParent<Engine::Components::TerrainManager>();
-    if (textured && arrays &&
+    // Distant terrain keeps its own path (Object.hlsl flag 16384) and only
+    // learns that its layers are bound (4194304): its compact vertices carry
+    // no weights, so the near layered path must not run for it. The shader
+    // infers the layers from the macro colour and the slope (steep layer).
+    const bool distantLayers = batch && batch->distantVisual;
+    if (distantLayers)
+    {
+        objectData.materialParams.w = textured && arrays ? 4194304.f : 0.f;
+        if (reliefManager)
+            objectData.terrainSteep = glm::vec4(.25f, .45f,
+                static_cast<float>(std::clamp(reliefManager->volumeSteepLayer, 0, 5)), 1.f);
+    }
+    if (!distantLayers && textured && arrays &&
         (reliefManager ? reliefManager->reliefMapping : (terrain && terrain->reliefMapping)))
     {
         objectData.materialParams.w += 1048576.f;

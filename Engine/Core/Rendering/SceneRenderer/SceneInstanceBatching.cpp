@@ -1,4 +1,5 @@
 #include "Core/Rendering/SceneRenderer.h"
+#include <cstdlib>
 #include "Core/Rendering/SceneRenderer/SceneInstanceBatching.h"
 #include "Core/Rendering/RenderUtilities.h"
 #include "Core/Components/Mesh/Mesh.h"
@@ -141,13 +142,20 @@ SceneInstanceBatching::Result SceneInstanceBatching::Prepare(SceneRenderer& rend
     // Register resident placements once per source/view, not once per species,
     // LOD and cascade. Camera changes are compute constants, not placement edits.
     const auto tilePrepareStart=RenderClock::now();
+    renderer.m_lastRenderCpuTimings.instanceTileRegistrations=0;
+    renderer.m_lastRenderCpuTimings.instanceTileRanges=0;
     using TilePreparation=Engine::Rendering::InstanceTilePreparation;
     std::vector<TilePreparation::Input> tileInputs;
     std::vector<size_t> tileDrawIndexes;
-    // Each placement source registers once per pass: a stamp on the data, as
-    // a shared part's blocks are visited by every part drawing them.
+    // Each placement source registers once per frame: a stamp on the data, as
+    // a shared part's blocks are visited by every part drawing them, and the
+    // shadow and camera views of a frame see the same placements (the stamp
+    // was per view, so the camera repeated the shadow pass's registrations).
+    // ENGINE_REGISTER_PER_VIEW=1 restores the per-view stamp (A/B runs).
     static std::atomic<uint64_t> registrationPasses{0};
-    const uint64_t pass=++registrationPasses;
+    static const bool perView=[]{ const char* v=std::getenv("ENGINE_REGISTER_PER_VIEW"); return v && v[0]=='1'; }();
+    const uint64_t pass=perView ? ++registrationPasses
+        : (renderer.m_graphicsProvider->GetContextFactory()->GetPreparedFrameSerial() << 1) | 1u;
     for(size_t index=0;index<preparedDraws.size();++index)
     {
         const auto& draw=preparedDraws[index];
@@ -156,8 +164,9 @@ SceneInstanceBatching::Result SceneInstanceBatching::Prepare(SceneRenderer& rend
         {
             if(data->poolPass!=pass)
             {
+                ++renderer.m_lastRenderCpuTimings.instanceTileRegistrations;
                 data->poolBase=renderer.m_persistentInstances.Register(data,data->revision,data->transforms.data(),
-                    uint32_t(data->transforms.size()),data->stableId,data->placementIds);
+                    uint32_t(data->transforms.size()),data->stableId,data->placementIds,&data->poolHandle);
                 data->poolPass=pass;
             }
             return data->poolBase;
@@ -211,6 +220,8 @@ SceneInstanceBatching::Result SceneInstanceBatching::Prepare(SceneRenderer& rend
         tileInputs.push_back(std::move(input));
         tileDrawIndexes.push_back(index);
     }
+    renderer.m_lastRenderCpuTimings.instanceTileInputMs=std::chrono::duration<double,std::milli>(RenderClock::now()-tilePrepareStart).count();
+    for(const auto& input:tileInputs) renderer.m_lastRenderCpuTimings.instanceTileRanges+=input.ranges.size();
     const auto tileResult=renderer.m_instanceTilePreparation.Prepare(tileInputs,
         renderer.m_graphicsProvider->GetContextFactory()->GetPreparedFrameSerial(),shadowOnly ? 1u:0u);
     auto& instanceTiles = result.instanceTiles;

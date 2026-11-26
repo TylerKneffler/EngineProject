@@ -61,6 +61,9 @@ struct PreparedDraw
     uint64_t occlusionId = 0;
 };
 
+// Diagnostics (ENGINE_RENDER_PHASE_LOG): material records built this view.
+extern size_t g_materialRecordMisses;
+
 struct ResolvedMaterialRecord
 {
     ObjectGPUData data{};
@@ -130,6 +133,25 @@ public:
         const glm::vec3& cameraPosition,
         const glm::vec3& irradiance,
         ObjectGPUData& objectData);
+    // ResolveMaterialRecord + ApplyMaterialRecord for one draw. A record
+    // already built this frame is applied straight from the cache: no 2 KB
+    // record is zeroed, copied and returned per draw (0.35 ms of the camera
+    // view's per-draw loop with ~550 draws). The environment seed is
+    // objectData, as the separate calls had it.
+    static void ResolveAndApplyMaterialRecord(
+        SceneRenderer& renderer,
+        Engine::Components::Material& material,
+        ObjectGPUData& objectData,
+        std::array<const Engine::Graphics::IGraphicsTexture*, 30>& textures,
+        const glm::vec3& cameraPosition,
+        const glm::vec3& irradiance,
+        bool allowNormalMapping,
+        bool allowParallaxMapping,
+        bool allowSubsurfaceScattering,
+        bool allowEnvironmentDiffuse,
+        bool allowReflections,
+        bool& doubleSided,
+        Engine::Components::MaterialAlphaMode& alphaMode);
     static void PrepareTerrainMaterial(
         SceneRenderer& renderer,
         const SceneRenderer::FrameRenderItem& item,

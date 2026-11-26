@@ -92,6 +92,13 @@ public:
     // keeps their detail and costs an eighth of 1 m (and ~a quarter of
     // the triangles).
     float volumeSampleSpacing = 2.f;
+    // Where loaded cells' volumes drop a level (every 2nd, 4th, 8th sample),
+    // in metres from the camera to each chunk (VolumeTerrain lod1-3Distance).
+    float volumeLod1Distance = 64.f;
+    float volumeLod2Distance = 128.f;
+    float volumeLod3Distance = 256.f;
+    // Pushes the level distances above to every loaded cell's volume.
+    void ApplyVolumeLevelDistances();
     // Volume edits (caves, arches; TerrainVolumeEdit), kept per cell in
     // <cellDataDirectory>/<x>_<z>.volumeedit in the cell's space, read when
     // the cell's volume is built (with its neighbours', which may reach
@@ -177,6 +184,21 @@ public:
     // after the viewer moves farVolumeStepMetres.
     float farVolumeDetail = 2.f;
     float farVolumeStepMetres = 32.f;
+    // Main-thread time per update for installing built distant nodes (at
+    // least one a frame); more waits for the next frame.
+    float farVolumeInstallMilliseconds = 1.5f;
+    // Terrain virtual texture (DX12; Rendering/SceneRenderer/SceneTerrainVirtualTexture.h):
+    // the blended layer material cached on a clipmap around the camera, so
+    // flat-enough ground reads it instead of blending its layers per pixel.
+    // Level 0 is virtualTextureResolution texels of virtualTextureTexelMillimetres;
+    // each further level doubles the texel (6 levels of 4 mm x 2048 reach ~260 m,
+    // ~300 MB). Windows follow the camera and are trusted within 3/8 of their
+    // extent, so a level needs ~2500 texels across for the level matching a
+    // pixel's footprint to be in range: at 1024 the ground blurs from ~1.5 m.
+    bool virtualTexture = false;
+    int virtualTextureLevels = 6;
+    int virtualTextureResolution = 2048;
+    float virtualTextureTexelMillimetres = 4.f;
     // Zero follows the camera clip distance.
     bool batchFarCells = true;
     // Optional fast directional diffuse shading for static play-mode terrain.
@@ -888,6 +910,10 @@ private:
     // The queue holds cells still to compute, nearest block first, and is
     // rebuilt only when the center cell, radius or cell set changes.
     Cell m_farScanCenter{ INT_MIN, INT_MIN };
+    // Layer materials and tiling for distant nodes (from the first loaded
+    // cell); handed to every node that lacks them (TerrainManagerFarVolume).
+    std::vector<std::shared_ptr<Material>> m_farLayerMaterials;
+    float m_farLayerTiling = 1.f;
     // Blocks a crossing re-checks from their cached members (see above).
     std::set<Cell> m_farRecheckBlocks;
     int m_farScanRadius = -1;

@@ -95,6 +95,7 @@ struct RenderCpuTimings
     double recordPackingMs=0, recordWaitMs=0;
     double batchSnapshotMs=0,batchBuildMs=0,batchWaitMs=0;
     double instanceTilePrepareMs=0;
+    double instanceTileInputMs=0; size_t instanceTileRegistrations=0, instanceTileRanges=0;
     double clusterPreparationMs=0;
     uint64_t clusterCacheHits=0,clusterUploadBytes=0;
     uint64_t instanceTileReused=0,instanceTileBuilt=0,instanceTileWorkerPasses=0;

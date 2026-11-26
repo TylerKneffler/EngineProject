@@ -46,11 +46,19 @@ TerrainManager::JsonValue TerrainManager::Serialize() const
         .Set("maxUploadsPerUpdate", JsonValue(maxUploadsPerUpdate))
         .Set("farVolumeDetail", JsonValue(farVolumeDetail))
         .Set("farVolumeStepMetres", JsonValue(farVolumeStepMetres))
+        .Set("farVolumeInstallMilliseconds", JsonValue(farVolumeInstallMilliseconds))
+        .Set("virtualTexture", JsonValue(virtualTexture))
+        .Set("virtualTextureLevels", JsonValue(virtualTextureLevels))
+        .Set("virtualTextureResolution", JsonValue(virtualTextureResolution))
+        .Set("virtualTextureTexelMillimetres", JsonValue(virtualTextureTexelMillimetres))
         .Set("farObjectRadius", JsonValue(farObjectRadius))
         .Set("maxCommitMilliseconds", JsonValue(maxCommitMilliseconds))
         .Set("farObjectBlockCells", JsonValue(farObjectBlockCells))
         .Set("nearObjectBlockCells", JsonValue(nearObjectBlockCells))
         .Set("volumeSampleSpacing", JsonValue(volumeSampleSpacing))
+        .Set("volumeLod1Distance", JsonValue(volumeLod1Distance))
+        .Set("volumeLod2Distance", JsonValue(volumeLod2Distance))
+        .Set("volumeLod3Distance", JsonValue(volumeLod3Distance))
         .Set("volumeSteepLayer", JsonValue(volumeSteepLayer))
         .Set("farObjectProjectLayer", JsonValue(farObjectProjectLayer))
         .Set("farClusterDistance", JsonValue(farClusterDistance))
@@ -313,6 +321,15 @@ void TerrainManager::Deserialize(const JsonValue& value)
         ? std::clamp(value["farVolumeDetail"].AsFloat(), 1.f, 16.f) : 2.f;
     farVolumeStepMetres = value.Has("farVolumeStepMetres")
         ? std::clamp(value["farVolumeStepMetres"].AsFloat(), 1.f, 1000.f) : 32.f;
+    farVolumeInstallMilliseconds = value.Has("farVolumeInstallMilliseconds")
+        ? std::clamp(value["farVolumeInstallMilliseconds"].AsFloat(), .1f, 50.f) : 1.5f;
+    virtualTexture = value.Has("virtualTexture") && value["virtualTexture"].AsBool();
+    virtualTextureLevels = value.Has("virtualTextureLevels")
+        ? std::clamp(value["virtualTextureLevels"].AsInt(), 1, 12) : 6;
+    virtualTextureResolution = value.Has("virtualTextureResolution")
+        ? std::clamp(value["virtualTextureResolution"].AsInt(), 64, 4096) : 2048;
+    virtualTextureTexelMillimetres = value.Has("virtualTextureTexelMillimetres")
+        ? std::clamp(value["virtualTextureTexelMillimetres"].AsFloat(), .5f, 4000.f) : 4.f;
     maxCommitMilliseconds = value.Has("maxCommitMilliseconds")
         ? std::clamp(value["maxCommitMilliseconds"].AsFloat(), .1f, 100.f) : 2.f;
     farObjectRadius = value.Has("farObjectRadius")
@@ -323,6 +340,12 @@ void TerrainManager::Deserialize(const JsonValue& value)
         ? std::clamp(value["nearObjectBlockCells"].AsInt(), 1, 8) : 1;
     volumeSampleSpacing = value.Has("volumeSampleSpacing")
         ? std::clamp(value["volumeSampleSpacing"].AsFloat(), .25f, 8.f) : 2.f;
+    volumeLod1Distance = value.Has("volumeLod1Distance")
+        ? std::clamp(value["volumeLod1Distance"].AsFloat(), 8.f, 4000.f) : 64.f;
+    volumeLod2Distance = value.Has("volumeLod2Distance")
+        ? std::clamp(value["volumeLod2Distance"].AsFloat(), volumeLod1Distance, 4000.f) : 128.f;
+    volumeLod3Distance = value.Has("volumeLod3Distance")
+        ? std::clamp(value["volumeLod3Distance"].AsFloat(), volumeLod2Distance, 4000.f) : 256.f;
     volumeSteepLayer = value.Has("volumeSteepLayer")
         ? std::clamp(value["volumeSteepLayer"].AsInt(), 0, 5) : 4;
     farObjectProjectLayer = value.Has("farObjectProjectLayer")
@@ -620,6 +643,14 @@ bool TerrainManager::DrawProperties(Engine::Core::IInspectorUi& ui)
         changed |= ui.SliderFloat("Distant terrain detail", &farVolumeDetail, 1.f, 16.f);
         ui.Tooltip("Distant terrain is meshed from the volume in square nodes (1 to 64 cells across, 32 x 32 samples each). A node splits while the viewer is within this many node sizes of it: higher keeps more detail further out and costs more triangles.");
         changed |= ui.DragFloat("Distant terrain step (m)", &farVolumeStepMetres, 1.f, 1.f, 1000.f);
+        changed |= ui.DragFloat("Distant node install budget (ms)", &farVolumeInstallMilliseconds, .1f, .1f, 50.f);
+        ui.Tooltip("Main-thread time per frame for installing built distant terrain nodes; at least one a frame.");
+        changed |= ui.Checkbox("Terrain virtual texture", &virtualTexture);
+        ui.Tooltip("Blend the terrain layers once into a texture around the camera (DX12) instead of for every pixel every frame. Steep faces, rock and ground-cover shading stay per pixel.");
+        changed |= ui.SliderInt("Virtual texture levels", &virtualTextureLevels, 1, 12);
+        changed |= ui.SliderInt("Virtual texture resolution", &virtualTextureResolution, 64, 4096);
+        changed |= ui.DragFloat("Virtual texture texel (mm)", &virtualTextureTexelMillimetres, .1f, .5f, 4000.f);
+        ui.Tooltip("Texel size of the finest level; each further level doubles it. Levels x resolution x texel sets the reach.");
         ui.Tooltip("The distant nodes are chosen again after the viewer moves this far.");
         changed |= ui.SliderInt("Full detail distance (cells)", &loadedRadius, 0, 32);
         ui.Tooltip("Full-resolution terrain and interactive cells around the viewer. Distances are square grid radii: one cell spans Cells X * Cell width by Cells Y * Cell depth.");
@@ -656,6 +687,17 @@ bool TerrainManager::DrawProperties(Engine::Core::IInspectorUi& ui)
         changed |= ui.SliderInt("Mesh cache budget MiB", &cacheBudgetMiB, 1, 16384);
         changed |= ui.Checkbox("Batch far terrain cells", &batchFarCells);
         changed |= ui.SliderFloat("Volume sample spacing (m)", &volumeSampleSpacing, .25f, 8.f);
+        bool levels = ui.DragFloat("Volume full detail to (m)", &volumeLod1Distance, 1.f, 8.f, 4000.f);
+        levels |= ui.DragFloat("Volume half detail to (m)", &volumeLod2Distance, 1.f, 8.f, 4000.f);
+        levels |= ui.DragFloat("Volume quarter detail to (m)", &volumeLod3Distance, 1.f, 8.f, 4000.f);
+        ui.Tooltip("Loaded terrain cells mesh every sample within the first distance, every 2nd, 4th and 8th beyond each. Larger is finer terrain further out, at more triangles and meshing work.");
+        if (levels)
+        {
+            volumeLod2Distance = std::max(volumeLod2Distance, volumeLod1Distance);
+            volumeLod3Distance = std::max(volumeLod3Distance, volumeLod2Distance);
+            ApplyVolumeLevelDistances();
+            changed = true;
+        }
         changed |= ui.SliderInt("Volume steep layer", &volumeSteepLayer, 0, 5);
     }
     if (ui.CollapsingHeader("Terrain appearance", false))

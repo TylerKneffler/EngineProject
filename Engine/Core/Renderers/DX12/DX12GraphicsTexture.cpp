@@ -400,4 +400,71 @@ D3D12TextureFactory::CreateDepthTexture2D(uint32_t width, uint32_t height)
     OwnDescriptor(result,slot);
     return result;
 }
+
+std::shared_ptr<Engine::Graphics::IGraphicsTexture>
+D3D12TextureFactory::CreateRenderTargetArray(uint32_t width, uint32_t height, uint32_t layers, bool srgb)
+{
+    if (!m_device || !m_heap || !width || !height || !layers || layers > 64)
+        return nullptr;
+    const DXGI_FORMAT viewFormat = srgb ? DXGI_FORMAT_R8G8B8A8_UNORM_SRGB : DXGI_FORMAT_R8G8B8A8_UNORM;
+    D3D12_RESOURCE_DESC desc{};
+    desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    desc.Width = width;
+    desc.Height = height;
+    desc.DepthOrArraySize = static_cast<UINT16>(layers);
+    desc.MipLevels = 1;
+    desc.Format = DXGI_FORMAT_R8G8B8A8_TYPELESS;
+    desc.SampleDesc.Count = 1;
+    desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+    desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+    D3D12_CLEAR_VALUE clear{};
+    clear.Format = viewFormat;
+    const auto heapProperties = HeapProperties(D3D12_HEAP_TYPE_DEFAULT);
+    Microsoft::WRL::ComPtr<ID3D12Resource> texture;
+    if (FAILED(m_device->CreateCommittedResource(&heapProperties,
+        D3D12_HEAP_FLAG_NONE, &desc, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+        &clear, IID_PPV_ARGS(&texture))))
+        return nullptr;
+
+    D3D12_CPU_DESCRIPTOR_HANDLE cpu = m_heap->GetCPUDescriptorHandleForHeapStart();
+    D3D12_GPU_DESCRIPTOR_HANDLE gpu = m_heap->GetGPUDescriptorHandleForHeapStart();
+    const uint32_t slot = AllocateDescriptor();
+    if (slot == UINT32_MAX) return nullptr;
+    const uint32_t descriptorIndex = m_firstDescriptor + slot;
+    cpu.ptr += static_cast<SIZE_T>(descriptorIndex) * m_descriptorSize;
+    gpu.ptr += static_cast<UINT64>(descriptorIndex) * m_descriptorSize;
+    D3D12_SHADER_RESOURCE_VIEW_DESC srv{};
+    srv.Format = viewFormat;
+    srv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
+    srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    srv.Texture2DArray.MipLevels = 1;
+    srv.Texture2DArray.ArraySize = layers;
+    m_device->CreateShaderResourceView(texture.Get(), &srv, cpu);
+
+    D3D12_DESCRIPTOR_HEAP_DESC rtvDesc{};
+    rtvDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
+    rtvDesc.NumDescriptors = layers;
+    Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> rtvHeap;
+    if (FAILED(m_device->CreateDescriptorHeap(&rtvDesc, IID_PPV_ARGS(&rtvHeap))))
+    {
+        std::lock_guard lock(m_slots->mutex); m_slots->free.push_back(slot);
+        return nullptr;
+    }
+    const uint32_t increment = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+    for (uint32_t layer = 0; layer < layers; ++layer)
+    {
+        D3D12_RENDER_TARGET_VIEW_DESC rtv{};
+        rtv.Format = viewFormat;
+        rtv.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2DARRAY;
+        rtv.Texture2DArray.FirstArraySlice = layer;
+        rtv.Texture2DArray.ArraySize = 1;
+        D3D12_CPU_DESCRIPTOR_HANDLE handle = rtvHeap->GetCPUDescriptorHandleForHeapStart();
+        handle.ptr += static_cast<SIZE_T>(layer) * increment;
+        m_device->CreateRenderTargetView(texture.Get(), &rtv, handle);
+    }
+    auto result = std::make_shared<D3D12GraphicsTexture>(std::move(texture), m_heap, gpu);
+    result->SetRenderTargetViews(std::move(rtvHeap), layers, increment);
+    OwnDescriptor(result, slot);
+    return result;
+}
 }

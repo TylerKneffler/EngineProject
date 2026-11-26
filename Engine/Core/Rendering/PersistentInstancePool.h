@@ -3,11 +3,13 @@
 #include "RenderJobs.h"
 #include <glm/glm.hpp>
 #include <algorithm>
+#include <atomic>
 #include <cstring>
 #include <cstdlib>
 #include <map>
 #include <stdexcept>
 #include <vector>
+#include <unordered_map>
 #include <unordered_set>
 
 namespace Engine::Rendering
@@ -27,8 +29,19 @@ class PersistentInstancePool
     {
         std::weak_ptr<const void> lifetime;
         uint64_t revision=0,identity=0;
+        // The frame (m_frameEpoch) whose slot last took a reference: one
+        // reference per frame, without a per-frame set of live keys.
+        uint64_t liveEpoch=0;
         uint32_t first=0,count=0,capacity=0;
+        // Registration handles (Register's handle argument) check these: the
+        // key this source is filed under now, and whether it left the pool.
+        const void* key=nullptr;
+        uint64_t pool=0;
+        bool erased=false;
     };
+    // Distinguishes pools (a rebuilt renderer) for registration handles.
+    static uint64_t NextPoolId() { static std::atomic<uint64_t> next{1}; return next++; }
+    const uint64_t m_poolId=NextPoolId();
     struct Change { uint64_t revision; uint32_t first,count; bool created; };
     struct Slot
     {
@@ -37,8 +50,6 @@ class PersistentInstancePool
         void* mapped=nullptr;
         // Old allocations can still be referenced by earlier passes this frame.
         std::vector<std::unique_ptr<Graphics::IGraphicsBuffer>> retired;
-        std::vector<std::shared_ptr<const void>> liveSources;
-        std::unordered_set<const void*> liveKeys;
         std::vector<std::pair<uint32_t,uint32_t>> retiredRanges;
         // GPU-resident mode: this frame's staged changes (Upload memory).
         // shared: command packets that reference it keep it alive until replay.
@@ -46,7 +57,20 @@ class PersistentInstancePool
         void* stagingMapped=nullptr;
         size_t stagingUsed=0;
     };
-    std::map<const void*,Source> m_sources;
+    // Hashed: every resident source (3.5k+ with the far forest) is looked up
+    // once a frame. A std::map plus a per-frame unordered_set of live keys
+    // (one node allocation per source) cost ~0.7 ms of the shadow view.
+    // Shared: a source's registration handle (kept on its placement data)
+    // reaches it without the lookup; see Register.
+    std::unordered_map<const void*,std::shared_ptr<Source>> m_sources;
+    uint64_t m_frameEpoch=1;
+    // No reference is taken: a source whose data expires has its range
+    // retired to the frame slot (BeginFrame), freed only once every frame
+    // that could still read it has finished, as moved ranges are.
+    void MarkLive(Source& source,const std::shared_ptr<const void>&)
+    {
+        source.liveEpoch=m_frameEpoch;
+    }
     std::map<uint64_t,const void*> m_stableSources;
     std::map<uint32_t,uint32_t> m_free;
     std::vector<PersistentInstance> m_records;
@@ -95,29 +119,39 @@ public:
     {
         auto* contexts=provider->GetContextFactory(); const auto serial=contexts->GetPreparedFrameSerial();
         if(serial==m_serial) return;
-        m_serial=serial; stats={};
+        m_serial=serial; stats={}; ++m_frameEpoch;
         const auto slot=contexts->GetPreparedFrameSlot();
         if(m_slots.size()<=slot) m_slots.resize(size_t(slot)+1);
         // The provider has waited this slot's fence before publishing its serial.
         m_currentSlot=slot;
         for(const auto& range:m_slots[slot].retiredRanges) Free(range.first,range.second);
         m_slots[slot].retiredRanges.clear();
-        m_slots[slot].retired.clear(); m_slots[slot].liveSources.clear(); m_slots[slot].liveKeys.clear();
+        m_slots[slot].retired.clear();
         m_slots[slot].stagingUsed=0;
         for(auto it=m_sources.begin();it!=m_sources.end();)
-            if(it->second.lifetime.expired())
+            if(it->second->lifetime.expired())
             {
-                const auto stable=m_stableSources.find(it->second.identity);
+                const auto stable=m_stableSources.find(it->second->identity);
                 if(stable!=m_stableSources.end() && stable->second==it->first) m_stableSources.erase(stable);
-                Free(it->second.first,it->second.capacity); it=m_sources.erase(it); ++stats.retirements;
+                m_slots[slot].retiredRanges.emplace_back(it->second->first,it->second->capacity);
+                it->second->erased=true;
+                it=m_sources.erase(it); ++stats.retirements;
             }
             else ++it;
     }
+    // handle (optional): kept by the caller with the placement data. An
+    // unchanged source registered through it skips the lookup (~4,900
+    // sources a frame with the far forest and its clusters).
     uint32_t Register(const std::shared_ptr<const void>& lifetime,uint64_t revision,
-        const void* transforms,uint32_t count,uint64_t identity=0,const std::vector<uint64_t>& ids={})
+        const void* transforms,uint32_t count,uint64_t identity=0,const std::vector<uint64_t>& ids={},
+        std::shared_ptr<void>* handle=nullptr)
     {
-        auto& frame=m_slots[m_currentSlot];
-        if(frame.liveKeys.insert(lifetime.get()).second) frame.liveSources.push_back(lifetime);
+        if(handle && *handle)
+        {
+            auto& cached=*static_cast<Source*>(handle->get());
+            if(!cached.erased && cached.pool==m_poolId && cached.key==lifetime.get() && cached.revision==revision && cached.count==count)
+            { MarkLive(cached,lifetime); ++stats.hits; return cached.first; }
+        }
         auto found=m_sources.find(lifetime.get());
         // ENGINE_INSTANCE_POOL_STEAL=0: a replacement never takes over the
         // allocation of a source with the same stable identity (A/B runs).
@@ -127,21 +161,31 @@ public:
             // Replacing a saved tile after an edit keeps its allocation. Compare
             // the new records instead of treating the replacement as a full upload.
             const auto stable=m_stableSources.find(identity);
-            if(stable!=m_stableSources.end() && !frame.liveKeys.count(stable->second))
+            const auto old=stable!=m_stableSources.end() ? m_sources.find(stable->second) : m_sources.end();
+            if(old!=m_sources.end() && old->second->liveEpoch!=m_frameEpoch)
             {
                 auto previous=m_sources.extract(stable->second);
                 if(!previous.empty())
                 {
-                    previous.key()=lifetime.get(); previous.mapped().revision=UINT64_MAX;
+                    previous.key()=lifetime.get(); previous.mapped()->revision=UINT64_MAX;
+                    previous.mapped()->key=lifetime.get();
                     found=m_sources.insert(std::move(previous)).position;
                     stable->second=lifetime.get();
                 }
             }
         }
-        if(found!=m_sources.end() && found->second.revision==revision && found->second.count==count)
-        { ++stats.hits; return found->second.first; }
+        if(found!=m_sources.end() && found->second->revision==revision && found->second->count==count)
+        {
+            if(handle) *handle=found->second;
+            MarkLive(*found->second,lifetime); ++stats.hits; return found->second->first;
+        }
         const bool created=found==m_sources.end();
-        auto& source=m_sources[lifetime.get()];
+        auto& entry=m_sources[lifetime.get()];
+        if(!entry) entry=std::make_shared<Source>();
+        auto& source=*entry;
+        source.key=lifetime.get(); source.pool=m_poolId;
+        if(handle) *handle=entry;
+        MarkLive(source,lifetime);
         bool moved=created || count>source.capacity;
         if(moved)
         {

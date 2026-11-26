@@ -149,6 +149,11 @@ public:
     // Zero retains the engine default. Not serialized; benchmark-only override.
     static float prefabInstanceGroupSpanMeters;
     static void SetPrefabInstanceGroupSpanForBenchmark(float span);
+    // Re-stats every prefab source the layers use in one background job a
+    // second and advances a shared epoch when any file changes, moves or
+    // appears. Settled layers then skip their own source re-checks while the
+    // epoch holds (once per frame, from scene preparation).
+    static void PollPrefabSources();
     void RebuildPrefabInstancesForBenchmark();
     float GetShadowFadeWidth() const;
     // -1 follows distance bands; 0..2 pins the prefab shadow proxy only.
@@ -185,6 +190,8 @@ public:
     static glm::quat SurfaceRotation(const glm::vec3& normal,
         float yawDegrees);
     glm::mat4 PlacementTransform(const Placement& placement) const;
+    // Placement data only: scene preparation drives it (no frame update).
+    bool RequiresUpdate() const override { return false; }
     JsonValue Serialize() const override;
     void Deserialize(const JsonValue& value) override;
     void InstallPrepared(TerrainObjectLayer&& source);
@@ -197,6 +204,15 @@ public:
     // restore. Cache keys validate source paths and timestamps before reuse.
     void AppendPrefabPrototypeRetention(std::vector<std::shared_ptr<void>>& output) const;
     bool IsPrefabPreparationComplete(IGraphicsProvider* provider) const;
+    // False while the layer is idle: placements unchanged and its next
+    // re-check not yet due. Scene preparation skips the call entirely then
+    // (775 idle visits a frame cost ~0.2 ms in call overhead alone).
+    bool IsPrefabPreparationDue(std::chrono::steady_clock::time_point now) const
+    {
+        return m_prefabCheckedRevision!=GetConfigurationRevision() ||
+            m_prefabCheckedData!=placements.data() || m_prefabCheckedCount!=placements.size() ||
+            now>=m_prefabIdleUntil;
+    }
     const PrefabPrepareTimings& GetLastPrefabPrepareTimings() const
     { return m_lastPrefabPrepareTimings; }
     bool DrawProperties(Engine::Core::IInspectorUi& ui) override;
@@ -204,12 +220,16 @@ private:
     // Settings::ApplyTo: each attached component type's value as last applied.
     std::map<std::string, std::string> m_appliedComponents;
     struct PrefabInstances;
+    struct PrefabSourceWatch;
+    static PrefabSourceWatch& GetPrefabSourceWatch();
     std::shared_ptr<PrefabInstances> m_prefabInstances;
     uint64_t m_prefabCheckedRevision=UINT64_MAX;
     const Placement* m_prefabCheckedData=nullptr;
     size_t m_prefabCheckedCount=0;
     bool m_hasPrefabPlacements=false;
     bool m_prefabSourcePreparationPending=false;
+    // Set only on PreparePrefabInstances' idle exits (see IsPrefabPreparationDue).
+    std::chrono::steady_clock::time_point m_prefabIdleUntil{};
     bool m_prefabPlacementAssetsValid=false;
     uint64_t m_prefabPlacementAssetsSignature=0;
     std::vector<std::string> m_prefabPlacementAssets;

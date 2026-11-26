@@ -38,6 +38,17 @@ public:
     D3D12_CPU_DESCRIPTOR_HANDLE GetDsvHandle() const
     { return m_dsvHeap ? m_dsvHeap->GetCPUDescriptorHandleForHeapStart() : D3D12_CPU_DESCRIPTOR_HANDLE{}; }
     bool IsDepthTarget() const { return m_dsvHeap != nullptr; }
+    // Render-target arrays (CreateRenderTargetArray): one RTV per slice.
+    void SetRenderTargetViews(Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> heap, uint32_t count, uint32_t increment)
+    { m_rtvHeap = std::move(heap); m_rtvCount = count; m_rtvIncrement = increment; }
+    bool IsColorTarget() const { return m_rtvHeap != nullptr; }
+    uint32_t GetRenderTargetSlices() const { return m_rtvCount; }
+    D3D12_CPU_DESCRIPTOR_HANDLE GetRtvHandle(uint32_t slice) const
+    {
+        D3D12_CPU_DESCRIPTOR_HANDLE handle = m_rtvHeap->GetCPUDescriptorHandleForHeapStart();
+        handle.ptr += static_cast<SIZE_T>(slice) * m_rtvIncrement;
+        return handle;
+    }
 
 private:
     Microsoft::WRL::ComPtr<ID3D12Fence> m_uploadFence;
@@ -47,6 +58,8 @@ private:
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_heap;
     D3D12_GPU_DESCRIPTOR_HANDLE m_handle{};
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_dsvHeap;
+    Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> m_rtvHeap;
+    uint32_t m_rtvCount = 0, m_rtvIncrement = 0;
 };
 
 class D3D12TextureFactory final : public Engine::Graphics::IGraphicsTextureFactory
@@ -74,6 +87,8 @@ public:
         bool srgb = true) override;
     std::shared_ptr<Engine::Graphics::IGraphicsTexture> CreateDepthTexture2D(
         uint32_t width, uint32_t height) override;
+    std::shared_ptr<Engine::Graphics::IGraphicsTexture> CreateRenderTargetArray(
+        uint32_t width, uint32_t height, uint32_t layers, bool srgb) override;
     std::shared_ptr<Engine::Graphics::IGraphicsTexture> GetNullTexture();
     std::shared_ptr<Engine::Graphics::IGraphicsTexture> GetNullArrayTexture();
 
