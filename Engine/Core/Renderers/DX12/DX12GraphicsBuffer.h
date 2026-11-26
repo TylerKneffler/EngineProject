@@ -71,6 +71,7 @@ public:
     std::unique_ptr<Engine::Graphics::IGraphicsBuffer> CreateStaticVertexBufferDeferred(
         uint64_t sizeBytes, const void* initialData) override;
     bool SupportsWorkerThreadStaticVertexBufferCreation() const override { return true; }
+    bool SupportsBufferRegionCopy() const override { return true; }
 
 private:
     ID3D12Device* m_device;

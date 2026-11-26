@@ -170,9 +170,13 @@ std::vector<Engine::Model::UITextLayout> UILayout::Resolve(
 {
     scene.AssertOwnerThread();
     std::vector<Engine::Model::UITextLayout> output;
-    for (const auto& candidate : scene.GetObjects())
+    // Canvases from the component registry, in scene object order (the old
+    // walk over every object cost ~0.5 ms twice a frame on the 6.6k-object
+    // landscape once any canvas existed, e.g. the performance overlay).
+    // Draw order comes from the sort keys below (canvas sorting order, z).
+    for (auto* component : scene.GetComponents<Engine::Components::Canvas>())
     {
-        Engine::Core::Object* object = candidate.get();
+        Engine::Core::Object* object = component ? component->Owner : nullptr;
         Engine::Components::Canvas* canvas = object && object->IsEnabledInHierarchy()
             ? object->GetComponent<Engine::Components::Canvas>() : nullptr;
         for (Engine::Core::Object* ancestor = object ? object->Parent : nullptr;

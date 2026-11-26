@@ -243,6 +243,8 @@ void ProjectLoader::ParseRendering(const pugi::xml_node& projectNode, ProjectSet
             settings.editorMaxFps = editorMaxFps.text().as_uint();
         if (auto gameMaxFps = prop.child("GameMaxFPS"))
             settings.gameMaxFps = gameMaxFps.text().as_uint();
+        if (auto overlay = prop.child("ShowPerformanceOverlay"))
+            settings.showPerformanceOverlay = overlay.text().as_bool(true);
         if (auto physicsTarget = prop.child("PhysicsTargetMilliseconds"))
             settings.physicsTargetMilliseconds = std::clamp(
                 physicsTarget.text().as_uint(), 1u, 100u);

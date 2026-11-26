@@ -822,7 +822,9 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
         std::future<OcclusionBufferResult>& job;
         ~OcclusionBufferFence() { if (job.valid()) job.wait(); }
     } occlusionBufferFence{occlusionBufferJob};
-    const bool occlusionBufferEnabled = ReadEnvFlag("ENGINE_VISIBILITY_OCCLUSION_BUFFER", true);
+    // Scene setting (Properties > Visibility); the env flag overrides it for runs.
+    const bool occlusionBufferEnabled = ReadEnvFlag("ENGINE_VISIBILITY_OCCLUSION_BUFFER",
+        m_scene.settings.cpuOcclusionCulling);
     const glm::vec2 occlusionProjectionScale(std::abs(proj[0][0]), std::abs(proj[1][1]));
     const float occlusionAspect = static_cast<float>(std::max(1u, viewportWidth)) /
         static_cast<float>(std::max(1u, viewportHeight));
@@ -2547,6 +2549,9 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
     auto& automaticGroups = instanceBatching.automaticGroups;
     auto& instanceTiles = instanceBatching.instanceTiles;
     auto* residentPlacementPool = instanceBatching.residentPlacementPool;
+    // GPU-resident placement pool: copy this frame's changed ranges in before
+    // the culls and draws below read it (PersistentInstancePool::FlushUploads).
+    if (residentPlacementPool) m_persistentInstances.FlushUploads(context, m_graphicsProvider);
     auto& drawViewStats = shadowOnly
         ? m_lastRenderCpuTimings.shadowVisibility
         : m_lastRenderCpuTimings.cameraVisibility;
@@ -2635,6 +2640,8 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
         {
             SubmittedGeometry submitted{};
             const bool gpuLod=(representative.drawData.flags & 0x00100000u)!=0;
+            // ENGINE_BLOCK_DISTANCE_CULL=0 turns the whole-block distance test off (A/B).
+            static const bool blockDistanceCull=ReadEnvFlag("ENGINE_BLOCK_DISTANCE_CULL",true);
             const int lodCount=gpuLod ? representative.gpuMaximumLod+1:1;
             // Ground cover tiles: nearest and farthest distance from the
             // camera to each member's bounds (x < 0 until computed), so a
@@ -2721,6 +2728,41 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
                             outside=glm::dot(glm::vec3(p),corner)+p.w<0.f;
                         }
                         if(outside) continue;
+                        // Whole blocks every placement of which the cull would
+                        // reject by distance (InstanceCull.hlsl, per-placement
+                        // bands): past the cull distance (lod.w), or outside this
+                        // batch's level band. Bounds are widened by the largest
+                        // placement radius and the coverage scale range, so a
+                        // block is skipped only when none of its placements could
+                        // pass. Without it every far tree was culled once per part
+                        // and level each frame (~10 ms GPU, todo.md Step 0).
+                        const auto* blockData=bounds.data.get();
+                        bool identityWorld=true;
+                        for(int r=0;r<3 && identityWorld;++r) for(int c=0;c<4;++c)
+                            if(std::abs(tile.world[r][c]-(r==c ? 1.f:0.f))>1e-5f) { identityWorld=false; break; }
+                        if(!shadowOnly && !screenColor && identityWorld && blockData && blockData->hasCullStats &&
+                            draw.mesh->instanceLodBand>=0 && blockDistanceCull)
+                        {
+                            const glm::vec3 low=bounds.minimum,high=bounds.maximum;
+                            const float blockNearest=glm::length(glm::max(glm::max(low-cameraPosition,cameraPosition-high),glm::vec3(0.f)));
+                            const float blockFarthest=glm::length(glm::max(glm::abs(low-cameraPosition),glm::abs(high-cameraPosition)));
+                            const float radius=glm::length(glm::vec3(tile.maximum-tile.minimum)*.5f)*blockData->maximumMatrixNorm;
+                            const float closest=blockNearest-radius,furthest=blockFarthest+radius;
+                            if(tile.lod.w>0.f && closest>=tile.lod.w) continue;
+                            const int band=gpuLod ? residentLod:draw.gpuLod;
+                            if(band>=0)
+                            {
+                                const float coverageMinimum=placementCoverageLod ? blockData->coverageMinimum:1.f;
+                                const float coverageMaximum=placementCoverageLod ? blockData->coverageMaximum:1.f;
+                                const float nearest=closest>=0.f ? closest/coverageMaximum:closest/coverageMinimum;
+                                const float farthest=furthest/coverageMinimum;
+                                const float widthX=std::clamp(tile.lod.x*.04f,.5f,6.f)+.5f;
+                                const float widthY=std::clamp(tile.lod.y*.04f,.5f,6.f)+.5f;
+                                if((band==0 && nearest>tile.lod.x+widthX) ||
+                                   (band==1 && (farthest<tile.lod.x-widthX || nearest>tile.lod.y+widthY)) ||
+                                   (band==2 && farthest<tile.lod.y-widthY)) continue;
+                            }
+                        }
                     }
                     if(coverSkip && !screenColor)
                     {
@@ -3556,6 +3598,7 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
         if (draw.terrain || draw.terrainCell) return Stage::Terrain;
         if (draw.mesh && draw.mesh->usesGrassShadowBudget) return Stage::Grass;
         if (draw.blended) return Stage::Transparent;
+        if (draw.material && draw.material->impostorBillboard) return Stage::Impostor;
         // Bundled oak source geometry, including shared prefab instances.
         if (draw.treeGeometry)
             return draw.material && draw.material->doubleSided ? Stage::TreeLeaves : Stage::TreeBark;
@@ -3639,7 +3682,7 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
                 if (std::adjacent_find(outputs.begin(), outputs.end()) != outputs.end())
                 { std::fprintf(stderr, "Hoisted culls: two batches share an output buffer\n"); sharedOutputReported = true; }
             }
-            switchGpuStage(Engine::Graphics::GpuTimingStage::Opaque);
+            switchGpuStage(Engine::Graphics::GpuTimingStage::InstanceCull);
             if (context->BeginComputePass())
             {
                 context->SetStructuredBuffer(45, m_emptyMorphDeltaBuffer.get());

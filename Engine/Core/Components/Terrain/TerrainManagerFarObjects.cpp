@@ -1,10 +1,13 @@
 #include "Core/Components/Terrain/TerrainManager.h"
 #include "Core/Components/Terrain/TerrainObjectLayer.h"
+#include "Core/Components/Terrain/TerrainObjectArchive.h"
 #include "Core/Components/Terrain/TerrainSurfaceSample.h"
 #include "Core/Scene/Object.h"
 #include "Core/Rendering/DetailBudget.h"
 #include "Core/Scene/Scene.h"
 
+#include <chrono>
+#include <cstdio>
 #include <cstdlib>
 #include <set>
 #include <algorithm>
@@ -93,6 +96,10 @@ struct FarCellInput
     bool hasSavedTerrain = false;
     JsonValue savedTerrain;
     JsonValue savedLayers;
+    // Set when the layers come only from the object archive: the job reads
+    // them (file read, inflate, JSON: ~0.8 ms a cell, which on the main thread
+    // made every cell crossing 20-35 ms for 3-4 frames; todo.md Step 0).
+    std::shared_ptr<const TerrainObjectArchive> archive;
 };
 
 std::vector<TerrainObjectLayer::Placement> FarPlacements(
@@ -519,6 +526,7 @@ void TerrainManager::UpdateFarObjects(int centerX, int centerY)
         it = m_farObjectJobs.erase(it);
     }
 
+    const auto scanStart = std::chrono::steady_clock::now();
     const int centerBlockX = floorDiv(centerX, blockCells);
     const int centerBlockY = floorDiv(centerY, blockCells);
     const int blockMinX = floorDiv(centerX - radius, blockCells);
@@ -534,16 +542,43 @@ void TerrainManager::UpdateFarObjects(int centerX, int centerY)
     if (m_farScanCenter != Cell{centerX, centerY} || m_farScanRadius != radius ||
         m_farScanCellCount != cellCount)
     {
+        // One cell on (same radius and cells): only the edge changed. Keep the
+        // queued cells still in range and add the cells that entered, instead
+        // of rescanning the whole square (16.6k cells, ~2.6 ms a crossing).
+        const Cell oldCenter = m_farScanCenter;
+        const bool stepped = m_farScanRadius == radius && m_farScanCellCount == cellCount &&
+            oldCenter.first != INT_MIN && std::abs(oldCenter.first - centerX) <= 1 &&
+            std::abs(oldCenter.second - centerY) <= 1;
+        const auto inOld = [&](int x, int y) {
+            return std::max(std::abs(x - oldCenter.first), std::abs(y - oldCenter.second)) <= radius;
+        };
         m_farScanCenter = {centerX, centerY};
         m_farScanRadius = radius;
         m_farScanCellCount = cellCount;
-        m_farObjectQueue.clear();
+        const auto wanted = [&](int x, int y) {
+            return HasCell(x, y) && !m_farObjectCells.count({x, y}) && !m_farObjectPending.count({x, y});
+        };
+        if (stepped)
+        {
+            std::vector<Cell> kept;
+            for (size_t i = m_farObjectQueueNext; i < m_farObjectQueue.size(); ++i)
+            {
+                const Cell cell = m_farObjectQueue[i];
+                if (inRadius(cell) && wanted(cell.first, cell.second)) kept.push_back(cell);
+            }
+            for (int y = centerY - radius; y <= centerY + radius; ++y)
+                for (int x = centerX - radius; x <= centerX + radius; ++x)
+                    if (!inOld(x, y) && wanted(x, y)) kept.emplace_back(x, y);
+            m_farObjectQueue = std::move(kept);
+        }
+        else
+        {
+            m_farObjectQueue.clear();
+            for (int y = centerY - radius; y <= centerY + radius; ++y)
+                for (int x = centerX - radius; x <= centerX + radius; ++x)
+                    if (wanted(x, y)) m_farObjectQueue.emplace_back(x, y);
+        }
         m_farObjectQueueNext = 0;
-        for (int y = centerY - radius; y <= centerY + radius; ++y)
-            for (int x = centerX - radius; x <= centerX + radius; ++x)
-                if (HasCell(x, y) && !m_farObjectCells.count({x, y}) &&
-                    !m_farObjectPending.count({x, y}))
-                    m_farObjectQueue.emplace_back(x, y);
         // Nearest block first, then nearest cell, so blocks complete one
         // after another and each is prepared once.
         const auto rank = [&](Cell cell) {
@@ -559,9 +594,29 @@ void TerrainManager::UpdateFarObjects(int centerX, int centerY)
             if (ba != bb) return ba < bb;
             return ra.second != rb.second ? ra.second < rb.second : a < b;
         });
+        // Blocks whose cells all stayed inside (or outside) the far square
+        // keep their members: re-checked from the cache. Blocks on the band
+        // between the old and new squares walk their cells again.
         for (int by = blockMinY; by <= blockMaxY; ++by)
             for (int bx = blockMinX; bx <= blockMaxX; ++bx)
-                m_farUrgentBlocks.insert({bx, by});
+            {
+                bool walk = !stepped;
+                if (stepped)
+                {
+                    const int x0 = bx * blockCells, x1 = x0 + blockCells - 1;
+                    const int y0 = by * blockCells, y1 = y0 + blockCells - 1;
+                    const auto inside = [&](int cx, int cy) {
+                        return x0 >= cx - radius && x1 <= cx + radius && y0 >= cy - radius && y1 <= cy + radius;
+                    };
+                    const auto outside = [&](int cx, int cy) {
+                        return x1 < cx - radius || x0 > cx + radius || y1 < cy - radius || y0 > cy + radius;
+                    };
+                    walk = !((inside(centerX, centerY) && inside(oldCenter.first, oldCenter.second)) ||
+                             (outside(centerX, centerY) && outside(oldCenter.first, oldCenter.second)));
+                }
+                if (walk) m_farUrgentBlocks.insert({bx, by});
+                else m_farRecheckBlocks.insert({bx, by});
+            }
         for (auto it = m_farObjectBlocks.begin(); it != m_farObjectBlocks.end(); )
         {
             const Cell key = it->first;
@@ -570,6 +625,7 @@ void TerrainManager::UpdateFarObjects(int centerX, int centerY)
             if (it->second.object) scene->RemoveObject(it->second.object);
             m_farDirtyBlocks.erase(key);
             m_farUrgentBlocks.erase(key);
+            m_farRecheckBlocks.erase(key);
             it = m_farObjectBlocks.erase(it);
         }
     }
@@ -583,6 +639,8 @@ void TerrainManager::UpdateFarObjects(int centerX, int centerY)
     // where a cell crossing queues a row of cells, the small count keeps
     // the frame's own workers free.
     // ENGINE_FAR_OBJECT_JOBS=<n> fixes the count (for A/B runs).
+    const auto scheduleStart = std::chrono::steady_clock::now();
+    size_t scheduledCells = 0;
     const size_t backlog = m_farObjectQueue.size() - std::min(m_farObjectQueueNext, m_farObjectQueue.size());
     static const size_t fixedJobs = []
     {
@@ -621,17 +679,34 @@ void TerrainManager::UpdateFarObjects(int centerX, int centerY)
                     input.hasSavedTerrain = true;
                     input.savedTerrain = saved->second;
                 }
-                GetSavedObjectLayers(input.cell, input.savedLayers);
+                // Archive-only cells: the job reads their layers.
+                if (!m_objectLayers.count(input.cell) &&
+                    !(UsesObjectFiles(input.cell) && ObjectFileCells().count(input.cell)) &&
+                    m_proceduralCells.count(input.cell))
+                {
+                    if (auto archive = GetObjectArchive(); archive && archive->Covers(input.cell))
+                        input.archive = std::move(archive);
+                }
+                else
+                    GetSavedObjectLayers(input.cell, input.savedLayers);
                 job.cells.push_back(input.cell);
+                ++scheduledCells;
                 m_farObjectPending.insert(input.cell);
                 batch.push_back(std::move(input));
             }
             if (batch.empty()) break;
             job.result = std::async(std::launch::async,
-                [inputs, batch = std::move(batch)]() {
+                [inputs, batch = std::move(batch)]() mutable {
                     std::vector<std::pair<Cell, FarObjectCell>> cells;
-                    for (const auto& input : batch)
+                    for (auto& input : batch)
                     {
+                        if (input.archive)
+                        {
+                            JsonValue layers;
+                            if (input.archive->ReadCellLayers(input.cell, layers) && layers.ArraySize())
+                                input.savedLayers = std::move(layers);
+                            input.archive.reset();
+                        }
                         FarObjectCell data;
                         try { data.placements = FarPlacements(inputs, input, &data.cullDistances); }
                         catch (...) {}
@@ -648,6 +723,7 @@ void TerrainManager::UpdateFarObjects(int centerX, int centerY)
     // so trees never blink out while a cell streams in. Only loaded and
     // latched cells can change state, so only they are checked. Latching
     // keeps periodic source re-checks from rebuilding far blocks.
+    const auto coveredStart = std::chrono::steady_clock::now();
     auto* provider = scene->GetGraphicsProvider();
     for (auto it = m_farNearCovered.begin(); it != m_farNearCovered.end(); )
     {
@@ -677,13 +753,23 @@ void TerrainManager::UpdateFarObjects(int centerX, int centerY)
     const double spanZ = static_cast<double>(cellsY) * cellDepth;
     const int projectLayer = Engine::Rendering::DetailBudget::Get().FindLayerOrDefault(
         farObjectProjectLayer);
-    const auto evaluate = [&](Cell key, bool urgent)
+    const auto evaluate = [&](Cell key, bool urgent, bool cached = false)
     {
         if (key.first < blockMinX || key.first > blockMaxX ||
             key.second < blockMinY || key.second > blockMaxY) return true;
         uint64_t membership = 1469598103934665603ull;
         std::vector<Cell> members;
         bool outstanding = false;
+        const auto cachedBlock = m_farObjectBlocks.find(key);
+        const bool reuse = cached && cachedBlock != m_farObjectBlocks.end() && cachedBlock->second.membersValid;
+        if (reuse)
+        {
+            members = cachedBlock->second.members;
+            for (const Cell cell : members)
+                membership = (membership ^ (static_cast<uint64_t>(cell.first - key.first * blockCells) |
+                    static_cast<uint64_t>(cell.second - key.second * blockCells) << 8)) * 1099511628211ull;
+        }
+        else
         for (int y = key.second * blockCells; y < (key.second + 1) * blockCells; ++y)
             for (int x = key.first * blockCells; x < (key.first + 1) * blockCells; ++x)
             {
@@ -712,9 +798,11 @@ void TerrainManager::UpdateFarObjects(int centerX, int centerY)
         // Assets with a cull distance (cliff pieces) leave blocks that lie
         // wholly beyond it, so those blocks carry no batches for them.
         std::map<std::string, float> cullDistances;
-        for (const Cell& cell : members)
-            for (const auto& [asset, distance] : m_farObjectCells[cell].cullDistances)
-                cullDistances[asset] = std::max(cullDistances[asset], distance);
+        if (reuse) cullDistances = cachedBlock->second.cullDistances;
+        else
+            for (const Cell& cell : members)
+                for (const auto& [asset, distance] : m_farObjectCells[cell].cullDistances)
+                    cullDistances[asset] = std::max(cullDistances[asset], distance);
         const double blockDistance = static_cast<double>(std::max(0, gapCells - 1)) * std::min(spanX, spanZ);
         std::set<std::string> beyondCull;
         for (const auto& [asset, distance] : cullDistances)
@@ -731,6 +819,12 @@ void TerrainManager::UpdateFarObjects(int centerX, int centerY)
             return true;
         }
         auto& block = m_farObjectBlocks[key];
+        if (!reuse)
+        {
+            block.members = members;
+            block.cullDistances = cullDistances;
+            block.membersValid = !outstanding;
+        }
         if (block.object && block.membership == membership) return true;
         if (!block.object)
         {
@@ -790,21 +884,50 @@ void TerrainManager::UpdateFarObjects(int centerX, int centerY)
         block.prepared = false;
         return true;
     };
+    // ENGINE_FAR_OBJECT_LOG=1: where a slow update goes (rebuilt blocks,
+    // their placements, and the preparation latch below).
+    static const bool farLog = std::getenv("ENGINE_FAR_OBJECT_LOG") != nullptr;
+    const auto rebuildStart = std::chrono::steady_clock::now();
+    const size_t dirtyCount = m_farUrgentBlocks.size() + m_farDirtyBlocks.size();
     // A block that is still computing is not kept dirty: each finished job
     // marks its blocks again, and the last one triggers the full rebuild.
     for (const Cell key : m_farUrgentBlocks)
     {
         evaluate(key, true);
         m_farDirtyBlocks.erase(key);
+        m_farRecheckBlocks.erase(key);
     }
     m_farUrgentBlocks.clear();
     for (const Cell key : m_farDirtyBlocks)
+    {
         evaluate(key, false);
+        m_farRecheckBlocks.erase(key);
+    }
     m_farDirtyBlocks.clear();
+    for (const Cell key : m_farRecheckBlocks)
+        evaluate(key, true, true);
+    m_farRecheckBlocks.clear();
 
+    const auto latchStart = std::chrono::steady_clock::now();
+    size_t latched = 0, unprepared = 0;
     // Latch blocks whose instances finished preparing (see FarObjectBlock).
     for (auto& [key, block] : m_farObjectBlocks)
-        if (!block.prepared && block.layer && block.layer->IsPrefabPreparationComplete(provider))
-            block.prepared = true;
+        if (!block.prepared && block.layer)
+        {
+            ++unprepared;
+            if (block.layer->IsPrefabPreparationComplete(provider)) { block.prepared = true; ++latched; }
+        }
+    if (farLog)
+    {
+        const auto now = std::chrono::steady_clock::now();
+        const double rebuildMs = std::chrono::duration<double, std::milli>(latchStart - rebuildStart).count();
+        const double latchMs = std::chrono::duration<double, std::milli>(now - latchStart).count();
+        if (std::chrono::duration<double, std::milli>(now - scanStart).count() > 5.0)
+            std::printf("[FarObjects] scan %.1f, schedule %zu cells %.1f, covered %.1f, rebuild %zu blocks %.1f, latch %zu/%zu %.1f ms\n",
+                std::chrono::duration<double, std::milli>(scheduleStart - scanStart).count(),
+                scheduledCells, std::chrono::duration<double, std::milli>(coveredStart - scheduleStart).count(),
+                std::chrono::duration<double, std::milli>(rebuildStart - coveredStart).count(),
+                dirtyCount, rebuildMs, latched, unprepared, latchMs);
+    }
 }
 }

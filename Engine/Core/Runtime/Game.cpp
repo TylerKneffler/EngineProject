@@ -19,6 +19,10 @@
 #include "Core/Threading/JobScheduler.h"
 #include <algorithm>
 #include <chrono>
+#include <string>
+#include <map>
+#include <cstdio>
+#include <cstdlib>
 #include <stdexcept>
 #include <typeinfo>
 #include <unordered_set>
@@ -198,6 +202,10 @@ void Game::Update(float deltaTime)
     Clock::time_point afterObjects{}, afterConstraints{}, afterPose{}, afterPhysics{};
     const auto componentUpdates = [&]
     {
+    // ENGINE_UPDATE_TYPE_LOG=1: serial component update time by type when a
+    // frame's updates pass 10 ms.
+    static const bool typeLog = std::getenv("ENGINE_UPDATE_TYPE_LOG") != nullptr;
+    std::map<std::string, std::pair<double, size_t>> typeTimes;
     const auto updateObjects = m_scene.GetUpdateObjects(); // callbacks may change the registry
     std::vector<Engine::Threading::ComponentUpdateScheduler::Node> parallelUpdates;
     const auto finishParallelUpdates = [&]
@@ -222,10 +230,39 @@ void Game::Update(float deltaTime)
         if (!object->CollectWorkerUpdates(parallelUpdates))
         {
             finishParallelUpdates();
+            const auto objectStart = typeLog ? Clock::now() : Clock::time_point{};
             object->Update();
+            if (typeLog)
+            {
+                std::string kind = "(none)";
+                for (const auto* component : object->Components)
+                    if (component && component->RequiresUpdate()) { kind = component->GetTypeName(); break; }
+                auto& entry = typeTimes[kind];
+                entry.first += std::chrono::duration<double, std::milli>(Clock::now() - objectStart).count();
+                ++entry.second;
+            }
         }
     }
     finishParallelUpdates();
+    if (typeLog)
+    {
+        double total = 0;
+        for (const auto& [kind, entry] : typeTimes) total += entry.first;
+        if (total > 10.0)
+        {
+            std::vector<std::pair<double, std::string>> ranked;
+            for (const auto& [kind, entry] : typeTimes) ranked.push_back({entry.first, kind + " x" + std::to_string(entry.second)});
+            std::sort(ranked.rbegin(), ranked.rend());
+            std::string line;
+            for (size_t i = 0; i < ranked.size() && i < 5; ++i)
+            {
+                char part[128];
+                std::snprintf(part, sizeof(part), "%s %.1f; ", ranked[i].second.c_str(), ranked[i].first);
+                line += part;
+            }
+            std::printf("[UpdateTypes] %.1f ms: %s\n", total, line.c_str());
+        }
+    }
     };
     const auto spatialScripts = [&]
     {
@@ -303,9 +340,15 @@ void Game::Update(float deltaTime)
     };
     const auto publishRenderSnapshot = [&]
     {
+    // ENGINE_COMMIT_LOG=1: where a slow end of update goes.
+    static const bool commitLog = std::getenv("ENGINE_COMMIT_LOG") != nullptr;
+    const auto t0 = Clock::now();
     m_scene.EndUpdatePass();
+    const auto t1 = Clock::now();
     m_scene.CommitPendingObjectChanges();
+    const auto t2 = Clock::now();
     m_staticMotionWatch.Check(m_scene);
+    const auto t3 = Clock::now();
     if (const auto* input = Engine::Core::CurrentNativeInputSnapshot())
     {
         if (input->clientWidth && input->clientHeight)
@@ -314,7 +357,15 @@ void Game::Update(float deltaTime)
         else
             m_scene.ClearPreparedNativeUiLayout();
     }
+    const auto t4 = Clock::now();
     m_scene.EnforceParticleBudget();
+    if (commitLog)
+    {
+        const auto ms = [](auto a, auto b) { return std::chrono::duration<double, std::milli>(b - a).count(); };
+        if (ms(t0, Clock::now()) > 3.0)
+            std::printf("[Commit] end pass %.1f, commit %.1f, static watch %.1f, ui layout %.1f, particles %.1f ms\n",
+                ms(t0, t1), ms(t1, t2), ms(t2, t3), ms(t3, t4), ms(t4, Clock::now()));
+    }
     if (profiling)
     {
         const auto ms = [](auto first, auto last)

@@ -484,6 +484,11 @@ void TransitionComputeBuffer(ID3D12GraphicsCommandList* commands,
     D3D12GraphicsBuffer* buffer, D3D12_RESOURCE_STATES destination)
 {
     if (!commands || !buffer || buffer->GetResourceState() == destination) return;
+    // A buffer readable by every shader stage (CopyBufferRegion leaves the
+    // placement pool so) already satisfies a narrower read state.
+    if (buffer->GetResourceState() == D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE &&
+        (destination == D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE ||
+         destination == D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)) return;
     D3D12_RESOURCE_BARRIER barrier{};
     barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
     barrier.Transition.pResource = buffer->GetResource();
@@ -755,6 +760,27 @@ bool D3D12GraphicsContext::CopyBuffer(
     m_cmdList->CopyBufferRegion(dst->GetResource(), 0,
         src->GetResource(), 0, size);
     TransitionComputeBuffer(m_cmdList, src, previous);
+    return true;
+}
+
+bool D3D12GraphicsContext::CopyBufferRegion(
+    const Engine::Graphics::IGraphicsBuffer* source, uint64_t sourceOffset,
+    Engine::Graphics::IGraphicsBuffer* destination, uint64_t destinationOffset, uint64_t bytes)
+{
+    auto* src = dynamic_cast<D3D12GraphicsBuffer*>(
+        const_cast<Engine::Graphics::IGraphicsBuffer*>(source));
+    auto* dst = dynamic_cast<D3D12GraphicsBuffer*>(destination);
+    using Access = Engine::Graphics::IGraphicsBuffer::AccessMode;
+    if (!m_cmdList || !src || !dst || !bytes ||
+        source->GetAccessMode() != Access::Upload || destination->GetAccessMode() != Access::Default ||
+        sourceOffset + bytes > source->GetSize() || destinationOffset + bytes > destination->GetSize())
+        return false;
+    RetainBuffer(src->GetResource());
+    RetainBuffer(dst->GetResource());
+    TransitionComputeBuffer(m_cmdList, dst, D3D12_RESOURCE_STATE_COPY_DEST);
+    m_cmdList->CopyBufferRegion(dst->GetResource(), destinationOffset,
+        src->GetResource(), sourceOffset, bytes);
+    TransitionComputeBuffer(m_cmdList, dst, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
     return true;
 }
 

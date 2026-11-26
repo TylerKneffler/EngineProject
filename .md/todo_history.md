@@ -3617,3 +3617,14 @@ Minor:
 - [x] `MeadowWalkCamera` and `Landscape Explorer` both have `Camera.active="true"`. MeadowWalkCamera was removed
   with the switch back to the flying explorer (2026-11-25); the explorer's is the only active camera
 - [x] Viewer object name set twice (TerrainManager and LandscapeDriver). The driver is gone (2026-11-25)
+
+### Old Grass Phase 3-8 lists closed (2026-11-25)
+Replaced in todo.md by "Grass to the horizon: wind waves and cover without more blades". Already done:
+- [x] View-space widening of blades seen edge-on (Phase 3): GPU blades widen edge-on in view space
+      (`GrassBlades.hlsl`, "GPU grass blades" above).
+- [x] Bushes on their own reach (Phase 8): scanned bushes draw from their own field to 80 m
+      ("Bushes, low shrubs, nettles and saplings are scanned now" above).
+- [x] Clumping (Phase 7, Foliage Phase 4): blade Voronoi clumps (height, lean, hue; fountains) and 2.4 m tussocks.
+- [x] Push the grass radius out (Phase 3): decided against; 50 -> 70/80 m gave no visible gain (todo.md, meadow
+      walk table). Distant grass is now the ground's job (todo.md G1-G3).
+Moved, still open: mesh grass LOD distances, Vulkan antialiasing, dry grass species ("Carried over").

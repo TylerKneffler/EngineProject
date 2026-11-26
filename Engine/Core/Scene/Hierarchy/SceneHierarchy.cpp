@@ -1,4 +1,7 @@
 #include "Core/Serialization/PrefabLoadProfile.h"
+#include <cstdlib>
+#include <set>
+#include <cstdio>
 #include "Core/Scene/Scene.h"
 #include "Core/Runtime/Game.h"
 #include "Core/Components/Mesh/Mesh.h"
@@ -182,6 +185,14 @@ const std::vector<Engine::Core::Object*>& Scene::GetUpdateObjects()
     return m_updateObjects;
 }
 
+bool Scene::PreparesTransform(const Object& object)
+{
+    // ENGINE_SKIP_STATIC_LEAVES=0 snapshots every object again (A/B runs).
+    static const bool skip = [] { const char* v = std::getenv("ENGINE_SKIP_STATIC_LEAVES"); return !(v && v[0] == '0'); }();
+    if (!skip) return true;
+    return !(object.Components.empty() && object.Children.empty() && object.IsStaticInHierarchy());
+}
+
 void Scene::PrepareTransformHierarchy()
 {
     // Reuses the render preparation's list storage; both run on the owner thread.
@@ -189,7 +200,7 @@ void Scene::PrepareTransformHierarchy()
     values.clear();
     values.reserve(m_objects.size());
     for (const auto& object : m_objects)
-        values.push_back(&object->transform);
+        if (PreparesTransform(*object)) values.push_back(&object->transform);
     m_transformHierarchy.Prepare(values);
 }
 
@@ -650,19 +661,23 @@ void Scene::RemoveObject(Engine::Core::Object* obj)
     // callbacks or destructors invalidate those references.
     WaitForSceneJobs();
 
-    // Generated grass/prefab leaves own only built-in rendering components.
-    // Keep their complete resource graph alive behind the submitted frame's
-    // fence; arbitrary scripts, physics, subclasses and subtrees still drain
-    // before their original lifecycle/destruction path.
-    const bool retireRenderLeaf=m_deferGraphicsRetirement && obj->runtimeOnly &&
-        obj->Children.empty() && std::all_of(obj->Components.begin(),obj->Components.end(),
-            [](const Engine::Core::Component* component) {
-                return !component || typeid(*component)==typeid(Engine::Components::Mesh) ||
-                    typeid(*component)==typeid(Engine::Components::Material);
-            });
-    if (!retireRenderLeaf && m_beforeGpuResourceDestruction)
-        m_beforeGpuResourceDestruction();
-
+    // Generated runtime content (grass and prefab leaves, terrain cells and
+    // their chunks, far-object blocks, chunk colliders) owns only engine
+    // components whose GPU resources are released with the object. Such a
+    // subtree is retired: its components are destroyed now and its storage
+    // kept alive behind the submitted frame's fence. Anything else (scripts,
+    // other components, Object subclasses) still drains the GPU first. The
+    // drain was 7-14 ms on every cell crossing (todo.md Step 0).
+    static const std::set<std::string> retirableTypes{
+        "Mesh", "Material", "TerrainBatchAppearance", "TerrainObjectLayer", "MeshObjectCollider",
+        "RigidBody", "Terrain", "VolumeTerrain", "GrassField"};
+    const auto retirable = [&](const Engine::Core::Object* current) {
+        return current->runtimeOnly && typeid(*current) == typeid(Engine::Core::Object) &&
+            std::all_of(current->Components.begin(), current->Components.end(),
+                [](const Engine::Core::Component* component) {
+                    return !component || retirableTypes.count(component->GetTypeName()) != 0;
+                });
+    };
     std::vector<Engine::Core::Object*> objectsToRemove;
     std::function<void(Engine::Core::Object*)> collect = [&](Engine::Core::Object* current)
     {
@@ -673,6 +688,30 @@ void Scene::RemoveObject(Engine::Core::Object* obj)
             collect(child);
     };
     collect(obj);
+    const bool retireRenderLeaf = m_deferGraphicsRetirement &&
+        std::all_of(objectsToRemove.begin(), objectsToRemove.end(),
+            [&](const Engine::Core::Object* current) { return current && retirable(current); });
+    if (!retireRenderLeaf && m_beforeGpuResourceDestruction)
+    {
+        static const bool removalLog = std::getenv("ENGINE_COMMIT_LOG") != nullptr;
+        if (removalLog)
+        {
+            std::set<std::string> types;
+            size_t count = 0;
+            std::function<void(const Engine::Core::Object*)> visit = [&](const Engine::Core::Object* current) {
+                ++count;
+                for (const auto* component : current->Components) if (component) types.insert(component->GetTypeName());
+                for (const auto* child : current->Children) if (child) visit(child);
+            };
+            visit(obj);
+            std::string list;
+            for (const auto& type : types) list += type + " ";
+            std::printf("[Remove] waits for GPU: '%s' runtimeOnly %d, %zu objects, components: %s\n",
+                obj->name.c_str(), obj->runtimeOnly ? 1 : 0, count, list.c_str());
+        }
+        m_beforeGpuResourceDestruction();
+    }
+
 
     for (Engine::Core::Object* object : objectsToRemove)
         object->FenceBackgroundWork();
@@ -721,16 +760,27 @@ void Scene::RemoveObject(Engine::Core::Object* obj)
     }
     if(retireRenderLeaf)
     {
-        // Deliver logical destruction now, on the scene owner. The fence
-        // releases storage later; DispatchDestroy is idempotent at that point.
-        obj->DispatchComponentDestroy();
-        auto found=std::find_if(m_objects.begin(),m_objects.end(),
-            [obj](const auto& candidate) { return candidate.get()==obj; });
-        if(found!=m_objects.end())
+        // Deliver logical destruction now, on the scene owner, children
+        // first. The fence releases storage later; DispatchDestroy is
+        // idempotent at that point.
+        for(auto it=objectsToRemove.rbegin();it!=objectsToRemove.rend();++it)
+            (*it)->DispatchComponentDestroy();
+        if(objectsToRemove.size()==1)
         {
-            m_retiredRenderObjects.push_back(std::move(*found));
-            m_objects.erase(found);
+            auto found=std::find_if(m_objects.begin(),m_objects.end(),
+                [obj](const auto& candidate) { return candidate.get()==obj; });
+            if(found!=m_objects.end())
+            {
+                m_retiredRenderObjects.push_back(std::move(*found));
+                m_objects.erase(found);
+            }
+            return;
         }
+        const std::unordered_set<const Engine::Core::Object*> removing(objectsToRemove.begin(),objectsToRemove.end());
+        auto keep=std::stable_partition(m_objects.begin(),m_objects.end(),
+            [&](const std::unique_ptr<Engine::Core::Object>& candidate) { return !removing.count(candidate.get()); });
+        for(auto it=keep;it!=m_objects.end();++it) m_retiredRenderObjects.push_back(std::move(*it));
+        m_objects.erase(keep,m_objects.end());
         return;
     }
     m_objects.erase(
@@ -970,10 +1020,17 @@ void Scene::CommitPendingObjectChanges()
         std::lock_guard<std::mutex> lock(m_queuedSceneMutationsMutex);
         commands.swap(m_queuedSceneMutations);
     }
+    static const bool commitLog = std::getenv("ENGINE_COMMIT_LOG") != nullptr;
+    using CommitClock = std::chrono::steady_clock;
+    const auto c0 = CommitClock::now();
+    const size_t commandCount = commands.size();
     const SceneGeneration generation = CaptureSceneGeneration();
     for (auto& command : commands)
         if (command.generation == generation) command.apply(*this);
+    const auto c1 = CommitClock::now();
+    const size_t objectsBefore = m_objects.size();
     FlushPendingObjectAdditions();
+    const auto c2 = CommitClock::now();
     if (m_hasStarted && m_lifecycleRevision != m_structureRevision)
     {
         m_lifecycleRevision = m_structureRevision;
@@ -989,10 +1046,22 @@ void Scene::CommitPendingObjectChanges()
         for (Object* object : objects)
             if (m_componentRegistry.Contains(object)) object->Start();
     }
+    const auto c3 = CommitClock::now();
+    const size_t objectsBeforeRemoval = m_objects.size();
     FlushPendingObjectRemovals();
+    const auto c4 = CommitClock::now();
     m_componentRegistry.ReleaseSnapshots();
     if (!m_suppressSceneSnapshotPublication)
         PublishSceneSnapshot();
+    if (commitLog)
+    {
+        const auto ms = [](auto a, auto b) { return std::chrono::duration<double, std::milli>(b - a).count(); };
+        const auto end = CommitClock::now();
+        if (ms(c0, end) > 3.0)
+            std::printf("[Commit]   %zu commands %.1f, add %zu %.1f, start %.1f, remove %zu %.1f, snapshot %.1f ms\n",
+                commandCount, ms(c0, c1), m_objects.size() >= objectsBefore ? objectsBeforeRemoval - objectsBefore : 0,
+                ms(c1, c2), ms(c2, c3), objectsBeforeRemoval - m_objects.size(), ms(c3, c4), ms(c4, end));
+    }
 }
 
 void Scene::BeginIncrementalRestore()

@@ -74,6 +74,10 @@ public:
         const void* initialData = nullptr,
         uint32_t elementStride = 0) = 0;
 
+    // Whether graphics contexts can copy Upload -> Default buffer regions
+    // (IGraphicsContext::CopyBufferRegion).
+    virtual bool SupportsBufferRegionCopy() const { return false; }
+
     // Initialized once and never mapped by callers. Backends can avoid a CPU
     // upload shadow; the fallback preserves initialization on upload-only APIs.
     virtual std::unique_ptr<IGraphicsBuffer> CreateStaticShaderResource(

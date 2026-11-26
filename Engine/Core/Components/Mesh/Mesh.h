@@ -156,6 +156,10 @@ public:
     // thread's small one by up to 25 ms).
     void InstallOwnBuffers(std::shared_ptr<IGraphicsBuffer> vertexBuffer,
         std::shared_ptr<IGraphicsBuffer> indexBuffer, IGraphicsBufferFactory* bufferFactory);
+    // The same for compact terrain vertices (SetTerrainGeometry with
+    // deferBuffers): the caller's buffers, not the content-cached ones.
+    void InstallOwnTerrainBuffers(std::shared_ptr<IGraphicsBuffer> vertexBuffer,
+        std::shared_ptr<IGraphicsBuffer> indexBuffer, IGraphicsBufferFactory* bufferFactory);
     void InstallPreparedStaticVertexBuffer(
         std::shared_ptr<IGraphicsBuffer> buffer, IGraphicsBufferFactory* bufferFactory,
         Engine::Rendering::PreparedMeshBuffer* preparedIndices = nullptr);
@@ -183,6 +187,12 @@ public:
         uint8_t traceSource=0;
         bool hasLodBounds=false;
         glm::vec3 lodMinimum{0},lodMaximum{0};
+        // Block culling (Mesh::SetInstanceBlocks fills them once): the
+        // placements' coverage scale range (InstanceCull.hlsl, length of row
+        // 0, clamped to .25-4) and their largest matrix Frobenius norm, which
+        // bounds each placement's radius as |local extent| * norm.
+        bool hasCullStats=false;
+        float coverageMinimum=1.f,coverageMaximum=1.f,maximumMatrixNorm=1.f;
         int maximumLod=0;
         std::vector<uint64_t> placementIds;
         void MarkDirty() { ++revision; }
@@ -301,8 +311,10 @@ public:
     // staticBuffers: device-local buffers (built once, drawn for a long
     // time: distant terrain tiles) instead of CPU-visible upload buffers
     // that suit cells rewritten often.
+    // deferBuffers: create no GPU buffers here (the caller installs its own,
+    // InstallOwnTerrainBuffers); the mesh is not ready until then.
     bool SetTerrainGeometry(TerrainMeshData&& geometry,
-        bool retainExpandedVertices = false, bool staticBuffers = false);
+        bool retainExpandedVertices = false, bool staticBuffers = false, bool deferBuffers = false);
     TerrainMeshData TakeTerrainGeometry();
     // Returns true only when CPU vertices, bounds, and the GPU buffer changed.
     bool SetDeformedVertices(const std::vector<Vertex>& vertices);

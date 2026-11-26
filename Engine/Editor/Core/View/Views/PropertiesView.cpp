@@ -540,6 +540,11 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
             }
             if (qualityChanged && OnComponentsChanged) OnComponentsChanged();
             ui.Separator();
+            ui.Label("Visibility");
+            if (ui.Checkbox("CPU Occlusion Culling", &m_scene->settings.cpuOcclusionCulling) && OnComponentsChanged)
+                OnComponentsChanged();
+            ui.Tooltip("Rasterizes the drawn terrain on the CPU each frame and skips objects wholly behind it. Saves GPU work behind hills; costs ~1 ms of main-thread time before the camera records. Instanced vegetation uses GPU occlusion either way.");
+            ui.Separator();
             ui.Label("Texture LOD");
             auto& textureLod = m_scene->settings.textureLod;
             bool textureLodChanged = ui.Checkbox("Distance Texture LOD", &textureLod.enabled);

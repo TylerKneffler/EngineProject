@@ -37,7 +37,7 @@ size_t ComponentCategory(const std::string& type,
         type == "PositionConstraint" || type == "RotationConstraint" ||
         type == "SpriteAnimationManager" || type == "CameraTrack") return 2;
     if (type == "Canvas" || type == "UIButton" || type == "UIImage" ||
-        type == "UIObject" || type == "UIText") return 3;
+        type == "UIObject" || type == "UIText" || type == "UILineGraph") return 3;
     if (type == "AudioSource") return 4;
     if (type == "SpatialManipulator" || type == "SplinePath" ||
         type == "SplineFollower" || type == "SplineGeometry") return 5;

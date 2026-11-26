@@ -76,6 +76,8 @@ public:
     bool CopyBuffer(const Engine::Graphics::IGraphicsBuffer* source,
         Engine::Graphics::IGraphicsBuffer* destination,
         uint64_t bytes = 0) override;
+    bool CopyBufferRegion(const Engine::Graphics::IGraphicsBuffer* source, uint64_t sourceOffset,
+        Engine::Graphics::IGraphicsBuffer* destination, uint64_t destinationOffset, uint64_t bytes) override;
     void SetVertexBuffer(uint32_t slot, const Engine::Graphics::IGraphicsBuffer* buffer, uint32_t stride, uint64_t offset = 0) override;
     void SetIndexBuffer(const Engine::Graphics::IGraphicsBuffer* buffer, uint32_t indexCount, uint64_t offset = 0) override;
     void SetTexture(uint32_t slot, const Engine::Graphics::IGraphicsTexture* texture) override;

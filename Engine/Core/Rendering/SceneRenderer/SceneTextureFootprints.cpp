@@ -1,4 +1,5 @@
 #include "Core/Rendering/SceneRenderer/SceneTextureFootprints.h"
+#include <cstdlib>
 #include "Core/Components/Materials/Material.h"
 #include "Core/Components/Materials/Texture.h"
 #include "Core/Components/Mesh/Mesh.h"
@@ -37,6 +38,16 @@ struct FootprintChunk
     float coverage = 0.f;
     Engine::Rendering::TextureFootprintCache::ChunkResult* cached = nullptr;
     bool project = true;
+    // A far-object block projected as one box (its world bounds, the largest
+    // placement scale): no per-chunk enumeration or cache lookups.
+    bool wholeBlock = false;
+    // From a far-object block (Mesh::InstanceData::traceSource 3).
+    bool farBlock = false;
+    // Collects this draw's far-block chunks into `cached` after projection
+    // (the per-part far aggregate, see the gather loop).
+    bool farAggregate = false;
+    glm::vec3 blockMinimum{0.f}, blockMaximum{0.f};
+    float blockScale = 1.f;
 };
 
 template<class T> void HashBytes(uint64_t& hash, const T& value)
@@ -114,13 +125,92 @@ void SceneTextureFootprints::Request(const std::vector<PreparedDraw>& preparedDr
                     }
                     return false;
                 };
+                // Far-object blocks (distant forest) ask once per block from
+                // its box instead of per 512-placement chunk: the chunk walk
+                // and its cache lookups were ~1.3 ms of camera recording with
+                // the 8 km forest, for no change in resident textures
+                // (todo.md Step 0). ENGINE_FOOTPRINT_WHOLE_FAR_BLOCKS=0: per chunk.
+                static const bool wholeFarBlocks=[]{ const char* v=std::getenv("ENGINE_FOOTPRINT_WHOLE_FAR_BLOCKS"); return !(v && v[0]=='0'); }();
+                bool identityWorld=true;
+                for(int c=0;c<4 && identityWorld;++c) for(int r=0;r<4;++r)
+                    if(std::abs(draw.objectData.world[c][r]-(c==r ? 1.f:0.f))>1e-5f) { identityWorld=false; break; }
+                // The far forest's demand changes slowly: per part, its far
+                // blocks are walked every RefreshFrames frames (staggered by
+                // part) and their combined demand reused in between. The walk
+                // (~287 blocks x every impostor part, frustum and cascade tests
+                // and a cache lookup each) was ~1.3 ms of camera recording.
+                bool farCached=false;
+                Cache::ChunkResult* farAggregate=nullptr;
+                if(view && wholeFarBlocks && identityWorld && draw.mesh->GetInstanceData())
+                {
+                    const auto* stub=draw.mesh->GetInstanceData().get();
+                    const Cache::ChunkKey farKey{stub,stub->revision,hash,SIZE_MAX-1};
+                    auto [found,inserted]=view->chunks.try_emplace(farKey);
+                    found->second.used=view->frame;
+                    if(inserted) found->second.due=view->frame+1+(index%Cache::RefreshFrames);
+                    else if(view->frame<found->second.due) farCached=true;
+                    FootprintChunk chunk{index,0,0};
+                    chunk.project=false;
+                    if(farCached)
+                    {
+                        chunk.pixels=found->second.pixels;
+                        chunk.coverage=found->second.coverage;
+                    }
+                    else
+                    {
+                        chunk.farAggregate=true;
+                        chunk.cached=&found->second;
+                        farAggregate=&found->second;
+                    }
+                    chunks.push_back(chunk);
+                }
                 for(const auto& block:draw.mesh->GetInstanceBlocks())
                 {
+                    if(farCached && block.data && block.data->traceSource==3) continue;
                     bool seen=!outside(viewProjection,block.minimum,block.maximum);
                     if(draw.castsShadow)
                         for(uint32_t cascade=0;cascade<shadowCascadeCount && !seen;++cascade)
                             seen=!outside(shadowViewProjections[cascade],block.minimum,block.maximum);
-                    if(seen) sources.push_back(block.data.get());
+                    if(!seen) continue;
+                    // Whole-block only when the box is wholly in front of the
+                    // camera (its corners well past the near plane).
+                    bool inFront=false;
+                    if(wholeFarBlocks && identityWorld && block.data && block.data->traceSource==3 &&
+                        block.data->hasCullStats && !block.data->transforms.empty())
+                    {
+                        inFront=true;
+                        for(int corner=0;corner<8 && inFront;++corner)
+                            inFront=(viewProjection*glm::vec4(corner&1?block.maximum.x:block.minimum.x,
+                                corner&2?block.maximum.y:block.minimum.y,corner&4?block.maximum.z:block.minimum.z,1.f)).w>1.f;
+                    }
+                    if(inFront)
+                    {
+                        FootprintChunk chunk{index,0,0};
+                        chunk.data=block.data.get();
+                        chunk.wholeBlock=true;
+                        chunk.farBlock=true;
+                        chunk.blockMinimum=block.minimum; chunk.blockMaximum=block.maximum;
+                        // Row lengths bound each axis scale of a rotated, scaled placement.
+                        chunk.blockScale=std::max(block.data->coverageMaximum,block.data->maximumMatrixNorm*0.57735f);
+                        if(view)
+                        {
+                            // Cached like a chunk (begin = SIZE_MAX marks a whole block).
+                            const Cache::ChunkKey key{block.data.get(),block.data->revision,hash,SIZE_MAX};
+                            auto [found,inserted]=view->chunks.try_emplace(key);
+                            chunk.cached=&found->second;
+                            chunk.cached->used=view->frame;
+                            if(inserted) chunk.cached->due=view->frame+1+(chunks.size()%Cache::RefreshFrames);
+                            else if(view->frame<chunk.cached->due)
+                            {
+                                chunk.project=false;
+                                chunk.pixels=chunk.cached->pixels;
+                                chunk.coverage=chunk.cached->coverage;
+                            }
+                        }
+                        chunks.push_back(chunk);
+                        continue;
+                    }
+                    sources.push_back(block.data.get());
                 }
             }
             else sources.push_back(draw.mesh->GetInstanceData().get());
@@ -132,6 +222,7 @@ void SceneTextureFootprints::Request(const std::vector<PreparedDraw>& preparedDr
             {
                 FootprintChunk chunk{index,begin,std::min(count,begin+kInstancesPerChunk)};
                 chunk.data=source;
+                chunk.farBlock=source->traceSource==3;
                 if(view)
                 {
                     const Cache::ChunkKey key{&instanceData,instanceData.revision,hash,begin};
@@ -185,6 +276,35 @@ void SceneTextureFootprints::Request(const std::vector<PreparedDraw>& preparedDr
                     shadowViewProjections[cascade]*projectionWorld,glm::vec2(float(shadowResolution)/2.f),units));
             return demand;
         };
+        if(chunk.wholeBlock)
+        {
+            const float units=footprintDraw.uvScale*chunk.blockScale;
+            float covered=0.f;
+            float demand=Engine::Rendering::ProjectedTextureFootprint(chunk.blockMinimum,chunk.blockMaximum,
+                viewProjection,{float(viewportWidth),float(viewportHeight)},units,&covered);
+            if(std::isfinite(demand))
+            {
+                if(draw.castsShadow) for(uint32_t cascade=0;cascade<shadowCascadeCount;++cascade)
+                {
+                    const float shadow=Engine::Rendering::ProjectedTextureFootprint(chunk.blockMinimum,chunk.blockMaximum,
+                        shadowViewProjections[cascade],glm::vec2(float(shadowResolution)/2.f),units);
+                    if(std::isfinite(shadow)) demand=std::max(demand,shadow);
+                }
+                chunk.pixels=demand; chunk.coverage=covered;
+                return;
+            }
+            // The camera is inside the block's box: every placement exactly.
+            chunk.pixels=0.f; chunk.coverage=0.f;
+            for(const auto& affine:chunk.data->transforms)
+            {
+                glm::mat4 matrix(1.f);
+                for(int row=0;row<3;++row) for(int column=0;column<4;++column) matrix[column][row]=affine.rows[row][column];
+                float instanceCovered=0.f;
+                chunk.pixels=std::max(chunk.pixels,footprint(draw.objectData.world*matrix,instanceCovered,true));
+                chunk.coverage+=instanceCovered;
+            }
+            return;
+        }
         if(footprintDraw.instanced)
         {
             const auto& transforms=chunk.data->transforms;
@@ -262,6 +382,23 @@ void SceneTextureFootprints::Request(const std::vector<PreparedDraw>& preparedDr
 
     if(view)
     {
+        // Far aggregates: the max demand and summed coverage of their draw's
+        // far-block chunks this frame (which also count this frame directly).
+        for(size_t index=0;index<chunks.size();++index)
+        {
+            auto& aggregate=chunks[index];
+            if(!aggregate.farAggregate || !aggregate.cached) continue;
+            float farPixels=0.f,farCoverage=0.f;
+            for(size_t other=index+1;other<chunks.size() && chunks[other].draw==aggregate.draw;++other)
+                if(chunks[other].farBlock)
+                {
+                    farPixels=std::max(farPixels,chunks[other].pixels);
+                    farCoverage+=chunks[other].coverage;
+                }
+            aggregate.cached->pixels=farPixels;
+            aggregate.cached->coverage=farCoverage;
+            aggregate.cached->due=view->frame+Cache::RefreshFrames;
+        }
         for(size_t index:projected)
             if(auto* cached=chunks[index].cached)
             {

@@ -21,6 +21,10 @@
 #include <ctime>
 #include <iomanip>
 #include <iostream>
+#include <map>
+#include <cctype>
+#include <cstdio>
+#include <cstdlib>
 #include <sstream>
 #include <stdexcept>
 #include <unordered_set>
@@ -151,10 +155,46 @@ GameBenchmarkSceneSample GameBenchmark::CollectScene(Engine::Scene::Scene& scene
     result.counters = scene.GetCounters().Get();
     result.meshes = scene.GetComponents<Engine::Components::Mesh>().size();
     result.terrains = scene.GetComponents<Engine::Components::Terrain>().size();
+    // ENGINE_PLACEMENT_DUMP=<n>: on the n-th sample, print placements per
+    // object layer name (diagnostic; which layer holds the resident placements).
+    static const int placementDumpAt = [] {
+        const char* value = std::getenv("ENGINE_PLACEMENT_DUMP");
+        return value ? std::atoi(value) : 0;
+    }();
+    static int placementDumpCalls = 0;
+    const bool dumpPlacements = placementDumpAt > 0 && ++placementDumpCalls == placementDumpAt;
+    std::map<std::string, std::pair<size_t, size_t>> placementsByLayer;
     for (auto* layer : scene.GetComponents<Engine::Components::TerrainObjectLayer>())
     {
         result.placements += layer->placements.size();
         result.pendingPrefabLayers += layer->IsPrefabPreparationPending() ? 1 : 0;
+        if (dumpPlacements)
+        {
+            auto& entry = placementsByLayer[layer->layerName];
+            entry.first += layer->placements.size();
+            ++entry.second;
+        }
+    }
+    if (dumpPlacements)
+        for (const auto& [name, entry] : placementsByLayer)
+            std::printf("[PlacementDump] %-40s %10zu placements in %zu layers\n",
+                name.c_str(), entry.first, entry.second);
+    if (dumpPlacements)
+    {
+        // Scene objects by name with digits removed (which kinds there are).
+        std::map<std::string, std::pair<size_t, size_t>> objectsByKind;
+        for (const auto& object : scene.GetObjects())
+        {
+            if (!object) continue;
+            std::string kind;
+            for (char c : object->name) if (!std::isdigit(static_cast<unsigned char>(c))) kind += c;
+            auto& entry = objectsByKind[kind];
+            ++entry.first;
+            entry.second += object->enabled ? 1 : 0;
+        }
+        for (const auto& [kind, entry] : objectsByKind)
+            if (entry.first >= 10)
+                std::printf("[ObjectDump] %-50s %7zu objects, %7zu enabled\n", kind.c_str(), entry.first, entry.second);
     }
     std::unordered_set<const Engine::Components::Mesh*> sources;
     for (auto* mesh : scene.GetComponents<Engine::Components::Mesh>())
@@ -329,6 +369,8 @@ void GameBenchmark::Record(uint64_t frame, const GameBenchmarkFrameSample& s)
     gpuStage("sky", Engine::Graphics::GpuTimingStage::Sky);
     gpuStage("clouds", Engine::Graphics::GpuTimingStage::Clouds);
     gpuStage("ambient_occlusion", Engine::Graphics::GpuTimingStage::AmbientOcclusion);
+    gpuStage("instance_cull", Engine::Graphics::GpuTimingStage::InstanceCull);
+    gpuStage("impostor", Engine::Graphics::GpuTimingStage::Impostor);
     s.gpu.WriteOpaqueJson(m_log);
     m_log << ",\"scene_objects_loaded\":" << s.scene.objects
         << ",\"scene_generation\":" << s.scene.sceneGeneration
@@ -408,7 +450,7 @@ void GameBenchmark::Record(uint64_t frame, const GameBenchmarkFrameSample& s)
         << ",\"render_occlusion_ms\":" << r.occlusionMs
         << ",\"render_upload_ms\":" << r.uploadMs
         << ",\"render_submission_ms\":" << r.submissionMs
-        << ",\"render_other_ms\":" << r.otherMs
+        << ",\"render_other_ms\":" << r.otherMs << ",\"render_retained_ui_ms\":" << r.retainedUiMs
         << ",\"render_record_packing_ms\":" << r.recordPackingMs
         << ",\"render_record_wait_ms\":" << r.recordWaitMs
         << ",\"render_instance_tile_prepare_ms\":" << r.instanceTilePrepareMs

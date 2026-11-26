@@ -90,6 +90,7 @@ public:
                 break;
             case Op::DrawIndirect: target.DrawInstancesIndirect(static_cast<const IGraphicsBuffer*>(command.pointer), command.n[0], command.n[1] != 0); break;
             case Op::CopyBuffer: target.CopyBuffer(static_cast<const IGraphicsBuffer*>(command.pointer), static_cast<IGraphicsBuffer*>(command.mutablePointer), command.n[0]); break;
+            case Op::CopyBufferRegion: target.CopyBufferRegion(static_cast<const IGraphicsBuffer*>(command.pointer), command.n[0], static_cast<IGraphicsBuffer*>(command.mutablePointer), command.n[1], command.n[2]); break;
             case Op::VertexBuffer: target.SetVertexBuffer(static_cast<uint32_t>(command.n[0]), static_cast<const IGraphicsBuffer*>(command.pointer), static_cast<uint32_t>(command.n[1]), command.n[2]); break;
             case Op::IndexBuffer: target.SetIndexBuffer(static_cast<const IGraphicsBuffer*>(command.pointer), static_cast<uint32_t>(command.n[0]), command.n[1]); break;
             case Op::Texture: target.SetTexture(static_cast<uint32_t>(command.n[0]), static_cast<const IGraphicsTexture*>(command.pointer)); break;
@@ -168,6 +169,9 @@ public:
     { if (!buffer) return false; TrackBuffer(buffer); auto& c = Add(Op::DrawIndirect); c.pointer = buffer; c.n[0] = offset; c.n[1] = indexed; return true; }
     bool CopyBuffer(const IGraphicsBuffer* source, IGraphicsBuffer* destination, uint64_t size = 0) override
     { if (!source || !destination) return false; TrackBuffer(source); TrackBuffer(destination); auto& c = Add(Op::CopyBuffer); c.pointer = source; c.mutablePointer = destination; c.n[0] = size; return true; }
+    bool CopyBufferRegion(const IGraphicsBuffer* source, uint64_t sourceOffset, IGraphicsBuffer* destination,
+        uint64_t destinationOffset, uint64_t bytes) override
+    { if (!source || !destination || !bytes) return false; TrackBuffer(source); TrackBuffer(destination); auto& c = Add(Op::CopyBufferRegion); c.pointer = source; c.mutablePointer = destination; c.n[0] = sourceOffset; c.n[1] = destinationOffset; c.n[2] = bytes; return true; }
     void SetVertexBuffer(uint32_t slot, const IGraphicsBuffer* buffer, uint32_t stride, uint64_t offset = 0) override
     { TrackBuffer(buffer); auto& c = Add(Op::VertexBuffer); c.pointer = buffer; c.n[0] = slot; c.n[1] = stride; c.n[2] = offset; }
     void SetIndexBuffer(const IGraphicsBuffer* buffer, uint32_t count, uint64_t offset = 0) override
@@ -220,7 +224,7 @@ private:
         NativePhase, Pipeline, Stencil, PrepareConstants, ConstantBuffer,
         StructuredBuffer, ComputePipeline, ComputeConstants, ComputeRead,
         ComputeWrite, Dispatch, StorageBarrier, BeginCompute, EndCompute, CopySceneDepth,
-        DrawIndirect, CopyBuffer, VertexBuffer, IndexBuffer, Texture,
+        DrawIndirect, CopyBuffer, CopyBufferRegion, VertexBuffer, IndexBuffer, Texture,
         BeginDepthOnlyPass, EndDepthOnlyPass, ClearDepthRectangle, Viewport, Scissor, Clear,
         Draw, DrawIndexed, BeginOcclusionFrame, OcclusionDecision,
         BeginOcclusionQuery, EndOcclusionQuery,

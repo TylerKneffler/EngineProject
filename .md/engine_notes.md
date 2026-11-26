@@ -10,7 +10,9 @@ this file on 2026-11-19; their phases are the "Foliage" and "Grass" sections bel
 
 **Goal:** the landscape demo meets the expectations below (the look of the Chlorophyll Engine frames in
 `.local/reference-images/chlorophyll-video/`) and holds 60+ fps at 1920x1080 on the RTX 4090 **while walking and
-turning**. 100+ fps on typical poses stays the aim. The earlier reference sets in `.local/reference-images/` (eight
+turning**. 100+ fps on typical poses stays the aim. **Current target (user, 2026-11-25): a steady 80 fps average
+(12.5 ms median) while moving and looking around**, with terrain that does not pop or flicker; plan in todo.md
+("Now: 80 fps while moving"). The earlier reference sets in `.local/reference-images/` (eight
 images, and six in `first-set/`) are variants to reach afterwards: water with reeds, fog, forest interiors.
 
 ## Static objects (2026-11-20)

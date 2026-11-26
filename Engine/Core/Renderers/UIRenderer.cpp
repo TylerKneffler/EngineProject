@@ -6,6 +6,7 @@
 #include "Core/Components/UI/Canvas.h"
 #include "Core/Components/UI/UIButton.h"
 #include "Core/Components/UI/UIImage.h"
+#include "Core/Components/UI/UILineGraph.h"
 #include "Core/Components/UI/UIObject.h"
 #include "Core/Components/UI/UIText.h"
 #include "Core/Components/Materials/Texture.h"
@@ -246,6 +247,28 @@ void AddQuad(std::vector<UIVertex>& vertices, float x0, float y0, float x1, floa
         { bottomRight, {u1,v1}, color }, { bottomLeft, {u0,v1}, color }
     });
 }
+
+// A quad from four corners in canvas units (line segments at any angle).
+void AddCorners(std::vector<UIVertex>& vertices, const glm::vec2& a, const glm::vec2& b,
+    const glm::vec2& c, const glm::vec2& d, const glm::vec4& color, const glm::vec2& canvas)
+{
+    const glm::vec2 pa = ToNdc(a.x, a.y, canvas), pb = ToNdc(b.x, b.y, canvas);
+    const glm::vec2 pc = ToNdc(c.x, c.y, canvas), pd = ToNdc(d.x, d.y, canvas);
+    vertices.insert(vertices.end(), {
+        { pa, {0.f,0.f}, color }, { pb, {1.f,0.f}, color }, { pc, {1.f,1.f}, color },
+        { pa, {0.f,0.f}, color }, { pc, {1.f,1.f}, color }, { pd, {0.f,1.f}, color }
+    });
+}
+
+void AddLine(std::vector<UIVertex>& vertices, glm::vec2 from, glm::vec2 to, float width,
+    const glm::vec4& color, const glm::vec2& canvas)
+{
+    glm::vec2 direction = to - from;
+    const float length = glm::length(direction);
+    if (length < 1e-4f) return;
+    const glm::vec2 side = glm::vec2(-direction.y, direction.x) / length * (width * .5f);
+    AddCorners(vertices, from + side, to + side, to - side, from - side, color, canvas);
+}
 }
 
 struct UIRenderer::Impl
@@ -256,6 +279,9 @@ struct UIRenderer::Impl
     std::unique_ptr<Engine::Graphics::IGraphicsBuffer> vertexBuffer;
     std::shared_ptr<Engine::Graphics::IGraphicsTexture> whiteTexture;
     std::size_t vertexCapacity = 0;
+    // Command-packet path: vertex buffers reused once no packet holds them
+    // (a new upload buffer every frame cost ~0.5 ms of recording).
+    std::vector<std::shared_ptr<Engine::Graphics::IGraphicsBuffer>> packetVertexBuffers;
     std::unordered_map<std::string, std::unique_ptr<FontAtlas>> atlases;
     glm::vec2 pointerPosition{};
     glm::vec2 pointerViewportSize{ 1.f };
@@ -263,9 +289,15 @@ struct UIRenderer::Impl
     bool externalPointerHovered = false;
     bool externalPointerDown = false;
 
+    // Resolved font paths per requested name: resolving touches the file
+    // system (several stat calls) and ran for every text every frame.
+    std::unordered_map<std::string, std::filesystem::path> resolvedFonts;
     FontAtlas* GetAtlas(const std::string& requested, float requestedPixelHeight)
     {
-        const std::filesystem::path fontPath = ResolveFontPath(requested);
+        auto resolved = resolvedFonts.find(requested);
+        if (resolved == resolvedFonts.end())
+            resolved = resolvedFonts.emplace(requested, ResolveFontPath(requested)).first;
+        const std::filesystem::path& fontPath = resolved->second;
         if (fontPath.empty() || !provider || !provider->GetTextureFactory()) return nullptr;
         const int pixelHeight = std::clamp(
             static_cast<int>(std::lround(requestedPixelHeight)), 8, 256);
@@ -463,7 +495,8 @@ void UIRenderer::Render(Engine::Rendering::SceneRenderer& renderer,
     if(scene.GetComponents<Engine::Components::Canvas>().empty() &&
         scene.GetComponents<Engine::Components::UIText>().empty() &&
         scene.GetComponents<Engine::Components::UIImage>().empty() &&
-        scene.GetComponents<Engine::Components::UIButton>().empty()) return;
+        scene.GetComponents<Engine::Components::UIButton>().empty() &&
+        scene.GetComponents<Engine::Components::UILineGraph>().empty()) return;
     const std::vector<Engine::Model::UITextLayout> items =
         scene.IsOwnerThread() && !renderer.IsRecordingNativeCommands()
         ? Engine::UI::UILayout::Resolve(scene, viewportAspect)
@@ -653,6 +686,58 @@ void UIRenderer::Render(Engine::Rendering::SceneRenderer& renderer,
                 segments.push_back({ graphicsTexture, first, 6, false });
         }
 
+        // Line graphs: background, guides and one polyline per series, all
+        // solid colour (white texture), drawn over images, under buttons/text.
+        for (auto* graph : scene.GetComponents<Engine::Components::UILineGraph>())
+        {
+            auto* object = graph ? graph->Owner : nullptr;
+            if (!object || !object->IsEnabledInHierarchy()) continue;
+            auto* layout = object->GetComponent<Engine::Components::UIObject>();
+            if (!layout || !layout->visible) continue;
+            Engine::Components::Canvas* canvas = nullptr;
+            for (Engine::Core::Object* current = object; current; current = current->Parent)
+                if ((canvas = current->GetComponent<Engine::Components::Canvas>())) break;
+            if (!canvas) continue;
+            glm::vec2 canvasSize(1.f);
+            for (const auto& entry : canvasSizes)
+                if (entry.first == canvas) { canvasSize = entry.second; break; }
+            const Engine::Model::UIRect& rect = layout->GetComputedRect();
+            if (rect.width <= 2.f || rect.height <= 2.f) continue;
+            const auto view = graph->Snapshot();
+            const uint32_t first = static_cast<uint32_t>(vertices.size());
+            AddQuad(vertices, rect.x, rect.y, rect.x + rect.width, rect.y + rect.height, 0.f, 0.f, 1.f, 1.f,
+                glm::vec4(graph->backgroundColor, graph->backgroundAlpha), canvasSize);
+            const float range = std::max(view.maximum - view.minimum, 1e-3f);
+            const auto toY = [&](float value) {
+                return rect.y + rect.height * (1.f - std::clamp((value - view.minimum) / range, 0.f, 1.f));
+            };
+            for (const float guide : view.guides)
+                if (guide > view.minimum && guide < view.maximum)
+                    AddLine(vertices, {rect.x, toY(guide)}, {rect.x + rect.width, toY(guide)}, 1.f,
+                        glm::vec4(graph->guideColor, graph->guideAlpha), canvasSize);
+            for (const auto& series : view.series)
+            {
+                const size_t count = series.values.size();
+                if (count < 2) continue;
+                const float step = rect.width / float(count - 1);
+                const glm::vec4 color(series.color, 1.f);
+                for (size_t i = 1; i < count; ++i)
+                {
+                    const float a = series.values[i - 1], b = series.values[i];
+                    if (!std::isfinite(a) || !std::isfinite(b)) continue;
+                    AddLine(vertices, {rect.x + step * float(i - 1), toY(a)}, {rect.x + step * float(i), toY(b)},
+                        graph->lineWidth, color, canvasSize);
+                }
+            }
+            const uint32_t count = static_cast<uint32_t>(vertices.size()) - first;
+            if (!count) continue;
+            if (!segments.empty() && !segments.back().fontSdf &&
+                segments.back().texture == m_impl->whiteTexture.get() &&
+                segments.back().firstVertex + segments.back().vertexCount == first)
+                segments.back().vertexCount += count;
+            else segments.push_back({ m_impl->whiteTexture.get(), first, count, false });
+        }
+
         const uint32_t firstButtonVertex = static_cast<uint32_t>(vertices.size());
         for (auto* button : scene.GetComponents<Engine::Components::UIButton>())
         {
@@ -796,13 +881,26 @@ void UIRenderer::Render(Engine::Rendering::SceneRenderer& renderer,
     if (vertices.empty()) return;
 
     auto* commandPacket = dynamic_cast<Engine::Graphics::GraphicsCommandPacket*>(context);
-    std::unique_ptr<Engine::Graphics::IGraphicsBuffer> packetVertexBuffer;
+    std::shared_ptr<Engine::Graphics::IGraphicsBuffer> packetVertexBuffer;
     if (commandPacket)
     {
-        packetVertexBuffer = m_impl->provider->GetBufferFactory()->CreateBuffer(
-            Engine::Graphics::IGraphicsBuffer::Usage::VertexBuffer,
-            Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
-            vertices.size() * sizeof(UIVertex));
+        const std::size_t bytes = vertices.size() * sizeof(UIVertex);
+        auto& pool = m_impl->packetVertexBuffers;
+        // Free: only this pool holds it (its packet was released after the
+        // frame's fence).
+        for (auto& candidate : pool)
+            if (candidate && candidate.use_count() == 1 && candidate->GetSize() >= bytes)
+            { packetVertexBuffer = candidate; break; }
+        if (!packetVertexBuffer)
+        {
+            std::size_t capacity = 64 * 1024;
+            while (capacity < bytes) capacity *= 2;
+            packetVertexBuffer = std::shared_ptr<Engine::Graphics::IGraphicsBuffer>(
+                m_impl->provider->GetBufferFactory()->CreateBuffer(
+                    Engine::Graphics::IGraphicsBuffer::Usage::VertexBuffer,
+                    Engine::Graphics::IGraphicsBuffer::AccessMode::Upload, capacity));
+            if (packetVertexBuffer && pool.size() < 8) pool.push_back(packetVertexBuffer);
+        }
     }
     else if (!m_impl->vertexBuffer || m_impl->vertexCapacity < vertices.size())
     {

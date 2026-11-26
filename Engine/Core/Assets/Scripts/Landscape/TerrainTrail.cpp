@@ -83,7 +83,11 @@ void TerrainTrail::Start() { Publish(); }
 
 void TerrainTrail::Update()
 {
-    // The editor moves points and changes settings: republish on change.
+    // A static trail cannot move while playing: once published, skip the
+    // per-frame check (60 trails rebuilt their point signatures every frame,
+    // ~0.7 ms of update; todo.md Step 0). The editor moves points and changes
+    // settings through the manager's trail watcher, which still republishes.
+    if (m_publishedSignature && Owner && Owner->IsStaticInHierarchy()) return;
     Publish();
 }
 

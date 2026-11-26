@@ -288,6 +288,12 @@ struct SceneSettings
     // When true, SceneView also shows game-style screen-space UI composition.
     // Default stays false so scene camera reflects in-scene editing context.
     bool sceneViewUiOverlay = false;
+    // Software occlusion culling for the game camera: the drawn terrain is
+    // rasterized on the CPU each frame and objects wholly behind it skipped.
+    // Saves GPU work behind hills, but the build (~1 ms) sits on the main
+    // thread before camera recording; instanced vegetation has GPU Hi-Z
+    // occlusion either way. ENGINE_VISIBILITY_OCCLUSION_BUFFER=0/1 overrides.
+    bool cpuOcclusionCulling = true;
 
     // Editor-only debug overlays for portals, matrix links, and warp volumes.
     bool portalDebugVisuals = false;

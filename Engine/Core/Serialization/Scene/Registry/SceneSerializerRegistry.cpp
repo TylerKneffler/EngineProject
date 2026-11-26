@@ -26,6 +26,7 @@
 #include "Core/Components/UI/Canvas.h"
 #include "Core/Components/UI/UIButton.h"
 #include "Core/Components/UI/UIImage.h"
+#include "Core/Components/UI/UILineGraph.h"
 #include "Core/Components/UI/UIObject.h"
 #include "Core/Components/UI/UIText.h"
 #include "Core/Components/Sprite/SpriteAnimationManager.h"
@@ -210,6 +211,7 @@ void SceneSerializer::EnsureBuiltinsRegistered()
     RegisterComponentType<Engine::Components::Canvas>();
     RegisterComponentType<Engine::Components::UIButton>();
     RegisterComponentType<Engine::Components::UIImage>();
+    RegisterComponentType<Engine::Components::UILineGraph>();
     RegisterComponentType<Engine::Components::UIObject>();
     RegisterComponentType<Engine::Components::UIText>();
     RegisterComponentType<Engine::Components::SpriteAnimationManager>();

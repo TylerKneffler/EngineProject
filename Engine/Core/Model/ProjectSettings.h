@@ -51,6 +51,9 @@ struct ProjectSettings
     uint32_t targetFramerate = 60; // Default video export frame rate.
     uint32_t editorMaxFps = 0;    // 0 means unlimited.
     uint32_t gameMaxFps = 0;      // 0 means unlimited.
+    // Live performance overlay (frame/GPU/CPU graph, top right) in the
+    // standalone game; F3 toggles it while playing.
+    bool showPerformanceOverlay = true;
     uint32_t physicsTargetMilliseconds = 30; // CPU budget per rendered frame.
     uint32_t physicsMaximumSubsteps = 6;     // Hard per-frame catch-up limit.
     Engine::Model::BakedLightingSettings bakedLighting;

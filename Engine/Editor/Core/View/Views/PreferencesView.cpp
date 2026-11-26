@@ -1051,6 +1051,10 @@ void PreferencesView::DrawRenderingSection(IEditorUi& ui)
         NotifyChanged();
     ui.Tooltip("0 means unlimited. Applies to the standalone game.");
 
+    if (ui.Checkbox("Show performance overlay", &m_settings.showPerformanceOverlay))
+        NotifyChanged();
+    ui.Tooltip("Live frame, GPU and CPU timing graph in the top right of the standalone game. F3 toggles it while playing.");
+
     if (ui.InputUInt("Physics Target (ms/frame)",
         &m_settings.physicsTargetMilliseconds))
     {
@@ -1895,6 +1899,9 @@ bool PreferencesView::SaveSettings()
                 auto gameMaxFps = prop.child("GameMaxFPS");
                 if (!gameMaxFps) gameMaxFps = prop.append_child("GameMaxFPS");
                 gameMaxFps.text().set(m_settings.gameMaxFps);
+                auto overlay = prop.child("ShowPerformanceOverlay");
+                if (!overlay) overlay = prop.append_child("ShowPerformanceOverlay");
+                overlay.text().set(m_settings.showPerformanceOverlay);
                 auto physicsTarget = prop.child("PhysicsTargetMilliseconds");
                 if (!physicsTarget) physicsTarget = prop.append_child("PhysicsTargetMilliseconds");
                 physicsTarget.text().set(m_settings.physicsTargetMilliseconds);
@@ -2169,6 +2176,7 @@ bool PreferencesView::SaveSettings()
             if (!prop) prop = projectNode.append_child("PropertyGroup");
             prop.append_child("EditorMaxFPS").text().set(m_settings.editorMaxFps);
             prop.append_child("GameMaxFPS").text().set(m_settings.gameMaxFps);
+            prop.append_child("ShowPerformanceOverlay").text().set(m_settings.showPerformanceOverlay);
             prop.append_child("PhysicsTargetMilliseconds").text().set(
                 m_settings.physicsTargetMilliseconds);
             prop.append_child("PhysicsMaximumSubsteps").text().set(

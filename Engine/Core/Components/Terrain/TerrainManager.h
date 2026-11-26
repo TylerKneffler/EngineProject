@@ -840,6 +840,12 @@ private:
         Engine::Core::Object* object = nullptr;
         TerrainObjectLayer* layer = nullptr;
         uint64_t membership = 0;
+        // The cells it showed at its last walk and their cull distances:
+        // a crossing re-checks blocks away from the radius edge from these
+        // instead of walking their cells again (UpdateFarObjects).
+        std::vector<Cell> members;
+        std::map<std::string, float> cullDistances;
+        bool membersValid = false;
         // Instances finished preparing since the last placement rebuild.
         // Latched: periodic source re-checks report "preparing" briefly.
         bool prepared = false;
@@ -882,6 +888,8 @@ private:
     // The queue holds cells still to compute, nearest block first, and is
     // rebuilt only when the center cell, radius or cell set changes.
     Cell m_farScanCenter{ INT_MIN, INT_MIN };
+    // Blocks a crossing re-checks from their cached members (see above).
+    std::set<Cell> m_farRecheckBlocks;
     int m_farScanRadius = -1;
     size_t m_farScanCellCount = 0;
     std::vector<Cell> m_farObjectQueue;

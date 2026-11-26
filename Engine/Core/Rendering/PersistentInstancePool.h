@@ -40,6 +40,11 @@ class PersistentInstancePool
         std::vector<std::shared_ptr<const void>> liveSources;
         std::unordered_set<const void*> liveKeys;
         std::vector<std::pair<uint32_t,uint32_t>> retiredRanges;
+        // GPU-resident mode: this frame's staged changes (Upload memory).
+        // shared: command packets that reference it keep it alive until replay.
+        std::shared_ptr<Graphics::IGraphicsBuffer> staging;
+        void* stagingMapped=nullptr;
+        size_t stagingUsed=0;
     };
     std::map<const void*,Source> m_sources;
     std::map<uint64_t,const void*> m_stableSources;
@@ -49,6 +54,17 @@ class PersistentInstancePool
     std::vector<Slot> m_slots;
     uint32_t m_currentSlot=0;
     uint64_t m_revision=0,m_nextIdentity=1,m_serial=UINT64_MAX;
+    // GPU-resident mode (backends with IGraphicsContext::CopyBufferRegion):
+    // one pool in GPU memory; Upload() collects the changed record ranges and
+    // FlushUploads() copies them in through the frame slot's staging buffer.
+    // Read across PCIe from Upload memory, the cull and the draws paid for
+    // every resident placement each frame (~10 ms GPU with the 8 km forest,
+    // todo.md Step 0). ENGINE_POOL_GPU_RESIDENT=0 keeps the Upload pool (A/B).
+    // shared: command packets that bind it keep it alive until replay (a
+    // retired unique buffer could be freed before a late packet replayed).
+    std::shared_ptr<Graphics::IGraphicsBuffer> m_gpuPool;
+    uint64_t m_gpuApplied=0;
+    std::vector<std::pair<uint32_t,uint32_t>> m_gpuPending; // first record, count
     uint32_t Allocate(uint32_t capacity)
     {
         for(auto it=m_free.begin();it!=m_free.end();++it) if(it->second>=capacity)
@@ -87,6 +103,7 @@ public:
         for(const auto& range:m_slots[slot].retiredRanges) Free(range.first,range.second);
         m_slots[slot].retiredRanges.clear();
         m_slots[slot].retired.clear(); m_slots[slot].liveSources.clear(); m_slots[slot].liveKeys.clear();
+        m_slots[slot].stagingUsed=0;
         for(auto it=m_sources.begin();it!=m_sources.end();)
             if(it->second.lifetime.expired())
             {
@@ -189,15 +206,79 @@ public:
         return stale;
     }
     uint64_t ResidentBytes() const
-    { uint64_t bytes=0; for(const auto& slot:m_slots) { if(slot.buffer) bytes+=slot.buffer->GetSize(); for(const auto& retired:slot.retired) bytes+=retired->GetSize(); } return bytes; }
+    { uint64_t bytes=m_gpuPool ? m_gpuPool->GetSize() : 0; for(const auto& slot:m_slots) { if(slot.buffer) bytes+=slot.buffer->GetSize(); if(slot.staging) bytes+=slot.staging->GetSize(); for(const auto& retired:slot.retired) bytes+=retired->GetSize(); } return bytes; }
     void Retire(std::unique_ptr<Graphics::IGraphicsBuffer> buffer)
     { if(buffer) m_slots[m_currentSlot].retired.push_back(std::move(buffer)); }
+    // GPU-resident mode: records the copies of the ranges Upload() collected,
+    // before anything this view records reads the pool. A no-op otherwise.
+    void FlushUploads(Graphics::IGraphicsContext* context, Graphics::IGraphicsProvider* provider)
+    {
+        if(m_gpuPending.empty() || !m_gpuPool || !context || m_currentSlot>=m_slots.size()) return;
+        auto ranges=std::move(m_gpuPending); m_gpuPending.clear();
+        // Merge overlapping and adjacent ranges (fewer copies and barriers).
+        std::sort(ranges.begin(),ranges.end());
+        std::vector<std::pair<uint32_t,uint32_t>> merged;
+        for(const auto& range:ranges)
+        {
+            const uint32_t end=std::min<uint32_t>(range.first+range.second,uint32_t(m_records.size()));
+            if(end<=range.first) continue;
+            if(!merged.empty() && range.first<=merged.back().first+merged.back().second)
+                merged.back().second=std::max(merged.back().second,end-merged.back().first);
+            else merged.push_back({range.first,end-range.first});
+        }
+        size_t total=0; for(const auto& range:merged) total+=size_t(range.second)*sizeof(PersistentInstance);
+        if(!total) return;
+        auto& slot=m_slots[m_currentSlot];
+        if(!slot.staging || slot.staging->GetSize()<slot.stagingUsed+total)
+        {
+            size_t capacity=size_t(1)<<20; while(capacity<total) capacity*=2;
+            // Copies recorded earlier keep the old one (shared).
+            slot.staging=std::shared_ptr<Graphics::IGraphicsBuffer>(provider->GetBufferFactory()->CreateBuffer(Graphics::IGraphicsBuffer::Usage::ShaderResource,
+                Graphics::IGraphicsBuffer::AccessMode::Upload,capacity,nullptr,sizeof(PersistentInstance)));
+            slot.stagingMapped=slot.staging ? slot.staging->Map() : nullptr;
+            slot.stagingUsed=0; ++stats.allocations;
+            if(!slot.stagingMapped) throw std::runtime_error("Placement pool staging is not CPU writable");
+        }
+        for(const auto& range:merged)
+        {
+            const size_t bytes=size_t(range.second)*sizeof(PersistentInstance);
+            std::memcpy(static_cast<uint8_t*>(slot.stagingMapped)+slot.stagingUsed,m_records.data()+range.first,bytes);
+            slot.staging->FlushMappedWrites(slot.stagingUsed,bytes);
+            if(!context->CopyBufferRegion(slot.staging.get(),slot.stagingUsed,m_gpuPool.get(),
+                size_t(range.first)*sizeof(PersistentInstance),bytes))
+                throw std::runtime_error("Placement pool copy failed");
+            slot.stagingUsed+=bytes;
+        }
+    }
     Graphics::IGraphicsBuffer* Upload(Graphics::IGraphicsProvider* provider)
     {
         const auto index=provider->GetContextFactory()->GetPreparedFrameSlot();
         if(m_slots.size()<=index) m_slots.resize(size_t(index)+1);
         auto& slot=m_slots[index];
         const size_t required=std::max<size_t>(64,m_records.size())*sizeof(PersistentInstance);
+        static const bool gpuResidentAllowed=[]{ const char* v=std::getenv("ENGINE_POOL_GPU_RESIDENT"); return !(v && v[0]=='0'); }();
+        if(gpuResidentAllowed && provider->GetBufferFactory()->SupportsBufferRegionCopy())
+        {
+            if(!m_gpuPool || m_gpuPool->GetSize()<required)
+            {
+                size_t capacity=4096; while(capacity<required) capacity*=2;
+                // Packets recorded earlier keep the old buffer (shared).
+                m_gpuPool=std::shared_ptr<Graphics::IGraphicsBuffer>(provider->GetBufferFactory()->CreateBuffer(Graphics::IGraphicsBuffer::Usage::ShaderResource,
+                    Graphics::IGraphicsBuffer::AccessMode::Default,capacity,nullptr,sizeof(PersistentInstance)));
+                ++stats.allocations; stats.growthBytes+=capacity;
+                m_gpuPending.clear();
+                if(!m_records.empty()) m_gpuPending.push_back({0u,uint32_t(m_records.size())});
+            }
+            else for(const auto& change:m_changes) if(change.revision>m_gpuApplied)
+            {
+                m_gpuPending.push_back({change.first,change.count});
+                const size_t bytes=size_t(change.count)*sizeof(PersistentInstance);
+                if(change.created) stats.newBytes+=bytes; else stats.editedBytes+=bytes;
+            }
+            m_gpuApplied=m_revision;
+            m_changes.clear();
+            return m_gpuPool.get();
+        }
         if(!slot.buffer || slot.buffer->GetSize()<required)
         {
             size_t capacity=4096; while(capacity<required) capacity*=2;

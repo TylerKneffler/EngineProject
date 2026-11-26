@@ -12,6 +12,8 @@
 #include "Core/Components/Physics/RigidBody.h"
 #include "Core/Inspection/IInspectorUi.h"
 #include "Core/Serialization/SceneSerializer.h"
+#include <cstdlib>
+#include <cstdio>
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -76,13 +78,26 @@ void TerrainManager::UpdateStreamingAtPosition(
         : std::nullopt;
     if (m_editorStreaming) InvalidatePrepared();
     m_editorStreaming = false;
+    using StreamClock = std::chrono::steady_clock;
+    static const bool partLog = std::getenv("ENGINE_UPDATE_TYPE_LOG") != nullptr;
+    const auto p0 = StreamClock::now();
     StreamCells(centerX, centerY);
+    const auto p1 = StreamClock::now();
     CheckTerrainField();
-    const auto farObjectsStart = std::chrono::steady_clock::now();
+    const auto farObjectsStart = StreamClock::now();
     UpdateNearObjects();
+    const auto p3 = StreamClock::now();
     UpdateFarObjects(centerX, centerY);
     m_lastStreamingTiming.farObjectsMs = std::chrono::duration<double, std::milli>(
-        std::chrono::steady_clock::now() - farObjectsStart).count();
+        StreamClock::now() - farObjectsStart).count();
+    if (partLog)
+    {
+        const auto ms = [](auto a, auto b) { return std::chrono::duration<double, std::milli>(b - a).count(); };
+        const auto end = StreamClock::now();
+        if (ms(p0, end) > 5.0)
+            std::printf("[TerrainUpdate] stream cells %.1f, field %.1f, near objects %.1f, far objects %.1f ms\n",
+                ms(p0, p1), ms(p1, farObjectsStart), ms(farObjectsStart, p3), ms(p3, end));
+    }
 }
 
 void TerrainManager::UpdateEditorStreaming(const glm::dvec3& worldPosition,
@@ -469,7 +484,13 @@ void TerrainManager::Update()
     if (manageAuthoredCellColliders)
         UpdateColliderStreamingAtPosition(viewer->transform.GetWorldPositionD());
     else UpdateStreamingAtPosition(viewer->transform.GetWorldPositionD());
-    UpdateArchiveMap(viewer);
+    {
+        static const bool partLog = std::getenv("ENGINE_UPDATE_TYPE_LOG") != nullptr;
+        const auto start = std::chrono::steady_clock::now();
+        UpdateArchiveMap(viewer);
+        const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+        if (partLog && ms > 2.0) std::printf("[TerrainUpdate] archive map %.1f ms\n", ms);
+    }
 }
 
 void TerrainManager::Start()

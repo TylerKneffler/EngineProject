@@ -9,6 +9,22 @@
 - Portal and warp demo timing belongs in `Engine/Core/Assets/Scripts/Portals` and `Engine/Core/Assets/Scripts/Spatial`. Keep `SpatialManipulator` focused on reusable portal and warp mechanics.
 - Preserve compatibility components such as `CameraTrack` when they maintain serialized scene behavior, even if only one bundled asset uses them.
 
+## Editor-first content and settings (user rule, 2026-11-25)
+
+- Every change to content or a scene must be something a user could also make by hand in the editor. A script or
+  tool may do it today (e.g. `tools/build_landscape_demo.py`, a scene script), but the result is ordinary,
+  serialized scene data (objects, components, properties, assets) that the editor shows and edits, not state
+  that only exists while the script runs.
+- Every setting or tunable parameter (distances, densities, strengths, thresholds, toggles) is reachable as a
+  scene setting, a project setting or an object/component property, saved with the scene or project and shown
+  in the inspector. No magic numbers in code for things a user would tune; a code constant is fine only as the
+  property's default.
+- Environment variables (`ENGINE_*`) are for A/B runs, debugging and captures only. They may override a
+  property for a run, never be the only way to set it.
+- New terrain editing features go into brush settings (`.brush` sections), not standalone tools.
+- When adding a feature, check it end to end in the editor: the property appears, edits apply live or on
+  reload, and undo/save round-trip it.
+
 ## Tests
 
 - Keep tests in `.local/tests`, with lowercase `tests`. Do not create `Engine/Tests`.

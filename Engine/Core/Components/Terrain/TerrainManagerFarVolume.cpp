@@ -292,14 +292,33 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
         }
         node.vertexCount = built->geometry.vertices.size();
         const bool hasGeometry = !built->geometry.indices.empty();
-        if (hasGeometry && node.mesh->SetTerrainGeometry(std::move(built->geometry), false, true))
+        auto* provider = scene->GetGraphicsProvider();
+        auto* factory = provider ? provider->GetBufferFactory() : nullptr;
+        // Own buffers, created without a wait: the vertex upload is recorded
+        // with the next frame (CreateStaticVertexBufferDeferred) and indices
+        // go in an upload buffer. The content-cached path (AcquireMeshBuffer)
+        // hashed every vertex and waited for the copy: 6-14 ms of the main
+        // thread for 1-4 nodes on each cell crossing (todo.md Step 0).
+        const bool ownBuffers = factory && factory->SupportsWorkerThreadStaticVertexBufferCreation();
+        if (hasGeometry && node.mesh->SetTerrainGeometry(std::move(built->geometry), false, true, ownBuffers))
         {
             node.mesh->occluderIndices = std::move(built->occluderIndices);
             node.mesh->occluderVertexCount = built->occluderVertexCount;
-            if (auto* provider = scene->GetGraphicsProvider())
+            if (ownBuffers)
+            {
+                const auto& vertices = node.mesh->GetTerrainVertices();
+                const auto& indices = node.mesh->GetIndices();
+                std::shared_ptr<Engine::Graphics::IGraphicsBuffer> vertexBuffer = factory->CreateStaticVertexBufferDeferred(
+                    vertices.size() * sizeof(Mesh::TerrainVertex), vertices.data());
+                std::shared_ptr<Engine::Graphics::IGraphicsBuffer> indexBuffer = factory->CreateBuffer(
+                    Engine::Graphics::IGraphicsBuffer::Usage::IndexBuffer, Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
+                    indices.size() * sizeof(uint32_t), indices.data(), sizeof(uint32_t));
+                node.mesh->InstallOwnTerrainBuffers(std::move(vertexBuffer), std::move(indexBuffer), factory);
+            }
+            if (provider)
             {
                 if (node.mesh->GetGpuBufferMemoryBytes() == 0)
-                    node.mesh->CreateBuffer(provider->GetBufferFactory());
+                    node.mesh->CreateBuffer(factory);
                 if (!node.mesh->IsReady()) node.mesh->OnAfterDeserialize(provider);
             }
             node.hasGeometry = true;
@@ -455,6 +474,12 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
     }
     m_lastFarUpdateTiming.totalMs = std::chrono::duration<double, std::milli>(
         FarClock::now() - updateStart).count();
+    static const bool partLog = std::getenv("ENGINE_UPDATE_TYPE_LOG") != nullptr;
+    if (partLog && m_lastFarUpdateTiming.totalMs > 2.0)
+        std::printf("[FarVolume] total %.1f: upload %zu nodes %.1f, selection %.1f, preparation %zu queued %.1f, shown %zu nodes\n",
+            m_lastFarUpdateTiming.totalMs, m_lastFarUpdateTiming.uploadedTiles, m_lastFarUpdateTiming.uploadMs,
+            m_lastFarUpdateTiming.selectionMs, m_lastFarUpdateTiming.queuedTiles, m_lastFarUpdateTiming.preparationMs,
+            m_farShown.size());
 }
 
 void TerrainManager::FenceFarVolumeJobs()

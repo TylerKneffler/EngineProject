@@ -56,6 +56,10 @@
 #include "Core/Assets/Scripts/Portals/PortalSplitAfterDelay.h"
 #include "Core/Assets/Scripts/Physics/FoxRagdollBlend.h"
 #include "Core/Serialization/SceneSerializer.h"
+#include "Game/Application/PerformanceOverlay.h"
+#include <DbgHelp.h>
+#include <shellapi.h>
+#pragma comment(lib, "Dbghelp.lib")
 #endif
 
 // Benchmark-only scene view render mode for the game camera (-1 = normal).
@@ -262,6 +266,9 @@ public:
 
     // Flicker flag overlay: shown when enabled, with this label. Window
     // thread, between frames (the worker is idle until BeginUpdate).
+    // Window thread, before the first frame.
+    void SetPerformanceOverlay(PerformanceOverlay* overlay) { m_performanceOverlay = overlay; }
+
     void SetFlagOverlay(bool enabled, std::string label)
     {
         std::lock_guard lock(m_mutex);
@@ -371,6 +378,7 @@ private:
                     if (auto* game = m_scene.GetGame())
                         game->Update(m_deltaTime);
                     if (m_flagOverlay) UpdateFlagOverlay();
+                    if (m_performanceOverlay) m_performanceOverlay->Update(m_scene);
                     if (m_scene.GetGame() && m_scene.GetGame()->ProcessPendingSceneLoad() &&
                         m_input.clientWidth && m_input.clientHeight)
                         m_scene.PrepareNativeUiLayout(
@@ -468,6 +476,7 @@ private:
     std::optional<::Engine::Components::Camera::Pose> m_cameraPose;
     bool m_flagOverlay = false;
     std::string m_flagLabel;
+    PerformanceOverlay* m_performanceOverlay = nullptr;
     ::Engine::Scene::Scene::ObjectId m_flagButtonId{};
     // The flag button: created in the running scene the first time (and again
     // after a scene load removed it), its label refreshed each frame.
@@ -853,6 +862,30 @@ private:
         const double latencyMs = std::chrono::duration<double, std::milli>(
             std::chrono::steady_clock::now() - packet.startedAt).count();
         const auto telemetry = m_renderer.GetFrameTimingTelemetry();
+        if (m_performanceOverlay && m_performanceOverlay->IsEnabled())
+        {
+            using Stage = ::Engine::Graphics::GpuTimingStage;
+            const auto stage = [&](Stage s) { return telemetry.gpuMilliseconds[static_cast<size_t>(s)]; };
+            PerformanceOverlay::Sample sample;
+            sample.frameMs = packet.intervalMs;
+            sample.gpuValid = telemetry.gpuTimingsValid;
+            for (const double value : telemetry.gpuMilliseconds) sample.gpuMs += value;
+            sample.gpuTerrainMs = stage(Stage::Terrain);
+            sample.gpuGrassMs = stage(Stage::Grass);
+            sample.gpuCullMs = stage(Stage::InstanceCull);
+            sample.gpuOpaqueMs = telemetry.OpaqueMilliseconds() - stage(Stage::InstanceCull);
+            sample.gpuShadowMs = stage(Stage::Shadow);
+            sample.gpuSkyCloudsMs = stage(Stage::Sky) + stage(Stage::Clouds);
+            sample.gpuImpostorMs = stage(Stage::Impostor);
+            sample.updateMs = packet.simulationTimings.simulationUpdateMs;
+            sample.prepareMs = packet.simulationTimings.scenePreparationMs;
+            sample.cameraRecordMs = packet.simulationTimings.cameraRecordingMs;
+            sample.shadowRecordMs = packet.simulationTimings.shadowRecordingMs;
+            sample.renderThreadMs = frameMs;
+            sample.width = m_renderer.GetWidth();
+            sample.height = m_renderer.GetHeight();
+            m_performanceOverlay->Push(sample);
+        }
         if (m_gameBenchmark && packet.benchmarkFrame != UINT64_MAX)
         {
             const uint64_t warmup = m_benchmarkOptions->warmup;
@@ -1026,6 +1059,10 @@ private:
     ::Engine::Renderers::IGameRenderer& m_renderer;
     std::string m_scenePath;
     GameBenchmark* m_gameBenchmark;
+    PerformanceOverlay* m_performanceOverlay = nullptr;
+public:
+    void SetPerformanceOverlay(PerformanceOverlay* overlay) { m_performanceOverlay = overlay; }
+private:
     // The sequence frame whose async capture was requested (captureAsync).
     uint64_t m_asyncCaptureFrame = UINT64_MAX;
     // capture_a.ppm / capture_b.ppm for the two moving snapshots (see
@@ -1084,9 +1121,49 @@ private:
 };
 }
 
+namespace
+{
+// Crash dumps: any unhandled exception writes a minidump (threads, stacks,
+// module list) to %LOCALAPPDATA%\Engine\crashes and prints where it is, so a
+// crash can be read with a debugger or symbolizer afterwards.
+LONG WINAPI WriteCrashDump(EXCEPTION_POINTERS* exception)
+{
+    wchar_t folder[MAX_PATH]{};
+    if (!GetEnvironmentVariableW(L"LOCALAPPDATA", folder, MAX_PATH)) return EXCEPTION_CONTINUE_SEARCH;
+    std::wstring path = std::wstring(folder) + L"\\Engine\\crashes";
+    CreateDirectoryW((std::wstring(folder) + L"\\Engine").c_str(), nullptr);
+    CreateDirectoryW(path.c_str(), nullptr);
+    SYSTEMTIME now{}; GetLocalTime(&now);
+    wchar_t name[96];
+    swprintf_s(name, L"\\crash-%04u%02u%02u-%02u%02u%02u-%lu.dmp", now.wYear, now.wMonth, now.wDay,
+        now.wHour, now.wMinute, now.wSecond, GetCurrentProcessId());
+    path += name;
+    const HANDLE file = CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file != INVALID_HANDLE_VALUE)
+    {
+        MINIDUMP_EXCEPTION_INFORMATION info{ GetCurrentThreadId(), exception, FALSE };
+        MiniDumpWriteDump(GetCurrentProcess(), GetCurrentProcessId(), file,
+            MINIDUMP_TYPE(MiniDumpWithThreadInfo | MiniDumpWithIndirectlyReferencedMemory | MiniDumpScanMemory),
+            &info, nullptr, nullptr);
+        CloseHandle(file);
+    }
+    const auto* record = exception ? exception->ExceptionRecord : nullptr;
+    HMODULE module = nullptr;
+    if (record) GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+        static_cast<LPCWSTR>(record->ExceptionAddress), &module);
+    std::fprintf(stderr, "[crash] exception 0x%08lx at module offset 0x%llx; dump: %ls\n",
+        record ? record->ExceptionCode : 0ul,
+        record && module ? static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(record->ExceptionAddress) -
+            reinterpret_cast<uintptr_t>(module)) : 0ull, path.c_str());
+    std::fflush(stderr);
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+}
+
 int GameApplication::Run(HINSTANCE instance, const GameBenchmarkOptions* benchmark)
 {
     const auto startupStart = std::chrono::steady_clock::now();
+    SetUnhandledExceptionFilter(WriteCrashDump);
     // Render at the display's real pixel size. A DPI-unaware process on a
     // scaled display (125 % here) gets a virtualized, smaller screen: the
     // game drew 1536 x 960 and Windows stretched it to 1920 x 1200, blurring
@@ -1204,8 +1281,22 @@ int GameApplication::Run(HINSTANCE instance, const GameBenchmarkOptions* benchma
         settings.materialCache);
     if (benchmark) scene.SetUpdateProfilingEnabled(true);
     if (benchmark) g_benchmarkRenderMode = benchmark->renderMode;
-    const std::string defaultScene = benchmark ? benchmark->scene.string() : settings.defaultScene.empty()
-        ? GetFallbackScenePath() : settings.defaultScene;
+    // `Game.exe --scene <path>` opens that scene instead of the project's
+    // default (runs and manual tests; the project setting is unchanged).
+    std::string sceneArgument;
+    {
+        int count = 0;
+        if (LPWSTR* arguments = CommandLineToArgvW(GetCommandLineW(), &count))
+        {
+            for (int i = 1; i + 1 < count; ++i)
+                if (std::wstring(arguments[i]) == L"--scene")
+                    sceneArgument = std::filesystem::path(arguments[i + 1]).string();
+            LocalFree(arguments);
+        }
+    }
+    const std::string defaultScene = benchmark ? benchmark->scene.string()
+        : !sceneArgument.empty() ? sceneArgument
+        : settings.defaultScene.empty() ? GetFallbackScenePath() : settings.defaultScene;
     std::string loadedScenePath = defaultScene;
     if (!scene.Load(loadedScenePath))
     {
@@ -1320,9 +1411,18 @@ int GameApplication::Run(HINSTANCE instance, const GameBenchmarkOptions* benchma
             loadedScenePath, settings.gameMaxFps, settings.distanceLighting.clusteredLighting,
             std::chrono::duration<double, std::milli>(
                 std::chrono::steady_clock::now() - startupStart).count());
+    // Performance overlay: the project setting, overridden per run by
+    // ENGINE_PERF_OVERLAY=0/1 (look captures turn it off); F3 toggles it.
+    PerformanceOverlay performanceOverlay;
+    {
+        const char* value = std::getenv("ENGINE_PERF_OVERLAY");
+        performanceOverlay.SetEnabled(value ? value[0] == '1' : settings.showPerformanceOverlay);
+    }
     RenderLoop renderLoop(*renderer, loadedScenePath, gameBenchmark.get(), benchmark);
+    renderLoop.SetPerformanceOverlay(&performanceOverlay);
     scene.SetBeforeGpuResourceDestruction([&renderLoop] { renderLoop.WaitIdle(); });
     SimulationLoop simulation(scene, benchmark != nullptr);
+    simulation.SetPerformanceOverlay(&performanceOverlay);
     splash.SetProgress(0.90f, L"Starting game...");
 
     LARGE_INTEGER performanceFrequency{};
@@ -1344,6 +1444,8 @@ int GameApplication::Run(HINSTANCE instance, const GameBenchmarkOptions* benchma
     uint64_t gameFrameCounter = 0;
     std::string flagLabel = "Flag flicker (F8)";
     auto flagLabelUntil = std::chrono::steady_clock::now();
+    if (flagButton) performanceOverlay.SetTopOffset(FlagButtonHeight + 12.f);
+    bool overlayKeyWasDown = false;
 
     window->OnResize = [&renderLoop](uint32_t width, uint32_t height)
     {
@@ -1374,6 +1476,14 @@ int GameApplication::Run(HINSTANCE instance, const GameBenchmarkOptions* benchma
 
         const uint32_t width = window->GetWidth();
         const uint32_t height = window->GetHeight();
+        // F3 toggles the performance overlay (window focused, not in benchmarks).
+        if (!benchmark)
+        {
+            const bool f3 = GetForegroundWindow() == window->GetHWND() &&
+                (GetAsyncKeyState(VK_F3) & 0x8000) != 0;
+            if (f3 && !overlayKeyWasDown) performanceOverlay.Toggle();
+            overlayKeyWasDown = f3;
+        }
         // Flicker flag (F8 or the button): read straight from the window, as
         // benchmark routes replace the input snapshot with scripted input.
         bool flagPressed = false;

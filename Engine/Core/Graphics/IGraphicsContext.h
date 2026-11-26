@@ -30,6 +30,11 @@ enum class GpuTimingStage : uint32_t
     Clouds,
     // Screen-space ambient occlusion (depth copy + GTAO compute).
     AmbientOcclusion,
+    // Camera view's hoisted instance culls (one compute pass), formerly in Opaque.
+    InstanceCull,
+    // Impostor draws (Material::impostorBillboard: far tree cards and
+    // octahedral impostors), formerly in Opaque.
+    Impostor,
     Count
 };
 
@@ -62,7 +67,9 @@ struct FrameTimingTelemetry
         return gpuMilliseconds[static_cast<size_t>(GpuTimingStage::Opaque)] +
             gpuMilliseconds[static_cast<size_t>(GpuTimingStage::TreeBark)] +
             gpuMilliseconds[static_cast<size_t>(GpuTimingStage::TreeLeaves)] +
-            gpuMilliseconds[static_cast<size_t>(GpuTimingStage::FoliageDepth)];
+            gpuMilliseconds[static_cast<size_t>(GpuTimingStage::FoliageDepth)] +
+            gpuMilliseconds[static_cast<size_t>(GpuTimingStage::InstanceCull)] +
+            gpuMilliseconds[static_cast<size_t>(GpuTimingStage::Impostor)];
     }
     template<class Stream> void WriteOpaqueJson(Stream& output) const
     {
@@ -143,6 +150,11 @@ public:
     // submitting frame's fence before mapping on explicit APIs.
     virtual bool CopyBuffer(const IGraphicsBuffer*, IGraphicsBuffer*,
         uint64_t = 0) { return false; }
+    // Copies bytes from an Upload buffer into a Default (GPU-memory) buffer,
+    // in command order; the destination is left readable by every shader
+    // stage. Only where IGraphicsBufferFactory::SupportsBufferRegionCopy().
+    virtual bool CopyBufferRegion(const IGraphicsBuffer* /*source*/, uint64_t /*sourceOffset*/,
+        IGraphicsBuffer* /*destination*/, uint64_t /*destinationOffset*/, uint64_t /*bytes*/) { return false; }
 
     // Vertex buffer binding
     virtual void SetVertexBuffer(uint32_t slot, const IGraphicsBuffer* buffer, uint32_t stride, uint64_t offset = 0) = 0;

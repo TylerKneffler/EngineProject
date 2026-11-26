@@ -225,6 +225,28 @@ void Mesh::SetInstanceBlocks(std::vector<InstanceBlock> blocks)
     if (!m_usesInstanceBlocks || !m_instances)
         throw std::logic_error("Instance blocks need SetInstanceBlocks with a source first");
     m_instanceBlocks = std::move(blocks);
+    // Per-block cull statistics, once per placement set (shared between the
+    // part objects of a prefab, so later parts find them computed).
+    for (auto& block : m_instanceBlocks)
+    {
+        if (!block.data || block.data->hasCullStats) continue;
+        auto& data = *block.data;
+        float coverageMinimum = 4.f, coverageMaximum = .25f, norm = 0.f;
+        for (const auto& transform : data.transforms)
+        {
+            const float coverage = std::clamp(glm::length(glm::vec3(transform.rows[0])), .25f, 4.f);
+            coverageMinimum = std::min(coverageMinimum, coverage);
+            coverageMaximum = std::max(coverageMaximum, coverage);
+            float squares = 0.f;
+            for (int row = 0; row < 3; ++row) squares += glm::dot(glm::vec3(transform.rows[row]), glm::vec3(transform.rows[row]));
+            norm = std::max(norm, std::sqrt(squares));
+        }
+        if (data.transforms.empty()) coverageMinimum = coverageMaximum = 1.f;
+        data.coverageMinimum = coverageMinimum;
+        data.coverageMaximum = coverageMaximum;
+        data.maximumMatrixNorm = norm;
+        data.hasCullStats = true;
+    }
     // Bounds: every block's, for whole-object culling (which then rarely
     // rejects; blocks are culled one by one when tiles are built).
     m_hasBounds = !m_instanceBlocks.empty();

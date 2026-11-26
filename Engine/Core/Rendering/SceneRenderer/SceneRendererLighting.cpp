@@ -229,6 +229,11 @@ void SceneRendererLighting::ComputeAmbientOcclusion(
     if (!renderer.m_ambientOcclusionDepth || renderer.m_ambientOcclusionDepthBytes < depthBytes)
     {
         const std::vector<uint8_t> zeros(size_t(depthBytes), 0u);
+        // Frames in flight (recorded packets not yet replayed) may still bind
+        // the old buffer: resizing the window while loading freed it under
+        // them (crash in packet replay, 2026-11-25). Retire it instead.
+        if (renderer.m_ambientOcclusionDepth)
+            renderer.RetiredSceneBuffers().push_back(std::move(renderer.m_ambientOcclusionDepth));
         renderer.m_ambientOcclusionDepth = buffers->CreateBuffer(IGraphicsBuffer::Usage::StorageBuffer,
             IGraphicsBuffer::AccessMode::Default, depthBytes, zeros.data(), sizeof(float));
         renderer.m_ambientOcclusionDepthBytes = renderer.m_ambientOcclusionDepth ? depthBytes : 0;
@@ -237,7 +242,9 @@ void SceneRendererLighting::ComputeAmbientOcclusion(
     {
         const std::vector<uint8_t> zeros(size_t(occlusionBytes), 0u);
         for (auto& buffer : renderer.m_ambientOcclusionBuffers)
-            buffer = buffers->CreateBuffer(IGraphicsBuffer::Usage::StorageBuffer,
+            if (buffer) renderer.RetiredSceneBuffers().push_back(std::move(buffer));
+        for (auto& buffer : renderer.m_ambientOcclusionBuffers)
+            buffer =buffers->CreateBuffer(IGraphicsBuffer::Usage::StorageBuffer,
                 IGraphicsBuffer::AccessMode::Default, occlusionBytes, zeros.data(), sizeof(uint32_t));
         renderer.m_ambientOcclusionBufferBytes = renderer.m_ambientOcclusionBuffers[0] &&
             renderer.m_ambientOcclusionBuffers[1] ? occlusionBytes : 0;
@@ -354,6 +361,8 @@ void SceneRendererLighting::BuildDepthPyramid(
     {
         // Zero-filled: zero levels reads as "no pyramid" until written.
         const std::vector<uint8_t> zeros(size_t(bytes), 0u);
+        if (renderer.m_depthPyramid)
+            renderer.RetiredSceneBuffers().push_back(std::move(renderer.m_depthPyramid));
         renderer.m_depthPyramid = buffers->CreateBuffer(
             Engine::Graphics::IGraphicsBuffer::Usage::StorageBuffer,
             Engine::Graphics::IGraphicsBuffer::AccessMode::Default, bytes, zeros.data(), sizeof(float));
@@ -438,6 +447,11 @@ const Engine::Graphics::IGraphicsBuffer* SceneRendererLighting::SceneDepthForPix
     {
         if (!buffers) return nullptr;
         const std::vector<uint8_t> zeros(size_t(depthBytes), 0u);
+        // Frames in flight (recorded packets not yet replayed) may still bind
+        // the old buffer: resizing the window while loading freed it under
+        // them (crash in packet replay, 2026-11-25). Retire it instead.
+        if (renderer.m_ambientOcclusionDepth)
+            renderer.RetiredSceneBuffers().push_back(std::move(renderer.m_ambientOcclusionDepth));
         renderer.m_ambientOcclusionDepth = buffers->CreateBuffer(IGraphicsBuffer::Usage::StorageBuffer,
             IGraphicsBuffer::AccessMode::Default, depthBytes, zeros.data(), sizeof(float));
         renderer.m_ambientOcclusionDepthBytes = renderer.m_ambientOcclusionDepth ? depthBytes : 0;

@@ -280,7 +280,11 @@ void SceneRenderer::PrepareRenderFrame(bool publishSnapshot)
     if(preparedTransforms)
     {
         m_scene.m_transformPreparationScratch.clear(); m_scene.m_transformPreparationScratch.reserve(m_scene.m_objects.size());
-        for(const auto& object:m_scene.m_objects) m_scene.m_transformPreparationScratch.push_back(&object->transform);
+        // Static leaves without components (spline points) stay out of the
+        // per-frame snapshot: nothing here reads them, and their world matrix
+        // is computed lazily when a spline does (Scene::PreparesTransform).
+        for(const auto& object:m_scene.m_objects)
+            if(m_scene.PreparesTransform(*object)) m_scene.m_transformPreparationScratch.push_back(&object->transform);
         const auto transformCaptured=PrepareClock::now();
         transformGatherMs=std::chrono::duration<double,std::milli>(transformCaptured-transformBegin).count();
         transforms=m_scene.m_transformHierarchy.Prepare(m_scene.m_transformPreparationScratch);
@@ -303,13 +307,25 @@ void SceneRenderer::PrepareRenderFrame(bool publishSnapshot)
             lookup.terrain=object->GetComponent<Engine::Components::Terrain>();
             lookup.terrainBatch=object->GetComponent<Engine::Components::TerrainBatchAppearance>(); return lookup;
         };
+        // Only objects that can draw (mesh, sprite) or change how others
+        // draw (spatial manipulators) get an entry: the 4.4k component-less
+        // spline points of the landscape's trails each cost a cache erase and
+        // checks every frame for nothing (todo.md Step 0).
+        static const bool skipIrrelevant=[]{ const char* v=std::getenv("ENGINE_SKIP_STATIC_LEAVES"); return !(v && v[0]=='0'); }();
+        const auto relevant=[](const FrameComponentLookup& lookup) {
+            return !skipIrrelevant || lookup.mesh || lookup.sprite || lookup.spatialManipulator;
+        };
         if(m_frameLookupFull || m_frameLookupEditPose!=GetViewOverlays().meshEditPose)
         {
             m_staticRenderItemCache.clear();
             m_frameComponentLookupScratch.clear(); m_frameLookupIndices.clear(); m_frameLookupFree.clear();
             m_frameComponentLookupScratch.reserve(m_scene.m_objects.size());
             for(const auto& object:m_scene.m_objects)
-            { m_frameLookupIndices[object.get()]=m_frameComponentLookupScratch.size(); m_frameComponentLookupScratch.push_back(describe(object.get())); }
+            {
+                auto lookup=describe(object.get());
+                if(!relevant(lookup)) continue;
+                m_frameLookupIndices[object.get()]=m_frameComponentLookupScratch.size(); m_frameComponentLookupScratch.push_back(lookup);
+            }
         }
         else for(auto* owner:m_frameLookupDirty)
         {
@@ -321,12 +337,19 @@ void SceneRenderer::PrepareRenderFrame(bool publishSnapshot)
                 { m_frameComponentLookupScratch[found->second]={}; m_frameLookupFree.push_back(found->second); m_frameLookupIndices.erase(found); }
                 continue;
             }
-            if(found!=m_frameLookupIndices.end()) m_frameComponentLookupScratch[found->second]=describe(owner);
+            auto lookup=describe(owner);
+            if(!relevant(lookup))
+            {
+                if(found!=m_frameLookupIndices.end())
+                { m_frameComponentLookupScratch[found->second]={}; m_frameLookupFree.push_back(found->second); m_frameLookupIndices.erase(found); }
+                continue;
+            }
+            if(found!=m_frameLookupIndices.end()) m_frameComponentLookupScratch[found->second]=lookup;
             else
             {
                 size_t index=m_frameComponentLookupScratch.size();
-                if(m_frameLookupFree.empty()) m_frameComponentLookupScratch.push_back(describe(owner));
-                else { index=m_frameLookupFree.back(); m_frameLookupFree.pop_back(); m_frameComponentLookupScratch[index]=describe(owner); }
+                if(m_frameLookupFree.empty()) m_frameComponentLookupScratch.push_back(lookup);
+                else { index=m_frameLookupFree.back(); m_frameLookupFree.pop_back(); m_frameComponentLookupScratch[index]=lookup; }
                 m_frameLookupIndices[owner]=index;
             }
         }

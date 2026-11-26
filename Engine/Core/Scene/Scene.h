@@ -222,6 +222,10 @@ public:
     // from the structure revision.
     const std::vector<Object*>& GetUpdateObjects();
     void PrepareTransformHierarchy();
+    // Whether the per-frame transform passes snapshot this object. Static
+    // leaves with no components (spline control points: 4.4k on the
+    // landscape's trails) are left to the lazy transform path.
+    static bool PreparesTransform(const Object& object);
     void ClearPreparedNativeUiLayout() { m_preparedNativeUiLayout.clear(); }
 
     bool UpdateSpatialScripts(bool editor=false) { return m_spatialUpdates.Tick(*this,editor); }

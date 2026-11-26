@@ -199,6 +199,8 @@ Engine::Serialization::JsonValue SerializeSceneSettings(const Engine::Model::Sce
         Engine::Serialization::JsonValue(settings.renderScaleMaximum));
     value.Set("sceneViewUiOverlay",
         Engine::Serialization::JsonValue(settings.sceneViewUiOverlay));
+    value.Set("cpuOcclusionCulling",
+        Engine::Serialization::JsonValue(settings.cpuOcclusionCulling));
     value.Set("portalDebugVisuals",
         Engine::Serialization::JsonValue(settings.portalDebugVisuals));
     value.Set("sceneCameraWarpLookThrough",
@@ -483,6 +485,8 @@ void DeserializeSceneSettings(Engine::Model::SceneSettings& settings, const Engi
         settings.renderScaleMaximum = std::clamp(renderScaleMaximum->AsFloat(), 0.5f, 1.0f);
     if (const auto* sceneViewUiOverlay = FindField(value, "sceneViewUiOverlay"))
         settings.sceneViewUiOverlay = sceneViewUiOverlay->AsBool();
+    if (const auto* cpuOcclusion = FindField(value, "cpuOcclusionCulling"))
+        settings.cpuOcclusionCulling = cpuOcclusion->AsBool();
     if (const auto* portalDebugVisuals = FindField(value, "portalDebugVisuals"))
         settings.portalDebugVisuals = portalDebugVisuals->AsBool();
     if (const auto* sceneCameraWarpLookThrough = FindField(value,
