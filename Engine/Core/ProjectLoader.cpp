@@ -328,6 +328,7 @@ void ProjectLoader::ParseRendering(const pugi::xml_node& projectNode, ProjectSet
             aa.msaaSamples = effects.attribute("MsaaSamples").as_uint(aa.msaaSamples);
             aa.taa = effects.attribute("Taa").as_bool(aa.taa);
             aa.taaFeedback = effects.attribute("TaaFeedback").as_float(aa.taaFeedback);
+            aa.taaMotionFeedback = effects.attribute("TaaMotionFeedback").as_float(aa.taaMotionFeedback);
             aa.taaSharpen = effects.attribute("TaaSharpen").as_float(aa.taaSharpen);
             aa.taaFastSettle = effects.attribute("TaaFastSettle").as_bool(aa.taaFastSettle);
             aa.grassMinimumWidth = effects.attribute("GrassMinimumWidth").as_bool(aa.grassMinimumWidth);

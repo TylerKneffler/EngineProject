@@ -1,4 +1,5 @@
 #include "Core/Components/Terrain/VolumeTerrain.h"
+#include "Core/Components/Terrain/TerrainEvents.h"
 
 #include "Core/Components/Camera/Camera.h"
 #include "Core/Components/Materials/Material.h"
@@ -206,6 +207,92 @@ void ApplyPaintWeights(std::vector<Mesh::Vertex>& vertices, const VolumeTerrain:
             vertex.uvChannels[1][2] = rock.tint.z;
         }
     }
+}
+
+// Geomorph targets (.md/lod_transition_research.md, plan 2): each vertex of a
+// chunk at stride s also stores the next coarser level's surface (stride 2s)
+// straight above or below it, and the distance at which the chunk becomes
+// that level; Object.hlsl moves it there over the last 30 % of the range, so
+// the level swap happens between matching shapes. uvChannels3.z: height to
+// the coarse surface; uvChannels3.w: the switch distance, negative where the
+// coarse surface faces down; uvChannels0.xy: the coarse normal's x, z.
+// Vertices with no coarse surface over them keep 0 (no morph).
+void ApplyGeomorphTargets(std::vector<Mesh::Vertex>& vertices, const TerrainVolume& volume,
+    const glm::ivec3& first, int cells, int stride, float switchDistance)
+{
+    if (vertices.empty() || switchDistance <= 0.f) return;
+    const int coarseStride = stride * 2;
+    std::vector<Mesh::Vertex> coarse;
+    std::vector<uint32_t> indices;
+    MeshSurfaceNets(volume, first, glm::ivec3(std::max(cells / coarseStride, 1)), coarseStride, 0.f, coarse, indices);
+    if (indices.size() < 3) return;
+    // Coarse triangles binned by their x, z bounds on a grid of the coarse spacing.
+    float minX = coarse[0].pos[0], minZ = coarse[0].pos[2], maxX = minX, maxZ = minZ;
+    for (const auto& v : coarse)
+    {
+        minX = std::min(minX, v.pos[0]); maxX = std::max(maxX, v.pos[0]);
+        minZ = std::min(minZ, v.pos[2]); maxZ = std::max(maxZ, v.pos[2]);
+    }
+    const float bin = std::max(volume.spacing * coarseStride, 1e-3f);
+    const int binsX = std::max(1, int(std::ceil((maxX - minX) / bin)) + 1);
+    const int binsZ = std::max(1, int(std::ceil((maxZ - minZ) / bin)) + 1);
+    std::vector<std::vector<uint32_t>> bins(size_t(binsX) * binsZ);
+    for (uint32_t t = 0; t + 2 < indices.size(); t += 3)
+    {
+        const auto& a = coarse[indices[t]], & b = coarse[indices[t + 1]], & c = coarse[indices[t + 2]];
+        const int x0 = std::clamp(int((std::min({a.pos[0], b.pos[0], c.pos[0]}) - minX) / bin), 0, binsX - 1);
+        const int x1 = std::clamp(int((std::max({a.pos[0], b.pos[0], c.pos[0]}) - minX) / bin), 0, binsX - 1);
+        const int z0 = std::clamp(int((std::min({a.pos[2], b.pos[2], c.pos[2]}) - minZ) / bin), 0, binsZ - 1);
+        const int z1 = std::clamp(int((std::max({a.pos[2], b.pos[2], c.pos[2]}) - minZ) / bin), 0, binsZ - 1);
+        for (int z = z0; z <= z1; ++z)
+            for (int x = x0; x <= x1; ++x) bins[size_t(z) * binsX + x].push_back(t);
+    }
+    size_t assigned = 0;
+    double travel = 0.0;
+    for (auto& vertex : vertices)
+    {
+        const float px = vertex.pos[0], pz = vertex.pos[2];
+        const int bx = int((px - minX) / bin), bz = int((pz - minZ) / bin);
+        if (bx < 0 || bz < 0 || bx >= binsX || bz >= binsZ) continue;
+        float bestDelta = 0.f, bestDistance = std::numeric_limits<float>::max();
+        glm::vec3 bestNormal(0.f, 1.f, 0.f);
+        for (const uint32_t t : bins[size_t(bz) * binsX + bx])
+        {
+            const auto& a = coarse[indices[t]], & b = coarse[indices[t + 1]], & c = coarse[indices[t + 2]];
+            const float d = (b.pos[2] - c.pos[2]) * (a.pos[0] - c.pos[0]) + (c.pos[0] - b.pos[0]) * (a.pos[2] - c.pos[2]);
+            if (std::abs(d) < 1e-8f) continue;   // vertical in x, z
+            const float wa = ((b.pos[2] - c.pos[2]) * (px - c.pos[0]) + (c.pos[0] - b.pos[0]) * (pz - c.pos[2])) / d;
+            const float wb = ((c.pos[2] - a.pos[2]) * (px - c.pos[0]) + (a.pos[0] - c.pos[0]) * (pz - c.pos[2])) / d;
+            const float wc = 1.f - wa - wb;
+            const float slack = -1e-4f;
+            if (wa < slack || wb < slack || wc < slack) continue;
+            const float y = wa * a.pos[1] + wb * b.pos[1] + wc * c.pos[1];
+            const float distance = std::abs(y - vertex.pos[1]);
+            if (distance >= bestDistance) continue;
+            bestDistance = distance;
+            bestDelta = y - vertex.pos[1];
+            bestNormal = glm::vec3(wa * a.normal[0] + wb * b.normal[0] + wc * c.normal[0],
+                wa * a.normal[1] + wb * b.normal[1] + wc * c.normal[1],
+                wa * a.normal[2] + wb * b.normal[2] + wc * c.normal[2]);
+        }
+        // Nothing under it, or a different sheet (an overhang's other side):
+        // no morph rather than a long jump.
+        if (bestDistance > volume.spacing * coarseStride * 2.f) continue;
+        ++assigned;
+        travel += std::abs(bestDelta);
+        const float length = glm::length(bestNormal);
+        if (length > 1e-6f) bestNormal /= length;
+        vertex.uvChannels[3][2] = bestDelta;
+        vertex.uvChannels[3][3] = bestNormal.y >= 0.f ? switchDistance : -switchDistance;
+        vertex.uvChannels[0][0] = bestNormal.x;
+        vertex.uvChannels[0][1] = bestNormal.z;
+    }
+    // ENGINE_VOLUME_TERRAIN_LOG=1: how many vertices got a coarse target and how far they move.
+    static const bool log = std::getenv("ENGINE_VOLUME_TERRAIN_LOG") != nullptr;
+    static std::atomic<uint64_t> jobs{0};
+    if (log && (++jobs % 50) == 0)
+        std::printf("[Geomorph] stride %d: %zu of %zu vertices morph, mean travel %.2f m\n", stride, assigned,
+            vertices.size(), assigned ? travel / double(assigned) : 0.0);
 }
 
 TerrainVolumeInput WithNeighbours(TerrainVolumeInput input,
@@ -664,9 +751,23 @@ void VolumeTerrain::SwapIn(const glm::vec3& eye)
     double dropMs = 0.0, createMs = 0.0, storeMs = 0.0, retireMs = 0.0;
     auto* scene = Owner->GetScene();
     auto* provider = scene ? scene->GetGraphicsProvider() : nullptr;
+    uint32_t levelChanges = 0, seamChanges = 0;
     for (auto& chunk : m_chunks)
     {
         if (chunk.wanted == chunk.shown) continue;
+        if (chunk.wanted.level != chunk.shown.level)
+        {
+            ++levelChanges;
+            if (TerrainEvents::LogEnabled() && scene)
+            {
+                const glm::dvec3 corner = Owner->transform.GetWorldPositionD() + glm::dvec3(chunk.minimum);
+                char kind[32];
+                std::snprintf(kind, sizeof(kind), "chunk_level_%d_to_%d", chunk.shown.level, chunk.wanted.level);
+                TerrainEvents::Log(scene->GetFrameIndex(), kind, int(std::floor(corner.x / 8.0)),
+                    int(std::floor(corner.z / 8.0)), -1);
+            }
+        }
+        else ++seamChanges;
         if (chunk.wanted.level < 0 || !chunk.ready || !chunk.ready->mesh)
         {
             const auto dropStart = SwapClock::now();
@@ -716,6 +817,8 @@ void VolumeTerrain::SwapIn(const glm::vec3& eye)
         storeMs += std::chrono::duration<double, std::milli>(SwapClock::now() - storeStart).count();
         chunk.object->enabled = true;
         chunk.shown = chunk.wanted;
+        if (auto* appearance = chunk.object->GetComponent<TerrainBatchAppearance>())
+            appearance->debugLevel = chunk.shown.level;
         // The collision copy follows the new mesh (Update rebuilds it) when
         // the chunk leaves level 0. At level 0 a new mesh differs only along
         // its seams (a neighbour's level changed): keep the cooked collider,
@@ -732,6 +835,9 @@ void VolumeTerrain::SwapIn(const glm::vec3& eye)
     for (auto& chunk : m_retiring) DropChunk(chunk);
     m_retiring.clear();
     retireMs = std::chrono::duration<double, std::milli>(SwapClock::now() - retireStart).count();
+    TerrainEvents::chunkLevelChanges += levelChanges;
+    TerrainEvents::chunkSeamChanges += seamChanges;
+    ++TerrainEvents::volumeStepSwaps;
     static const bool logSwap = std::getenv("ENGINE_VOLUME_TERRAIN_LOG") != nullptr;
     if (logSwap && dropMs + createMs + storeMs + retireMs > 1.0)
         std::fprintf(stderr, "[VolumeSwap] drop %.1f create %.1f store %.1f retire %.1f ms\n", dropMs, createMs, storeMs, retireMs);
@@ -741,6 +847,7 @@ void VolumeTerrain::SwapIn(const glm::vec3& eye)
             // height mesh; hide any other mesh on the object).
             if (auto* mesh = Owner->GetComponent<Mesh>()) mesh->SetAnimationVisible(false);
             m_terrainHidden = true;
+            ++TerrainEvents::cellHandovers;
             // ENGINE_VOLUME_TERRAIN_LOG=1: when each cell handed over.
             static const bool log = std::getenv("ENGINE_VOLUME_TERRAIN_LOG") != nullptr;
             if (log)
@@ -943,9 +1050,19 @@ void VolumeTerrain::Update()
         auto* bufferFactory = provider ? provider->GetBufferFactory() : nullptr;
         const bool workerBuffer = bufferFactory &&
             bufferFactory->SupportsWorkerThreadStaticVertexBufferCreation();
+        // Geomorph (ApplyGeomorphTargets): toward the next level, which takes
+        // over past this level's distance; not the last level, nor a border
+        // chunk held at the distant nodes' level. ENGINE_TERRAIN_GEOMORPH=0 off.
+        static const bool geomorph = [] {
+            const char* value = std::getenv("ENGINE_TERRAIN_GEOMORPH");
+            return !(value && value[0] == '0'); }();
+        const float levelBounds[LevelCount] = {lod1Distance, lod2Distance, lod3Distance, drawDistance};
+        const bool morphs = geomorph && key.level >= 0 && key.level + 1 < LevelCount &&
+            !(BorderLevel() >= 0 && BordersDistant(chunk.world));
+        const float morphDistance = morphs ? levelBounds[key.level] : 0.f;
         chunk.job = std::async(std::launch::async,
             [volume = m_volume, paint = m_paint, first, span, stride, seams, key, start, end, extent,
-             weights, steep, rock, cellVolumes, bufferFactory, workerBuffer]() mutable
+             weights, steep, rock, cellVolumes, bufferFactory, workerBuffer, cells, morphDistance]() mutable
             {
                 JobSlot slot{&g_meshJobs};
                 for (size_t i = 0; i < cellVolumes.size(); ++i)
@@ -964,6 +1081,8 @@ void VolumeTerrain::Update()
                     g_paintVertices += vertices.size();
                 }
                 else if (weights) ApplySlopeWeights(vertices, start, end, extent);
+                if (morphDistance > 0.f && !indices.empty())
+                    ApplyGeomorphTargets(vertices, *volume, first, cells, stride, morphDistance);
                 if (indices.empty()) return built;
                 const auto bounds = Mesh::PrepareIndexedGeometry(vertices, indices);
                 if (!bounds) return built;

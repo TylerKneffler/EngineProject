@@ -6,7 +6,7 @@ struct CullConstants
     float4x4 viewProjection;
     float4 cameraPosition;
     uint4 counts; // instance count, vertex/index count, indexed, reset phase
-    int4 selection; // target LOD, mode, maximum LOD, flags (1 shadow, 2 per-placement bands,
+    int4 selection; // target LOD, mode, LOD fade extra width (float bits; pool mode), flags (1 shadow, 2 per-placement bands,
                     // 4 occlusion, 8/16 occlusion debug, 32 placement-scaled band distances)
 };
 #ifdef VULKAN
@@ -194,8 +194,10 @@ void CSMain(uint3 id : SV_DispatchThreadID, uint3 group : SV_GroupID, uint3 thre
                 // Object.hlsl picks each placement's band from the distance to
                 // its origin and dissolves the whole placement over
                 // InstanceLodFadeWidth either side of a switch; keep in sync.
-                const float widthX=clamp(lodData.lod.x*.04,.5,6.0);
-                const float widthY=clamp(lodData.lod.y*.04,.5,6.0);
+                // Speed-scaled extra width (SceneRendering lodFadeExtraWidth).
+                const float extra=max(0.0,asfloat(constants.selection.z));
+                const float widthX=max(clamp(lodData.lod.x*.04,.5,6.0),min(extra,lodData.lod.x*.12));
+                const float widthY=max(clamp(lodData.lod.y*.04,.5,6.0),min(extra,lodData.lod.y*.12));
                 isTransitionPlacement = constants.selection.x>=0 &&
                     ((nearest <= lodData.lod.x+widthX && farthest >= lodData.lod.x-widthX) ||
                      (nearest <= lodData.lod.y+widthY && farthest >= lodData.lod.y-widthY));

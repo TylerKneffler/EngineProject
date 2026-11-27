@@ -965,6 +965,12 @@ private:
         std::array<TextureSource,9> sources{};
         uint8_t sourceCount=0;
         bool frameScoped=true;
+        // The slots the draw filled before the material (terrain and macro
+        // maps, shadow and environment textures): the record copies them, so
+        // it is reused across frames only while they are the same textures.
+        // (A rebuilt macro map freed the old one under a kept record: a
+        // dangling texture in SetTexture, 2026-11-26.)
+        std::array<const Engine::Graphics::IGraphicsTexture*,30> initial{};
         glm::vec3 ambient{0.f};
         glm::vec4 environmentSeed{0.f}, reflectionSeed{0.f};
     };
@@ -1027,6 +1033,16 @@ private:
         bool valid = false;
     };
     std::unordered_map<const void*, TemporalViewState> m_temporalViews;
+    // Per camera: its smoothed speed, for the speed-scaled instanced LOD
+    // fade band (SceneSettings::lodTransitionSeconds).
+    struct LodFadeViewState
+    {
+        glm::dvec3 position{0.0};
+        std::chrono::steady_clock::time_point time{};
+        double speed = 0.0;
+        bool valid = false;
+    };
+    std::unordered_map<const void*, LodFadeViewState> m_lodFadeViews;
     Engine::Model::DistanceLightingSettings m_distanceLightingSettings;
     // SetDetailResolutionScale.
     float m_detailResolutionScale = 1.f;

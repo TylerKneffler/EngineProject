@@ -134,6 +134,17 @@ public:
     // edits, which for thousands of far trees per block cost milliseconds
     // per frame across all blocks. Not serialized.
     bool placementsChangeOnlyWhenMarked = false;
+    // Near/far cell handover role of this layer's batches (Mesh::handoverRole,
+    // Rendering/CellHandover.h): TerrainManager's near blocks 1, far blocks 2.
+    // Not serialized.
+    int handoverRole = 0;
+    // Draws this layer's batches as one instanced LOD band at a fixed world
+    // distance (Mesh::instanceLodPlainDistance): band 0 inside
+    // forcedLodDistance, band 1 beyond it; -1 none. TerrainManager's far
+    // blocks: single trees inside farClusterDistance, forest clusters beyond,
+    // dissolved per placement like any LOD switch. Not serialized.
+    int forcedLodBand = -1;
+    float forcedLodDistance = 0.f;
     // Near object blocks (TerrainManager::nearObjectBlockCells): a streamed
     // cell's layer keeps its placements and colliders but leaves the instanced
     // batches to a block layer that holds the placements of several cells, and

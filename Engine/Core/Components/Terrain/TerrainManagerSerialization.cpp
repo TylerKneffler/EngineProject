@@ -33,6 +33,7 @@ TerrainManager::JsonValue TerrainManager::Serialize() const
     out.Set("cellsX", JsonValue(cellsX)).Set("cellsY", JsonValue(cellsY))
         .Set("cellWidth", JsonValue(cellWidth)).Set("cellDepth", JsonValue(cellDepth))
         .Set("loadedRadius", JsonValue(loadedRadius))
+        .Set("unloadMarginCells", JsonValue(unloadMarginCells))
         .Set("editorRadius", JsonValue(editorRadius))
         .Set("farRadius", JsonValue(farRadius))
         .Set("lod2Radius", JsonValue(lod2Radius))
@@ -48,6 +49,7 @@ TerrainManager::JsonValue TerrainManager::Serialize() const
         .Set("farVolumeStepMetres", JsonValue(farVolumeStepMetres))
         .Set("farVolumeInstallMilliseconds", JsonValue(farVolumeInstallMilliseconds))
         .Set("virtualTexture", JsonValue(virtualTexture))
+        .Set("distantGrass", JsonValue(distantGrass))
         .Set("virtualTextureLevels", JsonValue(virtualTextureLevels))
         .Set("virtualTextureResolution", JsonValue(virtualTextureResolution))
         .Set("virtualTextureTexelMillimetres", JsonValue(virtualTextureTexelMillimetres))
@@ -300,6 +302,7 @@ void TerrainManager::Deserialize(const JsonValue& value)
     cellWidth = std::max(.001f, value["cellWidth"].AsFloat());
     cellDepth = std::max(.001f, value["cellDepth"].AsFloat());
     loadedRadius = std::clamp(value["loadedRadius"].AsInt(), 0, 32);
+    unloadMarginCells = value.Has("unloadMarginCells") ? std::clamp(value["unloadMarginCells"].AsInt(), 0, 8) : 1;
     editorRadius = value.Has("editorRadius")
         ? std::clamp(value["editorRadius"].AsInt(), 0, 32) : 6;
     farRadius = value.Has("farRadius") ? std::clamp(value["farRadius"].AsInt(), -1, 32) : 8;
@@ -324,6 +327,7 @@ void TerrainManager::Deserialize(const JsonValue& value)
     farVolumeInstallMilliseconds = value.Has("farVolumeInstallMilliseconds")
         ? std::clamp(value["farVolumeInstallMilliseconds"].AsFloat(), .1f, 50.f) : 1.5f;
     virtualTexture = value.Has("virtualTexture") && value["virtualTexture"].AsBool();
+    distantGrass = !value.Has("distantGrass") || value["distantGrass"].AsBool();
     virtualTextureLevels = value.Has("virtualTextureLevels")
         ? std::clamp(value["virtualTextureLevels"].AsInt(), 1, 12) : 6;
     virtualTextureResolution = value.Has("virtualTextureResolution")
@@ -645,6 +649,8 @@ bool TerrainManager::DrawProperties(Engine::Core::IInspectorUi& ui)
         changed |= ui.DragFloat("Distant terrain step (m)", &farVolumeStepMetres, 1.f, 1.f, 1000.f);
         changed |= ui.DragFloat("Distant node install budget (ms)", &farVolumeInstallMilliseconds, .1f, .1f, 50.f);
         ui.Tooltip("Main-thread time per frame for installing built distant terrain nodes; at least one a frame.");
+        changed |= ui.Checkbox("Grass colour and wind on distant terrain", &distantGrass);
+        ui.Tooltip("Distant terrain takes the ground cover's colour and its wind gusts where grass is painted, so meadows past the blades keep reading as grass.");
         changed |= ui.Checkbox("Terrain virtual texture", &virtualTexture);
         ui.Tooltip("Blend the terrain layers once into a texture around the camera (DX12) instead of for every pixel every frame. Steep faces, rock and ground-cover shading stay per pixel.");
         changed |= ui.SliderInt("Virtual texture levels", &virtualTextureLevels, 1, 12);
@@ -653,6 +659,8 @@ bool TerrainManager::DrawProperties(Engine::Core::IInspectorUi& ui)
         ui.Tooltip("Texel size of the finest level; each further level doubles it. Levels x resolution x texel sets the reach.");
         ui.Tooltip("The distant nodes are chosen again after the viewer moves this far.");
         changed |= ui.SliderInt("Full detail distance (cells)", &loadedRadius, 0, 32);
+        changed |= ui.SliderInt("Unload margin (cells)", &unloadMarginCells, 0, 8);
+        ui.Tooltip("Cells load within the full detail distance and stay loaded until this many cells further away, so crossing back and forth over a cell edge never reloads it and a cell just passed is not dropped at once.");
         ui.Tooltip("Full-resolution terrain and interactive cells around the viewer. Distances are square grid radii: one cell spans Cells X * Cell width by Cells Y * Cell depth.");
         changed |= ui.SliderInt("Terrain loading distance (cells)", &farRadius, -1, 32);
         ui.Tooltip("Loaded terrain radius when distant terrain tiles are unavailable. -1 follows full detail distance. When distant tiles are active, only full-detail cells are loaded.");

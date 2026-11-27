@@ -22,9 +22,22 @@ struct NativeInputSnapshot
     bool cursorPositionRequested = false;
     POINT requestedCursorPosition{};
     std::optional<bool> cursorVisible;
+    // Relative mouse motion since the last capture, in raw device counts
+    // (WM_INPUT; no pointer acceleration). Mouse-look reads this instead of
+    // the cursor's offset from the centre, which loses whatever moves between
+    // the capture and the re-centring after the update. False when no raw
+    // input has arrived (registration failed) or a benchmark drives the look.
+    bool hasRawMouse = false;
+    long rawMouseX = 0, rawMouseY = 0;
 };
 
 NativeInputSnapshot CaptureNativeInput(HWND window);
+// Window procedures pass WM_INPUT here (Window::WndProc); returns true when
+// it was relative mouse motion and was taken into the next capture.
+bool AccumulateRawMouseInput(LPARAM rawInput);
+// Mouse-look's motion this tick: raw counts when the snapshot has them, else
+// false (callers fall back to the cursor's offset from their anchor).
+bool ReadNativeRawMouseDelta(long& x, long& y);
 void SetCurrentNativeInputSnapshot(NativeInputSnapshot* snapshot);
 NativeInputSnapshot* CurrentNativeInputSnapshot();
 SHORT ReadNativeKeyState(int virtualKey);

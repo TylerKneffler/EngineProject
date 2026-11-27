@@ -62,7 +62,11 @@ PostProcessConstants MakeTemporalConstants(const PostProcessSettings& settings, 
     for (int row = 0; row < 4; ++row)
         for (int column = 0; column < 4; ++column)
             rows[row][column] = settings.taaReprojection[row * 4 + column];
-    constants.temporal[0] = std::clamp(settings.taaFeedback, 0.f, 0.98f);
+    // temporal.x: history weight (fraction) plus the fast-motion weight in
+    // whole percent (the constants have no spare slot): 60.9 = 0.9 / 0.6.
+    const float feedback = std::clamp(settings.taaFeedback, 0.f, 0.98f);
+    const float motionFeedback = std::clamp(settings.taaMotionFeedback, 0.f, feedback);
+    constants.temporal[0] = std::round(motionFeedback * 100.f) + feedback;
     // temporal.y: 0 no usable history, else 1 + mode bits (the shader tests
     // < 0.5 for "no history"): 1 = ENGINE_TAA_HISTORY_DEBUG=1 (red where a
     // pixel has no history), 2 = fast settle off (taaFastSettle false, or

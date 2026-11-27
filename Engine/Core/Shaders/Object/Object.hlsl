@@ -92,6 +92,9 @@ struct ObjectData
     float4 shadowAtlasTiles;
     // Per blend slot: clip offset to the previous image (xyz), new weight (w).
     float4 shadowRefreshBlend[2];
+    // Near/far cell handover (Rendering/CellHandover.h): cells as packed uints;
+    // grid and role in viewTextureParams.yzw.
+    uint4 handoverCells[3];
 };
 
 struct SceneLightData
@@ -389,26 +392,46 @@ float3 GrassGroundShells(float3 worldPos, float3 toCamera, float3 normal, float 
     return lerp(lerp(mean, traced, resolved), float3(1.16, 1.12, 0.9) * (0.93 + 0.14 * level), skim);
 }
 
-// The wind over grass too far off for its blades to be seen: the broad gust
-// fronts of ApplyGrassWind (same field, direction and speed) shaded as the
-// light changing on a leaning field. Blades leaning toward the camera show
-// their lit sides and tips (lighter, yellower), leaning away their roots
-// (darker); any strong lean adds a little sheen. The fronts are 18 m along
-// the wind and GrassWindFrontStretch times that across (~144 m), so they stay
-// several pixels wide hundreds of metres away. Returns a multiplier on the cover colour.
-float3 GrassGroundWind(float3 worldPos, float sceneTime, float3 toCamera)
+// The wind over grass too far off for its blades to be seen, as the light
+// changing on a leaning field: blades leaning toward the camera show their lit
+// sides and tips (lighter, yellower), leaning away their roots (darker).
+// Two scales of the same wind:
+//  - the gust fronts of ApplyGrassWind (18 m along the wind, same field and
+//    speed), which match the blades where they end but shrink below a pixel
+//    and stop visibly moving a few hundred metres out, so they fade with the
+//    pixel footprint (they would only shimmer there);
+//  - gust patches (GrassWindPatchSize, much larger and faster, as gusts sweep
+//    a field seen from afar), which also group the fronts. Seen at grazing
+//    angles a lean shows more, so the far field's sheen is stronger.
+// footprint: ground metres per pixel (geometric mean of the axes).
+// Returns a multiplier on the cover colour.
+static const float GrassWindPatchSize = 140.0;  // metres along the wind
+static const float GrassWindPatchSpeed = 4.0;   // times the front speed
+
+float3 GrassGroundWind(float3 worldPos, float sceneTime, float3 toCamera, float footprint)
 {
     const float direction = radians(GrassWindDirectionDegrees);
     const float2 wind = float2(cos(direction), sin(direction));
-    const float2 traveling = worldPos.xz - wind * (sceneTime * max(0.0, GrassWindSpeed) * 2.0);
-    const float2 coordinate = GrassWindFrontCoordinate(traveling, wind, GrassWindWaveSize);
-    // ApplyGrassWind's gust without per-blade detail (bladeDetail 0).
-    const float gust = clamp(2.1 * .85 * GrassWindPerlin(coordinate, GrassWindSeed), -1.0, 1.0) * .7;
+    const float speed = sceneTime * max(0.0, GrassWindSpeed) * 2.0;
+    // Gust patches: a broad, slower-varying field moving downwind faster.
+    const float2 patchCoordinate = GrassWindFrontCoordinate(
+        worldPos.xz - wind * (speed * GrassWindPatchSpeed), wind, GrassWindPatchSize) * float2(1.0, 2.5);
+    const float patch = clamp(1.6 * GrassWindPerlin(patchCoordinate, GrassWindSeed ^ 0x6a09e667u), -1.0, 1.0);
+    // Fronts, grouped by the patches (gusts come in groups), faded once a
+    // front is only a few pixels deep.
+    const float2 coordinate = GrassWindFrontCoordinate(worldPos.xz - wind * speed, wind, GrassWindWaveSize);
+    const float fine = 1.0 - smoothstep(0.12 * GrassWindWaveSize, 0.45 * GrassWindWaveSize, footprint);
+    const float front = clamp(2.1 * .85 * GrassWindPerlin(coordinate, GrassWindSeed), -1.0, 1.0) * .7 *
+        fine * (0.65 + 0.35 * patch);
+    // Patches take over where the fronts fade (near, the blades show them).
+    const float far = smoothstep(0.5, 6.0, footprint);
+    const float gust = front + patch * lerp(0.25, 0.75, far);
     const float2 view = toCamera.xz;
     const float viewLength = length(view);
     const float facing = viewLength > 1e-4 ? dot(wind, view / viewLength) : 0.0;
-    const float lean = gust * facing * GrassWindStrength;
-    const float light = .34 * lean + .12 * abs(gust) - .06;
+    const float grazing = lerp(1.0, 1.7, saturate(1.0 - abs(toCamera.y) * 4.0));
+    const float lean = gust * facing * GrassWindStrength * grazing;
+    const float light = .34 * lean + .12 * abs(gust) * grazing - .06;
     return float3(1.0 + light, 1.0 + light, 1.0 + light - .5 * max(light, 0.0));
 }
 
@@ -431,6 +454,21 @@ float3 GrassColorVariation(float3 color, float3 root)
 }
 #endif
 
+// Near/far cell handover progress of a placement's cell (CellHandover.h);
+// fallback when the cell is not listed. The vertex shader packs it into the
+// instance LOD distance (ReadInstanceLodDistance).
+static const float HandoverPackStep = 4096.0;
+float HandoverProgress(ObjectData data, float3 worldPosition, float fallback)
+{
+    const int2 cell = int2(floor((worldPosition.xz - data.viewTextureParams.yz) *
+        abs(data.viewTextureParams.w)));
+    // CellHandover: an 11 x 11 grid of 3-bit cells around the camera's cell,
+    // 10 cells per uint.
+    if (abs(cell.x) > 5 || abs(cell.y) > 5) return fallback;
+    const uint index = uint((cell.y + 5) * 11 + cell.x + 5);
+    const uint value = (data.handoverCells[index / 40u][(index / 10u) % 4u] >> ((index % 10u) * 3u)) & 7u;
+    return value == 7u ? fallback : (float)value / 6.0;
+}
 void VSMain(
     float3 pos : POSITION,
     float3 normal : NORMAL,
@@ -537,6 +575,21 @@ void VSMain(
             fullUv4 += morphDeltas[base + 8] * weight;
         }
     }
+    // Terrain geomorph (VolumeTerrain ApplyGeomorphTargets): a volume chunk's
+    // vertex moves to the next coarser level's surface over the last 30 % of
+    // its level's range, so the level swap happens between matching shapes.
+    // uvChannels3.z: height to the coarse surface; .w: the switch distance
+    // (negative: coarse surface faces down); uvChannels0.xy: coarse normal x, z.
+    [branch] if (objectData.terrainSteep.w > 0.5 && uvChannels3.w != 0.0)
+    {
+        const float switchDistance = abs(uvChannels3.w);
+        const float3 placed = mul(objectData.world, localPosition).xyz;
+        const float morph = smoothstep(switchDistance * 0.7, switchDistance * 0.97,
+            length(placed - objectData.viewPositionAlphaCutoff.xyz));
+        localPosition.y += uvChannels3.z * morph;
+        const float coarseY = sqrt(saturate(1.0 - dot(uvChannels0.xy, uvChannels0.xy))) * sign(uvChannels3.w);
+        localNormal = lerp(localNormal, float3(uvChannels0.x, coarseY, uvChannels0.y), morph);
+    }
     if (dot(localNormal, localNormal) > 0.000001)
         localNormal = normalize(localNormal);
     if (dot(localTangent, localTangent) > 0.000001)
@@ -571,6 +624,21 @@ void VSMain(
         if ((objectData.geometryFade.w >= 4.5 && objectData.geometryFade.w < 5.5) ||
             objectData.geometryFade.w >= 6.5)
             oInstanceLodDistance /= clamp(length(grassScaleRow), 0.25, 4.0);
+    }
+    // Near/far cell handover (Rendering/CellHandover.h): this placement's
+    // cell's progress, packed into the LOD distance (ReadInstanceLodDistance).
+    [branch] if ((draw.drawFlags & 0x20000000u) != 0u && objectData.viewTextureParams.w != 0.0 &&
+        objectData.shadowCasterFade.z < 0.5)
+    {
+        const float3 root = mul(objectData.world, float4(grassRoot, 1.0)).xyz;
+        const bool nearRole = objectData.viewTextureParams.w > 0.0;
+        const float progress = HandoverProgress(objectData, root, nearRole ? 1.0 : 0.0);
+        [branch] if (nearRole ? progress < 0.999 : progress > 0.001)
+        {
+            const float distance = oInstanceLodDistance >= 0.0 ? oInstanceLodDistance
+                : length(root - objectData.viewPositionAlphaCutoff.xyz);
+            oInstanceLodDistance = min(distance, 4095.0) + HandoverPackStep * (1.0 + round(progress * 62.0));
+        }
     }
     // Detail view occlusion debug: -2 marks a placement the cull would hide.
     [branch] if (objectData.morphParams.z < -50.0 && ResolveOcclusionMark(instanceId))
@@ -1750,6 +1818,17 @@ float4 SampleTerrainMacroColor(ObjectData objectData, float3 worldPosition,
 
 // World-space terrain normal from the macro map's companion texture (normal
 // slot, logical 2; terrainMacroParams.w = 1 when bound), 16 m samples.
+// Grass share of the ground (0-1) from the macro normal map's alpha
+// (TerrainManagerArchiveMap: paint on the layers grass grows on; G1).
+float SampleTerrainMacroGrass(ObjectData objectData, float3 worldPosition,
+    float3 worldDx, float3 worldDy)
+{
+    const float2 scale = objectData.terrainMacroMap.zw;
+    return normalMap.SampleGrad(materialSampler,
+        (worldPosition.xz - objectData.terrainMacroMap.xy) * scale,
+        worldDx.xz * scale, worldDy.xz * scale).a;
+}
+
 float3 SampleTerrainMacroNormal(ObjectData objectData, float3 worldPosition,
     float3 worldDx, float3 worldDy)
 {
@@ -2724,11 +2803,40 @@ float GroundCoverVisibility(float w)
     return w >= 4.0 ? 1.0 : saturate(w - 2.0);
 }
 
-// Half-width of the dissolve at an instanced LOD switch distance. Must match
-// the per-placement band test in InstanceCull.hlsl.
-float InstanceLodFadeWidth(float switchDistance)
+// Near/far cell handover (Rendering/CellHandover.h). The vertex shader packs
+// the placement's progress into the instance LOD distance as
+// distance + HandoverPackStep * (1 + round(62 p)): handover cells lie within
+// the loaded cells, far under 4096 m. g_handover is -1 when none.
+static float g_handover = -1.0;
+void ReadInstanceLodDistance(float packed)
 {
-    return clamp(switchDistance * 0.04, 0.5, 6.0);
+    g_handover = -1.0;
+    if (packed >= HandoverPackStep)
+    {
+        const float step = floor(packed / HandoverPackStep);
+        g_handover = saturate((step - 1.0) / 62.0);
+        packed -= step * HandoverPackStep;
+    }
+    g_instanceLodDistance = packed;
+}
+// The handover's own dither (interleaved gradient noise, rotating with the TAA
+// frame): independent of the Bayer thresholds the LOD bands and impostor
+// views split pixels with, so stacked dissolves keep their proportions.
+float HandoverThreshold(float2 screenPosition, float frame)
+{
+    const float2 p = floor(screenPosition);
+    return frac(52.9829189 * frac(0.06711056 * p.x + 0.00583715 * p.y) + frame * 0.61803399);
+}
+
+// Half-width of the dissolve at an instanced LOD switch distance: the fixed
+// band, or wider while the camera moves (extra: half the distance it covers
+// in SceneSettings::lodTransitionSeconds, ObjectData skinParams.w), capped at
+// 12 % of the switch distance (at a quarter, the ring of forest between two
+// levels held ~9,000 trees mid-dissolve seen from a hill crest at 100 m/s).
+// Must match InstanceCull.hlsl.
+float InstanceLodFadeWidth(float switchDistance, float extra)
+{
+    return max(clamp(switchDistance * 0.04, 0.5, 6.0), min(extra, switchDistance * 0.12));
 }
 
 // A fixed threshold per screen pixel for complementary dissolves (LOD bands,
@@ -2774,7 +2882,23 @@ void ApplyNearFoliageFade(ObjectData data, float3 worldPosition, float2 screenPo
 
 void ApplyGeometryFade(ObjectData data, float3 worldPosition, float2 screenPosition)
 {
+    // The fade mode before the band logic below rewrites geometryFade: w < 1.5
+    // is a mesh's runtime level swap or visibility fade (Mesh::
+    // GetRuntimeGeometryFade: terrain chunks, grass tiles), old and new
+    // meshes on complementary intervals.
+    const float fadeMode = data.geometryFade.w;
     ApplyNearFoliageFade(data, worldPosition, screenPosition);
+    // Near/far cell handover, overlapped: over the first half the cell's own
+    // objects dissolve in over its full far impostors, over the second the
+    // impostors dissolve out behind them. A plain split (near < p, far >= p)
+    // left pixels only one of the two shapes covers at p or 1 - p: the
+    // cell's forest thinned to see-through mid-fade (user, 2026-11-27).
+    [branch] if (g_handover >= 0.0 && data.viewTextureParams.w != 0.0 && data.shadowCasterFade.z < 0.5)
+    {
+        const float threshold = HandoverThreshold(screenPosition, data.skinParams.z);
+        clip(data.viewTextureParams.w > 0.0 ? min(1.0, 2.0 * g_handover) - threshold - 1.0e-4
+            : threshold - max(0.0, 2.0 * g_handover - 1.0));
+    }
     // Shrubs and bushes dissolving in at their range edge (whole plant, one
     // opacity, rotating screen dither: TAA resolves it to a blend).
     [branch] if (g_placementOpacity < 1.0)
@@ -2815,17 +2939,26 @@ void ApplyGeometryFade(ObjectData data, float3 worldPosition, float2 screenPosit
             length((data.geometryFade.w>=4.0 ? worldPosition:mul(data.world,float4(0,0,0,1)).xyz)-data.viewPositionAlphaCutoff.xyz);
         const float widthFraction=data.geometryFade.w>=4.0 ? .25 : data.geometryFade.x;
         const float width=max(0.0,min(.5,(data.geometryFade.z-data.geometryFade.y)*widthFraction));
-        const float widthFirst=perPlacement ? InstanceLodFadeWidth(data.geometryFade.y) : width;
-        const float widthSecond=perPlacement ? InstanceLodFadeWidth(data.geometryFade.z) : width;
+        const float widthFirst=perPlacement ? InstanceLodFadeWidth(data.geometryFade.y, data.skinParams.w) : width;
+        const float widthSecond=perPlacement ? InstanceLodFadeWidth(data.geometryFade.z, data.skinParams.w) : width;
         const float first=widthFirst>0.0 ? smoothstep(data.geometryFade.y-widthFirst,data.geometryFade.y+widthFirst,distance) : step(data.geometryFade.y,distance);
         const float second=widthSecond>0.0 ? smoothstep(data.geometryFade.z-widthSecond,data.geometryFade.z+widthSecond,distance) : step(data.geometryFade.z,distance);
         // Bands (4, 5) carry their level in x; ground cover tiles (2-3 per
         // tile, 6-7 per placement) draw each level with the level in the flags.
         const uint lod=(data.geometryFade.w>=4.0 && data.geometryFade.w<5.5) ? (uint)data.geometryFade.x:(draw.drawFlags >> 21u) & 3u;
         const float visibility=GroundCoverVisibility(data.geometryFade.w);
-        if(lod==0) data.geometryFade=float4(0,(1-first)*visibility,0,1);
-        else if(lod==1) data.geometryFade=distance<data.geometryFade.z-widthSecond ? float4((1-first)*visibility,visibility,0,1):float4(0,(1-second)*visibility,0,1);
-        else data.geometryFade=float4((1-second)*visibility,visibility,0,1);
+        // Tree bands (4, 5) overlap their dissolves: the incoming level is
+        // complete by the middle of the band, then the outgoing one leaves.
+        // Split evenly, a tree mid-switch drew each of its two shapes at half
+        // its pixels and looked thinned; a ring of forest did at once from a
+        // hill crest (user, 2026-11-27). Ground cover keeps the even split
+        // (its levels match and it is the larger pixel cost).
+        const bool overlap=data.geometryFade.w>=4.0 && data.geometryFade.w<5.5;
+        const float firstOut=overlap ? saturate(2.0*first-1.0):first, firstIn=overlap ? saturate(2.0*first):first;
+        const float secondOut=overlap ? saturate(2.0*second-1.0):second, secondIn=overlap ? saturate(2.0*second):second;
+        if(lod==0) data.geometryFade=float4(0,(1-firstOut)*visibility,0,1);
+        else if(lod==1) data.geometryFade=distance<data.geometryFade.z-widthSecond ? float4((1-firstIn)*visibility,visibility,0,1):float4(0,(1-secondOut)*visibility,0,1);
+        else data.geometryFade=float4((1-secondIn)*visibility,visibility,0,1);
     }
     if (data.shadowCasterFade.z > 0.5 && data.shadowCasterFade.x > 0.0)
     {
@@ -2850,9 +2983,17 @@ void ApplyGeometryFade(ObjectData data, float3 worldPosition, float2 screenPosit
         // pixel. Most forest fragments are outside the narrow LOD crossfade.
         [branch] if (data.geometryFade.x <= 0.0 && data.geometryFade.y >= 1.0)
             return;
+        // Complementary intervals only split pixels exactly when both sides
+        // read the same threshold at a pixel: a screen threshold. Hashed by
+        // world position, an old and a new terrain chunk (different surfaces,
+        // different positions under one pixel) drew neither surface at about
+        // a quarter of the pixels mid-swap: terrain went see-through while its
+        // level changed (user, 2026-11-27). Runtime level swaps use the screen
+        // threshold (rotating with TAA); other fades keep the world hash.
         float3 cell = floor(worldPosition * 96.0);
-        float threshold = perPlacement ? ScreenDitherThreshold(screenPosition, data.skinParams.z) :
-            frac(sin(dot(cell, float3(12.9898, 78.233, 37.719))) * 43758.5453);
+        float threshold = perPlacement || (fadeMode > 0.5 && fadeMode < 1.5)
+            ? ScreenDitherThreshold(screenPosition, data.skinParams.z)
+            : frac(sin(dot(cell, float3(12.9898, 78.233, 37.719))) * 43758.5453);
         clip(threshold - data.geometryFade.x);
         clip(data.geometryFade.y - threshold);
     }
@@ -2874,7 +3015,7 @@ float4 PSShadowMain(
     nointerpolation uint objectIndex : TEXCOORD11,
     float instanceLodDistance : TEXCOORD12) : SV_TARGET
 {
-    g_instanceLodDistance = instanceLodDistance;
+    ReadInstanceLodDistance(instanceLodDistance);
     g_billboardFade = uvChannels4.w;
     g_billboardStart = uvChannels4.z;
     ReadPlacementOpacity(uvChannels4);
@@ -3333,6 +3474,19 @@ float4 ObjectSurfacePS(
 {
     g_triangleObject = (draw.drawFlags & 0x13080000u) != 0u ? objectIndex : draw.objectIndex;
     ObjectData objectData = objects[g_triangleObject];
+    // Terrain level debug view (ENGINE_TERRAIN_LEVEL_DEBUG=1): volume chunk
+    // levels 0-3 red, orange, yellow, green; distant nodes by size, light to
+    // dark blue; cell height meshes (9) grey. Shaded only by the normal.
+    [branch] if (objectData.terrainTrailReserved.w >= 19.5)
+    {
+        const int level = (int)round(objectData.terrainTrailReserved.w - 20.0);
+        float3 color = level == 9 ? float3(0.6, 0.6, 0.6)
+            : level == 0 ? float3(0.9, 0.1, 0.1) : level == 1 ? float3(0.95, 0.5, 0.1)
+            : level == 2 ? float3(0.95, 0.9, 0.1) : level == 3 ? float3(0.2, 0.8, 0.2)
+            : lerp(float3(0.5, 0.9, 1.0), float3(0.05, 0.1, 0.6), saturate((level - 10) / 6.0));
+        color *= 0.55 + 0.45 * saturate(normalize(normal).y);
+        return float4(color, 1.0);
+    }
     // Derivatives before any clip() below (the coverage hash ignores parallax
     // offsets: it needs a stable surface anchor, not the exact texel).
     const float3 facet = SurfaceFacet(worldPos);
@@ -3424,6 +3578,24 @@ float4 ObjectSurfacePS(
             [branch] if ((flags & 4194304u) != 0u)
                 ApplyDistantLayerDetail(objectData, worldPos, positionDx, positionDy,
                     ground, surfaceNormal);
+            // Grass to the horizon (G1-G2): where the macro map says grass
+            // grows, the ground takes the cover colour (the blades' mean, with
+            // their dry/lush patches) and the wind's gust fronts as sheen, as
+            // the loaded cells do past their blades.
+            [branch] if (objectData.groundCoverColor.w > 0.0 && objectData.terrainMacroParams.w > 0.5)
+            {
+                const float grass = SampleTerrainMacroGrass(objectData, worldPos, positionDx, positionDy) *
+                    objectData.groundCoverColor.w * (1.0 - canopyCover);
+                [branch] if (grass > 0.01)
+                {
+                    float3 cover = GrassPatchVariation(objectData.groundCoverColor.rgb, worldPos);
+                    [branch] if (objectData.grassAnimation.x > 0.0)
+                        cover *= GrassGroundWind(worldPos, objectData.grassAnimation.x,
+                            normalize(objectData.viewPositionAlphaCutoff.xyz - worldPos),
+                            sqrt(max(length(positionDx.xz) * length(positionDy.xz), 1e-8)));
+                    ground = lerp(ground, cover, grass);
+                }
+            }
             base.rgb = objectData.baseColor.rgb * lerp(ground, TerrainCanopyColor, canopyCover);
             [branch] if (objectData.terrainMacroParams.w > 0.5)
                 base.rgb *= ApplyDistantCanopy(surfaceNormal, worldPos,
@@ -3523,6 +3695,7 @@ float4 ObjectSurfacePS(
         float3 terrainVtMean = 0.0;
 #ifdef TERRAIN_VIRTUAL_TEXTURE
         [branch] if (!g_terrainVirtualTextureFill && objectData.terrainTrailReserved.w > 0.5 &&
+            objectData.terrainTrailReserved.w < 9.5 &&
             worldMapped && (uvChannels4.z > -0.5 || uvChannels4.w < 0.002) && macroBlend < 0.999 && abs(normalize(normal).y) >= 0.80)
         {
             float4 vtAlbedo, vtNormal, vtMean;
@@ -3946,7 +4119,8 @@ float4 ObjectSurfacePS(
                     // Scene time is 0 for draws without wind (SceneRendering.cpp).
                     [branch] if (objectData.grassAnimation.x > 0.0)
                         tinted *= lerp(1.0, GrassGroundWind(worldPos, objectData.grassAnimation.x,
-                            toCamera), beyond);
+                            toCamera, sqrt(max(length(ddx(worldPos.xz)) * length(ddy(worldPos.xz)), 1e-8))),
+                            beyond);
                 }
                 base.rgb = lerp(base.rgb, tinted * originalWeightSum,
                     cover * objectData.groundCoverColor.w);
@@ -4564,7 +4738,7 @@ float4 PSMain(
     uint primitiveId : SV_PrimitiveID) : SV_TARGET
 {
     g_primitiveId = primitiveId;
-    g_instanceLodDistance = instanceLodDistance;
+    ReadInstanceLodDistance(instanceLodDistance);
     g_billboardFade = uvChannels4.w;
     g_billboardStart = uvChannels4.z;
     ReadPlacementOpacity(uvChannels4);
@@ -4631,7 +4805,7 @@ TerrainVirtualTextureOutput PSTerrainVirtualTexture(
 {
     g_terrainVirtualTextureFill = true;
     g_primitiveId = primitiveId;
-    g_instanceLodDistance = instanceLodDistance;
+    ReadInstanceLodDistance(instanceLodDistance);
     g_terrainVtAlbedo = 0.0;
     g_terrainVtNormal = 0.0;
     g_terrainVtMean = 0.0;
@@ -4662,7 +4836,7 @@ float4 PSDepthEqualMain(
     uint primitiveId : SV_PrimitiveID) : SV_TARGET
 {
     g_primitiveId = primitiveId;
-    g_instanceLodDistance = instanceLodDistance;
+    ReadInstanceLodDistance(instanceLodDistance);
     g_billboardFade = uvChannels4.w;
     g_billboardStart = uvChannels4.z;
     ReadPlacementOpacity(uvChannels4);
@@ -4690,7 +4864,7 @@ float4 PSParallaxDepthMain(
     out float depth : SV_DepthLessEqual) : SV_TARGET
 {
     g_primitiveId = primitiveId;
-    g_instanceLodDistance = instanceLodDistance;
+    ReadInstanceLodDistance(instanceLodDistance);
     g_billboardFade = uvChannels4.w;
     g_billboardStart = uvChannels4.z;
     ReadPlacementOpacity(uvChannels4);

@@ -1,3 +1,4 @@
+#include "Core/Components/Terrain/TerrainEvents.h"
 #include "Core/Rendering/AutoQuality.h"
 #include "Core/Rendering/RenderSystem.h"
 #include "Core/Rendering/SceneRenderer.h"
@@ -130,6 +131,16 @@ GameBenchmark::GameBenchmark(const GameBenchmarkOptions& options,
 GameBenchmarkSceneSample GameBenchmark::CollectScene(Engine::Scene::Scene& scene)
 {
     GameBenchmarkSceneSample result;
+    {
+        using Events = Engine::Components::TerrainEvents;
+        result.terrainChunkLevelChanges = Events::chunkLevelChanges.exchange(0);
+        result.terrainChunkSeamChanges = Events::chunkSeamChanges.exchange(0);
+        result.terrainStepSwaps = Events::volumeStepSwaps.exchange(0);
+        result.terrainFarSwaps = Events::farSwaps.exchange(0);
+        result.terrainFarNodes = Events::farNodesShown.exchange(0);
+        result.terrainCellHandovers = Events::cellHandovers.exchange(0);
+        result.transitions = Events::TakeTransitions();
+    }
     result.render = Engine::Rendering::RenderSystem::For(scene).GetLastRenderCpuTimings();
     result.shadow = Engine::Rendering::RenderSystem::For(scene).GetLastShadowCpuTiming();
     result.preparation = Engine::Rendering::RenderSystem::For(scene).GetLastPrepareTimings();
@@ -410,6 +421,15 @@ void GameBenchmark::Record(uint64_t frame, const GameBenchmarkFrameSample& s)
         << ",\"terrain_cells_stored\":" << s.scene.storedCells
         << ",\"terrain_cells_loaded\":" << s.scene.loadedCells
         << ",\"terrain_prefab_cells_loaded\":" << s.scene.loadedPrefabCells
+        << ",\"terrain_chunk_level_changes\":" << s.scene.terrainChunkLevelChanges
+        << ",\"terrain_chunk_seam_changes\":" << s.scene.terrainChunkSeamChanges
+        << ",\"terrain_step_swaps\":" << s.scene.terrainStepSwaps
+        << ",\"terrain_far_swaps\":" << s.scene.terrainFarSwaps
+        << ",\"terrain_far_nodes\":" << s.scene.terrainFarNodes
+        << ",\"terrain_cell_handovers\":" << s.scene.terrainCellHandovers;
+    for (const auto& [name, value] : s.scene.transitions)
+        m_log << ",\"transition_" << name << "\":" << value;
+    m_log
         << ",\"terrain_prefab_cells_pooled\":" << s.scene.pooledPrefabCells
         << ",\"terrain_cells_preparing\":" << s.scene.preparingCells
         << ",\"far_object_cells\":" << s.scene.farObjectCells

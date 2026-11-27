@@ -47,6 +47,7 @@ struct PostProcessSettings
     bool taa = false;
     bool taaHistoryValid = false;
     float taaFeedback = 0.9f;
+    float taaMotionFeedback = 0.6f; // RenderingEffectsSettings::taaMotionFeedback
     float taaSharpen = 0.f; // compose unsharp mask after TAA
     bool taaFastSettle = true; // RenderingEffectsSettings::taaFastSettle
     float taaReprojection[16] = { 1.f, 0.f, 0.f, 0.f, 0.f, 1.f, 0.f, 0.f,

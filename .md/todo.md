@@ -21,6 +21,154 @@ kind of walk was 11.8-13.3 ms on 2026-11-22/23 (landscape_notes.md, the 6 m/s ro
 (todo_history.md, volume-first step 0, height grid). So ~6 ms came in between 11-23 and 11-24, not from volume
 terrain. Caveat: `e80eaec1` changed the meadow walk camera, so the routes may differ.
 
+**Feel while turning (2026-11-26, done).** The user reported "look controls felt laggy" at a measured
+~85-90 fps (14 ms from input to the end of the frame). Turning the TAA default off did not change it. Cause:
+mouse-look read the cursor's offset from the window centre at capture and re-centred it after the update, so
+any motion in between was lost, plus pointer acceleration. It now uses raw mouse counts (WM_INPUT,
+`NativeInputSnapshot::rawMouse*`, FirstPersonController); the user: "much more responsive now". TAA stays off
+by default (`RenderingEffectsSettings::taa`); walks measured before 2026-11-26 ran with TAA on.
+Also fixed: the performance overlay read 0 fps outside benchmarks (frame interval was only set for them).
+TAA back on, with a fast-motion cap (`taaMotionFeedback` 0.6, Preferences "TAA History Weight (Fast Motion)":
+less history, tighter clip, Catmull-Rom history and lighter settle blur while pixels move 4-32+ px a frame;
+user: "taa visible when rotating very fast"). Crash fixed (2026-11-26, interactive play, access violation in
+`GraphicsCommandPacket::SetTexture`): material records kept across frames also copied the draw's own texture
+slots (terrain/macro maps) without checking them, so a rebuilt map left a freed texture in the record; records
+now match those slots too (misses still ~0 a frame).
+
+**Fast flight: mass changes and cost (user, 2026-11-26: "flying fast and all objects mass updating and
+changing causing immersion/natural look to break").** Flight is 25 m/s, 250 m/s boosted (landscape_demo
+FirstPersonController). Evidence: boosted flight from MeadowSlope at ~90 m and at 1.5 m clearance
+(`.local/routes/fly_1126`, GameBackendCapture `--drive-boost`, bursts of consecutive frames).
+- [x] F1 Grass ignored camera height: tiles were chosen by horizontal distance, so at 90 m up the whole ring
+      stayed built and was rebuilt every frame (50-95 tiles/frame, grass 20-56 ms CPU). Ranges, the
+      per-field early-out and tile LOD distance now include the height above the field's ground
+      (GrassField::Refresh). High flight: grass 24.8 -> 1.4 ms, frame median 65 -> 30 ms.
+- [x] Automated flight (user: "setup a flight path and auto run instead of having me manually do it"):
+      `FlightTour` route, 18 km loop at 60-200 m above the ground (tools/add_flight_route.py, run by
+      build_landscape_demo.py so a rebuild keeps it); `python .local/routes/fly.py [--speed 100]` flies it
+      and prints a summary (perf_runner also takes `--routes FlightTour`). Baseline 2026-11-26 at 100 m/s:
+      median 18.2 ms (55 fps), p95 35.8, p99 56.8, 177 frames > 50 ms; far blocks preparing median 11
+      (max 69), prefab layers pending median 8 (max 47).
+- [ ] F2 What is left while flying. The "handoff waits" are the window thread waiting for the simulation
+      thread (update, then prepare + record), not background jobs. At 250 m/s the update's serial cost is
+      TerrainManager::Update (~10 ms of 11, `ENGINE_UPDATE_TYPE_LOG=8`). Done so far (2026-11-26):
+  - [x] Far object blocks: gathering ~17k placements and clustering past farClusterDistance took 5-8 ms a
+        frame on the main thread. Blocks more than a cell beyond the loaded radius now build on a worker
+        (BuildFarBlockPlacements; cells' placements shared read-only) and install when ready; blocks next to
+        the loaded cells still build at once (no doubled trees or holes at the takeover).
+        `ENGINE_FAR_BLOCK_ASYNC=0` for A/B. 6 km at 250 m/s: frames with far objects > 5 ms 82 -> 6, p99
+        55.9 -> 49.7, > 50 ms 23 -> 14.
+  - [x] Far volume node installs: the vertex buffer is created by the node's build job
+        (`ENGINE_FAR_WORKER_BUFFERS=0` for A/B); main-thread install 1.77 -> 0.64 ms median (2 nodes/frame).
+  - Walks unchanged by these (forest 12.3-12.5 off vs 12.4-12.7 on). Note the forest walk is 12.4-12.7
+    now against 11.7-12.2 earlier on 2026-11-26 with both off too: something else crept in (TAA
+    Catmull-Rom while moving? material record check?), worth an A/B.
+  - [ ] Left at 250 m/s (~20 ms median): the sim thread's prepare + record (~11 ms: detail_cpu_render 6.8,
+        command_record 7.0) and update ~8 (stream cells 3.7 on crossing frames, far object evaluation
+        ~2 ms of membership walks, the index buffer of far node installs).
+- [ ] F3 Tree backlog: far object blocks preparing 30-97 and prefab layers pending 40-130 during flight, so
+      trees arrive late and many at once. Prioritise along the direction of travel and by screen size;
+      predict the camera (velocity x lead time) for streaming; at speeds streaming cannot keep up with,
+      keep the far representation (blocks, impostors) instead of loading full detail passed in a second.
+- [ ] F4 Trees switching one at a time, sporadically, read as a flickering forest when flying (user,
+      2026-11-26). Cause: instanced LOD dissolves were distance bands of +-4 % of the switch distance
+      (max 6 m), crossed in a few frames at 100 m/s and in one at 250, so each tree swapped LOD in one
+      step at its own moment. Ruled out (FlightTour bursts, `.local/routes/flicker.py`, motion-compensated
+      `popmap.py`): the TAA fast-motion cap (pop pixels 5.9 -> 5.5 %), single-view impostors past 600 m
+      (5.92 -> 5.87 %), auto quality (Reference preset; detail scale stays 1). High route: 0.05-0.3 % of
+      tiles change beyond the motion; low route (FlightTourLow, 18-75 m) up to 10 %, but near-tree parallax
+      dominates there, so the measure cannot separate pops.
+  - [x] Speed-scaled fade bands: the band widens by half the distance the camera covers in
+        `SceneSettings::lodTransitionSeconds` (default 0.5 s, scene setting "LOD Transition (s)";
+        `ENGINE_LOD_TRANSITION_SECONDS` for A/B), capped at a quarter of the switch distance; one width
+        in Object.hlsl InstanceLodFadeWidth, InstanceCull.hlsl and the CPU tile pre-cull. Cost on
+        FlightTourLow at 100 m/s: GPU opaque 8.9 -> 9.5 ms, foliage depth 3.0 -> 3.2, frame median
+        unchanged (CPU-bound). Needs the user's look check.
+  - [ ] If still visible: a time-based per-placement fade (state per pool slot in the cull pass) with
+        hysteresis; and the 600 m single-view impostor snap.
+- [x] F5 Abrupt low -> high detail when moving fast (user, 2026-11-26: "the change from low to high lod is
+      abrupt ... make it smoother when moving across the terrain fast"). Cause: a cell's own trees replaced
+      its far impostors in one frame, and at 250 m/s the cells were ready late (takeover at 3 cells: 117,
+      2: 83, 1: 44, 0: 5 vs nearly all at 3 walking). Fix: near/far cell handover cross-fade
+      (Rendering/CellHandover.h): once a cell's objects are ready its progress runs 0 -> 1 over
+      lodTransitionSeconds; near placements in it keep pixels with a handover threshold < p, far impostors
+      the rest (own interleaved-gradient dither so it does not interact with the impostor view and LOD
+      band dithers); the far block drops the cell only after the fade, its impostors held at p = 1 until
+      the rebuilt block is prepared. Per placement: the VS finds the root's cell in a 12-entry list in the
+      object record (packed into the instance LOD distance for the PS; ObjectGPUData is now at D3D12's
+      2048-byte element limit). `ENGINE_CELL_HANDOVER=0` for A/B. Low route at 250 m/s: abrupt handovers
+      47.8/km (31.2 within 2 cells) -> 0, frame unchanged (24.0 ms). Load-ahead along the travel direction
+      was rejected by the user (only helps one case).
+  - [x] Unload margin (user: "a buffer between load and unload"): `TerrainManager::unloadMarginCells`
+        (default 1, inspector): cells load within loadedRadius and unload past loadedRadius + margin; far
+        terrain and far block sync tests use the kept radius. Flight +0.9 ms (24.0 -> 24.9), walks unchanged
+        (forest 12.47, meadow 10.78).
+  - [x] Transition monitor (user: "keep track of loaded objects -> lod states and their changes"):
+        TerrainEvents transition_* fields per frame (handovers started/faded/abrupt/active/nearest,
+        uncovered cells, far block rebuilds/installs, cluster flips, near block rebuilds, camera speed, LOD
+        fade width); `fly.py` prints a per-km transitions summary and the frames a tree LOD fade lasts.
+  - [x] Anomaly check (`ENGINE_TRANSITION_LOG=1` + `.local/routes/transition_check.py`, 2026-11-27):
+        handover restarts 16-25 per run (a near block re-preparing for a neighbour cancelled every member
+        cell's fade: trees vanished and faded in again) -> 0 (a fade under way holds); handovers finished
+        in the unload margin then unloaded 3-12 frames later -> handovers start only within loadedRadius;
+        the camera's far block rebuilt on the main thread ~1 frame in 5 -> covered-cell rebuilds go to
+        workers (impostors stay hidden via the handover list), main-thread far rebuilds 145 -> 64 per run.
+  - [x] Terrain see-through while changing level (user, 2026-11-27): runtime level swaps split pixels
+        by a world-position hash, so old and new chunk surfaces drew neither at ~1/4 of the pixels; they
+        use the screen threshold now. Near/far handover overlapped (near in over the first half, far out
+        over the second) instead of a split that thinned the forest mid-fade.
+  - [x] (1) Far terrain set swap -> cross-fade (2026-11-27): incoming nodes fade in on [0, p), outgoing
+        out on [p, 1) (Mesh::SetRuntimeVisibility fromEnd, screen threshold) over lodTransitionSeconds;
+        no new swap during a fade; a cell unloads only under a node that is not fading in (refusing all
+        cells during any fade stopped unloads entirely: uncover 53 -> 5/km, +2 ms). `ENGINE_FAR_FADE=0`.
+        Far swaps 28 -> 12/km, all faded; frame 23.7 -> 25.0 ms on the low route at 250 m/s.
+  - [x] Objects vanishing during LOD transitions (user, 2026-11-27): the renderer's per-block band skip
+        (SceneRendering, "a band whose distance range misses the block's bounds") kept a fixed 6.5 m
+        margin while the speed-scaled dissolve is wider, so a block's incoming/outgoing band was skipped
+        mid-dissolve; the margin follows lodFadeExtraWidth. And the handover list hid near objects of every
+        loaded, uncovered cell (bushes and rocks have no far impostor); now only cells within loadedRadius
+        (where a handover starts). Needs the user's look check.
+  - [x] Trees/bushes still disappearing and reappearing going low -> high (user, 2026-11-27): the
+        handover list held 12 cells; flying wanted up to 15 at 100 m/s (drops in 12 % of frames) and 78 at
+        250 m/s, and a dropped cell's near objects jumped to fully shown and back. Now a fixed 11 x 11 grid
+        of 3-bit cells around the camera's cell (CellHandover; same 48 bytes): 0 frames with a cell outside
+        it at 100 m/s; at 250 m/s only cells > 5 away (trailing unloads, behind the camera). Unready cells
+        are listed only when a near block holds them; awaited cells only while still covered.
+  - [x] (2) Geomorph volume chunk levels (2026-11-27): the mesh job also meshes the next coarser level
+        and stores, per vertex, the height to it, its normal and the switch distance (uvChannels3.zw,
+        uvChannels0.xy); Object.hlsl VSMain moves the vertex there over 70-97 % of the level's range.
+        `ENGINE_TERRAIN_GEOMORPH=0` for A/B; `ENGINE_VOLUME_TERRAIN_LOG=1` prints coverage (most vertices
+        morph; mean travel 1-6 cm, so chunk level shape changes were small). Frame time unchanged.
+        Far nodes (split/merge) not yet.
+  - [x] "A ton of lod/quality changes in trees/objects when cresting hills" (user, 2026-11-27): the
+        speed-scaled band (25 % of the switch distance) put a ~50 m ring of forest mid-dissolve between
+        LOD1 and LOD2 (~9,000 trees at peaks, all in view from a crest), each drawn half and half. Cap now
+        12 %, and tree bands overlap their dissolve (incoming complete by mid-band, then outgoing leaves;
+        ground cover keeps the even split). Trees mid-fade: median 7,442 -> 3,159, max 20,455 -> 11,764;
+        flight 17.3 ms. Walks 2026-11-27: forest 11.90 / 12.03, meadow 10.65 / 10.86 ms (84 / 93 fps).
+        Never run two engine instances at once: a capture overlapping the user's watch flight halved both
+        (23.9 vs 17.3 ms).
+  - [x] Frame batches (user: "capture a few batches of frame by frame changes"): `fly.py --capture-every
+        500 --capture-burst 10` + `.local/routes/burst_report.py` (per pair, tiles changing beyond the
+        motion; overlays and strips of the worst bursts). 22 bursts on the low route at 100 m/s: 15 under
+        0.3 %; the worst (12.7 %) is the route passing through a tree crown, the next (2-5 %) bright near
+        crowns in motion; no tree seen vanishing, reappearing or switching shape.
+  - [x] (3) Forest clusters <-> single trees (2026-11-27): no block flips any more. A far block carries
+        its trees on one layer and its clusters on a second ("Far clusters"), as bands 0 / 1 of one
+        instanced LOD switch at farClusterDistance in plain world metres
+        (TerrainObjectLayer::forcedLodBand, Mesh::instanceLodPlainDistance: no layer/view/placement/shadow
+        scaling), so each tree and cluster dissolves by its own distance with the usual band; a block
+        carries a form only while part of it can lie on that form's side (+-12 % band). Vista 12.6 ms,
+        forest continuous across 3 km; low flight 18.0 ms; transition check clean. The monitor's
+        "cluster flips" now counts forms added/dropped out of range (invisible).
+  - [ ] Smoother exchanges, plan from `.md/lod_transition_research.md`: (1), (2), (3) done above; (2) geomorph volume chunk levels (coarse surface per vertex, morph in the VS), then far
+        nodes; (3) cluster <-> tree flips -> cross-fade; (4) hysteresis on far node split/merge and chunk
+        levels; (5) leaf thinning toward the impostor, impostor depth, time-based per-placement fades.
+- [ ] F5b Ground handover at speed: far node -> textured cell (brown ground patches appearing in one frame,
+      fly_1126/high frames 280-281). Needs the Step 2 continuity work and a fade on handover.
+- [ ] F6 Look bug seen on the way: a near-black patch on a hillside (fly_1126/high seq_0160, left), stable
+      across frames - a material/macro colour problem, not a pop.
+
 **What the code does today (read 2026-11-25, suspects until a capture ties them to what is seen):**
 - Far volume nodes (`TerrainManagerFarVolume.cpp`): the wanted set is re-chosen every `farVolumeStepMetres`
   (32 m) and **swaps in whole, in one frame, with no fade**; a node splits when `distance < farVolumeDetail *
@@ -40,9 +188,10 @@ terrain. Caveat: `e80eaec1` changed the meadow walk camera, so the routes may di
   with no texture and simpler light. Several steps stack between 24 and 60 m and again at ~256-400 m.
 
 ### Step 0: baseline and the missing 6 ms
-- [ ] Re-baseline HEAD: meadow walk, forest walk, walk + turning; two interleaved runs each; full stage split
+- [x] Re-baseline HEAD: meadow walk, forest walk, walk + turning; two interleaved runs each; full stage split
       (GPU per stage, CPU serial per stage, frame histogram, peak memory). This is the 80 fps scorecard; keep
       the table here and update it after each step below.
+      Done (2026-11-26): kept up to date in Step 4/5 scorecards; latest with DXC: forest 11.81-11.90, meadow 10.85-10.90 ms (Step 5, Shader compile).
 - [x] Find the ~6 ms between 2026-11-23 and 2026-11-24 (2026-11-25). It is the camera view's GPU
       instance cull, not terrain. "Opaque other" is now split into its own timers (`gpu_instance_cull_ms`,
       `gpu_impostor_ms`; GpuTimingStage::InstanceCull / Impostor): meadow walk cull **9.7-9.9 ms**, impostors
@@ -79,11 +228,12 @@ terrain. Caveat: `e80eaec1` changed the meadow walk camera, so the routes may di
 
       Look unchanged (Vista 0.7 %, MeadowSlope 1.3 % of pixels over 10 levels: dither/TAA noise on foliage
       edges, `.local/routes/s0_gpu_look_ms_cmp.png`). The 8 km forest stays.
-- [ ] Now CPU-bound: GPU ~9 ms, main thread ~15 ms. Against 11-23 (`base1123`): update 1.1 -> 2.9 ms,
+- [x] Now CPU-bound: GPU ~9 ms, main thread ~15 ms. Against 11-23 (`base1123`): update 1.1 -> 2.9 ms,
       camera record 5.5 -> 7.7, scene prepare 1.4 -> 2.4, scene objects 1,568 -> 6,645, camera-visible
       items 320 -> 483. Objects by kind (`ENGINE_PLACEMENT_DUMP=<sample>` also prints `[ObjectDump]`):
       4,388 spline `Point`s (4,292 of them under the 60 `Trails/Trail NNN` splines), 483 grass tiles,
       299 distant-terrain nodes, 287 far object blocks, 226 volume chunks.
+      Resolved (2026-11-26): main thread ~9 ms (update 1.8, prepare 1.0, camera 4.0, shadow 1.9); the forest walk is now GPU bound (Step 5).
       - [x] Trail points (2026-11-25). A/B with a scene copy without the trail splines' points: frame
             16.4-16.6 -> 14.7-15.1 ms (update -0.97, scene prepare -0.65: `update_objects` +0.66 from the 60
             `TerrainTrail`s rebuilding point signatures each frame, `prepare_items` +0.41 and
@@ -113,11 +263,12 @@ terrain. Caveat: `e80eaec1` changed the meadow walk camera, so the routes may di
             freed on growth while recorded packets still bound them; now retired like the cloud samples.
             The GPU placement pool and its staging are shared so packets keep them alive. Crash dumps:
             `%LOCALAPPDATA%\Engine\crashes` (GameApplication). `Game.exe --scene <path>` added.
-      - [ ] Camera record 5.5 -> 7.7 ms: ~525 terrain objects (226 volume chunks + ~300 distant-terrain
+      - [x] Camera record 5.5 -> 7.7 ms: ~525 terrain objects (226 volume chunks + ~300 distant-terrain
             nodes) against 49 cells + far tiles before; texture footprints 1.6 -> 2.3, material other
             2.1 -> 3.3. One draw per cell/level for volume chunks (Step 4) and fewer, larger far nodes.
             Measured 2026-11-26: ~200 fewer distant nodes (`ENGINE_FAR_VOLUME_DETAIL=1.5`) saved only
             ~3.5 us per visible item, so terrain object count is not the lever.
+            Resolved (2026-11-26): camera record ~4.0 ms (async footprints, material records kept across frames, far aggregate).
             - [x] Far-forest texture footprints (2026-11-26): per impostor part the far blocks are
                   walked every 8 frames (staggered) and their combined demand reused in between
                   (SceneTextureFootprints, far aggregate). Interleaved (`ENGINE_FOOTPRINT_WHOLE_FAR_BLOCKS=0`
@@ -131,9 +282,10 @@ terrain. Caveat: `e80eaec1` changed the meadow walk camera, so the routes may di
                   (Properties > Visibility, saved with the scene; `ENGINE_VISIBILITY_OCCLUSION_BUFFER`
                   overrides), off in landscape_demo.scene, default on elsewhere. If a scene needs it,
                   a cheaper build (parallel raster tiles, fewer occluders) is the follow-up.
-            - [ ] Shadow record 2.5 ms, of it 1.7 "scene preparation": the shadow view repeats the
+            - [x] Shadow record 2.5 ms, of it 1.7 "scene preparation": the shadow view repeats the
                   camera's per-view draw preparation over the same items (share it: "Retained render
                   scene", engine_notes.md Next 3).
+                  Superseded (2026-11-26): shadow record ~1.9-2.0 ms after the registration and cluster fixes; the rest is Step 5 P2.
             - [x] Placement registration once per frame (2026-11-26): the pool registration stamp was per
                   view, so the camera repeated every registration the shadow pass had made
                   (SceneInstanceBatching; `ENGINE_REGISTER_PER_VIEW=1` restores it). Interleaved: camera
@@ -143,7 +295,8 @@ terrain. Caveat: `e80eaec1` changed the meadow walk camera, so the routes may di
                   candidates 0.09, draws 0.11, LOD + batching + tiles 0.94 ms; camera 0.01 / 0.19 / 1.82
                   (footprints in it) / 1.17. The shadow pass does not repeat the material work; its cost is
                   batching and tile preparation.
-            - [ ] Submission ~0.8, draw loop ~0.85, other ~1.1 ms, footprints ~1.1 (near chunks).
+            - [x] Submission ~0.8, draw loop ~0.85, other ~1.1 ms, footprints ~1.1 (near chunks).
+                  Superseded (2026-11-26): profiled in detail under Step 5 P1 ([RenderLoop]); the remaining work is P1/P2.
             - [x] `Scene::FindGameCamera` scanned every object (49 terrain cells call it each frame);
                   cached now (structure revision + a check over the camera registry). No measurable
                   frame change on the walks (the explorer is early in the object list).
@@ -236,8 +389,9 @@ terrain. Caveat: `e80eaec1` changed the meadow walk camera, so the routes may di
               ~3.1 (loop 1.2: TerrainManager 0.5, 776 layers + 525 appearances ~0.27 of near no-op calls,
               ~0.3 loop overhead; grass spatial scripts ~0.6, mean 1.0), prepare 1.5-1.7, camera 4.3,
               shadow 2.15. `ENGINE_UPDATE_TYPE_LOG=<ms>` now also prints loop, parallel and script times.
-- [ ] Frames over 50 ms: 9-10 per walk (11-23: 0). Find them (cell crossings, far-volume swaps, chunk
+- [x] Frames over 50 ms: 9-10 per walk (11-23: 0). Find them (cell crossings, far-volume swaps, chunk
       installs) with per-frame stage logs.
+      Done (2026-11-26): full 534 m walk 0 frames > 50 ms (crossings, chunk release, portal-slot growth fixed; Step 5 cluster item).
       - [x] Route for it (2026-11-26, user: "extend meadow walk path to capture cell traversal"):
             `MeadowTrailWalk` now follows its trail for 800 m (135 points, 8 cell borders; was 480 m and
             a 1000-frame run walked only its first 100 m, one border). Made by
@@ -281,16 +435,38 @@ terrain. Caveat: `e80eaec1` changed the meadow walk camera, so the routes may di
       the blocks are the far forest and the canopy distance moves out.
 
 ### Step 1: terrain flicker and pops (evidence first)
-- [ ] Evidence: still camera with wind frozen (`ENGINE_WIND_TIME`; any change between frames is flicker) at
+Resolved (user, 2026-11-26: "looks fine, move on"): no pops on the current build (evidence below). The open
+items (geomorphing, per-node far fades, hand-off) stay as the fix list if pops return.
+- [x] Evidence: still camera with wind frozen (`ENGINE_WIND_TIME`; any change between frames is flicker) at
       MeadowSlope and the meadow trail, and a per-frame burst of a slow walk; log far-node swaps
       (`ENGINE_FAR_VOLUME_LOG`), chunk level and border-level changes and cell show/hide
       (`ENGINE_VOLUME_TERRAIN_LOG`) per frame; diff consecutive frames and tie every changed region to one
       event. Debug view colouring terrain by chunk level / far node size.
-- [ ] Hysteresis: chunk levels and far-node splits switch to the coarser level at bound x ~1.15 and back at
+      Done (2026-11-26, DXC build, level distances 160/320/640):
+      - Tools: per-frame terrain events in frames.jsonl (`terrain_chunk_level_changes`, `_seam_changes`,
+        `_step_swaps`, `_far_swaps`, `_far_nodes`, `_cell_handovers`; Components/Terrain/TerrainEvents.h) and
+        `ENGINE_TERRAIN_LEVEL_DEBUG=1` (flat colour: chunk levels 0-3 red/orange/yellow/green, distant nodes
+        light to dark blue by size, cell height meshes grey; TerrainBatchAppearance::debugLevel). Bursts:
+        `--capture-every N --capture-burst M` (seq_<frame>.ppm).
+      - Meadow walk, 100 m at 6 m/s: 8 volume steps (each 6-94 chunk level changes + 60-124 seam changes in
+        one frame), 7 distant-node swaps (~300 nodes each, the whole set), 14 cell hand-overs.
+      - None shows as a one-frame pop (300-frame burst; step detector and the level view): level changes
+        cross-fade over ~20 frames at the band edges (on-screen level changes 1 % -> 2 % of pixels for frames
+        170-190 around the step at 188), mostly beyond ~100 m; the steps at 251 and 283 (94 level changes)
+        change nothing on screen (under grass or off view). Distant-node swap frames change the horizon band
+        less than a typical frame (0.6-0.75x the median).
+      - Still camera at MeadowSlope (60 frames, wind frozen): ~1.8 % of ground pixels change > 6/255 a
+        frame, evenly as fine grain over the grass (TAA jitter and dither), no patches.
+      - So the "quality changing right in front of the camera" is not reproduced on this build; the raised
+        level distances (64/128/256 -> 160/320/640, 2026-11-25) likely removed it. The items below stay
+        for if it is seen again (record where: position and view, or a capture).
+- [x] Hysteresis: chunk levels and far-node splits switch to the coarser level at bound x ~1.15 and back at
       the bound, so a camera near a boundary does not flip.
-- [ ] Paint independent of the mesh level: weights per pixel from a per-cell paint texture (Object.hlsl
+      Covered (2026-11-26): levels are chosen again only after the camera moves `lodStepMetres` (16 m) from the last step's position (VolumeTerrain LevelSteps), so a camera at a boundary cannot flip.
+- [x] Paint independent of the mesh level: weights per pixel from a per-cell paint texture (Object.hlsl
       already has the paint-map path, flag 524288) instead of per vertex, so a level change moves only the
       shape and never the rock/grass/trail boundaries.
+      Already in place (2026-11-26 check): volume chunks take their cell's paint map per pixel (SceneRendererDrawPreparation PrepareTerrainMaterial, flag 524288); the steep layer blends per pixel from the normal.
 - [ ] Geomorphing (CDLOD): each level's vertices also carry the parent level's position, blended by distance,
       so a switch is continuous; replaces the dithered two-mesh cross-fade that shimmers (and smears in TAA).
 - [ ] Far nodes: fade per node (old out, new in over ~0.3 s) or swap per subtree as it is ready, not the whole
@@ -298,6 +474,8 @@ terrain. Caveat: `e80eaec1` changed the meadow walk camera, so the routes may di
 - [ ] Loaded cell ↔ far node hand-off changes geometry only: needs Step 2's shared material in the band where
       they meet.
 - [ ] Recheck after each fix with the same still and burst captures; record pops per 100 m walked.
+      Baseline (2026-11-26): 0 one-frame pops per 100 m on the meadow walk; ~20-frame cross-fades at the
+      level band edges at each volume step (8 per 100 m).
 
 ### Approach (user, 2026-11-26: "low quality terrain close to the camera"; "distance alone is one-dimensional")
 How large engines do it (general practice, not researched here): (1) mesh detail by **projected screen-space
@@ -334,9 +512,16 @@ texel density each patch needs (Frostbite, Far Cry 4/5, Unreal RVT). Order here:
       noise (terrain GPU +0.1 ms on the meadow), Vista 17.0 vs 17.3 ms. User's case: a bare dirt hill past
       the loaded cells read as a smooth tan blob. Not done: the lighting of distant nodes is still the
       simpler ambient + sun model (no roughness or AO), and Vulkan's prebuilt SPIR-V needs a rebuild.
-- [ ] Measure first: luminance, hue and contrast against distance along the meadow walk view and from
+- [x] Measure first: luminance, hue and contrast against distance along the meadow walk view and from
       MeadowSlope (1440p tiles), and a debug view showing which material band each pixel is in; mark every
       visible step.
+      Done (2026-11-26, level debug view as a terrain mask, 2560x1440 at FieldWalk and MeadowSlope): grass covers
+      nearly all ground near the camera, so near -> far material changes show only on distant open meadows.
+      There the loaded-chunk -> distant-node hand-off is a slightly darker green on the chunk side, no hard edge
+      (`.local/routes/s2_field_crop.png`: normal over level view). At MeadowSlope the hand-off runs along the
+      slope's crest (hidden). The row profile there mixes shaded slope and lit plain, so it says little.
+      The visible distant difference is grass, not material: the meadows past the blades read flat (Grass to
+      the horizon, G1-G2).
 - [ ] Middle material tier, 40 m to the loaded edge: one sample per layer with normal maps, roughness and AO
       kept, the repeat scaled with distance (Step 3), the macro colour folded in gradually; so "medium" reads
       as the near material at lower frequency, not a different material.
@@ -351,7 +536,7 @@ texel density each patch needs (Frostbite, Far Cry 4/5, Unreal RVT). Order here:
 
 ### Step 3: medium-range repetition
 - [x] Macro variation in the near layered path past 20-60 m (2026-11-26): the strongest layer's texture
-      at 4x and 16x its scale as a brightness ratio, matching the distant nodes. Subtle on the near slope;
+      at 4x and 16x its scale as a brightness ratio, matching the distant nodes. Subtle on the near slope;              
       the flat look there is mostly the ground-cover colour past the grass reach (below).
 - [ ] Past the grass reach (~60 m) the ground takes the cover colour with the layer texture only as
       brightness detail: give the cover colour the same macro variation and grain, or let the layer show
@@ -402,6 +587,7 @@ Vista (GPU bound by vertices and overlap, not pixels), so a vendor upscaler is n
         `preparedDraws.emplace_back` order, `ResolveObjectPipeline` and `m_objectParallaxDepthPipelines`,
         the material record cache, `PrepareTerrainMaterial`'s `TerrainMaterialState`, `detailCostGroups`,
         the performance/detail heat vectors, `materialPipelineMs` and other timing sums.
+            Deferred (2026-11-26): the forest walk is GPU bound; this helps the meadow and 23 m/s only (~0.5 ms).
 - [ ] Forest GPU first (user, 2026-11-26; the forest walk is GPU bound). Measured on the walk
       (`ENGINE_GPU_WORKLOAD_COUNTERS=1`, now also terrain, shadow and impostor stages):
       - GPU occlusion (depth pyramid in the instance cull) is already worth 4 ms (`ENGINE_GPU_OCCLUSION=0`:
@@ -414,6 +600,7 @@ Vista (GPU bound by vertices and overlap, not pixels), so a vendor upscaler is n
         distant detail, ground cover, trails) plus lighting.
       - [ ] Terrain runtime virtual texture (user: "continue with runtime virtual texture", 2026-11-26).
             Design:
+            Parked (2026-11-26) (user): working but only 0.1-0.45 ms terrain GPU, softer near ground, ~300 MB; off by default (TerrainManager `virtualTexture`).
             - Fill: the terrain draws themselves, rendered top-down (orthographic) into the levels with a
               pixel-shader entry that outputs the blended material instead of lit colour (as UE's RVT
               output). This reuses every per-draw input (paint maps, layer arrays, steep layer, trails,
@@ -462,8 +649,11 @@ Vista (GPU bound by vertices and overlap, not pixels), so a vendor upscaler is n
                   ground-cover shading (shells, wind), which stay per pixel. Off by default.
             - [ ] Next: sharpness near the feet (2 mm level 0, or the layered path within a few metres),
                   then decide whether the ~0.1-0.45 ms is worth the memory (~300-350 MB) and the softer look.
-            - [ ] 3 Object.hlsl: sample the clipmap for top-projection pixels; A/B and look captures.
+                  Parked (2026-11-26) with the virtual texture.
+            - [x] 3 Object.hlsl: sample the clipmap for top-projection pixels; A/B and look captures.
+                  Done (2026-11-26): implemented (served/missed debug views, eligibility fixes); see the result and parked note above.
             - [ ] 4 Invalidation (paint, trails, array residency), budget, editor preview.
+                  Parked (2026-11-26); new or newly visible terrain already refills (above).
       - [ ] Foliage depth pre-pass: 38 M pixel invocations (~18 per pixel) for 1.29 ms; leaves 1.66 ms.
 - [ ] P2 Shadow and camera views recorded on separate threads: hoist the cascade selection the camera reads,
       move per-view mutable renderer state into a view state, make the shared caches (pipelines, material
@@ -477,16 +667,21 @@ Vista (GPU bound by vertices and overlap, not pixels), so a vendor upscaler is n
       fps while the CPU is the limit (~95 -> ~170 on the walks), at about a frame of latency.
 
 ### Step 4: performance to 12.5 ms (after Step 0's fix; each measured interleaved)
-- [ ] Camera record (7.2-7.7 ms, the largest serial item): texture footprints (~1.6 ms) on a worker or every
+- [x] Camera record (7.2-7.7 ms, the largest serial item): texture footprints (~1.6 ms) on a worker or every
       few frames; the CPU occlusion buffer started earlier or last frame's (~0.8 ms wait); attribute the
       ~1.2 ms "unattributed".
-- [ ] Volume terrain draws: compact volume vertex (264-byte mesh vertex today) and one draw per cell and level
+      Done (2026-11-26): footprints on a worker (async), CPU occlusion off for the landscape; camera record ~4.0 ms.
+- [x] Volume terrain draws: compact volume vertex (264-byte mesh vertex today) and one draw per cell and level
       instead of per chunk (~6x the height grid's draws); far nodes 0.56 M vertices at detail 2. Target
       terrain GPU ≤ 1.2 ms and less camera record.
-- [ ] Retained render scene ("Next" 3 in engine_notes.md): `PrepareFrameItems` copies every item each frame.
-- [ ] Cell crossings: `update_post_physics_ms` 17-22 ms on crossing frames (scene commit of the new cells'
+      Not needed (2026-11-26): terrain is pixel-shader bound (0.38 M vertices, 1.0-1.26 M pixels; Step 5 Forest GPU).
+- [x] Retained render scene ("Next" 3 in engine_notes.md): `PrepareFrameItems` copies every item each frame.
+      Moved (2026-11-26) to Step 5 P3.
+- [x] Cell crossings: `update_post_physics_ms` 17-22 ms on crossing frames (scene commit of the new cells'
       objects) is the p99.
-- [ ] GPU "opaque other" (~4 ms on earlier walks): break it down.
+      Done (2026-11-26): crossing work spread and retired (Step 0 crossing items); full walk p99 19 ms.
+- [x] GPU "opaque other" (~4 ms on earlier walks): break it down.
+      Done (2026-11-26): split into instance cull, impostor and other timers (Step 0); workload counters now also for terrain, shadow, impostor.
 - [ ] Re-decide `loadedRadius` 4 (below: +0.25 ms terrain GPU, +0.5 update, +0.4 camera record) only once
       Step 2 makes far nodes look right; it may not be needed.
 
@@ -517,17 +712,27 @@ they do not know where grass is.
 walk and MeadowSlope, interleaved.
 
 ### G1: grass data on distant terrain (shared with Step 2 above)
-- [ ] Confirm which surface draws the meadow plain from MeadowSlope (far node or loaded cell; debug colour).
-- [ ] Far nodes carry the grass share and the mean grass height per vertex (from the surface painter and the
+- [x] Confirm which surface draws the meadow plain from MeadowSlope (far node or loaded cell; debug colour).
+      Done (2026-11-26, `ENGINE_TERRAIN_LEVEL_DEBUG=1`): the plain is distant nodes; only the slope in front is loaded chunks.
+- [x] Far nodes carry the grass share and the mean grass height per vertex (from the surface painter and the
       blade generator's height rules), plus scene time and the view direction in their draw data.
+      Done differently (2026-11-26): the grass share rides in the macro normal map's alpha (built from the paint on the layers the grass fields grow on, `TerrainManager::GetDistantCover().layerMask`, part of `ArchiveMapKey` so the map rebuilds when they publish); the cover colour, root shade and layer mask come from the loaded cells' `Terrain::groundCover`; distant draws get the wind time (SceneRendering, groundCoverColor.w). No vertex format change. Mean grass height is still open (G3).
 - [ ] Keep `grassRadius` 50: the radius is not the lever for distant grass (meadow walk table, "Terrain and
       grass detail at distance").
 
 ### G2: wind waves on distant grass (small; fixes "no swaying past the hill")
-- [ ] Run `GrassGroundWind` on far nodes, same field, direction and speed as the blades, so gust fronts carry
+- [x] Run `GrassGroundWind` on far nodes, same field, direction and speed as the blades, so gust fronts carry
       on across the hand-off from blades to tufts to ground.
+      Done (2026-11-26): distant nodes take the cover colour (GrassPatchVariation) times GrassGroundWind, weighted by the grass share and away from the painted canopy (Object.hlsl distant path). TerrainManager `distantGrass` (inspector, on). MeadowSlope: the plain now matches the grass-covered slope in front instead of pale yellow-green paint, gust bands visible (`.local/routes/g2_cmp.png`: off over on); frame 10.18 -> 9.98 ms, terrain GPU 2.46 -> 2.38 (noise).
 - [ ] Lean sheen instead of a flat tint: brightness and hue follow the lean against the view direction
       (strength now `.34 * lean + .12 * |gust|`).
+- [x] Long-range wind visible (user, 2026-11-26: "wind effects long range aren't very detectable"): the 18 m
+      fronts fall under a pixel and barely move on screen past a few hundred metres. `GrassGroundWind` now
+      fades them by pixel footprint and adds gust patches (140 m along the wind, 4x the front speed) that
+      group the fronts near and carry the wind far, with a stronger sheen at grazing angles. Needs a look
+      check in a moving capture.
+- [ ] Wind tunables as properties (editor-first rule): `GrassWindPatchSize`/`PatchSpeed` (and the existing
+      `GrassWind*` shader constants) are code constants; move to scene wind settings.
 - [ ] Tune against moving captures (`ENGINE_WIND_FRAME_STEP`), not stills; from MeadowSlope the bands should
       read on the plain at 100-500 m.
 - [ ] Far ring from above: let the ground's grass colour and sheen carry the meadow where the tufts fall
@@ -622,8 +827,9 @@ Recommendations:
 
 ### Foliage Phase 2: Pay for it (performance)
 - [ ] Follow-ups of **Temporal upscaling** (done; todo_history.md):
-      - [ ] Landscape demo walk at 0.67 (the 1080p FieldWalk load did not finish in 10 minutes on this
+      - [x] Landscape demo walk at 0.67 (the 1080p FieldWalk load did not finish in 10 minutes on this
             machine at native scale on 2026-11-23; stopped).
+            Done (2026-11-26): render scale 0.67 measured (forest 11.75 -> 10.3, meadow 10.4 -> 9.8 ms, Vista 12.1 -> 11.7; frame_pipeline_research.md).
       - [ ] Scanned bushes' coarse level looks broken (eroded leaves, a dark card) wherever it shows,
             e.g. near the camera at 1280x720 native: an asset LOD problem, not upscaling.
       - [ ] UI draws into the scene pass, so it renders at the render size and goes through TAA.
@@ -641,13 +847,15 @@ Recommendations:
 ## Landscape look (large-scale vista with layered haze)
 
 ### 0. Baseline + test shot
-- [ ] Profile and cut CPU frame cost for the vista (camera command recording, scene prepare)
+- [x] Profile and cut CPU frame cost for the vista (camera command recording, scene prepare)
+      Done (2026-11-26): see Step 0/4/5 (main thread ~9 ms); Vista is GPU bound, now ~12 ms with cluster impostors.
   - Why serial: `SimulationLoop` (Game/Application/GameApplication.cpp) runs Update, then PrepareRenderFrame, then
     Render (shadow + camera recording) on one scene-owner thread while the window thread waits; only replay is on the
     render thread. Overlapping update N+1 with recording N needs a scene snapshot boundary; bigger change, do after the
     per-stage cuts below.
-  - [ ] Shader compile time itself: Object.hlsl ~21 s per entry in fxc (the fog include added ~2 s). Look at what
+  - [x] Shader compile time itself: Object.hlsl ~21 s per entry in fxc (the fog include added ~2 s). Look at what
     fxc unrolls/flattens (lighting loops, terrain layers); cold-cache startup is still ~65 s
+        Done (2026-11-26): DX12 compiles with DXC (all shaders ~7 s) plus parallel warm-up (items below).
     - Any Object.hlsl edit misses the cache for every entry that includes it (D3DShaderCache keys the
       preprocessed source), and the entries compile one after another (DX12ShaderCompiler, flags
       ENABLE_STRICTNESS | DEBUG | OPTIMIZATION_LEVEL3). Options, in order (user asked for todos, 2026-11-26):

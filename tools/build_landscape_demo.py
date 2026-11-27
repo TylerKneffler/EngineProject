@@ -933,6 +933,9 @@ def main():
         # Eye-level foliage viewpoints next to "Vista" (reads the new archive).
         import add_landscape_viewpoints
         add_landscape_viewpoints.main()
+        # The FlightTour route for automated fast-flight runs (.local/routes/fly.py).
+        import add_flight_route
+        add_flight_route.main()
     if arguments.preview:
         write_previews(arguments.preview, world)
     macro = world["macro_q"] / SCALE

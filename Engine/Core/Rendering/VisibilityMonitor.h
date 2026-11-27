@@ -133,8 +133,12 @@ inline ReferenceCullResult ReferenceCull(const InstanceCullConstants& constants,
                     ? glm::length(glm::max(delta - worldExtent, glm::vec3(0.f))) : glm::length(delta) - radius) / coverage;
                 const float farthest = rootDistance ? rootRange : (shadowPass
                     ? glm::length(delta + worldExtent) : glm::length(delta) + radius) / coverage;
-                const float widthX = glm::clamp(lod.x * .04f, .5f, 6.f);
-                const float widthY = glm::clamp(lod.y * .04f, .5f, 6.f);
+                // InstanceCull.hlsl: the speed-scaled extra width rides in selection.z (float bits).
+                float extra = 0.f;
+                std::memcpy(&extra, &selection.z, sizeof(extra));
+                extra = std::max(0.f, extra);
+                const float widthX = std::max(glm::clamp(lod.x * .04f, .5f, 6.f), std::min(extra, lod.x * .12f));
+                const float widthY = std::max(glm::clamp(lod.y * .04f, .5f, 6.f), std::min(extra, lod.y * .12f));
                 if ((selection.x == 0 && nearest > lod.x + widthX) ||
                     (selection.x == 1 && (farthest < lod.x - widthX || nearest > lod.y + widthY)) ||
                     (selection.x == 2 && farthest < lod.y - widthY))

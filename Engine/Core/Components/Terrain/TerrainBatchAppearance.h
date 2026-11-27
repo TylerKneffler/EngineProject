@@ -26,5 +26,9 @@ public:
     bool distantVisual = false;
     // True only when every cell of a resident 4x4 batch is present.
     bool completeFootprint = false;
+    // Terrain level debug view (ENGINE_TERRAIN_LEVEL_DEBUG=1, .md/todo.md
+    // Step 1): a volume chunk's shown level 0-3, a distant node 10 +
+    // log2(its size in cells); -1 for none. Runtime only, not serialized.
+    int debugLevel = -1;
 };
 }

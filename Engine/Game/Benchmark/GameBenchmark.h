@@ -38,6 +38,11 @@ struct GameBenchmarkSceneSample
     // Script and plugin counters (Scene::GetCounters).
     std::vector<Engine::Scene::SceneCounter> counters;
     uint64_t loadedPrefabCells = 0, pooledPrefabCells = 0;
+    // Components/Terrain/TerrainEvents.h, taken this frame.
+    uint32_t terrainChunkLevelChanges = 0, terrainChunkSeamChanges = 0, terrainStepSwaps = 0;
+    uint32_t terrainFarSwaps = 0, terrainFarNodes = 0, terrainCellHandovers = 0;
+    // TerrainEvents::TakeTransitions: object representation changes (transition_*).
+    std::vector<std::pair<const char*, double>> transitions;
     // Far objects of all managers; settled when every one reports settled.
     uint64_t farObjectCells = 0, farObjectQueuedCells = 0, farObjectBlocks = 0,
         farObjectPreparingBlocks = 0;

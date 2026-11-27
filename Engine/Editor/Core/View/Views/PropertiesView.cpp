@@ -547,6 +547,9 @@ void PropertiesView::DrawPanel(IEditorUi& ui)
             if (ui.DragFloat("Prefab Build Budget (ms)", &m_scene->settings.prefabBuildBudgetMs, .1f, .25f, 50.f) && OnComponentsChanged)
                 OnComponentsChanged();
             ui.Tooltip("Main-thread time per frame for building streamed object layers (trees, props) while cells stream in. Lower spreads the work over more frames; far blocks keep drawing until a cell is ready.");
+            if (ui.DragFloat("LOD Transition (s)", &m_scene->settings.lodTransitionSeconds, .01f, 0.f, 2.f) && OnComponentsChanged)
+                OnComponentsChanged();
+            ui.Tooltip("How long an instanced object (tree, shrub, rock) takes to cross-fade between detail levels, whatever the camera's speed: the fade band widens as the camera moves faster (up to 12 % of the switch distance). 0 keeps fixed-width bands, which a fast camera crosses in a frame or two.");
             ui.Separator();
             ui.Label("Texture LOD");
             auto& textureLod = m_scene->settings.textureLod;

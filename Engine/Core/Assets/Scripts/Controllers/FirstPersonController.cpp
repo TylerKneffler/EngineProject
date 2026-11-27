@@ -158,8 +158,13 @@ void FirstPersonController::UpdateLook()
     // edge. Treat the client centre as a relative-input anchor and restore it
     // after every sample, giving mouse-look an unlimited range while capture
     // is active. Focus loss still releases capture in Update().
-    const float deltaX = static_cast<float>(cursor.x - lookAnchor.x);
-    const float deltaY = static_cast<float>(cursor.y - lookAnchor.y);
+    // Raw mouse counts when the window gets them: every movement, no pointer
+    // acceleration. The cursor offset misses whatever moves between the input
+    // capture and the re-centring after the update (several ms a frame).
+    long rawX = 0, rawY = 0;
+    const bool raw = Engine::Core::ReadNativeRawMouseDelta(rawX, rawY);
+    const float deltaX = static_cast<float>(raw ? rawX : cursor.x - lookAnchor.x);
+    const float deltaY = static_cast<float>(raw ? rawY : cursor.y - lookAnchor.y);
     Engine::Core::RequestNativeCursorPosition(lookAnchor);
     m_lastCursorPosition = lookAnchor;
     SetSystemCursorVisible(false);

@@ -86,6 +86,15 @@ public:
     // between these world distances the share of placements kept falls from
     // 1 to placementThinMinimum (1 disables), and survivors widen by
     // 1 / sqrt(share) so the cover stays as dense on screen.
+    // Near/far cell handover role (Rendering/CellHandover.h): 1 a streamed
+    // cell's own objects, 2 the far impostor blocks; 0 none. Runtime only.
+    int handoverRole = 0;
+    // The instanced LOD band distances (instanceLodDistances) are world
+    // metres for every placement: not scaled by the layer or view LOD scale,
+    // the placement's own scale, or the shadow pass. Far tree blocks and
+    // their forest clusters split at TerrainManager::farClusterDistance with
+    // it, so a tree and the cluster that stands for it agree on the boundary.
+    bool instanceLodPlainDistance = false;
     float placementThinStart = 0.f;
     float placementThinEnd = 0.f;
     float placementThinMinimum = 1.f;
@@ -351,7 +360,10 @@ public:
     bool AdvanceRuntimeLodTransition(float deltaSeconds);
     Mesh* GetPreviousRuntimeLodMesh() const;
     glm::vec4 GetRuntimeGeometryFade(bool previous = false) const;
-    void SetRuntimeVisibility(float visibility);
+    // fromEnd: the visible share is the end of the dither range ([1 - v, 1))
+    // instead of its start ([0, v)): a mesh fading out under one fading in
+    // with the same share splits the pixels exactly (screen threshold).
+    void SetRuntimeVisibility(float visibility, bool fromEnd = false);
     float GetRuntimeVisibility() const { return m_runtimeVisibility; }
     uint64_t GetRuntimeFadeRevision() const { return m_runtimeFadeRevision; }
     int ChooseRuntimeLod(float distance, std::initializer_list<float> thresholds,
@@ -527,6 +539,7 @@ private:
     float m_runtimeLodProgress = 1.f;
     float m_runtimeLodDuration = 0.f;
     float m_runtimeVisibility = 1.f;
+    bool m_runtimeVisibilityFromEnd = false;
     uint64_t m_runtimeFadeRevision = 0;
     // PrepareAuthoredLods state: the base file and lodMeshes it installed.
     uint64_t m_authoredLodSignature = 0;

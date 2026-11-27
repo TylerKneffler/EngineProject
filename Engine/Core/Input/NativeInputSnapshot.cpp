@@ -1,11 +1,30 @@
 #include "Core/Input/NativeInputSnapshot.h"
 #include <algorithm>
+#include <atomic>
 
 namespace Engine::Core
 {
 namespace
 {
 thread_local NativeInputSnapshot* currentSnapshot = nullptr;
+
+// Raw mouse motion gathered by the window procedure between captures.
+std::atomic<long> rawMouseX{0}, rawMouseY{0};
+std::atomic<bool> rawMouseSeen{false};
+HWND rawMouseWindow = nullptr;
+
+// Relative mouse motion arrives as WM_INPUT for `window` (only while it is
+// in the foreground: no RIDEV_INPUTSINK). Normal mouse messages continue.
+void RegisterRawMouse(HWND window)
+{
+    if (!window || rawMouseWindow == window) return;
+    RAWINPUTDEVICE device{};
+    device.usUsagePage = 0x01; // generic desktop
+    device.usUsage = 0x02;     // mouse
+    device.dwFlags = 0;
+    device.hwndTarget = window;
+    if (RegisterRawInputDevices(&device, 1, sizeof(device))) rawMouseWindow = window;
+}
 
 void SetSystemCursorVisible(bool visible)
 {
@@ -22,6 +41,10 @@ void SetSystemCursorVisible(bool visible)
 NativeInputSnapshot CaptureNativeInput(HWND window)
 {
     NativeInputSnapshot snapshot;
+    RegisterRawMouse(window);
+    snapshot.rawMouseX = rawMouseX.exchange(0);
+    snapshot.rawMouseY = rawMouseY.exchange(0);
+    snapshot.hasRawMouse = rawMouseSeen.load();
     const HWND foreground = GetForegroundWindow();
     snapshot.focused = window && foreground &&
         GetAncestor(foreground, GA_ROOT) == GetAncestor(window, GA_ROOT);
@@ -48,6 +71,30 @@ NativeInputSnapshot CaptureNativeInput(HWND window)
         snapshot.hasCenter = ClientToScreen(window, &snapshot.center) != FALSE;
     }
     return snapshot;
+}
+
+bool AccumulateRawMouseInput(LPARAM rawInput)
+{
+    RAWINPUT input{};
+    UINT size = sizeof(input);
+    if (GetRawInputData(reinterpret_cast<HRAWINPUT>(rawInput), RID_INPUT, &input, &size,
+            sizeof(RAWINPUTHEADER)) == static_cast<UINT>(-1) ||
+        input.header.dwType != RIM_TYPEMOUSE)
+        return false;
+    // Absolute devices (tablets, remote desktop) keep the cursor path.
+    if ((input.data.mouse.usFlags & MOUSE_MOVE_ABSOLUTE) != 0) return false;
+    rawMouseX += input.data.mouse.lLastX;
+    rawMouseY += input.data.mouse.lLastY;
+    rawMouseSeen = true;
+    return true;
+}
+
+bool ReadNativeRawMouseDelta(long& x, long& y)
+{
+    if (!currentSnapshot || !currentSnapshot->hasRawMouse) return false;
+    x = currentSnapshot->rawMouseX;
+    y = currentSnapshot->rawMouseY;
+    return true;
 }
 
 void SetCurrentNativeInputSnapshot(NativeInputSnapshot* snapshot)

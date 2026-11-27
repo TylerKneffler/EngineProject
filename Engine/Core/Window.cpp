@@ -1,4 +1,5 @@
 #include "Window.h"
+#include "Core/Input/NativeInputSnapshot.h"
 #include <shellapi.h>
 #include "Core/Startup/LaunchActivation.h"
 #include "Core/Startup/WindowPlacementStore.h"
@@ -367,6 +368,10 @@ LRESULT CALLBACK Window::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
         ReleaseInputFocus(true);
         return 0;
     }
+
+    // Raw mouse motion for mouse-look (NativeInputSnapshot); the message
+    // still goes on to the hook and DefWindowProc, which frees it.
+    if (msg == WM_INPUT) Engine::Core::AccumulateRawMouseInput(lParam);
 
     if (self && self->WndProcHook)
         if (self->WndProcHook(hwnd, msg, wParam, lParam))

@@ -113,7 +113,8 @@ struct TerrainObjectLayer::PrefabInstances
     bool screenLodSelection=false, distanceLodOverride=false;
     float screenLod1Pixels=0, screenLod2Pixels=0, screenLodHysteresis=0;
     float shadowDistance=0, shadowFadeWidth=0, farShadowDistance=0;
-    int shadowLod=0;
+    int shadowLod=0, handoverRole=0, forcedLodBand=-1;
+    float forcedLodDistance=0;
     bool suppressRendering=false, suppressColliders=false;
     bool HasSameConfiguration(const TerrainObjectLayer& layer) const
     {
@@ -128,7 +129,9 @@ struct TerrainObjectLayer::PrefabInstances
             screenLodHysteresis==layer.screenLodHysteresis &&
             shadowDistance==layer.shadowDistance &&
             farShadowDistance==layer.farShadowDistance &&
-            shadowFadeWidth==layer.GetShadowFadeWidth() && shadowLod==layer.shadowLod;
+            shadowFadeWidth==layer.GetShadowFadeWidth() && shadowLod==layer.shadowLod &&
+            handoverRole==layer.handoverRole && forcedLodBand==layer.forcedLodBand &&
+            forcedLodDistance==layer.forcedLodDistance;
     }
     bool HasGeneratedObjects(const Engine::Scene::Scene& scene) const
     {
@@ -148,6 +151,8 @@ struct TerrainObjectLayer::PrefabInstances
         shadowDistance=layer.shadowDistance;
         farShadowDistance=layer.farShadowDistance;
         shadowFadeWidth=layer.GetShadowFadeWidth(); shadowLod=layer.shadowLod;
+        handoverRole=layer.handoverRole;
+        forcedLodBand=layer.forcedLodBand; forcedLodDistance=layer.forcedLodDistance;
         suppressRendering=layer.suppressPrefabRendering;
         suppressColliders=layer.suppressPrefabColliders;
     }
@@ -1125,6 +1130,7 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
                                 ? lodProfile.hysteresis : screenLodHysteresis,0.f,.5f)
                             : screenLodHysteresis;
                         mesh->useBoundsForShadowCulling=true;
+                        mesh->handoverRole=handoverRole;
                         mesh->foliageWindStrength=original->foliageWindStrength;
                         mesh->foliageWindTree=original->foliageWindTree;
                         const auto& sourcePath=original->GetFilePath();
@@ -1166,6 +1172,12 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
                             mesh->instanceLodBand=int(lod);
                             mesh->instanceLodDistances={lodDistances[0],lodDistances.size()>1 ? lodDistances[1]:1.e20f};
                         }
+                        else if (forcedLodBand>=0)
+                        {
+                            mesh->instanceLodBand=std::min(forcedLodBand,1);
+                            mesh->instanceLodDistances={forcedLodDistance,1.e20f};
+                            mesh->instanceLodPlainDistance=true;
+                        }
                         };
                         const auto addMaterial=[&](Engine::Core::Object* object, Mesh* mesh) {
                         if (const auto* material=original->Owner->GetComponent<Material>())
@@ -1204,7 +1216,7 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
                                 const auto* material=original->Owner->GetComponent<Material>();
                                 char buffer[640];
                                 std::snprintf(buffer,sizeof(buffer),
-                                    "%p|%p|%zu|%d|%d|%d|%d|%d|%.6g|%.6g|%.6g|%d|%.6g|%d|%d|%.6g|%d|%.6g|%.6g|%d|%d|%d|%d|%.6g|%d|%.6g|%.6g|%d",
+                                    "%p|%p|%zu|%d|%d|%d|%d|%d|%.6g|%.6g|%.6g|%d|%.6g|%d|%d|%.6g|%d|%.6g|%.6g|%d|%d|%d|%d|%.6g|%d|%.6g|%.6g|%d|%d|%d",
                                     static_cast<const void*>(source.get()),static_cast<const void*>(material),
                                     lod,int(shadowProxyOnly),Owner->layer,int(probe.screenLodSelection),
                                     int(probe.distanceLodOverride),int(probe.useBoundsForShadowCulling),
@@ -1215,7 +1227,7 @@ void TerrainObjectLayer::PreparePrefabInstances(IGraphicsProvider* provider, boo
                                     probe.fixedShadowLodBand,int(probe.farShadowCaster),probe.instanceLodBand,
                                     int(shadowDistance<=0 && !probe.farShadowCaster),probe.farShadowMinDistance,
                                     int(meshes.size()),probe.instanceLodDistances.x,probe.instanceLodDistances.y,
-                                    sharedMaximumLod);
+                                    sharedMaximumLod,probe.handoverRole,int(probe.instanceLodPlainDistance));
                                 sharedKey=buffer;
                             }
                             auto& world=runtime->worldBlocks[tile];

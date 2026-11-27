@@ -125,7 +125,9 @@ struct ObjectGPUData
     glm::vec4 terrainTrailReserved{0.f};
     // x = mip bias of the view (<= 0): -log2(output / render pixels) while
     // TAA upscales it, so textures keep the output's sharpness (Object.hlsl
-    // TextureLodBias, AlphaLodBias). yzw reserved.
+    // TextureLodBias, AlphaLodBias). yzw: the near/far cell handover grid
+    // (Rendering/CellHandover.h): the camera cell's corner x, z, and
+    // 1 / cell span, negative for far impostors (0: no handover).
     glm::vec4 viewTextureParams{0.f};
     // Directional shadow atlas tiles (SceneRendererShadows, refresh blend):
     // x = each cascade's tile, 3 bits per cascade (cascade 0 lowest); y, z =
@@ -136,5 +138,10 @@ struct ObjectGPUData
     // Per blend slot: clip-space offset from the new image's projection to
     // the previous one's (xyz), and the new image's weight (w).
     glm::vec4 shadowRefreshBlend[2]{};
+    // Near/far cell handover (Rendering/CellHandover.h): up to 12 cells
+    // mid-handover, one per uint (CellHandover::Entry); the grid and role are
+    // in viewTextureParams.yzw. The record is at D3D12's 2048-byte limit for a
+    // structured buffer element.
+    glm::uvec4 handoverCells[3]{};
 };
 }

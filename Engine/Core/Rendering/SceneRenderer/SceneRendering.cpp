@@ -1,4 +1,6 @@
 #include "Core/Rendering/RenderingEffects.h"
+#include "Core/Rendering/CellHandover.h"
+#include "Core/Components/Terrain/TerrainEvents.h"
 #include "Core/Rendering/DetailBudget.h"
 #include "Core/Rendering/ScreenCoverage.h"
 #include "Core/Rendering/OcclusionBuffer.h"
@@ -244,7 +246,7 @@ static_assert(offsetof(ObjectGPUData, terrainSunShadow) == 1744, "Terrain sun sh
 static_assert(offsetof(ObjectGPUData, terrainMacroMap) == 1760, "Terrain macro map data must follow the sun shadow");
 static_assert(offsetof(ObjectGPUData, placementFade) == 1792, "Placement fade data must follow the terrain macro data");
 static_assert(offsetof(ObjectGPUData, terrainTrailGrid) == 1856, "Terrain trail data must follow the placement thinning");
-static_assert(sizeof(ObjectGPUData) == 2000, "Object buffer layout must match Object.hlsl");
+static_assert(sizeof(ObjectGPUData) == 2048, "Object buffer layout must match Object.hlsl");
 static_assert(sizeof(Engine::Model::LightData) == 128,
     "Light buffer layout must match Object.hlsl");
 
@@ -684,6 +686,40 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
     // dissolve dither by it each frame (skinParams.z) so the TAA history
     // averages LOD cross-fades into a smooth blend. Static without TAA.
     float temporalDitherFrame = 0.f;
+    // Speed-scaled instanced LOD fades: the dissolve band either side of a
+    // switch widens by half the distance the camera covers in
+    // lodTransitionSeconds (Object.hlsl InstanceLodFadeWidth, InstanceCull.hlsl
+    // keep the same width; capped there at a quarter of the switch distance),
+    // so a crossing takes about that long at any speed. The camera pass
+    // measures the speed; its shadow passes reuse it.
+    float lodFadeExtraWidth = 0.f;
+    {
+        auto& fade = m_lodFadeViews[cam];
+        if (!shadowOnly)
+        {
+            const auto now = std::chrono::steady_clock::now();
+            const glm::dvec3 position(cameraPosition);
+            if (fade.valid)
+            {
+                const double seconds = std::chrono::duration<double>(now - fade.time).count();
+                const double moved = glm::length(position - fade.position);
+                // A cut or teleport (or a long stall) is not a speed.
+                if (seconds > 1.0e-4 && seconds < .5 && moved < 300.0)
+                    fade.speed += (std::min(moved / seconds, 1000.0) - fade.speed) *
+                        (1.0 - std::exp(-seconds / .25));
+            }
+            fade.position = position;
+            fade.time = now;
+            fade.valid = true;
+        }
+        lodFadeExtraWidth = static_cast<float>(fade.speed *
+            std::clamp(m_scene.settings.lodTransitionSeconds, 0.f, 2.f) * .5);
+        if (!shadowOnly)
+        {
+            Engine::Components::TerrainEvents::cameraSpeed = static_cast<float>(fade.speed);
+            Engine::Components::TerrainEvents::lodFadeExtraWidth = lodFadeExtraWidth;
+        }
+    }
     {
         const auto temporal = Engine::Rendering::RenderingEffects::Get().Settings().antiAliasing;
         const auto* contextFactory = m_graphicsProvider ? m_graphicsProvider->GetContextFactory() : nullptr;
@@ -715,6 +751,7 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
             auto post = Engine::Graphics::GetPostProcessSettings();
             post.taa = true;
             post.taaFeedback = temporal.taaFeedback;
+            post.taaMotionFeedback = temporal.taaMotionFeedback;
             post.taaSharpen = temporal.taaSharpen;
             post.taaFastSettle = temporal.taaFastSettle;
             // Pixels run downward while NDC y runs up.
@@ -1782,12 +1819,15 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
             const float nearDistance = glm::length(nearest);
             const float farDistance = glm::length(farthest);
             // Covers the per-tree dissolve either side of a switch
-            // (InstanceLodFadeWidth in Object.hlsl, at most 6 m, in
-            // placement-scaled distance).
-            const glm::vec2 scales = mesh->GetInstanceData()
+            // (InstanceLodFadeWidth in Object.hlsl: 6 m, or wider while the
+            // camera moves, lodFadeExtraWidth), in placement-scaled distance.
+            // A fixed 6.5 m skipped a block's incoming or outgoing band inside
+            // the widened dissolve: its trees lost that band's pixels and
+            // vanished mid-transition when moving fast (user, 2026-11-27).
+            const glm::vec2 scales = mesh->GetInstanceData() && !mesh->instanceLodPlainDistance
                 ? placementLodScaleRange(*mesh->GetInstanceData()) : glm::vec2(1.f);
-            const float margin = 6.5f * scales.y;
-            const glm::vec2 band = mesh->instanceLodDistances * lodScale;
+            const float margin = (std::max(6.f, lodFadeExtraWidth) + .5f) * scales.y;
+            const glm::vec2 band = mesh->instanceLodDistances * (mesh->instanceLodPlainDistance ? 1.f : lodScale);
             const int lod = mesh->instanceLodBand;
             // A placement scaled by s keeps a band out to s times its distance.
             const float bandStart = (lod == 0 ? 0.f : lod == 1 ? band.x : band.y) * scales.x;
@@ -1848,7 +1888,8 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
             preparedDraw.gpuLodDistances=mesh->instanceLodDistances;
             if(fixedShadowBand) preparedDraw.gpuLod=-1;
         }
-        preparedDraw.gpuLodDistances *= lodScale;
+        if (!(mesh && mesh->instanceLodBand >= 0 && mesh->instanceLodPlainDistance))
+            preparedDraw.gpuLodDistances *= lodScale;
         preparedDraw.lodScale = lodScale;
         preparedDraw.object = obj;
         preparedDraw.mesh = mesh;
@@ -1912,7 +1953,7 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
                 mesh->GetPosedVertexBuffer() &&
                 !mesh->IsPortalPoseSnapshot() &&
                 (useSourceChart || !renderItem->warpedVertexBuffer);
-            preparedDraw.objectData.geometryFade=mesh->instanceLodBand>=0 ? glm::vec4(float(mesh->instanceLodBand),scaledShadowLodDistances(preparedDraw.gpuLodDistances),instanceBandFadeMode) : scaleGeometryFade(hasPortalViews && renderItem->geometryFade.w>=2.f ? mesh->GetRuntimeGeometryFade():renderItem->geometryFade, lodScale);
+            preparedDraw.objectData.geometryFade=mesh->instanceLodBand>=0 ? glm::vec4(float(mesh->instanceLodBand),mesh->instanceLodPlainDistance ? preparedDraw.gpuLodDistances : scaledShadowLodDistances(preparedDraw.gpuLodDistances),mesh->instanceLodPlainDistance ? 4.f : instanceBandFadeMode) : scaleGeometryFade(hasPortalViews && renderItem->geometryFade.w>=2.f ? mesh->GetRuntimeGeometryFade():renderItem->geometryFade, lodScale);
             perPlacementFade(preparedDraw.objectData.geometryFade, mesh);
             // w: a far caster's minimum distance (Mesh::farShadowMinDistance);
             // Object.hlsl fades it in where the fixed band fades out.
@@ -2305,7 +2346,7 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
             (clusteredLightingEnabled ? kClusteredLightingFlag : 0u) |
                 (mesh && mesh->IsInstanced() ? (0x20000000u | (renderItem->geometryFade.w>=2.f && !hasPortalViews ? 0x00100000u:0u)):0u), 0u };
         preparedDraw.drawData = drawData;
-        objectData.geometryFade = mesh && mesh->instanceLodBand>=0 ? glm::vec4(float(mesh->instanceLodBand),preparedDraw.gpuLodDistances.x,preparedDraw.gpuLodDistances.y,instanceBandFadeMode) : scaleGeometryFade(hasPortalViews && renderItem->geometryFade.w>=2.f ? mesh->GetRuntimeGeometryFade():renderItem->geometryFade, lodScale);
+        objectData.geometryFade = mesh && mesh->instanceLodBand>=0 ? glm::vec4(float(mesh->instanceLodBand),preparedDraw.gpuLodDistances.x,preparedDraw.gpuLodDistances.y,mesh->instanceLodPlainDistance ? 4.f : instanceBandFadeMode) : scaleGeometryFade(hasPortalViews && renderItem->geometryFade.w>=2.f ? mesh->GetRuntimeGeometryFade():renderItem->geometryFade, lodScale);
         if (objectData.geometryFade.w >= 2.f && !Engine::Rendering::FairVisibilityLod()) {
             objectData.geometryFade.y *= quality.geometry;
             objectData.geometryFade.z *= quality.geometry;
@@ -2627,6 +2668,22 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
                 instanceLodDisplayOverride);
     if (temporalDitherFrame > 0.f)
         for (auto& draw : preparedDraws) draw.objectData.skinParams.z = temporalDitherFrame;
+    if (lodFadeExtraWidth > 0.f)
+        for (auto& draw : preparedDraws) draw.objectData.skinParams.w = lodFadeExtraWidth;
+    {
+        // Near/far cell handover (Rendering/CellHandover.h), camera views only.
+        const auto& handover = Engine::Rendering::CellHandover::Get();
+        if (!shadowOnly && handover.scene == &m_scene)
+            for (auto& draw : preparedDraws)
+                if (draw.mesh && draw.mesh->handoverRole > 0)
+                {
+                    draw.objectData.viewTextureParams.y = handover.grid.x;
+                    draw.objectData.viewTextureParams.z = handover.grid.y;
+                    draw.objectData.viewTextureParams.w = draw.mesh->handoverRole == 2 ? -handover.grid.z : handover.grid.z;
+                    for (size_t i = 0; i < handover.cells.size(); ++i)
+                        draw.objectData.handoverCells[i] = handover.cells[i];
+                }
+    }
     if(!shadowOnly && !(includeEditorVisuals && instanceLodDisplayOverride >= 0)) for(auto& draw:preparedDraws)
         if(SceneRendererDrawPreparation::ScreenLodPolicy(*this, draw, hasPortalViews, includeEditorVisuals)) draw.drawData.flags|=0x00800000u;
     SceneRendererObjectRecordUpload recordUpload(
@@ -2879,12 +2936,14 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
                             const int band=gpuLod ? residentLod:draw.gpuLod;
                             if(band>=0)
                             {
-                                const float coverageMinimum=placementCoverageLod ? blockData->coverageMinimum:1.f;
-                                const float coverageMaximum=placementCoverageLod ? blockData->coverageMaximum:1.f;
+                                const bool scaledBands=placementCoverageLod && !draw.mesh->instanceLodPlainDistance;
+                                const float coverageMinimum=scaledBands ? blockData->coverageMinimum:1.f;
+                                const float coverageMaximum=scaledBands ? blockData->coverageMaximum:1.f;
                                 const float nearest=closest>=0.f ? closest/coverageMaximum:closest/coverageMinimum;
                                 const float farthest=furthest/coverageMinimum;
-                                const float widthX=std::clamp(tile.lod.x*.04f,.5f,6.f)+.5f;
-                                const float widthY=std::clamp(tile.lod.y*.04f,.5f,6.f)+.5f;
+                                // InstanceCull.hlsl's band widths (speed-scaled), plus a margin.
+                                const float widthX=std::max(std::clamp(tile.lod.x*.04f,.5f,6.f),std::min(lodFadeExtraWidth,tile.lod.x*.12f))+.5f;
+                                const float widthY=std::max(std::clamp(tile.lod.y*.04f,.5f,6.f),std::min(lodFadeExtraWidth,tile.lod.y*.12f))+.5f;
                                 if((band==0 && nearest>tile.lod.x+widthX) ||
                                    (band==1 && (farthest<tile.lod.x-widthX || nearest>tile.lod.y+widthY)) ||
                                    (band==2 && farthest<tile.lod.y-widthY)) continue;
@@ -2902,8 +2961,8 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
                         if(!shadowOnly && draw.objectData.geometryFade.w>=5.5f)
                         {
                             const float first=tile.lod.x,second=tile.lod.y; // what the cull compares
-                            const float firstWidth=std::clamp(first*.04f,.5f,6.f)+.5f;
-                            const float secondWidth=std::clamp(second*.04f,.5f,6.f)+.5f;
+                            const float firstWidth=std::max(std::clamp(first*.04f,.5f,6.f),std::min(lodFadeExtraWidth,first*.12f))+.5f;
+                            const float secondWidth=std::max(std::clamp(second*.04f,.5f,6.f),std::min(lodFadeExtraWidth,second*.12f))+.5f;
                             if((residentLod==0 && distance.x>first+firstWidth) ||
                                (residentLod==1 && (distance.y<first-firstWidth || distance.x>second+secondWidth)) ||
                                (residentLod==2 && distance.y<second-secondWidth)) continue;
@@ -3172,8 +3231,9 @@ void SceneRenderer::Render(Engine::Graphics::IGraphicsContext* context, float as
                     Engine::Rendering::InstanceCullConstants cull;
                     cull.viewProjection=cullViewProjection; cull.cameraPosition=glm::vec4(cameraPosition,1);
                     cull.counts={uint32_t(tiles.size()),sourceRange.vertexCount,sourceRange.firstVertex,1};
-                    cull.selection={screenColor ? -1:gpuLod ? residentLod:representative.gpuLod,2,representative.gpuMaximumLod,
-                        (shadowOnly ? 1:0) | (representative.mesh->instanceLodBand>=0 ? (placementCoverageLod ? 2|32:2) : representative.objectData.geometryFade.w >= 5.5f ? 2|64:0) | cullOcclusionFlag | int(reachBits<<16) | (sourceRange.thinned?0:(1<<26))};
+                    int lodFadeBits=0; std::memcpy(&lodFadeBits,&lodFadeExtraWidth,sizeof(lodFadeBits));
+                    cull.selection={screenColor ? -1:gpuLod ? residentLod:representative.gpuLod,2,lodFadeBits,
+                        (shadowOnly ? 1:0) | (representative.mesh->instanceLodBand>=0 ? (placementCoverageLod && !representative.mesh->instanceLodPlainDistance ? 2|32:2) : representative.objectData.geometryFade.w >= 5.5f ? 2|64:0) | cullOcclusionFlag | int(reachBits<<16) | (sourceRange.thinned?0:(1<<26))};
                     // w: where this range's plants have faded out (0 = no shorter reach).
                     if(reachBits) cull.cameraPosition.w=representative.objectData.placementFade.y*(float(reachBits)/1024.f);
                     else cull.cameraPosition.w=0.f;

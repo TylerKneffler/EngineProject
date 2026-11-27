@@ -46,6 +46,15 @@ public:
     int cellsX = 32, cellsY = 32;
     float cellWidth = 1.f, cellDepth = 1.f;
     int loadedRadius = 1;
+    // Hysteresis for full-detail cells: a cell loads within loadedRadius and
+    // stays loaded until it is more than loadedRadius + unloadMarginCells away,
+    // so moving back and forth over a cell edge does not load and unload it,
+    // and a cell just passed is not dropped at once (user, 2026-11-26).
+    // Flying straight it keeps one more row behind, not a whole ring.
+    int unloadMarginCells = 1;
+    // The radius loaded cells keep drawing their own terrain and objects in
+    // (loadedRadius plus the unload margin; the editor streams without one).
+    int KeptRadius() const;
     // Scene view streams only editable, full-resolution cells around its camera.
     int editorRadius = 6;
     // -1 follows loadedRadius for older scenes; larger values stream coarse cells.
@@ -196,6 +205,9 @@ public:
     // extent, so a level needs ~2500 texels across for the level matching a
     // pixel's footprint to be in range: at 1024 the ground blurs from ~1.5 m.
     bool virtualTexture = false;
+    // Grass to the horizon (G1-G2): distant terrain takes the ground cover's
+    // colour and wind sheen where the macro map says grass grows.
+    bool distantGrass = true;
     int virtualTextureLevels = 6;
     int virtualTextureResolution = 2048;
     float virtualTextureTexelMillimetres = 4.f;
@@ -852,15 +864,31 @@ private:
     struct FarObjectCell
     {
         // Cell-local placements; asset is the far (last LOD) representation.
-        std::vector<TerrainObjectLayer::Placement> placements;
+        // Shared and never changed once computed: block builds on worker
+        // threads read them without a copy.
+        std::shared_ptr<const std::vector<TerrainObjectLayer::Placement>> placements;
         // Far assets that stop drawing at a distance (cliff pieces: their
         // layer's reach), by asset. Others draw as far as the far radius.
         std::map<std::string, float> cullDistances;
+    };
+    // A far block's placements in both forms (BuildFarBlockPlacements):
+    // single trees and forest clusters; either may be empty.
+    struct FarBlockBuilt
+    {
+        std::vector<TerrainObjectLayer::Placement> trees, clusters;
     };
     struct FarObjectBlock
     {
         Engine::Core::Object* object = nullptr;
         TerrainObjectLayer* layer = nullptr;
+        // Its forest clusters, on a second layer (farClusterDistance): the
+        // tree layer draws inside that distance and this one beyond it, as
+        // two bands of one LOD switch (TerrainObjectLayer::forcedLodBand), so
+        // the change is a per-placement dissolve instead of a block switching
+        // form in one frame. A block carries a form only while part of it can
+        // lie on that form's side of the boundary.
+        Engine::Core::Object* clusterObject = nullptr;
+        TerrainObjectLayer* clusterLayer = nullptr;
         uint64_t membership = 0;
         // The cells it showed at its last walk and their cull distances:
         // a crossing re-checks blocks away from the radius edge from these
@@ -871,6 +899,14 @@ private:
         // Instances finished preparing since the last placement rebuild.
         // Latched: periodic source re-checks report "preparing" briefly.
         bool prepared = false;
+        // A placement rebuild running on a worker (UpdateFarObjects: blocks
+        // away from the loaded cells), installed when ready; until then the
+        // block keeps drawing its previous placements.
+        std::future<FarBlockBuilt> build;
+        uint64_t buildMembership = 0;
+        std::map<std::string, float> buildCullDistances;
+        std::set<std::string> buildBeyondCull;
+        int forms = 0;   // 1 single trees, 2 forest clusters (wanted at the last evaluation)
     };
     struct FarObjectJob
     {
@@ -879,6 +915,9 @@ private:
     };
     void UpdateFarObjects(int centerX, int centerY);
     void ClearFarObjects();
+    void InstallFarBlockPlacements(FarObjectBlock& block, FarBlockBuilt built,
+        const std::map<std::string, float>& cullDistances, const std::set<std::string>& beyondCull,
+        uint64_t membership);
     struct NearObjectBlock
     {
         Engine::Core::Object* object = nullptr;
@@ -901,9 +940,23 @@ private:
     // terrain that did. Their periodic source re-checks briefly report
     // "preparing" again; latching keeps far blocks from rebuilding each time.
     std::map<Cell, const Terrain*> m_farNearCovered;
+    // Near/far cell handover (Rendering/CellHandover.h): a cell whose own
+    // objects are ready cross-fades from the far impostors over
+    // SceneSettings::lodTransitionSeconds before it counts as covered (and its
+    // far block drops it); then its impostors stay hidden (p = 1) until that
+    // block has rebuilt and prepared without it.
+    std::map<Cell, std::chrono::steady_clock::time_point> m_handoverStart;
+    std::map<Cell, Cell> m_handoverAwaitBlock;   // cell -> its far block key
+    void PublishCellHandover(int centerX, int centerY);
     std::set<Cell> m_farObjectPending;
     std::vector<FarObjectJob> m_farObjectJobs;
     std::map<Cell, FarObjectBlock> m_farObjectBlocks;
+    // Superseded or abandoned block builds: a std::async future waits for its
+    // task when destroyed, so they finish here instead of stalling a frame.
+    std::vector<std::future<FarBlockBuilt>> m_farBlockDraining;
+    void RemoveFarBlockObjects(FarObjectBlock& block);
+    void DrainFarBlockBuild(FarObjectBlock& block)
+    { if (block.build.valid()) m_farBlockDraining.push_back(std::move(block.build)); }
     uint64_t m_farObjectSignature = 0;
     // Incremental bookkeeping, so a frame touches only what changed instead
     // of the whole (2 * farObjectRadius + 1)^2 window (16k cells at 64).
@@ -925,11 +978,26 @@ private:
     // being computed, so a block re-prepares once instead of per batch.
     std::set<Cell> m_farDirtyBlocks;
     std::set<Cell> m_farUrgentBlocks;
+    // Blocks that must rebuild on the main thread this update: a cell handed
+    // back to them (its impostors must show in the frame its own objects go)
+    // or covered without a handover fade. A cell covered after its fade keeps
+    // its impostors hidden through the handover list until the rebuilt block
+    // is prepared, so its block builds on a worker.
+    std::set<Cell> m_farSyncBlocks;
     std::string m_cacheDirectory;
     uint64_t m_cacheSignature = 0;
     size_t m_cacheHits = 0;
     std::atomic<uint64_t> m_cacheReservedBytes{0};
     std::map<Cell, Terrain*> m_loaded;
+public:
+    // Grass to the horizon (G1, .md/todo.md): the ground cover the grass
+    // fields publish on loaded cells (Terrain::groundCover), carried onto the
+    // distant nodes; its layer mask also feeds the macro map's grass share.
+    // Refreshed each update from the loaded cells (strength 0: none).
+    struct DistantCover { glm::vec3 color{0.f}; float strength = 0.f, rootShade = .55f; uint32_t layerMask = 0; };
+    const DistantCover& GetDistantCover() const { return m_distantCover; }
+private:
+    DistantCover m_distantCover;
     struct RenderBatch
     {
         Engine::Core::Object* object = nullptr;
@@ -956,6 +1024,13 @@ private:
         std::vector<uint32_t> occluderIndices;
         size_t occluderVertexCount = 0;
         double buildMilliseconds = 0.0;
+        // Created by the build job where the backend allows it
+        // (SupportsWorkerThreadStaticVertexBufferCreation): copying the
+        // vertices into a GPU buffer was ~0.9 ms of the main thread a node,
+        // two nodes a frame flying fast (2026-11-26). Indices stay on the
+        // main thread (Mesh::SetTerrainGeometry orients them; vertices it
+        // leaves as they are).
+        std::shared_ptr<Engine::Graphics::IGraphicsBuffer> vertexBuffer;
     };
     struct FarVolumeNode
     {
@@ -965,6 +1040,16 @@ private:
         size_t vertexCount = 0;
         bool built = false, stale = false, hasGeometry = false;
     };
+    // Far terrain set cross-fade (.md/lod_transition_research.md, plan 1):
+    // a new node set fades in over the old one for lodTransitionSeconds
+    // (complementary screen dither) instead of replacing it in one frame.
+    // While it runs no other swap starts and no loaded cell counts as
+    // covered by the far terrain (so none unloads under a half-faded node).
+    std::vector<FarVolumeKey> m_farFadeIn, m_farFadeOut;
+    float m_farFadeProgress = 1.f;
+    std::chrono::steady_clock::time_point m_farFadeTime{};
+    bool m_farFading = false;
+    void AdvanceFarFade(float seconds);
     struct FarVolumeJobInput;
     static std::shared_ptr<FarVolumeMesh> BuildFarVolumeNode(const FarVolumeJobInput& input);
     std::map<FarVolumeKey, FarVolumeNode> m_farNodes;

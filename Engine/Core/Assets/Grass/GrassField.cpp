@@ -1367,7 +1367,16 @@ bool GrassField::Refresh()
     const float cellEdgeX = local.x - std::clamp(local.x, 0.f, terrainWidth);
     const float cellEdgeZ = local.z - std::clamp(local.z, 0.f, terrainDepth);
     const float retentionRadius = radius + 2.f * span;
-    if (cellEdgeX * cellEdgeX + cellEdgeZ * cellEdgeZ > retentionRadius * retentionRadius)
+    // The camera's height above this field's ground (at the nearest point of
+    // the cell): ranges are 3D, as the plants' own fade is (Object.hlsl
+    // VSMain). Measured by horizontal distance alone, a camera flying 100 m
+    // up kept the whole ring built and rebuilt it every frame at speed
+    // (20-56 ms a frame flying at 250 m/s, 2026-11-26) for blades far below a
+    // pixel.
+    const float above = std::max(0.f, local.y - SampleHeight(
+        std::clamp(local.x, 0.f, terrainWidth), std::clamp(local.z, 0.f, terrainDepth)));
+    const float aboveSquared = above * above;
+    if (cellEdgeX * cellEdgeX + cellEdgeZ * cellEdgeZ + aboveSquared > retentionRadius * retentionRadius)
     {
         // Distant cells must not load species meshes, index placements, or
         // generate tile geometry just because they exist in the stress scene.
@@ -1425,7 +1434,7 @@ bool GrassField::Refresh()
             const float dz = (z + .5f) * span - local.z;
             const float edgeX = std::max(0.f, std::abs(dx) - span * .5f);
             const float edgeZ = std::max(0.f, std::abs(dz) - span * .5f);
-            if (edgeX * edgeX + edgeZ * edgeZ > radius * radius) continue;
+            if (edgeX * edgeX + edgeZ * edgeZ + aboveSquared > radius * radius) continue;
             // Far ring: skip tiles wholly inside the inner radius.
             if (innerRadius > 0.f)
             {
@@ -1433,7 +1442,7 @@ bool GrassField::Refresh()
                 // detail budget scales.
                 const float inner = innerRadius * DetailRadiusScale();
                 const float farX = std::abs(dx) + span * .5f, farZ = std::abs(dz) + span * .5f;
-                if (farX * farX + farZ * farZ < inner * inner) continue;
+                if (farX * farX + farZ * farZ + aboveSquared < inner * inner) continue;
             }
             if (m_placementCount && !m_placementTiles->count({x,z})) continue;
             const Tile key{x,z};
@@ -1479,7 +1488,7 @@ bool GrassField::Refresh()
                 changed = true;
             }
             changed = tile.mesh->AdvanceRuntimeLodTransition(delta) || changed;
-            const float edgeDistance = std::sqrt(edgeX * edgeX + edgeZ * edgeZ);
+            const float edgeDistance = std::sqrt(edgeX * edgeX + edgeZ * edgeZ + aboveSquared);
             // With the placement fade each plant fades itself; a tile-wide
             // dither would show the 4 m tile squares at the edge.
             const float targetVisibility = placementFade ? 1.f : distanceFadeWidth > 0.f
@@ -1525,7 +1534,7 @@ bool GrassField::Refresh()
             }
             changed = previousVisibility != tile.visibility || changed;
             tile.distanceSquared = dx * dx + dz * dz;
-            const float distance = std::sqrt(tile.distanceSquared);
+            const float distance = std::sqrt(tile.distanceSquared + aboveSquared);
             const int lod = m_useGpuLodSelection ? 0 : tile.mesh->ChooseRuntimeLod(distance, m_lodDistances, hysteresis);
             tile.desiredLod = m_useGpuLodSelection ? 0 : lod;
             tile.mesh->gpuLodSelection=m_useGpuLodSelection;

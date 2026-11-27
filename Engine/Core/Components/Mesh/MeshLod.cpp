@@ -89,12 +89,14 @@ Mesh* Mesh::GetPreviousRuntimeLodMesh() const
         ? m_runtimeLods[m_previousRuntimeLod].get() : nullptr;
 }
 
-void Mesh::SetRuntimeVisibility(float visibility)
+void Mesh::SetRuntimeVisibility(float visibility, bool fromEnd)
 {
     const float next = std::clamp(visibility, 0.f, 1.f);
     if ((next <= 0.f) != (m_runtimeVisibility <= 0.f) ||
-        (next >= 1.f) != (m_runtimeVisibility >= 1.f)) ++m_runtimeFadeRevision;
+        (next >= 1.f) != (m_runtimeVisibility >= 1.f) ||
+        fromEnd != m_runtimeVisibilityFromEnd) ++m_runtimeFadeRevision;
     m_runtimeVisibility = next;
+    m_runtimeVisibilityFromEnd = fromEnd;
 }
 
 glm::vec4 Mesh::GetRuntimeGeometryFade(bool previous) const
@@ -104,6 +106,8 @@ glm::vec4 Mesh::GetRuntimeGeometryFade(bool previous) const
     // Complementary coverage intervals preserve opaque depth writes and avoid
     // transparent sorting. Ordinary, fully visible meshes use the fast path.
     if (previous) return {boundary, m_runtimeVisibility, 0.f, 1.f};
+    if (m_runtimeVisibilityFromEnd && m_previousRuntimeLod < 0)
+        return {1.f - m_runtimeVisibility, 1.f, 0.f, m_runtimeVisibility < 1.f ? 1.f : 0.f};
     return {0.f, boundary, 0.f, boundary < 1.f ? 1.f : 0.f};
 }
 

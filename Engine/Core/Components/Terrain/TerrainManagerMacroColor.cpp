@@ -66,7 +66,11 @@ TerrainManager::MacroColorImage TerrainManager::EncodeMacroColorImage(int width,
             for (int axis = 0; axis < 3; ++axis)
                 image.normalMips.push_back(static_cast<uint8_t>(
                     std::lround(std::clamp(unit[axis] * .5f + .5f, 0.f, 1.f) * 255.f)));
-            image.normalMips.push_back(255);
+            // Alpha: the grass share a build carried as length - 1 (G1;
+            // TerrainManagerArchiveMap). Unit normals (edited patches, maps
+            // without it) read as no grass.
+            image.normalMips.push_back(static_cast<uint8_t>(
+                std::lround(std::clamp(length - 1.f, 0.f, 1.f) * 255.f)));
         }
         ++image.mipLevels;
         if (levelWidth == 1 && levelHeight == 1) break;

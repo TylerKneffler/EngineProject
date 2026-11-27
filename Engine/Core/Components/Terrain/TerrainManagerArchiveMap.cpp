@@ -47,6 +47,7 @@ struct ArchiveMapInputs
     std::shared_ptr<const TerrainPaintArchive> paint;
     float brightness = .85f;
     glm::vec3 steep{-1.f};                 // negative: no steep colour
+    uint32_t coverLayers = 0;              // paint layers grass grows on (G1)
 };
 
 // A cell's baked paint: its layer weights and lushness per grid vertex. A
@@ -244,7 +245,13 @@ TerrainManager::MacroColorImage BuildMacroColors(const ArchiveMapInputs& in,
                     size_t((cx + extent) * perCell + col / step);
                 colors[sample] = glm::vec4(MacroGroundColor(in, &painted[index * layers], lushness[index], dx, dz) *
                     in.brightness, 0.f);
-                normals[sample] = glm::normalize(glm::vec3(-dx, 1.f, -dz));
+                // Grass share (G1): the paint on the layers grass grows on,
+                // carried as the normal's length (1 + share), encoded into
+                // the normal map's alpha (EncodeMacroColorImage).
+                float share = 0.f;
+                for (size_t layer = 0; layer < layers && layer < 32; ++layer)
+                    if (in.coverLayers & (1u << layer)) share += painted[index * layers + layer];
+                normals[sample] = glm::normalize(glm::vec3(-dx, 1.f, -dz)) * (1.f + std::clamp(share, 0.f, 1.f));
             }
         return true;
     });
@@ -282,6 +289,7 @@ ArchiveMapInputs ArchiveMapSnapshot(const TerrainManager& manager)
     in.paint = manager.GetPaintArchive();
     in.brightness = std::clamp(manager.archiveColorBrightness, .1f, 2.f);
     if (!manager.steepMaterial.empty()) in.steep = MaterialMacroColor(manager.steepMaterial);
+    in.coverLayers = manager.GetDistantCover().layerMask;
     return in;
 }
 }
@@ -298,6 +306,10 @@ uint64_t TerrainManager::ArchiveMapKey() const
     const auto paint = GetPaintArchive();
     const uint64_t paintKey = paint ? paint->Signature() : 0;
     mix(&paintKey, sizeof(paintKey));
+    // The grass share (G1) is part of the map: rebuild when the grass fields
+    // publish (or change) the layers they grow on.
+    const uint32_t coverLayers = m_distantCover.layerMask;
+    mix(&coverLayers, sizeof(coverLayers));
     const auto objects = GetObjectArchive();
     const uint64_t objectKey = objects ? objects->Signature() : 0;
     mix(&objectKey, sizeof(objectKey));

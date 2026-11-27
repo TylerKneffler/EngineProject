@@ -299,6 +299,13 @@ struct SceneSettings
     // the work over more frames; the far blocks keep drawing until a cell's
     // own layers are ready, so nothing disappears meanwhile.
     float prefabBuildBudgetMs = 3.f;
+    // Instanced LOD cross-fades (trees, shrubs, rocks) last about this long
+    // whatever the camera's speed: the dissolve band either side of a switch
+    // distance widens with the camera's (smoothed) speed, up to 12 % of
+    // the switch distance. A band of fixed metres passed in a few frames when
+    // flying, so each tree swapped LOD in one step, at its own moment: the
+    // forest flickered (2026-11-26). 0 keeps the fixed bands.
+    float lodTransitionSeconds = .5f;
 
     // Editor-only debug overlays for portals, matrix links, and warp volumes.
     bool portalDebugVisuals = false;

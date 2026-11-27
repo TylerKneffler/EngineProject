@@ -21,7 +21,7 @@ using Scene = Engine::Scene::Scene;
 namespace
 {
 constexpr std::size_t kObjectGPUDataSize = sizeof(ObjectGPUData);
-static_assert(kObjectGPUDataSize == 2000u, "Object buffer layout must match Object.hlsl");
+static_assert(kObjectGPUDataSize == 2048u, "Object buffer layout must match Object.hlsl");
 
 std::vector<float> GenerateBrdfIntegrationLut(uint32_t resolution)
 {

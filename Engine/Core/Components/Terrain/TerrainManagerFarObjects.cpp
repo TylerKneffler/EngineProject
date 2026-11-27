@@ -1,3 +1,5 @@
+#include "Core/Rendering/CellHandover.h"
+#include "Core/Components/Terrain/TerrainEvents.h"
 #include "Core/Components/Terrain/TerrainManager.h"
 #include "Core/Components/Terrain/TerrainObjectLayer.h"
 #include "Core/Components/Terrain/TerrainObjectArchive.h"
@@ -259,12 +261,94 @@ std::vector<TerrainObjectLayer::Placement> ClusterFarPlacements(
     }
     return result;
 }
+
+// A far block's inputs for BuildFarBlockPlacements: each member cell's offset
+// in the block and its shared placements (FarObjectCell), and the clustering.
+using BlockSources = std::vector<std::pair<glm::vec3,
+    std::shared_ptr<const std::vector<TerrainObjectLayer::Placement>>>>;
+struct ClusterSettings
+{
+    bool trees = true;        // keep the single trees
+    bool clustered = false;   // make the forest clusters
+    std::vector<TerrainManager::FarCluster> clusters;
+    float size = 0.f;
+    int minimum = 1;
+    Cell block{};
+};
+
+// Thread-safe: reads only its arguments.
+// first: single trees, second: forest clusters (TerrainManager::FarBlockBuilt).
+std::pair<std::vector<TerrainObjectLayer::Placement>, std::vector<TerrainObjectLayer::Placement>>
+BuildFarBlockPlacements(const BlockSources& sources,
+    const std::set<std::string>& beyondCull, const ClusterSettings& settings)
+{
+    size_t total = 0;
+    for (const auto& [offset, placements] : sources) total += placements->size();
+    std::vector<TerrainObjectLayer::Placement> result;
+    result.reserve(total);
+    uint64_t id = 0;
+    for (const auto& [offset, placements] : sources)
+        for (const auto& source : *placements)
+        {
+            if (!beyondCull.empty() && beyondCull.count(source.asset)) continue;
+            auto& placement = result.emplace_back(source);
+            placement.position += offset;
+            placement.id = ++id;
+        }
+    std::pair<std::vector<TerrainObjectLayer::Placement>, std::vector<TerrainObjectLayer::Placement>> built;
+    if (settings.clustered)
+        built.second = ClusterFarPlacements(result, settings.clusters, settings.size, settings.minimum, settings.block);
+    if (settings.trees) built.first = std::move(result);
+    return built;
+}
+}
+
+void TerrainManager::RemoveFarBlockObjects(FarObjectBlock& block)
+{
+    auto* scene = Owner ? Owner->GetScene() : nullptr;
+    if (scene && block.object) scene->RemoveObject(block.object);
+    if (scene && block.clusterObject) scene->RemoveObject(block.clusterObject);
+    block.object = block.clusterObject = nullptr;
+    block.layer = block.clusterLayer = nullptr;
+}
+
+void TerrainManager::InstallFarBlockPlacements(FarObjectBlock& block,
+    FarBlockBuilt built, const std::map<std::string, float>& cullDistances,
+    const std::set<std::string>& beyondCull, uint64_t membership)
+{
+    // A form the block does not carry now: its object off, placements freed.
+    const auto install = [&](Engine::Core::Object* object, TerrainObjectLayer* layer,
+        std::vector<TerrainObjectLayer::Placement>& placements, bool wanted)
+    {
+        if (!object || !layer) return;
+        object->enabled = wanted;
+        if (!wanted && layer->placements.empty()) return;
+        layer->objectLods.clear();
+        for (const auto& [asset, distance] : cullDistances)
+        {
+            if (beyondCull.count(asset)) continue;
+            auto& lod = layer->objectLods[asset];
+            lod.cullAfterLastLod = true;
+            lod.finalLodCullDistance = distance;
+        }
+        layer->placements = wanted ? std::move(placements) : std::vector<TerrainObjectLayer::Placement>();
+        layer->MarkConfigurationDirty();
+    };
+    install(block.object, block.layer, built.trees, (block.forms & 1) != 0);
+    install(block.clusterObject, block.clusterLayer, built.clusters, (block.forms & 2) != 0);
+    block.membership = membership;
+    block.prepared = false;
 }
 
 void TerrainManager::FenceFarObjectJobs()
 {
     for (auto& job : m_farObjectJobs)
         if (job.result.valid()) job.result.wait();
+    for (auto& [key, block] : m_farObjectBlocks)
+        if (block.build.valid()) block.build.wait();
+    for (auto& build : m_farBlockDraining)
+        if (build.valid()) build.wait();
+    m_farBlockDraining.clear();
     m_farObjectJobs.clear();
     m_farObjectPending.clear();
 }
@@ -380,6 +464,8 @@ void TerrainManager::UpdateNearObjects()
             continue;
         }
         const Cell blockCell = key.first;
+        ++TerrainEvents::nearBlockRebuilds;
+        TerrainEvents::Log(scene->GetFrameIndex(), "near_block", blockCell.first, blockCell.second, -1);
         if (!block.object)
         {
             block.object = scene->AddObject("Near objects " + std::to_string(blockCell.first) + "," +
@@ -393,6 +479,7 @@ void TerrainManager::UpdateNearObjects()
             block.layer->layerName = key.second;
             block.layer->placementsChangeOnlyWhenMarked = true;
             block.layer->suppressPrefabColliders = true;
+            block.layer->handoverRole = 1;   // a cell's own objects (CellHandover)
         }
         // Settings and project layer follow the member layers (all cells set
         // a layer name up the same way).
@@ -448,9 +535,7 @@ void TerrainManager::ClearFarObjects()
     FenceFarObjectJobs();
     m_farObjectCells.clear();
     m_farNearCovered.clear();
-    if (Owner && Owner->GetScene())
-        for (auto& [key, block] : m_farObjectBlocks)
-            if (block.object) Owner->GetScene()->RemoveObject(block.object);
+    for (auto& [key, block] : m_farObjectBlocks) RemoveFarBlockObjects(block);
     m_farObjectBlocks.clear();
     m_farScanCenter = { INT_MIN, INT_MIN };
     m_farScanRadius = -1;
@@ -459,6 +544,62 @@ void TerrainManager::ClearFarObjects()
     m_farObjectQueueNext = 0;
     m_farDirtyBlocks.clear();
     m_farUrgentBlocks.clear();
+    m_handoverStart.clear();
+    m_handoverAwaitBlock.clear();
+}
+
+// Rendering/CellHandover.h: the cells mid-handover, nearest first: fading
+// cells at their progress, covered cells whose far block still draws them at
+// 1, then loaded cells whose objects are not ready at 0 (their near objects
+// stay hidden even if a block shows them a frame early).
+void TerrainManager::PublishCellHandover(int centerX, int centerY)
+{
+    auto& handover = Engine::Rendering::CellHandover::Get();
+    auto* scene = Owner ? Owner->GetScene() : nullptr;
+    handover.scene = scene;
+    handover.Clear();
+    if (!scene) return;
+    const float seconds = std::clamp(scene->settings.lodTransitionSeconds, 0.f, 2.f);
+    const auto now = std::chrono::steady_clock::now();
+    struct Entry { Cell cell; float progress; int rank; };
+    std::vector<Entry> entries;
+    for (const auto& [cell, started] : m_handoverStart)
+        entries.push_back({cell, seconds > 0.f
+            ? std::clamp(std::chrono::duration<float>(now - started).count() / seconds, 0.f, 1.f) : 1.f, 0});
+    // Covered cells whose far block still draws them: hidden far impostors
+    // (p = 1). Only while the cell is still covered (it leaves the grid when
+    // it is handed back, and its block rebuilds with it at once).
+    for (const auto& [cell, block] : m_handoverAwaitBlock)
+        if (m_farNearCovered.count(cell)) entries.push_back({cell, 1.f, 0});
+    // Only cells within the loaded radius, where a handover will start once
+    // they are ready: a loaded cell further out (the unload margin, or
+    // uncovered while loaded) never starts one, and listing it at 0 hid its
+    // near objects for good, bushes and rocks with no far impostor included
+    // (objects vanished, 2026-11-27). Unlisted, they draw.
+    // And only cells a near block holds: otherwise no near object draws
+    // there yet and there is nothing to hide (fewer entries: the list holds
+    // MaximumCells).
+    std::set<Cell> blockMembers;
+    for (const auto& [key, block] : m_nearObjectBlocks)
+        blockMembers.insert(block.members.begin(), block.members.end());
+    for (const auto& [cell, terrain] : m_loaded)
+        if (!m_farNearCovered.count(cell) && !m_handoverStart.count(cell) && blockMembers.count(cell) &&
+            std::max(std::abs(cell.first - centerX), std::abs(cell.second - centerY)) <= std::max(0, loadedRadius))
+            entries.push_back({cell, 0.f, 1});
+    const auto distance = [&](Cell cell) {
+        return std::max(std::abs(cell.first - centerX), std::abs(cell.second - centerY)); };
+    std::sort(entries.begin(), entries.end(), [&](const Entry& a, const Entry& b) {
+        return a.rank != b.rank ? a.rank < b.rank : distance(a.cell) < distance(b.cell); });
+    // Square cells (the shader takes one span); the camera cell's corner.
+    const glm::dvec3 origin = Owner->transform.GetWorldPositionD();
+    const double span = static_cast<double>(cellsX) * cellWidth;
+    handover.grid = glm::vec3(static_cast<float>(origin.x + centerX * span),
+        static_cast<float>(origin.z + centerY * span), static_cast<float>(1.0 / span));
+    TerrainEvents::handoverWanted = static_cast<uint32_t>(entries.size());
+    uint32_t outside = 0;
+    for (const Entry& entry : entries)
+        if (!handover.Set(entry.cell.first - centerX, entry.cell.second - centerY, entry.progress)) ++outside;
+    TerrainEvents::handoverDropped = outside;   // beyond the grid (a larger loaded radius + margin)
 }
 
 TerrainManager::FarObjectStatus TerrainManager::GetFarObjectStatus() const
@@ -469,7 +610,7 @@ TerrainManager::FarObjectStatus TerrainManager::GetFarObjectStatus() const
     status.pendingCells = m_farObjectPending.size();
     status.blocks = m_farObjectBlocks.size();
     for (const auto& [key, block] : m_farObjectBlocks)
-        if (!block.prepared) ++status.preparingBlocks;
+        if (!block.prepared || block.build.valid()) ++status.preparingBlocks;
     if (std::clamp(farObjectRadius, 0, 64) <= 0 || m_editorStreaming) return status;
     // Not scanned yet (no update since enabling or a reset): nothing known.
     const bool scanned = m_farScanRadius == std::clamp(farObjectRadius, 0, 64);
@@ -622,7 +763,8 @@ void TerrainManager::UpdateFarObjects(int centerX, int centerY)
             const Cell key = it->first;
             if (key.first >= blockMinX && key.first <= blockMaxX &&
                 key.second >= blockMinY && key.second <= blockMaxY) { ++it; continue; }
-            if (it->second.object) scene->RemoveObject(it->second.object);
+            RemoveFarBlockObjects(it->second);
+            DrainFarBlockBuild(it->second);
             m_farDirtyBlocks.erase(key);
             m_farUrgentBlocks.erase(key);
             m_farRecheckBlocks.erase(key);
@@ -708,7 +850,11 @@ void TerrainManager::UpdateFarObjects(int centerX, int centerY)
                             input.archive.reset();
                         }
                         FarObjectCell data;
-                        try { data.placements = FarPlacements(inputs, input, &data.cullDistances); }
+                        try
+                        {
+                            data.placements = std::make_shared<const std::vector<TerrainObjectLayer::Placement>>(
+                                FarPlacements(inputs, input, &data.cullDistances));
+                        }
                         catch (...) {}
                         cells.emplace_back(input.cell, std::move(data));
                     }
@@ -731,8 +877,21 @@ void TerrainManager::UpdateFarObjects(int centerX, int centerY)
         if (found != m_loaded.end() && found->second == it->second &&
             found->second && found->second->Owner) { ++it; continue; }
         m_farUrgentBlocks.insert(blockOf(it->first));
+        m_farSyncBlocks.insert(blockOf(it->first));
+        ++TerrainEvents::uncovered;
+        TerrainEvents::Nearest(TerrainEvents::uncoveredNearest,
+            std::max(std::abs(it->first.first - centerX), std::abs(it->first.second - centerY)));
+        TerrainEvents::Log(scene->GetFrameIndex(), "uncover", it->first.first, it->first.second,
+            std::max(std::abs(it->first.first - centerX), std::abs(it->first.second - centerY)));
         it = m_farNearCovered.erase(it);
     }
+    // ENGINE_CELL_HANDOVER=0 swaps cells in one frame as before (A/B runs).
+    static const bool handoverEnabled = [] {
+        const char* value = std::getenv("ENGINE_CELL_HANDOVER");
+        return !(value && value[0] == '0'); }();
+    const float handoverSeconds = handoverEnabled
+        ? std::clamp(scene->settings.lodTransitionSeconds, 0.f, 2.f) : 0.f;
+    const auto handoverNow = std::chrono::steady_clock::now();
     for (const auto& [cell, terrain] : m_loaded)
     {
         if (!terrain || !terrain->Owner || m_farNearCovered.count(cell)) continue;
@@ -742,10 +901,61 @@ void TerrainManager::UpdateFarObjects(int centerX, int centerY)
                 if (!layer->IsPrefabPreparationComplete(provider)) { complete = false; break; }
         // With near blocks the cell's trees are drawn by its blocks.
         if (complete && !NearObjectsReady(cell, *terrain)) complete = false;
-        if (!complete) continue;
+        const int cellDistance = std::max(std::abs(cell.first - centerX), std::abs(cell.second - centerY));
+        if (!complete)
+        {
+            // A fade under way holds rather than restarts: a near block
+            // re-preparing because a neighbour joined it reports "not ready"
+            // for a few frames while it keeps drawing its previous batches,
+            // which hold this cell. Cancelling made the trees of every cell in
+            // the block vanish and fade in again (16-25 restarts per run at
+            // 250 m/s, 2026-11-27). It completes once ready again.
+            if (m_handoverStart.count(cell))
+                TerrainEvents::Log(scene->GetFrameIndex(), "handover_hold", cell.first, cell.second, cellDistance);
+            continue;
+        }
+        // Cross-fade from the far impostors first (CellHandover); the far
+        // block keeps the cell until the fade is done. Only within the loaded
+        // radius: a cell kept by the unload margin is on its way out and stays
+        // with the far impostors (it finished its handover and unloaded a few
+        // frames later).
+        if (handoverSeconds > 0.f && !m_handoverStart.count(cell) && !m_editorStreaming &&
+            cellDistance > std::max(0, loadedRadius))
+            continue;
+        if (handoverSeconds > 0.f)
+        {
+            const auto [entry, started] = m_handoverStart.emplace(cell, handoverNow);
+            if (started)
+            {
+                ++TerrainEvents::handoverStarted;
+                TerrainEvents::Nearest(TerrainEvents::handoverNearest, cellDistance);
+                TerrainEvents::Log(scene->GetFrameIndex(), "handover_start", cell.first, cell.second, cellDistance);
+            }
+            if (std::chrono::duration<float>(handoverNow - entry->second).count() < handoverSeconds) continue;
+            m_handoverStart.erase(cell);
+            ++TerrainEvents::handoverFaded;
+            TerrainEvents::Log(scene->GetFrameIndex(), "handover_done", cell.first, cell.second, cellDistance);
+        }
+        else
+        {
+            ++TerrainEvents::handoverAbrupt;
+            TerrainEvents::Nearest(TerrainEvents::handoverNearest, cellDistance);
+            TerrainEvents::Log(scene->GetFrameIndex(), "handover_abrupt", cell.first, cell.second, cellDistance);
+        }
+        // ENGINE_FAR_OBJECT_LOG=1: how close to the camera's cell a cell's own
+        // trees take over from the far impostors (in cells).
+        static const bool takeoverLog = std::getenv("ENGINE_FAR_OBJECT_LOG") != nullptr;
+        if (takeoverLog)
+            std::printf("[FarObjects] takeover at %d cells\n",
+                std::max(std::abs(cell.first - centerX), std::abs(cell.second - centerY)));
         m_farNearCovered[cell] = terrain;
         m_farUrgentBlocks.insert(blockOf(cell));
+        if (handoverSeconds > 0.f) m_handoverAwaitBlock[cell] = blockOf(cell);
+        else m_farSyncBlocks.insert(blockOf(cell));
     }
+    for (auto it = m_handoverStart.begin(); it != m_handoverStart.end(); )
+        it = m_loaded.count(it->first) ? std::next(it) : m_handoverStart.erase(it);
+    TerrainEvents::handoverActive = static_cast<uint32_t>(m_handoverStart.size());
 
     // Re-evaluate changed blocks: a block shows its cells that are inside the
     // far radius, computed, and not covered at full detail.
@@ -753,6 +963,12 @@ void TerrainManager::UpdateFarObjects(int centerX, int centerY)
     const double spanZ = static_cast<double>(cellsY) * cellDepth;
     const int projectLayer = Engine::Rendering::DetailBudget::Get().FindLayerOrDefault(
         farObjectProjectLayer);
+    double gatherMs = 0.0;
+    size_t clusteredRebuilds = 0, plainRebuilds = 0, rebuiltPlacements = 0, asyncRebuilds = 0, installedBuilds = 0;
+    // ENGINE_FAR_BLOCK_ASYNC=0 builds every block on the main thread (A/B runs).
+    static const bool asyncBlockBuilds = [] {
+        const char* value = std::getenv("ENGINE_FAR_BLOCK_ASYNC");
+        return !(value && value[0] == '0'); }();
     const auto evaluate = [&](Cell key, bool urgent, bool cached = false)
     {
         if (key.first < blockMinX || key.first > blockMaxX ||
@@ -780,7 +996,7 @@ void TerrainManager::UpdateFarObjects(int centerX, int centerY)
                     outstanding = outstanding || HasCell(x, y);
                     continue;
                 }
-                if (found->second.placements.empty()) continue;
+                if (!found->second.placements || found->second.placements->empty()) continue;
                 members.emplace_back(x, y);
                 membership = (membership ^ (static_cast<uint64_t>(x - key.first * blockCells) |
                     static_cast<uint64_t>(y - key.second * blockCells) << 8)) * 1099511628211ull;
@@ -792,9 +1008,20 @@ void TerrainManager::UpdateFarObjects(int centerX, int centerY)
         const int gapCells = std::max({0, key.first * blockCells - centerX,
             centerX - ((key.first + 1) * blockCells - 1), key.second * blockCells - centerY,
             centerY - ((key.second + 1) * blockCells - 1)});
-        const bool clustered = !farClusters.empty() && farClusterDistance > 0.f &&
-            static_cast<double>(gapCells) * std::min(spanX, spanZ) >= farClusterDistance;
-        if (clustered) membership = (membership ^ 0x636c7573ull) * 1099511628211ull;
+        // Which forms the block carries (FarObjectBlock::clusterLayer): single
+        // trees while part of it can be inside farClusterDistance plus the
+        // dissolve band (at most 12 % of the distance, InstanceLodFadeWidth),
+        // clusters while part can be beyond it less the band. The camera is
+        // somewhere in its cell, so both bounds are loose by a cell.
+        const bool clusters = !farClusters.empty() && farClusterDistance > 0.f;
+        const double cellSpan = std::min(spanX, spanZ);
+        const double nearLow = static_cast<double>(std::max(0, gapCells - 1)) * cellSpan;
+        const double farHigh = static_cast<double>(gapCells + blockCells + 1) * std::max(spanX, spanZ) * 1.4143;
+        const double bandMargin = farClusterDistance * .12 + 16.0;
+        const int forms = !clusters ? 1 : (nearLow < farClusterDistance + bandMargin ? 1 : 0) |
+            (farHigh > farClusterDistance - bandMargin ? 2 : 0);
+        const bool clustered = (forms & 2) != 0;
+        membership = (membership ^ (0x636c7573ull + static_cast<uint64_t>(forms))) * 1099511628211ull;
         // Assets with a cull distance (cliff pieces) leave blocks that lie
         // wholly beyond it, so those blocks carry no batches for them.
         std::map<std::string, float> cullDistances;
@@ -813,7 +1040,8 @@ void TerrainManager::UpdateFarObjects(int centerX, int centerY)
         {
             if (const auto found = m_farObjectBlocks.find(key); found != m_farObjectBlocks.end())
             {
-                if (found->second.object) scene->RemoveObject(found->second.object);
+                RemoveFarBlockObjects(found->second);
+                DrainFarBlockBuild(found->second);
                 m_farObjectBlocks.erase(found);
             }
             return true;
@@ -825,7 +1053,21 @@ void TerrainManager::UpdateFarObjects(int centerX, int centerY)
             block.cullDistances = cullDistances;
             block.membersValid = !outstanding;
         }
+        if (block.build.valid())
+        {
+            if (block.buildMembership == membership) return true;
+            DrainFarBlockBuild(block);   // superseded
+        }
         if (block.object && block.membership == membership) return true;
+        // A form added or dropped: every placement of it is beyond its band
+        // then (nothing changes on screen); counted to keep an eye on it.
+        if (block.object && block.forms != forms)
+        {
+            ++TerrainEvents::farClusterFlips;
+            TerrainEvents::Log(scene->GetFrameIndex(), (forms & ~block.forms) ? "cluster_on" : "cluster_off",
+                key.first, key.second, gapCells);
+        }
+        block.forms = forms;
         if (!block.object)
         {
             block.object = scene->AddObject("Far objects " +
@@ -839,6 +1081,7 @@ void TerrainManager::UpdateFarObjects(int centerX, int centerY)
                 static_cast<double>(key.second) * blockCells * spanZ};
             block.layer = block.object->AddComponent<TerrainObjectLayer>();
             block.layer->layerName = "Far objects";
+            block.layer->handoverRole = 2;   // far impostors (CellHandover)
             // Single-level chains: the far assets are already the last LOD.
             // Out to the far canopy distance when there is one: past it
             // the terrain's canopy (from these same placements) takes over.
@@ -852,44 +1095,80 @@ void TerrainManager::UpdateFarObjects(int centerX, int centerY)
             // Placements are only ever replaced below, then marked dirty.
             block.layer->placementsChangeOnlyWhenMarked = true;
         }
-        // A clustered block lies wholly beyond farClusterDistance: when the
-        // far casters stop before that (farShadowDistance follows the view
-        // distance), it can never cast, so it leaves the shadow view instead
-        // of being prepared and culled there every frame (+0.3 ms at 23 m/s).
+        // The two forms as bands of one LOD switch at farClusterDistance.
+        block.layer->forcedLodBand = clusters ? 0 : -1;
+        block.layer->forcedLodDistance = farClusterDistance;
+        if (clustered && !block.clusterObject)
         {
-            const float casterReach = block.layer->viewDistance;
-            block.layer->farShadowDistance = clustered && casterReach <= farClusterDistance ? 0.f : casterReach;
+            block.clusterObject = scene->AddObject("Far clusters " +
+                std::to_string(key.first) + "," + std::to_string(key.second));
+            block.clusterObject->runtimeOnly = true;
+            block.clusterObject->layer = projectLayer;
+            scene->MoveObject(block.clusterObject, Owner, Engine::Scene::Scene::ObjectPlacement::AsChild);
+            block.clusterObject->transform.position = block.object->transform.position;
+            block.clusterLayer = block.clusterObject->AddComponent<TerrainObjectLayer>();
+            block.clusterLayer->layerName = "Far clusters";
+            block.clusterLayer->handoverRole = 2;
+            block.clusterLayer->viewDistance = block.layer->viewDistance;
+            block.clusterLayer->lod1Distance = 100000.f;
+            block.clusterLayer->lod2Distance = 100000.f;
+            block.clusterLayer->shadowDistance = 0.f;
+            block.clusterLayer->placementsChangeOnlyWhenMarked = true;
+            block.clusterObject->enabled = false;
         }
-        std::vector<TerrainObjectLayer::Placement> placements;
-        uint64_t id = 0;
+        if (block.clusterLayer)
+        {
+            block.clusterLayer->forcedLodBand = 1;
+            block.clusterLayer->forcedLodDistance = farClusterDistance;
+            // Clusters lie beyond farClusterDistance: when the far casters
+            // stop before that (the view distance), they can never cast, so
+            // they leave the shadow view instead of being prepared and
+            // culled there every frame (+0.3 ms at 23 m/s).
+            const float casterReach = block.clusterLayer->viewDistance;
+            block.clusterLayer->farShadowDistance = casterReach <= farClusterDistance ? 0.f : casterReach;
+        }
+        // The block's placements: its cells' (shared, read-only) placements
+        // moved into the block, then clustered past farClusterDistance. Copying
+        // ~17k placements and clustering took 5-8 ms of the main thread a
+        // frame flying at 250 m/s (2026-11-26), so blocks away from the loaded
+        // cells build on a worker and install when ready. Blocks next to them
+        // build at once: a loaded cell's takeover must hide its far trees in
+        // the same frame (no doubled trees, no hole).
+        BlockSources sources;
+        sources.reserve(members.size());
         for (const Cell& cell : members)
+            if (const auto& shared = m_farObjectCells[cell].placements)
+                sources.push_back({glm::vec3(
+                    static_cast<float>((cell.first - key.first * blockCells) * spanX), 0.f,
+                    static_cast<float>((cell.second - key.second * blockCells) * spanZ)), shared});
+        const ClusterSettings clusterSettings{(forms & 1) != 0, clustered, farClusters,
+            std::clamp(farClusterSize, 4.f, 1000.f), std::max(1, farClusterMinimumTrees), key};
+        // On the main thread only when a coverage change needs this frame
+        // (m_farSyncBlocks); before handover fades every block next to the
+        // loaded cells did (the camera's block rebuilt ~1 frame in 5 at 250 m/s).
+        const bool nearLoaded = m_farSyncBlocks.count(key) != 0;
+        if (asyncBlockBuilds && !nearLoaded)
         {
-            const glm::vec3 offset(
-                static_cast<float>((cell.first - key.first * blockCells) * spanX), 0.f,
-                static_cast<float>((cell.second - key.second * blockCells) * spanZ));
-            for (auto placement : m_farObjectCells[cell].placements)
-            {
-                if (!beyondCull.empty() && beyondCull.count(placement.asset)) continue;
-                placement.position += offset;
-                placement.id = ++id;
-                placements.push_back(std::move(placement));
-            }
+            block.buildMembership = membership;
+            block.buildCullDistances = cullDistances;
+            block.buildBeyondCull = beyondCull;
+            block.build = std::async(std::launch::async,
+                [sources = std::move(sources), beyondCull, clusterSettings]() {
+                    auto forms = BuildFarBlockPlacements(sources, beyondCull, clusterSettings);
+                    return FarBlockBuilt{std::move(forms.first), std::move(forms.second)};
+                });
+            ++asyncRebuilds;
+            return true;
         }
-        if (clustered)
-            placements = ClusterFarPlacements(placements, farClusters,
-                std::clamp(farClusterSize, 4.f, 1000.f), std::max(1, farClusterMinimumTrees), key);
-        block.layer->objectLods.clear();
-        for (const auto& [asset, distance] : cullDistances)
-        {
-            if (beyondCull.count(asset)) continue;
-            auto& lod = block.layer->objectLods[asset];
-            lod.cullAfterLastLod = true;
-            lod.finalLodCullDistance = distance;
-        }
-        block.layer->placements = std::move(placements);
-        block.layer->MarkConfigurationDirty();
-        block.membership = membership;
-        block.prepared = false;
+        const auto gatherStart = std::chrono::steady_clock::now();
+        auto bothForms = BuildFarBlockPlacements(sources, beyondCull, clusterSettings);
+        FarBlockBuilt built{std::move(bothForms.first), std::move(bothForms.second)};
+        gatherMs += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - gatherStart).count();
+        rebuiltPlacements += built.trees.size() + built.clusters.size();
+        if (clustered) ++clusteredRebuilds; else ++plainRebuilds;
+        InstallFarBlockPlacements(block, std::move(built), cullDistances, beyondCull, membership);
+        ++TerrainEvents::farBlockRebuilds;
+        TerrainEvents::Log(scene->GetFrameIndex(), "far_block", key.first, key.second, gapCells);
         return true;
     };
     // ENGINE_FAR_OBJECT_LOG=1: where a slow update goes (rebuilt blocks,
@@ -915,6 +1194,25 @@ void TerrainManager::UpdateFarObjects(int centerX, int centerY)
     for (const Cell key : m_farRecheckBlocks)
         evaluate(key, true, true);
     m_farRecheckBlocks.clear();
+    m_farSyncBlocks.clear();
+
+    // Install finished worker builds; let superseded ones finish.
+    for (auto& [key, block] : m_farObjectBlocks)
+        if (block.build.valid() && block.build.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
+        {
+            FarBlockBuilt built;
+            try { built = block.build.get(); }
+            catch (...) { continue; }
+            if (!block.layer) continue;
+            InstallFarBlockPlacements(block, std::move(built), block.buildCullDistances,
+                block.buildBeyondCull, block.buildMembership);
+            ++installedBuilds;
+            ++TerrainEvents::farBlockInstalls;
+            TerrainEvents::Log(scene->GetFrameIndex(), "far_block_install", key.first, key.second, -1);
+        }
+    m_farBlockDraining.erase(std::remove_if(m_farBlockDraining.begin(), m_farBlockDraining.end(), [](auto& build) {
+        return !build.valid() || build.wait_for(std::chrono::seconds(0)) == std::future_status::ready; }),
+        m_farBlockDraining.end());
 
     const auto latchStart = std::chrono::steady_clock::now();
     size_t latched = 0, unprepared = 0;
@@ -923,19 +1221,33 @@ void TerrainManager::UpdateFarObjects(int centerX, int centerY)
         if (!block.prepared && block.layer)
         {
             ++unprepared;
-            if (block.layer->IsPrefabPreparationComplete(provider)) { block.prepared = true; ++latched; }
+            // Both forms the block carries (a form it does not carry is off).
+            const bool treesReady = !(block.forms & 1) || block.layer->IsPrefabPreparationComplete(provider);
+            const bool clustersReady = !(block.forms & 2) || !block.clusterLayer ||
+                block.clusterLayer->IsPrefabPreparationComplete(provider);
+            if (treesReady && clustersReady) { block.prepared = true; ++latched; }
         }
+    for (auto it = m_handoverAwaitBlock.begin(); it != m_handoverAwaitBlock.end(); )
+    {
+        const auto found = m_farObjectBlocks.find(it->second);
+        const bool settled = found == m_farObjectBlocks.end() ||
+            (found->second.prepared && !found->second.build.valid());
+        it = settled || !m_farNearCovered.count(it->first) ? m_handoverAwaitBlock.erase(it) : std::next(it);
+    }
+    PublishCellHandover(centerX, centerY);
     if (farLog)
     {
         const auto now = std::chrono::steady_clock::now();
         const double rebuildMs = std::chrono::duration<double, std::milli>(latchStart - rebuildStart).count();
         const double latchMs = std::chrono::duration<double, std::milli>(now - latchStart).count();
         if (std::chrono::duration<double, std::milli>(now - scanStart).count() > 5.0)
-            std::printf("[FarObjects] scan %.1f, schedule %zu cells %.1f, covered %.1f, rebuild %zu blocks %.1f, latch %zu/%zu %.1f ms\n",
+            std::printf("[FarObjects] scan %.1f, schedule %zu cells %.1f, covered %.1f, rebuild %zu blocks %.1f "
+                "(%zu plain + %zu clustered here, %zu placements %.1f ms; %zu to workers, %zu installed), latch %zu/%zu %.1f ms\n",
                 std::chrono::duration<double, std::milli>(scheduleStart - scanStart).count(),
                 scheduledCells, std::chrono::duration<double, std::milli>(coveredStart - scheduleStart).count(),
                 std::chrono::duration<double, std::milli>(rebuildStart - coveredStart).count(),
-                dirtyCount, rebuildMs, latched, unprepared, latchMs);
+                dirtyCount, rebuildMs, plainRebuilds, clusteredRebuilds, rebuiltPlacements, gatherMs,
+                asyncRebuilds, installedBuilds, latched, unprepared, latchMs);
     }
 }
 }

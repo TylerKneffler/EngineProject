@@ -24,6 +24,7 @@
 #include <filesystem>
 #include <map>
 #include <mutex>
+#include <set>
 #include <thread>
 #include <vector>
 
@@ -46,6 +47,27 @@ int main(int argc, char** argv)
             ? std::filesystem::path(request.filePath)
             : std::filesystem::path(request.directory) / request.filePath;
         if (std::filesystem::exists(path, error)) present.push_back(std::move(request));
+    }
+    // DX12 compiles shader model 6 with DXC (D3DShaderCache::DxcAvailable):
+    // precompile the 6.0 twin of every recorded 5.0 request, as the engine's
+    // own warm-up does, instead of the fxc 5.0 variants (minutes each for
+    // Object.hlsl). ENGINE_SHADER_DXC=0 keeps the recorded targets (DX11).
+    char dxcSetting[8]{};
+    const bool dxcOff = GetEnvironmentVariableA("ENGINE_SHADER_DXC", dxcSetting, sizeof(dxcSetting)) > 0 &&
+        dxcSetting[0] == '0';
+    if (!dxcOff && D3DShaderCache::DxcAvailable())
+    {
+        std::vector<D3DShaderCache::Request> twins;
+        std::set<std::string> listed;
+        for (auto& request : present)
+        {
+            if (request.target.size() == 6 && request.target.compare(2, 4, "_5_0") == 0)
+                request.target = request.target.substr(0, 2) + "_6_0";
+            if (listed.insert(request.directory + '|' + request.filePath + '|' + request.entryPoint + '|' +
+                request.target).second)
+                twins.push_back(std::move(request));
+        }
+        present = std::move(twins);
     }
     if (list)
     {

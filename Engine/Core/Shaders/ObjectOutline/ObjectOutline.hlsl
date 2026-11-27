@@ -72,6 +72,7 @@ struct ObjectData
     float4 viewTextureParams;
     float4 shadowAtlasTiles;
     float4 shadowRefreshBlend[2];
+    uint4 handoverCells[3];
 };
 
 struct InstanceTransform { float4 row0; float4 row1; float4 row2; };

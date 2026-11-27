@@ -256,6 +256,18 @@ float HistoryAge(float2 historyUv, float2 size)
     const int2 texel = clamp(int2(historyUv * size), int2(0, 0), int2(size) - 1);
     return TemporalAge(bloomColor.Load(int3(texel, 0)).a);
 }
+// History weights (temporal.x = fast-motion percent + weight, PostProcess.cpp)
+// and how fast this pixel moves: 0 still or slow, 1 at 32+ pixels a frame.
+float TemporalFeedback() { return frac(temporal.x); }
+float TemporalMotionFeedback() { return min(floor(temporal.x) * 0.01, frac(temporal.x)); }
+float TemporalMotion(float2 motionPixels) { return smoothstep(4.0, 32.0, length(motionPixels)); }
+// The weight for a pixel moving `motion` (0-1): fast motion keeps less
+// history, which also matches the strip a turn reveals to the rest.
+float MotionFeedback(float motion)
+{
+    return lerp(TemporalFeedback(), TemporalMotionFeedback(), motion);
+}
+
 // Fast settle: a pixel with `age` frames of history weights this frame by at
 // least 1 / (age + 1), a running average over its first frames, until the
 // usual blend (taaFeedback) takes over at about 1 / (1 - feedback) frames.
@@ -269,10 +281,13 @@ float SettleWeight(float currentWeight, float age)
 // A pixel's first frames are softened toward the 3x3 neighbourhood mean
 // (YCoCg, compressed), so dithered fades and aliased edges do not show raw:
 // strongly on the first frame, lightly on the second, not after.
-float3 SettleBlur(float3 currentYCoCg, float3 meanYCoCg, float age)
+// While the view moves fast the rest of the frame keeps less history (sharper,
+// its jitter showing more), so a new pixel is softened less to match.
+float3 SettleBlur(float3 currentYCoCg, float3 meanYCoCg, float age, float motion = 0.0)
 {
     if (!FastSettle()) return currentYCoCg;
-    return lerp(currentYCoCg, meanYCoCg, age < 0.5 ? 0.75 : age < 1.5 ? 0.35 : 0.0);
+    const float first = lerp(0.75, 0.4, motion), second = lerp(0.35, 0.15, motion);
+    return lerp(currentYCoCg, meanYCoCg, age < 0.5 ? first : age < 1.5 ? second : 0.0);
 }
 
 // History fetch with a Catmull-Rom filter in five bilinear taps (Jimenez,
@@ -364,25 +379,28 @@ float4 TemporalUpscale(VertexOutput input, int2 renderSize, int2 outputSize)
     const float2 outputUv = outputPosition / float2(outputSize);
     const float2 historyUv = outputUv +
         (float2(previousNdc.x * 0.5 + 0.5, 0.5 - previousNdc.y * 0.5) - uv);
+    const float2 motionPixels = (historyUv - outputUv) * float2(outputSize);
+    const float motion = TemporalMotion(motionPixels);
     if (any(historyUv < 0.0) || any(historyUv > 1.0))
-        return float4(HistoryDebugNone(fresh.rgb), fresh.a);
+        return float4(HistoryDebugNone(TemporalExpand(max(TemporalFromYCoCg(
+            SettleBlur(current, mean, 0.0, motion)), 0.0))), fresh.a);
     const float age = HistoryAge(historyUv, float2(outputSize));
     float3 history = TemporalToYCoCg(TemporalCompress(
         SampleHistoryCatmullRom(historyUv, float2(outputSize))));
-    const float3 extent = deviation * 1.25 + 1e-4;
+    // Fast motion clips the history tighter (less trailing at edges).
+    const float3 extent = deviation * lerp(1.25, 0.8, motion) + 1e-4;
     const float3 offset = history - mean;
     const float3 units = abs(offset / extent);
     const float largest = max(units.x, max(units.y, units.z));
     if (largest > 1.0) history = mean + offset / largest;
-    const float2 motionPixels = (historyUv - outputUv) * float2(outputSize);
-    const float feedback = temporal.x * lerp(1.0, 0.8, saturate(length(motionPixels) / 16.0));
+    const float feedback = MotionFeedback(motion);
     // Confidence: how close the nearest sample fell to this output pixel's
     // centre, in output pixels (1 on it, ~0.6 half a pixel away).
     const float scale = 0.5 * (toRender.x + toRender.y);
     const float confidence = exp(-2.0 * nearestDistance / (scale * scale));
     const float currentWeight = SettleWeight(
         saturate((1.0 - feedback) * (0.3 + 1.7 * confidence)), age);
-    const float3 resolved = lerp(history, SettleBlur(current, mean, age), currentWeight);
+    const float3 resolved = lerp(history, SettleBlur(current, mean, age, motion), currentWeight);
     return float4(TemporalExpand(max(TemporalFromYCoCg(resolved), 0.0)), PackTemporalAlpha(alpha, age + 1.0));
 }
 
@@ -439,23 +457,32 @@ float4 TemporalResolvePS(VertexOutput input) : SV_Target
     const float2 previousNdc = previous.xy / previous.w;
     const float2 historyUv = (input.position.xy / float2(width, height)) +
         (float2(previousNdc.x * 0.5 + 0.5, 0.5 - previousNdc.y * 0.5) - uv);
+    const float2 motionPixels = (historyUv - input.position.xy / float2(width, height)) *
+        float2(width, height);
+    const float motion = TemporalMotion(motionPixels);
+    // The strip a turn reveals: softened less while the view moves fast, to
+    // match the rest of the frame (which keeps less history then).
     if (any(historyUv < 0.0) || any(historyUv > 1.0))
-        return float4(HistoryDebugNone(fresh.rgb), fresh.a);
+        return float4(HistoryDebugNone(TemporalExpand(max(TemporalFromYCoCg(
+            SettleBlur(TemporalToYCoCg(current), mean, 0.0, motion)), 0.0))), fresh.a);
     const float age = HistoryAge(historyUv, float2(width, height));
-    float3 history = TemporalToYCoCg(TemporalCompress(
-        max(bloomColor.SampleLevel(sceneSampler, historyUv, 0.0).rgb, 0.0)));
-    // Clip the history toward the neighbourhood mean into its colour box.
-    const float3 extent = deviation * 1.25 + 1e-4;
+    // Catmull-Rom while moving (a bilinear fetch blurs the history each frame
+    // it is resampled at a sub-pixel offset); one tap when still.
+    float3 history = TemporalToYCoCg(TemporalCompress(length(motionPixels) > 0.25
+        ? SampleHistoryCatmullRom(historyUv, float2(width, height))
+        : max(bloomColor.SampleLevel(sceneSampler, historyUv, 0.0).rgb, 0.0)));
+    // Clip the history toward the neighbourhood mean into its colour box;
+    // tighter with fast motion (less trailing at edges).
+    const float3 extent = deviation * lerp(1.25, 0.8, motion) + 1e-4;
     const float3 offset = history - mean;
     const float3 units = abs(offset / extent);
     const float largest = max(units.x, max(units.y, units.z));
     if (largest > 1.0) history = mean + offset / largest;
-    // Less history when the pixel moved a lot: resampling blurs it.
-    const float2 motionPixels = (historyUv - input.position.xy / float2(width, height)) *
-        float2(width, height);
-    const float feedback = temporal.x * lerp(1.0, 0.8, saturate(length(motionPixels) / 16.0));
+    // Less history when the pixel moved a lot (taaMotionFeedback).
+    const float feedback = MotionFeedback(motion);
     const float currentWeight = SettleWeight(1.0 - feedback, age);
-    const float3 resolved = lerp(history, SettleBlur(TemporalToYCoCg(current), mean, age), currentWeight);
+    const float3 resolved = lerp(history, SettleBlur(TemporalToYCoCg(current), mean, age, motion),
+        currentWeight);
     return float4(TemporalExpand(max(TemporalFromYCoCg(resolved), 0.0)), PackTemporalAlpha(alpha, age + 1.0));
 }
 

@@ -1226,7 +1226,30 @@ int GameApplication::Run(HINSTANCE instance, const GameBenchmarkOptions* benchma
             videoProfile->cpuLoadMs, videoProfile->gpuLoadMs);
         Engine::Rendering::HardwareSimulation::Get().SetProfileName(videoProfile->name);
     }
-    if (!benchmark && !SelectStartupRenderer(settings))
+    // --renderer <DirectX12|DirectX11|Vulkan> (or dx12, dx11, vulkan) picks the
+    // renderer for this run without the selection dialog (scripted launches);
+    // the saved preference (Game.renderer.json) is left as it is.
+    std::string rendererArgument;
+    {
+        int count = 0;
+        if (LPWSTR* arguments = CommandLineToArgvW(GetCommandLineW(), &count))
+        {
+            for (int i = 1; i + 1 < count; ++i)
+                if (std::wstring(arguments[i]) == L"--renderer")
+                    rendererArgument = std::filesystem::path(arguments[i + 1]).string();
+            LocalFree(arguments);
+        }
+        std::string lower = rendererArgument;
+        std::transform(lower.begin(), lower.end(), lower.begin(),
+            [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        if (lower == "dx12" || lower == "d3d12" || lower == "directx12") rendererArgument = "DirectX12";
+        else if (lower == "dx11" || lower == "d3d11" || lower == "directx11") rendererArgument = "DirectX11";
+        else if (lower == "vulkan" || lower == "vk") rendererArgument = "Vulkan";
+    }
+    if (!rendererArgument.empty() &&
+        ::Engine::Renderers::RendererFactory::IsRendererAvailable(rendererArgument))
+        settings.gameRenderingAPI = rendererArgument;
+    else if (!benchmark && !SelectStartupRenderer(settings))
         return 0;
 
     const auto startupBackground =
@@ -1268,6 +1291,8 @@ int GameApplication::Run(HINSTANCE instance, const GameBenchmarkOptions* benchma
             effects.antiAliasing.grassMinimumWidth = std::atoi(value) != 0;
         if (const char* value = std::getenv("ENGINE_TAA"))
             effects.antiAliasing.taa = std::atoi(value) != 0;
+        if (const char* value = std::getenv("ENGINE_TAA_MOTION_FEEDBACK"))
+            effects.antiAliasing.taaMotionFeedback = static_cast<float>(std::atof(value));
         if (const char* value = std::getenv("ENGINE_AUTO_EXPOSURE"))
             effects.postEffects.autoExposure = std::atoi(value) != 0;
         Engine::Rendering::RenderingEffects::Get().Configure(effects);
@@ -1368,6 +1393,9 @@ int GameApplication::Run(HINSTANCE instance, const GameBenchmarkOptions* benchma
     if (const char* preset = std::getenv("ENGINE_QUALITY_PRESET"))
         scene.settings.graphicsQuality.preset = std::clamp(std::atoi(preset), 0,
             Engine::Model::GraphicsQualitySettings::AutoPreset);
+    // ENGINE_LOD_TRANSITION_SECONDS overrides SceneSettings::lodTransitionSeconds (A/B runs).
+    if (const char* seconds = std::getenv("ENGINE_LOD_TRANSITION_SECONDS"))
+        scene.settings.lodTransitionSeconds = std::clamp(static_cast<float>(std::atof(seconds)), 0.f, 2.f);
     // Diagnostics: ENGINE_ATMOSPHERE_FOG=0/1 forces the scene height fog off
     // or on (with the scene's or default parameters) for A/B captures.
     if (const char* fog = std::getenv("ENGINE_ATMOSPHERE_FOG"))
@@ -1537,6 +1565,7 @@ int GameApplication::Run(HINSTANCE instance, const GameBenchmarkOptions* benchma
         {
             input.focused = false;
             input.keys.fill(0);
+            input.hasRawMouse = false;
             if (input.hasCenter) input.cursor = input.center;
         }
         // A route walk moves the camera itself, from the frame W would go
@@ -1567,6 +1596,7 @@ int GameApplication::Run(HINSTANCE instance, const GameBenchmarkOptions* benchma
             // snapshot path without moving the host cursor or keyboard.
             input.focused = true;
             input.keys.fill(0);
+            input.hasRawMouse = false; // the look is driven through the cursor
             if (input.hasCenter) input.cursor = input.center;
             const uint64_t clickStart = uint64_t(benchmark->warmup) + 5u;
             if (benchmarkFrame >= clickStart && benchmarkFrame < clickStart + 3u)
@@ -1597,6 +1627,9 @@ int GameApplication::Run(HINSTANCE instance, const GameBenchmarkOptions* benchma
             previousOcclusionCulled = renderLoop.BeginFrame();
         auto tick = simulation.FinishFrame(width && height,
             previousOcclusionCulled);
+        // Every frame, not only benchmark ones: the performance overlay reads
+        // it too (it showed 0 fps in normal play).
+        tick.intervalMs = double(deltaTime) * 1000.0;
         if (benchmarkStarted && width && height)
         {
             if (!benchmarkReady)
@@ -1626,7 +1659,6 @@ int GameApplication::Run(HINSTANCE instance, const GameBenchmarkOptions* benchma
             {
                 tick.flagged = flagPressed;
                 tick.benchmarkFrame = benchmarkFrame++;
-                tick.intervalMs = double(deltaTime) * 1000.0;
                 tick.residencyWaitMs = residencyWaitMs;
             }
         }

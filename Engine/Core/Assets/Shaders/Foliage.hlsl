@@ -24,7 +24,7 @@ float4 PSMain(
 {
     g_primitiveId = primitiveId; // editor Triangles view
     // Instanced LOD bands dissolve per tree (see ApplyGeometryFade).
-    g_instanceLodDistance = instanceLodDistance;
+    ReadInstanceLodDistance(instanceLodDistance);
     // Shrubs and bushes dissolve in at their range edge (see VSMain).
     ReadPlacementOpacity(uvChannels4);
 #ifdef GRASS_SURFACE_SHADING

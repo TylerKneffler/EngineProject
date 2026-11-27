@@ -194,9 +194,11 @@ constexpr std::array<TextureField, 9> kMaterialTextureFields{
 // every frame. ENGINE_MATERIAL_RECORDS_ACROSS_FRAMES=0 keeps them per frame (A/B).
 template<class Cached>
 bool MaterialRecordValid(uint64_t serial, const glm::vec3& ambient, const Engine::Components::Material& material,
-    const Cached& cached, const ObjectGPUData& seed)
+    const Cached& cached, const ObjectGPUData& seed,
+    const std::array<const Engine::Graphics::IGraphicsTexture*, 30>& initialTextures)
 {
-    if (cached.data.size() != sizeof(ObjectGPUData) || cached.revision != material.GetConfigurationRevision())
+    if (cached.data.size() != sizeof(ObjectGPUData) || cached.revision != material.GetConfigurationRevision() ||
+        cached.initial != initialTextures)
         return false;
     if (cached.frame == serial) return true;
     static const bool acrossFrames = [] {
@@ -254,7 +256,8 @@ ResolvedMaterialRecord SceneRendererDrawPreparation::ResolveMaterialRecord(
         Engine::Rendering::MaterialCachePolicy::Get().RenderMaterialCacheEnabled();
     auto& cached = useCache
         ? renderer.m_renderMaterialCache[&material][variant] : uncached;
-    if (useCache && MaterialRecordValid(renderer.m_materialPreparationSerial, scene.settings.ambientColor, material, cached, environmentSeed))
+    if (useCache && MaterialRecordValid(renderer.m_materialPreparationSerial, scene.settings.ambientColor, material, cached, environmentSeed,
+            initialTextures))
     {
         std::memcpy(&data, cached.data.data(), sizeof(data));
         textures = cached.textures;
@@ -379,6 +382,7 @@ ResolvedMaterialRecord SceneRendererDrawPreparation::ResolveMaterialRecord(
         cached.data.resize(sizeof(data));
         std::memcpy(cached.data.data(), &data, sizeof(data));
         cached.textures = textures;
+        cached.initial = initialTextures;
         cached.doubleSided = doubleSided;
         cached.alphaMode = uint32_t(alphaMode);
         cached.revision = material.GetConfigurationRevision();
@@ -428,7 +432,8 @@ void SceneRendererDrawPreparation::ResolveAndApplyMaterialRecord(
             if (found != byMaterial->second.end())
             {
                 const auto& cached = found->second;
-                if (MaterialRecordValid(renderer.m_materialPreparationSerial, renderer.GetScene().settings.ambientColor, material, cached, objectData))
+                if (MaterialRecordValid(renderer.m_materialPreparationSerial, renderer.GetScene().settings.ambientColor, material, cached, objectData,
+                    textures))
                 {
                     // operator new storage: aligned for ObjectGPUData.
                     ApplyMaterialData(*reinterpret_cast<const ObjectGPUData*>(cached.data.data()),
@@ -512,6 +517,12 @@ void SceneRendererDrawPreparation::PrepareTerrainMaterial(
     auto* batch = object->GetComponent<Engine::Components::TerrainBatchAppearance>();
     if (!terrain && !batch)
         return;
+    // ENGINE_TERRAIN_LEVEL_DEBUG=1: flat colour by chunk level / distant node
+    // size (Object.hlsl, terrainTrailReserved.w 20 + level).
+    static const bool levelDebug = std::getenv("ENGINE_TERRAIN_LEVEL_DEBUG") != nullptr;
+    if (levelDebug)
+        objectData.terrainTrailReserved = glm::vec4(0.f, 0.f, 0.f,
+            20.f + float(batch && batch->debugLevel >= 0 ? batch->debugLevel : 9));
     // Compact terrain vertices carry no layer weights: only a cell with a
     // paint map (Terrain::compactMesh) can be shaded with its layers.
     // Distant terrain tiles carry no layers at all (vertex colour only), so
@@ -598,8 +609,19 @@ void SceneRendererDrawPreparation::PrepareTerrainMaterial(
     {
         objectData.materialParams.w = textured && arrays ? 4194304.f : 0.f;
         if (reliefManager)
+        {
             objectData.terrainSteep = glm::vec4(.25f, .45f,
                 static_cast<float>(std::clamp(reliefManager->volumeSteepLayer, 0, 5)), 1.f);
+            // Grass to the horizon (G1-G2): the loaded cells' ground cover on
+            // the distant nodes, weighted per pixel by the macro map's grass
+            // share; SceneRendering gives such draws the wind time.
+            const auto& cover = reliefManager->GetDistantCover();
+            if (cover.strength > 0.f && reliefManager->distantGrass)
+            {
+                objectData.groundCoverColor = glm::vec4(cover.color, std::clamp(cover.strength, 0.f, 1.f));
+                objectData.groundCoverRange = glm::vec4(0.f, 0.f, float(cover.layerMask & 63u), cover.rootShade);
+            }
+        }
     }
     if (!distantLayers && textured && arrays &&
         (reliefManager ? reliefManager->reliefMapping : (terrain && terrain->reliefMapping)))

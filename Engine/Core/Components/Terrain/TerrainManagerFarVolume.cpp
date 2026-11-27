@@ -1,3 +1,4 @@
+#include "Core/Components/Terrain/TerrainEvents.h"
 #include "TerrainManager.h"
 #include "Core/Components/Camera/Camera.h"
 #include "Core/Graphics/IGraphicsProvider.h"
@@ -251,7 +252,8 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
     // Loaded cells drawn by their volumes, within the loaded radius: a cell
     // past it is about to unload once a far node covers it (StreamCells).
     std::set<Cell> shownCells;
-    const int nearRadius = std::clamp(m_editorStreaming ? editorRadius : loadedRadius, 0, 32);
+    // Loaded cells kept by the unload margin still draw themselves.
+    const int nearRadius = KeptRadius();
     for (const auto& [cell, terrain] : m_loaded)
         if (std::max(std::abs(cell.first - centerX), std::abs(cell.second - centerY)) <= nearRadius &&
             terrain && terrain->Owner && terrain->Owner->enabled)
@@ -283,6 +285,7 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
     // Install finished builds (a few a frame).
     const auto installStart = FarClock::now();
     int installs = 0;
+    double geometryMs = 0, buffersMs = 0, readyMs = 0;
     for (auto& [key, node] : m_farNodes)
     {
         if (!node.job.valid() || node.job.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
@@ -310,7 +313,11 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
             material->unlit = true;
             // Distant hills shade valleys through the far shadow cascade.
             material->castsShadows = true;
-            node.object->AddComponent<TerrainBatchAppearance>()->distantVisual = true;
+            auto* appearance = node.object->AddComponent<TerrainBatchAppearance>();
+            appearance->distantVisual = true;
+            int sizeLevel = 0;
+            while ((1 << (sizeLevel + 1)) <= key.size) ++sizeLevel;
+            appearance->debugLevel = 10 + sizeLevel;
             node.object->enabled = false;
         }
         if (auto* appearance = node.object->GetComponent<TerrainBatchAppearance>();
@@ -329,27 +336,37 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
         // hashed every vertex and waited for the copy: 6-14 ms of the main
         // thread for 1-4 nodes on each cell crossing (todo.md Step 0).
         const bool ownBuffers = factory && factory->SupportsWorkerThreadStaticVertexBufferCreation();
-        if (hasGeometry && node.mesh->SetTerrainGeometry(std::move(built->geometry), false, true, ownBuffers))
+        const auto geometryStart = FarClock::now();
+        auto workerVertexBuffer = std::move(built->vertexBuffer);
+        const bool installed = hasGeometry && node.mesh->SetTerrainGeometry(std::move(built->geometry), false, true, ownBuffers);
+        geometryMs += std::chrono::duration<double, std::milli>(FarClock::now() - geometryStart).count();
+        if (installed)
         {
+            const auto buffersStart = FarClock::now();
             node.mesh->occluderIndices = std::move(built->occluderIndices);
             node.mesh->occluderVertexCount = built->occluderVertexCount;
             if (ownBuffers)
             {
                 const auto& vertices = node.mesh->GetTerrainVertices();
                 const auto& indices = node.mesh->GetIndices();
-                std::shared_ptr<Engine::Graphics::IGraphicsBuffer> vertexBuffer = factory->CreateStaticVertexBufferDeferred(
-                    vertices.size() * sizeof(Mesh::TerrainVertex), vertices.data());
+                std::shared_ptr<Engine::Graphics::IGraphicsBuffer> vertexBuffer = workerVertexBuffer
+                    ? std::move(workerVertexBuffer)
+                    : std::shared_ptr<Engine::Graphics::IGraphicsBuffer>(factory->CreateStaticVertexBufferDeferred(
+                        vertices.size() * sizeof(Mesh::TerrainVertex), vertices.data()));
                 std::shared_ptr<Engine::Graphics::IGraphicsBuffer> indexBuffer = factory->CreateBuffer(
                     Engine::Graphics::IGraphicsBuffer::Usage::IndexBuffer, Engine::Graphics::IGraphicsBuffer::AccessMode::Upload,
                     indices.size() * sizeof(uint32_t), indices.data(), sizeof(uint32_t));
                 node.mesh->InstallOwnTerrainBuffers(std::move(vertexBuffer), std::move(indexBuffer), factory);
             }
+            const auto readyStart = FarClock::now();
+            buffersMs += std::chrono::duration<double, std::milli>(readyStart - buffersStart).count();
             if (provider)
             {
                 if (node.mesh->GetGpuBufferMemoryBytes() == 0)
                     node.mesh->CreateBuffer(factory);
                 if (!node.mesh->IsReady()) node.mesh->OnAfterDeserialize(provider);
             }
+            readyMs += std::chrono::duration<double, std::milli>(FarClock::now() - readyStart).count();
             node.hasGeometry = true;
         }
         else node.hasGeometry = false;
@@ -361,6 +378,10 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
             node.object->enabled = node.hasGeometry;
     }
     m_lastFarUpdateTiming.uploadedTiles = static_cast<size_t>(installs);
+    static const bool installLog = std::getenv("ENGINE_UPDATE_TYPE_LOG") != nullptr;
+    if (installLog && installs)
+        std::printf("[FarVolume] install %d nodes: geometry %.2f, buffers %.2f, ready %.2f ms\n",
+            installs, geometryMs, buffersMs, readyMs);
     m_lastFarUpdateTiming.uploadMs = std::chrono::duration<double, std::milli>(
         FarClock::now() - installStart).count();
 
@@ -455,17 +476,36 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
             for (const auto& edit : GetVolumeEdits(owner)) input->edits.push_back(edit.Shifted(offset));
         }
         g_farJobs.fetch_add(1);
-        node.job = std::async(std::launch::async, [input] {
+        auto* jobProvider = scene->GetGraphicsProvider();
+        auto* jobFactory = jobProvider ? jobProvider->GetBufferFactory() : nullptr;
+        // ENGINE_FAR_WORKER_BUFFERS=0 creates the vertex buffers on the main thread (A/B).
+        static const bool workerBuffers = [] {
+            const char* value = std::getenv("ENGINE_FAR_WORKER_BUFFERS");
+            return !(value && value[0] == '0'); }();
+        if (!workerBuffers || !jobFactory || !jobFactory->SupportsWorkerThreadStaticVertexBufferCreation())
+            jobFactory = nullptr;
+        node.job = std::async(std::launch::async, [input, jobFactory] {
             FarJobSlot slot;
-            return BuildFarVolumeNode(*input);
+            auto built = BuildFarVolumeNode(*input);
+            if (built && jobFactory && !built->geometry.indices.empty() && !built->geometry.vertices.empty())
+                built->vertexBuffer = jobFactory->CreateStaticVertexBuffer(
+                    built->geometry.vertices.size() * sizeof(Mesh::TerrainVertex), built->geometry.vertices.data());
+            return built;
         });
         ++m_lastFarUpdateTiming.queuedTiles;
     }
     m_lastFarUpdateTiming.preparationMs = std::chrono::duration<double, std::milli>(
         FarClock::now() - preparationStart).count();
 
+    // A set cross-fade under way (AdvanceFarFade): run it on.
+    if (m_farFading)
+    {
+        const auto now = FarClock::now();
+        AdvanceFarFade(std::chrono::duration<float>(now - m_farFadeTime).count());
+        m_farFadeTime = now;
+    }
     // Swap the wanted set in once every node of it is built.
-    if (m_farWanted != m_farShown)
+    if (m_farWanted != m_farShown && !m_farFading)
     {
         bool ready = true;
         for (const FarVolumeKey& key : m_farWanted)
@@ -475,24 +515,55 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
         }
         if (ready)
         {
-            for (const FarVolumeKey& key : m_farShown)
-                if (const auto found = m_farNodes.find(key); found != m_farNodes.end() && found->second.object)
-                    found->second.object->enabled = false;
+            // Nodes in both sets stay as they are; the others cross-fade
+            // (lodTransitionSeconds; ENGINE_FAR_FADE=0 swaps in one frame).
+            static const bool fadeEnabled = [] {
+                const char* value = std::getenv("ENGINE_FAR_FADE");
+                return !(value && value[0] == '0'); }();
+            const float fadeSeconds = fadeEnabled ? std::clamp(scene->settings.lodTransitionSeconds, 0.f, 2.f) : 0.f;
+            std::vector<FarVolumeKey> incoming, outgoing;
+            std::set_difference(m_farWanted.begin(), m_farWanted.end(), m_farShown.begin(), m_farShown.end(),
+                std::back_inserter(incoming));
+            std::set_difference(m_farShown.begin(), m_farShown.end(), m_farWanted.begin(), m_farWanted.end(),
+                std::back_inserter(outgoing));
+            const bool fade = fadeSeconds > 0.f && !m_farShown.empty() && (!incoming.empty() || !outgoing.empty());
             for (const FarVolumeKey& key : m_farWanted)
             {
                 auto& node = m_farNodes[key];
-                if (node.object) node.object->enabled = node.hasGeometry;
+                if (!node.object) continue;
+                node.object->enabled = node.hasGeometry;
+                if (node.mesh) node.mesh->SetRuntimeVisibility(
+                    fade && std::binary_search(incoming.begin(), incoming.end(), key) ? 0.f : 1.f);
             }
+            for (const FarVolumeKey& key : outgoing)
+                if (const auto found = m_farNodes.find(key); found != m_farNodes.end() && found->second.object)
+                {
+                    if (fade && found->second.mesh) found->second.mesh->SetRuntimeVisibility(1.f, true);
+                    else found->second.object->enabled = false;
+                }
             m_farShown = m_farWanted;
             m_lastFarUpdateTiming.appearedTiles = m_farShown.size();
-            // Drop nodes no longer wanted (their builds finish first).
+            if (fade)
+            {
+                m_farFadeIn = std::move(incoming);
+                m_farFadeOut = std::move(outgoing);
+                m_farFadeProgress = 0.f;
+                m_farFadeTime = FarClock::now();
+                m_farFading = true;
+            }
+            // Drop nodes no longer wanted (their builds finish first; fading
+            // ones when their fade ends).
             for (auto it = m_farNodes.begin(); it != m_farNodes.end(); )
             {
                 if (std::binary_search(m_farWanted.begin(), m_farWanted.end(), it->first) ||
-                    it->second.job.valid()) { ++it; continue; }
+                    it->second.job.valid() ||
+                    (m_farFading && std::find(m_farFadeOut.begin(), m_farFadeOut.end(), it->first) != m_farFadeOut.end()))
+                { ++it; continue; }
                 if (it->second.object) scene->RemoveObject(it->second.object);
                 it = m_farNodes.erase(it);
             }
+            ++TerrainEvents::farSwaps;
+            TerrainEvents::farNodesShown += static_cast<uint32_t>(m_farShown.size());
             if (FarVolumeLog())
             {
                 size_t vertices = 0;
@@ -509,6 +580,34 @@ void TerrainManager::UpdateFarTerrain(int centerX, int centerY,
             m_lastFarUpdateTiming.totalMs, m_lastFarUpdateTiming.uploadedTiles, m_lastFarUpdateTiming.uploadMs,
             m_lastFarUpdateTiming.selectionMs, m_lastFarUpdateTiming.queuedTiles, m_lastFarUpdateTiming.preparationMs,
             m_farShown.size());
+}
+
+void TerrainManager::AdvanceFarFade(float seconds)
+{
+    auto* scene = Owner ? Owner->GetScene() : nullptr;
+    const float duration = scene ? std::clamp(scene->settings.lodTransitionSeconds, 0.f, 2.f) : 0.f;
+    m_farFadeProgress = duration > 0.f ? std::min(1.f, m_farFadeProgress + seconds / duration) : 1.f;
+    for (const FarVolumeKey& key : m_farFadeIn)
+        if (const auto found = m_farNodes.find(key); found != m_farNodes.end() && found->second.mesh)
+            found->second.mesh->SetRuntimeVisibility(m_farFadeProgress);
+    for (const FarVolumeKey& key : m_farFadeOut)
+        if (const auto found = m_farNodes.find(key); found != m_farNodes.end() && found->second.mesh)
+            found->second.mesh->SetRuntimeVisibility(1.f - m_farFadeProgress, true);
+    if (m_farFadeProgress < 1.f) return;
+    // Done: the old nodes go (unless wanted again meanwhile).
+    for (const FarVolumeKey& key : m_farFadeOut)
+    {
+        const auto found = m_farNodes.find(key);
+        if (found == m_farNodes.end()) continue;
+        if (found->second.mesh) found->second.mesh->SetRuntimeVisibility(1.f);
+        if (std::binary_search(m_farShown.begin(), m_farShown.end(), key)) continue;
+        if (found->second.object && scene) scene->RemoveObject(found->second.object);
+        if (found->second.job.valid()) { found->second.object = nullptr; found->second.mesh = nullptr; continue; }
+        m_farNodes.erase(found);
+    }
+    m_farFadeIn.clear();
+    m_farFadeOut.clear();
+    m_farFading = false;
 }
 
 void TerrainManager::FenceFarVolumeJobs()

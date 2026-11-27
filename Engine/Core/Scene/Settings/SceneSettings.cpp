@@ -203,6 +203,8 @@ Engine::Serialization::JsonValue SerializeSceneSettings(const Engine::Model::Sce
         Engine::Serialization::JsonValue(settings.cpuOcclusionCulling));
     value.Set("prefabBuildBudgetMs",
         Engine::Serialization::JsonValue(settings.prefabBuildBudgetMs));
+    value.Set("lodTransitionSeconds",
+        Engine::Serialization::JsonValue(settings.lodTransitionSeconds));
     value.Set("portalDebugVisuals",
         Engine::Serialization::JsonValue(settings.portalDebugVisuals));
     value.Set("sceneCameraWarpLookThrough",
@@ -491,6 +493,8 @@ void DeserializeSceneSettings(Engine::Model::SceneSettings& settings, const Engi
         settings.cpuOcclusionCulling = cpuOcclusion->AsBool();
     if (const auto* prefabBudget = FindField(value, "prefabBuildBudgetMs"))
         settings.prefabBuildBudgetMs = std::clamp(prefabBudget->AsFloat(), 0.25f, 50.f);
+    if (const auto* lodTransition = FindField(value, "lodTransitionSeconds"))
+        settings.lodTransitionSeconds = std::clamp(lodTransition->AsFloat(), 0.f, 2.f);
     if (const auto* portalDebugVisuals = FindField(value, "portalDebugVisuals"))
         settings.portalDebugVisuals = portalDebugVisuals->AsBool();
     if (const auto* sceneCameraWarpLookThrough = FindField(value,

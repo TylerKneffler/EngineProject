@@ -33,9 +33,15 @@ struct AntiAliasingSettings
     // On by default: instanced LOD cross-fades and impostor view hand-overs
     // dither per pixel and rely on the history to blend (Object.hlsl
     // ScreenDitherThreshold); without it they show a fixed dot pattern.
+    // (The laggy turning of 2026-11-26 was mouse input, not TAA.)
     bool taa = true;
     // Share of the history kept each frame (0.75 responsive .. 0.97 smooth).
     float taaFeedback = 0.9f;
+    // Share of the history kept where the image moves fast (a quick turn:
+    // 32+ pixels a frame, ramping in from 4): less history, clipped tighter,
+    // so edges do not smear or trail and the strip a turn reveals matches
+    // the rest of the frame. 0.5 .. taaFeedback; at taaFeedback no cap.
+    float taaMotionFeedback = 0.6f;
     // Restores detail TAA softens (most visible while moving): a light
     // unsharp mask in the final compose. 0 is off.
     float taaSharpen = 0.25f;
@@ -56,6 +62,7 @@ struct AntiAliasingSettings
         grassMinimumPixels = std::clamp(grassMinimumPixels, 0.25f, 4.f);
         msaaSamples = msaaSamples >= 8u ? 8u : msaaSamples >= 4u ? 4u : msaaSamples >= 2u ? 2u : 1u;
         taaFeedback = std::clamp(taaFeedback, 0.75f, 0.97f);
+        taaMotionFeedback = std::clamp(taaMotionFeedback, 0.5f, taaFeedback);
         taaSharpen = std::clamp(taaSharpen, 0.f, 1.f);
     }
 };

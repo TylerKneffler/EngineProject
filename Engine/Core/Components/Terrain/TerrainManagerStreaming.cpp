@@ -248,10 +248,14 @@ void TerrainManager::StreamCells(int centerX, int centerY, int initialRadius)
         std::clamp(m_farEnabled && !m_farHeights.empty() ? loadedRadius :
             std::max(loadedRadius, farRadius), 0, 32);
     const auto farCovers = [&](Cell cell) {
-        // A shown distant volume node over the cell (TerrainManagerFarVolume).
+        // A shown distant volume node over the cell (TerrainManagerFarVolume),
+        // fully faded in: not one still fading in under a set cross-fade
+        // (refusing every cell while any fade ran kept cells from unloading
+        // at all when flying, as swaps follow one another).
         for (const auto& key : m_farShown)
             if (cell.first >= key.x && cell.first < key.x + key.size &&
-                cell.second >= key.z && cell.second < key.z + key.size)
+                cell.second >= key.z && cell.second < key.z + key.size &&
+                !(m_farFading && std::find(m_farFadeIn.begin(), m_farFadeIn.end(), key) != m_farFadeIn.end()))
                 if (const auto found = m_farNodes.find(key); found != m_farNodes.end() &&
                     found->second.object && found->second.object->enabled)
                     return true;
@@ -301,13 +305,16 @@ void TerrainManager::StreamCells(int centerX, int centerY, int initialRadius)
     }
     record(m_lastStreamingTiming.queueMs);
     int unloaded = 0;
+    // Unload past the margin (unloadMarginCells): load and unload distances differ.
+    const int keep = radius + (initialRadius >= 0 || m_editorStreaming ? 0 :
+        std::clamp(unloadMarginCells, 0, 8));
     for (auto it = m_loaded.begin(); it != m_loaded.end() &&
         unloaded < std::clamp(maxUnloadsPerUpdate, 1, 64); )
     {
         const Cell cell = it->first;
         ++it;
-        if ((std::abs(cell.first - centerX) > radius ||
-            std::abs(cell.second - centerY) > radius) &&
+        if ((std::abs(cell.first - centerX) > keep ||
+            std::abs(cell.second - centerY) > keep) &&
             (!m_farEnabled || farCovers(cell)))
         {
             UnloadCell(cell);
@@ -476,6 +483,12 @@ void TerrainManager::StreamCells(int centerX, int centerY, int initialRadius)
             phaseStart - profileStart).count();
 }
 
+int TerrainManager::KeptRadius() const
+{
+    return m_editorStreaming ? std::clamp(editorRadius, 0, 32)
+        : std::clamp(loadedRadius + std::clamp(unloadMarginCells, 0, 8), 0, 32);
+}
+
 void TerrainManager::Update()
 {
     if (!Owner || viewerObjectName.empty()) return;
@@ -484,6 +497,22 @@ void TerrainManager::Update()
     if (manageAuthoredCellColliders)
         UpdateColliderStreamingAtPosition(viewer->transform.GetWorldPositionD());
     else UpdateStreamingAtPosition(viewer->transform.GetWorldPositionD());
+    // Distant cover (G1): the first loaded cell with a published cover.
+    {
+        DistantCover cover;
+        for (const auto& [cell, terrain] : m_loaded)
+            if (terrain && terrain->groundCover.strength > 0.f && terrain->groundCover.layerMask)
+            {
+                cover.color = terrain->groundCover.color;
+                cover.strength = terrain->groundCover.strength;
+                cover.rootShade = terrain->groundCover.rootShade;
+                cover.layerMask = terrain->groundCover.layerMask;
+                break;
+            }
+        // Keep the last known cover while no loaded cell publishes one
+        // (between streams), so the distant grass does not blink.
+        if (cover.strength > 0.f) m_distantCover = cover;
+    }
     {
         static const bool partLog = std::getenv("ENGINE_UPDATE_TYPE_LOG") != nullptr;
         const auto start = std::chrono::steady_clock::now();
